@@ -491,6 +491,34 @@ class WatchPage {
         }
     }
 
+    isCloudPlaybackMode() {
+        try {
+            return Boolean(window.API?.isCloudMode?.());
+        } catch (_) {
+            return false;
+        }
+    }
+
+    isGatewayPlaybackUrl(url) {
+        const value = String(url || '');
+        return /\/sessions\/[^/?#]+\/playlist\.m3u8/i.test(value);
+    }
+
+    getCloudSafeSettings(settings = {}) {
+        if (!this.isCloudPlaybackMode()) return settings || {};
+
+        // The hosted Cloud app has no local FFmpeg API. Playback decisions are
+        // already made by Norva Cloud when it returns direct/relay/gateway URLs.
+        return {
+            ...(settings || {}),
+            autoTranscode: false,
+            forceTranscode: false,
+            forceVideoTranscode: false,
+            forceRemux: false,
+            upscaleEnabled: false
+        };
+    }
+
     /**
      * Stop and cleanup current transcode session
      */
@@ -916,6 +944,7 @@ class WatchPage {
         } catch (e) {
             console.warn('Could not load settings');
         }
+        settings = this.getCloudSafeSettings(settings);
 
         // Detect stream type
         const looksLikeHls = url.includes('.m3u8') || url.includes('m3u8');
@@ -1126,6 +1155,7 @@ class WatchPage {
         // Local transcode sessions are VOD: always start from the beginning of
         // the playlist (never the live edge), even before EXT-X-ENDLIST exists.
         const isTranscodeSession = url.startsWith('/api/transcode/');
+        const isGatewaySession = this.isGatewayPlaybackUrl(url);
 
         // Fresh recovery budget for each new stream
         this._mediaRecoveries = 0;
@@ -1137,8 +1167,8 @@ class WatchPage {
             // Local transcode sessions: buffer aggressively ahead — segments are
             // already on disk, so a large forward buffer absorbs slow/erratic
             // upstream downloads on the encoder side
-            maxBufferLength: isTranscodeSession ? 120 : 30,
-            maxMaxBufferLength: isTranscodeSession ? 600 : 60,
+            maxBufferLength: (isTranscodeSession || isGatewaySession) ? 120 : 30,
+            maxMaxBufferLength: (isTranscodeSession || isGatewaySession) ? 600 : 60,
             startLevel: -1,
             enableWorker: true,
             // External probe subtitles are attached lazily as native <track>
@@ -1234,9 +1264,15 @@ class WatchPage {
                 // Local transcode session: playlist/segments can lag behind the
                 // encoder — restart loading instead of failing
                 this._networkRecoveries = (this._networkRecoveries || 0) + 1;
-                if (this._networkRecoveries <= 3) {
-                    console.warn(`[WatchPage] Restarting HLS load (attempt ${this._networkRecoveries}/3)`);
-                    setTimeout(() => { try { this.hls?.startLoad(); } catch (e) { /* destroyed */ } }, 1000);
+                const maxNetworkRecoveries = (isTranscodeSession || isGatewaySession) ? 20 : 3;
+                const retryDelay = isGatewaySession ? Math.min(5000, 1000 + (this._networkRecoveries * 500)) : 1000;
+                if (this._networkRecoveries <= maxNetworkRecoveries) {
+                    console.warn(`[WatchPage] Restarting HLS load (attempt ${this._networkRecoveries}/${maxNetworkRecoveries})`);
+                    this.showLoading();
+                    setTimeout(() => {
+                        if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
+                        try { this.hls?.startLoad(); } catch (e) { /* destroyed */ }
+                    }, retryDelay);
                     return;
                 }
             }
