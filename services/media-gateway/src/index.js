@@ -17,6 +17,7 @@ const DEFAULT_TTL_SECONDS = clampInt(process.env.SESSION_TTL_SECONDS, 30 * 60, 6
 const STARTUP_TIMEOUT_MS = clampInt(process.env.STARTUP_TIMEOUT_MS, 45_000, 5_000, 180_000);
 const PLAYLIST_REQUEST_TIMEOUT_MS = clampInt(process.env.PLAYLIST_REQUEST_TIMEOUT_MS, 45_000, 5_000, 180_000);
 const STOP_CONFLICTING_SOURCE_SESSIONS = (process.env.STOP_CONFLICTING_SOURCE_SESSIONS || 'true') !== 'false';
+const STOP_CONFLICTING_OWNER_SESSIONS = (process.env.STOP_CONFLICTING_OWNER_SESSIONS || 'true') !== 'false';
 const FFMPEG_USER_AGENT = process.env.FFMPEG_USER_AGENT ||
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36 Norva/1.0';
 const MAX_LOG_TAIL = 12000;
@@ -33,7 +34,7 @@ app.get('/health', (req, res) => {
     res.json({
         ok: true,
         service: 'norva-media-gateway',
-        version: 5,
+        version: 6,
         activeSessions: activeSessionCount(),
         totalSessions: sessions.size,
         time: new Date().toISOString()
@@ -42,9 +43,14 @@ app.get('/health', (req, res) => {
 
 app.post('/sessions', requireGatewayAuth, async (req, res) => {
     try {
-        const { sourceUrl, playbackSessionId, mode = 'remux', expiresAt } = req.body || {};
+        const { sourceUrl, playbackSessionId, ownerKey, mode = 'remux', expiresAt } = req.body || {};
         if (!sourceUrl || !isHttpUrl(sourceUrl)) {
             return res.status(400).json({ error: 'sourceUrl must be a valid http(s) URL' });
+        }
+
+        const normalizedOwnerKey = normalizeSessionKey(ownerKey);
+        if (STOP_CONFLICTING_OWNER_SESSIONS && normalizedOwnerKey) {
+            await stopConflictingOwnerSessions(normalizedOwnerKey);
         }
 
         if (STOP_CONFLICTING_SOURCE_SESSIONS) {
@@ -63,6 +69,7 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             playbackSessionId: playbackSessionId || null,
             sourceUrl,
             sourceKey,
+            ownerKey: normalizedOwnerKey,
             mode: mode === 'transcode' ? 'transcode' : 'remux',
             status: 'starting',
             outputDir,
@@ -269,10 +276,31 @@ async function stopConflictingSourceSessions(sourceUrl) {
     }));
 }
 
+async function stopConflictingOwnerSessions(ownerKey) {
+    const normalizedOwnerKey = normalizeSessionKey(ownerKey);
+    if (!normalizedOwnerKey) return;
+
+    const conflicts = Array.from(sessions.values()).filter((session) => {
+        if (session.ownerKey !== normalizedOwnerKey) return false;
+        return session.status === 'starting' || session.status === 'ready';
+    });
+
+    await Promise.allSettled(conflicts.map(async (session) => {
+        console.log(`[media-gateway] stopping previous session for same owner: ${session.id}`);
+        await stopSession(session);
+    }));
+}
+
 function activeSessionCount() {
     return Array.from(sessions.values())
         .filter((session) => session.status === 'starting' || session.status === 'ready')
         .length;
+}
+
+function normalizeSessionKey(value) {
+    if (typeof value !== 'string') return '';
+    const normalized = value.trim().toLowerCase();
+    return /^[a-f0-9]{64}$/.test(normalized) ? normalized : '';
 }
 
 async function removeSessionDir(dir) {

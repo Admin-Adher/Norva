@@ -72,7 +72,7 @@ Deno.serve(async (req) => {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 4,
+        version: 5,
         relayConfigured: Boolean(config.relayBaseUrl && config.relayTokenSecret),
         gatewayConfigured: Boolean(config.mediaGatewayUrl && config.mediaGatewayToken),
       });
@@ -446,7 +446,13 @@ async function createGatewaySession(
       "Content-Type": "application/json",
       Authorization: `Bearer ${runtimeConfig.mediaGatewayToken}`,
     },
-    body: JSON.stringify({ playbackSessionId, sourceUrl: targetUrl, mode: gatewayMode, expiresAt }),
+    body: JSON.stringify({
+      playbackSessionId,
+      ownerKey: await sha256Hex(userId),
+      sourceUrl: targetUrl,
+      mode: gatewayMode,
+      expiresAt,
+    }),
   });
   const gatewayBody = await response.json().catch(() => ({}));
   if (!response.ok) throw new HttpError(response.status, "Media gateway refused the session", gatewayBody);

@@ -293,6 +293,7 @@ class WatchPage {
      * @param {Object} playback - Cloud playback metadata
      */
     async play(content, streamUrl, playback = {}) {
+        const playbackAttemptId = this.beginPlaybackAttempt();
         const cloudPlaybackSessionId = playback.sessionId
             || playback.cloudPlaybackSessionId
             || content.cloudPlaybackSessionId
@@ -339,7 +340,8 @@ class WatchPage {
         this.subtitleEl.textContent = content.subtitle || '';
 
         // Load video
-        await this.loadVideo(streamUrl, { cloudPlaybackSessionId });
+        await this.loadVideo(streamUrl, { cloudPlaybackSessionId, playbackAttemptId });
+        if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
 
         // Show Now Playing indicator in navbar
         this.showNowPlaying(content.title);
@@ -352,6 +354,7 @@ class WatchPage {
             this.episodesSection?.classList.add('hidden');
             this.recommendedSection?.classList.remove('hidden');
             await this.loadRecommended(content.sourceId, content.categoryId);
+            if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
         } else {
             this.recommendedSection?.classList.add('hidden');
             this.episodesSection?.classList.remove('hidden');
@@ -360,6 +363,7 @@ class WatchPage {
 
         // Check favorite status
         await this.checkFavorite();
+        if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
         // Show overlay initially
         this.showOverlay();
 
@@ -386,6 +390,25 @@ class WatchPage {
         const indicator = document.getElementById('now-playing-indicator');
         if (indicator) {
             indicator.classList.add('hidden');
+        }
+    }
+
+    beginPlaybackAttempt() {
+        this._playbackAttemptId += 1;
+        return this._playbackAttemptId;
+    }
+
+    isStalePlaybackAttempt(attemptId) {
+        return Number.isFinite(attemptId) && attemptId !== this._playbackAttemptId;
+    }
+
+    async cleanupStaleCloudPlaybackSession(sessionId) {
+        const id = sessionId ? String(sessionId).trim() : '';
+        if (!id) return;
+        try {
+            await window.NorvaCloud?.playback?.expireSession?.(id);
+        } catch (error) {
+            console.warn('[WatchPage] Could not expire stale cloud playback session:', error?.message || error);
         }
     }
 
@@ -838,6 +861,12 @@ class WatchPage {
     }
 
     async loadVideo(url, options = {}) {
+        const playbackAttemptId = options.playbackAttemptId ?? this._playbackAttemptId;
+        if (this.isStalePlaybackAttempt(playbackAttemptId)) {
+            await this.cleanupStaleCloudPlaybackSession(options.cloudPlaybackSessionId);
+            return;
+        }
+
         // Store the URL for copy functionality
         this.currentUrl = url;
         this._playbackStatusOkReported = false;
@@ -850,7 +879,14 @@ class WatchPage {
         // the new title — otherwise the old + new connections overlap and a
         // single-connection IPTV account rejects the new one with 401.
         await this.stop();
+        if (this.isStalePlaybackAttempt(playbackAttemptId)) {
+            await this.cleanupStaleCloudPlaybackSession(options.cloudPlaybackSessionId);
+            return;
+        }
         this.registerCloudPlaybackSession(options.cloudPlaybackSessionId);
+        if (this.video) {
+            this.video.dataset.playbackAttemptId = String(playbackAttemptId);
+        }
         this.baseStreamUrl = url;
         this.currentPlaybackMode = null;
         this.currentProcessingOptions = {};
@@ -876,6 +912,7 @@ class WatchPage {
         let settings = {};
         try {
             settings = await API.settings.get();
+            if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
         } catch (e) {
             console.warn('Could not load settings');
         }
@@ -889,6 +926,7 @@ class WatchPage {
         try {
             console.log('[WatchPage] Probing stream...');
             probeInfo = await this.probeStreamInfo(url, settings);
+            if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
             console.log(`[WatchPage] Probe result: video=${probeInfo.video}, audio=${probeInfo.audio}, ` +
                 `${probeInfo.width}x${probeInfo.height}, duration=${probeInfo.duration || 'unknown'}, ` +
                 `profile=${probeInfo.videoProfile || 'unknown'}, pix_fmt=${probeInfo.videoPixelFormat || 'unknown'}, ` +
@@ -896,6 +934,7 @@ class WatchPage {
             this.applyProbeInfo(probeInfo);
             const probeFailureText = this.getProbeFailureText(probeInfo);
             if (probeInfo.upstreamFailure || this.isTerminalPlaybackError(probeFailureText)) {
+                if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
                 await this.handlePlaybackFailure(probeInfo.friendlyError || probeInfo.error || probeFailureText || 'The provider refused this stream.');
                 return;
             }
@@ -927,7 +966,8 @@ class WatchPage {
                     this.streamStartOffset = startOffset;
                     this.attachProbeSubtitles(url, info.subtitles, startOffset);
                     const playlistUrl = await this.startTranscodeSession(url, processingOptions);
-                    this.playHlsOrDirect(playlistUrl);
+                    if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
+                    this.playHlsOrDirect(playlistUrl, { playbackAttemptId });
                     this.setVolumeFromStorage();
                     return;
                 } else if (info.needsRemux) {
@@ -946,6 +986,7 @@ class WatchPage {
                         isMpegTs ? 'Transcoding (Audio)' : 'Remux (Auto)'
                     );
                     console.log(`[WatchPage] Auto: Using ${isMpegTs ? 'audio transcode' : 'remux'} for incompatible container`);
+                    if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
                     this.video.src = finalUrl;
                     this.video.play().catch(e => {
                         if (e.name !== 'AbortError') console.error('[WatchPage] Autoplay error:', e);
@@ -978,7 +1019,8 @@ class WatchPage {
             this.streamStartOffset = startOffset;
             this.attachProbeSubtitles(url, probeInfo?.subtitles, startOffset);
             const playlistUrl = await this.startTranscodeSession(url, processingOptions);
-            this.playHlsOrDirect(playlistUrl);
+            if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
+            this.playHlsOrDirect(playlistUrl, { playbackAttemptId });
             this.setVolumeFromStorage();
             return;
         }
@@ -991,6 +1033,7 @@ class WatchPage {
             if (!probeInfo) {
                 try {
                     const info = await this.probeStreamInfo(url, settings);
+                    if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
                     this.applyProbeInfo(info);
                     probeInfo = info;
                     videoCodec = info.video;
@@ -1011,7 +1054,8 @@ class WatchPage {
             this.streamStartOffset = startOffset;
             this.attachProbeSubtitles(url, (probeInfo || this.currentStreamInfo)?.subtitles, startOffset);
             const playlistUrl = await this.startTranscodeSession(url, processingOptions);
-            this.playHlsOrDirect(playlistUrl);
+            if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
+            this.playHlsOrDirect(playlistUrl, { playbackAttemptId });
             this.setVolumeFromStorage();
             return;
         }
@@ -1026,6 +1070,7 @@ class WatchPage {
             this.streamStartOffset = startOffset;
             this.attachProbeSubtitles(url, probeInfo?.subtitles, startOffset);
             const finalUrl = this.getRemuxUrl(url, startOffset);
+            if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
             this.video.src = finalUrl;
             this.video.play().catch(e => {
                 if (e.name !== 'AbortError') console.error('[WatchPage] Autoplay error:', e);
@@ -1043,14 +1088,16 @@ class WatchPage {
 
         // Use HLS.js for HLS streams
         if (looksLikeHls && Hls.isSupported()) {
+            if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
             this.updateTranscodeStatus('direct', 'Direct HLS');
             this.currentPlaybackMode = 'direct-hls';
             this.currentProcessingOptions = {};
             this.streamStartOffset = 0;
             this.attachProbeSubtitles(url, probeInfo?.subtitles, 0);
-            this.playHls(finalUrl);
+            this.playHls(finalUrl, { playbackAttemptId });
         } else {
             // Direct playback for mp4/mkv/avi
+            if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
             this.updateTranscodeStatus('direct', 'Direct Play');
             this.currentPlaybackMode = 'direct';
             this.currentProcessingOptions = {};
@@ -1070,6 +1117,7 @@ class WatchPage {
      */
     playHls(url, options = {}) {
         const { autoplay = true } = options;
+        const playbackAttemptId = options.playbackAttemptId ?? this._playbackAttemptId;
 
         if (this.hls) {
             this.hls.destroy();
@@ -1125,6 +1173,7 @@ class WatchPage {
         });
 
         this.hls.on(Hls.Events.MANIFEST_PARSED, () => {
+            if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
             if (!autoplay) return;
 
             this.video.play().catch(e => {
@@ -1133,6 +1182,7 @@ class WatchPage {
         });
 
         this.hls.on(Hls.Events.ERROR, (event, data) => {
+            if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
             // Non-fatal errors (incl. most bufferStalledError occurrences) are
             // recovered automatically by hls.js — never surface them
             if (!data.fatal) return;
@@ -1178,7 +1228,7 @@ class WatchPage {
                 // Try proxy on CORS error (only if not already proxied/transcoded)
                 if (this.canUseLocalProxy(this.currentUrl)) {
                     console.log('[WatchPage] Retrying via proxy...');
-                    this.playHls(this.getProxiedUrl(this.currentUrl));
+                    this.playHls(this.getProxiedUrl(this.currentUrl), { ...options, playbackAttemptId });
                     return;
                 }
                 // Local transcode session: playlist/segments can lag behind the
@@ -1193,6 +1243,7 @@ class WatchPage {
 
             // Recovery exhausted: last resort, try another version of the title
             this.hls.destroy();
+            if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
             this.handlePlaybackFailure(data.details || data.reason || 'Playback failed.');
         });
     }
@@ -1203,6 +1254,7 @@ class WatchPage {
         // Session creation failed terminally (upstream 401/404...): try another
         // version of the title or surface a clear error instead of spinning
         if (!url) {
+            if (this.isStalePlaybackAttempt(options.playbackAttemptId)) return;
             this.handlePlaybackFailure(this._lastFailureMsg || 'Playback failed');
             return;
         }
@@ -1686,6 +1738,9 @@ class WatchPage {
     }
 
     onError(e) {
+        const videoAttemptId = Number.parseInt(this.video?.dataset?.playbackAttemptId || '', 10);
+        if (Number.isFinite(videoAttemptId) && this.isStalePlaybackAttempt(videoAttemptId)) return;
+
         // Only log actual fatal errors, not benign stream recovery events
         const error = this.video?.error;
         if (error && error.code) {
