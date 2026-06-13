@@ -72,7 +72,7 @@ Deno.serve(async (req) => {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 3,
+        version: 4,
         relayConfigured: Boolean(config.relayBaseUrl && config.relayTokenSecret),
         gatewayConfigured: Boolean(config.mediaGatewayUrl && config.mediaGatewayToken),
       });
@@ -153,6 +153,8 @@ async function createPlaybackSession(
   const ttlSeconds = boundedInt(body.ttlSeconds ?? body.ttl_seconds, 900, 60, 7200);
   const expiresAt = new Date(Date.now() + ttlSeconds * 1000).toISOString();
   const targetUrlHash = await sha256Hex(targetUrl);
+
+  await closeOpenGatewaySessionsForUser(userId, db);
 
   const { data: session, error } = await db
     .from("cloud_playback_sessions")
@@ -272,6 +274,61 @@ async function expirePlaybackSession(id: string, userId: string, db: SupabaseCli
     gatewayClosed: closedGatewayIds.length,
     gatewayErrors: gatewayErrors.length,
   };
+}
+
+async function closeOpenGatewaySessionsForUser(userId: string, db: SupabaseClient) {
+  const { data: gatewaySessions, error } = await db
+    .from("cloud_gateway_sessions")
+    .select("id, playback_session_id, external_session_id, status")
+    .eq("user_id", userId)
+    .in("status", ["pending", "starting", "ready"]);
+  if (error) {
+    console.warn("[norva-playback] unable to list open gateway sessions", error.message);
+    return;
+  }
+  if (!gatewaySessions?.length) return;
+
+  const runtimeConfig = await getRuntimeConfig(db);
+  const gatewayIds = gatewaySessions
+    .map((gateway: JsonRecord) => stringOrNull(gateway.id))
+    .filter((gatewayId): gatewayId is string => Boolean(gatewayId));
+  const playbackSessionIds = gatewaySessions
+    .map((gateway: JsonRecord) => stringOrNull(gateway.playback_session_id))
+    .filter((sessionId): sessionId is string => Boolean(sessionId));
+
+  if (runtimeConfig.mediaGatewayUrl && runtimeConfig.mediaGatewayToken) {
+    await Promise.allSettled(gatewaySessions.map(async (gateway: JsonRecord) => {
+      const externalSessionId = stringOrNull(gateway.external_session_id);
+      if (!externalSessionId) return;
+      const response = await fetch(`${runtimeConfig.mediaGatewayUrl}/sessions/${encodeURIComponent(externalSessionId)}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${runtimeConfig.mediaGatewayToken}` },
+      });
+      if (!response.ok && response.status !== 404) {
+        console.warn("[norva-playback] gateway cleanup refused", response.status, await response.text().catch(() => ""));
+      }
+    }));
+  }
+
+  const now = new Date().toISOString();
+  if (gatewayIds.length) {
+    const { error: gatewayUpdateError } = await db
+      .from("cloud_gateway_sessions")
+      .update({ status: "expired", expires_at: now })
+      .in("id", gatewayIds);
+    if (gatewayUpdateError) {
+      console.warn("[norva-playback] unable to mark gateway sessions expired", gatewayUpdateError.message);
+    }
+  }
+  if (playbackSessionIds.length) {
+    const { error: playbackUpdateError } = await db
+      .from("cloud_playback_sessions")
+      .update({ status: "expired", expires_at: now })
+      .in("id", playbackSessionIds);
+    if (playbackUpdateError) {
+      console.warn("[norva-playback] unable to mark playback sessions expired", playbackUpdateError.message);
+    }
+  }
 }
 
 async function resolvePlaybackTarget(
