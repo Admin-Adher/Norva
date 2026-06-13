@@ -15,6 +15,7 @@ type RuntimeConfig = {
   relayTokenSecret: string;
   mediaGatewayUrl: string;
   mediaGatewayToken: string;
+  sourceConfigKey: string;
 };
 
 class HttpError extends Error {
@@ -46,6 +47,7 @@ const ENV_RELAY_BASE_URL = trimTrailingSlash(Deno.env.get("NORVA_RELAY_BASE_URL"
 const ENV_RELAY_TOKEN_SECRET = Deno.env.get("RELAY_TOKEN_SECRET") ?? "";
 const ENV_MEDIA_GATEWAY_URL = trimTrailingSlash(Deno.env.get("NORVA_MEDIA_GATEWAY_URL") ?? "");
 const ENV_MEDIA_GATEWAY_TOKEN = Deno.env.get("NORVA_MEDIA_GATEWAY_TOKEN") ?? "";
+const ENV_SOURCE_CONFIG_KEY = Deno.env.get("NORVA_SOURCE_CONFIG_KEY") ?? "";
 const DEVICE_PUBLIC_SELECT =
   "id, user_id, device_type, device_name, platform, app_version, public_key, capabilities, trusted, revoked, last_seen_at, created_at, updated_at";
 const RUNTIME_CONFIG_KEYS = [
@@ -53,6 +55,7 @@ const RUNTIME_CONFIG_KEYS = [
   "RELAY_TOKEN_SECRET",
   "NORVA_MEDIA_GATEWAY_URL",
   "NORVA_MEDIA_GATEWAY_TOKEN",
+  "NORVA_SOURCE_CONFIG_KEY",
 ];
 
 if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
@@ -101,9 +104,10 @@ async function route(
       body: {
         ok: true,
         service: "norva-cloud",
-        version: 3,
+        version: 4,
         relayConfigured: Boolean(runtimeConfig.relayBaseUrl && runtimeConfig.relayTokenSecret),
         gatewayConfigured: Boolean(runtimeConfig.mediaGatewayUrl && runtimeConfig.mediaGatewayToken),
+        cloudSourceConfigured: Boolean(runtimeConfig.sourceConfigKey),
         time: new Date().toISOString(),
       },
     };
@@ -150,6 +154,9 @@ async function route(
   if (scope === "sources") {
     if (req.method === "GET" && !id) return { body: await listSources(user.id, db) };
     if (req.method === "POST" && !id) return { status: 201, body: await createSource(req, user.id, db) };
+    if (req.method === "POST" && id && action === "sync") {
+      return { body: await syncExistingSource(id, user.id, db) };
+    }
     if ((req.method === "PATCH" || req.method === "PUT") && id) {
       return { body: await updateSource(req, id, user.id, db) };
     }
@@ -321,7 +328,7 @@ async function listSources(userId: string, db: SupabaseClient) {
     .eq("user_id", userId)
     .order("created_at", { ascending: false });
   if (error) throwDb(error, "Unable to list sources");
-  return { sources: data ?? [] };
+  return { sources: (data ?? []).map(sanitizeSource) };
 }
 
 async function createSource(req: Request, userId: string, db: SupabaseClient) {
@@ -329,19 +336,38 @@ async function createSource(req: Request, userId: string, db: SupabaseClient) {
   const sourceType = stringOr(body.sourceType ?? body.source_type ?? body.type, "");
   const displayName = stringOr(body.displayName ?? body.display_name ?? body.name, "");
   if (!sourceType || !displayName) throw new HttpError(400, "sourceType and displayName are required");
+  if (!["xtream", "m3u", "epg"].includes(sourceType)) throw new HttpError(400, "Unsupported source type");
+
+  const rawConfig = buildSourceConfig(sourceType, body);
+  const hasManagedConfig = Object.keys(rawConfig).length > 0;
+  const validation = hasManagedConfig ? await validateCloudSource(sourceType, rawConfig) : {};
+  const configCiphertext = hasManagedConfig
+    ? await encryptSourceConfig(rawConfig, await getRuntimeConfig(db))
+    : stringOrNull(body.configCiphertext ?? body.config_ciphertext);
+  const configHint = {
+    ...recordOrEmpty(body.configHint ?? body.config_hint),
+    ...buildSourceHint(sourceType, rawConfig, validation),
+    managedBy: hasManagedConfig ? "norva-cloud" : undefined,
+  };
+  const syncNow = hasManagedConfig && body.syncNow !== false && body.sync_now !== false;
 
   const row = {
     user_id: userId,
     source_type: sourceType,
     display_name: displayName,
-    config_ciphertext: stringOrNull(body.configCiphertext ?? body.config_ciphertext),
-    config_hint: recordOrEmpty(body.configHint ?? body.config_hint),
-    sync_status: stringOr(body.syncStatus ?? body.sync_status, "idle"),
+    config_ciphertext: configCiphertext,
+    config_hint: compactRecord(configHint),
+    sync_status: syncNow ? "syncing" : stringOr(body.syncStatus ?? body.sync_status, "idle"),
   };
 
   const { data, error } = await db.from("cloud_sources").insert(row).select("*").single();
   if (error) throwDb(error, "Unable to create source");
-  return { source: data };
+
+  if (syncNow) {
+    waitUntil(syncCloudSource(data.id, userId, db));
+  }
+
+  return { source: sanitizeSource(data), validation, syncStarted: syncNow };
 }
 
 async function updateSource(req: Request, id: string, userId: string, db: SupabaseClient) {
@@ -369,7 +395,255 @@ async function updateSource(req: Request, id: string, userId: string, db: Supaba
     .select("*")
     .single();
   if (error) throwDb(error, "Unable to update source");
-  return { source: data };
+  return { source: sanitizeSource(data) };
+}
+
+async function syncExistingSource(id: string, userId: string, db: SupabaseClient) {
+  await assertOwnedSource(id, userId, db);
+  const { data, error } = await db
+    .from("cloud_sources")
+    .update({ sync_status: "syncing", sync_error: null })
+    .eq("id", id)
+    .eq("user_id", userId)
+    .select("*")
+    .single();
+  if (error) throwDb(error, "Unable to start source sync");
+  waitUntil(syncCloudSource(id, userId, db));
+  return { source: sanitizeSource(data), syncStarted: true };
+}
+
+function sanitizeSource(source: JsonRecord) {
+  const { config_ciphertext: _configCiphertext, ...safeSource } = source;
+  return safeSource;
+}
+
+function buildSourceConfig(sourceType: string, body: JsonRecord): JsonRecord {
+  const supplied = recordOrEmpty(body.config);
+  if (Object.keys(supplied).length) return supplied;
+
+  if (sourceType === "xtream") {
+    const serverUrl = stringOr(body.serverUrl ?? body.server_url ?? body.url, "");
+    const username = stringOr(body.username, "");
+    const password = stringOr(body.password, "");
+    return serverUrl || username || password ? { serverUrl, username, password } : {};
+  }
+
+  if (sourceType === "m3u") {
+    const playlistUrl = stringOr(body.playlistUrl ?? body.playlist_url ?? body.url, "");
+    return playlistUrl ? { playlistUrl } : {};
+  }
+
+  if (sourceType === "epg") {
+    const epgUrl = stringOr(body.epgUrl ?? body.epg_url ?? body.url, "");
+    return epgUrl ? { epgUrl } : {};
+  }
+
+  return {};
+}
+
+async function validateCloudSource(sourceType: string, config: JsonRecord) {
+  if (sourceType === "xtream") {
+    const serverUrl = normalizeBaseUrl(stringOr(config.serverUrl, ""));
+    const username = stringOr(config.username, "");
+    const password = stringOr(config.password, "");
+    if (!serverUrl || !username || !password) {
+      throw new HttpError(400, "Xtream requires server URL, username and password");
+    }
+
+    const payload = recordOrEmpty(await fetchJson(xtreamApiUrl({ serverUrl, username, password }), 12000));
+    const userInfo = recordOrEmpty(payload.user_info);
+    const auth = String(userInfo.auth ?? "");
+    if (auth !== "1" && auth.toLowerCase() !== "true") {
+      throw new HttpError(401, "Xtream credentials were refused");
+    }
+
+    return {
+      serverUrl,
+      username,
+      status: stringOr(userInfo.status, "active"),
+      expiresAt: stringOrNull(userInfo.exp_date),
+    };
+  }
+
+  if (sourceType === "m3u") {
+    const playlistUrl = stringOr(config.playlistUrl, "");
+    if (!playlistUrl) throw new HttpError(400, "M3U requires a playlist URL");
+    assertHttpUrl(playlistUrl);
+    const text = await fetchText(playlistUrl, 12000, 1_000_000);
+    if (!text.includes("#EXTM3U")) throw new HttpError(400, "This URL does not look like a valid M3U playlist");
+    return { playlistUrl, estimatedItems: Math.max(0, text.split("#EXTINF").length - 1) };
+  }
+
+  return {};
+}
+
+function buildSourceHint(sourceType: string, config: JsonRecord, validation: JsonRecord) {
+  if (sourceType === "xtream") {
+    const serverUrl = stringOr(validation.serverUrl ?? config.serverUrl, "");
+    return {
+      serverHost: safeHost(serverUrl),
+      username: stringOr(validation.username ?? config.username, ""),
+      status: stringOrNull(validation.status),
+      hasPassword: Boolean(config.password),
+    };
+  }
+
+  if (sourceType === "m3u") {
+    const playlistUrl = stringOr(validation.playlistUrl ?? config.playlistUrl, "");
+    return {
+      playlistHost: safeHost(playlistUrl),
+      estimatedItems: validation.estimatedItems,
+    };
+  }
+
+  return {};
+}
+
+async function syncCloudSource(sourceId: string, userId: string, db: SupabaseClient) {
+  try {
+    const { data: source, error } = await db
+      .from("cloud_sources")
+      .select("*")
+      .eq("id", sourceId)
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (error) throwDb(error, "Unable to load source");
+    if (!source) throw new HttpError(404, "Source not found");
+    if (!source.config_ciphertext) throw new HttpError(400, "Source has no managed cloud configuration");
+
+    const config = await decryptSourceConfig(source.config_ciphertext, await getRuntimeConfig(db));
+    const startedAt = new Date().toISOString();
+    await db
+      .from("cloud_sources")
+      .update({ sync_status: "syncing", sync_error: null, last_synced_at: startedAt })
+      .eq("id", sourceId)
+      .eq("user_id", userId);
+
+    const result = source.source_type === "xtream"
+      ? await syncXtreamSource(sourceId, userId, config, db)
+      : source.source_type === "m3u"
+        ? await syncM3uSource(sourceId, userId, config, db)
+        : { total: 0 };
+
+    await db
+      .from("cloud_sources")
+      .update({
+        sync_status: "ready",
+        sync_error: null,
+        last_synced_at: new Date().toISOString(),
+        config_hint: compactRecord({
+          ...recordOrEmpty(source.config_hint),
+          lastSync: { ...result, syncedAt: new Date().toISOString() },
+        }),
+      })
+      .eq("id", sourceId)
+      .eq("user_id", userId);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Source sync failed";
+    console.error("[norva-cloud] source sync failed", sourceId, message);
+    await db
+      .from("cloud_sources")
+      .update({ sync_status: "error", sync_error: message, last_synced_at: new Date().toISOString() })
+      .eq("id", sourceId)
+      .eq("user_id", userId);
+  }
+}
+
+async function syncXtreamSource(sourceId: string, userId: string, config: JsonRecord, db: SupabaseClient) {
+  const serverUrl = normalizeBaseUrl(stringOr(config.serverUrl, ""));
+  const username = stringOr(config.username, "");
+  const password = stringOr(config.password, "");
+  const live = await fetchJson(xtreamApiUrl({ serverUrl, username, password, action: "get_live_streams" }), 25000).catch(() => []);
+  const vod = await fetchJson(xtreamApiUrl({ serverUrl, username, password, action: "get_vod_streams" }), 25000).catch(() => []);
+  const series = await fetchJson(xtreamApiUrl({ serverUrl, username, password, action: "get_series" }), 25000).catch(() => []);
+
+  const rows = [
+    ...xtreamRows(sourceId, userId, Array.isArray(live) ? live : [], "live"),
+    ...xtreamRows(sourceId, userId, Array.isArray(vod) ? vod : [], "movie"),
+    ...xtreamRows(sourceId, userId, Array.isArray(series) ? series : [], "series"),
+  ];
+
+  await replaceSourceItems(sourceId, userId, rows, db);
+  return {
+    live: Array.isArray(live) ? live.length : 0,
+    movies: Array.isArray(vod) ? vod.length : 0,
+    series: Array.isArray(series) ? series.length : 0,
+    total: rows.length,
+  };
+}
+
+function xtreamRows(
+  sourceId: string,
+  userId: string,
+  items: JsonRecord[],
+  itemType: "live" | "movie" | "series",
+) {
+  const rows: JsonRecord[] = [];
+  for (const item of items) {
+    const streamId = stringOr(item.stream_id ?? item.series_id, "");
+    const title = stringOr(item.name, "");
+    if (!streamId || !title) continue;
+    const container = stringOr(item.container_extension, itemType === "live" ? "m3u8" : "mp4");
+    rows.push({
+      user_id: userId,
+      source_id: sourceId,
+      item_type: itemType,
+      external_id: streamId,
+      parent_external_id: stringOrNull(item.category_id),
+      title,
+      subtitle: stringOrNull(item.category_name),
+      poster_url: stringOrNull(item.stream_icon ?? item.cover),
+      backdrop_url: null,
+      metadata: compactRecord({
+        categoryId: stringOrNull(item.category_id),
+        rating: item.rating,
+        added: item.added,
+      }),
+      playback_hint: compactRecord({
+        sourceType: "xtream",
+        streamId,
+        streamType: itemType,
+        container,
+      }),
+      available: true,
+    });
+  }
+  return rows;
+}
+
+async function syncM3uSource(sourceId: string, userId: string, config: JsonRecord, db: SupabaseClient) {
+  const playlistUrl = stringOr(config.playlistUrl, "");
+  const playlist = await fetchText(playlistUrl, 30000, 20_000_000);
+  const items = parseM3u(playlist).slice(0, 20000);
+  const rows = await Promise.all(items.map(async (item) => ({
+    user_id: userId,
+    source_id: sourceId,
+    item_type: "live",
+    external_id: item.tvgId || await sha256Hex(item.url),
+    parent_external_id: item.group || null,
+    title: item.title,
+    subtitle: item.group || null,
+    poster_url: item.logo || null,
+    backdrop_url: null,
+    metadata: compactRecord({ tvgId: item.tvgId, group: item.group }),
+    playback_hint: compactRecord({ sourceType: "m3u", targetUrl: item.url }),
+    available: true,
+  })));
+
+  await replaceSourceItems(sourceId, userId, rows, db);
+  return { live: rows.length, total: rows.length };
+}
+
+async function replaceSourceItems(sourceId: string, userId: string, rows: JsonRecord[], db: SupabaseClient) {
+  await db.from("cloud_media_items").delete().eq("source_id", sourceId).eq("user_id", userId);
+  for (let index = 0; index < rows.length; index += 500) {
+    const chunk = rows.slice(index, index + 500);
+    if (!chunk.length) continue;
+    const { error } = await db
+      .from("cloud_media_items")
+      .upsert(chunk, { onConflict: "source_id,item_type,external_id" });
+    if (error) throwDb(error, "Unable to save cloud media items");
+  }
 }
 
 async function listMediaItems(url: URL, userId: string, db: SupabaseClient) {
@@ -765,9 +1039,14 @@ async function createPlaybackSession(req: Request, userId: string, db: SupabaseC
   const deviceId = stringOrNull(body.deviceId ?? body.device_id);
   const itemType = stringOr(body.itemType ?? body.item_type, "");
   const itemId = stringOr(body.itemId ?? body.item_id, "");
-  const targetUrl = stringOr(body.targetUrl ?? body.target_url ?? body.url, "");
+  let targetUrl = stringOr(body.targetUrl ?? body.target_url ?? body.url, "");
   const requestedMode = stringOr(body.mode, "auto");
-  if (!itemType || !itemId || !targetUrl) throw new HttpError(400, "itemType, itemId and targetUrl are required");
+  if (!targetUrl && sourceId && itemType && itemId) {
+    targetUrl = await resolvePlaybackTarget(sourceId, itemType, itemId, userId, db);
+  }
+  if (!itemType || !itemId || !targetUrl) {
+    throw new HttpError(400, "itemType, itemId and targetUrl are required");
+  }
   assertHttpUrl(targetUrl);
   if (sourceId) await assertOwnedSource(sourceId, userId, db);
   if (deviceId) await assertOwnedDevice(deviceId, userId, db);
@@ -786,7 +1065,7 @@ async function createPlaybackSession(req: Request, userId: string, db: SupabaseC
       item_type: itemType,
       item_id: itemId,
       mode,
-      status: mode === "transcode" && !MEDIA_GATEWAY_URL ? "pending" : "ready",
+      status: mode === "transcode" ? "pending" : "ready",
       target_url_hash: targetUrlHash,
       stream_mime: stringOrNull(body.streamMime ?? body.stream_mime),
       playback_hint: recordOrEmpty(body.playbackHint ?? body.playback_hint),
@@ -954,7 +1233,8 @@ async function getRuntimeConfig(db: SupabaseClient): Promise<RuntimeConfig> {
     !ENV_RELAY_BASE_URL ||
     !ENV_RELAY_TOKEN_SECRET ||
     !ENV_MEDIA_GATEWAY_URL ||
-    !ENV_MEDIA_GATEWAY_TOKEN;
+    !ENV_MEDIA_GATEWAY_TOKEN ||
+    !ENV_SOURCE_CONFIG_KEY;
 
   if (needsDb) {
     const { data, error } = await db
@@ -978,10 +1258,211 @@ async function getRuntimeConfig(db: SupabaseClient): Promise<RuntimeConfig> {
     relayTokenSecret: ENV_RELAY_TOKEN_SECRET || fromDb.get("RELAY_TOKEN_SECRET") || "",
     mediaGatewayUrl: trimTrailingSlash(ENV_MEDIA_GATEWAY_URL || fromDb.get("NORVA_MEDIA_GATEWAY_URL") || ""),
     mediaGatewayToken: ENV_MEDIA_GATEWAY_TOKEN || fromDb.get("NORVA_MEDIA_GATEWAY_TOKEN") || "",
+    sourceConfigKey: ENV_SOURCE_CONFIG_KEY || fromDb.get("NORVA_SOURCE_CONFIG_KEY") || "",
   };
 
   runtimeConfigCache = { value, expiresAt: Date.now() + 30_000 };
   return value;
+}
+
+async function resolvePlaybackTarget(
+  sourceId: string,
+  itemType: string,
+  itemId: string,
+  userId: string,
+  db: SupabaseClient,
+) {
+  const { data: item, error } = await db
+    .from("cloud_media_items")
+    .select("playback_hint")
+    .eq("source_id", sourceId)
+    .eq("user_id", userId)
+    .eq("item_type", itemType)
+    .eq("external_id", itemId)
+    .maybeSingle();
+  if (error) throwDb(error, "Unable to resolve playback item");
+  if (!item) throw new HttpError(404, "Media item not found");
+
+  const hint = recordOrEmpty(item.playback_hint);
+  if (typeof hint.targetUrl === "string") return hint.targetUrl;
+
+  if (hint.sourceType === "xtream") {
+    const sourceConfig = await loadSourceConfig(sourceId, userId, db);
+    return xtreamStreamUrl({
+      serverUrl: stringOr(sourceConfig.serverUrl, ""),
+      username: stringOr(sourceConfig.username, ""),
+      password: stringOr(sourceConfig.password, ""),
+      streamType: stringOr(hint.streamType, "live"),
+      streamId: stringOr(hint.streamId, ""),
+      container: stringOr(hint.container, "m3u8"),
+    });
+  }
+
+  throw new HttpError(400, "This media item has no playback target");
+}
+
+async function loadSourceConfig(sourceId: string, userId: string, db: SupabaseClient) {
+  const { data: source, error } = await db
+    .from("cloud_sources")
+    .select("config_ciphertext")
+    .eq("id", sourceId)
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (error) throwDb(error, "Unable to load source config");
+  if (!source?.config_ciphertext) throw new HttpError(404, "Source config not found");
+  return decryptSourceConfig(source.config_ciphertext, await getRuntimeConfig(db));
+}
+
+async function encryptSourceConfig(config: JsonRecord, runtimeConfig: RuntimeConfig) {
+  if (!runtimeConfig.sourceConfigKey) {
+    throw new HttpError(503, "Norva Cloud source encryption is not configured");
+  }
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const key = await aesKey(runtimeConfig.sourceConfigKey);
+  const ciphertext = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv },
+    key,
+    encoder.encode(JSON.stringify(config)),
+  );
+  return `aesgcm.v1.${base64Url(iv)}.${base64Url(new Uint8Array(ciphertext))}`;
+}
+
+async function decryptSourceConfig(ciphertext: string, runtimeConfig: RuntimeConfig): Promise<JsonRecord> {
+  if (!runtimeConfig.sourceConfigKey) {
+    throw new HttpError(503, "Norva Cloud source encryption is not configured");
+  }
+  const [scheme, version, ivPart, dataPart] = ciphertext.split(".");
+  if (scheme !== "aesgcm" || version !== "v1" || !ivPart || !dataPart) {
+    throw new HttpError(500, "Unsupported source config format");
+  }
+  const key = await aesKey(runtimeConfig.sourceConfigKey);
+  const plaintext = await crypto.subtle.decrypt(
+    { name: "AES-GCM", iv: base64UrlToBytes(ivPart) },
+    key,
+    base64UrlToBytes(dataPart),
+  );
+  const parsed = JSON.parse(new TextDecoder().decode(plaintext));
+  if (!isRecord(parsed)) throw new HttpError(500, "Invalid source config payload");
+  return parsed;
+}
+
+async function aesKey(secret: string) {
+  let material = base64UrlToBytes(secret);
+  if (material.byteLength !== 32) {
+    material = new Uint8Array(await crypto.subtle.digest("SHA-256", encoder.encode(secret)));
+  }
+  return crypto.subtle.importKey("raw", material, { name: "AES-GCM" }, false, ["encrypt", "decrypt"]);
+}
+
+async function fetchJson(url: string, timeoutMs: number) {
+  const response = await fetchWithTimeout(url, timeoutMs);
+  const payload = await response.json().catch(() => null);
+  if (!response.ok) throw new HttpError(response.status, "IPTV provider request failed", payload);
+  return payload;
+}
+
+async function fetchText(url: string, timeoutMs: number, maxBytes: number) {
+  const response = await fetchWithTimeout(url, timeoutMs);
+  if (!response.ok) throw new HttpError(response.status, "IPTV provider request failed");
+  const text = await response.text();
+  if (text.length > maxBytes) throw new HttpError(413, "Playlist is too large for this cloud import");
+  return text;
+}
+
+async function fetchWithTimeout(url: string, timeoutMs: number) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, {
+      signal: controller.signal,
+      headers: { "User-Agent": "NorvaCloud/1.0" },
+    });
+  } catch (error) {
+    throw new HttpError(502, "Unable to reach IPTV provider", error instanceof Error ? error.message : undefined);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function parseM3u(playlist: string) {
+  const lines = playlist.split(/\r?\n/);
+  const items: Array<{ title: string; url: string; tvgId: string; logo: string; group: string }> = [];
+  let pending: { title: string; tvgId: string; logo: string; group: string } | null = null;
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    if (line.startsWith("#EXTINF")) {
+      pending = {
+        title: line.includes(",") ? line.slice(line.indexOf(",") + 1).trim() : "Norva channel",
+        tvgId: attr(line, "tvg-id") || attr(line, "tvg-name"),
+        logo: attr(line, "tvg-logo"),
+        group: attr(line, "group-title"),
+      };
+      continue;
+    }
+    if (line.startsWith("#")) continue;
+    if (pending && /^https?:\/\//i.test(line)) {
+      items.push({ ...pending, url: line });
+      pending = null;
+    }
+  }
+
+  return items;
+}
+
+function attr(value: string, name: string) {
+  const match = value.match(new RegExp(`${name}=\"([^\"]*)\"`, "i"));
+  return match?.[1]?.trim() ?? "";
+}
+
+function xtreamApiUrl(config: {
+  serverUrl: string;
+  username: string;
+  password: string;
+  action?: string;
+}) {
+  const url = new URL(`${normalizeBaseUrl(config.serverUrl)}/player_api.php`);
+  url.searchParams.set("username", config.username);
+  url.searchParams.set("password", config.password);
+  if (config.action) url.searchParams.set("action", config.action);
+  return url.href;
+}
+
+function xtreamStreamUrl(config: {
+  serverUrl: string;
+  username: string;
+  password: string;
+  streamType: string;
+  streamId: string;
+  container: string;
+}) {
+  const folder = config.streamType === "movie" ? "movie" : config.streamType === "series" ? "series" : "live";
+  return `${normalizeBaseUrl(config.serverUrl)}/${folder}/${encodeURIComponent(config.username)}/${encodeURIComponent(config.password)}/${encodeURIComponent(config.streamId)}.${config.container}`;
+}
+
+function normalizeBaseUrl(value: string) {
+  const trimmed = trimTrailingSlash(value.trim());
+  assertHttpUrl(trimmed);
+  return trimmed;
+}
+
+function safeHost(value: string) {
+  try {
+    return new URL(value).host;
+  } catch {
+    return "";
+  }
+}
+
+function compactRecord(value: JsonRecord) {
+  return Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined && entry !== null && entry !== ""));
+}
+
+function waitUntil(promise: Promise<unknown>) {
+  const runtime = (globalThis as typeof globalThis & { EdgeRuntime?: { waitUntil?: (promise: Promise<unknown>) => void } }).EdgeRuntime;
+  if (runtime?.waitUntil) runtime.waitUntil(promise);
+  else promise.catch((error) => console.error("[norva-cloud] background task failed", error));
 }
 
 async function assertOwnedSource(sourceId: string, userId: string, db: SupabaseClient) {
@@ -1128,6 +1609,16 @@ function base64Url(bytes: Uint8Array) {
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function base64UrlToBytes(value: string) {
+  const padded = value.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(value.length / 4) * 4, "=");
+  const binary = atob(padded);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return bytes;
 }
 
 function assertHttpUrl(value: string) {

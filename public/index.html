@@ -21,6 +21,11 @@
       var isHosted = host && host !== 'localhost' && host !== '127.0.0.1';
       if (!isHosted) return;
 
+      if (window.location.pathname === '/' || window.location.pathname.endsWith('/index.html')) {
+        window.location.replace('/cloud.html');
+        return;
+      }
+
       try {
         var session = JSON.parse(localStorage.getItem('norva-cloud-session') || 'null');
         var now = Math.floor(Date.now() / 1000);

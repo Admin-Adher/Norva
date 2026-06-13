@@ -24,6 +24,7 @@
           (!session.expires_at || Number(session.expires_at) > now + 30)
         );
         if (!isUsable) window.location.replace('/cloud.html');
+        else if (!localStorage.getItem('hubUrl')) window.location.replace('/cloud.html');
       } catch (_) {
         window.location.replace('/cloud.html');
       }
@@ -602,7 +603,7 @@
       $('manual-url').value = hubUrl;
       showScreen('welcome', false);
     } else {
-      showScreen('welcome', false);
+      location.replace('/cloud.html');
     }
   }
 

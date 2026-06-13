@@ -222,6 +222,77 @@
             display: block;
             font-size: 12px;
         }
+        .source-layout {
+            display: grid;
+            grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
+            gap: 18px;
+            align-items: start;
+        }
+        .source-fields {
+            display: grid;
+            gap: 12px;
+        }
+        .segmented {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            padding: 4px;
+            background: #0b0f16;
+            border: 1px solid var(--line);
+            border-radius: 8px;
+        }
+        .segment {
+            min-height: 38px;
+            border: 0;
+            border-radius: 6px;
+            background: transparent;
+            color: var(--muted);
+            font: inherit;
+            font-weight: 800;
+            cursor: pointer;
+        }
+        .segment.active {
+            color: var(--text);
+            background: #252b37;
+        }
+        .source-list {
+            display: grid;
+            gap: 10px;
+        }
+        .source-item {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: 12px;
+            align-items: center;
+            padding: 14px;
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            background: var(--surface-2);
+        }
+        .source-item strong {
+            display: block;
+            margin-bottom: 5px;
+        }
+        .source-item span {
+            display: block;
+            color: var(--quiet);
+            font-size: 12px;
+        }
+        .pill {
+            display: inline-flex;
+            align-items: center;
+            min-height: 24px;
+            padding: 0 8px;
+            border-radius: 999px;
+            background: rgba(79, 125, 243, 0.14);
+            color: #bfdbfe;
+            font-size: 12px;
+            font-weight: 800;
+            margin-right: 6px;
+        }
+        .pill.ready { background: rgba(52, 211, 153, 0.12); color: #86efac; }
+        .pill.error { background: rgba(251, 113, 133, 0.12); color: #fecdd3; }
+        .hidden { display: none !important; }
         .empty {
             min-height: 118px;
             border: 1px dashed var(--line);
@@ -243,7 +314,7 @@
             .topbar { padding: 0 16px; }
             .email { display: none; }
             .shell { padding: 24px 16px 36px; }
-            .hero, .grid { grid-template-columns: 1fr; }
+            .hero, .grid, .source-layout { grid-template-columns: 1fr; }
             .stats { grid-template-columns: 1fr; }
             .top-actions .btn.link { display: none; }
         }
@@ -257,7 +328,7 @@
         </div>
         <div class="top-actions">
             <span class="email" id="account-email"></span>
-            <a class="btn link" href="/hub-connect.html">Hub</a>
+            <a class="btn link" href="/hub-connect.html">Connector</a>
             <button class="btn danger" id="signout-button" type="button">Sign out</button>
         </div>
     </header>
@@ -265,9 +336,9 @@
     <main class="shell">
         <section class="hero">
             <div>
-                <h1>Your Norva ecosystem, attached to one account.</h1>
+                <h1>Add IPTV once. Watch across Norva.</h1>
                 <p class="lead">
-                    Pair new screens, manage trusted devices and keep the cloud identity ready for sources, favorites, history and playback sessions.
+                    Your sources, screens, favorites, history and playback sessions stay attached to one Norva Account.
                 </p>
                 <div class="stats">
                     <div class="stat"><strong id="device-count">0</strong><span>Trusted devices</span></div>
@@ -288,6 +359,50 @@
                 </div>
                 <div class="status" id="pair-status"></div>
             </section>
+        </section>
+
+        <section class="panel" style="margin-bottom:22px">
+            <div class="source-layout">
+                <div>
+                    <h2>Add IPTV</h2>
+                    <div class="source-fields">
+                        <div class="segmented" aria-label="Source type">
+                            <button class="segment active" id="type-xtream" type="button" data-source-type="xtream">Xtream</button>
+                            <button class="segment" id="type-m3u" type="button" data-source-type="m3u">M3U</button>
+                        </div>
+                        <div class="field">
+                            <label for="source-name">Name</label>
+                            <input id="source-name" type="text" maxlength="80" placeholder="My IPTV">
+                        </div>
+                        <div id="xtream-fields">
+                            <div class="field">
+                                <label for="xtream-url">Server URL</label>
+                                <input id="xtream-url" type="url" placeholder="https://provider.example">
+                            </div>
+                            <div class="field">
+                                <label for="xtream-username">Username</label>
+                                <input id="xtream-username" type="text" autocomplete="username">
+                            </div>
+                            <div class="field">
+                                <label for="xtream-password">Password</label>
+                                <input id="xtream-password" type="password" autocomplete="current-password">
+                            </div>
+                        </div>
+                        <div id="m3u-fields" class="hidden">
+                            <div class="field">
+                                <label for="m3u-url">Playlist URL</label>
+                                <input id="m3u-url" type="url" placeholder="https://provider.example/playlist.m3u">
+                            </div>
+                        </div>
+                        <button class="btn primary" id="add-source-button" type="button">Add IPTV</button>
+                        <div class="status" id="source-status"></div>
+                    </div>
+                </div>
+                <div>
+                    <h2>Cloud sources</h2>
+                    <div class="source-list" id="sources"></div>
+                </div>
+            </div>
         </section>
 
         <section class="grid">
@@ -347,12 +462,16 @@
         const currentReturn = location.pathname + location.search;
         const pairCodeInput = document.getElementById('pair-code');
         const devicesEl = document.getElementById('devices');
+        const sourcesEl = document.getElementById('sources');
         const commandDevice = document.getElementById('command-device');
         const pairStatus = document.getElementById('pair-status');
         const profileStatus = document.getElementById('profile-status');
         const devicesStatus = document.getElementById('devices-status');
+        const sourceStatus = document.getElementById('source-status');
         const commandStatus = document.getElementById('command-status');
         let trustedDevices = [];
+        let cloudSources = [];
+        let selectedSourceType = 'xtream';
         let commandPollHandle = 0;
 
         boot();
@@ -363,8 +482,12 @@
         });
         document.getElementById('save-profile-button').addEventListener('click', saveProfile);
         document.getElementById('approve-button').addEventListener('click', approveCode);
+        document.getElementById('add-source-button').addEventListener('click', addSource);
         document.getElementById('send-play-button').addEventListener('click', () => sendCommand('play'));
         document.getElementById('send-open-button').addEventListener('click', () => sendCommand('open'));
+        document.querySelectorAll('[data-source-type]').forEach(button => {
+            button.addEventListener('click', () => selectSourceType(button.dataset.sourceType));
+        });
         document.getElementById('clear-code-button').addEventListener('click', () => {
             pairCodeInput.value = '';
             pairStatus.className = 'status';
@@ -393,7 +516,7 @@
 
             await registerCurrentDevice();
             startDeviceCommandLoop();
-            await Promise.all([loadProfile(user), loadDevices(), loadCounters()]);
+            await Promise.all([loadProfile(user), loadDevices(), loadSources(), loadCounters()]);
         }
 
         async function loadProfile(user) {
@@ -455,12 +578,130 @@
         }
 
         async function loadCounters() {
-            const [sources, history] = await Promise.all([
-                NorvaCloud.sources.list().catch(() => ({ sources: [] })),
-                NorvaCloud.history.list({ limit: 1 }).catch(() => ({ history: [] }))
-            ]);
-            document.getElementById('source-count').textContent = String((sources.sources || []).length);
+            const history = await NorvaCloud.history.list({ limit: 1 }).catch(() => ({ history: [] }));
             document.getElementById('history-count').textContent = String((history.history || []).length);
+        }
+
+        function selectSourceType(type) {
+            selectedSourceType = type === 'm3u' ? 'm3u' : 'xtream';
+            document.querySelectorAll('[data-source-type]').forEach(button => {
+                button.classList.toggle('active', button.dataset.sourceType === selectedSourceType);
+            });
+            document.getElementById('xtream-fields').classList.toggle('hidden', selectedSourceType !== 'xtream');
+            document.getElementById('m3u-fields').classList.toggle('hidden', selectedSourceType !== 'm3u');
+        }
+
+        async function addSource() {
+            const button = document.getElementById('add-source-button');
+            const displayName = document.getElementById('source-name').value.trim() || (selectedSourceType === 'xtream' ? 'Xtream IPTV' : 'M3U Playlist');
+            const config = selectedSourceType === 'xtream'
+                ? {
+                    serverUrl: document.getElementById('xtream-url').value.trim(),
+                    username: document.getElementById('xtream-username').value.trim(),
+                    password: document.getElementById('xtream-password').value
+                }
+                : {
+                    playlistUrl: document.getElementById('m3u-url').value.trim()
+                };
+
+            button.disabled = true;
+            try {
+                setStatus(sourceStatus, 'info', 'Adding source...');
+                await NorvaCloud.sources.create({
+                    sourceType: selectedSourceType,
+                    displayName,
+                    config,
+                    syncNow: true
+                });
+                clearSourceForm();
+                setStatus(sourceStatus, 'success', 'Source added. Norva Cloud is syncing it now.');
+                await loadSources();
+                setTimeout(loadSources, 5000);
+            } catch (error) {
+                setStatus(sourceStatus, 'error', error.message);
+            } finally {
+                button.disabled = false;
+            }
+        }
+
+        function clearSourceForm() {
+            document.getElementById('source-name').value = '';
+            document.getElementById('xtream-url').value = '';
+            document.getElementById('xtream-username').value = '';
+            document.getElementById('xtream-password').value = '';
+            document.getElementById('m3u-url').value = '';
+        }
+
+        async function loadSources() {
+            try {
+                const payload = await NorvaCloud.sources.list();
+                cloudSources = payload.sources || [];
+                document.getElementById('source-count').textContent = String(cloudSources.length);
+                renderSources(cloudSources);
+            } catch (error) {
+                setStatus(sourceStatus, 'error', error.message);
+            }
+        }
+
+        function renderSources(sources) {
+            if (!sources.length) {
+                sourcesEl.innerHTML = '<div class="empty">No IPTV source yet.</div>';
+                return;
+            }
+            sourcesEl.innerHTML = '';
+            sources.forEach(source => {
+                const item = document.createElement('div');
+                item.className = 'source-item';
+
+                const info = document.createElement('div');
+                const name = document.createElement('strong');
+                name.textContent = source.display_name || 'IPTV source';
+                const meta = document.createElement('span');
+                const status = document.createElement('span');
+                status.className = `pill ${source.sync_status === 'ready' ? 'ready' : source.sync_status === 'error' ? 'error' : ''}`;
+                status.textContent = source.sync_status || 'idle';
+                const type = document.createElement('span');
+                type.className = 'pill';
+                type.textContent = String(source.source_type || 'source').toUpperCase();
+                meta.append(type, status, document.createTextNode(source.config_hint?.serverHost || source.config_hint?.playlistHost || 'Norva Cloud'));
+                info.append(name, meta);
+
+                const actions = document.createElement('div');
+                actions.className = 'button-row';
+                const sync = document.createElement('button');
+                sync.className = 'btn';
+                sync.type = 'button';
+                sync.textContent = 'Sync';
+                sync.addEventListener('click', async () => {
+                    sync.disabled = true;
+                    try {
+                        setStatus(sourceStatus, 'info', 'Sync started...');
+                        await NorvaCloud.sources.sync(source.id);
+                        await loadSources();
+                        setTimeout(loadSources, 5000);
+                    } catch (error) {
+                        setStatus(sourceStatus, 'error', error.message);
+                    } finally {
+                        sync.disabled = false;
+                    }
+                });
+                const remove = document.createElement('button');
+                remove.className = 'btn danger';
+                remove.type = 'button';
+                remove.textContent = 'Remove';
+                remove.addEventListener('click', async () => {
+                    remove.disabled = true;
+                    try {
+                        await NorvaCloud.sources.remove(source.id);
+                        await loadSources();
+                    } catch (error) {
+                        setStatus(sourceStatus, 'error', error.message);
+                    }
+                });
+                actions.append(sync, remove);
+                item.append(info, actions);
+                sourcesEl.appendChild(item);
+            });
         }
 
         async function registerCurrentDevice() {

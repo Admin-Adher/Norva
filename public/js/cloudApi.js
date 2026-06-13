@@ -98,6 +98,7 @@
             list: () => request('GET', '/sources'),
             create: (source) => request('POST', '/sources', source),
             update: (id, patch) => request('PATCH', `/sources/${encodeURIComponent(id)}`, patch),
+            sync: (id) => request('POST', `/sources/${encodeURIComponent(id)}/sync`, {}),
             remove: (id) => request('DELETE', `/sources/${encodeURIComponent(id)}`)
         },
 
