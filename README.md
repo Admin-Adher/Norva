@@ -19,6 +19,7 @@ The ecosystem is designed to support:
 - A polished TV-first experience for the living room
 - A responsive web interface for desktop and browser access
 - A mobile companion for pairing, remote control, and future casting flows
+- A unified account layer for identity, sessions, and device ownership
 - A cloud registry for secure device linking and synchronization
 - A local hub model that keeps playback infrastructure close to the user
 
@@ -32,6 +33,7 @@ Norva focuses on ownership, speed, clarity, and long-term product value.
 | **Norva TV** | TV-optimized application for Android TV and living-room usage |
 | **Norva Mobile** | Mobile companion for QR pairing and future remote interactions |
 | **Norva Web** | Browser-accessible interface for desktop and remote access |
+| **Norva Account** | Identity layer for sign in, sign up, session continuity, and account-owned devices |
 | **Norva Link** | Device pairing and identity layer |
 | **Norva Cloud** | Registry and synchronization layer for paired devices and future account services |
 
@@ -54,6 +56,7 @@ Core product areas include:
 Norva uses a hybrid architecture built for product independence:
 
 - Norva Cloud Core manages accounts, devices, sources, pairing, favorites, and history
+- Norva Account provides the authenticated identity and session layer across web, mobile, and TV pairing flows
 - Playback Sessions give every app a single cloud contract for direct, relay, or gateway playback
 - Norva Relay handles lightweight stream access concerns such as CORS, headers, HLS playlists, and signed URLs
 - Norva Media Gateway provides dedicated remux/transcode capacity for streams that need FFmpeg
@@ -72,6 +75,7 @@ Public naming should favor:
 - **Norva TV**
 - **Norva Mobile**
 - **Norva Web**
+- **Norva Account**
 - **Norva Link**
 - **Norva Cloud**
 

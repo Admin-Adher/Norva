@@ -37,7 +37,8 @@ public class MainActivity extends Activity {
 
     private static final String PREFS = "norva";
     private static final String PREF_SERVER_URL = "serverUrl";
-    private static final String PREF_MODE = "mode"; // "server" | "standalone"
+    private static final String PREF_MODE = "mode"; // "cloud" | "server" | "standalone"
+    private static final String CLOUD_PAIR_URL = "https://norva-eight.vercel.app/cloud-pair.html?device=tv";
     // Marker appended to the WebView user agent: the web app detects it and
     // enables TV mode (D-pad spatial navigation, focus outlines).
     private static final String UA_SUFFIX = " NorvaTV-AndroidTV/3.1";
@@ -63,7 +64,9 @@ public class MainActivity extends Activity {
 
         String mode = prefs().getString(PREF_MODE, null);
         String saved = prefs().getString(PREF_SERVER_URL, null);
-        if ("standalone".equals(mode)) {
+        if ("cloud".equals(mode)) {
+            connectCloudPairing();
+        } else if ("standalone".equals(mode)) {
             connectStandalone();
         } else if ("server".equals(mode) && saved != null && !saved.isEmpty()) {
             connect(saved);
@@ -132,6 +135,31 @@ public class MainActivity extends Activity {
         hint.setTextSize(16);
         hint.setPadding(0, 0, 0, dp(24));
         setupPanel.addView(hint);
+
+        TextView cloudHint = new TextView(this);
+        cloudHint.setText("Norva Account: pair this TV with the cloud ecosystem.");
+        cloudHint.setTextColor(Color.parseColor("#a1a1aa"));
+        cloudHint.setTextSize(15);
+        cloudHint.setPadding(0, 0, 0, dp(10));
+        setupPanel.addView(cloudHint, new LinearLayout.LayoutParams(dp(560), LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        Button cloudBtn = new Button(this);
+        cloudBtn.setText("Pair with Norva Account");
+        cloudBtn.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                prefs().edit().putString(PREF_MODE, "cloud").apply();
+                connectCloudPairing();
+            }
+        });
+        setupPanel.addView(cloudBtn, new LinearLayout.LayoutParams(dp(320), LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        TextView localLabel = new TextView(this);
+        localLabel.setText("Local hub");
+        localLabel.setTextColor(Color.parseColor("#71717a"));
+        localLabel.setTextSize(15);
+        localLabel.setPadding(0, dp(28), 0, dp(8));
+        setupPanel.addView(localLabel);
 
         urlInput = new EditText(this);
         urlInput.setHint("http://192.168.1.20:3000");
@@ -221,6 +249,10 @@ public class MainActivity extends Activity {
         webViewVisible = true;
         webView.loadUrl(url);
         webView.requestFocus();
+    }
+
+    private void connectCloudPairing() {
+        connect(CLOUD_PAIR_URL);
     }
 
     /**

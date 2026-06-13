@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#080b12">
+  <link rel="manifest" href="/manifest.json">
+  <link rel="apple-touch-icon" href="/icon-192.png">
+  <title>Norva Cloud</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #080b12;
+      --surface: #11151d;
+      --surface-2: #1a202b;
+      --line: #273142;
+      --text: #f8fafc;
+      --muted: #a1a1aa;
+      --quiet: #667085;
+      --accent: #4f7df3;
+      --success: #34d399;
+      --danger: #fb7185;
+    }
+    body {
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      padding-bottom: env(safe-area-inset-bottom);
+    }
+    header {
+      min-height: 60px;
+      padding: max(12px, env(safe-area-inset-top)) 16px 12px;
+      border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      position: sticky;
+      top: 0;
+      background: rgba(8, 11, 18, 0.94);
+      backdrop-filter: blur(18px);
+      z-index: 2;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      font-weight: 800;
+      min-width: 0;
+    }
+    .brand img {
+      width: 34px;
+      height: 34px;
+      border-radius: 8px;
+    }
+    main {
+      padding: 18px 16px 28px;
+      display: grid;
+      gap: 14px;
+    }
+    .panel {
+      background: var(--surface);
+      border: 1px solid rgba(148, 163, 184, 0.18);
+      border-radius: 8px;
+      padding: 16px;
+    }
+    h1 {
+      font-size: 26px;
+      margin-bottom: 8px;
+    }
+    h2 {
+      font-size: 16px;
+      margin-bottom: 12px;
+    }
+    .muted {
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.55;
+    }
+    .account {
+      color: var(--muted);
+      font-size: 13px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      margin-top: 10px;
+    }
+    label {
+      display: block;
+      color: #cbd5e1;
+      font-size: 13px;
+      font-weight: 650;
+      margin: 14px 0 6px;
+    }
+    input {
+      width: 100%;
+      min-height: 46px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #0b0f16;
+      color: var(--text);
+      font: inherit;
+      outline: none;
+      padding: 0 12px;
+    }
+    input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(79, 125, 243, 0.18); }
+    .code-input {
+      text-align: center;
+      letter-spacing: 4px;
+      text-transform: uppercase;
+      font-weight: 850;
+      font-size: 20px;
+    }
+    .row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-top: 12px;
+    }
+    .btn {
+      min-height: 44px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      color: var(--text);
+      background: #252b37;
+      font-weight: 800;
+      text-decoration: none;
+      display: inline-flex;
+      justify-content: center;
+      align-items: center;
+      padding: 0 12px;
+    }
+    .btn.primary {
+      border: 0;
+      background: linear-gradient(135deg, #4f7df3, #6d5dfc 58%, #c75cff);
+      color: white;
+    }
+    .btn.danger {
+      color: #fecdd3;
+      background: rgba(251, 113, 133, 0.08);
+      border-color: rgba(251, 113, 133, 0.35);
+    }
+    .status {
+      display: none;
+      margin-top: 12px;
+      padding: 11px 12px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.45;
+    }
+    .status.info { display: block; background: rgba(79, 125, 243, 0.1); color: #bfdbfe; }
+    .status.success { display: block; background: rgba(52, 211, 153, 0.1); color: var(--success); border-color: rgba(52, 211, 153, 0.3); }
+    .status.error { display: block; background: rgba(251, 113, 133, 0.1); color: var(--danger); border-color: rgba(251, 113, 133, 0.3); }
+    .devices {
+      display: grid;
+      gap: 10px;
+    }
+    .device {
+      background: var(--surface-2);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 13px;
+    }
+    .device strong {
+      display: block;
+      margin-bottom: 4px;
+    }
+    .device span {
+      display: block;
+      color: var(--quiet);
+      font-size: 12px;
+    }
+    .empty {
+      color: var(--quiet);
+      border: 1px dashed var(--line);
+      border-radius: 8px;
+      padding: 18px;
+      text-align: center;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <img src="/icon-192.png" alt="Norva">
+      <span>Norva Cloud</span>
+    </div>
+    <button class="btn danger" id="signout-button" type="button">Sign out</button>
+  </header>
+
+  <main>
+    <section class="panel">
+      <h1>Mobile cloud</h1>
+      <p class="muted">Approve screens and keep this phone attached to your Norva Account.</p>
+      <div class="account" id="account-email"></div>
+      <div class="row">
+        <a class="btn" href="/">Hub</a>
+        <a class="btn" href="/account.html">Account</a>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Approve pairing</h2>
+      <p class="muted">Enter the code shown on the TV or web screen.</p>
+      <label for="pair-code">Pairing code</label>
+      <input id="pair-code" class="code-input" type="text" inputmode="text" maxlength="10" autocomplete="one-time-code" placeholder="ABC123">
+      <div class="row">
+        <button class="btn primary" id="approve-button" type="button">Approve</button>
+        <button class="btn" id="clear-button" type="button">Clear</button>
+      </div>
+      <div class="status" id="pair-status"></div>
+    </section>
+
+    <section class="panel">
+      <h2>Trusted devices</h2>
+      <div class="devices" id="devices"></div>
+      <div class="status" id="devices-status"></div>
+    </section>
+  </main>
+
+  <script src="/cloudApi.js?v=1"></script>
+  <script src="/authApi.js?v=1"></script>
+  <script>
+    const params = new URLSearchParams(location.search);
+    const currentReturn = location.pathname + location.search;
+    const codeInput = document.getElementById('pair-code');
+    const pairStatus = document.getElementById('pair-status');
+    const devicesStatus = document.getElementById('devices-status');
+    const devicesEl = document.getElementById('devices');
+
+    boot();
+
+    document.getElementById('signout-button').addEventListener('click', async () => {
+      await NorvaAuth.signOut();
+      location.replace('/account.html');
+    });
+    document.getElementById('approve-button').addEventListener('click', approveCode);
+    document.getElementById('clear-button').addEventListener('click', () => {
+      codeInput.value = '';
+      pairStatus.className = 'status';
+      history.replaceState({}, document.title, '/cloud.html');
+    });
+    codeInput.addEventListener('input', () => {
+      codeInput.value = codeInput.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10);
+    });
+    codeInput.addEventListener('keydown', event => {
+      if (event.key === 'Enter') approveCode();
+    });
+
+    async function boot() {
+      NorvaAuth.captureSessionFromUrl();
+      const user = await NorvaAuth.getUser().catch(() => null);
+      if (!user) {
+        location.replace('/account.html?returnTo=' + encodeURIComponent(currentReturn));
+        return;
+      }
+      document.getElementById('account-email').textContent = user.email || 'Norva Account';
+      if (params.get('pair')) {
+        codeInput.value = params.get('pair').toUpperCase();
+        setStatus(pairStatus, 'info', 'Pairing code ready.');
+      }
+      await ensureProfile(user);
+      await registerCurrentDevice();
+      await loadDevices();
+    }
+
+    async function ensureProfile(user) {
+      const name = user.user_metadata?.display_name || user.email?.split('@')[0] || '';
+      await NorvaCloud.profile.save({ displayName: name, locale: navigator.language || 'fr-FR' }).catch(() => {});
+    }
+
+    async function approveCode() {
+      const code = codeInput.value.trim().toUpperCase();
+      if (!code) {
+        setStatus(pairStatus, 'error', 'Enter the pairing code first.');
+        return;
+      }
+      const button = document.getElementById('approve-button');
+      button.disabled = true;
+      try {
+        setStatus(pairStatus, 'info', 'Approving device...');
+        await NorvaCloud.pairing.approve(code);
+        setStatus(pairStatus, 'success', 'Device paired.');
+        codeInput.value = '';
+        history.replaceState({}, document.title, '/cloud.html');
+        await loadDevices();
+      } catch (error) {
+        setStatus(pairStatus, 'error', error.message);
+      } finally {
+        button.disabled = false;
+      }
+    }
+
+    async function loadDevices() {
+      try {
+        const payload = await NorvaCloud.devices.list();
+        const devices = (payload.devices || []).filter(device => !device.revoked);
+        renderDevices(devices);
+      } catch (error) {
+        setStatus(devicesStatus, 'error', error.message);
+      }
+    }
+
+    async function registerCurrentDevice() {
+      const key = 'norva-cloud-device-id';
+      const existing = localStorage.getItem(key);
+      if (existing) {
+        const heartbeat = await NorvaCloud.devices.heartbeat(existing).catch(() => null);
+        if (heartbeat?.device) return heartbeat.device;
+        localStorage.removeItem(key);
+      }
+
+      const created = await NorvaCloud.devices.create({
+        deviceType: 'mobile',
+        deviceName: 'Norva Mobile',
+        platform: navigator.platform || 'mobile',
+        appVersion: 'mobile-pwa',
+        trusted: true,
+        capabilities: { accountSession: true, pairingApproval: true }
+      }).catch(() => null);
+      if (created?.device?.id) localStorage.setItem(key, created.device.id);
+      return created?.device || null;
+    }
+
+    function renderDevices(devices) {
+      devicesStatus.className = 'status';
+      devicesEl.innerHTML = '';
+      if (!devices.length) {
+        devicesEl.innerHTML = '<div class="empty">No paired device yet.</div>';
+        return;
+      }
+      devices.forEach(device => {
+        const item = document.createElement('div');
+        item.className = 'device';
+        const name = document.createElement('strong');
+        name.textContent = device.device_name || 'Norva Device';
+        const meta = document.createElement('span');
+        meta.textContent = [device.device_type || 'device', formatDate(device.last_seen_at)].filter(Boolean).join(' - ');
+        item.append(name, meta);
+        devicesEl.appendChild(item);
+      });
+    }
+
+    function setStatus(element, type, message) {
+      element.className = 'status ' + type;
+      element.textContent = message;
+    }
+
+    function formatDate(value) {
+      if (!value) return '';
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return '';
+      return date.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+    }
+  </script>
+</body>
+</html>

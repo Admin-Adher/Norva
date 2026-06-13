@@ -34,6 +34,9 @@ public class MainActivity extends Activity {
 
     private static final String PREFS          = "norva_mobile";
     private static final String PREF_SERVER_URL = "serverUrl";
+    private static final String PREF_MODE       = "mode"; // "cloud" | "server"
+    private static final String CLOUD_ACCOUNT_URL = "https://norva-pgkk.vercel.app/account.html";
+    private static final String CLOUD_DASHBOARD_URL = "https://norva-pgkk.vercel.app/cloud.html";
     private static final String UA_SUFFIX       = " NorvaTV-AndroidPhone/1.0";
 
     private FrameLayout  root;
@@ -67,15 +70,18 @@ public class MainActivity extends Activity {
                 String hubUrl = data.getQueryParameter("hub");
                 String code   = data.getQueryParameter("code");
                 if (hubUrl != null && code != null) {
-                    prefs().edit().putString(PREF_SERVER_URL, hubUrl).apply();
+                    prefs().edit().putString(PREF_SERVER_URL, hubUrl).putString(PREF_MODE, "server").apply();
                     connect(hubUrl + "/pair-approve.html?code=" + code);
                     return;
                 }
             }
         }
 
+        String mode = prefs().getString(PREF_MODE, null);
         String saved = prefs().getString(PREF_SERVER_URL, null);
-        if (saved != null && !saved.isEmpty()) {
+        if ("cloud".equals(mode)) {
+            connect(CLOUD_DASHBOARD_URL);
+        } else if (saved != null && !saved.isEmpty()) {
             connect(saved);
         } else {
             showSetup(null);
@@ -185,6 +191,21 @@ public class MainActivity extends Activity {
         sub.setPadding(0, 0, 0, dp(32));
         setupPanel.addView(sub);
 
+        Button accountBtn = new Button(this);
+        accountBtn.setText("Norva Account");
+        accountBtn.setTextColor(Color.WHITE);
+        accountBtn.setBackgroundColor(Color.parseColor("#3B82F6"));
+        accountBtn.setOnClickListener(v -> {
+            prefs().edit().putString(PREF_MODE, "cloud").apply();
+            connect(CLOUD_ACCOUNT_URL);
+        });
+
+        LinearLayout.LayoutParams accountBtnLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        accountBtnLp.bottomMargin = dp(22);
+        setupPanel.addView(accountBtn, accountBtnLp);
+
         // Hint
         TextView hint = new TextView(this);
         hint.setText("Enter your Norva hub address");
@@ -224,7 +245,7 @@ public class MainActivity extends Activity {
             }
             if (!url.startsWith("http")) url = "http://" + url;
             while (url.endsWith("/")) url = url.substring(0, url.length() - 1);
-            prefs().edit().putString(PREF_SERVER_URL, url).apply();
+            prefs().edit().putString(PREF_SERVER_URL, url).putString(PREF_MODE, "server").apply();
             connect(url);
         });
 

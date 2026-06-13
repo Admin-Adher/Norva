@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#06080d">
+    <title>Pair with Norva</title>
+    <link rel="icon" type="image/png" href="/favicon.png">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        :root {
+            --bg: #06080d;
+            --surface: #11151d;
+            --line: #273142;
+            --text: #f8fafc;
+            --muted: #a1a1aa;
+            --quiet: #667085;
+            --accent: #4f7df3;
+            --cyan: #21d4fd;
+            --success: #34d399;
+            --danger: #fb7185;
+        }
+        body {
+            min-height: 100vh;
+            background:
+                radial-gradient(circle at 50% 0%, rgba(79, 125, 243, 0.18), transparent 42%),
+                var(--bg);
+            color: var(--text);
+            font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            display: grid;
+            place-items: center;
+            padding: 32px;
+        }
+        .screen {
+            width: min(880px, 100%);
+            text-align: center;
+        }
+        .logo {
+            width: 74px;
+            height: 74px;
+            border-radius: 8px;
+            object-fit: cover;
+            margin-bottom: 20px;
+        }
+        h1 {
+            font-size: clamp(30px, 5vw, 54px);
+            line-height: 1.05;
+            margin-bottom: 12px;
+        }
+        .subtitle {
+            color: var(--muted);
+            font-size: clamp(15px, 2vw, 20px);
+            line-height: 1.6;
+            max-width: 680px;
+            margin: 0 auto 30px;
+        }
+        .code-box {
+            background: rgba(17, 21, 29, 0.92);
+            border: 1px solid rgba(148, 163, 184, 0.2);
+            border-radius: 8px;
+            padding: clamp(24px, 5vw, 42px);
+            box-shadow: 0 28px 80px rgba(0, 0, 0, 0.34);
+        }
+        .code {
+            min-height: 96px;
+            display: grid;
+            place-items: center;
+            font-size: clamp(48px, 12vw, 104px);
+            font-weight: 900;
+            letter-spacing: 10px;
+            color: white;
+            text-shadow: 0 0 30px rgba(33, 212, 253, 0.32);
+        }
+        .url {
+            color: #bfdbfe;
+            font-size: clamp(14px, 2vw, 18px);
+            overflow-wrap: anywhere;
+            margin-top: 14px;
+        }
+        .status {
+            margin: 22px auto 0;
+            color: var(--muted);
+            font-size: 15px;
+            line-height: 1.5;
+            min-height: 24px;
+        }
+        .status.success { color: var(--success); }
+        .status.error { color: var(--danger); }
+        .actions {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            margin-top: 24px;
+            flex-wrap: wrap;
+        }
+        .btn {
+            min-height: 44px;
+            border-radius: 8px;
+            border: 1px solid var(--line);
+            padding: 0 16px;
+            color: var(--text);
+            background: #252b37;
+            font-weight: 800;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+        }
+        .btn.primary {
+            border: 0;
+            background: linear-gradient(135deg, #4f7df3, #6d5dfc 60%, #c75cff);
+        }
+        .timer {
+            color: var(--quiet);
+            font-size: 13px;
+            margin-top: 12px;
+        }
+    </style>
+</head>
+<body>
+    <main class="screen">
+        <img class="logo" src="/img/norva-app-icon.png" alt="Norva">
+        <h1>Pair this screen</h1>
+        <p class="subtitle">Open Norva Cloud on your phone or computer, sign in, then approve this code.</p>
+
+        <section class="code-box" aria-live="polite">
+            <div class="code" id="code">...</div>
+            <div class="url" id="pair-url"></div>
+            <div class="timer" id="timer"></div>
+        </section>
+
+        <div class="status" id="status">Creating pairing code...</div>
+        <div class="actions">
+            <button class="btn primary" id="restart-button" type="button">New code</button>
+            <a class="btn" id="account-link" href="/cloud.html">Open cloud</a>
+        </div>
+    </main>
+
+    <script src="/js/cloudApi.js?v=1"></script>
+    <script>
+        const params = new URLSearchParams(location.search);
+        const codeEl = document.getElementById('code');
+        const pairUrlEl = document.getElementById('pair-url');
+        const timerEl = document.getElementById('timer');
+        const statusEl = document.getElementById('status');
+        const accountLink = document.getElementById('account-link');
+        let currentCode = '';
+        let expiresAt = 0;
+        let pollHandle = 0;
+        let timerHandle = 0;
+
+        document.getElementById('restart-button').addEventListener('click', startPairing);
+        startPairing();
+
+        async function startPairing() {
+            clearInterval(pollHandle);
+            clearInterval(timerHandle);
+            currentCode = '';
+            expiresAt = 0;
+            codeEl.textContent = '...';
+            pairUrlEl.textContent = '';
+            timerEl.textContent = '';
+            setStatus('', 'Creating pairing code...');
+
+            try {
+                const deviceType = params.get('device') || inferDeviceType();
+                const deviceName = params.get('name') || defaultDeviceName(deviceType);
+                const result = await NorvaCloud.pairing.start({
+                    deviceType,
+                    deviceName,
+                    platform: navigator.platform || 'web',
+                    ttlSeconds: 600,
+                    capabilities: { cloudPairing: true }
+                });
+
+                currentCode = result.code;
+                expiresAt = new Date(result.expiresAt).getTime();
+                const pairPath = '/cloud.html?pair=' + encodeURIComponent(currentCode);
+                const pairUrl = location.origin + pairPath;
+                codeEl.textContent = currentCode;
+                pairUrlEl.textContent = pairUrl;
+                accountLink.href = pairPath;
+                setStatus('', 'Waiting for approval...');
+                updateTimer();
+                pollHandle = setInterval(pollPairing, 2500);
+                timerHandle = setInterval(updateTimer, 1000);
+            } catch (error) {
+                setStatus('error', error.message || 'Unable to create pairing code.');
+            }
+        }
+
+        async function pollPairing() {
+            if (!currentCode) return;
+            try {
+                const result = await NorvaCloud.pairing.poll(currentCode);
+                if (result.status === 'approved') {
+                    clearInterval(pollHandle);
+                    clearInterval(timerHandle);
+                    setStatus('success', 'This screen is paired with your Norva Account.');
+                    timerEl.textContent = 'Connected';
+                } else if (result.status === 'expired' || result.status === 'not_found') {
+                    clearInterval(pollHandle);
+                    clearInterval(timerHandle);
+                    setStatus('error', 'This pairing code expired. Create a new one.');
+                    timerEl.textContent = '';
+                }
+            } catch (error) {
+                setStatus('error', error.message || 'Pairing check failed.');
+            }
+        }
+
+        function updateTimer() {
+            if (!expiresAt) return;
+            const seconds = Math.max(0, Math.floor((expiresAt - Date.now()) / 1000));
+            const minutes = Math.floor(seconds / 60);
+            const rest = String(seconds % 60).padStart(2, '0');
+            timerEl.textContent = seconds ? `Expires in ${minutes}:${rest}` : 'Expired';
+            if (!seconds) {
+                clearInterval(pollHandle);
+                clearInterval(timerHandle);
+                setStatus('error', 'This pairing code expired. Create a new one.');
+            }
+        }
+
+        function setStatus(type, message) {
+            statusEl.className = type ? 'status ' + type : 'status';
+            statusEl.textContent = message;
+        }
+
+        function inferDeviceType() {
+            const ua = navigator.userAgent.toLowerCase();
+            if (ua.includes('android') && ua.includes('tv')) return 'tv';
+            if (ua.includes('mobile') || ua.includes('android') || ua.includes('iphone')) return 'mobile';
+            return 'web';
+        }
+
+        function defaultDeviceName(deviceType) {
+            if (deviceType === 'tv') return 'Norva TV';
+            if (deviceType === 'mobile') return 'Norva Mobile';
+            return 'Norva Web';
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#090b10">
+    <title>Norva Account</title>
+    <link rel="icon" type="image/png" href="/favicon.png">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        :root {
+            --bg: #090b10;
+            --panel: #11151d;
+            --panel-2: #171c26;
+            --line: #273142;
+            --text: #f8fafc;
+            --muted: #9ca3af;
+            --quiet: #667085;
+            --accent: #4f7df3;
+            --accent-2: #21d4fd;
+            --danger: #fb7185;
+            --success: #34d399;
+        }
+        body {
+            min-height: 100vh;
+            background:
+                radial-gradient(circle at 18% 12%, rgba(33, 212, 253, 0.16), transparent 30%),
+                radial-gradient(circle at 86% 4%, rgba(199, 92, 255, 0.13), transparent 28%),
+                var(--bg);
+            color: var(--text);
+            font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            display: grid;
+            place-items: center;
+            padding: 24px;
+        }
+        .shell {
+            width: min(960px, 100%);
+            display: grid;
+            grid-template-columns: minmax(0, 0.95fr) minmax(320px, 1.05fr);
+            gap: 28px;
+            align-items: center;
+        }
+        .brand {
+            min-width: 0;
+            padding: 10px 0;
+        }
+        .logo-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 26px;
+        }
+        .logo-row img {
+            width: 48px;
+            height: 48px;
+            border-radius: 8px;
+            object-fit: cover;
+        }
+        .logo-row span {
+            font-size: 20px;
+            font-weight: 750;
+        }
+        h1 {
+            font-size: clamp(34px, 6vw, 58px);
+            line-height: 1;
+            font-weight: 800;
+            max-width: 620px;
+        }
+        .lead {
+            max-width: 520px;
+            color: var(--muted);
+            font-size: 16px;
+            line-height: 1.7;
+            margin-top: 20px;
+        }
+        .signals {
+            display: grid;
+            gap: 10px;
+            margin-top: 28px;
+            max-width: 460px;
+        }
+        .signal {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            color: #cbd5e1;
+            font-size: 14px;
+        }
+        .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 999px;
+            background: linear-gradient(135deg, var(--accent-2), #c75cff);
+            flex: 0 0 auto;
+        }
+        .panel {
+            background: rgba(17, 21, 29, 0.92);
+            border: 1px solid rgba(148, 163, 184, 0.18);
+            border-radius: 8px;
+            box-shadow: 0 28px 80px rgba(0, 0, 0, 0.34);
+            padding: 24px;
+            width: 100%;
+        }
+        .tabs {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            background: var(--panel-2);
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            padding: 4px;
+            margin-bottom: 22px;
+        }
+        .tab {
+            min-height: 42px;
+            border: 0;
+            border-radius: 6px;
+            color: var(--muted);
+            background: transparent;
+            font-weight: 700;
+            cursor: pointer;
+        }
+        .tab.active {
+            color: var(--text);
+            background: #253044;
+        }
+        .form { display: none; }
+        .form.active { display: block; }
+        .field { margin-bottom: 14px; }
+        label {
+            display: block;
+            color: #cbd5e1;
+            font-size: 13px;
+            font-weight: 650;
+            margin-bottom: 7px;
+        }
+        input {
+            width: 100%;
+            min-height: 46px;
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            background: #0b0f16;
+            color: var(--text);
+            font: inherit;
+            outline: none;
+            padding: 0 13px;
+        }
+        input:focus {
+            border-color: rgba(79, 125, 243, 0.9);
+            box-shadow: 0 0 0 3px rgba(79, 125, 243, 0.18);
+        }
+        .primary, .secondary, .ghost {
+            width: 100%;
+            min-height: 46px;
+            border: 0;
+            border-radius: 8px;
+            font-weight: 750;
+            cursor: pointer;
+        }
+        .primary {
+            color: white;
+            background: linear-gradient(135deg, #4f7df3, #6d5dfc 58%, #c75cff);
+        }
+        .secondary {
+            color: var(--text);
+            background: #252b37;
+            border: 1px solid var(--line);
+            margin-top: 10px;
+        }
+        .ghost {
+            color: #a5b4fc;
+            background: transparent;
+            min-height: 38px;
+            margin-top: 6px;
+        }
+        button:disabled {
+            opacity: 0.62;
+            cursor: wait;
+        }
+        .status {
+            display: none;
+            margin-top: 14px;
+            padding: 12px 13px;
+            border-radius: 8px;
+            border: 1px solid var(--line);
+            color: var(--muted);
+            font-size: 14px;
+            line-height: 1.45;
+        }
+        .status.info { display: block; background: rgba(79, 125, 243, 0.11); color: #bfdbfe; }
+        .status.success { display: block; background: rgba(52, 211, 153, 0.1); color: var(--success); border-color: rgba(52, 211, 153, 0.3); }
+        .status.error { display: block; background: rgba(251, 113, 133, 0.1); color: var(--danger); border-color: rgba(251, 113, 133, 0.3); }
+        .fine {
+            color: var(--quiet);
+            font-size: 12px;
+            line-height: 1.5;
+            margin-top: 16px;
+        }
+        .recovery-title {
+            font-size: 22px;
+            font-weight: 800;
+            margin-bottom: 8px;
+        }
+        .recovery-copy {
+            color: var(--muted);
+            line-height: 1.6;
+            margin-bottom: 18px;
+        }
+        @media (max-width: 780px) {
+            body { padding: 18px; place-items: start center; }
+            .shell { grid-template-columns: 1fr; gap: 18px; }
+            .brand { padding-top: 18px; }
+            .lead { font-size: 15px; }
+            .signals { display: none; }
+            .panel { padding: 18px; }
+        }
+    </style>
+</head>
+<body>
+    <main class="shell">
+        <section class="brand" aria-label="Norva">
+            <div class="logo-row">
+                <img src="/img/norva-app-icon.png" alt="Norva">
+                <span>Norva</span>
+            </div>
+            <h1>One account for every Norva screen.</h1>
+            <p class="lead">
+                Sign in once, pair your TV or mobile app, and keep your devices, sources, favorites and playback history attached to your Norva Cloud account.
+            </p>
+            <div class="signals" aria-hidden="true">
+                <div class="signal"><span class="dot"></span><span>Cloud pairing for TV, mobile and web</span></div>
+                <div class="signal"><span class="dot"></span><span>Supabase Auth identity and secure sessions</span></div>
+                <div class="signal"><span class="dot"></span><span>Ready for direct playback and relay phases</span></div>
+            </div>
+        </section>
+
+        <section class="panel" aria-label="Account">
+            <div class="tabs" id="tabs">
+                <button class="tab active" type="button" data-tab="signin">Sign in</button>
+                <button class="tab" type="button" data-tab="signup">Create account</button>
+            </div>
+
+            <form class="form active" id="signin-form">
+                <div class="field">
+                    <label for="signin-email">Email</label>
+                    <input id="signin-email" type="email" autocomplete="email" required>
+                </div>
+                <div class="field">
+                    <label for="signin-password">Password</label>
+                    <input id="signin-password" type="password" autocomplete="current-password" minlength="6" required>
+                </div>
+                <button class="primary" type="submit">Sign in</button>
+                <button class="ghost" type="button" id="forgot-button">Forgot password</button>
+            </form>
+
+            <form class="form" id="signup-form">
+                <div class="field">
+                    <label for="signup-name">Display name</label>
+                    <input id="signup-name" type="text" autocomplete="name" maxlength="80">
+                </div>
+                <div class="field">
+                    <label for="signup-email">Email</label>
+                    <input id="signup-email" type="email" autocomplete="email" required>
+                </div>
+                <div class="field">
+                    <label for="signup-password">Password</label>
+                    <input id="signup-password" type="password" autocomplete="new-password" minlength="6" required>
+                </div>
+                <button class="primary" type="submit">Create account</button>
+            </form>
+
+            <form class="form" id="recover-form">
+                <p class="recovery-title">Reset password</p>
+                <p class="recovery-copy">Enter your email and Norva will send a secure recovery link.</p>
+                <div class="field">
+                    <label for="recover-email">Email</label>
+                    <input id="recover-email" type="email" autocomplete="email" required>
+                </div>
+                <button class="primary" type="submit">Send recovery link</button>
+                <button class="secondary" type="button" id="back-to-signin">Back to sign in</button>
+            </form>
+
+            <form class="form" id="password-form">
+                <p class="recovery-title">Choose a new password</p>
+                <p class="recovery-copy">Set a new password for your Norva Account.</p>
+                <div class="field">
+                    <label for="new-password">New password</label>
+                    <input id="new-password" type="password" autocomplete="new-password" minlength="6" required>
+                </div>
+                <button class="primary" type="submit">Update password</button>
+            </form>
+
+            <div class="status" id="status"></div>
+            <p class="fine">Norva uses Supabase Auth for account sessions. Your local hub flow remains available from the existing connection screen.</p>
+        </section>
+    </main>
+
+    <script src="/js/cloudApi.js?v=1"></script>
+    <script src="/js/authApi.js?v=1"></script>
+    <script>
+        const params = new URLSearchParams(location.search);
+        const returnTo = sanitizeReturnTo(params.get('returnTo')) || '/cloud.html';
+        const statusEl = document.getElementById('status');
+        const tabs = document.getElementById('tabs');
+        const forms = {
+            signin: document.getElementById('signin-form'),
+            signup: document.getElementById('signup-form'),
+            recover: document.getElementById('recover-form'),
+            password: document.getElementById('password-form')
+        };
+
+        boot();
+
+        document.querySelectorAll('.tab').forEach(button => {
+            button.addEventListener('click', () => showForm(button.dataset.tab));
+        });
+        document.getElementById('forgot-button').addEventListener('click', () => {
+            document.getElementById('recover-email').value = document.getElementById('signin-email').value.trim();
+            showForm('recover');
+        });
+        document.getElementById('back-to-signin').addEventListener('click', () => showForm('signin'));
+
+        forms.signin.addEventListener('submit', async event => {
+            event.preventDefault();
+            await withBusy(forms.signin, async () => {
+                setStatus('info', 'Signing in...');
+                await NorvaAuth.signIn({
+                    email: document.getElementById('signin-email').value.trim(),
+                    password: document.getElementById('signin-password').value
+                });
+                await ensureProfile();
+                setStatus('success', 'Signed in. Opening Norva Cloud...');
+                location.replace(returnTo);
+            });
+        });
+
+        forms.signup.addEventListener('submit', async event => {
+            event.preventDefault();
+            await withBusy(forms.signup, async () => {
+                const displayName = document.getElementById('signup-name').value.trim();
+                setStatus('info', 'Creating your account...');
+                const payload = await NorvaAuth.signUp({
+                    displayName,
+                    email: document.getElementById('signup-email').value.trim(),
+                    password: document.getElementById('signup-password').value
+                });
+
+                if (NorvaAuth.getSession()) {
+                    await ensureProfile(displayName);
+                    setStatus('success', 'Account created. Opening Norva Cloud...');
+                    location.replace(returnTo);
+                    return;
+                }
+
+                if (payload.user || payload.id) {
+                    setStatus('success', 'Account created. Check your email to confirm it, then sign in.');
+                    showForm('signin');
+                    return;
+                }
+
+                setStatus('success', 'Check your email to finish creating your account.');
+            });
+        });
+
+        forms.recover.addEventListener('submit', async event => {
+            event.preventDefault();
+            await withBusy(forms.recover, async () => {
+                setStatus('info', 'Sending recovery link...');
+                await NorvaAuth.recover(document.getElementById('recover-email').value.trim());
+                setStatus('success', 'Recovery email sent. Open the link from your inbox to choose a new password.');
+            });
+        });
+
+        forms.password.addEventListener('submit', async event => {
+            event.preventDefault();
+            await withBusy(forms.password, async () => {
+                setStatus('info', 'Updating password...');
+                await NorvaAuth.updatePassword(document.getElementById('new-password').value);
+                setStatus('success', 'Password updated. Opening Norva Cloud...');
+                setTimeout(() => location.replace(returnTo), 700);
+            });
+        });
+
+        async function boot() {
+            const recovered = NorvaAuth.captureSessionFromUrl();
+            if (params.get('mode') === 'recovery') {
+                tabs.style.display = 'none';
+                showForm('password');
+                setStatus('info', 'Recovery session verified.');
+                return;
+            }
+            if (recovered) {
+                location.replace(returnTo);
+                return;
+            }
+
+            const user = await NorvaAuth.getUser().catch(() => null);
+            if (user) {
+                location.replace(returnTo);
+                return;
+            }
+
+            const email = params.get('email') || '';
+            if (email) {
+                document.getElementById('signin-email').value = email;
+                document.getElementById('signup-email').value = email;
+            }
+        }
+
+        async function ensureProfile(displayName) {
+            await NorvaAuth.getAccessToken();
+            const user = NorvaAuth.getSession()?.user;
+            const name = displayName || user?.user_metadata?.display_name || user?.email?.split('@')[0] || '';
+            await NorvaCloud.profile.save({ displayName: name, locale: navigator.language || 'fr-FR' }).catch(() => {});
+        }
+
+        function showForm(name) {
+            Object.entries(forms).forEach(([key, form]) => form.classList.toggle('active', key === name));
+            document.querySelectorAll('.tab').forEach(button => {
+                button.classList.toggle('active', button.dataset.tab === name);
+            });
+            tabs.style.display = name === 'recover' || name === 'password' ? 'none' : 'grid';
+            if (name !== 'password') statusEl.className = 'status';
+        }
+
+        async function withBusy(form, action) {
+            const buttons = Array.from(form.querySelectorAll('button'));
+            buttons.forEach(button => button.disabled = true);
+            try {
+                await action();
+            } catch (error) {
+                setStatus('error', error.message || 'Something went wrong.');
+            } finally {
+                buttons.forEach(button => button.disabled = false);
+            }
+        }
+
+        function setStatus(type, message) {
+            statusEl.className = 'status ' + type;
+            statusEl.textContent = message;
+        }
+
+        function sanitizeReturnTo(value) {
+            if (!value || !value.startsWith('/')) return '';
+            if (value.startsWith('//')) return '';
+            return value;
+        }
+    </script>
+</body>
+</html>

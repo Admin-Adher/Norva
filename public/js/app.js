@@ -117,6 +117,7 @@ class App {
         // Navigation handling
         document.querySelectorAll('.nav-link').forEach(link => {
             link.addEventListener('click', (e) => {
+                if (link.dataset.external === 'true') return;
                 e.preventDefault();
                 this.navigateTo(link.dataset.page);
             });

@@ -98,6 +98,26 @@
         }
         .btn:hover { background: #2563eb; }
         .btn:disabled { background: #1e3a5f; cursor: not-allowed; }
+        .btn.secondary {
+            background: #252b37;
+            border: 1px solid #334155;
+            text-decoration: none;
+            text-align: center;
+        }
+        .btn.secondary:hover { background: #303849; }
+        .btn.compact { margin-top: 0; }
+        .cloud-actions {
+            display: grid;
+            gap: 10px;
+            margin-bottom: 28px;
+        }
+        .cloud-link {
+            color: #93c5fd;
+            font-size: 13px;
+            text-align: center;
+            text-decoration: none;
+        }
+        .cloud-link:hover { color: #bfdbfe; }
 
         .status {
             margin-top: 16px;
@@ -140,6 +160,11 @@
             Enter the local address of the PC or server running the Norva app.
             You can find it in the Norva title bar or Settings page.
         </p>
+
+        <div class="cloud-actions">
+            <a class="btn secondary compact" href="/account.html">Norva Account</a>
+            <a class="cloud-link" href="/cloud.html">Open Norva Cloud dashboard</a>
+        </div>
 
         <label for="hubUrl">Hub address</label>
         <input
