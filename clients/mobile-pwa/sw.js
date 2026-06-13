@@ -1,4 +1,4 @@
-const CACHE = 'norva-mobile-v6';
+const CACHE = 'norva-mobile-v7';
 const ASSETS = ['/', '/index.html', '/account.html', '/cloud.html', '/manifest.json', '/icon-192.png', '/cloudApi.js', '/authApi.js'];
 
 self.addEventListener('install', e =>

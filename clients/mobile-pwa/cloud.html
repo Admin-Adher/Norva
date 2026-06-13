@@ -322,7 +322,7 @@
     async function loadDevices() {
       try {
         const payload = await NorvaCloud.devices.list();
-        trustedDevices = (payload.devices || []).filter(device => !device.revoked);
+        trustedDevices = normalizeDevices((payload.devices || []).filter(device => !device.revoked));
         renderDevices(trustedDevices);
         renderCommandTargets(trustedDevices);
       } catch (error) {
@@ -332,14 +332,24 @@
 
     async function registerCurrentDevice() {
       const key = 'norva-cloud-device-id';
+      const installId = getInstallId();
       const existing = localStorage.getItem(key);
-      if (existing && NorvaCloud.deviceToken) {
+      if (existing) {
         const heartbeat = await NorvaCloud.devices.heartbeat(existing).catch(() => null);
         if (heartbeat?.device) return heartbeat.device;
         localStorage.removeItem(key);
         NorvaCloud.setDeviceToken('');
-      } else if (existing && !NorvaCloud.deviceToken) {
-        localStorage.removeItem(key);
+      }
+
+      const known = await NorvaCloud.devices.list().catch(() => ({ devices: [] }));
+      const matchingDevice = (known.devices || []).find(device =>
+        !device.revoked &&
+        (device.public_key === installId || device.capabilities?.installId === installId)
+      );
+      if (matchingDevice?.id) {
+        localStorage.setItem(key, matchingDevice.id);
+        await NorvaCloud.devices.heartbeat(matchingDevice.id).catch(() => null);
+        return matchingDevice;
       }
 
       const created = await NorvaCloud.devices.create({
@@ -347,9 +357,10 @@
         deviceName: 'Norva Mobile',
         platform: navigator.platform || 'mobile',
         appVersion: 'mobile-pwa',
+        publicKey: installId,
         trusted: true,
         issueDeviceToken: true,
-        capabilities: { accountSession: true, pairingApproval: true, commandSource: true }
+        capabilities: { accountSession: true, pairingApproval: true, commandSource: true, installId }
       }).catch(() => null);
       if (created?.device?.id) localStorage.setItem(key, created.device.id);
       if (created?.deviceToken) NorvaCloud.setDeviceToken(created.deviceToken);
@@ -373,6 +384,23 @@
         item.append(name, meta);
         devicesEl.appendChild(item);
       });
+    }
+
+    function normalizeDevices(devices) {
+      const byIdentity = new Map();
+      for (const device of devices) {
+        const identity = device.public_key || device.capabilities?.installId || [
+          device.device_type || 'device',
+          device.device_name || 'Norva Device',
+          device.platform || '',
+          device.app_version || ''
+        ].join('|');
+        const previous = byIdentity.get(identity);
+        if (!previous || new Date(device.created_at || device.last_seen_at || 0) > new Date(previous.created_at || previous.last_seen_at || 0)) {
+          byIdentity.set(identity, device);
+        }
+      }
+      return Array.from(byIdentity.values());
     }
 
     function renderCommandTargets(devices) {
@@ -471,6 +499,18 @@
       const date = new Date(value);
       if (Number.isNaN(date.getTime())) return '';
       return date.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+    }
+
+    function getInstallId() {
+      const key = 'norva-cloud-install-id';
+      let value = localStorage.getItem(key);
+      if (!value) {
+        const bytes = new Uint8Array(16);
+        crypto.getRandomValues(bytes);
+        value = 'mobile-' + Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
+        localStorage.setItem(key, value);
+      }
+      return value;
     }
   </script>
 </body>
