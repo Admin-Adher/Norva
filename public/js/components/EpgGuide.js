@@ -9,9 +9,9 @@ class EpgGuide {
         this.dateDisplay = document.getElementById('guide-date');
         this.prevBtn = document.getElementById('guide-prev');
         this.nextBtn = document.getElementById('guide-next');
-        this.nextBtn = document.getElementById('guide-next');
         this.groupSelect = document.getElementById('epg-group-select');
         this.searchInput = document.getElementById('epg-search');
+        this.isMounted = Boolean(this.container);
 
         this.channels = [];
         this.programmes = [];
@@ -52,8 +52,8 @@ class EpgGuide {
     }
 
     init() {
-        this.prevBtn.addEventListener('click', () => this.navigate(-2));
-        this.nextBtn.addEventListener('click', () => this.navigate(2));
+        this.prevBtn?.addEventListener('click', () => this.navigate(-2));
+        this.nextBtn?.addEventListener('click', () => this.navigate(2));
 
         // Group filter change
         this.groupSelect?.addEventListener('change', () => {
@@ -67,6 +67,8 @@ class EpgGuide {
                 this.render();
             }, 300));
         }
+
+        if (!this.isMounted) return;
 
         // Update current time indicator every minute
         setInterval(() => this.updateNowIndicator(), 60000);
@@ -126,6 +128,8 @@ class EpgGuide {
      * The actual sync runs on the server independently.
      */
     startBackgroundRefresh() {
+        if (!this.isMounted) return;
+
         // Clear any existing timer
         this.stopBackgroundRefresh();
 
@@ -172,6 +176,8 @@ class EpgGuide {
      * Load EPG data (server-side caching)
      */
     async loadEpg(forceRefresh = false) {
+        if (!this.isMounted) return;
+
         try {
             this.container.innerHTML = '<div class="loading"></div>';
             await this.fetchEpgData(forceRefresh);
@@ -183,7 +189,7 @@ class EpgGuide {
             this.startBackgroundRefresh();
         } catch (err) {
             console.error('Error loading EPG:', err);
-            this.container.innerHTML = `
+            if (this.container) this.container.innerHTML = `
         <div class="empty-state">
           <p>Error loading EPG</p>
           <p class="hint">${err.message}</p>
@@ -341,6 +347,8 @@ class EpgGuide {
      * Render the EPG grid
      */
     render() {
+        if (!this.isMounted || !this.container) return;
+
         // Get channel list instance
         const channelList = window.app?.channelList;
         if (!channelList) return;
@@ -828,6 +836,8 @@ class EpgGuide {
      * Update date display
      */
     updateDateDisplay(date) {
+        if (!this.dateDisplay) return;
+
         const today = new Date();
         const tomorrow = new Date(today);
         tomorrow.setDate(tomorrow.getDate() + 1);
@@ -857,6 +867,8 @@ class EpgGuide {
     }
 
     updateNowIndicator() {
+        if (!this.isMounted || !this.container) return;
+
         const now = new Date();
         // Place indicator inside the spacer so it scrolls with content
         const spacer = this.container.querySelector('.epg-spacer');
