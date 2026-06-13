@@ -32,7 +32,7 @@ app.get('/health', (req, res) => {
     res.json({
         ok: true,
         service: 'norva-media-gateway',
-        version: 3,
+        version: 4,
         activeSessions: sessions.size,
         time: new Date().toISOString()
     });
@@ -105,7 +105,8 @@ app.get('/sessions/:id/playlist.m3u8', requirePlaybackToken, async (req, res) =>
         await waitForPlaylist(session, PLAYLIST_REQUEST_TIMEOUT_MS);
         res.setHeader('Content-Type', 'application/vnd.apple.mpegurl; charset=utf-8');
         res.setHeader('Cache-Control', 'no-store');
-        res.sendFile(session.playlistPath);
+        const playlist = await fsp.readFile(session.playlistPath, 'utf8');
+        res.send(rewritePlaylistSegments(playlist, session.accessToken));
     } catch (err) {
         const status = session.lastError ? 502 : 202;
         res.status(status).send(session.lastError || 'Playlist is not ready yet');
@@ -357,6 +358,24 @@ function segmentContentType(file) {
 
 function appendLogTail(session, text) {
     session.logTail = `${session.logTail || ''}${text}`.slice(-MAX_LOG_TAIL);
+}
+
+function rewritePlaylistSegments(playlist, token) {
+    const encodedToken = encodeURIComponent(token);
+    return String(playlist || '')
+        .split(/\r?\n/)
+        .map((line) => {
+            const trimmed = line.trim();
+            if (!trimmed || trimmed.startsWith('#')) return line;
+            if (/^https?:\/\//i.test(trimmed)) return appendToken(trimmed, encodedToken);
+            return appendToken(trimmed, encodedToken);
+        })
+        .join('\n');
+}
+
+function appendToken(uri, encodedToken) {
+    if (/[?&]token=/.test(uri)) return uri;
+    return `${uri}${uri.includes('?') ? '&' : '?'}token=${encodedToken}`;
 }
 
 function sanitizeLog(text, sourceUrl) {
