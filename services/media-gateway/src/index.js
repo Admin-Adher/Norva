@@ -14,6 +14,8 @@ const PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL || '').replace(/\/+$/, '');
 const OUTPUT_DIR = path.resolve(process.env.OUTPUT_DIR || path.join(os.tmpdir(), 'norva-media-gateway'));
 const FFMPEG_PATH = process.env.FFMPEG_PATH || 'ffmpeg';
 const DEFAULT_TTL_SECONDS = clampInt(process.env.SESSION_TTL_SECONDS, 30 * 60, 60, 12 * 60 * 60);
+const STARTUP_TIMEOUT_MS = clampInt(process.env.STARTUP_TIMEOUT_MS, 45_000, 5_000, 180_000);
+const PLAYLIST_REQUEST_TIMEOUT_MS = clampInt(process.env.PLAYLIST_REQUEST_TIMEOUT_MS, 45_000, 5_000, 180_000);
 const FFMPEG_USER_AGENT = process.env.FFMPEG_USER_AGENT ||
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36 Norva/1.0';
 const MAX_LOG_TAIL = 12000;
@@ -100,7 +102,7 @@ app.get('/sessions/:id/playlist.m3u8', requirePlaybackToken, async (req, res) =>
     if (!session) return res.status(404).send('Session not found');
 
     try {
-        await waitForPlaylist(session, 8000);
+        await waitForPlaylist(session, PLAYLIST_REQUEST_TIMEOUT_MS);
         res.setHeader('Content-Type', 'application/vnd.apple.mpegurl; charset=utf-8');
         res.setHeader('Cache-Control', 'no-store');
         res.sendFile(session.playlistPath);
@@ -152,15 +154,20 @@ function startFfmpeg(session) {
         '-user_agent', FFMPEG_USER_AGENT,
         '-headers', 'Accept: */*\r\nConnection: keep-alive\r\n',
         '-i', session.sourceUrl,
+        '-fflags', '+genpts',
         '-map', '0:v:0?',
-        '-map', '0:a:0?'
+        '-map', '0:a:0?',
+        '-max_muxing_queue_size', '1024'
     ];
 
     if (session.mode === 'transcode') {
         args.push(
             '-c:v', 'libx264',
-            '-preset', 'veryfast',
+            '-preset', 'ultrafast',
+            '-tune', 'zerolatency',
             '-crf', '23',
+            '-g', '48',
+            '-sc_threshold', '0',
             '-c:a', 'aac',
             '-b:a', '128k'
         );
@@ -206,14 +213,13 @@ function startFfmpeg(session) {
         }
     });
 
-    waitForPlaylist(session, 12000)
+    waitForPlaylist(session, STARTUP_TIMEOUT_MS)
         .then(() => {
             if (session.status === 'starting') session.status = 'ready';
         })
         .catch((err) => {
             if (session.status === 'starting') {
-                session.status = 'failed';
-                session.lastError = err.message;
+                console.warn(`[ffmpeg:${session.id}] playlist still warming after ${STARTUP_TIMEOUT_MS}ms: ${err.message}`);
             }
         });
 
