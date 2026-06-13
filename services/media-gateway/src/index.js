@@ -34,7 +34,7 @@ app.get('/health', (req, res) => {
     res.json({
         ok: true,
         service: 'norva-media-gateway',
-        version: 8,
+        version: 9,
         activeSessions: activeSessionCount(),
         totalSessions: sessions.size,
         time: new Date().toISOString()
@@ -442,7 +442,11 @@ function rewritePlaylistSegments(playlist, token) {
         .split(/\r?\n/)
         .map((line) => {
             const trimmed = line.trim();
-            if (!trimmed || trimmed.startsWith('#')) return line;
+            if (!trimmed) return line;
+            if (trimmed.startsWith('#EXT-X-MAP')) {
+                return line.replace(/URI="([^"]+)"/i, (_match, uri) => `URI="${appendToken(uri, encodedToken)}"`);
+            }
+            if (trimmed.startsWith('#')) return line;
             if (/^https?:\/\//i.test(trimmed)) return appendToken(trimmed, encodedToken);
             return appendToken(trimmed, encodedToken);
         })
