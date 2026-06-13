@@ -16,6 +16,7 @@ const FFMPEG_PATH = process.env.FFMPEG_PATH || 'ffmpeg';
 const DEFAULT_TTL_SECONDS = clampInt(process.env.SESSION_TTL_SECONDS, 30 * 60, 60, 12 * 60 * 60);
 const STARTUP_TIMEOUT_MS = clampInt(process.env.STARTUP_TIMEOUT_MS, 45_000, 5_000, 180_000);
 const PLAYLIST_REQUEST_TIMEOUT_MS = clampInt(process.env.PLAYLIST_REQUEST_TIMEOUT_MS, 45_000, 5_000, 180_000);
+const STOP_CONFLICTING_SOURCE_SESSIONS = (process.env.STOP_CONFLICTING_SOURCE_SESSIONS || 'true') !== 'false';
 const FFMPEG_USER_AGENT = process.env.FFMPEG_USER_AGENT ||
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36 Norva/1.0';
 const MAX_LOG_TAIL = 12000;
@@ -32,8 +33,9 @@ app.get('/health', (req, res) => {
     res.json({
         ok: true,
         service: 'norva-media-gateway',
-        version: 4,
-        activeSessions: sessions.size,
+        version: 5,
+        activeSessions: activeSessionCount(),
+        totalSessions: sessions.size,
         time: new Date().toISOString()
     });
 });
@@ -45,16 +47,22 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             return res.status(400).json({ error: 'sourceUrl must be a valid http(s) URL' });
         }
 
+        if (STOP_CONFLICTING_SOURCE_SESSIONS) {
+            await stopConflictingSourceSessions(sourceUrl);
+        }
+
         const id = crypto.randomUUID();
         const accessToken = randomToken();
         const outputDir = resolveSessionDir(id);
         await fsp.mkdir(outputDir, { recursive: true });
+        const sourceKey = sourceSessionKey(sourceUrl);
 
         const expiresAtDate = expiresAt ? new Date(expiresAt) : new Date(Date.now() + DEFAULT_TTL_SECONDS * 1000);
         const session = {
             id,
             playbackSessionId: playbackSessionId || null,
             sourceUrl,
+            sourceKey,
             mode: mode === 'transcode' ? 'transcode' : 'remux',
             status: 'starting',
             outputDir,
@@ -246,6 +254,27 @@ async function stopSession(session) {
     await removeSessionDir(session.outputDir);
 }
 
+async function stopConflictingSourceSessions(sourceUrl) {
+    const sourceKey = sourceSessionKey(sourceUrl);
+    if (!sourceKey) return;
+
+    const conflicts = Array.from(sessions.values()).filter((session) => {
+        if (session.sourceKey !== sourceKey) return false;
+        return session.status === 'starting' || session.status === 'ready';
+    });
+
+    await Promise.allSettled(conflicts.map(async (session) => {
+        console.log(`[media-gateway] stopping previous session for same source: ${session.id}`);
+        await stopSession(session);
+    }));
+}
+
+function activeSessionCount() {
+    return Array.from(sessions.values())
+        .filter((session) => session.status === 'starting' || session.status === 'ready')
+        .length;
+}
+
 async function removeSessionDir(dir) {
     const resolved = path.resolve(dir);
     if (!isWithin(OUTPUT_DIR, resolved) || resolved === OUTPUT_DIR) return;
@@ -346,6 +375,20 @@ function isHttpUrl(value) {
         return url.protocol === 'http:' || url.protocol === 'https:';
     } catch (_) {
         return false;
+    }
+}
+
+function sourceSessionKey(value) {
+    try {
+        const url = new URL(value);
+        const parts = url.pathname.split('/').filter(Boolean);
+        const folder = parts[0] || '';
+        const username = parts[1] || '';
+        const password = parts[2] || '';
+        const identity = `${url.origin}/${folder}/${username}/${password}`;
+        return crypto.createHash('sha256').update(identity).digest('hex');
+    } catch (_) {
+        return '';
     }
 }
 
