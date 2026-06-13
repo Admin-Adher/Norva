@@ -14,6 +14,9 @@ const PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL || '').replace(/\/+$/, '');
 const OUTPUT_DIR = path.resolve(process.env.OUTPUT_DIR || path.join(os.tmpdir(), 'norva-media-gateway'));
 const FFMPEG_PATH = process.env.FFMPEG_PATH || 'ffmpeg';
 const DEFAULT_TTL_SECONDS = clampInt(process.env.SESSION_TTL_SECONDS, 30 * 60, 60, 12 * 60 * 60);
+const FFMPEG_USER_AGENT = process.env.FFMPEG_USER_AGENT ||
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36 Norva/1.0';
+const MAX_LOG_TAIL = 12000;
 
 const sessions = new Map();
 
@@ -27,6 +30,7 @@ app.get('/health', (req, res) => {
     res.json({
         ok: true,
         service: 'norva-media-gateway',
+        version: 2,
         activeSessions: sessions.size,
         time: new Date().toISOString()
     });
@@ -57,7 +61,8 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             createdAt: new Date(),
             expiresAt: expiresAtDate,
             ffmpeg: null,
-            lastError: null
+            lastError: null,
+            logTail: ''
         };
 
         sessions.set(id, session);
@@ -139,6 +144,13 @@ function startFfmpeg(session) {
         '-loglevel', 'warning',
         '-nostdin',
         '-y',
+        '-reconnect', '1',
+        '-reconnect_streamed', '1',
+        '-reconnect_at_eof', '1',
+        '-reconnect_delay_max', '5',
+        '-rw_timeout', '15000000',
+        '-user_agent', FFMPEG_USER_AGENT,
+        '-headers', 'Accept: */*\r\nConnection: keep-alive\r\n',
         '-i', session.sourceUrl,
         '-map', '0:v:0?',
         '-map', '0:a:0?'
@@ -173,7 +185,8 @@ function startFfmpeg(session) {
     session.status = 'starting';
 
     child.stderr.on('data', (chunk) => {
-        const text = chunk.toString();
+        const text = sanitizeLog(chunk.toString(), session.sourceUrl);
+        appendLogTail(session, text);
         if (text.trim()) console.warn(`[ffmpeg:${session.id}] ${text.trim()}`);
     });
 
@@ -186,7 +199,8 @@ function startFfmpeg(session) {
     child.on('exit', (code, signal) => {
         if (session.status !== 'ended' && code !== 0) {
             session.status = 'failed';
-            session.lastError = `FFmpeg exited with code ${code ?? 'null'} signal ${signal ?? 'none'}`;
+            const reason = lastNonEmptyLine(session.logTail);
+            session.lastError = `FFmpeg exited with code ${code ?? 'null'} signal ${signal ?? 'none'}${reason ? `: ${reason}` : ''}`;
         } else if (session.status !== 'failed') {
             session.status = 'ended';
         }
@@ -283,7 +297,8 @@ function serializeSession(req, session) {
         hlsUrl: publicUrl(req, `/sessions/${session.id}/playlist.m3u8?token=${encodeURIComponent(session.accessToken)}`),
         createdAt: session.createdAt.toISOString(),
         expiresAt: session.expiresAt.toISOString(),
-        lastError: session.lastError
+        lastError: session.lastError,
+        logTail: session.logTail
     };
 }
 
@@ -332,6 +347,36 @@ function segmentContentType(file) {
     if (file.endsWith('.mp4')) return 'video/mp4';
     if (file.endsWith('.aac')) return 'audio/aac';
     return 'video/mp2t';
+}
+
+function appendLogTail(session, text) {
+    session.logTail = `${session.logTail || ''}${text}`.slice(-MAX_LOG_TAIL);
+}
+
+function sanitizeLog(text, sourceUrl) {
+    let safe = String(text || '');
+    try {
+        const parsed = new URL(sourceUrl);
+        safe = safe.replaceAll(sourceUrl, `${parsed.origin}/<redacted>`);
+        for (const part of parsed.pathname.split('/').filter(Boolean)) {
+            if (part.length >= 4) safe = safe.replaceAll(part, '<redacted>');
+        }
+        for (const [key, value] of parsed.searchParams.entries()) {
+            if (value) safe = safe.replaceAll(value, '<redacted>');
+            safe = safe.replaceAll(key, '<redacted>');
+        }
+    } catch (_) {
+        safe = safe.replace(/https?:\/\/\S+/g, '<redacted-url>');
+    }
+    return safe;
+}
+
+function lastNonEmptyLine(text) {
+    return String(text || '')
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .slice(-1)[0] || '';
 }
 
 function clampInt(value, fallback, min, max) {
