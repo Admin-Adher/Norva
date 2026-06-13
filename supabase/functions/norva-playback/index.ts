@@ -168,7 +168,7 @@ async function createPlaybackSession(
     return { session, playback: { mode, url: relay.url, tokenExpiresAt: expiresAt } };
   }
 
-  const gateway = await createGatewaySession(session.id, userId, targetUrl, expiresAt, db);
+  const gateway = await createGatewaySession(session.id, userId, targetUrl, expiresAt, db, mode);
   return {
     session,
     playback: {
@@ -270,7 +270,9 @@ async function createGatewaySession(
   targetUrl: string,
   expiresAt: string,
   db: SupabaseClient,
+  mode: "direct" | "relay" | "transcode",
 ) {
+  const gatewayMode = mode === "transcode" ? "transcode" : "remux";
   const runtimeConfig = await getRuntimeConfig(db);
   if (!runtimeConfig.mediaGatewayUrl || !runtimeConfig.mediaGatewayToken) {
     const { data, error } = await db
@@ -279,7 +281,7 @@ async function createGatewaySession(
         user_id: userId,
         playback_session_id: playbackSessionId,
         status: "pending",
-        mode: "remux",
+        mode: gatewayMode,
         expires_at: expiresAt,
       })
       .select("*")
@@ -294,7 +296,7 @@ async function createGatewaySession(
       "Content-Type": "application/json",
       Authorization: `Bearer ${runtimeConfig.mediaGatewayToken}`,
     },
-    body: JSON.stringify({ playbackSessionId, sourceUrl: targetUrl, expiresAt }),
+    body: JSON.stringify({ playbackSessionId, sourceUrl: targetUrl, mode: gatewayMode, expiresAt }),
   });
   const gatewayBody = await response.json().catch(() => ({}));
   if (!response.ok) throw new HttpError(response.status, "Media gateway refused the session", gatewayBody);

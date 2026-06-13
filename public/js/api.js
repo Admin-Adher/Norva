@@ -260,6 +260,25 @@ const CloudAdapter = (() => {
         };
     }
 
+    function requiresGatewayForContainer(type, container) {
+        const normalizedType = String(type || '').toLowerCase();
+        const normalizedContainer = String(container || '').split('?')[0].split('#')[0].toLowerCase();
+        if (normalizedType === 'live') return false;
+        if (!normalizedContainer) return false;
+        return [
+            'mkv',
+            'avi',
+            'wmv',
+            'flv',
+            'mov',
+            'webm',
+            'ts',
+            'mpeg',
+            'mpg',
+            'vob'
+        ].includes(normalizedContainer);
+    }
+
     async function sourcePayloadFromLocal(data) {
         const type = data.type || data.sourceType || data.source_type || 'xtream';
         const payload = {
@@ -367,27 +386,37 @@ const CloudAdapter = (() => {
             if (action === 'stream' && streamId) {
                 const type = query.get('type') || xtreamMatch[4] || 'live';
                 const container = query.get('container') || (type === 'live' ? 'm3u8' : 'mp4');
-                const mode = localStorage.getItem('norva-cloud-playback-mode') || 'relay';
+                const preferredMode = localStorage.getItem('norva-cloud-playback-mode') || 'relay';
+                const needsGateway = requiresGatewayForContainer(type, container);
+                const mode = needsGateway && preferredMode !== 'direct' ? 'transcode' : preferredMode;
                 const cloudSourceId = await resolveSourceId(sourceId);
+                const baseSession = {
+                    sourceId: cloudSourceId,
+                    itemType: type === 'series' ? 'series' : type === 'movie' ? 'movie' : 'live',
+                    itemId: streamId,
+                    playbackHint: { container },
+                    corsSafe: false
+                };
                 let payload;
                 try {
                     payload = await cloudPlaybackApi().createSession({
-                        sourceId: cloudSourceId,
-                        itemType: type === 'series' ? 'series' : type === 'movie' ? 'movie' : 'live',
-                        itemId: streamId,
+                        ...baseSession,
                         mode,
-                        playbackHint: { container },
-                        corsSafe: false,
-                        requiresRelay: mode === 'relay'
+                        requiresRelay: mode === 'relay',
+                        requiresTranscode: mode === 'transcode'
                     });
+                    if (mode === 'transcode' && !payload.playback?.url && preferredMode !== 'direct') {
+                        payload = await cloudPlaybackApi().createSession({
+                            ...baseSession,
+                            mode: 'relay',
+                            requiresRelay: true
+                        });
+                    }
                 } catch (error) {
                     if (error.status !== 503 || mode === 'direct') throw error;
                     payload = await cloudPlaybackApi().createSession({
-                        sourceId: cloudSourceId,
-                        itemType: type === 'series' ? 'series' : type === 'movie' ? 'movie' : 'live',
-                        itemId: streamId,
+                        ...baseSession,
                         mode: 'direct',
-                        playbackHint: { container }
                     });
                 }
                 const url = payload.playback?.url || payload.url;
