@@ -2,7 +2,7 @@
 
 Norva Mobile is the companion experience for the Norva ecosystem.
 
-It is designed for pairing, mobile-first navigation, and future remote-control interactions between a phone and a Norva hub.
+It is designed for account-first mobile navigation, pairing, and remote-control interactions between a phone and Norva screens.
 
 ## Role In The Ecosystem
 

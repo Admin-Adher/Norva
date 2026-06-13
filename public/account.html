@@ -225,10 +225,10 @@
             </div>
             <h1>One account for every Norva screen.</h1>
             <p class="lead">
-                Sign in once, pair your TV or mobile app, and keep your devices, sources, favorites and playback history attached to your Norva Cloud account.
+                Sign in once, pair your TV or mobile app, and keep your devices, sources, favorites and playback history attached to your Norva account.
             </p>
             <div class="signals" aria-hidden="true">
-                <div class="signal"><span class="dot"></span><span>Cloud pairing for TV, mobile and web</span></div>
+                <div class="signal"><span class="dot"></span><span>Pairing for TV, mobile and web</span></div>
                 <div class="signal"><span class="dot"></span><span>Supabase Auth identity and secure sessions</span></div>
                 <div class="signal"><span class="dot"></span><span>Ready for direct playback and relay phases</span></div>
             </div>
@@ -291,7 +291,7 @@
             </form>
 
             <div class="status" id="status"></div>
-            <p class="fine">Norva uses Supabase Auth for account sessions. Your local hub flow remains available from the existing connection screen.</p>
+            <p class="fine">Norva keeps your account session attached to your trusted screens.</p>
         </section>
     </main>
 
@@ -329,7 +329,7 @@
                     password: document.getElementById('signin-password').value
                 });
                 await ensureProfile();
-                setStatus('success', 'Signed in. Opening Norva Cloud...');
+                setStatus('success', 'Signed in. Opening Norva...');
                 location.replace(returnTo);
             });
         });
@@ -347,7 +347,7 @@
 
                 if (NorvaAuth.getSession()) {
                     await ensureProfile(displayName);
-                    setStatus('success', 'Account created. Opening Norva Cloud...');
+                    setStatus('success', 'Account created. Opening Norva...');
                     location.replace(returnTo);
                     return;
                 }
@@ -376,7 +376,7 @@
             await withBusy(forms.password, async () => {
                 setStatus('info', 'Updating password...');
                 await NorvaAuth.updatePassword(document.getElementById('new-password').value);
-                setStatus('success', 'Password updated. Opening Norva Cloud...');
+                setStatus('success', 'Password updated. Opening Norva...');
                 setTimeout(() => location.replace(returnTo), 700);
             });
         });

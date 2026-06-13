@@ -1,15 +1,16 @@
 # Android TV / Google TV autonomous app
 
-This is a standalone Android TV IPTV app for Norva.
+This is the Android TV / Google TV app for Norva.
 
-It does not require the Windows/Norva desktop server for normal playback.
-On first launch, add either:
+The recommended first-run flow is to pair the TV with a Norva Account. The TV
+then becomes a trusted Norva screen for remote playback commands.
 
-- Xtream Codes server URL, username, and password
-- M3U playlist URL
+Advanced local modes remain available from the TV menu:
 
-The app stores the synced catalog locally on the TV with SQLite and plays
-streams directly with Android Media3/ExoPlayer.
+- Local connector: connect to a PC/server running Norva.
+- Standalone: add Xtream or M3U directly on the TV.
+
+The app plays streams with Android Media3/ExoPlayer.
 
 Included:
 
@@ -23,9 +24,8 @@ Included:
 Important limitation:
 
 This Android TV build plays streams directly on the TV. It does not run the
-full Node/ffmpeg backend and does not transcode incompatible streams. For rare
-formats/codecs that a TV cannot decode, use another stream version or the
-Windows desktop server build.
+full Node/ffmpeg backend and does not transcode incompatible streams locally.
+Norva Gateway is the cloud path for difficult streams once deployed.
 
 Build:
 

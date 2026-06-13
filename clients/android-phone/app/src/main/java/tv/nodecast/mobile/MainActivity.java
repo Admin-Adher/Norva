@@ -84,7 +84,8 @@ public class MainActivity extends Activity {
         } else if (saved != null && !saved.isEmpty()) {
             connect(saved);
         } else {
-            showSetup(null);
+            prefs().edit().putString(PREF_MODE, "cloud").apply();
+            connect(CLOUD_ACCOUNT_URL);
         }
     }
 
@@ -184,7 +185,7 @@ public class MainActivity extends Activity {
 
         // Subtitle
         TextView sub = new TextView(this);
-        sub.setText("Mobile companion");
+        sub.setText("Watch and manage Norva");
         sub.setTextColor(Color.parseColor("#71717a"));
         sub.setTextSize(14);
         sub.setGravity(Gravity.CENTER);
@@ -208,7 +209,7 @@ public class MainActivity extends Activity {
 
         // Hint
         TextView hint = new TextView(this);
-        hint.setText("Enter your Norva hub address");
+        hint.setText("Advanced local connector");
         hint.setTextColor(Color.parseColor("#a1a1aa"));
         hint.setTextSize(15);
         hint.setPadding(0, 0, 0, dp(10));
@@ -234,7 +235,7 @@ public class MainActivity extends Activity {
 
         // Connect button
         Button connectBtn = new Button(this);
-        connectBtn.setText("Connect");
+        connectBtn.setText("Connect local connector");
         connectBtn.setTextColor(Color.WHITE);
         connectBtn.setBackgroundColor(Color.parseColor("#3B82F6"));
         connectBtn.setOnClickListener(v -> {

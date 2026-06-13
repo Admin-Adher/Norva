@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Connect to Hub — Norva</title>
+    <title>Local connector - Norva</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -155,18 +155,17 @@
 <body>
     <div class="card">
         <div class="logo">norva</div>
-        <h1>Connect to your Hub</h1>
+        <h1>Local connector</h1>
         <p class="subtitle">
-            Enter the local address of the PC or server running the Norva app.
-            You can find it in the Norva title bar or Settings page.
+            Enter the local address of a PC or server running Norva.
         </p>
 
         <div class="cloud-actions">
             <a class="btn secondary compact" href="/account.html">Norva Account</a>
-            <a class="cloud-link" href="/cloud.html">Open Norva Cloud dashboard</a>
+            <a class="cloud-link" href="/cloud.html">Open Norva</a>
         </div>
 
-        <label for="hubUrl">Hub address</label>
+        <label for="hubUrl">Connector address</label>
         <input
             type="text"
             id="hubUrl"
@@ -174,7 +173,7 @@
             autocomplete="off"
             spellcheck="false"
         >
-        <p class="hint">Example: <code>http://192.168.1.20:3000</code> or your Cloudflare Tunnel URL</p>
+        <p class="hint">Example: <code>http://192.168.1.20:3000</code> or a secure remote URL</p>
 
         <button class="btn" id="connectBtn" onclick="connect()">Connect</button>
         <div class="status" id="status"></div>
@@ -182,11 +181,10 @@
         <hr class="divider">
 
         <div class="help">
-            <strong>How to find your Hub address</strong><br>
-            Open the Norva app on your PC/server. The address is shown in the
+            <strong>Advanced local mode</strong><br>
+            Open Norva on the PC or server. The local address is usually shown as
             title bar: <code>Norva — http://&lt;IP&gt;:3000</code><br><br>
-            For remote access, use your Cloudflare Tunnel URL
-            (e.g. <code>https://norva.example.com</code>) — see Hub Settings.
+            Use this only when you want Norva to talk to a local machine on your network.
         </div>
     </div>
 
@@ -196,7 +194,7 @@
         if (params.get('hub')) {
             document.getElementById('hubUrl').value = decodeURIComponent(params.get('hub'));
         } else {
-            // Pre-fill previously saved hub if user came back to change it
+            // Pre-fill previously saved connector if user came back to change it
             const saved = localStorage.getItem('norva-hub-url');
             if (saved) document.getElementById('hubUrl').value = saved;
         }
@@ -211,7 +209,7 @@
             const btn = document.getElementById('connectBtn');
 
             if (!raw) {
-                showStatus('error', 'Please enter the hub address.');
+                showStatus('error', 'Please enter the connector address.');
                 return;
             }
 
@@ -219,11 +217,11 @@
             const url = /^https?:\/\//i.test(raw) ? raw : 'http://' + raw;
 
             btn.disabled = true;
-            showStatus('loading', 'Connecting to hub…');
+            showStatus('loading', 'Connecting to local connector...');
 
             try {
                 const res = await fetch(`${url}/api/version`, { signal: AbortSignal.timeout(6000) });
-                if (!res.ok) throw new Error(`Hub returned HTTP ${res.status}`);
+                if (!res.ok) throw new Error(`Connector returned HTTP ${res.status}`);
                 const data = await res.json();
 
                 localStorage.setItem('norva-hub-url', url);
@@ -233,9 +231,9 @@
             } catch (err) {
                 btn.disabled = false;
                 if (err.name === 'TimeoutError' || err.name === 'AbortError') {
-                    showStatus('error', 'Connection timed out. Check the address and ensure the hub is reachable.');
+                    showStatus('error', 'Connection timed out. Check the address and make sure the connector is reachable.');
                 } else if (err.message.includes('Failed to fetch') || err.message.includes('NetworkError')) {
-                    showStatus('error', 'Could not reach the hub. Make sure you\'re on the same network or using a Tunnel URL.');
+                    showStatus('error', 'Could not reach the connector. Make sure you are on the same network or using a secure remote URL.');
                 } else {
                     showStatus('error', err.message);
                 }

@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#080b12">
   <link rel="manifest" href="/manifest.json">
   <link rel="apple-touch-icon" href="/icon-192.png">
-  <title>Norva Cloud</title>
+  <title>Norva</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
@@ -216,6 +216,33 @@
       color: var(--quiet);
       font-size: 12px;
     }
+    .media-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-top: 10px;
+    }
+    .media-card {
+      min-height: 126px;
+      background: var(--surface-2);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+      display: grid;
+      align-content: space-between;
+      gap: 10px;
+    }
+    .media-card strong {
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      line-height: 1.25;
+    }
+    .media-card span {
+      color: var(--quiet);
+      font-size: 12px;
+    }
     .hidden { display: none !important; }
     .empty {
       color: var(--quiet);
@@ -232,15 +259,15 @@
   <header>
     <div class="brand">
       <img src="/icon-192.png" alt="Norva">
-      <span>Norva Cloud</span>
+      <span>Norva</span>
     </div>
     <button class="btn danger" id="signout-button" type="button">Sign out</button>
   </header>
 
   <main>
     <section class="panel">
-      <h1>Mobile cloud</h1>
-      <p class="muted">Approve screens and keep this phone attached to your Norva Account.</p>
+      <h1>Watch everywhere</h1>
+      <p class="muted">Your IPTV sources and screens stay attached to your Norva Account.</p>
       <div class="account" id="account-email"></div>
       <div class="row">
         <a class="btn" href="/">Watch</a>
@@ -249,7 +276,21 @@
     </section>
 
     <section class="panel">
-      <h2>Add IPTV</h2>
+      <h2>Watch</h2>
+      <label for="media-search">Search</label>
+      <input id="media-search" type="search" placeholder="Channel, movie, series">
+      <button class="btn" id="media-search-button" type="button" style="width:100%; margin-top:10px">Search</button>
+      <div class="status" id="media-status"></div>
+      <h2 style="margin-top:16px">Live TV</h2>
+      <div class="media-row" id="media-live"></div>
+      <h2 style="margin-top:16px">Movies</h2>
+      <div class="media-row" id="media-movie"></div>
+      <h2 style="margin-top:16px">Series</h2>
+      <div class="media-row" id="media-series"></div>
+    </section>
+
+    <section class="panel">
+      <h2>Sources</h2>
       <div class="segmented" aria-label="Source type">
         <button class="segment active" type="button" data-source-type="xtream">Xtream</button>
         <button class="segment" type="button" data-source-type="m3u">M3U</button>
@@ -292,7 +333,7 @@
     </section>
 
     <section class="panel">
-      <h2>Cloud command</h2>
+      <h2>Remote play</h2>
       <p class="muted">Send a playback or navigation command to a trusted Norva screen.</p>
       <label for="command-device">Target device</label>
       <select id="command-device"></select>
@@ -319,8 +360,15 @@
     const commandStatus = document.getElementById('command-status');
     const devicesEl = document.getElementById('devices');
     const sourcesEl = document.getElementById('sources');
+    const mediaStatus = document.getElementById('media-status');
+    const mediaEls = {
+      live: document.getElementById('media-live'),
+      movie: document.getElementById('media-movie'),
+      series: document.getElementById('media-series')
+    };
     const commandDevice = document.getElementById('command-device');
     const sourceStatus = document.getElementById('source-status');
+    let cloudSources = [];
     let trustedDevices = [];
     let selectedSourceType = 'xtream';
     let commandPollHandle = 0;
@@ -335,6 +383,10 @@
     document.getElementById('add-source-button').addEventListener('click', addSource);
     document.getElementById('send-play-button').addEventListener('click', () => sendCommand('play'));
     document.getElementById('send-open-button').addEventListener('click', () => sendCommand('open'));
+    document.getElementById('media-search').addEventListener('keydown', event => {
+      if (event.key === 'Enter') loadMediaShelves();
+    });
+    document.getElementById('media-search-button').addEventListener('click', loadMediaShelves);
     document.querySelectorAll('[data-source-type]').forEach(button => {
       button.addEventListener('click', () => selectSourceType(button.dataset.sourceType));
     });
@@ -365,7 +417,9 @@
       await ensureProfile(user);
       await registerCurrentDevice();
       startDeviceCommandLoop();
-      await Promise.all([loadDevices(), loadSources()]);
+      await loadDevices();
+      await loadSources();
+      await loadMediaShelves();
     }
 
     async function ensureProfile(user) {
@@ -434,7 +488,9 @@
         clearSourceForm();
         setStatus(sourceStatus, 'success', 'Source added. Sync started.');
         await loadSources();
+        await loadMediaShelves();
         setTimeout(loadSources, 5000);
+        setTimeout(loadMediaShelves, 5500);
       } catch (error) {
         setStatus(sourceStatus, 'error', error.message);
       } finally {
@@ -453,10 +509,88 @@
     async function loadSources() {
       try {
         const payload = await NorvaCloud.sources.list();
-        renderSources(payload.sources || []);
+        cloudSources = payload.sources || [];
+        renderSources(cloudSources);
       } catch (error) {
         setStatus(sourceStatus, 'error', error.message);
       }
+    }
+
+    async function loadMediaShelves() {
+      const q = document.getElementById('media-search').value.trim();
+      try {
+        const [live, movie, series] = await Promise.all([
+          NorvaCloud.mediaItems.list({ type: 'live', limit: 8, q }).catch(() => ({ items: [] })),
+          NorvaCloud.mediaItems.list({ type: 'movie', limit: 8, q }).catch(() => ({ items: [] })),
+          NorvaCloud.mediaItems.list({ type: 'series', limit: 8, q }).catch(() => ({ items: [] }))
+        ]);
+        renderMediaShelf('live', live.items || []);
+        renderMediaShelf('movie', movie.items || []);
+        renderMediaShelf('series', series.items || []);
+        const total = (live.items || []).length + (movie.items || []).length + (series.items || []).length;
+        if (!total && cloudSources.length) {
+          setStatus(mediaStatus, 'info', 'Your source is syncing. Content will appear here shortly.');
+        } else {
+          mediaStatus.className = 'status';
+          mediaStatus.textContent = '';
+        }
+      } catch (error) {
+        setStatus(mediaStatus, 'error', error.message);
+      }
+    }
+
+    function renderMediaShelf(type, items) {
+      const container = mediaEls[type];
+      container.innerHTML = '';
+      if (!items.length) {
+        container.innerHTML = '<div class="empty">No items yet.</div>';
+        return;
+      }
+      items.forEach(item => {
+        const card = document.createElement('div');
+        card.className = 'media-card';
+        const info = document.createElement('div');
+        const title = document.createElement('strong');
+        title.textContent = item.title || 'Untitled';
+        const meta = document.createElement('span');
+        meta.textContent = item.subtitle || labelForType(item.item_type);
+        info.append(title, meta);
+        const play = document.createElement('button');
+        play.className = 'btn primary';
+        play.type = 'button';
+        play.textContent = 'Play';
+        play.addEventListener('click', () => playMediaItem(item, play));
+        card.append(info, play);
+        container.appendChild(card);
+      });
+    }
+
+    async function playMediaItem(item, button) {
+      button.disabled = true;
+      try {
+        setStatus(mediaStatus, 'info', 'Starting playback...');
+        const session = await NorvaCloud.playback.createSession({
+          sourceId: item.source_id,
+          itemType: item.item_type,
+          itemId: item.external_id,
+          mode: 'relay'
+        });
+        const playbackUrl = session.playback?.url;
+        if (!playbackUrl) throw new Error('Playback is waiting for Norva Gateway.');
+        setStatus(mediaStatus, 'success', 'Playback ready.');
+        location.href = playbackUrl;
+      } catch (error) {
+        setStatus(mediaStatus, 'error', error.message);
+      } finally {
+        button.disabled = false;
+      }
+    }
+
+    function labelForType(type) {
+      if (type === 'live') return 'Live TV';
+      if (type === 'movie') return 'Movie';
+      if (type === 'series') return 'Series';
+      return 'Norva';
     }
 
     function renderSources(sources) {
@@ -482,7 +616,9 @@
           try {
             await NorvaCloud.sources.sync(source.id);
             await loadSources();
+            await loadMediaShelves();
             setTimeout(loadSources, 5000);
+            setTimeout(loadMediaShelves, 5500);
           } catch (error) {
             setStatus(sourceStatus, 'error', error.message);
           } finally {

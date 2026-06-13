@@ -61,7 +61,7 @@
             : { error: await response.text().catch(() => '') };
 
         if (!response.ok) {
-            const message = payload.error || payload.message || `Norva Cloud responded with ${response.status}`;
+            const message = payload.error || payload.message || `Norva responded with ${response.status}`;
             const error = new Error(message);
             error.status = response.status;
             error.payload = payload;

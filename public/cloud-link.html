@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <meta name="theme-color" content="#090b10">
-    <title>Link Hub to Norva Cloud</title>
+    <title>Local connector - Norva</title>
     <link rel="icon" type="image/png" href="/favicon.png">
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -90,19 +90,19 @@
     <main class="panel">
         <div class="brand">
             <img src="/img/norva-app-icon.png" alt="Norva">
-            <span>Norva Cloud</span>
+            <span>Norva</span>
         </div>
-        <h1>Link this Hub to Norva Cloud.</h1>
+        <h1>Link this local connector.</h1>
         <p class="muted">
-            The local hub keeps its offline login and local playback tools, while Norva Cloud gives it a trusted device identity for ecosystem commands.
+            A local connector can keep offline playback tools while sharing a trusted device identity with your Norva account.
         </p>
         <div class="actions">
-            <button class="btn primary" id="link-button" type="button">Link hub</button>
+            <button class="btn primary" id="link-button" type="button">Link connector</button>
             <a class="btn" href="/account.html?returnTo=/cloud-link.html">Norva Account</a>
-            <a class="btn" href="/">Back to hub</a>
-            <button class="btn danger" id="unlink-button" type="button">Unlink hub</button>
+            <a class="btn" href="/">Back to Norva</a>
+            <button class="btn danger" id="unlink-button" type="button">Unlink connector</button>
         </div>
-        <div class="status info" id="status">Checking local and cloud sessions...</div>
+        <div class="status info" id="status">Checking sessions...</div>
     </main>
 
     <script src="/js/api.js?v=1"></script>
@@ -120,33 +120,33 @@
         async function boot() {
             NorvaAuth.captureSessionFromUrl();
             if (!localStorage.getItem('authToken')) {
-                setStatus('error', 'Sign in to this local hub first, then open this page again.');
+                setStatus('error', 'Sign in to this local connector first, then open this page again.');
                 linkButton.disabled = true;
                 return;
             }
             const cloudUser = await NorvaAuth.getUser().catch(() => null);
             if (!cloudUser) {
-                setStatus('info', 'Sign in to your Norva Account to link this hub.');
+                setStatus('info', 'Sign in to your Norva Account to link this connector.');
                 return;
             }
             const status = await API.cloud.status().catch(() => null);
             if (status?.linked) {
-                setStatus('success', `Hub linked as ${status.deviceName || 'Norva Hub'}.`);
+                setStatus('success', `Connector linked as ${status.deviceName || 'Norva Connector'}.`);
             } else {
-                setStatus('info', `Ready to link this hub to ${cloudUser.email || 'your Norva Account'}.`);
+                setStatus('info', `Ready to link this connector to ${cloudUser.email || 'your Norva Account'}.`);
             }
         }
 
         async function linkHub() {
             linkButton.disabled = true;
             try {
-                setStatus('info', 'Linking hub to Norva Cloud...');
+                setStatus('info', 'Linking connector...');
                 const cloudAccessToken = await NorvaAuth.getAccessToken();
                 if (!cloudAccessToken) throw new Error('Norva Account session is missing.');
-                const payload = await API.cloud.link({ cloudAccessToken, deviceName: 'Norva Hub' });
-                setStatus('success', `Hub linked as ${payload.deviceName || 'Norva Hub'}.`);
+                const payload = await API.cloud.link({ cloudAccessToken, deviceName: 'Norva Connector' });
+                setStatus('success', `Connector linked as ${payload.deviceName || 'Norva Connector'}.`);
             } catch (error) {
-                setStatus('error', error.message || 'Unable to link hub.');
+                setStatus('error', error.message || 'Unable to link connector.');
             } finally {
                 linkButton.disabled = false;
             }
@@ -155,11 +155,11 @@
         async function unlinkHub() {
             unlinkButton.disabled = true;
             try {
-                setStatus('info', 'Unlinking hub...');
+                setStatus('info', 'Unlinking connector...');
                 await API.cloud.unlink();
-                setStatus('success', 'Hub unlinked locally.');
+                setStatus('success', 'Connector unlinked locally.');
             } catch (error) {
-                setStatus('error', error.message || 'Unable to unlink hub.');
+                setStatus('error', error.message || 'Unable to unlink connector.');
             } finally {
                 unlinkButton.disabled = false;
             }

@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <meta name="theme-color" content="#090b10">
-    <title>Norva Cloud</title>
+    <title>Norva</title>
     <link rel="icon" type="image/png" href="/favicon.png">
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -55,6 +55,29 @@
             display: flex;
             align-items: center;
             gap: 10px;
+        }
+        .top-nav {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-left: 18px;
+        }
+        .nav-pill {
+            min-height: 38px;
+            padding: 0 12px;
+            border-radius: 8px;
+            display: inline-flex;
+            align-items: center;
+            color: var(--muted);
+            font-weight: 750;
+            font-size: 14px;
+            text-decoration: none;
+        }
+        .nav-pill:hover,
+        .nav-pill:focus {
+            color: var(--text);
+            background: #1b2230;
+            outline: none;
         }
         .email {
             color: var(--muted);
@@ -186,6 +209,10 @@
             flex-wrap: wrap;
             gap: 10px;
         }
+        .button-row input {
+            flex: 1 1 220px;
+            min-width: 0;
+        }
         .status {
             display: none;
             margin-top: 12px;
@@ -293,6 +320,51 @@
         .pill.ready { background: rgba(52, 211, 153, 0.12); color: #86efac; }
         .pill.error { background: rgba(251, 113, 133, 0.12); color: #fecdd3; }
         .hidden { display: none !important; }
+        .watch-tools {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: 10px;
+            align-items: end;
+            margin-bottom: 16px;
+        }
+        .shelf {
+            display: grid;
+            gap: 10px;
+            margin-top: 14px;
+        }
+        .shelf h3 {
+            font-size: 14px;
+            color: #dbeafe;
+        }
+        .media-row {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 10px;
+        }
+        .media-card {
+            min-height: 132px;
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            padding: 12px;
+            background: var(--surface-2);
+            display: grid;
+            align-content: space-between;
+            gap: 12px;
+        }
+        .media-card strong {
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+            line-height: 1.25;
+        }
+        .media-card span {
+            color: var(--quiet);
+            font-size: 12px;
+        }
+        .advanced {
+            margin-top: 22px;
+        }
         .empty {
             min-height: 118px;
             border: 1px dashed var(--line);
@@ -315,7 +387,10 @@
             .email { display: none; }
             .shell { padding: 24px 16px 36px; }
             .hero, .grid, .source-layout { grid-template-columns: 1fr; }
+            .watch-tools { grid-template-columns: 1fr; }
+            .media-row { grid-template-columns: 1fr 1fr; }
             .stats { grid-template-columns: 1fr; }
+            .top-nav { display: none; }
             .top-actions .btn.link { display: none; }
         }
     </style>
@@ -324,11 +399,16 @@
     <header class="topbar">
         <div class="brand">
             <img src="/img/norva-app-icon.png" alt="Norva">
-            <span>Norva Cloud</span>
+            <span>Norva</span>
+            <nav class="top-nav" aria-label="Norva">
+                <a class="nav-pill" href="#watch">Watch</a>
+                <a class="nav-pill" href="#sources">Sources</a>
+                <a class="nav-pill" href="#devices">Devices</a>
+                <a class="nav-pill" href="#account">Account</a>
+            </nav>
         </div>
         <div class="top-actions">
             <span class="email" id="account-email"></span>
-            <a class="btn link" href="/hub-connect.html">Connector</a>
             <button class="btn danger" id="signout-button" type="button">Sign out</button>
         </div>
     </header>
@@ -336,13 +416,13 @@
     <main class="shell">
         <section class="hero">
             <div>
-                <h1>Add IPTV once. Watch across Norva.</h1>
+                <h1>Watch your IPTV everywhere.</h1>
                 <p class="lead">
-                    Your sources, screens, favorites, history and playback sessions stay attached to one Norva Account.
+                    Add your provider once, pair your screens, and keep watching from every Norva app.
                 </p>
                 <div class="stats">
                     <div class="stat"><strong id="device-count">0</strong><span>Trusted devices</span></div>
-                    <div class="stat"><strong id="source-count">0</strong><span>Cloud sources</span></div>
+                    <div class="stat"><strong id="source-count">0</strong><span>Sources</span></div>
                     <div class="stat"><strong id="history-count">0</strong><span>History records</span></div>
                 </div>
             </div>
@@ -361,10 +441,39 @@
             </section>
         </section>
 
-        <section class="panel" style="margin-bottom:22px">
+        <section class="panel" id="watch" style="margin-bottom:22px">
+            <div class="watch-tools">
+                <div>
+                    <h2>Watch</h2>
+                    <p class="muted">Live TV, movies and series from your Norva sources.</p>
+                </div>
+                <div class="field" style="margin:0">
+                    <label for="media-search">Search</label>
+                    <div class="button-row">
+                        <input id="media-search" type="search" placeholder="Channel, movie, series">
+                        <button class="btn" id="media-search-button" type="button">Search</button>
+                    </div>
+                </div>
+            </div>
+            <div class="status" id="media-status"></div>
+            <div class="shelf">
+                <h3>Live TV</h3>
+                <div class="media-row" id="media-live"></div>
+            </div>
+            <div class="shelf">
+                <h3>Movies</h3>
+                <div class="media-row" id="media-movie"></div>
+            </div>
+            <div class="shelf">
+                <h3>Series</h3>
+                <div class="media-row" id="media-series"></div>
+            </div>
+        </section>
+
+        <section class="panel" id="sources" style="margin-bottom:22px">
             <div class="source-layout">
                 <div>
-                    <h2>Add IPTV</h2>
+                    <h2>Sources</h2>
                     <div class="source-fields">
                         <div class="segmented" aria-label="Source type">
                             <button class="segment active" id="type-xtream" type="button" data-source-type="xtream">Xtream</button>
@@ -399,14 +508,14 @@
                     </div>
                 </div>
                 <div>
-                    <h2>Cloud sources</h2>
-                    <div class="source-list" id="sources"></div>
+                    <h2>Your sources</h2>
+                    <div class="source-list" id="sources-list"></div>
                 </div>
             </div>
         </section>
 
         <section class="grid">
-            <section class="panel">
+            <section class="panel" id="account">
                 <h2>Profile</h2>
                 <div class="field">
                     <label for="display-name">Display name</label>
@@ -419,15 +528,15 @@
                 <div class="status" id="profile-status"></div>
             </section>
 
-            <section class="panel">
+            <section class="panel" id="devices">
                 <h2>Trusted devices</h2>
-                <div class="devices" id="devices"></div>
+                <div class="devices" id="devices-list"></div>
                 <div class="status" id="devices-status"></div>
             </section>
         </section>
 
         <section class="panel" style="margin-top:22px">
-            <h2>Cloud command</h2>
+            <h2>Remote play</h2>
             <p class="muted">Send a playback or navigation command to any trusted screen attached to this account.</p>
             <div class="grid" style="margin-top:14px">
                 <div>
@@ -453,6 +562,13 @@
                 </div>
             </div>
         </section>
+
+        <section class="panel advanced">
+            <h2>Advanced</h2>
+            <div class="button-row">
+                <a class="btn link" href="/hub-connect.html">Local connector</a>
+            </div>
+        </section>
     </main>
 
     <script src="/js/cloudApi.js?v=1"></script>
@@ -461,8 +577,14 @@
         const params = new URLSearchParams(location.search);
         const currentReturn = location.pathname + location.search;
         const pairCodeInput = document.getElementById('pair-code');
-        const devicesEl = document.getElementById('devices');
-        const sourcesEl = document.getElementById('sources');
+        const devicesEl = document.getElementById('devices-list');
+        const sourcesEl = document.getElementById('sources-list');
+        const mediaStatus = document.getElementById('media-status');
+        const mediaEls = {
+            live: document.getElementById('media-live'),
+            movie: document.getElementById('media-movie'),
+            series: document.getElementById('media-series')
+        };
         const commandDevice = document.getElementById('command-device');
         const pairStatus = document.getElementById('pair-status');
         const profileStatus = document.getElementById('profile-status');
@@ -485,6 +607,10 @@
         document.getElementById('add-source-button').addEventListener('click', addSource);
         document.getElementById('send-play-button').addEventListener('click', () => sendCommand('play'));
         document.getElementById('send-open-button').addEventListener('click', () => sendCommand('open'));
+        document.getElementById('media-search').addEventListener('keydown', event => {
+            if (event.key === 'Enter') loadMediaShelves();
+        });
+        document.getElementById('media-search-button').addEventListener('click', loadMediaShelves);
         document.querySelectorAll('[data-source-type]').forEach(button => {
             button.addEventListener('click', () => selectSourceType(button.dataset.sourceType));
         });
@@ -516,7 +642,9 @@
 
             await registerCurrentDevice();
             startDeviceCommandLoop();
-            await Promise.all([loadProfile(user), loadDevices(), loadSources(), loadCounters()]);
+            await Promise.all([loadProfile(user), loadDevices(), loadCounters()]);
+            await loadSources();
+            await loadMediaShelves();
         }
 
         async function loadProfile(user) {
@@ -614,9 +742,11 @@
                     syncNow: true
                 });
                 clearSourceForm();
-                setStatus(sourceStatus, 'success', 'Source added. Norva Cloud is syncing it now.');
+                setStatus(sourceStatus, 'success', 'Source added. Norva is syncing it now.');
                 await loadSources();
+                await loadMediaShelves();
                 setTimeout(loadSources, 5000);
+                setTimeout(loadMediaShelves, 5500);
             } catch (error) {
                 setStatus(sourceStatus, 'error', error.message);
             } finally {
@@ -643,6 +773,87 @@
             }
         }
 
+        async function loadMediaShelves() {
+            const q = document.getElementById('media-search').value.trim();
+            try {
+                const [live, movie, series] = await Promise.all([
+                    NorvaCloud.mediaItems.list({ type: 'live', limit: 8, q }).catch(() => ({ items: [] })),
+                    NorvaCloud.mediaItems.list({ type: 'movie', limit: 8, q }).catch(() => ({ items: [] })),
+                    NorvaCloud.mediaItems.list({ type: 'series', limit: 8, q }).catch(() => ({ items: [] }))
+                ]);
+                renderMediaShelf('live', live.items || []);
+                renderMediaShelf('movie', movie.items || []);
+                renderMediaShelf('series', series.items || []);
+                const total = (live.items || []).length + (movie.items || []).length + (series.items || []).length;
+                if (!total && cloudSources.length) {
+                    setStatus(mediaStatus, 'info', 'Your source is syncing. Content will appear here shortly.');
+                } else {
+                    mediaStatus.className = 'status';
+                    mediaStatus.textContent = '';
+                }
+            } catch (error) {
+                setStatus(mediaStatus, 'error', error.message);
+            }
+        }
+
+        function renderMediaShelf(type, items) {
+            const container = mediaEls[type];
+            container.innerHTML = '';
+            if (!items.length) {
+                container.innerHTML = '<div class="empty">No items yet.</div>';
+                return;
+            }
+            items.forEach(item => {
+                const card = document.createElement('div');
+                card.className = 'media-card';
+                const info = document.createElement('div');
+                const title = document.createElement('strong');
+                title.textContent = item.title || 'Untitled';
+                const meta = document.createElement('span');
+                meta.textContent = item.subtitle || labelForType(item.item_type);
+                info.append(title, meta);
+
+                const actions = document.createElement('div');
+                actions.className = 'button-row';
+                const play = document.createElement('button');
+                play.className = 'btn primary';
+                play.type = 'button';
+                play.textContent = 'Play';
+                play.addEventListener('click', () => playMediaItem(item, play));
+                actions.append(play);
+                card.append(info, actions);
+                container.appendChild(card);
+            });
+        }
+
+        async function playMediaItem(item, button) {
+            button.disabled = true;
+            try {
+                setStatus(mediaStatus, 'info', 'Starting playback...');
+                const session = await NorvaCloud.playback.createSession({
+                    sourceId: item.source_id,
+                    itemType: item.item_type,
+                    itemId: item.external_id,
+                    mode: 'relay'
+                });
+                const playbackUrl = session.playback?.url;
+                if (!playbackUrl) throw new Error('Playback is waiting for Norva Gateway.');
+                setStatus(mediaStatus, 'success', 'Playback ready.');
+                location.href = playbackUrl;
+            } catch (error) {
+                setStatus(mediaStatus, 'error', error.message);
+            } finally {
+                button.disabled = false;
+            }
+        }
+
+        function labelForType(type) {
+            if (type === 'live') return 'Live TV';
+            if (type === 'movie') return 'Movie';
+            if (type === 'series') return 'Series';
+            return 'Norva';
+        }
+
         function renderSources(sources) {
             if (!sources.length) {
                 sourcesEl.innerHTML = '<div class="empty">No IPTV source yet.</div>';
@@ -663,7 +874,7 @@
                 const type = document.createElement('span');
                 type.className = 'pill';
                 type.textContent = String(source.source_type || 'source').toUpperCase();
-                meta.append(type, status, document.createTextNode(source.config_hint?.serverHost || source.config_hint?.playlistHost || 'Norva Cloud'));
+                meta.append(type, status, document.createTextNode(source.config_hint?.serverHost || source.config_hint?.playlistHost || 'Norva'));
                 info.append(name, meta);
 
                 const actions = document.createElement('div');
@@ -678,7 +889,9 @@
                         setStatus(sourceStatus, 'info', 'Sync started...');
                         await NorvaCloud.sources.sync(source.id);
                         await loadSources();
+                        await loadMediaShelves();
                         setTimeout(loadSources, 5000);
+                        setTimeout(loadMediaShelves, 5500);
                     } catch (error) {
                         setStatus(sourceStatus, 'error', error.message);
                     } finally {

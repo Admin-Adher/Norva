@@ -1,6 +1,8 @@
 # Norva TV — Android Phone App
 
-A thin WebView wrapper for phones (portrait mode) that connects to your local Norva hub. It also handles `norva://pair` deep links so the OS automatically routes QR-scanned pairing URLs into this app.
+A thin WebView wrapper for phones (portrait mode). The recommended flow opens
+Norva Account first; the local connector remains available as an advanced mode.
+It also handles `norva://pair` deep links for older local-connector pairing URLs.
 
 ## Prerequisites
 
@@ -56,21 +58,21 @@ The `MainActivity.onCreate` method:
 3. Saves the hub URL to `SharedPreferences`.
 4. Loads `<hub>/pair-approve.html?code=<code>` in the WebView, where the user can approve pairing.
 
-## Manual connection
+## Manual local connector
 
-On first launch (no saved hub URL), the app shows a setup panel with a URL field. Enter your hub's local address (e.g. `http://192.168.1.20:3000`) and tap **Connect**.
+From the setup panel, enter a connector address (e.g. `http://192.168.1.20:3000`) and tap **Connect local connector**.
 
-To change the hub later, press the device **MENU** key from inside the app — the setup panel reappears.
+To change the connector later, press the device **MENU** key from inside the app.
 
 ## Permissions
 
 | Permission | Reason |
 |---|---|
-| `INTERNET` | Connect to the Norva hub |
+| `INTERNET` | Connect to Norva |
 | `CAMERA` | QR code scanning inside the WebView |
 
 Camera hardware is marked `required="false"` so the app installs on devices without cameras.
 
 ## Cleartext traffic
 
-`android:usesCleartextTraffic="true"` and the `network_security_config.xml` allow plain HTTP to local-network IPs (e.g. `http://192.168.x.x`). HTTPS hubs work without any changes.
+`android:usesCleartextTraffic="true"` and the `network_security_config.xml` allow plain HTTP to local-network IPs (e.g. `http://192.168.x.x`). HTTPS connectors work without any changes.

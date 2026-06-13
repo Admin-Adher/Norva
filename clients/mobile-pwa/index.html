@@ -391,7 +391,7 @@
         </svg>
       </div>
       <h2>Norva</h2>
-      <p>Connect to your Norva Hub to browse and cast content from your phone.</p>
+      <p>Connect to your Norva account or use an advanced local connector.</p>
 
       <button class="btn btn-primary" id="btn-scan-qr">
         <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:middle;margin-right:6px"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><path d="M14 14h3v3h-3zM17 17h3v3h-3zM14 20h3"/></svg>
@@ -402,10 +402,10 @@
       <div class="divider">or</div>
 
       <div class="field">
-        <label class="label" for="manual-url">Hub URL</label>
+        <label class="label" for="manual-url">Local connector URL</label>
         <input class="input" id="manual-url" type="url" placeholder="http://192.168.1.20:3000" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" />
       </div>
-      <button class="btn btn-secondary" id="btn-manual-connect">Connect to Hub</button>
+      <button class="btn btn-secondary" id="btn-manual-connect">Connect local connector</button>
 
       <div id="welcome-status" class="status-msg"></div>
     </section>
@@ -426,7 +426,7 @@
     <!-- Pair approval screen -->
     <section id="screen-pair" class="screen" data-title="Approve Pairing">
       <h2>Pair Device</h2>
-      <p>A device wants to connect to your Norva Hub.</p>
+      <p>A device wants to connect to Norva.</p>
 
       <div class="card">
         <div class="pair-device" id="pair-device-name">Unknown Device</div>
@@ -450,10 +450,10 @@
       <h2>Settings</h2>
 
       <div class="settings-section">
-        <h3>Hub Connection</h3>
+        <h3>Local connector</h3>
         <div class="card">
           <div class="info-row">
-            <span>Hub URL</span>
+            <span>Connector URL</span>
             <span class="val" id="settings-hub-url">—</span>
           </div>
           <div class="info-row">
@@ -468,9 +468,9 @@
       </div>
 
       <div class="settings-section">
-        <h3>Change Hub</h3>
+        <h3>Change connector</h3>
         <div class="field">
-          <label class="label" for="settings-url-input">Hub URL</label>
+          <label class="label" for="settings-url-input">Connector URL</label>
           <input class="input" id="settings-url-input" type="url" placeholder="http://192.168.1.20:3000" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" />
         </div>
         <button class="btn btn-secondary" id="btn-settings-connect">Reconnect</button>
@@ -478,7 +478,7 @@
 
       <div class="settings-section">
         <h3>Session</h3>
-        <button class="btn btn-danger" id="btn-logout">Disconnect &amp; Forget Hub</button>
+        <button class="btn btn-danger" id="btn-logout">Disconnect connector</button>
       </div>
 
       <div id="settings-status" class="status-msg"></div>
@@ -627,7 +627,7 @@
 
   $('btn-manual-connect').addEventListener('click', () => {
     const raw = $('manual-url').value.trim();
-    if (!raw) { setStatus('welcome-status', 'error', 'Please enter a hub URL.'); return; }
+    if (!raw) { setStatus('welcome-status', 'error', 'Please enter a connector URL.'); return; }
     const url = normalizeUrl(raw);
     if (!url) { setStatus('welcome-status', 'error', 'Enter a valid http:// URL.'); return; }
     connectToHub(url);
@@ -746,7 +746,7 @@
       if (json.token) localStorage.setItem(KEY_HUB_TOKEN, json.token);
       localStorage.setItem(KEY_HUB_AT, new Date().toISOString());
 
-      setStatus('pair-status', 'success', 'Pairing approved! Loading hub…');
+      setStatus('pair-status', 'success', 'Pairing approved. Opening connector...');
       setTimeout(() => showScreen('browse'), 1200);
     } catch (err) {
       setStatus('pair-status', 'error', err.message);

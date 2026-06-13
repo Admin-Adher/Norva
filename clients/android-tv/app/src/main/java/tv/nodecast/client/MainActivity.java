@@ -26,12 +26,10 @@ import android.widget.TextView;
 /**
  * Norva TV — Android TV client.
  *
- * Thin WebView wrapper around the Norva web app, mirroring what the
- * desktop .exe does with Electron: the TV renders the exact same UI
- * (filters, dedup, search, player) served by the Norva server.
+ * Thin WebView wrapper around Norva.
  *
- * The server URL is asked once and stored. The MENU key (or a load
- * failure) brings the setup screen back.
+ * The default path pairs the TV with a Norva Account. The MENU key
+ * brings back advanced connection options.
  */
 public class MainActivity extends Activity {
 
@@ -71,7 +69,8 @@ public class MainActivity extends Activity {
         } else if ("server".equals(mode) && saved != null && !saved.isEmpty()) {
             connect(saved);
         } else {
-            showSetup(null);
+            prefs().edit().putString(PREF_MODE, "cloud").apply();
+            connectCloudPairing();
         }
     }
 
@@ -99,7 +98,7 @@ public class MainActivity extends Activity {
             public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
                 // Only react to failures of the main document, not subresources
                 if (request.isForMainFrame()) {
-                    showSetup("Could not reach the server: " + error.getDescription());
+                    showSetup("Could not reach Norva: " + error.getDescription());
                 }
             }
 
@@ -130,21 +129,21 @@ public class MainActivity extends Activity {
         setupPanel.addView(title);
 
         TextView hint = new TextView(this);
-        hint.setText("Enter your Norva server address (the PC running the app), e.g. http://192.168.1.20:3000");
+        hint.setText("Connect this TV to your Norva Account. Pairing is the easiest way to attach this screen to your household.");
         hint.setTextColor(Color.parseColor("#a1a1aa"));
         hint.setTextSize(16);
         hint.setPadding(0, 0, 0, dp(24));
         setupPanel.addView(hint);
 
         TextView cloudHint = new TextView(this);
-        cloudHint.setText("Norva Account: pair this TV with the cloud ecosystem.");
+        cloudHint.setText("Recommended");
         cloudHint.setTextColor(Color.parseColor("#a1a1aa"));
         cloudHint.setTextSize(15);
         cloudHint.setPadding(0, 0, 0, dp(10));
         setupPanel.addView(cloudHint, new LinearLayout.LayoutParams(dp(560), LinearLayout.LayoutParams.WRAP_CONTENT));
 
         Button cloudBtn = new Button(this);
-        cloudBtn.setText("Pair with Norva Account");
+        cloudBtn.setText("Connect this TV");
         cloudBtn.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -155,7 +154,7 @@ public class MainActivity extends Activity {
         setupPanel.addView(cloudBtn, new LinearLayout.LayoutParams(dp(320), LinearLayout.LayoutParams.WRAP_CONTENT));
 
         TextView localLabel = new TextView(this);
-        localLabel.setText("Local hub");
+        localLabel.setText("Advanced local connector");
         localLabel.setTextColor(Color.parseColor("#71717a"));
         localLabel.setTextSize(15);
         localLabel.setPadding(0, dp(28), 0, dp(8));
@@ -171,7 +170,7 @@ public class MainActivity extends Activity {
         setupPanel.addView(urlInput, new LinearLayout.LayoutParams(dp(520), LinearLayout.LayoutParams.WRAP_CONTENT));
 
         Button connectBtn = new Button(this);
-        connectBtn.setText("Connect");
+        connectBtn.setText("Connect local connector");
         connectBtn.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -197,14 +196,14 @@ public class MainActivity extends Activity {
         setupPanel.addView(orLabel);
 
         TextView standaloneHint = new TextView(this);
-        standaloneHint.setText("Standalone: run Norva entirely on this TV. Enter your Xtream account in Settings > Sources once connected. (No transcoding/TMDB in this mode; playback uses the TV's native decoder.)");
+        standaloneHint.setText("Standalone: run Norva entirely on this TV. Use this when you do not want an account on this device. Playback uses the TV native decoder.");
         standaloneHint.setTextColor(Color.parseColor("#a1a1aa"));
         standaloneHint.setTextSize(14);
         standaloneHint.setPadding(0, 0, 0, dp(12));
         setupPanel.addView(standaloneHint, new LinearLayout.LayoutParams(dp(560), LinearLayout.LayoutParams.WRAP_CONTENT));
 
         Button standaloneBtn = new Button(this);
-        standaloneBtn.setText("Standalone mode (no PC)");
+        standaloneBtn.setText("Use standalone mode");
         standaloneBtn.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -221,7 +220,7 @@ public class MainActivity extends Activity {
         setupPanel.addView(statusText);
 
         TextView tip = new TextView(this);
-        tip.setText("Tip: press MENU on the remote at any time to come back here.");
+        tip.setText("Press MENU on the remote at any time for advanced connection options.");
         tip.setTextColor(Color.parseColor("#71717a"));
         tip.setTextSize(13);
         tip.setPadding(0, dp(24), 0, 0);
