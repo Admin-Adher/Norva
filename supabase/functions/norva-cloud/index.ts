@@ -10,6 +10,12 @@ type CloudDevice = {
   device_name?: string;
   capabilities?: JsonRecord;
 };
+type RuntimeConfig = {
+  relayBaseUrl: string;
+  relayTokenSecret: string;
+  mediaGatewayUrl: string;
+  mediaGatewayToken: string;
+};
 
 class HttpError extends Error {
   status: number;
@@ -36,12 +42,18 @@ const SUPABASE_SERVICE_KEY =
   Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ??
   Deno.env.get("SUPABASE_SECRET_KEY") ??
   "";
-const RELAY_BASE_URL = trimTrailingSlash(Deno.env.get("NORVA_RELAY_BASE_URL") ?? "");
-const RELAY_TOKEN_SECRET = Deno.env.get("RELAY_TOKEN_SECRET") ?? "";
-const MEDIA_GATEWAY_URL = trimTrailingSlash(Deno.env.get("NORVA_MEDIA_GATEWAY_URL") ?? "");
-const MEDIA_GATEWAY_TOKEN = Deno.env.get("NORVA_MEDIA_GATEWAY_TOKEN") ?? "";
+const ENV_RELAY_BASE_URL = trimTrailingSlash(Deno.env.get("NORVA_RELAY_BASE_URL") ?? "");
+const ENV_RELAY_TOKEN_SECRET = Deno.env.get("RELAY_TOKEN_SECRET") ?? "";
+const ENV_MEDIA_GATEWAY_URL = trimTrailingSlash(Deno.env.get("NORVA_MEDIA_GATEWAY_URL") ?? "");
+const ENV_MEDIA_GATEWAY_TOKEN = Deno.env.get("NORVA_MEDIA_GATEWAY_TOKEN") ?? "";
 const DEVICE_PUBLIC_SELECT =
   "id, user_id, device_type, device_name, platform, app_version, public_key, capabilities, trusted, revoked, last_seen_at, created_at, updated_at";
+const RUNTIME_CONFIG_KEYS = [
+  "NORVA_RELAY_BASE_URL",
+  "RELAY_TOKEN_SECRET",
+  "NORVA_MEDIA_GATEWAY_URL",
+  "NORVA_MEDIA_GATEWAY_TOKEN",
+];
 
 if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
   throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
@@ -53,6 +65,8 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
     persistSession: false,
   },
 });
+
+let runtimeConfigCache: { value: RuntimeConfig; expiresAt: number } | null = null;
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -82,11 +96,14 @@ async function route(
   const [scope, id, action] = segments;
 
   if (req.method === "GET" && scope === "health") {
+    const runtimeConfig = await getRuntimeConfig(db);
     return {
       body: {
         ok: true,
         service: "norva-cloud",
-        version: 1,
+        version: 3,
+        relayConfigured: Boolean(runtimeConfig.relayBaseUrl && runtimeConfig.relayTokenSecret),
+        gatewayConfigured: Boolean(runtimeConfig.mediaGatewayUrl && runtimeConfig.mediaGatewayToken),
         time: new Date().toISOString(),
       },
     };
@@ -846,7 +863,8 @@ async function createRelayAccess(
   expiresAt: string,
   db: SupabaseClient,
 ) {
-  if (!RELAY_BASE_URL || !RELAY_TOKEN_SECRET) {
+  const runtimeConfig = await getRuntimeConfig(db);
+  if (!runtimeConfig.relayBaseUrl || !runtimeConfig.relayTokenSecret) {
     throw new HttpError(503, "Norva Relay is not configured");
   }
 
@@ -857,7 +875,7 @@ async function createRelayAccess(
     url: targetUrl,
     exp: Math.floor(new Date(expiresAt).getTime() / 1000),
   });
-  const signature = await hmacBase64Url(RELAY_TOKEN_SECRET, payload);
+  const signature = await hmacBase64Url(runtimeConfig.relayTokenSecret, payload);
   const token = `${base64Url(encoder.encode(payload))}.${signature}`;
   const tokenHash = await sha256Hex(token);
 
@@ -869,7 +887,7 @@ async function createRelayAccess(
   });
   if (error) throwDb(error, "Unable to record relay token");
 
-  return { url: `${RELAY_BASE_URL}/relay/${token}` };
+  return { url: `${runtimeConfig.relayBaseUrl}/relay/${token}` };
 }
 
 async function createGatewaySession(
@@ -879,7 +897,8 @@ async function createGatewaySession(
   expiresAt: string,
   db: SupabaseClient,
 ) {
-  if (!MEDIA_GATEWAY_URL || !MEDIA_GATEWAY_TOKEN) {
+  const runtimeConfig = await getRuntimeConfig(db);
+  if (!runtimeConfig.mediaGatewayUrl || !runtimeConfig.mediaGatewayToken) {
     const { data, error } = await db
       .from("cloud_gateway_sessions")
       .insert({
@@ -895,11 +914,11 @@ async function createGatewaySession(
     return { status: "pending", session: data, hlsUrl: null };
   }
 
-  const response = await fetch(`${MEDIA_GATEWAY_URL}/sessions`, {
+  const response = await fetch(`${runtimeConfig.mediaGatewayUrl}/sessions`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${MEDIA_GATEWAY_TOKEN}`,
+      Authorization: `Bearer ${runtimeConfig.mediaGatewayToken}`,
     },
     body: JSON.stringify({ playbackSessionId, sourceUrl: targetUrl, expiresAt }),
   });
@@ -923,6 +942,46 @@ async function createGatewaySession(
     .single();
   if (error) throwDb(error, "Unable to record gateway session");
   return { status: data.status, session: data, hlsUrl: data.hls_url };
+}
+
+async function getRuntimeConfig(db: SupabaseClient): Promise<RuntimeConfig> {
+  if (runtimeConfigCache && runtimeConfigCache.expiresAt > Date.now()) {
+    return runtimeConfigCache.value;
+  }
+
+  const fromDb = new Map<string, string>();
+  const needsDb =
+    !ENV_RELAY_BASE_URL ||
+    !ENV_RELAY_TOKEN_SECRET ||
+    !ENV_MEDIA_GATEWAY_URL ||
+    !ENV_MEDIA_GATEWAY_TOKEN;
+
+  if (needsDb) {
+    const { data, error } = await db
+      .from("cloud_runtime_config")
+      .select("key, value")
+      .in("key", RUNTIME_CONFIG_KEYS);
+
+    if (error) {
+      console.warn("[norva-cloud] runtime config unavailable", error.message);
+    } else {
+      for (const item of data ?? []) {
+        if (typeof item.key === "string" && typeof item.value === "string") {
+          fromDb.set(item.key, item.value);
+        }
+      }
+    }
+  }
+
+  const value = {
+    relayBaseUrl: trimTrailingSlash(ENV_RELAY_BASE_URL || fromDb.get("NORVA_RELAY_BASE_URL") || ""),
+    relayTokenSecret: ENV_RELAY_TOKEN_SECRET || fromDb.get("RELAY_TOKEN_SECRET") || "",
+    mediaGatewayUrl: trimTrailingSlash(ENV_MEDIA_GATEWAY_URL || fromDb.get("NORVA_MEDIA_GATEWAY_URL") || ""),
+    mediaGatewayToken: ENV_MEDIA_GATEWAY_TOKEN || fromDb.get("NORVA_MEDIA_GATEWAY_TOKEN") || "",
+  };
+
+  runtimeConfigCache = { value, expiresAt: Date.now() + 30_000 };
+  return value;
 }
 
 async function assertOwnedSource(sourceId: string, userId: string, db: SupabaseClient) {
