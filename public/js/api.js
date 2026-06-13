@@ -167,6 +167,26 @@ const CloudAdapter = (() => {
         return base;
     }
 
+    function categoriesFromMediaItems(items) {
+        const categories = new Map();
+        for (const item of items) {
+            const categoryId = item.category_id || 'uncategorized';
+            const fallback = normalizeCategory(categoryId);
+            const metadata = item.metadata || {};
+            const name = item.category_name || item.subtitle || metadata.categoryName || fallback.category_name;
+            const existing = categories.get(categoryId);
+            const hasProviderName = name && name !== fallback.category_name;
+            if (!existing || (existing.category_name === fallback.category_name && hasProviderName)) {
+                categories.set(categoryId, {
+                    ...fallback,
+                    category_name: name,
+                    name
+                });
+            }
+        }
+        return [...categories.values()];
+    }
+
     async function listAllMedia({ sourceId, type, q } = {}) {
         const cloudSourceId = sourceId ? await resolveSourceId(sourceId) : '';
         const cacheKey = JSON.stringify({ cloudSourceId, type, q: q || '' });
@@ -326,8 +346,7 @@ const CloudAdapter = (() => {
             if (action === 'live_categories' || action === 'vod_categories' || action === 'series_categories') {
                 const type = action === 'live_categories' ? 'live' : action === 'vod_categories' ? 'movie' : 'series';
                 const items = await listAllMedia({ sourceId, type });
-                const ids = [...new Set(items.map(item => item.category_id || 'uncategorized'))];
-                return ids.map(normalizeCategory);
+                return categoriesFromMediaItems(items);
             }
             if (action === 'live_streams' || action === 'vod_streams' || action === 'series') {
                 const type = action === 'live_streams' ? 'live' : action === 'vod_streams' ? 'movie' : 'series';

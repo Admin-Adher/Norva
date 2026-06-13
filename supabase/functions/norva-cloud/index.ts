@@ -104,7 +104,7 @@ async function route(
       body: {
         ok: true,
         service: "norva-cloud",
-        version: 6,
+        version: 7,
         relayConfigured: Boolean(runtimeConfig.relayBaseUrl && runtimeConfig.relayTokenSecret),
         gatewayConfigured: Boolean(runtimeConfig.mediaGatewayUrl && runtimeConfig.mediaGatewayToken),
         cloudSourceConfigured: Boolean(runtimeConfig.sourceConfigKey),
@@ -572,14 +572,22 @@ async function syncXtreamSource(sourceId: string, userId: string, config: JsonRe
   const serverUrl = normalizeBaseUrl(stringOr(config.serverUrl, ""));
   const username = stringOr(config.username, "");
   const password = stringOr(config.password, "");
-  const live = await fetchJson(xtreamApiUrl({ serverUrl, username, password, action: "get_live_streams" }), 25000).catch(() => []);
-  const vod = await fetchJson(xtreamApiUrl({ serverUrl, username, password, action: "get_vod_streams" }), 25000).catch(() => []);
-  const series = await fetchJson(xtreamApiUrl({ serverUrl, username, password, action: "get_series" }), 25000).catch(() => []);
+  const [live, vod, series, liveCategories, vodCategories, seriesCategories] = await Promise.all([
+    fetchJson(xtreamApiUrl({ serverUrl, username, password, action: "get_live_streams" }), 25000).catch(() => []),
+    fetchJson(xtreamApiUrl({ serverUrl, username, password, action: "get_vod_streams" }), 25000).catch(() => []),
+    fetchJson(xtreamApiUrl({ serverUrl, username, password, action: "get_series" }), 25000).catch(() => []),
+    fetchJson(xtreamApiUrl({ serverUrl, username, password, action: "get_live_categories" }), 25000).catch(() => []),
+    fetchJson(xtreamApiUrl({ serverUrl, username, password, action: "get_vod_categories" }), 25000).catch(() => []),
+    fetchJson(xtreamApiUrl({ serverUrl, username, password, action: "get_series_categories" }), 25000).catch(() => []),
+  ]);
+  const liveCategoryMap = categoryMap(liveCategories);
+  const vodCategoryMap = categoryMap(vodCategories);
+  const seriesCategoryMap = categoryMap(seriesCategories);
 
   const rows = [
-    ...xtreamRows(sourceId, userId, Array.isArray(live) ? live : [], "live"),
-    ...xtreamRows(sourceId, userId, Array.isArray(vod) ? vod : [], "movie"),
-    ...xtreamRows(sourceId, userId, Array.isArray(series) ? series : [], "series"),
+    ...xtreamRows(sourceId, userId, Array.isArray(live) ? live : [], "live", liveCategoryMap),
+    ...xtreamRows(sourceId, userId, Array.isArray(vod) ? vod : [], "movie", vodCategoryMap),
+    ...xtreamRows(sourceId, userId, Array.isArray(series) ? series : [], "series", seriesCategoryMap),
   ];
 
   await replaceSourceItems(sourceId, userId, rows, db);
@@ -587,8 +595,23 @@ async function syncXtreamSource(sourceId: string, userId: string, config: JsonRe
     live: Array.isArray(live) ? live.length : 0,
     movies: Array.isArray(vod) ? vod.length : 0,
     series: Array.isArray(series) ? series.length : 0,
+    liveCategories: liveCategoryMap.size,
+    movieCategories: vodCategoryMap.size,
+    seriesCategories: seriesCategoryMap.size,
     total: rows.length,
   };
+}
+
+function categoryMap(items: unknown) {
+  const categories = new Map<string, string>();
+  if (!Array.isArray(items)) return categories;
+  for (const item of items) {
+    if (!isRecord(item)) continue;
+    const id = stringOr(item.category_id ?? item.categoryId ?? item.id, "");
+    const name = stringOr(item.category_name ?? item.categoryName ?? item.name, "");
+    if (id && name) categories.set(id, name);
+  }
+  return categories;
 }
 
 function xtreamRows(
@@ -596,6 +619,7 @@ function xtreamRows(
   userId: string,
   items: JsonRecord[],
   itemType: "live" | "movie" | "series",
+  categories: Map<string, string>,
 ) {
   const rows: JsonRecord[] = [];
   for (const item of items) {
@@ -603,18 +627,23 @@ function xtreamRows(
     const title = stringOr(item.name ?? item.title, "");
     if (!streamId || !title) continue;
     const container = stringOr(item.container_extension, itemType === "live" ? "m3u8" : "mp4");
+    const categoryId = stringOrNull(item.category_id);
+    const categoryName = categoryId
+      ? categories.get(categoryId) ?? stringOrNull(item.category_name)
+      : stringOrNull(item.category_name);
     rows.push({
       user_id: userId,
       source_id: sourceId,
       item_type: itemType,
       external_id: streamId,
-      parent_external_id: stringOrNull(item.category_id),
+      parent_external_id: categoryId,
       title,
-      subtitle: stringOrNull(item.category_name),
+      subtitle: categoryName,
       poster_url: stringOrNull(item.stream_icon ?? item.cover),
       backdrop_url: null,
       metadata: compactRecord({
-        categoryId: stringOrNull(item.category_id),
+        categoryId,
+        categoryName,
         rating: item.rating,
         added: item.added,
       }),
