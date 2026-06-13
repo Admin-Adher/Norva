@@ -74,7 +74,8 @@
             text-decoration: none;
         }
         .nav-pill:hover,
-        .nav-pill:focus {
+        .nav-pill:focus,
+        .nav-pill.active {
             color: var(--text);
             background: #1b2230;
             outline: none;
@@ -99,6 +100,17 @@
             align-items: stretch;
             margin-bottom: 22px;
         }
+        .app-view { display: none; }
+        .app-view.active { display: block; }
+        .section-head {
+            display: flex;
+            align-items: end;
+            justify-content: space-between;
+            gap: 18px;
+            margin-bottom: 18px;
+        }
+        .section-head h1 { margin-bottom: 0; }
+        .section-actions { min-width: min(360px, 100%); }
         h1 {
             font-size: clamp(30px, 5vw, 48px);
             line-height: 1.05;
@@ -383,15 +395,38 @@
             letter-spacing: 4px;
         }
         @media (max-width: 880px) {
-            .topbar { padding: 0 16px; }
+            .topbar {
+                height: auto;
+                min-height: 66px;
+                flex-wrap: wrap;
+                gap: 10px;
+                padding: 12px 16px;
+            }
+            .brand {
+                flex: 1 1 100%;
+                flex-wrap: wrap;
+                min-width: 0;
+                max-width: 100%;
+            }
             .email { display: none; }
             .shell { padding: 24px 16px 36px; }
             .hero, .grid, .source-layout { grid-template-columns: 1fr; }
             .watch-tools { grid-template-columns: 1fr; }
             .media-row { grid-template-columns: 1fr 1fr; }
             .stats { grid-template-columns: 1fr; }
-            .top-nav { display: none; }
+            .top-nav {
+                order: 3;
+                flex: 1 0 100%;
+                display: flex;
+                margin: 4px 0 0;
+                min-width: 0;
+                max-width: 100%;
+                overflow-x: auto;
+                padding-bottom: 4px;
+            }
+            .nav-pill { white-space: nowrap; }
             .top-actions .btn.link { display: none; }
+            .section-head { display: grid; align-items: start; }
         }
     </style>
 </head>
@@ -401,10 +436,13 @@
             <img src="/img/norva-app-icon.png" alt="Norva">
             <span>Norva</span>
             <nav class="top-nav" aria-label="Norva">
-                <a class="nav-pill" href="#watch">Watch</a>
-                <a class="nav-pill" href="#sources">Sources</a>
-                <a class="nav-pill" href="#devices">Devices</a>
-                <a class="nav-pill" href="#account">Account</a>
+                <a class="nav-pill active" href="#home" data-view-link="home">Home</a>
+                <a class="nav-pill" href="#live" data-view-link="live">Live TV</a>
+                <a class="nav-pill" href="#movies" data-view-link="movies">Movies</a>
+                <a class="nav-pill" href="#series" data-view-link="series">Series</a>
+                <a class="nav-pill" href="#search" data-view-link="search">Search</a>
+                <a class="nav-pill" href="#my-list" data-view-link="my-list">My List</a>
+                <a class="nav-pill" href="#account" data-view-link="account">Account</a>
             </nav>
         </div>
         <div class="top-actions">
@@ -414,133 +452,229 @@
     </header>
 
     <main class="shell">
-        <section class="hero">
-            <div>
-                <h1>Watch your IPTV everywhere.</h1>
-                <p class="lead">
-                    Add your provider once, pair your screens, and keep watching from every Norva app.
-                </p>
-                <div class="stats">
-                    <div class="stat"><strong id="device-count">0</strong><span>Trusted devices</span></div>
-                    <div class="stat"><strong id="source-count">0</strong><span>Sources</span></div>
-                    <div class="stat"><strong id="history-count">0</strong><span>History records</span></div>
+        <section class="app-view active" id="view-home" data-view="home">
+            <section class="hero">
+                <div>
+                    <h1>Watch your IPTV everywhere.</h1>
+                    <p class="lead">
+                        Your live channels, movies and series stay attached to one Norva account across every screen.
+                    </p>
+                    <div class="stats">
+                        <div class="stat"><strong id="device-count">0</strong><span>Trusted devices</span></div>
+                        <div class="stat"><strong id="source-count">0</strong><span>TV providers</span></div>
+                        <div class="stat"><strong id="history-count">0</strong><span>History records</span></div>
+                    </div>
+                </div>
+                <section class="panel">
+                    <h2>Start watching</h2>
+                    <p class="muted">Add your IPTV provider in Account, then pair your TV or mobile app once.</p>
+                    <div class="button-row" style="margin-top:16px">
+                        <button class="btn primary" type="button" data-view-button="live">Live TV</button>
+                        <button class="btn" type="button" data-view-button="movies">Movies</button>
+                        <button class="btn" type="button" data-view-button="series">Series</button>
+                        <button class="btn" type="button" data-view-button="account">Account</button>
+                    </div>
+                </section>
+            </section>
+
+            <section class="panel" style="margin-bottom:22px">
+                <div class="watch-tools">
+                    <div>
+                        <h2>For you</h2>
+                        <p class="muted">Recently synced titles from your Norva providers.</p>
+                    </div>
+                    <button class="btn" type="button" data-view-button="search">Search</button>
+                </div>
+                <div class="status" id="media-status"></div>
+                <div class="shelf">
+                    <h3>Live TV</h3>
+                    <div class="media-row" id="media-live" data-media-shelf="live"></div>
+                </div>
+                <div class="shelf">
+                    <h3>Movies</h3>
+                    <div class="media-row" id="media-movie" data-media-shelf="movie"></div>
+                </div>
+                <div class="shelf">
+                    <h3>Series</h3>
+                    <div class="media-row" id="media-series" data-media-shelf="series"></div>
+                </div>
+            </section>
+        </section>
+
+        <section class="app-view" id="view-live" data-view="live">
+            <div class="section-head">
+                <div>
+                    <h1>Live TV</h1>
+                    <p class="lead">Browse channels from every Norva provider attached to your account.</p>
                 </div>
             </div>
             <section class="panel">
-                <h2>Approve pairing</h2>
-                <p class="muted">Enter the code shown on a TV, mobile app or web screen.</p>
-                <div class="field" style="margin-top:14px">
-                    <label for="pair-code">Pairing code</label>
-                    <input id="pair-code" class="code-input" type="text" inputmode="text" maxlength="10" autocomplete="one-time-code" placeholder="ABC123">
-                </div>
-                <div class="button-row">
-                    <button class="btn primary" id="approve-button" type="button">Approve device</button>
-                    <button class="btn" id="clear-code-button" type="button">Clear</button>
-                </div>
-                <div class="status" id="pair-status"></div>
+                <div class="media-row" id="media-live-full" data-media-shelf="live"></div>
             </section>
         </section>
 
-        <section class="panel" id="watch" style="margin-bottom:22px">
-            <div class="watch-tools">
+        <section class="app-view" id="view-movies" data-view="movies">
+            <div class="section-head">
                 <div>
-                    <h2>Watch</h2>
-                    <p class="muted">Live TV, movies and series from your Norva sources.</p>
+                    <h1>Movies</h1>
+                    <p class="lead">Your movie catalog, synced once and available everywhere.</p>
                 </div>
-                <div class="field" style="margin:0">
-                    <label for="media-search">Search</label>
+            </div>
+            <section class="panel">
+                <div class="media-row" id="media-movie-full" data-media-shelf="movie"></div>
+            </section>
+        </section>
+
+        <section class="app-view" id="view-series" data-view="series">
+            <div class="section-head">
+                <div>
+                    <h1>Series</h1>
+                    <p class="lead">Shows and episodes from your Norva providers.</p>
+                </div>
+            </div>
+            <section class="panel">
+                <div class="media-row" id="media-series-full" data-media-shelf="series"></div>
+            </section>
+        </section>
+
+        <section class="app-view" id="view-search" data-view="search">
+            <div class="section-head">
+                <div>
+                    <h1>Search</h1>
+                    <p class="lead">Find a channel, movie or series across the whole household catalog.</p>
+                </div>
+                <div class="section-actions">
                     <div class="button-row">
                         <input id="media-search" type="search" placeholder="Channel, movie, series">
-                        <button class="btn" id="media-search-button" type="button">Search</button>
+                        <button class="btn primary" id="media-search-button" type="button">Search</button>
                     </div>
                 </div>
             </div>
-            <div class="status" id="media-status"></div>
-            <div class="shelf">
-                <h3>Live TV</h3>
-                <div class="media-row" id="media-live"></div>
-            </div>
-            <div class="shelf">
-                <h3>Movies</h3>
-                <div class="media-row" id="media-movie"></div>
-            </div>
-            <div class="shelf">
-                <h3>Series</h3>
-                <div class="media-row" id="media-series"></div>
-            </div>
-        </section>
-
-        <section class="panel" id="sources" style="margin-bottom:22px">
-            <div class="source-layout">
-                <div>
-                    <h2>Sources</h2>
-                    <div class="source-fields">
-                        <div class="segmented" aria-label="Source type">
-                            <button class="segment active" id="type-xtream" type="button" data-source-type="xtream">Xtream</button>
-                            <button class="segment" id="type-m3u" type="button" data-source-type="m3u">M3U</button>
-                        </div>
-                        <div class="field">
-                            <label for="source-name">Name</label>
-                            <input id="source-name" type="text" maxlength="80" placeholder="My IPTV">
-                        </div>
-                        <div id="xtream-fields">
-                            <div class="field">
-                                <label for="xtream-url">Server URL</label>
-                                <input id="xtream-url" type="url" placeholder="https://provider.example">
-                            </div>
-                            <div class="field">
-                                <label for="xtream-username">Username</label>
-                                <input id="xtream-username" type="text" autocomplete="username">
-                            </div>
-                            <div class="field">
-                                <label for="xtream-password">Password</label>
-                                <input id="xtream-password" type="password" autocomplete="current-password">
-                            </div>
-                        </div>
-                        <div id="m3u-fields" class="hidden">
-                            <div class="field">
-                                <label for="m3u-url">Playlist URL</label>
-                                <input id="m3u-url" type="url" placeholder="https://provider.example/playlist.m3u">
-                            </div>
-                        </div>
-                        <button class="btn primary" id="add-source-button" type="button">Add IPTV</button>
-                        <div class="status" id="source-status"></div>
-                    </div>
+            <section class="panel">
+                <div class="shelf">
+                    <h3>Live TV</h3>
+                    <div class="media-row" id="media-live-search" data-media-shelf="live"></div>
                 </div>
-                <div>
-                    <h2>Your sources</h2>
-                    <div class="source-list" id="sources-list"></div>
+                <div class="shelf">
+                    <h3>Movies</h3>
+                    <div class="media-row" id="media-movie-search" data-media-shelf="movie"></div>
                 </div>
-            </div>
-        </section>
-
-        <section class="grid">
-            <section class="panel" id="account">
-                <h2>Profile</h2>
-                <div class="field">
-                    <label for="display-name">Display name</label>
-                    <input id="display-name" type="text" maxlength="80" autocomplete="name">
+                <div class="shelf">
+                    <h3>Series</h3>
+                    <div class="media-row" id="media-series-search" data-media-shelf="series"></div>
                 </div>
-                <div class="button-row">
-                    <button class="btn primary" id="save-profile-button" type="button">Save profile</button>
-                    <a class="btn link" href="/account.html">Account</a>
-                </div>
-                <div class="status" id="profile-status"></div>
-            </section>
-
-            <section class="panel" id="devices">
-                <h2>Trusted devices</h2>
-                <div class="devices" id="devices-list"></div>
-                <div class="status" id="devices-status"></div>
             </section>
         </section>
 
-        <section class="panel" style="margin-top:22px">
-            <h2>Remote play</h2>
-            <p class="muted">Send a playback or navigation command to any trusted screen attached to this account.</p>
-            <div class="grid" style="margin-top:14px">
+        <section class="app-view" id="view-my-list" data-view="my-list">
+            <div class="section-head">
                 <div>
+                    <h1>My List</h1>
+                    <p class="lead">Favorites and watch history attached to your Norva account.</p>
+                </div>
+            </div>
+            <section class="panel" style="margin-bottom:22px">
+                <h2>Favorites</h2>
+                <div class="media-row" id="favorite-list"></div>
+            </section>
+            <section class="panel">
+                <h2>Continue watching</h2>
+                <div class="media-row" id="history-list"></div>
+            </section>
+        </section>
+
+        <section class="app-view" id="view-account" data-view="account">
+            <div class="section-head">
+                <div>
+                    <h1>Account</h1>
+                    <p class="lead">Manage your profile, TV providers and trusted screens.</p>
+                </div>
+                <a class="btn link" href="/account.html">Sign-in settings</a>
+            </div>
+
+            <section class="grid">
+                <section class="panel" id="account">
+                    <h2>Profile</h2>
                     <div class="field">
+                        <label for="display-name">Display name</label>
+                        <input id="display-name" type="text" maxlength="80" autocomplete="name">
+                    </div>
+                    <div class="button-row">
+                        <button class="btn primary" id="save-profile-button" type="button">Save profile</button>
+                    </div>
+                    <div class="status" id="profile-status"></div>
+                </section>
+
+                <section class="panel">
+                    <h2>Pair a screen</h2>
+                    <p class="muted">Enter the code shown on a TV, mobile app or web screen.</p>
+                    <div class="field" style="margin-top:14px">
+                        <label for="pair-code">Pairing code</label>
+                        <input id="pair-code" class="code-input" type="text" inputmode="text" maxlength="10" autocomplete="one-time-code" placeholder="ABC123">
+                    </div>
+                    <div class="button-row">
+                        <button class="btn primary" id="approve-button" type="button">Approve device</button>
+                        <button class="btn" id="clear-code-button" type="button">Clear</button>
+                    </div>
+                    <div class="status" id="pair-status"></div>
+                </section>
+            </section>
+
+            <section class="panel" id="sources" style="margin-top:22px">
+                <div class="source-layout">
+                    <div>
+                        <h2>TV provider</h2>
+                        <div class="source-fields">
+                            <div class="segmented" aria-label="Source type">
+                                <button class="segment active" id="type-xtream" type="button" data-source-type="xtream">Xtream</button>
+                                <button class="segment" id="type-m3u" type="button" data-source-type="m3u">M3U</button>
+                            </div>
+                            <div class="field">
+                                <label for="source-name">Name</label>
+                                <input id="source-name" type="text" maxlength="80" placeholder="My IPTV">
+                            </div>
+                            <div id="xtream-fields">
+                                <div class="field">
+                                    <label for="xtream-url">Server URL</label>
+                                    <input id="xtream-url" type="url" placeholder="https://provider.example">
+                                </div>
+                                <div class="field">
+                                    <label for="xtream-username">Username</label>
+                                    <input id="xtream-username" type="text" autocomplete="username">
+                                </div>
+                                <div class="field">
+                                    <label for="xtream-password">Password</label>
+                                    <input id="xtream-password" type="password" autocomplete="current-password">
+                                </div>
+                            </div>
+                            <div id="m3u-fields" class="hidden">
+                                <div class="field">
+                                    <label for="m3u-url">Playlist URL</label>
+                                    <input id="m3u-url" type="url" placeholder="https://provider.example/playlist.m3u">
+                                </div>
+                            </div>
+                            <button class="btn primary" id="add-source-button" type="button">Add provider</button>
+                            <div class="status" id="source-status"></div>
+                        </div>
+                    </div>
+                    <div>
+                        <h2>Your providers</h2>
+                        <div class="source-list" id="sources-list"></div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="grid" style="margin-top:22px">
+                <section class="panel" id="devices">
+                    <h2>Trusted screens</h2>
+                    <div class="devices" id="devices-list"></div>
+                    <div class="status" id="devices-status"></div>
+                </section>
+
+                <section class="panel">
+                    <h2>Remote play</h2>
+                    <p class="muted">Send a playback or navigation command to a trusted Norva screen.</p>
+                    <div class="field" style="margin-top:14px">
                         <label for="command-device">Target device</label>
                         <select id="command-device"></select>
                     </div>
@@ -548,8 +682,6 @@
                         <label for="command-title">Title</label>
                         <input id="command-title" type="text" maxlength="120" placeholder="Norva stream">
                     </div>
-                </div>
-                <div>
                     <div class="field">
                         <label for="command-url">URL</label>
                         <input id="command-url" type="url" placeholder="https://...">
@@ -559,15 +691,15 @@
                         <button class="btn" id="send-open-button" type="button">Open</button>
                     </div>
                     <div class="status" id="command-status"></div>
-                </div>
-            </div>
-        </section>
+                </section>
+            </section>
 
-        <section class="panel advanced">
-            <h2>Advanced</h2>
-            <div class="button-row">
-                <a class="btn link" href="/hub-connect.html">Local connector</a>
-            </div>
+            <section class="panel advanced">
+                <h2>Advanced</h2>
+                <div class="button-row">
+                    <a class="btn link" href="/hub-connect.html">Local connector</a>
+                </div>
+            </section>
         </section>
     </main>
 
@@ -581,10 +713,12 @@
         const sourcesEl = document.getElementById('sources-list');
         const mediaStatus = document.getElementById('media-status');
         const mediaEls = {
-            live: document.getElementById('media-live'),
-            movie: document.getElementById('media-movie'),
-            series: document.getElementById('media-series')
+            live: Array.from(document.querySelectorAll('[data-media-shelf="live"]')),
+            movie: Array.from(document.querySelectorAll('[data-media-shelf="movie"]')),
+            series: Array.from(document.querySelectorAll('[data-media-shelf="series"]'))
         };
+        const favoriteList = document.getElementById('favorite-list');
+        const historyList = document.getElementById('history-list');
         const commandDevice = document.getElementById('command-device');
         const pairStatus = document.getElementById('pair-status');
         const profileStatus = document.getElementById('profile-status');
@@ -597,6 +731,16 @@
         let commandPollHandle = 0;
 
         boot();
+
+        document.querySelectorAll('[data-view-link]').forEach(link => {
+            link.addEventListener('click', event => {
+                event.preventDefault();
+                showView(link.dataset.viewLink, true);
+            });
+        });
+        document.querySelectorAll('[data-view-button]').forEach(button => {
+            button.addEventListener('click', () => showView(button.dataset.viewButton, true));
+        });
 
         document.getElementById('signout-button').addEventListener('click', async () => {
             await NorvaAuth.signOut();
@@ -617,7 +761,7 @@
         document.getElementById('clear-code-button').addEventListener('click', () => {
             pairCodeInput.value = '';
             pairStatus.className = 'status';
-            history.replaceState({}, document.title, '/cloud.html');
+            history.replaceState({}, document.title, '#account');
         });
         pairCodeInput.addEventListener('input', () => {
             pairCodeInput.value = pairCodeInput.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10);
@@ -638,13 +782,34 @@
             if (params.get('pair')) {
                 pairCodeInput.value = params.get('pair').toUpperCase();
                 setStatus(pairStatus, 'info', 'Pairing code ready to approve.');
+                showView('account', true);
+            } else {
+                showView(getInitialView(), false);
             }
 
             await registerCurrentDevice();
             startDeviceCommandLoop();
             await Promise.all([loadProfile(user), loadDevices(), loadCounters()]);
             await loadSources();
-            await loadMediaShelves();
+            await Promise.all([loadMediaShelves(), loadMyList()]);
+        }
+
+        function getInitialView() {
+            const hash = location.hash.replace('#', '');
+            const allowed = new Set(['home', 'live', 'movies', 'series', 'search', 'my-list', 'account']);
+            return allowed.has(hash) ? hash : 'home';
+        }
+
+        function showView(view, pushHash) {
+            const selected = view || 'home';
+            document.querySelectorAll('[data-view]').forEach(panel => {
+                panel.classList.toggle('active', panel.dataset.view === selected);
+            });
+            document.querySelectorAll('[data-view-link]').forEach(link => {
+                link.classList.toggle('active', link.dataset.viewLink === selected);
+            });
+            if (pushHash) history.replaceState({}, document.title, `#${selected}`);
+            if (selected === 'my-list') loadMyList();
         }
 
         async function loadProfile(user) {
@@ -684,7 +849,7 @@
                 await NorvaCloud.pairing.approve(code);
                 setStatus(pairStatus, 'success', 'Device paired with your Norva Account.');
                 pairCodeInput.value = '';
-                history.replaceState({}, document.title, '/cloud.html');
+                history.replaceState({}, document.title, '#account');
                 await loadDevices();
             } catch (error) {
                 setStatus(pairStatus, 'error', error.message);
@@ -706,7 +871,7 @@
         }
 
         async function loadCounters() {
-            const history = await NorvaCloud.history.list({ limit: 1 }).catch(() => ({ history: [] }));
+            const history = await NorvaCloud.history.list({ limit: 50 }).catch(() => ({ history: [] }));
             document.getElementById('history-count').textContent = String((history.history || []).length);
         }
 
@@ -744,7 +909,7 @@
                 clearSourceForm();
                 setStatus(sourceStatus, 'success', 'Source added. Norva is syncing it now.');
                 await loadSources();
-                await loadMediaShelves();
+                await Promise.all([loadMediaShelves(), loadMyList()]);
                 setTimeout(loadSources, 5000);
                 setTimeout(loadMediaShelves, 5500);
             } catch (error) {
@@ -777,9 +942,9 @@
             const q = document.getElementById('media-search').value.trim();
             try {
                 const [live, movie, series] = await Promise.all([
-                    NorvaCloud.mediaItems.list({ type: 'live', limit: 8, q }).catch(() => ({ items: [] })),
-                    NorvaCloud.mediaItems.list({ type: 'movie', limit: 8, q }).catch(() => ({ items: [] })),
-                    NorvaCloud.mediaItems.list({ type: 'series', limit: 8, q }).catch(() => ({ items: [] }))
+                    NorvaCloud.mediaItems.list({ type: 'live', limit: 24, q }).catch(() => ({ items: [] })),
+                    NorvaCloud.mediaItems.list({ type: 'movie', limit: 24, q }).catch(() => ({ items: [] })),
+                    NorvaCloud.mediaItems.list({ type: 'series', limit: 24, q }).catch(() => ({ items: [] }))
                 ]);
                 renderMediaShelf('live', live.items || []);
                 renderMediaShelf('movie', movie.items || []);
@@ -797,13 +962,21 @@
         }
 
         function renderMediaShelf(type, items) {
-            const container = mediaEls[type];
-            container.innerHTML = '';
-            if (!items.length) {
-                container.innerHTML = '<div class="empty">No items yet.</div>';
-                return;
-            }
-            items.forEach(item => {
+            const containers = mediaEls[type] || [];
+            containers.forEach(container => {
+                container.innerHTML = '';
+                if (!items.length) {
+                    container.innerHTML = '<div class="empty">No items yet.</div>';
+                    return;
+                }
+                items.forEach(item => {
+                    container.appendChild(createMediaCard(item));
+                });
+            });
+        }
+
+        function createMediaCard(rawItem, options = {}) {
+            const item = normalizeMediaItem(rawItem);
                 const card = document.createElement('div');
                 card.className = 'media-card';
                 const info = document.createElement('div');
@@ -821,9 +994,67 @@
                 play.textContent = 'Play';
                 play.addEventListener('click', () => playMediaItem(item, play));
                 actions.append(play);
+                if (options.removable && item.favorite_id) {
+                    const remove = document.createElement('button');
+                    remove.className = 'btn';
+                    remove.type = 'button';
+                    remove.textContent = 'Remove';
+                    remove.addEventListener('click', async () => {
+                        remove.disabled = true;
+                        try {
+                            await NorvaCloud.favorites.remove(item.favorite_id);
+                            await loadMyList();
+                        } catch (error) {
+                            setStatus(mediaStatus, 'error', error.message);
+                        } finally {
+                            remove.disabled = false;
+                        }
+                    });
+                    actions.append(remove);
+                }
                 card.append(info, actions);
-                container.appendChild(card);
-            });
+                return card;
+        }
+
+        function normalizeMediaItem(item) {
+            const data = item.data || {};
+            return {
+                ...item,
+                favorite_id: item.favorite_id || item.id,
+                source_id: item.source_id || data.source_id,
+                item_type: item.item_type || data.item_type || data.type || 'live',
+                external_id: item.external_id || item.item_id || data.external_id || data.item_id,
+                title: item.title || data.title || data.name || item.item_id || 'Untitled',
+                subtitle: item.subtitle || data.subtitle || labelForType(item.item_type || data.type)
+            };
+        }
+
+        async function loadMyList() {
+            try {
+                const [favorites, history] = await Promise.all([
+                    NorvaCloud.favorites.list({ limit: 24 }).catch(() => ({ favorites: [] })),
+                    NorvaCloud.history.list({ limit: 24 }).catch(() => ({ history: [] }))
+                ]);
+                renderSimpleMediaList(favoriteList, favorites.favorites || [], {
+                    empty: 'No favorites yet.',
+                    removable: true
+                });
+                renderSimpleMediaList(historyList, history.history || [], {
+                    empty: 'No watch history yet.'
+                });
+                document.getElementById('history-count').textContent = String((history.history || []).length);
+            } catch (error) {
+                setStatus(mediaStatus, 'error', error.message);
+            }
+        }
+
+        function renderSimpleMediaList(container, items, options = {}) {
+            container.innerHTML = '';
+            if (!items.length) {
+                container.innerHTML = `<div class="empty">${options.empty || 'No items yet.'}</div>`;
+                return;
+            }
+            items.forEach(item => container.appendChild(createMediaCard(item, options)));
         }
 
         async function playMediaItem(item, button) {
@@ -889,7 +1120,7 @@
                         setStatus(sourceStatus, 'info', 'Sync started...');
                         await NorvaCloud.sources.sync(source.id);
                         await loadSources();
-                        await loadMediaShelves();
+                        await Promise.all([loadMediaShelves(), loadMyList()]);
                         setTimeout(loadSources, 5000);
                         setTimeout(loadMediaShelves, 5500);
                     } catch (error) {
@@ -907,6 +1138,7 @@
                     try {
                         await NorvaCloud.sources.remove(source.id);
                         await loadSources();
+                        await loadMediaShelves();
                     } catch (error) {
                         setStatus(sourceStatus, 'error', error.message);
                     }
