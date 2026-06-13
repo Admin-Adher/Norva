@@ -176,7 +176,13 @@ class App {
     hasCloudSession() {
         try {
             const session = JSON.parse(localStorage.getItem('norva-cloud-session') || 'null');
-            return Boolean(session?.access_token);
+            const now = Math.floor(Date.now() / 1000);
+            return Boolean(
+                session?.access_token &&
+                session?.refresh_token &&
+                session?.user?.id &&
+                (!session.expires_at || Number(session.expires_at) > now + 30)
+            );
         } catch (_) {
             return false;
         }

@@ -15,6 +15,29 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@800&display=swap"
     rel="stylesheet">
+  <script>
+    (function () {
+      var host = window.location.hostname;
+      var isHosted = host && host !== 'localhost' && host !== '127.0.0.1';
+      if (!isHosted) return;
+
+      try {
+        var session = JSON.parse(localStorage.getItem('norva-cloud-session') || 'null');
+        var now = Math.floor(Date.now() / 1000);
+        var isUsable = Boolean(
+          session &&
+          session.access_token &&
+          session.refresh_token &&
+          session.user &&
+          session.user.id &&
+          (!session.expires_at || Number(session.expires_at) > now + 30)
+        );
+        if (!isUsable) window.location.replace('/cloud.html');
+      } catch (_) {
+        window.location.replace('/cloud.html');
+      }
+    })();
+  </script>
   <!-- HLS.js for video playback -->
   <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.7/dist/hls.min.js"></script>
 </head>
@@ -1321,7 +1344,7 @@
   <script src="/js/pages/SeriesPage.js?v=4"></script>
   <script src="/js/pages/Settings.js?v=3"></script>
   <script src="/js/pages/WatchPage.js?v=31"></script>
-  <script src="/js/app.js?v=5"></script>
+  <script src="/js/app.js?v=8"></script>
   <script>
     // Check for SSO token in URL
     (function () {

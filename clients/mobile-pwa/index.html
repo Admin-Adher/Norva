@@ -10,6 +10,25 @@
   <link rel="manifest" href="/manifest.json" />
   <link rel="apple-touch-icon" href="/icon-192.png" />
   <title>Norva</title>
+  <script>
+    (function () {
+      try {
+        var session = JSON.parse(localStorage.getItem('norva-cloud-session') || 'null');
+        var now = Math.floor(Date.now() / 1000);
+        var isUsable = Boolean(
+          session &&
+          session.access_token &&
+          session.refresh_token &&
+          session.user &&
+          session.user.id &&
+          (!session.expires_at || Number(session.expires_at) > now + 30)
+        );
+        if (!isUsable) window.location.replace('/cloud.html');
+      } catch (_) {
+        window.location.replace('/cloud.html');
+      }
+    })();
+  </script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -590,7 +609,13 @@
   function hasCloudSession() {
     try {
       const session = JSON.parse(localStorage.getItem('norva-cloud-session') || 'null');
-      return Boolean(session && session.access_token);
+      const now = Math.floor(Date.now() / 1000);
+      return Boolean(
+        session?.access_token &&
+        session?.refresh_token &&
+        session?.user?.id &&
+        (!session.expires_at || Number(session.expires_at) > now + 30)
+      );
     } catch (_) {
       return false;
     }
