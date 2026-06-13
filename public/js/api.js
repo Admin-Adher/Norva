@@ -386,9 +386,10 @@ const CloudAdapter = (() => {
             if (action === 'stream' && streamId) {
                 const type = query.get('type') || xtreamMatch[4] || 'live';
                 const container = query.get('container') || (type === 'live' ? 'm3u8' : 'mp4');
-                const preferredMode = localStorage.getItem('norva-cloud-playback-mode') || 'relay';
+                const isVodPlayback = type === 'movie' || type === 'series';
+                const preferredMode = localStorage.getItem('norva-cloud-playback-mode') || (isVodPlayback ? 'transcode' : 'relay');
                 const needsGateway = requiresGatewayForContainer(type, container);
-                const mode = needsGateway && preferredMode !== 'direct' ? 'transcode' : preferredMode;
+                const mode = ((isVodPlayback || needsGateway) && preferredMode !== 'direct') ? 'transcode' : preferredMode;
                 const cloudSourceId = await resolveSourceId(sourceId);
                 const baseSession = {
                     sourceId: cloudSourceId,
