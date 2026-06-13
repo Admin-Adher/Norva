@@ -32,7 +32,7 @@ app.get('/health', (req, res) => {
     res.json({
         ok: true,
         service: 'norva-media-gateway',
-        version: 2,
+        version: 3,
         activeSessions: sessions.size,
         time: new Date().toISOString()
     });
