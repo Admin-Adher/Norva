@@ -12,10 +12,12 @@
     const DEFAULT_SOURCE_SYNC_URL = 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-source-sync';
     const DEFAULT_CATALOG_URL = 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-catalog';
     const DEFAULT_SERIES_INFO_URL = 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-series-info';
+    const DEFAULT_PLAYBACK_URL = 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-playback';
     const KEY_API_URL = 'norva-cloud-api-url';
     const KEY_SOURCE_SYNC_URL = 'norva-source-sync-url';
     const KEY_CATALOG_URL = 'norva-catalog-url';
     const KEY_SERIES_INFO_URL = 'norva-series-info-url';
+    const KEY_PLAYBACK_URL = 'norva-playback-url';
     const KEY_TOKEN = 'norva-cloud-token';
     const KEY_DEVICE_TOKEN = 'norva-cloud-device-token';
 
@@ -36,6 +38,11 @@
 
     function seriesInfoBase() {
         const configured = localStorage.getItem(KEY_SERIES_INFO_URL) || window.NORVA_SERIES_INFO_URL || DEFAULT_SERIES_INFO_URL;
+        return configured.replace(/\/+$/, '');
+    }
+
+    function playbackBase() {
+        const configured = localStorage.getItem(KEY_PLAYBACK_URL) || window.NORVA_PLAYBACK_URL || DEFAULT_PLAYBACK_URL;
         return configured.replace(/\/+$/, '');
     }
 
@@ -122,6 +129,17 @@
         } catch (error) {
             if (error.status === 404 || error.status === 405) {
                 return request('GET', route, null, options);
+            }
+            throw error;
+        }
+    }
+
+    async function playbackRequest(session, options = {}) {
+        try {
+            return await requestToBase(playbackBase(), 'POST', '/playback/sessions', session, options);
+        } catch (error) {
+            if (error.status === 404 || error.status === 405) {
+                return request('POST', '/playback/sessions', session, options);
             }
             throw error;
         }
@@ -224,7 +242,7 @@
         },
 
         playback: {
-            createSession: (session) => request('POST', '/playback/sessions', session),
+            createSession: (session) => playbackRequest(session),
             getSession: (id) => request('GET', `/playback/sessions/${encodeURIComponent(id)}`),
             expireSession: (id) => request('POST', `/playback/sessions/${encodeURIComponent(id)}/expire`)
         },
@@ -243,7 +261,7 @@
                 list: (params = {}) => catalogRequest('/device/media-items', params, { token: getDeviceToken() })
             },
             playback: {
-                createSession: (session) => request('POST', '/device/playback/sessions', session, { token: getDeviceToken() })
+                createSession: (session) => playbackRequest(session, { token: getDeviceToken() })
             }
         }
     };
