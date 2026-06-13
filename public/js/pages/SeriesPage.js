@@ -725,8 +725,9 @@ class SeriesPage {
                 currentEpisode: episodeNum,
                 containerExtension: container,
                 resumeTime: (ratio > 0.02 && ratio < 0.95) ? h.progress : 0,
-                durationHint: h.duration || MediaUtils.parseDurationToSeconds(episode.duration)
-            }, result.url);
+                durationHint: h.duration || MediaUtils.parseDurationToSeconds(episode.duration),
+                cloudPlaybackSessionId: result.sessionId
+            }, result.url, { sessionId: result.sessionId });
         } catch (err) {
             console.error('Error resuming episode:', err);
         }
@@ -957,8 +958,9 @@ class SeriesPage {
                         currentEpisode: episodeNum,
                         containerExtension: container,
                         resumeTime: (ratio > 0.02 && ratio < 0.95) ? h.progress : 0,
-                        durationHint
-                    }, result.url);
+                        durationHint,
+                        cloudPlaybackSessionId: result.sessionId
+                    }, result.url, { sessionId: result.sessionId });
                 }
             }
         } catch (err) {

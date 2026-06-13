@@ -101,7 +101,10 @@ class WatchPage {
         this._playbackStatusOkReported = false;
         this._seekDebounceTimer = null;
         this._pendingSeekTarget = null;
+        this.currentSessionId = null;
         this.activeSessionIds = new Set();
+        this.currentCloudPlaybackSessionId = null;
+        this.activeCloudPlaybackSessionIds = new Set();
 
         // Overlay timer
         this.overlayTimeout = null;
@@ -287,8 +290,18 @@ class WatchPage {
      * Main entry point - play content
      * @param {Object} content - Movie or episode info
      * @param {string} streamUrl - Stream URL
+     * @param {Object} playback - Cloud playback metadata
      */
-    async play(content, streamUrl) {
+    async play(content, streamUrl, playback = {}) {
+        const cloudPlaybackSessionId = playback.sessionId
+            || playback.cloudPlaybackSessionId
+            || content.cloudPlaybackSessionId
+            || content.playbackSessionId
+            || null;
+        if (cloudPlaybackSessionId) {
+            content.cloudPlaybackSessionId = cloudPlaybackSessionId;
+        }
+
         this.content = content;
         this.contentType = content.type;
         this.seriesInfo = content.seriesInfo || null;
@@ -326,7 +339,7 @@ class WatchPage {
         this.subtitleEl.textContent = content.subtitle || '';
 
         // Load video
-        await this.loadVideo(streamUrl);
+        await this.loadVideo(streamUrl, { cloudPlaybackSessionId });
 
         // Show Now Playing indicator in navbar
         this.showNowPlaying(content.title);
@@ -479,6 +492,39 @@ class WatchPage {
             results.forEach(result => {
                 if (result.status === 'rejected') {
                     console.error(result.reason?.message || 'Failed to stop transcode session');
+                }
+            });
+        });
+    }
+
+    registerCloudPlaybackSession(sessionId) {
+        const id = sessionId ? String(sessionId).trim() : '';
+        if (!id) return;
+        this.currentCloudPlaybackSessionId = id;
+        this.activeCloudPlaybackSessionIds.add(id);
+    }
+
+    async stopCloudPlaybackSessions() {
+        const sessionIds = new Set(this.activeCloudPlaybackSessionIds);
+        if (this.currentCloudPlaybackSessionId) {
+            sessionIds.add(this.currentCloudPlaybackSessionId);
+        }
+
+        if (!sessionIds.size) return;
+
+        this.currentCloudPlaybackSessionId = null;
+        this.activeCloudPlaybackSessionIds.clear();
+
+        const expireSession = window.NorvaCloud?.playback?.expireSession;
+        if (typeof expireSession !== 'function') return;
+
+        await Promise.allSettled(Array.from(sessionIds).map(async (sessionId) => {
+            console.log('[WatchPage] Expiring cloud playback session:', sessionId);
+            await expireSession(sessionId);
+        })).then(results => {
+            results.forEach(result => {
+                if (result.status === 'rejected') {
+                    console.error(result.reason?.message || 'Failed to expire cloud playback session');
                 }
             });
         });
@@ -791,7 +837,7 @@ class WatchPage {
         return probeRes.json();
     }
 
-    async loadVideo(url) {
+    async loadVideo(url, options = {}) {
         // Store the URL for copy functionality
         this.currentUrl = url;
         this._playbackStatusOkReported = false;
@@ -804,6 +850,7 @@ class WatchPage {
         // the new title — otherwise the old + new connections overlap and a
         // single-connection IPTV account rejects the new one with 401.
         await this.stop();
+        this.registerCloudPlaybackSession(options.cloudPlaybackSessionId);
         this.baseStreamUrl = url;
         this.currentPlaybackMode = null;
         this.currentProcessingOptions = {};
@@ -1195,7 +1242,10 @@ class WatchPage {
         // (loadVideo) can await full teardown before opening a new stream —
         // single-connection IPTV accounts 401 if the old FFmpeg is still
         // connected when the next one starts.
-        const sessionTeardown = this.stopTranscodeSession();
+        const sessionTeardown = Promise.allSettled([
+            this.stopTranscodeSession(),
+            this.stopCloudPlaybackSessions()
+        ]);
         this.updateTranscodeStatus('hidden');
 
         // Hide quality badge
@@ -1853,10 +1903,11 @@ class WatchPage {
                 this.resumeTime = position;
                 this.content.id = next.streamId;
                 this.content.sourceId = next.sourceId;
+                this.content.cloudPlaybackSessionId = result.sessionId || null;
                 this.containerExtension = next.container || 'mp4';
                 this._failoverInProgress = false;
                 handedOff = true;
-                await this.loadVideo(result.url);
+                await this.loadVideo(result.url, { cloudPlaybackSessionId: result.sessionId });
             }
         } catch (err) {
             console.error('[WatchPage] Failover failed:', err);
@@ -2707,8 +2758,9 @@ class WatchPage {
                     year: movie.year,
                     rating: movie.rating,
                     sourceId: sourceId,
-                    categoryId: movie.category_id
-                }, result.url);
+                    categoryId: movie.category_id,
+                    cloudPlaybackSessionId: result.sessionId
+                }, result.url, { sessionId: result.sessionId });
             }
         } catch (e) {
             console.error('Error playing recommended movie:', e);
@@ -2794,8 +2846,9 @@ class WatchPage {
                     seriesId: this.content.seriesId,
                     seriesInfo: this.seriesInfo,
                     currentSeason: seasonNum,
-                    currentEpisode: episodeNum
-                }, result.url);
+                    currentEpisode: episodeNum,
+                    cloudPlaybackSessionId: result.sessionId
+                }, result.url, { sessionId: result.sessionId });
             }
         } catch (e) {
             console.error('Error playing episode:', e);
@@ -2885,8 +2938,9 @@ class WatchPage {
                     seriesId: this.content.seriesId,
                     seriesInfo: this.seriesInfo,
                     currentSeason: nextEp.seasonNum,
-                    currentEpisode: nextEp.episode_num
-                }, result.url);
+                    currentEpisode: nextEp.episode_num,
+                    cloudPlaybackSessionId: result.sessionId
+                }, result.url, { sessionId: result.sessionId });
             }
         } catch (e) {
             console.error('Error playing next episode:', e);

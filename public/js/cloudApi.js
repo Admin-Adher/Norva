@@ -145,6 +145,17 @@
         }
     }
 
+    async function playbackSessionRequest(method, path, body, options = {}) {
+        try {
+            return await requestToBase(playbackBase(), method, path, body, options);
+        } catch (error) {
+            if (error.status === 404 || error.status === 405) {
+                return request(method, path, body, options);
+            }
+            throw error;
+        }
+    }
+
     async function requestToBase(baseUrl, method, path, body, options = {}) {
         const headers = {
             'Content-Type': 'application/json',
@@ -243,8 +254,8 @@
 
         playback: {
             createSession: (session) => playbackRequest(session),
-            getSession: (id) => request('GET', `/playback/sessions/${encodeURIComponent(id)}`),
-            expireSession: (id) => request('POST', `/playback/sessions/${encodeURIComponent(id)}/expire`)
+            getSession: (id) => playbackSessionRequest('GET', `/playback/sessions/${encodeURIComponent(id)}`),
+            expireSession: (id) => playbackSessionRequest('POST', `/playback/sessions/${encodeURIComponent(id)}/expire`)
         },
 
         device: {

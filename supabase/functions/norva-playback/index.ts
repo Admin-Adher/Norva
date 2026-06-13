@@ -72,7 +72,7 @@ Deno.serve(async (req) => {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 1,
+        version: 3,
         relayConfigured: Boolean(config.relayBaseUrl && config.relayTokenSecret),
         gatewayConfigured: Boolean(config.mediaGatewayUrl && config.mediaGatewayToken),
       });
@@ -80,6 +80,20 @@ Deno.serve(async (req) => {
     if (req.method === "POST" && segments[0] === "playback" && segments[1] === "sessions") {
       const identity = await requireIdentity(req, supabase);
       return json(req, await createPlaybackSession(req, identity.userId, supabase, identity.deviceId ?? null), 201);
+    }
+    if (req.method === "GET" && segments[0] === "playback" && segments[1] === "sessions" && segments[2]) {
+      const identity = await requireIdentity(req, supabase);
+      return json(req, await getPlaybackSession(segments[2], identity.userId, supabase));
+    }
+    if (
+      req.method === "POST" &&
+      segments[0] === "playback" &&
+      segments[1] === "sessions" &&
+      segments[2] &&
+      segments[3] === "expire"
+    ) {
+      const identity = await requireIdentity(req, supabase);
+      return json(req, await expirePlaybackSession(segments[2], identity.userId, supabase));
     }
     throw new HttpError(404, "Route not found");
   } catch (error) {
@@ -178,6 +192,85 @@ async function createPlaybackSession(
       gatewaySession: gateway.session,
       gatewayRequired: !gateway.hlsUrl,
     },
+  };
+}
+
+async function getPlaybackSession(id: string, userId: string, db: SupabaseClient) {
+  const { data, error } = await db
+    .from("cloud_playback_sessions")
+    .select("*, cloud_gateway_sessions(*)")
+    .eq("id", id)
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (error) throwDb(error, "Unable to load playback session");
+  if (!data) throw new HttpError(404, "Playback session not found");
+  return { session: data };
+}
+
+async function expirePlaybackSession(id: string, userId: string, db: SupabaseClient) {
+  const { data: session, error } = await db
+    .from("cloud_playback_sessions")
+    .select("*, cloud_gateway_sessions(*)")
+    .eq("id", id)
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (error) throwDb(error, "Unable to load playback session");
+  if (!session) throw new HttpError(404, "Playback session not found");
+
+  const gatewaySessions = Array.isArray(session.cloud_gateway_sessions)
+    ? session.cloud_gateway_sessions
+    : [];
+  const runtimeConfig = await getRuntimeConfig(db);
+  const closedGatewayIds: string[] = [];
+  const gatewayErrors: unknown[] = [];
+
+  if (runtimeConfig.mediaGatewayUrl && runtimeConfig.mediaGatewayToken) {
+    await Promise.allSettled(gatewaySessions.map(async (gateway: JsonRecord) => {
+      const externalSessionId = stringOrNull(gateway.external_session_id);
+      if (!externalSessionId) return;
+
+      const response = await fetch(`${runtimeConfig.mediaGatewayUrl}/sessions/${encodeURIComponent(externalSessionId)}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${runtimeConfig.mediaGatewayToken}` },
+      });
+      if (!response.ok && response.status !== 404) {
+        const body = await response.text().catch(() => "");
+        throw new HttpError(response.status, "Media gateway refused session expiry", body);
+      }
+      closedGatewayIds.push(String(gateway.id ?? externalSessionId));
+    })).then((results) => {
+      results.forEach((result) => {
+        if (result.status === "rejected") gatewayErrors.push(result.reason);
+      });
+    });
+  }
+
+  if (gatewaySessions.length) {
+    const gatewayIds = gatewaySessions
+      .map((gateway: JsonRecord) => stringOrNull(gateway.id))
+      .filter((gatewayId): gatewayId is string => Boolean(gatewayId));
+    if (gatewayIds.length) {
+      const { error: gatewayUpdateError } = await db
+        .from("cloud_gateway_sessions")
+        .update({ status: "expired", expires_at: new Date().toISOString() })
+        .in("id", gatewayIds);
+      if (gatewayUpdateError) throwDb(gatewayUpdateError, "Unable to expire gateway sessions");
+    }
+  }
+
+  const { data: expired, error: updateError } = await db
+    .from("cloud_playback_sessions")
+    .update({ status: "expired", expires_at: new Date().toISOString() })
+    .eq("id", id)
+    .eq("user_id", userId)
+    .select("*")
+    .single();
+  if (updateError) throwDb(updateError, "Unable to expire playback session");
+
+  return {
+    session: expired,
+    gatewayClosed: closedGatewayIds.length,
+    gatewayErrors: gatewayErrors.length,
   };
 }
 

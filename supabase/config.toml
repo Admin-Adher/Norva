@@ -2,3 +2,6 @@ project_id = "oupsceccxsonaalhueff"
 
 [functions.norva-cloud]
 verify_jwt = false
+
+[functions.norva-playback]
+verify_jwt = false

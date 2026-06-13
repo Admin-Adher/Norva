@@ -476,7 +476,8 @@ class HomePage {
                     poster: item.stream_icon || item.data.poster,
                     sourceId: sourceId,
                     resumeTime: isResume ? item.progress : 0,
-                    containerExtension: container
+                    containerExtension: container,
+                    cloudPlaybackSessionId: result.sessionId
                 };
 
                 // For episodes, try to restore series data for next episode functionality
@@ -501,7 +502,7 @@ class HomePage {
                 // Switch to watch page
                 this.app.navigateTo('watch');
 
-                this.app.pages.watch.play(content, result.url);
+                this.app.pages.watch.play(content, result.url, { sessionId: result.sessionId });
             }
         } catch (err) {
             console.error('[Dashboard] Playback failed:', err);

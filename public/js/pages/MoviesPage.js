@@ -818,8 +818,9 @@ class MoviesPage {
                         resumeTime,
                         durationHint: movie.tmdb?.runtime ? movie.tmdb.runtime * 60 : null,
                         versions: versionList,
-                        versionIndex: 0
-                    }, result.url);
+                        versionIndex: 0,
+                        cloudPlaybackSessionId: result.sessionId
+                    }, result.url, { sessionId: result.sessionId });
                 }
             }
         } catch (err) {
