@@ -1269,7 +1269,12 @@ async function createGatewaySession(
       "Content-Type": "application/json",
       Authorization: `Bearer ${runtimeConfig.mediaGatewayToken}`,
     },
-    body: JSON.stringify({ playbackSessionId, sourceUrl: targetUrl, expiresAt }),
+    body: JSON.stringify({
+      playbackSessionId,
+      ownerKey: await sha256Hex(userId),
+      sourceUrl: targetUrl,
+      expiresAt,
+    }),
   });
   const gatewayBody = await response.json().catch(() => ({}));
   if (!response.ok) {

@@ -321,6 +321,7 @@ class WatchPage {
         this.versionIndex = content.versionIndex || 0;
         this._failoverInProgress = false;
         this._playbackStatusOkReported = false;
+        this._lastFailureMsg = null;
 
         // Stop any Live TV playback before starting movie/series
         this.app?.player?.stop?.();
@@ -502,6 +503,26 @@ class WatchPage {
     isGatewayPlaybackUrl(url) {
         const value = String(url || '');
         return /\/sessions\/[^/?#]+\/playlist\.m3u8/i.test(value);
+    }
+
+    isLikelyPlaybackUrl(url) {
+        const value = String(url || '').trim();
+        if (!value || value === 'undefined' || value === 'null') return false;
+        if (/^(blob:|data:|\/api\/|\/sessions\/)/i.test(value)) return true;
+        if (!/^https?:\/\//i.test(value)) return false;
+
+        try {
+            const parsed = new URL(value, window.location.href);
+            if (parsed.origin === window.location.origin) {
+                const path = parsed.pathname.replace(/\/+$/, '') || '/';
+                if (path === '/' || path === '/index.html' || path === '/account.html' || path === '/cloud.html') {
+                    return false;
+                }
+            }
+            return true;
+        } catch (_) {
+            return false;
+        }
     }
 
     getCloudSafeSettings(settings = {}) {
@@ -892,6 +913,11 @@ class WatchPage {
         const playbackAttemptId = options.playbackAttemptId ?? this._playbackAttemptId;
         if (this.isStalePlaybackAttempt(playbackAttemptId)) {
             await this.cleanupStaleCloudPlaybackSession(options.cloudPlaybackSessionId);
+            return;
+        }
+        if (!this.isLikelyPlaybackUrl(url)) {
+            await this.cleanupStaleCloudPlaybackSession(options.cloudPlaybackSessionId);
+            await this.handlePlaybackFailure('Playback session did not return a media URL.');
             return;
         }
 
