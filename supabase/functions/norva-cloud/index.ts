@@ -104,7 +104,7 @@ async function route(
       body: {
         ok: true,
         service: "norva-cloud",
-        version: 5,
+        version: 6,
         relayConfigured: Boolean(runtimeConfig.relayBaseUrl && runtimeConfig.relayTokenSecret),
         gatewayConfigured: Boolean(runtimeConfig.mediaGatewayUrl && runtimeConfig.mediaGatewayToken),
         cloudSourceConfigured: Boolean(runtimeConfig.sourceConfigKey),
@@ -540,6 +540,10 @@ async function syncCloudSource(sourceId: string, userId: string, db: SupabaseCli
         ? await syncM3uSource(sourceId, userId, config, db)
         : { total: 0 };
 
+    if ((source.source_type === "xtream" || source.source_type === "m3u") && Number(result.total ?? 0) <= 0) {
+      throw new HttpError(422, "No playable catalog items were imported from this source");
+    }
+
     await db
       .from("cloud_sources")
       .update({
@@ -595,8 +599,8 @@ function xtreamRows(
 ) {
   const rows: JsonRecord[] = [];
   for (const item of items) {
-    const streamId = stringOr(item.stream_id ?? item.series_id, "");
-    const title = stringOr(item.name, "");
+    const streamId = stringOr(item.stream_id ?? item.series_id ?? item.id, "");
+    const title = stringOr(item.name ?? item.title, "");
     if (!streamId || !title) continue;
     const container = stringOr(item.container_extension, itemType === "live" ? "m3u8" : "mp4");
     rows.push({
@@ -1692,11 +1696,17 @@ function boundedInt(value: unknown, fallback: number, min: number, max: number) 
 }
 
 function stringOr(value: unknown, fallback: string) {
-  return typeof value === "string" && value.trim() ? value.trim() : fallback;
+  if (typeof value === "string" && value.trim()) return value.trim();
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  if (typeof value === "boolean") return String(value);
+  return fallback;
 }
 
 function stringOrNull(value: unknown) {
-  return typeof value === "string" && value.trim() ? value.trim() : null;
+  if (typeof value === "string" && value.trim()) return value.trim();
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  if (typeof value === "boolean") return String(value);
+  return null;
 }
 
 function trimTrailingSlash(value: string) {
