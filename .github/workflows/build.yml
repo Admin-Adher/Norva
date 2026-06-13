@@ -1,0 +1,231 @@
+name: Build Norva
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # ──────────────────────────────────────────────────────────────────────────
+  # Windows portable .exe (Electron builder)
+  # ──────────────────────────────────────────────────────────────────────────
+  build-windows:
+    name: Build Windows Portable
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Windows portable
+        run: npm run build:desktop
+
+      - name: Upload Windows .exe artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Norva-Windows
+          path: dist-desktop/*.exe
+          if-no-files-found: error
+          retention-days: 30
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Android TV debug APK (manual aapt2 / javac / d8 / zipalign / apksigner)
+  # ──────────────────────────────────────────────────────────────────────────
+  build-android:
+    name: Build Android TV APK
+    runs-on: ubuntu-latest
+
+    env:
+      ANDROID_BUILD_TOOLS_VERSION: '35.0.0'
+      ANDROID_COMPILE_SDK: '35'
+      # Resolved after SDK setup step
+      BUILD_TOOLS_DIR: ''
+      ANDROID_JAR: ''
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── Java 17 ────────────────────────────────────────────────────────────
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      # ── Android SDK (build-tools 35.0.0 + platform android-35) ─────────────
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK build-tools and platform
+        run: |
+          sdkmanager \
+            "build-tools;${{ env.ANDROID_BUILD_TOOLS_VERSION }}" \
+            "platforms;android-${{ env.ANDROID_COMPILE_SDK }}" \
+            --no_https \
+            <<< "y"
+
+      # Expose tool paths as environment variables for the remaining steps
+      - name: Export SDK tool paths
+        run: |
+          BT="${ANDROID_HOME}/build-tools/${{ env.ANDROID_BUILD_TOOLS_VERSION }}"
+          echo "BUILD_TOOLS_DIR=${BT}"                                            >> "$GITHUB_ENV"
+          echo "ANDROID_JAR=${ANDROID_HOME}/platforms/android-${{ env.ANDROID_COMPILE_SDK }}/android.jar" >> "$GITHUB_ENV"
+          echo "AAPT2=${BT}/aapt2"                                                >> "$GITHUB_ENV"
+          echo "D8=${BT}/d8"                                                      >> "$GITHUB_ENV"
+          echo "ZIPALIGN=${BT}/zipalign"                                          >> "$GITHUB_ENV"
+          echo "APKSIGNER=${BT}/apksigner"                                        >> "$GITHUB_ENV"
+
+      # ── Generate a debug keystore (deterministic CN so CI stays reproducible)
+      - name: Generate debug keystore
+        run: |
+          keytool -genkeypair -v \
+            -keystore debug.keystore \
+            -alias androiddebugkey \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -storepass android \
+            -keypass android \
+            -dname "CN=Android Debug,O=Android,C=US"
+
+      # ── Sync web assets from public/ into the APK staging area ─────────────
+      - name: Sync web assets into stage-assets/www
+        run: |
+          STAGE="clients/android-tv/build-manual/stage-assets/www"
+          mkdir -p "${STAGE}"
+          # Copy all web assets from public/ (preserves directory structure)
+          cp -r public/. "${STAGE}/"
+
+      # ── Compile resources (aapt2 compile) ──────────────────────────────────
+      - name: aapt2 – compile resources
+        working-directory: clients/android-tv/build-manual
+        run: |
+          mkdir -p compiled-res
+          "${AAPT2}" compile \
+            --dir ../app/src/main/res \
+            -o compiled-res/
+
+      # ── Link resources → base.apk (aapt2 link) ─────────────────────────────
+      - name: aapt2 – link resources and generate R.java
+        working-directory: clients/android-tv/build-manual
+        run: |
+          mkdir -p gen/tv/nodecast/client
+          "${AAPT2}" link \
+            --proto-format \
+            -o base.apk \
+            -I "${ANDROID_JAR}" \
+            --manifest manifest.xml \
+            --java gen \
+            --auto-add-overlay \
+            compiled-res/*.flat
+
+          # aapt2 link --proto-format produces a proto-APK that cannot be
+          # directly used; we need a standard (non-proto) APK for packaging.
+          # Re-link without --proto-format for the actual APK.
+          "${AAPT2}" link \
+            -o base-std.apk \
+            -I "${ANDROID_JAR}" \
+            --manifest manifest.xml \
+            --java gen \
+            --auto-add-overlay \
+            compiled-res/*.flat
+
+      # ── Compile Java sources with javac ─────────────────────────────────────
+      - name: javac – compile Java sources
+        working-directory: clients/android-tv/build-manual
+        run: |
+          mkdir -p classes
+          LIBS_CP=$(find libs -name '*.jar' | tr '\n' ':' | sed 's/:$//')
+          javac \
+            -source 8 -target 8 \
+            -encoding UTF-8 \
+            -cp "${ANDROID_JAR}:${LIBS_CP}" \
+            -d classes \
+            -Xlint:none \
+            gen/tv/nodecast/client/R.java \
+            ../app/src/main/java/tv/nodecast/client/LocalServer.java \
+            ../app/src/main/java/tv/nodecast/client/MainActivity.java \
+            ../app/src/main/java/tv/nodecast/client/PlayerActivity.java
+
+      # ── Create JAR from .class files ─────────────────────────────────────────
+      - name: jar – package classes
+        working-directory: clients/android-tv/build-manual
+        run: |
+          jar cf app-classes.jar -C classes .
+
+      # ── Convert JAR → DEX with d8 ────────────────────────────────────────────
+      - name: d8 – convert to DEX
+        working-directory: clients/android-tv/build-manual
+        run: |
+          mkdir -p dexout
+          LIBS=$(find libs -name '*.jar' | tr '\n' ' ')
+          "${D8}" \
+            --output dexout \
+            --lib "${ANDROID_JAR}" \
+            app-classes.jar ${LIBS}
+
+      # ── Inject DEX + web assets into APK using Python zipfile ───────────────
+      - name: Python – inject DEX and assets into APK
+        working-directory: clients/android-tv/build-manual
+        run: |
+          python3 - <<'PYEOF'
+          import zipfile, os, shutil
+
+          # Start from the standard-format APK produced by aapt2 link
+          shutil.copy('base-std.apk', 'work.apk')
+
+          with zipfile.ZipFile('work.apk', 'a', compression=zipfile.ZIP_STORED) as z:
+              # Add compiled DEX
+              z.write('dexout/classes.dex', 'classes.dex')
+
+              # Add web assets from stage-assets/www → assets/www/...
+              www_root = 'stage-assets/www'
+              for dirpath, dirs, files in os.walk(www_root):
+                  for fname in files:
+                      full = os.path.join(dirpath, fname)
+                      rel  = os.path.relpath(full, 'stage-assets').replace(os.sep, '/')
+                      arc  = 'assets/' + rel
+                      z.write(full, arc)
+
+          print('APK packaged: work.apk')
+          PYEOF
+
+      # ── zipalign ─────────────────────────────────────────────────────────────
+      - name: zipalign
+        working-directory: clients/android-tv/build-manual
+        run: |
+          "${ZIPALIGN}" -f -p 4 work.apk aligned.apk
+
+      # ── Sign with apksigner (debug keystore) ──────────────────────────────────
+      - name: apksigner – sign APK
+        run: |
+          "${APKSIGNER}" sign \
+            --ks debug.keystore \
+            --ks-key-alias androiddebugkey \
+            --ks-pass pass:android \
+            --key-pass pass:android \
+            --out clients/android-tv/build-manual/Norva-AndroidTV-debug.apk \
+            clients/android-tv/build-manual/aligned.apk
+
+      # ── Verify signature ──────────────────────────────────────────────────────
+      - name: apksigner – verify
+        run: |
+          "${APKSIGNER}" verify --verbose \
+            clients/android-tv/build-manual/Norva-AndroidTV-debug.apk
+
+      # ── Upload APK artifact ───────────────────────────────────────────────────
+      - name: Upload Android TV APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Norva-AndroidTV
+          path: clients/android-tv/build-manual/Norva-AndroidTV-debug.apk
+          if-no-files-found: error
+          retention-days: 30

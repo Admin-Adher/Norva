@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Connect to Hub — Norva</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            background: #080B12;
+            color: #F8FAFC;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+        }
+
+        .card {
+            background: #0f1623;
+            border: 1px solid #1e2a3a;
+            border-radius: 16px;
+            padding: 48px 40px;
+            width: 100%;
+            max-width: 480px;
+        }
+
+        .logo {
+            font-size: 28px;
+            font-weight: 800;
+            letter-spacing: -0.5px;
+            background: linear-gradient(135deg, #3B82F6, #8B5CF6);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 8px;
+        }
+
+        h1 {
+            font-size: 20px;
+            font-weight: 600;
+            color: #F8FAFC;
+            margin-bottom: 8px;
+        }
+
+        p.subtitle {
+            font-size: 14px;
+            color: #94a3b8;
+            margin-bottom: 32px;
+            line-height: 1.5;
+        }
+
+        label {
+            display: block;
+            font-size: 13px;
+            font-weight: 500;
+            color: #94a3b8;
+            margin-bottom: 8px;
+        }
+
+        input[type="url"], input[type="text"] {
+            width: 100%;
+            background: #080B12;
+            border: 1px solid #1e2a3a;
+            border-radius: 8px;
+            color: #F8FAFC;
+            font-size: 15px;
+            padding: 12px 14px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        input:focus {
+            border-color: #3B82F6;
+        }
+        input::placeholder { color: #475569; }
+
+        .hint {
+            font-size: 12px;
+            color: #475569;
+            margin-top: 6px;
+        }
+
+        .btn {
+            display: block;
+            width: 100%;
+            margin-top: 24px;
+            padding: 13px;
+            background: #3B82F6;
+            color: #fff;
+            font-size: 15px;
+            font-weight: 600;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .btn:hover { background: #2563eb; }
+        .btn:disabled { background: #1e3a5f; cursor: not-allowed; }
+
+        .status {
+            margin-top: 16px;
+            padding: 12px 14px;
+            border-radius: 8px;
+            font-size: 14px;
+            display: none;
+        }
+        .status.error { background: #1f0a0a; color: #f87171; border: 1px solid #7f1d1d; display: block; }
+        .status.success { background: #051a11; color: #4ade80; border: 1px solid #14532d; display: block; }
+        .status.loading { background: #0a1022; color: #93c5fd; border: 1px solid #1e3a5f; display: block; }
+
+        .divider {
+            margin: 28px 0;
+            border: none;
+            border-top: 1px solid #1e2a3a;
+        }
+
+        .help {
+            font-size: 13px;
+            color: #475569;
+            line-height: 1.6;
+        }
+        .help strong { color: #94a3b8; }
+        .help code {
+            background: #0f1623;
+            border: 1px solid #1e2a3a;
+            border-radius: 4px;
+            padding: 1px 5px;
+            font-size: 12px;
+            color: #93c5fd;
+        }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="logo">norva</div>
+        <h1>Connect to your Hub</h1>
+        <p class="subtitle">
+            Enter the local address of the PC or server running the Norva app.
+            You can find it in the Norva title bar or Settings page.
+        </p>
+
+        <label for="hubUrl">Hub address</label>
+        <input
+            type="text"
+            id="hubUrl"
+            placeholder="http://192.168.1.20:3000"
+            autocomplete="off"
+            spellcheck="false"
+        >
+        <p class="hint">Example: <code>http://192.168.1.20:3000</code> or your Cloudflare Tunnel URL</p>
+
+        <button class="btn" id="connectBtn" onclick="connect()">Connect</button>
+        <div class="status" id="status"></div>
+
+        <hr class="divider">
+
+        <div class="help">
+            <strong>How to find your Hub address</strong><br>
+            Open the Norva app on your PC/server. The address is shown in the
+            title bar: <code>Norva — http://&lt;IP&gt;:3000</code><br><br>
+            For remote access, use your Cloudflare Tunnel URL
+            (e.g. <code>https://norva.example.com</code>) — see Hub Settings.
+        </div>
+    </div>
+
+    <script>
+        // Pre-fill from URL param ?hub=... (e.g. from a QR code or share link)
+        const params = new URLSearchParams(location.search);
+        if (params.get('hub')) {
+            document.getElementById('hubUrl').value = decodeURIComponent(params.get('hub'));
+        } else {
+            // Pre-fill previously saved hub if user came back to change it
+            const saved = localStorage.getItem('norva-hub-url');
+            if (saved) document.getElementById('hubUrl').value = saved;
+        }
+
+        document.getElementById('hubUrl').addEventListener('keydown', e => {
+            if (e.key === 'Enter') connect();
+        });
+
+        async function connect() {
+            const raw = document.getElementById('hubUrl').value.trim().replace(/\/$/, '');
+            const statusEl = document.getElementById('status');
+            const btn = document.getElementById('connectBtn');
+
+            if (!raw) {
+                showStatus('error', 'Please enter the hub address.');
+                return;
+            }
+
+            // Ensure scheme
+            const url = /^https?:\/\//i.test(raw) ? raw : 'http://' + raw;
+
+            btn.disabled = true;
+            showStatus('loading', 'Connecting to hub…');
+
+            try {
+                const res = await fetch(`${url}/api/version`, { signal: AbortSignal.timeout(6000) });
+                if (!res.ok) throw new Error(`Hub returned HTTP ${res.status}`);
+                const data = await res.json();
+
+                localStorage.setItem('norva-hub-url', url);
+                showStatus('success', `Connected to Norva v${data.version || '?'}. Redirecting…`);
+
+                setTimeout(() => { window.location.replace('/'); }, 1000);
+            } catch (err) {
+                btn.disabled = false;
+                if (err.name === 'TimeoutError' || err.name === 'AbortError') {
+                    showStatus('error', 'Connection timed out. Check the address and ensure the hub is reachable.');
+                } else if (err.message.includes('Failed to fetch') || err.message.includes('NetworkError')) {
+                    showStatus('error', 'Could not reach the hub. Make sure you\'re on the same network or using a Tunnel URL.');
+                } else {
+                    showStatus('error', err.message);
+                }
+            }
+        }
+
+        function showStatus(type, msg) {
+            const el = document.getElementById('status');
+            el.className = `status ${type}`;
+            el.textContent = msg;
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,811 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#3B82F6" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Norva" />
+  <link rel="manifest" href="/manifest.json" />
+  <link rel="apple-touch-icon" href="/icon-192.svg" />
+  <title>Norva</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #080B12;
+      --surface: #18181f;
+      --surface2: #27272f;
+      --accent: #3B82F6;
+      --accent-dim: #2563EB;
+      --text: #f4f4f5;
+      --text-muted: #a1a1aa;
+      --danger: #ef4444;
+      --success: #22c55e;
+      --radius: 12px;
+      --nav-h: 64px;
+      --header-h: 56px;
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-size: 16px;
+      line-height: 1.5;
+      overflow: hidden;
+    }
+
+    /* ---- Layout ---- */
+    #app {
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      height: 100dvh;
+    }
+
+    #header {
+      flex-shrink: 0;
+      height: var(--header-h);
+      background: var(--surface);
+      border-bottom: 1px solid var(--surface2);
+      display: flex;
+      align-items: center;
+      padding: 0 16px;
+      gap: 12px;
+      padding-top: env(safe-area-inset-top);
+    }
+
+    #header .logo {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 700;
+      font-size: 17px;
+      color: var(--accent);
+      text-decoration: none;
+      flex-shrink: 0;
+    }
+
+    #header .logo svg { flex-shrink: 0; }
+
+    #header-title {
+      flex: 1;
+      font-size: 15px;
+      color: var(--text-muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    #btn-back {
+      display: none;
+      background: none;
+      border: none;
+      color: var(--accent);
+      font-size: 15px;
+      cursor: pointer;
+      padding: 6px 4px;
+      flex-shrink: 0;
+    }
+
+    #content {
+      flex: 1;
+      overflow: hidden;
+      position: relative;
+    }
+
+    /* screens */
+    .screen {
+      position: absolute;
+      inset: 0;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      display: none;
+      padding: 24px 20px;
+      padding-bottom: calc(24px + env(safe-area-inset-bottom));
+    }
+    .screen.active { display: block; }
+    #screen-browse { padding: 0; }
+    #screen-scan   { padding: 0; overflow: hidden; }
+
+    /* Bottom nav */
+    #bottom-nav {
+      flex-shrink: 0;
+      display: none;
+      height: var(--nav-h);
+      background: var(--surface);
+      border-top: 1px solid var(--surface2);
+      padding-bottom: env(safe-area-inset-bottom);
+    }
+    #bottom-nav.visible { display: flex; }
+
+    #bottom-nav button {
+      flex: 1;
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      font-size: 11px;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      transition: color 0.15s;
+    }
+    #bottom-nav button.active { color: var(--accent); }
+    #bottom-nav button svg { width: 22px; height: 22px; }
+
+    /* ---- Common components ---- */
+    h2 { font-size: 22px; font-weight: 700; margin-bottom: 8px; }
+    p  { color: var(--text-muted); margin-bottom: 16px; }
+
+    .btn {
+      display: block;
+      width: 100%;
+      padding: 14px 20px;
+      border: none;
+      border-radius: var(--radius);
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      text-align: center;
+      transition: opacity 0.15s, transform 0.1s;
+    }
+    .btn:active { opacity: 0.8; transform: scale(0.98); }
+    .btn-primary  { background: var(--accent); color: #fff; }
+    .btn-secondary { background: var(--surface2); color: var(--text); }
+    .btn-danger   { background: var(--danger); color: #fff; }
+    .btn + .btn   { margin-top: 12px; }
+
+    .input {
+      width: 100%;
+      padding: 13px 14px;
+      background: var(--surface2);
+      border: 1px solid var(--surface2);
+      border-radius: var(--radius);
+      color: var(--text);
+      font-size: 16px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    .input:focus { border-color: var(--accent); }
+    .input::placeholder { color: var(--text-muted); }
+
+    .label {
+      display: block;
+      font-size: 13px;
+      color: var(--text-muted);
+      margin-bottom: 6px;
+      font-weight: 500;
+    }
+
+    .field { margin-bottom: 16px; }
+
+    .card {
+      background: var(--surface);
+      border-radius: var(--radius);
+      padding: 16px;
+      margin-bottom: 12px;
+    }
+
+    .status-msg {
+      margin-top: 14px;
+      padding: 10px 14px;
+      border-radius: var(--radius);
+      font-size: 14px;
+      display: none;
+    }
+    .status-msg.error   { background: rgba(239,68,68,0.15); color: var(--danger); display: block; }
+    .status-msg.success { background: rgba(34,197,94,0.15);  color: var(--success); display: block; }
+    .status-msg.info    { background: rgba(59,130,246,0.15); color: var(--accent); display: block; }
+
+    /* ---- #welcome ---- */
+    #screen-welcome {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      min-height: 100%;
+    }
+    .welcome-logo {
+      display: flex;
+      justify-content: center;
+      margin-bottom: 32px;
+    }
+    .welcome-logo svg { width: 80px; height: 80px; }
+    #screen-welcome h2 { text-align: center; }
+    #screen-welcome > p { text-align: center; }
+
+    .divider {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 20px 0;
+      color: var(--text-muted);
+      font-size: 13px;
+    }
+    .divider::before, .divider::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: var(--surface2);
+    }
+
+    /* ---- #scan ---- */
+    #scan-wrapper {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      background: #000;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+    #scan-video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    #scan-overlay {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      pointer-events: none;
+    }
+    #scan-frame {
+      width: 240px;
+      height: 240px;
+      border: 3px solid var(--accent);
+      border-radius: 16px;
+      box-shadow: 0 0 0 9999px rgba(0,0,0,0.55);
+    }
+    #scan-hint {
+      color: #fff;
+      font-size: 14px;
+      margin-top: 20px;
+      text-shadow: 0 1px 4px rgba(0,0,0,0.8);
+    }
+    #scan-canvas { display: none; }
+    #scan-stop {
+      position: absolute;
+      bottom: max(32px, env(safe-area-inset-bottom));
+      left: 50%;
+      transform: translateX(-50%);
+      pointer-events: auto;
+    }
+
+    /* ---- #pair ---- */
+    .pair-code {
+      font-size: 36px;
+      font-weight: 800;
+      letter-spacing: 6px;
+      color: var(--accent);
+      text-align: center;
+      padding: 24px 0;
+    }
+    .pair-device {
+      text-align: center;
+      color: var(--text-muted);
+      margin-bottom: 24px;
+    }
+    .pair-user {
+      text-align: center;
+      font-size: 13px;
+      color: var(--text-muted);
+      margin-bottom: 20px;
+    }
+    .pair-user strong { color: var(--text); }
+
+    /* ---- #browse ---- */
+    #hub-iframe {
+      width: 100%;
+      height: 100%;
+      border: none;
+      display: block;
+    }
+
+    /* ---- #settings ---- */
+    .settings-section { margin-bottom: 28px; }
+    .settings-section h3 {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-muted);
+      margin-bottom: 10px;
+    }
+    .info-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--surface2);
+      font-size: 14px;
+    }
+    .info-row:last-child { border-bottom: none; }
+    .info-row .val { color: var(--text-muted); font-size: 13px; max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    /* Loading spinner */
+    .spinner {
+      width: 36px; height: 36px;
+      border: 3px solid var(--surface2);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin: 40px auto;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+<div id="app">
+  <!-- Header -->
+  <header id="header">
+    <button id="btn-back" aria-label="Back">&#8592;</button>
+    <a class="logo" href="#welcome">
+      <svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg" width="28" height="28">
+        <rect width="32" height="32" rx="6" fill="#3B82F6"/>
+        <path d="M10 8 L10 24 L24 16 Z" fill="white"/>
+      </svg>
+      Norva
+    </a>
+    <span id="header-title"></span>
+  </header>
+
+  <!-- Main content -->
+  <main id="content">
+
+    <!-- Welcome screen -->
+    <section id="screen-welcome" class="screen" data-title="">
+      <div class="welcome-logo">
+        <svg viewBox="0 0 192 192" xmlns="http://www.w3.org/2000/svg">
+          <rect width="192" height="192" rx="32" fill="#3B82F6"/>
+          <path d="M60 48 L60 144 L144 96 Z" fill="white"/>
+        </svg>
+      </div>
+      <h2>Norva</h2>
+      <p>Connect to your Norva Hub to browse and cast content from your phone.</p>
+
+      <button class="btn btn-primary" id="btn-scan-qr">
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:middle;margin-right:6px"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><path d="M14 14h3v3h-3zM17 17h3v3h-3zM14 20h3"/></svg>
+        Scan QR Code from TV
+      </button>
+
+      <div class="divider">or</div>
+
+      <div class="field">
+        <label class="label" for="manual-url">Hub URL</label>
+        <input class="input" id="manual-url" type="url" placeholder="http://192.168.1.20:3000" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" />
+      </div>
+      <button class="btn btn-secondary" id="btn-manual-connect">Connect to Hub</button>
+
+      <div id="welcome-status" class="status-msg"></div>
+    </section>
+
+    <!-- QR Scan screen -->
+    <section id="screen-scan" class="screen" data-title="Scan QR Code">
+      <div id="scan-wrapper">
+        <video id="scan-video" autoplay playsinline muted></video>
+        <canvas id="scan-canvas"></canvas>
+        <div id="scan-overlay">
+          <div id="scan-frame"></div>
+          <p id="scan-hint">Point camera at the QR code on your TV</p>
+        </div>
+        <button class="btn btn-secondary" id="scan-stop" style="width:auto;padding:10px 24px;">Cancel</button>
+      </div>
+    </section>
+
+    <!-- Pair approval screen -->
+    <section id="screen-pair" class="screen" data-title="Approve Pairing">
+      <h2>Pair Device</h2>
+      <p>A device wants to connect to your Norva Hub.</p>
+
+      <div class="card">
+        <div class="pair-device" id="pair-device-name">Unknown Device</div>
+        <div class="pair-code" id="pair-code">------</div>
+        <div class="pair-user">Approving as <strong id="pair-user-name">you</strong></div>
+      </div>
+
+      <button class="btn btn-primary" id="btn-approve">Approve Pairing</button>
+      <button class="btn btn-secondary" id="btn-deny">Deny</button>
+
+      <div id="pair-status" class="status-msg"></div>
+    </section>
+
+    <!-- Browse screen (iframe) -->
+    <section id="screen-browse" class="screen" data-title="Browse">
+      <iframe id="hub-iframe" allow="autoplay; fullscreen; camera; microphone" allowfullscreen></iframe>
+    </section>
+
+    <!-- Settings screen -->
+    <section id="screen-settings" class="screen" data-title="Settings">
+      <h2>Settings</h2>
+
+      <div class="settings-section">
+        <h3>Hub Connection</h3>
+        <div class="card">
+          <div class="info-row">
+            <span>Hub URL</span>
+            <span class="val" id="settings-hub-url">—</span>
+          </div>
+          <div class="info-row">
+            <span>Connected</span>
+            <span class="val" id="settings-connected-at">—</span>
+          </div>
+          <div class="info-row">
+            <span>Token</span>
+            <span class="val" id="settings-token-status">—</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <h3>Change Hub</h3>
+        <div class="field">
+          <label class="label" for="settings-url-input">Hub URL</label>
+          <input class="input" id="settings-url-input" type="url" placeholder="http://192.168.1.20:3000" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" />
+        </div>
+        <button class="btn btn-secondary" id="btn-settings-connect">Reconnect</button>
+      </div>
+
+      <div class="settings-section">
+        <h3>Session</h3>
+        <button class="btn btn-danger" id="btn-logout">Disconnect &amp; Forget Hub</button>
+      </div>
+
+      <div id="settings-status" class="status-msg"></div>
+    </section>
+
+  </main>
+
+  <!-- Bottom Nav -->
+  <nav id="bottom-nav">
+    <button id="nav-browse" data-screen="browse">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+      Browse
+    </button>
+    <button id="nav-remote" data-screen="remote">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>
+      Remote
+    </button>
+    <button id="nav-settings" data-screen="settings">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
+      Settings
+    </button>
+  </nav>
+</div>
+
+<!-- jsQR from CDN -->
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+
+<script>
+(function () {
+  'use strict';
+
+  // ---- Storage keys ----
+  const KEY_HUB_URL   = 'hubUrl';
+  const KEY_HUB_TOKEN = 'hubToken';
+  const KEY_HUB_AT    = 'hubConnectedAt';
+
+  // ---- State ----
+  let currentScreen = '';
+  let scanStream    = null;
+  let scanRaf       = null;
+  let pairData      = null;   // { hub, code }
+
+  // ---- Elements ----
+  const $ = id => document.getElementById(id);
+  const header      = $('header');
+  const headerTitle = $('header-title');
+  const btnBack     = $('btn-back');
+  const bottomNav   = $('bottom-nav');
+  const hubIframe   = $('hub-iframe');
+
+  // ---- Routing ----
+  const SCREENS_WITH_NAV  = ['browse', 'settings', 'remote'];
+  const SCREENS_WITH_BACK = ['scan', 'pair'];
+
+  function showScreen(name, pushHistory = true) {
+    if (name === currentScreen) return;
+
+    // hide all
+    document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+
+    const el = $('screen-' + name);
+    if (!el) { showScreen('welcome'); return; }
+    el.classList.add('active');
+    currentScreen = name;
+
+    // header title
+    headerTitle.textContent = el.dataset.title || '';
+
+    // back button
+    btnBack.style.display = SCREENS_WITH_BACK.includes(name) ? 'block' : 'none';
+
+    // bottom nav
+    if (SCREENS_WITH_NAV.includes(name)) {
+      bottomNav.classList.add('visible');
+      document.querySelectorAll('#bottom-nav button').forEach(b => {
+        b.classList.toggle('active', b.dataset.screen === name);
+      });
+    } else {
+      bottomNav.classList.remove('visible');
+    }
+
+    if (pushHistory) history.pushState({ screen: name }, '', '#' + name);
+
+    // screen-specific init
+    if (name === 'scan')     startScan();
+    if (name === 'settings') populateSettings();
+    if (name === 'browse')   loadBrowse();
+  }
+
+  window.addEventListener('popstate', e => {
+    const screen = (e.state && e.state.screen) || 'welcome';
+    showScreen(screen, false);
+  });
+
+  btnBack.addEventListener('click', () => history.back());
+
+  // Bottom nav
+  document.querySelectorAll('#bottom-nav button').forEach(btn => {
+    btn.addEventListener('click', () => showScreen(btn.dataset.screen));
+  });
+
+  // ---- Startup ----
+  function boot() {
+    // Register service worker
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').catch(() => {});
+    }
+
+    const hubUrl   = localStorage.getItem(KEY_HUB_URL);
+    const hubToken = localStorage.getItem(KEY_HUB_TOKEN);
+
+    if (hubUrl && hubToken) {
+      showScreen('browse', false);
+    } else if (hubUrl) {
+      // have URL but no token — prefill and go welcome
+      $('manual-url').value = hubUrl;
+      showScreen('welcome', false);
+    } else {
+      showScreen('welcome', false);
+    }
+  }
+
+  // ---- Welcome screen ----
+  $('btn-scan-qr').addEventListener('click', () => showScreen('scan'));
+
+  $('btn-manual-connect').addEventListener('click', () => {
+    const raw = $('manual-url').value.trim();
+    if (!raw) { setStatus('welcome-status', 'error', 'Please enter a hub URL.'); return; }
+    const url = normalizeUrl(raw);
+    if (!url) { setStatus('welcome-status', 'error', 'Enter a valid http:// URL.'); return; }
+    connectToHub(url);
+  });
+
+  // ---- QR Scanner ----
+  async function startScan() {
+    const video  = $('scan-video');
+    const canvas = $('scan-canvas');
+    try {
+      scanStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment' }
+      });
+      video.srcObject = scanStream;
+      video.play();
+      scanLoop(video, canvas);
+    } catch (err) {
+      stopScan();
+      history.back();
+      setStatus('welcome-status', 'error', 'Camera access denied: ' + err.message);
+    }
+  }
+
+  function scanLoop(video, canvas) {
+    const ctx = canvas.getContext('2d');
+    function tick() {
+      if (video.readyState === video.HAVE_ENOUGH_DATA) {
+        canvas.width  = video.videoWidth;
+        canvas.height = video.videoHeight;
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const code = typeof jsQR !== 'undefined'
+          ? jsQR(img.data, img.width, img.height, { inversionAttempts: 'dontInvert' })
+          : null;
+        if (code) {
+          handleQR(code.data);
+          return;
+        }
+      }
+      scanRaf = requestAnimationFrame(tick);
+    }
+    scanRaf = requestAnimationFrame(tick);
+  }
+
+  function stopScan() {
+    if (scanRaf)    { cancelAnimationFrame(scanRaf); scanRaf = null; }
+    if (scanStream) { scanStream.getTracks().forEach(t => t.stop()); scanStream = null; }
+    const video = $('scan-video');
+    if (video) { video.srcObject = null; }
+  }
+
+  $('scan-stop').addEventListener('click', () => {
+    stopScan();
+    history.back();
+  });
+
+  function handleQR(data) {
+    stopScan();
+    // Expected: norva://pair?hub=<url>&code=<code>
+    try {
+      const url = new URL(data);
+      if (url.protocol === 'norva:' && url.hostname === 'pair') {
+        const hub  = url.searchParams.get('hub');
+        const code = url.searchParams.get('code');
+        if (hub && code) {
+          pairData = { hub: normalizeUrl(hub) || hub, code };
+          $('pair-code').textContent        = code;
+          $('pair-device-name').textContent = url.searchParams.get('device') || 'TV Device';
+          $('pair-user-name').textContent   = getUserName();
+          showScreen('pair');
+          return;
+        }
+      }
+      // Maybe it's just a plain URL to the hub
+      if (url.protocol === 'http:' || url.protocol === 'https:') {
+        connectToHub(url.href.replace(/\/$/, ''));
+        history.back();
+        return;
+      }
+    } catch (_) {}
+    // Not recognised — go back
+    showScreen('welcome');
+    setStatus('welcome-status', 'error', 'QR code not recognised. Try scanning again.');
+  }
+
+  // ---- Pair screen ----
+  $('btn-approve').addEventListener('click', approvePairing);
+  $('btn-deny').addEventListener('click', () => showScreen('welcome'));
+
+  async function approvePairing() {
+    if (!pairData) return;
+    const { hub, code } = pairData;
+    const token = localStorage.getItem(KEY_HUB_TOKEN) || '';
+
+    setStatus('pair-status', 'info', 'Approving…');
+    $('btn-approve').disabled = true;
+
+    try {
+      const res = await fetch(hub + '/api/pair/approve', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': 'Bearer ' + token } : {})
+        },
+        body: JSON.stringify({ code })
+      });
+
+      if (!res.ok) {
+        const txt = await res.text().catch(() => res.status);
+        throw new Error('Server error: ' + txt);
+      }
+
+      const json = await res.json().catch(() => ({}));
+      // Save hub + returned token if any
+      localStorage.setItem(KEY_HUB_URL, hub);
+      if (json.token) localStorage.setItem(KEY_HUB_TOKEN, json.token);
+      localStorage.setItem(KEY_HUB_AT, new Date().toISOString());
+
+      setStatus('pair-status', 'success', 'Pairing approved! Loading hub…');
+      setTimeout(() => showScreen('browse'), 1200);
+    } catch (err) {
+      setStatus('pair-status', 'error', err.message);
+      $('btn-approve').disabled = false;
+    }
+  }
+
+  // ---- Browse screen ----
+  function loadBrowse() {
+    const url = localStorage.getItem(KEY_HUB_URL);
+    if (!url) { showScreen('welcome'); return; }
+    // Only reload if needed
+    if (!hubIframe.src || !hubIframe.src.startsWith(url)) {
+      hubIframe.src = url;
+    }
+  }
+
+  // ---- Settings screen ----
+  function populateSettings() {
+    const url = localStorage.getItem(KEY_HUB_URL)   || '—';
+    const at  = localStorage.getItem(KEY_HUB_AT)    || '';
+    const tok = localStorage.getItem(KEY_HUB_TOKEN);
+
+    $('settings-hub-url').textContent      = url;
+    $('settings-connected-at').textContent = at ? new Date(at).toLocaleString() : '—';
+    $('settings-token-status').textContent = tok ? 'Stored (' + tok.substring(0, 8) + '…)' : 'None';
+    $('settings-url-input').value          = url !== '—' ? url : '';
+  }
+
+  $('btn-settings-connect').addEventListener('click', () => {
+    const raw = $('settings-url-input').value.trim();
+    if (!raw) { setStatus('settings-status', 'error', 'Enter a URL.'); return; }
+    const url = normalizeUrl(raw);
+    if (!url) { setStatus('settings-status', 'error', 'Invalid URL.'); return; }
+    connectToHub(url, true);
+  });
+
+  $('btn-logout').addEventListener('click', () => {
+    localStorage.removeItem(KEY_HUB_URL);
+    localStorage.removeItem(KEY_HUB_TOKEN);
+    localStorage.removeItem(KEY_HUB_AT);
+    hubIframe.src = 'about:blank';
+    pairData = null;
+    bottomNav.classList.remove('visible');
+    showScreen('welcome');
+  });
+
+  // ---- Helpers ----
+  function connectToHub(url, fromSettings = false) {
+    setStatus('welcome-status', 'info', 'Connecting…');
+    // Simple connectivity check via a HEAD or GET to /
+    fetch(url, { method: 'HEAD', mode: 'no-cors', signal: AbortSignal.timeout(5000) })
+      .then(() => {
+        localStorage.setItem(KEY_HUB_URL, url);
+        localStorage.setItem(KEY_HUB_AT, new Date().toISOString());
+        if (fromSettings) {
+          // Clear old token for the new hub
+          localStorage.removeItem(KEY_HUB_TOKEN);
+          hubIframe.src = 'about:blank';
+          setStatus('settings-status', 'success', 'Connected to ' + url);
+          setTimeout(() => showScreen('browse'), 800);
+        } else {
+          showScreen('browse');
+        }
+      })
+      .catch(err => {
+        // no-cors fetch may succeed or fail; if truly blocked we fall here
+        // Still save and try loading
+        localStorage.setItem(KEY_HUB_URL, url);
+        localStorage.setItem(KEY_HUB_AT, new Date().toISOString());
+        showScreen('browse');
+      });
+  }
+
+  function normalizeUrl(raw) {
+    try {
+      if (!/^https?:\/\//i.test(raw)) raw = 'http://' + raw;
+      const u = new URL(raw);
+      return u.origin;   // strip trailing slash + path
+    } catch (_) { return null; }
+  }
+
+  function setStatus(id, type, msg) {
+    const el = $(id);
+    if (!el) return;
+    el.className = 'status-msg ' + type;
+    el.textContent = msg;
+  }
+
+  function getUserName() {
+    // Try to get name from stored token (JWT) or fall back to 'you'
+    const tok = localStorage.getItem(KEY_HUB_TOKEN);
+    if (!tok) return 'you';
+    try {
+      const payload = JSON.parse(atob(tok.split('.')[1]));
+      return payload.name || payload.email || payload.sub || 'you';
+    } catch (_) { return 'you'; }
+  }
+
+  // ---- Boot ----
+  boot();
+})();
+</script>
+</body>
+</html>

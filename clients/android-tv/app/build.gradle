@@ -1,0 +1,24 @@
+plugins {
+    id "com.android.application"
+}
+
+android {
+    namespace "tv.nodecast.client"
+    compileSdk 35
+
+    defaultConfig {
+        applicationId "tv.nodecast.client"
+        minSdk 23
+        targetSdk 35
+        versionCode 12
+        versionName "3.7.0-hybrid"
+    }
+}
+
+dependencies {
+    // Standalone-mode native player (full track selection, MKV/EAC3/HEVC).
+    // media3-ui is intentionally NOT used: the controls are built in code so
+    // the APK can also be assembled with raw SDK tools (no gradle daemon).
+    implementation "androidx.media3:media3-exoplayer:1.5.1"
+    implementation "androidx.media3:media3-exoplayer-hls:1.5.1"
+}

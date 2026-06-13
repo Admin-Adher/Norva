@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Norva — Pair Device</title>
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        :root {
+            --bg:        #080B12;
+            --surface:   #13131c;
+            --border:    #2a2a3a;
+            --accent:    #3B82F6;
+            --accent-hi: #60A5FA;
+            --text:      #f0f0f8;
+            --muted:     #8888aa;
+            --error:     #f87171;
+            --success:   #4ade80;
+        }
+
+        html, body {
+            height: 100%;
+            background: var(--bg);
+            color: var(--text);
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            padding: 2rem;
+        }
+
+        /* ── Logo ───────────────────────────────── */
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            margin-bottom: 2.5rem;
+        }
+
+        .logo-icon {
+            width: 48px;
+            height: 48px;
+            background: var(--accent);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .logo-icon svg { width: 28px; height: 28px; fill: #fff; }
+
+        .logo-text {
+            font-size: 1.75rem;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+        }
+
+        .logo-text span { color: var(--accent-hi); }
+
+        /* ── Card ───────────────────────────────── */
+        .card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            padding: 2.5rem 2rem;
+            max-width: 480px;
+            width: 100%;
+            text-align: center;
+        }
+
+        .card h1 {
+            font-size: 1.35rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+        }
+
+        .card .subtitle {
+            color: var(--muted);
+            font-size: 0.95rem;
+            margin-bottom: 2rem;
+            line-height: 1.5;
+        }
+
+        /* ── QR code ────────────────────────────── */
+        #qr-wrap {
+            display: flex;
+            justify-content: center;
+            margin-bottom: 1.5rem;
+        }
+
+        #qr-img {
+            width: 220px;
+            height: 220px;
+            border-radius: 12px;
+            background: #fff;
+            padding: 8px;
+            display: block;
+        }
+
+        #qr-placeholder {
+            width: 220px;
+            height: 220px;
+            border-radius: 12px;
+            background: var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--muted);
+            font-size: 0.85rem;
+        }
+
+        /* ── 6-char code ────────────────────────── */
+        #pair-code {
+            font-size: 3rem;
+            font-weight: 800;
+            letter-spacing: 0.25em;
+            color: var(--accent-hi);
+            margin-bottom: 0.5rem;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .code-label {
+            color: var(--muted);
+            font-size: 0.85rem;
+            margin-bottom: 1.75rem;
+        }
+
+        /* ── Divider ────────────────────────────── */
+        .divider {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            margin-bottom: 1.25rem;
+            color: var(--muted);
+            font-size: 0.8rem;
+        }
+
+        .divider::before, .divider::after {
+            content: '';
+            flex: 1;
+            height: 1px;
+            background: var(--border);
+        }
+
+        /* ── Fallback instruction ───────────────── */
+        .fallback {
+            color: var(--muted);
+            font-size: 0.85rem;
+            line-height: 1.6;
+            margin-bottom: 1.75rem;
+        }
+
+        .fallback strong { color: var(--text); }
+
+        /* ── Status / countdown ─────────────────── */
+        #status-row {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.6rem;
+            margin-bottom: 1.5rem;
+            font-size: 0.9rem;
+        }
+
+        .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--accent);
+            animation: pulse 1.5s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+
+        #countdown {
+            color: var(--muted);
+            font-size: 0.82rem;
+            margin-bottom: 1.25rem;
+        }
+
+        /* ── Buttons ────────────────────────────── */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            padding: 0.75rem 2rem;
+            border-radius: 10px;
+            border: none;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: opacity 0.15s, transform 0.1s;
+            outline: none;
+            min-width: 180px;
+        }
+
+        .btn:focus-visible {
+            box-shadow: 0 0 0 3px var(--accent-hi);
+        }
+
+        .btn:active { transform: scale(0.97); }
+
+        .btn-primary {
+            background: var(--accent);
+            color: #fff;
+        }
+
+        .btn-primary:hover { opacity: 0.88; }
+
+        .btn-ghost {
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--muted);
+        }
+
+        .btn-ghost:hover { border-color: var(--accent); color: var(--text); }
+
+        /* ── Approved state ─────────────────────── */
+        #approved-msg {
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .check-circle {
+            width: 72px;
+            height: 72px;
+            border-radius: 50%;
+            background: #16301e;
+            border: 2px solid var(--success);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .check-circle svg { width: 36px; height: 36px; stroke: var(--success); fill: none; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+
+        #approved-msg h2 { font-size: 1.4rem; color: var(--success); }
+        #approved-msg p  { color: var(--muted); font-size: 0.9rem; }
+
+        /* ── Error msg ──────────────────────────── */
+        #error-msg {
+            display: none;
+            color: var(--error);
+            font-size: 0.88rem;
+            margin-bottom: 1rem;
+        }
+
+        /* ── Loading spinner overlay ────────────── */
+        #loading {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 1rem;
+            padding: 1rem 0;
+        }
+
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid var(--border);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* ── Main pairing UI (hidden while loading) ─ */
+        #pair-ui { display: none; }
+
+        /* TV D-pad: make sure large tap targets */
+        @media (hover: none) {
+            .btn { min-height: 56px; font-size: 1.1rem; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="logo">
+    <div class="logo-icon">
+        <!-- simple TV icon -->
+        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <rect x="2" y="4" width="20" height="14" rx="2"/>
+            <path d="M8 22h8M12 18v4" stroke="#fff" stroke-width="1.5" stroke-linecap="round" fill="none"/>
+        </svg>
+    </div>
+    <div class="logo-text">Norva</div>
+</div>
+
+<div class="card">
+
+    <!-- Loading state -->
+    <div id="loading">
+        <div class="spinner"></div>
+        <span style="color:var(--muted);font-size:.9rem;">Generating pairing code…</span>
+    </div>
+
+    <!-- Error state -->
+    <div id="error-msg"></div>
+
+    <!-- Main pairing UI -->
+    <div id="pair-ui">
+        <h1>Pair this TV</h1>
+        <p class="subtitle">Scan the QR code with the Norva mobile app,<br>or enter the code on your phone.</p>
+
+        <div id="qr-wrap">
+            <div id="qr-placeholder">Generating…</div>
+        </div>
+
+        <div id="pair-code">------</div>
+        <p class="code-label">Enter this code in the Norva app to approve</p>
+
+        <div class="divider">or</div>
+
+        <p class="fallback" id="fallback-text">
+            Open <strong id="hub-url-display"></strong> on your phone<br>
+            and approve code <strong id="code-display-fallback"></strong>
+        </p>
+
+        <div id="status-row">
+            <div class="dot"></div>
+            <span>Waiting for approval…</span>
+        </div>
+
+        <div id="countdown"></div>
+
+        <button class="btn btn-ghost" id="regen-btn" onclick="startPairing()">
+            &#8635; Regenerate code
+        </button>
+    </div>
+
+    <!-- Approved state -->
+    <div id="approved-msg">
+        <div class="check-circle">
+            <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+        </div>
+        <h2>Paired!</h2>
+        <p>Signing you in…</p>
+    </div>
+
+</div>
+
+<script>
+(function () {
+    'use strict';
+
+    let currentCode = null;
+    let currentToken = null;
+    let pollTimer = null;
+    let countdownTimer = null;
+    let expiresAt = null;         // Unix ms
+    const POLL_INTERVAL = 2000;   // ms
+
+    // ── DOM refs ──────────────────────────────────────────────────────────────
+    const loadingEl    = document.getElementById('loading');
+    const errorEl      = document.getElementById('error-msg');
+    const pairUi       = document.getElementById('pair-ui');
+    const approvedEl   = document.getElementById('approved-msg');
+    const qrWrap       = document.getElementById('qr-wrap');
+    const pairCodeEl   = document.getElementById('pair-code');
+    const hubUrlEl     = document.getElementById('hub-url-display');
+    const codeFallback = document.getElementById('code-display-fallback');
+    const countdownEl  = document.getElementById('countdown');
+    const regenBtn     = document.getElementById('regen-btn');
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+    function showLoading() {
+        loadingEl.style.display = 'flex';
+        pairUi.style.display = 'none';
+        approvedEl.style.display = 'none';
+        errorEl.style.display = 'none';
+    }
+
+    function showPairUi() {
+        loadingEl.style.display = 'none';
+        pairUi.style.display = 'block';
+        approvedEl.style.display = 'none';
+        errorEl.style.display = 'none';
+    }
+
+    function showApproved() {
+        loadingEl.style.display = 'none';
+        pairUi.style.display = 'none';
+        approvedEl.style.display = 'flex';
+        errorEl.style.display = 'none';
+    }
+
+    function showError(msg) {
+        loadingEl.style.display = 'none';
+        errorEl.textContent = msg;
+        errorEl.style.display = 'block';
+    }
+
+    function stopPolling() {
+        if (pollTimer) clearTimeout(pollTimer);
+        if (countdownTimer) clearInterval(countdownTimer);
+        pollTimer = null;
+        countdownTimer = null;
+    }
+
+    function startCountdown() {
+        if (countdownTimer) clearInterval(countdownTimer);
+        countdownTimer = setInterval(() => {
+            const remaining = Math.max(0, Math.floor((expiresAt - Date.now()) / 1000));
+            const m = Math.floor(remaining / 60);
+            const s = remaining % 60;
+            countdownEl.textContent = `Code expires in ${m}:${s.toString().padStart(2, '0')}`;
+            if (remaining === 0) {
+                stopPolling();
+                // Auto-regenerate when timer hits zero
+                startPairing();
+            }
+        }, 1000);
+    }
+
+    // ── Poll for approval ─────────────────────────────────────────────────────
+    function schedulePoll(code) {
+        pollTimer = setTimeout(async () => {
+            try {
+                const res = await fetch(`/api/pair/poll/${encodeURIComponent(code)}`);
+                const data = await res.json();
+
+                if (data.status === 'approved' && data.token) {
+                    stopPolling();
+                    currentToken = data.token;
+                    onApproved(data.token);
+                } else if (data.status === 'expired' || data.status === 'not_found') {
+                    stopPolling();
+                    startPairing(); // Regenerate automatically
+                } else {
+                    // Still pending — schedule next poll
+                    if (currentCode === code) schedulePoll(code);
+                }
+            } catch (err) {
+                console.warn('[Pair] Poll error:', err);
+                if (currentCode === code) schedulePoll(code); // retry
+            }
+        }, POLL_INTERVAL);
+    }
+
+    // ── On approval ───────────────────────────────────────────────────────────
+    function onApproved(token) {
+        try {
+            localStorage.setItem('authToken', token);
+        } catch (e) { /* storage may be unavailable */ }
+        showApproved();
+        setTimeout(() => {
+            window.location.href = '/';
+        }, 1500);
+    }
+
+    // ── Start / regenerate pairing ────────────────────────────────────────────
+    window.startPairing = async function startPairing() {
+        stopPolling();
+        showLoading();
+
+        try {
+            const res = await fetch('/api/pair/start', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    device_type: 'tv',
+                    device_name: 'Norva'
+                })
+            });
+
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.error || `HTTP ${res.status}`);
+            }
+
+            const data = await res.json();
+            currentCode = data.code;
+            expiresAt = Date.now() + (data.expires_in || 300) * 1000;
+
+            // Populate QR
+            qrWrap.innerHTML = data.qr_data_url
+                ? `<img id="qr-img" src="${data.qr_data_url}" alt="Pairing QR code" width="220" height="220">`
+                : `<div id="qr-placeholder" style="color:var(--muted);font-size:.85rem;width:220px;height:220px;display:flex;align-items:center;justify-content:center;background:var(--border);border-radius:12px;">QR unavailable<br>Use code below</div>`;
+
+            // Populate code
+            pairCodeEl.textContent = data.code;
+            codeFallback.textContent = data.code;
+
+            // Fallback URL
+            const hubUrl = window.location.origin;
+            hubUrlEl.textContent = hubUrl;
+
+            showPairUi();
+            startCountdown();
+            schedulePoll(data.code);
+
+        } catch (err) {
+            console.error('[Pair] startPairing error:', err);
+            showError('Could not generate pairing code: ' + err.message);
+            pairUi.style.display = 'block'; // Show regen button
+            loadingEl.style.display = 'none';
+        }
+    };
+
+    // ── Init ──────────────────────────────────────────────────────────────────
+    startPairing();
+})();
+</script>
+
+</body>
+</html>

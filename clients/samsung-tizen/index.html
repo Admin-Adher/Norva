@@ -1,0 +1,31 @@
+<!doctype html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Norva</title>
+    <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+    <main id="setup" class="setup">
+        <section class="panel">
+            <div class="brand">Norva</div>
+            <h1>Connect to your server</h1>
+            <p>Run Norva on your PC, NAS, or mini-PC, then enter its local network URL.</p>
+            <input id="server-url" type="text" value="http://192.168.1.10:3000" spellcheck="false">
+            <div class="actions">
+                <button id="connect">Connect</button>
+                <button id="clear">Reset</button>
+            </div>
+            <p id="hint" class="hint">Example: http://192.168.1.42:3000</p>
+        </section>
+    </main>
+
+    <section id="viewer" class="viewer hidden">
+        <iframe id="nodecast-frame" title="Norva" allow="autoplay; fullscreen"></iframe>
+        <button id="settings" class="settings" title="Server settings">Server</button>
+    </section>
+
+    <script src="js/app.js"></script>
+</body>
+</html>
