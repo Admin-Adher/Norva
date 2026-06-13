@@ -341,7 +341,7 @@ const CloudAdapter = (() => {
         if (xtreamMatch && method === 'GET') {
             const sourceId = xtreamMatch[1];
             const action = xtreamMatch[2];
-            const streamId = xtreamMatch[4];
+            const streamId = action === 'stream' ? xtreamMatch[3] : xtreamMatch[4];
             if (action === 'auth') return { user_info: { auth: 1, status: 'Active' } };
             if (action === 'live_categories' || action === 'vod_categories' || action === 'series_categories') {
                 const type = action === 'live_categories' ? 'live' : action === 'vod_categories' ? 'movie' : 'series';
@@ -365,7 +365,7 @@ const CloudAdapter = (() => {
             }
             if (action === 'short_epg') return { epg_listings: [] };
             if (action === 'stream' && streamId) {
-                const type = query.get('type') || xtreamMatch[3] || 'live';
+                const type = query.get('type') || xtreamMatch[4] || 'live';
                 const container = query.get('container') || (type === 'live' ? 'm3u8' : 'mp4');
                 const mode = localStorage.getItem('norva-cloud-playback-mode') || 'relay';
                 const cloudSourceId = await resolveSourceId(sourceId);
