@@ -172,12 +172,12 @@ const CloudAdapter = (() => {
         const cacheKey = JSON.stringify({ cloudSourceId, type, q: q || '' });
         if (mediaCache.has(cacheKey)) return mediaCache.get(cacheKey);
 
-        const pageSize = 250;
+        const pageSize = 1000;
         let offset = 0;
         const all = [];
         const seen = new Set();
 
-        for (let page = 0; page < 40; page += 1) {
+        for (let page = 0; page < 150; page += 1) {
             const payload = await cloudMediaApi().list({
                 sourceId: cloudSourceId,
                 type,
@@ -195,6 +195,7 @@ const CloudAdapter = (() => {
                 added += 1;
             }
             if (!added && items.length) break;
+            if (payload.hasMore === false) break;
             if (items.length < pageSize) break;
             offset += pageSize;
         }

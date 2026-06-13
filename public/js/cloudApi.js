@@ -10,8 +10,10 @@
 
     const DEFAULT_API_URL = 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-cloud';
     const DEFAULT_SOURCE_SYNC_URL = 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-source-sync';
+    const DEFAULT_CATALOG_URL = 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-catalog';
     const KEY_API_URL = 'norva-cloud-api-url';
     const KEY_SOURCE_SYNC_URL = 'norva-source-sync-url';
+    const KEY_CATALOG_URL = 'norva-catalog-url';
     const KEY_TOKEN = 'norva-cloud-token';
     const KEY_DEVICE_TOKEN = 'norva-cloud-device-token';
 
@@ -22,6 +24,11 @@
 
     function sourceSyncBase() {
         const configured = localStorage.getItem(KEY_SOURCE_SYNC_URL) || window.NORVA_SOURCE_SYNC_URL || DEFAULT_SOURCE_SYNC_URL;
+        return configured.replace(/\/+$/, '');
+    }
+
+    function catalogBase() {
+        const configured = localStorage.getItem(KEY_CATALOG_URL) || window.NORVA_CATALOG_URL || DEFAULT_CATALOG_URL;
         return configured.replace(/\/+$/, '');
     }
 
@@ -84,6 +91,18 @@
         } catch (error) {
             if (error.status === 404 || error.status === 405) {
                 return request('POST', `/sources/${encodeURIComponent(id)}/sync`, {});
+            }
+            throw error;
+        }
+    }
+
+    async function catalogRequest(path, params = {}, options = {}) {
+        const route = `${path}${query(params)}`;
+        try {
+            return await requestToBase(catalogBase(), 'GET', route, null, options);
+        } catch (error) {
+            if (error.status === 404 || error.status === 405) {
+                return request('GET', route, null, options);
             }
             throw error;
         }
@@ -152,7 +171,7 @@
         },
 
         mediaItems: {
-            list: (params = {}) => request('GET', `/media-items${query(params)}`),
+            list: (params = {}) => catalogRequest('/media-items', params),
             upsert: (sourceId, items) => request('POST', '/media-items', { sourceId, items })
         },
 
@@ -202,7 +221,7 @@
                 seriesInfo: (id, seriesId) => request('GET', `/device/sources/${encodeURIComponent(id)}/series-info?series_id=${encodeURIComponent(seriesId)}`, null, { token: getDeviceToken() })
             },
             mediaItems: {
-                list: (params = {}) => request('GET', `/device/media-items${query(params)}`, null, { token: getDeviceToken() })
+                list: (params = {}) => catalogRequest('/device/media-items', params, { token: getDeviceToken() })
             },
             playback: {
                 createSession: (session) => request('POST', '/device/playback/sessions', session, { token: getDeviceToken() })
