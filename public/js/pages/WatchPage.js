@@ -494,7 +494,9 @@ class WatchPage {
 
     isCloudPlaybackMode() {
         try {
-            return Boolean(window.API?.isCloudMode?.());
+            const host = window.location.hostname;
+            const isHosted = Boolean(host && host !== 'localhost' && host !== '127.0.0.1' && host !== '::1');
+            return isHosted || Boolean(window.API?.isCloudMode?.());
         } catch (_) {
             return false;
         }
@@ -1853,6 +1855,7 @@ class WatchPage {
     }
 
     async retryWithFullVideoTranscode(message) {
+        if (this.isCloudPlaybackMode()) return false;
         if (this._videoEncodeFallbackTried) return false;
         if (!this.isFormatPlaybackError(message)) return false;
 
