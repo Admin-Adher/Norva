@@ -11,6 +11,7 @@
     const DEFAULT_API_URL = 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-cloud';
     const KEY_API_URL = 'norva-cloud-api-url';
     const KEY_TOKEN = 'norva-cloud-token';
+    const KEY_DEVICE_TOKEN = 'norva-cloud-device-token';
 
     function apiBase() {
         const configured = localStorage.getItem(KEY_API_URL) || window.NORVA_CLOUD_API_URL || DEFAULT_API_URL;
@@ -24,6 +25,15 @@
     function setToken(token) {
         if (token) localStorage.setItem(KEY_TOKEN, token);
         else localStorage.removeItem(KEY_TOKEN);
+    }
+
+    function getDeviceToken() {
+        return localStorage.getItem(KEY_DEVICE_TOKEN) || window.NORVA_CLOUD_DEVICE_TOKEN || '';
+    }
+
+    function setDeviceToken(token) {
+        if (token) localStorage.setItem(KEY_DEVICE_TOKEN, token);
+        else localStorage.removeItem(KEY_DEVICE_TOKEN);
     }
 
     function setApiUrl(url) {
@@ -64,7 +74,9 @@
     const NorvaCloud = {
         get apiUrl() { return apiBase(); },
         get token() { return getToken(); },
+        get deviceToken() { return getDeviceToken(); },
         setToken,
+        setDeviceToken,
         setApiUrl,
         isConfigured: () => Boolean(apiBase()),
 
@@ -108,7 +120,12 @@
 
         pairing: {
             start: (device) => request('POST', '/pairing/start', device, { token: '' }),
-            poll: (code) => request('GET', `/pairing/${encodeURIComponent(String(code).toUpperCase())}`, null, { token: '' }),
+            poll: (code, pairingSecret = '') => request(
+                'GET',
+                `/pairing/${encodeURIComponent(String(code).toUpperCase())}${pairingSecret ? `?secret=${encodeURIComponent(pairingSecret)}` : ''}`,
+                null,
+                { token: '' }
+            ),
             approve: (code) => request('POST', '/pairing/approve', { code })
         },
 
@@ -122,6 +139,14 @@
             createSession: (session) => request('POST', '/playback/sessions', session),
             getSession: (id) => request('GET', `/playback/sessions/${encodeURIComponent(id)}`),
             expireSession: (id) => request('POST', `/playback/sessions/${encodeURIComponent(id)}/expire`)
+        },
+
+        device: {
+            me: () => request('GET', '/device/me', null, { token: getDeviceToken() }),
+            heartbeat: () => request('POST', '/device/heartbeat', {}, { token: getDeviceToken() }),
+            commands: () => request('GET', '/device/commands', null, { token: getDeviceToken() }),
+            acknowledgeCommand: (id) => request('PATCH', `/device/commands/${encodeURIComponent(id)}`, { status: 'acknowledged' }, { token: getDeviceToken() }),
+            failCommand: (id, error) => request('PATCH', `/device/commands/${encodeURIComponent(id)}`, { status: 'failed', error }, { token: getDeviceToken() })
         }
     };
 

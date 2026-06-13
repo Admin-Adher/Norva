@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#090b10">
+    <title>Link Hub to Norva Cloud</title>
+    <link rel="icon" type="image/png" href="/favicon.png">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        :root {
+            --bg: #090b10;
+            --surface: #11151d;
+            --line: #273142;
+            --text: #f8fafc;
+            --muted: #9ca3af;
+            --accent: #4f7df3;
+            --success: #34d399;
+            --danger: #fb7185;
+        }
+        body {
+            min-height: 100vh;
+            background: var(--bg);
+            color: var(--text);
+            font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            display: grid;
+            place-items: center;
+            padding: 24px;
+        }
+        .panel {
+            width: min(620px, 100%);
+            background: var(--surface);
+            border: 1px solid rgba(148, 163, 184, 0.18);
+            border-radius: 8px;
+            padding: 24px;
+        }
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 22px;
+            font-weight: 850;
+        }
+        .brand img {
+            width: 42px;
+            height: 42px;
+            border-radius: 8px;
+        }
+        h1 { font-size: clamp(28px, 5vw, 42px); line-height: 1.05; margin-bottom: 12px; }
+        .muted { color: var(--muted); line-height: 1.6; font-size: 14px; }
+        .actions { display: grid; gap: 10px; margin-top: 20px; }
+        .btn {
+            min-height: 46px;
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            background: #252b37;
+            color: var(--text);
+            font-weight: 800;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            text-decoration: none;
+            padding: 0 14px;
+        }
+        .btn.primary {
+            border: 0;
+            background: linear-gradient(135deg, #4f7df3, #6d5dfc 58%, #c75cff);
+        }
+        .btn.danger {
+            color: #fecdd3;
+            border-color: rgba(251, 113, 133, 0.38);
+            background: rgba(251, 113, 133, 0.08);
+        }
+        .status {
+            margin-top: 16px;
+            padding: 12px 13px;
+            border-radius: 8px;
+            border: 1px solid var(--line);
+            color: var(--muted);
+            font-size: 14px;
+            line-height: 1.45;
+        }
+        .status.info { background: rgba(79, 125, 243, 0.11); color: #bfdbfe; }
+        .status.success { background: rgba(52, 211, 153, 0.1); color: var(--success); border-color: rgba(52, 211, 153, 0.3); }
+        .status.error { background: rgba(251, 113, 133, 0.1); color: var(--danger); border-color: rgba(251, 113, 133, 0.3); }
+    </style>
+</head>
+<body>
+    <main class="panel">
+        <div class="brand">
+            <img src="/img/norva-app-icon.png" alt="Norva">
+            <span>Norva Cloud</span>
+        </div>
+        <h1>Link this Hub to Norva Cloud.</h1>
+        <p class="muted">
+            The local hub keeps its offline login and local playback tools, while Norva Cloud gives it a trusted device identity for ecosystem commands.
+        </p>
+        <div class="actions">
+            <button class="btn primary" id="link-button" type="button">Link hub</button>
+            <a class="btn" href="/account.html?returnTo=/cloud-link.html">Norva Account</a>
+            <a class="btn" href="/">Back to hub</a>
+            <button class="btn danger" id="unlink-button" type="button">Unlink hub</button>
+        </div>
+        <div class="status info" id="status">Checking local and cloud sessions...</div>
+    </main>
+
+    <script src="/js/api.js?v=1"></script>
+    <script src="/js/cloudApi.js?v=1"></script>
+    <script src="/js/authApi.js?v=1"></script>
+    <script>
+        const statusEl = document.getElementById('status');
+        const linkButton = document.getElementById('link-button');
+        const unlinkButton = document.getElementById('unlink-button');
+
+        linkButton.addEventListener('click', linkHub);
+        unlinkButton.addEventListener('click', unlinkHub);
+        boot();
+
+        async function boot() {
+            NorvaAuth.captureSessionFromUrl();
+            if (!localStorage.getItem('authToken')) {
+                setStatus('error', 'Sign in to this local hub first, then open this page again.');
+                linkButton.disabled = true;
+                return;
+            }
+            const cloudUser = await NorvaAuth.getUser().catch(() => null);
+            if (!cloudUser) {
+                setStatus('info', 'Sign in to your Norva Account to link this hub.');
+                return;
+            }
+            const status = await API.cloud.status().catch(() => null);
+            if (status?.linked) {
+                setStatus('success', `Hub linked as ${status.deviceName || 'Norva Hub'}.`);
+            } else {
+                setStatus('info', `Ready to link this hub to ${cloudUser.email || 'your Norva Account'}.`);
+            }
+        }
+
+        async function linkHub() {
+            linkButton.disabled = true;
+            try {
+                setStatus('info', 'Linking hub to Norva Cloud...');
+                const cloudAccessToken = await NorvaAuth.getAccessToken();
+                if (!cloudAccessToken) throw new Error('Norva Account session is missing.');
+                const payload = await API.cloud.link({ cloudAccessToken, deviceName: 'Norva Hub' });
+                setStatus('success', `Hub linked as ${payload.deviceName || 'Norva Hub'}.`);
+            } catch (error) {
+                setStatus('error', error.message || 'Unable to link hub.');
+            } finally {
+                linkButton.disabled = false;
+            }
+        }
+
+        async function unlinkHub() {
+            unlinkButton.disabled = true;
+            try {
+                setStatus('info', 'Unlinking hub...');
+                await API.cloud.unlink();
+                setStatus('success', 'Hub unlinked locally.');
+            } catch (error) {
+                setStatus('error', error.message || 'Unable to unlink hub.');
+            } finally {
+                unlinkButton.disabled = false;
+            }
+        }
+
+        function setStatus(type, message) {
+            statusEl.className = 'status ' + type;
+            statusEl.textContent = message;
+        }
+    </script>
+</body>
+</html>

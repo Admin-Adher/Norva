@@ -140,7 +140,7 @@
             font-weight: 650;
             margin-bottom: 7px;
         }
-        input {
+        input, select {
             width: 100%;
             min-height: 44px;
             border: 1px solid var(--line);
@@ -151,7 +151,7 @@
             outline: none;
             padding: 0 12px;
         }
-        input:focus {
+        input:focus, select:focus {
             border-color: rgba(79, 125, 243, 0.9);
             box-shadow: 0 0 0 3px rgba(79, 125, 243, 0.18);
         }
@@ -310,6 +310,34 @@
                 <div class="status" id="devices-status"></div>
             </section>
         </section>
+
+        <section class="panel" style="margin-top:22px">
+            <h2>Cloud command</h2>
+            <p class="muted">Send a playback or navigation command to any trusted screen attached to this account.</p>
+            <div class="grid" style="margin-top:14px">
+                <div>
+                    <div class="field">
+                        <label for="command-device">Target device</label>
+                        <select id="command-device"></select>
+                    </div>
+                    <div class="field">
+                        <label for="command-title">Title</label>
+                        <input id="command-title" type="text" maxlength="120" placeholder="Norva stream">
+                    </div>
+                </div>
+                <div>
+                    <div class="field">
+                        <label for="command-url">URL</label>
+                        <input id="command-url" type="url" placeholder="https://...">
+                    </div>
+                    <div class="button-row">
+                        <button class="btn primary" id="send-play-button" type="button">Play</button>
+                        <button class="btn" id="send-open-button" type="button">Open</button>
+                    </div>
+                    <div class="status" id="command-status"></div>
+                </div>
+            </div>
+        </section>
     </main>
 
     <script src="/js/cloudApi.js?v=1"></script>
@@ -319,9 +347,13 @@
         const currentReturn = location.pathname + location.search;
         const pairCodeInput = document.getElementById('pair-code');
         const devicesEl = document.getElementById('devices');
+        const commandDevice = document.getElementById('command-device');
         const pairStatus = document.getElementById('pair-status');
         const profileStatus = document.getElementById('profile-status');
         const devicesStatus = document.getElementById('devices-status');
+        const commandStatus = document.getElementById('command-status');
+        let trustedDevices = [];
+        let commandPollHandle = 0;
 
         boot();
 
@@ -331,6 +363,8 @@
         });
         document.getElementById('save-profile-button').addEventListener('click', saveProfile);
         document.getElementById('approve-button').addEventListener('click', approveCode);
+        document.getElementById('send-play-button').addEventListener('click', () => sendCommand('play'));
+        document.getElementById('send-open-button').addEventListener('click', () => sendCommand('open'));
         document.getElementById('clear-code-button').addEventListener('click', () => {
             pairCodeInput.value = '';
             pairStatus.className = 'status';
@@ -358,6 +392,7 @@
             }
 
             await registerCurrentDevice();
+            startDeviceCommandLoop();
             await Promise.all([loadProfile(user), loadDevices(), loadCounters()]);
         }
 
@@ -410,9 +445,10 @@
         async function loadDevices() {
             try {
                 const payload = await NorvaCloud.devices.list();
-                const devices = (payload.devices || []).filter(device => !device.revoked);
-                document.getElementById('device-count').textContent = String(devices.length);
-                renderDevices(devices);
+                trustedDevices = (payload.devices || []).filter(device => !device.revoked);
+                document.getElementById('device-count').textContent = String(trustedDevices.length);
+                renderDevices(trustedDevices);
+                renderCommandTargets(trustedDevices);
             } catch (error) {
                 setStatus(devicesStatus, 'error', error.message);
             }
@@ -430,9 +466,12 @@
         async function registerCurrentDevice() {
             const key = 'norva-cloud-device-id';
             const existing = localStorage.getItem(key);
-            if (existing) {
+            if (existing && NorvaCloud.deviceToken) {
                 const heartbeat = await NorvaCloud.devices.heartbeat(existing).catch(() => null);
                 if (heartbeat?.device) return heartbeat.device;
+                localStorage.removeItem(key);
+                NorvaCloud.setDeviceToken('');
+            } else if (existing && !NorvaCloud.deviceToken) {
                 localStorage.removeItem(key);
             }
 
@@ -443,9 +482,11 @@
                 platform: navigator.platform || 'web',
                 appVersion: 'cloud-web',
                 trusted: true,
-                capabilities: { accountSession: true, pairingApproval: true }
+                issueDeviceToken: true,
+                capabilities: { accountSession: true, pairingApproval: true, commandSource: true }
             }).catch(() => null);
             if (created?.device?.id) localStorage.setItem(key, created.device.id);
+            if (created?.deviceToken) NorvaCloud.setDeviceToken(created.deviceToken);
             return created?.device || null;
         }
 
@@ -486,6 +527,92 @@
                 item.append(info, revoke);
                 devicesEl.appendChild(item);
             });
+        }
+
+        function renderCommandTargets(devices) {
+            commandDevice.innerHTML = '';
+            const targets = devices.filter(device => device.id !== localStorage.getItem('norva-cloud-device-id'));
+            if (!targets.length) {
+                const option = document.createElement('option');
+                option.value = '';
+                option.textContent = 'No target device available';
+                commandDevice.appendChild(option);
+                return;
+            }
+            targets.forEach(device => {
+                const option = document.createElement('option');
+                option.value = device.id;
+                option.textContent = `${device.device_name || 'Norva Device'} (${device.device_type || 'device'})`;
+                commandDevice.appendChild(option);
+            });
+        }
+
+        async function sendCommand(type) {
+            const targetDeviceId = commandDevice.value;
+            const url = document.getElementById('command-url').value.trim();
+            const title = document.getElementById('command-title').value.trim() || 'Norva';
+            const sourceDeviceId = localStorage.getItem('norva-cloud-device-id');
+            if (!targetDeviceId) {
+                setStatus(commandStatus, 'error', 'Select a target device first.');
+                return;
+            }
+            if (!/^https?:\/\//i.test(url)) {
+                setStatus(commandStatus, 'error', 'Enter a valid http(s) URL.');
+                return;
+            }
+            try {
+                setStatus(commandStatus, 'info', 'Sending command...');
+                await NorvaCloud.commands.queue({
+                    targetDeviceId,
+                    sourceDeviceId,
+                    command: type,
+                    payload: type === 'play' ? { playbackUrl: url, title } : { url, title },
+                    ttlSeconds: 180
+                });
+                setStatus(commandStatus, 'success', 'Command sent.');
+            } catch (error) {
+                setStatus(commandStatus, 'error', error.message);
+            }
+        }
+
+        function startDeviceCommandLoop() {
+            if (!NorvaCloud.deviceToken) return;
+            clearInterval(commandPollHandle);
+            pollDeviceCommands();
+            commandPollHandle = setInterval(pollDeviceCommands, 3500);
+            setInterval(() => NorvaCloud.device.heartbeat().catch(() => {}), 30000);
+        }
+
+        async function pollDeviceCommands() {
+            if (!NorvaCloud.deviceToken) return;
+            try {
+                const payload = await NorvaCloud.device.commands();
+                for (const command of payload.commands || []) {
+                    await handleDeviceCommand(command);
+                }
+            } catch (error) {
+                if (error.status === 401) {
+                    NorvaCloud.setDeviceToken('');
+                    clearInterval(commandPollHandle);
+                }
+            }
+        }
+
+        async function handleDeviceCommand(command) {
+            try {
+                const payload = command.payload || {};
+                if (command.command === 'open') {
+                    if (!payload.url) throw new Error('Missing URL');
+                    location.href = payload.url;
+                } else if (command.command === 'play') {
+                    const url = payload.playbackUrl || payload.url || payload.streamUrl;
+                    if (!url) throw new Error('Missing playback URL');
+                    location.href = url;
+                }
+                await NorvaCloud.device.acknowledgeCommand(command.id);
+            } catch (error) {
+                await NorvaCloud.device.failCommand(command.id, error.message || 'Command failed').catch(() => {});
+            }
         }
 
         function setStatus(element, type, message) {

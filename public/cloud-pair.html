@@ -145,9 +145,11 @@
         const statusEl = document.getElementById('status');
         const accountLink = document.getElementById('account-link');
         let currentCode = '';
+        let currentPairingSecret = '';
         let expiresAt = 0;
         let pollHandle = 0;
         let timerHandle = 0;
+        let commandHandle = 0;
 
         document.getElementById('restart-button').addEventListener('click', startPairing);
         startPairing();
@@ -156,7 +158,9 @@
             clearInterval(pollHandle);
             clearInterval(timerHandle);
             currentCode = '';
+            currentPairingSecret = '';
             expiresAt = 0;
+            clearInterval(commandHandle);
             codeEl.textContent = '...';
             pairUrlEl.textContent = '';
             timerEl.textContent = '';
@@ -174,6 +178,7 @@
                 });
 
                 currentCode = result.code;
+                currentPairingSecret = result.pairingSecret || '';
                 expiresAt = new Date(result.expiresAt).getTime();
                 const pairPath = '/cloud.html?pair=' + encodeURIComponent(currentCode);
                 const pairUrl = location.origin + pairPath;
@@ -192,12 +197,15 @@
         async function pollPairing() {
             if (!currentCode) return;
             try {
-                const result = await NorvaCloud.pairing.poll(currentCode);
+                const result = await NorvaCloud.pairing.poll(currentCode, currentPairingSecret);
                 if (result.status === 'approved') {
                     clearInterval(pollHandle);
                     clearInterval(timerHandle);
+                    if (result.deviceToken) NorvaCloud.setDeviceToken(result.deviceToken);
+                    if (result.approvedDeviceId) localStorage.setItem('norva-cloud-device-id', result.approvedDeviceId);
                     setStatus('success', 'This screen is paired with your Norva Account.');
                     timerEl.textContent = 'Connected';
+                    startCommandLoop();
                 } else if (result.status === 'expired' || result.status === 'not_found') {
                     clearInterval(pollHandle);
                     clearInterval(timerHandle);
@@ -206,6 +214,55 @@
                 }
             } catch (error) {
                 setStatus('error', error.message || 'Pairing check failed.');
+            }
+        }
+
+        function startCommandLoop() {
+            if (!NorvaCloud.deviceToken) return;
+            clearInterval(commandHandle);
+            pollCommands();
+            commandHandle = setInterval(pollCommands, 2500);
+            setInterval(() => NorvaCloud.device.heartbeat().catch(() => {}), 30000);
+        }
+
+        async function pollCommands() {
+            if (!NorvaCloud.deviceToken) return;
+            try {
+                const payload = await NorvaCloud.device.commands();
+                for (const command of payload.commands || []) {
+                    await handleCommand(command);
+                }
+            } catch (error) {
+                if (error.status === 401) {
+                    NorvaCloud.setDeviceToken('');
+                    clearInterval(commandHandle);
+                    setStatus('error', 'This device token was revoked. Create a new pairing code.');
+                }
+            }
+        }
+
+        async function handleCommand(command) {
+            try {
+                const payload = command.payload || {};
+                if (command.command === 'play') {
+                    const url = payload.playbackUrl || payload.url || payload.streamUrl;
+                    const title = payload.title || payload.name || 'Norva';
+                    if (!url) throw new Error('Missing playback URL');
+                    if (window.NorvaTVCloud && typeof window.NorvaTVCloud.playVideo === 'function') {
+                        window.NorvaTVCloud.playVideo(url, title);
+                    } else if (window.NodeCastNative && typeof window.NodeCastNative.playVideo === 'function') {
+                        window.NodeCastNative.playVideo(url, title);
+                    } else {
+                        location.href = url;
+                    }
+                } else if (command.command === 'open') {
+                    const url = payload.url;
+                    if (!url) throw new Error('Missing URL');
+                    location.href = url;
+                }
+                await NorvaCloud.device.acknowledgeCommand(command.id);
+            } catch (error) {
+                await NorvaCloud.device.failCommand(command.id, error.message || 'Command failed').catch(() => {});
             }
         }
 

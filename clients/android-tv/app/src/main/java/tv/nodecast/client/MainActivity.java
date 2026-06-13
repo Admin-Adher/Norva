@@ -252,6 +252,7 @@ public class MainActivity extends Activity {
     }
 
     private void connectCloudPairing() {
+        webView.addJavascriptInterface(new CloudBridge(), "NorvaTVCloud");
         connect(CLOUD_PAIR_URL);
     }
 
@@ -278,30 +279,37 @@ public class MainActivity extends Activity {
     private class NativeBridge {
         @android.webkit.JavascriptInterface
         public void playVideo(final String url, final String title) {
-            openPlayer(url, title, null, null, null);
+            MainActivity.this.openPlayer(url, title, null, null, null);
         }
 
         @android.webkit.JavascriptInterface
         public void playVideoWithMeta(final String url, final String title, final String sourceId,
                                       final String itemType, final String itemId) {
-            openPlayer(url, title, sourceId, itemType, itemId);
+            MainActivity.this.openPlayer(url, title, sourceId, itemType, itemId);
         }
+    }
 
-        private void openPlayer(final String url, final String title, final String sourceId,
-                                final String itemType, final String itemId) {
-            runOnUiThread(new Runnable() {
-                @Override
-                public void run() {
-                    android.content.Intent intent = new android.content.Intent(MainActivity.this, PlayerActivity.class);
-                    intent.putExtra(PlayerActivity.EXTRA_URL, url);
-                    intent.putExtra(PlayerActivity.EXTRA_TITLE, title);
-                    if (sourceId != null) intent.putExtra(PlayerActivity.EXTRA_SOURCE_ID, sourceId);
-                    if (itemType != null) intent.putExtra(PlayerActivity.EXTRA_ITEM_TYPE, itemType);
-                    if (itemId != null) intent.putExtra(PlayerActivity.EXTRA_ITEM_ID, itemId);
-                    startActivity(intent);
-                }
-            });
+    private class CloudBridge {
+        @android.webkit.JavascriptInterface
+        public void playVideo(final String url, final String title) {
+            MainActivity.this.openPlayer(url, title, null, null, null);
         }
+    }
+
+    private void openPlayer(final String url, final String title, final String sourceId,
+                            final String itemType, final String itemId) {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                android.content.Intent intent = new android.content.Intent(MainActivity.this, PlayerActivity.class);
+                intent.putExtra(PlayerActivity.EXTRA_URL, url);
+                intent.putExtra(PlayerActivity.EXTRA_TITLE, title);
+                if (sourceId != null) intent.putExtra(PlayerActivity.EXTRA_SOURCE_ID, sourceId);
+                if (itemType != null) intent.putExtra(PlayerActivity.EXTRA_ITEM_TYPE, itemType);
+                if (itemId != null) intent.putExtra(PlayerActivity.EXTRA_ITEM_ID, itemId);
+                startActivity(intent);
+            }
+        });
     }
 
     private void showSetup(String error) {

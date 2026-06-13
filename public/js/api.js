@@ -207,6 +207,13 @@ const API = {
         getDefaults: () => API.request('GET', '/settings/defaults')
     },
 
+    // Norva Cloud link for the local hub
+    cloud: {
+        status: () => API.request('GET', '/cloud/status'),
+        link: (data) => API.request('POST', '/cloud/link', data),
+        unlink: () => API.request('POST', '/cloud/unlink')
+    },
+
     // Users (admin only)
     users: {
         getAll: () => API.request('GET', '/auth/users'),

@@ -208,6 +208,7 @@ app.use('/api/history', require('./routes/history'));
 app.use('/api/tmdb', require('./routes/tmdb'));
 app.use('/api/playback-status', require('./routes/playbackStatus'));
 app.use('/api/pair', require('./routes/pairing'));
+app.use('/api/cloud', require('./routes/cloud'));
 
 // Version endpoint
 app.get('/api/version', (req, res) => {
@@ -247,6 +248,7 @@ app.listen(PORT, async () => {
     setTimeout(async () => {
         await syncService.syncAllIfDue('startup').catch(console.error);
         await syncService.startSyncTimer().catch(console.error);
+        require('./services/cloudBridge').start();
 
         // Detect hardware acceleration capabilities
         try {

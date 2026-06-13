@@ -2,6 +2,14 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 
 type JsonRecord = Record<string, unknown>;
+type CloudUser = { id: string; email?: string };
+type CloudDevice = {
+  id: string;
+  user_id: string;
+  device_type?: string;
+  device_name?: string;
+  capabilities?: JsonRecord;
+};
 
 class HttpError extends Error {
   status: number;
@@ -32,6 +40,8 @@ const RELAY_BASE_URL = trimTrailingSlash(Deno.env.get("NORVA_RELAY_BASE_URL") ??
 const RELAY_TOKEN_SECRET = Deno.env.get("RELAY_TOKEN_SECRET") ?? "";
 const MEDIA_GATEWAY_URL = trimTrailingSlash(Deno.env.get("NORVA_MEDIA_GATEWAY_URL") ?? "");
 const MEDIA_GATEWAY_TOKEN = Deno.env.get("NORVA_MEDIA_GATEWAY_TOKEN") ?? "";
+const DEVICE_PUBLIC_SELECT =
+  "id, user_id, device_type, device_name, platform, app_version, public_key, capabilities, trusted, revoked, last_seen_at, created_at, updated_at";
 
 if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
   throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
@@ -87,7 +97,19 @@ async function route(
   }
 
   if (scope === "pairing" && req.method === "GET" && id) {
-    return { body: await pollPairing(id, db) };
+    return { body: await pollPairing(req, id, db) };
+  }
+
+  if (scope === "device") {
+    const device = await requireDevice(req, db);
+    if (req.method === "GET" && id === "me") return { body: { device } };
+    if ((req.method === "POST" || req.method === "PATCH") && id === "heartbeat") {
+      return { body: await heartbeatDeviceToken(device, db) };
+    }
+    if (id === "commands") {
+      if (req.method === "GET" && !action) return { body: await listDeviceCommands(url, device, db) };
+      if (req.method === "PATCH" && action) return { body: await updateDeviceCommand(req, action, device, db) };
+    }
   }
 
   const user = await requireUser(req, db);
@@ -159,7 +181,7 @@ async function route(
   throw new HttpError(404, "Route not found");
 }
 
-async function requireUser(req: Request, db: SupabaseClient): Promise<{ id: string; email?: string }> {
+async function requireUser(req: Request, db: SupabaseClient): Promise<CloudUser> {
   const authHeader = req.headers.get("Authorization") ?? "";
   const token = authHeader.match(/^Bearer\s+(.+)$/i)?.[1];
   if (!token) throw new HttpError(401, "Missing bearer token");
@@ -167,6 +189,29 @@ async function requireUser(req: Request, db: SupabaseClient): Promise<{ id: stri
   const { data, error } = await db.auth.getUser(token);
   if (error || !data.user) throw new HttpError(401, "Invalid bearer token", error?.message);
   return { id: data.user.id, email: data.user.email ?? undefined };
+}
+
+async function requireDevice(req: Request, db: SupabaseClient): Promise<CloudDevice> {
+  const authHeader = req.headers.get("Authorization") ?? "";
+  const token = authHeader.match(/^Bearer\s+(.+)$/i)?.[1];
+  if (!token) throw new HttpError(401, "Missing device token");
+
+  const tokenHash = await sha256Hex(token);
+  const { data, error } = await db
+    .from("cloud_devices")
+    .select("id, user_id, device_type, device_name, capabilities")
+    .eq("device_token_hash", tokenHash)
+    .eq("revoked", false)
+    .maybeSingle();
+  if (error) throwDb(error, "Unable to verify device token");
+  if (!data) throw new HttpError(401, "Invalid device token");
+  return {
+    id: data.id,
+    user_id: data.user_id,
+    device_type: data.device_type,
+    device_name: data.device_name,
+    capabilities: recordOrEmpty(data.capabilities),
+  };
 }
 
 async function getProfile(userId: string, db: SupabaseClient) {
@@ -200,7 +245,7 @@ async function upsertProfile(req: Request, userId: string, db: SupabaseClient) {
 async function listDevices(userId: string, db: SupabaseClient) {
   const { data, error } = await db
     .from("cloud_devices")
-    .select("*")
+    .select(DEVICE_PUBLIC_SELECT)
     .eq("user_id", userId)
     .order("created_at", { ascending: false });
   if (error) throwDb(error, "Unable to list devices");
@@ -209,6 +254,8 @@ async function listDevices(userId: string, db: SupabaseClient) {
 
 async function createDevice(req: Request, userId: string, db: SupabaseClient) {
   const body = await readJson(req);
+  const issueDeviceToken = body.issueDeviceToken === true || body.issue_device_token === true;
+  const deviceToken = issueDeviceToken ? generateDeviceToken() : "";
   const row = {
     user_id: userId,
     device_type: stringOr(body.deviceType ?? body.device_type, "unknown"),
@@ -219,11 +266,13 @@ async function createDevice(req: Request, userId: string, db: SupabaseClient) {
     capabilities: recordOrEmpty(body.capabilities),
     trusted: Boolean(body.trusted ?? false),
     last_seen_at: new Date().toISOString(),
+    device_token_hash: deviceToken ? await sha256Hex(deviceToken) : null,
+    device_token_issued_at: deviceToken ? new Date().toISOString() : null,
   };
 
-  const { data, error } = await db.from("cloud_devices").insert(row).select("*").single();
+  const { data, error } = await db.from("cloud_devices").insert(row).select(DEVICE_PUBLIC_SELECT).single();
   if (error) throwDb(error, "Unable to register device");
-  return { device: data };
+  return { device: data, deviceToken: deviceToken || undefined };
 }
 
 async function heartbeatDevice(id: string, userId: string, db: SupabaseClient) {
@@ -232,7 +281,7 @@ async function heartbeatDevice(id: string, userId: string, db: SupabaseClient) {
     .update({ last_seen_at: new Date().toISOString() })
     .eq("id", id)
     .eq("user_id", userId)
-    .select("*")
+    .select(DEVICE_PUBLIC_SELECT)
     .single();
   if (error) throwDb(error, "Unable to update device heartbeat");
   return { device: data };
@@ -457,11 +506,16 @@ async function startPairing(req: Request, db: SupabaseClient) {
   const body = await readJson(req);
   const ttlSeconds = boundedInt(body.ttlSeconds ?? body.ttl_seconds, 300, 60, 900);
   const code = await uniquePairingCode(db);
+  const pairingSecret = generateDeviceToken();
   const row = {
     code,
     device_type: stringOr(body.deviceType ?? body.device_type, "unknown"),
     device_name: stringOrNull(body.deviceName ?? body.device_name),
     device_public_key: stringOrNull(body.devicePublicKey ?? body.device_public_key),
+    pairing_secret_hash: await sha256Hex(pairingSecret),
+    platform: stringOrNull(body.platform),
+    app_version: stringOrNull(body.appVersion ?? body.app_version),
+    device_capabilities: recordOrEmpty(body.capabilities),
     status: "pending",
     expires_at: new Date(Date.now() + ttlSeconds * 1000).toISOString(),
   };
@@ -471,15 +525,21 @@ async function startPairing(req: Request, db: SupabaseClient) {
   return {
     id: data.id,
     code: data.code,
+    pairingSecret,
     status: data.status,
     expiresAt: data.expires_at,
   };
 }
 
-async function pollPairing(code: string, db: SupabaseClient) {
+async function pollPairing(req: Request, code: string, db: SupabaseClient) {
+  const url = new URL(req.url);
+  const suppliedSecret =
+    url.searchParams.get("secret") ??
+    req.headers.get("X-Norva-Pairing-Secret") ??
+    "";
   const { data, error } = await db
     .from("cloud_pairing_sessions")
-    .select("id, code, status, approved_device_id, expires_at, approved_at")
+    .select("id, code, status, approved_device_id, pairing_secret_hash, expires_at, approved_at")
     .eq("code", code.toUpperCase())
     .maybeSingle();
   if (error) throwDb(error, "Unable to poll pairing");
@@ -488,11 +548,15 @@ async function pollPairing(code: string, db: SupabaseClient) {
     await db.from("cloud_pairing_sessions").update({ status: "expired" }).eq("id", data.id);
     return { status: "expired" };
   }
+  const secretMatches = suppliedSecret
+    ? data.pairing_secret_hash === await sha256Hex(suppliedSecret)
+    : false;
   return {
     id: data.id,
     code: data.code,
     status: data.status,
     approvedDeviceId: data.approved_device_id,
+    deviceToken: data.status === "approved" && secretMatches ? suppliedSecret : undefined,
     expiresAt: data.expires_at,
     approvedAt: data.approved_at,
   };
@@ -519,11 +583,16 @@ async function approvePairing(req: Request, userId: string, db: SupabaseClient) 
       user_id: userId,
       device_type: pair.device_type ?? "unknown",
       device_name: pair.device_name ?? "Norva Device",
+      platform: pair.platform,
+      app_version: pair.app_version,
       public_key: pair.device_public_key,
+      capabilities: recordOrEmpty(pair.device_capabilities),
       trusted: true,
       last_seen_at: new Date().toISOString(),
+      device_token_hash: pair.pairing_secret_hash,
+      device_token_issued_at: new Date().toISOString(),
     })
-    .select("*")
+    .select(DEVICE_PUBLIC_SELECT)
     .single();
   if (deviceError) throwDb(deviceError, "Unable to create paired device");
 
@@ -600,6 +669,76 @@ async function updateCommand(req: Request, id: string, userId: string, db: Supab
     .select("*")
     .single();
   if (error) throwDb(error, "Unable to update command");
+  return { command: data };
+}
+
+async function heartbeatDeviceToken(device: CloudDevice, db: SupabaseClient) {
+  const { data, error } = await db
+    .from("cloud_devices")
+    .update({ last_seen_at: new Date().toISOString() })
+    .eq("id", device.id)
+    .eq("user_id", device.user_id)
+    .eq("revoked", false)
+    .select(DEVICE_PUBLIC_SELECT)
+    .single();
+  if (error) throwDb(error, "Unable to update device heartbeat");
+  return { device: data };
+}
+
+async function listDeviceCommands(url: URL, device: CloudDevice, db: SupabaseClient) {
+  const limit = boundedInt(url.searchParams.get("limit"), 25, 1, 100);
+  const now = new Date().toISOString();
+  await db
+    .from("cloud_cast_commands")
+    .update({ status: "expired" })
+    .eq("target_device_id", device.id)
+    .eq("user_id", device.user_id)
+    .eq("status", "queued")
+    .not("expires_at", "is", null)
+    .lt("expires_at", now);
+
+  const { data, error } = await db
+    .from("cloud_cast_commands")
+    .select("*")
+    .eq("target_device_id", device.id)
+    .eq("user_id", device.user_id)
+    .eq("status", "queued")
+    .order("created_at", { ascending: true })
+    .limit(limit);
+  if (error) throwDb(error, "Unable to list device commands");
+
+  const ids = (data ?? []).map((command) => command.id).filter(Boolean);
+  if (ids.length) {
+    await db
+      .from("cloud_cast_commands")
+      .update({ status: "delivered", delivered_at: new Date().toISOString() })
+      .in("id", ids)
+      .eq("target_device_id", device.id)
+      .eq("user_id", device.user_id);
+  }
+  return { commands: data ?? [] };
+}
+
+async function updateDeviceCommand(req: Request, id: string, device: CloudDevice, db: SupabaseClient) {
+  const body = await readJson(req);
+  const status = stringOr(body.status, "");
+  if (!["acknowledged", "failed"].includes(status)) {
+    throw new HttpError(400, "Device commands can only be acknowledged or failed");
+  }
+
+  const patch: JsonRecord = { status };
+  if (status === "acknowledged") patch.acknowledged_at = new Date().toISOString();
+  if (status === "failed" && typeof body.error === "string") patch.payload = { error: body.error };
+
+  const { data, error } = await db
+    .from("cloud_cast_commands")
+    .update(patch)
+    .eq("id", id)
+    .eq("target_device_id", device.id)
+    .eq("user_id", device.user_id)
+    .select("*")
+    .single();
+  if (error) throwDb(error, "Unable to update device command");
   return { command: data };
 }
 
@@ -834,6 +973,12 @@ function generatePairingCode() {
   const bytes = new Uint8Array(6);
   crypto.getRandomValues(bytes);
   return Array.from(bytes, (byte) => alphabet[byte % alphabet.length]).join("");
+}
+
+function generateDeviceToken() {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  return `nv_dev_${base64Url(bytes)}`;
 }
 
 function choosePlaybackMode(requestedMode: string, body: JsonRecord): "direct" | "relay" | "transcode" {
