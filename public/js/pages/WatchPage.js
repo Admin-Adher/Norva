@@ -505,6 +505,30 @@ class WatchPage {
         return this.buildProcessingUrl('/api/remux', url, start);
     }
 
+    canUseLocalProxy(url) {
+        if (!url || url.startsWith('/')) return false;
+
+        try {
+            const parsed = new URL(url, window.location.href);
+            if (parsed.pathname.startsWith('/api/')) return false;
+            if (parsed.pathname.startsWith('/relay/')) return false;
+            if (parsed.hostname.includes('workers.dev') && parsed.pathname.includes('/relay/')) return false;
+            if (parsed.hostname.includes('norva-relay')) return false;
+
+            const isSecurePage = window.location.protocol === 'https:';
+            if (isSecurePage && parsed.protocol === 'https:') return false;
+        } catch {
+            return false;
+        }
+
+        return true;
+    }
+
+    getProxiedUrl(url) {
+        if (!this.canUseLocalProxy(url)) return url;
+        return `/api/proxy/stream?url=${encodeURIComponent(url)}`;
+    }
+
     async updateTranscodeStatus(mode, text) {
         if (!this.transcodeStatusEx) return;
 
@@ -966,7 +990,7 @@ class WatchPage {
         // Determine if proxy is needed
         const proxyRequiredDomains = ['pluto.tv'];
         const needsProxy = settings.forceProxy || proxyRequiredDomains.some(domain => url.includes(domain));
-        const finalUrl = needsProxy ? `/api/proxy/stream?url=${encodeURIComponent(url)}` : url;
+        const finalUrl = needsProxy ? this.getProxiedUrl(url) : url;
 
         console.log('[WatchPage] Playing:', { url, needsProxy, looksLikeHls });
 
@@ -1105,9 +1129,9 @@ class WatchPage {
                 }
             } else if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
                 // Try proxy on CORS error (only if not already proxied/transcoded)
-                if (!url.startsWith('/api/')) {
+                if (this.canUseLocalProxy(this.currentUrl)) {
                     console.log('[WatchPage] Retrying via proxy...');
-                    this.playHls(`/api/proxy/stream?url=${encodeURIComponent(this.currentUrl)}`);
+                    this.playHls(this.getProxiedUrl(this.currentUrl));
                     return;
                 }
                 // Local transcode session: playlist/segments can lag behind the

@@ -1290,10 +1290,7 @@ class VideoPlayer {
                         const isCorsLikely = data.type === Hls.ErrorTypes.NETWORK_ERROR ||
                             (data.type === Hls.ErrorTypes.MEDIA_ERROR && data.details === 'fragParsingError');
 
-                        // Don't proxy if it's already a local API URL
-                        const isLocalApi = this.currentUrl.startsWith('/api/');
-
-                        if (isCorsLikely && !this.isUsingProxy && !isLocalApi) {
+                        if (isCorsLikely && !this.isUsingProxy && this.canUseLocalProxy(this.currentUrl)) {
                             console.log('CORS/Network error detected, retrying via proxy...', data.details);
                             this.isUsingProxy = true;
                             this.hls.loadSource(this.getProxiedUrl(this.currentUrl));
@@ -1579,7 +1576,27 @@ class VideoPlayer {
      * Get proxied URL for a stream
      */
     getProxiedUrl(url) {
+        if (!this.canUseLocalProxy(url)) return url;
         return `/api/proxy/stream?url=${encodeURIComponent(url)}`;
+    }
+
+    canUseLocalProxy(url) {
+        if (!url || url.startsWith('/')) return false;
+
+        try {
+            const parsed = new URL(url, window.location.href);
+            if (parsed.pathname.startsWith('/api/')) return false;
+            if (parsed.pathname.startsWith('/relay/')) return false;
+            if (parsed.hostname.includes('workers.dev') && parsed.pathname.includes('/relay/')) return false;
+            if (parsed.hostname.includes('norva-relay')) return false;
+
+            const isSecurePage = window.location.protocol === 'https:';
+            if (isSecurePage && parsed.protocol === 'https:') return false;
+        } catch {
+            return false;
+        }
+
+        return true;
     }
 
     /**
