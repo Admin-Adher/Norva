@@ -1,0 +1,15 @@
+{
+  "name": "@norva/relay",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Norva Relay for signed playback URLs, CORS and HLS playlist rewriting.",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "types": "wrangler types"
+  },
+  "devDependencies": {
+    "wrangler": "^4.54.0"
+  }
+}

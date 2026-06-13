@@ -1,0 +1,4 @@
+project_id = "oupsceccxsonaalhueff"
+
+[functions.norva-cloud]
+verify_jwt = false

@@ -20,6 +20,7 @@ release/
 transcode-cache/
 tmp/
 outputs/
+supabase/.temp/
 *.exe
 *.apk
 *.wgt

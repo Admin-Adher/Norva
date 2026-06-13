@@ -51,15 +51,15 @@ Core product areas include:
 
 ## Architecture
 
-Norva uses a hybrid architecture built for flexibility:
+Norva uses a hybrid architecture built for product independence:
 
-- A local hub manages playback, sources, users, and device communication
-- A web interface provides the main application experience
-- Mobile and TV clients connect to the hub through local or remote access
-- A controlled cloud layer supports pairing, device state, and future synchronization
-- A managed distribution layer hosts the web and mobile companion experiences
+- Norva Cloud Core manages accounts, devices, sources, pairing, favorites, and history
+- Playback Sessions give every app a single cloud contract for direct, relay, or gateway playback
+- Norva Relay handles lightweight stream access concerns such as CORS, headers, HLS playlists, and signed URLs
+- Norva Media Gateway provides dedicated remux/transcode capacity for streams that need FFmpeg
+- The local hub remains useful for desktop and local-network experiences, but it is no longer the long-term dependency for every app
 
-This structure keeps Norva adaptable: local-first where performance matters, cloud-connected where continuity and device linking matter.
+This structure keeps Norva adaptable: cloud-first where continuity and ecosystem UX matter, local-capable where proximity and personal infrastructure still add value.
 
 ## Brand
 

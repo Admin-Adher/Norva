@@ -1,5 +1,5 @@
-const CACHE = 'norva-mobile-v1';
-const ASSETS = ['/', '/index.html', '/manifest.json', '/icon-192.png'];
+const CACHE = 'norva-mobile-v2';
+const ASSETS = ['/', '/index.html', '/manifest.json', '/icon-192.png', '/cloudApi.js'];
 
 self.addEventListener('install', e =>
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)))
