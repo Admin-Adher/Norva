@@ -1275,8 +1275,9 @@ class WatchPage {
             // recoverable: try a bounded number of recoveries before giving up.
             if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
                 this._mediaRecoveries = (this._mediaRecoveries || 0) + 1;
-                if (this._mediaRecoveries <= 3) {
-                    console.warn(`[WatchPage] Recovering media error (attempt ${this._mediaRecoveries}/3)`);
+                const maxMediaRecoveries = isGatewaySession ? 8 : 3;
+                if (this._mediaRecoveries <= maxMediaRecoveries) {
+                    console.warn(`[WatchPage] Recovering media error (attempt ${this._mediaRecoveries}/${maxMediaRecoveries})`);
                     if (this._mediaRecoveries === 2) this.hls.swapAudioCodec();
                     this.hls.recoverMediaError();
                     setTimeout(() => this.video?.play().catch(() => { }), 500);

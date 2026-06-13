@@ -34,7 +34,7 @@ app.get('/health', (req, res) => {
     res.json({
         ok: true,
         service: 'norva-media-gateway',
-        version: 6,
+        version: 7,
         activeSessions: activeSessionCount(),
         totalSessions: sessions.size,
         time: new Date().toISOString()
@@ -181,6 +181,9 @@ function startFfmpeg(session) {
             '-c:v', 'libx264',
             '-preset', 'ultrafast',
             '-tune', 'zerolatency',
+            '-profile:v', 'high',
+            '-level', '4.1',
+            '-pix_fmt', 'yuv420p',
             '-crf', '23',
             '-g', '48',
             '-sc_threshold', '0',
@@ -199,6 +202,7 @@ function startFfmpeg(session) {
         '-f', 'hls',
         '-hls_time', '4',
         '-hls_list_size', '8',
+        '-hls_segment_type', 'mpegts',
         '-hls_flags', 'delete_segments+append_list+independent_segments',
         '-hls_segment_filename', segmentPattern,
         session.playlistPath
