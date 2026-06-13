@@ -9,12 +9,19 @@
     'use strict';
 
     const DEFAULT_API_URL = 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-cloud';
+    const DEFAULT_SOURCE_SYNC_URL = 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-source-sync';
     const KEY_API_URL = 'norva-cloud-api-url';
+    const KEY_SOURCE_SYNC_URL = 'norva-source-sync-url';
     const KEY_TOKEN = 'norva-cloud-token';
     const KEY_DEVICE_TOKEN = 'norva-cloud-device-token';
 
     function apiBase() {
         const configured = localStorage.getItem(KEY_API_URL) || window.NORVA_CLOUD_API_URL || DEFAULT_API_URL;
+        return configured.replace(/\/+$/, '');
+    }
+
+    function sourceSyncBase() {
+        const configured = localStorage.getItem(KEY_SOURCE_SYNC_URL) || window.NORVA_SOURCE_SYNC_URL || DEFAULT_SOURCE_SYNC_URL;
         return configured.replace(/\/+$/, '');
     }
 
@@ -71,6 +78,47 @@
         return payload;
     }
 
+    async function sourceSyncRequest(id) {
+        try {
+            return await requestToBase(sourceSyncBase(), 'POST', `/sources/${encodeURIComponent(id)}/sync`, {});
+        } catch (error) {
+            if (error.status === 404 || error.status === 405) {
+                return request('POST', `/sources/${encodeURIComponent(id)}/sync`, {});
+            }
+            throw error;
+        }
+    }
+
+    async function requestToBase(baseUrl, method, path, body, options = {}) {
+        const headers = {
+            'Content-Type': 'application/json',
+            ...(options.headers || {})
+        };
+        const token = options.token === undefined ? getToken() : options.token;
+        if (token) headers.Authorization = `Bearer ${token}`;
+
+        const response = await fetch(`${baseUrl}${path}`, {
+            method,
+            headers,
+            body: body === undefined || body === null ? undefined : JSON.stringify(body)
+        });
+
+        const contentType = response.headers.get('content-type') || '';
+        const payload = contentType.includes('application/json')
+            ? await response.json().catch(() => ({}))
+            : { error: await response.text().catch(() => '') };
+
+        if (!response.ok) {
+            const message = payload.error || payload.message || `Norva responded with ${response.status}`;
+            const error = new Error(message);
+            error.status = response.status;
+            error.payload = payload;
+            throw error;
+        }
+
+        return payload;
+    }
+
     const NorvaCloud = {
         get apiUrl() { return apiBase(); },
         get token() { return getToken(); },
@@ -99,7 +147,7 @@
             create: (source) => request('POST', '/sources', source),
             update: (id, patch) => request('PATCH', `/sources/${encodeURIComponent(id)}`, patch),
             seriesInfo: (id, seriesId) => request('GET', `/sources/${encodeURIComponent(id)}/series-info?series_id=${encodeURIComponent(seriesId)}`),
-            sync: (id) => request('POST', `/sources/${encodeURIComponent(id)}/sync`, {}),
+            sync: (id) => sourceSyncRequest(id),
             remove: (id) => request('DELETE', `/sources/${encodeURIComponent(id)}`)
         },
 
