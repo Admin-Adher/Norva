@@ -150,6 +150,7 @@
         let pollHandle = 0;
         let timerHandle = 0;
         let commandHandle = 0;
+        const returnTo = sanitizeReturnTo(params.get('returnTo')) || '/?paired=1#home';
 
         document.getElementById('restart-button').addEventListener('click', startPairing);
         startPairing();
@@ -206,6 +207,7 @@
                     setStatus('success', 'This screen is paired with your Norva Account.');
                     timerEl.textContent = 'Connected';
                     startCommandLoop();
+                    setTimeout(() => location.replace(returnTo), 900);
                 } else if (result.status === 'expired' || result.status === 'not_found') {
                     clearInterval(pollHandle);
                     clearInterval(timerHandle);
@@ -295,6 +297,12 @@
             if (deviceType === 'tv') return 'Norva TV';
             if (deviceType === 'mobile') return 'Norva Mobile';
             return 'Norva Web';
+        }
+
+        function sanitizeReturnTo(value) {
+            if (!value || typeof value !== 'string') return '';
+            if (!value.startsWith('/') || value.startsWith('//')) return '';
+            return value;
         }
     </script>
 </body>

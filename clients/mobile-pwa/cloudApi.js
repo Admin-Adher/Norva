@@ -97,6 +97,7 @@
       list: () => request('GET', '/sources'),
       create: (source) => request('POST', '/sources', source),
       update: (id, patch) => request('PATCH', `/sources/${encodeURIComponent(id)}`, patch),
+      seriesInfo: (id, seriesId) => request('GET', `/sources/${encodeURIComponent(id)}/series-info?series_id=${encodeURIComponent(seriesId)}`),
       sync: (id) => request('POST', `/sources/${encodeURIComponent(id)}/sync`, {}),
       remove: (id) => request('DELETE', `/sources/${encodeURIComponent(id)}`)
     },
@@ -139,7 +140,17 @@
       heartbeat: () => request('POST', '/device/heartbeat', {}, { token: getDeviceToken() }),
       commands: () => request('GET', '/device/commands', null, { token: getDeviceToken() }),
       acknowledgeCommand: (id) => request('PATCH', `/device/commands/${encodeURIComponent(id)}`, { status: 'acknowledged' }, { token: getDeviceToken() }),
-      failCommand: (id, error) => request('PATCH', `/device/commands/${encodeURIComponent(id)}`, { status: 'failed', error }, { token: getDeviceToken() })
+      failCommand: (id, error) => request('PATCH', `/device/commands/${encodeURIComponent(id)}`, { status: 'failed', error }, { token: getDeviceToken() }),
+      sources: {
+        list: () => request('GET', '/device/sources', null, { token: getDeviceToken() }),
+        seriesInfo: (id, seriesId) => request('GET', `/device/sources/${encodeURIComponent(id)}/series-info?series_id=${encodeURIComponent(seriesId)}`, null, { token: getDeviceToken() })
+      },
+      mediaItems: {
+        list: (params = {}) => request('GET', `/device/media-items${query(params)}`, null, { token: getDeviceToken() })
+      },
+      playback: {
+        createSession: (session) => request('POST', '/device/playback/sessions', session, { token: getDeviceToken() })
+      }
     }
   };
 })();

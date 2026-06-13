@@ -1,1002 +1,655 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#080b12">
-  <link rel="manifest" href="/manifest.json">
-  <link rel="apple-touch-icon" href="/icon-192.png">
-  <title>Norva</title>
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    :root {
-      --bg: #080b12;
-      --surface: #11151d;
-      --surface-2: #1a202b;
-      --line: #273142;
-      --text: #f8fafc;
-      --muted: #a1a1aa;
-      --quiet: #667085;
-      --accent: #4f7df3;
-      --success: #34d399;
-      --danger: #fb7185;
-    }
-    body {
-      min-height: 100vh;
-      background: var(--bg);
-      color: var(--text);
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      padding-bottom: env(safe-area-inset-bottom);
-    }
-    header {
-      min-height: 60px;
-      padding: max(12px, env(safe-area-inset-top)) 16px 12px;
-      border-bottom: 1px solid rgba(148, 163, 184, 0.14);
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      position: sticky;
-      top: 0;
-      background: rgba(8, 11, 18, 0.94);
-      backdrop-filter: blur(18px);
-      z-index: 2;
-    }
-    .brand {
-      display: flex;
-      align-items: center;
-      gap: 9px;
-      font-weight: 800;
-      min-width: 0;
-    }
-    .brand img {
-      width: 34px;
-      height: 34px;
-      border-radius: 8px;
-    }
-    main {
-      padding: 18px 16px 28px;
-      display: grid;
-      gap: 14px;
-    }
-    .tabs {
-      display: flex;
-      gap: 8px;
-      overflow-x: auto;
-      padding-bottom: 4px;
-    }
-    .tab {
-      min-height: 40px;
-      padding: 0 12px;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      color: var(--muted);
-      background: #111827;
-      font-weight: 800;
-      white-space: nowrap;
-      text-decoration: none;
-      display: inline-flex;
-      align-items: center;
-    }
-    .tab.active {
-      color: var(--text);
-      background: #252b37;
-      border-color: rgba(79, 125, 243, 0.55);
-    }
-    .app-view { display: none; }
-    .app-view.active {
-      display: grid;
-      gap: 14px;
-    }
-    .panel {
-      background: var(--surface);
-      border: 1px solid rgba(148, 163, 184, 0.18);
-      border-radius: 8px;
-      padding: 16px;
-    }
-    h1 {
-      font-size: 26px;
-      margin-bottom: 8px;
-    }
-    h2 {
-      font-size: 16px;
-      margin-bottom: 12px;
-    }
-    .muted {
-      color: var(--muted);
-      font-size: 14px;
-      line-height: 1.55;
-    }
-    .account {
-      color: var(--muted);
-      font-size: 13px;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      margin-top: 10px;
-    }
-    label {
-      display: block;
-      color: #cbd5e1;
-      font-size: 13px;
-      font-weight: 650;
-      margin: 14px 0 6px;
-    }
-    input, select {
-      width: 100%;
-      min-height: 46px;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: #0b0f16;
-      color: var(--text);
-      font: inherit;
-      outline: none;
-      padding: 0 12px;
-    }
-    input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(79, 125, 243, 0.18); }
-    .code-input {
-      text-align: center;
-      letter-spacing: 4px;
-      text-transform: uppercase;
-      font-weight: 850;
-      font-size: 20px;
-    }
-    .row {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 10px;
-      margin-top: 12px;
-    }
-    .btn {
-      min-height: 44px;
-      border-radius: 8px;
-      border: 1px solid var(--line);
-      color: var(--text);
-      background: #252b37;
-      font-weight: 800;
-      text-decoration: none;
-      display: inline-flex;
-      justify-content: center;
-      align-items: center;
-      padding: 0 12px;
-    }
-    .btn.primary {
-      border: 0;
-      background: linear-gradient(135deg, #4f7df3, #6d5dfc 58%, #c75cff);
-      color: white;
-    }
-    .btn.danger {
-      color: #fecdd3;
-      background: rgba(251, 113, 133, 0.08);
-      border-color: rgba(251, 113, 133, 0.35);
-    }
-    .status {
-      display: none;
-      margin-top: 12px;
-      padding: 11px 12px;
-      border-radius: 8px;
-      border: 1px solid var(--line);
-      color: var(--muted);
-      font-size: 14px;
-      line-height: 1.45;
-    }
-    .status.info { display: block; background: rgba(79, 125, 243, 0.1); color: #bfdbfe; }
-    .status.success { display: block; background: rgba(52, 211, 153, 0.1); color: var(--success); border-color: rgba(52, 211, 153, 0.3); }
-    .status.error { display: block; background: rgba(251, 113, 133, 0.1); color: var(--danger); border-color: rgba(251, 113, 133, 0.3); }
-    .devices {
-      display: grid;
-      gap: 10px;
-    }
-    .device {
-      background: var(--surface-2);
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 13px;
-    }
-    .device strong {
-      display: block;
-      margin-bottom: 4px;
-    }
-    .device span {
-      display: block;
-      color: var(--quiet);
-      font-size: 12px;
-    }
-    .segmented {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 8px;
-      padding: 4px;
-      background: #0b0f16;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      margin-top: 12px;
-    }
-    .segment {
-      min-height: 38px;
-      border: 0;
-      border-radius: 6px;
-      background: transparent;
-      color: var(--muted);
-      font: inherit;
-      font-weight: 800;
-    }
-    .segment.active {
-      color: var(--text);
-      background: #252b37;
-    }
-    .source-list {
-      display: grid;
-      gap: 10px;
-      margin-top: 12px;
-    }
-    .source-item {
-      background: var(--surface-2);
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 13px;
-    }
-    .source-item strong {
-      display: block;
-      margin-bottom: 4px;
-    }
-    .source-item span {
-      display: block;
-      color: var(--quiet);
-      font-size: 12px;
-    }
-    .media-row {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 10px;
-      margin-top: 10px;
-    }
-    .media-card {
-      min-height: 126px;
-      background: var(--surface-2);
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 12px;
-      display: grid;
-      align-content: space-between;
-      gap: 10px;
-    }
-    .media-card strong {
-      display: -webkit-box;
-      -webkit-line-clamp: 2;
-      -webkit-box-orient: vertical;
-      overflow: hidden;
-      line-height: 1.25;
-    }
-    .media-card span {
-      color: var(--quiet);
-      font-size: 12px;
-    }
-    .hidden { display: none !important; }
-    .empty {
-      color: var(--quiet);
-      border: 1px dashed var(--line);
-      border-radius: 8px;
-      padding: 18px;
-      text-align: center;
-      font-size: 14px;
-      line-height: 1.5;
-    }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#090b10">
+    <title>Norva Account</title>
+    <link rel="icon" type="image/png" href="/favicon.png">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        :root {
+            --bg: #090b10;
+            --surface: #11151d;
+            --surface-2: #171c26;
+            --line: #273142;
+            --text: #f8fafc;
+            --muted: #9ca3af;
+            --quiet: #667085;
+            --accent: #4f7df3;
+            --danger: #fb7185;
+            --success: #34d399;
+        }
+        body {
+            min-height: 100vh;
+            background: var(--bg);
+            color: var(--text);
+            font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        }
+        .topbar {
+            min-height: 66px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 14px;
+            padding: 12px 24px;
+            border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+            background: rgba(9, 11, 16, 0.92);
+            position: sticky;
+            top: 0;
+            z-index: 2;
+            backdrop-filter: blur(18px);
+        }
+        .brand, .top-actions, .tabs, .button-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        .brand img { width: 36px; height: 36px; border-radius: 8px; }
+        .brand strong { font-size: 18px; }
+        .email {
+            color: var(--muted);
+            font-size: 13px;
+            max-width: 260px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .shell {
+            width: min(1120px, 100%);
+            margin: 0 auto;
+            padding: 32px 24px 48px;
+        }
+        .hero {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 360px;
+            gap: 22px;
+            align-items: stretch;
+            margin-bottom: 22px;
+        }
+        h1 {
+            font-size: clamp(32px, 5vw, 54px);
+            line-height: 1.04;
+            font-weight: 850;
+            margin-bottom: 14px;
+        }
+        h2 { font-size: 17px; margin-bottom: 14px; }
+        .lead {
+            max-width: 660px;
+            color: var(--muted);
+            line-height: 1.7;
+            font-size: 15px;
+        }
+        .panel {
+            background: var(--surface);
+            border: 1px solid rgba(148, 163, 184, 0.18);
+            border-radius: 8px;
+            padding: 20px;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+            gap: 22px;
+            margin-top: 22px;
+        }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            margin-top: 18px;
+        }
+        .stat {
+            background: var(--surface-2);
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            padding: 14px;
+            min-height: 82px;
+        }
+        .stat strong { display: block; font-size: 28px; line-height: 1; }
+        .stat span { display: block; color: var(--quiet); font-size: 12px; margin-top: 8px; }
+        .muted {
+            color: var(--muted);
+            font-size: 14px;
+            line-height: 1.55;
+        }
+        .field { margin-bottom: 14px; }
+        label {
+            display: block;
+            color: #cbd5e1;
+            font-size: 13px;
+            font-weight: 650;
+            margin-bottom: 7px;
+        }
+        input, select {
+            width: 100%;
+            min-height: 44px;
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            background: #0b0f16;
+            color: var(--text);
+            font: inherit;
+            outline: none;
+            padding: 0 12px;
+        }
+        input:focus, select:focus {
+            border-color: rgba(79, 125, 243, 0.9);
+            box-shadow: 0 0 0 3px rgba(79, 125, 243, 0.18);
+        }
+        .btn {
+            min-height: 42px;
+            border-radius: 8px;
+            border: 1px solid transparent;
+            padding: 0 14px;
+            font-weight: 750;
+            cursor: pointer;
+            color: var(--text);
+            background: #252b37;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .btn.primary {
+            border: 0;
+            background: linear-gradient(135deg, #4f7df3, #6d5dfc 60%, #c75cff);
+        }
+        .btn.danger {
+            color: #fecdd3;
+            border-color: rgba(251, 113, 133, 0.38);
+            background: rgba(251, 113, 133, 0.08);
+        }
+        .btn.link {
+            border-color: var(--line);
+            color: #bfdbfe;
+        }
+        .status {
+            display: none;
+            margin-top: 12px;
+            padding: 11px 12px;
+            border-radius: 8px;
+            border: 1px solid var(--line);
+            color: var(--muted);
+            font-size: 14px;
+        }
+        .status.info { display: block; background: rgba(79, 125, 243, 0.1); color: #bfdbfe; }
+        .status.success { display: block; background: rgba(52, 211, 153, 0.1); color: var(--success); border-color: rgba(52, 211, 153, 0.3); }
+        .status.error { display: block; background: rgba(251, 113, 133, 0.1); color: var(--danger); border-color: rgba(251, 113, 133, 0.3); }
+        .code-input {
+            text-transform: uppercase;
+            font-size: 20px;
+            font-weight: 800;
+            text-align: center;
+            letter-spacing: 4px;
+        }
+        .segmented {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            padding: 4px;
+            background: #0b0f16;
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            margin-bottom: 14px;
+        }
+        .segment {
+            min-height: 38px;
+            border: 0;
+            border-radius: 6px;
+            background: transparent;
+            color: var(--muted);
+            font: inherit;
+            font-weight: 800;
+            cursor: pointer;
+        }
+        .segment.active { color: var(--text); background: #252b37; }
+        .list {
+            display: grid;
+            gap: 10px;
+        }
+        .list-item {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: 12px;
+            align-items: center;
+            background: var(--surface-2);
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            padding: 14px;
+        }
+        .list-item strong { display: block; margin-bottom: 4px; }
+        .list-item span { display: block; color: var(--quiet); font-size: 12px; }
+        .hidden { display: none !important; }
+        @media (max-width: 880px) {
+            .topbar { align-items: flex-start; }
+            .email { display: none; }
+            .shell { padding: 24px 16px 36px; }
+            .hero, .grid { grid-template-columns: 1fr; }
+            .stats { grid-template-columns: 1fr; }
+            .list-item { grid-template-columns: 1fr; }
+        }
+    </style>
 </head>
 <body>
-  <header>
-    <div class="brand">
-      <img src="/icon-192.png" alt="Norva">
-      <span>Norva</span>
-    </div>
-    <button class="btn danger" id="signout-button" type="button">Sign out</button>
-  </header>
-
-  <main>
-    <nav class="tabs" aria-label="Norva">
-      <a class="tab active" href="#home" data-view-link="home">Home</a>
-      <a class="tab" href="#live" data-view-link="live">Live TV</a>
-      <a class="tab" href="#movies" data-view-link="movies">Movies</a>
-      <a class="tab" href="#series" data-view-link="series">Series</a>
-      <a class="tab" href="#search" data-view-link="search">Search</a>
-      <a class="tab" href="#my-list" data-view-link="my-list">My List</a>
-      <a class="tab" href="#account" data-view-link="account">Account</a>
-    </nav>
-
-    <section class="app-view active" data-view="home">
-      <section class="panel">
-        <h1>Watch everywhere</h1>
-        <p class="muted">Live TV, movies and series attached to your Norva Account.</p>
-        <div class="account" id="account-email"></div>
-        <div class="row">
-          <button class="btn primary" type="button" data-view-button="live">Live TV</button>
-          <button class="btn" type="button" data-view-button="account">Account</button>
+    <header class="topbar">
+        <div class="brand">
+            <img src="/icon-192.png" alt="Norva">
+            <strong>Norva Account</strong>
         </div>
-      </section>
-      <section class="panel">
-        <h2>For you</h2>
-        <div class="status" id="media-status"></div>
-        <h2 style="margin-top:16px">Live TV</h2>
-        <div class="media-row" id="media-live" data-media-shelf="live"></div>
-        <h2 style="margin-top:16px">Movies</h2>
-        <div class="media-row" id="media-movie" data-media-shelf="movie"></div>
-        <h2 style="margin-top:16px">Series</h2>
-        <div class="media-row" id="media-series" data-media-shelf="series"></div>
-      </section>
-    </section>
-
-    <section class="app-view" data-view="live">
-      <section class="panel">
-        <h1>Live TV</h1>
-        <p class="muted">Channels from your Norva providers.</p>
-        <div class="media-row" id="media-live-full" data-media-shelf="live"></div>
-      </section>
-    </section>
-
-    <section class="app-view" data-view="movies">
-      <section class="panel">
-        <h1>Movies</h1>
-        <p class="muted">Your synced movie catalog.</p>
-        <div class="media-row" id="media-movie-full" data-media-shelf="movie"></div>
-      </section>
-    </section>
-
-    <section class="app-view" data-view="series">
-      <section class="panel">
-        <h1>Series</h1>
-        <p class="muted">Shows from your Norva providers.</p>
-        <div class="media-row" id="media-series-full" data-media-shelf="series"></div>
-      </section>
-    </section>
-
-    <section class="app-view" data-view="search">
-      <section class="panel">
-        <h1>Search</h1>
-        <label for="media-search">Search</label>
-        <input id="media-search" type="search" placeholder="Channel, movie, series">
-        <button class="btn primary" id="media-search-button" type="button" style="width:100%; margin-top:10px">Search</button>
-        <h2 style="margin-top:16px">Live TV</h2>
-        <div class="media-row" id="media-live-search" data-media-shelf="live"></div>
-        <h2 style="margin-top:16px">Movies</h2>
-        <div class="media-row" id="media-movie-search" data-media-shelf="movie"></div>
-        <h2 style="margin-top:16px">Series</h2>
-        <div class="media-row" id="media-series-search" data-media-shelf="series"></div>
-      </section>
-    </section>
-
-    <section class="app-view" data-view="my-list">
-      <section class="panel">
-        <h1>My List</h1>
-        <h2>Favorites</h2>
-        <div class="media-row" id="favorite-list"></div>
-        <h2 style="margin-top:16px">Continue watching</h2>
-        <div class="media-row" id="history-list"></div>
-      </section>
-    </section>
-
-    <section class="app-view" data-view="account">
-      <section class="panel">
-        <h1>Account</h1>
-        <p class="muted">Manage your TV providers and trusted screens.</p>
-        <div class="row">
-          <a class="btn" href="/account.html">Sign-in</a>
-          <button class="btn danger" id="signout-inline-button" type="button">Sign out</button>
+        <div class="top-actions">
+            <span class="email" id="account-email"></span>
+            <a class="btn link" href="/">Watch</a>
+            <button class="btn danger" id="signout-button" type="button">Sign out</button>
         </div>
-      </section>
+    </header>
 
-      <section class="panel">
-        <h2>TV provider</h2>
-        <div class="segmented" aria-label="Source type">
-          <button class="segment active" type="button" data-source-type="xtream">Xtream</button>
-          <button class="segment" type="button" data-source-type="m3u">M3U</button>
-        </div>
-        <label for="source-name">Name</label>
-        <input id="source-name" type="text" maxlength="80" placeholder="My IPTV">
-        <div id="xtream-fields">
-          <label for="xtream-url">Server URL</label>
-          <input id="xtream-url" type="url" placeholder="https://provider.example">
-          <label for="xtream-username">Username</label>
-          <input id="xtream-username" type="text" autocomplete="username">
-          <label for="xtream-password">Password</label>
-          <input id="xtream-password" type="password" autocomplete="current-password">
-        </div>
-        <div id="m3u-fields" class="hidden">
-          <label for="m3u-url">Playlist URL</label>
-          <input id="m3u-url" type="url" placeholder="https://provider.example/playlist.m3u">
-        </div>
-        <button class="btn primary" id="add-source-button" type="button" style="width:100%; margin-top:14px">Add provider</button>
-        <div class="status" id="source-status"></div>
-        <div class="source-list" id="sources"></div>
-      </section>
+    <main class="shell">
+        <section class="hero">
+            <div>
+                <h1>Your household, attached to one Norva account.</h1>
+                <p class="lead">Manage your profile, IPTV providers, trusted screens and pairing codes. Watching happens in the Norva app.</p>
+                <div class="stats">
+                    <div class="stat"><strong id="device-count">0</strong><span>Trusted screens</span></div>
+                    <div class="stat"><strong id="source-count">0</strong><span>TV providers</span></div>
+                    <div class="stat"><strong id="history-count">0</strong><span>History records</span></div>
+                </div>
+            </div>
+            <section class="panel">
+                <h2>Pair a screen</h2>
+                <p class="muted">Enter the code shown on a TV, mobile app or web screen.</p>
+                <div class="field" style="margin-top:14px">
+                    <label for="pair-code">Pairing code</label>
+                    <input id="pair-code" class="code-input" type="text" inputmode="text" maxlength="10" autocomplete="one-time-code" placeholder="ABC123">
+                </div>
+                <div class="button-row">
+                    <button class="btn primary" id="approve-button" type="button">Approve device</button>
+                    <button class="btn" id="clear-code-button" type="button">Clear</button>
+                </div>
+                <div class="status" id="pair-status"></div>
+            </section>
+        </section>
 
-      <section class="panel">
-        <h2>Pair a screen</h2>
-        <p class="muted">Enter the code shown on the TV or web screen.</p>
-        <label for="pair-code">Pairing code</label>
-        <input id="pair-code" class="code-input" type="text" inputmode="text" maxlength="10" autocomplete="one-time-code" placeholder="ABC123">
-        <div class="row">
-          <button class="btn primary" id="approve-button" type="button">Approve</button>
-          <button class="btn" id="clear-button" type="button">Clear</button>
-        </div>
-        <div class="status" id="pair-status"></div>
-      </section>
+        <section class="grid">
+            <section class="panel">
+                <h2>Profile</h2>
+                <div class="field">
+                    <label for="display-name">Display name</label>
+                    <input id="display-name" type="text" maxlength="80" autocomplete="name">
+                </div>
+                <div class="button-row">
+                    <button class="btn primary" id="save-profile-button" type="button">Save profile</button>
+                    <a class="btn link" href="/account.html">Sign-in settings</a>
+                </div>
+                <div class="status" id="profile-status"></div>
+            </section>
 
-      <section class="panel">
-        <h2>Trusted screens</h2>
-        <div class="devices" id="devices"></div>
-        <div class="status" id="devices-status"></div>
-      </section>
+            <section class="panel">
+                <h2>Trusted screens</h2>
+                <div class="list" id="devices-list"></div>
+                <div class="status" id="devices-status"></div>
+            </section>
+        </section>
 
-      <section class="panel">
-        <h2>Remote play</h2>
-        <p class="muted">Send a playback or navigation command to a trusted Norva screen.</p>
-        <label for="command-device">Target device</label>
-        <select id="command-device"></select>
-        <label for="command-title">Title</label>
-        <input id="command-title" type="text" maxlength="120" placeholder="Norva stream">
-        <label for="command-url">URL</label>
-        <input id="command-url" type="url" placeholder="https://...">
-        <div class="row">
-          <button class="btn primary" id="send-play-button" type="button">Play</button>
-          <button class="btn" id="send-open-button" type="button">Open</button>
-        </div>
-        <div class="status" id="command-status"></div>
-      </section>
-    </section>
-  </main>
+        <section class="grid">
+            <section class="panel">
+                <h2>Add TV provider</h2>
+                <div class="segmented" aria-label="Source type">
+                    <button class="segment active" id="type-xtream" type="button" data-source-type="xtream">Xtream</button>
+                    <button class="segment" id="type-m3u" type="button" data-source-type="m3u">M3U</button>
+                </div>
+                <div class="field">
+                    <label for="source-name">Name</label>
+                    <input id="source-name" type="text" maxlength="80" placeholder="Family IPTV">
+                </div>
+                <div id="xtream-fields">
+                    <div class="field">
+                        <label for="xtream-url">Server URL</label>
+                        <input id="xtream-url" type="url" placeholder="https://provider.example">
+                    </div>
+                    <div class="field">
+                        <label for="xtream-username">Username</label>
+                        <input id="xtream-username" type="text" autocomplete="username">
+                    </div>
+                    <div class="field">
+                        <label for="xtream-password">Password</label>
+                        <input id="xtream-password" type="password" autocomplete="current-password">
+                    </div>
+                </div>
+                <div id="m3u-fields" class="hidden">
+                    <div class="field">
+                        <label for="m3u-url">Playlist URL</label>
+                        <input id="m3u-url" type="url" placeholder="https://provider.example/playlist.m3u">
+                    </div>
+                </div>
+                <button class="btn primary" id="add-source-button" type="button">Add provider</button>
+                <div class="status" id="source-status"></div>
+            </section>
 
-  <script src="/cloudApi.js?v=1"></script>
-  <script src="/authApi.js?v=1"></script>
-  <script>
-    const params = new URLSearchParams(location.search);
-    const currentReturn = location.pathname + location.search;
-    const codeInput = document.getElementById('pair-code');
-    const pairStatus = document.getElementById('pair-status');
-    const devicesStatus = document.getElementById('devices-status');
-    const commandStatus = document.getElementById('command-status');
-    const devicesEl = document.getElementById('devices');
-    const sourcesEl = document.getElementById('sources');
-    const mediaStatus = document.getElementById('media-status');
-    const mediaEls = {
-      live: Array.from(document.querySelectorAll('[data-media-shelf="live"]')),
-      movie: Array.from(document.querySelectorAll('[data-media-shelf="movie"]')),
-      series: Array.from(document.querySelectorAll('[data-media-shelf="series"]'))
-    };
-    const favoriteList = document.getElementById('favorite-list');
-    const historyList = document.getElementById('history-list');
-    const commandDevice = document.getElementById('command-device');
-    const sourceStatus = document.getElementById('source-status');
-    let cloudSources = [];
-    let trustedDevices = [];
-    let selectedSourceType = 'xtream';
-    let commandPollHandle = 0;
+            <section class="panel">
+                <h2>Your providers</h2>
+                <div class="list" id="sources-list"></div>
+            </section>
+        </section>
 
-    boot();
+        <section class="grid">
+            <section class="panel">
+                <h2>Remote command</h2>
+                <p class="muted">Send a playback or navigation command to a trusted Norva screen.</p>
+                <div class="field" style="margin-top:14px">
+                    <label for="command-device">Target screen</label>
+                    <select id="command-device"></select>
+                </div>
+                <div class="field">
+                    <label for="command-title">Title</label>
+                    <input id="command-title" type="text" maxlength="120" placeholder="Norva stream">
+                </div>
+                <div class="field">
+                    <label for="command-url">URL</label>
+                    <input id="command-url" type="url" placeholder="https://...">
+                </div>
+                <div class="button-row">
+                    <button class="btn primary" id="send-play-button" type="button">Play</button>
+                    <button class="btn" id="send-open-button" type="button">Open</button>
+                </div>
+                <div class="status" id="command-status"></div>
+            </section>
 
-    document.getElementById('signout-button').addEventListener('click', async () => {
-      await NorvaAuth.signOut();
-      location.replace('/account.html');
-    });
-    document.getElementById('signout-inline-button').addEventListener('click', async () => {
-      await NorvaAuth.signOut();
-      location.replace('/account.html');
-    });
-    document.querySelectorAll('[data-view-link]').forEach(link => {
-      link.addEventListener('click', event => {
-        event.preventDefault();
-        showView(link.dataset.viewLink, true);
-      });
-    });
-    document.querySelectorAll('[data-view-button]').forEach(button => {
-      button.addEventListener('click', () => showView(button.dataset.viewButton, true));
-    });
-    document.getElementById('approve-button').addEventListener('click', approveCode);
-    document.getElementById('add-source-button').addEventListener('click', addSource);
-    document.getElementById('send-play-button').addEventListener('click', () => sendCommand('play'));
-    document.getElementById('send-open-button').addEventListener('click', () => sendCommand('open'));
-    document.getElementById('media-search').addEventListener('keydown', event => {
-      if (event.key === 'Enter') loadMediaShelves();
-    });
-    document.getElementById('media-search-button').addEventListener('click', loadMediaShelves);
-    document.querySelectorAll('[data-source-type]').forEach(button => {
-      button.addEventListener('click', () => selectSourceType(button.dataset.sourceType));
-    });
-    document.getElementById('clear-button').addEventListener('click', () => {
-      codeInput.value = '';
-      pairStatus.className = 'status';
-      history.replaceState({}, document.title, '#account');
-    });
-    codeInput.addEventListener('input', () => {
-      codeInput.value = codeInput.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10);
-    });
-    codeInput.addEventListener('keydown', event => {
-      if (event.key === 'Enter') approveCode();
-    });
+            <section class="panel">
+                <h2>Advanced</h2>
+                <p class="muted">The local connector remains available for offline/local hub workflows. The public product should use Norva Account first.</p>
+                <div class="button-row" style="margin-top:14px">
+                    <a class="btn link" href="/hub-connect.html">Local connector</a>
+                    <a class="btn link" href="/">Open Watch</a>
+                </div>
+            </section>
+        </section>
+    </main>
 
-    async function boot() {
-      NorvaAuth.captureSessionFromUrl();
-      const user = await NorvaAuth.getUser().catch(() => null);
-      if (!user) {
-        location.replace('/account.html?returnTo=' + encodeURIComponent(currentReturn));
-        return;
-      }
-      document.getElementById('account-email').textContent = user.email || 'Norva Account';
-      if (params.get('pair')) {
-        codeInput.value = params.get('pair').toUpperCase();
-        setStatus(pairStatus, 'info', 'Pairing code ready.');
-        showView('account', true);
-      } else {
-        showView(getInitialView(), false);
-      }
-      await ensureProfile(user);
-      await registerCurrentDevice();
-      startDeviceCommandLoop();
-      await loadDevices();
-      await loadSources();
-      await Promise.all([loadMediaShelves(), loadMyList()]);
-    }
+    <script src="/cloudApi.js?v=2"></script>
+    <script src="/authApi.js?v=2"></script>
+    <script>
+        const params = new URLSearchParams(location.search);
+        const currentReturn = location.pathname + location.search;
+        const pairCodeInput = document.getElementById('pair-code');
+        const devicesEl = document.getElementById('devices-list');
+        const sourcesEl = document.getElementById('sources-list');
+        const commandDevice = document.getElementById('command-device');
+        const pairStatus = document.getElementById('pair-status');
+        const profileStatus = document.getElementById('profile-status');
+        const devicesStatus = document.getElementById('devices-status');
+        const sourceStatus = document.getElementById('source-status');
+        const commandStatus = document.getElementById('command-status');
+        let trustedDevices = [];
+        let cloudSources = [];
+        let selectedSourceType = 'xtream';
 
-    function getInitialView() {
-      const hash = location.hash.replace('#', '');
-      const allowed = new Set(['home', 'live', 'movies', 'series', 'search', 'my-list', 'account']);
-      return allowed.has(hash) ? hash : 'home';
-    }
+        boot();
 
-    function showView(view, pushHash) {
-      const selected = view || 'home';
-      document.querySelectorAll('[data-view]').forEach(panel => {
-        panel.classList.toggle('active', panel.dataset.view === selected);
-      });
-      document.querySelectorAll('[data-view-link]').forEach(link => {
-        link.classList.toggle('active', link.dataset.viewLink === selected);
-      });
-      if (pushHash) history.replaceState({}, document.title, `#${selected}`);
-      if (selected === 'my-list') loadMyList();
-    }
-
-    async function ensureProfile(user) {
-      const name = user.user_metadata?.display_name || user.email?.split('@')[0] || '';
-      await NorvaCloud.profile.save({ displayName: name, locale: navigator.language || 'fr-FR' }).catch(() => {});
-    }
-
-    async function approveCode() {
-      const code = codeInput.value.trim().toUpperCase();
-      if (!code) {
-        setStatus(pairStatus, 'error', 'Enter the pairing code first.');
-        return;
-      }
-      const button = document.getElementById('approve-button');
-      button.disabled = true;
-      try {
-        setStatus(pairStatus, 'info', 'Approving device...');
-        await NorvaCloud.pairing.approve(code);
-        setStatus(pairStatus, 'success', 'Device paired.');
-        codeInput.value = '';
-        history.replaceState({}, document.title, '#account');
-        await loadDevices();
-      } catch (error) {
-        setStatus(pairStatus, 'error', error.message);
-      } finally {
-        button.disabled = false;
-      }
-    }
-
-    async function loadDevices() {
-      try {
-        const payload = await NorvaCloud.devices.list();
-        trustedDevices = normalizeDevices((payload.devices || []).filter(device => !device.revoked));
-        renderDevices(trustedDevices);
-        renderCommandTargets(trustedDevices);
-      } catch (error) {
-        setStatus(devicesStatus, 'error', error.message);
-      }
-    }
-
-    function selectSourceType(type) {
-      selectedSourceType = type === 'm3u' ? 'm3u' : 'xtream';
-      document.querySelectorAll('[data-source-type]').forEach(button => {
-        button.classList.toggle('active', button.dataset.sourceType === selectedSourceType);
-      });
-      document.getElementById('xtream-fields').classList.toggle('hidden', selectedSourceType !== 'xtream');
-      document.getElementById('m3u-fields').classList.toggle('hidden', selectedSourceType !== 'm3u');
-    }
-
-    async function addSource() {
-      const button = document.getElementById('add-source-button');
-      const displayName = document.getElementById('source-name').value.trim() || (selectedSourceType === 'xtream' ? 'Xtream IPTV' : 'M3U Playlist');
-      const config = selectedSourceType === 'xtream'
-        ? {
-          serverUrl: document.getElementById('xtream-url').value.trim(),
-          username: document.getElementById('xtream-username').value.trim(),
-          password: document.getElementById('xtream-password').value
-        }
-        : {
-          playlistUrl: document.getElementById('m3u-url').value.trim()
-        };
-      button.disabled = true;
-      try {
-        setStatus(sourceStatus, 'info', 'Adding source...');
-        await NorvaCloud.sources.create({ sourceType: selectedSourceType, displayName, config, syncNow: true });
-        clearSourceForm();
-        setStatus(sourceStatus, 'success', 'Source added. Sync started.');
-        await loadSources();
-        await Promise.all([loadMediaShelves(), loadMyList()]);
-        setTimeout(loadSources, 5000);
-        setTimeout(loadMediaShelves, 5500);
-      } catch (error) {
-        setStatus(sourceStatus, 'error', error.message);
-      } finally {
-        button.disabled = false;
-      }
-    }
-
-    function clearSourceForm() {
-      document.getElementById('source-name').value = '';
-      document.getElementById('xtream-url').value = '';
-      document.getElementById('xtream-username').value = '';
-      document.getElementById('xtream-password').value = '';
-      document.getElementById('m3u-url').value = '';
-    }
-
-    async function loadSources() {
-      try {
-        const payload = await NorvaCloud.sources.list();
-        cloudSources = payload.sources || [];
-        renderSources(cloudSources);
-      } catch (error) {
-        setStatus(sourceStatus, 'error', error.message);
-      }
-    }
-
-    async function loadMediaShelves() {
-      const q = document.getElementById('media-search').value.trim();
-      try {
-        const [live, movie, series] = await Promise.all([
-          NorvaCloud.mediaItems.list({ type: 'live', limit: 24, q }).catch(() => ({ items: [] })),
-          NorvaCloud.mediaItems.list({ type: 'movie', limit: 24, q }).catch(() => ({ items: [] })),
-          NorvaCloud.mediaItems.list({ type: 'series', limit: 24, q }).catch(() => ({ items: [] }))
-        ]);
-        renderMediaShelf('live', live.items || []);
-        renderMediaShelf('movie', movie.items || []);
-        renderMediaShelf('series', series.items || []);
-        const total = (live.items || []).length + (movie.items || []).length + (series.items || []).length;
-        if (!total && cloudSources.length) {
-          setStatus(mediaStatus, 'info', 'Your source is syncing. Content will appear here shortly.');
-        } else {
-          mediaStatus.className = 'status';
-          mediaStatus.textContent = '';
-        }
-      } catch (error) {
-        setStatus(mediaStatus, 'error', error.message);
-      }
-    }
-
-    function renderMediaShelf(type, items) {
-      const containers = mediaEls[type] || [];
-      containers.forEach(container => {
-        container.innerHTML = '';
-        if (!items.length) {
-          container.innerHTML = '<div class="empty">No items yet.</div>';
-          return;
-        }
-        items.forEach(item => container.appendChild(createMediaCard(item)));
-      });
-    }
-
-    function createMediaCard(rawItem) {
-      const item = normalizeMediaItem(rawItem);
-      const card = document.createElement('div');
-      card.className = 'media-card';
-      const info = document.createElement('div');
-      const title = document.createElement('strong');
-      title.textContent = item.title || 'Untitled';
-      const meta = document.createElement('span');
-      meta.textContent = item.subtitle || labelForType(item.item_type);
-      info.append(title, meta);
-      const play = document.createElement('button');
-      play.className = 'btn primary';
-      play.type = 'button';
-      play.textContent = 'Play';
-      play.addEventListener('click', () => playMediaItem(item, play));
-      card.append(info, play);
-      return card;
-    }
-
-    function normalizeMediaItem(item) {
-      const data = item.data || {};
-      return {
-        ...item,
-        source_id: item.source_id || data.source_id,
-        item_type: item.item_type || data.item_type || data.type || 'live',
-        external_id: item.external_id || item.item_id || data.external_id || data.item_id,
-        title: item.title || data.title || data.name || item.item_id || 'Untitled',
-        subtitle: item.subtitle || data.subtitle || labelForType(item.item_type || data.type)
-      };
-    }
-
-    async function loadMyList() {
-      const [favorites, history] = await Promise.all([
-        NorvaCloud.favorites.list({ limit: 24 }).catch(() => ({ favorites: [] })),
-        NorvaCloud.history.list({ limit: 24 }).catch(() => ({ history: [] }))
-      ]);
-      renderSimpleMediaList(favoriteList, favorites.favorites || [], 'No favorites yet.');
-      renderSimpleMediaList(historyList, history.history || [], 'No watch history yet.');
-    }
-
-    function renderSimpleMediaList(container, items, emptyText) {
-      container.innerHTML = '';
-      if (!items.length) {
-        container.innerHTML = `<div class="empty">${emptyText}</div>`;
-        return;
-      }
-      items.forEach(item => container.appendChild(createMediaCard(item)));
-    }
-
-    async function playMediaItem(item, button) {
-      button.disabled = true;
-      try {
-        setStatus(mediaStatus, 'info', 'Starting playback...');
-        const session = await NorvaCloud.playback.createSession({
-          sourceId: item.source_id,
-          itemType: item.item_type,
-          itemId: item.external_id,
-          mode: 'relay'
+        document.getElementById('signout-button').addEventListener('click', async () => {
+            await NorvaAuth.signOut();
+            location.replace('/account.html');
         });
-        const playbackUrl = session.playback?.url;
-        if (!playbackUrl) throw new Error('Playback is waiting for Norva Gateway.');
-        setStatus(mediaStatus, 'success', 'Playback ready.');
-        location.href = playbackUrl;
-      } catch (error) {
-        setStatus(mediaStatus, 'error', error.message);
-      } finally {
-        button.disabled = false;
-      }
-    }
-
-    function labelForType(type) {
-      if (type === 'live') return 'Live TV';
-      if (type === 'movie') return 'Movie';
-      if (type === 'series') return 'Series';
-      return 'Norva';
-    }
-
-    function renderSources(sources) {
-      sourcesEl.innerHTML = '';
-      if (!sources.length) {
-        sourcesEl.innerHTML = '<div class="empty">No IPTV source yet.</div>';
-        return;
-      }
-      sources.forEach(source => {
-        const item = document.createElement('div');
-        item.className = 'source-item';
-        const name = document.createElement('strong');
-        name.textContent = source.display_name || 'IPTV source';
-        const meta = document.createElement('span');
-        meta.textContent = `${String(source.source_type || 'source').toUpperCase()} - ${source.sync_status || 'idle'}`;
-        const sync = document.createElement('button');
-        sync.className = 'btn';
-        sync.type = 'button';
-        sync.textContent = 'Sync';
-        sync.style.marginTop = '10px';
-        sync.addEventListener('click', async () => {
-          sync.disabled = true;
-          try {
-            await NorvaCloud.sources.sync(source.id);
-            await loadSources();
-            await Promise.all([loadMediaShelves(), loadMyList()]);
-            setTimeout(loadSources, 5000);
-            setTimeout(loadMediaShelves, 5500);
-          } catch (error) {
-            setStatus(sourceStatus, 'error', error.message);
-          } finally {
-            sync.disabled = false;
-          }
+        document.getElementById('save-profile-button').addEventListener('click', saveProfile);
+        document.getElementById('approve-button').addEventListener('click', approveCode);
+        document.getElementById('clear-code-button').addEventListener('click', () => {
+            pairCodeInput.value = '';
+            pairStatus.className = 'status';
+            history.replaceState({}, document.title, location.pathname);
         });
-        const remove = document.createElement('button');
-        remove.className = 'btn';
-        remove.type = 'button';
-        remove.textContent = 'Remove';
-        remove.style.marginTop = '10px';
-        remove.addEventListener('click', async () => {
-          remove.disabled = true;
-          try {
-            await NorvaCloud.sources.remove(source.id);
-            await loadSources();
-            await loadMediaShelves();
-          } catch (error) {
-            setStatus(sourceStatus, 'error', error.message);
-          } finally {
-            remove.disabled = false;
-          }
+        document.getElementById('add-source-button').addEventListener('click', addSource);
+        document.getElementById('send-play-button').addEventListener('click', () => sendCommand('play'));
+        document.getElementById('send-open-button').addEventListener('click', () => sendCommand('open'));
+        document.querySelectorAll('[data-source-type]').forEach(button => {
+            button.addEventListener('click', () => selectSourceType(button.dataset.sourceType));
         });
-        item.append(name, meta, sync, remove);
-        sourcesEl.appendChild(item);
-      });
-    }
-
-    async function registerCurrentDevice() {
-      const key = 'norva-cloud-device-id';
-      const installId = getInstallId();
-      const existing = localStorage.getItem(key);
-      if (existing) {
-        const heartbeat = await NorvaCloud.devices.heartbeat(existing).catch(() => null);
-        if (heartbeat?.device) return heartbeat.device;
-        localStorage.removeItem(key);
-        NorvaCloud.setDeviceToken('');
-      }
-
-      const known = await NorvaCloud.devices.list().catch(() => ({ devices: [] }));
-      const matchingDevice = (known.devices || []).find(device =>
-        !device.revoked &&
-        (device.public_key === installId || device.capabilities?.installId === installId)
-      );
-      if (matchingDevice?.id) {
-        localStorage.setItem(key, matchingDevice.id);
-        await NorvaCloud.devices.heartbeat(matchingDevice.id).catch(() => null);
-        return matchingDevice;
-      }
-
-      const created = await NorvaCloud.devices.create({
-        deviceType: 'mobile',
-        deviceName: 'Norva Mobile',
-        platform: navigator.platform || 'mobile',
-        appVersion: 'mobile-pwa',
-        publicKey: installId,
-        trusted: true,
-        issueDeviceToken: true,
-        capabilities: { accountSession: true, pairingApproval: true, commandSource: true, installId }
-      }).catch(() => null);
-      if (created?.device?.id) localStorage.setItem(key, created.device.id);
-      if (created?.deviceToken) NorvaCloud.setDeviceToken(created.deviceToken);
-      return created?.device || null;
-    }
-
-    function renderDevices(devices) {
-      devicesStatus.className = 'status';
-      devicesEl.innerHTML = '';
-      if (!devices.length) {
-        devicesEl.innerHTML = '<div class="empty">No paired device yet.</div>';
-        return;
-      }
-      devices.forEach(device => {
-        const item = document.createElement('div');
-        item.className = 'device';
-        const name = document.createElement('strong');
-        name.textContent = device.device_name || 'Norva Device';
-        const meta = document.createElement('span');
-        meta.textContent = [device.device_type || 'device', formatDate(device.last_seen_at)].filter(Boolean).join(' - ');
-        item.append(name, meta);
-        devicesEl.appendChild(item);
-      });
-    }
-
-    function normalizeDevices(devices) {
-      const byIdentity = new Map();
-      for (const device of devices) {
-        const identity = device.public_key || device.capabilities?.installId || [
-          device.device_type || 'device',
-          device.device_name || 'Norva Device',
-          device.platform || '',
-          device.app_version || ''
-        ].join('|');
-        const previous = byIdentity.get(identity);
-        if (!previous || new Date(device.created_at || device.last_seen_at || 0) > new Date(previous.created_at || previous.last_seen_at || 0)) {
-          byIdentity.set(identity, device);
-        }
-      }
-      return Array.from(byIdentity.values());
-    }
-
-    function renderCommandTargets(devices) {
-      commandDevice.innerHTML = '';
-      const targets = devices.filter(device => device.id !== localStorage.getItem('norva-cloud-device-id'));
-      if (!targets.length) {
-        const option = document.createElement('option');
-        option.value = '';
-        option.textContent = 'No target device';
-        commandDevice.appendChild(option);
-        return;
-      }
-      targets.forEach(device => {
-        const option = document.createElement('option');
-        option.value = device.id;
-        option.textContent = `${device.device_name || 'Norva Device'} (${device.device_type || 'device'})`;
-        commandDevice.appendChild(option);
-      });
-    }
-
-    async function sendCommand(type) {
-      const targetDeviceId = commandDevice.value;
-      const url = document.getElementById('command-url').value.trim();
-      const title = document.getElementById('command-title').value.trim() || 'Norva';
-      const sourceDeviceId = localStorage.getItem('norva-cloud-device-id');
-      if (!targetDeviceId) {
-        setStatus(commandStatus, 'error', 'Select a target device first.');
-        return;
-      }
-      if (!/^https?:\/\//i.test(url)) {
-        setStatus(commandStatus, 'error', 'Enter a valid http(s) URL.');
-        return;
-      }
-      try {
-        setStatus(commandStatus, 'info', 'Sending command...');
-        await NorvaCloud.commands.queue({
-          targetDeviceId,
-          sourceDeviceId,
-          command: type,
-          payload: type === 'play' ? { playbackUrl: url, title } : { url, title },
-          ttlSeconds: 180
+        pairCodeInput.addEventListener('input', () => {
+            pairCodeInput.value = pairCodeInput.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10);
         });
-        setStatus(commandStatus, 'success', 'Command sent.');
-      } catch (error) {
-        setStatus(commandStatus, 'error', error.message);
-      }
-    }
+        pairCodeInput.addEventListener('keydown', event => {
+            if (event.key === 'Enter') approveCode();
+        });
 
-    function startDeviceCommandLoop() {
-      if (!NorvaCloud.deviceToken) return;
-      clearInterval(commandPollHandle);
-      pollDeviceCommands();
-      commandPollHandle = setInterval(pollDeviceCommands, 3500);
-      setInterval(() => NorvaCloud.device.heartbeat().catch(() => {}), 30000);
-    }
+        async function boot() {
+            NorvaAuth.captureSessionFromUrl();
+            const user = await NorvaAuth.getUser().catch(() => null);
+            if (!user) {
+                location.replace('/account.html?returnTo=' + encodeURIComponent(currentReturn));
+                return;
+            }
 
-    async function pollDeviceCommands() {
-      if (!NorvaCloud.deviceToken) return;
-      try {
-        const payload = await NorvaCloud.device.commands();
-        for (const command of payload.commands || []) {
-          await handleDeviceCommand(command);
+            document.getElementById('account-email').textContent = user.email || '';
+            if (params.get('pair')) {
+                pairCodeInput.value = params.get('pair').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10);
+            }
+
+            await Promise.all([
+                loadProfile(),
+                loadDevices(),
+                loadSources(),
+                loadHistoryCount()
+            ]);
+
+            if (pairCodeInput.value) {
+                setStatus(pairStatus, 'info', 'Pairing code detected. Review it, then approve the device.');
+            }
         }
-      } catch (error) {
-        if (error.status === 401) {
-          NorvaCloud.setDeviceToken('');
-          clearInterval(commandPollHandle);
+
+        async function loadProfile() {
+            const profile = await NorvaCloud.profile.get().catch(() => null);
+            document.getElementById('display-name').value = profile?.display_name || profile?.displayName || '';
         }
-      }
-    }
 
-    async function handleDeviceCommand(command) {
-      try {
-        const payload = command.payload || {};
-        if (command.command === 'open') {
-          if (!payload.url) throw new Error('Missing URL');
-          location.href = payload.url;
-        } else if (command.command === 'play') {
-          const url = payload.playbackUrl || payload.url || payload.streamUrl;
-          if (!url) throw new Error('Missing playback URL');
-          location.href = url;
+        async function saveProfile() {
+            const name = document.getElementById('display-name').value.trim();
+            try {
+                setStatus(profileStatus, 'info', 'Saving profile...');
+                await NorvaCloud.profile.save({ displayName: name, locale: navigator.language || 'fr-FR' });
+                setStatus(profileStatus, 'success', 'Profile saved.');
+            } catch (error) {
+                setStatus(profileStatus, 'error', error.message || 'Unable to save profile.');
+            }
         }
-        await NorvaCloud.device.acknowledgeCommand(command.id);
-      } catch (error) {
-        await NorvaCloud.device.failCommand(command.id, error.message || 'Command failed').catch(() => {});
-      }
-    }
 
-    function setStatus(element, type, message) {
-      element.className = 'status ' + type;
-      element.textContent = message;
-    }
+        async function approveCode() {
+            const code = pairCodeInput.value.trim().toUpperCase();
+            if (!code) {
+                setStatus(pairStatus, 'error', 'Enter the pairing code shown on the screen.');
+                return;
+            }
+            try {
+                setStatus(pairStatus, 'info', 'Approving device...');
+                await NorvaCloud.pairing.approve(code);
+                setStatus(pairStatus, 'success', 'Device approved.');
+                pairCodeInput.value = '';
+                await loadDevices();
+            } catch (error) {
+                setStatus(pairStatus, 'error', error.message || 'Unable to approve this code.');
+            }
+        }
 
-    function formatDate(value) {
-      if (!value) return '';
-      const date = new Date(value);
-      if (Number.isNaN(date.getTime())) return '';
-      return date.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
-    }
+        async function loadDevices() {
+            try {
+                const payload = await NorvaCloud.devices.list();
+                trustedDevices = (payload.devices || []).filter(device => !device.revoked);
+                document.getElementById('device-count').textContent = trustedDevices.length;
+                commandDevice.innerHTML = trustedDevices.length
+                    ? trustedDevices.map(device => `<option value="${escapeAttr(device.id)}">${escapeHtml(device.device_name || device.device_type || 'Norva screen')}</option>`).join('')
+                    : '<option value="">No trusted screen</option>';
+                devicesEl.innerHTML = trustedDevices.length
+                    ? trustedDevices.map(renderDevice).join('')
+                    : '<div class="muted">No trusted screen yet. Pair a TV, phone or browser to see it here.</div>';
+                devicesEl.querySelectorAll('[data-revoke-device]').forEach(button => {
+                    button.addEventListener('click', async () => {
+                        const id = button.dataset.revokeDevice;
+                        button.disabled = true;
+                        try {
+                            await NorvaCloud.devices.revoke(id);
+                            if (localStorage.getItem('norva-cloud-device-id') === id) {
+                                NorvaCloud.setDeviceToken('');
+                                localStorage.removeItem('norva-cloud-device-id');
+                            }
+                            await loadDevices();
+                            setStatus(devicesStatus, 'success', 'Screen revoked.');
+                        } catch (error) {
+                            button.disabled = false;
+                            setStatus(devicesStatus, 'error', error.message || 'Unable to revoke this screen.');
+                        }
+                    });
+                });
+            } catch (error) {
+                setStatus(devicesStatus, 'error', error.message || 'Unable to load devices.');
+            }
+        }
 
-    function getInstallId() {
-      const key = 'norva-cloud-install-id';
-      let value = localStorage.getItem(key);
-      if (!value) {
-        const bytes = new Uint8Array(16);
-        crypto.getRandomValues(bytes);
-        value = 'mobile-' + Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
-        localStorage.setItem(key, value);
-      }
-      return value;
-    }
-  </script>
+        function renderDevice(device) {
+            const seen = device.last_seen_at ? new Date(device.last_seen_at).toLocaleString() : 'Never seen';
+            return `
+                <div class="list-item">
+                    <div>
+                        <strong>${escapeHtml(device.device_name || 'Norva screen')}</strong>
+                        <span>${escapeHtml(device.device_type || 'device')} - ${escapeHtml(device.platform || 'unknown')} - ${escapeHtml(seen)}</span>
+                    </div>
+                    <button class="btn danger" type="button" data-revoke-device="${escapeAttr(device.id)}">Revoke</button>
+                </div>
+            `;
+        }
+
+        function selectSourceType(type) {
+            selectedSourceType = type;
+            document.querySelectorAll('[data-source-type]').forEach(button => {
+                button.classList.toggle('active', button.dataset.sourceType === type);
+            });
+            document.getElementById('xtream-fields').classList.toggle('hidden', type !== 'xtream');
+            document.getElementById('m3u-fields').classList.toggle('hidden', type !== 'm3u');
+        }
+
+        async function addSource() {
+            const displayName = document.getElementById('source-name').value.trim();
+            const payload = { sourceType: selectedSourceType, displayName, syncNow: true };
+            if (!displayName) {
+                setStatus(sourceStatus, 'error', 'Name your TV provider.');
+                return;
+            }
+            if (selectedSourceType === 'xtream') {
+                payload.url = document.getElementById('xtream-url').value.trim();
+                payload.username = document.getElementById('xtream-username').value.trim();
+                payload.password = document.getElementById('xtream-password').value;
+            } else {
+                payload.url = document.getElementById('m3u-url').value.trim();
+            }
+            try {
+                setStatus(sourceStatus, 'info', 'Adding provider and starting sync...');
+                await NorvaCloud.sources.create(payload);
+                setStatus(sourceStatus, 'success', 'Provider added. Sync is running in the cloud.');
+                clearSourceForm();
+                await loadSources();
+                setTimeout(loadSources, 5000);
+            } catch (error) {
+                setStatus(sourceStatus, 'error', error.message || 'Unable to add this provider.');
+            }
+        }
+
+        function clearSourceForm() {
+            ['source-name', 'xtream-url', 'xtream-username', 'xtream-password', 'm3u-url'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.value = '';
+            });
+        }
+
+        async function loadSources() {
+            const payload = await NorvaCloud.sources.list().catch(() => ({ sources: [] }));
+            cloudSources = payload.sources || [];
+            document.getElementById('source-count').textContent = cloudSources.length;
+            sourcesEl.innerHTML = cloudSources.length
+                ? cloudSources.map(renderSource).join('')
+                : '<div class="muted">No TV provider yet. Add Xtream Codes or an M3U playlist to unlock Watch.</div>';
+            sourcesEl.querySelectorAll('[data-sync-source]').forEach(button => {
+                button.addEventListener('click', async () => {
+                    button.disabled = true;
+                    try {
+                        await NorvaCloud.sources.sync(button.dataset.syncSource);
+                        await loadSources();
+                    } finally {
+                        button.disabled = false;
+                    }
+                });
+            });
+            sourcesEl.querySelectorAll('[data-delete-source]').forEach(button => {
+                button.addEventListener('click', async () => {
+                    if (!confirm('Remove this provider from Norva Cloud?')) return;
+                    await NorvaCloud.sources.remove(button.dataset.deleteSource);
+                    await loadSources();
+                });
+            });
+        }
+
+        function renderSource(source) {
+            const hint = source.config_hint || {};
+            const status = source.sync_status || 'idle';
+            const detail = hint.serverHost || hint.playlistHost || source.last_synced_at || source.sync_error || '';
+            return `
+                <div class="list-item">
+                    <div>
+                        <strong>${escapeHtml(source.display_name || 'TV provider')}</strong>
+                        <span>${escapeHtml(source.source_type || 'source')} - ${escapeHtml(status)}${detail ? ' - ' + escapeHtml(detail) : ''}</span>
+                    </div>
+                    <div class="button-row">
+                        <button class="btn" type="button" data-sync-source="${escapeAttr(source.id)}">Sync</button>
+                        <button class="btn danger" type="button" data-delete-source="${escapeAttr(source.id)}">Remove</button>
+                    </div>
+                </div>
+            `;
+        }
+
+        async function loadHistoryCount() {
+            const payload = await NorvaCloud.history.list({ limit: 500 }).catch(() => ({ history: [] }));
+            document.getElementById('history-count').textContent = (payload.history || []).length;
+        }
+
+        async function sendCommand(command) {
+            const targetDeviceId = commandDevice.value;
+            const url = document.getElementById('command-url').value.trim();
+            const title = document.getElementById('command-title').value.trim() || 'Norva';
+            if (!targetDeviceId) {
+                setStatus(commandStatus, 'error', 'Choose a trusted screen.');
+                return;
+            }
+            if (command === 'play' && !url) {
+                setStatus(commandStatus, 'error', 'Enter a playback URL.');
+                return;
+            }
+            try {
+                setStatus(commandStatus, 'info', 'Sending command...');
+                await NorvaCloud.commands.queue({
+                    targetDeviceId,
+                    command,
+                    payload: command === 'play' ? { url, playbackUrl: url, title } : { url: url || '/' },
+                    ttlSeconds: 120
+                });
+                setStatus(commandStatus, 'success', 'Command sent.');
+            } catch (error) {
+                setStatus(commandStatus, 'error', error.message || 'Unable to send command.');
+            }
+        }
+
+        function setStatus(el, type, message) {
+            el.className = type ? 'status ' + type : 'status';
+            el.textContent = message || '';
+        }
+
+        function escapeHtml(value) {
+            return String(value ?? '').replace(/[&<>"']/g, char => ({
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#39;'
+            }[char]));
+        }
+
+        function escapeAttr(value) {
+            return escapeHtml(value).replace(/`/g, '&#96;');
+        }
+    </script>
 </body>
 </html>

@@ -104,7 +104,7 @@ async function route(
       body: {
         ok: true,
         service: "norva-cloud",
-        version: 4,
+        version: 5,
         relayConfigured: Boolean(runtimeConfig.relayBaseUrl && runtimeConfig.relayTokenSecret),
         gatewayConfigured: Boolean(runtimeConfig.mediaGatewayUrl && runtimeConfig.mediaGatewayToken),
         cloudSourceConfigured: Boolean(runtimeConfig.sourceConfigKey),
@@ -126,6 +126,18 @@ async function route(
     if (req.method === "GET" && id === "me") return { body: { device } };
     if ((req.method === "POST" || req.method === "PATCH") && id === "heartbeat") {
       return { body: await heartbeatDeviceToken(device, db) };
+    }
+    if (req.method === "GET" && id === "sources" && !action) {
+      return { body: await listSources(device.user_id, db) };
+    }
+    if (req.method === "GET" && id === "sources" && action && segments[3] === "series-info") {
+      return { body: await getXtreamSeriesInfo(url, action, device.user_id, db) };
+    }
+    if (req.method === "GET" && id === "media-items") {
+      return { body: await listMediaItems(url, device.user_id, db) };
+    }
+    if (id === "playback" && action === "sessions" && req.method === "POST") {
+      return { status: 201, body: await createPlaybackSession(req, device.user_id, db, device.id) };
     }
     if (id === "commands") {
       if (req.method === "GET" && !action) return { body: await listDeviceCommands(url, device, db) };
@@ -154,6 +166,9 @@ async function route(
   if (scope === "sources") {
     if (req.method === "GET" && !id) return { body: await listSources(user.id, db) };
     if (req.method === "POST" && !id) return { status: 201, body: await createSource(req, user.id, db) };
+    if (req.method === "GET" && id && action === "series-info") {
+      return { body: await getXtreamSeriesInfo(url, id, user.id, db) };
+    }
     if (req.method === "POST" && id && action === "sync") {
       return { body: await syncExistingSource(id, user.id, db) };
     }
@@ -650,13 +665,14 @@ async function listMediaItems(url: URL, userId: string, db: SupabaseClient) {
   const sourceId = url.searchParams.get("sourceId");
   const itemType = url.searchParams.get("type");
   const search = url.searchParams.get("q");
-  const limit = boundedInt(url.searchParams.get("limit"), 50, 1, 250);
+  const limit = boundedInt(url.searchParams.get("limit"), 50, 1, 1000);
+  const offset = boundedInt(url.searchParams.get("offset"), 0, 0, 100000);
 
   let query = db
     .from("cloud_media_items")
     .select("*")
     .eq("user_id", userId)
-    .limit(limit)
+    .range(offset, offset + limit - 1)
     .order("title", { ascending: true });
 
   if (sourceId) query = query.eq("source_id", sourceId);
@@ -666,6 +682,27 @@ async function listMediaItems(url: URL, userId: string, db: SupabaseClient) {
   const { data, error } = await query;
   if (error) throwDb(error, "Unable to list media items");
   return { items: data ?? [] };
+}
+
+async function getXtreamSeriesInfo(url: URL, sourceId: string, userId: string, db: SupabaseClient) {
+  await assertOwnedSource(sourceId, userId, db);
+  const seriesId = url.searchParams.get("series_id") ?? url.searchParams.get("seriesId") ?? "";
+  if (!seriesId) throw new HttpError(400, "series_id is required");
+
+  const sourceConfig = await loadSourceConfig(sourceId, userId, db);
+  const serverUrl = normalizeBaseUrl(stringOr(sourceConfig.serverUrl, ""));
+  const username = stringOr(sourceConfig.username, "");
+  const password = stringOr(sourceConfig.password, "");
+  if (!serverUrl || !username || !password) {
+    throw new HttpError(400, "Series details require an Xtream source");
+  }
+
+  const info = recordOrEmpty(await fetchJson(
+    xtreamApiUrl({ serverUrl, username, password, action: "get_series_info" }, { series_id: seriesId }),
+    20000,
+  ));
+
+  return info;
 }
 
 async function upsertMediaItems(req: Request, userId: string, db: SupabaseClient) {
@@ -1033,10 +1070,10 @@ async function updateDeviceCommand(req: Request, id: string, device: CloudDevice
   return { command: data };
 }
 
-async function createPlaybackSession(req: Request, userId: string, db: SupabaseClient) {
+async function createPlaybackSession(req: Request, userId: string, db: SupabaseClient, defaultDeviceId: string | null = null) {
   const body = await readJson(req);
   const sourceId = stringOrNull(body.sourceId ?? body.source_id);
-  const deviceId = stringOrNull(body.deviceId ?? body.device_id);
+  const deviceId = stringOrNull(body.deviceId ?? body.device_id) ?? defaultDeviceId;
   const itemType = stringOr(body.itemType ?? body.item_type, "");
   const itemId = stringOr(body.itemId ?? body.item_id, "");
   let targetUrl = stringOr(body.targetUrl ?? body.target_url ?? body.url, "");
@@ -1281,7 +1318,20 @@ async function resolvePlaybackTarget(
     .eq("external_id", itemId)
     .maybeSingle();
   if (error) throwDb(error, "Unable to resolve playback item");
-  if (!item) throw new HttpError(404, "Media item not found");
+  if (!item) {
+    if (itemType === "series") {
+      const sourceConfig = await loadSourceConfig(sourceId, userId, db);
+      return xtreamStreamUrl({
+        serverUrl: stringOr(sourceConfig.serverUrl, ""),
+        username: stringOr(sourceConfig.username, ""),
+        password: stringOr(sourceConfig.password, ""),
+        streamType: "series",
+        streamId: itemId,
+        container: "mp4",
+      });
+    }
+    throw new HttpError(404, "Media item not found");
+  }
 
   const hint = recordOrEmpty(item.playback_hint);
   if (typeof hint.targetUrl === "string") return hint.targetUrl;
@@ -1421,11 +1471,14 @@ function xtreamApiUrl(config: {
   username: string;
   password: string;
   action?: string;
-}) {
+}, extraParams: Record<string, string> = {}) {
   const url = new URL(`${normalizeBaseUrl(config.serverUrl)}/player_api.php`);
   url.searchParams.set("username", config.username);
   url.searchParams.set("password", config.password);
   if (config.action) url.searchParams.set("action", config.action);
+  for (const [key, value] of Object.entries(extraParams)) {
+    if (value) url.searchParams.set(key, value);
+  }
   return url.href;
 }
 

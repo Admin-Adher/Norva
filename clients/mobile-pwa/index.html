@@ -22,11 +22,13 @@
           session.user &&
           session.user.id &&
           (!session.expires_at || Number(session.expires_at) > now + 30)
-        );
-        if (!isUsable) window.location.replace('/cloud.html');
-        else if (!localStorage.getItem('hubUrl')) window.location.replace('/cloud.html');
+        ) || Boolean(localStorage.getItem('norva-cloud-device-token'));
+        if (!isUsable) {
+          var returnTo = window.location.pathname + window.location.search + window.location.hash;
+          window.location.replace('/account.html?returnTo=' + encodeURIComponent(returnTo || '/'));
+        }
       } catch (_) {
-        window.location.replace('/cloud.html');
+        window.location.replace('/account.html?returnTo=/');
       }
     })();
   </script>

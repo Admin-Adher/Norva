@@ -9,11 +9,533 @@ function _hubBase() {
     return hub ? hub.replace(/\/$/, '') : '';
 }
 
+function _isHostedApp() {
+    const host = window.location.hostname;
+    return Boolean(host && host !== 'localhost' && host !== '127.0.0.1' && host !== '::1');
+}
+
+function _hasCloudUserSession() {
+    try {
+        const session = JSON.parse(localStorage.getItem('norva-cloud-session') || 'null');
+        const now = Math.floor(Date.now() / 1000);
+        return Boolean(
+            session?.access_token &&
+            session?.user?.id &&
+            (!session.expires_at || Number(session.expires_at) > now + 30)
+        );
+    } catch (_) {
+        return false;
+    }
+}
+
+function _hasCloudDeviceSession() {
+    return Boolean(window.NorvaCloud?.deviceToken || localStorage.getItem('norva-cloud-device-token'));
+}
+
+function _cloudAvailable() {
+    return Boolean(window.NorvaCloud) && (_hasCloudUserSession() || _hasCloudDeviceSession());
+}
+
+function _shouldUseCloud() {
+    if (!_cloudAvailable()) return false;
+    if (localStorage.getItem('norva-api-mode') === 'local') return false;
+    if (localStorage.getItem('norva-api-mode') === 'cloud') return true;
+    return _isHostedApp() || !_hubBase();
+}
+
+const CloudAdapter = (() => {
+    const SOURCE_ALIAS_KEY = 'norva-cloud-source-aliases';
+    let sourcesCache = [];
+    let mediaCache = new Map();
+
+    function readAliases() {
+        try {
+            return JSON.parse(localStorage.getItem(SOURCE_ALIAS_KEY) || '{}') || {};
+        } catch (_) {
+            return {};
+        }
+    }
+
+    function writeAliases(aliases) {
+        localStorage.setItem(SOURCE_ALIAS_KEY, JSON.stringify(aliases));
+    }
+
+    function localSourceId(cloudId) {
+        const aliases = readAliases();
+        if (!aliases[cloudId]) {
+            const used = Object.values(aliases).map(Number).filter(Number.isFinite);
+            aliases[cloudId] = Math.max(900000, ...used) + 1;
+            writeAliases(aliases);
+        }
+        return aliases[cloudId];
+    }
+
+    async function resolveSourceId(id) {
+        const raw = String(id);
+        if (raw.includes('-')) return raw;
+        const local = Number(raw);
+        const cached = sourcesCache.find(source => Number(source.id) === local);
+        if (cached?.cloudId) return cached.cloudId;
+        await listSources();
+        return sourcesCache.find(source => Number(source.id) === local)?.cloudId || raw;
+    }
+
+    function normalizeSource(source) {
+        const config = source.config_hint || source.configHint || {};
+        const type = source.source_type || source.sourceType || source.type || 'xtream';
+        const cloudId = source.id;
+        const id = localSourceId(cloudId);
+        return {
+            ...source,
+            id,
+            cloudId,
+            cloud_id: cloudId,
+            source_type: type,
+            type,
+            name: source.display_name || source.displayName || source.name || 'Norva provider',
+            url: config.serverHost || config.playlistHost || '',
+            enabled: source.revoked !== true,
+            sync_status: source.sync_status || source.syncStatus || 'idle',
+            sync_error: source.sync_error || source.syncError || '',
+            last_sync: source.last_synced_at || source.lastSyncedAt || null,
+            cloud: true
+        };
+    }
+
+    async function listSources() {
+        const payload = await cloudSourcesApi().list();
+        sourcesCache = (payload.sources || []).map(normalizeSource);
+        return sourcesCache;
+    }
+
+    function normalizeCategory(value) {
+        const raw = value === null || value === undefined || value === '' ? 'uncategorized' : String(value);
+        return {
+            category_id: raw,
+            category_name: raw === 'uncategorized' ? 'Uncategorized' : `Category ${raw}`,
+            name: raw === 'uncategorized' ? 'Uncategorized' : `Category ${raw}`
+        };
+    }
+
+    function itemTypeToLocal(type) {
+        if (type === 'live') return 'channel';
+        if (type === 'movie') return 'movie';
+        if (type === 'series') return 'series';
+        if (type === 'episode') return 'episode';
+        return type || 'channel';
+    }
+
+    function cloudTypeFromLocal(type) {
+        if (type === 'channel') return 'live';
+        return type || 'live';
+    }
+
+    function normalizeMediaItem(item, sourceId) {
+        const metadata = item.metadata || {};
+        const playbackHint = item.playback_hint || item.playbackHint || {};
+        const itemType = item.item_type || item.itemType || item.type;
+        const id = String(item.external_id || item.externalId || item.item_id || item.id || '');
+        const categoryId = String(item.parent_external_id || metadata.categoryId || metadata.group || 'uncategorized');
+        const title = item.title || item.name || 'Norva';
+        const poster = item.poster_url || item.posterUrl || item.cover || item.stream_icon || '';
+        const container = playbackHint.container || metadata.container || (itemType === 'live' ? 'm3u8' : 'mp4');
+        const base = {
+            ...item,
+            sourceId,
+            source_id: sourceId,
+            cloudSourceId: item.source_id || item.sourceId,
+            cloudItemId: item.id,
+            name: title,
+            title,
+            category_id: categoryId,
+            category_name: item.subtitle || metadata.categoryName || normalizeCategory(categoryId).category_name,
+            stream_icon: poster,
+            cover: poster,
+            poster_url: poster,
+            container_extension: container,
+            rating: metadata.rating || item.rating || ''
+        };
+
+        if (itemType === 'series') {
+            base.series_id = id;
+            base.stream_id = id;
+        } else {
+            base.stream_id = id;
+            base.series_id = id;
+        }
+
+        return base;
+    }
+
+    async function listAllMedia({ sourceId, type, q } = {}) {
+        const cloudSourceId = sourceId ? await resolveSourceId(sourceId) : '';
+        const cacheKey = JSON.stringify({ cloudSourceId, type, q: q || '' });
+        if (mediaCache.has(cacheKey)) return mediaCache.get(cacheKey);
+
+        const pageSize = 250;
+        let offset = 0;
+        const all = [];
+        const seen = new Set();
+
+        for (let page = 0; page < 40; page += 1) {
+            const payload = await cloudMediaApi().list({
+                sourceId: cloudSourceId,
+                type,
+                q,
+                limit: pageSize,
+                offset
+            });
+            const items = payload.items || [];
+            let added = 0;
+            for (const item of items) {
+                const key = `${item.source_id || item.sourceId}:${item.item_type || item.itemType}:${item.external_id || item.externalId || item.id}`;
+                if (seen.has(key)) continue;
+                seen.add(key);
+                all.push(item);
+                added += 1;
+            }
+            if (!added && items.length) break;
+            if (items.length < pageSize) break;
+            offset += pageSize;
+        }
+
+        const mapped = all.map(item => normalizeMediaItem(item, localSourceId(item.source_id || item.sourceId || cloudSourceId)));
+        mediaCache.set(cacheKey, mapped);
+        return mapped;
+    }
+
+    async function sourcePayloadFromLocal(data) {
+        const type = data.type || data.sourceType || data.source_type || 'xtream';
+        const payload = {
+            sourceType: type,
+            displayName: data.name || data.displayName || data.display_name || (type === 'm3u' ? 'M3U provider' : 'Xtream provider'),
+            syncNow: data.syncNow !== false
+        };
+
+        if (type === 'xtream') {
+            payload.url = data.url || data.serverUrl || data.server_url;
+            payload.username = data.username;
+            payload.password = data.password;
+        } else if (type === 'm3u') {
+            payload.url = data.url || data.playlistUrl || data.playlist_url;
+        }
+
+        return payload;
+    }
+
+    async function request(method, endpoint, data = null) {
+        const [path, queryString = ''] = endpoint.split('?');
+        const query = new URLSearchParams(queryString);
+
+        if (method === 'GET' && path === '/sources') return listSources();
+        if (method === 'GET' && path.startsWith('/sources/type/')) {
+            const type = decodeURIComponent(path.split('/').pop());
+            return (await listSources()).filter(source => source.type === type);
+        }
+        if (method === 'GET' && path === '/sources/status') {
+            return (await listSources()).map(source => ({
+                source_id: source.id,
+                sourceId: source.id,
+                status: source.sync_status,
+                error: source.sync_error,
+                last_sync: source.last_sync
+            }));
+        }
+        if (method === 'GET' && /^\/sources\/[^/]+$/.test(path)) {
+            const id = path.split('/').pop();
+            return (await listSources()).find(source => String(source.id) === String(id) || source.cloudId === id) || null;
+        }
+        if (method === 'POST' && path === '/sources') {
+            if (!hasUserSession()) throw new Error('Sign in to add a TV provider.');
+            const payload = await NorvaCloud.sources.create(await sourcePayloadFromLocal(data || {}));
+            mediaCache.clear();
+            return normalizeSource(payload.source);
+        }
+        if ((method === 'PUT' || method === 'PATCH') && /^\/sources\/[^/]+$/.test(path)) {
+            const id = await resolveSourceId(path.split('/').pop());
+            const patch = {};
+            if (data?.name || data?.displayName) patch.displayName = data.name || data.displayName;
+            if (!hasUserSession()) throw new Error('Sign in to edit a TV provider.');
+            const payload = await NorvaCloud.sources.update(id, patch);
+            return normalizeSource(payload.source);
+        }
+        if (method === 'DELETE' && /^\/sources\/[^/]+$/.test(path)) {
+            const id = await resolveSourceId(path.split('/').pop());
+            if (!hasUserSession()) throw new Error('Sign in to remove a TV provider.');
+            const payload = await NorvaCloud.sources.remove(id);
+            sourcesCache = sourcesCache.filter(source => source.cloudId !== id);
+            mediaCache.clear();
+            return payload;
+        }
+        if (method === 'POST' && /^\/sources\/[^/]+\/(sync|hard-sync)$/.test(path)) {
+            const parts = path.split('/');
+            if (!hasUserSession()) throw new Error('Sign in to sync a TV provider.');
+            const payload = await NorvaCloud.sources.sync(await resolveSourceId(parts[2]));
+            mediaCache.clear();
+            return normalizeSource(payload.source || {});
+        }
+        if (method === 'POST' && /^\/sources\/[^/]+\/(toggle|test)$/.test(path)) {
+            return { success: true, cloud: true };
+        }
+        if ((method === 'GET' && /^\/sources\/[^/]+\/estimate$/.test(path)) || (method === 'POST' && path === '/sources/estimate')) {
+            return { count: 0, estimatedItems: 0, needsWarning: false, threshold: 50000, cloud: true };
+        }
+
+        const xtreamMatch = path.match(/^\/proxy\/xtream\/([^/]+)\/([^/]+)(?:\/([^/]+)\/([^/]+))?/);
+        if (xtreamMatch && method === 'GET') {
+            const sourceId = xtreamMatch[1];
+            const action = xtreamMatch[2];
+            const streamId = xtreamMatch[4];
+            if (action === 'auth') return { user_info: { auth: 1, status: 'Active' } };
+            if (action === 'live_categories' || action === 'vod_categories' || action === 'series_categories') {
+                const type = action === 'live_categories' ? 'live' : action === 'vod_categories' ? 'movie' : 'series';
+                const items = await listAllMedia({ sourceId, type });
+                const ids = [...new Set(items.map(item => item.category_id || 'uncategorized'))];
+                return ids.map(normalizeCategory);
+            }
+            if (action === 'live_streams' || action === 'vod_streams' || action === 'series') {
+                const type = action === 'live_streams' ? 'live' : action === 'vod_streams' ? 'movie' : 'series';
+                const categoryId = query.get('category_id');
+                const items = await listAllMedia({ sourceId, type });
+                return categoryId ? items.filter(item => String(item.category_id) === String(categoryId)) : items;
+            }
+            if (action === 'series_info') {
+                const cloudSourceId = await resolveSourceId(sourceId);
+                const seriesId = query.get('series_id');
+                const sourcesApi = cloudSourcesApi();
+                if (sourcesApi.seriesInfo && seriesId) {
+                    return sourcesApi.seriesInfo(cloudSourceId, seriesId);
+                }
+                return { info: {}, episodes: {} };
+            }
+            if (action === 'short_epg') return { epg_listings: [] };
+            if (action === 'stream' && streamId) {
+                const type = query.get('type') || xtreamMatch[3] || 'live';
+                const container = query.get('container') || (type === 'live' ? 'm3u8' : 'mp4');
+                const mode = localStorage.getItem('norva-cloud-playback-mode') || 'relay';
+                const cloudSourceId = await resolveSourceId(sourceId);
+                let payload;
+                try {
+                    payload = await cloudPlaybackApi().createSession({
+                        sourceId: cloudSourceId,
+                        itemType: type === 'series' ? 'series' : type === 'movie' ? 'movie' : 'live',
+                        itemId: streamId,
+                        mode,
+                        playbackHint: { container },
+                        corsSafe: false,
+                        requiresRelay: mode === 'relay'
+                    });
+                } catch (error) {
+                    if (error.status !== 503 || mode === 'direct') throw error;
+                    payload = await cloudPlaybackApi().createSession({
+                        sourceId: cloudSourceId,
+                        itemType: type === 'series' ? 'series' : type === 'movie' ? 'movie' : 'live',
+                        itemId: streamId,
+                        mode: 'direct',
+                        playbackHint: { container }
+                    });
+                }
+                const url = payload.playback?.url || payload.url;
+                return {
+                    ...payload,
+                    url,
+                    streamUrl: url,
+                    playbackUrl: url,
+                    cloud: true,
+                    mode: payload.playback?.mode || mode,
+                    sessionId: payload.session?.id
+                };
+            }
+        }
+
+        if (method === 'GET' && path.startsWith('/proxy/epg/')) return {};
+        if (method === 'POST' && path.includes('/proxy/epg/')) return {};
+        if (method === 'DELETE' && path.startsWith('/proxy/cache/')) return { success: true };
+
+        if (path.startsWith('/favorites')) return handleFavorites(method, path, query, data);
+        if (path.startsWith('/history')) return handleHistory(method, path, query, data);
+
+        if (path.startsWith('/channels/hidden')) {
+            if (method === 'GET') return path.endsWith('/check') ? { hidden: false } : [];
+            return { success: true };
+        }
+        if (path.startsWith('/channels/')) return { success: true };
+        if (path.startsWith('/playback-status')) return method === 'GET' ? [] : { success: true, cloud: true };
+        if (path.startsWith('/tmdb')) return { enabled: false, cloud: true };
+        if (path === '/settings' || path === '/settings/defaults') {
+            if (method === 'DELETE') {
+                localStorage.removeItem('norva-cloud-settings');
+                return defaultSettings();
+            }
+            if (method === 'PUT') {
+                const next = { ...defaultSettings(), ...JSON.parse(localStorage.getItem('norva-cloud-settings') || '{}'), ...(data || {}) };
+                localStorage.setItem('norva-cloud-settings', JSON.stringify(next));
+                return next;
+            }
+            return { ...defaultSettings(), ...JSON.parse(localStorage.getItem('norva-cloud-settings') || '{}') };
+        }
+        if (path.startsWith('/cloud/')) return { linked: true, cloud: true };
+
+        throw new Error(`Cloud API route not mapped: ${method} ${endpoint}`);
+    }
+
+    async function handleFavorites(method, path, query, data) {
+        if (!hasUserSession()) return method === 'GET' && path === '/favorites/check' ? { favorite: false, isFavorite: false } : (method === 'GET' ? [] : { success: true });
+        if (method === 'GET' && path === '/favorites/check') {
+            const sourceId = await resolveSourceId(query.get('sourceId'));
+            const itemId = String(query.get('itemId') || '');
+            const itemType = itemTypeToLocal(query.get('itemType') || 'channel');
+            const payload = await NorvaCloud.favorites.list({ sourceId, itemType });
+            const favorite = (payload.favorites || []).find(item => String(item.item_id) === itemId);
+            return { favorite: Boolean(favorite), isFavorite: Boolean(favorite), id: favorite?.id };
+        }
+        if (method === 'GET') {
+            const sourceId = query.get('sourceId') ? await resolveSourceId(query.get('sourceId')) : '';
+            const itemType = query.get('itemType') ? itemTypeToLocal(query.get('itemType')) : '';
+            const payload = await NorvaCloud.favorites.list({ sourceId, itemType });
+            return (payload.favorites || []).map(mapFavorite);
+        }
+        if (method === 'POST') {
+            const cloudSourceId = await resolveSourceId(data.sourceId);
+            const itemType = itemTypeToLocal(data.itemType || 'channel');
+            const payload = await NorvaCloud.favorites.add({
+                sourceId: cloudSourceId,
+                itemId: String(data.itemId),
+                itemType,
+                itemName: data.itemName,
+                itemMeta: data.itemMeta || {}
+            });
+            return mapFavorite(payload.favorite);
+        }
+        if (method === 'DELETE') {
+            const cloudSourceId = await resolveSourceId(data.sourceId);
+            const itemType = itemTypeToLocal(data.itemType || 'channel');
+            const payload = await NorvaCloud.favorites.list({ sourceId: cloudSourceId, itemType });
+            const favorite = (payload.favorites || []).find(item => String(item.item_id) === String(data.itemId));
+            if (favorite) return NorvaCloud.favorites.remove(favorite.id);
+            return { success: true };
+        }
+        return { success: true };
+    }
+
+    function mapFavorite(item = {}) {
+        const localId = item.source_id ? localSourceId(item.source_id) : null;
+        return {
+            ...item,
+            source_id: localId,
+            sourceId: localId,
+            item_id: item.item_id,
+            itemId: item.item_id,
+            item_type: cloudTypeFromLocal(item.item_type) === 'live' ? 'channel' : item.item_type,
+            itemType: cloudTypeFromLocal(item.item_type) === 'live' ? 'channel' : item.item_type
+        };
+    }
+
+    async function handleHistory(method, path, query, data) {
+        if (!hasUserSession()) return method === 'GET' ? [] : { success: true };
+        if (method === 'GET') {
+            const payload = await NorvaCloud.history.list({ limit: query.get('limit') || 200 });
+            return (payload.history || []).map(mapHistory);
+        }
+        if (method === 'POST') {
+            const cloudSourceId = data?.sourceId ? await resolveSourceId(data.sourceId) : null;
+            const itemType = cloudTypeFromLocal(data?.itemType || data?.type || 'movie');
+            const item = {
+                ...data,
+                sourceId: cloudSourceId,
+                itemType,
+                itemId: String(data.itemId || data.id),
+                itemName: data.itemName || data.name || data.title,
+                progressSeconds: data.progressSeconds ?? data.progress,
+                durationSeconds: data.durationSeconds ?? data.duration,
+                data: { ...(data.data || {}), sourceId: data.sourceId }
+            };
+            const payload = await NorvaCloud.history.save(item);
+            return mapHistory(payload.item);
+        }
+        if (method === 'DELETE') {
+            const itemId = decodeURIComponent(path.split('/').pop());
+            const payload = await NorvaCloud.history.list({ limit: 500 });
+            const item = (payload.history || []).find(entry => String(entry.id) === itemId || String(entry.item_id) === itemId);
+            if (item) return NorvaCloud.history.remove(item.id);
+            return { success: true };
+        }
+        return { success: true };
+    }
+
+    function mapHistory(item = {}) {
+        const localId = item.source_id ? localSourceId(item.source_id) : null;
+        const data = { ...(item.data || {}) };
+        if (localId) data.sourceId = localId;
+        return {
+            ...item,
+            source_id: localId,
+            sourceId: localId,
+            item_id: item.item_id,
+            itemId: item.item_id,
+            item_type: item.item_type === 'live' ? 'channel' : item.item_type,
+            itemType: item.item_type === 'live' ? 'channel' : item.item_type,
+            progress: item.progress_seconds || 0,
+            duration: item.duration_seconds || 0,
+            data
+        };
+    }
+
+    function defaultSettings() {
+        return {
+            streamFormat: 'm3u8',
+            forceProxy: false,
+            forceTranscode: false,
+            forceVideoTranscode: false,
+            forceRemux: false,
+            autoTranscode: false,
+            upscaleEnabled: false,
+            userAgentPreset: '',
+            userAgentCustom: '',
+            autoPlayNextEpisode: true,
+            groupDuplicates: true,
+            duplicateStrategy: 'smart'
+        };
+    }
+
+    function hasUserSession() {
+        return _hasCloudUserSession();
+    }
+
+    function cloudSourcesApi() {
+        return hasUserSession() ? NorvaCloud.sources : NorvaCloud.device.sources;
+    }
+
+    function cloudMediaApi() {
+        return hasUserSession() ? NorvaCloud.mediaItems : NorvaCloud.device.mediaItems;
+    }
+
+    function cloudPlaybackApi() {
+        return hasUserSession() ? NorvaCloud.playback : NorvaCloud.device.playback;
+    }
+
+    return {
+        request,
+        isCloudMode: _shouldUseCloud,
+        hasUserSession,
+        cloudSourcesApi,
+        cloudMediaApi,
+        cloudPlaybackApi
+    };
+})();
+
 const API = {
+    isCloudMode: () => _shouldUseCloud(),
+    getMode: () => _shouldUseCloud() ? 'cloud' : 'local',
+
     /**
      * Make API request
      */
     async request(method, endpoint, data = null) {
+        if (_shouldUseCloud()) {
+            return CloudAdapter.request(method, endpoint, data);
+        }
+
         const options = {
             method,
             headers: {

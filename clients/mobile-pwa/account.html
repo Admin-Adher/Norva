@@ -212,7 +212,7 @@
   <script src="/authApi.js?v=1"></script>
   <script>
     const params = new URLSearchParams(location.search);
-    const returnTo = sanitizeReturnTo(params.get('returnTo')) || '/cloud.html';
+    const returnTo = sanitizeReturnTo(params.get('returnTo')) || '/';
     const statusEl = document.getElementById('status');
     const tabs = document.getElementById('tabs');
     const forms = {

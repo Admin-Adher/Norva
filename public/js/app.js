@@ -31,7 +31,8 @@ class App {
         const host = window.location.hostname;
         const isRemote = host !== 'localhost' && host !== '127.0.0.1' && host !== '';
         if (isRemote && !this.hasCloudSession()) {
-            window.location.replace('/cloud.html');
+            const returnTo = window.location.pathname + window.location.search + window.location.hash;
+            window.location.replace('/account.html?returnTo=' + encodeURIComponent(returnTo || '/'));
             return;
         }
 
@@ -189,6 +190,36 @@ class App {
     }
 
     async checkAuth() {
+        if (window.API?.isCloudMode?.()) {
+            try {
+                const user = window.NorvaAuth
+                    ? await window.NorvaAuth.getUser()
+                    : JSON.parse(localStorage.getItem('norva-cloud-session') || 'null')?.user;
+
+                if (!user && !window.NorvaCloud?.deviceToken) {
+                    const returnTo = window.location.pathname + window.location.search + window.location.hash;
+                    window.location.replace('/account.html?returnTo=' + encodeURIComponent(returnTo || '/'));
+                    return;
+                }
+
+                this.currentUser = {
+                    id: user?.id || localStorage.getItem('norva-cloud-device-id') || 'paired-device',
+                    username: user?.email || 'Paired Norva screen',
+                    email: user?.email || '',
+                    role: 'admin',
+                    cloud: true,
+                    device: !user
+                };
+                this.addLogoutButton();
+                return;
+            } catch (err) {
+                console.error('Cloud authentication error:', err);
+                const returnTo = window.location.pathname + window.location.search + window.location.hash;
+                window.location.replace('/account.html?returnTo=' + encodeURIComponent(returnTo || '/'));
+                return;
+            }
+        }
+
         const token = localStorage.getItem('authToken');
         const hub = _hubBase();
 
@@ -249,6 +280,12 @@ class App {
             e.preventDefault();
 
             const token = localStorage.getItem('authToken');
+            if (this.currentUser?.cloud && window.NorvaAuth) {
+                await window.NorvaAuth.signOut();
+                window.location.replace('/account.html');
+                return;
+            }
+
             if (token) {
                 await fetch('/api/auth/logout', {
                     method: 'POST',

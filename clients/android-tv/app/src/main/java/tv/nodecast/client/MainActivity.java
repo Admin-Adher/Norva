@@ -36,7 +36,7 @@ public class MainActivity extends Activity {
     private static final String PREFS = "norva";
     private static final String PREF_SERVER_URL = "serverUrl";
     private static final String PREF_MODE = "mode"; // "cloud" | "server" | "standalone"
-    private static final String CLOUD_PAIR_URL = "https://norva-eight.vercel.app/cloud-pair.html?device=tv";
+    private static final String CLOUD_PAIR_URL = "https://norva-eight.vercel.app/cloud-pair.html?device=tv&returnTo=%2F%3Fpaired%3D1%23home";
     // Marker appended to the WebView user agent: the web app detects it and
     // enables TV mode (D-pad spatial navigation, focus outlines).
     private static final String UA_SUFFIX = " NorvaTV-AndroidTV/3.1";

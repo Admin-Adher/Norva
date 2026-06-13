@@ -21,11 +21,6 @@
       var isHosted = host && host !== 'localhost' && host !== '127.0.0.1';
       if (!isHosted) return;
 
-      if (window.location.pathname === '/' || window.location.pathname.endsWith('/index.html')) {
-        window.location.replace('/cloud.html');
-        return;
-      }
-
       try {
         var session = JSON.parse(localStorage.getItem('norva-cloud-session') || 'null');
         var now = Math.floor(Date.now() / 1000);
@@ -36,10 +31,13 @@
           session.user &&
           session.user.id &&
           (!session.expires_at || Number(session.expires_at) > now + 30)
-        );
-        if (!isUsable) window.location.replace('/cloud.html');
+        ) || Boolean(localStorage.getItem('norva-cloud-device-token'));
+        if (!isUsable) {
+          var returnTo = window.location.pathname + window.location.search + window.location.hash;
+          window.location.replace('/account.html?returnTo=' + encodeURIComponent(returnTo || '/'));
+        }
       } catch (_) {
-        window.location.replace('/cloud.html');
+        window.location.replace('/account.html?returnTo=/');
       }
     })();
   </script>
@@ -1330,8 +1328,9 @@
 
   <!-- JavaScript -->
   <script src="/js/icons.js"></script>
-  <script src="/js/cloudApi.js?v=1"></script>
-  <script src="/js/api.js?v=7"></script>
+  <script src="/js/cloudApi.js?v=2"></script>
+  <script src="/js/authApi.js?v=2"></script>
+  <script src="/js/api.js?v=8"></script>
   <script src="/js/utils/mediaUtils.js?v=2"></script>
   <script src="/js/utils/playbackHealth.js?v=2"></script>
   <script src="/js/utils/tvNavigation.js?v=6"></script>
@@ -1349,7 +1348,7 @@
   <script src="/js/pages/SeriesPage.js?v=4"></script>
   <script src="/js/pages/Settings.js?v=3"></script>
   <script src="/js/pages/WatchPage.js?v=31"></script>
-  <script src="/js/app.js?v=8"></script>
+  <script src="/js/app.js?v=9"></script>
   <script>
     // Check for SSO token in URL
     (function () {
