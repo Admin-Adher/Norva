@@ -204,6 +204,41 @@ const CloudAdapter = (() => {
         return mapped;
     }
 
+    async function listMediaPage({ sourceId, type, q, limit = 50, offset = 0 } = {}) {
+        const cloudSourceId = sourceId ? await resolveSourceId(sourceId) : '';
+        const payload = await cloudMediaApi().list({
+            sourceId: cloudSourceId,
+            type,
+            q,
+            limit,
+            offset
+        });
+        return (payload.items || []).map(item => normalizeMediaItem(item, localSourceId(item.source_id || item.sourceId || cloudSourceId)));
+    }
+
+    function normalizeRecentItem(item) {
+        const type = itemTypeToLocal(item.item_type || item.itemType || item.type);
+        const itemId = String(item.stream_id || item.series_id || item.external_id || item.externalId || item.id || '');
+        const poster = item.stream_icon || item.poster_url || item.posterUrl || item.cover || '';
+        return {
+            ...item,
+            item_id: itemId,
+            item_type: type,
+            type,
+            source_id: item.sourceId || item.source_id,
+            sourceId: item.sourceId || item.source_id,
+            stream_icon: poster,
+            container_extension: item.container_extension || item.containerExtension || (type === 'channel' ? 'm3u8' : 'mp4'),
+            data: {
+                title: item.name || item.title || 'Norva',
+                subtitle: item.category_name || item.subtitle || (type === 'movie' ? 'Movie' : type === 'series' ? 'Series' : 'Live TV'),
+                poster,
+                sourceId: item.sourceId || item.source_id,
+                containerExtension: item.container_extension || item.containerExtension || (type === 'channel' ? 'm3u8' : 'mp4')
+            }
+        };
+    }
+
     async function sourcePayloadFromLocal(data) {
         const type = data.type || data.sourceType || data.source_type || 'xtream';
         const payload = {
@@ -358,6 +393,13 @@ const CloudAdapter = (() => {
         if (path.startsWith('/channels/hidden')) {
             if (method === 'GET') return path.endsWith('/check') ? { hidden: false } : [];
             return { success: true };
+        }
+        if (method === 'GET' && path === '/channels/recent') {
+            const requestedType = query.get('type') || 'movie';
+            const limit = Math.max(1, Math.min(50, Number.parseInt(query.get('limit') || '12', 10) || 12));
+            const type = cloudTypeFromLocal(requestedType);
+            const items = await listMediaPage({ type, limit });
+            return items.map(normalizeRecentItem);
         }
         if (path.startsWith('/channels/')) return { success: true };
         if (path.startsWith('/playback-status')) return method === 'GET' ? [] : { success: true, cloud: true };
