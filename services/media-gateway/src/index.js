@@ -34,7 +34,7 @@ app.get('/health', (req, res) => {
     res.json({
         ok: true,
         service: 'norva-media-gateway',
-        version: 7,
+        version: 8,
         activeSessions: activeSessionCount(),
         totalSessions: sessions.size,
         time: new Date().toISOString()
@@ -156,7 +156,7 @@ async function bootstrap() {
 }
 
 function startFfmpeg(session) {
-    const segmentPattern = path.join(session.outputDir, 'segment-%05d.ts');
+    const segmentPattern = path.join(session.outputDir, 'segment-%05d.m4s');
     const args = [
         '-hide_banner',
         '-loglevel', 'warning',
@@ -202,7 +202,8 @@ function startFfmpeg(session) {
         '-f', 'hls',
         '-hls_time', '4',
         '-hls_list_size', '8',
-        '-hls_segment_type', 'mpegts',
+        '-hls_segment_type', 'fmp4',
+        '-hls_fmp4_init_filename', 'init.mp4',
         '-hls_flags', 'delete_segments+append_list+independent_segments',
         '-hls_segment_filename', segmentPattern,
         session.playlistPath
