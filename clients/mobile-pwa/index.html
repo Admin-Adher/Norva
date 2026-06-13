@@ -568,6 +568,11 @@
       navigator.serviceWorker.register('/sw.js').catch(() => {});
     }
 
+    if (!hasCloudSession()) {
+      location.replace('/cloud.html');
+      return;
+    }
+
     const hubUrl   = localStorage.getItem(KEY_HUB_URL);
     const hubToken = localStorage.getItem(KEY_HUB_TOKEN);
 
@@ -579,6 +584,15 @@
       showScreen('welcome', false);
     } else {
       showScreen('welcome', false);
+    }
+  }
+
+  function hasCloudSession() {
+    try {
+      const session = JSON.parse(localStorage.getItem('norva-cloud-session') || 'null');
+      return Boolean(session && session.access_token);
+    } catch (_) {
+      return false;
     }
   }
 

@@ -27,11 +27,11 @@ class App {
     }
 
     async init() {
-        // When running from a remote host (Vercel web version), require hub URL
+        // On the hosted web app, Norva Account is the product entry point.
         const host = window.location.hostname;
         const isRemote = host !== 'localhost' && host !== '127.0.0.1' && host !== '';
-        if (isRemote && !localStorage.getItem('norva-hub-url')) {
-            window.location.replace('/hub-connect.html');
+        if (isRemote && !this.hasCloudSession()) {
+            window.location.replace('/cloud.html');
             return;
         }
 
@@ -171,6 +171,15 @@ class App {
         this.navigateTo(initialPage, true); // true = replace history (don't add)
 
         console.log('Norva initialized');
+    }
+
+    hasCloudSession() {
+        try {
+            const session = JSON.parse(localStorage.getItem('norva-cloud-session') || 'null');
+            return Boolean(session?.access_token);
+        } catch (_) {
+            return false;
+        }
     }
 
     async checkAuth() {
