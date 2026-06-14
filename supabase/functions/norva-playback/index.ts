@@ -139,6 +139,7 @@ async function createPlaybackSession(
   let targetUrl = stringOr(body.targetUrl ?? body.target_url ?? body.url, "");
   const requestedMode = stringOr(body.mode, "auto");
   const requestedPlaybackHint = recordOrEmpty(body.playbackHint ?? body.playback_hint);
+  const userAgent = stringOrNull(body.userAgent ?? body.user_agent);
 
   if (!targetUrl && sourceId && itemType && itemId) {
     targetUrl = await resolvePlaybackTarget(sourceId, itemType, itemId, userId, db, requestedPlaybackHint);
@@ -185,7 +186,7 @@ async function createPlaybackSession(
     return { session, playback: { mode, url: relay.url, tokenExpiresAt: expiresAt } };
   }
 
-  const gateway = await createGatewaySession(session.id, userId, targetUrl, expiresAt, db, mode);
+  const gateway = await createGatewaySession(session.id, userId, targetUrl, expiresAt, db, mode, userAgent);
   return {
     session,
     playback: {
@@ -425,6 +426,7 @@ async function createGatewaySession(
   expiresAt: string,
   db: SupabaseClient,
   mode: "direct" | "relay" | "transcode",
+  userAgent: string | null = null,
 ) {
   const gatewayMode = mode === "transcode" ? "transcode" : "remux";
   const runtimeConfig = await getRuntimeConfig(db);
@@ -456,6 +458,7 @@ async function createGatewaySession(
       sourceUrl: targetUrl,
       mode: gatewayMode,
       expiresAt,
+      ...(userAgent ? { userAgent } : {}),
     }),
   });
   const gatewayBody = await response.json().catch(() => ({}));

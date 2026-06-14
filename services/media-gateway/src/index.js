@@ -35,7 +35,7 @@ app.get('/health', (req, res) => {
     res.json({
         ok: true,
         service: 'norva-media-gateway',
-        version: 12,
+        version: 13,
         activeSessions: activeSessionCount(),
         totalSessions: sessions.size,
         lastFailureCount: lastFailures.length,
@@ -45,7 +45,7 @@ app.get('/health', (req, res) => {
 
 app.post('/sessions', requireGatewayAuth, async (req, res) => {
     try {
-        const { sourceUrl, playbackSessionId, ownerKey, mode = 'remux', expiresAt } = req.body || {};
+        const { sourceUrl, playbackSessionId, ownerKey, mode = 'remux', expiresAt, userAgent } = req.body || {};
         if (!sourceUrl || !isHttpUrl(sourceUrl)) {
             return res.status(400).json({ error: 'sourceUrl must be a valid http(s) URL' });
         }
@@ -73,6 +73,7 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             sourceKey,
             ownerKey: normalizedOwnerKey,
             mode: mode === 'transcode' ? 'transcode' : 'remux',
+            userAgent: sanitizeUserAgent(userAgent),
             status: 'starting',
             outputDir,
             playlistPath: path.join(outputDir, 'playlist.m3u8'),
@@ -182,7 +183,7 @@ function startFfmpeg(session) {
         '-reconnect_at_eof', '1',
         '-reconnect_delay_max', '5',
         '-rw_timeout', '15000000',
-        '-user_agent', FFMPEG_USER_AGENT,
+        '-user_agent', session.userAgent || FFMPEG_USER_AGENT,
         '-headers', 'Accept: */*\r\nConnection: keep-alive\r\n',
         '-i', session.sourceUrl,
         '-fflags', '+genpts',
@@ -423,6 +424,15 @@ function isHttpUrl(value) {
     } catch (_) {
         return false;
     }
+}
+
+function sanitizeUserAgent(value) {
+    if (typeof value !== 'string') return null;
+    // Strip control chars (incl. CR/LF) so the value cannot inject extra
+    // FFmpeg header lines, then cap length defensively.
+    const cleaned = value.replace(/[\x00-\x1f\x7f]/g, '').trim();
+    if (!cleaned) return null;
+    return cleaned.slice(0, 256);
 }
 
 function sourceSessionKey(value) {

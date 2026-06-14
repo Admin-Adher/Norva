@@ -467,12 +467,14 @@ const CloudAdapter = (() => {
                 const needsGateway = requiresGatewayForContainer(type, container);
                 const mode = forcedMode || (((isVodPlayback || needsGateway) && preferredMode !== 'direct') ? 'transcode' : preferredMode);
                 const cloudSourceId = await resolveSourceId(sourceId);
+                const userAgent = resolveCloudUserAgent();
                 const baseSession = {
                     sourceId: cloudSourceId,
                     itemType: type === 'series' ? 'series' : type === 'movie' ? 'movie' : 'live',
                     itemId: streamId,
                     playbackHint: { container },
-                    corsSafe: false
+                    corsSafe: false,
+                    ...(userAgent ? { userAgent } : {})
                 };
                 let payload;
                 try {
@@ -661,6 +663,25 @@ const CloudAdapter = (() => {
             duration: item.duration_seconds || 0,
             data
         };
+    }
+
+    // Mirrors server/db.js USER_AGENT_PRESETS so the cloud gateway can use the
+    // same provider-accepted User-Agent that works for the local server.
+    const CLOUD_USER_AGENT_PRESETS = {
+        chrome: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+        vlc: 'VLC/3.0.20 LibVLC/3.0.20',
+        tivimate: 'TiviMate/4.7.0'
+    };
+
+    function resolveCloudUserAgent() {
+        try {
+            const settings = { ...defaultSettings(), ...JSON.parse(localStorage.getItem('norva-cloud-settings') || '{}') };
+            const preset = settings.userAgentPreset || '';
+            if (preset === 'custom') return (settings.userAgentCustom || '').trim() || null;
+            return CLOUD_USER_AGENT_PRESETS[preset] || null;
+        } catch (_) {
+            return null;
+        }
     }
 
     function defaultSettings() {
