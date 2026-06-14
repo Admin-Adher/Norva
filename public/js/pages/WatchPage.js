@@ -976,24 +976,27 @@ class WatchPage {
 
         // Detect stream type
         const looksLikeHls = url.includes('.m3u8') || url.includes('m3u8');
+        const isGatewaySessionUrl = this.isGatewayPlaybackUrl(url);
         const isRawTs = url.includes('.ts') && !url.includes('.m3u8');
         const isDirectVideo = url.includes('.mp4') || url.includes('.mkv') || url.includes('.avi');
         let probeInfo = null;
 
         try {
             console.log('[WatchPage] Probing stream...');
-            probeInfo = await this.probeStreamInfo(url, settings);
+            probeInfo = isGatewaySessionUrl ? null : await this.probeStreamInfo(url, settings);
             if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
-            console.log(`[WatchPage] Probe result: video=${probeInfo.video}, audio=${probeInfo.audio}, ` +
-                `${probeInfo.width}x${probeInfo.height}, duration=${probeInfo.duration || 'unknown'}, ` +
-                `profile=${probeInfo.videoProfile || 'unknown'}, pix_fmt=${probeInfo.videoPixelFormat || 'unknown'}, ` +
-                `copySafe=${probeInfo.videoCopySafe}, compatible=${probeInfo.compatible}`);
-            this.applyProbeInfo(probeInfo);
-            const probeFailureText = this.getProbeFailureText(probeInfo);
-            if (probeInfo.upstreamFailure || this.isTerminalPlaybackError(probeFailureText)) {
-                if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
-                await this.handlePlaybackFailure(probeInfo.friendlyError || probeInfo.error || probeFailureText || 'The provider refused this stream.');
-                return;
+            if (probeInfo) {
+                console.log(`[WatchPage] Probe result: video=${probeInfo.video}, audio=${probeInfo.audio}, ` +
+                    `${probeInfo.width}x${probeInfo.height}, duration=${probeInfo.duration || 'unknown'}, ` +
+                    `profile=${probeInfo.videoProfile || 'unknown'}, pix_fmt=${probeInfo.videoPixelFormat || 'unknown'}, ` +
+                    `copySafe=${probeInfo.videoCopySafe}, compatible=${probeInfo.compatible}`);
+                this.applyProbeInfo(probeInfo);
+                const probeFailureText = this.getProbeFailureText(probeInfo);
+                if (probeInfo.upstreamFailure || this.isTerminalPlaybackError(probeFailureText)) {
+                    if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
+                    await this.handlePlaybackFailure(probeInfo.friendlyError || probeInfo.error || probeFailureText || 'The provider refused this stream.');
+                    return;
+                }
             }
         } catch (err) {
             console.warn('[WatchPage] Probe failed, continuing without duration fallback:', err.message);
@@ -1146,8 +1149,8 @@ class WatchPage {
         // Use HLS.js for HLS streams
         if (looksLikeHls && Hls.isSupported()) {
             if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
-            this.updateTranscodeStatus('direct', 'Direct HLS');
-            this.currentPlaybackMode = 'direct-hls';
+            this.updateTranscodeStatus(isGatewaySessionUrl ? 'transcoding' : 'direct', isGatewaySessionUrl ? 'Norva Gateway' : 'Direct HLS');
+            this.currentPlaybackMode = isGatewaySessionUrl ? 'gateway-session' : 'direct-hls';
             this.currentProcessingOptions = {};
             this.streamStartOffset = 0;
             this.attachProbeSubtitles(url, probeInfo?.subtitles, 0);

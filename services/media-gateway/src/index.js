@@ -86,6 +86,18 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
         session.ffmpeg = startFfmpeg(session);
 
         const hlsUrl = publicUrl(req, `/sessions/${id}/playlist.m3u8?token=${encodeURIComponent(accessToken)}`);
+        try {
+            await waitForPlaylist(session, STARTUP_TIMEOUT_MS);
+            if (session.status === 'starting') session.status = 'ready';
+        } catch (err) {
+            const detail = session.lastError || err.message || 'Playlist was not generated';
+            await stopSession(session);
+            return res.status(502).json({
+                error: 'Failed to start media session',
+                details: detail
+            });
+        }
+
         res.status(201).json({
             id,
             status: session.status,

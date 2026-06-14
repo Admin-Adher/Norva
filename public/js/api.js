@@ -485,11 +485,25 @@ const CloudAdapter = (() => {
                         });
                     }
                 } catch (error) {
-                    if (error.status !== 503 || mode === 'direct') throw error;
-                    payload = await cloudPlaybackApi().createSession({
-                        ...baseSession,
-                        mode: 'direct',
-                    });
+                    if (mode === 'direct') throw error;
+                    if (mode === 'transcode' && preferredMode !== 'direct') {
+                        try {
+                            payload = await cloudPlaybackApi().createSession({
+                                ...baseSession,
+                                mode: 'relay',
+                                requiresRelay: true
+                            });
+                        } catch (relayError) {
+                            if (relayError.status !== 503) throw relayError;
+                        }
+                    }
+                    if (!payload) {
+                        if (error.status !== 503 && error.status !== 502) throw error;
+                        payload = await cloudPlaybackApi().createSession({
+                            ...baseSession,
+                            mode: 'direct',
+                        });
+                    }
                 }
                 const url = payload.playback?.url || payload.url;
                 return {
