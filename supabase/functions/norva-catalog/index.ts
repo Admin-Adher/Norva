@@ -44,12 +44,17 @@ Deno.serve(async (req) => {
     const segments = routeSegments(url.pathname);
 
     if (req.method === "GET" && segments[0] === "health") {
-      return json(req, { ok: true, service: "norva-catalog", version: 1 });
+      return json(req, { ok: true, service: "norva-catalog", version: 2 });
     }
 
     if (req.method === "GET" && (segments[0] === "media-items" || (segments[0] === "device" && segments[1] === "media-items"))) {
       const userId = await requireUserId(req);
       return json(req, await listMediaItems(url, userId));
+    }
+
+    if (req.method === "GET" && (segments[0] === "media-categories" || (segments[0] === "device" && segments[1] === "media-categories"))) {
+      const userId = await requireUserId(req);
+      return json(req, await listMediaCategories(url, userId));
     }
 
     throw new HttpError(404, "Route not found");
@@ -93,6 +98,7 @@ async function listMediaItems(url: URL, userId: string) {
   const sourceId = url.searchParams.get("sourceId");
   const itemType = url.searchParams.get("type");
   const search = url.searchParams.get("q");
+  const categoryId = url.searchParams.get("categoryId");
   const limit = boundedInt(url.searchParams.get("limit"), 1000, 1, 1000);
   const offset = boundedInt(url.searchParams.get("offset"), 0, 0, 1_000_000);
 
@@ -106,6 +112,7 @@ async function listMediaItems(url: URL, userId: string) {
 
   if (sourceId) query = query.eq("source_id", sourceId);
   if (itemType) query = query.eq("item_type", itemType);
+  if (categoryId) query = query.eq("parent_external_id", categoryId);
   if (search) query = query.ilike("title", `%${search}%`);
 
   const { data, count, error } = await query;
@@ -118,6 +125,52 @@ async function listMediaItems(url: URL, userId: string) {
     offset,
     hasMore: typeof count === "number" ? offset + limit < count : (data?.length ?? 0) === limit,
   };
+}
+
+async function listMediaCategories(url: URL, userId: string) {
+  const sourceId = url.searchParams.get("sourceId");
+  const itemType = url.searchParams.get("type");
+
+  let query = db
+    .from("cloud_media_items")
+    .select("source_id,parent_external_id,subtitle,metadata")
+    .eq("user_id", userId)
+    .not("parent_external_id", "is", null)
+    .order("subtitle", { ascending: true })
+    .limit(50000);
+
+  if (sourceId) query = query.eq("source_id", sourceId);
+  if (itemType) query = query.eq("item_type", itemType);
+
+  const { data, error } = await query;
+  if (error) throwDb(error, "Unable to list media categories");
+
+  const categories = new Map<string, { source_id: string; category_id: string; category_name: string }>();
+  for (const row of data ?? []) {
+    const rowSourceId = String(row.source_id ?? "");
+    const categoryId = String(row.parent_external_id ?? "");
+    if (!rowSourceId || !categoryId) continue;
+    const metadata = isRecord(row.metadata) ? row.metadata : {};
+    const categoryName = String(row.subtitle || metadata.categoryName || categoryId);
+    const key = `${rowSourceId}:${categoryId}`;
+    if (!categories.has(key) || categories.get(key)?.category_name === categoryId) {
+      categories.set(key, {
+        source_id: rowSourceId,
+        category_id: categoryId,
+        category_name: categoryName || categoryId,
+      });
+    }
+  }
+
+  return {
+    categories: [...categories.values()].sort((a, b) =>
+      a.category_name.localeCompare(b.category_name, undefined, { sensitivity: "base" })
+    ),
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
 function bearer(req: Request) {

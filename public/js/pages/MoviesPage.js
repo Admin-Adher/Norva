@@ -34,6 +34,12 @@ class MoviesPage {
         this.batchSize = 24;
         this.filteredCards = []; // [{ items, representative }] — grouped or singletons
         this.isLoading = false;
+        this.cloudLoadingMore = false;
+        this.cloudHasMore = false;
+        this.cloudOffset = 0;
+        this.cloudTotal = null;
+        this.cloudPageSize = 120;
+        this.cloudRequestId = 0;
         this.observer = null;
         this.favoriteIds = new Set();
         this.showFavoritesOnly = false;
@@ -166,6 +172,10 @@ class MoviesPage {
 
     onFiltersChanged() {
         this.persistFilters();
+        if (this.isCloudPagedMode()) {
+            this.loadMovies();
+            return;
+        }
         this.filterAndRender();
     }
 
@@ -296,6 +306,10 @@ class MoviesPage {
     }
 
     async loadCategories() {
+        if (this.isCloudPagedMode()) {
+            return this.loadCloudCategories();
+        }
+
         try {
             this.categories = [];
             this.hiddenCategoryIds = new Set();
@@ -351,7 +365,51 @@ class MoviesPage {
         }
     }
 
+    async loadCloudCategories() {
+        try {
+            this.categories = [];
+            this.hiddenCategoryIds = new Set();
+
+            const sourceId = this.sourceSelect.value;
+            const sourcesToLoad = sourceId
+                ? this.sources.filter(s => s.id === parseInt(sourceId))
+                : this.sources;
+
+            const loaded = [];
+            for (const source of sourcesToLoad) {
+                try {
+                    const cats = await API.media.categories({ sourceId: source.id, type: 'movie' });
+                    if (Array.isArray(cats)) {
+                        cats.forEach(c => loaded.push({ ...c, sourceId: c.sourceId || source.id }));
+                    }
+                } catch (err) {
+                    console.warn(`Failed to load cloud movie categories from source ${source.id}:`, err.message);
+                }
+            }
+
+            this.categories = loaded;
+            const options = this.categories.map(c => ({
+                value: `${c.sourceId}:${c.category_id}`,
+                label: sourcesToLoad.length > 1
+                    ? `${c.category_name} (${this.getSourceName(c.sourceId)})`
+                    : c.category_name
+            }));
+            this.categoryMulti.setOptions(options);
+
+            if (this.savedFilters?.categories?.length && !this._categoriesRestored) {
+                this.categoryMulti.setSelected(this.savedFilters.categories);
+                this._categoriesRestored = true;
+            }
+        } catch (err) {
+            console.error('Error loading cloud movie categories:', err);
+        }
+    }
+
     async loadMovies() {
+        if (this.isCloudPagedMode()) {
+            return this.loadCloudMovies({ reset: true });
+        }
+
         this.isLoading = true;
         this.container.innerHTML = '<div class="loading"><div class="loading-spinner"></div></div>';
 
@@ -391,6 +449,98 @@ class MoviesPage {
             this.container.innerHTML = '<div class="empty-state"><p>Error loading movies</p></div>';
         } finally {
             this.isLoading = false;
+        }
+    }
+
+    isCloudPagedMode() {
+        try {
+            return Boolean(window.API?.isCloudMode?.());
+        } catch (_) {
+            return false;
+        }
+    }
+
+    cloudPageParams(offset = 0) {
+        const selectedCats = [...(this.categoryMulti?.getSelected() || [])];
+        let sourceId = this.sourceSelect?.value || '';
+        let categoryId = '';
+
+        if (selectedCats.length === 1) {
+            const [selectedSourceId, selectedCategoryId] = selectedCats[0].split(':');
+            categoryId = selectedCategoryId || '';
+            if (!sourceId) sourceId = selectedSourceId || '';
+        }
+
+        return {
+            type: 'movie',
+            sourceId,
+            categoryId,
+            q: (this.searchInput?.value || '').trim(),
+            limit: this.cloudPageSize,
+            offset
+        };
+    }
+
+    async loadCloudMovies({ reset = false } = {}) {
+        if (this.cloudLoadingMore || (this.isLoading && !reset)) return;
+
+        if (reset) {
+            this.isLoading = true;
+            this.cloudRequestId += 1;
+            this.cloudOffset = 0;
+            this.cloudHasMore = false;
+            this.cloudTotal = null;
+            this.movies = [];
+            this.filteredCards = [];
+            this.currentBatch = 0;
+            this.container.innerHTML = '<div class="loading"><div class="loading-spinner"></div></div>';
+        } else {
+            this.cloudLoadingMore = true;
+        }
+
+        try {
+            const requestId = this.cloudRequestId;
+            const renderedBefore = reset ? 0 : this.container.querySelectorAll('.movie-card').length;
+            const page = await API.media.page(this.cloudPageParams(this.cloudOffset));
+            if (reset && requestId !== this.cloudRequestId) return;
+            const incoming = (page.items || [])
+                .filter(m => !this.hiddenCategoryIds.has(`${m.sourceId}:${m.category_id}`))
+                .map(m => ({
+                    ...m,
+                    sourceId: m.sourceId,
+                    id: `${m.sourceId}:${m.stream_id}`
+                }));
+
+            const seen = new Set(this.movies.map(m => `${m.sourceId}:${m.stream_id}`));
+            incoming.forEach(movie => {
+                const key = `${movie.sourceId}:${movie.stream_id}`;
+                if (!seen.has(key)) {
+                    seen.add(key);
+                    this.movies.push(movie);
+                }
+            });
+
+            this.cloudOffset = (page.offset || this.cloudOffset) + (page.items?.length || 0);
+            this.cloudHasMore = Boolean(page.hasMore);
+            this.cloudTotal = page.count ?? this.cloudTotal;
+            this.populateGenres();
+
+            if (reset) {
+                this.filterAndRender();
+            } else {
+                this.filteredCards = this.buildFilteredCards();
+                this.updateResultChrome(this.filteredCards);
+                this.currentBatch = Math.ceil(renderedBefore / this.batchSize);
+                this.renderNextBatch();
+            }
+        } catch (err) {
+            console.error('Error loading cloud movies:', err);
+            if (reset) {
+                this.container.innerHTML = '<div class="empty-state"><p>Error loading movies</p></div>';
+            }
+        } finally {
+            if (reset) this.isLoading = false;
+            this.cloudLoadingMore = false;
         }
     }
 
@@ -497,12 +647,12 @@ class MoviesPage {
             window.PlaybackHealth?.isBroken(item.sourceId, 'movie', item.stream_id);
     }
 
-    filterAndRender() {
+    buildFilteredCards() {
         const searchTerm = MediaUtils.searchableText(this.searchInput?.value || '').trim();
 
         let items = this.movies.filter(m => this.matchesFilters(m));
 
-        if (searchTerm) {
+        if (searchTerm && !this.isCloudPagedMode()) {
             items = items.filter(m =>
                 MediaUtils.searchableText(m.name).includes(searchTerm) ||
                 (m.tmdb?.title && MediaUtils.searchableText(m.tmdb.title).includes(searchTerm)));
@@ -529,15 +679,29 @@ class MoviesPage {
 
         // Sort
         this.sortCards(cards);
+        return cards;
+    }
+
+    updateResultChrome(cards) {
+        if (this.countEl) {
+            let total = this.groupDuplicates ? `${cards.length} titles` : `${cards.length} movies`;
+            if (this.isCloudPagedMode() && this.cloudTotal !== null && !this.hasActiveFilters()) {
+                total = `${this.cloudTotal} titles`;
+            } else if (this.isCloudPagedMode() && this.cloudHasMore) {
+                total = `${cards.length}+ titles`;
+            }
+            this.countEl.textContent = total;
+        }
+        this.resetBtn?.classList.toggle('hidden', !this.hasActiveFilters());
+    }
+
+    filterAndRender() {
+        const cards = this.buildFilteredCards();
 
         this.filteredCards = cards;
 
         // Counter + reset visibility
-        if (this.countEl) {
-            const total = this.groupDuplicates ? `${cards.length} titles` : `${cards.length} movies`;
-            this.countEl.textContent = total;
-        }
-        this.resetBtn?.classList.toggle('hidden', !this.hasActiveFilters());
+        this.updateResultChrome(cards);
 
         console.log(`[Movies] Displaying ${cards.length} cards from ${this.movies.length} movies`);
 
@@ -594,7 +758,12 @@ class MoviesPage {
 
         if (batch.length === 0) {
             const loader = this.container.querySelector('.movies-loader');
-            if (loader) loader.style.display = 'none';
+            if (this.isCloudPagedMode() && this.cloudHasMore && !this.cloudLoadingMore) {
+                if (loader) loader.style.display = '';
+                this.loadCloudMovies({ reset: false });
+            } else if (loader) {
+                loader.style.display = 'none';
+            }
             return;
         }
 
@@ -611,7 +780,7 @@ class MoviesPage {
 
         this.currentBatch++;
 
-        if (end >= this.filteredCards.length && loader) {
+        if (end >= this.filteredCards.length && loader && !(this.isCloudPagedMode() && this.cloudHasMore)) {
             loader.style.display = 'none';
         }
     }

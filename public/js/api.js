@@ -232,7 +232,7 @@ const CloudAdapter = (() => {
         return mapped;
     }
 
-    async function listMediaPage({ sourceId, type, q, limit = 50, offset = 0 } = {}) {
+    async function getMediaPage({ sourceId, type, q, categoryId, limit = 50, offset = 0 } = {}) {
         const cloudSourceId = sourceId ? await resolveSourceId(sourceId) : '';
         const normalizedLimit = Math.max(1, Math.min(1000, Number.parseInt(limit, 10) || 50));
         const normalizedOffset = Math.max(0, Number.parseInt(offset, 10) || 0);
@@ -240,25 +240,49 @@ const CloudAdapter = (() => {
             cloudSourceId,
             type: type || '',
             q: q || '',
+            categoryId: categoryId || '',
             limit: normalizedLimit,
             offset: normalizedOffset
         });
         const cached = pageCache.get(cacheKey);
-        if (cached && cached.expiresAt > Date.now()) return cached.items;
+        if (cached && cached.expiresAt > Date.now()) return cached.page;
 
         const payload = await cloudMediaApi().list({
             sourceId: cloudSourceId,
             type,
             q,
+            categoryId,
             limit: normalizedLimit,
             offset: normalizedOffset
         });
         const items = (payload.items || []).map(item => normalizeMediaItem(item, localSourceId(item.source_id || item.sourceId || cloudSourceId)));
+        const page = {
+            items,
+            count: payload.count ?? null,
+            limit: payload.limit ?? normalizedLimit,
+            offset: payload.offset ?? normalizedOffset,
+            hasMore: payload.hasMore ?? items.length === normalizedLimit
+        };
         pageCache.set(cacheKey, {
             expiresAt: Date.now() + PAGE_CACHE_TTL_MS,
-            items
+            page
         });
-        return items;
+        return page;
+    }
+
+    async function listMediaPage(options = {}) {
+        return (await getMediaPage(options)).items;
+    }
+
+    async function listMediaCategories({ sourceId, type } = {}) {
+        const cloudSourceId = sourceId ? await resolveSourceId(sourceId) : '';
+        const payload = await cloudMediaApi().categories({ sourceId: cloudSourceId, type });
+        return (payload.categories || []).map(category => ({
+            category_id: String(category.category_id || category.categoryId || 'uncategorized'),
+            category_name: category.category_name || category.categoryName || 'Uncategorized',
+            name: category.category_name || category.categoryName || 'Uncategorized',
+            sourceId: localSourceId(category.source_id || category.sourceId || cloudSourceId)
+        }));
     }
 
     function normalizeRecentItem(item) {
@@ -381,6 +405,24 @@ const CloudAdapter = (() => {
             return { count: 0, estimatedItems: 0, needsWarning: false, threshold: 50000, cloud: true };
         }
 
+        if (method === 'GET' && path === '/media/page') {
+            return getMediaPage({
+                sourceId: query.get('sourceId') || '',
+                type: query.get('type') || '',
+                q: query.get('q') || '',
+                categoryId: query.get('categoryId') || '',
+                limit: query.get('limit') || 120,
+                offset: query.get('offset') || 0
+            });
+        }
+
+        if (method === 'GET' && path === '/media/categories') {
+            return listMediaCategories({
+                sourceId: query.get('sourceId') || '',
+                type: query.get('type') || ''
+            });
+        }
+
         const xtreamMatch = path.match(/^\/proxy\/xtream\/([^/]+)\/([^/]+)(?:\/([^/]+)\/([^/]+))?/);
         if (xtreamMatch && method === 'GET') {
             const sourceId = xtreamMatch[1];
@@ -389,8 +431,12 @@ const CloudAdapter = (() => {
             if (action === 'auth') return { user_info: { auth: 1, status: 'Active' } };
             if (action === 'live_categories' || action === 'vod_categories' || action === 'series_categories') {
                 const type = action === 'live_categories' ? 'live' : action === 'vod_categories' ? 'movie' : 'series';
-                const items = await listAllMedia({ sourceId, type });
-                return categoriesFromMediaItems(items);
+                try {
+                    return await listMediaCategories({ sourceId, type });
+                } catch (err) {
+                    console.warn('[Cloud] Unable to load categories without full catalog:', err);
+                    return [];
+                }
             }
             if (action === 'live_streams' || action === 'vod_streams' || action === 'series') {
                 const type = action === 'live_streams' ? 'live' : action === 'vod_streams' ? 'movie' : 'series';
@@ -730,6 +776,24 @@ const API = {
         // Fast bulk operations - single SQL statement
         showAll: (sourceId, contentType) => API.request('POST', '/channels/show/all', { sourceId, contentType }),
         hideAll: (sourceId, contentType) => API.request('POST', '/channels/hide/all', { sourceId, contentType })
+    },
+
+    // Cloud/catalog browsing helpers
+    media: {
+        page: (params = {}) => {
+            const search = new URLSearchParams();
+            Object.entries(params).forEach(([key, value]) => {
+                if (value !== undefined && value !== null && value !== '') search.set(key, value);
+            });
+            return API.request('GET', `/media/page${search.toString() ? `?${search.toString()}` : ''}`);
+        },
+        categories: (params = {}) => {
+            const search = new URLSearchParams();
+            Object.entries(params).forEach(([key, value]) => {
+                if (value !== undefined && value !== null && value !== '') search.set(key, value);
+            });
+            return API.request('GET', `/media/categories${search.toString() ? `?${search.toString()}` : ''}`);
+        }
     },
 
     // Playback health (auto-detected broken/working streams)

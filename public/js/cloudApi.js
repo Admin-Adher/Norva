@@ -220,6 +220,7 @@
 
         mediaItems: {
             list: (params = {}) => catalogRequest('/media-items', params),
+            categories: (params = {}) => catalogRequest('/media-categories', params),
             upsert: (sourceId, items) => request('POST', '/media-items', { sourceId, items })
         },
 
@@ -269,7 +270,8 @@
                 seriesInfo: (id, seriesId) => seriesInfoRequest(id, seriesId, { token: getDeviceToken() })
             },
             mediaItems: {
-                list: (params = {}) => catalogRequest('/device/media-items', params, { token: getDeviceToken() })
+                list: (params = {}) => catalogRequest('/device/media-items', params, { token: getDeviceToken() }),
+                categories: (params = {}) => catalogRequest('/device/media-categories', params, { token: getDeviceToken() })
             },
             playback: {
                 createSession: (session) => playbackRequest(session, { token: getDeviceToken() })

@@ -36,6 +36,12 @@ class SeriesPage {
         this.batchSize = 24;
         this.filteredCards = [];
         this.isLoading = false;
+        this.cloudLoadingMore = false;
+        this.cloudHasMore = false;
+        this.cloudOffset = 0;
+        this.cloudTotal = null;
+        this.cloudPageSize = 120;
+        this.cloudRequestId = 0;
         this.observer = null;
         this.hiddenCategoryIds = new Set();
         this.currentSeries = null;
@@ -164,6 +170,10 @@ class SeriesPage {
 
     onFiltersChanged() {
         this.persistFilters();
+        if (this.isCloudPagedMode()) {
+            this.loadSeries();
+            return;
+        }
         this.filterAndRender();
     }
 
@@ -282,6 +292,10 @@ class SeriesPage {
     }
 
     async loadCategories() {
+        if (this.isCloudPagedMode()) {
+            return this.loadCloudCategories();
+        }
+
         try {
             this.categories = [];
             this.hiddenCategoryIds = new Set();
@@ -336,7 +350,51 @@ class SeriesPage {
         }
     }
 
+    async loadCloudCategories() {
+        try {
+            this.categories = [];
+            this.hiddenCategoryIds = new Set();
+
+            const sourceId = this.sourceSelect.value;
+            const sourcesToLoad = sourceId
+                ? this.sources.filter(s => s.id === parseInt(sourceId))
+                : this.sources;
+
+            const loaded = [];
+            for (const source of sourcesToLoad) {
+                try {
+                    const cats = await API.media.categories({ sourceId: source.id, type: 'series' });
+                    if (Array.isArray(cats)) {
+                        cats.forEach(c => loaded.push({ ...c, sourceId: c.sourceId || source.id }));
+                    }
+                } catch (err) {
+                    console.warn(`Failed to load cloud series categories from source ${source.id}:`, err.message);
+                }
+            }
+
+            this.categories = loaded;
+            const options = this.categories.map(c => ({
+                value: `${c.sourceId}:${c.category_id}`,
+                label: sourcesToLoad.length > 1
+                    ? `${c.category_name} (${this.getSourceName(c.sourceId)})`
+                    : c.category_name
+            }));
+            this.categoryMulti.setOptions(options);
+
+            if (this.savedFilters?.categories?.length && !this._categoriesRestored) {
+                this.categoryMulti.setSelected(this.savedFilters.categories);
+                this._categoriesRestored = true;
+            }
+        } catch (err) {
+            console.error('Error loading cloud series categories:', err);
+        }
+    }
+
     async loadSeries() {
+        if (this.isCloudPagedMode()) {
+            return this.loadCloudSeries({ reset: true });
+        }
+
         this.isLoading = true;
         this.container.innerHTML = '<div class="loading"><div class="loading-spinner"></div></div>';
 
@@ -376,6 +434,98 @@ class SeriesPage {
             this.container.innerHTML = '<div class="empty-state"><p>Error loading series</p></div>';
         } finally {
             this.isLoading = false;
+        }
+    }
+
+    isCloudPagedMode() {
+        try {
+            return Boolean(window.API?.isCloudMode?.());
+        } catch (_) {
+            return false;
+        }
+    }
+
+    cloudPageParams(offset = 0) {
+        const selectedCats = [...(this.categoryMulti?.getSelected() || [])];
+        let sourceId = this.sourceSelect?.value || '';
+        let categoryId = '';
+
+        if (selectedCats.length === 1) {
+            const [selectedSourceId, selectedCategoryId] = selectedCats[0].split(':');
+            categoryId = selectedCategoryId || '';
+            if (!sourceId) sourceId = selectedSourceId || '';
+        }
+
+        return {
+            type: 'series',
+            sourceId,
+            categoryId,
+            q: (this.searchInput?.value || '').trim(),
+            limit: this.cloudPageSize,
+            offset
+        };
+    }
+
+    async loadCloudSeries({ reset = false } = {}) {
+        if (this.cloudLoadingMore || (this.isLoading && !reset)) return;
+
+        if (reset) {
+            this.isLoading = true;
+            this.cloudRequestId += 1;
+            this.cloudOffset = 0;
+            this.cloudHasMore = false;
+            this.cloudTotal = null;
+            this.seriesList = [];
+            this.filteredCards = [];
+            this.currentBatch = 0;
+            this.container.innerHTML = '<div class="loading"><div class="loading-spinner"></div></div>';
+        } else {
+            this.cloudLoadingMore = true;
+        }
+
+        try {
+            const requestId = this.cloudRequestId;
+            const renderedBefore = reset ? 0 : this.container.querySelectorAll('.series-card').length;
+            const page = await API.media.page(this.cloudPageParams(this.cloudOffset));
+            if (reset && requestId !== this.cloudRequestId) return;
+            const incoming = (page.items || [])
+                .filter(s => !this.hiddenCategoryIds.has(`${s.sourceId}:${s.category_id}`))
+                .map(s => ({
+                    ...s,
+                    sourceId: s.sourceId,
+                    id: `${s.sourceId}:${s.series_id}`
+                }));
+
+            const seen = new Set(this.seriesList.map(s => `${s.sourceId}:${s.series_id}`));
+            incoming.forEach(series => {
+                const key = `${series.sourceId}:${series.series_id}`;
+                if (!seen.has(key)) {
+                    seen.add(key);
+                    this.seriesList.push(series);
+                }
+            });
+
+            this.cloudOffset = (page.offset || this.cloudOffset) + (page.items?.length || 0);
+            this.cloudHasMore = Boolean(page.hasMore);
+            this.cloudTotal = page.count ?? this.cloudTotal;
+            this.populateGenres();
+
+            if (reset) {
+                this.filterAndRender();
+            } else {
+                this.filteredCards = this.buildFilteredCards();
+                this.updateResultChrome(this.filteredCards);
+                this.currentBatch = Math.ceil(renderedBefore / this.batchSize);
+                this.renderNextBatch();
+            }
+        } catch (err) {
+            console.error('Error loading cloud series:', err);
+            if (reset) {
+                this.container.innerHTML = '<div class="empty-state"><p>Error loading series</p></div>';
+            }
+        } finally {
+            if (reset) this.isLoading = false;
+            this.cloudLoadingMore = false;
         }
     }
 
@@ -476,12 +626,12 @@ class SeriesPage {
             window.PlaybackHealth?.isBroken(item.sourceId, 'series', item.series_id);
     }
 
-    filterAndRender() {
+    buildFilteredCards() {
         const searchTerm = MediaUtils.searchableText(this.searchInput?.value || '').trim();
 
         let items = this.seriesList.filter(s => this.matchesFilters(s));
 
-        if (searchTerm) {
+        if (searchTerm && !this.isCloudPagedMode()) {
             items = items.filter(s =>
                 MediaUtils.searchableText(s.name).includes(searchTerm) ||
                 (s.tmdb?.title && MediaUtils.searchableText(s.tmdb.title).includes(searchTerm)));
@@ -506,12 +656,27 @@ class SeriesPage {
         }
 
         this.sortCards(cards);
-        this.filteredCards = cards;
+        return cards;
+    }
 
+    updateResultChrome(cards) {
         if (this.countEl) {
-            this.countEl.textContent = this.groupDuplicates ? `${cards.length} titles` : `${cards.length} series`;
+            let total = this.groupDuplicates ? `${cards.length} titles` : `${cards.length} series`;
+            if (this.isCloudPagedMode() && this.cloudTotal !== null && !this.hasActiveFilters()) {
+                total = `${this.cloudTotal} titles`;
+            } else if (this.isCloudPagedMode() && this.cloudHasMore) {
+                total = `${cards.length}+ titles`;
+            }
+            this.countEl.textContent = total;
         }
         this.resetBtn?.classList.toggle('hidden', !this.hasActiveFilters());
+    }
+
+    filterAndRender() {
+        const cards = this.buildFilteredCards();
+        this.filteredCards = cards;
+
+        this.updateResultChrome(cards);
 
         console.log(`[Series] Displaying ${cards.length} cards from ${this.seriesList.length} series`);
 
@@ -568,7 +733,12 @@ class SeriesPage {
 
         if (batch.length === 0) {
             const loader = this.container.querySelector('.series-loader');
-            if (loader) loader.style.display = 'none';
+            if (this.isCloudPagedMode() && this.cloudHasMore && !this.cloudLoadingMore) {
+                if (loader) loader.style.display = '';
+                this.loadCloudSeries({ reset: false });
+            } else if (loader) {
+                loader.style.display = 'none';
+            }
             return;
         }
 
@@ -584,7 +754,7 @@ class SeriesPage {
 
         this.currentBatch++;
 
-        if (end >= this.filteredCards.length && loader) {
+        if (end >= this.filteredCards.length && loader && !(this.isCloudPagedMode() && this.cloudHasMore)) {
             loader.style.display = 'none';
         }
     }
