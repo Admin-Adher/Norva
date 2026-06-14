@@ -35,7 +35,7 @@ app.get('/health', (req, res) => {
     res.json({
         ok: true,
         service: 'norva-media-gateway',
-        version: 13,
+        version: 14,
         activeSessions: activeSessionCount(),
         totalSessions: sessions.size,
         lastFailureCount: lastFailures.length,
@@ -218,8 +218,15 @@ function startFfmpeg(session) {
         '-f', 'hls',
         '-hls_time', '4',
         '-hls_list_size', '0',
+        // EVENT playlist: a growing VOD transcode the player can seek from the
+        // start. Avoids the live-edge chase that LIVE playlists trigger, and
+        // ffmpeg appends #EXT-X-ENDLIST on clean completion.
+        '-hls_playlist_type', 'event',
         '-hls_segment_type', 'mpegts',
-        '-hls_flags', 'append_list+independent_segments',
+        // No `append_list`: it injected a spurious leading #EXT-X-DISCONTINUITY
+        // that stalled hls.js fragment indexing. `temp_file` makes each segment
+        // appear in the playlist only once fully written (no partial reads).
+        '-hls_flags', 'independent_segments+temp_file',
         '-hls_segment_filename', segmentPattern,
         session.playlistPath
     );

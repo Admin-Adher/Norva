@@ -1207,7 +1207,10 @@ class WatchPage {
             // elements. Keep hls.js from owning textTracks so it cannot reset
             // the selected external track back to "hidden" during HLS events.
             renderTextTracksNatively: false,
-            ...(isTranscodeSession ? { startPosition: 0 } : {})
+            // Cloud gateway sessions are real-time VOD transcodes too: start at
+            // the beginning, never the live edge (otherwise hls.js chases the
+            // edge on the growing EVENT playlist and never loads a fragment).
+            ...((isTranscodeSession || isGatewaySession) ? { startPosition: 0 } : {})
         });
 
         this.hls.loadSource(url);
