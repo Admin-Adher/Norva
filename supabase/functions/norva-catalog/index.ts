@@ -268,7 +268,10 @@ async function listMaterializedLiveLogicalChannels(
       variantsByChannelId = await listMaterializedVariantsByChannelIds(rows.map((row) => String(row.id)));
     }
 
-    const channels = rows.map((row) => materializedChannel(row, variantsByChannelId.get(String(row.id)) ?? null));
+    const channels = rankLiveSearchChannels(
+      rows.map((row) => materializedChannel(row, variantsByChannelId.get(String(row.id)) ?? null)),
+      options.search,
+    );
     return {
       contract: "norva.live.logical.v1",
       country: options.country,
@@ -300,6 +303,31 @@ function normalizeSearchText(value: string) {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
+}
+
+function rankLiveSearchChannels(channels: JsonRecord[], search: string | null) {
+  if (!search) return channels;
+  const needle = normalizeSearchText(search);
+  if (!needle) return channels;
+  const score = (channel: JsonRecord) => {
+    const title = normalizeSearchText(stringFrom(channel.title ?? channel.name));
+    const group = normalizeSearchText(stringFrom(channel.category_name ?? channel.group_name ?? channel.section));
+    if (title === needle) return 1000;
+    if (title.startsWith(`${needle} `) || title.startsWith(`${needle}-`) || title.startsWith(`${needle}:`)) return 900;
+    if (title.startsWith(needle)) return 800;
+    if (title.includes(` ${needle} `) || title.endsWith(` ${needle}`)) return 650;
+    if (title.includes(needle)) return 500;
+    if (group.includes(needle)) return 250;
+    return 0;
+  };
+  return channels
+    .map((channel, index) => ({ channel, index, score: score(channel) }))
+    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .map((entry) => entry.channel);
+}
+
+function stringFrom(value: unknown) {
+  return typeof value === "string" ? value : "";
 }
 
 function escapePostgrestLike(value: string) {
