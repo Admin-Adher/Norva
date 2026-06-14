@@ -35,10 +35,10 @@ app.get('/health', (req, res) => {
     res.json({
         ok: true,
         service: 'norva-media-gateway',
-        version: 11,
+        version: 12,
         activeSessions: activeSessionCount(),
         totalSessions: sessions.size,
-        lastFailures: lastFailures.slice(-3),
+        lastFailureCount: lastFailures.length,
         time: new Date().toISOString()
     });
 });
