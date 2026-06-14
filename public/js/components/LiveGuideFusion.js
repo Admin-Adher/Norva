@@ -42,6 +42,19 @@ class LiveGuideFusion {
         window.addEventListener('playbackStatusChanged', () => this.render());
     }
 
+    shouldShowGroupRail() {
+        const layout = document.querySelector('.home-layout');
+        if (!layout) return true;
+        return !layout.classList.contains('sidebar-open');
+    }
+
+    syncNavigationState() {
+        if (!this.container) return;
+        const hideGroups = !this.shouldShowGroupRail();
+        this.container.classList.toggle('live-guide-groups-hidden', hideGroups);
+        this.container.querySelector('.live-guide-shell')?.classList.toggle('groups-hidden', hideGroups);
+    }
+
     escapeHtml(text) {
         return String(text || '')
             .replace(/&/g, '&amp;')
@@ -461,7 +474,7 @@ class LiveGuideFusion {
         this._lastChannelsKey = channelsKey;
 
         this.container.innerHTML = `
-            <div class="live-guide-shell">
+            <div class="live-guide-shell ${this.shouldShowGroupRail() ? '' : 'groups-hidden'}">
                 ${this.renderGroups(groups)}
                 <div class="live-guide-main">
                     ${this.renderPreview(selectedChannel)}
@@ -469,6 +482,7 @@ class LiveGuideFusion {
                 </div>
             </div>
         `;
+        this.syncNavigationState();
         this.app.channelList.updateScanScopeHint?.();
     }
 }

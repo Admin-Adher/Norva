@@ -70,11 +70,25 @@ class App {
         const channelToggleBtn = document.getElementById('channel-toggle-btn');
         const channelSidebar = document.getElementById('channel-sidebar');
         const channelOverlay = document.getElementById('channel-sidebar-overlay');
+        const homeLayout = document.querySelector('.home-layout');
+
+        const syncLiveNavigationState = () => {
+            if (!homeLayout || !channelSidebar) return;
+            const isMobileDrawer = window.matchMedia('(max-width: 768px)').matches;
+            const isSidebarOpen = isMobileDrawer
+                ? channelSidebar.classList.contains('active')
+                : !channelSidebar.classList.contains('collapsed');
+
+            homeLayout.classList.toggle('sidebar-open', isSidebarOpen);
+            homeLayout.classList.toggle('sidebar-collapsed', !isSidebarOpen);
+            this.liveGuideFusion?.syncNavigationState?.();
+        };
 
         if (channelToggleBtn && channelSidebar && channelOverlay) {
             const toggleChannelDrawer = () => {
                 channelSidebar.classList.toggle('active');
                 channelOverlay.classList.toggle('active');
+                syncLiveNavigationState();
             };
 
             channelToggleBtn.addEventListener('click', toggleChannelDrawer);
@@ -87,6 +101,7 @@ class App {
                     setTimeout(() => {
                         channelSidebar.classList.remove('active');
                         channelOverlay.classList.remove('active');
+                        syncLiveNavigationState();
                     }, 300);
                 }
             });
@@ -95,15 +110,14 @@ class App {
         // Desktop sidebar collapse toggle
         const sidebarCollapseBtn = document.getElementById('sidebar-collapse-btn');
         const sidebarExpandBtn = document.getElementById('sidebar-expand-btn');
-        const homeLayout = document.querySelector('.home-layout');
 
         const toggleSidebarCollapse = () => {
             channelSidebar?.classList.toggle('collapsed');
-            homeLayout?.classList.toggle('sidebar-collapsed');
 
             // Persist preference
             const isCollapsed = channelSidebar?.classList.contains('collapsed');
             localStorage.setItem('sidebarCollapsed', isCollapsed ? 'true' : 'false');
+            syncLiveNavigationState();
         };
 
         sidebarCollapseBtn?.addEventListener('click', toggleSidebarCollapse);
@@ -112,8 +126,9 @@ class App {
         // Restore sidebar state from localStorage
         if (localStorage.getItem('sidebarCollapsed') === 'true') {
             channelSidebar?.classList.add('collapsed');
-            homeLayout?.classList.add('sidebar-collapsed');
         }
+        syncLiveNavigationState();
+        window.addEventListener('resize', syncLiveNavigationState);
 
         // Navigation handling
         document.querySelectorAll('.nav-link').forEach(link => {
