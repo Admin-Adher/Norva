@@ -767,7 +767,7 @@ class SeriesPage {
         card.dataset.sourceId = series.sourceId;
 
         const poster = series.cover || series.stream_icon ||
-            MediaUtils.tmdbPosterUrl(series.tmdb) || '/img/placeholder.png';
+            MediaUtils.tmdbPosterUrl(series.tmdb) || '/img/norva-media-placeholder.png';
         const year = this.getItemYear(series) || '';
         const rating = series.rating ? `${Icons.star} ${series.rating}` : '';
         const isFav = group.items.some(i => this.favoriteIds.has(`${i.sourceId}:${i.series_id}`));
@@ -779,7 +779,7 @@ class SeriesPage {
         card.innerHTML = `
             <div class="series-poster">
                 <img src="${MediaUtils.escapeHtml(poster)}" alt="${MediaUtils.escapeHtml(displayName)}"
-                     onerror="this.onerror=null;this.src='/img/placeholder.png'" loading="lazy">
+                     onerror="this.onerror=null;this.src='/img/norva-media-placeholder.png'" loading="lazy">
                 <div class="series-play-overlay">
                     <span class="play-icon">${Icons.play}</span>
                 </div>
@@ -840,8 +840,8 @@ class SeriesPage {
             const ratio = h.duration > 0 ? Math.round((h.progress / h.duration) * 100) : 0;
             return `
             <div class="continue-card" data-item-id="${MediaUtils.escapeHtml(h.item_id)}">
-                <img src="${MediaUtils.escapeHtml(h.data?.poster || '/img/placeholder.png')}"
-                     onerror="this.onerror=null;this.src='/img/placeholder.png'" loading="lazy" alt="">
+                <img src="${MediaUtils.escapeHtml(h.data?.poster || '/img/norva-media-placeholder.png')}"
+                     onerror="this.onerror=null;this.src='/img/norva-media-placeholder.png'" loading="lazy" alt="">
                 <div class="continue-card-info">
                     <p class="continue-card-title">${MediaUtils.escapeHtml(h.data?.title || 'Unknown')}</p>
                     <p class="continue-card-subtitle">${MediaUtils.escapeHtml(h.data?.subtitle || '')}</p>
@@ -967,7 +967,7 @@ class SeriesPage {
         this.detailsPanel.classList.remove('hidden');
 
         document.getElementById('series-poster').src = series.cover || series.stream_icon ||
-            MediaUtils.tmdbPosterUrl(series.tmdb) || '/img/placeholder.png';
+            MediaUtils.tmdbPosterUrl(series.tmdb) || '/img/norva-media-placeholder.png';
         document.getElementById('series-title').textContent = series.tmdb?.title || series.name;
         document.getElementById('series-plot').textContent = series.plot || series.tmdb?.overview || '';
 

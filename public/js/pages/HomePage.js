@@ -434,13 +434,13 @@ class HomePage {
         const percent = duration > 0 ? Math.min(100, Math.round((progress / duration) * 100)) : 0;
         const title = item.name || item.title || data.title || 'Unknown Title';
         const subtitle = data.subtitle || (type === 'movie' ? 'Movie' : 'Series');
-        const posterUrl = this.resolveImageUrl(this.posterFromItem(item), '/img/poster-placeholder.jpg');
+        const posterUrl = this.resolveImageUrl(this.posterFromItem(item), '/img/norva-media-placeholder.png');
 
 
         return `
             <div class="dashboard-card" data-id="${item_id}" data-type="${type}">
                 <div class="card-image">
-                    <img src="${this.escapeHtml(posterUrl)}" alt="${this.escapeHtml(title)}" loading="lazy" onerror="this.onerror=null;this.src='/img/poster-placeholder.jpg'">
+                    <img src="${this.escapeHtml(posterUrl)}" alt="${this.escapeHtml(title)}" loading="lazy" onerror="this.onerror=null;this.src='/img/norva-media-placeholder.png'">
                     <div class="progress-bar-container">
                         <div class="progress-bar" style="width: ${percent}%"></div>
                     </div>
@@ -462,12 +462,12 @@ class HomePage {
         const type = item.type || item.item_type;
         const title = item.name || item.title || data.title || 'Unknown Title';
         const subtitle = data.subtitle || (type === 'movie' ? 'Movie' : 'Series');
-        const posterUrl = this.resolveImageUrl(this.posterFromItem(item), '/img/poster-placeholder.jpg');
+        const posterUrl = this.resolveImageUrl(this.posterFromItem(item), '/img/norva-media-placeholder.png');
 
         return `
             <div class="dashboard-card" data-id="${item_id}" data-type="${type}">
                 <div class="card-image">
-                    <img src="${this.escapeHtml(posterUrl)}" alt="${this.escapeHtml(title)}" loading="lazy" onerror="this.onerror=null;this.src='/img/poster-placeholder.jpg'">
+                    <img src="${this.escapeHtml(posterUrl)}" alt="${this.escapeHtml(title)}" loading="lazy" onerror="this.onerror=null;this.src='/img/norva-media-placeholder.png'">
                     <div class="play-icon-overlay">
                         <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
                     </div>
