@@ -1,7 +1,4 @@
-<shape xmlns:android="http://schemas.android.com/apk/res/android">
-    <solid android:color="#11111A" />
-    <stroke
-        android:width="2dp"
-        android:color="#6C63FF" />
-    <corners android:radius="8dp" />
-</shape>
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@drawable/norva_tv_banner" />
+</layer-list>

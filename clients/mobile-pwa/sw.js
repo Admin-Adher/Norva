@@ -1,5 +1,5 @@
 const CACHE = 'norva-mobile-shell-v12';
-const ASSETS = ['/manifest.json', '/icon-192.png', '/icon-512.png'];
+const ASSETS = ['/manifest.json', '/icon-192.png', '/icon-512.png', '/norva-media-placeholder.png'];
 
 self.addEventListener('install', event => {
   event.waitUntil(

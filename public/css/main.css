@@ -284,6 +284,9 @@ h4 {
 
 .nav-icon {
   font-size: 1.1rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 /* =====================================================
@@ -3679,11 +3682,41 @@ kbd {
   display: inline-block;
   vertical-align: middle;
   fill: currentColor;
+  object-fit: contain;
+  flex-shrink: 0;
 }
 
 .nav-link .icon {
   width: 1.5em;
   height: 1.5em;
+}
+
+.norva-ui-icon {
+  filter: drop-shadow(0 0 8px rgba(94, 142, 255, 0.22));
+}
+
+.nav-link .norva-ui-icon {
+  width: 1.65em;
+  height: 1.65em;
+  opacity: 0.78;
+  transition: opacity var(--transition-fast), filter var(--transition-fast), transform var(--transition-fast);
+}
+
+.nav-link:hover .norva-ui-icon,
+.nav-link.active .norva-ui-icon {
+  opacity: 1;
+  filter: drop-shadow(0 0 12px rgba(91, 147, 255, 0.52)) drop-shadow(0 0 18px rgba(203, 91, 255, 0.28));
+  transform: translateY(-1px);
+}
+
+.btn .norva-ui-icon {
+  width: 1.35em;
+  height: 1.35em;
+}
+
+.favorite-btn .norva-ui-icon {
+  width: 1.45em;
+  height: 1.45em;
 }
 
 .icon.text-warning {

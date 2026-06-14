@@ -94,7 +94,13 @@
       flex-shrink: 0;
     }
 
-    #header .logo svg { flex-shrink: 0; }
+    #header .logo img {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      object-fit: cover;
+      flex-shrink: 0;
+    }
 
     #header-title {
       flex: 1;
@@ -241,7 +247,13 @@
       justify-content: center;
       margin-bottom: 32px;
     }
-    .welcome-logo svg { width: 80px; height: 80px; }
+    .welcome-logo img {
+      width: 96px;
+      height: 96px;
+      border-radius: 22px;
+      object-fit: cover;
+      box-shadow: 0 18px 46px rgba(82, 124, 255, 0.28);
+    }
     #screen-welcome h2 { text-align: center; }
     #screen-welcome > p { text-align: center; }
 
@@ -375,10 +387,7 @@
   <header id="header">
     <button id="btn-back" aria-label="Back">&#8592;</button>
     <a class="logo" href="#welcome">
-      <svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg" width="28" height="28">
-        <rect width="32" height="32" rx="6" fill="#3B82F6"/>
-        <path d="M10 8 L10 24 L24 16 Z" fill="white"/>
-      </svg>
+      <img src="/icon-192.png" alt="">
       Norva
     </a>
     <span id="header-title"></span>
@@ -390,10 +399,7 @@
     <!-- Welcome screen -->
     <section id="screen-welcome" class="screen" data-title="">
       <div class="welcome-logo">
-        <svg viewBox="0 0 192 192" xmlns="http://www.w3.org/2000/svg">
-          <rect width="192" height="192" rx="32" fill="#3B82F6"/>
-          <path d="M60 48 L60 144 L144 96 Z" fill="white"/>
-        </svg>
+        <img src="/icon-192.png" alt="Norva">
       </div>
       <h2>Norva</h2>
       <p>Connect to your Norva account or use an advanced local connector.</p>
