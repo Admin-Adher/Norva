@@ -33,6 +33,8 @@ class VideoPlayer {
         this.settingsLoaded = false;
         this._playbackStatusOkReported = false;
         this._clearingMedia = false;
+        this._variantSwitchSeq = 0;
+        this._vfTimer = null;
 
         // Settings - start with defaults, load from server async
         this.settings = this.getDefaultSettings();
@@ -1042,6 +1044,7 @@ class VideoPlayer {
      * Play a channel
      */
     async play(channel, streamUrl) {
+        ++this._variantSwitchSeq;
         this.currentChannel = channel;
         this._playbackStatusOkReported = false;
         this.applyQualityGroup(channel);
@@ -1569,25 +1572,37 @@ class VideoPlayer {
             const url = res && (res.url || res.streamUrl);
             if (!url) throw new Error('no url');
             const ch = Object.assign({}, this.currentChannel, { streamId: variant.streamId, currentVariant: variant, qualityGroup: this.qualityGroup });
-            this._armVariantFallback(variant);
-            this.play(ch, url);
+            await this.play(ch, url);
+            const switchSeq = this._variantSwitchSeq;
+            this._armVariantFallback(variant, switchSeq);
         } catch (e) {
             console.warn('[Quality] switch failed:', e.message);
             this._tryFallback(variant, 'resolve failed');
         }
     }
 
-    _armVariantFallback(variant) {
+    _clearVariantFallbackTimer() {
+        if (this._vfTimer) {
+            clearTimeout(this._vfTimer);
+            this._vfTimer = null;
+        }
+    }
+
+    _armVariantFallback(variant, switchSeq = this._variantSwitchSeq) {
         clearTimeout(this._vfTimer);
         this._vfStartCt = this.video.currentTime || 0;
         this._vfTimer = setTimeout(() => {
             this._vfTimer = null;
+            if (switchSeq !== this._variantSwitchSeq) return;
+            if (!this.currentVariant || String(this.currentVariant.streamId) !== String(variant.streamId)) return;
             const progressed = this.video.currentTime > this._vfStartCt + 0.3 && this.video.readyState >= 3;
-            if (!progressed) this._tryFallback(variant, 'no start in time');
+            if (!progressed) this._tryFallback(variant, 'no start in time', switchSeq);
         }, 9000);
     }
 
-    _tryFallback(failed, reason) {
+    _tryFallback(failed, reason, switchSeq = this._variantSwitchSeq) {
+        if (switchSeq !== this._variantSwitchSeq) return;
+        if (!this.currentVariant || String(this.currentVariant.streamId) !== String(failed.streamId)) return;
         if (!this.qualityGroup || !window.ChannelGrouping) return;
         this._triedVariants.add(String(failed.streamId));
         const order = window.ChannelGrouping.fallbackOrder(this.qualityGroup.variants, failed.streamId)
@@ -1749,6 +1764,8 @@ class VideoPlayer {
      * Stop playback
      */
     stop() {
+        ++this._variantSwitchSeq;
+        this._clearVariantFallbackTimer();
         // Stop any running transcode session first
         this.stopTranscodeSession();
         this._clearingMedia = true;
