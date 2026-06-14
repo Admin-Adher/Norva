@@ -1694,6 +1694,42 @@ class ChannelList {
     /**
      * Load Xtream channels
      */
+    async loadPagedLiveStreams(sourceId) {
+        const pageSize = 1000;
+        const firstPage = await API.proxy.xtream.liveStreams(sourceId, null, { limit: pageSize, offset: 0 });
+        if (!window.API?.isCloudMode?.() || !Array.isArray(firstPage) || firstPage.length < pageSize) {
+            return firstPage || [];
+        }
+
+        const all = [];
+        const seen = new Set();
+        const appendUnique = (streams = []) => {
+            let added = 0;
+            for (const stream of streams || []) {
+                const streamId = stream.stream_id ?? stream.streamId ?? stream.id;
+                const key = `${stream.sourceId || stream.source_id || sourceId}:${streamId}`;
+                if (!streamId || seen.has(key)) continue;
+                seen.add(key);
+                all.push(stream);
+                added += 1;
+            }
+            return added;
+        };
+
+        appendUnique(firstPage);
+        for (let offset = pageSize; offset < 80000; offset += pageSize) {
+            const page = await API.proxy.xtream.liveStreams(sourceId, null, { limit: pageSize, offset });
+            if (!Array.isArray(page) || !page.length) break;
+            const added = appendUnique(page);
+            if (page.length < pageSize || added === 0) break;
+        }
+
+        return all;
+    }
+
+    /**
+     * Load Xtream channels
+     */
     async loadXtreamChannels(sourceId, append = false) {
         if (!append) {
             this.channels = [];
@@ -1701,7 +1737,7 @@ class ChannelList {
         }
 
         const categories = await API.proxy.xtream.liveCategories(sourceId);
-        const streams = await API.proxy.xtream.liveStreams(sourceId);
+        const streams = await this.loadPagedLiveStreams(sourceId);
 
         // Map categories to groups
         const categoryGroups = categories.map(cat => ({
@@ -1789,7 +1825,7 @@ class ChannelList {
 
         // Use Xtream API endpoints - backend now supports M3U sources too
         const categories = await API.proxy.xtream.liveCategories(sourceId);
-        const streams = await API.proxy.xtream.liveStreams(sourceId);
+        const streams = await this.loadPagedLiveStreams(sourceId);
 
         // Map categories to groups (keeping m3u sourceType for downstream compatibility)
         const m3uGroups = categories.map(cat => ({

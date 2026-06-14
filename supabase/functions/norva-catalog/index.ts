@@ -39,6 +39,7 @@ const db = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
 
 const LIVE_PAGE_SIZE = 1000;
 const LIVE_MAX_ROWS = 80000;
+const LIVE_SECTION_ORDER = ["primary", "regional", "multiplex", "other"];
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -199,8 +200,8 @@ async function listLiveLogicalChannels(url: URL, userId: string) {
   if (search) {
     const needle = normalizeSearchText(search);
     catalog.channels = (catalog.channels || []).filter((channel) => {
-      const title = normalizeSearchText(stringOr(channel.title ?? channel.name, ""));
-      const group = normalizeSearchText(stringOr(channel.category_name ?? channel.group_name ?? channel.section, ""));
+      const title = normalizeSearchText(stringFrom(channel.title ?? channel.name));
+      const group = normalizeSearchText(stringFrom(channel.category_name ?? channel.group_name ?? channel.section));
       return title.includes(needle) || group.includes(needle);
     });
     catalog.count = catalog.channels.length;
@@ -234,33 +235,9 @@ async function listMaterializedLiveLogicalChannels(
   try {
     const limit = boundedInt(url.searchParams.get("limit"), LIVE_PAGE_SIZE, 1, LIVE_PAGE_SIZE);
     const offset = boundedInt(url.searchParams.get("offset"), 0, 0, 1_000_000);
-    let query = db
-      .from("cloud_live_logical_channels")
-      .select("*", { count: "exact" })
-      .eq("user_id", userId)
-      .order("section", { ascending: true })
-      .order("lcn", { ascending: true, nullsFirst: false })
-      .order("title", { ascending: true })
-      .range(offset, offset + limit - 1);
-
-    if (options.sourceId) query = query.eq("source_id", options.sourceId);
-    if (options.categoryId) query = query.eq("category_id", options.categoryId);
-    if (options.search) {
-      const like = escapePostgrestLike(options.search);
-      query = query.or([
-        `title.ilike.%${like}%`,
-        `logical_key.ilike.%${like}%`,
-        `category_name.ilike.%${like}%`,
-        `section.ilike.%${like}%`,
-      ].join(","));
-    }
-
-    const { data, count, error } = await query;
-    if (error) {
-      if (isMissingMaterialization(error)) return null;
-      throwDb(error, "Unable to list materialized live catalog");
-    }
-    const rows = data ?? [];
+    const { rows, total } = options.search || options.categoryId
+      ? await listFilteredMaterializedLiveRows(userId, options, limit, offset)
+      : await listOrderedMaterializedLiveRows(userId, options, limit, offset);
     if (!rows.length) return null;
 
     let variantsByChannelId = new Map<string, JsonRecord[]>();
@@ -284,16 +261,115 @@ async function listMaterializedLiveLogicalChannels(
       channels,
       groups: liveGroupsFromChannels(channels),
       count: channels.length,
-      total: count ?? channels.length,
+      total,
       limit,
       offset,
-      hasMore: typeof count === "number" ? offset + limit < count : rows.length === limit,
+      hasMore: offset + limit < total,
       rawCount: null,
     };
   } catch (error) {
     if (isMissingMaterialization(error)) return null;
     throw error;
   }
+}
+
+async function listFilteredMaterializedLiveRows(
+  userId: string,
+  options: { sourceId: string | null; categoryId: string | null; search: string | null },
+  limit: number,
+  offset: number,
+) {
+  let query = db
+    .from("cloud_live_logical_channels")
+    .select("*", { count: "exact" })
+    .eq("user_id", userId)
+    .order("section", { ascending: true })
+    .order("lcn", { ascending: true, nullsFirst: false })
+    .order("title", { ascending: true })
+    .range(offset, offset + limit - 1);
+
+  if (options.sourceId) query = query.eq("source_id", options.sourceId);
+  if (options.categoryId) query = query.eq("category_id", options.categoryId);
+  if (options.search) {
+    const like = escapePostgrestLike(options.search);
+    query = query.or([
+      `title.ilike.%${like}%`,
+      `logical_key.ilike.%${like}%`,
+      `category_name.ilike.%${like}%`,
+      `section.ilike.%${like}%`,
+    ].join(","));
+  }
+
+  const { data, count, error } = await query;
+  if (error) {
+    if (isMissingMaterialization(error)) return { rows: [], total: 0 };
+    throwDb(error, "Unable to list materialized live catalog");
+  }
+  return { rows: data ?? [], total: count ?? (data ?? []).length };
+}
+
+async function listOrderedMaterializedLiveRows(
+  userId: string,
+  options: { sourceId: string | null },
+  limit: number,
+  offset: number,
+) {
+  const rows: JsonRecord[] = [];
+  let total = 0;
+  let skip = offset;
+  let remaining = limit;
+
+  for (const section of LIVE_SECTION_ORDER) {
+    const sectionCount = await countMaterializedLiveSection(userId, options.sourceId, section);
+    total += sectionCount;
+    if (remaining <= 0) continue;
+    if (skip >= sectionCount) {
+      skip -= sectionCount;
+      continue;
+    }
+
+    let query = db
+      .from("cloud_live_logical_channels")
+      .select("*")
+      .eq("user_id", userId)
+      .eq("section", section)
+      .order("lcn", { ascending: true, nullsFirst: false })
+      .order("category_name", { ascending: true })
+      .order("title", { ascending: true })
+      .range(skip, skip + remaining - 1);
+
+    if (options.sourceId) query = query.eq("source_id", options.sourceId);
+
+    const { data, error } = await query;
+    if (error) {
+      if (isMissingMaterialization(error)) return { rows: [], total: 0 };
+      throwDb(error, "Unable to list ordered materialized live catalog");
+    }
+
+    const chunk = data ?? [];
+    rows.push(...chunk);
+    remaining -= chunk.length;
+    skip = 0;
+  }
+
+  return { rows, total };
+}
+
+async function countMaterializedLiveSection(userId: string, sourceId: string | null, section: string) {
+  let query = db
+    .from("cloud_live_logical_channels")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", userId)
+    .eq("section", section);
+
+  if (sourceId) query = query.eq("source_id", sourceId);
+
+  const { count, error } = await query;
+  if (error) {
+    if (isMissingMaterialization(error)) return 0;
+    throwDb(error, "Unable to count materialized live section");
+  }
+  return count ?? 0;
 }
 
 function normalizeSearchText(value: string) {
