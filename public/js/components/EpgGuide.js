@@ -751,6 +751,8 @@ class EpgGuide {
             this.favorites.delete(key);
         }
 
+        if (!this.container) return;
+
         // Update DOM (All instances in EPG)
         const rows = this.container.querySelectorAll(`.epg-channel-row[data-channel-id="${channelId}"][data-source-id="${sourceId}"]`);
         rows.forEach(row => {

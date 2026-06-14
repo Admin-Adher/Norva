@@ -15,6 +15,13 @@ const CHANNEL_FAMILY_NOISE_WORDS = new Set([
     'tv', 'superhd', 'ultrahd', 'multicam', 'multi', 'stereo', 'audio'
 ]);
 
+const CONSOLIDATED_LIVE_GROUPS = {
+    FAVORITES: 'Favorites',
+    PRIMARY: 'Chaines principales',
+    REGIONAL: 'Chaines regionales',
+    MULTIPLEX: 'Multiplex et evenements'
+};
+
 class ChannelList {
     constructor() {
         this.container = document.getElementById('channel-list');
@@ -123,10 +130,12 @@ class ChannelList {
     loadCollapsedState() {
         try {
             const saved = localStorage.getItem('norva_tv_collapsed_groups');
-            if (saved) {
+            const version = localStorage.getItem('norva_tv_collapsed_groups_version');
+            if (saved && version === '2') {
                 this.collapsedGroups = new Set(JSON.parse(saved));
                 this._hasCollapsedState = true;
             } else {
+                this.collapsedGroups = new Set();
                 this._hasCollapsedState = false; // First load - will collapse all by default
             }
         } catch (err) {
@@ -140,6 +149,7 @@ class ChannelList {
      */
     saveCollapsedState() {
         try {
+            localStorage.setItem('norva_tv_collapsed_groups_version', '2');
             localStorage.setItem('norva_tv_collapsed_groups', JSON.stringify([...this.collapsedGroups]));
         } catch (err) {
             console.error('Error saving collapsed state:', err);
@@ -349,15 +359,18 @@ class ChannelList {
         channelItems.forEach(item => {
             const channelId = item.dataset.channelId;
             const sourceId = item.dataset.sourceId;
+            const rendered = item.dataset.renderId
+                ? this.renderedChannels.find(channel => channel._renderId === item.dataset.renderId)
+                : null;
 
             // Find the channel data
-            const channel = this.channels.find(c =>
+            const channel = rendered || this.channels.find(c =>
                 String(c.id) === String(channelId) &&
                 String(c.sourceId) === String(sourceId)
             );
 
             if (channel) {
-                const programInfo = this.getProgramInfo(channel);
+                const programInfo = this.getDisplayProgramInfo(channel);
                 const programElement = item.querySelector('.channel-program');
                 if (programElement) {
                     programElement.textContent = programInfo || '';
@@ -420,6 +433,303 @@ class ChannelList {
             .replace(/'/g, "&#039;");
     }
 
+    getBrowseCountry() {
+        const country = window.app?.player?.getCountry?.()
+            || localStorage.getItem('norva_country')
+            || navigator.language?.slice(0, 2)?.toUpperCase()
+            || 'FR';
+        return String(country || 'FR').toUpperCase();
+    }
+
+    getChannelItemId(channel) {
+        return channel?.streamId || channel?.id;
+    }
+
+    isChannelVisibleInBrowse(channel, showHidden, { favoritesGroup = false } = {}) {
+        if (!channel) return false;
+        const rawChannelId = this.getChannelItemId(channel);
+        const hidden = this.isHidden('channel', channel.sourceId, rawChannelId);
+        if (!favoritesGroup && hidden && !showHidden) return false;
+        if (this.hideBroken && this.shouldHideByPlayback(channel)) return false;
+        return true;
+    }
+
+    shouldGroupStartCollapsed(groupName, isFavoritesGroup = false) {
+        if (isFavoritesGroup || groupName === CONSOLIDATED_LIVE_GROUPS.PRIMARY) return false;
+        if (groupName === CONSOLIDATED_LIVE_GROUPS.REGIONAL) return false;
+        if (groupName === CONSOLIDATED_LIVE_GROUPS.MULTIPLEX) return true;
+        return true;
+    }
+
+    cleanLogicalChannelName(name) {
+        return String(name || '')
+            .replace(/^[^|]*\|\s*/, '')
+            .replace(/\[[^\]]*\]/g, ' ')
+            .replace(/\([^)]*\)/g, ' ')
+            .replace(/\b(4k|uhd|hdr|fhd|full\s*hd|super\s*hd|superhd|hd|sd|h265|hevc|h264|avc|50fps|60fps)\b/gi, ' ')
+            .replace(/\s{2,}/g, ' ')
+            .trim();
+    }
+
+    dedupeVariantList(variants = []) {
+        const seen = new Set();
+        const out = [];
+        for (const variant of variants.slice().sort((a, b) => (a.rank - b.rank) || String(a.raw || '').localeCompare(String(b.raw || '')))) {
+            const key = `${variant.label}:${variant.sourceId}:${variant.streamId}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            out.push(variant);
+        }
+        return out;
+    }
+
+    makeLogicalChannel(entry, groupTitle, kind = 'generic') {
+        const variants = this.dedupeVariantList(entry.variants || []);
+        const defaultVariant = entry.defaultVariant || window.ChannelGrouping?.pickDefault?.(variants) || variants[0] || null;
+        const base = defaultVariant?.channel || entry.channel || variants[0]?.channel;
+        if (!base) return null;
+
+        const name = entry.name || this.cleanLogicalChannelName(base.name) || base.name;
+        const display = {
+            ...base,
+            name,
+            num: entry.lcn ?? base.num ?? null,
+            groupTitle,
+            qualityGroup: {
+                name,
+                variants,
+                defaultVariant
+            },
+            currentVariant: defaultVariant,
+            _logicalChannel: variants.length > 1 || kind !== 'generic',
+            _logicalKind: kind,
+            _variantCount: variants.length,
+            _sourceGroupTitle: base.groupTitle || groupTitle,
+            _displayGroupTitle: groupTitle
+        };
+
+        const favoriteVariant = variants.find(variant =>
+            variant.channel && this.isFavorite(variant.sourceId, variant.channel.id)
+        );
+        display._favoriteTargetId = favoriteVariant?.channel?.id || base.id;
+
+        return display;
+    }
+
+    mergeExtraEntries(entries = [], groupTitle, kind) {
+        const byKey = new Map();
+
+        entries.forEach((entry, index) => {
+            const base = entry.channel || entry.variants?.[0]?.channel;
+            if (!base) return;
+            const familyKey = this.getChannelFamilyKey(entry.name || base.name) || `${base.sourceId}:${base.id}`;
+            const key = `${base.sourceId}:${entry.parentKey || ''}:${familyKey}`;
+            if (!byKey.has(key)) {
+                byKey.set(key, {
+                    name: this.cleanLogicalChannelName(entry.name || base.name) || entry.name || base.name,
+                    parentKey: entry.parentKey,
+                    parentName: entry.parentName,
+                    variants: [],
+                    firstIndex: index
+                });
+            }
+            byKey.get(key).variants.push(...(entry.variants || []));
+        });
+
+        return [...byKey.values()]
+            .map(entry => {
+                entry.variants = this.dedupeVariantList(entry.variants);
+                entry.defaultVariant = window.ChannelGrouping?.pickDefault?.(entry.variants) || entry.variants[0] || null;
+                return this.makeLogicalChannel(entry, groupTitle, kind);
+            })
+            .filter(Boolean)
+            .sort((a, b) => {
+                const parent = String(a._sourceGroupTitle || '').localeCompare(String(b._sourceGroupTitle || ''));
+                return parent || String(a.name || '').localeCompare(String(b.name || ''));
+            });
+    }
+
+    consolidateRawChannels(channels = [], groupTitle) {
+        const byKey = new Map();
+        const country = this.getBrowseCountry();
+
+        channels.forEach((channel, index) => {
+            const familyKey = this.getChannelFamilyKey(channel) || `${channel.sourceId}:${channel.id}`;
+            const key = `${channel.sourceId}:${familyKey}`;
+            if (!byKey.has(key)) byKey.set(key, { channel, members: [], firstIndex: index });
+            byKey.get(key).members.push(channel);
+        });
+
+        return [...byKey.values()]
+            .sort((a, b) => a.firstIndex - b.firstIndex)
+            .map(bucket => {
+                if (bucket.members.length <= 1 || !window.ChannelGrouping) {
+                    return { ...bucket.channel, _variantCount: 1, _displayGroupTitle: groupTitle, _favoriteTargetId: bucket.channel.id };
+                }
+
+                const group = window.ChannelGrouping.variantsForChannel(bucket.channel, bucket.members, country);
+                if (!group || !group.variants?.length) {
+                    return { ...bucket.channel, _variantCount: bucket.members.length, _displayGroupTitle: groupTitle, _favoriteTargetId: bucket.channel.id };
+                }
+                return this.makeLogicalChannel({
+                    name: this.cleanLogicalChannelName(group.name) || group.name,
+                    variants: group.variants,
+                    defaultVariant: group.defaultVariant
+                }, groupTitle, 'generic');
+            })
+            .filter(Boolean);
+    }
+
+    buildBrowseModel(showHidden) {
+        const groupedChannels = {};
+        const groupMeta = {};
+        const country = this.getBrowseCountry();
+
+        const addGroup = (name, channels, meta = {}) => {
+            const visible = (channels || []).filter(Boolean);
+            if (!visible.length) return;
+            groupedChannels[name] = visible;
+            groupMeta[name] = {
+                defaultCollapsed: this.shouldGroupStartCollapsed(name, name === CONSOLIDATED_LIVE_GROUPS.FAVORITES),
+                ...meta
+            };
+        };
+
+        const visibleChannels = this.channels.filter(channel =>
+            this.isChannelVisibleInBrowse(channel, showHidden)
+        );
+        this.filteredChannels = visibleChannels;
+
+        const favoriteChannels = this.channels
+            .filter(channel => this.isFavorite(channel.sourceId, channel.id))
+            .filter(channel => this.isChannelVisibleInBrowse(channel, showHidden, { favoritesGroup: true }));
+        addGroup(
+            CONSOLIDATED_LIVE_GROUPS.FAVORITES,
+            this.consolidateRawChannels(favoriteChannels, CONSOLIDATED_LIVE_GROUPS.FAVORITES),
+            { defaultCollapsed: false, priority: 0 }
+        );
+
+        if (window.ChannelGrouping?.group) {
+            const model = window.ChannelGrouping.group(visibleChannels, country);
+            const primary = (model.primary || [])
+                .map(entry => this.makeLogicalChannel(entry, CONSOLIDATED_LIVE_GROUPS.PRIMARY, 'primary'))
+                .filter(Boolean);
+            addGroup(CONSOLIDATED_LIVE_GROUPS.PRIMARY, primary, { defaultCollapsed: false, priority: 1 });
+
+            const otherByGroup = new Map();
+            (model.other || []).forEach(channel => {
+                const group = channel.groupTitle || 'Uncategorized';
+                if (!otherByGroup.has(group)) otherByGroup.set(group, []);
+                otherByGroup.get(group).push(channel);
+            });
+
+            [...otherByGroup.entries()]
+                .sort(([a], [b]) => a.localeCompare(b))
+                .forEach(([group, channels]) => {
+                    addGroup(group, this.consolidateRawChannels(channels, group), { defaultCollapsed: true, priority: 10 });
+                });
+
+            addGroup(
+                CONSOLIDATED_LIVE_GROUPS.REGIONAL,
+                this.mergeExtraEntries(model.regional || [], CONSOLIDATED_LIVE_GROUPS.REGIONAL, 'regional'),
+                { defaultCollapsed: false, priority: 90 }
+            );
+            addGroup(
+                CONSOLIDATED_LIVE_GROUPS.MULTIPLEX,
+                this.mergeExtraEntries(model.multiplex || [], CONSOLIDATED_LIVE_GROUPS.MULTIPLEX, 'multiplex'),
+                { defaultCollapsed: true, priority: 100 }
+            );
+        } else {
+            const rawByGroup = new Map();
+            visibleChannels.forEach(channel => {
+                const group = channel.groupTitle || 'Uncategorized';
+                if (!rawByGroup.has(group)) rawByGroup.set(group, []);
+                rawByGroup.get(group).push(channel);
+            });
+            [...rawByGroup.entries()].sort(([a], [b]) => a.localeCompare(b)).forEach(([group, channels]) => {
+                addGroup(group, this.consolidateRawChannels(channels, group), { defaultCollapsed: true, priority: 10 });
+            });
+        }
+
+        const sortedGroups = Object.keys(groupedChannels)
+            .filter(groupName => groupedChannels[groupName].some(channel =>
+                this.isChannelVisibleInBrowse(channel, showHidden, { favoritesGroup: groupName === CONSOLIDATED_LIVE_GROUPS.FAVORITES })
+            ))
+            .sort((a, b) => {
+                const pa = groupMeta[a]?.priority ?? 50;
+                const pb = groupMeta[b]?.priority ?? 50;
+                if (pa !== pb) return pa - pb;
+                return a.localeCompare(b);
+            });
+
+        return { groupedChannels, groupMeta, sortedGroups };
+    }
+
+    findRenderedChannel(channel, groupName) {
+        return this.renderedChannels.find(rc =>
+            rc.id === channel.id &&
+            String(rc.sourceId) === String(channel.sourceId) &&
+            rc._renderGroup === groupName
+        );
+    }
+
+    isDisplayChannelFavorite(channel) {
+        const favoriteId = channel?._favoriteTargetId || channel?.id;
+        return this.isFavorite(channel?.sourceId, favoriteId);
+    }
+
+    isDisplayChannelActive(channel) {
+        if (!channel || !this.currentChannel) return false;
+        if (channel.id === this.currentChannel.id && String(channel.sourceId) === String(this.currentChannel.sourceId)) return true;
+        return Boolean(channel.qualityGroup?.variants?.some(variant =>
+            variant.channel?.id === this.currentChannel.id &&
+            String(variant.sourceId) === String(this.currentChannel.sourceId)
+        ));
+    }
+
+    getDisplayProgramInfo(channel) {
+        const program = this.getProgramInfo(channel);
+        const bits = [];
+        if (channel?._variantCount > 1) bits.push(`${channel._variantCount} variantes`);
+        if (channel?.currentVariant?.label) bits.push(channel.currentVariant.label);
+        if (program) bits.push(program);
+        return bits.join(' - ');
+    }
+
+    buildChannelItemHtml(channel, groupName, { hidden = false, navActive = false } = {}) {
+        const renderedChannel = this.findRenderedChannel(channel, groupName);
+        const renderId = renderedChannel?._renderId || '';
+        const renderGroup = renderedChannel?._renderGroup || groupName;
+        const isActive = this.isDisplayChannelActive(channel);
+        const isFavorite = this.isDisplayChannelFavorite(channel);
+        const playbackClasses = this.getPlaybackClassNames(channel);
+        const logicalClass = channel._logicalChannel ? `logical-channel logical-${channel._logicalKind || 'generic'}` : '';
+        const lcn = channel.num != null ? String(channel.num).trim() : '';
+
+        return `
+          <div class="channel-item ${logicalClass} ${isActive ? 'active' : ''} ${navActive ? 'nav-active' : ''} ${hidden ? 'hidden' : ''} ${playbackClasses}"
+               data-channel-id="${channel.id}"
+               data-source-id="${channel.sourceId}"
+               data-source-type="${channel.sourceType}"
+               data-stream-id="${channel.streamId || ''}"
+               data-url="${channel.url || ''}"
+               data-render-id="${renderId}"
+               data-render-group="${renderGroup}"
+               data-favorite-id="${channel._favoriteTargetId || channel.id}">
+            ${lcn ? `<span class="channel-lcn">${this.escapeHtml(lcn)}</span>` : ''}
+            <img class="channel-logo" src="${this.getProxiedImageUrl(channel.tvgLogo)}"
+                 alt="" onerror="this.onerror=null;this.src='/img/placeholder.png'">
+            <div class="channel-info">
+              <div class="channel-name">${this.escapeHtml(channel.name)}</div>
+              <div class="channel-program">${this.escapeHtml(this.getDisplayProgramInfo(channel) || '')}</div>
+            </div>
+            <button class="favorite-btn ${isFavorite ? 'active' : ''}" title="${isFavorite ? 'Remove from Favorites' : 'Add to Favorites'}">
+              ${isFavorite ? Icons.favorite : Icons.favoriteOutline}
+            </button>
+          </div>
+        `;
+    }
+
     /**
      * Render channel list
      */
@@ -436,58 +746,20 @@ class ChannelList {
         this.batchSize = 100; // Number of groups to render per batch (increased to handle many hidden groups)
         this.container.innerHTML = ''; // Clear container
 
-        // Group channels
-        const groupedChannels = {};
-
-        this.filteredChannels = this.channels.filter(ch => !this.hideBroken || !this.shouldHideByPlayback(ch));
-        let filteredChannels = this.filteredChannels;
-
-        // 2. Group
-        filteredChannels.forEach(ch => {
-            const groupKey = ch.groupTitle || 'Uncategorized';
-            if (!groupedChannels[groupKey]) {
-                groupedChannels[groupKey] = [];
-            }
-            groupedChannels[groupKey].push(ch);
-        });
-
-        // 3. Add Favorites
-        const favoritedChannels = this.channels.filter(ch =>
-            this.isFavorite(ch.sourceId, ch.id) && (!this.hideBroken || !this.shouldHideByPlayback(ch)));
-        if (favoritedChannels.length > 0) {
-            favoritedChannels.sort((a, b) => a.name.localeCompare(b.name));
-            groupedChannels['Favorites'] = favoritedChannels;
-        }
-
-        // 4. Sort Groups and filter to only those with visible channels
-        const allGroups = Object.keys(groupedChannels).sort((a, b) => {
-            if (a === 'Favorites') return -1;
-            if (b === 'Favorites') return 1;
-            return a.localeCompare(b);
-        });
-
-        // Pre-filter to only include groups with visible channels (so hidden groups don't consume batch slots)
-        this.sortedGroups = allGroups.filter(groupName => {
-            if (groupName === 'Favorites') return true;
-            const channels = groupedChannels[groupName];
-            // Check if any channel in this group is visible
-            return channels.some(channel => {
-                const rawChannelId = channel.streamId || channel.id;
-                const isHidden = this.isHidden('channel', channel.sourceId, rawChannelId);
-                const shouldHideByPlayback = this.shouldHideByPlayback(channel);
-                return (!isHidden || showHidden) && (!this.hideBroken || !shouldHideByPlayback);
-            });
-        });
-
-        this.groupedChannels = groupedChannels;
+        const browseModel = this.buildBrowseModel(showHidden);
+        this.groupedChannels = browseModel.groupedChannels;
+        this.groupMeta = browseModel.groupMeta;
+        this.sortedGroups = browseModel.sortedGroups;
         this.showHidden = showHidden;
 
-        // Collapse all groups by default on first load (for large playlists)
-        // This prevents rendering 100K+ channel items on initial load
+        // Collapse noisy groups by default on first load. The consolidated
+        // national lineup stays open so Live TV feels instantly browsable.
         if (!this._hasCollapsedState && this.sortedGroups.length > 0) {
             this.sortedGroups.forEach(groupName => {
-                if (groupName !== 'Favorites') {
+                if (this.groupMeta?.[groupName]?.defaultCollapsed) {
                     this.collapsedGroups.add(groupName);
+                } else {
+                    this.collapsedGroups.delete(groupName);
                 }
             });
             this._hasCollapsedState = true;
@@ -501,10 +773,7 @@ class ChannelList {
             const isFavoritesGroup = groupName === 'Favorites';
 
             const visibleChannels = channels.filter(channel => {
-                if (isFavoritesGroup) return true;
-                const rawChannelId = channel.streamId || channel.id;
-                const channelHidden = this.isHidden('channel', channel.sourceId, rawChannelId);
-                return (!channelHidden || this.showHidden) && (!this.hideBroken || !this.shouldHideByPlayback(channel));
+                return this.isChannelVisibleInBrowse(channel, this.showHidden, { favoritesGroup: isFavoritesGroup });
             });
 
             // Assign unique render IDs for linear navigation
@@ -572,8 +841,6 @@ class ChannelList {
         this.loader.style.opacity = '1';
         let html = '';
 
-        let renderIndex = start; // Keep track of global index for mapping to renderedChannels
-
         for (const groupName of groupsToRender) {
             const channels = this.groupedChannels[groupName];
             if (channels.length === 0) continue;
@@ -582,10 +849,7 @@ class ChannelList {
 
             // Pre-filter visible channels for this group
             const visibleChannels = channels.filter(channel => {
-                if (isFavoritesGroup) return true;
-                const rawChannelId = channel.streamId || channel.id;
-                const channelHidden = this.isHidden('channel', channel.sourceId, rawChannelId);
-                return (!channelHidden || this.showHidden) && (!this.hideBroken || !this.shouldHideByPlayback(channel));
+                return this.isChannelVisibleInBrowse(channel, this.showHidden, { favoritesGroup: isFavoritesGroup });
             });
 
             // Skip group if no visible channels (derived visibility)
@@ -593,7 +857,9 @@ class ChannelList {
 
             // Default new groups to collapsed (except Favorites)
             // This handles groups loaded via scroll that weren't in the initial collapse
-            if (!isFavoritesGroup && !this.collapsedGroups.has(groupName) && !this._userExpandedGroups?.has(groupName)) {
+            if (!this.collapsedGroups.has(groupName) &&
+                !this._userExpandedGroups?.has(groupName) &&
+                this.groupMeta?.[groupName]?.defaultCollapsed) {
                 this.collapsedGroups.add(groupName);
             }
 
@@ -617,39 +883,14 @@ class ChannelList {
 
             for (const channel of visibleChannels) {
                 // Check hidden again for styling (showHidden mode)
-                const rawChannelId = channel.streamId || channel.id;
+                const rawChannelId = this.getChannelItemId(channel);
                 const channelHidden = !isFavoritesGroup && this.isHidden('channel', channel.sourceId, rawChannelId);
-
-                const isActive = this.currentChannel?.id === channel.id;
-                // Check if this specific instance is the "active" one for navigation purposes
-                const isRenderActive = this.currentRenderId && this.renderedChannels[renderIndex]?._renderId === this.currentRenderId;
-
-                const isFavorite = this.isFavorite(channel.sourceId, channel.id);
-                const playbackClasses = this.getPlaybackClassNames(channel);
-                const renderId = this.renderedChannels[renderIndex]?._renderId || '';
-                const renderGroup = this.renderedChannels[renderIndex]?._renderGroup || groupName;
-                renderIndex++;
-
-                html += `
-          <div class="channel-item ${isActive ? 'active' : ''} ${isRenderActive ? 'nav-active' : ''} ${channelHidden ? 'hidden' : ''} ${playbackClasses}" 
-               data-channel-id="${channel.id}"
-               data-source-id="${channel.sourceId}"
-               data-source-type="${channel.sourceType}"
-               data-stream-id="${channel.streamId || ''}"
-               data-url="${channel.url || ''}"
-               data-render-id="${renderId}"
-               data-render-group="${renderGroup}">
-            <img class="channel-logo" src="${this.getProxiedImageUrl(channel.tvgLogo)}" 
-                 alt="" onerror="this.onerror=null;this.src='/img/placeholder.png'">
-            <div class="channel-info">
-              <div class="channel-name">${this.escapeHtml(channel.name)}</div>
-              <div class="channel-program">${this.escapeHtml(this.getProgramInfo(channel) || '')}</div>
-            </div>
-            <button class="favorite-btn ${isFavorite ? 'active' : ''}" title="${isFavorite ? 'Remove from Favorites' : 'Add to Favorites'}">
-              ${isFavorite ? Icons.favorite : Icons.favoriteOutline}
-            </button>
-          </div>
-        `;
+                const renderedChannel = this.findRenderedChannel(channel, groupName);
+                const isRenderActive = this.currentRenderId && renderedChannel?._renderId === this.currentRenderId;
+                html += this.buildChannelItemHtml(channel, groupName, {
+                    hidden: channelHidden,
+                    navActive: isRenderActive
+                });
             }
             html += '</div></div>';
         }
@@ -706,7 +947,7 @@ class ChannelList {
             if (favBtn) {
                 favBtn.addEventListener('click', (e) => {
                     e.stopPropagation();
-                    this.toggleFavorite(parseInt(item.dataset.sourceId), item.dataset.channelId);
+                    this.toggleFavorite(parseInt(item.dataset.sourceId), item.dataset.favoriteId || item.dataset.channelId);
                 });
             }
         });
@@ -723,47 +964,14 @@ class ChannelList {
 
         // Filter visible channels
         const visibleChannels = channels.filter(channel => {
-            if (isFavoritesGroup) return true;
-            const rawChannelId = channel.streamId || channel.id;
-            const channelHidden = this.isHidden('channel', channel.sourceId, rawChannelId);
-            return (!channelHidden || this.showHidden) && (!this.hideBroken || !this.shouldHideByPlayback(channel));
+            return this.isChannelVisibleInBrowse(channel, this.showHidden, { favoritesGroup: isFavoritesGroup });
         });
 
         let html = '';
         for (const channel of visibleChannels) {
-            const rawChannelId = channel.streamId || channel.id;
+            const rawChannelId = this.getChannelItemId(channel);
             const channelHidden = !isFavoritesGroup && this.isHidden('channel', channel.sourceId, rawChannelId);
-            const isActive = this.currentChannel?.id === channel.id;
-            const isFavorite = this.isFavorite(channel.sourceId, channel.id);
-            const playbackClasses = this.getPlaybackClassNames(channel);
-
-            // Find the matching rendered channel to get its unique IDs
-            const renderedChannel = this.renderedChannels.find(rc =>
-                rc.id === channel.id && rc.sourceId === channel.sourceId && rc._renderGroup === groupName
-            );
-            const renderId = renderedChannel?._renderId || '';
-            const renderGroup = renderedChannel?._renderGroup || groupName;
-
-            html += `
-          <div class="channel-item ${isActive ? 'active' : ''} ${channelHidden ? 'hidden' : ''} ${playbackClasses}" 
-               data-channel-id="${channel.id}"
-               data-source-id="${channel.sourceId}"
-               data-source-type="${channel.sourceType}"
-               data-stream-id="${channel.streamId || ''}"
-               data-url="${channel.url || ''}"
-               data-render-id="${renderId}"
-               data-render-group="${renderGroup}">
-            <img class="channel-logo" src="${this.getProxiedImageUrl(channel.tvgLogo)}" 
-                 alt="" onerror="this.onerror=null;this.src='/img/placeholder.png'">
-            <div class="channel-info">
-              <div class="channel-name">${this.escapeHtml(channel.name)}</div>
-              <div class="channel-program">${this.escapeHtml(this.getProgramInfo(channel) || '')}</div>
-            </div>
-            <button class="favorite-btn ${isFavorite ? 'active' : ''}" title="${isFavorite ? 'Remove from Favorites' : 'Add to Favorites'}">
-              ${isFavorite ? Icons.favorite : Icons.favoriteOutline}
-            </button>
-          </div>
-        `;
+            html += this.buildChannelItemHtml(channel, groupName, { hidden: channelHidden });
         }
 
         container.innerHTML = html;
@@ -780,7 +988,7 @@ class ChannelList {
             if (favBtn) {
                 favBtn.addEventListener('click', (e) => {
                     e.stopPropagation();
-                    this.toggleFavorite(parseInt(item.dataset.sourceId), item.dataset.channelId);
+                    this.toggleFavorite(parseInt(item.dataset.sourceId), item.dataset.favoriteId || item.dataset.channelId);
                 });
             }
         });
@@ -1760,8 +1968,12 @@ class ChannelList {
         const key = `${sourceId}:${channelId}`;
         const wasFavorite = this.visibleFavorites.has(key);
 
-        // Find all buttons for this channel in the DOM (it may appear in multiple groups)
-        const btns = document.querySelectorAll(`.channel-item[data-channel-id="${channelId}"][data-source-id="${sourceId}"] .favorite-btn`);
+        // A consolidated row can represent one default variant while the
+        // favorite target points to another variant from the same source.
+        const btns = document.querySelectorAll(
+            `.channel-item[data-source-id="${sourceId}"][data-channel-id="${channelId}"] .favorite-btn,` +
+            `.channel-item[data-source-id="${sourceId}"][data-favorite-id="${channelId}"] .favorite-btn`
+        );
 
         try {
             // Optimistic update
@@ -1828,60 +2040,33 @@ class ChannelList {
      * Update Favorites group in DOM and data
      */
     updateFavoritesGroup(channel, isAdded) {
-        // 1. Update Data
-        if (!this.groupedChannels['Favorites']) {
-            this.groupedChannels['Favorites'] = [];
-        }
+        const groupName = CONSOLIDATED_LIVE_GROUPS.FAVORITES;
+        const favoriteChannels = this.channels
+            .filter(ch => this.isFavorite(ch.sourceId, ch.id))
+            .filter(ch => this.isChannelVisibleInBrowse(ch, this.showHidden, { favoritesGroup: true }));
+        const favArray = this.consolidateRawChannels(favoriteChannels, groupName);
+        this.groupedChannels[groupName] = favArray;
 
-        const favArray = this.groupedChannels['Favorites'];
-        const existingIdx = favArray.findIndex(c => c.id === channel.id && c.sourceId === channel.sourceId);
-
-        if (isAdded) {
-            if (existingIdx === -1) favArray.push(channel);
-        } else {
-            if (existingIdx !== -1) favArray.splice(existingIdx, 1);
-        }
-
-        // 2. Update DOM
-        const groupHeader = this.listContainer.querySelector('.group-header[data-group="Favorites"]');
-
+        const groupHeader = this.listContainer?.querySelector(`.group-header[data-group="${groupName}"]`);
         if (!groupHeader) {
-            // If group doesn't exist and we're adding, we ideally should create it
-            // For now, simpler to just return. User will see it on next refresh.
-            // Or we could force a re-render if it's the first favorite? 
-            if (isAdded && favArray.length === 1) {
-                this.render(); // This is the one case where full render is worth it
-            }
+            if (isAdded && favArray.length > 0) this.render();
             return;
         }
 
+        const groupEl = groupHeader.closest('.channel-group');
         const groupChannels = groupHeader.nextElementSibling; // .group-channels
         const countSpan = groupHeader.querySelector('.group-count');
-
-        if (isAdded) {
-            // Check if already in DOM (to avoid dupes)
-            const existingEl = groupChannels.querySelector(`.channel-item[data-channel-id="${channel.id}"][data-source-id="${channel.sourceId}"]`);
-            if (!existingEl) {
-                const newEl = this.createChannelElement(channel);
-                groupChannels.appendChild(newEl);
-            }
-        } else {
-            const existingEl = groupChannels.querySelector(`.channel-item[data-channel-id="${channel.id}"][data-source-id="${channel.sourceId}"]`);
-            if (existingEl) {
-                existingEl.remove();
-            }
-        }
-
-        // Update count
         if (countSpan) countSpan.textContent = favArray.length;
 
-        // Hide/Show group if empty?
         if (favArray.length === 0) {
-            groupHeader.classList.add('hidden'); // Or remove
-            groupHeader.style.display = 'none';
-        } else {
-            groupHeader.classList.remove('hidden');
-            groupHeader.style.display = '';
+            groupEl?.remove();
+            return;
+        }
+
+        groupHeader.classList.remove('hidden');
+        groupHeader.style.display = '';
+        if (groupChannels && !this.collapsedGroups.has(groupName)) {
+            this.renderGroupChannels(groupName, groupChannels);
         }
     }
 
@@ -1934,7 +2119,10 @@ class ChannelList {
      * Select and play a channel
      */
     async selectChannel(dataset) {
-        const channel = this.channels.find(c => c.id === dataset.channelId);
+        const channel = this.channels.find(c =>
+            c.id === dataset.channelId &&
+            (!dataset.sourceId || String(c.sourceId) === String(dataset.sourceId))
+        );
         if (!channel) return;
 
         this.currentChannel = channel;
@@ -2268,7 +2456,8 @@ class ChannelList {
             sourceType: nextChannel.sourceType,
             streamId: nextChannel.streamId,
             url: nextChannel.url,
-            renderId: nextChannel._renderId // Pass the unique render ID
+            renderId: nextChannel._renderId, // Pass the unique render ID
+            renderGroup: nextChannel._renderGroup
         });
     }
 
@@ -2311,7 +2500,8 @@ class ChannelList {
             sourceType: prevChannel.sourceType,
             streamId: prevChannel.streamId,
             url: prevChannel.url,
-            renderId: prevChannel._renderId
+            renderId: prevChannel._renderId,
+            renderGroup: prevChannel._renderGroup
         });
     }
 

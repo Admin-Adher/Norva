@@ -669,6 +669,27 @@ h4 {
   transition: background var(--transition-fast);
 }
 
+.channel-item.logical-channel {
+  min-height: 58px;
+}
+
+.channel-lcn {
+  flex: 0 0 24px;
+  color: #9fb1ff;
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.channel-item.logical-primary .channel-name {
+  font-weight: 700;
+}
+
+.channel-item.logical-multiplex {
+  opacity: 0.92;
+}
+
 .channel-item:hover {
   background: var(--color-bg-hover);
 }
