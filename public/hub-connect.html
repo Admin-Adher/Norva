@@ -28,14 +28,20 @@
         }
 
         .logo {
-            font-size: 28px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 20px;
+            color: #F8FAFC;
+            font-size: 22px;
             font-weight: 800;
-            letter-spacing: -0.5px;
-            background: linear-gradient(135deg, #3B82F6, #8B5CF6);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-            margin-bottom: 8px;
+        }
+
+        .logo img {
+            width: 44px;
+            height: 44px;
+            border-radius: 10px;
+            display: block;
         }
 
         h1 {
@@ -154,15 +160,18 @@
 </head>
 <body>
     <div class="card">
-        <div class="logo">norva</div>
+        <div class="logo">
+            <img src="/img/norva-app-icon.png" alt="Norva">
+            <span>Norva</span>
+        </div>
         <h1>Local connector</h1>
         <p class="subtitle">
-            Enter the local address of a PC or server running Norva.
+            Connect to a local Norva hub when you want direct access on your network.
         </p>
 
         <div class="cloud-actions">
             <a class="btn secondary compact" href="/account.html">Norva Account</a>
-            <a class="cloud-link" href="/cloud.html">Open Norva</a>
+            <a class="cloud-link" href="/cloud.html">Open Norva Cloud</a>
         </div>
 
         <label for="hubUrl">Connector address</label>

@@ -45,16 +45,11 @@
         }
 
         .logo-icon {
-            width: 48px;
-            height: 48px;
-            background: var(--accent);
+            width: 52px;
+            height: 52px;
             border-radius: 12px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
+            display: block;
         }
-
-        .logo-icon svg { width: 28px; height: 28px; fill: #fff; }
 
         .logo-text {
             font-size: 1.75rem;
@@ -290,13 +285,7 @@
 <body>
 
 <div class="logo">
-    <div class="logo-icon">
-        <!-- simple TV icon -->
-        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-            <rect x="2" y="4" width="20" height="14" rx="2"/>
-            <path d="M8 22h8M12 18v4" stroke="#fff" stroke-width="1.5" stroke-linecap="round" fill="none"/>
-        </svg>
-    </div>
+    <img class="logo-icon" src="/img/norva-app-icon.png" alt="Norva">
     <div class="logo-text">Norva</div>
 </div>
 
@@ -313,15 +302,15 @@
 
     <!-- Main pairing UI -->
     <div id="pair-ui">
-        <h1>Pair this TV</h1>
-        <p class="subtitle">Scan the QR code with the Norva mobile app,<br>or enter the code on your phone.</p>
+        <h1>Pair this screen</h1>
+        <p class="subtitle">Scan the QR code with Norva,<br>or enter the code from your account.</p>
 
         <div id="qr-wrap">
             <div id="qr-placeholder">Generating…</div>
         </div>
 
         <div id="pair-code">------</div>
-        <p class="code-label">Enter this code in the Norva app to approve</p>
+        <p class="code-label">Enter this code in Norva Account to approve</p>
 
         <div class="divider">or</div>
 

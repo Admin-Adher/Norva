@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-  <title>Approve Pairing — Norva</title>
+  <title>Approve pairing - Norva</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -45,8 +45,15 @@
       gap: 10px;
       font-size: 20px;
       font-weight: 700;
-      color: var(--accent);
+      color: var(--text);
       margin-bottom: 36px;
+    }
+
+    .logo img {
+      width: 40px;
+      height: 40px;
+      border-radius: 10px;
+      display: block;
     }
 
     .card {
@@ -158,19 +165,16 @@
 <body>
 <div class="page">
   <div class="logo">
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
-      <rect width="32" height="32" rx="6" fill="#3B82F6"/>
-      <path d="M10 8 L10 24 L24 16 Z" fill="white"/>
-    </svg>
+    <img src="/img/norva-app-icon.png" alt="Norva">
     Norva
   </div>
 
   <!-- Main approval card -->
   <div class="card" id="card-approve">
-    <h1>Approve Pairing</h1>
-    <p class="subtitle">A device wants to connect to this Norva hub.</p>
+    <h1>Approve pairing</h1>
+    <p class="subtitle">A screen wants to join your Norva ecosystem.</p>
 
-    <div class="code-label">Pairing Code</div>
+    <div class="code-label">Pairing code</div>
     <div class="pair-code" id="display-code">——</div>
 
     <div class="device-row">
@@ -183,10 +187,10 @@
     </div>
 
     <p class="login-note" id="login-note" style="display:none">
-      You are not logged in. <a href="/login.html" id="login-link">Log in</a> to approve this pairing.
+      You are not signed in. <a href="/login.html" id="login-link">Sign in</a> to approve this pairing.
     </p>
 
-    <button class="btn btn-primary" id="btn-approve">Approve</button>
+    <button class="btn btn-primary" id="btn-approve">Approve screen</button>
     <button class="btn btn-ghost"   id="btn-deny">Deny</button>
 
     <div class="status" id="status-msg"></div>
