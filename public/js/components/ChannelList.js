@@ -109,6 +109,7 @@ class ChannelList {
      */
     getProxiedImageUrl(url) {
         if (!url || url.length === 0) return '/img/placeholder.png';
+        if (window.API?.isCloudMode?.()) return url;
         // Only proxy if we're on HTTPS and the image is HTTP
         if (window.location.protocol === 'https:' && url.startsWith('http://')) {
             return `/api/proxy/image?url=${encodeURIComponent(url)}`;
