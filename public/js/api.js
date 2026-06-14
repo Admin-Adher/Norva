@@ -458,9 +458,11 @@ const CloudAdapter = (() => {
                 const type = query.get('type') || xtreamMatch[4] || 'live';
                 const container = query.get('container') || (type === 'live' ? 'm3u8' : 'mp4');
                 const isVodPlayback = type === 'movie' || type === 'series';
-                const preferredMode = localStorage.getItem('norva-cloud-playback-mode') || (isVodPlayback ? 'transcode' : 'relay');
+                const requestedCloudMode = localStorage.getItem('norva-cloud-playback-mode') || '';
+                const forcedMode = query.get('mode') || '';
+                const preferredMode = forcedMode || (isVodPlayback ? 'transcode' : (requestedCloudMode || 'relay'));
                 const needsGateway = requiresGatewayForContainer(type, container);
-                const mode = ((isVodPlayback || needsGateway) && preferredMode !== 'direct') ? 'transcode' : preferredMode;
+                const mode = forcedMode || (((isVodPlayback || needsGateway) && preferredMode !== 'direct') ? 'transcode' : preferredMode);
                 const cloudSourceId = await resolveSourceId(sourceId);
                 const baseSession = {
                     sourceId: cloudSourceId,
@@ -885,8 +887,11 @@ const API = {
             seriesInfo: (sourceId, seriesId) =>
                 API.request('GET', `/proxy/xtream/${sourceId}/series_info?series_id=${seriesId}`),
             shortEpg: (sourceId, streamId) => API.request('GET', `/proxy/xtream/${sourceId}/short_epg?stream_id=${streamId}`),
-            getStreamUrl: (sourceId, streamId, type = 'live', container = 'm3u8') =>
-                API.request('GET', `/proxy/xtream/${sourceId}/stream/${streamId}/${type}?container=${container}`)
+            getStreamUrl: (sourceId, streamId, type = 'live', container = 'm3u8', options = {}) => {
+                const params = new URLSearchParams({ container });
+                if (options.mode) params.set('mode', options.mode);
+                return API.request('GET', `/proxy/xtream/${sourceId}/stream/${streamId}/${type}?${params.toString()}`);
+            }
         },
 
         // EPG

@@ -322,6 +322,7 @@ class WatchPage {
         this._failoverInProgress = false;
         this._playbackStatusOkReported = false;
         this._lastFailureMsg = null;
+        this._cloudRelayFallbackTried = false;
 
         // Stop any Live TV playback before starting movie/series
         this.app?.player?.stop?.();
@@ -1840,6 +1841,9 @@ class WatchPage {
         }
 
         this._lastFailureMsg = message;
+        const retriedWithRelay = await this.retryWithCloudRelay(message);
+        if (retriedWithRelay) return;
+
         const retriedWithEncode = await this.retryWithFullVideoTranscode(message);
         if (retriedWithEncode) return;
 
@@ -1856,6 +1860,40 @@ class WatchPage {
 
     isFormatPlaybackError(message) {
         return /MEDIA_ELEMENT_ERROR|MEDIA_ERR_DECODE|Format error|decode|bufferAppendError|fragParsingError|sourceBuffer|appendBuffer/i.test(message || '');
+    }
+
+    async retryWithCloudRelay(message) {
+        if (!this.isCloudPlaybackMode()) return false;
+        if (this._cloudRelayFallbackTried) return false;
+        if (!this.isFormatPlaybackError(message)) return false;
+        if (!this.content?.sourceId || !this.content?.id) return false;
+
+        this._cloudRelayFallbackTried = true;
+        console.warn('[WatchPage] Gateway media append failed. Retrying through Relay.');
+        this.hidePlaybackError();
+        this.showLoading();
+        this.updateTranscodeStatus('remuxing', 'Norva Relay');
+
+        try {
+            const result = await API.proxy.xtream.getStreamUrl(
+                this.content.sourceId,
+                this.content.id,
+                this.content.type === 'series' ? 'series' : 'movie',
+                this.containerExtension || 'mp4',
+                { mode: 'relay' }
+            );
+
+            if (!result?.url) return false;
+            this.content.cloudPlaybackSessionId = result.sessionId || null;
+            await this.loadVideo(result.url, {
+                cloudPlaybackSessionId: result.sessionId,
+                playbackAttemptId: this._playbackAttemptId
+            });
+            return true;
+        } catch (error) {
+            console.warn('[WatchPage] Relay fallback failed:', error?.message || error);
+            return false;
+        }
     }
 
     async retryWithFullVideoTranscode(message) {
