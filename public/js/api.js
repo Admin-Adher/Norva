@@ -456,8 +456,11 @@ const CloudAdapter = (() => {
             if (action === 'short_epg') return { epg_listings: [] };
             if (action === 'stream' && streamId) {
                 const type = query.get('type') || xtreamMatch[4] || 'live';
-                const container = query.get('container') || (type === 'live' ? 'm3u8' : 'mp4');
                 const isVodPlayback = type === 'movie' || type === 'series';
+                const requestedContainer = query.get('container') || (type === 'live' ? 'm3u8' : 'mp4');
+                const container = (isVodPlayback && (!requestedContainer || requestedContainer === 'm3u8'))
+                    ? 'mp4'
+                    : requestedContainer;
                 const requestedCloudMode = localStorage.getItem('norva-cloud-playback-mode') || '';
                 const forcedMode = query.get('mode') || '';
                 const preferredMode = forcedMode || (isVodPlayback ? 'transcode' : (requestedCloudMode || 'relay'));

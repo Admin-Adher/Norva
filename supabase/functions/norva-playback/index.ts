@@ -138,9 +138,10 @@ async function createPlaybackSession(
   const itemId = stringOr(body.itemId ?? body.item_id, "");
   let targetUrl = stringOr(body.targetUrl ?? body.target_url ?? body.url, "");
   const requestedMode = stringOr(body.mode, "auto");
+  const requestedPlaybackHint = recordOrEmpty(body.playbackHint ?? body.playback_hint);
 
   if (!targetUrl && sourceId && itemType && itemId) {
-    targetUrl = await resolvePlaybackTarget(sourceId, itemType, itemId, userId, db);
+    targetUrl = await resolvePlaybackTarget(sourceId, itemType, itemId, userId, db, requestedPlaybackHint);
   }
   if (!itemType || !itemId || !targetUrl) {
     throw new HttpError(400, "itemType, itemId and targetUrl are required");
@@ -168,7 +169,7 @@ async function createPlaybackSession(
       status: mode === "transcode" ? "pending" : "ready",
       target_url_hash: targetUrlHash,
       stream_mime: stringOrNull(body.streamMime ?? body.stream_mime),
-      playback_hint: recordOrEmpty(body.playbackHint ?? body.playback_hint),
+      playback_hint: requestedPlaybackHint,
       expires_at: expiresAt,
     })
     .select("*")
@@ -337,6 +338,7 @@ async function resolvePlaybackTarget(
   itemId: string,
   userId: string,
   db: SupabaseClient,
+  requestHint: JsonRecord = {},
 ) {
   const { data: item, error } = await db
     .from("cloud_media_items")
@@ -367,13 +369,15 @@ async function resolvePlaybackTarget(
 
   if (hint.sourceType === "xtream") {
     const sourceConfig = await loadSourceConfig(sourceId, userId, db);
+    const requestContainer = stringOrNull(requestHint.container);
+    const storedContainer = stringOr(hint.container, "m3u8");
     return xtreamStreamUrl({
       serverUrl: stringOr(sourceConfig.serverUrl, ""),
       username: stringOr(sourceConfig.username, ""),
       password: stringOr(sourceConfig.password, ""),
       streamType: stringOr(hint.streamType, "live"),
       streamId: stringOr(hint.streamId, ""),
-      container: stringOr(hint.container, "m3u8"),
+      container: requestContainer || storedContainer,
     });
   }
 

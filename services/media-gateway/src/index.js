@@ -23,6 +23,7 @@ const FFMPEG_USER_AGENT = process.env.FFMPEG_USER_AGENT ||
 const MAX_LOG_TAIL = 12000;
 
 const sessions = new Map();
+const lastFailures = [];
 
 app.disable('x-powered-by');
 app.use(express.json({ limit: '1mb' }));
@@ -34,9 +35,10 @@ app.get('/health', (req, res) => {
     res.json({
         ok: true,
         service: 'norva-media-gateway',
-        version: 10,
+        version: 11,
         activeSessions: activeSessionCount(),
         totalSessions: sessions.size,
+        lastFailures: lastFailures.slice(-3),
         time: new Date().toISOString()
     });
 });
@@ -91,6 +93,7 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             if (session.status === 'starting') session.status = 'ready';
         } catch (err) {
             const detail = session.lastError || err.message || 'Playlist was not generated';
+            rememberFailure(session, detail);
             await stopSession(session);
             return res.status(502).json({
                 error: 'Failed to start media session',
@@ -445,6 +448,19 @@ function segmentContentType(file) {
 
 function appendLogTail(session, text) {
     session.logTail = `${session.logTail || ''}${text}`.slice(-MAX_LOG_TAIL);
+}
+
+function rememberFailure(session, detail) {
+    lastFailures.push({
+        id: session.id,
+        playbackSessionId: session.playbackSessionId,
+        mode: session.mode,
+        status: session.status,
+        detail: String(detail || '').slice(0, 1000),
+        logTail: String(session.logTail || '').slice(-2000),
+        time: new Date().toISOString()
+    });
+    while (lastFailures.length > 10) lastFailures.shift();
 }
 
 function rewritePlaylistSegments(playlist, token) {
