@@ -2,12 +2,12 @@
   "redirects": [
     {
       "source": "/",
-      "destination": "https://norva-eight.vercel.app/",
+      "destination": "https://norva-eight.vercel.app/?mobile=1",
       "permanent": false
     },
     {
       "source": "/index.html",
-      "destination": "https://norva-eight.vercel.app/",
+      "destination": "https://norva-eight.vercel.app/?mobile=1",
       "permanent": false
     },
     {

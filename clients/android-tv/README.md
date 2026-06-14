@@ -3,7 +3,13 @@
 This is the Android TV / Google TV app for Norva.
 
 The recommended first-run flow is to pair the TV with a Norva Account. The TV
-then becomes a trusted Norva screen for remote playback commands.
+does not ask users to type an email and password with the remote as the primary
+path: it shows a pairing code, the user signs in or creates the account on a
+phone/computer, approves the code, then the TV opens Norva Watch.
+
+After pairing, the TV is a trusted Norva screen. It can browse the cloud app and
+receive cloud playback commands, while playback is handed to the native Android
+player with the media metadata attached when the cloud command provides it.
 
 Advanced local modes remain available from the TV menu:
 

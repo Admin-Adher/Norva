@@ -293,6 +293,12 @@ public class MainActivity extends Activity {
         public void playVideo(final String url, final String title) {
             MainActivity.this.openPlayer(url, title, null, null, null);
         }
+
+        @android.webkit.JavascriptInterface
+        public void playVideoWithMeta(final String url, final String title, final String sourceId,
+                                      final String itemType, final String itemId) {
+            MainActivity.this.openPlayer(url, title, sourceId, itemType, itemId);
+        }
     }
 
     private void openPlayer(final String url, final String title, final String sourceId,

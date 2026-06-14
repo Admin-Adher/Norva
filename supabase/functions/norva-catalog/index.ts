@@ -189,12 +189,24 @@ async function listLiveLogicalChannels(url: URL, userId: string) {
   const sourceId = url.searchParams.get("sourceId");
   const country = url.searchParams.get("country") || "FR";
   const categoryId = url.searchParams.get("categoryId");
+  const search = stringOrNull(url.searchParams.get("q"));
   const includeVariants = boolParam(url.searchParams.get("includeVariants"));
-  const materialized = await listMaterializedLiveLogicalChannels(url, userId, { sourceId, country, categoryId, includeVariants });
+  const materialized = await listMaterializedLiveLogicalChannels(url, userId, { sourceId, country, categoryId, search, includeVariants });
   if (materialized) return materialized;
   const maxRows = boundedInt(url.searchParams.get("maxRows"), LIVE_MAX_ROWS, 1000, LIVE_MAX_ROWS);
   const rows = await listLiveRows(userId, sourceId, maxRows);
-  return { ...buildLiveCatalog(rows, { country, sourceId, categoryId, includeVariants }), materialized: false };
+  const catalog = buildLiveCatalog(rows, { country, sourceId, categoryId, includeVariants });
+  if (search) {
+    const needle = normalizeSearchText(search);
+    catalog.channels = (catalog.channels || []).filter((channel) => {
+      const title = normalizeSearchText(stringOr(channel.title ?? channel.name, ""));
+      const group = normalizeSearchText(stringOr(channel.category_name ?? channel.group_name ?? channel.section, ""));
+      return title.includes(needle) || group.includes(needle);
+    });
+    catalog.count = catalog.channels.length;
+    catalog.groups = liveGroupsFromChannels(catalog.channels);
+  }
+  return { ...catalog, materialized: false };
 }
 
 async function listLiveChannelVariants(url: URL, userId: string, logicalId: string) {
@@ -217,21 +229,33 @@ async function listLiveChannelVariants(url: URL, userId: string, logicalId: stri
 async function listMaterializedLiveLogicalChannels(
   url: URL,
   userId: string,
-  options: { sourceId: string | null; country: string; categoryId: string | null; includeVariants: boolean },
+  options: { sourceId: string | null; country: string; categoryId: string | null; search: string | null; includeVariants: boolean },
 ) {
   try {
+    const limit = boundedInt(url.searchParams.get("limit"), LIVE_PAGE_SIZE, 1, LIVE_PAGE_SIZE);
+    const offset = boundedInt(url.searchParams.get("offset"), 0, 0, 1_000_000);
     let query = db
       .from("cloud_live_logical_channels")
-      .select("*")
+      .select("*", { count: "exact" })
       .eq("user_id", userId)
       .order("section", { ascending: true })
       .order("lcn", { ascending: true, nullsFirst: false })
-      .order("title", { ascending: true });
+      .order("title", { ascending: true })
+      .range(offset, offset + limit - 1);
 
     if (options.sourceId) query = query.eq("source_id", options.sourceId);
     if (options.categoryId) query = query.eq("category_id", options.categoryId);
+    if (options.search) {
+      const like = escapePostgrestLike(options.search);
+      query = query.or([
+        `title.ilike.%${like}%`,
+        `logical_key.ilike.%${like}%`,
+        `category_name.ilike.%${like}%`,
+        `section.ilike.%${like}%`,
+      ].join(","));
+    }
 
-    const { data, error } = await query;
+    const { data, count, error } = await query;
     if (error) {
       if (isMissingMaterialization(error)) return null;
       throwDb(error, "Unable to list materialized live catalog");
@@ -257,12 +281,29 @@ async function listMaterializedLiveLogicalChannels(
       channels,
       groups: liveGroupsFromChannels(channels),
       count: channels.length,
+      total: count ?? channels.length,
+      limit,
+      offset,
+      hasMore: typeof count === "number" ? offset + limit < count : rows.length === limit,
       rawCount: null,
     };
   } catch (error) {
     if (isMissingMaterialization(error)) return null;
     throw error;
   }
+}
+
+function normalizeSearchText(value: string) {
+  return value
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function escapePostgrestLike(value: string) {
+  return value.replace(/[%_,()]/g, (char) => `\\${char}`);
 }
 
 async function listMaterializedLiveChannelVariants(userId: string, logicalId: string, sourceId: string | null, country: string) {

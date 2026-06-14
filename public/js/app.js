@@ -176,6 +176,10 @@ class App {
 
     hasCloudSession() {
         try {
+            if (window.NorvaCloud?.deviceToken || localStorage.getItem('norva-cloud-device-token')) {
+                return true;
+            }
+
             const session = JSON.parse(localStorage.getItem('norva-cloud-session') || 'null');
             const now = Math.floor(Date.now() / 1000);
             return Boolean(

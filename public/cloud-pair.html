@@ -61,6 +61,29 @@
             padding: clamp(24px, 5vw, 42px);
             box-shadow: 0 28px 80px rgba(0, 0, 0, 0.34);
         }
+        .steps {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 10px;
+            margin: 0 auto 18px;
+            max-width: 760px;
+            text-align: left;
+        }
+        .step {
+            background: rgba(17, 21, 29, 0.62);
+            border: 1px solid rgba(148, 163, 184, 0.16);
+            border-radius: 8px;
+            padding: 14px;
+            color: var(--muted);
+            font-size: 14px;
+            line-height: 1.45;
+        }
+        .step strong {
+            display: block;
+            color: var(--text);
+            font-size: 15px;
+            margin-bottom: 4px;
+        }
         .code {
             min-height: 96px;
             display: grid;
@@ -115,13 +138,23 @@
             font-size: 13px;
             margin-top: 12px;
         }
+        @media (max-width: 720px) {
+            body { padding: 24px; }
+            .steps { grid-template-columns: 1fr; }
+        }
     </style>
 </head>
 <body>
     <main class="screen">
         <img class="logo" src="/img/norva-app-icon.png" alt="Norva">
-        <h1>Pair this screen</h1>
-        <p class="subtitle">Open Norva on your phone or computer, sign in, then approve this code.</p>
+        <h1 id="page-title">Connect this TV to Norva</h1>
+        <p class="subtitle" id="page-subtitle">Use your phone or computer to sign in or create your Norva Account. This TV will open the Norva app automatically after approval.</p>
+
+        <section class="steps" aria-label="Pairing steps">
+            <div class="step"><strong>1. Open Norva Account</strong>Use your phone, tablet or computer.</div>
+            <div class="step"><strong>2. Enter this code</strong>Approve the trusted screen from your account.</div>
+            <div class="step"><strong>3. Start watching</strong>The TV opens Norva Watch with your cloud library.</div>
+        </section>
 
         <section class="code-box" aria-live="polite">
             <div class="code" id="code">...</div>
@@ -250,9 +283,16 @@
                     const url = payload.playbackUrl || payload.url || payload.streamUrl;
                     const title = payload.title || payload.name || 'Norva';
                     if (!url) throw new Error('Missing playback URL');
-                    if (window.NorvaTVCloud && typeof window.NorvaTVCloud.playVideo === 'function') {
+                    const sourceId = payload.sourceId || payload.source_id || payload.cloudSourceId || '';
+                    const itemType = payload.itemType || payload.item_type || payload.type || '';
+                    const itemId = payload.itemId || payload.item_id || payload.streamId || payload.stream_id || payload.id || '';
+                    if (window.NorvaTVCloud?.playVideoWithMeta && (sourceId || itemType || itemId)) {
+                        window.NorvaTVCloud.playVideoWithMeta(url, title, String(sourceId), String(itemType), String(itemId));
+                    } else if (window.NorvaTVCloud?.playVideo) {
                         window.NorvaTVCloud.playVideo(url, title);
-                    } else if (window.NodeCastNative && typeof window.NodeCastNative.playVideo === 'function') {
+                    } else if (window.NodeCastNative?.playVideoWithMeta && (sourceId || itemType || itemId)) {
+                        window.NodeCastNative.playVideoWithMeta(url, title, String(sourceId), String(itemType), String(itemId));
+                    } else if (window.NodeCastNative?.playVideo) {
                         window.NodeCastNative.playVideo(url, title);
                     } else {
                         location.href = url;

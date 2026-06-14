@@ -1,7 +1,10 @@
 # Norva TV — Android Phone App
 
 A thin WebView wrapper for phones (portrait mode). The recommended flow opens
-Norva Account first; the local connector remains available as an advanced mode.
+Norva Account first, then the same Norva Watch web cloud app used in the browser
+(`https://norva-eight.vercel.app/?mobile=1#home`). This includes Home, Live TV,
+Movies, Series, Watch playback, Account and Settings. The local connector remains
+available as an advanced mode.
 It also handles `norva://pair` deep links for older local-connector pairing URLs.
 
 ## Prerequisites

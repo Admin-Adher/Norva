@@ -11,7 +11,11 @@
   <link rel="apple-touch-icon" href="/icon-192.png" />
   <title>Norva</title>
   <script>
-    window.location.replace('https://norva-eight.vercel.app/' + window.location.search + window.location.hash);
+    const targetHash = window.location.hash || '#home';
+    const targetQuery = window.location.search
+      ? window.location.search + '&mobile=1'
+      : '?mobile=1';
+    window.location.replace('https://norva-eight.vercel.app/' + targetQuery + targetHash);
   </script>
   <script>
     (function () {
@@ -620,6 +624,9 @@
 
   function hasCloudSession() {
     try {
+      if (window.NorvaCloud?.deviceToken || localStorage.getItem('norva-cloud-device-token')) {
+        return true;
+      }
       const session = JSON.parse(localStorage.getItem('norva-cloud-session') || 'null');
       const now = Math.floor(Date.now() / 1000);
       return Boolean(

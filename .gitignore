@@ -30,3 +30,5 @@ supabase/.temp/
 *.pak
 *.bin
 *.dat
+
+.vercel

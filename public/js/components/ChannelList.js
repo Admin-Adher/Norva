@@ -48,6 +48,9 @@ class ChannelList {
         this.renderedChannels = [];
         this._lastPlaybackRefreshAt = new Map();
         this._playbackScanRunId = 0;
+        this.remoteSearchCache = new Map();
+        this.remoteSearchSeq = 0;
+        this.remoteSearchInFlight = null;
 
         this.loadCollapsedState();
         this.init();
@@ -1052,6 +1055,7 @@ class ChannelList {
             this.zeroState = false;
             this.searchMode = true;
             this.renderSearchResults(term);
+            this.scheduleRemoteSearch(term);
         } else if (document.activeElement === this.searchInput) {
             this.showZeroState();
         } else {
@@ -1126,6 +1130,110 @@ class ChannelList {
         const groups = [...groupCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8);
 
         return { results, groups };
+    }
+
+    shouldUseRemoteSearch(term) {
+        return term && term.trim().length >= 2 && window.API?.isCloudMode?.();
+    }
+
+    getRemoteSearchSources() {
+        const value = this.sourceSelect?.value || '';
+        if (value) {
+            const [type, id] = value.split(':');
+            const source = this.sources.find(s => String(s.id) === String(id) && s.type === type);
+            return source ? [source] : [];
+        }
+        return this.sources.filter(source => source.enabled && (source.type === 'xtream' || source.type === 'm3u'));
+    }
+
+    scheduleRemoteSearch(term) {
+        if (!this.shouldUseRemoteSearch(term)) return;
+        const seq = ++this.remoteSearchSeq;
+        clearTimeout(this.remoteSearchInFlight);
+        this.remoteSearchInFlight = setTimeout(() => {
+            this.loadRemoteSearchResults(term, seq).catch(err => {
+                console.warn('[ChannelList] Remote live search failed:', err);
+            });
+        }, 220);
+    }
+
+    async loadRemoteSearchResults(term, seq) {
+        if (seq !== this.remoteSearchSeq) return;
+        const sources = this.getRemoteSearchSources();
+        if (!sources.length) return;
+
+        let added = 0;
+        for (const source of sources) {
+            const key = `${source.type}:${source.id}:${this.normalizeSearchText(term)}`;
+            let streams = this.remoteSearchCache.get(key);
+            if (!streams) {
+                streams = await API.proxy.xtream.liveStreams(source.id, null, {
+                    q: term,
+                    limit: 80
+                });
+                this.remoteSearchCache.set(key, streams || []);
+            }
+            if (seq !== this.remoteSearchSeq || this.searchInput.value.trim() !== term) return;
+            added += this.mergeRemoteSearchChannels(source, streams || []);
+        }
+
+        if (!added) return;
+        this._indexedChannels = null;
+        if (this.searchMode && this.searchInput.value.trim() === term) {
+            this.renderSearchResults(term);
+        }
+        window.app?.liveGuideFusion?.render();
+    }
+
+    mergeRemoteSearchChannels(source, streams = []) {
+        const existing = new Set(this.channels.map(channel =>
+            `${channel.sourceId}:${channel.streamId || channel.stream_id || channel.id}`
+        ));
+        let added = 0;
+        for (const stream of streams) {
+            const streamId = stream.stream_id ?? stream.streamId;
+            if (!streamId) continue;
+            const sourceId = stream.sourceId || source.id;
+            const uniqueKey = `${sourceId}:${streamId}`;
+            if (existing.has(uniqueKey)) continue;
+
+            const groupTitle = stream.category_name
+                || stream.groupTitle
+                || stream._displayGroupTitle
+                || stream._sourceGroupTitle
+                || 'Uncategorized';
+            const channel = {
+                ...stream,
+                id: stream.id || `${source.type}_${sourceId}_${streamId}`,
+                streamId,
+                stream_id: streamId,
+                name: stream.name || stream.title || `Channel ${streamId}`,
+                num: stream.num ?? null,
+                tvgId: stream.epg_channel_id || stream.tvgId,
+                tvgLogo: stream.stream_icon || stream.tvgLogo,
+                groupId: `${source.type}_${sourceId}_${stream.category_id || groupTitle}`,
+                groupTitle,
+                sourceId,
+                sourceType: source.type,
+                playbackStatus: stream.playback_status || stream.playbackStatus || 'unknown',
+                playbackMode: stream.playback_mode || stream.playbackMode || 'unknown',
+                playbackCheckedAt: stream.playback_checked_at || stream.playbackCheckedAt || null,
+                playbackModeCheckedAt: stream.playback_mode_checked_at || stream.playbackModeCheckedAt || null,
+                qualityGroup: stream.qualityGroup || null,
+                currentVariant: stream.currentVariant || null,
+                cloudLogicalId: stream.cloudLogicalId || null,
+                cloudSourceId: stream.cloudSourceId || null,
+                _logicalChannel: stream._logicalChannel || false,
+                _logicalKind: stream._logicalKind || 'search',
+                _variantCount: stream._variantCount || stream.qualityGroup?.variants?.length || 1,
+                _sourceGroupTitle: stream._sourceGroupTitle || groupTitle,
+                _displayGroupTitle: stream._displayGroupTitle || groupTitle
+            };
+            this.channels.push(channel);
+            existing.add(uniqueKey);
+            added += 1;
+        }
+        return added;
     }
 
     // === EPG "on now" index (rebuilt at most once a minute) ===

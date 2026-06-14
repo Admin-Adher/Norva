@@ -287,12 +287,15 @@ const CloudAdapter = (() => {
         }));
     }
 
-    async function getLiveLogicalCatalog({ sourceId, categoryId, country = 'FR', includeVariants = true } = {}) {
+    async function getLiveLogicalCatalog({ sourceId, categoryId, country = 'FR', q = '', limit = '', offset = '', includeVariants = true } = {}) {
         const cloudSourceId = sourceId ? await resolveSourceId(sourceId) : '';
         const cacheKey = JSON.stringify({
             cloudSourceId,
             categoryId: categoryId || '',
             country,
+            q: q || '',
+            limit: limit || '',
+            offset: offset || '',
             includeVariants: includeVariants ? 1 : 0
         });
         const cached = liveCatalogCache.get(cacheKey);
@@ -302,6 +305,9 @@ const CloudAdapter = (() => {
             sourceId: cloudSourceId,
             categoryId: categoryId || '',
             country,
+            q: q || '',
+            limit: limit || '',
+            offset: offset || '',
             includeVariants: includeVariants ? '1' : ''
         });
         liveCatalogCache.set(cacheKey, {
@@ -321,8 +327,8 @@ const CloudAdapter = (() => {
         }));
     }
 
-    async function listLiveLogicalChannels({ sourceId, categoryId, country = 'FR' } = {}) {
-        const payload = await getLiveLogicalCatalog({ sourceId, categoryId, country, includeVariants: true });
+    async function listLiveLogicalChannels({ sourceId, categoryId, country = 'FR', q = '', limit = '', offset = '' } = {}) {
+        const payload = await getLiveLogicalCatalog({ sourceId, categoryId, country, q, limit, offset, includeVariants: true });
         return (payload.channels || []).map(channel => normalizeLogicalLiveChannel(channel, sourceId));
     }
 
@@ -592,12 +598,18 @@ const CloudAdapter = (() => {
                 const categoryId = query.get('category_id');
                 if (type === 'live') {
                     try {
-                        return await listLiveLogicalChannels({ sourceId, categoryId });
+                        return await listLiveLogicalChannels({
+                            sourceId,
+                            categoryId,
+                            q: query.get('q') || '',
+                            limit: query.get('limit') || '',
+                            offset: query.get('offset') || ''
+                        });
                     } catch (err) {
                         console.warn('[Cloud] Logical live catalog unavailable, falling back to raw media items:', err);
                     }
                 }
-                const items = await listAllMedia({ sourceId, type });
+                const items = await listAllMedia({ sourceId, type, q: query.get('q') || '' });
                 return categoryId ? items.filter(item => String(item.category_id) === String(categoryId)) : items;
             }
             if (action === 'series_info') {
@@ -1044,6 +1056,9 @@ const API = {
                 const params = [];
                 if (categoryId) params.push(`category_id=${categoryId}`);
                 if (options.includeHidden) params.push('includeHidden=true');
+                if (options.q) params.push(`q=${encodeURIComponent(options.q)}`);
+                if (options.limit) params.push(`limit=${encodeURIComponent(options.limit)}`);
+                if (options.offset) params.push(`offset=${encodeURIComponent(options.offset)}`);
                 const query = params.length ? `?${params.join('&')}` : '';
                 return API.request('GET', `/proxy/xtream/${sourceId}/live_streams${query}`);
             },
