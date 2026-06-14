@@ -1,5 +1,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
+import { refreshMaterializedLiveCatalog } from "../_shared/live-materialization.ts";
+import type { LiveCatalogItem } from "../_shared/live-catalog.ts";
 
 type JsonRecord = Record<string, unknown>;
 type CloudUser = { id: string; email?: string };
@@ -104,7 +106,8 @@ async function route(
       body: {
         ok: true,
         service: "norva-cloud",
-        version: 7,
+        version: 8,
+        liveMaterialization: true,
         relayConfigured: Boolean(runtimeConfig.relayBaseUrl && runtimeConfig.relayTokenSecret),
         gatewayConfigured: Boolean(runtimeConfig.mediaGatewayUrl && runtimeConfig.mediaGatewayToken),
         cloudSourceConfigured: Boolean(runtimeConfig.sourceConfigKey),
@@ -590,7 +593,8 @@ async function syncXtreamSource(sourceId: string, userId: string, config: JsonRe
     ...xtreamRows(sourceId, userId, Array.isArray(series) ? series : [], "series", seriesCategoryMap),
   ];
 
-  await replaceSourceItems(sourceId, userId, rows, db);
+  const savedRows = await replaceSourceItems(sourceId, userId, rows, db);
+  const liveCatalog = await refreshMaterializedLiveCatalog(db, { sourceId, userId, rows: savedRows });
   return {
     live: Array.isArray(live) ? live.length : 0,
     movies: Array.isArray(vod) ? vod.length : 0,
@@ -599,6 +603,7 @@ async function syncXtreamSource(sourceId: string, userId: string, config: JsonRe
     movieCategories: vodCategoryMap.size,
     seriesCategories: seriesCategoryMap.size,
     total: rows.length,
+    liveCatalog,
   };
 }
 
@@ -678,20 +683,25 @@ async function syncM3uSource(sourceId: string, userId: string, config: JsonRecor
     available: true,
   })));
 
-  await replaceSourceItems(sourceId, userId, rows, db);
-  return { live: rows.length, total: rows.length };
+  const savedRows = await replaceSourceItems(sourceId, userId, rows, db);
+  const liveCatalog = await refreshMaterializedLiveCatalog(db, { sourceId, userId, rows: savedRows });
+  return { live: rows.length, total: rows.length, liveCatalog };
 }
 
-async function replaceSourceItems(sourceId: string, userId: string, rows: JsonRecord[], db: SupabaseClient) {
+async function replaceSourceItems(sourceId: string, userId: string, rows: JsonRecord[], db: SupabaseClient): Promise<LiveCatalogItem[]> {
+  const savedRows: LiveCatalogItem[] = [];
   await db.from("cloud_media_items").delete().eq("source_id", sourceId).eq("user_id", userId);
   for (let index = 0; index < rows.length; index += 500) {
     const chunk = rows.slice(index, index + 500);
     if (!chunk.length) continue;
-    const { error } = await db
+    const { data, error } = await db
       .from("cloud_media_items")
-      .upsert(chunk, { onConflict: "source_id,item_type,external_id" });
+      .upsert(chunk, { onConflict: "source_id,item_type,external_id" })
+      .select("id,source_id,item_type,external_id,parent_external_id,title,subtitle,poster_url,metadata,playback_hint,available");
     if (error) throwDb(error, "Unable to save cloud media items");
+    if (Array.isArray(data)) savedRows.push(...data as LiveCatalogItem[]);
   }
+  return savedRows;
 }
 
 async function listMediaItems(url: URL, userId: string, db: SupabaseClient) {

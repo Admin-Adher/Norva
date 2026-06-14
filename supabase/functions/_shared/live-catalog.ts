@@ -36,6 +36,8 @@ type LineupEntry = {
 
 type LiveVariant = {
   id: string;
+  media_item_id: string | null;
+  mediaItemId: string | null;
   label: string;
   rank: number;
   healthRank: number;
@@ -333,6 +335,8 @@ function makeLogicalChannel(bucket: LiveBucket, includeVariants: boolean): JsonR
 function summaryVariant(variant: LiveVariant) {
   return {
     id: variant.id,
+    media_item_id: variant.media_item_id,
+    mediaItemId: variant.mediaItemId,
     label: variant.label,
     rank: variant.rank,
     healthRank: variant.healthRank,
@@ -457,6 +461,8 @@ function variantFrom(item: LiveCatalogItem, parsed: ParsedName): LiveVariant {
   const container = String(playbackHint.container || metadata.container || "m3u8");
   return {
     id: `${sourceId}:${streamId}`,
+    media_item_id: stringOrNull(item.id),
+    mediaItemId: stringOrNull(item.id),
     label,
     rank: rankOf(label),
     healthRank: healthRank(item),

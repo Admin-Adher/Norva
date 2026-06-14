@@ -1,6 +1,8 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { buildLiveCatalog, findLiveChannel, type LiveCatalogItem } from "../_shared/live-catalog.ts";
 
+type JsonRecord = Record<string, unknown>;
+
 class HttpError extends Error {
   status: number;
   details?: unknown;
@@ -48,7 +50,7 @@ Deno.serve(async (req) => {
     const segments = routeSegments(url.pathname);
 
     if (req.method === "GET" && segments[0] === "health") {
-      return json(req, { ok: true, service: "norva-catalog", version: 3, liveContract: "norva.live.logical.v1" });
+      return json(req, { ok: true, service: "norva-catalog", version: 4, liveContract: "norva.live.logical.v1", materializedLive: true });
     }
 
     if (req.method === "GET" && isLiveLogicalChannelsRoute(segments)) {
@@ -188,23 +190,237 @@ async function listLiveLogicalChannels(url: URL, userId: string) {
   const country = url.searchParams.get("country") || "FR";
   const categoryId = url.searchParams.get("categoryId");
   const includeVariants = boolParam(url.searchParams.get("includeVariants"));
+  const materialized = await listMaterializedLiveLogicalChannels(url, userId, { sourceId, country, categoryId, includeVariants });
+  if (materialized) return materialized;
   const maxRows = boundedInt(url.searchParams.get("maxRows"), LIVE_MAX_ROWS, 1000, LIVE_MAX_ROWS);
   const rows = await listLiveRows(userId, sourceId, maxRows);
-  return buildLiveCatalog(rows, { country, sourceId, categoryId, includeVariants });
+  return { ...buildLiveCatalog(rows, { country, sourceId, categoryId, includeVariants }), materialized: false };
 }
 
 async function listLiveChannelVariants(url: URL, userId: string, logicalId: string) {
   const sourceId = url.searchParams.get("sourceId");
   const country = url.searchParams.get("country") || "FR";
+  const materialized = await listMaterializedLiveChannelVariants(userId, logicalId, sourceId, country);
+  if (materialized) return materialized;
   const rows = await listLiveRows(userId, sourceId, boundedInt(url.searchParams.get("maxRows"), LIVE_MAX_ROWS, 1000, LIVE_MAX_ROWS));
   const catalog = buildLiveCatalog(rows, { country, sourceId, includeVariants: true });
   const channel = findLiveChannel(catalog, logicalId);
   if (!channel) throw new HttpError(404, "Logical channel not found");
   return {
     contract: "norva.live.logical.v1",
+    materialized: false,
     channel,
     variants: Array.isArray(channel.variants) ? channel.variants : [],
   };
+}
+
+async function listMaterializedLiveLogicalChannels(
+  url: URL,
+  userId: string,
+  options: { sourceId: string | null; country: string; categoryId: string | null; includeVariants: boolean },
+) {
+  try {
+    let query = db
+      .from("cloud_live_logical_channels")
+      .select("*")
+      .eq("user_id", userId)
+      .order("section", { ascending: true })
+      .order("lcn", { ascending: true, nullsFirst: false })
+      .order("title", { ascending: true });
+
+    if (options.sourceId) query = query.eq("source_id", options.sourceId);
+    if (options.categoryId) query = query.eq("category_id", options.categoryId);
+
+    const { data, error } = await query;
+    if (error) {
+      if (isMissingMaterialization(error)) return null;
+      throwDb(error, "Unable to list materialized live catalog");
+    }
+    const rows = data ?? [];
+    if (!rows.length) return null;
+
+    let variantsByChannelId = new Map<string, JsonRecord[]>();
+    if (options.includeVariants) {
+      variantsByChannelId = await listMaterializedVariantsByChannelIds(rows.map((row) => String(row.id)));
+    }
+
+    const channels = rows.map((row) => materializedChannel(row, variantsByChannelId.get(String(row.id)) ?? null));
+    return {
+      contract: "norva.live.logical.v1",
+      country: options.country,
+      sourceId: options.sourceId || null,
+      materialized: true,
+      syncedAt: rows.reduce((latest: string | null, row) => {
+        const syncedAt = stringOrNull(row.synced_at);
+        return syncedAt && (!latest || syncedAt > latest) ? syncedAt : latest;
+      }, null),
+      channels,
+      groups: liveGroupsFromChannels(channels),
+      count: channels.length,
+      rawCount: null,
+    };
+  } catch (error) {
+    if (isMissingMaterialization(error)) return null;
+    throw error;
+  }
+}
+
+async function listMaterializedLiveChannelVariants(userId: string, logicalId: string, sourceId: string | null, country: string) {
+  try {
+    let query = db
+      .from("cloud_live_logical_channels")
+      .select("*")
+      .eq("user_id", userId)
+      .eq("logical_id", logicalId);
+    if (sourceId) query = query.eq("source_id", sourceId);
+
+    const { data: channel, error } = await query.maybeSingle();
+    if (error) {
+      if (isMissingMaterialization(error)) return null;
+      throwDb(error, "Unable to load materialized live channel");
+    }
+    if (!channel) return null;
+
+    const { data: variants, error: variantsError } = await db
+      .from("cloud_live_variants")
+      .select("*")
+      .eq("user_id", userId)
+      .eq("logical_channel_id", channel.id)
+      .order("health_rank", { ascending: true })
+      .order("rank", { ascending: true })
+      .order("label", { ascending: true });
+    if (variantsError) throwDb(variantsError, "Unable to load materialized live variants");
+    const normalizedVariants = (variants ?? []).map(materializedVariant);
+    return {
+      contract: "norva.live.logical.v1",
+      country,
+      sourceId: channel.source_id,
+      materialized: true,
+      channel: materializedChannel(channel, variants ?? []),
+      variants: normalizedVariants,
+    };
+  } catch (error) {
+    if (isMissingMaterialization(error)) return null;
+    throw error;
+  }
+}
+
+async function listMaterializedVariantsByChannelIds(channelIds: string[]) {
+  const variantsByChannelId = new Map<string, JsonRecord[]>();
+  for (let index = 0; index < channelIds.length; index += 200) {
+    const chunk = channelIds.slice(index, index + 200);
+    if (!chunk.length) continue;
+    const { data, error } = await db
+      .from("cloud_live_variants")
+      .select("*")
+      .in("logical_channel_id", chunk)
+      .order("health_rank", { ascending: true })
+      .order("rank", { ascending: true })
+      .order("label", { ascending: true });
+    if (error) throwDb(error, "Unable to list materialized live variants");
+    for (const variant of data ?? []) {
+      const id = String(variant.logical_channel_id);
+      const existing = variantsByChannelId.get(id) ?? [];
+      existing.push(variant);
+      variantsByChannelId.set(id, existing);
+    }
+  }
+  return variantsByChannelId;
+}
+
+function materializedChannel(row: JsonRecord, variantRows: JsonRecord[] | null = null) {
+  const defaultVariant = recordOrEmpty(row.default_variant);
+  const variants = Array.isArray(variantRows) ? variantRows.map(materializedVariant) : null;
+  const preview = Array.isArray(row.variant_preview) ? row.variant_preview : [];
+  const channel: JsonRecord = {
+    id: row.logical_id,
+    logical_id: row.logical_id,
+    logical_key: row.logical_key,
+    source_id: row.source_id,
+    sourceId: row.source_id,
+    item_type: "live",
+    type: "live",
+    external_id: defaultVariant.external_id ?? row.default_stream_id,
+    stream_id: defaultVariant.stream_id ?? defaultVariant.streamId ?? row.default_stream_id,
+    streamId: defaultVariant.streamId ?? defaultVariant.stream_id ?? row.default_stream_id,
+    title: row.title,
+    name: row.title,
+    lcn: row.lcn ?? null,
+    num: row.lcn ?? null,
+    section: row.section,
+    category_id: row.category_id,
+    category_name: row.category_name,
+    group_id: row.category_id,
+    group_name: row.category_name,
+    poster_url: row.poster_url,
+    stream_icon: row.stream_icon,
+    variant_count: row.variant_count,
+    variantCount: row.variant_count,
+    variant_preview: preview,
+    default_variant: defaultVariant,
+    defaultVariant,
+    playback_hint: recordOrEmpty(row.playback_hint),
+    playbackHint: recordOrEmpty(row.playback_hint),
+    metadata: {
+      ...recordOrEmpty(row.metadata),
+      logical: true,
+      materialized: true,
+      syncedAt: row.synced_at,
+    },
+  };
+  if (variants) channel.variants = variants;
+  return channel;
+}
+
+function materializedVariant(row: JsonRecord) {
+  return {
+    id: `${row.source_id}:${row.stream_id}`,
+    media_item_id: row.media_item_id ?? null,
+    mediaItemId: row.media_item_id ?? null,
+    label: row.label,
+    rank: row.rank,
+    healthRank: row.health_rank,
+    health_rank: row.health_rank,
+    source_id: row.source_id,
+    sourceId: row.source_id,
+    stream_id: row.stream_id,
+    streamId: row.stream_id,
+    external_id: row.external_id,
+    item_type: "live",
+    raw: row.raw_title ?? row.title,
+    title: row.title,
+    name: row.title,
+    poster_url: row.poster_url,
+    stream_icon: row.stream_icon,
+    category_id: row.category_id,
+    category_name: row.category_name,
+    playback_hint: recordOrEmpty(row.playback_hint),
+    playbackHint: recordOrEmpty(row.playback_hint),
+    metadata: recordOrEmpty(row.metadata),
+    container_extension: row.container_extension,
+  };
+}
+
+function liveGroupsFromChannels(channels: JsonRecord[]) {
+  const groups = new Map<string, JsonRecord>();
+  for (const channel of channels) {
+    const id = String(channel.category_id || "uncategorized");
+    const existing = groups.get(id) ?? {
+      id,
+      category_id: id,
+      name: channel.category_name || id,
+      category_name: channel.category_name || id,
+      priority: id === "primary" ? 1 : id === "regional" ? 2 : id === "multiplex" ? 3 : 20,
+      defaultCollapsed: id !== "primary",
+      count: 0,
+    };
+    existing.count = Number(existing.count || 0) + 1;
+    groups.set(id, existing);
+  }
+  return [...groups.values()].sort((a, b) =>
+    (Number(a.priority || 20) - Number(b.priority || 20)) ||
+    String(a.category_name || a.name).localeCompare(String(b.category_name || b.name), undefined, { sensitivity: "base" })
+  );
 }
 
 async function listLiveRows(userId: string, sourceId: string | null, maxRows: number): Promise<LiveCatalogItem[]> {
@@ -233,6 +449,23 @@ async function listLiveRows(userId: string, sourceId: string | null, maxRows: nu
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function recordOrEmpty(value: unknown): JsonRecord {
+  return isRecord(value) ? value : {};
+}
+
+function stringOrNull(value: unknown) {
+  if (typeof value === "string" && value.trim()) return value.trim();
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  if (typeof value === "boolean") return String(value);
+  return null;
+}
+
+function isMissingMaterialization(error: unknown) {
+  if (!error || typeof error !== "object") return false;
+  const record = error as { code?: string; message?: string };
+  return record.code === "42P01" || String(record.message || "").includes("cloud_live_");
 }
 
 function bearer(req: Request) {

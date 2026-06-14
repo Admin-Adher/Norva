@@ -8,3 +8,6 @@ verify_jwt = false
 
 [functions.norva-playback]
 verify_jwt = false
+
+[functions.norva-source-sync]
+verify_jwt = false
