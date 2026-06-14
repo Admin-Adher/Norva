@@ -251,16 +251,15 @@ class HomePage {
     }
 
     createChannelTile(channel) {
-        const logo = channel.tvgLogo || '/img/placeholder.png';
-        const logoUrl = logo.startsWith('http') ? `/api/proxy/image?url=${encodeURIComponent(logo)}` : logo;
+        const logoUrl = this.resolveImageUrl(channel.tvgLogo || channel.stream_icon || channel.logo, '/img/placeholder.png');
         const name = channel.name || 'Unknown';
 
         return `
             <div class="channel-tile" data-channel-id="${channel.id}" data-source-id="${channel.sourceId}">
                 <div class="tile-logo">
-                    <img src="${logoUrl}" alt="${name}" loading="lazy" onerror="this.onerror=null;this.src='/img/placeholder.png'">
+                    <img src="${this.escapeHtml(logoUrl)}" alt="${this.escapeHtml(name)}" loading="lazy" onerror="this.onerror=null;this.src='/img/placeholder.png'">
                 </div>
-                <div class="tile-name" title="${name}">${name}</div>
+                <div class="tile-name" title="${this.escapeHtml(name)}">${this.escapeHtml(name)}</div>
             </div>
         `;
     }
@@ -406,18 +405,19 @@ class HomePage {
     }
 
     createCard(item) {
-        const { data, progress, duration, item_id } = item;
+        const data = item.data || {};
+        const { progress, duration, item_id } = item;
         const type = item.item_type || item.type;
-        const percent = Math.min(100, Math.round((progress / duration) * 100));
+        const percent = duration > 0 ? Math.min(100, Math.round((progress / duration) * 100)) : 0;
+        const title = item.name || item.title || data.title || 'Unknown Title';
+        const subtitle = data.subtitle || (type === 'movie' ? 'Movie' : 'Series');
+        const posterUrl = this.resolveImageUrl(this.posterFromItem(item), '/img/poster-placeholder.jpg');
 
-        // Proxy the poster if it's an external URL
-        const poster = data.poster || '/img/poster-placeholder.jpg';
-        const posterUrl = poster.startsWith('http') ? `/api/proxy/image?url=${encodeURIComponent(poster)}` : poster;
 
         return `
             <div class="dashboard-card" data-id="${item_id}" data-type="${type}">
                 <div class="card-image">
-                    <img src="${posterUrl}" alt="${data.title || item.name}" loading="lazy" onerror="this.onerror=null;this.src='/img/poster-placeholder.jpg'">
+                    <img src="${this.escapeHtml(posterUrl)}" alt="${this.escapeHtml(title)}" loading="lazy" onerror="this.onerror=null;this.src='/img/poster-placeholder.jpg'">
                     <div class="progress-bar-container">
                         <div class="progress-bar" style="width: ${percent}%"></div>
                     </div>
@@ -426,33 +426,81 @@ class HomePage {
                     </div>
                 </div>
                 <div class="card-info">
-                    <div class="card-title" title="${item.name || data.title}">${item.name || data.title || 'Unknown Title'}</div>
-                    <div class="card-subtitle">${data.subtitle || (type === 'movie' ? 'Movie' : 'Series')}</div>
+                    <div class="card-title" title="${this.escapeHtml(title)}">${this.escapeHtml(title)}</div>
+                    <div class="card-subtitle">${this.escapeHtml(subtitle)}</div>
                 </div>
             </div>
         `;
     }
 
     createRecentCard(item) {
-        const { data, item_id } = item;
+        const data = item.data || {};
+        const { item_id } = item;
         const type = item.type || item.item_type;
-        const poster = item.stream_icon || data.poster || '/img/poster-placeholder.jpg';
-        const posterUrl = poster.startsWith('http') ? `/api/proxy/image?url=${encodeURIComponent(poster)}` : poster;
+        const title = item.name || item.title || data.title || 'Unknown Title';
+        const subtitle = data.subtitle || (type === 'movie' ? 'Movie' : 'Series');
+        const posterUrl = this.resolveImageUrl(this.posterFromItem(item), '/img/poster-placeholder.jpg');
 
         return `
             <div class="dashboard-card" data-id="${item_id}" data-type="${type}">
                 <div class="card-image">
-                    <img src="${posterUrl}" alt="${item.name}" loading="lazy" onerror="this.onerror=null;this.src='/img/poster-placeholder.jpg'">
+                    <img src="${this.escapeHtml(posterUrl)}" alt="${this.escapeHtml(title)}" loading="lazy" onerror="this.onerror=null;this.src='/img/poster-placeholder.jpg'">
                     <div class="play-icon-overlay">
                         <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
                     </div>
                 </div>
                 <div class="card-info">
-                    <div class="card-title" title="${item.name || (data && data.title)}">${item.name || (data && data.title) || 'Unknown Title'}</div>
-                    <div class="card-subtitle">${(data && data.subtitle) || (type === 'movie' ? 'Movie' : 'Series')}</div>
+                    <div class="card-title" title="${this.escapeHtml(title)}">${this.escapeHtml(title)}</div>
+                    <div class="card-subtitle">${this.escapeHtml(subtitle)}</div>
                 </div>
             </div>
         `;
+    }
+
+    posterFromItem(item = {}) {
+        const data = item.data || {};
+        return item.stream_icon
+            || item.cover
+            || item.poster
+            || item.poster_url
+            || item.posterUrl
+            || data.poster
+            || data.posterUrl
+            || data.poster_url
+            || data.cover
+            || data.stream_icon
+            || (typeof MediaUtils !== 'undefined' ? MediaUtils.tmdbPosterUrl(item.tmdb || data.tmdb) : null);
+    }
+
+    resolveImageUrl(value, fallback) {
+        const raw = String(value || '').trim();
+        if (!raw) return fallback;
+        if (raw.startsWith('/')) return raw;
+        if (/^https?:\/\//i.test(raw)) {
+            return this.shouldProxyImages() ? `/api/proxy/image?url=${encodeURIComponent(raw)}` : raw;
+        }
+        return raw;
+    }
+
+    shouldProxyImages() {
+        try {
+            return !window.API?.isCloudMode?.();
+        } catch (_) {
+            return false;
+        }
+    }
+
+    escapeHtml(value) {
+        if (typeof MediaUtils !== 'undefined' && MediaUtils.escapeHtml) {
+            return MediaUtils.escapeHtml(value || '');
+        }
+        return String(value || '').replace(/[&<>"']/g, char => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        }[char]));
     }
 
     async playItem(item, isResume = false) {
