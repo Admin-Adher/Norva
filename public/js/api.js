@@ -311,7 +311,11 @@ const CloudAdapter = (() => {
     function requiresGatewayForContainer(type, container) {
         const normalizedType = String(type || '').toLowerCase();
         const normalizedContainer = String(container || '').split('?')[0].split('#')[0].toLowerCase();
-        if (normalizedType === 'live') return false;
+        // Live channels are MPEG-TS (or provider HLS with no CORS and a
+        // UA-locked origin) — the browser can't play them directly. Route them
+        // through the gateway so FFmpeg pulls the stream with the provider's
+        // accepted User-Agent and serves browser-compatible HLS.
+        if (normalizedType === 'live') return true;
         if (!normalizedContainer) return false;
         return [
             'mkv',
