@@ -206,7 +206,17 @@
         // ↑/↓ leave the field via spatial navigation — except in the channel
         // search, whose own ↑/↓ result navigation must keep working.
         if (isTextField(focused)) {
-            const ownsVerticalKeys = focused.id === 'channel-search';
+            if (focused.id === 'channel-search' &&
+                e.key === 'ArrowDown' &&
+                !focused.value.trim() &&
+                !window.app?.channelList?.searchMode &&
+                !window.app?.channelList?.zeroState) {
+                e.preventDefault();
+                e.stopPropagation();
+                if (window.app?.channelList?.focusFirstVisibleChannel?.()) return;
+            }
+            const ownsVerticalKeys = focused.id === 'channel-search' &&
+                (window.app?.channelList?.searchMode || window.app?.channelList?.zeroState);
             if (isEnter || e.key === 'ArrowLeft' || e.key === 'ArrowRight' || ownsVerticalKeys) return;
         }
         // <select>: arrows navigate away (never trapped); Enter opens the

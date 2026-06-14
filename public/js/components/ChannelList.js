@@ -244,7 +244,9 @@ class ChannelList {
         });
         this.searchInput.addEventListener('keydown', (e) => this.handleSearchKeydown(e));
         this.searchInput.addEventListener('focus', () => {
-            if (!this.searchInput.value.trim()) this.showZeroState();
+            if (!this.searchInput.value.trim() && !document.documentElement.classList.contains('tv-mode')) {
+                this.showZeroState();
+            }
         });
         this.searchInput.addEventListener('blur', () => {
             // Delay so clicks on zero-state results land before restoring
@@ -714,6 +716,7 @@ class ChannelList {
 
         return `
           <div class="channel-item ${logicalClass} ${isActive ? 'active' : ''} ${navActive ? 'nav-active' : ''} ${hidden ? 'hidden' : ''} ${playbackClasses}"
+               tabindex="-1"
                data-channel-id="${channel.id}"
                data-source-id="${channel.sourceId}"
                data-source-type="${channel.sourceType}"
@@ -1000,6 +1003,101 @@ class ChannelList {
         });
     }
 
+    captureLiveFocusState() {
+        const active = document.activeElement;
+        if (!active || active === document.body) return null;
+        if (active === this.searchInput) return { type: 'search' };
+
+        const channelItem = active.closest?.('.channel-item');
+        if (channelItem && this.container?.contains(channelItem)) {
+            return {
+                type: 'channel',
+                channelId: channelItem.dataset.channelId || '',
+                sourceId: channelItem.dataset.sourceId || '',
+                renderId: channelItem.dataset.renderId || ''
+            };
+        }
+
+        const groupHeader = active.closest?.('.group-header');
+        if (groupHeader && this.container?.contains(groupHeader)) {
+            return {
+                type: 'group',
+                groupName: groupHeader.dataset.group || ''
+            };
+        }
+
+        return null;
+    }
+
+    findChannelElementFromFocusState(state) {
+        if (!state) return null;
+        const items = this.container?.querySelectorAll('.channel-item') || [];
+        for (const item of items) {
+            if (state.renderId && item.dataset.renderId === state.renderId) return item;
+        }
+        for (const item of items) {
+            if (String(item.dataset.channelId) === String(state.channelId) &&
+                String(item.dataset.sourceId) === String(state.sourceId)) {
+                return item;
+            }
+        }
+        return null;
+    }
+
+    restoreLiveFocusState(state) {
+        if (!state) return false;
+        let target = null;
+
+        if (state.type === 'search') {
+            target = this.searchInput;
+        } else if (state.type === 'channel') {
+            target = this.findChannelElementFromFocusState(state);
+        } else if (state.type === 'group') {
+            const headers = this.container?.querySelectorAll('.group-header') || [];
+            target = [...headers].find(header => header.dataset.group === state.groupName) || null;
+        }
+
+        if (!target) return false;
+        if (!target.hasAttribute('tabindex') &&
+            !['A', 'BUTTON', 'INPUT', 'SELECT', 'TEXTAREA'].includes(target.tagName)) {
+            target.setAttribute('tabindex', '-1');
+        }
+        target.focus({ preventScroll: true });
+        target.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+        return true;
+    }
+
+    renderBrowsePreservingFocus() {
+        const focusState = this.captureLiveFocusState();
+        this.render();
+        this.restoreLiveFocusState(focusState);
+    }
+
+    focusFirstVisibleChannel() {
+        let item = this.container?.querySelector('.channel-item:not(.hidden)');
+        if (!item) {
+            const header = this.container?.querySelector('.group-header.collapsed');
+            if (header) {
+                const groupName = header.dataset.group;
+                header.classList.remove('collapsed');
+                this.collapsedGroups.delete(groupName);
+                this._userExpandedGroups.add(groupName);
+                this.saveCollapsedState();
+
+                const channelsContainer = header.closest('.channel-group')?.querySelector('.group-channels');
+                if (channelsContainer && channelsContainer.children.length === 0) {
+                    this.renderGroupChannels(groupName, channelsContainer);
+                }
+                item = this.container?.querySelector('.channel-item:not(.hidden)');
+            }
+        }
+
+        if (!item) return false;
+        item.focus({ preventScroll: true });
+        item.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
+        return true;
+    }
+
     // ============================================================
     // Search — flat ranked results with EPG "on now" matches,
     // keyboard navigation and a recents/favorites zero-state.
@@ -1059,7 +1157,7 @@ class ChannelList {
             this.searchMode = true;
             this.renderSearchResults(term);
             this.scheduleRemoteSearch(term);
-        } else if (document.activeElement === this.searchInput) {
+        } else if (document.activeElement === this.searchInput && !document.documentElement.classList.contains('tv-mode')) {
             this.showZeroState();
         } else {
             this.exitSearchMode();
@@ -1538,6 +1636,15 @@ class ChannelList {
             this.searchInput.blur();
             return;
         }
+
+        if (e.key === 'ArrowDown' && !this.searchInput.value.trim()) {
+            e.preventDefault();
+            e.stopPropagation();
+            this.exitSearchMode({ restoreScroll: true });
+            this.focusFirstVisibleChannel();
+            return;
+        }
+
         if (!this.searchMode && !this.zeroState) return;
 
         if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
@@ -1693,7 +1800,7 @@ class ChannelList {
             this.loadPlaybackStatuses()
         ]).then(() => {
             if (loadRunId !== this.liveHydrationRunId) return;
-            this.render();
+            this.renderBrowsePreservingFocus();
             window.app?.liveGuideFusion?.render();
         }).catch(err => {
             console.warn('[ChannelList] Live decorations refresh failed:', err);
@@ -1786,8 +1893,7 @@ class ChannelList {
         const pageSize = 1000;
 
         (async () => {
-            let addedSinceRender = 0;
-            let lastRenderAt = Date.now();
+            let addedSinceHydrationStart = 0;
             for (let offset = pageSize; offset < 80000; offset += pageSize) {
                 if (loadRunId !== this.liveHydrationRunId) return;
                 const streams = await API.proxy.xtream.liveStreams(sourceId, null, { limit: pageSize, offset });
@@ -1796,23 +1902,14 @@ class ChannelList {
 
                 const channelList = this.mapLiveStreamsToChannels(sourceId, categories, streams, sourceType);
                 const added = this.addChannelsUnique(channelList);
-                addedSinceRender += added;
-
-                const shouldRender = addedSinceRender > 0 && Date.now() - lastRenderAt > 900;
-                if (shouldRender) {
-                    this._indexedChannels = null;
-                    if (!this.searchMode) this.render();
-                    window.app?.liveGuideFusion?.render();
-                    addedSinceRender = 0;
-                    lastRenderAt = Date.now();
-                }
+                addedSinceHydrationStart += added;
 
                 if (streams.length < pageSize) break;
             }
 
-            if (addedSinceRender > 0 && loadRunId === this.liveHydrationRunId) {
+            if (addedSinceHydrationStart > 0 && loadRunId === this.liveHydrationRunId) {
                 this._indexedChannels = null;
-                if (!this.searchMode) this.render();
+                if (!this.searchMode) this.renderBrowsePreservingFocus();
                 window.app?.liveGuideFusion?.render();
             }
             if (loadRunId === this.liveHydrationRunId) {
