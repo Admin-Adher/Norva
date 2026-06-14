@@ -45,8 +45,10 @@ function _shouldUseCloud() {
 
 const CloudAdapter = (() => {
     const SOURCE_ALIAS_KEY = 'norva-cloud-source-aliases';
+    const PAGE_CACHE_TTL_MS = 120000;
     let sourcesCache = [];
     let mediaCache = new Map();
+    let pageCache = new Map();
 
     function readAliases() {
         try {
@@ -106,6 +108,11 @@ const CloudAdapter = (() => {
         const payload = await cloudSourcesApi().list();
         sourcesCache = (payload.sources || []).map(normalizeSource);
         return sourcesCache;
+    }
+
+    function clearMediaCaches() {
+        mediaCache.clear();
+        pageCache.clear();
     }
 
     function normalizeCategory(value) {
@@ -227,14 +234,31 @@ const CloudAdapter = (() => {
 
     async function listMediaPage({ sourceId, type, q, limit = 50, offset = 0 } = {}) {
         const cloudSourceId = sourceId ? await resolveSourceId(sourceId) : '';
+        const normalizedLimit = Math.max(1, Math.min(1000, Number.parseInt(limit, 10) || 50));
+        const normalizedOffset = Math.max(0, Number.parseInt(offset, 10) || 0);
+        const cacheKey = JSON.stringify({
+            cloudSourceId,
+            type: type || '',
+            q: q || '',
+            limit: normalizedLimit,
+            offset: normalizedOffset
+        });
+        const cached = pageCache.get(cacheKey);
+        if (cached && cached.expiresAt > Date.now()) return cached.items;
+
         const payload = await cloudMediaApi().list({
             sourceId: cloudSourceId,
             type,
             q,
-            limit,
-            offset
+            limit: normalizedLimit,
+            offset: normalizedOffset
         });
-        return (payload.items || []).map(item => normalizeMediaItem(item, localSourceId(item.source_id || item.sourceId || cloudSourceId)));
+        const items = (payload.items || []).map(item => normalizeMediaItem(item, localSourceId(item.source_id || item.sourceId || cloudSourceId)));
+        pageCache.set(cacheKey, {
+            expiresAt: Date.now() + PAGE_CACHE_TTL_MS,
+            items
+        });
+        return items;
     }
 
     function normalizeRecentItem(item) {
@@ -323,7 +347,7 @@ const CloudAdapter = (() => {
         if (method === 'POST' && path === '/sources') {
             if (!hasUserSession()) throw new Error('Sign in to add a TV provider.');
             const payload = await NorvaCloud.sources.create(await sourcePayloadFromLocal(data || {}));
-            mediaCache.clear();
+            clearMediaCaches();
             return normalizeSource(payload.source);
         }
         if ((method === 'PUT' || method === 'PATCH') && /^\/sources\/[^/]+$/.test(path)) {
@@ -332,6 +356,7 @@ const CloudAdapter = (() => {
             if (data?.name || data?.displayName) patch.displayName = data.name || data.displayName;
             if (!hasUserSession()) throw new Error('Sign in to edit a TV provider.');
             const payload = await NorvaCloud.sources.update(id, patch);
+            clearMediaCaches();
             return normalizeSource(payload.source);
         }
         if (method === 'DELETE' && /^\/sources\/[^/]+$/.test(path)) {
@@ -339,14 +364,14 @@ const CloudAdapter = (() => {
             if (!hasUserSession()) throw new Error('Sign in to remove a TV provider.');
             const payload = await NorvaCloud.sources.remove(id);
             sourcesCache = sourcesCache.filter(source => source.cloudId !== id);
-            mediaCache.clear();
+            clearMediaCaches();
             return payload;
         }
         if (method === 'POST' && /^\/sources\/[^/]+\/(sync|hard-sync)$/.test(path)) {
             const parts = path.split('/');
             if (!hasUserSession()) throw new Error('Sign in to sync a TV provider.');
             const payload = await NorvaCloud.sources.sync(await resolveSourceId(parts[2]));
-            mediaCache.clear();
+            clearMediaCaches();
             return normalizeSource(payload.source || {});
         }
         if (method === 'POST' && /^\/sources\/[^/]+\/(toggle|test)$/.test(path)) {

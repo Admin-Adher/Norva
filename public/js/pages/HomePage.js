@@ -7,6 +7,9 @@ class HomePage {
         this.app = app;
         this.container = null; // Will be set in renderLayout
         this.isLoading = false;
+        this.loadPromise = null;
+        this.lastLoadedAt = 0;
+        this.dashboardTtlMs = 60000;
     }
 
     async init() {
@@ -14,15 +17,22 @@ class HomePage {
     }
 
     async show() {
-        this.renderLayout();
+        if (!document.getElementById('home-content')) {
+            this.renderLayout();
+        } else {
+            this.container = document.getElementById('home-content');
+        }
+
+        if (this.lastLoadedAt && Date.now() - this.lastLoadedAt < this.dashboardTtlMs) {
+            this.updateScrollArrows();
+            return;
+        }
+
         await this.loadDashboardData();
     }
 
     hide() {
-        // Cleanup if needed
-        if (this.container) {
-            this.container.innerHTML = '';
-        }
+        // Keep the dashboard DOM warm so returning to Home feels instant.
     }
 
     renderLayout() {
@@ -166,28 +176,41 @@ class HomePage {
 
 
     async loadDashboardData() {
-        if (this.isLoading) return;
+        if (this.isLoading) return this.loadPromise;
         this.isLoading = true;
 
-        try {
-            // 0. Load Favorite Channels (first section)
-            await this.renderFavoriteChannels();
+        this.loadPromise = (async () => {
+            try {
+                const historyPromise = window.API.request('GET', '/history?limit=12');
+                const recentMoviesPromise = this.renderRecentMovies();
+                const recentSeriesPromise = this.renderRecentSeries();
+                const favoriteChannelsPromise = this.renderFavoriteChannels();
 
-            // 1. Load Watch History
-            const history = await window.API.request('GET', '/history?limit=12');
-            if (history && Array.isArray(history)) {
-                this.renderHistory(history);
+                try {
+                    const history = await historyPromise;
+                    if (history && Array.isArray(history)) {
+                        this.renderHistory(history);
+                    }
+                } catch (err) {
+                    console.error('[Dashboard] Error loading history:', err);
+                }
+
+                await Promise.allSettled([
+                    recentMoviesPromise,
+                    recentSeriesPromise,
+                    favoriteChannelsPromise
+                ]);
+
+                this.lastLoadedAt = Date.now();
+            } catch (err) {
+                console.error('[Dashboard] Error loading data:', err);
+            } finally {
+                this.isLoading = false;
+                this.loadPromise = null;
             }
+        })();
 
-            // 2. Load Recent Items
-            this.renderRecentMovies();
-            this.renderRecentSeries();
-
-        } catch (err) {
-            console.error('[Dashboard] Error loading data:', err);
-        } finally {
-            this.isLoading = false;
-        }
+        return this.loadPromise;
     }
 
     async renderFavoriteChannels() {
