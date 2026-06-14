@@ -35,8 +35,8 @@ public class MainActivity extends Activity {
     private static final String PREFS          = "norva_mobile";
     private static final String PREF_SERVER_URL = "serverUrl";
     private static final String PREF_MODE       = "mode"; // "cloud" | "server"
-    private static final String CLOUD_ACCOUNT_URL = "https://norva-pgkk.vercel.app/account.html";
-    private static final String CLOUD_DASHBOARD_URL = "https://norva-pgkk.vercel.app/cloud.html";
+    private static final String CLOUD_ACCOUNT_URL = "https://norva-eight.vercel.app/account.html";
+    private static final String CLOUD_WATCH_URL = "https://norva-eight.vercel.app/?mobile=1#home";
     private static final String UA_SUFFIX       = " NorvaTV-AndroidPhone/1.0";
 
     private FrameLayout  root;
@@ -80,7 +80,7 @@ public class MainActivity extends Activity {
         String mode = prefs().getString(PREF_MODE, null);
         String saved = prefs().getString(PREF_SERVER_URL, null);
         if ("cloud".equals(mode)) {
-            connect(CLOUD_DASHBOARD_URL);
+            connect(CLOUD_WATCH_URL);
         } else if (saved != null && !saved.isEmpty()) {
             connect(saved);
         } else {
@@ -198,7 +198,7 @@ public class MainActivity extends Activity {
         accountBtn.setBackgroundColor(Color.parseColor("#3B82F6"));
         accountBtn.setOnClickListener(v -> {
             prefs().edit().putString(PREF_MODE, "cloud").apply();
-            connect(CLOUD_ACCOUNT_URL);
+            connect(CLOUD_WATCH_URL);
         });
 
         LinearLayout.LayoutParams accountBtnLp = new LinearLayout.LayoutParams(

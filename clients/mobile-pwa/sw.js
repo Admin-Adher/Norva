@@ -1,10 +1,30 @@
-const CACHE = 'norva-mobile-v11';
-const ASSETS = ['/', '/index.html', '/account.html', '/cloud.html', '/manifest.json', '/icon-192.png', '/cloudApi.js', '/authApi.js'];
+const CACHE = 'norva-mobile-shell-v12';
+const ASSETS = ['/manifest.json', '/icon-192.png', '/icon-512.png'];
 
-self.addEventListener('install', e =>
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)))
-);
+self.addEventListener('install', event => {
+  event.waitUntil(
+    caches.open(CACHE)
+      .then(cache => cache.addAll(ASSETS))
+      .then(() => self.skipWaiting())
+  );
+});
 
-self.addEventListener('fetch', e =>
-  e.respondWith(caches.match(e.request).then(r => r || fetch(e.request)))
-);
+self.addEventListener('activate', event => {
+  event.waitUntil(
+    caches.keys()
+      .then(keys => Promise.all(keys.filter(key => key !== CACHE).map(key => caches.delete(key))))
+      .then(() => self.clients.claim())
+  );
+});
+
+self.addEventListener('fetch', event => {
+  const request = event.request;
+  if (request.mode === 'navigate') {
+    event.respondWith(fetch(request));
+    return;
+  }
+
+  event.respondWith(
+    caches.match(request).then(cached => cached || fetch(request))
+  );
+});

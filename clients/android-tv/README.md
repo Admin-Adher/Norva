@@ -21,6 +21,14 @@ Included:
 - Native Android TV playback with audio/subtitle controls when the device
   exposes compatible tracks
 
+The cloud mode opens the canonical Norva Web app at
+`https://norva-eight.vercel.app`, so account, catalog pagination, Relay/Gateway
+playback sessions and UI improvements are inherited automatically.
+
+The standalone APK build copies the root `public/` web app into
+`app/src/main/assets/www` during Gradle `preBuild`. Rebuild the APK after web UI
+changes to embed the latest Movies, Series, Watch and Cloud assets.
+
 Important limitation:
 
 This Android TV build plays streams directly on the TV. It does not run the

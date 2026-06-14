@@ -5,6 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <meta name="theme-color" content="#090b10">
     <title>Norva Account</title>
+    <script>
+        window.location.replace('https://norva-eight.vercel.app/cloud.html' + window.location.search + window.location.hash);
+    </script>
     <link rel="icon" type="image/png" href="/favicon.png">
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -365,7 +368,7 @@
         </section>
     </main>
 
-    <script src="/cloudApi.js?v=2"></script>
+    <script src="/cloudApi.js?v=8"></script>
     <script src="/authApi.js?v=2"></script>
     <script>
         const params = new URLSearchParams(location.search);

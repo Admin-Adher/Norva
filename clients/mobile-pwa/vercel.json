@@ -1,4 +1,26 @@
 {
+  "redirects": [
+    {
+      "source": "/",
+      "destination": "https://norva-eight.vercel.app/",
+      "permanent": false
+    },
+    {
+      "source": "/index.html",
+      "destination": "https://norva-eight.vercel.app/",
+      "permanent": false
+    },
+    {
+      "source": "/cloud.html",
+      "destination": "https://norva-eight.vercel.app/cloud.html",
+      "permanent": false
+    },
+    {
+      "source": "/account.html",
+      "destination": "https://norva-eight.vercel.app/account.html",
+      "permanent": false
+    }
+  ],
   "headers": [
     {
       "source": "/(.*)",

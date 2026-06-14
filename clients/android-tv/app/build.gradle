@@ -13,7 +13,24 @@ android {
         versionCode 12
         versionName "3.7.0-hybrid"
     }
+
+    sourceSets {
+        main {
+            assets.srcDirs = ["src/main/assets"]
+        }
+    }
 }
+
+def norvaPublicDir = file("../../../public")
+def norvaAssetsDir = file("src/main/assets/www")
+
+tasks.register("syncNorvaWebAssets", Sync) {
+    from(norvaPublicDir)
+    into(norvaAssetsDir)
+    exclude("screenshots/**")
+}
+
+preBuild.dependsOn("syncNorvaWebAssets")
 
 dependencies {
     // Standalone-mode native player (full track selection, MKV/EAC3/HEVC).
