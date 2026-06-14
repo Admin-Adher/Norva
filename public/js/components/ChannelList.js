@@ -21,6 +21,7 @@ const CONSOLIDATED_LIVE_GROUPS = {
     REGIONAL: 'Chaines regionales',
     MULTIPLEX: 'Multiplex et evenements'
 };
+const LIVE_CATALOG_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 
 class ChannelList {
     constructor() {
@@ -51,6 +52,8 @@ class ChannelList {
         this.remoteSearchCache = new Map();
         this.remoteSearchSeq = 0;
         this.remoteSearchInFlight = null;
+        this.liveHydrationRunId = 0;
+        this.liveCacheDbPromise = null;
 
         this.loadCollapsedState();
         this.init();
@@ -1619,6 +1622,7 @@ class ChannelList {
     async loadChannels() {
         if (this.isLoading) return;
         this.isLoading = true;
+        const loadRunId = ++this.liveHydrationRunId;
         this.currentRenderId = null; // Reset render tracking
 
         const sourceValue = this.sourceSelect.value;
@@ -1637,19 +1641,13 @@ class ChannelList {
             this.container.innerHTML = '<div class="loading"></div>';
 
             if (type === 'xtream') {
-                await this.loadXtreamChannels(parseInt(id));
+                await this.loadXtreamChannels(parseInt(id), false, loadRunId);
             } else if (type === 'm3u') {
-                await this.loadM3uChannels(parseInt(id));
+                await this.loadM3uChannels(parseInt(id), false, loadRunId);
             }
 
-            // Load hidden items and favorites
-            await Promise.all([
-                this.loadHiddenItems(),
-                this.loadFavorites(),
-                this.loadPlaybackStatuses()
-            ]);
-
             this.render();
+            this.loadLiveDecorationsAndRefresh(loadRunId);
         } catch (err) {
             console.error('Error loading channels:', err);
             this.container.innerHTML = `<div class="empty-state"><p>Error loading channels</p><p class="hint">${err.message}</p></div>`;
@@ -1662,6 +1660,7 @@ class ChannelList {
      * Load channels from all enabled sources
      */
     async loadAllChannels() {
+        const loadRunId = ++this.liveHydrationRunId;
         this.channels = [];
         this.groups = [];
 
@@ -1673,103 +1672,196 @@ class ChannelList {
             console.log('[ChannelList] loadAllChannels: xtream=', xtreamSources.length, 'm3u=', m3uSources.length);
 
             for (const source of xtreamSources) {
-                await this.loadXtreamChannels(source.id, true);
+                await this.loadXtreamChannels(source.id, true, loadRunId);
             }
 
             for (const source of m3uSources) {
-                await this.loadM3uChannels(source.id, true);
+                await this.loadM3uChannels(source.id, true, loadRunId);
             }
 
-            await Promise.all([
-                this.loadHiddenItems(),
-                this.loadFavorites(),
-                this.loadPlaybackStatuses()
-            ]);
             this.render();
+            this.loadLiveDecorationsAndRefresh(loadRunId);
         } catch (err) {
             console.error('Error loading all channels:', err);
         }
     }
 
-    /**
-     * Load Xtream channels
-     */
-    async loadPagedLiveStreams(sourceId) {
-        const pageSize = 1000;
-        const firstPage = await API.proxy.xtream.liveStreams(sourceId, null, { limit: pageSize, offset: 0 });
-        if (!window.API?.isCloudMode?.() || !Array.isArray(firstPage) || firstPage.length < pageSize) {
-            return firstPage || [];
-        }
-
-        const all = [];
-        const seen = new Set();
-        const appendUnique = (streams = []) => {
-            let added = 0;
-            for (const stream of streams || []) {
-                const streamId = stream.stream_id ?? stream.streamId ?? stream.id;
-                const key = `${stream.sourceId || stream.source_id || sourceId}:${streamId}`;
-                if (!streamId || seen.has(key)) continue;
-                seen.add(key);
-                all.push(stream);
-                added += 1;
-            }
-            return added;
-        };
-
-        appendUnique(firstPage);
-        for (let offset = pageSize; offset < 80000; offset += pageSize) {
-            const page = await API.proxy.xtream.liveStreams(sourceId, null, { limit: pageSize, offset });
-            if (!Array.isArray(page) || !page.length) break;
-            const added = appendUnique(page);
-            if (page.length < pageSize || added === 0) break;
-        }
-
-        return all;
+    loadLiveDecorationsAndRefresh(loadRunId) {
+        Promise.all([
+            this.loadHiddenItems(),
+            this.loadFavorites(),
+            this.loadPlaybackStatuses()
+        ]).then(() => {
+            if (loadRunId !== this.liveHydrationRunId) return;
+            this.render();
+            window.app?.liveGuideFusion?.render();
+        }).catch(err => {
+            console.warn('[ChannelList] Live decorations refresh failed:', err);
+        });
     }
 
     /**
      * Load Xtream channels
      */
-    async loadXtreamChannels(sourceId, append = false) {
-        if (!append) {
-            this.channels = [];
-            this.groups = [];
-        }
+    async loadFirstLivePage(sourceId) {
+        const pageSize = 1000;
+        return API.proxy.xtream.liveStreams(sourceId, null, { limit: pageSize, offset: 0 });
+    }
 
-        const categories = await API.proxy.xtream.liveCategories(sourceId);
-        const streams = await this.loadPagedLiveStreams(sourceId);
+    liveCacheKey(sourceId, sourceType) {
+        return `norva-live:${sourceType}:${sourceId}:v3`;
+    }
 
-        // Map categories to groups
-        const categoryGroups = categories.map(cat => ({
-            id: `xtream_${sourceId}_${cat.category_id}`,
-            name: cat.category_name,
+    openLiveCacheDb() {
+        if (typeof indexedDB === 'undefined') return Promise.resolve(null);
+        if (this.liveCacheDbPromise) return this.liveCacheDbPromise;
+        this.liveCacheDbPromise = new Promise((resolve) => {
+            const request = indexedDB.open('norva-live-cache', 1);
+            request.onupgradeneeded = () => {
+                const db = request.result;
+                if (!db.objectStoreNames.contains('catalogs')) {
+                    db.createObjectStore('catalogs', { keyPath: 'key' });
+                }
+            };
+            request.onsuccess = () => resolve(request.result);
+            request.onerror = () => resolve(null);
+        });
+        return this.liveCacheDbPromise;
+    }
+
+    async readLiveCatalogCache(sourceId, sourceType) {
+        if (!window.API?.isCloudMode?.()) return null;
+        const db = await this.openLiveCacheDb();
+        if (!db) return null;
+        const key = this.liveCacheKey(sourceId, sourceType);
+        return new Promise((resolve) => {
+            const tx = db.transaction('catalogs', 'readonly');
+            const request = tx.objectStore('catalogs').get(key);
+            request.onsuccess = () => {
+                const entry = request.result;
+                const fresh = entry?.savedAt && Date.now() - Number(entry.savedAt) < LIVE_CATALOG_CACHE_TTL_MS;
+                resolve(fresh && Array.isArray(entry.channels) ? entry : null);
+            };
+            request.onerror = () => resolve(null);
+        });
+    }
+
+    async writeLiveCatalogCache(sourceId, sourceType) {
+        if (!window.API?.isCloudMode?.()) return;
+        const db = await this.openLiveCacheDb();
+        if (!db) return;
+        const sourceKey = String(sourceId);
+        const entry = {
+            key: this.liveCacheKey(sourceId, sourceType),
+            savedAt: Date.now(),
             sourceId,
-            sourceType: 'xtream'
-        }));
+            sourceType,
+            groups: this.groups.filter(group =>
+                String(group.sourceId) === sourceKey && group.sourceType === sourceType
+            ),
+            channels: this.channels.filter(channel =>
+                String(channel.sourceId) === sourceKey && channel.sourceType === sourceType
+            )
+        };
+        if (!entry.channels.length) return;
+        await new Promise((resolve) => {
+            const tx = db.transaction('catalogs', 'readwrite');
+            tx.objectStore('catalogs').put(entry);
+            tx.oncomplete = () => resolve();
+            tx.onerror = () => resolve();
+            tx.onabort = () => resolve();
+        });
+    }
 
-        this.groups = this.groups.concat(categoryGroups);
+    async loadLiveCatalogFromCache(sourceId, sourceType) {
+        const entry = await this.readLiveCatalogCache(sourceId, sourceType);
+        if (!entry) return false;
+        this.groups = this.groups.concat(entry.groups || []);
+        this.channels = this.channels.concat(entry.channels || []);
+        return true;
+    }
 
+    hydrateRemainingLivePages(sourceId, categories, sourceType, loadRunId) {
+        if (!window.API?.isCloudMode?.()) return;
+        const pageSize = 1000;
+
+        (async () => {
+            let addedSinceRender = 0;
+            let lastRenderAt = Date.now();
+            for (let offset = pageSize; offset < 80000; offset += pageSize) {
+                if (loadRunId !== this.liveHydrationRunId) return;
+                const streams = await API.proxy.xtream.liveStreams(sourceId, null, { limit: pageSize, offset });
+                if (loadRunId !== this.liveHydrationRunId) return;
+                if (!Array.isArray(streams) || !streams.length) break;
+
+                const channelList = this.mapLiveStreamsToChannels(sourceId, categories, streams, sourceType);
+                const added = this.addChannelsUnique(channelList);
+                addedSinceRender += added;
+
+                const shouldRender = addedSinceRender > 0 && Date.now() - lastRenderAt > 900;
+                if (shouldRender) {
+                    this._indexedChannels = null;
+                    if (!this.searchMode) this.render();
+                    window.app?.liveGuideFusion?.render();
+                    addedSinceRender = 0;
+                    lastRenderAt = Date.now();
+                }
+
+                if (streams.length < pageSize) break;
+            }
+
+            if (addedSinceRender > 0 && loadRunId === this.liveHydrationRunId) {
+                this._indexedChannels = null;
+                if (!this.searchMode) this.render();
+                window.app?.liveGuideFusion?.render();
+            }
+            if (loadRunId === this.liveHydrationRunId) {
+                await this.writeLiveCatalogCache(sourceId, sourceType);
+            }
+        })().catch(err => {
+            console.warn('[ChannelList] Background live hydration failed:', err);
+        });
+    }
+
+    addChannelsUnique(channelList = []) {
+        const existing = new Set(this.channels.map(channel =>
+            `${channel.sourceId}:${channel.streamId || channel.stream_id || channel.id}`
+        ));
+        let added = 0;
+        for (const channel of channelList) {
+            const streamId = channel.streamId || channel.stream_id || channel.id;
+            const key = `${channel.sourceId}:${streamId}`;
+            if (!streamId || existing.has(key)) continue;
+            this.channels.push(channel);
+            existing.add(key);
+            added += 1;
+        }
+        return added;
+    }
+
+    mapLiveStreamsToChannels(sourceId, categories, streams, sourceType = 'xtream') {
         const categoryById = new Map(categories.map(c => [String(c.category_id), c.category_name]));
 
-        // Map streams to channels while preserving cloud logical metadata.
-        const channelList = streams.map(stream => {
+        return (streams || []).map(stream => {
+            const streamId = stream.stream_id ?? stream.streamId;
             const groupTitle = categoryById.get(String(stream.category_id))
                 || stream.category_name
                 || stream.groupTitle
                 || 'Uncategorized';
             const channel = {
                 ...stream,
-                id: stream.id || `xtream_${sourceId}_${stream.stream_id}`,
-                streamId: stream.stream_id ?? stream.streamId,
-                stream_id: stream.stream_id ?? stream.streamId,
+                id: stream.id || `${sourceType}_${sourceId}_${streamId}`,
+                streamId,
+                stream_id: streamId,
                 name: stream.name,
-                num: stream.num ?? null, // channel number (for digit zapping in search)
+                num: stream.num ?? null,
                 tvgId: stream.epg_channel_id || stream.tvgId,
                 tvgLogo: stream.stream_icon || stream.tvgLogo,
-                groupId: `xtream_${sourceId}_${stream.category_id}`,
+                url: stream.stream_url || stream.url,
+                groupId: `${sourceType}_${sourceId}_${stream.category_id || groupTitle}`,
                 groupTitle,
                 sourceId,
-                sourceType: 'xtream',
+                sourceType,
                 playbackStatus: stream.playback_status || stream.playbackStatus || 'unknown',
                 playbackMode: stream.playback_mode || stream.playbackMode || 'unknown',
                 playbackCheckedAt: stream.playback_checked_at || stream.playbackCheckedAt || null,
@@ -1791,7 +1883,7 @@ class ChannelList {
                         ...variant,
                         channel: variant.channel || {
                             ...channel,
-                            id: `xtream_${variant.sourceId || sourceId}_${variant.streamId}`,
+                            id: `${sourceType}_${variant.sourceId || sourceId}_${variant.streamId}`,
                             streamId: variant.streamId,
                             stream_id: variant.streamId,
                             sourceId: variant.sourceId || sourceId,
@@ -1809,23 +1901,53 @@ class ChannelList {
             }
             return channel;
         });
+    }
 
+    /**
+     * Load Xtream channels
+     */
+    async loadXtreamChannels(sourceId, append = false, loadRunId = this.liveHydrationRunId) {
+        if (!append) {
+            this.channels = [];
+            this.groups = [];
+        }
+
+        if (await this.loadLiveCatalogFromCache(sourceId, 'xtream')) return;
+
+        const categories = await API.proxy.xtream.liveCategories(sourceId);
+        const streams = await this.loadFirstLivePage(sourceId);
+
+        // Map categories to groups
+        const categoryGroups = categories.map(cat => ({
+            id: `xtream_${sourceId}_${cat.category_id}`,
+            name: cat.category_name,
+            sourceId,
+            sourceType: 'xtream'
+        }));
+
+        this.groups = this.groups.concat(categoryGroups);
+
+        const channelList = this.mapLiveStreamsToChannels(sourceId, categories, streams, 'xtream');
         this.channels = this.channels.concat(channelList);
+        this.hydrateRemainingLivePages(sourceId, categories, 'xtream', loadRunId);
+        if ((streams || []).length < 1000) await this.writeLiveCatalogCache(sourceId, 'xtream');
     }
 
     /**
      * Load M3U channels
      * Now uses unified Xtream-style API endpoints (backend supports both source types)
      */
-    async loadM3uChannels(sourceId, append = false) {
+    async loadM3uChannels(sourceId, append = false, loadRunId = this.liveHydrationRunId) {
         if (!append) {
             this.channels = [];
             this.groups = [];
         }
 
         // Use Xtream API endpoints - backend now supports M3U sources too
+        if (await this.loadLiveCatalogFromCache(sourceId, 'm3u')) return;
+
         const categories = await API.proxy.xtream.liveCategories(sourceId);
-        const streams = await this.loadPagedLiveStreams(sourceId);
+        const streams = await this.loadFirstLivePage(sourceId);
 
         // Map categories to groups (keeping m3u sourceType for downstream compatibility)
         const m3uGroups = categories.map(cat => ({
@@ -1837,25 +1959,10 @@ class ChannelList {
 
         this.groups = this.groups.concat(m3uGroups);
 
-        // Map streams to channels
-        const channelList = streams.map(stream => ({
-            id: `m3u_${sourceId}_${stream.stream_id}`,
-            streamId: stream.stream_id,
-            name: stream.name,
-            tvgId: stream.epg_channel_id,
-            tvgLogo: stream.stream_icon,
-            url: stream.stream_url, // M3U has direct URLs
-            groupId: `m3u_${sourceId}_${stream.category_id}`,
-            groupTitle: categories.find(c => String(c.category_id) === String(stream.category_id))?.category_name || 'Uncategorized',
-            sourceId,
-            sourceType: 'm3u',
-            playbackStatus: stream.playback_status || 'unknown',
-            playbackMode: stream.playback_mode || 'unknown',
-            playbackCheckedAt: stream.playback_checked_at || null,
-            playbackModeCheckedAt: stream.playback_mode_checked_at || null
-        }));
-
+        const channelList = this.mapLiveStreamsToChannels(sourceId, categories, streams, 'm3u');
         this.channels = this.channels.concat(channelList);
+        this.hydrateRemainingLivePages(sourceId, categories, 'm3u', loadRunId);
+        if ((streams || []).length < 1000) await this.writeLiveCatalogCache(sourceId, 'm3u');
     }
 
     /**
