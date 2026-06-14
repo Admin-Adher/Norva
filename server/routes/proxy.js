@@ -410,10 +410,36 @@ router.get('/epg/:sourceId', async (req, res) => {
             }));
         }
 
-        res.json({
-            channels: epgChannels,
-            programmes: formattedPrograms
-        });
+        if (formattedPrograms.length > 0 || epgChannels.length > 0) {
+            return res.json({
+                channels: epgChannels,
+                programmes: formattedPrograms
+            });
+        }
+
+        const source = await sources.getById(sourceId);
+        if (!source || (source.type !== 'epg' && source.type !== 'xtream')) {
+            return res.json({ channels: [], programmes: [] });
+        }
+
+        const forceRefresh = req.query.refresh === '1';
+        const maxAgeHours = parseInt(req.query.maxAge, 10) || DEFAULT_MAX_AGE_HOURS;
+        const maxAgeMs = maxAgeHours * 60 * 60 * 1000;
+
+        if (!forceRefresh) {
+            const cached = cache.get('epg', sourceId, 'data', maxAgeMs);
+            if (cached) return res.json(cached);
+        }
+
+        let url = source.url;
+        if (source.type === 'xtream') {
+            const api = xtreamApi.createFromSource(source);
+            url = api.getXmltvUrl();
+        }
+
+        const providerData = await epgParser.fetchAndParse(url);
+        cache.set('epg', sourceId, 'data', providerData);
+        return res.json(providerData);
 
     } catch (err) {
         console.error(err);

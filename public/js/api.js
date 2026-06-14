@@ -621,7 +621,16 @@ const CloudAdapter = (() => {
                 }
                 return { info: {}, episodes: {} };
             }
-            if (action === 'short_epg') return { epg_listings: [] };
+            if (action === 'short_epg') {
+                const cloudSourceId = await resolveSourceId(sourceId);
+                const requestedStreamId = query.get('stream_id') || streamId || '';
+                const limit = query.get('limit') || 8;
+                const sourcesApi = cloudSourcesApi();
+                if (sourcesApi.shortEpg && requestedStreamId) {
+                    return sourcesApi.shortEpg(cloudSourceId, requestedStreamId, limit);
+                }
+                return { epg_listings: [] };
+            }
             if (action === 'stream' && streamId) {
                 const type = query.get('type') || xtreamMatch[4] || 'live';
                 const isVodPlayback = type === 'movie' || type === 'series';
@@ -693,8 +702,8 @@ const CloudAdapter = (() => {
             }
         }
 
-        if (method === 'GET' && path.startsWith('/proxy/epg/')) return {};
-        if (method === 'POST' && path.includes('/proxy/epg/')) return {};
+        if (method === 'GET' && path.startsWith('/proxy/epg/')) return { channels: [], programmes: [] };
+        if (method === 'POST' && path.includes('/proxy/epg/')) return { channels: [], programmes: [] };
         if (method === 'DELETE' && path.startsWith('/proxy/cache/')) return { success: true };
 
         if (path.startsWith('/favorites')) return handleFavorites(method, path, query, data);

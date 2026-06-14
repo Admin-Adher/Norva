@@ -1619,7 +1619,7 @@ class VideoPlayer {
      * Fetch EPG data for current channel
      */
     async fetchEpgData(channel) {
-        if (!channel || (!channel.tvgId && !channel.epg_id)) {
+        if (!channel) {
             this.updateNowPlaying(channel, null);
             return;
         }
@@ -1629,11 +1629,12 @@ class VideoPlayer {
                 const epgGuide = window.app.epgGuide;
 
                 // Get current program from EpgGuide
-                const currentProgram = epgGuide.getCurrentProgram(channel.tvgId, channel.name);
+                const currentProgram = epgGuide.getCurrentProgram(channel.tvgId || channel.epg_id, channel.name);
 
                 if (currentProgram) {
                     // Find upcoming programs from the guide's data
-                    const epgChannel = epgGuide.channelMap?.get(channel.tvgId) ||
+                    const epgChannel = epgGuide.getEpgChannel?.(channel.tvgId || channel.epg_id, channel.name) ||
+                        epgGuide.channelMap?.get(channel.tvgId || channel.epg_id) ||
                         epgGuide.channelMap?.get(channel.name?.toLowerCase());
 
                     let upcoming = [];
@@ -1701,8 +1702,10 @@ class VideoPlayer {
                     }
                 }
             }
+            this.updateNowPlaying(channel, null);
         } catch (err) {
             console.log('EPG data not available:', err.message);
+            this.updateNowPlaying(channel, null);
         }
     }
 

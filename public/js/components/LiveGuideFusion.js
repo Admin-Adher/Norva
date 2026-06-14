@@ -9,6 +9,9 @@ class LiveGuideFusion {
         this.currentChannel = null;
         this._lastChannelsKey = '';
         this._pendingFamilySelection = null;
+        this.shortEpgCache = new Map();
+        this.shortEpgLoadedAt = new Map();
+        this.shortEpgInflight = new Set();
         this.init();
     }
 
@@ -66,6 +69,20 @@ class LiveGuideFusion {
 
     getProxiedImageUrl(url) {
         return this.app.channelList.getProxiedImageUrl(url);
+    }
+
+    decodeBase64(value) {
+        if (!value) return '';
+        try {
+            const decoded = atob(String(value));
+            return decodeURIComponent(escape(decoded));
+        } catch (_) {
+            try {
+                return atob(String(value));
+            } catch (__) {
+                return String(value);
+            }
+        }
     }
 
     findChannel(channelId, sourceId) {
@@ -331,6 +348,7 @@ class LiveGuideFusion {
     getEpgChannel(channel) {
         const guide = this.app.epgGuide;
         if (!guide?.channels?.length) return null;
+        if (guide.getEpgChannel) return guide.getEpgChannel(channel.tvgId || channel.epg_id, channel.name);
         if (channel.tvgId && guide.channelMap?.has(channel.tvgId)) {
             return guide.channelMap.get(channel.tvgId);
         }
@@ -340,17 +358,85 @@ class LiveGuideFusion {
         return guide.channels.find(epg => epg.id === channel.tvgId || epg.name === channel.name) || null;
     }
 
-    getProgramAt(channel, date) {
-        const guide = this.app.epgGuide;
-        const epgChannel = this.getEpgChannel(channel);
-        if (!epgChannel || !guide?.programmes?.length) return null;
+    shortEpgKey(channel) {
+        const streamId = channel?.streamId || channel?.id || '';
+        return channel?.sourceType === 'xtream' && channel?.sourceId && streamId
+            ? `${channel.sourceId}:${streamId}`
+            : '';
+    }
+
+    normalizeShortEpgListing(listing) {
+        const start = Number.parseInt(listing?.start_timestamp, 10);
+        const stop = Number.parseInt(listing?.stop_timestamp, 10);
+        if (!Number.isFinite(start) || !Number.isFinite(stop) || stop <= start) return null;
+        return {
+            title: this.decodeBase64(listing.title) || 'Programme',
+            description: this.decodeBase64(listing.description),
+            start: new Date(start * 1000),
+            stop: new Date(stop * 1000)
+        };
+    }
+
+    getShortProgramAt(channel, date) {
+        const key = this.shortEpgKey(channel);
+        if (!key) return null;
+        const programmes = this.shortEpgCache.get(key) || [];
         const time = date.getTime();
-        return guide.programmes.find(program => {
-            if (program.channelId !== epgChannel.id) return false;
+        return programmes.find(program => {
             const start = new Date(program.start).getTime();
             const stop = new Date(program.stop).getTime();
             return time >= start && time < stop;
         }) || null;
+    }
+
+    ensureShortEpgForChannels(channels = []) {
+        const now = Date.now();
+        const candidates = channels
+            .filter(Boolean)
+            .filter(channel => this.shortEpgKey(channel))
+            .slice(0, 36);
+
+        candidates.forEach(channel => {
+            const key = this.shortEpgKey(channel);
+            const loadedAt = this.shortEpgLoadedAt.get(key) || 0;
+            if (this.shortEpgInflight.has(key) || now - loadedAt < 120000) return;
+
+            this.shortEpgInflight.add(key);
+            API.proxy.xtream.shortEpg(channel.sourceId, channel.streamId || channel.id)
+                .then(data => {
+                    const listings = Array.isArray(data?.epg_listings) ? data.epg_listings : [];
+                    const programmes = listings
+                        .map(listing => this.normalizeShortEpgListing(listing))
+                        .filter(Boolean);
+                    this.shortEpgCache.set(key, programmes);
+                    this.shortEpgLoadedAt.set(key, Date.now());
+                })
+                .catch(err => {
+                    console.warn('[LiveGuide] Short EPG unavailable for', channel.name, err);
+                    this.shortEpgCache.set(key, []);
+                    this.shortEpgLoadedAt.set(key, Date.now());
+                })
+                .finally(() => {
+                    this.shortEpgInflight.delete(key);
+                    this.render();
+                });
+        });
+    }
+
+    getProgramAt(channel, date) {
+        const guide = this.app.epgGuide;
+        const epgChannel = this.getEpgChannel(channel);
+        if (epgChannel && guide?.programmes?.length) {
+            const time = date.getTime();
+            const fullGuideProgram = guide.programmes.find(program => {
+                if (program.channelId !== epgChannel.id) return false;
+                const start = new Date(program.start).getTime();
+                const stop = new Date(program.stop).getTime();
+                return time >= start && time < stop;
+            }) || null;
+            if (fullGuideProgram) return fullGuideProgram;
+        }
+        return this.getShortProgramAt(channel, date);
     }
 
     formatTime(value) {
@@ -472,6 +558,10 @@ class LiveGuideFusion {
         const slots = this.buildSlots();
         const channelsKey = `${channels.length}:${this.activeGroup}:${selectedChannel?.id || ''}`;
         this._lastChannelsKey = channelsKey;
+        const shortEpgCandidates = selectedChannel
+            ? [selectedChannel, ...groupChannels.slice(0, 60)]
+            : groupChannels.slice(0, 60);
+        this.ensureShortEpgForChannels(shortEpgCandidates);
 
         this.container.innerHTML = `
             <div class="live-guide-shell ${this.shouldShowGroupRail() ? '' : 'groups-hidden'}">

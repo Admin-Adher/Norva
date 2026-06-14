@@ -52,6 +52,34 @@ class EpgGuide {
         return url;
     }
 
+    normalizeChannelKey(value) {
+        return String(value || '')
+            .toLowerCase()
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .replace(/\b(fhd|full\s*hd|hd|uhd|4k|sd|hevc|h265|h264|fr)\b/g, ' ')
+            .replace(/[^a-z0-9]+/g, ' ')
+            .trim()
+            .replace(/\s+/g, ' ');
+    }
+
+    getEpgChannel(tvgId, channelName) {
+        if (!this.channelMap) return null;
+        const directId = tvgId ? this.channelMap.get(String(tvgId)) : null;
+        if (directId) return directId;
+        const directName = channelName ? this.channelMap.get(String(channelName).toLowerCase()) : null;
+        if (directName) return directName;
+        const normalizedId = tvgId ? this.channelMap.get(this.normalizeChannelKey(tvgId)) : null;
+        if (normalizedId) return normalizedId;
+        const normalizedName = channelName ? this.channelMap.get(this.normalizeChannelKey(channelName)) : null;
+        if (normalizedName) return normalizedName;
+        return this.channels.find(epg =>
+            (tvgId && epg.id === tvgId) ||
+            (channelName && epg.name === channelName) ||
+            (channelName && this.normalizeChannelKey(epg.name || epg.id) === this.normalizeChannelKey(channelName))
+        ) || null;
+    }
+
     init() {
         this.prevBtn?.addEventListener('click', () => this.navigate(-2));
         this.nextBtn?.addEventListener('click', () => this.navigate(2));
@@ -257,11 +285,15 @@ class EpgGuide {
         this.channelMap = new Map();
         // Index by ID
         this.channels.forEach(ch => {
-            this.channelMap.set(ch.id, ch);
+            if (ch.id) this.channelMap.set(String(ch.id), ch);
             // Also index by name (normalized) for fallback matching
             if (ch.name) {
                 this.channelMap.set(ch.name.toLowerCase(), ch);
             }
+            const normalizedId = this.normalizeChannelKey(ch.id);
+            const normalizedName = this.normalizeChannelKey(ch.name);
+            if (normalizedId) this.channelMap.set(normalizedId, ch);
+            if (normalizedName) this.channelMap.set(normalizedName, ch);
         });
 
         // Load favorites
@@ -278,18 +310,7 @@ class EpgGuide {
     getCurrentProgram(tvgId, channelName) {
         if (!this.programmes || this.programmes.length === 0) return null;
 
-        // Find EPG channel using fast map lookup
-        let epgChannel = null;
-        if (tvgId && this.channelMap && this.channelMap.has(tvgId)) {
-            epgChannel = this.channelMap.get(tvgId);
-        } else if (channelName && this.channelMap) {
-            epgChannel = this.channelMap.get(channelName.toLowerCase());
-        } else {
-            // Fallback to slow search if map fails or not built yet
-            epgChannel = this.channels.find(epg =>
-                (tvgId && epg.id === tvgId) || epg.name === channelName
-            );
-        }
+        const epgChannel = this.getEpgChannel(tvgId, channelName);
 
         if (!epgChannel) return null;
 
@@ -379,10 +400,7 @@ class EpgGuide {
 
         // Match ALL playable channels with optional EPG data
         const allChannels = playableChannels.map(sourceChannel => {
-            // Try to find matching EPG channel by tvgId or name
-            const epgChannel = this.channels.find(epg =>
-                epg.id === sourceChannel.tvgId || epg.name === sourceChannel.name
-            );
+            const epgChannel = this.getEpgChannel(sourceChannel.tvgId || sourceChannel.epg_id, sourceChannel.name);
             return { epgChannel, sourceChannel };
         });
 

@@ -214,6 +214,10 @@
             create: (source) => request('POST', '/sources', source),
             update: (id, patch) => request('PATCH', `/sources/${encodeURIComponent(id)}`, patch),
             seriesInfo: (id, seriesId) => seriesInfoRequest(id, seriesId),
+            shortEpg: (id, streamId, limit = 8) => request(
+                'GET',
+                `/sources/${encodeURIComponent(id)}/short-epg?stream_id=${encodeURIComponent(streamId)}&limit=${encodeURIComponent(limit)}`
+            ),
             sync: (id) => sourceSyncRequest(id),
             remove: (id) => request('DELETE', `/sources/${encodeURIComponent(id)}`)
         },
@@ -272,7 +276,13 @@
             failCommand: (id, error) => request('PATCH', `/device/commands/${encodeURIComponent(id)}`, { status: 'failed', error }, { token: getDeviceToken() }),
             sources: {
                 list: () => request('GET', '/device/sources', null, { token: getDeviceToken() }),
-                seriesInfo: (id, seriesId) => seriesInfoRequest(id, seriesId, { token: getDeviceToken() })
+                seriesInfo: (id, seriesId) => seriesInfoRequest(id, seriesId, { token: getDeviceToken() }),
+                shortEpg: (id, streamId, limit = 8) => request(
+                    'GET',
+                    `/device/sources/${encodeURIComponent(id)}/short-epg?stream_id=${encodeURIComponent(streamId)}&limit=${encodeURIComponent(limit)}`,
+                    null,
+                    { token: getDeviceToken() }
+                )
             },
             mediaItems: {
                 list: (params = {}) => catalogRequest('/device/media-items', params, { token: getDeviceToken() }),

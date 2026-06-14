@@ -106,7 +106,7 @@ async function route(
       body: {
         ok: true,
         service: "norva-cloud",
-        version: 8,
+        version: 9,
         liveMaterialization: true,
         relayConfigured: Boolean(runtimeConfig.relayBaseUrl && runtimeConfig.relayTokenSecret),
         gatewayConfigured: Boolean(runtimeConfig.mediaGatewayUrl && runtimeConfig.mediaGatewayToken),
@@ -135,6 +135,9 @@ async function route(
     }
     if (req.method === "GET" && id === "sources" && action && segments[3] === "series-info") {
       return { body: await getXtreamSeriesInfo(url, action, device.user_id, db) };
+    }
+    if (req.method === "GET" && id === "sources" && action && segments[3] === "short-epg") {
+      return { body: await getXtreamShortEpg(url, action, device.user_id, db) };
     }
     if (req.method === "GET" && id === "media-items") {
       return { body: await listMediaItems(url, device.user_id, db) };
@@ -171,6 +174,9 @@ async function route(
     if (req.method === "POST" && !id) return { status: 201, body: await createSource(req, user.id, db) };
     if (req.method === "GET" && id && action === "series-info") {
       return { body: await getXtreamSeriesInfo(url, id, user.id, db) };
+    }
+    if (req.method === "GET" && id && action === "short-epg") {
+      return { body: await getXtreamShortEpg(url, id, user.id, db) };
     }
     if (req.method === "POST" && id && action === "sync") {
       return { body: await syncExistingSource(id, user.id, db) };
@@ -746,6 +752,26 @@ async function getXtreamSeriesInfo(url: URL, sourceId: string, userId: string, d
   ));
 
   return info;
+}
+
+async function getXtreamShortEpg(url: URL, sourceId: string, userId: string, db: SupabaseClient) {
+  await assertOwnedSource(sourceId, userId, db);
+  const streamId = url.searchParams.get("stream_id") ?? url.searchParams.get("streamId") ?? "";
+  const limit = String(boundedInt(url.searchParams.get("limit"), 8, 1, 24));
+  if (!streamId) throw new HttpError(400, "stream_id is required");
+
+  const sourceConfig = await loadSourceConfig(sourceId, userId, db);
+  const serverUrl = normalizeBaseUrl(stringOr(sourceConfig.serverUrl, ""));
+  const username = stringOr(sourceConfig.username, "");
+  const password = stringOr(sourceConfig.password, "");
+  if (!serverUrl || !username || !password) {
+    throw new HttpError(400, "Short EPG requires an Xtream source");
+  }
+
+  return recordOrEmpty(await fetchJson(
+    xtreamApiUrl({ serverUrl, username, password, action: "get_short_epg" }, { stream_id: streamId, limit }),
+    12000,
+  ));
 }
 
 async function upsertMediaItems(req: Request, userId: string, db: SupabaseClient) {
