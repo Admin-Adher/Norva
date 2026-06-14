@@ -49,6 +49,7 @@ const CloudAdapter = (() => {
     let sourcesCache = [];
     let mediaCache = new Map();
     let pageCache = new Map();
+    let liveCatalogCache = new Map();
 
     function readAliases() {
         try {
@@ -113,6 +114,7 @@ const CloudAdapter = (() => {
     function clearMediaCaches() {
         mediaCache.clear();
         pageCache.clear();
+        liveCatalogCache.clear();
     }
 
     function normalizeCategory(value) {
@@ -285,6 +287,141 @@ const CloudAdapter = (() => {
         }));
     }
 
+    async function getLiveLogicalCatalog({ sourceId, categoryId, country = 'FR', includeVariants = true } = {}) {
+        const cloudSourceId = sourceId ? await resolveSourceId(sourceId) : '';
+        const cacheKey = JSON.stringify({
+            cloudSourceId,
+            categoryId: categoryId || '',
+            country,
+            includeVariants: includeVariants ? 1 : 0
+        });
+        const cached = liveCatalogCache.get(cacheKey);
+        if (cached && cached.expiresAt > Date.now()) return cached.payload;
+
+        const payload = await cloudLiveApi().logicalChannels({
+            sourceId: cloudSourceId,
+            categoryId: categoryId || '',
+            country,
+            includeVariants: includeVariants ? '1' : ''
+        });
+        liveCatalogCache.set(cacheKey, {
+            expiresAt: Date.now() + PAGE_CACHE_TTL_MS,
+            payload
+        });
+        return payload;
+    }
+
+    async function listLiveLogicalCategories({ sourceId, country = 'FR' } = {}) {
+        const payload = await getLiveLogicalCatalog({ sourceId, country, includeVariants: false });
+        return (payload.groups || []).map(group => ({
+            category_id: String(group.category_id || group.id || 'uncategorized'),
+            category_name: group.category_name || group.name || 'Uncategorized',
+            name: group.category_name || group.name || 'Uncategorized',
+            sourceId
+        }));
+    }
+
+    async function listLiveLogicalChannels({ sourceId, categoryId, country = 'FR' } = {}) {
+        const payload = await getLiveLogicalCatalog({ sourceId, categoryId, country, includeVariants: true });
+        return (payload.channels || []).map(channel => normalizeLogicalLiveChannel(channel, sourceId));
+    }
+
+    function normalizeLogicalLiveChannel(channel, requestedSourceId) {
+        const cloudSourceId = channel.source_id || channel.sourceId || '';
+        const localId = requestedSourceId || localSourceId(cloudSourceId);
+        const defaultVariantRaw = channel.default_variant || channel.defaultVariant || {};
+        const rawVariants = Array.isArray(channel.variants) && channel.variants.length
+            ? channel.variants
+            : (channel.variant_preview || channel.variantPreview || (defaultVariantRaw.stream_id || defaultVariantRaw.streamId ? [defaultVariantRaw] : []));
+        const variants = rawVariants
+            .map(variant => normalizeLiveVariant(variant, localId, cloudSourceId))
+            .filter(variant => variant.streamId);
+        const defaultStreamId = String(defaultVariantRaw.stream_id || defaultVariantRaw.streamId || channel.stream_id || channel.streamId || channel.external_id || '');
+        const defaultVariant = variants.find(variant => String(variant.streamId) === defaultStreamId)
+            || variants.find(variant => variant.rank >= 1)
+            || variants[0]
+            || normalizeLiveVariant(defaultVariantRaw, localId, cloudSourceId);
+        const streamId = String(defaultVariant.streamId || defaultStreamId || '');
+        const categoryId = String(channel.category_id || channel.group_id || channel.section || 'uncategorized');
+        const categoryName = channel.category_name || channel.group_name || (categoryId === 'uncategorized' ? 'Uncategorized' : categoryId);
+        const poster = channel.stream_icon || channel.poster_url || defaultVariant.streamIcon || defaultVariant.posterUrl || '';
+        const base = {
+            ...channel,
+            id: `xtream_${localId}_${streamId}`,
+            stream_id: streamId,
+            streamId,
+            name: channel.name || channel.title || defaultVariant.raw || 'Norva',
+            title: channel.title || channel.name || defaultVariant.raw || 'Norva',
+            num: channel.num ?? channel.lcn ?? null,
+            epg_channel_id: channel.epg_channel_id || channel.tvgId || '',
+            stream_icon: poster,
+            tvgLogo: poster,
+            category_id: categoryId,
+            category_name: categoryName,
+            sourceId: localId,
+            source_id: localId,
+            cloudSourceId,
+            cloudLogicalId: channel.id || channel.logical_id || '',
+            playback_status: channel.playback_status || 'unknown',
+            playback_mode: channel.playback_mode || 'unknown',
+            qualityGroup: {
+                name: channel.name || channel.title || defaultVariant.raw || 'Norva',
+                variants,
+                defaultVariant
+            },
+            currentVariant: defaultVariant,
+            _logicalChannel: true,
+            _logicalKind: channel.section || 'cloud',
+            _variantCount: Number(channel.variant_count || channel.variantCount || variants.length || 1),
+            _sourceGroupTitle: categoryName,
+            _displayGroupTitle: categoryName
+        };
+        base.qualityGroup.variants = variants.map(variant => ({
+            ...variant,
+            channel: {
+                ...base,
+                id: `xtream_${variant.sourceId}_${variant.streamId}`,
+                stream_id: variant.streamId,
+                streamId: variant.streamId,
+                name: variant.raw || base.name,
+                title: variant.raw || base.title,
+                sourceId: variant.sourceId,
+                source_id: variant.sourceId,
+                currentVariant: variant,
+                qualityGroup: undefined
+            }
+        }));
+        base.qualityGroup.defaultVariant = base.qualityGroup.variants.find(variant => String(variant.streamId) === String(defaultVariant.streamId))
+            || base.qualityGroup.variants[0]
+            || defaultVariant;
+        base.currentVariant = base.qualityGroup.defaultVariant;
+        return base;
+    }
+
+    function normalizeLiveVariant(variant, fallbackLocalSourceId, fallbackCloudSourceId) {
+        const cloudSourceId = variant.source_id || variant.sourceId || fallbackCloudSourceId || '';
+        const sourceId = cloudSourceId ? localSourceId(cloudSourceId) : fallbackLocalSourceId;
+        const streamId = String(variant.stream_id || variant.streamId || variant.external_id || variant.externalId || variant.id || '');
+        const raw = variant.raw || variant.name || variant.title || '';
+        const poster = variant.stream_icon || variant.poster_url || variant.posterUrl || '';
+        return {
+            ...variant,
+            label: variant.label || 'HD',
+            rank: Number.isFinite(Number(variant.rank)) ? Number(variant.rank) : 2,
+            healthRank: Number.isFinite(Number(variant.healthRank)) ? Number(variant.healthRank) : 1,
+            streamId,
+            stream_id: streamId,
+            sourceId,
+            source_id: sourceId,
+            cloudSourceId,
+            raw,
+            title: variant.title || raw,
+            streamIcon: poster,
+            posterUrl: poster,
+            container: variant.container_extension || variant.container || 'm3u8'
+        };
+    }
+
     function normalizeRecentItem(item) {
         const type = itemTypeToLocal(item.item_type || item.itemType || item.type);
         const itemId = String(item.stream_id || item.series_id || item.external_id || item.externalId || item.id || '');
@@ -436,15 +573,30 @@ const CloudAdapter = (() => {
             if (action === 'live_categories' || action === 'vod_categories' || action === 'series_categories') {
                 const type = action === 'live_categories' ? 'live' : action === 'vod_categories' ? 'movie' : 'series';
                 try {
+                    if (type === 'live') return await listLiveLogicalCategories({ sourceId });
                     return await listMediaCategories({ sourceId, type });
                 } catch (err) {
                     console.warn('[Cloud] Unable to load categories without full catalog:', err);
+                    if (type === 'live') {
+                        try {
+                            return await listMediaCategories({ sourceId, type });
+                        } catch (fallbackErr) {
+                            console.warn('[Cloud] Raw live categories fallback failed:', fallbackErr);
+                        }
+                    }
                     return [];
                 }
             }
             if (action === 'live_streams' || action === 'vod_streams' || action === 'series') {
                 const type = action === 'live_streams' ? 'live' : action === 'vod_streams' ? 'movie' : 'series';
                 const categoryId = query.get('category_id');
+                if (type === 'live') {
+                    try {
+                        return await listLiveLogicalChannels({ sourceId, categoryId });
+                    } catch (err) {
+                        console.warn('[Cloud] Logical live catalog unavailable, falling back to raw media items:', err);
+                    }
+                }
                 const items = await listAllMedia({ sourceId, type });
                 return categoryId ? items.filter(item => String(item.category_id) === String(categoryId)) : items;
             }
@@ -717,6 +869,10 @@ const CloudAdapter = (() => {
         return hasUserSession() ? NorvaCloud.mediaItems : NorvaCloud.device.mediaItems;
     }
 
+    function cloudLiveApi() {
+        return hasUserSession() ? NorvaCloud.live : NorvaCloud.device.live;
+    }
+
     function cloudPlaybackApi() {
         return hasUserSession() ? NorvaCloud.playback : NorvaCloud.device.playback;
     }
@@ -727,6 +883,7 @@ const CloudAdapter = (() => {
         hasUserSession,
         cloudSourcesApi,
         cloudMediaApi,
+        cloudLiveApi,
         cloudPlaybackApi
     };
 })();

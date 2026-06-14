@@ -72,12 +72,16 @@ Deno.serve(async (req) => {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 5,
+        version: 6,
         relayConfigured: Boolean(config.relayBaseUrl && config.relayTokenSecret),
         gatewayConfigured: Boolean(config.mediaGatewayUrl && config.mediaGatewayToken),
       });
     }
-    if (req.method === "POST" && segments[0] === "playback" && segments[1] === "sessions") {
+    if (
+      req.method === "POST" &&
+      segments[0] === "playback" &&
+      (segments[1] === "sessions" || segments[1] === "session")
+    ) {
       const identity = await requireIdentity(req, supabase);
       return json(req, await createPlaybackSession(req, identity.userId, supabase, identity.deviceId ?? null), 201);
     }
@@ -252,7 +256,7 @@ async function expirePlaybackSession(id: string, userId: string, db: SupabaseCli
   if (gatewaySessions.length) {
     const gatewayIds = gatewaySessions
       .map((gateway: JsonRecord) => stringOrNull(gateway.id))
-      .filter((gatewayId): gatewayId is string => Boolean(gatewayId));
+      .filter((gatewayId: string | null): gatewayId is string => Boolean(gatewayId));
     if (gatewayIds.length) {
       const { error: gatewayUpdateError } = await db
         .from("cloud_gateway_sessions")
@@ -293,10 +297,10 @@ async function closeOpenGatewaySessionsForUser(userId: string, db: SupabaseClien
   const runtimeConfig = await getRuntimeConfig(db);
   const gatewayIds = gatewaySessions
     .map((gateway: JsonRecord) => stringOrNull(gateway.id))
-    .filter((gatewayId): gatewayId is string => Boolean(gatewayId));
+    .filter((gatewayId: string | null): gatewayId is string => Boolean(gatewayId));
   const playbackSessionIds = gatewaySessions
     .map((gateway: JsonRecord) => stringOrNull(gateway.playback_session_id))
-    .filter((sessionId): sessionId is string => Boolean(sessionId));
+    .filter((sessionId: string | null): sessionId is string => Boolean(sessionId));
 
   if (runtimeConfig.mediaGatewayUrl && runtimeConfig.mediaGatewayToken) {
     await Promise.allSettled(gatewaySessions.map(async (gateway: JsonRecord) => {

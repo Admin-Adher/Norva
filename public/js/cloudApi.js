@@ -136,7 +136,7 @@
 
     async function playbackRequest(session, options = {}) {
         try {
-            return await requestToBase(playbackBase(), 'POST', '/playback/sessions', session, options);
+            return await requestToBase(playbackBase(), 'POST', '/playback/session', session, options);
         } catch (error) {
             if (error.status === 404 || error.status === 405) {
                 return request('POST', '/playback/sessions', session, options);
@@ -224,6 +224,11 @@
             upsert: (sourceId, items) => request('POST', '/media-items', { sourceId, items })
         },
 
+        live: {
+            logicalChannels: (params = {}) => catalogRequest('/live/logical-channels', params),
+            variants: (channelId, params = {}) => catalogRequest(`/live/channel/${encodeURIComponent(channelId)}/variants`, params)
+        },
+
         favorites: {
             list: (params = {}) => request('GET', `/favorites${query(params)}`),
             add: (favorite) => request('POST', '/favorites', favorite),
@@ -272,6 +277,10 @@
             mediaItems: {
                 list: (params = {}) => catalogRequest('/device/media-items', params, { token: getDeviceToken() }),
                 categories: (params = {}) => catalogRequest('/device/media-categories', params, { token: getDeviceToken() })
+            },
+            live: {
+                logicalChannels: (params = {}) => catalogRequest('/device/live/logical-channels', params, { token: getDeviceToken() }),
+                variants: (channelId, params = {}) => catalogRequest(`/device/live/channel/${encodeURIComponent(channelId)}/variants`, params, { token: getDeviceToken() })
             },
             playback: {
                 createSession: (session) => playbackRequest(session, { token: getDeviceToken() })

@@ -1605,24 +1605,66 @@ class ChannelList {
 
         this.groups = this.groups.concat(categoryGroups);
 
-        // Map streams to channels
-        const channelList = streams.map(stream => ({
-            id: `xtream_${sourceId}_${stream.stream_id}`,
-            streamId: stream.stream_id,
-            name: stream.name,
-            num: stream.num ?? null, // channel number (for digit zapping in search)
-            tvgId: stream.epg_channel_id,
-            tvgLogo: stream.stream_icon,
-            groupId: `xtream_${sourceId}_${stream.category_id}`,
-            // Use string comparison to handle type mismatches (number vs string category_id)
-            groupTitle: categories.find(c => String(c.category_id) === String(stream.category_id))?.category_name || 'Uncategorized',
-            sourceId,
-            sourceType: 'xtream',
-            playbackStatus: stream.playback_status || 'unknown',
-            playbackMode: stream.playback_mode || 'unknown',
-            playbackCheckedAt: stream.playback_checked_at || null,
-            playbackModeCheckedAt: stream.playback_mode_checked_at || null
-        }));
+        const categoryById = new Map(categories.map(c => [String(c.category_id), c.category_name]));
+
+        // Map streams to channels while preserving cloud logical metadata.
+        const channelList = streams.map(stream => {
+            const groupTitle = categoryById.get(String(stream.category_id))
+                || stream.category_name
+                || stream.groupTitle
+                || 'Uncategorized';
+            const channel = {
+                ...stream,
+                id: stream.id || `xtream_${sourceId}_${stream.stream_id}`,
+                streamId: stream.stream_id ?? stream.streamId,
+                stream_id: stream.stream_id ?? stream.streamId,
+                name: stream.name,
+                num: stream.num ?? null, // channel number (for digit zapping in search)
+                tvgId: stream.epg_channel_id || stream.tvgId,
+                tvgLogo: stream.stream_icon || stream.tvgLogo,
+                groupId: `xtream_${sourceId}_${stream.category_id}`,
+                groupTitle,
+                sourceId,
+                sourceType: 'xtream',
+                playbackStatus: stream.playback_status || stream.playbackStatus || 'unknown',
+                playbackMode: stream.playback_mode || stream.playbackMode || 'unknown',
+                playbackCheckedAt: stream.playback_checked_at || stream.playbackCheckedAt || null,
+                playbackModeCheckedAt: stream.playback_mode_checked_at || stream.playbackModeCheckedAt || null,
+                qualityGroup: stream.qualityGroup || null,
+                currentVariant: stream.currentVariant || null,
+                cloudLogicalId: stream.cloudLogicalId || null,
+                cloudSourceId: stream.cloudSourceId || null,
+                _logicalChannel: stream._logicalChannel || false,
+                _logicalKind: stream._logicalKind || 'generic',
+                _variantCount: stream._variantCount || stream.qualityGroup?.variants?.length || 1,
+                _sourceGroupTitle: stream._sourceGroupTitle || groupTitle,
+                _displayGroupTitle: stream._displayGroupTitle || groupTitle
+            };
+            if (channel.qualityGroup?.variants?.length) {
+                channel.qualityGroup = {
+                    ...channel.qualityGroup,
+                    variants: channel.qualityGroup.variants.map(variant => ({
+                        ...variant,
+                        channel: variant.channel || {
+                            ...channel,
+                            id: `xtream_${variant.sourceId || sourceId}_${variant.streamId}`,
+                            streamId: variant.streamId,
+                            stream_id: variant.streamId,
+                            sourceId: variant.sourceId || sourceId,
+                            source_id: variant.sourceId || sourceId,
+                            name: variant.raw || channel.name,
+                            currentVariant: variant,
+                            qualityGroup: undefined
+                        }
+                    }))
+                };
+                channel.currentVariant = channel.currentVariant
+                    || channel.qualityGroup.defaultVariant
+                    || channel.qualityGroup.variants.find(v => String(v.streamId) === String(channel.streamId))
+                    || channel.qualityGroup.variants[0];
+            }
+            return channel;
+        });
 
         this.channels = this.channels.concat(channelList);
     }

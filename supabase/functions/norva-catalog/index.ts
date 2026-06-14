@@ -1,4 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { buildLiveCatalog, findLiveChannel, type LiveCatalogItem } from "../_shared/live-catalog.ts";
 
 class HttpError extends Error {
   status: number;
@@ -34,6 +35,9 @@ const db = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
   auth: { autoRefreshToken: false, persistSession: false },
 });
 
+const LIVE_PAGE_SIZE = 1000;
+const LIVE_MAX_ROWS = 80000;
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: corsHeaders(req) });
@@ -44,7 +48,17 @@ Deno.serve(async (req) => {
     const segments = routeSegments(url.pathname);
 
     if (req.method === "GET" && segments[0] === "health") {
-      return json(req, { ok: true, service: "norva-catalog", version: 2 });
+      return json(req, { ok: true, service: "norva-catalog", version: 3, liveContract: "norva.live.logical.v1" });
+    }
+
+    if (req.method === "GET" && isLiveLogicalChannelsRoute(segments)) {
+      const userId = await requireUserId(req);
+      return json(req, await listLiveLogicalChannels(url, userId));
+    }
+
+    if (req.method === "GET" && isLiveChannelVariantsRoute(segments)) {
+      const userId = await requireUserId(req);
+      return json(req, await listLiveChannelVariants(url, userId, liveChannelIdFromRoute(segments)));
     }
 
     if (req.method === "GET" && (segments[0] === "media-items" || (segments[0] === "device" && segments[1] === "media-items"))) {
@@ -169,6 +183,54 @@ async function listMediaCategories(url: URL, userId: string) {
   };
 }
 
+async function listLiveLogicalChannels(url: URL, userId: string) {
+  const sourceId = url.searchParams.get("sourceId");
+  const country = url.searchParams.get("country") || "FR";
+  const categoryId = url.searchParams.get("categoryId");
+  const includeVariants = boolParam(url.searchParams.get("includeVariants"));
+  const maxRows = boundedInt(url.searchParams.get("maxRows"), LIVE_MAX_ROWS, 1000, LIVE_MAX_ROWS);
+  const rows = await listLiveRows(userId, sourceId, maxRows);
+  return buildLiveCatalog(rows, { country, sourceId, categoryId, includeVariants });
+}
+
+async function listLiveChannelVariants(url: URL, userId: string, logicalId: string) {
+  const sourceId = url.searchParams.get("sourceId");
+  const country = url.searchParams.get("country") || "FR";
+  const rows = await listLiveRows(userId, sourceId, boundedInt(url.searchParams.get("maxRows"), LIVE_MAX_ROWS, 1000, LIVE_MAX_ROWS));
+  const catalog = buildLiveCatalog(rows, { country, sourceId, includeVariants: true });
+  const channel = findLiveChannel(catalog, logicalId);
+  if (!channel) throw new HttpError(404, "Logical channel not found");
+  return {
+    contract: "norva.live.logical.v1",
+    channel,
+    variants: Array.isArray(channel.variants) ? channel.variants : [],
+  };
+}
+
+async function listLiveRows(userId: string, sourceId: string | null, maxRows: number): Promise<LiveCatalogItem[]> {
+  const rows: LiveCatalogItem[] = [];
+  for (let offset = 0; offset < maxRows; offset += LIVE_PAGE_SIZE) {
+    let query = db
+      .from("cloud_media_items")
+      .select("id,source_id,item_type,external_id,parent_external_id,title,subtitle,poster_url,metadata,playback_hint,available")
+      .eq("user_id", userId)
+      .eq("item_type", "live")
+      .eq("available", true)
+      .order("title", { ascending: true })
+      .order("external_id", { ascending: true })
+      .range(offset, offset + LIVE_PAGE_SIZE - 1);
+
+    if (sourceId) query = query.eq("source_id", sourceId);
+
+    const { data, error } = await query;
+    if (error) throwDb(error, "Unable to list live catalog");
+    const chunk = (data ?? []) as LiveCatalogItem[];
+    rows.push(...chunk);
+    if (chunk.length < LIVE_PAGE_SIZE) break;
+  }
+  return rows;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
@@ -186,6 +248,26 @@ function routeSegments(pathname: string) {
   const parts = pathname.split("/").filter(Boolean);
   if (parts[0] === "norva-catalog") parts.shift();
   return parts;
+}
+
+function isLiveLogicalChannelsRoute(segments: string[]) {
+  return (
+    (segments[0] === "live" && segments[1] === "logical-channels") ||
+    (segments[0] === "device" && segments[1] === "live" && segments[2] === "logical-channels")
+  );
+}
+
+function isLiveChannelVariantsRoute(segments: string[]) {
+  return (
+    (segments[0] === "live" && segments[1] === "channel" && Boolean(segments[2]) && segments[3] === "variants") ||
+    (segments[0] === "device" && segments[1] === "live" && segments[2] === "channel" && Boolean(segments[3]) && segments[4] === "variants")
+  );
+}
+
+function liveChannelIdFromRoute(segments: string[]) {
+  const id = segments[0] === "device" ? segments[3] : segments[2];
+  if (!id) throw new HttpError(400, "Missing logical channel id");
+  return decodeURIComponent(id);
 }
 
 function json(req: Request, data: unknown, status = 200) {
@@ -230,6 +312,10 @@ function boundedInt(value: unknown, fallback: number, min: number, max: number) 
   const parsed = Number.parseInt(String(value ?? ""), 10);
   if (!Number.isFinite(parsed)) return fallback;
   return Math.max(min, Math.min(max, parsed));
+}
+
+function boolParam(value: unknown) {
+  return ["1", "true", "yes", "on"].includes(String(value ?? "").toLowerCase());
 }
 
 function throwDb(error: { message?: string; details?: string; hint?: string }, message: string): never {
