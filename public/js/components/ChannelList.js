@@ -2037,6 +2037,16 @@ class ChannelList {
             streamUrl = channel.url;
         }
 
+        // Attach the channel's quality variants so the player can build its
+        // quality menu (all HD/FHD/4K/H265 feeds of the same logical channel).
+        try {
+            if (window.ChannelGrouping && this.channels && this.channels.length) {
+                const country = window.app?.player?.getCountry?.() || 'FR';
+                const grp = window.ChannelGrouping.variantsForChannel(channel, this.channels, country);
+                if (grp && grp.variants && grp.variants.length > 1) channel.qualityGroup = grp;
+            }
+        } catch (e) { /* grouping is best-effort */ }
+
         // Play channel
         if (window.app?.player) {
             window.app.player.play(channel, streamUrl);

@@ -222,6 +222,19 @@
                     </button>
                     <input type="range" class="watch-volume" id="player-volume" min="0" max="100" value="80">
 
+                    <!-- Quality Button -->
+                    <div class="watch-captions-wrapper" id="player-quality-wrapper" style="display:none;">
+                      <button class="watch-btn" id="player-quality-btn" title="Qualité">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon">
+                          <path d="M3 5h18v2H3V5zm0 6h18v2H3v-2zm0 6h12v2H3v-2z" />
+                        </svg>
+                      </button>
+                      <div class="watch-captions-menu hidden" id="player-quality-menu">
+                        <div class="captions-menu-title">Qualité</div>
+                        <div class="captions-menu-list" id="player-quality-list"></div>
+                      </div>
+                    </div>
+
                     <!-- Captions Button -->
                     <div class="watch-captions-wrapper">
                       <button class="watch-btn" id="player-captions-btn" title="Captions">
@@ -1302,9 +1315,10 @@
   <script src="/js/utils/playbackHealth.js?v=2"></script>
   <script src="/js/utils/tvNavigation.js?v=6"></script>
   <script src="/js/utils/standalone.js?v=1"></script>
+  <script src="/js/utils/channelGrouping.js?v=1"></script>
   <script src="/js/components/MultiSelect.js?v=1"></script>
-  <script src="/js/components/VideoPlayer.js?v=9"></script>
-  <script src="/js/components/ChannelList.js?v=13"></script>
+  <script src="/js/components/VideoPlayer.js?v=10"></script>
+  <script src="/js/components/ChannelList.js?v=14"></script>
   <script src="/js/components/SourceManager.js?v=3"></script>
   <script src="/js/components/EpgGuide.js?v=5"></script>
   <script src="/js/components/LiveGuideFusion.js?v=8"></script>

@@ -351,6 +351,31 @@ class VideoPlayer {
             }
         });
 
+        // Quality menu (variant switching)
+        this.qualityWrapper = document.getElementById('player-quality-wrapper');
+        this.qualityBtn = document.getElementById('player-quality-btn');
+        this.qualityMenu = document.getElementById('player-quality-menu');
+        this.qualityList = document.getElementById('player-quality-list');
+        this.qualityGroup = null;
+        this.currentVariant = null;
+        this._triedVariants = new Set();
+        this.qualityBtn?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.qualityMenu?.classList.toggle('hidden');
+        });
+        document.addEventListener('click', (e) => {
+            if (this.qualityMenu && !this.qualityMenu.classList.contains('hidden') &&
+                !this.qualityMenu.contains(e.target) && !this.qualityBtn.contains(e.target)) {
+                this.qualityMenu.classList.add('hidden');
+            }
+        });
+        // Playback progressing → the chosen variant works: cancel any pending fallback.
+        this.video.addEventListener('timeupdate', () => {
+            if (this._vfTimer && this.video.currentTime > (this._vfStartCt || 0) + 0.3) {
+                clearTimeout(this._vfTimer); this._vfTimer = null; this._triedVariants.clear();
+            }
+        });
+
         // Fullscreen
         btnFullscreen?.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -1019,6 +1044,7 @@ class VideoPlayer {
     async play(channel, streamUrl) {
         this.currentChannel = channel;
         this._playbackStatusOkReported = false;
+        this.applyQualityGroup(channel);
 
         try {
             // Stop any WatchPage playback (movies/series) before starting Live TV
@@ -1473,11 +1499,104 @@ class VideoPlayer {
         const badge = document.getElementById('player-quality-badge');
         if (!badge) return;
 
+        if (this.currentVariant && this.currentVariant.label) {
+            badge.textContent = this.currentVariant.label;
+            badge.classList.remove('hidden');
+            return;
+        }
         if (this.currentStreamInfo?.height > 0) {
             badge.textContent = this.getQualityLabel(this.currentStreamInfo.height);
             badge.classList.remove('hidden');
         } else {
             badge.classList.add('hidden');
+        }
+    }
+
+    /** User's country for channel grouping (override → locale → FR). */
+    getCountry() {
+        try { const s = localStorage.getItem('norva-country'); if (s) return s.toUpperCase(); } catch (e) { }
+        const loc = (navigator.language || '').split('-')[1];
+        return (loc || 'FR').toUpperCase();
+    }
+
+    /** Wire the quality menu from a channel's variant group (set by ChannelList, or derived on the fly). */
+    applyQualityGroup(channel) {
+        let group = channel && channel.qualityGroup;
+        if (!group && channel && window.ChannelGrouping) {
+            const catalog = window.app?.channelList?.channels || window.app?.pages?.live?.channelList?.channels;
+            if (catalog) { try { group = window.ChannelGrouping.variantsForChannel(channel, catalog, this.getCountry()); } catch (e) { } }
+        }
+        this.qualityGroup = (group && group.variants && group.variants.length > 1) ? group : null;
+        if (!this.qualityGroup) {
+            if (this.qualityWrapper) this.qualityWrapper.style.display = 'none';
+            if (!(channel && channel.currentVariant)) this.currentVariant = null;
+            return;
+        }
+        const sid = String(channel.streamId != null ? channel.streamId : channel.stream_id);
+        this.currentVariant = channel.currentVariant
+            || this.qualityGroup.variants.find(v => String(v.streamId) === sid)
+            || this.qualityGroup.defaultVariant
+            || this.qualityGroup.variants[0];
+        if (this.qualityWrapper) this.qualityWrapper.style.display = '';
+        this.populateQualityMenu();
+        this.updateQualityBadge();
+    }
+
+    populateQualityMenu() {
+        if (!this.qualityList || !this.qualityGroup) return;
+        this.qualityList.innerHTML = '';
+        this.qualityGroup.variants.forEach(v => {
+            const btn = document.createElement('button');
+            const active = this.currentVariant && String(v.streamId) === String(this.currentVariant.streamId);
+            btn.className = 'captions-option' + (active ? ' active' : '');
+            btn.textContent = v.label + (v.healthRank >= 3 ? '  (HS)' : '');
+            btn.addEventListener('click', (e) => { e.stopPropagation(); this.switchVariant(v); });
+            this.qualityList.appendChild(btn);
+        });
+    }
+
+    /** Switch to another variant: re-resolve its stream and reload, with auto-fallback. */
+    async switchVariant(variant) {
+        if (!variant || !this.currentChannel) return;
+        this.qualityMenu?.classList.add('hidden');
+        if (this.currentVariant && String(variant.streamId) === String(this.currentVariant.streamId) && this.video.readyState >= 3) return;
+        this.currentVariant = variant;
+        this.populateQualityMenu();
+        this.updateQualityBadge();
+        try {
+            const fmt = (this.settings && this.settings.streamFormat) || 'm3u8';
+            const res = await window.API.proxy.xtream.getStreamUrl(variant.sourceId, variant.streamId, 'live', fmt);
+            const url = res && (res.url || res.streamUrl);
+            if (!url) throw new Error('no url');
+            const ch = Object.assign({}, this.currentChannel, { streamId: variant.streamId, currentVariant: variant, qualityGroup: this.qualityGroup });
+            this._armVariantFallback(variant);
+            this.play(ch, url);
+        } catch (e) {
+            console.warn('[Quality] switch failed:', e.message);
+            this._tryFallback(variant, 'resolve failed');
+        }
+    }
+
+    _armVariantFallback(variant) {
+        clearTimeout(this._vfTimer);
+        this._vfStartCt = this.video.currentTime || 0;
+        this._vfTimer = setTimeout(() => {
+            this._vfTimer = null;
+            const progressed = this.video.currentTime > this._vfStartCt + 0.3 && this.video.readyState >= 3;
+            if (!progressed) this._tryFallback(variant, 'no start in time');
+        }, 9000);
+    }
+
+    _tryFallback(failed, reason) {
+        if (!this.qualityGroup || !window.ChannelGrouping) return;
+        this._triedVariants.add(String(failed.streamId));
+        const order = window.ChannelGrouping.fallbackOrder(this.qualityGroup.variants, failed.streamId)
+            .filter(v => !this._triedVariants.has(String(v.streamId)));
+        if (order.length) {
+            console.warn('[Quality] fallback (' + reason + ') -> ' + order[0].label);
+            this.switchVariant(order[0]);
+        } else {
+            console.warn('[Quality] no healthy fallback left for ' + (this.qualityGroup.name || ''));
         }
     }
 
