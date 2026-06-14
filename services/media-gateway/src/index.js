@@ -21,6 +21,12 @@ const STOP_CONFLICTING_OWNER_SESSIONS = (process.env.STOP_CONFLICTING_OWNER_SESS
 const FFMPEG_USER_AGENT = process.env.FFMPEG_USER_AGENT ||
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36 Norva/1.0';
 const MAX_LOG_TAIL = 12000;
+// Always re-encode audio to plain AAC-LC stereo @48k. Source HE-AAC / unusual
+// sample rates make hls.js label the track mp4a.40.5 (HE-AAC), and Chrome's
+// MSE then rejects the audio SourceBuffer append (bufferAppendError) — which
+// ends the MediaSource and takes video down with it. LC-AAC @48k removes the
+// SBR ambiguity so the segment appends cleanly.
+const AUDIO_ARGS = ['-c:a', 'aac', '-profile:a', 'aac_low', '-ar', '48000', '-ac', '2', '-b:a', '128k'];
 
 const sessions = new Map();
 const lastFailures = [];
@@ -35,7 +41,7 @@ app.get('/health', (req, res) => {
     res.json({
         ok: true,
         service: 'norva-media-gateway',
-        version: 14,
+        version: 15,
         activeSessions: activeSessionCount(),
         totalSessions: sessions.size,
         lastFailureCount: lastFailures.length,
@@ -203,14 +209,12 @@ function startFfmpeg(session) {
             '-crf', '23',
             '-g', '48',
             '-sc_threshold', '0',
-            '-c:a', 'aac',
-            '-b:a', '128k'
+            ...AUDIO_ARGS
         );
     } else {
         args.push(
             '-c:v', 'copy',
-            '-c:a', 'aac',
-            '-b:a', '128k'
+            ...AUDIO_ARGS
         );
     }
 
