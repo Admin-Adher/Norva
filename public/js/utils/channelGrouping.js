@@ -73,10 +73,14 @@
         let prefix = '';
         const pm = work.match(/^([a-z0-9 \-]+?)\s*\|\s*/);
         if (pm) { prefix = pm[1].trim(); work = work.slice(pm[0].length); }
+        // Detect the codec BEFORE stripping brackets — providers tag it as
+        // "[H265]", and stripping first would lose the signal (collapsing an
+        // H265 feed and an H264 feed into one deduped label).
+        const codecHint = /\b(h265|hevc)\b/.test(work) || /\b(h265|hevc)\b/.test(prefix);
         work = work.replace(/\[[^\]]*\]/g, ' ').replace(/\([^)]*\)/g, ' ');
 
         const quals = [];
-        let codec = false, foreign = null;
+        let codec = codecHint, foreign = null;
         prefix.split(/[^a-z0-9]+/).filter(Boolean).forEach(t => {
             if (QUALITY_TOKENS[t]) quals.push(QUALITY_TOKENS[t]);
             else if (t === 'fr' || t === 'kids') { /* fr / kids-fr → keep */ }
