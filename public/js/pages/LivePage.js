@@ -13,6 +13,9 @@ class LivePage {
         await this.app.channelList.loadSources();
         await this.app.channelList.loadChannels();
         this.app.liveGuideFusion?.render();
+        if (document.getElementById('page-live')?.classList.contains('active')) {
+            this.app.channelList.resumeLivePlayback();
+        }
 
         // Silently fetch EPG data for sidebar info
         try {
@@ -102,6 +105,7 @@ class LivePage {
             await this.app.channelList.loadChannels();
         }
         this.app.liveGuideFusion?.render();
+        this.app.channelList.resumeLivePlayback();
     }
 
     hide() {

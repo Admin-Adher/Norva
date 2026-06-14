@@ -22,6 +22,7 @@ const CONSOLIDATED_LIVE_GROUPS = {
     MULTIPLEX: 'Multiplex et evenements'
 };
 const LIVE_CATALOG_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+const LAST_LIVE_CHANNEL_KEY = 'norva_last_live_channel_v1';
 
 class ChannelList {
     constructor() {
@@ -54,6 +55,8 @@ class ChannelList {
         this.remoteSearchInFlight = null;
         this.liveHydrationRunId = 0;
         this.liveCacheDbPromise = null;
+        this.pendingLiveResume = false;
+        this.liveResumeInFlight = null;
 
         this.loadCollapsedState();
         this.init();
@@ -1802,6 +1805,7 @@ class ChannelList {
             if (loadRunId !== this.liveHydrationRunId) return;
             this.renderBrowsePreservingFocus();
             window.app?.liveGuideFusion?.render();
+            this.resumeLivePlaybackIfPending();
         }).catch(err => {
             console.warn('[ChannelList] Live decorations refresh failed:', err);
         });
@@ -1911,6 +1915,7 @@ class ChannelList {
                 this._indexedChannels = null;
                 if (!this.searchMode) this.renderBrowsePreservingFocus();
                 window.app?.liveGuideFusion?.render();
+                this.resumeLivePlaybackIfPending();
             }
             if (loadRunId === this.liveHydrationRunId) {
                 await this.writeLiveCatalogCache(sourceId, sourceType);
@@ -1934,6 +1939,105 @@ class ChannelList {
             added += 1;
         }
         return added;
+    }
+
+    getLastLiveChannelRecord() {
+        try {
+            return JSON.parse(localStorage.getItem(LAST_LIVE_CHANNEL_KEY) || 'null');
+        } catch (_) {
+            return null;
+        }
+    }
+
+    rememberLastLiveChannel(channel) {
+        if (!channel) return;
+        try {
+            localStorage.setItem(LAST_LIVE_CHANNEL_KEY, JSON.stringify({
+                id: channel.id,
+                sourceId: channel.sourceId,
+                sourceType: channel.sourceType || '',
+                streamId: channel.streamId || channel.stream_id || '',
+                name: channel.name || '',
+                savedAt: Date.now()
+            }));
+        } catch (_) { /* local storage can be unavailable in private modes */ }
+    }
+
+    findLastLiveChannel() {
+        const record = this.getLastLiveChannelRecord();
+        if (!record) return null;
+        return this.channels.find(channel => {
+            if (String(channel.sourceId) !== String(record.sourceId)) return false;
+            if (String(channel.id) === String(record.id)) return true;
+            const streamId = channel.streamId || channel.stream_id || '';
+            return streamId && String(streamId) === String(record.streamId || '');
+        }) || null;
+    }
+
+    getFirstPlayableChannel() {
+        return this.channels.find(channel => {
+            if (!channel) return false;
+            const rawId = channel.streamId || channel.stream_id || channel.id;
+            if (this.isHidden('channel', channel.sourceId, rawId)) return false;
+            if (this.isHidden('group', channel.sourceId, channel.groupTitle)) return false;
+            if (this.hideBroken && this.shouldHideByPlayback(channel)) return false;
+            return true;
+        }) || this.channels[0] || null;
+    }
+
+    getLiveResumeChannel() {
+        return this.findLastLiveChannel()
+            || this.currentChannel
+            || this.getFirstPlayableChannel();
+    }
+
+    hasActiveLivePlayback(channel = this.currentChannel) {
+        const player = window.app?.player;
+        if (!player || !channel || !player.currentChannel) return false;
+        const sameChannel = String(player.currentChannel.id) === String(channel.id)
+            && String(player.currentChannel.sourceId) === String(channel.sourceId);
+        return sameChannel && player.hasCurrentMedia?.();
+    }
+
+    resumeLivePlayback(options = {}) {
+        const { force = false } = options;
+        if (this.liveResumeInFlight) return this.liveResumeInFlight;
+
+        const channel = this.getLiveResumeChannel();
+        if (!channel) {
+            this.pendingLiveResume = true;
+            return Promise.resolve(false);
+        }
+
+        if (!force && this.hasActiveLivePlayback(channel)) {
+            this.currentChannel = channel;
+            this.pendingLiveResume = false;
+            return Promise.resolve(true);
+        }
+
+        this.pendingLiveResume = false;
+        this.liveResumeInFlight = this.selectChannel({
+            channelId: channel.id,
+            sourceId: channel.sourceId,
+            sourceType: channel.sourceType,
+            streamId: channel.streamId || channel.stream_id || '',
+            url: channel.url || '',
+            autoResume: 'true'
+        }).then(() => true).catch(err => {
+            console.warn('[ChannelList] Live resume failed:', err);
+            this.pendingLiveResume = true;
+            return false;
+        }).finally(() => {
+            this.liveResumeInFlight = null;
+        });
+
+        return this.liveResumeInFlight;
+    }
+
+    resumeLivePlaybackIfPending() {
+        if (!this.pendingLiveResume) return;
+        if (!document.getElementById('page-live')?.classList.contains('active')) return;
+        this.resumeLivePlayback();
     }
 
     mapLiveStreamsToChannels(sourceId, categories, streams, sourceType = 'xtream') {
@@ -2519,6 +2623,7 @@ class ChannelList {
         this.currentRenderId = dataset.renderId; // Track which visual instance is active
         this.currentRenderGroup = dataset.renderGroup; // Track which group the selection came from
 
+        this.rememberLastLiveChannel(channel);
         this.rememberRecentChannel(channel);
 
         // Flat search/zero-state results: refresh the highlight only —
