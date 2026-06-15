@@ -59,6 +59,7 @@ const RUNTIME_CONFIG_KEYS = [
   "NORVA_MEDIA_GATEWAY_TOKEN",
   "NORVA_SOURCE_CONFIG_KEY",
 ];
+const CONTENT_REGION_PATTERN = /^[A-Z][A-Z0-9_]{1,31}$/;
 
 if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
   throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
@@ -288,12 +289,40 @@ async function getProfile(userId: string, db: SupabaseClient) {
 
 async function upsertProfile(req: Request, userId: string, db: SupabaseClient) {
   const body = await readJson(req);
-  const row = {
+  const { data: existing, error: existingError } = await db
+    .from("cloud_profiles")
+    .select("*")
+    .eq("id", userId)
+    .maybeSingle();
+  if (existingError) throwDb(existingError, "Unable to load profile");
+
+  const hasDisplayName =
+    Object.prototype.hasOwnProperty.call(body, "displayName") ||
+    Object.prototype.hasOwnProperty.call(body, "display_name");
+  const hasAvatarUrl =
+    Object.prototype.hasOwnProperty.call(body, "avatarUrl") ||
+    Object.prototype.hasOwnProperty.call(body, "avatar_url");
+  const hasLocale = Object.prototype.hasOwnProperty.call(body, "locale");
+  const hasRegion =
+    Object.prototype.hasOwnProperty.call(body, "preferredContentRegion") ||
+    Object.prototype.hasOwnProperty.call(body, "preferred_content_region");
+
+  const row: JsonRecord = {
     id: userId,
-    display_name: stringOrNull(body.displayName ?? body.display_name),
-    avatar_url: stringOrNull(body.avatarUrl ?? body.avatar_url),
-    locale: stringOrNull(body.locale) ?? "fr-FR",
+    display_name: hasDisplayName ? stringOrNull(body.displayName ?? body.display_name) : stringOrNull(existing?.display_name),
+    avatar_url: hasAvatarUrl ? stringOrNull(body.avatarUrl ?? body.avatar_url) : stringOrNull(existing?.avatar_url),
+    locale: hasLocale ? (stringOrNull(body.locale) ?? "fr-FR") : (stringOrNull(existing?.locale) ?? "fr-FR"),
   };
+
+  if (hasRegion) {
+    if (!hasExplicitContentRegionConfirmation(body)) {
+      throw new HttpError(400, "preferred_content_region requires explicit user confirmation");
+    }
+    const region = normalizeContentRegion(body.preferredContentRegion ?? body.preferred_content_region);
+    row.preferred_content_region = region;
+    row.preferred_content_region_confirmed_at = region ? new Date().toISOString() : null;
+    row.content_region_taxonomy_version = "v1";
+  }
 
   const { data, error } = await db
     .from("cloud_profiles")
@@ -302,6 +331,27 @@ async function upsertProfile(req: Request, userId: string, db: SupabaseClient) {
     .single();
   if (error) throwDb(error, "Unable to save profile");
   return data;
+}
+
+function hasExplicitContentRegionConfirmation(body: JsonRecord) {
+  return (
+    body.confirmPreferredContentRegion === true ||
+    body.confirm_preferred_content_region === true ||
+    body.preferredContentRegionConfirmed === true ||
+    body.preferred_content_region_confirmed === true ||
+    body.regionPreferenceConfirmed === true ||
+    body.region_preference_confirmed === true
+  );
+}
+
+function normalizeContentRegion(value: unknown) {
+  if (value === null || value === undefined) return null;
+  const normalized = String(value).trim().toUpperCase().replace(/[\s-]+/g, "_");
+  if (!normalized) return null;
+  if (!CONTENT_REGION_PATTERN.test(normalized)) {
+    throw new HttpError(400, "Invalid preferred_content_region");
+  }
+  return normalized;
 }
 
 async function listDevices(userId: string, db: SupabaseClient) {

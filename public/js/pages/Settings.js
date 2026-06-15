@@ -132,23 +132,39 @@ class SettingsPage {
             API.settings.update({ tmdbApiKey: tmdbKeyInput.value.trim() }).catch(console.error);
         });
 
-        // Country / region: drives the Live TV national line-up order + logos.
+        // Catalog region: confirmed user preference. Locale/IP suggestions never write it.
         const countrySelect = document.getElementById('setting-country');
         if (countrySelect) {
-            let cc = '';
-            try { cc = (localStorage.getItem('norva-country') || '').toUpperCase(); } catch (e) { }
-            if (!cc) { const loc = (navigator.language || '').split('-')[1]; cc = (loc || 'FR').toUpperCase(); }
-            if (![...countrySelect.options].some(o => o.value === cc)) cc = 'FR';
-            countrySelect.value = cc;
+            const regionApi = window.NorvaCloud?.regions;
+            const hint = countrySelect.parentElement?.querySelector('.setting-hint');
+            const baseHint = hint?.textContent || 'Catalog region changes only the presentation order, not access.';
+            const applyResolution = () => {
+                const resolution = regionApi?.resolve?.() || { region: 'FR', status: 'inferred', source: 'fallback' };
+                const value = String(resolution.region || 'FR').toUpperCase();
+                if (![...countrySelect.options].some(o => o.value === value)) {
+                    countrySelect.add(new Option(regionApi?.label?.(value) || value, value));
+                }
+                countrySelect.value = value;
+                if (hint) {
+                    const state = resolution.status === 'confirmed'
+                        ? `Preference confirmee (${regionApi?.label?.(value) || value}).`
+                        : `Region deduite (${regionApi?.label?.(value) || value}) tant que tu ne confirmes pas un choix.`;
+                    hint.textContent = `${baseHint} ${state}`;
+                }
+            };
+            applyResolution();
 
             countrySelect.addEventListener('change', async () => {
                 const value = countrySelect.value;
-                try { localStorage.setItem('norva-country', value); } catch (e) { }
                 countrySelect.disabled = true;
-                const prevHint = countrySelect.parentElement?.querySelector('.setting-hint');
-                const originalHint = prevHint?.textContent;
-                if (prevHint) prevHint.textContent = `Re-synchronisation des chaînes pour ${value}…`;
+                const originalHint = hint?.textContent;
+                if (hint) hint.textContent = `Synchronisation du catalogue pour ${regionApi?.label?.(value) || value}...`;
                 try {
+                    if (regionApi?.setPreferred) {
+                        await regionApi.setPreferred(value);
+                    } else {
+                        localStorage.setItem('norva-country', value);
+                    }
                     const sources = await API.sources.getAll();
                     for (const src of (sources || [])) {
                         try { await API.sources.sync(src.id); } catch (e) { console.warn('[country] resync failed for', src.id, e); }
@@ -156,7 +172,8 @@ class SettingsPage {
                     try { await window.app?.channelList?.loadChannels?.(); } catch (e) { }
                 } finally {
                     countrySelect.disabled = false;
-                    if (prevHint && originalHint) prevHint.textContent = originalHint;
+                    if (hint && originalHint) hint.textContent = originalHint;
+                    applyResolution();
                 }
             });
         }

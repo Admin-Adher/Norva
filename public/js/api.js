@@ -73,6 +73,18 @@ const CloudAdapter = (() => {
         return aliases[cloudId];
     }
 
+    function activeContentRegion() {
+        try {
+            const resolved = window.NorvaCloud?.regions?.resolve?.();
+            if (resolved?.region) return String(resolved.region).toUpperCase();
+        } catch (_) { }
+        try {
+            const stored = localStorage.getItem('norva-preferred-content-region') || localStorage.getItem('norva-country');
+            if (stored) return String(stored).toUpperCase();
+        } catch (_) { }
+        return 'INTERNATIONAL';
+    }
+
     async function resolveSourceId(id) {
         const raw = String(id);
         if (raw.includes('-')) return raw;
@@ -287,7 +299,8 @@ const CloudAdapter = (() => {
         }));
     }
 
-    async function getLiveLogicalCatalog({ sourceId, categoryId, country = 'FR', q = '', limit = '', offset = '', includeVariants = true } = {}) {
+    async function getLiveLogicalCatalog({ sourceId, categoryId, country = '', q = '', limit = '', offset = '', includeVariants = true } = {}) {
+        country = String(country || activeContentRegion()).toUpperCase();
         const cloudSourceId = sourceId ? await resolveSourceId(sourceId) : '';
         const cacheKey = JSON.stringify({
             cloudSourceId,
@@ -317,7 +330,8 @@ const CloudAdapter = (() => {
         return payload;
     }
 
-    async function listLiveLogicalCategories({ sourceId, country = 'FR' } = {}) {
+    async function listLiveLogicalCategories({ sourceId, country = '' } = {}) {
+        country = String(country || activeContentRegion()).toUpperCase();
         const payload = await getLiveLogicalCatalog({ sourceId, country, includeVariants: false });
         return (payload.groups || []).map(group => ({
             category_id: String(group.category_id || group.id || 'uncategorized'),
@@ -327,7 +341,8 @@ const CloudAdapter = (() => {
         }));
     }
 
-    async function listLiveLogicalChannels({ sourceId, categoryId, country = 'FR', q = '', limit = '', offset = '' } = {}) {
+    async function listLiveLogicalChannels({ sourceId, categoryId, country = '', q = '', limit = '', offset = '' } = {}) {
+        country = String(country || activeContentRegion()).toUpperCase();
         const payload = await getLiveLogicalCatalog({ sourceId, categoryId, country, q, limit, offset, includeVariants: true });
         return (payload.channels || []).map(channel => normalizeLogicalLiveChannel(channel, sourceId));
     }

@@ -523,11 +523,12 @@ class ChannelList {
     }
 
     getBrowseCountry() {
-        const country = window.app?.player?.getCountry?.()
-            || localStorage.getItem('norva_country')
-            || navigator.language?.slice(0, 2)?.toUpperCase()
-            || 'FR';
-        return String(country || 'FR').toUpperCase();
+        const country = window.NorvaCloud?.regions?.active?.()
+            || window.app?.player?.getCountry?.()
+            || localStorage.getItem('norva-preferred-content-region')
+            || localStorage.getItem('norva-country')
+            || 'INTERNATIONAL';
+        return String(country || 'INTERNATIONAL').toUpperCase();
     }
 
     getChannelItemId(channel) {

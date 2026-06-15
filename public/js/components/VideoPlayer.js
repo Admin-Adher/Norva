@@ -1515,11 +1515,16 @@ class VideoPlayer {
         }
     }
 
-    /** User's country for channel grouping (override → locale → FR). */
+    /** Active catalog region for channel grouping. */
     getCountry() {
+        try {
+            const resolved = window.NorvaCloud?.regions?.resolve?.();
+            if (resolved?.region) return String(resolved.region).toUpperCase();
+        } catch (e) { }
+        try { const s = localStorage.getItem('norva-preferred-content-region'); if (s) return s.toUpperCase(); } catch (e) { }
         try { const s = localStorage.getItem('norva-country'); if (s) return s.toUpperCase(); } catch (e) { }
         const loc = (navigator.language || '').split('-')[1];
-        return (loc || 'FR').toUpperCase();
+        return (loc || 'INTERNATIONAL').toUpperCase();
     }
 
     /** Wire the quality menu from a channel's variant group (set by ChannelList, or derived on the fly). */
