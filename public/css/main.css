@@ -5762,7 +5762,7 @@ kbd {
   }
 }
 
-/* Compact touch rails for dense catalog pages on phones. */
+/* Compact touch controls for dense catalog pages on phones. */
 @media (max-width: 640px) {
 
   #page-movies .movies-header,
@@ -5777,32 +5777,29 @@ kbd {
   }
 
   #page-movies .movies-controls,
-  #page-series .series-controls,
-  #page-movies .filter-bar,
-  #page-series .filter-bar {
-    flex-wrap: nowrap;
+  #page-series .series-controls {
+    display: grid;
+    grid-template-columns: minmax(104px, 0.9fr) minmax(148px, 1.35fr) 44px;
     align-items: center;
     gap: 8px;
-    overflow-x: auto;
-    overflow-y: hidden;
-    scrollbar-width: none;
-    scroll-snap-type: x proximity;
-    -webkit-overflow-scrolling: touch;
+    width: 100%;
+    overflow: visible;
   }
 
-  #page-movies .movies-controls::-webkit-scrollbar,
-  #page-series .series-controls::-webkit-scrollbar,
-  #page-movies .filter-bar::-webkit-scrollbar,
-  #page-series .filter-bar::-webkit-scrollbar {
-    display: none;
+  #page-movies .filter-bar,
+  #page-series .filter-bar {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    align-items: center;
+    gap: 8px;
+    overflow: visible;
   }
 
   #page-movies .movies-controls > *,
   #page-series .series-controls > *,
   #page-movies .filter-bar > *,
   #page-series .filter-bar > * {
-    flex: 0 0 auto;
-    scroll-snap-align: start;
+    min-width: 0;
   }
 
   #page-movies .movies-controls .source-select,
@@ -5811,28 +5808,23 @@ kbd {
   #page-series .series-controls .multi-select-btn,
   #page-movies .filter-select,
   #page-series .filter-select {
-    width: auto;
-    min-width: 128px;
-    max-width: 158px;
+    width: 100%;
+    min-width: 0;
+    max-width: none;
     height: 36px;
     font-size: 0.78rem;
   }
 
   #page-movies .movies-controls .multi-select,
   #page-series .series-controls .multi-select {
-    min-width: 150px;
-  }
-
-  #page-movies .movies-controls .multi-select-btn,
-  #page-series .series-controls .multi-select-btn {
-    max-width: 170px;
+    min-width: 0;
   }
 
   #page-movies .movies-controls .search-wrapper,
   #page-series .series-controls .search-wrapper {
-    flex: 0 0 min(210px, calc(100vw - 32px));
-    width: min(210px, calc(100vw - 32px));
-    min-width: 180px;
+    grid-column: 1 / -1;
+    width: 100%;
+    min-width: 0;
   }
 
   #page-movies .movies-controls .search-input,
@@ -5853,7 +5845,12 @@ kbd {
     height: 36px;
     display: inline-flex;
     align-items: center;
+    justify-content: center;
     white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    padding-left: 8px;
+    padding-right: 8px;
   }
 
   #page-movies .filter-bar,
@@ -5862,12 +5859,30 @@ kbd {
     min-height: 52px;
   }
 
+  #movies-favorites-btn,
+  #series-favorites-btn {
+    width: 44px;
+    min-width: 44px;
+    padding: 0;
+    font-size: 0;
+  }
+
+  #movies-favorites-btn .icon,
+  #series-favorites-btn .icon {
+    width: 22px;
+    height: 22px;
+    margin: 0;
+  }
+
   #page-movies .filter-count,
   #page-series .filter-count {
     width: auto;
     margin-left: 0;
     order: 0;
     padding: 0 6px;
+    text-align: center;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   #page-movies .continue-row,

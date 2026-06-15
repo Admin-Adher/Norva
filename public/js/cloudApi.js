@@ -264,10 +264,13 @@
         prompt.id = 'norva-region-prompt';
         prompt.style.cssText = [
             'position:fixed',
-            'left:24px',
-            'bottom:24px',
+            'left:16px',
+            'right:16px',
+            'bottom:16px',
             'z-index:9999',
             'max-width:420px',
+            'width:auto',
+            'box-sizing:border-box',
             'background:#121722',
             'border:1px solid #2b3448',
             'border-radius:16px',
@@ -281,8 +284,8 @@
             <strong style="display:block;font-size:16px;margin:0 26px 8px 0">Organiser Norva pour ${escapeHtml(contentRegionLabel(suggestion.region))} ?</strong>
             <span style="display:block;color:#aeb8cc;margin-bottom:14px">Norva utilise cette region pour ordonner les chaines, logos et categories. Tu peux la changer a tout moment.</span>
             <div style="display:flex;gap:10px;flex-wrap:wrap">
-                <button type="button" data-region-confirm style="border:0;border-radius:10px;background:#5b7cfa;color:white;padding:10px 14px;font-weight:800;cursor:pointer">Oui</button>
-                <button type="button" data-region-settings style="border:1px solid #334155;border-radius:10px;background:#1b2230;color:#dbe7ff;padding:10px 14px;font-weight:800;cursor:pointer">Choisir une autre region</button>
+                <button type="button" data-region-confirm style="flex:1 1 82px;border:0;border-radius:10px;background:#5b7cfa;color:white;padding:10px 14px;font-weight:800;cursor:pointer">Oui</button>
+                <button type="button" data-region-settings style="flex:2 1 180px;min-width:0;border:1px solid #334155;border-radius:10px;background:#1b2230;color:#dbe7ff;padding:10px 14px;font-weight:800;cursor:pointer">Choisir une autre region</button>
             </div>
         `;
 
