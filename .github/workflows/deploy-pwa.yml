@@ -11,6 +11,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Verify region model
+        run: npm run verify:region
+
+      - name: Check frontend JavaScript syntax
+        run: |
+          node --check public/js/cloudApi.js
+          node --check clients/mobile-pwa/cloudApi.js
+          node --check public/js/pages/Settings.js
+
       - name: Deploy to Vercel
         uses: amondnet/vercel-action@v25
         with:
