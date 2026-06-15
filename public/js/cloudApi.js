@@ -100,11 +100,12 @@
     }
 
     async function sourceSyncRequest(id) {
+        const path = `/sources/${encodeURIComponent(id)}/sync?country=${encodeURIComponent(resolveCountry())}`;
         try {
-            return await requestToBase(sourceSyncBase(), 'POST', `/sources/${encodeURIComponent(id)}/sync`, {});
+            return await requestToBase(sourceSyncBase(), 'POST', path, {});
         } catch (error) {
             if (error.status === 404 || error.status === 405) {
-                return request('POST', `/sources/${encodeURIComponent(id)}/sync`, {});
+                return request('POST', path, {});
             }
             throw error;
         }

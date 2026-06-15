@@ -56,7 +56,7 @@ Deno.serve(async (req) => {
     }
     if (req.method === "POST" && segments[0] === "sources" && segments[2] === "sync") {
       const user = await requireUser(req, supabase);
-      const result = await syncCloudSource(segments[1], user.id, supabase);
+      const result = await syncCloudSource(segments[1], user.id, supabase, url.searchParams.get("country"));
       return json(req, result);
     }
     throw new HttpError(404, "Route not found");
@@ -78,7 +78,7 @@ async function requireUser(req: Request, db: SupabaseClient) {
   return { id: data.user.id, email: data.user.email ?? undefined };
 }
 
-async function syncCloudSource(sourceId: string, userId: string, db: SupabaseClient) {
+async function syncCloudSource(sourceId: string, userId: string, db: SupabaseClient, country: string | null = null) {
   const { data: source, error } = await db
     .from("cloud_sources")
     .select("*")
@@ -99,9 +99,9 @@ async function syncCloudSource(sourceId: string, userId: string, db: SupabaseCli
   try {
     const config = await decryptSourceConfig(source.config_ciphertext, await getRuntimeConfig(db));
     const result = source.source_type === "xtream"
-      ? await syncXtreamSource(sourceId, userId, config, db)
+      ? await syncXtreamSource(sourceId, userId, config, db, country)
       : source.source_type === "m3u"
-        ? await syncM3uSource(sourceId, userId, config, db)
+        ? await syncM3uSource(sourceId, userId, config, db, country)
         : { total: 0 };
 
     if ((source.source_type === "xtream" || source.source_type === "m3u") && Number(result.total ?? 0) <= 0) {
@@ -136,7 +136,7 @@ async function syncCloudSource(sourceId: string, userId: string, db: SupabaseCli
   }
 }
 
-async function syncXtreamSource(sourceId: string, userId: string, config: JsonRecord, db: SupabaseClient) {
+async function syncXtreamSource(sourceId: string, userId: string, config: JsonRecord, db: SupabaseClient, country: string | null = null) {
   const serverUrl = normalizeBaseUrl(stringOr(config.serverUrl, ""));
   const username = stringOr(config.username, "");
   const password = stringOr(config.password, "");
@@ -161,7 +161,7 @@ async function syncXtreamSource(sourceId: string, userId: string, config: JsonRe
   ];
 
   const savedRows = await replaceSourceItems(sourceId, userId, rows, db);
-  const liveCatalog = await refreshMaterializedLiveCatalog(db, { sourceId, userId, rows: savedRows, country: stringOr(config.country, "FR") });
+  const liveCatalog = await refreshMaterializedLiveCatalog(db, { sourceId, userId, rows: savedRows, country: country || stringOr(config.country, "FR") });
   return {
     live: Array.isArray(live) ? live.length : 0,
     movies: Array.isArray(vod) ? vod.length : 0,
@@ -231,7 +231,7 @@ function xtreamRows(
   return rows;
 }
 
-async function syncM3uSource(sourceId: string, userId: string, config: JsonRecord, db: SupabaseClient) {
+async function syncM3uSource(sourceId: string, userId: string, config: JsonRecord, db: SupabaseClient, country: string | null = null) {
   const playlistUrl = stringOr(config.playlistUrl, "");
   const playlist = await fetchText(playlistUrl, 30000, 20_000_000);
   const items = parseM3u(playlist).slice(0, 20000);
@@ -251,7 +251,7 @@ async function syncM3uSource(sourceId: string, userId: string, config: JsonRecor
   })));
 
   const savedRows = await replaceSourceItems(sourceId, userId, rows, db);
-  const liveCatalog = await refreshMaterializedLiveCatalog(db, { sourceId, userId, rows: savedRows, country: stringOr(config.country, "FR") });
+  const liveCatalog = await refreshMaterializedLiveCatalog(db, { sourceId, userId, rows: savedRows, country: country || stringOr(config.country, "FR") });
   return { live: rows.length, total: rows.length, liveCatalog };
 }
 
