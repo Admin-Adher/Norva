@@ -201,8 +201,14 @@ async function listHomeRails(url: URL, userId: string) {
 
   if (includeMovies) {
     rails.push(await listTitleRail(userId, "movie", "recently-added-movies", "Recently Added Movies", limit));
+    rails.push(await listGenreRail(userId, "movie", "Action", "action-movies", "Films d'action", limit));
   }
+
+  const watchedRail = await listBecauseYouWatchedRail(userId, { includeMovies, includeSeries, limit });
+  if (watchedRail) rails.push(watchedRail);
+
   if (includeSeries) {
+    rails.push(await listPopularTitleRail(userId, "series", "popular-series", "Series populaires", limit));
     rails.push(await listTitleRail(userId, "series", "recently-added-series", "Recently Added Series", limit));
   }
 
@@ -241,6 +247,189 @@ async function listTitleRail(userId: string, itemType: "movie" | "series", id: s
   }
 }
 
+async function listGenreRail(
+  userId: string,
+  itemType: "movie" | "series",
+  genre: string,
+  id: string,
+  title: string,
+  limit: number,
+) {
+  try {
+    const candidates = await listVerifiedTitleCandidates(userId, itemType);
+    const titles = candidates
+      .filter((row) => titleGenres(row).some((value: string) => sameGenre(value, genre)))
+      .sort((a, b) => String(b.synced_at ?? b.updated_at ?? "").localeCompare(String(a.synced_at ?? a.updated_at ?? "")))
+      .slice(0, limit);
+    const variantsByTitle = await listVariantsByTitleIds(titles.map((row) => String(row.id)));
+    return {
+      id,
+      title,
+      itemType,
+      source: "titles",
+      curation: { kind: "genre", genre },
+      items: titles.map((row) => titleRailItem(row, variantsByTitle.get(String(row.id)) ?? [])),
+    };
+  } catch (error) {
+    if (isMissingMaterialization(error)) return { id, title, itemType, source: "titles", items: [] };
+    throw error;
+  }
+}
+
+async function listPopularTitleRail(
+  userId: string,
+  itemType: "movie" | "series",
+  id: string,
+  title: string,
+  limit: number,
+) {
+  try {
+    const candidates = await listVerifiedTitleCandidates(userId, itemType);
+    const titles = candidates
+      .filter((row) => numberOrNull(titleTmdb(row).vote_average) !== null)
+      .sort((a, b) =>
+        numberOr(titleTmdb(b).vote_average, 0) - numberOr(titleTmdb(a).vote_average, 0) ||
+        numberOr(b.variant_count, 0) - numberOr(a.variant_count, 0) ||
+        String(b.synced_at ?? b.updated_at ?? "").localeCompare(String(a.synced_at ?? a.updated_at ?? ""))
+      )
+      .slice(0, limit);
+    const variantsByTitle = await listVariantsByTitleIds(titles.map((row) => String(row.id)));
+    return {
+      id,
+      title,
+      itemType,
+      source: "titles",
+      curation: { kind: "popular", metric: "tmdb_vote_average" },
+      items: titles.map((row) => titleRailItem(row, variantsByTitle.get(String(row.id)) ?? [])),
+    };
+  } catch (error) {
+    if (isMissingMaterialization(error)) return { id, title, itemType, source: "titles", items: [] };
+    throw error;
+  }
+}
+
+async function listBecauseYouWatchedRail(
+  userId: string,
+  options: { includeMovies: boolean; includeSeries: boolean; limit: number },
+) {
+  const itemTypes = [
+    ...(options.includeMovies ? ["movie"] : []),
+    ...(options.includeSeries ? ["series"] : []),
+  ];
+  if (!itemTypes.length) return null;
+
+  try {
+    const { data: history, error } = await db
+      .from("cloud_watch_history")
+      .select("source_id,item_type,item_id,item_name,data,updated_at")
+      .eq("user_id", userId)
+      .in("item_type", itemTypes)
+      .order("updated_at", { ascending: false })
+      .limit(40);
+    if (error) throwDb(error, "Unable to list watch history for home rail");
+
+    for (const entry of history ?? []) {
+      const watchedTitle = await resolveWatchedTitle(userId, entry);
+      if (!watchedTitle) continue;
+      const genres = titleGenres(watchedTitle);
+      if (!genres.length) continue;
+
+      const itemType = String(watchedTitle.item_type) === "series" ? "series" : "movie";
+      const candidates = await listVerifiedTitleCandidates(userId, itemType);
+      const watchedId = String(watchedTitle.id);
+      const titles = candidates
+        .filter((row) => String(row.id) !== watchedId)
+        .filter((row) => titleGenres(row).some((candidateGenre: string) =>
+          genres.some((anchorGenre: string) => sameGenre(candidateGenre, anchorGenre))
+        ))
+        .sort((a, b) =>
+          numberOr(titleTmdb(b).vote_average, 0) - numberOr(titleTmdb(a).vote_average, 0) ||
+          String(b.synced_at ?? b.updated_at ?? "").localeCompare(String(a.synced_at ?? a.updated_at ?? ""))
+        )
+        .slice(0, options.limit);
+      if (!titles.length) continue;
+
+      const variantsByTitle = await listVariantsByTitleIds(titles.map((row) => String(row.id)));
+      return {
+        id: `because-you-watched-${watchedId}`,
+        title: "Parce que vous avez regarde",
+        itemType,
+        source: "titles",
+        curation: {
+          kind: "because_you_watched",
+          anchorTitleId: watchedId,
+          anchorTitle: watchedTitle.title ?? watchedTitle.original_title ?? null,
+          genres,
+        },
+        items: titles.map((row) => titleRailItem(row, variantsByTitle.get(String(row.id)) ?? [])),
+      };
+    }
+  } catch (error) {
+    if (isMissingMaterialization(error)) return null;
+    throw error;
+  }
+
+  return null;
+}
+
+async function resolveWatchedTitle(userId: string, history: JsonRecord) {
+  const data = recordOrEmpty(history.data);
+  const titleId = stringOrNull(data.titleId ?? data.title_id);
+  if (titleId) {
+    const title = await loadTitleById(userId, titleId);
+    if (title) return title;
+  }
+
+  const sourceId = stringOrNull(history.source_id);
+  const itemType = String(history.item_type) === "series" ? "series" : String(history.item_type) === "movie" ? "movie" : "";
+  const itemId = stringOrNull(history.item_id);
+  if (!sourceId || !itemType || !itemId) return null;
+
+  const { data: variant, error } = await db
+    .from("cloud_title_variants")
+    .select("title_id")
+    .eq("user_id", userId)
+    .eq("source_id", sourceId)
+    .eq("item_type", itemType)
+    .eq("external_id", itemId)
+    .maybeSingle();
+  if (error) {
+    if (isMissingMaterialization(error)) return null;
+    throwDb(error, "Unable to resolve watched title variant");
+  }
+  const resolvedTitleId = stringOrNull(variant?.title_id);
+  return resolvedTitleId ? loadTitleById(userId, resolvedTitleId) : null;
+}
+
+async function loadTitleById(userId: string, titleId: string) {
+  const { data, error } = await db
+    .from("cloud_titles")
+    .select("*")
+    .eq("user_id", userId)
+    .eq("id", titleId)
+    .maybeSingle();
+  if (error) {
+    if (isMissingMaterialization(error)) return null;
+    throwDb(error, "Unable to load title");
+  }
+  return data ?? null;
+}
+
+async function listVerifiedTitleCandidates(userId: string, itemType: "movie" | "series", candidateLimit = 300) {
+  const { data, error } = await db
+    .from("cloud_titles")
+    .select("*")
+    .eq("user_id", userId)
+    .eq("item_type", itemType)
+    .eq("match_status", "provider_verified")
+    .gt("variant_count", 0)
+    .order("synced_at", { ascending: false })
+    .order("updated_at", { ascending: false })
+    .limit(candidateLimit);
+  if (error) throwDb(error, "Unable to list verified title candidates");
+  return (data ?? []) as JsonRecord[];
+}
+
 async function listVariantsByTitleIds(titleIds: string[]) {
   const variantsByTitle = new Map<string, JsonRecord[]>();
   if (!titleIds.length) return variantsByTitle;
@@ -273,6 +462,11 @@ async function listVariantsByTitleIds(titleIds: string[]) {
 function titleRailItem(title: JsonRecord, variants: JsonRecord[]) {
   const defaultVariant = variants[0] ?? {};
   const metadata = recordOrEmpty(title.metadata);
+  const tmdb = titleTmdb(title);
+  const genres = titleGenres(title);
+  const overview = stringOrNull(tmdb.overview ?? metadata.overview);
+  const rating = numberOrNull(tmdb.vote_average ?? metadata.vote_average);
+  const runtime = numberOrNull(tmdb.runtime ?? metadata.runtime);
   const defaultVariantId = defaultVariant.id ?? title.default_variant_id ?? null;
   return {
     id: title.id,
@@ -290,8 +484,18 @@ function titleRailItem(title: JsonRecord, variants: JsonRecord[]) {
     original_title: title.original_title,
     year: title.release_year,
     poster_url: title.poster_url ?? defaultVariant.poster_url ?? null,
+    posterUrl: title.poster_url ?? defaultVariant.poster_url ?? null,
     stream_icon: title.poster_url ?? defaultVariant.poster_url ?? null,
     backdrop_url: title.backdrop_url ?? null,
+    backdropUrl: title.backdrop_url ?? null,
+    overview,
+    description: overview,
+    genres,
+    rating,
+    vote_average: rating,
+    voteAverage: rating,
+    runtime,
+    runtimeMinutes: runtime,
     provider_tmdb_id: title.provider_tmdb_id ?? null,
     providerTmdbId: title.provider_tmdb_id ?? null,
     match_status: title.match_status,
@@ -310,14 +514,55 @@ function titleRailItem(title: JsonRecord, variants: JsonRecord[]) {
     last_observed_ttff_ms: defaultVariant.last_observed_ttff_ms ?? title.last_observed_ttff_ms ?? null,
     lastObservedTtffMs: defaultVariant.last_observed_ttff_ms ?? title.last_observed_ttff_ms ?? null,
     metadata,
+    tmdb,
     data: {
       ...metadata,
+      description: overview,
+      overview,
+      genres,
+      rating,
+      voteAverage: rating,
+      runtime,
+      runtimeMinutes: runtime,
+      backdrop: title.backdrop_url ?? null,
+      backdropUrl: title.backdrop_url ?? null,
+      tmdb,
       sourceId: defaultVariant.source_id ?? null,
       containerExtension: defaultVariant.container_extension ?? null,
       providerTmdbId: title.provider_tmdb_id ?? null,
       titleId: title.id,
     },
   };
+}
+
+function titleTmdb(title: JsonRecord) {
+  return recordOrEmpty(recordOrEmpty(title.metadata).tmdb);
+}
+
+function titleGenres(title: JsonRecord) {
+  const tmdb = titleTmdb(title);
+  const metadata = recordOrEmpty(title.metadata);
+  const rawGenres: unknown[] = Array.isArray(tmdb.genres)
+    ? tmdb.genres
+    : Array.isArray(metadata.genres)
+      ? metadata.genres
+      : [];
+  return rawGenres
+    .map((genre: unknown) => typeof genre === "string" ? genre : stringOrNull(recordOrEmpty(genre).name))
+    .filter((genre: string | null): genre is string => Boolean(genre));
+}
+
+function sameGenre(left: string, right: string) {
+  return normalizeGenre(left) === normalizeGenre(right);
+}
+
+function normalizeGenre(value: string) {
+  return value
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
 }
 
 function compareTitleVariants(left: JsonRecord, right: JsonRecord) {
@@ -339,6 +584,11 @@ function qualityRank(value: unknown) {
 function numberOr(value: unknown, fallback: number) {
   const number = Number(value);
   return Number.isFinite(number) ? number : fallback;
+}
+
+function numberOrNull(value: unknown) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
 }
 
 function titleVariantItem(variant: JsonRecord) {

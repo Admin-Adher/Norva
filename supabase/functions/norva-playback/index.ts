@@ -37,6 +37,18 @@ const RUNTIME_CONFIG_KEYS = [
   "NORVA_MEDIA_GATEWAY_TOKEN",
   "NORVA_SOURCE_CONFIG_KEY",
 ];
+const PLAYBACK_EVENT_TYPES = new Set([
+  "session_created",
+  "play_requested",
+  "play_started",
+  "first_frame",
+  "pause",
+  "resume",
+  "ended",
+  "abandoned",
+  "playback_error",
+  "gateway_error",
+]);
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SUPABASE_SERVICE_KEY =
@@ -84,6 +96,10 @@ Deno.serve(async (req) => {
     ) {
       const identity = await requireIdentity(req, supabase);
       return json(req, await createPlaybackSession(req, identity.userId, supabase, identity.deviceId ?? null), 201);
+    }
+    if (req.method === "POST" && segments[0] === "playback" && segments[1] === "events") {
+      const identity = await requireIdentity(req, supabase);
+      return json(req, await recordPlaybackEvent(req, identity.userId, supabase, identity.deviceId ?? null), 201);
     }
     if (req.method === "GET" && segments[0] === "playback" && segments[1] === "sessions" && segments[2]) {
       const identity = await requireIdentity(req, supabase);
@@ -290,6 +306,77 @@ async function expirePlaybackSession(id: string, userId: string, db: SupabaseCli
     gatewayClosed: closedGatewayIds.length,
     gatewayErrors: gatewayErrors.length,
   };
+}
+
+async function recordPlaybackEvent(
+  req: Request,
+  userId: string,
+  db: SupabaseClient,
+  defaultDeviceId: string | null = null,
+) {
+  const body = await readJson(req);
+  const eventType = stringOr(body.eventType ?? body.event_type, "");
+  if (!PLAYBACK_EVENT_TYPES.has(eventType)) throw new HttpError(400, "Unsupported playback event type");
+
+  const playbackSessionId = stringOrNull(body.playbackSessionId ?? body.playback_session_id ?? body.sessionId);
+  let sourceId = stringOrNull(body.sourceId ?? body.source_id);
+  let deviceId = stringOrNull(body.deviceId ?? body.device_id) ?? defaultDeviceId;
+  let itemType = stringOr(body.itemType ?? body.item_type ?? body.type, "");
+  let itemId = stringOr(body.itemId ?? body.item_id ?? body.id, "");
+  let playbackMode = stringOrNull(body.playbackMode ?? body.playback_mode ?? body.mode);
+
+  if (playbackSessionId) {
+    const { data: session, error } = await db
+      .from("cloud_playback_sessions")
+      .select("id,source_id,device_id,item_type,item_id,mode")
+      .eq("id", playbackSessionId)
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (error) throwDb(error, "Unable to verify playback session");
+    if (!session) throw new HttpError(404, "Playback session not found");
+    sourceId = sourceId ?? stringOrNull(session.source_id);
+    deviceId = deviceId ?? stringOrNull(session.device_id);
+    itemType = itemType || stringOr(session.item_type, "");
+    itemId = itemId || stringOr(session.item_id, "");
+    playbackMode = playbackMode ?? stringOrNull(session.mode);
+  }
+
+  if (!itemType || !itemId) throw new HttpError(400, "itemType and itemId are required");
+  if (sourceId) await assertOwnedSource(sourceId, userId, db);
+  if (deviceId) await assertOwnedDevice(deviceId, userId, db);
+
+  const ttff = boundedNullableInt(
+    body.timeToFirstFrameMs ?? body.time_to_first_frame_ms ?? body.ttffMs ?? body.ttff_ms,
+    0,
+    10 * 60 * 1000,
+  );
+  const { data, error } = await db
+    .from("cloud_playback_events")
+    .insert({
+      user_id: userId,
+      device_id: deviceId,
+      playback_session_id: playbackSessionId,
+      source_id: sourceId,
+      item_type: itemType,
+      item_id: itemId,
+      event_type: eventType,
+      position_seconds: boundedInt(body.positionSeconds ?? body.position_seconds ?? body.position, 0, 0, 10_000_000),
+      duration_seconds: boundedInt(body.durationSeconds ?? body.duration_seconds ?? body.duration, 0, 0, 10_000_000),
+      time_to_first_frame_ms: ttff,
+      playback_mode: playbackMode,
+      error_code: stringOrNull(body.errorCode ?? body.error_code),
+      error_message: stringOrNull(body.errorMessage ?? body.error_message),
+      metadata: compactRecord(recordOrEmpty(body.metadata)),
+    })
+    .select("*")
+    .single();
+  if (error) throwDb(error, "Unable to record playback event");
+
+  if (sourceId && ttff && (eventType === "first_frame" || eventType === "play_started")) {
+    await recordPlaybackStartupObservation(db, { userId, sourceId, itemType, itemId, startupMs: ttff });
+  }
+
+  return { event: data };
 }
 
 async function closeOpenGatewaySessionsForUser(userId: string, db: SupabaseClient) {
@@ -725,8 +812,19 @@ function boundedInt(value: unknown, fallback: number, min: number, max: number) 
   return Math.max(min, Math.min(max, parsed));
 }
 
+function boundedNullableInt(value: unknown, min: number, max: number) {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = Number.parseInt(String(value), 10);
+  if (!Number.isFinite(parsed)) return null;
+  return Math.max(min, Math.min(max, parsed));
+}
+
 function recordOrEmpty(value: unknown): JsonRecord {
   return isRecord(value) ? value : {};
+}
+
+function compactRecord(value: JsonRecord) {
+  return Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined && entry !== null && entry !== ""));
 }
 
 function stringOr(value: unknown, fallback: string) {

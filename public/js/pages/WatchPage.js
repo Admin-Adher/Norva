@@ -105,6 +105,12 @@ class WatchPage {
         this.activeSessionIds = new Set();
         this.currentCloudPlaybackSessionId = null;
         this.activeCloudPlaybackSessionIds = new Set();
+        this.playbackTelemetry = null;
+        this._playRequestedAt = 0;
+        this._firstFrameReported = false;
+        this._playStartedReported = false;
+        this._playbackEnded = false;
+        this._lastPauseTelemetryAt = 0;
 
         // Overlay timer
         this.overlayTimeout = null;
@@ -323,6 +329,10 @@ class WatchPage {
         this._playbackStatusOkReported = false;
         this._lastFailureMsg = null;
         this._cloudRelayFallbackTried = false;
+        this._firstFrameReported = false;
+        this._playStartedReported = false;
+        this._playbackEnded = false;
+        this._lastPauseTelemetryAt = 0;
 
         // Stop any Live TV playback before starting movie/series
         this.app?.player?.stop?.();
@@ -412,6 +422,95 @@ class WatchPage {
         } catch (error) {
             console.warn('[WatchPage] Could not expire stale cloud playback session:', error?.message || error);
         }
+    }
+
+    beginPlaybackTelemetry(sessionId, playbackAttemptId) {
+        this.playbackTelemetry = {
+            playbackAttemptId,
+            sessionId: sessionId || null,
+            requestedAt: Date.now(),
+            firstFrameReported: false,
+            playStartedReported: false,
+            ended: false,
+            abandoned: false
+        };
+        this._playRequestedAt = this.playbackTelemetry.requestedAt;
+        this._firstFrameReported = false;
+        this._playStartedReported = false;
+        this._playbackEnded = false;
+        this.sendPlaybackEvent('play_requested');
+    }
+
+    getTelemetrySourceId() {
+        const sourceId = this.content?.cloudSourceId
+            || this.content?.data?.cloudSourceId
+            || this.content?.source_id
+            || this.content?.sourceId
+            || '';
+        return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(sourceId))
+            ? String(sourceId)
+            : null;
+    }
+
+    getTelemetryItemId() {
+        const itemId = this.content?.itemId
+            || this.content?.item_id
+            || this.content?.streamId
+            || this.content?.stream_id
+            || this.content?.seriesId
+            || this.content?.series_id
+            || this.content?.id
+            || '';
+        return String(itemId || '');
+    }
+
+    buildPlaybackEventPayload(eventType, extra = {}) {
+        const duration = this.getDisplayDuration?.() || this.getValidDuration?.() || 0;
+        return {
+            eventType,
+            playbackSessionId: this.currentCloudPlaybackSessionId || this.playbackTelemetry?.sessionId || null,
+            sourceId: this.getTelemetrySourceId(),
+            itemType: this.contentType || this.content?.type || '',
+            itemId: this.getTelemetryItemId(),
+            positionSeconds: Math.max(0, Math.floor(this.getPlaybackPosition?.() || 0)),
+            durationSeconds: Math.max(0, Math.floor(Number.isFinite(duration) ? duration : 0)),
+            playbackMode: extra.playbackMode || this.currentPlaybackMode || null,
+            timeToFirstFrameMs: extra.timeToFirstFrameMs,
+            errorCode: extra.errorCode,
+            errorMessage: extra.errorMessage,
+            metadata: {
+                title: this.content?.title || this.content?.name || null,
+                attemptId: this._playbackAttemptId,
+                variantCount: this.content?.variantCount || this.content?._variantCount || null,
+                providerTmdbId: this.content?.providerTmdbId || this.content?.data?.providerTmdbId || null,
+                titleId: this.content?.titleId || this.content?.title_id || this.content?.data?.titleId || null,
+                readyState: this.video?.readyState ?? null,
+                currentSrcType: this.video?.currentSrc ? (this.isGatewayPlaybackUrl(this.video.currentSrc) ? 'gateway' : 'direct') : null,
+                ...extra.metadata
+            }
+        };
+    }
+
+    sendPlaybackEvent(eventType, extra = {}) {
+        if (!this.content || !this.getTelemetryItemId()) return;
+        const cloud = window.NorvaCloud;
+        const api = cloud?.token ? cloud.playback : (cloud?.deviceToken ? cloud.device?.playback : cloud?.playback);
+        const send = api?.event || cloud?.playback?.event;
+        if (typeof send !== 'function') return;
+
+        const payload = this.buildPlaybackEventPayload(eventType, extra);
+        if (!payload.itemType || !payload.itemId) return;
+        Promise.resolve(send(payload)).catch((error) => {
+            console.warn('[WatchPage] Playback telemetry failed:', error?.message || error);
+        });
+    }
+
+    reportAbandonedPlayback() {
+        if (!this.playbackTelemetry || this.playbackTelemetry.abandoned || this.playbackTelemetry.ended) return;
+        const position = Math.floor(this.getPlaybackPosition?.() || 0);
+        if (!this._firstFrameReported && position < 2) return;
+        this.playbackTelemetry.abandoned = true;
+        this.sendPlaybackEvent('abandoned');
     }
 
     resetTrackSelectionState() {
@@ -944,6 +1043,7 @@ class WatchPage {
         if (this.video) {
             this.video.dataset.playbackAttemptId = String(playbackAttemptId);
         }
+        this.beginPlaybackTelemetry(options.cloudPlaybackSessionId, playbackAttemptId);
         this.baseStreamUrl = url;
         this.currentPlaybackMode = null;
         this.currentProcessingOptions = {};
@@ -1316,6 +1416,10 @@ class WatchPage {
             // Recovery exhausted: last resort, try another version of the title
             this.hls.destroy();
             if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
+            this.sendPlaybackEvent(isGatewaySession ? 'gateway_error' : 'playback_error', {
+                errorCode: data.details || data.type || 'hls_fatal',
+                errorMessage: data.reason || data.details || 'HLS playback failed.'
+            });
             this.handlePlaybackFailure(data.details || data.reason || 'Playback failed.');
         });
     }
@@ -1361,6 +1465,7 @@ class WatchPage {
         // Stop history tracking and save final progress
         this.stopHistoryTracking();
         this.saveProgress();
+        this.reportAbandonedPlayback();
 
         // Cleanup transcode session if exists. Keep the promise so callers
         // (loadVideo) can await full teardown before opening a new stream —
@@ -1783,6 +1888,15 @@ class WatchPage {
         this.playPauseBtn?.querySelector('.icon-pause')?.classList.remove('hidden');
         this.centerPlayBtn?.classList.remove('show');
 
+        if (!this._playStartedReported) {
+            this._playStartedReported = true;
+            if (this.playbackTelemetry) this.playbackTelemetry.playStartedReported = true;
+            this.sendPlaybackEvent('play_started');
+        } else if (this._lastPauseTelemetryAt) {
+            this._lastPauseTelemetryAt = 0;
+            this.sendPlaybackEvent('resume');
+        }
+
         // Start overlay auto-hide
         this.startOverlayTimer();
     }
@@ -1795,9 +1909,23 @@ class WatchPage {
         // Keep overlay visible when paused
         this.showOverlay();
         clearTimeout(this.overlayTimeout);
+
+        if (!this.video?.ended && this._playStartedReported) {
+            const now = Date.now();
+            if (now - this._lastPauseTelemetryAt > 1000) {
+                this._lastPauseTelemetryAt = now;
+                this.sendPlaybackEvent('pause');
+            }
+        }
     }
 
     onEnded() {
+        if (!this._playbackEnded) {
+            this._playbackEnded = true;
+            if (this.playbackTelemetry) this.playbackTelemetry.ended = true;
+            this.sendPlaybackEvent('ended');
+        }
+
         // For series, show next episode panel if not already showing and auto-play is enabled
         const autoPlayEnabled = this.app?.player?.settings?.autoPlayNextEpisode;
         if (autoPlayEnabled && this.contentType === 'series' && this.seriesInfo && !this.nextEpisodeShowing) {
@@ -1826,6 +1954,10 @@ class WatchPage {
             // MEDIA_ERR_NETWORK / MEDIA_ERR_DECODE / MEDIA_ERR_SRC_NOT_SUPPORTED:
             // fail over to another version of the same title if available
             if ([2, 3, 4].includes(error.code)) {
+                this.sendPlaybackEvent('playback_error', {
+                    errorCode: String(error.code),
+                    errorMessage: error.message || 'Media error'
+                });
                 this.handlePlaybackFailure(error.message || 'Media error');
             }
         }
@@ -1844,6 +1976,7 @@ class WatchPage {
         }
 
         this._lastFailureMsg = message;
+        this.sendPlaybackEvent('playback_error', { errorMessage: message || 'Playback failed.' });
         const retriedWithRelay = await this.retryWithCloudRelay(message);
         if (retriedWithRelay) return;
 
@@ -2013,6 +2146,14 @@ class WatchPage {
         if (!this.hasCurrentMedia()) return;
         this.hideLoading();
         this.hidePlaybackError();
+        if (!this._firstFrameReported) {
+            this._firstFrameReported = true;
+            if (this.playbackTelemetry) this.playbackTelemetry.firstFrameReported = true;
+            const requestedAt = this.playbackTelemetry?.requestedAt || this._playRequestedAt || Date.now();
+            this.sendPlaybackEvent('first_frame', {
+                timeToFirstFrameMs: Math.max(1, Date.now() - requestedAt)
+            });
+        }
         if (!this._playbackStatusOkReported) {
             this._playbackStatusOkReported = true;
             this.reportPlaybackStatus('ok').catch(() => { });

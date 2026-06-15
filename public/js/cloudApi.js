@@ -535,7 +535,8 @@
         playback: {
             createSession: (session) => playbackRequest(session),
             getSession: (id) => playbackSessionRequest('GET', `/playback/sessions/${encodeURIComponent(id)}`),
-            expireSession: (id) => playbackSessionRequest('POST', `/playback/sessions/${encodeURIComponent(id)}/expire`)
+            expireSession: (id) => playbackSessionRequest('POST', `/playback/sessions/${encodeURIComponent(id)}/expire`),
+            event: (event) => playbackSessionRequest('POST', '/playback/events', event)
         },
 
         device: {
@@ -572,7 +573,8 @@
                 rails: (params = {}) => catalogRequest('/device/home/rails', params, { token: getDeviceToken() })
             },
             playback: {
-                createSession: (session) => playbackRequest(session, { token: getDeviceToken() })
+                createSession: (session) => playbackRequest(session, { token: getDeviceToken() }),
+                event: (event) => playbackSessionRequest('POST', '/playback/events', event, { token: getDeviceToken() })
             }
         }
     };
