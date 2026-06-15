@@ -163,7 +163,16 @@ class SettingsPage {
                     if (regionApi?.setPreferred) {
                         await regionApi.setPreferred(value);
                     } else {
+                        localStorage.setItem('norva-preferred-content-region', value);
                         localStorage.setItem('norva-country', value);
+                        localStorage.removeItem('norva-content-region-prompt-dismissed');
+                        localStorage.setItem('norva-content-region-state', JSON.stringify({
+                            region: value,
+                            status: 'confirmed',
+                            source: 'settings-fallback',
+                            suggestedRegion: '',
+                            updatedAt: new Date().toISOString()
+                        }));
                     }
                     const sources = await API.sources.getAll();
                     for (const src of (sources || [])) {

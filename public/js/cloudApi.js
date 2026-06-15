@@ -148,13 +148,11 @@
         const local = normalizeContentRegion(storageGet(KEY_PREFERRED_CONTENT_REGION));
         if (local) return { region: local, source: 'local' };
 
-        const legacy = normalizeContentRegion(storageGet(KEY_LEGACY_COUNTRY));
-        if (legacy) {
-            storageSet(KEY_PREFERRED_CONTENT_REGION, legacy);
-            return { region: legacy, source: 'legacy' };
-        }
-
         return null;
+    }
+
+    function getLegacyContentRegion() {
+        return normalizeContentRegion(storageGet(KEY_LEGACY_COUNTRY));
     }
 
     function resolveContentRegion() {
@@ -166,6 +164,19 @@
                 source: preferred.source,
                 suggestedRegion: '',
                 label: contentRegionLabel(preferred.region)
+            };
+            rememberRegionState(resolved);
+            return resolved;
+        }
+
+        const legacy = getLegacyContentRegion();
+        if (legacy) {
+            const resolved = {
+                region: legacy,
+                status: 'inferred',
+                source: 'legacy',
+                suggestedRegion: legacy,
+                label: contentRegionLabel(legacy)
             };
             rememberRegionState(resolved);
             return resolved;
@@ -238,7 +249,7 @@
     function shouldShowRegionPrompt() {
         if (getStoredPreferredContentRegion()) return false;
         if (storageGet(KEY_REGION_PROMPT_DISMISSED)) return false;
-        const suggested = inferContentRegionFromLocale();
+        const suggested = getLegacyContentRegion() || inferContentRegionFromLocale();
         return suggested && suggested !== 'INTERNATIONAL';
     }
 

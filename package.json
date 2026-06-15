@@ -7,6 +7,7 @@
     "scripts": {
         "start": "node server/index.js",
         "dev": "node --watch server/index.js",
+        "verify:region": "node scripts/verify-region-model.js",
         "desktop": "electron .",
         "rebuild:electron": "electron-rebuild -f -w better-sqlite3",
         "build:desktop": "npm run rebuild:electron && electron-builder --win portable --x64"
