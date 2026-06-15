@@ -12,6 +12,8 @@ class LiveGuideFusion {
         this.shortEpgCache = new Map();
         this.shortEpgLoadedAt = new Map();
         this.shortEpgInflight = new Set();
+        this.shortEpgSourceCooldown = new Map();
+        this.shortEpgSourceFailures = new Map();
         this.init();
     }
 
@@ -372,7 +374,12 @@ class LiveGuideFusion {
 
     shortEpgKey(channel) {
         const streamId = channel?.streamId || channel?.id || '';
-        return channel?.sourceType === 'xtream' && channel?.sourceId && streamId
+        const sourceType = channel?.sourceType
+            || channel?.source_type
+            || channel?.playback_hint?.sourceType
+            || channel?.playbackHint?.sourceType
+            || (channel?._logicalChannel ? 'xtream' : '');
+        return sourceType === 'xtream' && channel?.sourceId && streamId
             ? `${channel.sourceId}:${streamId}`
             : '';
     }
@@ -405,16 +412,21 @@ class LiveGuideFusion {
         const now = Date.now();
         const candidates = channels
             .filter(Boolean)
+            .filter(channel => !this.getProgramAt(channel, new Date(now)))
             .filter(channel => this.shortEpgKey(channel))
-            .slice(0, 36);
+            .slice(0, 10);
 
         candidates.forEach(channel => {
             const key = this.shortEpgKey(channel);
+            const sourceKey = String(channel.sourceId || '');
+            const sourceCooldownUntil = this.shortEpgSourceCooldown.get(sourceKey) || 0;
+            if (sourceCooldownUntil > now) return;
+
             const loadedAt = this.shortEpgLoadedAt.get(key) || 0;
-            if (this.shortEpgInflight.has(key) || now - loadedAt < 120000) return;
+            if (this.shortEpgInflight.has(key) || now - loadedAt < 10 * 60 * 1000) return;
 
             this.shortEpgInflight.add(key);
-            API.proxy.xtream.shortEpg(channel.sourceId, channel.streamId || channel.id)
+            API.proxy.xtream.shortEpg(channel.sourceId, channel.streamId || channel.id, 8)
                 .then(data => {
                     const listings = Array.isArray(data?.epg_listings) ? data.epg_listings : [];
                     const programmes = listings
@@ -422,9 +434,17 @@ class LiveGuideFusion {
                         .filter(Boolean);
                     this.shortEpgCache.set(key, programmes);
                     this.shortEpgLoadedAt.set(key, Date.now());
+                    if (programmes.length) this.shortEpgSourceFailures.set(sourceKey, 0);
                 })
                 .catch(err => {
-                    console.warn('[LiveGuide] Short EPG unavailable for', channel.name, err);
+                    const failures = (this.shortEpgSourceFailures.get(sourceKey) || 0) + 1;
+                    this.shortEpgSourceFailures.set(sourceKey, failures);
+                    if (err?.status === 429 || failures >= 3) {
+                        this.shortEpgSourceCooldown.set(sourceKey, Date.now() + 10 * 60 * 1000);
+                    }
+                    if (err?.status !== 429) {
+                        console.debug('[LiveGuide] Short EPG unavailable for', channel.name, err);
+                    }
                     this.shortEpgCache.set(key, []);
                     this.shortEpgLoadedAt.set(key, Date.now());
                 })

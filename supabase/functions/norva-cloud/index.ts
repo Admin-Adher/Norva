@@ -72,6 +72,11 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
 });
 
 let runtimeConfigCache: { value: RuntimeConfig; expiresAt: number } | null = null;
+const EPG_CACHE_TTL_MS = 10 * 60 * 1000;
+const EPG_WINDOW_BUCKET_MS = 30 * 60 * 1000;
+const EPG_MAX_XML_BYTES = 80_000_000;
+const EPG_MAX_PROGRAMMES = 80_000;
+const epgCache = new Map<string, { expiresAt: number; data: unknown }>();
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -142,6 +147,9 @@ async function route(
     if (req.method === "GET" && id === "sources" && action && segments[3] === "short-epg") {
       return { body: await getXtreamShortEpg(url, action, device.user_id, db) };
     }
+    if (req.method === "GET" && id === "sources" && action && segments[3] === "epg") {
+      return { body: await getSourceEpg(url, action, device.user_id, db) };
+    }
     if (req.method === "GET" && id === "media-items") {
       return { body: await listMediaItems(url, device.user_id, db) };
     }
@@ -180,6 +188,9 @@ async function route(
     }
     if (req.method === "GET" && id && action === "short-epg") {
       return { body: await getXtreamShortEpg(url, id, user.id, db) };
+    }
+    if (req.method === "GET" && id && action === "epg") {
+      return { body: await getSourceEpg(url, id, user.id, db) };
     }
     if (req.method === "POST" && id && action === "sync") {
       return { body: await syncExistingSource(id, user.id, db) };
@@ -771,10 +782,212 @@ async function getXtreamShortEpg(url: URL, sourceId: string, userId: string, db:
     throw new HttpError(400, "Short EPG requires an Xtream source");
   }
 
-  return recordOrEmpty(await fetchJson(
-    xtreamApiUrl({ serverUrl, username, password, action: "get_short_epg" }, { stream_id: streamId, limit }),
-    12000,
-  ));
+  const runtimeConfig = await getRuntimeConfig(db);
+  const gatewayRequest = { serverUrl, username, password, streamId, limit };
+  const shortEpg = runtimeConfig.mediaGatewayUrl && runtimeConfig.mediaGatewayToken
+    ? await requestGatewayXtreamEpg(runtimeConfig, { ...gatewayRequest, action: "get_short_epg" }).catch(async (error) => {
+      if (error instanceof HttpError && (error.status === 404 || error.status === 405 || error.status === 503)) {
+        return recordOrEmpty(await fetchJson(
+          xtreamApiUrl({ serverUrl, username, password, action: "get_short_epg" }, { stream_id: streamId, limit }),
+          12000,
+        ));
+      }
+      throw error;
+    })
+    : recordOrEmpty(await fetchJson(
+      xtreamApiUrl({ serverUrl, username, password, action: "get_short_epg" }, { stream_id: streamId, limit }),
+      12000,
+    ));
+  if (epgPayloadHasCurrentOrFuture(shortEpg)) return shortEpg;
+
+  const simpleTable = runtimeConfig.mediaGatewayUrl && runtimeConfig.mediaGatewayToken
+    ? await requestGatewayXtreamEpg(runtimeConfig, { ...gatewayRequest, action: "get_simple_data_table" }).catch(() => shortEpg)
+    : recordOrEmpty(await fetchJson(
+      xtreamApiUrl({ serverUrl, username, password, action: "get_simple_data_table" }, { stream_id: streamId }),
+      15000,
+    ).catch(() => shortEpg));
+  return epgPayloadHasListings(simpleTable) ? simpleTable : shortEpg;
+}
+
+function epgPayloadHasListings(payload: JsonRecord) {
+  return Array.isArray(payload.epg_listings) && payload.epg_listings.length > 0;
+}
+
+function epgPayloadHasCurrentOrFuture(payload: JsonRecord) {
+  if (!Array.isArray(payload.epg_listings)) return false;
+  const now = Math.floor(Date.now() / 1000);
+  return payload.epg_listings.some((listing) => {
+    if (!isRecord(listing)) return false;
+    const stop = Number.parseInt(String(listing.stop_timestamp ?? listing.end_timestamp ?? ""), 10);
+    return Number.isFinite(stop) && stop > now - 300;
+  });
+}
+
+async function getSourceEpg(url: URL, sourceId: string, userId: string, db: SupabaseClient) {
+  const beforeHours = boundedInt(url.searchParams.get("beforeHours") ?? url.searchParams.get("windowBeforeHours"), 2, 0, 24);
+  const afterHours = boundedInt(url.searchParams.get("afterHours") ?? url.searchParams.get("windowAfterHours"), 8, 1, 48);
+  const refresh = url.searchParams.get("refresh") === "1";
+  const now = Date.now();
+  const windowStartMs = now - beforeHours * 60 * 60 * 1000;
+  const windowEndMs = now + afterHours * 60 * 60 * 1000;
+  const bucketStart = Math.floor(windowStartMs / EPG_WINDOW_BUCKET_MS) * EPG_WINDOW_BUCKET_MS;
+  const bucketEnd = Math.ceil(windowEndMs / EPG_WINDOW_BUCKET_MS) * EPG_WINDOW_BUCKET_MS;
+  const cacheKey = `${userId}:${sourceId}:${bucketStart}:${bucketEnd}`;
+  const cached = epgCache.get(cacheKey);
+  if (!refresh && cached && cached.expiresAt > now) return cached.data;
+
+  const { data: source, error } = await db
+    .from("cloud_sources")
+    .select("source_type, config_ciphertext")
+    .eq("id", sourceId)
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (error) throwDb(error, "Unable to load source");
+  if (!source) throw new HttpError(404, "Source not found");
+  if (!source.config_ciphertext) throw new HttpError(400, "EPG requires a managed cloud source");
+
+  const sourceType = stringOr(source.source_type, "");
+  const sourceConfig = await decryptSourceConfig(source.config_ciphertext, await getRuntimeConfig(db));
+  let epgUrl = "";
+  if (sourceType === "xtream") {
+    const serverUrl = normalizeBaseUrl(stringOr(sourceConfig.serverUrl, ""));
+    const username = stringOr(sourceConfig.username, "");
+    const password = stringOr(sourceConfig.password, "");
+    if (!serverUrl || !username || !password) {
+      throw new HttpError(400, "Xtream EPG requires server URL, username and password");
+    }
+    epgUrl = xtreamXmltvUrl({ serverUrl, username, password });
+  } else if (sourceType === "epg") {
+    epgUrl = stringOr(sourceConfig.epgUrl, "");
+    assertHttpUrl(epgUrl);
+  } else {
+    return { channels: [], programmes: [], sourceId, generatedAt: new Date().toISOString(), cloud: true };
+  }
+
+  const xml = await fetchText(epgUrl, 45000, EPG_MAX_XML_BYTES, providerHeaders("VLC/3.0.20 LibVLC/3.0.20"));
+  const data = {
+    ...parseXmltvWindow(xml, { windowStartMs, windowEndMs, maxProgrammes: EPG_MAX_PROGRAMMES }),
+    sourceId,
+    generatedAt: new Date().toISOString(),
+    windowStart: new Date(windowStartMs).toISOString(),
+    windowEnd: new Date(windowEndMs).toISOString(),
+    cloud: true,
+  };
+  epgCache.set(cacheKey, { expiresAt: Date.now() + EPG_CACHE_TTL_MS, data });
+  return data;
+}
+
+function parseXmltvWindow(xml: string, options: { windowStartMs: number; windowEndMs: number; maxProgrammes: number }) {
+  const channels: JsonRecord[] = [];
+  const channelIds = new Set<string>();
+  const channelPattern = /<channel\b([^>]*)>([\s\S]*?)<\/channel>/gi;
+  let channelMatch: RegExpExecArray | null;
+
+  while ((channelMatch = channelPattern.exec(xml)) !== null) {
+    const id = xmlAttr(channelMatch[1], "id");
+    if (!id || channelIds.has(id)) continue;
+    const body = channelMatch[2] ?? "";
+    const iconTag = body.match(/<icon\b([^>]*)\/?>/i);
+    channels.push({
+      id,
+      name: xmlChildText(body, "display-name") || id,
+      icon: iconTag ? xmlAttr(iconTag[1], "src") : null,
+      url: xmlChildText(body, "url") || null,
+    });
+    channelIds.add(id);
+  }
+
+  const programmes: JsonRecord[] = [];
+  const programmePattern = /<programme\b([^>]*)>([\s\S]*?)<\/programme>/gi;
+  let programmeMatch: RegExpExecArray | null;
+
+  while ((programmeMatch = programmePattern.exec(xml)) !== null) {
+    const attrs = programmeMatch[1] ?? "";
+    const channelId = xmlAttr(attrs, "channel");
+    const startMs = parseXmltvDateMs(xmlAttr(attrs, "start"));
+    const stopMs = parseXmltvDateMs(xmlAttr(attrs, "stop"));
+    if (!channelId || !Number.isFinite(startMs) || !Number.isFinite(stopMs) || stopMs <= startMs) continue;
+    if (stopMs <= options.windowStartMs || startMs >= options.windowEndMs) continue;
+
+    const body = programmeMatch[2] ?? "";
+    programmes.push({
+      channelId,
+      start: new Date(startMs).toISOString(),
+      stop: new Date(stopMs).toISOString(),
+      title: xmlChildText(body, "title") || "Programme",
+      subtitle: xmlChildText(body, "sub-title") || null,
+      description: xmlChildText(body, "desc") || "",
+      category: xmlChildrenText(body, "category"),
+      icon: xmlIcon(body),
+    });
+
+    if (programmes.length >= options.maxProgrammes) break;
+  }
+
+  if (!channels.length && programmes.length) {
+    for (const channelId of new Set(programmes.map((program) => String(program.channelId)))) {
+      channels.push({ id: channelId, name: channelId, icon: null, url: null });
+    }
+  }
+
+  return { channels, programmes };
+}
+
+function xmlIcon(body: string) {
+  const iconTag = body.match(/<icon\b([^>]*)\/?>/i);
+  return iconTag ? xmlAttr(iconTag[1], "src") : null;
+}
+
+function xmlAttr(attrs: string, name: string) {
+  const pattern = new RegExp(`${escapeRegExp(name)}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`, "i");
+  const match = attrs.match(pattern);
+  return decodeXmlText(match?.[1] ?? match?.[2] ?? "");
+}
+
+function xmlChildText(body: string, tagName: string) {
+  const pattern = new RegExp(`<${escapeRegExp(tagName)}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/${escapeRegExp(tagName)}>`, "i");
+  const match = body.match(pattern);
+  return decodeXmlText(match?.[1] ?? "");
+}
+
+function xmlChildrenText(body: string, tagName: string) {
+  const pattern = new RegExp(`<${escapeRegExp(tagName)}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/${escapeRegExp(tagName)}>`, "gi");
+  const values: string[] = [];
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(body)) !== null) {
+    const value = decodeXmlText(match[1] ?? "");
+    if (value) values.push(value);
+  }
+  return values;
+}
+
+function parseXmltvDateMs(value: string) {
+  if (!value) return NaN;
+  const match = value.match(/^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})\s*([+-]\d{4})?$/);
+  if (!match) return Date.parse(value);
+  const [, year, month, day, hour, minute, second, tz] = match;
+  const offset = tz ? `${tz.slice(0, 3)}:${tz.slice(3)}` : "Z";
+  return Date.parse(`${year}-${month}-${day}T${hour}:${minute}:${second}${offset}`);
+}
+
+function decodeXmlText(value: string) {
+  if (!value) return "";
+  const stripped = value
+    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")
+    .replace(/<[^>]+>/g, "")
+    .trim();
+  return stripped
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, code) => String.fromCharCode(Number.parseInt(code, 16)));
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 async function upsertMediaItems(req: Request, userId: string, db: SupabaseClient) {
@@ -1337,6 +1550,39 @@ async function createGatewaySession(
   return { status: data.status, session: data, hlsUrl: data.hls_url };
 }
 
+async function requestGatewayXtreamEpg(
+  runtimeConfig: RuntimeConfig,
+  body: {
+    serverUrl: string;
+    username: string;
+    password: string;
+    streamId: string;
+    limit?: string;
+    action: "get_short_epg" | "get_simple_data_table";
+  },
+) {
+  if (!runtimeConfig.mediaGatewayUrl || !runtimeConfig.mediaGatewayToken) {
+    throw new HttpError(503, "Norva Media Gateway is not configured");
+  }
+
+  const response = await fetch(`${runtimeConfig.mediaGatewayUrl}/xtream/epg`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${runtimeConfig.mediaGatewayToken}`,
+    },
+    body: JSON.stringify({
+      ...body,
+      userAgent: "VLC/3.0.20 LibVLC/3.0.20",
+    }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new HttpError(response.status, "Media gateway refused the EPG request", payload);
+  }
+  return recordOrEmpty(payload);
+}
+
 async function getRuntimeConfig(db: SupabaseClient): Promise<RuntimeConfig> {
   if (runtimeConfigCache && runtimeConfigCache.expiresAt > Date.now()) {
     return runtimeConfigCache.value;
@@ -1488,11 +1734,15 @@ async function fetchJson(url: string, timeoutMs: number) {
   return payload;
 }
 
-async function fetchText(url: string, timeoutMs: number, maxBytes: number) {
-  const response = await fetchWithTimeout(url, timeoutMs);
+async function fetchText(url: string, timeoutMs: number, maxBytes: number, headers = providerHeaders()) {
+  const response = await fetchWithTimeout(url, timeoutMs, headers);
   if (!response.ok) throw new HttpError(response.status, "IPTV provider request failed");
+  const contentLength = Number.parseInt(response.headers.get("content-length") ?? "", 10);
+  if (Number.isFinite(contentLength) && contentLength > maxBytes) {
+    throw new HttpError(413, "Provider payload is too large for this cloud request");
+  }
   const text = await response.text();
-  if (text.length > maxBytes) throw new HttpError(413, "Playlist is too large for this cloud import");
+  if (text.length > maxBytes) throw new HttpError(413, "Provider payload is too large for this cloud request");
   return text;
 }
 
@@ -1546,13 +1796,20 @@ async function fetchImageWithTimeout(url: string, timeoutMs: number) {
   }
 }
 
-async function fetchWithTimeout(url: string, timeoutMs: number) {
+function providerHeaders(userAgent = "NorvaCloud/1.0") {
+  return {
+    "Accept": "application/json,text/xml,application/xml,text/plain,*/*",
+    "User-Agent": userAgent,
+  };
+}
+
+async function fetchWithTimeout(url: string, timeoutMs: number, headers = providerHeaders()) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     return await fetch(url, {
       signal: controller.signal,
-      headers: { "User-Agent": "NorvaCloud/1.0" },
+      headers,
     });
   } catch (error) {
     throw new HttpError(502, "Unable to reach IPTV provider", error instanceof Error ? error.message : undefined);
@@ -1606,6 +1863,13 @@ function xtreamApiUrl(config: {
   for (const [key, value] of Object.entries(extraParams)) {
     if (value) url.searchParams.set(key, value);
   }
+  return url.href;
+}
+
+function xtreamXmltvUrl(config: { serverUrl: string; username: string; password: string }) {
+  const url = new URL(`${normalizeBaseUrl(config.serverUrl)}/xmltv.php`);
+  url.searchParams.set("username", config.username);
+  url.searchParams.set("password", config.password);
   return url.href;
 }
 

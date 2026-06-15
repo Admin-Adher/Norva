@@ -16,6 +16,7 @@ const FFMPEG_PATH = process.env.FFMPEG_PATH || 'ffmpeg';
 const DEFAULT_TTL_SECONDS = clampInt(process.env.SESSION_TTL_SECONDS, 30 * 60, 60, 12 * 60 * 60);
 const STARTUP_TIMEOUT_MS = clampInt(process.env.STARTUP_TIMEOUT_MS, 45_000, 5_000, 180_000);
 const PLAYLIST_REQUEST_TIMEOUT_MS = clampInt(process.env.PLAYLIST_REQUEST_TIMEOUT_MS, 45_000, 5_000, 180_000);
+const XTREAM_REQUEST_TIMEOUT_MS = clampInt(process.env.XTREAM_REQUEST_TIMEOUT_MS, 15_000, 5_000, 60_000);
 const STOP_CONFLICTING_SOURCE_SESSIONS = (process.env.STOP_CONFLICTING_SOURCE_SESSIONS || 'true') !== 'false';
 const STOP_CONFLICTING_OWNER_SESSIONS = (process.env.STOP_CONFLICTING_OWNER_SESSIONS || 'true') !== 'false';
 const FFMPEG_USER_AGENT = process.env.FFMPEG_USER_AGENT ||
@@ -41,12 +42,48 @@ app.get('/health', (req, res) => {
     res.json({
         ok: true,
         service: 'norva-media-gateway',
-        version: 15,
+        version: 16,
         activeSessions: activeSessionCount(),
         totalSessions: sessions.size,
         lastFailureCount: lastFailures.length,
         time: new Date().toISOString()
     });
+});
+
+app.post('/xtream/epg', requireGatewayAuth, async (req, res) => {
+    try {
+        const {
+            serverUrl,
+            username,
+            password,
+            streamId,
+            action = 'get_short_epg',
+            limit,
+            userAgent
+        } = req.body || {};
+
+        const normalizedAction = action === 'get_simple_data_table' ? 'get_simple_data_table' : 'get_short_epg';
+        if (!serverUrl || !isHttpUrl(serverUrl) || !username || !password || !streamId) {
+            return res.status(400).json({ error: 'serverUrl, username, password and streamId are required' });
+        }
+
+        const url = xtreamPlayerApiUrl({
+            serverUrl,
+            username,
+            password,
+            action: normalizedAction,
+            streamId,
+            limit: normalizedAction === 'get_short_epg' ? limit : ''
+        });
+        const payload = await fetchProviderJson(url, sanitizeUserAgent(userAgent) || FFMPEG_USER_AGENT);
+        res.json(payload);
+    } catch (err) {
+        const status = Number.isInteger(err.status) ? err.status : 502;
+        res.status(status).json({
+            error: err.publicMessage || 'IPTV provider request failed',
+            details: err.details || undefined
+        });
+    }
 });
 
 app.post('/sessions', requireGatewayAuth, async (req, res) => {
@@ -434,6 +471,57 @@ function isHttpUrl(value) {
         return url.protocol === 'http:' || url.protocol === 'https:';
     } catch (_) {
         return false;
+    }
+}
+
+function xtreamPlayerApiUrl({ serverUrl, username, password, action, streamId, limit }) {
+    const url = new URL(`${String(serverUrl).replace(/\/+$/, '')}/player_api.php`);
+    url.searchParams.set('username', String(username));
+    url.searchParams.set('password', String(password));
+    url.searchParams.set('action', action);
+    url.searchParams.set('stream_id', String(streamId));
+    if (limit) url.searchParams.set('limit', String(limit));
+    return url.href;
+}
+
+async function fetchProviderJson(url, userAgent) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), XTREAM_REQUEST_TIMEOUT_MS);
+    try {
+        const response = await fetch(url, {
+            signal: controller.signal,
+            headers: {
+                'Accept': 'application/json,text/plain,*/*',
+                'User-Agent': userAgent
+            }
+        });
+        const text = await response.text();
+        const payload = text ? safeJson(text) : {};
+        if (!response.ok) {
+            const error = new Error('IPTV provider request failed');
+            error.status = response.status;
+            error.publicMessage = 'IPTV provider request failed';
+            error.details = payload;
+            throw error;
+        }
+        return payload;
+    } catch (err) {
+        if (err.status) throw err;
+        const error = new Error('Unable to reach IPTV provider');
+        error.status = err.name === 'AbortError' ? 504 : 502;
+        error.publicMessage = 'Unable to reach IPTV provider';
+        error.details = err.message;
+        throw error;
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
+function safeJson(text) {
+    try {
+        return JSON.parse(text);
+    } catch (_) {
+        return { raw: String(text || '').slice(0, 2000) };
     }
 }
 

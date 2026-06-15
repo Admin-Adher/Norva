@@ -258,17 +258,21 @@ class EpgGuide {
             throw new Error('No EPG sources or Xtream accounts configured');
         }
 
-        // Build query params for server-side caching
-        // Sync interval is controlled by server, we just hint at max cache age
-        const maxAge = 24; // hours - server controls actual refresh
-        const queryParams = forceRefresh ? '?refresh=1' : `?maxAge=${maxAge}`;
+        // Sync interval is controlled by the backend, we just hint at max cache age.
+        // In cloud mode this goes through API.proxy.epg so the same guide works
+        // on web, PWA and paired TV clients without a local hub route.
+        const maxAge = 24;
+        const epgOptions = {
+            maxAge,
+            beforeHours: 2,
+            afterHours: 8,
+            ...(forceRefresh ? { refresh: 1 } : {})
+        };
 
         // Load EPG from ALL sources in parallel
         const fetchPromises = sources.map(async (source) => {
             try {
-                const response = await fetch(`/api/proxy/epg/${source.id}${queryParams}`);
-                if (!response.ok) throw new Error(`Status ${response.status}`);
-                return await response.json();
+                return await API.proxy.epg.get(source.id, epgOptions);
             } catch (e) {
                 console.warn(`Failed to load EPG for source ${source.name}:`, e);
                 return null;

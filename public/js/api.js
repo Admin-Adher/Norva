@@ -702,8 +702,20 @@ const CloudAdapter = (() => {
             }
         }
 
-        if (method === 'GET' && path.startsWith('/proxy/epg/')) return { channels: [], programmes: [] };
-        if (method === 'POST' && path.includes('/proxy/epg/')) return { channels: [], programmes: [] };
+        const epgMatch = path.match(/^\/proxy\/epg\/([^/]+)(?:\/channels)?$/);
+        if (epgMatch && (method === 'GET' || method === 'POST')) {
+            const cloudSourceId = await resolveSourceId(epgMatch[1]);
+            const sourcesApi = cloudSourcesApi();
+            if (sourcesApi.epg) {
+                return sourcesApi.epg(cloudSourceId, {
+                    refresh: query.get('refresh') === '1' ? '1' : '',
+                    maxAge: query.get('maxAge') || '',
+                    beforeHours: query.get('beforeHours') || query.get('windowBeforeHours') || '2',
+                    afterHours: query.get('afterHours') || query.get('windowAfterHours') || '8'
+                });
+            }
+            return { channels: [], programmes: [] };
+        }
         if (method === 'DELETE' && path.startsWith('/proxy/cache/')) return { success: true };
 
         if (path.startsWith('/favorites')) return handleFavorites(method, path, query, data);
@@ -1095,7 +1107,7 @@ const API = {
             },
             seriesInfo: (sourceId, seriesId) =>
                 API.request('GET', `/proxy/xtream/${sourceId}/series_info?series_id=${seriesId}`),
-            shortEpg: (sourceId, streamId) => API.request('GET', `/proxy/xtream/${sourceId}/short_epg?stream_id=${streamId}`),
+            shortEpg: (sourceId, streamId, limit = 8) => API.request('GET', `/proxy/xtream/${sourceId}/short_epg?stream_id=${streamId}&limit=${encodeURIComponent(limit)}`),
             getStreamUrl: (sourceId, streamId, type = 'live', container = 'm3u8', options = {}) => {
                 const params = new URLSearchParams({ container });
                 if (options.mode) params.set('mode', options.mode);
@@ -1105,8 +1117,20 @@ const API = {
 
         // EPG
         epg: {
-            get: (sourceId) => API.request('GET', `/proxy/epg/${sourceId}`),
-            getForChannels: (sourceId, channelIds) => API.request('POST', `/proxy/epg/${sourceId}/channels`, { channelIds })
+            get: (sourceId, options = {}) => {
+                const params = new URLSearchParams();
+                Object.entries(options).forEach(([key, value]) => {
+                    if (value !== undefined && value !== null && value !== '') params.set(key, value);
+                });
+                return API.request('GET', `/proxy/epg/${sourceId}${params.toString() ? `?${params.toString()}` : ''}`);
+            },
+            getForChannels: (sourceId, channelIds, options = {}) => {
+                const params = new URLSearchParams();
+                Object.entries(options).forEach(([key, value]) => {
+                    if (value !== undefined && value !== null && value !== '') params.set(key, value);
+                });
+                return API.request('POST', `/proxy/epg/${sourceId}/channels${params.toString() ? `?${params.toString()}` : ''}`, { channelIds });
+            }
         },
 
         // Cache management

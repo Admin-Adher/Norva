@@ -219,6 +219,10 @@
                 'GET',
                 `/sources/${encodeURIComponent(id)}/short-epg?stream_id=${encodeURIComponent(streamId)}&limit=${encodeURIComponent(limit)}`
             ),
+            epg: (id, params = {}) => request(
+                'GET',
+                `/sources/${encodeURIComponent(id)}/epg${query(params)}`
+            ),
             sync: (id) => sourceSyncRequest(id),
             remove: (id) => request('DELETE', `/sources/${encodeURIComponent(id)}`)
         },
@@ -281,6 +285,12 @@
                 shortEpg: (id, streamId, limit = 8) => request(
                     'GET',
                     `/device/sources/${encodeURIComponent(id)}/short-epg?stream_id=${encodeURIComponent(streamId)}&limit=${encodeURIComponent(limit)}`,
+                    null,
+                    { token: getDeviceToken() }
+                ),
+                epg: (id, params = {}) => request(
+                    'GET',
+                    `/device/sources/${encodeURIComponent(id)}/epg${query(params)}`,
                     null,
                     { token: getDeviceToken() }
                 )
