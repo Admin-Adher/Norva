@@ -721,10 +721,7 @@ class SettingsPage {
         if (!display) return;
 
         try {
-            // Fetch last sync time from server
-            const response = await fetch('/api/settings/sync-status');
-            if (!response.ok) throw new Error('Failed to fetch sync status');
-            const data = await response.json();
+            const data = await API.settings.getSyncStatus();
 
             if (data.lastSyncTime) {
                 const lastRefreshTime = new Date(data.lastSyncTime);
@@ -754,7 +751,7 @@ class SettingsPage {
                 display.title = 'Sync has not run yet since server started';
             }
         } catch (err) {
-            console.error('Error fetching sync status:', err);
+            console.debug('Sync status unavailable:', err);
             display.textContent = 'Unknown';
             display.title = 'Could not fetch sync status';
         }

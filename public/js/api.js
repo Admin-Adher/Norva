@@ -747,6 +747,15 @@ const CloudAdapter = (() => {
             }
             return { ...defaultSettings(), ...JSON.parse(localStorage.getItem('norva-cloud-settings') || '{}') };
         }
+        if (method === 'GET' && path === '/settings/sync-status') {
+            const sources = await listSources().catch(() => []);
+            const lastSyncTime = sources
+                .map(source => source.last_sync || source.lastSyncedAt || source.last_synced_at)
+                .filter(Boolean)
+                .sort()
+                .pop() || null;
+            return { lastSyncTime, cloud: true };
+        }
         if (path.startsWith('/cloud/')) return { linked: true, cloud: true };
 
         throw new Error(`Cloud API route not mapped: ${method} ${endpoint}`);
@@ -1159,7 +1168,8 @@ const API = {
         get: () => API.request('GET', '/settings'),
         update: (data) => API.request('PUT', '/settings', data),
         reset: () => API.request('DELETE', '/settings'),
-        getDefaults: () => API.request('GET', '/settings/defaults')
+        getDefaults: () => API.request('GET', '/settings/defaults'),
+        getSyncStatus: () => API.request('GET', '/settings/sync-status')
     },
 
     // Norva Cloud link for the local hub
