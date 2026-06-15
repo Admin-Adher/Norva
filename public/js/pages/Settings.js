@@ -132,6 +132,35 @@ class SettingsPage {
             API.settings.update({ tmdbApiKey: tmdbKeyInput.value.trim() }).catch(console.error);
         });
 
+        // Country / region: drives the Live TV national line-up order + logos.
+        const countrySelect = document.getElementById('setting-country');
+        if (countrySelect) {
+            let cc = '';
+            try { cc = (localStorage.getItem('norva-country') || '').toUpperCase(); } catch (e) { }
+            if (!cc) { const loc = (navigator.language || '').split('-')[1]; cc = (loc || 'FR').toUpperCase(); }
+            if (![...countrySelect.options].some(o => o.value === cc)) cc = 'FR';
+            countrySelect.value = cc;
+
+            countrySelect.addEventListener('change', async () => {
+                const value = countrySelect.value;
+                try { localStorage.setItem('norva-country', value); } catch (e) { }
+                countrySelect.disabled = true;
+                const prevHint = countrySelect.parentElement?.querySelector('.setting-hint');
+                const originalHint = prevHint?.textContent;
+                if (prevHint) prevHint.textContent = `Re-synchronisation des chaînes pour ${value}…`;
+                try {
+                    const sources = await API.sources.getAll();
+                    for (const src of (sources || [])) {
+                        try { await API.sources.sync(src.id); } catch (e) { console.warn('[country] resync failed for', src.id, e); }
+                    }
+                    try { await window.app?.channelList?.loadChannels?.(); } catch (e) { }
+                } finally {
+                    countrySelect.disabled = false;
+                    if (prevHint && originalHint) prevHint.textContent = originalHint;
+                }
+            });
+        }
+
         const formatStatus = (st) => {
             if (st.running) {
                 return `Enriching… ${st.processed}/${st.total} titles (${st.matched} matched)`;
