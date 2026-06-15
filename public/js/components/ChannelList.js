@@ -124,13 +124,73 @@ class ChannelList {
      * Only proxies HTTP URLs when on HTTPS page
      */
     getProxiedImageUrl(url) {
-        if (!url || url.length === 0) return '/img/placeholder.png';
-        if (window.API?.isCloudMode?.()) return url;
-        // Only proxy if we're on HTTPS and the image is HTTP
-        if (window.location.protocol === 'https:' && url.startsWith('http://')) {
-            return `/api/proxy/image?url=${encodeURIComponent(url)}`;
+        const raw = String(url || '').trim();
+        if (!raw) return '/img/placeholder.png';
+        if (raw.startsWith('/') || raw.startsWith('data:')) return raw;
+        if (window.API?.isCloudMode?.() && window.NorvaCloud?.imageUrl && /^https?:\/\//i.test(raw)) {
+            return window.NorvaCloud.imageUrl(raw);
         }
-        return url;
+        // Only proxy if we're on HTTPS and the image is HTTP
+        if (window.location.protocol === 'https:' && raw.startsWith('http://')) {
+            return `/api/proxy/image?url=${encodeURIComponent(raw)}`;
+        }
+        return raw;
+    }
+
+    getChannelLogoFallback(channelOrName) {
+        const label = typeof channelOrName === 'string'
+            ? channelOrName
+            : (channelOrName?.name || channelOrName?.title || 'TV');
+        const clean = String(label || 'TV').replace(/\s+/g, ' ').trim();
+        const initials = clean
+            .split(/[^A-Za-z0-9]+/)
+            .filter(Boolean)
+            .slice(0, 2)
+            .map(part => part.slice(0, 2).toUpperCase())
+            .join('') || 'TV';
+        const hue = Array.from(clean).reduce((acc, char) => acc + char.charCodeAt(0), 0) % 360;
+        const title = clean.length > 18 ? `${clean.slice(0, 17)}...` : clean;
+        const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96">
+  <defs>
+    <linearGradient id="g" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="hsl(${hue}, 82%, 58%)"/>
+      <stop offset="1" stop-color="hsl(${(hue + 70) % 360}, 78%, 46%)"/>
+    </linearGradient>
+  </defs>
+  <rect width="96" height="96" rx="20" fill="#101522"/>
+  <rect x="4" y="4" width="88" height="88" rx="18" fill="url(#g)" opacity=".22"/>
+  <text x="48" y="46" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="24" font-weight="800" fill="#f8fbff">${this.escapeSvgText(initials)}</text>
+  <text x="48" y="67" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="10" font-weight="700" fill="#cfd8ff">${this.escapeSvgText(title)}</text>
+</svg>`;
+        return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+    }
+
+    getChannelLogoErrorSrc(channelOrName) {
+        return this.escapeHtml(this.getChannelLogoFallback(channelOrName));
+    }
+
+    getChannelLogoSrc(channel) {
+        const raw = channel?.tvgLogo || channel?.stream_icon || channel?.poster_url || channel?.logo;
+        if (this.isKnownBrokenLogoUrl(raw)) return this.getChannelLogoFallback(channel);
+        return raw ? this.getProxiedImageUrl(raw) : this.getChannelLogoFallback(channel);
+    }
+
+    isKnownBrokenLogoUrl(url) {
+        try {
+            const host = new URL(String(url || '')).hostname.toLowerCase();
+            return host === 'aptvpix.net' || host.endsWith('.aptvpix.net');
+        } catch (_) {
+            return false;
+        }
+    }
+
+    escapeSvgText(text) {
+        return String(text || '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
     }
 
     /**
@@ -729,8 +789,8 @@ class ChannelList {
                data-render-group="${renderGroup}"
                data-favorite-id="${channel._favoriteTargetId || channel.id}">
             ${lcn ? `<span class="channel-lcn">${this.escapeHtml(lcn)}</span>` : ''}
-            <img class="channel-logo" src="${this.getProxiedImageUrl(channel.tvgLogo)}"
-                 alt="" onerror="this.onerror=null;this.src='/img/placeholder.png'">
+            <img class="channel-logo" src="${this.getChannelLogoSrc(channel)}"
+                 alt="" onerror="this.onerror=null;this.src='${this.getChannelLogoErrorSrc(channel)}'">
             <div class="channel-info">
               <div class="channel-name">${this.escapeHtml(channel.name)}</div>
               <div class="channel-program">${this.escapeHtml(this.getDisplayProgramInfo(channel) || '')}</div>
@@ -1430,8 +1490,8 @@ class ChannelList {
                data-url="${ch.url || ''}"
                data-render-id="${renderId}"
                data-render-group="Search">
-            <img class="channel-logo" src="${this.getProxiedImageUrl(ch.tvgLogo)}"
-                 alt="" onerror="this.onerror=null;this.src='/img/placeholder.png'">
+            <img class="channel-logo" src="${this.getChannelLogoSrc(ch)}"
+                 alt="" onerror="this.onerror=null;this.src='${this.getChannelLogoErrorSrc(ch)}'">
             <div class="channel-info">
               <div class="channel-name">${title}</div>
               <div class="channel-program search-subtitle">${subtitle}</div>
@@ -2579,8 +2639,8 @@ class ChannelList {
         div.dataset.url = channel.url || '';
 
         div.innerHTML = `
-            <img class="channel-logo" src="${this.getProxiedImageUrl(channel.tvgLogo)}" 
-                 alt="" onerror="this.onerror=null;this.src='/img/placeholder.png'">
+            <img class="channel-logo" src="${this.getChannelLogoSrc(channel)}"
+                 alt="" onerror="this.onerror=null;this.src='${this.getChannelLogoErrorSrc(channel)}'">
             <div class="channel-info">
               <div class="channel-name">${this.escapeHtml(channel.name)}</div>
               <div class="channel-program">${this.getProgramInfo(channel) || ''}</div>
@@ -2857,8 +2917,8 @@ class ChannelList {
         modalBody.innerHTML = `
             <div class="epg-info-modal">
                 <div class="channel-details">
-                    <img class="channel-logo" src="${this.getProxiedImageUrl(channel.tvgLogo)}" 
-                         onerror="this.onerror=null;this.src='/img/placeholder.png'" />
+                    <img class="channel-logo" src="${this.getChannelLogoSrc(channel)}"
+                         onerror="this.onerror=null;this.src='${this.getChannelLogoErrorSrc(channel)}'" />
                     <div class="channel-meta">
                         <p><strong>Group:</strong> ${this.escapeHtml(channel.groupTitle || 'Uncategorized')}</p>
                         <p><strong>Source:</strong> ${channel.sourceType}</p>

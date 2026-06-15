@@ -274,17 +274,65 @@ class HomePage {
     }
 
     createChannelTile(channel) {
-        const logoUrl = this.resolveImageUrl(channel.tvgLogo || channel.stream_icon || channel.logo, '/img/placeholder.png');
+        const logoUrl = this.getChannelLogoSrc(channel);
+        const fallbackLogo = this.getChannelLogoFallback(channel);
         const name = channel.name || 'Unknown';
 
         return `
             <div class="channel-tile" data-channel-id="${channel.id}" data-source-id="${channel.sourceId}">
                 <div class="tile-logo">
-                    <img src="${this.escapeHtml(logoUrl)}" alt="${this.escapeHtml(name)}" loading="lazy" onerror="this.onerror=null;this.src='/img/placeholder.png'">
+                    <img src="${this.escapeHtml(logoUrl)}" alt="${this.escapeHtml(name)}" loading="lazy" onerror="this.onerror=null;this.src='${this.escapeHtml(fallbackLogo)}'">
                 </div>
                 <div class="tile-name" title="${this.escapeHtml(name)}">${this.escapeHtml(name)}</div>
             </div>
         `;
+    }
+
+    getChannelLogoSrc(channel) {
+        if (this.app?.channelList?.getChannelLogoSrc) {
+            return this.app.channelList.getChannelLogoSrc(channel);
+        }
+        const raw = channel?.tvgLogo || channel?.stream_icon || channel?.poster_url || channel?.logo;
+        if (this.isKnownBrokenLogoUrl(raw)) return this.getChannelLogoFallback(channel);
+        return raw ? this.resolveImageUrl(raw, '/img/placeholder.png') : this.getChannelLogoFallback(channel);
+    }
+
+    isKnownBrokenLogoUrl(url) {
+        try {
+            const host = new URL(String(url || '')).hostname.toLowerCase();
+            return host === 'aptvpix.net' || host.endsWith('.aptvpix.net');
+        } catch (_) {
+            return false;
+        }
+    }
+
+    getChannelLogoFallback(channel) {
+        if (this.app?.channelList?.getChannelLogoFallback) {
+            return this.app.channelList.getChannelLogoFallback(channel);
+        }
+        const label = channel?.name || channel?.title || 'TV';
+        const clean = String(label || 'TV').replace(/\s+/g, ' ').trim();
+        const initials = clean
+            .split(/[^A-Za-z0-9]+/)
+            .filter(Boolean)
+            .slice(0, 2)
+            .map(part => part.slice(0, 2).toUpperCase())
+            .join('') || 'TV';
+        const hue = Array.from(clean).reduce((acc, char) => acc + char.charCodeAt(0), 0) % 360;
+        const title = clean.length > 18 ? `${clean.slice(0, 17)}...` : clean;
+        const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96">
+  <defs>
+    <linearGradient id="g" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="hsl(${hue}, 82%, 58%)"/>
+      <stop offset="1" stop-color="hsl(${(hue + 70) % 360}, 78%, 46%)"/>
+    </linearGradient>
+  </defs>
+  <rect width="96" height="96" rx="20" fill="#101522"/>
+  <rect x="4" y="4" width="88" height="88" rx="18" fill="url(#g)" opacity=".22"/>
+  <text x="48" y="46" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="24" font-weight="800" fill="#f8fbff">${this.escapeSvgText(initials)}</text>
+  <text x="48" y="67" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="10" font-weight="700" fill="#cfd8ff">${this.escapeSvgText(title)}</text>
+</svg>`;
+        return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
     }
 
     playChannel(channelId, sourceId) {
@@ -500,17 +548,29 @@ class HomePage {
         if (!raw) return fallback;
         if (raw.startsWith('/')) return raw;
         if (/^https?:\/\//i.test(raw)) {
-            return this.shouldProxyImages() ? `/api/proxy/image?url=${encodeURIComponent(raw)}` : raw;
+            if (window.API?.isCloudMode?.() && window.NorvaCloud?.imageUrl) {
+                return window.NorvaCloud.imageUrl(raw);
+            }
+            return this.shouldProxyImages(raw) ? `/api/proxy/image?url=${encodeURIComponent(raw)}` : raw;
         }
         return raw;
     }
 
-    shouldProxyImages() {
+    shouldProxyImages(url = '') {
         try {
-            return !window.API?.isCloudMode?.();
+            return window.location.protocol === 'https:' && String(url).startsWith('http://');
         } catch (_) {
             return false;
         }
+    }
+
+    escapeSvgText(text) {
+        return String(text || '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
     }
 
     escapeHtml(value) {

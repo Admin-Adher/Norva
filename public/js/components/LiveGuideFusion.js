@@ -71,6 +71,18 @@ class LiveGuideFusion {
         return this.app.channelList.getProxiedImageUrl(url);
     }
 
+    getChannelLogoSrc(channel) {
+        return this.app.channelList.getChannelLogoSrc
+            ? this.app.channelList.getChannelLogoSrc(channel)
+            : this.getProxiedImageUrl(channel?.tvgLogo);
+    }
+
+    getChannelLogoErrorSrc(channel) {
+        return this.app.channelList.getChannelLogoErrorSrc
+            ? this.app.channelList.getChannelLogoErrorSrc(channel || 'TV')
+            : '/img/placeholder.png';
+    }
+
     decodeBase64(value) {
         if (!value) return '';
         try {
@@ -469,13 +481,14 @@ class LiveGuideFusion {
         const title = program?.title || 'Pas d information';
         const start = program?.start ? this.formatTime(program.start) : '--:--';
         const stop = program?.stop ? this.formatTime(program.stop) : '--:--';
-        const logo = channel ? this.getProxiedImageUrl(channel.tvgLogo) : '/img/placeholder.png';
+        const logo = channel ? this.getChannelLogoSrc(channel) : '/img/placeholder.png';
+        const fallbackLogo = this.getChannelLogoErrorSrc(channel);
         const group = channel?.groupTitle || this.activeGroup || '';
 
         return `
             <div class="live-guide-preview">
                 <div class="live-guide-preview-art">
-                    <img src="${logo}" alt="" onerror="this.onerror=null;this.src='/img/placeholder.png'">
+                    <img src="${logo}" alt="" onerror="this.onerror=null;this.src='${fallbackLogo}'">
                 </div>
                 <div class="live-guide-preview-copy">
                     <div class="live-guide-preview-title">${this.escapeHtml(title)}</div>
@@ -535,7 +548,7 @@ class LiveGuideFusion {
             <button class="live-guide-row ${isActive ? 'active' : ''} ${isPending ? 'pending-refresh' : ''}" data-channel-id="${channel.id}" data-source-id="${channel.sourceId}" data-family-key="${this.escapeHtml(family.familyKey)}">
                 <span class="live-guide-channel-cell">
                     <span class="live-guide-num">${channel.num || index + 1}</span>
-                    <img src="${this.getProxiedImageUrl(channel.tvgLogo)}" alt="" onerror="this.onerror=null;this.src='/img/placeholder.png'">
+                    <img src="${this.getChannelLogoSrc(channel)}" alt="" onerror="this.onerror=null;this.src='${this.getChannelLogoErrorSrc(channel)}'">
                     <span class="live-guide-channel-name">${this.escapeHtml(family.label)}</span>
                     <span class="live-guide-variant-count">${this.escapeHtml(variantLabel)}</span>
                     ${badge ? `<span class="live-guide-mode ${badge.className}" title="${this.escapeHtml(badge.title)}">${badge.label}</span>` : ''}

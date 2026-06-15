@@ -81,6 +81,9 @@ Deno.serve(async (req) => {
   try {
     const url = new URL(req.url);
     const segments = routeSegments(url.pathname);
+    if (req.method === "GET" && segments[0] === "image") {
+      return await proxyImage(req, url);
+    }
     const result = await route(req, url, segments, supabase);
     return json(req, result.body, result.status ?? 200);
   } catch (error) {
@@ -106,7 +109,7 @@ async function route(
       body: {
         ok: true,
         service: "norva-cloud",
-        version: 9,
+        version: 11,
         liveMaterialization: true,
         relayConfigured: Boolean(runtimeConfig.relayBaseUrl && runtimeConfig.relayTokenSecret),
         gatewayConfigured: Boolean(runtimeConfig.mediaGatewayUrl && runtimeConfig.mediaGatewayToken),
@@ -1493,6 +1496,56 @@ async function fetchText(url: string, timeoutMs: number, maxBytes: number) {
   return text;
 }
 
+async function proxyImage(req: Request, url: URL) {
+  const targetUrl = assertPublicImageUrl(url.searchParams.get("url") ?? "");
+  const response = await fetchImageWithFallback(targetUrl, 12000);
+  if (!response.ok) {
+    return new Response("Failed to fetch image", {
+      status: response.status,
+      headers: corsHeaders(req),
+    });
+  }
+
+  const contentType = response.headers.get("content-type") || "image/png";
+  return new Response(response.body, {
+    status: 200,
+    headers: {
+      ...corsHeaders(req),
+      "Content-Type": contentType,
+      "Cache-Control": "public, max-age=86400, s-maxage=86400",
+    },
+  });
+}
+
+async function fetchImageWithFallback(url: string, timeoutMs: number) {
+  try {
+    return await fetchImageWithTimeout(url, timeoutMs);
+  } catch (error) {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "http:") throw error;
+    parsed.protocol = "https:";
+    return await fetchImageWithTimeout(parsed.href, timeoutMs);
+  }
+}
+
+async function fetchImageWithTimeout(url: string, timeoutMs: number) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+        "User-Agent": "Mozilla/5.0 (compatible; NorvaCloudImageProxy/1.0)",
+      },
+    });
+  } catch (error) {
+    throw new HttpError(502, "Unable to reach image host", error instanceof Error ? error.message : undefined);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function fetchWithTimeout(url: string, timeoutMs: number) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -1757,6 +1810,48 @@ function assertHttpUrl(value: string) {
   } catch {
     throw new HttpError(400, "targetUrl must be a valid http(s) URL");
   }
+}
+
+function assertPublicImageUrl(value: string) {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      throw new Error("unsupported protocol");
+    }
+    if (url.username || url.password) {
+      throw new Error("credentials are not allowed");
+    }
+    const hostname = url.hostname.toLowerCase();
+    if (
+      hostname === "localhost" ||
+      hostname === "127.0.0.1" ||
+      hostname === "0.0.0.0" ||
+      hostname.endsWith(".local") ||
+      hostname.includes(":") ||
+      isPrivateIpv4(hostname)
+    ) {
+      throw new Error("private hosts are not allowed");
+    }
+    return url.href;
+  } catch {
+    throw new HttpError(400, "url must be a public http(s) image URL");
+  }
+}
+
+function isPrivateIpv4(hostname: string) {
+  const parts = hostname.split(".").map((part) => Number.parseInt(part, 10));
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) {
+    return false;
+  }
+  const [a, b] = parts;
+  return (
+    a === 10 ||
+    a === 127 ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168) ||
+    (a === 169 && b === 254) ||
+    a === 0
+  );
 }
 
 function boundedInt(value: unknown, fallback: number, min: number, max: number) {

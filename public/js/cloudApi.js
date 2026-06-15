@@ -194,6 +194,7 @@
         setDeviceToken,
         setApiUrl,
         isConfigured: () => Boolean(apiBase()),
+        imageUrl: (url) => `${apiBase()}/image?url=${encodeURIComponent(url)}`,
 
         health: () => request('GET', '/health', null, { token: '' }),
 

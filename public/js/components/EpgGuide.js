@@ -43,13 +43,32 @@ class EpgGuide {
      * Only proxies HTTP URLs when on HTTPS page
      */
     getProxiedImageUrl(url) {
-        if (!url || url.length === 0) return '/img/placeholder.png';
-        if (window.API?.isCloudMode?.()) return url;
-        // Only proxy if we're on HTTPS and the image is HTTP
-        if (window.location.protocol === 'https:' && url.startsWith('http://')) {
-            return `/api/proxy/image?url=${encodeURIComponent(url)}`;
+        const raw = String(url || '').trim();
+        if (!raw) return '/img/placeholder.png';
+        if (raw.startsWith('/') || raw.startsWith('data:')) return raw;
+        if (window.API?.isCloudMode?.() && window.NorvaCloud?.imageUrl && /^https?:\/\//i.test(raw)) {
+            return window.NorvaCloud.imageUrl(raw);
         }
-        return url;
+        // Only proxy if we're on HTTPS and the image is HTTP
+        if (window.location.protocol === 'https:' && raw.startsWith('http://')) {
+            return `/api/proxy/image?url=${encodeURIComponent(raw)}`;
+        }
+        return raw;
+    }
+
+    getChannelLogoSrc(sourceChannel, epgChannel) {
+        if (window.app?.channelList?.getChannelLogoSrc) {
+            return window.app.channelList.getChannelLogoSrc(sourceChannel);
+        }
+        const raw = sourceChannel?.tvgLogo || sourceChannel?.stream_icon || sourceChannel?.poster_url || (epgChannel && epgChannel.icon);
+        return raw ? this.getProxiedImageUrl(raw) : this.getChannelLogoErrorSrc(sourceChannel, epgChannel);
+    }
+
+    getChannelLogoErrorSrc(sourceChannel, epgChannel) {
+        if (window.app?.channelList?.getChannelLogoErrorSrc) {
+            return window.app.channelList.getChannelLogoErrorSrc(sourceChannel || epgChannel?.name || 'TV');
+        }
+        return '/img/placeholder.png';
     }
 
     normalizeChannelKey(value) {
@@ -603,7 +622,8 @@ class EpgGuide {
         }
 
         // Fallback values if EPG channel is missing
-        const logo = this.getProxiedImageUrl(sourceChannel.tvgLogo || (epgChannel && epgChannel.icon));
+        const logo = this.getChannelLogoSrc(sourceChannel, epgChannel);
+        const fallbackLogo = this.getChannelLogoErrorSrc(sourceChannel, epgChannel);
         const name = sourceChannel.name || (epgChannel && epgChannel.name);
 
         const row = document.createElement('div');
@@ -624,7 +644,7 @@ class EpgGuide {
               ${isFavorite ? Icons.favorite : Icons.favoriteOutline}
             </button>
             <img class="epg-channel-logo" src="${logo}" 
-                 alt="" onerror="this.onerror=null;this.src='/img/placeholder.png'">
+                 alt="" onerror="this.onerror=null;this.src='${fallbackLogo}'">
             <span class="epg-channel-name">${name}</span>
             <div class="resize-handle"></div>
           </div>
