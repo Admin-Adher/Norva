@@ -5789,9 +5789,9 @@ kbd {
   #page-movies .filter-bar,
   #page-series .filter-bar {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     align-items: center;
-    gap: 8px;
+    gap: 6px;
     overflow: visible;
   }
 
@@ -5811,8 +5811,8 @@ kbd {
     width: 100%;
     min-width: 0;
     max-width: none;
-    height: 36px;
-    font-size: 0.78rem;
+    height: 34px;
+    font-size: 0.72rem;
   }
 
   #page-movies .movies-controls .multi-select,
@@ -5854,22 +5854,23 @@ kbd {
   #page-series .filter-toggle,
   #page-movies .filter-reset,
   #page-series .filter-reset {
-    min-height: 36px;
-    height: 36px;
+    min-height: 34px;
+    height: 34px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    padding-left: 8px;
-    padding-right: 8px;
+    padding-left: 6px;
+    padding-right: 6px;
+    font-size: 0.72rem;
   }
 
   #page-movies .filter-bar,
   #page-series .filter-bar {
-    padding: 8px 10px;
-    min-height: 52px;
+    padding: 6px 8px;
+    min-height: 80px;
   }
 
   #movies-favorites-btn,
@@ -5891,13 +5892,7 @@ kbd {
 
   #page-movies .filter-count,
   #page-series .filter-count {
-    width: auto;
-    margin-left: 0;
-    order: 0;
-    padding: 0 6px;
-    text-align: center;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    display: none;
   }
 
   #page-movies .continue-row,
