@@ -395,7 +395,7 @@ class App {
 
         const sync = () => setups.forEach(setup => setup.sync());
         sync();
-        window.matchMedia('(max-width: 640px)').addEventListener?.('change', sync);
+        window.matchMedia('(max-width: 1024px)').addEventListener?.('change', sync);
         window.addEventListener('resize', sync);
     }
 
@@ -541,7 +541,7 @@ class App {
 
         return {
             sync: () => {
-                if (window.matchMedia('(max-width: 640px)').matches) apply();
+                if (window.matchMedia('(max-width: 1024px)').matches) apply();
                 else restore();
             }
         };

@@ -5758,8 +5758,8 @@ kbd {
   }
 }
 
-/* Compact touch controls for dense catalog pages on phones. */
-@media (max-width: 640px) {
+/* Compact touch controls for dense catalog pages on phones and tablets. */
+@media (max-width: 1024px) {
 
   body.catalog-filter-open {
     overflow: hidden;
@@ -6072,6 +6072,59 @@ kbd {
   #page-movies .movies-grid,
   #page-series .series-grid {
     padding: 10px;
+  }
+}
+
+@media (min-width: 641px) and (max-width: 1024px) {
+  #page-movies .movies-header,
+  #page-series .series-header {
+    gap: 10px;
+    padding: 12px 16px;
+  }
+
+  #page-movies .movies-controls,
+  #page-series .series-controls {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 52px;
+    max-width: 760px;
+    margin: 0 auto;
+  }
+
+  #movies-random,
+  #series-random {
+    width: 52px;
+    max-width: 52px;
+    min-width: 52px;
+    flex-basis: 52px;
+  }
+
+  #page-movies .filter-bar,
+  #page-series .filter-bar {
+    left: 24px;
+    right: 24px;
+    bottom: 16px;
+    max-height: min(76dvh, 720px);
+    border-bottom: 1px solid var(--color-border-light);
+    border-radius: 18px;
+  }
+
+  .mobile-filter-body {
+    padding: 14px 18px calc(18px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .mobile-filter-section-body {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+  }
+}
+
+@media (min-width: 900px) and (max-width: 1024px) {
+  #page-movies .movies-controls,
+  #page-series .series-controls {
+    max-width: 880px;
+  }
+
+  .mobile-filter-section-body {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
