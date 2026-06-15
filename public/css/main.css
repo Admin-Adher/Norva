@@ -5779,7 +5779,7 @@ kbd {
   #page-movies .movies-controls,
   #page-series .series-controls {
     display: grid;
-    grid-template-columns: minmax(104px, 0.9fr) minmax(148px, 1.35fr) 44px;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 44px;
     align-items: center;
     gap: 8px;
     width: 100%;
@@ -5822,9 +5822,22 @@ kbd {
 
   #page-movies .movies-controls .search-wrapper,
   #page-series .series-controls .search-wrapper {
-    grid-column: 1 / -1;
+    grid-column: 1 / 3;
+    grid-row: 2;
     width: 100%;
     min-width: 0;
+  }
+
+  #movies-source-select,
+  #series-source-select {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  #movies-category-multi,
+  #series-category-multi {
+    grid-column: 2 / 4;
+    grid-row: 1;
   }
 
   #page-movies .movies-controls .search-input,
@@ -5861,6 +5874,8 @@ kbd {
 
   #movies-favorites-btn,
   #series-favorites-btn {
+    grid-column: 3;
+    grid-row: 2;
     width: 44px;
     min-width: 44px;
     padding: 0;
