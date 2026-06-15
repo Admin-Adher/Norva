@@ -38,7 +38,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: '22'
           cache: 'npm'
 
       - name: Install dependencies
@@ -141,7 +141,7 @@ jobs:
             --proto-format \
             -o base.apk \
             -I "${ANDROID_JAR}" \
-            --manifest manifest.xml \
+            --manifest ../app/src/main/AndroidManifest.xml \
             --java gen \
             --auto-add-overlay \
             compiled-res/*.flat
@@ -152,7 +152,7 @@ jobs:
           "${AAPT2}" link \
             -o base-std.apk \
             -I "${ANDROID_JAR}" \
-            --manifest manifest.xml \
+            --manifest ../app/src/main/AndroidManifest.xml \
             --java gen \
             --auto-add-overlay \
             compiled-res/*.flat
