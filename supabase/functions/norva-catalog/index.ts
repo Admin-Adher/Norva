@@ -64,6 +64,11 @@ Deno.serve(async (req) => {
       return json(req, await listLiveChannelVariants(url, userId, liveChannelIdFromRoute(segments)));
     }
 
+    if (req.method === "GET" && isHomeRailsRoute(segments)) {
+      const userId = await requireUserId(req);
+      return json(req, await listHomeRails(url, userId));
+    }
+
     if (req.method === "GET" && (segments[0] === "media-items" || (segments[0] === "device" && segments[1] === "media-items"))) {
       const userId = await requireUserId(req);
       return json(req, await listMediaItems(url, userId));
@@ -183,6 +188,197 @@ async function listMediaCategories(url: URL, userId: string) {
     categories: [...categories.values()].sort((a, b) =>
       a.category_name.localeCompare(b.category_name, undefined, { sensitivity: "base" })
     ),
+  };
+}
+
+async function listHomeRails(url: URL, userId: string) {
+  const limit = boundedInt(url.searchParams.get("limit"), 24, 1, 50);
+  const type = url.searchParams.get("type");
+  const includeSeries = !type || type === "series";
+  const includeMovies = !type || type === "movie";
+  const rails: JsonRecord[] = [];
+
+  if (includeMovies) {
+    rails.push(await listTitleRail(userId, "movie", "recently-added-movies", "Recently Added Movies", limit));
+  }
+  if (includeSeries) {
+    rails.push(await listTitleRail(userId, "series", "recently-added-series", "Recently Added Series", limit));
+  }
+
+  return {
+    contract: "norva.home.rails.v1",
+    rails: rails.filter((rail) => Array.isArray(rail.items) && rail.items.length > 0),
+  };
+}
+
+async function listTitleRail(userId: string, itemType: "movie" | "series", id: string, title: string, limit: number) {
+  try {
+    const { data: titles, error } = await db
+      .from("cloud_titles")
+      .select("*")
+      .eq("user_id", userId)
+      .eq("item_type", itemType)
+      .gt("variant_count", 0)
+      .order("synced_at", { ascending: false })
+      .order("updated_at", { ascending: false })
+      .limit(limit);
+    if (error) {
+      if (isMissingMaterialization(error)) return listRawMediaRail(userId, itemType, id, title, limit);
+      throwDb(error, "Unable to list title rail");
+    }
+    const variantsByTitle = await listVariantsByTitleIds((titles ?? []).map((row) => String(row.id)));
+    return {
+      id,
+      title,
+      itemType,
+      source: "titles",
+      items: (titles ?? []).map((row) => titleRailItem(row, variantsByTitle.get(String(row.id)) ?? [])),
+    };
+  } catch (error) {
+    if (isMissingMaterialization(error)) return listRawMediaRail(userId, itemType, id, title, limit);
+    throw error;
+  }
+}
+
+async function listVariantsByTitleIds(titleIds: string[]) {
+  const variantsByTitle = new Map<string, JsonRecord[]>();
+  if (!titleIds.length) return variantsByTitle;
+  for (let index = 0; index < titleIds.length; index += 200) {
+    const chunk = titleIds.slice(index, index + 200);
+    const { data, error } = await db
+      .from("cloud_title_variants")
+      .select("*")
+      .in("title_id", chunk)
+      .order("playback_cost_score", { ascending: true })
+      .order("last_observed_ttff_ms", { ascending: true, nullsFirst: false })
+      .order("created_at", { ascending: false });
+    if (error) {
+      if (isMissingMaterialization(error)) return variantsByTitle;
+      throwDb(error, "Unable to list title variants");
+    }
+    for (const variant of data ?? []) {
+      const key = String(variant.title_id);
+      const existing = variantsByTitle.get(key) ?? [];
+      existing.push(variant);
+      variantsByTitle.set(key, existing);
+    }
+  }
+  return variantsByTitle;
+}
+
+function titleRailItem(title: JsonRecord, variants: JsonRecord[]) {
+  const defaultVariant = variants.find((variant) => String(variant.id) === String(title.default_variant_id))
+    ?? variants[0]
+    ?? {};
+  const metadata = recordOrEmpty(title.metadata);
+  return {
+    id: title.id,
+    title_id: title.id,
+    titleId: title.id,
+    item_type: title.item_type,
+    type: title.item_type,
+    item_id: defaultVariant.external_id ?? title.id,
+    itemId: defaultVariant.external_id ?? title.id,
+    source_id: defaultVariant.source_id ?? null,
+    sourceId: defaultVariant.source_id ?? null,
+    external_id: defaultVariant.external_id ?? null,
+    name: title.title,
+    title: title.title,
+    original_title: title.original_title,
+    year: title.release_year,
+    poster_url: title.poster_url ?? defaultVariant.poster_url ?? null,
+    stream_icon: title.poster_url ?? defaultVariant.poster_url ?? null,
+    backdrop_url: title.backdrop_url ?? null,
+    provider_tmdb_id: title.provider_tmdb_id ?? null,
+    providerTmdbId: title.provider_tmdb_id ?? null,
+    match_status: title.match_status,
+    matchStatus: title.match_status,
+    default_variant_id: title.default_variant_id,
+    defaultVariantId: title.default_variant_id,
+    default_variant: titleVariantItem(defaultVariant),
+    defaultVariant: titleVariantItem(defaultVariant),
+    variants: variants.map(titleVariantItem),
+    variant_count: title.variant_count,
+    variantCount: title.variant_count,
+    playback_cost_score: defaultVariant.playback_cost_score ?? null,
+    playbackCostScore: defaultVariant.playback_cost_score ?? null,
+    last_observed_ttff_ms: defaultVariant.last_observed_ttff_ms ?? title.last_observed_ttff_ms ?? null,
+    lastObservedTtffMs: defaultVariant.last_observed_ttff_ms ?? title.last_observed_ttff_ms ?? null,
+    metadata,
+    data: {
+      ...metadata,
+      sourceId: defaultVariant.source_id ?? null,
+      containerExtension: defaultVariant.container_extension ?? null,
+      providerTmdbId: title.provider_tmdb_id ?? null,
+      titleId: title.id,
+    },
+  };
+}
+
+function titleVariantItem(variant: JsonRecord) {
+  return {
+    id: variant.id,
+    source_id: variant.source_id,
+    sourceId: variant.source_id,
+    media_item_id: variant.media_item_id,
+    mediaItemId: variant.media_item_id,
+    item_type: variant.item_type,
+    itemType: variant.item_type,
+    external_id: variant.external_id,
+    item_id: variant.external_id,
+    itemId: variant.external_id,
+    raw_title: variant.raw_title,
+    rawTitle: variant.raw_title,
+    label: variant.label,
+    language: variant.language,
+    quality: variant.quality,
+    resolution: variant.resolution,
+    container_extension: variant.container_extension,
+    containerExtension: variant.container_extension,
+    poster_url: variant.poster_url,
+    posterUrl: variant.poster_url,
+    playback_hint: recordOrEmpty(variant.playback_hint),
+    playbackHint: recordOrEmpty(variant.playback_hint),
+    codec_profile: recordOrEmpty(variant.codec_profile),
+    codecProfile: recordOrEmpty(variant.codec_profile),
+    compatibility_tier: variant.compatibility_tier,
+    compatibilityTier: variant.compatibility_tier,
+    playback_cost_score: variant.playback_cost_score,
+    playbackCostScore: variant.playback_cost_score,
+    last_observed_ttff_ms: variant.last_observed_ttff_ms,
+    lastObservedTtffMs: variant.last_observed_ttff_ms,
+    metadata: recordOrEmpty(variant.metadata),
+  };
+}
+
+async function listRawMediaRail(userId: string, itemType: "movie" | "series", id: string, title: string, limit: number) {
+  const { data, error } = await db
+    .from("cloud_media_items")
+    .select("*")
+    .eq("user_id", userId)
+    .eq("item_type", itemType)
+    .eq("available", true)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (error) throwDb(error, "Unable to list fallback home rail");
+  return {
+    id,
+    title,
+    itemType,
+    source: "raw",
+    items: (data ?? []).map((item) => ({
+      ...item,
+      type: item.item_type,
+      item_id: item.external_id,
+      itemId: item.external_id,
+      name: item.title,
+      stream_icon: item.poster_url,
+      data: {
+        ...recordOrEmpty(item.metadata),
+        sourceId: item.source_id,
+        containerExtension: recordOrEmpty(item.playback_hint).container,
+      },
+    })),
   };
 }
 
@@ -620,7 +816,8 @@ function stringOrNull(value: unknown) {
 function isMissingMaterialization(error: unknown) {
   if (!error || typeof error !== "object") return false;
   const record = error as { code?: string; message?: string };
-  return record.code === "42P01" || String(record.message || "").includes("cloud_live_");
+  const message = String(record.message || "");
+  return record.code === "42P01" || message.includes("cloud_live_") || message.includes("cloud_title");
 }
 
 function bearer(req: Request) {
@@ -649,6 +846,13 @@ function isLiveChannelVariantsRoute(segments: string[]) {
   return (
     (segments[0] === "live" && segments[1] === "channel" && Boolean(segments[2]) && segments[3] === "variants") ||
     (segments[0] === "device" && segments[1] === "live" && segments[2] === "channel" && Boolean(segments[3]) && segments[4] === "variants")
+  );
+}
+
+function isHomeRailsRoute(segments: string[]) {
+  return (
+    (segments[0] === "home" && segments[1] === "rails") ||
+    (segments[0] === "device" && segments[1] === "home" && segments[2] === "rails")
   );
 }
 

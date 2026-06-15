@@ -191,6 +191,15 @@ async function createPlaybackSession(
   }
 
   const gateway = await createGatewaySession(session.id, userId, targetUrl, expiresAt, db, mode, userAgent);
+  if (sourceId && gateway.startupMs) {
+    await recordPlaybackStartupObservation(db, {
+      userId,
+      sourceId,
+      itemType,
+      itemId,
+      startupMs: gateway.startupMs,
+    });
+  }
   return {
     session,
     playback: {
@@ -199,6 +208,7 @@ async function createPlaybackSession(
       url: gateway.hlsUrl,
       gatewaySession: gateway.session,
       gatewayRequired: !gateway.hlsUrl,
+      startupMs: gateway.startupMs ?? null,
     },
   };
 }
@@ -447,9 +457,10 @@ async function createGatewaySession(
       .select("*")
       .single();
     if (error) throwDb(error, "Unable to create pending gateway session");
-    return { status: "pending", session: data, hlsUrl: null };
+    return { status: "pending", session: data, hlsUrl: null, startupMs: null };
   }
 
+  const startupStartedAt = performance.now();
   const response = await fetch(`${runtimeConfig.mediaGatewayUrl}/sessions`, {
     method: "POST",
     headers: {
@@ -467,6 +478,7 @@ async function createGatewaySession(
   });
   const gatewayBody = await response.json().catch(() => ({}));
   if (!response.ok) throw new HttpError(response.status, "Media gateway refused the session", gatewayBody);
+  const startupMs = Math.max(1, Math.round(performance.now() - startupStartedAt));
 
   const { data, error } = await db
     .from("cloud_gateway_sessions")
@@ -482,7 +494,36 @@ async function createGatewaySession(
     .select("*")
     .single();
   if (error) throwDb(error, "Unable to record gateway session");
-  return { status: data.status, session: data, hlsUrl: data.hls_url };
+  return { status: data.status, session: data, hlsUrl: data.hls_url, startupMs };
+}
+
+async function recordPlaybackStartupObservation(
+  db: SupabaseClient,
+  options: { userId: string; sourceId: string; itemType: string; itemId: string; startupMs: number },
+) {
+  const itemType = options.itemType === "series" ? "series" : options.itemType === "movie" ? "movie" : "";
+  if (!itemType || !options.itemId || !Number.isFinite(options.startupMs) || options.startupMs <= 0) return;
+
+  const cost = Math.max(1, Math.min(999, Math.round(options.startupMs / 10)));
+  const { error } = await db
+    .from("cloud_title_variants")
+    .update({
+      last_observed_ttff_ms: Math.round(options.startupMs),
+      playback_cost_score: cost,
+    })
+    .eq("user_id", options.userId)
+    .eq("source_id", options.sourceId)
+    .eq("item_type", itemType)
+    .eq("external_id", options.itemId);
+  if (error && !isProjectionMissing(error)) {
+    console.warn("[norva-playback] unable to record playback startup observation", error.message);
+  }
+}
+
+function isProjectionMissing(error: unknown) {
+  if (!error || typeof error !== "object") return false;
+  const record = error as { code?: string; message?: string };
+  return record.code === "42P01" || String(record.message || "").includes("cloud_title");
 }
 
 async function loadSourceConfig(sourceId: string, userId: string, db: SupabaseClient) {

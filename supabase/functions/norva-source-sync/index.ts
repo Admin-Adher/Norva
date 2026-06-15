@@ -1,6 +1,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { refreshMaterializedLiveCatalog } from "../_shared/live-materialization.ts";
+import { refreshVodTitleProjection } from "../_shared/vod-title-projection.ts";
 import type { LiveCatalogItem } from "../_shared/live-catalog.ts";
 
 type JsonRecord = Record<string, unknown>;
@@ -162,6 +163,14 @@ async function syncXtreamSource(sourceId: string, userId: string, config: JsonRe
 
   const savedRows = await replaceSourceItems(sourceId, userId, rows, db);
   const liveCatalog = await refreshMaterializedLiveCatalog(db, { sourceId, userId, rows: savedRows, country: country || stringOr(config.country, "FR") });
+  const titleProjection = await refreshVodTitleProjection({
+    sourceId,
+    userId,
+    rows: savedRows,
+    db,
+    xtreamConfig: { serverUrl, username, password },
+    vodInfoLimit: boundedInt(Deno.env.get("NORVA_VOD_INFO_SYNC_LIMIT"), 120, 0, 1000),
+  });
   return {
     live: Array.isArray(live) ? live.length : 0,
     movies: Array.isArray(vod) ? vod.length : 0,
@@ -171,6 +180,7 @@ async function syncXtreamSource(sourceId: string, userId: string, config: JsonRe
     seriesCategories: seriesCategoryMap.size,
     total: rows.length,
     liveCatalog,
+    titleProjection,
   };
 }
 
@@ -218,12 +228,16 @@ function xtreamRows(
         categoryName,
         rating: item.rating,
         added: item.added,
+        providerTmdbId: stringOrNull(item.tmdb_id ?? item.tmdbId ?? item.tmdb),
+        providerImdbId: stringOrNull(item.imdb_id ?? item.imdbId ?? item.imdb),
       }),
       playback_hint: compactRecord({
         sourceType: "xtream",
         streamId,
         streamType: itemType,
         container,
+        providerTmdbId: stringOrNull(item.tmdb_id ?? item.tmdbId ?? item.tmdb),
+        providerImdbId: stringOrNull(item.imdb_id ?? item.imdbId ?? item.imdb),
       }),
       available: true,
     });
@@ -476,6 +490,12 @@ function stringOrNull(value: unknown) {
 
 function trimTrailingSlash(value: string) {
   return value.replace(/\/+$/, "");
+}
+
+function boundedInt(value: unknown, fallback: number, min: number, max: number) {
+  const parsed = Number.parseInt(String(value ?? ""), 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(min, Math.min(max, parsed));
 }
 
 function isRecord(value: unknown): value is JsonRecord {

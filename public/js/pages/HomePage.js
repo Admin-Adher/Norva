@@ -590,11 +590,12 @@ class HomePage {
         if (!this.app.pages.watch) return;
 
         try {
+            const data = item.data || {};
             const type = item.item_type || item.type;
             const streamType = type === 'movie' ? 'movie' : 'series';
-            const sourceId = item.source_id || (item.data && item.data.sourceId);
+            const sourceId = item.source_id || item.sourceId || data.sourceId;
             const streamId = item.item_id;
-            const container = item.container_extension || (item.data && item.data.containerExtension) || 'mp4';
+            const container = item.container_extension || item.containerExtension || data.containerExtension || 'mp4';
 
             const result = await window.API.request('GET', `/proxy/xtream/${sourceId}/stream/${streamId}/${streamType}?container=${container}`);
 
@@ -602,9 +603,9 @@ class HomePage {
                 const content = {
                     id: item.item_id,
                     type: type,
-                    title: item.name || item.data.title,
-                    subtitle: item.data.subtitle || (type === 'movie' ? 'Movie' : 'Series'),
-                    poster: item.stream_icon || item.data.poster,
+                    title: item.name || item.title || data.title || 'Norva',
+                    subtitle: data.subtitle || (type === 'movie' ? 'Movie' : 'Series'),
+                    poster: item.stream_icon || item.poster_url || data.poster,
                     sourceId: sourceId,
                     resumeTime: isResume ? item.progress : 0,
                     containerExtension: container,

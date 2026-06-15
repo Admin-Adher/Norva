@@ -349,7 +349,7 @@
         try {
             return await requestToBase(sourceSyncBase(), 'POST', path, {});
         } catch (error) {
-            if (error.status === 404 || error.status === 405) {
+            if ([404, 405, 502, 503, 504, 546].includes(error.status)) {
                 return request('POST', path, {});
             }
             throw error;
@@ -496,6 +496,10 @@
             variants: (channelId, params = {}) => catalogRequest(`/live/channel/${encodeURIComponent(channelId)}/variants`, params)
         },
 
+        home: {
+            rails: (params = {}) => catalogRequest('/home/rails', params)
+        },
+
         favorites: {
             list: (params = {}) => request('GET', `/favorites${query(params)}`),
             add: (favorite) => request('POST', '/favorites', favorite),
@@ -560,6 +564,9 @@
             live: {
                 logicalChannels: (params = {}) => catalogRequest('/device/live/logical-channels', params, { token: getDeviceToken() }),
                 variants: (channelId, params = {}) => catalogRequest(`/device/live/channel/${encodeURIComponent(channelId)}/variants`, params, { token: getDeviceToken() })
+            },
+            home: {
+                rails: (params = {}) => catalogRequest('/device/home/rails', params, { token: getDeviceToken() })
             },
             playback: {
                 createSession: (session) => playbackRequest(session, { token: getDeviceToken() })

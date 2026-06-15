@@ -50,6 +50,7 @@ const CloudAdapter = (() => {
     let mediaCache = new Map();
     let pageCache = new Map();
     let liveCatalogCache = new Map();
+    let homeRailCache = new Map();
 
     function readAliases() {
         try {
@@ -127,6 +128,7 @@ const CloudAdapter = (() => {
         mediaCache.clear();
         pageCache.clear();
         liveCatalogCache.clear();
+        homeRailCache.clear();
     }
 
     function normalizeCategory(value) {
@@ -347,6 +349,24 @@ const CloudAdapter = (() => {
         return (payload.channels || []).map(channel => normalizeLogicalLiveChannel(channel, sourceId));
     }
 
+    async function getHomeRails({ type = '', limit = 12 } = {}) {
+        const normalizedType = type ? cloudTypeFromLocal(type) : '';
+        const normalizedLimit = Math.max(1, Math.min(50, Number.parseInt(limit, 10) || 12));
+        const cacheKey = JSON.stringify({ type: normalizedType, limit: normalizedLimit });
+        const cached = homeRailCache.get(cacheKey);
+        if (cached && cached.expiresAt > Date.now()) return cached.payload;
+
+        const payload = await cloudHomeApi().rails({
+            type: normalizedType,
+            limit: normalizedLimit
+        });
+        homeRailCache.set(cacheKey, {
+            expiresAt: Date.now() + PAGE_CACHE_TTL_MS,
+            payload
+        });
+        return payload;
+    }
+
     function normalizeLogicalLiveChannel(channel, requestedSourceId) {
         const cloudSourceId = channel.source_id || channel.sourceId || '';
         const localId = requestedSourceId || localSourceId(cloudSourceId);
@@ -462,6 +482,67 @@ const CloudAdapter = (() => {
                 poster,
                 sourceId: item.sourceId || item.source_id,
                 containerExtension: item.container_extension || item.containerExtension || (type === 'channel' ? 'm3u8' : 'mp4')
+            }
+        };
+    }
+
+    function normalizeHomeRailItem(item) {
+        const defaultVariant = item.default_variant || item.defaultVariant || {};
+        const cloudSourceId = defaultVariant.source_id || defaultVariant.sourceId || item.source_id || item.sourceId || '';
+        const sourceId = cloudSourceId ? localSourceId(cloudSourceId) : (item.source_id || item.sourceId || null);
+        const type = itemTypeToLocal(item.item_type || item.itemType || item.type);
+        const itemId = String(
+            defaultVariant.external_id ||
+            defaultVariant.externalId ||
+            item.external_id ||
+            item.externalId ||
+            item.item_id ||
+            item.itemId ||
+            item.id ||
+            ''
+        );
+        const metadata = item.metadata || {};
+        const data = item.data || {};
+        const poster = item.stream_icon || item.poster_url || item.posterUrl || item.cover || data.poster || data.posterUrl || '';
+        const container = defaultVariant.container_extension ||
+            defaultVariant.containerExtension ||
+            item.container_extension ||
+            item.containerExtension ||
+            data.containerExtension ||
+            (type === 'channel' ? 'm3u8' : 'mp4');
+        return {
+            ...item,
+            item_id: itemId,
+            itemId,
+            item_type: type,
+            itemType: type,
+            type,
+            source_id: sourceId,
+            sourceId,
+            cloudSourceId,
+            stream_id: itemId,
+            series_id: itemId,
+            name: item.name || item.title || data.title || 'Norva',
+            title: item.title || item.name || data.title || 'Norva',
+            stream_icon: poster,
+            cover: poster,
+            poster_url: poster,
+            container_extension: container,
+            containerExtension: container,
+            providerTmdbId: item.providerTmdbId || item.provider_tmdb_id || data.providerTmdbId || metadata.providerTmdbId || null,
+            variantCount: item.variantCount || item.variant_count || 1,
+            defaultVariant,
+            data: {
+                ...metadata,
+                ...data,
+                title: item.name || item.title || data.title || 'Norva',
+                subtitle: data.subtitle || (type === 'movie' ? 'Movie' : type === 'series' ? 'Series' : 'Live TV'),
+                poster,
+                sourceId,
+                cloudSourceId,
+                containerExtension: container,
+                providerTmdbId: item.providerTmdbId || item.provider_tmdb_id || data.providerTmdbId || metadata.providerTmdbId || null,
+                titleId: item.titleId || item.title_id || item.id || null
             }
         };
     }
@@ -744,6 +825,15 @@ const CloudAdapter = (() => {
             const requestedType = query.get('type') || 'movie';
             const limit = Math.max(1, Math.min(50, Number.parseInt(query.get('limit') || '12', 10) || 12));
             const type = cloudTypeFromLocal(requestedType);
+            try {
+                const payload = await getHomeRails({ type, limit });
+                const rail = (payload.rails || []).find(item => item.itemType === type || item.item_type === type || String(item.id || '').includes(type));
+                if (rail?.items?.length) {
+                    return rail.items.slice(0, limit).map(normalizeHomeRailItem);
+                }
+            } catch (err) {
+                console.warn('[Cloud] Home rail unavailable, falling back to media page:', err);
+            }
             const items = await listMediaPage({ type, limit });
             return items.map(normalizeRecentItem);
         }
@@ -930,6 +1020,10 @@ const CloudAdapter = (() => {
         return hasUserSession() ? NorvaCloud.live : NorvaCloud.device.live;
     }
 
+    function cloudHomeApi() {
+        return hasUserSession() ? NorvaCloud.home : NorvaCloud.device.home;
+    }
+
     function cloudPlaybackApi() {
         return hasUserSession() ? NorvaCloud.playback : NorvaCloud.device.playback;
     }
@@ -941,6 +1035,7 @@ const CloudAdapter = (() => {
         cloudSourcesApi,
         cloudMediaApi,
         cloudLiveApi,
+        cloudHomeApi,
         cloudPlaybackApi
     };
 })();

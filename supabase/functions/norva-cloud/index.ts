@@ -1,6 +1,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { refreshMaterializedLiveCatalog } from "../_shared/live-materialization.ts";
+import { refreshVodTitleProjection } from "../_shared/vod-title-projection.ts";
 import type { LiveCatalogItem } from "../_shared/live-catalog.ts";
 
 type JsonRecord = Record<string, unknown>;
@@ -665,6 +666,14 @@ async function syncXtreamSource(sourceId: string, userId: string, config: JsonRe
 
   const savedRows = await replaceSourceItems(sourceId, userId, rows, db);
   const liveCatalog = await refreshMaterializedLiveCatalog(db, { sourceId, userId, rows: savedRows });
+  const titleProjection = await refreshVodTitleProjection({
+    sourceId,
+    userId,
+    rows: savedRows,
+    db,
+    xtreamConfig: { serverUrl, username, password },
+    vodInfoLimit: boundedInt(Deno.env.get("NORVA_VOD_INFO_SYNC_LIMIT"), 120, 0, 1000),
+  });
   return {
     live: Array.isArray(live) ? live.length : 0,
     movies: Array.isArray(vod) ? vod.length : 0,
@@ -674,6 +683,7 @@ async function syncXtreamSource(sourceId: string, userId: string, config: JsonRe
     seriesCategories: seriesCategoryMap.size,
     total: rows.length,
     liveCatalog,
+    titleProjection,
   };
 }
 
@@ -721,12 +731,16 @@ function xtreamRows(
         categoryName,
         rating: item.rating,
         added: item.added,
+        providerTmdbId: stringOrNull(item.tmdb_id ?? item.tmdbId ?? item.tmdb),
+        providerImdbId: stringOrNull(item.imdb_id ?? item.imdbId ?? item.imdb),
       }),
       playback_hint: compactRecord({
         sourceType: "xtream",
         streamId,
         streamType: itemType,
         container,
+        providerTmdbId: stringOrNull(item.tmdb_id ?? item.tmdbId ?? item.tmdb),
+        providerImdbId: stringOrNull(item.imdb_id ?? item.imdbId ?? item.imdb),
       }),
       available: true,
     });
@@ -1471,6 +1485,15 @@ async function createPlaybackSession(req: Request, userId: string, db: SupabaseC
   }
 
   const gateway = await createGatewaySession(session.id, userId, targetUrl, expiresAt, db);
+  if (sourceId && gateway.startupMs) {
+    await recordPlaybackStartupObservation(db, {
+      userId,
+      sourceId,
+      itemType,
+      itemId,
+      startupMs: gateway.startupMs,
+    });
+  }
   return {
     session,
     playback: {
@@ -1479,6 +1502,7 @@ async function createPlaybackSession(req: Request, userId: string, db: SupabaseC
       url: gateway.hlsUrl,
       gatewaySession: gateway.session,
       gatewayRequired: !gateway.hlsUrl,
+      startupMs: gateway.startupMs ?? null,
     },
   };
 }
@@ -1558,13 +1582,14 @@ async function createGatewaySession(
         status: "pending",
         mode: "remux",
         expires_at: expiresAt,
-      })
-      .select("*")
-      .single();
+    })
+    .select("*")
+    .single();
     if (error) throwDb(error, "Unable to create pending gateway session");
-    return { status: "pending", session: data, hlsUrl: null };
+    return { status: "pending", session: data, hlsUrl: null, startupMs: null };
   }
 
+  const startupStartedAt = performance.now();
   const response = await fetch(`${runtimeConfig.mediaGatewayUrl}/sessions`, {
     method: "POST",
     headers: {
@@ -1582,6 +1607,7 @@ async function createGatewaySession(
   if (!response.ok) {
     throw new HttpError(response.status, "Media gateway refused the session", gatewayBody);
   }
+  const startupMs = Math.max(1, Math.round(performance.now() - startupStartedAt));
 
   const { data, error } = await db
     .from("cloud_gateway_sessions")
@@ -1597,7 +1623,36 @@ async function createGatewaySession(
     .select("*")
     .single();
   if (error) throwDb(error, "Unable to record gateway session");
-  return { status: data.status, session: data, hlsUrl: data.hls_url };
+  return { status: data.status, session: data, hlsUrl: data.hls_url, startupMs };
+}
+
+async function recordPlaybackStartupObservation(
+  db: SupabaseClient,
+  options: { userId: string; sourceId: string; itemType: string; itemId: string; startupMs: number },
+) {
+  const itemType = options.itemType === "series" ? "series" : options.itemType === "movie" ? "movie" : "";
+  if (!itemType || !options.itemId || !Number.isFinite(options.startupMs) || options.startupMs <= 0) return;
+
+  const cost = Math.max(1, Math.min(999, Math.round(options.startupMs / 10)));
+  const { error } = await db
+    .from("cloud_title_variants")
+    .update({
+      last_observed_ttff_ms: Math.round(options.startupMs),
+      playback_cost_score: cost,
+    })
+    .eq("user_id", options.userId)
+    .eq("source_id", options.sourceId)
+    .eq("item_type", itemType)
+    .eq("external_id", options.itemId);
+  if (error && !isProjectionMissing(error)) {
+    console.warn("[norva-cloud] unable to record playback startup observation", error.message);
+  }
+}
+
+function isProjectionMissing(error: unknown) {
+  if (!error || typeof error !== "object") return false;
+  const record = error as { code?: string; message?: string };
+  return record.code === "42P01" || String(record.message || "").includes("cloud_title");
 }
 
 async function requestGatewayXtreamEpg(
