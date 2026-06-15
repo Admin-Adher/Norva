@@ -29,9 +29,11 @@ type ParsedName = {
 
 type LineupEntry = {
   key: string;
-  lcn: number;
+  lcn?: number;    // national channel number where it exists (Europe/Maghreb TNT)
+  rank?: number;   // curated popularity order where there is no channel number (US/IN)
   name: string;
   aliases: string[];
+  logo?: string;   // curated real logo, used when the provider logo is dead/empty
 };
 
 type LiveVariant = {
@@ -67,37 +69,96 @@ type LiveBucket = {
   groupId: string;
   groupName: string;
   lcn?: number;
+  logo?: string;
   firstIndex: number;
   variants: LiveVariant[];
 };
 
+const TVLOGO = "https://raw.githubusercontent.com/tv-logo/tv-logos/main/countries/";
+
 const COUNTRY_LINEUPS: Record<string, LineupEntry[]> = {
   FR: [
-    { key: "tf1", lcn: 1, name: "TF1", aliases: ["tf1"] },
-    { key: "france2", lcn: 2, name: "France 2", aliases: ["france 2"] },
-    { key: "france3", lcn: 3, name: "France 3", aliases: ["france 3"] },
-    { key: "france4", lcn: 4, name: "France 4", aliases: ["france 4"] },
-    { key: "france5", lcn: 5, name: "France 5", aliases: ["france 5"] },
-    { key: "m6", lcn: 6, name: "M6", aliases: ["m6"] },
-    { key: "arte", lcn: 7, name: "Arte", aliases: ["arte"] },
-    { key: "c8", lcn: 8, name: "C8", aliases: ["c8"] },
-    { key: "w9", lcn: 9, name: "W9", aliases: ["w9"] },
-    { key: "tmc", lcn: 10, name: "TMC", aliases: ["tmc"] },
-    { key: "tfx", lcn: 11, name: "TFX", aliases: ["tfx"] },
-    { key: "nrj12", lcn: 12, name: "NRJ 12", aliases: ["nrj 12", "nrj12"] },
-    { key: "lcp", lcn: 13, name: "LCP", aliases: ["lcp", "public senat"] },
-    { key: "bfmtv", lcn: 15, name: "BFM TV", aliases: ["bfm tv", "bfmtv"] },
-    { key: "cnews", lcn: 16, name: "CNews", aliases: ["cnews"] },
-    { key: "cstar", lcn: 17, name: "CStar", aliases: ["cstar"] },
-    { key: "gulli", lcn: 18, name: "Gulli", aliases: ["gulli"] },
-    { key: "tf1sf", lcn: 19, name: "TF1 Series Films", aliases: ["tf1 series films", "tf1 series film", "tf1 series et films"] },
-    { key: "lequipe", lcn: 21, name: "L'Equipe", aliases: ["l equipe", "lequipe"] },
-    { key: "6ter", lcn: 22, name: "6ter", aliases: ["6ter"] },
-    { key: "rmcstory", lcn: 23, name: "RMC Story", aliases: ["rmc story"] },
-    { key: "rmcdecouverte", lcn: 24, name: "RMC Decouverte", aliases: ["rmc decouverte"] },
+    { key: "tf1", lcn: 1, name: "TF1", aliases: ["tf1"], logo: TVLOGO + "france/tf1-fr.png" },
+    { key: "france2", lcn: 2, name: "France 2", aliases: ["france 2"], logo: TVLOGO + "france/france-2-fr.png" },
+    { key: "france3", lcn: 3, name: "France 3", aliases: ["france 3"], logo: TVLOGO + "france/france-3-fr.png" },
+    { key: "france4", lcn: 4, name: "France 4", aliases: ["france 4"], logo: TVLOGO + "france/france-4-fr.png" },
+    { key: "france5", lcn: 5, name: "France 5", aliases: ["france 5"], logo: TVLOGO + "france/france-5-fr.png" },
+    { key: "m6", lcn: 6, name: "M6", aliases: ["m6"], logo: TVLOGO + "france/m6-fr.png" },
+    { key: "arte", lcn: 7, name: "Arte", aliases: ["arte"], logo: TVLOGO + "france/arte-fr.png" },
+    { key: "c8", lcn: 8, name: "C8", aliases: ["c8"], logo: TVLOGO + "france/c8-fr.png" },
+    { key: "w9", lcn: 9, name: "W9", aliases: ["w9"], logo: TVLOGO + "france/w9-fr.png" },
+    { key: "tmc", lcn: 10, name: "TMC", aliases: ["tmc"], logo: TVLOGO + "france/tmc-fr.png" },
+    { key: "tfx", lcn: 11, name: "TFX", aliases: ["tfx"], logo: TVLOGO + "france/tfx-fr.png" },
+    { key: "nrj12", lcn: 12, name: "NRJ 12", aliases: ["nrj 12", "nrj12"], logo: TVLOGO + "france/nrj-12-fr.png" },
+    { key: "lcp", lcn: 13, name: "LCP", aliases: ["lcp", "public senat"], logo: TVLOGO + "france/lcp-fr.png" },
+    { key: "bfmtv", lcn: 15, name: "BFM TV", aliases: ["bfm tv", "bfmtv"], logo: TVLOGO + "france/bfm-tv-fr.png" },
+    { key: "cnews", lcn: 16, name: "CNews", aliases: ["cnews"], logo: TVLOGO + "france/c-news-fr.png" },
+    { key: "cstar", lcn: 17, name: "CStar", aliases: ["cstar"], logo: TVLOGO + "france/c-star-fr.png" },
+    { key: "gulli", lcn: 18, name: "Gulli", aliases: ["gulli"], logo: TVLOGO + "france/gulli-fr.png" },
+    { key: "tf1sf", lcn: 19, name: "TF1 Series Films", aliases: ["tf1 series films", "tf1 series film", "tf1 series et films"], logo: TVLOGO + "france/tf1-series-films-fr.png" },
+    { key: "lequipe", lcn: 21, name: "L'Equipe", aliases: ["l equipe", "lequipe"], logo: TVLOGO + "france/lequipe-fr.png" },
+    { key: "6ter", lcn: 22, name: "6ter", aliases: ["6ter"], logo: TVLOGO + "france/6ter-fr.png" },
+    { key: "rmcstory", lcn: 23, name: "RMC Story", aliases: ["rmc story"], logo: TVLOGO + "france/rmc-story-fr.png" },
+    { key: "rmcdecouverte", lcn: 24, name: "RMC Decouverte", aliases: ["rmc decouverte"], logo: TVLOGO + "france/rmc-decouverte-fr.png" },
     { key: "cherie25", lcn: 25, name: "Cherie 25", aliases: ["cherie 25", "cherie25"] },
-    { key: "lci", lcn: 26, name: "LCI", aliases: ["lci"] },
-    { key: "franceinfo", lcn: 27, name: "Franceinfo", aliases: ["france info", "franceinfo"] },
+    { key: "lci", lcn: 26, name: "LCI", aliases: ["lci"], logo: TVLOGO + "france/lci-fr.png" },
+    { key: "franceinfo", lcn: 27, name: "Franceinfo", aliases: ["france info", "franceinfo"], logo: TVLOGO + "france/franceinfo-fr.png" },
+  ],
+  US: [
+    { key: "abc", rank: 1, name: "ABC", aliases: ["abc"], logo: TVLOGO + "united-states/abc-us.png" },
+    { key: "cbs", rank: 2, name: "CBS", aliases: ["cbs"], logo: TVLOGO + "united-states/cbs-logo-white-us.png" },
+    { key: "nbc", rank: 3, name: "NBC", aliases: ["nbc"], logo: TVLOGO + "united-states/nbc-us.png" },
+    { key: "fox", rank: 4, name: "FOX", aliases: ["fox"], logo: TVLOGO + "united-states/fox-us.png" },
+    { key: "thecw", rank: 5, name: "The CW", aliases: ["the cw", "cw"], logo: TVLOGO + "united-states/the-cw-us.png" },
+    { key: "pbs", rank: 6, name: "PBS", aliases: ["pbs"], logo: TVLOGO + "united-states/pbs-us.png" },
+    { key: "cnn", rank: 7, name: "CNN", aliases: ["cnn"], logo: TVLOGO + "united-states/cnn-us.png" },
+    { key: "foxnews", rank: 8, name: "Fox News", aliases: ["fox news"], logo: TVLOGO + "united-states/fox-news-us.png" },
+    { key: "msnbc", rank: 9, name: "MSNBC", aliases: ["msnbc"], logo: TVLOGO + "united-states/msnbc-hz-us.png" },
+    { key: "cnbc", rank: 10, name: "CNBC", aliases: ["cnbc"], logo: TVLOGO + "united-states/cnbc-us.png" },
+    { key: "espn", rank: 11, name: "ESPN", aliases: ["espn"], logo: TVLOGO + "united-states/espn-us.png" },
+    { key: "espn2", rank: 12, name: "ESPN2", aliases: ["espn 2", "espn2"], logo: TVLOGO + "united-states/espn-2-us.png" },
+    { key: "fs1", rank: 13, name: "Fox Sports 1", aliases: ["fox sports 1", "fs1"], logo: TVLOGO + "united-states/fox-sports-1-us.png" },
+    { key: "hbo", rank: 14, name: "HBO", aliases: ["hbo"], logo: TVLOGO + "united-states/hbo-us.png" },
+    { key: "amc", rank: 15, name: "AMC", aliases: ["amc"], logo: TVLOGO + "united-states/amc-us.png" },
+    { key: "tnt", rank: 16, name: "TNT", aliases: ["tnt"], logo: TVLOGO + "united-states/tnt-us.png" },
+    { key: "tbs", rank: 17, name: "TBS", aliases: ["tbs"], logo: TVLOGO + "united-states/tbs-us.png" },
+    { key: "discovery", rank: 18, name: "Discovery", aliases: ["discovery", "discovery channel"], logo: TVLOGO + "united-states/discovery-channel-us.png" },
+    { key: "history", rank: 19, name: "History", aliases: ["history", "history channel"], logo: TVLOGO + "united-states/history-channel-us.png" },
+    { key: "cartoonnetwork", rank: 20, name: "Cartoon Network", aliases: ["cartoon network"], logo: TVLOGO + "united-states/cartoon-network-us.png" },
+    { key: "nickelodeon", rank: 21, name: "Nickelodeon", aliases: ["nickelodeon"], logo: TVLOGO + "united-states/nickelodeon-us.png" },
+    { key: "disneychannel", rank: 22, name: "Disney Channel", aliases: ["disney channel"], logo: TVLOGO + "united-states/disney-channel-us.png" },
+    { key: "hgtv", rank: 23, name: "HGTV", aliases: ["hgtv"], logo: TVLOGO + "united-states/hgtv-us.png" },
+    { key: "foodnetwork", rank: 24, name: "Food Network", aliases: ["food network"], logo: TVLOGO + "united-states/food-network-us.png" },
+    { key: "comedycentral", rank: 25, name: "Comedy Central", aliases: ["comedy central"], logo: TVLOGO + "united-states/comedy-central-us.png" },
+    { key: "mtv", rank: 26, name: "MTV", aliases: ["mtv"], logo: TVLOGO + "united-states/mtv-us.png" },
+    { key: "tlc", rank: 27, name: "TLC", aliases: ["tlc"], logo: TVLOGO + "united-states/tlc-us.png" },
+    { key: "bravo", rank: 28, name: "Bravo", aliases: ["bravo"], logo: TVLOGO + "united-states/bravo-us.png" },
+    { key: "bet", rank: 29, name: "BET", aliases: ["bet"], logo: TVLOGO + "united-states/bet-us.png" },
+    { key: "paramountnetwork", rank: 30, name: "Paramount Network", aliases: ["paramount network"], logo: TVLOGO + "united-states/paramount-network-us.png" },
+  ],
+  IN: [
+    { key: "starplus", rank: 1, name: "Star Plus", aliases: ["star plus"], logo: TVLOGO + "india/star-plus-in.png" },
+    { key: "colors", rank: 2, name: "Colors", aliases: ["colors"], logo: TVLOGO + "india/colors-in.png" },
+    { key: "sonytv", rank: 3, name: "Sony Entertainment Television", aliases: ["sony entertainment television", "sony tv"], logo: TVLOGO + "india/sony-entertainment-television-in.png" },
+    { key: "zeetv", rank: 4, name: "Zee TV", aliases: ["zee tv"], logo: TVLOGO + "india/zee-tv-in.png" },
+    { key: "starbharat", rank: 5, name: "Star Bharat", aliases: ["star bharat"], logo: TVLOGO + "india/star-bharat-in.png" },
+    { key: "sonysab", rank: 6, name: "Sony SAB", aliases: ["sony sab", "sab tv"], logo: TVLOGO + "india/sony-sab-in.png" },
+    { key: "andtv", rank: 7, name: "&TV", aliases: ["and tv"], logo: TVLOGO + "india/and-tv-in.png" },
+    { key: "stargold", rank: 8, name: "Star Gold", aliases: ["star gold"], logo: TVLOGO + "india/star-gold-in.png" },
+    { key: "zeecinema", rank: 9, name: "Zee Cinema", aliases: ["zee cinema"], logo: TVLOGO + "india/zee-cinema-in.png" },
+    { key: "sonymax", rank: 10, name: "Sony Max", aliases: ["sony max"], logo: TVLOGO + "india/sony-max-in.png" },
+    { key: "aajtak", rank: 11, name: "Aaj Tak", aliases: ["aaj tak"], logo: TVLOGO + "india/aaj-tak-in.png" },
+    { key: "ndtv24x7", rank: 12, name: "NDTV 24x7", aliases: ["ndtv 24x7", "ndtv 24 7"], logo: TVLOGO + "india/ndtv-24x7-in.png" },
+    { key: "indiatoday", rank: 13, name: "India Today", aliases: ["india today"], logo: TVLOGO + "india/india-today-in.png" },
+    { key: "republictv", rank: 14, name: "Republic TV", aliases: ["republic tv"], logo: TVLOGO + "india/republic-tv-in.png" },
+    { key: "timesnow", rank: 15, name: "Times Now", aliases: ["times now"], logo: TVLOGO + "india/times-now-in.png" },
+    { key: "zeenews", rank: 16, name: "Zee News", aliases: ["zee news"], logo: TVLOGO + "india/zee-news-in.png" },
+    { key: "ndtvindia", rank: 17, name: "NDTV India", aliases: ["ndtv india"], logo: TVLOGO + "india/ndtv-india-in.png" },
+    { key: "starsports1", rank: 18, name: "Star Sports 1", aliases: ["star sports 1"], logo: TVLOGO + "india/star-sports-1-in.png" },
+    { key: "sonyten1", rank: 19, name: "Sony Ten 1", aliases: ["sony ten 1"], logo: TVLOGO + "india/sony-ten-1-in.png" },
+    { key: "starmaa", rank: 20, name: "Star Maa", aliases: ["star maa"], logo: TVLOGO + "india/star-maa-in.png" },
+    { key: "asianet", rank: 21, name: "Asianet", aliases: ["asianet"], logo: TVLOGO + "india/asianet-in.png" },
+    { key: "zeebangla", rank: 22, name: "Zee Bangla", aliases: ["zee bangla"], logo: TVLOGO + "india/zee-bangla-in.png" },
   ],
 };
 
@@ -209,6 +270,7 @@ export function findLiveChannel(catalog: ReturnType<typeof buildLiveCatalog>, lo
 
 function buildBuckets(rows: LiveCatalogItem[], country: string) {
   const { lineup, aliasMap } = buildAliasMap(country);
+  const targetCc = country.toLowerCase();
   const buckets = new Map<string, LiveBucket>();
 
   rows.forEach((row, index) => {
@@ -218,8 +280,12 @@ function buildBuckets(rows: LiveCatalogItem[], country: string) {
     const variant = variantFrom(row, parsed);
     if (!sourceId || !variant.streamId) return;
 
+    // A "XX |" prefix only marks a foreign feed when it differs from the
+    // user's own country (e.g. for a US user, "US | ESPN" is NOT foreign).
+    const isForeign = Boolean(parsed.foreign) && parsed.foreign !== targetCc;
+
     let bucket: LiveBucket | null = null;
-    const national = !parsed.foreign ? aliasMap[parsed.coreStr] : null;
+    const national = !isForeign ? aliasMap[parsed.coreStr] : null;
     if (national) {
       const key = `${sourceId}:primary:${national.key}`;
       bucket = ensureBucket(buckets, key, {
@@ -228,10 +294,11 @@ function buildBuckets(rows: LiveCatalogItem[], country: string) {
         section: "primary",
         groupId: GROUPS.primary.id,
         groupName: GROUPS.primary.name,
-        lcn: national.lcn,
+        lcn: national.lcn ?? national.rank,
+        logo: national.logo,
         firstIndex: index,
       });
-    } else if (!parsed.foreign) {
+    } else if (!isForeign) {
       const parent = findParent(parsed.coreStr, lineup);
       if (parent) {
         const section = classifyExtra(parsed.coreStr);
@@ -310,8 +377,8 @@ function makeLogicalChannel(bucket: LiveBucket, includeVariants: boolean): JsonR
     category_name: bucket.groupName,
     group_id: bucket.groupId,
     group_name: bucket.groupName,
-    poster_url: defaultVariant.poster_url,
-    stream_icon: defaultVariant.stream_icon,
+    poster_url: bucket.logo || defaultVariant.poster_url,
+    stream_icon: bucket.logo || defaultVariant.stream_icon,
     variant_count: variants.length,
     variantCount: variants.length,
     variant_preview: variants.map(summaryVariant),
