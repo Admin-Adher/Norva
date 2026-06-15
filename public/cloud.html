@@ -228,6 +228,38 @@
             .stats { grid-template-columns: 1fr; }
             .list-item { grid-template-columns: 1fr; }
         }
+        @media (max-width: 560px) {
+            .topbar {
+                min-height: 58px;
+                align-items: center;
+                padding: 10px 12px;
+            }
+            .brand strong { font-size: 16px; }
+            .brand img { width: 32px; height: 32px; }
+            .top-actions {
+                margin-left: auto;
+                gap: 8px;
+                justify-content: flex-end;
+            }
+            .top-actions .btn {
+                min-height: 38px;
+                padding: 0 10px;
+                font-size: 13px;
+            }
+            .shell { padding: 20px 12px 32px; }
+            h1 { font-size: 30px; }
+            .panel { padding: 16px; }
+            .button-row .btn {
+                flex: 1 1 100%;
+            }
+            .segmented {
+                gap: 4px;
+            }
+            .segment {
+                min-height: 36px;
+                font-size: 13px;
+            }
+        }
     </style>
 </head>
 <body>
