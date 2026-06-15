@@ -148,6 +148,8 @@ class App {
             });
         }
 
+        this.initMobileCatalogControls();
+
         // Toggle groups button
         document.getElementById('toggle-groups').addEventListener('click', () => {
             this.channelList.toggleAllGroups();
@@ -317,6 +319,242 @@ class App {
         });
 
         navbar.appendChild(logoutLink);
+    }
+
+    initMobileCatalogControls() {
+        const setups = [
+            this.createMobileCatalogSetup({
+                key: 'movies',
+                title: 'Movie filters',
+                labels: {
+                    source: 'Source',
+                    category: 'Category',
+                    genre: 'Genre',
+                    year: 'Year',
+                    rating: 'Rating',
+                    watched: 'Watch status',
+                    added: 'Added',
+                    duration: 'Duration',
+                    group: 'Group duplicates',
+                    hide: 'Hide broken',
+                    favorite: 'Favorites only',
+                    reset: 'Reset'
+                },
+                controls: {
+                    source: 'movies-source-select',
+                    category: 'movies-category-multi',
+                    sort: 'movies-sort',
+                    genre: 'movies-genre',
+                    year: 'movies-year',
+                    rating: 'movies-rating',
+                    watched: 'movies-watched',
+                    added: 'movies-added',
+                    duration: 'movies-duration',
+                    group: 'movies-group-toggle',
+                    hide: 'movies-hide-broken-btn',
+                    random: 'movies-random',
+                    favorite: 'movies-favorites-btn',
+                    reset: 'movies-reset'
+                }
+            }),
+            this.createMobileCatalogSetup({
+                key: 'series',
+                title: 'Series filters',
+                labels: {
+                    source: 'Source',
+                    category: 'Category',
+                    genre: 'Genre',
+                    year: 'Year',
+                    rating: 'Rating',
+                    watched: 'Watch status',
+                    added: 'Added',
+                    status: 'Status',
+                    group: 'Group duplicates',
+                    hide: 'Hide broken',
+                    favorite: 'Favorites only',
+                    reset: 'Reset'
+                },
+                controls: {
+                    source: 'series-source-select',
+                    category: 'series-category-multi',
+                    sort: 'series-sort',
+                    genre: 'series-genre',
+                    year: 'series-year',
+                    rating: 'series-rating',
+                    watched: 'series-watched',
+                    added: 'series-added',
+                    status: 'series-status',
+                    group: 'series-group-toggle',
+                    hide: 'series-hide-broken-btn',
+                    random: 'series-random',
+                    favorite: 'series-favorites-btn',
+                    reset: 'series-reset'
+                }
+            })
+        ].filter(Boolean);
+
+        const sync = () => setups.forEach(setup => setup.sync());
+        sync();
+        window.matchMedia('(max-width: 640px)').addEventListener?.('change', sync);
+        window.addEventListener('resize', sync);
+    }
+
+    createMobileCatalogSetup(config) {
+        const page = document.getElementById(`page-${config.key}`);
+        const controls = page?.querySelector(`.${config.key}-controls`);
+        const filterBar = document.getElementById(`${config.key}-filter-bar`);
+        const searchWrapper = controls?.querySelector('.search-wrapper');
+        if (!page || !controls || !filterBar || !searchWrapper) return null;
+
+        const elements = {};
+        Object.entries(config.controls).forEach(([name, id]) => {
+            elements[name] = document.getElementById(id);
+        });
+
+        const moveNames = Object.keys(elements).filter(name => elements[name]);
+        const markers = new Map();
+        moveNames.forEach(name => {
+            const el = elements[name];
+            const marker = document.createComment(`${config.key}-${name}-origin`);
+            el.parentNode?.insertBefore(marker, el);
+            markers.set(name, marker);
+        });
+
+        const filterBtn = document.createElement('button');
+        filterBtn.type = 'button';
+        filterBtn.id = `${config.key}-mobile-filters-btn`;
+        filterBtn.className = 'btn btn-sm mobile-filter-button';
+        filterBtn.setAttribute('aria-controls', `${config.key}-filter-bar`);
+        filterBtn.setAttribute('aria-expanded', 'false');
+        filterBtn.innerHTML = `Filters <span class="mobile-filter-badge" id="${config.key}-mobile-filter-badge"></span>`;
+
+        const backdrop = document.createElement('div');
+        backdrop.id = `${config.key}-mobile-filter-backdrop`;
+        backdrop.className = 'mobile-filter-backdrop';
+        filterBar.before(backdrop);
+        filterBar.setAttribute('aria-label', config.title);
+
+        const sheetHeader = document.createElement('div');
+        sheetHeader.className = 'mobile-filter-sheet-header';
+        sheetHeader.innerHTML = `
+            <span class="mobile-filter-sheet-title">${config.title}</span>
+            <button type="button" class="btn btn-sm btn-ghost mobile-filter-close" aria-label="Close filters">&times;</button>
+        `;
+
+        const sheetBody = document.createElement('div');
+        sheetBody.className = 'mobile-filter-body';
+        const catalogSection = this.createMobileFilterSection('Catalog');
+        const displaySection = this.createMobileFilterSection('Display');
+        sheetBody.append(catalogSection.section, displaySection.section);
+        filterBar.prepend(sheetHeader, sheetBody);
+
+        const fieldWrappers = new Map();
+        const addField = (section, name) => {
+            const el = elements[name];
+            if (!el) return;
+            const field = document.createElement('div');
+            field.className = 'mobile-filter-field';
+            field.dataset.mobileField = name;
+            field.innerHTML = `<span class="mobile-filter-label">${config.labels[name] || name}</span>`;
+            field.append(el);
+            section.append(field);
+            fieldWrappers.set(name, field);
+        };
+
+        ['source', 'category', 'genre', 'year', 'rating', 'watched', 'added', 'duration', 'status'].forEach(name => addField(catalogSection.body, name));
+        ['group', 'hide', 'favorite', 'reset'].forEach(name => addField(displaySection.body, name));
+
+        const close = () => {
+            filterBar.classList.remove('mobile-open');
+            backdrop.classList.remove('mobile-open');
+            filterBtn.setAttribute('aria-expanded', 'false');
+            document.body.classList.remove('catalog-filter-open');
+        };
+        const open = () => {
+            filterBar.classList.add('mobile-open');
+            backdrop.classList.add('mobile-open');
+            filterBtn.setAttribute('aria-expanded', 'true');
+            document.body.classList.add('catalog-filter-open');
+        };
+
+        filterBtn.addEventListener('click', open);
+        backdrop.addEventListener('click', close);
+        sheetHeader.querySelector('.mobile-filter-close')?.addEventListener('click', close);
+        document.addEventListener('keydown', event => {
+            if (event.key === 'Escape') close();
+        });
+
+        const updateHiddenFields = () => {
+            fieldWrappers.forEach((field, name) => {
+                const el = elements[name];
+                field.classList.toggle('hidden', !el || el.classList.contains('hidden'));
+            });
+        };
+
+        const updateBadge = () => {
+            const categoryBtn = document.getElementById(`${config.key}-category-btn`);
+            const count = [
+                elements.source?.value,
+                categoryBtn?.classList.contains('has-selection') ? 'category' : '',
+                elements.genre?.value,
+                elements.year?.value,
+                elements.rating?.value,
+                elements.watched?.value,
+                elements.added?.value,
+                elements.duration?.value,
+                elements.status?.value,
+                elements.group && !elements.group.classList.contains('active') ? 'group-off' : '',
+                elements.hide && !elements.hide.classList.contains('active') ? 'hide-off' : '',
+                elements.favorite?.classList.contains('active') ? 'favorites' : ''
+            ].filter(Boolean).length;
+            const badge = filterBtn.querySelector('.mobile-filter-badge');
+            badge.textContent = String(count);
+            badge.classList.toggle('active', count > 0);
+            updateHiddenFields();
+        };
+
+        const restore = () => {
+            moveNames.forEach(name => {
+                const marker = markers.get(name);
+                const el = elements[name];
+                if (marker?.parentNode && el) marker.parentNode.insertBefore(el, marker.nextSibling);
+            });
+            filterBtn.remove();
+            close();
+            updateBadge();
+        };
+
+        const apply = () => {
+            if (!filterBtn.isConnected) controls.append(filterBtn);
+            if (elements.sort) controls.append(elements.sort);
+            if (elements.random) controls.append(elements.random);
+            updateBadge();
+        };
+
+        const watched = [...moveNames.map(name => elements[name]), document.getElementById(`${config.key}-category-btn`)]
+            .filter(Boolean);
+        watched.forEach(el => {
+            el.addEventListener('change', () => setTimeout(updateBadge, 0));
+            el.addEventListener('click', () => setTimeout(updateBadge, 0));
+            new MutationObserver(updateBadge).observe(el, { attributes: true, attributeFilter: ['class'] });
+        });
+
+        return {
+            sync: () => {
+                if (window.matchMedia('(max-width: 640px)').matches) apply();
+                else restore();
+            }
+        };
+    }
+
+    createMobileFilterSection(title) {
+        const section = document.createElement('section');
+        section.className = 'mobile-filter-section';
+        section.innerHTML = `<div class="mobile-filter-section-title">${title}</div>`;
+        const body = document.createElement('div');
+        body.className = 'mobile-filter-section-body mobile-filter-section';
+        section.append(body);
+        return { section, body };
     }
 
     navigateTo(pageName, replaceHistory = false) {
