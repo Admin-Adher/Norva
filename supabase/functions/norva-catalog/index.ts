@@ -28,6 +28,7 @@ const SUPABASE_SERVICE_KEY =
   Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ??
   Deno.env.get("SUPABASE_SECRET_KEY") ??
   "";
+const HOME_RAIL_VARIANT_LIMIT = 10;
 
 if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
   throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
@@ -263,14 +264,16 @@ async function listVariantsByTitleIds(titleIds: string[]) {
       variantsByTitle.set(key, existing);
     }
   }
+  for (const [key, variants] of variantsByTitle) {
+    variantsByTitle.set(key, variants.sort(compareTitleVariants).slice(0, HOME_RAIL_VARIANT_LIMIT));
+  }
   return variantsByTitle;
 }
 
 function titleRailItem(title: JsonRecord, variants: JsonRecord[]) {
-  const defaultVariant = variants.find((variant) => String(variant.id) === String(title.default_variant_id))
-    ?? variants[0]
-    ?? {};
+  const defaultVariant = variants[0] ?? {};
   const metadata = recordOrEmpty(title.metadata);
+  const defaultVariantId = defaultVariant.id ?? title.default_variant_id ?? null;
   return {
     id: title.id,
     title_id: title.id,
@@ -293,11 +296,13 @@ function titleRailItem(title: JsonRecord, variants: JsonRecord[]) {
     providerTmdbId: title.provider_tmdb_id ?? null,
     match_status: title.match_status,
     matchStatus: title.match_status,
-    default_variant_id: title.default_variant_id,
-    defaultVariantId: title.default_variant_id,
+    default_variant_id: defaultVariantId,
+    defaultVariantId: defaultVariantId,
     default_variant: titleVariantItem(defaultVariant),
     defaultVariant: titleVariantItem(defaultVariant),
     variants: variants.map(titleVariantItem),
+    exposed_variant_count: variants.length,
+    exposedVariantCount: variants.length,
     variant_count: title.variant_count,
     variantCount: title.variant_count,
     playback_cost_score: defaultVariant.playback_cost_score ?? null,
@@ -313,6 +318,27 @@ function titleRailItem(title: JsonRecord, variants: JsonRecord[]) {
       titleId: title.id,
     },
   };
+}
+
+function compareTitleVariants(left: JsonRecord, right: JsonRecord) {
+  return numberOr(left.playback_cost_score, 9999) - numberOr(right.playback_cost_score, 9999) ||
+    numberOr(left.last_observed_ttff_ms, 999999) - numberOr(right.last_observed_ttff_ms, 999999) ||
+    qualityRank(right.quality) - qualityRank(left.quality) ||
+    String(right.created_at ?? "").localeCompare(String(left.created_at ?? ""));
+}
+
+function qualityRank(value: unknown) {
+  const text = String(value ?? "").toUpperCase();
+  if (text.includes("4K") || text.includes("UHD") || text.includes("2160")) return 4;
+  if (text.includes("FHD") || text.includes("1080")) return 3;
+  if (text.includes("HD") || text.includes("720")) return 2;
+  if (text.includes("SD") || text.includes("480")) return 1;
+  return 0;
+}
+
+function numberOr(value: unknown, fallback: number) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
 }
 
 function titleVariantItem(variant: JsonRecord) {

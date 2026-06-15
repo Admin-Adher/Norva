@@ -325,10 +325,22 @@ async function validateTmdbCandidate(
   candidate: { itemType: "movie" | "series"; tmdbId: string; title: string; year: string | null },
 ): Promise<TmdbValidation> {
   const details = await fetchTmdbDetails(apiKey, candidate.itemType, candidate.tmdbId);
-  const title = stringOr(details.title ?? details.name ?? details.original_title ?? details.original_name, "");
+  const titleCandidates = uniqueStrings([
+    details.title,
+    details.name,
+    details.original_title,
+    details.original_name,
+  ]);
+  const bestTitle = titleCandidates
+    .map((title) => ({
+      title,
+      confidence: titleConfidence(candidate.title, title, candidate.year, null),
+    }))
+    .sort((a, b) => b.confidence - a.confidence)[0];
+  const title = bestTitle?.title ?? stringOr(details.title ?? details.name ?? details.original_title ?? details.original_name, "");
   const releaseDate = stringOr(details.release_date ?? details.first_air_date, "");
   const year = releaseDate.match(/(19|20)\d{2}/)?.[0] ?? null;
-  const confidence = titleConfidence(candidate.title, title, candidate.year, year);
+  const confidence = Math.max(...titleCandidates.map((item) => titleConfidence(candidate.title, item, candidate.year, year)), 0);
   const valid = confidence >= 0.58;
   return {
     valid,
@@ -360,6 +372,8 @@ async function validateTmdbCandidate(
 async function fetchTmdbDetails(apiKey: string, itemType: "movie" | "series", tmdbId: string) {
   const endpoint = itemType === "series" ? "tv" : "movie";
   const url = new URL(`https://api.themoviedb.org/3/${endpoint}/${encodeURIComponent(tmdbId)}`);
+  const language = stringOr(Deno.env.get("NORVA_TMDB_LANGUAGE"), "fr-FR");
+  if (language) url.searchParams.set("language", language);
   const headers: Record<string, string> = {};
   if (apiKey.startsWith("eyJ")) headers.Authorization = `Bearer ${apiKey}`;
   else url.searchParams.set("api_key", apiKey);
@@ -391,6 +405,18 @@ function tokenOverlap(a: string, b: string) {
     if (right.has(token)) overlap += 1;
   }
   return overlap / Math.max(left.size, right.size);
+}
+
+function uniqueStrings(values: unknown[]) {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const value of values) {
+    const text = stringOr(value, "");
+    if (!text || seen.has(text.toLowerCase())) continue;
+    seen.add(text.toLowerCase());
+    result.push(text);
+  }
+  return result;
 }
 
 function tmdbImageUrl(path: unknown, size = "w500") {
