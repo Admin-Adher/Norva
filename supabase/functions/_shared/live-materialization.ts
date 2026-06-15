@@ -22,8 +22,9 @@ export async function refreshMaterializedLiveCatalog(
     return { rawLive: 0, logicalChannels: 0, liveVariants: 0 };
   }
 
+  const country = String(input.country || "FR").toUpperCase();
   const catalog = buildLiveCatalog(liveRows, {
-    country: input.country || "FR",
+    country,
     sourceId: input.sourceId,
     includeVariants: true,
   });
@@ -45,7 +46,7 @@ export async function refreshMaterializedLiveCatalog(
     default_variant: recordOrEmpty(channel.default_variant ?? channel.defaultVariant),
     variant_preview: arrayOrEmpty(channel.variant_preview),
     playback_hint: recordOrEmpty(channel.playback_hint ?? channel.playbackHint),
-    metadata: recordOrEmpty(channel.metadata),
+    metadata: { ...recordOrEmpty(channel.metadata), country },
     synced_at: now,
   }));
 
@@ -58,7 +59,7 @@ export async function refreshMaterializedLiveCatalog(
     return channel.variants.map((variantValue) => {
       const variant = recordOrEmpty(variantValue);
       const playbackHint = recordOrEmpty(variant.playback_hint ?? variant.playbackHint);
-      const metadata = recordOrEmpty(variant.metadata);
+      const metadata = { ...recordOrEmpty(variant.metadata), country };
       return {
         user_id: input.userId,
         source_id: input.sourceId,

@@ -246,9 +246,12 @@ async function listMaterializedLiveLogicalChannels(
     }
 
     const channels = rankLiveSearchChannels(
-      rows.map((row) => materializedChannel(row, variantsByChannelId.get(String(row.id)) ?? null)),
+      rows
+        .filter((row) => materializedRowMatchesCountry(row, options.country))
+        .map((row) => materializedChannel(row, variantsByChannelId.get(String(row.id)) ?? null)),
       options.search,
     );
+    if (!channels.length && rows.length) return null;
     return {
       contract: "norva.live.logical.v1",
       country: options.country,
@@ -424,7 +427,7 @@ async function listMaterializedLiveChannelVariants(userId: string, logicalId: st
       if (isMissingMaterialization(error)) return null;
       throwDb(error, "Unable to load materialized live channel");
     }
-    if (!channel) return null;
+    if (!channel || !materializedRowMatchesCountry(channel, country)) return null;
 
     const { data: variants, error: variantsError } = await db
       .from("cloud_live_variants")
@@ -544,6 +547,13 @@ function materializedVariant(row: JsonRecord) {
     metadata: recordOrEmpty(row.metadata),
     container_extension: row.container_extension,
   };
+}
+
+function materializedRowMatchesCountry(row: JsonRecord, country: string) {
+  const requested = String(country || "FR").toUpperCase();
+  const metadata = recordOrEmpty(row.metadata);
+  const actual = stringOrNull(metadata.country)?.toUpperCase() || "FR";
+  return actual === requested;
 }
 
 function liveGroupsFromChannels(channels: JsonRecord[]) {
