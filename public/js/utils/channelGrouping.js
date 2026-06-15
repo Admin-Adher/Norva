@@ -12,36 +12,41 @@
 (function () {
     'use strict';
 
+    // Real channel logos from the public tv-logos repo (raw.githubusercontent,
+    // CDN-backed, reliable) — used when the provider's logo host is dead/empty
+    // (the FR nationals all point to the now-defunct aptvpix.net).
+    const LOGO_BASE = 'https://raw.githubusercontent.com/tv-logo/tv-logos/main/countries/france/';
+
     // National line-ups. `kind: 'national'` channels are ordered by `lcn` and
     // pinned to the top. `aliases` must be the *canonical core* after
     // normalisation (lowercase, de-accented, quality/codec/country stripped).
     const COUNTRY_LINEUPS = {
         FR: [
-            { key: 'tf1', lcn: 1, name: 'TF1', aliases: ['tf1'] },
-            { key: 'france2', lcn: 2, name: 'France 2', aliases: ['france 2'] },
-            { key: 'france3', lcn: 3, name: 'France 3', aliases: ['france 3'] },
-            { key: 'france4', lcn: 4, name: 'France 4', aliases: ['france 4'] },
-            { key: 'france5', lcn: 5, name: 'France 5', aliases: ['france 5'] },
-            { key: 'm6', lcn: 6, name: 'M6', aliases: ['m6'] },
-            { key: 'arte', lcn: 7, name: 'Arte', aliases: ['arte'] },
-            { key: 'c8', lcn: 8, name: 'C8', aliases: ['c8'] },
-            { key: 'w9', lcn: 9, name: 'W9', aliases: ['w9'] },
-            { key: 'tmc', lcn: 10, name: 'TMC', aliases: ['tmc'] },
-            { key: 'tfx', lcn: 11, name: 'TFX', aliases: ['tfx'] },
-            { key: 'nrj12', lcn: 12, name: 'NRJ 12', aliases: ['nrj 12', 'nrj12'] },
-            { key: 'lcp', lcn: 13, name: 'LCP', aliases: ['lcp', 'public senat'] },
-            { key: 'bfmtv', lcn: 15, name: 'BFM TV', aliases: ['bfm tv', 'bfmtv'] },
-            { key: 'cnews', lcn: 16, name: 'CNews', aliases: ['cnews'] },
-            { key: 'cstar', lcn: 17, name: 'CStar', aliases: ['cstar'] },
-            { key: 'gulli', lcn: 18, name: 'Gulli', aliases: ['gulli'] },
-            { key: 'tf1sf', lcn: 19, name: 'TF1 Séries Films', aliases: ['tf1 series films', 'tf1 series film', 'tf1 series et films'] },
-            { key: 'lequipe', lcn: 21, name: "L'Équipe", aliases: ['l equipe', 'lequipe'] },
-            { key: '6ter', lcn: 22, name: '6ter', aliases: ['6ter'] },
-            { key: 'rmcstory', lcn: 23, name: 'RMC Story', aliases: ['rmc story'] },
-            { key: 'rmcdecouverte', lcn: 24, name: 'RMC Découverte', aliases: ['rmc decouverte'] },
+            { key: 'tf1', lcn: 1, name: 'TF1', aliases: ['tf1'], logo: LOGO_BASE + 'tf1-fr.png' },
+            { key: 'france2', lcn: 2, name: 'France 2', aliases: ['france 2'], logo: LOGO_BASE + 'france-2-fr.png' },
+            { key: 'france3', lcn: 3, name: 'France 3', aliases: ['france 3'], logo: LOGO_BASE + 'france-3-fr.png' },
+            { key: 'france4', lcn: 4, name: 'France 4', aliases: ['france 4'], logo: LOGO_BASE + 'france-4-fr.png' },
+            { key: 'france5', lcn: 5, name: 'France 5', aliases: ['france 5'], logo: LOGO_BASE + 'france-5-fr.png' },
+            { key: 'm6', lcn: 6, name: 'M6', aliases: ['m6'], logo: LOGO_BASE + 'm6-fr.png' },
+            { key: 'arte', lcn: 7, name: 'Arte', aliases: ['arte'], logo: LOGO_BASE + 'arte-fr.png' },
+            { key: 'c8', lcn: 8, name: 'C8', aliases: ['c8'], logo: LOGO_BASE + 'c8-fr.png' },
+            { key: 'w9', lcn: 9, name: 'W9', aliases: ['w9'], logo: LOGO_BASE + 'w9-fr.png' },
+            { key: 'tmc', lcn: 10, name: 'TMC', aliases: ['tmc'], logo: LOGO_BASE + 'tmc-fr.png' },
+            { key: 'tfx', lcn: 11, name: 'TFX', aliases: ['tfx'], logo: LOGO_BASE + 'tfx-fr.png' },
+            { key: 'nrj12', lcn: 12, name: 'NRJ 12', aliases: ['nrj 12', 'nrj12'], logo: LOGO_BASE + 'nrj-12-fr.png' },
+            { key: 'lcp', lcn: 13, name: 'LCP', aliases: ['lcp', 'public senat'], logo: LOGO_BASE + 'lcp-fr.png' },
+            { key: 'bfmtv', lcn: 15, name: 'BFM TV', aliases: ['bfm tv', 'bfmtv'], logo: LOGO_BASE + 'bfm-tv-fr.png' },
+            { key: 'cnews', lcn: 16, name: 'CNews', aliases: ['cnews'], logo: LOGO_BASE + 'c-news-fr.png' },
+            { key: 'cstar', lcn: 17, name: 'CStar', aliases: ['cstar'], logo: LOGO_BASE + 'c-star-fr.png' },
+            { key: 'gulli', lcn: 18, name: 'Gulli', aliases: ['gulli'], logo: LOGO_BASE + 'gulli-fr.png' },
+            { key: 'tf1sf', lcn: 19, name: 'TF1 Séries Films', aliases: ['tf1 series films', 'tf1 series film', 'tf1 series et films'], logo: LOGO_BASE + 'tf1-series-films-fr.png' },
+            { key: 'lequipe', lcn: 21, name: "L'Équipe", aliases: ['l equipe', 'lequipe'], logo: LOGO_BASE + 'lequipe-fr.png' },
+            { key: '6ter', lcn: 22, name: '6ter', aliases: ['6ter'], logo: LOGO_BASE + '6ter-fr.png' },
+            { key: 'rmcstory', lcn: 23, name: 'RMC Story', aliases: ['rmc story'], logo: LOGO_BASE + 'rmc-story-fr.png' },
+            { key: 'rmcdecouverte', lcn: 24, name: 'RMC Découverte', aliases: ['rmc decouverte'], logo: LOGO_BASE + 'rmc-decouverte-fr.png' },
             { key: 'cherie25', lcn: 25, name: 'Chérie 25', aliases: ['cherie 25', 'cherie25'] },
-            { key: 'lci', lcn: 26, name: 'LCI', aliases: ['lci'] },
-            { key: 'franceinfo', lcn: 27, name: 'Franceinfo', aliases: ['france info', 'franceinfo'] }
+            { key: 'lci', lcn: 26, name: 'LCI', aliases: ['lci'], logo: LOGO_BASE + 'lci-fr.png' },
+            { key: 'franceinfo', lcn: 27, name: 'Franceinfo', aliases: ['france info', 'franceinfo'], logo: LOGO_BASE + 'franceinfo-fr.png' }
         ]
     };
 
@@ -208,7 +213,7 @@
             if (p.foreign) { other.push(ch); continue; }
             const d = map[p.coreStr];
             if (d) {
-                if (!groups[d.key]) groups[d.key] = { key: d.key, name: d.name, lcn: d.lcn, country, variants: [] };
+                if (!groups[d.key]) groups[d.key] = { key: d.key, name: d.name, lcn: d.lcn, country, logo: d.logo || null, variants: [] };
                 groups[d.key].variants.push(variantFrom(ch, p));
                 continue;
             }
@@ -269,9 +274,22 @@
         if (!variants.length) return null;
         return {
             name: d ? d.name : (channel.name || channel.title || '').replace(/^[^|]*\|\s*/, '').trim(),
+            logo: d ? (d.logo || null) : null,
             variants,
             defaultVariant: pickDefault(variants)
         };
+    }
+
+    /**
+     * Curated real logo for a raw or canonical channel name, or null if the
+     * channel isn't a known national channel for the country.
+     */
+    function logoForName(name, country) {
+        const { map } = buildAliasMap(country);
+        const p = parseName(name);
+        if (p.foreign) return null;
+        const d = map[p.coreStr];
+        return (d && d.logo) || null;
     }
 
     window.ChannelGrouping = {
@@ -281,6 +299,7 @@
         qualityLabel,
         group,
         variantsForChannel,
+        logoForName,
         pickDefault,
         fallbackOrder
     };

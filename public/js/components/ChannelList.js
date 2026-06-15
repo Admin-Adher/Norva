@@ -171,8 +171,26 @@ class ChannelList {
 
     getChannelLogoSrc(channel) {
         const raw = channel?.tvgLogo || channel?.stream_icon || channel?.poster_url || channel?.logo;
-        if (this.isKnownBrokenLogoUrl(raw)) return this.getChannelLogoFallback(channel);
-        return raw ? this.getProxiedImageUrl(raw) : this.getChannelLogoFallback(channel);
+        // Working provider logo → use it as-is.
+        if (raw && !this.isKnownBrokenLogoUrl(raw)) return this.getProxiedImageUrl(raw);
+        // Dead host (aptvpix) or no logo → curated real logo for the country's
+        // national channels, before falling back to a generated placeholder.
+        const canon = this.getCanonicalLogo(channel);
+        if (canon) return canon;
+        return this.getChannelLogoFallback(channel);
+    }
+
+    /** Real curated logo for a known national channel (TF1, France 2, M6...), else null. */
+    getCanonicalLogo(channel) {
+        try {
+            if (channel?.logo && /^https?:\/\//i.test(channel.logo) && !this.isKnownBrokenLogoUrl(channel.logo)) {
+                return channel.logo;
+            }
+            if (!window.ChannelGrouping?.logoForName) return null;
+            const country = window.app?.player?.getCountry?.() || 'FR';
+            const name = channel?.canonicalName || channel?.name || channel?.title || '';
+            return window.ChannelGrouping.logoForName(name, country) || null;
+        } catch (_) { return null; }
     }
 
     isKnownBrokenLogoUrl(url) {
