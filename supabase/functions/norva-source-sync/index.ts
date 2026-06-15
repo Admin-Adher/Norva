@@ -161,7 +161,7 @@ async function syncXtreamSource(sourceId: string, userId: string, config: JsonRe
   ];
 
   const savedRows = await replaceSourceItems(sourceId, userId, rows, db);
-  const liveCatalog = await refreshMaterializedLiveCatalog(db, { sourceId, userId, rows: savedRows });
+  const liveCatalog = await refreshMaterializedLiveCatalog(db, { sourceId, userId, rows: savedRows, country: stringOr(config.country, "FR") });
   return {
     live: Array.isArray(live) ? live.length : 0,
     movies: Array.isArray(vod) ? vod.length : 0,
@@ -251,7 +251,7 @@ async function syncM3uSource(sourceId: string, userId: string, config: JsonRecor
   })));
 
   const savedRows = await replaceSourceItems(sourceId, userId, rows, db);
-  const liveCatalog = await refreshMaterializedLiveCatalog(db, { sourceId, userId, rows: savedRows });
+  const liveCatalog = await refreshMaterializedLiveCatalog(db, { sourceId, userId, rows: savedRows, country: stringOr(config.country, "FR") });
   return { live: rows.length, total: rows.length, liveCatalog };
 }
 

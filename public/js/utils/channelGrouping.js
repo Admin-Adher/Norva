@@ -16,6 +16,7 @@
     // CDN-backed, reliable) — used when the provider's logo host is dead/empty
     // (the FR nationals all point to the now-defunct aptvpix.net).
     const LOGO_BASE = 'https://raw.githubusercontent.com/tv-logo/tv-logos/main/countries/france/';
+    const TVL = 'https://raw.githubusercontent.com/tv-logo/tv-logos/main/countries/';
 
     // National line-ups. `kind: 'national'` channels are ordered by `lcn` and
     // pinned to the top. `aliases` must be the *canonical core* after
@@ -47,6 +48,62 @@
             { key: 'cherie25', lcn: 25, name: 'Chérie 25', aliases: ['cherie 25', 'cherie25'] },
             { key: 'lci', lcn: 26, name: 'LCI', aliases: ['lci'], logo: LOGO_BASE + 'lci-fr.png' },
             { key: 'franceinfo', lcn: 27, name: 'Franceinfo', aliases: ['france info', 'franceinfo'], logo: LOGO_BASE + 'franceinfo-fr.png' }
+        ],
+        US: [
+            { key: 'abc', rank: 1, name: 'ABC', aliases: ['abc'], logo: TVL + 'united-states/abc-us.png' },
+            { key: 'cbs', rank: 2, name: 'CBS', aliases: ['cbs'], logo: TVL + 'united-states/cbs-logo-white-us.png' },
+            { key: 'nbc', rank: 3, name: 'NBC', aliases: ['nbc'], logo: TVL + 'united-states/nbc-us.png' },
+            { key: 'fox', rank: 4, name: 'FOX', aliases: ['fox'], logo: TVL + 'united-states/fox-us.png' },
+            { key: 'thecw', rank: 5, name: 'The CW', aliases: ['the cw', 'cw'], logo: TVL + 'united-states/the-cw-us.png' },
+            { key: 'pbs', rank: 6, name: 'PBS', aliases: ['pbs'], logo: TVL + 'united-states/pbs-us.png' },
+            { key: 'cnn', rank: 7, name: 'CNN', aliases: ['cnn'], logo: TVL + 'united-states/cnn-us.png' },
+            { key: 'foxnews', rank: 8, name: 'Fox News', aliases: ['fox news'], logo: TVL + 'united-states/fox-news-us.png' },
+            { key: 'msnbc', rank: 9, name: 'MSNBC', aliases: ['msnbc'], logo: TVL + 'united-states/msnbc-hz-us.png' },
+            { key: 'cnbc', rank: 10, name: 'CNBC', aliases: ['cnbc'], logo: TVL + 'united-states/cnbc-us.png' },
+            { key: 'espn', rank: 11, name: 'ESPN', aliases: ['espn'], logo: TVL + 'united-states/espn-us.png' },
+            { key: 'espn2', rank: 12, name: 'ESPN2', aliases: ['espn 2', 'espn2'], logo: TVL + 'united-states/espn-2-us.png' },
+            { key: 'fs1', rank: 13, name: 'Fox Sports 1', aliases: ['fox sports 1', 'fs1'], logo: TVL + 'united-states/fox-sports-1-us.png' },
+            { key: 'hbo', rank: 14, name: 'HBO', aliases: ['hbo'], logo: TVL + 'united-states/hbo-us.png' },
+            { key: 'amc', rank: 15, name: 'AMC', aliases: ['amc'], logo: TVL + 'united-states/amc-us.png' },
+            { key: 'tnt', rank: 16, name: 'TNT', aliases: ['tnt'], logo: TVL + 'united-states/tnt-us.png' },
+            { key: 'tbs', rank: 17, name: 'TBS', aliases: ['tbs'], logo: TVL + 'united-states/tbs-us.png' },
+            { key: 'discovery', rank: 18, name: 'Discovery', aliases: ['discovery', 'discovery channel'], logo: TVL + 'united-states/discovery-channel-us.png' },
+            { key: 'history', rank: 19, name: 'History', aliases: ['history', 'history channel'], logo: TVL + 'united-states/history-channel-us.png' },
+            { key: 'cartoonnetwork', rank: 20, name: 'Cartoon Network', aliases: ['cartoon network'], logo: TVL + 'united-states/cartoon-network-us.png' },
+            { key: 'nickelodeon', rank: 21, name: 'Nickelodeon', aliases: ['nickelodeon'], logo: TVL + 'united-states/nickelodeon-us.png' },
+            { key: 'disneychannel', rank: 22, name: 'Disney Channel', aliases: ['disney channel'], logo: TVL + 'united-states/disney-channel-us.png' },
+            { key: 'hgtv', rank: 23, name: 'HGTV', aliases: ['hgtv'], logo: TVL + 'united-states/hgtv-us.png' },
+            { key: 'foodnetwork', rank: 24, name: 'Food Network', aliases: ['food network'], logo: TVL + 'united-states/food-network-us.png' },
+            { key: 'comedycentral', rank: 25, name: 'Comedy Central', aliases: ['comedy central'], logo: TVL + 'united-states/comedy-central-us.png' },
+            { key: 'mtv', rank: 26, name: 'MTV', aliases: ['mtv'], logo: TVL + 'united-states/mtv-us.png' },
+            { key: 'tlc', rank: 27, name: 'TLC', aliases: ['tlc'], logo: TVL + 'united-states/tlc-us.png' },
+            { key: 'bravo', rank: 28, name: 'Bravo', aliases: ['bravo'], logo: TVL + 'united-states/bravo-us.png' },
+            { key: 'bet', rank: 29, name: 'BET', aliases: ['bet'], logo: TVL + 'united-states/bet-us.png' },
+            { key: 'paramountnetwork', rank: 30, name: 'Paramount Network', aliases: ['paramount network'], logo: TVL + 'united-states/paramount-network-us.png' }
+        ],
+        IN: [
+            { key: 'starplus', rank: 1, name: 'Star Plus', aliases: ['star plus'], logo: TVL + 'india/star-plus-in.png' },
+            { key: 'colors', rank: 2, name: 'Colors', aliases: ['colors'], logo: TVL + 'india/colors-in.png' },
+            { key: 'sonytv', rank: 3, name: 'Sony Entertainment Television', aliases: ['sony entertainment television', 'sony tv'], logo: TVL + 'india/sony-entertainment-television-in.png' },
+            { key: 'zeetv', rank: 4, name: 'Zee TV', aliases: ['zee tv'], logo: TVL + 'india/zee-tv-in.png' },
+            { key: 'starbharat', rank: 5, name: 'Star Bharat', aliases: ['star bharat'], logo: TVL + 'india/star-bharat-in.png' },
+            { key: 'sonysab', rank: 6, name: 'Sony SAB', aliases: ['sony sab', 'sab tv'], logo: TVL + 'india/sony-sab-in.png' },
+            { key: 'andtv', rank: 7, name: '&TV', aliases: ['and tv'], logo: TVL + 'india/and-tv-in.png' },
+            { key: 'stargold', rank: 8, name: 'Star Gold', aliases: ['star gold'], logo: TVL + 'india/star-gold-in.png' },
+            { key: 'zeecinema', rank: 9, name: 'Zee Cinema', aliases: ['zee cinema'], logo: TVL + 'india/zee-cinema-in.png' },
+            { key: 'sonymax', rank: 10, name: 'Sony Max', aliases: ['sony max'], logo: TVL + 'india/sony-max-in.png' },
+            { key: 'aajtak', rank: 11, name: 'Aaj Tak', aliases: ['aaj tak'], logo: TVL + 'india/aaj-tak-in.png' },
+            { key: 'ndtv24x7', rank: 12, name: 'NDTV 24x7', aliases: ['ndtv 24x7', 'ndtv 24 7'], logo: TVL + 'india/ndtv-24x7-in.png' },
+            { key: 'indiatoday', rank: 13, name: 'India Today', aliases: ['india today'], logo: TVL + 'india/india-today-in.png' },
+            { key: 'republictv', rank: 14, name: 'Republic TV', aliases: ['republic tv'], logo: TVL + 'india/republic-tv-in.png' },
+            { key: 'timesnow', rank: 15, name: 'Times Now', aliases: ['times now'], logo: TVL + 'india/times-now-in.png' },
+            { key: 'zeenews', rank: 16, name: 'Zee News', aliases: ['zee news'], logo: TVL + 'india/zee-news-in.png' },
+            { key: 'ndtvindia', rank: 17, name: 'NDTV India', aliases: ['ndtv india'], logo: TVL + 'india/ndtv-india-in.png' },
+            { key: 'starsports1', rank: 18, name: 'Star Sports 1', aliases: ['star sports 1'], logo: TVL + 'india/star-sports-1-in.png' },
+            { key: 'sonyten1', rank: 19, name: 'Sony Ten 1', aliases: ['sony ten 1'], logo: TVL + 'india/sony-ten-1-in.png' },
+            { key: 'starmaa', rank: 20, name: 'Star Maa', aliases: ['star maa'], logo: TVL + 'india/star-maa-in.png' },
+            { key: 'asianet', rank: 21, name: 'Asianet', aliases: ['asianet'], logo: TVL + 'india/asianet-in.png' },
+            { key: 'zeebangla', rank: 22, name: 'Zee Bangla', aliases: ['zee bangla'], logo: TVL + 'india/zee-bangla-in.png' }
         ]
     };
 
@@ -200,6 +257,12 @@
      *   multiplex– overflow/event feeds (collapsed by default)
      *   other    – everything else, untouched (kept for the rest of the list)
      */
+    // A "XX |" prefix only marks a foreign feed when it differs from the user's
+    // own country (for a US user, "US | ESPN" is a national channel, not foreign).
+    function isForeignTo(p, country) {
+        return !!p.foreign && p.foreign !== String(country || 'FR').toLowerCase();
+    }
+
     function group(channels, country) {
         const { lineup, map } = buildAliasMap(country);
         const groups = {};       // key -> logical channel
@@ -210,10 +273,10 @@
         for (const ch of (channels || [])) {
             const name = ch.name || ch.title || '';
             const p = parseName(name);
-            if (p.foreign) { other.push(ch); continue; }
+            if (isForeignTo(p, country)) { other.push(ch); continue; }
             const d = map[p.coreStr];
             if (d) {
-                if (!groups[d.key]) groups[d.key] = { key: d.key, name: d.name, lcn: d.lcn, country, logo: d.logo || null, variants: [] };
+                if (!groups[d.key]) groups[d.key] = { key: d.key, name: d.name, lcn: d.lcn ?? d.rank, country, logo: d.logo || null, variants: [] };
                 groups[d.key].variants.push(variantFrom(ch, p));
                 continue;
             }
@@ -251,7 +314,7 @@
     function variantsForChannel(channel, allChannels, country) {
         const { map } = buildAliasMap(country);
         const p = parseName(channel.name || channel.title || '');
-        const d = !p.foreign ? map[p.coreStr] : null;
+        const d = !isForeignTo(p, country) ? map[p.coreStr] : null;
         const sameSource = (c) => (c.sourceId || c.source_id) === (channel.sourceId || channel.source_id);
 
         let variants;
@@ -259,14 +322,14 @@
             variants = (allChannels || []).filter(c => {
                 if (!sameSource(c)) return false;
                 const pp = parseName(c.name || c.title || '');
-                return !pp.foreign && map[pp.coreStr] === d;
+                return !isForeignTo(pp, country) && map[pp.coreStr] === d;
             }).map(c => variantFrom(c, parseName(c.name || c.title || '')));
         } else {
             // Unknown channel: group purely by canonical core (generic dedupe).
             variants = (allChannels || []).filter(c => {
                 if (!sameSource(c)) return false;
                 const pp = parseName(c.name || c.title || '');
-                return !pp.foreign && pp.coreStr === p.coreStr;
+                return !isForeignTo(pp, country) && pp.coreStr === p.coreStr;
             }).map(c => variantFrom(c, parseName(c.name || c.title || '')));
         }
 
@@ -287,7 +350,7 @@
     function logoForName(name, country) {
         const { map } = buildAliasMap(country);
         const p = parseName(name);
-        if (p.foreign) return null;
+        if (isForeignTo(p, country)) return null;
         const d = map[p.coreStr];
         return (d && d.logo) || null;
     }

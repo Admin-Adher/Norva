@@ -110,8 +110,14 @@
         }
     }
 
+    function resolveCountry() {
+        try { const s = localStorage.getItem('norva-country'); if (s) return s.toUpperCase(); } catch (e) { }
+        const loc = (navigator.language || '').split('-')[1];
+        return (loc || 'FR').toUpperCase();
+    }
+
     async function catalogRequest(path, params = {}, options = {}) {
-        const route = `${path}${query(params)}`;
+        const route = `${path}${query({ country: resolveCountry(), ...params })}`;
         try {
             return await requestToBase(catalogBase(), 'GET', route, null, options);
         } catch (error) {
