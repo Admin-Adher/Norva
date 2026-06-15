@@ -82,13 +82,14 @@ jobs:
       # ── Android SDK (build-tools 35.0.0 + platform android-35) ─────────────
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
 
       - name: Install Android SDK build-tools and platform
         run: |
           sdkmanager \
             "build-tools;${{ env.ANDROID_BUILD_TOOLS_VERSION }}" \
             "platforms;android-${{ env.ANDROID_COMPILE_SDK }}" \
-            --no_https \
             <<< "y"
 
       # Expose tool paths as environment variables for the remaining steps
