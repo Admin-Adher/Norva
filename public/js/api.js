@@ -503,6 +503,22 @@ const CloudAdapter = (() => {
         );
         const metadata = item.metadata || {};
         const data = item.data || {};
+        const tmdb = data.tmdb || metadata.tmdb || item.tmdb || {};
+        const title = firstUsefulTitle(
+            data.title,
+            metadata.title,
+            tmdb.title,
+            tmdb.name,
+            tmdb.original_title,
+            tmdb.original_name,
+            item.title,
+            item.name,
+            item.original_title,
+            defaultVariant.title,
+            defaultVariant.name,
+            defaultVariant.raw_title,
+            defaultVariant.rawTitle
+        ) || 'Norva';
         const poster = item.stream_icon || item.poster_url || item.posterUrl || item.cover || data.poster || data.posterUrl || '';
         const container = defaultVariant.container_extension ||
             defaultVariant.containerExtension ||
@@ -522,8 +538,8 @@ const CloudAdapter = (() => {
             cloudSourceId,
             stream_id: itemId,
             series_id: itemId,
-            name: item.name || item.title || data.title || 'Norva',
-            title: item.title || item.name || data.title || 'Norva',
+            name: title,
+            title,
             stream_icon: poster,
             cover: poster,
             poster_url: poster,
@@ -535,7 +551,7 @@ const CloudAdapter = (() => {
             data: {
                 ...metadata,
                 ...data,
-                title: item.name || item.title || data.title || 'Norva',
+                title,
                 subtitle: data.subtitle || (type === 'movie' ? 'Movie' : type === 'series' ? 'Series' : 'Live TV'),
                 poster,
                 sourceId,
@@ -545,6 +561,22 @@ const CloudAdapter = (() => {
                 titleId: item.titleId || item.title_id || item.id || null
             }
         };
+    }
+
+    function firstUsefulTitle(...values) {
+        for (const value of values) {
+            const title = usefulTitle(value);
+            if (title) return title;
+        }
+        return '';
+    }
+
+    function usefulTitle(value) {
+        const title = String(value ?? '').replace(/\s+/g, ' ').trim();
+        if (!title) return '';
+        const normalized = title.toLowerCase();
+        if (['0', 'null', 'undefined', 'unknown', 'unknown title', 'norva'].includes(normalized)) return '';
+        return title;
     }
 
     function requiresGatewayForContainer(type, container) {
@@ -574,7 +606,7 @@ const CloudAdapter = (() => {
         const type = data.type || data.sourceType || data.source_type || 'xtream';
         const payload = {
             sourceType: type,
-            displayName: data.name || data.displayName || data.display_name || (type === 'm3u' ? 'M3U provider' : 'Xtream provider'),
+            displayName: data.name || data.displayName || data.display_name || (type === 'm3u' ? 'Playlist link' : 'TV provider'),
             syncNow: data.syncNow !== false
         };
 
@@ -820,6 +852,18 @@ const CloudAdapter = (() => {
         if (path.startsWith('/channels/hidden')) {
             if (method === 'GET') return path.endsWith('/check') ? { hidden: false } : [];
             return { success: true };
+        }
+        if (method === 'GET' && path === '/home/rails') {
+            const requestedType = query.get('type') || '';
+            const limit = Math.max(1, Math.min(50, Number.parseInt(query.get('limit') || '18', 10) || 18));
+            const payload = await getHomeRails({ type: requestedType, limit });
+            return {
+                ...payload,
+                rails: (payload.rails || []).map(rail => ({
+                    ...rail,
+                    items: (rail.items || []).slice(0, limit).map(normalizeHomeRailItem)
+                }))
+            };
         }
         if (method === 'GET' && path === '/channels/recent') {
             const requestedType = query.get('type') || 'movie';

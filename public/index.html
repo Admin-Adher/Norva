@@ -387,8 +387,7 @@
             title="Group duplicate versions into a single card">Group duplicates</button>
           <button id="movies-hide-broken-btn" class="btn btn-sm btn-ghost filter-toggle playback-filter-toggle active"
             title="Hide movies that failed to play">Hide broken</button>
-          <button id="movies-random" class="btn btn-sm btn-ghost filter-toggle" title="Play a random movie">🎲
-            Random</button>
+          <button id="movies-random" class="btn btn-sm btn-ghost filter-toggle" title="Play a random movie">Random</button>
           <span id="movies-count" class="filter-count"></span>
           <button id="movies-reset" class="btn btn-sm btn-ghost filter-reset hidden" title="Reset filters">✕
             Reset</button>
@@ -481,8 +480,7 @@
             title="Group duplicate versions into a single card">Group duplicates</button>
           <button id="series-hide-broken-btn" class="btn btn-sm btn-ghost filter-toggle playback-filter-toggle active"
             title="Hide series that failed to play">Hide broken</button>
-          <button id="series-random" class="btn btn-sm btn-ghost filter-toggle" title="Open a random series">🎲
-            Random</button>
+          <button id="series-random" class="btn btn-sm btn-ghost filter-toggle" title="Open a random series">Random</button>
           <span id="series-count" class="filter-count"></span>
           <button id="series-reset" class="btn btn-sm btn-ghost filter-reset hidden" title="Reset filters">✕
             Reset</button>
@@ -520,7 +518,7 @@
 
           <!-- Tabs -->
           <div class="tabs">
-            <button class="tab active" data-tab="sources">Sources</button>
+            <button class="tab active" data-tab="sources">Providers</button>
             <button class="tab" data-tab="player">Player</button>
             <button class="tab" data-tab="transcode">Transcoding</button>
             <button class="tab" data-tab="content">Manage Content</button>
@@ -531,24 +529,24 @@
           <div id="tab-sources" class="tab-content active">
             <div class="source-section">
               <div class="section-header">
-                <h3>Xtream Connections</h3>
-                <button class="btn btn-primary" id="add-xtream">+ Add Xtream</button>
+                <h3>TV provider accounts</h3>
+                <button class="btn btn-primary" id="add-xtream">+ Add provider</button>
               </div>
               <div id="xtream-list" class="source-list"></div>
             </div>
 
             <div class="source-section">
               <div class="section-header">
-                <h3>M3U Playlists</h3>
-                <button class="btn btn-primary" id="add-m3u">+ Add M3U</button>
+                <h3>Playlist links</h3>
+                <button class="btn btn-primary" id="add-m3u">+ Add playlist</button>
               </div>
               <div id="m3u-list" class="source-list"></div>
             </div>
 
             <div class="source-section">
               <div class="section-header">
-                <h3>EPG Sources</h3>
-                <button class="btn btn-primary" id="add-epg">+ Add EPG</button>
+                <h3>TV guide data</h3>
+                <button class="btn btn-primary" id="add-epg">+ Add guide</button>
               </div>
               <div id="epg-list" class="source-list"></div>
             </div>
@@ -1321,7 +1319,7 @@
   <script src="/js/icons.js"></script>
   <script src="/js/cloudApi.js?v=15"></script>
   <script src="/js/authApi.js?v=2"></script>
-  <script src="/js/api.js?v=27"></script>
+  <script src="/js/api.js?v=29"></script>
   <script src="/js/utils/mediaUtils.js?v=2"></script>
   <script src="/js/utils/playbackHealth.js?v=2"></script>
   <script src="/js/utils/tvNavigation.js?v=7"></script>
@@ -1330,10 +1328,10 @@
   <script src="/js/components/MultiSelect.js?v=1"></script>
   <script src="/js/components/VideoPlayer.js?v=13"></script>
   <script src="/js/components/ChannelList.js?v=25"></script>
-  <script src="/js/components/SourceManager.js?v=3"></script>
+  <script src="/js/components/SourceManager.js?v=4"></script>
   <script src="/js/components/EpgGuide.js?v=10"></script>
   <script src="/js/components/LiveGuideFusion.js?v=13"></script>
-  <script src="/js/pages/HomePage.js?v=7"></script>
+  <script src="/js/pages/HomePage.js?v=10"></script>
   <script src="/js/pages/LivePage.js?v=4"></script>
   <script src="/js/pages/Guide.js?v=2"></script>
   <script src="/js/pages/MoviesPage.js?v=8"></script>

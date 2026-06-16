@@ -296,9 +296,9 @@
         <section class="grid">
             <section class="panel">
                 <h2>Add TV provider</h2>
-                <div class="segmented" aria-label="Source type">
-                    <button class="segment active" id="type-xtream" type="button" data-source-type="xtream">Xtream</button>
-                    <button class="segment" id="type-m3u" type="button" data-source-type="m3u">M3U</button>
+                <div class="segmented" aria-label="Provider type">
+                    <button class="segment active" id="type-xtream" type="button" data-source-type="xtream">Provider account</button>
+                    <button class="segment" id="type-m3u" type="button" data-source-type="m3u">Playlist link</button>
                 </div>
                 <div class="field">
                     <label for="source-name">Name</label>
@@ -565,7 +565,7 @@
             document.getElementById('source-count').textContent = cloudSources.length;
             sourcesEl.innerHTML = cloudSources.length
                 ? cloudSources.map(renderSource).join('')
-                : '<div class="muted">No TV provider yet. Add Xtream Codes or an M3U playlist to unlock Watch.</div>';
+                : '<div class="muted">No TV provider yet. Add a provider account or playlist link to unlock Watch.</div>';
             sourcesEl.querySelectorAll('[data-sync-source]').forEach(button => {
                 button.addEventListener('click', async () => {
                     button.disabled = true;

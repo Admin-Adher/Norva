@@ -124,8 +124,13 @@ class SourceManager {
      * Render source list
      */
     renderSourceList(container, sources, type) {
+        const labels = {
+            xtream: 'provider accounts',
+            m3u: 'playlist links',
+            epg: 'TV guide feeds'
+        };
         if (sources.length === 0) {
-            container.innerHTML = `<p class="hint">No ${type.toUpperCase()} sources configured</p>`;
+            container.innerHTML = `<p class="hint">No ${labels[type] || 'providers'} configured</p>`;
             return;
         }
 
@@ -173,14 +178,14 @@ class SourceManager {
         const body = document.getElementById('modal-body');
         const footer = document.getElementById('modal-footer');
 
-        const titles = { xtream: 'Add Xtream Connection', m3u: 'Add M3U Playlist', epg: 'Add EPG Source' };
+        const titles = { xtream: 'Add TV provider', m3u: 'Add playlist link', epg: 'Add TV guide' };
         title.textContent = titles[type];
 
         body.innerHTML = this.getSourceForm(type);
 
         footer.innerHTML = `
       <button class="btn btn-secondary" id="modal-cancel">Cancel</button>
-      <button class="btn btn-primary" id="modal-save">Add Source</button>
+      <button class="btn btn-primary" id="modal-save">Add</button>
     `;
 
         modal.classList.add('active');
@@ -203,7 +208,8 @@ class SourceManager {
             const body = document.getElementById('modal-body');
             const footer = document.getElementById('modal-footer');
 
-            title.textContent = `Edit ${type.toUpperCase()} Source`;
+            const titles = { xtream: 'Edit TV provider', m3u: 'Edit playlist link', epg: 'Edit TV guide' };
+            title.textContent = titles[type] || 'Edit provider';
             body.innerHTML = this.getSourceForm(type, source);
 
             footer.innerHTML = `
@@ -228,7 +234,7 @@ class SourceManager {
         const nameField = `
       <div class="form-group">
         <label for="source-name">Name</label>
-        <input type="text" id="source-name" class="form-input" placeholder="My Source" value="${source.name || ''}">
+        <input type="text" id="source-name" class="form-input" placeholder="Family TV" value="${source.name || ''}">
       </div>
     `;
 
