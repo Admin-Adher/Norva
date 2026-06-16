@@ -449,6 +449,19 @@
             save: async (profile) => rememberProfileRegion(await request('PUT', '/profile', profile))
         },
 
+        entitlements: {
+            get: () => request('GET', '/entitlements'),
+            device: () => request('GET', '/device/entitlements', null, { token: getDeviceToken() }),
+            isSubscriptionError: (error) => {
+                const payload = error?.payload || {};
+                const details = payload.details || {};
+                return error?.status === 402 && (
+                    details.code === 'subscription_required' ||
+                    payload.code === 'subscription_required'
+                );
+            }
+        },
+
         regions: {
             list: () => CONTENT_REGIONS.slice(),
             label: contentRegionLabel,

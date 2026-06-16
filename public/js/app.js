@@ -22,6 +22,7 @@ class App {
         this.pages.series = new SeriesPage(this);
         this.pages.settings = new SettingsPage(this);
         this.pages.watch = new WatchPage(this);
+        this.entitlement = null;
 
         this.init();
     }
@@ -38,6 +39,7 @@ class App {
 
         // Check authentication first
         await this.checkAuth();
+        if (!await this.checkCloudAccess()) return;
 
         // Mobile menu toggle
         const mobileMenuToggle = document.getElementById('mobile-menu-toggle');
@@ -280,6 +282,51 @@ class App {
             localStorage.removeItem('authToken');
             window.location.replace('/login.html');
         }
+    }
+
+    async checkCloudAccess() {
+        if (!window.API?.isCloudMode?.() || !window.NorvaCloud?.entitlements) return true;
+
+        try {
+            const decision = this.currentUser?.device
+                ? await window.NorvaCloud.entitlements.device()
+                : await window.NorvaCloud.entitlements.get();
+
+            this.entitlement = decision;
+            window.NorvaEntitlement = decision;
+
+            if (decision && decision.allowed === false) {
+                this.redirectToPaywall(decision);
+                return false;
+            }
+        } catch (err) {
+            if (err?.status === 401) {
+                const returnTo = window.location.pathname + window.location.search + window.location.hash;
+                window.location.replace('/account.html?returnTo=' + encodeURIComponent(returnTo || '/'));
+                return false;
+            }
+            // Billing uncertainty must fail open: a temporary entitlement outage
+            // should not lock a household out of their own TV service.
+            console.warn('[Norva] Unable to verify access, continuing temporarily:', err);
+            this.entitlement = {
+                allowed: true,
+                failOpen: true,
+                reason: 'client_entitlement_check_failed',
+                message: 'Norva access could not be verified locally.'
+            };
+            window.NorvaEntitlement = this.entitlement;
+        }
+        return true;
+    }
+
+    redirectToPaywall(decision) {
+        const returnTo = window.location.pathname + window.location.search + window.location.hash;
+        sessionStorage.setItem('norva-entitlement-denied', JSON.stringify({
+            reason: decision?.reason || 'subscription_required',
+            status: decision?.status || '',
+            message: decision?.message || 'Norva access is required.'
+        }));
+        window.location.replace('/paywall.html?returnTo=' + encodeURIComponent(returnTo || '/'));
     }
 
     addLogoutButton() {

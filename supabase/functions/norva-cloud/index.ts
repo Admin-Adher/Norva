@@ -3,6 +3,7 @@ import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { refreshMaterializedLiveCatalog } from "../_shared/live-materialization.ts";
 import { refreshVodTitleProjection } from "../_shared/vod-title-projection.ts";
 import type { LiveCatalogItem } from "../_shared/live-catalog.ts";
+import { getEntitlementDecision, limitNumber } from "../_shared/entitlements.ts";
 
 type JsonRecord = Record<string, unknown>;
 type CloudUser = { id: string; email?: string };
@@ -128,7 +129,8 @@ async function route(
       body: {
         ok: true,
         service: "norva-cloud",
-        version: 11,
+        version: 12,
+        entitlements: true,
         liveMaterialization: true,
         relayConfigured: Boolean(runtimeConfig.relayBaseUrl && runtimeConfig.relayTokenSecret),
         gatewayConfigured: Boolean(runtimeConfig.mediaGatewayUrl && runtimeConfig.mediaGatewayToken),
@@ -167,7 +169,13 @@ async function route(
     if (req.method === "GET" && id === "media-items") {
       return { body: await listMediaItems(url, device.user_id, db) };
     }
+    if (req.method === "GET" && id === "entitlements") {
+      return { body: await getEntitlementDecision(db, device.user_id) };
+    }
     if (id === "playback" && action === "sessions" && req.method === "POST") {
+      await requirePlanCapacity(device.user_id, db, "concurrent_streams", "cloud_playback_sessions", {
+        activeSession: true,
+      });
       return { status: 201, body: await createPlaybackSession(req, device.user_id, db, device.id) };
     }
     if (id === "playback" && action === "events" && req.method === "POST") {
@@ -181,6 +189,10 @@ async function route(
 
   const user = await requireUser(req, db);
 
+  if (scope === "entitlements" && req.method === "GET") {
+    return { body: await getEntitlementDecision(db, user.id) };
+  }
+
   if (!scope || scope === "profile") {
     if (req.method === "GET") return { body: await getProfile(user.id, db) };
     if (req.method === "PUT" || req.method === "PATCH") {
@@ -190,7 +202,12 @@ async function route(
 
   if (scope === "devices") {
     if (req.method === "GET" && !id) return { body: await listDevices(user.id, db) };
-    if (req.method === "POST" && !id) return { status: 201, body: await createDevice(req, user.id, db) };
+    if (req.method === "POST" && !id) {
+      await requirePlanCapacity(user.id, db, "trusted_devices", "cloud_devices", {
+        revoked: false,
+      });
+      return { status: 201, body: await createDevice(req, user.id, db) };
+    }
     if (req.method === "PATCH" && id && action === "heartbeat") {
       return { body: await heartbeatDevice(id, user.id, db) };
     }
@@ -199,7 +216,10 @@ async function route(
 
   if (scope === "sources") {
     if (req.method === "GET" && !id) return { body: await listSources(user.id, db) };
-    if (req.method === "POST" && !id) return { status: 201, body: await createSource(req, user.id, db) };
+    if (req.method === "POST" && !id) {
+      await requirePlanCapacity(user.id, db, "sources", "cloud_sources");
+      return { status: 201, body: await createSource(req, user.id, db) };
+    }
     if (req.method === "GET" && id && action === "series-info") {
       return { body: await getXtreamSeriesInfo(url, id, user.id, db) };
     }
@@ -210,6 +230,7 @@ async function route(
       return { body: await getSourceEpg(url, id, user.id, db) };
     }
     if (req.method === "POST" && id && action === "sync") {
+      await requireCloudAccess(user.id, db, "source_sync");
       return { body: await syncExistingSource(id, user.id, db) };
     }
     if ((req.method === "PATCH" || req.method === "PUT") && id) {
@@ -236,6 +257,9 @@ async function route(
   }
 
   if (scope === "pairing" && req.method === "POST" && id === "approve") {
+    await requirePlanCapacity(user.id, db, "trusted_devices", "cloud_devices", {
+      revoked: false,
+    });
     return { body: await approvePairing(req, user.id, db) };
   }
 
@@ -247,6 +271,9 @@ async function route(
 
   if (scope === "playback" && id === "sessions") {
     if (req.method === "POST" && !action) {
+      await requirePlanCapacity(user.id, db, "concurrent_streams", "cloud_playback_sessions", {
+        activeSession: true,
+      });
       return { status: 201, body: await createPlaybackSession(req, user.id, db) };
     }
     if (req.method === "GET" && action) {
@@ -295,6 +322,63 @@ async function requireDevice(req: Request, db: SupabaseClient): Promise<CloudDev
     device_name: data.device_name,
     capabilities: recordOrEmpty(data.capabilities),
   };
+}
+
+async function requireCloudAccess(userId: string, db: SupabaseClient, feature: string) {
+  const decision = await getEntitlementDecision(db, userId);
+  if (!decision.allowed) throwEntitlementRequired(feature, decision);
+  return decision;
+}
+
+async function requirePlanCapacity(
+  userId: string,
+  db: SupabaseClient,
+  limitKey: string,
+  table: string,
+  filters: { revoked?: boolean; activeSession?: boolean } = {},
+) {
+  const decision = await requireCloudAccess(userId, db, limitKey);
+  const limit = limitNumber(decision.limits, limitKey, 0);
+  if (limit <= 0) throwEntitlementRequired(limitKey, decision, { limit, current: 0 });
+
+  const count = await countEntitlementUsage(userId, db, table, filters);
+  if (count >= limit) {
+    throwEntitlementRequired(limitKey, decision, { limit, current: count });
+  }
+
+  return { decision, limit, current: count };
+}
+
+async function countEntitlementUsage(
+  userId: string,
+  db: SupabaseClient,
+  table: string,
+  filters: { revoked?: boolean; activeSession?: boolean } = {},
+) {
+  let query = db
+    .from(table)
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", userId);
+
+  if (typeof filters.revoked === "boolean") {
+    query = query.eq("revoked", filters.revoked);
+  }
+  if (filters.activeSession) {
+    query = query.in("status", ["pending", "ready"]).gt("expires_at", new Date().toISOString());
+  }
+
+  const { count, error } = await query;
+  if (error) throwDb(error, "Unable to verify Norva access limits");
+  return count ?? 0;
+}
+
+function throwEntitlementRequired(feature: string, decision: unknown, usage?: unknown): never {
+  throw new HttpError(402, "Norva access required", {
+    code: "subscription_required",
+    feature,
+    entitlement: decision,
+    usage,
+  });
 }
 
 async function getProfile(userId: string, db: SupabaseClient) {

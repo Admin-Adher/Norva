@@ -1161,7 +1161,21 @@ const API = {
      */
     async request(method, endpoint, data = null) {
         if (_shouldUseCloud()) {
-            return CloudAdapter.request(method, endpoint, data);
+            try {
+                return await CloudAdapter.request(method, endpoint, data);
+            } catch (error) {
+                if (window.NorvaCloud?.entitlements?.isSubscriptionError?.(error)) {
+                    const details = error.payload?.details || {};
+                    sessionStorage.setItem('norva-entitlement-denied', JSON.stringify({
+                        reason: details.entitlement?.reason || details.feature || 'subscription_required',
+                        status: details.entitlement?.status || '',
+                        message: details.entitlement?.message || error.message || 'Norva access is required.'
+                    }));
+                    const returnTo = window.location.pathname + window.location.search + window.location.hash;
+                    window.location.replace('/paywall.html?returnTo=' + encodeURIComponent(returnTo || '/'));
+                }
+                throw error;
+            }
         }
 
         const options = {

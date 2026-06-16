@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#090b10">
+  <title>Norva Access</title>
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #090b10;
+      --panel: #11151d;
+      --line: #283246;
+      --text: #f8fafc;
+      --muted: #a8b3c7;
+      --quiet: #6b7690;
+      --accent: #5b7cfa;
+      --danger: #fb7185;
+    }
+    body {
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      display: grid;
+      place-items: center;
+      padding: 22px;
+    }
+    .panel {
+      width: min(720px, 100%);
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: clamp(22px, 5vw, 42px);
+      box-shadow: 0 24px 70px rgba(0, 0, 0, 0.34);
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 30px;
+    }
+    .brand img {
+      width: 48px;
+      height: 48px;
+      border-radius: 8px;
+    }
+    .brand span {
+      font-size: 22px;
+      font-weight: 800;
+    }
+    h1 {
+      font-size: clamp(34px, 7vw, 56px);
+      line-height: 1;
+      max-width: 620px;
+      margin-bottom: 16px;
+    }
+    .lead {
+      color: var(--muted);
+      font-size: 17px;
+      line-height: 1.65;
+      max-width: 620px;
+    }
+    .status {
+      margin-top: 24px;
+      padding: 16px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      background: #151b26;
+      color: #dbe7ff;
+      line-height: 1.5;
+    }
+    .status.denied {
+      border-color: rgba(251, 113, 133, 0.55);
+      color: #fecdd3;
+      background: rgba(80, 24, 36, 0.32);
+    }
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-top: 28px;
+    }
+    .btn {
+      min-height: 48px;
+      border: 0;
+      border-radius: 8px;
+      padding: 0 18px;
+      color: white;
+      background: var(--accent);
+      font-weight: 800;
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .btn.secondary {
+      background: #242c3d;
+      color: #dbe7ff;
+      border: 1px solid #344158;
+    }
+    .note {
+      color: var(--quiet);
+      margin-top: 20px;
+      font-size: 13px;
+      line-height: 1.55;
+    }
+    @media (max-width: 560px) {
+      .actions { display: grid; }
+      .btn { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <main class="panel">
+    <div class="brand">
+      <img src="/favicon.png" alt="">
+      <span>Norva</span>
+    </div>
+    <h1>Norva Access</h1>
+    <p class="lead">
+      Norva powers your private streaming ecosystem: apps, cloud sync, trusted screens and playback reliability.
+      Your TV content remains provided by your own TV service.
+    </p>
+    <div class="status" id="paywall-status">Checking Norva access...</div>
+    <div class="actions">
+      <button class="btn" id="paywall-primary">Continue</button>
+      <a class="btn secondary" id="paywall-account" href="/account.html">Account</a>
+      <button class="btn secondary" id="paywall-retry">Retry check</button>
+    </div>
+    <p class="note">
+      Billing and TV service errors are intentionally separate. If your TV provider needs repair, Norva will show that
+      inside Settings > TV Service instead of asking you to manage a plan.
+    </p>
+  </main>
+
+  <script src="/js/cloudApi.js"></script>
+  <script src="/js/authApi.js"></script>
+  <script>
+    (function () {
+      const params = new URLSearchParams(window.location.search);
+      const returnTo = params.get('returnTo') || '/';
+      const statusEl = document.getElementById('paywall-status');
+      const primaryBtn = document.getElementById('paywall-primary');
+      const retryBtn = document.getElementById('paywall-retry');
+      const accountLink = document.getElementById('paywall-account');
+
+      accountLink.href = '/account.html?returnTo=' + encodeURIComponent(returnTo);
+
+      function storedDenial() {
+        try { return JSON.parse(sessionStorage.getItem('norva-entitlement-denied') || 'null'); }
+        catch (_) { return null; }
+      }
+
+      function setStatus(message, denied) {
+        statusEl.textContent = message;
+        statusEl.classList.toggle('denied', Boolean(denied));
+      }
+
+      function showDenied(decision) {
+        const message = decision?.message || storedDenial()?.message || 'Norva access is required to keep watching.';
+        setStatus(message, true);
+        primaryBtn.textContent = 'Manage account';
+        primaryBtn.onclick = () => { window.location.href = accountLink.href; };
+      }
+
+      function hasAnyCloudSession() {
+        if (window.NorvaCloud?.deviceToken || localStorage.getItem('norva-cloud-device-token')) return true;
+        try {
+          const session = JSON.parse(localStorage.getItem('norva-cloud-session') || 'null');
+          const now = Math.floor(Date.now() / 1000);
+          return Boolean(
+            session?.access_token &&
+            session?.user?.id &&
+            (!session.expires_at || Number(session.expires_at) > now + 30)
+          );
+        } catch (_) {
+          return false;
+        }
+      }
+
+      async function checkAccess() {
+        setStatus('Checking Norva access...', false);
+        if (!hasAnyCloudSession()) {
+          setStatus('Sign in to start or manage Norva access.', true);
+          primaryBtn.textContent = 'Sign in';
+          primaryBtn.onclick = () => { window.location.href = accountLink.href; };
+          return;
+        }
+        try {
+          const isDevice = Boolean(window.NorvaCloud?.deviceToken || localStorage.getItem('norva-cloud-device-token'));
+          const decision = isDevice
+            ? await window.NorvaCloud.entitlements.device()
+            : await window.NorvaCloud.entitlements.get();
+          window.NorvaEntitlement = decision;
+          if (decision?.allowed !== false) {
+            sessionStorage.removeItem('norva-entitlement-denied');
+            setStatus(decision?.message || 'Norva access is active.', false);
+            primaryBtn.textContent = 'Continue to Norva';
+            primaryBtn.onclick = () => { window.location.href = returnTo || '/'; };
+            return;
+          }
+          showDenied(decision);
+        } catch (error) {
+          console.warn('[paywall] access check failed', error);
+          if (error?.status === 401) {
+            setStatus('Sign in to start or manage Norva access.', true);
+            primaryBtn.textContent = 'Sign in';
+            primaryBtn.onclick = () => { window.location.href = accountLink.href; };
+            return;
+          }
+          setStatus('Access could not be verified right now. Norva keeps recent access open while billing is checked.', false);
+          primaryBtn.textContent = 'Continue to Norva';
+          primaryBtn.onclick = () => { window.location.href = returnTo || '/'; };
+        }
+      }
+
+      retryBtn.addEventListener('click', checkAccess);
+      primaryBtn.onclick = () => { window.location.href = returnTo || '/'; };
+      const denial = storedDenial();
+      if (denial) showDenied(denial);
+      checkAccess();
+    })();
+  </script>
+</body>
+</html>

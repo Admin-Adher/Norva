@@ -1,5 +1,6 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
+import { getEntitlementDecision, limitNumber } from "../_shared/entitlements.ts";
 
 type JsonRecord = Record<string, unknown>;
 type RuntimeConfig = {
@@ -84,7 +85,8 @@ Deno.serve(async (req) => {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 10,
+        version: 11,
+        entitlements: true,
         relayConfigured: Boolean(config.relayBaseUrl && config.relayTokenSecret),
         gatewayConfigured: Boolean(config.mediaGatewayUrl && config.mediaGatewayToken),
       });
@@ -150,6 +152,35 @@ async function requireIdentity(req: Request, db: SupabaseClient): Promise<CloudI
   return { userId: device.user_id, deviceId: device.id };
 }
 
+async function requirePlaybackCapacity(userId: string, db: SupabaseClient) {
+  const decision = await getEntitlementDecision(db, userId);
+  if (!decision.allowed) throwEntitlementRequired("playback", decision);
+
+  const limit = limitNumber(decision.limits, "concurrent_streams", 0);
+  if (limit <= 0) throwEntitlementRequired("concurrent_streams", decision, { limit, current: 0 });
+
+  const { count, error } = await db
+    .from("cloud_playback_sessions")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", userId)
+    .in("status", ["pending", "ready"])
+    .gt("expires_at", new Date().toISOString());
+
+  if (error) throwDb(error, "Unable to verify Norva access limits");
+  if ((count ?? 0) >= limit) {
+    throwEntitlementRequired("concurrent_streams", decision, { limit, current: count ?? 0 });
+  }
+}
+
+function throwEntitlementRequired(feature: string, decision: unknown, usage?: unknown): never {
+  throw new HttpError(402, "Norva access required", {
+    code: "subscription_required",
+    feature,
+    entitlement: decision,
+    usage,
+  });
+}
+
 async function createPlaybackSession(
   req: Request,
   userId: string,
@@ -185,6 +216,7 @@ async function createPlaybackSession(
   const targetUrlHash = await sha256Hex(targetUrl);
 
   await closeOpenGatewaySessionsForUser(userId, db);
+  await requirePlaybackCapacity(userId, db);
 
   const { data: session, error } = await db
     .from("cloud_playback_sessions")

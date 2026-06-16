@@ -49,6 +49,11 @@ class SettingsPage {
 
         document.getElementById('settings-signout-btn')?.addEventListener('click', () => this.signOut());
 
+        document.getElementById('settings-manage-plan-btn')?.addEventListener('click', () => {
+            const returnTo = window.location.pathname + window.location.search + '#settings';
+            window.location.href = '/paywall.html?returnTo=' + encodeURIComponent(returnTo);
+        });
+
         document.getElementById('settings-service-health')?.addEventListener('click', (event) => {
             if (event.target.closest('[data-source-health-action="open-sources"]')) {
                 this.switchTab('sources');
@@ -95,7 +100,52 @@ class SettingsPage {
         if (accountOnly) accountOnly.style.display = user.cloud ? '' : 'none';
         if (cloudDashboard) cloudDashboard.style.display = user.cloud ? '' : 'none';
 
+        await this.refreshAccessCard();
         await this.refreshSourceHealthCard();
+    }
+
+    async refreshAccessCard() {
+        const plan = document.getElementById('settings-access-plan');
+        const hint = document.getElementById('settings-access-hint');
+        const button = document.getElementById('settings-manage-plan-btn');
+        if (!plan || !hint) return;
+
+        if (!this.app.currentUser?.cloud || !window.NorvaCloud?.entitlements) {
+            plan.textContent = 'Local access';
+            hint.textContent = 'This device is using the local hub. Norva Cloud billing is not active here.';
+            if (button) button.style.display = 'none';
+            return;
+        }
+
+        if (button) button.style.display = '';
+
+        try {
+            const decision = this.app.currentUser.device
+                ? await window.NorvaCloud.entitlements.device()
+                : await window.NorvaCloud.entitlements.get();
+            this.app.entitlement = decision;
+            window.NorvaEntitlement = decision;
+
+            const label = this.accessLabel(decision);
+            plan.textContent = label;
+            hint.textContent = decision.message || 'Norva access is active.';
+            if (decision.failOpen) {
+                hint.textContent = `${hint.textContent} Last known access is being honored while billing is checked.`;
+            }
+        } catch (err) {
+            console.warn('[Settings] Unable to load Norva access:', err);
+            plan.textContent = 'Access temporarily unavailable';
+            hint.textContent = 'Norva will keep access open briefly while billing status is checked.';
+        }
+    }
+
+    accessLabel(decision = {}) {
+        const plan = String(decision.planCode || decision.plan_code || 'trial');
+        const status = String(decision.status || 'unknown').replace(/_/g, ' ');
+        const planLabel = plan === 'trial'
+            ? 'Trial'
+            : plan.charAt(0).toUpperCase() + plan.slice(1);
+        return `${planLabel} - ${status}`;
     }
 
     async refreshSourceHealthCard() {
