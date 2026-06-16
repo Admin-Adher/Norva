@@ -552,7 +552,7 @@ class VideoPlayer {
                         btn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg> Copy Stream URL`;
                     }, 1500);
                 }
-                console.log('[Player] Stream URL copied:', streamUrl);
+                console.log('[Player] Stream URL copied:', this.describePlaybackUrl(streamUrl));
             }).catch(() => {
                 showPromptFallback();
             });
@@ -1009,7 +1009,7 @@ class VideoPlayer {
      */
     async startTranscodeSession(url, options = {}) {
         try {
-            console.log('[Player] Starting HLS transcode session...', options);
+            console.log('[Player] Starting HLS transcode session...', this.describeProcessingOptions(options));
             const res = await fetch('/api/transcode/session', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -1269,7 +1269,7 @@ class VideoPlayer {
                 const playlistUrl = await this.startTranscodeSession(streamUrl, { videoMode, videoCodec });
                 this.currentUrl = playlistUrl;
 
-                console.log('[Player] Playing transcoded HLS stream:', playlistUrl);
+                console.log('[Player] Playing transcoded HLS stream:', this.describePlaybackUrl(playlistUrl));
                 this.playHls(playlistUrl);
 
                 // Update UI and dispatch events
@@ -1785,6 +1785,28 @@ class VideoPlayer {
         }
 
         return true;
+    }
+
+    describePlaybackUrl(url) {
+        const value = String(url || '').trim();
+        if (!value) return 'empty';
+        if (/\/sessions\/[^/?#]+\/playlist\.m3u8/i.test(value)) return 'gateway-session';
+        if (value.startsWith('blob:')) return 'blob';
+        if (value.startsWith('data:')) return 'data';
+        if (/^\/api\/transcode/i.test(value)) return 'local-transcode';
+        if (/^\/api\/remux/i.test(value)) return 'local-remux';
+        if (/^\/api\/proxy\/stream/i.test(value)) return 'local-proxy';
+        if (/^\/api\//i.test(value)) return 'local-api';
+        if (/^\/relay\//i.test(value)) return 'relay';
+        if (/^https?:\/\//i.test(value)) {
+            return /\.m3u8(?:[?#]|$)/i.test(value) ? 'external-hls' : 'external-media';
+        }
+        return value.startsWith('/') ? 'local-media' : 'unknown';
+    }
+
+    describeProcessingOptions(options = {}) {
+        const { url, sourceUrl, streamUrl, ...safeOptions } = options || {};
+        return safeOptions;
     }
 
     /**

@@ -554,7 +554,7 @@ class WatchPage {
      */
     async startTranscodeSession(url, options = {}) {
         try {
-            console.log('[WatchPage] Starting HLS transcode session...', options);
+            console.log('[WatchPage] Starting HLS transcode session...', this.describeProcessingOptions(options));
             const subtitleTracks = this.getSubtitleExtractionTracks()
                 .map(t => ({ index: t.index, codec: t.codec }));
             const res = await fetch('/api/transcode/session', {
@@ -627,6 +627,28 @@ class WatchPage {
     isGatewayPlaybackUrl(url) {
         const value = String(url || '');
         return /\/sessions\/[^/?#]+\/playlist\.m3u8/i.test(value);
+    }
+
+    describePlaybackUrl(url) {
+        const value = String(url || '').trim();
+        if (!value) return 'empty';
+        if (this.isGatewayPlaybackUrl(value)) return 'gateway-session';
+        if (value.startsWith('blob:')) return 'blob';
+        if (value.startsWith('data:')) return 'data';
+        if (/^\/api\/transcode/i.test(value)) return 'local-transcode';
+        if (/^\/api\/remux/i.test(value)) return 'local-remux';
+        if (/^\/api\/proxy\/stream/i.test(value)) return 'local-proxy';
+        if (/^\/api\//i.test(value)) return 'local-api';
+        if (/^\/relay\//i.test(value)) return 'relay';
+        if (/^https?:\/\//i.test(value)) {
+            return /\.m3u8(?:[?#]|$)/i.test(value) ? 'external-hls' : 'external-media';
+        }
+        return value.startsWith('/') ? 'local-media' : 'unknown';
+    }
+
+    describeProcessingOptions(options = {}) {
+        const { url, sourceUrl, streamUrl, ...safeOptions } = options || {};
+        return safeOptions;
     }
 
     isLikelyPlaybackUrl(url) {
@@ -1267,7 +1289,12 @@ class WatchPage {
         const needsProxy = settings.forceProxy || proxyRequiredDomains.some(domain => url.includes(domain));
         const finalUrl = needsProxy ? this.getProxiedUrl(url) : url;
 
-        console.log('[WatchPage] Playing:', { url, needsProxy, looksLikeHls });
+        console.log('[WatchPage] Playing:', {
+            source: this.describePlaybackUrl(url),
+            final: this.describePlaybackUrl(finalUrl),
+            needsProxy,
+            looksLikeHls
+        });
 
         // Use HLS.js for HLS streams
         if (looksLikeHls && Hls.isSupported()) {
@@ -1749,7 +1776,7 @@ class WatchPage {
                         btn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg> Copy Stream URL`;
                     }, 1500);
                 }
-                console.log('[WatchPage] Stream URL copied:', streamUrl);
+                console.log('[WatchPage] Stream URL copied:', this.describePlaybackUrl(streamUrl));
             }).catch(() => {
                 showPromptFallback();
             });
