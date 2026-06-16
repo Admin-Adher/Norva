@@ -1842,10 +1842,6 @@ class VideoPlayer {
     stop() {
         ++this._variantSwitchSeq;
         this._clearVariantFallbackTimer();
-        const sessionTeardown = Promise.allSettled([
-            this.stopTranscodeSession(),
-            this.stopCloudPlaybackSessions()
-        ]);
         this._clearingMedia = true;
 
         if (this.hls) {
@@ -1860,6 +1856,11 @@ class VideoPlayer {
         this.video.src = '';
         this.video.load();
         this._clearingMedia = false;
+
+        const sessionTeardown = Promise.allSettled([
+            this.stopTranscodeSession(),
+            this.stopCloudPlaybackSessions()
+        ]);
 
         // Reset UI to idle state
         this.overlay.classList.remove('hidden'); // Show "Select a channel"

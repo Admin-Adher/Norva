@@ -1516,14 +1516,6 @@ class WatchPage {
         this.saveProgress();
         this.reportAbandonedPlayback();
 
-        // Cleanup transcode session if exists. Keep the promise so callers
-        // (loadVideo) can await full teardown before opening a new stream —
-        // single-connection IPTV accounts 401 if the old FFmpeg is still
-        // connected when the next one starts.
-        const sessionTeardown = Promise.allSettled([
-            this.stopTranscodeSession(),
-            this.stopCloudPlaybackSessions()
-        ]);
         this.updateTranscodeStatus('hidden');
 
         // Hide quality badge
@@ -1542,6 +1534,12 @@ class WatchPage {
             this.video.src = '';
             this.video.load();
         }
+        // Teardown sessions after destroying HLS so stale playlists are not
+        // requested while the old Gateway session is being expired.
+        const sessionTeardown = Promise.allSettled([
+            this.stopTranscodeSession(),
+            this.stopCloudPlaybackSessions()
+        ]);
         this.baseStreamUrl = null;
         this.currentPlaybackMode = null;
         this.currentProcessingOptions = {};
