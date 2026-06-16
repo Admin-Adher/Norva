@@ -68,6 +68,10 @@ function _cloudClientTelemetryMetadata() {
     };
 }
 
+function compactPlaybackHint(value = {}) {
+    return Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined && entry !== null && entry !== ''));
+}
+
 const CloudAdapter = (() => {
     const SOURCE_ALIAS_KEY = 'norva-cloud-source-aliases';
     const PAGE_CACHE_TTL_MS = 120000;
