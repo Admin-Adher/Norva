@@ -3,7 +3,7 @@ import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { refreshMaterializedLiveCatalog } from "../_shared/live-materialization.ts";
 import { refreshVodTitleProjection } from "../_shared/vod-title-projection.ts";
 import type { LiveCatalogItem } from "../_shared/live-catalog.ts";
-import { getEntitlementDecision, limitNumber } from "../_shared/entitlements.ts";
+import { getEntitlementDecision, getEntitlementRuntime, limitNumber } from "../_shared/entitlements.ts";
 
 type JsonRecord = Record<string, unknown>;
 type CloudUser = { id: string; email?: string };
@@ -125,12 +125,15 @@ async function route(
 
   if (req.method === "GET" && scope === "health") {
     const runtimeConfig = await getRuntimeConfig(db);
+    const entitlementRuntime = getEntitlementRuntime();
     return {
       body: {
         ok: true,
         service: "norva-cloud",
-        version: 12,
+        version: 13,
         entitlements: true,
+        entitlementsMode: entitlementRuntime.mode,
+        entitlementsEnforced: entitlementRuntime.enforced,
         liveMaterialization: true,
         relayConfigured: Boolean(runtimeConfig.relayBaseUrl && runtimeConfig.relayTokenSecret),
         gatewayConfigured: Boolean(runtimeConfig.mediaGatewayUrl && runtimeConfig.mediaGatewayToken),

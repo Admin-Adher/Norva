@@ -129,7 +129,10 @@ class SettingsPage {
             const label = this.accessLabel(decision);
             plan.textContent = label;
             hint.textContent = decision.message || 'Norva access is active.';
-            if (decision.failOpen) {
+            if (decision.enforced === false || decision.mode === 'observe') {
+                hint.textContent = decision.message || 'Gate 0 access is open. Billing is being observed but not enforced.';
+            }
+            if (decision.failOpen && decision.enforced !== false && decision.mode !== 'observe') {
                 hint.textContent = `${hint.textContent} Last known access is being honored while billing is checked.`;
             }
         } catch (err) {
@@ -140,6 +143,9 @@ class SettingsPage {
     }
 
     accessLabel(decision = {}) {
+        if (decision.enforced === false || decision.mode === 'observe') {
+            return 'Gate 0 access';
+        }
         const plan = String(decision.planCode || decision.plan_code || 'trial');
         const status = String(decision.status || 'unknown').replace(/_/g, ' ');
         const planLabel = plan === 'trial'

@@ -7,6 +7,8 @@ export type EntitlementDecision = {
   reason: string;
   status: string;
   planCode: string;
+  mode: string;
+  enforced: boolean;
   failOpen: boolean;
   limits: JsonRecord;
   projection: JsonRecord | null;
@@ -15,6 +17,7 @@ export type EntitlementDecision = {
 
 const DEFAULT_TRIAL_DAYS = boundedEnvInt("NORVA_TRIAL_DAYS", 7, 1, 60);
 const DEFAULT_FAIL_OPEN_HOURS = boundedEnvInt("NORVA_BILLING_FAIL_OPEN_HOURS", 72, 1, 24 * 14);
+const ENTITLEMENTS_MODE = normalizeEntitlementsMode(Deno.env.get("NORVA_ENTITLEMENTS_MODE") ?? "enforce");
 
 const PLAN_LIMITS: Record<string, JsonRecord> = {
   trial: {
@@ -75,6 +78,13 @@ const PLAN_LIMITS: Record<string, JsonRecord> = {
 
 const HARD_BLOCK_STATUSES = new Set(["revoked", "refunded", "fraud"]);
 
+export function getEntitlementRuntime() {
+  return {
+    mode: ENTITLEMENTS_MODE,
+    enforced: ENTITLEMENTS_MODE === "enforce",
+  };
+}
+
 export async function getEntitlementDecision(
   db: SupabaseClient,
   userId: string,
@@ -87,7 +97,7 @@ export async function getEntitlementDecision(
     .maybeSingle();
 
   if (error) {
-    return uncertainDecision("billing_projection_unavailable", null);
+    return applyEntitlementMode(uncertainDecision("billing_projection_unavailable", null));
   }
 
   let projection = data as JsonRecord | null;
@@ -95,7 +105,7 @@ export async function getEntitlementDecision(
     projection = await startTrialProjection(db, userId);
   }
 
-  if (!projection) return blockedDecision("subscription_required", null);
+  if (!projection) return applyEntitlementMode(blockedDecision("subscription_required", null));
 
   const now = Date.now();
   const status = String(projection.status || "unknown");
@@ -107,52 +117,52 @@ export async function getEntitlementDecision(
   const lastVerifiedAt = timeMs(projection.last_verified_at);
 
   if (HARD_BLOCK_STATUSES.has(status)) {
-    return blockedDecision(status, projection, limits);
+    return applyEntitlementMode(blockedDecision(status, projection, limits));
   }
 
   if (status === "trialing") {
     const effectiveEnd = trialEnd || periodEnd;
     if (!effectiveEnd || effectiveEnd > now) {
-      return allowedDecision("trialing", projection, limits, false);
+      return applyEntitlementMode(allowedDecision("trialing", projection, limits, false));
     }
-    return blockedDecision("trial_expired", projection, limits);
+    return applyEntitlementMode(blockedDecision("trial_expired", projection, limits));
   }
 
   if (status === "active") {
     if (!periodEnd || periodEnd > now) {
-      return allowedDecision("active", projection, limits, false);
+      return applyEntitlementMode(allowedDecision("active", projection, limits, false));
     }
     if (failOpenUntil && failOpenUntil > now) {
-      return allowedDecision("billing_grace", projection, limits, true);
+      return applyEntitlementMode(allowedDecision("billing_grace", projection, limits, true));
     }
     if (lastVerifiedAt && lastVerifiedAt + DEFAULT_FAIL_OPEN_HOURS * 60 * 60 * 1000 > now) {
-      return allowedDecision("billing_recently_verified", projection, limits, true);
+      return applyEntitlementMode(allowedDecision("billing_recently_verified", projection, limits, true));
     }
-    return blockedDecision("subscription_expired", projection, limits);
+    return applyEntitlementMode(blockedDecision("subscription_expired", projection, limits));
   }
 
   if (status === "cancelled_at_period_end") {
     if (!periodEnd || periodEnd > now) {
-      return allowedDecision("cancelled_at_period_end", projection, limits, false);
+      return applyEntitlementMode(allowedDecision("cancelled_at_period_end", projection, limits, false));
     }
-    return blockedDecision("subscription_expired", projection, limits);
+    return applyEntitlementMode(blockedDecision("subscription_expired", projection, limits));
   }
 
   if (status === "grace" || status === "past_due" || status === "unknown") {
     if ((periodEnd && periodEnd > now) || (failOpenUntil && failOpenUntil > now)) {
-      return allowedDecision("billing_grace", projection, limits, true);
+      return applyEntitlementMode(allowedDecision("billing_grace", projection, limits, true));
     }
     if (lastVerifiedAt && lastVerifiedAt + DEFAULT_FAIL_OPEN_HOURS * 60 * 60 * 1000 > now) {
-      return allowedDecision("billing_recently_verified", projection, limits, true);
+      return applyEntitlementMode(allowedDecision("billing_recently_verified", projection, limits, true));
     }
-    return blockedDecision("billing_unverified", projection, limits);
+    return applyEntitlementMode(blockedDecision("billing_unverified", projection, limits));
   }
 
   if (status === "expired") {
-    return blockedDecision("subscription_expired", projection, limits);
+    return applyEntitlementMode(blockedDecision("subscription_expired", projection, limits));
   }
 
-  return blockedDecision("subscription_required", projection, limits);
+  return applyEntitlementMode(blockedDecision("subscription_required", projection, limits));
 }
 
 export function limitNumber(limits: JsonRecord, key: string, fallback = 0) {
@@ -167,6 +177,8 @@ function allowedDecision(reason: string, projection: JsonRecord, limits: JsonRec
     reason,
     status: String(projection.status || "unknown"),
     planCode: String(projection.plan_code || "none"),
+    mode: ENTITLEMENTS_MODE,
+    enforced: ENTITLEMENTS_MODE === "enforce",
     failOpen,
     limits,
     projection: sanitizeProjection(projection),
@@ -182,6 +194,8 @@ function blockedDecision(reason: string, projection: JsonRecord | null, limits =
     reason,
     status: String(projection?.status || "none"),
     planCode: String(projection?.plan_code || "none"),
+    mode: ENTITLEMENTS_MODE,
+    enforced: ENTITLEMENTS_MODE === "enforce",
     failOpen: false,
     limits,
     projection: projection ? sanitizeProjection(projection) : null,
@@ -196,10 +210,34 @@ function uncertainDecision(reason: string, projection: JsonRecord | null): Entit
     reason,
     status: String(projection?.status || "unknown"),
     planCode: String(projection?.plan_code || "manual"),
+    mode: ENTITLEMENTS_MODE,
+    enforced: ENTITLEMENTS_MODE === "enforce",
     failOpen: true,
     limits,
     projection: projection ? sanitizeProjection(projection) : null,
     message: "Norva access is temporarily allowed because billing status could not be verified.",
+  };
+}
+
+function applyEntitlementMode(decision: EntitlementDecision): EntitlementDecision {
+  if (ENTITLEMENTS_MODE === "enforce") {
+    return { ...decision, mode: ENTITLEMENTS_MODE, enforced: true };
+  }
+
+  if (HARD_BLOCK_STATUSES.has(decision.reason)) {
+    return { ...decision, mode: ENTITLEMENTS_MODE, enforced: true };
+  }
+
+  return {
+    ...decision,
+    allowed: true,
+    reason: decision.allowed ? `gate0_observe_${decision.reason}` : `gate0_bypass_${decision.reason}`,
+    planCode: decision.planCode === "none" ? "manual" : decision.planCode,
+    mode: ENTITLEMENTS_MODE,
+    enforced: false,
+    failOpen: true,
+    limits: PLAN_LIMITS.manual,
+    message: "Gate 0 access is open. Billing is being observed but not enforced.",
   };
 }
 
@@ -271,6 +309,14 @@ function timeMs(value: unknown) {
 
 function isRecord(value: unknown): value is JsonRecord {
   return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function normalizeEntitlementsMode(value: string) {
+  const mode = value.trim().toLowerCase().replace(/_/g, "-");
+  if (mode === "observe" || mode === "gate0" || mode === "gate0-observe" || mode === "off") {
+    return "observe";
+  }
+  return "enforce";
 }
 
 function boundedEnvInt(name: string, fallback: number, min: number, max: number) {

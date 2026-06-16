@@ -1,6 +1,6 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
-import { getEntitlementDecision, limitNumber } from "../_shared/entitlements.ts";
+import { getEntitlementDecision, getEntitlementRuntime, limitNumber } from "../_shared/entitlements.ts";
 
 type JsonRecord = Record<string, unknown>;
 type RuntimeConfig = {
@@ -82,11 +82,14 @@ Deno.serve(async (req) => {
     const segments = routeSegments(url.pathname);
     if (req.method === "GET" && segments[0] === "health") {
       const config = await getRuntimeConfig(supabase);
+      const entitlementRuntime = getEntitlementRuntime();
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 11,
+        version: 12,
         entitlements: true,
+        entitlementsMode: entitlementRuntime.mode,
+        entitlementsEnforced: entitlementRuntime.enforced,
         relayConfigured: Boolean(config.relayBaseUrl && config.relayTokenSecret),
         gatewayConfigured: Boolean(config.mediaGatewayUrl && config.mediaGatewayToken),
       });
