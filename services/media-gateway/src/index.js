@@ -13,10 +13,14 @@ const GATEWAY_TOKEN = process.env.GATEWAY_TOKEN || process.env.NORVA_MEDIA_GATEW
 const PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL || '').replace(/\/+$/, '');
 const OUTPUT_DIR = path.resolve(process.env.OUTPUT_DIR || path.join(os.tmpdir(), 'norva-media-gateway'));
 const FFMPEG_PATH = process.env.FFMPEG_PATH || 'ffmpeg';
+const FFPROBE_PATH = process.env.FFPROBE_PATH || 'ffprobe';
 const DEFAULT_TTL_SECONDS = clampInt(process.env.SESSION_TTL_SECONDS, 30 * 60, 60, 12 * 60 * 60);
 const STARTUP_TIMEOUT_MS = clampInt(process.env.STARTUP_TIMEOUT_MS, 45_000, 5_000, 180_000);
 const PLAYLIST_REQUEST_TIMEOUT_MS = clampInt(process.env.PLAYLIST_REQUEST_TIMEOUT_MS, 45_000, 5_000, 180_000);
 const XTREAM_REQUEST_TIMEOUT_MS = clampInt(process.env.XTREAM_REQUEST_TIMEOUT_MS, 15_000, 5_000, 60_000);
+const CODEC_PROBE_TIMEOUT_MS = clampInt(process.env.CODEC_PROBE_TIMEOUT_MS, 5_000, 1_000, 20_000);
+const CODEC_PROBE_ANALYZE_DURATION_US = clampInt(process.env.CODEC_PROBE_ANALYZE_DURATION_US, 2_000_000, 250_000, 20_000_000);
+const CODEC_PROBE_SIZE_BYTES = clampInt(process.env.CODEC_PROBE_SIZE_BYTES, 2_000_000, 64_000, 20_000_000);
 const STOP_CONFLICTING_SOURCE_SESSIONS = (process.env.STOP_CONFLICTING_SOURCE_SESSIONS || 'true') !== 'false';
 const STOP_CONFLICTING_OWNER_SESSIONS = (process.env.STOP_CONFLICTING_OWNER_SESSIONS || 'true') !== 'false';
 const FFMPEG_USER_AGENT = process.env.FFMPEG_USER_AGENT ||
@@ -40,7 +44,8 @@ app.get('/health', (req, res) => {
     res.json({
         ok: true,
         service: 'norva-media-gateway',
-        version: 18,
+        version: 19,
+        codecProbe: true,
         activeSessions: activeSessionCount(),
         totalSessions: sessions.size,
         lastFailureCount: lastFailures.length,
@@ -123,7 +128,16 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
 
         const expiresAtDate = expiresAt ? new Date(expiresAt) : new Date(Date.now() + DEFAULT_TTL_SECONDS * 1000);
         const normalizedPlaybackHint = asRecord(playbackHint);
-        const normalizedCodecProfile = asRecord(codecProfile || normalizedPlaybackHint.codecProfile || normalizedPlaybackHint.codec_profile);
+        let normalizedCodecProfile = asRecord(codecProfile || normalizedPlaybackHint.codecProfile || normalizedPlaybackHint.codec_profile);
+        let codecProfileSource = hasUsefulCodecProfile(normalizedCodecProfile) ? 'request' : '';
+        if (!codecProfileSource && shouldProbeCodecProfile(normalizedPlaybackHint, sourceUrl)) {
+            try {
+                normalizedCodecProfile = await probeCodecProfile(sourceUrl, sanitizeUserAgent(userAgent) || FFMPEG_USER_AGENT);
+                codecProfileSource = hasUsefulCodecProfile(normalizedCodecProfile) ? 'gateway_probe' : '';
+            } catch (err) {
+                console.warn('[media-gateway] codec probe skipped:', sanitizeLog(err.message || String(err), sourceUrl));
+            }
+        }
         const session = {
             id,
             playbackSessionId: playbackSessionId || null,
@@ -134,6 +148,7 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             userAgent: sanitizeUserAgent(userAgent),
             playbackHint: normalizedPlaybackHint,
             codecProfile: normalizedCodecProfile,
+            codecProfileSource,
             audioCodec: stringOrNull(audioCodec) || stringOrNull(normalizedPlaybackHint.audioCodec) || stringOrNull(normalizedPlaybackHint.audio_codec) || stringOrNull(normalizedCodecProfile.audioCodec) || stringOrNull(normalizedCodecProfile.audio_codec) || stringOrNull(normalizedCodecProfile.audio),
             audioProfile: stringOrNull(audioProfile) || stringOrNull(normalizedPlaybackHint.audioProfile) || stringOrNull(normalizedPlaybackHint.audio_profile) || stringOrNull(normalizedCodecProfile.audioProfile) || stringOrNull(normalizedCodecProfile.audio_profile),
             audioChannels: nullableInt(audioChannels ?? normalizedPlaybackHint.audioChannels ?? normalizedPlaybackHint.audio_channels ?? normalizedCodecProfile.audioChannels ?? normalizedCodecProfile.audio_channels ?? normalizedCodecProfile.channels),
@@ -173,6 +188,8 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             status: session.status,
             mode: session.mode,
             audioMode: audioModeForSession(session),
+            codecProfile: session.codecProfile,
+            codecProfileSource: session.codecProfileSource || null,
             hlsUrl,
             expiresAt: session.expiresAt.toISOString()
         });
@@ -404,6 +421,118 @@ function hasHeAacMarker(value) {
     );
 }
 
+async function probeCodecProfile(sourceUrl, userAgent) {
+    const startedAt = Date.now();
+    const args = [
+        '-v', 'error',
+        '-rw_timeout', '8000000',
+        '-user_agent', userAgent || FFMPEG_USER_AGENT,
+        '-headers', 'Accept: */*\r\nConnection: keep-alive\r\n',
+        '-analyzeduration', String(CODEC_PROBE_ANALYZE_DURATION_US),
+        '-probesize', String(CODEC_PROBE_SIZE_BYTES),
+        '-show_streams',
+        '-show_format',
+        '-print_format', 'json',
+        sourceUrl
+    ];
+
+    const payload = await runFfprobe(args, CODEC_PROBE_TIMEOUT_MS, sourceUrl);
+    const streams = Array.isArray(payload.streams) ? payload.streams : [];
+    const video = streams.find((stream) => stream?.codec_type === 'video') || {};
+    const audio = streams.find((stream) => stream?.codec_type === 'audio') || {};
+    const format = asRecord(payload.format);
+    const profile = compactRecord({
+        videoCodec: stringOrNull(video.codec_name),
+        videoProfile: stringOrNull(video.profile),
+        videoWidth: nullableInt(video.width),
+        videoHeight: nullableInt(video.height),
+        videoPixelFormat: stringOrNull(video.pix_fmt),
+        audioCodec: stringOrNull(audio.codec_name),
+        audioProfile: stringOrNull(audio.profile),
+        audioChannels: nullableInt(audio.channels),
+        audioChannelLayout: stringOrNull(audio.channel_layout),
+        audioSampleRate: nullableInt(audio.sample_rate),
+        container: stringOrNull(format.format_name),
+        durationSeconds: nullableFloat(format.duration),
+        bitRate: nullableInt(format.bit_rate),
+        probeSource: 'gateway_probe',
+        probeMs: Math.max(1, Date.now() - startedAt),
+        probedAt: new Date().toISOString()
+    });
+    return hasUsefulCodecProfile(profile) ? profile : {};
+}
+
+function runFfprobe(args, timeoutMs, sourceUrl) {
+    return new Promise((resolve, reject) => {
+        const child = spawn(FFPROBE_PATH, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+        let stdout = '';
+        let stderr = '';
+        let finished = false;
+        const timer = setTimeout(() => {
+            if (finished) return;
+            finished = true;
+            child.kill('SIGTERM');
+            reject(new Error('Codec probe timeout'));
+        }, timeoutMs);
+
+        child.stdout.on('data', (chunk) => {
+            stdout += chunk.toString();
+            if (stdout.length > 512_000) stdout = stdout.slice(-512_000);
+        });
+        child.stderr.on('data', (chunk) => {
+            stderr += sanitizeLog(chunk.toString(), sourceUrl);
+            if (stderr.length > 8_000) stderr = stderr.slice(-8_000);
+        });
+        child.on('error', (err) => {
+            if (finished) return;
+            finished = true;
+            clearTimeout(timer);
+            reject(err);
+        });
+        child.on('exit', (code, signal) => {
+            if (finished) return;
+            finished = true;
+            clearTimeout(timer);
+            if (code !== 0) {
+                reject(new Error(`Codec probe exited with code ${code ?? 'null'} signal ${signal ?? 'none'}${stderr ? `: ${lastNonEmptyLine(stderr)}` : ''}`));
+                return;
+            }
+            try {
+                resolve(JSON.parse(stdout || '{}'));
+            } catch (err) {
+                reject(new Error(`Codec probe returned invalid JSON: ${err.message}`));
+            }
+        });
+    });
+}
+
+function hasUsefulCodecProfile(profile) {
+    const record = asRecord(profile);
+    return Boolean(
+        stringOrNull(record.videoCodec) ||
+        stringOrNull(record.video_codec) ||
+        stringOrNull(record.video) ||
+        stringOrNull(record.audioCodec) ||
+        stringOrNull(record.audio_codec) ||
+        stringOrNull(record.audio)
+    );
+}
+
+function shouldProbeCodecProfile(playbackHint, sourceUrl) {
+    const hint = asRecord(playbackHint);
+    const streamType = String(hint.streamType || hint.stream_type || hint.itemType || hint.item_type || '').toLowerCase();
+    if (streamType === 'live' || streamType === 'channel') return false;
+    const container = String(hint.container || '').toLowerCase();
+    if (container === 'm3u8' || container === 'ts') return false;
+    try {
+        const extension = path.extname(new URL(sourceUrl).pathname).replace(/^\./, '').toLowerCase();
+        if (extension === 'm3u8' || extension === 'ts') return false;
+        return ['mp4', 'mkv', 'avi', 'mov', 'webm', 'wmv', 'flv', 'mpeg', 'mpg', 'vob'].includes(extension) || streamType === 'movie' || streamType === 'series';
+    } catch (_) {
+        return streamType === 'movie' || streamType === 'series';
+    }
+}
+
 async function waitForPlaylist(session, timeoutMs) {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
@@ -521,6 +650,8 @@ function serializeSession(req, session) {
         status: session.status,
         mode: session.mode,
         audioMode: audioModeForSession(session),
+        codecProfile: session.codecProfile,
+        codecProfileSource: session.codecProfileSource || null,
         hlsUrl: publicUrl(req, `/sessions/${session.id}/playlist.m3u8?token=${encodeURIComponent(session.accessToken)}`),
         createdAt: session.createdAt.toISOString(),
         expiresAt: session.expiresAt.toISOString(),
@@ -635,6 +766,21 @@ function nullableInt(value) {
     if (value === null || value === undefined || value === '') return null;
     const parsed = Number.parseInt(String(value), 10);
     return Number.isFinite(parsed) ? parsed : null;
+}
+
+function nullableFloat(value) {
+    if (value === null || value === undefined || value === '') return null;
+    const parsed = Number.parseFloat(String(value));
+    return Number.isFinite(parsed) ? parsed : null;
+}
+
+function compactRecord(record) {
+    return Object.fromEntries(Object.entries(asRecord(record)).filter(([, value]) => (
+        value !== undefined &&
+        value !== null &&
+        value !== '' &&
+        !(typeof value === 'number' && !Number.isFinite(value))
+    )));
 }
 
 function normalizeCodecToken(value) {

@@ -84,7 +84,7 @@ Deno.serve(async (req) => {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 7,
+        version: 8,
         relayConfigured: Boolean(config.relayBaseUrl && config.relayTokenSecret),
         gatewayConfigured: Boolean(config.mediaGatewayUrl && config.mediaGatewayToken),
       });
@@ -158,11 +158,13 @@ async function createPlaybackSession(
   const itemId = stringOr(body.itemId ?? body.item_id, "");
   let targetUrl = stringOr(body.targetUrl ?? body.target_url ?? body.url, "");
   const requestedMode = stringOr(body.mode, "auto");
-  const requestedPlaybackHint = recordOrEmpty(body.playbackHint ?? body.playback_hint);
+  let requestedPlaybackHint = recordOrEmpty(body.playbackHint ?? body.playback_hint);
   const userAgent = stringOrNull(body.userAgent ?? body.user_agent);
 
   if (!targetUrl && sourceId && itemType && itemId) {
-    targetUrl = await resolvePlaybackTarget(sourceId, itemType, itemId, userId, db, requestedPlaybackHint);
+    const resolved = await resolvePlaybackTarget(sourceId, itemType, itemId, userId, db, requestedPlaybackHint);
+    targetUrl = resolved.targetUrl;
+    requestedPlaybackHint = mergePlaybackHints(resolved.playbackHint, requestedPlaybackHint);
   }
   if (!itemType || !itemId || !targetUrl) {
     throw new HttpError(400, "itemType, itemId and targetUrl are required");
@@ -216,6 +218,17 @@ async function createPlaybackSession(
       startupMs: gateway.startupMs,
     });
   }
+  if (sourceId && gateway.codecProfile) {
+    await persistObservedCodecProfile(db, {
+      userId,
+      sourceId,
+      itemType,
+      itemId,
+      codecProfile: gateway.codecProfile,
+      startupMs: gateway.startupMs,
+      audioMode: gateway.audioMode,
+    });
+  }
   return {
     session,
     playback: {
@@ -226,6 +239,7 @@ async function createPlaybackSession(
       gatewayRequired: !gateway.hlsUrl,
       startupMs: gateway.startupMs ?? null,
       audioMode: gateway.audioMode ?? null,
+      codecProfile: gateway.codecProfile ?? null,
     },
   };
 }
@@ -445,7 +459,7 @@ async function resolvePlaybackTarget(
 ) {
   const { data: item, error } = await db
     .from("cloud_media_items")
-    .select("playback_hint")
+    .select("playback_hint,metadata")
     .eq("source_id", sourceId)
     .eq("user_id", userId)
     .eq("item_type", itemType)
@@ -455,33 +469,55 @@ async function resolvePlaybackTarget(
   if (!item) {
     if (itemType === "series") {
       const sourceConfig = await loadSourceConfig(sourceId, userId, db);
-      return xtreamStreamUrl({
-        serverUrl: stringOr(sourceConfig.serverUrl, ""),
-        username: stringOr(sourceConfig.username, ""),
-        password: stringOr(sourceConfig.password, ""),
-        streamType: "series",
-        streamId: itemId,
-        container: "mp4",
-      });
+      return {
+        targetUrl: xtreamStreamUrl({
+          serverUrl: stringOr(sourceConfig.serverUrl, ""),
+          username: stringOr(sourceConfig.username, ""),
+          password: stringOr(sourceConfig.password, ""),
+          streamType: "series",
+          streamId: itemId,
+          container: "mp4",
+        }),
+        playbackHint: compactRecord({ container: "mp4" }),
+      };
     }
     throw new HttpError(404, "Media item not found");
   }
 
   const hint = recordOrEmpty(item.playback_hint);
-  if (typeof hint.targetUrl === "string") return hint.targetUrl;
+  const metadata = recordOrEmpty(item.metadata);
+  const storedCodecProfile = firstUsefulCodecProfile(
+    hint.codecProfile,
+    hint.codec_profile,
+    metadata.codecProfile,
+    metadata.codec_profile,
+  );
+  const storedPlaybackHint = mergePlaybackHints(
+    compactRecord({
+      ...hint,
+      codecProfile: storedCodecProfile,
+    }),
+    {},
+  );
+  if (typeof hint.targetUrl === "string") {
+    return { targetUrl: hint.targetUrl, playbackHint: storedPlaybackHint };
+  }
 
   if (hint.sourceType === "xtream") {
     const sourceConfig = await loadSourceConfig(sourceId, userId, db);
     const requestContainer = stringOrNull(requestHint.container);
     const storedContainer = stringOr(hint.container, "m3u8");
-    return xtreamStreamUrl({
-      serverUrl: stringOr(sourceConfig.serverUrl, ""),
-      username: stringOr(sourceConfig.username, ""),
-      password: stringOr(sourceConfig.password, ""),
-      streamType: stringOr(hint.streamType, "live"),
-      streamId: stringOr(hint.streamId, ""),
-      container: requestContainer || storedContainer,
-    });
+    return {
+      targetUrl: xtreamStreamUrl({
+        serverUrl: stringOr(sourceConfig.serverUrl, ""),
+        username: stringOr(sourceConfig.username, ""),
+        password: stringOr(sourceConfig.password, ""),
+        streamType: stringOr(hint.streamType, "live"),
+        streamId: stringOr(hint.streamId, ""),
+        container: requestContainer || storedContainer,
+      }),
+      playbackHint: mergePlaybackHints(storedPlaybackHint, compactRecord({ container: requestContainer || storedContainer })),
+    };
   }
 
   throw new HttpError(400, "This media item has no playback target");
@@ -551,27 +587,32 @@ async function createGatewaySession(
 
   const gatewayHints = gatewayPlaybackHints(playbackHint);
   const startupStartedAt = performance.now();
-  const response = await fetch(`${runtimeConfig.mediaGatewayUrl}/sessions`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${runtimeConfig.mediaGatewayToken}`,
-    },
-    body: JSON.stringify({
-      playbackSessionId,
-      ownerKey: await sha256Hex(userId),
-      sourceUrl: targetUrl,
-      mode: gatewayMode,
-      expiresAt,
-      playbackHint: compactRecord(playbackHint),
-      ...gatewayHints,
-      ...(userAgent ? { userAgent } : {}),
-    }),
-  });
-  const gatewayBody = await response.json().catch(() => ({}));
+  const baseGatewayBody = {
+    playbackSessionId,
+    ownerKey: await sha256Hex(userId),
+    sourceUrl: targetUrl,
+    mode: gatewayMode,
+    expiresAt,
+    playbackHint: compactRecord(playbackHint),
+    ...gatewayHints,
+    ...(userAgent ? { userAgent } : {}),
+  };
+  let { response, body: gatewayBody } = await requestGatewaySession(runtimeConfig.mediaGatewayUrl, runtimeConfig.mediaGatewayToken, baseGatewayBody);
+  if (!response.ok && shouldRetryGatewayWithAudioTranscode(gatewayHints, response.status)) {
+    const fallbackHint = mergePlaybackHints(playbackHint, {
+      audioMode: "transcode",
+      audioFallbackReason: "copy_start_failed",
+    });
+    ({ response, body: gatewayBody } = await requestGatewaySession(runtimeConfig.mediaGatewayUrl, runtimeConfig.mediaGatewayToken, {
+      ...baseGatewayBody,
+      playbackHint: fallbackHint,
+      audioMode: "transcode",
+    }));
+  }
   if (!response.ok) throw new HttpError(response.status, "Media gateway refused the session", gatewayBody);
   const startupMs = Math.max(1, Math.round(performance.now() - startupStartedAt));
   const audioMode = stringOrNull(gatewayBody.audioMode ?? gatewayBody.audio_mode);
+  const codecProfile = firstUsefulCodecProfile(gatewayBody.codecProfile, gatewayBody.codec_profile);
 
   const { data, error } = await db
     .from("cloud_gateway_sessions")
@@ -587,7 +628,36 @@ async function createGatewaySession(
     .select("*")
     .single();
   if (error) throwDb(error, "Unable to record gateway session");
-  return { status: data.status, session: data, hlsUrl: data.hls_url, startupMs, audioMode };
+  return { status: data.status, session: data, hlsUrl: data.hls_url, startupMs, audioMode, codecProfile };
+}
+
+async function requestGatewaySession(
+  baseUrl: string,
+  token: string,
+  body: JsonRecord,
+) {
+  const response = await fetch(`${baseUrl}/sessions`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(body),
+  });
+  return {
+    response,
+    body: await response.json().catch(() => ({})),
+  };
+}
+
+function shouldRetryGatewayWithAudioTranscode(gatewayHints: JsonRecord, status: number) {
+  if (![500, 502, 503, 504].includes(status)) return false;
+  const requested = normalizeCodecToken(gatewayHints.audioMode ?? gatewayHints.audio_mode);
+  if (requested === "transcode" || requested === "encode") return false;
+  return Boolean(
+    firstUsefulCodecProfile(gatewayHints.codecProfile, gatewayHints.codec_profile) ||
+    stringOrNull(gatewayHints.audioCodec ?? gatewayHints.audio_codec),
+  );
 }
 
 function gatewayPlaybackHints(playbackHint: JsonRecord) {
@@ -654,6 +724,179 @@ async function recordPlaybackStartupObservation(
   if (error && !isProjectionMissing(error)) {
     console.warn("[norva-playback] unable to record playback startup observation", error.message);
   }
+}
+
+async function persistObservedCodecProfile(
+  db: SupabaseClient,
+  options: {
+    userId: string;
+    sourceId: string;
+    itemType: string;
+    itemId: string;
+    codecProfile: JsonRecord;
+    startupMs: number | null;
+    audioMode: string | null;
+  },
+) {
+  const itemType = options.itemType === "series" ? "series" : options.itemType === "movie" ? "movie" : "";
+  const codecProfile = normalizeCodecProfile(options.codecProfile);
+  if (!itemType || !options.itemId || !hasUsefulCodecProfile(codecProfile)) return;
+
+  const observedAt = new Date().toISOString();
+  const { data: item, error } = await db
+    .from("cloud_media_items")
+    .select("id,metadata,playback_hint")
+    .eq("user_id", options.userId)
+    .eq("source_id", options.sourceId)
+    .eq("item_type", itemType)
+    .eq("external_id", options.itemId)
+    .maybeSingle();
+  if (error) {
+    console.warn("[norva-playback] unable to load media item for codec profile", error.message);
+    return;
+  }
+
+  const metadata = recordOrEmpty(item?.metadata);
+  const playbackHint = recordOrEmpty(item?.playback_hint);
+  const mergedPlaybackHint = mergePlaybackHints(playbackHint, compactRecord({
+    codecProfile,
+    audioMode: options.audioMode || undefined,
+  }));
+  if (item?.id) {
+    const { error: itemUpdateError } = await db
+      .from("cloud_media_items")
+      .update({
+        metadata: compactRecord({
+          ...metadata,
+          codecProfile,
+          codecProfileObservedAt: observedAt,
+        }),
+        playback_hint: mergedPlaybackHint,
+      })
+      .eq("id", item.id);
+    if (itemUpdateError) {
+      console.warn("[norva-playback] unable to persist media codec profile", itemUpdateError.message);
+    }
+  }
+
+  const tier = compatibilityTierForCodecProfile(codecProfile, mergedPlaybackHint);
+  const variantPatch: JsonRecord = compactRecord({
+    codec_profile: codecProfile,
+    compatibility_tier: tier,
+    playback_cost_score: playbackCostScoreForObservation(tier, options.startupMs),
+  });
+  const { error: variantError } = await db
+    .from("cloud_title_variants")
+    .update(variantPatch)
+    .eq("user_id", options.userId)
+    .eq("source_id", options.sourceId)
+    .eq("item_type", itemType)
+    .eq("external_id", options.itemId);
+  if (variantError && !isProjectionMissing(variantError)) {
+    console.warn("[norva-playback] unable to persist variant codec profile", variantError.message);
+  }
+}
+
+function mergePlaybackHints(base: JsonRecord, override: JsonRecord) {
+  const baseRecord = recordOrEmpty(base);
+  const overrideRecord = recordOrEmpty(override);
+  const codecProfile = firstUsefulCodecProfile(
+    overrideRecord.codecProfile,
+    overrideRecord.codec_profile,
+    baseRecord.codecProfile,
+    baseRecord.codec_profile,
+  );
+  return compactRecord({
+    ...baseRecord,
+    ...overrideRecord,
+    ...(hasUsefulCodecProfile(codecProfile) ? { codecProfile } : {}),
+  });
+}
+
+function firstUsefulCodecProfile(...values: unknown[]) {
+  for (const value of values) {
+    const profile = normalizeCodecProfile(recordOrEmpty(value));
+    if (hasUsefulCodecProfile(profile)) return profile;
+  }
+  return {};
+}
+
+function normalizeCodecProfile(profile: JsonRecord) {
+  return compactRecord({
+    videoCodec: stringOrNull(profile.videoCodec ?? profile.video_codec ?? profile.video),
+    videoProfile: stringOrNull(profile.videoProfile ?? profile.video_profile),
+    videoWidth: boundedNullableInt(profile.videoWidth ?? profile.video_width ?? profile.width, 0, 16_384),
+    videoHeight: boundedNullableInt(profile.videoHeight ?? profile.video_height ?? profile.height, 0, 16_384),
+    videoPixelFormat: stringOrNull(profile.videoPixelFormat ?? profile.video_pixel_format ?? profile.pix_fmt),
+    audioCodec: stringOrNull(profile.audioCodec ?? profile.audio_codec ?? profile.audio),
+    audioProfile: stringOrNull(profile.audioProfile ?? profile.audio_profile),
+    audioChannels: boundedNullableInt(profile.audioChannels ?? profile.audio_channels ?? profile.channels, 0, 16),
+    audioChannelLayout: stringOrNull(profile.audioChannelLayout ?? profile.audio_channel_layout ?? profile.channel_layout),
+    audioSampleRate: boundedNullableInt(profile.audioSampleRate ?? profile.audio_sample_rate ?? profile.sample_rate, 0, 384_000),
+    container: stringOrNull(profile.container),
+    durationSeconds: boundedNullableNumber(profile.durationSeconds ?? profile.duration_seconds ?? profile.duration, 0, 24 * 60 * 60),
+    bitRate: boundedNullableInt(profile.bitRate ?? profile.bit_rate, 0, 1_000_000_000),
+    probeSource: stringOrNull(profile.probeSource ?? profile.probe_source),
+    probeMs: boundedNullableInt(profile.probeMs ?? profile.probe_ms, 0, 120_000),
+    probedAt: stringOrNull(profile.probedAt ?? profile.probed_at),
+  });
+}
+
+function hasUsefulCodecProfile(profile: JsonRecord) {
+  return Boolean(
+    stringOrNull(profile.videoCodec ?? profile.video_codec ?? profile.video) ||
+    stringOrNull(profile.audioCodec ?? profile.audio_codec ?? profile.audio)
+  );
+}
+
+function compatibilityTierForCodecProfile(profile: JsonRecord, playbackHint: JsonRecord) {
+  const video = normalizeCodecToken(profile.videoCodec ?? profile.video_codec ?? profile.video);
+  const audio = normalizeCodecToken(profile.audioCodec ?? profile.audio_codec ?? profile.audio);
+  const audioProfile = normalizeCodecToken(profile.audioProfile ?? profile.audio_profile);
+  const channels = boundedNullableInt(profile.audioChannels ?? profile.audio_channels ?? profile.channels, 0, 16);
+  const container = normalizeCodecToken(playbackHint.container ?? profile.container);
+  const safeVideo = !video || video === "h264" || video === "avc1";
+  const safeAudio = isBrowserSafeAudio(audio, audioProfile, channels);
+  if (!safeVideo) return "video_transcode";
+  if (audio && !safeAudio) return "audio_transcode";
+  if (safeVideo && safeAudio) return container === "mp4" || container === "movmp4m4a3gp3g2mj2" ? "direct" : "remux";
+  return "unknown";
+}
+
+function playbackCostScoreForObservation(tier: string, startupMs: number | null) {
+  if (startupMs && Number.isFinite(startupMs) && startupMs > 0) {
+    return Math.max(1, Math.min(999, Math.round(startupMs / 10)));
+  }
+  if (tier === "direct") return 100;
+  if (tier === "remux") return 250;
+  if (tier === "audio_transcode") return 380;
+  if (tier === "video_transcode") return 650;
+  return 500;
+}
+
+function isBrowserSafeAudio(codec: string, profile: string, channels: number | null) {
+  const joined = `${codec} ${profile}`;
+  if (!codec) return false;
+  if (channels && channels > 2) return false;
+  if (
+    joined.includes("heaac") ||
+    joined.includes("aache") ||
+    joined.includes("sbr") ||
+    joined.includes("mp4a.40.5") ||
+    joined.includes("mp4a.40.29") ||
+    codec.includes("eac3") ||
+    codec.includes("e-ac3") ||
+    codec.includes("ac3") ||
+    codec.includes("dts") ||
+    codec.includes("truehd") ||
+    codec.includes("flac") ||
+    codec.includes("pcm")
+  ) return false;
+  return codec.includes("aac") || codec.includes("mp4a.40.2") || codec.includes("mp3") || codec.includes("opus") || codec.includes("vorbis");
+}
+
+function normalizeCodecToken(value: unknown) {
+  return String(value || "").toLowerCase().replace(/[^a-z0-9.]+/g, "");
 }
 
 function isProjectionMissing(error: unknown) {
@@ -864,6 +1107,13 @@ function boundedInt(value: unknown, fallback: number, min: number, max: number) 
 function boundedNullableInt(value: unknown, min: number, max: number) {
   if (value === null || value === undefined || value === "") return null;
   const parsed = Number.parseInt(String(value), 10);
+  if (!Number.isFinite(parsed)) return null;
+  return Math.max(min, Math.min(max, parsed));
+}
+
+function boundedNullableNumber(value: unknown, min: number, max: number) {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = Number.parseFloat(String(value));
   if (!Number.isFinite(parsed)) return null;
   return Math.max(min, Math.min(max, parsed));
 }
