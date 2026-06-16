@@ -84,7 +84,7 @@ Deno.serve(async (req) => {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 8,
+        version: 9,
         relayConfigured: Boolean(config.relayBaseUrl && config.relayTokenSecret),
         gatewayConfigured: Boolean(config.mediaGatewayUrl && config.mediaGatewayToken),
       });
@@ -92,7 +92,8 @@ Deno.serve(async (req) => {
     if (
       req.method === "POST" &&
       segments[0] === "playback" &&
-      (segments[1] === "sessions" || segments[1] === "session")
+      (segments[1] === "sessions" || segments[1] === "session") &&
+      !segments[2]
     ) {
       const identity = await requireIdentity(req, supabase);
       return json(req, await createPlaybackSession(req, identity.userId, supabase, identity.deviceId ?? null), 201);
