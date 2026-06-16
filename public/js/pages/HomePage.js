@@ -45,6 +45,8 @@ class HomePage {
 
         pageHome.innerHTML = `
             <div class="dashboard-content" id="home-content">
+                <section id="home-service-health" class="dashboard-section hidden"></section>
+
                 <section class="home-hero-section hidden" id="home-hero"></section>
 
                 <section class="dashboard-section hidden" id="continue-watching-section">
@@ -145,9 +147,10 @@ class HomePage {
 
         this.loadPromise = (async () => {
             try {
-                const [historyResult, railsResult, favoritesResult] = await Promise.allSettled([
+                const [historyResult, railsResult, healthResult, favoritesResult] = await Promise.allSettled([
                     window.API.request('GET', '/history?limit=18'),
                     window.API.request('GET', '/home/rails?limit=18'),
+                    window.NorvaSourceHealth?.loadSummary?.(),
                     this.renderFavoriteChannels()
                 ]);
 
@@ -155,6 +158,10 @@ class HomePage {
                     ? historyResult.value
                     : [];
                 this.renderHistory(history);
+
+                if (healthResult.status === 'fulfilled' && healthResult.value) {
+                    this.renderServiceHealth(healthResult.value);
+                }
 
                 if (railsResult.status === 'fulfilled') {
                     this.renderHero(history, railsResult.value?.rails || []);
@@ -179,6 +186,18 @@ class HomePage {
         })();
 
         return this.loadPromise;
+    }
+
+    renderServiceHealth(summary) {
+        const container = document.getElementById('home-service-health');
+        if (!container || !window.NorvaSourceHealth) return;
+
+        container.innerHTML = window.NorvaSourceHealth.cardHtml(summary, { hideWhenReady: true });
+        container.classList.toggle('hidden', summary?.state === 'ready');
+        container.querySelector('[data-source-health-action="open-sources"]')?.addEventListener('click', () => {
+            this.app.navigateTo('settings');
+            setTimeout(() => this.app.pages.settings?.switchTab?.('sources'), 0);
+        });
     }
 
     async renderFallbackRails() {
@@ -305,7 +324,7 @@ class HomePage {
         if (!rails.length) {
             container.innerHTML = `
                 <section class="dashboard-section">
-                    <div class="empty-state hint">Add a TV provider from Account to build your Home.</div>
+                    <div class="empty-state hint">Add a TV service from Settings to build your Home.</div>
                 </section>
             `;
             return;

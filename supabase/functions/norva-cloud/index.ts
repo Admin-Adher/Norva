@@ -480,6 +480,15 @@ async function createSource(req: Request, userId: string, db: SupabaseClient) {
 
 async function updateSource(req: Request, id: string, userId: string, db: SupabaseClient) {
   const body = await readJson(req);
+  const { data: existing, error: existingError } = await db
+    .from("cloud_sources")
+    .select("*")
+    .eq("id", id)
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (existingError) throwDb(existingError, "Unable to load source");
+  if (!existing) throw new HttpError(404, "Source not found");
+
   const patch: JsonRecord = {};
   copyString(body, patch, "displayName", "display_name");
   copyString(body, patch, "display_name", "display_name");
@@ -495,6 +504,26 @@ async function updateSource(req: Request, id: string, userId: string, db: Supaba
     patch.last_synced_at = stringOrNull(body.lastSyncedAt ?? body.last_synced_at);
   }
 
+  const requestedSourceType = stringOr(body.sourceType ?? body.source_type ?? body.type, "");
+  const sourceType = requestedSourceType || stringOr(existing.source_type, "");
+  if (!["xtream", "m3u", "epg"].includes(sourceType)) throw new HttpError(400, "Unsupported source type");
+
+  const rawConfig = buildSourceConfig(sourceType, body);
+  const hasManagedConfig = Object.keys(rawConfig).length > 0;
+  if (hasManagedConfig) {
+    const validation = await validateCloudSource(sourceType, rawConfig);
+    patch.source_type = sourceType;
+    patch.config_ciphertext = await encryptSourceConfig(rawConfig, await getRuntimeConfig(db));
+    patch.config_hint = compactRecord({
+      ...recordOrEmpty(existing.config_hint),
+      ...recordOrEmpty(body.configHint ?? body.config_hint),
+      ...buildSourceHint(sourceType, rawConfig, validation),
+      managedBy: "norva-cloud",
+    });
+    patch.sync_status = body.syncNow === false || body.sync_now === false ? "idle" : "syncing";
+    patch.sync_error = null;
+  }
+
   const { data, error } = await db
     .from("cloud_sources")
     .update(patch)
@@ -503,6 +532,11 @@ async function updateSource(req: Request, id: string, userId: string, db: Supaba
     .select("*")
     .single();
   if (error) throwDb(error, "Unable to update source");
+
+  if (hasManagedConfig && body.syncNow !== false && body.sync_now !== false) {
+    waitUntil(syncCloudSource(id, userId, db));
+  }
+
   return { source: sanitizeSource(data) };
 }
 

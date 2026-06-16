@@ -10,7 +10,7 @@
   <title>Norva | IPTV Player</title>
   <meta name="description" content="Stream live TV, movies, and series with EPG support">
   <link rel="icon" type="image/png" href="/favicon.png">
-  <link rel="stylesheet" href="css/main.css?v=8">
+  <link rel="stylesheet" href="css/main.css?v=9">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@800&display=swap"
@@ -79,10 +79,6 @@
         <a href="#" class="nav-link" data-page="series">
           <span class="nav-icon"><img class="icon norva-ui-icon" src="/img/icons/norva-series.svg" alt=""></span>
           <span>Series</span>
-        </a>
-        <a href="/cloud.html" class="nav-link" data-external="true">
-          <span class="nav-icon"><img class="icon norva-ui-icon" src="/img/icons/norva-account.svg" alt=""></span>
-          <span>Account</span>
         </a>
         <a href="#" class="nav-link" data-page="settings">
           <span class="nav-icon"><img class="icon norva-ui-icon" src="/img/icons/norva-settings.svg" alt=""></span>
@@ -518,41 +514,74 @@
 
           <!-- Tabs -->
           <div class="tabs">
-            <button class="tab active" data-tab="sources">Providers</button>
+            <button class="tab active" data-tab="account">Account</button>
+            <button class="tab" data-tab="sources">TV Service</button>
             <button class="tab" data-tab="player">Player</button>
             <button class="tab" data-tab="transcode">Transcoding</button>
             <button class="tab" data-tab="content">Manage Content</button>
             <button class="tab" data-tab="users" id="users-tab" style="display:none;">Users</button>
           </div>
 
+          <!-- Account Tab -->
+          <div id="tab-account" class="tab-content active">
+            <div id="settings-service-health"></div>
+
+            <div class="settings-section">
+              <h3>Norva Account</h3>
+              <div class="account-settings-grid">
+                <div class="account-summary-card">
+                  <span class="setting-label">Signed in as</span>
+                  <strong id="settings-account-email">Norva user</strong>
+                  <span class="setting-hint" id="settings-account-mode">Cloud account</span>
+                </div>
+                <div class="account-actions-card">
+                  <button class="btn btn-secondary" id="settings-open-account">Sign-in settings</button>
+                  <button class="btn btn-secondary" id="settings-open-cloud-dashboard">Trusted devices</button>
+                  <button class="btn btn-danger" id="settings-signout-btn">Sign out</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="settings-section">
+              <h3>TV Service</h3>
+              <div class="setting-item">
+                <div class="setting-info">
+                  <span class="setting-label">Provider account and playlist links</span>
+                  <span class="setting-hint">Connect, repair or sync the service that provides your channels, movies and series.</span>
+                </div>
+                <button class="btn btn-primary" id="settings-manage-service-btn">Manage TV service</button>
+              </div>
+            </div>
+          </div>
+
           <!-- Sources Tab -->
-          <div id="tab-sources" class="tab-content active">
+          <div id="tab-sources" class="tab-content">
             <div class="source-section">
               <div class="section-header">
-                <h3>TV provider accounts</h3>
-                <button class="btn btn-primary" id="add-xtream">+ Add provider</button>
+                <h3>Provider account</h3>
+                <button class="btn btn-primary" id="add-xtream">Add provider</button>
               </div>
               <div id="xtream-list" class="source-list"></div>
             </div>
 
             <div class="source-section">
               <div class="section-header">
-                <h3>Playlist links</h3>
-                <button class="btn btn-primary" id="add-m3u">+ Add playlist</button>
+                <h3>Playlist link</h3>
+                <button class="btn btn-primary" id="add-m3u">Add playlist</button>
               </div>
               <div id="m3u-list" class="source-list"></div>
             </div>
 
             <div class="source-section">
               <div class="section-header">
-                <h3>TV guide data</h3>
-                <button class="btn btn-primary" id="add-epg">+ Add guide</button>
+                <h3>TV guide</h3>
+                <button class="btn btn-primary" id="add-epg">Add guide</button>
               </div>
               <div id="epg-list" class="source-list"></div>
             </div>
 
             <div class="source-section">
-              <h3>EPG Data Settings</h3>
+              <h3>TV guide refresh</h3>
               <div class="setting-item">
                 <label for="epg-refresh-interval">Auto-refresh EPG data every:</label>
                 <select id="epg-refresh-interval" class="form-input">
@@ -1319,24 +1348,25 @@
   <script src="/js/icons.js"></script>
   <script src="/js/cloudApi.js?v=15"></script>
   <script src="/js/authApi.js?v=2"></script>
-  <script src="/js/api.js?v=30"></script>
+  <script src="/js/api.js?v=31"></script>
   <script src="/js/utils/mediaUtils.js?v=3"></script>
   <script src="/js/utils/playbackHealth.js?v=2"></script>
+  <script src="/js/utils/sourceHealth.js?v=1"></script>
   <script src="/js/utils/tvNavigation.js?v=7"></script>
   <script src="/js/utils/standalone.js?v=1"></script>
   <script src="/js/utils/channelGrouping.js?v=4"></script>
   <script src="/js/components/MultiSelect.js?v=1"></script>
   <script src="/js/components/VideoPlayer.js?v=13"></script>
   <script src="/js/components/ChannelList.js?v=25"></script>
-  <script src="/js/components/SourceManager.js?v=4"></script>
+  <script src="/js/components/SourceManager.js?v=5"></script>
   <script src="/js/components/EpgGuide.js?v=10"></script>
   <script src="/js/components/LiveGuideFusion.js?v=13"></script>
-  <script src="/js/pages/HomePage.js?v=12"></script>
+  <script src="/js/pages/HomePage.js?v=13"></script>
   <script src="/js/pages/LivePage.js?v=4"></script>
   <script src="/js/pages/Guide.js?v=2"></script>
   <script src="/js/pages/MoviesPage.js?v=9"></script>
   <script src="/js/pages/SeriesPage.js?v=7"></script>
-  <script src="/js/pages/Settings.js?v=7"></script>
+  <script src="/js/pages/Settings.js?v=8"></script>
   <script src="/js/pages/WatchPage.js?v=41"></script>
   <script src="/js/app.js?v=11"></script>
   <script>

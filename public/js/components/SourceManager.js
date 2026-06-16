@@ -110,11 +110,16 @@ class SourceManager {
      */
     async loadSources() {
         try {
-            const sources = await API.sources.getAll();
+            const [sources, statuses] = await Promise.all([
+                API.sources.getAll(),
+                API.sources.getStatus().catch(() => [])
+            ]);
+            this.sourceStatuses = statuses || [];
 
             this.renderSourceList(this.xtreamList, sources.filter(s => s.type === 'xtream'), 'xtream');
             this.renderSourceList(this.m3uList, sources.filter(s => s.type === 'm3u'), 'm3u');
             this.renderSourceList(this.epgList, sources.filter(s => s.type === 'epg'), 'epg');
+            window.app?.pages?.settings?.refreshSourceHealthCard?.();
         } catch (err) {
             console.error('Error loading sources:', err);
         }
@@ -136,29 +141,40 @@ class SourceManager {
 
         const icons = { xtream: Icons.live, m3u: Icons.guide, epg: Icons.series };
 
-        container.innerHTML = sources.map(source => `
-      <div class="source-item ${source.enabled ? '' : 'disabled'}" data-id="${source.id}">
+        container.innerHTML = sources.map(source => {
+            const health = window.NorvaSourceHealth?.classifySource(source, this.sourceStatuses || []) || {
+                state: source.enabled === false ? 'degraded' : 'ready',
+                label: source.enabled === false ? 'Disabled' : 'Ready',
+                message: ''
+            };
+            return `
+      <div class="source-item ${source.enabled ? '' : 'disabled'} ${health.needsAttention ? 'needs-attention' : ''}" data-id="${this.escapeHtml(source.id)}">
         <span class="source-icon">${icons[type]}</span>
         <div class="source-info">
-          <div class="source-name">${source.name}</div>
-          <div class="source-url">${source.url}</div>
+          <div class="source-name-row">
+            <span class="source-name">${this.escapeHtml(source.name)}</span>
+            <span class="source-health-badge source-health-${this.escapeHtml(health.state)}">${this.escapeHtml(health.label)}</span>
+          </div>
+          <div class="source-url">${this.escapeHtml(source.url || 'Managed by Norva Cloud')}</div>
+          ${health.message && health.state !== 'ready' ? `<div class="source-health-message">${this.escapeHtml(health.message)}</div>` : ''}
         </div>
         <div class="source-actions">
-          <button class="btn btn-sm btn-secondary" data-action="refresh" title="Refresh Data">${Icons.refresh}</button>
-          <button class="btn btn-sm btn-secondary btn-warning-outline" data-action="hard-refresh" title="Hard Refresh: clear local data and sync">${Icons.refresh}</button>
-          <button class="btn btn-sm btn-secondary" data-action="test" title="Test Connection">${Icons.link}</button>
+          <button class="btn btn-sm btn-secondary" data-action="refresh" title="Sync TV service">${Icons.refresh}</button>
+          <button class="btn btn-sm btn-secondary btn-warning-outline" data-action="hard-refresh" title="Rebuild catalog from this service">${Icons.refresh}</button>
+          <button class="btn btn-sm btn-secondary" data-action="test" title="Check service">${Icons.link}</button>
           <button class="btn btn-sm btn-secondary" data-action="toggle" title="${source.enabled ? 'Disable' : 'Enable'}">
             ${source.enabled ? Icons.check : Icons.circle}
           </button>
-          <button class="btn btn-sm btn-secondary" data-action="edit" title="Edit">${Icons.settings}</button>
+          <button class="btn btn-sm btn-secondary ${health.needsAttention ? 'btn-repair' : ''}" data-action="edit" title="${health.needsAttention ? 'Repair service' : 'Edit service'}">${Icons.settings}</button>
           <button class="btn btn-sm btn-danger" data-action="delete" title="Delete">${Icons.close}</button>
         </div>
       </div>
-    `).join('');
+    `;
+        }).join('');
 
         // Attach event listeners
         container.querySelectorAll('.source-item').forEach(item => {
-            const id = parseInt(item.dataset.id);
+            const id = item.dataset.id;
 
             item.querySelector('[data-action="refresh"]').addEventListener('click', () => this.refreshSource(id, type));
             item.querySelector('[data-action="hard-refresh"]').addEventListener('click', () => this.refreshSource(id, type, { hard: true }));
@@ -231,19 +247,28 @@ class SourceManager {
      * Get source form HTML
      */
     getSourceForm(type, source = {}) {
+        const intros = {
+            xtream: 'Use this when your TV service gives you a server URL, username and password.',
+            m3u: 'Use this when your TV service gives you a playlist link ending in .m3u or .m3u8.',
+            epg: 'Use this when your TV service gives you a separate TV guide link.'
+        };
+        const storedUrl = String(source.url || '');
+        const urlValue = source.cloud && storedUrl && !/^https?:\/\//i.test(storedUrl) ? '' : storedUrl;
         const nameField = `
+      <p class="source-form-intro">${this.escapeHtml(intros[type] || 'Connect a TV service to Norva.')}</p>
       <div class="form-group">
-        <label for="source-name">Name</label>
-        <input type="text" id="source-name" class="form-input" placeholder="Family TV" value="${source.name || ''}">
+        <label for="source-name">Service name</label>
+        <input type="text" id="source-name" class="form-input" placeholder="Family TV" value="${this.escapeHtml(source.name || '')}">
       </div>
     `;
 
         const urlField = `
       <div class="form-group">
-        <label for="source-url">${type === 'xtream' ? 'Server URL' : 'URL'}</label>
+        <label for="source-url">${type === 'xtream' ? 'Provider server URL' : type === 'epg' ? 'TV guide URL' : 'Playlist URL'}</label>
         <input type="text" id="source-url" class="form-input" 
                placeholder="${type === 'xtream' ? 'http://server.com:port' : 'https://example.com/playlist.m3u'}" 
-               value="${source.url || ''}">
+               value="${this.escapeHtml(urlValue)}">
+        ${source.cloud && !urlValue ? '<p class="hint">Norva keeps the full URL private. Paste the complete URL from your TV service when repairing it.</p>' : ''}
       </div>
     `;
 
@@ -253,12 +278,14 @@ class SourceManager {
         ${urlField}
         <div class="form-group">
           <label for="source-username">Username</label>
-          <input type="text" id="source-username" class="form-input" value="${source.username || ''}">
+          <input type="text" id="source-username" class="form-input" value="${this.escapeHtml(source.username || '')}">
         </div>
         <div class="form-group">
           <label for="source-password">Password</label>
-          <input type="password" id="source-password" class="form-input" 
-                 value="${source.password && !source.password.includes('•') ? source.password : ''}">
+          <input type="password" id="source-password" class="form-input"
+                 placeholder="${source.id ? 'Enter password to update login' : ''}"
+                 value="${source.password && !source.password.includes('•') ? this.escapeHtml(source.password) : ''}">
+          ${source.id ? '<p class="hint">For cloud providers, enter the password again when repairing the login.</p>' : ''}
         </div>
       `;
         }
@@ -332,7 +359,7 @@ class SourceManager {
         }
 
         try {
-            const data = { name, url };
+            const data = { type, name, url };
             if (type === 'xtream') {
                 data.username = username;
                 if (password) data.password = password;
@@ -344,6 +371,15 @@ class SourceManager {
         } catch (err) {
             alert('Error updating source: ' + err.message);
         }
+    }
+
+    escapeHtml(value) {
+        return String(value ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
     }
 
     /**

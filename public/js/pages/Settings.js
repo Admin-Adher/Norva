@@ -17,6 +17,9 @@ class SettingsPage {
             tab.addEventListener('click', () => this.switchTab(tab.dataset.tab));
         });
 
+        // Account and TV service overview
+        this.initAccountSettings();
+
         // Player settings
         this.initPlayerSettings();
 
@@ -28,6 +31,84 @@ class SettingsPage {
 
         // User management (admin only)
         this.initUserManagement();
+    }
+
+    initAccountSettings() {
+        document.getElementById('settings-manage-service-btn')?.addEventListener('click', () => {
+            this.switchTab('sources');
+        });
+
+        document.getElementById('settings-open-account')?.addEventListener('click', () => {
+            const returnTo = window.location.pathname + window.location.search + '#settings';
+            window.location.href = '/account.html?returnTo=' + encodeURIComponent(returnTo);
+        });
+
+        document.getElementById('settings-open-cloud-dashboard')?.addEventListener('click', () => {
+            window.location.href = '/cloud.html';
+        });
+
+        document.getElementById('settings-signout-btn')?.addEventListener('click', () => this.signOut());
+
+        document.getElementById('settings-service-health')?.addEventListener('click', (event) => {
+            if (event.target.closest('[data-source-health-action="open-sources"]')) {
+                this.switchTab('sources');
+            }
+        });
+    }
+
+    async signOut() {
+        const token = localStorage.getItem('authToken');
+
+        if (this.app.currentUser?.cloud && window.NorvaAuth) {
+            await window.NorvaAuth.signOut();
+            window.location.replace('/account.html');
+            return;
+        }
+
+        if (token) {
+            try {
+                await fetch('/api/auth/logout', {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+            } catch (_) { }
+        }
+
+        localStorage.removeItem('authToken');
+        window.location.replace('/login.html');
+    }
+
+    async refreshAccountSettings() {
+        const user = this.app.currentUser || {};
+        const email = document.getElementById('settings-account-email');
+        const mode = document.getElementById('settings-account-mode');
+
+        if (email) email.textContent = user.email || user.username || 'Paired Norva screen';
+        if (mode) {
+            mode.textContent = user.cloud
+                ? (user.device ? 'Paired cloud screen' : 'Norva Cloud account')
+                : (user.role ? `Local ${user.role}` : 'Local account');
+        }
+
+        const accountOnly = document.getElementById('settings-open-account');
+        const cloudDashboard = document.getElementById('settings-open-cloud-dashboard');
+        if (accountOnly) accountOnly.style.display = user.cloud ? '' : 'none';
+        if (cloudDashboard) cloudDashboard.style.display = user.cloud ? '' : 'none';
+
+        await this.refreshSourceHealthCard();
+    }
+
+    async refreshSourceHealthCard() {
+        const container = document.getElementById('settings-service-health');
+        if (!container || !window.NorvaSourceHealth) return;
+
+        try {
+            const summary = await window.NorvaSourceHealth.loadSummary();
+            container.innerHTML = window.NorvaSourceHealth.cardHtml(summary, { hideWhenReady: false });
+        } catch (err) {
+            console.warn('[Settings] Unable to load TV service health:', err);
+            container.innerHTML = '';
+        }
     }
 
     initPlayerSettings() {
@@ -697,6 +778,10 @@ class SettingsPage {
             this.app.sourceManager.loadContentSources();
         }
 
+        if (tabName === 'account') {
+            this.refreshAccountSettings();
+        }
+
         // Load users when switching to users tab
         if (tabName === 'users') {
             this.loadUsers();
@@ -719,6 +804,7 @@ class SettingsPage {
 
         // Load sources when page is shown
         await this.app.sourceManager.loadSources();
+        await this.refreshAccountSettings();
 
         // Refresh ALL player settings from server
         if (this.app.player?.settings) {

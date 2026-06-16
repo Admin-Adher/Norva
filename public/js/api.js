@@ -135,6 +135,7 @@ const CloudAdapter = (() => {
             type,
             name: source.display_name || source.displayName || source.name || 'Norva provider',
             url: config.serverHost || config.playlistHost || '',
+            username: config.username || source.username || '',
             enabled: source.revoked !== true,
             sync_status: source.sync_status || source.syncStatus || 'idle',
             sync_error: source.sync_error || source.syncError || '',
@@ -657,9 +658,35 @@ const CloudAdapter = (() => {
             payload.password = data.password;
         } else if (type === 'm3u') {
             payload.url = data.url || data.playlistUrl || data.playlist_url;
+        } else if (type === 'epg') {
+            payload.url = data.url || data.epgUrl || data.epg_url;
         }
 
         return payload;
+    }
+
+    async function sourcePatchFromLocal(id, data = {}) {
+        const cached = (await listSources()).find(source => String(source.id) === String(id) || source.cloudId === id) || {};
+        const type = data.type || data.sourceType || data.source_type || cached.type || 'xtream';
+        const patch = {
+            sourceType: type
+        };
+
+        if (data.name || data.displayName || data.display_name) {
+            patch.displayName = data.name || data.displayName || data.display_name;
+        }
+
+        if (type === 'xtream' && data.password) {
+            patch.url = data.url || data.serverUrl || data.server_url || cached.url;
+            patch.username = data.username || cached.username || '';
+            patch.password = data.password;
+            patch.syncNow = data.syncNow !== false;
+        } else if ((type === 'm3u' || type === 'epg') && data.url) {
+            patch.url = data.url || data.playlistUrl || data.playlist_url || data.epgUrl || data.epg_url;
+            patch.syncNow = data.syncNow !== false;
+        }
+
+        return patch;
     }
 
     async function request(method, endpoint, data = null) {
@@ -692,8 +719,7 @@ const CloudAdapter = (() => {
         }
         if ((method === 'PUT' || method === 'PATCH') && /^\/sources\/[^/]+$/.test(path)) {
             const id = await resolveSourceId(path.split('/').pop());
-            const patch = {};
-            if (data?.name || data?.displayName) patch.displayName = data.name || data.displayName;
+            const patch = await sourcePatchFromLocal(id, data || {});
             if (!hasUserSession()) throw new Error('Sign in to edit a TV provider.');
             const payload = await NorvaCloud.sources.update(id, patch);
             clearMediaCaches();
