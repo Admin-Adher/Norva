@@ -794,11 +794,13 @@ class SettingsPage {
     }
 
     async show() {
-        // Show users tab for admin
-        if (this.app.currentUser && this.app.currentUser.role === 'admin') {
-            const usersTab = document.getElementById('users-tab');
-            if (usersTab) {
-                usersTab.style.display = 'block';
+        // Local hub user management stays available to local admins only.
+        const usersTab = document.getElementById('users-tab');
+        const canManageLocalUsers = this.app.currentUser?.role === 'admin' && !this.app.currentUser?.cloud;
+        if (usersTab) {
+            usersTab.style.display = canManageLocalUsers ? 'block' : 'none';
+            if (!canManageLocalUsers && usersTab.classList.contains('active')) {
+                this.switchTab('account');
             }
         }
 
