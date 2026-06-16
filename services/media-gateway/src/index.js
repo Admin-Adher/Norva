@@ -40,7 +40,7 @@ app.get('/health', (req, res) => {
     res.json({
         ok: true,
         service: 'norva-media-gateway',
-        version: 17,
+        version: 18,
         activeSessions: activeSessionCount(),
         totalSessions: sessions.size,
         lastFailureCount: lastFailures.length,
@@ -520,6 +520,7 @@ function serializeSession(req, session) {
         playbackSessionId: session.playbackSessionId,
         status: session.status,
         mode: session.mode,
+        audioMode: audioModeForSession(session),
         hlsUrl: publicUrl(req, `/sessions/${session.id}/playlist.m3u8?token=${encodeURIComponent(session.accessToken)}`),
         createdAt: session.createdAt.toISOString(),
         expiresAt: session.expiresAt.toISOString(),

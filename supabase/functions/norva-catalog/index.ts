@@ -52,7 +52,7 @@ Deno.serve(async (req) => {
     const segments = routeSegments(url.pathname);
 
     if (req.method === "GET" && segments[0] === "health") {
-      return json(req, { ok: true, service: "norva-catalog", version: 4, liveContract: "norva.live.logical.v1", materializedLive: true });
+      return json(req, { ok: true, service: "norva-catalog", version: 5, liveContract: "norva.live.logical.v1", materializedLive: true });
     }
 
     if (req.method === "GET" && isLiveLogicalChannelsRoute(segments)) {
@@ -205,7 +205,11 @@ async function listHomeRails(url: URL, userId: string) {
   }
 
   const watchedRail = await listBecauseYouWatchedRail(userId, { includeMovies, includeSeries, limit });
-  if (watchedRail) rails.push(watchedRail);
+  if (watchedRail) {
+    rails.push(watchedRail);
+  } else if (includeMovies) {
+    rails.push(await listPopularTitleRail(userId, "movie", "popular-movies", "Films populaires", limit));
+  }
 
   if (includeSeries) {
     rails.push(await listPopularTitleRail(userId, "series", "popular-series", "Series populaires", limit));

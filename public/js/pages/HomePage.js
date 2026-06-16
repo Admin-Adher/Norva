@@ -348,6 +348,7 @@ class HomePage {
         if (id === 'recently-added-movies') return 'Films recemment ajoutes';
         if (id === 'recently-added-series') return 'Series recemment ajoutees';
         if (id === 'action-movies') return "Films d'action";
+        if (id === 'popular-movies') return 'Films populaires';
         if (id === 'popular-series') return 'Series populaires';
         if (id.startsWith('because-you-watched')) return 'Parce que vous avez regarde';
         return rail.title || rail.name || 'Selection Norva';
@@ -357,6 +358,7 @@ class HomePage {
         const id = String(rail.id || '').toLowerCase();
         if (id.startsWith('because-you-watched')) return 'Suggestions basees sur votre historique';
         if (id === 'action-movies') return 'Titres verifies avec genres enrichis';
+        if (id === 'popular-movies') return 'Titres verifies avec les meilleures notes';
         return '';
     }
 

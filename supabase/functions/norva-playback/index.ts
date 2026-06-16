@@ -84,7 +84,7 @@ Deno.serve(async (req) => {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 6,
+        version: 7,
         relayConfigured: Boolean(config.relayBaseUrl && config.relayTokenSecret),
         gatewayConfigured: Boolean(config.mediaGatewayUrl && config.mediaGatewayToken),
       });
@@ -225,6 +225,7 @@ async function createPlaybackSession(
       gatewaySession: gateway.session,
       gatewayRequired: !gateway.hlsUrl,
       startupMs: gateway.startupMs ?? null,
+      audioMode: gateway.audioMode ?? null,
     },
   };
 }
@@ -570,6 +571,7 @@ async function createGatewaySession(
   const gatewayBody = await response.json().catch(() => ({}));
   if (!response.ok) throw new HttpError(response.status, "Media gateway refused the session", gatewayBody);
   const startupMs = Math.max(1, Math.round(performance.now() - startupStartedAt));
+  const audioMode = stringOrNull(gatewayBody.audioMode ?? gatewayBody.audio_mode);
 
   const { data, error } = await db
     .from("cloud_gateway_sessions")
@@ -585,7 +587,7 @@ async function createGatewaySession(
     .select("*")
     .single();
   if (error) throwDb(error, "Unable to record gateway session");
-  return { status: data.status, session: data, hlsUrl: data.hls_url, startupMs };
+  return { status: data.status, session: data, hlsUrl: data.hls_url, startupMs, audioMode };
 }
 
 function gatewayPlaybackHints(playbackHint: JsonRecord) {
