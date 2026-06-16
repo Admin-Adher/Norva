@@ -230,11 +230,81 @@ const MediaUtils = (() => {
         return `https://image.tmdb.org/t/p/${size}${tmdb.poster_path}`;
     }
 
+    function playbackHintFromItem(item = {}, base = {}) {
+        const variant = item.defaultVariant || item.default_variant || item.variant || {};
+        const data = item.data || {};
+        const codec = firstRecord(
+            item.codecProfile,
+            item.codec_profile,
+            variant.codecProfile,
+            variant.codec_profile,
+            data.codecProfile,
+            data.codec_profile,
+            item.playbackHint?.codecProfile,
+            item.playback_hint?.codec_profile
+        );
+        const hint = compactRecord({
+            ...base,
+            container: base.container || item.container_extension || item.containerExtension || data.containerExtension || variant.container_extension || variant.containerExtension,
+            audioCodec: firstValue(item.audioCodec, item.audio_codec, codec.audioCodec, codec.audio_codec, codec.audio),
+            audioProfile: firstValue(item.audioProfile, item.audio_profile, codec.audioProfile, codec.audio_profile),
+            audioChannels: firstValue(item.audioChannels, item.audio_channels, codec.audioChannels, codec.audio_channels, codec.channels),
+            audioMode: firstValue(item.audioMode, item.audio_mode, codec.audioMode, codec.audio_mode),
+            videoCodec: firstValue(item.videoCodec, item.video_codec, codec.videoCodec, codec.video_codec, codec.video)
+        });
+
+        if (isSafeBrowserAudio(hint.audioCodec, hint.audioProfile, hint.audioChannels)) {
+            hint.clientAudioPassthrough = true;
+        }
+        return hint;
+    }
+
+    function firstRecord(...values) {
+        return values.find(value => value && typeof value === 'object' && !Array.isArray(value)) || {};
+    }
+
+    function firstValue(...values) {
+        return values.find(value => value !== undefined && value !== null && value !== '') ?? '';
+    }
+
+    function compactRecord(record) {
+        return Object.fromEntries(Object.entries(record).filter(([, value]) => value !== undefined && value !== null && value !== ''));
+    }
+
+    function normalizeCodecToken(value) {
+        return String(value || '').toLowerCase().replace(/[^a-z0-9.]+/g, '');
+    }
+
+    function isSafeBrowserAudio(codecValue, profileValue, channelsValue) {
+        const codec = normalizeCodecToken(codecValue);
+        const profile = normalizeCodecToken(profileValue);
+        const channels = parseInt(String(channelsValue || ''), 10);
+        const combined = `${codec} ${profile}`;
+        if (!codec) return false;
+        if (Number.isFinite(channels) && channels > 2) return false;
+        if (
+            combined.includes('heaac') ||
+            combined.includes('aache') ||
+            combined.includes('sbr') ||
+            combined.includes('mp4a.40.5') ||
+            combined.includes('mp4a.40.29') ||
+            codec.includes('eac3') ||
+            codec.includes('e-ac3') ||
+            codec.includes('ac3') ||
+            codec.includes('dts') ||
+            codec.includes('truehd') ||
+            codec.includes('flac') ||
+            codec.includes('pcm')
+        ) return false;
+        return codec.includes('aac') || codec.includes('mp4a.40.2') || codec.includes('mp3') || codec.includes('opus') || codec.includes('vorbis');
+    }
+
     return {
         stripDiacritics, extractYear, normalizeTitle, computeDedupKey,
         parseVersionInfo, searchableText, groupItems, pickRepresentative,
         orderVersionsByPreference, versionLabel,
-        saveFilters, loadFilters, escapeHtml, tmdbPosterUrl, parseDurationToSeconds
+        saveFilters, loadFilters, escapeHtml, tmdbPosterUrl, parseDurationToSeconds,
+        playbackHintFromItem
     };
 })();
 

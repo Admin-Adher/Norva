@@ -961,7 +961,13 @@ class MoviesPage {
     async playMovie(movie, { versions = null, resumeTime = 0 } = {}) {
         try {
             const container = movie.container_extension || 'mp4';
-            const result = await API.proxy.xtream.getStreamUrl(movie.sourceId, movie.stream_id, 'movie', container);
+            const result = await API.proxy.xtream.getStreamUrl(
+                movie.sourceId,
+                movie.stream_id,
+                'movie',
+                container,
+                MediaUtils.playbackHintFromItem ? MediaUtils.playbackHintFromItem(movie, { container }) : {}
+            );
 
             if (result && result.url) {
                 if (this.app.pages.watch) {

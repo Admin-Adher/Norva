@@ -579,6 +579,22 @@ const CloudAdapter = (() => {
         return title;
     }
 
+    function compactPlaybackHint(value = {}) {
+        return Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined && entry !== null && entry !== ''));
+    }
+
+    function playbackHintFromQuery(query, container) {
+        return compactPlaybackHint({
+            container,
+            audioCodec: query.get('audioCodec'),
+            audioProfile: query.get('audioProfile'),
+            audioChannels: query.get('audioChannels'),
+            audioMode: query.get('audioMode'),
+            videoCodec: query.get('videoCodec'),
+            clientAudioPassthrough: query.get('clientAudioPassthrough') === '1' ? true : undefined
+        });
+    }
+
     function requiresGatewayForContainer(type, container) {
         const normalizedType = String(type || '').toLowerCase();
         const normalizedContainer = String(container || '').split('?')[0].split('#')[0].toLowerCase();
@@ -777,7 +793,7 @@ const CloudAdapter = (() => {
                     sourceId: cloudSourceId,
                     itemType: type === 'series' ? 'series' : type === 'movie' ? 'movie' : 'live',
                     itemId: streamId,
-                    playbackHint: { container },
+                    playbackHint: playbackHintFromQuery(query, container),
                     corsSafe: false,
                     ...(userAgent ? { userAgent } : {})
                 };
@@ -1273,7 +1289,10 @@ const API = {
             shortEpg: (sourceId, streamId, limit = 8) => API.request('GET', `/proxy/xtream/${sourceId}/short_epg?stream_id=${streamId}&limit=${encodeURIComponent(limit)}`),
             getStreamUrl: (sourceId, streamId, type = 'live', container = 'm3u8', options = {}) => {
                 const params = new URLSearchParams({ container });
-                if (options.mode) params.set('mode', options.mode);
+                Object.entries(compactPlaybackHint(options)).forEach(([key, value]) => {
+                    if (key === 'container') return;
+                    params.set(key, value === true ? '1' : String(value));
+                });
                 return API.request('GET', `/proxy/xtream/${sourceId}/stream/${streamId}/${type}?${params.toString()}`);
             }
         },

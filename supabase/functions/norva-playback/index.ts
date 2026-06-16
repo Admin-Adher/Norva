@@ -206,7 +206,7 @@ async function createPlaybackSession(
     return { session, playback: { mode, url: relay.url, tokenExpiresAt: expiresAt } };
   }
 
-  const gateway = await createGatewaySession(session.id, userId, targetUrl, expiresAt, db, mode, userAgent);
+  const gateway = await createGatewaySession(session.id, userId, targetUrl, expiresAt, db, mode, userAgent, requestedPlaybackHint);
   if (sourceId && gateway.startupMs) {
     await recordPlaybackStartupObservation(db, {
       userId,
@@ -528,6 +528,7 @@ async function createGatewaySession(
   db: SupabaseClient,
   mode: "direct" | "relay" | "transcode",
   userAgent: string | null = null,
+  playbackHint: JsonRecord = {},
 ) {
   const gatewayMode = mode === "transcode" ? "transcode" : "remux";
   const runtimeConfig = await getRuntimeConfig(db);
@@ -547,6 +548,7 @@ async function createGatewaySession(
     return { status: "pending", session: data, hlsUrl: null, startupMs: null };
   }
 
+  const gatewayHints = gatewayPlaybackHints(playbackHint);
   const startupStartedAt = performance.now();
   const response = await fetch(`${runtimeConfig.mediaGatewayUrl}/sessions`, {
     method: "POST",
@@ -560,6 +562,8 @@ async function createGatewaySession(
       sourceUrl: targetUrl,
       mode: gatewayMode,
       expiresAt,
+      playbackHint: compactRecord(playbackHint),
+      ...gatewayHints,
       ...(userAgent ? { userAgent } : {}),
     }),
   });
@@ -582,6 +586,49 @@ async function createGatewaySession(
     .single();
   if (error) throwDb(error, "Unable to record gateway session");
   return { status: data.status, session: data, hlsUrl: data.hls_url, startupMs };
+}
+
+function gatewayPlaybackHints(playbackHint: JsonRecord) {
+  const codecProfile = recordOrEmpty(playbackHint.codecProfile ?? playbackHint.codec_profile);
+  return compactRecord({
+    codecProfile,
+    audioCodec: stringOrNull(
+      playbackHint.audioCodec ??
+        playbackHint.audio_codec ??
+        codecProfile.audioCodec ??
+        codecProfile.audio_codec ??
+        codecProfile.audio,
+    ),
+    audioProfile: stringOrNull(
+      playbackHint.audioProfile ??
+        playbackHint.audio_profile ??
+        codecProfile.audioProfile ??
+        codecProfile.audio_profile,
+    ),
+    audioChannels: boundedNullableInt(
+      playbackHint.audioChannels ??
+        playbackHint.audio_channels ??
+        codecProfile.audioChannels ??
+        codecProfile.audio_channels ??
+        codecProfile.channels,
+      0,
+      16,
+    ),
+    audioMode: stringOrNull(playbackHint.audioMode ?? playbackHint.audio_mode),
+    videoCodec: stringOrNull(
+      playbackHint.videoCodec ??
+        playbackHint.video_codec ??
+        codecProfile.videoCodec ??
+        codecProfile.video_codec ??
+        codecProfile.video,
+    ),
+    clientAudioPassthrough:
+      playbackHint.clientAudioPassthrough === false || playbackHint.client_audio_passthrough === false
+        ? false
+        : playbackHint.clientAudioPassthrough === true || playbackHint.client_audio_passthrough === true
+          ? true
+          : undefined,
+  });
 }
 
 async function recordPlaybackStartupObservation(

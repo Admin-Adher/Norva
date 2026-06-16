@@ -878,7 +878,13 @@ class SeriesPage {
             if (!episode) return;
 
             const container = episode.container_extension || h.data?.containerExtension || 'mp4';
-            const result = await API.proxy.xtream.getStreamUrl(sourceId, episode.id, 'series', container);
+            const result = await API.proxy.xtream.getStreamUrl(
+                sourceId,
+                episode.id,
+                'series',
+                container,
+                MediaUtils.playbackHintFromItem ? MediaUtils.playbackHintFromItem(episode, { container }) : {}
+            );
             if (!result?.url) return;
 
             const ratio = h.duration > 0 ? h.progress / h.duration : 0;
@@ -1097,7 +1103,13 @@ class SeriesPage {
         const episodeNum = episodeEl.querySelector('.episode-number')?.textContent?.replace('E', '') || '1';
 
         try {
-            const result = await API.proxy.xtream.getStreamUrl(sourceId, episodeId, 'series', container);
+            const result = await API.proxy.xtream.getStreamUrl(
+                sourceId,
+                episodeId,
+                'series',
+                container,
+                { container }
+            );
 
             if (result && result.url) {
                 if (this.app.pages.watch) {

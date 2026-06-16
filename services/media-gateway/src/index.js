@@ -22,12 +22,10 @@ const STOP_CONFLICTING_OWNER_SESSIONS = (process.env.STOP_CONFLICTING_OWNER_SESS
 const FFMPEG_USER_AGENT = process.env.FFMPEG_USER_AGENT ||
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36 Norva/1.0';
 const MAX_LOG_TAIL = 12000;
-// Always re-encode audio to plain AAC-LC stereo @48k. Source HE-AAC / unusual
-// sample rates make hls.js label the track mp4a.40.5 (HE-AAC), and Chrome's
-// MSE then rejects the audio SourceBuffer append (bufferAppendError) — which
-// ends the MediaSource and takes video down with it. LC-AAC @48k removes the
-// SBR ambiguity so the segment appends cleanly.
-const AUDIO_ARGS = ['-c:a', 'aac', '-profile:a', 'aac_low', '-ar', '48000', '-ac', '2', '-b:a', '128k'];
+// Fallback audio path: plain AAC-LC stereo @48k. Source HE-AAC / unusual sample
+// rates can make hls.js label the track mp4a.40.5 (HE-AAC), and Chrome's MSE
+// may reject the append. Copy audio only when the codec hint is browser-safe.
+const TRANSCODE_AUDIO_ARGS = ['-c:a', 'aac', '-profile:a', 'aac_low', '-ar', '48000', '-ac', '2', '-b:a', '128k'];
 
 const sessions = new Map();
 const lastFailures = [];
@@ -42,7 +40,7 @@ app.get('/health', (req, res) => {
     res.json({
         ok: true,
         service: 'norva-media-gateway',
-        version: 16,
+        version: 17,
         activeSessions: activeSessionCount(),
         totalSessions: sessions.size,
         lastFailureCount: lastFailures.length,
@@ -88,7 +86,22 @@ app.post('/xtream/epg', requireGatewayAuth, async (req, res) => {
 
 app.post('/sessions', requireGatewayAuth, async (req, res) => {
     try {
-        const { sourceUrl, playbackSessionId, ownerKey, mode = 'remux', expiresAt, userAgent } = req.body || {};
+        const {
+            sourceUrl,
+            playbackSessionId,
+            ownerKey,
+            mode = 'remux',
+            expiresAt,
+            userAgent,
+            playbackHint,
+            codecProfile,
+            audioCodec,
+            audioProfile,
+            audioChannels,
+            audioMode,
+            videoCodec,
+            clientAudioPassthrough
+        } = req.body || {};
         if (!sourceUrl || !isHttpUrl(sourceUrl)) {
             return res.status(400).json({ error: 'sourceUrl must be a valid http(s) URL' });
         }
@@ -109,6 +122,8 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
         const sourceKey = sourceSessionKey(sourceUrl);
 
         const expiresAtDate = expiresAt ? new Date(expiresAt) : new Date(Date.now() + DEFAULT_TTL_SECONDS * 1000);
+        const normalizedPlaybackHint = asRecord(playbackHint);
+        const normalizedCodecProfile = asRecord(codecProfile || normalizedPlaybackHint.codecProfile || normalizedPlaybackHint.codec_profile);
         const session = {
             id,
             playbackSessionId: playbackSessionId || null,
@@ -117,6 +132,14 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             ownerKey: normalizedOwnerKey,
             mode: mode === 'transcode' ? 'transcode' : 'remux',
             userAgent: sanitizeUserAgent(userAgent),
+            playbackHint: normalizedPlaybackHint,
+            codecProfile: normalizedCodecProfile,
+            audioCodec: stringOrNull(audioCodec) || stringOrNull(normalizedPlaybackHint.audioCodec) || stringOrNull(normalizedPlaybackHint.audio_codec) || stringOrNull(normalizedCodecProfile.audioCodec) || stringOrNull(normalizedCodecProfile.audio_codec) || stringOrNull(normalizedCodecProfile.audio),
+            audioProfile: stringOrNull(audioProfile) || stringOrNull(normalizedPlaybackHint.audioProfile) || stringOrNull(normalizedPlaybackHint.audio_profile) || stringOrNull(normalizedCodecProfile.audioProfile) || stringOrNull(normalizedCodecProfile.audio_profile),
+            audioChannels: nullableInt(audioChannels ?? normalizedPlaybackHint.audioChannels ?? normalizedPlaybackHint.audio_channels ?? normalizedCodecProfile.audioChannels ?? normalizedCodecProfile.audio_channels ?? normalizedCodecProfile.channels),
+            audioMode: stringOrNull(audioMode) || stringOrNull(normalizedPlaybackHint.audioMode) || stringOrNull(normalizedPlaybackHint.audio_mode),
+            videoCodec: stringOrNull(videoCodec) || stringOrNull(normalizedPlaybackHint.videoCodec) || stringOrNull(normalizedPlaybackHint.video_codec) || stringOrNull(normalizedCodecProfile.videoCodec) || stringOrNull(normalizedCodecProfile.video_codec) || stringOrNull(normalizedCodecProfile.video),
+            clientAudioPassthrough: clientAudioPassthrough === false || normalizedPlaybackHint.clientAudioPassthrough === false || normalizedPlaybackHint.client_audio_passthrough === false ? false : true,
             status: 'starting',
             outputDir,
             playlistPath: path.join(outputDir, 'playlist.m3u8'),
@@ -149,6 +172,7 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             id,
             status: session.status,
             mode: session.mode,
+            audioMode: audioModeForSession(session),
             hlsUrl,
             expiresAt: session.expiresAt.toISOString()
         });
@@ -216,6 +240,7 @@ async function bootstrap() {
 
 function startFfmpeg(session) {
     const segmentPattern = path.join(session.outputDir, 'segment-%05d.ts');
+    const audioArgs = audioArgsForSession(session);
     const args = [
         '-hide_banner',
         '-loglevel', 'warning',
@@ -246,12 +271,12 @@ function startFfmpeg(session) {
             '-crf', '23',
             '-g', '48',
             '-sc_threshold', '0',
-            ...AUDIO_ARGS
+            ...audioArgs
         );
     } else {
         args.push(
             '-c:v', 'copy',
-            ...AUDIO_ARGS
+            ...audioArgs
         );
     }
 
@@ -308,6 +333,75 @@ function startFfmpeg(session) {
         });
 
     return child;
+}
+
+function audioArgsForSession(session) {
+    return shouldCopyAudio(session) ? ['-c:a', 'copy'] : TRANSCODE_AUDIO_ARGS;
+}
+
+function audioModeForSession(session) {
+    return shouldCopyAudio(session) ? 'copy' : 'transcode';
+}
+
+function shouldCopyAudio(session) {
+    const requestedMode = normalizeCodecToken(session.audioMode);
+    if (requestedMode === 'transcode' || requestedMode === 'encode') return false;
+    if (session.clientAudioPassthrough === false) return false;
+
+    const codec = normalizeCodecToken(
+        session.audioCodec ||
+        session.codecProfile?.audioCodec ||
+        session.codecProfile?.audio_codec ||
+        session.codecProfile?.audio
+    );
+    const profile = normalizeCodecToken(
+        session.audioProfile ||
+        session.codecProfile?.audioProfile ||
+        session.codecProfile?.audio_profile
+    );
+    const channels = nullableInt(session.audioChannels ?? session.codecProfile?.audioChannels ?? session.codecProfile?.audio_channels ?? session.codecProfile?.channels);
+
+    if (!codec) return false;
+    if (channels && channels > 2) return false;
+    if (isKnownUnsafeAudio(codec, profile)) return false;
+    return isKnownBrowserSafeAudio(codec, profile);
+}
+
+function isKnownBrowserSafeAudio(codec, profile) {
+    const joined = `${codec} ${profile}`;
+    if (hasHeAacMarker(joined)) return false;
+    return (
+        codec.includes('aac') ||
+        codec.includes('mp4a.40.2') ||
+        codec.includes('mp3') ||
+        codec.includes('opus') ||
+        codec.includes('vorbis')
+    );
+}
+
+function isKnownUnsafeAudio(codec, profile) {
+    const joined = `${codec} ${profile}`;
+    return (
+        hasHeAacMarker(joined) ||
+        codec.includes('eac3') ||
+        codec.includes('e-ac3') ||
+        codec.includes('ac3') ||
+        codec.includes('dts') ||
+        codec.includes('truehd') ||
+        codec.includes('flac') ||
+        codec.includes('pcm')
+    );
+}
+
+function hasHeAacMarker(value) {
+    const normalized = normalizeCodecToken(value);
+    return (
+        normalized.includes('heaac') ||
+        normalized.includes('aache') ||
+        normalized.includes('sbr') ||
+        normalized.includes('mp4a.40.5') ||
+        normalized.includes('mp4a.40.29')
+    );
 }
 
 async function waitForPlaylist(session, timeoutMs) {
@@ -523,6 +617,27 @@ function safeJson(text) {
     } catch (_) {
         return { raw: String(text || '').slice(0, 2000) };
     }
+}
+
+function asRecord(value) {
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+}
+
+function stringOrNull(value) {
+    if (typeof value === 'string' && value.trim()) return value.trim();
+    if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+    if (typeof value === 'boolean') return String(value);
+    return null;
+}
+
+function nullableInt(value) {
+    if (value === null || value === undefined || value === '') return null;
+    const parsed = Number.parseInt(String(value), 10);
+    return Number.isFinite(parsed) ? parsed : null;
+}
+
+function normalizeCodecToken(value) {
+    return String(value || '').toLowerCase().replace(/[^a-z0-9.]+/g, '');
 }
 
 function sanitizeUserAgent(value) {

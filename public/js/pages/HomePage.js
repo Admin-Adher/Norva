@@ -755,7 +755,13 @@ class HomePage {
                 throw new Error('Missing source or stream identifier');
             }
 
-            const result = await window.API.request('GET', `/proxy/xtream/${sourceId}/stream/${streamId}/${streamType}?container=${container}`);
+            const result = await window.API.proxy.xtream.getStreamUrl(
+                sourceId,
+                streamId,
+                streamType,
+                container,
+                MediaUtils.playbackHintFromItem ? MediaUtils.playbackHintFromItem(item, { container }) : {}
+            );
 
             if (result && result.url) {
                 const content = {
