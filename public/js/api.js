@@ -43,6 +43,31 @@ function _shouldUseCloud() {
     return _isHostedApp() || !_hubBase();
 }
 
+function _cloudClientSurface() {
+    const ua = navigator.userAgent || '';
+    const standalone = window.matchMedia?.('(display-mode: standalone)')?.matches || navigator.standalone;
+    if (window.NorvaAndroidTV || /android tv|afts|aftt|aftm|bravia|smart-tv|smarttv|tizen|webos/i.test(ua)) return 'android-tv';
+    if (standalone) return 'pwa';
+    if (/mobi|android|iphone|ipad|ipod/i.test(ua)) return 'mobile-web';
+    return 'web';
+}
+
+function _cloudViewportClass() {
+    const width = Math.max(0, Number(window.innerWidth) || 0);
+    if (width && width < 600) return 'phone';
+    if (width && width < 1024) return 'tablet';
+    return 'desktop';
+}
+
+function _cloudClientTelemetryMetadata() {
+    return {
+        clientSurface: _cloudClientSurface(),
+        viewportClass: _cloudViewportClass(),
+        appMode: _isHostedApp() ? 'cloud' : 'local',
+        playbackEntry: 'watch'
+    };
+}
+
 const CloudAdapter = (() => {
     const SOURCE_ALIAS_KEY = 'norva-cloud-source-aliases';
     const PAGE_CACHE_TTL_MS = 120000;
@@ -794,6 +819,7 @@ const CloudAdapter = (() => {
                     itemType: type === 'series' ? 'series' : type === 'movie' ? 'movie' : 'live',
                     itemId: streamId,
                     playbackHint: playbackHintFromQuery(query, container),
+                    clientMetadata: _cloudClientTelemetryMetadata(),
                     corsSafe: false,
                     ...(userAgent ? { userAgent } : {})
                 };

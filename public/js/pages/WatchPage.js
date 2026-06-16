@@ -464,6 +464,26 @@ class WatchPage {
         return String(itemId || '');
     }
 
+    getTelemetryClientMetadata() {
+        const ua = navigator.userAgent || '';
+        const standalone = window.matchMedia?.('(display-mode: standalone)')?.matches || navigator.standalone;
+        const width = Math.max(0, Number(window.innerWidth) || 0);
+        let clientSurface = 'web';
+        if (window.NorvaAndroidTV || /android tv|afts|aftt|aftm|bravia|smart-tv|smarttv|tizen|webos/i.test(ua)) {
+            clientSurface = 'android-tv';
+        } else if (standalone) {
+            clientSurface = 'pwa';
+        } else if (/mobi|android|iphone|ipad|ipod/i.test(ua)) {
+            clientSurface = 'mobile-web';
+        }
+        return {
+            clientSurface,
+            viewportClass: width && width < 600 ? 'phone' : width && width < 1024 ? 'tablet' : 'desktop',
+            appMode: this.isCloudPlaybackMode() ? 'cloud' : 'local',
+            playbackEntry: 'watch'
+        };
+    }
+
     buildPlaybackEventPayload(eventType, extra = {}) {
         const duration = this.getDisplayDuration?.() || this.getValidDuration?.() || 0;
         return {
@@ -479,6 +499,7 @@ class WatchPage {
             errorCode: extra.errorCode,
             errorMessage: extra.errorMessage,
             metadata: {
+                ...this.getTelemetryClientMetadata(),
                 title: this.content?.title || this.content?.name || null,
                 attemptId: this._playbackAttemptId,
                 variantCount: this.content?.variantCount || this.content?._variantCount || null,

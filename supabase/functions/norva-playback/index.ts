@@ -84,10 +84,14 @@ Deno.serve(async (req) => {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 9,
+        version: 10,
         relayConfigured: Boolean(config.relayBaseUrl && config.relayTokenSecret),
         gatewayConfigured: Boolean(config.mediaGatewayUrl && config.mediaGatewayToken),
       });
+    }
+    if (req.method === "GET" && segments[0] === "telemetry" && segments[1] === "summary") {
+      const identity = await requireIdentity(req, supabase);
+      return json(req, await getPlaybackTelemetrySummary(url, identity.userId, supabase));
     }
     if (
       req.method === "POST" &&
@@ -161,6 +165,7 @@ async function createPlaybackSession(
   const requestedMode = stringOr(body.mode, "auto");
   let requestedPlaybackHint = recordOrEmpty(body.playbackHint ?? body.playback_hint);
   const userAgent = stringOrNull(body.userAgent ?? body.user_agent);
+  const clientMetadata = clientTelemetryMetadataFromBody(body);
 
   if (!targetUrl && sourceId && itemType && itemId) {
     const resolved = await resolvePlaybackTarget(sourceId, itemType, itemId, userId, db, requestedPlaybackHint);
@@ -209,7 +214,23 @@ async function createPlaybackSession(
     return { session, playback: { mode, url: relay.url, tokenExpiresAt: expiresAt } };
   }
 
-  const gateway = await createGatewaySession(session.id, userId, targetUrl, expiresAt, db, mode, userAgent, requestedPlaybackHint);
+  let gateway;
+  try {
+    gateway = await createGatewaySession(session.id, userId, targetUrl, expiresAt, db, mode, userAgent, requestedPlaybackHint);
+  } catch (error) {
+    await recordPlaybackSessionFailure(db, {
+      userId,
+      deviceId,
+      playbackSessionId: session.id,
+      sourceId,
+      itemType,
+      itemId,
+      playbackMode: mode,
+      clientMetadata,
+      error,
+    });
+    throw error;
+  }
   if (sourceId && gateway.startupMs) {
     await recordPlaybackStartupObservation(db, {
       userId,
@@ -393,6 +414,176 @@ async function recordPlaybackEvent(
   }
 
   return { event: data };
+}
+
+async function recordPlaybackSessionFailure(
+  db: SupabaseClient,
+  options: {
+    userId: string;
+    deviceId: string | null;
+    playbackSessionId: string;
+    sourceId: string | null;
+    itemType: string;
+    itemId: string;
+    playbackMode: string;
+    clientMetadata: JsonRecord;
+    error: unknown;
+  },
+) {
+  const failure = classifyPlaybackFailure(options.error);
+  const now = new Date().toISOString();
+
+  const { error: sessionError } = await db
+    .from("cloud_playback_sessions")
+    .update({
+      status: "failed",
+      error_code: failure.errorCode,
+      error_message: failure.errorMessage,
+      updated_at: now,
+    })
+    .eq("id", options.playbackSessionId)
+    .eq("user_id", options.userId);
+  if (sessionError) {
+    console.warn("[norva-playback] unable to mark failed playback session", sessionError.message);
+  }
+
+  const { error: eventError } = await db
+    .from("cloud_playback_events")
+    .insert({
+      user_id: options.userId,
+      device_id: options.deviceId,
+      playback_session_id: options.playbackSessionId,
+      source_id: options.sourceId,
+      item_type: options.itemType,
+      item_id: options.itemId,
+      event_type: "gateway_error",
+      position_seconds: 0,
+      duration_seconds: 0,
+      playback_mode: options.playbackMode,
+      error_code: failure.errorCode,
+      error_message: failure.errorMessage,
+      metadata: compactRecord({
+        ...options.clientMetadata,
+        failureCategory: failure.failureCategory,
+        gatewayStatus: failure.gatewayStatus,
+        providerStatus: failure.providerStatus,
+        providerConcurrencySignal: failure.providerConcurrencySignal,
+        gatewayDetails: failure.gatewayDetails,
+      }),
+    });
+  if (eventError) {
+    console.warn("[norva-playback] unable to record playback failure event", eventError.message);
+  }
+}
+
+async function getPlaybackTelemetrySummary(url: URL, userId: string, db: SupabaseClient) {
+  const days = boundedInt(url.searchParams.get("days"), 7, 1, 90);
+  const limit = boundedInt(url.searchParams.get("limit"), 5000, 100, 20000);
+  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+  const until = new Date().toISOString();
+
+  const { data, error } = await db
+    .from("cloud_playback_events")
+    .select("item_type,event_type,time_to_first_frame_ms,playback_mode,error_code,metadata,created_at")
+    .eq("user_id", userId)
+    .gte("created_at", since)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (error) throwDb(error, "Unable to load playback telemetry");
+
+  const rows = (data ?? []) as JsonRecord[];
+  const byContentType: Record<string, JsonRecord> = {};
+  const byClientSurface: Record<string, JsonRecord> = {};
+  const ttffOverall: number[] = [];
+  const ttffByContentType: Record<string, number[]> = {};
+  let providerConcurrencyRefusals = 0;
+  let gatewayErrors = 0;
+  let playbackErrors = 0;
+
+  for (const row of rows) {
+    const itemType = normalizeTelemetryKey(row.item_type, "unknown");
+    const eventType = normalizeTelemetryKey(row.event_type, "unknown");
+    const metadata = recordOrEmpty(row.metadata);
+    const surface = normalizeTelemetryKey(
+      metadata.clientSurface ?? metadata.client_surface ?? metadata.surface ?? metadata.client,
+      "unknown",
+    );
+
+    const typeBucket = telemetryBucket(byContentType, itemType);
+    const surfaceBucket = telemetryBucket(byClientSurface, surface);
+    typeBucket.events = numberValue(typeBucket.events) + 1;
+    surfaceBucket.events = numberValue(surfaceBucket.events) + 1;
+
+    if (eventType === "play_requested") {
+      typeBucket.requests = numberValue(typeBucket.requests) + 1;
+      surfaceBucket.requests = numberValue(surfaceBucket.requests) + 1;
+    }
+    if (eventType === "first_frame") {
+      typeBucket.firstFrames = numberValue(typeBucket.firstFrames) + 1;
+      surfaceBucket.firstFrames = numberValue(surfaceBucket.firstFrames) + 1;
+    }
+    if (eventType === "playback_error") {
+      playbackErrors += 1;
+      typeBucket.errors = numberValue(typeBucket.errors) + 1;
+      surfaceBucket.errors = numberValue(surfaceBucket.errors) + 1;
+    }
+    if (eventType === "gateway_error") {
+      gatewayErrors += 1;
+      typeBucket.errors = numberValue(typeBucket.errors) + 1;
+      typeBucket.gatewayErrors = numberValue(typeBucket.gatewayErrors) + 1;
+      surfaceBucket.errors = numberValue(surfaceBucket.errors) + 1;
+      surfaceBucket.gatewayErrors = numberValue(surfaceBucket.gatewayErrors) + 1;
+    }
+
+    const isConcurrencySignal =
+      metadata.providerConcurrencySignal === true ||
+      metadata.provider_concurrency_signal === true ||
+      stringOr(metadata.failureCategory ?? metadata.failure_category, "") === "provider_concurrency_or_auth";
+    if (isConcurrencySignal) {
+      providerConcurrencyRefusals += 1;
+      typeBucket.providerConcurrencyRefusals = numberValue(typeBucket.providerConcurrencyRefusals) + 1;
+      surfaceBucket.providerConcurrencyRefusals = numberValue(surfaceBucket.providerConcurrencyRefusals) + 1;
+    }
+
+    const ttff = boundedNullableInt(row.time_to_first_frame_ms, 0, 10 * 60 * 1000);
+    if (ttff && (eventType === "first_frame" || eventType === "play_started")) {
+      ttffOverall.push(ttff);
+      if (!ttffByContentType[itemType]) ttffByContentType[itemType] = [];
+      ttffByContentType[itemType].push(ttff);
+    }
+  }
+
+  const liveRequests = numberValue(byContentType.live?.requests);
+  const movieRequests = numberValue(byContentType.movie?.requests);
+  const seriesRequests = numberValue(byContentType.series?.requests);
+  const vodRequests = movieRequests + seriesRequests;
+  const totalRequests = Math.max(1, liveRequests + vodRequests);
+  const androidTvRequests = numberValue(byClientSurface["android-tv"]?.requests);
+
+  return {
+    window: { since, until, days, sampleSize: rows.length, limit },
+    playback: {
+      byContentType,
+      byClientSurface,
+      errors: {
+        gatewayErrors,
+        playbackErrors,
+        providerConcurrencyRefusals,
+      },
+      ttff: {
+        overall: percentileSummary(ttffOverall),
+        byContentType: Object.fromEntries(
+          Object.entries(ttffByContentType).map(([key, values]) => [key, percentileSummary(values)]),
+        ),
+      },
+    },
+    decisionSignals: {
+      liveRequestShare: roundRatio(liveRequests / totalRequests),
+      vodRequestShare: roundRatio(vodRequests / totalRequests),
+      androidTvRequestShare: roundRatio(androidTvRequests / totalRequests),
+      providerConcurrencyRefusals,
+    },
+  };
 }
 
 async function closeOpenGatewaySessionsForUser(userId: string, db: SupabaseClient) {
@@ -1141,8 +1332,152 @@ function stringOrNull(value: unknown) {
   return null;
 }
 
+function numberValue(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
 function trimTrailingSlash(value: string) {
   return value.replace(/\/+$/, "");
+}
+
+function clientTelemetryMetadataFromBody(body: JsonRecord) {
+  const nested = recordOrEmpty(body.metadata);
+  const client = recordOrEmpty(
+    body.clientMetadata ??
+      body.client_metadata ??
+      nested.clientMetadata ??
+      nested.client_metadata,
+  );
+  const clientSurface = normalizeTelemetryKey(client.clientSurface ?? client.client_surface ?? client.surface, "");
+  const viewportClass = normalizeTelemetryKey(client.viewportClass ?? client.viewport_class, "");
+  const appMode = normalizeTelemetryKey(client.appMode ?? client.app_mode, "");
+  const playbackEntry = normalizeTelemetryKey(client.playbackEntry ?? client.playback_entry, "");
+  return compactRecord({
+    clientSurface,
+    viewportClass,
+    appMode,
+    playbackEntry,
+  });
+}
+
+function classifyPlaybackFailure(error: unknown) {
+  const gatewayStatus = error instanceof HttpError ? error.status : null;
+  const message = error instanceof Error ? error.message : "Playback failed";
+  const details = error instanceof HttpError ? error.details : undefined;
+  const detailText = sanitizeTelemetryText(textFromGatewayDetails(details));
+  const combined = `${message} ${detailText}`.toLowerCase();
+  const providerStatus = extractProviderStatus(details, combined);
+  const providerConcurrencySignal = Boolean(
+    providerStatus === 401 ||
+      providerStatus === 403 ||
+      providerStatus === 429 ||
+      /\b(maximum|max|too many|concurrent|connection limit|connections?)\b/.test(combined) ||
+      /\b(unauthorized|unauthorised|authorization failed|forbidden|rate limit)\b/.test(combined)
+  );
+  const failureCategory = providerConcurrencySignal
+    ? "provider_concurrency_or_auth"
+    : gatewayStatus === 503
+      ? "gateway_unavailable"
+      : gatewayStatus && gatewayStatus >= 500
+        ? "gateway_startup_failed"
+        : "playback_session_failed";
+  return {
+    gatewayStatus,
+    providerStatus,
+    providerConcurrencySignal,
+    failureCategory,
+    errorCode: providerConcurrencySignal ? "provider_concurrency_or_auth" : `gateway_${gatewayStatus || "error"}`,
+    errorMessage: truncateText(sanitizeTelemetryText(message), 240),
+    gatewayDetails: truncateText(detailText, 500),
+  };
+}
+
+function extractProviderStatus(details: unknown, text: string) {
+  const fromRecord = firstNumericField(details, ["providerStatus", "provider_status", "upstreamStatus", "upstream_status", "statusCode", "status_code"]);
+  if (fromRecord) return fromRecord;
+  const match = text.match(/\b(401|403|408|429|500|502|503|504)\b/);
+  return match ? Number.parseInt(match[1], 10) : null;
+}
+
+function firstNumericField(value: unknown, fields: string[]): number | null {
+  if (!isRecord(value)) return null;
+  for (const field of fields) {
+    const parsed = boundedNullableInt(value[field], 100, 599);
+    if (parsed) return parsed;
+  }
+  return null;
+}
+
+function textFromGatewayDetails(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (!isRecord(value)) return "";
+  return [
+    value.error,
+    value.message,
+    value.details,
+    value.reason,
+    value.code,
+  ]
+    .map((entry) => typeof entry === "string" ? entry : "")
+    .filter(Boolean)
+    .join(" ");
+}
+
+function sanitizeTelemetryText(value: unknown) {
+  return String(value || "")
+    .replace(/https?:\/\/[^\s"'<>]+/gi, "<url>")
+    .replace(/([?&](?:username|password|token|key)=)[^&\s]+/gi, "$1<redacted>")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function truncateText(value: string, max: number) {
+  if (value.length <= max) return value;
+  return `${value.slice(0, Math.max(0, max - 1))}…`;
+}
+
+function normalizeTelemetryKey(value: unknown, fallback: string) {
+  const normalized = String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return normalized || fallback;
+}
+
+function telemetryBucket(target: Record<string, JsonRecord>, key: string) {
+  if (!target[key]) {
+    target[key] = {
+      events: 0,
+      requests: 0,
+      firstFrames: 0,
+      errors: 0,
+      gatewayErrors: 0,
+      providerConcurrencyRefusals: 0,
+    };
+  }
+  return target[key];
+}
+
+function percentileSummary(values: number[]) {
+  const sorted = values.filter((value) => Number.isFinite(value) && value > 0).sort((a, b) => a - b);
+  return {
+    count: sorted.length,
+    p50: percentile(sorted, 0.5),
+    p75: percentile(sorted, 0.75),
+    p95: percentile(sorted, 0.95),
+  };
+}
+
+function percentile(sorted: number[], ratio: number) {
+  if (!sorted.length) return null;
+  const index = Math.min(sorted.length - 1, Math.max(0, Math.ceil(sorted.length * ratio) - 1));
+  return sorted[index];
+}
+
+function roundRatio(value: number) {
+  if (!Number.isFinite(value)) return 0;
+  return Math.round(value * 1000) / 1000;
 }
 
 function isRecord(value: unknown): value is JsonRecord {

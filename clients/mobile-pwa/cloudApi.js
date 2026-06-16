@@ -533,7 +533,8 @@
             createSession: (session) => playbackRequest(session),
             getSession: (id) => playbackSessionRequest('GET', `/playback/sessions/${encodeURIComponent(id)}`),
             expireSession: (id) => playbackSessionRequest('POST', `/playback/sessions/${encodeURIComponent(id)}/expire`),
-            event: (event) => playbackSessionRequest('POST', '/playback/events', event)
+            event: (event) => playbackSessionRequest('POST', '/playback/events', event),
+            summary: (params = {}) => playbackSessionRequest('GET', `/telemetry/summary${query(params)}`)
         },
 
         device: {
@@ -571,7 +572,8 @@
             },
             playback: {
                 createSession: (session) => playbackRequest(session, { token: getDeviceToken() }),
-                event: (event) => playbackSessionRequest('POST', '/playback/events', event, { token: getDeviceToken() })
+                event: (event) => playbackSessionRequest('POST', '/playback/events', event, { token: getDeviceToken() }),
+                summary: (params = {}) => playbackSessionRequest('GET', `/telemetry/summary${query(params)}`, null, { token: getDeviceToken() })
             }
         }
     };
