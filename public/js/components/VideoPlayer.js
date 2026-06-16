@@ -35,6 +35,8 @@ class VideoPlayer {
         this._clearingMedia = false;
         this._variantSwitchSeq = 0;
         this._vfTimer = null;
+        this.currentCloudPlaybackSessionId = null;
+        this.activeCloudPlaybackSessionIds = new Set();
 
         // Settings - start with defaults, load from server async
         this.settings = this.getDefaultSettings();
@@ -1028,16 +1030,51 @@ class VideoPlayer {
      * Stop and cleanup current transcode session
      */
     async stopTranscodeSession() {
-        if (this.currentSessionId) {
-            console.log('[Player] Stopping transcode session:', this.currentSessionId);
-            try {
-                // Fire and forget cleanup
-                fetch(`/api/transcode/${this.currentSessionId}`, { method: 'DELETE' });
-            } catch (err) {
-                console.error('Failed to stop session:', err);
+        if (!this.currentSessionId) return;
+
+        const sessionId = this.currentSessionId;
+        this.currentSessionId = null;
+        console.log('[Player] Stopping transcode session:', sessionId);
+        try {
+            const res = await fetch(`/api/transcode/${sessionId}`, { method: 'DELETE' });
+            if (!res.ok && res.status !== 404) {
+                throw new Error(`Failed to stop session ${sessionId}: ${res.status}`);
             }
-            this.currentSessionId = null;
+        } catch (err) {
+            console.error('Failed to stop session:', err);
         }
+    }
+
+    registerCloudPlaybackSession(sessionId) {
+        const id = sessionId ? String(sessionId).trim() : '';
+        if (!id) return;
+        this.currentCloudPlaybackSessionId = id;
+        this.activeCloudPlaybackSessionIds.add(id);
+    }
+
+    async stopCloudPlaybackSessions() {
+        const sessionIds = new Set(this.activeCloudPlaybackSessionIds);
+        if (this.currentCloudPlaybackSessionId) {
+            sessionIds.add(this.currentCloudPlaybackSessionId);
+        }
+
+        this.currentCloudPlaybackSessionId = null;
+        this.activeCloudPlaybackSessionIds.clear();
+        if (!sessionIds.size) return;
+
+        const expireSession = window.NorvaCloud?.playback?.expireSession;
+        if (typeof expireSession !== 'function') return;
+
+        await Promise.allSettled(Array.from(sessionIds).map(async (sessionId) => {
+            console.log('[Player] Expiring cloud playback session:', sessionId);
+            await expireSession(sessionId);
+        })).then(results => {
+            results.forEach(result => {
+                if (result.status === 'rejected') {
+                    console.error(result.reason?.message || 'Failed to expire cloud playback session');
+                }
+            });
+        });
     }
 
     /**
@@ -1045,16 +1082,20 @@ class VideoPlayer {
      */
     async play(channel, streamUrl) {
         ++this._variantSwitchSeq;
+        const cloudPlaybackSessionId = channel.cloudPlaybackSessionId || channel.playbackSessionId || null;
         this.currentChannel = channel;
         this._playbackStatusOkReported = false;
         this.applyQualityGroup(channel);
 
         try {
             // Stop any WatchPage playback (movies/series) before starting Live TV
-            window.app?.pages?.watch?.stop?.();
+            await window.app?.pages?.watch?.stop?.();
 
             // Stop current playback
-            this.stop();
+            await this.stop();
+            if (cloudPlaybackSessionId) {
+                this.registerCloudPlaybackSession(cloudPlaybackSessionId);
+            }
             this.updateTranscodeStatus('hidden');
 
             // Hide "select a channel" overlay
@@ -1576,7 +1617,12 @@ class VideoPlayer {
             const res = await window.API.proxy.xtream.getStreamUrl(variant.sourceId, variant.streamId, 'live', fmt);
             const url = res && (res.url || res.streamUrl);
             if (!url) throw new Error('no url');
-            const ch = Object.assign({}, this.currentChannel, { streamId: variant.streamId, currentVariant: variant, qualityGroup: this.qualityGroup });
+            const ch = Object.assign({}, this.currentChannel, {
+                streamId: variant.streamId,
+                currentVariant: variant,
+                qualityGroup: this.qualityGroup,
+                cloudPlaybackSessionId: res.sessionId || null
+            });
             await this.play(ch, url);
             const switchSeq = this._variantSwitchSeq;
             this._armVariantFallback(variant, switchSeq);
@@ -1774,8 +1820,10 @@ class VideoPlayer {
     stop() {
         ++this._variantSwitchSeq;
         this._clearVariantFallbackTimer();
-        // Stop any running transcode session first
-        this.stopTranscodeSession();
+        const sessionTeardown = Promise.allSettled([
+            this.stopTranscodeSession(),
+            this.stopCloudPlaybackSessions()
+        ]);
         this._clearingMedia = true;
 
         if (this.hls) {
@@ -1801,6 +1849,8 @@ class VideoPlayer {
         this.currentStreamInfo = null;
         const badge = document.getElementById('player-quality-badge');
         if (badge) badge.classList.add('hidden');
+
+        return sessionTeardown;
     }
 
     /**

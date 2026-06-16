@@ -2795,8 +2795,10 @@ class ChannelList {
             const streamFormat = window.app?.player?.settings?.streamFormat || 'm3u8';
             const result = await API.proxy.xtream.getStreamUrl(channel.sourceId, channel.streamId, 'live', streamFormat);
             streamUrl = result.url;
+            channel.cloudPlaybackSessionId = result.sessionId || null;
         } else {
             streamUrl = channel.url;
+            channel.cloudPlaybackSessionId = null;
         }
 
         // Attach the channel's quality variants so the player can build its

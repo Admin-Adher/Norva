@@ -883,7 +883,7 @@ class SeriesPage {
                 episode.id,
                 'series',
                 container,
-                MediaUtils.playbackHintFromItem ? MediaUtils.playbackHintFromItem(episode, { container }) : {}
+                MediaUtils.playbackHintFromItem ? MediaUtils.playbackHintFromItem(episode, { container, streamType: 'series' }) : { container, streamType: 'series' }
             );
             if (!result?.url) return;
 
@@ -1091,10 +1091,27 @@ class SeriesPage {
         this.currentSeries = null;
     }
 
+    findEpisodeById(episodeId) {
+        if (!this.currentSeriesInfo?.episodes) return null;
+        for (const episodes of Object.values(this.currentSeriesInfo.episodes)) {
+            const found = Array.isArray(episodes)
+                ? episodes.find(ep => String(ep.id) === String(episodeId))
+                : null;
+            if (found) return found;
+        }
+        return null;
+    }
+
     async playEpisode(episodeEl) {
         const episodeId = episodeEl.dataset.episodeId;
         const sourceId = parseInt(episodeEl.dataset.sourceId);
         const container = episodeEl.dataset.container || 'mp4';
+        const episode = this.findEpisodeById(episodeId) || {
+            id: episodeId,
+            container_extension: container,
+            type: 'episode',
+            streamType: 'series'
+        };
 
         const seasonGroup = episodeEl.closest('.season-group');
         const seasonHeader = seasonGroup?.querySelector('.season-name')?.textContent || '';
@@ -1108,7 +1125,9 @@ class SeriesPage {
                 episodeId,
                 'series',
                 container,
-                { container }
+                MediaUtils.playbackHintFromItem
+                    ? MediaUtils.playbackHintFromItem(episode, { container, streamType: 'series' })
+                    : { container, streamType: 'series' }
             );
 
             if (result && result.url) {

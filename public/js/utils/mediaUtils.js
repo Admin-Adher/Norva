@@ -180,7 +180,7 @@ const MediaUtils = (() => {
         if (v.quality) parts.push(v.quality);
         if (v.language) parts.push(v.language);
         if (item.container_extension) parts.push(item.container_extension);
-        return parts.join(' · ') || 'Version';
+        return parts.join(' - ') || 'Version';
     }
 
     // === Filter persistence ===
@@ -233,6 +233,8 @@ const MediaUtils = (() => {
     function playbackHintFromItem(item = {}, base = {}) {
         const variant = item.defaultVariant || item.default_variant || item.variant || {};
         const data = item.data || {};
+        const rawType = firstValue(base.streamType, base.itemType, item.streamType, item.stream_type, item.itemType, item.item_type, item.type);
+        const streamType = rawType === 'episode' ? 'series' : rawType;
         const codec = firstRecord(
             item.codecProfile,
             item.codec_profile,
@@ -245,6 +247,8 @@ const MediaUtils = (() => {
         );
         const hint = compactRecord({
             ...base,
+            streamType,
+            itemType: streamType,
             container: base.container || item.container_extension || item.containerExtension || data.containerExtension || variant.container_extension || variant.containerExtension,
             audioCodec: firstValue(item.audioCodec, item.audio_codec, codec.audioCodec, codec.audio_codec, codec.audio),
             audioProfile: firstValue(item.audioProfile, item.audio_profile, codec.audioProfile, codec.audio_profile),

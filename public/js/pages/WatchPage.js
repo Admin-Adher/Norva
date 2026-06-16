@@ -329,13 +329,14 @@ class WatchPage {
         this._playbackStatusOkReported = false;
         this._lastFailureMsg = null;
         this._cloudRelayFallbackTried = false;
+        this._cloudGatewayTranscodeFallbackTried = false;
         this._firstFrameReported = false;
         this._playStartedReported = false;
         this._playbackEnded = false;
         this._lastPauseTelemetryAt = 0;
 
         // Stop any Live TV playback before starting movie/series
-        this.app?.player?.stop?.();
+        await this.app?.player?.stop?.();
 
         // Reset state
         this.cancelNextEpisode();
@@ -1998,6 +1999,9 @@ class WatchPage {
 
         this._lastFailureMsg = message;
         this.sendPlaybackEvent('playback_error', { errorMessage: message || 'Playback failed.' });
+        const retriedWithGatewayTranscode = await this.retryWithCloudGatewayTranscode(message);
+        if (retriedWithGatewayTranscode) return;
+
         const retriedWithRelay = await this.retryWithCloudRelay(message);
         if (retriedWithRelay) return;
 
@@ -2049,6 +2053,44 @@ class WatchPage {
             return true;
         } catch (error) {
             console.warn('[WatchPage] Relay fallback failed:', error?.message || error);
+            return false;
+        }
+    }
+
+    async retryWithCloudGatewayTranscode(message) {
+        if (!this.isCloudPlaybackMode()) return false;
+        if (this._cloudGatewayTranscodeFallbackTried) return false;
+        if (!this.isFormatPlaybackError(message)) return false;
+        if (!this.content?.sourceId || !this.content?.id) return false;
+        if (this.content.type !== 'movie' && this.content.type !== 'series') return false;
+
+        this._cloudGatewayTranscodeFallbackTried = true;
+        console.warn('[WatchPage] Gateway remux failed. Retrying with full Gateway transcode.');
+        this.hidePlaybackError();
+        this.showLoading();
+        this.updateTranscodeStatus('transcoding', 'Norva Gateway');
+
+        try {
+            const result = await API.proxy.xtream.getStreamUrl(
+                this.content.sourceId,
+                this.content.id,
+                this.content.type === 'series' ? 'series' : 'movie',
+                this.containerExtension || 'mp4',
+                {
+                    gatewayMode: 'transcode',
+                    audioMode: 'transcode'
+                }
+            );
+
+            if (!result?.url) return false;
+            this.content.cloudPlaybackSessionId = result.sessionId || null;
+            await this.loadVideo(result.url, {
+                cloudPlaybackSessionId: result.sessionId,
+                playbackAttemptId: this._playbackAttemptId
+            });
+            return true;
+        } catch (error) {
+            console.warn('[WatchPage] Gateway transcode fallback failed:', error?.message || error);
             return false;
         }
     }
@@ -3073,7 +3115,13 @@ class WatchPage {
             if (!movie) return;
 
             const container = movie.container_extension || 'mp4';
-            const result = await API.proxy.xtream.getStreamUrl(sourceId, streamId, 'movie', container);
+            const result = await API.proxy.xtream.getStreamUrl(
+                sourceId,
+                streamId,
+                'movie',
+                container,
+                MediaUtils.playbackHintFromItem ? MediaUtils.playbackHintFromItem(movie, { container, streamType: 'movie' }) : { container, streamType: 'movie' }
+            );
 
             if (result?.url) {
                 this.play({
@@ -3148,14 +3196,39 @@ class WatchPage {
         });
     }
 
+    findEpisodeById(episodeId) {
+        if (!this.seriesInfo?.episodes) return null;
+        for (const episodes of Object.values(this.seriesInfo.episodes)) {
+            const found = Array.isArray(episodes)
+                ? episodes.find(ep => String(ep.id) === String(episodeId))
+                : null;
+            if (found) return found;
+        }
+        return null;
+    }
+
     async playEpisodeFromList(episodeEl) {
         const episodeId = episodeEl.dataset.episodeId;
         const seasonNum = episodeEl.dataset.season;
         const episodeNum = episodeEl.dataset.episode;
         const container = episodeEl.dataset.container || 'mp4';
+        const episode = this.findEpisodeById(episodeId) || {
+            id: episodeId,
+            container_extension: container,
+            type: 'episode',
+            streamType: 'series'
+        };
 
         try {
-            const result = await API.proxy.xtream.getStreamUrl(this.content.sourceId, episodeId, 'series', container);
+            const result = await API.proxy.xtream.getStreamUrl(
+                this.content.sourceId,
+                episodeId,
+                'series',
+                container,
+                MediaUtils.playbackHintFromItem
+                    ? MediaUtils.playbackHintFromItem(episode, { container, streamType: 'series' })
+                    : { container, streamType: 'series' }
+            );
 
             if (result?.url) {
                 const episodeTitle = episodeEl.querySelector('.watch-episode-title')?.textContent || `Episode ${episodeNum}`;
@@ -3249,7 +3322,15 @@ class WatchPage {
 
         try {
             const container = nextEp.container_extension || 'mp4';
-            const result = await API.proxy.xtream.getStreamUrl(this.content.sourceId, nextEp.id, 'series', container);
+            const result = await API.proxy.xtream.getStreamUrl(
+                this.content.sourceId,
+                nextEp.id,
+                'series',
+                container,
+                MediaUtils.playbackHintFromItem
+                    ? MediaUtils.playbackHintFromItem(nextEp, { container, streamType: 'series' })
+                    : { container, streamType: 'series' }
+            );
 
             if (result?.url) {
                 this.play({

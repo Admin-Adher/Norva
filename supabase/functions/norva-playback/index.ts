@@ -86,7 +86,7 @@ Deno.serve(async (req) => {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 12,
+        version: 13,
         entitlements: true,
         entitlementsMode: entitlementRuntime.mode,
         entitlementsEnforced: entitlementRuntime.enforced,
@@ -696,6 +696,7 @@ async function resolvePlaybackTarget(
   if (!item) {
     if (itemType === "series") {
       const sourceConfig = await loadSourceConfig(sourceId, userId, db);
+      const requestContainer = stringOr(requestHint.container, "mp4");
       return {
         targetUrl: xtreamStreamUrl({
           serverUrl: stringOr(sourceConfig.serverUrl, ""),
@@ -703,9 +704,13 @@ async function resolvePlaybackTarget(
           password: stringOr(sourceConfig.password, ""),
           streamType: "series",
           streamId: itemId,
-          container: "mp4",
+          container: requestContainer,
         }),
-        playbackHint: compactRecord({ container: "mp4" }),
+        playbackHint: mergePlaybackHints(recordOrEmpty(requestHint), compactRecord({
+          container: requestContainer,
+          streamType: "series",
+          itemType: "series",
+        })),
       };
     }
     throw new HttpError(404, "Media item not found");
@@ -794,7 +799,7 @@ async function createGatewaySession(
   userAgent: string | null = null,
   playbackHint: JsonRecord = {},
 ) {
-  const gatewayMode = mode === "transcode" ? "transcode" : "remux";
+  const gatewayMode = gatewayModeForPlayback(mode, playbackHint);
   const runtimeConfig = await getRuntimeConfig(db);
   if (!runtimeConfig.mediaGatewayUrl || !runtimeConfig.mediaGatewayToken) {
     const { data, error } = await db
@@ -885,6 +890,13 @@ function shouldRetryGatewayWithAudioTranscode(gatewayHints: JsonRecord, status: 
     firstUsefulCodecProfile(gatewayHints.codecProfile, gatewayHints.codec_profile) ||
     stringOrNull(gatewayHints.audioCodec ?? gatewayHints.audio_codec),
   );
+}
+
+function gatewayModeForPlayback(mode: "direct" | "relay" | "transcode", playbackHint: JsonRecord): "remux" | "transcode" {
+  const requested = normalizeCodecToken(playbackHint.gatewayMode ?? playbackHint.gateway_mode);
+  if (requested === "remux" || requested === "copy") return "remux";
+  if (requested === "transcode" || requested === "encode") return "transcode";
+  return mode === "transcode" ? "transcode" : "remux";
 }
 
 function gatewayPlaybackHints(playbackHint: JsonRecord) {

@@ -613,9 +613,12 @@ const CloudAdapter = (() => {
         return Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined && entry !== null && entry !== ''));
     }
 
-    function playbackHintFromQuery(query, container) {
+    function playbackHintFromQuery(query, container, type = '') {
         return compactPlaybackHint({
             container,
+            streamType: type,
+            itemType: type,
+            gatewayMode: query.get('gatewayMode') || query.get('gateway_mode'),
             audioCodec: query.get('audioCodec'),
             audioProfile: query.get('audioProfile'),
             audioChannels: query.get('audioChannels'),
@@ -842,17 +845,32 @@ const CloudAdapter = (() => {
                 const preferredMode = forcedMode || (isVodPlayback ? 'transcode' : (requestedCloudMode || 'relay'));
                 const needsGateway = requiresGatewayForContainer(type, container);
                 const mode = forcedMode || (((isVodPlayback || needsGateway) && preferredMode !== 'direct') ? 'transcode' : preferredMode);
+                const playbackHint = playbackHintFromQuery(query, container, type);
+                if (type === 'series' && !playbackHint.gatewayMode) {
+                    playbackHint.gatewayMode = 'remux';
+                }
                 const cloudSourceId = await resolveSourceId(sourceId);
                 const userAgent = resolveCloudUserAgent();
                 const baseSession = {
                     sourceId: cloudSourceId,
                     itemType: type === 'series' ? 'series' : type === 'movie' ? 'movie' : 'live',
                     itemId: streamId,
-                    playbackHint: playbackHintFromQuery(query, container),
+                    playbackHint,
                     clientMetadata: _cloudClientTelemetryMetadata(),
                     corsSafe: false,
                     ...(userAgent ? { userAgent } : {})
                 };
+                const remuxFirst = mode === 'transcode' && baseSession.playbackHint.gatewayMode === 'remux';
+                const createGatewayTranscodeSession = () => cloudPlaybackApi().createSession({
+                    ...baseSession,
+                    playbackHint: {
+                        ...baseSession.playbackHint,
+                        gatewayMode: 'transcode',
+                        audioMode: baseSession.playbackHint.audioMode || 'transcode'
+                    },
+                    mode: 'transcode',
+                    requiresTranscode: true
+                });
                 let payload;
                 try {
                     payload = await cloudPlaybackApi().createSession({
@@ -870,7 +888,14 @@ const CloudAdapter = (() => {
                     }
                 } catch (error) {
                     if (mode === 'direct') throw error;
-                    if (mode === 'transcode' && preferredMode !== 'direct') {
+                    if (remuxFirst && (error.status === 502 || error.status === 503 || error.status === 504 || error.status === 500)) {
+                        try {
+                            payload = await createGatewayTranscodeSession();
+                        } catch (transcodeError) {
+                            if (!transcodeError.status || transcodeError.status < 500) throw transcodeError;
+                        }
+                    }
+                    if (!payload && mode === 'transcode' && preferredMode !== 'direct') {
                         try {
                             payload = await cloudPlaybackApi().createSession({
                                 ...baseSession,
