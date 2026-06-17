@@ -44,7 +44,7 @@ app.get('/health', (req, res) => {
     res.json({
         ok: true,
         service: 'norva-media-gateway',
-        version: 20,
+        version: 21,
         codecProbe: true,
         activeSessions: activeSessionCount(),
         totalSessions: sessions.size,
@@ -439,7 +439,9 @@ async function probeCodecProfile(sourceUrl, userAgent) {
     const payload = await runFfprobe(args, CODEC_PROBE_TIMEOUT_MS, sourceUrl);
     const streams = Array.isArray(payload.streams) ? payload.streams : [];
     const video = streams.find((stream) => stream?.codec_type === 'video') || {};
-    const audio = streams.find((stream) => stream?.codec_type === 'audio') || {};
+    const audioStreams = streams.filter((stream) => stream?.codec_type === 'audio');
+    const subtitleStreams = streams.filter((stream) => stream?.codec_type === 'subtitle');
+    const audio = audioStreams[0] || {};
     const format = asRecord(payload.format);
     const profile = compactRecord({
         videoCodec: stringOrNull(video.codec_name),
@@ -452,6 +454,35 @@ async function probeCodecProfile(sourceUrl, userAgent) {
         audioChannels: nullableInt(audio.channels),
         audioChannelLayout: stringOrNull(audio.channel_layout),
         audioSampleRate: nullableInt(audio.sample_rate),
+        audioTracks: audioStreams.map((stream, order) => compactRecord({
+            index: nullableInt(stream.index),
+            order,
+            language: streamLanguage(stream),
+            title: streamTitle(stream, `Audio ${order + 1}`),
+            codec: stringOrNull(stream.codec_name),
+            channels: nullableInt(stream.channels),
+            default: stream.disposition?.default === 1
+        })),
+        subtitles: subtitleStreams.map((stream, order) => {
+            const codec = stringOrNull(stream.codec_name);
+            const subtitleType = subtitleKind(codec);
+            const extractable = subtitleType === 'text';
+            return compactRecord({
+                index: nullableInt(stream.index),
+                order,
+                language: streamLanguage(stream),
+                title: streamTitle(stream, `Subtitle ${order + 1}`),
+                codec,
+                subtitleType,
+                extractable,
+                burnInRequired: subtitleType === 'image',
+                unsupportedReason: extractable
+                    ? null
+                    : (subtitleType === 'image'
+                        ? 'Image subtitles require burn-in video transcoding'
+                        : `Unsupported subtitle codec: ${codec || 'unknown'}`)
+            });
+        }),
         container: stringOrNull(format.format_name),
         durationSeconds: nullableFloat(format.duration),
         bitRate: nullableInt(format.bit_rate),
@@ -460,6 +491,23 @@ async function probeCodecProfile(sourceUrl, userAgent) {
         probedAt: new Date().toISOString()
     });
     return hasUsefulCodecProfile(profile) ? profile : {};
+}
+
+function streamLanguage(stream) {
+    const tags = asRecord(stream?.tags);
+    return stringOrNull(tags.language || tags.LANGUAGE || tags.lang || tags.LANG);
+}
+
+function streamTitle(stream, fallback) {
+    const tags = asRecord(stream?.tags);
+    return stringOrNull(tags.title || tags.TITLE || tags.handler_name || tags.HANDLER_NAME) || fallback;
+}
+
+function subtitleKind(codec) {
+    const normalized = normalizeCodecToken(codec);
+    if (['subrip', 'srt', 'ass', 'ssa', 'webvtt', 'movtext', 'text'].includes(normalized)) return 'text';
+    if (['hdmvpgssubtitle', 'dvdsubtitle', 'dvbsubtitle', 'xsub'].includes(normalized)) return 'image';
+    return normalized ? 'unknown' : '';
 }
 
 function runFfprobe(args, timeoutMs, sourceUrl) {

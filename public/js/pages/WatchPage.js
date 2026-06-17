@@ -355,7 +355,11 @@ class WatchPage {
         this.subtitleEl.textContent = content.subtitle || '';
 
         // Load video
-        await this.loadVideo(streamUrl, { cloudPlaybackSessionId, playbackAttemptId });
+        await this.loadVideo(streamUrl, {
+            cloudPlaybackSessionId,
+            playbackAttemptId,
+            codecProfile: playback.codecProfile || playback.codec_profile || null
+        });
         if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
 
         // Show Now Playing indicator in navbar
@@ -1076,6 +1080,41 @@ class WatchPage {
         this.updateDurationState();
     }
 
+    normalizePlaybackCodecProfile(profile) {
+        if (!profile || typeof profile !== 'object') return null;
+
+        const subtitles = Array.isArray(profile.subtitles)
+            ? profile.subtitles
+            : (Array.isArray(profile.subtitleTracks) ? profile.subtitleTracks : []);
+        const audioTracks = Array.isArray(profile.audioTracks)
+            ? profile.audioTracks
+            : (Array.isArray(profile.audio_tracks) ? profile.audio_tracks : []);
+        const info = {
+            video: profile.video || profile.videoCodec || profile.video_codec || 'unknown',
+            audio: profile.audio || profile.audioCodec || profile.audio_codec || 'unknown',
+            videoProfile: profile.videoProfile || profile.video_profile || '',
+            videoPixelFormat: profile.videoPixelFormat || profile.video_pixel_format || profile.pix_fmt || '',
+            width: Number(profile.width || profile.videoWidth || profile.video_width || 0) || 0,
+            height: Number(profile.height || profile.videoHeight || profile.video_height || 0) || 0,
+            duration: Number(profile.duration || profile.durationSeconds || profile.duration_seconds || 0) || null,
+            audioChannels: Number(profile.audioChannels || profile.audio_channels || profile.channels || 0) || 0,
+            audioTracks,
+            subtitles,
+            container: profile.container || 'unknown',
+            compatible: false,
+            needsRemux: false,
+            needsTranscode: false
+        };
+
+        const hasUsefulInfo = info.width > 0
+            || info.height > 0
+            || subtitles.length > 0
+            || audioTracks.length > 0
+            || info.video !== 'unknown'
+            || info.audio !== 'unknown';
+        return hasUsefulInfo ? info : null;
+    }
+
     async probeStreamInfo(url, settings = {}) {
         const ua = settings.userAgentPreset === 'custom' ? settings.userAgentCustom : settings.userAgentPreset;
         const probeRes = await fetch(`/api/probe?url=${encodeURIComponent(url)}&ua=${encodeURIComponent(ua || '')}&timeout=7000`);
@@ -1135,6 +1174,10 @@ class WatchPage {
         this.updateAudioTracks();
         this.updateCaptionsTracks();
         this.updateDurationState();
+        const codecProfileInfo = this.normalizePlaybackCodecProfile(options.codecProfile);
+        if (codecProfileInfo) {
+            this.applyProbeInfo(codecProfileInfo);
+        }
 
         // Show loading spinner
         this.showLoading();
@@ -1333,7 +1376,7 @@ class WatchPage {
             this.currentPlaybackMode = isGatewaySessionUrl ? 'gateway-session' : 'direct-hls';
             this.currentProcessingOptions = {};
             this.streamStartOffset = 0;
-            this.attachProbeSubtitles(url, probeInfo?.subtitles, 0);
+            this.attachProbeSubtitles(url, (probeInfo || this.currentStreamInfo)?.subtitles, 0);
             this.playHls(finalUrl, { playbackAttemptId });
         } else {
             // Direct playback for mp4/mkv/avi
@@ -1342,7 +1385,7 @@ class WatchPage {
             this.currentPlaybackMode = 'direct';
             this.currentProcessingOptions = {};
             this.streamStartOffset = 0;
-            this.attachProbeSubtitles(url, probeInfo?.subtitles, 0);
+            this.attachProbeSubtitles(url, (probeInfo || this.currentStreamInfo)?.subtitles, 0);
             this.video.src = finalUrl;
             this.video.play().catch(e => {
                 if (e.name !== 'AbortError') console.error('[WatchPage] Autoplay error:', e);

@@ -1072,6 +1072,8 @@ function normalizeCodecProfile(profile: JsonRecord) {
     audioChannels: boundedNullableInt(profile.audioChannels ?? profile.audio_channels ?? profile.channels, 0, 16),
     audioChannelLayout: stringOrNull(profile.audioChannelLayout ?? profile.audio_channel_layout ?? profile.channel_layout),
     audioSampleRate: boundedNullableInt(profile.audioSampleRate ?? profile.audio_sample_rate ?? profile.sample_rate, 0, 384_000),
+    audioTracks: normalizeCodecProfileTracks(profile.audioTracks ?? profile.audio_tracks, "audio"),
+    subtitles: normalizeCodecProfileTracks(profile.subtitles ?? profile.subtitleTracks ?? profile.subtitle_tracks, "subtitle"),
     container: stringOrNull(profile.container),
     durationSeconds: boundedNullableNumber(profile.durationSeconds ?? profile.duration_seconds ?? profile.duration, 0, 24 * 60 * 60),
     bitRate: boundedNullableInt(profile.bitRate ?? profile.bit_rate, 0, 1_000_000_000),
@@ -1079,6 +1081,51 @@ function normalizeCodecProfile(profile: JsonRecord) {
     probeMs: boundedNullableInt(profile.probeMs ?? profile.probe_ms, 0, 120_000),
     probedAt: stringOrNull(profile.probedAt ?? profile.probed_at),
   });
+}
+
+function normalizeCodecProfileTracks(value: unknown, kind: "audio" | "subtitle") {
+  if (!Array.isArray(value)) return [];
+  return value
+    .slice(0, 32)
+    .map((entry, order) => {
+      const track = recordOrEmpty(entry);
+      if (kind === "audio") {
+        return compactRecord({
+          index: boundedNullableInt(track.index, 0, 128),
+          order: boundedNullableInt(track.order, 0, 128) ?? order,
+          language: stringOrNull(track.language ?? track.lang),
+          title: stringOrNull(track.title ?? track.name),
+          codec: stringOrNull(track.codec ?? track.codecName ?? track.codec_name),
+          channels: boundedNullableInt(track.channels, 0, 16),
+          default: booleanOrNull(track.default),
+        });
+      }
+      const subtitleType = stringOrNull(track.subtitleType ?? track.subtitle_type) || null;
+      const extractable = booleanOrNull(track.extractable);
+      return compactRecord({
+        index: boundedNullableInt(track.index, 0, 128),
+        order: boundedNullableInt(track.order, 0, 128) ?? order,
+        language: stringOrNull(track.language ?? track.lang),
+        title: stringOrNull(track.title ?? track.name),
+        codec: stringOrNull(track.codec ?? track.codecName ?? track.codec_name),
+        subtitleType,
+        extractable,
+        burnInRequired: booleanOrNull(track.burnInRequired ?? track.burn_in_required),
+        unsupportedReason: stringOrNull(track.unsupportedReason ?? track.unsupported_reason),
+      });
+    })
+    .filter((track) => Object.keys(track).length > 0);
+}
+
+function booleanOrNull(value: unknown) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (["true", "1", "yes"].includes(normalized)) return true;
+    if (["false", "0", "no"].includes(normalized)) return false;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) return value !== 0;
+  return null;
 }
 
 function hasUsefulCodecProfile(profile: JsonRecord) {
