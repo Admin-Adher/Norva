@@ -26,6 +26,7 @@ const STOP_CONFLICTING_OWNER_SESSIONS = (process.env.STOP_CONFLICTING_OWNER_SESS
 const FFMPEG_USER_AGENT = process.env.FFMPEG_USER_AGENT ||
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36 Norva/1.0';
 const MAX_LOG_TAIL = 12000;
+const GATEWAY_VERSION = 24;
 // Fallback audio path: plain AAC-LC stereo @48k. Source HE-AAC / unusual sample
 // rates can make hls.js label the track mp4a.40.5 (HE-AAC), and Chrome's MSE
 // may reject the append. Copy audio only when the codec hint is browser-safe.
@@ -33,6 +34,14 @@ const TRANSCODE_AUDIO_ARGS = ['-c:a', 'aac', '-profile:a', 'aac_low', '-ar', '48
 
 const sessions = new Map();
 const lastFailures = [];
+const probeStats = {
+    attempts: 0,
+    successes: 0,
+    failures: 0,
+    empty: 0,
+    last: null,
+    lastFailure: null
+};
 
 app.disable('x-powered-by');
 app.use(express.json({ limit: '1mb' }));
@@ -44,8 +53,12 @@ app.get('/health', (req, res) => {
     res.json({
         ok: true,
         service: 'norva-media-gateway',
-        version: 23,
+        version: GATEWAY_VERSION,
         codecProbe: true,
+        codecProbeTimeoutMs: CODEC_PROBE_TIMEOUT_MS,
+        codecProbeAnalyzeDurationUs: CODEC_PROBE_ANALYZE_DURATION_US,
+        codecProbeSizeBytes: CODEC_PROBE_SIZE_BYTES,
+        probeStats,
         activeSessions: activeSessionCount(),
         totalSessions: sessions.size,
         lastFailureCount: lastFailures.length,
@@ -140,6 +153,7 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
                     codecProfileSource = codecProfileSource ? `${codecProfileSource}+gateway_probe` : 'gateway_probe';
                 }
             } catch (err) {
+                rememberProbeFailure(err.message || String(err), sourceUrl);
                 console.warn('[media-gateway] codec probe skipped:', sanitizeLog(err.message || String(err), sourceUrl));
             }
         }
@@ -464,6 +478,7 @@ function hasHeAacMarker(value) {
 
 async function probeCodecProfile(sourceUrl, userAgent) {
     const startedAt = Date.now();
+    probeStats.attempts += 1;
     const args = [
         '-v', 'error',
         '-rw_timeout', '8000000',
@@ -531,7 +546,43 @@ async function probeCodecProfile(sourceUrl, userAgent) {
         probeMs: Math.max(1, Date.now() - startedAt),
         probedAt: new Date().toISOString()
     });
-    return hasUsefulCodecProfile(profile) ? profile : {};
+    if (hasUsefulCodecProfile(profile)) {
+        probeStats.successes += 1;
+        probeStats.last = compactRecord({
+            ok: true,
+            streamCount: streams.length,
+            videoCount: streams.filter((stream) => stream?.codec_type === 'video').length,
+            audioCount: audioStreams.length,
+            subtitleCount: subtitleStreams.length,
+            extractableSubtitleCount: profile.subtitles.filter((track) => track.extractable === true).length,
+            probeMs: profile.probeMs,
+            time: profile.probedAt
+        });
+        return profile;
+    }
+
+    probeStats.empty += 1;
+    probeStats.last = {
+        ok: false,
+        reason: 'empty_profile',
+        streamCount: streams.length,
+        probeMs: Math.max(1, Date.now() - startedAt),
+        time: new Date().toISOString()
+    };
+    return {};
+}
+
+function rememberProbeFailure(detail, sourceUrl) {
+    probeStats.failures += 1;
+    probeStats.lastFailure = {
+        detail: sanitizeLog(detail || 'Codec probe failed', sourceUrl).slice(0, 1000),
+        time: new Date().toISOString()
+    };
+    probeStats.last = {
+        ok: false,
+        reason: 'probe_failed',
+        time: probeStats.lastFailure.time
+    };
 }
 
 function streamLanguage(stream) {
