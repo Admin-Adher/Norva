@@ -868,6 +868,7 @@ class SeriesPage {
         if (!sourceId || !seriesId) return;
 
         try {
+            await this.prepareForPlaybackSession();
             const info = await API.proxy.xtream.seriesInfo(sourceId, seriesId);
             if (!info?.episodes) return;
 
@@ -1124,6 +1125,7 @@ class SeriesPage {
         const episodeNum = episodeEl.querySelector('.episode-number')?.textContent?.replace('E', '') || '1';
 
         try {
+            await this.prepareForPlaybackSession();
             const result = await API.proxy.xtream.getStreamUrl(
                 sourceId,
                 episodeId,
@@ -1171,6 +1173,13 @@ class SeriesPage {
         } catch (err) {
             console.error('Error playing episode:', err);
         }
+    }
+
+    async prepareForPlaybackSession() {
+        await Promise.allSettled([
+            this.app?.player?.stop?.(),
+            this.app?.pages?.watch?.releasePlaybackPipelineForRetry?.()
+        ]);
     }
 
     async toggleFavorite(group, btn) {

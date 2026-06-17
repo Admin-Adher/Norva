@@ -3291,6 +3291,7 @@ class WatchPage {
         };
 
         try {
+            await this.releasePlaybackPipelineForRetry();
             const result = await API.proxy.xtream.getStreamUrl(
                 this.content.sourceId,
                 episodeId,

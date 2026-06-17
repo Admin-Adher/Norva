@@ -960,9 +960,17 @@ class MoviesPage {
         modal.classList.add('active');
     }
 
+    async prepareForPlaybackSession() {
+        await Promise.allSettled([
+            this.app?.player?.stop?.(),
+            this.app?.pages?.watch?.releasePlaybackPipelineForRetry?.()
+        ]);
+    }
+
     async playMovie(movie, { versions = null, resumeTime = 0 } = {}) {
         try {
             const container = movie.container_extension || 'mp4';
+            await this.prepareForPlaybackSession();
             const result = await API.proxy.xtream.getStreamUrl(
                 movie.sourceId,
                 movie.stream_id,
