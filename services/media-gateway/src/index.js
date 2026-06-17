@@ -44,7 +44,7 @@ app.get('/health', (req, res) => {
     res.json({
         ok: true,
         service: 'norva-media-gateway',
-        version: 22,
+        version: 23,
         codecProbe: true,
         activeSessions: activeSessionCount(),
         totalSessions: sessions.size,
@@ -368,10 +368,9 @@ function appendSubtitleOutputs(args, session) {
 
     for (const track of tracks) {
         args.push(
-            '-map', `0:${track.index}`,
-            '-an',
-            '-vn',
+            '-map', `0:${track.index}?`,
             '-c:s', 'webvtt',
+            '-flush_packets', '1',
             '-f', 'webvtt',
             path.join(session.outputDir, `sub_${track.index}.vtt`)
         );
