@@ -1613,6 +1613,10 @@ class VideoPlayer {
         this.populateQualityMenu();
         this.updateQualityBadge();
         try {
+            const previousChannel = this.currentChannel;
+            await this.stop();
+            if (previousChannel) this.currentChannel = previousChannel;
+
             const fmt = (this.settings && this.settings.streamFormat) || 'm3u8';
             const res = await window.API.proxy.xtream.getStreamUrl(variant.sourceId, variant.streamId, 'live', fmt);
             const url = res && (res.url || res.streamUrl);
