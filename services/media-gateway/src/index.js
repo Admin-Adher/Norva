@@ -21,12 +21,13 @@ const XTREAM_REQUEST_TIMEOUT_MS = clampInt(process.env.XTREAM_REQUEST_TIMEOUT_MS
 const CODEC_PROBE_TIMEOUT_MS = clampInt(process.env.CODEC_PROBE_TIMEOUT_MS, 12_000, 1_000, 30_000);
 const CODEC_PROBE_ANALYZE_DURATION_US = clampInt(process.env.CODEC_PROBE_ANALYZE_DURATION_US, 2_000_000, 250_000, 20_000_000);
 const CODEC_PROBE_SIZE_BYTES = clampInt(process.env.CODEC_PROBE_SIZE_BYTES, 2_000_000, 64_000, 20_000_000);
+const MAX_SUBTITLE_TRACKS = clampInt(process.env.MAX_SUBTITLE_TRACKS, 32, 1, 64);
 const STOP_CONFLICTING_SOURCE_SESSIONS = (process.env.STOP_CONFLICTING_SOURCE_SESSIONS || 'true') !== 'false';
 const STOP_CONFLICTING_OWNER_SESSIONS = (process.env.STOP_CONFLICTING_OWNER_SESSIONS || 'true') !== 'false';
 const FFMPEG_USER_AGENT = process.env.FFMPEG_USER_AGENT ||
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36 Norva/1.0';
 const MAX_LOG_TAIL = 12000;
-const GATEWAY_VERSION = 24;
+const GATEWAY_VERSION = 25;
 // Fallback audio path: plain AAC-LC stereo @48k. Source HE-AAC / unusual sample
 // rates can make hls.js label the track mp4a.40.5 (HE-AAC), and Chrome's MSE
 // may reject the append. Copy audio only when the codec hint is browser-safe.
@@ -58,6 +59,7 @@ app.get('/health', (req, res) => {
         codecProbeTimeoutMs: CODEC_PROBE_TIMEOUT_MS,
         codecProbeAnalyzeDurationUs: CODEC_PROBE_ANALYZE_DURATION_US,
         codecProbeSizeBytes: CODEC_PROBE_SIZE_BYTES,
+        maxSubtitleTracks: MAX_SUBTITLE_TRACKS,
         probeStats,
         activeSessions: activeSessionCount(),
         totalSessions: sessions.size,
@@ -412,7 +414,7 @@ function subtitleTracksForSession(session) {
             seen.add(track.index);
             return true;
         })
-        .slice(0, 8);
+        .slice(0, MAX_SUBTITLE_TRACKS);
 }
 
 function shouldCopyAudio(session) {
