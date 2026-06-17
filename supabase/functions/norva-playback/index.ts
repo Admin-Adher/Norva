@@ -931,6 +931,12 @@ function gatewayPlaybackHints(playbackHint: JsonRecord) {
       0,
       16,
     ),
+    audioStreamIndex: boundedNullableInt(
+      playbackHint.audioStreamIndex ??
+        playbackHint.audio_stream_index,
+      0,
+      1024,
+    ),
     audioMode: stringOrNull(playbackHint.audioMode ?? playbackHint.audio_mode),
     videoCodec: stringOrNull(
       playbackHint.videoCodec ??

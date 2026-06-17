@@ -27,7 +27,7 @@ const STOP_CONFLICTING_OWNER_SESSIONS = (process.env.STOP_CONFLICTING_OWNER_SESS
 const FFMPEG_USER_AGENT = process.env.FFMPEG_USER_AGENT ||
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36 Norva/1.0';
 const MAX_LOG_TAIL = 12000;
-const GATEWAY_VERSION = 26;
+const GATEWAY_VERSION = 27;
 // Fallback audio path: plain AAC-LC stereo @48k. Source HE-AAC / unusual sample
 // rates can make hls.js label the track mp4a.40.5 (HE-AAC), and Chrome's MSE
 // may reject the append. Copy audio only when the codec hint is browser-safe.
@@ -118,6 +118,8 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             audioCodec,
             audioProfile,
             audioChannels,
+            audioStreamIndex,
+            audio_stream_index,
             audioMode,
             videoCodec,
             clientAudioPassthrough,
@@ -188,6 +190,7 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             audioCodec: stringOrNull(audioCodec) || stringOrNull(normalizedPlaybackHint.audioCodec) || stringOrNull(normalizedPlaybackHint.audio_codec) || stringOrNull(normalizedCodecProfile.audioCodec) || stringOrNull(normalizedCodecProfile.audio_codec) || stringOrNull(normalizedCodecProfile.audio),
             audioProfile: stringOrNull(audioProfile) || stringOrNull(normalizedPlaybackHint.audioProfile) || stringOrNull(normalizedPlaybackHint.audio_profile) || stringOrNull(normalizedCodecProfile.audioProfile) || stringOrNull(normalizedCodecProfile.audio_profile),
             audioChannels: nullableInt(audioChannels ?? normalizedPlaybackHint.audioChannels ?? normalizedPlaybackHint.audio_channels ?? normalizedCodecProfile.audioChannels ?? normalizedCodecProfile.audio_channels ?? normalizedCodecProfile.channels),
+            audioStreamIndex: normalizeAudioStreamIndex(audioStreamIndex ?? audio_stream_index ?? normalizedPlaybackHint.audioStreamIndex ?? normalizedPlaybackHint.audio_stream_index),
             audioMode: stringOrNull(audioMode) || stringOrNull(normalizedPlaybackHint.audioMode) || stringOrNull(normalizedPlaybackHint.audio_mode),
             videoCodec: stringOrNull(videoCodec) || stringOrNull(normalizedPlaybackHint.videoCodec) || stringOrNull(normalizedPlaybackHint.video_codec) || stringOrNull(normalizedCodecProfile.videoCodec) || stringOrNull(normalizedCodecProfile.video_codec) || stringOrNull(normalizedCodecProfile.video),
             clientAudioPassthrough: clientAudioPassthrough === false || normalizedPlaybackHint.clientAudioPassthrough === false || normalizedPlaybackHint.client_audio_passthrough === false ? false : true,
@@ -224,6 +227,7 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             status: session.status,
             mode: session.mode,
             audioMode: audioModeForSession(session),
+            audioStreamIndex: session.audioStreamIndex,
             codecProfile: session.codecProfile,
             codecProfileSource: session.codecProfileSource || null,
             hlsUrl,
@@ -294,6 +298,9 @@ async function bootstrap() {
 function startFfmpeg(session) {
     const segmentPattern = path.join(session.outputDir, 'segment-%05d.ts');
     const audioArgs = audioArgsForSession(session);
+    const audioMap = Number.isInteger(session.audioStreamIndex)
+        ? `0:${session.audioStreamIndex}?`
+        : '0:a:0?';
     const args = [
         '-hide_banner',
         '-loglevel', 'warning',
@@ -310,7 +317,7 @@ function startFfmpeg(session) {
         '-i', session.sourceUrl,
         '-fflags', '+genpts',
         '-map', '0:v:0?',
-        '-map', '0:a:0?',
+        '-map', audioMap,
         '-max_muxing_queue_size', '1024'
     ];
 
@@ -438,7 +445,9 @@ function shouldCopyAudio(session) {
     if (requestedMode === 'transcode' || requestedMode === 'encode') return false;
     if (session.clientAudioPassthrough === false) return false;
 
+    const selectedTrack = selectedAudioTrackForSession(session);
     const codec = normalizeCodecToken(
+        selectedTrack?.codec ||
         session.audioCodec ||
         session.codecProfile?.audioCodec ||
         session.codecProfile?.audio_codec ||
@@ -449,12 +458,20 @@ function shouldCopyAudio(session) {
         session.codecProfile?.audioProfile ||
         session.codecProfile?.audio_profile
     );
-    const channels = nullableInt(session.audioChannels ?? session.codecProfile?.audioChannels ?? session.codecProfile?.audio_channels ?? session.codecProfile?.channels);
+    const channels = nullableInt(selectedTrack?.channels ?? session.audioChannels ?? session.codecProfile?.audioChannels ?? session.codecProfile?.audio_channels ?? session.codecProfile?.channels);
 
     if (!codec) return false;
     if (channels && channels > 2) return false;
     if (isKnownUnsafeAudio(codec, profile)) return false;
     return isKnownBrowserSafeAudio(codec, profile);
+}
+
+function selectedAudioTrackForSession(session) {
+    const tracks = Array.isArray(session.codecProfile?.audioTracks)
+        ? session.codecProfile.audioTracks
+        : (Array.isArray(session.codecProfile?.audio_tracks) ? session.codecProfile.audio_tracks : []);
+    if (!tracks.length || !Number.isInteger(session.audioStreamIndex)) return null;
+    return tracks.find((track) => nullableInt(track?.index) === session.audioStreamIndex) || null;
 }
 
 function isKnownBrowserSafeAudio(codec, profile) {
@@ -891,6 +908,7 @@ function serializeSession(req, session) {
         status: session.status,
         mode: session.mode,
         audioMode: audioModeForSession(session),
+        audioStreamIndex: session.audioStreamIndex,
         codecProfile: session.codecProfile,
         codecProfileSource: session.codecProfileSource || null,
         hlsUrl: publicUrl(req, `/sessions/${session.id}/playlist.m3u8?token=${encodeURIComponent(session.accessToken)}`),
@@ -1007,6 +1025,12 @@ function nullableInt(value) {
     if (value === null || value === undefined || value === '') return null;
     const parsed = Number.parseInt(String(value), 10);
     return Number.isFinite(parsed) ? parsed : null;
+}
+
+function normalizeAudioStreamIndex(value) {
+    const parsed = nullableInt(value);
+    if (!Number.isInteger(parsed) || parsed < 0 || parsed > 1024) return null;
+    return parsed;
 }
 
 function nullableFloat(value) {

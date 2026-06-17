@@ -641,6 +641,7 @@ const CloudAdapter = (() => {
             audioCodec: query.get('audioCodec'),
             audioProfile: query.get('audioProfile'),
             audioChannels: query.get('audioChannels'),
+            audioStreamIndex: numericPlaybackHint(query.get('audioStreamIndex') ?? query.get('audio_stream_index')),
             audioMode: query.get('audioMode'),
             videoCodec: query.get('videoCodec'),
             clientAudioPassthrough: query.get('clientAudioPassthrough') === '1' ? true : undefined

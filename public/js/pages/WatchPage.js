@@ -109,6 +109,8 @@ class WatchPage {
         this._timelineScrubbing = false;
         this._lastCommittedSeekPercent = null;
         this._lastCommittedSeekAt = 0;
+        this._audioSwitchPromise = null;
+        this._audioSwitchRequestId = 0;
         this.currentSessionId = null;
         this.activeSessionIds = new Set();
         this.currentCloudPlaybackSessionId = null;
@@ -415,14 +417,7 @@ class WatchPage {
     getCurrentAudioPreference() {
         const selectedProbe = this.getSelectedAudioTrack();
         if (this.selectedAudioTrackUserChoice && selectedProbe) {
-            return {
-                source: 'probe',
-                streamIndex: selectedProbe.index,
-                label: this.getTrackLabel(selectedProbe, 'Audio', 'audio'),
-                language: selectedProbe.language || null,
-                codec: selectedProbe.codec || null,
-                channels: selectedProbe.channels || null
-            };
+            return this.audioPreferenceFromProbeTrack(selectedProbe);
         }
 
         if (this.hls && Number.isInteger(this.hls.audioTrack) && this.hls.audioTrack >= 0) {
@@ -453,6 +448,18 @@ class WatchPage {
         }
 
         return null;
+    }
+
+    audioPreferenceFromProbeTrack(track) {
+        if (!track) return null;
+        return {
+            source: 'probe',
+            streamIndex: track.index,
+            label: this.getTrackLabel(track, 'Audio', 'audio'),
+            language: track.language || null,
+            codec: track.codec || null,
+            channels: track.channels || null
+        };
     }
 
     getCurrentSubtitlePreference() {
@@ -2601,6 +2608,7 @@ class WatchPage {
             ...(MediaUtils.playbackHintFromItem
                 ? MediaUtils.playbackHintFromItem(this.content, { container, streamType: itemType })
                 : { container, streamType: itemType }),
+            ...this.getSelectedAudioPlaybackOptions(),
             seekOffset: target,
             startOffset: target,
             resumeTime: target
@@ -3484,7 +3492,10 @@ class WatchPage {
                     btn.dataset.source,
                     parseInt(btn.dataset.index, 10),
                     btn.dataset.streamIndex !== undefined ? parseInt(btn.dataset.streamIndex, 10) : null
-                );
+                ).catch(error => {
+                    console.error('[WatchPage] Audio selection failed:', error);
+                    this.handlePlaybackFailure('Failed to switch audio track.').catch(() => { });
+                });
             });
         });
     }
@@ -3534,14 +3545,64 @@ class WatchPage {
         this.saveResumeSnapshotThrottled(true);
         this.saveProgress({ force: true });
 
-        if (previous === streamIndex && this.currentPlaybackMode === 'transcode-session') {
+        if (previous === streamIndex && ['gateway-session', 'transcode-session'].includes(this.currentPlaybackMode)) {
             return;
         }
 
-        await this.restartWithSelectedAudioTrack();
+        await this.queueSelectedAudioTrackRestart();
     }
 
-    async restartWithSelectedAudioTrack() {
+    queueSelectedAudioTrackRestart() {
+        const requestId = ++this._audioSwitchRequestId;
+        const run = (this._audioSwitchPromise || Promise.resolve())
+            .catch(() => { })
+            .then(() => {
+                if (requestId !== this._audioSwitchRequestId) return false;
+                return this.restartWithSelectedAudioTrack(requestId);
+            });
+
+        this._audioSwitchPromise = run.finally(() => {
+            if (requestId === this._audioSwitchRequestId) {
+                this._audioSwitchPromise = null;
+            }
+        });
+        return this._audioSwitchPromise;
+    }
+
+    isStaleAudioSwitch(requestId) {
+        return Number.isInteger(requestId) && requestId !== this._audioSwitchRequestId;
+    }
+
+    setSelectedAudioPreference(track) {
+        const audio = this.audioPreferenceFromProbeTrack(track);
+        if (!audio || !this.content) return null;
+
+        const playbackPreferences = {
+            ...(this.content.playbackPreferences || this.content.playback_preferences || {}),
+            audio
+        };
+        this.content.playbackPreferences = playbackPreferences;
+        this.setPendingPlaybackPreferences(playbackPreferences);
+        return playbackPreferences;
+    }
+
+    getSelectedAudioPlaybackOptions() {
+        if (!this.selectedAudioTrackUserChoice) return {};
+        const selected = this.getSelectedAudioTrack();
+        if (!selected) return {};
+        return this.getAudioProcessingOptions({
+            ...(this.currentStreamInfo || {}),
+            audioTracks: this.audioTracks
+        });
+    }
+
+    async restartWithSelectedAudioTrack(requestId = this._audioSwitchRequestId) {
+        if (this.isStaleAudioSwitch(requestId)) return false;
+
+        if (this.isCloudPlaybackMode() && this.content?.sourceId && this.content?.id) {
+            return this.restartCloudGatewayWithSelectedAudioTrack(requestId);
+        }
+
         const sourceUrl = this.baseStreamUrl || this.currentUrl;
         const selected = this.getSelectedAudioTrack();
         if (!sourceUrl || !selected) return;
@@ -3549,6 +3610,7 @@ class WatchPage {
         const position = Math.max(0, this.getPlaybackPosition());
         const autoplay = !this.video?.paused;
         const info = this.currentStreamInfo || {};
+        const playbackPreferences = this.setSelectedAudioPreference(selected);
         const videoCodec = info.video || this.currentProcessingOptions.videoCodec || 'unknown';
         const videoMode = this.currentProcessingOptions.videoMode
             || this.getTranscodeVideoMode(info);
@@ -3573,6 +3635,7 @@ class WatchPage {
         }
 
         await this.stopTranscodeSession();
+        if (this.isStaleAudioSwitch(requestId)) return false;
 
         if (this.video) {
             this.video.pause();
@@ -3587,8 +3650,95 @@ class WatchPage {
         this.updateDurationState();
 
         const playlistUrl = await this.startTranscodeSession(sourceUrl, processingOptions);
+        if (this.isStaleAudioSwitch(requestId)) {
+            await this.stopTranscodeSession();
+            return false;
+        }
         this.playHlsOrDirect(playlistUrl, { autoplay });
+        if (playbackPreferences) this.saveResumeSnapshotThrottled(true);
         this.setVolumeFromStorage();
+        return true;
+    }
+
+    async restartCloudGatewayWithSelectedAudioTrack(requestId = this._audioSwitchRequestId) {
+        const selected = this.getSelectedAudioTrack();
+        if (!selected || !this.content?.sourceId || !this.content?.id) return false;
+
+        const position = Math.max(0, Math.floor(this.getPlaybackPosition()));
+        const autoplay = !this.video?.paused;
+        const itemType = this.content.type === 'series' ? 'series' : 'movie';
+        const container = this.containerExtension || this.content.containerExtension || 'mp4';
+        const audioOptions = this.getAudioProcessingOptions({
+            ...(this.currentStreamInfo || {}),
+            audioTracks: this.audioTracks
+        });
+        const playbackPreferences = this.setSelectedAudioPreference(selected);
+        const audioLabel = this.getTrackLabel(selected, 'Selected audio', 'audio');
+
+        console.log(`[WatchPage] Restarting Gateway with audio track ${selected.index}: ${audioLabel}`);
+        this.hidePlaybackError();
+        this.showLoading();
+        this.updateTranscodeStatus('transcoding', `Audio: ${audioLabel}`);
+        this.trackPlaybackPosition({ position, force: true });
+        this.saveResumeSnapshotThrottled(true);
+
+        await this.releasePlaybackPipelineForRetry();
+        if (this.isStaleAudioSwitch(requestId)) return false;
+
+        const playbackHint = {
+            ...(MediaUtils.playbackHintFromItem
+                ? MediaUtils.playbackHintFromItem(this.content, { container, streamType: itemType })
+                : { container, streamType: itemType }),
+            ...audioOptions,
+            seekOffset: position,
+            startOffset: position,
+            resumeTime: position
+        };
+
+        let result = null;
+        try {
+            result = await API.proxy.xtream.getStreamUrl(
+                this.content.sourceId,
+                this.content.id,
+                itemType,
+                container,
+                playbackHint
+            );
+        } catch (error) {
+            console.error('[WatchPage] Gateway audio switch failed:', error);
+            await this.handlePlaybackFailure(error?.message || 'Failed to switch audio track.');
+            return false;
+        }
+
+        if (this.isStaleAudioSwitch(requestId)) {
+            await this.cleanupStaleCloudPlaybackSession(result?.sessionId);
+            return false;
+        }
+
+        if (!result?.url) {
+            await this.handlePlaybackFailure('Failed to switch audio track.');
+            return false;
+        }
+
+        this.content.cloudPlaybackSessionId = result.sessionId || null;
+        this.resumeTime = position;
+        await this.loadVideo(result.url, this.playbackMetadataFromResult(result, {
+            seekOffset: position,
+            startOffset: position,
+            playbackAttemptId: this._playbackAttemptId,
+            cloudPlaybackSessionId: result.sessionId || null,
+            playbackPreferences
+        }));
+
+        if (autoplay) {
+            this.video?.play?.().catch(e => {
+                if (e.name !== 'AbortError') console.error('[WatchPage] Gateway audio switch play error:', e);
+            });
+        } else {
+            this.video?.pause?.();
+        }
+        this.setVolumeFromStorage();
+        return true;
     }
 
     clearExternalSubtitleTracks() {
