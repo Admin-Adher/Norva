@@ -445,13 +445,33 @@ class WatchPage {
         }
     }
 
+    findResumeSnapshotEpisode(snapshot) {
+        const episodeId = snapshot?.content?.id;
+        const episodesBySeason = snapshot?.content?.seriesInfo?.episodes;
+        if (!episodeId || !episodesBySeason || typeof episodesBySeason !== 'object') return null;
+
+        for (const episodes of Object.values(episodesBySeason)) {
+            if (!Array.isArray(episodes)) continue;
+            const found = episodes.find(episode => String(episode?.id) === String(episodeId));
+            if (found) return found;
+        }
+        return null;
+    }
+
     buildResumePlaybackHint(snapshot) {
         const content = snapshot?.content || {};
         const streamType = content.type === 'series' ? 'series' : 'movie';
         const container = snapshot.containerExtension || content.containerExtension || 'mp4';
+        const resumeEpisode = streamType === 'series' ? this.findResumeSnapshotEpisode(snapshot) : null;
         const item = {
+            ...(resumeEpisode || {}),
             ...content,
+            type: resumeEpisode ? 'episode' : content.type,
+            streamType,
+            itemType: streamType,
+            container_extension: resumeEpisode?.container_extension || content.containerExtension || container,
             codecProfile: snapshot.playback?.codecProfile || content.codecProfile || content.defaultVariant?.codecProfile
+                || resumeEpisode?.codecProfile || resumeEpisode?.codec_profile
         };
         const base = { container, streamType };
         return MediaUtils.playbackHintFromItem
