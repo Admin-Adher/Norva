@@ -4569,6 +4569,7 @@ class WatchPage {
         }
 
         this.clearPendingPreference('subtitle');
+        this.savePlaybackPreferences(this.getMergedPlaybackPreferences());
         this.updateCaptionsTracks();
         this.closeCaptionsMenu();
         this.saveResumeSnapshotThrottled(true);
