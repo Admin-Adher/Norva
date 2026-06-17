@@ -130,7 +130,7 @@ async function route(
       body: {
         ok: true,
         service: "norva-cloud",
-        version: 13,
+        version: 14,
         entitlements: true,
         entitlementsMode: entitlementRuntime.mode,
         entitlementsEnforced: entitlementRuntime.enforced,
@@ -1895,7 +1895,7 @@ async function requestGatewayXtreamEpg(
     }),
   });
   const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
+  if (!response || !response.ok) {
     throw new HttpError(response.status, "Media gateway refused the EPG request", payload);
   }
   return recordOrEmpty(payload);
@@ -2066,23 +2066,57 @@ async function fetchText(url: string, timeoutMs: number, maxBytes: number, heade
 
 async function proxyImage(req: Request, url: URL) {
   const targetUrl = assertPublicImageUrl(url.searchParams.get("url") ?? "");
-  const response = await fetchImageWithFallback(targetUrl, 12000);
+  const response = await fetchImageWithFallback(targetUrl, 12000).catch(() => null);
   if (!response.ok) {
-    return new Response("Failed to fetch image", {
-      status: response.status,
-      headers: corsHeaders(req),
-    });
+    return imageFallback(req);
   }
 
-  const contentType = response.headers.get("content-type") || "image/png";
+  const contentType = imageContentType(response.headers.get("content-type"), targetUrl);
+  if (!contentType) {
+    await response.body?.cancel().catch(() => undefined);
+    return imageFallback(req);
+  }
+
   return new Response(response.body, {
     status: 200,
     headers: {
       ...corsHeaders(req),
       "Content-Type": contentType,
+      "Cross-Origin-Resource-Policy": "cross-origin",
+      "Timing-Allow-Origin": "*",
+      "X-Content-Type-Options": "nosniff",
       "Cache-Control": "public, max-age=86400, s-maxage=86400",
     },
   });
+}
+
+function imageFallback(req: Request) {
+  return new Response(null, {
+    status: 302,
+    headers: {
+      ...corsHeaders(req),
+      "Location": "https://norva-eight.vercel.app/img/norva-media-placeholder.png",
+      "Cross-Origin-Resource-Policy": "cross-origin",
+      "Timing-Allow-Origin": "*",
+      "X-Content-Type-Options": "nosniff",
+      "X-Norva-Image-Fallback": "1",
+      "Cache-Control": "public, max-age=3600, s-maxage=3600",
+    },
+  });
+}
+
+function imageContentType(value: string | null, url: string) {
+  const type = (value || "").split(";")[0].trim().toLowerCase();
+  if (type.startsWith("image/")) return type;
+  if (type === "application/octet-stream" || !type) {
+    const path = new URL(url).pathname.toLowerCase();
+    if (path.endsWith(".jpg") || path.endsWith(".jpeg")) return "image/jpeg";
+    if (path.endsWith(".png")) return "image/png";
+    if (path.endsWith(".webp")) return "image/webp";
+    if (path.endsWith(".gif")) return "image/gif";
+    if (path.endsWith(".svg")) return "image/svg+xml; charset=utf-8";
+  }
+  return "";
 }
 
 async function fetchImageWithFallback(url: string, timeoutMs: number) {
