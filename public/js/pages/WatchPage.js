@@ -111,6 +111,7 @@ class WatchPage {
         this._pendingLocalSeekTimer = null;
         this._gatewaySeekRetry = null;
         this._gatewaySeekRequestId = 0;
+        this._suppressMediaErrorsUntil = 0;
         this._timelineScrubbing = false;
         this._lastCommittedSeekPercent = null;
         this._lastCommittedSeekAt = 0;
@@ -500,10 +501,12 @@ class WatchPage {
     getCurrentSubtitlePreference() {
         const selectedProbe = this.getSelectedSubtitleTrack();
         if (selectedProbe) {
+            const subtitleTracks = this.getExtractableSubtitleTracks();
+            const trackIndex = subtitleTracks.indexOf(selectedProbe);
             return {
                 source: 'probe',
                 streamIndex: selectedProbe.index,
-                label: this.getSubtitleTrackLabel(selectedProbe, 'Subtitles'),
+                label: this.getSubtitleMenuLabel(selectedProbe, subtitleTracks, trackIndex, 'Subtitles'),
                 language: selectedProbe.inferredLanguage || selectedProbe.language || null,
                 offsetSeconds: this.normalizeSubtitleOffset(this.subtitleOffsetSeconds)
             };
@@ -574,10 +577,14 @@ class WatchPage {
         const label = String(preference.label || '').trim().toLowerCase();
         if (label) {
             const byLabel = tracks.find(track => {
+                const trackIndex = tracks.indexOf(track);
                 const candidate = type === 'subtitle'
                     ? this.getSubtitleTrackLabel(track, '').toLowerCase()
                     : this.getTrackLabel(track, '', type).toLowerCase();
-                return candidate && candidate === label;
+                const menuCandidate = type === 'subtitle'
+                    ? this.getSubtitleMenuLabel(track, tracks, trackIndex, '').toLowerCase()
+                    : '';
+                return candidate && (candidate === label || menuCandidate === label);
             });
             if (byLabel) return byLabel;
         }
@@ -1514,6 +1521,7 @@ class WatchPage {
 
             if (this.video) {
                 try {
+                    this._suppressMediaErrorsUntil = Date.now() + 2500;
                     this.video.pause();
                     this.video.removeAttribute('src');
                     this.video.load();
@@ -1772,13 +1780,67 @@ class WatchPage {
 
         const title = !this.isGenericTrackTitle(track.title, 'subtitle') ? String(track.title).trim() : '';
         const languageLabel = this.getLanguageDisplayName(track.inferredLanguage || track.language);
+        const roleLabels = this.getSubtitleRoleLabels(track);
+        const parts = [];
 
-        if (languageLabel && title && title.toLowerCase() !== languageLabel.toLowerCase()) {
-            return `${languageLabel} - ${title}`;
+        if (languageLabel) parts.push(languageLabel);
+        if (title && (!languageLabel || title.toLowerCase() !== languageLabel.toLowerCase())) {
+            parts.push(title);
         }
-        if (languageLabel) return languageLabel;
-        if (title) return title;
+        roleLabels.forEach(label => {
+            if (!parts.some(part => part.toLowerCase() === label.toLowerCase())) {
+                parts.push(label);
+            }
+        });
+
+        if (parts.length) return parts.join(' - ');
         return fallback;
+    }
+
+    hasTrackDisposition(track, keys = []) {
+        if (!track || !Array.isArray(keys)) return false;
+        const disposition = track.disposition && typeof track.disposition === 'object'
+            ? track.disposition
+            : {};
+        return keys.some(key => {
+            const value = track[key] ?? disposition[key];
+            return value === true || value === 1 || value === '1' || String(value).toLowerCase() === 'true';
+        });
+    }
+
+    getSubtitleRoleLabels(track) {
+        const labels = [];
+        const title = String(track?.title || track?.label || track?.name || '').toLowerCase();
+
+        if (this.hasTrackDisposition(track, ['forced']) || /\b(forced|force)\b/i.test(title)) {
+            labels.push('Forced');
+        }
+
+        if (this.hasTrackDisposition(track, ['hearingImpaired', 'hearing_impaired', 'sdh'])
+            || /\b(sdh|hearing|malentendant|malentendants|cc)\b/i.test(title)) {
+            labels.push('SDH');
+        }
+
+        return labels;
+    }
+
+    getSubtitleMenuLabel(track, allTracks = [], index = -1, fallback = 'Subtitles') {
+        const base = this.getSubtitleTrackLabel(track, fallback);
+        const tracks = Array.isArray(allTracks) ? allTracks : [];
+        const normalizedBase = base.toLowerCase();
+        const bases = tracks.map(candidate => this.getSubtitleTrackLabel(candidate, fallback).toLowerCase());
+        const duplicateCount = bases.filter(label => label === normalizedBase).length;
+
+        if (duplicateCount > 1) {
+            const safeIndex = Number.isInteger(index) && index >= 0 ? index : tracks.indexOf(track);
+            const occurrence = bases
+                .slice(0, safeIndex + 1)
+                .filter(label => label === normalizedBase)
+                .length || (safeIndex + 1);
+            return `${base} - Piste ${occurrence}`;
+        }
+
+        return base;
     }
 
     getTrackLabel(track, fallback, type = 'track') {
@@ -2525,13 +2587,15 @@ class WatchPage {
         this.trackPlaybackPosition({ position: target, force: true });
         this.saveResumeSnapshotThrottled(true);
         this._pendingSeekTarget = target;
-        Promise.resolve(this.seekToTime(target, { immediate: true }))
+        const debounceGatewaySeek = this.currentPlaybackMode === 'gateway-session'
+            && this.canRestartForSeek(target);
+        Promise.resolve(this.seekToTime(target, { immediate: !debounceGatewaySeek }))
             .catch(error => {
                 console.error('[WatchPage] Seek failed:', error);
                 this.handlePlaybackFailure('Failed to seek in this title.').catch(() => { });
             })
             .finally(() => {
-                if (!this._timelineScrubbing && this._pendingSeekTarget === target) {
+                if (!debounceGatewaySeek && !this._timelineScrubbing && this._pendingSeekTarget === target) {
                     this._pendingSeekTarget = null;
                 }
             });
@@ -2563,11 +2627,19 @@ class WatchPage {
         this.updateDurationState();
 
         clearTimeout(this._seekDebounceTimer);
+        if (this.currentPlaybackMode === 'gateway-session') {
+            this._gatewaySeekRequestId += 1;
+            this._gatewaySeekRetry = null;
+        }
         this._seekDebounceTimer = setTimeout(() => {
             const nextTarget = this._pendingSeekTarget;
             this._pendingSeekTarget = null;
             this._seekDebounceTimer = null;
-            this.seekToTime(nextTarget, { immediate: true });
+            Promise.resolve(this.seekToTime(nextTarget, { immediate: true }))
+                .catch(error => {
+                    console.error('[WatchPage] Scheduled seek failed:', error);
+                    this.handlePlaybackFailure('Failed to seek in this title.').catch(() => { });
+                });
         }, delay);
     }
 
@@ -2621,9 +2693,10 @@ class WatchPage {
         const duration = this.getValidDuration();
         const seekable = this.video.seekable;
         const hasSeekableRange = seekable && seekable.length > 0;
+        const requiresSeekableRange = this.currentPlaybackMode === 'gateway-session';
         let isAvailable = false;
 
-        if (duration && target <= duration + 0.75) {
+        if (!requiresSeekableRange && duration && target <= duration + 0.75) {
             isAvailable = true;
         } else if (hasSeekableRange) {
             for (let i = 0; i < seekable.length; i += 1) {
@@ -3024,6 +3097,7 @@ class WatchPage {
 
         const seekable = this.video.seekable;
         if (!seekable || seekable.length === 0) {
+            if (this.currentPlaybackMode === 'gateway-session') return false;
             return Boolean(nativeDuration && localTarget >= 0 && localTarget <= nativeDuration);
         }
 
@@ -3243,6 +3317,8 @@ class WatchPage {
                 this.hidePlaybackError();
                 return;
             }
+            const currentSrc = this.video?.currentSrc || this.video?.src || '';
+            if (!currentSrc && Date.now() < this._suppressMediaErrorsUntil) return;
             // Benign: fired when the src is cleared during stop()/teardown
             if (/Empty src/i.test(error.message || '')) return;
             console.error('[WatchPage] Video error:', error.code, error.message);
@@ -4077,7 +4153,8 @@ class WatchPage {
 
         engine.trackMeta.inferredLanguage = inferred;
         if (engine.trackEl) {
-            engine.trackEl.label = this.getSubtitleTrackLabel(engine.trackMeta, 'Subtitles');
+            const subtitleTracks = this.getExtractableSubtitleTracks();
+            engine.trackEl.label = this.getSubtitleMenuLabel(engine.trackMeta, subtitleTracks, subtitleTracks.indexOf(engine.trackMeta), 'Subtitles');
             engine.trackEl.srclang = inferred;
         }
         return true;
@@ -4361,7 +4438,8 @@ class WatchPage {
         // so updates never reload/flicker the displayed subtitle
         const trackEl = document.createElement('track');
         trackEl.kind = 'subtitles';
-        trackEl.label = this.getTrackLabel(selected, 'Subtitles', 'subtitle');
+        const subtitleTracks = this.getExtractableSubtitleTracks();
+        trackEl.label = this.getSubtitleMenuLabel(selected, subtitleTracks, subtitleTracks.indexOf(selected), 'Subtitles');
         trackEl.srclang = this.normalizeTrackLanguage(selected.language);
         trackEl.dataset.norvaProbeSubtitle = 'true';
         trackEl.dataset.streamIndex = String(selected.index);
@@ -4462,7 +4540,7 @@ class WatchPage {
                     source: 'probe',
                     index,
                     streamIndex: track.index,
-                    label: this.getTrackLabel(track, probeSubtitleTracks.length > 1 ? `Subtitles ${index + 1}` : 'Subtitles', 'subtitle'),
+                    label: this.getSubtitleMenuLabel(track, probeSubtitleTracks, index, probeSubtitleTracks.length > 1 ? `Subtitles ${index + 1}` : 'Subtitles'),
                     active
                 };
             });

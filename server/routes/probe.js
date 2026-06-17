@@ -333,6 +333,10 @@ function analyzeProbeResult(probeResult, url) {
             codec: s.codec_name,
             subtitleType: kind,
             extractable,
+            default: s.disposition?.default === 1,
+            forced: s.disposition?.forced === 1,
+            hearingImpaired: s.disposition?.hearing_impaired === 1,
+            disposition: s.disposition || {},
             burnInRequired: kind === 'image',
             unsupportedReason: extractable
                 ? null
