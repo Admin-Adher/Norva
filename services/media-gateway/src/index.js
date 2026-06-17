@@ -27,7 +27,7 @@ const STOP_CONFLICTING_OWNER_SESSIONS = (process.env.STOP_CONFLICTING_OWNER_SESS
 const FFMPEG_USER_AGENT = process.env.FFMPEG_USER_AGENT ||
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36 Norva/1.0';
 const MAX_LOG_TAIL = 12000;
-const GATEWAY_VERSION = 28;
+const GATEWAY_VERSION = 29;
 // Fallback audio path: plain AAC-LC stereo @48k. Source HE-AAC / unusual sample
 // rates can make hls.js label the track mp4a.40.5 (HE-AAC), and Chrome's MSE
 // may reject the append. Copy audio only when the codec hint is browser-safe.
@@ -65,6 +65,15 @@ app.get('/health', (req, res) => {
         totalSessions: sessions.size,
         lastFailureCount: lastFailures.length,
         time: new Date().toISOString()
+    });
+});
+
+app.get('/debug/failures', requireGatewayAuth, (req, res) => {
+    res.json({
+        ok: true,
+        service: 'norva-media-gateway',
+        version: GATEWAY_VERSION,
+        failures: lastFailures
     });
 });
 
