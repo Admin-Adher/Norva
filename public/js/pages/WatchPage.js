@@ -537,6 +537,7 @@ class WatchPage {
                 ...snapshot.content,
                 type: snapshot.content.type,
                 resumeTime: this.getResumeRestorePosition(snapshot.position, snapshot.duration),
+                durationHint: this.normalizeDuration(snapshot.content.durationHint) || this.normalizeDuration(snapshot.duration),
                 currentSeason: snapshot.currentSeason || snapshot.content.currentSeason || null,
                 currentEpisode: snapshot.currentEpisode || snapshot.content.currentEpisode || null,
                 containerExtension: snapshot.containerExtension || snapshot.content.containerExtension || 'mp4'
@@ -656,6 +657,17 @@ class WatchPage {
         };
     }
 
+    durationFromCodecProfile(profile) {
+        if (!profile || typeof profile !== 'object') return null;
+        return this.normalizeDuration(
+            profile.durationSeconds ??
+            profile.duration_seconds ??
+            profile.duration ??
+            profile.formatDuration ??
+            profile.format_duration
+        );
+    }
+
     /**
      * Main entry point - play content
      * @param {Object} content - Movie or episode info
@@ -686,7 +698,8 @@ class WatchPage {
         this.returnPage = content.type === 'movie' ? 'movies' : 'series';
         // Known total duration (TMDB runtime / episode duration) used as a
         // timeline fallback when ffprobe can't determine the duration
-        this.durationHint = this.normalizeDuration(content.durationHint);
+        const codecProfileDuration = this.durationFromCodecProfile(playbackMetadata.codecProfile || playbackMetadata.codec_profile);
+        this.durationHint = this.normalizeDuration(content.durationHint) || codecProfileDuration;
         this._lastKnownPlaybackPosition = this.resumeTime || 0;
         this._lastKnownPlaybackDuration = this.durationHint || 0;
         this.resetTrackSelectionState();
