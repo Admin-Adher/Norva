@@ -884,11 +884,12 @@ class WatchPage {
 
             await this.releasePlaybackPipelineForRetry();
             const resumePosition = this.getResumeRestorePosition(snapshot.position, snapshot.duration);
+            const resumePlan = this.getGatewaySeekPlan(resumePosition);
             const playbackHint = {
                 ...this.buildResumePlaybackHint(snapshot),
-                seekOffset: resumePosition,
-                startOffset: resumePosition,
-                resumeTime: resumePosition
+                seekOffset: resumePlan.sessionStart,
+                startOffset: resumePlan.sessionStart,
+                resumeTime: resumePlan.sessionStart
             };
             const result = await API.proxy.xtream.getStreamUrl(
                 content.sourceId,
@@ -902,8 +903,9 @@ class WatchPage {
                 throw new Error('Restored playback did not return a media URL');
             }
 
-            result.seekOffset = resumePosition;
-            result.startOffset = resumePosition;
+            result.seekOffset = resumePlan.sessionStart;
+            result.startOffset = resumePlan.sessionStart;
+            result.resumeTarget = resumePlan.target;
             content.cloudPlaybackSessionId = result.sessionId || null;
             await this.play(content, result.url, result);
             return true;
@@ -1019,8 +1021,26 @@ class WatchPage {
         this.seriesInfo = content.seriesInfo || null;
         this.currentSeason = content.currentSeason || null;
         this.currentEpisode = content.currentEpisode || null;
-        const requestedResumeTime = Number(content.resumeTime ?? playbackMetadata.seekOffset ?? playbackMetadata.startOffset ?? 0);
+        const requestedResumeTime = Number(
+            content.resumeTime ??
+            playbackMetadata.resumeTarget ??
+            playbackMetadata.resume_target ??
+            playbackMetadata.seekOffset ??
+            playbackMetadata.startOffset ??
+            0
+        );
         this.resumeTime = Number.isFinite(requestedResumeTime) && requestedResumeTime > 0 ? Math.floor(requestedResumeTime) : 0;
+        const sessionStartOffset = Number(
+            playbackMetadata.seekOffset ??
+            playbackMetadata.seek_offset ??
+            playbackMetadata.startOffset ??
+            playbackMetadata.start_offset ??
+            playbackMetadata.resumeTime ??
+            0
+        );
+        const loadSeekOffset = Number.isFinite(sessionStartOffset) && sessionStartOffset > 0
+            ? Math.floor(sessionStartOffset)
+            : (this.resumeTime || 0);
         this.containerExtension = content.containerExtension || 'mp4';
         this.returnPage = content.type === 'movie' ? 'movies' : 'series';
         // Known total duration (TMDB runtime / episode duration) used as a
@@ -1076,9 +1096,14 @@ class WatchPage {
             cloudPlaybackSessionId,
             playbackAttemptId,
             codecProfile: playbackMetadata.codecProfile || playbackMetadata.codec_profile || null,
-            seekOffset: this.resumeTime || playbackMetadata.seekOffset || playbackMetadata.startOffset || 0
+            seekOffset: loadSeekOffset
         });
         if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
+
+        const localResumeTarget = Math.max(0, (this.resumeTime || 0) - (loadSeekOffset || 0));
+        if (localResumeTarget > 0.25 && this.isGatewayPlaybackUrl(streamUrl)) {
+            this.queuePendingLocalSeek(localResumeTarget);
+        }
 
         // Show Now Playing indicator in navbar
         this.showNowPlaying(content.title);
@@ -2696,16 +2721,26 @@ class WatchPage {
         return Math.min(safeTarget, requested || 20);
     }
 
+    getGatewaySeekPlan(targetTime, requestedPreRoll = 20) {
+        const target = Math.max(0, Math.floor(Number(targetTime) || 0));
+        const preRoll = this.getGatewaySeekPreRoll(target, requestedPreRoll);
+        const sessionStart = Math.max(0, target - preRoll);
+        return {
+            target,
+            preRoll,
+            sessionStart,
+            localSeekTarget: Math.max(0, target - sessionStart)
+        };
+    }
+
     async restartCloudGatewayStreamAt(targetTime, options = {}) {
         if (!this.content?.sourceId || !this.content?.id) return;
 
         const requestId = Number.isInteger(options.requestId)
             ? options.requestId
             : ++this._gatewaySeekRequestId;
-        const target = Math.max(0, Math.floor(targetTime || 0));
-        const preRoll = this.getGatewaySeekPreRoll(target, options.preRollSeconds ?? 20);
-        const sessionStart = Math.max(0, target - preRoll);
-        const localSeekTarget = Math.max(0, target - sessionStart);
+        const seekPlan = this.getGatewaySeekPlan(targetTime, options.preRollSeconds ?? 20);
+        const { target, preRoll, sessionStart, localSeekTarget } = seekPlan;
         const autoplay = !this.video?.paused;
         const itemType = this.content.type === 'series' ? 'series' : 'movie';
         const container = this.containerExtension || this.content.containerExtension || 'mp4';

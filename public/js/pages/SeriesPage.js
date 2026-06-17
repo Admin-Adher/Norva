@@ -891,13 +891,14 @@ class SeriesPage {
 
             const container = episode.container_extension || h.data?.containerExtension || 'mp4';
             const resumeOffset = this.getResumeOffset(h.progress, h.duration);
+            const resumePlan = this.getGatewayResumePlan(resumeOffset);
             const playbackHint = MediaUtils.playbackHintFromItem
                 ? MediaUtils.playbackHintFromItem(episode, { container, streamType: 'series' })
                 : { container, streamType: 'series' };
-            if (resumeOffset > 0) {
-                playbackHint.seekOffset = resumeOffset;
-                playbackHint.startOffset = resumeOffset;
-                playbackHint.resumeTime = resumeOffset;
+            if (resumePlan.sessionStart > 0) {
+                playbackHint.seekOffset = resumePlan.sessionStart;
+                playbackHint.startOffset = resumePlan.sessionStart;
+                playbackHint.resumeTime = resumePlan.sessionStart;
             }
             const playbackPreferences = h.data?.playbackPreferences || h.data?.playback_preferences || null;
             const audioStreamIndex = Number(playbackPreferences?.audio?.streamIndex ?? playbackPreferences?.audio?.stream_index);
@@ -925,11 +926,16 @@ class SeriesPage {
                 currentSeason: seasonNum,
                 currentEpisode: episodeNum,
                 containerExtension: container,
-                resumeTime: resumeOffset,
+                resumeTime: resumePlan.target,
                 playbackPreferences,
                 durationHint: h.duration || MediaUtils.parseDurationToSeconds(episode.duration),
                 cloudPlaybackSessionId: result.sessionId
-            }, result.url, { ...result, seekOffset: resumeOffset, startOffset: resumeOffset });
+            }, result.url, {
+                ...result,
+                seekOffset: resumePlan.sessionStart,
+                startOffset: resumePlan.sessionStart,
+                resumeTarget: resumePlan.target
+            });
         } catch (err) {
             console.error('Error resuming episode:', err);
         }
@@ -1151,14 +1157,15 @@ class SeriesPage {
             const h = (this.historyItems || []).find(x =>
                 x.item_type === 'episode' && String(x.item_id) === String(episodeId));
             const resumeOffset = h ? this.getResumeOffset(h.progress, h.duration) : 0;
+            const resumePlan = this.getGatewayResumePlan(resumeOffset);
             const playbackPreferences = h?.data?.playbackPreferences || h?.data?.playback_preferences || null;
             const playbackHint = MediaUtils.playbackHintFromItem
                 ? MediaUtils.playbackHintFromItem(episode, { container, streamType: 'series' })
                 : { container, streamType: 'series' };
-            if (resumeOffset > 0) {
-                playbackHint.seekOffset = resumeOffset;
-                playbackHint.startOffset = resumeOffset;
-                playbackHint.resumeTime = resumeOffset;
+            if (resumePlan.sessionStart > 0) {
+                playbackHint.seekOffset = resumePlan.sessionStart;
+                playbackHint.startOffset = resumePlan.sessionStart;
+                playbackHint.resumeTime = resumePlan.sessionStart;
             }
             const audioStreamIndex = Number(playbackPreferences?.audio?.streamIndex ?? playbackPreferences?.audio?.stream_index);
             if (Number.isInteger(audioStreamIndex)) {
@@ -1196,11 +1203,16 @@ class SeriesPage {
                         currentSeason: seasonNum,
                         currentEpisode: episodeNum,
                         containerExtension: container,
-                        resumeTime: resumeOffset,
+                        resumeTime: resumePlan.target,
                         playbackPreferences,
                         durationHint,
                         cloudPlaybackSessionId: result.sessionId
-                    }, result.url, { ...result, seekOffset: resumeOffset, startOffset: resumeOffset });
+                    }, result.url, {
+                        ...result,
+                        seekOffset: resumePlan.sessionStart,
+                        startOffset: resumePlan.sessionStart,
+                        resumeTarget: resumePlan.target
+                    });
                 }
             }
         } catch (err) {
@@ -1213,6 +1225,18 @@ class SeriesPage {
             this.app?.player?.stop?.(),
             this.app?.pages?.watch?.releasePlaybackPipelineForRetry?.()
         ]);
+    }
+
+    getGatewayResumePlan(resumeOffset, requestedPreRoll = 20) {
+        const target = Math.max(0, Math.floor(Number(resumeOffset) || 0));
+        const requested = Math.max(0, Math.floor(Number(requestedPreRoll) || 0));
+        const preRoll = target > 5 ? Math.min(target, requested || 20) : 0;
+        const sessionStart = Math.max(0, target - preRoll);
+        return {
+            target,
+            sessionStart,
+            localSeekTarget: Math.max(0, target - sessionStart)
+        };
     }
 
     async toggleFavorite(group, btn) {

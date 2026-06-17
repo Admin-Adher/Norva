@@ -983,17 +983,30 @@ class MoviesPage {
         ]);
     }
 
+    getGatewayResumePlan(resumeOffset, requestedPreRoll = 20) {
+        const target = Math.max(0, Math.floor(Number(resumeOffset) || 0));
+        const requested = Math.max(0, Math.floor(Number(requestedPreRoll) || 0));
+        const preRoll = target > 5 ? Math.min(target, requested || 20) : 0;
+        const sessionStart = Math.max(0, target - preRoll);
+        return {
+            target,
+            sessionStart,
+            localSeekTarget: Math.max(0, target - sessionStart)
+        };
+    }
+
     async playMovie(movie, { versions = null, resumeTime = 0, playbackPreferences = null } = {}) {
         try {
             const container = movie.container_extension || 'mp4';
             const resumeOffset = Math.max(0, Math.floor(Number(resumeTime) || 0));
+            const resumePlan = this.getGatewayResumePlan(resumeOffset);
             const playbackHint = MediaUtils.playbackHintFromItem
                 ? MediaUtils.playbackHintFromItem(movie, { container })
                 : { container };
-            if (resumeOffset > 0) {
-                playbackHint.seekOffset = resumeOffset;
-                playbackHint.startOffset = resumeOffset;
-                playbackHint.resumeTime = resumeOffset;
+            if (resumePlan.sessionStart > 0) {
+                playbackHint.seekOffset = resumePlan.sessionStart;
+                playbackHint.startOffset = resumePlan.sessionStart;
+                playbackHint.resumeTime = resumePlan.sessionStart;
             }
             const audioStreamIndex = Number(playbackPreferences?.audio?.streamIndex ?? playbackPreferences?.audio?.stream_index);
             if (Number.isInteger(audioStreamIndex)) {
@@ -1029,13 +1042,18 @@ class MoviesPage {
                         sourceId: movie.sourceId,
                         categoryId: movie.category_id,
                         containerExtension: container,
-                        resumeTime: resumeOffset,
+                        resumeTime: resumePlan.target,
                         playbackPreferences,
                         durationHint: movie.tmdb?.runtime ? movie.tmdb.runtime * 60 : null,
                         versions: versionList,
                         versionIndex: 0,
                         cloudPlaybackSessionId: result.sessionId
-                    }, result.url, { ...result, seekOffset: resumeOffset, startOffset: resumeOffset });
+                    }, result.url, {
+                        ...result,
+                        seekOffset: resumePlan.sessionStart,
+                        startOffset: resumePlan.sessionStart,
+                        resumeTarget: resumePlan.target
+                    });
                 }
             }
         } catch (err) {
