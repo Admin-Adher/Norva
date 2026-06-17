@@ -38,6 +38,11 @@ class SourceManager {
         return Boolean(err?.deviceTokenInvalid) || /invalid\s+(bearer\s+)?(device\s+)?token|device\s+token|expired\s+(device\s+)?token/i.test(text);
     }
 
+    isMissingCloudTokenError(err) {
+        const text = `${err?.message || ''} ${err?.payload?.error || ''} ${err?.payload?.message || ''}`;
+        return /missing\s+(bearer\s+)?token|not\s+signed\s+in|auth\s+session\s+missing/i.test(text);
+    }
+
     /**
      * Show a styled warning modal with Cancel/Proceed buttons
      * @param {Object} options - { title, message, details, proceedText, cancelText }
@@ -1357,6 +1362,11 @@ class SourceManager {
             } catch (err) {
                 if (this.isInvalidDeviceTokenError(err)) {
                     console.info('[SourceManager] Cloud device session expired; sync polling paused.');
+                    this.syncPollTimeout = null;
+                    return;
+                }
+                if (this.isMissingCloudTokenError(err)) {
+                    console.info('[SourceManager] Cloud session unavailable; sync polling paused.');
                     this.syncPollTimeout = null;
                     return;
                 }
