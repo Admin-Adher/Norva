@@ -286,6 +286,10 @@ async function createPlaybackSession(
       audioMode: gateway.audioMode,
     });
   }
+  const responseCodecProfile = mergeCodecProfileAnnotations(
+    firstUsefulCodecProfile(requestedPlaybackHint.codecProfile, requestedPlaybackHint.codec_profile),
+    recordOrEmpty(gateway.codecProfile),
+  );
   return {
     session,
     playback: {
@@ -296,7 +300,7 @@ async function createPlaybackSession(
       gatewayRequired: !gateway.hlsUrl,
       startupMs: gateway.startupMs ?? null,
       audioMode: gateway.audioMode ?? null,
-      codecProfile: gateway.codecProfile ?? null,
+      codecProfile: hasUsefulCodecProfile(responseCodecProfile) ? responseCodecProfile : null,
     },
   };
 }
@@ -978,8 +982,8 @@ async function persistObservedCodecProfile(
   },
 ) {
   const itemType = options.itemType === "series" ? "series" : options.itemType === "movie" ? "movie" : "";
-  const codecProfile = normalizeCodecProfile(options.codecProfile);
-  if (!itemType || !options.itemId || !hasUsefulCodecProfile(codecProfile)) return;
+  const observedCodecProfile = normalizeCodecProfile(options.codecProfile);
+  if (!itemType || !options.itemId || !hasUsefulCodecProfile(observedCodecProfile)) return;
 
   const observedAt = new Date().toISOString();
   const { data: item, error } = await db
@@ -997,6 +1001,10 @@ async function persistObservedCodecProfile(
 
   const metadata = recordOrEmpty(item?.metadata);
   const playbackHint = recordOrEmpty(item?.playback_hint);
+  const codecProfile = mergeCodecProfileAnnotations(
+    firstUsefulCodecProfile(metadata.codecProfile, metadata.codec_profile, playbackHint.codecProfile, playbackHint.codec_profile),
+    observedCodecProfile,
+  );
   const mergedPlaybackHint = mergePlaybackHints(playbackHint, compactRecord({
     codecProfile,
     audioMode: options.audioMode || undefined,
@@ -1060,6 +1068,48 @@ function firstUsefulCodecProfile(...values: unknown[]) {
   return {};
 }
 
+function mergeCodecProfileAnnotations(existingValue: unknown, observedValue: unknown) {
+  const existing = normalizeCodecProfile(recordOrEmpty(existingValue));
+  const observed = normalizeCodecProfile(recordOrEmpty(observedValue));
+  if (!hasUsefulCodecProfile(observed)) return existing;
+  if (!hasUsefulCodecProfile(existing)) return observed;
+
+  return compactRecord({
+    ...observed,
+    subtitles: mergeSubtitleTrackAnnotations(existing.subtitles, observed.subtitles),
+  });
+}
+
+function mergeSubtitleTrackAnnotations(existingValue: unknown, observedValue: unknown) {
+  const existing = Array.isArray(existingValue) ? existingValue.map((track) => recordOrEmpty(track)) : [];
+  const observed = Array.isArray(observedValue) ? observedValue.map((track) => recordOrEmpty(track)) : [];
+  if (!observed.length) return observed;
+
+  return observed.map((track, order) => {
+    const match = findMatchingCodecTrack(existing, track, order);
+    const inferredLanguage = stringOrNull(track.inferredLanguage ?? track.inferred_language)
+      ?? stringOrNull(match?.inferredLanguage ?? match?.inferred_language);
+    return compactRecord({
+      ...track,
+      inferredLanguage,
+    });
+  });
+}
+
+function findMatchingCodecTrack(tracks: JsonRecord[], target: JsonRecord, order: number) {
+  const targetIndex = boundedNullableInt(target.index, 0, 128);
+  if (targetIndex !== null) {
+    const byIndex = tracks.find((track) => boundedNullableInt(track.index, 0, 128) === targetIndex);
+    if (byIndex) return byIndex;
+  }
+
+  const targetOrder = boundedNullableInt(target.order, 0, 128) ?? order;
+  const byOrder = tracks.find((track) => boundedNullableInt(track.order, 0, 128) === targetOrder);
+  if (byOrder) return byOrder;
+
+  return tracks[order] ?? null;
+}
+
 function normalizeCodecProfile(profile: JsonRecord) {
   return compactRecord({
     videoCodec: stringOrNull(profile.videoCodec ?? profile.video_codec ?? profile.video),
@@ -1106,6 +1156,7 @@ function normalizeCodecProfileTracks(value: unknown, kind: "audio" | "subtitle")
         index: boundedNullableInt(track.index, 0, 128),
         order: boundedNullableInt(track.order, 0, 128) ?? order,
         language: stringOrNull(track.language ?? track.lang),
+        inferredLanguage: stringOrNull(track.inferredLanguage ?? track.inferred_language),
         title: stringOrNull(track.title ?? track.name),
         codec: stringOrNull(track.codec ?? track.codecName ?? track.codec_name),
         subtitleType,
@@ -1131,7 +1182,12 @@ function booleanOrNull(value: unknown) {
 function hasUsefulCodecProfile(profile: JsonRecord) {
   return Boolean(
     stringOrNull(profile.videoCodec ?? profile.video_codec ?? profile.video) ||
-    stringOrNull(profile.audioCodec ?? profile.audio_codec ?? profile.audio)
+    stringOrNull(profile.audioCodec ?? profile.audio_codec ?? profile.audio) ||
+    (Array.isArray(profile.audioTracks) && profile.audioTracks.length > 0) ||
+    (Array.isArray(profile.audio_tracks) && profile.audio_tracks.length > 0) ||
+    (Array.isArray(profile.subtitles) && profile.subtitles.length > 0) ||
+    (Array.isArray(profile.subtitleTracks) && profile.subtitleTracks.length > 0) ||
+    (Array.isArray(profile.subtitle_tracks) && profile.subtitle_tracks.length > 0)
   );
 }
 
