@@ -22,12 +22,13 @@ const CODEC_PROBE_TIMEOUT_MS = clampInt(process.env.CODEC_PROBE_TIMEOUT_MS, 12_0
 const CODEC_PROBE_ANALYZE_DURATION_US = clampInt(process.env.CODEC_PROBE_ANALYZE_DURATION_US, 2_000_000, 250_000, 20_000_000);
 const CODEC_PROBE_SIZE_BYTES = clampInt(process.env.CODEC_PROBE_SIZE_BYTES, 2_000_000, 64_000, 20_000_000);
 const MAX_SUBTITLE_TRACKS = clampInt(process.env.MAX_SUBTITLE_TRACKS, 32, 1, 64);
+const PROVIDER_SLOT_RELEASE_DELAY_MS = clampInt(process.env.PROVIDER_SLOT_RELEASE_DELAY_MS, 1_500, 0, 10_000);
 const STOP_CONFLICTING_SOURCE_SESSIONS = (process.env.STOP_CONFLICTING_SOURCE_SESSIONS || 'true') !== 'false';
 const STOP_CONFLICTING_OWNER_SESSIONS = (process.env.STOP_CONFLICTING_OWNER_SESSIONS || 'true') !== 'false';
 const FFMPEG_USER_AGENT = process.env.FFMPEG_USER_AGENT ||
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36 Norva/1.0';
 const MAX_LOG_TAIL = 12000;
-const GATEWAY_VERSION = 31;
+const GATEWAY_VERSION = 32;
 // Fallback audio path: plain AAC-LC stereo @48k. Source HE-AAC / unusual sample
 // rates can make hls.js label the track mp4a.40.5 (HE-AAC), and Chrome's MSE
 // may reject the append. Copy audio only when the codec hint is browser-safe.
@@ -157,12 +158,18 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
         }
 
         const normalizedOwnerKey = normalizeSessionKey(ownerKey);
+        let stoppedConflictingSessions = 0;
         if (STOP_CONFLICTING_OWNER_SESSIONS && normalizedOwnerKey) {
-            await stopConflictingOwnerSessions(normalizedOwnerKey);
+            stoppedConflictingSessions += await stopConflictingOwnerSessions(normalizedOwnerKey);
         }
 
         if (STOP_CONFLICTING_SOURCE_SESSIONS) {
-            await stopConflictingSourceSessions(sourceUrl);
+            stoppedConflictingSessions += await stopConflictingSourceSessions(sourceUrl);
+        }
+
+        if (stoppedConflictingSessions > 0 && PROVIDER_SLOT_RELEASE_DELAY_MS > 0) {
+            console.log(`[media-gateway] waiting ${PROVIDER_SLOT_RELEASE_DELAY_MS}ms for provider slot release after stopping ${stoppedConflictingSessions} session(s)`);
+            await sleep(PROVIDER_SLOT_RELEASE_DELAY_MS);
         }
 
         const id = crypto.randomUUID();
@@ -811,7 +818,7 @@ async function stopSession(session) {
 
 async function stopConflictingSourceSessions(sourceUrl) {
     const sourceKey = sourceSessionKey(sourceUrl);
-    if (!sourceKey) return;
+    if (!sourceKey) return 0;
 
     const conflicts = Array.from(sessions.values()).filter((session) => {
         if (session.sourceKey !== sourceKey) return false;
@@ -822,11 +829,12 @@ async function stopConflictingSourceSessions(sourceUrl) {
         console.log(`[media-gateway] stopping previous session for same source: ${session.id}`);
         await stopSession(session);
     }));
+    return conflicts.length;
 }
 
 async function stopConflictingOwnerSessions(ownerKey) {
     const normalizedOwnerKey = normalizeSessionKey(ownerKey);
-    if (!normalizedOwnerKey) return;
+    if (!normalizedOwnerKey) return 0;
 
     const conflicts = Array.from(sessions.values()).filter((session) => {
         if (session.ownerKey !== normalizedOwnerKey) return false;
@@ -837,6 +845,7 @@ async function stopConflictingOwnerSessions(ownerKey) {
         console.log(`[media-gateway] stopping previous session for same owner: ${session.id}`);
         await stopSession(session);
     }));
+    return conflicts.length;
 }
 
 function activeSessionCount() {

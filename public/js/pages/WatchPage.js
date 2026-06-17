@@ -3685,6 +3685,8 @@ class WatchPage {
 
         await this.releasePlaybackPipelineForRetry();
         if (this.isStaleAudioSwitch(requestId)) return false;
+        await this.waitForProviderSlotRelease();
+        if (this.isStaleAudioSwitch(requestId)) return false;
 
         const playbackHint = {
             ...(MediaUtils.playbackHintFromItem
@@ -3698,13 +3700,7 @@ class WatchPage {
 
         let result = null;
         try {
-            result = await API.proxy.xtream.getStreamUrl(
-                this.content.sourceId,
-                this.content.id,
-                itemType,
-                container,
-                playbackHint
-            );
+            result = await this.requestAudioSwitchGatewayUrl(itemType, container, playbackHint, requestId);
         } catch (error) {
             console.error('[WatchPage] Gateway audio switch failed:', error);
             await this.handlePlaybackFailure(error?.message || 'Failed to switch audio track.');
@@ -3740,6 +3736,34 @@ class WatchPage {
         }
         this.setVolumeFromStorage();
         return true;
+    }
+
+    async waitForProviderSlotRelease(delay = 1400) {
+        await new Promise(resolve => setTimeout(resolve, delay));
+    }
+
+    async requestAudioSwitchGatewayUrl(itemType, container, playbackHint, requestId) {
+        let lastError = null;
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+            if (this.isStaleAudioSwitch(requestId)) return null;
+            try {
+                return await API.proxy.xtream.getStreamUrl(
+                    this.content.sourceId,
+                    this.content.id,
+                    itemType,
+                    container,
+                    playbackHint
+                );
+            } catch (error) {
+                lastError = error;
+                if (attempt === 0) {
+                    console.warn('[WatchPage] Audio switch session failed, retrying after provider cooldown:', error?.message || error);
+                    await this.waitForProviderSlotRelease(2200);
+                    continue;
+                }
+            }
+        }
+        throw lastError || new Error('Failed to switch audio track.');
     }
 
     clearExternalSubtitleTracks() {
