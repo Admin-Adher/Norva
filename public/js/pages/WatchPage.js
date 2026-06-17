@@ -3946,7 +3946,7 @@ class WatchPage {
         if (!selected || !this.content?.sourceId || !this.content?.id) return false;
 
         const targetPosition = Math.max(0, Math.floor(this.getPlaybackPosition()) - 3);
-        const preRoll = this.getGatewaySeekPreRoll(targetPosition, 20);
+        const preRoll = this.getGatewaySeekPreRoll(targetPosition, 10);
         const sessionStart = Math.max(0, targetPosition - preRoll);
         const localSeekTarget = Math.max(0, targetPosition - sessionStart);
         const autoplay = !this.video?.paused;
@@ -3968,7 +3968,7 @@ class WatchPage {
 
         await this.releasePlaybackPipelineForRetry();
         if (this.isStaleAudioSwitch(requestId)) return false;
-        await this.waitForProviderSlotRelease();
+        await this.waitForProviderSlotRelease(300);
         if (this.isStaleAudioSwitch(requestId)) return false;
 
         const playbackHint = {
@@ -4052,6 +4052,21 @@ class WatchPage {
         await new Promise(resolve => setTimeout(resolve, delay));
     }
 
+    getAudioSwitchRetryDelay(error) {
+        const message = [
+            error?.message,
+            error?.details,
+            error?.status,
+            error?.code
+        ].filter(Boolean).join(' ');
+
+        if (this.isConnectionLimitError(message)) return 2200;
+        if (/502|503|504|UPSTREAM_UNAVAILABLE|ECONNRESET|ETIMEDOUT|timeout|NetworkError|Failed to fetch/i.test(message)) {
+            return 1400;
+        }
+        return 900;
+    }
+
     async requestAudioSwitchGatewayUrl(itemType, container, playbackHint, requestId) {
         let lastError = null;
         for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -4067,8 +4082,9 @@ class WatchPage {
             } catch (error) {
                 lastError = error;
                 if (attempt === 0) {
-                    console.warn('[WatchPage] Audio switch session failed, retrying after provider cooldown:', error?.message || error);
-                    await this.waitForProviderSlotRelease(2200);
+                    const retryDelay = this.getAudioSwitchRetryDelay(error);
+                    console.warn(`[WatchPage] Audio switch session failed, retrying after ${retryDelay}ms provider cooldown:`, error?.message || error);
+                    await this.waitForProviderSlotRelease(retryDelay);
                     continue;
                 }
             }
