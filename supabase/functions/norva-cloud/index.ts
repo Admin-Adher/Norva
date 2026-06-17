@@ -1654,6 +1654,7 @@ async function createPlaybackSession(req: Request, userId: string, db: SupabaseC
   const ttlSeconds = boundedInt(body.ttlSeconds ?? body.ttl_seconds, 900, 60, 7200);
   const expiresAt = new Date(Date.now() + ttlSeconds * 1000).toISOString();
   const targetUrlHash = await sha256Hex(targetUrl);
+  const requestedPlaybackHint = recordOrEmpty(body.playbackHint ?? body.playback_hint);
 
   const { data: session, error } = await db
     .from("cloud_playback_sessions")
@@ -1667,7 +1668,7 @@ async function createPlaybackSession(req: Request, userId: string, db: SupabaseC
       status: mode === "transcode" ? "pending" : "ready",
       target_url_hash: targetUrlHash,
       stream_mime: stringOrNull(body.streamMime ?? body.stream_mime),
-      playback_hint: recordOrEmpty(body.playbackHint ?? body.playback_hint),
+      playback_hint: requestedPlaybackHint,
       expires_at: expiresAt,
     })
     .select("*")
@@ -1697,7 +1698,7 @@ async function createPlaybackSession(req: Request, userId: string, db: SupabaseC
     };
   }
 
-  const gateway = await createGatewaySession(session.id, userId, targetUrl, expiresAt, db);
+  const gateway = await createGatewaySession(session.id, userId, targetUrl, expiresAt, db, requestedPlaybackHint);
   if (sourceId && gateway.startupMs) {
     await recordPlaybackStartupObservation(db, {
       userId,
@@ -1784,6 +1785,7 @@ async function createGatewaySession(
   targetUrl: string,
   expiresAt: string,
   db: SupabaseClient,
+  playbackHint: JsonRecord = {},
 ) {
   const runtimeConfig = await getRuntimeConfig(db);
   if (!runtimeConfig.mediaGatewayUrl || !runtimeConfig.mediaGatewayToken) {
@@ -1802,6 +1804,16 @@ async function createGatewaySession(
     return { status: "pending", session: data, hlsUrl: null, startupMs: null };
   }
 
+  const seekOffset = boundedNullableNumber(
+    playbackHint.seekOffset ??
+      playbackHint.seek_offset ??
+      playbackHint.startOffset ??
+      playbackHint.start_offset ??
+      playbackHint.resumeTime ??
+      playbackHint.resume_time,
+    0,
+    24 * 60 * 60,
+  );
   const startupStartedAt = performance.now();
   const response = await fetch(`${runtimeConfig.mediaGatewayUrl}/sessions`, {
     method: "POST",
@@ -1814,6 +1826,9 @@ async function createGatewaySession(
       ownerKey: await sha256Hex(userId),
       sourceUrl: targetUrl,
       expiresAt,
+      playbackHint: compactRecord(playbackHint),
+      seekOffset,
+      startOffset: seekOffset,
     }),
   });
   const gatewayBody = await response.json().catch(() => ({}));
@@ -2481,6 +2496,13 @@ function boundedNullableInt(value: unknown, min: number, max: number) {
   const parsed = Number.parseInt(String(value), 10);
   if (!Number.isFinite(parsed)) return null;
   return Math.max(min, Math.min(max, parsed));
+}
+
+function boundedNullableNumber(value: unknown, min: number, max: number) {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = Number.parseFloat(String(value));
+  if (!Number.isFinite(parsed)) return null;
+  return Math.max(min, Math.min(max, Math.floor(parsed)));
 }
 
 function stringOr(value: unknown, fallback: string) {

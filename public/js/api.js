@@ -613,11 +613,30 @@ const CloudAdapter = (() => {
         return Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined && entry !== null && entry !== ''));
     }
 
+    function numericPlaybackHint(value) {
+        if (value === null || value === undefined || value === '') return undefined;
+        const parsed = Number.parseFloat(String(value));
+        if (!Number.isFinite(parsed) || parsed < 0) return undefined;
+        return Math.floor(parsed);
+    }
+
     function playbackHintFromQuery(query, container, type = '') {
+        const seekOffset = numericPlaybackHint(
+            query.get('seekOffset') ??
+            query.get('seek_offset') ??
+            query.get('startOffset') ??
+            query.get('start_offset') ??
+            query.get('resumeTime') ??
+            query.get('resume_time') ??
+            query.get('start')
+        );
         return compactPlaybackHint({
             container,
             streamType: type,
             itemType: type,
+            seekOffset,
+            startOffset: seekOffset,
+            resumeTime: seekOffset,
             gatewayMode: query.get('gatewayMode') || query.get('gateway_mode'),
             audioCodec: query.get('audioCodec'),
             audioProfile: query.get('audioProfile'),
@@ -856,6 +875,7 @@ const CloudAdapter = (() => {
                     itemType: type === 'series' ? 'series' : type === 'movie' ? 'movie' : 'live',
                     itemId: streamId,
                     playbackHint,
+                    seekOffset: playbackHint.seekOffset,
                     clientMetadata: _cloudClientTelemetryMetadata(),
                     corsSafe: false,
                     ...(userAgent ? { userAgent } : {})

@@ -115,11 +115,13 @@ class WatchPage {
         this._handlingPlaybackFailure = false;
         this.resumeSnapshotKey = 'norva-watch-resume-v1';
         this.resumeSnapshotTtlMs = 6 * 60 * 60 * 1000;
-        this.resumeSnapshotSaveIntervalMs = 5000;
+        this.resumeSnapshotSaveIntervalMs = 2000;
         this._lastResumeSnapshotSaveAt = 0;
         this._resumeRestorePromise = null;
         this._resumePlaybackMetadata = null;
         this._suspendResumeSnapshotSave = false;
+        this._lastKnownPlaybackPosition = 0;
+        this._lastKnownPlaybackDuration = 0;
 
         // Overlay timer
         this.overlayTimeout = null;
@@ -227,11 +229,18 @@ class WatchPage {
         this.video?.addEventListener('timeupdate', () => {
             this.updateProgress();
             this.markPlaybackUsable();
+            this.trackPlaybackPosition();
             this.saveResumeSnapshotThrottled();
         });
         this.video?.addEventListener('loadedmetadata', () => {
             this.onMetadataLoaded();
             this.markPlaybackUsable();
+            this.trackPlaybackPosition({ force: true });
+            this.saveResumeSnapshotThrottled(true);
+        });
+        this.video?.addEventListener('seeking', () => this.trackPlaybackPosition({ force: true }));
+        this.video?.addEventListener('seeked', () => {
+            this.trackPlaybackPosition({ force: true });
             this.saveResumeSnapshotThrottled(true);
         });
         this.video?.addEventListener('loadeddata', () => this.markPlaybackUsable());
@@ -302,11 +311,11 @@ class WatchPage {
 
         this.updateDurationState();
 
-        window.addEventListener('pagehide', () => this.saveResumeSnapshotThrottled(true));
-        window.addEventListener('beforeunload', () => this.saveResumeSnapshotThrottled(true));
+        window.addEventListener('pagehide', () => this.persistPlaybackStateForExit());
+        window.addEventListener('beforeunload', () => this.persistPlaybackStateForExit());
         document.addEventListener('visibilitychange', () => {
             if (document.visibilityState === 'hidden') {
-                this.saveResumeSnapshotThrottled(true);
+                this.persistPlaybackStateForExit();
             }
         });
     }
@@ -364,8 +373,47 @@ class WatchPage {
     }
 
     getResumeSnapshotPosition() {
-        const position = this.getPlaybackPosition?.() ?? this.video?.currentTime ?? this.resumeTime ?? 0;
+        this.trackPlaybackPosition();
+        const position = Math.max(
+            this._lastKnownPlaybackPosition || 0,
+            this.getPlaybackPosition?.() || 0,
+            this.video?.currentTime || 0,
+            this.resumeTime || 0
+        );
         return Math.max(0, Math.floor(Number.isFinite(position) ? position : 0));
+    }
+
+    trackPlaybackPosition(options = {}) {
+        const rawDuration = this.getDisplayDuration?.() || this.durationHint || this._lastKnownPlaybackDuration || 0;
+        const duration = Number(rawDuration);
+        if (Number.isFinite(duration) && duration > 0) {
+            this._lastKnownPlaybackDuration = Math.floor(duration);
+        }
+
+        const rawPosition = Number.isFinite(Number(options.position))
+            ? Number(options.position)
+            : (this.getPlaybackPosition?.() || this.video?.currentTime || this.resumeTime || 0);
+        if (!Number.isFinite(rawPosition) || rawPosition < 0) return this._lastKnownPlaybackPosition || 0;
+
+        const position = Math.floor(rawPosition);
+        if (options.force || position >= (this._lastKnownPlaybackPosition || 0) || position <= 2) {
+            this._lastKnownPlaybackPosition = position;
+        }
+        return this._lastKnownPlaybackPosition || 0;
+    }
+
+    persistPlaybackStateForExit() {
+        this.trackPlaybackPosition({ force: true });
+        this.saveResumeSnapshotThrottled(true);
+        this.saveProgress({ force: true });
+    }
+
+    getResumeRestorePosition(position, duration = 0) {
+        const rawPosition = Math.max(0, Math.floor(Number(position) || 0));
+        const rawDuration = Math.max(0, Math.floor(Number(duration) || 0));
+        if (rawPosition < 12) return 0;
+        if (rawDuration > 0 && rawPosition >= rawDuration * 0.95) return 0;
+        return Math.max(0, rawPosition - 3);
     }
 
     saveResumeSnapshotThrottled(force = false) {
@@ -391,8 +439,8 @@ class WatchPage {
         });
         if (!content?.id || !content?.sourceId) return;
 
-        const position = Number.isFinite(overrides.position)
-            ? Math.max(0, Math.floor(overrides.position))
+        const position = Number.isFinite(Number(overrides.position))
+            ? Math.max(0, Math.floor(Number(overrides.position)))
             : this.getResumeSnapshotPosition();
         const duration = this.getDisplayDuration?.() || this.durationHint || 0;
 
@@ -488,7 +536,7 @@ class WatchPage {
             const content = {
                 ...snapshot.content,
                 type: snapshot.content.type,
-                resumeTime: Math.max(0, Math.floor(snapshot.position || 0)),
+                resumeTime: this.getResumeRestorePosition(snapshot.position, snapshot.duration),
                 currentSeason: snapshot.currentSeason || snapshot.content.currentSeason || null,
                 currentEpisode: snapshot.currentEpisode || snapshot.content.currentEpisode || null,
                 containerExtension: snapshot.containerExtension || snapshot.content.containerExtension || 'mp4'
@@ -507,18 +555,27 @@ class WatchPage {
             }
 
             await this.releasePlaybackPipelineForRetry();
+            const resumePosition = this.getResumeRestorePosition(snapshot.position, snapshot.duration);
+            const playbackHint = {
+                ...this.buildResumePlaybackHint(snapshot),
+                seekOffset: resumePosition,
+                startOffset: resumePosition,
+                resumeTime: resumePosition
+            };
             const result = await API.proxy.xtream.getStreamUrl(
                 content.sourceId,
                 content.id,
                 content.type === 'series' ? 'series' : 'movie',
                 content.containerExtension || 'mp4',
-                this.buildResumePlaybackHint(snapshot)
+                playbackHint
             );
 
             if (!result?.url) {
                 throw new Error('Restored playback did not return a media URL');
             }
 
+            result.seekOffset = resumePosition;
+            result.startOffset = resumePosition;
             content.cloudPlaybackSessionId = result.sessionId || null;
             await this.play(content, result.url, result);
             return true;
@@ -545,6 +602,21 @@ class WatchPage {
         const session = root.session && typeof root.session === 'object' ? root.session : {};
         const nestedSession = nestedPlayback.session && typeof nestedPlayback.session === 'object' ? nestedPlayback.session : {};
         const gatewaySession = nestedPlayback.gatewaySession || nestedPlayback.gateway_session || root.gatewaySession || root.gateway_session || null;
+        const seekOffset = Number(
+            extra.seekOffset ??
+            extra.seek_offset ??
+            extra.startOffset ??
+            extra.resumeTime ??
+            root.seekOffset ??
+            root.seek_offset ??
+            root.startOffset ??
+            root.resumeTime ??
+            nestedPlayback.seekOffset ??
+            nestedPlayback.seek_offset ??
+            nestedPlayback.startOffset ??
+            nestedPlayback.resumeTime ??
+            0
+        );
         const sessionId = extra.sessionId
             || extra.cloudPlaybackSessionId
             || root.sessionId
@@ -578,7 +650,9 @@ class WatchPage {
                 || root.audio_mode
                 || nestedPlayback.audioMode
                 || nestedPlayback.audio_mode
-                || null
+                || null,
+            seekOffset: Number.isFinite(seekOffset) && seekOffset > 0 ? Math.floor(seekOffset) : 0,
+            startOffset: Number.isFinite(seekOffset) && seekOffset > 0 ? Math.floor(seekOffset) : 0
         };
     }
 
@@ -606,12 +680,15 @@ class WatchPage {
         this.seriesInfo = content.seriesInfo || null;
         this.currentSeason = content.currentSeason || null;
         this.currentEpisode = content.currentEpisode || null;
-        this.resumeTime = content.resumeTime || 0;
+        const requestedResumeTime = Number(content.resumeTime ?? playbackMetadata.seekOffset ?? playbackMetadata.startOffset ?? 0);
+        this.resumeTime = Number.isFinite(requestedResumeTime) && requestedResumeTime > 0 ? Math.floor(requestedResumeTime) : 0;
         this.containerExtension = content.containerExtension || 'mp4';
         this.returnPage = content.type === 'movie' ? 'movies' : 'series';
         // Known total duration (TMDB runtime / episode duration) used as a
         // timeline fallback when ffprobe can't determine the duration
         this.durationHint = this.normalizeDuration(content.durationHint);
+        this._lastKnownPlaybackPosition = this.resumeTime || 0;
+        this._lastKnownPlaybackDuration = this.durationHint || 0;
         this.resetTrackSelectionState();
 
         // Alternate versions of the same title (duplicate group) for failover
@@ -650,7 +727,8 @@ class WatchPage {
         await this.loadVideo(streamUrl, {
             cloudPlaybackSessionId,
             playbackAttemptId,
-            codecProfile: playbackMetadata.codecProfile || playbackMetadata.codec_profile || null
+            codecProfile: playbackMetadata.codecProfile || playbackMetadata.codec_profile || null,
+            seekOffset: this.resumeTime || playbackMetadata.seekOffset || playbackMetadata.startOffset || 0
         });
         if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
 
@@ -1726,8 +1804,12 @@ class WatchPage {
             this.updateTranscodeStatus(isGatewaySessionUrl ? 'transcoding' : 'direct', isGatewaySessionUrl ? 'Norva Gateway' : 'Direct HLS');
             this.currentPlaybackMode = isGatewaySessionUrl ? 'gateway-session' : 'direct-hls';
             this.currentProcessingOptions = {};
-            this.streamStartOffset = 0;
-            this.attachProbeSubtitles(url, (probeInfo || this.currentStreamInfo)?.subtitles, 0);
+            const startOffset = isGatewaySessionUrl
+                ? Math.max(0, Math.floor(Number(options.seekOffset ?? this.resumeTime ?? 0) || 0))
+                : 0;
+            this.streamStartOffset = startOffset;
+            this.trackPlaybackPosition({ position: startOffset, force: true });
+            this.attachProbeSubtitles(url, (probeInfo || this.currentStreamInfo)?.subtitles, startOffset);
             this.playHls(finalUrl, { playbackAttemptId });
         } else {
             // Direct playback for mp4/mkv/avi
@@ -1736,6 +1818,7 @@ class WatchPage {
             this.currentPlaybackMode = 'direct';
             this.currentProcessingOptions = {};
             this.streamStartOffset = 0;
+            this.trackPlaybackPosition({ position: 0, force: true });
             this.attachProbeSubtitles(url, (probeInfo || this.currentStreamInfo)?.subtitles, 0);
             this.video.src = finalUrl;
             this.video.play().catch(e => {
@@ -1939,8 +2022,12 @@ class WatchPage {
 
         // Stop history tracking and save final progress
         this.stopHistoryTracking();
-        this.saveProgress();
-        this.reportAbandonedPlayback();
+        if (!this._suspendResumeSnapshotSave) {
+            this.trackPlaybackPosition({ force: true });
+            this.saveResumeSnapshotThrottled(true);
+            this.saveProgress({ force: true });
+            this.reportAbandonedPlayback();
+        }
 
         this.updateTranscodeStatus('hidden');
 
@@ -2012,12 +2099,16 @@ class WatchPage {
 
         const target = (nextPercent / 100) * duration;
         this.setProgressValue(nextPercent);
+        this.trackPlaybackPosition({ position: target, force: true });
+        this.saveResumeSnapshotThrottled(true);
         this.seekToTime(target);
     }
 
     scheduleProcessedSeek(target, duration, delay = 900) {
         this._pendingSeekTarget = target;
         this.setProgressValue((target / duration) * 100);
+        this.trackPlaybackPosition({ position: target, force: true });
+        this.saveResumeSnapshotThrottled(true);
         if (this.timeCurrent) {
             this.timeCurrent.textContent = this.formatTime(target);
         }
@@ -2075,6 +2166,8 @@ class WatchPage {
         await this.stopTranscodeSession();
 
         this.streamStartOffset = targetTime;
+        this.trackPlaybackPosition({ position: targetTime, force: true });
+        this.saveResumeSnapshotThrottled(true);
         this.updateDurationState();
 
         if (this.video) {
@@ -2223,9 +2316,14 @@ class WatchPage {
 
     getDisplayDuration() {
         const probeDuration = this.getProbeDuration();
+        const hintedDuration = this.normalizeDuration(this.durationHint);
 
         if (probeDuration && ['remux', 'transcode', 'transcode-session'].includes(this.currentPlaybackMode)) {
             return probeDuration;
+        }
+
+        if (this.streamStartOffset > 0 && hintedDuration && (this.contentType === 'movie' || this.contentType === 'series')) {
+            return hintedDuration;
         }
 
         return this.getValidDuration() || probeDuration;
@@ -2378,7 +2476,9 @@ class WatchPage {
         this.playPauseBtn?.querySelector('.icon-play')?.classList.remove('hidden');
         this.playPauseBtn?.querySelector('.icon-pause')?.classList.add('hidden');
         this.centerPlayBtn?.classList.add('show');
+        this.trackPlaybackPosition({ force: true });
         this.saveResumeSnapshotThrottled(true);
+        this.saveProgress({ force: true });
 
         // Keep overlay visible when paused
         this.showOverlay();
@@ -2537,6 +2637,7 @@ class WatchPage {
 
         try {
             await this.releasePlaybackPipelineForRetry();
+            const position = Math.max(0, Math.floor(this.getResumeSnapshotPosition()) - 3);
             const result = await API.proxy.xtream.getStreamUrl(
                 this.content.sourceId,
                 this.content.id,
@@ -2544,14 +2645,19 @@ class WatchPage {
                 this.containerExtension || 'mp4',
                 {
                     gatewayMode: 'transcode',
-                    audioMode: 'transcode'
+                    audioMode: 'transcode',
+                    seekOffset: position,
+                    startOffset: position,
+                    resumeTime: position
                 }
             );
 
             if (!result?.url) return false;
             this.content.cloudPlaybackSessionId = result.sessionId || null;
             await this.loadVideo(result.url, this.playbackMetadataFromResult(result, {
-                playbackAttemptId: this._playbackAttemptId
+                playbackAttemptId: this._playbackAttemptId,
+                seekOffset: position,
+                startOffset: position
             }));
             return true;
         } catch (error) {
@@ -2728,7 +2834,11 @@ class WatchPage {
         try {
             // Resume close to where the previous version failed
             const position = Math.max(0, Math.floor(this.getPlaybackPosition()) - 5);
-            const result = await API.proxy.xtream.getStreamUrl(next.sourceId, next.streamId, next.type || 'movie', next.container || 'mp4');
+            const result = await API.proxy.xtream.getStreamUrl(next.sourceId, next.streamId, next.type || 'movie', next.container || 'mp4', {
+                seekOffset: position,
+                startOffset: position,
+                resumeTime: position
+            });
             if (result?.url) {
                 this.updateTranscodeStatus('transcoding', `Switched: ${next.label}`);
                 if (this.subtitleEl) {
@@ -2741,7 +2851,10 @@ class WatchPage {
                 this.containerExtension = next.container || 'mp4';
                 this._failoverInProgress = false;
                 handedOff = true;
-                await this.loadVideo(result.url, this.playbackMetadataFromResult(result));
+                await this.loadVideo(result.url, this.playbackMetadataFromResult(result, {
+                    seekOffset: position,
+                    startOffset: position
+                }));
             }
         } catch (err) {
             console.error('[WatchPage] Failover failed:', err);
@@ -4025,12 +4138,15 @@ class WatchPage {
         }
     }
 
-    async saveProgress() {
-        if (!this.content || !this.video || this.video.paused) return;
+    async saveProgress(options = {}) {
+        if (!this.content || !this.video) return;
+        if (this.video.paused && !options.force) return;
 
-        const progress = Math.floor(this.getPlaybackPosition());
-        const validDuration = this.getDisplayDuration();
+        const validDuration = this.getDisplayDuration() || this._lastKnownPlaybackDuration;
         const duration = validDuration ? Math.floor(validDuration) : 0;
+        const progress = duration > 0
+            ? Math.min(Math.floor(this.getResumeSnapshotPosition()), duration)
+            : Math.floor(this.getResumeSnapshotPosition());
 
         if (isNaN(progress) || isNaN(duration) || duration <= 0) return;
 

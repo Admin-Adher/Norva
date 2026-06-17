@@ -970,13 +970,22 @@ class MoviesPage {
     async playMovie(movie, { versions = null, resumeTime = 0 } = {}) {
         try {
             const container = movie.container_extension || 'mp4';
+            const resumeOffset = Math.max(0, Math.floor(Number(resumeTime) || 0));
+            const playbackHint = MediaUtils.playbackHintFromItem
+                ? MediaUtils.playbackHintFromItem(movie, { container })
+                : { container };
+            if (resumeOffset > 0) {
+                playbackHint.seekOffset = resumeOffset;
+                playbackHint.startOffset = resumeOffset;
+                playbackHint.resumeTime = resumeOffset;
+            }
             await this.prepareForPlaybackSession();
             const result = await API.proxy.xtream.getStreamUrl(
                 movie.sourceId,
                 movie.stream_id,
                 'movie',
                 container,
-                MediaUtils.playbackHintFromItem ? MediaUtils.playbackHintFromItem(movie, { container }) : {}
+                playbackHint
             );
 
             if (result && result.url) {
@@ -1000,12 +1009,12 @@ class MoviesPage {
                         sourceId: movie.sourceId,
                         categoryId: movie.category_id,
                         containerExtension: container,
-                        resumeTime,
+                        resumeTime: resumeOffset,
                         durationHint: movie.tmdb?.runtime ? movie.tmdb.runtime * 60 : null,
                         versions: versionList,
                         versionIndex: 0,
                         cloudPlaybackSessionId: result.sessionId
-                    }, result.url, result);
+                    }, result.url, { ...result, seekOffset: resumeOffset, startOffset: resumeOffset });
                 }
             }
         } catch (err) {

@@ -830,6 +830,8 @@ async function createGatewaySession(
     mode: gatewayMode,
     expiresAt,
     playbackHint: compactRecord(playbackHint),
+    seekOffset: gatewayHints.seekOffset,
+    startOffset: gatewayHints.startOffset,
     ...gatewayHints,
     ...(userAgent ? { userAgent } : {}),
   };
@@ -936,6 +938,26 @@ function gatewayPlaybackHints(playbackHint: JsonRecord) {
         codecProfile.videoCodec ??
         codecProfile.video_codec ??
         codecProfile.video,
+    ),
+    seekOffset: boundedNullableNumber(
+      playbackHint.seekOffset ??
+        playbackHint.seek_offset ??
+        playbackHint.startOffset ??
+        playbackHint.start_offset ??
+        playbackHint.resumeTime ??
+        playbackHint.resume_time,
+      0,
+      24 * 60 * 60,
+    ),
+    startOffset: boundedNullableNumber(
+      playbackHint.startOffset ??
+        playbackHint.start_offset ??
+        playbackHint.seekOffset ??
+        playbackHint.seek_offset ??
+        playbackHint.resumeTime ??
+        playbackHint.resume_time,
+      0,
+      24 * 60 * 60,
     ),
     clientAudioPassthrough:
       playbackHint.clientAudioPassthrough === false || playbackHint.client_audio_passthrough === false

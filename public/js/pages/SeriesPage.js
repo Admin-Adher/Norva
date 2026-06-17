@@ -881,16 +881,27 @@ class SeriesPage {
             if (!episode) return;
 
             const container = episode.container_extension || h.data?.containerExtension || 'mp4';
+            const ratio = h.duration > 0 ? h.progress / h.duration : 0;
+            const resumeOffset = (ratio > 0.02 && ratio < 0.95)
+                ? Math.max(0, Math.floor(Number(h.progress) || 0))
+                : 0;
+            const playbackHint = MediaUtils.playbackHintFromItem
+                ? MediaUtils.playbackHintFromItem(episode, { container, streamType: 'series' })
+                : { container, streamType: 'series' };
+            if (resumeOffset > 0) {
+                playbackHint.seekOffset = resumeOffset;
+                playbackHint.startOffset = resumeOffset;
+                playbackHint.resumeTime = resumeOffset;
+            }
             const result = await API.proxy.xtream.getStreamUrl(
                 sourceId,
                 episode.id,
                 'series',
                 container,
-                MediaUtils.playbackHintFromItem ? MediaUtils.playbackHintFromItem(episode, { container, streamType: 'series' }) : { container, streamType: 'series' }
+                playbackHint
             );
             if (!result?.url) return;
 
-            const ratio = h.duration > 0 ? h.progress / h.duration : 0;
             this.app.pages.watch?.play({
                 type: 'series',
                 id: episode.id,
@@ -903,10 +914,10 @@ class SeriesPage {
                 currentSeason: seasonNum,
                 currentEpisode: episodeNum,
                 containerExtension: container,
-                resumeTime: (ratio > 0.02 && ratio < 0.95) ? h.progress : 0,
+                resumeTime: resumeOffset,
                 durationHint: h.duration || MediaUtils.parseDurationToSeconds(episode.duration),
                 cloudPlaybackSessionId: result.sessionId
-            }, result.url, result);
+            }, result.url, { ...result, seekOffset: resumeOffset, startOffset: resumeOffset });
         } catch (err) {
             console.error('Error resuming episode:', err);
         }
@@ -1125,25 +1136,32 @@ class SeriesPage {
         const episodeNum = episodeEl.querySelector('.episode-number')?.textContent?.replace('E', '') || '1';
 
         try {
+            const h = (this.historyItems || []).find(x =>
+                x.item_type === 'episode' && String(x.item_id) === String(episodeId));
+            const ratio = h && h.duration > 0 ? h.progress / h.duration : 0;
+            const resumeOffset = (ratio > 0.02 && ratio < 0.95)
+                ? Math.max(0, Math.floor(Number(h.progress) || 0))
+                : 0;
+            const playbackHint = MediaUtils.playbackHintFromItem
+                ? MediaUtils.playbackHintFromItem(episode, { container, streamType: 'series' })
+                : { container, streamType: 'series' };
+            if (resumeOffset > 0) {
+                playbackHint.seekOffset = resumeOffset;
+                playbackHint.startOffset = resumeOffset;
+                playbackHint.resumeTime = resumeOffset;
+            }
             await this.prepareForPlaybackSession();
             const result = await API.proxy.xtream.getStreamUrl(
                 sourceId,
                 episodeId,
                 'series',
                 container,
-                MediaUtils.playbackHintFromItem
-                    ? MediaUtils.playbackHintFromItem(episode, { container, streamType: 'series' })
-                    : { container, streamType: 'series' }
+                playbackHint
             );
 
             if (result && result.url) {
                 if (this.app.pages.watch) {
                     const episodeTitle = episodeEl.querySelector('.episode-title')?.textContent || `Episode ${episodeNum}`;
-
-                    // Resume support for episodes
-                    const h = (this.historyItems || []).find(x =>
-                        x.item_type === 'episode' && String(x.item_id) === String(episodeId));
-                    const ratio = h && h.duration > 0 ? h.progress / h.duration : 0;
 
                     // Episode duration ("00:42:10") as timeline fallback
                     const durationText = episodeEl.querySelector('.episode-duration')?.textContent;
@@ -1164,10 +1182,10 @@ class SeriesPage {
                         currentSeason: seasonNum,
                         currentEpisode: episodeNum,
                         containerExtension: container,
-                        resumeTime: (ratio > 0.02 && ratio < 0.95) ? h.progress : 0,
+                        resumeTime: resumeOffset,
                         durationHint,
                         cloudPlaybackSessionId: result.sessionId
-                    }, result.url, result);
+                    }, result.url, { ...result, seekOffset: resumeOffset, startOffset: resumeOffset });
                 }
             }
         } catch (err) {

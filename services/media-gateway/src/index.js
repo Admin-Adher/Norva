@@ -27,7 +27,7 @@ const STOP_CONFLICTING_OWNER_SESSIONS = (process.env.STOP_CONFLICTING_OWNER_SESS
 const FFMPEG_USER_AGENT = process.env.FFMPEG_USER_AGENT ||
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36 Norva/1.0';
 const MAX_LOG_TAIL = 12000;
-const GATEWAY_VERSION = 25;
+const GATEWAY_VERSION = 26;
 // Fallback audio path: plain AAC-LC stereo @48k. Source HE-AAC / unusual sample
 // rates can make hls.js label the track mp4a.40.5 (HE-AAC), and Chrome's MSE
 // may reject the append. Copy audio only when the codec hint is browser-safe.
@@ -120,7 +120,10 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             audioChannels,
             audioMode,
             videoCodec,
-            clientAudioPassthrough
+            clientAudioPassthrough,
+            seekOffset,
+            startOffset,
+            resumeTime
         } = req.body || {};
         if (!sourceUrl || !isHttpUrl(sourceUrl)) {
             return res.status(400).json({ error: 'sourceUrl must be a valid http(s) URL' });
@@ -143,6 +146,17 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
 
         const expiresAtDate = expiresAt ? new Date(expiresAt) : new Date(Date.now() + DEFAULT_TTL_SECONDS * 1000);
         const normalizedPlaybackHint = asRecord(playbackHint);
+        const normalizedSeekOffset = normalizeSeekOffset(
+            seekOffset ??
+            startOffset ??
+            resumeTime ??
+            normalizedPlaybackHint.seekOffset ??
+            normalizedPlaybackHint.seek_offset ??
+            normalizedPlaybackHint.startOffset ??
+            normalizedPlaybackHint.start_offset ??
+            normalizedPlaybackHint.resumeTime ??
+            normalizedPlaybackHint.resume_time
+        );
         let normalizedCodecProfile = asRecord(codecProfile || normalizedPlaybackHint.codecProfile || normalizedPlaybackHint.codec_profile);
         let codecProfileSource = hasUsefulCodecProfile(normalizedCodecProfile) ? 'request' : '';
         const shouldProbe = shouldProbeCodecProfile(normalizedPlaybackHint, sourceUrl);
@@ -168,6 +182,7 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             mode: mode === 'transcode' ? 'transcode' : 'remux',
             userAgent: sanitizeUserAgent(userAgent),
             playbackHint: normalizedPlaybackHint,
+            seekOffset: normalizedSeekOffset,
             codecProfile: normalizedCodecProfile,
             codecProfileSource,
             audioCodec: stringOrNull(audioCodec) || stringOrNull(normalizedPlaybackHint.audioCodec) || stringOrNull(normalizedPlaybackHint.audio_codec) || stringOrNull(normalizedCodecProfile.audioCodec) || stringOrNull(normalizedCodecProfile.audio_codec) || stringOrNull(normalizedCodecProfile.audio),
@@ -291,6 +306,7 @@ function startFfmpeg(session) {
         '-rw_timeout', '15000000',
         '-user_agent', session.userAgent || FFMPEG_USER_AGENT,
         '-headers', 'Accept: */*\r\nConnection: keep-alive\r\n',
+        ...(session.seekOffset > 0 ? ['-ss', String(session.seekOffset)] : []),
         '-i', session.sourceUrl,
         '-fflags', '+genpts',
         '-map', '0:v:0?',
@@ -997,6 +1013,12 @@ function nullableFloat(value) {
     if (value === null || value === undefined || value === '') return null;
     const parsed = Number.parseFloat(String(value));
     return Number.isFinite(parsed) ? parsed : null;
+}
+
+function normalizeSeekOffset(value) {
+    const parsed = nullableFloat(value);
+    if (!Number.isFinite(parsed) || parsed <= 0) return 0;
+    return Math.max(0, Math.min(Math.floor(parsed), 24 * 60 * 60));
 }
 
 function compactRecord(record) {

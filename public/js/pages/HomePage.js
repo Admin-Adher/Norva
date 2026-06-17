@@ -771,9 +771,19 @@ class HomePage {
             const sourceId = item.source_id || item.sourceId || data.sourceId;
             const streamId = item.item_id || item.itemId || item.stream_id || item.streamId || item.series_id;
             const container = item.container_extension || item.containerExtension || data.containerExtension || 'mp4';
+            const resumeOffset = isResume ? Math.max(0, Math.floor(Number(item.progress || item.progress_seconds || 0) || 0)) : 0;
 
             if (!sourceId || !streamId) {
                 throw new Error('Missing source or stream identifier');
+            }
+
+            const playbackHint = MediaUtils.playbackHintFromItem
+                ? MediaUtils.playbackHintFromItem(item, { container })
+                : { container };
+            if (resumeOffset > 0) {
+                playbackHint.seekOffset = resumeOffset;
+                playbackHint.startOffset = resumeOffset;
+                playbackHint.resumeTime = resumeOffset;
             }
 
             const result = await window.API.proxy.xtream.getStreamUrl(
@@ -781,7 +791,7 @@ class HomePage {
                 streamId,
                 streamType,
                 container,
-                MediaUtils.playbackHintFromItem ? MediaUtils.playbackHintFromItem(item, { container }) : {}
+                playbackHint
             );
 
             if (result && result.url) {
@@ -793,7 +803,7 @@ class HomePage {
                     poster: item.stream_icon || item.poster_url || item.posterUrl || data.poster || data.posterUrl,
                     sourceId,
                     cloudSourceId: item.cloudSourceId || data.cloudSourceId || null,
-                    resumeTime: isResume ? Number(item.progress || item.progress_seconds || 0) : 0,
+                    resumeTime: resumeOffset,
                     containerExtension: container,
                     cloudPlaybackSessionId: result.sessionId,
                     titleId: data.titleId || item.titleId || item.title_id || null,
@@ -817,7 +827,7 @@ class HomePage {
                 }
 
                 this.app.navigateTo('watch');
-                this.app.pages.watch.play(content, result.url, result);
+                this.app.pages.watch.play(content, result.url, { ...result, seekOffset: resumeOffset, startOffset: resumeOffset });
             }
         } catch (err) {
             console.error('[Dashboard] Playback failed:', err);
