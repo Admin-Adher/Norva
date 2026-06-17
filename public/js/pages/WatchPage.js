@@ -111,6 +111,7 @@ class WatchPage {
         this._playStartedReported = false;
         this._playbackEnded = false;
         this._lastPauseTelemetryAt = 0;
+        this._handlingPlaybackFailure = false;
 
         // Overlay timer
         this.overlayTimeout = null;
@@ -334,6 +335,7 @@ class WatchPage {
         this._playStartedReported = false;
         this._playbackEnded = false;
         this._lastPauseTelemetryAt = 0;
+        this._handlingPlaybackFailure = false;
 
         // Stop any Live TV playback before starting movie/series
         await this.app?.player?.stop?.();
@@ -746,6 +748,34 @@ class WatchPage {
                 }
             });
         });
+    }
+
+    async releasePlaybackPipelineForRetry() {
+        try {
+            if (this.hls) {
+                try { this.hls.destroy(); } catch (error) {
+                    console.warn('[WatchPage] Could not destroy HLS before retry:', error?.message || error);
+                }
+                this.hls = null;
+            }
+
+            if (this.video) {
+                try {
+                    this.video.pause();
+                    this.video.removeAttribute('src');
+                    this.video.load();
+                } catch (error) {
+                    console.warn('[WatchPage] Could not clear video before retry:', error?.message || error);
+                }
+            }
+
+            await Promise.allSettled([
+                this.stopTranscodeSession(),
+                this.stopCloudPlaybackSessions()
+            ]);
+        } catch (error) {
+            console.warn('[WatchPage] Playback retry cleanup failed:', error?.message || error);
+        }
     }
 
     buildProcessingUrl(route, url, start = 0, options = {}) {
@@ -1469,7 +1499,8 @@ class WatchPage {
                 errorCode: data.details || data.type || 'hls_fatal',
                 errorMessage: data.reason || data.details || 'HLS playback failed.'
             });
-            this.handlePlaybackFailure(data.details || data.reason || 'Playback failed.');
+            this.handlePlaybackFailure(data.details || data.reason || 'Playback failed.')
+                .catch(error => console.warn('[WatchPage] Playback failure handler failed:', error?.message || error));
         });
     }
 
@@ -1480,7 +1511,8 @@ class WatchPage {
         // version of the title or surface a clear error instead of spinning
         if (!url) {
             if (this.isStalePlaybackAttempt(options.playbackAttemptId)) return;
-            this.handlePlaybackFailure(this._lastFailureMsg || 'Playback failed');
+            this.handlePlaybackFailure(this._lastFailureMsg || 'Playback failed')
+                .catch(error => console.warn('[WatchPage] Playback failure handler failed:', error?.message || error));
             return;
         }
 
@@ -2005,7 +2037,8 @@ class WatchPage {
                     errorCode: String(error.code),
                     errorMessage: error.message || 'Media error'
                 });
-                this.handlePlaybackFailure(error.message || 'Media error');
+                this.handlePlaybackFailure(error.message || 'Media error')
+                    .catch(error => console.warn('[WatchPage] Playback failure handler failed:', error?.message || error));
             }
         }
     }
@@ -2015,6 +2048,11 @@ class WatchPage {
      * otherwise stop the spinner and show a clear error message.
      */
     async handlePlaybackFailure(message) {
+        if (this._handlingPlaybackFailure) {
+            console.warn('[WatchPage] Ignoring duplicate playback failure while retry is already running:', message);
+            return;
+        }
+
         if (this.hasCurrentMedia()) {
             console.warn('[WatchPage] Ignoring stale playback failure because media is active:', message);
             this.hidePlaybackError();
@@ -2022,25 +2060,31 @@ class WatchPage {
             return;
         }
 
-        this._lastFailureMsg = message;
-        this.sendPlaybackEvent('playback_error', { errorMessage: message || 'Playback failed.' });
-        const retriedWithGatewayTranscode = await this.retryWithCloudGatewayTranscode(message);
-        if (retriedWithGatewayTranscode) return;
+        this._handlingPlaybackFailure = true;
+        try {
+            this._lastFailureMsg = message;
+            this.sendPlaybackEvent('playback_error', { errorMessage: message || 'Playback failed.' });
+            const retriedWithGatewayTranscode = await this.retryWithCloudGatewayTranscode(message);
+            if (retriedWithGatewayTranscode) return;
 
-        const retriedWithRelay = await this.retryWithCloudRelay(message);
-        if (retriedWithRelay) return;
+            const retriedWithRelay = await this.retryWithCloudRelay(message);
+            if (retriedWithRelay) return;
 
-        const retriedWithEncode = await this.retryWithFullVideoTranscode(message);
-        if (retriedWithEncode) return;
+            const retriedWithEncode = await this.retryWithFullVideoTranscode(message);
+            if (retriedWithEncode) return;
 
-        // 401/403/429 = connection-limit or account throttle, not a dead title.
-        // Never mark as broken — doing so would hide a perfectly valid stream.
-        if (!this.isConnectionLimitError(message)) {
-            await this.reportPlaybackStatus('broken', message);
-        }
-        const attempted = await this.tryNextVersion();
-        if (!attempted) {
-            this.showPlaybackError(message);
+            // 401/403/429 = connection-limit or account throttle, not a dead title.
+            // Never mark as broken: it would hide a perfectly valid stream.
+            if (!this.isConnectionLimitError(message)) {
+                await this.reportPlaybackStatus('broken', message);
+            }
+            await this.releasePlaybackPipelineForRetry();
+            const attempted = await this.tryNextVersion();
+            if (!attempted) {
+                this.showPlaybackError(message);
+            }
+        } finally {
+            this._handlingPlaybackFailure = false;
         }
     }
 
@@ -2061,6 +2105,7 @@ class WatchPage {
         this.updateTranscodeStatus('remuxing', 'Norva Relay');
 
         try {
+            await this.releasePlaybackPipelineForRetry();
             const result = await API.proxy.xtream.getStreamUrl(
                 this.content.sourceId,
                 this.content.id,
@@ -2096,6 +2141,7 @@ class WatchPage {
         this.updateTranscodeStatus('transcoding', 'Norva Gateway');
 
         try {
+            await this.releasePlaybackPipelineForRetry();
             const result = await API.proxy.xtream.getStreamUrl(
                 this.content.sourceId,
                 this.content.id,
@@ -3024,7 +3070,7 @@ class WatchPage {
             this.posterEl.onerror = null;
             this.posterEl.src = fallback;
         };
-        this.posterEl.src = this.content.poster || fallback;
+        this.posterEl.src = MediaUtils.safeImageUrl(this.content.poster, fallback);
         this.posterEl.alt = this.content.title || '';
         this.contentTitleEl.textContent = this.content.title || '';
         this.yearEl.textContent = this.content.year || '';
@@ -3118,10 +3164,10 @@ class WatchPage {
 
         this.recommendedGrid.innerHTML = movies.map(movie => `
             <div class="watch-recommended-card" data-id="${movie.stream_id}" data-source="${sourceId}">
-                <img src="${movie.stream_icon || movie.cover || '/img/norva-media-placeholder.png'}" 
-                     alt="${movie.name}" 
+                <img src="${MediaUtils.escapeHtml(MediaUtils.safeImageUrl(movie.stream_icon || movie.cover, '/img/norva-media-placeholder.png'))}"
+                     alt="${MediaUtils.escapeHtml(movie.name)}"
                      onerror="this.onerror=null;this.src='/img/norva-media-placeholder.png'" loading="lazy">
-                <p>${movie.name}</p>
+                <p>${MediaUtils.escapeHtml(movie.name)}</p>
             </div>
         `).join('');
 
@@ -3153,7 +3199,7 @@ class WatchPage {
                     type: 'movie',
                     id: movie.stream_id,
                     title: movie.name,
-                    poster: movie.stream_icon || movie.cover,
+                    poster: MediaUtils.safeImageUrl(movie.stream_icon || movie.cover),
                     description: movie.plot || '',
                     year: movie.year,
                     rating: movie.rating,

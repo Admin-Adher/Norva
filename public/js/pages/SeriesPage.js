@@ -766,8 +766,10 @@ class SeriesPage {
         card.dataset.seriesId = series.series_id;
         card.dataset.sourceId = series.sourceId;
 
-        const poster = series.cover || series.stream_icon ||
-            MediaUtils.tmdbPosterUrl(series.tmdb) || '/img/norva-media-placeholder.png';
+        const poster = MediaUtils.safeImageUrl(
+            series.cover || series.stream_icon || MediaUtils.tmdbPosterUrl(series.tmdb),
+            '/img/norva-media-placeholder.png'
+        );
         const year = this.getItemYear(series) || '';
         const rating = series.rating ? `${Icons.star} ${series.rating}` : '';
         const isFav = group.items.some(i => this.favoriteIds.has(`${i.sourceId}:${i.series_id}`));
@@ -840,7 +842,7 @@ class SeriesPage {
             const ratio = h.duration > 0 ? Math.round((h.progress / h.duration) * 100) : 0;
             return `
             <div class="continue-card" data-item-id="${MediaUtils.escapeHtml(h.item_id)}">
-                <img src="${MediaUtils.escapeHtml(h.data?.poster || '/img/norva-media-placeholder.png')}"
+                <img src="${MediaUtils.escapeHtml(MediaUtils.safeImageUrl(h.data?.poster, '/img/norva-media-placeholder.png'))}"
                      onerror="this.onerror=null;this.src='/img/norva-media-placeholder.png'" loading="lazy" alt="">
                 <div class="continue-card-info">
                     <p class="continue-card-title">${MediaUtils.escapeHtml(h.data?.title || 'Unknown')}</p>
@@ -893,7 +895,7 @@ class SeriesPage {
                 id: episode.id,
                 title: h.data?.title || 'Series',
                 subtitle: `S${seasonNum} E${episodeNum} - ${episode.title || `Episode ${episodeNum}`}`,
-                poster: h.data?.poster,
+                poster: MediaUtils.safeImageUrl(h.data?.poster),
                 sourceId: sourceId,
                 seriesId: seriesId,
                 seriesInfo: info,
@@ -972,8 +974,10 @@ class SeriesPage {
         this.container.classList.add('hidden');
         this.detailsPanel.classList.remove('hidden');
 
-        document.getElementById('series-poster').src = series.cover || series.stream_icon ||
-            MediaUtils.tmdbPosterUrl(series.tmdb) || '/img/norva-media-placeholder.png';
+        document.getElementById('series-poster').src = MediaUtils.safeImageUrl(
+            series.cover || series.stream_icon || MediaUtils.tmdbPosterUrl(series.tmdb),
+            '/img/norva-media-placeholder.png'
+        );
         document.getElementById('series-title').textContent = series.tmdb?.title || series.name;
         document.getElementById('series-plot').textContent = series.plot || series.tmdb?.overview || '';
 
@@ -1148,7 +1152,7 @@ class SeriesPage {
                         id: episodeId,
                         title: this.currentSeries?.tmdb?.title || this.currentSeries?.name || 'Series',
                         subtitle: `S${seasonNum} E${episodeNum} - ${episodeTitle}`,
-                        poster: this.currentSeries?.cover,
+                        poster: MediaUtils.safeImageUrl(this.currentSeries?.cover || this.currentSeries?.stream_icon || MediaUtils.tmdbPosterUrl(this.currentSeries?.tmdb)),
                         description: this.currentSeries?.plot || this.currentSeries?.tmdb?.overview || '',
                         year: this.currentSeries?.year,
                         rating: this.currentSeries?.rating,

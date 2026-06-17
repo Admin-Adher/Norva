@@ -200,6 +200,30 @@ const MediaUtils = (() => {
         }
     }
 
+    // === Image helpers ===
+
+    const DEFAULT_IMAGE_FALLBACK = '/img/norva-media-placeholder.png';
+
+    function safeImageUrl(value, fallback = DEFAULT_IMAGE_FALLBACK) {
+        const fallbackUrl = fallback || DEFAULT_IMAGE_FALLBACK;
+        const raw = String(value || '').trim();
+        if (!raw) return fallbackUrl;
+        if (/^(data|blob):/i.test(raw)) return raw;
+        if (/^(\.?\.?\/|#)/.test(raw)) return raw;
+        if (!/^https?:\/\//i.test(raw)) return fallbackUrl;
+        if (/\/image\?url=/i.test(raw)) return raw;
+
+        if (window.API?.isCloudMode?.() && window.NorvaCloud?.imageUrl) {
+            return window.NorvaCloud.imageUrl(raw) || fallbackUrl;
+        }
+
+        if (window.location?.protocol === 'https:' && raw.toLowerCase().startsWith('http://')) {
+            return `/api/proxy/image?url=${encodeURIComponent(raw)}`;
+        }
+
+        return raw;
+    }
+
     // === Misc helpers ===
 
     function escapeHtml(str) {
@@ -308,7 +332,7 @@ const MediaUtils = (() => {
         parseVersionInfo, searchableText, groupItems, pickRepresentative,
         orderVersionsByPreference, versionLabel,
         saveFilters, loadFilters, escapeHtml, tmdbPosterUrl, parseDurationToSeconds,
-        playbackHintFromItem
+        playbackHintFromItem, safeImageUrl
     };
 })();
 

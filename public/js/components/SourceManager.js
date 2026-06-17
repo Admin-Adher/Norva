@@ -33,6 +33,11 @@ class SourceManager {
         this.pollSyncStatus();
     }
 
+    isInvalidDeviceTokenError(err) {
+        const text = `${err?.message || ''} ${err?.payload?.error || ''} ${err?.payload?.message || ''}`;
+        return Boolean(err?.deviceTokenInvalid) || /invalid\s+(bearer\s+)?(device\s+)?token|device\s+token|expired\s+(device\s+)?token/i.test(text);
+    }
+
     /**
      * Show a styled warning modal with Cancel/Proceed buttons
      * @param {Object} options - { title, message, details, proceedText, cancelText }
@@ -499,6 +504,9 @@ class SourceManager {
                     statuses = await API.sources.getStatus();
                     statusPollErrors = 0;
                 } catch (err) {
+                    if (this.isInvalidDeviceTokenError(err)) {
+                        throw new Error('This device session expired. Sign in again or pair the device again.');
+                    }
                     statusPollErrors++;
                     console.warn('[SourceManager] Sync status poll failed:', err);
                     if (statusPollErrors < 5) {
@@ -1347,6 +1355,11 @@ class SourceManager {
                 const statuses = await API.sources.getStatus();
                 this.updateSyncStatus(statuses);
             } catch (err) {
+                if (this.isInvalidDeviceTokenError(err)) {
+                    console.info('[SourceManager] Cloud device session expired; sync polling paused.');
+                    this.syncPollTimeout = null;
+                    return;
+                }
                 console.warn('Error polling sync status:', err);
             }
             // Poll every 3 seconds

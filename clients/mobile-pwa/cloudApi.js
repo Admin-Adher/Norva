@@ -85,6 +85,25 @@
         else localStorage.removeItem(KEY_DEVICE_TOKEN);
     }
 
+    function isInvalidDeviceTokenResponse(status, payload, message) {
+        if (status !== 401) return false;
+        const text = `${payload?.error || ''} ${payload?.message || ''} ${payload?.code || ''} ${message || ''}`;
+        return /invalid\s+(bearer\s+)?(device\s+)?token|device\s+token|expired\s+(device\s+)?token/i.test(text);
+    }
+
+    function markInvalidDeviceToken(error, tokenUsed) {
+        if (!tokenUsed || tokenUsed !== getDeviceToken()) return;
+        setDeviceToken('');
+        error.deviceTokenInvalid = true;
+    }
+
+    function proxyImageUrl(url) {
+        const raw = String(url || '').trim();
+        if (!raw) return '';
+        if (/\/image\?url=/i.test(raw)) return raw;
+        return `${apiBase()}/image?url=${encodeURIComponent(raw)}`;
+    }
+
     function setApiUrl(url) {
         if (url) localStorage.setItem(KEY_API_URL, url.replace(/\/+$/, ''));
         else localStorage.removeItem(KEY_API_URL);
@@ -338,6 +357,9 @@
             const error = new Error(message);
             error.status = response.status;
             error.payload = payload;
+            if (isInvalidDeviceTokenResponse(response.status, payload, message)) {
+                markInvalidDeviceToken(error, token);
+            }
             throw error;
         }
 
@@ -426,6 +448,9 @@
             const error = new Error(message);
             error.status = response.status;
             error.payload = payload;
+            if (isInvalidDeviceTokenResponse(response.status, payload, message)) {
+                markInvalidDeviceToken(error, token);
+            }
             throw error;
         }
 
@@ -440,7 +465,7 @@
         setDeviceToken,
         setApiUrl,
         isConfigured: () => Boolean(apiBase()),
-        imageUrl: (url) => `${apiBase()}/image?url=${encodeURIComponent(url)}`,
+        imageUrl: proxyImageUrl,
 
         health: () => request('GET', '/health', null, { token: '' }),
 

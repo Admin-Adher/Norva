@@ -44,7 +44,7 @@ app.get('/health', (req, res) => {
     res.json({
         ok: true,
         service: 'norva-media-gateway',
-        version: 19,
+        version: 20,
         codecProbe: true,
         activeSessions: activeSessionCount(),
         totalSessions: sessions.size,
@@ -544,12 +544,19 @@ async function waitForPlaylist(session, timeoutMs) {
 }
 
 async function stopSession(session) {
-    session.status = 'ended';
-    if (session.ffmpeg && !session.ffmpeg.killed) {
-        session.ffmpeg.kill('SIGTERM');
-    }
-    sessions.delete(session.id);
-    await removeSessionDir(session.outputDir);
+    if (session.stoppingPromise) return session.stoppingPromise;
+
+    session.status = 'stopping';
+    session.stoppingPromise = (async () => {
+        const child = session.ffmpeg;
+        session.ffmpeg = null;
+        await stopChildProcess(child);
+        session.status = 'ended';
+        sessions.delete(session.id);
+        await removeSessionDir(session.outputDir);
+    })();
+
+    return session.stoppingPromise;
 }
 
 async function stopConflictingSourceSessions(sourceUrl) {
@@ -558,7 +565,7 @@ async function stopConflictingSourceSessions(sourceUrl) {
 
     const conflicts = Array.from(sessions.values()).filter((session) => {
         if (session.sourceKey !== sourceKey) return false;
-        return session.status === 'starting' || session.status === 'ready';
+        return isSessionBlockingProviderSlot(session);
     });
 
     await Promise.allSettled(conflicts.map(async (session) => {
@@ -573,7 +580,7 @@ async function stopConflictingOwnerSessions(ownerKey) {
 
     const conflicts = Array.from(sessions.values()).filter((session) => {
         if (session.ownerKey !== normalizedOwnerKey) return false;
-        return session.status === 'starting' || session.status === 'ready';
+        return isSessionBlockingProviderSlot(session);
     });
 
     await Promise.allSettled(conflicts.map(async (session) => {
@@ -586,6 +593,43 @@ function activeSessionCount() {
     return Array.from(sessions.values())
         .filter((session) => session.status === 'starting' || session.status === 'ready')
         .length;
+}
+
+function isSessionBlockingProviderSlot(session) {
+    return session?.status === 'starting' || session?.status === 'ready' || session?.status === 'stopping';
+}
+
+function stopChildProcess(child, timeoutMs = 2500) {
+    return new Promise((resolve) => {
+        if (!child || child.exitCode !== null || child.signalCode) {
+            resolve();
+            return;
+        }
+
+        let done = false;
+        let killTimer = null;
+        const finish = () => {
+            if (done) return;
+            done = true;
+            if (killTimer) clearTimeout(killTimer);
+            child.off('exit', finish);
+            child.off('error', finish);
+            resolve();
+        };
+        killTimer = setTimeout(() => {
+            if (!done) {
+                try { child.kill('SIGKILL'); } catch (_) { }
+            }
+        }, timeoutMs);
+
+        child.once('exit', finish);
+        child.once('error', finish);
+        try {
+            child.kill('SIGTERM');
+        } catch (_) {
+            finish();
+        }
+    });
 }
 
 function normalizeSessionKey(value) {

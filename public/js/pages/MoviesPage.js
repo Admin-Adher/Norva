@@ -792,8 +792,10 @@ class MoviesPage {
         card.dataset.movieId = movie.stream_id;
         card.dataset.sourceId = movie.sourceId;
 
-        const poster = movie.stream_icon || movie.cover ||
-            MediaUtils.tmdbPosterUrl(movie.tmdb) || '/img/norva-media-placeholder.png';
+        const poster = MediaUtils.safeImageUrl(
+            movie.stream_icon || movie.cover || MediaUtils.tmdbPosterUrl(movie.tmdb),
+            '/img/norva-media-placeholder.png'
+        );
         const year = this.getItemYear(movie) || '';
         const rating = movie.rating ? `${Icons.star} ${movie.rating}` : '';
         const isFav = group.items.some(i => this.favoriteIds.has(`${i.sourceId}:${i.stream_id}`));
@@ -861,7 +863,7 @@ class MoviesPage {
             return `
             <div class="continue-card" data-item-id="${MediaUtils.escapeHtml(h.item_id)}"
                  data-source-id="${h.source_id || h.data?.sourceId || ''}">
-                <img src="${MediaUtils.escapeHtml(h.data?.poster || '/img/norva-media-placeholder.png')}"
+                <img src="${MediaUtils.escapeHtml(MediaUtils.safeImageUrl(h.data?.poster, '/img/norva-media-placeholder.png'))}"
                      onerror="this.onerror=null;this.src='/img/norva-media-placeholder.png'" loading="lazy" alt="">
                 <div class="continue-card-info">
                     <p class="continue-card-title">${MediaUtils.escapeHtml(h.data?.title || 'Unknown')}</p>
@@ -983,7 +985,7 @@ class MoviesPage {
                         type: 'movie',
                         id: movie.stream_id,
                         title: movie.tmdb?.title || movie.name,
-                        poster: movie.stream_icon || movie.cover || MediaUtils.tmdbPosterUrl(movie.tmdb),
+                        poster: MediaUtils.safeImageUrl(movie.stream_icon || movie.cover || MediaUtils.tmdbPosterUrl(movie.tmdb)),
                         description: movie.plot || movie.tmdb?.overview || '',
                         year: this.getItemYear(movie),
                         rating: movie.rating || movie.tmdb?.vote_average,
