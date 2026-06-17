@@ -15,6 +15,8 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.widget.FrameLayout;
+import android.widget.ImageButton;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.SeekBar;
@@ -50,8 +52,7 @@ import java.util.Locale;
  * on-screen display:
  *   - top-right clock,
  *   - title + full-width seek bar,
- *   - circular transport row (prev / -10s / play-pause / +10s / next) and a
- *     restart button,
+ *   - circular transport row matching the web player (-10s / play-pause / +10s),
  *   - a chevron that expands a second options bar: video/resolution, audio
  *     track, subtitles, aspect ratio, playback speed and sleep timer.
  *
@@ -87,9 +88,9 @@ public class PlayerActivity extends Activity {
     private TextView titleView;
     private TextView timeView;
     private SeekBar seekBar;
-    private TextView playPauseBtn;
+    private ImageButton playPauseBtn;
     private LinearLayout secondBar;
-    private TextView chevron;
+    private ImageButton chevron;
 
     // Second-bar value labels (kept to refresh after a change)
     private TextView videoValue;
@@ -430,35 +431,18 @@ public class PlayerActivity extends Activity {
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
                 Gravity.CENTER_HORIZONTAL));
 
-        addCircle(transport, "⏮", 48, 22, false, new Runnable() {       // ⏮ prev (-60s)
-            @Override public void run() { seekBy(-60000); }
-        });
-        addCircle(transport, "⏪", 48, 22, false, new Runnable() {       // ⏪ -10s
+        addCircleIcon(transport, R.drawable.ic_player_skip_back, "Back 10 seconds", 48, false, new Runnable() {
             @Override public void run() { seekBy(-10000); }
         });
-        playPauseBtn = addCircle(transport, "⏸", 64, 28, true, new Runnable() { // ⏯
+        playPauseBtn = addCircleIcon(transport, R.drawable.ic_player_pause, "Play/Pause", 64, true, new Runnable() {
             @Override public void run() { togglePlay(); }
         });
-        addCircle(transport, "⏩", 48, 22, false, new Runnable() {       // ⏩ +10s
+        addCircleIcon(transport, R.drawable.ic_player_skip_forward, "Forward 10 seconds", 48, false, new Runnable() {
             @Override public void run() { seekBy(10000); }
         });
-        addCircle(transport, "⏭", 48, 22, false, new Runnable() {       // ⏭ next (+60s)
-            @Override public void run() { seekBy(60000); }
-        });
-
-        TextView restart = makeGlyph("↺", 22, Color.WHITE);             // ↺ restart
-        restart.setPadding(dp(10), dp(10), dp(10), dp(10));
-        makeFocusable(restart, 0); // reachable from the transport row (rightmost)
-        restart.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { player.seekTo(0); scheduleHideControls(); }
-        });
-        controlRow.addView(restart, new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
-                Gravity.END | Gravity.CENTER_VERTICAL));
 
         // Chevron toggles the second bar (remote uses DPAD up/down instead)
-        chevron = makeGlyph("⌄", 26, ACCENT);                           // ⌄
-        chevron.setPadding(dp(16), dp(2), dp(16), dp(6));
+        chevron = makePlainIconButton(R.drawable.ic_player_expand_more, "Player options", 44, 10, ACCENT);
         chevron.setFocusable(false);
         chevron.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { toggleSecondBar(); }
@@ -483,28 +467,28 @@ public class PlayerActivity extends Activity {
         parent.addView(secondBar, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        videoValue = addBarItem("🎬", "Vidéo", "—", new Runnable() {
+        videoValue = addBarItem(R.drawable.ic_player_quality, "Vidéo", "—", new Runnable() {
             @Override public void run() { showTrackDialog(C.TRACK_TYPE_VIDEO, "Piste vidéo"); }
         });
-        audioValue = addBarItem("🔊", "Audio", "—", new Runnable() {
+        audioValue = addBarItem(R.drawable.ic_player_audio, "Audio", "—", new Runnable() {
             @Override public void run() { showTrackDialog(C.TRACK_TYPE_AUDIO, "Piste audio"); }
         });
-        subValue = addBarItem("CC", "Sous-titres", "Off", new Runnable() {
+        subValue = addBarItem(R.drawable.ic_player_captions, "Sous-titres", "Off", new Runnable() {
             @Override public void run() { showTrackDialog(C.TRACK_TYPE_TEXT, "Sous-titres"); }
         });
-        aspectValue = addBarItem("⛶", "Ratio", ASPECT_LABELS[0], new Runnable() {
+        aspectValue = addBarItem(R.drawable.ic_player_pip, "Ratio", ASPECT_LABELS[0], new Runnable() {
             @Override public void run() { cycleAspect(); }
         });
-        speedValue = addBarItem("×", "Vitesse", "1×", new Runnable() {
+        speedValue = addBarItem(R.drawable.ic_player_speed, "Vitesse", "1×", new Runnable() {
             @Override public void run() { cycleSpeed(); }
         });
-        sleepValue = addBarItem("☾", "Veille", "Off", new Runnable() {
+        sleepValue = addBarItem(R.drawable.ic_player_sleep, "Veille", "Off", new Runnable() {
             @Override public void run() { cycleSleep(); }
         });
     }
 
-    /** One second-bar entry: glyph on top, caption + live value below. */
-    private TextView addBarItem(String glyph, String caption, String value, final Runnable action) {
+    /** One second-bar entry: icon on top, caption + live value below. */
+    private TextView addBarItem(int iconRes, String caption, String value, final Runnable action) {
         LinearLayout item = new LinearLayout(this);
         item.setOrientation(LinearLayout.VERTICAL);
         item.setGravity(Gravity.CENTER);
@@ -514,12 +498,11 @@ public class PlayerActivity extends Activity {
             @Override public void onClick(View v) { action.run(); }
         });
 
-        TextView icon = new TextView(this);
-        icon.setText(glyph);
-        icon.setTextColor(Color.WHITE);
-        icon.setTextSize(20);
-        icon.setGravity(Gravity.CENTER);
-        item.addView(icon);
+        ImageView icon = new ImageView(this);
+        icon.setImageResource(iconRes);
+        icon.setColorFilter(Color.WHITE);
+        icon.setContentDescription(caption);
+        item.addView(icon, new LinearLayout.LayoutParams(dp(24), dp(24)));
 
         TextView val = new TextView(this);
         val.setText(value);
@@ -542,12 +525,12 @@ public class PlayerActivity extends Activity {
 
     // ==================== Circular transport buttons ====================
 
-    private TextView addCircle(LinearLayout parent, String glyph, int diameterDp, int glyphSp,
-                               boolean primary, final Runnable action) {
-        final TextView btn = makeGlyph(glyph, glyphSp, primary ? Color.parseColor("#0A0A0F") : Color.WHITE);
-        btn.setGravity(Gravity.CENTER);
+    private ImageButton addCircleIcon(LinearLayout parent, int iconRes, String description, int diameterDp,
+                                      boolean primary, final Runnable action) {
+        final ImageButton btn = makePlainIconButton(iconRes, description, diameterDp,
+                primary ? 18 : 12, primary ? Color.parseColor("#0A0A0F") : Color.WHITE);
         final int idle = primary ? Color.parseColor("#E4E4F2") : Color.parseColor("#33FFFFFF");
-        final int idleText = primary ? Color.parseColor("#0A0A0F") : Color.WHITE;
+        final int idleIcon = primary ? Color.parseColor("#0A0A0F") : Color.WHITE;
 
         GradientDrawable bg = new GradientDrawable();
         bg.setShape(GradientDrawable.OVAL);
@@ -569,7 +552,7 @@ public class PlayerActivity extends Activity {
                 g.setShape(GradientDrawable.OVAL);
                 g.setColor(hasFocus ? ACCENT : idle);
                 v.setBackground(g);
-                ((TextView) v).setTextColor(hasFocus ? Color.parseColor("#0A0A0F") : idleText);
+                ((ImageButton) v).setColorFilter(hasFocus ? Color.parseColor("#0A0A0F") : idleIcon);
                 v.animate().scaleX(hasFocus ? 1.12f : 1f).scaleY(hasFocus ? 1.12f : 1f).setDuration(120).start();
             }
         });
@@ -580,13 +563,18 @@ public class PlayerActivity extends Activity {
         return btn;
     }
 
-    private TextView makeGlyph(String glyph, int sizeSp, int color) {
-        TextView tv = new TextView(this);
-        tv.setText(glyph);
-        tv.setTextSize(sizeSp);
-        tv.setTextColor(color);
-        tv.setGravity(Gravity.CENTER);
-        return tv;
+    private ImageButton makePlainIconButton(int iconRes, String description, int sizeDp, int paddingDp, int color) {
+        ImageButton btn = new ImageButton(this);
+        btn.setImageResource(iconRes);
+        btn.setColorFilter(color);
+        btn.setContentDescription(description);
+        btn.setScaleType(ImageView.ScaleType.CENTER);
+        btn.setPadding(dp(paddingDp), dp(paddingDp), dp(paddingDp), dp(paddingDp));
+        btn.setBackgroundColor(Color.TRANSPARENT);
+        btn.setFocusable(true);
+        btn.setMinimumWidth(dp(sizeDp));
+        btn.setMinimumHeight(dp(sizeDp));
+        return btn;
     }
 
     private void makeFocusable(final View v, int circleDp) {
@@ -621,7 +609,9 @@ public class PlayerActivity extends Activity {
 
     private void updatePlayPauseLabel() {
         if (playPauseBtn != null) {
-            playPauseBtn.setText(player != null && player.isPlaying() ? "⏸" : "▶");
+            playPauseBtn.setImageResource(player != null && player.isPlaying()
+                    ? R.drawable.ic_player_pause
+                    : R.drawable.ic_player_play);
         }
     }
 
@@ -805,7 +795,7 @@ public class PlayerActivity extends Activity {
         if (!secondBarVisible) {
             secondBarVisible = true;
             secondBar.setVisibility(View.VISIBLE);
-            chevron.setText("⌃"); // ⌃
+            chevron.setImageResource(R.drawable.ic_player_expand_less);
             refreshSecondBarValues();
         }
         if (secondBar.getChildCount() > 0) secondBar.getChildAt(0).requestFocus();
@@ -815,7 +805,7 @@ public class PlayerActivity extends Activity {
     private void closeSecondBar() {
         secondBarVisible = false;
         secondBar.setVisibility(View.GONE);
-        chevron.setText("⌄"); // ⌄
+        chevron.setImageResource(R.drawable.ic_player_expand_more);
         playPauseBtn.requestFocus();
         scheduleHideControls();
     }
@@ -847,7 +837,7 @@ public class PlayerActivity extends Activity {
         controlsVisible = false;
         secondBarVisible = false;
         secondBar.setVisibility(View.GONE);
-        chevron.setText("⌄");
+        chevron.setImageResource(R.drawable.ic_player_expand_more);
     }
 
     private void scheduleHideControls() {
@@ -1011,7 +1001,7 @@ public class PlayerActivity extends Activity {
         controlsVisible = false;
         secondBarVisible = false;
         secondBar.setVisibility(View.GONE);
-        chevron.setText("⌄");
+        chevron.setImageResource(R.drawable.ic_player_expand_more);
     }
 
     @Override
