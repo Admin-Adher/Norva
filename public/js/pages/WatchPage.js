@@ -294,6 +294,53 @@ class WatchPage {
     }
 
     /**
+     * Normalize Cloud playback/session responses so every caller can pass either
+     * the full API result or the already-flattened playback object.
+     */
+    playbackMetadataFromResult(playback = {}, extra = {}) {
+        const root = playback && typeof playback === 'object' ? playback : {};
+        const nestedPlayback = root.playback && typeof root.playback === 'object' ? root.playback : {};
+        const session = root.session && typeof root.session === 'object' ? root.session : {};
+        const nestedSession = nestedPlayback.session && typeof nestedPlayback.session === 'object' ? nestedPlayback.session : {};
+        const gatewaySession = nestedPlayback.gatewaySession || nestedPlayback.gateway_session || root.gatewaySession || root.gateway_session || null;
+        const sessionId = extra.sessionId
+            || extra.cloudPlaybackSessionId
+            || root.sessionId
+            || root.cloudPlaybackSessionId
+            || nestedPlayback.sessionId
+            || nestedPlayback.cloudPlaybackSessionId
+            || session.id
+            || nestedSession.id
+            || null;
+
+        return {
+            ...nestedPlayback,
+            ...root,
+            ...extra,
+            sessionId,
+            cloudPlaybackSessionId: extra.cloudPlaybackSessionId
+                || root.cloudPlaybackSessionId
+                || nestedPlayback.cloudPlaybackSessionId
+                || sessionId,
+            gatewaySession,
+            codecProfile: extra.codecProfile
+                || extra.codec_profile
+                || root.codecProfile
+                || root.codec_profile
+                || nestedPlayback.codecProfile
+                || nestedPlayback.codec_profile
+                || null,
+            audioMode: extra.audioMode
+                || extra.audio_mode
+                || root.audioMode
+                || root.audio_mode
+                || nestedPlayback.audioMode
+                || nestedPlayback.audio_mode
+                || null
+        };
+    }
+
+    /**
      * Main entry point - play content
      * @param {Object} content - Movie or episode info
      * @param {string} streamUrl - Stream URL
@@ -301,8 +348,9 @@ class WatchPage {
      */
     async play(content, streamUrl, playback = {}) {
         const playbackAttemptId = this.beginPlaybackAttempt();
-        const cloudPlaybackSessionId = playback.sessionId
-            || playback.cloudPlaybackSessionId
+        const playbackMetadata = this.playbackMetadataFromResult(playback);
+        const cloudPlaybackSessionId = playbackMetadata.sessionId
+            || playbackMetadata.cloudPlaybackSessionId
             || content.cloudPlaybackSessionId
             || content.playbackSessionId
             || null;
@@ -358,7 +406,7 @@ class WatchPage {
         await this.loadVideo(streamUrl, {
             cloudPlaybackSessionId,
             playbackAttemptId,
-            codecProfile: playback.codecProfile || playback.codec_profile || null
+            codecProfile: playbackMetadata.codecProfile || playbackMetadata.codec_profile || null
         });
         if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
 
@@ -2159,10 +2207,9 @@ class WatchPage {
 
             if (!result?.url) return false;
             this.content.cloudPlaybackSessionId = result.sessionId || null;
-            await this.loadVideo(result.url, {
-                cloudPlaybackSessionId: result.sessionId,
+            await this.loadVideo(result.url, this.playbackMetadataFromResult(result, {
                 playbackAttemptId: this._playbackAttemptId
-            });
+            }));
             return true;
         } catch (error) {
             console.warn('[WatchPage] Relay fallback failed:', error?.message || error);
@@ -2198,10 +2245,9 @@ class WatchPage {
 
             if (!result?.url) return false;
             this.content.cloudPlaybackSessionId = result.sessionId || null;
-            await this.loadVideo(result.url, {
-                cloudPlaybackSessionId: result.sessionId,
+            await this.loadVideo(result.url, this.playbackMetadataFromResult(result, {
                 playbackAttemptId: this._playbackAttemptId
-            });
+            }));
             return true;
         } catch (error) {
             console.warn('[WatchPage] Gateway transcode fallback failed:', error?.message || error);
@@ -2390,7 +2436,7 @@ class WatchPage {
                 this.containerExtension = next.container || 'mp4';
                 this._failoverInProgress = false;
                 handedOff = true;
-                await this.loadVideo(result.url, { cloudPlaybackSessionId: result.sessionId });
+                await this.loadVideo(result.url, this.playbackMetadataFromResult(result));
             }
         } catch (err) {
             console.error('[WatchPage] Failover failed:', err);
@@ -2759,6 +2805,20 @@ class WatchPage {
     /**
      * Session mode: poll the growing in-process .vtt for new cues.
      */
+    gatewaySubtitleUrlForTrack(streamIndex) {
+        const sourceUrl = this.subtitleSourceUrl || this.baseStreamUrl || this.currentUrl;
+        if (!sourceUrl) return '';
+
+        try {
+            const url = new URL(sourceUrl, window.location.href);
+            if (!this.isGatewayPlaybackUrl(url.href)) return '';
+            url.pathname = url.pathname.replace(/\/playlist\.m3u8$/i, `/sub_${streamIndex}.vtt`);
+            return url.toString();
+        } catch (_) {
+            return '';
+        }
+    }
+
     async subtitleSessionTick(engine) {
         if (engine !== this._subEngine) return;
         if (engine.done || engine.busy) return;
@@ -2767,7 +2827,14 @@ class WatchPage {
         // If-None-Match + size-based ETag: ticks are sub-second so a freshly
         // demuxed cue lands before its startTime, but unchanged files cost a
         // cheap local 304 instead of a full re-download + re-parse.
-        const url = `/api/transcode/${engine.sessionId}/sub_${engine.streamIndex}.vtt`;
+        const url = engine.mode === 'gateway-session'
+            ? engine.gatewaySubtitleUrl
+            : `/api/transcode/${engine.sessionId}/sub_${engine.streamIndex}.vtt`;
+        if (!url) {
+            engine.done = true;
+            engine.busy = false;
+            return;
+        }
         const headers = engine.lastEtag ? { 'If-None-Match': engine.lastEtag } : undefined;
         const added = await this.fetchSubtitleCues(engine, url, 0, { headers });
         engine.busy = false;
@@ -2788,7 +2855,7 @@ class WatchPage {
             }
         }
         // Session gone (cleaned up server-side after a seek/restart): stop
-        if ((engine.failures || 0) >= 3) engine.done = true;
+        if ((engine.failures || 0) >= 30) engine.done = true;
     }
 
     /**
@@ -2855,20 +2922,25 @@ class WatchPage {
         this.video.appendChild(trackEl);
         if (trackEl.track) trackEl.track.mode = 'showing';
 
-        const isSessionMode = this.currentPlaybackMode === 'transcode-session';
+        const isLocalSessionMode = this.currentPlaybackMode === 'transcode-session';
+        const gatewaySubtitleUrl = this.currentPlaybackMode === 'gateway-session'
+            ? this.gatewaySubtitleUrlForTrack(selected.index)
+            : '';
+        const isSessionMode = isLocalSessionMode || Boolean(gatewaySubtitleUrl);
         const engine = {
             trackEl,
             streamIndex: selected.index,
             codec: selected.codec,
             seenCues: new Set(),
-            mode: isSessionMode ? 'session' : 'window',
+            mode: isLocalSessionMode ? 'session' : (gatewaySubtitleUrl ? 'gateway-session' : 'window'),
             sessionId: this.currentSessionId,
+            gatewaySubtitleUrl,
             sourceUrl: this.subtitleSourceUrl || this.baseStreamUrl || this.currentUrl,
             failures: 0
         };
         this._subEngine = engine;
 
-        if (isSessionMode && this.currentSessionId) {
+        if (isSessionMode && (this.currentSessionId || gatewaySubtitleUrl)) {
             this.subtitleSessionTick(engine);
             // Session subtitles are local files written by the same FFmpeg
             // process as the video. Poll them often so a newly written cue is
@@ -3249,7 +3321,7 @@ class WatchPage {
                     sourceId: sourceId,
                     categoryId: movie.category_id,
                     cloudPlaybackSessionId: result.sessionId
-                }, result.url, { sessionId: result.sessionId });
+                }, result.url, result);
             }
         } catch (e) {
             console.error('Error playing recommended movie:', e);
@@ -3363,7 +3435,7 @@ class WatchPage {
                     currentSeason: seasonNum,
                     currentEpisode: episodeNum,
                     cloudPlaybackSessionId: result.sessionId
-                }, result.url, { sessionId: result.sessionId });
+                }, result.url, result);
             }
         } catch (e) {
             console.error('Error playing episode:', e);
@@ -3463,7 +3535,7 @@ class WatchPage {
                     currentSeason: nextEp.seasonNum,
                     currentEpisode: nextEp.episode_num,
                     cloudPlaybackSessionId: result.sessionId
-                }, result.url, { sessionId: result.sessionId });
+                }, result.url, result);
             }
         } catch (e) {
             console.error('Error playing next episode:', e);

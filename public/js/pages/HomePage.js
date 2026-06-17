@@ -817,7 +817,7 @@ class HomePage {
                 }
 
                 this.app.navigateTo('watch');
-                this.app.pages.watch.play(content, result.url, { sessionId: result.sessionId });
+                this.app.pages.watch.play(content, result.url, result);
             }
         } catch (err) {
             console.error('[Dashboard] Playback failed:', err);

@@ -44,7 +44,7 @@ app.get('/health', (req, res) => {
     res.json({
         ok: true,
         service: 'norva-media-gateway',
-        version: 21,
+        version: 22,
         codecProbe: true,
         activeSessions: activeSessionCount(),
         totalSessions: sessions.size,
@@ -314,6 +314,8 @@ function startFfmpeg(session) {
         session.playlistPath
     );
 
+    appendSubtitleOutputs(args, session);
+
     const child = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'ignore', 'pipe'] });
     session.status = 'starting';
 
@@ -358,6 +360,41 @@ function audioArgsForSession(session) {
 
 function audioModeForSession(session) {
     return shouldCopyAudio(session) ? 'copy' : 'transcode';
+}
+
+function appendSubtitleOutputs(args, session) {
+    const tracks = subtitleTracksForSession(session);
+    if (!tracks.length) return;
+
+    for (const track of tracks) {
+        args.push(
+            '-map', `0:${track.index}`,
+            '-an',
+            '-vn',
+            '-c:s', 'webvtt',
+            '-f', 'webvtt',
+            path.join(session.outputDir, `sub_${track.index}.vtt`)
+        );
+    }
+    console.log(`[media-gateway] extracting subtitle stream(s): ${tracks.map((track) => track.index).join(', ')}`);
+}
+
+function subtitleTracksForSession(session) {
+    const tracks = Array.isArray(session.codecProfile?.subtitles)
+        ? session.codecProfile.subtitles
+        : (Array.isArray(session.playbackHint?.subtitles) ? session.playbackHint.subtitles : []);
+    const seen = new Set();
+
+    return tracks
+        .filter((track) => track && track.extractable === true && subtitleKind(track.codec) === 'text')
+        .map((track) => ({ ...track, index: nullableInt(track.index) }))
+        .filter((track) => {
+            if (track.index === null || track.index === undefined) return false;
+            if (seen.has(track.index)) return false;
+            seen.add(track.index);
+            return true;
+        })
+        .slice(0, 8);
 }
 
 function shouldCopyAudio(session) {
@@ -903,6 +940,7 @@ function sourceSessionKey(value) {
 }
 
 function segmentContentType(file) {
+    if (file.endsWith('.vtt')) return 'text/vtt; charset=utf-8';
     if (file.endsWith('.m4s')) return 'video/iso.segment';
     if (file.endsWith('.mp4')) return 'video/mp4';
     if (file.endsWith('.aac')) return 'audio/aac';

@@ -906,7 +906,7 @@ class SeriesPage {
                 resumeTime: (ratio > 0.02 && ratio < 0.95) ? h.progress : 0,
                 durationHint: h.duration || MediaUtils.parseDurationToSeconds(episode.duration),
                 cloudPlaybackSessionId: result.sessionId
-            }, result.url, { sessionId: result.sessionId });
+            }, result.url, result);
         } catch (err) {
             console.error('Error resuming episode:', err);
         }
@@ -1167,7 +1167,7 @@ class SeriesPage {
                         resumeTime: (ratio > 0.02 && ratio < 0.95) ? h.progress : 0,
                         durationHint,
                         cloudPlaybackSessionId: result.sessionId
-                    }, result.url, { sessionId: result.sessionId });
+                    }, result.url, result);
                 }
             }
         } catch (err) {

@@ -1005,7 +1005,7 @@ class MoviesPage {
                         versions: versionList,
                         versionIndex: 0,
                         cloudPlaybackSessionId: result.sessionId
-                    }, result.url, { sessionId: result.sessionId });
+                    }, result.url, result);
                 }
             }
         } catch (err) {
