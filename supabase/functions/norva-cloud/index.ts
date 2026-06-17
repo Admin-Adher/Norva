@@ -130,7 +130,7 @@ async function route(
       body: {
         ok: true,
         service: "norva-cloud",
-        version: 14,
+        version: 15,
         entitlements: true,
         entitlementsMode: entitlementRuntime.mode,
         entitlementsEnforced: entitlementRuntime.enforced,
@@ -1717,6 +1717,7 @@ async function createPlaybackSession(req: Request, userId: string, db: SupabaseC
       gatewaySession: gateway.session,
       gatewayRequired: !gateway.hlsUrl,
       startupMs: gateway.startupMs ?? null,
+      codecProfile: gateway.codecProfile ?? null,
     },
   };
 }
@@ -1835,6 +1836,7 @@ async function createGatewaySession(
   if (!response.ok) {
     throw new HttpError(response.status, "Media gateway refused the session", gatewayBody);
   }
+  const codecProfile = recordOrEmpty(gatewayBody.codecProfile ?? gatewayBody.codec_profile);
   const startupMs = Math.max(1, Math.round(performance.now() - startupStartedAt));
 
   const { data, error } = await db
@@ -1851,7 +1853,7 @@ async function createGatewaySession(
     .select("*")
     .single();
   if (error) throwDb(error, "Unable to record gateway session");
-  return { status: data.status, session: data, hlsUrl: data.hls_url, startupMs };
+  return { status: data.status, session: data, hlsUrl: data.hls_url, startupMs, codecProfile };
 }
 
 async function recordPlaybackStartupObservation(

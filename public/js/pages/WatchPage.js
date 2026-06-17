@@ -2314,16 +2314,29 @@ class WatchPage {
         return this.normalizeDuration(this.probeDuration) || this.normalizeDuration(this.durationHint);
     }
 
+    isVodContent() {
+        const type = this.contentType || this.content?.type || '';
+        return type === 'movie' || type === 'series';
+    }
+
     getDisplayDuration() {
         const probeDuration = this.getProbeDuration();
         const hintedDuration = this.normalizeDuration(this.durationHint);
 
-        if (probeDuration && ['remux', 'transcode', 'transcode-session'].includes(this.currentPlaybackMode)) {
+        if (this.isVodContent() && probeDuration) {
             return probeDuration;
         }
 
         if (this.streamStartOffset > 0 && hintedDuration && (this.contentType === 'movie' || this.contentType === 'series')) {
             return hintedDuration;
+        }
+
+        if (probeDuration && ['remux', 'transcode', 'transcode-session'].includes(this.currentPlaybackMode)) {
+            return probeDuration;
+        }
+
+        if (this.isVodContent() && ['gateway-session', 'direct-hls'].includes(this.currentPlaybackMode) && !probeDuration) {
+            return null;
         }
 
         return this.getValidDuration() || probeDuration;
