@@ -27,7 +27,7 @@ const STOP_CONFLICTING_OWNER_SESSIONS = (process.env.STOP_CONFLICTING_OWNER_SESS
 const FFMPEG_USER_AGENT = process.env.FFMPEG_USER_AGENT ||
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36 Norva/1.0';
 const MAX_LOG_TAIL = 12000;
-const GATEWAY_VERSION = 27;
+const GATEWAY_VERSION = 28;
 // Fallback audio path: plain AAC-LC stereo @48k. Source HE-AAC / unusual sample
 // rates can make hls.js label the track mp4a.40.5 (HE-AAC), and Chrome's MSE
 // may reject the append. Copy audio only when the codec hint is browser-safe.
@@ -298,9 +298,7 @@ async function bootstrap() {
 function startFfmpeg(session) {
     const segmentPattern = path.join(session.outputDir, 'segment-%05d.ts');
     const audioArgs = audioArgsForSession(session);
-    const audioMap = Number.isInteger(session.audioStreamIndex)
-        ? `0:${session.audioStreamIndex}?`
-        : '0:a:0?';
+    const audioMap = audioMapForSession(session);
     const args = [
         '-hide_banner',
         '-loglevel', 'warning',
@@ -461,17 +459,30 @@ function shouldCopyAudio(session) {
     const channels = nullableInt(selectedTrack?.channels ?? session.audioChannels ?? session.codecProfile?.audioChannels ?? session.codecProfile?.audio_channels ?? session.codecProfile?.channels);
 
     if (!codec) return false;
+    if (!Number.isInteger(channels) || channels <= 0) return false;
     if (channels && channels > 2) return false;
     if (isKnownUnsafeAudio(codec, profile)) return false;
     return isKnownBrowserSafeAudio(codec, profile);
+}
+
+function audioMapForSession(session) {
+    const selectedTrack = selectedAudioTrackForSession(session);
+    const selectedIndex = nullableInt(selectedTrack?.index);
+    if (Number.isInteger(selectedIndex)) return `0:${selectedIndex}?`;
+    if (Number.isInteger(session.audioStreamIndex)) return `0:${session.audioStreamIndex}?`;
+    return '0:a:0?';
 }
 
 function selectedAudioTrackForSession(session) {
     const tracks = Array.isArray(session.codecProfile?.audioTracks)
         ? session.codecProfile.audioTracks
         : (Array.isArray(session.codecProfile?.audio_tracks) ? session.codecProfile.audio_tracks : []);
-    if (!tracks.length || !Number.isInteger(session.audioStreamIndex)) return null;
-    return tracks.find((track) => nullableInt(track?.index) === session.audioStreamIndex) || null;
+    if (!tracks.length) return null;
+    if (Number.isInteger(session.audioStreamIndex)) {
+        const selected = tracks.find((track) => nullableInt(track?.index) === session.audioStreamIndex);
+        if (selected) return selected;
+    }
+    return tracks.find((track) => track?.default === true) || tracks[0] || null;
 }
 
 function isKnownBrowserSafeAudio(codec, profile) {

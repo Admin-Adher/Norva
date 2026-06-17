@@ -3158,6 +3158,7 @@ class WatchPage {
                 {
                     gatewayMode: 'transcode',
                     audioMode: 'transcode',
+                    ...this.getSelectedAudioPlaybackOptions(),
                     seekOffset: position,
                     startOffset: position,
                     resumeTime: position
