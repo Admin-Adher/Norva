@@ -3665,7 +3665,7 @@ class WatchPage {
         const selected = this.getSelectedAudioTrack();
         if (!selected || !this.content?.sourceId || !this.content?.id) return false;
 
-        const position = Math.max(0, Math.floor(this.getPlaybackPosition()));
+        const position = Math.max(0, Math.floor(this.getPlaybackPosition()) - 3);
         const autoplay = !this.video?.paused;
         const itemType = this.content.type === 'series' ? 'series' : 'movie';
         const container = this.containerExtension || this.content.containerExtension || 'mp4';
