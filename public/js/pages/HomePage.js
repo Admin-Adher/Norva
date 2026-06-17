@@ -430,12 +430,25 @@ class HomePage {
         return type === 'series' ? 'Series' : type === 'channel' ? 'Live TV' : 'Movie';
     }
 
+    getResumeOffset(progress, duration = 0) {
+        const position = Math.max(0, Math.floor(Number(progress) || 0));
+        const total = Math.max(0, Math.floor(Number(duration) || 0));
+        if (position < 12) return 0;
+        if (total > 0 && position >= total * 0.95) return 0;
+        return Math.max(0, position - 3);
+    }
+
     renderHistory(items) {
         const list = document.getElementById('continue-watching-list');
         const section = document.getElementById('continue-watching-section');
         if (!list || !section) return;
 
-        this.historyItems = items || [];
+        this.historyItems = (items || []).filter(item => {
+            const data = item.data || {};
+            const progress = item.progress || item.progress_seconds || data.progress || 0;
+            const duration = item.duration || item.duration_seconds || data.duration || 0;
+            return this.getResumeOffset(progress, duration) > 0;
+        });
 
         if (!this.historyItems.length) {
             section.classList.add('hidden');
@@ -771,7 +784,15 @@ class HomePage {
             const sourceId = item.source_id || item.sourceId || data.sourceId;
             const streamId = item.item_id || item.itemId || item.stream_id || item.streamId || item.series_id;
             const container = item.container_extension || item.containerExtension || data.containerExtension || 'mp4';
-            const resumeOffset = isResume ? Math.max(0, Math.floor(Number(item.progress || item.progress_seconds || 0) || 0)) : 0;
+            const resumeOffset = isResume
+                ? this.getResumeOffset(
+                    item.progress || item.progress_seconds || data.progress || 0,
+                    item.duration || item.duration_seconds || data.duration || 0
+                )
+                : 0;
+            const playbackPreferences = isResume
+                ? (data.playbackPreferences || data.playback_preferences || null)
+                : null;
 
             if (!sourceId || !streamId) {
                 throw new Error('Missing source or stream identifier');
@@ -784,6 +805,10 @@ class HomePage {
                 playbackHint.seekOffset = resumeOffset;
                 playbackHint.startOffset = resumeOffset;
                 playbackHint.resumeTime = resumeOffset;
+            }
+            const audioStreamIndex = Number(playbackPreferences?.audio?.streamIndex ?? playbackPreferences?.audio?.stream_index);
+            if (Number.isInteger(audioStreamIndex)) {
+                playbackHint.audioStreamIndex = audioStreamIndex;
             }
 
             const result = await window.API.proxy.xtream.getStreamUrl(
@@ -804,6 +829,7 @@ class HomePage {
                     sourceId,
                     cloudSourceId: item.cloudSourceId || data.cloudSourceId || null,
                     resumeTime: resumeOffset,
+                    playbackPreferences,
                     containerExtension: container,
                     cloudPlaybackSessionId: result.sessionId,
                     titleId: data.titleId || item.titleId || item.title_id || null,

@@ -95,8 +95,12 @@ class WatchPage {
         this.subtitleStartOffset = 0;
         this.selectedSubtitleStreamIndex = null;
         this.subtitleOffsetSeconds = 0;
+        this.selectedSubtitleTrackUserChoice = false;
         this.selectedAudioStreamIndex = null;
         this.selectedAudioTrackUserChoice = false;
+        this.pendingPlaybackPreferences = null;
+        this._pendingAudioPreferenceApplied = false;
+        this._pendingSubtitlePreferenceApplied = false;
         this._videoEncodeFallbackTried = false;
         this._playbackAttemptId = 0;
         this._playbackStatusOkReported = false;
@@ -234,6 +238,8 @@ class WatchPage {
         });
         this.video?.addEventListener('loadedmetadata', () => {
             this.onMetadataLoaded();
+            this.restorePendingAudioPreference();
+            this.restorePendingSubtitlePreference();
             this.markPlaybackUsable();
             this.trackPlaybackPosition({ force: true });
             this.saveResumeSnapshotThrottled(true);
@@ -365,11 +371,272 @@ class WatchPage {
     sanitizeResumePlayback(playback = {}) {
         const metadata = this.playbackMetadataFromResult(playback || {});
         const codecProfile = this.cloneForResumeStorage(metadata.codecProfile || metadata.codec_profile);
+        const playbackPreferences = this.cloneForResumeStorage(
+            metadata.playbackPreferences
+            || metadata.playback_preferences
+            || metadata.preferences
+            || this.getPlaybackPreferences()
+        );
         const result = {};
         if (codecProfile) result.codecProfile = codecProfile;
         if (metadata.audioMode || metadata.audio_mode) result.audioMode = metadata.audioMode || metadata.audio_mode;
         if (metadata.gatewayMode || metadata.gateway_mode) result.gatewayMode = metadata.gatewayMode || metadata.gateway_mode;
+        if (playbackPreferences) result.playbackPreferences = playbackPreferences;
         return result;
+    }
+
+    normalizePlaybackPreferences(value = null) {
+        if (!value || typeof value !== 'object') return null;
+        const audio = value.audio || value.selectedAudio || value.audioTrack || null;
+        const subtitle = value.subtitle || value.subtitles || value.selectedSubtitle || value.caption || null;
+        const result = {};
+        if (audio && typeof audio === 'object') result.audio = { ...audio };
+        if (subtitle && typeof subtitle === 'object') result.subtitle = { ...subtitle };
+        return result.audio || result.subtitle ? result : null;
+    }
+
+    getPlaybackPreferences() {
+        const result = {};
+        const audio = this.getCurrentAudioPreference();
+        const subtitle = this.getCurrentSubtitlePreference();
+        if (audio) result.audio = audio;
+        if (subtitle) result.subtitle = subtitle;
+        return result.audio || result.subtitle ? result : null;
+    }
+
+    getCurrentAudioPreference() {
+        const selectedProbe = this.getSelectedAudioTrack();
+        if (this.selectedAudioTrackUserChoice && selectedProbe) {
+            return {
+                source: 'probe',
+                streamIndex: selectedProbe.index,
+                label: this.getTrackLabel(selectedProbe, 'Audio', 'audio'),
+                language: selectedProbe.language || null,
+                codec: selectedProbe.codec || null,
+                channels: selectedProbe.channels || null
+            };
+        }
+
+        if (this.hls && Number.isInteger(this.hls.audioTrack) && this.hls.audioTrack >= 0) {
+            const track = this.hls.audioTracks?.[this.hls.audioTrack];
+            if (track) {
+                return {
+                    source: 'hls',
+                    index: this.hls.audioTrack,
+                    label: track.name || track.lang || `Audio ${this.hls.audioTrack + 1}`,
+                    language: track.lang || null
+                };
+            }
+        }
+
+        const nativeTracks = this.video?.audioTracks;
+        if (nativeTracks && Number.isFinite(nativeTracks.length)) {
+            for (let i = 0; i < nativeTracks.length; i++) {
+                const track = nativeTracks[i];
+                if (track?.enabled) {
+                    return {
+                        source: 'native',
+                        index: i,
+                        label: track.label || track.language || `Audio ${i + 1}`,
+                        language: track.language || null
+                    };
+                }
+            }
+        }
+
+        return null;
+    }
+
+    getCurrentSubtitlePreference() {
+        const selectedProbe = this.getSelectedSubtitleTrack();
+        if (selectedProbe) {
+            return {
+                source: 'probe',
+                streamIndex: selectedProbe.index,
+                label: this.getSubtitleTrackLabel(selectedProbe, 'Subtitles'),
+                language: selectedProbe.inferredLanguage || selectedProbe.language || null,
+                offsetSeconds: this.normalizeSubtitleOffset(this.subtitleOffsetSeconds)
+            };
+        }
+
+        if (this.hls && Number.isInteger(this.hls.subtitleTrack) && this.hls.subtitleTrack >= 0) {
+            const track = this.hls.subtitleTracks?.[this.hls.subtitleTrack];
+            if (track) {
+                return {
+                    source: 'hls',
+                    index: this.hls.subtitleTrack,
+                    label: track.name || track.lang || `Subtitle ${this.hls.subtitleTrack + 1}`,
+                    language: track.lang || null
+                };
+            }
+        }
+
+        const textTracks = this.video?.textTracks;
+        if (textTracks && Number.isFinite(textTracks.length)) {
+            for (let i = 0; i < textTracks.length; i++) {
+                const track = textTracks[i];
+                if (track?.mode === 'showing') {
+                    return {
+                        source: 'native',
+                        index: i,
+                        label: track.label || track.language || `Subtitle ${i + 1}`,
+                        language: track.language || null
+                    };
+                }
+            }
+        }
+
+        if (this.selectedSubtitleTrackUserChoice && this.selectedSubtitleStreamIndex === null) {
+            return { source: 'off', mode: 'off' };
+        }
+
+        return null;
+    }
+
+    setPendingPlaybackPreferences(value) {
+        this.pendingPlaybackPreferences = this.normalizePlaybackPreferences(value);
+        this._pendingAudioPreferenceApplied = false;
+        this._pendingSubtitlePreferenceApplied = false;
+    }
+
+    clearPendingPreference(kind) {
+        if (kind === 'audio') this._pendingAudioPreferenceApplied = true;
+        if (kind === 'subtitle') this._pendingSubtitlePreferenceApplied = true;
+    }
+
+    findTrackByPreference(tracks, preference, fallbackIndex = null, type = 'track') {
+        if (!Array.isArray(tracks) || !preference) return null;
+        const streamIndex = Number(preference.streamIndex ?? preference.stream_index);
+        if (Number.isInteger(streamIndex)) {
+            const byStream = tracks.find(track => Number(track?.index) === streamIndex);
+            if (byStream) return byStream;
+        }
+
+        const index = Number(preference.index);
+        if (Number.isInteger(index) && tracks[index]) return tracks[index];
+
+        const language = this.normalizeTrackLanguage(preference.language || preference.lang);
+        if (language && language !== 'und') {
+            const byLanguage = tracks.find(track => this.normalizeTrackLanguage(track?.language || track?.lang) === language);
+            if (byLanguage) return byLanguage;
+        }
+
+        const label = String(preference.label || '').trim().toLowerCase();
+        if (label) {
+            const byLabel = tracks.find(track => {
+                const candidate = type === 'subtitle'
+                    ? this.getSubtitleTrackLabel(track, '').toLowerCase()
+                    : this.getTrackLabel(track, '', type).toLowerCase();
+                return candidate && candidate === label;
+            });
+            if (byLabel) return byLabel;
+        }
+
+        if (Number.isInteger(fallbackIndex) && tracks[fallbackIndex]) return tracks[fallbackIndex];
+        return null;
+    }
+
+    restorePendingAudioPreference(info = this.currentStreamInfo) {
+        if (this._pendingAudioPreferenceApplied) return false;
+        const preference = this.pendingPlaybackPreferences?.audio;
+        if (!preference) return false;
+
+        const probeTracks = Array.isArray(info?.audioTracks) && info.audioTracks.length
+            ? info.audioTracks
+            : this.audioTracks;
+        if (probeTracks?.length && (preference.source === 'probe' || preference.streamIndex !== undefined || preference.stream_index !== undefined)) {
+            const track = this.findTrackByPreference(probeTracks, preference, null, 'audio');
+            if (track) {
+                this.selectedAudioStreamIndex = track.index;
+                this.selectedAudioTrackUserChoice = true;
+                this._pendingAudioPreferenceApplied = true;
+                return true;
+            }
+        }
+
+        if (preference.source === 'hls' && this.hls?.audioTracks?.length) {
+            const track = this.findTrackByPreference(this.hls.audioTracks, preference, Number(preference.index), 'audio');
+            const index = this.hls.audioTracks.indexOf(track);
+            if (index >= 0) {
+                this.hls.audioTrack = index;
+                this._pendingAudioPreferenceApplied = true;
+                return true;
+            }
+        }
+
+        const nativeTracks = this.video?.audioTracks;
+        if (preference.source === 'native' && nativeTracks && Number.isFinite(nativeTracks.length)) {
+            const index = Number(preference.index);
+            if (Number.isInteger(index) && index >= 0 && index < nativeTracks.length) {
+                for (let i = 0; i < nativeTracks.length; i++) nativeTracks[i].enabled = i === index;
+                this._pendingAudioPreferenceApplied = true;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    restorePendingSubtitlePreference() {
+        if (this._pendingSubtitlePreferenceApplied) return false;
+        const preference = this.pendingPlaybackPreferences?.subtitle;
+        if (!preference) return false;
+
+        if (preference.source === 'off' || preference.mode === 'off') {
+            this.selectedSubtitleStreamIndex = null;
+            this.subtitleOffsetSeconds = 0;
+            this.selectedSubtitleTrackUserChoice = true;
+            this._pendingSubtitlePreferenceApplied = true;
+            if (this.hls) {
+                this.hls.subtitleDisplay = false;
+                this.hls.subtitleTrack = -1;
+            }
+            const textTracks = this.video?.textTracks;
+            if (textTracks && Number.isFinite(textTracks.length)) {
+                for (let i = 0; i < textTracks.length; i++) textTracks[i].mode = 'hidden';
+            }
+            this.clearExternalSubtitleTracks();
+            return true;
+        }
+
+        const probeTracks = this.getExtractableSubtitleTracks();
+        if (probeTracks.length && (preference.source === 'probe' || preference.streamIndex !== undefined || preference.stream_index !== undefined)) {
+            const track = this.findTrackByPreference(probeTracks, preference, null, 'subtitle');
+            if (track) {
+                this.selectedSubtitleStreamIndex = track.index;
+                this.subtitleOffsetSeconds = this.normalizeSubtitleOffset(
+                    preference.offsetSeconds ?? preference.offset_seconds ?? this.loadSubtitleOffset(track.index)
+                );
+                this.selectedSubtitleTrackUserChoice = true;
+                this._pendingSubtitlePreferenceApplied = true;
+                return true;
+            }
+        }
+
+        if (preference.source === 'hls' && this.hls?.subtitleTracks?.length) {
+            const track = this.findTrackByPreference(this.hls.subtitleTracks, preference, Number(preference.index), 'subtitle');
+            const index = this.hls.subtitleTracks.indexOf(track);
+            if (index >= 0) {
+                this.hls.subtitleDisplay = true;
+                this.hls.subtitleTrack = index;
+                this.selectedSubtitleTrackUserChoice = true;
+                this._pendingSubtitlePreferenceApplied = true;
+                return true;
+            }
+        }
+
+        const textTracks = this.video?.textTracks;
+        if (preference.source === 'native' && textTracks && Number.isFinite(textTracks.length)) {
+            const index = Number(preference.index);
+            if (Number.isInteger(index) && index >= 0 && index < textTracks.length) {
+                for (let i = 0; i < textTracks.length; i++) textTracks[i].mode = i === index ? 'showing' : 'hidden';
+                this.selectedSubtitleTrackUserChoice = true;
+                this._pendingSubtitlePreferenceApplied = true;
+                return true;
+            }
+        }
+
+        return false;
     }
 
     getResumeSnapshotPosition() {
@@ -522,9 +789,18 @@ class WatchPage {
                 || resumeEpisode?.codecProfile || resumeEpisode?.codec_profile
         };
         const base = { container, streamType };
-        return MediaUtils.playbackHintFromItem
+        const hint = MediaUtils.playbackHintFromItem
             ? MediaUtils.playbackHintFromItem(item, base)
             : base;
+        const audioPreference = snapshot?.playback?.playbackPreferences?.audio
+            || snapshot?.playbackPreferences?.audio
+            || snapshot?.content?.playbackPreferences?.audio
+            || null;
+        const audioStreamIndex = Number(audioPreference?.streamIndex ?? audioPreference?.stream_index);
+        if (Number.isInteger(audioStreamIndex)) {
+            hint.audioStreamIndex = audioStreamIndex;
+        }
+        return hint;
     }
 
     async restoreFromResumeSnapshot() {
@@ -537,6 +813,7 @@ class WatchPage {
                 ...snapshot.content,
                 type: snapshot.content.type,
                 resumeTime: this.getResumeRestorePosition(snapshot.position, snapshot.duration),
+                playbackPreferences: snapshot.playback?.playbackPreferences || snapshot.playbackPreferences || snapshot.content.playbackPreferences || null,
                 durationHint: this.normalizeDuration(snapshot.content.durationHint) || this.normalizeDuration(snapshot.duration),
                 currentSeason: snapshot.currentSeason || snapshot.content.currentSeason || null,
                 currentEpisode: snapshot.currentEpisode || snapshot.content.currentEpisode || null,
@@ -703,6 +980,14 @@ class WatchPage {
         this._lastKnownPlaybackPosition = this.resumeTime || 0;
         this._lastKnownPlaybackDuration = this.durationHint || 0;
         this.resetTrackSelectionState();
+        this.setPendingPlaybackPreferences(
+            content.playbackPreferences
+            || content.playback_preferences
+            || playbackMetadata.playbackPreferences
+            || playbackMetadata.playback_preferences
+            || playbackMetadata.preferences
+            || null
+        );
 
         // Alternate versions of the same title (duplicate group) for failover
         this.versions = Array.isArray(content.versions) && content.versions.length > 1 ? content.versions : null;
@@ -930,6 +1215,7 @@ class WatchPage {
         this.subtitleSourceUrl = null;
         this.subtitleStartOffset = 0;
         this.selectedSubtitleStreamIndex = null;
+        this.selectedSubtitleTrackUserChoice = false;
         this.selectedAudioStreamIndex = null;
         this.selectedAudioTrackUserChoice = false;
         this.closeAudioMenu();
@@ -1511,9 +1797,12 @@ class WatchPage {
         this.probeDuration = this.normalizeDuration(info.duration);
         this.audioTracks = Array.isArray(info.audioTracks) ? info.audioTracks : [];
         this.subtitleTracks = Array.isArray(info.subtitles) ? info.subtitles : [];
+        this.restorePendingAudioPreference(info);
+        this.restorePendingSubtitlePreference();
         this.ensureSelectedAudioTrack();
         this.updateQualityBadge();
         this.updateAudioTracks();
+        this.updateCaptionsTracks();
         this.updateDurationState();
     }
 
@@ -1610,6 +1899,7 @@ class WatchPage {
         this.subtitleSourceUrl = null;
         this.subtitleStartOffset = 0;
         this.selectedSubtitleStreamIndex = null;
+        this.selectedSubtitleTrackUserChoice = false;
         this.selectedAudioStreamIndex = null;
         this.selectedAudioTrackUserChoice = false;
         this.clearExternalSubtitleTracks();
@@ -1887,6 +2177,7 @@ class WatchPage {
 
         this.hls.on(Hls.Events.AUDIO_TRACKS_UPDATED, (event, data) => {
             console.log('[WatchPage] Audio tracks updated:', data.audioTracks);
+            this.restorePendingAudioPreference();
             this.updateAudioTracks();
         });
 
@@ -1898,6 +2189,7 @@ class WatchPage {
         // Listen for subtitle track updates
         this.hls.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, (event, data) => {
             console.log('[WatchPage] Subtitle tracks updated:', data.subtitleTracks);
+            this.restorePendingSubtitlePreference();
             // Wait a moment for native text tracks to populate
             setTimeout(() => this.updateCaptionsTracks(), 100);
         });
@@ -2075,6 +2367,7 @@ class WatchPage {
         this.subtitleSourceUrl = null;
         this.subtitleStartOffset = 0;
         this.selectedSubtitleStreamIndex = null;
+        this.selectedSubtitleTrackUserChoice = false;
         this.updateDurationState();
 
         this.hideNowPlaying();
@@ -2524,16 +2817,29 @@ class WatchPage {
             this._playbackEnded = true;
             if (this.playbackTelemetry) this.playbackTelemetry.ended = true;
             this.sendPlaybackEvent('ended');
+            const duration = this.getDisplayDuration?.() || this._lastKnownPlaybackDuration || 0;
+            if (duration > 0) {
+                this.trackPlaybackPosition({ position: duration, force: true });
+            }
+            this.saveProgress({ force: true });
             this.clearResumeSnapshot();
+            if (this.playBtnText) this.playBtnText.textContent = 'Restart';
         }
 
-        // For series, show next episode panel if not already showing and auto-play is enabled
+        // For series, propose the next episode. Autoplay controls whether the
+        // countdown starts, but the next episode affordance is useful either way.
         const autoPlayEnabled = this.app?.player?.settings?.autoPlayNextEpisode;
         if (autoPlayEnabled && this.contentType === 'series' && this.seriesInfo && !this.nextEpisodeShowing) {
             const nextEp = this.getNextEpisode();
             if (nextEp) {
                 this.nextEpisodeShowing = true;
-                this.showNextEpisodePanel(nextEp);
+                this.showNextEpisodePanel(nextEp, { autoCountdown: true });
+            }
+        } else if (this.contentType === 'series' && this.seriesInfo && !this.nextEpisodeShowing) {
+            const nextEp = this.getNextEpisode();
+            if (nextEp) {
+                this.nextEpisodeShowing = true;
+                this.showNextEpisodePanel(nextEp, { autoCountdown: false });
             }
         }
     }
@@ -3019,8 +3325,11 @@ class WatchPage {
 
         if (source === 'hls' && this.hls && index >= 0) {
             this.hls.audioTrack = index;
+            this.clearPendingPreference('audio');
             this.updateAudioTracks();
             this.closeAudioMenu();
+            this.saveResumeSnapshotThrottled(true);
+            this.saveProgress({ force: true });
             return;
         }
 
@@ -3031,8 +3340,11 @@ class WatchPage {
                     tracks[i].enabled = i === index;
                 }
             }
+            this.clearPendingPreference('audio');
             this.updateAudioTracks();
             this.closeAudioMenu();
+            this.saveResumeSnapshotThrottled(true);
+            this.saveProgress({ force: true });
             return;
         }
 
@@ -3044,8 +3356,11 @@ class WatchPage {
         const previous = Number(this.selectedAudioStreamIndex);
         this.selectedAudioStreamIndex = streamIndex;
         this.selectedAudioTrackUserChoice = true;
+        this.clearPendingPreference('audio');
         this.updateAudioTracks();
         this.closeAudioMenu();
+        this.saveResumeSnapshotThrottled(true);
+        this.saveProgress({ force: true });
 
         if (previous === streamIndex && this.currentPlaybackMode === 'transcode-session') {
             return;
@@ -3233,6 +3548,8 @@ class WatchPage {
         this.saveSubtitleOffset(this.selectedSubtitleStreamIndex, next);
         this.attachSelectedProbeSubtitleTrack();
         this.updateCaptionsTracks();
+        this.saveResumeSnapshotThrottled(true);
+        this.saveProgress({ force: true });
     }
 
     getExtractableSubtitleTracks(subtitles = this.subtitleTracks) {
@@ -3521,6 +3838,7 @@ class WatchPage {
         this.subtitleStartOffset = this.normalizeDuration(startOffset) || 0;
         this.subtitleTracks = Array.isArray(subtitles) ? subtitles : [];
         this.clearExternalSubtitleTracks();
+        this.restorePendingSubtitlePreference();
 
         if (this.selectedSubtitleStreamIndex !== null && this.selectedSubtitleStreamIndex !== undefined) {
             this.attachSelectedProbeSubtitleTrack();
@@ -3649,24 +3967,31 @@ class WatchPage {
         if (source === 'off') {
             this.selectedSubtitleStreamIndex = null;
             this.subtitleOffsetSeconds = 0;
+            this.selectedSubtitleTrackUserChoice = true;
             this.clearExternalSubtitleTracks();
         } else if (source === 'probe' && Number.isInteger(streamIndex)) {
             this.selectedSubtitleStreamIndex = streamIndex;
             this.subtitleOffsetSeconds = this.loadSubtitleOffset(streamIndex);
+            this.selectedSubtitleTrackUserChoice = true;
             this.attachSelectedProbeSubtitleTrack();
         } else if (source === 'native' && index >= 0 && index < tracks.length) {
             this.selectedSubtitleStreamIndex = null;
             this.subtitleOffsetSeconds = 0;
+            this.selectedSubtitleTrackUserChoice = true;
             tracks[index].mode = 'showing';
         } else if (source === 'hls' && this.hls && index >= 0) {
             this.selectedSubtitleStreamIndex = null;
             this.subtitleOffsetSeconds = 0;
+            this.selectedSubtitleTrackUserChoice = true;
             this.hls.subtitleDisplay = true;
             this.hls.subtitleTrack = index;
         }
 
+        this.clearPendingPreference('subtitle');
         this.updateCaptionsTracks();
         this.closeCaptionsMenu();
+        this.saveResumeSnapshotThrottled(true);
+        this.saveProgress({ force: true });
     }
 
     // === Overlay Auto-Hide ===
@@ -3767,7 +4092,7 @@ class WatchPage {
 
         // Update play button text
         if (this.playBtnText) {
-            this.playBtnText.textContent = 'Play';
+            this.playBtnText.textContent = this.resumeTime > 0 ? 'Resume' : 'Play';
         }
     }
 
@@ -3980,14 +4305,20 @@ class WatchPage {
 
         try {
             await this.releasePlaybackPipelineForRetry();
+            const playbackPreferences = this.getPlaybackPreferences();
+            const playbackHint = MediaUtils.playbackHintFromItem
+                ? MediaUtils.playbackHintFromItem(episode, { container, streamType: 'series' })
+                : { container, streamType: 'series' };
+            const audioStreamIndex = Number(playbackPreferences?.audio?.streamIndex ?? playbackPreferences?.audio?.stream_index);
+            if (Number.isInteger(audioStreamIndex)) {
+                playbackHint.audioStreamIndex = audioStreamIndex;
+            }
             const result = await API.proxy.xtream.getStreamUrl(
                 this.content.sourceId,
                 episodeId,
                 'series',
                 container,
-                MediaUtils.playbackHintFromItem
-                    ? MediaUtils.playbackHintFromItem(episode, { container, streamType: 'series' })
-                    : { container, streamType: 'series' }
+                playbackHint
             );
 
             if (result?.url) {
@@ -4007,6 +4338,8 @@ class WatchPage {
                     seriesInfo: this.seriesInfo,
                     currentSeason: seasonNum,
                     currentEpisode: episodeNum,
+                    containerExtension: container,
+                    playbackPreferences,
                     cloudPlaybackSessionId: result.sessionId
                 }, result.url, result);
             }
@@ -4051,16 +4384,31 @@ class WatchPage {
         return null;
     }
 
-    showNextEpisodePanel(nextEp) {
+    sanitizeNextEpisodeForHistory(nextEp) {
+        if (!nextEp) return null;
+        return {
+            id: nextEp.id || null,
+            season: nextEp.seasonNum || null,
+            episode: nextEp.episode_num || null,
+            title: nextEp.title || null,
+            containerExtension: nextEp.container_extension || 'mp4',
+            duration: nextEp.duration || null
+        };
+    }
+
+    showNextEpisodePanel(nextEp, options = {}) {
         if (!this.nextEpisodePanel) return;
 
+        const autoCountdown = options.autoCountdown !== false;
         this.nextEpisodeTitle.textContent = `S${nextEp.seasonNum} E${nextEp.episode_num} - ${nextEp.title || `Episode ${nextEp.episode_num}`}`;
         this.nextEpisodePanel.classList.remove('hidden');
         this.nextEpisodePanel.nextEpisodeData = nextEp;
 
-        // Start countdown
         this.nextEpisodeCountdown = 10;
-        this.nextCountdown.textContent = this.nextEpisodeCountdown;
+        if (this.nextCountdown) {
+            this.nextCountdown.textContent = autoCountdown ? this.nextEpisodeCountdown : '';
+        }
+        if (!autoCountdown) return;
 
         this.nextEpisodeInterval = setInterval(() => {
             this.nextEpisodeCountdown--;
@@ -4082,14 +4430,20 @@ class WatchPage {
 
         try {
             const container = nextEp.container_extension || 'mp4';
+            const playbackPreferences = this.getPlaybackPreferences();
+            const playbackHint = MediaUtils.playbackHintFromItem
+                ? MediaUtils.playbackHintFromItem(nextEp, { container, streamType: 'series' })
+                : { container, streamType: 'series' };
+            const audioStreamIndex = Number(playbackPreferences?.audio?.streamIndex ?? playbackPreferences?.audio?.stream_index);
+            if (Number.isInteger(audioStreamIndex)) {
+                playbackHint.audioStreamIndex = audioStreamIndex;
+            }
             const result = await API.proxy.xtream.getStreamUrl(
                 this.content.sourceId,
                 nextEp.id,
                 'series',
                 container,
-                MediaUtils.playbackHintFromItem
-                    ? MediaUtils.playbackHintFromItem(nextEp, { container, streamType: 'series' })
-                    : { container, streamType: 'series' }
+                playbackHint
             );
 
             if (result?.url) {
@@ -4107,6 +4461,8 @@ class WatchPage {
                     seriesInfo: this.seriesInfo,
                     currentSeason: nextEp.seasonNum,
                     currentEpisode: nextEp.episode_num,
+                    containerExtension: container,
+                    playbackPreferences,
                     cloudPlaybackSessionId: result.sessionId
                 }, result.url, result);
             }
@@ -4127,7 +4483,11 @@ class WatchPage {
 
     // === Navigation ===
 
-    goBack() {
+    async goBack() {
+        this.trackPlaybackPosition({ force: true });
+        this.saveResumeSnapshotThrottled(true);
+        await this.saveProgress({ force: true });
+
         this._suspendResumeSnapshotSave = true;
         this.stop();
         this._suspendResumeSnapshotSave = false;
@@ -4183,10 +4543,13 @@ class WatchPage {
                 poster: this.content.poster,
                 sourceId: this.content.sourceId,
                 containerExtension: this.containerExtension,
+                durationHint: duration,
+                playbackPreferences: this.getPlaybackPreferences(),
                 // Series-specific fields for next episode functionality
                 seriesId: this.content.seriesId || null,
                 currentSeason: this.currentSeason || null,
-                currentEpisode: this.currentEpisode || null
+                currentEpisode: this.currentEpisode || null,
+                nextEpisode: this.content.type === 'series' ? this.sanitizeNextEpisodeForHistory(this.getNextEpisode()) : null
             };
 
             await window.API.request('POST', '/history', {

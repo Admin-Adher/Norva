@@ -819,6 +819,14 @@ class SeriesPage {
 
     // === Continue Watching row ===
 
+    getResumeOffset(progress, duration = 0) {
+        const position = Math.max(0, Math.floor(Number(progress) || 0));
+        const total = Math.max(0, Math.floor(Number(duration) || 0));
+        if (position < 12) return 0;
+        if (total > 0 && position >= total * 0.95) return 0;
+        return Math.max(0, position - 3);
+    }
+
     renderContinueWatching() {
         if (!this.continueRow || !this.continueList) return;
         // Keep only the most recent episode per series
@@ -826,6 +834,7 @@ class SeriesPage {
         const inProgress = [];
         for (const h of (this.historyItems || [])) {
             if (h.item_type !== 'episode' || !h.data?.seriesId) continue;
+            if (this.getResumeOffset(h.progress, h.duration) <= 0) continue;
             const key = `${h.data.sourceId}:${h.data.seriesId}`;
             if (seen.has(key)) continue;
             seen.add(key);
@@ -881,10 +890,7 @@ class SeriesPage {
             if (!episode) return;
 
             const container = episode.container_extension || h.data?.containerExtension || 'mp4';
-            const ratio = h.duration > 0 ? h.progress / h.duration : 0;
-            const resumeOffset = (ratio > 0.02 && ratio < 0.95)
-                ? Math.max(0, Math.floor(Number(h.progress) || 0))
-                : 0;
+            const resumeOffset = this.getResumeOffset(h.progress, h.duration);
             const playbackHint = MediaUtils.playbackHintFromItem
                 ? MediaUtils.playbackHintFromItem(episode, { container, streamType: 'series' })
                 : { container, streamType: 'series' };
@@ -892,6 +898,11 @@ class SeriesPage {
                 playbackHint.seekOffset = resumeOffset;
                 playbackHint.startOffset = resumeOffset;
                 playbackHint.resumeTime = resumeOffset;
+            }
+            const playbackPreferences = h.data?.playbackPreferences || h.data?.playback_preferences || null;
+            const audioStreamIndex = Number(playbackPreferences?.audio?.streamIndex ?? playbackPreferences?.audio?.stream_index);
+            if (Number.isInteger(audioStreamIndex)) {
+                playbackHint.audioStreamIndex = audioStreamIndex;
             }
             const result = await API.proxy.xtream.getStreamUrl(
                 sourceId,
@@ -915,6 +926,7 @@ class SeriesPage {
                 currentEpisode: episodeNum,
                 containerExtension: container,
                 resumeTime: resumeOffset,
+                playbackPreferences,
                 durationHint: h.duration || MediaUtils.parseDurationToSeconds(episode.duration),
                 cloudPlaybackSessionId: result.sessionId
             }, result.url, { ...result, seekOffset: resumeOffset, startOffset: resumeOffset });
@@ -1138,10 +1150,8 @@ class SeriesPage {
         try {
             const h = (this.historyItems || []).find(x =>
                 x.item_type === 'episode' && String(x.item_id) === String(episodeId));
-            const ratio = h && h.duration > 0 ? h.progress / h.duration : 0;
-            const resumeOffset = (ratio > 0.02 && ratio < 0.95)
-                ? Math.max(0, Math.floor(Number(h.progress) || 0))
-                : 0;
+            const resumeOffset = h ? this.getResumeOffset(h.progress, h.duration) : 0;
+            const playbackPreferences = h?.data?.playbackPreferences || h?.data?.playback_preferences || null;
             const playbackHint = MediaUtils.playbackHintFromItem
                 ? MediaUtils.playbackHintFromItem(episode, { container, streamType: 'series' })
                 : { container, streamType: 'series' };
@@ -1149,6 +1159,10 @@ class SeriesPage {
                 playbackHint.seekOffset = resumeOffset;
                 playbackHint.startOffset = resumeOffset;
                 playbackHint.resumeTime = resumeOffset;
+            }
+            const audioStreamIndex = Number(playbackPreferences?.audio?.streamIndex ?? playbackPreferences?.audio?.stream_index);
+            if (Number.isInteger(audioStreamIndex)) {
+                playbackHint.audioStreamIndex = audioStreamIndex;
             }
             await this.prepareForPlaybackSession();
             const result = await API.proxy.xtream.getStreamUrl(
@@ -1183,6 +1197,7 @@ class SeriesPage {
                         currentEpisode: episodeNum,
                         containerExtension: container,
                         resumeTime: resumeOffset,
+                        playbackPreferences,
                         durationHint,
                         cloudPlaybackSessionId: result.sessionId
                     }, result.url, { ...result, seekOffset: resumeOffset, startOffset: resumeOffset });

@@ -846,11 +846,19 @@ class MoviesPage {
 
     // === Continue Watching row ===
 
+    getResumeOffset(progress, duration = 0) {
+        const position = Math.max(0, Math.floor(Number(progress) || 0));
+        const total = Math.max(0, Math.floor(Number(duration) || 0));
+        if (position < 12) return 0;
+        if (total > 0 && position >= total * 0.95) return 0;
+        return Math.max(0, position - 3);
+    }
+
     renderContinueWatching() {
         if (!this.continueRow || !this.continueList) return;
         const inProgress = (this.historyItems || [])
             .filter(h => h.item_type === 'movie' && h.duration > 0 &&
-                h.progress / h.duration > 0.02 && h.progress / h.duration < 0.95)
+                this.getResumeOffset(h.progress, h.duration) > 0)
             .slice(0, 12);
 
         if (inProgress.length === 0) {
@@ -894,7 +902,11 @@ class MoviesPage {
                 stream_icon: h.data?.poster,
                 container_extension: h.data?.containerExtension || 'mp4'
             };
-        await this.playMovie(movie, { resumeTime: h.progress, versions: [movie] });
+        await this.playMovie(movie, {
+            resumeTime: this.getResumeOffset(h.progress, h.duration),
+            versions: [movie],
+            playbackPreferences: h.data?.playbackPreferences || h.data?.playback_preferences || null
+        });
     }
 
     // === Playback ===
@@ -910,8 +922,12 @@ class MoviesPage {
         const ordered = MediaUtils.orderVersionsByPreference(group.items, this.getPreferences());
         const best = ordered[0];
         const watch = this.watchState.get(String(best.stream_id));
-        const resumeTime = (watch && watch.ratio > 0.02 && watch.ratio < 0.95) ? watch.progress : 0;
-        await this.playMovie(best, { versions: ordered, resumeTime });
+        const resumeTime = watch ? this.getResumeOffset(watch.progress, watch.duration) : 0;
+        await this.playMovie(best, {
+            versions: ordered,
+            resumeTime,
+            playbackPreferences: watch?.data?.playbackPreferences || watch?.data?.playback_preferences || null
+        });
     }
 
     async playRandom() {
@@ -967,7 +983,7 @@ class MoviesPage {
         ]);
     }
 
-    async playMovie(movie, { versions = null, resumeTime = 0 } = {}) {
+    async playMovie(movie, { versions = null, resumeTime = 0, playbackPreferences = null } = {}) {
         try {
             const container = movie.container_extension || 'mp4';
             const resumeOffset = Math.max(0, Math.floor(Number(resumeTime) || 0));
@@ -978,6 +994,10 @@ class MoviesPage {
                 playbackHint.seekOffset = resumeOffset;
                 playbackHint.startOffset = resumeOffset;
                 playbackHint.resumeTime = resumeOffset;
+            }
+            const audioStreamIndex = Number(playbackPreferences?.audio?.streamIndex ?? playbackPreferences?.audio?.stream_index);
+            if (Number.isInteger(audioStreamIndex)) {
+                playbackHint.audioStreamIndex = audioStreamIndex;
             }
             await this.prepareForPlaybackSession();
             const result = await API.proxy.xtream.getStreamUrl(
@@ -1010,6 +1030,7 @@ class MoviesPage {
                         categoryId: movie.category_id,
                         containerExtension: container,
                         resumeTime: resumeOffset,
+                        playbackPreferences,
                         durationHint: movie.tmdb?.runtime ? movie.tmdb.runtime * 60 : null,
                         versions: versionList,
                         versionIndex: 0,
