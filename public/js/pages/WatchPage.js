@@ -113,6 +113,13 @@ class WatchPage {
         this._playbackEnded = false;
         this._lastPauseTelemetryAt = 0;
         this._handlingPlaybackFailure = false;
+        this.resumeSnapshotKey = 'norva-watch-resume-v1';
+        this.resumeSnapshotTtlMs = 6 * 60 * 60 * 1000;
+        this.resumeSnapshotSaveIntervalMs = 5000;
+        this._lastResumeSnapshotSaveAt = 0;
+        this._resumeRestorePromise = null;
+        this._resumePlaybackMetadata = null;
+        this._suspendResumeSnapshotSave = false;
 
         // Overlay timer
         this.overlayTimeout = null;
@@ -220,10 +227,12 @@ class WatchPage {
         this.video?.addEventListener('timeupdate', () => {
             this.updateProgress();
             this.markPlaybackUsable();
+            this.saveResumeSnapshotThrottled();
         });
         this.video?.addEventListener('loadedmetadata', () => {
             this.onMetadataLoaded();
             this.markPlaybackUsable();
+            this.saveResumeSnapshotThrottled(true);
         });
         this.video?.addEventListener('loadeddata', () => this.markPlaybackUsable());
         this.video?.addEventListener('durationchange', () => this.updateDurationState());
@@ -292,6 +301,218 @@ class WatchPage {
         });
 
         this.updateDurationState();
+
+        window.addEventListener('pagehide', () => this.saveResumeSnapshotThrottled(true));
+        window.addEventListener('beforeunload', () => this.saveResumeSnapshotThrottled(true));
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'hidden') {
+                this.saveResumeSnapshotThrottled(true);
+            }
+        });
+    }
+
+    cloneForResumeStorage(value) {
+        if (value === undefined || value === null) return null;
+        try {
+            return JSON.parse(JSON.stringify(value));
+        } catch (_) {
+            return null;
+        }
+    }
+
+    sanitizeResumeContent(content = {}) {
+        if (!content || typeof content !== 'object') return null;
+
+        const copy = {};
+        [
+            'type', 'id', 'title', 'subtitle', 'poster', 'description', 'year', 'rating',
+            'sourceId', 'cloudSourceId', 'seriesId', 'categoryId', 'currentSeason',
+            'currentEpisode', 'containerExtension', 'durationHint', 'titleId',
+            'variantCount', '_variantCount', 'providerTmdbId'
+        ].forEach(key => {
+            if (content[key] !== undefined && content[key] !== null) copy[key] = content[key];
+        });
+
+        if (Array.isArray(content.versions)) {
+            copy.versions = content.versions.map(version => ({
+                sourceId: version.sourceId,
+                streamId: version.streamId,
+                container: version.container,
+                type: version.type,
+                label: version.label
+            })).filter(version => version.sourceId && version.streamId);
+        }
+        if (Number.isFinite(Number(content.versionIndex))) {
+            copy.versionIndex = Number(content.versionIndex);
+        }
+        const defaultVariant = this.cloneForResumeStorage(content.defaultVariant || content.default_variant);
+        if (defaultVariant) copy.defaultVariant = defaultVariant;
+        const seriesInfo = this.cloneForResumeStorage(content.seriesInfo);
+        if (seriesInfo) copy.seriesInfo = seriesInfo;
+
+        return copy;
+    }
+
+    sanitizeResumePlayback(playback = {}) {
+        const metadata = this.playbackMetadataFromResult(playback || {});
+        const codecProfile = this.cloneForResumeStorage(metadata.codecProfile || metadata.codec_profile);
+        const result = {};
+        if (codecProfile) result.codecProfile = codecProfile;
+        if (metadata.audioMode || metadata.audio_mode) result.audioMode = metadata.audioMode || metadata.audio_mode;
+        if (metadata.gatewayMode || metadata.gateway_mode) result.gatewayMode = metadata.gatewayMode || metadata.gateway_mode;
+        return result;
+    }
+
+    getResumeSnapshotPosition() {
+        const position = this.getPlaybackPosition?.() ?? this.video?.currentTime ?? this.resumeTime ?? 0;
+        return Math.max(0, Math.floor(Number.isFinite(position) ? position : 0));
+    }
+
+    saveResumeSnapshotThrottled(force = false) {
+        if (this._suspendResumeSnapshotSave) return;
+        const now = Date.now();
+        if (!force && now - this._lastResumeSnapshotSaveAt < this.resumeSnapshotSaveIntervalMs) return;
+        this._lastResumeSnapshotSaveAt = now;
+        this.saveResumeSnapshot();
+    }
+
+    saveResumeSnapshot(overrides = {}) {
+        if (this._suspendResumeSnapshotSave) return;
+        if (!this.content?.id || !this.content?.sourceId) return;
+        if (this.content.type !== 'movie' && this.content.type !== 'series') return;
+
+        const content = this.sanitizeResumeContent({
+            ...this.content,
+            containerExtension: this.containerExtension,
+            currentSeason: this.currentSeason,
+            currentEpisode: this.currentEpisode,
+            seriesInfo: this.seriesInfo,
+            durationHint: this.durationHint
+        });
+        if (!content?.id || !content?.sourceId) return;
+
+        const position = Number.isFinite(overrides.position)
+            ? Math.max(0, Math.floor(overrides.position))
+            : this.getResumeSnapshotPosition();
+        const duration = this.getDisplayDuration?.() || this.durationHint || 0;
+
+        const snapshot = {
+            version: 1,
+            savedAt: Date.now(),
+            content,
+            contentType: this.contentType || content.type,
+            containerExtension: this.containerExtension || content.containerExtension || 'mp4',
+            currentSeason: this.currentSeason || content.currentSeason || null,
+            currentEpisode: this.currentEpisode || content.currentEpisode || null,
+            returnPage: this.returnPage || (content.type === 'movie' ? 'movies' : 'series'),
+            position,
+            duration: Number.isFinite(duration) && duration > 0 ? Math.floor(duration) : 0,
+            playback: this.sanitizeResumePlayback(overrides.playback || this._resumePlaybackMetadata || {})
+        };
+
+        try {
+            sessionStorage.setItem(this.resumeSnapshotKey, JSON.stringify(snapshot));
+        } catch (error) {
+            console.warn('[WatchPage] Could not persist playback resume snapshot:', error?.message || error);
+        }
+    }
+
+    readResumeSnapshot() {
+        let snapshot = null;
+        try {
+            snapshot = JSON.parse(sessionStorage.getItem(this.resumeSnapshotKey) || 'null');
+        } catch (_) {
+            snapshot = null;
+        }
+
+        const isValid = snapshot?.version === 1
+            && snapshot?.content?.id
+            && snapshot?.content?.sourceId
+            && (snapshot.content.type === 'movie' || snapshot.content.type === 'series');
+
+        if (!isValid || Date.now() - Number(snapshot.savedAt || 0) > this.resumeSnapshotTtlMs) {
+            this.clearResumeSnapshot();
+            return null;
+        }
+        return snapshot;
+    }
+
+    clearResumeSnapshot() {
+        try {
+            sessionStorage.removeItem(this.resumeSnapshotKey);
+        } catch (_) {
+            // Ignore storage cleanup failures.
+        }
+    }
+
+    buildResumePlaybackHint(snapshot) {
+        const content = snapshot?.content || {};
+        const streamType = content.type === 'series' ? 'series' : 'movie';
+        const container = snapshot.containerExtension || content.containerExtension || 'mp4';
+        const item = {
+            ...content,
+            codecProfile: snapshot.playback?.codecProfile || content.codecProfile || content.defaultVariant?.codecProfile
+        };
+        const base = { container, streamType };
+        return MediaUtils.playbackHintFromItem
+            ? MediaUtils.playbackHintFromItem(item, base)
+            : base;
+    }
+
+    async restoreFromResumeSnapshot() {
+        if (this.content || this._resumeRestorePromise) return this._resumeRestorePromise;
+        const snapshot = this.readResumeSnapshot();
+        if (!snapshot) return null;
+
+        this._resumeRestorePromise = (async () => {
+            const content = {
+                ...snapshot.content,
+                type: snapshot.content.type,
+                resumeTime: Math.max(0, Math.floor(snapshot.position || 0)),
+                currentSeason: snapshot.currentSeason || snapshot.content.currentSeason || null,
+                currentEpisode: snapshot.currentEpisode || snapshot.content.currentEpisode || null,
+                containerExtension: snapshot.containerExtension || snapshot.content.containerExtension || 'mp4'
+            };
+
+            this.titleEl.textContent = content.title || '';
+            this.subtitleEl.textContent = content.subtitle || '';
+            this.showLoading();
+
+            if (content.type === 'series' && !content.seriesInfo && content.seriesId && content.sourceId) {
+                try {
+                    content.seriesInfo = await API.proxy.xtream.seriesInfo(content.sourceId, content.seriesId);
+                } catch (error) {
+                    console.warn('[WatchPage] Could not reload series info for restored playback:', error?.message || error);
+                }
+            }
+
+            await this.releasePlaybackPipelineForRetry();
+            const result = await API.proxy.xtream.getStreamUrl(
+                content.sourceId,
+                content.id,
+                content.type === 'series' ? 'series' : 'movie',
+                content.containerExtension || 'mp4',
+                this.buildResumePlaybackHint(snapshot)
+            );
+
+            if (!result?.url) {
+                throw new Error('Restored playback did not return a media URL');
+            }
+
+            content.cloudPlaybackSessionId = result.sessionId || null;
+            await this.play(content, result.url, result);
+            return true;
+        })()
+            .catch(error => {
+                console.warn('[WatchPage] Could not restore playback after refresh:', error?.message || error);
+                this.showPlaybackError('Playback failed after refresh. Try opening the title again.');
+                return false;
+            })
+            .finally(() => {
+                this._resumeRestorePromise = null;
+            });
+
+        return this._resumeRestorePromise;
     }
 
     /**
@@ -350,6 +571,7 @@ class WatchPage {
     async play(content, streamUrl, playback = {}) {
         const playbackAttemptId = this.beginPlaybackAttempt();
         const playbackMetadata = this.playbackMetadataFromResult(playback);
+        this._resumePlaybackMetadata = playbackMetadata;
         const cloudPlaybackSessionId = playbackMetadata.sessionId
             || playbackMetadata.cloudPlaybackSessionId
             || content.cloudPlaybackSessionId
@@ -402,6 +624,7 @@ class WatchPage {
         // Update title bar
         this.titleEl.textContent = content.title || '';
         this.subtitleEl.textContent = content.subtitle || '';
+        this.saveResumeSnapshot({ playback: playbackMetadata, position: this.resumeTime || 0 });
 
         // Load video
         await this.loadVideo(streamUrl, {
@@ -1250,7 +1473,12 @@ class WatchPage {
         // session to release its provider connection before we probe/transcode
         // the new title — otherwise the old + new connections overlap and a
         // single-connection IPTV account rejects the new one with 401.
-        await this.stop();
+        this._suspendResumeSnapshotSave = true;
+        try {
+            await this.stop();
+        } finally {
+            this._suspendResumeSnapshotSave = false;
+        }
         if (this.isStalePlaybackAttempt(playbackAttemptId)) {
             await this.cleanupStaleCloudPlaybackSession(options.cloudPlaybackSessionId);
             return;
@@ -2130,6 +2358,7 @@ class WatchPage {
         this.playPauseBtn?.querySelector('.icon-play')?.classList.remove('hidden');
         this.playPauseBtn?.querySelector('.icon-pause')?.classList.add('hidden');
         this.centerPlayBtn?.classList.add('show');
+        this.saveResumeSnapshotThrottled(true);
 
         // Keep overlay visible when paused
         this.showOverlay();
@@ -2149,6 +2378,7 @@ class WatchPage {
             this._playbackEnded = true;
             if (this.playbackTelemetry) this.playbackTelemetry.ended = true;
             this.sendPlaybackEvent('ended');
+            this.clearResumeSnapshot();
         }
 
         // For series, show next episode panel if not already showing and auto-play is enabled
@@ -3739,7 +3969,10 @@ class WatchPage {
     // === Navigation ===
 
     goBack() {
+        this._suspendResumeSnapshotSave = true;
         this.stop();
+        this._suspendResumeSnapshotSave = false;
+        this.clearResumeSnapshot();
         this.cancelNextEpisode();
 
         // Navigate to the page we came from (stored in returnPage)
@@ -3748,7 +3981,7 @@ class WatchPage {
     }
 
     show() {
-        // Called when page becomes visible
+        this.restoreFromResumeSnapshot();
     }
 
     hide() {
