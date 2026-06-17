@@ -30,6 +30,7 @@ class VideoPlayer {
         this.subtitleTracks = [];
         this.subtitleSourceUrl = null;
         this.selectedSubtitleStreamIndex = null;
+        this.subtitleOffsetSeconds = 0;
         this.settingsLoaded = false;
         this._playbackStatusOkReported = false;
         this._clearingMedia = false;
@@ -614,14 +615,158 @@ class VideoPlayer {
         return aliases[normalized] || normalized || 'und';
     }
 
+    isGenericSubtitleTitle(title) {
+        const value = String(title || '').trim();
+        if (!value) return true;
+        if (/^soundhandler$/i.test(value)) return true;
+        return /^(subtitle|subtitles?|sous[-\s]?titres?|captions?|track)\s*\d*$/i.test(value);
+    }
+
+    getLanguageDisplayName(language) {
+        const normalized = this.normalizeTrackLanguage(language);
+        if (!normalized || normalized === 'und') return null;
+
+        try {
+            const displayNames = new Intl.DisplayNames([navigator.language || 'en'], { type: 'language' });
+            const label = displayNames.of(normalized);
+            if (label) return label.charAt(0).toUpperCase() + label.slice(1);
+        } catch (_) {
+            // Compact fallback for older WebViews.
+        }
+
+        const fallbacks = {
+            fr: 'French',
+            en: 'English',
+            es: 'Spanish',
+            de: 'German',
+            it: 'Italian',
+            pt: 'Portuguese',
+            ar: 'Arabic',
+            nl: 'Dutch'
+        };
+        return fallbacks[normalized] || normalized.toUpperCase();
+    }
+
+    inferSubtitleLanguageFromText(text) {
+        const sample = String(text || '')
+            .replace(/<[^>]+>/g, ' ')
+            .replace(/\{[^}]*\}/g, ' ')
+            .toLowerCase();
+        if (sample.length < 40) return null;
+        if (/[\u0600-\u06ff]/.test(sample)) return 'ar';
+
+        const count = patterns => patterns.reduce((score, pattern) => score + (sample.match(pattern) || []).length, 0);
+        const scores = {
+            fr: count([
+                /\b(le|la|les|des|une|un|que|qui|vous|nous|dans|pour|pas|est|avec|sur|mais|alors|cette|comme)\b/g,
+                /\b(c'est|j'ai|d'accord|qu'il|qu'elle|n'est|voil[aà])\b/g,
+                /[àâçéèêëîïôûùüÿœ]/g
+            ]),
+            en: count([
+                /\b(the|and|you|that|this|with|for|not|are|have|what|will|from|they|your|about)\b/g,
+                /\b(don't|can't|it's|i'm|you're|we're|that's)\b/g
+            ]),
+            es: count([
+                /\b(el|la|los|las|una|uno|que|con|para|por|pero|como|esta|este|usted|nosotros)\b/g,
+                /[áéíñóúü]/g
+            ])
+        };
+        const winner = Object.entries(scores).sort((a, b) => b[1] - a[1])[0];
+        return winner && winner[1] >= 3 ? winner[0] : null;
+    }
+
     getSubtitleLabel(track, fallback) {
         if (!track) return fallback;
-        const parts = [];
-        const title = track.title && !/^soundhandler$/i.test(track.title) ? track.title : null;
-        const language = track.language && track.language !== 'und' ? track.language.toUpperCase() : null;
-        if (title) parts.push(title);
-        if (language && !parts.some(part => part.toUpperCase() === language)) parts.push(language);
-        return parts.length ? parts.join(' - ') : fallback;
+        const title = !this.isGenericSubtitleTitle(track.title) ? String(track.title).trim() : '';
+        const languageLabel = this.getLanguageDisplayName(track.inferredLanguage || track.language);
+        if (languageLabel && title && title.toLowerCase() !== languageLabel.toLowerCase()) {
+            return `${languageLabel} - ${title}`;
+        }
+        if (languageLabel) return languageLabel;
+        if (title) return title;
+        return fallback;
+    }
+
+    maybeInferSubtitleLanguage(track, textTrack) {
+        if (!track || !textTrack?.cues?.length) return false;
+        const currentLanguage = this.normalizeTrackLanguage(track.inferredLanguage || track.language);
+        if (currentLanguage && currentLanguage !== 'und') return false;
+
+        const sample = Array.from(textTrack.cues)
+            .slice(0, 80)
+            .map(cue => cue.text || '')
+            .join('\n');
+        const inferred = this.inferSubtitleLanguageFromText(sample);
+        if (!inferred) return false;
+
+        track.inferredLanguage = inferred;
+        return true;
+    }
+
+    getSubtitleOffsetStorageKey(streamIndex = this.selectedSubtitleStreamIndex) {
+        const sourceId = this.currentChannel?.sourceId || this.currentChannel?.source_id || 'local';
+        const itemId = this.currentChannel?.streamId || this.currentChannel?.stream_id || this.currentChannel?.id || 'unknown';
+        const trackId = streamIndex === null || streamIndex === undefined ? 'default' : String(streamIndex);
+        return `norva-subtitle-offset:${sourceId}:${itemId}:${trackId}`;
+    }
+
+    normalizeSubtitleOffset(value) {
+        const seconds = Number(value);
+        if (!Number.isFinite(seconds)) return 0;
+        return Math.max(-15, Math.min(15, Math.round(seconds * 10) / 10));
+    }
+
+    loadSubtitleOffset(streamIndex) {
+        try {
+            return this.normalizeSubtitleOffset(localStorage.getItem(this.getSubtitleOffsetStorageKey(streamIndex)));
+        } catch (_) {
+            return 0;
+        }
+    }
+
+    saveSubtitleOffset(streamIndex, value) {
+        try {
+            const key = this.getSubtitleOffsetStorageKey(streamIndex);
+            const normalized = this.normalizeSubtitleOffset(value);
+            if (normalized === 0) localStorage.removeItem(key);
+            else localStorage.setItem(key, String(normalized));
+        } catch (_) {
+            // Convenience only.
+        }
+    }
+
+    formatSubtitleOffset(seconds = this.subtitleOffsetSeconds) {
+        const value = this.normalizeSubtitleOffset(seconds);
+        if (value === 0) return '0.0s';
+        return `${value > 0 ? '+' : ''}${value.toFixed(1)}s`;
+    }
+
+    applySubtitleOffsetToTextTrack(textTrack, offset = this.subtitleOffsetSeconds) {
+        if (!textTrack?.cues?.length) return;
+        const normalized = this.normalizeSubtitleOffset(offset);
+        Array.from(textTrack.cues).forEach(cue => {
+            try {
+                if (cue._norvaBaseStart === undefined) {
+                    cue._norvaBaseStart = cue.startTime;
+                    cue._norvaBaseEnd = cue.endTime;
+                }
+                cue.startTime = Math.max(0, cue._norvaBaseStart + normalized);
+                cue.endTime = Math.max(cue.startTime + 0.05, cue._norvaBaseEnd + normalized);
+            } catch (_) {
+                // Some native tracks may expose immutable cues.
+            }
+        });
+    }
+
+    applySubtitleOffsetDelta(delta) {
+        if (this.selectedSubtitleStreamIndex === null || this.selectedSubtitleStreamIndex === undefined) return;
+        const next = this.normalizeSubtitleOffset(this.subtitleOffsetSeconds + delta);
+        this.subtitleOffsetSeconds = next;
+        this.saveSubtitleOffset(this.selectedSubtitleStreamIndex, next);
+        for (let i = 0; i < (this.video?.textTracks?.length || 0); i++) {
+            this.applySubtitleOffsetToTextTrack(this.video.textTracks[i], next);
+        }
+        this.updateCaptionsTracks();
     }
 
     escapeHtml(text) {
@@ -650,6 +795,7 @@ class VideoPlayer {
         this.subtitleSourceUrl = url;
         this.subtitleTracks = Array.isArray(subtitles) ? subtitles : [];
         this.selectedSubtitleStreamIndex = null;
+        this.subtitleOffsetSeconds = 0;
         this.clearExternalSubtitleTracks();
         this.updateCaptionsTracks();
     }
@@ -667,17 +813,26 @@ class VideoPlayer {
 
         const trackEl = document.createElement('track');
         trackEl.kind = 'subtitles';
-        trackEl.label = this.getSubtitleLabel(track, 'Subtitle');
+        trackEl.label = this.getSubtitleLabel(track, 'Subtitles');
         trackEl.srclang = this.normalizeTrackLanguage(track.language);
         trackEl.src = `/api/subtitle?${params.toString()}`;
         trackEl.default = true;
         trackEl.dataset.norvaProbeSubtitle = 'true';
         trackEl.dataset.streamIndex = String(track.index);
-        trackEl.addEventListener('load', () => this.updateCaptionsTracks());
+        trackEl.addEventListener('load', () => {
+            if (trackEl.track) {
+                this.maybeInferSubtitleLanguage(track, trackEl.track);
+                trackEl.label = this.getSubtitleLabel(track, 'Subtitles');
+                trackEl.srclang = this.normalizeTrackLanguage(track.inferredLanguage || track.language);
+                this.applySubtitleOffsetToTextTrack(trackEl.track, this.subtitleOffsetSeconds);
+            }
+            this.updateCaptionsTracks();
+        });
         trackEl.addEventListener('error', () => {
             console.warn('[Player] Subtitle extraction failed:', track);
             if (Number(this.selectedSubtitleStreamIndex) === Number(track.index)) {
                 this.selectedSubtitleStreamIndex = null;
+                this.subtitleOffsetSeconds = 0;
                 this.clearExternalSubtitleTracks();
             }
             this.updateCaptionsTracks();
@@ -687,7 +842,10 @@ class VideoPlayer {
             trackEl.track.mode = 'showing';
         }
         setTimeout(() => {
-            if (trackEl.track) trackEl.track.mode = 'showing';
+            if (trackEl.track) {
+                trackEl.track.mode = 'showing';
+                this.applySubtitleOffsetToTextTrack(trackEl.track, this.subtitleOffsetSeconds);
+            }
             this.updateCaptionsTracks();
         }, 0);
         return true;
@@ -711,7 +869,7 @@ class VideoPlayer {
                     source: 'probe',
                     index,
                     streamIndex: track.index,
-                    label: this.getSubtitleLabel(track, `Subtitle ${index + 1}`),
+                    label: this.getSubtitleLabel(track, probeTracks.length > 1 ? `Subtitles ${index + 1}` : 'Subtitles'),
                     active
                 });
             });
@@ -738,6 +896,18 @@ class VideoPlayer {
             const streamAttr = track.streamIndex !== undefined ? ` data-stream-index="${track.streamIndex}"` : '';
             buttons.push(`<button class="captions-option ${track.active ? 'active' : ''}" data-source="${track.source}" data-index="${track.index}"${streamAttr}>${this.escapeHtml(track.label)}</button>`);
         });
+        if (!options.length) {
+            buttons.push('<div class="captions-empty">No subtitle track exposed by this stream.</div>');
+        }
+        if (this.selectedSubtitleStreamIndex !== null && this.selectedSubtitleStreamIndex !== undefined && probeTracks.length) {
+            buttons.push(`<div class="captions-offset" aria-label="Subtitle sync">
+                <div class="captions-offset-label">Sync ${this.escapeHtml(this.formatSubtitleOffset())}</div>
+                <div class="captions-offset-controls">
+                  <button type="button" class="captions-offset-btn" data-offset-delta="-0.5">-0.5s</button>
+                  <button type="button" class="captions-offset-btn" data-offset-delta="0.5">+0.5s</button>
+                </div>
+              </div>`);
+        }
         this.captionsList.innerHTML = buttons.join('');
 
         this.captionsList.querySelectorAll('.captions-option').forEach(btn => {
@@ -748,6 +918,12 @@ class VideoPlayer {
                     parseInt(btn.dataset.index, 10),
                     btn.dataset.streamIndex !== undefined ? parseInt(btn.dataset.streamIndex, 10) : null
                 );
+            };
+        });
+        this.captionsList.querySelectorAll('.captions-offset-btn').forEach(btn => {
+            btn.onclick = (e) => {
+                e.stopPropagation();
+                this.applySubtitleOffsetDelta(Number(btn.dataset.offsetDelta) || 0);
             };
         });
         return;
@@ -765,14 +941,17 @@ class VideoPlayer {
 
         if (source === 'off') {
             this.selectedSubtitleStreamIndex = null;
+            this.subtitleOffsetSeconds = 0;
             this.clearExternalSubtitleTracks();
         } else if (source === 'probe' && Number.isInteger(streamIndex)) {
             const selected = this.getExtractableSubtitleTracks()
                 .find(track => Number(track.index) === Number(streamIndex));
             this.selectedSubtitleStreamIndex = streamIndex;
+            this.subtitleOffsetSeconds = this.loadSubtitleOffset(streamIndex);
             this.attachSelectedProbeSubtitleTrack(selected);
         } else if (source === 'native' && index >= 0 && index < this.video.textTracks.length) {
             this.selectedSubtitleStreamIndex = null;
+            this.subtitleOffsetSeconds = 0;
             this.video.textTracks[index].mode = 'showing';
         }
 
