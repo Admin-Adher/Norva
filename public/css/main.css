@@ -4430,11 +4430,52 @@ kbd {
 }
 
 .captions-option.active::before {
-  content: "✓ ";
+  content: "\2713 ";
 }
 
 .audio-option.active::before {
   content: "\2713 ";
+}
+
+.captions-empty {
+  padding: var(--space-sm) var(--space-md);
+  color: var(--color-text-muted);
+  font-size: 0.8rem;
+  line-height: 1.35;
+  border-top: 1px solid var(--glass-border);
+}
+
+.captions-offset {
+  padding: var(--space-sm) var(--space-md);
+  border-top: 1px solid var(--glass-border);
+}
+
+.captions-offset-label {
+  margin-bottom: var(--space-xs);
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+}
+
+.captions-offset-controls {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-xs);
+}
+
+.captions-offset-btn {
+  min-height: 32px;
+  padding: 0 var(--space-sm);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--color-text-primary);
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.captions-offset-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
 }
 
 .watch-btn-lg {

@@ -94,6 +94,7 @@ class WatchPage {
         this.subtitleSourceUrl = null;
         this.subtitleStartOffset = 0;
         this.selectedSubtitleStreamIndex = null;
+        this.subtitleOffsetSeconds = 0;
         this.selectedAudioStreamIndex = null;
         this.selectedAudioTrackUserChoice = false;
         this._videoEncodeFallbackTried = false;
@@ -1023,11 +1024,65 @@ class WatchPage {
         }[char]));
     }
 
-    getTrackLabel(track, fallback, type = 'track') {
+    isGenericTrackTitle(title, type = 'track') {
+        const value = String(title || '').trim();
+        if (!value) return true;
+
+        if (/^soundhandler$/i.test(value)) return true;
+        if (type === 'subtitle') {
+            return /^(subtitle|subtitles?|sous[-\s]?titres?|captions?|track)\s*\d*$/i.test(value);
+        }
+        if (type === 'audio') {
+            return /^(audio|track)\s*\d*$/i.test(value);
+        }
+        return false;
+    }
+
+    getLanguageDisplayName(language) {
+        const normalized = this.normalizeTrackLanguage(language);
+        if (!normalized || normalized === 'und') return null;
+
+        try {
+            const displayNames = new Intl.DisplayNames([navigator.language || 'en'], { type: 'language' });
+            const label = displayNames.of(normalized);
+            if (label) return label.charAt(0).toUpperCase() + label.slice(1);
+        } catch (_) {
+            // Fall back to compact English labels below.
+        }
+
+        const fallbacks = {
+            fr: 'French',
+            en: 'English',
+            es: 'Spanish',
+            de: 'German',
+            it: 'Italian',
+            pt: 'Portuguese',
+            ar: 'Arabic',
+            nl: 'Dutch'
+        };
+        return fallbacks[normalized] || normalized.toUpperCase();
+    }
+
+    getSubtitleTrackLabel(track, fallback = 'Subtitles') {
         if (!track) return fallback;
 
+        const title = !this.isGenericTrackTitle(track.title, 'subtitle') ? String(track.title).trim() : '';
+        const languageLabel = this.getLanguageDisplayName(track.inferredLanguage || track.language);
+
+        if (languageLabel && title && title.toLowerCase() !== languageLabel.toLowerCase()) {
+            return `${languageLabel} - ${title}`;
+        }
+        if (languageLabel) return languageLabel;
+        if (title) return title;
+        return fallback;
+    }
+
+    getTrackLabel(track, fallback, type = 'track') {
+        if (!track) return fallback;
+        if (type === 'subtitle') return this.getSubtitleTrackLabel(track, fallback);
+
         const parts = [];
-        const title = track.title && !/^soundhandler$/i.test(track.title) ? track.title : null;
+        const title = !this.isGenericTrackTitle(track.title, type) ? track.title : null;
         const language = track.language && track.language !== 'und' ? track.language.toUpperCase() : null;
         const codec = track.codec ? String(track.codec).toUpperCase() : null;
         const channels = track.channels ? `${track.channels}ch` : null;
@@ -2691,6 +2746,106 @@ class WatchPage {
         return aliases[normalized] || normalized || 'und';
     }
 
+    inferSubtitleLanguageFromText(text) {
+        const sample = String(text || '')
+            .replace(/<[^>]+>/g, ' ')
+            .replace(/[{}][^}]*[}]/g, ' ')
+            .toLowerCase();
+        if (sample.length < 40) return null;
+
+        if (/[\u0600-\u06ff]/.test(sample)) return 'ar';
+
+        const scores = {
+            fr: 0,
+            en: 0,
+            es: 0
+        };
+
+        const countMatches = (patterns) => patterns.reduce((score, pattern) => score + (sample.match(pattern) || []).length, 0);
+        scores.fr += countMatches([
+            /\b(le|la|les|des|une|un|que|qui|vous|nous|dans|pour|pas|est|avec|sur|mais|alors|cette|comme)\b/g,
+            /\b(c'est|j'ai|d'accord|qu'il|qu'elle|n'est|voil[aà])\b/g,
+            /[àâçéèêëîïôûùüÿœ]/g
+        ]);
+        scores.en += countMatches([
+            /\b(the|and|you|that|this|with|for|not|are|have|what|will|from|they|your|about)\b/g,
+            /\b(don't|can't|it's|i'm|you're|we're|that's)\b/g
+        ]);
+        scores.es += countMatches([
+            /\b(el|la|los|las|una|uno|que|con|para|por|pero|como|esta|este|usted|nosotros)\b/g,
+            /[áéíñóúü]/g
+        ]);
+
+        const winner = Object.entries(scores).sort((a, b) => b[1] - a[1])[0];
+        return winner && winner[1] >= 3 ? winner[0] : null;
+    }
+
+    maybeInferSubtitleLanguage(engine, text) {
+        if (!engine?.trackMeta) return false;
+
+        const currentLanguage = this.normalizeTrackLanguage(engine.trackMeta.inferredLanguage || engine.trackMeta.language);
+        if (currentLanguage && currentLanguage !== 'und') return false;
+
+        engine.languageSample = `${engine.languageSample || ''}\n${text || ''}`.slice(-5000);
+        const inferred = this.inferSubtitleLanguageFromText(engine.languageSample);
+        if (!inferred) return false;
+
+        engine.trackMeta.inferredLanguage = inferred;
+        if (engine.trackEl) {
+            engine.trackEl.label = this.getSubtitleTrackLabel(engine.trackMeta, 'Subtitles');
+            engine.trackEl.srclang = inferred;
+        }
+        return true;
+    }
+
+    getSubtitleOffsetStorageKey(streamIndex = this.selectedSubtitleStreamIndex) {
+        const sourceId = this.getTelemetrySourceId?.() || this.content?.sourceId || this.content?.source_id || 'local';
+        const itemId = this.getTelemetryItemId?.() || this.content?.id || this.content?.stream_id || 'unknown';
+        const trackId = streamIndex === null || streamIndex === undefined ? 'default' : String(streamIndex);
+        return `norva-subtitle-offset:${sourceId}:${itemId}:${trackId}`;
+    }
+
+    normalizeSubtitleOffset(value) {
+        const seconds = Number(value);
+        if (!Number.isFinite(seconds)) return 0;
+        return Math.max(-15, Math.min(15, Math.round(seconds * 10) / 10));
+    }
+
+    loadSubtitleOffset(streamIndex) {
+        try {
+            return this.normalizeSubtitleOffset(localStorage.getItem(this.getSubtitleOffsetStorageKey(streamIndex)));
+        } catch (_) {
+            return 0;
+        }
+    }
+
+    saveSubtitleOffset(streamIndex, value) {
+        try {
+            const key = this.getSubtitleOffsetStorageKey(streamIndex);
+            const normalized = this.normalizeSubtitleOffset(value);
+            if (normalized === 0) localStorage.removeItem(key);
+            else localStorage.setItem(key, String(normalized));
+        } catch (_) {
+            // Offset persistence is a convenience only.
+        }
+    }
+
+    formatSubtitleOffset(seconds = this.subtitleOffsetSeconds) {
+        const value = this.normalizeSubtitleOffset(seconds);
+        if (value === 0) return '0.0s';
+        return `${value > 0 ? '+' : ''}${value.toFixed(1)}s`;
+    }
+
+    applySubtitleOffsetDelta(delta) {
+        if (this.selectedSubtitleStreamIndex === null || this.selectedSubtitleStreamIndex === undefined) return;
+
+        const next = this.normalizeSubtitleOffset(this.subtitleOffsetSeconds + delta);
+        this.subtitleOffsetSeconds = next;
+        this.saveSubtitleOffset(this.selectedSubtitleStreamIndex, next);
+        this.attachSelectedProbeSubtitleTrack();
+        this.updateCaptionsTracks();
+    }
+
     getExtractableSubtitleTracks(subtitles = this.subtitleTracks) {
         return (Array.isArray(subtitles) ? subtitles : []).filter(track => this.isSubtitleExtractable(track));
     }
@@ -2788,17 +2943,21 @@ class WatchPage {
 
         const textTrack = engine.trackEl.track;
         let added = 0;
+        let inferredLanguage = false;
+        const subtitleOffset = this.normalizeSubtitleOffset(engine.subtitleOffsetSeconds || 0);
         for (const cue of this.parseVttCues(text)) {
-            const start = cue.start + timeOffset;
-            const end = cue.end + timeOffset;
+            const start = Math.max(0, cue.start + timeOffset + subtitleOffset);
+            const end = Math.max(start + 0.05, cue.end + timeOffset + subtitleOffset);
             const key = `${start.toFixed(3)}|${end.toFixed(3)}|${cue.text}`;
             if (engine.seenCues.has(key)) continue;
             engine.seenCues.add(key);
             try {
                 textTrack.addCue(new VTTCue(start, end, cue.text));
+                inferredLanguage = this.maybeInferSubtitleLanguage(engine, cue.text) || inferredLanguage;
                 added++;
             } catch (e) { /* malformed cue, skip */ }
         }
+        if (inferredLanguage) this.updateCaptionsTracks();
         return added;
     }
 
@@ -2915,7 +3074,7 @@ class WatchPage {
         // so updates never reload/flicker the displayed subtitle
         const trackEl = document.createElement('track');
         trackEl.kind = 'subtitles';
-        trackEl.label = this.getTrackLabel(selected, 'Subtitle', 'subtitle');
+        trackEl.label = this.getTrackLabel(selected, 'Subtitles', 'subtitle');
         trackEl.srclang = this.normalizeTrackLanguage(selected.language);
         trackEl.dataset.norvaProbeSubtitle = 'true';
         trackEl.dataset.streamIndex = String(selected.index);
@@ -2929,9 +3088,11 @@ class WatchPage {
         const isSessionMode = isLocalSessionMode || Boolean(gatewaySubtitleUrl);
         const engine = {
             trackEl,
+            trackMeta: selected,
             streamIndex: selected.index,
             codec: selected.codec,
             seenCues: new Set(),
+            subtitleOffsetSeconds: this.subtitleOffsetSeconds,
             mode: isLocalSessionMode ? 'session' : (gatewaySubtitleUrl ? 'gateway-session' : 'window'),
             sessionId: this.currentSessionId,
             gatewaySubtitleUrl,
@@ -3013,7 +3174,7 @@ class WatchPage {
                     source: 'probe',
                     index,
                     streamIndex: track.index,
-                    label: this.getTrackLabel(track, `Subtitle ${index + 1}`, 'subtitle'),
+                    label: this.getTrackLabel(track, probeSubtitleTracks.length > 1 ? `Subtitles ${index + 1}` : 'Subtitles', 'subtitle'),
                     active
                 };
             });
@@ -3052,8 +3213,20 @@ class WatchPage {
             const streamAttr = track.streamIndex !== undefined ? ` data-stream-index="${track.streamIndex}"` : '';
             return `<button class="captions-option ${track.active ? 'active' : ''}" data-source="${track.source}" data-index="${track.index}"${streamAttr}>${this.escapeHtml(track.label)}</button>`;
         }).join('');
+        const emptyHtml = !options.length
+            ? '<div class="captions-empty">No subtitle track exposed by this stream.</div>'
+            : '';
+        const offsetHtml = this.selectedSubtitleStreamIndex !== null && this.selectedSubtitleStreamIndex !== undefined && probeSubtitleTracks.length
+            ? `<div class="captions-offset" aria-label="Subtitle sync">
+                <div class="captions-offset-label">Sync ${this.escapeHtml(this.formatSubtitleOffset())}</div>
+                <div class="captions-offset-controls">
+                  <button type="button" class="captions-offset-btn" data-offset-delta="-0.5">-0.5s</button>
+                  <button type="button" class="captions-offset-btn" data-offset-delta="0.5">+0.5s</button>
+                </div>
+              </div>`
+            : '';
 
-        this.captionsList.innerHTML = `<button class="captions-option ${offActive ? 'active' : ''}" data-source="off" data-index="-1">Off</button>${optionHtml}`;
+        this.captionsList.innerHTML = `<button class="captions-option ${offActive ? 'active' : ''}" data-source="off" data-index="-1">Off</button>${optionHtml}${emptyHtml}${offsetHtml}`;
 
         this.captionsList.querySelectorAll('.captions-option').forEach(btn => {
             btn.addEventListener('click', () => this.selectCaptionTrack(
@@ -3061,6 +3234,13 @@ class WatchPage {
                 parseInt(btn.dataset.index, 10),
                 btn.dataset.streamIndex !== undefined ? parseInt(btn.dataset.streamIndex, 10) : null
             ));
+        });
+
+        this.captionsList.querySelectorAll('.captions-offset-btn').forEach(btn => {
+            btn.addEventListener('click', (event) => {
+                event.stopPropagation();
+                this.applySubtitleOffsetDelta(Number(btn.dataset.offsetDelta) || 0);
+            });
         });
     }
 
@@ -3079,15 +3259,19 @@ class WatchPage {
 
         if (source === 'off') {
             this.selectedSubtitleStreamIndex = null;
+            this.subtitleOffsetSeconds = 0;
             this.clearExternalSubtitleTracks();
         } else if (source === 'probe' && Number.isInteger(streamIndex)) {
             this.selectedSubtitleStreamIndex = streamIndex;
+            this.subtitleOffsetSeconds = this.loadSubtitleOffset(streamIndex);
             this.attachSelectedProbeSubtitleTrack();
         } else if (source === 'native' && index >= 0 && index < tracks.length) {
             this.selectedSubtitleStreamIndex = null;
+            this.subtitleOffsetSeconds = 0;
             tracks[index].mode = 'showing';
         } else if (source === 'hls' && this.hls && index >= 0) {
             this.selectedSubtitleStreamIndex = null;
+            this.subtitleOffsetSeconds = 0;
             this.hls.subtitleDisplay = true;
             this.hls.subtitleTrack = index;
         }
