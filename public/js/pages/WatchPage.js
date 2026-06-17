@@ -106,6 +106,11 @@ class WatchPage {
         this._playbackStatusOkReported = false;
         this._seekDebounceTimer = null;
         this._pendingSeekTarget = null;
+        this._pendingLocalSeekTarget = null;
+        this._pendingLocalSeekAttempts = 0;
+        this._pendingLocalSeekTimer = null;
+        this._gatewaySeekRetry = null;
+        this._gatewaySeekRequestId = 0;
         this._timelineScrubbing = false;
         this._lastCommittedSeekPercent = null;
         this._lastCommittedSeekAt = 0;
@@ -250,6 +255,7 @@ class WatchPage {
             this.onMetadataLoaded();
             this.restorePendingAudioPreference();
             this.restorePendingSubtitlePreference();
+            this.applyPendingLocalSeek();
             this.markPlaybackUsable();
             this.trackPlaybackPosition({ force: true });
             this.saveResumeSnapshotThrottled(true);
@@ -259,7 +265,10 @@ class WatchPage {
             this.trackPlaybackPosition({ force: true });
             this.saveResumeSnapshotThrottled(true);
         });
-        this.video?.addEventListener('loadeddata', () => this.markPlaybackUsable());
+        this.video?.addEventListener('loadeddata', () => {
+            this.applyPendingLocalSeek();
+            this.markPlaybackUsable();
+        });
         this.video?.addEventListener('durationchange', () => this.updateDurationState());
         this.video?.addEventListener('play', () => this.onPlay());
         this.video?.addEventListener('playing', () => this.markPlaybackUsable());
@@ -267,7 +276,10 @@ class WatchPage {
         this.video?.addEventListener('ended', () => this.onEnded());
         this.video?.addEventListener('error', (e) => this.onError(e));
         this.video?.addEventListener('waiting', () => this.showLoading());
-        this.video?.addEventListener('canplay', () => this.markPlaybackUsable());
+        this.video?.addEventListener('canplay', () => {
+            this.applyPendingLocalSeek();
+            this.markPlaybackUsable();
+        });
 
         // Overlay auto-hide + click to toggle play
         const watchSection = document.querySelector('.watch-video-section');
@@ -412,6 +424,29 @@ class WatchPage {
         if (audio) result.audio = audio;
         if (subtitle) result.subtitle = subtitle;
         return result.audio || result.subtitle ? result : null;
+    }
+
+    getMergedPlaybackPreferences(overrides = {}) {
+        const current = this.getPlaybackPreferences() || {};
+        const existing = this.normalizePlaybackPreferences(
+            this.content?.playbackPreferences || this.content?.playback_preferences || {}
+        ) || {};
+        const merged = {
+            ...existing,
+            ...current,
+            ...overrides
+        };
+        if (!merged.audio) delete merged.audio;
+        if (!merged.subtitle) delete merged.subtitle;
+        return merged.audio || merged.subtitle ? merged : null;
+    }
+
+    savePlaybackPreferences(preferences) {
+        const normalized = this.normalizePlaybackPreferences(preferences);
+        if (!this.content || !normalized) return null;
+        this.content.playbackPreferences = normalized;
+        this.setPendingPlaybackPreferences(normalized);
+        return normalized;
     }
 
     getCurrentAudioPreference() {
@@ -1440,6 +1475,11 @@ class WatchPage {
 
     async releasePlaybackPipelineForRetry() {
         try {
+            clearTimeout(this._pendingLocalSeekTimer);
+            this._pendingLocalSeekTimer = null;
+            this._pendingLocalSeekTarget = null;
+            this._pendingLocalSeekAttempts = 0;
+
             if (this.hls) {
                 try { this.hls.destroy(); } catch (error) {
                     console.warn('[WatchPage] Could not destroy HLS before retry:', error?.message || error);
@@ -1585,6 +1625,10 @@ class WatchPage {
 
     isTerminalPlaybackError(message) {
         return /UPSTREAM_(UNAUTHORIZED|RATE_LIMIT|FORBIDDEN|NOT_FOUND|REFUSED|UNAVAILABLE|RANGE_REJECTED)|401|403|404|416|429|5\d\d|Unauthorized|Forbidden|Too Many Requests|Many Requests|rate limit|provider refused|Service Unavailable|server error|Requested Range Not Satisfiable|4XX Client Error|Error opening input|Invalid data/i.test(message || '');
+    }
+
+    isRangeSeekFailure(message) {
+        return /416|Requested Range Not Satisfiable|range not satisfiable|RANGE_REJECTED|invalid as first byte of an EBML number|File ended prematurely|exceeds containing master element/i.test(message || '');
     }
 
     // Returns true for errors that reflect a temporary connection/account state,
@@ -2289,6 +2333,12 @@ class WatchPage {
                 }
             }
 
+            const retriedGatewaySeek = this.retryGatewaySeekAfterFatalPlayback(
+                data.reason || data.details || data.type || 'HLS playback failed.',
+                playbackAttemptId
+            );
+            if (retriedGatewaySeek) return;
+
             // Recovery exhausted: last resort, try another version of the title
             this.hls.destroy();
             if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
@@ -2333,9 +2383,15 @@ class WatchPage {
     }
 
     stop() {
+        this._gatewaySeekRequestId += 1;
         clearTimeout(this._seekDebounceTimer);
         this._seekDebounceTimer = null;
         this._pendingSeekTarget = null;
+        clearTimeout(this._pendingLocalSeekTimer);
+        this._pendingLocalSeekTimer = null;
+        this._pendingLocalSeekTarget = null;
+        this._pendingLocalSeekAttempts = 0;
+        this._gatewaySeekRetry = null;
 
         // Stop subtitle cue polling/window timers
         this.stopSubtitleEngine();
@@ -2517,6 +2573,63 @@ class WatchPage {
         }
     }
 
+    queuePendingLocalSeek(localTarget) {
+        const target = Number(localTarget);
+        if (!Number.isFinite(target) || target <= 0.25) {
+            this._pendingLocalSeekTarget = null;
+            this._pendingLocalSeekAttempts = 0;
+            clearTimeout(this._pendingLocalSeekTimer);
+            this._pendingLocalSeekTimer = null;
+            return;
+        }
+
+        this._pendingLocalSeekTarget = target;
+        this._pendingLocalSeekAttempts = 0;
+        clearTimeout(this._pendingLocalSeekTimer);
+        this._pendingLocalSeekTimer = setTimeout(() => this.applyPendingLocalSeek(), 350);
+    }
+
+    applyPendingLocalSeek() {
+        if (!this.video || !Number.isFinite(this._pendingLocalSeekTarget)) return false;
+
+        const target = Math.max(0, this._pendingLocalSeekTarget);
+        const duration = this.getValidDuration();
+        const seekable = this.video.seekable;
+        const hasSeekableRange = seekable && seekable.length > 0;
+        let isAvailable = false;
+
+        if (duration && target <= duration + 0.75) {
+            isAvailable = true;
+        } else if (hasSeekableRange) {
+            for (let i = 0; i < seekable.length; i += 1) {
+                if (target >= seekable.start(i) - 0.5 && target <= seekable.end(i) + 0.75) {
+                    isAvailable = true;
+                    break;
+                }
+            }
+        }
+
+        if (!isAvailable && this._pendingLocalSeekAttempts < 40) {
+            this._pendingLocalSeekAttempts += 1;
+            clearTimeout(this._pendingLocalSeekTimer);
+            this._pendingLocalSeekTimer = setTimeout(() => this.applyPendingLocalSeek(), 500);
+            return false;
+        }
+
+        try {
+            this.video.currentTime = target;
+            this._pendingLocalSeekTarget = null;
+            this._pendingLocalSeekAttempts = 0;
+            clearTimeout(this._pendingLocalSeekTimer);
+            this._pendingLocalSeekTimer = null;
+            this.updateDurationState();
+            return true;
+        } catch (error) {
+            console.warn('[WatchPage] Deferred local seek failed:', error?.message || error);
+            return false;
+        }
+    }
+
     async restartProcessedStreamAt(targetTime) {
         if (this.currentPlaybackMode === 'gateway-session') {
             await this.restartCloudGatewayStreamAt(targetTime);
@@ -2576,17 +2689,31 @@ class WatchPage {
         this.setVolumeFromStorage();
     }
 
-    async restartCloudGatewayStreamAt(targetTime) {
+    getGatewaySeekPreRoll(target, requestedPreRoll = 20) {
+        const safeTarget = Math.max(0, Math.floor(Number(target) || 0));
+        if (safeTarget <= 5) return 0;
+        const requested = Math.max(0, Math.floor(Number(requestedPreRoll) || 0));
+        return Math.min(safeTarget, requested || 20);
+    }
+
+    async restartCloudGatewayStreamAt(targetTime, options = {}) {
         if (!this.content?.sourceId || !this.content?.id) return;
 
+        const requestId = Number.isInteger(options.requestId)
+            ? options.requestId
+            : ++this._gatewaySeekRequestId;
         const target = Math.max(0, Math.floor(targetTime || 0));
+        const preRoll = this.getGatewaySeekPreRoll(target, options.preRollSeconds ?? 20);
+        const sessionStart = Math.max(0, target - preRoll);
+        const localSeekTarget = Math.max(0, target - sessionStart);
         const autoplay = !this.video?.paused;
         const itemType = this.content.type === 'series' ? 'series' : 'movie';
         const container = this.containerExtension || this.content.containerExtension || 'mp4';
+        const playbackPreferences = this.savePlaybackPreferences(this.getMergedPlaybackPreferences());
 
         this.showLoading();
         this.hidePlaybackError();
-        this.streamStartOffset = target;
+        this.streamStartOffset = sessionStart;
         this.trackPlaybackPosition({ position: target, force: true });
         this.saveResumeSnapshotThrottled(true);
         this.updateDurationState();
@@ -2597,6 +2724,8 @@ class WatchPage {
         }
 
         await this.releasePlaybackPipelineForRetry();
+        await this.waitForProviderSlotRelease(900);
+        if (requestId !== this._gatewaySeekRequestId) return;
 
         if (this.video) {
             this.video.pause();
@@ -2609,9 +2738,9 @@ class WatchPage {
                 ? MediaUtils.playbackHintFromItem(this.content, { container, streamType: itemType })
                 : { container, streamType: itemType }),
             ...this.getSelectedAudioPlaybackOptions(),
-            seekOffset: target,
-            startOffset: target,
-            resumeTime: target
+            seekOffset: sessionStart,
+            startOffset: sessionStart,
+            resumeTime: sessionStart
         };
 
         let result = null;
@@ -2625,7 +2754,21 @@ class WatchPage {
             );
         } catch (error) {
             console.error('[WatchPage] Gateway seek session failed:', error);
+            if (!options.retryLevel && this.isRangeSeekFailure(error?.message || error?.details || '')) {
+                await this.restartCloudGatewayStreamAt(target, {
+                    preRollSeconds: 75,
+                    retryLevel: 1,
+                    requestId
+                });
+                return;
+            }
+            if (requestId !== this._gatewaySeekRequestId) return;
             await this.handlePlaybackFailure(error?.message || 'Failed to start seek session.');
+            return;
+        }
+
+        if (requestId !== this._gatewaySeekRequestId) {
+            await this.cleanupStaleCloudPlaybackSession(result?.sessionId);
             return;
         }
 
@@ -2637,11 +2780,20 @@ class WatchPage {
         this.content.cloudPlaybackSessionId = result.sessionId || null;
         this.resumeTime = target;
         await this.loadVideo(result.url, this.playbackMetadataFromResult(result, {
-            seekOffset: target,
-            startOffset: target,
+            seekOffset: sessionStart,
+            startOffset: sessionStart,
             playbackAttemptId: this._playbackAttemptId,
-            cloudPlaybackSessionId: result.sessionId || null
+            cloudPlaybackSessionId: result.sessionId || null,
+            playbackPreferences
         }));
+        this._gatewaySeekRetry = {
+            target,
+            preRoll,
+            retryLevel: Number(options.retryLevel) || 0,
+            playbackAttemptId: this._playbackAttemptId,
+            requestId
+        };
+        this.queuePendingLocalSeek(localSeekTarget);
 
         if (autoplay) {
             this.video?.play?.().catch(e => {
@@ -2654,6 +2806,27 @@ class WatchPage {
         if (this._pendingSeekTarget === target) {
             this._pendingSeekTarget = null;
         }
+    }
+
+    retryGatewaySeekAfterFatalPlayback(reason = '', playbackAttemptId = this._playbackAttemptId) {
+        const retry = this._gatewaySeekRetry;
+        if (!retry || retry.retryLevel >= 1) return false;
+        if (this.currentPlaybackMode !== 'gateway-session') return false;
+        if (Number.isInteger(playbackAttemptId) && this.isStalePlaybackAttempt(playbackAttemptId)) return false;
+        if (!this.isRangeSeekFailure(reason) && !this.isFormatPlaybackError(reason)) return false;
+
+        const target = Math.max(0, Math.floor(Number(retry.target) || this.getResumeSnapshotPosition() || 0));
+        if (!target) return false;
+
+        console.warn('[WatchPage] Gateway seek playback failed, retrying with wider pre-roll:', reason);
+        this.restartCloudGatewayStreamAt(target, {
+            preRollSeconds: Math.max(75, (Number(retry.preRoll) || 20) * 3),
+            retryLevel: retry.retryLevel + 1
+        }).catch(error => {
+            console.error('[WatchPage] Gateway seek retry failed:', error);
+            this.handlePlaybackFailure(error?.message || 'Failed to seek in this title.').catch(() => { });
+        });
+        return true;
     }
 
     toggleMute() {
@@ -3041,11 +3214,13 @@ class WatchPage {
             // MEDIA_ERR_NETWORK / MEDIA_ERR_DECODE / MEDIA_ERR_SRC_NOT_SUPPORTED:
             // fail over to another version of the same title if available
             if ([2, 3, 4].includes(error.code)) {
+                const message = error.message || 'Media error';
+                if (this.retryGatewaySeekAfterFatalPlayback(message, videoAttemptId)) return;
                 this.sendPlaybackEvent('playback_error', {
                     errorCode: String(error.code),
-                    errorMessage: error.message || 'Media error'
+                    errorMessage: message
                 });
-                this.handlePlaybackFailure(error.message || 'Media error')
+                this.handlePlaybackFailure(message)
                     .catch(error => console.warn('[WatchPage] Playback failure handler failed:', error?.message || error));
             }
         }
@@ -3578,13 +3753,7 @@ class WatchPage {
         const audio = this.audioPreferenceFromProbeTrack(track);
         if (!audio || !this.content) return null;
 
-        const playbackPreferences = {
-            ...(this.content.playbackPreferences || this.content.playback_preferences || {}),
-            audio
-        };
-        this.content.playbackPreferences = playbackPreferences;
-        this.setPendingPlaybackPreferences(playbackPreferences);
-        return playbackPreferences;
+        return this.savePlaybackPreferences(this.getMergedPlaybackPreferences({ audio }));
     }
 
     getSelectedAudioPlaybackOptions() {
@@ -3665,7 +3834,10 @@ class WatchPage {
         const selected = this.getSelectedAudioTrack();
         if (!selected || !this.content?.sourceId || !this.content?.id) return false;
 
-        const position = Math.max(0, Math.floor(this.getPlaybackPosition()) - 3);
+        const targetPosition = Math.max(0, Math.floor(this.getPlaybackPosition()) - 3);
+        const preRoll = this.getGatewaySeekPreRoll(targetPosition, 20);
+        const sessionStart = Math.max(0, targetPosition - preRoll);
+        const localSeekTarget = Math.max(0, targetPosition - sessionStart);
         const autoplay = !this.video?.paused;
         const itemType = this.content.type === 'series' ? 'series' : 'movie';
         const container = this.containerExtension || this.content.containerExtension || 'mp4';
@@ -3680,7 +3852,7 @@ class WatchPage {
         this.hidePlaybackError();
         this.showLoading();
         this.updateTranscodeStatus('transcoding', `Audio: ${audioLabel}`);
-        this.trackPlaybackPosition({ position, force: true });
+        this.trackPlaybackPosition({ position: targetPosition, force: true });
         this.saveResumeSnapshotThrottled(true);
 
         await this.releasePlaybackPipelineForRetry();
@@ -3693,18 +3865,35 @@ class WatchPage {
                 ? MediaUtils.playbackHintFromItem(this.content, { container, streamType: itemType })
                 : { container, streamType: itemType }),
             ...audioOptions,
-            seekOffset: position,
-            startOffset: position,
-            resumeTime: position
+            seekOffset: sessionStart,
+            startOffset: sessionStart,
+            resumeTime: sessionStart
         };
 
         let result = null;
+        let retryLevel = 0;
         try {
             result = await this.requestAudioSwitchGatewayUrl(itemType, container, playbackHint, requestId);
         } catch (error) {
             console.error('[WatchPage] Gateway audio switch failed:', error);
-            await this.handlePlaybackFailure(error?.message || 'Failed to switch audio track.');
-            return false;
+            if (this.isRangeSeekFailure(error?.message || error?.details || '')) {
+                retryLevel = 1;
+                const widerPreRoll = this.getGatewaySeekPreRoll(targetPosition, 75);
+                const widerSessionStart = Math.max(0, targetPosition - widerPreRoll);
+                playbackHint.seekOffset = widerSessionStart;
+                playbackHint.startOffset = widerSessionStart;
+                playbackHint.resumeTime = widerSessionStart;
+                try {
+                    result = await this.requestAudioSwitchGatewayUrl(itemType, container, playbackHint, requestId);
+                } catch (retryError) {
+                    console.error('[WatchPage] Gateway audio switch seek retry failed:', retryError);
+                    await this.handlePlaybackFailure(retryError?.message || 'Failed to switch audio track.');
+                    return false;
+                }
+            } else {
+                await this.handlePlaybackFailure(error?.message || 'Failed to switch audio track.');
+                return false;
+            }
         }
 
         if (this.isStaleAudioSwitch(requestId)) {
@@ -3718,14 +3907,24 @@ class WatchPage {
         }
 
         this.content.cloudPlaybackSessionId = result.sessionId || null;
-        this.resumeTime = position;
+        this.resumeTime = targetPosition;
+        const effectiveSessionStart = Number(playbackHint.seekOffset) || sessionStart;
+        const effectiveLocalSeekTarget = Math.max(0, targetPosition - effectiveSessionStart);
         await this.loadVideo(result.url, this.playbackMetadataFromResult(result, {
-            seekOffset: position,
-            startOffset: position,
+            seekOffset: effectiveSessionStart,
+            startOffset: effectiveSessionStart,
             playbackAttemptId: this._playbackAttemptId,
             cloudPlaybackSessionId: result.sessionId || null,
             playbackPreferences
         }));
+        this._gatewaySeekRetry = {
+            target: targetPosition,
+            preRoll: Math.max(0, targetPosition - effectiveSessionStart),
+            retryLevel,
+            playbackAttemptId: this._playbackAttemptId,
+            audioSwitchRequestId: requestId
+        };
+        this.queuePendingLocalSeek(effectiveLocalSeekTarget);
 
         if (autoplay) {
             this.video?.play?.().catch(e => {
