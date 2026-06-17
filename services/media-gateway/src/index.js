@@ -18,7 +18,7 @@ const DEFAULT_TTL_SECONDS = clampInt(process.env.SESSION_TTL_SECONDS, 30 * 60, 6
 const STARTUP_TIMEOUT_MS = clampInt(process.env.STARTUP_TIMEOUT_MS, 45_000, 5_000, 180_000);
 const PLAYLIST_REQUEST_TIMEOUT_MS = clampInt(process.env.PLAYLIST_REQUEST_TIMEOUT_MS, 45_000, 5_000, 180_000);
 const XTREAM_REQUEST_TIMEOUT_MS = clampInt(process.env.XTREAM_REQUEST_TIMEOUT_MS, 15_000, 5_000, 60_000);
-const CODEC_PROBE_TIMEOUT_MS = clampInt(process.env.CODEC_PROBE_TIMEOUT_MS, 5_000, 1_000, 20_000);
+const CODEC_PROBE_TIMEOUT_MS = clampInt(process.env.CODEC_PROBE_TIMEOUT_MS, 12_000, 1_000, 30_000);
 const CODEC_PROBE_ANALYZE_DURATION_US = clampInt(process.env.CODEC_PROBE_ANALYZE_DURATION_US, 2_000_000, 250_000, 20_000_000);
 const CODEC_PROBE_SIZE_BYTES = clampInt(process.env.CODEC_PROBE_SIZE_BYTES, 2_000_000, 64_000, 20_000_000);
 const STOP_CONFLICTING_SOURCE_SESSIONS = (process.env.STOP_CONFLICTING_SOURCE_SESSIONS || 'true') !== 'false';
@@ -130,10 +130,15 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
         const normalizedPlaybackHint = asRecord(playbackHint);
         let normalizedCodecProfile = asRecord(codecProfile || normalizedPlaybackHint.codecProfile || normalizedPlaybackHint.codec_profile);
         let codecProfileSource = hasUsefulCodecProfile(normalizedCodecProfile) ? 'request' : '';
-        if (!codecProfileSource && shouldProbeCodecProfile(normalizedPlaybackHint, sourceUrl)) {
+        const shouldProbe = shouldProbeCodecProfile(normalizedPlaybackHint, sourceUrl);
+        const shouldCompleteProfile = shouldProbe && shouldProbeMissingSubtitleTracks(normalizedCodecProfile, normalizedPlaybackHint, sourceUrl);
+        if ((!codecProfileSource || shouldCompleteProfile) && shouldProbe) {
             try {
-                normalizedCodecProfile = await probeCodecProfile(sourceUrl, sanitizeUserAgent(userAgent) || FFMPEG_USER_AGENT);
-                codecProfileSource = hasUsefulCodecProfile(normalizedCodecProfile) ? 'gateway_probe' : '';
+                const probedCodecProfile = await probeCodecProfile(sourceUrl, sanitizeUserAgent(userAgent) || FFMPEG_USER_AGENT);
+                if (hasUsefulCodecProfile(probedCodecProfile)) {
+                    normalizedCodecProfile = mergeCodecProfiles(normalizedCodecProfile, probedCodecProfile);
+                    codecProfileSource = codecProfileSource ? `${codecProfileSource}+gateway_probe` : 'gateway_probe';
+                }
             } catch (err) {
                 console.warn('[media-gateway] codec probe skipped:', sanitizeLog(err.message || String(err), sourceUrl));
             }
@@ -598,8 +603,47 @@ function hasUsefulCodecProfile(profile) {
         stringOrNull(record.video) ||
         stringOrNull(record.audioCodec) ||
         stringOrNull(record.audio_codec) ||
-        stringOrNull(record.audio)
+        stringOrNull(record.audio) ||
+        (Array.isArray(record.audioTracks) && record.audioTracks.length > 0) ||
+        (Array.isArray(record.audio_tracks) && record.audio_tracks.length > 0) ||
+        (Array.isArray(record.subtitles) && record.subtitles.length > 0) ||
+        (Array.isArray(record.subtitleTracks) && record.subtitleTracks.length > 0) ||
+        (Array.isArray(record.subtitle_tracks) && record.subtitle_tracks.length > 0)
     );
+}
+
+function mergeCodecProfiles(baseProfile, probeProfile) {
+    const base = asRecord(baseProfile);
+    const probe = asRecord(probeProfile);
+    return compactRecord({
+        ...base,
+        ...probe,
+        audioTracks: Array.isArray(probe.audioTracks) && probe.audioTracks.length ? probe.audioTracks : base.audioTracks,
+        subtitles: Array.isArray(probe.subtitles) && probe.subtitles.length ? probe.subtitles : base.subtitles,
+    });
+}
+
+function shouldProbeMissingSubtitleTracks(profile, playbackHint, sourceUrl) {
+    const record = asRecord(profile);
+    if (
+        (Array.isArray(record.subtitles) && record.subtitles.length > 0) ||
+        (Array.isArray(record.subtitleTracks) && record.subtitleTracks.length > 0) ||
+        (Array.isArray(record.subtitle_tracks) && record.subtitle_tracks.length > 0)
+    ) return false;
+
+    const hint = asRecord(playbackHint);
+    const streamType = String(hint.streamType || hint.stream_type || hint.itemType || hint.item_type || '').toLowerCase();
+    if (streamType === 'live' || streamType === 'channel') return false;
+
+    const container = String(hint.container || record.container || '').toLowerCase();
+    if (['mkv', 'webm', 'avi'].includes(container)) return true;
+
+    try {
+        const extension = path.extname(new URL(sourceUrl).pathname).replace(/^\./, '').toLowerCase();
+        return ['mkv', 'webm', 'avi'].includes(extension);
+    } catch (_) {
+        return streamType === 'series' || streamType === 'movie';
+    }
 }
 
 function shouldProbeCodecProfile(playbackHint, sourceUrl) {
