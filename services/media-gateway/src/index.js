@@ -27,7 +27,7 @@ const STOP_CONFLICTING_OWNER_SESSIONS = (process.env.STOP_CONFLICTING_OWNER_SESS
 const FFMPEG_USER_AGENT = process.env.FFMPEG_USER_AGENT ||
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36 Norva/1.0';
 const MAX_LOG_TAIL = 12000;
-const GATEWAY_VERSION = 29;
+const GATEWAY_VERSION = 30;
 // Fallback audio path: plain AAC-LC stereo @48k. Source HE-AAC / unusual sample
 // rates can make hls.js label the track mp4a.40.5 (HE-AAC), and Chrome's MSE
 // may reject the append. Copy audio only when the codec hint is browser-safe.
@@ -74,6 +74,15 @@ app.get('/debug/failures', requireGatewayAuth, (req, res) => {
         service: 'norva-media-gateway',
         version: GATEWAY_VERSION,
         failures: lastFailures
+    });
+});
+
+app.get('/debug/sessions', requireGatewayAuth, (req, res) => {
+    res.json({
+        ok: true,
+        service: 'norva-media-gateway',
+        version: GATEWAY_VERSION,
+        sessions: Array.from(sessions.values()).map(debugSession)
     });
 });
 
@@ -936,6 +945,36 @@ function serializeSession(req, session) {
         expiresAt: session.expiresAt.toISOString(),
         lastError: session.lastError,
         logTail: session.logTail
+    };
+}
+
+function debugSession(session) {
+    const selectedTrack = selectedAudioTrackForSession(session);
+    return {
+        id: session.id,
+        playbackSessionId: session.playbackSessionId,
+        status: session.status,
+        mode: session.mode,
+        audioMode: audioModeForSession(session),
+        audioStreamIndex: session.audioStreamIndex,
+        audioMap: audioMapForSession(session),
+        audioCodec: session.audioCodec,
+        audioChannels: session.audioChannels,
+        selectedAudioTrack: selectedTrack
+            ? {
+                index: nullableInt(selectedTrack.index),
+                language: selectedTrack.language || null,
+                title: selectedTrack.title || null,
+                codec: selectedTrack.codec || null,
+                channels: nullableInt(selectedTrack.channels),
+                default: selectedTrack.default === true
+            }
+            : null,
+        codecProfileSource: session.codecProfileSource || null,
+        createdAt: session.createdAt.toISOString(),
+        expiresAt: session.expiresAt.toISOString(),
+        lastError: session.lastError,
+        logTail: String(session.logTail || '').slice(-1200)
     };
 }
 
