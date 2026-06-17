@@ -106,6 +106,9 @@ class WatchPage {
         this._playbackStatusOkReported = false;
         this._seekDebounceTimer = null;
         this._pendingSeekTarget = null;
+        this._timelineScrubbing = false;
+        this._lastCommittedSeekPercent = null;
+        this._lastCommittedSeekAt = 0;
         this.currentSessionId = null;
         this.activeSessionIds = new Set();
         this.currentCloudPlaybackSessionId = null;
@@ -226,8 +229,13 @@ class WatchPage {
             }
         });
 
-        // Progress bar
-        this.progressSlider?.addEventListener('input', (e) => this.seek(e.target.value));
+        // Progress bar: update the UI while dragging, commit one real seek on release.
+        this.progressSlider?.addEventListener('pointerdown', () => {
+            this._timelineScrubbing = true;
+        });
+        this.progressSlider?.addEventListener('input', (e) => this.previewSeek(e.target.value));
+        this.progressSlider?.addEventListener('change', (e) => this.commitSeek(e.target.value));
+        this.progressSlider?.addEventListener('pointerup', (e) => this.commitSeek(e.target.value));
 
         // Video events
         this.video?.addEventListener('timeupdate', () => {
@@ -2393,7 +2401,28 @@ class WatchPage {
         const base = Number.isFinite(this._pendingSeekTarget)
             ? this._pendingSeekTarget
             : this.getPlaybackPosition();
-        this.seekToTime(base + seconds);
+        Promise.resolve(this.seekToTime(base + seconds, { immediate: true }))
+            .catch(error => {
+                console.error('[WatchPage] Skip seek failed:', error);
+                this.handlePlaybackFailure('Failed to seek in this title.').catch(() => { });
+            });
+    }
+
+    commitSeek(percent) {
+        this._timelineScrubbing = false;
+        const value = Math.max(0, Math.min(100, parseFloat(percent)));
+        if (!Number.isFinite(value)) return;
+
+        const now = Date.now();
+        if (this._lastCommittedSeekPercent !== null
+            && Math.abs(this._lastCommittedSeekPercent - value) < 0.05
+            && now - this._lastCommittedSeekAt < 450) {
+            return;
+        }
+
+        this._lastCommittedSeekPercent = value;
+        this._lastCommittedSeekAt = now;
+        this.seek(value);
     }
 
     seek(percent) {
@@ -2407,7 +2436,32 @@ class WatchPage {
         this.setProgressValue(nextPercent);
         this.trackPlaybackPosition({ position: target, force: true });
         this.saveResumeSnapshotThrottled(true);
-        this.seekToTime(target);
+        this._pendingSeekTarget = target;
+        Promise.resolve(this.seekToTime(target, { immediate: true }))
+            .catch(error => {
+                console.error('[WatchPage] Seek failed:', error);
+                this.handlePlaybackFailure('Failed to seek in this title.').catch(() => { });
+            })
+            .finally(() => {
+                if (!this._timelineScrubbing && this._pendingSeekTarget === target) {
+                    this._pendingSeekTarget = null;
+                }
+            });
+    }
+
+    previewSeek(percent) {
+        const duration = this.getDisplayDuration();
+        if (!duration) return;
+
+        const nextPercent = Math.max(0, Math.min(100, parseFloat(percent)));
+        if (!Number.isFinite(nextPercent)) return;
+
+        const target = (nextPercent / 100) * duration;
+        this._pendingSeekTarget = target;
+        this.setProgressValue(nextPercent);
+        if (this.timeCurrent) {
+            this.timeCurrent.textContent = this.formatTime(target);
+        }
     }
 
     scheduleProcessedSeek(target, duration, delay = 900) {
@@ -2438,12 +2492,12 @@ class WatchPage {
         const target = Math.max(0, Math.min(targetTime, duration));
         const nativeDuration = this.getValidDuration();
 
-        if (this.canRestartForSeek() && !options.immediate) {
+        if (this.canRestartForSeek(target) && !options.immediate) {
             this.scheduleProcessedSeek(target, duration);
             return;
         }
 
-        if (this.canRestartForSeek()) {
+        if (this.canRestartForSeek(target)) {
             await this.restartProcessedStreamAt(target);
             return;
         }
@@ -2457,6 +2511,11 @@ class WatchPage {
     }
 
     async restartProcessedStreamAt(targetTime) {
+        if (this.currentPlaybackMode === 'gateway-session') {
+            await this.restartCloudGatewayStreamAt(targetTime);
+            return;
+        }
+
         const sourceUrl = this.baseStreamUrl || this.currentUrl;
         if (!sourceUrl) return;
 
@@ -2508,6 +2567,85 @@ class WatchPage {
         }
 
         this.setVolumeFromStorage();
+    }
+
+    async restartCloudGatewayStreamAt(targetTime) {
+        if (!this.content?.sourceId || !this.content?.id) return;
+
+        const target = Math.max(0, Math.floor(targetTime || 0));
+        const autoplay = !this.video?.paused;
+        const itemType = this.content.type === 'series' ? 'series' : 'movie';
+        const container = this.containerExtension || this.content.containerExtension || 'mp4';
+
+        this.showLoading();
+        this.hidePlaybackError();
+        this.streamStartOffset = target;
+        this.trackPlaybackPosition({ position: target, force: true });
+        this.saveResumeSnapshotThrottled(true);
+        this.updateDurationState();
+
+        if (this.hls) {
+            this.hls.destroy();
+            this.hls = null;
+        }
+
+        await this.releasePlaybackPipelineForRetry();
+
+        if (this.video) {
+            this.video.pause();
+            this.video.removeAttribute('src');
+            this.video.load();
+        }
+
+        const playbackHint = {
+            ...(MediaUtils.playbackHintFromItem
+                ? MediaUtils.playbackHintFromItem(this.content, { container, streamType: itemType })
+                : { container, streamType: itemType }),
+            seekOffset: target,
+            startOffset: target,
+            resumeTime: target
+        };
+
+        let result = null;
+        try {
+            result = await API.proxy.xtream.getStreamUrl(
+                this.content.sourceId,
+                this.content.id,
+                itemType,
+                container,
+                playbackHint
+            );
+        } catch (error) {
+            console.error('[WatchPage] Gateway seek session failed:', error);
+            await this.handlePlaybackFailure(error?.message || 'Failed to start seek session.');
+            return;
+        }
+
+        if (!result?.url) {
+            await this.handlePlaybackFailure('Failed to start seek session.');
+            return;
+        }
+
+        this.content.cloudPlaybackSessionId = result.sessionId || null;
+        this.resumeTime = target;
+        await this.loadVideo(result.url, this.playbackMetadataFromResult(result, {
+            seekOffset: target,
+            startOffset: target,
+            playbackAttemptId: this._playbackAttemptId,
+            cloudPlaybackSessionId: result.sessionId || null
+        }));
+
+        if (autoplay) {
+            this.video?.play?.().catch(e => {
+                if (e.name !== 'AbortError') console.error('[WatchPage] Gateway seek play error:', e);
+            });
+        } else {
+            this.video?.pause?.();
+        }
+
+        if (this._pendingSeekTarget === target) {
+            this._pendingSeekTarget = null;
+        }
     }
 
     toggleMute() {
@@ -2659,7 +2797,36 @@ class WatchPage {
         return displayDuration ? Math.min(position, displayDuration) : position;
     }
 
-    canRestartForSeek() {
+    isLocalSeekTargetAvailable(target) {
+        if (!this.video || !Number.isFinite(target)) return false;
+
+        const localTarget = target - (this.streamStartOffset || 0);
+        if (localTarget < -0.5) return false;
+
+        const nativeDuration = this.getValidDuration();
+        if (nativeDuration && localTarget > nativeDuration + 0.75) return false;
+
+        const seekable = this.video.seekable;
+        if (!seekable || seekable.length === 0) {
+            return Boolean(nativeDuration && localTarget >= 0 && localTarget <= nativeDuration);
+        }
+
+        for (let i = 0; i < seekable.length; i++) {
+            if (localTarget >= seekable.start(i) - 0.5 && localTarget <= seekable.end(i) + 0.5) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    canRestartForSeek(target = null) {
+        if (this.currentPlaybackMode === 'gateway-session') {
+            const canCloudSeek = Boolean(this.isVodContent() && this.content?.sourceId && this.content?.id && this.getDisplayDuration());
+            if (!canCloudSeek) return false;
+            if (!Number.isFinite(target)) return true;
+            return !this.isLocalSeekTargetAvailable(target);
+        }
+
         return Boolean(
             this.baseStreamUrl &&
             this.getProbeDuration() &&
@@ -2693,9 +2860,12 @@ class WatchPage {
     updateDurationState() {
         const duration = this.getDisplayDuration();
         const currentTime = this.getPlaybackPosition();
+        const previewPosition = this._timelineScrubbing && Number.isFinite(this._pendingSeekTarget)
+            ? Math.max(0, Math.min(this._pendingSeekTarget, duration || this._pendingSeekTarget))
+            : null;
 
         if (this.timeCurrent) {
-            this.timeCurrent.textContent = this.formatTime(currentTime);
+            this.timeCurrent.textContent = this.formatTime(previewPosition ?? currentTime);
         }
 
         if (!duration) {
@@ -2710,7 +2880,9 @@ class WatchPage {
         }
 
         this.setProgressState(true, this.canSeekTimeline());
-        this.setProgressValue((currentTime / duration) * 100);
+        if (!this._timelineScrubbing) {
+            this.setProgressValue((currentTime / duration) * 100);
+        }
         return duration;
     }
 
