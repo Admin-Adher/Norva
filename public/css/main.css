@@ -1735,6 +1735,30 @@ video::cue {
   border-radius: var(--radius-lg);
 }
 
+.service-health-card.service-health-prominent {
+  min-height: 220px;
+  align-items: flex-end;
+  padding: clamp(24px, 4vw, 48px);
+  background:
+    linear-gradient(120deg, rgba(59, 130, 246, 0.22), rgba(139, 92, 246, 0.14)),
+    var(--color-bg-secondary);
+}
+
+.service-health-prominent .service-health-copy h3 {
+  max-width: 760px;
+  font-size: clamp(2rem, 4vw, 4rem);
+  line-height: 1;
+}
+
+.service-health-prominent .service-health-copy p {
+  max-width: 680px;
+  font-size: 1.05rem;
+}
+
+.service-health-prominent .service-health-actions .btn {
+  min-width: 220px;
+}
+
 .service-health-card.hidden {
   display: none;
 }
@@ -2832,6 +2856,11 @@ kbd {
     flex-direction: column;
     align-items: stretch;
     gap: var(--space-md);
+  }
+
+  .service-health-card.service-health-prominent {
+    min-height: 260px;
+    justify-content: flex-end;
   }
 
   .service-health-actions .btn {
@@ -6435,6 +6464,30 @@ kbd {
   font-size: 0.72rem;
   font-weight: 700;
   backdrop-filter: blur(10px);
+}
+
+.home-card-language-badge {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  z-index: 2;
+  max-width: calc(100% - 20px);
+  padding: 4px 8px;
+  border-radius: var(--radius-full);
+  background: rgba(20, 36, 73, 0.82);
+  color: #d8e6ff;
+  border: 1px solid rgba(95, 130, 255, 0.42);
+  font-size: 0.68rem;
+  font-weight: 700;
+  line-height: 1.1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  backdrop-filter: blur(10px);
+}
+
+.home-card-badge + .home-card-language-badge {
+  bottom: 38px;
 }
 
 .loading-state,

@@ -1036,9 +1036,10 @@ class MoviesPage {
             const state = this.getMovieWatchState(item);
             const active = String(item.stream_id) === String(selectedMovie?.stream_id) &&
                 String(item.sourceId) === String(selectedMovie?.sourceId);
+            const languageBadge = MediaUtils.versionLanguageBadge(item, this.getPreferences());
             const bits = [
                 version.quality,
-                version.language,
+                languageBadge,
                 item.container_extension,
                 this.getSourceName(item.sourceId)
             ].filter(Boolean);
@@ -1101,7 +1102,7 @@ class MoviesPage {
             ratingLabel,
             ...this.getMovieGenres(displayMovie).slice(0, 3),
             version.quality,
-            version.language,
+            MediaUtils.versionLanguageBadge(movie, this.getPreferences()),
             ordered.length > 1 ? `${ordered.length} versions` : '',
             this.getCategoryName(displayMovie)
         ].filter(Boolean);
@@ -1164,6 +1165,9 @@ class MoviesPage {
     getPreferences() {
         return {
             preferredLanguage: this.serverSettings.preferredLanguage || '',
+            preferredAudioLanguage: this.serverSettings.preferredAudioLanguage || '',
+            preferredSubtitleLanguage: this.serverSettings.preferredSubtitleLanguage || '',
+            strictLanguageMatching: Boolean(this.serverSettings.strictLanguageMatching),
             preferredQuality: this.serverSettings.preferredQuality || 'highest'
         };
     }

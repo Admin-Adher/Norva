@@ -14,6 +14,7 @@ class HomePage {
         this.railItems = [];
         this.historyItems = [];
         this.heroItem = null;
+        this.contentPreferences = {};
     }
 
     async init() {
@@ -147,12 +148,19 @@ class HomePage {
 
         this.loadPromise = (async () => {
             try {
-                const [historyResult, railsResult, healthResult, favoritesResult] = await Promise.allSettled([
+                const [historyResult, railsResult, healthResult, favoritesResult, settingsResult] = await Promise.allSettled([
                     window.API.request('GET', '/history?limit=18'),
                     window.API.request('GET', '/home/rails?limit=18'),
                     window.NorvaSourceHealth?.loadSummary?.(),
-                    this.renderFavoriteChannels()
+                    this.renderFavoriteChannels(),
+                    window.API.settings.get()
                 ]);
+
+                if (settingsResult.status === 'fulfilled') {
+                    this.contentPreferences = window.MediaUtils?.normalizeContentPreferences
+                        ? window.MediaUtils.normalizeContentPreferences(settingsResult.value || {})
+                        : (settingsResult.value || {});
+                }
 
                 const history = historyResult.status === 'fulfilled' && Array.isArray(historyResult.value)
                     ? historyResult.value
@@ -192,11 +200,13 @@ class HomePage {
         const container = document.getElementById('home-service-health');
         if (!container || !window.NorvaSourceHealth) return;
 
-        container.innerHTML = window.NorvaSourceHealth.cardHtml(summary, { hideWhenReady: true });
+        container.innerHTML = window.NorvaSourceHealth.cardHtml(summary, {
+            hideWhenReady: true,
+            prominent: !summary?.ready?.length
+        });
         container.classList.toggle('hidden', summary?.state === 'ready');
         container.querySelector('[data-source-health-action="open-sources"]')?.addEventListener('click', () => {
-            this.app.navigateTo('settings');
-            setTimeout(() => this.app.pages.settings?.switchTab?.('sources'), 0);
+            window.NorvaSourceHealth.openAction(summary, this.app);
         });
     }
 
@@ -317,6 +327,10 @@ class HomePage {
                 ...rail,
                 items: (rail.items || []).filter(item => this.hasUsefulDisplayTitle(item) && (this.posterFromItem(item) || item.stream_icon || item.poster_url))
             }))
+            .map(rail => ({
+                ...rail,
+                items: this.rankRailItemsByLanguagePreference(rail.items)
+            }))
             .filter(rail => rail.items.length);
 
         this.railItems = rails;
@@ -342,6 +356,14 @@ class HomePage {
 
         this.initScrollArrows();
         this.updateScrollArrows();
+    }
+
+    rankRailItemsByLanguagePreference(items = []) {
+        if (!window.MediaUtils?.scoreTitleForPreferences) return items;
+        return [...items].sort((a, b) =>
+            MediaUtils.scoreTitleForPreferences(b, this.contentPreferences) -
+            MediaUtils.scoreTitleForPreferences(a, this.contentPreferences)
+        );
     }
 
     createRailSection(rail, railIndex) {
@@ -389,12 +411,14 @@ class HomePage {
         const posterUrl = this.resolveImageUrl(this.posterFromItem(item), '/img/norva-media-placeholder.png');
         const meta = this.cardMeta(item);
         const variantCount = Number(item.variantCount || item.variant_count || data.variantCount || 0);
+        const languageBadge = this.cardLanguageBadge(item);
 
         return `
             <div class="dashboard-card" data-id="${this.escapeAttr(itemId)}" data-type="${this.escapeAttr(type)}" data-rail-index="${railIndex}" data-item-index="${itemIndex}">
                 <div class="card-image">
                     <img src="${this.escapeAttr(posterUrl)}" alt="${this.escapeAttr(title)}" loading="lazy" onerror="this.onerror=null;this.src='/img/norva-media-placeholder.png'">
                     ${variantCount > 1 ? `<div class="home-card-badge">${variantCount} versions</div>` : ''}
+                    ${languageBadge ? `<div class="home-card-language-badge">${this.escapeHtml(languageBadge)}</div>` : ''}
                     <div class="play-icon-overlay">
                         <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
                     </div>
@@ -405,6 +429,20 @@ class HomePage {
                 </div>
             </div>
         `;
+    }
+
+    cardLanguageBadge(item) {
+        const prefs = this.contentPreferences || {};
+        if (!prefs.preferredAudioLanguage && !prefs.preferredSubtitleLanguage) return '';
+        const variants = Array.isArray(item.variants) && item.variants.length
+            ? item.variants
+            : [item.defaultVariant || item.default_variant || item];
+        const best = [...variants].sort((a, b) =>
+            MediaUtils.scoreVersionLanguage({ ...item, ...b }, prefs) -
+            MediaUtils.scoreVersionLanguage({ ...item, ...a }, prefs)
+        )[0] || item;
+        const label = MediaUtils.versionLanguageBadge({ ...item, ...best }, prefs);
+        return label;
     }
 
     cardMeta(item = {}) {
@@ -646,23 +684,162 @@ class HomePage {
         }, 100);
     }
 
-    navigateToSeries(item) {
-        if (!this.app.pages.series) return;
+    homeVariantToMediaItem(variant, parent, type) {
+        const data = parent.data || {};
+        const metadata = parent.metadata || {};
+        const tmdb = data.tmdb || metadata.tmdb || parent.tmdb || {};
+        const sourceId = variant.sourceId || variant.source_id || parent.sourceId || parent.source_id || data.sourceId;
+        const itemId = String(
+            variant.stream_id ||
+            variant.streamId ||
+            variant.series_id ||
+            variant.seriesId ||
+            variant.item_id ||
+            variant.itemId ||
+            variant.external_id ||
+            variant.externalId ||
+            parent.item_id ||
+            parent.itemId ||
+            ''
+        );
+        const title = this.firstUsefulTitle(
+            variant.name,
+            variant.title,
+            variant.rawTitle,
+            variant.raw_title,
+            parent.name,
+            parent.title,
+            data.title
+        ) || this.displayTitle(parent);
+        const poster = variant.stream_icon ||
+            variant.poster_url ||
+            variant.posterUrl ||
+            variant.cover ||
+            parent.stream_icon ||
+            parent.poster_url ||
+            parent.posterUrl ||
+            parent.cover ||
+            data.poster ||
+            data.posterUrl ||
+            null;
+        const container = variant.container_extension ||
+            variant.containerExtension ||
+            variant.playbackHint?.container ||
+            variant.playback_hint?.container ||
+            parent.container_extension ||
+            parent.containerExtension ||
+            data.containerExtension ||
+            'mp4';
+        const providerTmdbId = parent.providerTmdbId || parent.provider_tmdb_id || data.providerTmdbId || metadata.providerTmdbId || null;
+        const titleId = parent.titleId || parent.title_id || data.titleId || null;
+
+        return {
+            ...parent,
+            ...variant,
+            sourceId,
+            source_id: sourceId,
+            stream_id: itemId,
+            streamId: itemId,
+            series_id: itemId,
+            seriesId: itemId,
+            item_id: itemId,
+            itemId,
+            item_type: type,
+            itemType: type,
+            type,
+            name: title,
+            title,
+            raw_title: variant.raw_title || variant.rawTitle || title,
+            rawTitle: variant.rawTitle || variant.raw_title || title,
+            stream_icon: poster,
+            poster_url: poster,
+            posterUrl: poster,
+            cover: poster,
+            container_extension: container,
+            containerExtension: container,
+            plot: parent.overview || parent.description || parent.plot || data.overview || data.description || data.plot || metadata.overview || tmdb.overview || '',
+            overview: parent.overview || data.overview || metadata.overview || tmdb.overview || '',
+            year: data.year || parent.year || metadata.year || '',
+            rating: parent.rating || data.rating || metadata.rating || metadata.voteAverage || tmdb.vote_average || '',
+            provider_tmdb_id: providerTmdbId,
+            providerTmdbId,
+            tmdb_id: providerTmdbId,
+            title_id: titleId,
+            titleId,
+            tmdb,
+            metadata: {
+                ...metadata,
+                ...(variant.metadata || {}),
+                tmdb
+            },
+            data: {
+                ...metadata,
+                ...data,
+                ...(variant.data || {}),
+                title,
+                poster,
+                sourceId,
+                containerExtension: container,
+                providerTmdbId,
+                titleId,
+                tmdb
+            }
+        };
+    }
+
+    buildHomeMediaGroup(item, type) {
         const data = item.data || {};
         const sourceId = item.source_id || item.sourceId || data.sourceId;
-        const series = {
-            series_id: item.item_id || item.itemId || item.series_id,
+        const variants = Array.isArray(item.variants) && item.variants.length
+            ? item.variants
+            : (item.defaultVariant || item.default_variant ? [item.defaultVariant || item.default_variant] : []);
+        const fallbackItem = this.homeVariantToMediaItem({
+            ...item,
+            item_id: item.item_id || item.itemId || item.stream_id || item.streamId || item.series_id,
             sourceId,
-            name: this.displayTitle(item),
-            cover: item.stream_icon || item.cover || data.poster || data.posterUrl || null,
-            plot: data.description || data.plot || item.plot || '',
-            year: data.year || item.year || ''
+            name: this.displayTitle(item)
+        }, item, type);
+        const items = variants
+            .map(variant => this.homeVariantToMediaItem(variant, item, type))
+            .filter(variant => variant.sourceId && (type === 'series' ? variant.series_id : variant.stream_id));
+        const unique = [];
+        const seen = new Set();
+        for (const version of (items.length ? items : [fallbackItem])) {
+            const key = `${version.sourceId}:${type === 'series' ? version.series_id : version.stream_id}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            unique.push(version);
+        }
+        const title = this.displayTitle(item);
+        const representative = {
+            ...fallbackItem,
+            name: title,
+            title,
+            stream_icon: item.stream_icon || item.poster_url || item.posterUrl || data.poster || data.posterUrl || fallbackItem.stream_icon,
+            poster_url: item.poster_url || item.posterUrl || data.poster || data.posterUrl || fallbackItem.poster_url,
+            posterUrl: item.posterUrl || item.poster_url || data.posterUrl || data.poster || fallbackItem.posterUrl,
+            cover: item.cover || data.cover || fallbackItem.cover,
+            plot: data.description || data.plot || item.plot || item.overview || fallbackItem.plot,
+            overview: data.overview || item.overview || fallbackItem.overview,
+            variantCount: item.variantCount || item.variant_count || unique.length,
+            variants: unique
         };
+
+        return {
+            representative,
+            items: unique.length ? unique : [representative]
+        };
+    }
+
+    navigateToSeries(item) {
+        if (!this.app.pages.series) return;
+        const group = this.buildHomeMediaGroup(item, 'series');
 
         this.app.navigateTo('series');
         setTimeout(() => {
             const page = this.app.pages.series;
-            const group = { representative: series, items: [series] };
+            const versions = MediaUtils.orderVersionsByPreference(group.items, page.getPreferences?.() || {});
+            const series = versions[0] || group.representative;
             page.currentSeriesGroup = group;
             page.showSeriesDetailsV2(series, group);
         }, 100);
@@ -670,38 +847,14 @@ class HomePage {
 
     navigateToMovie(item) {
         if (!this.app.pages.movies) return;
-        const data = item.data || {};
-        const metadata = item.metadata || {};
-        const sourceId = item.source_id || item.sourceId || data.sourceId;
-        const streamId = item.item_id || item.itemId || item.stream_id || item.streamId || data.streamId;
-        const tmdb = data.tmdb || metadata.tmdb || item.tmdb || {};
-        const movie = {
-            stream_id: streamId,
-            sourceId,
-            name: this.displayTitle(item),
-            stream_icon: item.stream_icon || item.poster_url || item.posterUrl || data.poster || data.posterUrl || metadata.poster || null,
-            cover: item.cover || data.cover || null,
-            plot: data.description || data.plot || item.plot || metadata.overview || tmdb.overview || '',
-            year: data.year || item.year || metadata.year || '',
-            rating: item.rating || data.rating || metadata.rating || metadata.voteAverage || tmdb.vote_average || '',
-            category_id: item.category_id || data.categoryId || data.category_id || '',
-            container_extension: item.container_extension || item.containerExtension || data.containerExtension || 'mp4',
-            tmdb: {
-                ...tmdb,
-                title: metadata.title || data.title || item.title || tmdb.title || this.displayTitle(item),
-                overview: metadata.overview || data.description || data.plot || item.plot || tmdb.overview || '',
-                poster_path: metadata.poster_path || metadata.posterPath || data.poster_path || tmdb.poster_path || null,
-                backdrop_path: metadata.backdrop_path || metadata.backdropPath || data.backdrop_path || tmdb.backdrop_path || null,
-                runtime: metadata.runtime || data.runtime || tmdb.runtime || null,
-                vote_average: metadata.voteAverage || data.voteAverage || item.rating || tmdb.vote_average || ''
-            }
-        };
+        const group = this.buildHomeMediaGroup(item, 'movie');
 
         this.app.navigateTo('movies');
         setTimeout(() => {
             const page = this.app.pages.movies;
-            const group = { representative: movie, items: [movie] };
-            page.showMovieDetails(group, movie, { versions: [movie] });
+            const versions = MediaUtils.orderVersionsByPreference(group.items, page.getPreferences?.() || {});
+            const selected = versions[0] || group.representative;
+            page.showMovieDetails(group, selected, { versions });
         }, 100);
     }
 

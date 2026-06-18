@@ -20,6 +20,57 @@ const MediaUtils = (() => {
         { re: /\b(sd|480p?|360p?)\b/i, label: 'SD', score: 1 }
     ];
 
+    const LANGUAGE_LABELS = {
+        fr: 'FR',
+        en: 'EN',
+        es: 'ES',
+        original: 'VO'
+    };
+
+    const LANGUAGE_ALIASES = {
+        french: 'fr',
+        francais: 'fr',
+        francaise: 'fr',
+        fra: 'fr',
+        fre: 'fr',
+        truefrench: 'fr',
+        vff: 'fr',
+        vfq: 'fr',
+        vf: 'fr',
+        english: 'en',
+        anglais: 'en',
+        eng: 'en',
+        en: 'en',
+        spanish: 'es',
+        espagnol: 'es',
+        spa: 'es',
+        es: 'es',
+        vo: 'original',
+        vost: 'original',
+        vostfr: 'original',
+        original: 'original'
+    };
+
+    const TITLE_AUDIO_SIGNALS = [
+        { tag: 'TRUEFRENCH', re: /\btrue[\s._-]*french\b/i, language: 'fr' },
+        { tag: 'VFF', re: /\bvff\b/i, language: 'fr' },
+        { tag: 'VFQ', re: /\bvfq\b/i, language: 'fr' },
+        { tag: 'VF', re: /\bvf\b/i, language: 'fr' },
+        { tag: 'FR', re: /(^|[^a-z])fr([^a-z]|$)/i, language: 'fr' },
+        { tag: 'VOSTFR', re: /\bvost[\s._-]*fr\b/i, language: 'original' },
+        { tag: 'VO', re: /\bvo\b/i, language: 'original' },
+        { tag: 'EN', re: /(^|[^a-z])en([^a-z]|$)|\beng(lish)?\b/i, language: 'en' },
+        { tag: 'ES', re: /(^|[^a-z])es([^a-z]|$)|\bspa(nish)?\b/i, language: 'es' }
+    ];
+
+    const TITLE_SUBTITLE_SIGNALS = [
+        { tag: 'VOSTFR', re: /\bvost[\s._-]*fr\b/i, language: 'fr' },
+        { tag: 'SUBFR', re: /\b(sub|subs|st|subtitle|subtitles)[\s._-]*fr\b/i, language: 'fr' },
+        { tag: 'FRSUB', re: /\bfr[\s._-]*(sub|subs|st|subtitle|subtitles)\b/i, language: 'fr' },
+        { tag: 'SUBEN', re: /\b(sub|subs|st|subtitle|subtitles)[\s._-]*(en|eng|english)\b/i, language: 'en' },
+        { tag: 'SUBES', re: /\b(sub|subs|st|subtitle|subtitles)[\s._-]*(es|spa|spanish)\b/i, language: 'es' }
+    ];
+
     const NOISE_WORDS = new Set([
         '4k', 'uhd', '2160p', '2160', '1440p', 'fhd', '1080p', '1080', 'hd', '720p', '720',
         'sd', '480p', '360p', 'hdr', 'hdr10', 'dolby', 'vision', 'hevc', 'h264', 'h265', 'x264', 'x265',
@@ -77,14 +128,256 @@ const MediaUtils = (() => {
         for (const q of QUALITY_PATTERNS) {
             if (q.re.test(raw)) { quality = q.label; qualityScore = q.score; break; }
         }
-        let language = null;
+        const signals = parseTitleLanguageSignals(raw);
+        let language = signals.primaryTag;
         const lower = stripDiacritics(raw).toLowerCase();
         const ordered = [...LANG_TAGS].sort((a, b) => b.length - a.length);
-        for (const tag of ordered) {
-            const re = new RegExp(`(^|[^a-z])${tag}([^a-z]|$)`, 'i');
-            if (re.test(lower)) { language = tag.toUpperCase(); break; }
+        if (!language) {
+            for (const tag of ordered) {
+                const re = new RegExp(`(^|[^a-z])${tag}([^a-z]|$)`, 'i');
+                if (re.test(lower)) { language = tag.toUpperCase(); break; }
+            }
         }
-        return { quality, qualityScore, language };
+        return {
+            quality,
+            qualityScore,
+            language,
+            audioSignals: signals.audio,
+            subtitleSignals: signals.subtitles,
+            hasMulti: signals.hasMulti,
+            languageSummary: signals.summary
+        };
+    }
+
+    function normalizeLanguagePreference(value, kind = 'audio') {
+        const raw = stripDiacritics(String(value || '')).toLowerCase().replace(/[^a-z0-9]+/g, '');
+        if (!raw || raw === 'nopreference' || raw === 'any') return '';
+        if (kind === 'subtitle' && ['none', 'off', 'nosubtitles', 'disabled'].includes(raw)) return 'none';
+        return LANGUAGE_ALIASES[raw] || raw;
+    }
+
+    function migrateLegacyLanguagePreference(value) {
+        const legacy = normalizeLanguagePreference(value);
+        if (!legacy) return { preferredAudioLanguage: '', preferredSubtitleLanguage: '' };
+        const raw = stripDiacritics(String(value || '')).toLowerCase();
+        if (raw.includes('vostfr')) {
+            return { preferredAudioLanguage: 'original', preferredSubtitleLanguage: 'fr' };
+        }
+        if (raw.includes('vo') || legacy === 'original') {
+            return { preferredAudioLanguage: 'original', preferredSubtitleLanguage: '' };
+        }
+        if (raw.includes('multi')) {
+            return { preferredAudioLanguage: '', preferredSubtitleLanguage: '' };
+        }
+        return { preferredAudioLanguage: legacy, preferredSubtitleLanguage: '' };
+    }
+
+    function normalizeContentPreferences(prefs = {}) {
+        const legacy = migrateLegacyLanguagePreference(prefs.preferredLanguage || '');
+        return {
+            ...prefs,
+            preferredAudioLanguage: normalizeLanguagePreference(
+                prefs.preferredAudioLanguage || legacy.preferredAudioLanguage || '',
+                'audio'
+            ),
+            preferredSubtitleLanguage: normalizeLanguagePreference(
+                prefs.preferredSubtitleLanguage || legacy.preferredSubtitleLanguage || '',
+                'subtitle'
+            ),
+            strictLanguageMatching: Boolean(prefs.strictLanguageMatching)
+        };
+    }
+
+    function parseTitleLanguageSignals(name) {
+        const raw = stripDiacritics(String(name || '')).toLowerCase();
+        const audio = [];
+        const subtitles = [];
+        const pushUnique = (list, entry) => {
+            if (!list.some(item => item.language === entry.language && item.tag === entry.tag)) list.push(entry);
+        };
+        TITLE_AUDIO_SIGNALS.forEach(signal => {
+            if (signal.re.test(raw)) pushUnique(audio, { language: signal.language, tag: signal.tag, confidence: 'probable' });
+        });
+        TITLE_SUBTITLE_SIGNALS.forEach(signal => {
+            if (signal.re.test(raw)) pushUnique(subtitles, { language: signal.language, tag: signal.tag, confidence: 'probable' });
+        });
+        const hasMulti = /\bmulti\b/i.test(raw);
+        const primaryTag = subtitles.find(item => item.tag === 'VOSTFR')?.tag
+            || audio.find(item => item.language === 'fr')?.tag
+            || audio[0]?.tag
+            || (hasMulti ? 'MULTI' : null);
+        const summary = subtitles.find(item => item.tag === 'VOSTFR')
+            ? 'VOSTFR'
+            : audio.find(item => item.language === 'fr')?.tag
+                || audio[0]?.tag
+                || (hasMulti ? 'MULTI (unverified)' : '');
+        return { audio, subtitles, hasMulti, primaryTag, summary };
+    }
+
+    function languageDisplay(code) {
+        const normalized = normalizeLanguagePreference(code);
+        return LANGUAGE_LABELS[normalized] || String(code || '').toUpperCase();
+    }
+
+    function codecProfileFromItem(item = {}) {
+        const data = item.data || {};
+        const variant = item.defaultVariant || item.default_variant || item.variant || {};
+        return firstRecord(
+            item.codecProfile,
+            item.codec_profile,
+            data.codecProfile,
+            data.codec_profile,
+            variant.codecProfile,
+            variant.codec_profile,
+            item.playbackHint?.codecProfile,
+            item.playback_hint?.codec_profile
+        );
+    }
+
+    function languageArrayFromValue(value) {
+        if (value === undefined || value === null || value === '') return [];
+        if (Array.isArray(value)) return value.flatMap(languageArrayFromValue);
+        if (typeof value === 'object') {
+            return languageArrayFromValue(value.language || value.lang || value.iso_639_1 || value.iso639 || value.code || value.name || value.english_name || value.title);
+        }
+        return String(value)
+            .split(/[,/|;]/)
+            .map(part => normalizeLanguagePreference(part))
+            .filter(Boolean);
+    }
+
+    function collectStructuredLanguages(item = {}, keys = []) {
+        const data = item.data || {};
+        const metadata = item.metadata || {};
+        const profile = codecProfileFromItem(item);
+        const records = [item, data, metadata, profile];
+        const languages = [];
+        for (const record of records) {
+            if (!record || typeof record !== 'object') continue;
+            for (const key of keys) {
+                languages.push(...languageArrayFromValue(record[key]));
+            }
+        }
+        return [...new Set(languages)];
+    }
+
+    function tracksFromCodecProfile(item = {}, kind = 'audio') {
+        const profile = codecProfileFromItem(item);
+        if (!profile || typeof profile !== 'object') return null;
+        const tracks = kind === 'audio'
+            ? (profile.audioTracks || profile.audio_tracks)
+            : (profile.subtitles || profile.subtitleTracks || profile.subtitle_tracks);
+        return Array.isArray(tracks) ? tracks : null;
+    }
+
+    function evaluateRequestedLanguage(item, requested, kind = 'audio') {
+        const language = normalizeLanguagePreference(requested, kind);
+        if (!language) return { requested: '', state: 'unknown', confidence: 'none', source: 'none', tag: null };
+        if (kind === 'subtitle' && language === 'none') {
+            return { requested: 'none', state: 'confirmed', confidence: 'confirmed', source: 'user', tag: null };
+        }
+
+        const structuredKeys = kind === 'audio'
+            ? ['audioLanguages', 'audio_languages', 'audioLangs', 'audio_langs', 'spokenLanguages', 'spoken_languages']
+            : ['subtitleLanguages', 'subtitle_languages', 'subtitlesLanguages', 'subtitles_languages'];
+        const structured = collectStructuredLanguages(item, structuredKeys);
+        if (structured.length) {
+            return structured.includes(language)
+                ? { requested: language, state: 'confirmed', confidence: 'confirmed', source: 'provider', tag: null }
+                : { requested: language, state: 'confirmed_absent', confidence: 'absent', source: 'provider', tag: null };
+        }
+
+        const tracks = tracksFromCodecProfile(item, kind);
+        if (Array.isArray(tracks)) {
+            const trackLanguages = tracks.flatMap(track => languageArrayFromValue(track.language || track.lang || track.title || track.label));
+            return trackLanguages.includes(language)
+                ? { requested: language, state: 'confirmed', confidence: 'confirmed', source: 'probe', tag: null }
+                : { requested: language, state: 'confirmed_absent', confidence: 'absent', source: 'probe', tag: null };
+        }
+
+        const signals = parseTitleLanguageSignals(item.name || item.title || item.raw_title || item.rawTitle || '');
+        const tagList = kind === 'audio' ? signals.audio : signals.subtitles;
+        const matchedTag = tagList.find(signal => signal.language === language);
+        if (matchedTag) {
+            return { requested: language, state: 'unknown', confidence: 'probable', source: 'title_tag', tag: matchedTag.tag };
+        }
+
+        return { requested: language, state: 'unknown', confidence: signals.hasMulti ? 'ambiguous' : 'unknown', source: signals.hasMulti ? 'multi_tag' : 'none', tag: signals.hasMulti ? 'MULTI' : null };
+    }
+
+    function languageStateScore(result, weights, strict) {
+        if (!result?.requested) return 0;
+        if (result.state === 'confirmed') return weights.confirmed;
+        if (result.state === 'confirmed_absent') return strict ? -100000 : weights.absent;
+        if (result.confidence === 'probable') return weights.probable;
+        if (result.confidence === 'ambiguous') return weights.ambiguous;
+        return weights.unknown;
+    }
+
+    function analyzeLanguageCompatibility(item, prefs = {}) {
+        const normalizedPrefs = normalizeContentPreferences(prefs);
+        const audio = evaluateRequestedLanguage(item, normalizedPrefs.preferredAudioLanguage, 'audio');
+        const subtitle = evaluateRequestedLanguage(item, normalizedPrefs.preferredSubtitleLanguage, 'subtitle');
+        const strict = normalizedPrefs.strictLanguageMatching;
+        let score = 0;
+        score += languageStateScore(audio, {
+            confirmed: 900,
+            probable: 450,
+            ambiguous: 30,
+            unknown: 60,
+            absent: -600
+        }, strict);
+        score += languageStateScore(subtitle, {
+            confirmed: 700,
+            probable: 350,
+            ambiguous: 20,
+            unknown: 50,
+            absent: -500
+        }, strict);
+        if (audio.requested === 'original' && subtitle.requested === 'fr' && subtitle.confidence === 'probable') {
+            score += 180;
+        }
+        return { audio, subtitle, score, preferences: normalizedPrefs };
+    }
+
+    function scoreVersionLanguage(item, prefs = {}) {
+        return analyzeLanguageCompatibility(item, prefs).score;
+    }
+
+    function scoreTitleForPreferences(item, prefs = {}) {
+        const variants = Array.isArray(item.variants) && item.variants.length
+            ? item.variants
+            : [item.defaultVariant || item.default_variant || item];
+        const scores = variants.map(variant => scoreVersionLanguage({ ...item, ...variant, data: { ...(item.data || {}), ...(variant.data || {}) } }, prefs));
+        return scores.length ? Math.max(...scores) : 0;
+    }
+
+    function versionLanguageBadge(item, prefs = {}) {
+        const analysis = analyzeLanguageCompatibility(item, prefs);
+        const candidates = [];
+        let audioCandidate = '';
+        let subtitleCandidate = '';
+        const hasRequestedLanguage = Boolean(analysis.audio.requested || (analysis.subtitle.requested && analysis.subtitle.requested !== 'none'));
+        if (analysis.audio.requested) {
+            if (analysis.audio.state === 'confirmed') audioCandidate = `Audio ${languageDisplay(analysis.audio.requested)} confirme`;
+            else if (analysis.audio.confidence === 'probable') audioCandidate = `Audio ${languageDisplay(analysis.audio.requested)} probable`;
+            else if (analysis.audio.state === 'confirmed_absent') audioCandidate = `Audio ${languageDisplay(analysis.audio.requested)} absent`;
+        }
+        if (analysis.subtitle.requested && analysis.subtitle.requested !== 'none') {
+            if (analysis.subtitle.state === 'confirmed') subtitleCandidate = `Sous-titres ${languageDisplay(analysis.subtitle.requested)} confirmes`;
+            else if (analysis.subtitle.confidence === 'probable') subtitleCandidate = `Sous-titres ${languageDisplay(analysis.subtitle.requested)} probables`;
+            else if (analysis.subtitle.state === 'confirmed_absent') subtitleCandidate = `Sous-titres ${languageDisplay(analysis.subtitle.requested)} absents`;
+        }
+        if (analysis.audio.requested === 'original' && subtitleCandidate) {
+            candidates.push(subtitleCandidate, audioCandidate);
+        } else {
+            candidates.push(audioCandidate, subtitleCandidate);
+        }
+        const firstCandidate = candidates.filter(Boolean)[0];
+        if (firstCandidate) return firstCandidate;
+        const parsed = parseVersionInfo(item.name || item.title || item.raw_title || item.rawTitle);
+        if (parsed.languageSummary) return parsed.languageSummary;
+        return hasRequestedLanguage ? 'Langue non verifiee' : '';
     }
 
     /**
@@ -143,19 +436,18 @@ const MediaUtils = (() => {
     }
 
     /**
-     * Order group versions by user preference (language > quality > source order).
-     * prefs: { preferredLanguage: 'vf'|'vostfr'|''..., preferredQuality: 'highest'|'4k'|'1080p'|'720p'|'lowest' }
+     * Order group versions by user preference (language compatibility > quality > source order).
+     * Unknown language data stays eligible; confirmed/probable matches are boosted.
      */
     function orderVersionsByPreference(items, prefs = {}) {
-        const prefLang = (prefs.preferredLanguage || '').toUpperCase();
-        const prefQuality = prefs.preferredQuality || 'highest';
+        const normalizedPrefs = normalizeContentPreferences(prefs);
+        const prefQuality = normalizedPrefs.preferredQuality || 'highest';
 
         const qualityTarget = { '4k': 5, '1080p': 3, '720p': 2 }[prefQuality] || null;
 
         return [...items].map(item => {
             const v = parseVersionInfo(item.name);
-            let score = 0;
-            if (prefLang && v.language === prefLang) score += 1000;
+            let score = scoreVersionLanguage(item, normalizedPrefs);
             if (qualityTarget !== null) {
                 // Closest to target wins; above target slightly preferred over below
                 score += 100 - Math.abs(v.qualityScore - qualityTarget) * 20 + (v.qualityScore >= qualityTarget ? 5 : 0);
@@ -178,7 +470,7 @@ const MediaUtils = (() => {
         const parts = [];
         if (sourceName) parts.push(sourceName);
         if (v.quality) parts.push(v.quality);
-        if (v.language) parts.push(v.language);
+        if (v.languageSummary || v.language) parts.push(v.languageSummary || v.language);
         if (item.container_extension) parts.push(item.container_extension);
         return parts.join(' - ') || 'Version';
     }
@@ -330,7 +622,9 @@ const MediaUtils = (() => {
     return {
         stripDiacritics, extractYear, normalizeTitle, computeDedupKey,
         parseVersionInfo, searchableText, groupItems, pickRepresentative,
-        orderVersionsByPreference, versionLabel,
+        normalizeLanguagePreference, normalizeContentPreferences, migrateLegacyLanguagePreference,
+        analyzeLanguageCompatibility, scoreVersionLanguage, scoreTitleForPreferences,
+        orderVersionsByPreference, versionLabel, versionLanguageBadge,
         saveFilters, loadFilters, escapeHtml, tmdbPosterUrl, parseDurationToSeconds,
         playbackHintFromItem, safeImageUrl
     };

@@ -56,7 +56,11 @@ class SettingsPage {
 
         document.getElementById('settings-service-health')?.addEventListener('click', (event) => {
             if (event.target.closest('[data-source-health-action="open-sources"]')) {
-                this.switchTab('sources');
+                if (this.lastSourceHealthSummary && window.NorvaSourceHealth?.openAction) {
+                    window.NorvaSourceHealth.openAction(this.lastSourceHealthSummary, this.app);
+                } else {
+                    this.switchTab('sources');
+                }
             }
         });
     }
@@ -160,6 +164,7 @@ class SettingsPage {
 
         try {
             const summary = await window.NorvaSourceHealth.loadSummary();
+            this.lastSourceHealthSummary = summary;
             container.innerHTML = window.NorvaSourceHealth.cardHtml(summary, { hideWhenReady: false });
         } catch (err) {
             console.warn('[Settings] Unable to load TV service health:', err);
@@ -236,7 +241,9 @@ class SettingsPage {
 
     async initContentSettings() {
         const groupToggle = document.getElementById('setting-group-duplicates');
-        const langSelect = document.getElementById('setting-preferred-language');
+        const audioLangSelect = document.getElementById('setting-preferred-audio-language');
+        const subtitleLangSelect = document.getElementById('setting-preferred-subtitle-language');
+        const strictLangToggle = document.getElementById('setting-strict-language');
         const qualitySelect = document.getElementById('setting-preferred-quality');
         const tmdbKeyInput = document.getElementById('setting-tmdb-key');
         const enrichBtn = document.getElementById('tmdb-enrich-btn');
@@ -252,15 +259,44 @@ class SettingsPage {
         }
 
         if (groupToggle) groupToggle.checked = s.groupDuplicates !== false;
-        if (langSelect) langSelect.value = s.preferredLanguage || '';
+        const languagePrefs = window.MediaUtils?.normalizeContentPreferences
+            ? window.MediaUtils.normalizeContentPreferences(s)
+            : {
+                preferredAudioLanguage: s.preferredAudioLanguage || '',
+                preferredSubtitleLanguage: s.preferredSubtitleLanguage || '',
+                strictLanguageMatching: Boolean(s.strictLanguageMatching)
+            };
+        if (audioLangSelect) audioLangSelect.value = languagePrefs.preferredAudioLanguage || '';
+        if (subtitleLangSelect) subtitleLangSelect.value = languagePrefs.preferredSubtitleLanguage || '';
+        if (strictLangToggle) strictLangToggle.checked = Boolean(languagePrefs.strictLanguageMatching);
         if (qualitySelect) qualitySelect.value = s.preferredQuality || 'highest';
         if (tmdbKeyInput) tmdbKeyInput.value = s.tmdbApiKey || '';
+
+        if (s.preferredLanguage && !s.preferredAudioLanguage && !s.preferredSubtitleLanguage) {
+            API.settings.update({
+                preferredAudioLanguage: languagePrefs.preferredAudioLanguage || '',
+                preferredSubtitleLanguage: languagePrefs.preferredSubtitleLanguage || '',
+                preferredLanguage: ''
+            }).catch(console.error);
+        }
 
         groupToggle?.addEventListener('change', () => {
             API.settings.update({ groupDuplicates: groupToggle.checked }).catch(console.error);
         });
-        langSelect?.addEventListener('change', () => {
-            API.settings.update({ preferredLanguage: langSelect.value }).catch(console.error);
+        audioLangSelect?.addEventListener('change', () => {
+            API.settings.update({
+                preferredAudioLanguage: audioLangSelect.value,
+                preferredLanguage: ''
+            }).catch(console.error);
+        });
+        subtitleLangSelect?.addEventListener('change', () => {
+            API.settings.update({
+                preferredSubtitleLanguage: subtitleLangSelect.value,
+                preferredLanguage: ''
+            }).catch(console.error);
+        });
+        strictLangToggle?.addEventListener('change', () => {
+            API.settings.update({ strictLanguageMatching: strictLangToggle.checked }).catch(console.error);
         });
         qualitySelect?.addEventListener('change', () => {
             API.settings.update({ preferredQuality: qualitySelect.value }).catch(console.error);

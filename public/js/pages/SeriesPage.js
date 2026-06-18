@@ -960,6 +960,9 @@ class SeriesPage {
     getPreferences() {
         return {
             preferredLanguage: this.serverSettings.preferredLanguage || '',
+            preferredAudioLanguage: this.serverSettings.preferredAudioLanguage || '',
+            preferredSubtitleLanguage: this.serverSettings.preferredSubtitleLanguage || '',
+            strictLanguageMatching: Boolean(this.serverSettings.strictLanguageMatching),
             preferredQuality: this.serverSettings.preferredQuality || 'highest'
         };
     }
@@ -1242,7 +1245,7 @@ class SeriesPage {
                 ratingLabel,
                 ...genres,
                 version.quality,
-                version.language
+                MediaUtils.versionLanguageBadge(series, this.getPreferences())
             ].filter(Boolean);
 
             const metaEl = document.getElementById('series-meta');

@@ -516,6 +516,107 @@ const CloudAdapter = (() => {
         };
     }
 
+    function normalizeHomeRailVariant(variant, context) {
+        const raw = variant || {};
+        const cloudSourceId = raw.source_id || raw.sourceId || context.cloudSourceId || '';
+        const sourceId = cloudSourceId ? localSourceId(cloudSourceId) : context.sourceId;
+        const itemId = String(
+            raw.external_id ||
+            raw.externalId ||
+            raw.item_id ||
+            raw.itemId ||
+            raw.stream_id ||
+            raw.streamId ||
+            raw.id ||
+            ''
+        );
+        const title = firstUsefulTitle(
+            raw.raw_title,
+            raw.rawTitle,
+            raw.title,
+            raw.name,
+            context.title
+        ) || context.title;
+        const poster = raw.poster_url ||
+            raw.posterUrl ||
+            raw.stream_icon ||
+            raw.cover ||
+            context.poster ||
+            '';
+        const container = raw.container_extension ||
+            raw.containerExtension ||
+            raw.playback_hint?.container ||
+            raw.playbackHint?.container ||
+            context.container;
+        const playbackHint = raw.playback_hint || raw.playbackHint || {};
+        const codecProfile = raw.codec_profile || raw.codecProfile || {};
+        const providerTmdbId = context.providerTmdbId || null;
+
+        return {
+            ...raw,
+            id: raw.id || itemId,
+            item_id: itemId,
+            itemId,
+            external_id: itemId,
+            externalId: itemId,
+            stream_id: itemId,
+            streamId: itemId,
+            series_id: itemId,
+            seriesId: itemId,
+            item_type: context.type,
+            itemType: context.type,
+            type: context.type,
+            source_id: sourceId,
+            sourceId,
+            cloudSourceId,
+            cloud_source_id: cloudSourceId,
+            media_item_id: raw.media_item_id || raw.mediaItemId || null,
+            mediaItemId: raw.mediaItemId || raw.media_item_id || null,
+            name: title,
+            title,
+            raw_title: raw.raw_title || raw.rawTitle || title,
+            rawTitle: raw.rawTitle || raw.raw_title || title,
+            stream_icon: poster,
+            cover: poster,
+            poster_url: poster,
+            posterUrl: poster,
+            container_extension: container,
+            containerExtension: container,
+            playback_hint: playbackHint,
+            playbackHint,
+            codec_profile: codecProfile,
+            codecProfile,
+            provider_tmdb_id: providerTmdbId,
+            providerTmdbId,
+            tmdb_id: providerTmdbId,
+            title_id: context.titleId,
+            titleId: context.titleId,
+            rating: context.rating || '',
+            year: context.year || '',
+            tmdb: context.tmdb,
+            metadata: {
+                ...context.metadata,
+                ...(raw.metadata || {}),
+                tmdb: context.tmdb
+            },
+            data: {
+                ...context.metadata,
+                ...context.data,
+                ...(raw.metadata || {}),
+                title,
+                poster,
+                sourceId,
+                cloudSourceId,
+                containerExtension: container,
+                providerTmdbId,
+                titleId: context.titleId,
+                tmdb: context.tmdb,
+                codecProfile,
+                playbackHint
+            }
+        };
+    }
+
     function normalizeHomeRailItem(item) {
         const defaultVariant = item.default_variant || item.defaultVariant || {};
         const cloudSourceId = defaultVariant.source_id || defaultVariant.sourceId || item.source_id || item.sourceId || '';
@@ -556,6 +657,34 @@ const CloudAdapter = (() => {
             item.containerExtension ||
             data.containerExtension ||
             (type === 'channel' ? 'm3u8' : 'mp4');
+        const providerTmdbId = item.providerTmdbId || item.provider_tmdb_id || data.providerTmdbId || metadata.providerTmdbId || null;
+        const titleId = item.titleId || item.title_id || item.id || null;
+        const context = {
+            type,
+            title,
+            poster,
+            container,
+            sourceId,
+            cloudSourceId,
+            providerTmdbId,
+            titleId,
+            tmdb,
+            metadata,
+            data,
+            rating: item.rating || data.rating || metadata.rating || metadata.voteAverage || tmdb.vote_average || '',
+            year: data.year || item.year || metadata.year || '',
+        };
+        const rawVariants = Array.isArray(item.variants) && item.variants.length
+            ? item.variants
+            : (defaultVariant && Object.keys(defaultVariant).length ? [defaultVariant] : []);
+        const variants = rawVariants
+            .map(variant => normalizeHomeRailVariant(variant, context))
+            .filter(variant => variant.item_id && variant.sourceId);
+        const normalizedDefaultVariant = variants.find(variant =>
+            String(variant.id) === String(item.defaultVariantId || item.default_variant_id || defaultVariant.id || '') ||
+            String(variant.item_id) === String(itemId)
+        ) || variants[0] || normalizeHomeRailVariant(defaultVariant, context);
+
         return {
             ...item,
             item_id: itemId,
@@ -575,9 +704,17 @@ const CloudAdapter = (() => {
             poster_url: poster,
             container_extension: container,
             containerExtension: container,
-            providerTmdbId: item.providerTmdbId || item.provider_tmdb_id || data.providerTmdbId || metadata.providerTmdbId || null,
-            variantCount: item.variantCount || item.variant_count || 1,
-            defaultVariant,
+            provider_tmdb_id: providerTmdbId,
+            providerTmdbId,
+            tmdb_id: providerTmdbId,
+            title_id: titleId,
+            titleId,
+            variantCount: item.variantCount || item.variant_count || variants.length || 1,
+            variant_count: item.variant_count || item.variantCount || variants.length || 1,
+            variants,
+            exposedVariants: variants,
+            defaultVariant: normalizedDefaultVariant,
+            default_variant: normalizedDefaultVariant,
             data: {
                 ...metadata,
                 ...data,
@@ -587,8 +724,10 @@ const CloudAdapter = (() => {
                 sourceId,
                 cloudSourceId,
                 containerExtension: container,
-                providerTmdbId: item.providerTmdbId || item.provider_tmdb_id || data.providerTmdbId || metadata.providerTmdbId || null,
-                titleId: item.titleId || item.title_id || item.id || null
+                providerTmdbId,
+                titleId,
+                tmdb,
+                variants
             }
         };
     }
@@ -1162,7 +1301,12 @@ const CloudAdapter = (() => {
             userAgentCustom: '',
             autoPlayNextEpisode: true,
             groupDuplicates: true,
-            duplicateStrategy: 'smart'
+            duplicateStrategy: 'smart',
+            preferredLanguage: '',
+            preferredAudioLanguage: '',
+            preferredSubtitleLanguage: '',
+            strictLanguageMatching: false,
+            preferredQuality: 'highest'
         };
     }
 
