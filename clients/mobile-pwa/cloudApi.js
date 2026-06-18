@@ -13,7 +13,7 @@
     const DEFAULT_CATALOG_URL = 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-catalog';
     const DEFAULT_SERIES_INFO_URL = 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-series-info';
     const DEFAULT_PLAYBACK_URL = 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-playback';
-    const DEFAULT_EDGE_URL = 'https://norva-relay.norva-adher.workers.dev';
+    const DEFAULT_EDGE_URL = 'https://edge.norva.tv';
     const KEY_API_URL = 'norva-cloud-api-url';
     const KEY_SOURCE_SYNC_URL = 'norva-source-sync-url';
     const KEY_CATALOG_URL = 'norva-catalog-url';
