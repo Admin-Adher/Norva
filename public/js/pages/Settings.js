@@ -284,8 +284,8 @@ class SettingsPage {
                 countrySelect.value = value;
                 if (hint) {
                     const state = resolution.status === 'confirmed'
-                        ? `Preference confirmee (${regionApi?.label?.(value) || value}).`
-                        : `Region deduite (${regionApi?.label?.(value) || value}) tant que tu ne confirmes pas un choix.`;
+                        ? `Préférence confirmée (${regionApi?.label?.(value) || value}).`
+                        : `Région déduite (${regionApi?.label?.(value) || value}) tant que tu ne confirmes pas un choix.`;
                     hint.textContent = `${baseHint} ${state}`;
                 }
             };

@@ -188,7 +188,7 @@ class LiveGuideFusion {
         if (hasFavorites) {
             groups.push({ id: 'Favorites', name: 'Favoris' });
         }
-        groups.push({ id: '', name: 'Toutes les Chaines' });
+        groups.push({ id: '', name: 'Toutes les chaînes' });
 
         for (const channel of channels) {
             const group = channel.groupTitle || 'Uncategorized';
@@ -336,7 +336,7 @@ class LiveGuideFusion {
 
         const scopeLabel = this.activeGroup === 'Favorites'
             ? 'Favoris'
-            : (this.activeGroup || 'Toutes les chaines');
+            : (this.activeGroup || 'Toutes les chaînes');
 
         this.app.channelList.refreshPlaybackForChannels(problematic, {
             label: scopeLabel,

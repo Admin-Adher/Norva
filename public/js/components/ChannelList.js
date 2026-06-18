@@ -17,9 +17,9 @@ const CHANNEL_FAMILY_NOISE_WORDS = new Set([
 
 const CONSOLIDATED_LIVE_GROUPS = {
     FAVORITES: 'Favorites',
-    PRIMARY: 'Chaines principales',
-    REGIONAL: 'Chaines regionales',
-    MULTIPLEX: 'Multiplex et evenements'
+    PRIMARY: 'Chaînes principales',
+    REGIONAL: 'Chaînes régionales',
+    MULTIPLEX: 'Multiplex et événements'
 };
 const LIVE_CATALOG_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const LAST_LIVE_CHANNEL_KEY = 'norva_last_live_channel_v1';
@@ -2392,7 +2392,7 @@ class ChannelList {
                 ? 'Favoris'
                 : isCategory
                     ? activeGroup
-                    : 'Toutes les chaines'
+                    : 'Toutes les chaînes'
         };
 
         if (isFavorites || isCategory) {

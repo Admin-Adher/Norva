@@ -70,7 +70,7 @@ class HomePage {
 
                 <section class="dashboard-section" id="favorite-channels-section">
                     <div class="section-header">
-                        <h2>Chaines favorites</h2>
+                        <h2>Chaînes favorites</h2>
                     </div>
                     ${this.scrollSection('favorite-channels-list', 'Loading favorites...', 'channel-tiles')}
                 </section>
