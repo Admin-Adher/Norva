@@ -699,13 +699,15 @@ class SourceManager {
             const createdSource = await API.sources.create({ type, name, url, username, password });
             await this.loadSources();
             this.notifySourceHealthChanged();
-
-            // Refresh channel list
-            if (window.app?.channelList) {
-                await window.app.channelList.loadSources();
-                await window.app.channelList.loadChannels();
-            }
             this.showCatalogPreparation(createdSource, type);
+
+            // Refresh the watch surfaces in the background. The onboarding progress
+            // step must appear immediately, even when a provider catalog is large.
+            if (window.app?.channelList) {
+                window.app.channelList.loadSources()
+                    .then(() => window.app.channelList.loadChannels())
+                    .catch(err => console.warn('[SourceManager] Background channel refresh failed:', err));
+            }
         } catch (err) {
             alert('Error adding source: ' + err.message);
         }
