@@ -3892,6 +3892,8 @@ kbd {
 /* Premium Series Detail */
 #page-series.series-detail-open {
   overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 #page-series.series-detail-open .series-header,
@@ -3911,6 +3913,7 @@ kbd {
   min-height: calc(100vh - var(--navbar-height));
   padding: 0;
   overflow-x: hidden;
+  overflow-y: visible;
   background: #05070d;
 }
 
