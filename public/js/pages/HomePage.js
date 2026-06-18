@@ -11,10 +11,13 @@ class HomePage {
         this.loadPromise = null;
         this.lastLoadedAt = 0;
         this.dashboardTtlMs = 60000;
+        this.homeRailDisplayLimit = 18;
+        this.homeRailFetchLimit = 60;
         this.railItems = [];
         this.historyItems = [];
         this.heroItem = null;
         this.contentPreferences = {};
+        this.contentPreferenceKey = '';
     }
 
     async init() {
@@ -26,6 +29,11 @@ class HomePage {
             this.renderLayout();
         } else {
             this.container = document.getElementById('home-content');
+        }
+
+        const preferencesChanged = await this.refreshContentPreferences();
+        if (preferencesChanged) {
+            this.lastLoadedAt = 0;
         }
 
         if (this.lastLoadedAt && Date.now() - this.lastLoadedAt < this.dashboardTtlMs) {
@@ -142,24 +150,54 @@ class HomePage {
         });
     }
 
+    normalizeContentPreferences(settings = {}) {
+        return window.MediaUtils?.normalizeContentPreferences
+            ? window.MediaUtils.normalizeContentPreferences(settings || {})
+            : (settings || {});
+    }
+
+    setContentPreferences(settings = {}) {
+        const prefs = this.normalizeContentPreferences(settings);
+        const key = [
+            prefs.preferredAudioLanguage || '',
+            prefs.preferredSubtitleLanguage || '',
+            prefs.strictLanguageMatching ? 'strict' : 'soft',
+            prefs.preferredQuality || ''
+        ].join('|');
+        const changed = key !== this.contentPreferenceKey;
+        this.contentPreferences = prefs;
+        this.contentPreferenceKey = key;
+        return changed;
+    }
+
+    async refreshContentPreferences() {
+        if (!window.API?.settings?.get) return false;
+        try {
+            const settings = await window.API.settings.get();
+            return this.setContentPreferences(settings || {});
+        } catch (err) {
+            console.warn('[Dashboard] Unable to refresh content preferences:', err);
+            return false;
+        }
+    }
+
     async loadDashboardData() {
         if (this.isLoading) return this.loadPromise;
         this.isLoading = true;
 
         this.loadPromise = (async () => {
             try {
+                const railFetchLimit = Math.max(this.homeRailDisplayLimit, this.homeRailFetchLimit);
                 const [historyResult, railsResult, healthResult, favoritesResult, settingsResult] = await Promise.allSettled([
                     window.API.request('GET', '/history?limit=18'),
-                    window.API.request('GET', '/home/rails?limit=18'),
+                    window.API.request('GET', `/home/rails?limit=${railFetchLimit}`),
                     window.NorvaSourceHealth?.loadSummary?.(),
                     this.renderFavoriteChannels(),
                     window.API.settings.get()
                 ]);
 
                 if (settingsResult.status === 'fulfilled') {
-                    this.contentPreferences = window.MediaUtils?.normalizeContentPreferences
-                        ? window.MediaUtils.normalizeContentPreferences(settingsResult.value || {})
-                        : (settingsResult.value || {});
+                    this.setContentPreferences(settingsResult.value || {});
                 }
 
                 const history = historyResult.status === 'fulfilled' && Array.isArray(historyResult.value)
@@ -172,8 +210,8 @@ class HomePage {
                 }
 
                 if (railsResult.status === 'fulfilled') {
-                    this.renderHero(history, railsResult.value?.rails || []);
                     this.renderCloudRails(railsResult.value);
+                    this.renderHero(history, this.railItems);
                 } else {
                     console.warn('[Dashboard] Home rails unavailable, using recent content fallback:', railsResult.reason);
                     await this.renderFallbackRails();
@@ -214,9 +252,10 @@ class HomePage {
         const container = document.getElementById('home-rails');
         if (!container) return;
 
+        const railFetchLimit = Math.max(this.homeRailDisplayLimit, this.homeRailFetchLimit);
         const [moviesResult, seriesResult] = await Promise.allSettled([
-            window.API.request('GET', '/channels/recent?type=movie&limit=18'),
-            window.API.request('GET', '/channels/recent?type=series&limit=18')
+            window.API.request('GET', `/channels/recent?type=movie&limit=${railFetchLimit}`),
+            window.API.request('GET', `/channels/recent?type=series&limit=${railFetchLimit}`)
         ]);
 
         const rails = [];
@@ -329,7 +368,7 @@ class HomePage {
             }))
             .map(rail => ({
                 ...rail,
-                items: this.rankRailItemsByLanguagePreference(rail.items)
+                items: this.rankRailItemsByLanguagePreference(rail.items).slice(0, this.homeRailDisplayLimit)
             }))
             .filter(rail => rail.items.length);
 
