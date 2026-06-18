@@ -219,6 +219,18 @@ async function createPlaybackSession(
   const targetUrlHash = await sha256Hex(targetUrl);
 
   await closeOpenGatewaySessionsForUser(userId, db);
+  const edgeCoordination = mode === "transcode"
+    ? await prepareEdgeSessionCoordinator({
+      userId,
+      sourceId,
+      deviceId,
+      itemType,
+      itemId,
+      targetUrlHash,
+      expiresAt,
+    }, db)
+    : null;
+  if (edgeCoordination?.waitMs) await sleep(edgeCoordination.waitMs);
   await requirePlaybackCapacity(userId, db);
 
   const { data: session, error } = await db
@@ -252,7 +264,16 @@ async function createPlaybackSession(
   let gateway;
   try {
     gateway = await createGatewaySession(session.id, userId, targetUrl, expiresAt, db, mode, userAgent, requestedPlaybackHint);
+    await commitEdgeSessionCoordinator(edgeCoordination, {
+      playbackSessionId: session.id,
+      gatewaySessionId: stringOrNull(gateway.session?.external_session_id),
+      itemType,
+      itemId,
+      targetUrlHash,
+      expiresAt,
+    });
   } catch (error) {
+    await abortEdgeSessionCoordinator(edgeCoordination);
     await recordPlaybackSessionFailure(db, {
       userId,
       deviceId,
@@ -354,6 +375,15 @@ async function expirePlaybackSession(id: string, userId: string, db: SupabaseCli
       });
     });
   }
+
+  await endEdgeSessionCoordinator({
+    userId,
+    sourceId: stringOrNull(session.source_id),
+    playbackSessionId: id,
+    gatewaySessionId: gatewaySessions
+      .map((gateway: JsonRecord) => stringOrNull(gateway.external_session_id))
+      .find(Boolean) ?? null,
+  }, db);
 
   if (gatewaySessions.length) {
     const gatewayIds = gatewaySessions
@@ -677,6 +707,123 @@ async function closeOpenGatewaySessionsForUser(userId: string, db: SupabaseClien
     if (playbackUpdateError) {
       console.warn("[norva-playback] unable to mark playback sessions expired", playbackUpdateError.message);
     }
+  }
+}
+
+async function prepareEdgeSessionCoordinator(
+  options: {
+    userId: string;
+    sourceId: string | null;
+    deviceId: string | null;
+    itemType: string;
+    itemId: string;
+    targetUrlHash: string;
+    expiresAt: string;
+  },
+  db: SupabaseClient,
+) {
+  const runtimeConfig = await getRuntimeConfig(db);
+  if (!runtimeConfig.relayBaseUrl || !runtimeConfig.relayTokenSecret) return null;
+
+  const ownerKey = await sha256Hex(options.userId);
+  const sourceKey = options.sourceId ? await sha256Hex(options.sourceId) : "account";
+  const deviceKey = options.deviceId ? await sha256Hex(options.deviceId) : "";
+  const body = compactRecord({
+    ownerKey,
+    sourceKey,
+    deviceKey,
+    itemType: options.itemType,
+    itemId: options.itemId,
+    targetHash: options.targetUrlHash,
+    expiresAt: options.expiresAt,
+  });
+
+  const payload = await requestEdgeCoordinator(runtimeConfig, "/sessions/prepare", body);
+  if (!payload?.ok) return null;
+
+  return {
+    runtimeConfig,
+    ownerKey,
+    sourceKey,
+    deviceKey,
+    lockId: stringOrNull(payload.lockId),
+    waitMs: boundedInt(payload.waitMs, 0, 0, 10_000),
+  };
+}
+
+async function commitEdgeSessionCoordinator(
+  coordination: Awaited<ReturnType<typeof prepareEdgeSessionCoordinator>>,
+  options: {
+    playbackSessionId: string;
+    gatewaySessionId: string | null;
+    itemType: string;
+    itemId: string;
+    targetUrlHash: string;
+    expiresAt: string;
+  },
+) {
+  if (!coordination?.runtimeConfig || !coordination.lockId) return;
+  await requestEdgeCoordinator(coordination.runtimeConfig, "/sessions/start", compactRecord({
+    lockId: coordination.lockId,
+    ownerKey: coordination.ownerKey,
+    sourceKey: coordination.sourceKey,
+    deviceKey: coordination.deviceKey,
+    playbackSessionId: options.playbackSessionId,
+    gatewaySessionId: options.gatewaySessionId,
+    itemType: options.itemType,
+    itemId: options.itemId,
+    targetHash: options.targetUrlHash,
+    expiresAt: options.expiresAt,
+  }));
+}
+
+async function abortEdgeSessionCoordinator(coordination: Awaited<ReturnType<typeof prepareEdgeSessionCoordinator>>) {
+  if (!coordination?.runtimeConfig || !coordination.lockId) return;
+  await requestEdgeCoordinator(coordination.runtimeConfig, "/sessions/abort", {
+    lockId: coordination.lockId,
+    ownerKey: coordination.ownerKey,
+    sourceKey: coordination.sourceKey,
+  });
+}
+
+async function endEdgeSessionCoordinator(
+  options: {
+    userId: string;
+    sourceId: string | null;
+    playbackSessionId: string;
+    gatewaySessionId: string | null;
+  },
+  db: SupabaseClient,
+) {
+  const runtimeConfig = await getRuntimeConfig(db);
+  if (!runtimeConfig.relayBaseUrl || !runtimeConfig.relayTokenSecret) return;
+  await requestEdgeCoordinator(runtimeConfig, "/sessions/end", compactRecord({
+    ownerKey: await sha256Hex(options.userId),
+    sourceKey: options.sourceId ? await sha256Hex(options.sourceId) : "account",
+    playbackSessionId: options.playbackSessionId,
+    gatewaySessionId: options.gatewaySessionId,
+  }));
+}
+
+async function requestEdgeCoordinator(runtimeConfig: RuntimeConfig, path: string, body: JsonRecord) {
+  try {
+    const response = await fetch(`${runtimeConfig.relayBaseUrl}${path}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${runtimeConfig.relayTokenSecret}`,
+      },
+      body: JSON.stringify(body),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      console.warn("[norva-playback] edge coordinator skipped", response.status, payload);
+      return null;
+    }
+    return payload as JsonRecord;
+  } catch (error) {
+    console.warn("[norva-playback] edge coordinator unavailable", error instanceof Error ? error.message : String(error));
+    return null;
   }
 }
 
@@ -1516,6 +1663,10 @@ function numberValue(value: unknown) {
 
 function trimTrailingSlash(value: string) {
   return value.replace(/\/+$/, "");
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
 }
 
 function clientTelemetryMetadataFromBody(body: JsonRecord) {

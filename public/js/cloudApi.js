@@ -13,11 +13,13 @@
     const DEFAULT_CATALOG_URL = 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-catalog';
     const DEFAULT_SERIES_INFO_URL = 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-series-info';
     const DEFAULT_PLAYBACK_URL = 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-playback';
+    const DEFAULT_EDGE_URL = 'https://norva-relay.norva-adher.workers.dev';
     const KEY_API_URL = 'norva-cloud-api-url';
     const KEY_SOURCE_SYNC_URL = 'norva-source-sync-url';
     const KEY_CATALOG_URL = 'norva-catalog-url';
     const KEY_SERIES_INFO_URL = 'norva-series-info-url';
     const KEY_PLAYBACK_URL = 'norva-playback-url';
+    const KEY_EDGE_URL = 'norva-edge-url';
     const KEY_TOKEN = 'norva-cloud-token';
     const KEY_DEVICE_TOKEN = 'norva-cloud-device-token';
     const KEY_PREFERRED_CONTENT_REGION = 'norva-preferred-content-region';
@@ -64,6 +66,11 @@
         return configured.replace(/\/+$/, '');
     }
 
+    function edgeBase() {
+        const configured = localStorage.getItem(KEY_EDGE_URL) || window.NORVA_EDGE_URL || window.NORVA_RELAY_BASE_URL || DEFAULT_EDGE_URL;
+        return configured ? configured.replace(/\/+$/, '') : '';
+    }
+
     function getToken() {
         return localStorage.getItem(KEY_TOKEN) || window.NORVA_CLOUD_TOKEN || '';
     }
@@ -101,12 +108,19 @@
         const raw = String(url || '').trim();
         if (!raw) return '';
         if (/\/image\?url=/i.test(raw)) return raw;
+        const edge = edgeBase();
+        if (edge) return `${edge}/image?url=${encodeURIComponent(raw)}`;
         return `${apiBase()}/image?url=${encodeURIComponent(raw)}`;
     }
 
     function setApiUrl(url) {
         if (url) localStorage.setItem(KEY_API_URL, url.replace(/\/+$/, ''));
         else localStorage.removeItem(KEY_API_URL);
+    }
+
+    function setEdgeUrl(url) {
+        if (url) localStorage.setItem(KEY_EDGE_URL, url.replace(/\/+$/, ''));
+        else localStorage.removeItem(KEY_EDGE_URL);
     }
 
     function storageGet(key) {
@@ -462,11 +476,13 @@
 
     const NorvaCloud = {
         get apiUrl() { return apiBase(); },
+        get edgeUrl() { return edgeBase(); },
         get token() { return getToken(); },
         get deviceToken() { return getDeviceToken(); },
         setToken,
         setDeviceToken,
         setApiUrl,
+        setEdgeUrl,
         isConfigured: () => Boolean(apiBase()),
         imageUrl: proxyImageUrl,
 

@@ -1,0 +1,6 @@
+RELAY_TOKEN_SECRET="replace-with-the-same-secret-used-by-supabase"
+EDGE_COORDINATOR_TOKEN="optional-dedicated-coordinator-secret"
+NORVA_MEDIA_GATEWAY_URL="https://norva-production.up.railway.app"
+NORVA_MEDIA_GATEWAY_TOKEN="replace-with-railway-gateway-token"
+PUBLIC_BASE_URL="http://localhost:8787"
+IMAGE_PROXY_ALLOWED_HOSTS=""
