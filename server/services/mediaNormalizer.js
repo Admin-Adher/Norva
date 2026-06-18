@@ -9,8 +9,17 @@
 
 // Language tags commonly embedded in IPTV titles
 const LANG_TAGS = [
-    'vostfr', 'vost', 'multi', 'truefrench', 'vff', 'vfq', 'vf', 'vo',
-    'fr', 'en', 'es', 'de', 'it', 'pt', 'nl', 'ar', 'tr', 'pl', 'ru', 'sub', 'dub'
+    'vostfr', 'vosten', 'vostes', 'vostar', 'vostde', 'vostit', 'vostpt',
+    'vosttr', 'vostnl', 'vostru', 'vostpl', 'vosthi', 'vostjpn', 'vostkor',
+    'vostzh', 'vost', 'subfr', 'suben', 'subes', 'subar', 'subde', 'subit',
+    'subpt', 'subtr', 'subnl', 'subru', 'subpl', 'subhi', 'subjpn', 'subkor',
+    'subzh', 'frsub', 'ensub', 'essub', 'arsub', 'desub', 'itsub', 'ptsub',
+    'trsub', 'nlsub', 'rusub', 'plsub', 'hisub', 'jpnsub', 'korsub', 'zhsub',
+    'multi', 'truefrench', 'vff', 'vfq', 'vf', 'vo',
+    'fr', 'fre', 'fra', 'en', 'eng', 'es', 'spa', 'de', 'deu', 'ger',
+    'it', 'ita', 'pt', 'por', 'br', 'nl', 'nld', 'dut', 'ar', 'ara',
+    'tr', 'tur', 'pl', 'pol', 'ru', 'rus', 'hi', 'hin', 'ja', 'jpn',
+    'jp', 'ko', 'kor', 'zh', 'zho', 'chi', 'cn', 'sub', 'subs', 'dub'
 ];
 
 // Quality tags (order matters: first match wins, highest first)

@@ -90,8 +90,8 @@ function getDefaultSettings() {
     tmdbApiKey: '',               // TMDB v3 API key or v4 read token (enables genre/duration filters)
     groupDuplicates: true,        // Group identical movies/series from different sources/categories
     preferredLanguage: '',        // legacy only; migrated to preferredAudioLanguage/preferredSubtitleLanguage
-    preferredAudioLanguage: '',   // '' | fr | en | es | original
-    preferredSubtitleLanguage: '',// '' | none | fr | en | es
+    preferredAudioLanguage: '',   // '' | supported language code | original
+    preferredSubtitleLanguage: '',// '' | none | supported language code
     strictLanguageMatching: false,// language prefs are soft by default
     preferredQuality: 'highest'   // highest | 4k | 1080p | 720p | lowest
   };
