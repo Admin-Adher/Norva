@@ -112,6 +112,8 @@ class WatchPage {
         this._gatewaySeekRetry = null;
         this._gatewaySeekRequestId = 0;
         this._suppressMediaErrorsUntil = 0;
+        this._pendingPlaybackErrorTimer = null;
+        this._pendingPlaybackErrorMessage = null;
         this._timelineScrubbing = false;
         this._lastCommittedSeekPercent = null;
         this._lastCommittedSeekAt = 0;
@@ -3519,13 +3521,20 @@ class WatchPage {
         return true;
     }
 
-    showPlaybackError(message) {
+    showPlaybackError(message, options = {}) {
         if (this.hasCurrentMedia()) {
             console.warn('[WatchPage] Suppressing stale playback error because media is already playing:', message);
             this.hidePlaybackError();
             return;
         }
 
+        const safeMessage = this.sanitizePlaybackMessage(message);
+        if (!options.immediate && this.shouldDeferPlaybackError(safeMessage)) {
+            this.deferPlaybackError(safeMessage);
+            return;
+        }
+
+        this.clearDeferredPlaybackError();
         this.hideLoading();
         this.updateTranscodeStatus('hidden');
 
@@ -3537,7 +3546,6 @@ class WatchPage {
             document.querySelector('.watch-video-section')?.appendChild(errorEl);
         }
 
-        const safeMessage = this.sanitizePlaybackMessage(message);
         const friendly = this.getFriendlyPlaybackError(safeMessage);
         const detail = this.escapePlaybackDetail(safeMessage);
 
@@ -3557,7 +3565,46 @@ class WatchPage {
     }
 
     hidePlaybackError() {
+        this.clearDeferredPlaybackError();
         document.getElementById('watch-error')?.classList.add('hidden');
+    }
+
+    shouldDeferPlaybackError(message) {
+        if (this._pendingPlaybackErrorTimer) return false;
+        if (!this.isCloudPlaybackMode()) return false;
+        if (!this.content?.id) return false;
+        if (this.hasCurrentMedia()) return false;
+        return this.isFormatPlaybackError(message)
+            || this.isConnectionLimitError(message)
+            || /Media error|Playback failed|network|timeout|refused/i.test(message || '');
+    }
+
+    deferPlaybackError(message, delayMs = 7000) {
+        this.clearDeferredPlaybackError();
+        this._pendingPlaybackErrorMessage = message;
+        this.showLoading();
+        this._pendingPlaybackErrorTimer = setTimeout(() => {
+            this._pendingPlaybackErrorTimer = null;
+            const deferredMessage = this._pendingPlaybackErrorMessage;
+            this._pendingPlaybackErrorMessage = null;
+            if (this.hasCurrentMedia()) {
+                this.hidePlaybackError();
+                return;
+            }
+            if (this._handlingPlaybackFailure) {
+                this.deferPlaybackError(deferredMessage || message, 3000);
+                return;
+            }
+            this.showPlaybackError(deferredMessage || message, { immediate: true });
+        }, delayMs);
+    }
+
+    clearDeferredPlaybackError() {
+        if (this._pendingPlaybackErrorTimer) {
+            clearTimeout(this._pendingPlaybackErrorTimer);
+            this._pendingPlaybackErrorTimer = null;
+        }
+        this._pendingPlaybackErrorMessage = null;
     }
 
     isCurrentPlaybackUsable() {
