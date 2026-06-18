@@ -130,7 +130,7 @@ async function route(
       body: {
         ok: true,
         service: "norva-cloud",
-        version: 15,
+        version: 17,
         entitlements: true,
         entitlementsMode: entitlementRuntime.mode,
         entitlementsEnforced: entitlementRuntime.enforced,
@@ -239,7 +239,7 @@ async function route(
     if ((req.method === "PATCH" || req.method === "PUT") && id) {
       return { body: await updateSource(req, id, user.id, db) };
     }
-    if (req.method === "DELETE" && id) return { body: await deleteOwned("cloud_sources", id, user.id, db) };
+    if (req.method === "DELETE" && id) return { body: await deleteSource(id, user.id, db) };
   }
 
   if (scope === "media-items") {
@@ -2458,6 +2458,34 @@ async function assertOwnedSource(sourceId: string, userId: string, db: SupabaseC
   if (!data) throw new HttpError(404, "Source not found");
 }
 
+async function deleteSource(sourceId: string, userId: string, db: SupabaseClient) {
+  await assertOwnedSource(sourceId, userId, db);
+  const affectedTitleIds = await listSourceTitleIds(sourceId, userId, db);
+
+  await deleteRowsBySource(db, "cloud_live_variants", sourceId, userId);
+  await deleteRowsBySource(db, "cloud_live_logical_channels", sourceId, userId);
+  await deleteRowsBySource(db, "cloud_title_variants", sourceId, userId);
+  await deleteRowsBySource(db, "cloud_title_overrides", sourceId, userId);
+  await deleteRowsBySource(db, "cloud_favorites", sourceId, userId);
+  await deleteRowsBySource(db, "cloud_media_items", sourceId, userId);
+  await clearSourceReference(db, "cloud_watch_history", sourceId, userId);
+  await clearSourceReference(db, "cloud_playback_sessions", sourceId, userId);
+  await clearSourceReference(db, "cloud_playback_events", sourceId, userId);
+
+  const { error } = await db
+    .from("cloud_sources")
+    .delete()
+    .eq("id", sourceId)
+    .eq("user_id", userId);
+  if (error) throwDb(error, "Unable to delete provider account");
+
+  if (affectedTitleIds.length) {
+    waitUntil(deleteOrphanTitles(affectedTitleIds, userId, db));
+  }
+
+  return { success: true, sourceId };
+}
+
 async function assertOwnedDevice(deviceId: string, userId: string, db: SupabaseClient) {
   const { data, error } = await db
     .from("cloud_devices")
@@ -2474,6 +2502,145 @@ async function deleteOwned(table: string, id: string, userId: string, db: Supaba
   const { error } = await db.from(table).delete().eq("id", id).eq("user_id", userId);
   if (error) throwDb(error, "Unable to delete row");
   return { success: true };
+}
+
+async function listSourceTitleIds(sourceId: string, userId: string, db: SupabaseClient) {
+  const ids = new Set<string>();
+  const pageSize = 1000;
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await db
+      .from("cloud_title_variants")
+      .select("title_id")
+      .eq("source_id", sourceId)
+      .eq("user_id", userId)
+      .range(from, from + pageSize - 1);
+    if (error) {
+      if (isMissingRelation(error)) return [];
+      throwDb(error, "Unable to inspect provider variants");
+    }
+    const rows = Array.isArray(data) ? data : [];
+    for (const row of rows) {
+      const titleId = stringOrNull((row as JsonRecord).title_id);
+      if (titleId) ids.add(titleId);
+    }
+    if (rows.length < pageSize) break;
+  }
+  return Array.from(ids);
+}
+
+async function deleteRowsBySource(
+  db: SupabaseClient,
+  table: string,
+  sourceId: string,
+  userId: string,
+) {
+  for (;;) {
+    const ids = await listRowIdsBySource(db, table, sourceId, userId);
+    if (!ids.length) return;
+
+    const { error } = await db
+      .from(table)
+      .delete()
+      .eq("source_id", sourceId)
+      .eq("user_id", userId)
+      .in("id", ids);
+    if (error) {
+      if (isMissingRelation(error)) return;
+      throwDb(error, `Unable to clear ${table}`);
+    }
+  }
+}
+
+async function clearSourceReference(
+  db: SupabaseClient,
+  table: string,
+  sourceId: string,
+  userId: string,
+) {
+  for (;;) {
+    const ids = await listRowIdsBySource(db, table, sourceId, userId);
+    if (!ids.length) return;
+
+    const { error } = await db
+      .from(table)
+      .update({ source_id: null })
+      .eq("source_id", sourceId)
+      .eq("user_id", userId)
+      .in("id", ids);
+    if (error) {
+      if (isMissingRelation(error)) return;
+      throwDb(error, `Unable to detach ${table}`);
+    }
+  }
+}
+
+async function listRowIdsBySource(
+  db: SupabaseClient,
+  table: string,
+  sourceId: string,
+  userId: string,
+  batchSize = 500,
+) {
+  const { data, error } = await db
+    .from(table)
+    .select("id")
+    .eq("source_id", sourceId)
+    .eq("user_id", userId)
+    .limit(batchSize);
+  if (error) {
+    if (isMissingRelation(error)) return [];
+    throwDb(error, `Unable to inspect ${table}`);
+  }
+  return (Array.isArray(data) ? data : [])
+    .map((row) => stringOrNull((row as JsonRecord).id))
+    .filter((id): id is string => Boolean(id));
+}
+
+async function deleteOrphanTitles(titleIds: string[], userId: string, db: SupabaseClient) {
+  for (const chunk of chunkArray(Array.from(new Set(titleIds)), 500)) {
+    const { data, error } = await db
+      .from("cloud_title_variants")
+      .select("title_id")
+      .eq("user_id", userId)
+      .in("title_id", chunk);
+    if (error) {
+      if (isMissingRelation(error)) return;
+      throwDb(error, "Unable to inspect remaining title variants");
+    }
+
+    const remaining = new Set(
+      (Array.isArray(data) ? data : [])
+        .map((row) => stringOrNull((row as JsonRecord).title_id))
+        .filter((id): id is string => Boolean(id)),
+    );
+    const orphanIds = chunk.filter((id) => !remaining.has(id));
+    if (!orphanIds.length) continue;
+
+    const { error: deleteError } = await db
+      .from("cloud_titles")
+      .delete()
+      .eq("user_id", userId)
+      .in("id", orphanIds);
+    if (deleteError) {
+      if (isMissingRelation(deleteError)) return;
+      throwDb(deleteError, "Unable to clear orphan titles");
+    }
+  }
+}
+
+function chunkArray<T>(items: T[], size: number) {
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+  return chunks;
+}
+
+function isMissingRelation(error: unknown) {
+  if (!error || typeof error !== "object") return false;
+  const record = error as { code?: string; message?: string };
+  const message = String(record.message || "");
+  return record.code === "42P01" || message.includes("Could not find the table");
 }
 
 async function uniquePairingCode(db: SupabaseClient) {
