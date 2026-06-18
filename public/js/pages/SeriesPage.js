@@ -657,6 +657,10 @@ class SeriesPage {
         } else {
             cards = items.map(item => ({ key: item.id, items: [item], representative: item }));
         }
+        cards = this.applyLanguagePreferencesToCards(cards);
+        if (this.getPreferences().strictLanguageMatching) {
+            cards = cards.filter(c => !this.isStrictLanguageExcluded(c));
+        }
 
         if (this.showFavoritesOnly) {
             cards = cards.filter(c => c.items.some(i => this.favoriteIds.has(`${i.sourceId}:${i.series_id}`)));
@@ -717,25 +721,55 @@ class SeriesPage {
     sortCards(cards) {
         const sort = this.sortSelect?.value || 'default';
         const rep = c => c.representative;
+        const pref = (a, b) => (b.preferenceScore || 0) - (a.preferenceScore || 0);
+        const sortWithPreference = (compare) => cards.sort((a, b) => compare(a, b) || pref(a, b));
         switch (sort) {
             case 'added':
-                cards.sort((a, b) => this.parseAddedMs(rep(b)) - this.parseAddedMs(rep(a)));
+                sortWithPreference((a, b) => this.parseAddedMs(rep(b)) - this.parseAddedMs(rep(a)));
                 break;
             case 'rating':
-                cards.sort((a, b) => (parseFloat(rep(b).rating) || 0) - (parseFloat(rep(a).rating) || 0));
+                sortWithPreference((a, b) => (parseFloat(rep(b).rating) || 0) - (parseFloat(rep(a).rating) || 0));
                 break;
             case 'year':
-                cards.sort((a, b) => (this.getItemYear(rep(b)) || 0) - (this.getItemYear(rep(a)) || 0));
+                sortWithPreference((a, b) => (this.getItemYear(rep(b)) || 0) - (this.getItemYear(rep(a)) || 0));
                 break;
             case 'year-asc':
-                cards.sort((a, b) => (this.getItemYear(rep(a)) || 9999) - (this.getItemYear(rep(b)) || 9999));
+                sortWithPreference((a, b) => (this.getItemYear(rep(a)) || 9999) - (this.getItemYear(rep(b)) || 9999));
                 break;
             case 'name':
-                cards.sort((a, b) => (rep(a).name || '').localeCompare(rep(b).name || ''));
+                sortWithPreference((a, b) => (rep(a).name || '').localeCompare(rep(b).name || ''));
                 break;
             default:
+                cards.sort(pref);
                 break;
         }
+    }
+
+    applyLanguagePreferencesToCards(cards) {
+        const prefs = this.getPreferences();
+        if (!window.MediaUtils?.orderVersionsByPreference) return cards;
+        return cards.map(card => {
+            const ordered = MediaUtils.orderVersionsByPreference(card.items || [], prefs);
+            const representative = ordered[0] || card.representative;
+            const preferenceScore = window.MediaUtils?.scoreTitleForPreferences
+                ? MediaUtils.scoreTitleForPreferences({ ...representative, variants: ordered }, prefs)
+                : 0;
+            return { ...card, items: ordered, representative, preferenceScore };
+        });
+    }
+
+    isStrictLanguageExcluded(card) {
+        const prefs = this.getPreferences();
+        if (!prefs.strictLanguageMatching || !window.MediaUtils?.analyzeLanguageCompatibility) return false;
+        const wantsAudio = Boolean(prefs.preferredAudioLanguage);
+        const wantsSubtitle = Boolean(prefs.preferredSubtitleLanguage && prefs.preferredSubtitleLanguage !== 'none');
+        if (!wantsAudio && !wantsSubtitle) return false;
+        return (card.items || []).every(item => {
+            const analysis = MediaUtils.analyzeLanguageCompatibility(item, prefs);
+            const audioAbsent = wantsAudio && analysis.audio?.state === 'confirmed_absent';
+            const subtitleAbsent = wantsSubtitle && analysis.subtitle?.state === 'confirmed_absent';
+            return audioAbsent || subtitleAbsent;
+        });
     }
 
     // === Rendering ===
@@ -791,6 +825,7 @@ class SeriesPage {
         const versionCount = group.items.length;
         const displayName = (this.groupDuplicates && series.tmdb?.title) ? series.tmdb.title : series.name;
         const groupBroken = group.items.every(item => this.isBrokenItem(item));
+        const languageBadge = MediaUtils.versionLanguageBadge(series, this.getPreferences());
 
         card.innerHTML = `
             <div class="series-poster">
@@ -801,6 +836,7 @@ class SeriesPage {
                 </div>
                 ${groupBroken ? '<span class="playback-badge" title="Playback failed">HS</span>' : ''}
                 ${versionCount > 1 ? `<button class="version-badge" title="Choose version">${versionCount} versions</button>` : ''}
+                ${languageBadge ? `<span class="version-language-badge ${versionCount > 1 ? 'with-version-badge' : ''}">${MediaUtils.escapeHtml(languageBadge)}</span>` : ''}
                 ${started ? '<span class="watched-badge inprogress-badge" title="Watching">▶</span>' : ''}
                 <button class="favorite-btn ${isFav ? 'active' : ''}" title="${isFav ? 'Remove from Favorites' : 'Add to Favorites'}">
                     <span class="fav-icon">${isFav ? Icons.favorite : Icons.favoriteOutline}</span>

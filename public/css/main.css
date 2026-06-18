@@ -6737,6 +6737,30 @@ kbd {
   color: #fff;
 }
 
+.version-language-badge {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  z-index: 2;
+  max-width: calc(100% - 16px);
+  padding: 3px 8px;
+  border-radius: var(--radius-full);
+  background: rgba(20, 36, 73, 0.86);
+  color: #d8e6ff;
+  border: 1px solid rgba(95, 130, 255, 0.42);
+  font-size: 0.68rem;
+  font-weight: 700;
+  line-height: 1.1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  backdrop-filter: blur(8px);
+}
+
+.version-language-badge.with-version-badge {
+  bottom: 34px;
+}
+
 .watched-badge {
   position: absolute;
   top: 8px;
