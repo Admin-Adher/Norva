@@ -3903,7 +3903,11 @@ kbd {
 }
 
 #page-series.series-detail-open .series-content {
-  min-height: calc(100vh - var(--navbar-height));
+  flex: 1;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 #page-series.series-detail-open .series-details {
