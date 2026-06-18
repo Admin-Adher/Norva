@@ -7,11 +7,15 @@
 class SeriesPage {
     constructor(app) {
         this.app = app;
+        this.pageEl = document.getElementById('page-series');
         this.container = document.getElementById('series-grid');
         this.sourceSelect = document.getElementById('series-source-select');
         this.searchInput = document.getElementById('series-search');
         this.detailsPanel = document.getElementById('series-details');
         this.seasonsContainer = document.getElementById('series-seasons');
+        this.seasonSelect = document.getElementById('series-season-select');
+        this.primaryActionBtn = document.getElementById('series-primary-action');
+        this.detailFavoriteBtn = document.getElementById('series-detail-favorite');
 
         // Filter bar elements
         this.sortSelect = document.getElementById('series-sort');
@@ -45,6 +49,7 @@ class SeriesPage {
         this.observer = null;
         this.hiddenCategoryIds = new Set();
         this.currentSeries = null;
+        this.currentSeriesGroup = null;
         this.favoriteIds = new Set();
         this.showFavoritesOnly = false;
         this.groupDuplicates = true;
@@ -101,6 +106,15 @@ class SeriesPage {
 
         document.querySelector('.series-back-btn')?.addEventListener('click', () => {
             this.hideDetails();
+        });
+
+        this.seasonSelect?.addEventListener('change', () => this.applySelectedSeason());
+        this.primaryActionBtn?.addEventListener('click', () => this.playPrimaryEpisode());
+        this.detailFavoriteBtn?.addEventListener('click', async (e) => {
+            e.preventDefault();
+            if (!this.currentSeriesGroup) return;
+            await this.toggleFavorite(this.currentSeriesGroup, this.detailFavoriteBtn);
+            this.syncDetailFavoriteButton();
         });
 
         this.observer = new IntersectionObserver((entries) => {
@@ -952,7 +966,8 @@ class SeriesPage {
 
     openGroup(group) {
         const ordered = MediaUtils.orderVersionsByPreference(group.items, this.getPreferences());
-        this.showSeriesDetails(ordered[0]);
+        this.currentSeriesGroup = group;
+        this.showSeriesDetailsV2(ordered[0], group);
     }
 
     openRandom() {
@@ -991,69 +1006,299 @@ class SeriesPage {
         body.querySelectorAll('.version-item').forEach(btn => {
             btn.addEventListener('click', () => {
                 close();
-                this.showSeriesDetails(ordered[parseInt(btn.dataset.index)]);
+                this.currentSeriesGroup = group;
+                this.showSeriesDetailsV2(ordered[parseInt(btn.dataset.index)], group);
             });
         });
 
         modal.classList.add('active');
     }
 
-    async showSeriesDetails(series) {
-        this.currentSeries = series;
+    getSeriesDisplayTitle(series = this.currentSeries) {
+        return series?.tmdb?.title || series?.tmdb?.name || series?.name || 'Series';
+    }
 
-        this.container.classList.add('hidden');
-        this.detailsPanel.classList.remove('hidden');
-
-        document.getElementById('series-poster').src = MediaUtils.safeImageUrl(
-            series.cover || series.stream_icon || MediaUtils.tmdbPosterUrl(series.tmdb),
+    getSeriesPoster(series = this.currentSeries) {
+        return MediaUtils.safeImageUrl(
+            series?.cover || series?.stream_icon || MediaUtils.tmdbPosterUrl(series?.tmdb, 'w600_and_h900_bestv2'),
             '/img/norva-media-placeholder.png'
         );
-        document.getElementById('series-title').textContent = series.tmdb?.title || series.name;
-        document.getElementById('series-plot').textContent = series.plot || series.tmdb?.overview || '';
+    }
+
+    getTmdbImageUrl(path, size = 'w1280') {
+        const raw = String(path || '').trim();
+        if (!raw) return null;
+        if (/^https?:\/\//i.test(raw)) return MediaUtils.safeImageUrl(raw);
+        if (raw.startsWith('/')) return MediaUtils.safeImageUrl(`https://image.tmdb.org/t/p/${size}${raw}`);
+        return null;
+    }
+
+    getSeriesBackdrop(series = this.currentSeries) {
+        return this.getTmdbImageUrl(
+            series?.backdrop_path || series?.tmdb?.backdrop_path || series?.backdrop || series?.tmdb?.backdrop,
+            'w1280'
+        ) || this.getSeriesPoster(series);
+    }
+
+    getSeriesYear(series = this.currentSeries) {
+        const firstAir = series?.tmdb?.first_air_date || series?.first_air_date || series?.releaseDate;
+        const fromDate = firstAir ? String(firstAir).match(/(19|20)\d{2}/)?.[0] : null;
+        return fromDate || this.getItemYear(series) || '';
+    }
+
+    getSeriesGenres(series = this.currentSeries) {
+        const genres = series?.tmdb?.genres || series?.genres || [];
+        if (Array.isArray(genres)) {
+            return genres.map(g => typeof g === 'string' ? g : g?.name).filter(Boolean);
+        }
+        return String(genres || '').split(',').map(g => g.trim()).filter(Boolean);
+    }
+
+    escapeRegExp(value) {
+        return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+
+    cleanEpisodeTitle(ep, seasonNum) {
+        let title = String(ep?.title || ep?.name || '').trim();
+        const episodeNum = ep?.episode_num || ep?.episodeNumber || '';
+        if (!title) return `Épisode ${episodeNum || ''}`.trim();
+
+        const seriesNames = [
+            this.getSeriesDisplayTitle(),
+            this.currentSeries?.name,
+            this.currentSeries?.tmdb?.original_name,
+            this.currentSeries?.tmdb?.original_title
+        ].filter(Boolean);
+
+        for (const name of seriesNames) {
+            title = title.replace(new RegExp(`^${this.escapeRegExp(name)}\\s*[-:–—|]+\\s*`, 'i'), '');
+        }
+        title = title
+            .replace(new RegExp(`^S0?${seasonNum}\\s*E0?${episodeNum}\\s*[-:–—|]+\\s*`, 'i'), '')
+            .replace(/^S\d{1,2}E\d{1,3}\s*[-:–—|]+\s*/i, '')
+            .trim();
+
+        return title || `Épisode ${episodeNum || ''}`.trim();
+    }
+
+    getEpisodeImage(ep, series = this.currentSeries) {
+        return MediaUtils.safeImageUrl(
+            ep?.info?.movie_image || ep?.movie_image || ep?.cover || ep?.stream_icon || this.getSeriesPoster(series),
+            '/img/norva-media-placeholder.png'
+        );
+    }
+
+    formatEpisodeDuration(value) {
+        const seconds = MediaUtils.parseDurationToSeconds(value);
+        if (!seconds) return String(value || '').trim();
+        const minutes = Math.round(seconds / 60);
+        if (minutes < 60) return `${minutes} min`;
+        const h = Math.floor(minutes / 60);
+        const m = minutes % 60;
+        return m ? `${h} h ${m} min` : `${h} h`;
+    }
+
+    getSeriesHistoryMap(series = this.currentSeries) {
+        const watchedEpisodes = new Map();
+        for (const h of (this.historyItems || [])) {
+            if (h.item_type === 'episode' && String(h.data?.seriesId) === String(series?.series_id)) {
+                const ratio = h.duration > 0 ? h.progress / h.duration : 0;
+                watchedEpisodes.set(String(h.item_id), { ...h, ratio });
+            }
+        }
+        return watchedEpisodes;
+    }
+
+    flattenEpisodes(info) {
+        const rows = [];
+        const seasons = Object.keys(info?.episodes || {}).sort((a, b) => parseInt(a) - parseInt(b));
+        for (const seasonNum of seasons) {
+            const episodes = Array.isArray(info.episodes[seasonNum]) ? info.episodes[seasonNum] : [];
+            episodes.forEach((episode, index) => {
+                rows.push({
+                    seasonNum,
+                    episode,
+                    episodeNum: episode.episode_num || episode.episodeNumber || index + 1
+                });
+            });
+        }
+        return rows;
+    }
+
+    getFeaturedEpisode(flatEpisodes, watchedEpisodes) {
+        if (!flatEpisodes.length) return null;
+
+        const inProgress = flatEpisodes.find(row => {
+            const ratio = watchedEpisodes.get(String(row.episode.id))?.ratio || 0;
+            return ratio > 0.02 && ratio < 0.95;
+        });
+        if (inProgress) {
+            return {
+                ...inProgress,
+                label: `Reprendre S${inProgress.seasonNum}:E${inProgress.episodeNum}`
+            };
+        }
+
+        let lastCompletedIndex = -1;
+        flatEpisodes.forEach((row, index) => {
+            const ratio = watchedEpisodes.get(String(row.episode.id))?.ratio || 0;
+            if (ratio >= 0.95) lastCompletedIndex = Math.max(lastCompletedIndex, index);
+        });
+
+        const next = flatEpisodes[lastCompletedIndex + 1] || flatEpisodes.find(row => {
+            const ratio = watchedEpisodes.get(String(row.episode.id))?.ratio || 0;
+            return ratio < 0.95;
+        });
+
+        if (next) {
+            return {
+                ...next,
+                label: lastCompletedIndex >= 0
+                    ? `Épisode suivant S${next.seasonNum}:E${next.episodeNum}`
+                    : `Lire S${next.seasonNum}:E${next.episodeNum}`
+            };
+        }
+
+        const first = flatEpisodes[0];
+        return { ...first, label: `Recommencer S${first.seasonNum}:E${first.episodeNum}` };
+    }
+
+    syncDetailFavoriteButton() {
+        if (!this.detailFavoriteBtn || !this.currentSeriesGroup) return;
+        const isFav = this.currentSeriesGroup.items.some(i => this.favoriteIds.has(`${i.sourceId}:${i.series_id}`));
+        this.detailFavoriteBtn.classList.toggle('active', isFav);
+        this.detailFavoriteBtn.title = isFav ? 'Remove from Favorites' : 'Add to Favorites';
+        const icon = this.detailFavoriteBtn.querySelector('.fav-icon');
+        const label = this.detailFavoriteBtn.querySelector('.fav-label');
+        if (icon) icon.innerHTML = isFav ? Icons.favorite : Icons.favoriteOutline;
+        if (label) label.textContent = 'Favori';
+    }
+
+    playPrimaryEpisode() {
+        const episodeId = this.primaryActionBtn?.dataset?.episodeId;
+        if (!episodeId) return;
+        const episodeEl = [...this.seasonsContainer.querySelectorAll('.episode-item')]
+            .find(el => String(el.dataset.episodeId) === String(episodeId));
+        if (episodeEl) this.playEpisode(episodeEl);
+    }
+
+    applySelectedSeason() {
+        if (!this.seasonSelect || !this.seasonsContainer) return;
+        const selected = this.seasonSelect.value;
+        this.seasonsContainer.querySelectorAll('.season-group').forEach(group => {
+            group.classList.toggle('hidden-by-select', selected && group.dataset.season !== selected);
+        });
+    }
+
+    async showSeriesDetailsV2(series, group = null) {
+        this.currentSeries = series;
+        this.currentSeriesGroup = group || this.currentSeriesGroup || { representative: series, items: [series] };
+
+        this.pageEl?.classList.add('series-detail-open');
+        this.container.classList.add('hidden');
+        this.detailsPanel.classList.remove('hidden');
+        this.detailsPanel.scrollTop = 0;
+
+        const poster = this.getSeriesPoster(series);
+        const backdrop = this.getSeriesBackdrop(series);
+        const hero = document.getElementById('series-detail-hero');
+        if (hero) hero.style.setProperty('--series-hero-bg', `url("${String(backdrop).replace(/"/g, '%22')}")`);
+        document.getElementById('series-poster').src = poster;
+        document.getElementById('series-title').textContent = this.getSeriesDisplayTitle(series);
+        document.getElementById('series-plot').textContent = series.plot || series.tmdb?.overview || 'Aucun résumé disponible pour le moment.';
+        this.syncDetailFavoriteButton();
 
         this.seasonsContainer.innerHTML = '<div class="loading"><div class="loading-spinner"></div></div>';
+        if (this.primaryActionBtn) {
+            this.primaryActionBtn.disabled = true;
+            this.primaryActionBtn.textContent = 'Chargement...';
+            delete this.primaryActionBtn.dataset.episodeId;
+        }
 
         try {
             const info = await API.proxy.xtream.seriesInfo(series.sourceId, series.series_id);
-
             if (!info || !info.episodes) {
-                this.seasonsContainer.innerHTML = '<p class="hint">No episodes found</p>';
+                this.seasonsContainer.innerHTML = '<p class="hint">Aucun épisode trouvé</p>';
+                if (this.primaryActionBtn) this.primaryActionBtn.textContent = 'Aucun épisode';
                 return;
             }
 
             this.currentSeriesInfo = info;
+            const watchedEpisodes = this.getSeriesHistoryMap(series);
+            const flatEpisodes = this.flattenEpisodes(info);
+            const seasons = Object.keys(info.episodes).sort((a, b) => parseInt(a) - parseInt(b));
+            const episodeCount = flatEpisodes.length;
+            const seasonCount = seasons.length;
+            const genres = this.getSeriesGenres(series).slice(0, 3);
+            const rating = parseFloat(series.rating || series.tmdb?.vote_average);
+            const version = MediaUtils.parseVersionInfo(series.name);
+            const metaParts = [
+                this.getSeriesYear(series),
+                seasonCount ? `${seasonCount} saison${seasonCount > 1 ? 's' : ''}` : '',
+                episodeCount ? `${episodeCount} épisodes` : '',
+                Number.isFinite(rating) && rating > 0 ? `${Icons.star} ${rating.toFixed(1).replace('.0', '')}` : '',
+                ...genres,
+                version.quality,
+                version.language
+            ].filter(Boolean);
 
-            // Episodes already watched (for ✓ markers)
-            const watchedEpisodes = new Map();
-            for (const h of (this.historyItems || [])) {
-                if (h.item_type === 'episode' && String(h.data?.seriesId) === String(series.series_id)) {
-                    const ratio = h.duration > 0 ? h.progress / h.duration : 0;
-                    watchedEpisodes.set(String(h.item_id), ratio);
+            const metaEl = document.getElementById('series-meta');
+            if (metaEl) {
+                metaEl.innerHTML = metaParts.map(part => `<span>${MediaUtils.escapeHtml(part)}</span>`).join('');
+            }
+
+            const featured = this.getFeaturedEpisode(flatEpisodes, watchedEpisodes);
+            if (this.seasonSelect) {
+                this.seasonSelect.innerHTML = seasons.map(seasonNum =>
+                    `<option value="${MediaUtils.escapeHtml(seasonNum)}">Saison ${MediaUtils.escapeHtml(seasonNum)}</option>`
+                ).join('');
+                this.seasonSelect.disabled = seasons.length <= 1;
+                if (featured) this.seasonSelect.value = featured.seasonNum;
+            }
+
+            if (this.primaryActionBtn) {
+                if (featured) {
+                    this.primaryActionBtn.disabled = false;
+                    this.primaryActionBtn.dataset.episodeId = featured.episode.id;
+                    this.primaryActionBtn.innerHTML = `<span class="play-icon">${Icons.play}</span><span>${MediaUtils.escapeHtml(featured.label)}</span>`;
+                } else {
+                    this.primaryActionBtn.disabled = true;
+                    this.primaryActionBtn.textContent = 'Aucun épisode';
                 }
             }
 
             let html = '';
-            const seasons = Object.keys(info.episodes).sort((a, b) => parseInt(a) - parseInt(b));
-
             seasons.forEach(seasonNum => {
-                const episodes = info.episodes[seasonNum];
+                const episodes = Array.isArray(info.episodes[seasonNum]) ? info.episodes[seasonNum] : [];
                 html += `
-                <div class="season-group">
-                    <div class="season-header">
-                        <span class="season-expander">${Icons.chevronDown}</span>
-                        <span class="season-name">Season ${seasonNum} (${episodes.length} episodes)</span>
-                    </div>
+                <div class="season-group" data-season="${MediaUtils.escapeHtml(seasonNum)}">
                     <div class="episode-list">
                         ${episodes.map(ep => {
-                            const ratio = watchedEpisodes.get(String(ep.id)) || 0;
-                            const marker = ratio >= 0.9 ? '<span class="episode-watched" title="Watched">✓</span>'
-                                : (ratio > 0.02 ? '<span class="episode-watched inprogress" title="In progress">◐</span>' : '');
+                            const history = watchedEpisodes.get(String(ep.id));
+                            const ratio = history?.ratio || 0;
+                            const ratioPercent = Math.max(0, Math.min(100, Math.round(ratio * 100)));
+                            const marker = ratio >= 0.95 ? '<span class="episode-watched" title="Vu">✓</span>'
+                                : (ratio > 0.02 ? '<span class="episode-watched inprogress" title="En cours">◐</span>' : '');
+                            const cleanTitle = this.cleanEpisodeTitle(ep, seasonNum);
+                            const duration = this.formatEpisodeDuration(ep.duration);
+                            const description = ep.plot || ep.info?.plot || ep.overview || '';
+                            const thumb = this.getEpisodeImage(ep, series);
                             return `
-                            <div class="episode-item" data-episode-id="${ep.id}" data-source-id="${series.sourceId}" data-container="${ep.container_extension || 'mp4'}">
-                                <span class="episode-number">E${ep.episode_num}</span>
-                                <span class="episode-title">${MediaUtils.escapeHtml(ep.title || `Episode ${ep.episode_num}`)}</span>
-                                ${marker}
-                                <span class="episode-duration">${ep.duration || ''}</span>
+                            <div class="episode-item" data-episode-id="${MediaUtils.escapeHtml(ep.id)}" data-source-id="${series.sourceId}" data-container="${MediaUtils.escapeHtml(ep.container_extension || 'mp4')}" data-season="${MediaUtils.escapeHtml(seasonNum)}" data-episode-num="${MediaUtils.escapeHtml(ep.episode_num || '')}">
+                                <span class="episode-number">${MediaUtils.escapeHtml(ep.episode_num || '')}</span>
+                                <div class="episode-thumb">
+                                    <img src="${MediaUtils.escapeHtml(thumb)}" alt="" onerror="this.onerror=null;this.src='/img/norva-media-placeholder.png'" loading="lazy">
+                                    <span class="episode-play">${Icons.play}</span>
+                                </div>
+                                <div class="episode-copy">
+                                    <div class="episode-title-row">
+                                        <span class="episode-title">${MediaUtils.escapeHtml(cleanTitle)}</span>
+                                        ${marker}
+                                    </div>
+                                    ${description ? `<p class="episode-description">${MediaUtils.escapeHtml(description)}</p>` : ''}
+                                    ${ratioPercent > 0 && ratioPercent < 95 ? `<div class="episode-progress"><div style="width:${ratioPercent}%"></div></div>` : ''}
+                                </div>
+                                <span class="episode-duration">${MediaUtils.escapeHtml(duration)}</span>
                             </div>`;
                         }).join('')}
                     </div>
@@ -1061,17 +1306,10 @@ class SeriesPage {
             });
 
             this.seasonsContainer.innerHTML = html;
-
-            this.seasonsContainer.querySelectorAll('.season-header').forEach(header => {
-                header.addEventListener('click', () => {
-                    header.closest('.season-group').classList.toggle('collapsed');
-                });
-            });
-
             this.seasonsContainer.querySelectorAll('.episode-item').forEach(ep => {
                 ep.addEventListener('click', () => this.playEpisode(ep));
             });
-
+            this.applySelectedSeason();
         } catch (err) {
             const { friendly, detail } = this.getSeriesInfoError(err);
             console.error('Error loading series info:', err);
@@ -1122,7 +1360,9 @@ class SeriesPage {
     hideDetails() {
         this.detailsPanel.classList.add('hidden');
         this.container.classList.remove('hidden');
+        this.pageEl?.classList.remove('series-detail-open');
         this.currentSeries = null;
+        this.currentSeriesGroup = null;
     }
 
     findEpisodeById(episodeId) {
@@ -1150,8 +1390,8 @@ class SeriesPage {
         const seasonGroup = episodeEl.closest('.season-group');
         const seasonHeader = seasonGroup?.querySelector('.season-name')?.textContent || '';
         const seasonMatch = seasonHeader.match(/Season (\d+)/);
-        const seasonNum = seasonMatch ? seasonMatch[1] : '1';
-        const episodeNum = episodeEl.querySelector('.episode-number')?.textContent?.replace('E', '') || '1';
+        const seasonNum = episodeEl.dataset.season || (seasonMatch ? seasonMatch[1] : '1');
+        const episodeNum = episodeEl.dataset.episodeNum || episodeEl.querySelector('.episode-number')?.textContent?.replace('E', '') || '1';
 
         try {
             const h = (this.historyItems || []).find(x =>

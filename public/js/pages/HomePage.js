@@ -657,7 +657,10 @@ class HomePage {
 
         this.app.navigateTo('series');
         setTimeout(() => {
-            this.app.pages.series.showSeriesDetails(series);
+            const page = this.app.pages.series;
+            const group = { representative: series, items: [series] };
+            page.currentSeriesGroup = group;
+            page.showSeriesDetailsV2(series, group);
         }, 100);
     }
 
