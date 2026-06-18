@@ -258,14 +258,70 @@ class SourceManager {
     /**
      * Get source form HTML
      */
+    sourceHost(source = {}) {
+        const config = source.configHint || source.config_hint || {};
+        const candidates = [
+            source.serverHost,
+            source.providerHost,
+            config.serverHost,
+            config.playlistHost,
+            source.url
+        ].filter(Boolean);
+
+        for (const candidate of candidates) {
+            const host = this.hostFromUrl(candidate) || String(candidate || '').trim();
+            if (host) return host.replace(/^https?:\/\//i, '').replace(/\/.*$/, '');
+        }
+        return '';
+    }
+
+    editableSourceUrl(type, source = {}) {
+        const raw = String(source.url || source.serverUrl || source.server_url || '').trim();
+        if (/^https?:\/\//i.test(raw)) return raw;
+        const host = this.sourceHost(source);
+        if (type === 'xtream' && host) return `https://${host}`;
+        return raw;
+    }
+
+    hasSavedPassword(source = {}) {
+        const config = source.configHint || source.config_hint || {};
+        return Boolean(source.hasPassword || config.hasPassword || (source.cloud && source.username));
+    }
+
+    getSavedConnectionCard(type, source = {}) {
+        const isExisting = Boolean(source.id || source.cloudId || source.cloud_id);
+        if (!isExisting) return '';
+
+        const host = this.sourceHost(source);
+        const username = source.username || (source.configHint || source.config_hint || {}).username || '';
+        const hasPassword = type === 'xtream' && this.hasSavedPassword(source);
+
+        return `
+      <div class="source-saved-connection">
+        <div class="source-saved-title">Saved connection</div>
+        <div class="source-saved-grid">
+          <span>Server</span>
+          <strong>${this.escapeHtml(host || 'Saved privately')}</strong>
+          ${type === 'xtream' ? `
+          <span>Username</span>
+          <strong>${this.escapeHtml(username || 'Saved privately')}</strong>
+          <span>Password</span>
+          <strong><span class="source-secret-mask">${hasPassword ? '&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;' : 'Not saved'}</span></strong>
+          ` : ''}
+        </div>
+      </div>
+    `;
+    }
+
     getSourceForm(type, source = {}) {
         const intros = {
             xtream: 'Paste the complete link from your TV service, or enter the server URL, username and password separately.',
             m3u: 'Use this when your TV service gives you a playlist link ending in .m3u or .m3u8.',
             epg: 'Use this when your TV service gives you a separate TV guide link.'
         };
-        const storedUrl = String(source.url || '');
-        const urlValue = source.cloud && storedUrl && !/^https?:\/\//i.test(storedUrl) ? '' : storedUrl;
+        const isExisting = Boolean(source.id || source.cloudId || source.cloud_id);
+        const urlValue = this.editableSourceUrl(type, source);
+        const savedConnectionCard = this.getSavedConnectionCard(type, source);
         const introField = `
       <p class="source-form-intro">${this.escapeHtml(intros[type] || 'Connect a TV service to Norva.')}</p>
     `;
@@ -283,7 +339,7 @@ class SourceManager {
                placeholder="${type === 'xtream' ? 'https://provider.com/get.php?username=...&password=...' : 'https://example.com/playlist.m3u'}"
                value="${this.escapeHtml(urlValue)}">
         ${type === 'xtream' ? '<p class="hint" id="source-url-parse-hint">If you paste a full Xtream link, Norva will fill the login fields automatically.</p>' : ''}
-        ${source.cloud && !urlValue ? '<p class="hint">Norva keeps the full URL private. Paste the complete URL from your TV service when repairing it.</p>' : ''}
+        ${source.cloud ? '<p class="hint">Norva keeps the original full link private. The saved server is shown here. Paste a complete link only when replacing or repairing the login.</p>' : ''}
       </div>
     `;
 
@@ -291,6 +347,7 @@ class SourceManager {
             const advancedOpen = source.id ? ' open' : '';
             return `
         ${introField}
+        ${savedConnectionCard}
         ${urlField}
         ${nameField}
         <details class="source-advanced-login" id="source-advanced-login"${advancedOpen}>
@@ -302,15 +359,15 @@ class SourceManager {
           <div class="form-group">
           <label for="source-password">Password</label>
           <input type="password" id="source-password" class="form-input"
-                 placeholder="${source.id ? 'Enter password to update login' : ''}"
+                 placeholder="${isExisting ? 'Password saved - leave blank to keep it' : ''}"
                  value="${source.password && !source.password.includes('•') ? this.escapeHtml(source.password) : ''}">
-            ${source.id ? '<p class="hint">For cloud providers, enter the password again when repairing the login.</p>' : ''}
+            ${isExisting ? '<p class="hint">Leave this empty to keep the saved password. Type a new password only when repairing or replacing the login.</p>' : ''}
           </div>
         </details>
       `;
         }
 
-        return introField + urlField + nameField;
+        return introField + savedConnectionCard + urlField + nameField;
     }
 
     bindSourceForm(type) {
@@ -419,7 +476,7 @@ class SourceManager {
             }
         }
 
-        if (!url) {
+        if (!url && !(existing && type === 'xtream' && !password)) {
             throw new Error('Provider URL is required.');
         }
 
@@ -432,7 +489,7 @@ class SourceManager {
 
         if (type === 'xtream' && (!username || (!password && !existing))) {
             throw new Error(existing
-                ? 'Provider URL and username are required. Enter the password too when repairing the login.'
+                ? 'Username is required. Enter the password too only when repairing the login.'
                 : 'Provider URL, username and password are required.');
         }
 
@@ -447,6 +504,158 @@ class SourceManager {
             return url.hostname || '';
         } catch (_) {
             return '';
+        }
+    }
+
+    catalogCountsFromSource(source = {}) {
+        const config = source.configHint || source.config_hint || {};
+        const lastSync = source.lastSync || config.lastSync || source.last_sync_result || {};
+        const live = Number(lastSync.live ?? lastSync.channels ?? lastSync.liveChannels ?? lastSync.liveCatalog?.channels ?? 0) || 0;
+        const movies = Number(lastSync.movies ?? lastSync.vod ?? lastSync.vodMovies ?? 0) || 0;
+        const series = Number(lastSync.series ?? lastSync.tvSeries ?? 0) || 0;
+        return {
+            live,
+            movies,
+            series,
+            total: Number(lastSync.total ?? (live + movies + series)) || 0,
+            syncedAt: lastSync.syncedAt || source.last_sync || source.last_synced_at || null
+        };
+    }
+
+    sourceSyncState(source = {}) {
+        const status = String(source.sync_status || source.syncStatus || '').toLowerCase();
+        const counts = this.catalogCountsFromSource(source);
+        const failedStates = new Set(['error', 'failed', 'auth_failed', 'expired', 'unreachable', 'revoked']);
+        const readyStates = new Set(['ready', 'success', 'complete', 'completed']);
+
+        if (failedStates.has(status)) return { phase: 'error', counts };
+        if (readyStates.has(status) || counts.total > 0) return { phase: 'ready', counts };
+        return { phase: 'syncing', counts };
+    }
+
+    formatCatalogCount(value, fallback = 'Scanning') {
+        return value > 0 ? value.toLocaleString() : fallback;
+    }
+
+    renderCatalogPreparation(source = {}, type = 'xtream') {
+        const { phase, counts } = this.sourceSyncState(source);
+        const sourceName = source.name || 'TV service';
+        const statusText = {
+            syncing: 'Norva is importing your channels, movies and series. This can take a few minutes.',
+            ready: 'Your catalog is ready.',
+            error: source.sync_error || source.syncError || 'Norva could not finish importing this service.'
+        };
+        const phaseLabel = phase === 'ready' ? 'Ready' : phase === 'error' ? 'Needs attention' : 'Importing';
+
+        return `
+      <div class="source-sync-step source-sync-${this.escapeHtml(phase)}">
+        <div class="source-sync-hero">
+          <span class="source-sync-pill">${this.escapeHtml(phaseLabel)}</span>
+          <h3>${this.escapeHtml(sourceName)}</h3>
+          <p>${this.escapeHtml(statusText[phase] || statusText.syncing)}</p>
+        </div>
+        <div class="source-sync-grid">
+          <div class="source-sync-card">
+            <span>Live TV</span>
+            <strong>${this.escapeHtml(this.formatCatalogCount(counts.live))}</strong>
+            <small>channels found</small>
+          </div>
+          <div class="source-sync-card">
+            <span>Movies</span>
+            <strong>${this.escapeHtml(this.formatCatalogCount(counts.movies))}</strong>
+            <small>films found</small>
+          </div>
+          <div class="source-sync-card">
+            <span>Series</span>
+            <strong>${this.escapeHtml(this.formatCatalogCount(counts.series))}</strong>
+            <small>series found</small>
+          </div>
+        </div>
+        ${phase === 'syncing' ? `
+          <div class="source-sync-progress" aria-label="Catalog import in progress">
+            <span></span>
+          </div>
+          <p class="hint">You can let this continue in the background. Norva will keep this service visible in Settings while it prepares the catalog.</p>
+        ` : ''}
+        ${phase === 'error' ? `
+          <div class="source-sync-error">${this.escapeHtml(statusText.error)}</div>
+        ` : ''}
+        ${counts.syncedAt && phase === 'ready' ? `
+          <p class="hint">Last import: ${this.escapeHtml(new Date(counts.syncedAt).toLocaleString())}</p>
+        ` : ''}
+      </div>
+    `;
+    }
+
+    async showCatalogPreparation(initialSource = {}, type = 'xtream') {
+        const modal = document.getElementById('modal');
+        const title = document.getElementById('modal-title');
+        const body = document.getElementById('modal-body');
+        const footer = document.getElementById('modal-footer');
+        const sourceId = initialSource.id || initialSource.cloudId || initialSource.cloud_id;
+        const token = Symbol('catalog-preparation');
+        this.catalogPreparationToken = token;
+
+        const closeToSettings = async () => {
+            if (this.catalogPreparationToken === token) this.catalogPreparationToken = null;
+            modal.classList.remove('active');
+            await this.loadSources();
+            this.notifySourceHealthChanged();
+        };
+
+        const startWatching = async () => {
+            await closeToSettings();
+            window.location.hash = '#home';
+        };
+
+        const render = (source) => {
+            const { phase } = this.sourceSyncState(source);
+            title.textContent = phase === 'ready' ? 'Catalog ready' : phase === 'error' ? 'TV service needs attention' : 'Preparing your catalog';
+            body.innerHTML = this.renderCatalogPreparation(source, type);
+
+            if (phase === 'ready') {
+                footer.innerHTML = `
+          <button class="btn btn-secondary" id="catalog-stay">Stay in Settings</button>
+          <button class="btn btn-primary" id="catalog-start">Start Watching</button>
+        `;
+                document.getElementById('catalog-stay').onclick = closeToSettings;
+                document.getElementById('catalog-start').onclick = startWatching;
+            } else if (phase === 'error') {
+                footer.innerHTML = `
+          <button class="btn btn-secondary" id="catalog-background">Close</button>
+          <button class="btn btn-primary" id="catalog-edit">Repair Login</button>
+        `;
+                document.getElementById('catalog-background').onclick = closeToSettings;
+                document.getElementById('catalog-edit').onclick = () => this.showEditModal(sourceId, type);
+            } else {
+                footer.innerHTML = `
+          <button class="btn btn-secondary" id="catalog-background">Run in Background</button>
+        `;
+                document.getElementById('catalog-background').onclick = closeToSettings;
+            }
+        };
+
+        modal.querySelector('.modal-close').onclick = closeToSettings;
+        modal.classList.add('active');
+        render(initialSource);
+
+        if (!sourceId) return;
+
+        let current = initialSource;
+        for (let attempt = 0; attempt < 90; attempt += 1) {
+            if (this.catalogPreparationToken !== token) return;
+            const { phase } = this.sourceSyncState(current);
+            if (phase === 'ready' || phase === 'error') return;
+
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            if (this.catalogPreparationToken !== token) return;
+
+            try {
+                current = await API.sources.getById(sourceId) || current;
+                render(current);
+            } catch (err) {
+                console.warn('[SourceManager] Catalog preparation poll failed:', err);
+            }
         }
     }
 
@@ -487,8 +696,7 @@ class SourceManager {
                 }
             }
 
-            await API.sources.create({ type, name, url, username, password });
-            document.getElementById('modal').classList.remove('active');
+            const createdSource = await API.sources.create({ type, name, url, username, password });
             await this.loadSources();
             this.notifySourceHealthChanged();
 
@@ -497,6 +705,7 @@ class SourceManager {
                 await window.app.channelList.loadSources();
                 await window.app.channelList.loadChannels();
             }
+            this.showCatalogPreparation(createdSource, type);
         } catch (err) {
             alert('Error adding source: ' + err.message);
         }

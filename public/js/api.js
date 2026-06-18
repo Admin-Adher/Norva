@@ -130,20 +130,28 @@ const CloudAdapter = (() => {
         const type = source.source_type || source.sourceType || source.type || 'xtream';
         const cloudId = source.id;
         const id = localSourceId(cloudId);
+        const providerHost = config.serverHost || config.playlistHost || '';
         return {
             ...source,
             id,
             cloudId,
             cloud_id: cloudId,
+            configHint: config,
+            config_hint: config,
             source_type: type,
             type,
             name: source.display_name || source.displayName || source.name || 'Norva provider',
-            url: config.serverHost || config.playlistHost || '',
+            url: config.serverUrl || providerHost || '',
+            providerHost,
+            serverHost: config.serverHost || '',
+            playlistHost: config.playlistHost || '',
             username: config.username || source.username || '',
+            hasPassword: Boolean(config.hasPassword),
             enabled: source.revoked !== true,
             sync_status: source.sync_status || source.syncStatus || 'idle',
             sync_error: source.sync_error || source.syncError || '',
             last_sync: source.last_synced_at || source.lastSyncedAt || null,
+            lastSync: config.lastSync || source.lastSync || null,
             cloud: true
         };
     }
