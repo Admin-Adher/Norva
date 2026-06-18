@@ -3393,6 +3393,11 @@ class WatchPage {
         if (this._cloudRelayFallbackTried) return false;
         if (!this.isFormatPlaybackError(message)) return false;
         if (!this.content?.sourceId || !this.content?.id) return false;
+        if (this.currentPlaybackMode === 'gateway-session'
+            || this.isGatewayPlaybackUrl(this.currentUrl)
+            || this.isGatewayPlaybackUrl(this.baseStreamUrl)) {
+            return false;
+        }
 
         this._cloudRelayFallbackTried = true;
         console.warn('[WatchPage] Gateway media append failed. Retrying through Relay.');
@@ -3438,20 +3443,40 @@ class WatchPage {
         try {
             await this.releasePlaybackPipelineForRetry();
             const position = Math.max(0, Math.floor(this.getResumeSnapshotPosition()) - 3);
-            const result = await API.proxy.xtream.getStreamUrl(
-                this.content.sourceId,
-                this.content.id,
-                this.content.type === 'series' ? 'series' : 'movie',
-                this.containerExtension || 'mp4',
-                {
-                    gatewayMode: 'transcode',
-                    audioMode: 'transcode',
-                    ...this.getSelectedAudioPlaybackOptions(),
-                    seekOffset: position,
-                    startOffset: position,
-                    resumeTime: position
+            const itemType = this.content.type === 'series' ? 'series' : 'movie';
+            const container = this.containerExtension || 'mp4';
+            const playbackHint = {
+                gatewayMode: 'transcode',
+                audioMode: 'transcode',
+                ...this.getSelectedAudioPlaybackOptions(),
+                seekOffset: position,
+                startOffset: position,
+                resumeTime: position
+            };
+
+            let result = null;
+            let lastError = null;
+            await this.waitForProviderSlotRelease(1400);
+            for (let attempt = 0; attempt < 2; attempt += 1) {
+                try {
+                    result = await API.proxy.xtream.getStreamUrl(
+                        this.content.sourceId,
+                        this.content.id,
+                        itemType,
+                        container,
+                        playbackHint
+                    );
+                    break;
+                } catch (error) {
+                    lastError = error;
+                    if (attempt === 0) {
+                        const retryDelay = this.getAudioSwitchRetryDelay(error);
+                        console.warn(`[WatchPage] Gateway transcode session failed, retrying after ${retryDelay}ms provider cooldown:`, error?.message || error);
+                        await this.waitForProviderSlotRelease(retryDelay);
+                    }
                 }
-            );
+            }
+            if (!result && lastError) throw lastError;
 
             if (!result?.url) return false;
             this.content.cloudPlaybackSessionId = result.sessionId || null;
