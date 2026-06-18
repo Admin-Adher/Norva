@@ -67,10 +67,12 @@
     }
 
     function sourceId(source = {}) {
+        source = source || {};
         return string(source.id || source.source_id || source.sourceId || source.cloudId || source.cloud_id);
     }
 
     function sourceType(source = {}) {
+        source = source || {};
         return string(source.type || source.source_type || source.sourceType || 'xtream') || 'xtream';
     }
 
@@ -219,14 +221,20 @@
     function cardHtml(summary = {}, options = {}) {
         const state = summary.state || 'degraded';
         const hidden = options.hideWhenReady !== false && state === 'ready';
+        const prominent = options.prominent === true;
         const issueCount = summary.issues?.length || 0;
         const sourceCount = summary.sources?.length || 0;
+        const primaryIssue = [...(summary.issues || [])].sort((a, b) => b.severity - a.severity)[0] || null;
+        const primarySource = primaryIssue?.source || null;
         const detail = sourceCount
             ? `${sourceCount} service${sourceCount > 1 ? 's' : ''}${issueCount ? `, ${issueCount} need attention` : ''}`
             : 'No service connected';
 
         return `
-            <div class="service-health-card service-health-${escapeHtml(state)} ${hidden ? 'hidden' : ''}">
+            <div class="service-health-card service-health-${escapeHtml(state)} ${prominent ? 'service-health-prominent' : ''} ${hidden ? 'hidden' : ''}"
+                 data-source-health-state="${escapeHtml(state)}"
+                 data-source-health-source-id="${escapeHtml(sourceId(primarySource))}"
+                 data-source-health-source-type="${escapeHtml(sourceType(primarySource))}">
                 <div class="service-health-copy">
                     <span class="service-health-label">${escapeHtml(summary.label || STATE_META[state]?.label || 'Status')}</span>
                     <h3>${escapeHtml(summary.title || STATE_META[state]?.title || 'TV service')}</h3>
@@ -240,11 +248,41 @@
         `;
     }
 
+    function openAction(summary = {}, app = window.app) {
+        const manager = app?.sourceManager || window.app?.sourceManager;
+        const settings = app?.pages?.settings || window.app?.pages?.settings;
+        const issues = [...(summary.issues || [])].sort((a, b) => b.severity - a.severity);
+        const primaryIssue = issues[0] || null;
+        const primarySource = primaryIssue?.source || null;
+        const state = summary.state || 'degraded';
+
+        if (state === 'not_configured') {
+            if (manager?.showAddModal) {
+                manager.showAddModal('xtream');
+                return true;
+            }
+        }
+
+        if (primarySource && manager?.showEditModal) {
+            const id = sourceId(primarySource);
+            const type = sourceType(primarySource);
+            if (id) {
+                manager.showEditModal(id, type);
+                return true;
+            }
+        }
+
+        if (app?.navigateTo) app.navigateTo('settings');
+        setTimeout(() => settings?.switchTab?.('sources'), 0);
+        return true;
+    }
+
     window.NorvaSourceHealth = {
         STATE_META,
         classifySource,
         summarize: summaryFrom,
         loadSummary,
-        cardHtml
+        cardHtml,
+        openAction
     };
 })();

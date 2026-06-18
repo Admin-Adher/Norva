@@ -18,6 +18,13 @@ class HomePage {
         this.heroItem = null;
         this.contentPreferences = {};
         this.contentPreferenceKey = '';
+        this.setupRefreshTimer = null;
+        document.addEventListener('norva:source-health-changed', () => {
+            this.lastLoadedAt = 0;
+            if (this.app?.currentPage === 'home') {
+                this.loadDashboardData();
+            }
+        });
     }
 
     async init() {
@@ -203,11 +210,25 @@ class HomePage {
                 const history = historyResult.status === 'fulfilled' && Array.isArray(historyResult.value)
                     ? historyResult.value
                     : [];
-                this.renderHistory(history);
+                const sourceSummary = healthResult.status === 'fulfilled' && healthResult.value
+                    ? healthResult.value
+                    : null;
 
-                if (healthResult.status === 'fulfilled' && healthResult.value) {
-                    this.renderServiceHealth(healthResult.value);
+                if (sourceSummary) {
+                    this.renderServiceHealth(sourceSummary);
                 }
+
+                if (this.shouldShowSetupGate(sourceSummary)) {
+                    this.renderSetupGate(sourceSummary);
+                    if (favoritesResult.status === 'rejected') {
+                        console.warn('[Dashboard] Favorites unavailable:', favoritesResult.reason);
+                    }
+                    this.lastLoadedAt = Date.now();
+                    return;
+                }
+
+                this.clearSetupGate();
+                this.renderHistory(history);
 
                 if (railsResult.status === 'fulfilled') {
                     this.renderCloudRails(railsResult.value);
@@ -232,6 +253,176 @@ class HomePage {
         })();
 
         return this.loadPromise;
+    }
+
+    shouldShowSetupGate(summary = null) {
+        if (!summary || summary.state === 'ready') return false;
+        return !(summary.ready || []).length;
+    }
+
+    clearSetupGate() {
+        if (this.setupRefreshTimer) {
+            clearTimeout(this.setupRefreshTimer);
+            this.setupRefreshTimer = null;
+        }
+        document.getElementById('home-service-health')?.classList.remove('setup-suppressed');
+    }
+
+    renderSetupGate(summary = {}) {
+        const container = document.getElementById('home-rails');
+        if (!container) return;
+
+        if (this.setupRefreshTimer) {
+            clearTimeout(this.setupRefreshTimer);
+            this.setupRefreshTimer = null;
+        }
+
+        document.getElementById('home-hero')?.classList.add('hidden');
+        document.getElementById('continue-watching-section')?.classList.add('hidden');
+        document.getElementById('favorite-channels-section')?.classList.add('hidden');
+        document.getElementById('home-service-health')?.classList.add('setup-suppressed');
+
+        const state = summary.state || 'not_configured';
+        const copy = this.setupCopy(summary);
+        const steps = this.setupSteps(state);
+        const secondaryLabel = copy.secondary || 'Check again';
+        const showSecondary = secondaryLabel && secondaryLabel !== copy.primary;
+
+        container.innerHTML = `
+            <section class="norva-setup-gate" data-setup-state="${this.escapeAttr(state)}" data-paired-screen="${this.isPairedScreen() ? 'true' : 'false'}">
+                <div class="norva-setup-card">
+                    <div class="norva-setup-kicker">Norva setup</div>
+                    <h1>${this.escapeHtml(copy.title)}</h1>
+                    <p>${this.escapeHtml(copy.message)}</p>
+                    <div class="norva-setup-actions">
+                        <button class="btn btn-primary" id="norva-setup-primary">${this.escapeHtml(copy.primary)}</button>
+                        ${showSecondary ? `<button class="btn btn-secondary" id="norva-setup-refresh">${this.escapeHtml(secondaryLabel)}</button>` : ''}
+                    </div>
+                </div>
+                <div class="norva-setup-steps" aria-label="Norva setup progress">
+                    ${steps.map(step => `
+                        <div class="norva-setup-step ${step.state}">
+                            <span class="norva-setup-step-index">${this.escapeHtml(step.index)}</span>
+                            <div>
+                                <strong>${this.escapeHtml(step.title)}</strong>
+                                <span>${this.escapeHtml(step.hint)}</span>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            </section>
+        `;
+
+        container.querySelector('#norva-setup-primary')?.addEventListener('click', () => {
+            if (copy.primaryAction === 'refresh') {
+                this.lastLoadedAt = 0;
+                this.loadDashboardData();
+                return;
+            }
+            window.NorvaSourceHealth?.openAction?.(summary, this.app);
+        });
+        container.querySelector('#norva-setup-refresh')?.addEventListener('click', () => {
+            this.lastLoadedAt = 0;
+            this.loadDashboardData();
+        });
+
+        if (state === 'syncing') {
+            this.setupRefreshTimer = setTimeout(() => {
+                this.lastLoadedAt = 0;
+                if (this.app?.currentPage === 'home') this.loadDashboardData();
+            }, 8000);
+        }
+    }
+
+    isPairedScreen() {
+        return Boolean(
+            this.app?.currentUser?.device ||
+            window.NorvaCloud?.deviceToken ||
+            localStorage.getItem('norva-cloud-device-token')
+        );
+    }
+
+    setupCopy(summary = {}) {
+        const state = summary.state || 'not_configured';
+        const pairedScreen = this.isPairedScreen();
+
+        if (pairedScreen) {
+            if (state === 'syncing') {
+                return {
+                    title: 'Norva is preparing your catalog',
+                    message: 'Keep this screen open. Finish setup from your phone or web account; this TV will update automatically.',
+                    primary: 'Check again',
+                    primaryAction: 'refresh'
+                };
+            }
+            if (['auth_failed', 'expired', 'unreachable', 'degraded'].includes(state)) {
+                return {
+                    title: 'Repair your TV service from your phone',
+                    message: summary.message || 'This TV is paired, but your TV service needs attention. Open Norva on your phone or web account to repair it, then check again here.',
+                    primary: 'Check again',
+                    primaryAction: 'refresh'
+                };
+            }
+            return {
+                title: 'Finish setup from your phone',
+                message: 'This TV is paired to your Norva account. Connect your TV service from your phone or web account, then return here to start watching.',
+                primary: 'Check again',
+                primaryAction: 'refresh'
+            };
+        }
+
+        if (state === 'syncing') {
+            return {
+                title: 'Norva is preparing your catalog',
+                message: summary.message || 'Channels, movies and series are being imported. You can keep this page open; Norva will refresh automatically.',
+                primary: 'View TV service'
+            };
+        }
+        if (['auth_failed', 'expired'].includes(state)) {
+            return {
+                title: 'Repair your TV service',
+                message: summary.message || 'Your provider login needs attention before Norva can play content again.',
+                primary: summary.action || 'Update login'
+            };
+        }
+        if (['unreachable', 'degraded'].includes(state)) {
+            return {
+                title: 'Your TV service needs attention',
+                message: summary.message || 'Norva cannot confirm that this service is ready. Check it before inviting anyone to watch.',
+                primary: summary.action || 'Check service'
+            };
+        }
+        return {
+            title: 'Connect your TV service to start watching',
+            message: 'Paste the complete Xtream or M3U link from your TV service. Norva will prepare your channels, movies and series automatically.',
+            primary: summary.action || 'Connect TV service'
+        };
+    }
+
+    setupSteps(state) {
+        const connected = state !== 'not_configured';
+        const ready = state === 'ready';
+        const needsRepair = ['auth_failed', 'expired', 'unreachable', 'degraded'].includes(state);
+        return [
+            {
+                index: '1',
+                title: connected ? 'TV service connected' : 'Connect TV service',
+                hint: connected ? 'Norva has a service saved for this account.' : 'Use your full Xtream or M3U link.',
+                state: connected && !needsRepair ? 'complete' : state === 'not_configured' ? 'active' : 'attention'
+            },
+            {
+                index: '2',
+                title: state === 'syncing' ? 'Preparing catalog' : 'Catalog preparation',
+                hint: state === 'syncing' ? 'Importing content now.' : ready ? 'Catalog ready.' : 'Norva prepares channels, movies and series after connection.',
+                state: ready ? 'complete' : state === 'syncing' ? 'active' : 'pending'
+            },
+            {
+                index: '3',
+                title: 'Start watching',
+                hint: 'Home, Live TV, Movies and Series unlock when the catalog is ready.',
+                state: ready ? 'complete' : 'pending'
+            }
+        ];
     }
 
     renderServiceHealth(summary) {

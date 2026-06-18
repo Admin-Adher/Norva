@@ -220,6 +220,7 @@ class SourceManager {
         modal.querySelector('.modal-close').onclick = () => modal.classList.remove('active');
         document.getElementById('modal-cancel').onclick = () => modal.classList.remove('active');
         document.getElementById('modal-save').onclick = () => this.saveNewSource(type);
+        this.bindSourceForm(type);
     }
 
     /**
@@ -248,6 +249,7 @@ class SourceManager {
             modal.querySelector('.modal-close').onclick = () => modal.classList.remove('active');
             document.getElementById('modal-cancel').onclick = () => modal.classList.remove('active');
             document.getElementById('modal-save').onclick = () => this.updateSource(id, type);
+            this.bindSourceForm(type);
         } catch (err) {
             console.error('Error loading source:', err);
         }
@@ -258,64 +260,209 @@ class SourceManager {
      */
     getSourceForm(type, source = {}) {
         const intros = {
-            xtream: 'Use this when your TV service gives you a server URL, username and password.',
+            xtream: 'Paste the complete link from your TV service, or enter the server URL, username and password separately.',
             m3u: 'Use this when your TV service gives you a playlist link ending in .m3u or .m3u8.',
             epg: 'Use this when your TV service gives you a separate TV guide link.'
         };
         const storedUrl = String(source.url || '');
         const urlValue = source.cloud && storedUrl && !/^https?:\/\//i.test(storedUrl) ? '' : storedUrl;
-        const nameField = `
+        const introField = `
       <p class="source-form-intro">${this.escapeHtml(intros[type] || 'Connect a TV service to Norva.')}</p>
+    `;
+        const nameField = `
       <div class="form-group">
-        <label for="source-name">Service name</label>
+        <label for="source-name">Service name <span class="label-optional">(optional)</span></label>
         <input type="text" id="source-name" class="form-input" placeholder="Family TV" value="${this.escapeHtml(source.name || '')}">
       </div>
     `;
 
         const urlField = `
       <div class="form-group">
-        <label for="source-url">${type === 'xtream' ? 'Provider server URL' : type === 'epg' ? 'TV guide URL' : 'Playlist URL'}</label>
+        <label for="source-url">${type === 'xtream' ? 'Provider URL or complete Xtream link' : type === 'epg' ? 'TV guide URL' : 'Playlist URL'}</label>
         <input type="text" id="source-url" class="form-input" 
-               placeholder="${type === 'xtream' ? 'http://server.com:port' : 'https://example.com/playlist.m3u'}" 
+               placeholder="${type === 'xtream' ? 'https://provider.com/get.php?username=...&password=...' : 'https://example.com/playlist.m3u'}"
                value="${this.escapeHtml(urlValue)}">
+        ${type === 'xtream' ? '<p class="hint" id="source-url-parse-hint">If you paste a full Xtream link, Norva will fill the login fields automatically.</p>' : ''}
         ${source.cloud && !urlValue ? '<p class="hint">Norva keeps the full URL private. Paste the complete URL from your TV service when repairing it.</p>' : ''}
       </div>
     `;
 
         if (type === 'xtream') {
+            const advancedOpen = source.id ? ' open' : '';
             return `
-        ${nameField}
+        ${introField}
         ${urlField}
-        <div class="form-group">
+        ${nameField}
+        <details class="source-advanced-login" id="source-advanced-login"${advancedOpen}>
+          <summary>Enter server login manually</summary>
+          <div class="form-group">
           <label for="source-username">Username</label>
           <input type="text" id="source-username" class="form-input" value="${this.escapeHtml(source.username || '')}">
-        </div>
-        <div class="form-group">
+          </div>
+          <div class="form-group">
           <label for="source-password">Password</label>
           <input type="password" id="source-password" class="form-input"
                  placeholder="${source.id ? 'Enter password to update login' : ''}"
                  value="${source.password && !source.password.includes('•') ? this.escapeHtml(source.password) : ''}">
-          ${source.id ? '<p class="hint">For cloud providers, enter the password again when repairing the login.</p>' : ''}
-        </div>
+            ${source.id ? '<p class="hint">For cloud providers, enter the password again when repairing the login.</p>' : ''}
+          </div>
+        </details>
       `;
         }
 
-        return nameField + urlField;
+        return introField + urlField + nameField;
+    }
+
+    bindSourceForm(type) {
+        if (type !== 'xtream') return;
+        const urlInput = document.getElementById('source-url');
+        const nameInput = document.getElementById('source-name');
+        const usernameInput = document.getElementById('source-username');
+        const passwordInput = document.getElementById('source-password');
+        const advancedLogin = document.getElementById('source-advanced-login');
+        const hint = document.getElementById('source-url-parse-hint');
+        if (!urlInput || !usernameInput || !passwordInput) return;
+
+        const applyParsedLink = (force = false) => {
+            const parsed = this.parseXtreamLink(urlInput.value);
+            if (!parsed) {
+                if (hint) hint.textContent = 'If you paste a full Xtream link, Norva will fill the login fields automatically.';
+                return;
+            }
+
+            if (parsed.serverUrl) {
+                urlInput.value = parsed.serverUrl;
+            }
+            if (parsed.username && (force || !usernameInput.value.trim())) {
+                usernameInput.value = parsed.username;
+            }
+            if (parsed.password && (force || !passwordInput.value.trim())) {
+                passwordInput.value = parsed.password;
+            }
+            if ((!parsed.username || !parsed.password) && advancedLogin) {
+                advancedLogin.open = true;
+            }
+            if (nameInput && !nameInput.value.trim() && parsed.host) {
+                nameInput.value = parsed.host.replace(/^www\./i, '');
+            }
+            if (hint) {
+                hint.textContent = parsed.username && parsed.password
+                    ? 'Login detected from the link. You can review it before saving.'
+                    : 'Server detected. Add the username and password if they were provided separately.';
+            }
+        };
+
+        urlInput.addEventListener('paste', () => setTimeout(() => applyParsedLink(true), 0));
+        urlInput.addEventListener('blur', () => applyParsedLink(false));
+        urlInput.addEventListener('change', () => applyParsedLink(false));
+    }
+
+    openAdvancedSourceLogin() {
+        const advancedLogin = document.getElementById('source-advanced-login');
+        if (advancedLogin) advancedLogin.open = true;
+    }
+
+    parseXtreamLink(raw) {
+        const value = String(raw || '').trim();
+        if (!value) return null;
+        let url;
+        try {
+            const withScheme = /^https?:\/\//i.test(value) ? value : `http://${value}`;
+            url = new URL(withScheme);
+        } catch (_) {
+            return null;
+        }
+
+        const knownEndpoints = new Set(['get.php', 'player_api.php', 'xmltv.php', 'panel_api.php']);
+        const pathParts = url.pathname.split('/').filter(Boolean);
+        const lowerParts = pathParts.map(part => part.toLowerCase());
+        const endpointIndex = lowerParts.findIndex(part => knownEndpoints.has(part));
+        const streamIndex = lowerParts.findIndex(part => ['live', 'movie', 'series'].includes(part));
+        let username = url.searchParams.get('username') || url.searchParams.get('user') || '';
+        let password = url.searchParams.get('password') || url.searchParams.get('pass') || '';
+        let baseParts = pathParts;
+
+        if (endpointIndex >= 0) {
+            baseParts = pathParts.slice(0, endpointIndex);
+        } else if (streamIndex >= 0 && pathParts.length >= streamIndex + 3) {
+            username = username || decodeURIComponent(pathParts[streamIndex + 1] || '');
+            password = password || decodeURIComponent(pathParts[streamIndex + 2] || '');
+            baseParts = pathParts.slice(0, streamIndex);
+        } else if (username || password) {
+            baseParts = [];
+        }
+
+        const basePath = baseParts.length ? `/${baseParts.join('/')}` : '';
+        const serverUrl = `${url.protocol}//${url.host}${basePath}`.replace(/\/+$/, '');
+        if (!serverUrl || serverUrl === `${url.protocol}//`) return null;
+
+        return {
+            serverUrl,
+            username,
+            password,
+            host: url.hostname
+        };
+    }
+
+    readSourceForm(type, { existing = false } = {}) {
+        let name = document.getElementById('source-name')?.value.trim() || '';
+        let url = document.getElementById('source-url')?.value.trim() || '';
+        let username = document.getElementById('source-username')?.value.trim() || null;
+        let password = document.getElementById('source-password')?.value.trim() || null;
+
+        if (type === 'xtream') {
+            const parsed = this.parseXtreamLink(url);
+            if (parsed) {
+                url = parsed.serverUrl || url;
+                username = username || parsed.username || null;
+                password = password || parsed.password || null;
+            }
+        }
+
+        if (!url) {
+            throw new Error('Provider URL is required.');
+        }
+
+        if (!name) {
+            const parsed = type === 'xtream' ? this.parseXtreamLink(url) : null;
+            const hostName = parsed?.host || this.hostFromUrl(url);
+            const fallbackName = type === 'm3u' ? 'Playlist' : type === 'epg' ? 'TV guide' : 'TV service';
+            name = hostName ? hostName.replace(/^www\./i, '') : fallbackName;
+        }
+
+        if (type === 'xtream' && (!username || (!password && !existing))) {
+            throw new Error(existing
+                ? 'Provider URL and username are required. Enter the password too when repairing the login.'
+                : 'Provider URL, username and password are required.');
+        }
+
+        return { name, url, username, password };
+    }
+
+    hostFromUrl(raw) {
+        try {
+            const value = String(raw || '').trim();
+            if (!value) return '';
+            const url = new URL(/^https?:\/\//i.test(value) ? value : `http://${value}`);
+            return url.hostname || '';
+        } catch (_) {
+            return '';
+        }
     }
 
     /**
      * Save new source
      */
     async saveNewSource(type) {
-        const name = document.getElementById('source-name').value.trim();
-        const url = document.getElementById('source-url').value.trim();
-        const username = document.getElementById('source-username')?.value.trim() || null;
-        const password = document.getElementById('source-password')?.value.trim() || null;
-
-        if (!name || !url) {
-            alert('Name and URL are required');
+        let form;
+        try {
+            form = this.readSourceForm(type);
+        } catch (err) {
+            if (type === 'xtream') this.openAdvancedSourceLogin();
+            alert(err.message);
             return;
         }
+        const { name, url, username, password } = form;
 
         try {
             // Check M3U size before creating (large playlist warning)
@@ -343,6 +490,7 @@ class SourceManager {
             await API.sources.create({ type, name, url, username, password });
             document.getElementById('modal').classList.remove('active');
             await this.loadSources();
+            this.notifySourceHealthChanged();
 
             // Refresh channel list
             if (window.app?.channelList) {
@@ -358,15 +506,15 @@ class SourceManager {
      * Update existing source
      */
     async updateSource(id, type) {
-        const name = document.getElementById('source-name').value.trim();
-        const url = document.getElementById('source-url').value.trim();
-        const username = document.getElementById('source-username')?.value.trim();
-        const password = document.getElementById('source-password')?.value.trim();
-
-        if (!name || !url) {
-            alert('Name and URL are required');
+        let form;
+        try {
+            form = this.readSourceForm(type, { existing: true });
+        } catch (err) {
+            if (type === 'xtream') this.openAdvancedSourceLogin();
+            alert(err.message);
             return;
         }
+        const { name, url, username, password } = form;
 
         try {
             const data = { type, name, url };
@@ -378,9 +526,14 @@ class SourceManager {
             await API.sources.update(id, data);
             document.getElementById('modal').classList.remove('active');
             await this.loadSources();
+            this.notifySourceHealthChanged();
         } catch (err) {
             alert('Error updating source: ' + err.message);
         }
+    }
+
+    notifySourceHealthChanged() {
+        document.dispatchEvent(new CustomEvent('norva:source-health-changed'));
     }
 
     escapeHtml(value) {
@@ -401,6 +554,7 @@ class SourceManager {
         try {
             await API.sources.delete(id);
             await this.loadSources();
+            this.notifySourceHealthChanged();
 
             if (window.app?.channelList) {
                 await window.app.channelList.loadSources();
@@ -418,6 +572,7 @@ class SourceManager {
         try {
             await API.sources.toggle(id);
             await this.loadSources();
+            this.notifySourceHealthChanged();
         } catch (err) {
             alert('Error toggling source: ' + err.message);
         }
@@ -569,6 +724,7 @@ class SourceManager {
             if (isHardRefresh && syncResult?.cleared) {
                 console.log('[SourceManager] Hard refresh cleared:', syncResult.cleared);
             }
+            this.notifySourceHealthChanged();
         } catch (err) {
             console.error('Error refreshing source:', err);
             alert(`${isHardRefresh ? 'Hard refresh' : 'Refresh'} failed: ${err.message}`);
