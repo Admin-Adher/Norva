@@ -26,6 +26,12 @@ class MoviesPage {
         this.resetBtn = document.getElementById('movies-reset');
         this.continueRow = document.getElementById('movies-continue');
         this.continueList = document.getElementById('movies-continue-list');
+        this.pageEl = document.getElementById('page-movies');
+        this.detailsPanel = document.getElementById('movie-details');
+        this.primaryActionBtn = document.getElementById('movie-primary-action');
+        this.detailFavoriteBtn = document.getElementById('movie-detail-favorite');
+        this.versionsList = document.getElementById('movie-versions-list');
+        this.versionSummary = document.getElementById('movie-version-summary');
 
         this.movies = [];
         this.categories = [];
@@ -48,6 +54,9 @@ class MoviesPage {
         this.watchState = new Map(); // item_id -> { progress, duration, ratio }
         this.serverSettings = {};
         this.hiddenCategoryIds = new Set();
+        this.currentMovie = null;
+        this.currentMovieGroup = null;
+        this.currentMovieVersions = [];
 
         this.restoreFilters();
         this.init();
@@ -102,6 +111,12 @@ class MoviesPage {
 
         // Reset filters
         this.resetBtn?.addEventListener('click', () => this.resetFilters());
+
+        this.detailsPanel?.querySelector('.movie-back-btn')?.addEventListener('click', () => this.hideDetails());
+        this.primaryActionBtn?.addEventListener('click', () => this.playPrimaryMovie());
+        this.detailFavoriteBtn?.addEventListener('click', () => {
+            if (this.currentMovieGroup) this.toggleFavorite(this.currentMovieGroup, this.detailFavoriteBtn);
+        });
 
         // Lazy loading
         this.observer = new IntersectionObserver((entries) => {
@@ -835,9 +850,9 @@ class MoviesPage {
                 this.toggleFavorite(group, e.target.closest('.favorite-btn'));
             } else if (e.target.closest('.version-badge')) {
                 e.stopPropagation();
-                this.showVersionPicker(group);
+                this.openGroup(group, { focusVersions: true });
             } else {
-                this.playGroup(group);
+                this.openGroup(group);
             }
         });
 
@@ -906,6 +921,241 @@ class MoviesPage {
             resumeTime: this.getResumeOffset(h.progress, h.duration),
             versions: [movie],
             playbackPreferences: h.data?.playbackPreferences || h.data?.playback_preferences || null
+        });
+    }
+
+    // === Movie detail destination ===
+
+    openGroup(group, { focusVersions = false, selectedMovie = null } = {}) {
+        const ordered = MediaUtils.orderVersionsByPreference(group.items, this.getPreferences());
+        const resumeVersion = ordered.find(item => {
+            const state = this.watchState.get(String(item.stream_id));
+            return state && state.ratio > 0.01 && state.ratio < 0.9;
+        });
+        this.showMovieDetails(group, selectedMovie || resumeVersion || ordered[0], {
+            versions: ordered,
+            focusVersions
+        });
+    }
+
+    getMovieDisplayTitle(movie = this.currentMovie) {
+        return movie?.tmdb?.title || movie?.title || movie?.name || 'Movie';
+    }
+
+    getMoviePoster(movie = this.currentMovie) {
+        return MediaUtils.safeImageUrl(
+            movie?.stream_icon || movie?.cover || MediaUtils.tmdbPosterUrl(movie?.tmdb, 'w600_and_h900_bestv2'),
+            '/img/norva-media-placeholder.png'
+        );
+    }
+
+    getTmdbImageUrl(path, size = 'w1280') {
+        const raw = String(path || '').trim();
+        if (!raw) return null;
+        if (/^https?:\/\//i.test(raw)) return MediaUtils.safeImageUrl(raw);
+        if (raw.startsWith('/')) return MediaUtils.safeImageUrl(`https://image.tmdb.org/t/p/${size}${raw}`);
+        return null;
+    }
+
+    getMovieBackdrop(movie = this.currentMovie) {
+        return this.getTmdbImageUrl(
+            movie?.backdrop_path || movie?.tmdb?.backdrop_path || movie?.backdrop || movie?.tmdb?.backdrop,
+            'w1280'
+        ) || this.getMoviePoster(movie);
+    }
+
+    getMovieGenres(movie = this.currentMovie) {
+        const genres = movie?.tmdb?.genres || movie?.genres || [];
+        if (Array.isArray(genres)) {
+            return genres.map(g => typeof g === 'string' ? g : g?.name).filter(Boolean);
+        }
+        return String(genres || '').split(',').map(g => g.trim()).filter(Boolean);
+    }
+
+    getCategoryName(movie = this.currentMovie) {
+        const category = this.categories.find(c =>
+            String(c.sourceId) === String(movie?.sourceId) &&
+            String(c.category_id) === String(movie?.category_id)
+        );
+        return category?.category_name || '';
+    }
+
+    getMovieDuration(movie = this.currentMovie) {
+        const runtime = Number(movie?.tmdb?.runtime || movie?.runtime || movie?.duration_minutes);
+        if (Number.isFinite(runtime) && runtime > 0) return `${Math.round(runtime)} min`;
+        const seconds = MediaUtils.parseDurationToSeconds(movie?.duration || movie?.duration_secs || movie?.duration_seconds);
+        if (!seconds) return '';
+        const minutes = Math.round(seconds / 60);
+        const h = Math.floor(minutes / 60);
+        const m = minutes % 60;
+        if (h <= 0) return `${minutes} min`;
+        return m ? `${h} h ${m} min` : `${h} h`;
+    }
+
+    getMovieWatchState(movie = this.currentMovie) {
+        const state = this.watchState.get(String(movie?.stream_id));
+        if (!state) return { status: 'unwatched', ratio: 0, progress: 0, duration: 0, resumeTime: 0 };
+        const resumeTime = this.getResumeOffset(state.progress, state.duration);
+        if (state.ratio >= 0.9) return { ...state, status: 'watched', resumeTime: 0 };
+        if (resumeTime > 0) return { ...state, status: 'inprogress', resumeTime };
+        return { ...state, status: 'unwatched', resumeTime: 0 };
+    }
+
+    getMovieActionLabel(movie = this.currentMovie) {
+        const state = this.getMovieWatchState(movie);
+        if (state.status === 'inprogress') return 'Reprendre';
+        if (state.status === 'watched') return 'Recommencer';
+        return 'Lire';
+    }
+
+    syncDetailFavoriteButton() {
+        if (!this.detailFavoriteBtn || !this.currentMovieGroup) return;
+        const isFav = this.currentMovieGroup.items.some(i => this.favoriteIds.has(`${i.sourceId}:${i.stream_id}`));
+        this.detailFavoriteBtn.classList.toggle('active', isFav);
+        this.detailFavoriteBtn.title = isFav ? 'Retirer des favoris' : 'Ajouter aux favoris';
+        const icon = this.detailFavoriteBtn.querySelector('.fav-icon');
+        const label = this.detailFavoriteBtn.querySelector('.fav-label');
+        if (icon) icon.innerHTML = isFav ? Icons.favorite : Icons.favoriteOutline;
+        if (label) label.textContent = 'Favori';
+    }
+
+    renderMovieVersions(selectedMovie = this.currentMovie) {
+        if (!this.versionsList || !this.versionSummary) return;
+        const versions = this.currentMovieVersions || [];
+        if (versions.length <= 1) {
+            this.versionsList.innerHTML = '';
+            this.versionSummary.textContent = 'Meilleure version sélectionnée automatiquement.';
+            this.versionsList.closest('.movie-versions-section')?.classList.add('single-version');
+            return;
+        }
+
+        this.versionsList.closest('.movie-versions-section')?.classList.remove('single-version');
+        this.versionSummary.textContent = `${versions.length} versions disponibles. Le bouton Lire utilise la version sélectionnée.`;
+        this.versionsList.innerHTML = versions.map((item, index) => {
+            const version = MediaUtils.parseVersionInfo(item.name);
+            const state = this.getMovieWatchState(item);
+            const active = String(item.stream_id) === String(selectedMovie?.stream_id) &&
+                String(item.sourceId) === String(selectedMovie?.sourceId);
+            const bits = [
+                version.quality,
+                version.language,
+                item.container_extension,
+                this.getSourceName(item.sourceId)
+            ].filter(Boolean);
+            return `
+                <button class="movie-version-item ${active ? 'active' : ''}" type="button" data-index="${index}">
+                    <span class="movie-version-main">${MediaUtils.escapeHtml(bits.join(' - ') || `Version ${index + 1}`)}</span>
+                    <span class="movie-version-sub">${MediaUtils.escapeHtml(item.name || this.getMovieDisplayTitle(item))}</span>
+                    ${state.status === 'inprogress' ? '<span class="movie-version-progress">En cours</span>' : ''}
+                    ${state.status === 'watched' ? '<span class="movie-version-progress">Vu</span>' : ''}
+                </button>`;
+        }).join('');
+
+        this.versionsList.querySelectorAll('.movie-version-item').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const index = parseInt(btn.dataset.index);
+                const movie = versions[index];
+                if (movie) this.showMovieDetails(this.currentMovieGroup, movie, { versions });
+            });
+        });
+    }
+
+    showMovieDetails(group, selectedMovie = null, { versions = null, focusVersions = false } = {}) {
+        if (!group?.items?.length || !this.detailsPanel) return;
+        const ordered = versions || MediaUtils.orderVersionsByPreference(group.items, this.getPreferences());
+        const movie = selectedMovie || ordered[0] || group.representative;
+        const displayMovie = group.representative || movie;
+
+        this.currentMovieGroup = group;
+        this.currentMovieVersions = ordered;
+        this.currentMovie = movie;
+
+        this.pageEl?.classList.add('movie-detail-open');
+        this.container.classList.add('hidden');
+        this.detailsPanel.classList.remove('hidden');
+        this.detailsPanel.scrollTop = 0;
+
+        const hero = document.getElementById('movie-detail-hero');
+        const poster = this.getMoviePoster(displayMovie);
+        const backdrop = this.getMovieBackdrop(displayMovie);
+        if (hero) hero.style.setProperty('--movie-hero-bg', `url("${String(backdrop).replace(/"/g, '%22')}")`);
+
+        const posterEl = document.getElementById('movie-detail-poster');
+        if (posterEl) {
+            posterEl.src = poster;
+            posterEl.alt = this.getMovieDisplayTitle(displayMovie);
+        }
+
+        const titleEl = document.getElementById('movie-detail-title');
+        if (titleEl) titleEl.textContent = this.getMovieDisplayTitle(displayMovie);
+
+        const plotEl = document.getElementById('movie-detail-plot');
+        if (plotEl) plotEl.textContent = displayMovie.plot || displayMovie.tmdb?.overview || 'Aucun résumé disponible pour le moment.';
+
+        const version = MediaUtils.parseVersionInfo(movie.name);
+        const rating = parseFloat(displayMovie.rating || displayMovie.tmdb?.vote_average);
+        const ratingLabel = Number.isFinite(rating) && rating > 0 ? `Note ${rating.toFixed(1).replace('.0', '')}` : '';
+        const metaParts = [
+            this.getItemYear(displayMovie),
+            this.getMovieDuration(displayMovie),
+            ratingLabel,
+            ...this.getMovieGenres(displayMovie).slice(0, 3),
+            version.quality,
+            version.language,
+            ordered.length > 1 ? `${ordered.length} versions` : '',
+            this.getCategoryName(displayMovie)
+        ].filter(Boolean);
+
+        const metaEl = document.getElementById('movie-detail-meta');
+        if (metaEl) metaEl.innerHTML = metaParts.map(part => `<span>${MediaUtils.escapeHtml(part)}</span>`).join('');
+
+        const state = this.getMovieWatchState(movie);
+        const progressEl = document.getElementById('movie-detail-progress');
+        if (progressEl) {
+            progressEl.classList.toggle('hidden', !(state.ratio > 0.01 && state.ratio < 0.9));
+            const fill = progressEl.querySelector('div');
+            if (fill) fill.style.width = `${Math.max(0, Math.min(100, Math.round((state.ratio || 0) * 100)))}%`;
+        }
+
+        if (this.primaryActionBtn) {
+            this.primaryActionBtn.disabled = false;
+            this.primaryActionBtn.dataset.streamId = movie.stream_id;
+            this.primaryActionBtn.dataset.sourceId = movie.sourceId;
+            this.primaryActionBtn.innerHTML = `<span class="play-icon">${Icons.play}</span><span>${MediaUtils.escapeHtml(this.getMovieActionLabel(movie))}</span>`;
+        }
+
+        this.syncDetailFavoriteButton();
+        this.renderMovieVersions(movie);
+
+        if (focusVersions) {
+            setTimeout(() => {
+                this.detailsPanel?.querySelector('.movie-versions-section')?.scrollIntoView({ block: 'start' });
+            }, 50);
+        }
+    }
+
+    hideDetails() {
+        this.detailsPanel?.classList.add('hidden');
+        this.container?.classList.remove('hidden');
+        this.pageEl?.classList.remove('movie-detail-open');
+        this.currentMovie = null;
+        this.currentMovieGroup = null;
+        this.currentMovieVersions = [];
+    }
+
+    async playPrimaryMovie() {
+        if (!this.currentMovie) return;
+        const versions = this.currentMovieVersions?.length
+            ? [this.currentMovie, ...this.currentMovieVersions.filter(item =>
+                String(item.stream_id) !== String(this.currentMovie.stream_id) ||
+                String(item.sourceId) !== String(this.currentMovie.sourceId)
+            )]
+            : [this.currentMovie];
+        const state = this.getMovieWatchState(this.currentMovie);
+        await this.playMovie(this.currentMovie, {
+            versions,
+            resumeTime: state.resumeTime || 0,
+            playbackPreferences: state.data?.playbackPreferences || state.data?.playback_preferences || null
         });
     }
 

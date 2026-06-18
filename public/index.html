@@ -10,7 +10,7 @@
   <title>Norva | IPTV Player</title>
   <meta name="description" content="Stream live TV, movies, and series with EPG support">
   <link rel="icon" type="image/png" href="/favicon.png">
-  <link rel="stylesheet" href="css/main.css?v=13">
+  <link rel="stylesheet" href="css/main.css?v=14">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@800&display=swap"
@@ -396,6 +396,37 @@
           <div class="empty-state">
             <p>Loading movies...</p>
           </div>
+        </div>
+        <div id="movie-details" class="movie-details hidden">
+          <section class="movie-detail-hero" id="movie-detail-hero">
+            <button class="movie-back-btn" type="button">&larr; Films</button>
+            <div class="movie-detail-hero-content">
+              <img id="movie-detail-poster" src="" alt="" class="movie-detail-poster">
+              <div class="movie-detail-info">
+                <div id="movie-detail-meta" class="movie-meta-pills"></div>
+                <h3 id="movie-detail-title"></h3>
+                <p id="movie-detail-plot"></p>
+                <div id="movie-detail-progress" class="movie-detail-progress hidden">
+                  <div></div>
+                </div>
+                <div class="movie-detail-actions">
+                  <button id="movie-primary-action" class="movie-primary-action" type="button">Lire</button>
+                  <button id="movie-detail-favorite" class="movie-secondary-action" type="button"
+                    title="Ajouter aux favoris">
+                    <span class="fav-icon">&hearts;</span>
+                    <span class="fav-label">Favori</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </section>
+          <section class="movie-versions-section">
+            <div class="movie-versions-toolbar">
+              <h3>Versions</h3>
+              <p id="movie-version-summary" class="hint"></p>
+            </div>
+            <div id="movie-versions-list" class="movie-versions-list"></div>
+          </section>
         </div>
       </div>
 
@@ -1388,10 +1419,10 @@
   <script src="/js/components/SourceManager.js?v=7"></script>
   <script src="/js/components/EpgGuide.js?v=10"></script>
   <script src="/js/components/LiveGuideFusion.js?v=14"></script>
-  <script src="/js/pages/HomePage.js?v=17"></script>
+  <script src="/js/pages/HomePage.js?v=18"></script>
   <script src="/js/pages/LivePage.js?v=4"></script>
   <script src="/js/pages/Guide.js?v=2"></script>
-  <script src="/js/pages/MoviesPage.js?v=14"></script>
+  <script src="/js/pages/MoviesPage.js?v=15"></script>
   <script src="/js/pages/SeriesPage.js?v=14"></script>
   <script src="/js/pages/Settings.js?v=9"></script>
   <script src="/js/pages/WatchPage.js?v=65"></script>

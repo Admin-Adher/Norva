@@ -504,6 +504,10 @@ class HomePage {
             this.navigateToSeries(item);
             return;
         }
+        if (type === 'movie' && !isResume) {
+            this.navigateToMovie(item);
+            return;
+        }
         if (type === 'channel') {
             this.playChannel(item.item_id || item.streamId || item.stream_id, item.source_id || item.sourceId);
             return;
@@ -661,6 +665,43 @@ class HomePage {
             const group = { representative: series, items: [series] };
             page.currentSeriesGroup = group;
             page.showSeriesDetailsV2(series, group);
+        }, 100);
+    }
+
+    navigateToMovie(item) {
+        if (!this.app.pages.movies) return;
+        const data = item.data || {};
+        const metadata = item.metadata || {};
+        const sourceId = item.source_id || item.sourceId || data.sourceId;
+        const streamId = item.item_id || item.itemId || item.stream_id || item.streamId || data.streamId;
+        const tmdb = data.tmdb || metadata.tmdb || item.tmdb || {};
+        const movie = {
+            stream_id: streamId,
+            sourceId,
+            name: this.displayTitle(item),
+            stream_icon: item.stream_icon || item.poster_url || item.posterUrl || data.poster || data.posterUrl || metadata.poster || null,
+            cover: item.cover || data.cover || null,
+            plot: data.description || data.plot || item.plot || metadata.overview || tmdb.overview || '',
+            year: data.year || item.year || metadata.year || '',
+            rating: item.rating || data.rating || metadata.rating || metadata.voteAverage || tmdb.vote_average || '',
+            category_id: item.category_id || data.categoryId || data.category_id || '',
+            container_extension: item.container_extension || item.containerExtension || data.containerExtension || 'mp4',
+            tmdb: {
+                ...tmdb,
+                title: metadata.title || data.title || item.title || tmdb.title || this.displayTitle(item),
+                overview: metadata.overview || data.description || data.plot || item.plot || tmdb.overview || '',
+                poster_path: metadata.poster_path || metadata.posterPath || data.poster_path || tmdb.poster_path || null,
+                backdrop_path: metadata.backdrop_path || metadata.backdropPath || data.backdrop_path || tmdb.backdrop_path || null,
+                runtime: metadata.runtime || data.runtime || tmdb.runtime || null,
+                vote_average: metadata.voteAverage || data.voteAverage || item.rating || tmdb.vote_average || ''
+            }
+        };
+
+        this.app.navigateTo('movies');
+        setTimeout(() => {
+            const page = this.app.pages.movies;
+            const group = { representative: movie, items: [movie] };
+            page.showMovieDetails(group, movie, { versions: [movie] });
         }, 100);
     }
 
