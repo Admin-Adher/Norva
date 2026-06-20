@@ -2,11 +2,14 @@ name: Deploy Norva Web to Cloudflare Pages
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
 
 jobs:
   deploy:
     name: Deploy to Cloudflare Pages
     runs-on: ubuntu-latest
+    environment: Cloudflare
     steps:
       - uses: actions/checkout@v4
 
