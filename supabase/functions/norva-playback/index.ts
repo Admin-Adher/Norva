@@ -40,7 +40,7 @@ const RUNTIME_CONFIG_KEYS = [
 ];
 const PROVIDER_SLOT_RELEASE_DELAY_MS = boundedInt(
   Deno.env.get("NORVA_PROVIDER_SLOT_RELEASE_DELAY_MS") ?? Deno.env.get("PROVIDER_SLOT_RELEASE_DELAY_MS"),
-  8_000,
+  2_500,
   0,
   15_000,
 );
@@ -92,7 +92,7 @@ Deno.serve(async (req) => {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 13,
+        version: 14,
         entitlements: true,
         entitlementsMode: entitlementRuntime.mode,
         entitlementsEnforced: entitlementRuntime.enforced,
@@ -236,9 +236,16 @@ async function createPlaybackSession(
       expiresAt,
     }, db)
     : null;
+  // Only the cloud-gateway transcode path shares the provider's single slot, so
+  // only it benefits from a brief release wait after evicting a previous gateway
+  // session. Direct/relay (residential native players, pass-through) never hold a
+  // gateway slot — make them wait nothing. The gateway also retries provider 401s
+  // internally, so this is a small head start, not the old 8s blanket stall that
+  // made switching titles feel slow.
+  const needsSlotWait = mode === "transcode" && closedGatewaySessions > 0;
   const startupWaitMs = Math.max(
     edgeCoordination?.waitMs ?? 0,
-    closedGatewaySessions > 0 ? PROVIDER_SLOT_RELEASE_DELAY_MS : 0,
+    needsSlotWait ? PROVIDER_SLOT_RELEASE_DELAY_MS : 0,
   );
   if (startupWaitMs) await sleep(startupWaitMs);
   await requirePlaybackCapacity(userId, db);
