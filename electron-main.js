@@ -60,7 +60,7 @@ function waitForServer(url, timeoutMs = 20000) {
     });
 }
 
-function createWindow(url) {
+function createWindow(url, transcoderUrl) {
     const window = new BrowserWindow({
         width: 1280,
         height: 820,
@@ -72,7 +72,12 @@ function createWindow(url) {
         webPreferences: {
             contextIsolation: true,
             nodeIntegration: false,
-            sandbox: true
+            sandbox: true,
+            preload: path.join(__dirname, 'preload.js'),
+            // Tells the page where the in-app transcoder lives (residential IP),
+            // so cloud-mode playback transcodes locally instead of via the
+            // datacenter gateway the provider blocks.
+            additionalArguments: transcoderUrl ? [`--norva-transcoder=${transcoderUrl}`] : []
         }
     });
 
@@ -104,6 +109,25 @@ async function startDesktopApp() {
     const port = await findFreePort();
     const serverUrl = `http://127.0.0.1:${port}`;
 
+    // The window can load the bundled local UI (default, offline-capable) or the
+    // cloud app for full cloud sync. Either way the in-app server runs as the
+    // residential transcoder. Override with NORVA_DESKTOP_URL, e.g.
+    // https://norva.tv/app.html for the pure cloud experience.
+    const appUrl = process.env.NORVA_DESKTOP_URL || serverUrl;
+
+    // If we load a remote (cloud) origin, let the in-app server accept its
+    // cross-origin playback calls so the page can use the local transcoder.
+    try {
+        const appOrigin = new URL(appUrl).origin;
+        if (appOrigin !== serverUrl) {
+            const origins = (process.env.CORS_ORIGINS ? process.env.CORS_ORIGINS.split(',') : [])
+                .map((s) => s.trim())
+                .filter(Boolean);
+            if (!origins.includes(appOrigin)) origins.push(appOrigin);
+            process.env.CORS_ORIGINS = origins.join(',');
+        }
+    } catch (_) { /* appUrl invalid -> fall back to local serverUrl below */ }
+
     process.env.NODE_ENV = 'production';
     process.env.PORT = String(port);
     process.env.NODECAST_DATA_DIR = path.join(userData, 'data');
@@ -113,7 +137,7 @@ async function startDesktopApp() {
     require('./server/index');
 
     await waitForServer(`${serverUrl}/login.html`);
-    createWindow(serverUrl);
+    createWindow(appUrl, serverUrl);
 }
 
 const gotLock = app.requestSingleInstanceLock();

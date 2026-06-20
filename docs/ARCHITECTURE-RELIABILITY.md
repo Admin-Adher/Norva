@@ -117,16 +117,24 @@ Classés par impact / facilité. ⚙️ = déployable par l'agent (web/edge) ;
   (`api.js`) envoie le preset (`tivimate` = `TiviMate/4.7.0`) client → edge →
   gateway. Réglable via les settings cloud.
 
+- **App desktop = synchro cloud + transcodage résidentiel local**
+  (`public/js/api.js`, `electron-main.js`, `preload.js`). En mode cloud servi
+  par un serveur Norva local (l'app desktop, ou tout serveur sur `localhost`),
+  `getStreamUrl` détecte le transcodeur in-app (`_localTranscoderBase()` :
+  `window.NorvaDesktop.transcoder` ou origine localhost), résout l'**URL directe**
+  du fournisseur via le cloud (`mode: 'direct'`), la transcode **sur la machine
+  (IP résidentielle)** et joue le HLS local par le pipeline existant. Catalogue /
+  reprise / favoris restent dans le cloud → reprise partagée PC ↔ téléphone ↔ TV,
+  **sans hub séparé**. Strictement gated : `norva.tv` dans un navigateur n'a pas
+  de transcodeur local → comportement inchangé. En cas d'échec local → repli sur
+  le chemin cloud.
+  - ⚠️ **À tester via un build Electron** (impossible ici). L'app desktop doit
+    être **en mode cloud** (connexion au compte cloud). Pour l'expérience cloud
+    complète : lancer avec `NORVA_DESKTOP_URL=https://norva.tv/app.html`.
+
 ### Reste à faire
-1. **Web → hub local (navigateur, codecs exotiques)**. Seul chemin résidentiel
-   pour lire MKV/HEVC/AC3 **dans un navigateur** (le natif TV est déjà couvert).
-   Conception (à faire en opt-in strict pour ne rien risquer sur le web par
-   défaut) :
-   - Réglage explicite « Lecture via hub local » (par défaut OFF) + champ URL du
-     hub (Cloudflare Tunnel → HTTPS) + bouton test.
-   - Router **uniquement la résolution de flux** (`getStreamUrl`) vers le hub
-     quand activé ; garder catalogue/historique/favoris sur le cloud.
-   - Côté hub (`server/`) : autoriser l'origine `norva.tv` (CORS) + HTTPS via le
-     tunnel. `_hubBase()` existe déjà dans `api.js`.
-   - Idéalement : repli automatique sur le hub quand le gateway cloud renvoie un
-     blocage fournisseur (401), si un hub est configuré.
+1. **Onglet de navigateur nu sur une machine SANS app Norva** (cas limite,
+   optionnel) : ex. un Chromebook / PC d'emprunt ouvrant `norva.tv`. Là il n'y a
+   pas de transcodeur résidentiel disponible → seul un hub distant appairé
+   (Cloudflare Tunnel + CORS + token) pourrait servir. Non prioritaire : tous les
+   appareils normaux utilisent une app Norva (TV/mobile/desktop) = déjà couverts.

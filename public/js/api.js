@@ -9,6 +9,22 @@ function _hubBase() {
     return hub ? hub.replace(/\/$/, '') : '';
 }
 
+// Base URL of an in-app / same-machine Norva transcoder (residential IP).
+// Set by the desktop app (preload exposes window.NorvaDesktop.transcoder), or
+// inferred when the page is served by a local Norva server (localhost). Used to
+// transcode locally while still syncing catalog/resume through the cloud, so the
+// IPTV provider never sees a datacenter IP. Empty in a normal browser on norva.tv.
+function _localTranscoderBase() {
+    if (typeof window === 'undefined') return '';
+    const explicit = window.NorvaDesktop && window.NorvaDesktop.transcoder;
+    if (explicit) return String(explicit).replace(/\/$/, '');
+    const host = window.location && window.location.hostname;
+    if (host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]') {
+        return String(window.location.origin).replace(/\/$/, '');
+    }
+    return '';
+}
+
 function _isHostedApp() {
     const host = window.location.hostname;
     return Boolean(host && host !== 'localhost' && host !== '127.0.0.1' && host !== '::1');
@@ -1091,6 +1107,63 @@ const CloudAdapter = (() => {
                 const container = (isVodPlayback && (!requestedContainer || requestedContainer === 'm3u8'))
                     ? 'mp4'
                     : requestedContainer;
+
+                // Desktop app / local Norva server in cloud mode: keep catalog +
+                // resume in the cloud, but TRANSCODE on this machine (residential
+                // IP) so the provider doesn't 401-block a datacenter. Resolve the
+                // raw provider URL from the cloud (direct), hand it to the local
+                // transcoder, and play its HLS through the normal pipeline. Only
+                // triggers when a local transcoder is present (desktop/localhost);
+                // norva.tv in a browser never hits this. On any failure it falls
+                // through to the normal cloud path.
+                const localTranscoder = _localTranscoderBase();
+                if (localTranscoder) {
+                    try {
+                        const hint = playbackHintFromQuery(query, container, type);
+                        const cloudSourceId = await resolveSourceId(sourceId);
+                        const userAgent = resolveCloudUserAgent();
+                        const direct = await cloudPlaybackApi().createSession({
+                            sourceId: cloudSourceId,
+                            itemType: type === 'series' ? 'series' : type === 'movie' ? 'movie' : 'live',
+                            itemId: streamId,
+                            playbackHint: hint,
+                            mode: 'direct',
+                            clientMetadata: _cloudClientTelemetryMetadata(),
+                            ...(userAgent ? { userAgent } : {})
+                        });
+                        const providerUrl = direct?.playback?.url || direct?.url;
+                        if (!providerUrl) throw new Error('Cloud did not return a direct stream URL');
+                        const seekOffset = Math.max(0, Math.floor(Number(
+                            hint.seekOffset ?? hint.startOffset ?? hint.resumeTime ?? 0
+                        )) || 0);
+                        const transcodeRes = await fetch(`${localTranscoder}/api/transcode/session`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ url: providerUrl, seekOffset })
+                        });
+                        if (!transcodeRes.ok) {
+                            const detail = await transcodeRes.json().catch(() => ({}));
+                            throw new Error(detail.error || `Local transcoder error ${transcodeRes.status}`);
+                        }
+                        const ts = await transcodeRes.json();
+                        if (!ts?.playlistUrl) throw new Error('Local transcoder returned no playlist');
+                        const hls = `${localTranscoder}${ts.playlistUrl}`;
+                        return {
+                            url: hls,
+                            streamUrl: hls,
+                            playbackUrl: hls,
+                            cloud: true,
+                            mode: 'desktop-local',
+                            sessionId: direct?.session?.id,
+                            seekOffset,
+                            startOffset: seekOffset
+                        };
+                    } catch (localErr) {
+                        console.warn('[Desktop] Local transcode failed; falling back to cloud gateway:', localErr?.message || localErr);
+                        // fall through to the normal cloud path below
+                    }
+                }
+
                 const requestedCloudMode = localStorage.getItem('norva-cloud-playback-mode') || '';
                 const forcedMode = query.get('mode') || '';
                 const preferredMode = forcedMode || (isVodPlayback ? 'transcode' : (requestedCloudMode || 'relay'));
