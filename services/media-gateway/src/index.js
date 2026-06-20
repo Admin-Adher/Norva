@@ -15,7 +15,9 @@ const OUTPUT_DIR = path.resolve(process.env.OUTPUT_DIR || path.join(os.tmpdir(),
 const FFMPEG_PATH = process.env.FFMPEG_PATH || 'ffmpeg';
 const FFPROBE_PATH = process.env.FFPROBE_PATH || 'ffprobe';
 const DEFAULT_TTL_SECONDS = clampInt(process.env.SESSION_TTL_SECONDS, 30 * 60, 60, 12 * 60 * 60);
-const STARTUP_TIMEOUT_MS = clampInt(process.env.STARTUP_TIMEOUT_MS, 45_000, 5_000, 180_000);
+// Linear-read VOD resume (-seekable 0) reaches the resume point by reading from
+// byte 0, so far resumes need a longer startup budget than a normal stream.
+const STARTUP_TIMEOUT_MS = clampInt(process.env.STARTUP_TIMEOUT_MS, 60_000, 5_000, 180_000);
 const PLAYLIST_REQUEST_TIMEOUT_MS = clampInt(process.env.PLAYLIST_REQUEST_TIMEOUT_MS, 45_000, 5_000, 180_000);
 const XTREAM_REQUEST_TIMEOUT_MS = clampInt(process.env.XTREAM_REQUEST_TIMEOUT_MS, 15_000, 5_000, 60_000);
 const CODEC_PROBE_TIMEOUT_MS = clampInt(process.env.CODEC_PROBE_TIMEOUT_MS, 12_000, 1_000, 30_000);
@@ -29,12 +31,6 @@ const MAX_SUBTITLE_TRACKS = clampInt(process.env.MAX_SUBTITLE_TRACKS, 32, 1, 64)
 const PROVIDER_SLOT_RELEASE_DELAY_MS = clampInt(process.env.PROVIDER_SLOT_RELEASE_DELAY_MS, 8_000, 0, 15_000);
 const STOP_CONFLICTING_SOURCE_SESSIONS = (process.env.STOP_CONFLICTING_SOURCE_SESSIONS || 'true') !== 'false';
 const STOP_CONFLICTING_OWNER_SESSIONS = (process.env.STOP_CONFLICTING_OWNER_SESSIONS || 'true') !== 'false';
-// When re-encoding from a seek, decode this many seconds BEFORE the requested
-// offset and discard them (output seek) so the encoder resyncs on a clean
-// keyframe first. Without it, an imprecise provider VOD seek starts decode
-// mid-GOP and the re-encoded output is full of "top block unavailable / corrupt
-// decoded frame" garbage (the "saturation" users see right after Resume).
-const SEEK_DECODE_PREROLL_SECONDS = clampInt(process.env.SEEK_DECODE_PREROLL_SECONDS, 12, 0, 120);
 // The provider allows a single concurrent connection; a fresh session can hit a
 // 401 while the previous connection's slot is still releasing. Retry startup a
 // few times (after re-evicting + waiting) before surfacing a 502 to the client.
@@ -43,7 +39,7 @@ const PROVIDER_AUTH_RETRY_DELAY_MS = clampInt(process.env.PROVIDER_AUTH_RETRY_DE
 const FFMPEG_USER_AGENT = process.env.FFMPEG_USER_AGENT ||
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36 Norva/1.0';
 const MAX_LOG_TAIL = 12000;
-const GATEWAY_VERSION = 37;
+const GATEWAY_VERSION = 38;
 // Browser playback fetches HLS playlists/segments cross-origin, so these must
 // list every Norva web origin or the browser blocks the response (CORS). Keep
 // in sync with the relay's ALLOWED_ORIGINS (services/norva-relay/wrangler.jsonc).
@@ -511,21 +507,21 @@ function startFfmpeg(session) {
 function seekArgsForSession(session, encodeVideo) {
     const seekOffset = Number(session.seekOffset) > 0 ? Math.floor(Number(session.seekOffset)) : 0;
     if (seekOffset <= 0) return { preInputSeek: [], postInputSeek: [] };
-    // Copy mode can't output-seek (it never decodes); it copies from the
-    // keyframe at/before the offset, which is already clean. Only the encode
-    // path needs the accurate two-stage seek: a coarse input seek to a point
-    // before the target (fast, snaps near a keyframe) plus a fine output seek
-    // over the DECODED stream, so the encoder resyncs on a clean keyframe and
-    // only emits cleanly-decoded frames from the requested offset onward.
+    // Copy mode can't decode, so it must input-seek. That's fine: copy is only
+    // used for browser-safe MP4, which carries a real index and seeks cleanly.
     if (!encodeVideo) {
         return { preInputSeek: ['-ss', String(seekOffset)], postInputSeek: [] };
     }
-    const coarse = Math.max(0, seekOffset - SEEK_DECODE_PREROLL_SECONDS);
-    const fine = seekOffset - coarse;
-    return {
-        preInputSeek: coarse > 0 ? ['-ss', String(coarse)] : [],
-        postInputSeek: fine > 0 ? ['-ss', String(fine)] : []
-    };
+    // Encode path. The Xtream provider only honors BOUNDED HTTP Range requests
+    // (`bytes=N-M`); the open-ended `bytes=N-` requests ffmpeg uses to seek are
+    // answered with byte 0, so a normal seek lands on garbage and the decoder
+    // emits a continuous stream of corrupt frames ("top block unavailable /
+    // corrupt decoded frame" = the macroblock "saturation" users saw right
+    // after Resume). Force a linear read (-seekable 0 -> no range seeks) and do
+    // an ACCURATE output seek (-ss AFTER -i) to the exact target: reliable and
+    // clean. Trade-off: startup scales with the resume point (linear read from
+    // byte 0), so far resumes take longer to first frame.
+    return { preInputSeek: ['-seekable', '0'], postInputSeek: ['-ss', String(seekOffset)] };
 }
 
 function inputProbeArgsForSession(session) {
