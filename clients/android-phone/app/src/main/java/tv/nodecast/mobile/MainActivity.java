@@ -35,9 +35,11 @@ public class MainActivity extends Activity {
     private static final String PREFS          = "norva_mobile";
     private static final String PREF_SERVER_URL = "serverUrl";
     private static final String PREF_MODE       = "mode"; // "cloud" | "server"
-    private static final String CLOUD_ACCOUNT_URL = "https://norva-eight.vercel.app/account.html?returnTo=%2F%3Fmobile%3D1%23home";
-    private static final String CLOUD_WATCH_URL = "https://norva-eight.vercel.app/?mobile=1#home";
+    private static final String CLOUD_ACCOUNT_URL = "https://norva.tv/account.html?returnTo=%2Fapp.html%3Fmobile%3D1%23home";
+    private static final String CLOUD_WATCH_URL = "https://norva.tv/app.html?mobile=1#home";
     private static final String UA_SUFFIX       = " NorvaTV-AndroidPhone/1.0";
+    private static final int    REQ_PLAYER      = 1001;
+    private boolean             cloudBridgeAdded = false;
 
     private FrameLayout  root;
     private WebView      webView;
@@ -81,12 +83,12 @@ public class MainActivity extends Activity {
         String mode = prefs().getString(PREF_MODE, null);
         String saved = prefs().getString(PREF_SERVER_URL, null);
         if ("cloud".equals(mode)) {
-            connect(CLOUD_WATCH_URL);
+            connectCloud(CLOUD_WATCH_URL);
         } else if (saved != null && !saved.isEmpty()) {
             connect(saved);
         } else {
             prefs().edit().putString(PREF_MODE, "cloud").apply();
-            connect(CLOUD_ACCOUNT_URL);
+            connectCloud(CLOUD_ACCOUNT_URL);
         }
     }
 
@@ -202,7 +204,7 @@ public class MainActivity extends Activity {
         accountBtn.setBackgroundColor(Color.parseColor("#3B82F6"));
         accountBtn.setOnClickListener(v -> {
             prefs().edit().putString(PREF_MODE, "cloud").apply();
-            connect(CLOUD_WATCH_URL);
+            connectCloud(CLOUD_WATCH_URL);
         });
 
         LinearLayout.LayoutParams accountBtnLp = new LinearLayout.LayoutParams(
@@ -302,6 +304,80 @@ public class MainActivity extends Activity {
         webViewVisible = true;
         webView.loadUrl(url);
         webView.requestFocus();
+    }
+
+    /** Cloud playback: expose the native player bridge, then load the cloud app. */
+    private void connectCloud(String url) {
+        if (!cloudBridgeAdded) {
+            webView.addJavascriptInterface(new CloudBridge(), "NorvaTVCloud");
+            cloudBridgeAdded = true;
+        }
+        connect(url);
+    }
+
+    /**
+     * JS bridge: the web app hands playback here so movies use the phone's
+     * hardware decoders and the home network (residential IP) instead of the
+     * cloud gateway the provider blocks. playVideoResumable is feature-detected
+     * by the web, so older builds still work (playback without resume).
+     */
+    private class CloudBridge {
+        @android.webkit.JavascriptInterface
+        public void playVideo(final String url, final String title) {
+            openPlayer(url, title, null, null, null, 0);
+        }
+
+        @android.webkit.JavascriptInterface
+        public void playVideoWithMeta(final String url, final String title, final String sourceId,
+                                      final String itemType, final String itemId) {
+            openPlayer(url, title, sourceId, itemType, itemId, 0);
+        }
+
+        @android.webkit.JavascriptInterface
+        public void playVideoResumable(final String url, final String title, final String sourceId,
+                                       final String itemType, final String itemId, final int resumeSeconds) {
+            openPlayer(url, title, sourceId, itemType, itemId, resumeSeconds);
+        }
+    }
+
+    private void openPlayer(final String url, final String title, final String sourceId,
+                            final String itemType, final String itemId, final int resumeSeconds) {
+        runOnUiThread(() -> {
+            Intent intent = new Intent(MainActivity.this, PlayerActivity.class);
+            intent.putExtra(PlayerActivity.EXTRA_URL, url);
+            intent.putExtra(PlayerActivity.EXTRA_TITLE, title);
+            if (sourceId != null) intent.putExtra(PlayerActivity.EXTRA_SOURCE_ID, sourceId);
+            if (itemType != null) intent.putExtra(PlayerActivity.EXTRA_ITEM_TYPE, itemType);
+            if (itemId != null) intent.putExtra(PlayerActivity.EXTRA_ITEM_ID, itemId);
+            if (resumeSeconds > 0) intent.putExtra(PlayerActivity.EXTRA_RESUME_SECONDS, resumeSeconds);
+            startActivityForResult(intent, REQ_PLAYER);
+        });
+    }
+
+    /**
+     * The native player returns its final position when it closes; forward it to
+     * the web app, which persists it to the cloud history for cross-device resume.
+     */
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != REQ_PLAYER || data == null || webView == null) return;
+        final String sourceId = data.getStringExtra("sourceId");
+        final String itemType = data.getStringExtra("itemType");
+        final String itemId = data.getStringExtra("itemId");
+        final long pos = data.getLongExtra("positionSeconds", 0);
+        final long dur = data.getLongExtra("durationSeconds", 0);
+        if (sourceId == null || itemId == null || pos <= 0) return;
+        final String js = "window.__norvaNative && window.__norvaNative.onProgress("
+                + jsStr(sourceId) + "," + jsStr(itemType) + "," + jsStr(itemId) + "," + pos + "," + dur + ")";
+        runOnUiThread(() -> {
+            try { webView.evaluateJavascript(js, null); } catch (Exception ignored) { }
+        });
+    }
+
+    private static String jsStr(String value) {
+        if (value == null) return "''";
+        return "'" + value.replace("\\", "\\\\").replace("'", "\\'").replace("\n", " ") + "'";
     }
 
     private void showSetup(String error) {
