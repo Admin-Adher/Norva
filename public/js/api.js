@@ -1134,63 +1134,98 @@ const CloudAdapter = (() => {
                     mode: 'transcode',
                     requiresTranscode: true
                 });
-                let payload;
-                try {
-                    payload = await cloudPlaybackApi().createSession({
-                        ...baseSession,
-                        mode,
-                        requiresRelay: mode === 'relay',
-                        requiresTranscode: mode === 'transcode'
-                    });
-                    if (mode === 'transcode' && !payload.playback?.url && preferredMode !== 'direct') {
-                        // Gateway-only VOD can't play via relay or direct in the
-                        // browser, so retry the transcode instead of cascading
-                        // into an unplayable stream.
-                        payload = gatewayOnlyVod
-                            ? await createGatewayTranscodeSession()
-                            : await cloudPlaybackApi().createSession({
-                                ...baseSession,
-                                mode: 'relay',
-                                requiresRelay: true
-                            });
-                    }
-                } catch (error) {
-                    if (mode === 'direct') throw error;
-                    if (remuxFirst && (error.status === 502 || error.status === 503 || error.status === 504 || error.status === 500)) {
-                        try {
-                            payload = await createGatewayTranscodeSession();
-                        } catch (transcodeError) {
-                            if (!transcodeError.status || transcodeError.status < 500) throw transcodeError;
-                        }
-                    }
-                    // Gateway-only VOD is unplayable via relay/direct in the
-                    // browser, so never cascade into them — that is exactly what
-                    // produced the ~30s "Media error" storm on Resume. The gateway
-                    // already retries provider 401s internally; give the transcode
-                    // one more try, otherwise surface the failure.
-                    if (!payload && gatewayOnlyVod) {
-                        if (error.status === 500 || error.status === 502 || error.status === 503 || error.status === 504) {
-                            payload = await createGatewayTranscodeSession();
-                        }
-                        if (!payload) throw error;
-                    }
-                    if (!payload && mode === 'transcode' && preferredMode !== 'direct') {
-                        try {
-                            payload = await cloudPlaybackApi().createSession({
-                                ...baseSession,
-                                mode: 'relay',
-                                requiresRelay: true
-                            });
-                        } catch (relayError) {
-                            if (relayError.status !== 503) throw relayError;
-                        }
-                    }
-                    if (!payload) {
-                        if (error.status !== 503 && error.status !== 502) throw error;
+                // The IPTV provider grants a single concurrent connection. Right
+                // after a refresh or a quick title switch its previous slot can
+                // still be held, so the gateway answers the first attempt(s) with
+                // a transient 502/503/504 ("Media gateway refused the session").
+                // The edge function re-runs its session cleanup + slot-release
+                // wait on every call, so retrying with a short backoff lets the
+                // slot free. Only provider-slot rejections are retried; a genuinely
+                // dead source fails with a different reason and surfaces at once,
+                // so this never reopens the old ~30s "Media error" storm.
+                const PROVIDER_SLOT_RETRY_DELAYS_MS = [2500, 5000];
+                const isProviderSlotBusy = (err) => {
+                    if (!err || (err.status !== 502 && err.status !== 503 && err.status !== 504)) return false;
+                    const detail = err.payload?.details;
+                    const reason = String(
+                        detail && typeof detail === 'object' ? (detail.details ?? detail.error ?? '') : (detail ?? '')
+                    ).toLowerCase();
+                    // Reason not forwarded by the gateway: treat the 5xx as possibly transient.
+                    if (!reason) return true;
+                    return /\b401\b|\b403\b|unauthor|forbidden|timed out|connection reset|-1005[34]|concurren|\bslot\b/.test(reason);
+                };
+                const attemptCreateGatewaySession = async () => {
+                    let payload;
+                    try {
                         payload = await cloudPlaybackApi().createSession({
                             ...baseSession,
-                            mode: 'direct',
+                            mode,
+                            requiresRelay: mode === 'relay',
+                            requiresTranscode: mode === 'transcode'
                         });
+                        if (mode === 'transcode' && !payload.playback?.url && preferredMode !== 'direct') {
+                            // Gateway-only VOD can't play via relay or direct in the
+                            // browser, so retry the transcode instead of cascading
+                            // into an unplayable stream.
+                            payload = gatewayOnlyVod
+                                ? await createGatewayTranscodeSession()
+                                : await cloudPlaybackApi().createSession({
+                                    ...baseSession,
+                                    mode: 'relay',
+                                    requiresRelay: true
+                                });
+                        }
+                    } catch (error) {
+                        if (mode === 'direct') throw error;
+                        if (remuxFirst && (error.status === 502 || error.status === 503 || error.status === 504 || error.status === 500)) {
+                            try {
+                                payload = await createGatewayTranscodeSession();
+                            } catch (transcodeError) {
+                                if (!transcodeError.status || transcodeError.status < 500) throw transcodeError;
+                            }
+                        }
+                        // Gateway-only VOD is unplayable via relay/direct in the
+                        // browser, so never cascade into them — that is exactly what
+                        // produced the ~30s "Media error" storm on Resume. The gateway
+                        // already retries provider 401s internally; give the transcode
+                        // one more try, otherwise surface the failure.
+                        if (!payload && gatewayOnlyVod) {
+                            if (error.status === 500 || error.status === 502 || error.status === 503 || error.status === 504) {
+                                payload = await createGatewayTranscodeSession();
+                            }
+                            if (!payload) throw error;
+                        }
+                        if (!payload && mode === 'transcode' && preferredMode !== 'direct') {
+                            try {
+                                payload = await cloudPlaybackApi().createSession({
+                                    ...baseSession,
+                                    mode: 'relay',
+                                    requiresRelay: true
+                                });
+                            } catch (relayError) {
+                                if (relayError.status !== 503) throw relayError;
+                            }
+                        }
+                        if (!payload) {
+                            if (error.status !== 503 && error.status !== 502) throw error;
+                            payload = await cloudPlaybackApi().createSession({
+                                ...baseSession,
+                                mode: 'direct',
+                            });
+                        }
+                    }
+                    return payload;
+                };
+                let payload;
+                for (let providerAttempt = 0; ; providerAttempt += 1) {
+                    try {
+                        payload = await attemptCreateGatewaySession();
+                        break;
+                    } catch (sessionError) {
+                        if (!isProviderSlotBusy(sessionError) || providerAttempt >= PROVIDER_SLOT_RETRY_DELAYS_MS.length) {
+                            throw sessionError;
+                        }
+                        await new Promise((resolve) => setTimeout(resolve, PROVIDER_SLOT_RETRY_DELAYS_MS[providerAttempt]));
                     }
                 }
                 const url = payload.playback?.url || payload.url;
