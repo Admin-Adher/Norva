@@ -137,7 +137,7 @@ async function route(
       body: {
         ok: true,
         service: "norva-cloud",
-        version: 19,
+        version: 20,
         entitlements: true,
         entitlementsMode: entitlementRuntime.mode,
         entitlementsEnforced: entitlementRuntime.enforced,
@@ -2055,17 +2055,43 @@ async function saveHistory(req: Request, userId: string, db: SupabaseClient) {
   if (!itemType || !itemId) throw new HttpError(400, "itemType and itemId are required");
   if (sourceId) await assertOwnedSource(sourceId, userId, db);
 
+  // A progress-only update (e.g. the native player's onProgress, which only
+  // knows source/item/position) must NOT wipe the rich metadata an earlier
+  // save stored. Load the existing row and merge: incoming fields win, but
+  // title/poster/name/duration are preserved when the update omits them —
+  // otherwise Continue Watching shows a placeholder ("Norva" + the logo)
+  // after a cross-device resume.
+  let existingQuery = db
+    .from("cloud_watch_history")
+    .select("item_name,parent_item_id,duration_seconds,data")
+    .eq("user_id", userId)
+    .eq("item_type", itemType)
+    .eq("item_id", itemId);
+  existingQuery = sourceId
+    ? existingQuery.eq("source_id", sourceId)
+    : existingQuery.is("source_id", null);
+  const { data: existing } = await existingQuery.maybeSingle();
+
+  const mergedData = { ...recordOrEmpty(existing?.data), ...recordOrEmpty(body.data) };
+  const incomingDuration = boundedInt(body.durationSeconds ?? body.duration_seconds ?? body.duration, 0, 0, 10_000_000);
+
   const row = {
     user_id: userId,
     source_id: sourceId,
     item_type: itemType,
     item_id: itemId,
-    parent_item_id: stringOrNull(body.parentItemId ?? body.parent_item_id),
-    item_name: stringOrNull(body.itemName ?? body.item_name ?? body.name),
+    parent_item_id: stringOrNull(body.parentItemId ?? body.parent_item_id)
+      ?? stringOrNull(existing?.parent_item_id),
+    item_name: stringOrNull(body.itemName ?? body.item_name ?? body.name)
+      ?? stringOrNull(existing?.item_name),
     progress_seconds: boundedInt(body.progressSeconds ?? body.progress_seconds ?? body.progress, 0, 0, 10_000_000),
-    duration_seconds: boundedInt(body.durationSeconds ?? body.duration_seconds ?? body.duration, 0, 0, 10_000_000),
+    // Keep a known duration if this update doesn't carry one (e.g. native exit
+    // before the player resolved the duration).
+    duration_seconds: incomingDuration > 0
+      ? incomingDuration
+      : boundedInt(existing?.duration_seconds, 0, 0, 10_000_000),
     completed: Boolean(body.completed ?? false),
-    data: recordOrEmpty(body.data),
+    data: mergedData,
     watched_at: stringOrNull(body.watchedAt ?? body.watched_at) ?? new Date().toISOString(),
   };
 
