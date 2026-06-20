@@ -2209,9 +2209,7 @@ class WatchPage {
                     console.log(`[WatchPage] Auto: Using ${isMpegTs ? 'audio transcode' : 'remux'} for incompatible container`);
                     if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
                     this.video.src = finalUrl;
-                    this.video.play().catch(e => {
-                        if (e.name !== 'AbortError') console.error('[WatchPage] Autoplay error:', e);
-                    });
+                    this.video.play().catch(e => this.handleAutoplayError(e));
                     this.setVolumeFromStorage();
                     return;
                 }
@@ -2293,9 +2291,7 @@ class WatchPage {
             const finalUrl = this.getRemuxUrl(url, startOffset);
             if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
             this.video.src = finalUrl;
-            this.video.play().catch(e => {
-                if (e.name !== 'AbortError') console.error('[WatchPage] Autoplay error:', e);
-            });
+            this.video.play().catch(e => this.handleAutoplayError(e));
             this.setVolumeFromStorage();
             return;
         }
@@ -2335,9 +2331,7 @@ class WatchPage {
             this.trackPlaybackPosition({ position: 0, force: true });
             this.attachProbeSubtitles(url, (probeInfo || this.currentStreamInfo)?.subtitles, 0);
             this.video.src = finalUrl;
-            this.video.play().catch(e => {
-                if (e.name !== 'AbortError') console.error('[WatchPage] Autoplay error:', e);
-            });
+            this.video.play().catch(e => this.handleAutoplayError(e));
         }
 
         this.setVolumeFromStorage();
@@ -2413,9 +2407,7 @@ class WatchPage {
             if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
             if (!autoplay) return;
 
-            this.video.play().catch(e => {
-                if (e.name !== 'AbortError') console.error('[WatchPage] Autoplay error:', e);
-            });
+            this.video.play().catch(e => this.handleAutoplayError(e));
         });
 
         this.hls.on(Hls.Events.ERROR, (event, data) => {
@@ -2533,9 +2525,7 @@ class WatchPage {
         if (url.startsWith('/api/transcode?')) {
             this.video.src = url;
             if (autoplay) {
-                this.video.play().catch(e => {
-                    if (e.name !== 'AbortError') console.error('[WatchPage] Direct transcode play error:', e);
-                });
+                this.video.play().catch(e => this.handleAutoplayError(e, 'Direct transcode play error'));
             }
             return;
         }
@@ -2615,6 +2605,18 @@ class WatchPage {
     }
 
     // === Playback Controls ===
+
+    handleAutoplayError(error, label = 'Autoplay error') {
+        if (error?.name === 'AbortError') return;
+        console.error(`[WatchPage] ${label}:`, error);
+
+        if (error?.name === 'NotAllowedError') {
+            this.hideLoading();
+            this.centerPlayBtn?.classList.add('show');
+            this.showOverlay();
+            clearTimeout(this.overlayTimeout);
+        }
+    }
 
     togglePlay() {
         if (this.video.paused) {
@@ -2844,18 +2846,14 @@ class WatchPage {
         if (mode === 'remux') {
             this.video.src = this.getRemuxUrl(sourceUrl, targetTime);
             if (autoplay) {
-                this.video.play().catch(e => {
-                    if (e.name !== 'AbortError') console.error('[WatchPage] Remux seek play error:', e);
-                });
+                this.video.play().catch(e => this.handleAutoplayError(e, 'Remux seek play error'));
             }
         } else if (mode === 'transcode') {
             const processingOptions = this.getFreshProcessingOptions();
             this.currentProcessingOptions = processingOptions;
             this.video.src = this.getTranscodeUrl(sourceUrl, targetTime, processingOptions);
             if (autoplay) {
-                this.video.play().catch(e => {
-                    if (e.name !== 'AbortError') console.error('[WatchPage] Transcode seek play error:', e);
-                });
+                this.video.play().catch(e => this.handleAutoplayError(e, 'Transcode seek play error'));
             }
         } else if (mode === 'transcode-session') {
             const processingOptions = this.getFreshProcessingOptions({ seekOffset: targetTime });
