@@ -318,20 +318,34 @@ async function proxyPlayback(request, env, claims) {
   const headers = new Headers();
   copyHeader(request.headers, headers, "accept");
   copyHeader(request.headers, headers, "accept-language");
-  copyHeader(request.headers, headers, "range");
   copyHeader(request.headers, headers, "user-agent");
+
+  // Resume seeks: the IPTV provider ignores OPEN-ENDED Range requests
+  // (`bytes=N-` is answered from byte 0), so a player seek re-reads the file
+  // from the start — the ~20s Resume stall. It DOES honor BOUNDED ranges
+  // (`bytes=N-M`). Map an open-ended seek (N>0) to a bounded range using the
+  // file's total size so the player jumps straight to the resume point.
+  // `bytes=0-` is left untouched (answering from byte 0 is already correct),
+  // which keeps cold startup fast.
+  const requestedRange = request.headers.get("range");
+  const upstreamRange = await boundedUpstreamRange(requestedRange, targetUrl, headers);
+  if (upstreamRange) headers.set("range", upstreamRange);
+  else if (requestedRange) headers.set("range", requestedRange);
 
   const upstream = await fetch(targetUrl, {
     method: request.method,
     headers,
     redirect: "follow",
   });
+  rememberContentLength(targetUrl, upstream);
 
   const responseHeaders = filteredResponseHeaders(upstream.headers);
   mergeCors(responseHeaders, corsHeaders(request, env));
   responseHeaders.set("Cache-Control", "private, max-age=30");
 
   if (request.method === "HEAD" || !isHlsPlaylist(targetUrl, upstream.headers)) {
+    // Advertise range support so the player enables client-side seeking.
+    if (!responseHeaders.has("Accept-Ranges")) responseHeaders.set("Accept-Ranges", "bytes");
     return new Response(upstream.body, {
       status: upstream.status,
       statusText: upstream.statusText,
@@ -358,6 +372,74 @@ async function proxyPlayback(request, env, claims) {
     statusText: upstream.statusText,
     headers: responseHeaders,
   });
+}
+
+// --- Bounded-range seeking -------------------------------------------------
+// Cache each source's total size (learned from a response) so a seek can issue
+// a BOUNDED upstream range without an extra probe round-trip. Isolate-local;
+// worst case a cold isolate does one tiny probe per source.
+const CONTENT_LENGTH_CACHE = new Map();
+const CONTENT_LENGTH_TTL_MS = 5 * 60 * 1000;
+const CONTENT_LENGTH_CACHE_MAX = 256;
+
+function cacheContentLength(href, total) {
+  if (CONTENT_LENGTH_CACHE.size >= CONTENT_LENGTH_CACHE_MAX) {
+    const oldest = CONTENT_LENGTH_CACHE.keys().next().value;
+    if (oldest !== undefined) CONTENT_LENGTH_CACHE.delete(oldest);
+  }
+  CONTENT_LENGTH_CACHE.set(href, { total, at: Date.now() });
+}
+
+function totalSizeFromResponse(response) {
+  const contentRange = response.headers.get("content-range"); // "bytes 0-0/12345678"
+  if (contentRange) {
+    const match = /\/(\d+)\s*$/.exec(contentRange);
+    if (match) {
+      const total = Number.parseInt(match[1], 10);
+      if (Number.isFinite(total) && total > 0) return total;
+    }
+  }
+  if (response.status === 200) {
+    const contentLength = Number.parseInt(response.headers.get("content-length") ?? "", 10);
+    if (Number.isFinite(contentLength) && contentLength > 0) return contentLength;
+  }
+  return NaN;
+}
+
+function rememberContentLength(targetUrl, response) {
+  const total = totalSizeFromResponse(response);
+  if (Number.isFinite(total)) cacheContentLength(targetUrl.href, total);
+}
+
+async function resolveContentLength(targetUrl, baseHeaders) {
+  const cached = CONTENT_LENGTH_CACHE.get(targetUrl.href);
+  if (cached && Date.now() - cached.at < CONTENT_LENGTH_TTL_MS) return cached.total;
+  // Probe with a tiny BOUNDED range (which the provider honors) and read the
+  // total size from Content-Range, then reuse it for every seek on this URL.
+  try {
+    const probeHeaders = new Headers(baseHeaders);
+    probeHeaders.set("range", "bytes=0-0");
+    const probe = await fetch(targetUrl, { method: "GET", headers: probeHeaders, redirect: "follow" });
+    const total = totalSizeFromResponse(probe);
+    try { await probe.body?.cancel?.(); } catch (_) { /* ignore */ }
+    if (Number.isFinite(total)) {
+      cacheContentLength(targetUrl.href, total);
+      return total;
+    }
+  } catch (_) { /* fall back to the original range */ }
+  return NaN;
+}
+
+async function boundedUpstreamRange(rangeHeader, targetUrl, baseHeaders) {
+  if (!rangeHeader) return null;
+  const match = /^bytes=(\d+)-(\d*)$/.exec(rangeHeader.trim());
+  if (!match) return null;                 // suffix or multi-range: leave to upstream
+  if (match[2]) return null;               // already bounded
+  const start = Number.parseInt(match[1], 10);
+  if (!Number.isFinite(start) || start === 0) return null; // from byte 0 is already correct
+  const total = await resolveContentLength(targetUrl, baseHeaders);
+  if (!Number.isFinite(total) || start >= total) return null;
+  return `bytes=${start}-${total - 1}`;
 }
 
 async function proxyImage(request, env, ctx, url) {

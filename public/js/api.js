@@ -1226,19 +1226,29 @@ const CloudAdapter = (() => {
                 // relay/direct can never work for it, so failures must stay on the
                 // gateway transcode path instead of cascading into "Media error".
                 const gatewayOnlyVod = isVodPlayback && needsGateway;
+                const playbackHint = playbackHintFromQuery(query, container, type);
                 // Native client (Android TV / standalone): a native ExoPlayer with
                 // hardware HEVC/MKV/AC3 decoders plays straight from the user's home
                 // network. Pull the RAW provider URL (direct) instead of the cloud
                 // gateway, whose datacenter IP the provider 401-blocks. This is what
-                // makes the TV behave like TiviMate. The browser never has this
-                // bridge, so its path is unchanged.
+                // makes the TV behave like TiviMate.
                 const nativePlayer = typeof window !== 'undefined'
                     && (window.NodeCastNative || window.NorvaTVCloud);
+                // Browser-safe film/series (mp4 + H.264/AAC): the browser plays it
+                // directly, so serve it through the RELAY (pass-through, no transcode
+                // server) rather than the cloud gateway. The browser then seeks
+                // client-side for an instant Resume, and nothing depends on a
+                // transcode gateway. Anything that needs decoding help (mkv/HEVC/AC3
+                // or live) still takes the gateway/transcode path.
+                const browserSafeVod = isVodPlayback
+                    && !needsGateway
+                    && !shouldVodUseGatewayTranscode(container, playbackHint);
                 const mode = forcedMode
                     || (nativePlayer
                         ? 'direct'
-                        : (((isVodPlayback || needsGateway) && preferredMode !== 'direct') ? 'transcode' : preferredMode));
-                const playbackHint = playbackHintFromQuery(query, container, type);
+                        : browserSafeVod
+                            ? 'relay'
+                            : (((isVodPlayback || needsGateway) && preferredMode !== 'direct') ? 'transcode' : preferredMode));
                 if ((type === 'series' || type === 'movie') && !playbackHint.gatewayMode) {
                     const needsFullGatewayTranscode = shouldVodUseGatewayTranscode(container, playbackHint);
                     // VOD only uses remux when the container, video and audio
