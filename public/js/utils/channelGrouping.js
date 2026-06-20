@@ -194,27 +194,45 @@
     }
 
     /**
-     * Pick the default variant: best quality that is healthy (or unknown),
-     * capped at FHD — never auto-open in 4K. Falls back to best available.
+     * Default-pick preference (lower = preferred as the auto-start variant).
+     * HD is the safe default the list advertises: lightest, fastest to start,
+     * most reliable. FHD/Super HD come next, then SD; 4K is never auto-started.
+     * H.265 feeds are slightly deprioritised because they need a full transcode
+     * (slower start) where H.264 can be remux-copied.
+     */
+    function defaultPref(v) {
+        const label = String(v.label || '');
+        let base;
+        if (label.startsWith('HD')) base = 0;
+        else if (label.startsWith('FHD') || label.startsWith('Super HD')) base = 1;
+        else if (label.startsWith('SD')) base = 2;
+        else if (label.startsWith('4K')) base = 4;
+        else base = 1;
+        if (/h265|hevc/i.test(label)) base += 0.5;
+        return base;
+    }
+
+    /**
+     * Pick the default variant: the HD feed when available (what the list shows
+     * by default), preferring healthy ones, then FHD/SD, never auto-opening 4K.
+     * Falls back to the best available.
      */
     function pickDefault(variants) {
         const ok = variants.filter(v => v.healthRank < 3);
         const pool = (ok.length ? ok : variants).slice();
-        // candidates capped at FHD (rank >= 1); prefer them, else allow 4K.
-        const capped = pool.filter(v => v.rank >= 1);
-        const list = (capped.length ? capped : pool);
-        list.sort((a, b) => (a.healthRank - b.healthRank) || (a.rank - b.rank));
-        return list[0] || variants[0] || null;
+        pool.sort((a, b) => (a.healthRank - b.healthRank) || (defaultPref(a) - defaultPref(b)) || (a.rank - b.rank));
+        return pool[0] || variants[0] || null;
     }
 
     /**
      * Build the ordered list of variants for the next-best fallback chain,
-     * starting after `current` (best healthy first).
+     * starting after `current` - HD first, matching the default-pick order so
+     * the HD feed is always tried first.
      */
     function fallbackOrder(variants, currentStreamId) {
         return variants
             .filter(v => String(v.streamId) !== String(currentStreamId))
-            .sort((a, b) => (a.healthRank - b.healthRank) || (a.rank - b.rank));
+            .sort((a, b) => (a.healthRank - b.healthRank) || (defaultPref(a) - defaultPref(b)) || (a.rank - b.rank));
     }
 
     function variantFrom(ch, p) {

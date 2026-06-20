@@ -37,14 +37,13 @@ class LiveGuideFusion {
         });
 
         window.addEventListener('channelChanged', (event) => {
-            this.currentChannel = event.detail || null;
-            this.render();
+            this.setActiveChannel(event.detail || null);
         });
         window.addEventListener('playbackModeScanComplete', (event) => {
             this.selectPendingFamilyIfReady(event.detail);
             this.render();
         });
-        window.addEventListener('playbackStatusChanged', () => this.render());
+        window.addEventListener('playbackStatusChanged', (event) => this.refreshPlaybackStatus(event.detail));
     }
 
     shouldShowGroupRail() {
@@ -123,6 +122,8 @@ class LiveGuideFusion {
         const bestChannel = this.getBestFamilyChannel(members);
         const hasHealthyVariant = members.some(channel => this.app.channelList.isHealthyChannel(channel));
         const allKnownBad = members.every(channel => this.isProblematicChannel(channel));
+
+        this.setActiveChannel(bestChannel);
 
         if (!hasHealthyVariant && allKnownBad) {
             this._pendingFamilySelection = {
@@ -241,6 +242,96 @@ class LiveGuideFusion {
         return String(family.sourceId) === pending.sourceId && family.familyKey === pending.familyKey;
     }
 
+    getAutoStartQualityRank(channel) {
+        const name = String(channel?.name || '').toLowerCase();
+        if (/\b4k\b|\buhd\b/.test(name)) return 4;
+        if (/\bfhd\b|full\s*hd|super\s*hd|superhd/.test(name)) return 1;
+        if (/\bhd\b/.test(name)) return 0;
+        if (/\bsd\b/.test(name)) return 2;
+        return 1;
+    }
+
+    refreshPreview(channel) {
+        if (!this.container) return;
+        const preview = this.container.querySelector('.live-guide-preview');
+        if (preview) preview.outerHTML = this.renderPreview(channel);
+    }
+
+    setActiveChannel(channel) {
+        this.currentChannel = channel || null;
+        if (!this.container) return;
+
+        if (!channel) {
+            this.container.querySelectorAll('.live-guide-row.active').forEach(row => row.classList.remove('active'));
+            return;
+        }
+
+        const list = this.app.channelList;
+        const familyKey = list.getChannelFamilyKey(channel) || `${channel.sourceId}:${channel.id}`;
+        this.container.querySelectorAll('.live-guide-row').forEach(row => {
+            const isActive =
+                String(row.dataset.sourceId) === String(channel.sourceId) &&
+                String(row.dataset.familyKey) === String(familyKey);
+            row.classList.toggle('active', isActive);
+        });
+        this.refreshPreview(channel);
+    }
+
+    updateRowBadge(row, badge) {
+        let el = row.querySelector('.live-guide-mode');
+        if (!badge) {
+            el?.remove();
+            return;
+        }
+        if (!el) {
+            el = document.createElement('span');
+            row.querySelector('.live-guide-channel-cell')?.appendChild(el);
+        }
+        el.className = `live-guide-mode ${badge.className || ''}`.trim();
+        el.title = badge.title || '';
+        el.textContent = badge.label || '';
+    }
+
+    refreshPlaybackStatus(detail = {}) {
+        if (!this.container) return;
+        const itemType = detail?.item_type || detail?.itemType;
+        if (itemType && itemType !== 'channel' && itemType !== 'live') return;
+
+        const rawId = detail.item_id ?? detail.itemId;
+        const sourceId = detail.source_id ?? detail.sourceId;
+        if (rawId == null || sourceId == null) return;
+
+        const list = this.app.channelList;
+        const affected = (list.channels || []).find(channel =>
+            String(channel.sourceId) === String(sourceId) &&
+            (String(channel.streamId || channel.id) === String(rawId) || String(channel.id) === String(rawId))
+        );
+        if (!affected) return;
+
+        const familyKey = list.getChannelFamilyKey(affected) || `${affected.sourceId}:${affected.id}`;
+        const members = (list.channels || []).filter(channel =>
+            String(channel.sourceId) === String(sourceId) &&
+            (list.getChannelFamilyKey(channel) || `${channel.sourceId}:${channel.id}`) === familyKey
+        );
+        const family = {
+            sourceId: affected.sourceId,
+            familyKey,
+            members
+        };
+        const isPending = this.isPendingFamily(family);
+        const badge = isPending
+            ? { label: 'SCAN', className: 'pending', title: 'Verification des variantes' }
+            : this.getFamilyBadge(family);
+
+        this.container.querySelectorAll('.live-guide-row').forEach(row => {
+            if (String(row.dataset.sourceId) !== String(sourceId)) return;
+            if (String(row.dataset.familyKey) !== String(familyKey)) return;
+            row.classList.toggle('pending-refresh', isPending);
+            row.classList.toggle('active', this.isFamilyActive(family) || isPending);
+            this.updateRowBadge(row, badge);
+        });
+    }
+
     getVariantQualityScore(channel) {
         const list = this.app.channelList;
         const name = String(channel?.name || '').toLowerCase();
@@ -252,10 +343,7 @@ class LiveGuideFusion {
         if (mode === 'direct_play') score += 3000;
         if (this.isProblematicChannel(channel)) score -= 10000;
 
-        if (/\bfhd\b|full\s*hd|superhd/.test(name)) score += 500;
-        else if (/\bhd\b/.test(name)) score += 400;
-        else if (/\b4k\b|\buhd\b/.test(name)) score += 300;
-        else if (/\bsd\b/.test(name)) score += 100;
+        score += Math.max(0, 500 - (this.getAutoStartQualityRank(channel) * 100));
 
         if (/\bh265\b|hevc/.test(name)) score -= 50;
         if (channel.num != null) score += Math.max(0, 100 - Number(channel.num));

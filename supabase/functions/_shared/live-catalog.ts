@@ -507,13 +507,27 @@ function healthRank(item: LiveCatalogItem) {
   return 1;
 }
 
+function defaultPref(variant: LiveVariant) {
+  const label = String(variant.label || "");
+  let base: number;
+  if (label.startsWith("HD")) base = 0;
+  else if (label.startsWith("FHD") || label.startsWith("Super HD")) base = 1;
+  else if (label.startsWith("SD")) base = 2;
+  else if (label.startsWith("4K")) base = 4;
+  else base = 1;
+  if (/h265|hevc/i.test(label)) base += 0.5;
+  return base;
+}
+
 function pickDefault(variants: LiveVariant[]) {
   const ok = variants.filter((variant) => variant.healthRank < 3);
   const pool = (ok.length ? ok : variants).slice();
-  const capped = pool.filter((variant) => variant.rank >= 1);
-  const list = capped.length ? capped : pool;
-  list.sort((a, b) => (a.healthRank - b.healthRank) || (a.rank - b.rank));
-  return list[0] || variants[0] || null;
+  pool.sort((a, b) =>
+    (a.healthRank - b.healthRank) ||
+    (defaultPref(a) - defaultPref(b)) ||
+    (a.rank - b.rank)
+  );
+  return pool[0] || variants[0] || null;
 }
 
 function livePlaybackContainer(playbackHint: JsonRecord, metadata: JsonRecord) {

@@ -411,6 +411,30 @@ const CloudAdapter = (() => {
         return payload;
     }
 
+    function liveDefaultPref(variant) {
+        const label = String(variant?.label || '');
+        let base;
+        if (label.startsWith('HD')) base = 0;
+        else if (label.startsWith('FHD') || label.startsWith('Super HD')) base = 1;
+        else if (label.startsWith('SD')) base = 2;
+        else if (label.startsWith('4K')) base = 4;
+        else base = 1;
+        if (/h265|hevc/i.test(label)) base += 0.5;
+        return base;
+    }
+
+    function pickDefaultLiveVariant(variants) {
+        const available = Array.isArray(variants) ? variants.filter(variant => variant?.streamId) : [];
+        const ok = available.filter(variant => Number(variant.healthRank) < 3);
+        const pool = (ok.length ? ok : available).slice();
+        pool.sort((a, b) =>
+            (Number(a.healthRank || 1) - Number(b.healthRank || 1)) ||
+            (liveDefaultPref(a) - liveDefaultPref(b)) ||
+            (Number(a.rank || 2) - Number(b.rank || 2))
+        );
+        return pool[0] || null;
+    }
+
     function normalizeLogicalLiveChannel(channel, requestedSourceId) {
         const cloudSourceId = channel.source_id || channel.sourceId || '';
         const localId = requestedSourceId || localSourceId(cloudSourceId);
@@ -422,9 +446,7 @@ const CloudAdapter = (() => {
             .map(variant => normalizeLiveVariant(variant, localId, cloudSourceId))
             .filter(variant => variant.streamId);
         const defaultStreamId = String(defaultVariantRaw.stream_id || defaultVariantRaw.streamId || channel.stream_id || channel.streamId || channel.external_id || '');
-        const defaultVariant = variants.find(variant => String(variant.streamId) === defaultStreamId)
-            || variants.find(variant => variant.rank >= 1)
-            || variants[0]
+        const defaultVariant = pickDefaultLiveVariant(variants)
             || normalizeLiveVariant(defaultVariantRaw, localId, cloudSourceId);
         const streamId = String(defaultVariant.streamId || defaultStreamId || '');
         const categoryId = String(channel.category_id || channel.group_id || channel.section || 'uncategorized');

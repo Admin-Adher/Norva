@@ -378,19 +378,28 @@ class ChannelList {
         this.scanPlaybackBtn?.addEventListener('click', () => this.scanLivePlaybackModes());
 
         window.addEventListener('playbackStatusChanged', (event) => {
-            if (event.detail?.item_type !== 'channel') return;
-            const rawId = event.detail.item_id ?? event.detail.itemId;
+            const detail = event.detail || {};
+            const itemType = detail.item_type || detail.itemType;
+            if (itemType && itemType !== 'channel' && itemType !== 'live') return;
+            const rawId = detail.item_id ?? detail.itemId;
+            const srcId = detail.source_id ?? detail.sourceId;
+            let changed = false;
             this.channels.forEach(channel => {
-                if (String(channel.sourceId) === String(event.detail.source_id ?? event.detail.sourceId) &&
+                if (String(channel.sourceId) === String(srcId) &&
                     String(channel.streamId || channel.id) === String(rawId)) {
-                    channel.playbackStatus = event.detail.status || channel.playbackStatus || 'unknown';
-                    channel.playbackMode = event.detail.mode || channel.playbackMode || 'unknown';
-                    channel.playbackCheckedAt = event.detail.updated_at || event.detail.updatedAt || channel.playbackCheckedAt || null;
-                    channel.playbackModeCheckedAt = event.detail.mode_checked_at || event.detail.modeCheckedAt || channel.playbackModeCheckedAt || null;
+                    channel.playbackStatus = detail.status || channel.playbackStatus || 'unknown';
+                    channel.playbackMode = detail.mode || channel.playbackMode || 'unknown';
+                    channel.playbackCheckedAt = detail.updated_at || detail.updatedAt || channel.playbackCheckedAt || null;
+                    channel.playbackModeCheckedAt = detail.mode_checked_at || detail.modeCheckedAt || channel.playbackModeCheckedAt || null;
+                    changed = true;
                 }
             });
-            this.render();
-            window.app?.liveGuideFusion?.render();
+            // Surgically refresh just the affected channel's playback indicator.
+            // A full this.render() here rebuilt the entire list on every play,
+            // which caused the visible lag/flicker when selecting a channel.
+            if (changed) this.refreshChannelPlaybackClasses(srcId, rawId);
+            // LiveGuideFusion listens to this event too and updates its visible
+            // rows without rebuilding the full guide.
         });
 
         // Context menu handlers
@@ -1901,7 +1910,7 @@ class ChannelList {
     }
 
     liveCacheKey(sourceId, sourceType) {
-        return `norva-live:${sourceType}:${sourceId}:v3`;
+        return `norva-live:${sourceType}:${sourceId}:v4`;
     }
 
     openLiveCacheDb() {
@@ -2315,6 +2324,29 @@ class ChannelList {
         return classes.join(' ');
     }
 
+    /**
+     * Update the playback-status CSS classes on the rendered DOM items for a
+     * single channel, without rebuilding the whole list. Keeps channel
+     * selection/switching fluid (a full render() on every play caused lag).
+     */
+    refreshChannelPlaybackClasses(sourceId, streamId) {
+        const items = this.container?.querySelectorAll('.channel-item');
+        if (!items || !items.length) return;
+        items.forEach(el => {
+            if (String(el.dataset.sourceId) !== String(sourceId)) return;
+            if (String(el.dataset.streamId) !== String(streamId) &&
+                String(el.dataset.channelId) !== String(streamId)) return;
+            const ch = this.channels.find(c =>
+                String(c.sourceId) === String(sourceId) &&
+                (String(c.streamId || c.id) === String(streamId) ||
+                    String(c.id) === String(el.dataset.channelId)));
+            if (!ch) return;
+            el.classList.toggle('playback-broken', this.isBrokenChannel(ch));
+            el.classList.toggle('playback-direct-hls', this.isDirectHlsChannel(ch));
+            el.classList.toggle('playback-ok', this.isHealthyChannel(ch));
+        });
+    }
+
     shouldHideByPlayback(channel) {
         return this.isBrokenChannel(channel) || this.isDirectHlsChannel(channel);
     }
@@ -2707,6 +2739,7 @@ class ChannelList {
 
         this.rememberLastLiveChannel(channel);
         this.rememberRecentChannel(channel);
+        window.app?.liveGuideFusion?.setActiveChannel?.(channel);
 
         // Flat search/zero-state results: refresh the highlight only —
         // the group expansion / focus-mode logic below doesn't apply
