@@ -121,9 +121,13 @@ async function streamRemux(id, mime) {
       { format_name: 'mp4', filename: 'output', open: true, device: true, codecpars: true },
       streamCtxs);
     const oc = muxRet[0], pb = muxRet[2];
-    log('muxer initialisé (oc=' + oc + ') → écriture en-tête fMP4…');
-    const opts = await lib.av_dict_set_js(0, 'movflags', 'frag_keyframe+empty_moov+default_base_moof', 0);
-    const whRet = await lib.avformat_write_header(oc, opts);
+    log('muxer initialisé (oc=' + oc + ') → réglage movflags (fMP4)…');
+    // Set fragmented-MP4 flags on the muxer's private options. avformat_write_header
+    // expects an AVDictionary** (double ptr); passing a single dict ptr crashes
+    // (OOB). So set the option directly via av_opt_set + write header with no dict.
+    const setRet = await lib.av_opt_set(oc, 'movflags', 'frag_keyframe+empty_moov+default_base_moof', lib.AV_OPT_SEARCH_CHILDREN);
+    log('av_opt_set movflags ret=' + setRet + ' → écriture en-tête…');
+    const whRet = await lib.avformat_write_header(oc, 0);
     log('en-tête MP4 fragmenté écrit (ret=' + whRet + '), remux en cours…');
     setStatus('<span class="wait">⏳ remux + lecture…</span>');
 
