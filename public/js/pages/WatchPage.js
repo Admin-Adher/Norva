@@ -2400,6 +2400,21 @@ class WatchPage {
                     return;
                 }
             } else if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+                if (isGatewaySession && this.isGatewaySessionGoneError(data)) {
+                    const message = this.gatewaySessionGoneMessage(data);
+                    console.warn('[WatchPage] Gateway session disappeared; refreshing playback session.');
+                    try {
+                        this.hls?.destroy();
+                    } catch (_) { /* destroyed */ }
+                    this.hls = null;
+                    this.sendPlaybackEvent('gateway_error', {
+                        errorCode: data.details || data.type || 'gateway_session_gone',
+                        errorMessage: message
+                    });
+                    this.handlePlaybackFailure(message)
+                        .catch(error => console.warn('[WatchPage] Gateway session refresh failed:', error?.message || error));
+                    return;
+                }
                 // Try proxy on CORS error (only if not already proxied/transcoded)
                 if (this.canUseLocalProxy(this.currentUrl)) {
                     console.log('[WatchPage] Retrying via proxy...');
@@ -3385,7 +3400,37 @@ class WatchPage {
     }
 
     isFormatPlaybackError(message) {
-        return /MEDIA_ELEMENT_ERROR|MEDIA_ERR_DECODE|Format error|decode|bufferAppendError|fragParsingError|sourceBuffer|appendBuffer/i.test(message || '');
+        return /MEDIA_ELEMENT_ERROR|MEDIA_ERR_DECODE|Format error|decode|bufferAppendError|fragParsingError|sourceBuffer|appendBuffer|manifestLoadError|levelLoadError|Gateway session/i.test(message || '');
+    }
+
+    isGatewaySessionGoneError(data = {}) {
+        const response = data.response || {};
+        const networkDetails = data.networkDetails || {};
+        const code = Number(response.code ?? response.status ?? response.statusCode ?? networkDetails.status);
+        const detail = String(data.details || '');
+        const text = [
+            response.text,
+            response.statusText,
+            networkDetails.responseText,
+            networkDetails.statusText,
+            data.reason,
+            data.error?.message,
+            data.details
+        ].filter(Boolean).join(' ');
+        const isPlaylistLoad = /manifestLoadError|levelLoadError|fragLoadError/i.test(detail);
+        return isPlaylistLoad && (
+            code === 404 ||
+            code === 410 ||
+            /session not found|session expired|session gone/i.test(text)
+        );
+    }
+
+    gatewaySessionGoneMessage(data = {}) {
+        const response = data.response || {};
+        const networkDetails = data.networkDetails || {};
+        const code = Number(response.code ?? response.status ?? response.statusCode ?? networkDetails.status);
+        if (code === 410) return 'Gateway session expired.';
+        return 'Gateway session not found.';
     }
 
     async retryWithCloudRelay(message) {
@@ -3393,9 +3438,10 @@ class WatchPage {
         if (this._cloudRelayFallbackTried) return false;
         if (!this.isFormatPlaybackError(message)) return false;
         if (!this.content?.sourceId || !this.content?.id) return false;
-        if (this.currentPlaybackMode === 'gateway-session'
+        const gatewaySessionGone = /Gateway session (not found|expired)/i.test(message || '');
+        if (!gatewaySessionGone && (this.currentPlaybackMode === 'gateway-session'
             || this.isGatewayPlaybackUrl(this.currentUrl)
-            || this.isGatewayPlaybackUrl(this.baseStreamUrl)) {
+            || this.isGatewayPlaybackUrl(this.baseStreamUrl))) {
             return false;
         }
 
