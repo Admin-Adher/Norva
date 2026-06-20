@@ -26,8 +26,8 @@
 
   <div id="status">Prêt. Choisis un échantillon.</div>
   <div class="row">
-    <button data-id="s_h264_aac" data-mime='video/mp4; codecs="avc1.640028, mp4a.40.2"'>Streamer mkv H.264 + AAC</button>
-    <button data-id="s_hevc_aac" data-mime='video/mp4; codecs="hvc1.1.6.L93.B0, mp4a.40.2"'>Streamer mkv HEVC + AAC</button>
+    <button data-id="s_h264_aac" data-mime='video/mp4; codecs="avc1.640028,mp4a.40.2"'>Streamer mkv H.264 + AAC</button>
+    <button data-id="s_hevc_aac" data-mime='video/mp4; codecs="hvc1.1.6.L93.B0,mp4a.40.2"'>Streamer mkv HEVC + AAC</button>
     <button id="seek" disabled>⏩ Sauter à 6 s (test reprise)</button>
   </div>
   <video id="vid" controls playsinline></video>
@@ -94,10 +94,12 @@ async function streamRemux(id, mime) {
     if (!('MediaSource' in window) || !MediaSource.isTypeSupported(mime)) {
       throw new Error('MediaSource ne supporte pas ' + mime);
     }
+    log('MediaSource.isTypeSupported(' + mime + ') = ' + MediaSource.isTypeSupported(mime));
     const ms = new MediaSource();
     vid.src = URL.createObjectURL(ms);
     await new Promise(res => ms.addEventListener('sourceopen', res, { once: true }));
     const sb = ms.addSourceBuffer(mime);
+    log('MediaSource ouvert + SourceBuffer créé');
     const queue = [];
     let ended = false;
     const drain = () => {
@@ -108,19 +110,21 @@ async function streamRemux(id, mime) {
     sb.addEventListener('updateend', drain);
     sb.addEventListener('error', () => log('SourceBuffer error'));
 
-    // 4) writer device -> MSE queue (copy bytes out of wasm memory)
-    await lib.mkwriterdev('output');
+    // 4) writer device (created by ff_init_muxer via device:true) -> MSE queue
     let written = 0;
     lib.onwrite = (name, pos, data) => { written += data.length; queue.push(data.slice(0)); drain(); };
 
     // 5) muxer: copy all streams to fragmented MP4
     const streamCtxs = streams.map(s => [s.codecpar, s.time_base_num, s.time_base_den]);
-    const [oc, , pb] = await lib.ff_init_muxer(
+    log('init muxer mp4 (device=output)…');
+    const muxRet = await lib.ff_init_muxer(
       { format_name: 'mp4', filename: 'output', open: true, device: true, codecpars: true },
       streamCtxs);
+    const oc = muxRet[0], pb = muxRet[2];
+    log('muxer initialisé (oc=' + oc + ') → écriture en-tête fMP4…');
     const opts = await lib.av_dict_set_js(0, 'movflags', 'frag_keyframe+empty_moov+default_base_moof', 0);
-    await lib.avformat_write_header(oc, opts);
-    log('en-tête MP4 fragmenté écrit, remux en cours…');
+    const whRet = await lib.avformat_write_header(oc, opts);
+    log('en-tête MP4 fragmenté écrit (ret=' + whRet + '), remux en cours…');
     setStatus('<span class="wait">⏳ remux + lecture…</span>');
 
     // 6) read packets -> write packets
@@ -151,8 +155,11 @@ async function streamRemux(id, mime) {
       setStatus(`<span class="no">✖ &lt;video&gt; refuse le flux</span> (code ${vid.error?.code}, ${vid.error?.message||''}) — voir journal`); };
     setTimeout(() => { if (!settled) setStatus('<span class="no">✖ pas de lecture</span> — colle le journal stp'); }, 9000);
   } catch (e) {
-    setStatus(`<span class="no">✖ erreur</span> : ${e.message}`);
-    log('ERREUR: ' + (e.stack || e.message));
+    let desc;
+    if (e && (e.stack || e.message)) desc = e.stack || e.message;
+    else { let j; try { j = JSON.stringify(e); } catch (_) { j = '?'; } desc = `type=${typeof e} val=${String(e)} json=${j} code=${e && e.code}`; }
+    setStatus(`<span class="no">✖ erreur</span> : ${desc}`);
+    log('ERREUR: ' + desc);
   } finally {
     document.querySelectorAll('button[data-id]').forEach(b => b.disabled = false);
   }
