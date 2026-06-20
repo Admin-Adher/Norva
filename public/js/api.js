@@ -846,6 +846,52 @@ const CloudAdapter = (() => {
         ].includes(normalizedContainer);
     }
 
+    function normalizeCodecToken(value) {
+        return String(value || '').toLowerCase().replace(/[^a-z0-9.]+/g, '');
+    }
+
+    function isSafeBrowserAudio(codecValue, profileValue, channelsValue) {
+        const codec = normalizeCodecToken(codecValue);
+        const profile = normalizeCodecToken(profileValue);
+        const channels = Number.parseInt(String(channelsValue || ''), 10);
+        const combined = `${codec} ${profile}`;
+        if (!codec) return false;
+        if (Number.isFinite(channels) && channels > 2) return false;
+        if (
+            combined.includes('heaac') ||
+            combined.includes('aache') ||
+            combined.includes('sbr') ||
+            combined.includes('mp4a.40.5') ||
+            combined.includes('mp4a.40.29') ||
+            codec.includes('eac3') ||
+            codec.includes('e-ac3') ||
+            codec.includes('ac3') ||
+            codec.includes('dts') ||
+            codec.includes('truehd') ||
+            codec.includes('flac') ||
+            codec.includes('pcm')
+        ) return false;
+        return codec.includes('aac') || codec.includes('mp4a.40.2') || codec.includes('mp3') || codec.includes('opus') || codec.includes('vorbis');
+    }
+
+    function shouldVodUseGatewayTranscode(container, playbackHint = {}) {
+        const normalizedContainer = String(container || '').split('?')[0].split('#')[0].toLowerCase();
+        const videoCodec = normalizeCodecToken(playbackHint.videoCodec);
+        const unsafeContainer = ['mkv', 'webm', 'avi', 'wmv', 'flv', 'vob'].includes(normalizedContainer);
+        const unsafeVideo = videoCodec && !(
+            videoCodec.includes('h264') ||
+            videoCodec.includes('avc1') ||
+            videoCodec.includes('avc')
+        );
+        const hasAudioMetadata = Boolean(playbackHint.audioCodec || playbackHint.audioProfile || playbackHint.audioChannels);
+        const unsafeAudio = hasAudioMetadata && !isSafeBrowserAudio(
+            playbackHint.audioCodec,
+            playbackHint.audioProfile,
+            playbackHint.audioChannels
+        );
+        return unsafeContainer || unsafeVideo || unsafeAudio;
+    }
+
     async function sourcePayloadFromLocal(data) {
         const type = data.type || data.sourceType || data.source_type || 'xtream';
         const payload = {
@@ -1052,10 +1098,14 @@ const CloudAdapter = (() => {
                 const mode = forcedMode || (((isVodPlayback || needsGateway) && preferredMode !== 'direct') ? 'transcode' : preferredMode);
                 const playbackHint = playbackHintFromQuery(query, container, type);
                 if ((type === 'series' || type === 'movie') && !playbackHint.gatewayMode) {
-                    // VOD defaults to remux: the gateway copies browser-safe video
-                    // (H.264) for a fast start and only re-encodes when needed
-                    // (HEVC, etc.), transcoding audio separately as required.
-                    playbackHint.gatewayMode = 'remux';
+                    const needsFullGatewayTranscode = shouldVodUseGatewayTranscode(container, playbackHint);
+                    // VOD only uses remux when the container, video and audio
+                    // are browser-safe. MKV + AC3/5.1 can decode poorly after
+                    // Gateway seeks, so force clean H.264/AAC HLS instead.
+                    playbackHint.gatewayMode = needsFullGatewayTranscode ? 'transcode' : 'remux';
+                    if (needsFullGatewayTranscode && !playbackHint.audioMode) {
+                        playbackHint.audioMode = 'transcode';
+                    }
                 }
                 const cloudSourceId = await resolveSourceId(sourceId);
                 const userAgent = resolveCloudUserAgent();
