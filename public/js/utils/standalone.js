@@ -1,28 +1,37 @@
 /**
- * Standalone-mode glue for the Android TV client.
+ * Native-player glue for the Android TV client.
  *
- * Active only when the page runs inside the standalone APK (the native
- * side injects window.NodeCastNative). In this mode:
- *  - auth is implicit (the embedded local server has a single admin user),
- *  - playback is handed to the native Android player, whose hardware
- *    decoders handle MKV/AC3/EAC3/HEVC that the WebView cannot play.
+ * Active whenever the page runs inside a native shell that injects a bridge:
+ *  - window.NodeCastNative  → standalone APK (embedded local server), or
+ *  - window.NorvaTVCloud    → cloud-paired TV loading https://norva.tv/app.html.
  *
- * Loaded before app.js so the implicit token exists before checkAuth().
+ * In both modes playback is handed to the native Android player (ExoPlayer),
+ * whose hardware decoders handle MKV/AC3/EAC3/HEVC the WebView cannot play, and
+ * which pulls the stream from the user's HOME network (residential IP) — so the
+ * provider does not 401-block it the way it blocks the cloud datacenter gateway.
+ * api.js resolves a DIRECT provider URL when a native bridge is present.
+ *
+ * Loaded before app.js so the implicit token (standalone only) exists before
+ * checkAuth(). In a normal browser no bridge exists and this is a no-op.
  */
 
 (() => {
-    if (!window.NodeCastNative) return;
+    const bridge = window.NodeCastNative || window.NorvaTVCloud;
+    if (!bridge) return;
 
-    // Implicit session: the embedded server accepts any token
-    if (!localStorage.getItem('authToken')) {
+    // Implicit session only in standalone (the embedded server has a single
+    // admin user). In cloud mode the TV uses its real Norva account session —
+    // never clobber it.
+    const isStandalone = Boolean(window.NodeCastNative);
+    if (isStandalone && !localStorage.getItem('authToken')) {
         localStorage.setItem('authToken', 'standalone');
     }
 
     // Route all playback to the native player once the page classes exist
     document.addEventListener('DOMContentLoaded', () => {
         const nativePlay = (streamUrl, title, meta) => {
-            if (window.NodeCastNative.playVideoWithMeta && meta) {
-                window.NodeCastNative.playVideoWithMeta(
+            if (bridge.playVideoWithMeta && meta) {
+                bridge.playVideoWithMeta(
                     streamUrl,
                     title,
                     String(meta.sourceId || ''),
@@ -30,7 +39,23 @@
                     String(meta.itemId || '')
                 );
             } else {
-                window.NodeCastNative.playVideo(streamUrl, title);
+                bridge.playVideo(streamUrl, title);
+            }
+        };
+
+        // play() may receive a ready URL or an async resolver returning
+        // { url, ... } — the cloud movie/series path opens the player shell
+        // first, then resolves the stream. Support both so native playback
+        // works in cloud mode (not just standalone).
+        const resolveStreamUrl = async (streamUrl) => {
+            try {
+                if (typeof streamUrl !== 'function') return streamUrl || null;
+                const resolved = await streamUrl();
+                if (typeof resolved === 'string') return resolved || null;
+                return resolved && resolved.url ? resolved.url : null;
+            } catch (err) {
+                console.warn('[Native] Could not resolve stream URL:', err?.message || err);
+                return null;
             }
         };
 
@@ -54,9 +79,11 @@
         };
 
         if (window.WatchPage) {
-            WatchPage.prototype.play = function (content, streamUrl) {
+            WatchPage.prototype.play = async function (content, streamUrl) {
                 try {
-                    // Keep lightweight history so Continue Watching still works
+                    // Keep lightweight history so Continue Watching still works.
+                    // (Live position sync from the native player is a separate
+                    // native-side change — see docs/ARCHITECTURE-RELIABILITY.md.)
                     window.API?.history?.save?.({
                         id: content.id,
                         type: content.type === 'movie' ? 'movie' : 'episode',
@@ -75,22 +102,28 @@
                         }
                     }).catch(() => { });
                 } catch (e) { /* history is best-effort */ }
-                nativePlay(streamUrl, nativeTitle(content), contentMeta(content));
+                const url = await resolveStreamUrl(streamUrl);
+                if (!url) return;
+                nativePlay(url, nativeTitle(content), contentMeta(content));
             };
         }
 
         if (window.VideoPlayer) {
-            VideoPlayer.prototype.play = function (channel, streamUrl) {
+            VideoPlayer.prototype.play = async function (channel, streamUrl) {
                 this.currentChannel = channel;
-                nativePlay(streamUrl, channel?.name || 'Live TV', channelMeta(channel));
+                const url = await resolveStreamUrl(streamUrl);
+                if (!url) return;
+                nativePlay(url, channel?.name || 'Live TV', channelMeta(channel));
             };
         }
 
-        // Logout makes no sense without accounts: hide the button when it appears
-        const hideLogout = () => document.getElementById('logout-btn')?.remove();
-        setTimeout(hideLogout, 1500);
-        setTimeout(hideLogout, 4000);
+        // Logout makes no sense without accounts in standalone: hide the button.
+        if (isStandalone) {
+            const hideLogout = () => document.getElementById('logout-btn')?.remove();
+            setTimeout(hideLogout, 1500);
+            setTimeout(hideLogout, 4000);
+        }
     });
 
-    console.log('[Standalone] Native playback bridge active');
+    console.log(`[Native] Playback bridge active (${isStandalone ? 'standalone' : 'cloud'})`);
 })();

@@ -85,3 +85,40 @@ Classés par impact / facilité. ⚙️ = déployable par l'agent (web/edge) ;
   le suivant et, en dernier recours, expliquer clairement à l'utilisateur.
 - Aucune erreur silencieuse : tout échec de lecture produit un message
   actionnable + de la télémétrie (`cloud_playback_events`).
+
+## 6. Journal d'implémentation & reste à faire
+
+### Fait
+- **Erreurs claires + stop au refresh en boucle** (`public/js/cloudApi.js`,
+  `public/js/pages/WatchPage.js`). Un blocage fournisseur (401/403/429) affiche
+  un message exact et n'enchaîne plus les rafraîchissements.
+- **Lecture native TV en mode cloud** (`public/js/api.js`,
+  `public/js/utils/standalone.js`). Quand un pont natif est présent
+  (`window.NodeCastNative` standalone, ou `window.NorvaTVCloud` cloud), `api.js`
+  résout l'**URL directe** du fournisseur (`mode: 'direct'`) et `standalone.js`
+  la passe à l'ExoPlayer natif → lecture depuis l'IP résidentielle, codecs
+  matériels, **pas de 401 datacenter**. Corrige aussi un bug : le pont ne gérait
+  pas le *resolver* async de `play()` (il passait la fonction au lieu de l'URL),
+  et ne s'activait qu'en standalone.
+  - ⚠️ **À tester sur l'appareil** : impossible à exécuter ici (pas d'Android TV).
+    Le mode cloud charge `norva.tv/app.html` en direct → déploiement web suffit
+    (pas de rebuild APK). Le navigateur n'a aucun pont → comportement inchangé.
+
+### Reste à faire (prioritaire pour la reprise multi-appareils)
+1. **Remontée de position depuis le lecteur natif** (Java, rebuild APK).
+   `clients/android-tv/.../PlayerActivity.java` ne reporte aujourd'hui qu'un
+   statut ok/broken vers `127.0.0.1` (standalone only) — **aucune position**.
+   Pour réaliser « reprendre à 38:01 sur un autre écran » :
+   - POSTer périodiquement la progression vers l'API cloud `/history`
+     (`POST norva-cloud/history` avec le token cloud + `sourceId/itemType/itemId`),
+     p.ex. toutes les 10 s et à la pause/sortie.
+   - Récupérer l'offset de reprise à l'ouverture et `player.seekTo(...)`.
+   - Le pont devra fournir le token cloud + l'offset au `PlayerActivity`.
+2. **Web → hub local (navigateur)**. Pour lire les codecs exotiques **dans un
+   navigateur** sans datacenter :
+   - UI d'appairage d'un hub (`server/`) dans Réglages + Cloudflare Tunnel.
+   - Router la lecture web sur le hub (`_hubBase()` existe dans `api.js`, mais
+     `_shouldUseCloud()` force le cloud sur un hôte distant — à assouplir pour la
+     lecture quand un hub est appairé).
+3. **UA configurable jusqu'au gateway cloud** (mitigation du repli cloud) :
+   remonter le preset UA de la source (`tivimate`) client → edge → gateway.

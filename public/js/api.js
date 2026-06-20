@@ -1099,7 +1099,18 @@ const CloudAdapter = (() => {
                 // relay/direct can never work for it, so failures must stay on the
                 // gateway transcode path instead of cascading into "Media error".
                 const gatewayOnlyVod = isVodPlayback && needsGateway;
-                const mode = forcedMode || (((isVodPlayback || needsGateway) && preferredMode !== 'direct') ? 'transcode' : preferredMode);
+                // Native client (Android TV / standalone): a native ExoPlayer with
+                // hardware HEVC/MKV/AC3 decoders plays straight from the user's home
+                // network. Pull the RAW provider URL (direct) instead of the cloud
+                // gateway, whose datacenter IP the provider 401-blocks. This is what
+                // makes the TV behave like TiviMate. The browser never has this
+                // bridge, so its path is unchanged.
+                const nativePlayer = typeof window !== 'undefined'
+                    && (window.NodeCastNative || window.NorvaTVCloud);
+                const mode = forcedMode
+                    || (nativePlayer
+                        ? 'direct'
+                        : (((isVodPlayback || needsGateway) && preferredMode !== 'direct') ? 'transcode' : preferredMode));
                 const playbackHint = playbackHintFromQuery(query, container, type);
                 if ((type === 'series' || type === 'movie') && !playbackHint.gatewayMode) {
                     const needsFullGatewayTranscode = shouldVodUseGatewayTranscode(container, playbackHint);
