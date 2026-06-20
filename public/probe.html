@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Norva — Sonde de capacités navigateur</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+         background:#0a0e1a; color:#dce6ff; padding:18px; line-height:1.45; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  h2 { font-size:15px; margin:20px 0 8px; color:#9db4ff; }
+  .sub { color:#8794b3; font-size:13px; margin-bottom:14px; }
+  table { border-collapse:collapse; width:100%; max-width:760px; font-size:13.5px; }
+  td, th { text-align:left; padding:7px 10px; border-bottom:1px solid #1c2540; }
+  th { color:#9db4ff; font-weight:600; }
+  .ok { color:#34d399; font-weight:700; }
+  .no { color:#f87171; font-weight:700; }
+  .verdict { max-width:760px; background:#111a30; border:1px solid #24304f; border-radius:10px;
+             padding:14px 16px; margin:14px 0; font-size:14px; }
+  .verdict b { color:#fff; }
+  code { background:#1a2238; padding:1px 6px; border-radius:5px; font-size:12.5px; }
+  button { background:#5b7cfa; color:#fff; border:0; border-radius:9px; padding:10px 16px;
+           font-weight:700; font-size:14px; cursor:pointer; margin:6px 6px 6px 0; }
+  #copy { background:#1b2742; border:1px solid #34406a; }
+  pre { background:#0c1322; border:1px solid #1c2540; border-radius:8px; padding:12px;
+        overflow:auto; font-size:12px; max-width:760px; white-space:pre-wrap; }
+  .pill { display:inline-block; padding:2px 8px; border-radius:999px; font-size:11px; font-weight:700; }
+  .pill.y { background:#0c3a2a; color:#34d399; } .pill.n { background:#3a0c14; color:#f87171; }
+</style>
+</head>
+<body>
+  <h1>Norva — Sonde de capacités du navigateur</h1>
+  <div class="sub">Ouvre cette page dans chaque navigateur/appareil à tester (PC Chrome, téléphone, tablette…), puis clique <b>« Copier le rapport »</b> et envoie-le-moi. Tout tourne en local, rien n'est envoyé nulle part.</div>
+
+  <div id="env" class="verdict"></div>
+
+  <h2>1. Media Source Extensions (lecture par remux → &lt;video&gt;)</h2>
+  <table id="mse"><thead><tr><th>Codec dans fMP4</th><th>Décodable</th></tr></thead><tbody></tbody></table>
+
+  <h2>2. WebCodecs — décodage vidéo matériel</h2>
+  <table id="vdec"><thead><tr><th>Codec vidéo</th><th>Supporté</th><th>Matériel</th></tr></thead><tbody></tbody></table>
+
+  <h2>3. WebCodecs — décodage audio</h2>
+  <table id="adec"><thead><tr><th>Codec audio</th><th>Supporté</th></tr></thead><tbody></tbody></table>
+
+  <div id="verdict" class="verdict">Analyse en cours…</div>
+
+  <h2>4. (Optionnel) Test ffmpeg.wasm réel — nécessite Internet</h2>
+  <div class="sub">Charge ffmpeg.wasm (~10 Mo) et mesure le temps de démarrage sur CET appareil. Si erreur (souvent en ouvrant le fichier en <code>file://</code>), ignore — les sections 1 à 3 suffisent.</div>
+  <button id="wasmbtn">Lancer le test ffmpeg.wasm</button>
+  <div id="wasmout" class="sub"></div>
+
+  <button id="copy">📋 Copier le rapport</button>
+  <pre id="report">…</pre>
+
+<script>
+const report = {};
+const cell = (ok) => `<span class="${ok?'ok':'no'}">${ok?'✅ oui':'❌ non'}</span>`;
+
+// ---- 1. MSE ----
+const mseTests = [
+  ['H.264 (avc1) + AAC',  'video/mp4; codecs="avc1.640028,mp4a.40.2"'],
+  ['HEVC/H.265 (hvc1)',   'video/mp4; codecs="hvc1.1.6.L93.B0"'],
+  ['HEVC/H.265 (hev1)',   'video/mp4; codecs="hev1.1.6.L93.B0"'],
+  ['VP9',                 'video/mp4; codecs="vp09.00.10.08"'],
+  ['AV1',                 'video/mp4; codecs="av01.0.04M.08"'],
+  ['Audio AAC',           'audio/mp4; codecs="mp4a.40.2"'],
+  ['Audio AC-3',          'audio/mp4; codecs="ac-3"'],
+  ['Audio E-AC-3',        'audio/mp4; codecs="ec-3"'],
+  ['Audio Opus',          'audio/mp4; codecs="opus"'],
+  ['Audio FLAC',          'audio/mp4; codecs="flac"'],
+];
+const mseTbody = document.querySelector('#mse tbody');
+const hasMSE = 'MediaSource' in window && typeof MediaSource.isTypeSupported === 'function';
+report.mse = {};
+for (const [name, type] of mseTests) {
+  const ok = hasMSE ? MediaSource.isTypeSupported(type) : false;
+  report.mse[name] = ok;
+  mseTbody.insertAdjacentHTML('beforeend', `<tr><td>${name}<br><code>${type}</code></td><td>${cell(ok)}</td></tr>`);
+}
+
+// ---- 2 & 3. WebCodecs ----
+const vTests = [
+  ['H.264 (avc1)', 'avc1.640028'],
+  ['HEVC/H.265 (hvc1)', 'hvc1.1.6.L93.B0'],
+  ['HEVC/H.265 (hev1)', 'hev1.1.6.L93.B0'],
+  ['VP9', 'vp09.00.10.08'],
+  ['AV1', 'av01.0.04M.08.0.110.01.01.01.0'],
+];
+const aTests = [
+  ['AAC', 'mp4a.40.2'], ['AC-3', 'ac-3'], ['E-AC-3', 'ec-3'],
+  ['Opus', 'opus'], ['FLAC', 'flac'],
+];
+const vTbody = document.querySelector('#vdec tbody');
+const aTbody = document.querySelector('#adec tbody');
+report.webcodecs_video = {}; report.webcodecs_audio = {};
+
+async function run() {
+  const hasVD = 'VideoDecoder' in window;
+  const hasAD = 'AudioDecoder' in window;
+  report.has_VideoDecoder = hasVD; report.has_AudioDecoder = hasAD;
+
+  for (const [name, codec] of vTests) {
+    let supported = false, hw = false, err = '';
+    if (hasVD) {
+      try {
+        const r = await VideoDecoder.isConfigSupported({ codec, codedWidth:1920, codedHeight:1080 });
+        supported = !!r.supported;
+        try {
+          const rh = await VideoDecoder.isConfigSupported({ codec, codedWidth:1920, codedHeight:1080, hardwareAcceleration:'require-hardware' });
+          hw = !!rh.supported;
+        } catch(_) {}
+      } catch(e) { err = e.name; }
+    }
+    report.webcodecs_video[name] = { supported, hw };
+    vTbody.insertAdjacentHTML('beforeend',
+      `<tr><td>${name}<br><code>${codec}</code></td><td>${cell(supported)}</td><td>${supported ? (hw?'<span class="pill y">HW</span>':'<span class="pill n">logiciel</span>') : '—'}</td></tr>`);
+  }
+
+  for (const [name, codec] of aTests) {
+    let supported = false;
+    if (hasAD) {
+      try {
+        const r = await AudioDecoder.isConfigSupported({ codec, sampleRate:48000, numberOfChannels:(codec==='ac-3'||codec==='ec-3')?6:2 });
+        supported = !!r.supported;
+      } catch(e) {}
+    }
+    report.webcodecs_audio[name] = supported;
+    aTbody.insertAdjacentHTML('beforeend', `<tr><td>${name} <code>${codec}</code></td><td>${cell(supported)}</td></tr>`);
+  }
+
+  // ---- Verdict ----
+  const remuxOK = report.mse['H.264 (avc1) + AAC'];
+  const hevcMSE = report.mse['HEVC/H.265 (hvc1)'] || report.mse['HEVC/H.265 (hev1)'];
+  const hevcWC  = report.webcodecs_video['HEVC/H.265 (hvc1)']?.supported || report.webcodecs_video['HEVC/H.265 (hev1)']?.supported;
+  const lines = [];
+  lines.push(`<b>Verdict pour cet appareil :</b>`);
+  lines.push(`• mkv H.264+AAC par <b>remux client</b> → ${remuxOK?'<span class="ok">OK</span>':'<span class="no">non</span>'}`);
+  lines.push(`• mkv avec <b>audio AC-3/DTS</b> → transcodage audio nécessaire (léger) : ${report.webcodecs_audio['AAC']?'<span class="ok">faisable</span>':'<span class="no">à vérifier</span>'}`);
+  lines.push(`• <b>HEVC</b> jouable ici → ${(hevcMSE||hevcWC)?`<span class="ok">OUI</span> ${hevcMSE?'(MSE)':''} ${hevcWC?'(WebCodecs)':''}`:'<span class="no">NON</span> (→ app native pour ces titres)'}`);
+  document.getElementById('verdict').innerHTML = lines.join('<br>');
+
+  document.getElementById('report').textContent = JSON.stringify(report, null, 2);
+}
+
+// env
+report.userAgent = navigator.userAgent;
+report.crossOriginIsolated = !!self.crossOriginIsolated;
+report.has_MediaSource = hasMSE;
+document.getElementById('env').innerHTML =
+  `<b>Appareil :</b> <code>${navigator.userAgent}</code><br>` +
+  `MediaSource: ${hasMSE?'<span class="pill y">oui</span>':'<span class="pill n">non</span>'} · ` +
+  `WebCodecs: ${('VideoDecoder' in window)?'<span class="pill y">oui</span>':'<span class="pill n">non</span>'} · ` +
+  `crossOriginIsolated: ${self.crossOriginIsolated?'oui':'non'}`;
+
+run();
+
+// ---- 4. optional ffmpeg.wasm timing ----
+document.getElementById('wasmbtn').addEventListener('click', async () => {
+  const out = document.getElementById('wasmout');
+  out.textContent = 'Chargement de ffmpeg.wasm…';
+  try {
+    const t0 = performance.now();
+    const { FFmpeg } = await import('https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/esm/index.js');
+    const { toBlobURL } = await import('https://unpkg.com/@ffmpeg/util@0.12.1/dist/esm/index.js');
+    const base = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm';
+    const ff = new FFmpeg();
+    await ff.load({
+      coreURL: await toBlobURL(`${base}/ffmpeg-core.js`, 'text/javascript'),
+      wasmURL: await toBlobURL(`${base}/ffmpeg-core.wasm`, 'application/wasm'),
+    });
+    const tLoad = performance.now() - t0;
+    // generate 10s 720p H.264 then remux to fMP4, time the remux
+    await ff.exec(['-f','lavfi','-i','testsrc2=size=1280x720:rate=25:duration=10','-c:v','libx264','-preset','ultrafast','-pix_fmt','yuv420p','gen.mkv']);
+    const t1 = performance.now();
+    await ff.exec(['-i','gen.mkv','-c','copy','-movflags','+frag_keyframe+empty_moov+default_base_moof','out.mp4']);
+    const tRemux = performance.now() - t1;
+    report.ffmpeg_wasm = { load_ms: Math.round(tLoad), remux_10s_ms: Math.round(tRemux), remux_x_realtime: +(10000/tRemux).toFixed(1) };
+    out.innerHTML = `<span class="ok">ffmpeg.wasm OK</span> — chargement: <b>${(tLoad/1000).toFixed(1)} s</b>, remux de 10 s de vidéo: <b>${Math.round(tRemux)} ms</b> (≈ <b>${(10000/tRemux).toFixed(0)}× temps réel</b>)`;
+    document.getElementById('report').textContent = JSON.stringify(report, null, 2);
+  } catch (e) {
+    out.innerHTML = `<span class="no">Test ffmpeg.wasm impossible ici</span> : ${e.message}. (Normal en file:// — ce n'est pas grave, les sections 1–3 suffisent.)`;
+  }
+});
+
+document.getElementById('copy').addEventListener('click', async () => {
+  try { await navigator.clipboard.writeText(document.getElementById('report').textContent); document.getElementById('copy').textContent = '✅ Copié !'; }
+  catch(_) { document.getElementById('report').focus(); }
+});
+</script>
+</body>
+</html>
