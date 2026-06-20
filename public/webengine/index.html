@@ -24,13 +24,13 @@
   #runall { margin:6px 0 2px; }
   .ok { color:#34d399; font-weight:700; } .no { color:#f87171; font-weight:700; } .wait{color:#fbbf24;}
   pre { background:#0c1322; border:1px solid #1c2540; border-radius:8px; padding:10px;
-        overflow:auto; font-size:11px; max-width:1100px; max-height:220px; white-space:pre-wrap; margin-top:14px; }
+        overflow:auto; font-size:11px; max-width:1100px; max-height:240px; white-space:pre-wrap; margin-top:14px; }
   code{background:#1a2238;padding:1px 5px;border-radius:5px;font-size:12px;}
 </style>
 </head>
 <body>
   <h1>Norva — Test du moteur de lecture client (remux WASM)</h1>
-  <div class="sub">Ce test prouve, <b>dans TON navigateur</b>, que les mkv (y compris <b>HEVC + AC-3</b>) peuvent être ré-emballés/transcodés-audio et lus — sans aucun serveur de transcodage (zéro Railway). Clique « Tout tester », attends, et dis-moi quelles vignettes s'affichent et se lisent (surtout HEVC+AC-3). Le 1er chargement télécharge ffmpeg.wasm (~10 Mo, une fois).</div>
+  <div class="sub">Ce test prouve, <b>dans TON navigateur</b>, que les mkv (y compris <b>HEVC + AC-3</b>) peuvent être ré-emballés/transcodés-audio et lus — sans aucun serveur de transcodage (zéro Railway). Clique « Tout tester », attends, et dis-moi quelles vignettes s'affichent et se lisent (surtout HEVC+AC-3). Le 1er chargement télécharge ffmpeg.wasm (~32 Mo, une fois).</div>
 
   <div id="status">Chargement de ffmpeg.wasm…</div>
   <button id="runall" disabled>▶ Tout tester</button>
@@ -39,8 +39,11 @@
   <pre id="log">Journal…</pre>
 
 <script type="module">
-import { FFmpeg } from 'https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/esm/index.js';
-import { toBlobURL } from 'https://unpkg.com/@ffmpeg/util@0.12.1/dist/esm/index.js';
+// Load @ffmpeg/core directly on the MAIN THREAD (no @ffmpeg/ffmpeg Worker
+// wrapper) — this avoids the cross-origin "Failed to construct 'Worker'"
+// block and needs nothing hosted. Single-thread core => no Worker at all.
+const CORE = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm/ffmpeg-core.js';
+const WASM = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm/ffmpeg-core.wasm';
 
 const logEl = document.getElementById('log');
 const statusEl = document.getElementById('status');
@@ -54,27 +57,24 @@ const samples = [
 ];
 
 const grid = document.getElementById('grid');
-const cards = {};
 for (const s of samples) {
   const el = document.createElement('div'); el.className = 'card';
   el.innerHTML = `<h3>${s.title}</h3><div class="codecs">${s.codecs}</div>
     <button data-id="${s.id}" disabled>Tester</button>
     <div class="stat" id="stat_${s.id}">—</div>
     <video id="vid_${s.id}" controls playsinline muted></video>`;
-  grid.appendChild(el); cards[s.id] = el;
+  grid.appendChild(el);
 }
 
-let ff;
+let core;
 async function loadFF() {
-  ff = new FFmpeg();
-  ff.on('log', ({ message }) => { if (message && !message.includes('frame=')) log('[ffmpeg] ' + message); });
-  const base = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm';
   const t0 = performance.now();
-  await ff.load({
-    coreURL: await toBlobURL(`${base}/ffmpeg-core.js`, 'text/javascript'),
-    wasmURL: await toBlobURL(`${base}/ffmpeg-core.wasm`, 'application/wasm'),
+  const createFFmpegCore = (await import(CORE)).default;
+  core = await createFFmpegCore({
+    mainScriptUrlOrBlob: `${CORE}#${btoa(JSON.stringify({ wasmURL: WASM, workerURL: '' }))}`,
   });
-  statusEl.innerHTML = `<span class="ok">✅ ffmpeg.wasm chargé</span> en ${((performance.now()-t0)/1000).toFixed(1)} s. Clique « Tout tester ».`;
+  try { core.setLogger((d) => { const m = d && (d.message ?? d); if (m && !String(m).includes('frame=')) log('[ffmpeg] ' + m); }); } catch(_) {}
+  statusEl.innerHTML = `<span class="ok">✅ ffmpeg.wasm chargé</span> en ${((performance.now()-t0)/1000).toFixed(1)} s (mono-thread). Clique « ▶ Tout tester ».`;
   document.getElementById('runall').disabled = false;
   document.querySelectorAll('button[data-id]').forEach(b => b.disabled = false);
 }
@@ -85,15 +85,21 @@ async function test(s) {
   stat.innerHTML = '<span class="wait">⏳ téléchargement…</span>';
   try {
     const buf = new Uint8Array(await (await fetch('/webengine/media/' + s.id + '.mkv')).arrayBuffer());
-    await ff.writeFile('in.mkv', buf);
-    stat.innerHTML = '<span class="wait">⏳ remux + audio…</span>';
+    for (const f of ['in.mkv','out.mp4']) { try { core.FS.unlink(f); } catch(_) {} }
+    core.FS.writeFile('in.mkv', buf);
+    stat.innerHTML = '<span class="wait">⏳ remux + audio (le navigateur peut figer 1-2 s)…</span>';
+    await new Promise(r => setTimeout(r, 60)); // let the status render before the blocking exec
     const args = ['-i','in.mkv','-c:v','copy'];
     if (s.hevc) args.push('-tag:v','hvc1');
     args.push('-c:a','aac','-b:a','192k','-movflags','+faststart','out.mp4');
     const t0 = performance.now();
-    await ff.exec(args);
+    try { core.setTimeout(-1); } catch(_) {}
+    core.exec(...args);
+    const ret = core.ret;
     const ms = Math.round(performance.now() - t0);
-    const out = await ff.readFile('out.mp4');
+    if (ret !== 0) { stat.innerHTML = `<span class="no">✖ ffmpeg a échoué</span> (code ${ret}, ${ms} ms) — voir journal`; try { core.reset(); } catch(_){} return; }
+    const out = core.FS.readFile('out.mp4');
+    try { core.reset(); } catch(_) {}
     const url = URL.createObjectURL(new Blob([out.buffer], { type:'video/mp4' }));
     vid.src = url; vid.style.display = 'block';
     let settled = false;
@@ -101,7 +107,7 @@ async function test(s) {
       stat.innerHTML = `<span class="ok">✅ LU</span> — remux ${ms} ms, sortie ${(out.length/1048576).toFixed(1)} Mo, ${vid.videoWidth}×${vid.videoHeight}`;
       vid.play().catch(()=>{}); };
     vid.onerror = () => { if (settled) return; settled = true;
-      stat.innerHTML = `<span class="no">✖ vidéo refusée</span> (remux OK en ${ms} ms, mais &lt;video&gt; ne décode pas — code ${vid.error?.code})`; };
+      stat.innerHTML = `<span class="no">✖ &lt;video&gt; refuse le flux</span> (remux OK ${ms} ms, mais pas de décodage — code ${vid.error?.code})`; };
     setTimeout(() => { if (!settled) { settled=true; stat.innerHTML = `<span class="no">✖ pas de 'loadeddata'</span> (remux ${ms} ms) — le navigateur ne décode pas ce flux`; } }, 8000);
   } catch (e) {
     stat.innerHTML = `<span class="no">✖ erreur</span> : ${e.message}`;
@@ -112,7 +118,7 @@ async function test(s) {
 document.querySelectorAll('button[data-id]').forEach(b =>
   b.addEventListener('click', () => test(samples.find(s => s.id === b.dataset.id))));
 document.getElementById('runall').addEventListener('click', async () => {
-  for (const s of samples) { await test(s); }
+  for (const s of samples) await test(s);
 });
 
 loadFF().catch(e => { statusEl.innerHTML = `<span class="no">✖ Échec chargement ffmpeg.wasm</span> : ${e.message}`; log(e.stack || e.message); });
