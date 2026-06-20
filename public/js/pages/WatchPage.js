@@ -1809,7 +1809,7 @@ class WatchPage {
         }
         if (/401|Unauthorized|403|Forbidden/i.test(text)) {
             return cloud
-                ? "Le fournisseur a refusé le flux depuis le serveur cloud (401/403). En général l'IP datacenter est bloquée alors que ton compte fonctionne sur ton réseau (ex. TiviMate). → Lis ce titre depuis l'app TV/mobile ou un hub local sur ton réseau, ou réessaie plus tard."
+                ? "Ton fournisseur bloque la lecture depuis le cloud (un navigateur ne peut pas lire ce format sans datacenter). Regarde ce titre dans l'app Norva — TV, mobile ou tablette : ta progression est synchronisée, tu reprends exactement où tu en étais."
                 : 'The provider refused the stream (401/403). Check your IPTV subscription, connection limit, or that this device is allowed.';
         }
         if (/404|not found/i.test(text)) {

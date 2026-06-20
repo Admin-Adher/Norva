@@ -25,6 +25,47 @@ function _localTranscoderBase() {
     return '';
 }
 
+// Remember when a source's CLOUD playback was refused by the provider (a
+// datacenter 401) so a plain browser doesn't keep spinning ~10s on a doomed
+// gateway attempt before handing the title off to the native apps. Self-heals
+// after a TTL and is cleared on any successful cloud playback. Native/desktop
+// (residential) surfaces never set this — they don't use the cloud gateway.
+const CLOUD_BLOCK_KEY = 'norva-cloud-blocked-sources-v1';
+const CLOUD_BLOCK_TTL_MS = 30 * 60 * 1000;
+function _readCloudBlocked() {
+    try { return JSON.parse(localStorage.getItem(CLOUD_BLOCK_KEY) || '{}') || {}; } catch (_) { return {}; }
+}
+function _isSourceCloudBlocked(sourceId) {
+    if (!sourceId) return false;
+    const at = Number(_readCloudBlocked()[String(sourceId)] || 0);
+    return at > 0 && (Date.now() - at) < CLOUD_BLOCK_TTL_MS;
+}
+function _markSourceCloudBlocked(sourceId) {
+    if (!sourceId) return;
+    try {
+        const map = _readCloudBlocked();
+        map[String(sourceId)] = Date.now();
+        localStorage.setItem(CLOUD_BLOCK_KEY, JSON.stringify(map));
+    } catch (_) { /* storage best-effort */ }
+}
+function _clearSourceCloudBlock(sourceId) {
+    if (!sourceId) return;
+    try {
+        const map = _readCloudBlocked();
+        if (map[String(sourceId)]) {
+            delete map[String(sourceId)];
+            localStorage.setItem(CLOUD_BLOCK_KEY, JSON.stringify(map));
+        }
+    } catch (_) { /* storage best-effort */ }
+}
+function _looksProviderBlocked(err) {
+    if (!err) return false;
+    const detail = err.payload && err.payload.details;
+    const text = (String(err.message || '') + ' '
+        + (detail && typeof detail === 'object' ? JSON.stringify(detail) : String(detail || ''))).toLowerCase();
+    return /\b401\b|\b403\b|\b429\b|unauthor|forbidden|too many/.test(text);
+}
+
 function _isHostedApp() {
     const host = window.location.hostname;
     return Boolean(host && host !== 'localhost' && host !== '127.0.0.1' && host !== '::1');
@@ -1164,6 +1205,19 @@ const CloudAdapter = (() => {
                     }
                 }
 
+                // Plain browser (no native player, no local transcoder): if this
+                // source's cloud playback was just refused by the provider
+                // (datacenter 401), skip the doomed ~10s gateway attempt and hand
+                // off to the apps immediately. A working source is never skipped
+                // (only set after a real block) and it self-heals after a TTL.
+                const hasNativeOrLocal = (typeof window !== 'undefined'
+                    && (window.NodeCastNative || window.NorvaTVCloud)) || localTranscoder;
+                if (!hasNativeOrLocal && isVodPlayback && _isSourceCloudBlocked(sourceId)) {
+                    const blockedErr = new Error('Lecture cloud refusee par le fournisseur (401).');
+                    blockedErr.cloudBrowserBlocked = true;
+                    throw blockedErr;
+                }
+
                 const requestedCloudMode = localStorage.getItem('norva-cloud-playback-mode') || '';
                 const forcedMode = query.get('mode') || '';
                 const preferredMode = forcedMode || (isVodPlayback ? 'transcode' : (requestedCloudMode || 'relay'));
@@ -1301,17 +1355,28 @@ const CloudAdapter = (() => {
                     return payload;
                 };
                 let payload;
-                for (let providerAttempt = 0; ; providerAttempt += 1) {
-                    try {
-                        payload = await attemptCreateGatewaySession();
-                        break;
-                    } catch (sessionError) {
-                        if (!isProviderSlotBusy(sessionError) || providerAttempt >= PROVIDER_SLOT_RETRY_DELAYS_MS.length) {
-                            throw sessionError;
+                try {
+                    for (let providerAttempt = 0; ; providerAttempt += 1) {
+                        try {
+                            payload = await attemptCreateGatewaySession();
+                            break;
+                        } catch (sessionError) {
+                            if (!isProviderSlotBusy(sessionError) || providerAttempt >= PROVIDER_SLOT_RETRY_DELAYS_MS.length) {
+                                throw sessionError;
+                            }
+                            await new Promise((resolve) => setTimeout(resolve, PROVIDER_SLOT_RETRY_DELAYS_MS[providerAttempt]));
                         }
-                        await new Promise((resolve) => setTimeout(resolve, PROVIDER_SLOT_RETRY_DELAYS_MS[providerAttempt]));
                     }
+                } catch (sessionError) {
+                    // Browser: a provider block means the cloud datacenter is
+                    // refused for this source — remember it so the next title hands
+                    // off instantly instead of spinning again.
+                    if (!hasNativeOrLocal && _looksProviderBlocked(sessionError)) {
+                        _markSourceCloudBlocked(sourceId);
+                    }
+                    throw sessionError;
                 }
+                if (!hasNativeOrLocal) _clearSourceCloudBlock(sourceId);
                 const url = payload.playback?.url || payload.url;
                 return {
                     ...payload,
