@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Norva — Moteur streaming (libav.js) — itération 1</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+         background:#0a0e1a; color:#dce6ff; padding:18px; line-height:1.45; }
+  h1 { font-size:19px; margin:0 0 4px; }
+  .sub { color:#8794b3; font-size:13px; margin-bottom:14px; max-width:820px; }
+  #status { max-width:820px; background:#111a30; border:1px solid #24304f; border-radius:10px; padding:12px 14px; margin:12px 0; font-size:14px; }
+  .row { display:flex; gap:10px; flex-wrap:wrap; margin:10px 0; }
+  button { background:#5b7cfa; color:#fff; border:0; border-radius:9px; padding:9px 14px; font-weight:700; font-size:13.5px; cursor:pointer; }
+  button:disabled { opacity:.5; cursor:default; }
+  video { width:100%; max-width:820px; border-radius:10px; background:#000; margin-top:10px; }
+  .ok{color:#34d399;font-weight:700;} .no{color:#f87171;font-weight:700;} .wait{color:#fbbf24;}
+  pre { background:#0c1322; border:1px solid #1c2540; border-radius:8px; padding:10px; overflow:auto; font-size:11px; max-width:820px; max-height:300px; white-space:pre-wrap; margin-top:12px; }
+  code{background:#1a2238;padding:1px 5px;border-radius:5px;}
+</style>
+</head>
+<body>
+  <h1>Norva — Moteur streaming (libav.js) · itération 1</h1>
+  <div class="sub">Teste le <b>vrai</b> moteur : lecture du mkv <b>par plages d'octets</b> → démux → remux (copie) → MP4 fragmenté → <b>MediaSource</b> → &lt;video&gt;. Aucun fichier chargé en entier, aucun serveur. Itération 1 = pipeline streaming sur les échantillons <b>AAC</b> (l'audio AC-3 et le seek-par-offset arrivent ensuite). Clique un bouton, dis-moi si ça joue + colle le journal.</div>
+
+  <div id="status">Prêt. Choisis un échantillon.</div>
+  <div class="row">
+    <button data-id="s_h264_aac" data-mime='video/mp4; codecs="avc1.640028, mp4a.40.2"'>Streamer mkv H.264 + AAC</button>
+    <button data-id="s_hevc_aac" data-mime='video/mp4; codecs="hvc1.1.6.L93.B0, mp4a.40.2"'>Streamer mkv HEVC + AAC</button>
+    <button id="seek" disabled>⏩ Sauter à 6 s (test reprise)</button>
+  </div>
+  <video id="vid" controls playsinline></video>
+  <pre id="log">Journal…</pre>
+
+<script type="module">
+import { LibAV } from '/webengine/vendor/libav/libav-default.mjs';
+
+const logEl = document.getElementById('log');
+const statusEl = document.getElementById('status');
+const vid = document.getElementById('vid');
+const log = (m) => { logEl.textContent += '\n' + m; logEl.scrollTop = logEl.scrollHeight; };
+const setStatus = (h) => { statusEl.innerHTML = h; };
+
+let libav = null;
+async function getLibav() {
+  if (libav) return libav;
+  log('Chargement de libav.js…');
+  const t0 = performance.now();
+  libav = await LibAV({ base: '/webengine/vendor/libav' });
+  log(`libav.js prêt en ${((performance.now()-t0)/1000).toFixed(1)} s (mode ${libav.libavjsMode})`);
+  return libav;
+}
+
+async function probeSize(url) {
+  const r = await fetch(url, { headers: { Range: 'bytes=0-1' } });
+  const cr = r.headers.get('content-range');
+  if (cr && cr.includes('/')) return parseInt(cr.split('/')[1], 10);
+  return parseInt(r.headers.get('content-length') || '0', 10);
+}
+
+async function streamRemux(id, mime) {
+  document.getElementById('seek').disabled = true;
+  document.querySelectorAll('button[data-id]').forEach(b => b.disabled = true);
+  try {
+    const url = '/webengine/media/' + id + '.mkv';
+    const lib = await getLibav();
+    setStatus('<span class="wait">⏳ ouverture du flux…</span>');
+
+    const size = await probeSize(url);
+    log(`taille fichier: ${(size/1048576).toFixed(2)} Mo`);
+
+    // 1) seekable byte-range reader
+    await lib.mkblockreaderdev('input', size);
+    let reads = 0;
+    lib.onblockread = async (name, pos, len) => {
+      reads++;
+      try {
+        const end = Math.min(pos + len, size) - 1;
+        const r = await fetch(url, { headers: { Range: `bytes=${pos}-${end}` } });
+        const d = new Uint8Array(await r.arrayBuffer());
+        await lib.ff_block_reader_dev_send('input', pos, d);
+      } catch (e) {
+        log('read err @' + pos + ': ' + e.message);
+        await lib.ff_block_reader_dev_send('input', pos, null, { error: e });
+      }
+    };
+
+    // 2) demux
+    const [fmtCtx, streams] = await lib.ff_init_demuxer_file('input');
+    log(`flux détectés: ${streams.length} (` + streams.map(s => `#${s.index} type=${s.codec_type}`).join(', ') + ')');
+
+    // 3) MediaSource
+    if (!('MediaSource' in window) || !MediaSource.isTypeSupported(mime)) {
+      throw new Error('MediaSource ne supporte pas ' + mime);
+    }
+    const ms = new MediaSource();
+    vid.src = URL.createObjectURL(ms);
+    await new Promise(res => ms.addEventListener('sourceopen', res, { once: true }));
+    const sb = ms.addSourceBuffer(mime);
+    const queue = [];
+    let ended = false;
+    const drain = () => {
+      if (sb.updating) return;
+      if (queue.length) { sb.appendBuffer(queue.shift()); }
+      else if (ended && ms.readyState === 'open') { try { ms.endOfStream(); } catch (_) {} }
+    };
+    sb.addEventListener('updateend', drain);
+    sb.addEventListener('error', () => log('SourceBuffer error'));
+
+    // 4) writer device -> MSE queue (copy bytes out of wasm memory)
+    await lib.mkwriterdev('output');
+    let written = 0;
+    lib.onwrite = (name, pos, data) => { written += data.length; queue.push(data.slice(0)); drain(); };
+
+    // 5) muxer: copy all streams to fragmented MP4
+    const streamCtxs = streams.map(s => [s.codecpar, s.time_base_num, s.time_base_den]);
+    const [oc, , pb] = await lib.ff_init_muxer(
+      { format_name: 'mp4', filename: 'output', open: true, device: true, codecpars: true },
+      streamCtxs);
+    const opts = await lib.av_dict_set_js(0, 'movflags', 'frag_keyframe+empty_moov+default_base_moof', 0);
+    await lib.avformat_write_header(oc, opts);
+    log('en-tête MP4 fragmenté écrit, remux en cours…');
+    setStatus('<span class="wait">⏳ remux + lecture…</span>');
+
+    // 6) read packets -> write packets
+    const pkt = await lib.av_packet_alloc();
+    let res, guard = 0;
+    do {
+      let packets;
+      [res, packets] = await lib.ff_read_frame_multi(fmtCtx, pkt, { limit: 256 * 1024 });
+      const list = [];
+      for (const k in packets) for (const p of packets[k]) list.push(p);
+      if (list.length) await lib.ff_write_multi(oc, pkt, list);
+      if (++guard > 100000) { log('garde-fou boucle atteint'); break; }
+    } while (res === 0 || res === -lib.EAGAIN);
+    log(`lecture terminée (res=${res}, AVERROR_EOF=${lib.AVERROR_EOF}, lectures plage=${reads})`);
+
+    await lib.av_write_trailer(oc);
+    ended = true;
+    drain();
+    log(`remux fini: ${(written/1048576).toFixed(2)} Mo écrits vers MediaSource`);
+
+    let settled = false;
+    vid.onloadeddata = () => { if (settled) return; settled = true;
+      setStatus(`<span class="ok">✅ LECTURE</span> — ${vid.videoWidth}×${vid.videoHeight}, durée ${vid.duration ? vid.duration.toFixed(1)+'s' : '?'}. Teste « ⏩ Sauter à 6 s ».`);
+      document.getElementById('seek').disabled = false;
+      vid.play().catch(()=>{});
+    };
+    vid.onerror = () => { if (settled) return; settled = true;
+      setStatus(`<span class="no">✖ &lt;video&gt; refuse le flux</span> (code ${vid.error?.code}, ${vid.error?.message||''}) — voir journal`); };
+    setTimeout(() => { if (!settled) setStatus('<span class="no">✖ pas de lecture</span> — colle le journal stp'); }, 9000);
+  } catch (e) {
+    setStatus(`<span class="no">✖ erreur</span> : ${e.message}`);
+    log('ERREUR: ' + (e.stack || e.message));
+  } finally {
+    document.querySelectorAll('button[data-id]').forEach(b => b.disabled = false);
+  }
+}
+
+document.querySelectorAll('button[data-id]').forEach(b =>
+  b.addEventListener('click', () => { logEl.textContent = 'Journal…'; streamRemux(b.dataset.id, b.dataset.mime); }));
+document.getElementById('seek').addEventListener('click', () => {
+  const t = performance.now();
+  vid.currentTime = 6;
+  vid.addEventListener('seeked', () => log(`seek -> 6s OK en ${Math.round(performance.now()-t)} ms (position ${vid.currentTime.toFixed(2)}s)`), { once: true });
+});
+</script>
+</body>
+</html>
