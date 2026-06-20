@@ -2,16 +2,14 @@ name: Deploy Norva Relay Worker
 
 # The relay Worker (services/norva-relay) carries playback through Cloudflare's
 # residential-friendly edge and now rewrites open-ended seek ranges into bounded
-# ones so browser Resume is instant. It deploys independently of the Pages site
-# so a Workers-permission issue never masks the web deploy status.
+# ones so browser Resume is instant. The web routes playback through it, so it
+# redeploys alongside the Pages site on every push to main (kept in its own
+# workflow so a Workers-permission issue never masks the web deploy status).
 
 on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths:
-      - 'services/norva-relay/**'
-      - '.github/workflows/deploy-relay.yml'
 
 jobs:
   deploy:
