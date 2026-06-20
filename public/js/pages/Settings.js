@@ -55,7 +55,16 @@ class SettingsPage {
         });
 
         document.getElementById('settings-service-health')?.addEventListener('click', (event) => {
-            if (event.target.closest('[data-source-health-action="open-sources"]')) {
+            const actionButton = event.target.closest('[data-source-health-action]');
+            if (!actionButton) return;
+
+            const action = actionButton.dataset.sourceHealthAction;
+            if (action === 'view-progress' && this.lastSourceHealthSummary && window.NorvaSourceHealth?.openProgress) {
+                window.NorvaSourceHealth.openProgress(this.lastSourceHealthSummary, this.app);
+                return;
+            }
+
+            if (action === 'open-sources') {
                 if (this.lastSourceHealthSummary && window.NorvaSourceHealth?.openAction) {
                     window.NorvaSourceHealth.openAction(this.lastSourceHealthSummary, this.app);
                 } else {
@@ -244,6 +253,7 @@ class SettingsPage {
         const audioLangSelect = document.getElementById('setting-preferred-audio-language');
         const subtitleLangSelect = document.getElementById('setting-preferred-subtitle-language');
         const strictLangToggle = document.getElementById('setting-strict-language');
+        const preferredGenresSelect = document.getElementById('setting-preferred-genres');
         const qualitySelect = document.getElementById('setting-preferred-quality');
         const tmdbKeyInput = document.getElementById('setting-tmdb-key');
         const enrichBtn = document.getElementById('tmdb-enrich-btn');
@@ -269,6 +279,14 @@ class SettingsPage {
         if (audioLangSelect) audioLangSelect.value = languagePrefs.preferredAudioLanguage || '';
         if (subtitleLangSelect) subtitleLangSelect.value = languagePrefs.preferredSubtitleLanguage || '';
         if (strictLangToggle) strictLangToggle.checked = Boolean(languagePrefs.strictLanguageMatching);
+        if (preferredGenresSelect) {
+            const selectedGenres = Array.isArray(s.preferredGenres)
+                ? s.preferredGenres
+                : String(s.preferredGenres || '').split(',').map(value => value.trim()).filter(Boolean);
+            [...preferredGenresSelect.options].forEach(option => {
+                option.selected = selectedGenres.includes(option.value);
+            });
+        }
         if (qualitySelect) qualitySelect.value = s.preferredQuality || 'highest';
         if (tmdbKeyInput) tmdbKeyInput.value = s.tmdbApiKey || '';
 
@@ -298,6 +316,11 @@ class SettingsPage {
         strictLangToggle?.addEventListener('change', () => {
             API.settings.update({ strictLanguageMatching: strictLangToggle.checked }).catch(console.error);
         });
+        preferredGenresSelect?.addEventListener('change', () => {
+            API.settings.update({
+                preferredGenres: [...preferredGenresSelect.selectedOptions].map(option => option.value)
+            }).catch(console.error);
+        });
         qualitySelect?.addEventListener('change', () => {
             API.settings.update({ preferredQuality: qualitySelect.value }).catch(console.error);
         });
@@ -319,10 +342,10 @@ class SettingsPage {
                 }
                 countrySelect.value = value;
                 if (hint) {
-                    const state = resolution.status === 'confirmed'
-                        ? `Préférence confirmée (${regionApi?.label?.(value) || value}).`
-                        : `Région déduite (${regionApi?.label?.(value) || value}) tant que tu ne confirmes pas un choix.`;
-                    hint.textContent = `${baseHint} ${state}`;
+                    const englishState = resolution.status === 'confirmed'
+                        ? `Confirmed preference (${regionApi?.label?.(value) || value}).`
+                        : `Suggested region (${regionApi?.label?.(value) || value}) until you confirm a choice.`;
+                    hint.textContent = `${baseHint} ${englishState}`;
                 }
             };
             applyResolution();
@@ -331,7 +354,7 @@ class SettingsPage {
                 const value = countrySelect.value;
                 countrySelect.disabled = true;
                 const originalHint = hint?.textContent;
-                if (hint) hint.textContent = `Synchronisation du catalogue pour ${regionApi?.label?.(value) || value}...`;
+                if (hint) hint.textContent = `Syncing catalog for ${regionApi?.label?.(value) || value}...`;
                 try {
                     if (regionApi?.setPreferred) {
                         await regionApi.setPreferred(value);

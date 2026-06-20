@@ -23,6 +23,8 @@ class App {
         this.pages.settings = new SettingsPage(this);
         this.pages.watch = new WatchPage(this);
         this.entitlement = null;
+        this.sourceHealthSummary = null;
+        this.catalogPages = new Set(['live', 'movies', 'series']);
 
         this.init();
     }
@@ -40,6 +42,7 @@ class App {
         // Check authentication first
         await this.checkAuth();
         if (!await this.checkCloudAccess()) return;
+        this.applyCatalogAvailability(null);
 
         // Mobile menu toggle
         const mobileMenuToggle = document.getElementById('mobile-menu-toggle');
@@ -141,6 +144,23 @@ class App {
             });
         });
 
+        const navbarBrandHome = document.getElementById('navbar-brand-home');
+        const goHomeFromBrand = (event) => {
+            event.preventDefault();
+            mobileMenuToggle?.classList.remove('active');
+            navbarMenu?.classList.remove('active');
+            this.navigateTo('home');
+        };
+        navbarBrandHome?.addEventListener('click', goHomeFromBrand);
+        navbarBrandHome?.addEventListener('keydown', (event) => {
+            if (event.key !== 'Enter' && event.key !== ' ') return;
+            goHomeFromBrand(event);
+        });
+
+        document.addEventListener('norva:source-health-changed', () => {
+            this.refreshSourceHealth({ redirectIfBlocked: true });
+        });
+
         // Now Playing indicator
         const nowPlayingBtn = document.getElementById('now-playing-indicator');
         if (nowPlayingBtn) {
@@ -179,6 +199,8 @@ class App {
         // Initialize home page first (it's needed for channel list)
         await this.pages.home.init();
 
+        await this.refreshSourceHealth();
+
         // Preload EPG data in background (non-blocking)
         // This ensures EPG info is available on Live TV page without visiting Guide first
         this.epgGuide.loadEpg().catch(err => {
@@ -187,10 +209,65 @@ class App {
 
         // Navigate to the page from URL hash, or default to home
         const hash = window.location.hash.slice(1); // Remove #
-        const initialPage = hash && this.pages[hash] ? hash : 'home';
+        const requestedInitialPage = hash && this.pages[hash] ? hash : 'home';
+        const initialPage = this.guardCatalogPage(requestedInitialPage);
         this.navigateTo(initialPage, true); // true = replace history (don't add)
 
         console.log('Norva initialized');
+    }
+
+    async refreshSourceHealth({ redirectIfBlocked = false } = {}) {
+        if (!window.NorvaSourceHealth?.loadSummary) {
+            this.applyCatalogAvailability(null);
+            return null;
+        }
+
+        try {
+            const summary = await window.NorvaSourceHealth.loadSummary();
+            this.sourceHealthSummary = summary;
+            this.applyCatalogAvailability(summary);
+
+            if (redirectIfBlocked && this.isCatalogPage(this.currentPage) && !this.isCatalogReady()) {
+                this.navigateTo('home', true);
+            }
+
+            window.dispatchEvent(new CustomEvent('norva:catalog-availability-changed', {
+                detail: {
+                    ready: this.isCatalogReady(),
+                    summary
+                }
+            }));
+
+            return summary;
+        } catch (err) {
+            console.warn('[Norva] Unable to refresh TV service health:', err);
+            this.applyCatalogAvailability(this.sourceHealthSummary);
+            return this.sourceHealthSummary;
+        }
+    }
+
+    isCatalogPage(pageName) {
+        return this.catalogPages.has(pageName);
+    }
+
+    isCatalogReady(summary = this.sourceHealthSummary) {
+        if (!summary) return false;
+        return summary.state === 'ready' || Boolean(summary.ready?.length);
+    }
+
+    guardCatalogPage(pageName) {
+        return this.isCatalogPage(pageName) && !this.isCatalogReady() ? 'home' : pageName;
+    }
+
+    applyCatalogAvailability(summary = this.sourceHealthSummary) {
+        const ready = this.isCatalogReady(summary);
+        document.body.classList.toggle('catalog-locked', !ready);
+        document.querySelectorAll('.nav-link[data-page="live"], .nav-link[data-page="movies"], .nav-link[data-page="series"]').forEach(link => {
+            link.classList.toggle('catalog-nav-hidden', !ready);
+            link.hidden = !ready;
+            link.setAttribute('aria-hidden', ready ? 'false' : 'true');
+            link.tabIndex = ready ? 0 : -1;
+        });
     }
 
     hasCloudSession() {
@@ -605,6 +682,12 @@ class App {
     }
 
     navigateTo(pageName, replaceHistory = false) {
+        const requestedPage = pageName;
+        pageName = this.guardCatalogPage(pageName);
+        if (pageName !== requestedPage) {
+            replaceHistory = true;
+        }
+
         // Don't navigate if already on this page
         if (this.currentPage === pageName && !replaceHistory) {
             return;

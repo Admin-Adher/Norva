@@ -222,6 +222,12 @@ class MoviesPage {
     // === Page lifecycle ===
 
     async show() {
+        const summary = await this.app?.refreshSourceHealth?.();
+        if (this.app?.isCatalogReady && !this.app.isCatalogReady(summary || undefined)) {
+            this.renderCatalogLocked();
+            return;
+        }
+
         if (this.sources.length === 0) {
             await this.loadSources();
         }
@@ -239,6 +245,30 @@ class MoviesPage {
 
     hide() {
         // Page is hidden
+    }
+
+    renderCatalogLocked() {
+        this.hideDetails?.();
+        this.movies = [];
+        this.filteredCards = [];
+        this.historyItems = [];
+        this.watchState = new Map();
+        this.cloudHasMore = false;
+        this.cloudLoadingMore = false;
+        this.continueRow?.classList.add('hidden');
+        if (this.countEl) this.countEl.textContent = '';
+        if (this.container) {
+            this.container.innerHTML = `
+                <div class="catalog-locked-empty">
+                    <h2>Connect your TV service first</h2>
+                    <p>Movies unlock as soon as Norva finishes preparing your catalog.</p>
+                    <button class="btn btn-primary" id="movies-connect-service">Connect TV Service</button>
+                </div>
+            `;
+            this.container.querySelector('#movies-connect-service')?.addEventListener('click', () => {
+                this.app?.navigateTo?.('home');
+            });
+        }
     }
 
     async loadServerSettings() {
@@ -261,8 +291,12 @@ class MoviesPage {
     async loadWatchState() {
         try {
             const history = await API.history.getAll(500);
+            const activeSourceIds = new Set((this.sources || []).map(source => String(source.id)));
             this.watchState = new Map();
-            this.historyItems = history || [];
+            this.historyItems = (history || []).filter(item => {
+                const sourceId = item.source_id || item.sourceId || item.data?.sourceId;
+                return sourceId && activeSourceIds.has(String(sourceId));
+            });
             for (const h of this.historyItems) {
                 if (h.item_type !== 'movie') continue;
                 const ratio = h.duration > 0 ? h.progress / h.duration : 0;
@@ -1204,6 +1238,7 @@ class MoviesPage {
             preferredAudioLanguage: this.serverSettings.preferredAudioLanguage || '',
             preferredSubtitleLanguage: this.serverSettings.preferredSubtitleLanguage || '',
             strictLanguageMatching: Boolean(this.serverSettings.strictLanguageMatching),
+            preferredGenres: this.serverSettings.preferredGenres || [],
             preferredQuality: this.serverSettings.preferredQuality || 'highest'
         };
     }

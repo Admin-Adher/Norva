@@ -57,6 +57,8 @@ class ChannelList {
         this.liveCacheDbPromise = null;
         this.pendingLiveResume = false;
         this.liveResumeInFlight = null;
+        this._selectRequestSeq = 0;
+        this._streamResolveQueue = Promise.resolve();
 
         this.loadCollapsedState();
         this.init();
@@ -2697,6 +2699,7 @@ class ChannelList {
             (!dataset.sourceId || String(c.sourceId) === String(dataset.sourceId))
         );
         if (!channel) return;
+        const selectSeq = ++this._selectRequestSeq;
 
         this.currentChannel = channel;
         this.currentRenderId = dataset.renderId; // Track which visual instance is active
@@ -2788,32 +2791,66 @@ class ChannelList {
 
         } // end browse-mode DOM handling
 
-        // Get stream URL
-        let streamUrl;
-        if (channel.sourceType === 'xtream') {
-            // Get stream format from player settings (server-side) or fallback
-            const streamFormat = window.app?.player?.settings?.streamFormat || 'm3u8';
-            const result = await API.proxy.xtream.getStreamUrl(channel.sourceId, channel.streamId, 'live', streamFormat);
-            streamUrl = result.url;
-            channel.cloudPlaybackSessionId = result.sessionId || null;
-        } else {
-            streamUrl = channel.url;
-            channel.cloudPlaybackSessionId = null;
-        }
+        const resolveTask = (this._streamResolveQueue || Promise.resolve()).catch(() => { }).then(async () => {
+            if (selectSeq !== this._selectRequestSeq) return;
 
-        // Attach the channel's quality variants so the player can build its
-        // quality menu (all HD/FHD/4K/H265 feeds of the same logical channel).
-        try {
-            if (window.ChannelGrouping && this.channels && this.channels.length) {
-                const country = window.app?.player?.getCountry?.() || 'FR';
-                const grp = window.ChannelGrouping.variantsForChannel(channel, this.channels, country);
-                if (grp && grp.variants && grp.variants.length > 1) channel.qualityGroup = grp;
+            // Get stream URL
+            let streamUrl;
+            let staleSessionId = null;
+            if (channel.sourceType === 'xtream') {
+                // Get stream format from player settings (server-side) or fallback
+                const providerContainer =
+                    channel.container_extension ||
+                    channel.containerExtension ||
+                    channel.container ||
+                    'ts';
+                // Live H.264 → lightweight remux (copy video, transcode audio only);
+                // H.265/HEVC → full transcode (browsers can't decode copied HEVC).
+                const gatewayMode = (typeof MediaUtils !== 'undefined' && MediaUtils.liveGatewayMode)
+                    ? MediaUtils.liveGatewayMode(channel)
+                    : 'transcode';
+                const result = await API.proxy.xtream.getStreamUrl(channel.sourceId, channel.streamId, 'live', providerContainer, { gatewayMode });
+                streamUrl = result.url;
+                channel.cloudPlaybackSessionId = result.sessionId || null;
+                staleSessionId = channel.cloudPlaybackSessionId;
+            } else {
+                streamUrl = channel.url;
+                channel.cloudPlaybackSessionId = null;
             }
-        } catch (e) { /* grouping is best-effort */ }
 
-        // Play channel
-        if (window.app?.player) {
-            window.app.player.play(channel, streamUrl);
+            if (selectSeq !== this._selectRequestSeq) {
+                await this.expireStaleCloudPlaybackSession(staleSessionId);
+                return;
+            }
+
+            // Attach the channel's quality variants so the player can build its
+            // quality menu (all HD/FHD/4K/H265 feeds of the same logical channel).
+            try {
+                if (window.ChannelGrouping && this.channels && this.channels.length) {
+                    const country = window.app?.player?.getCountry?.() || 'FR';
+                    const grp = window.ChannelGrouping.variantsForChannel(channel, this.channels, country);
+                    if (grp && grp.variants && grp.variants.length > 1) channel.qualityGroup = grp;
+                }
+            } catch (e) { /* grouping is best-effort */ }
+
+            // Play channel
+            if (window.app?.player) {
+                await window.app.player.play(channel, streamUrl);
+            }
+        });
+        this._streamResolveQueue = resolveTask.catch((err) => {
+            console.error('[ChannelList] Failed to resolve live stream:', err);
+        });
+        return this._streamResolveQueue;
+    }
+
+    async expireStaleCloudPlaybackSession(sessionId) {
+        const id = sessionId ? String(sessionId).trim() : '';
+        if (!id) return;
+        try {
+            await window.NorvaCloud?.playback?.expireSession?.(id);
+        } catch (err) {
+            console.warn('[ChannelList] Failed to expire stale playback session:', err?.message || err);
         }
     }
 

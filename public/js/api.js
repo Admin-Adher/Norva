@@ -191,6 +191,12 @@ const CloudAdapter = (() => {
         return type || 'live';
     }
 
+    function defaultProviderContainerForType(type) {
+        const normalized = String(type || '').toLowerCase();
+        if (normalized === 'live' || normalized === 'channel') return 'ts';
+        return 'mp4';
+    }
+
     function normalizeMediaItem(item, sourceId) {
         const metadata = item.metadata || {};
         const playbackHint = item.playback_hint || item.playbackHint || {};
@@ -199,7 +205,7 @@ const CloudAdapter = (() => {
         const categoryId = String(item.parent_external_id || metadata.categoryId || metadata.group || 'uncategorized');
         const title = item.title || item.name || 'Norva';
         const poster = item.poster_url || item.posterUrl || item.cover || item.stream_icon || '';
-        const container = playbackHint.container || metadata.container || (itemType === 'live' ? 'm3u8' : 'mp4');
+        const container = playbackHint.container || metadata.container || defaultProviderContainerForType(itemType);
         const base = {
             ...item,
             sourceId,
@@ -497,7 +503,7 @@ const CloudAdapter = (() => {
             title: variant.title || raw,
             streamIcon: poster,
             posterUrl: poster,
-            container: variant.container_extension || variant.container || 'm3u8'
+            container: variant.container_extension || variant.container || defaultProviderContainerForType('live')
         };
     }
 
@@ -513,13 +519,13 @@ const CloudAdapter = (() => {
             source_id: item.sourceId || item.source_id,
             sourceId: item.sourceId || item.source_id,
             stream_icon: poster,
-            container_extension: item.container_extension || item.containerExtension || (type === 'channel' ? 'm3u8' : 'mp4'),
+            container_extension: item.container_extension || item.containerExtension || defaultProviderContainerForType(type),
             data: {
                 title: item.name || item.title || 'Norva',
                 subtitle: item.category_name || item.subtitle || (type === 'movie' ? 'Movie' : type === 'series' ? 'Series' : 'Live TV'),
                 poster,
                 sourceId: item.sourceId || item.source_id,
-                containerExtension: item.container_extension || item.containerExtension || (type === 'channel' ? 'm3u8' : 'mp4')
+                containerExtension: item.container_extension || item.containerExtension || defaultProviderContainerForType(type)
             }
         };
     }
@@ -664,7 +670,7 @@ const CloudAdapter = (() => {
             item.container_extension ||
             item.containerExtension ||
             data.containerExtension ||
-            (type === 'channel' ? 'm3u8' : 'mp4');
+            defaultProviderContainerForType(type);
         const providerTmdbId = item.providerTmdbId || item.provider_tmdb_id || data.providerTmdbId || metadata.providerTmdbId || null;
         const titleId = item.titleId || item.title_id || item.id || null;
         const context = {
@@ -914,6 +920,16 @@ const CloudAdapter = (() => {
             clearMediaCaches();
             return normalizeSource(payload.source || {});
         }
+        if (method === 'POST' && /^\/sources\/[^/]+\/finalize$/.test(path)) {
+            const parts = path.split('/');
+            if (!hasUserSession()) throw new Error('Sign in to finish importing a TV provider.');
+            const id = await resolveSourceId(parts[2]);
+            const sourcesApi = cloudSourcesApi();
+            if (!sourcesApi.finalize) throw new Error('Catalog finalization is not available.');
+            const payload = await sourcesApi.finalize(id, data || {});
+            clearMediaCaches();
+            return payload;
+        }
         if (method === 'POST' && /^\/sources\/[^/]+\/(toggle|test)$/.test(path)) {
             return { success: true, cloud: true };
         }
@@ -1003,7 +1019,7 @@ const CloudAdapter = (() => {
             if (action === 'stream' && streamId) {
                 const type = query.get('type') || xtreamMatch[4] || 'live';
                 const isVodPlayback = type === 'movie' || type === 'series';
-                const requestedContainer = query.get('container') || (type === 'live' ? 'm3u8' : 'mp4');
+                const requestedContainer = query.get('container') || defaultProviderContainerForType(type);
                 const container = (isVodPlayback && (!requestedContainer || requestedContainer === 'm3u8'))
                     ? 'mp4'
                     : requestedContainer;
@@ -1314,6 +1330,7 @@ const CloudAdapter = (() => {
             preferredAudioLanguage: '',
             preferredSubtitleLanguage: '',
             strictLanguageMatching: false,
+            preferredGenres: [],
             preferredQuality: 'highest'
         };
     }
@@ -1440,6 +1457,7 @@ const API = {
         toggle: (id) => API.request('POST', `/sources/${id}/toggle`),
         test: (id) => API.request('POST', `/sources/${id}/test`),
         sync: (id) => API.request('POST', `/sources/${id}/sync`), // Manual sync
+        finalize: (id, params = {}) => API.request('POST', `/sources/${id}/finalize`, params), // Resume catalog finalization
         hardSync: (id) => API.request('POST', `/sources/${id}/hard-sync`), // Clear local content then sync
         getStatus: () => API.request('GET', '/sources/status'), // Get all statuses
         estimate: (id) => API.request('GET', `/sources/${id}/estimate`), // Estimate M3U size
@@ -1555,7 +1573,7 @@ const API = {
             seriesInfo: (sourceId, seriesId) =>
                 API.request('GET', `/proxy/xtream/${sourceId}/series_info?series_id=${seriesId}`),
             shortEpg: (sourceId, streamId, limit = 8) => API.request('GET', `/proxy/xtream/${sourceId}/short_epg?stream_id=${streamId}&limit=${encodeURIComponent(limit)}`),
-            getStreamUrl: (sourceId, streamId, type = 'live', container = 'm3u8', options = {}) => {
+            getStreamUrl: (sourceId, streamId, type = 'live', container = defaultProviderContainerForType(type), options = {}) => {
                 const params = new URLSearchParams({ container });
                 Object.entries(compactPlaybackHint(options)).forEach(([key, value]) => {
                     if (key === 'container') return;

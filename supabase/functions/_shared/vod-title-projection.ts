@@ -29,6 +29,7 @@ type ProjectionOptions = {
   db: SupabaseClient;
   xtreamConfig?: XtreamConfig | null;
   vodInfoLimit?: number;
+  tmdbValidateLimit?: number;
 };
 
 const encoder = new TextEncoder();
@@ -47,7 +48,7 @@ export async function refreshVodTitleProjection(options: ProjectionOptions) {
     ? await loadVodInfoIds(options.xtreamConfig, rows, boundedInt(options.vodInfoLimit, DEFAULT_VOD_INFO_LIMIT, 0, 1000))
     : new Map<string, ProviderIds>();
   const providerIdsByExternalId = collectProviderIds(rows, vodInfoByExternalId);
-  const tmdbValidationById = await validateProviderTmdbIds(rows, providerIdsByExternalId);
+  const tmdbValidationById = await validateProviderTmdbIds(rows, providerIdsByExternalId, options.tmdbValidateLimit);
 
   const titleRowsByKey = new Map<string, JsonRecord>();
   const variantRows: JsonRecord[] = [];
@@ -273,9 +274,11 @@ async function loadVodInfoIds(config: XtreamConfig, rows: ProjectionRow[], limit
   return result;
 }
 
-async function validateProviderTmdbIds(rows: ProjectionRow[], idsByExternalId: Map<string, ProviderIds>) {
+async function validateProviderTmdbIds(rows: ProjectionRow[], idsByExternalId: Map<string, ProviderIds>, limitOverride?: number) {
   const apiKey = stringOr(Deno.env.get("NORVA_TMDB_API_KEY") ?? Deno.env.get("TMDB_API_KEY") ?? Deno.env.get("TMDB_READ_TOKEN"), "");
-  const limit = boundedInt(Deno.env.get("NORVA_TMDB_VALIDATE_LIMIT"), DEFAULT_TMDB_VALIDATE_LIMIT, 0, 1000);
+  const limit = limitOverride === undefined
+    ? boundedInt(Deno.env.get("NORVA_TMDB_VALIDATE_LIMIT"), DEFAULT_TMDB_VALIDATE_LIMIT, 0, 1000)
+    : boundedInt(limitOverride, DEFAULT_TMDB_VALIDATE_LIMIT, 0, 1000);
   const validations = new Map<string, TmdbValidation>();
   if (!apiKey || limit <= 0) return validations;
 

@@ -38,6 +38,12 @@ const RUNTIME_CONFIG_KEYS = [
   "NORVA_MEDIA_GATEWAY_TOKEN",
   "NORVA_SOURCE_CONFIG_KEY",
 ];
+const PROVIDER_SLOT_RELEASE_DELAY_MS = boundedInt(
+  Deno.env.get("NORVA_PROVIDER_SLOT_RELEASE_DELAY_MS") ?? Deno.env.get("PROVIDER_SLOT_RELEASE_DELAY_MS"),
+  8_000,
+  0,
+  15_000,
+);
 const PLAYBACK_EVENT_TYPES = new Set([
   "session_created",
   "play_requested",
@@ -218,7 +224,7 @@ async function createPlaybackSession(
   const expiresAt = new Date(Date.now() + ttlSeconds * 1000).toISOString();
   const targetUrlHash = await sha256Hex(targetUrl);
 
-  await closeOpenGatewaySessionsForUser(userId, db);
+  const closedGatewaySessions = await closeOpenGatewaySessionsForUser(userId, db);
   const edgeCoordination = mode === "transcode"
     ? await prepareEdgeSessionCoordinator({
       userId,
@@ -230,7 +236,11 @@ async function createPlaybackSession(
       expiresAt,
     }, db)
     : null;
-  if (edgeCoordination?.waitMs) await sleep(edgeCoordination.waitMs);
+  const startupWaitMs = Math.max(
+    edgeCoordination?.waitMs ?? 0,
+    closedGatewaySessions > 0 ? PROVIDER_SLOT_RELEASE_DELAY_MS : 0,
+  );
+  if (startupWaitMs) await sleep(startupWaitMs);
   await requirePlaybackCapacity(userId, db);
 
   const { data: session, error } = await db
@@ -655,7 +665,7 @@ async function getPlaybackTelemetrySummary(url: URL, userId: string, db: Supabas
   };
 }
 
-async function closeOpenGatewaySessionsForUser(userId: string, db: SupabaseClient) {
+async function closeOpenGatewaySessionsForUser(userId: string, db: SupabaseClient): Promise<number> {
   const { data: gatewaySessions, error } = await db
     .from("cloud_gateway_sessions")
     .select("id, playback_session_id, external_session_id, status")
@@ -663,9 +673,9 @@ async function closeOpenGatewaySessionsForUser(userId: string, db: SupabaseClien
     .in("status", ["pending", "starting", "ready"]);
   if (error) {
     console.warn("[norva-playback] unable to list open gateway sessions", error.message);
-    return;
+    return 0;
   }
-  if (!gatewaySessions?.length) return;
+  if (!gatewaySessions?.length) return 0;
 
   const runtimeConfig = await getRuntimeConfig(db);
   const gatewayIds = gatewaySessions
@@ -708,6 +718,7 @@ async function closeOpenGatewaySessionsForUser(userId: string, db: SupabaseClien
       console.warn("[norva-playback] unable to mark playback sessions expired", playbackUpdateError.message);
     }
   }
+  return gatewaySessions.length;
 }
 
 async function prepareEdgeSessionCoordinator(
@@ -747,7 +758,7 @@ async function prepareEdgeSessionCoordinator(
     sourceKey,
     deviceKey,
     lockId: stringOrNull(payload.lockId),
-    waitMs: boundedInt(payload.waitMs, 0, 0, 10_000),
+    waitMs: boundedInt(payload.waitMs, 0, 0, 15_000),
   };
 }
 
@@ -889,17 +900,18 @@ async function resolvePlaybackTarget(
   if (hint.sourceType === "xtream") {
     const sourceConfig = await loadSourceConfig(sourceId, userId, db);
     const requestContainer = stringOrNull(requestHint.container);
-    const storedContainer = stringOr(hint.container, "m3u8");
+    const streamType = stringOr(hint.streamType, "live");
+    const container = xtreamPlaybackContainer(hint, streamType, requestContainer);
     return {
       targetUrl: xtreamStreamUrl({
         serverUrl: stringOr(sourceConfig.serverUrl, ""),
         username: stringOr(sourceConfig.username, ""),
         password: stringOr(sourceConfig.password, ""),
-        streamType: stringOr(hint.streamType, "live"),
+        streamType,
         streamId: stringOr(hint.streamId, ""),
-        container: requestContainer || storedContainer,
+        container,
       }),
-      playbackHint: mergePlaybackHints(storedPlaybackHint, compactRecord({ container: requestContainer || storedContainer })),
+      playbackHint: mergePlaybackHints(storedPlaybackHint, compactRecord({ container })),
     };
   }
 
@@ -1241,6 +1253,16 @@ function firstUsefulCodecProfile(...values: unknown[]) {
     if (hasUsefulCodecProfile(profile)) return profile;
   }
   return {};
+}
+
+function xtreamPlaybackContainer(hint: JsonRecord, streamTypeValue: unknown, requestedContainerValue: unknown = "") {
+  const requestedContainer = stringOr(requestedContainerValue, "");
+  if (requestedContainer) return requestedContainer;
+  const streamType = stringOr(streamTypeValue, "live");
+  const storedContainer = stringOr(hint.container, streamType === "live" ? "ts" : "mp4");
+  const explicit = Boolean(hint.containerExplicit || hint.container_explicit);
+  if (streamType === "live" && storedContainer.toLowerCase() === "m3u8" && !explicit) return "ts";
+  return storedContainer;
 }
 
 function mergeCodecProfileAnnotations(existingValue: unknown, observedValue: unknown) {

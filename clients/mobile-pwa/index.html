@@ -15,7 +15,7 @@
     const targetQuery = window.location.search
       ? window.location.search + '&mobile=1'
       : '?mobile=1';
-    window.location.replace('https://norva-eight.vercel.app/' + targetQuery + targetHash);
+    window.location.replace('https://norva.tv/app.html' + targetQuery + targetHash);
   </script>
   <script>
     (function () {
@@ -220,6 +220,8 @@
     }
 
     .field { margin-bottom: 16px; }
+    .advanced-local-panel { display: none; margin-top: 14px; }
+    .advanced-local-panel.open { display: block; }
 
     .card {
       background: var(--surface);
@@ -414,13 +416,16 @@
       </button>
       <a class="btn btn-secondary" href="/account.html">Norva Account</a>
 
-      <div class="divider">or</div>
+      <button class="btn btn-secondary" id="btn-advanced-local" type="button">Advanced local connector</button>
 
-      <div class="field">
-        <label class="label" for="manual-url">Local connector URL</label>
-        <input class="input" id="manual-url" type="url" placeholder="http://192.168.1.20:3000" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" />
+      <div class="advanced-local-panel" id="advanced-local-panel">
+        <div class="divider">or</div>
+        <div class="field">
+          <label class="label" for="manual-url">Local connector URL</label>
+          <input class="input" id="manual-url" type="url" placeholder="http://192.168.1.20:3000" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" />
+        </div>
+        <button class="btn btn-secondary" id="btn-manual-connect">Connect local connector</button>
       </div>
-      <button class="btn btn-secondary" id="btn-manual-connect">Connect local connector</button>
 
       <div id="welcome-status" class="status-msg"></div>
     </section>
@@ -642,6 +647,9 @@
 
   // ---- Welcome screen ----
   $('btn-scan-qr').addEventListener('click', () => showScreen('scan'));
+  $('btn-advanced-local').addEventListener('click', () => {
+    $('advanced-local-panel').classList.toggle('open');
+  });
 
   $('btn-manual-connect').addEventListener('click', () => {
     const raw = $('manual-url').value.trim();

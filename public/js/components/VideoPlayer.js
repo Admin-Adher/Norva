@@ -35,7 +35,11 @@ class VideoPlayer {
         this._playbackStatusOkReported = false;
         this._clearingMedia = false;
         this._variantSwitchSeq = 0;
+        this._playRequestSeq = 0;
+        this._playQueue = Promise.resolve();
         this._vfTimer = null;
+        this._gatewayHlsRetryCount = 0;
+        this._gatewayHlsRetryTimer = null;
         this.currentCloudPlaybackSessionId = null;
         this.activeCloudPlaybackSessionIds = new Set();
 
@@ -1005,6 +1009,7 @@ class VideoPlayer {
             this.hls.on(Hls.Events.ERROR, (event, data) => {
                 console.error('HLS error:', data.type, data.details);
                 if (data.fatal) {
+                    if (this.retryGatewayHlsStartup(data)) return;
                     switch (data.type) {
                         case Hls.ErrorTypes.NETWORK_ERROR:
                             // Track network retry attempts
@@ -1260,6 +1265,21 @@ class VideoPlayer {
      * Play a channel
      */
     async play(channel, streamUrl) {
+        const requestSeq = ++this._playRequestSeq;
+        const previous = this._playQueue || Promise.resolve();
+        const task = previous.catch(() => { }).then(async () => {
+            if (this.isStalePlayRequest(requestSeq)) return;
+            return this._playInternal(channel, streamUrl, requestSeq);
+        });
+        this._playQueue = task.catch(() => { });
+        return task;
+    }
+
+    isStalePlayRequest(requestSeq) {
+        return requestSeq !== this._playRequestSeq;
+    }
+
+    async _playInternal(channel, streamUrl, requestSeq = this._playRequestSeq) {
         ++this._variantSwitchSeq;
         const cloudPlaybackSessionId = channel.cloudPlaybackSessionId || channel.playbackSessionId || null;
         this.currentChannel = channel;
@@ -1269,9 +1289,11 @@ class VideoPlayer {
         try {
             // Stop any WatchPage playback (movies/series) before starting Live TV
             await window.app?.pages?.watch?.stop?.();
+            if (this.isStalePlayRequest(requestSeq)) return;
 
             // Stop current playback
             await this.stop();
+            if (this.isStalePlayRequest(requestSeq)) return;
             if (cloudPlaybackSessionId) {
                 this.registerCloudPlaybackSession(cloudPlaybackSessionId);
             }
@@ -1286,6 +1308,8 @@ class VideoPlayer {
 
             // Determine if HLS or direct stream
             this.currentUrl = streamUrl;
+            this.resetGatewayHlsRetries();
+            if (this.shouldAutoFallbackVariants()) this.armCurrentVariantFallback();
             const initialLooksLikeHls = streamUrl.includes('.m3u8') || streamUrl.includes('m3u8');
             let canFastStartHls = initialLooksLikeHls
                 && this.settings.autoTranscode
@@ -1296,6 +1320,7 @@ class VideoPlayer {
 
             if (canFastStartHls) {
                 const sniff = await this.sniffStreamKind(streamUrl);
+                if (this.isStalePlayRequest(requestSeq)) return;
                 if (sniff?.kind === 'mpegts') {
                     console.log('[Player] Auto Transcode: fast sniff detected MPEG-TS, using audio transcode');
                     this.updateTranscodeStatus('transcoding', 'Transcoding (Audio)');
@@ -1326,6 +1351,7 @@ class VideoPlayer {
                 try {
                     const probeRes = await fetch(`/api/probe?url=${encodeURIComponent(streamUrl)}&timeout=5000`);
                     const info = await probeRes.json();
+                    if (this.isStalePlayRequest(requestSeq)) return;
                     console.log(`[Player] Probe result: video=${info.video}, audio=${info.audio}, ${info.width}x${info.height}, compatible=${info.compatible}`);
 
                     // Store probe result for quality badge display
@@ -1349,6 +1375,7 @@ class VideoPlayer {
                             audioCodec: info.audio,
                             audioChannels: info.audioChannels
                         });
+                        if (this.isStalePlayRequest(requestSeq)) return;
                         this.currentUrl = playlistUrl; // Update currentUrl for HLS reload
 
                         this.playHls(playlistUrl);
@@ -1391,6 +1418,7 @@ class VideoPlayer {
                 console.log(`[Player] ${statusText} enabled. Starting session (encode)...`);
                 this.updateTranscodeStatus(statusMode, statusText);
                 const playlistUrl = await this.startTranscodeSession(streamUrl, { videoMode: 'encode' });
+                if (this.isStalePlayRequest(requestSeq)) return;
                 this.currentUrl = playlistUrl;
 
                 // Load HLS
@@ -1439,6 +1467,7 @@ class VideoPlayer {
                 try {
                     const probeRes = await fetch(`/api/probe?url=${encodeURIComponent(streamUrl)}&timeout=7000`);
                     probeInfo = await probeRes.json();
+                    if (this.isStalePlayRequest(requestSeq)) return;
                     this.currentStreamInfo = probeInfo;
                     videoCodec = probeInfo.video;
                 } catch (e) { console.warn('Probe failed for force audio, assuming h264'); }
@@ -1446,6 +1475,7 @@ class VideoPlayer {
                 const videoMode = this.getTranscodeVideoMode(probeInfo);
                 this.updateTranscodeStatus('transcoding', this.getTranscodeStatusText(videoMode));
                 const playlistUrl = await this.startTranscodeSession(streamUrl, { videoMode, videoCodec });
+                if (this.isStalePlayRequest(requestSeq)) return;
                 this.currentUrl = playlistUrl;
 
                 console.log('[Player] Playing transcoded HLS stream:', this.describePlaybackUrl(playlistUrl));
@@ -1536,6 +1566,7 @@ class VideoPlayer {
                 // Re-attach error handler for the new Hls instance
                 this.hls.on(Hls.Events.ERROR, (event, data) => {
                     if (data.fatal) {
+                        if (this.retryGatewayHlsStartup(data)) return;
                         const isCorsLikely = data.type === Hls.ErrorTypes.NETWORK_ERROR ||
                             (data.type === Hls.ErrorTypes.MEDIA_ERROR && data.details === 'fragParsingError');
 
@@ -1553,7 +1584,7 @@ class VideoPlayer {
                                 this.hls.recoverMediaError();
                             }
                         } else {
-                            console.error('Fatal HLS error:', data);
+                            console.error('Fatal HLS error:', this.describeHlsError(data));
                             this.handlePlaybackError(data.details || data.type || 'Fatal HLS error');
                         }
                     } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
@@ -1639,8 +1670,9 @@ class VideoPlayer {
 
         this.hls.on(Hls.Events.ERROR, (event, data) => {
             if (data.fatal) {
+                if (this.retryGatewayHlsStartup(data)) return;
                 // Simple error handling for forced HLS/transcode modes
-                console.error('Fatal HLS error in transcode mode:', data);
+                console.error('Fatal HLS error in transcode mode:', this.describeHlsError(data));
                 this.hls.destroy();
                 this.handlePlaybackError(data.details || data.type || 'Fatal HLS error');
             }
@@ -1669,6 +1701,7 @@ class VideoPlayer {
     markPlaybackUsable() {
         if (!this.hasCurrentMedia() || this._playbackStatusOkReported) return;
         this._playbackStatusOkReported = true;
+        this.resetGatewayHlsRetries();
         const target = this.getPlaybackHealthTarget();
         if (target && window.PlaybackHealth?.report) {
             PlaybackHealth.report({ ...target, status: 'ok' }).catch(() => { });
@@ -1678,10 +1711,106 @@ class VideoPlayer {
     handlePlaybackError(reason = '') {
         if (this._clearingMedia || this.hasCurrentMedia()) return;
         if (!this.currentUrl || /empty src/i.test(String(reason))) return;
+        if (this.tryCurrentVariantFallback(reason)) return;
+        if (!this.shouldReportPlaybackBroken(reason)) {
+            console.warn('[Player] Live startup failed without marking channel broken:', reason);
+            return;
+        }
         const target = this.getPlaybackHealthTarget();
         if (target && window.PlaybackHealth?.report) {
             PlaybackHealth.report({ ...target, status: 'broken', reason }).catch(() => { });
         }
+    }
+
+    isLivePlayback(channel = this.currentChannel) {
+        if (!channel) return false;
+        const explicitType = String(
+            channel.itemType ||
+            channel.item_type ||
+            channel.streamType ||
+            channel.stream_type ||
+            channel.type ||
+            ''
+        ).toLowerCase();
+        if (explicitType === 'live' || explicitType === 'channel') return true;
+        if (channel.streamId != null || channel.stream_id != null) return true;
+        return Boolean(channel.sourceType || channel.url);
+    }
+
+    shouldAutoFallbackVariants() {
+        if (!this.currentVariant || !this.qualityGroup) return false;
+        if (this.isLivePlayback()) return false;
+        if (this.isGatewayPlaybackUrl()) return false;
+        return true;
+    }
+
+    isProviderTransientPlaybackError(reason = '') {
+        return /(401|403|429|unauthori[sz]ed|forbidden|too many|rate.?limit|concurr|max.?connection|provider|slot|manifestLoad|levelLoad|fragLoad|network|playlist timeout)/i
+            .test(String(reason || ''));
+    }
+
+    shouldReportPlaybackBroken(reason = '') {
+        if (this.isLivePlayback() && (this.isGatewayPlaybackUrl() || this.isProviderTransientPlaybackError(reason))) {
+            return false;
+        }
+        return true;
+    }
+
+    isGatewayPlaybackUrl(url = this.currentUrl) {
+        const value = String(url || '');
+        return /\/sessions\/[^/?#]+\/playlist\.m3u8/i.test(value) ||
+            /^https?:\/\/edge\.norva\.tv\/sessions\/[^/?#]+/i.test(value);
+    }
+
+    resetGatewayHlsRetries() {
+        this._gatewayHlsRetryCount = 0;
+        if (this._gatewayHlsRetryTimer) {
+            clearTimeout(this._gatewayHlsRetryTimer);
+            this._gatewayHlsRetryTimer = null;
+        }
+    }
+
+    describeHlsError(data = {}) {
+        return {
+            type: data.type || 'unknown',
+            details: data.details || '',
+            fatal: Boolean(data.fatal),
+            responseCode: data.response?.code || data.response?.status || null,
+            responseText: data.response?.text ? String(data.response.text).slice(0, 160) : ''
+        };
+    }
+
+    retryGatewayHlsStartup(data = {}) {
+        if (!this.hls || !this.isGatewayPlaybackUrl(this.currentUrl) || this.hasCurrentMedia()) return false;
+        const retryable = data.type === Hls.ErrorTypes.NETWORK_ERROR ||
+            data.details === 'manifestLoadError' ||
+            data.details === 'manifestLoadTimeOut' ||
+            data.details === 'levelLoadError' ||
+            data.details === 'levelLoadTimeOut' ||
+            data.details === 'fragLoadError' ||
+            data.details === 'fragLoadTimeOut';
+        if (!retryable) return false;
+
+        const maxRetries = 8;
+        this._gatewayHlsRetryCount += 1;
+        if (this._gatewayHlsRetryCount > maxRetries) return false;
+
+        const delay = Math.min(5000, 750 + this._gatewayHlsRetryCount * 750);
+        const errorInfo = this.describeHlsError(data);
+        console.warn(`[HLS] Gateway startup retry ${this._gatewayHlsRetryCount}/${maxRetries}: ${errorInfo.type}/${errorInfo.details || 'unknown'} ${errorInfo.responseCode || ''}`.trim());
+        if (this._gatewayHlsRetryTimer) clearTimeout(this._gatewayHlsRetryTimer);
+        const retrySeq = this._variantSwitchSeq;
+        this._gatewayHlsRetryTimer = setTimeout(() => {
+            this._gatewayHlsRetryTimer = null;
+            if (!this.hls || retrySeq !== this._variantSwitchSeq || !this.isGatewayPlaybackUrl(this.currentUrl) || this.hasCurrentMedia()) return;
+            try {
+                if (this._gatewayHlsRetryCount >= 3) this.hls.loadSource(this.currentUrl);
+                this.hls.startLoad();
+            } catch (err) {
+                console.warn('[HLS] Gateway retry failed:', err.message);
+            }
+        }, delay);
+        return true;
     }
 
     async updateTranscodeStatus(mode, text) {
@@ -1796,8 +1925,16 @@ class VideoPlayer {
             await this.stop();
             if (previousChannel) this.currentChannel = previousChannel;
 
-            const fmt = (this.settings && this.settings.streamFormat) || 'm3u8';
-            const res = await window.API.proxy.xtream.getStreamUrl(variant.sourceId, variant.streamId, 'live', fmt);
+            const providerContainer =
+                variant.container_extension ||
+                variant.containerExtension ||
+                variant.container ||
+                'ts';
+            // Match ChannelList: H.264 variant → remux, H.265/HEVC variant → transcode.
+            const gatewayMode = (typeof MediaUtils !== 'undefined' && MediaUtils.liveGatewayMode)
+                ? MediaUtils.liveGatewayMode(variant)
+                : 'transcode';
+            const res = await window.API.proxy.xtream.getStreamUrl(variant.sourceId, variant.streamId, 'live', providerContainer, { gatewayMode });
             const url = res && (res.url || res.streamUrl);
             if (!url) throw new Error('no url');
             const ch = Object.assign({}, this.currentChannel, {
@@ -1808,7 +1945,7 @@ class VideoPlayer {
             });
             await this.play(ch, url);
             const switchSeq = this._variantSwitchSeq;
-            this._armVariantFallback(variant, switchSeq);
+            if (this.shouldAutoFallbackVariants()) this._armVariantFallback(variant, switchSeq);
         } catch (e) {
             console.warn('[Quality] switch failed:', e.message);
             this._tryFallback(variant, 'resolve failed');
@@ -1822,7 +1959,17 @@ class VideoPlayer {
         }
     }
 
+    armCurrentVariantFallback() {
+        if (!this.shouldAutoFallbackVariants()) return;
+        if (!this.currentVariant || !this.qualityGroup) return;
+        this._armVariantFallback(this.currentVariant);
+    }
+
     _armVariantFallback(variant, switchSeq = this._variantSwitchSeq) {
+        if (!this.shouldAutoFallbackVariants()) {
+            this._clearVariantFallbackTimer();
+            return;
+        }
         clearTimeout(this._vfTimer);
         this._vfStartCt = this.video.currentTime || 0;
         this._vfTimer = setTimeout(() => {
@@ -1831,22 +1978,31 @@ class VideoPlayer {
             if (!this.currentVariant || String(this.currentVariant.streamId) !== String(variant.streamId)) return;
             const progressed = this.video.currentTime > this._vfStartCt + 0.3 && this.video.readyState >= 3;
             if (!progressed) this._tryFallback(variant, 'no start in time', switchSeq);
-        }, 9000);
+        }, this.isGatewayPlaybackUrl() ? 18000 : 9000);
     }
 
     _tryFallback(failed, reason, switchSeq = this._variantSwitchSeq) {
-        if (switchSeq !== this._variantSwitchSeq) return;
-        if (!this.currentVariant || String(this.currentVariant.streamId) !== String(failed.streamId)) return;
-        if (!this.qualityGroup || !window.ChannelGrouping) return;
+        if (!this.shouldAutoFallbackVariants()) return false;
+        if (switchSeq !== this._variantSwitchSeq) return false;
+        if (!this.currentVariant || String(this.currentVariant.streamId) !== String(failed.streamId)) return false;
+        if (!this.qualityGroup || !window.ChannelGrouping) return false;
         this._triedVariants.add(String(failed.streamId));
         const order = window.ChannelGrouping.fallbackOrder(this.qualityGroup.variants, failed.streamId)
             .filter(v => !this._triedVariants.has(String(v.streamId)));
         if (order.length) {
             console.warn('[Quality] fallback (' + reason + ') -> ' + order[0].label);
             this.switchVariant(order[0]);
+            return true;
         } else {
             console.warn('[Quality] no healthy fallback left for ' + (this.qualityGroup.name || ''));
         }
+        return false;
+    }
+
+    tryCurrentVariantFallback(reason) {
+        if (!this.shouldAutoFallbackVariants()) return false;
+        if (!this.currentVariant || !this.qualityGroup) return false;
+        return this._tryFallback(this.currentVariant, reason || 'playback failed');
     }
 
     /**
@@ -2025,6 +2181,7 @@ class VideoPlayer {
     stop() {
         ++this._variantSwitchSeq;
         this._clearVariantFallbackTimer();
+        this.resetGatewayHlsRetries();
         this._clearingMedia = true;
 
         if (this.hls) {

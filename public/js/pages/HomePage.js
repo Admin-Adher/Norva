@@ -19,6 +19,9 @@ class HomePage {
         this.contentPreferences = {};
         this.contentPreferenceKey = '';
         this.setupRefreshTimer = null;
+        this.setupRecoveryToken = null;
+        this.setupRecoverySourceId = null;
+        this.setupRecoveryCooldowns = new Map();
         document.addEventListener('norva:source-health-changed', () => {
             this.lastLoadedAt = 0;
             if (this.app?.currentPage === 'home') {
@@ -169,6 +172,7 @@ class HomePage {
             prefs.preferredAudioLanguage || '',
             prefs.preferredSubtitleLanguage || '',
             prefs.strictLanguageMatching ? 'strict' : 'soft',
+            JSON.stringify(prefs.preferredGenres || []),
             prefs.preferredQuality || ''
         ].join('|');
         const changed = key !== this.contentPreferenceKey;
@@ -194,12 +198,8 @@ class HomePage {
 
         this.loadPromise = (async () => {
             try {
-                const railFetchLimit = Math.max(this.homeRailDisplayLimit, this.homeRailFetchLimit);
-                const [historyResult, railsResult, healthResult, favoritesResult, settingsResult] = await Promise.allSettled([
-                    window.API.request('GET', '/history?limit=18'),
-                    window.API.request('GET', `/home/rails?limit=${railFetchLimit}`),
-                    window.NorvaSourceHealth?.loadSummary?.(),
-                    this.renderFavoriteChannels(),
+                const [healthResult, settingsResult] = await Promise.allSettled([
+                    this.app?.refreshSourceHealth?.() || window.NorvaSourceHealth?.loadSummary?.(),
                     window.API.settings.get()
                 ]);
 
@@ -207,9 +207,6 @@ class HomePage {
                     this.setContentPreferences(settingsResult.value || {});
                 }
 
-                const history = historyResult.status === 'fulfilled' && Array.isArray(historyResult.value)
-                    ? historyResult.value
-                    : [];
                 const sourceSummary = healthResult.status === 'fulfilled' && healthResult.value
                     ? healthResult.value
                     : null;
@@ -219,15 +216,24 @@ class HomePage {
                 }
 
                 if (this.shouldShowSetupGate(sourceSummary)) {
-                    this.renderSetupGate(sourceSummary);
-                    if (favoritesResult.status === 'rejected') {
-                        console.warn('[Dashboard] Favorites unavailable:', favoritesResult.reason);
-                    }
+                    this.renderSetupGate(sourceSummary || {});
                     this.lastLoadedAt = Date.now();
                     return;
                 }
 
                 this.clearSetupGate();
+
+                const railFetchLimit = Math.max(this.homeRailDisplayLimit, this.homeRailFetchLimit);
+                const [historyResult, railsResult, favoritesResult] = await Promise.allSettled([
+                    window.API.request('GET', '/history?limit=18'),
+                    window.API.request('GET', `/home/rails?limit=${railFetchLimit}`),
+                    this.renderFavoriteChannels()
+                ]);
+
+                const history = historyResult.status === 'fulfilled' && Array.isArray(historyResult.value)
+                    ? historyResult.value
+                    : [];
+
                 this.renderHistory(history);
 
                 if (railsResult.status === 'fulfilled') {
@@ -256,7 +262,8 @@ class HomePage {
     }
 
     shouldShowSetupGate(summary = null) {
-        if (!summary || summary.state === 'ready') return false;
+        if (!summary) return true;
+        if (summary.state === 'ready') return false;
         return !(summary.ready || []).length;
     }
 
@@ -265,7 +272,17 @@ class HomePage {
             clearTimeout(this.setupRefreshTimer);
             this.setupRefreshTimer = null;
         }
+        const manager = this.app?.sourceManager || window.app?.sourceManager;
+        if (this.setupRecoveryToken && manager?.catalogPreparationToken === this.setupRecoveryToken) {
+            manager.catalogPreparationToken = null;
+        }
+        this.setupRecoveryToken = null;
+        this.setupRecoverySourceId = null;
+        document.getElementById('page-home')?.classList.remove('home-setup-active', 'home-setup-connect-active');
         document.getElementById('home-service-health')?.classList.remove('setup-suppressed');
+        document.getElementById('home-hero')?.classList.remove('hidden');
+        document.getElementById('continue-watching-section')?.classList.remove('hidden');
+        document.getElementById('favorite-channels-section')?.classList.remove('hidden');
     }
 
     renderSetupGate(summary = {}) {
@@ -281,12 +298,24 @@ class HomePage {
         document.getElementById('continue-watching-section')?.classList.add('hidden');
         document.getElementById('favorite-channels-section')?.classList.add('hidden');
         document.getElementById('home-service-health')?.classList.add('setup-suppressed');
+        document.getElementById('page-home')?.classList.add('home-setup-active');
 
         const state = summary.state || 'not_configured';
         const copy = this.setupCopy(summary);
         const steps = this.setupSteps(state);
         const secondaryLabel = copy.secondary || 'Check again';
         const showSecondary = secondaryLabel && secondaryLabel !== copy.primary;
+
+        if (state === 'not_configured' && !this.isPairedScreen()) {
+            this.renderSetupConnectionGate(container, summary, steps);
+            return;
+        }
+        document.getElementById('page-home')?.classList.remove('home-setup-connect-active');
+
+        if (state === 'syncing') {
+            this.renderSetupSyncingGate(container, summary);
+            return;
+        }
 
         container.innerHTML = `
             <section class="norva-setup-gate" data-setup-state="${this.escapeAttr(state)}" data-paired-screen="${this.isPairedScreen() ? 'true' : 'false'}">
@@ -332,6 +361,333 @@ class HomePage {
                 if (this.app?.currentPage === 'home') this.loadDashboardData();
             }, 8000);
         }
+    }
+
+    renderSetupSyncingGate(container, summary = {}) {
+        const manager = this.app?.sourceManager || window.app?.sourceManager;
+        const source = this.syncingSourceFromSummary(summary);
+        const type = source?.type || source?.source_type || source?.sourceType || 'xtream';
+        const sourceView = manager?.sourceWithStatus ? manager.sourceWithStatus(source || {}) : (source || {});
+        const progressHtml = manager?.renderCatalogPreparation
+            ? manager.renderCatalogPreparation(sourceView, type)
+            : this.renderSetupSyncFallback(summary);
+
+        container.innerHTML = `
+            <section class="norva-setup-gate norva-setup-sync-embedded" data-setup-state="syncing">
+                <div class="norva-setup-sync-copy">
+                    <div class="norva-setup-kicker">Norva setup</div>
+                    <h1>Preparing your catalog</h1>
+                    <p>Norva is importing your TV service and unlocking Home, Live TV, Movies and Series as soon as the catalog is ready.</p>
+                    <div class="norva-setup-actions">
+                        <button class="btn btn-primary" id="norva-setup-sync-refresh">Refresh progress</button>
+                        <button class="btn btn-secondary" id="norva-setup-sync-settings">TV Service settings</button>
+                    </div>
+                </div>
+                <div class="norva-setup-sync-panel" aria-label="Catalog import progress">
+                    ${progressHtml}
+                </div>
+            </section>
+        `;
+
+        container.querySelector('#norva-setup-sync-refresh')?.addEventListener('click', () => {
+            this.lastLoadedAt = 0;
+            this.loadDashboardData();
+        });
+        container.querySelector('#norva-setup-sync-settings')?.addEventListener('click', () => {
+            this.app?.navigateTo?.('settings');
+            setTimeout(() => this.app?.pages?.settings?.switchTab?.('sources'), 0);
+        });
+
+        this.maybeRecoverSetupCatalogFinalization(sourceView, type);
+
+        this.setupRefreshTimer = setTimeout(() => {
+            this.lastLoadedAt = 0;
+            if (this.app?.currentPage === 'home') this.loadDashboardData();
+        }, 4000);
+    }
+
+    maybeRecoverSetupCatalogFinalization(sourceView = {}, type = 'xtream') {
+        const manager = this.app?.sourceManager || window.app?.sourceManager;
+        if (!manager?.shouldRecoverCatalogFinalization || !manager?.recoverCatalogFinalization) return;
+        const api = window.API || (typeof API !== 'undefined' ? API : null);
+        if (!api?.sources?.finalize || !api?.sources?.getById) return;
+
+        const sourceId = sourceView.cloudId || sourceView.cloud_id || sourceView.id || sourceView.source_id;
+        if (!sourceId || !this.shouldRecoverSetupCatalogFinalization(sourceView, manager)) return;
+
+        const sourceKey = String(sourceId);
+        const retryAt = Number(this.setupRecoveryCooldowns.get(sourceKey) || 0);
+        if (retryAt && Date.now() < retryAt) return;
+        if (this.setupRecoveryToken && this.setupRecoverySourceId === sourceKey) return;
+
+        const token = Symbol('home-catalog-recovery');
+        this.setupRecoveryToken = token;
+        this.setupRecoverySourceId = sourceKey;
+        manager.catalogPreparationToken = token;
+
+        const render = (latestSource) => {
+            if (this.setupRecoveryToken !== token || this.app?.currentPage !== 'home') return;
+            const latestView = manager.sourceWithStatus
+                ? manager.sourceWithStatus(latestSource || sourceView)
+                : (latestSource || sourceView);
+            const panel = document.querySelector('.norva-setup-sync-panel');
+            if (panel && manager.renderCatalogPreparation) {
+                panel.innerHTML = manager.renderCatalogPreparation(latestView, type);
+            }
+        };
+
+        manager.recoverCatalogFinalization(sourceId, token, render)
+            .then(() => {
+                if (this.setupRecoveryToken !== token) return;
+                this.setupRecoveryCooldowns.delete(sourceKey);
+                this.lastLoadedAt = 0;
+                document.dispatchEvent(new CustomEvent('norva:source-health-changed'));
+                if (this.app?.currentPage === 'home') {
+                    this.loadDashboardData();
+                }
+            })
+            .catch(err => {
+                this.setupRecoveryCooldowns.set(sourceKey, Date.now() + 60_000);
+                console.warn('[HomePage] Catalog finalization recovery failed:', err);
+            })
+            .finally(() => {
+                if (manager.catalogPreparationToken === token) manager.catalogPreparationToken = null;
+                if (this.setupRecoveryToken === token) {
+                    this.setupRecoveryToken = null;
+                    this.setupRecoverySourceId = null;
+                }
+            });
+    }
+
+    shouldRecoverSetupCatalogFinalization(sourceView = {}, manager = null) {
+        if (manager?.shouldRecoverCatalogFinalization?.(sourceView)) return true;
+
+        const progress = manager?.syncProgressFromSource?.(sourceView)
+            || sourceView.syncProgress
+            || sourceView.sync_progress
+            || sourceView.configHint?.syncProgress
+            || sourceView.config_hint?.syncProgress
+            || {};
+        const steps = progress.steps && typeof progress.steps === 'object' ? progress.steps : {};
+        const counts = progress.counts && typeof progress.counts === 'object' ? progress.counts : {};
+        const status = String(progress.status || sourceView.syncStatus || sourceView.sync_status || '').toLowerCase();
+        const stage = String(progress.stage || '').toLowerCase();
+        const importStatus = String(steps.import?.status || '').toLowerCase();
+        const finalizeStatus = String(steps.finalize?.status || '').toLowerCase();
+        const total = Number(counts.total || counts.items || manager?.catalogCountsFromSource?.(sourceView)?.total || 0) || 0;
+
+        const finalizingStages = new Set([
+            'materializing',
+            'building_live_channels',
+            'building_live_variants',
+            'building_titles',
+            'finalizing'
+        ]);
+        const finalizing = finalizingStages.has(stage) || ['running', 'in_progress', 'pending'].includes(finalizeStatus);
+
+        return status === 'syncing'
+            && importStatus === 'done'
+            && total > 0
+            && finalizing;
+    }
+
+    syncingSourceFromSummary(summary = {}) {
+        const candidates = [
+            ...(summary.issues || []),
+            ...(summary.sources || [])
+        ];
+        return (candidates.find(item => item?.state === 'syncing') || candidates[0] || {})?.source || null;
+    }
+
+    renderSetupSyncFallback(summary = {}) {
+        const steps = this.setupSteps(summary.state || 'syncing');
+        return `
+            <div class="norva-setup-steps">
+                ${steps.map(step => `
+                    <div class="norva-setup-step ${step.state}">
+                        <span class="norva-setup-step-index">${this.escapeHtml(step.index)}</span>
+                        <div>
+                            <strong>${this.escapeHtml(step.title)}</strong>
+                            <span>${this.escapeHtml(step.hint)}</span>
+                        </div>
+                    </div>
+                `).join('')}
+            </div>
+        `;
+    }
+
+    renderSetupConnectionGate(container, summary = {}, steps = []) {
+        document.getElementById('page-home')?.classList.add('home-setup-connect-active');
+        container.innerHTML = `
+            <section class="norva-setup-gate norva-setup-connect" data-setup-state="not_configured" data-paired-screen="false">
+                <div class="norva-setup-connect-card">
+                    <div class="norva-setup-kicker">Norva setup</div>
+                    <h1>Enter your service details</h1>
+                    <p>Paste the complete link from your TV service, or enter the server URL, username and password separately.</p>
+                    <form class="norva-setup-inline-form" id="home-tv-service-form" autocomplete="off">
+                        <div class="form-group">
+                            <label for="home-source-url">Provider URL or complete Xtream link</label>
+                            <input type="text" id="home-source-url" class="form-input setup-form-input"
+                                   placeholder="https://provider.com/get.php?username=...&password=..."
+                                   inputmode="url" autocomplete="off">
+                            <p class="setup-form-hint" id="home-source-url-hint">If you paste a full Xtream link, Norva will fill the login fields automatically.</p>
+                        </div>
+                        <div class="form-group setup-service-name-group">
+                            <label for="home-source-name">Service name <span class="label-optional">(optional)</span></label>
+                            <input type="text" id="home-source-name" class="form-input setup-form-input" placeholder="Family TV" autocomplete="off">
+                        </div>
+                        <details class="source-advanced-login setup-manual-login" id="home-source-advanced" open>
+                            <summary>Enter server login manually</summary>
+                            <p class="setup-form-hint">Auto-filled when a complete link is pasted above.</p>
+                            <div class="setup-manual-grid">
+                                <div class="form-group">
+                                    <label for="home-source-username">Username</label>
+                                    <input type="text" id="home-source-username" class="form-input setup-form-input" placeholder="username" autocomplete="off">
+                                </div>
+                                <div class="form-group">
+                                    <label for="home-source-password">Password</label>
+                                    <div class="setup-password-field">
+                                        <input type="password" id="home-source-password" class="form-input setup-form-input" placeholder="password" autocomplete="off">
+                                        <button type="button" class="setup-password-toggle" id="home-source-password-toggle" aria-label="Show password">${Icons.hide}</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </details>
+                        <div class="norva-setup-error hidden" id="home-tv-service-error" role="alert"></div>
+                        <button class="btn btn-primary norva-setup-submit" id="home-tv-service-submit" type="submit">Connect TV Service</button>
+                    </form>
+                </div>
+                <aside class="norva-setup-progress-panel" aria-label="Norva setup progress">
+                    <div class="norva-setup-progress-kicker">Progress panel</div>
+                    ${steps.map((step, index) => this.renderSetupProgressStep(step, index)).join('')}
+                </aside>
+            </section>
+        `;
+        this.bindSetupConnectionForm(container);
+    }
+
+    renderSetupProgressStep(step, index) {
+        const stepMark = step.state === 'complete' ? Icons.check : String(index + 1);
+        const lock = step.state === 'pending' ? `<span class="norva-setup-lock" aria-label="Locked">${Icons.circle}</span>` : '';
+        return `
+            <div class="norva-setup-step norva-setup-progress-step ${this.escapeAttr(step.state)}">
+                <span class="norva-setup-step-index">${stepMark}</span>
+                <div>
+                    <strong>${this.escapeHtml(index + 1)}. ${this.escapeHtml(step.title)}</strong>
+                    <span>${this.escapeHtml(step.hint)}</span>
+                </div>
+                ${lock}
+            </div>
+        `;
+    }
+
+    bindSetupConnectionForm(container) {
+        const form = container.querySelector('#home-tv-service-form');
+        const urlInput = container.querySelector('#home-source-url');
+        const nameInput = container.querySelector('#home-source-name');
+        const usernameInput = container.querySelector('#home-source-username');
+        const passwordInput = container.querySelector('#home-source-password');
+        const passwordToggle = container.querySelector('#home-source-password-toggle');
+        const advancedLogin = container.querySelector('#home-source-advanced');
+        const hint = container.querySelector('#home-source-url-hint');
+        const error = container.querySelector('#home-tv-service-error');
+        const submit = container.querySelector('#home-tv-service-submit');
+        const manager = this.app?.sourceManager || window.app?.sourceManager;
+        if (!form || !urlInput || !usernameInput || !passwordInput || !submit) return;
+
+        const applyParsedLink = (force = false) => {
+            const parsed = manager?.parseXtreamLink?.(urlInput.value);
+            if (!parsed) {
+                if (hint) hint.textContent = 'If you paste a full Xtream link, Norva will fill the login fields automatically.';
+                return;
+            }
+            if (parsed.serverUrl) urlInput.value = parsed.serverUrl;
+            if (nameInput && !nameInput.value.trim() && parsed.host) {
+                nameInput.value = parsed.host.replace(/^www\./i, '');
+            }
+            if (parsed.username && (force || !usernameInput.value.trim())) usernameInput.value = parsed.username;
+            if (parsed.password && (force || !passwordInput.value.trim())) passwordInput.value = parsed.password;
+            if ((!parsed.username || !parsed.password) && advancedLogin) advancedLogin.open = true;
+            if (hint) {
+                hint.textContent = parsed.username && parsed.password
+                    ? 'Login detected from the link. You can review it before connecting.'
+                    : 'Server detected. Add the username and password if they were provided separately.';
+            }
+        };
+
+        urlInput.addEventListener('paste', () => setTimeout(() => applyParsedLink(true), 0));
+        urlInput.addEventListener('blur', () => applyParsedLink(false));
+        urlInput.addEventListener('change', () => applyParsedLink(false));
+
+        passwordToggle?.addEventListener('click', () => {
+            const visible = passwordInput.type === 'text';
+            passwordInput.type = visible ? 'password' : 'text';
+            passwordToggle.setAttribute('aria-label', visible ? 'Show password' : 'Hide password');
+        });
+
+        form.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            if (error) {
+                error.classList.add('hidden');
+                error.textContent = '';
+            }
+
+            let payload;
+            try {
+                payload = this.readSetupConnectionForm(container);
+            } catch (err) {
+                if (error) {
+                    error.textContent = err.message;
+                    error.classList.remove('hidden');
+                }
+                advancedLogin.open = true;
+                return;
+            }
+
+            submit.disabled = true;
+            submit.textContent = 'Connecting...';
+            try {
+                const createdSource = await window.API.sources.create({ type: 'xtream', ...payload });
+                await this.app?.sourceManager?.loadSources?.();
+                document.dispatchEvent(new CustomEvent('norva:source-health-changed'));
+                submit.textContent = 'Preparing catalog...';
+                this.lastLoadedAt = 0;
+                await this.app?.refreshSourceHealth?.();
+                await this.loadDashboardData();
+            } catch (err) {
+                console.error('[Dashboard] TV service connection failed:', err);
+                if (error) {
+                    error.textContent = err.message || 'Unable to connect this TV service.';
+                    error.classList.remove('hidden');
+                }
+                submit.disabled = false;
+                submit.textContent = 'Connect TV Service';
+            }
+        });
+    }
+
+    readSetupConnectionForm(container) {
+        const manager = this.app?.sourceManager || window.app?.sourceManager;
+        let url = container.querySelector('#home-source-url')?.value.trim() || '';
+        let name = container.querySelector('#home-source-name')?.value.trim() || '';
+        let username = container.querySelector('#home-source-username')?.value.trim() || '';
+        let password = container.querySelector('#home-source-password')?.value.trim() || '';
+        const parsed = manager?.parseXtreamLink?.(url);
+
+        if (parsed) {
+            url = parsed.serverUrl || url;
+            username = username || parsed.username || '';
+            password = password || parsed.password || '';
+        }
+
+        if (!url) throw new Error('Provider URL is required.');
+        if (!username || !password) throw new Error('Username and password are required.');
+
+        if (!name) {
+            const hostName = parsed?.host || manager?.hostFromUrl?.(url) || 'TV service';
+            name = hostName ? hostName.replace(/^www\./i, '') : 'TV service';
+        }
+        return { name, url, username, password };
     }
 
     isPairedScreen() {
@@ -434,8 +790,15 @@ class HomePage {
             prominent: !summary?.ready?.length
         });
         container.classList.toggle('hidden', summary?.state === 'ready');
-        container.querySelector('[data-source-health-action="open-sources"]')?.addEventListener('click', () => {
-            window.NorvaSourceHealth.openAction(summary, this.app);
+        container.querySelectorAll('[data-source-health-action]').forEach(button => {
+            button.addEventListener('click', () => {
+                const action = button.dataset.sourceHealthAction;
+                if (action === 'view-progress' && window.NorvaSourceHealth.openProgress) {
+                    window.NorvaSourceHealth.openProgress(summary, this.app);
+                    return;
+                }
+                window.NorvaSourceHealth.openAction(summary, this.app);
+            });
         });
     }
 
@@ -451,10 +814,10 @@ class HomePage {
 
         const rails = [];
         if (moviesResult.status === 'fulfilled' && moviesResult.value?.length) {
-            rails.push({ id: 'recently-added-movies', title: 'Films recemment ajoutes', items: moviesResult.value });
+            rails.push({ id: 'recently-added-movies', title: 'Recently Added Movies', items: moviesResult.value });
         }
         if (seriesResult.status === 'fulfilled' && seriesResult.value?.length) {
-            rails.push({ id: 'recently-added-series', title: 'Series recemment ajoutees', items: seriesResult.value });
+            rails.push({ id: 'recently-added-series', title: 'Recently Added Series', items: seriesResult.value });
         }
 
         this.renderCloudRails({ rails });
@@ -616,20 +979,20 @@ class HomePage {
 
     railTitle(rail = {}) {
         const id = String(rail.id || '').toLowerCase();
-        if (id === 'recently-added-movies') return 'Films recemment ajoutes';
-        if (id === 'recently-added-series') return 'Series recemment ajoutees';
-        if (id === 'action-movies') return "Films d'action";
-        if (id === 'popular-movies') return 'Films populaires';
-        if (id === 'popular-series') return 'Series populaires';
-        if (id.startsWith('because-you-watched')) return 'Parce que vous avez regarde';
-        return rail.title || rail.name || 'Selection Norva';
+        if (id === 'recently-added-movies') return 'Recently Added Movies';
+        if (id === 'recently-added-series') return 'Recently Added Series';
+        if (id === 'action-movies') return 'Action Movies';
+        if (id === 'popular-movies') return 'Popular Movies';
+        if (id === 'popular-series') return 'Popular Series';
+        if (id.startsWith('because-you-watched')) return 'Because You Watched';
+        return rail.title || rail.name || 'Norva Selection';
     }
 
     railSubtitle(rail = {}) {
         const id = String(rail.id || '').toLowerCase();
-        if (id.startsWith('because-you-watched')) return 'Suggestions basees sur votre historique';
-        if (id === 'action-movies') return 'Titres verifies avec genres enrichis';
-        if (id === 'popular-movies') return 'Titres verifies avec les meilleures notes';
+        if (id.startsWith('because-you-watched')) return 'Suggestions based on your watch history';
+        if (id === 'action-movies') return 'Verified titles with enriched genres';
+        if (id === 'popular-movies') return 'Verified titles with top ratings';
         return '';
     }
 
@@ -1236,6 +1599,11 @@ class HomePage {
             const audioStreamIndex = Number(playbackPreferences?.audio?.streamIndex ?? playbackPreferences?.audio?.stream_index);
             if (Number.isInteger(audioStreamIndex)) {
                 playbackHint.audioStreamIndex = audioStreamIndex;
+            }
+
+            // Live H.264 → remux (copy video), H.265/HEVC → full transcode.
+            if (streamType === 'live' && !playbackHint.gatewayMode && window.MediaUtils?.liveGatewayMode) {
+                playbackHint.gatewayMode = MediaUtils.liveGatewayMode(item);
             }
 
             const result = await window.API.proxy.xtream.getStreamUrl(

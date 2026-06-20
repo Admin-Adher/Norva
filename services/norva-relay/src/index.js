@@ -175,7 +175,7 @@ export class ProviderSessionCoordinator {
     await this.saveState(state);
 
     const waitMs = conflicts.length
-      ? boundedInt(this.env.PROVIDER_SLOT_RELEASE_DELAY_MS, 1200, 0, 10_000)
+      ? boundedInt(this.env.PROVIDER_SLOT_RELEASE_DELAY_MS, 8000, 0, 15_000)
       : 0;
 
     return {

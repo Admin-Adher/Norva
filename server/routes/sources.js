@@ -119,13 +119,15 @@ router.delete('/:id', async (req, res) => {
         const deleteItems = db.prepare('DELETE FROM playlist_items WHERE source_id = ?');
         const deleteEpg = db.prepare('DELETE FROM epg_programs WHERE source_id = ?');
         const deleteSyncStatus = db.prepare('DELETE FROM sync_status WHERE source_id = ?');
+        const deleteHistory = db.prepare('DELETE FROM watch_history WHERE source_id = ?');
 
         const catResult = deleteCategories.run(sourceId);
         const itemResult = deleteItems.run(sourceId);
         const epgResult = deleteEpg.run(sourceId);
+        const historyResult = deleteHistory.run(sourceId);
         deleteSyncStatus.run(sourceId);
 
-        console.log(`[Source] Cascade delete for source ${sourceId}: ${catResult.changes} categories, ${itemResult.changes} items, ${epgResult.changes} EPG programs`);
+        console.log(`[Source] Cascade delete for source ${sourceId}: ${catResult.changes} categories, ${itemResult.changes} items, ${epgResult.changes} EPG programs, ${historyResult.changes} watch history rows`);
 
         // Delete source config and related hidden items (favorites handled by db.js)
         await sources.delete(sourceId);

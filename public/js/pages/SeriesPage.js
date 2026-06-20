@@ -221,6 +221,12 @@ class SeriesPage {
     async show() {
         this.hideDetails();
 
+        const summary = await this.app?.refreshSourceHealth?.();
+        if (this.app?.isCatalogReady && !this.app.isCatalogReady(summary || undefined)) {
+            this.renderCatalogLocked();
+            return;
+        }
+
         if (this.sources.length === 0) {
             await this.loadSources();
         }
@@ -238,6 +244,30 @@ class SeriesPage {
 
     hide() {
         // Page is hidden
+    }
+
+    renderCatalogLocked() {
+        this.hideDetails();
+        this.seriesList = [];
+        this.filteredCards = [];
+        this.historyItems = [];
+        this.startedSeriesIds = new Set();
+        this.cloudHasMore = false;
+        this.cloudLoadingMore = false;
+        this.continueRow?.classList.add('hidden');
+        if (this.countEl) this.countEl.textContent = '';
+        if (this.container) {
+            this.container.innerHTML = `
+                <div class="catalog-locked-empty">
+                    <h2>Connect your TV service first</h2>
+                    <p>Series unlock as soon as Norva finishes preparing your catalog.</p>
+                    <button class="btn btn-primary" id="series-connect-service">Connect TV Service</button>
+                </div>
+            `;
+            this.container.querySelector('#series-connect-service')?.addEventListener('click', () => {
+                this.app?.navigateTo?.('home');
+            });
+        }
     }
 
     async loadServerSettings() {
@@ -260,7 +290,11 @@ class SeriesPage {
     async loadWatchState() {
         try {
             const history = await API.history.getAll(500);
-            this.historyItems = history || [];
+            const activeSourceIds = new Set((this.sources || []).map(source => String(source.id)));
+            this.historyItems = (history || []).filter(item => {
+                const sourceId = item.source_id || item.sourceId || item.data?.sourceId;
+                return sourceId && activeSourceIds.has(String(sourceId));
+            });
             this.startedSeriesIds = new Set();
             for (const h of this.historyItems) {
                 if (h.item_type === 'episode' && h.data?.seriesId) {
@@ -999,6 +1033,7 @@ class SeriesPage {
             preferredAudioLanguage: this.serverSettings.preferredAudioLanguage || '',
             preferredSubtitleLanguage: this.serverSettings.preferredSubtitleLanguage || '',
             strictLanguageMatching: Boolean(this.serverSettings.strictLanguageMatching),
+            preferredGenres: this.serverSettings.preferredGenres || [],
             preferredQuality: this.serverSettings.preferredQuality || 'highest'
         };
     }

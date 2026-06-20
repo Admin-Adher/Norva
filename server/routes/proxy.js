@@ -16,6 +16,11 @@ const { normalizeUpstreamError, sanitizeErrorMessage } = require('../utils/upstr
 // Default cache max age in hours
 const DEFAULT_MAX_AGE_HOURS = 24;
 
+function defaultXtreamContainer(type = 'live') {
+    const normalized = String(type || '').toLowerCase();
+    return normalized === 'live' || normalized === 'channel' ? 'ts' : 'mp4';
+}
+
 // Helper to get formatted category list from DB
 function getCategoriesFromDb(sourceId, type, includeHidden = false) {
     const db = getDb();
@@ -281,7 +286,7 @@ router.get('/xtream/:sourceId/stream/:streamId/:type', async (req, res) => {
 
         const streamId = req.params.streamId;
         const type = req.params.type || 'live';
-        const container = req.query.container || 'm3u8';
+        const container = req.query.container || defaultXtreamContainer(type);
 
         // Construct the Xtream stream URL
         // Format: http://server:port/live/username/password/streamId.container (for live)
@@ -555,7 +560,7 @@ router.get('/xtream/:sourceId/stream/:streamId/:type?', async (req, res) => {
 
         const api = xtreamApi.createFromSource(source);
         const { streamId, type = 'live' } = req.params;
-        const { container = 'm3u8' } = req.query;
+        const container = req.query.container || defaultXtreamContainer(type);
 
         const url = api.buildStreamUrl(streamId, type, container);
         res.json({ url });

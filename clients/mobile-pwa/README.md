@@ -3,7 +3,7 @@
 Norva Mobile is the companion experience for the Norva ecosystem.
 
 It is now a thin mobile entrypoint to the canonical Norva Web experience at
-`https://norva-eight.vercel.app`.
+`https://norva.tv/app.html`.
 
 This keeps Movies, Series, Watch, Cloud Account, catalog pagination, Relay and
 Gateway behavior aligned with the rest of the ecosystem instead of maintaining a

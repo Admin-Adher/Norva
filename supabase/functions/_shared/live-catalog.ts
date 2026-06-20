@@ -516,6 +516,18 @@ function pickDefault(variants: LiveVariant[]) {
   return list[0] || variants[0] || null;
 }
 
+function livePlaybackContainer(playbackHint: JsonRecord, metadata: JsonRecord) {
+  const stored = String(playbackHint.container || metadata.container || "ts");
+  const explicit = Boolean(
+    playbackHint.containerExplicit ||
+    playbackHint.container_explicit ||
+    metadata.containerExplicit ||
+    metadata.container_explicit
+  );
+  if (stored.toLowerCase() === "m3u8" && !explicit) return "ts";
+  return stored;
+}
+
 function variantFrom(item: LiveCatalogItem, parsed: ParsedName): LiveVariant {
   const label = qualityLabel(parsed);
   const metadata = recordOrEmpty(item.metadata);
@@ -525,7 +537,7 @@ function variantFrom(item: LiveCatalogItem, parsed: ParsedName): LiveVariant {
   const title = String(item.title || item.name || "Norva");
   const category = categoryOf(item);
   const poster = String(item.poster_url || item.posterUrl || item.stream_icon || "");
-  const container = String(playbackHint.container || metadata.container || "m3u8");
+  const container = livePlaybackContainer(playbackHint, metadata);
   return {
     id: `${sourceId}:${streamId}`,
     media_item_id: stringOrNull(item.id),

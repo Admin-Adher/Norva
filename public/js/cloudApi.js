@@ -314,13 +314,21 @@
         ].join(';');
         prompt.innerHTML = `
             <button type="button" aria-label="Close" data-region-close style="float:right;background:transparent;border:0;color:#94a3b8;font-size:22px;line-height:1;cursor:pointer">&times;</button>
-            <strong style="display:block;font-size:16px;margin:0 26px 8px 0">Organiser Norva pour ${escapeHtml(contentRegionLabel(suggestion.region))} ?</strong>
-            <span style="display:block;color:#aeb8cc;margin-bottom:14px">Norva utilise cette région pour ordonner les chaînes, logos et catégories. Tu peux la changer à tout moment.</span>
+            <strong style="display:block;font-size:16px;margin:0 26px 8px 0">Organize Norva for ${escapeHtml(contentRegionLabel(suggestion.region))}?</strong>
+            <span style="display:block;color:#aeb8cc;margin-bottom:14px">Norva uses this region to organize channels, logos and categories. You can change it at any time.</span>
             <div style="display:flex;gap:10px;flex-wrap:wrap">
-                <button type="button" data-region-confirm style="flex:1 1 82px;border:0;border-radius:10px;background:#5b7cfa;color:white;padding:10px 14px;font-weight:800;cursor:pointer">Oui</button>
-                <button type="button" data-region-settings style="flex:2 1 180px;min-width:0;border:1px solid #334155;border-radius:10px;background:#1b2230;color:#dbe7ff;padding:10px 14px;font-weight:800;cursor:pointer">Choisir une autre région</button>
+                <button type="button" data-region-confirm style="flex:1 1 82px;border:0;border-radius:10px;background:#5b7cfa;color:white;padding:10px 14px;font-weight:800;cursor:pointer">Yes</button>
+                <button type="button" data-region-settings style="flex:2 1 180px;min-width:0;border:1px solid #334155;border-radius:10px;background:#1b2230;color:#dbe7ff;padding:10px 14px;font-weight:800;cursor:pointer">Choose another region</button>
             </div>
         `;
+        const regionTitle = prompt.querySelector('strong');
+        const regionMessage = prompt.querySelector('span[style*="margin-bottom"]');
+        const confirmButton = prompt.querySelector('[data-region-confirm]');
+        const settingsButton = prompt.querySelector('[data-region-settings]');
+        if (regionTitle) regionTitle.textContent = `Organize Norva for ${contentRegionLabel(suggestion.region)}?`;
+        if (regionMessage) regionMessage.textContent = 'Norva uses this region to order channels, logos and categories. You can change it at any time.';
+        if (confirmButton) confirmButton.textContent = 'Yes';
+        if (settingsButton) settingsButton.textContent = 'Choose another region';
 
         const close = () => {
             dismissRegionPrompt();
@@ -385,6 +393,18 @@
 
     async function sourceSyncRequest(id) {
         const path = `/sources/${encodeURIComponent(id)}/sync?country=${encodeURIComponent(resolveCountry())}`;
+        try {
+            return await requestToBase(sourceSyncBase(), 'POST', path, {});
+        } catch (error) {
+            if ([404, 405, 502, 503, 504, 546].includes(error.status)) {
+                return request('POST', path, {});
+            }
+            throw error;
+        }
+    }
+
+    async function sourceFinalizeRequest(id, params = {}) {
+        const path = `/sources/${encodeURIComponent(id)}/finalize${query({ country: resolveCountry(), ...params })}`;
         try {
             return await requestToBase(sourceSyncBase(), 'POST', path, {});
         } catch (error) {
@@ -539,6 +559,7 @@
                 `/sources/${encodeURIComponent(id)}/epg${query(params)}`
             ),
             sync: (id) => sourceSyncRequest(id),
+            finalize: (id, params = {}) => sourceFinalizeRequest(id, params),
             remove: (id) => request('DELETE', `/sources/${encodeURIComponent(id)}`)
         },
 

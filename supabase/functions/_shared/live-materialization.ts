@@ -15,11 +15,35 @@ export async function refreshMaterializedLiveCatalog(
     country?: string;
   },
 ) {
-  const liveRows = input.rows.filter((row) => row.item_type === "live" && row.available !== false);
-  await deleteSourceMaterialization(db, input.sourceId, input.userId);
+  const plan = buildLiveMaterializationPlan(input);
+  await clearLiveMaterialization(db, input.sourceId, input.userId);
 
-  if (!liveRows.length) {
+  if (!plan.rawLive) {
     return { rawLive: 0, logicalChannels: 0, liveVariants: 0 };
+  }
+
+  const insertedChannels = await upsertLiveChannelRows(db, plan.channelRows);
+  const channelIdByLogicalId = new Map(insertedChannels.map((row) => [String(row.logical_id), String(row.id)]));
+  await upsertLiveVariantRows(db, plan.variantRows, channelIdByLogicalId);
+
+  return {
+    rawLive: plan.rawLive,
+    logicalChannels: plan.channelRows.length,
+    liveVariants: plan.variantRows.length,
+  };
+}
+
+export function buildLiveMaterializationPlan(
+  input: {
+    userId: string;
+    sourceId: string;
+    rows: LiveCatalogItem[];
+    country?: string;
+  },
+) {
+  const liveRows = input.rows.filter((row) => row.item_type === "live" && row.available !== false);
+  if (!liveRows.length) {
+    return { rawLive: 0, channelRows: [], variantRows: [] };
   }
 
   const country = String(input.country || "FR").toUpperCase();
@@ -50,12 +74,9 @@ export async function refreshMaterializedLiveCatalog(
     synced_at: now,
   }));
 
-  const insertedChannels = await insertRows(db, "cloud_live_logical_channels", channelRows, "id,logical_id");
-  const channelIdByLogicalId = new Map(insertedChannels.map((row) => [String(row.logical_id), String(row.id)]));
   const variantRows = catalog.channels.flatMap((channel) => {
     const logicalId = stringValue(channel.logical_id ?? channel.id);
-    const channelId = channelIdByLogicalId.get(logicalId);
-    if (!channelId || !Array.isArray(channel.variants)) return [];
+    if (!Array.isArray(channel.variants)) return [];
     return channel.variants.map((variantValue) => {
       const variant = recordOrEmpty(variantValue);
       const playbackHint = recordOrEmpty(variant.playback_hint ?? variant.playbackHint);
@@ -63,7 +84,6 @@ export async function refreshMaterializedLiveCatalog(
       return {
         user_id: input.userId,
         source_id: input.sourceId,
-        logical_channel_id: channelId,
         logical_id: logicalId,
         media_item_id: stringOrNull(variant.media_item_id ?? variant.mediaItemId),
         stream_id: stringValue(variant.stream_id ?? variant.streamId),
@@ -84,16 +104,15 @@ export async function refreshMaterializedLiveCatalog(
       };
     });
   });
-  await insertRows(db, "cloud_live_variants", variantRows);
 
   return {
     rawLive: liveRows.length,
-    logicalChannels: channelRows.length,
-    liveVariants: variantRows.length,
+    channelRows,
+    variantRows,
   };
 }
 
-async function deleteSourceMaterialization(db: SupabaseLike, sourceId: string, userId: string) {
+export async function clearLiveMaterialization(db: SupabaseLike, sourceId: string, userId: string) {
   const { error } = await db
     .from("cloud_live_logical_channels")
     .delete()
@@ -102,13 +121,69 @@ async function deleteSourceMaterialization(db: SupabaseLike, sourceId: string, u
   if (error) throwDb(error, "Unable to clear live materialization");
 }
 
+export async function upsertLiveChannelRows(db: SupabaseLike, rows: JsonRecord[], offset = 0, limit = rows.length) {
+  const slice = rows.slice(offset, offset + Math.max(0, limit));
+  return await writeRows(db, "cloud_live_logical_channels", slice, {
+    selectColumns: "id,logical_id",
+    onConflict: "source_id,logical_id",
+  });
+}
+
+export async function fetchLiveChannelIdMap(db: SupabaseLike, sourceId: string, userId: string) {
+  const rows: JsonRecord[] = [];
+  for (let offset = 0; ; offset += 1000) {
+    const { data, error } = await db
+      .from("cloud_live_logical_channels")
+      .select("id,logical_id")
+      .eq("source_id", sourceId)
+      .eq("user_id", userId)
+      .range(offset, offset + 999);
+    if (error) throwDb(error, "Unable to load live channel ids");
+    if (!Array.isArray(data) || !data.length) break;
+    rows.push(...data);
+    if (data.length < 1000) break;
+  }
+  return new Map(rows.map((row) => [String(row.logical_id), String(row.id)]));
+}
+
+export async function upsertLiveVariantRows(
+  db: SupabaseLike,
+  rows: JsonRecord[],
+  channelIdByLogicalId: Map<string, string>,
+  offset = 0,
+  limit = rows.length,
+) {
+  const slice = rows
+    .slice(offset, offset + Math.max(0, limit))
+    .map((row) => ({
+      ...row,
+      logical_channel_id: channelIdByLogicalId.get(String(row.logical_id)) || null,
+    }))
+    .filter((row) => row.logical_channel_id);
+  await writeRows(db, "cloud_live_variants", slice, {
+    onConflict: "source_id,logical_id,stream_id,label",
+  });
+  return slice.length;
+}
+
 async function insertRows(db: SupabaseLike, table: string, rows: JsonRecord[], selectColumns = "") {
+  return await writeRows(db, table, rows, { selectColumns });
+}
+
+type WriteRowsOptions = {
+  selectColumns?: string;
+  onConflict?: string;
+};
+
+async function writeRows(db: SupabaseLike, table: string, rows: JsonRecord[], options: WriteRowsOptions = {}) {
   const inserted: JsonRecord[] = [];
   for (let index = 0; index < rows.length; index += 500) {
     const chunk = rows.slice(index, index + 500);
     if (!chunk.length) continue;
-    const query = db.from(table).insert(chunk);
-    const { data, error } = selectColumns ? await query.select(selectColumns) : await query;
+    const query = options.onConflict
+      ? db.from(table).upsert(chunk, { onConflict: options.onConflict })
+      : db.from(table).insert(chunk);
+    const { data, error } = options.selectColumns ? await query.select(options.selectColumns) : await query;
     if (error) throwDb(error, `Unable to save ${table}`);
     if (Array.isArray(data)) inserted.push(...data);
   }

@@ -334,8 +334,55 @@ const MediaUtils = (() => {
                 prefs.preferredSubtitleLanguage || legacy.preferredSubtitleLanguage || '',
                 'subtitle'
             ),
-            strictLanguageMatching: Boolean(prefs.strictLanguageMatching)
+            strictLanguageMatching: Boolean(prefs.strictLanguageMatching),
+            preferredGenres: normalizeGenrePreferences(prefs.preferredGenres || prefs.favoriteGenres || prefs.preferredGenre || [])
         };
+    }
+
+    function normalizeGenrePreference(value) {
+        const normalized = stripDiacritics(String(value || '').toLowerCase())
+            .replace(/&/g, 'and')
+            .replace(/[^a-z0-9]+/g, '-')
+            .replace(/^-+|-+$/g, '');
+        const aliases = {
+            scifi: 'science-fiction',
+            'sci-fi': 'science-fiction',
+            sciencefiction: 'science-fiction',
+            'science-fiction': 'science-fiction',
+            tvmovie: 'tv-movie',
+            'tv-movie': 'tv-movie'
+        };
+        return aliases[normalized] || normalized;
+    }
+
+    function normalizeGenrePreferences(value) {
+        const values = Array.isArray(value)
+            ? value
+            : String(value || '').split(/[,|;]/);
+        return [...new Set(values.map(normalizeGenrePreference).filter(Boolean))];
+    }
+
+    function genreListFromItem(item = {}) {
+        const data = item.data || {};
+        const metadata = item.metadata || {};
+        const raw = item.genres || data.genres || metadata.genres || [];
+        if (Array.isArray(raw)) {
+            return raw.map(genre => typeof genre === 'string'
+                ? genre
+                : (genre.name || genre.label || genre.title || '')
+            ).map(normalizeGenrePreference).filter(Boolean);
+        }
+        return String(raw || '').split(/[,|;]/).map(normalizeGenrePreference).filter(Boolean);
+    }
+
+    function scoreGenrePreferences(item = {}, prefs = {}) {
+        const preferredGenres = normalizeGenrePreferences(prefs.preferredGenres || prefs.favoriteGenres || prefs.preferredGenre || []);
+        if (!preferredGenres.length) return 0;
+        const genres = genreListFromItem(item);
+        if (!genres.length) return 35;
+        const matches = preferredGenres.filter(genre => genres.includes(genre)).length;
+        if (matches) return 220 + matches * 120;
+        return -25;
     }
 
     function parseTitleLanguageSignals(name) {
@@ -495,11 +542,12 @@ const MediaUtils = (() => {
     }
 
     function scoreTitleForPreferences(item, prefs = {}) {
+        const normalizedPrefs = normalizeContentPreferences(prefs);
         const variants = Array.isArray(item.variants) && item.variants.length
             ? item.variants
             : [item.defaultVariant || item.default_variant || item];
-        const scores = variants.map(variant => scoreVersionLanguage({ ...item, ...variant, data: { ...(item.data || {}), ...(variant.data || {}) } }, prefs));
-        return scores.length ? Math.max(...scores) : 0;
+        const scores = variants.map(variant => scoreVersionLanguage({ ...item, ...variant, data: { ...(item.data || {}), ...(variant.data || {}) } }, normalizedPrefs));
+        return (scores.length ? Math.max(...scores) : 0) + scoreGenrePreferences(item, normalizedPrefs);
     }
 
     function versionLanguageBadge(item, prefs = {}) {
@@ -509,14 +557,14 @@ const MediaUtils = (() => {
         let subtitleCandidate = '';
         const hasRequestedLanguage = Boolean(analysis.audio.requested || (analysis.subtitle.requested && analysis.subtitle.requested !== 'none'));
         if (analysis.audio.requested) {
-            if (analysis.audio.state === 'confirmed') audioCandidate = `Audio ${languageDisplay(analysis.audio.requested)} confirme`;
-            else if (analysis.audio.confidence === 'probable') audioCandidate = `Audio ${languageDisplay(analysis.audio.requested)} probable`;
-            else if (analysis.audio.state === 'confirmed_absent') audioCandidate = `Audio ${languageDisplay(analysis.audio.requested)} absent`;
+            if (analysis.audio.state === 'confirmed') audioCandidate = `Audio ${languageDisplay(analysis.audio.requested)} confirmed`;
+            else if (analysis.audio.confidence === 'probable') audioCandidate = `Audio ${languageDisplay(analysis.audio.requested)} likely`;
+            else if (analysis.audio.state === 'confirmed_absent') audioCandidate = `Audio ${languageDisplay(analysis.audio.requested)} unavailable`;
         }
         if (analysis.subtitle.requested && analysis.subtitle.requested !== 'none') {
-            if (analysis.subtitle.state === 'confirmed') subtitleCandidate = `Sous-titres ${languageDisplay(analysis.subtitle.requested)} confirmes`;
-            else if (analysis.subtitle.confidence === 'probable') subtitleCandidate = `Sous-titres ${languageDisplay(analysis.subtitle.requested)} probables`;
-            else if (analysis.subtitle.state === 'confirmed_absent') subtitleCandidate = `Sous-titres ${languageDisplay(analysis.subtitle.requested)} absents`;
+            if (analysis.subtitle.state === 'confirmed') subtitleCandidate = `${languageDisplay(analysis.subtitle.requested)} subtitles confirmed`;
+            else if (analysis.subtitle.confidence === 'probable') subtitleCandidate = `${languageDisplay(analysis.subtitle.requested)} subtitles likely`;
+            else if (analysis.subtitle.state === 'confirmed_absent') subtitleCandidate = `${languageDisplay(analysis.subtitle.requested)} subtitles unavailable`;
         }
         if (analysis.audio.requested === 'original' && subtitleCandidate) {
             candidates.push(subtitleCandidate, audioCandidate);
@@ -527,7 +575,7 @@ const MediaUtils = (() => {
         if (firstCandidate) return firstCandidate;
         const parsed = parseVersionInfo(item.name || item.title || item.raw_title || item.rawTitle);
         if (parsed.languageSummary) return parsed.languageSummary;
-        return hasRequestedLanguage ? 'Langue non verifiee' : '';
+        return hasRequestedLanguage ? 'Language not verified' : '';
     }
 
     /**
@@ -606,6 +654,7 @@ const MediaUtils = (() => {
             } else {
                 score += v.qualityScore * 10; // highest
             }
+            score += scoreGenrePreferences(item, normalizedPrefs);
             if (item.stream_icon || item.cover) score += 1;
             return { item, score, version: v };
         }).sort((a, b) => b.score - a.score).map(s => s.item);
@@ -729,6 +778,29 @@ const MediaUtils = (() => {
         return hint;
     }
 
+    /**
+     * Decide the gateway processing mode for a LIVE channel/variant.
+     *
+     * H.264 feeds → "remux": the gateway copies the video stream untouched and
+     * only transcodes audio (HE-AAC/AC3 → AAC). This is fast and light on the
+     * shared gateway. H.265/HEVC feeds → "transcode": browsers (notably Chrome
+     * over MSE) cannot decode copied HEVC, so the video must be re-encoded to
+     * H.264. Providers tag HEVC feeds in the channel/variant name or quality
+     * label (e.g. "TF1 [H265]", "FHD · H265", "FRANCE H265").
+     */
+    function liveGatewayMode(channel = {}) {
+        const codecProfile = channel.codecProfile || channel.codec_profile || {};
+        const text = [
+            channel.name, channel.tvgName, channel.tvg_name, channel.title,
+            channel.label, channel.qualityLabel, channel.quality,
+            channel.group, channel.groupTitle, channel.group_title,
+            channel.category, channel.categoryName, channel.category_name,
+            channel.videoCodec, channel.video_codec,
+            codecProfile.videoCodec, codecProfile.video_codec, codecProfile.video
+        ].filter(Boolean).join(' ').toLowerCase();
+        return /\b(h\.?265|hevc|x265)\b/.test(text) ? 'transcode' : 'remux';
+    }
+
     function firstRecord(...values) {
         return values.find(value => value && typeof value === 'object' && !Array.isArray(value)) || {};
     }
@@ -773,10 +845,11 @@ const MediaUtils = (() => {
         stripDiacritics, extractYear, normalizeTitle, computeDedupKey,
         parseVersionInfo, searchableText, groupItems, pickRepresentative,
         normalizeLanguagePreference, normalizeContentPreferences, migrateLegacyLanguagePreference,
+        normalizeGenrePreference, normalizeGenrePreferences, scoreGenrePreferences,
         analyzeLanguageCompatibility, scoreVersionLanguage, scoreTitleForPreferences,
         orderVersionsByPreference, versionLabel, versionLanguageBadge,
         saveFilters, loadFilters, escapeHtml, tmdbPosterUrl, parseDurationToSeconds,
-        playbackHintFromItem, safeImageUrl
+        playbackHintFromItem, liveGatewayMode, safeImageUrl
     };
 })();
 

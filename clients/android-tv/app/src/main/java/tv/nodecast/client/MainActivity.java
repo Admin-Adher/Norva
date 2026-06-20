@@ -36,7 +36,7 @@ public class MainActivity extends Activity {
     private static final String PREFS = "norva";
     private static final String PREF_SERVER_URL = "serverUrl";
     private static final String PREF_MODE = "mode"; // "cloud" | "server" | "standalone"
-    private static final String CLOUD_PAIR_URL = "https://norva-eight.vercel.app/cloud-pair.html?device=tv&returnTo=%2F%3Fpaired%3D1%23home";
+    private static final String CLOUD_PAIR_URL = "https://norva.tv/cloud-pair.html?device=tv&returnTo=%2Fapp.html%3Fpaired%3D1%23home";
     // Marker appended to the WebView user agent: the web app detects it and
     // enables TV mode (D-pad spatial navigation, focus outlines).
     private static final String UA_SUFFIX = " NorvaTV-AndroidTV/3.1";
@@ -44,6 +44,7 @@ public class MainActivity extends Activity {
     private FrameLayout root;
     private WebView webView;
     private LinearLayout setupPanel;
+    private LinearLayout advancedPanel;
     private EditText urlInput;
     private TextView statusText;
     private boolean webViewVisible = false;
@@ -153,12 +154,32 @@ public class MainActivity extends Activity {
         });
         setupPanel.addView(cloudBtn, new LinearLayout.LayoutParams(dp(320), LinearLayout.LayoutParams.WRAP_CONTENT));
 
+        Button advancedToggle = new Button(this);
+        advancedToggle.setText("Advanced setup");
+        advancedToggle.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if (advancedPanel != null) {
+                    advancedPanel.setVisibility(advancedPanel.getVisibility() == View.VISIBLE ? View.GONE : View.VISIBLE);
+                }
+            }
+        });
+        LinearLayout.LayoutParams advancedToggleLp = new LinearLayout.LayoutParams(dp(220), LinearLayout.LayoutParams.WRAP_CONTENT);
+        advancedToggleLp.topMargin = dp(20);
+        setupPanel.addView(advancedToggle, advancedToggleLp);
+
+        advancedPanel = new LinearLayout(this);
+        advancedPanel.setOrientation(LinearLayout.VERTICAL);
+        advancedPanel.setGravity(android.view.Gravity.CENTER);
+        advancedPanel.setVisibility(View.GONE);
+        setupPanel.addView(advancedPanel, new LinearLayout.LayoutParams(dp(580), LinearLayout.LayoutParams.WRAP_CONTENT));
+
         TextView localLabel = new TextView(this);
         localLabel.setText("Advanced local connector");
         localLabel.setTextColor(Color.parseColor("#71717a"));
         localLabel.setTextSize(15);
         localLabel.setPadding(0, dp(28), 0, dp(8));
-        setupPanel.addView(localLabel);
+        advancedPanel.addView(localLabel);
 
         urlInput = new EditText(this);
         urlInput.setHint("http://192.168.1.20:3000");
@@ -167,7 +188,7 @@ public class MainActivity extends Activity {
         urlInput.setHintTextColor(Color.parseColor("#71717a"));
         urlInput.setSingleLine(true);
         urlInput.setInputType(android.text.InputType.TYPE_TEXT_VARIATION_URI);
-        setupPanel.addView(urlInput, new LinearLayout.LayoutParams(dp(520), LinearLayout.LayoutParams.WRAP_CONTENT));
+        advancedPanel.addView(urlInput, new LinearLayout.LayoutParams(dp(520), LinearLayout.LayoutParams.WRAP_CONTENT));
 
         Button connectBtn = new Button(this);
         connectBtn.setText("Connect local connector");
@@ -185,22 +206,22 @@ public class MainActivity extends Activity {
         });
         LinearLayout.LayoutParams btnLp = new LinearLayout.LayoutParams(dp(220), LinearLayout.LayoutParams.WRAP_CONTENT);
         btnLp.topMargin = dp(16);
-        setupPanel.addView(connectBtn, btnLp);
+        advancedPanel.addView(connectBtn, btnLp);
 
         // --- Standalone mode (no PC required) ---
         TextView orLabel = new TextView(this);
-        orLabel.setText("— or —");
+        orLabel.setText("- or -");
         orLabel.setTextColor(Color.parseColor("#71717a"));
         orLabel.setTextSize(15);
         orLabel.setPadding(0, dp(28), 0, dp(8));
-        setupPanel.addView(orLabel);
+        advancedPanel.addView(orLabel);
 
         TextView standaloneHint = new TextView(this);
         standaloneHint.setText("Standalone: run Norva entirely on this TV. Use this when you do not want an account on this device. Playback uses the TV native decoder.");
         standaloneHint.setTextColor(Color.parseColor("#a1a1aa"));
         standaloneHint.setTextSize(14);
         standaloneHint.setPadding(0, 0, 0, dp(12));
-        setupPanel.addView(standaloneHint, new LinearLayout.LayoutParams(dp(560), LinearLayout.LayoutParams.WRAP_CONTENT));
+        advancedPanel.addView(standaloneHint, new LinearLayout.LayoutParams(dp(560), LinearLayout.LayoutParams.WRAP_CONTENT));
 
         Button standaloneBtn = new Button(this);
         standaloneBtn.setText("Use standalone mode");
@@ -211,7 +232,7 @@ public class MainActivity extends Activity {
                 connectStandalone();
             }
         });
-        setupPanel.addView(standaloneBtn, new LinearLayout.LayoutParams(dp(320), LinearLayout.LayoutParams.WRAP_CONTENT));
+        advancedPanel.addView(standaloneBtn, new LinearLayout.LayoutParams(dp(320), LinearLayout.LayoutParams.WRAP_CONTENT));
 
         statusText = new TextView(this);
         statusText.setTextColor(Color.parseColor("#ef4444"));
@@ -322,13 +343,21 @@ public class MainActivity extends Activity {
         webView.setVisibility(View.GONE);
         setupPanel.setVisibility(View.VISIBLE);
         statusText.setText(error == null ? "" : error);
-        urlInput.requestFocus();
+        if (error != null && advancedPanel != null) {
+            advancedPanel.setVisibility(View.VISIBLE);
+        }
+        if (advancedPanel != null && advancedPanel.getVisibility() == View.VISIBLE) {
+            urlInput.requestFocus();
+        }
     }
 
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
         if (keyCode == KeyEvent.KEYCODE_MENU && webViewVisible) {
             showSetup(null);
+            if (advancedPanel != null) {
+                advancedPanel.setVisibility(View.VISIBLE);
+            }
             return true;
         }
         return super.onKeyDown(keyCode, event);

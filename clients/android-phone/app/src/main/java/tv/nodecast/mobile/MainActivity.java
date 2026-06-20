@@ -35,13 +35,14 @@ public class MainActivity extends Activity {
     private static final String PREFS          = "norva_mobile";
     private static final String PREF_SERVER_URL = "serverUrl";
     private static final String PREF_MODE       = "mode"; // "cloud" | "server"
-    private static final String CLOUD_ACCOUNT_URL = "https://norva-eight.vercel.app/account.html";
+    private static final String CLOUD_ACCOUNT_URL = "https://norva-eight.vercel.app/account.html?returnTo=%2F%3Fmobile%3D1%23home";
     private static final String CLOUD_WATCH_URL = "https://norva-eight.vercel.app/?mobile=1#home";
     private static final String UA_SUFFIX       = " NorvaTV-AndroidPhone/1.0";
 
     private FrameLayout  root;
     private WebView      webView;
     private LinearLayout setupPanel;
+    private LinearLayout advancedPanel;
     private EditText     urlInput;
     private TextView     statusText;
     private boolean      webViewVisible = false;
@@ -93,6 +94,9 @@ public class MainActivity extends Activity {
     public boolean onKeyDown(int keyCode, KeyEvent event) {
         if (keyCode == KeyEvent.KEYCODE_MENU && webViewVisible) {
             showSetup(null);
+            if (advancedPanel != null) {
+                advancedPanel.setVisibility(View.VISIBLE);
+            }
             return true;
         }
         return super.onKeyDown(keyCode, event);
@@ -207,13 +211,35 @@ public class MainActivity extends Activity {
         accountBtnLp.bottomMargin = dp(22);
         setupPanel.addView(accountBtn, accountBtnLp);
 
+        Button advancedToggle = new Button(this);
+        advancedToggle.setText("Advanced setup");
+        advancedToggle.setTextColor(Color.WHITE);
+        advancedToggle.setBackgroundColor(Color.parseColor("#272d3a"));
+        advancedToggle.setOnClickListener(v -> {
+            if (advancedPanel != null) {
+                advancedPanel.setVisibility(advancedPanel.getVisibility() == View.VISIBLE ? View.GONE : View.VISIBLE);
+            }
+        });
+        LinearLayout.LayoutParams advancedToggleLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        advancedToggleLp.bottomMargin = dp(14);
+        setupPanel.addView(advancedToggle, advancedToggleLp);
+
+        advancedPanel = new LinearLayout(this);
+        advancedPanel.setOrientation(LinearLayout.VERTICAL);
+        advancedPanel.setVisibility(View.GONE);
+        setupPanel.addView(advancedPanel, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT));
+
         // Hint
         TextView hint = new TextView(this);
         hint.setText("Advanced local connector");
         hint.setTextColor(Color.parseColor("#a1a1aa"));
         hint.setTextSize(15);
         hint.setPadding(0, 0, 0, dp(10));
-        setupPanel.addView(hint);
+        advancedPanel.addView(hint);
 
         // URL input — max width 300dp on phones
         urlInput = new EditText(this);
@@ -231,7 +257,7 @@ public class MainActivity extends Activity {
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT);
         inputLp.bottomMargin = dp(4);
-        setupPanel.addView(urlInput, inputLp);
+        advancedPanel.addView(urlInput, inputLp);
 
         // Connect button
         Button connectBtn = new Button(this);
@@ -254,7 +280,7 @@ public class MainActivity extends Activity {
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT);
         btnLp.topMargin = dp(16);
-        setupPanel.addView(connectBtn, btnLp);
+        advancedPanel.addView(connectBtn, btnLp);
 
         // Status / error text
         statusText = new TextView(this);
@@ -283,7 +309,12 @@ public class MainActivity extends Activity {
         webView.setVisibility(View.GONE);
         setupPanel.setVisibility(View.VISIBLE);
         statusText.setText(error == null ? "" : error);
-        urlInput.requestFocus();
+        if (error != null && advancedPanel != null) {
+            advancedPanel.setVisibility(View.VISIBLE);
+        }
+        if (advancedPanel != null && advancedPanel.getVisibility() == View.VISIBLE) {
+            urlInput.requestFocus();
+        }
     }
 
     // ---- Helpers ----

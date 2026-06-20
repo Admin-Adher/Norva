@@ -138,6 +138,40 @@ class SourceManager {
     /**
      * Render source list
      */
+    sourceStatusFor(source = {}) {
+        const sourceIds = [
+            source.id,
+            source.source_id,
+            source.sourceId,
+            source.cloudId,
+            source.cloud_id
+        ].filter(Boolean).map(value => String(value));
+        if (!sourceIds.length) return {};
+        const sourceIdSet = new Set(sourceIds);
+        return (this.sourceStatuses || []).find(status => {
+            const candidates = [
+                status.source_id,
+                status.sourceId,
+                status.id,
+                status.cloudId,
+                status.cloud_id
+            ].filter(Boolean).map(value => String(value));
+            return candidates.some(candidate => sourceIdSet.has(candidate));
+        }) || {};
+    }
+
+    sourceWithStatus(source = {}) {
+        const status = this.sourceStatusFor(source);
+        return {
+            ...source,
+            sync_status: source.sync_status || source.syncStatus || status.status || status.sync_status || '',
+            sync_error: source.sync_error || source.syncError || status.error || status.sync_error || '',
+            syncProgress: source.syncProgress || source.sync_progress || status.syncProgress || status.sync_progress || null,
+            sync_progress: source.sync_progress || source.syncProgress || status.sync_progress || status.syncProgress || null,
+            last_sync: source.last_sync || source.lastSync || status.last_sync || status.lastSyncedAt || null
+        };
+    }
+
     renderSourceList(container, sources, type) {
         const labels = {
             xtream: 'provider accounts',
@@ -152,11 +186,15 @@ class SourceManager {
         const icons = { xtream: Icons.live, m3u: Icons.guide, epg: Icons.series };
 
         container.innerHTML = sources.map(source => {
-            const health = window.NorvaSourceHealth?.classifySource(source, this.sourceStatuses || []) || {
+            const sourceView = this.sourceWithStatus(source);
+            const health = window.NorvaSourceHealth?.classifySource(sourceView, this.sourceStatuses || []) || {
                 state: source.enabled === false ? 'degraded' : 'ready',
                 label: source.enabled === false ? 'Disabled' : 'Ready',
                 message: ''
             };
+            const progressButton = health.state === 'syncing'
+                ? `<button class="btn btn-sm btn-secondary source-progress-btn" data-action="progress" title="View catalog import progress">Progress</button>`
+                : '';
             return `
       <div class="source-item ${source.enabled ? '' : 'disabled'} ${health.needsAttention ? 'needs-attention' : ''}" data-id="${this.escapeHtml(source.id)}">
         <span class="source-icon">${icons[type]}</span>
@@ -169,6 +207,7 @@ class SourceManager {
           ${health.message && health.state !== 'ready' ? `<div class="source-health-message">${this.escapeHtml(health.message)}</div>` : ''}
         </div>
         <div class="source-actions">
+          ${progressButton}
           <button class="btn btn-sm btn-secondary" data-action="refresh" title="Sync TV service">${Icons.refresh}</button>
           <button class="btn btn-sm btn-secondary btn-warning-outline" data-action="hard-refresh" title="Rebuild catalog from this service">${Icons.refresh}</button>
           <button class="btn btn-sm btn-secondary" data-action="test" title="Check service">${Icons.link}</button>
@@ -186,6 +225,7 @@ class SourceManager {
         container.querySelectorAll('.source-item').forEach(item => {
             const id = item.dataset.id;
 
+            item.querySelector('[data-action="progress"]')?.addEventListener('click', () => this.showCatalogPreparationById(id, type));
             item.querySelector('[data-action="refresh"]').addEventListener('click', () => this.refreshSource(id, type));
             item.querySelector('[data-action="hard-refresh"]').addEventListener('click', () => this.refreshSource(id, type, { hard: true }));
             item.querySelector('[data-action="test"]').addEventListener('click', () => this.testSource(id));
@@ -419,6 +459,16 @@ class SourceManager {
         if (advancedLogin) advancedLogin.open = true;
     }
 
+    async showCatalogPreparationById(id, type = 'xtream') {
+        try {
+            const source = await API.sources.getById(id);
+            this.showCatalogPreparation(this.sourceWithStatus(source || { id }), type);
+        } catch (err) {
+            console.warn('[SourceManager] Unable to reopen catalog preparation:', err);
+            this.showCatalogPreparation(this.sourceWithStatus({ id, name: 'TV service' }), type);
+        }
+    }
+
     parseXtreamLink(raw) {
         const value = String(raw || '').trim();
         if (!value) return null;
@@ -509,43 +559,178 @@ class SourceManager {
 
     catalogCountsFromSource(source = {}) {
         const config = source.configHint || source.config_hint || {};
+        const progress = this.syncProgressFromSource(source);
+        const progressCounts = progress.counts || {};
+        const progressCategories = progress.categories || {};
         const lastSync = source.lastSync || config.lastSync || source.last_sync_result || {};
-        const live = Number(lastSync.live ?? lastSync.channels ?? lastSync.liveChannels ?? lastSync.liveCatalog?.channels ?? 0) || 0;
-        const movies = Number(lastSync.movies ?? lastSync.vod ?? lastSync.vodMovies ?? 0) || 0;
-        const series = Number(lastSync.series ?? lastSync.tvSeries ?? 0) || 0;
+        const live = Number(progressCounts.live ?? lastSync.live ?? lastSync.channels ?? lastSync.liveChannels ?? lastSync.liveCatalog?.channels ?? 0) || 0;
+        const movies = Number(progressCounts.movies ?? lastSync.movies ?? lastSync.vod ?? lastSync.vodMovies ?? 0) || 0;
+        const series = Number(progressCounts.series ?? lastSync.series ?? lastSync.tvSeries ?? 0) || 0;
+        const lastSyncCategories =
+            (Number(lastSync.liveCategories) || 0) +
+            (Number(lastSync.movieCategories) || 0) +
+            (Number(lastSync.seriesCategories) || 0);
+        const categories = Number(progressCategories.total ?? lastSyncCategories) || 0;
         return {
             live,
             movies,
             series,
-            total: Number(lastSync.total ?? (live + movies + series)) || 0,
-            syncedAt: lastSync.syncedAt || source.last_sync || source.last_synced_at || null
+            categories,
+            total: Number(progressCounts.total ?? lastSync.total ?? (live + movies + series)) || 0,
+            syncedAt: lastSync.syncedAt || progress.updatedAt || source.last_sync || source.last_synced_at || null
         };
+    }
+
+    syncProgressFromSource(source = {}) {
+        const config = source.configHint || source.config_hint || {};
+        const progress = source.syncProgress || source.sync_progress || config.syncProgress || config.sync_progress || {};
+        if (!progress || typeof progress !== 'object' || Array.isArray(progress)) return {};
+        return this.monotonicSyncProgress(source, progress);
+    }
+
+    boundedProgressPercent(value) {
+        const numeric = Number(value);
+        if (!Number.isFinite(numeric)) return 0;
+        return Math.max(0, Math.min(100, numeric));
+    }
+
+    syncProgressCacheKey(source = {}, progress = {}) {
+        const sourceId = source.id || source.source_id || source.external_id || source.name || 'unknown';
+        const startedAt = progress.startedAt || progress.started_at || source.sync_started_at || source.created_at || '';
+        return `norva-sync-progress:${sourceId}:${startedAt}`;
+    }
+
+    monotonicSyncProgress(source = {}, progress = {}) {
+        const nextProgress = { ...progress };
+        const status = String(progress.status || progress.stage || source.sync_status || source.syncStatus || '').toLowerCase();
+        const terminal = new Set(['ready', 'success', 'complete', 'completed']);
+        const cacheKey = this.syncProgressCacheKey(source, progress);
+        const rawPercent = terminal.has(status) ? 100 : this.boundedProgressPercent(progress.percent);
+        let previousPercent = 0;
+        try {
+            previousPercent = this.boundedProgressPercent(window.localStorage?.getItem(cacheKey));
+        } catch (error) {
+            previousPercent = 0;
+        }
+        const visiblePercent = Math.max(previousPercent, rawPercent);
+        nextProgress.percent = visiblePercent;
+        try {
+            if (terminal.has(status)) {
+                window.localStorage?.removeItem(cacheKey);
+            } else {
+                window.localStorage?.setItem(cacheKey, String(visiblePercent));
+            }
+        } catch (error) {
+            // Progress rendering should never fail because local storage is unavailable.
+        }
+        return nextProgress;
     }
 
     sourceSyncState(source = {}) {
         const status = String(source.sync_status || source.syncStatus || '').toLowerCase();
+        const progress = this.syncProgressFromSource(source);
+        const progressStatus = String(progress.status || progress.stage || '').toLowerCase();
         const counts = this.catalogCountsFromSource(source);
         const failedStates = new Set(['error', 'failed', 'auth_failed', 'expired', 'unreachable', 'revoked']);
         const readyStates = new Set(['ready', 'success', 'complete', 'completed']);
+        const syncingStates = new Set(['syncing', 'checking', 'pending', 'connecting', 'discovering', 'discovered', 'importing', 'materializing', 'building_titles', 'building_live_channels', 'building_live_variants', 'finalizing']);
 
-        if (failedStates.has(status)) return { phase: 'error', counts };
-        if (readyStates.has(status) || counts.total > 0) return { phase: 'ready', counts };
-        return { phase: 'syncing', counts };
+        if (failedStates.has(status) || failedStates.has(progressStatus)) return { phase: 'error', counts, progress };
+        if (readyStates.has(status) || readyStates.has(progressStatus)) return { phase: 'ready', counts, progress };
+        if (syncingStates.has(status) || syncingStates.has(progressStatus)) return { phase: 'syncing', counts, progress };
+        if (counts.total > 0) return { phase: 'ready', counts, progress };
+        return { phase: 'syncing', counts, progress };
+    }
+
+    shouldRecoverCatalogFinalization(source = {}, options = {}) {
+        const { requireStale = true } = options || {};
+        const progress = this.syncProgressFromSource(source);
+        const stage = String(progress.stage || '').toLowerCase();
+        const status = String(progress.status || source.sync_status || source.syncStatus || '').toLowerCase();
+        const finalizingStages = new Set(['materializing', 'building_titles', 'building_live_channels', 'building_live_variants', 'finalizing']);
+        const importStep = progress.steps && typeof progress.steps === 'object' ? progress.steps.import : null;
+        const finalizeStep = progress.steps && typeof progress.steps === 'object' ? progress.steps.finalize : null;
+        const importDone = importStep && typeof importStep === 'object'
+            ? String(importStep.status || '').toLowerCase() === 'done'
+            : false;
+        const finalizeStatus = finalizeStep && typeof finalizeStep === 'object'
+            ? String(finalizeStep.status || '').toLowerCase()
+            : '';
+        const finalizing = finalizingStages.has(stage) || ['running', 'in_progress', 'pending'].includes(finalizeStatus);
+        const total = Number((progress.counts && progress.counts.total) || this.catalogCountsFromSource(source).total || 0) || 0;
+        const updatedAt = Date.parse(progress.updatedAt || source.updated_at || source.updatedAt || '');
+        const staleForMs = Number.isFinite(updatedAt) ? Date.now() - updatedAt : Number.POSITIVE_INFINITY;
+
+        return status === 'syncing' &&
+            finalizing &&
+            importDone &&
+            total > 0 &&
+            (!requireStale || staleForMs > 60_000);
     }
 
     formatCatalogCount(value, fallback = 'Scanning') {
         return value > 0 ? value.toLocaleString() : fallback;
     }
 
+    catalogMilestones(progress = {}, counts = {}) {
+        const steps = progress.steps && typeof progress.steps === 'object' ? progress.steps : {};
+        const step = (key, label, count, detail) => {
+            const entry = steps[key] && typeof steps[key] === 'object' ? steps[key] : {};
+            return {
+                key,
+                label,
+                status: String(entry.status || 'pending').toLowerCase(),
+                count: Number(entry.count ?? count ?? 0) || 0,
+                detail
+            };
+        };
+        return [
+            step('connect', 'Connecting to TV service', 0, 'Secure login check'),
+            step('channels', 'Channels found', counts.live, 'Live TV catalog'),
+            step('movies', 'Movies found', counts.movies, 'Films catalog'),
+            step('series', 'Series found', counts.series, 'Series catalog'),
+            step('categories', 'Categories', counts.categories, 'Navigation groups'),
+            step('import', 'Import catalog', counts.total, 'Saving items to Norva Cloud'),
+            step('finalize', 'Finalize Norva', 0, 'Preparing Home, Live TV and details')
+        ];
+    }
+
+    renderCatalogMilestone(step) {
+        const safeStatus = ['pending', 'running', 'done', 'error', 'skipped'].includes(step.status) ? step.status : 'pending';
+        const count = step.count > 0 ? `<strong>${this.escapeHtml(step.count.toLocaleString())}</strong>` : '';
+        const statusLabel = {
+            pending: 'Waiting',
+            running: 'In progress',
+            done: 'Done',
+            error: 'Needs attention',
+            skipped: 'Skipped'
+        }[safeStatus] || 'Waiting';
+        return `
+          <li class="source-sync-milestone source-sync-milestone-${this.escapeHtml(safeStatus)}">
+            <span class="source-sync-dot" aria-hidden="true"></span>
+            <span class="source-sync-copy">
+              <span class="source-sync-line">
+                <span>${this.escapeHtml(step.label)}</span>
+                ${count}
+              </span>
+              <small>${this.escapeHtml(step.detail)} - ${this.escapeHtml(statusLabel)}</small>
+            </span>
+          </li>
+        `;
+    }
+
     renderCatalogPreparation(source = {}, type = 'xtream') {
-        const { phase, counts } = this.sourceSyncState(source);
+        const { phase, counts, progress } = this.sourceSyncState(source);
         const sourceName = source.name || 'TV service';
+        const percent = Math.max(0, Math.min(100, Number(progress.percent ?? (phase === 'ready' ? 100 : 0)) || 0));
+        const determinate = percent > 0 || phase === 'ready';
         const statusText = {
-            syncing: 'Norva is importing your channels, movies and series. This can take a few minutes.',
+            syncing: 'Norva is connecting, counting your catalog and preparing it for Home, Live TV, Movies and Series.',
             ready: 'Your catalog is ready.',
             error: source.sync_error || source.syncError || 'Norva could not finish importing this service.'
         };
         const phaseLabel = phase === 'ready' ? 'Ready' : phase === 'error' ? 'Needs attention' : 'Importing';
+        const milestones = this.catalogMilestones(progress, counts).map(step => this.renderCatalogMilestone(step)).join('');
 
         return `
       <div class="source-sync-step source-sync-${this.escapeHtml(phase)}">
@@ -570,11 +755,22 @@ class SourceManager {
             <strong>${this.escapeHtml(this.formatCatalogCount(counts.series))}</strong>
             <small>series found</small>
           </div>
+          <div class="source-sync-card">
+            <span>Categories</span>
+            <strong>${this.escapeHtml(this.formatCatalogCount(counts.categories))}</strong>
+            <small>groups found</small>
+          </div>
         </div>
-        ${phase === 'syncing' ? `
-          <div class="source-sync-progress" aria-label="Catalog import in progress">
+        <div class="source-sync-progress-wrap">
+          <div class="source-sync-progress ${determinate ? 'is-determinate' : ''}" style="--source-sync-percent: ${this.escapeHtml(String(percent))}%;" aria-label="Catalog import progress">
             <span></span>
           </div>
+          ${determinate ? `<small>${this.escapeHtml(String(Math.round(percent)))}%</small>` : ''}
+        </div>
+        <ol class="source-sync-timeline">
+          ${milestones}
+        </ol>
+        ${phase === 'syncing' ? `
           <p class="hint">You can let this continue in the background. Norva will keep this service visible in Settings while it prepares the catalog.</p>
         ` : ''}
         ${phase === 'error' ? `
@@ -585,6 +781,63 @@ class SourceManager {
         ` : ''}
       </div>
     `;
+    }
+
+    async recoverCatalogFinalization(sourceId, token, render) {
+        if (!API.sources.finalize) return;
+        const initialBatchLimit = 500;
+        const minBatchLimit = 100;
+        const refreshAndRender = async () => {
+            if (this.catalogPreparationToken !== token) return null;
+            const latest = await API.sources.getById(sourceId).catch(() => null);
+            if (latest && this.catalogPreparationToken === token) render(this.sourceWithStatus(latest));
+            return latest;
+        };
+        const finalize = async (params) => {
+            let limit = Number(params.limit || initialBatchLimit) || initialBatchLimit;
+            for (;;) {
+                try {
+                    return await API.sources.finalize(sourceId, { ...params, limit });
+                } catch (error) {
+                    if (!this.isRecoverableFinalizeResourceError(error) || limit <= minBatchLimit) throw error;
+                    limit = Math.max(minBatchLimit, Math.floor(limit / 2));
+                }
+            }
+        };
+
+        let response = await finalize({ phase: 'live', limit: initialBatchLimit });
+        await refreshAndRender();
+
+        let phase = response?.nextPhase || 'titles';
+        let offset = Number(response?.nextOffset ?? 0) || 0;
+        let safety = 0;
+        while (this.catalogPreparationToken === token && phase && phase !== 'complete' && safety < 160) {
+            safety += 1;
+            response = await finalize({
+                phase,
+                offset,
+                limit: initialBatchLimit
+            });
+            await refreshAndRender();
+            const nextPhase = response?.nextPhase || 'complete';
+            const nextOffset = Number(response?.nextOffset ?? 0) || 0;
+            if (nextPhase === phase && nextOffset <= offset && !response?.done) break;
+            phase = nextPhase;
+            offset = nextOffset;
+        }
+
+        if (this.catalogPreparationToken !== token) return;
+        await API.sources.finalize(sourceId, { phase: 'complete' });
+        await refreshAndRender();
+    }
+
+    isRecoverableFinalizeResourceError(error) {
+        const message = String(error?.message || error || '').toLowerCase();
+        return message.includes('compute resources') ||
+            message.includes('resource') ||
+            message.includes('timeout') ||
+            message.includes('worker') ||
+            message.includes('memory');
     }
 
     async showCatalogPreparation(initialSource = {}, type = 'xtream') {
@@ -642,10 +895,20 @@ class SourceManager {
         if (!sourceId) return;
 
         let current = initialSource;
+        let recoveryStarted = false;
         for (let attempt = 0; attempt < 90; attempt += 1) {
             if (this.catalogPreparationToken !== token) return;
             const { phase } = this.sourceSyncState(current);
             if (phase === 'ready' || phase === 'error') return;
+
+            if (!recoveryStarted && this.shouldRecoverCatalogFinalization(current, { requireStale: false }) && API.sources.finalize) {
+                recoveryStarted = true;
+                this.recoverCatalogFinalization(sourceId, token, (source) => {
+                    current = source || current;
+                    render(current);
+                })
+                    .catch(err => console.warn('[SourceManager] Catalog finalization recovery failed:', err));
+            }
 
             await new Promise(resolve => setTimeout(resolve, 2000));
             if (this.catalogPreparationToken !== token) return;

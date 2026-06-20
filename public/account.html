@@ -312,7 +312,7 @@
     <script src="/js/authApi.js?v=2"></script>
     <script>
         const params = new URLSearchParams(location.search);
-        const returnTo = sanitizeReturnTo(params.get('returnTo')) || '/#home';
+      const returnTo = sanitizeReturnTo(params.get('returnTo')) || '/app#home';
         const statusEl = document.getElementById('status');
         const tabs = document.getElementById('tabs');
         const forms = {
@@ -460,7 +460,7 @@
                 const url = new URL(value, location.origin);
                 if (url.origin !== location.origin) return '';
                 const target = `${url.pathname}${url.search}${url.hash}`;
-                return url.pathname === '/cloud.html' ? '/#home' : target;
+        return url.pathname === '/cloud.html' ? '/app#home' : target;
             } catch (_) {
                 return '';
             }

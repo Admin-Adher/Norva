@@ -21,14 +21,30 @@ const XTREAM_REQUEST_TIMEOUT_MS = clampInt(process.env.XTREAM_REQUEST_TIMEOUT_MS
 const CODEC_PROBE_TIMEOUT_MS = clampInt(process.env.CODEC_PROBE_TIMEOUT_MS, 12_000, 1_000, 30_000);
 const CODEC_PROBE_ANALYZE_DURATION_US = clampInt(process.env.CODEC_PROBE_ANALYZE_DURATION_US, 2_000_000, 250_000, 20_000_000);
 const CODEC_PROBE_SIZE_BYTES = clampInt(process.env.CODEC_PROBE_SIZE_BYTES, 2_000_000, 64_000, 20_000_000);
+const LIVE_INPUT_ANALYZE_DURATION_US = clampInt(process.env.LIVE_INPUT_ANALYZE_DURATION_US, 1_500_000, 250_000, 10_000_000);
+const LIVE_INPUT_PROBE_SIZE_BYTES = clampInt(process.env.LIVE_INPUT_PROBE_SIZE_BYTES, 2_000_000, 64_000, 10_000_000);
+const VOD_INPUT_ANALYZE_DURATION_US = clampInt(process.env.VOD_INPUT_ANALYZE_DURATION_US, 8_000_000, 250_000, 30_000_000);
+const VOD_INPUT_PROBE_SIZE_BYTES = clampInt(process.env.VOD_INPUT_PROBE_SIZE_BYTES, 8_000_000, 64_000, 30_000_000);
 const MAX_SUBTITLE_TRACKS = clampInt(process.env.MAX_SUBTITLE_TRACKS, 32, 1, 64);
-const PROVIDER_SLOT_RELEASE_DELAY_MS = clampInt(process.env.PROVIDER_SLOT_RELEASE_DELAY_MS, 1_500, 0, 10_000);
+const PROVIDER_SLOT_RELEASE_DELAY_MS = clampInt(process.env.PROVIDER_SLOT_RELEASE_DELAY_MS, 8_000, 0, 15_000);
 const STOP_CONFLICTING_SOURCE_SESSIONS = (process.env.STOP_CONFLICTING_SOURCE_SESSIONS || 'true') !== 'false';
 const STOP_CONFLICTING_OWNER_SESSIONS = (process.env.STOP_CONFLICTING_OWNER_SESSIONS || 'true') !== 'false';
 const FFMPEG_USER_AGENT = process.env.FFMPEG_USER_AGENT ||
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36 Norva/1.0';
 const MAX_LOG_TAIL = 12000;
-const GATEWAY_VERSION = 32;
+const GATEWAY_VERSION = 35;
+// Browser playback fetches HLS playlists/segments cross-origin, so these must
+// list every Norva web origin or the browser blocks the response (CORS). Keep
+// in sync with the relay's ALLOWED_ORIGINS (services/norva-relay/wrangler.jsonc).
+const DEFAULT_ALLOWED_ORIGINS = [
+    'https://norva.tv',
+    'https://app.norva.tv',
+    'https://norva-web.pages.dev',
+    'https://norva-eight.vercel.app',
+    'https://norva-pgkk.vercel.app',
+    'http://localhost:3000',
+    'http://localhost:5173',
+].join(',');
 // Fallback audio path: plain AAC-LC stereo @48k. Source HE-AAC / unusual sample
 // rates can make hls.js label the track mp4a.40.5 (HE-AAC), and Chrome's MSE
 // may reject the append. Copy audio only when the codec hint is browser-safe.
@@ -331,6 +347,7 @@ function startFfmpeg(session) {
     const segmentPattern = path.join(session.outputDir, 'segment-%05d.ts');
     const audioArgs = audioArgsForSession(session);
     const audioMap = audioMapForSession(session);
+    const inputProbeArgs = inputProbeArgsForSession(session);
     const args = [
         '-hide_banner',
         '-loglevel', 'warning',
@@ -343,9 +360,10 @@ function startFfmpeg(session) {
         '-rw_timeout', '15000000',
         '-user_agent', session.userAgent || FFMPEG_USER_AGENT,
         '-headers', 'Accept: */*\r\nConnection: keep-alive\r\n',
+        '-fflags', '+genpts',
+        ...inputProbeArgs,
         ...(session.seekOffset > 0 ? ['-ss', String(session.seekOffset)] : []),
         '-i', session.sourceUrl,
-        '-fflags', '+genpts',
         '-map', '0:v:0?',
         '-map', audioMap,
         '-max_muxing_queue_size', '1024'
@@ -357,7 +375,6 @@ function startFfmpeg(session) {
             '-preset', 'ultrafast',
             '-tune', 'zerolatency',
             '-profile:v', 'high',
-            '-level', '4.1',
             '-pix_fmt', 'yuv420p',
             '-crf', '23',
             '-g', '48',
@@ -372,6 +389,7 @@ function startFfmpeg(session) {
     }
 
     args.push(
+        '-fps_mode', 'passthrough',
         '-f', 'hls',
         '-hls_time', '4',
         '-hls_list_size', '0',
@@ -426,6 +444,26 @@ function startFfmpeg(session) {
         });
 
     return child;
+}
+
+function inputProbeArgsForSession(session) {
+    const live = isLiveSession(session);
+    return [
+        '-analyzeduration', String(live ? LIVE_INPUT_ANALYZE_DURATION_US : VOD_INPUT_ANALYZE_DURATION_US),
+        '-probesize', String(live ? LIVE_INPUT_PROBE_SIZE_BYTES : VOD_INPUT_PROBE_SIZE_BYTES)
+    ];
+}
+
+function isLiveSession(session) {
+    const hint = asRecord(session.playbackHint);
+    const type = String(hint.streamType || hint.stream_type || hint.itemType || hint.item_type || '').toLowerCase();
+    if (type === 'live' || type === 'channel') return true;
+    try {
+        const extension = path.extname(new URL(session.sourceUrl).pathname).replace(/^\./, '').toLowerCase();
+        return extension === 'ts' || extension === 'm3u8';
+    } catch (_) {
+        return false;
+    }
 }
 
 function audioArgsForSession(session) {
@@ -929,7 +967,7 @@ function requirePlaybackToken(req, res, next) {
 }
 
 function cors(req, res, next) {
-    const allowed = (process.env.ALLOWED_ORIGINS || 'https://norva-eight.vercel.app,https://norva-pgkk.vercel.app')
+    const allowed = (process.env.ALLOWED_ORIGINS || DEFAULT_ALLOWED_ORIGINS)
         .split(',')
         .map((item) => item.trim())
         .filter(Boolean);

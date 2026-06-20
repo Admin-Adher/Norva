@@ -28,7 +28,7 @@ Included:
   exposes compatible tracks
 
 The cloud mode opens the canonical Norva Web app at
-`https://norva-eight.vercel.app`, so account, catalog pagination, Relay/Gateway
+`https://norva.tv/app.html`, so account, catalog pagination, Relay/Gateway
 playback sessions and UI improvements are inherited automatically.
 
 The standalone APK build copies the root `public/` web app into

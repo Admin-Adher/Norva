@@ -1,6 +1,13 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
-import { refreshMaterializedLiveCatalog } from "../_shared/live-materialization.ts";
+import {
+  buildLiveMaterializationPlan,
+  clearLiveMaterialization,
+  fetchLiveChannelIdMap,
+  refreshMaterializedLiveCatalog,
+  upsertLiveChannelRows,
+  upsertLiveVariantRows,
+} from "../_shared/live-materialization.ts";
 import { refreshVodTitleProjection } from "../_shared/vod-title-projection.ts";
 import type { LiveCatalogItem } from "../_shared/live-catalog.ts";
 import { getEntitlementDecision, getEntitlementRuntime, limitNumber } from "../_shared/entitlements.ts";
@@ -130,7 +137,7 @@ async function route(
       body: {
         ok: true,
         service: "norva-cloud",
-        version: 17,
+        version: 19,
         entitlements: true,
         entitlementsMode: entitlementRuntime.mode,
         entitlementsEnforced: entitlementRuntime.enforced,
@@ -235,6 +242,18 @@ async function route(
     if (req.method === "POST" && id && action === "sync") {
       await requireCloudAccess(user.id, db, "source_sync");
       return { body: await syncExistingSource(id, user.id, db) };
+    }
+    if (req.method === "POST" && id && action === "finalize") {
+      await requireCloudAccess(user.id, db, "source_sync");
+      const body = await readJson(req);
+      return {
+        body: await finalizeCloudSource(id, user.id, db, {
+          country: stringOrNull(body.country ?? url.searchParams.get("country")),
+          phase: stringOr(body.phase ?? url.searchParams.get("phase"), "live"),
+          offset: boundedInt(body.offset ?? url.searchParams.get("offset"), 0, 0, 1_000_000),
+          limit: boundedInt(body.limit ?? url.searchParams.get("limit"), 1000, 1, 2000),
+        }),
+      };
     }
     if ((req.method === "PATCH" || req.method === "PUT") && id) {
       return { body: await updateSource(req, id, user.id, db) };
@@ -728,7 +747,125 @@ function buildSourceHint(sourceType: string, config: JsonRecord, validation: Jso
   return {};
 }
 
+type SyncProgressReporter = (progress: JsonRecord) => Promise<void>;
+
+function syncProgressSteps(status: "pending" | "running" | "done" | "error" | "skipped" = "pending") {
+  return {
+    connect: { status },
+    channels: { status },
+    movies: { status },
+    series: { status },
+    categories: { status },
+    import: { status },
+    finalize: { status },
+  };
+}
+
+function mergeSyncProgress(current: JsonRecord, patch: JsonRecord) {
+  const merged = compactRecord({
+    ...current,
+    ...patch,
+    steps: {
+      ...recordOrEmpty(current.steps),
+      ...recordOrEmpty(patch.steps),
+    },
+    counts: {
+      ...recordOrEmpty(current.counts),
+      ...recordOrEmpty(patch.counts),
+    },
+    categories: {
+      ...recordOrEmpty(current.categories),
+      ...recordOrEmpty(patch.categories),
+    },
+  });
+  if ("percent" in current || "percent" in patch) {
+    merged.percent = Math.max(
+      boundedProgressPercent(current.percent),
+      boundedProgressPercent(patch.percent),
+    );
+  }
+  return merged;
+}
+
+function boundedProgressPercent(value: unknown) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 0;
+  return Math.max(0, Math.min(100, numeric));
+}
+
+function catalogCountsFromSyncResult(result: JsonRecord) {
+  const live = Number(result.live ?? result.channels ?? 0) || 0;
+  const movies = Number(result.movies ?? result.vod ?? 0) || 0;
+  const series = Number(result.series ?? 0) || 0;
+  const liveCategories = Number(result.liveCategories ?? 0) || 0;
+  const movieCategories = Number(result.movieCategories ?? 0) || 0;
+  const seriesCategories = Number(result.seriesCategories ?? 0) || 0;
+  return {
+    live,
+    movies,
+    series,
+    total: Number(result.total ?? (live + movies + series)) || 0,
+    categories: {
+      live: liveCategories,
+      movies: movieCategories,
+      series: seriesCategories,
+      total: liveCategories + movieCategories + seriesCategories,
+    },
+  };
+}
+
+function completedSyncProgress(result: JsonRecord, startedAt: string, syncedAt: string) {
+  const counts = catalogCountsFromSyncResult(result);
+  return compactRecord({
+    status: "ready",
+    stage: "ready",
+    percent: 100,
+    startedAt,
+    updatedAt: syncedAt,
+    counts: {
+      live: counts.live,
+      movies: counts.movies,
+      series: counts.series,
+      total: counts.total,
+    },
+    categories: counts.categories,
+    steps: {
+      connect: { status: "done" },
+      channels: { status: "done", count: counts.live },
+      movies: { status: "done", count: counts.movies },
+      series: { status: "done", count: counts.series },
+      categories: { status: "done", count: counts.categories.total },
+      import: { status: "done", count: counts.total },
+      finalize: { status: "done" },
+    },
+  });
+}
+
+async function writeSourceSyncProgress(
+  db: SupabaseClient,
+  sourceId: string,
+  userId: string,
+  baseHint: JsonRecord,
+  progress: JsonRecord,
+) {
+  const { error } = await db
+    .from("cloud_sources")
+    .update({
+      config_hint: compactRecord({
+        ...baseHint,
+        syncProgress: progress,
+      }),
+    })
+    .eq("id", sourceId)
+    .eq("user_id", userId);
+  if (error) console.warn("[norva-cloud] Unable to update source sync progress", error.message);
+}
+
 async function syncCloudSource(sourceId: string, userId: string, db: SupabaseClient) {
+  let baseHint: JsonRecord = {};
+  let progress: JsonRecord = {};
+  let reportProgress: SyncProgressReporter = async () => {};
+
   try {
     const { data: source, error } = await db
       .from("cloud_sources")
@@ -742,31 +879,60 @@ async function syncCloudSource(sourceId: string, userId: string, db: SupabaseCli
 
     const config = await decryptSourceConfig(source.config_ciphertext, await getRuntimeConfig(db));
     const startedAt = new Date().toISOString();
+    baseHint = recordOrEmpty(source.config_hint);
+    progress = compactRecord({
+      status: "syncing",
+      stage: "connecting",
+      percent: 4,
+      startedAt,
+      updatedAt: startedAt,
+      counts: { live: 0, movies: 0, series: 0, total: 0 },
+      categories: { live: 0, movies: 0, series: 0, total: 0 },
+      steps: {
+        ...syncProgressSteps("pending"),
+        connect: { status: "running" },
+      },
+    });
+    reportProgress = async (patch: JsonRecord) => {
+      progress = mergeSyncProgress(progress, compactRecord({ ...patch, status: "syncing", updatedAt: new Date().toISOString() }));
+      await writeSourceSyncProgress(db, sourceId, userId, baseHint, progress);
+    };
+
     await db
       .from("cloud_sources")
-      .update({ sync_status: "syncing", sync_error: null, last_synced_at: startedAt })
+      .update({
+        sync_status: "syncing",
+        sync_error: null,
+        last_synced_at: startedAt,
+        config_hint: compactRecord({
+          ...baseHint,
+          syncProgress: progress,
+        }),
+      })
       .eq("id", sourceId)
       .eq("user_id", userId);
 
     const result = source.source_type === "xtream"
-      ? await syncXtreamSource(sourceId, userId, config, db)
+      ? await syncXtreamSource(sourceId, userId, config, db, reportProgress)
       : source.source_type === "m3u"
-        ? await syncM3uSource(sourceId, userId, config, db)
+        ? await syncM3uSource(sourceId, userId, config, db, reportProgress)
         : { total: 0 };
 
     if ((source.source_type === "xtream" || source.source_type === "m3u") && Number(result.total ?? 0) <= 0) {
       throw new HttpError(422, "No playable catalog items were imported from this source");
     }
 
+    const syncedAt = new Date().toISOString();
     await db
       .from("cloud_sources")
       .update({
         sync_status: "ready",
         sync_error: null,
-        last_synced_at: new Date().toISOString(),
+        last_synced_at: syncedAt,
         config_hint: compactRecord({
-          ...recordOrEmpty(source.config_hint),
-          lastSync: { ...result, syncedAt: new Date().toISOString() },
+          ...baseHint,
+          lastSync: { ...result, syncedAt },
+          syncProgress: completedSyncProgress(result, startedAt, syncedAt),
         }),
       })
       .eq("id", sourceId)
@@ -774,18 +940,501 @@ async function syncCloudSource(sourceId: string, userId: string, db: SupabaseCli
   } catch (error) {
     const message = error instanceof Error ? error.message : "Source sync failed";
     console.error("[norva-cloud] source sync failed", sourceId, message);
+    const failedAt = new Date().toISOString();
     await db
       .from("cloud_sources")
-      .update({ sync_status: "error", sync_error: message, last_synced_at: new Date().toISOString() })
+      .update({
+        sync_status: "error",
+        sync_error: message,
+        last_synced_at: failedAt,
+        config_hint: compactRecord({
+          ...baseHint,
+          syncProgress: mergeSyncProgress(progress, {
+            status: "error",
+            stage: "error",
+            percent: Number(progress.percent ?? 0) || 0,
+            updatedAt: failedAt,
+            error: message,
+          }),
+        }),
+      })
       .eq("id", sourceId)
       .eq("user_id", userId);
   }
 }
 
-async function syncXtreamSource(sourceId: string, userId: string, config: JsonRecord, db: SupabaseClient) {
+type FinalizeCloudSourceOptions = {
+  country: string | null;
+  phase: string;
+  offset: number;
+  limit: number;
+};
+
+async function finalizeCloudSource(sourceId: string, userId: string, db: SupabaseClient, options: FinalizeCloudSourceOptions) {
+  const { data: source, error } = await db
+    .from("cloud_sources")
+    .select("*")
+    .eq("id", sourceId)
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (error) throwDb(error, "Unable to load source");
+  if (!source) throw new HttpError(404, "Source not found");
+
+  const baseHint = recordOrEmpty(source.config_hint);
+  const existingProgress = recordOrEmpty(baseHint.syncProgress);
+  const startedAt = stringOr(existingProgress.startedAt ?? source.last_synced_at, new Date().toISOString());
+  const phase = normalizeFinalizePhase(options.phase);
+  const batchLimit = Math.max(1, Math.min(2000, options.limit || 1000));
+  const batchOffset = Math.max(0, options.offset || 0);
+  const counts = await countSourceItems(sourceId, userId, db, existingProgress);
+  let progress: JsonRecord = compactRecord({
+    ...existingProgress,
+    status: "syncing",
+    stage: finalizePhaseStage(phase),
+    percent: Math.max(74, Number(existingProgress.percent ?? 0) || 0),
+    startedAt,
+    updatedAt: new Date().toISOString(),
+  });
+  const reportProgress: SyncProgressReporter = async (patch: JsonRecord) => {
+    progress = mergeSyncProgress(progress, compactRecord({ ...patch, status: "syncing", updatedAt: new Date().toISOString() }));
+    await writeSourceSyncProgress(db, sourceId, userId, baseHint, progress);
+  };
+
+  await db
+    .from("cloud_sources")
+    .update({ sync_status: "syncing", sync_error: null })
+    .eq("id", sourceId)
+    .eq("user_id", userId);
+
+  try {
+    if (counts.total <= 0) throw new HttpError(422, "No imported catalog items were found for this source");
+    await reportProgress({
+      stage: finalizePhaseStage(phase),
+      percent: finalizePhasePercent(phase, batchOffset, counts),
+      counts: {
+        live: counts.live,
+        movies: counts.movies,
+        series: counts.series,
+        total: counts.total,
+      },
+      categories: counts.categories,
+      steps: {
+        connect: { status: "done" },
+        channels: { status: "done", count: counts.live },
+        movies: { status: "done", count: counts.movies },
+        series: { status: "done", count: counts.series },
+        categories: { status: "done", count: counts.categories.total },
+        import: { status: "done", count: counts.total },
+        finalize: { status: "running" },
+      },
+    });
+
+    const config = source.config_ciphertext
+      ? await decryptSourceConfig(String(source.config_ciphertext), await getRuntimeConfig(db)).catch(() => ({}))
+      : {};
+
+    const result = {
+      live: counts.live,
+      movies: counts.movies,
+      series: counts.series,
+      liveCategories: counts.categories.live,
+      movieCategories: counts.categories.movies,
+      seriesCategories: counts.categories.series,
+      total: counts.total,
+      recoveredFromImportedItems: true,
+    };
+
+    if (phase === "live") {
+      const existingLiveCatalog = await existingLiveMaterializationCounts(sourceId, userId, db);
+      const totalVod = counts.movies + counts.series;
+      if (counts.live <= 0) {
+        return {
+          sourceId,
+          status: "syncing",
+          phase: "live",
+          nextPhase: totalVod > 0 ? "titles" : "complete",
+          nextOffset: 0,
+          limit: batchLimit,
+          totalVod,
+          ...result,
+          liveCatalog: { rawLive: 0, logicalChannels: 0, liveVariants: 0, skipped: true },
+        };
+      }
+
+      const liveCatalogComplete = existingLiveCatalog.logicalChannels > 0 && existingLiveCatalog.liveVariants > 0;
+      if (liveCatalogComplete) {
+        await reportProgress({
+          stage: "building_titles",
+          percent: 86,
+          steps: { finalize: { status: "running" } },
+        });
+        return {
+          sourceId,
+          status: "syncing",
+          phase: "live",
+          nextPhase: totalVod > 0 ? "titles" : "complete",
+          nextOffset: 0,
+          limit: batchLimit,
+          totalVod,
+          ...result,
+          liveCatalog: { ...existingLiveCatalog, rawLive: counts.live, reused: true },
+        };
+      }
+
+      await reportProgress({
+        stage: "building_live_channels",
+        percent: 76,
+        steps: { finalize: { status: "running" } },
+      });
+      await clearLiveMaterialization(db, sourceId, userId);
+      const livePlan = buildLiveMaterializationPlan({
+        sourceId,
+        userId,
+        rows: await loadSourceItems(sourceId, userId, db, { itemTypes: ["live"] }),
+        country: options.country || stringOr(config.country, "FR"),
+      });
+      await reportProgress({
+        stage: "building_live_channels",
+        percent: 76,
+        steps: { finalize: { status: "running" } },
+      });
+      return {
+        sourceId,
+        status: "syncing",
+        phase: "live",
+        nextPhase: livePlan.channelRows.length > 0 ? "live_channels" : "titles",
+        nextOffset: 0,
+        limit: batchLimit,
+        totalLiveChannels: livePlan.channelRows.length,
+        totalLiveVariants: livePlan.variantRows.length,
+        totalVod,
+        ...result,
+        liveCatalog: {
+          rawLive: livePlan.rawLive,
+          logicalChannels: livePlan.channelRows.length,
+          liveVariants: livePlan.variantRows.length,
+          reset: true,
+        },
+      };
+    }
+
+    if (phase === "live_channels") {
+      const livePlan = buildLiveMaterializationPlan({
+        sourceId,
+        userId,
+        rows: await loadSourceItems(sourceId, userId, db, { itemTypes: ["live"] }),
+        country: options.country || stringOr(config.country, "FR"),
+      });
+      const insertedChannels = await upsertLiveChannelRows(db, livePlan.channelRows, batchOffset, batchLimit);
+      const nextOffset = Math.min(livePlan.channelRows.length, batchOffset + insertedChannels.length);
+      const done = insertedChannels.length < batchLimit || nextOffset >= livePlan.channelRows.length;
+      await reportProgress({
+        stage: done ? "building_live_variants" : "building_live_channels",
+        percent: done ? 80 : liveFinalizePercent("live_channels", nextOffset, livePlan.channelRows.length),
+        steps: { finalize: { status: "running" } },
+      });
+      return {
+        sourceId,
+        status: "syncing",
+        phase: "live_channels",
+        nextPhase: done ? "live_variants" : "live_channels",
+        nextOffset: done ? 0 : nextOffset,
+        limit: batchLimit,
+        totalLiveChannels: livePlan.channelRows.length,
+        totalLiveVariants: livePlan.variantRows.length,
+        totalVod: counts.movies + counts.series,
+        done,
+        ...result,
+        liveCatalog: {
+          rawLive: livePlan.rawLive,
+          logicalChannels: nextOffset,
+          liveVariants: 0,
+        },
+      };
+    }
+
+    if (phase === "live_variants") {
+      const livePlan = buildLiveMaterializationPlan({
+        sourceId,
+        userId,
+        rows: await loadSourceItems(sourceId, userId, db, { itemTypes: ["live"] }),
+        country: options.country || stringOr(config.country, "FR"),
+      });
+      const channelIdByLogicalId = await fetchLiveChannelIdMap(db, sourceId, userId);
+      const insertedVariants = await upsertLiveVariantRows(db, livePlan.variantRows, channelIdByLogicalId, batchOffset, batchLimit);
+      const nextOffset = Math.min(livePlan.variantRows.length, batchOffset + insertedVariants);
+      const done = insertedVariants < batchLimit || nextOffset >= livePlan.variantRows.length;
+      await reportProgress({
+        stage: done ? "building_titles" : "building_live_variants",
+        percent: done ? 86 : liveFinalizePercent("live_variants", nextOffset, livePlan.variantRows.length),
+        steps: { finalize: { status: "running" } },
+      });
+      const totalVod = counts.movies + counts.series;
+      return {
+        sourceId,
+        status: "syncing",
+        phase: "live_variants",
+        nextPhase: totalVod > 0 ? "titles" : "complete",
+        nextOffset: done ? 0 : nextOffset,
+        limit: batchLimit,
+        totalVod,
+        totalLiveChannels: livePlan.channelRows.length,
+        totalLiveVariants: livePlan.variantRows.length,
+        done,
+        ...result,
+        liveCatalog: {
+          rawLive: livePlan.rawLive,
+          logicalChannels: livePlan.channelRows.length,
+          liveVariants: nextOffset,
+        },
+      };
+    }
+
+    if (phase === "titles") {
+      const totalVod = counts.movies + counts.series;
+      const rows = await loadSourceItems(sourceId, userId, db, {
+        itemTypes: ["movie", "series"],
+        offset: batchOffset,
+        limit: batchLimit,
+      });
+      const sourceType = stringOr(source.source_type, "");
+      const titleProjection = await refreshVodTitleProjection({
+        sourceId,
+        userId,
+        rows,
+        db,
+        xtreamConfig: sourceType === "xtream" && config.serverUrl && config.username && config.password
+          ? {
+            serverUrl: normalizeBaseUrl(stringOr(config.serverUrl, "")),
+            username: stringOr(config.username, ""),
+            password: stringOr(config.password, ""),
+          }
+          : null,
+        vodInfoLimit: boundedInt(Deno.env.get("NORVA_VOD_INFO_FINALIZE_LIMIT"), 0, 0, 1000),
+        tmdbValidateLimit: boundedInt(Deno.env.get("NORVA_TMDB_VALIDATE_FINALIZE_LIMIT"), 40, 0, 1000),
+      });
+      const nextOffset = Math.min(totalVod, batchOffset + rows.length);
+      const done = rows.length < batchLimit || nextOffset >= totalVod;
+      await reportProgress({
+        stage: done ? "finalizing" : "building_titles",
+        percent: done ? 96 : titleFinalizePercent(nextOffset, totalVod),
+        steps: { finalize: { status: "running" } },
+      });
+      return {
+        sourceId,
+        status: "syncing",
+        phase: "titles",
+        nextPhase: done ? "complete" : "titles",
+        nextOffset,
+        limit: batchLimit,
+        totalVod,
+        done,
+        ...result,
+        titleProjection,
+      };
+    }
+
+    if (phase !== "complete") throw new HttpError(400, "Invalid catalog finalization phase");
+
+    const syncedAt = new Date().toISOString();
+    const { error: updateError } = await db
+      .from("cloud_sources")
+      .update({
+        sync_status: "ready",
+        sync_error: null,
+        last_synced_at: syncedAt,
+        config_hint: compactRecord({
+          ...baseHint,
+          lastSync: { ...result, syncedAt },
+          syncProgress: completedSyncProgress(result, startedAt, syncedAt),
+        }),
+      })
+      .eq("id", sourceId)
+      .eq("user_id", userId);
+    if (updateError) throwDb(updateError, "Unable to update source sync status");
+
+    return { sourceId, status: "ready", ...result };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Source finalization failed";
+    const failedAt = new Date().toISOString();
+    await db
+      .from("cloud_sources")
+      .update({
+        sync_status: "error",
+        sync_error: message,
+        last_synced_at: failedAt,
+        config_hint: compactRecord({
+          ...baseHint,
+          syncProgress: mergeSyncProgress(progress, {
+            status: "error",
+            stage: "error",
+            percent: Number(progress.percent ?? 0) || 0,
+            updatedAt: failedAt,
+            error: message,
+          }),
+        }),
+      })
+      .eq("id", sourceId)
+      .eq("user_id", userId);
+    throw error;
+  }
+}
+
+function normalizeFinalizePhase(value: string) {
+  const phase = String(value || "").trim().toLowerCase();
+  if (
+    phase === "live" ||
+    phase === "live_channels" ||
+    phase === "live_variants" ||
+    phase === "titles" ||
+    phase === "complete"
+  ) return phase;
+  return "live";
+}
+
+function finalizePhaseStage(phase: string) {
+  if (phase === "live_channels") return "building_live_channels";
+  if (phase === "live_variants") return "building_live_variants";
+  if (phase === "titles") return "building_titles";
+  if (phase === "complete") return "finalizing";
+  return "materializing";
+}
+
+function finalizePhasePercent(phase: string, offset: number, counts: { live: number; movies: number; series: number }) {
+  if (phase === "live_channels") return liveFinalizePercent("live_channels", offset, counts.live);
+  if (phase === "live_variants") return liveFinalizePercent("live_variants", offset, counts.live);
+  if (phase === "titles") return titleFinalizePercent(offset, counts.movies + counts.series);
+  if (phase === "complete") return 96;
+  return 74;
+}
+
+function liveFinalizePercent(phase: string, offset: number, total: number) {
+  const ratio = total ? Math.max(0, Math.min(1, offset / total)) : 1;
+  if (phase === "live_channels") return Math.max(76, Math.min(80, Math.round(76 + ratio * 4)));
+  return Math.max(80, Math.min(86, Math.round(80 + ratio * 6)));
+}
+
+function titleFinalizePercent(offset: number, totalVod: number) {
+  if (!totalVod) return 96;
+  const ratio = Math.max(0, Math.min(1, offset / totalVod));
+  return Math.max(86, Math.min(95, Math.round(86 + ratio * 9)));
+}
+
+async function countRowsByType(sourceId: string, userId: string, db: SupabaseClient, itemType: string) {
+  const { count, error } = await db
+    .from("cloud_media_items")
+    .select("id", { count: "exact", head: true })
+    .eq("source_id", sourceId)
+    .eq("user_id", userId)
+    .eq("item_type", itemType);
+  if (error) throwDb(error, `Unable to count ${itemType} catalog items`);
+  return count ?? 0;
+}
+
+async function countRowsInTable(table: string, sourceId: string, userId: string, db: SupabaseClient) {
+  const { count, error } = await db
+    .from(table)
+    .select("id", { count: "exact", head: true })
+    .eq("source_id", sourceId)
+    .eq("user_id", userId);
+  if (error) throwDb(error, `Unable to count ${table}`);
+  return count ?? 0;
+}
+
+async function existingLiveMaterializationCounts(sourceId: string, userId: string, db: SupabaseClient) {
+  const [logicalChannels, liveVariants] = await Promise.all([
+    countRowsInTable("cloud_live_logical_channels", sourceId, userId, db),
+    countRowsInTable("cloud_live_variants", sourceId, userId, db),
+  ]);
+  return { logicalChannels, liveVariants };
+}
+
+async function countSourceItems(sourceId: string, userId: string, db: SupabaseClient, progress: JsonRecord = {}) {
+  const [live, movies, series] = await Promise.all([
+    countRowsByType(sourceId, userId, db, "live"),
+    countRowsByType(sourceId, userId, db, "movie"),
+    countRowsByType(sourceId, userId, db, "series"),
+  ]);
+  const categories = recordOrEmpty(progress.categories);
+  return {
+    live,
+    movies,
+    series,
+    total: live + movies + series,
+    categories: {
+      live: Number(categories.live ?? 0) || 0,
+      movies: Number(categories.movies ?? 0) || 0,
+      series: Number(categories.series ?? 0) || 0,
+      total: Number(categories.total ?? 0) || 0,
+    },
+  };
+}
+
+type LoadSourceItemsOptions = {
+  itemTypes?: string[];
+  offset?: number;
+  limit?: number;
+};
+
+async function loadSourceItems(
+  sourceId: string,
+  userId: string,
+  db: SupabaseClient,
+  options: LoadSourceItemsOptions = {},
+): Promise<LiveCatalogItem[]> {
+  const rows: LiveCatalogItem[] = [];
+  const pageSize = options.limit ? Math.max(1, Math.min(2000, options.limit)) : 1000;
+  const startOffset = Math.max(0, options.offset ?? 0);
+  const maxRows = options.limit ? pageSize : Number.POSITIVE_INFINITY;
+  for (let offset = startOffset; rows.length < maxRows; offset += pageSize) {
+    let query = db
+      .from("cloud_media_items")
+      .select("id,source_id,item_type,external_id,parent_external_id,title,subtitle,poster_url,metadata,playback_hint,available")
+      .eq("source_id", sourceId)
+      .eq("user_id", userId)
+      .order("item_type", { ascending: true })
+      .order("external_id", { ascending: true });
+    const itemTypes = (options.itemTypes || []).filter(Boolean);
+    if (itemTypes.length === 1) query = query.eq("item_type", itemTypes[0]);
+    else if (itemTypes.length > 1) query = query.in("item_type", itemTypes);
+
+    const { data, error } = await query.range(offset, offset + pageSize - 1);
+    if (error) throwDb(error, "Unable to load imported catalog items");
+    if (!Array.isArray(data) || !data.length) break;
+    rows.push(...(data as LiveCatalogItem[]));
+    if (data.length < pageSize) break;
+    if (options.limit) break;
+  }
+  return Number.isFinite(maxRows) ? rows.slice(0, maxRows) : rows;
+}
+
+async function syncXtreamSource(
+  sourceId: string,
+  userId: string,
+  config: JsonRecord,
+  db: SupabaseClient,
+  reportProgress: SyncProgressReporter = async () => {},
+) {
   const serverUrl = normalizeBaseUrl(stringOr(config.serverUrl, ""));
   const username = stringOr(config.username, "");
   const password = stringOr(config.password, "");
+  await reportProgress({
+    stage: "connecting",
+    percent: 10,
+    steps: { connect: { status: "running" } },
+  });
+  if (!username || !password) throw new HttpError(400, "Xtream credentials are incomplete");
+  await reportProgress({
+    stage: "discovering",
+    percent: 18,
+    steps: {
+      connect: { status: "done" },
+      channels: { status: "running" },
+      movies: { status: "running" },
+      series: { status: "running" },
+      categories: { status: "running" },
+    },
+  });
   const [live, vod, series, liveCategories, vodCategories, seriesCategories] = await Promise.all([
     fetchJson(xtreamApiUrl({ serverUrl, username, password, action: "get_live_streams" }), 25000).catch(() => []),
     fetchJson(xtreamApiUrl({ serverUrl, username, password, action: "get_vod_streams" }), 25000).catch(() => []),
@@ -797,6 +1446,33 @@ async function syncXtreamSource(sourceId: string, userId: string, config: JsonRe
   const liveCategoryMap = categoryMap(liveCategories);
   const vodCategoryMap = categoryMap(vodCategories);
   const seriesCategoryMap = categoryMap(seriesCategories);
+  const liveCount = Array.isArray(live) ? live.length : 0;
+  const movieCount = Array.isArray(vod) ? vod.length : 0;
+  const seriesCount = Array.isArray(series) ? series.length : 0;
+  const categoryCount = liveCategoryMap.size + vodCategoryMap.size + seriesCategoryMap.size;
+  await reportProgress({
+    stage: "discovered",
+    percent: 42,
+    counts: {
+      live: liveCount,
+      movies: movieCount,
+      series: seriesCount,
+      total: liveCount + movieCount + seriesCount,
+    },
+    categories: {
+      live: liveCategoryMap.size,
+      movies: vodCategoryMap.size,
+      series: seriesCategoryMap.size,
+      total: categoryCount,
+    },
+    steps: {
+      channels: { status: "done", count: liveCount },
+      movies: { status: "done", count: movieCount },
+      series: { status: "done", count: seriesCount },
+      categories: { status: "done", count: categoryCount },
+      import: { status: "running" },
+    },
+  });
 
   const rows = [
     ...xtreamRows(sourceId, userId, Array.isArray(live) ? live : [], "live", liveCategoryMap),
@@ -804,8 +1480,23 @@ async function syncXtreamSource(sourceId: string, userId: string, config: JsonRe
     ...xtreamRows(sourceId, userId, Array.isArray(series) ? series : [], "series", seriesCategoryMap),
   ];
 
+  await reportProgress({
+    stage: "importing",
+    percent: 58,
+    steps: { import: { status: "running", count: rows.length } },
+  });
   const savedRows = await replaceSourceItems(sourceId, userId, rows, db);
+  await reportProgress({
+    stage: "materializing",
+    percent: 74,
+    steps: { import: { status: "done", count: savedRows.length }, finalize: { status: "running" } },
+  });
   const liveCatalog = await refreshMaterializedLiveCatalog(db, { sourceId, userId, rows: savedRows });
+  await reportProgress({
+    stage: "building_titles",
+    percent: 86,
+    steps: { finalize: { status: "running" } },
+  });
   const titleProjection = await refreshVodTitleProjection({
     sourceId,
     userId,
@@ -814,10 +1505,15 @@ async function syncXtreamSource(sourceId: string, userId: string, config: JsonRe
     xtreamConfig: { serverUrl, username, password },
     vodInfoLimit: boundedInt(Deno.env.get("NORVA_VOD_INFO_SYNC_LIMIT"), 120, 0, 1000),
   });
+  await reportProgress({
+    stage: "finalizing",
+    percent: 96,
+    steps: { finalize: { status: "running" } },
+  });
   return {
-    live: Array.isArray(live) ? live.length : 0,
-    movies: Array.isArray(vod) ? vod.length : 0,
-    series: Array.isArray(series) ? series.length : 0,
+    live: liveCount,
+    movies: movieCount,
+    series: seriesCount,
     liveCategories: liveCategoryMap.size,
     movieCategories: vodCategoryMap.size,
     seriesCategories: seriesCategoryMap.size,
@@ -851,7 +1547,9 @@ function xtreamRows(
     const streamId = stringOr(item.stream_id ?? item.series_id ?? item.id, "");
     const title = stringOr(item.name ?? item.title, "");
     if (!streamId || !title) continue;
-    const container = stringOr(item.container_extension, itemType === "live" ? "m3u8" : "mp4");
+    const rawContainer = stringOr(item.container_extension, "");
+    const container = rawContainer || (itemType === "live" ? "ts" : "mp4");
+    const containerExplicit = Boolean(rawContainer);
     const categoryId = stringOrNull(item.category_id);
     const categoryName = categoryId
       ? categories.get(categoryId) ?? stringOrNull(item.category_name)
@@ -879,6 +1577,7 @@ function xtreamRows(
         streamId,
         streamType: itemType,
         container,
+        containerExplicit,
         providerTmdbId: stringOrNull(item.tmdb_id ?? item.tmdbId ?? item.tmdb),
         providerImdbId: stringOrNull(item.imdb_id ?? item.imdbId ?? item.imdb),
       }),
@@ -888,9 +1587,31 @@ function xtreamRows(
   return rows;
 }
 
-async function syncM3uSource(sourceId: string, userId: string, config: JsonRecord, db: SupabaseClient) {
+async function syncM3uSource(
+  sourceId: string,
+  userId: string,
+  config: JsonRecord,
+  db: SupabaseClient,
+  reportProgress: SyncProgressReporter = async () => {},
+) {
   const playlistUrl = stringOr(config.playlistUrl, "");
+  await reportProgress({
+    stage: "connecting",
+    percent: 10,
+    steps: { connect: { status: "running" } },
+  });
   const playlist = await fetchText(playlistUrl, 30000, 20_000_000);
+  await reportProgress({
+    stage: "discovered",
+    percent: 42,
+    steps: {
+      connect: { status: "done" },
+      channels: { status: "running" },
+      movies: { status: "skipped" },
+      series: { status: "skipped" },
+      categories: { status: "running" },
+    },
+  });
   const items = parseM3u(playlist).slice(0, 20000);
   const rows = await Promise.all(items.map(async (item) => ({
     user_id: userId,
@@ -907,7 +1628,24 @@ async function syncM3uSource(sourceId: string, userId: string, config: JsonRecor
     available: true,
   })));
 
+  const categoryCount = new Set(rows.map((row) => stringOr(row.parent_external_id, "")).filter(Boolean)).size;
+  await reportProgress({
+    stage: "importing",
+    percent: 62,
+    counts: { live: rows.length, movies: 0, series: 0, total: rows.length },
+    categories: { live: categoryCount, movies: 0, series: 0, total: categoryCount },
+    steps: {
+      channels: { status: "done", count: rows.length },
+      categories: { status: "done", count: categoryCount },
+      import: { status: "running", count: rows.length },
+    },
+  });
   const savedRows = await replaceSourceItems(sourceId, userId, rows, db);
+  await reportProgress({
+    stage: "finalizing",
+    percent: 86,
+    steps: { import: { status: "done", count: savedRows.length }, finalize: { status: "running" } },
+  });
   const liveCatalog = await refreshMaterializedLiveCatalog(db, { sourceId, userId, rows: savedRows });
   return { live: rows.length, total: rows.length, liveCatalog };
 }
@@ -1278,14 +2016,35 @@ async function addFavorite(req: Request, userId: string, db: SupabaseClient) {
 
 async function listHistory(url: URL, userId: string, db: SupabaseClient) {
   const limit = boundedInt(url.searchParams.get("limit"), 100, 1, 500);
+  const readySourceIds = await listHistorySourceIds(userId, db);
+  if (!readySourceIds.length) return { history: [] };
+
   const { data, error } = await db
     .from("cloud_watch_history")
     .select("*")
     .eq("user_id", userId)
+    .in("source_id", readySourceIds)
     .order("updated_at", { ascending: false })
     .limit(limit);
   if (error) throwDb(error, "Unable to list history");
   return { history: data ?? [] };
+}
+
+async function listHistorySourceIds(userId: string, db: SupabaseClient) {
+  const { data, error } = await db
+    .from("cloud_sources")
+    .select("id,sync_status,sync_error,last_synced_at")
+    .eq("user_id", userId);
+  if (error) throwDb(error, "Unable to list history sources");
+
+  return (data ?? [])
+    .filter((source: Record<string, unknown>) => {
+      if (source.sync_error) return false;
+      const status = String(source.sync_status || "").toLowerCase();
+      return status === "ready" || status === "completed" || Boolean(source.last_synced_at);
+    })
+    .map((source: Record<string, unknown>) => String(source.id))
+    .filter(Boolean);
 }
 
 async function saveHistory(req: Request, userId: string, db: SupabaseClient) {
@@ -2129,6 +2888,14 @@ async function getRuntimeConfig(db: SupabaseClient): Promise<RuntimeConfig> {
   return value;
 }
 
+function xtreamPlaybackContainer(hint: JsonRecord, streamTypeValue: unknown) {
+  const streamType = stringOr(streamTypeValue, "live");
+  const storedContainer = stringOr(hint.container, streamType === "live" ? "ts" : "mp4");
+  const explicit = Boolean(hint.containerExplicit || hint.container_explicit);
+  if (streamType === "live" && storedContainer.toLowerCase() === "m3u8" && !explicit) return "ts";
+  return storedContainer;
+}
+
 async function resolvePlaybackTarget(
   sourceId: string,
   itemType: string,
@@ -2165,13 +2932,14 @@ async function resolvePlaybackTarget(
 
   if (hint.sourceType === "xtream") {
     const sourceConfig = await loadSourceConfig(sourceId, userId, db);
+    const streamType = stringOr(hint.streamType, "live");
     return xtreamStreamUrl({
       serverUrl: stringOr(sourceConfig.serverUrl, ""),
       username: stringOr(sourceConfig.username, ""),
       password: stringOr(sourceConfig.password, ""),
-      streamType: stringOr(hint.streamType, "live"),
+      streamType,
       streamId: stringOr(hint.streamId, ""),
-      container: stringOr(hint.container, "m3u8"),
+      container: xtreamPlaybackContainer(hint, streamType),
     });
   }
 
@@ -2468,7 +3236,7 @@ async function deleteSource(sourceId: string, userId: string, db: SupabaseClient
   await deleteRowsBySource(db, "cloud_title_overrides", sourceId, userId);
   await deleteRowsBySource(db, "cloud_favorites", sourceId, userId);
   await deleteRowsBySource(db, "cloud_media_items", sourceId, userId);
-  await clearSourceReference(db, "cloud_watch_history", sourceId, userId);
+  await deleteRowsBySource(db, "cloud_watch_history", sourceId, userId);
   await clearSourceReference(db, "cloud_playback_sessions", sourceId, userId);
   await clearSourceReference(db, "cloud_playback_events", sourceId, userId);
 

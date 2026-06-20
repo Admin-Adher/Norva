@@ -84,6 +84,18 @@
         }) || {};
     }
 
+    function progressFor(source = {}, status = {}) {
+        const config = source.configHint || source.config_hint || {};
+        const progress = source.syncProgress ||
+            source.sync_progress ||
+            config.syncProgress ||
+            config.sync_progress ||
+            status.syncProgress ||
+            status.sync_progress ||
+            {};
+        return progress && typeof progress === 'object' && !Array.isArray(progress) ? progress : {};
+    }
+
     function classifyError(errorText, rawStatus = '') {
         const error = lower(`${rawStatus} ${errorText}`);
         if (!error) return 'degraded';
@@ -102,19 +114,44 @@
 
     function classifySource(source = {}, statuses = []) {
         const status = statusFor(source, statuses);
-        const rawStatus = lower(source.sync_status || source.syncStatus || status.status || status.sync_status || 'idle');
+        const progress = progressFor(source, status);
+        const rawStatus = lower(
+            source.sync_status ||
+            source.syncStatus ||
+            status.status ||
+            status.sync_status ||
+            progress.status ||
+            progress.stage ||
+            'idle'
+        );
+        const progressStatus = lower(progress.status || progress.stage || '');
         const error = string(source.sync_error || source.syncError || status.error || status.sync_error || '');
         const lastSync = source.last_sync || source.lastSync || source.last_synced_at || status.last_sync || status.lastSyncedAt;
         const enabled = source.enabled !== false && source.revoked !== true;
+        const syncingStates = new Set([
+            'syncing',
+            'pending',
+            'checking',
+            'connecting',
+            'discovering',
+            'discovered',
+            'importing',
+            'materializing',
+            'building_titles',
+            'building_live_channels',
+            'building_live_variants',
+            'finalizing'
+        ]);
+        const readyStates = new Set(['ready', 'success', 'synced', 'complete', 'completed']);
 
         let state = 'degraded';
         if (!enabled) {
             state = 'degraded';
-        } else if (rawStatus === 'syncing' || rawStatus === 'pending') {
+        } else if (syncingStates.has(rawStatus) || syncingStates.has(progressStatus)) {
             state = 'syncing';
         } else if (error) {
             state = classifyError(error, rawStatus);
-        } else if (['ready', 'success', 'synced', 'complete', 'completed'].includes(rawStatus) || lastSync) {
+        } else if (readyStates.has(rawStatus) || readyStates.has(progressStatus) || lastSync) {
             state = 'ready';
         } else if (rawStatus === 'idle' || rawStatus === 'new') {
             state = 'syncing';
@@ -227,8 +264,11 @@
         const primaryIssue = [...(summary.issues || [])].sort((a, b) => b.severity - a.severity)[0] || null;
         const primarySource = primaryIssue?.source || null;
         const detail = sourceCount
-            ? `${sourceCount} service${sourceCount > 1 ? 's' : ''}${issueCount ? `, ${issueCount} need attention` : ''}`
+            ? `${sourceCount} service${sourceCount > 1 ? 's' : ''}${state === 'syncing' ? ', preparing catalog' : issueCount ? `, ${issueCount} need attention` : ''}`
             : 'No service connected';
+        const progressAction = state === 'syncing'
+            ? '<button class="btn btn-secondary" data-source-health-action="view-progress">View progress</button>'
+            : '';
 
         return `
             <div class="service-health-card service-health-${escapeHtml(state)} ${prominent ? 'service-health-prominent' : ''} ${hidden ? 'hidden' : ''}"
@@ -243,9 +283,29 @@
                 </div>
                 <div class="service-health-actions">
                     <button class="btn btn-primary" data-source-health-action="open-sources">${escapeHtml(summary.action || 'Manage service')}</button>
+                    ${progressAction}
                 </div>
             </div>
         `;
+    }
+
+    function progressSourceFrom(summary = {}) {
+        const candidates = [
+            ...(summary.issues || []),
+            ...(summary.sources || [])
+        ];
+        const match = candidates.find(item => item?.state === 'syncing') || candidates[0];
+        return match?.source || null;
+    }
+
+    function openProgress(summary = {}, app = window.app) {
+        const manager = app?.sourceManager || window.app?.sourceManager;
+        const source = progressSourceFrom(summary);
+        if (source && manager?.showCatalogPreparation) {
+            manager.showCatalogPreparation(source, sourceType(source));
+            return true;
+        }
+        return openAction(summary, app);
     }
 
     function openAction(summary = {}, app = window.app) {
@@ -283,6 +343,7 @@
         summarize: summaryFrom,
         loadSummary,
         cardHtml,
+        openProgress,
         openAction
     };
 })();

@@ -1,0 +1,250 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#18153D"/>
+      <stop offset="0.48" stop-color="#262050"/>
+      <stop offset="1" stop-color="#15112F"/>
+    </linearGradient>
+    <radialGradient id="bgGlow" cx="50%" cy="42%" r="68%">
+      <stop offset="0" stop-color="#7358FF" stop-opacity="0.28"/>
+      <stop offset="0.48" stop-color="#5D44D9" stop-opacity="0.08"/>
+      <stop offset="1" stop-color="#15112F" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="glass" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#18213A"/>
+      <stop offset="1" stop-color="#10162B"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#7568FF"/>
+      <stop offset="0.5" stop-color="#5B46EA"/>
+      <stop offset="1" stop-color="#A65EEA"/>
+    </linearGradient>
+    <linearGradient id="mint" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#83E0C2"/>
+      <stop offset="1" stop-color="#B5F3DB"/>
+    </linearGradient>
+    <linearGradient id="progress" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#FF8E7D"/>
+      <stop offset="0.55" stop-color="#A26AFF"/>
+      <stop offset="1" stop-color="#6E5BFF"/>
+    </linearGradient>
+    <linearGradient id="poster" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#17183D"/>
+      <stop offset="0.46" stop-color="#2A2054"/>
+      <stop offset="1" stop-color="#0F102D"/>
+    </linearGradient>
+    <radialGradient id="sun" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#FFD5A0"/>
+      <stop offset="0.45" stop-color="#F4B36B" stop-opacity="0.95"/>
+      <stop offset="1" stop-color="#F0A65E" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="mountain1" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#7961FF"/>
+      <stop offset="1" stop-color="#4330C6"/>
+    </linearGradient>
+    <linearGradient id="mountain2" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#A36CFF"/>
+      <stop offset="1" stop-color="#5B43D8"/>
+    </linearGradient>
+    <linearGradient id="cardPink" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#F58D87"/>
+      <stop offset="1" stop-color="#A85FD3"/>
+    </linearGradient>
+    <linearGradient id="cardMint" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#A2E8CD"/>
+      <stop offset="1" stop-color="#5DA99B"/>
+    </linearGradient>
+    <filter id="shadow" x="-40%" y="-40%" width="180%" height="180%">
+      <feDropShadow dx="0" dy="24" stdDeviation="28" flood-color="#08091E" flood-opacity="0.62"/>
+    </filter>
+    <filter id="softShadow" x="-40%" y="-40%" width="180%" height="180%">
+      <feDropShadow dx="0" dy="14" stdDeviation="18" flood-color="#08091E" flood-opacity="0.48"/>
+    </filter>
+    <filter id="glow" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="18" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="grain" x="0" y="0" width="100%" height="100%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.8" numOctaves="2" seed="9" result="noise"/>
+      <feColorMatrix in="noise" type="saturate" values="0" result="mono"/>
+      <feComponentTransfer in="mono" result="alphaNoise">
+        <feFuncA type="table" tableValues="0 0.035"/>
+      </feComponentTransfer>
+      <feBlend in="SourceGraphic" in2="alphaNoise" mode="screen"/>
+    </filter>
+    <clipPath id="tvClip"><rect x="0" y="0" width="860" height="480" rx="28"/></clipPath>
+    <clipPath id="phoneClip"><rect x="0" y="0" width="278" height="564" rx="34"/></clipPath>
+    <clipPath id="tabletClip"><rect x="0" y="0" width="390" height="504" rx="34"/></clipPath>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1600" height="1000" fill="url(#bg)"/>
+  <rect width="1600" height="1000" fill="url(#bgGlow)"/>
+  <g opacity="0.18">
+    <path d="M0 190 H1600 M0 500 H1600 M0 810 H1600" stroke="#8C80E8" stroke-width="1"/>
+    <path d="M245 0 V1000 M800 0 V1000 M1355 0 V1000" stroke="#8C80E8" stroke-width="1"/>
+  </g>
+  <ellipse cx="800" cy="840" rx="570" ry="90" fill="#6B52F3" opacity="0.09" filter="url(#glow)"/>
+
+  <!-- Sync connector lines behind devices -->
+  <g fill="none" stroke-linecap="round">
+    <path d="M395 445 C520 328 610 307 800 310" stroke="#7968FF" stroke-opacity="0.38" stroke-width="3" stroke-dasharray="4 14"/>
+    <path d="M1206 455 C1082 328 987 306 800 310" stroke="#83DFC2" stroke-opacity="0.34" stroke-width="3" stroke-dasharray="4 14"/>
+    <circle cx="498" cy="363" r="6" fill="#7B6DFF" stroke="none"/>
+    <circle cx="1108" cy="361" r="6" fill="#91E7CB" stroke="none"/>
+  </g>
+
+  <!-- Top sync status -->
+  <g transform="translate(608 62)" filter="url(#softShadow)">
+    <rect width="384" height="72" rx="36" fill="#11182D" stroke="#394568" stroke-width="2"/>
+    <circle cx="38" cy="36" r="12" fill="url(#mint)"/>
+    <path d="M32 36 l5 5 9 -11" fill="none" stroke="#102338" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="64" y="44" fill="#F8F7FF" font-family="Inter, Arial, sans-serif" font-size="25" font-weight="700">Synced progress</text>
+  </g>
+
+  <!-- Central TV -->
+  <g transform="translate(370 160)" filter="url(#shadow)">
+    <rect x="-22" y="-22" width="904" height="524" rx="50" fill="#10182C" stroke="#4A5C8B" stroke-width="3"/>
+    <g clip-path="url(#tvClip)">
+      <rect width="860" height="480" fill="url(#poster)"/>
+      <circle cx="680" cy="120" r="116" fill="url(#sun)" opacity="0.95"/>
+      <circle cx="680" cy="120" r="47" fill="#F6BD7D" opacity="0.94"/>
+      <path d="M0 362 L170 282 L310 390 L430 278 L612 400 L860 310 L860 480 L0 480 Z" fill="url(#mountain1)" opacity="0.96"/>
+      <path d="M0 432 L136 332 L238 422 L396 306 L572 440 L706 342 L860 430 L860 480 L0 480 Z" fill="url(#mountain2)" opacity="0.82"/>
+      <path d="M0 0 H860 V480 H0 Z" fill="url(#bg)" opacity="0.18"/>
+      <rect x="0" y="0" width="860" height="480" fill="#07081D" opacity="0.10"/>
+
+      <!-- TV top chrome -->
+      <g transform="translate(34 28)">
+        <rect width="38" height="38" rx="11" fill="#141C34" stroke="#38456A"/>
+        <path d="M9 26 L14 11 L20 21 L25 10 L30 27" fill="none" stroke="url(#accent)" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <text x="52" y="27" fill="#FFFFFF" font-family="Inter, Arial, sans-serif" font-size="22" font-weight="800">Norva</text>
+      </g>
+      <g transform="translate(668 29)">
+        <rect width="158" height="38" rx="19" fill="#0B1124" fill-opacity="0.72" stroke="#4B557E"/>
+        <circle cx="20" cy="19" r="5" fill="#85DFC2"/>
+        <text x="34" y="25" fill="#D8DBEC" font-family="Inter, Arial, sans-serif" font-size="14" font-weight="600">Android TV · Living room</text>
+      </g>
+
+      <!-- TV content -->
+      <text x="54" y="194" fill="#CFC9FF" font-family="Inter, Arial, sans-serif" font-size="17" font-weight="700" letter-spacing="4">CONTINUE WATCHING</text>
+      <text x="54" y="253" fill="#FFFFFF" font-family="Inter, Arial, sans-serif" font-size="56" font-weight="800">Orbital Dawn</text>
+      <text x="56" y="288" fill="#D4D3E6" font-family="Inter, Arial, sans-serif" font-size="22" font-weight="500">Season 2 · Episode 4 · 26 min left</text>
+
+      <g transform="translate(54 320)">
+        <rect width="176" height="54" rx="27" fill="#FFFFFF"/>
+        <circle cx="28" cy="27" r="15" fill="#5E4AE8"/>
+        <path d="M24 19 L36 27 L24 35 Z" fill="#FFFFFF"/>
+        <text x="54" y="35" fill="#14152A" font-family="Inter, Arial, sans-serif" font-size="18" font-weight="750">Resume</text>
+      </g>
+      <g transform="translate(246 320)">
+        <rect width="150" height="54" rx="27" fill="#0B1025" fill-opacity="0.68" stroke="#59628B"/>
+        <text x="25" y="34" fill="#FFFFFF" font-family="Inter, Arial, sans-serif" font-size="17" font-weight="650">+ My list</text>
+      </g>
+
+      <g transform="translate(54 416)">
+        <rect width="752" height="8" rx="4" fill="#FFFFFF" fill-opacity="0.20"/>
+        <rect width="466" height="8" rx="4" fill="url(#progress)"/>
+        <circle cx="466" cy="4" r="8" fill="#FFFFFF"/>
+        <text x="0" y="34" fill="#D8D8E8" font-family="Inter, Arial, sans-serif" font-size="14" font-weight="600">23:41</text>
+        <text x="711" y="34" fill="#D8D8E8" font-family="Inter, Arial, sans-serif" font-size="14" font-weight="600">38:20</text>
+      </g>
+    </g>
+    <!-- TV stand -->
+    <path d="M365 506 H495 L518 562 H342 Z" fill="#10172A" stroke="#3E4C72" stroke-width="2"/>
+    <rect x="282" y="558" width="296" height="18" rx="9" fill="#11182D" stroke="#3A476B" stroke-width="2"/>
+  </g>
+
+  <!-- Phone left -->
+  <g transform="translate(100 270) rotate(-7 150 310)" filter="url(#shadow)">
+    <rect x="-11" y="-11" width="300" height="586" rx="54" fill="#0D1427" stroke="#536699" stroke-width="3"/>
+    <g clip-path="url(#phoneClip)">
+      <rect width="278" height="564" fill="#11182D"/>
+      <rect x="0" y="0" width="278" height="564" fill="url(#bgGlow)" opacity="0.28"/>
+      <g transform="translate(20 25)">
+        <rect width="31" height="31" rx="9" fill="#141D35" stroke="#354367"/>
+        <path d="M7 22 L11 9 L16 18 L21 8 L25 23" fill="none" stroke="url(#accent)" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <text x="42" y="23" fill="#FFFFFF" font-family="Inter, Arial, sans-serif" font-size="20" font-weight="800">Norva</text>
+      </g>
+      <rect x="20" y="80" width="238" height="282" rx="25" fill="url(#poster)"/>
+      <circle cx="206" cy="132" r="58" fill="url(#sun)"/>
+      <circle cx="206" cy="132" r="24" fill="#F7BF7F"/>
+      <path d="M20 290 L86 238 L132 295 L178 230 L258 304 L258 362 L20 362 Z" fill="url(#mountain1)"/>
+      <path d="M20 330 L78 270 L126 333 L170 269 L218 335 L258 300 L258 362 L20 362 Z" fill="url(#mountain2)" opacity="0.86"/>
+      <rect x="34" y="96" width="112" height="31" rx="15.5" fill="#0B1025" fill-opacity="0.68" stroke="#4D587E"/>
+      <circle cx="51" cy="111.5" r="5" fill="#84E2C3"/>
+      <text x="63" y="117" fill="#FFFFFF" font-family="Inter, Arial, sans-serif" font-size="12.5" font-weight="650">Resume at 23:41</text>
+
+      <text x="22" y="411" fill="#FFFFFF" font-family="Inter, Arial, sans-serif" font-size="27" font-weight="800">Orbital Dawn</text>
+      <text x="22" y="444" fill="#BFC3D7" font-family="Inter, Arial, sans-serif" font-size="17" font-weight="550">S2 · E4 · 26 min left</text>
+      <g transform="translate(22 477)">
+        <rect width="234" height="8" rx="4" fill="#FFFFFF" fill-opacity="0.18"/>
+        <rect width="145" height="8" rx="4" fill="url(#progress)"/>
+        <circle cx="145" cy="4" r="7" fill="#FFFFFF"/>
+        <text x="0" y="30" fill="#CDD0E0" font-family="Inter, Arial, sans-serif" font-size="14" font-weight="600">23:41</text>
+        <text x="193" y="30" fill="#CDD0E0" font-family="Inter, Arial, sans-serif" font-size="14" font-weight="600">38:20</text>
+      </g>
+    </g>
+    <rect x="95" y="10" width="88" height="15" rx="7.5" fill="#070B18"/>
+    <circle cx="198" cy="17.5" r="5" fill="#0C1530"/>
+  </g>
+
+  <!-- Tablet right -->
+  <g transform="translate(1115 285) rotate(6 206 262)" filter="url(#shadow)">
+    <rect x="-12" y="-12" width="414" height="528" rx="50" fill="#0E1528" stroke="#536799" stroke-width="3"/>
+    <g clip-path="url(#tabletClip)">
+      <rect width="390" height="504" fill="#10172C"/>
+      <rect width="390" height="504" fill="url(#bgGlow)" opacity="0.22"/>
+      <g transform="translate(26 26)">
+        <rect width="31" height="31" rx="9" fill="#141D35" stroke="#354367"/>
+        <path d="M7 22 L11 9 L16 18 L21 8 L25 23" fill="none" stroke="url(#accent)" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <text x="44" y="23" fill="#FFFFFF" font-family="Inter, Arial, sans-serif" font-size="18" font-weight="800">Norva</text>
+        <circle cx="326" cy="15" r="15" fill="#6D59F3"/>
+        <text x="321" y="21" fill="#FFFFFF" font-family="Inter, Arial, sans-serif" font-size="14" font-weight="800">A</text>
+      </g>
+      <text x="26" y="102" fill="#FFFFFF" font-family="Inter, Arial, sans-serif" font-size="28" font-weight="800">Tonight, Adrien</text>
+      <text x="26" y="128" fill="#AEB5CE" font-family="Inter, Arial, sans-serif" font-size="15" font-weight="550">Resume exactly where you left off.</text>
+
+      <g transform="translate(26 158)">
+        <rect width="338" height="180" rx="26" fill="url(#accent)"/>
+        <circle cx="280" cy="41" r="48" fill="url(#sun)" opacity="0.68"/>
+        <path d="M0 148 L70 96 L125 151 L188 80 L270 153 L338 113 L338 180 L0 180 Z" fill="#3423A5" opacity="0.76"/>
+        <path d="M0 167 L66 127 L106 168 L165 110 L232 170 L286 125 L338 166 L338 180 L0 180 Z" fill="#8C69FF" opacity="0.86"/>
+        <rect x="18" y="17" width="118" height="30" rx="15" fill="#0D1327" fill-opacity="0.72"/>
+        <circle cx="35" cy="32" r="5" fill="#8BE4C6"/>
+        <text x="47" y="37" fill="#FFFFFF" font-family="Inter, Arial, sans-serif" font-size="12.5" font-weight="650">Synced</text>
+        <text x="20" y="91" fill="#FFFFFF" font-family="Inter, Arial, sans-serif" font-size="25" font-weight="800">Orbital Dawn</text>
+        <text x="20" y="117" fill="#E7E3FF" font-family="Inter, Arial, sans-serif" font-size="14.5" font-weight="600">S2 · E4 · 26 min left</text>
+        <rect x="20" y="138" width="294" height="7" rx="3.5" fill="#FFFFFF" fill-opacity="0.23"/>
+        <rect x="20" y="138" width="182" height="7" rx="3.5" fill="url(#progress)"/>
+        <circle cx="202" cy="141.5" r="6" fill="#FFFFFF"/>
+      </g>
+
+      <text x="26" y="378" fill="#D9DCEC" font-family="Inter, Arial, sans-serif" font-size="15" font-weight="700">For you</text>
+      <g transform="translate(26 397)">
+        <rect width="98" height="84" rx="18" fill="url(#cardPink)"/>
+        <path d="M12 72 L38 42 L59 65 L78 32 L98 54 V84 H0 Z" fill="#7E4CC7" opacity="0.56"/>
+        <rect x="112" width="98" height="84" rx="18" fill="url(#cardMint)"/>
+        <circle cx="163" cy="39" r="19" fill="#D8F7E8" opacity="0.65"/>
+        <rect x="224" width="114" height="84" rx="18" fill="url(#accent)"/>
+        <path d="M224 74 L263 38 L293 70 L319 30 L338 51 V84 H224 Z" fill="#4B34C2" opacity="0.58"/>
+      </g>
+    </g>
+    <circle cx="195" cy="9" r="4.5" fill="#223054"/>
+  </g>
+
+  <!-- Bottom value chip -->
+  <g transform="translate(556 870)" filter="url(#softShadow)">
+    <rect width="488" height="74" rx="37" fill="#10172B" stroke="#3D4A71" stroke-width="2"/>
+    <g transform="translate(26 20)" fill="none" stroke="#AFA6FF" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="0" y="2" width="22" height="31" rx="5"/>
+      <rect x="41" y="0" width="42" height="34" rx="5"/>
+      <rect x="102" y="3" width="22" height="28" rx="4"/>
+      <path d="M24 17 H38 M86 17 H99" stroke-dasharray="2 5"/>
+    </g>
+    <text x="174" y="34" fill="#FFFFFF" font-family="Inter, Arial, sans-serif" font-size="18" font-weight="750">One account, one progress</text>
+    <text x="174" y="56" fill="#ABB2CB" font-family="Inter, Arial, sans-serif" font-size="13.5" font-weight="550">Android TV · phone · tablet</text>
+  </g>
+
+  <rect width="1600" height="1000" fill="transparent" filter="url(#grain)" pointer-events="none"/>
+</svg>

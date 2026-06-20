@@ -335,8 +335,9 @@
                 </div>
                 <div id="xtream-fields">
                     <div class="field">
-                        <label for="xtream-url">Server URL</label>
-                        <input id="xtream-url" type="url" placeholder="https://provider.example">
+                        <label for="xtream-url">Provider URL or complete Xtream link</label>
+                        <input id="xtream-url" type="url" placeholder="https://provider.example/get.php?username=...&password=...">
+                        <p class="muted" id="xtream-link-hint">Paste the complete link from your TV service, or enter the fields separately.</p>
                     </div>
                     <div class="field">
                         <label for="xtream-username">Username</label>
@@ -429,6 +430,11 @@
             history.replaceState({}, document.title, location.pathname);
         });
         document.getElementById('add-source-button').addEventListener('click', addSource);
+        ['paste', 'change', 'blur'].forEach(eventName => {
+            document.getElementById('xtream-url')?.addEventListener(eventName, () => {
+                setTimeout(parseAndFillXtreamLink, 0);
+            });
+        });
         document.getElementById('send-play-button').addEventListener('click', () => sendCommand('play'));
         document.getElementById('send-open-button').addEventListener('click', () => sendCommand('open'));
         document.querySelectorAll('[data-source-type]').forEach(button => {
@@ -555,6 +561,68 @@
             document.getElementById('m3u-fields').classList.toggle('hidden', type !== 'm3u');
         }
 
+        function parseXtreamLink(raw) {
+            const value = String(raw || '').trim();
+            if (!value) return null;
+
+            let url;
+            try {
+                url = new URL(value.includes('://') ? value : `http://${value}`);
+            } catch (_) {
+                return null;
+            }
+
+            const params = url.searchParams;
+            const username = params.get('username') || params.get('user') || '';
+            const password = params.get('password') || params.get('pass') || '';
+            const endpointNames = new Set(['get.php', 'player_api.php', 'xmltv.php', 'panel_api.php']);
+            const pathParts = url.pathname.split('/').filter(Boolean);
+            const endpointIndex = pathParts.findIndex(part => endpointNames.has(part.toLowerCase()));
+            const baseParts = endpointIndex >= 0 ? pathParts.slice(0, endpointIndex) : [];
+
+            if (username && password) {
+                const basePath = baseParts.length ? `/${baseParts.join('/')}` : '';
+                return {
+                    serverUrl: `${url.protocol}//${url.host}${basePath}`,
+                    username,
+                    password,
+                    host: url.hostname
+                };
+            }
+
+            const typedPathIndex = pathParts.findIndex(part => ['live', 'movie', 'series'].includes(part.toLowerCase()));
+            if (typedPathIndex >= 0 && pathParts.length > typedPathIndex + 2) {
+                const basePath = typedPathIndex > 0 ? `/${pathParts.slice(0, typedPathIndex).join('/')}` : '';
+                return {
+                    serverUrl: `${url.protocol}//${url.host}${basePath}`,
+                    username: pathParts[typedPathIndex + 1],
+                    password: pathParts[typedPathIndex + 2],
+                    host: url.hostname
+                };
+            }
+
+            return null;
+        }
+
+        function parseAndFillXtreamLink() {
+            const urlInput = document.getElementById('xtream-url');
+            const usernameInput = document.getElementById('xtream-username');
+            const passwordInput = document.getElementById('xtream-password');
+            const nameInput = document.getElementById('source-name');
+            const hint = document.getElementById('xtream-link-hint');
+            const parsed = parseXtreamLink(urlInput?.value);
+            if (!parsed) {
+                if (hint) hint.textContent = 'Paste the complete link from your TV service, or enter the fields separately.';
+                return null;
+            }
+            urlInput.value = parsed.serverUrl;
+            if (!usernameInput.value) usernameInput.value = parsed.username;
+            if (!passwordInput.value) passwordInput.value = parsed.password;
+            if (nameInput && !nameInput.value && parsed.host) nameInput.value = parsed.host;
+            if (hint) hint.textContent = 'Link recognized. Norva filled the server and login fields.';
+            return parsed;
+        }
+
         async function addSource() {
             const displayName = document.getElementById('source-name').value.trim();
             const payload = { sourceType: selectedSourceType, displayName, syncNow: true };
@@ -563,9 +631,14 @@
                 return;
             }
             if (selectedSourceType === 'xtream') {
+                parseAndFillXtreamLink();
                 payload.url = document.getElementById('xtream-url').value.trim();
                 payload.username = document.getElementById('xtream-username').value.trim();
                 payload.password = document.getElementById('xtream-password').value;
+                if (!payload.url || !payload.username || !payload.password) {
+                    setStatus(sourceStatus, 'error', 'Paste the complete Xtream link or enter server, username and password.');
+                    return;
+                }
             } else {
                 payload.url = document.getElementById('m3u-url').value.trim();
             }

@@ -122,7 +122,7 @@ function classifySniff(buffer, contentType = '', statusCode = 0) {
 function buildLiveStreamUrl(source, row) {
     const data = parseJson(row.data);
     if (source?.type === 'xtream') {
-        return xtreamApi.createFromSource(source).buildStreamUrl(row.item_id, 'live', 'm3u8');
+        return xtreamApi.createFromSource(source).buildStreamUrl(row.item_id, 'live', 'ts');
     }
 
     return row.stream_url || data.stream_url || data.url || data.file || data.link || '';
