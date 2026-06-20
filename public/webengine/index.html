@@ -84,7 +84,7 @@ async function test(s) {
   const vid = document.getElementById('vid_' + s.id);
   stat.innerHTML = '<span class="wait">⏳ téléchargement…</span>';
   try {
-    const buf = new Uint8Array(await (await fetch('/engine-test/' + s.id + '.mkv')).arrayBuffer());
+    const buf = new Uint8Array(await (await fetch('/webengine/media/' + s.id + '.mkv')).arrayBuffer());
     await ff.writeFile('in.mkv', buf);
     stat.innerHTML = '<span class="wait">⏳ remux + audio…</span>';
     const args = ['-i','in.mkv','-c:v','copy'];
