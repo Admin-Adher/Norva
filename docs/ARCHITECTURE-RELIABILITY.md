@@ -104,21 +104,29 @@ Classés par impact / facilité. ⚙️ = déployable par l'agent (web/edge) ;
     Le mode cloud charge `norva.tv/app.html` en direct → déploiement web suffit
     (pas de rebuild APK). Le navigateur n'a aucun pont → comportement inchangé.
 
-### Reste à faire (prioritaire pour la reprise multi-appareils)
-1. **Remontée de position depuis le lecteur natif** (Java, rebuild APK).
-   `clients/android-tv/.../PlayerActivity.java` ne reporte aujourd'hui qu'un
-   statut ok/broken vers `127.0.0.1` (standalone only) — **aucune position**.
-   Pour réaliser « reprendre à 38:01 sur un autre écran » :
-   - POSTer périodiquement la progression vers l'API cloud `/history`
-     (`POST norva-cloud/history` avec le token cloud + `sourceId/itemType/itemId`),
-     p.ex. toutes les 10 s et à la pause/sortie.
-   - Récupérer l'offset de reprise à l'ouverture et `player.seekTo(...)`.
-   - Le pont devra fournir le token cloud + l'offset au `PlayerActivity`.
-2. **Web → hub local (navigateur)**. Pour lire les codecs exotiques **dans un
-   navigateur** sans datacenter :
-   - UI d'appairage d'un hub (`server/`) dans Réglages + Cloudflare Tunnel.
-   - Router la lecture web sur le hub (`_hubBase()` existe dans `api.js`, mais
-     `_shouldUseCloud()` force le cloud sur un hôte distant — à assouplir pour la
-     lecture quand un hub est appairé).
-3. **UA configurable jusqu'au gateway cloud** (mitigation du repli cloud) :
-   remonter le preset UA de la source (`tivimate`) client → edge → gateway.
+- **Reprise multi-appareils depuis le lecteur natif** (`standalone.js`,
+  `MainActivity.java`, `PlayerActivity.java`). Le `PlayerActivity` démarre à
+  l'offset sauvegardé (`seekTo`) et renvoie sa position finale via
+  `onActivityResult` → `window.__norvaNative.onProgress()` → historique cloud
+  (`API.history.save`). Méthode pont `playVideoResumable` **feature-détectée** :
+  les anciens APK retombent sur `playVideoWithMeta` (lecture sans reprise), donc
+  rien ne casse. ⚠️ La reprise nécessite un **rebuild APK** (CI `build.yml` sur
+  push `main`) ; la lecture directe native, elle, marche dès le déploiement web
+  même sur l'APK actuel (via `playVideoWithMeta`).
+- **UA configurable jusqu'au gateway** : déjà en place — `resolveCloudUserAgent()`
+  (`api.js`) envoie le preset (`tivimate` = `TiviMate/4.7.0`) client → edge →
+  gateway. Réglable via les settings cloud.
+
+### Reste à faire
+1. **Web → hub local (navigateur, codecs exotiques)**. Seul chemin résidentiel
+   pour lire MKV/HEVC/AC3 **dans un navigateur** (le natif TV est déjà couvert).
+   Conception (à faire en opt-in strict pour ne rien risquer sur le web par
+   défaut) :
+   - Réglage explicite « Lecture via hub local » (par défaut OFF) + champ URL du
+     hub (Cloudflare Tunnel → HTTPS) + bouton test.
+   - Router **uniquement la résolution de flux** (`getStreamUrl`) vers le hub
+     quand activé ; garder catalogue/historique/favoris sur le cloud.
+   - Côté hub (`server/`) : autoriser l'origine `norva.tv` (CORS) + HTTPS via le
+     tunnel. `_hubBase()` existe déjà dans `api.js`.
+   - Idéalement : repli automatique sur le hub quand le gateway cloud renvoie un
+     blocage fournisseur (401), si un hub est configuré.

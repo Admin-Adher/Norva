@@ -307,6 +307,15 @@ public class MainActivity extends Activity {
                                       final String itemType, final String itemId) {
             MainActivity.this.openPlayer(url, title, sourceId, itemType, itemId);
         }
+
+        // Resume-aware variant: starts at resumeSeconds and reports the final
+        // position back (cross-device resume). The web feature-detects this, so
+        // older APKs that lack it transparently fall back to playVideoWithMeta.
+        @android.webkit.JavascriptInterface
+        public void playVideoResumable(final String url, final String title, final String sourceId,
+                                       final String itemType, final String itemId, final int resumeSeconds) {
+            MainActivity.this.openPlayer(url, title, sourceId, itemType, itemId, resumeSeconds);
+        }
     }
 
     private class CloudBridge {
@@ -320,10 +329,26 @@ public class MainActivity extends Activity {
                                       final String itemType, final String itemId) {
             MainActivity.this.openPlayer(url, title, sourceId, itemType, itemId);
         }
+
+        // Resume-aware variant: starts at resumeSeconds and reports the final
+        // position back (cross-device resume). The web feature-detects this, so
+        // older APKs that lack it transparently fall back to playVideoWithMeta.
+        @android.webkit.JavascriptInterface
+        public void playVideoResumable(final String url, final String title, final String sourceId,
+                                       final String itemType, final String itemId, final int resumeSeconds) {
+            MainActivity.this.openPlayer(url, title, sourceId, itemType, itemId, resumeSeconds);
+        }
     }
+
+    private static final int REQ_PLAYER = 1001;
 
     private void openPlayer(final String url, final String title, final String sourceId,
                             final String itemType, final String itemId) {
+        openPlayer(url, title, sourceId, itemType, itemId, 0);
+    }
+
+    private void openPlayer(final String url, final String title, final String sourceId,
+                            final String itemType, final String itemId, final int resumeSeconds) {
         runOnUiThread(new Runnable() {
             @Override
             public void run() {
@@ -333,9 +358,40 @@ public class MainActivity extends Activity {
                 if (sourceId != null) intent.putExtra(PlayerActivity.EXTRA_SOURCE_ID, sourceId);
                 if (itemType != null) intent.putExtra(PlayerActivity.EXTRA_ITEM_TYPE, itemType);
                 if (itemId != null) intent.putExtra(PlayerActivity.EXTRA_ITEM_ID, itemId);
-                startActivity(intent);
+                if (resumeSeconds > 0) intent.putExtra(PlayerActivity.EXTRA_RESUME_SECONDS, resumeSeconds);
+                startActivityForResult(intent, REQ_PLAYER);
             }
         });
+    }
+
+    /**
+     * The native player returns its final position when it closes; forward it to
+     * the web app, which persists it to the cloud history so other devices
+     * resume where this TV left off.
+     */
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, android.content.Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != REQ_PLAYER || data == null || webView == null) return;
+        final String sourceId = data.getStringExtra("sourceId");
+        final String itemType = data.getStringExtra("itemType");
+        final String itemId = data.getStringExtra("itemId");
+        final long pos = data.getLongExtra("positionSeconds", 0);
+        final long dur = data.getLongExtra("durationSeconds", 0);
+        if (sourceId == null || itemId == null || pos <= 0) return;
+        final String js = "window.__norvaNative && window.__norvaNative.onProgress("
+                + jsStr(sourceId) + "," + jsStr(itemType) + "," + jsStr(itemId) + "," + pos + "," + dur + ")";
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                try { webView.evaluateJavascript(js, null); } catch (Exception ignored) { }
+            }
+        });
+    }
+
+    private static String jsStr(String value) {
+        if (value == null) return "''";
+        return "'" + value.replace("\\", "\\\\").replace("'", "\\'").replace("\n", " ") + "'";
     }
 
     private void showSetup(String error) {

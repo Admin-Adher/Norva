@@ -66,6 +66,7 @@ public class PlayerActivity extends Activity {
     public static final String EXTRA_SOURCE_ID = "sourceId";
     public static final String EXTRA_ITEM_TYPE = "itemType";
     public static final String EXTRA_ITEM_ID = "itemId";
+    public static final String EXTRA_RESUME_SECONDS = "resumeSeconds";
 
     // Browser-style UA: some IPTV providers reject unknown agents (403/406)
     private static final String UA =
@@ -118,6 +119,8 @@ public class PlayerActivity extends Activity {
     private String itemType;
     private String itemId;
     private boolean playbackOkReported = false;
+    private int resumeSeconds = 0;        // start offset for cross-device resume
+    private boolean resumeApplied = false; // seek to the resume offset only once
 
     private final SimpleDateFormat clockFmt = new SimpleDateFormat("EEE d MMM 'à' HH:mm", Locale.FRENCH);
 
@@ -159,6 +162,7 @@ public class PlayerActivity extends Activity {
         sourceId = getIntent().getStringExtra(EXTRA_SOURCE_ID);
         itemType = getIntent().getStringExtra(EXTRA_ITEM_TYPE);
         itemId = getIntent().getStringExtra(EXTRA_ITEM_ID);
+        resumeSeconds = getIntent().getIntExtra(EXTRA_RESUME_SECONDS, 0);
         if (url == null || url.isEmpty()) { finish(); return; }
 
         root = new FrameLayout(this);
@@ -225,6 +229,16 @@ public class PlayerActivity extends Activity {
                     reportPlaybackStatus("ok", null);
                     if (player.getDuration() > 0) {
                         seekBar.setMax((int) (player.getDuration() / 1000));
+                    }
+                    // Cross-device resume: jump to the saved offset once the
+                    // player is ready (only once, and never past the end).
+                    if (!resumeApplied && resumeSeconds > 0) {
+                        resumeApplied = true;
+                        long target = resumeSeconds * 1000L;
+                        long dur = player.getDuration();
+                        if (dur <= 0 || target < dur - 5000) {
+                            player.seekTo(target);
+                        }
                     }
                     refreshSecondBarValues();
                 }
@@ -1002,6 +1016,29 @@ public class PlayerActivity extends Activity {
         secondBarVisible = false;
         secondBar.setVisibility(View.GONE);
         chevron.setImageResource(R.drawable.ic_player_expand_more);
+    }
+
+    /**
+     * Hand the final position back to MainActivity (which persists it to the
+     * cloud history for cross-device resume). Called on every exit path: Back,
+     * end-of-stream, and the sleep timer.
+     */
+    @Override
+    public void finish() {
+        try {
+            if (player != null && itemId != null && !itemId.isEmpty()) {
+                long pos = Math.max(0, player.getCurrentPosition() / 1000);
+                long dur = player.getDuration() > 0 ? player.getDuration() / 1000 : 0;
+                android.content.Intent data = new android.content.Intent();
+                data.putExtra("sourceId", sourceId);
+                data.putExtra("itemType", itemType);
+                data.putExtra("itemId", itemId);
+                data.putExtra("positionSeconds", pos);
+                data.putExtra("durationSeconds", dur);
+                setResult(RESULT_OK, data);
+            }
+        } catch (Exception ignored) { /* result is best-effort */ }
+        super.finish();
     }
 
     @Override

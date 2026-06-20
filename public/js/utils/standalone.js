@@ -11,6 +11,13 @@
  * provider does not 401-block it the way it blocks the cloud datacenter gateway.
  * api.js resolves a DIRECT provider URL when a native bridge is present.
  *
+ * Cross-device resume: the native player is started at the saved offset
+ * (content.resumeTime) and, on exit, reports its final position back through
+ * window.__norvaNative.onProgress(), which persists it to the cloud history —
+ * so a title stopped on the TV resumes where you left off on phone/web, and
+ * vice-versa. This uses a feature-detected bridge method (playVideoResumable),
+ * so older APKs that lack it keep working (playback without resume).
+ *
  * Loaded before app.js so the implicit token (standalone only) exists before
  * checkAuth(). In a normal browser no bridge exists and this is a no-op.
  */
@@ -27,10 +34,52 @@
         localStorage.setItem('authToken', 'standalone');
     }
 
+    // History identity used by the cloud resume logic: movies key on the movie
+    // id, episodes on the episode id (mirrors WatchPage.saveProgress) so the
+    // position the TV reports is read back by every other device.
+    const historyType = (content) => (content?.type === 'movie' ? 'movie' : 'episode');
+    const historyId = (content) => (content?.id != null ? String(content.id) : '');
+
+    // The native player reports its final position here when it closes. Persist
+    // it to the cloud history so other devices resume from it. Defined on window
+    // up-front: MainActivity calls it via evaluateJavascript after the player
+    // activity returns, which can happen before/after DOMContentLoaded.
+    window.__norvaNative = window.__norvaNative || {};
+    window.__norvaNative.onProgress = (sourceId, itemType, itemId, positionSeconds, durationSeconds) => {
+        try {
+            const progress = Math.max(0, Math.floor(Number(positionSeconds) || 0));
+            const duration = Math.max(0, Math.floor(Number(durationSeconds) || 0));
+            if (!sourceId || !itemId || progress <= 0) return;
+            window.API?.history?.save?.({
+                id: String(itemId),
+                type: itemType || 'movie',
+                sourceId: String(sourceId),
+                progress,
+                duration,
+                data: { sourceId: String(sourceId) }
+            })?.catch?.(() => { });
+        } catch (err) {
+            console.warn('[Native] onProgress save failed:', err?.message || err);
+        }
+    };
+
     // Route all playback to the native player once the page classes exist
     document.addEventListener('DOMContentLoaded', () => {
-        const nativePlay = (streamUrl, title, meta) => {
-            if (bridge.playVideoWithMeta && meta) {
+        const nativePlay = (streamUrl, title, meta, resumeSeconds) => {
+            const resume = Math.max(0, Math.floor(Number(resumeSeconds) || 0));
+            if (meta && resume > 0 && typeof bridge.playVideoResumable === 'function') {
+                // New APK: start at the saved offset and report position on exit.
+                bridge.playVideoResumable(
+                    streamUrl,
+                    title,
+                    String(meta.sourceId || ''),
+                    meta.itemType || '',
+                    String(meta.itemId || ''),
+                    resume
+                );
+                return;
+            }
+            if (meta && typeof bridge.playVideoWithMeta === 'function') {
                 bridge.playVideoWithMeta(
                     streamUrl,
                     title,
@@ -38,9 +87,9 @@
                     meta.itemType || '',
                     String(meta.itemId || '')
                 );
-            } else {
-                bridge.playVideo(streamUrl, title);
+                return;
             }
+            bridge.playVideo(streamUrl, title);
         };
 
         // play() may receive a ready URL or an async resolver returning
@@ -59,12 +108,10 @@
             }
         };
 
+        // History metadata used by the native resume callback (movies/episodes).
         const contentMeta = (content) => {
-            if (!content?.sourceId || !content?.id) return null;
-            if (content.type === 'movie') {
-                return { sourceId: content.sourceId, itemType: 'movie', itemId: content.id };
-            }
-            return { sourceId: content.sourceId, itemType: 'series', itemId: content.seriesId || content.id };
+            if (!content?.sourceId || content?.id == null) return null;
+            return { sourceId: content.sourceId, itemType: historyType(content), itemId: historyId(content) };
         };
 
         const channelMeta = (channel) => {
@@ -81,15 +128,14 @@
         if (window.WatchPage) {
             WatchPage.prototype.play = async function (content, streamUrl) {
                 try {
-                    // Keep lightweight history so Continue Watching still works.
-                    // (Live position sync from the native player is a separate
-                    // native-side change — see docs/ARCHITECTURE-RELIABILITY.md.)
+                    // Seed history so Continue Watching shows the title even if
+                    // the viewer quits before the native player reports back.
                     window.API?.history?.save?.({
                         id: content.id,
-                        type: content.type === 'movie' ? 'movie' : 'episode',
+                        type: historyType(content),
                         sourceId: content.sourceId,
-                        progress: 0,
-                        duration: 0,
+                        progress: Math.max(0, Math.floor(Number(content.resumeTime) || 0)),
+                        duration: Math.max(0, Math.floor(Number(content.durationHint) || 0)),
                         data: {
                             title: content.title,
                             subtitle: content.subtitle || '',
@@ -100,11 +146,11 @@
                             currentEpisode: content.currentEpisode || null,
                             containerExtension: content.containerExtension || 'mp4'
                         }
-                    }).catch(() => { });
+                    })?.catch?.(() => { });
                 } catch (e) { /* history is best-effort */ }
                 const url = await resolveStreamUrl(streamUrl);
                 if (!url) return;
-                nativePlay(url, nativeTitle(content), contentMeta(content));
+                nativePlay(url, nativeTitle(content), contentMeta(content), content.resumeTime);
             };
         }
 
@@ -113,7 +159,7 @@
                 this.currentChannel = channel;
                 const url = await resolveStreamUrl(streamUrl);
                 if (!url) return;
-                nativePlay(url, channel?.name || 'Live TV', channelMeta(channel));
+                nativePlay(url, channel?.name || 'Live TV', channelMeta(channel), 0);
             };
         }
 
