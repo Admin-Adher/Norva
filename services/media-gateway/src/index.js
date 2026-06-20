@@ -29,10 +29,21 @@ const MAX_SUBTITLE_TRACKS = clampInt(process.env.MAX_SUBTITLE_TRACKS, 32, 1, 64)
 const PROVIDER_SLOT_RELEASE_DELAY_MS = clampInt(process.env.PROVIDER_SLOT_RELEASE_DELAY_MS, 8_000, 0, 15_000);
 const STOP_CONFLICTING_SOURCE_SESSIONS = (process.env.STOP_CONFLICTING_SOURCE_SESSIONS || 'true') !== 'false';
 const STOP_CONFLICTING_OWNER_SESSIONS = (process.env.STOP_CONFLICTING_OWNER_SESSIONS || 'true') !== 'false';
+// When re-encoding from a seek, decode this many seconds BEFORE the requested
+// offset and discard them (output seek) so the encoder resyncs on a clean
+// keyframe first. Without it, an imprecise provider VOD seek starts decode
+// mid-GOP and the re-encoded output is full of "top block unavailable / corrupt
+// decoded frame" garbage (the "saturation" users see right after Resume).
+const SEEK_DECODE_PREROLL_SECONDS = clampInt(process.env.SEEK_DECODE_PREROLL_SECONDS, 12, 0, 120);
+// The provider allows a single concurrent connection; a fresh session can hit a
+// 401 while the previous connection's slot is still releasing. Retry startup a
+// few times (after re-evicting + waiting) before surfacing a 502 to the client.
+const PROVIDER_AUTH_RETRY_LIMIT = clampInt(process.env.PROVIDER_AUTH_RETRY_LIMIT, 2, 0, 5);
+const PROVIDER_AUTH_RETRY_DELAY_MS = clampInt(process.env.PROVIDER_AUTH_RETRY_DELAY_MS, 4_000, 0, 15_000);
 const FFMPEG_USER_AGENT = process.env.FFMPEG_USER_AGENT ||
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36 Norva/1.0';
 const MAX_LOG_TAIL = 12000;
-const GATEWAY_VERSION = 36;
+const GATEWAY_VERSION = 37;
 // Browser playback fetches HLS playlists/segments cross-origin, so these must
 // list every Norva web origin or the browser blocks the response (CORS). Keep
 // in sync with the relay's ALLOWED_ORIGINS (services/norva-relay/wrangler.jsonc).
@@ -254,14 +265,11 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
         };
 
         sessions.set(id, session);
-        session.ffmpeg = startFfmpeg(session);
 
         const hlsUrl = publicUrl(req, `/sessions/${id}/playlist.m3u8?token=${encodeURIComponent(accessToken)}`);
-        try {
-            await waitForPlaylist(session, STARTUP_TIMEOUT_MS);
-            if (session.status === 'starting') session.status = 'ready';
-        } catch (err) {
-            const detail = session.lastError || err.message || 'Playlist was not generated';
+        const started = await startSessionWithProviderRetry(session);
+        if (!started) {
+            const detail = session.lastError || 'Playlist was not generated';
             rememberFailure(session, detail);
             await stopSession(session);
             return res.status(502).json({
@@ -344,11 +352,57 @@ async function bootstrap() {
     });
 }
 
+function isProviderConcurrencyFailure(session) {
+    const text = String((session && session.lastError) || '').toLowerCase();
+    if (!text) return false;
+    // The Xtream provider answers a connection it can't grant (single slot still
+    // held) with 401/403, and a stale slot often surfaces as a timeout/reset.
+    return text.includes('401')
+        || text.includes('unauthorized')
+        || text.includes('403')
+        || text.includes('forbidden')
+        || text.includes('connection timed out')
+        || text.includes('connection reset')
+        || text.includes('-10053')
+        || text.includes('-10054');
+}
+
+// Start FFmpeg and wait for the first playlist. If startup fails because the
+// provider's single connection slot wasn't free yet (401/403/timeout), wait for
+// the slot to release and retry, instead of bubbling a 502 that pushes the web
+// client into a relay/direct fallback it can never play (e.g. MKV in-browser).
+async function startSessionWithProviderRetry(session) {
+    const maxAttempts = 1 + PROVIDER_AUTH_RETRY_LIMIT;
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        if (attempt > 1) {
+            await stopChildProcess(session.ffmpeg).catch(() => {});
+            await removeSessionDir(session.outputDir).catch(() => {});
+            await fsp.mkdir(session.outputDir, { recursive: true }).catch(() => {});
+            session.status = 'starting';
+            session.lastError = null;
+            session.logTail = '';
+        }
+        session.ffmpeg = startFfmpeg(session);
+        try {
+            await waitForPlaylist(session, STARTUP_TIMEOUT_MS);
+            if (session.status === 'starting') session.status = 'ready';
+            return true;
+        } catch (err) {
+            if (attempt >= maxAttempts || !isProviderConcurrencyFailure(session)) return false;
+            console.warn(`[media-gateway] provider slot busy for ${session.id} (attempt ${attempt}/${maxAttempts}); waiting ${PROVIDER_AUTH_RETRY_DELAY_MS}ms before retry`);
+            await sleep(PROVIDER_AUTH_RETRY_DELAY_MS);
+        }
+    }
+    return false;
+}
+
 function startFfmpeg(session) {
     const segmentPattern = path.join(session.outputDir, 'segment-%05d.ts');
     const audioArgs = audioArgsForSession(session);
     const audioMap = audioMapForSession(session);
     const inputProbeArgs = inputProbeArgsForSession(session);
+    const encodeVideo = session.mode === 'transcode' || !shouldCopyVideo(session);
+    const { preInputSeek, postInputSeek } = seekArgsForSession(session, encodeVideo);
     const args = [
         '-hide_banner',
         '-loglevel', 'warning',
@@ -363,8 +417,9 @@ function startFfmpeg(session) {
         '-headers', 'Accept: */*\r\nConnection: keep-alive\r\n',
         '-fflags', '+genpts',
         ...inputProbeArgs,
-        ...(session.seekOffset > 0 ? ['-ss', String(session.seekOffset)] : []),
+        ...preInputSeek,
         '-i', session.sourceUrl,
+        ...postInputSeek,
         '-map', '0:v:0?',
         '-map', audioMap,
         '-max_muxing_queue_size', '1024'
@@ -376,7 +431,7 @@ function startFfmpeg(session) {
     // probed so the codec is known; live isn't probed, so an unknown codec
     // is trusted as copyable (the web client already routes HEVC live to
     // full transcode by channel name).
-    if (session.mode === 'transcode' || !shouldCopyVideo(session)) {
+    if (encodeVideo) {
         args.push(
             '-c:v', 'libx264',
             '-preset', 'ultrafast',
@@ -413,7 +468,7 @@ function startFfmpeg(session) {
         session.playlistPath
     );
 
-    appendSubtitleOutputs(args, session);
+    appendSubtitleOutputs(args, session, postInputSeek);
 
     const child = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'ignore', 'pipe'] });
     session.status = 'starting';
@@ -453,6 +508,26 @@ function startFfmpeg(session) {
     return child;
 }
 
+function seekArgsForSession(session, encodeVideo) {
+    const seekOffset = Number(session.seekOffset) > 0 ? Math.floor(Number(session.seekOffset)) : 0;
+    if (seekOffset <= 0) return { preInputSeek: [], postInputSeek: [] };
+    // Copy mode can't output-seek (it never decodes); it copies from the
+    // keyframe at/before the offset, which is already clean. Only the encode
+    // path needs the accurate two-stage seek: a coarse input seek to a point
+    // before the target (fast, snaps near a keyframe) plus a fine output seek
+    // over the DECODED stream, so the encoder resyncs on a clean keyframe and
+    // only emits cleanly-decoded frames from the requested offset onward.
+    if (!encodeVideo) {
+        return { preInputSeek: ['-ss', String(seekOffset)], postInputSeek: [] };
+    }
+    const coarse = Math.max(0, seekOffset - SEEK_DECODE_PREROLL_SECONDS);
+    const fine = seekOffset - coarse;
+    return {
+        preInputSeek: coarse > 0 ? ['-ss', String(coarse)] : [],
+        postInputSeek: fine > 0 ? ['-ss', String(fine)] : []
+    };
+}
+
 function inputProbeArgsForSession(session) {
     const live = isLiveSession(session);
     return [
@@ -485,12 +560,16 @@ function videoModeForSession(session) {
     return (session.mode === 'transcode' || !shouldCopyVideo(session)) ? 'encode' : 'copy';
 }
 
-function appendSubtitleOutputs(args, session) {
+function appendSubtitleOutputs(args, session, postInputSeek = []) {
     const tracks = subtitleTracksForSession(session);
     if (!tracks.length) return;
 
     for (const track of tracks) {
         args.push(
+            // Output seek is per-output: re-apply the same fine seek used for the
+            // HLS output so extracted subtitles stay aligned with the seeked
+            // video/audio instead of starting SEEK_DECODE_PREROLL_SECONDS early.
+            ...postInputSeek,
             '-map', `0:${track.index}?`,
             '-c:s', 'webvtt',
             '-flush_packets', '1',

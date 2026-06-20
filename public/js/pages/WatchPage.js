@@ -2874,14 +2874,20 @@ class WatchPage {
         this.setVolumeFromStorage();
     }
 
-    getGatewaySeekPreRoll(target, requestedPreRoll = 90) {
+    getGatewaySeekPreRoll(target, requestedPreRoll = 0) {
         const safeTarget = Math.max(0, Math.floor(Number(target) || 0));
         if (safeTarget <= 5) return 0;
         const requested = Math.max(0, Math.floor(Number(requestedPreRoll) || 0));
-        return Math.min(safeTarget, requested || 90);
+        // The gateway now emits clean frames at the exact requested offset
+        // (accurate two-stage seek), so the default pre-roll is 0: no seek-ahead
+        // that stalls the player while the transcoder grinds up to the target
+        // (the old 90s pre-roll was the main cause of the slow/"buffering"
+        // Resume). A non-zero value is only passed as a fallback when a provider
+        // range-seek failure is actually detected.
+        return Math.min(safeTarget, requested);
     }
 
-    getGatewaySeekPlan(targetTime, requestedPreRoll = 90) {
+    getGatewaySeekPlan(targetTime, requestedPreRoll = 0) {
         const target = Math.max(0, Math.floor(Number(targetTime) || 0));
         const preRoll = this.getGatewaySeekPreRoll(target, requestedPreRoll);
         const sessionStart = Math.max(0, target - preRoll);
@@ -2899,7 +2905,7 @@ class WatchPage {
         const requestId = Number.isInteger(options.requestId)
             ? options.requestId
             : ++this._gatewaySeekRequestId;
-        const seekPlan = this.getGatewaySeekPlan(targetTime, options.preRollSeconds ?? 90);
+        const seekPlan = this.getGatewaySeekPlan(targetTime, options.preRollSeconds ?? 0);
         const { target, preRoll, sessionStart, localSeekTarget } = seekPlan;
         const autoplay = !this.video?.paused;
         const itemType = this.content.type === 'series' ? 'series' : 'movie';
@@ -3503,11 +3509,24 @@ class WatchPage {
         return 'Gateway session not found.';
     }
 
+    isGatewayOnlyContainer() {
+        const container = String(this.containerExtension || this.content?.containerExtension || '')
+            .split('?')[0].split('#')[0].toLowerCase();
+        // Mirrors api.js requiresGatewayForContainer: the browser can't play
+        // these directly, so relay/direct fallbacks never work — only the
+        // gateway transcode can. Skipping them avoids the "Media error" storm.
+        return ['mkv', 'avi', 'wmv', 'flv', 'mov', 'webm', 'ts', 'mpeg', 'mpg', 'vob'].includes(container);
+    }
+
     async retryWithCloudRelay(message) {
         if (!this.isCloudPlaybackMode()) return false;
         if (this._cloudRelayFallbackTried) return false;
         if (!this.isFormatPlaybackError(message)) return false;
         if (!this.content?.sourceId || !this.content?.id) return false;
+        // Relay yields a direct provider stream the browser can't decode for
+        // gateway-only containers (MKV/AVI/…) — don't even try; let the gateway
+        // transcode retry (already attempted first) own the recovery.
+        if (this.isGatewayOnlyContainer()) return false;
         const gatewaySessionGone = /Gateway session (not found|expired)/i.test(message || '');
         if (!gatewaySessionGone && (this.currentPlaybackMode === 'gateway-session'
             || this.isGatewayPlaybackUrl(this.currentUrl)
@@ -4194,7 +4213,7 @@ class WatchPage {
         if (!selected || !this.content?.sourceId || !this.content?.id) return false;
 
         const targetPosition = Math.max(0, Math.floor(this.getPlaybackPosition()) - 3);
-        const preRoll = this.getGatewaySeekPreRoll(targetPosition, 90);
+        const preRoll = this.getGatewaySeekPreRoll(targetPosition, 0);
         const sessionStart = Math.max(0, targetPosition - preRoll);
         const localSeekTarget = Math.max(0, targetPosition - sessionStart);
         const autoplay = !this.video?.paused;

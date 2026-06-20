@@ -1095,6 +1095,10 @@ const CloudAdapter = (() => {
                 const forcedMode = query.get('mode') || '';
                 const preferredMode = forcedMode || (isVodPlayback ? 'transcode' : (requestedCloudMode || 'relay'));
                 const needsGateway = requiresGatewayForContainer(type, container);
+                // VOD whose container the browser can't play directly (mkv/avi/…):
+                // relay/direct can never work for it, so failures must stay on the
+                // gateway transcode path instead of cascading into "Media error".
+                const gatewayOnlyVod = isVodPlayback && needsGateway;
                 const mode = forcedMode || (((isVodPlayback || needsGateway) && preferredMode !== 'direct') ? 'transcode' : preferredMode);
                 const playbackHint = playbackHintFromQuery(query, container, type);
                 if ((type === 'series' || type === 'movie') && !playbackHint.gatewayMode) {
@@ -1139,11 +1143,16 @@ const CloudAdapter = (() => {
                         requiresTranscode: mode === 'transcode'
                     });
                     if (mode === 'transcode' && !payload.playback?.url && preferredMode !== 'direct') {
-                        payload = await cloudPlaybackApi().createSession({
-                            ...baseSession,
-                            mode: 'relay',
-                            requiresRelay: true
-                        });
+                        // Gateway-only VOD can't play via relay or direct in the
+                        // browser, so retry the transcode instead of cascading
+                        // into an unplayable stream.
+                        payload = gatewayOnlyVod
+                            ? await createGatewayTranscodeSession()
+                            : await cloudPlaybackApi().createSession({
+                                ...baseSession,
+                                mode: 'relay',
+                                requiresRelay: true
+                            });
                     }
                 } catch (error) {
                     if (mode === 'direct') throw error;
@@ -1153,6 +1162,17 @@ const CloudAdapter = (() => {
                         } catch (transcodeError) {
                             if (!transcodeError.status || transcodeError.status < 500) throw transcodeError;
                         }
+                    }
+                    // Gateway-only VOD is unplayable via relay/direct in the
+                    // browser, so never cascade into them — that is exactly what
+                    // produced the ~30s "Media error" storm on Resume. The gateway
+                    // already retries provider 401s internally; give the transcode
+                    // one more try, otherwise surface the failure.
+                    if (!payload && gatewayOnlyVod) {
+                        if (error.status === 500 || error.status === 502 || error.status === 503 || error.status === 504) {
+                            payload = await createGatewayTranscodeSession();
+                        }
+                        if (!payload) throw error;
                     }
                     if (!payload && mode === 'transcode' && preferredMode !== 'direct') {
                         try {
