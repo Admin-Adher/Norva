@@ -1,71 +1,72 @@
-# Norva TV — Android Phone App
+# Norva — Android Phone / Tablet App
 
-A thin WebView wrapper for phones (portrait mode). The recommended flow opens
-Norva Account first, then the same Norva Watch web cloud app used in the browser
-(`https://norva-eight.vercel.app/?mobile=1#home`). This includes Home, Live TV,
-Movies, Series, Watch playback, Account and Settings. The local connector remains
-available as an advanced mode.
-It also handles `norva://pair` deep links for older local-connector pairing URLs.
+A **native player** app for phones and tablets. It opens the Norva cloud web app
+(`https://norva.tv/app.html?mobile=1`) for browsing, account and cross-device
+sync (resume / history / favorites), but hands actual **playback to a native
+ExoPlayer (media3)**. So movies play with the device's hardware decoders
+(MKV / HEVC / AC3…) straight from your **home network (residential IP)** — the
+IPTV provider never sees the cloud datacenter, which it blocks.
+
+This mirrors the Android TV client: the web app detects the native bridge
+(`window.NorvaTVCloud`), resolves a **direct** provider URL via the cloud, and
+plays it natively. The player reports its final position back, which is saved to
+the cloud history — so a title stopped on the phone resumes on the TV / another
+device, and vice-versa.
+
+The local connector (advanced) and `norva://pair` deep links still work.
 
 ## Prerequisites
 
-- Android Studio (or the Android command-line SDK tools)
-- Java 11+
-- A device or emulator running Android 8.0+ (API 26+)
+- Android Studio (or the Android command-line SDK tools) + JDK 17
+- Android SDK platform 35
+- A device/emulator running Android 6.0+ (API 23+)
 
 ## Build the APK
 
-This project uses the same manual (no Gradle) build process as the Android TV client. Steps:
+This is a standard Gradle project (same setup as `clients/android-tv`).
 
 ```bash
-# 1. Compile
-javac -source 8 -target 8 \
-  -classpath $ANDROID_SDK/platforms/android-34/android.jar \
-  app/src/main/java/tv/nodecast/mobile/MainActivity.java \
-  -d build/classes
-
-# 2. Package resources
-$ANDROID_SDK/build-tools/34.0.0/aapt package -f -m \
-  -S app/src/main/res \
-  -M app/src/main/AndroidManifest.xml \
-  -I $ANDROID_SDK/platforms/android-34/android.jar \
-  -J build/gen \
-  -F build/norva-mobile-unsigned.apk
-
-# 3. Add classes
-dx --dex --output=build/classes.dex build/classes
-zip -j build/norva-mobile-unsigned.apk build/classes.dex
-
-# 4. Sign (debug)
-apksigner sign --ks ~/.android/debug.keystore \
-  --ks-pass pass:android \
-  --out build/norva-mobile.apk \
-  build/norva-mobile-unsigned.apk
+cd clients/android-phone
+gradle :app:assembleDebug      # output: app/build/outputs/apk/debug/app-debug.apk
 ```
 
-Or open the `clients/android-phone/` folder in Android Studio and use **Build → Build Bundle(s)/APK(s) → Build APK(s)**.
+Or open `clients/android-phone/` in Android Studio → **Build → Build APK(s)**.
+
+CI also builds it on every push to `main`: download the **Norva-AndroidPhone**
+artifact from the *Build Norva* workflow run.
 
 ## Install on device
 
 ```bash
-adb install build/norva-mobile.apk
+adb install app/build/outputs/apk/debug/app-debug.apk
 ```
+
+Sign in with your **Norva cloud account** so the app runs in cloud mode (catalog
++ resume sync). Playback then uses the native player from your home network.
+
+## How playback works (residential, no datacenter)
+
+1. The WebView loads the cloud app and injects `window.NorvaTVCloud`.
+2. On play, the web resolves the **direct provider URL** via the cloud and calls
+   `playVideoResumable(url, title, sourceId, itemType, itemId, resumeSeconds)`.
+3. `PlayerActivity` (ExoPlayer) plays it from the device's residential IP,
+   seeking to `resumeSeconds`.
+4. On exit it returns the final position → `window.__norvaNative.onProgress(...)`
+   → saved to the cloud history for cross-device resume.
+
+`playVideoResumable` is feature-detected by the web, so older app builds keep
+working (playback without resume).
 
 ## How the deep link works
 
-When a user scans a QR code that encodes a `norva://pair?hub=<url>&code=<code>` URI (from any camera app or QR reader), Android looks for an app that handles the `norva` scheme and `pair` host — that's this app.
-
-The `MainActivity.onCreate` method:
-1. Detects the `ACTION_VIEW` intent with `norva://pair` URI.
-2. Extracts `hub` and `code` query parameters.
-3. Saves the hub URL to `SharedPreferences`.
-4. Loads `<hub>/pair-approve.html?code=<code>` in the WebView, where the user can approve pairing.
+A `norva://pair?hub=<url>&code=<code>` URI (from a QR scan) opens this app:
+`MainActivity` extracts `hub` + `code`, saves the hub URL, and loads
+`<hub>/pair-approve.html?code=<code>` to approve pairing.
 
 ## Manual local connector
 
-From the setup panel, enter a connector address (e.g. `http://192.168.1.20:3000`) and tap **Connect local connector**.
-
-To change the connector later, press the device **MENU** key from inside the app.
+From the setup panel, enter a connector address (e.g. `http://192.168.1.20:3000`)
+and tap **Connect local connector**. Press the device **MENU** key to change it.
 
 ## Permissions
 
@@ -74,8 +75,9 @@ To change the connector later, press the device **MENU** key from inside the app
 | `INTERNET` | Connect to Norva |
 | `CAMERA` | QR code scanning inside the WebView |
 
-Camera hardware is marked `required="false"` so the app installs on devices without cameras.
+Camera hardware is `required="false"` so the app installs on devices without one.
 
 ## Cleartext traffic
 
-`android:usesCleartextTraffic="true"` and the `network_security_config.xml` allow plain HTTP to local-network IPs (e.g. `http://192.168.x.x`). HTTPS connectors work without any changes.
+`android:usesCleartextTraffic="true"` + `network_security_config.xml` allow plain
+HTTP to local-network IPs (e.g. `http://192.168.x.x`). HTTPS works unchanged.
