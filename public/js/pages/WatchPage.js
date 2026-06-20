@@ -819,6 +819,69 @@ class WatchPage {
         }
     }
 
+    getHistoryResumePosition(item = {}) {
+        const data = item.data || {};
+        const progress = item.progress || item.progress_seconds || data.progress || 0;
+        const duration = item.duration || item.duration_seconds || data.duration || data.durationHint || 0;
+        return this.getResumeRestorePosition(progress, duration);
+    }
+
+    pickCloudResumeHistoryItem(items = []) {
+        return (items || [])
+            .map((item, index) => ({ item, index }))
+            .filter(({ item }) => {
+                const data = item.data || {};
+                const type = item.item_type || item.itemType || item.type;
+                const sourceId = item.source_id || item.sourceId || data.sourceId;
+                const streamId = item.item_id || item.itemId || item.stream_id || item.streamId || item.series_id;
+                const isPlayable = type === 'movie' || type === 'episode' || type === 'series';
+                return isPlayable && sourceId && streamId && this.getHistoryResumePosition(item) > 0;
+            })
+            .sort((a, b) => {
+                const aTime = Date.parse(a.item.updated_at || a.item.watched_at || a.item.updatedAt || a.item.watchedAt || '') || 0;
+                const bTime = Date.parse(b.item.updated_at || b.item.watched_at || b.item.updatedAt || b.item.watchedAt || '') || 0;
+                return (bTime - aTime) || (a.index - b.index);
+            })[0]?.item || null;
+    }
+
+    async restoreFromCloudHistory() {
+        if (this.content || this._resumeRestorePromise) return this._resumeRestorePromise;
+        const homePage = this.app?.pages?.home;
+        if (!homePage?.playItem) return null;
+
+        this._resumeRestorePromise = (async () => {
+            const history = window.API?.history?.getAll
+                ? await window.API.history.getAll(20)
+                : await window.API.request('GET', '/history?limit=20');
+            const item = this.pickCloudResumeHistoryItem(Array.isArray(history) ? history : []);
+            if (!item) return null;
+
+            const data = item.data || {};
+            const title = data.title || item.title || item.name || item.item_name || '';
+            const subtitle = data.subtitle || '';
+            this.titleEl.textContent = title;
+            this.subtitleEl.textContent = subtitle;
+            this.showLoading();
+            console.info('[WatchPage] Restoring playback from cloud history after refresh.', {
+                itemId: item.item_id || item.itemId || item.id,
+                resumeOffset: this.getHistoryResumePosition(item)
+            });
+
+            await homePage.playItem(item, true);
+            return true;
+        })()
+            .catch(error => {
+                console.warn('[WatchPage] Could not restore cloud playback history after refresh:', error?.message || error);
+                this.showPlaybackError('Playback failed after refresh. Try opening the title again.');
+                return false;
+            })
+            .finally(() => {
+                this._resumeRestorePromise = null;
+            });
+
+        return this._resumeRestorePromise;
+    }
+
     findResumeSnapshotEpisode(snapshot) {
         const episodeId = snapshot?.content?.id;
         const episodesBySeason = snapshot?.content?.seriesInfo?.episodes;
@@ -865,7 +928,7 @@ class WatchPage {
     async restoreFromResumeSnapshot() {
         if (this.content || this._resumeRestorePromise) return this._resumeRestorePromise;
         const snapshot = this.readResumeSnapshot();
-        if (!snapshot) return null;
+        if (!snapshot) return this.restoreFromCloudHistory();
 
         this._resumeRestorePromise = (async () => {
             const content = {
@@ -5329,6 +5392,7 @@ class WatchPage {
             : Math.floor(this.getResumeSnapshotPosition());
 
         if (isNaN(progress) || isNaN(duration) || duration <= 0) return;
+        this.saveResumeSnapshot({ position: progress });
 
         try {
             const data = {
