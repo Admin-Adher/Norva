@@ -150,14 +150,19 @@ async function streamRemux(id, mime) {
     log(`remux fini: ${(written/1048576).toFixed(2)} Mo écrits vers MediaSource`);
 
     let settled = false;
-    vid.onloadeddata = () => { if (settled) return; settled = true;
+    const onOk = () => { if (settled) return; settled = true;
       setStatus(`<span class="ok">✅ LECTURE</span> — ${vid.videoWidth}×${vid.videoHeight}, durée ${vid.duration ? vid.duration.toFixed(1)+'s' : '?'}. Teste « ⏩ Sauter à 6 s ».`);
       document.getElementById('seek').disabled = false;
       vid.play().catch(()=>{});
     };
+    vid.addEventListener('loadedmetadata', onOk);
+    vid.addEventListener('loadeddata', onOk);
+    vid.addEventListener('canplay', onOk);
     vid.onerror = () => { if (settled) return; settled = true;
       setStatus(`<span class="no">✖ &lt;video&gt; refuse le flux</span> (code ${vid.error?.code}, ${vid.error?.message||''}) — voir journal`); };
-    setTimeout(() => { if (!settled) setStatus('<span class="no">✖ pas de lecture</span> — colle le journal stp'); }, 9000);
+    setTimeout(() => { if (settled) return;
+      if (vid.readyState >= 1 && vid.duration > 0) onOk();
+      else setStatus('<span class="no">✖ pas de lecture</span> — colle le journal stp'); }, 12000);
   } catch (e) {
     let desc;
     if (e && (e.stack || e.message)) desc = e.stack || e.message;
