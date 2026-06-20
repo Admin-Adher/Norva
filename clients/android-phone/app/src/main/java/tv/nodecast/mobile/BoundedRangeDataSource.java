@@ -2,7 +2,6 @@ package tv.nodecast.mobile;
 
 import android.net.Uri;
 
-import androidx.annotation.Nullable;
 import androidx.media3.common.C;
 import androidx.media3.common.util.UnstableApi;
 import androidx.media3.datasource.DataSource;
@@ -82,7 +81,6 @@ public final class BoundedRangeDataSource implements DataSource {
         upstream.addTransferListener(transferListener);
     }
 
-    @Nullable
     @Override
     public Uri getUri() {
         return upstream.getUri();
