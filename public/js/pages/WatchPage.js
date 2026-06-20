@@ -139,6 +139,10 @@ class WatchPage {
         this._suspendResumeSnapshotSave = false;
         this._lastKnownPlaybackPosition = 0;
         this._lastKnownPlaybackDuration = 0;
+        this.playbackErrorRefreshKey = 'norva-watch-error-refresh-v1';
+        this.playbackErrorRefreshDelayMs = 2000;
+        this.playbackErrorRefreshGuardMs = 60000;
+        this._playbackErrorRefreshTimer = null;
 
         // Overlay timer
         this.overlayTimeout = null;
@@ -3685,14 +3689,24 @@ class WatchPage {
 
         const friendly = this.getFriendlyPlaybackError(safeMessage);
         const detail = this.escapePlaybackDetail(safeMessage);
+        const refreshScheduled = this.schedulePlaybackErrorRefresh();
+        const refreshHint = refreshScheduled
+            ? 'La page va se rafraichir automatiquement dans 2 secondes. Si le probleme persiste, rafraichis la page manuellement.'
+            : 'Si le probleme persiste, rafraichis la page manuellement.';
 
         errorEl.innerHTML = `
             <div class="watch-error-box">
                 <p class="watch-error-title">⚠ Unable to play this title</p>
                 <p class="watch-error-msg">${friendly}</p>
+                <p class="watch-error-refresh">${refreshHint}</p>
+                <button type="button" class="watch-error-refresh-btn" id="watch-error-refresh-btn">Rafraichir maintenant</button>
                 ${detail ? `<p class="watch-error-detail">${detail}</p>` : ''}
             </div>`;
         errorEl.classList.remove('hidden');
+        document.getElementById('watch-error-refresh-btn')?.addEventListener('click', () => {
+            this.clearPlaybackErrorRefreshTimer();
+            window.location.reload();
+        });
 
         // HLS/transcode sessions can recover just after an error callback fired.
         // Re-check shortly so a stale fatal banner never stays over active video.
@@ -3703,7 +3717,57 @@ class WatchPage {
 
     hidePlaybackError() {
         this.clearDeferredPlaybackError();
+        this.clearPlaybackErrorRefreshTimer();
         document.getElementById('watch-error')?.classList.add('hidden');
+    }
+
+    getPlaybackErrorRefreshGuardKey() {
+        const contentKey = [
+            this.content?.sourceId,
+            this.content?.type,
+            this.content?.id
+        ].filter(Boolean).join(':');
+        return contentKey || window.location.href;
+    }
+
+    schedulePlaybackErrorRefresh() {
+        this.clearPlaybackErrorRefreshTimer();
+
+        const key = this.getPlaybackErrorRefreshGuardKey();
+        const now = Date.now();
+        try {
+            const previous = JSON.parse(sessionStorage.getItem(this.playbackErrorRefreshKey) || 'null');
+            if (previous?.key === key && now - Number(previous.at || 0) < this.playbackErrorRefreshGuardMs) {
+                return false;
+            }
+            sessionStorage.setItem(this.playbackErrorRefreshKey, JSON.stringify({ key, at: now }));
+        } catch (error) {
+            console.warn('[WatchPage] Auto-refresh guard unavailable:', error?.message || error);
+            return false;
+        }
+
+        this._playbackErrorRefreshTimer = setTimeout(() => {
+            this._playbackErrorRefreshTimer = null;
+            const errorEl = document.getElementById('watch-error');
+            const errorVisible = errorEl && !errorEl.classList.contains('hidden');
+            if (!errorVisible || this.hasCurrentMedia()) return;
+            try {
+                this.trackPlaybackPosition({ force: true });
+                this.saveResumeSnapshotThrottled(true);
+            } catch (_) {
+                // Continue with the refresh even if local persistence fails.
+            }
+            window.location.reload();
+        }, this.playbackErrorRefreshDelayMs);
+
+        return true;
+    }
+
+    clearPlaybackErrorRefreshTimer() {
+        if (this._playbackErrorRefreshTimer) {
+            clearTimeout(this._playbackErrorRefreshTimer);
+            this._playbackErrorRefreshTimer = null;
+        }
     }
 
     shouldDeferPlaybackError(message) {

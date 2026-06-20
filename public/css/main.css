@@ -8820,6 +8820,33 @@ kbd {
   margin-bottom: var(--space-sm);
 }
 
+.watch-error-refresh {
+  color: var(--color-text-muted);
+  font-size: 0.82rem;
+  line-height: 1.4;
+  margin-bottom: var(--space-md);
+}
+
+.watch-error-refresh-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  padding: 0 var(--space-md);
+  margin-bottom: var(--space-sm);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: var(--color-primary);
+  color: #fff;
+  font-size: 0.84rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.watch-error-refresh-btn:hover {
+  filter: brightness(1.12);
+}
+
 .watch-error-detail {
   color: var(--color-text-muted);
   font-size: 0.75rem;
