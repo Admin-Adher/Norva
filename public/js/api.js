@@ -1029,7 +1029,10 @@ const CloudAdapter = (() => {
                 const needsGateway = requiresGatewayForContainer(type, container);
                 const mode = forcedMode || (((isVodPlayback || needsGateway) && preferredMode !== 'direct') ? 'transcode' : preferredMode);
                 const playbackHint = playbackHintFromQuery(query, container, type);
-                if (type === 'series' && !playbackHint.gatewayMode) {
+                if ((type === 'series' || type === 'movie') && !playbackHint.gatewayMode) {
+                    // VOD defaults to remux: the gateway copies browser-safe video
+                    // (H.264) for a fast start and only re-encodes when needed
+                    // (HEVC, etc.), transcoding audio separately as required.
                     playbackHint.gatewayMode = 'remux';
                 }
                 const cloudSourceId = await resolveSourceId(sourceId);

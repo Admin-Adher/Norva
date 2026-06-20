@@ -32,7 +32,7 @@ const STOP_CONFLICTING_OWNER_SESSIONS = (process.env.STOP_CONFLICTING_OWNER_SESS
 const FFMPEG_USER_AGENT = process.env.FFMPEG_USER_AGENT ||
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36 Norva/1.0';
 const MAX_LOG_TAIL = 12000;
-const GATEWAY_VERSION = 35;
+const GATEWAY_VERSION = 36;
 // Browser playback fetches HLS playlists/segments cross-origin, so these must
 // list every Norva web origin or the browser blocks the response (CORS). Keep
 // in sync with the relay's ALLOWED_ORIGINS (services/norva-relay/wrangler.jsonc).
@@ -275,6 +275,7 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             status: session.status,
             mode: session.mode,
             audioMode: audioModeForSession(session),
+            videoMode: videoModeForSession(session),
             audioStreamIndex: session.audioStreamIndex,
             codecProfile: session.codecProfile,
             codecProfileSource: session.codecProfileSource || null,
@@ -369,7 +370,13 @@ function startFfmpeg(session) {
         '-max_muxing_queue_size', '1024'
     ];
 
-    if (session.mode === 'transcode') {
+    // Encode video when the session is in transcode mode OR when a remux
+    // session's source video isn't browser-safe (e.g. HEVC/H.265, MPEG-2):
+    // copying those into HLS yields a stream Chrome can't decode. VOD is
+    // probed so the codec is known; live isn't probed, so an unknown codec
+    // is trusted as copyable (the web client already routes HEVC live to
+    // full transcode by channel name).
+    if (session.mode === 'transcode' || !shouldCopyVideo(session)) {
         args.push(
             '-c:v', 'libx264',
             '-preset', 'ultrafast',
@@ -474,6 +481,10 @@ function audioModeForSession(session) {
     return shouldCopyAudio(session) ? 'copy' : 'transcode';
 }
 
+function videoModeForSession(session) {
+    return (session.mode === 'transcode' || !shouldCopyVideo(session)) ? 'encode' : 'copy';
+}
+
 function appendSubtitleOutputs(args, session) {
     const tracks = subtitleTracksForSession(session);
     if (!tracks.length) return;
@@ -533,6 +544,28 @@ function shouldCopyAudio(session) {
     if (channels && channels > 2) return false;
     if (isKnownUnsafeAudio(codec, profile)) return false;
     return isKnownBrowserSafeAudio(codec, profile);
+}
+
+function shouldCopyVideo(session) {
+    // Only consulted for remux sessions (transcode always encodes). Copy the
+    // video stream straight into HLS only when it's a codec browsers can play
+    // via MSE (H.264). Anything else (HEVC/H.265, MPEG-2, VP9, AV1, ...) must
+    // be re-encoded. Unknown codec (live: not probed to respect the provider's
+    // single-connection limit) is trusted as copyable — the web client already
+    // routes HEVC live channels to full transcode by name.
+    const codec = normalizeCodecToken(
+        session.videoCodec ||
+        session.codecProfile?.videoCodec ||
+        session.codecProfile?.video_codec ||
+        session.codecProfile?.video
+    );
+    if (!codec) return true;
+    return isKnownBrowserSafeVideo(codec);
+}
+
+function isKnownBrowserSafeVideo(codec) {
+    const normalized = normalizeCodecToken(codec);
+    return normalized.includes('h264') || normalized.includes('avc');
 }
 
 function audioMapForSession(session) {
