@@ -378,7 +378,11 @@
             : { error: await response.text().catch(() => '') };
 
         if (!response.ok) {
-            const message = payload.error || payload.message || `Norva responded with ${response.status}`;
+            const baseMessage = payload.error || payload.message || `Norva responded with ${response.status}`;
+            const detail = extractUpstreamDetail(payload.details);
+            const message = detail && !baseMessage.includes(detail)
+                ? `${baseMessage} — ${detail}`.slice(0, 400)
+                : baseMessage;
             const error = new Error(message);
             error.status = response.status;
             error.payload = payload;
@@ -461,6 +465,22 @@
         }
     }
 
+    // Pull the deepest upstream detail out of an error payload so callers see
+    // the real cause (e.g. the provider "401 Unauthorized" the cloud gateway
+    // reports) instead of only the generic top-level "Media gateway refused the
+    // session". The UI keys its friendly messages off this text.
+    function extractUpstreamDetail(value, depth = 0) {
+        if (!value || depth > 4) return '';
+        if (typeof value === 'string') return value.trim();
+        if (typeof value !== 'object') return '';
+        const parts = [];
+        for (const key of ['details', 'error', 'message', 'reason']) {
+            const nested = extractUpstreamDetail(value[key], depth + 1);
+            if (nested) parts.push(nested);
+        }
+        return parts.join(' ').trim();
+    }
+
     async function requestToBase(baseUrl, method, path, body, options = {}) {
         const headers = {
             'Content-Type': 'application/json',
@@ -481,7 +501,11 @@
             : { error: await response.text().catch(() => '') };
 
         if (!response.ok) {
-            const message = payload.error || payload.message || `Norva responded with ${response.status}`;
+            const baseMessage = payload.error || payload.message || `Norva responded with ${response.status}`;
+            const detail = extractUpstreamDetail(payload.details);
+            const message = detail && !baseMessage.includes(detail)
+                ? `${baseMessage} — ${detail}`.slice(0, 400)
+                : baseMessage;
             const error = new Error(message);
             error.status = response.status;
             error.payload = payload;

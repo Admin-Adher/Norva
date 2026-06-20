@@ -1800,15 +1800,17 @@ class WatchPage {
 
     getFriendlyPlaybackError(message) {
         const text = this.sanitizePlaybackMessage(message);
+        const cloud = this.isCloudPlaybackMode();
 
         if (/429|Too Many Requests|Many Requests|rate limit/i.test(text)) {
-            return 'The provider is rate limiting this stream (429 Too Many Requests). Close other players, wait a bit, then try again.';
+            return cloud
+                ? "Le fournisseur limite les connexions (429). L'IP du serveur cloud est probablement bridée : ferme les autres lectures, ou lis ce titre depuis l'app TV/mobile (ou un hub local) sur ton réseau, puis réessaie."
+                : 'The provider is rate limiting this stream (429 Too Many Requests). Close other players, wait a bit, then try again.';
         }
-        if (/401|Unauthorized/i.test(text)) {
-            return 'The provider refused the stream (401 Unauthorized). Your IPTV account may be blocked, expired, or limited to one connection.';
-        }
-        if (/403|Forbidden/i.test(text)) {
-            return 'Access denied by the provider (403).';
+        if (/401|Unauthorized|403|Forbidden/i.test(text)) {
+            return cloud
+                ? "Le fournisseur a refusé le flux depuis le serveur cloud (401/403). En général l'IP datacenter est bloquée alors que ton compte fonctionne sur ton réseau (ex. TiviMate). → Lis ce titre depuis l'app TV/mobile ou un hub local sur ton réseau, ou réessaie plus tard."
+                : 'The provider refused the stream (401/403). Check your IPTV subscription, connection limit, or that this device is allowed.';
         }
         if (/404|not found/i.test(text)) {
             return 'Stream not found on the provider (404). This title may have been removed.';
@@ -3751,17 +3753,24 @@ class WatchPage {
 
         const friendly = this.getFriendlyPlaybackError(safeMessage);
         const detail = this.escapePlaybackDetail(safeMessage);
-        const refreshScheduled = this.schedulePlaybackErrorRefresh();
-        const refreshHint = refreshScheduled
-            ? 'La page va se rafraichir automatiquement dans 2 secondes. Si le probleme persiste, rafraichis la page manuellement.'
-            : 'Si le probleme persiste, rafraichis la page manuellement.';
+        // A provider auth / rate-limit block (401/403/429) does not clear on a
+        // reload — auto-refreshing just spins on the same blocked path. Skip it
+        // and point the user to a residential path (native app / local hub).
+        const providerBlocked = this.isConnectionLimitError(safeMessage);
+        const refreshScheduled = providerBlocked ? false : this.schedulePlaybackErrorRefresh();
+        const refreshHint = providerBlocked
+            ? "Inutile de rafraichir : ce blocage vient du fournisseur. Lis ce titre depuis l'app TV/mobile ou un hub local (ton réseau), ou réessaie plus tard."
+            : refreshScheduled
+                ? 'La page va se rafraichir automatiquement dans 2 secondes. Si le probleme persiste, rafraichis la page manuellement.'
+                : 'Si le probleme persiste, rafraichis la page manuellement.';
+        const refreshBtnLabel = providerBlocked ? 'Réessayer' : 'Rafraichir maintenant';
 
         errorEl.innerHTML = `
             <div class="watch-error-box">
                 <p class="watch-error-title">⚠ Unable to play this title</p>
                 <p class="watch-error-msg">${friendly}</p>
                 <p class="watch-error-refresh">${refreshHint}</p>
-                <button type="button" class="watch-error-refresh-btn" id="watch-error-refresh-btn">Rafraichir maintenant</button>
+                <button type="button" class="watch-error-refresh-btn" id="watch-error-refresh-btn">${refreshBtnLabel}</button>
                 ${detail ? `<p class="watch-error-detail">${detail}</p>` : ''}
             </div>`;
         errorEl.classList.remove('hidden');
