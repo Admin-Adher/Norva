@@ -1158,29 +1158,26 @@ class WatchPage {
         this._lastPauseTelemetryAt = 0;
         this._handlingPlaybackFailure = false;
 
-        // Stop any Live TV playback before starting movie/series
-        await this.app?.player?.stop?.();
-
         // Reset state
         this.cancelNextEpisode();
         this.nextEpisodeDismissed = false;
 
-        // Navigate to watch page
+        // Paint the player shell (poster + title + loading animation) FIRST so the
+        // player appears instantly on click — before stopping the previous stream
+        // or waiting on the gateway session. The stream loads into this shell.
         this.app.navigateTo('watch', true);
-
-        // Scroll to top
         document.getElementById('page-watch')?.scrollTo(0, 0);
-
-        // Update title bar
         this.titleEl.textContent = content.title || '';
         this.subtitleEl.textContent = content.subtitle || '';
         this.saveResumeSnapshot({ playback: playbackMetadata, position: this.resumeTime || 0 });
-
-        // Paint the player shell (poster + title + loading animation) right
-        // away so the player appears instantly on click, before we wait on the
-        // gateway session. The stream then loads into this already-visible shell.
         this.renderDetails();
         this.showLoading();
+
+        // Now stop any previous (Live TV) playback, so the provider's single
+        // connection slot is free before we request this title. Kept before the
+        // stream resolver so the old slot is released first, but no longer blocks
+        // the shell from showing.
+        await this.app?.player?.stop?.();
 
         if (streamUrlResolver) {
             let resolved;
