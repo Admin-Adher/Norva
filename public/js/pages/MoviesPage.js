@@ -1308,10 +1308,13 @@ class MoviesPage {
         ]);
     }
 
-    getGatewayResumePlan(resumeOffset, requestedPreRoll = 20) {
+    getGatewayResumePlan(resumeOffset, requestedPreRoll = 0) {
         const target = Math.max(0, Math.floor(Number(resumeOffset) || 0));
         const requested = Math.max(0, Math.floor(Number(requestedPreRoll) || 0));
-        const preRoll = target > 5 ? Math.min(target, requested || 20) : 0;
+        // The gateway now seeks cleanly (linear read + accurate output seek), so
+        // no client pre-roll is needed — it only added a delay while the
+        // transcoder ground up to the resume point.
+        const preRoll = target > 5 ? Math.min(target, requested) : 0;
         const sessionStart = Math.max(0, target - preRoll);
         return {
             target,
@@ -1321,22 +1324,51 @@ class MoviesPage {
     }
 
     async playMovie(movie, { versions = null, resumeTime = 0, playbackPreferences = null } = {}) {
-        try {
-            const container = movie.container_extension || 'mp4';
-            const resumeOffset = Math.max(0, Math.floor(Number(resumeTime) || 0));
-            const resumePlan = this.getGatewayResumePlan(resumeOffset);
-            const playbackHint = MediaUtils.playbackHintFromItem
-                ? MediaUtils.playbackHintFromItem(movie, { container })
-                : { container };
-            if (resumePlan.sessionStart > 0) {
-                playbackHint.seekOffset = resumePlan.sessionStart;
-                playbackHint.startOffset = resumePlan.sessionStart;
-                playbackHint.resumeTime = resumePlan.sessionStart;
-            }
-            const audioStreamIndex = Number(playbackPreferences?.audio?.streamIndex ?? playbackPreferences?.audio?.stream_index);
-            if (Number.isInteger(audioStreamIndex)) {
-                playbackHint.audioStreamIndex = audioStreamIndex;
-            }
+        const watch = this.app.pages.watch;
+        if (!watch) return;
+        const container = movie.container_extension || 'mp4';
+        const resumeOffset = Math.max(0, Math.floor(Number(resumeTime) || 0));
+        const resumePlan = this.getGatewayResumePlan(resumeOffset);
+        const playbackHint = MediaUtils.playbackHintFromItem
+            ? MediaUtils.playbackHintFromItem(movie, { container })
+            : { container };
+        if (resumePlan.sessionStart > 0) {
+            playbackHint.seekOffset = resumePlan.sessionStart;
+            playbackHint.startOffset = resumePlan.sessionStart;
+            playbackHint.resumeTime = resumePlan.sessionStart;
+        }
+        const audioStreamIndex = Number(playbackPreferences?.audio?.streamIndex ?? playbackPreferences?.audio?.stream_index);
+        if (Number.isInteger(audioStreamIndex)) {
+            playbackHint.audioStreamIndex = audioStreamIndex;
+        }
+        const versionList = (versions || [movie]).map(v => ({
+            sourceId: v.sourceId,
+            streamId: v.stream_id,
+            container: v.container_extension || 'mp4',
+            type: 'movie',
+            label: MediaUtils.versionLabel(v, this.getSourceName(v.sourceId))
+        }));
+        const content = {
+            type: 'movie',
+            id: movie.stream_id,
+            title: movie.tmdb?.title || movie.name,
+            poster: MediaUtils.safeImageUrl(movie.stream_icon || movie.cover || MediaUtils.tmdbPosterUrl(movie.tmdb)),
+            description: movie.plot || movie.tmdb?.overview || '',
+            year: this.getItemYear(movie),
+            rating: movie.rating || movie.tmdb?.vote_average,
+            sourceId: movie.sourceId,
+            categoryId: movie.category_id,
+            containerExtension: container,
+            resumeTime: resumePlan.target,
+            playbackPreferences,
+            durationHint: movie.tmdb?.runtime ? movie.tmdb.runtime * 60 : null,
+            versions: versionList,
+            versionIndex: 0
+        };
+
+        // Open the player immediately (poster + loading animation), then resolve
+        // the stream URL into the already-visible shell.
+        await watch.play(content, async () => {
             await this.prepareForPlaybackSession();
             const result = await API.proxy.xtream.getStreamUrl(
                 movie.sourceId,
@@ -1345,45 +1377,15 @@ class MoviesPage {
                 container,
                 playbackHint
             );
-
-            if (result && result.url) {
-                if (this.app.pages.watch) {
-                    const versionList = (versions || [movie]).map(v => ({
-                        sourceId: v.sourceId,
-                        streamId: v.stream_id,
-                        container: v.container_extension || 'mp4',
-                        type: 'movie',
-                        label: MediaUtils.versionLabel(v, this.getSourceName(v.sourceId))
-                    }));
-
-                    this.app.pages.watch.play({
-                        type: 'movie',
-                        id: movie.stream_id,
-                        title: movie.tmdb?.title || movie.name,
-                        poster: MediaUtils.safeImageUrl(movie.stream_icon || movie.cover || MediaUtils.tmdbPosterUrl(movie.tmdb)),
-                        description: movie.plot || movie.tmdb?.overview || '',
-                        year: this.getItemYear(movie),
-                        rating: movie.rating || movie.tmdb?.vote_average,
-                        sourceId: movie.sourceId,
-                        categoryId: movie.category_id,
-                        containerExtension: container,
-                        resumeTime: resumePlan.target,
-                        playbackPreferences,
-                        durationHint: movie.tmdb?.runtime ? movie.tmdb.runtime * 60 : null,
-                        versions: versionList,
-                        versionIndex: 0,
-                        cloudPlaybackSessionId: result.sessionId
-                    }, result.url, {
-                        ...result,
-                        seekOffset: resumePlan.sessionStart,
-                        startOffset: resumePlan.sessionStart,
-                        resumeTarget: resumePlan.target
-                    });
-                }
-            }
-        } catch (err) {
-            console.error('Error playing movie:', err);
-        }
+            if (!result || !result.url) return null;
+            return {
+                ...result,
+                url: result.url,
+                seekOffset: resumePlan.sessionStart,
+                startOffset: resumePlan.sessionStart,
+                resumeTarget: resumePlan.target
+            };
+        }, {});
     }
 
     async toggleFavorite(group, btn) {

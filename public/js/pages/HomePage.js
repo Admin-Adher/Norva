@@ -1565,47 +1565,73 @@ class HomePage {
     }
 
     async playItem(item, isResume = false) {
-        if (!this.app.pages.watch) return;
+        const watch = this.app.pages.watch;
+        if (!watch) return;
 
-        try {
-            const data = item.data || {};
-            const type = item.item_type || item.itemType || item.type;
-            const streamType = type === 'movie' ? 'movie' : 'series';
-            const sourceId = item.source_id || item.sourceId || data.sourceId;
-            const streamId = item.item_id || item.itemId || item.stream_id || item.streamId || item.series_id;
-            const container = item.container_extension || item.containerExtension || data.containerExtension || 'mp4';
-            const resumeOffset = isResume
-                ? this.getResumeOffset(
-                    item.progress || item.progress_seconds || data.progress || 0,
-                    item.duration || item.duration_seconds || data.duration || 0
-                )
-                : 0;
-            const playbackPreferences = isResume
-                ? (data.playbackPreferences || data.playback_preferences || null)
-                : null;
+        const data = item.data || {};
+        const type = item.item_type || item.itemType || item.type;
+        const streamType = type === 'movie' ? 'movie' : 'series';
+        const sourceId = item.source_id || item.sourceId || data.sourceId;
+        const streamId = item.item_id || item.itemId || item.stream_id || item.streamId || item.series_id;
+        const container = item.container_extension || item.containerExtension || data.containerExtension || 'mp4';
+        const resumeOffset = isResume
+            ? this.getResumeOffset(
+                item.progress || item.progress_seconds || data.progress || 0,
+                item.duration || item.duration_seconds || data.duration || 0
+            )
+            : 0;
+        const playbackPreferences = isResume
+            ? (data.playbackPreferences || data.playback_preferences || null)
+            : null;
 
-            if (!sourceId || !streamId) {
-                throw new Error('Missing source or stream identifier');
-            }
+        if (!sourceId || !streamId) {
+            console.error('[Dashboard] Missing source or stream identifier');
+            return;
+        }
 
-            const playbackHint = MediaUtils.playbackHintFromItem
-                ? MediaUtils.playbackHintFromItem(item, { container })
-                : { container };
-            if (resumeOffset > 0) {
-                playbackHint.seekOffset = resumeOffset;
-                playbackHint.startOffset = resumeOffset;
-                playbackHint.resumeTime = resumeOffset;
-            }
-            const audioStreamIndex = Number(playbackPreferences?.audio?.streamIndex ?? playbackPreferences?.audio?.stream_index);
-            if (Number.isInteger(audioStreamIndex)) {
-                playbackHint.audioStreamIndex = audioStreamIndex;
-            }
+        const playbackHint = MediaUtils.playbackHintFromItem
+            ? MediaUtils.playbackHintFromItem(item, { container })
+            : { container };
+        if (resumeOffset > 0) {
+            playbackHint.seekOffset = resumeOffset;
+            playbackHint.startOffset = resumeOffset;
+            playbackHint.resumeTime = resumeOffset;
+        }
+        const audioStreamIndex = Number(playbackPreferences?.audio?.streamIndex ?? playbackPreferences?.audio?.stream_index);
+        if (Number.isInteger(audioStreamIndex)) {
+            playbackHint.audioStreamIndex = audioStreamIndex;
+        }
 
-            // Live H.264 → remux (copy video), H.265/HEVC → full transcode.
-            if (streamType === 'live' && !playbackHint.gatewayMode && window.MediaUtils?.liveGatewayMode) {
-                playbackHint.gatewayMode = MediaUtils.liveGatewayMode(item);
-            }
+        // Live H.264 → remux (copy video), H.265/HEVC → full transcode.
+        if (streamType === 'live' && !playbackHint.gatewayMode && window.MediaUtils?.liveGatewayMode) {
+            playbackHint.gatewayMode = MediaUtils.liveGatewayMode(item);
+        }
 
+        const content = {
+            id: streamId,
+            type,
+            title: this.displayTitle(item),
+            subtitle: data.subtitle || this.typeLabel(type),
+            poster: item.stream_icon || item.poster_url || item.posterUrl || data.poster || data.posterUrl,
+            sourceId,
+            cloudSourceId: item.cloudSourceId || data.cloudSourceId || null,
+            resumeTime: resumeOffset,
+            playbackPreferences,
+            containerExtension: container,
+            titleId: data.titleId || item.titleId || item.title_id || null,
+            variantCount: item.variantCount || item.variant_count || data.variantCount || 1,
+            defaultVariant: item.defaultVariant || item.default_variant || null
+        };
+        if (type === 'episode' && item.data) {
+            content.seriesId = item.data.seriesId || null;
+            content.currentSeason = item.data.currentSeason || null;
+            content.currentEpisode = item.data.currentEpisode || null;
+        }
+
+        // Open the player immediately (poster + loading animation), then resolve
+        // the stream URL — and, for episodes, the series info for next-episode
+        // handoff — into the already-visible shell.
+        await watch.play(content, async () => {
             const result = await window.API.proxy.xtream.getStreamUrl(
                 sourceId,
                 streamId,
@@ -1613,46 +1639,17 @@ class HomePage {
                 container,
                 playbackHint
             );
-
-            if (result && result.url) {
-                const content = {
-                    id: streamId,
-                    type,
-                    title: this.displayTitle(item),
-                    subtitle: data.subtitle || this.typeLabel(type),
-                    poster: item.stream_icon || item.poster_url || item.posterUrl || data.poster || data.posterUrl,
-                    sourceId,
-                    cloudSourceId: item.cloudSourceId || data.cloudSourceId || null,
-                    resumeTime: resumeOffset,
-                    playbackPreferences,
-                    containerExtension: container,
-                    cloudPlaybackSessionId: result.sessionId,
-                    titleId: data.titleId || item.titleId || item.title_id || null,
-                    variantCount: item.variantCount || item.variant_count || data.variantCount || 1,
-                    defaultVariant: item.defaultVariant || item.default_variant || null
-                };
-
-                if (type === 'episode' && item.data) {
-                    content.seriesId = item.data.seriesId || null;
-                    content.currentSeason = item.data.currentSeason || null;
-                    content.currentEpisode = item.data.currentEpisode || null;
-
-                    if (content.seriesId && sourceId) {
-                        try {
-                            const seriesInfo = await window.API.request('GET', `/proxy/xtream/${sourceId}/series_info?series_id=${content.seriesId}`);
-                            if (seriesInfo) content.seriesInfo = seriesInfo;
-                        } catch (e) {
-                            console.warn('[Dashboard] Could not fetch seriesInfo for next episode:', e);
-                        }
-                    }
+            if (!result || !result.url) return null;
+            if (type === 'episode' && content.seriesId && sourceId) {
+                try {
+                    const seriesInfo = await window.API.request('GET', `/proxy/xtream/${sourceId}/series_info?series_id=${content.seriesId}`);
+                    if (seriesInfo) content.seriesInfo = seriesInfo;
+                } catch (e) {
+                    console.warn('[Dashboard] Could not fetch seriesInfo for next episode:', e);
                 }
-
-                this.app.navigateTo('watch');
-                this.app.pages.watch.play(content, result.url, { ...result, seekOffset: resumeOffset, startOffset: resumeOffset });
             }
-        } catch (err) {
-            console.error('[Dashboard] Playback failed:', err);
-        }
+            return { ...result, url: result.url, seekOffset: resumeOffset, startOffset: resumeOffset };
+        }, {});
     }
 }
 

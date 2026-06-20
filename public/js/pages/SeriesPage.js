@@ -956,14 +956,37 @@ class SeriesPage {
     }
 
     async resumeEpisodeFromHistory(h) {
+        const watch = this.app.pages.watch;
+        if (!watch) return;
         const sourceId = parseInt(h.source_id || h.data?.sourceId);
         const seriesId = h.data?.seriesId;
         if (!sourceId || !seriesId) return;
 
-        try {
+        const resumeOffset = this.getResumeOffset(h.progress, h.duration);
+        const resumePlan = this.getGatewayResumePlan(resumeOffset);
+        const playbackPreferences = h.data?.playbackPreferences || h.data?.playback_preferences || null;
+        // Preliminary content from history data so the player shows instantly;
+        // the exact episode details are filled in by the resolver below.
+        const content = {
+            type: 'series',
+            id: h.item_id,
+            title: h.data?.title || 'Series',
+            subtitle: h.data?.currentSeason ? `S${h.data.currentSeason} E${h.data.currentEpisode || ''}` : 'Series',
+            poster: MediaUtils.safeImageUrl(h.data?.poster),
+            sourceId,
+            seriesId,
+            currentSeason: h.data?.currentSeason,
+            currentEpisode: h.data?.currentEpisode,
+            containerExtension: h.data?.containerExtension || 'mp4',
+            resumeTime: resumePlan.target,
+            playbackPreferences,
+            durationHint: h.duration || 0
+        };
+
+        await watch.play(content, async () => {
             await this.prepareForPlaybackSession();
             const info = await API.proxy.xtream.seriesInfo(sourceId, seriesId);
-            if (!info?.episodes) return;
+            if (!info?.episodes) return null;
 
             // Find the episode in seriesInfo
             let episode = null, seasonNum = h.data?.currentSeason, episodeNum = h.data?.currentEpisode;
@@ -971,11 +994,9 @@ class SeriesPage {
                 const found = eps.find(ep => String(ep.id) === String(h.item_id));
                 if (found) { episode = found; seasonNum = sn; episodeNum = found.episode_num; break; }
             }
-            if (!episode) return;
+            if (!episode) return null;
 
             const container = episode.container_extension || h.data?.containerExtension || 'mp4';
-            const resumeOffset = this.getResumeOffset(h.progress, h.duration);
-            const resumePlan = this.getGatewayResumePlan(resumeOffset);
             const playbackHint = MediaUtils.playbackHintFromItem
                 ? MediaUtils.playbackHintFromItem(episode, { container, streamType: 'series' })
                 : { container, streamType: 'series' };
@@ -984,7 +1005,6 @@ class SeriesPage {
                 playbackHint.startOffset = resumePlan.sessionStart;
                 playbackHint.resumeTime = resumePlan.sessionStart;
             }
-            const playbackPreferences = h.data?.playbackPreferences || h.data?.playback_preferences || null;
             const audioStreamIndex = Number(playbackPreferences?.audio?.streamIndex ?? playbackPreferences?.audio?.stream_index);
             if (Number.isInteger(audioStreamIndex)) {
                 playbackHint.audioStreamIndex = audioStreamIndex;
@@ -996,33 +1016,24 @@ class SeriesPage {
                 container,
                 playbackHint
             );
-            if (!result?.url) return;
+            if (!result?.url) return null;
 
-            this.app.pages.watch?.play({
-                type: 'series',
-                id: episode.id,
-                title: h.data?.title || 'Series',
-                subtitle: `S${seasonNum} E${episodeNum} - ${episode.title || `Episode ${episodeNum}`}`,
-                poster: MediaUtils.safeImageUrl(h.data?.poster),
-                sourceId: sourceId,
-                seriesId: seriesId,
-                seriesInfo: info,
-                currentSeason: seasonNum,
-                currentEpisode: episodeNum,
-                containerExtension: container,
-                resumeTime: resumePlan.target,
-                playbackPreferences,
-                durationHint: h.duration || MediaUtils.parseDurationToSeconds(episode.duration),
-                cloudPlaybackSessionId: result.sessionId
-            }, result.url, {
+            // Enrich content now that we know the exact episode (play() re-renders these).
+            content.id = episode.id;
+            content.subtitle = `S${seasonNum} E${episodeNum} - ${episode.title || `Episode ${episodeNum}`}`;
+            content.seriesInfo = info;
+            content.currentSeason = seasonNum;
+            content.currentEpisode = episodeNum;
+            content.containerExtension = container;
+            content.durationHint = h.duration || MediaUtils.parseDurationToSeconds(episode.duration);
+            return {
                 ...result,
+                url: result.url,
                 seekOffset: resumePlan.sessionStart,
                 startOffset: resumePlan.sessionStart,
                 resumeTarget: resumePlan.target
-            });
-        } catch (err) {
-            console.error('Error resuming episode:', err);
-        }
+            };
+        }, {});
     }
 
     // === Group interaction ===
@@ -1470,24 +1481,51 @@ class SeriesPage {
         const seasonNum = episodeEl.dataset.season || (seasonMatch ? seasonMatch[1] : '1');
         const episodeNum = episodeEl.dataset.episodeNum || episodeEl.querySelector('.episode-number')?.textContent?.replace('E', '') || '1';
 
-        try {
-            const h = (this.historyItems || []).find(x =>
-                x.item_type === 'episode' && String(x.item_id) === String(episodeId));
-            const resumeOffset = h ? this.getResumeOffset(h.progress, h.duration) : 0;
-            const resumePlan = this.getGatewayResumePlan(resumeOffset);
-            const playbackPreferences = h?.data?.playbackPreferences || h?.data?.playback_preferences || null;
-            const playbackHint = MediaUtils.playbackHintFromItem
-                ? MediaUtils.playbackHintFromItem(episode, { container, streamType: 'series' })
-                : { container, streamType: 'series' };
-            if (resumePlan.sessionStart > 0) {
-                playbackHint.seekOffset = resumePlan.sessionStart;
-                playbackHint.startOffset = resumePlan.sessionStart;
-                playbackHint.resumeTime = resumePlan.sessionStart;
-            }
-            const audioStreamIndex = Number(playbackPreferences?.audio?.streamIndex ?? playbackPreferences?.audio?.stream_index);
-            if (Number.isInteger(audioStreamIndex)) {
-                playbackHint.audioStreamIndex = audioStreamIndex;
-            }
+        const watch = this.app.pages.watch;
+        if (!watch) return;
+        const h = (this.historyItems || []).find(x =>
+            x.item_type === 'episode' && String(x.item_id) === String(episodeId));
+        const resumeOffset = h ? this.getResumeOffset(h.progress, h.duration) : 0;
+        const resumePlan = this.getGatewayResumePlan(resumeOffset);
+        const playbackPreferences = h?.data?.playbackPreferences || h?.data?.playback_preferences || null;
+        const playbackHint = MediaUtils.playbackHintFromItem
+            ? MediaUtils.playbackHintFromItem(episode, { container, streamType: 'series' })
+            : { container, streamType: 'series' };
+        if (resumePlan.sessionStart > 0) {
+            playbackHint.seekOffset = resumePlan.sessionStart;
+            playbackHint.startOffset = resumePlan.sessionStart;
+            playbackHint.resumeTime = resumePlan.sessionStart;
+        }
+        const audioStreamIndex = Number(playbackPreferences?.audio?.streamIndex ?? playbackPreferences?.audio?.stream_index);
+        if (Number.isInteger(audioStreamIndex)) {
+            playbackHint.audioStreamIndex = audioStreamIndex;
+        }
+        const episodeTitle = episodeEl.querySelector('.episode-title')?.textContent || `Episode ${episodeNum}`;
+        // Episode duration ("00:42:10") as timeline fallback
+        const durationText = episodeEl.querySelector('.episode-duration')?.textContent;
+        const durationHint = (h?.duration) || MediaUtils.parseDurationToSeconds(durationText);
+        const content = {
+            type: 'series',
+            id: episodeId,
+            title: this.currentSeries?.tmdb?.title || this.currentSeries?.name || 'Series',
+            subtitle: `S${seasonNum} E${episodeNum} - ${episodeTitle}`,
+            poster: MediaUtils.safeImageUrl(this.currentSeries?.cover || this.currentSeries?.stream_icon || MediaUtils.tmdbPosterUrl(this.currentSeries?.tmdb)),
+            description: this.currentSeries?.plot || this.currentSeries?.tmdb?.overview || '',
+            year: this.currentSeries?.year,
+            rating: this.currentSeries?.rating,
+            sourceId: sourceId,
+            seriesId: this.currentSeries?.series_id,
+            seriesInfo: this.currentSeriesInfo,
+            currentSeason: seasonNum,
+            currentEpisode: episodeNum,
+            containerExtension: container,
+            resumeTime: resumePlan.target,
+            playbackPreferences,
+            durationHint
+        };
+
+        // Open the player immediately, then resolve the stream URL into the shell.
+        await watch.play(content, async () => {
             await this.prepareForPlaybackSession();
             const result = await API.proxy.xtream.getStreamUrl(
                 sourceId,
@@ -1496,45 +1534,15 @@ class SeriesPage {
                 container,
                 playbackHint
             );
-
-            if (result && result.url) {
-                if (this.app.pages.watch) {
-                    const episodeTitle = episodeEl.querySelector('.episode-title')?.textContent || `Episode ${episodeNum}`;
-
-                    // Episode duration ("00:42:10") as timeline fallback
-                    const durationText = episodeEl.querySelector('.episode-duration')?.textContent;
-                    const durationHint = (h?.duration) || MediaUtils.parseDurationToSeconds(durationText);
-
-                    this.app.pages.watch.play({
-                        type: 'series',
-                        id: episodeId,
-                        title: this.currentSeries?.tmdb?.title || this.currentSeries?.name || 'Series',
-                        subtitle: `S${seasonNum} E${episodeNum} - ${episodeTitle}`,
-                        poster: MediaUtils.safeImageUrl(this.currentSeries?.cover || this.currentSeries?.stream_icon || MediaUtils.tmdbPosterUrl(this.currentSeries?.tmdb)),
-                        description: this.currentSeries?.plot || this.currentSeries?.tmdb?.overview || '',
-                        year: this.currentSeries?.year,
-                        rating: this.currentSeries?.rating,
-                        sourceId: sourceId,
-                        seriesId: this.currentSeries?.series_id,
-                        seriesInfo: this.currentSeriesInfo,
-                        currentSeason: seasonNum,
-                        currentEpisode: episodeNum,
-                        containerExtension: container,
-                        resumeTime: resumePlan.target,
-                        playbackPreferences,
-                        durationHint,
-                        cloudPlaybackSessionId: result.sessionId
-                    }, result.url, {
-                        ...result,
-                        seekOffset: resumePlan.sessionStart,
-                        startOffset: resumePlan.sessionStart,
-                        resumeTarget: resumePlan.target
-                    });
-                }
-            }
-        } catch (err) {
-            console.error('Error playing episode:', err);
-        }
+            if (!result || !result.url) return null;
+            return {
+                ...result,
+                url: result.url,
+                seekOffset: resumePlan.sessionStart,
+                startOffset: resumePlan.sessionStart,
+                resumeTarget: resumePlan.target
+            };
+        }, {});
     }
 
     async prepareForPlaybackSession() {
@@ -1544,10 +1552,13 @@ class SeriesPage {
         ]);
     }
 
-    getGatewayResumePlan(resumeOffset, requestedPreRoll = 20) {
+    getGatewayResumePlan(resumeOffset, requestedPreRoll = 0) {
         const target = Math.max(0, Math.floor(Number(resumeOffset) || 0));
         const requested = Math.max(0, Math.floor(Number(requestedPreRoll) || 0));
-        const preRoll = target > 5 ? Math.min(target, requested || 20) : 0;
+        // The gateway now seeks cleanly (linear read + accurate output seek), so
+        // no client pre-roll is needed — it only added a delay while the
+        // transcoder ground up to the resume point.
+        const preRoll = target > 5 ? Math.min(target, requested) : 0;
         const sessionStart = Math.max(0, target - preRoll);
         return {
             target,

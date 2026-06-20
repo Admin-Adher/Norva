@@ -1086,9 +1086,13 @@ class WatchPage {
      */
     async play(content, streamUrl, playback = {}) {
         const playbackAttemptId = this.beginPlaybackAttempt();
-        const playbackMetadata = this.playbackMetadataFromResult(playback);
+        // `streamUrl` may be an async resolver: we render the player shell +
+        // loading animation first, then await it. Resolve it later (after the
+        // shell is on screen) so the metadata below uses what we have upfront.
+        const streamUrlResolver = typeof streamUrl === 'function' ? streamUrl : null;
+        let playbackMetadata = this.playbackMetadataFromResult(playback);
         this._resumePlaybackMetadata = playbackMetadata;
-        const cloudPlaybackSessionId = playbackMetadata.sessionId
+        let cloudPlaybackSessionId = playbackMetadata.sessionId
             || playbackMetadata.cloudPlaybackSessionId
             || content.cloudPlaybackSessionId
             || content.playbackSessionId
@@ -1171,6 +1175,45 @@ class WatchPage {
         this.titleEl.textContent = content.title || '';
         this.subtitleEl.textContent = content.subtitle || '';
         this.saveResumeSnapshot({ playback: playbackMetadata, position: this.resumeTime || 0 });
+
+        // Paint the player shell (poster + title + loading animation) right
+        // away so the player appears instantly on click, before we wait on the
+        // gateway session. The stream then loads into this already-visible shell.
+        this.renderDetails();
+        this.showLoading();
+
+        if (streamUrlResolver) {
+            let resolved;
+            try {
+                resolved = await streamUrlResolver();
+            } catch (err) {
+                if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
+                this.showPlaybackError(err?.message || 'This title could not be started. Please try again.', { immediate: true });
+                return;
+            }
+            if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
+            if (!resolved || !resolved.url) {
+                this.showPlaybackError('This title could not be started. Please try again.', { immediate: true });
+                return;
+            }
+            streamUrl = resolved.url;
+            playbackMetadata = this.playbackMetadataFromResult({ ...playback, ...resolved });
+            this._resumePlaybackMetadata = playbackMetadata;
+            const resolvedSessionId = playbackMetadata.sessionId || playbackMetadata.cloudPlaybackSessionId;
+            if (resolvedSessionId) {
+                cloudPlaybackSessionId = resolvedSessionId;
+                content.cloudPlaybackSessionId = resolvedSessionId;
+            }
+            // The resolver may have enriched content (e.g. episode seriesInfo
+            // for next-episode handoff, or a fuller subtitle) while the shell
+            // was already on screen — refresh the bits that were shown early.
+            if (content.seriesInfo) this.seriesInfo = content.seriesInfo;
+            if (content.currentSeason) this.currentSeason = content.currentSeason;
+            if (content.currentEpisode) this.currentEpisode = content.currentEpisode;
+            this.titleEl.textContent = content.title || '';
+            this.subtitleEl.textContent = content.subtitle || '';
+            this.renderDetails();
+        }
 
         // Load video
         await this.loadVideo(streamUrl, {
