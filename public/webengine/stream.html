@@ -34,7 +34,7 @@
   <pre id="log">Journal…</pre>
 
 <script type="module">
-import { LibAV } from '/webengine/vendor/libav/libav-default.mjs';
+import { LibAV } from '/webengine/vendor/libav/libav-webcodecs.mjs';
 
 const logEl = document.getElementById('log');
 const statusEl = document.getElementById('status');
@@ -47,7 +47,7 @@ async function getLibav() {
   if (libav) return libav;
   log('Chargement de libav.js…');
   const t0 = performance.now();
-  libav = await LibAV({ base: '/webengine/vendor/libav' });
+  libav = await LibAV({ base: '/webengine/vendor/libav', variant: 'webcodecs' });
   log(`libav.js prêt en ${((performance.now()-t0)/1000).toFixed(1)} s (mode ${libav.libavjsMode})`);
   return libav;
 }
