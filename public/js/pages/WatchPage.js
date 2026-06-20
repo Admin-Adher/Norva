@@ -929,12 +929,18 @@ class WatchPage {
         if (this.content || this._resumeRestorePromise) return this._resumeRestorePromise;
         const snapshot = this.readResumeSnapshot();
         if (!snapshot) return this.restoreFromCloudHistory();
+        const snapshotResumePosition = this.getResumeRestorePosition(snapshot.position, snapshot.duration);
+        if (snapshotResumePosition <= 0) {
+            console.info('[WatchPage] Local resume snapshot has no usable position; checking cloud history.');
+            const cloudRestored = await this.restoreFromCloudHistory();
+            if (cloudRestored) return cloudRestored;
+        }
 
         this._resumeRestorePromise = (async () => {
             const content = {
                 ...snapshot.content,
                 type: snapshot.content.type,
-                resumeTime: this.getResumeRestorePosition(snapshot.position, snapshot.duration),
+                resumeTime: snapshotResumePosition,
                 playbackPreferences: snapshot.playback?.playbackPreferences || snapshot.playbackPreferences || snapshot.content.playbackPreferences || null,
                 durationHint: this.normalizeDuration(snapshot.content.durationHint) || this.normalizeDuration(snapshot.duration),
                 currentSeason: snapshot.currentSeason || snapshot.content.currentSeason || null,
@@ -955,8 +961,7 @@ class WatchPage {
             }
 
             await this.releasePlaybackPipelineForRetry();
-            const resumePosition = this.getResumeRestorePosition(snapshot.position, snapshot.duration);
-            const resumePlan = this.getGatewaySeekPlan(resumePosition);
+            const resumePlan = this.getGatewaySeekPlan(snapshotResumePosition);
             const playbackHint = {
                 ...this.buildResumePlaybackHint(snapshot),
                 seekOffset: resumePlan.sessionStart,
