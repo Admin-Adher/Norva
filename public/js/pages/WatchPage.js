@@ -2874,14 +2874,14 @@ class WatchPage {
         this.setVolumeFromStorage();
     }
 
-    getGatewaySeekPreRoll(target, requestedPreRoll = 20) {
+    getGatewaySeekPreRoll(target, requestedPreRoll = 90) {
         const safeTarget = Math.max(0, Math.floor(Number(target) || 0));
         if (safeTarget <= 5) return 0;
         const requested = Math.max(0, Math.floor(Number(requestedPreRoll) || 0));
-        return Math.min(safeTarget, requested || 20);
+        return Math.min(safeTarget, requested || 90);
     }
 
-    getGatewaySeekPlan(targetTime, requestedPreRoll = 20) {
+    getGatewaySeekPlan(targetTime, requestedPreRoll = 90) {
         const target = Math.max(0, Math.floor(Number(targetTime) || 0));
         const preRoll = this.getGatewaySeekPreRoll(target, requestedPreRoll);
         const sessionStart = Math.max(0, target - preRoll);
@@ -2899,7 +2899,7 @@ class WatchPage {
         const requestId = Number.isInteger(options.requestId)
             ? options.requestId
             : ++this._gatewaySeekRequestId;
-        const seekPlan = this.getGatewaySeekPlan(targetTime, options.preRollSeconds ?? 20);
+        const seekPlan = this.getGatewaySeekPlan(targetTime, options.preRollSeconds ?? 90);
         const { target, preRoll, sessionStart, localSeekTarget } = seekPlan;
         const autoplay = !this.video?.paused;
         const itemType = this.content.type === 'series' ? 'series' : 'movie';
@@ -4194,7 +4194,7 @@ class WatchPage {
         if (!selected || !this.content?.sourceId || !this.content?.id) return false;
 
         const targetPosition = Math.max(0, Math.floor(this.getPlaybackPosition()) - 3);
-        const preRoll = this.getGatewaySeekPreRoll(targetPosition, 10);
+        const preRoll = this.getGatewaySeekPreRoll(targetPosition, 90);
         const sessionStart = Math.max(0, targetPosition - preRoll);
         const localSeekTarget = Math.max(0, targetPosition - sessionStart);
         const autoplay = !this.video?.paused;
