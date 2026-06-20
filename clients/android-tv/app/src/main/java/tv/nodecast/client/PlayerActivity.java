@@ -33,6 +33,7 @@ import androidx.media3.common.Tracks;
 import androidx.media3.common.VideoSize;
 import androidx.media3.common.text.Cue;
 import androidx.media3.common.text.CueGroup;
+import androidx.media3.datasource.DataSource;
 import androidx.media3.datasource.DefaultHttpDataSource;
 import androidx.media3.exoplayer.ExoPlayer;
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory;
@@ -213,9 +214,12 @@ public class PlayerActivity extends Activity {
                 .setAllowCrossProtocolRedirects(true)
                 .setConnectTimeoutMs(15000)
                 .setReadTimeoutMs(30000);
+        // Bound open-ended seek ranges so Resume jumps straight to the offset
+        // instead of the provider replaying the file from byte 0 (a ~20s stall).
+        DataSource.Factory dataSourceFactory = new BoundedRangeDataSource.Factory(http);
 
         player = new ExoPlayer.Builder(this)
-                .setMediaSourceFactory(new DefaultMediaSourceFactory(http))
+                .setMediaSourceFactory(new DefaultMediaSourceFactory(dataSourceFactory))
                 .build();
         player.setVideoSurfaceView(surfaceView);
 
