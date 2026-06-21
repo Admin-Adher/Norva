@@ -290,7 +290,9 @@
         if (!shouldShowRegionPrompt()) return;
         if (!document.body || document.getElementById('norva-region-prompt')) return;
         const pathname = window.location.pathname || '';
-        if (/\/(login|cloud|account|cloud-pair|hub-connect)\.html$/i.test(pathname)) return;
+        // Suppress on auth/pairing surfaces — match both the .html paths and the
+        // clean URLs Cloudflare Pages serves (e.g. "/account", "/login").
+        if (/\/(login|cloud|account|cloud-pair|hub-connect)(\.html)?\/?$/i.test(pathname)) return;
 
         const suggestion = resolveContentRegion();
         const prompt = document.createElement('div');
