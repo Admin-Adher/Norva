@@ -36,10 +36,18 @@ const STOP_CONFLICTING_OWNER_SESSIONS = (process.env.STOP_CONFLICTING_OWNER_SESS
 // few times (after re-evicting + waiting) before surfacing a 502 to the client.
 const PROVIDER_AUTH_RETRY_LIMIT = clampInt(process.env.PROVIDER_AUTH_RETRY_LIMIT, 2, 0, 5);
 const PROVIDER_AUTH_RETRY_DELAY_MS = clampInt(process.env.PROVIDER_AUTH_RETRY_DELAY_MS, 4_000, 0, 15_000);
+// The in-browser byte-pipe (/raw) issues many short byte-range requests. The
+// single-slot provider can 401/403/429 one whose connection slot from the prior
+// read hasn't released yet (~PROVIDER_SLOT_RELEASE_DELAY_MS). ffmpeg rides this
+// out via auto-reconnect; mirror it here with a few quick retries so a transient
+// provider auth blip doesn't abort playback. Delays stay short to keep range
+// throughput usable, then back off toward the slot-release window.
+const RAW_PROVIDER_RETRY_LIMIT = clampInt(process.env.RAW_PROVIDER_RETRY_LIMIT, 4, 0, 8);
+const RAW_PROVIDER_RETRY_DELAYS_MS = [400, 1000, 2000, 3000, 4000, 5000, 6000, 8000];
 const FFMPEG_USER_AGENT = process.env.FFMPEG_USER_AGENT ||
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36 Norva/1.0';
 const MAX_LOG_TAIL = 12000;
-const GATEWAY_VERSION = 40;
+const GATEWAY_VERSION = 41;
 // Browser playback fetches HLS playlists/segments cross-origin, so these must
 // list every Norva web origin or the browser blocks the response (CORS). Keep
 // in sync with the relay's ALLOWED_ORIGINS (services/norva-relay/wrangler.jsonc).
@@ -165,29 +173,48 @@ app.get('/raw/:token', async (req, res) => {
 
     const ac = new AbortController();
     res.on('close', () => ac.abort());
-    try {
-        const headers = { 'user-agent': claims.ua || FFMPEG_USER_AGENT };
-        if (req.headers.range) headers.range = req.headers.range;
-        if (req.headers.accept) headers.accept = req.headers.accept;
-        const upstream = await fetch(claims.url, {
-            method: req.method === 'HEAD' ? 'HEAD' : 'GET',
-            headers,
-            redirect: 'follow',
-            signal: ac.signal
-        });
-        res.status(upstream.status);
-        for (const h of ['content-type', 'content-length', 'content-range', 'accept-ranges', 'last-modified', 'etag']) {
-            const v = upstream.headers.get(h);
-            if (v) res.setHeader(h, v);
+    const headers = { 'user-agent': claims.ua || FFMPEG_USER_AGENT };
+    if (req.headers.range) headers.range = req.headers.range;
+    if (req.headers.accept) headers.accept = req.headers.accept;
+    const method = req.method === 'HEAD' ? 'HEAD' : 'GET';
+
+    // Retry transient provider auth/slot failures (single-slot 401/403/429) so a
+    // burst of byte-range reads doesn't get one connection rejected and abort the
+    // whole pump. Anything else (206/200/404/...) passes straight through.
+    const maxAttempts = 1 + RAW_PROVIDER_RETRY_LIMIT;
+    let upstream = null;
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        try {
+            upstream = await fetch(claims.url, { method, headers, redirect: 'follow', signal: ac.signal });
+        } catch (err) {
+            if (ac.signal.aborted) { try { res.end(); } catch (_) {} return; }
+            if (attempt >= maxAttempts) {
+                return res.status(502).json({ error: 'Byte pipe failed', details: String((err && err.message) || err) });
+            }
+            await sleep(RAW_PROVIDER_RETRY_DELAYS_MS[attempt - 1] || 4000);
+            continue;
         }
-        if (!upstream.headers.get('accept-ranges')) res.setHeader('Accept-Ranges', 'bytes');
-        res.setHeader('Cache-Control', 'private, max-age=30');
-        if (req.method === 'HEAD' || !upstream.body) { res.end(); return; }
-        require('stream').Readable.fromWeb(upstream.body).pipe(res);
-    } catch (err) {
-        if (ac.signal.aborted) { try { res.end(); } catch (_) {} return; }
-        res.status(502).json({ error: 'Byte pipe failed', details: String((err && err.message) || err) });
+        const retryable = upstream.status === 401 || upstream.status === 403 || upstream.status === 429;
+        if (retryable && attempt < maxAttempts) {
+            try { await upstream.body?.cancel(); } catch (_) {} // free the slot before retrying
+            if (ac.signal.aborted) { try { res.end(); } catch (_) {} return; }
+            console.warn(`[media-gateway] /raw provider ${upstream.status} (attempt ${attempt}/${maxAttempts}); retrying in ${RAW_PROVIDER_RETRY_DELAYS_MS[attempt - 1]}ms`);
+            await sleep(RAW_PROVIDER_RETRY_DELAYS_MS[attempt - 1] || 4000);
+            continue;
+        }
+        break;
     }
+    if (ac.signal.aborted) { try { res.end(); } catch (_) {} return; }
+
+    res.status(upstream.status);
+    for (const h of ['content-type', 'content-length', 'content-range', 'accept-ranges', 'last-modified', 'etag']) {
+        const v = upstream.headers.get(h);
+        if (v) res.setHeader(h, v);
+    }
+    if (!upstream.headers.get('accept-ranges')) res.setHeader('Accept-Ranges', 'bytes');
+    res.setHeader('Cache-Control', 'private, max-age=30');
+    if (method === 'HEAD' || !upstream.body) { res.end(); return; }
+    require('stream').Readable.fromWeb(upstream.body).pipe(res);
 });
 
 app.post('/sessions', requireGatewayAuth, async (req, res) => {
