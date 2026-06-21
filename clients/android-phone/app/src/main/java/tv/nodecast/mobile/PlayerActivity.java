@@ -8,9 +8,11 @@ import android.view.DisplayCutout;
 import android.view.View;
 import android.view.WindowInsets;
 import android.view.WindowManager;
+import android.widget.Toast;
 
 import androidx.annotation.OptIn;
 import androidx.media3.common.MediaItem;
+import androidx.media3.common.MimeTypes;
 import androidx.media3.common.Player;
 import androidx.media3.common.util.UnstableApi;
 import androidx.media3.datasource.DataSource;
@@ -34,6 +36,12 @@ public class PlayerActivity extends Activity {
     public static final String EXTRA_ITEM_TYPE = "itemType";
     public static final String EXTRA_ITEM_ID = "itemId";
     public static final String EXTRA_RESUME_SECONDS = "resumeSeconds";
+    // Offline (encrypted local file) playback.
+    public static final String EXTRA_LOCAL = "local";
+    public static final String EXTRA_WRAPPED_KEY = "wrappedKey";
+    public static final String EXTRA_KEY_IV = "keyIv";
+    public static final String EXTRA_MEDIA_IV = "mediaIv";
+    public static final String EXTRA_CONTAINER = "container";
 
     // Browser-style UA: some IPTV providers reject unknown agents (401/403).
     private static final String UA =
@@ -87,14 +95,31 @@ public class PlayerActivity extends Activity {
         playerView.requestApplyInsets();
         applyImmersive();
 
-        DefaultHttpDataSource.Factory http = new DefaultHttpDataSource.Factory()
-                .setUserAgent(UA)
-                .setAllowCrossProtocolRedirects(true)
-                .setConnectTimeoutMs(15000)
-                .setReadTimeoutMs(30000);
-        // Bound open-ended seek ranges so Resume jumps straight to the offset
-        // instead of the provider replaying the file from byte 0 (a ~20s stall).
-        DataSource.Factory dataSourceFactory = new BoundedRangeDataSource.Factory(http);
+        boolean local = getIntent().getBooleanExtra(EXTRA_LOCAL, false);
+        DataSource.Factory dataSourceFactory;
+        if (local) {
+            // Offline: decrypt the AES/CTR file with the keystore-protected key.
+            try {
+                byte[] dataKey = DownloadCrypto.unwrapDataKey(
+                        DownloadCrypto.unb64(getIntent().getStringExtra(EXTRA_WRAPPED_KEY)),
+                        DownloadCrypto.unb64(getIntent().getStringExtra(EXTRA_KEY_IV)));
+                byte[] mediaIv = DownloadCrypto.unb64(getIntent().getStringExtra(EXTRA_MEDIA_IV));
+                dataSourceFactory = new EncryptedFileDataSource.Factory(dataKey, mediaIv);
+            } catch (Exception e) {
+                Toast.makeText(this, "Cannot open download", Toast.LENGTH_LONG).show();
+                finish();
+                return;
+            }
+        } else {
+            DefaultHttpDataSource.Factory http = new DefaultHttpDataSource.Factory()
+                    .setUserAgent(UA)
+                    .setAllowCrossProtocolRedirects(true)
+                    .setConnectTimeoutMs(15000)
+                    .setReadTimeoutMs(30000);
+            // Bound open-ended seek ranges so Resume jumps straight to the offset
+            // instead of the provider replaying the file from byte 0 (a ~20s stall).
+            dataSourceFactory = new BoundedRangeDataSource.Factory(http);
+        }
 
         player = new ExoPlayer.Builder(this)
                 .setMediaSourceFactory(new DefaultMediaSourceFactory(dataSourceFactory))
@@ -117,9 +142,34 @@ public class PlayerActivity extends Activity {
             }
         });
 
-        player.setMediaItem(MediaItem.fromUri(url));
+        MediaItem.Builder mediaItem = new MediaItem.Builder().setUri(url);
+        if (local) {
+            // The file extension is hidden (.enc); give ExoPlayer a MIME hint so
+            // it picks the right extractor (it also sniffs the decrypted bytes).
+            String mime = mimeForContainer(getIntent().getStringExtra(EXTRA_CONTAINER));
+            if (mime != null) mediaItem.setMimeType(mime);
+        }
+        player.setMediaItem(mediaItem.build());
         player.prepare();
         player.setPlayWhenReady(true);
+    }
+
+    /** Map a download's container extension to a MIME type for the extractor. */
+    private static String mimeForContainer(String container) {
+        if (container == null) return null;
+        switch (container.toLowerCase()) {
+            case "mp4":
+            case "m4v":
+            case "mov":
+                return MimeTypes.VIDEO_MP4;
+            case "mkv":
+            case "webm":
+                return MimeTypes.VIDEO_MATROSKA;
+            case "ts":
+                return MimeTypes.VIDEO_MP2T;
+            default:
+                return null;
+        }
     }
 
     /** Immersive fullscreen: hide the status and navigation bars (sticky, so a

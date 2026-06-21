@@ -10,7 +10,7 @@
   <title>Norva | Cloud media player</title>
   <meta name="description" content="Organize your compatible media source and sync playback across your screens.">
   <link rel="icon" type="image/png" href="/favicon.png">
-  <link rel="stylesheet" href="/css/main.css?v=38">
+  <link rel="stylesheet" href="/css/main.css?v=39">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@800&display=swap"
@@ -435,7 +435,7 @@
         </div>
         <div id="movie-details" class="movie-details hidden">
           <section class="movie-detail-hero" id="movie-detail-hero">
-            <button class="movie-back-btn" type="button">&larr; Films</button>
+            <button class="movie-back-btn" type="button">&larr; Movies</button>
             <div class="movie-detail-hero-content">
               <img id="movie-detail-poster" src="" alt="" class="movie-detail-poster">
               <div class="movie-detail-info">
@@ -446,11 +446,16 @@
                   <div></div>
                 </div>
                 <div class="movie-detail-actions">
-                  <button id="movie-primary-action" class="movie-primary-action" type="button">Lire</button>
+                  <button id="movie-primary-action" class="movie-primary-action" type="button">Play</button>
                   <button id="movie-detail-favorite" class="movie-secondary-action" type="button"
                     title="Add to Favorites">
                     <span class="fav-icon">&hearts;</span>
-                    <span class="fav-label">Favori</span>
+                    <span class="fav-label">Favorite</span>
+                  </button>
+                  <button id="movie-detail-download" class="movie-secondary-action movie-download-action" type="button"
+                    title="Download for offline" style="display:none">
+                    <span class="download-icon">&#x2193;</span>
+                    <span class="download-label">Download</span>
                   </button>
                 </div>
               </div>
@@ -569,11 +574,11 @@
                   <h3 id="series-title"></h3>
                   <p id="series-plot"></p>
                   <div class="series-detail-actions">
-                    <button id="series-primary-action" class="series-primary-action" type="button">Lire</button>
+                    <button id="series-primary-action" class="series-primary-action" type="button">Play</button>
                     <button id="series-detail-favorite" class="series-secondary-action" type="button"
                       title="Add to Favorites">
                       <span class="fav-icon">♡</span>
-                      <span class="fav-label">Favori</span>
+                      <span class="fav-label">Favorite</span>
                     </button>
                   </div>
                 </div>
@@ -1529,7 +1534,7 @@
   <script src="/js/pages/HomePage.js?v=37"></script>
   <script src="/js/pages/LivePage.js?v=5"></script>
   <script src="/js/pages/Guide.js?v=2"></script>
-  <script src="/js/pages/MoviesPage.js?v=23"></script>
+  <script src="/js/pages/MoviesPage.js?v=24"></script>
   <script src="/js/pages/SeriesPage.js?v=22"></script>
   <script src="/js/pages/Settings.js?v=12"></script>
   <script src="/js/pages/WatchPage.js?v=87"></script>

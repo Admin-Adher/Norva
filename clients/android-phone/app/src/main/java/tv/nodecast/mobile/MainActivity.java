@@ -1,12 +1,18 @@
 package tv.nodecast.mobile;
 
+import android.Manifest;
 import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
 import android.graphics.Color;
+import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.NetworkCapabilities;
 import android.net.Uri;
 import android.net.http.SslError;
+import android.os.Build;
 import android.os.Bundle;
 import android.text.InputType;
 import android.view.Gravity;
@@ -31,6 +37,17 @@ import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
 /**
  * Norva Mobile — Android phone client.
  */
@@ -43,7 +60,12 @@ public class MainActivity extends Activity {
     private static final String CLOUD_WATCH_URL = "https://norva.tv/app.html?mobile=1#home";
     private static final String UA_SUFFIX       = " NorvaTV-AndroidPhone/1.0";
     private static final int    REQ_PLAYER      = 1001;
+    private static final int    REQ_NOTIF_PERM  = 1002;
+    private static final String DL_UA           =
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            + "(KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36";
     private boolean             cloudBridgeAdded = false;
+    private final ExecutorService ioPool = Executors.newCachedThreadPool();
 
     private FrameLayout  root;
     private WebView      webView;
@@ -102,6 +124,12 @@ public class MainActivity extends Activity {
             prefs().edit().putString(PREF_MODE, "cloud").apply();
             connectCloud(CLOUD_ACCOUNT_URL);
         }
+
+        // Offline: with no connectivity but saved downloads present, go straight
+        // to the native Downloads library instead of a doomed page load.
+        if (!hasNetwork() && !DownloadStore.all(this).isEmpty()) {
+            startActivity(new Intent(this, DownloadsActivity.class));
+        }
     }
 
     @Override
@@ -155,6 +183,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         if (webView != null) webView.destroy();
+        ioPool.shutdownNow();
         super.onDestroy();
     }
 
@@ -382,6 +411,201 @@ public class MainActivity extends Activity {
                                        final String itemType, final String itemId, final int resumeSeconds) {
             openPlayer(url, title, sourceId, itemType, itemId, resumeSeconds);
         }
+
+        // ---- Offline downloads ----
+
+        /** Queue a movie for offline download. {@code json} carries url + metadata. */
+        @android.webkit.JavascriptInterface
+        public void downloadMedia(final String json) {
+            startDownload(json);
+        }
+
+        /** JSON array of all downloads (id, title, state, progress) for the web UI. */
+        @android.webkit.JavascriptInterface
+        public String getDownloads() {
+            return downloadsJson();
+        }
+
+        /** State of one download ("none" | queued | downloading | done | failed). */
+        @android.webkit.JavascriptInterface
+        public String downloadState(final String id) {
+            DownloadStore.Item it = DownloadStore.get(MainActivity.this, id);
+            return it == null ? "none" : it.state;
+        }
+
+        @android.webkit.JavascriptInterface
+        public void deleteDownload(final String id) {
+            removeDownload(id);
+        }
+
+        /** Open the native Downloads screen. */
+        @android.webkit.JavascriptInterface
+        public void openDownloads() {
+            runOnUiThread(() -> startActivity(new Intent(MainActivity.this, DownloadsActivity.class)));
+        }
+    }
+
+    // ---- Offline downloads ----
+
+    /** Build the manifest entry (with envelope-wrapped key) and start the service. */
+    private void startDownload(String json) {
+        try {
+            JSONObject o = new JSONObject(json);
+            String url = o.optString("url");
+            String sourceId = o.optString("sourceId");
+            String itemId = o.optString("itemId");
+            if (url.isEmpty() || sourceId.isEmpty() || itemId.isEmpty()) return;
+            final String id = sourceId + ":" + itemId;
+
+            DownloadStore.Item existing = DownloadStore.get(this, id);
+            if (existing != null) {
+                if ("done".equals(existing.state)) return; // already saved
+                // queued / downloading / failed: re-queue the SAME entry so the
+                // existing per-file key is reused (a new key would corrupt the
+                // partial encrypted file on resume). Refresh the provider URL.
+                if (url != null && !url.isEmpty()) existing.url = url;
+                existing.state = "queued";
+                existing.error = "";
+                DownloadStore.put(this, existing);
+                ensureNotifPermission();
+                startDownloadService(id);
+                return;
+            }
+
+            DownloadStore.Item it = new DownloadStore.Item();
+            it.id = id;
+            it.sourceId = sourceId;
+            it.itemId = itemId;
+            it.itemType = o.optString("itemType", "movie");
+            it.title = o.optString("title", "Movie");
+            it.subtitle = o.optString("subtitle", "");
+            it.posterUrl = o.optString("posterUrl", "");
+            it.container = sanitizeContainer(o.optString("container", "mp4"));
+            it.url = url;
+            it.durationSeconds = o.optInt("durationSeconds", 0);
+            it.state = "queued";
+            it.createdAt = System.currentTimeMillis();
+
+            byte[] dataKey = DownloadCrypto.newDataKey();
+            byte[] mediaIv = DownloadCrypto.newMediaIv();
+            DownloadCrypto.Wrapped w = DownloadCrypto.wrapDataKey(dataKey);
+            it.wrappedKey = DownloadCrypto.b64(w.blob);
+            it.keyIv = DownloadCrypto.b64(w.iv);
+            it.mediaIv = DownloadCrypto.b64(mediaIv);
+
+            DownloadStore.put(this, it);
+            if (!it.posterUrl.isEmpty()) downloadPosterAsync(id, it.posterUrl);
+            ensureNotifPermission();
+            startDownloadService(id);
+        } catch (Exception ignored) {
+            // The web side simply won't see a new entry appear.
+        }
+    }
+
+    private void startDownloadService(String id) {
+        Intent svc = new Intent(this, DownloadService.class);
+        svc.setAction(DownloadService.ACTION_ENQUEUE);
+        svc.putExtra(DownloadService.EXTRA_ID, id);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(svc);
+        } else {
+            startService(svc);
+        }
+    }
+
+    private void removeDownload(String id) {
+        ioPool.execute(() -> {
+            DownloadStore.Item it = DownloadStore.get(this, id);
+            if (it != null) {
+                try { if (it.filePath != null && !it.filePath.isEmpty()) new File(it.filePath).delete(); } catch (Exception ignored) { }
+                try { if (it.posterFile != null && !it.posterFile.isEmpty()) new File(it.posterFile).delete(); } catch (Exception ignored) { }
+            }
+            DownloadStore.remove(this, id);
+        });
+    }
+
+    private String downloadsJson() {
+        try {
+            JSONArray arr = new JSONArray();
+            for (DownloadStore.Item it : DownloadStore.all(this)) {
+                JSONObject o = new JSONObject();
+                o.put("id", it.id);
+                o.put("sourceId", it.sourceId);
+                o.put("itemId", it.itemId);
+                o.put("itemType", it.itemType);
+                o.put("title", it.title);
+                o.put("state", it.state);
+                o.put("totalBytes", it.totalBytes);
+                o.put("downloadedBytes", it.downloadedBytes);
+                o.put("progress", it.totalBytes > 0 ? (int) (it.downloadedBytes * 100 / it.totalBytes) : 0);
+                arr.put(o);
+            }
+            return arr.toString();
+        } catch (Exception e) {
+            return "[]";
+        }
+    }
+
+    /** Download the poster once (unencrypted, app-private) so the offline screen has art. */
+    private void downloadPosterAsync(String id, String posterUrl) {
+        ioPool.execute(() -> {
+            HttpURLConnection conn = null;
+            try {
+                File base = getFilesDir();
+                File dir = new File(base, "posters");
+                if (!dir.exists()) dir.mkdirs();
+                File out = new File(dir, id.replaceAll("[^A-Za-z0-9_.-]", "_") + ".jpg");
+                conn = (HttpURLConnection) new URL(posterUrl).openConnection();
+                conn.setRequestProperty("User-Agent", DL_UA);
+                conn.setConnectTimeout(15000);
+                conn.setReadTimeout(20000);
+                conn.setInstanceFollowRedirects(true);
+                if (conn.getResponseCode() != HttpURLConnection.HTTP_OK) return;
+                InputStream in = conn.getInputStream();
+                FileOutputStream fos = new FileOutputStream(out);
+                byte[] buf = new byte[16 * 1024];
+                int n;
+                while ((n = in.read(buf)) != -1) fos.write(buf, 0, n);
+                fos.close();
+                DownloadStore.Item it = DownloadStore.get(this, id);
+                if (it != null) {
+                    it.posterFile = out.getAbsolutePath();
+                    DownloadStore.put(this, it);
+                }
+            } catch (Exception ignored) {
+                // Poster is best-effort; the row just shows a placeholder.
+            } finally {
+                if (conn != null) conn.disconnect();
+            }
+        });
+    }
+
+    private void ensureNotifPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+                && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
+                    != PackageManager.PERMISSION_GRANTED) {
+            runOnUiThread(() -> requestPermissions(
+                    new String[]{ Manifest.permission.POST_NOTIFICATIONS }, REQ_NOTIF_PERM));
+        }
+    }
+
+    private static String sanitizeContainer(String c) {
+        if (c == null) return "mp4";
+        String s = c.toLowerCase().replaceAll("[^a-z0-9]", "");
+        return s.isEmpty() ? "mp4" : s;
+    }
+
+    private boolean hasNetwork() {
+        try {
+            ConnectivityManager cm = (ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE);
+            if (cm == null) return true;
+            Network n = cm.getActiveNetwork();
+            if (n == null) return false;
+            NetworkCapabilities caps = cm.getNetworkCapabilities(n);
+            return caps != null && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET);
+        } catch (Exception e) {
+            return true; // assume online if we can't tell
+        }
     }
 
     private void openPlayer(final String url, final String title, final String sourceId,
@@ -521,6 +745,17 @@ public class MainActivity extends Activity {
                 dp(220), LinearLayout.LayoutParams.WRAP_CONTENT);
         retryLp.bottomMargin = dp(14);
         errorPanel.addView(retryBtn, retryLp);
+
+        Button downloadsBtn = new Button(this);
+        downloadsBtn.setText("Downloads");
+        downloadsBtn.setTextColor(Color.WHITE);
+        downloadsBtn.setBackgroundColor(Color.parseColor("#272d3a"));
+        downloadsBtn.setOnClickListener(v ->
+                startActivity(new Intent(MainActivity.this, DownloadsActivity.class)));
+        LinearLayout.LayoutParams downloadsLp = new LinearLayout.LayoutParams(
+                dp(220), LinearLayout.LayoutParams.WRAP_CONTENT);
+        downloadsLp.bottomMargin = dp(14);
+        errorPanel.addView(downloadsBtn, downloadsLp);
 
         Button setupBtn = new Button(this);
         setupBtn.setText("Advanced setup");

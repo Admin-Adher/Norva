@@ -30,6 +30,7 @@ class MoviesPage {
         this.detailsPanel = document.getElementById('movie-details');
         this.primaryActionBtn = document.getElementById('movie-primary-action');
         this.detailFavoriteBtn = document.getElementById('movie-detail-favorite');
+        this.detailDownloadBtn = document.getElementById('movie-detail-download');
         this.versionsList = document.getElementById('movie-versions-list');
         this.versionSummary = document.getElementById('movie-version-summary');
 
@@ -117,6 +118,7 @@ class MoviesPage {
         this.detailFavoriteBtn?.addEventListener('click', () => {
             if (this.currentMovieGroup) this.toggleFavorite(this.currentMovieGroup, this.detailFavoriteBtn);
         });
+        this.detailDownloadBtn?.addEventListener('click', () => this.onDownloadClick());
 
         // Lazy loading
         this.observer = new IntersectionObserver((entries) => {
@@ -1123,7 +1125,132 @@ class MoviesPage {
         const icon = this.detailFavoriteBtn.querySelector('.fav-icon');
         const label = this.detailFavoriteBtn.querySelector('.fav-label');
         if (icon) icon.innerHTML = isFav ? Icons.favorite : Icons.favoriteOutline;
-        if (label) label.textContent = 'Favori';
+        if (label) label.textContent = 'Favorite';
+    }
+
+    // === Offline downloads (native phone/tablet app only) ===
+
+    /** The native download bridge, present only inside the Norva mobile APK. */
+    nativeDownloadBridge() {
+        const b = window.NorvaTVCloud;
+        return (b && typeof b.downloadMedia === 'function') ? b : null;
+    }
+
+    /** Current download state for the open movie: none | queued | downloading | done | failed. */
+    downloadStateFor(movie) {
+        const bridge = this.nativeDownloadBridge();
+        if (!bridge || !movie) return 'none';
+        try {
+            const id = `${movie.sourceId}:${movie.stream_id}`;
+            if (typeof bridge.downloadState === 'function') return bridge.downloadState(id) || 'none';
+        } catch (_) { /* fall through */ }
+        return 'none';
+    }
+
+    /** Reflect the download bridge + state on the fiche button (hidden in the browser). */
+    syncDownloadButton() {
+        const btn = this.detailDownloadBtn;
+        if (!btn) return;
+        const bridge = this.nativeDownloadBridge();
+        if (!bridge || !this.currentMovie) {
+            btn.style.display = 'none';
+            this.stopDownloadPolling();
+            return;
+        }
+        btn.style.display = '';
+        const state = this.downloadStateFor(this.currentMovie);
+        const label = btn.querySelector('.download-label');
+        const icon = btn.querySelector('.download-icon');
+        btn.classList.remove('is-downloading', 'is-done');
+        btn.disabled = false;
+        let text = 'Download';
+        if (state === 'done') {
+            text = 'Downloaded';
+            btn.classList.add('is-done');
+            if (icon) icon.innerHTML = '&#x2713;'; // check
+        } else if (state === 'downloading' || state === 'queued') {
+            text = state === 'queued' ? 'Queued…' : 'Downloading…';
+            btn.classList.add('is-downloading');
+            if (icon) icon.innerHTML = '&#x2193;';
+        } else {
+            if (icon) icon.innerHTML = '&#x2193;';
+        }
+        if (label) label.textContent = text;
+        btn.title = state === 'done' ? 'Open downloads' : 'Download for offline';
+        // Poll while in flight so the label tracks progress and flips to Downloaded.
+        if (state === 'downloading' || state === 'queued') this.startDownloadPolling();
+        else this.stopDownloadPolling();
+    }
+
+    startDownloadPolling() {
+        if (this._downloadPollTimer) return;
+        this._downloadPollTimer = setInterval(() => {
+            if (!this.currentMovie || !this.detailDownloadBtn || this.detailsPanel?.classList.contains('hidden')) {
+                this.stopDownloadPolling();
+                return;
+            }
+            this.syncDownloadButton();
+        }, 1500);
+    }
+
+    stopDownloadPolling() {
+        if (this._downloadPollTimer) {
+            clearInterval(this._downloadPollTimer);
+            this._downloadPollTimer = null;
+        }
+    }
+
+    async onDownloadClick() {
+        const bridge = this.nativeDownloadBridge();
+        if (!bridge || !this.currentMovie) return;
+        const state = this.downloadStateFor(this.currentMovie);
+        // Already saved (or in flight) → open the native Downloads screen.
+        if (state === 'done' || state === 'downloading' || state === 'queued') {
+            try { bridge.openDownloads?.(); } catch (_) { /* no-op */ }
+            return;
+        }
+        await this.startMovieDownload(this.currentMovie);
+    }
+
+    /** Resolve the direct provider URL (residential IP, no gateway) and queue it natively. */
+    async startMovieDownload(movie) {
+        const bridge = this.nativeDownloadBridge();
+        if (!bridge || !movie) return;
+        const btn = this.detailDownloadBtn;
+        const label = btn?.querySelector('.download-label');
+        try {
+            if (btn) { btn.disabled = true; }
+            if (label) label.textContent = 'Preparing…';
+            const container = movie.container_extension || 'mp4';
+            const playbackHint = MediaUtils.playbackHintFromItem
+                ? MediaUtils.playbackHintFromItem(movie, { container })
+                : { container };
+            await this.prepareForPlaybackSession();
+            const result = await API.proxy.xtream.getStreamUrl(
+                movie.sourceId, movie.stream_id, 'movie', container, playbackHint
+            );
+            if (!result || !result.url) throw new Error('No stream URL');
+            const payload = {
+                url: result.url,
+                sourceId: String(movie.sourceId),
+                itemId: String(movie.stream_id),
+                itemType: 'movie',
+                title: movie.tmdb?.title || movie.name || 'Movie',
+                subtitle: '',
+                posterUrl: MediaUtils.safeImageUrl(
+                    movie.stream_icon || movie.cover || MediaUtils.tmdbPosterUrl(movie.tmdb)) || '',
+                container,
+                durationSeconds: movie.tmdb?.runtime ? movie.tmdb.runtime * 60 : 0
+            };
+            bridge.downloadMedia(JSON.stringify(payload));
+        } catch (err) {
+            console.warn('[Download] Could not start:', err?.message || err);
+            if (label) label.textContent = 'Download failed';
+        } finally {
+            if (btn) btn.disabled = false;
+            // Give the native side a moment to register the entry, then refresh.
+            setTimeout(() => this.syncDownloadButton(), 600);
+        }
     }
 
     renderMovieVersions(selectedMovie = this.currentMovie) {
@@ -1233,6 +1360,7 @@ class MoviesPage {
         }
 
         this.syncDetailFavoriteButton();
+        this.syncDownloadButton();
         this.renderMovieVersions(movie);
 
         if (focusVersions) {
@@ -1243,6 +1371,7 @@ class MoviesPage {
     }
 
     hideDetails() {
+        this.stopDownloadPolling();
         this.detailsPanel?.classList.add('hidden');
         this.container?.classList.remove('hidden');
         this.pageEl?.classList.remove('movie-detail-open');
