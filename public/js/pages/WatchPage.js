@@ -3994,8 +3994,12 @@ class WatchPage {
             this._firstFrameReported = true;
             if (this.playbackTelemetry) this.playbackTelemetry.firstFrameReported = true;
             const requestedAt = this.playbackTelemetry?.requestedAt || this._playRequestedAt || Date.now();
+            // Attach the in-browser engine's per-stage startup timings so we can
+            // see exactly where launch time goes (wasm vs probe vs demux vs ...).
+            const engineTimings = this.norvaEngine?.timings;
             this.sendPlaybackEvent('first_frame', {
-                timeToFirstFrameMs: Math.max(1, Date.now() - requestedAt)
+                timeToFirstFrameMs: Math.max(1, Date.now() - requestedAt),
+                ...(engineTimings ? { metadata: { engineTimings } } : {})
             });
         }
         if (!this._playbackStatusOkReported) {

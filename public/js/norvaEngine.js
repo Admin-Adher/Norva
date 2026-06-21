@@ -100,6 +100,9 @@
       this.fmtCtx = null; this.vS = null; this.aS = null;
       this.copyAudio = false;
       this._lastReadError = null; // precise reason a byte-range fetch failed
+      this._raCache = [];         // read-ahead windows (filled before _openInput)
+      this.timings = {};          // per-stage startup timings (ms)
+      this._fetchCount = 0; this._fetchBytes = 0; this._fetchMs = 0;
       this.decCtx = null; this.decPkt = null; this.decFrame = null;
       this.encCtx = null; this.encFrame = null; this.encPkt = null; this.frameSize = 0; this.encCodecpar = null;
       this.fg = null; this.fsrc = null; this.fsink = null;
@@ -113,25 +116,58 @@
     async load(url, { startTime = 0 } = {}) {
       this.url = url;
       const t0 = performance.now();
-      const factory = await loadLibavFactory();
+      this.loadStartedAt = t0;
+      // Kick off wasm AND the initial network at the same time: the wasm compile
+      // (~3 MB) overlaps fetching the file size + first window + MKV tail, so
+      // _openInput's demuxer reads hit the cache instead of waiting on the net.
+      const factoryP = loadLibavFactory();
+      const prefetchP = this._prefetchStart();
+      const factory = await factoryP;
       const LibAV = factory.LibAV || factory.default.LibAV;
       this.lib = await LibAV({ base: LIBAV_BASE });
-      this.log(`libav prêt (${this.lib.libavjsMode}) en ${((performance.now() - t0) / 1000).toFixed(1)}s`);
+      this.timings.wasmMs = Math.round(performance.now() - t0);
+      this.log(`libav prêt (${this.lib.libavjsMode}) en ${(this.timings.wasmMs / 1000).toFixed(1)}s`);
 
-      this.size = await this._probeSize(url);
-      await this._openInput();
-      await this._detectStreams();
-      this.mime = await this._chooseMime();
-      await this._attachMediaSource();
-      if (this.copyAudio === false && this.aS) await this._initEncoder();
-      await this._initMuxer();
+      let m = performance.now();
+      await prefetchP;
+      if (!this.size) this.size = await this._probeSize(url);
+      this.timings.probeMs = Math.round(performance.now() - m);
+      m = performance.now(); await this._openInput(); this.timings.openInputMs = Math.round(performance.now() - m);
+      m = performance.now(); await this._detectStreams(); this.mime = await this._chooseMime(); this.timings.detectMimeMs = Math.round(performance.now() - m);
+      m = performance.now(); await this._attachMediaSource(); this.timings.mediaSourceMs = Math.round(performance.now() - m);
+      m = performance.now(); if (this.copyAudio === false && this.aS) await this._initEncoder(); this.timings.encoderMs = Math.round(performance.now() - m);
+      m = performance.now(); await this._initMuxer(); this.timings.muxerMs = Math.round(performance.now() - m);
+      m = performance.now();
       if (startTime > 0.25) {
         await this._seekDemuxer(startTime);
         try { this.video.currentTime = startTime; } catch (_) {}
       }
+      this.timings.seekMs = Math.round(performance.now() - m);
+      this.timings.loadTotalMs = Math.round(performance.now() - t0);
+      this.timings.fetches = this._fetchCount;
+      this.timings.fetchMB = Math.round((this._fetchBytes / 1048576) * 10) / 10;
+      this.timings.fetchMs = Math.round(this._fetchMs);
+      this.timings.audio = this.copyAudio ? 'copy' : 'aac';
+      this.log('timings ' + JSON.stringify(this.timings));
       this.video.addEventListener('seeking', this._onSeeking);
       this.video.addEventListener('timeupdate', this._onTimeUpdate);
       this._startPump();
+    }
+
+    // Fetch file size + first window (+ MKV tail for cues) up front so they're
+    // cached by the time the demuxer reads. Runs in parallel with the wasm load;
+    // failures are swallowed here and re-surfaced by _openInput's real reads.
+    async _prefetchStart() {
+      try {
+        this.size = await this._probeSize(this.url);
+        if (!this.size) return;
+        const jobs = [this._readRange(0, Math.min(RA_WINDOW, this.size))];
+        if (this.size > RA_WINDOW + 1048576) {
+          const tailLen = Math.min(1048576, this.size);
+          jobs.push(this._readRange(this.size - tailLen, tailLen));
+        }
+        await Promise.allSettled(jobs);
+      } catch (_) { /* _openInput surfaces the real error */ }
     }
 
     async seek(t) {
@@ -195,7 +231,7 @@
     async _openInput() {
       const lib = this.lib, url = this.url, size = this.size;
       await lib.mkblockreaderdev('input', size);
-      this._raCache = []; // [{start,end,buf}] tiny LRU of fetched windows
+      // _raCache was primed by _prefetchStart in parallel with the wasm load.
       lib.onblockread = async (name, pos, len) => {
         try {
           const want = Math.min(len, Math.max(0, size - pos));
@@ -250,13 +286,16 @@
     async _fetchRange(start, end) {
       const ac = new AbortController();
       const to = setTimeout(() => { try { ac.abort(); } catch (_) {} }, 60000);
+      const ft0 = performance.now();
       try {
         const r = await fetch(this.url, { headers: { Range: `bytes=${start}-${end - 1}` }, signal: ac.signal });
         // 200 without Content-Range → provider ignored Range and would stream the
         // whole file; bail before buffering gigabytes.
         if (r.status === 200 && !r.headers.get('content-range')) { try { ac.abort(); } catch (_) {} throw new Error('RANGE_UNSUPPORTED'); }
         if (r.status !== 206 && r.status !== 200) throw new Error('BLOCK_HTTP_' + r.status);
-        return new Uint8Array(await r.arrayBuffer());
+        const out = new Uint8Array(await r.arrayBuffer());
+        this._fetchCount += 1; this._fetchBytes += out.length; this._fetchMs += performance.now() - ft0;
+        return out;
       } finally {
         clearTimeout(to);
       }
@@ -513,4 +552,8 @@
   }
 
   window.NorvaEngine = NorvaEngine;
+  // Warm the libav module import as soon as this script loads, so the dynamic
+  // import + parse is done (and the browser can start fetching the wasm) before
+  // the user presses play. Errors are ignored; load() retries/​surfaces them.
+  try { loadLibavFactory().catch(() => {}); } catch (_) {}
 })();
