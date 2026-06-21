@@ -80,6 +80,7 @@ const PLAYBACK_EVENT_TYPES = new Set([
   "abandoned",
   "playback_error",
   "gateway_error",
+  "seek",
 ]);
 
 if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
@@ -137,7 +138,7 @@ async function route(
       body: {
         ok: true,
         service: "norva-cloud",
-        version: 20,
+        version: 21,
         entitlements: true,
         entitlementsMode: entitlementRuntime.mode,
         entitlementsEnforced: entitlementRuntime.enforced,
@@ -273,7 +274,14 @@ async function route(
   }
 
   if (scope === "history") {
-    if (req.method === "GET" && !id) return { body: await listHistory(url, user.id, db) };
+    if (req.method === "GET" && !id) {
+      // Targeted lookup (?itemId&itemType[&sourceId]) → single item's progress,
+      // used for authoritative cross-device resume; otherwise list recent history.
+      if (url.searchParams.get("itemId") || url.searchParams.get("item_id")) {
+        return { body: await getHistoryItem(url, user.id, db) };
+      }
+      return { body: await listHistory(url, user.id, db) };
+    }
     if (req.method === "POST" && !id) return { status: 201, body: await saveHistory(req, user.id, db) };
     if (req.method === "DELETE" && id) return { body: await deleteOwned("cloud_watch_history", id, user.id, db) };
   }
@@ -2012,6 +2020,26 @@ async function addFavorite(req: Request, userId: string, db: SupabaseClient) {
     .single();
   if (error) throwDb(error, "Unable to save favorite");
   return { favorite: data };
+}
+
+async function getHistoryItem(url: URL, userId: string, db: SupabaseClient) {
+  const itemId = stringOr(url.searchParams.get("itemId") ?? url.searchParams.get("item_id"), "");
+  const itemType = stringOr(
+    url.searchParams.get("itemType") ?? url.searchParams.get("item_type") ?? url.searchParams.get("type"),
+    "",
+  );
+  const sourceId = stringOrNull(url.searchParams.get("sourceId") ?? url.searchParams.get("source_id"));
+  if (!itemId || !itemType) throw new HttpError(400, "itemId and itemType are required");
+  let q = db
+    .from("cloud_watch_history")
+    .select("source_id,item_type,item_id,progress_seconds,duration_seconds,completed,updated_at")
+    .eq("user_id", userId)
+    .eq("item_type", itemType)
+    .eq("item_id", itemId);
+  q = sourceId ? q.eq("source_id", sourceId) : q.is("source_id", null);
+  const { data, error } = await q.maybeSingle();
+  if (error) throwDb(error, "Unable to load history item");
+  return { item: data ?? null };
 }
 
 async function listHistory(url: URL, userId: string, db: SupabaseClient) {

@@ -55,6 +55,7 @@ const PLAYBACK_EVENT_TYPES = new Set([
   "abandoned",
   "playback_error",
   "gateway_error",
+  "seek",
 ]);
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
@@ -92,7 +93,7 @@ Deno.serve(async (req) => {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 14,
+        version: 15,
         entitlements: true,
         entitlementsMode: entitlementRuntime.mode,
         entitlementsEnforced: entitlementRuntime.enforced,

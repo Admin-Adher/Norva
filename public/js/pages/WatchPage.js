@@ -877,6 +877,28 @@ class WatchPage {
         } catch (_) { /* best-effort */ }
     }
 
+    // Authoritative cross-device resume: fetch this title's saved position from the
+    // server's continue-watching (cloud_watch_history) via the targeted /history
+    // lookup. Returns 0 on any failure or if the backend lookup isn't available
+    // (older backend returns {history:[...]} with no .item → treated as 0).
+    async _fetchServerResumePosition(content) {
+        try {
+            if (!window.API?.request || !content?.id) return 0;
+            const itemType = content.type === 'movie' ? 'movie' : 'episode';
+            const params = new URLSearchParams({ itemId: String(content.id), itemType });
+            if (content.sourceId) params.set('sourceId', String(content.sourceId));
+            const res = await window.API.request('GET', `/history?${params.toString()}`);
+            const item = res && res.item;
+            if (!item || item.completed) return 0;
+            const progress = Number(item.progress_seconds ?? item.progress ?? 0);
+            const duration = Number(item.duration_seconds ?? item.duration ?? 0);
+            return this.getResumeRestorePosition(progress, duration);
+        } catch (err) {
+            console.warn('[WatchPage] Server resume fetch failed:', err?.message || err);
+            return 0;
+        }
+    }
+
     getHistoryResumePosition(item = {}) {
         const data = item.data || {};
         const progress = item.progress || item.progress_seconds || data.progress || 0;
@@ -1168,10 +1190,17 @@ class WatchPage {
             playbackMetadata.startOffset ??
             0
         );
-        // Fallback: the catalog item often opens without a resume position (stale
-        // progress). Use the persistent per-title store (saved ~every 2s during
-        // playback, survives quit + tab close) so reopening resumes at the saved
-        // spot instead of restarting at 0.
+        // The catalog item often opens without a resume position (stale progress).
+        // Recover it with a two-tier fallback so reopening resumes at the saved spot:
+        //   1) authoritative server position (continue-watching) — works cross-device
+        //   2) durable per-title store on this device — offline / server unavailable
+        if (!(requestedResumeTime > 0) && content?.id && content?.sourceId) {
+            const serverPos = await this._fetchServerResumePosition(content);
+            if (serverPos > 0) {
+                requestedResumeTime = serverPos;
+                console.log(`[WatchPage] Resume from server: ${serverPos}s`);
+            }
+        }
         if (!(requestedResumeTime > 0) && content?.id && content?.sourceId) {
             const stored = this._loadResumePosition(content);
             if (stored > 0) {
@@ -2194,7 +2223,11 @@ class WatchPage {
             report: (info) => this.reportEngineFailure(info),
             log: (m) => console.log('[NorvaEngine] ' + m),
             onReady: (timings) => { console.log('[NorvaEngine] ready', timings); },
-            onSeek: (timings) => { console.log('[NorvaEngine] seek', timings); }
+            onSeek: (timings) => {
+                console.log('[NorvaEngine] seek', timings);
+                // Dedicated seek telemetry (backend accepts the 'seek' event type).
+                try { this.sendPlaybackEvent('seek', { metadata: { seekTimings: timings } }); } catch (_) {}
+            }
         });
         try {
             await engine.load(url, { startTime });
