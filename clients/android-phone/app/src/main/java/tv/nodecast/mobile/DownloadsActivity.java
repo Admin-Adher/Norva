@@ -513,14 +513,12 @@ public final class DownloadsActivity extends Activity {
         return card;
     }
 
-    private interface Click { void onClick(View v); }
-
-    private TextView pillSpaced(String text, int bg, int textColor, final Click cb) {
+    private TextView pillSpaced(String text, int bg, int textColor, View.OnClickListener cb) {
         TextView b = pill(text, bg, textColor);
         LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) b.getLayoutParams();
         lp.leftMargin = dp(8);
         b.setLayoutParams(lp);
-        b.setOnClickListener(cb::onClick);
+        b.setOnClickListener(cb);
         return b;
     }
 
