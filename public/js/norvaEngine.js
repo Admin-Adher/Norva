@@ -47,6 +47,35 @@
   const from64 = (v) => { const hi = Math.floor(v / 4294967296); return [(v - hi * 4294967296) >>> 0, hi]; };
   const hex2 = (n) => n.toString(16).padStart(2, '0');
 
+  // ---- minimal EBML/Matroska reader (builds a time→byte cue index so we can
+  //      prefetch the bytes for a seek target while the user is still scrubbing).
+  const MKV = {
+    Segment: 0x18538067, SeekHead: 0x114D9B74, Seek: 0x4DBB, SeekID: 0x53AB, SeekPosition: 0x53AC,
+    Info: 0x1549A966, TimestampScale: 0x2AD7B1, Cues: 0x1C53BB6B,
+    CuePoint: 0xBB, CueTime: 0xB3, CueTrackPositions: 0xB7, CueClusterPosition: 0xF1,
+  };
+  // Read an EBML element ID (keeps the length-descriptor bits, matching MKV.* ids).
+  function ebmlId(b, p) {
+    if (p >= b.length) return null;
+    const b0 = b[p];
+    const len = b0 & 0x80 ? 1 : b0 & 0x40 ? 2 : b0 & 0x20 ? 3 : b0 & 0x10 ? 4 : 0;
+    if (!len || p + len > b.length) return null;
+    let id = 0; for (let i = 0; i < len; i++) id = id * 256 + b[p + i];
+    return { id, len };
+  }
+  // Read an EBML size (VINT); strips the marker bit. unknown=all-ones size.
+  function ebmlSize(b, p) {
+    if (p >= b.length) return null;
+    const b0 = b[p];
+    let mask = 0x80, len = 1;
+    while (len <= 8 && !(b0 & mask)) { mask >>= 1; len++; }
+    if (len > 8 || p + len > b.length) return null;
+    let val = b0 & (mask - 1); let unknown = (b0 & (mask - 1)) === (mask - 1);
+    for (let i = 1; i < len; i++) { val = val * 256 + b[p + i]; if (b[p + i] !== 0xff) unknown = false; }
+    return { val, len, unknown };
+  }
+  function ebmlUint(b, p, n) { let v = 0; for (let i = 0; i < n && p + i < b.length; i++) v = v * 256 + b[p + i]; return v; }
+
   let libavLoaderPromise = null;
   function loadLibavFactory() {
     if (!libavLoaderPromise) libavLoaderPromise = import(LIBAV_LOADER);
@@ -78,7 +107,7 @@
     av1: ['av01.0.08M.08'],
   };
 
-  const ENGINE_VERSION = 7;
+  const ENGINE_VERSION = 8;
 
   class NorvaEngine {
     constructor(videoEl, opts = {}) {
@@ -86,6 +115,10 @@
       this.report = typeof opts.report === 'function' ? opts.report : () => {};
       this.log = typeof opts.log === 'function' ? opts.log : () => {};
       this.onReady = typeof opts.onReady === 'function' ? opts.onReady : () => {};
+      this.onSeek = typeof opts.onSeek === 'function' ? opts.onSeek : () => {};
+      this._cueIndex = null;      // [{t, off}] time→byte index from MKV cues
+      this._prefetching = false;  // single-flight guard for scrub prefetch
+      this._smallNextRead = false;// next demuxer read after a seek uses a small window
       this.lib = null;
       this.url = null;
       this.size = 0;
@@ -161,6 +194,9 @@
       this.video.addEventListener('seeking', this._onSeeking);
       this.video.addEventListener('timeupdate', this._onTimeUpdate);
       this._startPump();
+      // Build the cue index in the background (enables prefetch-on-scrub). Delayed
+      // so it never competes with the first frame's fetches on the single-slot link.
+      setTimeout(() => { if (!this.destroyed) this._buildCueIndex(); }, 2500);
     }
 
     // Fetch file size + first window (+ MKV tail for cues) up front so they're
@@ -181,18 +217,54 @@
       // Within the buffered range → let the native element seek, no rework.
       if (this._isBuffered(t)) return;
       this._seeking = true;
+      const st0 = performance.now();
+      const f0 = this._fetchCount, b0 = this._fetchBytes;
+      const off = this._offsetForTime(t);
+      const warm = off != null && this._raCache.some((w) => off >= w.start && off < w.end);
       try {
         await this._stopPump();
         await this._resetForSeek();
+        this._smallNextRead = true;        // reach the first frame faster on a cold seek
         await this._seekDemuxer(t);
         await this._clearSourceBuffer();
         await this._initMuxer();           // fresh init segment → onwrite
         this._startPump();
+        this.seekTimings = {
+          warm, setupMs: Math.round(performance.now() - st0),
+          fetches: this._fetchCount - f0, fetchKB: Math.round((this._fetchBytes - b0) / 1024),
+        };
+        this.log('seek ' + JSON.stringify(this.seekTimings));
+        try { this.onSeek(this.seekTimings); } catch (_) {}
       } catch (e) {
         this.report({ stage: 'seek', message: String(e && (e.message || e)) });
       } finally {
         this._seeking = false;
       }
+    }
+
+    // Prefetch the bytes for seek target `t` into the read-ahead cache *while the
+    // user is still scrubbing*, so the real seek on release hits a warm cache and
+    // feels instant. No-op (graceful) when there's no cue index or it's cached.
+    async prefetchAt(t) {
+      if (this.destroyed || this._prefetching || this._seeking) return;
+      const off = this._offsetForTime(t);
+      if (off == null || off >= this.size) return;
+      for (const w of this._raCache) if (off >= w.start && off < w.end) return; // already warm
+      this._prefetching = true;
+      try {
+        await this._cacheWindow(off, Math.min(RA_FIRST_WINDOW, this.size - off));
+        this.log(`prefetch t=${t.toFixed(0)}s off=${off}`);
+      } catch (_) { /* a real seek will fetch it */ } finally { this._prefetching = false; }
+    }
+
+    // Largest cue offset whose timestamp is ≤ t (the cluster the demuxer will seek to).
+    _offsetForTime(t) {
+      const idx = this._cueIndex;
+      if (!idx || !idx.length) return null;
+      if (t <= idx[0].t) return idx[0].off;
+      let lo = 0, hi = idx.length - 1, ans = idx[0].off;
+      while (lo <= hi) { const m = (lo + hi) >> 1; if (idx[m].t <= t) { ans = idx[m].off; lo = m + 1; } else hi = m - 1; }
+      return ans;
     }
 
     destroy() {
@@ -273,7 +345,8 @@
       for (const w of this._raCache) {
         if (pos >= w.start && end <= w.end) { this._raTouch(w); return w.buf.subarray(pos - w.start, end - w.start); }
       }
-      const winEnd = Math.min(pos + Math.max(RA_WINDOW, len), this.size);
+      const small = this._smallNextRead; this._smallNextRead = false;
+      const winEnd = Math.min(pos + Math.max(small ? RA_FIRST_WINDOW : RA_WINDOW, len), this.size);
       const w = await this._cacheWindow(pos, winEnd - pos);
       const sliceEnd = Math.min(end, w.end);
       return w.buf.subarray(pos - w.start, Math.max(pos - w.start, sliceEnd - w.start));
@@ -291,6 +364,128 @@
     _raTouch(w) {
       const i = this._raCache.indexOf(w);
       if (i >= 0 && i !== this._raCache.length - 1) { this._raCache.splice(i, 1); this._raCache.push(w); }
+    }
+
+    // Build a time→byte index from the Matroska cues so prefetchAt() can map a
+    // scrub target to the exact cluster offset. Fully defensive: any failure
+    // leaves _cueIndex null and seeking falls back to its normal (cold) path.
+    async _buildCueIndex() {
+      try {
+        if (!this.size || this._cueIndex) return;
+        const head = await this._readRange(0, Math.min(RA_FIRST_WINDOW, this.size));
+        const segStart = this._findSegmentDataStart(head);
+        if (segStart < 0) return;
+        const { scaleNs, cuesPos } = this._scanSegmentHead(head, segStart);
+        if (cuesPos < 0 || cuesPos >= this.size) return;
+        const hdr = await this._readRange(cuesPos, Math.min(16, this.size - cuesPos));
+        const idr = ebmlId(hdr, 0); if (!idr || idr.id !== MKV.Cues) return;
+        const szr = ebmlSize(hdr, idr.len); if (!szr || szr.unknown) return;
+        const dataStart = cuesPos + idr.len + szr.len;
+        const dataLen = Math.min(szr.val, this.size - dataStart);
+        if (dataLen <= 0 || dataLen > 16 * 1048576) return; // sanity bound
+        const cues = await this._readRange(dataStart, dataLen);
+        const index = this._parseCuePoints(cues, segStart, scaleNs || 1e6);
+        if (index && index.length) { index.sort((a, b) => a.t - b.t); this._cueIndex = index; this.log('cue index: ' + index.length + ' points'); }
+      } catch (_) { this._cueIndex = null; }
+    }
+
+    // Walk top-level EBML (EBML header, then Segment); return Segment data start.
+    _findSegmentDataStart(b) {
+      let p = 0;
+      while (p < b.length) {
+        const idr = ebmlId(b, p); if (!idr) break;
+        const szr = ebmlSize(b, p + idr.len); if (!szr) break;
+        const dataStart = p + idr.len + szr.len;
+        if (idr.id === MKV.Segment) return dataStart;
+        if (szr.unknown) break;
+        p = dataStart + szr.val;
+      }
+      return -1;
+    }
+
+    // Scan Segment children present in `b` for TimestampScale (Info) and the
+    // Cues byte position (via SeekHead, or an inline Cues element).
+    _scanSegmentHead(b, segStart) {
+      let p = segStart, scaleNs = 1e6, cuesPos = -1;
+      while (p < b.length) {
+        const idr = ebmlId(b, p); if (!idr) break;
+        const szr = ebmlSize(b, p + idr.len); if (!szr) break;
+        const ds = p + idr.len + szr.len;
+        const de = szr.unknown ? b.length : ds + szr.val;
+        if (idr.id === MKV.Info) { const v = this._findChildUint(b, ds, Math.min(de, b.length), MKV.TimestampScale); if (v) scaleNs = v; }
+        else if (idr.id === MKV.SeekHead) { const c = this._findCuesInSeekHead(b, ds, Math.min(de, b.length), segStart); if (c >= 0) cuesPos = c; }
+        else if (idr.id === MKV.Cues) { cuesPos = p; }
+        if (de > b.length) break; // element runs past our buffer
+        p = de;
+      }
+      return { scaleNs, cuesPos };
+    }
+
+    _findCuesInSeekHead(b, start, end, segStart) {
+      let p = start;
+      while (p < end) {
+        const idr = ebmlId(b, p); if (!idr) break;
+        const szr = ebmlSize(b, p + idr.len); if (!szr) break;
+        const ds = p + idr.len + szr.len, de = ds + szr.val;
+        if (idr.id === MKV.Seek) {
+          let seekId = -1, seekPos = -1, q = ds;
+          while (q < de && q < end) {
+            const i2 = ebmlId(b, q); if (!i2) break;
+            const s2 = ebmlSize(b, q + i2.len); if (!s2) break;
+            const d2 = q + i2.len + s2.len;
+            if (i2.id === MKV.SeekID) seekId = ebmlUint(b, d2, s2.val);
+            else if (i2.id === MKV.SeekPosition) seekPos = ebmlUint(b, d2, s2.val);
+            q = d2 + s2.val;
+          }
+          if (seekId === MKV.Cues && seekPos >= 0) return segStart + seekPos;
+        }
+        p = de;
+      }
+      return -1;
+    }
+
+    _findChildUint(b, start, end, targetId) {
+      let p = start;
+      while (p < end) {
+        const idr = ebmlId(b, p); if (!idr) break;
+        const szr = ebmlSize(b, p + idr.len); if (!szr) break;
+        const ds = p + idr.len + szr.len;
+        if (idr.id === targetId) return ebmlUint(b, ds, szr.val);
+        p = ds + szr.val;
+      }
+      return 0;
+    }
+
+    _parseCuePoints(b, segStart, scaleNs) {
+      const out = []; let p = 0;
+      while (p < b.length) {
+        const idr = ebmlId(b, p); if (!idr) break;
+        const szr = ebmlSize(b, p + idr.len); if (!szr) break;
+        const ds = p + idr.len + szr.len, de = Math.min(ds + szr.val, b.length);
+        if (idr.id === MKV.CuePoint) {
+          let time = -1, clusterPos = -1, q = ds;
+          while (q < de) {
+            const i2 = ebmlId(b, q); if (!i2) break;
+            const s2 = ebmlSize(b, q + i2.len); if (!s2) break;
+            const d2 = q + i2.len + s2.len, e2 = Math.min(d2 + s2.val, de);
+            if (i2.id === MKV.CueTime) time = ebmlUint(b, d2, s2.val);
+            else if (i2.id === MKV.CueTrackPositions) {
+              let r = d2;
+              while (r < e2) {
+                const i3 = ebmlId(b, r); if (!i3) break;
+                const s3 = ebmlSize(b, r + i3.len); if (!s3) break;
+                const d3 = r + i3.len + s3.len;
+                if (i3.id === MKV.CueClusterPosition) clusterPos = ebmlUint(b, d3, s3.val);
+                r = d3 + s3.val;
+              }
+            }
+            q = e2;
+          }
+          if (time >= 0 && clusterPos >= 0) out.push({ t: time * scaleNs / 1e9, off: segStart + clusterPos });
+        }
+        p = de;
+      }
+      return out;
     }
 
     // Fetch [start, end) (exclusive) as one ranged request, bounded by a timeout.

@@ -2131,6 +2131,10 @@ class WatchPage {
             onReady: (timings) => {
                 console.log('[NorvaEngine] ready', timings);
                 try { this.sendPlaybackEvent('play_started', { metadata: { engineTimings: timings } }); } catch (_) {}
+            },
+            onSeek: (timings) => {
+                console.log('[NorvaEngine] seek', timings);
+                try { this.sendPlaybackEvent('play_started', { metadata: { seekTimings: timings } }); } catch (_) {}
             }
         });
         try {
@@ -2832,6 +2836,18 @@ class WatchPage {
         if (this.timeCurrent) {
             this.timeCurrent.textContent = this.formatTime(target);
         }
+        // Warm the byte cache at the scrub target so the seek on release is instant.
+        this._scheduleEnginePrefetch(target);
+    }
+
+    // Debounced: while scrubbing, ask the browser engine to prefetch the bytes for
+    // the hovered position. Only the browser-engine path supports this; no-op else.
+    _scheduleEnginePrefetch(target) {
+        if (this.currentPlaybackMode !== 'engine' || !this.norvaEngine || typeof this.norvaEngine.prefetchAt !== 'function') return;
+        clearTimeout(this._enginePrefetchTimer);
+        this._enginePrefetchTimer = setTimeout(() => {
+            try { this.norvaEngine?.prefetchAt(target); } catch (_) {}
+        }, 180);
     }
 
     scheduleProcessedSeek(target, duration, delay = 900) {
