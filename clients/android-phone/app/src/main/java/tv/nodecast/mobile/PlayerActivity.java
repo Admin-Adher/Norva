@@ -2,7 +2,11 @@ package tv.nodecast.mobile;
 
 import android.app.Activity;
 import android.content.Intent;
+import android.os.Build;
 import android.os.Bundle;
+import android.view.DisplayCutout;
+import android.view.View;
+import android.view.WindowInsets;
 import android.view.WindowManager;
 
 import androidx.annotation.OptIn;
@@ -60,6 +64,29 @@ public class PlayerActivity extends Activity {
         playerView = new PlayerView(this);
         setContentView(playerView);
 
+        // Fullscreen video that respects display cutouts (notches): draw
+        // edge-to-edge under the cutout, hide the system bars, but pad the
+        // player by the cutout's safe insets so the media3 controls (title,
+        // seek bar, buttons) are never hidden behind a notch or the nav bar.
+        if (Build.VERSION.SDK_INT >= 28) {
+            getWindow().getAttributes().layoutInDisplayCutoutMode =
+                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+        }
+        playerView.setOnApplyWindowInsetsListener((v, insets) -> {
+            int l = 0, t = 0, r = 0, b = 0;
+            if (Build.VERSION.SDK_INT >= 28 && insets.getDisplayCutout() != null) {
+                DisplayCutout dc = insets.getDisplayCutout();
+                l = dc.getSafeInsetLeft();
+                t = dc.getSafeInsetTop();
+                r = dc.getSafeInsetRight();
+                b = dc.getSafeInsetBottom();
+            }
+            v.setPadding(l, t, r, b);
+            return insets;
+        });
+        playerView.requestApplyInsets();
+        applyImmersive();
+
         DefaultHttpDataSource.Factory http = new DefaultHttpDataSource.Factory()
                 .setUserAgent(UA)
                 .setAllowCrossProtocolRedirects(true)
@@ -93,6 +120,24 @@ public class PlayerActivity extends Activity {
         player.setMediaItem(MediaItem.fromUri(url));
         player.prepare();
         player.setPlayWhenReady(true);
+    }
+
+    /** Immersive fullscreen: hide the status and navigation bars (sticky, so a
+     *  swipe reveals them transiently without resizing the video). */
+    private void applyImmersive() {
+        getWindow().getDecorView().setSystemUiVisibility(
+                View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                | View.SYSTEM_UI_FLAG_FULLSCREEN
+                | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) applyImmersive();
     }
 
     /**
