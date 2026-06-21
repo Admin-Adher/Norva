@@ -77,11 +77,14 @@
     av1: ['av01.0.08M.08'],
   };
 
+  const ENGINE_VERSION = 5;
+
   class NorvaEngine {
     constructor(videoEl, opts = {}) {
       this.video = videoEl;
       this.report = typeof opts.report === 'function' ? opts.report : () => {};
       this.log = typeof opts.log === 'function' ? opts.log : () => {};
+      this.onReady = typeof opts.onReady === 'function' ? opts.onReady : () => {};
       this.lib = null;
       this.url = null;
       this.size = 0;
@@ -148,7 +151,12 @@
       this.timings.fetchMB = Math.round((this._fetchBytes / 1048576) * 10) / 10;
       this.timings.fetchMs = Math.round(this._fetchMs);
       this.timings.audio = this.copyAudio ? 'copy' : 'aac';
+      this.timings.video = this.vName || null;
+      this.timings.engineVersion = ENGINE_VERSION;
       this.log('timings ' + JSON.stringify(this.timings));
+      // Emit timings the instant the engine is ready — unambiguous proof of
+      // version + per-stage breakdown, independent of the first_frame path.
+      try { this.onReady(this.timings); } catch (_) {}
       this.video.addEventListener('seeking', this._onSeeking);
       this.video.addEventListener('timeupdate', this._onTimeUpdate);
       this._startPump();

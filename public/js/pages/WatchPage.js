@@ -2127,7 +2127,11 @@ class WatchPage {
         try { this.updateTranscodeStatus('direct', 'Navigateur'); } catch (_) {}
         const engine = this.norvaEngine = new window.NorvaEngine(this.video, {
             report: (info) => this.reportEngineFailure(info),
-            log: (m) => console.log('[NorvaEngine] ' + m)
+            log: (m) => console.log('[NorvaEngine] ' + m),
+            onReady: (timings) => {
+                console.log('[NorvaEngine] ready', timings);
+                try { this.sendPlaybackEvent('play_started', { metadata: { engineTimings: timings } }); } catch (_) {}
+            }
         });
         try {
             await engine.load(url, { startTime });
