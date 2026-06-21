@@ -43,6 +43,7 @@ class App {
         await this.checkAuth();
         if (!await this.checkCloudAccess()) return;
         this.applyCatalogAvailability(null);
+        this.startCloudWarmKeep();
 
         // Mobile menu toggle
         const mobileMenuToggle = document.getElementById('mobile-menu-toggle');
@@ -287,6 +288,25 @@ class App {
         } catch (_) {
             return false;
         }
+    }
+
+    // Keep the Supabase edge functions warm so the first catalog call after a
+    // lull (or returning to the tab/app) doesn't pay a cold start. Only while
+    // visible and signed in; pauses when hidden.
+    startCloudWarmKeep() {
+        if (!window.API?.isCloudMode?.() || typeof window.NorvaCloud?.warmUp !== 'function') return;
+        const ping = () => {
+            if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+            if (!this.hasCloudSession()) return;
+            try { window.NorvaCloud.warmUp(); } catch (_) { /* best-effort */ }
+        };
+        if (typeof document !== 'undefined') {
+            document.addEventListener('visibilitychange', () => {
+                if (document.visibilityState === 'visible') ping();
+            });
+        }
+        if (this._warmKeepTimer) clearInterval(this._warmKeepTimer);
+        this._warmKeepTimer = setInterval(ping, 4 * 60 * 1000);
     }
 
     async checkAuth() {

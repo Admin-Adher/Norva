@@ -17,19 +17,17 @@ class LivePage {
             this.app.channelList.resumeLivePlayback();
         }
 
-        // Silently fetch EPG data for sidebar info
-        try {
-            await this.app.epgGuide.fetchEpgData();
-
-            // Clear cache so we don't get stale "null" results from initial render
-            this.app.channelList.clearProgramInfoCache();
-
-            // Update program info in existing DOM elements without re-rendering
-            this.updateProgramInfo();
-            this.app.liveGuideFusion?.render();
-        } catch (err) {
-            console.warn('Background EPG fetch failed:', err);
-        }
+        // Fetch EPG in the background — never block the channel list or page init
+        // on it. The guide fills in (and program info updates) once it arrives.
+        this.app.epgGuide.fetchEpgData()
+            .then(() => {
+                // Clear cache so we don't keep stale "null" results from first render
+                this.app.channelList.clearProgramInfoCache();
+                // Update program info in existing DOM elements without re-rendering
+                this.updateProgramInfo();
+                this.app.liveGuideFusion?.render();
+            })
+            .catch((err) => console.warn('Background EPG fetch failed:', err));
     }
 
     /**

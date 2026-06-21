@@ -531,9 +531,17 @@ class MoviesPage {
         };
     }
 
+    catalogCacheKey() {
+        // First page only, keyed by the active filter so a different
+        // source/category/search uses its own entry (or none).
+        const p = this.cloudPageParams(0);
+        return 'movies:' + JSON.stringify({ s: p.sourceId || '', c: p.categoryId || '', q: p.q || '' });
+    }
+
     async loadCloudMovies({ reset = false } = {}) {
         if (this.cloudLoadingMore || (this.isLoading && !reset)) return;
 
+        let paintedFromCache = false;
         if (reset) {
             this.isLoading = true;
             this.cloudRequestId += 1;
@@ -543,7 +551,19 @@ class MoviesPage {
             this.movies = [];
             this.filteredCards = [];
             this.currentBatch = 0;
-            this.container.innerHTML = '<div class="loading"><div class="loading-spinner"></div></div>';
+            // Stale-while-revalidate: paint the cached first page instantly, then
+            // refresh from the network below and replace it.
+            const cached = window.NorvaCatalogCache?.read?.(this.catalogCacheKey());
+            if (cached?.data?.items?.length) {
+                this.movies = cached.data.items.slice();
+                this.cloudHasMore = Boolean(cached.data.hasMore);
+                this.cloudTotal = cached.data.count ?? null;
+                this.populateGenres();
+                this.filterAndRender();
+                paintedFromCache = true;
+            } else {
+                this.container.innerHTML = '<div class="loading"><div class="loading-spinner"></div></div>';
+            }
         } else {
             this.cloudLoadingMore = true;
         }
@@ -551,7 +571,8 @@ class MoviesPage {
         try {
             const requestId = this.cloudRequestId;
             const renderedBefore = reset ? 0 : this.container.querySelectorAll('.movie-card').length;
-            const page = await API.media.page(this.cloudPageParams(this.cloudOffset));
+            // On reset always refetch page 1 (offset 0), even after a cache paint.
+            const page = await API.media.page(this.cloudPageParams(reset ? 0 : this.cloudOffset));
             if (reset && requestId !== this.cloudRequestId) return;
             const incoming = (page.items || [])
                 .filter(m => !this.hiddenCategoryIds.has(`${m.sourceId}:${m.category_id}`))
@@ -561,6 +582,8 @@ class MoviesPage {
                     id: `${m.sourceId}:${m.stream_id}`
                 }));
 
+            // Fresh page 1 replaces the cache paint; later pages append.
+            if (reset) { this.movies = []; this.cloudOffset = 0; }
             const seen = new Set(this.movies.map(m => `${m.sourceId}:${m.stream_id}`));
             incoming.forEach(movie => {
                 const key = `${movie.sourceId}:${movie.stream_id}`;
@@ -577,6 +600,14 @@ class MoviesPage {
 
             if (reset) {
                 this.filterAndRender();
+                // Cache the fresh first page for an instant next cold entry.
+                try {
+                    window.NorvaCatalogCache?.write?.(this.catalogCacheKey(), {
+                        items: this.movies.slice(0, this.cloudPageSize),
+                        hasMore: this.cloudHasMore,
+                        count: this.cloudTotal
+                    });
+                } catch (_) { /* best-effort */ }
             } else {
                 this.filteredCards = this.buildFilteredCards();
                 this.updateResultChrome(this.filteredCards);
@@ -585,7 +616,8 @@ class MoviesPage {
             }
         } catch (err) {
             console.error('Error loading cloud movies:', err);
-            if (reset) {
+            // Keep the cached paint on error; only show an error with nothing shown.
+            if (reset && !paintedFromCache) {
                 this.container.innerHTML = '<div class="empty-state"><p>Error loading movies</p></div>';
             }
         } finally {

@@ -515,9 +515,15 @@ class SeriesPage {
         };
     }
 
+    catalogCacheKey() {
+        const p = this.cloudPageParams(0);
+        return 'series:' + JSON.stringify({ s: p.sourceId || '', c: p.categoryId || '', q: p.q || '' });
+    }
+
     async loadCloudSeries({ reset = false } = {}) {
         if (this.cloudLoadingMore || (this.isLoading && !reset)) return;
 
+        let paintedFromCache = false;
         if (reset) {
             this.isLoading = true;
             this.cloudRequestId += 1;
@@ -527,7 +533,19 @@ class SeriesPage {
             this.seriesList = [];
             this.filteredCards = [];
             this.currentBatch = 0;
-            this.container.innerHTML = '<div class="loading"><div class="loading-spinner"></div></div>';
+            // Stale-while-revalidate: paint the cached first page instantly, then
+            // refresh from the network below and replace it.
+            const cached = window.NorvaCatalogCache?.read?.(this.catalogCacheKey());
+            if (cached?.data?.items?.length) {
+                this.seriesList = cached.data.items.slice();
+                this.cloudHasMore = Boolean(cached.data.hasMore);
+                this.cloudTotal = cached.data.count ?? null;
+                this.populateGenres();
+                this.filterAndRender();
+                paintedFromCache = true;
+            } else {
+                this.container.innerHTML = '<div class="loading"><div class="loading-spinner"></div></div>';
+            }
         } else {
             this.cloudLoadingMore = true;
         }
@@ -535,7 +553,8 @@ class SeriesPage {
         try {
             const requestId = this.cloudRequestId;
             const renderedBefore = reset ? 0 : this.container.querySelectorAll('.series-card').length;
-            const page = await API.media.page(this.cloudPageParams(this.cloudOffset));
+            // On reset always refetch page 1 (offset 0), even after a cache paint.
+            const page = await API.media.page(this.cloudPageParams(reset ? 0 : this.cloudOffset));
             if (reset && requestId !== this.cloudRequestId) return;
             const incoming = (page.items || [])
                 .filter(s => !this.hiddenCategoryIds.has(`${s.sourceId}:${s.category_id}`))
@@ -545,6 +564,8 @@ class SeriesPage {
                     id: `${s.sourceId}:${s.series_id}`
                 }));
 
+            // Fresh page 1 replaces the cache paint; later pages append.
+            if (reset) { this.seriesList = []; this.cloudOffset = 0; }
             const seen = new Set(this.seriesList.map(s => `${s.sourceId}:${s.series_id}`));
             incoming.forEach(series => {
                 const key = `${series.sourceId}:${series.series_id}`;
@@ -561,6 +582,13 @@ class SeriesPage {
 
             if (reset) {
                 this.filterAndRender();
+                try {
+                    window.NorvaCatalogCache?.write?.(this.catalogCacheKey(), {
+                        items: this.seriesList.slice(0, this.cloudPageSize),
+                        hasMore: this.cloudHasMore,
+                        count: this.cloudTotal
+                    });
+                } catch (_) { /* best-effort */ }
             } else {
                 this.filteredCards = this.buildFilteredCards();
                 this.updateResultChrome(this.filteredCards);
@@ -569,7 +597,7 @@ class SeriesPage {
             }
         } catch (err) {
             console.error('Error loading cloud series:', err);
-            if (reset) {
+            if (reset && !paintedFromCache) {
                 this.container.innerHTML = '<div class="empty-state"><p>Error loading series</p></div>';
             }
         } finally {

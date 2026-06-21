@@ -377,22 +377,34 @@
     // the edge function's cold-start. Cache it briefly and share one in-flight
     // request. (Live sync STATUS is read from the separate /sources/status
     // endpoint, which stays uncached, so this never staleness progress.)
-    let _sourcesCache = null;        // { at, data }
-    let _sourcesInFlight = null;
-    const SOURCES_TTL_MS = 30 * 1000;
-    function invalidateSourcesCache() { _sourcesCache = null; }
     function cloneJson(d) { try { return d == null ? d : JSON.parse(JSON.stringify(d)); } catch (_) { return d; } }
-    function listSourcesCached() {
-        if (_sourcesCache && (Date.now() - _sourcesCache.at) < SOURCES_TTL_MS) {
-            return Promise.resolve(cloneJson(_sourcesCache.data));
-        }
-        if (!_sourcesInFlight) {
-            _sourcesInFlight = request('GET', '/sources')
-                .then((data) => { _sourcesCache = { at: Date.now(), data }; return data; })
-                .finally(() => { _sourcesInFlight = null; });
-        }
-        return _sourcesInFlight.then(cloneJson);
+    // Short-lived cache + in-flight dedup for idempotent GETs that several
+    // surfaces request on the same navigation (sources, favorites, watch
+    // history) — collapsing the duplicate round-trips that each pay the edge
+    // function's cold-start. No staleness risk: short TTL + every entry is
+    // invalidated the moment its data is mutated.
+    const _getCache = new Map();      // key -> { at, data }
+    const _getInFlight = new Map();   // key -> promise
+    function cachedGet(cacheKey, ttlMs, fetchFn) {
+        const hit = _getCache.get(cacheKey);
+        if (hit && (Date.now() - hit.at) < ttlMs) return Promise.resolve(cloneJson(hit.data));
+        if (_getInFlight.has(cacheKey)) return _getInFlight.get(cacheKey).then(cloneJson);
+        const p = Promise.resolve(fetchFn())
+            .then((data) => { _getCache.set(cacheKey, { at: Date.now(), data }); return data; })
+            .finally(() => { _getInFlight.delete(cacheKey); });
+        _getInFlight.set(cacheKey, p);
+        return p.then(cloneJson);
     }
+    function invalidateCache(prefix) {
+        for (const k of Array.from(_getCache.keys())) {
+            if (k === prefix || k.indexOf(prefix + ':') === 0) _getCache.delete(k);
+        }
+    }
+    const SOURCES_TTL_MS = 30 * 1000;
+    const FAVORITES_TTL_MS = 30 * 1000;
+    const HISTORY_TTL_MS = 20 * 1000;
+    function invalidateSourcesCache() { invalidateCache('sources'); }
+    function listSourcesCached() { return cachedGet('sources', SOURCES_TTL_MS, () => request('GET', '/sources')); }
 
     async function sourceSyncRequest(id) {
         const path = `/sources/${encodeURIComponent(id)}/sync?country=${encodeURIComponent(resolveCountry())}`;
@@ -566,6 +578,14 @@
 
         health: () => request('GET', '/health', null, { token: '' }),
 
+        // Keep the edge functions warm so the next real call after a lull doesn't
+        // pay a cold start (the main cause of the slow first catalog load after
+        // inactivity). Cheapest touch on each function we use; best-effort.
+        warmUp: () => {
+            try { request('GET', '/health', null, { token: '' }).catch(() => {}); } catch (_) { /* noop */ }
+            try { catalogRequest('/media-items', { type: 'movie', limit: 1 }).catch(() => {}); } catch (_) { /* noop */ }
+        },
+
         profile: {
             get: async () => rememberProfileRegion(await request('GET', '/profile')),
             save: async (profile) => rememberProfileRegion(await request('PUT', '/profile', profile))
@@ -637,15 +657,17 @@
         },
 
         favorites: {
-            list: (params = {}) => request('GET', `/favorites${query(params)}`),
-            add: (favorite) => request('POST', '/favorites', favorite),
-            remove: (id) => request('DELETE', `/favorites/${encodeURIComponent(id)}`)
+            list: (params = {}) => cachedGet('fav:' + JSON.stringify(params || {}), FAVORITES_TTL_MS,
+                () => request('GET', `/favorites${query(params)}`)),
+            add: (favorite) => request('POST', '/favorites', favorite).then((r) => { invalidateCache('fav'); return r; }),
+            remove: (id) => request('DELETE', `/favorites/${encodeURIComponent(id)}`).then((r) => { invalidateCache('fav'); return r; })
         },
 
         history: {
-            list: (params = {}) => request('GET', `/history${query(params)}`),
-            save: (item) => request('POST', '/history', item),
-            remove: (id) => request('DELETE', `/history/${encodeURIComponent(id)}`)
+            list: (params = {}) => cachedGet('hist:' + JSON.stringify(params || {}), HISTORY_TTL_MS,
+                () => request('GET', `/history${query(params)}`)),
+            save: (item) => request('POST', '/history', item).then((r) => { invalidateCache('hist'); return r; }),
+            remove: (id) => request('DELETE', `/history/${encodeURIComponent(id)}`).then((r) => { invalidateCache('hist'); return r; })
         },
 
         pairing: {
