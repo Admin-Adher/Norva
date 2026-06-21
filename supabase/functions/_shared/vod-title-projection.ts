@@ -375,7 +375,7 @@ async function validateTmdbCandidate(
 async function fetchTmdbDetails(apiKey: string, itemType: "movie" | "series", tmdbId: string) {
   const endpoint = itemType === "series" ? "tv" : "movie";
   const url = new URL(`https://api.themoviedb.org/3/${endpoint}/${encodeURIComponent(tmdbId)}`);
-  const language = stringOr(Deno.env.get("NORVA_TMDB_LANGUAGE"), "fr-FR");
+  const language = stringOr(Deno.env.get("NORVA_TMDB_LANGUAGE"), "en-US");
   if (language) url.searchParams.set("language", language);
   const headers: Record<string, string> = {};
   if (apiKey.startsWith("eyJ")) headers.Authorization = `Bearer ${apiKey}`;

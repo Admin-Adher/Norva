@@ -1179,7 +1179,7 @@ class SeriesPage {
     cleanEpisodeTitle(ep, seasonNum) {
         let title = String(ep?.title || ep?.name || '').trim();
         const episodeNum = ep?.episode_num || ep?.episodeNumber || '';
-        if (!title) return `Épisode ${episodeNum || ''}`.trim();
+        if (!title) return `Episode ${episodeNum || ''}`.trim();
 
         const seriesNames = [
             this.getSeriesDisplayTitle(),
@@ -1196,7 +1196,7 @@ class SeriesPage {
             .replace(/^S\d{1,2}E\d{1,3}\s*[-:–—|]+\s*/i, '')
             .trim();
 
-        return title || `Épisode ${episodeNum || ''}`.trim();
+        return title || `Episode ${episodeNum || ''}`.trim();
     }
 
     getEpisodeImage(ep, series = this.currentSeries) {
@@ -1253,7 +1253,7 @@ class SeriesPage {
         if (inProgress) {
             return {
                 ...inProgress,
-                label: `Reprendre S${inProgress.seasonNum}:E${inProgress.episodeNum}`
+                label: `Resume S${inProgress.seasonNum}:E${inProgress.episodeNum}`
             };
         }
 
@@ -1272,7 +1272,7 @@ class SeriesPage {
             return {
                 ...next,
                 label: lastCompletedIndex >= 0
-                    ? `Épisode suivant S${next.seasonNum}:E${next.episodeNum}`
+                    ? `Next episode S${next.seasonNum}:E${next.episodeNum}`
                     : `Lire S${next.seasonNum}:E${next.episodeNum}`
             };
         }
@@ -1323,21 +1323,21 @@ class SeriesPage {
         if (hero) hero.style.setProperty('--series-hero-bg', `url("${String(backdrop).replace(/"/g, '%22')}")`);
         document.getElementById('series-poster').src = poster;
         document.getElementById('series-title').textContent = this.getSeriesDisplayTitle(series);
-        document.getElementById('series-plot').textContent = series.plot || series.tmdb?.overview || 'Aucun résumé disponible pour le moment.';
+        document.getElementById('series-plot').textContent = series.tmdb?.overview || series.plot || 'No summary available yet.';
         this.syncDetailFavoriteButton();
 
         this.seasonsContainer.innerHTML = '<div class="loading"><div class="loading-spinner"></div></div>';
         if (this.primaryActionBtn) {
             this.primaryActionBtn.disabled = true;
-            this.primaryActionBtn.textContent = 'Chargement...';
+            this.primaryActionBtn.textContent = 'Loading...';
             delete this.primaryActionBtn.dataset.episodeId;
         }
 
         try {
             const info = await API.proxy.xtream.seriesInfo(series.sourceId, series.series_id);
             if (!info || !info.episodes) {
-                this.seasonsContainer.innerHTML = '<p class="hint">Aucun épisode trouvé</p>';
-                if (this.primaryActionBtn) this.primaryActionBtn.textContent = 'Aucun épisode';
+                this.seasonsContainer.innerHTML = '<p class="hint">No episodes found</p>';
+                if (this.primaryActionBtn) this.primaryActionBtn.textContent = 'No episodes';
                 return;
             }
 
@@ -1371,7 +1371,7 @@ class SeriesPage {
             const featured = this.getFeaturedEpisode(flatEpisodes, watchedEpisodes);
             if (this.seasonSelect) {
                 this.seasonSelect.innerHTML = seasons.map(seasonNum =>
-                    `<option value="${MediaUtils.escapeHtml(seasonNum)}">Saison ${MediaUtils.escapeHtml(seasonNum)}</option>`
+                    `<option value="${MediaUtils.escapeHtml(seasonNum)}">Season ${MediaUtils.escapeHtml(seasonNum)}</option>`
                 ).join('');
                 this.seasonSelect.disabled = seasons.length <= 1;
                 if (featured) this.seasonSelect.value = featured.seasonNum;
@@ -1384,7 +1384,7 @@ class SeriesPage {
                     this.primaryActionBtn.innerHTML = `<span class="play-icon">${Icons.play}</span><span>${MediaUtils.escapeHtml(featured.label)}</span>`;
                 } else {
                     this.primaryActionBtn.disabled = true;
-                    this.primaryActionBtn.textContent = 'Aucun épisode';
+                    this.primaryActionBtn.textContent = 'No episodes';
                 }
             }
 
@@ -1398,7 +1398,7 @@ class SeriesPage {
                             const history = watchedEpisodes.get(String(ep.id));
                             const ratio = history?.ratio || 0;
                             const ratioPercent = Math.max(0, Math.min(100, Math.round(ratio * 100)));
-                            const marker = ratio >= 0.95 ? '<span class="episode-watched" title="Vu">✓</span>'
+                            const marker = ratio >= 0.95 ? '<span class="episode-watched" title="Watched">✓</span>'
                                 : (ratio > 0.02 ? '<span class="episode-watched inprogress" title="En cours">◐</span>' : '');
                             const cleanTitle = this.cleanEpisodeTitle(ep, seasonNum);
                             const duration = this.formatEpisodeDuration(ep.duration);

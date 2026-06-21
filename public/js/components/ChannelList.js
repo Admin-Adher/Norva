@@ -17,9 +17,9 @@ const CHANNEL_FAMILY_NOISE_WORDS = new Set([
 
 const CONSOLIDATED_LIVE_GROUPS = {
     FAVORITES: 'Favorites',
-    PRIMARY: 'Chaînes principales',
-    REGIONAL: 'Chaînes régionales',
-    MULTIPLEX: 'Multiplex et événements'
+    PRIMARY: 'Main channels',
+    REGIONAL: 'Regional channels',
+    MULTIPLEX: 'Multiplex & events'
 };
 const LIVE_CATALOG_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const LAST_LIVE_CHANNEL_KEY = 'norva_last_live_channel_v1';
@@ -2443,7 +2443,7 @@ class ChannelList {
                 ? 'Favoris'
                 : isCategory
                     ? activeGroup
-                    : 'Toutes les chaînes'
+                    : 'All channels'
         };
 
         if (isFavorites || isCategory) {
@@ -2938,8 +2938,8 @@ class ChannelList {
             // previous channel, so surface a clear message on ANY resolve failure.
             if (window.app?.player?.showError) {
                 const msg = (err && err.liveProviderBackoff)
-                    ? 'Le fournisseur est momentanément saturé (une seule connexion à la fois).<br>Réessaie dans quelques secondes.'
-                    : 'Cette chaîne ne répond pas — le fournisseur a refusé ou expiré la connexion (chaîne morte ou indisponible).<br>Essaie une autre chaîne.';
+                    ? 'The provider is momentarily saturated (one connection at a time).<br>Try again in a few seconds.'
+                    : "This channel isn't responding — the provider refused or timed out the connection (dead or unavailable channel).<br>Try another channel.";
                 try { window.app.player.showError(msg); } catch (_) { /* best-effort */ }
             }
         });

@@ -1897,12 +1897,12 @@ class WatchPage {
 
         if (/429|Too Many Requests|Many Requests|rate limit/i.test(text)) {
             return cloud
-                ? "Le fournisseur limite les connexions (429). L'IP du serveur cloud est probablement bridée : ferme les autres lectures, ou lis ce titre depuis l'app TV/mobile (ou un hub local) sur ton réseau, puis réessaie."
+                ? "The provider is limiting connections (429). The cloud server's IP is likely throttled: close other playbacks, or watch this title from the Norva TV/mobile app (or a local hub) on your network, then try again."
                 : 'The provider is rate limiting this stream (429 Too Many Requests). Close other players, wait a bit, then try again.';
         }
         if (/401|Unauthorized|403|Forbidden/i.test(text)) {
             return cloud
-                ? "Ton fournisseur bloque la lecture depuis le cloud (un navigateur ne peut pas lire ce format sans datacenter). Regarde ce titre dans l'app Norva — TV, mobile ou tablette : ta progression est synchronisée, tu reprends exactement où tu en étais."
+                ? "Your provider is blocking cloud playback (a browser can't play this format without a datacenter). Watch this title in the Norva app — TV, mobile or tablet: your progress is synced, you resume exactly where you left off."
                 : 'The provider refused the stream (401/403). Check your IPTV subscription, connection limit, or that this device is allowed.';
         }
         if (/404|not found/i.test(text)) {
@@ -2251,7 +2251,7 @@ class WatchPage {
     }
 
     reportEngineFailure(info = {}) {
-        console.warn('[NorvaEngine] échec', info);
+        console.warn('[NorvaEngine] failed', info);
         try {
             // Use the server-accepted 'playback_error' event type and pack the
             // engine context into errorMessage so it persists even if the event
@@ -2275,8 +2275,8 @@ class WatchPage {
     handleEngineUnplayable(e) {
         const detail = String((e && (e.message || e)) || '');
         const msg = detail.includes('NO_SUPPORTED_MIME')
-            ? "Ce format n'est pas lisible dans ce navigateur. Ouvre le titre dans l'app Norva (TV / mobile / tablette) pour le lire."
-            : "La lecture dans le navigateur a échoué. Ouvre le titre dans l'app Norva (TV / mobile / tablette).";
+            ? "This format can't be played in this browser. Open the title in the Norva app (TV / mobile / tablet) to play it."
+            : "Browser playback failed. Open the title in the Norva app (TV / mobile / tablet).";
         this.showPlaybackError(msg, { immediate: true });
     }
 
@@ -3972,11 +3972,11 @@ class WatchPage {
         const providerBlocked = this.isConnectionLimitError(safeMessage);
         const refreshScheduled = providerBlocked ? false : this.schedulePlaybackErrorRefresh();
         const refreshHint = providerBlocked
-            ? "Inutile de rafraichir : ce blocage vient du fournisseur. Lis ce titre depuis l'app TV/mobile ou un hub local (ton réseau), ou réessaie plus tard."
+            ? "No need to refresh: this block comes from the provider. Watch this title from the TV/mobile app or a local hub (your network), or try again later."
             : refreshScheduled
-                ? 'La page va se rafraichir automatiquement dans 2 secondes. Si le probleme persiste, rafraichis la page manuellement.'
-                : 'Si le probleme persiste, rafraichis la page manuellement.';
-        const refreshBtnLabel = providerBlocked ? 'Réessayer' : 'Rafraichir maintenant';
+                ? 'The page will refresh automatically in 2 seconds. If the problem persists, refresh the page manually.'
+                : 'If the problem persists, refresh the page manually.';
+        const refreshBtnLabel = providerBlocked ? 'Retry' : 'Refresh now';
 
         errorEl.innerHTML = `
             <div class="watch-error-box">

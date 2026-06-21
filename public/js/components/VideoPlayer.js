@@ -1819,7 +1819,7 @@ class VideoPlayer {
         // Show as live immediately; the first tick refines it.
         this._liveBadge.classList.add('is-live');
         this._liveBadge.classList.remove('behind');
-        if (this._liveBadgeText) this._liveBadgeText.textContent = 'EN DIRECT';
+        if (this._liveBadgeText) this._liveBadgeText.textContent = 'LIVE';
         this._showLiveBadge(true);
         this._updateLiveSyncBadge();
         if (this._liveSyncTimer) return;
@@ -1893,10 +1893,10 @@ class VideoPlayer {
         this._liveBadge.classList.toggle('is-live', !isBehind);
         if (this._liveBadgeText) {
             this._liveBadgeText.textContent = isBehind
-                ? `En retard de ${this._formatBehind(behind)}`
-                : 'EN DIRECT';
+                ? `Behind by ${this._formatBehind(behind)}`
+                : 'LIVE';
         }
-        this._liveBadge.title = isBehind ? 'Revenir au direct' : 'En direct';
+        this._liveBadge.title = isBehind ? 'Back to live' : 'Live';
     }
 
     _formatBehind(seconds) {

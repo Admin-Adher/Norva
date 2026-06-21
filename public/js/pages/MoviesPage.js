@@ -1110,7 +1110,7 @@ class MoviesPage {
 
     getMovieActionLabel(movie = this.currentMovie) {
         const state = this.getMovieWatchState(movie);
-        if (state.status === 'inprogress') return 'Reprendre';
+        if (state.status === 'inprogress') return 'Resume';
         if (state.status === 'watched') return 'Recommencer';
         return 'Lire';
     }
@@ -1119,7 +1119,7 @@ class MoviesPage {
         if (!this.detailFavoriteBtn || !this.currentMovieGroup) return;
         const isFav = this.currentMovieGroup.items.some(i => this.favoriteIds.has(`${i.sourceId}:${i.stream_id}`));
         this.detailFavoriteBtn.classList.toggle('active', isFav);
-        this.detailFavoriteBtn.title = isFav ? 'Retirer des favoris' : 'Ajouter aux favoris';
+        this.detailFavoriteBtn.title = isFav ? 'Remove from Favorites' : 'Add to Favorites';
         const icon = this.detailFavoriteBtn.querySelector('.fav-icon');
         const label = this.detailFavoriteBtn.querySelector('.fav-label');
         if (icon) icon.innerHTML = isFav ? Icons.favorite : Icons.favoriteOutline;
@@ -1131,13 +1131,13 @@ class MoviesPage {
         const versions = this.currentMovieVersions || [];
         if (versions.length <= 1) {
             this.versionsList.innerHTML = '';
-            this.versionSummary.textContent = 'Meilleure version sélectionnée automatiquement.';
+            this.versionSummary.textContent = 'Best version selected automatically.';
             this.versionsList.closest('.movie-versions-section')?.classList.add('single-version');
             return;
         }
 
         this.versionsList.closest('.movie-versions-section')?.classList.remove('single-version');
-        this.versionSummary.textContent = `${versions.length} versions disponibles. Le bouton Lire utilise la version sélectionnée.`;
+        this.versionSummary.textContent = `${versions.length} versions available. Play uses the selected version.`;
         this.versionsList.innerHTML = versions.map((item, index) => {
             const version = MediaUtils.parseVersionInfo(item.name);
             const state = this.getMovieWatchState(item);
@@ -1198,7 +1198,7 @@ class MoviesPage {
         if (titleEl) titleEl.textContent = this.getMovieDisplayTitle(displayMovie);
 
         const plotEl = document.getElementById('movie-detail-plot');
-        if (plotEl) plotEl.textContent = displayMovie.plot || displayMovie.tmdb?.overview || 'Aucun résumé disponible pour le moment.';
+        if (plotEl) plotEl.textContent = displayMovie.tmdb?.overview || displayMovie.plot || 'No summary available yet.';
 
         const version = MediaUtils.parseVersionInfo(movie.name);
         const rating = parseFloat(displayMovie.rating || displayMovie.tmdb?.vote_average);
