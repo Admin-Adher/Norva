@@ -92,6 +92,7 @@
       // libav handles
       this.fmtCtx = null; this.vS = null; this.aS = null;
       this.copyAudio = false;
+      this._lastReadError = null; // precise reason a byte-range fetch failed
       this.decCtx = null; this.decPkt = null; this.decFrame = null;
       this.encCtx = null; this.encFrame = null; this.encPkt = null; this.frameSize = 0; this.encCodecpar = null;
       this.fg = null; this.fsrc = null; this.fsink = null;
@@ -159,26 +160,63 @@
 
     // ---- setup -------------------------------------------------------------
     async _probeSize(url) {
-      const r = await fetch(url, { headers: { Range: 'bytes=0-1' } });
+      // Bound the probe so a stalled gateway/provider can't hang the engine.
+      const ac = new AbortController();
+      const to = setTimeout(() => { try { ac.abort(); } catch (_) {} }, 30000);
+      let r;
+      try {
+        r = await fetch(url, { headers: { Range: 'bytes=0-1' }, signal: ac.signal });
+      } catch (e) {
+        throw new Error('PROBE_FETCH:' + String((e && e.message) || e));
+      } finally {
+        clearTimeout(to);
+      }
       const cr = r.headers.get('content-range');
-      if (cr && cr.includes('/')) return parseInt(cr.split('/')[1], 10);
-      return parseInt(r.headers.get('content-length') || '0', 10);
+      // A range-honouring origin replies 206 + Content-Range. A 200 means the
+      // provider ignored Range and is about to stream the WHOLE file — abort
+      // before the body buffers gigabytes and hangs the engine forever.
+      if (r.status === 200 && !cr) { try { ac.abort(); } catch (_) {} throw new Error('RANGE_UNSUPPORTED'); }
+      if (r.status !== 206 && !r.ok) { try { ac.abort(); } catch (_) {} throw new Error('PROBE_HTTP_' + r.status); }
+      const size = cr && cr.includes('/')
+        ? parseInt(cr.split('/')[1], 10)
+        : parseInt(r.headers.get('content-length') || '0', 10);
+      try { ac.abort(); } catch (_) {} // headers are all we need
+      if (!Number.isFinite(size) || size <= 0) throw new Error('PROBE_NO_SIZE');
+      return size;
     }
 
     async _openInput() {
       const lib = this.lib, url = this.url, size = this.size;
       await lib.mkblockreaderdev('input', size);
       lib.onblockread = async (name, pos, len) => {
+        const ac = new AbortController();
+        const to = setTimeout(() => { try { ac.abort(); } catch (_) {} }, 30000);
         try {
           const end = Math.min(pos + len, size) - 1;
-          const r = await fetch(url, { headers: { Range: `bytes=${pos}-${end}` } });
+          const r = await fetch(url, { headers: { Range: `bytes=${pos}-${end}` }, signal: ac.signal });
+          // 200 without Content-Range → provider ignored Range and is streaming
+          // the whole file; reading it would buffer gigabytes and hang. Bail.
+          if (r.status === 200 && !r.headers.get('content-range')) { try { ac.abort(); } catch (_) {} throw new Error('RANGE_UNSUPPORTED'); }
+          if (r.status !== 206 && r.status !== 200) throw new Error('BLOCK_HTTP_' + r.status);
           const d = new Uint8Array(await r.arrayBuffer());
           await lib.ff_block_reader_dev_send('input', pos, d);
         } catch (e) {
+          this._lastReadError = e;
           await lib.ff_block_reader_dev_send('input', pos, null, { error: e });
+        } finally {
+          clearTimeout(to);
         }
       };
-      const [fmtCtx, streams] = await lib.ff_init_demuxer_file('input');
+      let fmtCtx, streams;
+      try {
+        [fmtCtx, streams] = await lib.ff_init_demuxer_file('input');
+      } catch (e) {
+        // Surface the real fetch reason (RANGE_UNSUPPORTED / BLOCK_HTTP_xxx)
+        // instead of libav's generic "error opening input".
+        throw new Error(this._lastReadError
+          ? String(this._lastReadError.message || this._lastReadError)
+          : ('DEMUX_OPEN:' + String((e && e.message) || e)));
+      }
       this.fmtCtx = fmtCtx; this._streams = streams;
       try {
         const durUs = to64(await lib.AVFormatContext_duration(fmtCtx), await lib.AVFormatContext_durationhi(fmtCtx));
@@ -221,7 +259,10 @@
     async _attachMediaSource() {
       this.ms = new MediaSource();
       this.video.src = URL.createObjectURL(this.ms);
-      await new Promise((res) => this.ms.addEventListener('sourceopen', res, { once: true }));
+      await new Promise((res, rej) => {
+        const to = setTimeout(() => rej(new Error('SOURCEOPEN_TIMEOUT')), 15000);
+        this.ms.addEventListener('sourceopen', () => { clearTimeout(to); res(); }, { once: true });
+      });
       this.sb = this.ms.addSourceBuffer(this.mime);
       this.sb.mode = 'segments';
       if (this.durationSec > 0) { try { this.ms.duration = this.durationSec; } catch (_) {} }
