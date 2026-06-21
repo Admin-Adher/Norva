@@ -1285,6 +1285,8 @@ class VideoPlayer {
         this.currentChannel = channel;
         this._playbackStatusOkReported = false;
         this.applyQualityGroup(channel);
+        this._livePlayRequestedAt = Date.now();
+        try { this._sendLiveEvent('play_requested'); } catch (_) {}
 
         try {
             // Stop any WatchPage playback (movies/series) before starting Live TV
@@ -1311,7 +1313,15 @@ class VideoPlayer {
             this.resetGatewayHlsRetries();
             if (this.shouldAutoFallbackVariants()) this.armCurrentVariantFallback();
             const initialLooksLikeHls = streamUrl.includes('.m3u8') || streamUrl.includes('m3u8');
+            // On the web there's no local FFmpeg, so /api/probe(/sniff)/transcode
+            // don't exist and the URL is already a ready gateway HLS — skip those
+            // round-trips entirely and play it directly.
+            const hasLocalTranscoder = this._hasLocalTranscoder();
+            if (!hasLocalTranscoder) {
+                console.log('[Player] Web mode: no local transcoder — skipping probe/sniff, playing gateway stream directly');
+            }
             let canFastStartHls = initialLooksLikeHls
+                && hasLocalTranscoder
                 && this.settings.autoTranscode
                 && !this.settings.forceTranscode
                 && !this.settings.forceVideoTranscode
@@ -1346,7 +1356,7 @@ class VideoPlayer {
             // CHECK: Auto Transcode (Smart) - probe first, then decide
             if (canFastStartHls) {
                 console.log('[Player] Auto Transcode: fast-starting HLS without blocking probe');
-            } else if (this.settings.autoTranscode) {
+            } else if (this.settings.autoTranscode && hasLocalTranscoder) {
                 console.log('[Player] Auto Transcode enabled. Probing stream...');
                 try {
                     const probeRes = await fetch(`/api/probe?url=${encodeURIComponent(streamUrl)}&timeout=5000`);
@@ -1702,10 +1712,60 @@ class VideoPlayer {
         if (!this.hasCurrentMedia() || this._playbackStatusOkReported) return;
         this._playbackStatusOkReported = true;
         this.resetGatewayHlsRetries();
+        // Live launch telemetry: first usable frame (once per channel).
+        try {
+            const ttff = this._livePlayRequestedAt ? Math.max(1, Date.now() - this._livePlayRequestedAt) : undefined;
+            this._sendLiveEvent('first_frame', { timeToFirstFrameMs: ttff });
+        } catch (_) {}
         const target = this.getPlaybackHealthTarget();
         if (target && window.PlaybackHealth?.report) {
             PlaybackHealth.report({ ...target, status: 'ok' }).catch(() => { });
         }
+    }
+
+    // True only where a local FFmpeg transcoder exists (desktop/Electron or
+    // localhost). On the plain web there is none, so /api/probe + /api/transcode
+    // don't exist (Pages serves the SPA shell) — callers must skip them.
+    _hasLocalTranscoder() {
+        try {
+            if (window.NorvaDesktop && window.NorvaDesktop.transcoder) return true;
+            const h = (location && location.hostname) || '';
+            return h === 'localhost' || h === '127.0.0.1' || h === '::1' || h === '[::1]';
+        } catch (_) { return false; }
+    }
+
+    // Lightweight Live TV telemetry (mirrors WatchPage.sendPlaybackEvent) so live
+    // launch + failures are measurable in cloud_playback_events. Best-effort.
+    _sendLiveEvent(eventType, extra = {}) {
+        try {
+            const ch = this.currentChannel;
+            if (!ch) return;
+            const sourceId = ch.sourceId || ch.source_id;
+            const itemId = String(ch.streamId || ch.stream_id || ch.id || '');
+            if (!sourceId || !itemId) return;
+            const cloud = window.NorvaCloud;
+            if (!cloud) return;
+            const api = cloud.token ? cloud.playback : (cloud.deviceToken ? cloud.device?.playback : cloud.playback);
+            const send = api?.event || cloud.playback?.event;
+            if (typeof send !== 'function') return;
+            const hasSession = Boolean(ch.cloudPlaybackSessionId || ch.playbackSessionId);
+            Promise.resolve(send({
+                eventType,
+                playbackSessionId: ch.cloudPlaybackSessionId || ch.playbackSessionId || null,
+                sourceId,
+                itemType: 'live',
+                itemId,
+                playbackMode: hasSession ? 'transcode' : 'direct',
+                timeToFirstFrameMs: extra.timeToFirstFrameMs,
+                errorCode: extra.errorCode,
+                errorMessage: extra.errorMessage,
+                metadata: {
+                    clientSurface: 'mobile-web',
+                    title: ch.name || ch.title || null,
+                    ...(extra.metadata || {})
+                }
+            })).catch(() => {});
+        } catch (_) {}
     }
 
     handlePlaybackError(reason = '') {
@@ -1720,6 +1780,12 @@ class VideoPlayer {
         if (target && window.PlaybackHealth?.report) {
             PlaybackHealth.report({ ...target, status: 'broken', reason }).catch(() => { });
         }
+        try {
+            this._sendLiveEvent('playback_error', {
+                errorCode: 'LIVE_' + (this.isProviderTransientPlaybackError(reason) ? 'provider' : 'playback'),
+                errorMessage: String(reason || '').slice(0, 240)
+            });
+        } catch (_) {}
     }
 
     isLivePlayback(channel = this.currentChannel) {
