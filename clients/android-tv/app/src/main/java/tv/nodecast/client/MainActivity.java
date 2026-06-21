@@ -20,7 +20,9 @@ import android.webkit.WebViewClient;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.FrameLayout;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.ProgressBar;
 import android.widget.TextView;
 
 /**
@@ -48,6 +50,11 @@ public class MainActivity extends Activity {
     private EditText urlInput;
     private TextView statusText;
     private boolean webViewVisible = false;
+    private LinearLayout splashPanel;
+    private LinearLayout errorPanel;
+    private TextView errorText;
+    private Button errorRetryBtn;
+    private String lastLoadedUrl;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -60,6 +67,9 @@ public class MainActivity extends Activity {
 
         buildWebView();
         buildSetupPanel();
+        buildErrorPanel();
+        buildSplash();
+        showSplash();
 
         String mode = prefs().getString(PREF_MODE, null);
         String saved = prefs().getString(PREF_SERVER_URL, null);
@@ -96,10 +106,16 @@ public class MainActivity extends Activity {
         webView.setWebChromeClient(new WebChromeClient());
         webView.setWebViewClient(new WebViewClient() {
             @Override
+            public void onPageFinished(WebView view, String url) {
+                hideSplash();
+            }
+
+            @Override
             public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
                 // Only react to failures of the main document, not subresources
                 if (request.isForMainFrame()) {
-                    showSetup("Could not reach Norva: " + error.getDescription());
+                    hideSplash();
+                    showNetworkError(String.valueOf(error.getDescription()));
                 }
             }
 
@@ -264,7 +280,10 @@ public class MainActivity extends Activity {
     }
 
     private void connect(String url) {
+        lastLoadedUrl = url;
         setupPanel.setVisibility(View.GONE);
+        if (errorPanel != null) errorPanel.setVisibility(View.GONE);
+        showSplash();
         webView.setVisibility(View.VISIBLE);
         webViewVisible = true;
         webView.loadUrl(url);
@@ -396,6 +415,8 @@ public class MainActivity extends Activity {
 
     private void showSetup(String error) {
         webViewVisible = false;
+        hideSplash();
+        if (errorPanel != null) errorPanel.setVisibility(View.GONE);
         webView.setVisibility(View.GONE);
         setupPanel.setVisibility(View.VISIBLE);
         statusText.setText(error == null ? "" : error);
@@ -405,6 +426,106 @@ public class MainActivity extends Activity {
         if (advancedPanel != null && advancedPanel.getVisibility() == View.VISIBLE) {
             urlInput.requestFocus();
         }
+    }
+
+    // ---- Splash ----
+
+    /** Branded launch/loading screen shown over the WebView until a page loads. */
+    private void buildSplash() {
+        splashPanel = new LinearLayout(this);
+        splashPanel.setOrientation(LinearLayout.VERTICAL);
+        splashPanel.setGravity(android.view.Gravity.CENTER);
+        splashPanel.setBackgroundColor(Color.parseColor("#0a0a0f"));
+        splashPanel.setVisibility(View.GONE);
+
+        ImageView logo = new ImageView(this);
+        int logoId = getResources().getIdentifier("norva_app_icon", "drawable", getPackageName());
+        if (logoId == 0) logoId = getResources().getIdentifier("ic_launcher", "mipmap", getPackageName());
+        if (logoId != 0) logo.setImageResource(logoId);
+        LinearLayout.LayoutParams logoLp = new LinearLayout.LayoutParams(dp(120), dp(120));
+        logoLp.bottomMargin = dp(32);
+        splashPanel.addView(logo, logoLp);
+
+        ProgressBar spinner = new ProgressBar(this);
+        splashPanel.addView(spinner, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        root.addView(splashPanel, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+    }
+
+    private void showSplash() {
+        if (splashPanel != null) {
+            splashPanel.bringToFront();
+            splashPanel.setVisibility(View.VISIBLE);
+        }
+    }
+
+    private void hideSplash() {
+        if (splashPanel != null) splashPanel.setVisibility(View.GONE);
+    }
+
+    // ---- Network error ----
+
+    /** Friendly "can't reach Norva" screen with a focusable Retry button. */
+    private void buildErrorPanel() {
+        errorPanel = new LinearLayout(this);
+        errorPanel.setOrientation(LinearLayout.VERTICAL);
+        errorPanel.setGravity(android.view.Gravity.CENTER);
+        errorPanel.setBackgroundColor(Color.parseColor("#0a0a0f"));
+        errorPanel.setVisibility(View.GONE);
+        int pad = dp(40);
+        errorPanel.setPadding(pad, pad, pad, pad);
+
+        TextView title = new TextView(this);
+        title.setText("Can't reach Norva");
+        title.setTextColor(Color.WHITE);
+        title.setTextSize(26);
+        title.setGravity(android.view.Gravity.CENTER);
+        title.setPadding(0, 0, 0, dp(12));
+        errorPanel.addView(title);
+
+        errorText = new TextView(this);
+        errorText.setText("Please check your internet connection and try again.");
+        errorText.setTextColor(Color.parseColor("#a1a1aa"));
+        errorText.setTextSize(16);
+        errorText.setGravity(android.view.Gravity.CENTER);
+        errorText.setPadding(0, 0, 0, dp(32));
+        errorPanel.addView(errorText);
+
+        errorRetryBtn = new Button(this);
+        errorRetryBtn.setText("Retry");
+        errorRetryBtn.setTextColor(Color.WHITE);
+        errorRetryBtn.setBackgroundColor(Color.parseColor("#3B82F6"));
+        errorRetryBtn.setOnClickListener(v -> {
+            if (lastLoadedUrl != null && !lastLoadedUrl.isEmpty()) {
+                connect(lastLoadedUrl);
+            } else {
+                connectCloudPairing();
+            }
+        });
+        errorPanel.addView(errorRetryBtn, new LinearLayout.LayoutParams(
+                dp(260), LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        root.addView(errorPanel, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+    }
+
+    private void showNetworkError(String detail) {
+        webViewVisible = false;
+        hideSplash();
+        webView.setVisibility(View.GONE);
+        setupPanel.setVisibility(View.GONE);
+        if (errorText != null) {
+            errorText.setText(detail == null || detail.isEmpty()
+                    ? "Please check your internet connection and try again."
+                    : "Please check your internet connection and try again.\n\n" + detail);
+        }
+        if (errorPanel != null) {
+            errorPanel.bringToFront();
+            errorPanel.setVisibility(View.VISIBLE);
+        }
+        if (errorRetryBtn != null) errorRetryBtn.requestFocus();
     }
 
     @Override
