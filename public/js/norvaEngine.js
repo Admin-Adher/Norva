@@ -78,7 +78,7 @@
     av1: ['av01.0.08M.08'],
   };
 
-  const ENGINE_VERSION = 6;
+  const ENGINE_VERSION = 7;
 
   class NorvaEngine {
     constructor(videoEl, opts = {}) {
@@ -122,8 +122,8 @@
       const t0 = performance.now();
       this.loadStartedAt = t0;
       // Kick off wasm AND the initial network at the same time: the wasm compile
-      // (~3 MB) overlaps fetching the file size + first window + MKV tail, so
-      // _openInput's demuxer reads hit the cache instead of waiting on the net.
+      // (~3 MB) overlaps the single first-window fetch (which also yields the
+      // file size), so _openInput's demuxer reads hit the cache, not the net.
       const factoryP = loadLibavFactory();
       const prefetchP = this._prefetchStart();
       const factory = await factoryP;
@@ -168,17 +168,12 @@
     // failures are swallowed here and re-surfaced by _openInput's real reads.
     async _prefetchStart() {
       try {
-        this.size = await this._probeSize(this.url);
-        if (!this.size) return;
-        // Small first window (demux needs little) + the MKV tail in parallel, so
-        // the tail (cues, for seeking) is effectively free under the first fetch.
-        const jobs = [this._cacheWindow(0, Math.min(RA_FIRST_WINDOW, this.size))];
-        if (this.size > RA_FIRST_WINDOW + 1048576) {
-          const tailLen = Math.min(1048576, this.size);
-          jobs.push(this._cacheWindow(this.size - tailLen, tailLen));
-        }
-        await Promise.allSettled(jobs);
-      } catch (_) { /* _openInput surfaces the real error */ }
+        // One sequential fetch of the first window: it also yields the file size
+        // via Content-Range (no separate probe), and a single connection avoids
+        // the parallel collision on the single-slot provider. The MKV tail (cues)
+        // is fetched lazily on the first seek — the demuxer doesn't need it to open.
+        await this._cacheWindow(0, RA_FIRST_WINDOW);
+      } catch (_) { /* load()'s fallback probe / _openInput surface the real error */ }
     }
 
     async seek(t) {
@@ -307,8 +302,15 @@
         const r = await fetch(this.url, { headers: { Range: `bytes=${start}-${end - 1}` }, signal: ac.signal });
         // 200 without Content-Range → provider ignored Range and would stream the
         // whole file; bail before buffering gigabytes.
-        if (r.status === 200 && !r.headers.get('content-range')) { try { ac.abort(); } catch (_) {} throw new Error('RANGE_UNSUPPORTED'); }
+        const cr = r.headers.get('content-range');
+        if (r.status === 200 && !cr) { try { ac.abort(); } catch (_) {} throw new Error('RANGE_UNSUPPORTED'); }
         if (r.status !== 206 && r.status !== 200) throw new Error('BLOCK_HTTP_' + r.status);
+        // Learn the total file size for free from Content-Range, so the first
+        // window fetch doubles as the size probe (one request instead of two).
+        if (!this.size && cr && cr.includes('/')) {
+          const total = parseInt(cr.split('/')[1], 10);
+          if (Number.isFinite(total) && total > 0) this.size = total;
+        }
         const out = new Uint8Array(await r.arrayBuffer());
         this._fetchCount += 1; this._fetchBytes += out.length; this._fetchMs += performance.now() - ft0;
         return out;
