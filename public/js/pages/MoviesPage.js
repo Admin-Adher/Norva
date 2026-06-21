@@ -1177,6 +1177,8 @@ class MoviesPage {
         }
         if (label) label.textContent = text;
         btn.title = state === 'done' ? 'Open downloads' : 'Download for offline';
+        // Reveal the Downloads menu entry as soon as something is downloading.
+        window.app?.refreshDownloadsNav?.();
         // Poll while in flight so the label tracks progress and flips to Downloaded.
         if (state === 'downloading' || state === 'queued') this.startDownloadPolling();
         else this.stopDownloadPolling();

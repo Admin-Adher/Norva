@@ -4,14 +4,18 @@ import android.app.Activity;
 import android.content.Intent;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
+import android.graphics.Outline;
+import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.Button;
+import android.view.ViewOutlineProvider;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -23,15 +27,26 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * Native "Downloads" screen — the offline library of saved movies. Plays a
- * finished download through the encrypted player (no network), shows live
- * progress for in-flight ones, and deletes both the encrypted media and its
- * poster. Rebuilt on a light poll so progress advances while visible.
+ * Native "Downloads" screen — the offline library of saved movies/episodes,
+ * styled to match the Norva web app (dark canvas, rounded cards, blue accent).
+ * Plays a finished download through the encrypted player (no network), shows
+ * live progress for in-flight ones, and deletes media + poster. Rebuilt on a
+ * light poll so progress advances while visible.
  */
 public final class DownloadsActivity extends Activity {
 
+    private static final int BG = Color.parseColor("#0a0a0f");
+    private static final int CARD = Color.parseColor("#15151d");
+    private static final int CARD_BORDER = Color.parseColor("#23232e");
+    private static final int ACCENT = Color.parseColor("#3B82F6");
+    private static final int SUBTLE = Color.parseColor("#22222c");
+    private static final int TEXT = Color.WHITE;
+    private static final int MUTED = Color.parseColor("#a1a1aa");
+    private static final int DANGER = Color.parseColor("#ef4444");
+
     private LinearLayout list;
     private TextView empty;
+    private TextView summary;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable poll = new Runnable() {
         @Override
@@ -46,41 +61,50 @@ public final class DownloadsActivity extends Activity {
         super.onCreate(b);
 
         ScrollView scroll = new ScrollView(this);
-        scroll.setBackgroundColor(Color.parseColor("#0a0a0f"));
+        scroll.setBackgroundColor(BG);
+        scroll.setFillViewport(true);
         scroll.setFitsSystemWindows(true);
 
         LinearLayout container = new LinearLayout(this);
         container.setOrientation(LinearLayout.VERTICAL);
-        int pad = dp(16);
-        container.setPadding(pad, dp(28), pad, pad);
+        container.setPadding(dp(18), dp(30), dp(18), dp(24));
 
+        // Header: title + summary on the left, Close pill on the right.
         LinearLayout header = new LinearLayout(this);
         header.setOrientation(LinearLayout.HORIZONTAL);
         header.setGravity(Gravity.CENTER_VERTICAL);
+
+        LinearLayout titleCol = new LinearLayout(this);
+        titleCol.setOrientation(LinearLayout.VERTICAL);
         TextView title = new TextView(this);
         title.setText("Downloads");
-        title.setTextColor(Color.WHITE);
-        title.setTextSize(24);
-        header.addView(title, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        Button close = new Button(this);
-        close.setText("Close");
-        close.setTextColor(Color.WHITE);
-        close.setBackgroundColor(Color.parseColor("#272d3a"));
+        title.setTextColor(TEXT);
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 26);
+        titleCol.addView(title);
+        summary = new TextView(this);
+        summary.setTextColor(MUTED);
+        summary.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        summary.setPadding(0, dp(2), 0, 0);
+        titleCol.addView(summary);
+        header.addView(titleCol, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        TextView close = pill("Close", SUBTLE, TEXT);
         close.setOnClickListener(v -> finish());
         header.addView(close);
         container.addView(header);
 
         empty = new TextView(this);
         empty.setText("No downloads yet.\nTap Download on a movie to watch it offline.");
-        empty.setTextColor(Color.parseColor("#a1a1aa"));
-        empty.setTextSize(15);
+        empty.setTextColor(MUTED);
+        empty.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
         empty.setGravity(Gravity.CENTER);
-        empty.setPadding(0, dp(48), 0, 0);
+        empty.setPadding(0, dp(64), 0, 0);
         container.addView(empty);
 
         list = new LinearLayout(this);
         list.setOrientation(LinearLayout.VERTICAL);
-        list.setPadding(0, dp(8), 0, 0);
+        list.setPadding(0, dp(16), 0, 0);
         container.addView(list);
 
         scroll.addView(container);
@@ -102,71 +126,97 @@ public final class DownloadsActivity extends Activity {
     private void render() {
         List<DownloadStore.Item> items = DownloadStore.all(this);
         empty.setVisibility(items.isEmpty() ? View.VISIBLE : View.GONE);
+
+        int done = 0;
+        long bytes = 0;
+        for (DownloadStore.Item it : items) {
+            if ("done".equals(it.state)) {
+                done++;
+                bytes += it.totalBytes;
+            }
+        }
+        summary.setText(items.isEmpty() ? ""
+                : done + (done == 1 ? " title" : " titles") + " · " + sizeStr(bytes));
+
         list.removeAllViews();
-        for (DownloadStore.Item it : items) list.addView(row(it));
+        for (DownloadStore.Item it : items) list.addView(card(it));
     }
 
-    private View row(final DownloadStore.Item it) {
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(0, dp(10), 0, dp(10));
+    private View card(final DownloadStore.Item it) {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.HORIZONTAL);
+        card.setGravity(Gravity.CENTER_VERTICAL);
+        card.setBackground(roundedStroke(CARD, CARD_BORDER, 14));
+        card.setPadding(dp(12), dp(12), dp(12), dp(12));
+        LinearLayout.LayoutParams cardLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        cardLp.bottomMargin = dp(12);
+        card.setLayoutParams(cardLp);
 
         ImageView poster = new ImageView(this);
         poster.setScaleType(ImageView.ScaleType.CENTER_CROP);
-        poster.setBackgroundColor(Color.parseColor("#18181f"));
+        poster.setBackground(rounded(Color.parseColor("#1d1d27"), 10));
+        roundCorners(poster, dp(10));
+        boolean hasPoster = false;
         if (it.posterFile != null && !it.posterFile.isEmpty()) {
             File pf = new File(it.posterFile);
             if (pf.exists()) {
                 try {
                     poster.setImageBitmap(BitmapFactory.decodeFile(pf.getAbsolutePath()));
+                    hasPoster = true;
                 } catch (Exception ignored) { }
             }
         }
-        LinearLayout.LayoutParams plp = new LinearLayout.LayoutParams(dp(58), dp(86));
-        plp.rightMargin = dp(12);
-        row.addView(poster, plp);
+        if (!hasPoster) {
+            poster.setImageDrawable(null);
+        }
+        LinearLayout.LayoutParams plp = new LinearLayout.LayoutParams(dp(56), dp(82));
+        plp.rightMargin = dp(14);
+        card.addView(poster, plp);
 
         LinearLayout mid = new LinearLayout(this);
         mid.setOrientation(LinearLayout.VERTICAL);
         TextView t = new TextView(this);
         t.setText(it.title);
-        t.setTextColor(Color.WHITE);
-        t.setTextSize(16);
+        t.setTextColor(TEXT);
+        t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15.5f);
+        t.setTypeface(Typeface.DEFAULT_BOLD);
         t.setMaxLines(2);
         mid.addView(t);
+        if (it.subtitle != null && !it.subtitle.isEmpty()) {
+            TextView sub = new TextView(this);
+            sub.setText(it.subtitle);
+            sub.setTextColor(MUTED);
+            sub.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f);
+            sub.setMaxLines(1);
+            sub.setPadding(0, dp(2), 0, 0);
+            mid.addView(sub);
+        }
         TextView s = new TextView(this);
         s.setText(statusText(it));
-        s.setTextColor("failed".equals(it.state)
-                ? Color.parseColor("#ef4444") : Color.parseColor("#a1a1aa"));
-        s.setTextSize(13);
+        s.setTextColor("failed".equals(it.state) ? DANGER : MUTED);
+        s.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f);
         s.setPadding(0, dp(4), 0, 0);
         mid.addView(s);
-        row.addView(mid, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        card.addView(mid, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
         if ("done".equals(it.state)) {
-            Button play = new Button(this);
-            play.setText("Play");
-            play.setTextColor(Color.WHITE);
-            play.setBackgroundColor(Color.parseColor("#3B82F6"));
+            TextView play = pill("Play", ACCENT, TEXT);
             play.setOnClickListener(v -> playLocal(it));
-            row.addView(play);
+            card.addView(play);
         } else if ("failed".equals(it.state) && it.url != null && !it.url.isEmpty()) {
-            Button retry = new Button(this);
-            retry.setText("Retry");
-            retry.setTextColor(Color.WHITE);
-            retry.setBackgroundColor(Color.parseColor("#3B82F6"));
+            TextView retry = pill("Retry", ACCENT, TEXT);
             retry.setOnClickListener(v -> retryItem(it));
-            row.addView(retry);
+            card.addView(retry);
         }
-        Button del = new Button(this);
-        del.setText("Delete");
-        del.setTextColor(Color.WHITE);
-        del.setBackgroundColor(Color.parseColor("#272d3a"));
+        TextView del = pill("Delete", SUBTLE, MUTED);
+        LinearLayout.LayoutParams delLp = (LinearLayout.LayoutParams) del.getLayoutParams();
+        delLp.leftMargin = dp(8);
+        del.setLayoutParams(delLp);
         del.setOnClickListener(v -> deleteItem(it));
-        row.addView(del);
+        card.addView(del);
 
-        return row;
+        return card;
     }
 
     private String statusText(DownloadStore.Item it) {
@@ -175,7 +225,9 @@ public final class DownloadsActivity extends Activity {
                 return sizeStr(it.totalBytes) + " · Saved";
             case "downloading":
                 int pct = it.totalBytes > 0 ? (int) (it.downloadedBytes * 100 / it.totalBytes) : 0;
-                return "Downloading " + pct + "%";
+                return it.totalBytes > 0
+                        ? "Downloading " + pct + "% · " + sizeStr(it.downloadedBytes) + " / " + sizeStr(it.totalBytes)
+                        : "Downloading…";
             case "queued":
                 return "Queued…";
             case "failed":
@@ -231,8 +283,52 @@ public final class DownloadsActivity extends Activity {
         render();
     }
 
+    // ---- Styling helpers ----
+
+    /** A rounded "pill" button rendered as a TextView (no Material all-caps grey). */
+    private TextView pill(String text, int bg, int textColor) {
+        TextView b = new TextView(this);
+        b.setText(text);
+        b.setTextColor(textColor);
+        b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        b.setTypeface(Typeface.DEFAULT_BOLD);
+        b.setGravity(Gravity.CENTER);
+        b.setPadding(dp(18), dp(10), dp(18), dp(10));
+        b.setBackground(rounded(bg, 10));
+        b.setClickable(true);
+        b.setFocusable(true);
+        b.setLayoutParams(new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        return b;
+    }
+
+    private GradientDrawable rounded(int color, int radiusDp) {
+        GradientDrawable d = new GradientDrawable();
+        d.setColor(color);
+        d.setCornerRadius(dp(radiusDp));
+        return d;
+    }
+
+    private GradientDrawable roundedStroke(int fill, int stroke, int radiusDp) {
+        GradientDrawable d = new GradientDrawable();
+        d.setColor(fill);
+        d.setCornerRadius(dp(radiusDp));
+        d.setStroke(Math.max(1, dp(1)), stroke);
+        return d;
+    }
+
+    private void roundCorners(View v, final int radiusPx) {
+        v.setOutlineProvider(new ViewOutlineProvider() {
+            @Override
+            public void getOutline(View view, Outline outline) {
+                outline.setRoundRect(0, 0, view.getWidth(), view.getHeight(), radiusPx);
+            }
+        });
+        v.setClipToOutline(true);
+    }
+
     private static String sizeStr(long bytes) {
-        if (bytes <= 0) return "";
+        if (bytes <= 0) return "0 MB";
         double mb = bytes / (1024.0 * 1024.0);
         if (mb >= 1024) return String.format(Locale.US, "%.1f GB", mb / 1024.0);
         return String.format(Locale.US, "%.0f MB", mb);

@@ -1420,6 +1420,9 @@ class SeriesPage {
                                     ${ratioPercent > 0 && ratioPercent < 95 ? `<div class="episode-progress"><div style="width:${ratioPercent}%"></div></div>` : ''}
                                 </div>
                                 <span class="episode-duration">${MediaUtils.escapeHtml(duration)}</span>
+                                <button class="episode-download" type="button" title="Download for offline" style="display:none">
+                                    <span class="episode-download-icon">&#x2193;</span>
+                                </button>
                             </div>`;
                         }).join('')}
                     </div>
@@ -1430,6 +1433,17 @@ class SeriesPage {
             this.seasonsContainer.querySelectorAll('.episode-item').forEach(ep => {
                 ep.addEventListener('click', () => this.playEpisode(ep));
             });
+            // Offline download per episode (native phone/tablet app only).
+            if (this.nativeDownloadBridge()) {
+                this.seasonsContainer.querySelectorAll('.episode-download').forEach(btn => {
+                    btn.style.display = '';
+                    btn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        this.downloadEpisode(btn.closest('.episode-item'), btn);
+                    });
+                });
+                this.refreshEpisodeDownloadStates();
+            }
             this.applySelectedSeason();
         } catch (err) {
             const { friendly, detail } = this.getSeriesInfoError(err);
@@ -1479,6 +1493,7 @@ class SeriesPage {
     }
 
     hideDetails() {
+        if (this._epDlTimer) { clearInterval(this._epDlTimer); this._epDlTimer = null; }
         this.detailsPanel.classList.add('hidden');
         this.container.classList.remove('hidden');
         this.pageEl?.classList.remove('series-detail-open');
@@ -1576,6 +1591,102 @@ class SeriesPage {
                 resumeTarget: resumePlan.target
             };
         }, {});
+    }
+
+    // === Offline downloads (native phone/tablet app only) ===
+
+    nativeDownloadBridge() {
+        const b = window.NorvaTVCloud;
+        return (b && typeof b.downloadMedia === 'function') ? b : null;
+    }
+
+    episodeDownloadState(id) {
+        const bridge = this.nativeDownloadBridge();
+        if (!bridge || typeof bridge.downloadState !== 'function') return 'none';
+        try { return bridge.downloadState(id) || 'none'; } catch (_) { return 'none'; }
+    }
+
+    /** Resolve the direct provider URL for an episode and queue it natively. */
+    async downloadEpisode(episodeEl, btn) {
+        const bridge = this.nativeDownloadBridge();
+        if (!bridge || !episodeEl) return;
+        const episodeId = episodeEl.dataset.episodeId;
+        const sourceId = parseInt(episodeEl.dataset.sourceId);
+        const container = episodeEl.dataset.container || 'mp4';
+        const id = `${sourceId}:${episodeId}`;
+        const state = this.episodeDownloadState(id);
+        if (state === 'done' || state === 'downloading' || state === 'queued') {
+            try { bridge.openDownloads?.(); } catch (_) { /* no-op */ }
+            return;
+        }
+        const episode = this.findEpisodeById(episodeId)
+            || { id: episodeId, container_extension: container, type: 'episode', streamType: 'series' };
+        const seasonNum = episodeEl.dataset.season || '1';
+        const episodeNum = episodeEl.dataset.episodeNum || '';
+        const episodeTitle = episodeEl.querySelector('.episode-title')?.textContent || `Episode ${episodeNum}`;
+        const playbackHint = MediaUtils.playbackHintFromItem
+            ? MediaUtils.playbackHintFromItem(episode, { container, streamType: 'series' })
+            : { container, streamType: 'series' };
+        try {
+            btn?.classList.add('busy');
+            await this.prepareForPlaybackSession();
+            const result = await API.proxy.xtream.getStreamUrl(sourceId, episodeId, 'series', container, playbackHint);
+            if (!result || !result.url) throw new Error('No stream URL');
+            const showTitle = this.currentSeries?.tmdb?.title || this.currentSeries?.name || 'Series';
+            const payload = {
+                url: result.url,
+                sourceId: String(sourceId),
+                itemId: String(episodeId),
+                itemType: 'episode',
+                title: showTitle,
+                subtitle: `S${seasonNum}E${episodeNum} · ${episodeTitle}`,
+                posterUrl: MediaUtils.safeImageUrl(this.currentSeries?.cover
+                    || this.currentSeries?.stream_icon || MediaUtils.tmdbPosterUrl(this.currentSeries?.tmdb)) || '',
+                container,
+                durationSeconds: 0
+            };
+            bridge.downloadMedia(JSON.stringify(payload));
+            window.app?.refreshDownloadsNav?.();
+        } catch (err) {
+            console.warn('[Download] episode failed:', err?.message || err);
+        } finally {
+            btn?.classList.remove('busy');
+            setTimeout(() => this.refreshEpisodeDownloadStates(), 600);
+        }
+    }
+
+    /** Reflect each episode's download state on its button; poll while in flight. */
+    refreshEpisodeDownloadStates() {
+        const bridge = this.nativeDownloadBridge();
+        if (!bridge || typeof bridge.downloadState !== 'function' || !this.seasonsContainer) return;
+        let anyActive = false;
+        this.seasonsContainer.querySelectorAll('.episode-item').forEach(ep => {
+            const btn = ep.querySelector('.episode-download');
+            if (!btn) return;
+            const id = `${parseInt(ep.dataset.sourceId)}:${ep.dataset.episodeId}`;
+            const state = this.episodeDownloadState(id);
+            const icon = btn.querySelector('.episode-download-icon');
+            btn.classList.remove('is-done', 'is-active');
+            if (state === 'done') {
+                btn.classList.add('is-done');
+                if (icon) icon.innerHTML = '&#x2713;';
+                btn.title = 'Downloaded — open Downloads';
+            } else if (state === 'downloading' || state === 'queued') {
+                btn.classList.add('is-active');
+                anyActive = true;
+                if (icon) icon.innerHTML = '&#x22EF;';
+                btn.title = 'Downloading';
+            } else {
+                if (icon) icon.innerHTML = '&#x2193;';
+                btn.title = 'Download for offline';
+            }
+        });
+        if (anyActive) {
+            if (!this._epDlTimer) this._epDlTimer = setInterval(() => this.refreshEpisodeDownloadStates(), 1500);
+        } else if (this._epDlTimer) {
+            clearInterval(this._epDlTimer);
+            this._epDlTimer = null;
+        }
     }
 
     async prepareForPlaybackSession() {

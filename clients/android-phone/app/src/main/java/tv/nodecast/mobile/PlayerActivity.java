@@ -2,6 +2,8 @@ package tv.nodecast.mobile;
 
 import android.app.Activity;
 import android.content.Intent;
+import android.graphics.Color;
+import android.graphics.drawable.ColorDrawable;
 import android.os.Build;
 import android.os.Bundle;
 import android.view.DisplayCutout;
@@ -70,6 +72,11 @@ public class PlayerActivity extends Activity {
         if (url == null || url.isEmpty()) { finish(); return; }
 
         playerView = new PlayerView(this);
+        // Black everywhere behind the video so letterbox/pillarbox and any
+        // cutout-safe insets read as clean black bars, never the theme's grey.
+        getWindow().setBackgroundDrawable(new ColorDrawable(Color.BLACK));
+        playerView.setBackgroundColor(Color.BLACK);
+        playerView.setShutterBackgroundColor(Color.BLACK);
         setContentView(playerView);
 
         // Fullscreen video that respects display cutouts (notches): draw

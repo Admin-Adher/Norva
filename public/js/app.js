@@ -140,9 +140,24 @@ class App {
         document.querySelectorAll('.nav-link').forEach(link => {
             link.addEventListener('click', (e) => {
                 if (link.dataset.external === 'true') return;
+                // Downloads opens the NATIVE offline screen (not an SPA page) so
+                // it works with no connectivity. Phone/tablet app only.
+                if (link.dataset.action === 'downloads') {
+                    e.preventDefault();
+                    document.getElementById('mobile-menu-toggle')?.classList.remove('active');
+                    document.getElementById('navbar-menu')?.classList.remove('active');
+                    try { window.NorvaTVCloud?.openDownloads?.(); } catch (_) { /* no bridge */ }
+                    return;
+                }
                 e.preventDefault();
                 this.navigateTo(link.dataset.page);
             });
+        });
+
+        // Surface the Downloads menu entry once the native app has ≥1 download.
+        this.refreshDownloadsNav();
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') this.refreshDownloadsNav();
         });
 
         const navbarBrandHome = document.getElementById('navbar-brand-home');
@@ -699,6 +714,29 @@ class App {
         body.className = 'mobile-filter-section-body mobile-filter-section';
         section.append(body);
         return { section, body };
+    }
+
+    /**
+     * Show the "Downloads" menu entry only inside the native phone/tablet app
+     * and only once at least one title has been downloaded (per the product
+     * decision: the offline library becomes reachable from the menu after the
+     * first download). No-op in the browser.
+     */
+    refreshDownloadsNav() {
+        const link = document.getElementById('nav-downloads');
+        if (!link) return;
+        const bridge = window.NorvaTVCloud;
+        let count = 0;
+        if (bridge && typeof bridge.getDownloads === 'function') {
+            try {
+                const list = JSON.parse(bridge.getDownloads() || '[]');
+                count = Array.isArray(list) ? list.length : 0;
+            } catch (_) { count = 0; }
+        }
+        const show = count > 0;
+        link.hidden = !show;
+        link.setAttribute('aria-hidden', show ? 'false' : 'true');
+        link.tabIndex = show ? 0 : -1;
     }
 
     navigateTo(pageName, replaceHistory = false) {
