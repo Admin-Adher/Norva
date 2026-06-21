@@ -2456,12 +2456,13 @@ class VideoPlayer {
         this.overlay?.classList.add('hidden');
         this.controlsOverlay?.classList.remove('hidden');
         this.loadingSpinner?.classList.add('show');
-        // Expire the previous session in the BACKGROUND — do NOT block the switch
-        // on it. The synchronous hls.destroy() above is what prevents the churn;
-        // the new session's creation already closes the user's prior gateway
-        // session, so awaiting this full client->edge->gateway round-trip only
-        // added ~1-2s of dead time to every zap.
-        try { this.stopCloudPlaybackSessions().catch(() => {}); } catch (_) {}
+        // Expire the previous session and WAIT for it before the caller creates
+        // the replacement. With a single provider slot this strict ordering
+        // (old fully gone -> new created) matters: doing it in the background let
+        // the old and new sessions briefly overlap = two provider connections =
+        // more slot contention. The latency is dominated by the provider's
+        // variable slot-release time regardless, so sequential is the safe choice.
+        try { await this.stopCloudPlaybackSessions(); } catch (_) {}
     }
 
     /**
