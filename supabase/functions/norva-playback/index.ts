@@ -274,6 +274,13 @@ async function createPlaybackSession(
   }
 
   if (mode === "relay") {
+    // In-browser engine: relay the RAW bytes through the media gateway (an IP
+    // the provider accepts), not the Cloudflare relay (which the provider's WAF
+    // 403s). The gateway does no transcode here — just a byte-range passthrough.
+    if (body.enginePipe === true || body.engine_pipe === true) {
+      const pipe = await createBytePipeAccess(session.id, userId, targetUrl, expiresAt, db, userAgent);
+      return { session, playback: { mode: "relay", url: pipe.url, tokenExpiresAt: expiresAt } };
+    }
     const relay = await createRelayAccess(session.id, userId, targetUrl, expiresAt, db, userAgent);
     return { session, playback: { mode, url: relay.url, tokenExpiresAt: expiresAt } };
   }
@@ -961,6 +968,35 @@ async function createRelayAccess(
   if (error) throwDb(error, "Unable to record relay token");
 
   return { url: `${runtimeConfig.relayBaseUrl}/relay/${token}` };
+}
+
+// Byte-range passthrough URL on the media gateway for the in-browser engine.
+// Signs the same token shape as the relay but with the shared gateway token, so
+// the gateway verifies it statelessly (HMAC), then proxies the raw bytes from an
+// IP the provider accepts. No transcode — the browser does that.
+async function createBytePipeAccess(
+  playbackSessionId: string,
+  userId: string,
+  targetUrl: string,
+  expiresAt: string,
+  _db: SupabaseClient,
+  userAgent: string | null = null,
+) {
+  const runtimeConfig = await getRuntimeConfig(_db);
+  if (!runtimeConfig.mediaGatewayUrl || !runtimeConfig.mediaGatewayToken) {
+    throw new HttpError(503, "Media gateway is not configured");
+  }
+  const payload = JSON.stringify({
+    v: 1,
+    sid: playbackSessionId,
+    uid: userId,
+    url: targetUrl,
+    ...(userAgent ? { ua: userAgent } : {}),
+    exp: Math.floor(new Date(expiresAt).getTime() / 1000),
+  });
+  const signature = await hmacBase64Url(runtimeConfig.mediaGatewayToken, payload);
+  const token = `${base64Url(encoder.encode(payload))}.${signature}`;
+  return { url: `${runtimeConfig.mediaGatewayUrl}/raw/${token}` };
 }
 
 async function createGatewaySession(

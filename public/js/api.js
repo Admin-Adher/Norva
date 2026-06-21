@@ -1293,7 +1293,8 @@ const CloudAdapter = (() => {
                     const enginePayload = await cloudPlaybackApi().createSession({
                         ...baseSession,
                         mode: 'relay',
-                        requiresRelay: true
+                        requiresRelay: true,
+                        enginePipe: true
                     });
                     const engineUrl = enginePayload.playback?.url || enginePayload.url;
                     if (!engineUrl) {

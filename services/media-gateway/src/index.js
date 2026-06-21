@@ -39,7 +39,7 @@ const PROVIDER_AUTH_RETRY_DELAY_MS = clampInt(process.env.PROVIDER_AUTH_RETRY_DE
 const FFMPEG_USER_AGENT = process.env.FFMPEG_USER_AGENT ||
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36 Norva/1.0';
 const MAX_LOG_TAIL = 12000;
-const GATEWAY_VERSION = 39;
+const GATEWAY_VERSION = 40;
 // Browser playback fetches HLS playlists/segments cross-origin, so these must
 // list every Norva web origin or the browser blocks the response (CORS). Keep
 // in sync with the relay's ALLOWED_ORIGINS (services/norva-relay/wrangler.jsonc).
@@ -150,6 +150,43 @@ app.post('/xtream/epg', requireGatewayAuth, async (req, res) => {
             error: err.publicMessage || 'IPTV provider request failed',
             details: err.details || undefined
         });
+    }
+});
+
+// Raw byte-range passthrough for the in-browser engine. The browser remuxes +
+// transcodes the file itself, so the gateway only needs to relay the raw bytes
+// from an IP the provider accepts (no FFmpeg, no transcode). Auth is a per-
+// session HMAC token signed by the playback function with the shared gateway
+// token, carried in the path; the engine fetches it cross-origin with Range.
+app.get('/raw/:token', async (req, res) => {
+    const claims = verifyRawToken(req.params.token, GATEWAY_TOKEN);
+    if (!claims) return res.status(401).json({ error: 'Invalid byte-pipe token' });
+    if (Number(claims.exp) * 1000 < Date.now()) return res.status(401).json({ error: 'Byte-pipe token expired' });
+
+    const ac = new AbortController();
+    res.on('close', () => ac.abort());
+    try {
+        const headers = { 'user-agent': claims.ua || FFMPEG_USER_AGENT };
+        if (req.headers.range) headers.range = req.headers.range;
+        if (req.headers.accept) headers.accept = req.headers.accept;
+        const upstream = await fetch(claims.url, {
+            method: req.method === 'HEAD' ? 'HEAD' : 'GET',
+            headers,
+            redirect: 'follow',
+            signal: ac.signal
+        });
+        res.status(upstream.status);
+        for (const h of ['content-type', 'content-length', 'content-range', 'accept-ranges', 'last-modified', 'etag']) {
+            const v = upstream.headers.get(h);
+            if (v) res.setHeader(h, v);
+        }
+        if (!upstream.headers.get('accept-ranges')) res.setHeader('Accept-Ranges', 'bytes');
+        res.setHeader('Cache-Control', 'private, max-age=30');
+        if (req.method === 'HEAD' || !upstream.body) { res.end(); return; }
+        require('stream').Readable.fromWeb(upstream.body).pipe(res);
+    } catch (err) {
+        if (ac.signal.aborted) { try { res.end(); } catch (_) {} return; }
+        res.status(502).json({ error: 'Byte pipe failed', details: String((err && err.message) || err) });
     }
 });
 
@@ -1169,6 +1206,27 @@ function timingSafeEqual(left, right) {
         return false;
     }
     return crypto.timingSafeEqual(leftBuffer, rightBuffer);
+}
+
+// Verify a byte-pipe token: `base64url(payload).base64url(HMAC-SHA256(payload,
+// secret))`. Same format the playback function signs (with the shared gateway
+// token as the key). Returns the claims object, or null if invalid.
+function verifyRawToken(token, secret) {
+    try {
+        if (!secret) return null;
+        const [payloadPart, signaturePart] = String(token).split('.');
+        if (!payloadPart || !signaturePart) return null;
+        const payload = Buffer.from(payloadPart.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8');
+        const expected = crypto.createHmac('sha256', secret).update(payload).digest('base64')
+            .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+        if (!timingSafeEqual(signaturePart, expected)) return null;
+        const claims = JSON.parse(payload);
+        if (!claims || claims.v !== 1 || !claims.url || !claims.exp) return null;
+        if (!isHttpUrl(claims.url)) return null;
+        return claims;
+    } catch (_) {
+        return null;
+    }
 }
 
 function isHttpUrl(value) {
