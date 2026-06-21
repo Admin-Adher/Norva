@@ -1216,20 +1216,16 @@ class VideoPlayer {
      * Show the now playing overlay briefly
      */
     showNowPlayingOverlay() {
-        if (!this.currentChannel) return;
-
-        // Clear existing timer
+        // Disabled: this transient banner only showed the channel name (already
+        // shown in the controls top bar) plus an empty "Up Next" (no EPG data is
+        // wired in), so it added noise without information. Kept hidden — the
+        // element stays in the DOM so the existing hide/teardown calls remain
+        // valid. Re-enable by restoring the show + timer below.
         if (this.overlayTimer) {
             clearTimeout(this.overlayTimer);
+            this.overlayTimer = null;
         }
-
-        // Show overlay
-        this.nowPlaying.classList.remove('hidden');
-
-        // Hide after duration
-        this.overlayTimer = setTimeout(() => {
-            this.nowPlaying.classList.add('hidden');
-        }, this.settings.overlayDuration * 1000);
+        this.nowPlaying?.classList.add('hidden');
     }
 
     /**
