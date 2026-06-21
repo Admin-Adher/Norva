@@ -119,7 +119,7 @@
     av1: ['av01.0.08M.08'],
   };
 
-  const ENGINE_VERSION = 12;
+  const ENGINE_VERSION = 13;
 
   class NorvaEngine {
     constructor(videoEl, opts = {}) {
@@ -188,6 +188,9 @@
       m = performance.now(); await this._initMuxer(); this.timings.muxerMs = Math.round(performance.now() - m);
       m = performance.now();
       if (startTime > 0.25) {
+        // Resume: the muxer re-bases output to 0, so offset the SB to the resume
+        // point (else the data lands at 0 while currentTime sits at startTime).
+        try { this.sb.timestampOffset = startTime; } catch (_) {}
         await this._seekDemuxer(startTime);
         try { this.video.currentTime = startTime; } catch (_) {}
       }
@@ -241,6 +244,11 @@
         this._smallNextRead = true;        // reach the first frame faster on a cold seek
         step = 'demux'; await this._seekDemuxer(t);
         step = 'clearSB'; await this._clearSourceBuffer();
+        // The fresh muxer re-bases its output timeline to 0; shift the SourceBuffer
+        // so the data lands at the real seek time instead of at 0 (which left
+        // currentTime with no data → permanent spinner, and corrupted t=0).
+        const tsBase = this._cueTimeForTime(t);
+        try { this.sb.timestampOffset = (tsBase != null ? tsBase : t); } catch (_) {}
         step = 'initMuxer'; await this._initMuxer();   // fresh init segment → onwrite
         this._startPump();
         setTimeout(() => { if (!this.destroyed) this._logPostSeek(); }, 4000);
@@ -289,6 +297,17 @@
       if (t <= idx[0].t) return idx[0].off;
       let lo = 0, hi = idx.length - 1, ans = idx[0].off;
       while (lo <= hi) { const m = (lo + hi) >> 1; if (idx[m].t <= t) { ans = idx[m].off; lo = m + 1; } else hi = m - 1; }
+      return ans;
+    }
+
+    // Largest cue timestamp ≤ t — the real time of the keyframe the demuxer lands
+    // on, i.e. where the muxer's re-based-to-0 output must be placed in the SB.
+    _cueTimeForTime(t) {
+      const idx = this._cueIndex;
+      if (!idx || !idx.length) return null;
+      if (t <= idx[0].t) return idx[0].t;
+      let lo = 0, hi = idx.length - 1, ans = idx[0].t;
+      while (lo <= hi) { const m = (lo + hi) >> 1; if (idx[m].t <= t) { ans = idx[m].t; lo = m + 1; } else hi = m - 1; }
       return ans;
     }
 
