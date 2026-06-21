@@ -1218,6 +1218,60 @@ const CloudAdapter = (() => {
                     throw blockedErr;
                 }
 
+                // LIVE — provider's NATIVE HLS through the Cloudflare relay (same
+                // path VOD uses), instead of the Railway ffmpeg gateway. The relay
+                // fetches the provider's .m3u8 + .ts SEGMENTS as short GET requests
+                // — the same access pattern the provider already serves for VOD —
+                // rather than the single continuous connection the live ffmpeg
+                // holds, which the provider 403-blocks on a datacenter IP. So most
+                // (H.264/AAC) channels play with NO Railway and escape the block.
+                // HEVC/AC3 channels can't decode in the browser and fall back to
+                // the gateway transcode: the player flags the channel and re-asks
+                // with liveForceTranscode=1.
+                if (type === 'live'
+                    && !hasNativeOrLocal
+                    && query.get('liveForceTranscode') !== '1'
+                    && query.get('mode') !== 'transcode') {
+                    try {
+                        const liveCloudSourceId = await resolveSourceId(sourceId);
+                        const liveUserAgent = resolveCloudUserAgent();
+                        const relayPayload = await cloudPlaybackApi().createSession({
+                            sourceId: liveCloudSourceId,
+                            itemType: 'live',
+                            itemId: streamId,
+                            // Force the provider's HLS endpoint (…/<id>.m3u8); the
+                            // edge only honours m3u8 for live when explicit.
+                            playbackHint: { container: 'm3u8', containerExplicit: true },
+                            mode: 'relay',
+                            requiresRelay: true,
+                            // The relay token is just an HMAC for the relay URL (it
+                            // holds no provider connection), so a long TTL is safe
+                            // and keeps a long live watch from dropping mid-stream
+                            // when a short session TTL would expire the segments.
+                            ttlSeconds: 7200,
+                            clientMetadata: _cloudClientTelemetryMetadata(),
+                            ...(liveUserAgent ? { userAgent: liveUserAgent } : {})
+                        });
+                        const relayUrl = relayPayload.playback?.url || relayPayload.url;
+                        if (relayUrl) {
+                            _clearSourceCloudBlock(sourceId);
+                            return {
+                                ...relayPayload,
+                                url: relayUrl,
+                                streamUrl: relayUrl,
+                                playbackUrl: relayUrl,
+                                cloud: true,
+                                mode: 'relay-hls',
+                                sessionId: relayPayload.session?.id,
+                                cloudSourceId: liveCloudSourceId
+                            };
+                        }
+                    } catch (relayErr) {
+                        console.warn('[Live] Relay HLS unavailable, falling back to gateway transcode:', relayErr?.message || relayErr);
+                        // fall through to the gateway path below
+                    }
+                }
+
                 const requestedCloudMode = localStorage.getItem('norva-cloud-playback-mode') || '';
                 const forcedMode = query.get('mode') || '';
                 const preferredMode = forcedMode || (isVodPlayback ? 'transcode' : (requestedCloudMode || 'relay'));

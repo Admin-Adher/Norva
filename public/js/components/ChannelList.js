@@ -2865,7 +2865,12 @@ class ChannelList {
                 // "hevc" defaults to remux and fails to decode — once that happens
                 // the player flags it here so it's transcoded on every later play.
                 const transcodeKey = `${channel.sourceId}:${channel.id}`;
-                const gatewayMode = (this._forceTranscode && this._forceTranscode.has(transcodeKey))
+                // Default live path = provider HLS via the Cloudflare relay (no
+                // Railway). Only channels the browser can't decode (flagged after a
+                // failure) take the gateway transcode — liveForceTranscode skips the
+                // relay-HLS attempt in api.getStreamUrl.
+                const forceLiveTranscode = Boolean(this._forceTranscode && this._forceTranscode.has(transcodeKey));
+                const gatewayMode = forceLiveTranscode
                     ? 'transcode'
                     : ((typeof MediaUtils !== 'undefined' && MediaUtils.liveGatewayMode)
                         ? MediaUtils.liveGatewayMode(channel)
@@ -2882,7 +2887,10 @@ class ChannelList {
                     try { await switchPlayer.prepareLiveSwitch(); } catch (_) { /* best-effort */ }
                     if (selectSeq !== this._selectRequestSeq) return;
                 }
-                const result = await API.proxy.xtream.getStreamUrl(channel.sourceId, channel.streamId, 'live', providerContainer, { gatewayMode });
+                const result = await API.proxy.xtream.getStreamUrl(channel.sourceId, channel.streamId, 'live', providerContainer, {
+                    gatewayMode,
+                    ...(forceLiveTranscode ? { liveForceTranscode: '1' } : {})
+                });
                 streamUrl = result.url;
                 channel.cloudPlaybackSessionId = result.sessionId || null;
                 // Cloud source UUID resolved during session creation — used for

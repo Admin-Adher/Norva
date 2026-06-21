@@ -1333,7 +1333,10 @@ class VideoPlayer {
             this.currentUrl = streamUrl;
             this.resetGatewayHlsRetries();
             if (this.shouldAutoFallbackVariants()) this.armCurrentVariantFallback();
-            const initialLooksLikeHls = streamUrl.includes('.m3u8') || streamUrl.includes('m3u8');
+            // Relay-HLS live URLs are /relay/<token> (no ".m3u8" in the path) but
+            // serve the provider's HLS playlist — treat them as HLS too. (This is
+            // the live-only player, so a relay URL here is always live HLS.)
+            const initialLooksLikeHls = streamUrl.includes('.m3u8') || streamUrl.includes('m3u8') || this.isRelayPlaybackUrl(streamUrl);
             // On the web there's no local FFmpeg, so /api/probe(/sniff)/transcode
             // don't exist and the URL is already a ready gateway HLS — skip those
             // round-trips entirely and play it directly.
@@ -1530,13 +1533,14 @@ class VideoPlayer {
             this.isUsingProxy = needsProxy;
             const finalUrl = needsProxy ? this.getProxiedUrl(streamUrl) : streamUrl;
 
-            // Detect if this is likely an HLS stream (has .m3u8 in URL)
-            const looksLikeHls = finalUrl.includes('.m3u8') || finalUrl.includes('m3u8');
+            // Detect if this is likely an HLS stream (has .m3u8 in URL, or is a
+            // relay-HLS live URL — /relay/<token> serving the provider's playlist).
+            const looksLikeHls = finalUrl.includes('.m3u8') || finalUrl.includes('m3u8') || this.isRelayPlaybackUrl(finalUrl);
 
             // Check if this looks like a raw stream (no HLS manifest, no common video extensions)
             // This includes .ts files AND extension-less URLs that might be TS streams
-            const isRawTs = finalUrl.includes('.ts') && !finalUrl.includes('.m3u8');
-            const isExtensionless = !finalUrl.includes('.m3u8') &&
+            const isRawTs = finalUrl.includes('.ts') && !finalUrl.includes('.m3u8') && !this.isRelayPlaybackUrl(finalUrl);
+            const isExtensionless = !looksLikeHls &&
                 !finalUrl.includes('.mp4') &&
                 !finalUrl.includes('.mkv') &&
                 !finalUrl.includes('.avi') &&
@@ -1891,6 +1895,12 @@ class VideoPlayer {
             /^https?:\/\/edge\.norva\.tv\/sessions\/[^/?#]+/i.test(value);
     }
 
+    // The Cloudflare relay (norva-relay) — used for the live "provider HLS via
+    // relay" path (no Railway). A failure here means fall back to the gateway.
+    isRelayPlaybackUrl(url = this.currentUrl) {
+        return /\/relay\/[^/?#]+/i.test(String(url || ''));
+    }
+
     resetGatewayHlsRetries() {
         this._gatewayHlsRetryCount = 0;
         if (this._gatewayHlsRetryTimer) {
@@ -1910,7 +1920,16 @@ class VideoPlayer {
     }
 
     retryGatewayHlsStartup(data = {}) {
-        if (!this.hls || !this.isGatewayPlaybackUrl(this.currentUrl)) return false;
+        if (!this.hls) return false;
+        // Live "provider HLS via relay" (no-Railway default) failed — provider has
+        // no HLS, or the browser can't decode it (HEVC/AC3). Fall back to the
+        // gateway transcode. Must run before the gateway-URL guard (relay URLs are
+        // not gateway URLs).
+        if (this.isLivePlayback() && this.isRelayPlaybackUrl(this.currentUrl)) {
+            if (this.tryLiveCodecFallback(data)) return true;
+            return false;
+        }
+        if (!this.isGatewayPlaybackUrl(this.currentUrl)) return false;
         // A 404 on a gateway playlist/segment means the session is GONE from the
         // gateway (process restart, TTL sweep, or single-slot eviction). Retrying
         // the same URL can never bring it back, so the channel would stay broken.
@@ -2006,31 +2025,40 @@ class VideoPlayer {
         }
     }
 
-    // A live gateway stream failed to DECODE (not load) — the browser can't play
-    // the video the gateway served. Almost always an HEVC channel that was
-    // remuxed (video copied) because its codec wasn't known up front. Re-resolve
-    // the channel with full transcode so the gateway re-encodes to H.264. Bounded
-    // to one transcode attempt per channel (if transcode also fails it's a real
-    // problem, not a copy/codec mismatch).
+    // Fall a live channel back to the gateway transcode path. Two triggers:
+    //  • relay-HLS (the default no-Railway path): ANY fatal failure — the provider
+    //    has no HLS for this channel, or the browser can't decode it (HEVC/AC3).
+    //  • gateway: a DECODE failure — an HEVC channel that was remuxed (video copied)
+    //    because its codec wasn't known up front; re-encode it to H.264.
+    // forceTranscodeChannel marks the channel transcode-only (skips relay-HLS) and
+    // re-selects it. Bounded to one fallback per channel so a truly dead source
+    // can't loop.
     tryLiveCodecFallback(data = {}) {
         try {
-            if (!this.isLivePlayback() || !this.isGatewayPlaybackUrl(this.currentUrl)) return false;
+            if (!this.isLivePlayback()) return false;
+            const onRelay = this.isRelayPlaybackUrl(this.currentUrl);
+            const onGateway = this.isGatewayPlaybackUrl(this.currentUrl);
+            if (!onRelay && !onGateway) return false;
             const details = String(data.details || '');
             const isDecodeErr = data.type === Hls.ErrorTypes.MEDIA_ERROR
                 || /codec|bufferappend|bufferadd|incompatible|parsing|decode|demux/i.test(details);
-            if (!isDecodeErr) return false;
+            // Gateway: only decode failures fall back (it's already transcoding).
+            // Relay-HLS: any fatal failure falls back.
+            if (onGateway && !isDecodeErr) return false;
+            if (onRelay && !data.fatal && !isDecodeErr) return false;
             const ch = this.currentChannel;
             const list = window.app?.channelList;
             if (!ch || ch.id == null || !list || typeof list.forceTranscodeChannel !== 'function') return false;
             const key = `${ch.sourceId ?? ch.source_id ?? ''}:${ch.id}`;
             if (this._codecFallbackKey === key) return false; // already tried transcode for this channel
             this._codecFallbackKey = key;
-            console.warn(`[Player] Live decode failure (${details || data.type}) — re-resolving channel ${ch.id} with full transcode`);
+            const from = onRelay ? 'relay-hls' : 'gateway-decode';
+            console.warn(`[Player] Live ${from} failure (${details || data.type}) — switching channel ${ch.id} to gateway transcode`);
             try {
                 this._sendLiveEvent('playback_error', {
                     errorCode: 'LIVE_codec',
-                    errorMessage: `decode fail -> transcode retry: ${details || data.type}`.slice(0, 240),
-                    metadata: { codecFallback: true }
+                    errorMessage: `${from} -> transcode: ${details || data.type}`.slice(0, 240),
+                    metadata: { codecFallback: true, from }
                 });
             } catch (_) {}
             this.resetGatewayHlsRetries();
