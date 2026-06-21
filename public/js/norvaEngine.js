@@ -76,6 +76,18 @@
   }
   function ebmlUint(b, p, n) { let v = 0; for (let i = 0; i < n && p + i < b.length; i++) v = v * 256 + b[p + i]; return v; }
 
+  // libav.js rejects with bare objects/numbers; String(e) → "[object Object]".
+  // Squeeze out whatever detail there is so failures are diagnosable.
+  function errStr(e) {
+    if (e == null) return 'null';
+    if (typeof e === 'string' || typeof e === 'number') return String(e);
+    if (e.stack) return String(e.stack);
+    if (e.message) return String(e.message);
+    try { const j = JSON.stringify(e); if (j && j !== '{}') return j; } catch (_) {}
+    try { const k = Object.keys(e); if (k.length) return k.map((x) => x + '=' + String(e[x])).join(' '); } catch (_) {}
+    return Object.prototype.toString.call(e);
+  }
+
   let libavLoaderPromise = null;
   function loadLibavFactory() {
     if (!libavLoaderPromise) libavLoaderPromise = import(LIBAV_LOADER);
@@ -107,7 +119,7 @@
     av1: ['av01.0.08M.08'],
   };
 
-  const ENGINE_VERSION = 8;
+  const ENGINE_VERSION = 9;
 
   class NorvaEngine {
     constructor(videoEl, opts = {}) {
@@ -221,13 +233,14 @@
       const f0 = this._fetchCount, b0 = this._fetchBytes;
       const off = this._offsetForTime(t);
       const warm = off != null && this._raCache.some((w) => off >= w.start && off < w.end);
+      let step = 'stopPump';
       try {
         await this._stopPump();
-        await this._resetForSeek();
+        step = 'reset'; await this._resetForSeek();
         this._smallNextRead = true;        // reach the first frame faster on a cold seek
-        await this._seekDemuxer(t);
-        await this._clearSourceBuffer();
-        await this._initMuxer();           // fresh init segment → onwrite
+        step = 'demux'; await this._seekDemuxer(t);
+        step = 'clearSB'; await this._clearSourceBuffer();
+        step = 'initMuxer'; await this._initMuxer();   // fresh init segment → onwrite
         this._startPump();
         this.seekTimings = {
           warm, setupMs: Math.round(performance.now() - st0),
@@ -236,7 +249,7 @@
         this.log('seek ' + JSON.stringify(this.seekTimings));
         try { this.onSeek(this.seekTimings); } catch (_) {}
       } catch (e) {
-        this.report({ stage: 'seek', message: String(e && (e.message || e)) });
+        this.report({ stage: 'seek:' + step, message: errStr(e) });
       } finally {
         this._seeking = false;
       }
@@ -640,7 +653,7 @@
       this._pumpRunning = true; this._stopRequested = false; this.ended = false;
       this._pump().catch((e) => {
         if (this.destroyed) return;
-        this.report({ stage: 'pump', message: String(e && (e.stack || e.message || e)) });
+        this.report({ stage: 'pump', message: errStr(e) });
       }).finally(() => { this._pumpRunning = false; });
     }
 
