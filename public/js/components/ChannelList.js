@@ -2845,6 +2845,9 @@ class ChannelList {
                 const result = await API.proxy.xtream.getStreamUrl(channel.sourceId, channel.streamId, 'live', providerContainer, { gatewayMode });
                 streamUrl = result.url;
                 channel.cloudPlaybackSessionId = result.sessionId || null;
+                // Cloud source UUID resolved during session creation — used for
+                // live telemetry (the player must send the UUID, not the local id).
+                if (result.cloudSourceId) channel.cloudSourceId = result.cloudSourceId;
                 staleSessionId = channel.cloudPlaybackSessionId;
             } else {
                 streamUrl = channel.url;

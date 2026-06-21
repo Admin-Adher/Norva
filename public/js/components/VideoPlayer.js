@@ -1740,7 +1740,15 @@ class VideoPlayer {
         try {
             const ch = this.currentChannel;
             if (!ch) return;
-            const sourceId = ch.sourceId || ch.source_id;
+            // Telemetry needs the CLOUD source UUID, not the local numeric source
+            // id. cloud_playback_events.source_id is a uuid column, so sending the
+            // local id makes the edge fn's ownership check throw (Postgres 22P02)
+            // → 500. Mirror WatchPage.getTelemetrySourceId: only send a value that
+            // is a real UUID, otherwise skip the event silently.
+            const rawSource = ch.cloudSourceId || ch.cloud_source_id || ch.sourceId || ch.source_id || '';
+            const sourceId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(rawSource))
+                ? String(rawSource)
+                : null;
             const itemId = String(ch.streamId || ch.stream_id || ch.id || '');
             if (!sourceId || !itemId) return;
             const cloud = window.NorvaCloud;

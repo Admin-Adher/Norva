@@ -1437,7 +1437,11 @@ const CloudAdapter = (() => {
                     playbackUrl: url,
                     cloud: true,
                     mode: payload.playback?.mode || mode,
-                    sessionId: payload.session?.id
+                    sessionId: payload.session?.id,
+                    // Resolved cloud source UUID (validated by the edge fn when the
+                    // session was created). Callers use it for telemetry so live
+                    // events send a real UUID, not the local numeric source id.
+                    cloudSourceId
                 };
             }
         }
