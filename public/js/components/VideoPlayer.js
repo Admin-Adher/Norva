@@ -1829,7 +1829,7 @@ class VideoPlayer {
     // upstream/slot/auth/network. "playback" = anything else.
     classifyLiveError(reason = '') {
         const r = String(reason || '').toLowerCase();
-        if (/bufferappend|bufferadd|appendbuffer|incompatiblecodec|fragpars|parsing|decode|mediaerror|media_error|buffernospace|codec|demux/.test(r)) {
+        if (/bufferappend|bufferadd|appendbuffer|incompatiblecodec|fragpars|parsing|decode|media.?error|buffernospace|codec|demux/.test(r)) {
             return 'codec';
         }
         if (this.isProviderTransientPlaybackError(reason)) return 'provider';
@@ -1904,6 +1904,11 @@ class VideoPlayer {
         // can die after the first frame.
         const responseCode = data.response?.code || data.response?.status || null;
         if (responseCode === 404 && this.recoverDeadGatewaySession('gateway-404')) return true;
+        // Decode/codec failure (e.g. an HEVC live channel served via remux — the
+        // gateway copies unknown live codecs and trusts the client to route HEVC
+        // to transcode by name, which misses channels whose name doesn't say so).
+        // Re-resolve the channel with full transcode so the browser gets H.264.
+        if (this.tryLiveCodecFallback(data)) return true;
         if (this.hasCurrentMedia()) return false;
         const retryable = data.type === Hls.ErrorTypes.NETWORK_ERROR ||
             data.details === 'manifestLoadError' ||
@@ -1980,6 +1985,42 @@ class VideoPlayer {
                     console.warn('[Player] Gateway re-resolve threw:', e?.message || e);
                 }
             }, 600);
+            return true;
+        } catch (_) {
+            return false;
+        }
+    }
+
+    // A live gateway stream failed to DECODE (not load) — the browser can't play
+    // the video the gateway served. Almost always an HEVC channel that was
+    // remuxed (video copied) because its codec wasn't known up front. Re-resolve
+    // the channel with full transcode so the gateway re-encodes to H.264. Bounded
+    // to one transcode attempt per channel (if transcode also fails it's a real
+    // problem, not a copy/codec mismatch).
+    tryLiveCodecFallback(data = {}) {
+        try {
+            if (!this.isLivePlayback() || !this.isGatewayPlaybackUrl(this.currentUrl)) return false;
+            const details = String(data.details || '');
+            const isDecodeErr = data.type === Hls.ErrorTypes.MEDIA_ERROR
+                || /codec|bufferappend|bufferadd|incompatible|parsing|decode|demux/i.test(details);
+            if (!isDecodeErr) return false;
+            const ch = this.currentChannel;
+            const list = window.app?.channelList;
+            if (!ch || ch.id == null || !list || typeof list.forceTranscodeChannel !== 'function') return false;
+            const key = `${ch.sourceId ?? ch.source_id ?? ''}:${ch.id}`;
+            if (this._codecFallbackKey === key) return false; // already tried transcode for this channel
+            this._codecFallbackKey = key;
+            console.warn(`[Player] Live decode failure (${details || data.type}) — re-resolving channel ${ch.id} with full transcode`);
+            try {
+                this._sendLiveEvent('playback_error', {
+                    errorCode: 'LIVE_codec',
+                    errorMessage: `decode fail -> transcode retry: ${details || data.type}`.slice(0, 240),
+                    metadata: { codecFallback: true }
+                });
+            } catch (_) {}
+            this.resetGatewayHlsRetries();
+            // forceTranscodeChannel marks the channel transcode-only and re-selects it.
+            try { Promise.resolve(list.forceTranscodeChannel(ch)).catch(() => {}); } catch (_) {}
             return true;
         } catch (_) {
             return false;

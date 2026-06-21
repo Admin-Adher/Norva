@@ -2089,6 +2089,23 @@ class ChannelList {
         return sameChannel && player.hasCurrentMedia?.();
     }
 
+    // Mark a channel as transcode-only (its remuxed video failed to decode in the
+    // browser — typically HEVC) and immediately re-select it so the gateway
+    // re-encodes to H.264. The flag persists for the session so later plays of
+    // this channel skip the doomed remux attempt.
+    forceTranscodeChannel(channel) {
+        if (!channel || channel.id == null) return Promise.resolve();
+        this._forceTranscode = this._forceTranscode || new Set();
+        const key = `${channel.sourceId}:${channel.id}`;
+        this._forceTranscode.add(key);
+        return this.selectChannel({
+            channelId: channel.id,
+            sourceId: String(channel.sourceId ?? ''),
+            streamId: channel.streamId || channel.stream_id || '',
+            sourceType: channel.sourceType
+        });
+    }
+
     resumeLivePlayback(options = {}) {
         const { force = false } = options;
         if (this.liveResumeInFlight) return this.liveResumeInFlight;
@@ -2843,9 +2860,16 @@ class ChannelList {
                     'ts';
                 // Live H.264 → lightweight remux (copy video, transcode audio only);
                 // H.265/HEVC → full transcode (browsers can't decode copied HEVC).
-                const gatewayMode = (typeof MediaUtils !== 'undefined' && MediaUtils.liveGatewayMode)
-                    ? MediaUtils.liveGatewayMode(channel)
-                    : 'transcode';
+                // H.265/HEVC → full transcode; H.264 → remux. Live channels carry
+                // no codec info up front, so an HEVC channel whose name doesn't say
+                // "hevc" defaults to remux and fails to decode — once that happens
+                // the player flags it here so it's transcoded on every later play.
+                const transcodeKey = `${channel.sourceId}:${channel.id}`;
+                const gatewayMode = (this._forceTranscode && this._forceTranscode.has(transcodeKey))
+                    ? 'transcode'
+                    : ((typeof MediaUtils !== 'undefined' && MediaUtils.liveGatewayMode)
+                        ? MediaUtils.liveGatewayMode(channel)
+                        : 'transcode');
                 // Channel SWITCH: tear down the currently-playing channel BEFORE
                 // creating the new gateway session. The provider grants one slot,
                 // so creating the new session closes the old one; if the old
