@@ -274,7 +274,7 @@ async function createPlaybackSession(
   }
 
   if (mode === "relay") {
-    const relay = await createRelayAccess(session.id, userId, targetUrl, expiresAt, db);
+    const relay = await createRelayAccess(session.id, userId, targetUrl, expiresAt, db, userAgent);
     return { session, playback: { mode, url: relay.url, tokenExpiresAt: expiresAt } };
   }
 
@@ -931,6 +931,7 @@ async function createRelayAccess(
   targetUrl: string,
   expiresAt: string,
   db: SupabaseClient,
+  userAgent: string | null = null,
 ) {
   const runtimeConfig = await getRuntimeConfig(db);
   if (!runtimeConfig.relayBaseUrl || !runtimeConfig.relayTokenSecret) {
@@ -942,6 +943,9 @@ async function createRelayAccess(
     sid: playbackSessionId,
     uid: userId,
     url: targetUrl,
+    // Carry the source's IPTV User-Agent so the relay reaches the provider with
+    // the same UA the gateway uses (a browser UA is 403'd by providers).
+    ...(userAgent ? { ua: userAgent } : {}),
     exp: Math.floor(new Date(expiresAt).getTime() / 1000),
   });
   const signature = await hmacBase64Url(runtimeConfig.relayTokenSecret, payload);

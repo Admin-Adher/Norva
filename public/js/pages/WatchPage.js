@@ -2153,14 +2153,20 @@ class WatchPage {
     reportEngineFailure(info = {}) {
         console.warn('[NorvaEngine] échec', info);
         try {
-            this.sendPlaybackEvent('engine_failure', {
+            // Use the server-accepted 'playback_error' event type and pack the
+            // engine context into errorMessage so it persists even if the event
+            // store drops unknown metadata fields.
+            const v = this.norvaEngine?.vName || this.currentStreamInfo?.video || '?';
+            const a = this.norvaEngine?.aName || '?';
+            const c = this.containerExtension || '?';
+            this.sendPlaybackEvent('playback_error', {
                 errorCode: 'ENGINE_' + (info.stage || 'unknown'),
-                errorMessage: String(info.message || '').slice(0, 500),
+                errorMessage: `engine ${info.stage || 'unknown'} container=${c} video=${v} audio=${a} :: ${String(info.message || '').slice(0, 300)}`,
                 metadata: {
                     engineStage: info.stage || null,
-                    engineVideoCodec: this.norvaEngine?.vName || this.currentStreamInfo?.video || null,
-                    engineAudioCodec: this.norvaEngine?.aName || null,
-                    engineContainer: this.containerExtension || null
+                    engineVideoCodec: v,
+                    engineAudioCodec: a,
+                    engineContainer: c
                 }
             });
         } catch (_) {}
@@ -3525,11 +3531,12 @@ class WatchPage {
         // message — do NOT run the gateway/version retry chain (no Railway).
         if (this.currentPlaybackMode === 'engine') {
             const err = this.video?.error;
-            if (err && err.code) {
-                this.reportEngineFailure({ stage: 'mediaerror', message: 'code=' + err.code + ' ' + (err.message || '') });
-                this.destroyEngine();
-                this.handleEngineUnplayable(new Error('MEDIA_ERR_' + err.code));
-            }
+            // Benign: fired while the previous src is cleared during stop()/setup,
+            // before the engine has attached its MediaSource. Not a real failure.
+            if (!err || !err.code || /Empty src/i.test(err.message || '')) return;
+            this.reportEngineFailure({ stage: 'mediaerror', message: 'code=' + err.code + ' ' + (err.message || '') });
+            this.destroyEngine();
+            this.handleEngineUnplayable(new Error('MEDIA_ERR_' + err.code));
             return;
         }
 

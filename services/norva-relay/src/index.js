@@ -318,7 +318,11 @@ async function proxyPlayback(request, env, claims) {
   const headers = new Headers();
   copyHeader(request.headers, headers, "accept");
   copyHeader(request.headers, headers, "accept-language");
-  copyHeader(request.headers, headers, "user-agent");
+  // IPTV providers gate on User-Agent: a browser UA is rejected (403). Use the
+  // source's configured UA carried in the signed relay token (the same UA the
+  // gateway uses successfully); never forward the caller's browser UA. Fall
+  // back to a VLC UA when the token has none.
+  headers.set("user-agent", String(claims.ua || "VLC/3.0.20 LibVLC/3.0.20"));
 
   // Resume seeks: the IPTV provider ignores OPEN-ENDED Range requests
   // (`bytes=N-` is answered from byte 0), so a player seek re-reads the file
