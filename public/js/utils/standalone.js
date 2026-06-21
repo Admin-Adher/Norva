@@ -63,6 +63,67 @@
         }
     };
 
+    // Hardware Back button bridge for the native phone shell. Returns 'handled'
+    // when Back was consumed inside the page (an open overlay closed, or we
+    // stepped back to Home) so the native layer leaves history/exit alone, else
+    // 'exit'. Mirrors the TV client's __norvaTV.handleBack, but available on the
+    // phone where the TV-only D-pad module that defines it stays disabled.
+    window.__norvaHandleBack = function () {
+        try {
+            // Region suggestion popup.
+            const region = document.getElementById('norva-region-prompt');
+            if (region) { region.remove(); return 'handled'; }
+
+            // An open modal (settings, add source, dialogs).
+            const modal = document.querySelector('#modal.active, .modal-overlay.active');
+            if (modal) {
+                const closeBtn = modal.querySelector('.modal-close, #modal-cancel');
+                if (closeBtn && typeof closeBtn.onclick === 'function') {
+                    try { closeBtn.onclick(); } catch (_) { /* fall through */ }
+                }
+                modal.classList.remove('active');
+                return 'handled';
+            }
+
+            // An open player menu (captions / audio / quality / overflow).
+            const menu = document.querySelector(
+                '.watch-captions-menu:not(.hidden), .watch-audio-menu:not(.hidden), '
+                + '.player-quality-menu:not(.hidden), .player-overflow-menu:not(.hidden)');
+            if (menu) { menu.classList.add('hidden'); return 'handled'; }
+
+            // The mobile navigation menu.
+            const navMenu = document.getElementById('navbar-menu');
+            if (navMenu && navMenu.classList.contains('active')) {
+                navMenu.classList.remove('active');
+                document.getElementById('mobile-menu-toggle')?.classList.remove('active');
+                return 'handled';
+            }
+
+            // The Live TV channel drawer.
+            const sidebar = document.getElementById('channel-sidebar');
+            if (sidebar && sidebar.classList.contains('active')) {
+                sidebar.classList.remove('active');
+                document.querySelectorAll('.channel-overlay.active').forEach((o) => o.classList.remove('active'));
+                return 'handled';
+            }
+
+            // Series details (seasons/episodes) panel → back to the grid.
+            const details = document.getElementById('series-details');
+            if (details && !details.classList.contains('hidden')) {
+                const back = document.querySelector('.series-back-btn');
+                if (back) { back.click(); return 'handled'; }
+            }
+
+            // Not on Home → go Home instead of exiting.
+            const active = document.querySelector('.page.active');
+            if (active && active.id && active.id !== 'page-home') {
+                const homeLink = document.querySelector('.nav-link[data-page="home"]');
+                if (homeLink) { homeLink.click(); return 'handled'; }
+            }
+        } catch (_) { /* fall through to native exit handling */ }
+        return 'exit';
+    };
+
     // Route all playback to the native player once the page classes exist
     document.addEventListener('DOMContentLoaded', () => {
         const nativePlay = (streamUrl, title, meta, resumeSeconds) => {

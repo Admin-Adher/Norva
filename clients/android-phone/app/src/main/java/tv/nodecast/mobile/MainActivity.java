@@ -15,6 +15,7 @@ import android.view.View;
 import android.view.WindowManager;
 import android.webkit.PermissionRequest;
 import android.webkit.SslErrorHandler;
+import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
@@ -24,8 +25,11 @@ import android.webkit.WebViewClient;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.FrameLayout;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.ProgressBar;
 import android.widget.TextView;
+import android.widget.Toast;
 
 /**
  * Norva Mobile — Android phone client.
@@ -48,6 +52,11 @@ public class MainActivity extends Activity {
     private EditText     urlInput;
     private TextView     statusText;
     private boolean      webViewVisible = false;
+    private LinearLayout splashPanel;
+    private LinearLayout errorPanel;
+    private TextView     errorText;
+    private String       lastLoadedUrl;
+    private long         lastBackPressMs = 0L;
 
     // ---- Lifecycle ----
 
@@ -62,6 +71,9 @@ public class MainActivity extends Activity {
 
         buildWebView();
         buildSetupPanel();
+        buildErrorPanel();
+        buildSplash();
+        showSplash();
 
         // Handle norva://pair deep link
         Intent intent = getIntent();
@@ -110,11 +122,34 @@ public class MainActivity extends Activity {
             super.onBackPressed();
             return;
         }
-        if (webView.canGoBack()) {
-            webView.goBack();
-        } else {
-            finish();
-        }
+        // Let the web app consume Back first (close a menu, modal, channel drawer,
+        // or step back to Home). Only fall back to history / exit when it doesn't.
+        webView.evaluateJavascript(
+                "(window.__norvaHandleBack ? window.__norvaHandleBack() : 'none')",
+                new ValueCallback<String>() {
+                    @Override
+                    public void onReceiveValue(String value) {
+                        final String v = value == null ? "" : value.replace("\"", "");
+                        if ("handled".equals(v)) return; // page consumed Back
+                        runOnUiThread(new Runnable() {
+                            @Override
+                            public void run() {
+                                if ("none".equals(v) && webView.canGoBack()) {
+                                    webView.goBack();
+                                    return;
+                                }
+                                long now = System.currentTimeMillis();
+                                if (now - lastBackPressMs < 2000) {
+                                    finish();
+                                } else {
+                                    lastBackPressMs = now;
+                                    Toast.makeText(MainActivity.this,
+                                            "Press back again to exit", Toast.LENGTH_SHORT).show();
+                                }
+                            }
+                        });
+                    }
+                });
     }
 
     @Override
@@ -150,10 +185,16 @@ public class MainActivity extends Activity {
 
         webView.setWebViewClient(new WebViewClient() {
             @Override
+            public void onPageFinished(WebView view, String url) {
+                hideSplash();
+            }
+
+            @Override
             public void onReceivedError(WebView view, WebResourceRequest request,
                                         WebResourceError error) {
                 if (request.isForMainFrame()) {
-                    showSetup("Could not reach server: " + error.getDescription());
+                    hideSplash();
+                    showNetworkError(String.valueOf(error.getDescription()));
                 }
             }
 
@@ -299,7 +340,10 @@ public class MainActivity extends Activity {
     // ---- Navigation ----
 
     private void connect(String url) {
+        lastLoadedUrl = url;
         setupPanel.setVisibility(View.GONE);
+        if (errorPanel != null) errorPanel.setVisibility(View.GONE);
+        showSplash();
         webView.setVisibility(View.VISIBLE);
         webViewVisible = true;
         webView.loadUrl(url);
@@ -382,6 +426,8 @@ public class MainActivity extends Activity {
 
     private void showSetup(String error) {
         webViewVisible = false;
+        hideSplash();
+        if (errorPanel != null) errorPanel.setVisibility(View.GONE);
         webView.setVisibility(View.GONE);
         setupPanel.setVisibility(View.VISIBLE);
         statusText.setText(error == null ? "" : error);
@@ -390,6 +436,121 @@ public class MainActivity extends Activity {
         }
         if (advancedPanel != null && advancedPanel.getVisibility() == View.VISIBLE) {
             urlInput.requestFocus();
+        }
+    }
+
+    // ---- Splash ----
+
+    /** Branded launch/loading screen shown over the WebView until a page loads. */
+    private void buildSplash() {
+        splashPanel = new LinearLayout(this);
+        splashPanel.setOrientation(LinearLayout.VERTICAL);
+        splashPanel.setGravity(Gravity.CENTER);
+        splashPanel.setBackgroundColor(Color.parseColor("#0a0a0f"));
+        splashPanel.setVisibility(View.GONE);
+
+        ImageView logo = new ImageView(this);
+        int logoId = getResources().getIdentifier("norva_app_icon", "drawable", getPackageName());
+        if (logoId == 0) logoId = getResources().getIdentifier("ic_launcher", "drawable", getPackageName());
+        if (logoId != 0) logo.setImageResource(logoId);
+        LinearLayout.LayoutParams logoLp = new LinearLayout.LayoutParams(dp(96), dp(96));
+        logoLp.bottomMargin = dp(28);
+        splashPanel.addView(logo, logoLp);
+
+        ProgressBar spinner = new ProgressBar(this);
+        splashPanel.addView(spinner, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        root.addView(splashPanel, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT));
+    }
+
+    private void showSplash() {
+        if (splashPanel != null) {
+            splashPanel.bringToFront();
+            splashPanel.setVisibility(View.VISIBLE);
+        }
+    }
+
+    private void hideSplash() {
+        if (splashPanel != null) splashPanel.setVisibility(View.GONE);
+    }
+
+    // ---- Network error ----
+
+    /** Friendly "can't reach Norva" screen with a Retry button. */
+    private void buildErrorPanel() {
+        errorPanel = new LinearLayout(this);
+        errorPanel.setOrientation(LinearLayout.VERTICAL);
+        errorPanel.setGravity(Gravity.CENTER);
+        errorPanel.setBackgroundColor(Color.parseColor("#0a0a0f"));
+        errorPanel.setVisibility(View.GONE);
+        int pad = dp(28);
+        errorPanel.setPadding(pad, pad, pad, pad);
+
+        TextView title = new TextView(this);
+        title.setText("Can't reach Norva");
+        title.setTextColor(Color.WHITE);
+        title.setTextSize(22);
+        title.setGravity(Gravity.CENTER);
+        title.setPadding(0, 0, 0, dp(10));
+        errorPanel.addView(title);
+
+        errorText = new TextView(this);
+        errorText.setText("Please check your internet connection and try again.");
+        errorText.setTextColor(Color.parseColor("#a1a1aa"));
+        errorText.setTextSize(15);
+        errorText.setGravity(Gravity.CENTER);
+        errorText.setPadding(0, 0, 0, dp(28));
+        errorPanel.addView(errorText);
+
+        Button retryBtn = new Button(this);
+        retryBtn.setText("Retry");
+        retryBtn.setTextColor(Color.WHITE);
+        retryBtn.setBackgroundColor(Color.parseColor("#3B82F6"));
+        retryBtn.setOnClickListener(v -> {
+            if (lastLoadedUrl != null && !lastLoadedUrl.isEmpty()) {
+                connect(lastLoadedUrl);
+            } else {
+                connectCloud(CLOUD_WATCH_URL);
+            }
+        });
+        LinearLayout.LayoutParams retryLp = new LinearLayout.LayoutParams(
+                dp(220), LinearLayout.LayoutParams.WRAP_CONTENT);
+        retryLp.bottomMargin = dp(14);
+        errorPanel.addView(retryBtn, retryLp);
+
+        Button setupBtn = new Button(this);
+        setupBtn.setText("Advanced setup");
+        setupBtn.setTextColor(Color.WHITE);
+        setupBtn.setBackgroundColor(Color.parseColor("#272d3a"));
+        setupBtn.setOnClickListener(v -> {
+            showSetup(null);
+            if (advancedPanel != null) advancedPanel.setVisibility(View.VISIBLE);
+        });
+        errorPanel.addView(setupBtn, new LinearLayout.LayoutParams(
+                dp(220), LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        root.addView(errorPanel, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT));
+    }
+
+    private void showNetworkError(String detail) {
+        webViewVisible = false;
+        hideSplash();
+        webView.setVisibility(View.GONE);
+        setupPanel.setVisibility(View.GONE);
+        if (errorText != null) {
+            errorText.setText(detail == null || detail.isEmpty()
+                    ? "Please check your internet connection and try again."
+                    : "Please check your internet connection and try again.\n\n" + detail);
+        }
+        if (errorPanel != null) {
+            errorPanel.bringToFront();
+            errorPanel.setVisibility(View.VISIBLE);
         }
     }
 
