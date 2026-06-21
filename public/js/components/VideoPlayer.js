@@ -48,6 +48,21 @@ class VideoPlayer {
         this.currentCloudPlaybackSessionId = null;
         this.activeCloudPlaybackSessionIds = new Set();
 
+        // Chrome rejects a pending video.play() with AbortError when we pause()/
+        // load() to switch channels (and the browser's own autoplay promise isn't
+        // ours to catch). It's benign — the play was superseded — but surfaces as
+        // "Uncaught (in promise) AbortError". Swallow only that specific case.
+        if (typeof window !== 'undefined' && !window.__norvaPlayAbortGuard) {
+            window.__norvaPlayAbortGuard = true;
+            window.addEventListener('unhandledrejection', (ev) => {
+                const r = ev && ev.reason;
+                if (r && r.name === 'AbortError' &&
+                    /play\(\)|pause\(\)|interrupted|media/i.test(String(r.message || ''))) {
+                    ev.preventDefault();
+                }
+            });
+        }
+
         // Settings - start with defaults, load from server async
         this.settings = this.getDefaultSettings();
 
@@ -252,7 +267,7 @@ class VideoPlayer {
         // Play/Pause toggle
         const togglePlay = () => {
             if (this.video.paused) {
-                this.video.play();
+                this.video.play().catch(() => {});
             } else {
                 this.video.pause();
             }
@@ -2516,7 +2531,7 @@ class VideoPlayer {
             case ' ':
             case 'k':
                 e.preventDefault();
-                this.video.paused ? this.video.play() : this.video.pause();
+                this.video.paused ? this.video.play().catch(() => {}) : this.video.pause();
                 break;
             case 'f':
                 e.preventDefault();
