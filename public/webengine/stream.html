@@ -3,38 +3,40 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Norva — Moteur streaming (libav.js) — itération 1</title>
+<title>Norva — Moteur streaming (libav.js sur-mesure) — itération 2</title>
 <style>
   :root { color-scheme: dark; }
   body { margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
          background:#0a0e1a; color:#dce6ff; padding:18px; line-height:1.45; }
   h1 { font-size:19px; margin:0 0 4px; }
-  .sub { color:#8794b3; font-size:13px; margin-bottom:14px; max-width:820px; }
-  #status { max-width:820px; background:#111a30; border:1px solid #24304f; border-radius:10px; padding:12px 14px; margin:12px 0; font-size:14px; }
+  .sub { color:#8794b3; font-size:13px; margin-bottom:14px; max-width:860px; }
+  #status { max-width:860px; background:#111a30; border:1px solid #24304f; border-radius:10px; padding:12px 14px; margin:12px 0; font-size:14px; }
   .row { display:flex; gap:10px; flex-wrap:wrap; margin:10px 0; }
   button { background:#5b7cfa; color:#fff; border:0; border-radius:9px; padding:9px 14px; font-weight:700; font-size:13.5px; cursor:pointer; }
   button:disabled { opacity:.5; cursor:default; }
-  video { width:100%; max-width:820px; border-radius:10px; background:#000; margin-top:10px; }
+  video { width:100%; max-width:860px; border-radius:10px; background:#000; margin-top:10px; }
   .ok{color:#34d399;font-weight:700;} .no{color:#f87171;font-weight:700;} .wait{color:#fbbf24;}
-  pre { background:#0c1322; border:1px solid #1c2540; border-radius:8px; padding:10px; overflow:auto; font-size:11px; max-width:820px; max-height:300px; white-space:pre-wrap; margin-top:12px; }
+  pre { background:#0c1322; border:1px solid #1c2540; border-radius:8px; padding:10px; overflow:auto; font-size:11px; max-width:860px; max-height:320px; white-space:pre-wrap; margin-top:12px; }
   code{background:#1a2238;padding:1px 5px;border-radius:5px;}
 </style>
 </head>
 <body>
-  <h1>Norva — Moteur streaming (libav.js) · itération 1</h1>
-  <div class="sub">Teste le <b>vrai</b> moteur : lecture du mkv <b>par plages d'octets</b> → démux → remux (copie) → MP4 fragmenté → <b>MediaSource</b> → &lt;video&gt;. Aucun fichier chargé en entier, aucun serveur. Itération 1 = pipeline streaming sur les échantillons <b>AAC</b> (l'audio AC-3 et le seek-par-offset arrivent ensuite). Clique un bouton, dis-moi si ça joue + colle le journal.</div>
+  <h1>Norva — Moteur streaming (libav.js sur-mesure) · itération 2</h1>
+  <div class="sub">Le <b>navigateur devient le serveur média</b> : lecture du mkv <b>par plages d'octets</b> → démux → la vidéo est <b>copiée</b> (décodée par le navigateur) et l'audio <b>AC-3 / E-AC-3 / DTS / TrueHD</b> est <b>transcodé en AAC</b> à la volée → MP4 fragmenté → <b>MediaSource</b>. Aucun serveur de transcodage (zéro Railway). Clique un échantillon, dis-moi si ça joue (image + son) et colle le journal.</div>
 
   <div id="status">Prêt. Choisis un échantillon.</div>
   <div class="row">
-    <button data-id="s_h264_aac" data-mime='video/mp4; codecs="avc1.640028,mp4a.40.2"'>Streamer mkv H.264 + AAC</button>
-    <button data-id="s_hevc_aac" data-mime='video/mp4; codecs="hvc1.1.6.L93.B0,mp4a.40.2"'>Streamer mkv HEVC + AAC</button>
+    <button data-id="s_h264_aac">mkv H.264 + AAC</button>
+    <button data-id="s_h264_ac3">mkv H.264 + AC-3 5.1</button>
+    <button data-id="s_hevc_aac">mkv HEVC + AAC</button>
+    <button data-id="s_hevc_ac3">mkv HEVC + AC-3 5.1</button>
     <button id="seek" disabled>⏩ Sauter à 6 s (test reprise)</button>
   </div>
   <video id="vid" controls playsinline></video>
   <pre id="log">Journal…</pre>
 
 <script type="module">
-import { LibAV } from '/webengine/vendor/libav/libav-webcodecs.mjs';
+import { LibAV } from '/webengine/vendor/libav/libav-norva.mjs';
 
 const logEl = document.getElementById('log');
 const statusEl = document.getElementById('status');
@@ -42,13 +44,28 @@ const vid = document.getElementById('vid');
 const log = (m) => { logEl.textContent += '\n' + m; logEl.scrollTop = logEl.scrollHeight; };
 const setStatus = (h) => { statusEl.innerHTML = h; };
 
+// Video codec strings per test sample (for the MSE mime). Audio is always AAC
+// after the engine runs (copied if already AAC, transcoded otherwise).
+const SAMPLES = {
+  s_h264_aac: { vmime: 'avc1.640028' },
+  s_h264_ac3: { vmime: 'avc1.640028' },
+  s_hevc_aac: { vmime: 'hvc1.1.6.L93.B0' },
+  s_hevc_ac3: { vmime: 'hvc1.1.6.L93.B0' },
+};
+// Audio codecs the browser decodes natively in fMP4 → copy (no transcode).
+const AUDIO_COPY = new Set(['aac', 'opus', 'flac']);
+const AUDIO_MIME = { aac: 'mp4a.40.2', opus: 'opus', flac: 'flac' };
+
+const to64 = (lo, hi) => hi * 4294967296 + (lo >>> 0);
+const from64 = (v) => { const hi = Math.floor(v / 4294967296); const lo = v - hi * 4294967296; return [lo >>> 0, hi]; };
+
 let libav = null;
 async function getLibav() {
   if (libav) return libav;
-  log('Chargement de libav.js…');
+  log('Chargement du moteur libav.js sur-mesure…');
   const t0 = performance.now();
-  libav = await LibAV({ base: '/webengine/vendor/libav', variant: 'webcodecs' });
-  log(`libav.js prêt en ${((performance.now()-t0)/1000).toFixed(1)} s (mode ${libav.libavjsMode})`);
+  libav = await LibAV({ base: '/webengine/vendor/libav' });
+  log(`moteur prêt en ${((performance.now() - t0) / 1000).toFixed(1)} s (mode ${libav.libavjsMode})`);
   return libav;
 }
 
@@ -59,18 +76,17 @@ async function probeSize(url) {
   return parseInt(r.headers.get('content-length') || '0', 10);
 }
 
-async function streamRemux(id, mime) {
+async function streamRemux(id) {
   document.getElementById('seek').disabled = true;
   document.querySelectorAll('button[data-id]').forEach(b => b.disabled = true);
+  const lib = await getLibav();
   try {
     const url = '/webengine/media/' + id + '.mkv';
-    const lib = await getLibav();
     setStatus('<span class="wait">⏳ ouverture du flux…</span>');
-
     const size = await probeSize(url);
-    log(`taille fichier: ${(size/1048576).toFixed(2)} Mo`);
+    log(`taille fichier: ${(size / 1048576).toFixed(2)} Mo`);
 
-    // 1) seekable byte-range reader
+    // 1) seekable byte-range reader (input device)
     await lib.mkblockreaderdev('input', size);
     let reads = 0;
     lib.onblockread = async (name, pos, len) => {
@@ -88,85 +104,141 @@ async function streamRemux(id, mime) {
 
     // 2) demux
     const [fmtCtx, streams] = await lib.ff_init_demuxer_file('input');
-    log(`flux détectés: ${streams.length} (` + streams.map(s => `#${s.index} type=${s.codec_type}`).join(', ') + ')');
+    const vS = streams.find(s => s.codec_type === 0);
+    const aS = streams.find(s => s.codec_type === 1);
+    const vName = vS ? await lib.avcodec_get_name(vS.codec_id) : null;
+    const aName = aS ? await lib.avcodec_get_name(aS.codec_id) : null;
+    const COPY_AUDIO = aS && AUDIO_COPY.has(aName);
+    log(`flux: vidéo=${vName}${aS ? `, audio=${aName} → ${COPY_AUDIO ? 'copie' : 'transcodage AAC'}` : ' (sans audio)'}`);
 
-    // 3) MediaSource
-    if (!('MediaSource' in window) || !MediaSource.isTypeSupported(mime)) {
+    // 3) MediaSource mime
+    let mime = 'video/mp4; codecs="' + SAMPLES[id].vmime;
+    if (aS) mime += ',' + (COPY_AUDIO ? (AUDIO_MIME[aName] || 'mp4a.40.2') : 'mp4a.40.2');
+    mime += '"';
+    if (!('MediaSource' in window) || !MediaSource.isTypeSupported(mime))
       throw new Error('MediaSource ne supporte pas ' + mime);
-    }
-    log('MediaSource.isTypeSupported(' + mime + ') = ' + MediaSource.isTypeSupported(mime));
+    log('MediaSource.isTypeSupported(' + mime + ') = true');
     const ms = new MediaSource();
     vid.src = URL.createObjectURL(ms);
     await new Promise(res => ms.addEventListener('sourceopen', res, { once: true }));
     const sb = ms.addSourceBuffer(mime);
-    log('MediaSource ouvert + SourceBuffer créé');
     const queue = [];
     let ended = false;
     const drain = () => {
       if (sb.updating) return;
-      if (queue.length) { sb.appendBuffer(queue.shift()); }
+      if (queue.length) sb.appendBuffer(queue.shift());
       else if (ended && ms.readyState === 'open') { try { ms.endOfStream(); } catch (_) {} }
     };
     sb.addEventListener('updateend', drain);
     sb.addEventListener('error', () => log('SourceBuffer error'));
 
-    // 4) writer device (created by ff_init_muxer via device:true) -> MSE queue
+    // 4) output writer device (created by ff_init_muxer with device:true) → MSE queue
     let written = 0;
     lib.onwrite = (name, pos, data) => { written += data.length; queue.push(data.slice(0)); drain(); };
 
-    // 5) muxer: copy all streams to fragmented MP4
-    const streamCtxs = streams.map(s => [s.codecpar, s.time_base_num, s.time_base_den]);
-    log('init muxer mp4 (device=output)…');
+    // 5) audio transcode setup (decoder + AAC encoder; filter graph is lazy)
+    const V_IDX = 0, A_IDX = vS ? 1 : 0;
+    let decCtx, decPkt, decFrame, encCtx, encFrame, encPkt, frameSize, encCodecpar;
+    let fg = null, fsrc = null, fsink = null;
+    if (aS && !COPY_AUDIO) {
+      [, decCtx, decPkt, decFrame] = await lib.ff_init_decoder(aS.codec_id, aS.codecpar);
+      [, encCtx, encFrame, encPkt, frameSize] = await lib.ff_init_encoder('aac', {
+        ctx: { bit_rate: 192000, sample_fmt: lib.AV_SAMPLE_FMT_FLTP, sample_rate: 48000, channel_layout: 3 },
+        time_base: [1, 48000],
+      });
+      encCodecpar = await lib.avcodec_parameters_alloc();
+      await lib.avcodec_parameters_from_context(encCodecpar, encCtx);
+      log(`encodeur AAC prêt (frame_size=${frameSize})`);
+    }
+
+    // 6) muxer → fragmented MP4 (video copy + audio copy/encoded)
+    const streamCtxs = [];
+    if (vS) streamCtxs.push([vS.codecpar, vS.time_base_num, vS.time_base_den]);
+    if (aS) streamCtxs.push(COPY_AUDIO ? [aS.codecpar, aS.time_base_num, aS.time_base_den]
+                                       : [encCodecpar, 1, 48000]);
     const muxRet = await lib.ff_init_muxer(
-      { format_name: 'mp4', filename: 'output', open: true, device: true, codecpars: true },
-      streamCtxs);
-    const oc = muxRet[0], pb = muxRet[2];
-    log('muxer initialisé (oc=' + oc + ') → réglage movflags (fMP4)…');
-    // Set fragmented-MP4 flags on the muxer's private options. avformat_write_header
-    // expects an AVDictionary** (double ptr); passing a single dict ptr crashes
-    // (OOB). So set the option directly via av_opt_set + write header with no dict.
-    const setRet = await lib.av_opt_set(oc, 'movflags', 'frag_keyframe+empty_moov+default_base_moof', lib.AV_OPT_SEARCH_CHILDREN);
-    log('av_opt_set movflags ret=' + setRet + ' → écriture en-tête…');
-    const whRet = await lib.avformat_write_header(oc, 0);
-    log('en-tête MP4 fragmenté écrit (ret=' + whRet + '), remux en cours…');
+      { format_name: 'mp4', filename: 'output', open: true, device: true, codecpars: true }, streamCtxs);
+    const oc = muxRet[0];
+    await lib.av_opt_set(oc, 'movflags', 'frag_keyframe+empty_moov+default_base_moof', lib.AV_OPT_SEARCH_CHILDREN);
+    await lib.avformat_write_header(oc, 0);
+    log('en-tête MP4 fragmenté écrit, remux + transcodage en cours…');
     setStatus('<span class="wait">⏳ remux + lecture…</span>');
 
-    // 6) read packets -> write packets
+    // Video DTS reconstruction: matroska stores no DTS, so the demuxer hands us
+    // dts==pts which is non-monotonic for B-frames. Rebuild a strictly-increasing
+    // decode-order grid from the real per-packet durations, offset earlier by a
+    // safe reorder depth so dts<=pts always holds.
+    const D_REORDER = 16;
+    let vBase = null, vCum = 0, vFd0 = 0, vOffset = 0;
+    const setVideoDts = (p) => {
+      const pts = to64(p.pts, p.ptshi);
+      if (vBase === null) { vBase = pts; vFd0 = (p.duration || 0) > 0 ? p.duration : 1; vOffset = D_REORDER * vFd0; }
+      const [lo, hi] = from64(vBase + vCum - vOffset); p.dts = lo; p.dtshi = hi;
+      vCum += (p.duration || 0) > 0 ? p.duration : 1;
+    };
+
+    const initFilter = async (fr) => {
+      // The decoder emits frames whose time_base is 1/sample_rate (not the mkv
+      // stream tb). Feed the buffersrc that exact tb, else avfilter misreads the
+      // frame pts and the audio clock runs ~48× fast (A/V desync).
+      const itb = (fr.time_base_den > 0) ? [fr.time_base_num, fr.time_base_den]
+                                         : [aS.time_base_num, aS.time_base_den];
+      [fg, fsrc, fsink] = await lib.ff_init_filter_graph('anull',
+        { type: 1, sample_rate: fr.sample_rate, sample_fmt: fr.format, channel_layout: fr.channel_layout,
+          time_base: itb },
+        { type: 1, sample_rate: 48000, sample_fmt: lib.AV_SAMPLE_FMT_FLTP, channel_layout: 3, frame_size: frameSize });
+      log('filtre audio prêt (rééchantillonnage → AAC stéréo 48 kHz)');
+    };
+    const pushAudio = async (frames, fin) => {
+      if (!fg && frames.length) await initFilter(frames[0]);
+      if (!fg) return;
+      const ff = await lib.ff_filter_multi(fsrc, fsink, encFrame, frames, !!fin);
+      const pk = await lib.ff_encode_multi(encCtx, encFrame, encPkt, ff, !!fin);
+      for (const p of pk) p.stream_index = A_IDX;
+      if (pk.length) await lib.ff_write_multi(oc, encPkt, pk);
+    };
+
+    // 7) read loop: copy video, copy-or-transcode audio
     const pkt = await lib.av_packet_alloc();
-    let res, guard = 0;
+    let res, guard = 0, vc = 0, ac = 0;
     do {
       let packets;
       [res, packets] = await lib.ff_read_frame_multi(fmtCtx, pkt, { limit: 256 * 1024 });
-      const list = [];
-      for (const k in packets) for (const p of packets[k]) list.push(p);
-      if (list.length) await lib.ff_write_multi(oc, pkt, list);
-      if (++guard > 100000) { log('garde-fou boucle atteint'); break; }
+      for (const k in packets) for (const p of packets[k]) {
+        if (vS && p.stream_index === vS.index) {
+          p.stream_index = V_IDX; setVideoDts(p); vc++;
+          await lib.ff_write_multi(oc, pkt, [p]);
+        } else if (aS && p.stream_index === aS.index) {
+          ac++;
+          if (COPY_AUDIO) { p.stream_index = A_IDX; await lib.ff_write_multi(oc, pkt, [p]); }
+          else { const fr = await lib.ff_decode_multi(decCtx, decPkt, decFrame, [p], false); await pushAudio(fr, false); }
+        }
+      }
+      if (++guard > 200000) { log('garde-fou boucle atteint'); break; }
     } while (res === 0 || res === -lib.EAGAIN);
-    log(`lecture terminée (res=${res}, AVERROR_EOF=${lib.AVERROR_EOF}, lectures plage=${reads})`);
 
+    if (aS && !COPY_AUDIO) { const fr = await lib.ff_decode_multi(decCtx, decPkt, decFrame, [], true); await pushAudio(fr, true); }
     await lib.av_write_trailer(oc);
-    ended = true;
-    drain();
-    log(`remux fini: ${(written/1048576).toFixed(2)} Mo écrits vers MediaSource`);
+    ended = true; drain();
+    log(`remux fini: vidéo=${vc} pkts, audio=${ac} pkts, ${(written / 1048576).toFixed(2)} Mo → MediaSource (lectures plage=${reads})`);
 
     let settled = false;
-    const onOk = () => { if (settled) return; settled = true;
-      setStatus(`<span class="ok">✅ LECTURE</span> — ${vid.videoWidth}×${vid.videoHeight}, durée ${vid.duration ? vid.duration.toFixed(1)+'s' : '?'}. Teste « ⏩ Sauter à 6 s ».`);
+    const onOk = () => {
+      if (settled) return; settled = true;
+      setStatus(`<span class="ok">✅ LECTURE</span> — ${vid.videoWidth}×${vid.videoHeight}, durée ${vid.duration ? vid.duration.toFixed(1) + 's' : '?'}. Teste « ⏩ Sauter à 6 s ».`);
       document.getElementById('seek').disabled = false;
-      vid.play().catch(()=>{});
+      vid.play().catch(() => {});
     };
     vid.addEventListener('loadedmetadata', onOk);
     vid.addEventListener('loadeddata', onOk);
     vid.addEventListener('canplay', onOk);
     vid.onerror = () => { if (settled) return; settled = true;
-      setStatus(`<span class="no">✖ &lt;video&gt; refuse le flux</span> (code ${vid.error?.code}, ${vid.error?.message||''}) — voir journal`); };
+      setStatus(`<span class="no">✖ &lt;video&gt; refuse le flux</span> (code ${vid.error?.code}, ${vid.error?.message || ''}) — voir journal`); };
     setTimeout(() => { if (settled) return;
       if (vid.readyState >= 1 && vid.duration > 0) onOk();
       else setStatus('<span class="no">✖ pas de lecture</span> — colle le journal stp'); }, 12000);
   } catch (e) {
-    let desc;
-    if (e && (e.stack || e.message)) desc = e.stack || e.message;
-    else { let j; try { j = JSON.stringify(e); } catch (_) { j = '?'; } desc = `type=${typeof e} val=${String(e)} json=${j} code=${e && e.code}`; }
+    const desc = (e && (e.stack || e.message)) ? (e.stack || e.message) : String(e);
     setStatus(`<span class="no">✖ erreur</span> : ${desc}`);
     log('ERREUR: ' + desc);
   } finally {
@@ -175,11 +247,11 @@ async function streamRemux(id, mime) {
 }
 
 document.querySelectorAll('button[data-id]').forEach(b =>
-  b.addEventListener('click', () => { logEl.textContent = 'Journal…'; streamRemux(b.dataset.id, b.dataset.mime); }));
+  b.addEventListener('click', () => { logEl.textContent = 'Journal…'; streamRemux(b.dataset.id); }));
 document.getElementById('seek').addEventListener('click', () => {
   const t = performance.now();
   vid.currentTime = 6;
-  vid.addEventListener('seeked', () => log(`seek -> 6s OK en ${Math.round(performance.now()-t)} ms (position ${vid.currentTime.toFixed(2)}s)`), { once: true });
+  vid.addEventListener('seeked', () => log(`seek → 6s OK en ${Math.round(performance.now() - t)} ms (position ${vid.currentTime.toFixed(2)}s)`), { once: true });
 });
 </script>
 </body>
