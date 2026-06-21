@@ -1228,7 +1228,18 @@ const CloudAdapter = (() => {
                 // HEVC/AC3 channels can't decode in the browser and fall back to
                 // the gateway transcode: the player flags the channel and re-asks
                 // with liveForceTranscode=1.
+                // OPT-IN (default OFF): only worth it for providers that allow
+                // multiple concurrent connections / serve open HLS. Single-slot
+                // providers (one connection at a time) refuse the relay's .m3u8
+                // while the gateway holds the slot, so it just wastes a connection
+                // and falls back. Enable per deployment with
+                // localStorage['norva-live-hls-relay']='1' once a provider is known
+                // to serve open HLS.
+                const liveRelayHlsOptIn = (() => {
+                    try { return localStorage.getItem('norva-live-hls-relay') === '1'; } catch (_) { return false; }
+                })();
                 if (type === 'live'
+                    && liveRelayHlsOptIn
                     && !hasNativeOrLocal
                     && query.get('liveForceTranscode') !== '1'
                     && query.get('mode') !== 'transcode') {
