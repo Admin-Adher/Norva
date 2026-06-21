@@ -2733,6 +2733,10 @@ class ChannelList {
         if (!channel) return;
         const selectSeq = ++this._selectRequestSeq;
 
+        // Stamp the zap start (user click) so the player can measure the full
+        // perceived switch latency (click -> first frame) in telemetry.
+        try { if (window.app?.player) window.app.player._liveZapStartedAt = Date.now(); } catch (_) {}
+
         this.currentChannel = channel;
         this.currentRenderId = dataset.renderId; // Track which visual instance is active
         this.currentRenderGroup = dataset.renderGroup; // Track which group the selection came from

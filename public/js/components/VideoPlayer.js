@@ -1289,6 +1289,7 @@ class VideoPlayer {
         const cloudPlaybackSessionId = channel.cloudPlaybackSessionId || channel.playbackSessionId || null;
         this.currentChannel = channel;
         this._playbackStatusOkReported = false;
+        this._liveErrorReported = false;
         this.applyQualityGroup(channel);
         this._livePlayRequestedAt = Date.now();
         try { this._sendLiveEvent('play_requested'); } catch (_) {}
@@ -1722,9 +1723,15 @@ class VideoPlayer {
         this._gatewayRecreateCount = 0;
         this._gatewayRecreateKey = null;
         // Live launch telemetry: first usable frame (once per channel).
+        // timeToFirstFrameMs = hls attach -> first frame (decode part).
+        // zapMs (metadata) = user click -> first frame (full perceived zap,
+        // including session creation + provider slot), so we can measure and
+        // target channel-switch latency.
         try {
             const ttff = this._livePlayRequestedAt ? Math.max(1, Date.now() - this._livePlayRequestedAt) : undefined;
-            this._sendLiveEvent('first_frame', { timeToFirstFrameMs: ttff });
+            const zapMs = this._liveZapStartedAt ? Math.max(1, Date.now() - this._liveZapStartedAt) : undefined;
+            this._sendLiveEvent('first_frame', { timeToFirstFrameMs: ttff, metadata: { zapMs } });
+            this._liveZapStartedAt = null;
         } catch (_) {}
         const target = this.getPlaybackHealthTarget();
         if (target && window.PlaybackHealth?.report) {
@@ -1789,7 +1796,24 @@ class VideoPlayer {
         if (this._clearingMedia || this.hasCurrentMedia()) return;
         if (!this.currentUrl || /empty src/i.test(String(reason))) return;
         if (this.tryCurrentVariantFallback(reason)) return;
-        if (!this.shouldReportPlaybackBroken(reason)) {
+
+        // Record EVERY live failure once per play attempt so codec-broken channels
+        // become measurable — including the ones we deliberately don't flag as
+        // "broken" (transient gateway). The code separates codec/decode failures
+        // (the real broken-channel signal) from provider/network ones.
+        const willMarkBroken = this.shouldReportPlaybackBroken(reason);
+        if (this.isLivePlayback() && !this._liveErrorReported) {
+            this._liveErrorReported = true;
+            try {
+                this._sendLiveEvent('playback_error', {
+                    errorCode: 'LIVE_' + this.classifyLiveError(reason),
+                    errorMessage: String(reason || '').slice(0, 240),
+                    metadata: { markedBroken: willMarkBroken }
+                });
+            } catch (_) {}
+        }
+
+        if (!willMarkBroken) {
             console.warn('[Player] Live startup failed without marking channel broken:', reason);
             return;
         }
@@ -1797,12 +1821,19 @@ class VideoPlayer {
         if (target && window.PlaybackHealth?.report) {
             PlaybackHealth.report({ ...target, status: 'broken', reason }).catch(() => { });
         }
-        try {
-            this._sendLiveEvent('playback_error', {
-                errorCode: 'LIVE_' + (this.isProviderTransientPlaybackError(reason) ? 'provider' : 'playback'),
-                errorMessage: String(reason || '').slice(0, 240)
-            });
-        } catch (_) {}
+    }
+
+    // Classify a live playback failure for telemetry. "codec" = the gateway served
+    // a playlist but the browser can't decode it (HEVC copied through, unsupported
+    // audio, incompatible codecs) — the genuine broken-channel case. "provider" =
+    // upstream/slot/auth/network. "playback" = anything else.
+    classifyLiveError(reason = '') {
+        const r = String(reason || '').toLowerCase();
+        if (/bufferappend|bufferadd|appendbuffer|incompatiblecodec|fragpars|parsing|decode|mediaerror|media_error|buffernospace|codec|demux/.test(r)) {
+            return 'codec';
+        }
+        if (this.isProviderTransientPlaybackError(reason)) return 'provider';
+        return 'playback';
     }
 
     isLivePlayback(channel = this.currentChannel) {
