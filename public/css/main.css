@@ -6682,6 +6682,22 @@ kbd {
   flex: 0 0 auto;
 }
 
+/* Skip-to-live icon — only shown in the behind (button) state. */
+.watch-live-badge .live-badge-icon {
+  display: none;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+}
+
+.watch-live-badge.behind .live-badge-icon {
+  display: inline-flex;
+}
+
+.watch-live-badge.behind .live-badge-dot {
+  display: none;
+}
+
 /* At the live edge: broadcast-red pulsing dot, not actionable */
 .watch-live-badge.is-live .live-badge-dot {
   background: #ff3b30;

@@ -10,7 +10,7 @@
   <title>Norva | Cloud media player</title>
   <meta name="description" content="Organize your compatible media source and sync playback across your screens.">
   <link rel="icon" type="image/png" href="/favicon.png">
-  <link rel="stylesheet" href="/css/main.css?v=36">
+  <link rel="stylesheet" href="/css/main.css?v=37">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@800&display=swap"
@@ -204,9 +204,15 @@
                       </svg>
                     </button>
 
-                    <!-- Live status / "back to live" badge (live TV only) -->
+                    <!-- Live status / "back to live" badge (live TV only).
+                         At the edge: red dot + EN DIRECT. Behind: skip-to-live
+                         icon + delay, click to re-launch at the real-time edge. -->
                     <button class="watch-live-badge hidden" id="player-live-badge" type="button" title="En direct">
                       <span class="live-badge-dot"></span>
+                      <svg class="live-badge-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
+                        fill="currentColor" aria-hidden="true">
+                        <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" />
+                      </svg>
                       <span class="live-badge-text">EN DIRECT</span>
                     </button>
 
@@ -1493,7 +1499,7 @@
   <script src="/js/utils/standalone.js?v=3"></script>
   <script src="/js/utils/channelGrouping.js?v=4"></script>
   <script src="/js/components/MultiSelect.js?v=1"></script>
-  <script src="/js/components/VideoPlayer.js?v=30"></script>
+  <script src="/js/components/VideoPlayer.js?v=31"></script>
   <script src="/js/components/ChannelList.js?v=35"></script>
   <script src="/js/components/SourceManager.js?v=19"></script>
   <script src="/js/components/EpgGuide.js?v=10"></script>

@@ -1894,17 +1894,44 @@ class VideoPlayer {
         return r ? `${m} min ${r} s` : `${m} min`;
     }
 
-    // Seek to the live edge and resume real-time playback. Used by the badge
-    // click and the X-min-after-pause auto-reset.
+    // Return to the real-time live edge. Used by the badge click and the
+    // X-min-after-pause auto-reset.
+    //
+    // Preferred path: re-launch the current channel exactly like a channel
+    // switch (ChannelList.selectChannel). A fresh session restarts at the
+    // real-time edge with no stale buffer, and — crucially — it reuses the
+    // slot-safe prepareLiveSwitch teardown, so it can't reintroduce the
+    // single-slot provider churn. Falls back to an in-buffer seek only when the
+    // channel list isn't reachable (detached player).
     jumpToLive() {
         if (!this.isLivePlayback() || !this.video) return;
+        // Cancel the auto-snap and clear offset bookkeeping up-front.
+        this._livePausedAt = 0;
+        this._liveBehindBaseSeconds = 0;
+        if (this._liveAutoSnapTimer) { clearTimeout(this._liveAutoSnapTimer); this._liveAutoSnapTimer = null; }
+
+        const ch = this.currentChannel;
+        const list = window.app?.channelList;
+        if (ch && ch.id != null && list && typeof list.selectChannel === 'function') {
+            // Show the re-launch as a normal load until the fresh session's first
+            // frame (which re-arms the badge at the edge via markPlaybackUsable).
+            this.loadingSpinner?.classList.add('show');
+            try {
+                Promise.resolve(list.selectChannel({
+                    channelId: ch.id,
+                    sourceId: String(ch.sourceId ?? ch.source_id ?? ''),
+                    streamId: ch.streamId || ch.stream_id || '',
+                    sourceType: ch.sourceType
+                })).catch(() => {});
+                return;
+            } catch (_) { /* fall through to in-buffer seek */ }
+        }
+
+        // Fallback: seek within the available window to the live edge.
         const edge = this.liveEdgePosition();
         if (edge != null) {
             try { this.video.currentTime = Math.max(0, edge - 0.5); } catch (_) {}
         }
-        this._livePausedAt = 0;
-        this._liveBehindBaseSeconds = 0;
-        if (this._liveAutoSnapTimer) { clearTimeout(this._liveAutoSnapTimer); this._liveAutoSnapTimer = null; }
         try { this.video.play?.().catch(() => {}); } catch (_) {}
         this._updateLiveSyncBadge();
     }
