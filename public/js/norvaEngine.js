@@ -119,7 +119,7 @@
     av1: ['av01.0.08M.08'],
   };
 
-  const ENGINE_VERSION = 14;
+  const ENGINE_VERSION = 15;
 
   class NorvaEngine {
     constructor(videoEl, opts = {}) {
@@ -134,6 +134,7 @@
       // The muxer re-bases output to 0; _tsAnchor is the real time muxer-0 maps to,
       // applied via SourceBuffer.timestampOffset so seeks/resume land on target.
       this._tsAnchor = 0; this._tsApplied = 0; this._firstVpktPending = false;
+      this._skipSeekTo = null;    // suppress the self-induced seeking event on resume
       this.lib = null;
       this.url = null;
       this.size = 0;
@@ -195,6 +196,9 @@
         // PTS by _setVideoDts) so data lands at startTime, not at 0.
         this._tsAnchor = startTime; this._firstVpktPending = true;
         await this._seekDemuxer(startTime);
+        // We've positioned the demuxer/pump; ignore the seeking event this fires.
+        this._skipSeekTo = startTime;
+        setTimeout(() => { if (this._skipSeekTo === startTime) this._skipSeekTo = null; }, 5000);
         try { this.video.currentTime = startTime; } catch (_) {}
       }
       this.timings.seekMs = Math.round(performance.now() - m);
@@ -806,6 +810,9 @@
 
     _handleSeeking() {
       const t = this.video.currentTime;
+      // Ignore the self-induced seeking event from the engine's own resume
+      // currentTime set (load already positioned the demuxer + pump there).
+      if (this._skipSeekTo != null && Math.abs(t - this._skipSeekTo) < 1.5) { this._skipSeekTo = null; return; }
       if (!this._isBuffered(t)) this.seek(t);
     }
   }

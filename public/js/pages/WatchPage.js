@@ -3449,8 +3449,12 @@ class WatchPage {
         // Handle resumption
         if (this.resumeTime > 0 && this.video && this.streamStartOffset === 0) {
             const duration = this.getValidDuration();
-            // Only resume if not near the end (95%)
-            if (!duration || this.resumeTime < duration * 0.95) {
+            // The browser engine already resumes to startTime inside load(); setting
+            // currentTime again here just triggers a redundant re-seek. Skip it.
+            if (this.currentPlaybackMode === 'engine') {
+                // engine handled the resume itself
+            } else if (!duration || this.resumeTime < duration * 0.95) {
+                // Only resume if not near the end (95%)
                 console.log(`[WatchPage] Resuming at ${this.resumeTime}s`);
                 try {
                     this.video.currentTime = this.resumeTime;
