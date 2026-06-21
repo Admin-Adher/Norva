@@ -46,6 +46,7 @@ final class DownloadStore {
         String mediaIv = "";
         int durationSeconds = 0;
         long createdAt = System.currentTimeMillis();
+        long queueOrder = 0; // lower = earlier in the queue (0 -> fall back to createdAt)
 
         JSONObject toJson() throws Exception {
             JSONObject o = new JSONObject();
@@ -69,6 +70,7 @@ final class DownloadStore {
             o.put("mediaIv", mediaIv);
             o.put("durationSeconds", durationSeconds);
             o.put("createdAt", createdAt);
+            o.put("queueOrder", queueOrder);
             return o;
         }
 
@@ -94,6 +96,7 @@ final class DownloadStore {
             it.mediaIv = o.optString("mediaIv");
             it.durationSeconds = o.optInt("durationSeconds");
             it.createdAt = o.optLong("createdAt", System.currentTimeMillis());
+            it.queueOrder = o.optLong("queueOrder", it.createdAt);
             return it;
         }
     }

@@ -435,7 +435,7 @@ public class MainActivity extends Activity {
 
         @android.webkit.JavascriptInterface
         public void deleteDownload(final String id) {
-            removeDownload(id);
+            DownloadService.requestCancel(MainActivity.this, id);
         }
 
         /** Open the native Downloads screen. */
@@ -470,10 +470,6 @@ public class MainActivity extends Activity {
                 existing.state = "queued";
                 existing.error = "";
                 DownloadStore.put(this, existing);
-                if ((existing.posterFile == null || existing.posterFile.isEmpty())
-                        && existing.posterUrl != null && !existing.posterUrl.isEmpty()) {
-                    downloadPosterAsync(id, existing.posterUrl);
-                }
                 ensureNotifPermission();
                 startDownloadService(id);
                 return;
@@ -492,6 +488,7 @@ public class MainActivity extends Activity {
             it.durationSeconds = o.optInt("durationSeconds", 0);
             it.state = "queued";
             it.createdAt = System.currentTimeMillis();
+            it.queueOrder = it.createdAt; // FIFO by default; reorder edits this
 
             byte[] dataKey = DownloadCrypto.newDataKey();
             byte[] mediaIv = DownloadCrypto.newMediaIv();
@@ -501,7 +498,7 @@ public class MainActivity extends Activity {
             it.mediaIv = DownloadCrypto.b64(mediaIv);
 
             DownloadStore.put(this, it);
-            if (!it.posterUrl.isEmpty()) downloadPosterAsync(id, it.posterUrl);
+            // The download service fetches the poster (single owner -> no race).
             ensureNotifPermission();
             startDownloadService(id);
         } catch (Exception ignored) {

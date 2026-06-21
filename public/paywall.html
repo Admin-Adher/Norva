@@ -196,10 +196,28 @@
             : await window.NorvaCloud.entitlements.get();
           window.NorvaEntitlement = decision;
           if (decision?.allowed !== false) {
+            const bounced = Boolean(sessionStorage.getItem('norva-entitlement-denied'));
             sessionStorage.removeItem('norva-entitlement-denied');
             setStatus(decision?.message || 'Norva access is active.', false);
             primaryBtn.textContent = 'Continue to Norva';
             primaryBtn.onclick = () => { window.location.href = returnTo || '/'; };
+            // Gate 0 / observe: access IS granted. If the app bounced us here
+            // involuntarily (a denial flag was set), don't stop the user with an
+            // interstitial — continue straight through. A small loop guard keeps
+            // a misbehaving API from causing a redirect storm. When the user
+            // opened this page on purpose (no denial flag, e.g. Manage plan), we
+            // show it normally.
+            if (bounced && returnTo && !/paywall/i.test(returnTo)) {
+              let n = 0;
+              try { n = Number(sessionStorage.getItem('norva-paywall-auto') || '0'); } catch (_) { }
+              if (n < 2) {
+                try { sessionStorage.setItem('norva-paywall-auto', String(n + 1)); } catch (_) { }
+                window.location.replace(returnTo);
+                return;
+              }
+            } else {
+              try { sessionStorage.removeItem('norva-paywall-auto'); } catch (_) { }
+            }
             return;
           }
           showDenied(decision);

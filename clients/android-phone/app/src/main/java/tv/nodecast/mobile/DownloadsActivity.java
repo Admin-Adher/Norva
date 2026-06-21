@@ -1,6 +1,7 @@
 package tv.nodecast.mobile;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Intent;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
@@ -19,19 +20,23 @@ import android.view.ViewOutlineProvider;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
+import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
 
 import java.io.File;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 /**
- * Native "Downloads" screen — the offline library of saved movies/episodes,
- * styled to match the Norva web app (dark canvas, rounded cards, blue accent).
- * Plays a finished download through the encrypted player (no network), shows
- * live progress for in-flight ones, and deletes media + poster. Rebuilt on a
- * light poll so progress advances while visible.
+ * Native "Downloads" screen — the offline library, styled to match the Norva
+ * web app. Movies show as cards; episodes are grouped under their show. Each
+ * item exposes the controls valid for its state (play / pause / resume / move /
+ * retry / cancel-delete). A header shows storage use, the active download, and a
+ * Wi-Fi-only toggle. Rebuilt on a light poll only when something changes.
  */
 public final class DownloadsActivity extends Activity {
 
@@ -47,12 +52,15 @@ public final class DownloadsActivity extends Activity {
     private LinearLayout list;
     private TextView empty;
     private TextView summary;
+    private TextView active;
+    private String lastSignature = "";
+
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable poll = new Runnable() {
         @Override
         public void run() {
-            render();
-            handler.postDelayed(this, 1200);
+            renderIfChanged();
+            handler.postDelayed(this, 1500);
         }
     };
 
@@ -69,42 +77,65 @@ public final class DownloadsActivity extends Activity {
         container.setOrientation(LinearLayout.VERTICAL);
         container.setPadding(dp(18), dp(30), dp(18), dp(24));
 
-        // Header: title + summary on the left, Close pill on the right.
+        // Header row: title + Close.
         LinearLayout header = new LinearLayout(this);
         header.setOrientation(LinearLayout.HORIZONTAL);
         header.setGravity(Gravity.CENTER_VERTICAL);
-
-        LinearLayout titleCol = new LinearLayout(this);
-        titleCol.setOrientation(LinearLayout.VERTICAL);
         TextView title = new TextView(this);
         title.setText("Downloads");
         title.setTextColor(TEXT);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 26);
-        titleCol.addView(title);
-        summary = new TextView(this);
-        summary.setTextColor(MUTED);
-        summary.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
-        summary.setPadding(0, dp(2), 0, 0);
-        titleCol.addView(summary);
-        header.addView(titleCol, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-
+        header.addView(title, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         TextView close = pill("Close", SUBTLE, TEXT);
         close.setOnClickListener(v -> finish());
         header.addView(close);
         container.addView(header);
 
+        summary = new TextView(this);
+        summary.setTextColor(MUTED);
+        summary.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        summary.setPadding(0, dp(3), 0, 0);
+        container.addView(summary);
+
+        active = new TextView(this);
+        active.setTextColor(Color.parseColor("#cdd9ff"));
+        active.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        active.setPadding(0, dp(2), 0, 0);
+        active.setVisibility(View.GONE);
+        container.addView(active);
+
+        // Controls row: Wi-Fi-only switch + Clear all.
+        LinearLayout controls = new LinearLayout(this);
+        controls.setOrientation(LinearLayout.HORIZONTAL);
+        controls.setGravity(Gravity.CENTER_VERTICAL);
+        controls.setPadding(0, dp(14), 0, dp(6));
+        Switch wifi = new Switch(this);
+        wifi.setText("Wi-Fi only");
+        wifi.setTextColor(TEXT);
+        wifi.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        wifi.setChecked(DownloadService.getWifiOnly(this));
+        wifi.setOnCheckedChangeListener((btn, checked) -> {
+            DownloadService.setWifiOnly(this, checked);
+            renderNow();
+        });
+        controls.addView(wifi, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        TextView clearAll = pill("Clear all", SUBTLE, MUTED);
+        clearAll.setOnClickListener(v -> confirmClearAll());
+        controls.addView(clearAll);
+        container.addView(controls);
+
         empty = new TextView(this);
-        empty.setText("No downloads yet.\nTap Download on a movie to watch it offline.");
+        empty.setText("No downloads yet.\nTap Download on a movie or episode to watch it offline.");
         empty.setTextColor(MUTED);
         empty.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
         empty.setGravity(Gravity.CENTER);
-        empty.setPadding(0, dp(64), 0, 0);
+        empty.setPadding(0, dp(56), 0, 0);
         container.addView(empty);
 
         list = new LinearLayout(this);
         list.setOrientation(LinearLayout.VERTICAL);
-        list.setPadding(0, dp(16), 0, 0);
+        list.setPadding(0, dp(14), 0, 0);
         container.addView(list);
 
         scroll.addView(container);
@@ -114,6 +145,7 @@ public final class DownloadsActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        lastSignature = ""; // force a fresh paint
         handler.post(poll);
     }
 
@@ -123,112 +155,227 @@ public final class DownloadsActivity extends Activity {
         handler.removeCallbacks(poll);
     }
 
-    private void render() {
+    // ---- Rendering ----
+
+    private void renderNow() {
+        lastSignature = "";
+        renderIfChanged();
+    }
+
+    private void renderIfChanged() {
         List<DownloadStore.Item> items = DownloadStore.all(this);
+        String sig = signature(items);
+        if (sig.equals(lastSignature)) return;
+        lastSignature = sig;
+        render(items);
+    }
+
+    private String signature(List<DownloadStore.Item> items) {
+        StringBuilder sb = new StringBuilder();
+        for (DownloadStore.Item it : items) {
+            sb.append(it.id).append(it.state).append(it.downloadedBytes)
+              .append(it.posterFile == null ? "" : "p").append(';');
+        }
+        return sb.toString();
+    }
+
+    private void render(List<DownloadStore.Item> items) {
         empty.setVisibility(items.isEmpty() ? View.VISIBLE : View.GONE);
 
-        int done = 0;
-        long bytes = 0;
+        int done = 0, remaining = 0;
+        String activeTitle = null;
+        int activePct = 0;
         for (DownloadStore.Item it : items) {
-            if ("done".equals(it.state)) {
-                done++;
-                bytes += it.totalBytes;
+            if ("done".equals(it.state)) done++;
+            else remaining++;
+            if ("downloading".equals(it.state)) {
+                activeTitle = it.title;
+                activePct = it.totalBytes > 0 ? (int) (it.downloadedBytes * 100 / it.totalBytes) : 0;
             }
         }
         summary.setText(items.isEmpty() ? ""
-                : done + (done == 1 ? " title" : " titles") + " · " + sizeStr(bytes));
+                : done + (done == 1 ? " title · " : " titles · ") + sizeStr(usedBytes())
+                  + " used · " + sizeStr(freeBytes()) + " free");
+        if (activeTitle != null) {
+            active.setVisibility(View.VISIBLE);
+            active.setText("Downloading " + activeTitle + " — " + activePct + "%"
+                    + (remaining > 1 ? "  ·  " + (remaining - 1) + " in queue" : ""));
+        } else if (remaining > 0) {
+            active.setVisibility(View.VISIBLE);
+            boolean wifiWait = DownloadService.getWifiOnly(this) && !onWifiNow();
+            active.setText(remaining + " in queue" + (wifiWait ? "  ·  waiting for Wi-Fi" : ""));
+        } else {
+            active.setVisibility(View.GONE);
+        }
 
         list.removeAllViews();
-        for (DownloadStore.Item it : items) list.addView(card(it));
+
+        // Movies as cards; episodes grouped under their show (preserve order).
+        Map<String, List<DownloadStore.Item>> shows = new LinkedHashMap<>();
+        for (DownloadStore.Item it : items) {
+            if ("episode".equals(it.itemType)) {
+                String key = it.title == null ? "" : it.title;
+                List<DownloadStore.Item> g = shows.get(key);
+                if (g == null) { g = new ArrayList<>(); shows.put(key, g); }
+                g.add(it);
+            } else {
+                list.addView(movieCard(it));
+            }
+        }
+        for (Map.Entry<String, List<DownloadStore.Item>> e : shows.entrySet()) {
+            list.addView(showCard(e.getKey(), e.getValue()));
+        }
     }
 
-    private View card(final DownloadStore.Item it) {
-        LinearLayout card = new LinearLayout(this);
+    // ---- Movie card ----
+
+    private View movieCard(final DownloadStore.Item it) {
+        LinearLayout card = card();
         card.setOrientation(LinearLayout.HORIZONTAL);
         card.setGravity(Gravity.CENTER_VERTICAL);
-        card.setBackground(roundedStroke(CARD, CARD_BORDER, 14));
-        card.setPadding(dp(12), dp(12), dp(12), dp(12));
-        LinearLayout.LayoutParams cardLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        cardLp.bottomMargin = dp(12);
-        card.setLayoutParams(cardLp);
 
-        ImageView poster = new ImageView(this);
-        poster.setScaleType(ImageView.ScaleType.CENTER_CROP);
-        poster.setBackground(rounded(Color.parseColor("#1d1d27"), 10));
-        roundCorners(poster, dp(10));
-        String posterPath = posterPathFor(it);
-        if (posterPath != null) {
-            try {
-                poster.setImageBitmap(BitmapFactory.decodeFile(posterPath));
-            } catch (Exception ignored) { }
-        }
-        LinearLayout.LayoutParams plp = new LinearLayout.LayoutParams(dp(56), dp(82));
-        plp.rightMargin = dp(14);
-        card.addView(poster, plp);
+        card.addView(posterView(it, 56, 82));
 
         LinearLayout mid = new LinearLayout(this);
         mid.setOrientation(LinearLayout.VERTICAL);
-        TextView t = new TextView(this);
-        t.setText(it.title);
-        t.setTextColor(TEXT);
-        t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15.5f);
-        t.setTypeface(Typeface.DEFAULT_BOLD);
-        t.setMaxLines(2);
-        mid.addView(t);
-        if (it.subtitle != null && !it.subtitle.isEmpty()) {
-            TextView sub = new TextView(this);
-            sub.setText(it.subtitle);
-            sub.setTextColor(MUTED);
-            sub.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f);
-            sub.setMaxLines(1);
-            sub.setPadding(0, dp(2), 0, 0);
-            mid.addView(sub);
-        }
-        TextView s = new TextView(this);
-        s.setText(statusText(it));
-        s.setTextColor("failed".equals(it.state) ? DANGER : MUTED);
-        s.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f);
-        s.setPadding(0, dp(4), 0, 0);
-        mid.addView(s);
+        mid.addView(titleText(it.title));
+        mid.addView(statusText(it));
         card.addView(mid, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
-        if ("done".equals(it.state)) {
-            TextView play = pill("Play", ACCENT, TEXT);
-            play.setOnClickListener(v -> playLocal(it));
-            card.addView(play);
-        } else if ("failed".equals(it.state) && it.url != null && !it.url.isEmpty()) {
-            TextView retry = pill("Retry", ACCENT, TEXT);
-            retry.setOnClickListener(v -> retryItem(it));
-            card.addView(retry);
-        }
-        TextView del = pill("Delete", SUBTLE, MUTED);
-        LinearLayout.LayoutParams delLp = (LinearLayout.LayoutParams) del.getLayoutParams();
-        delLp.leftMargin = dp(8);
-        del.setLayoutParams(delLp);
-        del.setOnClickListener(v -> deleteItem(it));
-        card.addView(del);
-
+        LinearLayout actions = new LinearLayout(this);
+        actions.setOrientation(LinearLayout.HORIZONTAL);
+        addActions(actions, it);
+        card.addView(actions);
         return card;
     }
 
-    private String statusText(DownloadStore.Item it) {
+    // ---- Show (series) group card ----
+
+    private View showCard(String showTitle, List<DownloadStore.Item> episodes) {
+        LinearLayout card = card();
+        card.setOrientation(LinearLayout.VERTICAL);
+
+        LinearLayout head = new LinearLayout(this);
+        head.setOrientation(LinearLayout.HORIZONTAL);
+        head.setGravity(Gravity.CENTER_VERTICAL);
+        head.addView(posterView(episodes.get(0), 48, 70));
+        LinearLayout headMid = new LinearLayout(this);
+        headMid.setOrientation(LinearLayout.VERTICAL);
+        headMid.addView(titleText(showTitle));
+        TextView count = new TextView(this);
+        count.setText(episodes.size() + (episodes.size() == 1 ? " episode" : " episodes"));
+        count.setTextColor(MUTED);
+        count.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f);
+        count.setPadding(0, dp(3), 0, 0);
+        headMid.addView(count);
+        head.addView(headMid, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        card.addView(head);
+
+        for (final DownloadStore.Item ep : episodes) {
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setPadding(0, dp(10), 0, 0);
+
+            LinearLayout mid = new LinearLayout(this);
+            mid.setOrientation(LinearLayout.VERTICAL);
+            TextView label = new TextView(this);
+            label.setText(ep.subtitle == null || ep.subtitle.isEmpty() ? "Episode" : ep.subtitle);
+            label.setTextColor(TEXT);
+            label.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+            label.setMaxLines(1);
+            mid.addView(label);
+            mid.addView(statusText(ep));
+            row.addView(mid, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+            LinearLayout actions = new LinearLayout(this);
+            actions.setOrientation(LinearLayout.HORIZONTAL);
+            addActions(actions, ep);
+            row.addView(actions);
+            card.addView(row);
+        }
+        return card;
+    }
+
+    /** Add the control pills valid for this item's state into {@code actions}. */
+    private void addActions(LinearLayout actions, final DownloadStore.Item it) {
         switch (it.state) {
             case "done":
-                return sizeStr(it.totalBytes) + " · Saved";
+                actions.addView(pillSpaced("Play", ACCENT, TEXT, v -> playLocal(it)));
+                actions.addView(pillSpaced("Delete", SUBTLE, MUTED, v -> confirmDelete(it)));
+                break;
             case "downloading":
-                int pct = it.totalBytes > 0 ? (int) (it.downloadedBytes * 100 / it.totalBytes) : 0;
-                return it.totalBytes > 0
-                        ? "Downloading " + pct + "% · " + sizeStr(it.downloadedBytes) + " / " + sizeStr(it.totalBytes)
-                        : "Downloading…";
+                actions.addView(pillSpaced("Pause", SUBTLE, TEXT, v -> {
+                    DownloadService.requestPause(this, it.id);
+                    renderNow();
+                }));
+                actions.addView(pillSpaced("Cancel", SUBTLE, MUTED, v -> confirmDelete(it)));
+                break;
+            case "paused":
+                actions.addView(pillSpaced("Resume", ACCENT, TEXT, v -> {
+                    DownloadService.requestResume(this, it.id);
+                    renderNow();
+                }));
+                actions.addView(pillSpaced("Cancel", SUBTLE, MUTED, v -> confirmDelete(it)));
+                break;
             case "queued":
-                return "Queued…";
+                actions.addView(pillSpaced("▲", SUBTLE, TEXT, v -> {
+                    DownloadService.moveInQueue(this, it.id, -1);
+                    renderNow();
+                }));
+                actions.addView(pillSpaced("▼", SUBTLE, TEXT, v -> {
+                    DownloadService.moveInQueue(this, it.id, 1);
+                    renderNow();
+                }));
+                actions.addView(pillSpaced("Cancel", SUBTLE, MUTED, v -> confirmDelete(it)));
+                break;
             case "failed":
-                return "Failed" + (it.error != null && !it.error.isEmpty() ? " · " + it.error : "");
+                if (it.url != null && !it.url.isEmpty()) {
+                    actions.addView(pillSpaced("Retry", ACCENT, TEXT, v -> {
+                        DownloadService.requestResume(this, it.id);
+                        renderNow();
+                    }));
+                }
+                actions.addView(pillSpaced("Delete", SUBTLE, MUTED, v -> confirmDelete(it)));
+                break;
             default:
-                return it.state;
+                actions.addView(pillSpaced("Delete", SUBTLE, MUTED, v -> confirmDelete(it)));
         }
     }
+
+    private TextView statusText(DownloadStore.Item it) {
+        TextView s = new TextView(this);
+        s.setTextColor("failed".equals(it.state) ? DANGER : MUTED);
+        s.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f);
+        s.setPadding(0, dp(4), 0, 0);
+        switch (it.state) {
+            case "done":
+                s.setText(sizeStr(it.totalBytes) + " · Saved");
+                break;
+            case "downloading": {
+                int pct = it.totalBytes > 0 ? (int) (it.downloadedBytes * 100 / it.totalBytes) : 0;
+                s.setText(it.totalBytes > 0
+                        ? "Downloading " + pct + "% · " + sizeStr(it.downloadedBytes) + " / " + sizeStr(it.totalBytes)
+                        : "Downloading…");
+                break;
+            }
+            case "paused":
+                s.setText("Paused · " + sizeStr(it.downloadedBytes)
+                        + (it.totalBytes > 0 ? " / " + sizeStr(it.totalBytes) : ""));
+                break;
+            case "queued":
+                s.setText("Queued");
+                break;
+            case "failed":
+                s.setText("Failed" + (it.error != null && !it.error.isEmpty() ? " · " + it.error : ""));
+                break;
+            default:
+                s.setText(it.state);
+        }
+        return s;
+    }
+
+    // ---- Actions ----
 
     private void playLocal(DownloadStore.Item it) {
         File f = new File(it.filePath);
@@ -238,7 +385,8 @@ public final class DownloadsActivity extends Activity {
         }
         Intent i = new Intent(this, PlayerActivity.class);
         i.putExtra(PlayerActivity.EXTRA_URL, Uri.fromFile(f).toString());
-        i.putExtra(PlayerActivity.EXTRA_TITLE, it.title);
+        i.putExtra(PlayerActivity.EXTRA_TITLE, it.subtitle != null && !it.subtitle.isEmpty()
+                ? it.title + " — " + it.subtitle : it.title);
         i.putExtra(PlayerActivity.EXTRA_LOCAL, true);
         i.putExtra(PlayerActivity.EXTRA_WRAPPED_KEY, it.wrappedKey);
         i.putExtra(PlayerActivity.EXTRA_KEY_IV, it.keyIv);
@@ -250,69 +398,140 @@ public final class DownloadsActivity extends Activity {
         startActivity(i);
     }
 
-    private void retryItem(DownloadStore.Item it) {
-        it.state = "queued";
-        it.error = "";
-        DownloadStore.put(this, it);
-        Intent svc = new Intent(this, DownloadService.class);
-        svc.setAction(DownloadService.ACTION_ENQUEUE);
-        svc.putExtra(DownloadService.EXTRA_ID, it.id);
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-            startForegroundService(svc);
-        } else {
-            startService(svc);
-        }
-        render();
+    private void confirmDelete(final DownloadStore.Item it) {
+        boolean finished = "done".equals(it.state) || "failed".equals(it.state);
+        String label = it.subtitle != null && !it.subtitle.isEmpty()
+                ? it.title + " — " + it.subtitle : it.title;
+        new AlertDialog.Builder(this)
+                .setTitle(finished ? "Delete download?" : "Cancel download?")
+                .setMessage((finished ? "Delete \"" : "Cancel and remove \"") + label
+                        + "\"? This frees the storage it uses.")
+                .setPositiveButton(finished ? "Delete" : "Cancel download", (d, w) -> {
+                    DownloadService.requestCancel(this, it.id);
+                    Toast.makeText(this, "Removed", Toast.LENGTH_SHORT).show();
+                    renderNow();
+                })
+                .setNegativeButton("Keep", null)
+                .show();
     }
 
-    private void deleteItem(DownloadStore.Item it) {
+    private void confirmClearAll() {
+        List<DownloadStore.Item> items = DownloadStore.all(this);
+        if (items.isEmpty()) return;
+        new AlertDialog.Builder(this)
+                .setTitle("Delete all downloads?")
+                .setMessage("Remove all " + items.size() + " downloads and free their storage?")
+                .setPositiveButton("Delete all", (d, w) -> {
+                    for (DownloadStore.Item it : DownloadStore.all(this)) {
+                        DownloadService.requestCancel(this, it.id);
+                    }
+                    Toast.makeText(this, "All downloads removed", Toast.LENGTH_SHORT).show();
+                    renderNow();
+                })
+                .setNegativeButton("Keep", null)
+                .show();
+    }
+
+    // ---- Storage ----
+
+    private long usedBytes() {
+        long sum = 0;
+        File[] files = downloadsDir().listFiles();
+        if (files != null) for (File f : files) sum += f.length();
+        return sum;
+    }
+
+    private long freeBytes() {
         try {
-            if (it.filePath != null && !it.filePath.isEmpty()) new File(it.filePath).delete();
-        } catch (Exception ignored) { }
-        // Delete the poster via both the manifest path and the deterministic
-        // location (in case the manifest pointer was lost).
-        try {
-            if (it.posterFile != null && !it.posterFile.isEmpty()) new File(it.posterFile).delete();
-        } catch (Exception ignored) { }
-        try {
-            new File(posterDir(), posterName(it.id)).delete();
-        } catch (Exception ignored) { }
-        DownloadStore.remove(this, it.id);
-        render();
-    }
-
-    /** The poster bitmap path: manifest pointer first, else the deterministic file. */
-    private String posterPathFor(DownloadStore.Item it) {
-        if (it.posterFile != null && !it.posterFile.isEmpty()) {
-            File f = new File(it.posterFile);
-            if (f.exists()) return it.posterFile;
+            return storageBase().getUsableSpace();
+        } catch (Exception e) {
+            return 0;
         }
-        if (it.id != null) {
-            File f = new File(posterDir(), posterName(it.id));
-            if (f.exists()) return f.getAbsolutePath();
+    }
+
+    private File storageBase() {
+        File base = getExternalFilesDir(null);
+        return base != null ? base : getFilesDir();
+    }
+
+    private File downloadsDir() {
+        return new File(storageBase(), "downloads");
+    }
+
+    private boolean onWifiNow() {
+        try {
+            android.net.ConnectivityManager cm =
+                    (android.net.ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE);
+            if (cm == null) return true;
+            android.net.Network n = cm.getActiveNetwork();
+            if (n == null) return false;
+            android.net.NetworkCapabilities c = cm.getNetworkCapabilities(n);
+            return c != null && (c.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI)
+                    || c.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_NOT_METERED));
+        } catch (Exception e) {
+            return true;
         }
-        return null;
     }
 
-    private File posterDir() {
-        return new File(getFilesDir(), "posters");
+    // ---- Views / styling ----
+
+    private TextView titleText(String text) {
+        TextView t = new TextView(this);
+        t.setText(text == null ? "" : text);
+        t.setTextColor(TEXT);
+        t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15.5f);
+        t.setTypeface(Typeface.DEFAULT_BOLD);
+        t.setMaxLines(2);
+        return t;
     }
 
-    private static String posterName(String id) {
-        return (id == null ? "x" : id.replaceAll("[^A-Za-z0-9_.-]", "_")) + ".jpg";
+    private ImageView posterView(DownloadStore.Item it, int wDp, int hDp) {
+        ImageView poster = new ImageView(this);
+        poster.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        poster.setBackground(rounded(Color.parseColor("#1d1d27"), 10));
+        roundCorners(poster, dp(10));
+        String path = posterPathFor(it);
+        if (path != null) {
+            try {
+                poster.setImageBitmap(BitmapFactory.decodeFile(path));
+            } catch (Exception ignored) { }
+        }
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(wDp), dp(hDp));
+        lp.rightMargin = dp(13);
+        poster.setLayoutParams(lp);
+        return poster;
     }
 
-    // ---- Styling helpers ----
+    private LinearLayout card() {
+        LinearLayout card = new LinearLayout(this);
+        card.setBackground(roundedStroke(CARD, CARD_BORDER, 14));
+        card.setPadding(dp(12), dp(12), dp(12), dp(12));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.bottomMargin = dp(12);
+        card.setLayoutParams(lp);
+        return card;
+    }
 
-    /** A rounded "pill" button rendered as a TextView (no Material all-caps grey). */
+    private interface Click { void onClick(View v); }
+
+    private TextView pillSpaced(String text, int bg, int textColor, final Click cb) {
+        TextView b = pill(text, bg, textColor);
+        LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) b.getLayoutParams();
+        lp.leftMargin = dp(8);
+        b.setLayoutParams(lp);
+        b.setOnClickListener(cb::onClick);
+        return b;
+    }
+
     private TextView pill(String text, int bg, int textColor) {
         TextView b = new TextView(this);
         b.setText(text);
         b.setTextColor(textColor);
-        b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13.5f);
         b.setTypeface(Typeface.DEFAULT_BOLD);
         b.setGravity(Gravity.CENTER);
-        b.setPadding(dp(18), dp(10), dp(18), dp(10));
+        b.setPadding(dp(15), dp(9), dp(15), dp(9));
         b.setBackground(rounded(bg, 10));
         b.setClickable(true);
         b.setFocusable(true);
@@ -344,6 +563,22 @@ public final class DownloadsActivity extends Activity {
             }
         });
         v.setClipToOutline(true);
+    }
+
+    private String posterPathFor(DownloadStore.Item it) {
+        if (it.posterFile != null && !it.posterFile.isEmpty()) {
+            File f = new File(it.posterFile);
+            if (f.exists()) return it.posterFile;
+        }
+        if (it.id != null) {
+            File f = new File(new File(getFilesDir(), "posters"), posterName(it.id));
+            if (f.exists()) return f.getAbsolutePath();
+        }
+        return null;
+    }
+
+    private static String posterName(String id) {
+        return (id == null ? "x" : id.replaceAll("[^A-Za-z0-9_.-]", "_")) + ".jpg";
     }
 
     private static String sizeStr(long bytes) {
