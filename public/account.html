@@ -240,17 +240,81 @@
             .btn { min-height: 44px; }
         }
         /* Native app (APK WebView): clean, centered, app-style login — drop the
-           web marketing copy, keep only the logo + the form. */
-        html.native-app body { place-items: center; padding: 20px; }
-        html.native-app .shell { grid-template-columns: 1fr; max-width: 420px; gap: 16px; }
+           web marketing copy, keep only the logo + the form, and show the
+           advantages carousel above it. */
+        html.native-app body {
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            gap: 18px; padding: 22px 18px;
+            padding-bottom: calc(22px + env(safe-area-inset-bottom, 0px));
+            padding-top: calc(22px + env(safe-area-inset-top, 0px));
+        }
+        html.native-app .shell { grid-template-columns: 1fr; max-width: 420px; gap: 16px; width: 100%; }
         html.native-app .brand { text-align: center; padding: 0; }
         html.native-app .brand h1,
         html.native-app .brand .lead,
         html.native-app .brand .signals { display: none; }
         html.native-app .logo-row { justify-content: center; margin-bottom: 10px; }
+
+        /* Sign-up advantages carousel — native only. */
+        .native-onboarding { display: none; }
+        html.native-app .native-onboarding { display: block; width: 100%; max-width: 420px; }
+        .onb-track {
+            display: flex; overflow-x: auto; scroll-snap-type: x mandatory;
+            scroll-behavior: smooth; -webkit-overflow-scrolling: touch;
+            scrollbar-width: none; gap: 0;
+        }
+        .onb-track::-webkit-scrollbar { display: none; }
+        .onb-slide {
+            flex: 0 0 100%; scroll-snap-align: center; box-sizing: border-box;
+            display: flex; flex-direction: column; align-items: center; text-align: center;
+            padding: 6px 14px 4px;
+        }
+        .onb-icon {
+            width: 64px; height: 64px; display: grid; place-items: center;
+            border-radius: 18px; margin-bottom: 16px;
+            background: linear-gradient(135deg, rgba(33,212,253,.16), rgba(199,92,255,.16));
+            border: 1px solid rgba(148,163,184,.18);
+        }
+        .onb-icon svg { width: 32px; height: 32px; color: #8fb3ff; }
+        .onb-slide h2 { font-size: 21px; font-weight: 800; line-height: 1.2; margin-bottom: 8px; }
+        .onb-slide p { color: var(--muted); font-size: 14px; line-height: 1.55; max-width: 320px; }
+        .onb-badge {
+            display: inline-block; margin-bottom: 12px; padding: 3px 10px; border-radius: 999px;
+            font-size: 11px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase;
+            color: #d8b4fe; background: rgba(199,92,255,.14); border: 1px solid rgba(199,92,255,.32);
+        }
+        .onb-dots { display: flex; justify-content: center; gap: 7px; margin-top: 14px; }
+        .onb-dots span {
+            width: 7px; height: 7px; border-radius: 999px; background: #334155;
+            transition: width .25s ease, background .25s ease; cursor: pointer;
+        }
+        .onb-dots span.active { width: 22px; background: linear-gradient(135deg, var(--accent), #c75cff); }
     </style>
 </head>
 <body>
+    <!-- Sign-up advantages carousel (native app only; hidden on web). -->
+    <section class="native-onboarding" aria-label="Why Norva">
+        <div class="onb-track" id="onb-track">
+            <article class="onb-slide">
+                <div class="onb-icon"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/></svg></div>
+                <h2>Synced across every screen</h2>
+                <p>Your favorites, history and resume point follow your account on web, mobile and TV — a first on the market.</p>
+            </article>
+            <article class="onb-slide">
+                <div class="onb-icon"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93C7.05 19.44 4 16.08 4 12c0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41C19.92 5.77 22 8.65 22 12c0 2.08-.8 3.97-2.1 5.39z"/></svg></div>
+                <h2>Your IPTV in the browser</h2>
+                <p>Watch your channels right in a web browser, nothing to install — the first to make it truly work for everyone.</p>
+            </article>
+            <article class="onb-slide">
+                <span class="onb-badge">Soon</span>
+                <div class="onb-icon"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg></div>
+                <h2>Offline mode</h2>
+                <p>Download your content and keep watching with no connection, anywhere. Coming soon on mobile.</p>
+            </article>
+        </div>
+        <div class="onb-dots" id="onb-dots" aria-hidden="true"><span class="active"></span><span></span><span></span></div>
+    </section>
+
     <main class="shell">
         <section class="brand" aria-label="Norva">
             <div class="logo-row">
@@ -486,6 +550,42 @@
                 return '';
             }
         }
+    </script>
+    <script>
+      // Advantages carousel (native app only): dot sync, swipe, auto-advance.
+      (function () {
+        if (!document.documentElement.classList.contains('native-app')) return;
+        var track = document.getElementById('onb-track');
+        var dots = document.getElementById('onb-dots');
+        if (!track || !dots) return;
+        var slides = track.children.length;
+        var dotEls = Array.prototype.slice.call(dots.querySelectorAll('span'));
+        var current = 0, timer = null, paused = false, raf = null;
+
+        function width() { return track.clientWidth || 1; }
+        function setActive(i) { dotEls.forEach(function (d, idx) { d.classList.toggle('active', idx === i); }); }
+        function go(i, smooth) {
+          current = (i + slides) % slides;
+          track.scrollTo({ left: current * width(), behavior: smooth === false ? 'auto' : 'smooth' });
+          setActive(current);
+        }
+        track.addEventListener('scroll', function () {
+          if (raf) return;
+          raf = requestAnimationFrame(function () {
+            raf = null;
+            var i = Math.round(track.scrollLeft / width());
+            if (i !== current) { current = i; setActive(i); }
+          });
+        });
+        dotEls.forEach(function (d, idx) { d.addEventListener('click', function () { stop(); go(idx); }); });
+        ['touchstart', 'pointerdown', 'wheel'].forEach(function (ev) {
+          track.addEventListener(ev, stop, { passive: true });
+        });
+        function start() { if (timer || paused) return; timer = setInterval(function () { go(current + 1); }, 4500); }
+        function stop() { paused = true; if (timer) { clearInterval(timer); timer = null; } }
+        window.addEventListener('resize', function () { go(current, false); });
+        start();
+      })();
     </script>
 </body>
 </html>
