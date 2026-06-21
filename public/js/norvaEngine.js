@@ -30,6 +30,13 @@
   const BUFFER_AHEAD_MAX = 45; // seconds
   const BUFFER_AHEAD_MIN = 20; // seconds
 
+  // Read-ahead cache. A single-slot provider 401s rapid per-block connections
+  // (even with gateway retries that's slow), so fetch large windows and serve
+  // libav's small block reads from memory — sequential playback then uses ~1
+  // upstream connection per window instead of one per ~64 KB block.
+  const RA_WINDOW = 4 * 1024 * 1024; // bytes fetched per window
+  const RA_WINDOWS = 4;              // windows kept (header + cues + playhead)
+
   const AAC_SAMPLE_RATE = 48000;
   const AAC_CHANNEL_LAYOUT = 3; // stereo
   const AAC_BIT_RATE = 192000;
@@ -188,23 +195,15 @@
     async _openInput() {
       const lib = this.lib, url = this.url, size = this.size;
       await lib.mkblockreaderdev('input', size);
+      this._raCache = []; // [{start,end,buf}] tiny LRU of fetched windows
       lib.onblockread = async (name, pos, len) => {
-        const ac = new AbortController();
-        const to = setTimeout(() => { try { ac.abort(); } catch (_) {} }, 30000);
         try {
-          const end = Math.min(pos + len, size) - 1;
-          const r = await fetch(url, { headers: { Range: `bytes=${pos}-${end}` }, signal: ac.signal });
-          // 200 without Content-Range → provider ignored Range and is streaming
-          // the whole file; reading it would buffer gigabytes and hang. Bail.
-          if (r.status === 200 && !r.headers.get('content-range')) { try { ac.abort(); } catch (_) {} throw new Error('RANGE_UNSUPPORTED'); }
-          if (r.status !== 206 && r.status !== 200) throw new Error('BLOCK_HTTP_' + r.status);
-          const d = new Uint8Array(await r.arrayBuffer());
-          await lib.ff_block_reader_dev_send('input', pos, d);
+          const want = Math.min(len, Math.max(0, size - pos));
+          const data = await this._readRange(pos, want);
+          await lib.ff_block_reader_dev_send('input', pos, data);
         } catch (e) {
           this._lastReadError = e;
           await lib.ff_block_reader_dev_send('input', pos, null, { error: e });
-        } finally {
-          clearTimeout(to);
         }
       };
       let fmtCtx, streams;
@@ -222,6 +221,45 @@
         const durUs = to64(await lib.AVFormatContext_duration(fmtCtx), await lib.AVFormatContext_durationhi(fmtCtx));
         this.durationSec = durUs > 0 ? durUs / 1e6 : 0;
       } catch (_) { this.durationSec = 0; }
+    }
+
+    // Serve [pos, pos+len) from a cached window, fetching a fresh RA_WINDOW-sized
+    // window from the origin when needed. Collapses libav's many small block
+    // reads into a few large upstream requests (key for single-slot providers).
+    async _readRange(pos, len) {
+      const end = pos + len; // exclusive
+      for (const w of this._raCache) {
+        if (pos >= w.start && end <= w.end) { this._raTouch(w); return w.buf.subarray(pos - w.start, end - w.start); }
+      }
+      const winStart = pos;
+      const winEnd = Math.min(pos + Math.max(RA_WINDOW, len), this.size);
+      const buf = await this._fetchRange(winStart, winEnd);
+      const w = { start: winStart, end: winStart + buf.length, buf };
+      this._raCache.push(w);
+      while (this._raCache.length > RA_WINDOWS) this._raCache.shift();
+      const sliceEnd = Math.min(end, w.end);
+      return buf.subarray(pos - w.start, Math.max(pos - w.start, sliceEnd - w.start));
+    }
+
+    _raTouch(w) {
+      const i = this._raCache.indexOf(w);
+      if (i >= 0 && i !== this._raCache.length - 1) { this._raCache.splice(i, 1); this._raCache.push(w); }
+    }
+
+    // Fetch [start, end) (exclusive) as one ranged request, bounded by a timeout.
+    async _fetchRange(start, end) {
+      const ac = new AbortController();
+      const to = setTimeout(() => { try { ac.abort(); } catch (_) {} }, 60000);
+      try {
+        const r = await fetch(this.url, { headers: { Range: `bytes=${start}-${end - 1}` }, signal: ac.signal });
+        // 200 without Content-Range → provider ignored Range and would stream the
+        // whole file; bail before buffering gigabytes.
+        if (r.status === 200 && !r.headers.get('content-range')) { try { ac.abort(); } catch (_) {} throw new Error('RANGE_UNSUPPORTED'); }
+        if (r.status !== 206 && r.status !== 200) throw new Error('BLOCK_HTTP_' + r.status);
+        return new Uint8Array(await r.arrayBuffer());
+      } finally {
+        clearTimeout(to);
+      }
     }
 
     async _detectStreams() {
