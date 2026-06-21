@@ -119,7 +119,7 @@
     av1: ['av01.0.08M.08'],
   };
 
-  const ENGINE_VERSION = 9;
+  const ENGINE_VERSION = 10;
 
   class NorvaEngine {
     constructor(videoEl, opts = {}) {
@@ -594,6 +594,9 @@
                                                   : [this.encCodecpar, 1, AAC_SAMPLE_RATE]);
       let written = 0;
       this._initSegPending = true;
+      // ff_init_muxer(device:true) re-creates the 'output' writer device; remove
+      // any stale one from a prior init (e.g. a re-seek) or it can collide.
+      try { await lib.unlink('output'); } catch (_) {}
       lib.onwrite = (name, pos, data) => { written += data.length; this.queue.push(data.slice(0)); this._drain(); };
       const muxRet = await lib.ff_init_muxer(
         { format_name: 'mp4', filename: 'output', open: true, device: true, codecpars: true }, streamCtxs);
