@@ -15,27 +15,43 @@
   <link rel="stylesheet" href="/css/landing.css?v=19">
   <script>
     (function () {
+      function readCloudSession() {
+        try {
+          var session = JSON.parse(localStorage.getItem('norva-cloud-session') || 'null');
+          var now = Math.floor(Date.now() / 1000);
+          var ok = Boolean(
+            session &&
+            session.access_token &&
+            session.refresh_token &&
+            session.user &&
+            session.user.id &&
+            (!session.expires_at || Number(session.expires_at) > now + 30)
+          );
+          return ok || Boolean(localStorage.getItem('norva-cloud-device-token'));
+        } catch (_) { return false; }
+      }
+
+      // Native apps (Android phone/TV APK WebView) must never see this web
+      // marketing landing — they are real mobile apps. Send them into the app
+      // when signed in, otherwise straight to the login screen.
+      var ua = navigator.userAgent || '';
+      var nativeApp = /NorvaTV-/i.test(ua) || !!window.NorvaTVCloud || !!window.NodeCastNative
+        || /[?&]mobile=1\b/.test(window.location.search || '');
+      if (nativeApp) {
+        if (readCloudSession()) window.location.replace('/app#home');
+        else window.location.replace('/account.html?returnTo=' + encodeURIComponent('/app.html?mobile=1#home'));
+        return;
+      }
+
       var appPages = ['home', 'live', 'movies', 'series', 'settings', 'watch', 'account'];
       var page = (window.location.hash || '').replace(/^#/, '').split('?')[0];
       if (!appPages.includes(page)) return;
 
         var target = '/app' + window.location.search + window.location.hash;
-      try {
-        var session = JSON.parse(localStorage.getItem('norva-cloud-session') || 'null');
-        var now = Math.floor(Date.now() / 1000);
-        var hasCloudSession = Boolean(
-          session &&
-          session.access_token &&
-          session.refresh_token &&
-          session.user &&
-          session.user.id &&
-          (!session.expires_at || Number(session.expires_at) > now + 30)
-        );
-        if (hasCloudSession || localStorage.getItem('norva-cloud-device-token')) {
-          window.location.replace(target);
-          return;
-        }
-      } catch (_) { }
+      if (readCloudSession()) {
+        window.location.replace(target);
+        return;
+      }
       window.location.replace('/account.html?returnTo=' + encodeURIComponent(target));
     })();
   </script>

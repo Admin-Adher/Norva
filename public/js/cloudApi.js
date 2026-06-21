@@ -297,9 +297,14 @@
         prompt.id = 'norva-region-prompt';
         prompt.style.cssText = [
             'position:fixed',
-            'left:16px',
-            'right:16px',
-            'bottom:16px',
+            // Offset by the device safe-area so the card is never cropped behind
+            // the Android/iOS system navigation bar in the native APK WebView.
+            'left:calc(16px + env(safe-area-inset-left, 0px))',
+            'right:calc(16px + env(safe-area-inset-right, 0px))',
+            'bottom:calc(16px + env(safe-area-inset-bottom, 0px))',
+            // Never taller than the viewport (scroll if it somehow is).
+            'max-height:calc(100vh - 32px - env(safe-area-inset-bottom, 0px) - env(safe-area-inset-top, 0px))',
+            'overflow:auto',
             'z-index:9999',
             'max-width:420px',
             'width:auto',
