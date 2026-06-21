@@ -2934,14 +2934,13 @@ class ChannelList {
         });
         this._streamResolveQueue = resolveTask.catch((err) => {
             console.error('[ChannelList] Failed to resolve live stream:', err);
-            // Provider back-off: show a brief message instead of an endless spinner
-            // (prepareLiveSwitch already tore down the previous channel).
-            if (err && err.liveProviderBackoff && window.app?.player?.showError) {
-                try {
-                    window.app.player.showError(
-                        'Le fournisseur est momentanément saturé (une seule connexion à la fois).<br>Réessaie dans quelques secondes.'
-                    );
-                } catch (_) { /* best-effort */ }
+            // Never leave an endless spinner: prepareLiveSwitch already tore down the
+            // previous channel, so surface a clear message on ANY resolve failure.
+            if (window.app?.player?.showError) {
+                const msg = (err && err.liveProviderBackoff)
+                    ? 'Le fournisseur est momentanément saturé (une seule connexion à la fois).<br>Réessaie dans quelques secondes.'
+                    : 'Cette chaîne ne répond pas — le fournisseur a refusé ou expiré la connexion (chaîne morte ou indisponible).<br>Essaie une autre chaîne.';
+                try { window.app.player.showError(msg); } catch (_) { /* best-effort */ }
             }
         });
         return this._streamResolveQueue;

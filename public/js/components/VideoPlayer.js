@@ -2545,6 +2545,8 @@ class VideoPlayer {
      * Show error overlay
      */
     showError(message) {
+        // Replace the spinner with the message (a failed channel must not spin forever).
+        this.loadingSpinner?.classList.remove('show');
         this.overlay.classList.remove('hidden');
         this.overlay.querySelector('.overlay-content').innerHTML = `<p style="color: var(--color-error);">${message}</p>`;
     }
