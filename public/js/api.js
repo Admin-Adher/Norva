@@ -1243,12 +1243,26 @@ const CloudAdapter = (() => {
                 const browserSafeVod = isVodPlayback
                     && !needsGateway
                     && !shouldVodUseGatewayTranscode(container, playbackHint);
+                // Browser VOD that needs container/codec help (mkv/avi, HEVC,
+                // AC-3/DTS/TrueHD audio, …): play it with the in-browser engine
+                // (NorvaEngine remuxes the container + transcodes the audio to
+                // AAC client-side and feeds MediaSource). No transcode server, no
+                // Railway. Gated on the engine script being present so a stale
+                // cache falls back to the gateway instead of failing. Native +
+                // browser-safe keep their existing paths.
+                const engineVod = isVodPlayback
+                    && !nativePlayer
+                    && !browserSafeVod
+                    && typeof window !== 'undefined'
+                    && Boolean(window.NorvaEngine);
                 const mode = forcedMode
                     || (nativePlayer
                         ? 'direct'
                         : browserSafeVod
                             ? 'relay'
-                            : (((isVodPlayback || needsGateway) && preferredMode !== 'direct') ? 'transcode' : preferredMode));
+                            : engineVod
+                                ? 'engine'
+                                : (((isVodPlayback || needsGateway) && preferredMode !== 'direct') ? 'transcode' : preferredMode));
                 if ((type === 'series' || type === 'movie') && !playbackHint.gatewayMode) {
                     const needsFullGatewayTranscode = shouldVodUseGatewayTranscode(container, playbackHint);
                     // VOD only uses remux when the container, video and audio
@@ -1271,6 +1285,33 @@ const CloudAdapter = (() => {
                     corsSafe: false,
                     ...(userAgent ? { userAgent } : {})
                 };
+                // Engine mode: fetch a RAW pass-through URL (byte-range + CORS)
+                // via the relay and hand it to the in-browser engine. No gateway
+                // transcode session is created, so there is no Railway dependency
+                // and Resume seeks straight to the saved offset client-side.
+                if (mode === 'engine') {
+                    const enginePayload = await cloudPlaybackApi().createSession({
+                        ...baseSession,
+                        mode: 'relay',
+                        requiresRelay: true
+                    });
+                    const engineUrl = enginePayload.playback?.url || enginePayload.url;
+                    if (!engineUrl) {
+                        const e = new Error('Engine: relais indisponible (URL brute manquante).');
+                        e.engineUnavailable = true;
+                        throw e;
+                    }
+                    if (!hasNativeOrLocal) _clearSourceCloudBlock(sourceId);
+                    return {
+                        ...enginePayload,
+                        url: engineUrl,
+                        streamUrl: engineUrl,
+                        playbackUrl: engineUrl,
+                        cloud: true,
+                        mode: 'engine',
+                        sessionId: enginePayload.session?.id
+                    };
+                }
                 const remuxFirst = mode === 'transcode' && baseSession.playbackHint.gatewayMode === 'remux';
                 const createGatewayTranscodeSession = () => cloudPlaybackApi().createSession({
                     ...baseSession,

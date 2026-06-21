@@ -693,7 +693,7 @@ function corsHeaders(request, env) {
   const origin = request.headers.get("Origin");
   const configured = parseCsv(env.ALLOWED_ORIGINS);
   const allowed = configured.length ? configured : DEFAULT_ALLOWED_ORIGINS;
-  const allowOrigin = origin && (allowed.includes("*") || allowed.includes(origin) || isLocalOrigin(origin))
+  const allowOrigin = origin && (allowed.includes("*") || allowed.includes(origin) || isLocalOrigin(origin) || isNorvaOrigin(origin))
     ? origin
     : allowed[0];
 
@@ -750,6 +750,19 @@ function isLocalOrigin(origin) {
   try {
     const { hostname } = new URL(origin);
     return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+  } catch {
+    return false;
+  }
+}
+
+// The production site (norva.tv and any subdomain) is always allowed. The
+// in-browser engine fetches relay byte-ranges with fetch(), which — unlike
+// <video src> — strictly enforces CORS, so this must hold regardless of the
+// worker's ALLOWED_ORIGINS env configuration.
+function isNorvaOrigin(origin) {
+  try {
+    const { protocol, hostname } = new URL(origin);
+    return protocol === "https:" && (hostname === "norva.tv" || hostname.endsWith(".norva.tv"));
   } catch {
     return false;
   }

@@ -25,6 +25,7 @@ jobs:
           node --check public/js/api.js
           node --check public/js/cloudApi.js
           node --check public/js/pages/WatchPage.js
+          node --check public/js/norvaEngine.js
 
       - name: Deploy public/ to Cloudflare Pages (norva-web)
         uses: cloudflare/wrangler-action@v3

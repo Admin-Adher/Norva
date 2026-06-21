@@ -1216,6 +1216,8 @@ class WatchPage {
         await this.loadVideo(streamUrl, {
             cloudPlaybackSessionId,
             playbackAttemptId,
+            mode: playbackMetadata.mode || null,
+            startTime: this.resumeTime || 0,
             codecProfile: playbackMetadata.codecProfile || playbackMetadata.codec_profile || null,
             seekOffset: loadSeekOffset
         });
@@ -2112,6 +2114,66 @@ class WatchPage {
         return probeRes.json();
     }
 
+    // ---- in-browser engine (NorvaEngine) ----------------------------------
+    // Plays mkv/HEVC/AC-3/DTS/… entirely client-side: reads the raw file by
+    // byte-range, remuxes the container and transcodes non-browser audio to AAC,
+    // feeding a MediaSource. No transcode server, no Railway. User policy is
+    // "engine only": on failure we surface a clear message + telemetry rather
+    // than falling back to the gateway.
+    async playWithEngine(url, { startTime = 0, playbackAttemptId } = {}) {
+        this.destroyEngine();
+        this.currentPlaybackMode = 'engine';
+        this.streamStartOffset = 0;
+        try { this.updateTranscodeStatus('direct', 'Navigateur'); } catch (_) {}
+        const engine = this.norvaEngine = new window.NorvaEngine(this.video, {
+            report: (info) => this.reportEngineFailure(info),
+            log: (m) => console.log('[NorvaEngine] ' + m)
+        });
+        try {
+            await engine.load(url, { startTime });
+            if (this.isStalePlaybackAttempt(playbackAttemptId)) { this.destroyEngine(); return; }
+            try { this.hideLoading(); } catch (_) {}
+            this.video.play().catch((e) => this.handleAutoplayError(e));
+            this.setVolumeFromStorage();
+        } catch (e) {
+            if (this.isStalePlaybackAttempt(playbackAttemptId)) { this.destroyEngine(); return; }
+            this.reportEngineFailure({ stage: 'load', message: String(e && (e.message || e)) });
+            this.destroyEngine();
+            this.handleEngineUnplayable(e);
+        }
+    }
+
+    destroyEngine() {
+        if (this.norvaEngine) {
+            try { this.norvaEngine.destroy(); } catch (_) {}
+            this.norvaEngine = null;
+        }
+    }
+
+    reportEngineFailure(info = {}) {
+        console.warn('[NorvaEngine] échec', info);
+        try {
+            this.sendPlaybackEvent('engine_failure', {
+                errorCode: 'ENGINE_' + (info.stage || 'unknown'),
+                errorMessage: String(info.message || '').slice(0, 500),
+                metadata: {
+                    engineStage: info.stage || null,
+                    engineVideoCodec: this.norvaEngine?.vName || this.currentStreamInfo?.video || null,
+                    engineAudioCodec: this.norvaEngine?.aName || null,
+                    engineContainer: this.containerExtension || null
+                }
+            });
+        } catch (_) {}
+    }
+
+    handleEngineUnplayable(e) {
+        const detail = String((e && (e.message || e)) || '');
+        const msg = detail.includes('NO_SUPPORTED_MIME')
+            ? "Ce format n'est pas lisible dans ce navigateur. Ouvre le titre dans l'app Norva (TV / mobile / tablette) pour le lire."
+            : "La lecture dans le navigateur a échoué. Ouvre le titre dans l'app Norva (TV / mobile / tablette).";
+        this.showPlaybackError(msg, { immediate: true });
+    }
+
     async loadVideo(url, options = {}) {
         const playbackAttemptId = options.playbackAttemptId ?? this._playbackAttemptId;
         if (this.isStalePlaybackAttempt(playbackAttemptId)) {
@@ -2175,6 +2237,18 @@ class WatchPage {
 
         // Show loading spinner
         this.showLoading();
+
+        // In-browser engine path (mkv/HEVC/AC-3/DTS/…): NorvaEngine owns the
+        // MediaSource — it reads the raw file by byte-range, remuxes the
+        // container and transcodes non-browser audio to AAC client-side. No
+        // gateway/transcode server. Resume seeks straight to the saved offset.
+        if (options.mode === 'engine' && typeof window !== 'undefined' && window.NorvaEngine) {
+            await this.playWithEngine(url, {
+                startTime: Number(options.startTime ?? options.seekOffset ?? this.resumeTime ?? 0) || 0,
+                playbackAttemptId
+            });
+            return;
+        }
 
         // Get settings for proxy/transcode
         let settings = {};
@@ -2591,6 +2665,7 @@ class WatchPage {
     }
 
     stop() {
+        this.destroyEngine();
         this._gatewaySeekRequestId += 1;
         clearTimeout(this._seekDebounceTimer);
         this._seekDebounceTimer = null;
@@ -3444,6 +3519,19 @@ class WatchPage {
     onError(e) {
         const videoAttemptId = Number.parseInt(this.video?.dataset?.playbackAttemptId || '', 10);
         if (Number.isFinite(videoAttemptId) && this.isStalePlaybackAttempt(videoAttemptId)) return;
+
+        // Engine mode is "engine only": a MediaError means the in-browser engine
+        // can't play this title. Report it (telemetry) and show the native-app
+        // message — do NOT run the gateway/version retry chain (no Railway).
+        if (this.currentPlaybackMode === 'engine') {
+            const err = this.video?.error;
+            if (err && err.code) {
+                this.reportEngineFailure({ stage: 'mediaerror', message: 'code=' + err.code + ' ' + (err.message || '') });
+                this.destroyEngine();
+                this.handleEngineUnplayable(new Error('MEDIA_ERR_' + err.code));
+            }
+            return;
+        }
 
         // Only log actual fatal errors, not benign stream recovery events
         const error = this.video?.error;
