@@ -2128,14 +2128,8 @@ class WatchPage {
         const engine = this.norvaEngine = new window.NorvaEngine(this.video, {
             report: (info) => this.reportEngineFailure(info),
             log: (m) => console.log('[NorvaEngine] ' + m),
-            onReady: (timings) => {
-                console.log('[NorvaEngine] ready', timings);
-                try { this.sendPlaybackEvent('play_started', { metadata: { engineTimings: timings } }); } catch (_) {}
-            },
-            onSeek: (timings) => {
-                console.log('[NorvaEngine] seek', timings);
-                try { this.sendPlaybackEvent('play_started', { metadata: { seekTimings: timings } }); } catch (_) {}
-            }
+            onReady: (timings) => { console.log('[NorvaEngine] ready', timings); },
+            onSeek: (timings) => { console.log('[NorvaEngine] seek', timings); }
         });
         try {
             await engine.load(url, { startTime });
