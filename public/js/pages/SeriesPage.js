@@ -516,8 +516,10 @@ class SeriesPage {
     }
 
     catalogCacheKey() {
+        // Only the DEFAULT first screen is cached (see MoviesPage for rationale).
         const p = this.cloudPageParams(0);
-        return 'series:' + JSON.stringify({ s: p.sourceId || '', c: p.categoryId || '', q: p.q || '' });
+        if (p.sourceId || p.categoryId || p.q) return null;
+        return 'series:default';
     }
 
     async loadCloudSeries({ reset = false } = {}) {
@@ -535,7 +537,8 @@ class SeriesPage {
             this.currentBatch = 0;
             // Stale-while-revalidate: paint the cached first page instantly, then
             // refresh from the network below and replace it.
-            const cached = window.NorvaCatalogCache?.read?.(this.catalogCacheKey());
+            const cacheKey = this.catalogCacheKey();
+            const cached = cacheKey && window.NorvaCatalogCache?.read?.(cacheKey);
             if (cached?.data?.items?.length) {
                 this.seriesList = cached.data.items.slice();
                 this.cloudHasMore = Boolean(cached.data.hasMore);
@@ -583,7 +586,8 @@ class SeriesPage {
             if (reset) {
                 this.filterAndRender();
                 try {
-                    window.NorvaCatalogCache?.write?.(this.catalogCacheKey(), {
+                    const ck = this.catalogCacheKey();
+                    if (ck) window.NorvaCatalogCache?.write?.(ck, {
                         items: this.seriesList.slice(0, this.cloudPageSize),
                         hasMore: this.cloudHasMore,
                         count: this.cloudTotal

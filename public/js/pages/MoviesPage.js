@@ -532,10 +532,12 @@ class MoviesPage {
     }
 
     catalogCacheKey() {
-        // First page only, keyed by the active filter so a different
-        // source/category/search uses its own entry (or none).
+        // Only the DEFAULT first screen (no source/category/search filter) is
+        // cached — that's the cold-load view worth painting instantly. Returns
+        // null otherwise so searches/filtered views never bloat storage.
         const p = this.cloudPageParams(0);
-        return 'movies:' + JSON.stringify({ s: p.sourceId || '', c: p.categoryId || '', q: p.q || '' });
+        if (p.sourceId || p.categoryId || p.q) return null;
+        return 'movies:default';
     }
 
     async loadCloudMovies({ reset = false } = {}) {
@@ -553,7 +555,8 @@ class MoviesPage {
             this.currentBatch = 0;
             // Stale-while-revalidate: paint the cached first page instantly, then
             // refresh from the network below and replace it.
-            const cached = window.NorvaCatalogCache?.read?.(this.catalogCacheKey());
+            const cacheKey = this.catalogCacheKey();
+            const cached = cacheKey && window.NorvaCatalogCache?.read?.(cacheKey);
             if (cached?.data?.items?.length) {
                 this.movies = cached.data.items.slice();
                 this.cloudHasMore = Boolean(cached.data.hasMore);
@@ -602,7 +605,8 @@ class MoviesPage {
                 this.filterAndRender();
                 // Cache the fresh first page for an instant next cold entry.
                 try {
-                    window.NorvaCatalogCache?.write?.(this.catalogCacheKey(), {
+                    const ck = this.catalogCacheKey();
+                    if (ck) window.NorvaCatalogCache?.write?.(ck, {
                         items: this.movies.slice(0, this.cloudPageSize),
                         hasMore: this.cloudHasMore,
                         count: this.cloudTotal
