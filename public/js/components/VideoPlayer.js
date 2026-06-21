@@ -40,6 +40,11 @@ class VideoPlayer {
         this._vfTimer = null;
         this._gatewayHlsRetryCount = 0;
         this._gatewayHlsRetryTimer = null;
+        // Self-heal a live gateway session that vanished (404 = gone from the
+        // gateway's in-memory map: restart / TTL sweep / eviction). Bounded per
+        // channel so a permanently-dead source can't loop. Reset on success.
+        this._gatewayRecreateCount = 0;
+        this._gatewayRecreateKey = null;
         this.currentCloudPlaybackSessionId = null;
         this.activeCloudPlaybackSessionIds = new Set();
 
@@ -1712,6 +1717,10 @@ class VideoPlayer {
         if (!this.hasCurrentMedia() || this._playbackStatusOkReported) return;
         this._playbackStatusOkReported = true;
         this.resetGatewayHlsRetries();
+        // Playback recovered — refill the gateway re-resolve budget so a later
+        // session death on this channel can self-heal again.
+        this._gatewayRecreateCount = 0;
+        this._gatewayRecreateKey = null;
         // Live launch telemetry: first usable frame (once per channel).
         try {
             const ttff = this._livePlayRequestedAt ? Math.max(1, Date.now() - this._livePlayRequestedAt) : undefined;
@@ -1855,7 +1864,16 @@ class VideoPlayer {
     }
 
     retryGatewayHlsStartup(data = {}) {
-        if (!this.hls || !this.isGatewayPlaybackUrl(this.currentUrl) || this.hasCurrentMedia()) return false;
+        if (!this.hls || !this.isGatewayPlaybackUrl(this.currentUrl)) return false;
+        // A 404 on a gateway playlist/segment means the session is GONE from the
+        // gateway (process restart, TTL sweep, or single-slot eviction). Retrying
+        // the same URL can never bring it back, so the channel would stay broken.
+        // Re-resolve a brand-new session for the current channel instead. This
+        // must run even mid-stream (hasCurrentMedia true), since a live session
+        // can die after the first frame.
+        const responseCode = data.response?.code || data.response?.status || null;
+        if (responseCode === 404 && this.recoverDeadGatewaySession('gateway-404')) return true;
+        if (this.hasCurrentMedia()) return false;
         const retryable = data.type === Hls.ErrorTypes.NETWORK_ERROR ||
             data.details === 'manifestLoadError' ||
             data.details === 'manifestLoadTimeOut' ||
@@ -1885,6 +1903,56 @@ class VideoPlayer {
             }
         }, delay);
         return true;
+    }
+
+    // The live gateway session is gone (404). Re-resolve a fresh session for the
+    // current channel via the channel list, which creates a new gateway session
+    // and replays it. Bounded per channel (a permanently-dead source must not
+    // loop); the budget refills on a successful first frame.
+    recoverDeadGatewaySession(reason = '') {
+        try {
+            if (!this.isLivePlayback()) return false;
+            const ch = this.currentChannel;
+            const list = window.app?.channelList;
+            if (!ch || ch.id == null || !list || typeof list.selectChannel !== 'function') return false;
+            const key = `${ch.sourceId ?? ch.source_id ?? ''}:${ch.id}`;
+            if (key !== this._gatewayRecreateKey) {
+                this._gatewayRecreateKey = key;
+                this._gatewayRecreateCount = 0;
+            }
+            const MAX_RECREATES = 2;
+            if (this._gatewayRecreateCount >= MAX_RECREATES) {
+                console.warn(`[Player] Gateway session gone (${reason}); already re-resolved ${MAX_RECREATES}x — giving up on channel ${ch.id}`);
+                return false;
+            }
+            this._gatewayRecreateCount += 1;
+            const attempt = this._gatewayRecreateCount;
+            console.warn(`[Player] Gateway session gone (${reason}); re-resolving fresh session ${attempt}/${MAX_RECREATES} for channel ${ch.id}`);
+            try {
+                this._sendLiveEvent('playback_error', {
+                    errorCode: 'LIVE_session_gone',
+                    errorMessage: `gateway session 404; re-resolve ${attempt}/${MAX_RECREATES}`,
+                    metadata: { reason, recreateAttempt: attempt }
+                });
+            } catch (_) {}
+            // Cancel the dumb same-URL retry loop and re-select the channel. The
+            // small delay lets the failed pipeline unwind and gives the provider's
+            // single slot a moment to release before the new session is created.
+            this.resetGatewayHlsRetries();
+            const dataset = { channelId: ch.id, sourceId: String(ch.sourceId ?? ch.source_id ?? '') };
+            setTimeout(() => {
+                try {
+                    Promise.resolve(list.selectChannel(dataset)).catch((e) => {
+                        console.warn('[Player] Gateway re-resolve failed:', e?.message || e);
+                    });
+                } catch (e) {
+                    console.warn('[Player] Gateway re-resolve threw:', e?.message || e);
+                }
+            }, 600);
+            return true;
+        } catch (_) {
+            return false;
+        }
     }
 
     async updateTranscodeStatus(mode, text) {
