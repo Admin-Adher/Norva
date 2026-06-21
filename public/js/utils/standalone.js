@@ -99,11 +99,12 @@
                 return 'handled';
             }
 
-            // The Live TV channel drawer.
+            // The Live TV channel drawer (sidebar + its dimmed backdrop overlay).
             const sidebar = document.getElementById('channel-sidebar');
             if (sidebar && sidebar.classList.contains('active')) {
                 sidebar.classList.remove('active');
-                document.querySelectorAll('.channel-overlay.active').forEach((o) => o.classList.remove('active'));
+                document.getElementById('channel-sidebar-overlay')?.classList.remove('active');
+                document.getElementById('channel-toggle-btn')?.classList.remove('active');
                 return 'handled';
             }
 
