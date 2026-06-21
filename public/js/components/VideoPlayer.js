@@ -2456,10 +2456,12 @@ class VideoPlayer {
         this.overlay?.classList.add('hidden');
         this.controlsOverlay?.classList.remove('hidden');
         this.loadingSpinner?.classList.add('show');
-        // Expire the previous session so the gateway frees the provider's single
-        // slot before the new ffmpeg starts. Awaited so the teardown is complete
-        // before the caller creates the replacement session.
-        try { await this.stopCloudPlaybackSessions(); } catch (_) {}
+        // Expire the previous session in the BACKGROUND — do NOT block the switch
+        // on it. The synchronous hls.destroy() above is what prevents the churn;
+        // the new session's creation already closes the user's prior gateway
+        // session, so awaiting this full client->edge->gateway round-trip only
+        // added ~1-2s of dead time to every zap.
+        try { this.stopCloudPlaybackSessions().catch(() => {}); } catch (_) {}
     }
 
     /**
