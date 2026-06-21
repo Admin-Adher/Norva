@@ -6733,6 +6733,34 @@ kbd {
   .watch-live-badge.is-live .live-badge-dot { animation: none; }
 }
 
+/* Floating "go fullscreen" button on the inline live player (top-right) —
+   shown while a channel plays and the controls bar is auto-hidden. */
+.live-fullscreen-cta {
+  position: absolute;
+  top: calc(12px + env(safe-area-inset-top, 0px));
+  right: calc(12px + env(safe-area-inset-right, 0px));
+  z-index: 30;
+  width: 44px;
+  height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 10px;
+  background: rgba(10, 12, 18, 0.62);
+  color: #fff;
+  cursor: pointer;
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  opacity: 0.9;
+  transition: opacity 0.2s ease, background 0.2s ease, transform 0.1s ease;
+}
+
+.live-fullscreen-cta:hover { opacity: 1; background: rgba(10, 12, 18, 0.85); }
+.live-fullscreen-cta:active { transform: scale(0.94); }
+.live-fullscreen-cta .icon { width: 24px; height: 24px; }
+.live-fullscreen-cta.hidden { display: none; }
+
 /* Volume Slider */
 .watch-volume {
   width: 80px;

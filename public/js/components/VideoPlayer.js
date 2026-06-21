@@ -479,6 +479,15 @@ class VideoPlayer {
 
         this.container.addEventListener('dblclick', () => this.toggleFullscreen());
 
+        // Floating "go fullscreen" button on the inline live player. It's the
+        // obvious way to expand the preview; it shows while a channel is playing
+        // and the controls bar is auto-hidden (so it never overlaps the bar).
+        this.liveFsCta = document.getElementById('live-fullscreen-cta');
+        this.liveFsCta?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.toggleFullscreen();
+        });
+
         // Overlay Auto-hide Logic
         let overlayTimeout;
         const sidebarExpandBtn = document.getElementById('sidebar-expand-btn');
@@ -487,6 +496,9 @@ class VideoPlayer {
             this.controlsOverlay.classList.remove('hidden');
             this.container.style.cursor = 'default';
             sidebarExpandBtn?.classList.add('visible');
+            // Full controls (with their own fullscreen button) are up — tuck the
+            // floating CTA away to avoid doubling up.
+            this.liveFsCta?.classList.add('hidden');
             resetOverlayTimer();
         };
 
@@ -495,6 +507,11 @@ class VideoPlayer {
                 this.controlsOverlay.classList.add('hidden');
                 this.container.style.cursor = 'none';
                 sidebarExpandBtn?.classList.remove('visible');
+                // Controls hidden while watching live → surface the floating
+                // fullscreen button so expanding is always one click away.
+                if (this.isLivePlayback() && this.hasCurrentMedia()) {
+                    this.liveFsCta?.classList.remove('hidden');
+                }
             }
         };
 
@@ -2639,6 +2656,7 @@ class VideoPlayer {
         // #2 (channel change -> _playInternal calls stop()): drop the live badge
         // and its monitor so the next live channel starts cleanly at the edge.
         this.stopLiveSyncMonitor();
+        this.liveFsCta?.classList.add('hidden');
         this._clearingMedia = true;
 
         if (this.hls) {
@@ -2693,6 +2711,7 @@ class VideoPlayer {
         // Reset trigger #2 (channel change): clear the live badge up-front so it
         // never lingers from the outgoing channel during the switch.
         this.stopLiveSyncMonitor();
+        this.liveFsCta?.classList.add('hidden');
         this._clearingMedia = true;
         if (this.hls) { try { this.hls.destroy(); } catch (_) {} this.hls = null; }
         try { this.video.pause(); this.video.removeAttribute('src'); this.video.load(); } catch (_) {}
@@ -2750,6 +2769,7 @@ class VideoPlayer {
     showError(message) {
         // Replace the spinner with the message (a failed channel must not spin forever).
         this.loadingSpinner?.classList.remove('show');
+        this.liveFsCta?.classList.add('hidden');
         this.overlay.classList.remove('hidden');
         this.overlay.querySelector('.overlay-content').innerHTML = `<p style="color: var(--color-error);">${message}</p>`;
     }
