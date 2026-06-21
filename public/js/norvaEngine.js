@@ -34,8 +34,9 @@
   // (even with gateway retries that's slow), so fetch large windows and serve
   // libav's small block reads from memory — sequential playback then uses ~1
   // upstream connection per window instead of one per ~64 KB block.
-  const RA_WINDOW = 4 * 1024 * 1024; // bytes fetched per window
-  const RA_WINDOWS = 4;              // windows kept (header + cues + playhead)
+  const RA_WINDOW = 4 * 1024 * 1024;        // bytes fetched per steady-state window
+  const RA_FIRST_WINDOW = 2 * 1024 * 1024;  // smaller first window → faster startup
+  const RA_WINDOWS = 4;                      // windows kept (header + cues + playhead)
 
   const AAC_SAMPLE_RATE = 48000;
   const AAC_CHANNEL_LAYOUT = 3; // stereo
@@ -77,7 +78,7 @@
     av1: ['av01.0.08M.08'],
   };
 
-  const ENGINE_VERSION = 5;
+  const ENGINE_VERSION = 6;
 
   class NorvaEngine {
     constructor(videoEl, opts = {}) {
@@ -169,10 +170,12 @@
       try {
         this.size = await this._probeSize(this.url);
         if (!this.size) return;
-        const jobs = [this._readRange(0, Math.min(RA_WINDOW, this.size))];
-        if (this.size > RA_WINDOW + 1048576) {
+        // Small first window (demux needs little) + the MKV tail in parallel, so
+        // the tail (cues, for seeking) is effectively free under the first fetch.
+        const jobs = [this._cacheWindow(0, Math.min(RA_FIRST_WINDOW, this.size))];
+        if (this.size > RA_FIRST_WINDOW + 1048576) {
           const tailLen = Math.min(1048576, this.size);
-          jobs.push(this._readRange(this.size - tailLen, tailLen));
+          jobs.push(this._cacheWindow(this.size - tailLen, tailLen));
         }
         await Promise.allSettled(jobs);
       } catch (_) { /* _openInput surfaces the real error */ }
@@ -275,14 +278,19 @@
       for (const w of this._raCache) {
         if (pos >= w.start && end <= w.end) { this._raTouch(w); return w.buf.subarray(pos - w.start, end - w.start); }
       }
-      const winStart = pos;
       const winEnd = Math.min(pos + Math.max(RA_WINDOW, len), this.size);
-      const buf = await this._fetchRange(winStart, winEnd);
-      const w = { start: winStart, end: winStart + buf.length, buf };
+      const w = await this._cacheWindow(pos, winEnd - pos);
+      const sliceEnd = Math.min(end, w.end);
+      return w.buf.subarray(pos - w.start, Math.max(pos - w.start, sliceEnd - w.start));
+    }
+
+    // Fetch [start, start+len) and insert it as a read-ahead window (LRU).
+    async _cacheWindow(start, len) {
+      const buf = await this._fetchRange(start, start + len);
+      const w = { start, end: start + buf.length, buf };
       this._raCache.push(w);
       while (this._raCache.length > RA_WINDOWS) this._raCache.shift();
-      const sliceEnd = Math.min(end, w.end);
-      return buf.subarray(pos - w.start, Math.max(pos - w.start, sliceEnd - w.start));
+      return w;
     }
 
     _raTouch(w) {
