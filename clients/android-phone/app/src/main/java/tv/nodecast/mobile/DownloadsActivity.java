@@ -157,18 +157,11 @@ public final class DownloadsActivity extends Activity {
         poster.setScaleType(ImageView.ScaleType.CENTER_CROP);
         poster.setBackground(rounded(Color.parseColor("#1d1d27"), 10));
         roundCorners(poster, dp(10));
-        boolean hasPoster = false;
-        if (it.posterFile != null && !it.posterFile.isEmpty()) {
-            File pf = new File(it.posterFile);
-            if (pf.exists()) {
-                try {
-                    poster.setImageBitmap(BitmapFactory.decodeFile(pf.getAbsolutePath()));
-                    hasPoster = true;
-                } catch (Exception ignored) { }
-            }
-        }
-        if (!hasPoster) {
-            poster.setImageDrawable(null);
+        String posterPath = posterPathFor(it);
+        if (posterPath != null) {
+            try {
+                poster.setImageBitmap(BitmapFactory.decodeFile(posterPath));
+            } catch (Exception ignored) { }
         }
         LinearLayout.LayoutParams plp = new LinearLayout.LayoutParams(dp(56), dp(82));
         plp.rightMargin = dp(14);
@@ -276,11 +269,37 @@ public final class DownloadsActivity extends Activity {
         try {
             if (it.filePath != null && !it.filePath.isEmpty()) new File(it.filePath).delete();
         } catch (Exception ignored) { }
+        // Delete the poster via both the manifest path and the deterministic
+        // location (in case the manifest pointer was lost).
         try {
             if (it.posterFile != null && !it.posterFile.isEmpty()) new File(it.posterFile).delete();
         } catch (Exception ignored) { }
+        try {
+            new File(posterDir(), posterName(it.id)).delete();
+        } catch (Exception ignored) { }
         DownloadStore.remove(this, it.id);
         render();
+    }
+
+    /** The poster bitmap path: manifest pointer first, else the deterministic file. */
+    private String posterPathFor(DownloadStore.Item it) {
+        if (it.posterFile != null && !it.posterFile.isEmpty()) {
+            File f = new File(it.posterFile);
+            if (f.exists()) return it.posterFile;
+        }
+        if (it.id != null) {
+            File f = new File(posterDir(), posterName(it.id));
+            if (f.exists()) return f.getAbsolutePath();
+        }
+        return null;
+    }
+
+    private File posterDir() {
+        return new File(getFilesDir(), "posters");
+    }
+
+    private static String posterName(String id) {
+        return (id == null ? "x" : id.replaceAll("[^A-Za-z0-9_.-]", "_")) + ".jpg";
     }
 
     // ---- Styling helpers ----

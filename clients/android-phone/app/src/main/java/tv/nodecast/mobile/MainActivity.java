@@ -462,11 +462,18 @@ public class MainActivity extends Activity {
                 if ("done".equals(existing.state)) return; // already saved
                 // queued / downloading / failed: re-queue the SAME entry so the
                 // existing per-file key is reused (a new key would corrupt the
-                // partial encrypted file on resume). Refresh the provider URL.
+                // partial encrypted file on resume). Refresh the provider URL and
+                // poster, and re-fetch the poster if it never landed.
                 if (url != null && !url.isEmpty()) existing.url = url;
+                String freshPoster = o.optString("posterUrl", existing.posterUrl);
+                if (freshPoster != null && !freshPoster.isEmpty()) existing.posterUrl = freshPoster;
                 existing.state = "queued";
                 existing.error = "";
                 DownloadStore.put(this, existing);
+                if ((existing.posterFile == null || existing.posterFile.isEmpty())
+                        && existing.posterUrl != null && !existing.posterUrl.isEmpty()) {
+                    downloadPosterAsync(id, existing.posterUrl);
+                }
                 ensureNotifPermission();
                 startDownloadService(id);
                 return;

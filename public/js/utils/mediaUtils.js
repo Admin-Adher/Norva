@@ -745,6 +745,20 @@ const MediaUtils = (() => {
         return `https://image.tmdb.org/t/p/${size}${tmdb.poster_path}`;
     }
 
+    /**
+     * A directly-fetchable poster URL for native offline downloads. Prefers the
+     * public TMDB CDN (absolute, no auth), else the raw provider image when it's
+     * an absolute http(s) URL. Deliberately avoids safeImageUrl's cloud/edge
+     * image proxy (which needs auth headers the native downloader can't send)
+     * and relative proxy paths (which a native URL fetch can't resolve).
+     */
+    function downloadablePosterUrl(item) {
+        const tmdb = tmdbPosterUrl(item && item.tmdb, 'w342');
+        if (tmdb) return tmdb;
+        const raw = String((item && (item.stream_icon || item.cover || item.poster)) || '').trim();
+        return /^https?:\/\//i.test(raw) ? raw : '';
+    }
+
     function playbackHintFromItem(item = {}, base = {}) {
         const variant = item.defaultVariant || item.default_variant || item.variant || {};
         const data = item.data || {};
@@ -849,7 +863,7 @@ const MediaUtils = (() => {
         analyzeLanguageCompatibility, scoreVersionLanguage, scoreTitleForPreferences,
         orderVersionsByPreference, versionLabel, versionLanguageBadge,
         saveFilters, loadFilters, escapeHtml, tmdbPosterUrl, parseDurationToSeconds,
-        playbackHintFromItem, liveGatewayMode, safeImageUrl
+        playbackHintFromItem, liveGatewayMode, safeImageUrl, downloadablePosterUrl
     };
 })();
 

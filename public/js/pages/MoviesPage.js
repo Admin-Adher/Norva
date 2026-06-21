@@ -1239,8 +1239,7 @@ class MoviesPage {
                 itemType: 'movie',
                 title: movie.tmdb?.title || movie.name || 'Movie',
                 subtitle: '',
-                posterUrl: MediaUtils.safeImageUrl(
-                    movie.stream_icon || movie.cover || MediaUtils.tmdbPosterUrl(movie.tmdb)) || '',
+                posterUrl: MediaUtils.downloadablePosterUrl(movie),
                 container,
                 durationSeconds: movie.tmdb?.runtime ? movie.tmdb.runtime * 60 : 0
             };

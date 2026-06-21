@@ -1640,8 +1640,7 @@ class SeriesPage {
                 itemType: 'episode',
                 title: showTitle,
                 subtitle: `S${seasonNum}E${episodeNum} · ${episodeTitle}`,
-                posterUrl: MediaUtils.safeImageUrl(this.currentSeries?.cover
-                    || this.currentSeries?.stream_icon || MediaUtils.tmdbPosterUrl(this.currentSeries?.tmdb)) || '',
+                posterUrl: MediaUtils.downloadablePosterUrl(this.currentSeries),
                 container,
                 durationSeconds: 0
             };
