@@ -235,8 +235,9 @@ class SeriesPage {
         this.renderContinueWatching();
 
         if (this.seriesList.length === 0) {
-            await this.loadCategories();
-            await this.loadSeries();
+            // Categories only feed the filter dropdown — load them alongside the
+            // series page instead of gating the grid's first paint on them.
+            await Promise.all([this.loadCategories(), this.loadSeries()]);
         } else {
             this.filterAndRender();
         }

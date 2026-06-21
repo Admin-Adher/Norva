@@ -371,6 +371,29 @@
         return requestToBase(apiBase(), method, path, body, options);
     }
 
+    // The source LIST rarely changes within a session, yet several pages re-fetch
+    // it on every view (movies, series, live, home, source health) — fanning a
+    // single navigation out into ~5 identical /sources round-trips, each paying
+    // the edge function's cold-start. Cache it briefly and share one in-flight
+    // request. (Live sync STATUS is read from the separate /sources/status
+    // endpoint, which stays uncached, so this never staleness progress.)
+    let _sourcesCache = null;        // { at, data }
+    let _sourcesInFlight = null;
+    const SOURCES_TTL_MS = 30 * 1000;
+    function invalidateSourcesCache() { _sourcesCache = null; }
+    function cloneJson(d) { try { return d == null ? d : JSON.parse(JSON.stringify(d)); } catch (_) { return d; } }
+    function listSourcesCached() {
+        if (_sourcesCache && (Date.now() - _sourcesCache.at) < SOURCES_TTL_MS) {
+            return Promise.resolve(cloneJson(_sourcesCache.data));
+        }
+        if (!_sourcesInFlight) {
+            _sourcesInFlight = request('GET', '/sources')
+                .then((data) => { _sourcesCache = { at: Date.now(), data }; return data; })
+                .finally(() => { _sourcesInFlight = null; });
+        }
+        return _sourcesInFlight.then(cloneJson);
+    }
+
     async function sourceSyncRequest(id) {
         const path = `/sources/${encodeURIComponent(id)}/sync?country=${encodeURIComponent(resolveCountry())}`;
         try {
@@ -581,9 +604,9 @@
         },
 
         sources: {
-            list: () => request('GET', '/sources'),
-            create: (source) => request('POST', '/sources', source),
-            update: (id, patch) => request('PATCH', `/sources/${encodeURIComponent(id)}`, patch),
+            list: () => listSourcesCached(),
+            create: (source) => request('POST', '/sources', source).then((r) => { invalidateSourcesCache(); return r; }),
+            update: (id, patch) => request('PATCH', `/sources/${encodeURIComponent(id)}`, patch).then((r) => { invalidateSourcesCache(); return r; }),
             seriesInfo: (id, seriesId) => seriesInfoRequest(id, seriesId),
             shortEpg: (id, streamId, limit = 8) => request(
                 'GET',
@@ -593,9 +616,9 @@
                 'GET',
                 `/sources/${encodeURIComponent(id)}/epg${query(params)}`
             ),
-            sync: (id) => sourceSyncRequest(id),
-            finalize: (id, params = {}) => sourceFinalizeRequest(id, params),
-            remove: (id) => request('DELETE', `/sources/${encodeURIComponent(id)}`)
+            sync: (id) => sourceSyncRequest(id).then((r) => { invalidateSourcesCache(); return r; }),
+            finalize: (id, params = {}) => sourceFinalizeRequest(id, params).then((r) => { invalidateSourcesCache(); return r; }),
+            remove: (id) => request('DELETE', `/sources/${encodeURIComponent(id)}`).then((r) => { invalidateSourcesCache(); return r; })
         },
 
         mediaItems: {
