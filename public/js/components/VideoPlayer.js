@@ -2358,6 +2358,38 @@ class VideoPlayer {
         return sessionTeardown;
     }
 
+    // Tear down the currently-playing live channel in preparation for switching to
+    // another one — WITHOUT resetting the surface to the idle "select a channel"
+    // state (keeps the spinner up so a switch looks like a normal load).
+    //
+    // Why this exists: on a channel switch the new gateway session is created
+    // while the OLD hls.js is still polling the previous session's playlist. The
+    // moment the new session is created the edge function closes the user's prior
+    // gateway session (single provider slot), so the old hls.js 404s, which used
+    // to trigger self-heal churn — a cascade of sessions each killing the last,
+    // leaving the channel broken until a page refresh. Killing the old player and
+    // releasing its session BEFORE creating the new one removes that race.
+    async prepareLiveSwitch() {
+        ++this._variantSwitchSeq;
+        this._clearVariantFallbackTimer?.();
+        this.resetGatewayHlsRetries();
+        this._gatewayRecreateCount = 0;
+        this._gatewayRecreateKey = null;
+        this._clearingMedia = true;
+        if (this.hls) { try { this.hls.destroy(); } catch (_) {} this.hls = null; }
+        try { this.video.pause(); this.video.removeAttribute('src'); this.video.load(); } catch (_) {}
+        this._clearingMedia = false;
+        this.currentUrl = null;
+        // Keep the surface in "loading", not idle.
+        this.overlay?.classList.add('hidden');
+        this.controlsOverlay?.classList.remove('hidden');
+        this.loadingSpinner?.classList.add('show');
+        // Expire the previous session so the gateway frees the provider's single
+        // slot before the new ffmpeg starts. Awaited so the teardown is complete
+        // before the caller creates the replacement session.
+        try { await this.stopCloudPlaybackSessions(); } catch (_) {}
+    }
+
     /**
      * Update now playing display
      */

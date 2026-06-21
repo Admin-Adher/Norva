@@ -2842,6 +2842,18 @@ class ChannelList {
                 const gatewayMode = (typeof MediaUtils !== 'undefined' && MediaUtils.liveGatewayMode)
                     ? MediaUtils.liveGatewayMode(channel)
                     : 'transcode';
+                // Channel SWITCH: tear down the currently-playing channel BEFORE
+                // creating the new gateway session. The provider grants one slot,
+                // so creating the new session closes the old one; if the old
+                // hls.js is still running it 404s on the just-deleted playlist and
+                // triggers self-heal churn (a cascade of sessions that each kill
+                // the previous — the broken-switch symptom). Stopping first makes a
+                // switch behave like the fresh page-load case, which works.
+                const switchPlayer = window.app?.player;
+                if (switchPlayer && (switchPlayer.hls || switchPlayer.currentUrl) && typeof switchPlayer.prepareLiveSwitch === 'function') {
+                    try { await switchPlayer.prepareLiveSwitch(); } catch (_) { /* best-effort */ }
+                    if (selectSeq !== this._selectRequestSeq) return;
+                }
                 const result = await API.proxy.xtream.getStreamUrl(channel.sourceId, channel.streamId, 'live', providerContainer, { gatewayMode });
                 streamUrl = result.url;
                 channel.cloudPlaybackSessionId = result.sessionId || null;
