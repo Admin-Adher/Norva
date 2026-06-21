@@ -1893,12 +1893,13 @@ class VideoPlayer {
     // Return to the real-time live edge. Used by the badge click and the
     // X-min-after-pause auto-reset.
     //
-    // Preferred path: re-launch the current channel exactly like a channel
-    // switch (ChannelList.selectChannel). A fresh session restarts at the
-    // real-time edge with no stale buffer, and — crucially — it reuses the
-    // slot-safe prepareLiveSwitch teardown, so it can't reintroduce the
-    // single-slot provider churn. Falls back to an in-buffer seek only when the
-    // channel list isn't reachable (detached player).
+    // METHOD: re-launch the current channel exactly like a channel switch
+    // (ChannelList.selectChannel) — the reliable "reload" path. A fresh session
+    // restarts at the real-time edge with no stale buffer, and it reuses the
+    // slot-safe prepareLiveSwitch teardown so it can't reintroduce single-slot
+    // provider churn. This is the chosen behaviour; the in-buffer seek below is
+    // a pure last resort, used ONLY if the channel list is unreachable (which
+    // doesn't happen in the live app) — never as the normal "back to live".
     jumpToLive() {
         if (!this.isLivePlayback() || !this.video) return;
         // Cancel the auto-snap and clear offset bookkeeping up-front.
@@ -1920,10 +1921,10 @@ class VideoPlayer {
                     sourceType: ch.sourceType
                 })).catch(() => {});
                 return;
-            } catch (_) { /* fall through to in-buffer seek */ }
+            } catch (_) { /* fall through to the last-resort seek */ }
         }
 
-        // Fallback: seek within the available window to the live edge.
+        // Last resort only (reload impossible — no channel list): seek to edge.
         const edge = this.liveEdgePosition();
         if (edge != null) {
             try { this.video.currentTime = Math.max(0, edge - 0.5); } catch (_) {}
