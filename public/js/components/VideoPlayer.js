@@ -8,6 +8,14 @@ function isMobile() {
     return /Mobi|Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
 }
 
+// Live "behind the edge" badge tuning.
+// - Below the threshold the user is treated as live (no nagging on the normal
+//   2-3s the player sits behind the edge for stability).
+// - After being paused this long, snap back to live so a long-forgotten pause
+//   doesn't leave the user silently minutes behind (and frees the buffer).
+const LIVE_BEHIND_THRESHOLD_S = 10;
+const LIVE_PAUSE_AUTOSNAP_MS = 5 * 60 * 1000;
+
 class VideoPlayer {
     constructor() {
         this.video = document.getElementById('video-player');
@@ -47,6 +55,18 @@ class VideoPlayer {
         this._gatewayRecreateKey = null;
         this.currentCloudPlaybackSessionId = null;
         this.activeCloudPlaybackSessionIds = new Set();
+
+        // Live "behind the live edge" badge state. The gap is computed entirely
+        // client-side (no server round-trip), and the monitor is torn down on
+        // every channel switch / VOD launch / long pause, so it never runs idle.
+        this._liveBadge = null;
+        this._liveBadgeDot = null;
+        this._liveBadgeText = null;
+        this._liveSyncTimer = null;       // 1s badge refresh (live only)
+        this._liveAutoSnapTimer = null;   // X-min-after-pause snap-to-live
+        this._livePausedAt = 0;           // epoch ms of the current pause, else 0
+        this._liveBehindBaseSeconds = 0;  // accumulated offset (native-HLS fallback)
+        this._liveBehindSeconds = 0;      // last computed gap (for callers/tests)
 
         // Chrome rejects a pending video.play() with AbortError when we pause()/
         // load() to switch channels (and the browser's own autoplay promise isn't
@@ -313,6 +333,20 @@ class VideoPlayer {
 
         this.video.addEventListener('play', updatePlayUI);
         this.video.addEventListener('pause', updatePlayUI);
+
+        // Live "behind the edge" badge: clicking it (when behind) jumps to live.
+        this._liveBadge = document.getElementById('player-live-badge');
+        this._liveBadgeDot = this._liveBadge?.querySelector('.live-badge-dot');
+        this._liveBadgeText = this._liveBadge?.querySelector('.live-badge-text');
+        this._liveBadge?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (this._liveBadge.classList.contains('behind')) this.jumpToLive();
+        });
+        // Track pause/resume to drive the badge and the X-min snap-to-live timer.
+        this.video.addEventListener('pause', () => this._onLivePauseStateChange(true));
+        this.video.addEventListener('play', () => this._onLivePauseStateChange(false));
+        // A manual seek (scrubbing back/forward in the DVR window) changes the gap.
+        this.video.addEventListener('seeked', () => { if (this._liveSyncTimer) this._updateLiveSyncBadge(); });
 
         // Loading spinner
         this.video.addEventListener('waiting', () => {
@@ -1756,6 +1790,144 @@ class VideoPlayer {
         if (target && window.PlaybackHealth?.report) {
             PlaybackHealth.report({ ...target, status: 'ok' }).catch(() => { });
         }
+        // A fresh live channel starts at the edge — begin tracking the gap.
+        if (this.isLivePlayback()) this.startLiveSyncMonitor();
+    }
+
+    // ---- Live "behind the edge" badge -------------------------------------
+    // The whole feature is client-side: the gap is read from the media element /
+    // hls.js (no server call), and the monitor only runs while a live channel is
+    // active — torn down on every channel switch, VOD launch and long pause.
+
+    startLiveSyncMonitor() {
+        if (!this.isLivePlayback() || !this._liveBadge) return;
+        this._livePausedAt = this.video?.paused ? Date.now() : 0;
+        this._liveBehindBaseSeconds = 0;
+        // Show as live immediately; the first tick refines it.
+        this._liveBadge.classList.add('is-live');
+        this._liveBadge.classList.remove('behind');
+        if (this._liveBadgeText) this._liveBadgeText.textContent = 'EN DIRECT';
+        this._showLiveBadge(true);
+        this._updateLiveSyncBadge();
+        if (this._liveSyncTimer) return;
+        this._liveSyncTimer = setInterval(() => this._updateLiveSyncBadge(), 1000);
+    }
+
+    stopLiveSyncMonitor() {
+        if (this._liveSyncTimer) { clearInterval(this._liveSyncTimer); this._liveSyncTimer = null; }
+        if (this._liveAutoSnapTimer) { clearTimeout(this._liveAutoSnapTimer); this._liveAutoSnapTimer = null; }
+        this._livePausedAt = 0;
+        this._liveBehindBaseSeconds = 0;
+        this._liveBehindSeconds = 0;
+        this._showLiveBadge(false);
+    }
+
+    _showLiveBadge(show) {
+        this._liveBadge?.classList.toggle('hidden', !show);
+    }
+
+    // Furthest live position the player can reach right now (the live edge),
+    // or null when it can't be determined.
+    liveEdgePosition() {
+        try {
+            if (this.hls && Number.isFinite(this.hls.liveSyncPosition)) {
+                return this.hls.liveSyncPosition;
+            }
+            const s = this.video?.seekable;
+            if (s && s.length) return s.end(s.length - 1);
+        } catch (_) {}
+        return null;
+    }
+
+    // Seconds the user currently sits behind the live edge.
+    liveBehindSeconds() {
+        if (!this.video) return 0;
+        // hls.js: liveSyncPosition tracks the playlist edge (advances while paused
+        // and drops back to ~0 once hls catches up), so it's accurate everywhere.
+        if (this.hls && Number.isFinite(this.hls.liveSyncPosition)) {
+            const gap = this.hls.liveSyncPosition - this.video.currentTime;
+            return gap > 0 && gap < 86400 ? gap : 0;
+        }
+        // Native HLS (Safari): no liveSyncPosition. The seekable window's end
+        // tracks the edge. While paused some implementations cap it near the
+        // buffer, so fall back to the "elapsed since pause" model the user
+        // described; while playing the seekable gap is the real offset.
+        let gap = 0;
+        try {
+            const s = this.video.seekable;
+            if (s && s.length) gap = Math.max(0, s.end(s.length - 1) - this.video.currentTime);
+        } catch (_) {}
+        if (this._livePausedAt) {
+            const pausedFor = (Date.now() - this._livePausedAt) / 1000;
+            gap = Math.max(gap, this._liveBehindBaseSeconds + pausedFor);
+        } else {
+            // Playing: the seekable gap is the real offset — keep the base in sync
+            // so it can't drift (e.g. if the native player caught up on its own).
+            this._liveBehindBaseSeconds = gap;
+        }
+        return gap < 86400 ? gap : 0;
+    }
+
+    _updateLiveSyncBadge() {
+        if (!this.isLivePlayback() || !this._liveBadge) { this.stopLiveSyncMonitor(); return; }
+        if (typeof document !== 'undefined' && document.hidden) return; // don't churn while backgrounded
+        // Ignore the startup transient before the first real frame.
+        if (!(this.video?.currentTime > 0)) return;
+        const behind = this.liveBehindSeconds();
+        this._liveBehindSeconds = behind;
+        const isBehind = behind >= LIVE_BEHIND_THRESHOLD_S;
+        this._liveBadge.classList.toggle('behind', isBehind);
+        this._liveBadge.classList.toggle('is-live', !isBehind);
+        if (this._liveBadgeText) {
+            this._liveBadgeText.textContent = isBehind
+                ? `En retard de ${this._formatBehind(behind)}`
+                : 'EN DIRECT';
+        }
+        this._liveBadge.title = isBehind ? 'Revenir au direct' : 'En direct';
+    }
+
+    _formatBehind(seconds) {
+        const s = Math.max(0, Math.round(seconds));
+        if (s < 60) return `${s} s`;
+        const m = Math.floor(s / 60);
+        const r = s % 60;
+        return r ? `${m} min ${r} s` : `${m} min`;
+    }
+
+    // Seek to the live edge and resume real-time playback. Used by the badge
+    // click and the X-min-after-pause auto-reset.
+    jumpToLive() {
+        if (!this.isLivePlayback() || !this.video) return;
+        const edge = this.liveEdgePosition();
+        if (edge != null) {
+            try { this.video.currentTime = Math.max(0, edge - 0.5); } catch (_) {}
+        }
+        this._livePausedAt = 0;
+        this._liveBehindBaseSeconds = 0;
+        if (this._liveAutoSnapTimer) { clearTimeout(this._liveAutoSnapTimer); this._liveAutoSnapTimer = null; }
+        try { this.video.play?.().catch(() => {}); } catch (_) {}
+        this._updateLiveSyncBadge();
+    }
+
+    _onLivePauseStateChange(isPaused) {
+        if (!this.isLivePlayback()) return;
+        if (isPaused) {
+            this._livePausedAt = Date.now();
+            // Snap back to live if the stream stays paused too long.
+            if (this._liveAutoSnapTimer) clearTimeout(this._liveAutoSnapTimer);
+            this._liveAutoSnapTimer = setTimeout(() => {
+                this._liveAutoSnapTimer = null;
+                if (this.isLivePlayback()) this.jumpToLive();
+            }, LIVE_PAUSE_AUTOSNAP_MS);
+        } else {
+            // Resumed: bank the time spent paused (native-HLS fallback estimate).
+            if (this._livePausedAt) {
+                this._liveBehindBaseSeconds += (Date.now() - this._livePausedAt) / 1000;
+                this._livePausedAt = 0;
+            }
+            if (this._liveAutoSnapTimer) { clearTimeout(this._liveAutoSnapTimer); this._liveAutoSnapTimer = null; }
+        }
+        if (this._liveSyncTimer) this._updateLiveSyncBadge();
     }
 
     // True only where a local FFmpeg transcoder exists (desktop/Electron or
@@ -2439,6 +2611,10 @@ class VideoPlayer {
         ++this._variantSwitchSeq;
         this._clearVariantFallbackTimer();
         this.resetGatewayHlsRetries();
+        // Reset triggers #1 (VOD launch -> WatchPage calls player.stop()) and
+        // #2 (channel change -> _playInternal calls stop()): drop the live badge
+        // and its monitor so the next live channel starts cleanly at the edge.
+        this.stopLiveSyncMonitor();
         this._clearingMedia = true;
 
         if (this.hls) {
@@ -2490,6 +2666,9 @@ class VideoPlayer {
         this.resetGatewayHlsRetries();
         this._gatewayRecreateCount = 0;
         this._gatewayRecreateKey = null;
+        // Reset trigger #2 (channel change): clear the live badge up-front so it
+        // never lingers from the outgoing channel during the switch.
+        this.stopLiveSyncMonitor();
         this._clearingMedia = true;
         if (this.hls) { try { this.hls.destroy(); } catch (_) {} this.hls = null; }
         try { this.video.pause(); this.video.removeAttribute('src'); this.video.load(); } catch (_) {}
