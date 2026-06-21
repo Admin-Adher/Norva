@@ -359,40 +359,9 @@
     }
 
     async function request(method, path, body, options = {}) {
-        const headers = {
-            'Content-Type': 'application/json',
-            ...(options.headers || {})
-        };
-        const token = options.token === undefined ? getToken() : options.token;
-        if (token) headers.Authorization = `Bearer ${token}`;
-
-        const response = await fetch(`${apiBase()}${path}`, {
-            method,
-            headers,
-            body: body === undefined || body === null ? undefined : JSON.stringify(body)
-        });
-
-        const contentType = response.headers.get('content-type') || '';
-        const payload = contentType.includes('application/json')
-            ? await response.json().catch(() => ({}))
-            : { error: await response.text().catch(() => '') };
-
-        if (!response.ok) {
-            const baseMessage = payload.error || payload.message || `Norva responded with ${response.status}`;
-            const detail = extractUpstreamDetail(payload.details);
-            const message = detail && !baseMessage.includes(detail)
-                ? `${baseMessage} — ${detail}`.slice(0, 400)
-                : baseMessage;
-            const error = new Error(message);
-            error.status = response.status;
-            error.payload = payload;
-            if (isInvalidDeviceTokenResponse(response.status, payload, message)) {
-                markInvalidDeviceToken(error, token);
-            }
-            throw error;
-        }
-
-        return payload;
+        // Delegates to requestToBase so the session refresh-and-retry on 401
+        // (see below) applies uniformly to every cloud call.
+        return requestToBase(apiBase(), method, path, body, options);
     }
 
     async function sourceSyncRequest(id) {
@@ -481,19 +450,54 @@
         return parts.join(' ').trim();
     }
 
+    // Supabase access tokens expire (~1h). When the tab has sat idle past that,
+    // the cached token 401s mid-session and the app wrongly looks logged out —
+    // the onboarding "enter your service details" screen (sources 401) or a
+    // redirect to the landing page (entitlements 401). Transparently refresh the
+    // session via NorvaAuth and retry. Deduped via a single in-flight promise so
+    // the burst of calls that fire when the user returns can't race Supabase's
+    // single-use refresh-token rotation (which would invalidate the session and
+    // defeat the refresh).
+    let _tokenRefreshInFlight = null;
+    function refreshAccessToken() {
+        if (_tokenRefreshInFlight) return _tokenRefreshInFlight;
+        const auth = (typeof window !== 'undefined') ? window.NorvaAuth : null;
+        if (!auth || typeof auth.refreshSession !== 'function') return Promise.resolve(null);
+        _tokenRefreshInFlight = Promise.resolve()
+            .then(() => auth.refreshSession())
+            .then((session) => (session && session.access_token) ? session.access_token : null)
+            .catch(() => null)
+            .finally(() => { _tokenRefreshInFlight = null; });
+        return _tokenRefreshInFlight;
+    }
+
     async function requestToBase(baseUrl, method, path, body, options = {}) {
+        // Only user-session calls (no explicit token) get the refresh-and-retry.
+        // Device tokens ('' / device token) keep their own invalidation path.
+        const usingUserToken = options.token === undefined;
         const headers = {
             'Content-Type': 'application/json',
             ...(options.headers || {})
         };
-        const token = options.token === undefined ? getToken() : options.token;
+        let token = usingUserToken ? getToken() : options.token;
         if (token) headers.Authorization = `Bearer ${token}`;
 
-        const response = await fetch(`${baseUrl}${path}`, {
+        const send = () => fetch(`${baseUrl}${path}`, {
             method,
             headers,
             body: body === undefined || body === null ? undefined : JSON.stringify(body)
         });
+
+        let response = await send();
+
+        if (response.status === 401 && usingUserToken && token) {
+            const fresh = await refreshAccessToken();
+            if (fresh && fresh !== token) {
+                token = fresh;
+                headers.Authorization = `Bearer ${token}`;
+                response = await send();
+            }
+        }
 
         const contentType = response.headers.get('content-type') || '';
         const payload = contentType.includes('application/json')
