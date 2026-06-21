@@ -119,7 +119,7 @@
     av1: ['av01.0.08M.08'],
   };
 
-  const ENGINE_VERSION = 10;
+  const ENGINE_VERSION = 11;
 
   class NorvaEngine {
     constructor(videoEl, opts = {}) {
@@ -233,6 +233,7 @@
       const f0 = this._fetchCount, b0 = this._fetchBytes;
       const off = this._offsetForTime(t);
       const warm = off != null && this._raCache.some((w) => off >= w.start && off < w.end);
+      this._seekDiag = { t, vpts: null, apts: null }; // captures where data actually lands
       let step = 'stopPump';
       try {
         await this._stopPump();
@@ -242,6 +243,7 @@
         step = 'clearSB'; await this._clearSourceBuffer();
         step = 'initMuxer'; await this._initMuxer();   // fresh init segment → onwrite
         this._startPump();
+        setTimeout(() => { if (!this.destroyed) this._logPostSeek(); }, 1800);
         this.seekTimings = {
           warm, setupMs: Math.round(performance.now() - st0),
           fetches: this._fetchCount - f0, fetchKB: Math.round((this._fetchBytes - b0) / 1024),
@@ -268,6 +270,16 @@
         await this._cacheWindow(off, Math.min(RA_FIRST_WINDOW, this.size - off));
         this.log(`prefetch t=${t.toFixed(0)}s off=${off}`);
       } catch (_) { /* a real seek will fetch it */ } finally { this._prefetching = false; }
+    }
+
+    // Diagnostic: where did the muxed data actually land vs. where the element is?
+    _logPostSeek() {
+      try {
+        const b = this.sb.buffered, r = [];
+        for (let i = 0; i < b.length; i++) r.push(b.start(i).toFixed(1) + '-' + b.end(i).toFixed(1));
+        const d = this._seekDiag || {};
+        this.log(`postseek target=${(d.t || 0).toFixed(1)} vpts=${d.vpts == null ? '?' : d.vpts.toFixed(1)} apts=${d.apts == null ? '?' : d.apts.toFixed(1)} buffered=[${r.join(',')}] ct=${this.video.currentTime.toFixed(1)} rs=${this.video.readyState}`);
+      } catch (_) {}
     }
 
     // Largest cue offset whose timestamp is ≤ t (the cluster the demuxer will seek to).
@@ -684,6 +696,9 @@
             else {
               const fr = await lib.ff_decode_multi(this.decCtx, this.decPkt, this.decFrame, [p], false);
               const enc = await this._encodeAudio(fr, false);
+              if (this._seekDiag && this._seekDiag.apts === null && enc.length) {
+                this._seekDiag.apts = to64(enc[0].pts, enc[0].ptshi) / AAC_SAMPLE_RATE;
+              }
               for (const ep of enc) writeList.push(ep);
             }
           }
@@ -723,6 +738,9 @@
 
     _setVideoDts(p) {
       const pts = to64(p.pts, p.ptshi);
+      if (this._seekDiag && this._seekDiag.vpts === null && this.vS) {
+        this._seekDiag.vpts = pts * this.vS.time_base_num / this.vS.time_base_den;
+      }
       if (this.vBase === null) { this.vBase = pts; this.vFd0 = (p.duration || 0) > 0 ? p.duration : 1; this.vOffset = D_REORDER * this.vFd0; }
       const [lo, hi] = from64(this.vBase + this.vCum - this.vOffset);
       p.dts = lo; p.dtshi = hi;
