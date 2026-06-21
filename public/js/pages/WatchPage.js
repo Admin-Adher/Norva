@@ -133,6 +133,10 @@ class WatchPage {
         this.resumeSnapshotKey = 'norva-watch-resume-v1';
         this.resumeSnapshotTtlMs = 6 * 60 * 60 * 1000;
         this.resumeSnapshotSaveIntervalMs = 2000;
+        // Persistent per-title resume positions (localStorage): survives quit and
+        // tab close, independent of the catalog/server, used as a resume fallback.
+        this.resumePositionsKey = 'norva-resume-pos-v1';
+        this.resumePositionsTtlMs = 7 * 24 * 60 * 60 * 1000;
         this._lastResumeSnapshotSaveAt = 0;
         this._resumeRestorePromise = null;
         this._resumePlaybackMetadata = null;
@@ -793,6 +797,8 @@ class WatchPage {
         } catch (error) {
             console.warn('[WatchPage] Could not persist playback resume snapshot:', error?.message || error);
         }
+        // Also persist a durable per-title position (survives quit + tab close).
+        this._persistResumePosition();
     }
 
     readResumeSnapshot() {
@@ -821,6 +827,54 @@ class WatchPage {
         } catch (_) {
             // Ignore storage cleanup failures.
         }
+    }
+
+    _resumePositionId(content) {
+        const c = content || this.content || {};
+        if (!c.id || !c.sourceId) return null;
+        return `${c.sourceId}:${c.id}:${c.currentSeason || ''}:${c.currentEpisode || ''}`;
+    }
+
+    // Persist the current playback position per title (localStorage). Survives
+    // quit + tab close, unlike the sessionStorage snapshot which goBack() clears.
+    _persistResumePosition() {
+        try {
+            const id = this._resumePositionId();
+            if (!id) return;
+            const pos = Math.floor(this.getResumeSnapshotPosition?.() || 0);
+            const dur = Math.floor(this.getDisplayDuration?.() || this.durationHint || 0);
+            if (pos < 12) return;                         // too early to matter
+            if (dur > 0 && pos >= dur * 0.95) return;     // near the end → no resume
+            let map = {};
+            try { map = JSON.parse(localStorage.getItem(this.resumePositionsKey) || '{}') || {}; } catch (_) { map = {}; }
+            map[id] = { position: pos, duration: dur, savedAt: Date.now() };
+            const entries = Object.entries(map);
+            if (entries.length > 60) { // cap + drop oldest
+                entries.sort((a, b) => (b[1].savedAt || 0) - (a[1].savedAt || 0));
+                map = Object.fromEntries(entries.slice(0, 60));
+            }
+            localStorage.setItem(this.resumePositionsKey, JSON.stringify(map));
+        } catch (_) { /* best-effort */ }
+    }
+
+    _loadResumePosition(content) {
+        try {
+            const id = this._resumePositionId(content);
+            if (!id) return 0;
+            const map = JSON.parse(localStorage.getItem(this.resumePositionsKey) || '{}') || {};
+            const e = map[id];
+            if (!e || Date.now() - (e.savedAt || 0) > this.resumePositionsTtlMs) return 0;
+            return this.getResumeRestorePosition(e.position, e.duration);
+        } catch (_) { return 0; }
+    }
+
+    _clearResumePosition() {
+        try {
+            const id = this._resumePositionId();
+            if (!id) return;
+            const map = JSON.parse(localStorage.getItem(this.resumePositionsKey) || '{}') || {};
+            if (map[id]) { delete map[id]; localStorage.setItem(this.resumePositionsKey, JSON.stringify(map)); }
+        } catch (_) { /* best-effort */ }
     }
 
     getHistoryResumePosition(item = {}) {
@@ -1106,7 +1160,7 @@ class WatchPage {
         this.seriesInfo = content.seriesInfo || null;
         this.currentSeason = content.currentSeason || null;
         this.currentEpisode = content.currentEpisode || null;
-        const requestedResumeTime = Number(
+        let requestedResumeTime = Number(
             content.resumeTime ??
             playbackMetadata.resumeTarget ??
             playbackMetadata.resume_target ??
@@ -1114,6 +1168,17 @@ class WatchPage {
             playbackMetadata.startOffset ??
             0
         );
+        // Fallback: the catalog item often opens without a resume position (stale
+        // progress). Use the persistent per-title store (saved ~every 2s during
+        // playback, survives quit + tab close) so reopening resumes at the saved
+        // spot instead of restarting at 0.
+        if (!(requestedResumeTime > 0) && content?.id && content?.sourceId) {
+            const stored = this._loadResumePosition(content);
+            if (stored > 0) {
+                requestedResumeTime = stored;
+                console.log(`[WatchPage] Resume from stored position: ${stored}s`);
+            }
+        }
         this.resumeTime = Number.isFinite(requestedResumeTime) && requestedResumeTime > 0 ? Math.floor(requestedResumeTime) : 0;
         const sessionStartOffset = Number(
             playbackMetadata.seekOffset ??
@@ -3523,6 +3588,7 @@ class WatchPage {
             }
             this.saveProgress({ force: true });
             this.clearResumeSnapshot();
+            this._clearResumePosition(); // finished → don't resume next time
             if (this.playBtnText) this.playBtnText.textContent = 'Restart';
         }
 
