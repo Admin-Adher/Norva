@@ -34,8 +34,14 @@ const STOP_CONFLICTING_OWNER_SESSIONS = (process.env.STOP_CONFLICTING_OWNER_SESS
 // The provider allows a single concurrent connection; a fresh session can hit a
 // 401 while the previous connection's slot is still releasing. Retry startup a
 // few times (after re-evicting + waiting) before surfacing a 502 to the client.
-const PROVIDER_AUTH_RETRY_LIMIT = clampInt(process.env.PROVIDER_AUTH_RETRY_LIMIT, 2, 0, 5);
-const PROVIDER_AUTH_RETRY_DELAY_MS = clampInt(process.env.PROVIDER_AUTH_RETRY_DELAY_MS, 4_000, 0, 15_000);
+// Defaults tuned for fast-fail: a dead/blocked channel surfaces a 502 in ~3s
+// (1 retry @ 1.5s) instead of ~12s (2 retries @ 4s), and hits the provider 2x
+// instead of 3x — far less load on a single-slot provider's anti-abuse. A
+// legitimate channel switch still gets its retry: the client already frees the
+// old slot (prepareLiveSwitch) ~1-2s before the new ffmpeg starts, so the slot
+// is released by the 1.5s retry. Overridable via env.
+const PROVIDER_AUTH_RETRY_LIMIT = clampInt(process.env.PROVIDER_AUTH_RETRY_LIMIT, 1, 0, 5);
+const PROVIDER_AUTH_RETRY_DELAY_MS = clampInt(process.env.PROVIDER_AUTH_RETRY_DELAY_MS, 1_500, 0, 15_000);
 // The in-browser byte-pipe (/raw) issues many short byte-range requests. The
 // single-slot provider can 401/403/429 one whose connection slot from the prior
 // read hasn't released yet (~PROVIDER_SLOT_RELEASE_DELAY_MS). ffmpeg rides this
@@ -47,7 +53,7 @@ const RAW_PROVIDER_RETRY_DELAYS_MS = [400, 1000, 2000, 3000, 4000, 5000, 6000, 8
 const FFMPEG_USER_AGENT = process.env.FFMPEG_USER_AGENT ||
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36 Norva/1.0';
 const MAX_LOG_TAIL = 12000;
-const GATEWAY_VERSION = 41;
+const GATEWAY_VERSION = 42;
 // Browser playback fetches HLS playlists/segments cross-origin, so these must
 // list every Norva web origin or the browser blocks the response (CORS). Keep
 // in sync with the relay's ALLOWED_ORIGINS (services/norva-relay/wrangler.jsonc).
