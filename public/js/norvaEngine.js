@@ -119,7 +119,7 @@
     av1: ['av01.0.08M.08'],
   };
 
-  const ENGINE_VERSION = 11;
+  const ENGINE_VERSION = 12;
 
   class NorvaEngine {
     constructor(videoEl, opts = {}) {
@@ -243,7 +243,7 @@
         step = 'clearSB'; await this._clearSourceBuffer();
         step = 'initMuxer'; await this._initMuxer();   // fresh init segment → onwrite
         this._startPump();
-        setTimeout(() => { if (!this.destroyed) this._logPostSeek(); }, 1800);
+        setTimeout(() => { if (!this.destroyed) this._logPostSeek(); }, 4000);
         this.seekTimings = {
           warm, setupMs: Math.round(performance.now() - st0),
           fetches: this._fetchCount - f0, fetchKB: Math.round((this._fetchBytes - b0) / 1024),
@@ -278,7 +278,7 @@
         const b = this.sb.buffered, r = [];
         for (let i = 0; i < b.length; i++) r.push(b.start(i).toFixed(1) + '-' + b.end(i).toFixed(1));
         const d = this._seekDiag || {};
-        this.log(`postseek target=${(d.t || 0).toFixed(1)} vpts=${d.vpts == null ? '?' : d.vpts.toFixed(1)} apts=${d.apts == null ? '?' : d.apts.toFixed(1)} buffered=[${r.join(',')}] ct=${this.video.currentTime.toFixed(1)} rs=${this.video.readyState}`);
+        this.log(`postseek target=${(d.t || 0).toFixed(1)} vpts=${d.vpts == null ? '?' : d.vpts.toFixed(1)} apts=${d.apts == null ? '?' : d.apts.toFixed(1)} writes=${d.writes || 0} appends=${d.appends || 0} queue=${this.queue.length} updating=${this.sb && this.sb.updating} buffered=[${r.join(',')}] ct=${this.video.currentTime.toFixed(1)} rs=${this.video.readyState}`);
       } catch (_) {}
     }
 
@@ -609,7 +609,7 @@
       // ff_init_muxer(device:true) re-creates the 'output' writer device; remove
       // any stale one from a prior init (e.g. a re-seek) or it can collide.
       try { await lib.unlink('output'); } catch (_) {}
-      lib.onwrite = (name, pos, data) => { written += data.length; this.queue.push(data.slice(0)); this._drain(); };
+      lib.onwrite = (name, pos, data) => { written += data.length; if (this._seekDiag) this._seekDiag.writes = (this._seekDiag.writes || 0) + data.length; this.queue.push(data.slice(0)); this._drain(); };
       const muxRet = await lib.ff_init_muxer(
         { format_name: 'mp4', filename: 'output', open: true, device: true, codecpars: true }, streamCtxs);
       this.oc = muxRet[0];
@@ -751,7 +751,7 @@
     _drain() {
       const sb = this.sb;
       if (!sb || sb.updating) return;
-      if (this.queue.length) { try { sb.appendBuffer(this.queue.shift()); } catch (e) { this.log('append err ' + e.message); } }
+      if (this.queue.length) { const chunk = this.queue.shift(); try { sb.appendBuffer(chunk); if (this._seekDiag) this._seekDiag.appends = (this._seekDiag.appends || 0) + chunk.length; } catch (e) { this.log('append err ' + errStr(e)); } }
       else if (this.ended && this.ms && this.ms.readyState === 'open') { try { this.ms.endOfStream(); } catch (_) {} }
     }
 
