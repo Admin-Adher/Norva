@@ -2848,6 +2848,16 @@ class ChannelList {
         const resolveTask = (this._streamResolveQueue || Promise.resolve()).catch(() => { }).then(async () => {
             if (selectSeq !== this._selectRequestSeq) return;
 
+            // Anti-hammer debounce: pause briefly before creating the provider
+            // session. If you keep zapping, this selection is superseded and bails
+            // HERE — so a rapid sweep through channels only opens ONE provider
+            // connection (the channel you settle on), not one per channel surfed
+            // past. Critical for single-slot providers that 403-block under a
+            // connection storm. Superseded selections above already returned, so
+            // only the latest pays the delay.
+            await new Promise((resolve) => setTimeout(resolve, 300));
+            if (selectSeq !== this._selectRequestSeq) return;
+
             // Get stream URL
             let streamUrl;
             let staleSessionId = null;
@@ -2924,6 +2934,15 @@ class ChannelList {
         });
         this._streamResolveQueue = resolveTask.catch((err) => {
             console.error('[ChannelList] Failed to resolve live stream:', err);
+            // Provider back-off: show a brief message instead of an endless spinner
+            // (prepareLiveSwitch already tore down the previous channel).
+            if (err && err.liveProviderBackoff && window.app?.player?.showError) {
+                try {
+                    window.app.player.showError(
+                        'Le fournisseur est momentanément saturé (une seule connexion à la fois).<br>Réessaie dans quelques secondes.'
+                    );
+                } catch (_) { /* best-effort */ }
+            }
         });
         return this._streamResolveQueue;
     }

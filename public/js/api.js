@@ -66,6 +66,30 @@ function _looksProviderBlocked(err) {
     return /\b401\b|\b403\b|\b429\b|unauthor|forbidden|too many/.test(text);
 }
 
+// LIVE back-off — distinct from the VOD cloud-block. Single-slot providers
+// 403-block under a connection storm (rapid zapping + retries). A SHORT back-off
+// (vs VOD's 30 min) stops the client from hammering for a moment so the
+// provider's cooldown lifts and the next attempt succeeds — without locking the
+// user out of live for half an hour.
+const LIVE_BLOCK_KEY = 'norva-live-blocked-sources-v1';
+const LIVE_BLOCK_TTL_MS = 60 * 1000;
+function _readLiveBlocked() {
+    try { return JSON.parse(localStorage.getItem(LIVE_BLOCK_KEY) || '{}') || {}; } catch (_) { return {}; }
+}
+function _isLiveBlocked(sourceId) {
+    if (!sourceId) return false;
+    const at = Number(_readLiveBlocked()[String(sourceId)] || 0);
+    return at > 0 && (Date.now() - at) < LIVE_BLOCK_TTL_MS;
+}
+function _markLiveBlocked(sourceId) {
+    if (!sourceId) return;
+    try { const m = _readLiveBlocked(); m[String(sourceId)] = Date.now(); localStorage.setItem(LIVE_BLOCK_KEY, JSON.stringify(m)); } catch (_) { /* best-effort */ }
+}
+function _clearLiveBlock(sourceId) {
+    if (!sourceId) return;
+    try { const m = _readLiveBlocked(); if (m[String(sourceId)]) { delete m[String(sourceId)]; localStorage.setItem(LIVE_BLOCK_KEY, JSON.stringify(m)); } } catch (_) { /* best-effort */ }
+}
+
 function _isHostedApp() {
     const host = window.location.hostname;
     return Boolean(host && host !== 'localhost' && host !== '127.0.0.1' && host !== '::1');
@@ -1217,6 +1241,14 @@ const CloudAdapter = (() => {
                     blockedErr.cloudBrowserBlocked = true;
                     throw blockedErr;
                 }
+                // LIVE back-off: the provider just 401/403'd this source (slot storm).
+                // Fail fast for a short window instead of piling on more connections,
+                // so the single-slot cooldown lifts and the next try succeeds.
+                if (!hasNativeOrLocal && type === 'live' && _isLiveBlocked(sourceId)) {
+                    const liveBackoff = new Error('Chaîne momentanément indisponible (fournisseur saturé) — réessaie dans quelques secondes.');
+                    liveBackoff.liveProviderBackoff = true;
+                    throw liveBackoff;
+                }
 
                 // LIVE — provider's NATIVE HLS through the Cloudflare relay (same
                 // path VOD uses), instead of the Railway ffmpeg gateway. The relay
@@ -1472,28 +1504,52 @@ const CloudAdapter = (() => {
                     return payload;
                 };
                 let payload;
-                try {
-                    for (let providerAttempt = 0; ; providerAttempt += 1) {
-                        try {
-                            payload = await attemptCreateGatewaySession();
-                            break;
-                        } catch (sessionError) {
-                            if (!isProviderSlotBusy(sessionError) || providerAttempt >= PROVIDER_SLOT_RETRY_DELAYS_MS.length) {
-                                throw sessionError;
-                            }
-                            await new Promise((resolve) => setTimeout(resolve, PROVIDER_SLOT_RETRY_DELAYS_MS[providerAttempt]));
+                if (type === 'live') {
+                    // Single-slot provider: the gateway ALREADY retries the provider
+                    // internally (PROVIDER_AUTH_RETRY). The client retry-loop + the
+                    // relay/direct cascades below re-create sessions on top of that —
+                    // ~9-15 provider connections per failed zap — which is exactly
+                    // what trips the provider's anti-abuse cooldown. For live, do ONE
+                    // attempt; on a provider block, back off briefly so the cooldown
+                    // lifts instead of being prolonged. (relay/direct can't play live
+                    // in-browser anyway, so the cascades were dead weight.)
+                    try {
+                        payload = await cloudPlaybackApi().createSession({
+                            ...baseSession,
+                            mode,
+                            requiresTranscode: mode === 'transcode'
+                        });
+                    } catch (sessionError) {
+                        if (!hasNativeOrLocal && _looksProviderBlocked(sessionError)) {
+                            _markLiveBlocked(sourceId);
                         }
+                        throw sessionError;
                     }
-                } catch (sessionError) {
-                    // Browser: a provider block means the cloud datacenter is
-                    // refused for this source — remember it so the next title hands
-                    // off instantly instead of spinning again.
-                    if (!hasNativeOrLocal && _looksProviderBlocked(sessionError)) {
-                        _markSourceCloudBlocked(sourceId);
+                    if (!hasNativeOrLocal) _clearLiveBlock(sourceId);
+                } else {
+                    try {
+                        for (let providerAttempt = 0; ; providerAttempt += 1) {
+                            try {
+                                payload = await attemptCreateGatewaySession();
+                                break;
+                            } catch (sessionError) {
+                                if (!isProviderSlotBusy(sessionError) || providerAttempt >= PROVIDER_SLOT_RETRY_DELAYS_MS.length) {
+                                    throw sessionError;
+                                }
+                                await new Promise((resolve) => setTimeout(resolve, PROVIDER_SLOT_RETRY_DELAYS_MS[providerAttempt]));
+                            }
+                        }
+                    } catch (sessionError) {
+                        // Browser: a provider block means the cloud datacenter is
+                        // refused for this source — remember it so the next title hands
+                        // off instantly instead of spinning again.
+                        if (!hasNativeOrLocal && _looksProviderBlocked(sessionError)) {
+                            _markSourceCloudBlocked(sourceId);
+                        }
+                        throw sessionError;
                     }
-                    throw sessionError;
+                    if (!hasNativeOrLocal) _clearSourceCloudBlock(sourceId);
                 }
-                if (!hasNativeOrLocal) _clearSourceCloudBlock(sourceId);
                 const url = payload.playback?.url || payload.url;
                 return {
                     ...payload,
