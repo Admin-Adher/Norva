@@ -89,6 +89,27 @@ function _clearLiveBlock(sourceId) {
     if (!sourceId) return;
     try { const m = _readLiveBlocked(); if (m[String(sourceId)]) { delete m[String(sourceId)]; localStorage.setItem(LIVE_BLOCK_KEY, JSON.stringify(m)); } } catch (_) { /* best-effort */ }
 }
+// A single dead channel returning 403 must NOT back-off the whole source — that
+// would wrongly show "fournisseur saturé" on the next (healthy) channel. Only a
+// real provider cooldown (several DISTINCT channels failing in quick succession)
+// warrants a back-off. Track recent distinct failures in a short window.
+const LIVE_FAIL_WINDOW_MS = 30 * 1000;
+const LIVE_FAIL_DISTINCT_THRESHOLD = 3;
+let _recentLiveFails = [];
+function _noteLiveFailureMaybeBlock(sourceId, itemId) {
+    if (!sourceId) return;
+    const now = Date.now();
+    const src = String(sourceId);
+    _recentLiveFails = _recentLiveFails.filter((f) => (now - f.at) < LIVE_FAIL_WINDOW_MS);
+    _recentLiveFails.push({ src, item: String(itemId || now), at: now });
+    const distinct = new Set(
+        _recentLiveFails.filter((f) => f.src === src).map((f) => f.item)
+    );
+    if (distinct.size >= LIVE_FAIL_DISTINCT_THRESHOLD) {
+        _markLiveBlocked(sourceId);
+        _recentLiveFails = _recentLiveFails.filter((f) => f.src !== src);
+    }
+}
 
 function _isHostedApp() {
     const host = window.location.hostname;
@@ -1521,11 +1542,19 @@ const CloudAdapter = (() => {
                         });
                     } catch (sessionError) {
                         if (!hasNativeOrLocal && _looksProviderBlocked(sessionError)) {
-                            _markLiveBlocked(sourceId);
+                            // One dead channel's 403 must not block the source — only
+                            // a real cooldown (several distinct channels failing in a
+                            // short window) trips the back-off.
+                            _noteLiveFailureMaybeBlock(sourceId, streamId);
                         }
                         throw sessionError;
                     }
-                    if (!hasNativeOrLocal) _clearLiveBlock(sourceId);
+                    // A success clears both the back-off and the recent-failure tally
+                    // so an earlier dead-channel click can't accrue toward a block.
+                    if (!hasNativeOrLocal) {
+                        _clearLiveBlock(sourceId);
+                        _recentLiveFails = _recentLiveFails.filter((f) => f.src !== String(sourceId));
+                    }
                 } else {
                     try {
                         for (let providerAttempt = 0; ; providerAttempt += 1) {
