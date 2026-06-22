@@ -513,6 +513,24 @@ const CloudAdapter = (() => {
         return payload;
     }
 
+    async function getGenreRails({ type = '', limit = 18 } = {}) {
+        const normalizedType = type ? cloudTypeFromLocal(type) : 'movie';
+        const normalizedLimit = Math.max(1, Math.min(50, Number.parseInt(limit, 10) || 18));
+        const cacheKey = JSON.stringify({ genre: true, type: normalizedType, limit: normalizedLimit });
+        const cached = homeRailCache.get(cacheKey);
+        if (cached && cached.expiresAt > Date.now()) return cached.payload;
+
+        const payload = await cloudHomeApi().genreRails({
+            type: normalizedType,
+            limit: normalizedLimit
+        });
+        homeRailCache.set(cacheKey, {
+            expiresAt: Date.now() + PAGE_CACHE_TTL_MS,
+            payload
+        });
+        return payload;
+    }
+
     function liveDefaultPref(variant) {
         const label = String(variant?.label || '');
         let base;
@@ -1631,6 +1649,18 @@ const CloudAdapter = (() => {
                 }))
             };
         }
+        if (method === 'GET' && path === '/media/genre-rails') {
+            const requestedType = query.get('type') || 'movie';
+            const limit = Math.max(1, Math.min(50, Number.parseInt(query.get('limit') || '18', 10) || 18));
+            const payload = await getGenreRails({ type: requestedType, limit });
+            return {
+                ...payload,
+                rails: (payload.rails || []).map(rail => ({
+                    ...rail,
+                    items: (rail.items || []).slice(0, limit).map(normalizeHomeRailItem)
+                }))
+            };
+        }
         if (method === 'GET' && path === '/channels/recent') {
             const requestedType = query.get('type') || 'movie';
             const limit = Math.max(1, Math.min(50, Number.parseInt(query.get('limit') || '12', 10) || 12));
@@ -2001,6 +2031,13 @@ const API = {
                 if (value !== undefined && value !== null && value !== '') search.set(key, value);
             });
             return API.request('GET', `/media/categories${search.toString() ? `?${search.toString()}` : ''}`);
+        },
+        genreRails: (params = {}) => {
+            const search = new URLSearchParams();
+            Object.entries(params).forEach(([key, value]) => {
+                if (value !== undefined && value !== null && value !== '') search.set(key, value);
+            });
+            return API.request('GET', `/media/genre-rails${search.toString() ? `?${search.toString()}` : ''}`);
         }
     },
 

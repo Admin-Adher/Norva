@@ -1,5 +1,6 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { buildLiveCatalog, findLiveChannel, type LiveCatalogItem } from "../_shared/live-catalog.ts";
+import { BUCKET_ORDER, bucketLabel, classifyTitleBuckets } from "../_shared/genre-taxonomy.ts";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -78,6 +79,11 @@ Deno.serve(async (req) => {
     if (req.method === "GET" && (segments[0] === "media-categories" || (segments[0] === "device" && segments[1] === "media-categories"))) {
       const userId = await requireUserId(req);
       return json(req, await listMediaCategories(url, userId));
+    }
+
+    if (req.method === "GET" && (segments[0] === "media-genre-rails" || (segments[0] === "device" && segments[1] === "media-genre-rails"))) {
+      const userId = await requireUserId(req);
+      return json(req, await listGenreRails(url, userId));
     }
 
     throw new HttpError(404, "Route not found");
@@ -220,6 +226,74 @@ async function listHomeRails(url: URL, userId: string) {
     contract: "norva.home.rails.v1",
     rails: rails.filter((rail) => Array.isArray(rail.items) && rail.items.length > 0),
   };
+}
+
+// Netflix-style genre rails: one rail per curated genre bucket, built from the
+// user's titles. Unlike listGenreRail (single TMDB genre, verified-only), this
+// scans a broadened candidate set INCLUDING titles without a TMDB match — they
+// carry a provider category name we can still classify — so niche buckets are
+// not starved. classifyTitleBuckets maps each title onto one or more buckets.
+async function listGenreRails(url: URL, userId: string) {
+  const itemType = url.searchParams.get("type") === "series" ? "series" : "movie";
+  const perRail = boundedInt(url.searchParams.get("limit"), 18, 1, 50);
+  const candidateLimit = boundedInt(url.searchParams.get("candidates"), 2000, 100, 5000);
+
+  let titles: JsonRecord[];
+  try {
+    const { data, error } = await db
+      .from("cloud_titles")
+      .select("*")
+      .eq("user_id", userId)
+      .eq("item_type", itemType)
+      .gt("variant_count", 0)
+      .order("synced_at", { ascending: false })
+      .order("updated_at", { ascending: false })
+      .limit(candidateLimit);
+    if (error) {
+      if (isMissingMaterialization(error)) return { contract: "norva.genre.rails.v1", type: itemType, rails: [] };
+      throwDb(error, "Unable to list genre rail candidates");
+    }
+    titles = (data ?? []) as JsonRecord[];
+  } catch (error) {
+    if (isMissingMaterialization(error)) return { contract: "norva.genre.rails.v1", type: itemType, rails: [] };
+    throw error;
+  }
+
+  // Bucket -> titles (multi-membership), capped per rail, recency preserved.
+  const byBucket = new Map<string, JsonRecord[]>();
+  for (const title of titles) {
+    const categoryName = recordOrEmpty(title.metadata).categoryName;
+    for (const bucketId of classifyTitleBuckets(categoryName, titleGenres(title))) {
+      if (bucketId === "autres") continue; // never surface an "Autres" rail
+      const list = byBucket.get(bucketId) ?? [];
+      if (list.length < perRail) {
+        list.push(title);
+        byBucket.set(bucketId, list);
+      }
+    }
+  }
+
+  // One batched variant fetch for the union of selected titles.
+  const selectedIds = new Set<string>();
+  for (const list of byBucket.values()) {
+    for (const title of list) selectedIds.add(String(title.id));
+  }
+  const variantsByTitle = await listVariantsByTitleIds([...selectedIds]);
+
+  const rails = BUCKET_ORDER
+    .filter((bucketId) => bucketId !== "autres" && (byBucket.get(bucketId)?.length ?? 0) > 0)
+    .map((bucketId) => ({
+      id: `genre-${bucketId}`,
+      title: bucketLabel(bucketId),
+      itemType,
+      source: "titles",
+      curation: { kind: "genre_bucket", bucket: bucketId },
+      items: (byBucket.get(bucketId) ?? []).map((row) =>
+        titleRailItem(row, variantsByTitle.get(String(row.id)) ?? [])
+      ),
+    }));
+
+  return { contract: "norva.genre.rails.v1", type: itemType, rails };
 }
 
 async function listTitleRail(userId: string, itemType: "movie" | "series", id: string, title: string, limit: number) {
