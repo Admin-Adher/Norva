@@ -61,10 +61,6 @@ class SettingsPage {
             window.NorvaProfiles?.openSwitcher?.();
         });
 
-        document.getElementById('settings-open-cloud-dashboard')?.addEventListener('click', () => {
-            window.location.href = '/cloud.html';
-        });
-
         document.getElementById('settings-signout-btn')?.addEventListener('click', () => this.signOut());
 
         document.getElementById('settings-manage-plan-btn')?.addEventListener('click', () => {
@@ -237,14 +233,9 @@ class SettingsPage {
         }
 
         const accountOnly = document.getElementById('settings-open-account');
-        const cloudDashboard = document.getElementById('settings-open-cloud-dashboard');
         const switchProfile = document.getElementById('settings-switch-profile');
         if (accountOnly) accountOnly.style.display = user.cloud ? '' : 'none';
         if (switchProfile) switchProfile.style.display = user.cloud ? '' : 'none';
-        // "Trusted devices" opens the full web household dashboard (cloud.html),
-        // which is a web account surface rather than an in-app screen — hide it
-        // inside native shells (the native-aware "Sign-in settings" stays).
-        if (cloudDashboard) cloudDashboard.style.display = (user.cloud && !isNativeShell()) ? '' : 'none';
 
         // Account deletion is for real cloud accounts only (a device-paired
         // screen authenticates with a device token, not a user session).
@@ -1052,6 +1043,136 @@ class SettingsPage {
         }
     }
 
+    // --- Screens & pairing tab (display name / pairing / devices / command) ---
+    initScreensTab() {
+        if (!this.screensBound) {
+            this.screensBound = true;
+            document.getElementById('screens-save-profile')?.addEventListener('click', () => this.saveScreensProfile());
+            const pair = document.getElementById('screens-pair-code');
+            pair?.addEventListener('input', () => { pair.value = pair.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10); });
+            pair?.addEventListener('keydown', (e) => { if (e.key === 'Enter') this.approvePairCode(); });
+            document.getElementById('screens-approve')?.addEventListener('click', () => this.approvePairCode());
+            document.getElementById('screens-send-play')?.addEventListener('click', () => this.sendScreenCommand('play'));
+            document.getElementById('screens-send-open')?.addEventListener('click', () => this.sendScreenCommand('open'));
+        }
+        this.loadScreensProfile();
+        this.loadTrustedDevices();
+    }
+
+    setScreensStatus(el, type, message) {
+        if (!el) return;
+        el.textContent = message || '';
+        el.style.color = type === 'success' ? '#34d399' : type === 'error' ? '#fb7185' : '#a8b3c7';
+    }
+
+    escapeHtml(value) {
+        return String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    }
+    escapeAttr(value) { return this.escapeHtml(value); }
+
+    async loadScreensProfile() {
+        try {
+            const profile = await window.NorvaCloud.profile.get();
+            const el = document.getElementById('screens-display-name');
+            if (el) el.value = profile?.display_name || profile?.displayName || '';
+        } catch (_) { /* ignore */ }
+    }
+
+    async saveScreensProfile() {
+        const status = document.getElementById('screens-profile-status');
+        const name = (document.getElementById('screens-display-name')?.value || '').trim();
+        try {
+            this.setScreensStatus(status, 'info', 'Saving…');
+            await window.NorvaCloud.profile.save({ displayName: name, locale: navigator.language || 'fr-FR' });
+            this.setScreensStatus(status, 'success', 'Saved.');
+        } catch (e) {
+            this.setScreensStatus(status, 'error', e?.message || 'Unable to save.');
+        }
+    }
+
+    async approvePairCode() {
+        const input = document.getElementById('screens-pair-code');
+        const status = document.getElementById('screens-pair-status');
+        const code = (input?.value || '').trim().toUpperCase();
+        if (!code) { this.setScreensStatus(status, 'error', 'Enter the pairing code shown on the screen.'); return; }
+        try {
+            this.setScreensStatus(status, 'info', 'Approving…');
+            await window.NorvaCloud.pairing.approve(code);
+            this.setScreensStatus(status, 'success', 'Device approved.');
+            if (input) input.value = '';
+            this.loadTrustedDevices();
+        } catch (e) {
+            this.setScreensStatus(status, 'error', e?.message || 'Unable to approve this code.');
+        }
+    }
+
+    async loadTrustedDevices() {
+        const listEl = document.getElementById('screens-devices-list');
+        const status = document.getElementById('screens-devices-status');
+        const select = document.getElementById('screens-command-device');
+        if (!listEl) return;
+        try {
+            const payload = await window.NorvaCloud.devices.list();
+            const devices = (payload.devices || []).filter((d) => !d.revoked);
+            if (select) {
+                select.innerHTML = devices.length
+                    ? devices.map((d) => `<option value="${this.escapeAttr(d.id)}">${this.escapeHtml(d.device_name || d.device_type || 'Norva screen')}</option>`).join('')
+                    : '<option value="">No trusted screen</option>';
+            }
+            listEl.innerHTML = devices.length
+                ? devices.map((d) => this.renderTrustedDevice(d)).join('')
+                : '<p class="setting-hint">No trusted screen yet. Pair a TV, phone or browser to see it here.</p>';
+            listEl.querySelectorAll('[data-revoke-device]').forEach((btn) => {
+                btn.addEventListener('click', async () => {
+                    const id = btn.dataset.revokeDevice;
+                    btn.disabled = true;
+                    try {
+                        await window.NorvaCloud.devices.revoke(id);
+                        this.loadTrustedDevices();
+                        this.setScreensStatus(status, 'success', 'Screen revoked.');
+                    } catch (e) {
+                        btn.disabled = false;
+                        this.setScreensStatus(status, 'error', e?.message || 'Unable to revoke.');
+                    }
+                });
+            });
+        } catch (e) {
+            this.setScreensStatus(status, 'error', e?.message || 'Unable to load devices.');
+        }
+    }
+
+    renderTrustedDevice(device) {
+        const seen = device.last_seen_at ? new Date(device.last_seen_at).toLocaleString() : 'Never seen';
+        return `<div class="setting-item">
+            <div class="setting-info" style="flex:1">
+                <span class="setting-label">${this.escapeHtml(device.device_name || 'Norva screen')}</span>
+                <span class="setting-hint">${this.escapeHtml(device.device_type || 'device')} · ${this.escapeHtml(device.platform || 'unknown')} · ${this.escapeHtml(seen)}</span>
+            </div>
+            <button class="btn btn-danger" type="button" data-revoke-device="${this.escapeAttr(device.id)}">Revoke</button>
+        </div>`;
+    }
+
+    async sendScreenCommand(command) {
+        const status = document.getElementById('screens-command-status');
+        const targetDeviceId = document.getElementById('screens-command-device')?.value;
+        const url = (document.getElementById('screens-command-url')?.value || '').trim();
+        const title = (document.getElementById('screens-command-title')?.value || '').trim() || 'Norva';
+        if (!targetDeviceId) { this.setScreensStatus(status, 'error', 'Choose a trusted screen.'); return; }
+        if (command === 'play' && !url) { this.setScreensStatus(status, 'error', 'Enter a playback URL.'); return; }
+        try {
+            this.setScreensStatus(status, 'info', 'Sending…');
+            await window.NorvaCloud.commands.queue({
+                targetDeviceId,
+                command,
+                payload: command === 'play' ? { url, playbackUrl: url, title } : { url: url || '/' },
+                ttlSeconds: 120
+            });
+            this.setScreensStatus(status, 'success', 'Command sent.');
+        } catch (e) {
+            this.setScreensStatus(status, 'error', e?.message || 'Unable to send command.');
+        }
+    }
+
     switchTab(tabName) {
         this.tabs.forEach(t => t.classList.toggle('active', t.dataset.tab === tabName));
         this.tabContents.forEach(c => c.classList.toggle('active', c.id === `tab-${tabName}`));
@@ -1074,6 +1195,10 @@ class SettingsPage {
         if (tabName === 'transcode') {
             this.loadHardwareInfo();
         }
+
+        if (tabName === 'screens') {
+            this.initScreensTab();
+        }
     }
 
     async show() {
@@ -1083,6 +1208,16 @@ class SettingsPage {
         if (usersTab) {
             usersTab.style.display = canManageLocalUsers ? 'block' : 'none';
             if (!canManageLocalUsers && usersTab.classList.contains('active')) {
+                this.switchTab('account');
+            }
+        }
+
+        // "Screens & pairing" (devices) is a cloud-account-only feature.
+        const screensTab = document.getElementById('screens-tab');
+        if (screensTab) {
+            const cloudUser = !!this.app.currentUser?.cloud;
+            screensTab.style.display = cloudUser ? 'block' : 'none';
+            if (!cloudUser && screensTab.classList.contains('active')) {
                 this.switchTab('account');
             }
         }
