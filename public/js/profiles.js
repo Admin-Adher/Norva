@@ -20,7 +20,7 @@
   let overlayEl = null;
   let resolveSelect = null;
 
-  const state = { profiles: [], limit: 1, canCreate: false, mode: 'select', editing: null, pickedAvatar: 'avatar-01' };
+  const state = { profiles: [], limit: 1, canCreate: false, mode: 'select', editing: null, pickedAvatar: 'avatar-01', cameFrom: 'select' };
 
   function profilesApi() { return window.NorvaCloud && window.NorvaCloud.profiles; }
   function isCloud() {
@@ -86,6 +86,9 @@
 .np-avatar-choice.np-picked{border-color:#5b7cfa}
 .np-avatar-choice:focus-visible{outline:2px solid #b579ff;outline-offset:2px}
 .np-status{min-height:18px;color:#fecdd3;font-size:13px;margin:6px 0}
+.np-close{position:absolute;top:18px;right:18px;width:44px;height:44px;border-radius:50%;border:1px solid #344158;background:#11151d;color:#dbe7ff;font-size:18px;cursor:pointer;z-index:2}
+.np-close:focus-visible{outline:3px solid #b579ff;outline-offset:2px}
+html.tv .np-close{width:56px;height:56px;font-size:22px}
 html.tv .np-avatar{width:184px;height:184px}
 html.tv .np-card{width:184px}
 html.tv .np-title{font-size:46px}
@@ -99,6 +102,7 @@ html.tv .np-btn{min-height:58px;font-size:18px}
 
   function close() {
     if (overlayEl) { overlayEl.remove(); overlayEl = null; }
+    document.removeEventListener('keydown', onKeydown);
   }
 
   async function loadProfiles() {
@@ -116,6 +120,7 @@ html.tv .np-btn{min-height:58px;font-size:18px}
     overlayEl.setAttribute('role', 'dialog');
     overlayEl.setAttribute('aria-modal', 'true');
     document.body.appendChild(overlayEl);
+    document.addEventListener('keydown', onKeydown);
     render();
   }
 
@@ -123,6 +128,55 @@ html.tv .np-btn{min-height:58px;font-size:18px}
     if (!overlayEl) return;
     if (state.mode === 'add' || state.mode === 'edit') renderEdit();
     else renderGrid();
+  }
+
+  // Land focus inside the overlay so a D-pad remote is immediately useful:
+  // the name field when editing, otherwise the first profile card.
+  function focusFirst() {
+    setTimeout(() => {
+      if (!overlayEl) return;
+      const target = overlayEl.querySelector('.np-input') ||
+        overlayEl.querySelector('.np-card') ||
+        overlayEl.querySelector('button');
+      if (target) { try { target.focus(); } catch (_) { } }
+    }, 40);
+  }
+
+  // Step back one screen: add/edit → where we came from, manage → select,
+  // select → close (unless this is the forced login pick, which has no exit).
+  function handleOverlayBack() {
+    if (state.mode === 'add' || state.mode === 'edit') {
+      state.mode = state.cameFrom || 'select';
+      render();
+      return;
+    }
+    if (state.mode === 'manage') {
+      state.mode = 'select';
+      render();
+      return;
+    }
+    if (resolveSelect) return; // forced "Who's watching?" — a profile must be picked
+    close();
+  }
+
+  // ✕ button — Back/Escape target on TV (the modal-close class lets the TV
+  // navigation's closeTopModal() find and invoke it) and a tap target on web.
+  function addCloseButton() {
+    if (state.mode === 'select' && resolveSelect) return; // no exit at the forced pick
+    const btn = el('button', 'np-close modal-close', '✕');
+    btn.type = 'button';
+    btn.setAttribute('aria-label', 'Back');
+    btn.onclick = handleOverlayBack;
+    overlayEl.appendChild(btn);
+  }
+
+  // Web fallback for Escape (on TV the capture-phase handler in tvNavigation.js
+  // gets there first and stops propagation, so this never double-fires).
+  function onKeydown(e) {
+    if (e.key !== 'Escape') return;
+    if (state.mode === 'select' && resolveSelect) return;
+    e.preventDefault();
+    handleOverlayBack();
   }
 
   function renderGrid() {
@@ -162,16 +216,20 @@ html.tv .np-btn{min-height:58px;font-size:18px}
     panel.appendChild(actions);
 
     overlayEl.appendChild(panel);
+    addCloseButton();
+    focusFirst();
   }
 
   function openAdd() {
     state.mode = 'add';
+    state.cameFrom = 'select';
     state.editing = null;
     state.pickedAvatar = avatarIdAt(state.profiles.length);
     render();
   }
   function openEdit(p) {
     state.mode = 'edit';
+    state.cameFrom = 'manage';
     state.editing = p;
     state.pickedAvatar = p.avatar_id || 'avatar-01';
     render();
@@ -263,6 +321,7 @@ html.tv .np-btn{min-height:58px;font-size:18px}
 
     panel.appendChild(actions);
     overlayEl.appendChild(panel);
+    addCloseButton();
     setTimeout(() => { try { nameInput.focus(); } catch (_) { } }, 0);
   }
 

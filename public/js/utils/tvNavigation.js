@@ -41,7 +41,7 @@
     // The currently open modal, if any. While one is open, navigation is
     // confined to it so the D-pad can't escape to the dimmed page behind.
     function openModal() {
-        return document.querySelector('#modal.active, .modal-overlay.active');
+        return document.querySelector('#modal.active, .modal-overlay.active, .np-overlay');
     }
 
     function getCandidates() {
