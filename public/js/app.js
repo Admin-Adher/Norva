@@ -818,15 +818,19 @@ class App {
     refreshDownloadsNav() {
         const link = document.getElementById('nav-downloads');
         if (!link) return;
+        // Downloads is a MOBILE-APP-ONLY feature (like Netflix): never on the web
+        // and never on the Android TV app. Gate strictly on the phone/tablet APK's
+        // UA marker so it can't leak onto TV even if that bridge later gains the API.
+        const isMobileApk = /NorvaTV-AndroidPhone/i.test(navigator.userAgent || '');
         const bridge = window.NorvaTVCloud;
         let count = 0;
-        if (bridge && typeof bridge.getDownloads === 'function') {
+        if (isMobileApk && bridge && typeof bridge.getDownloads === 'function') {
             try {
                 const list = JSON.parse(bridge.getDownloads() || '[]');
                 count = Array.isArray(list) ? list.length : 0;
             } catch (_) { count = 0; }
         }
-        const show = count > 0;
+        const show = isMobileApk && count > 0;
         link.hidden = !show;
         // The `hidden` attribute alone doesn't hide a .nav-link (CSS forces
         // display:flex and there is no [hidden] override), so toggle display too —
