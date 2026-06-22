@@ -2,6 +2,17 @@
  * Settings Page Controller
  */
 
+// Native shell = Android phone/TV APK WebView. Mirrors the detection used in
+// app.html / account.html (UA tag, injected native bridges, or the ?mobile=1
+// param). Billing management and the web household dashboard are hidden inside
+// native shells: app stores forbid steering to web/Stripe payment for digital
+// goods, and cloud.html is a web account surface, not an in-app screen.
+function isNativeShell() {
+    const ua = navigator.userAgent || '';
+    return /NorvaTV-/i.test(ua) || !!window.NorvaTVCloud || !!window.NodeCastNative
+        || /[?&]mobile=1\b/.test(window.location.search || '');
+}
+
 class SettingsPage {
     constructor(app) {
         this.app = app;
@@ -111,7 +122,10 @@ class SettingsPage {
         const accountOnly = document.getElementById('settings-open-account');
         const cloudDashboard = document.getElementById('settings-open-cloud-dashboard');
         if (accountOnly) accountOnly.style.display = user.cloud ? '' : 'none';
-        if (cloudDashboard) cloudDashboard.style.display = user.cloud ? '' : 'none';
+        // "Trusted devices" opens the full web household dashboard (cloud.html),
+        // which is a web account surface rather than an in-app screen — hide it
+        // inside native shells (the native-aware "Sign-in settings" stays).
+        if (cloudDashboard) cloudDashboard.style.display = (user.cloud && !isNativeShell()) ? '' : 'none';
 
         await this.refreshAccessCard();
         await this.refreshSourceHealthCard();
@@ -130,7 +144,10 @@ class SettingsPage {
             return;
         }
 
-        if (button) button.style.display = '';
+        // The access STATUS stays visible (read-only membership state, like
+        // Netflix), but plan/billing MANAGEMENT is web-only on native shells:
+        // app-store policy forbids surfacing external payment for digital goods.
+        if (button) button.style.display = isNativeShell() ? 'none' : '';
 
         try {
             const decision = this.app.currentUser.device

@@ -28,6 +28,12 @@ tasks.register("syncNorvaWebAssets", Sync) {
     from(norvaPublicDir)
     into(norvaAssetsDir)
     exclude("screenshots/**")
+    // Web-only pages that never belong in the offline app bundle:
+    // landing.html (marketing, already 301'd to / on the web and superseded by
+    // index.html's native redirect) and probe.html (browser diagnostic). Neither
+    // is reachable from the app shell.
+    exclude("landing.html")
+    exclude("probe.html")
 }
 
 preBuild.dependsOn("syncNorvaWebAssets")
