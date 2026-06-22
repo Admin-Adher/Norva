@@ -203,6 +203,9 @@ class SettingsPage {
             hint.textContent = decision.message || 'Norva access is active.';
             if (decision.enforced === false || decision.mode === 'observe') {
                 hint.textContent = decision.message || 'Gate 0 access is open. Billing is being observed but not enforced.';
+                // Keep billing surfaces dark until the go-live bascule: hide the web
+                // "Manage plan" entry point while entitlements are only being observed.
+                if (button && !isNativeShell()) button.style.display = 'none';
             }
             if (decision.failOpen && decision.enforced !== false && decision.mode !== 'observe') {
                 hint.textContent = `${hint.textContent} Last known access is being honored while billing is checked.`;
