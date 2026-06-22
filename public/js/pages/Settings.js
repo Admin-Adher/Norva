@@ -201,6 +201,18 @@ class SettingsPage {
             if (decision.failOpen && decision.enforced !== false && decision.mode !== 'observe') {
                 hint.textContent = `${hint.textContent} Last known access is being honored while billing is checked.`;
             }
+
+            // On an enforced trial, surface days left + renewal date (anti-surprise).
+            if (decision.enforced === true && decision.status === 'trialing') {
+                const endIso = decision.projection?.trial_ends_at || decision.projection?.current_period_end;
+                if (endIso) {
+                    const end = new Date(endIso);
+                    const daysLeft = Math.max(0, Math.ceil((end.getTime() - Date.now()) / 86400000));
+                    hint.textContent = daysLeft > 0
+                        ? `${daysLeft} day${daysLeft === 1 ? '' : 's'} left — renews ${end.toLocaleDateString()} unless cancelled.`
+                        : 'Trial ended — choose a plan to keep watching.';
+                }
+            }
         } catch (err) {
             console.warn('[Settings] Unable to load Norva access:', err);
             plan.textContent = 'Access temporarily unavailable';

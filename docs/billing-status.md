@@ -43,10 +43,20 @@ Projet Supabase : **`oupsceccxsonaalhueff`**.
 - **Pas de migration** (le palier `free` n'est jamais écrit → contrainte `plan_code` inchangée).
 - ⏳ Pas encore déployé ; nécessitera un redéploiement `norva-cloud` + `norva-playback`.
 
-### Reste (Phases 2-3)
-- **#5 Onboarding « connecte ta source »** (effet visible même avant le billing) — **prochain**.
-- Écran « essai démarré, renouvelé le [date] » + bandeau compteur « J-7 » + date de fin dans Settings.
-- Polish TV D-pad sur `subscribe.html`.
+### Phase 2 (essai : confirmation + compteur) — FAIT (dormant, conditionné à `enforced`)
+- `subscribe.html` : panneau **« essai démarré »** au succès (accès complet, pas de débit avant la fin, annulable) au lieu d'un auto-redirect → anti-surprise/chargeback.
+- `app.js` : `maybeShowTrialBanner()` → bandeau **« J-N restants »** dismissable, **uniquement si l'essai est enforced** (dormant en observe).
+- `Settings.js` : carte d'accès montre **jours restants + date de renouvellement** en essai enforced.
+- Bumps : app.js v18, Settings.js v14.
+
+### Phase 3 (polish TV) — FAIT
+- `subscribe.html` : classe `html.tv` (UA Android TV) → cibles agrandies (toggle, boutons, cartes) + **focus ring D-pad** (`:focus-visible`, `card:focus-within`).
+
+### #5 Onboarding « connecte ta source » — DÉJÀ EXISTANT (pas de build)
+- `HomePage.js` a un *setup gate* (`shouldShowSetupGate` → `renderSetupConnectionGate`) qui affiche déjà, pour un nouveau compte sans source, un écran « Norva setup » + formulaire de connexion (lien Xtream/M3U). Le 1ᵉʳ audit (« home vide ») était inexact.
+
+### Reste pour plus tard
+- Au moment de la bascule billing : pass de copy soft-wall sur le setup gate (« browse libre / essai pour regarder ») + test e2e du compteur/confirmation avec RevenueCat branché.
 
 ---
 
