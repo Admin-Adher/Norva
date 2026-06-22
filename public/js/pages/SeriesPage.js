@@ -184,11 +184,52 @@ class SeriesPage {
 
     onFiltersChanged() {
         this.persistFilters();
+        if (this.shouldShowRails()) {
+            this.renderGenreRails();
+            return;
+        }
         if (this.isCloudPagedMode()) {
             this.loadSeries();
             return;
         }
         this.filterAndRender();
+    }
+
+    // Netflix-style default: with no active filter/search, the cloud Series page
+    // shows curated genre rails instead of a flat grid. Any filter or search
+    // flips back to the grid via the normal path.
+    shouldShowRails() {
+        return this.isCloudPagedMode() && !!window.GenreRails && !this.hasActiveFilters();
+    }
+
+    async renderGenreRails() {
+        this.railsView = true;
+        if (this.countEl) this.countEl.textContent = '';
+        this.resetBtn?.classList.add('hidden');
+        if (this.randomBtn) this.randomBtn.disabled = true; // "Random" needs the flat grid.
+        try {
+            const payload = await API.media.genreRails({ type: 'series', limit: 18 });
+            const rails = (payload && payload.rails) || [];
+            if (!rails.length) {
+                this.railsView = false;
+                return this.loadSeries();
+            }
+            window.GenreRails.render(this.container, rails, {
+                emptyText: 'Aucune série à afficher pour le moment.',
+                onItemClick: (item) => this.openRailItem(item)
+            });
+        } catch (err) {
+            console.warn('[Series] Genre rails unavailable, falling back to grid:', err);
+            this.railsView = false;
+            return this.loadSeries();
+        }
+    }
+
+    // Reuse the Home page's rail→detail path (builds the version group and opens
+    // the series detail on this page), so clicks behave exactly like Home rails.
+    openRailItem(item) {
+        const home = this.app?.pages?.home;
+        if (home?.navigateToSeries) home.navigateToSeries(item);
     }
 
     resetFilters() {
@@ -233,6 +274,13 @@ class SeriesPage {
 
         await Promise.all([this.loadFavorites(), this.loadWatchState(), this.loadServerSettings(), this.loadPlaybackStatuses()]);
         this.renderContinueWatching();
+
+        // Default cloud view with no active filters → Netflix-style genre rails.
+        if (this.shouldShowRails()) {
+            if (!this.categories.length) this.loadCategories(); // keep the filter dropdown ready
+            await this.renderGenreRails();
+            return;
+        }
 
         if (this.seriesList.length === 0) {
             // Categories only feed the filter dropdown — load them alongside the
