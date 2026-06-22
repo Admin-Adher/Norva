@@ -1219,32 +1219,12 @@ class SourceManager {
         this.seriesBtn = document.getElementById('content-type-series');
 
         // Content type toggle
-        this.channelsBtn?.addEventListener('click', () => {
-            this.contentType = 'channels';
-            this.channelsBtn.classList.add('active');
-            this.moviesBtn?.classList.remove('active');
-            this.seriesBtn?.classList.remove('active');
-            this.reloadContentTree();
-        });
+        this.channelsBtn?.addEventListener('click', () => this.selectContentType('channels'));
+        this.moviesBtn?.addEventListener('click', () => this.selectContentType('movies'));
+        this.seriesBtn?.addEventListener('click', () => this.selectContentType('series'));
 
-        this.moviesBtn?.addEventListener('click', () => {
-            this.contentType = 'movies';
-            this.moviesBtn.classList.add('active');
-            this.channelsBtn?.classList.remove('active');
-            this.seriesBtn?.classList.remove('active');
-            this.reloadContentTree();
-        });
-
-        this.seriesBtn?.addEventListener('click', () => {
-            this.contentType = 'series';
-            this.seriesBtn.classList.add('active');
-            this.channelsBtn?.classList.remove('active');
-            this.moviesBtn?.classList.remove('active');
-            this.reloadContentTree();
-        });
-
-        // Source selection
-        this.contentSourceSelect?.addEventListener('change', () => this.reloadContentTree());
+        // Source selection — flush pending edits before swapping the data out.
+        this.contentSourceSelect?.addEventListener('change', () => this.flushThenReload());
 
         // Show All / Hide All buttons
         document.getElementById('content-show-all')?.addEventListener('click', () => this.setAllVisibility(true));
@@ -1272,14 +1252,56 @@ class SourceManager {
     }
 
     /**
+     * Switch content type (Channels / Movies / Series), saving any pending edits
+     * first so the user never silently loses ticks by changing view.
+     */
+    selectContentType(type) {
+        if (this.contentType === type) return;
+        this.contentType = type;
+        this.channelsBtn?.classList.toggle('active', type === 'channels');
+        this.moviesBtn?.classList.toggle('active', type === 'movies');
+        this.seriesBtn?.classList.toggle('active', type === 'series');
+        this.setContentSearchPlaceholder(type);
+        this.flushThenReload();
+    }
+
+    setContentSearchPlaceholder(type) {
+        const input = document.getElementById('content-search');
+        if (!input) return;
+        input.placeholder = type === 'movies' ? 'Search movies…'
+            : type === 'series' ? 'Search shows…' : 'Search channels…';
+    }
+
+    /**
+     * True when local visibility ticks differ from what was last loaded/saved.
+     */
+    hasUnsavedContentChanges() {
+        if (!this.treeData || !this.hiddenSet || !this.originalHiddenSet) return false;
+        if (this.hiddenSet.size !== this.originalHiddenSet.size) return true;
+        for (const key of this.hiddenSet) {
+            if (!this.originalHiddenSet.has(key)) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Persist any pending edits, then reload the tree. Switching content type or
+     * provider replaces the in-memory data, so we save first to avoid silent loss.
+     */
+    async flushThenReload() {
+        if (this.hasUnsavedContentChanges()) {
+            await this.saveContentChanges();
+        }
+        this.reloadContentTree();
+    }
+
+    /**
      * Reload content tree based on current type and source
      */
     reloadContentTree() {
         const sourceId = this.contentSourceSelect?.value;
         if (!sourceId) {
-            const typeLabel = this.contentType === 'movies' ? 'movie categories' :
-                this.contentType === 'series' ? 'series categories' : 'groups and channels';
-            this.contentTree.innerHTML = `<p class="hint">Select a source to view ${typeLabel}</p>`;
+            this.contentTree.innerHTML = '<p class="hint">Choose a provider above to manage its content.</p>';
             return;
         }
 
@@ -1301,14 +1323,56 @@ class SourceManager {
             const select = document.getElementById('content-source-select');
             if (!select) return;
 
-            // Keep the placeholder option
-            select.innerHTML = '<option value="">Select a source...</option>';
+            const providers = sources.filter(s => s.type === 'xtream' || s.type === 'm3u');
 
-            sources.filter(s => s.type === 'xtream' || s.type === 'm3u').forEach(source => {
-                select.innerHTML += `<option value="${source.id}">${source.name} (${source.type})</option>`;
-            });
+            // Plain provider names only — the underlying protocol (xtream/m3u) is
+            // jargon a mass-market user neither knows nor needs to see here.
+            const current = select.value;
+            select.innerHTML = '<option value="">Choose a provider…</option>'
+                + providers.map(source =>
+                    `<option value="${source.id}">${this.escapeHtml(source.name)}</option>`).join('');
+            // Preserve the current selection across reloads when still present.
+            if (current && providers.some(p => String(p.id) === String(current))) {
+                select.value = current;
+            }
+
+            // Grand-public dead-end guard: with no provider added yet, point the
+            // user to where they can add one instead of showing an inert tree.
+            this.updateContentEmptyState(providers.length);
         } catch (err) {
             console.error('Error loading content sources:', err);
+        }
+    }
+
+    /**
+     * Show a helpful empty state (with a path to add a provider) when the
+     * account has no Xtream/M3U provider, instead of an inert "select a source"
+     * prompt that leads nowhere.
+     */
+    updateContentEmptyState(providerCount) {
+        const tree = document.getElementById('content-tree');
+        const header = document.querySelector('#tab-content .content-browser-header');
+        const legend = document.getElementById('content-legend');
+        const noProviders = !providerCount;
+
+        if (header) header.style.display = noProviders ? 'none' : '';
+        if (legend) legend.style.display = noProviders ? 'none' : '';
+        if (!tree) return;
+
+        if (noProviders) {
+            tree.innerHTML = `
+                <div style="text-align:center;padding:44px 20px;max-width:440px;margin:0 auto">
+                    <div style="font-size:36px;margin-bottom:10px">📺</div>
+                    <p style="font-weight:700;color:#f1f5fb;margin:0 0 6px;font-size:16px">No provider added yet</p>
+                    <p class="hint" style="margin:0 0 18px">Add your TV provider to choose which channels, movies and shows appear in Norva.</p>
+                    <button class="btn btn-primary" id="content-add-provider" type="button">Add a provider</button>
+                </div>`;
+            document.getElementById('content-add-provider')?.addEventListener('click', () => {
+                document.querySelector('.tabs .tab[data-tab="sources"]')?.click();
+            });
+        } else if (tree.querySelector('#content-add-provider')) {
+            // A provider was just added — clear the empty state back to the prompt.
+            tree.innerHTML = '<p class="hint">Choose a provider above to manage its content.</p>';
         }
     }
 
@@ -1826,7 +1890,7 @@ class SourceManager {
             if (saveBtn) {
                 saveBtn.textContent = '✓ Done!';
                 setTimeout(() => {
-                    saveBtn.textContent = '💾 Save Changes';
+                    saveBtn.textContent = '💾 Save changes';
                     saveBtn.disabled = false;
                 }, 1500);
             }
@@ -1835,7 +1899,7 @@ class SourceManager {
             console.error('Error setting all visibility:', err);
             alert('Failed: ' + err.message);
             if (saveBtn) {
-                saveBtn.textContent = '💾 Save Changes';
+                saveBtn.textContent = '💾 Save changes';
                 saveBtn.disabled = false;
             }
         } finally {
@@ -1923,7 +1987,7 @@ class SourceManager {
                 if (saveBtn) {
                     saveBtn.textContent = 'No changes';
                     setTimeout(() => {
-                        saveBtn.textContent = '💾 Save Changes';
+                        saveBtn.textContent = '💾 Save changes';
                         saveBtn.disabled = false;
                     }, 1500);
                 }
@@ -1997,7 +2061,7 @@ class SourceManager {
             if (saveBtn) {
                 saveBtn.textContent = '✓ Saved!';
                 setTimeout(() => {
-                    saveBtn.textContent = '💾 Save Changes';
+                    saveBtn.textContent = '💾 Save changes';
                     saveBtn.disabled = false;
                 }, 1500);
             }
@@ -2006,7 +2070,7 @@ class SourceManager {
             console.error('Error saving content changes:', err);
             alert('Failed to save changes: ' + err.message);
             if (saveBtn) {
-                saveBtn.textContent = '💾 Save Changes';
+                saveBtn.textContent = '💾 Save changes';
                 saveBtn.disabled = false;
             }
         }

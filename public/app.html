@@ -1228,6 +1228,10 @@
           <!-- Manage Content Tab -->
           <div id="tab-content" class="tab-content">
             <div class="content-browser">
+              <p class="setting-hint" style="margin:0 0 16px;max-width:760px;line-height:1.55">
+                Choose what appears in Norva. Pick one of your providers below, then untick any channels,
+                movies or shows you'd rather hide. Your choices apply to every screen on your account.
+              </p>
               <div class="content-browser-header">
                 <div class="content-type-toggle">
                   <button class="btn btn-sm active" id="content-type-channels">Channels</button>
@@ -1235,25 +1239,25 @@
                   <button class="btn btn-sm" id="content-type-series">Series</button>
                 </div>
                 <select id="content-source-select" class="source-select">
-                  <option value="">Select a source...</option>
+                  <option value="">Choose a provider…</option>
                 </select>
                 <div class="search-wrapper">
-                  <input type="text" id="content-search" placeholder="Search groups/channels..." class="search-input">
+                  <input type="text" id="content-search" placeholder="Search channels…" class="search-input">
                   <button type="button" class="search-clear" title="Clear search">&times;</button>
                 </div>
                 <div class="content-actions">
-                  <button class="btn btn-sm btn-secondary" id="content-show-all">Show All</button>
-                  <button class="btn btn-sm btn-secondary" id="content-hide-all">Hide All</button>
+                  <button class="btn btn-sm btn-secondary" id="content-show-all">Show all</button>
+                  <button class="btn btn-sm btn-secondary" id="content-hide-all">Hide all</button>
                   <button class="btn btn-sm btn-primary" id="content-save"><svg xmlns="http://www.w3.org/2000/svg"
                       viewBox="0 0 24 24" fill="currentColor" class="icon">
                       <path
                         d="M17 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V7l-4-4zm-5 16c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3zm3-10H5V5h10v4z" />
-                    </svg> Save Changes</button>
+                    </svg> Save changes</button>
                 </div>
               </div>
-              <p class="hint" style="margin-bottom: var(--space-sm);">✓ Checked = Visible, ☐ Unchecked = Hidden</p>
+              <p class="hint" id="content-legend" style="margin-bottom: var(--space-sm);">Ticked = shown in Norva · Unticked = hidden. Switching tabs or providers saves automatically.</p>
               <div id="content-tree" class="content-tree">
-                <p class="hint">Select a source to view groups and channels</p>
+                <p class="hint">Choose a provider above to manage its content.</p>
               </div>
             </div>
           </div>
@@ -1622,7 +1626,7 @@
   <script src="/js/components/MultiSelect.js?v=1"></script>
   <script src="/js/components/VideoPlayer.js?v=35"></script>
   <script src="/js/components/ChannelList.js?v=37"></script>
-  <script src="/js/components/SourceManager.js?v=20"></script>
+  <script src="/js/components/SourceManager.js?v=21"></script>
   <script src="/js/components/EpgGuide.js?v=10"></script>
   <script src="/js/components/LiveGuideFusion.js?v=14"></script>
   <script src="/js/pages/HomePage.js?v=37"></script>
