@@ -42,6 +42,8 @@ class App {
         // Check authentication first
         await this.checkAuth();
         if (!await this.checkCloudAccess()) return;
+        // Netflix-style "who's watching": pick a profile before entering the app.
+        try { if (window.NorvaProfiles?.ensureSelected) await window.NorvaProfiles.ensureSelected(); } catch (_) { }
         this.applyCatalogAvailability(null);
         this.startCloudWarmKeep();
 
@@ -228,6 +230,8 @@ class App {
         const requestedInitialPage = hash && this.pages[hash] ? hash : 'home';
         const initialPage = this.guardCatalogPage(requestedInitialPage);
         this.navigateTo(initialPage, true); // true = replace history (don't add)
+
+        this.maybeShowTrialBanner();
 
         console.log('Norva initialized');
     }
@@ -439,6 +443,52 @@ class App {
             message: decision?.message || 'Norva access is required.'
         }));
         window.location.replace('/paywall.html?returnTo=' + encodeURIComponent(returnTo || '/'));
+    }
+
+    // Gentle "X days left in your trial" banner. Only shows when a trial is
+    // actually enforced (dormant in observe mode), reads the entitlement's
+    // trial end date, is dismissible, and re-appears as the day count changes so
+    // it never nags twice in the same day.
+    maybeShowTrialBanner() {
+        try {
+            const ent = this.entitlement || window.NorvaEntitlement;
+            if (!ent || ent.enforced !== true || ent.status !== 'trialing') return;
+            const endIso = ent.projection?.trial_ends_at || ent.projection?.current_period_end;
+            if (!endIso) return;
+            const msLeft = new Date(endIso).getTime() - Date.now();
+            if (!(msLeft > 0)) return;
+            const daysLeft = Math.max(1, Math.ceil(msLeft / 86400000));
+            if (sessionStorage.getItem('norva-trial-banner-dismissed') === String(daysLeft)) return;
+            if (document.getElementById('norva-trial-banner')) return;
+
+            const here = location.pathname + location.search + location.hash;
+            const bar = document.createElement('div');
+            bar.id = 'norva-trial-banner';
+            bar.style.cssText = 'position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:9999;display:flex;align-items:center;gap:14px;max-width:calc(100% - 24px);padding:10px 16px;border-radius:999px;background:#11151d;border:1px solid #283246;color:#f8fafc;font:600 14px/1 Inter,system-ui,sans-serif;box-shadow:0 12px 40px rgba(0,0,0,.45)';
+
+            const span = document.createElement('span');
+            span.textContent = daysLeft === 1 ? 'Last day of your Norva trial' : daysLeft + ' days left in your Norva trial';
+
+            const link = document.createElement('a');
+            link.href = '/subscribe.html?returnTo=' + encodeURIComponent(here);
+            link.textContent = 'Manage plan';
+            link.style.cssText = 'color:#b579ff;text-decoration:none;font-weight:700';
+
+            const close = document.createElement('button');
+            close.type = 'button';
+            close.setAttribute('aria-label', 'Dismiss');
+            close.textContent = '✕';
+            close.style.cssText = 'background:transparent;border:0;color:#a8b3c7;font-size:16px;cursor:pointer;line-height:1';
+            close.addEventListener('click', () => {
+                try { sessionStorage.setItem('norva-trial-banner-dismissed', String(daysLeft)); } catch (_) { }
+                bar.remove();
+            });
+
+            bar.appendChild(span);
+            bar.appendChild(link);
+            bar.appendChild(close);
+            document.body.appendChild(bar);
+        } catch (_) { /* never break the app over a banner */ }
     }
 
     addLogoutButton() {

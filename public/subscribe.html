@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#090b10">
+  <title>Choose your Norva plan</title>
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #090b10; --panel: #11151d; --line: #283246; --text: #f8fafc;
+      --muted: #a8b3c7; --quiet: #6b7690; --accent: #5b7cfa; --coral: #ff8067;
+      --pink: #b579ff; --green: #34d399; --danger: #fb7185;
+    }
+    body {
+      min-height: 100vh; background: var(--bg); color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+      display: grid; place-items: center; padding: 22px;
+    }
+    .wrap { width: min(860px, 100%); }
+    .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; }
+    .brand img { width: 40px; height: 40px; border-radius: 8px; }
+    .brand span { font-size: 20px; font-weight: 800; }
+    h1 { font-size: clamp(26px, 5vw, 40px); line-height: 1.05; margin-bottom: 10px; }
+    .lead { color: var(--muted); font-size: 16px; line-height: 1.55; max-width: 620px; }
+    .toggle { display: inline-flex; gap: 4px; margin: 22px 0 6px; padding: 5px;
+      border: 1px solid var(--line); border-radius: 999px; background: rgba(255,255,255,0.04); }
+    .toggle button { display: inline-flex; align-items: center; gap: 8px; padding: 9px 18px;
+      border: 0; border-radius: 999px; background: transparent; color: var(--muted);
+      font: inherit; font-size: 14px; font-weight: 700; cursor: pointer; }
+    .toggle button.active { background: rgba(255,255,255,0.1); color: #fff; }
+    .save { padding: 3px 8px; border-radius: 999px; font-size: 10px; font-weight: 900;
+      text-transform: uppercase; color: #0b1220; background: linear-gradient(135deg, var(--coral), var(--pink)); }
+    .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin-top: 16px; }
+    @media (max-width: 620px) { .grid { grid-template-columns: 1fr; } }
+    .card { position: relative; border: 1px solid var(--line); border-radius: 14px;
+      padding: 24px; background: var(--panel); }
+    .card.featured { border-color: rgba(143,85,255,0.6); box-shadow: 0 0 50px rgba(143,85,255,0.16); }
+    .card .badge { position: absolute; top: 16px; right: 16px; padding: 5px 9px; border-radius: 999px;
+      font-size: 10px; font-weight: 900; text-transform: uppercase; color: #0b1220;
+      background: linear-gradient(135deg, var(--coral), var(--pink)); }
+    .card h2 { font-size: 20px; margin-bottom: 4px; }
+    .card .tag { color: var(--muted); font-size: 13px; margin-bottom: 14px; }
+    .price { font-size: 42px; font-weight: 800; font-family: Outfit, Inter, sans-serif; }
+    .price .per { color: var(--muted); font-size: 15px; font-weight: 600; font-family: Inter, sans-serif; }
+    .price-note { display: block; min-height: 16px; margin: 4px 0 12px; color: var(--muted); font-size: 12px; }
+    ul { list-style: none; display: grid; gap: 9px; margin: 6px 0 20px; color: #cbd3e8; font-size: 14px; }
+    li::before { content: "✓"; color: var(--green); margin-right: 9px; font-weight: 800; }
+    .btn { width: 100%; min-height: 48px; border: 0; border-radius: 10px; padding: 0 16px;
+      color: #fff; background: var(--accent); font: inherit; font-weight: 800; cursor: pointer;
+      display: inline-flex; align-items: center; justify-content: center; }
+    .card.featured .btn { background: linear-gradient(135deg, var(--coral), #b579ff); color: #0b1220; }
+    .btn[disabled] { opacity: 0.6; cursor: default; }
+    .row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-top: 18px; }
+    .btn.ghost { width: auto; background: #242c3d; color: #dbe7ff; border: 1px solid #344158; }
+    .status { margin-top: 16px; padding: 14px; border-radius: 10px; border: 1px solid var(--line);
+      background: #151b26; color: #dbe7ff; line-height: 1.5; font-size: 14px; display: none; }
+    .status.show { display: block; }
+    .status.error { border-color: rgba(251,113,133,0.5); color: #fecdd3; background: rgba(80,24,36,0.3); }
+    .note { color: var(--quiet); font-size: 12px; line-height: 1.5; margin-top: 18px; }
+    /* Confirmation panel shown after a successful trial / subscription start. */
+    .confirm { text-align: center; padding: 28px 22px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); max-width: 520px; margin: 8px auto 0; }
+    .confirm .badge-ok { display: inline-grid; place-items: center; width: 46px; height: 46px; border-radius: 50%; background: rgba(52,211,153,.15); color: var(--green); font-size: 24px; margin-bottom: 12px; }
+    .confirm h2 { font-size: 22px; margin-bottom: 8px; }
+    .confirm p { color: var(--muted); font-size: 15px; line-height: 1.6; margin-bottom: 20px; }
+    .confirm .btn { max-width: 320px; margin: 0 auto; }
+    /* Keyboard / D-pad focus ring — matters most on Android TV (10-foot view). */
+    .period:focus-visible, .buy:focus-visible, .btn:focus-visible, .confirm .btn:focus-visible { outline: 3px solid var(--pink); outline-offset: 3px; }
+    .card:focus-within { border-color: var(--pink); }
+    /* Bigger, easier targets on the TV remote. */
+    html.tv .toggle button { padding: 14px 26px; font-size: 18px; }
+    html.tv .btn { min-height: 64px; font-size: 18px; }
+    html.tv .card { padding: 28px; }
+    html.tv h1 { font-size: 34px; }
+    html.tv .lead { font-size: 18px; }
+  </style>
+</head>
+<body>
+  <script>
+    // Bigger targets + focus tuning on Android TV (D-pad navigation).
+    if (/NorvaTV-AndroidTV/i.test(navigator.userAgent || '')) {
+      document.documentElement.classList.add('tv');
+    }
+  </script>
+  <main class="wrap">
+    <div class="brand"><img src="/favicon.png" alt=""><span>Norva</span></div>
+    <h1>Choose your Norva plan</h1>
+    <p class="lead">Every plan unlocks all of Norva. Plans differ only by how many
+      screens can stream at the same time. Start with a 7-day free trial.</p>
+
+    <div class="toggle" role="group" aria-label="Billing period">
+      <button type="button" class="period active" data-period="monthly" aria-pressed="true">Monthly</button>
+      <button type="button" class="period" data-period="annual" aria-pressed="false">Annual <span class="save">Save 30%</span></button>
+    </div>
+
+    <div class="grid">
+      <article class="card"
+        data-plan="plus"
+        data-product="norva_plus"
+        data-package-monthly="$rc_monthly" data-package-annual="$rc_annual"
+        data-monthly="4.99" data-annual="41.99" data-annual-note="That's about 3.49/mo, billed yearly.">
+        <h2>Norva</h2>
+        <p class="tag">Everything Norva does, on your main screens.</p>
+        <div class="price"><span class="amount">4.99</span><span class="per">/mo</span></div>
+        <small class="price-note"></small>
+        <ul>
+          <li>2 simultaneous streams</li>
+          <li>Up to 5 profiles</li>
+          <li>Sync across Web, phone, tablet &amp; TV</li>
+          <li>Offline mode on compatible devices</li>
+          <li>Every Norva feature included</li>
+        </ul>
+        <button class="btn buy" type="button">Start 7-day free trial</button>
+      </article>
+
+      <article class="card featured"
+        data-plan="family"
+        data-product="norva_family"
+        data-package-monthly="family_monthly" data-package-annual="family_annual"
+        data-monthly="8.99" data-annual="75.99" data-annual-note="That's about 6.29/mo, billed yearly.">
+        <span class="badge">Most popular</span>
+        <h2>Norva Family</h2>
+        <p class="tag">The full Norva experience for the whole home.</p>
+        <div class="price"><span class="amount">8.99</span><span class="per">/mo</span></div>
+        <small class="price-note"></small>
+        <ul>
+          <li>5 simultaneous streams</li>
+          <li>Up to 5 profiles</li>
+          <li>Sync across Web, phone, tablet &amp; TV</li>
+          <li>Offline mode on compatible devices</li>
+          <li>Every Norva feature included</li>
+        </ul>
+        <button class="btn buy" type="button">Start 7-day free trial</button>
+      </article>
+    </div>
+
+    <div class="status" id="status"></div>
+
+    <div class="confirm" id="trial-confirm" hidden>
+      <span class="badge-ok" aria-hidden="true">✓</span>
+      <h2 id="confirm-title">You're in</h2>
+      <p id="confirm-msg"></p>
+      <a class="btn" id="confirm-continue" href="/app#home">Continue to Norva</a>
+    </div>
+
+    <div class="row">
+      <button class="btn ghost" id="restore" type="button">Restore purchases</button>
+      <a class="btn ghost" id="back" href="/app#home">Not now</a>
+    </div>
+
+    <p class="note">The free trial requires a payment method and converts to a paid plan unless
+      cancelled before it ends — cancel anytime. Norva is a media player; no content or TV
+      subscription is included. Your TV content stays provided by your own TV service.</p>
+  </main>
+
+  <script src="/js/cloudApi.js"></script>
+  <script src="/js/authApi.js"></script>
+  <script src="/js/billing-config.js"></script>
+  <script src="/js/billing.js"></script>
+  <script>
+    (function () {
+      const params = new URLSearchParams(window.location.search);
+      const returnTo = params.get('returnTo') || '/app#home';
+      const statusEl = document.getElementById('status');
+      const restoreBtn = document.getElementById('restore');
+      const backBtn = document.getElementById('back');
+      let period = 'monthly';
+      let trialEligible = true;
+
+      backBtn.setAttribute('href', returnTo);
+
+      function appUserId() {
+        try {
+          const session = JSON.parse(localStorage.getItem('norva-cloud-session') || 'null');
+          return session && session.user && session.user.id ? session.user.id : null;
+        } catch (_) { return null; }
+      }
+
+      function setStatus(message, isError) {
+        statusEl.textContent = message;
+        statusEl.classList.toggle('error', Boolean(isError));
+        statusEl.classList.add('show');
+      }
+
+      function ctaLabel() {
+        return trialEligible ? 'Start 7-day free trial' : 'Subscribe';
+      }
+
+      // Clear "trial started" confirmation so the renewal terms are explicit
+      // before the user continues — reduces surprise charges / chargebacks.
+      function showTrialConfirmation() {
+        ['.grid', '.toggle', '.row'].forEach(function (sel) {
+          const el = document.querySelector(sel);
+          if (el) el.style.display = 'none';
+        });
+        statusEl.classList.remove('show');
+        const panel = document.getElementById('trial-confirm');
+        const title = document.getElementById('confirm-title');
+        const msg = document.getElementById('confirm-msg');
+        const cont = document.getElementById('confirm-continue');
+        if (trialEligible) {
+          title.textContent = 'Your free trial has started';
+          msg.textContent = "You have full access now and won't be charged until your 7-day trial ends. Cancel anytime before then.";
+        } else {
+          title.textContent = "You're subscribed";
+          msg.textContent = 'Your plan is active — enjoy Norva on every screen.';
+        }
+        if (cont) { cont.setAttribute('href', returnTo); }
+        if (panel) { panel.hidden = false; }
+        if (cont && cont.focus) { try { cont.focus(); } catch (_) {} }
+      }
+
+      function applyPeriod(next) {
+        period = next;
+        document.querySelectorAll('.period').forEach(function (b) {
+          const on = b.dataset.period === period;
+          b.classList.toggle('active', on);
+          b.setAttribute('aria-pressed', String(on));
+        });
+        document.querySelectorAll('.card').forEach(function (card) {
+          const amount = card.querySelector('.amount');
+          const per = card.querySelector('.per');
+          const note = card.querySelector('.price-note');
+          const annual = period === 'annual';
+          amount.textContent = annual ? card.dataset.annual : card.dataset.monthly;
+          per.textContent = annual ? '/yr' : '/mo';
+          note.textContent = annual ? (card.dataset.annualNote || '') : '';
+        });
+      }
+
+      document.querySelectorAll('.period').forEach(function (b) {
+        b.addEventListener('click', function () { applyPeriod(b.dataset.period); });
+      });
+
+      async function buy(card, button) {
+        const uid = appUserId();
+        if (!uid) {
+          window.location.href = '/account.html?returnTo=' + encodeURIComponent(window.location.pathname + window.location.search);
+          return;
+        }
+        if (!window.NorvaBilling.hasNativeBilling() && !window.NorvaBilling.isWebBillingConfigured()) {
+          setStatus('Billing is not configured yet on this platform. Please try again once setup is complete.', true);
+          return;
+        }
+        const packageId = period === 'annual' ? card.dataset.packageAnnual : card.dataset.packageMonthly;
+        const original = button.textContent;
+        button.disabled = true;
+        button.textContent = 'Opening checkout…';
+        try {
+          window.NorvaBilling.login(uid);
+          await window.NorvaBilling.purchase({
+            packageId: packageId,
+            productId: card.dataset.product,
+            planCode: card.dataset.plan,
+            appUserId: uid,
+          });
+          showTrialConfirmation();
+        } catch (e) {
+          if (e && e.code === 'cancelled') {
+            setStatus('Checkout cancelled. You can pick a plan whenever you\'re ready.', false);
+          } else if (e && (e.code === 'not_configured' || e.code === 'unavailable')) {
+            setStatus('Billing is not available on this platform yet.', true);
+          } else {
+            setStatus('Something went wrong starting the purchase' + (e && e.message ? ': ' + e.message : '') + '.', true);
+          }
+          button.disabled = false;
+          button.textContent = original;
+        }
+      }
+
+      document.querySelectorAll('.card').forEach(function (card) {
+        const button = card.querySelector('.buy');
+        button.addEventListener('click', function () { buy(card, button); });
+      });
+
+      restoreBtn.addEventListener('click', async function () {
+        restoreBtn.disabled = true;
+        const original = restoreBtn.textContent;
+        restoreBtn.textContent = 'Restoring…';
+        try {
+          await window.NorvaBilling.restore({ appUserId: appUserId() });
+          setStatus('Purchases restored. If you have an active plan it\'s back now.', false);
+          setTimeout(function () { window.location.href = returnTo; }, 900);
+        } catch (e) {
+          setStatus('Could not restore purchases' + (e && e.message ? ': ' + e.message : '') + '.', true);
+        } finally {
+          restoreBtn.disabled = false;
+          restoreBtn.textContent = original;
+        }
+      });
+
+      // Adjust CTA copy based on whether this account can still start a trial.
+      async function loadTrialEligibility() {
+        try {
+          if (!window.NorvaCloud || !window.NorvaCloud.billing) return;
+          const res = await window.NorvaCloud.billing.trialEligibility();
+          trialEligible = res && res.eligible !== false;
+        } catch (_) { /* keep default */ }
+        document.querySelectorAll('.buy').forEach(function (b) { b.textContent = ctaLabel(); });
+      }
+
+      // If we landed here from a playback/capacity wall (soft wall at first
+      // play), acknowledge it contextually instead of showing a generic screen.
+      try {
+        const denied = JSON.parse(sessionStorage.getItem('norva-entitlement-denied') || 'null');
+        if (denied) {
+          sessionStorage.removeItem('norva-entitlement-denied');
+          setStatus('Start your 7-day free trial to keep watching.', false);
+        }
+      } catch (_) { /* ignore */ }
+
+      applyPeriod('monthly');
+      window.NorvaBilling.login(appUserId());
+      loadTrialEligibility();
+    })();
+  </script>
+</body>
+</html>

@@ -10,7 +10,7 @@ import {
 } from "../_shared/live-materialization.ts";
 import { refreshVodTitleProjection } from "../_shared/vod-title-projection.ts";
 import type { LiveCatalogItem } from "../_shared/live-catalog.ts";
-import { getEntitlementDecision, getEntitlementRuntime, limitNumber } from "../_shared/entitlements.ts";
+import { getBillingMode, getEntitlementDecision, getEntitlementRuntime, hasConsumedTrial, limitNumber } from "../_shared/entitlements.ts";
 
 type JsonRecord = Record<string, unknown>;
 type CloudUser = { id: string; email?: string };
@@ -123,6 +123,18 @@ Deno.serve(async (req) => {
   }
 });
 
+// Whether the signed-in account may still start a free trial. Trial eligibility
+// is account-level (keyed to trial_consumed_at), so it follows the user across
+// Play / web / TV and prevents stacking trials across stores.
+async function getTrialEligibility(userId: string, db: SupabaseClient) {
+  const consumed = await hasConsumedTrial(db, userId);
+  return {
+    eligible: !consumed,
+    trialConsumed: consumed,
+    billingMode: getBillingMode(),
+  };
+}
+
 async function route(
   req: Request,
   url: URL,
@@ -142,6 +154,7 @@ async function route(
         entitlements: true,
         entitlementsMode: entitlementRuntime.mode,
         entitlementsEnforced: entitlementRuntime.enforced,
+        billingMode: getBillingMode(),
         liveMaterialization: true,
         relayConfigured: Boolean(runtimeConfig.relayBaseUrl && runtimeConfig.relayTokenSecret),
         gatewayConfigured: Boolean(runtimeConfig.mediaGatewayUrl && runtimeConfig.mediaGatewayToken),
@@ -202,6 +215,17 @@ async function route(
 
   if (scope === "entitlements" && req.method === "GET") {
     return { body: await getEntitlementDecision(db, user.id) };
+  }
+
+  if (scope === "billing" && id === "trial-eligibility" && req.method === "GET") {
+    return { body: await getTrialEligibility(user.id, db) };
+  }
+
+  if (scope === "profiles") {
+    if (req.method === "GET" && !id) return { body: await listProfiles(user.id, db) };
+    if (req.method === "POST" && !id) return { status: 201, body: await createProfile(req, user.id, db) };
+    if ((req.method === "PATCH" || req.method === "PUT") && id) return { body: await updateProfile(req, id, user.id, db) };
+    if (req.method === "DELETE" && id) return { body: await deleteProfile(id, user.id, db) };
   }
 
   if (!scope || scope === "profile") {
@@ -268,7 +292,7 @@ async function route(
   }
 
   if (scope === "favorites") {
-    if (req.method === "GET" && !id) return { body: await listFavorites(url, user.id, db) };
+    if (req.method === "GET" && !id) return { body: await listFavorites(req, url, user.id, db) };
     if (req.method === "POST" && !id) return { status: 201, body: await addFavorite(req, user.id, db) };
     if (req.method === "DELETE" && id) return { body: await deleteOwned("cloud_favorites", id, user.id, db) };
   }
@@ -278,9 +302,9 @@ async function route(
       // Targeted lookup (?itemId&itemType[&sourceId]) → single item's progress,
       // used for authoritative cross-device resume; otherwise list recent history.
       if (url.searchParams.get("itemId") || url.searchParams.get("item_id")) {
-        return { body: await getHistoryItem(url, user.id, db) };
+        return { body: await getHistoryItem(req, url, user.id, db) };
       }
-      return { body: await listHistory(url, user.id, db) };
+      return { body: await listHistory(req, url, user.id, db) };
     }
     if (req.method === "POST" && !id) return { status: 201, body: await saveHistory(req, user.id, db) };
     if (req.method === "DELETE" && id) return { body: await deleteOwned("cloud_watch_history", id, user.id, db) };
@@ -409,6 +433,179 @@ function throwEntitlementRequired(feature: string, decision: unknown, usage?: un
     entitlement: decision,
     usage,
   });
+}
+
+// --- Account profiles (Netflix-style "who's watching") --------------------
+
+const PROFILE_HEADER = "x-norva-profile-id";
+const PROFILE_SELECT =
+  "id, name, avatar_id, is_kids, is_default, sort_order, preferred_audio_language, preferred_subtitle_language, preferred_genres, created_at";
+
+// Every account always has at least one profile. Provisions a default (named
+// from the account display name) the first time it's needed.
+async function getOrCreateDefaultProfileId(userId: string, db: SupabaseClient): Promise<string> {
+  const { data: existing } = await db
+    .from("cloud_account_profiles")
+    .select("id")
+    .eq("user_id", userId)
+    .order("is_default", { ascending: false })
+    .order("sort_order", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  if (existing?.id) return existing.id as string;
+
+  const { data: account } = await db.from("cloud_profiles").select("display_name").eq("id", userId).maybeSingle();
+  const name = stringOrNull(account?.display_name) || "Profile 1";
+  const { data, error } = await db
+    .from("cloud_account_profiles")
+    .insert({ user_id: userId, name, avatar_id: "avatar-01", is_default: true, sort_order: 0 })
+    .select("id")
+    .single();
+  if (error) throwDb(error, "Unable to create default profile");
+  return data.id as string;
+}
+
+// Resolve the active profile from the request header, validating it belongs to
+// the account. Falls back to (and provisions) the default profile.
+async function resolveProfileId(req: Request, userId: string, db: SupabaseClient): Promise<string> {
+  const headerId = stringOrNull(req.headers.get(PROFILE_HEADER));
+  if (headerId) {
+    const { data } = await db
+      .from("cloud_account_profiles")
+      .select("id")
+      .eq("id", headerId)
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (data?.id) return data.id as string;
+  }
+  return await getOrCreateDefaultProfileId(userId, db);
+}
+
+async function listProfiles(userId: string, db: SupabaseClient) {
+  await getOrCreateDefaultProfileId(userId, db); // ensure at least one exists
+  const { data, error } = await db
+    .from("cloud_account_profiles")
+    .select(PROFILE_SELECT)
+    .eq("user_id", userId)
+    .order("is_default", { ascending: false })
+    .order("sort_order", { ascending: true })
+    .order("created_at", { ascending: true });
+  if (error) throwDb(error, "Unable to list profiles");
+  const decision = await getEntitlementDecision(db, userId, { autoStartTrial: false });
+  const limit = limitNumber(decision.limits, "profiles", 1);
+  const profiles = data ?? [];
+  return { profiles, limit, canCreate: profiles.length < limit };
+}
+
+async function createProfile(req: Request, userId: string, db: SupabaseClient) {
+  // Enforces the plan's `profiles` limit (5 in enforce, manual in observe).
+  await requirePlanCapacity(userId, db, "profiles", "cloud_account_profiles");
+  const body = await readJson(req);
+  const name = normalizeProfileName(body.name ?? body.profileName);
+  if (!name) throw new HttpError(400, "A profile name is required");
+
+  const { data: last } = await db
+    .from("cloud_account_profiles")
+    .select("sort_order")
+    .eq("user_id", userId)
+    .order("sort_order", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const sortOrder = (Number(last?.sort_order) || 0) + 1;
+
+  const { data, error } = await db
+    .from("cloud_account_profiles")
+    .insert({
+      user_id: userId,
+      name,
+      avatar_id: normalizeAvatarId(body.avatarId ?? body.avatar_id),
+      is_kids: Boolean(body.isKids ?? body.is_kids ?? false),
+      is_default: false,
+      sort_order: sortOrder,
+      preferred_audio_language: stringOrNull(body.preferredAudioLanguage ?? body.preferred_audio_language),
+      preferred_subtitle_language: stringOrNull(body.preferredSubtitleLanguage ?? body.preferred_subtitle_language),
+      preferred_genres: normalizeGenres(body.preferredGenres ?? body.preferred_genres),
+    })
+    .select(PROFILE_SELECT)
+    .single();
+  if (error) throwDb(error, "Unable to create profile");
+  return { profile: data };
+}
+
+async function updateProfile(req: Request, profileId: string, userId: string, db: SupabaseClient) {
+  const body = await readJson(req);
+  const patch: JsonRecord = {};
+  if (body.name !== undefined || body.profileName !== undefined) {
+    const name = normalizeProfileName(body.name ?? body.profileName);
+    if (!name) throw new HttpError(400, "A profile name is required");
+    patch.name = name;
+  }
+  if (body.avatarId !== undefined || body.avatar_id !== undefined) {
+    patch.avatar_id = normalizeAvatarId(body.avatarId ?? body.avatar_id);
+  }
+  if (body.isKids !== undefined || body.is_kids !== undefined) {
+    patch.is_kids = Boolean(body.isKids ?? body.is_kids);
+  }
+  if (body.preferredAudioLanguage !== undefined || body.preferred_audio_language !== undefined) {
+    patch.preferred_audio_language = stringOrNull(body.preferredAudioLanguage ?? body.preferred_audio_language);
+  }
+  if (body.preferredSubtitleLanguage !== undefined || body.preferred_subtitle_language !== undefined) {
+    patch.preferred_subtitle_language = stringOrNull(body.preferredSubtitleLanguage ?? body.preferred_subtitle_language);
+  }
+  if (body.preferredGenres !== undefined || body.preferred_genres !== undefined) {
+    patch.preferred_genres = normalizeGenres(body.preferredGenres ?? body.preferred_genres);
+  }
+  if (!Object.keys(patch).length) throw new HttpError(400, "No profile fields to update");
+
+  const { data, error } = await db
+    .from("cloud_account_profiles")
+    .update(patch)
+    .eq("id", profileId)
+    .eq("user_id", userId)
+    .select(PROFILE_SELECT)
+    .maybeSingle();
+  if (error) throwDb(error, "Unable to update profile");
+  if (!data) throw new HttpError(404, "Profile not found");
+  return { profile: data };
+}
+
+async function deleteProfile(profileId: string, userId: string, db: SupabaseClient) {
+  const { data: profiles, error: listErr } = await db
+    .from("cloud_account_profiles")
+    .select("id, is_default")
+    .eq("user_id", userId);
+  if (listErr) throwDb(listErr, "Unable to load profiles");
+  const all = (profiles ?? []) as Array<{ id: string; is_default: boolean }>;
+  const target = all.find((p) => p.id === profileId);
+  if (!target) throw new HttpError(404, "Profile not found");
+  if (all.length <= 1) throw new HttpError(400, "You must keep at least one profile");
+
+  const { error } = await db.from("cloud_account_profiles").delete().eq("id", profileId).eq("user_id", userId);
+  if (error) throwDb(error, "Unable to delete profile");
+
+  // Removing the default promotes another profile to default.
+  if (target.is_default) {
+    const next = all.find((p) => p.id !== profileId);
+    if (next) {
+      await db.from("cloud_account_profiles").update({ is_default: true }).eq("id", next.id).eq("user_id", userId);
+    }
+  }
+  return { ok: true, deleted: profileId };
+}
+
+function normalizeProfileName(value: unknown): string {
+  const s = typeof value === "string" ? value.trim() : "";
+  return s.slice(0, 40);
+}
+
+function normalizeAvatarId(value: unknown): string {
+  const s = typeof value === "string" ? value.trim() : "";
+  return /^avatar-\d{1,2}$/.test(s) ? s : "avatar-01";
+}
+
+function normalizeGenres(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((g) => String(g)).filter(Boolean).slice(0, 20);
 }
 
 async function getProfile(userId: string, db: SupabaseClient) {
@@ -1979,11 +2176,13 @@ async function upsertMediaItems(req: Request, userId: string, db: SupabaseClient
   return { items: data ?? [] };
 }
 
-async function listFavorites(url: URL, userId: string, db: SupabaseClient) {
+async function listFavorites(req: Request, url: URL, userId: string, db: SupabaseClient) {
+  const profileId = await resolveProfileId(req, userId, db);
   let query = db
     .from("cloud_favorites")
     .select("*")
     .eq("user_id", userId)
+    .eq("profile_id", profileId)
     .order("created_at", { ascending: false });
 
   const sourceId = url.searchParams.get("sourceId");
@@ -2003,9 +2202,11 @@ async function addFavorite(req: Request, userId: string, db: SupabaseClient) {
   const itemId = stringOr(body.itemId ?? body.item_id, "");
   if (!sourceId || !itemId) throw new HttpError(400, "sourceId and itemId are required");
   await assertOwnedSource(sourceId, userId, db);
+  const profileId = await resolveProfileId(req, userId, db);
 
   const row = {
     user_id: userId,
+    profile_id: profileId,
     source_id: sourceId,
     item_type: itemType,
     item_id: itemId,
@@ -2015,14 +2216,15 @@ async function addFavorite(req: Request, userId: string, db: SupabaseClient) {
 
   const { data, error } = await db
     .from("cloud_favorites")
-    .upsert(row, { onConflict: "user_id,source_id,item_type,item_id" })
+    .upsert(row, { onConflict: "profile_id,source_id,item_type,item_id" })
     .select("*")
     .single();
   if (error) throwDb(error, "Unable to save favorite");
   return { favorite: data };
 }
 
-async function getHistoryItem(url: URL, userId: string, db: SupabaseClient) {
+async function getHistoryItem(req: Request, url: URL, userId: string, db: SupabaseClient) {
+  const profileId = await resolveProfileId(req, userId, db);
   const itemId = stringOr(url.searchParams.get("itemId") ?? url.searchParams.get("item_id"), "");
   const itemType = stringOr(
     url.searchParams.get("itemType") ?? url.searchParams.get("item_type") ?? url.searchParams.get("type"),
@@ -2033,7 +2235,7 @@ async function getHistoryItem(url: URL, userId: string, db: SupabaseClient) {
   let q = db
     .from("cloud_watch_history")
     .select("source_id,item_type,item_id,progress_seconds,duration_seconds,completed,updated_at")
-    .eq("user_id", userId)
+    .eq("profile_id", profileId)
     .eq("item_type", itemType)
     .eq("item_id", itemId);
   q = sourceId ? q.eq("source_id", sourceId) : q.is("source_id", null);
@@ -2042,7 +2244,8 @@ async function getHistoryItem(url: URL, userId: string, db: SupabaseClient) {
   return { item: data ?? null };
 }
 
-async function listHistory(url: URL, userId: string, db: SupabaseClient) {
+async function listHistory(req: Request, url: URL, userId: string, db: SupabaseClient) {
+  const profileId = await resolveProfileId(req, userId, db);
   const limit = boundedInt(url.searchParams.get("limit"), 100, 1, 500);
   const readySourceIds = await listHistorySourceIds(userId, db);
   if (!readySourceIds.length) return { history: [] };
@@ -2051,6 +2254,7 @@ async function listHistory(url: URL, userId: string, db: SupabaseClient) {
     .from("cloud_watch_history")
     .select("*")
     .eq("user_id", userId)
+    .eq("profile_id", profileId)
     .in("source_id", readySourceIds)
     .order("updated_at", { ascending: false })
     .limit(limit);
@@ -2082,6 +2286,7 @@ async function saveHistory(req: Request, userId: string, db: SupabaseClient) {
   const itemId = stringOr(body.itemId ?? body.item_id ?? body.id, "");
   if (!itemType || !itemId) throw new HttpError(400, "itemType and itemId are required");
   if (sourceId) await assertOwnedSource(sourceId, userId, db);
+  const profileId = await resolveProfileId(req, userId, db);
 
   // A progress-only update (e.g. the native player's onProgress, which only
   // knows source/item/position) must NOT wipe the rich metadata an earlier
@@ -2092,7 +2297,7 @@ async function saveHistory(req: Request, userId: string, db: SupabaseClient) {
   let existingQuery = db
     .from("cloud_watch_history")
     .select("item_name,parent_item_id,duration_seconds,data")
-    .eq("user_id", userId)
+    .eq("profile_id", profileId)
     .eq("item_type", itemType)
     .eq("item_id", itemId);
   existingQuery = sourceId
@@ -2105,6 +2310,7 @@ async function saveHistory(req: Request, userId: string, db: SupabaseClient) {
 
   const row = {
     user_id: userId,
+    profile_id: profileId,
     source_id: sourceId,
     item_type: itemType,
     item_id: itemId,
@@ -2125,7 +2331,7 @@ async function saveHistory(req: Request, userId: string, db: SupabaseClient) {
 
   const { data, error } = await db
     .from("cloud_watch_history")
-    .upsert(row, { onConflict: "user_id,source_id,item_type,item_id" })
+    .upsert(row, { onConflict: "profile_id,source_id,item_type,item_id" })
     .select("*")
     .single();
   if (error) throwDb(error, "Unable to save history");

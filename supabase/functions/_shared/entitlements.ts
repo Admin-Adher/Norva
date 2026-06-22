@@ -18,6 +18,10 @@ export type EntitlementDecision = {
 const DEFAULT_TRIAL_DAYS = boundedEnvInt("NORVA_TRIAL_DAYS", 7, 1, 60);
 const DEFAULT_FAIL_OPEN_HOURS = boundedEnvInt("NORVA_BILLING_FAIL_OPEN_HOURS", 72, 1, 24 * 14);
 const ENTITLEMENTS_MODE = normalizeEntitlementsMode(Deno.env.get("NORVA_ENTITLEMENTS_MODE") ?? "enforce");
+// "legacy"     → auto-start a no-card 7-day trial on first access (current).
+// "revenuecat" → trials/subscriptions come from the store + webhook with a
+//                payment method; no trial is auto-granted server-side.
+const BILLING_MODE = normalizeBillingMode(Deno.env.get("NORVA_BILLING_MODE") ?? "legacy");
 
 const PLAN_LIMITS: Record<string, JsonRecord> = {
   trial: {
@@ -29,20 +33,24 @@ const PLAN_LIMITS: Record<string, JsonRecord> = {
     cloud_sync: true,
     metadata: true,
   },
+  // Norva (entry plan) and Norva Family share full feature parity. The ONLY
+  // difference is concurrent_streams (2 vs 5) — i.e. how many screens can play
+  // at the same time. Everything else (profiles, trusted devices, sources and
+  // all feature flags) is intentionally identical between the two paid plans.
   plus: {
-    trusted_devices: 6,
+    trusted_devices: 10,
     concurrent_streams: 2,
-    sources: 3,
-    profiles: 1,
+    sources: 5,
+    profiles: 5,
     gateway: true,
     cloud_sync: true,
     metadata: true,
   },
   family: {
-    trusted_devices: 12,
-    concurrent_streams: 4,
+    trusted_devices: 10,
+    concurrent_streams: 5,
     sources: 5,
-    profiles: 6,
+    profiles: 5,
     gateway: true,
     cloud_sync: true,
     metadata: true,
@@ -61,6 +69,17 @@ const PLAN_LIMITS: Record<string, JsonRecord> = {
     concurrent_streams: 8,
     sources: 10,
     profiles: 8,
+    gateway: true,
+    cloud_sync: true,
+    metadata: true,
+  },
+  free: {
+    // Soft-wall browse tier: connect one source and browse the catalogue, but
+    // concurrent_streams: 0 means playback is walled until a plan/trial starts.
+    trusted_devices: 5,
+    concurrent_streams: 0,
+    sources: 1,
+    profiles: 1,
     gateway: true,
     cloud_sync: true,
     metadata: true,
@@ -101,11 +120,15 @@ export async function getEntitlementDecision(
   }
 
   let projection = data as JsonRecord | null;
-  if (!projection && options.autoStartTrial !== false) {
+  // Legacy mode auto-starts a no-card trial on first access. Once billing runs
+  // through RevenueCat, trials are created by the store/webhook with a payment
+  // method, so we no longer auto-grant one here.
+  const autoTrialAllowed = BILLING_MODE === "legacy" && options.autoStartTrial !== false;
+  if (!projection && autoTrialAllowed) {
     projection = await startTrialProjection(db, userId);
   }
 
-  if (!projection) return applyEntitlementMode(blockedDecision("subscription_required", null));
+  if (!projection) return applyEntitlementMode(softDeny("subscription_required", null));
 
   const now = Date.now();
   const status = String(projection.status || "unknown");
@@ -125,7 +148,7 @@ export async function getEntitlementDecision(
     if (!effectiveEnd || effectiveEnd > now) {
       return applyEntitlementMode(allowedDecision("trialing", projection, limits, false));
     }
-    return applyEntitlementMode(blockedDecision("trial_expired", projection, limits));
+    return applyEntitlementMode(softDeny("trial_expired", projection, limits));
   }
 
   if (status === "active") {
@@ -138,14 +161,14 @@ export async function getEntitlementDecision(
     if (lastVerifiedAt && lastVerifiedAt + DEFAULT_FAIL_OPEN_HOURS * 60 * 60 * 1000 > now) {
       return applyEntitlementMode(allowedDecision("billing_recently_verified", projection, limits, true));
     }
-    return applyEntitlementMode(blockedDecision("subscription_expired", projection, limits));
+    return applyEntitlementMode(softDeny("subscription_expired", projection, limits));
   }
 
   if (status === "cancelled_at_period_end") {
     if (!periodEnd || periodEnd > now) {
       return applyEntitlementMode(allowedDecision("cancelled_at_period_end", projection, limits, false));
     }
-    return applyEntitlementMode(blockedDecision("subscription_expired", projection, limits));
+    return applyEntitlementMode(softDeny("subscription_expired", projection, limits));
   }
 
   if (status === "grace" || status === "past_due" || status === "unknown") {
@@ -159,16 +182,37 @@ export async function getEntitlementDecision(
   }
 
   if (status === "expired") {
-    return applyEntitlementMode(blockedDecision("subscription_expired", projection, limits));
+    return applyEntitlementMode(softDeny("subscription_expired", projection, limits));
   }
 
-  return applyEntitlementMode(blockedDecision("subscription_required", projection, limits));
+  return applyEntitlementMode(softDeny("subscription_required", projection, limits));
 }
 
 export function limitNumber(limits: JsonRecord, key: string, fallback = 0) {
   const value = limits[key];
   const numberValue = typeof value === "number" ? value : Number(value);
   return Number.isFinite(numberValue) ? Math.max(0, Math.floor(numberValue)) : fallback;
+}
+
+// Canonical limits for a plan code. Single source of truth shared with the
+// billing webhook so a projection always stores limits that match the catalog.
+export function planLimits(planCode: string): JsonRecord {
+  return { ...(PLAN_LIMITS[planCode] ?? PLAN_LIMITS.none) };
+}
+
+// Whether an account has already consumed a free trial on ANY billing rail.
+// Keyed to the Supabase user (= RevenueCat App User ID), so it stops a user
+// from stacking a Play trial and a web trial. Fails open (returns false) on a
+// read error so a transient outage never wrongly blocks a legitimate first
+// trial — the purchase path can apply a stricter policy if needed.
+export async function hasConsumedTrial(db: SupabaseClient, userId: string): Promise<boolean> {
+  const { data, error } = await db
+    .from("cloud_entitlement_projection")
+    .select("trial_consumed_at")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (error) return false;
+  return Boolean(data?.trial_consumed_at);
 }
 
 function allowedDecision(reason: string, projection: JsonRecord, limits: JsonRecord, failOpen: boolean): EntitlementDecision {
@@ -186,6 +230,33 @@ function allowedDecision(reason: string, projection: JsonRecord, limits: JsonRec
       ? "Norva access is temporarily allowed while billing status is being verified."
       : "Norva access is active.",
   };
+}
+
+// Soft-wall browse decision: the user keeps access to browse (connect a source,
+// see their catalogue) but cannot play (free tier has concurrent_streams: 0).
+function freeBrowseDecision(reason: string, projection: JsonRecord | null): EntitlementDecision {
+  return {
+    allowed: true,
+    reason: `free_${reason}`,
+    status: String(projection?.status || "none"),
+    planCode: "free",
+    mode: ENTITLEMENTS_MODE,
+    enforced: ENTITLEMENTS_MODE === "enforce",
+    failOpen: false,
+    limits: PLAN_LIMITS.free,
+    projection: projection ? sanitizeProjection(projection) : null,
+    message: billingMessage(reason),
+  };
+}
+
+// In RevenueCat billing mode, "soft" denials (no subscription / trial ended /
+// subscription expired) degrade to free browse instead of a hard block — the
+// user is walled only at playback (the soft-wall model). Legacy mode keeps the
+// historical hard block, and observe mode overrides everything anyway, so this
+// is dormant until billing_mode=revenuecat AND entitlements_mode=enforce.
+function softDeny(reason: string, projection: JsonRecord | null, limits = PLAN_LIMITS.none): EntitlementDecision {
+  if (BILLING_MODE === "revenuecat") return freeBrowseDecision(reason, projection);
+  return blockedDecision(reason, projection, limits);
 }
 
 function blockedDecision(reason: string, projection: JsonRecord | null, limits = PLAN_LIMITS.none): EntitlementDecision {
@@ -251,6 +322,7 @@ async function startTrialProjection(db: SupabaseClient, userId: string): Promise
     limits: PLAN_LIMITS.trial,
     current_period_end: trialEndsAt,
     trial_ends_at: trialEndsAt,
+    trial_consumed_at: new Date().toISOString(),
     last_verified_at: new Date().toISOString(),
     last_event_at: new Date().toISOString(),
     notes: "Auto-started Norva trial projection.",
@@ -309,6 +381,15 @@ function timeMs(value: unknown) {
 
 function isRecord(value: unknown): value is JsonRecord {
   return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function normalizeBillingMode(value: string) {
+  const mode = value.trim().toLowerCase();
+  return mode === "revenuecat" || mode === "rc" ? "revenuecat" : "legacy";
+}
+
+export function getBillingMode() {
+  return BILLING_MODE;
 }
 
 function normalizeEntitlementsMode(value: string) {

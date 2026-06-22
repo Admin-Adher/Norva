@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Google Play Billing (in-app subscriptions via RevenueCat). -->
+    <uses-permission android:name="com.android.vending.BILLING" />
 
     <uses-feature
         android:name="android.software.leanback"
@@ -10,6 +12,7 @@
         android:required="false" />
 
     <application
+        android:name=".NorvaApplication"
         android:allowBackup="false"
         android:banner="@drawable/banner"
         android:icon="@drawable/ic_launcher"

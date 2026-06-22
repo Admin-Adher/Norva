@@ -18,6 +18,14 @@ android {
         targetSdk 35
         versionCode 12
         versionName "3.7.0-hybrid"
+
+        // RevenueCat public SDK key, injected at build time. Empty by default so
+        // local/debug builds need no key (see docs/billing-setup.md §7).
+        buildConfigField "String", "REVENUECAT_API_KEY", "\"${project.findProperty('REVENUECAT_API_KEY') ?: ''}\""
+    }
+
+    buildFeatures {
+        buildConfig true
     }
 
     sourceSets {
@@ -73,4 +81,7 @@ dependencies {
     // the APK can also be assembled with raw SDK tools (no gradle daemon).
     implementation "androidx.media3:media3-exoplayer:1.5.1"
     implementation "androidx.media3:media3-exoplayer-hls:1.5.1"
+    // In-app subscriptions (Google Play Billing) through RevenueCat. Pin a
+    // tested version before release; "8.+" resolves the latest v8 line.
+    implementation "com.revenuecat.purchases:purchases:8.+"
 }

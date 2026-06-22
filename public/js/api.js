@@ -1841,7 +1841,22 @@ const CloudAdapter = (() => {
     }
 
     function cloudPlaybackApi() {
-        return hasUserSession() ? NorvaCloud.playback : NorvaCloud.device.playback;
+        const api = hasUserSession() ? NorvaCloud.playback : NorvaCloud.device.playback;
+        // Wrap createSession so a playback/capacity 402 — the soft wall hit at the
+        // first play on the free browse tier — routes to the subscribe screen.
+        // These calls bypass API.request, so they need their own guard.
+        return Object.assign({}, api, {
+            createSession: async (session) => {
+                try {
+                    return await api.createSession(session);
+                } catch (error) {
+                    if (window.NorvaCloud?.entitlements?.isSubscriptionError?.(error)) {
+                        routeToSubscribeWall(error);
+                    }
+                    throw error;
+                }
+            }
+        });
     }
 
     return {
@@ -1856,6 +1871,22 @@ const CloudAdapter = (() => {
     };
 })();
 
+// Soft wall: a subscription/capacity 402 routes the user to the in-app subscribe
+// screen (start a trial / pick a plan) instead of failing silently or showing
+// the generic access gate. Shared by API.request and the createSession wrapper.
+function routeToSubscribeWall(error) {
+    const details = error?.payload?.details || {};
+    try {
+        sessionStorage.setItem('norva-entitlement-denied', JSON.stringify({
+            reason: details.entitlement?.reason || details.feature || 'subscription_required',
+            status: details.entitlement?.status || '',
+            message: details.entitlement?.message || error?.message || 'Norva access is required.'
+        }));
+    } catch (_) { /* sessionStorage may be unavailable */ }
+    const returnTo = window.location.pathname + window.location.search + window.location.hash;
+    window.location.replace('/subscribe.html?returnTo=' + encodeURIComponent(returnTo || '/'));
+}
+
 const API = {
     isCloudMode: () => _shouldUseCloud(),
     getMode: () => _shouldUseCloud() ? 'cloud' : 'local',
@@ -1869,14 +1900,7 @@ const API = {
                 return await CloudAdapter.request(method, endpoint, data);
             } catch (error) {
                 if (window.NorvaCloud?.entitlements?.isSubscriptionError?.(error)) {
-                    const details = error.payload?.details || {};
-                    sessionStorage.setItem('norva-entitlement-denied', JSON.stringify({
-                        reason: details.entitlement?.reason || details.feature || 'subscription_required',
-                        status: details.entitlement?.status || '',
-                        message: details.entitlement?.message || error.message || 'Norva access is required.'
-                    }));
-                    const returnTo = window.location.pathname + window.location.search + window.location.hash;
-                    window.location.replace('/paywall.html?returnTo=' + encodeURIComponent(returnTo || '/'));
+                    routeToSubscribeWall(error);
                 }
                 throw error;
             }

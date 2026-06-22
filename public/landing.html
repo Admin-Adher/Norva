@@ -12,7 +12,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Outfit:wght@800&display=swap"
     rel="stylesheet">
-  <link rel="stylesheet" href="/css/landing.css?v=19">
+  <link rel="stylesheet" href="/css/landing.css?v=20">
 </head>
 
 <body>
@@ -192,25 +192,31 @@
     <section class="pricing-section" id="pricing">
       <p class="eyebrow centered"><span></span> Simple offer</p>
       <h2>Pay for the Norva experience. Never for content.</h2>
-      <p class="section-copy">Clear software features, no hidden catalog and no included channel package.</p>
+      <p class="section-copy">Clear software features, no hidden catalog and no included channel package. Every plan starts with a 7-day free trial.</p>
+      <div class="billing-toggle" role="group" aria-label="Billing period">
+        <button type="button" class="billing-opt is-active" data-period="monthly" aria-pressed="true">Monthly</button>
+        <button type="button" class="billing-opt" data-period="annual" aria-pressed="false">Annual <span class="save-badge">Save 30%</span></button>
+      </div>
       <div class="pricing-grid">
         <article>
-          <strong>Norva Solo</strong>
-          <p>For discovering Norva on your main screens.</p>
-          <div class="price">4.99<span>/mo</span></div>
-          <ul><li>2 simultaneous devices</li><li>Progress sync</li><li>Personalized recommendations</li><li>Standard support</li></ul>
-            <a href="/account.html?returnTo=%2Fapp%23home">Start</a>
+          <strong>Norva</strong>
+          <p>Everything Norva does, on your main screens.</p>
+          <div class="price" data-monthly="4.99" data-annual="41.99" data-annual-suffix="/yr"><span class="price-amount">4.99</span><span class="price-period">/mo</span></div>
+          <small class="price-note" data-annual-note="That's about 3.49/mo, billed yearly."></small>
+          <ul><li>2 simultaneous streams</li><li>Up to 5 profiles</li><li>Sync across Web, phone, tablet &amp; TV</li><li>Offline mode on compatible devices</li><li>Every Norva feature included</li></ul>
+            <a href="/account.html?returnTo=%2Fapp%23home">Start 7-day free trial</a>
         </article>
         <article class="featured">
           <em>Most popular</em>
           <strong>Norva Family</strong>
-          <p>For a complete home experience across every screen.</p>
-          <div class="price">8.99<span>/mo</span></div>
-          <ul><li>5 simultaneous devices</li><li>Up to 5 profiles</li><li>Compatible offline mode</li><li>Priority support</li></ul>
-            <a href="/account.html?returnTo=%2Fapp%23home">Try Family</a>
+          <p>The full Norva experience for the whole home.</p>
+          <div class="price" data-monthly="8.99" data-annual="75.99" data-annual-suffix="/yr"><span class="price-amount">8.99</span><span class="price-period">/mo</span></div>
+          <small class="price-note" data-annual-note="That's about 6.29/mo, billed yearly."></small>
+          <ul><li>5 simultaneous streams</li><li>Up to 5 profiles</li><li>Sync across Web, phone, tablet &amp; TV</li><li>Offline mode on compatible devices</li><li>Every Norva feature included</li></ul>
+            <a href="/account.html?returnTo=%2Fapp%23home">Start 7-day free trial</a>
         </article>
       </div>
-      <small>No content, TV package or IPTV subscription is included in these offers.</small>
+      <small>No content, TV package or IPTV subscription is included in these offers. The free trial needs a payment method and converts to a paid plan unless cancelled — cancel anytime.</small>
     </section>
 
     <section class="faq-section" id="faq">
@@ -268,7 +274,7 @@
     <p class="footer-bottom">&copy; 2026 Norva. Norva is a media player. No content is provided.</p>
   </footer>
 
-  <script src="/js/landing.js?v=3"></script>
+  <script src="/js/landing.js?v=4"></script>
 </body>
 
 </html>

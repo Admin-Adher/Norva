@@ -13,6 +13,14 @@ function isNativeShell() {
         || /[?&]mobile=1\b/.test(window.location.search || '');
 }
 
+// True once the native APK exposes the Play Billing purchase bridge. In-app
+// purchase is allowed by stores (only external web payment links are not), so
+// when this bridge is present we can surface an in-app "Subscribe" action.
+function nativeBillingReady() {
+    const bridge = window.NorvaTVCloud || window.NodeCastNative;
+    return !!(bridge && typeof bridge.purchase === 'function');
+}
+
 class SettingsPage {
     constructor(app) {
         this.app = app;
@@ -54,6 +62,10 @@ class SettingsPage {
             window.location.href = '/account.html?returnTo=' + encodeURIComponent(returnTo);
         });
 
+        document.getElementById('settings-switch-profile')?.addEventListener('click', () => {
+            window.NorvaProfiles?.openSwitcher?.();
+        });
+
         document.getElementById('settings-open-cloud-dashboard')?.addEventListener('click', () => {
             window.location.href = '/cloud.html';
         });
@@ -62,7 +74,11 @@ class SettingsPage {
 
         document.getElementById('settings-manage-plan-btn')?.addEventListener('click', () => {
             const returnTo = window.location.pathname + window.location.search + '#settings';
-            window.location.href = '/paywall.html?returnTo=' + encodeURIComponent(returnTo);
+            // Both web and native route to the in-app subscribe screen: web uses
+            // RevenueCat Web Billing, native uses Play Billing via the bridge.
+            // (In-app purchase is allowed by the stores; only external web payment
+            // links are not.)
+            window.location.href = '/subscribe.html?returnTo=' + encodeURIComponent(returnTo);
         });
 
         // Account deletion uses the dedicated page (session-aware, typed
@@ -128,7 +144,9 @@ class SettingsPage {
 
         const accountOnly = document.getElementById('settings-open-account');
         const cloudDashboard = document.getElementById('settings-open-cloud-dashboard');
+        const switchProfile = document.getElementById('settings-switch-profile');
         if (accountOnly) accountOnly.style.display = user.cloud ? '' : 'none';
+        if (switchProfile) switchProfile.style.display = user.cloud ? '' : 'none';
         // "Trusted devices" opens the full web household dashboard (cloud.html),
         // which is a web account surface rather than an in-app screen — hide it
         // inside native shells (the native-aware "Sign-in settings" stays).
@@ -157,9 +175,21 @@ class SettingsPage {
         }
 
         // The access STATUS stays visible (read-only membership state, like
-        // Netflix), but plan/billing MANAGEMENT is web-only on native shells:
-        // app-store policy forbids surfacing external payment for digital goods.
-        if (button) button.style.display = isNativeShell() ? 'none' : '';
+        // Netflix). The action differs by shell:
+        //   - Web: "Manage plan" (web account/billing surface).
+        //   - Native: "Subscribe" via the in-app Play Billing flow, but ONLY
+        //     once the APK ships the purchase bridge. Until then it stays hidden
+        //     (external web payment links remain forbidden inside native).
+        if (button) {
+            if (isNativeShell()) {
+                const ready = nativeBillingReady();
+                button.style.display = ready ? '' : 'none';
+                if (ready) button.textContent = 'Subscribe';
+            } else {
+                button.style.display = '';
+                button.textContent = 'Manage plan';
+            }
+        }
 
         try {
             const decision = this.app.currentUser.device
@@ -173,9 +203,24 @@ class SettingsPage {
             hint.textContent = decision.message || 'Norva access is active.';
             if (decision.enforced === false || decision.mode === 'observe') {
                 hint.textContent = decision.message || 'Gate 0 access is open. Billing is being observed but not enforced.';
+                // Keep billing surfaces dark until the go-live bascule: hide the web
+                // "Manage plan" entry point while entitlements are only being observed.
+                if (button && !isNativeShell()) button.style.display = 'none';
             }
             if (decision.failOpen && decision.enforced !== false && decision.mode !== 'observe') {
                 hint.textContent = `${hint.textContent} Last known access is being honored while billing is checked.`;
+            }
+
+            // On an enforced trial, surface days left + renewal date (anti-surprise).
+            if (decision.enforced === true && decision.status === 'trialing') {
+                const endIso = decision.projection?.trial_ends_at || decision.projection?.current_period_end;
+                if (endIso) {
+                    const end = new Date(endIso);
+                    const daysLeft = Math.max(0, Math.ceil((end.getTime() - Date.now()) / 86400000));
+                    hint.textContent = daysLeft > 0
+                        ? `${daysLeft} day${daysLeft === 1 ? '' : 's'} left — renews ${end.toLocaleDateString()} unless cancelled.`
+                        : 'Trial ended — choose a plan to keep watching.';
+                }
             }
         } catch (err) {
             console.warn('[Settings] Unable to load Norva access:', err);
