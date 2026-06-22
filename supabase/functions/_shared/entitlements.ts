@@ -175,6 +175,27 @@ export function limitNumber(limits: JsonRecord, key: string, fallback = 0) {
   return Number.isFinite(numberValue) ? Math.max(0, Math.floor(numberValue)) : fallback;
 }
 
+// Canonical limits for a plan code. Single source of truth shared with the
+// billing webhook so a projection always stores limits that match the catalog.
+export function planLimits(planCode: string): JsonRecord {
+  return { ...(PLAN_LIMITS[planCode] ?? PLAN_LIMITS.none) };
+}
+
+// Whether an account has already consumed a free trial on ANY billing rail.
+// Keyed to the Supabase user (= RevenueCat App User ID), so it stops a user
+// from stacking a Play trial and a web trial. Fails open (returns false) on a
+// read error so a transient outage never wrongly blocks a legitimate first
+// trial — the purchase path can apply a stricter policy if needed.
+export async function hasConsumedTrial(db: SupabaseClient, userId: string): Promise<boolean> {
+  const { data, error } = await db
+    .from("cloud_entitlement_projection")
+    .select("trial_consumed_at")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (error) return false;
+  return Boolean(data?.trial_consumed_at);
+}
+
 function allowedDecision(reason: string, projection: JsonRecord, limits: JsonRecord, failOpen: boolean): EntitlementDecision {
   return {
     allowed: true,
@@ -255,6 +276,7 @@ async function startTrialProjection(db: SupabaseClient, userId: string): Promise
     limits: PLAN_LIMITS.trial,
     current_period_end: trialEndsAt,
     trial_ends_at: trialEndsAt,
+    trial_consumed_at: new Date().toISOString(),
     last_verified_at: new Date().toISOString(),
     last_event_at: new Date().toISOString(),
     notes: "Auto-started Norva trial projection.",

@@ -11,3 +11,9 @@ verify_jwt = false
 
 [functions.norva-source-sync]
 verify_jwt = false
+
+# RevenueCat sends our shared secret in the Authorization header (not a Supabase
+# JWT), so the platform gateway check is disabled and the function verifies the
+# secret itself via NORVA_REVENUECAT_WEBHOOK_AUTH.
+[functions.norva-billing-webhook]
+verify_jwt = false
