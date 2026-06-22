@@ -3,11 +3,11 @@ plugins {
 }
 
 android {
-    namespace "tv.nodecast.client"
+    namespace "tv.norva.tv"
     compileSdk 35
 
     defaultConfig {
-        applicationId "tv.nodecast.client"
+        applicationId "tv.norva.tv"
         minSdk 23
         targetSdk 35
         versionCode 12

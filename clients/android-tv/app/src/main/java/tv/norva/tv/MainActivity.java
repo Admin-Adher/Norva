@@ -1,4 +1,4 @@
-package tv.nodecast.client;
+package tv.norva.tv;
 
 import android.annotation.SuppressLint;
 import android.app.Activity;

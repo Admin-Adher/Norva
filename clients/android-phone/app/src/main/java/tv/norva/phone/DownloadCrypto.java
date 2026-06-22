@@ -1,4 +1,4 @@
-package tv.nodecast.mobile;
+package tv.norva.phone;
 
 import android.security.keystore.KeyGenParameterSpec;
 import android.security.keystore.KeyProperties;

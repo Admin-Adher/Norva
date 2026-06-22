@@ -1,4 +1,4 @@
-package tv.nodecast.mobile;
+package tv.norva.phone;
 
 import android.app.Notification;
 import android.app.NotificationChannel;
@@ -45,7 +45,7 @@ import javax.crypto.Cipher;
  */
 public final class DownloadService extends Service {
 
-    static final String ACTION_ENQUEUE = "tv.nodecast.mobile.ENQUEUE";
+    static final String ACTION_ENQUEUE = "tv.norva.phone.ENQUEUE";
     static final String EXTRA_ID = "id";
     static final String PREFS = "norva_downloads_prefs";
     static final String PREF_WIFI_ONLY = "wifi_only";
