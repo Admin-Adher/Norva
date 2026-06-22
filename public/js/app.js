@@ -810,27 +810,17 @@ class App {
     }
 
     /**
-     * Show the "Downloads" menu entry only inside the native phone/tablet app
-     * and only once at least one title has been downloaded (per the product
-     * decision: the offline library becomes reachable from the menu after the
-     * first download). No-op in the browser.
+     * Show the "Downloads" menu entry only inside the native phone/tablet APK
+     * (Netflix-style): always available there, never on the web or the Android TV
+     * app. The native downloads screen handles its own empty state.
      */
     refreshDownloadsNav() {
         const link = document.getElementById('nav-downloads');
         if (!link) return;
-        // Downloads is a MOBILE-APP-ONLY feature (like Netflix): never on the web
-        // and never on the Android TV app. Gate strictly on the phone/tablet APK's
-        // UA marker so it can't leak onto TV even if that bridge later gains the API.
-        const isMobileApk = /NorvaTV-AndroidPhone/i.test(navigator.userAgent || '');
-        const bridge = window.NorvaTVCloud;
-        let count = 0;
-        if (isMobileApk && bridge && typeof bridge.getDownloads === 'function') {
-            try {
-                const list = JSON.parse(bridge.getDownloads() || '[]');
-                count = Array.isArray(list) ? list.length : 0;
-            } catch (_) { count = 0; }
-        }
-        const show = isMobileApk && count > 0;
+        // Downloads is a MOBILE-APP-ONLY feature (like Netflix): always available
+        // in the phone/tablet APK, never on the web or the Android TV app. Gate
+        // strictly on the phone APK's UA marker so it can't leak onto TV/web.
+        const show = /NorvaTV-AndroidPhone/i.test(navigator.userAgent || '');
         link.hidden = !show;
         // The `hidden` attribute alone doesn't hide a .nav-link (CSS forces
         // display:flex and there is no [hidden] override), so toggle display too —
