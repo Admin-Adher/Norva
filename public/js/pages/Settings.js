@@ -53,10 +53,6 @@ class SettingsPage {
     }
 
     initAccountSettings() {
-        document.getElementById('settings-manage-service-btn')?.addEventListener('click', () => {
-            this.switchTab('sources');
-        });
-
         document.getElementById('settings-open-account')?.addEventListener('click', () => {
             const returnTo = window.location.pathname + window.location.search + '#settings';
             window.location.href = '/account.html?returnTo=' + encodeURIComponent(returnTo);
@@ -207,7 +203,7 @@ class SettingsPage {
             plan.textContent = label;
             hint.textContent = decision.message || 'Norva access is active.';
             if (decision.enforced === false || decision.mode === 'observe') {
-                hint.textContent = decision.message || 'Gate 0 access is open. Billing is being observed but not enforced.';
+                hint.textContent = 'You have full access to Norva.';
                 // Keep billing surfaces dark until the go-live bascule: hide the web
                 // "Manage plan" entry point while entitlements are only being observed.
                 if (button && !isNativeShell()) button.style.display = 'none';
@@ -236,7 +232,7 @@ class SettingsPage {
 
     accessLabel(decision = {}) {
         if (decision.enforced === false || decision.mode === 'observe') {
-            return 'Gate 0 access';
+            return 'Full access';
         }
         const plan = String(decision.planCode || decision.plan_code || 'trial');
         const status = String(decision.status || 'unknown').replace(/_/g, ' ');
