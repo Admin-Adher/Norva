@@ -54,10 +54,7 @@ class SettingsPage {
 
     initAccountSettings() {
         document.getElementById('settings-open-account')?.addEventListener('click', () => {
-            const returnTo = window.location.pathname + window.location.search + '#settings';
-            // manage=1 → account.html shows the "Manage sign-in" view for the
-            // already-signed-in user instead of bouncing straight back.
-            window.location.href = '/account.html?manage=1&returnTo=' + encodeURIComponent(returnTo);
+            this.openSignInSettings();
         });
 
         document.getElementById('settings-switch-profile')?.addEventListener('click', () => {
@@ -109,6 +106,100 @@ class SettingsPage {
                 }
             }
         });
+    }
+
+    // "Sign-in settings" as a lightweight in-context modal rather than a full-page
+    // bounce: account email + change password + a reset-email fallback.
+    openSignInSettings() {
+        const modal = document.getElementById('modal');
+        const title = document.getElementById('modal-title');
+        const body = document.getElementById('modal-body');
+        const footer = document.getElementById('modal-footer');
+        // Fall back to the standalone page if the in-app modal/auth isn't available.
+        if (!modal || !title || !body || !window.NorvaAuth?.updatePassword) {
+            const returnTo = window.location.pathname + window.location.search + '#settings';
+            window.location.href = '/account.html?manage=1&returnTo=' + encodeURIComponent(returnTo);
+            return;
+        }
+
+        const email = this.app?.currentUser?.email
+            || window.NorvaAuth?.getSession?.()?.user?.email || '';
+        const inputStyle = 'width:100%;min-height:44px;padding:0 12px;border-radius:8px;border:1px solid #344158;background:#0b0f16;color:#f8fafc;font:inherit';
+
+        title.textContent = 'Sign-in settings';
+        if (footer) footer.innerHTML = '';
+        body.innerHTML = `
+            <div style="display:flex;flex-direction:column;gap:14px">
+              <div>
+                <div class="setting-label">Signed in as</div>
+                <strong id="ss-email" style="color:#f8fafc"></strong>
+              </div>
+              <div>
+                <label class="setting-label" for="ss-new" style="display:block;margin-bottom:6px">New password</label>
+                <input id="ss-new" type="password" autocomplete="new-password" minlength="6" placeholder="At least 6 characters" style="${inputStyle}">
+              </div>
+              <div>
+                <label class="setting-label" for="ss-confirm" style="display:block;margin-bottom:6px">Confirm new password</label>
+                <input id="ss-confirm" type="password" autocomplete="new-password" minlength="6" style="${inputStyle}">
+              </div>
+              <p id="ss-status" class="setting-hint" style="min-height:18px;margin:0"></p>
+              <p class="setting-hint" style="margin:0"><a id="ss-reset" href="#" style="color:#5b7cfa">Send a password reset email instead</a></p>
+              <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:4px">
+                <button class="btn btn-secondary" id="ss-cancel" type="button">Close</button>
+                <button class="btn btn-primary" id="ss-update" type="button">Update password</button>
+              </div>
+            </div>`;
+
+        const emailEl = document.getElementById('ss-email');
+        if (emailEl) emailEl.textContent = email || 'your account';
+
+        const close = () => modal.classList.remove('active');
+        const closeX = modal.querySelector('.modal-close');
+        if (closeX) closeX.onclick = close;
+        modal.onclick = (e) => { if (e.target === modal) close(); };
+
+        const status = document.getElementById('ss-status');
+        const newInput = document.getElementById('ss-new');
+        const confirmInput = document.getElementById('ss-confirm');
+        const setStatus = (msg, isError) => {
+            if (!status) return;
+            status.textContent = msg;
+            status.style.color = isError ? '#fb7185' : '#34d399';
+        };
+
+        document.getElementById('ss-cancel')?.addEventListener('click', close);
+        document.getElementById('ss-update')?.addEventListener('click', async () => {
+            const pwd = newInput?.value || '';
+            const confirmPwd = confirmInput?.value || '';
+            if (pwd.length < 6) { setStatus('Password must be at least 6 characters.', true); newInput?.focus(); return; }
+            if (pwd !== confirmPwd) { setStatus('The passwords do not match.', true); confirmInput?.focus(); return; }
+            const btn = document.getElementById('ss-update');
+            if (btn) btn.disabled = true;
+            setStatus('Updating…', false);
+            try {
+                await window.NorvaAuth.updatePassword(pwd);
+                setStatus('Password updated.', false);
+                if (newInput) newInput.value = '';
+                if (confirmInput) confirmInput.value = '';
+                setTimeout(close, 900);
+            } catch (e) {
+                setStatus((e && e.message) || 'Could not update the password.', true);
+                if (btn) btn.disabled = false;
+            }
+        });
+        document.getElementById('ss-reset')?.addEventListener('click', async (e) => {
+            e.preventDefault();
+            if (!email) { setStatus('No email on file for a reset link.', true); return; }
+            try {
+                await window.NorvaAuth.recover(email);
+                setStatus('Reset email sent — check your inbox.', false);
+            } catch (err) {
+                setStatus((err && err.message) || 'Could not send the reset email.', true);
+            }
+        });
+
+        modal.classList.add('active');
+        setTimeout(() => { try { newInput?.focus(); } catch (_) { } }, 50);
     }
 
     async signOut() {
