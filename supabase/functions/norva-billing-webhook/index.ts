@@ -13,8 +13,9 @@
 //   * Idempotency: every event is recorded in `cloud_entitlement_events` keyed by
 //     (provider, provider_event_id). RevenueCat may retry, so a duplicate event
 //     id is acknowledged with 200 and skipped.
-//   * The projection always stores limits straight from the plan catalog
-//     (planLimits), so catalog changes apply on the next event.
+//   * The projection stores no limit overrides; the read path (entitlements.ts)
+//     applies the current plan-catalog limits, so catalog changes take effect
+//     immediately without the webhook keeping a copy of the catalog.
 //
 // Configure in the RevenueCat dashboard → Integrations → Webhooks:
 //   * URL:    https://<project-ref>.supabase.co/functions/v1/norva-billing-webhook
@@ -34,7 +35,6 @@
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
-import { planLimits } from "../_shared/entitlements.ts";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -139,7 +139,10 @@ function projectionPatch(userId: string, type: string, event: JsonRecord): JsonR
     provider_customer_id: stringOrNull(event.original_app_user_id) ?? stringOrNull(event.app_user_id),
     plan_code: planCode,
     status,
-    limits: planLimits(planCode),
+    // Store no per-user overrides: the read path (entitlements.ts
+    // normalizeLimits) always layers the CURRENT plan-catalog limits over this,
+    // so catalog changes apply immediately and the webhook keeps no copy of it.
+    limits: {},
     current_period_end: periodEnd,
     last_verified_at: nowIso,
     last_event_at: msToIso(event.event_timestamp_ms) ?? nowIso,
