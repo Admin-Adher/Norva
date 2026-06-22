@@ -89,6 +89,8 @@
     <p class="lead">Every plan unlocks all of Norva. Plans differ only by how many
       screens can stream at the same time. Start with a 7-day free trial.</p>
 
+    <div class="status" id="already-sub"></div>
+
     <div class="toggle" role="group" aria-label="Billing period">
       <button type="button" class="period active" data-period="monthly" aria-pressed="true">Monthly</button>
       <button type="button" class="period" data-period="annual" aria-pressed="false">Annual <span class="save">Save 30%</span></button>
@@ -156,8 +158,8 @@
 
   <script src="/js/cloudApi.js"></script>
   <script src="/js/authApi.js"></script>
-  <script src="/js/billing-config.js"></script>
-  <script src="/js/billing.js"></script>
+  <script src="/js/billing-config.js?v=2"></script>
+  <script src="/js/billing.js?v=2"></script>
   <script>
     (function () {
       const params = new URLSearchParams(window.location.search);
@@ -300,19 +302,57 @@
         document.querySelectorAll('.buy').forEach(function (b) { b.textContent = ctaLabel(); });
       }
 
+      // Tailor the contextual message to WHY the user hit the wall instead of a
+      // generic line. Prefer the backend's own message; otherwise infer from the
+      // reason/status (trial ended vs expired vs capacity vs first subscribe).
+      function softWallMessage(denied) {
+        if (denied && denied.message) return denied.message;
+        const r = String((denied && denied.reason) || '');
+        const s = String((denied && denied.status) || '');
+        if (r.indexOf('trial') !== -1) return 'Your free trial has ended. Pick a plan to keep watching.';
+        if (r.indexOf('expired') !== -1 || s === 'expired') return 'Your Norva plan has expired. Resubscribe to keep watching.';
+        if (r.indexOf('capacity') !== -1 || r.indexOf('concurrent') !== -1 || r.indexOf('stream') !== -1) {
+          return "You've reached your plan's simultaneous-stream limit. Upgrade for more screens.";
+        }
+        return trialEligible ? 'Start your 7-day free trial to keep watching.' : 'Subscribe to keep watching.';
+      }
+
       // If we landed here from a playback/capacity wall (soft wall at first
       // play), acknowledge it contextually instead of showing a generic screen.
       try {
         const denied = JSON.parse(sessionStorage.getItem('norva-entitlement-denied') || 'null');
         if (denied) {
           sessionStorage.removeItem('norva-entitlement-denied');
-          setStatus('Start your 7-day free trial to keep watching.', false);
+          setStatus(softWallMessage(denied), false);
         }
       } catch (_) { /* ignore */ }
+
+      // If the account already has a live plan, surface a "manage" shortcut up
+      // top so they don't accidentally start a second purchase. Dormant in observe.
+      async function checkExisting() {
+        try {
+          const ent = window.NorvaCloud && window.NorvaCloud.entitlements;
+          if (!ent) return;
+          const dec = appUserId() ? await ent.get() : await ent.device();
+          if (!dec || dec.enforced === false || dec.mode === 'observe') return;
+          const st = String(dec.status || '');
+          if (['active', 'trialing', 'cancelled_at_period_end', 'past_due', 'grace'].indexOf(st) === -1) return;
+          const box = document.getElementById('already-sub');
+          if (!box) return;
+          box.textContent = 'You already have a Norva ' + (st === 'trialing' ? 'free trial' : 'plan') + '. ';
+          const a = document.createElement('a');
+          a.href = '/subscription.html?returnTo=' + encodeURIComponent(returnTo);
+          a.textContent = 'Manage your subscription →';
+          a.style.cssText = 'color:var(--pink);font-weight:700;text-decoration:none';
+          box.appendChild(a);
+          box.classList.add('show');
+        } catch (_) { /* ignore */ }
+      }
 
       applyPeriod('monthly');
       window.NorvaBilling.login(appUserId());
       loadTrialEligibility();
+      checkExisting();
     })();
   </script>
 </body>

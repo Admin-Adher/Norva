@@ -16,4 +16,8 @@ window.NORVA_BILLING_CONFIG = {
   offeringId: 'default',
   // Optional override for where the RevenueCat Web SDK is loaded from.
   purchasesJsUrl: 'https://esm.sh/@revenuecat/purchases-js@1',
+  // Where web subscribers manage / cancel / update their card (a RevenueCat
+  // customer-center or Stripe billing-portal link). Empty = no web "manage"
+  // button until configured. Native uses the Google Play subscriptions page.
+  webCustomerPortalUrl: '',
 };

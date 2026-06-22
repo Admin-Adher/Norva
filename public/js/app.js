@@ -232,6 +232,7 @@ class App {
         this.navigateTo(initialPage, true); // true = replace history (don't add)
 
         this.maybeShowTrialBanner();
+        this.maybeShowBillingIssueBanner();
 
         console.log('Norva initialized');
     }
@@ -481,6 +482,48 @@ class App {
             close.style.cssText = 'background:transparent;border:0;color:#a8b3c7;font-size:16px;cursor:pointer;line-height:1';
             close.addEventListener('click', () => {
                 try { sessionStorage.setItem('norva-trial-banner-dismissed', String(daysLeft)); } catch (_) { }
+                bar.remove();
+            });
+
+            bar.appendChild(span);
+            bar.appendChild(link);
+            bar.appendChild(close);
+            document.body.appendChild(bar);
+        } catch (_) { /* never break the app over a banner */ }
+    }
+
+    // Payment-issue banner: a failed renewal puts the account in a short grace
+    // window (still enforced). Nudge the user to fix billing before access is
+    // cut, linking to the subscription manager. Dormant in observe mode.
+    maybeShowBillingIssueBanner() {
+        try {
+            const ent = this.entitlement || window.NorvaEntitlement;
+            if (!ent || ent.enforced !== true) return;
+            const status = ent.status || (ent.projection && ent.projection.status) || '';
+            if (!(status === 'past_due' || status === 'grace' || ent.reason === 'billing_grace')) return;
+            if (sessionStorage.getItem('norva-billing-banner-dismissed') === '1') return;
+            if (document.getElementById('norva-billing-banner')) return;
+
+            const here = location.pathname + location.search + location.hash;
+            const bar = document.createElement('div');
+            bar.id = 'norva-billing-banner';
+            bar.style.cssText = 'position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:9999;display:flex;align-items:center;gap:14px;max-width:calc(100% - 24px);padding:10px 16px;border-radius:999px;background:#2a1d12;border:1px solid #7a5326;color:#fde8b0;font:600 14px/1 Inter,system-ui,sans-serif;box-shadow:0 12px 40px rgba(0,0,0,.45)';
+
+            const span = document.createElement('span');
+            span.textContent = 'Payment issue — update your payment method to keep watching';
+
+            const link = document.createElement('a');
+            link.href = '/subscription.html?returnTo=' + encodeURIComponent(here);
+            link.textContent = 'Fix billing';
+            link.style.cssText = 'color:#ffd479;text-decoration:none;font-weight:700';
+
+            const close = document.createElement('button');
+            close.type = 'button';
+            close.setAttribute('aria-label', 'Dismiss');
+            close.textContent = '✕';
+            close.style.cssText = 'background:transparent;border:0;color:#d9c08a;font-size:16px;cursor:pointer;line-height:1';
+            close.addEventListener('click', () => {
+                try { sessionStorage.setItem('norva-billing-banner-dismissed', '1'); } catch (_) { }
                 bar.remove();
             });
 

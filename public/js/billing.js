@@ -153,6 +153,15 @@
     }
   }
 
+  // Where to send the user to manage / cancel / update their payment method.
+  // Native → the Google Play subscriptions page (Play policy requires management
+  // there); web → the configured billing portal ('' until set). Used by the
+  // subscription management screen.
+  function manageUrl() {
+    if (isNative()) return 'https://play.google.com/store/account/subscriptions';
+    return CONFIG.webCustomerPortalUrl || '';
+  }
+
   window.NorvaBilling = {
     isNative: isNative,
     hasNativeBilling: hasNativeBilling,
@@ -160,6 +169,7 @@
     purchase: purchase,
     restore: restore,
     login: login,
+    manageUrl: manageUrl,
     config: CONFIG,
   };
 })();

@@ -74,11 +74,16 @@ class SettingsPage {
 
         document.getElementById('settings-manage-plan-btn')?.addEventListener('click', () => {
             const returnTo = window.location.pathname + window.location.search + '#settings';
-            // Both web and native route to the in-app subscribe screen: web uses
-            // RevenueCat Web Billing, native uses Play Billing via the bridge.
-            // (In-app purchase is allowed by the stores; only external web payment
-            // links are not.)
-            window.location.href = '/subscribe.html?returnTo=' + encodeURIComponent(returnTo);
+            // A live subscription → the management screen (details, cancel/update
+            // via Play or the billing portal); otherwise → the plan picker. Both
+            // web and native are store-allowed for in-app management/purchase
+            // (only external web payment links are not).
+            const ent = this.app?.entitlement || window.NorvaEntitlement;
+            const st = String(ent?.status || '');
+            const hasSub = ent?.enforced === true &&
+                ['active', 'trialing', 'cancelled_at_period_end', 'past_due', 'grace'].indexOf(st) !== -1;
+            const dest = hasSub ? '/subscription.html' : '/subscribe.html';
+            window.location.href = dest + '?returnTo=' + encodeURIComponent(returnTo);
         });
 
         // Account deletion uses the dedicated page (session-aware, typed
