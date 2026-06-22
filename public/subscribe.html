@@ -249,6 +249,16 @@
         document.querySelectorAll('.buy').forEach(function (b) { b.textContent = ctaLabel(); });
       }
 
+      // If we landed here from a playback/capacity wall (soft wall at first
+      // play), acknowledge it contextually instead of showing a generic screen.
+      try {
+        const denied = JSON.parse(sessionStorage.getItem('norva-entitlement-denied') || 'null');
+        if (denied) {
+          sessionStorage.removeItem('norva-entitlement-denied');
+          setStatus('Start your 7-day free trial to keep watching.', false);
+        }
+      } catch (_) { /* ignore */ }
+
       applyPeriod('monthly');
       window.NorvaBilling.login(appUserId());
       loadTrialEligibility();

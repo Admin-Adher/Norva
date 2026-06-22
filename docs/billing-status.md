@@ -27,6 +27,29 @@ Projet Supabase : **`oupsceccxsonaalhueff`**.
 
 ---
 
+## Modèle d'abonnement (décidé 2026-06-22)
+
+- **Essai 7 j avec carte** (Play : moyen de paiement du compte Google ; Web : carte via RC Web Billing/Stripe). Conversion auto sauf annulation. **Pas de palier gratuit permanent payant** — mais un palier `free` de navigation (voir ci-dessous).
+- **Soft wall** : signup (sans carte) → onboarding « connecte ta source » → browse libre → **au 1er play** → écran subscribe (plan + période + carte) → essai. **Aucun aperçu gratuit** (play = mur).
+- **Palier `free`** (décision *calculée*, jamais stockée en base) : browse + 1 source, `concurrent_streams: 0`. Sans abo / essai expiré / abo expiré → `free` (browse), **pas** bloqué → l'utilisateur retombe en browse libre à l'expiration.
+- **Garde-fous** : tout ça est **dormant** tant que `NORVA_ENTITLEMENTS_MODE != enforce` OU `NORVA_BILLING_MODE != revenuecat`. Bascule = clés AVANT le flip (runbook §10).
+
+### Phase 1 (socle soft wall) — FAIT (commité, dormant)
+- `_shared/entitlements.ts` : palier `free` + `softDeny`/`freeBrowseDecision` (refus doux → `free` en mode revenuecat ; blocages durs fraude/revoked/billing_unverified inchangés).
+- `public/js/api.js` : 402 lecture/capacité → `subscribe.html` (helper `routeToSubscribeWall` + wrap de `createSession`, car le play bypasse `API.request`).
+- `public/js/pages/Settings.js` : bouton plan → `subscribe.html` (web + natif).
+- `public/subscribe.html` : message contextuel quand on arrive du mur.
+- Bumps cache app.html : api.js v52, Settings.js v13, cloudApi.js v24.
+- **Pas de migration** (le palier `free` n'est jamais écrit → contrainte `plan_code` inchangée).
+- ⏳ Pas encore déployé ; nécessitera un redéploiement `norva-cloud` + `norva-playback`.
+
+### Reste (Phases 2-3)
+- **#5 Onboarding « connecte ta source »** (effet visible même avant le billing) — **prochain**.
+- Écran « essai démarré, renouvelé le [date] » + bandeau compteur « J-7 » + date de fin dans Settings.
+- Polish TV D-pad sur `subscribe.html`.
+
+---
+
 ## ✅ Fait & DÉPLOYÉ sur le live
 
 ### Base de données (Supabase `oupsceccxsonaalhueff`)

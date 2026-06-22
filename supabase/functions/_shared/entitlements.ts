@@ -73,6 +73,17 @@ const PLAN_LIMITS: Record<string, JsonRecord> = {
     cloud_sync: true,
     metadata: true,
   },
+  free: {
+    // Soft-wall browse tier: connect one source and browse the catalogue, but
+    // concurrent_streams: 0 means playback is walled until a plan/trial starts.
+    trusted_devices: 5,
+    concurrent_streams: 0,
+    sources: 1,
+    profiles: 1,
+    gateway: true,
+    cloud_sync: true,
+    metadata: true,
+  },
   none: {
     trusted_devices: 0,
     concurrent_streams: 0,
@@ -117,7 +128,7 @@ export async function getEntitlementDecision(
     projection = await startTrialProjection(db, userId);
   }
 
-  if (!projection) return applyEntitlementMode(blockedDecision("subscription_required", null));
+  if (!projection) return applyEntitlementMode(softDeny("subscription_required", null));
 
   const now = Date.now();
   const status = String(projection.status || "unknown");
@@ -137,7 +148,7 @@ export async function getEntitlementDecision(
     if (!effectiveEnd || effectiveEnd > now) {
       return applyEntitlementMode(allowedDecision("trialing", projection, limits, false));
     }
-    return applyEntitlementMode(blockedDecision("trial_expired", projection, limits));
+    return applyEntitlementMode(softDeny("trial_expired", projection, limits));
   }
 
   if (status === "active") {
@@ -150,14 +161,14 @@ export async function getEntitlementDecision(
     if (lastVerifiedAt && lastVerifiedAt + DEFAULT_FAIL_OPEN_HOURS * 60 * 60 * 1000 > now) {
       return applyEntitlementMode(allowedDecision("billing_recently_verified", projection, limits, true));
     }
-    return applyEntitlementMode(blockedDecision("subscription_expired", projection, limits));
+    return applyEntitlementMode(softDeny("subscription_expired", projection, limits));
   }
 
   if (status === "cancelled_at_period_end") {
     if (!periodEnd || periodEnd > now) {
       return applyEntitlementMode(allowedDecision("cancelled_at_period_end", projection, limits, false));
     }
-    return applyEntitlementMode(blockedDecision("subscription_expired", projection, limits));
+    return applyEntitlementMode(softDeny("subscription_expired", projection, limits));
   }
 
   if (status === "grace" || status === "past_due" || status === "unknown") {
@@ -171,10 +182,10 @@ export async function getEntitlementDecision(
   }
 
   if (status === "expired") {
-    return applyEntitlementMode(blockedDecision("subscription_expired", projection, limits));
+    return applyEntitlementMode(softDeny("subscription_expired", projection, limits));
   }
 
-  return applyEntitlementMode(blockedDecision("subscription_required", projection, limits));
+  return applyEntitlementMode(softDeny("subscription_required", projection, limits));
 }
 
 export function limitNumber(limits: JsonRecord, key: string, fallback = 0) {
@@ -219,6 +230,33 @@ function allowedDecision(reason: string, projection: JsonRecord, limits: JsonRec
       ? "Norva access is temporarily allowed while billing status is being verified."
       : "Norva access is active.",
   };
+}
+
+// Soft-wall browse decision: the user keeps access to browse (connect a source,
+// see their catalogue) but cannot play (free tier has concurrent_streams: 0).
+function freeBrowseDecision(reason: string, projection: JsonRecord | null): EntitlementDecision {
+  return {
+    allowed: true,
+    reason: `free_${reason}`,
+    status: String(projection?.status || "none"),
+    planCode: "free",
+    mode: ENTITLEMENTS_MODE,
+    enforced: ENTITLEMENTS_MODE === "enforce",
+    failOpen: false,
+    limits: PLAN_LIMITS.free,
+    projection: projection ? sanitizeProjection(projection) : null,
+    message: billingMessage(reason),
+  };
+}
+
+// In RevenueCat billing mode, "soft" denials (no subscription / trial ended /
+// subscription expired) degrade to free browse instead of a hard block — the
+// user is walled only at playback (the soft-wall model). Legacy mode keeps the
+// historical hard block, and observe mode overrides everything anyway, so this
+// is dormant until billing_mode=revenuecat AND entitlements_mode=enforce.
+function softDeny(reason: string, projection: JsonRecord | null, limits = PLAN_LIMITS.none): EntitlementDecision {
+  if (BILLING_MODE === "revenuecat") return freeBrowseDecision(reason, projection);
+  return blockedDecision(reason, projection, limits);
 }
 
 function blockedDecision(reason: string, projection: JsonRecord | null, limits = PLAN_LIMITS.none): EntitlementDecision {

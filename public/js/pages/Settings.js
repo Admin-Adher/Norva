@@ -70,13 +70,11 @@ class SettingsPage {
 
         document.getElementById('settings-manage-plan-btn')?.addEventListener('click', () => {
             const returnTo = window.location.pathname + window.location.search + '#settings';
-            // Native shells use the in-app purchase screen (Play Billing via
-            // RevenueCat) — in-app purchase is allowed; only external web payment
-            // links are not. Web keeps the existing access/manage page.
-            const target = isNativeShell()
-                ? '/subscribe.html?returnTo=' + encodeURIComponent(returnTo)
-                : '/paywall.html?returnTo=' + encodeURIComponent(returnTo);
-            window.location.href = target;
+            // Both web and native route to the in-app subscribe screen: web uses
+            // RevenueCat Web Billing, native uses Play Billing via the bridge.
+            // (In-app purchase is allowed by the stores; only external web payment
+            // links are not.)
+            window.location.href = '/subscribe.html?returnTo=' + encodeURIComponent(returnTo);
         });
 
         // Account deletion uses the dedicated page (session-aware, typed
