@@ -50,6 +50,16 @@
     return 'avatar-' + String((index % AVATAR_COUNT) + 1).padStart(2, '0');
   }
 
+  // Netflix-style gating is per browser session: once a profile is chosen we
+  // don't re-prompt on in-session reloads, but a new session/login shows it again.
+  const SESSION_FLAG = 'norva-profile-session';
+  function pickedThisSession() {
+    try { return sessionStorage.getItem(SESSION_FLAG) === '1'; } catch (_) { return false; }
+  }
+  function markPickedThisSession() {
+    try { sessionStorage.setItem(SESSION_FLAG, '1'); } catch (_) { }
+  }
+
   function injectStyles() {
     if (stylesInjected) return;
     stylesInjected = true;
@@ -57,42 +67,56 @@
       document.documentElement.classList.add('tv');
     }
     const css = `
-.np-overlay{position:fixed;inset:0;z-index:10000;display:grid;place-items:center;padding:24px;background:#090b10;overflow:auto;font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif}
-.np-panel{width:min(900px,100%);text-align:center;color:#f8fafc}
+.np-overlay{position:fixed;inset:0;z-index:10000;display:grid;place-items:center;padding:24px;background:radial-gradient(125% 125% at 50% -10%,#161b24 0%,#0a0c11 55%);overflow:auto;font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif;animation:np-fade .35s ease both}
+@keyframes np-fade{from{opacity:0}to{opacity:1}}
+@keyframes np-rise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+.np-panel{width:min(960px,100%);text-align:center;color:#f8fafc;animation:np-rise .42s cubic-bezier(.2,.7,.2,1) both}
 .np-panel-edit{width:min(560px,100%)}
-.np-title{font-size:clamp(26px,4vw,40px);font-weight:800;margin:0 0 28px}
-.np-grid{display:flex;flex-wrap:wrap;gap:24px;justify-content:center}
-.np-card{background:transparent;border:0;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:10px;width:140px;padding:8px;border-radius:14px}
-.np-avatar{width:140px;height:140px;border-radius:14px;overflow:hidden;background:#11151d;border:3px solid transparent;position:relative;display:grid;place-items:center}
-.np-avatar img{width:100%;height:100%;object-fit:cover}
-.np-card:hover .np-avatar,.np-card:focus-visible .np-avatar{border-color:#fff}
+.np-brand{font-size:13px;letter-spacing:.34em;text-transform:uppercase;color:#7c8aa5;font-weight:800;margin:0 0 16px}
+.np-title{font-size:clamp(30px,4.6vw,50px);font-weight:800;letter-spacing:-.015em;margin:0 0 40px}
+.np-grid{display:flex;flex-wrap:wrap;gap:30px;justify-content:center}
+.np-card{background:transparent;border:0;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:14px;width:160px;padding:8px;border-radius:16px;transition:transform .22s ease}
+.np-card:hover,.np-card:focus-visible{transform:scale(1.07)}
 .np-card:focus-visible{outline:none}
-.np-name{color:#a8b3c7;font-size:16px;font-weight:600}
+.np-avatar{width:160px;height:160px;border-radius:14px;overflow:hidden;background:#11151d;border:3px solid transparent;position:relative;display:grid;place-items:center;transition:border-color .22s ease,box-shadow .22s ease}
+.np-avatar img{width:100%;height:100%;object-fit:cover}
+.np-card:hover .np-avatar,.np-card:focus-visible .np-avatar{border-color:#fff;box-shadow:0 14px 40px rgba(0,0,0,.6)}
+.np-name{color:#94a1b8;font-size:17px;font-weight:600;transition:color .22s ease}
 .np-card:hover .np-name,.np-card:focus-visible .np-name{color:#fff}
-.np-avatar-add{font-size:64px;color:#6b7690;font-weight:300}
-.np-avatar-lg{width:120px;height:120px;margin:0 auto 18px}
-.np-edit-badge{position:absolute;inset:0;display:grid;place-items:center;background:rgba(0,0,0,.45);color:#fff;font-size:34px}
-.np-actions{display:flex;gap:12px;justify-content:center;margin-top:36px;flex-wrap:wrap}
-.np-btn{min-height:46px;padding:0 22px;border-radius:8px;border:1px solid #344158;background:#1a2130;color:#dbe7ff;font:inherit;font-weight:700;cursor:pointer}
+.np-avatar-add{font-size:66px;color:#5f6b85;font-weight:200;transition:color .22s ease}
+.np-card:hover .np-avatar-add,.np-card:focus-visible .np-avatar-add{color:#cdd6e6}
+.np-avatar-lg{width:128px;height:128px;margin:0 auto 20px}
+.np-edit-badge{position:absolute;inset:0;display:grid;place-items:center;background:rgba(0,0,0,.45);color:#fff;font-size:34px;opacity:0;transition:opacity .2s ease}
+.np-card:hover .np-edit-badge,.np-card:focus-visible .np-edit-badge{opacity:1}
+.np-actions{display:flex;gap:12px;justify-content:center;margin-top:48px;flex-wrap:wrap}
+.np-btn{min-height:48px;padding:0 26px;border-radius:8px;border:1px solid #344158;background:#1a2130;color:#dbe7ff;font:inherit;font-weight:700;cursor:pointer;transition:transform .15s ease,border-color .15s ease,background .15s ease}
+.np-btn:hover{transform:translateY(-1px)}
 .np-btn-primary{background:#5b7cfa;border-color:#5b7cfa;color:#fff}
+.np-btn-primary:hover{background:#6f8bff}
 .np-btn-danger{background:transparent;border-color:rgba(251,113,133,.6);color:#fecdd3}
-.np-btn-ghost{background:transparent}
+.np-btn-ghost{background:transparent;letter-spacing:.06em;text-transform:uppercase;font-size:13px;color:#9aa6bd}
+.np-btn-ghost:hover{border-color:#5a6b86;color:#fff}
 .np-btn:focus-visible{outline:3px solid #b579ff;outline-offset:2px}
 .np-input{width:100%;max-width:360px;margin:0 auto 18px;display:block;padding:12px 14px;border-radius:8px;border:1px solid #344158;background:#11151d;color:#f8fafc;font:inherit;font-size:16px;text-align:center}
 .np-avatars-label{color:#a8b3c7;font-size:13px;margin-bottom:10px}
 .np-avatars{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin-bottom:18px}
-.np-avatar-choice{width:64px;height:64px;border-radius:10px;overflow:hidden;background:#11151d;border:3px solid transparent;cursor:pointer;padding:0}
+.np-avatar-choice{width:64px;height:64px;border-radius:10px;overflow:hidden;background:#11151d;border:3px solid transparent;cursor:pointer;padding:0;transition:transform .15s ease,border-color .15s ease}
+.np-avatar-choice:hover{transform:scale(1.08)}
 .np-avatar-choice img{width:100%;height:100%;object-fit:cover}
 .np-avatar-choice.np-picked{border-color:#5b7cfa}
 .np-avatar-choice:focus-visible{outline:2px solid #b579ff;outline-offset:2px}
 .np-status{min-height:18px;color:#fecdd3;font-size:13px;margin:6px 0}
-.np-close{position:absolute;top:18px;right:18px;width:44px;height:44px;border-radius:50%;border:1px solid #344158;background:#11151d;color:#dbe7ff;font-size:18px;cursor:pointer;z-index:2}
+.np-close{position:absolute;top:20px;right:20px;width:46px;height:46px;border-radius:50%;border:1px solid #344158;background:rgba(17,21,29,.8);color:#dbe7ff;font-size:18px;cursor:pointer;z-index:2;transition:background .15s ease,transform .15s ease}
+.np-close:hover{background:#1a2130;transform:scale(1.06)}
 .np-close:focus-visible{outline:3px solid #b579ff;outline-offset:2px}
-html.tv .np-close{width:56px;height:56px;font-size:22px}
-html.tv .np-avatar{width:184px;height:184px}
-html.tv .np-card{width:184px}
-html.tv .np-title{font-size:46px}
-html.tv .np-btn{min-height:58px;font-size:18px}
+@media (prefers-reduced-motion:reduce){.np-overlay,.np-panel{animation:none}.np-card,.np-avatar,.np-name,.np-btn,.np-close,.np-avatar-choice,.np-edit-badge{transition:none}}
+html.tv .np-close{width:58px;height:58px;font-size:22px}
+html.tv .np-avatar{width:200px;height:200px}
+html.tv .np-card{width:200px}
+html.tv .np-card:hover,html.tv .np-card:focus-visible{transform:scale(1.09)}
+html.tv .np-title{font-size:54px}
+html.tv .np-name{font-size:20px}
+html.tv .np-btn{min-height:60px;font-size:18px}
 `;
     const style = el('style');
     style.id = 'norva-profiles-style';
@@ -136,6 +160,7 @@ html.tv .np-btn{min-height:58px;font-size:18px}
     setTimeout(() => {
       if (!overlayEl) return;
       const target = overlayEl.querySelector('.np-input') ||
+        overlayEl.querySelector('.np-current') ||
         overlayEl.querySelector('.np-card') ||
         overlayEl.querySelector('button');
       if (target) { try { target.focus(); } catch (_) { } }
@@ -183,11 +208,13 @@ html.tv .np-btn{min-height:58px;font-size:18px}
     const manage = state.mode === 'manage';
     overlayEl.innerHTML = '';
     const panel = el('div', 'np-panel');
+    if (!manage) panel.appendChild(el('div', 'np-brand', 'NORVA'));
     panel.appendChild(el('h1', 'np-title', manage ? 'Manage profiles' : "Who's watching?"));
 
+    const activeId = profilesApi().getActiveId();
     const grid = el('div', 'np-grid');
     state.profiles.forEach((p) => {
-      const card = el('button', 'np-card' + (manage ? ' np-card-manage' : ''));
+      const card = el('button', 'np-card' + (manage ? ' np-card-manage' : '') + (!manage && p.id === activeId ? ' np-current' : ''));
       card.type = 'button';
       const av = el('div', 'np-avatar');
       av.appendChild(avatarImg(p.avatar_id, p.name));
@@ -327,6 +354,7 @@ html.tv .np-btn{min-height:58px;font-size:18px}
 
   function selectProfile(p) {
     profilesApi().setActiveId(p.id);
+    markPickedThisSession();
     if (resolveSelect) {
       const r = resolveSelect; resolveSelect = null;
       close();
@@ -344,12 +372,18 @@ html.tv .np-btn{min-height:58px;font-size:18px}
     let list;
     try { list = await loadProfiles(); } catch (_) { return true; } // fail open — never lock the app
 
-    const activeId = profilesApi().getActiveId();
-    if (activeId && list.some((p) => p.id === activeId)) return true;
+    // One profile: auto-select, never gate.
     if (list.length <= 1) {
       if (list.length === 1) profilesApi().setActiveId(list[0].id);
       return true;
     }
+
+    // Netflix-style: with several profiles show "Who's watching?" once per browser
+    // session/login. The stored active id only pre-highlights the last pick — an
+    // in-session reload keeps it, a new session/login shows the picker again.
+    const activeId = profilesApi().getActiveId();
+    if (pickedThisSession() && activeId && list.some((p) => p.id === activeId)) return true;
+
     state.mode = 'select';
     return new Promise((resolve) => {
       resolveSelect = resolve;
