@@ -443,6 +443,42 @@ public class MainActivity extends Activity {
         public void openDownloads() {
             runOnUiThread(() -> startActivity(new Intent(MainActivity.this, DownloadsActivity.class)));
         }
+
+        // ---- Billing (Google Play Billing via RevenueCat) ----
+
+        /** Associate the RevenueCat App User ID with the Supabase user id. */
+        @android.webkit.JavascriptInterface
+        public void billingLogin(final String userId) {
+            NorvaBilling.login(userId);
+        }
+
+        /** Start a subscription purchase for the given RevenueCat package id. */
+        @android.webkit.JavascriptInterface
+        public void purchase(final String packageId, final String planCode, final String requestId) {
+            NorvaBilling.purchase(MainActivity.this, packageId,
+                    (status, error) -> sendBillingResult(requestId, status, planCode, error));
+        }
+
+        /** Restore previous purchases for the signed-in account. */
+        @android.webkit.JavascriptInterface
+        public void restore(final String requestId) {
+            NorvaBilling.restore((status, error) -> sendBillingResult(requestId, status, null, error));
+        }
+    }
+
+    /** Post a billing result back to the web layer (subscribe.html / billing.js). */
+    private void sendBillingResult(String requestId, String status, String planCode, String error) {
+        try {
+            org.json.JSONObject o = new org.json.JSONObject();
+            o.put("requestId", requestId);
+            o.put("status", status);
+            if (planCode != null) o.put("planCode", planCode);
+            if (error != null) o.put("error", error);
+            final String js = "window.__norvaBilling && window.__norvaBilling.onResult(" + jsStr(o.toString()) + ")";
+            runOnUiThread(() -> {
+                try { if (webView != null) webView.evaluateJavascript(js, null); } catch (Exception ignored) { }
+            });
+        } catch (Exception ignored) { }
     }
 
     // ---- Offline downloads ----

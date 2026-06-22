@@ -335,6 +335,33 @@ public class MainActivity extends Activity {
                                        final String itemType, final String itemId, final int resumeSeconds) {
             MainActivity.this.openPlayer(url, title, sourceId, itemType, itemId, resumeSeconds);
         }
+
+        // ---- Billing (Google Play Billing via RevenueCat) ----
+
+        @android.webkit.JavascriptInterface
+        public void billingLogin(final String userId) {
+            NorvaBilling.login(userId);
+        }
+
+        @android.webkit.JavascriptInterface
+        public void purchase(final String packageId, final String planCode, final String requestId) {
+            NorvaBilling.purchase(MainActivity.this, packageId, new NorvaBilling.ResultCallback() {
+                @Override
+                public void onResult(String status, String error) {
+                    sendBillingResult(requestId, status, planCode, error);
+                }
+            });
+        }
+
+        @android.webkit.JavascriptInterface
+        public void restore(final String requestId) {
+            NorvaBilling.restore(new NorvaBilling.ResultCallback() {
+                @Override
+                public void onResult(String status, String error) {
+                    sendBillingResult(requestId, status, null, error);
+                }
+            });
+        }
     }
 
     private class CloudBridge {
@@ -356,6 +383,33 @@ public class MainActivity extends Activity {
         public void playVideoResumable(final String url, final String title, final String sourceId,
                                        final String itemType, final String itemId, final int resumeSeconds) {
             MainActivity.this.openPlayer(url, title, sourceId, itemType, itemId, resumeSeconds);
+        }
+
+        // ---- Billing (Google Play Billing via RevenueCat) ----
+
+        @android.webkit.JavascriptInterface
+        public void billingLogin(final String userId) {
+            NorvaBilling.login(userId);
+        }
+
+        @android.webkit.JavascriptInterface
+        public void purchase(final String packageId, final String planCode, final String requestId) {
+            NorvaBilling.purchase(MainActivity.this, packageId, new NorvaBilling.ResultCallback() {
+                @Override
+                public void onResult(String status, String error) {
+                    sendBillingResult(requestId, status, planCode, error);
+                }
+            });
+        }
+
+        @android.webkit.JavascriptInterface
+        public void restore(final String requestId) {
+            NorvaBilling.restore(new NorvaBilling.ResultCallback() {
+                @Override
+                public void onResult(String status, String error) {
+                    sendBillingResult(requestId, status, null, error);
+                }
+            });
         }
     }
 
@@ -406,6 +460,24 @@ public class MainActivity extends Activity {
                 try { webView.evaluateJavascript(js, null); } catch (Exception ignored) { }
             }
         });
+    }
+
+    /** Post a billing result back to the web layer (subscribe.html / billing.js). */
+    private void sendBillingResult(final String requestId, final String status, final String planCode, final String error) {
+        try {
+            org.json.JSONObject o = new org.json.JSONObject();
+            o.put("requestId", requestId);
+            o.put("status", status);
+            if (planCode != null) o.put("planCode", planCode);
+            if (error != null) o.put("error", error);
+            final String js = "window.__norvaBilling && window.__norvaBilling.onResult(" + jsStr(o.toString()) + ")";
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    try { if (webView != null) webView.evaluateJavascript(js, null); } catch (Exception ignored) { }
+                }
+            });
+        } catch (Exception ignored) { }
     }
 
     private static String jsStr(String value) {
