@@ -10,7 +10,7 @@ import {
 } from "../_shared/live-materialization.ts";
 import { refreshVodTitleProjection } from "../_shared/vod-title-projection.ts";
 import type { LiveCatalogItem } from "../_shared/live-catalog.ts";
-import { getEntitlementDecision, getEntitlementRuntime, limitNumber } from "../_shared/entitlements.ts";
+import { getBillingMode, getEntitlementDecision, getEntitlementRuntime, hasConsumedTrial, limitNumber } from "../_shared/entitlements.ts";
 
 type JsonRecord = Record<string, unknown>;
 type CloudUser = { id: string; email?: string };
@@ -123,6 +123,18 @@ Deno.serve(async (req) => {
   }
 });
 
+// Whether the signed-in account may still start a free trial. Trial eligibility
+// is account-level (keyed to trial_consumed_at), so it follows the user across
+// Play / web / TV and prevents stacking trials across stores.
+async function getTrialEligibility(userId: string, db: SupabaseClient) {
+  const consumed = await hasConsumedTrial(db, userId);
+  return {
+    eligible: !consumed,
+    trialConsumed: consumed,
+    billingMode: getBillingMode(),
+  };
+}
+
 async function route(
   req: Request,
   url: URL,
@@ -142,6 +154,7 @@ async function route(
         entitlements: true,
         entitlementsMode: entitlementRuntime.mode,
         entitlementsEnforced: entitlementRuntime.enforced,
+        billingMode: getBillingMode(),
         liveMaterialization: true,
         relayConfigured: Boolean(runtimeConfig.relayBaseUrl && runtimeConfig.relayTokenSecret),
         gatewayConfigured: Boolean(runtimeConfig.mediaGatewayUrl && runtimeConfig.mediaGatewayToken),
@@ -202,6 +215,10 @@ async function route(
 
   if (scope === "entitlements" && req.method === "GET") {
     return { body: await getEntitlementDecision(db, user.id) };
+  }
+
+  if (scope === "billing" && id === "trial-eligibility" && req.method === "GET") {
+    return { body: await getTrialEligibility(user.id, db) };
   }
 
   if (!scope || scope === "profile") {

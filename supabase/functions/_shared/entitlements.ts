@@ -18,6 +18,10 @@ export type EntitlementDecision = {
 const DEFAULT_TRIAL_DAYS = boundedEnvInt("NORVA_TRIAL_DAYS", 7, 1, 60);
 const DEFAULT_FAIL_OPEN_HOURS = boundedEnvInt("NORVA_BILLING_FAIL_OPEN_HOURS", 72, 1, 24 * 14);
 const ENTITLEMENTS_MODE = normalizeEntitlementsMode(Deno.env.get("NORVA_ENTITLEMENTS_MODE") ?? "enforce");
+// "legacy"     → auto-start a no-card 7-day trial on first access (current).
+// "revenuecat" → trials/subscriptions come from the store + webhook with a
+//                payment method; no trial is auto-granted server-side.
+const BILLING_MODE = normalizeBillingMode(Deno.env.get("NORVA_BILLING_MODE") ?? "legacy");
 
 const PLAN_LIMITS: Record<string, JsonRecord> = {
   trial: {
@@ -105,7 +109,11 @@ export async function getEntitlementDecision(
   }
 
   let projection = data as JsonRecord | null;
-  if (!projection && options.autoStartTrial !== false) {
+  // Legacy mode auto-starts a no-card trial on first access. Once billing runs
+  // through RevenueCat, trials are created by the store/webhook with a payment
+  // method, so we no longer auto-grant one here.
+  const autoTrialAllowed = BILLING_MODE === "legacy" && options.autoStartTrial !== false;
+  if (!projection && autoTrialAllowed) {
     projection = await startTrialProjection(db, userId);
   }
 
@@ -335,6 +343,15 @@ function timeMs(value: unknown) {
 
 function isRecord(value: unknown): value is JsonRecord {
   return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function normalizeBillingMode(value: string) {
+  const mode = value.trim().toLowerCase();
+  return mode === "revenuecat" || mode === "rc" ? "revenuecat" : "legacy";
+}
+
+export function getBillingMode() {
+  return BILLING_MODE;
 }
 
 function normalizeEntitlementsMode(value: string) {
