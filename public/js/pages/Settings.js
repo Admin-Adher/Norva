@@ -13,6 +13,14 @@ function isNativeShell() {
         || /[?&]mobile=1\b/.test(window.location.search || '');
 }
 
+// True once the native APK exposes the Play Billing purchase bridge. In-app
+// purchase is allowed by stores (only external web payment links are not), so
+// when this bridge is present we can surface an in-app "Subscribe" action.
+function nativeBillingReady() {
+    const bridge = window.NorvaTVCloud || window.NodeCastNative;
+    return !!(bridge && typeof bridge.purchase === 'function');
+}
+
 class SettingsPage {
     constructor(app) {
         this.app = app;
@@ -62,7 +70,13 @@ class SettingsPage {
 
         document.getElementById('settings-manage-plan-btn')?.addEventListener('click', () => {
             const returnTo = window.location.pathname + window.location.search + '#settings';
-            window.location.href = '/paywall.html?returnTo=' + encodeURIComponent(returnTo);
+            // Native shells use the in-app purchase screen (Play Billing via
+            // RevenueCat) — in-app purchase is allowed; only external web payment
+            // links are not. Web keeps the existing access/manage page.
+            const target = isNativeShell()
+                ? '/subscribe.html?returnTo=' + encodeURIComponent(returnTo)
+                : '/paywall.html?returnTo=' + encodeURIComponent(returnTo);
+            window.location.href = target;
         });
 
         // Account deletion uses the dedicated page (session-aware, typed
@@ -157,9 +171,21 @@ class SettingsPage {
         }
 
         // The access STATUS stays visible (read-only membership state, like
-        // Netflix), but plan/billing MANAGEMENT is web-only on native shells:
-        // app-store policy forbids surfacing external payment for digital goods.
-        if (button) button.style.display = isNativeShell() ? 'none' : '';
+        // Netflix). The action differs by shell:
+        //   - Web: "Manage plan" (web account/billing surface).
+        //   - Native: "Subscribe" via the in-app Play Billing flow, but ONLY
+        //     once the APK ships the purchase bridge. Until then it stays hidden
+        //     (external web payment links remain forbidden inside native).
+        if (button) {
+            if (isNativeShell()) {
+                const ready = nativeBillingReady();
+                button.style.display = ready ? '' : 'none';
+                if (ready) button.textContent = 'Subscribe';
+            } else {
+                button.style.display = '';
+                button.textContent = 'Manage plan';
+            }
+        }
 
         try {
             const decision = this.app.currentUser.device

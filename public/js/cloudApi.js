@@ -604,6 +604,13 @@
             }
         },
 
+        billing: {
+            // Account-level trial eligibility (one trial per account across every
+            // rail — keyed to trial_consumed_at). Lets the paywall show "Start
+            // free trial" vs "Subscribe".
+            trialEligibility: () => request('GET', '/billing/trial-eligibility')
+        },
+
         regions: {
             list: () => CONTENT_REGIONS.slice(),
             label: contentRegionLabel,
