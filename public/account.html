@@ -500,6 +500,10 @@
 
             const user = await NorvaAuth.getUser().catch(() => null);
             if (user) {
+                // Logged-in users reaching account.html with ?manage=1 (the Settings
+                // "Sign-in settings" entry) get an account-management view instead of
+                // being bounced straight back — otherwise that button looks like a no-op.
+                if (params.get('manage') === '1') { showManage(user); return; }
                 location.replace(returnTo);
                 return;
             }
@@ -509,6 +513,39 @@
                 document.getElementById('signin-email').value = email;
                 document.getElementById('signup-email').value = email;
             }
+        }
+
+        // Authenticated "manage sign-in" view for a user who is already signed in:
+        // reuses the new-password form (change password), plus go-back and sign-out.
+        function showManage(user) {
+            tabs.style.display = 'none';
+            showForm('password');
+            const form = forms.password;
+            const title = form.querySelector('.recovery-title');
+            const copy = form.querySelector('.recovery-copy');
+            if (title) title.textContent = 'Manage sign-in';
+            if (copy) copy.textContent = 'Signed in as ' + (user.email || 'your account') + '. Set a new password below, or go back.';
+            if (!document.getElementById('manage-back')) {
+                const back = document.createElement('button');
+                back.id = 'manage-back';
+                back.type = 'button';
+                back.className = 'secondary';
+                back.textContent = 'Back to Norva';
+                back.addEventListener('click', () => location.replace(returnTo));
+                form.appendChild(back);
+
+                const out = document.createElement('button');
+                out.id = 'manage-signout';
+                out.type = 'button';
+                out.className = 'ghost';
+                out.textContent = 'Sign out';
+                out.addEventListener('click', async () => {
+                    try { await NorvaAuth.signOut(); } catch (_) { /* ignore */ }
+                    location.replace('/account.html');
+                });
+                form.appendChild(out);
+            }
+            statusEl.className = 'status';
         }
 
         async function ensureProfile(displayName) {

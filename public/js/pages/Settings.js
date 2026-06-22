@@ -55,7 +55,9 @@ class SettingsPage {
     initAccountSettings() {
         document.getElementById('settings-open-account')?.addEventListener('click', () => {
             const returnTo = window.location.pathname + window.location.search + '#settings';
-            window.location.href = '/account.html?returnTo=' + encodeURIComponent(returnTo);
+            // manage=1 → account.html shows the "Manage sign-in" view for the
+            // already-signed-in user instead of bouncing straight back.
+            window.location.href = '/account.html?manage=1&returnTo=' + encodeURIComponent(returnTo);
         });
 
         document.getElementById('settings-switch-profile')?.addEventListener('click', () => {
