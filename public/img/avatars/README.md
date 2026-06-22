@@ -1,11 +1,13 @@
 # Norva profile avatars
 
-Drop the profile avatar images here.
+The 12 profile avatars live here as `avatar-01.png` … `avatar-12.png`.
 
-- **Files**: `avatar-01.png` … `avatar-12.png` (about 12).
-- **Format**: PNG, square, transparent or solid background.
-- **Size**: 512×512 px (stays crisp on a 4K TV).
+- **Format**: PNG, square (currently 384×384, palette-optimised to ~30–55 KB
+  each — crisp at the 140–184 px display sizes, including 4K TV).
 - The app references avatars by id (`avatar-01`, `avatar-02`, …) and builds the
   path `/img/avatars/<id>.png`. Any missing file falls back to `placeholder.svg`.
+- **Replacing one**: drop a square PNG at the same name. Keep it small — source
+  art straight out of an image generator is often ~1.5 MB / 1254 px and should
+  be downscaled to ~384 px before committing (the picker loads all 12 at once).
 - Custom user-uploaded avatars (a later phase) will be stored separately and do
   not go in this folder.
