@@ -42,6 +42,8 @@ class App {
         // Check authentication first
         await this.checkAuth();
         if (!await this.checkCloudAccess()) return;
+        // Netflix-style "who's watching": pick a profile before entering the app.
+        try { if (window.NorvaProfiles?.ensureSelected) await window.NorvaProfiles.ensureSelected(); } catch (_) { }
         this.applyCatalogAvailability(null);
         this.startCloudWarmKeep();
 

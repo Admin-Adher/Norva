@@ -62,6 +62,10 @@ class SettingsPage {
             window.location.href = '/account.html?returnTo=' + encodeURIComponent(returnTo);
         });
 
+        document.getElementById('settings-switch-profile')?.addEventListener('click', () => {
+            window.NorvaProfiles?.openSwitcher?.();
+        });
+
         document.getElementById('settings-open-cloud-dashboard')?.addEventListener('click', () => {
             window.location.href = '/cloud.html';
         });
@@ -140,7 +144,9 @@ class SettingsPage {
 
         const accountOnly = document.getElementById('settings-open-account');
         const cloudDashboard = document.getElementById('settings-open-cloud-dashboard');
+        const switchProfile = document.getElementById('settings-switch-profile');
         if (accountOnly) accountOnly.style.display = user.cloud ? '' : 'none';
+        if (switchProfile) switchProfile.style.display = user.cloud ? '' : 'none';
         // "Trusted devices" opens the full web household dashboard (cloud.html),
         // which is a web account surface rather than an in-app screen — hide it
         // inside native shells (the native-aware "Sign-in settings" stays).

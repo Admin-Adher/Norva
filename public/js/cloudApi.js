@@ -406,6 +406,26 @@
     function invalidateSourcesCache() { invalidateCache('sources'); }
     function listSourcesCached() { return cachedGet('sources', SOURCES_TTL_MS, () => request('GET', '/sources')); }
 
+    // Active profile (Netflix-style "who's watching"). Stored per device and sent
+    // on every cloud call as x-norva-profile-id so favorites / history / continue
+    // watching are scoped to the chosen profile.
+    const ACTIVE_PROFILE_KEY = 'norva-active-profile-id';
+    function getActiveProfileId() {
+        try { return localStorage.getItem(ACTIVE_PROFILE_KEY) || ''; } catch (_) { return ''; }
+    }
+    function setActiveProfileId(id) {
+        const prev = getActiveProfileId();
+        try {
+            if (id) localStorage.setItem(ACTIVE_PROFILE_KEY, String(id));
+            else localStorage.removeItem(ACTIVE_PROFILE_KEY);
+        } catch (_) { /* ignore */ }
+        // Switching profile invalidates the per-profile caches.
+        if (String(id || '') !== String(prev || '')) {
+            invalidateCache('favorites');
+            invalidateCache('history');
+        }
+    }
+
     async function sourceSyncRequest(id) {
         const path = `/sources/${encodeURIComponent(id)}/sync?country=${encodeURIComponent(resolveCountry())}`;
         try {
@@ -523,6 +543,8 @@
         };
         let token = usingUserToken ? getToken() : options.token;
         if (token) headers.Authorization = `Bearer ${token}`;
+        const activeProfileId = getActiveProfileId();
+        if (activeProfileId) headers['x-norva-profile-id'] = activeProfileId;
 
         const send = () => fetch(`${baseUrl}${path}`, {
             method,
@@ -609,6 +631,16 @@
             // rail — keyed to trial_consumed_at). Lets the paywall show "Start
             // free trial" vs "Subscribe".
             trialEligibility: () => request('GET', '/billing/trial-eligibility')
+        },
+
+        profiles: {
+            list: () => request('GET', '/profiles'),
+            create: (profile) => request('POST', '/profiles', profile),
+            update: (id, patch) => request('PATCH', `/profiles/${encodeURIComponent(id)}`, patch),
+            remove: (id) => request('DELETE', `/profiles/${encodeURIComponent(id)}`),
+            getActiveId: getActiveProfileId,
+            setActiveId: setActiveProfileId,
+            avatarUrl: (avatarId) => '/img/avatars/' + encodeURIComponent(String(avatarId || 'avatar-01')) + '.png',
         },
 
         regions: {
