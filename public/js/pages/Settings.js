@@ -1116,14 +1116,15 @@ class SettingsPage {
             const devices = (payload.devices || []).filter((d) => !d.revoked);
             if (select) {
                 select.innerHTML = devices.length
-                    ? devices.map((d) => `<option value="${this.escapeAttr(d.id)}">${this.escapeHtml(d.device_name || d.device_type || 'Norva screen')}</option>`).join('')
-                    : '<option value="">No trusted screen</option>';
+                    ? devices.map((d) => `<option value="${this.escapeAttr(d.id)}">${this.escapeHtml(d.device_name || this.deviceTypeLabel(d))}</option>`).join('')
+                    : '<option value="">No screen linked yet</option>';
             }
             listEl.innerHTML = devices.length
                 ? devices.map((d) => this.renderTrustedDevice(d)).join('')
-                : '<p class="setting-hint">No trusted screen yet. Pair a TV, phone or browser to see it here.</p>';
+                : '<div class="screens-empty">No screens linked yet.<br>Pair a TV, phone or browser above to see it here.</div>';
             listEl.querySelectorAll('[data-revoke-device]').forEach((btn) => {
                 btn.addEventListener('click', async () => {
+                    if (!confirm('Remove this screen from your account? It will need to be paired again to reconnect.')) return;
                     const id = btn.dataset.revokeDevice;
                     btn.disabled = true;
                     try {
@@ -1142,14 +1143,63 @@ class SettingsPage {
     }
 
     renderTrustedDevice(device) {
-        const seen = device.last_seen_at ? new Date(device.last_seen_at).toLocaleString() : 'Never seen';
-        return `<div class="setting-item">
-            <div class="setting-info" style="flex:1">
-                <span class="setting-label">${this.escapeHtml(device.device_name || 'Norva screen')}</span>
-                <span class="setting-hint">${this.escapeHtml(device.device_type || 'device')} · ${this.escapeHtml(device.platform || 'unknown')} · ${this.escapeHtml(seen)}</span>
+        const seen = device.last_seen_at ? this.relativeTime(device.last_seen_at) : 'Never connected';
+        return `<div class="device-card">
+            <div class="dc-icon">${this.deviceIcon(device)}</div>
+            <div class="dc-info">
+                <div class="dc-name">${this.escapeHtml(device.device_name || this.deviceTypeLabel(device))}</div>
+                <div class="dc-meta">${this.escapeHtml(this.deviceTypeLabel(device))} · ${this.escapeHtml(seen)}</div>
             </div>
-            <button class="btn btn-danger" type="button" data-revoke-device="${this.escapeAttr(device.id)}">Revoke</button>
+            <button class="dc-remove" type="button" data-revoke-device="${this.escapeAttr(device.id)}">Remove</button>
         </div>`;
+    }
+
+    // Normalise a device into one of: tv | phone | tablet | web | screen
+    deviceKind(device) {
+        const hint = `${device.device_type || ''} ${device.platform || ''} ${device.device_name || ''}`.toLowerCase();
+        if (/\btv\b|androidtv|android tv|firetv|fire tv|tvos|appletv|apple tv|chromecast|cast|roku|webos|tizen|bravia/.test(hint)) return 'tv';
+        if (/tablet|ipad/.test(hint)) return 'tablet';
+        if (/phone|android|iphone|ios|mobile/.test(hint)) return 'phone';
+        if (/web|browser|chrome|firefox|safari|edge|desktop|windows|mac|linux/.test(hint)) return 'web';
+        return 'screen';
+    }
+
+    deviceTypeLabel(device) {
+        switch (this.deviceKind(device)) {
+            case 'tv': return 'TV';
+            case 'phone': return 'Phone';
+            case 'tablet': return 'Tablet';
+            case 'web': return 'Web browser';
+            default: return 'Screen';
+        }
+    }
+
+    deviceIcon(device) {
+        const icons = {
+            tv: '<rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8M12 17v4"/>',
+            phone: '<rect x="6" y="2" width="12" height="20" rx="2.5"/><path d="M11 18h2"/>',
+            tablet: '<rect x="4" y="2" width="16" height="20" rx="2.5"/><path d="M11 18h2"/>',
+            web: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.5 2.5 15.5 0 18M12 3c-2.5 2.5-2.5 15.5 0 18"/>',
+            screen: '<rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8"/>'
+        };
+        const kind = this.deviceKind(device);
+        return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${icons[kind] || icons.screen}</svg>`;
+    }
+
+    relativeTime(iso) {
+        const then = new Date(iso).getTime();
+        if (!Number.isFinite(then)) return 'Recently';
+        const diff = Date.now() - then;
+        if (diff < 0) return 'Just now';
+        const mins = Math.floor(diff / 60000);
+        if (mins < 1) return 'Just now';
+        if (mins < 60) return `${mins} min ago`;
+        const hrs = Math.floor(mins / 60);
+        if (hrs < 24) return `${hrs} h ago`;
+        const days = Math.floor(hrs / 24);
+        if (days < 7) return `${days} d ago`;
+        if (days < 30) return `${Math.floor(days / 7)} wk ago`;
+        return new Date(iso).toLocaleDateString();
     }
 
     async sendScreenCommand(command) {

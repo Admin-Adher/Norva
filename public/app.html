@@ -670,58 +670,80 @@
 
           <!-- Screens & Pairing Tab -->
           <div id="tab-screens" class="tab-content">
-            <div class="settings-section">
-              <h3>Account</h3>
-              <div class="setting-item">
-                <div class="setting-info" style="flex:1">
-                  <span class="setting-label">Display name</span>
-                  <span class="setting-hint">The name shown on your Norva account.</span>
+            <style>
+              .screens-wrap{max-width:880px}
+              .screens-pair{display:flex;gap:18px;align-items:center;flex-wrap:wrap;background:linear-gradient(135deg,rgba(91,124,250,.12),rgba(181,121,255,.06));border:1px solid #2b3550;border-radius:16px;padding:22px}
+              .screens-pair .sp-icon{width:54px;height:54px;border-radius:14px;display:grid;place-items:center;background:rgba(91,124,250,.18);color:#9db4ff;flex:0 0 auto}
+              .screens-pair .sp-icon svg{width:28px;height:28px}
+              .screens-pair .sp-text{flex:1;min-width:200px}
+              .screens-pair .sp-text h4{font-size:17px;margin:0 0 4px;color:#f1f5fb}
+              .screens-pair .sp-text p{color:#9aa6bd;font-size:13px;margin:0;line-height:1.5}
+              .screens-pair-form{display:flex;gap:10px;align-items:center;flex:0 0 auto}
+              .screens-code{width:160px;text-transform:uppercase;letter-spacing:.16em;font-weight:800;text-align:center;font-size:18px;padding:0 12px;min-height:48px;border-radius:10px;border:1px solid #344158;background:#0b0f16;color:#fff}
+              .screens-code:focus{outline:none;border-color:#5b7cfa}
+              .screens-h{font-size:15px;font-weight:800;color:#cdd6e6;letter-spacing:.02em;margin:24px 2px 12px}
+              .screens-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(258px,1fr));gap:12px}
+              .device-card{display:flex;align-items:center;gap:14px;background:#0f131b;border:1px solid #222a39;border-radius:14px;padding:13px 15px}
+              .device-card .dc-icon{width:44px;height:44px;border-radius:12px;display:grid;place-items:center;background:#1a2130;color:#9db4ff;flex:0 0 auto}
+              .device-card .dc-icon svg{width:24px;height:24px}
+              .device-card .dc-info{flex:1;min-width:0}
+              .device-card .dc-name{font-weight:700;color:#f1f5fb;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+              .device-card .dc-meta{color:#8b97ad;font-size:12px;margin-top:2px}
+              .device-card .dc-remove{background:transparent;border:1px solid #4a2a33;color:#fb7185;border-radius:9px;padding:7px 13px;font-weight:700;cursor:pointer;font-size:13px;flex:0 0 auto}
+              .device-card .dc-remove:hover{background:rgba(251,113,133,.12)}
+              .screens-empty{color:#8b97ad;font-size:14px;background:#0f131b;border:1px dashed #2a3346;border-radius:14px;padding:26px 18px;text-align:center;line-height:1.6}
+              .screens-card{background:#11151d;border:1px solid #222a39;border-radius:14px;padding:18px}
+              .screens-input{min-height:46px;padding:0 13px;border-radius:10px;border:1px solid #344158;background:#0b0f16;color:#f8fafc;font:inherit}
+              .screens-input:focus{outline:none;border-color:#5b7cfa}
+              .screens-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+              .screens-status{min-height:18px;font-size:13px;margin-top:10px}
+              .screens-cast .sc-fields{display:grid;gap:10px;margin-top:4px}
+              .screens-muted{color:#9aa6bd;font-size:13px;margin:0 0 10px;line-height:1.5}
+              @media(max-width:560px){.screens-pair-form{width:100%}.screens-code{flex:1;width:auto}}
+            </style>
+            <div class="screens-wrap">
+
+              <div class="screens-pair">
+                <div class="sp-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg></div>
+                <div class="sp-text">
+                  <h4>Add a TV, phone or browser</h4>
+                  <p>Open Norva on the other device and type the code it shows here to link it to your account.</p>
                 </div>
-                <input id="screens-display-name" type="text" maxlength="80" autocomplete="name" class="source-select" style="width:auto;min-width:200px">
-                <button class="btn btn-primary" id="screens-save-profile" type="button">Save</button>
-              </div>
-              <div class="setting-hint" id="screens-profile-status" style="min-height:16px"></div>
-            </div>
-
-            <div class="settings-section">
-              <h3>Pair a screen</h3>
-              <div class="setting-item">
-                <div class="setting-info" style="flex:1">
-                  <span class="setting-label">Pairing code</span>
-                  <span class="setting-hint">Enter the code shown on a TV, mobile app or web screen to trust it.</span>
+                <div class="screens-pair-form">
+                  <input id="screens-pair-code" class="screens-code" type="text" inputmode="text" maxlength="10" autocomplete="one-time-code" placeholder="ABC123">
+                  <button class="btn btn-primary" id="screens-approve" type="button">Pair</button>
                 </div>
-                <input id="screens-pair-code" type="text" inputmode="text" maxlength="10" autocomplete="one-time-code" placeholder="ABC123" class="source-select" style="width:auto;min-width:160px;text-transform:uppercase">
-                <button class="btn btn-primary" id="screens-approve" type="button">Approve</button>
               </div>
-              <div class="setting-hint" id="screens-pair-status" style="min-height:16px"></div>
-            </div>
+              <div class="screens-status" id="screens-pair-status"></div>
 
-            <div class="settings-section">
-              <h3>Trusted screens</h3>
-              <div id="screens-devices-list"></div>
-              <div class="setting-hint" id="screens-devices-status" style="min-height:16px"></div>
-            </div>
+              <div class="screens-h">Your screens</div>
+              <div class="screens-grid" id="screens-devices-list"></div>
+              <div class="screens-status" id="screens-devices-status"></div>
 
-            <div class="settings-section">
-              <h3>Remote command</h3>
-              <p class="setting-hint">Send a playback or navigation command to a trusted Norva screen.</p>
-              <div class="setting-item">
-                <div class="setting-info" style="flex:1"><span class="setting-label">Target screen</span></div>
-                <select id="screens-command-device" class="source-select" style="width:auto;min-width:200px"></select>
+              <div class="screens-h">Account name</div>
+              <div class="screens-card">
+                <div class="screens-row">
+                  <input id="screens-display-name" class="screens-input" type="text" maxlength="80" autocomplete="name" placeholder="Your name" style="flex:1;min-width:180px">
+                  <button class="btn btn-primary" id="screens-save-profile" type="button">Save</button>
+                </div>
+                <div class="screens-status" id="screens-profile-status"></div>
               </div>
-              <div class="setting-item">
-                <div class="setting-info" style="flex:1"><span class="setting-label">Title</span></div>
-                <input id="screens-command-title" type="text" maxlength="120" placeholder="Norva stream" class="source-select" style="width:auto;min-width:200px">
+
+              <div class="screens-h">Cast a link to a screen</div>
+              <div class="screens-card screens-cast">
+                <p class="screens-muted">Send a video link to one of your trusted screens to start playing it there.</p>
+                <div class="sc-fields">
+                  <select id="screens-command-device" class="screens-input"></select>
+                  <input id="screens-command-title" class="screens-input" type="text" maxlength="120" placeholder="Title (optional)">
+                  <input id="screens-command-url" class="screens-input" type="url" placeholder="https://…  (video link)">
+                </div>
+                <div class="screens-row" style="margin-top:12px">
+                  <button class="btn btn-primary" id="screens-send-play" type="button">Play on screen</button>
+                  <button class="btn btn-secondary" id="screens-send-open" type="button">Open</button>
+                </div>
+                <div class="screens-status" id="screens-command-status"></div>
               </div>
-              <div class="setting-item">
-                <div class="setting-info" style="flex:1"><span class="setting-label">URL</span></div>
-                <input id="screens-command-url" type="url" placeholder="https://..." class="source-select" style="width:auto;min-width:200px">
-              </div>
-              <div style="display:flex;gap:10px;margin-top:8px">
-                <button class="btn btn-primary" id="screens-send-play" type="button">Play</button>
-                <button class="btn btn-secondary" id="screens-send-open" type="button">Open</button>
-              </div>
-              <div class="setting-hint" id="screens-command-status" style="min-height:16px"></div>
+
             </div>
           </div>
 
@@ -1608,7 +1630,7 @@
   <script src="/js/pages/Guide.js?v=2"></script>
   <script src="/js/pages/MoviesPage.js?v=26"></script>
   <script src="/js/pages/SeriesPage.js?v=25"></script>
-  <script src="/js/pages/Settings.js?v=22"></script>
+  <script src="/js/pages/Settings.js?v=23"></script>
   <script src="/js/pages/WatchPage.js?v=88"></script>
   <script src="/js/profiles.js?v=4"></script>
   <script src="/js/app.js?v=23"></script>
