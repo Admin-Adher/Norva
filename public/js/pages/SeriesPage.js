@@ -204,6 +204,8 @@ class SeriesPage {
 
     async renderGenreRails() {
         this.railsView = true;
+        this.activeBucket = null;
+        this.bucketObserver?.disconnect();
         if (this.countEl) this.countEl.textContent = '';
         this.resetBtn?.classList.add('hidden');
         if (this.randomBtn) this.randomBtn.disabled = true; // "Random" needs the flat grid.
@@ -216,7 +218,8 @@ class SeriesPage {
             }
             window.GenreRails.render(this.container, rails, {
                 emptyText: 'Aucune série à afficher pour le moment.',
-                onItemClick: (item) => this.openRailItem(item)
+                onItemClick: (item) => this.openRailItem(item),
+                onSeeAll: (rail) => this.openBucket(rail)
             });
         } catch (err) {
             console.warn('[Series] Genre rails unavailable, falling back to grid:', err);
@@ -230,6 +233,64 @@ class SeriesPage {
     openRailItem(item) {
         const home = this.app?.pages?.home;
         if (home?.navigateToSeries) home.navigateToSeries(item);
+    }
+
+    // "Tout voir" on a genre rail → a full, paged grid of that genre.
+    openBucket(rail) {
+        const bucket = (rail && rail.curation && rail.curation.bucket) || String((rail && rail.id) || '').replace(/^genre-/, '');
+        if (!bucket) return;
+        this.activeBucket = bucket;
+        this.bucketLabel = (rail && (rail.title || rail.name)) || '';
+        this.bucketOffset = 0;
+        this.bucketHasMore = true;
+        this.bucketLoading = false;
+        this.bucketObserver?.disconnect();
+
+        this.container.innerHTML = `
+            <div class="genre-bucket-head" style="display:flex;align-items:center;gap:14px;margin:4px 0 18px">
+                <button class="btn btn-secondary btn-sm" id="genre-bucket-back" type="button">‹ Tous les genres</button>
+                <h2 style="margin:0;font-size:21px">${MediaUtils.escapeHtml(this.bucketLabel)}</h2>
+            </div>
+            <div class="genre-bucket-grid" style="display:flex;flex-wrap:wrap;gap:16px"></div>
+            <div class="genre-bucket-loader" style="height:1px"></div>`;
+        document.getElementById('genre-bucket-back')?.addEventListener('click', () => this.closeBucket());
+        this.bucketGridEl = this.container.querySelector('.genre-bucket-grid');
+        try { this.container.scrollIntoView({ block: 'start' }); } catch (_) { /* noop */ }
+
+        const loaderEl = this.container.querySelector('.genre-bucket-loader');
+        this.bucketObserver = new IntersectionObserver((entries) => {
+            if (entries.some((e) => e.isIntersecting)) this.loadBucketPage();
+        }, { rootMargin: '700px' });
+        this.loadBucketPage().then(() => {
+            if (loaderEl) this.bucketObserver.observe(loaderEl);
+        });
+    }
+
+    async loadBucketPage() {
+        if (this.bucketLoading || !this.bucketHasMore || !this.activeBucket) return;
+        this.bucketLoading = true;
+        try {
+            const payload = await API.media.genreItems({ type: 'series', bucket: this.activeBucket, limit: 36, offset: this.bucketOffset });
+            const items = (payload && payload.items) || [];
+            window.GenreRails.appendCards(this.bucketGridEl, items, {
+                startIndex: this.bucketOffset,
+                onItemClick: (item) => this.openRailItem(item)
+            });
+            this.bucketOffset += items.length;
+            this.bucketHasMore = Boolean(payload && payload.hasMore) && items.length > 0;
+        } catch (err) {
+            console.warn('[Series] Genre bucket page failed:', err);
+            this.bucketHasMore = false;
+        } finally {
+            this.bucketLoading = false;
+        }
+    }
+
+    closeBucket() {
+        this.activeBucket = null;
+        this.bucketObserver?.disconnect();
+        this.bucketObserver = null;
+        this.renderGenreRails();
     }
 
     resetFilters() {

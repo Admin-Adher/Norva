@@ -86,6 +86,11 @@ Deno.serve(async (req) => {
       return json(req, await listGenreRails(url, userId));
     }
 
+    if (req.method === "GET" && (segments[0] === "media-genre-items" || (segments[0] === "device" && segments[1] === "media-genre-items"))) {
+      const userId = await requireUserId(req);
+      return json(req, await listGenreItems(url, userId));
+    }
+
     throw new HttpError(404, "Route not found");
   } catch (error) {
     const status = error instanceof HttpError ? error.status : 500;
@@ -294,6 +299,52 @@ async function listGenreRails(url: URL, userId: string) {
     }));
 
   return { contract: "norva.genre.rails.v1", type: itemType, rails };
+}
+
+// Full, paged list of one curated genre bucket (the rail's "Tout voir" / See
+// all). Same shape as listMediaItems so the client grid consumes it unchanged.
+async function listGenreItems(url: URL, userId: string) {
+  const itemType = url.searchParams.get("type") === "series" ? "series" : "movie";
+  const bucket = (url.searchParams.get("bucket") || "").trim();
+  const limit = boundedInt(url.searchParams.get("limit"), 36, 1, 100);
+  const offset = boundedInt(url.searchParams.get("offset"), 0, 0, 1_000_000);
+  const candidateLimit = boundedInt(url.searchParams.get("candidates"), 4000, 100, 8000);
+  if (!bucket) throw new HttpError(400, "Missing bucket");
+
+  let titles: JsonRecord[];
+  try {
+    const { data, error } = await db
+      .from("cloud_titles")
+      .select("*")
+      .eq("user_id", userId)
+      .eq("item_type", itemType)
+      .gt("variant_count", 0)
+      .order("synced_at", { ascending: false })
+      .order("updated_at", { ascending: false })
+      .limit(candidateLimit);
+    if (error) {
+      if (isMissingMaterialization(error)) return { items: [], count: 0, limit, offset, hasMore: false };
+      throwDb(error, "Unable to list genre items");
+    }
+    titles = (data ?? []) as JsonRecord[];
+  } catch (error) {
+    if (isMissingMaterialization(error)) return { items: [], count: 0, limit, offset, hasMore: false };
+    throw error;
+  }
+
+  const matched = titles.filter((title) =>
+    classifyTitleBuckets(recordOrEmpty(title.metadata).categoryName, titleGenres(title)).includes(bucket)
+  );
+  const pageRows = matched.slice(offset, offset + limit);
+  const variantsByTitle = await listVariantsByTitleIds(pageRows.map((row) => String(row.id)));
+
+  return {
+    items: pageRows.map((row) => titleRailItem(row, variantsByTitle.get(String(row.id)) ?? [])),
+    count: matched.length,
+    limit,
+    offset,
+    hasMore: offset + limit < matched.length,
+  };
 }
 
 async function listTitleRail(userId: string, itemType: "movie" | "series", id: string, title: string, limit: number) {

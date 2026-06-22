@@ -693,7 +693,8 @@
 
         home: {
             rails: (params = {}) => catalogRequest('/home/rails', params),
-            genreRails: (params = {}) => catalogRequest('/media-genre-rails', params)
+            genreRails: (params = {}) => catalogRequest('/media-genre-rails', params),
+            genreItems: (params = {}) => catalogRequest('/media-genre-items', params)
         },
 
         favorites: {
@@ -767,7 +768,8 @@
             },
             home: {
                 rails: (params = {}) => catalogRequest('/device/home/rails', params, { token: getDeviceToken() }),
-                genreRails: (params = {}) => catalogRequest('/device/media-genre-rails', params, { token: getDeviceToken() })
+                genreRails: (params = {}) => catalogRequest('/device/media-genre-rails', params, { token: getDeviceToken() }),
+                genreItems: (params = {}) => catalogRequest('/device/media-genre-items', params, { token: getDeviceToken() })
             },
             playback: {
                 createSession: (session) => playbackRequest(session, { token: getDeviceToken() }),

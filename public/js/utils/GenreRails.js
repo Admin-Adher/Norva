@@ -64,8 +64,9 @@
         const cards = (rail.items || []).map((item, i) => cardHtml(item, railIndex, i)).join('');
         return `
             <section class="dashboard-section home-rail-section" data-rail-id="${esc(rail.id || railIndex)}">
-                <div class="section-header home-rail-header">
+                <div class="section-header home-rail-header" style="display:flex;align-items:center;justify-content:space-between;gap:12px">
                     <div><h2>${esc(rail.title || rail.name || '')}</h2></div>
+                    <button class="genre-see-all" type="button" data-rail-index="${railIndex}" style="background:none;border:none;color:#9db4ff;font:600 13px/1 inherit;cursor:pointer;white-space:nowrap;padding:6px 8px">Tout voir ›</button>
                 </div>
                 <div class="scroll-wrapper">
                     <button class="scroll-arrow scroll-left" aria-label="Défiler à gauche" type="button"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg></button>
@@ -113,8 +114,33 @@
                 if (item) onItemClick(item, rail);
             });
         });
+        if (typeof options.onSeeAll === 'function') {
+            container.querySelectorAll('.genre-see-all').forEach((btn) => {
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const rail = usable[Number(btn.dataset.railIndex)];
+                    if (rail) options.onSeeAll(rail);
+                });
+            });
+        }
         wireArrows(container);
     }
 
-    window.GenreRails = { render };
+    // Append rail-item cards into an existing grid element (used by the per-genre
+    // "Tout voir" paged grid). Each card opens via onItemClick(item).
+    function appendCards(gridEl, items, options) {
+        if (!gridEl) return;
+        options = options || {};
+        const onItemClick = options.onItemClick || function () {};
+        const start = Number(options.startIndex) || 0;
+        const holder = document.createElement('div');
+        holder.innerHTML = (items || []).map((it, i) => cardHtml(it, 0, start + i)).join('');
+        Array.prototype.slice.call(holder.children).forEach((card, i) => {
+            const item = items[i];
+            card.addEventListener('click', () => onItemClick(item));
+            gridEl.appendChild(card);
+        });
+    }
+
+    window.GenreRails = { render, appendCards };
 })();

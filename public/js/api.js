@@ -531,6 +531,18 @@ const CloudAdapter = (() => {
         return payload;
     }
 
+    async function getGenreItems({ type = 'movie', bucket = '', limit = 36, offset = 0 } = {}) {
+        const normalizedType = type ? cloudTypeFromLocal(type) : 'movie';
+        const normalizedLimit = Math.max(1, Math.min(100, Number.parseInt(limit, 10) || 36));
+        const normalizedOffset = Math.max(0, Number.parseInt(offset, 10) || 0);
+        return cloudHomeApi().genreItems({
+            type: normalizedType,
+            bucket,
+            limit: normalizedLimit,
+            offset: normalizedOffset
+        });
+    }
+
     function liveDefaultPref(variant) {
         const label = String(variant?.label || '');
         let base;
@@ -1661,6 +1673,16 @@ const CloudAdapter = (() => {
                 }))
             };
         }
+        if (method === 'GET' && path === '/media/genre-items') {
+            const requestedType = query.get('type') || 'movie';
+            const limit = Math.max(1, Math.min(100, Number.parseInt(query.get('limit') || '36', 10) || 36));
+            const offset = Math.max(0, Number.parseInt(query.get('offset') || '0', 10) || 0);
+            const payload = await getGenreItems({ type: requestedType, bucket: query.get('bucket') || '', limit, offset });
+            return {
+                ...payload,
+                items: (payload.items || []).map(normalizeHomeRailItem)
+            };
+        }
         if (method === 'GET' && path === '/channels/recent') {
             const requestedType = query.get('type') || 'movie';
             const limit = Math.max(1, Math.min(50, Number.parseInt(query.get('limit') || '12', 10) || 12));
@@ -2038,6 +2060,13 @@ const API = {
                 if (value !== undefined && value !== null && value !== '') search.set(key, value);
             });
             return API.request('GET', `/media/genre-rails${search.toString() ? `?${search.toString()}` : ''}`);
+        },
+        genreItems: (params = {}) => {
+            const search = new URLSearchParams();
+            Object.entries(params).forEach(([key, value]) => {
+                if (value !== undefined && value !== null && value !== '') search.set(key, value);
+            });
+            return API.request('GET', `/media/genre-items${search.toString() ? `?${search.toString()}` : ''}`);
         }
     },
 
