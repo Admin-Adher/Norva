@@ -169,6 +169,21 @@
         return user;
     }
 
+    async function deleteAccount(confirm) {
+        const token = await getAccessToken();
+        if (!token) throw new Error('Not signed in');
+        // Calls the norva-account-delete edge function, which re-verifies this
+        // JWT server-side and deletes the auth user. Every user-owned table
+        // references auth.users(id) ON DELETE CASCADE, so all data goes with it.
+        const result = await request('/functions/v1/norva-account-delete', {
+            method: 'POST',
+            token,
+            body: { confirm: confirm || 'DELETE' }
+        });
+        clearSession();
+        return result;
+    }
+
     function captureSessionFromUrl() {
         const hash = new URLSearchParams(location.hash.replace(/^#/, ''));
         const accessToken = hash.get('access_token');
@@ -195,6 +210,7 @@
         signOut,
         recover,
         updatePassword,
+        deleteAccount,
         refreshSession,
         getAccessToken,
         getUser,

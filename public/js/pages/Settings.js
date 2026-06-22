@@ -65,6 +65,13 @@ class SettingsPage {
             window.location.href = '/paywall.html?returnTo=' + encodeURIComponent(returnTo);
         });
 
+        // Account deletion uses the dedicated page (session-aware, typed
+        // confirmation), which also works inside the APK WebView and is the same
+        // public URL Play requires for web-based deletion.
+        document.getElementById('settings-delete-account-btn')?.addEventListener('click', () => {
+            window.location.href = '/delete-account.html';
+        });
+
         document.getElementById('settings-service-health')?.addEventListener('click', (event) => {
             const actionButton = event.target.closest('[data-source-health-action]');
             if (!actionButton) return;
@@ -126,6 +133,11 @@ class SettingsPage {
         // which is a web account surface rather than an in-app screen — hide it
         // inside native shells (the native-aware "Sign-in settings" stays).
         if (cloudDashboard) cloudDashboard.style.display = (user.cloud && !isNativeShell()) ? '' : 'none';
+
+        // Account deletion is for real cloud accounts only (a device-paired
+        // screen authenticates with a device token, not a user session).
+        const deleteRow = document.getElementById('settings-delete-account-row');
+        if (deleteRow) deleteRow.style.display = (user.cloud && !user.device) ? '' : 'none';
 
         await this.refreshAccessCard();
         await this.refreshSourceHealthCard();
