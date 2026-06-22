@@ -1,12 +1,13 @@
 package tv.nodecast.mobile;
 
 import android.app.Activity;
-import android.app.AlertDialog;
+import android.app.Dialog;
 import android.content.Intent;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.Outline;
 import android.graphics.Typeface;
+import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Bundle;
@@ -17,6 +18,8 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewOutlineProvider;
+import android.view.Window;
+import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -61,7 +64,9 @@ public final class DownloadsActivity extends Activity {
     private TextView empty;
     private TextView summary;
     private TextView active;
-    private String lastSignature = "";
+    // null = "force the next paint". signature() never returns null (it returns
+    // "" for an empty list), so an empty library still re-renders correctly.
+    private String lastSignature = null;
     /** Seasons the user has collapsed, keyed "showTitle|season"; survives re-render. */
     private final Set<String> collapsed = new HashSet<>();
 
@@ -155,7 +160,7 @@ public final class DownloadsActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
-        lastSignature = ""; // force a fresh paint
+        lastSignature = null; // force a fresh paint
         handler.post(poll);
     }
 
@@ -168,7 +173,7 @@ public final class DownloadsActivity extends Activity {
     // ---- Rendering ----
 
     private void renderNow() {
-        lastSignature = "";
+        lastSignature = null;
         renderIfChanged();
     }
 
@@ -529,34 +534,93 @@ public final class DownloadsActivity extends Activity {
         boolean finished = "done".equals(it.state) || "failed".equals(it.state);
         String label = it.subtitle != null && !it.subtitle.isEmpty()
                 ? it.title + " — " + it.subtitle : it.title;
-        new AlertDialog.Builder(this)
-                .setTitle(finished ? "Delete download?" : "Cancel download?")
-                .setMessage((finished ? "Delete \"" : "Cancel and remove \"") + label
-                        + "\"? This frees the storage it uses.")
-                .setPositiveButton(finished ? "Delete" : "Cancel download", (d, w) -> {
+        styledConfirm(
+                finished ? "Delete download?" : "Cancel download?",
+                (finished ? "Delete \"" : "Cancel and remove \"") + label
+                        + "\"? This frees the storage it uses.",
+                finished ? "Delete" : "Cancel download",
+                () -> {
                     DownloadService.requestCancel(this, it.id);
                     Toast.makeText(this, "Removed", Toast.LENGTH_SHORT).show();
                     renderNow();
-                })
-                .setNegativeButton("Keep", null)
-                .show();
+                });
     }
 
     private void confirmClearAll() {
         List<DownloadStore.Item> items = DownloadStore.all(this);
         if (items.isEmpty()) return;
-        new AlertDialog.Builder(this)
-                .setTitle("Delete all downloads?")
-                .setMessage("Remove all " + items.size() + " downloads and free their storage?")
-                .setPositiveButton("Delete all", (d, w) -> {
+        styledConfirm(
+                "Delete all downloads?",
+                "Remove all " + items.size() + " downloads and free their storage?",
+                "Delete all",
+                () -> {
                     for (DownloadStore.Item it : DownloadStore.all(this)) {
                         DownloadService.requestCancel(this, it.id);
                     }
                     Toast.makeText(this, "All downloads removed", Toast.LENGTH_SHORT).show();
                     renderNow();
-                })
-                .setNegativeButton("Keep", null)
-                .show();
+                });
+    }
+
+    /** A confirmation dialog styled to match the app (dark card, danger action). */
+    private void styledConfirm(String title, String message, String confirmLabel, final Runnable onConfirm) {
+        final Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+
+        LinearLayout cardView = new LinearLayout(this);
+        cardView.setOrientation(LinearLayout.VERTICAL);
+        cardView.setBackground(roundedStroke(CARD, CARD_BORDER, 18));
+        cardView.setPadding(dp(22), dp(22), dp(22), dp(16));
+
+        TextView titleView = new TextView(this);
+        titleView.setText(title);
+        titleView.setTextColor(TEXT);
+        titleView.setTypeface(Typeface.DEFAULT_BOLD);
+        titleView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 19);
+        cardView.addView(titleView);
+
+        TextView messageView = new TextView(this);
+        messageView.setText(message);
+        messageView.setTextColor(MUTED);
+        messageView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14.5f);
+        messageView.setLineSpacing(dp(3), 1f);
+        LinearLayout.LayoutParams mlp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        mlp.topMargin = dp(12);
+        messageView.setLayoutParams(mlp);
+        cardView.addView(messageView);
+
+        LinearLayout actions = new LinearLayout(this);
+        actions.setOrientation(LinearLayout.HORIZONTAL);
+        actions.setGravity(Gravity.END);
+        LinearLayout.LayoutParams alp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        alp.topMargin = dp(20);
+        actions.setLayoutParams(alp);
+
+        TextView keep = pill("Keep", SUBTLE, TEXT);
+        keep.setOnClickListener(v -> dialog.dismiss());
+        actions.addView(keep);
+
+        actions.addView(pillSpaced(confirmLabel, DANGER, TEXT, v -> {
+            dialog.dismiss();
+            if (onConfirm != null) onConfirm.run();
+        }));
+
+        cardView.addView(actions);
+
+        FrameLayout wrap = new FrameLayout(this);
+        wrap.setPadding(dp(24), 0, dp(24), 0);
+        wrap.addView(cardView, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        dialog.setContentView(wrap);
+        Window window = dialog.getWindow();
+        if (window != null) {
+            window.setBackgroundDrawable(new ColorDrawable(0x00000000));
+            window.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        }
+        dialog.show();
     }
 
     // ---- Storage ----
