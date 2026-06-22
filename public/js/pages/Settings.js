@@ -750,7 +750,7 @@ class SettingsPage {
             container.innerHTML = html;
         } catch (err) {
             console.error('Error loading hardware info:', err);
-            container.innerHTML = '<p class="hint error">Failed to load hardware info</p>';
+            container.innerHTML = '<p class="hint">Couldn\'t check your hardware right now — Norva will use software encoding, which works everywhere.</p>';
         }
     }
 

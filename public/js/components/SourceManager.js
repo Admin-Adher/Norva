@@ -1739,8 +1739,37 @@ class SourceManager {
      * Set visibility for all items and IMMEDIATELY persist to server
      * Uses fast bulk API endpoint (single SQL statement) instead of item-by-item
      */
+    // Small transient confirmation toast (the app has no global toast helper).
+    toast(message, isError) {
+        try {
+            const t = document.createElement('div');
+            t.className = 'norva-toast';
+            t.textContent = message;
+            t.style.cssText = 'position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:10001;padding:11px 18px;border-radius:999px;background:' + (isError ? '#3a1d22' : '#11241b') + ';border:1px solid ' + (isError ? '#7a3340' : '#2f6b4b') + ';color:' + (isError ? '#fecdd3' : '#bff3d6') + ';font:600 14px/1 Inter,system-ui,sans-serif;box-shadow:0 12px 40px rgba(0,0,0,.45);opacity:0;transition:opacity .2s ease';
+            document.body.appendChild(t);
+            requestAnimationFrame(() => { t.style.opacity = '1'; });
+            setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 250); }, 2200);
+        } catch (_) { /* never break over a toast */ }
+    }
+
     async setAllVisibility(visible) {
         if (!this.treeData || !this.treeData.groups) return;
+
+        // With an active search, only affect the items currently shown — not the
+        // whole source — so "Show/Hide All" never silently touches filtered-out
+        // items. Persist just the resulting diff via the normal save path.
+        if (this.searchQuery) {
+            this.getFilteredGroups().forEach(group => {
+                group.items.forEach(item => {
+                    const key = `${item.type}:${item.id}`;
+                    if (visible) this.hiddenSet.delete(key);
+                    else this.hiddenSet.add(key);
+                });
+            });
+            this.renderTree();
+            await this.saveContentChanges();
+            return;
+        }
 
         const saveBtn = document.getElementById('content-save');
         const showAllBtn = document.querySelector('.content-actions button:first-child');
@@ -1792,6 +1821,7 @@ class SourceManager {
 
             // Re-render to reflect changes
             this.renderTree();
+            this.toast(visible ? 'All items shown' : 'All items hidden');
 
             if (saveBtn) {
                 saveBtn.textContent = '✓ Done!';
@@ -1963,6 +1993,7 @@ class SourceManager {
                 console.warn('[SourceManager] Channel list sync failed:', e);
             }
 
+            this.toast('Changes saved');
             if (saveBtn) {
                 saveBtn.textContent = '✓ Saved!';
                 setTimeout(() => {
