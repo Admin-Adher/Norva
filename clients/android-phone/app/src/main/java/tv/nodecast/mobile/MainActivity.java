@@ -482,6 +482,9 @@ public class MainActivity extends Activity {
             it.itemType = o.optString("itemType", "movie");
             it.title = o.optString("title", "Movie");
             it.subtitle = o.optString("subtitle", "");
+            it.season = o.optInt("season", 0);
+            it.episodeNum = o.optInt("episode", 0);
+            it.episodeTitle = o.optString("episodeTitle", "");
             it.posterUrl = o.optString("posterUrl", "");
             it.container = sanitizeContainer(o.optString("container", "mp4"));
             it.url = url;

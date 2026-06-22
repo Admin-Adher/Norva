@@ -1393,6 +1393,13 @@ class SeriesPage {
                 const episodes = Array.isArray(info.episodes[seasonNum]) ? info.episodes[seasonNum] : [];
                 html += `
                 <div class="season-group" data-season="${MediaUtils.escapeHtml(seasonNum)}">
+                    <div class="season-dl-bar" data-season="${MediaUtils.escapeHtml(seasonNum)}" style="display:none">
+                        <span class="season-dl-name">Season ${MediaUtils.escapeHtml(seasonNum)}</span>
+                        <span class="season-dl-count"></span>
+                        <button class="season-download-btn" type="button" data-season="${MediaUtils.escapeHtml(seasonNum)}" title="Download every episode of this season">
+                            <span class="season-download-label">Download season</span>
+                        </button>
+                    </div>
                     <div class="episode-list">
                         ${episodes.map(ep => {
                             const history = watchedEpisodes.get(String(ep.id));
@@ -1433,13 +1440,21 @@ class SeriesPage {
             this.seasonsContainer.querySelectorAll('.episode-item').forEach(ep => {
                 ep.addEventListener('click', () => this.playEpisode(ep));
             });
-            // Offline download per episode (native phone/tablet app only).
+            // Offline download per episode + per season (native phone/tablet app only).
             if (this.nativeDownloadBridge()) {
                 this.seasonsContainer.querySelectorAll('.episode-download').forEach(btn => {
                     btn.style.display = '';
                     btn.addEventListener('click', (e) => {
                         e.stopPropagation();
                         this.downloadEpisode(btn.closest('.episode-item'), btn);
+                    });
+                });
+                this.seasonsContainer.querySelectorAll('.season-dl-bar').forEach(bar => {
+                    bar.style.display = '';
+                    const seasonBtn = bar.querySelector('.season-download-btn');
+                    seasonBtn?.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        this.downloadSeason(bar.dataset.season, seasonBtn);
                     });
                 });
                 this.refreshEpisodeDownloadStates();
@@ -1606,19 +1621,20 @@ class SeriesPage {
         try { return bridge.downloadState(id) || 'none'; } catch (_) { return 'none'; }
     }
 
-    /** Resolve the direct provider URL for an episode and queue it natively. */
-    async downloadEpisode(episodeEl, btn) {
+    /**
+     * Resolve the direct provider URL for one episode and queue it natively.
+     * No UI side-effects (so it can be looped for a whole season). Returns
+     * 'queued' | 'skip' (already saved/in flight); throws if the URL can't resolve.
+     */
+    async queueEpisodeDownload(episodeEl) {
         const bridge = this.nativeDownloadBridge();
-        if (!bridge || !episodeEl) return;
+        if (!bridge || !episodeEl) return 'skip';
         const episodeId = episodeEl.dataset.episodeId;
         const sourceId = parseInt(episodeEl.dataset.sourceId);
         const container = episodeEl.dataset.container || 'mp4';
         const id = `${sourceId}:${episodeId}`;
         const state = this.episodeDownloadState(id);
-        if (state === 'done' || state === 'downloading' || state === 'queued') {
-            try { bridge.openDownloads?.(); } catch (_) { /* no-op */ }
-            return;
-        }
+        if (state === 'done' || state === 'downloading' || state === 'queued') return 'skip';
         const episode = this.findEpisodeById(episodeId)
             || { id: episodeId, container_extension: container, type: 'episode', streamType: 'series' };
         const seasonNum = episodeEl.dataset.season || '1';
@@ -1627,24 +1643,40 @@ class SeriesPage {
         const playbackHint = MediaUtils.playbackHintFromItem
             ? MediaUtils.playbackHintFromItem(episode, { container, streamType: 'series' })
             : { container, streamType: 'series' };
+        const result = await API.proxy.xtream.getStreamUrl(sourceId, episodeId, 'series', container, playbackHint);
+        if (!result || !result.url) throw new Error('No stream URL');
+        const showTitle = this.currentSeries?.tmdb?.title || this.currentSeries?.name || 'Series';
+        const payload = {
+            url: result.url,
+            sourceId: String(sourceId),
+            itemId: String(episodeId),
+            itemType: 'episode',
+            title: showTitle,
+            subtitle: `S${seasonNum}E${episodeNum} · ${episodeTitle}`,
+            season: parseInt(seasonNum, 10) || 0,
+            episode: parseInt(episodeNum, 10) || 0,
+            episodeTitle,
+            posterUrl: MediaUtils.downloadablePosterUrl(this.currentSeries),
+            container,
+            durationSeconds: 0
+        };
+        bridge.downloadMedia(JSON.stringify(payload));
+        return 'queued';
+    }
+
+    /** Queue a single episode for offline download (per-episode button). */
+    async downloadEpisode(episodeEl, btn) {
+        const bridge = this.nativeDownloadBridge();
+        if (!bridge || !episodeEl) return;
+        const id = `${parseInt(episodeEl.dataset.sourceId)}:${episodeEl.dataset.episodeId}`;
+        if (['done', 'downloading', 'queued'].includes(this.episodeDownloadState(id))) {
+            try { bridge.openDownloads?.(); } catch (_) { /* no-op */ }
+            return;
+        }
         try {
             btn?.classList.add('busy');
             await this.prepareForPlaybackSession();
-            const result = await API.proxy.xtream.getStreamUrl(sourceId, episodeId, 'series', container, playbackHint);
-            if (!result || !result.url) throw new Error('No stream URL');
-            const showTitle = this.currentSeries?.tmdb?.title || this.currentSeries?.name || 'Series';
-            const payload = {
-                url: result.url,
-                sourceId: String(sourceId),
-                itemId: String(episodeId),
-                itemType: 'episode',
-                title: showTitle,
-                subtitle: `S${seasonNum}E${episodeNum} · ${episodeTitle}`,
-                posterUrl: MediaUtils.downloadablePosterUrl(this.currentSeries),
-                container,
-                durationSeconds: 0
-            };
-            bridge.downloadMedia(JSON.stringify(payload));
+            await this.queueEpisodeDownload(episodeEl);
             window.app?.refreshDownloadsNav?.();
         } catch (err) {
             console.warn('[Download] episode failed:', err?.message || err);
@@ -1654,16 +1686,53 @@ class SeriesPage {
         }
     }
 
+    /** Queue every not-yet-saved episode of one season, in order. */
+    async downloadSeason(seasonNum, btn) {
+        const bridge = this.nativeDownloadBridge();
+        if (!bridge || !this.seasonsContainer) return;
+        const sel = (window.CSS && CSS.escape) ? CSS.escape(String(seasonNum)) : String(seasonNum);
+        const group = this.seasonsContainer.querySelector(`.season-group[data-season="${sel}"]`);
+        if (!group) return;
+        const pending = [...group.querySelectorAll('.episode-item')].filter(ep => {
+            const id = `${parseInt(ep.dataset.sourceId)}:${ep.dataset.episodeId}`;
+            return !['done', 'downloading', 'queued'].includes(this.episodeDownloadState(id));
+        });
+        if (!pending.length) { try { bridge.openDownloads?.(); } catch (_) { /* no-op */ } return; }
+        const label = btn?.querySelector('.season-download-label');
+        const original = label ? label.textContent : '';
+        if (btn) btn.disabled = true;
+        try {
+            await this.prepareForPlaybackSession();
+            let n = 0;
+            for (const ep of pending) {
+                if (label) label.textContent = `Queuing ${++n}/${pending.length}…`;
+                try { await this.queueEpisodeDownload(ep); }
+                catch (err) { console.warn('[Download] season episode failed:', err?.message || err); }
+                this.refreshEpisodeDownloadStates();
+            }
+            window.app?.refreshDownloadsNav?.();
+        } finally {
+            if (btn) btn.disabled = false;
+            if (label) label.textContent = original || 'Download season';
+            setTimeout(() => this.refreshEpisodeDownloadStates(), 600);
+        }
+    }
+
     /** Reflect each episode's download state on its button; poll while in flight. */
     refreshEpisodeDownloadStates() {
         const bridge = this.nativeDownloadBridge();
         if (!bridge || typeof bridge.downloadState !== 'function' || !this.seasonsContainer) return;
         let anyActive = false;
+        const seasonAgg = {};
         this.seasonsContainer.querySelectorAll('.episode-item').forEach(ep => {
-            const btn = ep.querySelector('.episode-download');
-            if (!btn) return;
             const id = `${parseInt(ep.dataset.sourceId)}:${ep.dataset.episodeId}`;
             const state = this.episodeDownloadState(id);
+            const agg = seasonAgg[ep.dataset.season || ''] || (seasonAgg[ep.dataset.season || ''] = { done: 0, total: 0 });
+            agg.total++;
+            if (state === 'done') agg.done++;
+            if (state === 'downloading' || state === 'queued') anyActive = true;
+            const btn = ep.querySelector('.episode-download');
+            if (!btn) return;
             const icon = btn.querySelector('.episode-download-icon');
             btn.classList.remove('is-done', 'is-active');
             if (state === 'done') {
@@ -1672,12 +1741,25 @@ class SeriesPage {
                 btn.title = 'Downloaded — open Downloads';
             } else if (state === 'downloading' || state === 'queued') {
                 btn.classList.add('is-active');
-                anyActive = true;
                 if (icon) icon.innerHTML = '&#x22EF;';
                 btn.title = 'Downloading';
             } else {
                 if (icon) icon.innerHTML = '&#x2193;';
                 btn.title = 'Download for offline';
+            }
+        });
+        // Reflect per-season progress on each "Download season" bar.
+        this.seasonsContainer.querySelectorAll('.season-dl-bar').forEach(bar => {
+            const agg = seasonAgg[bar.dataset.season || ''] || { done: 0, total: 0 };
+            const countEl = bar.querySelector('.season-dl-count');
+            const seasonBtn = bar.querySelector('.season-download-btn');
+            const labelEl = bar.querySelector('.season-download-label');
+            if (countEl) countEl.textContent = agg.total ? `${agg.done}/${agg.total} offline` : '';
+            const allDone = agg.total > 0 && agg.done === agg.total;
+            if (seasonBtn) seasonBtn.classList.toggle('is-done', allDone);
+            // Don't stomp the transient "Queuing x/y…" label while a batch runs.
+            if (labelEl && seasonBtn && !seasonBtn.disabled) {
+                labelEl.textContent = allDone ? 'Saved offline' : 'Download season';
             }
         });
         if (anyActive) {

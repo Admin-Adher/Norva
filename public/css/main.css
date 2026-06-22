@@ -5630,6 +5630,55 @@ kbd {
   color: #9af3bd;
 }
 
+/* "Download season" bar (native phone/tablet app only; hidden in a browser). */
+.season-dl-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+}
+
+.season-dl-name {
+  font-weight: 600;
+}
+
+.season-dl-count {
+  margin-left: auto;
+  color: var(--color-text-secondary);
+  font-size: 0.8125rem;
+}
+
+.season-download-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(98, 135, 255, 0.48);
+  background: rgba(98, 135, 255, 0.16);
+  color: #cdd9ff;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast);
+}
+
+.season-download-btn:hover {
+  background: rgba(98, 135, 255, 0.26);
+  border-color: rgba(98, 135, 255, 0.7);
+}
+
+.season-download-btn:disabled {
+  opacity: 0.65;
+  cursor: default;
+}
+
+.season-download-btn.is-done {
+  border-color: rgba(34, 197, 94, 0.5);
+  background: rgba(34, 197, 94, 0.16);
+  color: #9af3bd;
+}
+
 /* Premium Series Detail */
 #page-series.series-detail-open {
   overflow-x: hidden;

@@ -32,6 +32,9 @@ final class DownloadStore {
         String itemType = "movie";
         String title = "";
         String subtitle = "";
+        int season = 0;       // series only; 0 when unknown
+        int episodeNum = 0;   // series only; 0 when unknown
+        String episodeTitle = "";
         String posterUrl = "";
         String posterFile = "";
         String container = "mp4";
@@ -56,6 +59,9 @@ final class DownloadStore {
             o.put("itemType", itemType);
             o.put("title", title);
             o.put("subtitle", subtitle);
+            o.put("season", season);
+            o.put("episodeNum", episodeNum);
+            o.put("episodeTitle", episodeTitle);
             o.put("posterUrl", posterUrl);
             o.put("posterFile", posterFile);
             o.put("container", container);
@@ -82,6 +88,9 @@ final class DownloadStore {
             it.itemType = o.optString("itemType", "movie");
             it.title = o.optString("title");
             it.subtitle = o.optString("subtitle");
+            it.season = o.optInt("season", 0);
+            it.episodeNum = o.optInt("episodeNum", 0);
+            it.episodeTitle = o.optString("episodeTitle");
             it.posterUrl = o.optString("posterUrl");
             it.posterFile = o.optString("posterFile");
             it.container = o.optString("container", "mp4");

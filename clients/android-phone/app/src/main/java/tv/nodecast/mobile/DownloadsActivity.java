@@ -26,10 +26,16 @@ import android.widget.Toast;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
+import java.util.TreeMap;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Native "Downloads" screen — the offline library, styled to match the Norva
@@ -49,11 +55,15 @@ public final class DownloadsActivity extends Activity {
     private static final int MUTED = Color.parseColor("#a1a1aa");
     private static final int DANGER = Color.parseColor("#ef4444");
 
+    private static final Pattern SXEY = Pattern.compile("(?i)S(\\d{1,3})\\s*E(\\d{1,4})");
+
     private LinearLayout list;
     private TextView empty;
     private TextView summary;
     private TextView active;
     private String lastSignature = "";
+    /** Seasons the user has collapsed, keyed "showTitle|season"; survives re-render. */
+    private final Set<String> collapsed = new HashSet<>();
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable poll = new Runnable() {
@@ -271,30 +281,147 @@ public final class DownloadsActivity extends Activity {
         head.addView(headMid, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         card.addView(head);
 
-        for (final DownloadStore.Item ep : episodes) {
-            LinearLayout row = new LinearLayout(this);
-            row.setOrientation(LinearLayout.HORIZONTAL);
-            row.setGravity(Gravity.CENTER_VERTICAL);
-            row.setPadding(0, dp(10), 0, 0);
+        // Group the show's episodes by season (ascending; unknown season last),
+        // each under a collapsible header, sorted by episode number within.
+        Map<Integer, List<DownloadStore.Item>> bySeason = new TreeMap<>((a, b) -> {
+            if (a.intValue() == b.intValue()) return 0;
+            if (a <= 0) return 1;
+            if (b <= 0) return -1;
+            return Integer.compare(a, b);
+        });
+        for (DownloadStore.Item ep : episodes) {
+            int s = seasonOf(ep);
+            List<DownloadStore.Item> g = bySeason.get(s);
+            if (g == null) { g = new ArrayList<>(); bySeason.put(s, g); }
+            g.add(ep);
+        }
 
-            LinearLayout mid = new LinearLayout(this);
-            mid.setOrientation(LinearLayout.VERTICAL);
-            TextView label = new TextView(this);
-            label.setText(ep.subtitle == null || ep.subtitle.isEmpty() ? "Episode" : ep.subtitle);
-            label.setTextColor(TEXT);
-            label.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
-            label.setMaxLines(1);
-            mid.addView(label);
-            mid.addView(statusText(ep));
-            row.addView(mid, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        for (Map.Entry<Integer, List<DownloadStore.Item>> se : bySeason.entrySet()) {
+            final int season = se.getKey();
+            List<DownloadStore.Item> eps = se.getValue();
+            Collections.sort(eps, (a, b) -> {
+                int c = Integer.compare(episodeOf(a), episodeOf(b));
+                return c != 0 ? c : Long.compare(a.createdAt, b.createdAt);
+            });
 
-            LinearLayout actions = new LinearLayout(this);
-            actions.setOrientation(LinearLayout.HORIZONTAL);
-            addActions(actions, ep);
-            row.addView(actions);
-            card.addView(row);
+            final String key = showTitle + "|" + season;
+            final LinearLayout body = new LinearLayout(this);
+            body.setOrientation(LinearLayout.VERTICAL);
+            body.setVisibility(collapsed.contains(key) ? View.GONE : View.VISIBLE);
+            for (DownloadStore.Item ep : eps) body.addView(episodeRow(ep));
+
+            card.addView(seasonHeader(season, eps.size(), key, body));
+            card.addView(body);
         }
         return card;
+    }
+
+    /** A collapsible "Season N" header; tapping toggles {@code body} and remembers it. */
+    private LinearLayout seasonHeader(int season, int count, final String key, final LinearLayout body) {
+        LinearLayout h = new LinearLayout(this);
+        h.setOrientation(LinearLayout.HORIZONTAL);
+        h.setGravity(Gravity.CENTER_VERTICAL);
+        h.setPadding(0, dp(13), 0, dp(2));
+        h.setClickable(true);
+        h.setFocusable(true);
+
+        final TextView chevron = new TextView(this);
+        chevron.setText(collapsed.contains(key) ? "▸" : "▾");
+        chevron.setTextColor(MUTED);
+        chevron.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        clp.rightMargin = dp(8);
+        chevron.setLayoutParams(clp);
+        h.addView(chevron);
+
+        TextView label = new TextView(this);
+        label.setText(season > 0 ? "Season " + season : "Episodes");
+        label.setTextColor(TEXT);
+        label.setTypeface(Typeface.DEFAULT_BOLD);
+        label.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        h.addView(label, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        TextView c = new TextView(this);
+        c.setText(count + (count == 1 ? " episode" : " episodes"));
+        c.setTextColor(MUTED);
+        c.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f);
+        h.addView(c);
+
+        h.setOnClickListener(v -> {
+            if (collapsed.contains(key)) {
+                collapsed.remove(key);
+                body.setVisibility(View.VISIBLE);
+                chevron.setText("▾");
+            } else {
+                collapsed.add(key);
+                body.setVisibility(View.GONE);
+                chevron.setText("▸");
+            }
+        });
+        return h;
+    }
+
+    /** One episode row inside a season group. */
+    private View episodeRow(final DownloadStore.Item ep) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(6), dp(10), 0, 0);
+
+        LinearLayout mid = new LinearLayout(this);
+        mid.setOrientation(LinearLayout.VERTICAL);
+        TextView label = new TextView(this);
+        label.setText(episodeLabel(ep));
+        label.setTextColor(TEXT);
+        label.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        label.setMaxLines(1);
+        mid.addView(label);
+        mid.addView(statusText(ep));
+        row.addView(mid, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        LinearLayout actions = new LinearLayout(this);
+        actions.setOrientation(LinearLayout.HORIZONTAL);
+        addActions(actions, ep);
+        row.addView(actions);
+        return row;
+    }
+
+    // ---- Season / episode parsing ----
+
+    private int seasonOf(DownloadStore.Item it) {
+        return it.season > 0 ? it.season : parseSE(it.subtitle)[0];
+    }
+
+    private int episodeOf(DownloadStore.Item it) {
+        return it.episodeNum > 0 ? it.episodeNum : parseSE(it.subtitle)[1];
+    }
+
+    /** Best-effort {season, episode} from a "S1E2 · Title" style subtitle (0 when absent). */
+    private static int[] parseSE(String s) {
+        if (s != null) {
+            Matcher m = SXEY.matcher(s);
+            if (m.find()) {
+                try {
+                    return new int[]{ Integer.parseInt(m.group(1)), Integer.parseInt(m.group(2)) };
+                } catch (NumberFormatException ignored) { }
+            }
+        }
+        return new int[]{0, 0};
+    }
+
+    private String episodeLabel(DownloadStore.Item ep) {
+        String title = ep.episodeTitle != null && !ep.episodeTitle.isEmpty()
+                ? ep.episodeTitle : stripSEPrefix(ep.subtitle);
+        int e = episodeOf(ep);
+        if (e > 0) return title.isEmpty() ? "Episode " + e : "E" + e + " · " + title;
+        return title.isEmpty() ? "Episode" : title;
+    }
+
+    /** Drop a leading "S1E2 ·" / "S1 E2 -" marker so the row shows just the title. */
+    private static String stripSEPrefix(String s) {
+        if (s == null) return "";
+        return s.replaceFirst("(?i)^\\s*S\\d{1,3}\\s*E\\d{1,4}\\s*[·:\\-–—|]*\\s*", "").trim();
     }
 
     /** Add the control pills valid for this item's state into {@code actions}. */
