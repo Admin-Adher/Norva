@@ -72,7 +72,9 @@
 @keyframes np-rise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
 .np-panel{width:min(960px,100%);text-align:center;color:#f8fafc;animation:np-rise .42s cubic-bezier(.2,.7,.2,1) both}
 .np-panel-edit{width:min(560px,100%)}
-.np-brand{font-size:13px;letter-spacing:.34em;text-transform:uppercase;color:#7c8aa5;font-weight:800;margin:0 0 16px}
+.np-brand{display:flex;align-items:center;justify-content:center;gap:10px;margin:0 0 22px}
+.np-brand img{width:34px;height:34px;border-radius:9px;display:block;object-fit:contain}
+.np-brand span{font-family:'Century Gothic',sans-serif;font-size:25px;font-weight:500;letter-spacing:-.03em;color:#fff;padding-top:2px}
 .np-title{font-size:clamp(30px,4.6vw,50px);font-weight:800;letter-spacing:-.015em;margin:0 0 40px}
 .np-grid{display:flex;flex-wrap:wrap;gap:30px;justify-content:center}
 .np-card{background:transparent;border:0;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:14px;width:160px;padding:8px;border-radius:16px;transition:transform .22s ease}
@@ -115,6 +117,8 @@ html.tv .np-avatar{width:200px;height:200px}
 html.tv .np-card{width:200px}
 html.tv .np-card:hover,html.tv .np-card:focus-visible{transform:scale(1.09)}
 html.tv .np-title{font-size:54px}
+html.tv .np-brand img{width:44px;height:44px}
+html.tv .np-brand span{font-size:32px}
 html.tv .np-name{font-size:20px}
 html.tv .np-btn{min-height:60px;font-size:18px}
 `;
@@ -208,7 +212,15 @@ html.tv .np-btn{min-height:60px;font-size:18px}
     const manage = state.mode === 'manage';
     overlayEl.innerHTML = '';
     const panel = el('div', 'np-panel');
-    if (!manage) panel.appendChild(el('div', 'np-brand', 'NORVA'));
+    if (!manage) {
+      const brand = el('div', 'np-brand');
+      const brandLogo = el('img');
+      brandLogo.src = '/img/norva-app-icon.png';
+      brandLogo.alt = '';
+      brand.appendChild(brandLogo);
+      brand.appendChild(el('span', null, 'Norva'));
+      panel.appendChild(brand);
+    }
     panel.appendChild(el('h1', 'np-title', manage ? 'Manage profiles' : "Who's watching?"));
 
     const activeId = profilesApi().getActiveId();
