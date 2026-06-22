@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#090b10">
+  <title>Norva — Privacy Policy</title>
+  <meta name="description" content="How Norva collects, uses, stores and deletes your data.">
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #090b10; --panel: #11151d; --line: #283246; --text: #f8fafc;
+      --muted: #a8b3c7; --quiet: #6b7690; --accent: #5b7cfa;
+    }
+    body {
+      min-height: 100vh; background: var(--bg); color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.65; padding: 28px;
+    }
+    main { width: min(820px, 100%); margin: 0 auto; }
+    .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 26px; }
+    .brand img { width: 44px; height: 44px; border-radius: 8px; }
+    .brand span { font-size: 20px; font-weight: 800; }
+    h1 { font-size: clamp(28px, 5vw, 40px); line-height: 1.1; margin-bottom: 8px; }
+    .updated { color: var(--quiet); font-size: 14px; margin-bottom: 28px; }
+    h2 { font-size: 20px; margin: 30px 0 10px; }
+    p, li { color: var(--muted); margin-bottom: 10px; }
+    ul { padding-left: 22px; }
+    a { color: var(--accent); }
+    .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px 20px; margin: 16px 0; }
+    table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 14px; }
+    th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+    th { color: var(--text); }
+    td { color: var(--muted); }
+    footer { margin-top: 40px; padding-top: 18px; border-top: 1px solid var(--line); color: var(--quiet); font-size: 13px; }
+    footer a { margin-right: 16px; }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="brand"><img src="/favicon.png" alt=""><span>Norva</span></div>
+    <h1>Privacy Policy</h1>
+    <p class="updated">Last updated: 22 June 2026</p>
+
+    <p>This Privacy Policy explains how Norva (“Norva”, “we”, “us”) collects, uses, stores and
+      deletes information when you use the Norva apps (Android phone/tablet and Android TV) and the
+      Norva web app at norva.tv (together, the “Service”).</p>
+
+    <div class="card">
+      <p><strong>Norva is a media player, not a content provider.</strong> Norva does not supply,
+      sell or host any channels, movies, series or streams. You connect a compatible media source
+      that you own and are authorized to use. Any credentials or playlist links you add are used
+      only to connect the Service to <em>your</em> source on your behalf.</p>
+    </div>
+
+    <h2>1. Information we collect</h2>
+    <table>
+      <tr><th>Category</th><th>Examples</th><th>Why</th></tr>
+      <tr><td>Account</td><td>Email address, display name, password (stored hashed by our auth provider)</td><td>Create and secure your account, sign you in</td></tr>
+      <tr><td>Media source settings</td><td>Provider host/username/password (Xtream), playlist (M3U) and TV-guide (EPG) URLs you choose to add</td><td>Connect the Service to the source you are authorized to use</td></tr>
+      <tr><td>Usage &amp; preferences</td><td>Watch history and playback progress, favorites, audio/subtitle/genre preferences</td><td>Resume playback across your devices and personalize the experience</td></tr>
+      <tr><td>Devices &amp; pairing</td><td>Trusted-device records, device tokens, pairing codes</td><td>Let your TV and phone share one account and sync playback</td></tr>
+      <tr><td>Entitlement / subscription</td><td>Subscription status and the store/provider that granted it (e.g. Google Play, Apple, Stripe)</td><td>Verify Norva access; we do <em>not</em> store card numbers</td></tr>
+      <tr><td>Technical</td><td>IP address, app version, device/model, basic logs and crash data</td><td>Deliver streams from your network, secure the Service, fix bugs</td></tr>
+      <tr><td>Downloads (on device)</td><td>Media you download is encrypted and stored only on your device</td><td>Offline viewing; this content is not uploaded to us</td></tr>
+    </table>
+
+    <h2>2. How we use information</h2>
+    <ul>
+      <li>To provide, maintain and secure the Service and your account.</li>
+      <li>To connect the Service to the compatible source you choose to add.</li>
+      <li>To sync playback progress, history and preferences across your devices.</li>
+      <li>To verify your Norva access/subscription status.</li>
+      <li>To diagnose problems and improve reliability.</li>
+    </ul>
+    <p>We do <strong>not</strong> sell your personal information, and we do not use it for
+      third-party advertising.</p>
+
+    <h2>3. Sharing and processors</h2>
+    <p>We share data only with service providers that process it on our behalf, under contract:</p>
+    <ul>
+      <li><strong>Supabase</strong> — authentication and cloud database hosting.</li>
+      <li><strong>Cloudflare</strong> — web hosting and content delivery.</li>
+      <li><strong>Payment/store providers</strong> (e.g. Google Play, Apple, Stripe) — to confirm
+        your subscription entitlement. Payments are handled by them, not by Norva.</li>
+      <li>Your <strong>media source</strong> — when you ask the Service to connect, requests are made
+        to the host you configured. You are responsible for that source and its terms.</li>
+    </ul>
+    <p>We may disclose information if required by law or to protect the rights, safety and security
+      of users and the Service.</p>
+
+    <h2>4. Data retention</h2>
+    <p>We keep account and usage data while your account is active. When you delete your account (see
+      below) we delete or anonymize your personal data, except where we must retain limited records
+      to comply with legal obligations. Downloaded media lives only on your device and is removed
+      when you delete it or uninstall the app.</p>
+
+    <h2>5. Your rights &amp; deleting your account</h2>
+    <p>You can access or update your information in the app, and you can request deletion of your
+      account and associated data at any time:</p>
+    <ul>
+      <li><strong>In the app:</strong> Settings → Account → Delete account.</li>
+      <li><strong>On the web:</strong> <a href="/delete-account.html">norva.tv/delete-account.html</a>.</li>
+    </ul>
+    <p>Depending on where you live, you may also have rights to access, correct, port or restrict
+      processing of your data. To exercise them, contact us using the details below.</p>
+
+    <h2>6. Security</h2>
+    <p>Traffic to Norva’s cloud is encrypted in transit (HTTPS). Passwords are stored hashed by our
+      auth provider. Offline downloads are encrypted on your device with a hardware-backed key where
+      available. No system is perfectly secure, but we work to protect your data.</p>
+
+    <h2>7. Children</h2>
+    <p>Norva is not directed to children under 13 (or the minimum age in your country) and we do not
+      knowingly collect their personal data.</p>
+
+    <h2>8. International transfers</h2>
+    <p>Your data may be processed in countries other than your own by the providers listed above,
+      with appropriate safeguards in place.</p>
+
+    <h2>9. Changes</h2>
+    <p>We may update this policy. We will revise the “Last updated” date and, for material changes,
+      provide a more prominent notice.</p>
+
+    <h2>10. Contact</h2>
+    <p>Operator: Norva <!-- replace with the registered legal entity name once available -->.<br>
+      Email: <a href="mailto:adrienhernandez20@gmail.com">adrienhernandez20@gmail.com</a></p>
+
+    <footer>
+      <a href="/terms.html">Terms of Service</a>
+      <a href="/delete-account.html">Delete account</a>
+      <a href="/">Home</a>
+    </footer>
+  </main>
+</body>
+</html>

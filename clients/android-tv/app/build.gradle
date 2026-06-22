@@ -2,6 +2,12 @@ plugins {
     id "com.android.application"
 }
 
+// Release signing is supplied by CI via env (see .github/workflows/android-release.yml).
+// Absent locally and for debug builds, the release type stays unsigned and the
+// debug build is completely unaffected.
+def releaseKeystorePath = System.getenv("ANDROID_KEYSTORE_FILE")
+def hasReleaseKeystore = releaseKeystorePath != null && new File(releaseKeystorePath).exists()
+
 android {
     namespace "tv.norva.tv"
     compileSdk 35
@@ -17,6 +23,29 @@ android {
     sourceSets {
         main {
             assets.srcDirs = ["src/main/assets"]
+        }
+    }
+
+    signingConfigs {
+        release {
+            if (hasReleaseKeystore) {
+                storeFile file(releaseKeystorePath)
+                storePassword System.getenv("ANDROID_KEYSTORE_PASSWORD")
+                keyAlias System.getenv("ANDROID_KEY_ALIAS")
+                keyPassword System.getenv("ANDROID_KEY_PASSWORD")
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            // R8 left off for the first release so the bundled WebView assets and
+            // media3 reflection paths are never stripped.
+            minifyEnabled false
+            // Signed only when CI supplies a keystore via env (debug unaffected).
+            if (hasReleaseKeystore) {
+                signingConfig signingConfigs.release
+            }
         }
     }
 }
