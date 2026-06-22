@@ -29,20 +29,24 @@ const PLAN_LIMITS: Record<string, JsonRecord> = {
     cloud_sync: true,
     metadata: true,
   },
+  // Norva (entry plan) and Norva Family share full feature parity. The ONLY
+  // difference is concurrent_streams (2 vs 5) — i.e. how many screens can play
+  // at the same time. Everything else (profiles, trusted devices, sources and
+  // all feature flags) is intentionally identical between the two paid plans.
   plus: {
-    trusted_devices: 6,
+    trusted_devices: 10,
     concurrent_streams: 2,
-    sources: 3,
-    profiles: 1,
+    sources: 5,
+    profiles: 5,
     gateway: true,
     cloud_sync: true,
     metadata: true,
   },
   family: {
-    trusted_devices: 12,
-    concurrent_streams: 4,
+    trusted_devices: 10,
+    concurrent_streams: 5,
     sources: 5,
-    profiles: 6,
+    profiles: 5,
     gateway: true,
     cloud_sync: true,
     metadata: true,

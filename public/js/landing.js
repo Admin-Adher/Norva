@@ -58,6 +58,40 @@
     });
   });
 
+  function setupBillingToggle() {
+    const opts = Array.from(document.querySelectorAll('.billing-opt'));
+    if (!opts.length) return;
+    const prices = Array.from(document.querySelectorAll('.pricing-grid .price'));
+
+    function apply(period) {
+      const isAnnual = period === 'annual';
+      opts.forEach(opt => {
+        const active = opt.dataset.period === period;
+        opt.classList.toggle('is-active', active);
+        opt.setAttribute('aria-pressed', String(active));
+      });
+      prices.forEach(price => {
+        const amount = price.querySelector('.price-amount');
+        const suffix = price.querySelector('.price-period');
+        if (amount && price.dataset.monthly && price.dataset.annual) {
+          amount.textContent = isAnnual ? price.dataset.annual : price.dataset.monthly;
+        }
+        if (suffix) {
+          suffix.textContent = isAnnual
+            ? (price.dataset.annualSuffix || '/yr')
+            : (price.dataset.monthlySuffix || '/mo');
+        }
+        const note = price.nextElementSibling;
+        if (note && note.classList.contains('price-note')) {
+          note.textContent = isAnnual ? (note.dataset.annualNote || '') : (note.dataset.monthlyNote || '');
+        }
+      });
+    }
+
+    opts.forEach(opt => opt.addEventListener('click', () => apply(opt.dataset.period)));
+    apply('monthly');
+  }
+
   function setupScrollReveal() {
     const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     if (reduceMotion || !('IntersectionObserver' in window)) {
@@ -119,5 +153,6 @@
     });
   }
 
+  setupBillingToggle();
   setupScrollReveal();
 })();
