@@ -293,6 +293,43 @@ class SeriesPage {
         this.renderGenreRails();
     }
 
+    // Local-mode genre rails: group already-loaded series by curated bucket and
+    // render them with the page's own cards (so clicks open details normally).
+    renderGenreRailsLocal() {
+        const T = window.GenreTaxonomy;
+        if (!T || !window.GenreRails || !Array.isArray(this.seriesList) || !this.seriesList.length) return false;
+
+        const byBucket = new Map();
+        for (const s of this.seriesList) {
+            if (this.hideBroken && this.isBrokenItem(s)) continue;
+            const genres = (s.tmdb && s.tmdb.genres) || [];
+            for (const b of T.classifyTitle(s.category_name || s.category_id, genres)) {
+                if (b === 'autres') continue;
+                const arr = byBucket.get(b) || [];
+                if (arr.length < 30) arr.push(s);
+                byBucket.set(b, arr);
+            }
+        }
+
+        const sections = [];
+        for (const def of T.BUCKETS) {
+            if (def.id === 'autres') continue;
+            const list = byBucket.get(def.id);
+            if (!list || !list.length) continue;
+            const groups = this.groupDuplicates
+                ? MediaUtils.groupItems(list, { idField: 'series_id' })
+                : list.map((it) => ({ key: it.id, items: [it], representative: it }));
+            sections.push({ title: def.label, cards: groups.map((g) => this.buildCard(g)) });
+        }
+        if (!sections.length) return false;
+
+        if (this.countEl) this.countEl.textContent = '';
+        this.resetBtn?.classList.add('hidden');
+        if (this.randomBtn) this.randomBtn.disabled = true;
+        window.GenreRails.renderCustom(this.container, sections);
+        return true;
+    }
+
     resetFilters() {
         [this.sortSelect, this.genreSelect, this.yearSelect, this.ratingSelect,
          this.watchedSelect, this.addedSelect, this.statusSelect].forEach(sel => {
@@ -867,6 +904,12 @@ class SeriesPage {
     }
 
     filterAndRender() {
+        // Local (self-hosted) mode default with no active filter → genre rails,
+        // built client-side. Cloud mode is untouched (server rails).
+        if (!this.isCloudPagedMode() && !this.hasActiveFilters() && this.renderGenreRailsLocal()) {
+            return;
+        }
+
         const cards = this.buildFilteredCards();
         this.filteredCards = cards;
 

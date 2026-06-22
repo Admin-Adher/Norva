@@ -1619,6 +1619,44 @@ class SourceManager {
     /**
      * Load movie categories tree for a source
      */
+    // Group raw provider categories under curated genre headers (Action,
+    // Comédie, K-Drama, …) for a mass-market Manage Content view. Persistence is
+    // unchanged: items keep their provider category_id and item_type, and the
+    // genre group has NO categoryId, so a group toggle only ever cascades to the
+    // real provider categories underneath it. Unclassified categories land in
+    // "Autres" so nothing disappears. Falls back to one flat list if the
+    // taxonomy module isn't available.
+    buildCategoryBucketGroups(categories, itemType) {
+        const sorted = (categories || []).slice().sort((a, b) =>
+            String(a.category_name || '').localeCompare(String(b.category_name || '')));
+        const mkItem = (cat) => ({ id: String(cat.category_id), name: cat.category_name, type: itemType, original: cat });
+
+        const T = window.GenreTaxonomy;
+        if (!T) {
+            return [{ id: `all_${itemType}`, name: 'Categories', type: 'group', items: sorted.map(mkItem) }];
+        }
+
+        const byBucket = new Map();
+        for (const cat of sorted) {
+            const bucket = T.classifyCategory(cat.category_name);
+            const arr = byBucket.get(bucket) || [];
+            arr.push(cat);
+            byBucket.set(bucket, arr);
+        }
+        const groups = [];
+        for (const def of T.BUCKETS) {
+            const cats = byBucket.get(def.id);
+            if (!cats || !cats.length) continue;
+            groups.push({
+                id: `bucket_${itemType}_${def.id}`,
+                name: def.label,
+                type: 'group',
+                items: cats.map(mkItem)
+            });
+        }
+        return groups;
+    }
+
     async loadMovieCategoriesTree(sourceId) {
         this.contentTree.innerHTML = '<p class="hint">Loading movie categories...</p>';
         this.treeData = { type: 'movies', sourceId, groups: [] };
@@ -1651,20 +1689,11 @@ class SourceManager {
             // Let's update renderTree to support flat list if groups is empty? 
             // Or just put them in one "All Categories" group that is auto-expanded.
 
-            this.treeData.groups = [{
-                id: 'all_categories',
-                name: 'Categories',
-                type: 'group',
-                items: categories.sort((a, b) => a.category_name.localeCompare(b.category_name)).map(cat => ({
-                    id: String(cat.category_id),
-                    name: cat.category_name,
-                    type: 'vod_category',
-                    original: cat
-                }))
-            }];
+            this.treeData.groups = this.buildCategoryBucketGroups(categories, 'vod_category');
 
-            // Auto expand
-            this.expandedGroups.add('all_categories');
+            // Expand every genre group so the categories are visible (and search
+            // works), like the previous single auto-expanded list.
+            this.treeData.groups.forEach(g => this.expandedGroups.add(g.id));
             this.renderTree();
 
         } catch (err) {
@@ -1699,19 +1728,9 @@ class SourceManager {
             this.hiddenSet = new Set(hiddenItems.map(h => `${h.item_type}:${h.item_id}`));
             this.originalHiddenSet = new Set(this.hiddenSet); // Track original state
 
-            this.treeData.groups = [{
-                id: 'all_series_categories',
-                name: 'Categories',
-                type: 'group',
-                items: categories.sort((a, b) => a.category_name.localeCompare(b.category_name)).map(cat => ({
-                    id: String(cat.category_id),
-                    name: cat.category_name,
-                    type: 'series_category',
-                    original: cat
-                }))
-            }];
+            this.treeData.groups = this.buildCategoryBucketGroups(categories, 'series_category');
 
-            this.expandedGroups.add('all_series_categories');
+            this.treeData.groups.forEach(g => this.expandedGroups.add(g.id));
             this.renderTree();
 
         } catch (err) {

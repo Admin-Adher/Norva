@@ -142,5 +142,32 @@
         });
     }
 
-    window.GenreRails = { render, appendCards };
+    // Render rails from caller-built card ELEMENTS (used by local/self-hosted
+    // mode, which reuses the page's own movie/series cards). sections is
+    // [{ title, cards: [HTMLElement] }].
+    function renderCustom(container, sections) {
+        if (!container) return;
+        container.innerHTML = '';
+        (sections || []).forEach((sec) => {
+            const section = document.createElement('section');
+            section.className = 'dashboard-section home-rail-section';
+            const header = document.createElement('div');
+            header.className = 'section-header home-rail-header';
+            header.innerHTML = `<div><h2>${esc(sec.title)}</h2></div>`;
+            const wrapper = document.createElement('div');
+            wrapper.className = 'scroll-wrapper';
+            wrapper.innerHTML = `
+                <button class="scroll-arrow scroll-left" aria-label="Défiler à gauche" type="button"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg></button>
+                <div class="horizontal-scroll"></div>
+                <button class="scroll-arrow scroll-right" aria-label="Défiler à droite" type="button"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg></button>`;
+            const scroll = wrapper.querySelector('.horizontal-scroll');
+            (sec.cards || []).forEach((el) => { if (el) scroll.appendChild(el); });
+            section.appendChild(header);
+            section.appendChild(wrapper);
+            container.appendChild(section);
+        });
+        wireArrows(container);
+    }
+
+    window.GenreRails = { render, appendCards, renderCustom };
 })();
