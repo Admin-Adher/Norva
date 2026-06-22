@@ -60,6 +60,57 @@ Projet Supabase : **`oupsceccxsonaalhueff`**.
 
 ---
 
+## 🎬 Plan d'activation (jour J — allumer le billing)
+
+> Tout le code du tunnel est **dormant** derrière 2 flags. « La bascule » = les
+> passer de dormant à actif. **Rien à coder** ce jour-là : poser les clés,
+> flipper, redéployer, tester.
+
+### Les 2 interrupteurs (secrets Supabase)
+| Flag | Dormant (auj.) | Actif | Effet |
+|---|---|---|---|
+| `NORVA_ENTITLEMENTS_MODE` | `observe` | `enforce` | observe = **rien n'est bloqué** (accès complet pour tous, limites ignorées). enforce = limites appliquées (palier `free` bloque le play, compteur d'essai, expiration). |
+| `NORVA_BILLING_MODE` | `legacy` | `revenuecat` | legacy = essai auto **sans carte**. revenuecat = plus d'auto-trial ; sans abo → `free` (browse) ; essais/abos via RevenueCat. |
+
+### ⚠️ Règle d'or — l'ORDRE est critique
+**Ne jamais flipper les flags avant que les achats marchent ET soient testés.**
+Sinon un nouvel user tombe en `free` → veut lire → mur subscribe → « billing non
+configuré » → **coincé** (browse mais jamais lire, et ne peut pas s'abonner).
+→ Clés + produits RevenueCat/Play/Stripe **prêts et testés en sandbox AVANT** le flip.
+
+### Étapes (dans l'ordre)
+1. **Prérequis** : RevenueCat + produits Play + Stripe en place ; secrets posés :
+   `NORVA_REVENUECAT_WEBHOOK_AUTH`, (`NORVA_RC_PRODUCT_MAP`), `REVENUECAT_API_KEY`
+   (Android), clé Web Billing dans `billing-config.js`. Cf. `billing-setup.md` §3-8.
+2. **Redéployer** `norva-cloud` + `norva-playback` (ils portent le code soft-wall
+   pas encore déployé) :
+   `supabase-go functions deploy norva-cloud norva-playback --project-ref oupsceccxsonaalhueff`
+3. **Tester en sandbox PENDANT qu'on est encore en `observe`** (vrais users non
+   impactés) : achat test Play + web → le webhook écrit la projection
+   (`cloud_entitlement_events` + `cloud_entitlement_projection`), bouton Subscribe OK.
+4. **Flipper** (secrets Supabase) : `NORVA_BILLING_MODE=revenuecat` **puis**
+   `NORVA_ENTITLEMENTS_MODE=enforce`, et **redéployer** norva-cloud/playback pour
+   recharger l'env.
+5. **Test e2e prod** (compte test) : signup → connecte source → browse → 1er play
+   → mur subscribe → essai → écran « essai démarré » → compteur J-7 → conversion
+   auto / annulation → retour `free`. Tester aussi restore + double-essai bloqué.
+6. **Pass de copy soft-wall** : setup gate Home (« browse libre / essai pour
+   regarder ») + cohérence des messages une fois `enforce` actif.
+
+### 🧑‍🤝‍🧑 Décision rollout (à prendre le jour J)
+Au flip `enforce`, **les utilisateurs actuels** (accès complet gratuit en observe)
+basculent vers leur vrai droit → sans abo = `free` (browse, plus de lecture).
+Choisir :
+- **Grandfather** : leur offrir un essai/grâce de courtoisie (ex. insérer une
+  projection `trialing` à +N j pour les comptes existants), ou
+- **Communiquer** : bandeau « ton essai démarre » / « abonne-toi pour continuer ».
+
+### Rollback
+En cas de souci : repasser `NORVA_ENTITLEMENTS_MODE=observe` (réouvre tout
+immédiatement) + redeploy. Le code soft-wall redevient dormant sans rien casser.
+
+---
+
 ## ✅ Fait & DÉPLOYÉ sur le live
 
 ### Base de données (Supabase `oupsceccxsonaalhueff`)
