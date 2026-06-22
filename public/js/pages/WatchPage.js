@@ -5677,9 +5677,12 @@ class WatchPage {
                     playbackPreferences,
                     cloudPlaybackSessionId: result.sessionId
                 }, result.url, result);
+            } else {
+                this.showPlaybackError('The next episode could not be started. Please try again.', { immediate: true });
             }
         } catch (e) {
             console.error('Error playing next episode:', e);
+            this.showPlaybackError('The next episode could not be started. Please try again.', { immediate: true });
         }
     }
 

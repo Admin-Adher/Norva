@@ -828,6 +828,10 @@ class App {
         }
         const show = count > 0;
         link.hidden = !show;
+        // The `hidden` attribute alone doesn't hide a .nav-link (CSS forces
+        // display:flex and there is no [hidden] override), so toggle display too —
+        // otherwise Downloads shows on the web, where it's a dead no-op.
+        link.style.display = show ? '' : 'none';
         link.setAttribute('aria-hidden', show ? 'false' : 'true');
         link.tabIndex = show ? 0 : -1;
     }

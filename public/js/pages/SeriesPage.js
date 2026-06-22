@@ -768,6 +768,9 @@ class SeriesPage {
         this.currentBatch = 0;
         this.container.innerHTML = '';
 
+        // No results → disable "Random" so it isn't a silent no-op.
+        if (this.randomBtn) this.randomBtn.disabled = cards.length === 0;
+
         if (cards.length === 0) {
             this.container.innerHTML = '<div class="empty-state"><p>No series found</p></div>';
             return;

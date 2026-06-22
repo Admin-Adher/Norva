@@ -896,9 +896,14 @@ class ChannelList {
             this.container.innerHTML = `
         <div class="empty-state">
           <p>No channels loaded</p>
-          <p class="hint">Add a source in Settings to get started</p>
+          <p class="hint">Connect your TV service to start watching.</p>
+          <button type="button" class="btn btn-primary" id="live-empty-add-source">Add a source</button>
         </div>
       `;
+            this.container.querySelector('#live-empty-add-source')?.addEventListener('click', () => {
+                window.app?.navigateTo?.('settings');
+                setTimeout(() => { document.querySelector('.tab[data-tab="sources"]')?.click(); }, 60);
+            });
             return;
         }
 
