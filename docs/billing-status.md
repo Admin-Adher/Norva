@@ -52,6 +52,14 @@ Projet Supabase : **`oupsceccxsonaalhueff`**.
 ### Phase 3 (polish TV) — FAIT
 - `subscribe.html` : classe `html.tv` (UA Android TV) → cibles agrandies (toggle, boutons, cartes) + **focus ring D-pad** (`:focus-visible`, `card:focus-within`).
 
+### Phase 4 (gestion d'abo + anti-churn) — FAIT (dormant, conditionné à `enforced`)
+- **`public/subscription.html`** (NOUVEL écran) : gestion de l'abo par statut — essai (J-N), actif, **annulé** (finit le DATE / Resume), **paiement échoué/grâce** (Update payment), aucun/expiré (**Resubscribe / win-back**). Bouton Manage/cancel = deep-link **Google Play** (natif) ou **portail web** (`NorvaBilling.manageUrl` → `webCustomerPortalUrl`).
+- `subscribe.html` : garde **« déjà abonné »** (raccourci vers `subscription.html`, évite le double achat) + **message du mur contextuel** (essai terminé / abo expiré / limite de flux / 1ᵉʳ abonnement).
+- `app.js` : **bannière « paiement échoué »** (jumelle du compteur d'essai) → `subscription.html`, dormant en observe.
+- `Settings.js` : « Manage plan » → `subscription.html` si abo actif, sinon `subscribe.html`.
+- Bumps : app.js v20, Settings.js v17, billing*.js v2, `subscription.html` (nouveau). **Déployé** (web).
+- ⚠️ **Manque connu non bloquant** : webhook `TRANSFER` (fusion de comptes) non géré ; pas de splash marketing plein écran « essai terminé » (couvert par l'écran de plans contextuel).
+
 ### #5 Onboarding « connecte ta source » — DÉJÀ EXISTANT (pas de build)
 - `HomePage.js` a un *setup gate* (`shouldShowSetupGate` → `renderSetupConnectionGate`) qui affiche déjà, pour un nouveau compte sans source, un écran « Norva setup » + formulaire de connexion (lien Xtream/M3U). Le 1ᵉʳ audit (« home vide ») était inexact.
 
@@ -81,7 +89,7 @@ configuré » → **coincé** (browse mais jamais lire, et ne peut pas s'abonner
 ### Étapes (dans l'ordre)
 1. **Prérequis** : RevenueCat + produits Play + Stripe en place ; secrets posés :
    `NORVA_REVENUECAT_WEBHOOK_AUTH`, (`NORVA_RC_PRODUCT_MAP`), `REVENUECAT_API_KEY`
-   (Android), clé Web Billing dans `billing-config.js`. Cf. `billing-setup.md` §3-8.
+   (Android), clé Web Billing **+ `webCustomerPortalUrl`** dans `billing-config.js`. Cf. `billing-setup.md` §3-8.
 2. **Redéployer** `norva-cloud` + `norva-playback` (ils portent le code soft-wall
    pas encore déployé) :
    `supabase-go functions deploy norva-cloud norva-playback --project-ref oupsceccxsonaalhueff`
@@ -93,7 +101,9 @@ configuré » → **coincé** (browse mais jamais lire, et ne peut pas s'abonner
    recharger l'env.
 5. **Test e2e prod** (compte test) : signup → connecte source → browse → 1er play
    → mur subscribe → essai → écran « essai démarré » → compteur J-7 → conversion
-   auto / annulation → retour `free`. Tester aussi restore + double-essai bloqué.
+   auto / annulation → retour `free`. Tester aussi restore + double-essai bloqué,
+   l'écran **gestion d'abo** (`subscription.html`) et le **win-back** (compte expiré
+   → Resubscribe).
 6. **Pass de copy soft-wall** : setup gate Home (« browse libre / essai pour
    regarder ») + cohérence des messages une fois `enforce` actif.
 
@@ -189,6 +199,9 @@ Ces morceaux sont en place mais ne s'activent qu'une fois les clés fournies
 - [ ] Android : **`REVENUECAT_API_KEY`** dans `clients/android-phone/gradle.properties`
       + `clients/android-tv/gradle.properties` (ou secret CI) (§7)
 - [ ] Web : éditer **`public/js/billing-config.js`** → `revenueCatWebPublicKey` + `webBillingEnabled: true` (§8)
+- [ ] Web : **`webCustomerPortalUrl`** dans `billing-config.js` = lien portail client
+      (RevenueCat customer center / Stripe billing portal) → fait marcher le bouton
+      « Manage/cancel » de `subscription.html` sur le web. (Android = deep-link Play, déjà câblé.)
 
 ### Phase 4 — Tester
 - [ ] RevenueCat → **Send test event** → doit passer `200 OK` (ligne dans `cloud_entitlement_events`)
@@ -196,6 +209,9 @@ Ces morceaux sont en place mais ne s'activent qu'une fois les clés fournies
 - [ ] Achat **web** (carte test Stripe) → même compte, accès partout
 - [ ] **Restore purchases** (réinstall APK) → accès retrouvé
 - [ ] **Double essai bloqué** (essai Play puis tentative web) → refusé
+- [ ] **Gestion d'abo** (`subscription.html`) : états essai / actif / annulé / paiement
+      échoué / expiré ; bouton Manage ouvre Play (natif) ou le portail (web) ; bannière
+      « paiement échoué » s'affiche en `past_due`
 - [ ] **Épingler la version du SDK RevenueCat** Android (`8.+` → version testée) dans les 2 `build.gradle`
 - [ ] Vérifier les signatures SDK natif (v8) + web `purchases-js` au 1er vrai build (cf. caveats)
 
@@ -224,7 +240,8 @@ Ces morceaux sont en place mais ne s'activent qu'une fois les clés fournies
 |---|---|
 | Webhook Authorization secret | RevenueCat **et** Supabase `NORVA_REVENUECAT_WEBHOOK_AUTH` |
 | Clé publique Android | `clients/android-*/gradle.properties` → `REVENUECAT_API_KEY` (ou CI) |
-| Clé publique Web Billing | `public/js/billing-config.js` |
+| Clé publique Web Billing | `public/js/billing-config.js` → `revenueCatWebPublicKey` |
+| Lien portail client web | `public/js/billing-config.js` → `webCustomerPortalUrl` |
 | Service Account JSON (Play) | RevenueCat (app Play) |
 | Product map (option) | Supabase `NORVA_RC_PRODUCT_MAP` |
 
@@ -280,6 +297,7 @@ autres). La migration s'applique via `supabase-go db push` ou l'intégration.
 | Migration | `supabase/migrations/20260622130000_billing_trial_consumed.sql` |
 | Abstraction billing web | `public/js/billing.js` + `public/js/billing-config.js` |
 | Écran d'achat in-app | `public/subscribe.html` |
+| Écran de gestion d'abo | `public/subscription.html` |
 | Bridge natif | `clients/android-{phone,tv}/app/src/main/java/tv/norva/*/NorvaBilling.java` |
 | Pricing landing | `public/landing.html` + `public/index.html` + `public/css/landing.css` |
 | Runbook complet | `docs/billing-setup.md` |
