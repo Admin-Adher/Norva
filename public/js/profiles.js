@@ -76,6 +76,8 @@
 .np-brand img{width:34px;height:34px;border-radius:9px;display:block;object-fit:contain}
 .np-brand span{font-family:'Century Gothic',sans-serif;font-size:25px;font-weight:500;letter-spacing:-.03em;color:#fff;padding-top:2px}
 .np-title{font-size:clamp(30px,4.6vw,50px);font-weight:800;letter-spacing:-.015em;margin:0 0 40px}
+.np-panel-edit .np-title{margin-bottom:14px}
+.np-subtitle{color:#9aa6bd;font-size:15px;line-height:1.45;margin:0 0 26px}
 .np-grid{display:flex;flex-wrap:wrap;gap:30px;justify-content:center}
 .np-card{background:transparent;border:0;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:14px;width:160px;padding:8px;border-radius:16px;transition:transform .22s ease}
 .np-card:hover,.np-card:focus-visible{transform:scale(1.07)}
@@ -154,7 +156,8 @@ html.tv .np-btn{min-height:60px;font-size:18px}
 
   function render() {
     if (!overlayEl) return;
-    if (state.mode === 'add' || state.mode === 'edit') renderEdit();
+    if (state.mode === 'setup') renderSetup();
+    else if (state.mode === 'add' || state.mode === 'edit') renderEdit();
     else renderGrid();
   }
 
@@ -321,7 +324,7 @@ html.tv .np-btn{min-height:60px;font-size:18px}
       if (!name) { status.textContent = 'Please enter a name.'; nameInput.focus(); return; }
       save.disabled = true; status.textContent = 'Saving…';
       try {
-        if (isEdit) await profilesApi().update(state.editing.id, { name, avatarId: state.pickedAvatar });
+        if (isEdit) await profilesApi().update(state.editing.id, { name, avatarId: state.pickedAvatar, setupCompleted: true });
         else await profilesApi().create({ name, avatarId: state.pickedAvatar });
         await loadProfiles();
         state.mode = isEdit ? 'manage' : 'select';
@@ -364,6 +367,94 @@ html.tv .np-btn{min-height:60px;font-size:18px}
     setTimeout(() => { try { nameInput.focus(); } catch (_) { } }, 0);
   }
 
+  // One-time first-run personalisation of the auto-provisioned default profile.
+  function renderSetup() {
+    const p = state.editing || {};
+    overlayEl.innerHTML = '';
+    const panel = el('div', 'np-panel np-panel-edit');
+
+    const brand = el('div', 'np-brand');
+    const brandLogo = el('img');
+    brandLogo.src = '/img/norva-app-icon.png';
+    brandLogo.alt = '';
+    brand.appendChild(brandLogo);
+    brand.appendChild(el('span', null, 'Norva'));
+    panel.appendChild(brand);
+
+    panel.appendChild(el('h1', 'np-title', 'Set up your profile'));
+    panel.appendChild(el('div', 'np-subtitle', 'Pick a name and an avatar — you can change them anytime.'));
+
+    const preview = el('div', 'np-avatar np-avatar-lg');
+    const previewImg = avatarImg(state.pickedAvatar, '');
+    preview.appendChild(previewImg);
+    panel.appendChild(preview);
+
+    const nameInput = el('input', 'np-input');
+    nameInput.type = 'text';
+    nameInput.maxLength = 40;
+    nameInput.placeholder = 'Profile name';
+    nameInput.value = p.name || '';
+    panel.appendChild(nameInput);
+
+    panel.appendChild(el('div', 'np-avatars-label', 'Choose an avatar'));
+    const avatars = el('div', 'np-avatars');
+    for (let i = 0; i < AVATAR_COUNT; i++) {
+      const id = avatarIdAt(i);
+      const choice = el('button', 'np-avatar-choice' + (id === state.pickedAvatar ? ' np-picked' : ''));
+      choice.type = 'button';
+      choice.appendChild(avatarImg(id, id));
+      choice.addEventListener('click', () => {
+        state.pickedAvatar = id;
+        previewImg.src = avatarSrc(id);
+        avatars.querySelectorAll('.np-avatar-choice').forEach((c) => c.classList.remove('np-picked'));
+        choice.classList.add('np-picked');
+      });
+      avatars.appendChild(choice);
+    }
+    panel.appendChild(avatars);
+
+    const status = el('div', 'np-status', '');
+    panel.appendChild(status);
+
+    const actions = el('div', 'np-actions');
+    const save = el('button', 'np-btn np-btn-primary', "Let's go");
+    save.type = 'button';
+    const skip = el('button', 'np-btn np-btn-ghost', 'Skip for now');
+    skip.type = 'button';
+
+    save.addEventListener('click', async () => {
+      const name = (nameInput.value || '').trim();
+      if (!name) { status.textContent = 'Please enter a name.'; nameInput.focus(); return; }
+      save.disabled = true; skip.disabled = true; status.textContent = 'Saving…';
+      try {
+        await profilesApi().update(p.id, { name, avatarId: state.pickedAvatar, setupCompleted: true });
+        finishSetup(p.id);
+      } catch (e) {
+        status.textContent = (e && e.message) || 'Could not save your profile.';
+        save.disabled = false; skip.disabled = false;
+      }
+    });
+    actions.appendChild(save);
+
+    skip.addEventListener('click', async () => {
+      save.disabled = true; skip.disabled = true;
+      try { await profilesApi().update(p.id, { setupCompleted: true }); } catch (_) { /* enter anyway */ }
+      finishSetup(p.id);
+    });
+    actions.appendChild(skip);
+
+    panel.appendChild(actions);
+    overlayEl.appendChild(panel);
+    setTimeout(() => { try { nameInput.focus(); } catch (_) { } }, 0);
+  }
+
+  function finishSetup(profileId) {
+    if (profileId) profilesApi().setActiveId(profileId);
+    markPickedThisSession();
+    if (resolveSelect) { const r = resolveSelect; resolveSelect = null; close(); r(true); }
+    else { close(); }
+  }
+
   function selectProfile(p) {
     profilesApi().setActiveId(p.id);
     markPickedThisSession();
@@ -384,7 +475,19 @@ html.tv .np-btn{min-height:60px;font-size:18px}
     let list;
     try { list = await loadProfiles(); } catch (_) { return true; } // fail open — never lock the app
 
-    // One profile: auto-select, never gate.
+    // First run: the lone auto-provisioned profile hasn't been personalised yet
+    // → one-time "Set up your profile" screen (name + avatar), with Skip.
+    if (list.length === 1 && !list[0].setup_completed) {
+      state.editing = list[0];
+      state.pickedAvatar = list[0].avatar_id || 'avatar-01';
+      state.mode = 'setup';
+      return new Promise((resolve) => {
+        resolveSelect = resolve;
+        buildOverlay();
+      });
+    }
+
+    // One profile (already set up): auto-select, never gate.
     if (list.length <= 1) {
       if (list.length === 1) profilesApi().setActiveId(list[0].id);
       return true;

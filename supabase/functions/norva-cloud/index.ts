@@ -439,7 +439,7 @@ function throwEntitlementRequired(feature: string, decision: unknown, usage?: un
 
 const PROFILE_HEADER = "x-norva-profile-id";
 const PROFILE_SELECT =
-  "id, name, avatar_id, is_kids, is_default, sort_order, preferred_audio_language, preferred_subtitle_language, preferred_genres, created_at";
+  "id, name, avatar_id, is_kids, is_default, sort_order, preferred_audio_language, preferred_subtitle_language, preferred_genres, setup_completed, created_at";
 
 // Every account always has at least one profile. Provisions a default (named
 // from the account display name) the first time it's needed.
@@ -525,6 +525,7 @@ async function createProfile(req: Request, userId: string, db: SupabaseClient) {
       preferred_audio_language: stringOrNull(body.preferredAudioLanguage ?? body.preferred_audio_language),
       preferred_subtitle_language: stringOrNull(body.preferredSubtitleLanguage ?? body.preferred_subtitle_language),
       preferred_genres: normalizeGenres(body.preferredGenres ?? body.preferred_genres),
+      setup_completed: true,
     })
     .select(PROFILE_SELECT)
     .single();
@@ -554,6 +555,9 @@ async function updateProfile(req: Request, profileId: string, userId: string, db
   }
   if (body.preferredGenres !== undefined || body.preferred_genres !== undefined) {
     patch.preferred_genres = normalizeGenres(body.preferredGenres ?? body.preferred_genres);
+  }
+  if (body.setupCompleted !== undefined || body.setup_completed !== undefined) {
+    patch.setup_completed = Boolean(body.setupCompleted ?? body.setup_completed);
   }
   if (!Object.keys(patch).length) throw new HttpError(400, "No profile fields to update");
 
