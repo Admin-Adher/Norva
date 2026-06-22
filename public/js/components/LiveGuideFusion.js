@@ -6,8 +6,9 @@ class LiveGuideFusion {
         this.app = app;
         this.container = document.getElementById('live-guide-fusion');
         this.activeGroup = localStorage.getItem('norva_live_guide_group') || '';
-        this.currentChannel = null;
+        this.currentChannel = null;       // the channel SELECTED/previewed in the guide
         this._lastChannelsKey = '';
+        this._renderScheduled = false;    // coalesce bursty re-renders (EPG arrivals)
         this._pendingFamilySelection = null;
         this.shortEpgCache = new Map();
         this.shortEpgLoadedAt = new Map();
@@ -30,10 +31,30 @@ class LiveGuideFusion {
                 return;
             }
 
-            const row = event.target.closest('.live-guide-row');
-            if (row) {
-                this.selectFamilyRow(row);
+            // Preview-bar actions (operate on the currently selected channel).
+            const action = event.target.closest('[data-action]')?.dataset.action;
+            if (action === 'watch') { this.playCurrent(); return; }
+            if (action === 'fullscreen') { this.app.player?.toggleFullscreen?.(); return; }
+            if (action === 'favorite') { this.toggleSelectedFavorite(); return; }
+
+            // The ▶ button plays immediately; tapping the row body only previews.
+            const playBtn = event.target.closest('.live-guide-play');
+            if (playBtn) {
+                const playRow = playBtn.closest('.live-guide-row');
+                if (playRow) this.playFamilyRow(playRow);
+                return;
             }
+            const row = event.target.closest('.live-guide-row');
+            if (row) this.previewFamilyRow(row);
+        });
+
+        // Keyboard: Enter/Space on a row previews it (the ▶ button is a real
+        // <button> and handles its own activation).
+        this.container.addEventListener('keydown', (event) => {
+            if (event.key !== 'Enter' && event.key !== ' ') return;
+            if (event.target.closest('.live-guide-play, .live-guide-group, [data-action]')) return;
+            const row = event.target.closest('.live-guide-row');
+            if (row) { event.preventDefault(); this.previewFamilyRow(row); }
         });
 
         window.addEventListener('channelChanged', (event) => {
@@ -115,15 +136,44 @@ class LiveGuideFusion {
         });
     }
 
-    selectFamilyRow(row) {
+    /** Tap on the row body: select + preview the family, but DON'T start a stream. */
+    previewFamilyRow(row) {
         const members = this.getFamilyMembersFromRow(row);
         if (!members.length) return;
+        const best = this.getBestFamilyChannel(members);
+        this.currentChannel = best;
+        this.refreshPreview(best);
+        this.updateHighlights();
+    }
 
+    /** Tap on a row's ▶ button: select + play (the old one-tap behaviour). */
+    playFamilyRow(row) {
+        const members = this.getFamilyMembersFromRow(row);
+        if (!members.length) return;
+        this.playSelection(members);
+    }
+
+    /** The preview bar's "Regarder" button: play the currently selected family. */
+    playCurrent() {
+        const channel = this.currentChannel;
+        if (!channel) return;
+        const members = this.app.channelList.getChannelFamilyMembers(channel, {
+            includeHidden: false,
+            includeCurrent: true,
+            sameSourceOnly: true
+        });
+        this.playSelection(members.length ? members : [channel]);
+    }
+
+    /** Shared play path: pick the best variant, kick a scan if all known bad. */
+    playSelection(members) {
         const bestChannel = this.getBestFamilyChannel(members);
         const hasHealthyVariant = members.some(channel => this.app.channelList.isHealthyChannel(channel));
         const allKnownBad = members.every(channel => this.isProblematicChannel(channel));
 
-        this.setActiveChannel(bestChannel);
+        this.currentChannel = bestChannel;
+        this.refreshPreview(bestChannel);
+        this.updateHighlights();
 
         if (!hasHealthyVariant && allKnownBad) {
             this._pendingFamilySelection = {
@@ -131,13 +181,22 @@ class LiveGuideFusion {
                 familyKey: this.app.channelList.getChannelFamilyKey(bestChannel),
                 label: this.app.channelList.getChannelFamilyLabel(bestChannel) || bestChannel.name
             };
-            this.render();
+            this.scheduleRender();
             this.refreshFamilyIfNeeded(bestChannel, members, { force: true });
             return;
         }
 
         this.refreshFamilyIfNeeded(bestChannel, members);
         this.playChannel(bestChannel);
+    }
+
+    /** Toggle the selected channel as a favourite (from the preview bar). */
+    toggleSelectedFavorite() {
+        const channel = this.currentChannel;
+        if (!channel) return;
+        Promise.resolve(this.app.channelList.toggleFavorite(channel.sourceId, channel.id))
+            .then(() => { this.refreshPreview(this.currentChannel); this.updateHighlights(); })
+            .catch(err => console.warn('Favorite toggle failed:', err));
     }
 
     playChannel(channel) {
@@ -257,24 +316,48 @@ class LiveGuideFusion {
         if (preview) preview.outerHTML = this.renderPreview(channel);
     }
 
+    /** Playback changed (channelChanged event): follow it in the preview + highlights. */
     setActiveChannel(channel) {
-        this.currentChannel = channel || null;
         if (!this.container) return;
-
-        if (!channel) {
-            this.container.querySelectorAll('.live-guide-row.active').forEach(row => row.classList.remove('active'));
-            return;
+        if (channel) {
+            this.currentChannel = channel;
+            this.refreshPreview(channel);
         }
+        this.updateHighlights();
+    }
 
+    /** Reflect both the previewed selection (.selected) and what's actually playing (.playing). */
+    updateHighlights() {
+        if (!this.container) return;
         const list = this.app.channelList;
-        const familyKey = list.getChannelFamilyKey(channel) || `${channel.sourceId}:${channel.id}`;
+        const keyOf = (channel) => channel
+            ? `${channel.sourceId}|${list.getChannelFamilyKey(channel) || `${channel.sourceId}:${channel.id}`}`
+            : null;
+        const selectedKey = keyOf(this.currentChannel);
+        const playingKey = keyOf(list.currentChannel);
         this.container.querySelectorAll('.live-guide-row').forEach(row => {
-            const isActive =
-                String(row.dataset.sourceId) === String(channel.sourceId) &&
-                String(row.dataset.familyKey) === String(familyKey);
-            row.classList.toggle('active', isActive);
+            const key = `${row.dataset.sourceId}|${row.dataset.familyKey}`;
+            row.classList.toggle('selected', selectedKey != null && key === selectedKey);
+            row.classList.toggle('playing', playingKey != null && key === playingKey);
         });
-        this.refreshPreview(channel);
+    }
+
+    isFamilySelected(family) {
+        const current = this.currentChannel;
+        if (!current || !family?.members?.length) return false;
+        return family.members.some(channel =>
+            channel.id === current.id && String(channel.sourceId) === String(current.sourceId)
+        );
+    }
+
+    /** Coalesce bursty re-renders (e.g. many short-EPG fetches landing at once). */
+    scheduleRender() {
+        if (this._renderScheduled) return;
+        this._renderScheduled = true;
+        setTimeout(() => {
+            this._renderScheduled = false;
+            this.render();
+        }, 120);
     }
 
     updateRowBadge(row, badge) {
@@ -285,7 +368,7 @@ class LiveGuideFusion {
         }
         if (!el) {
             el = document.createElement('span');
-            row.querySelector('.live-guide-channel-cell')?.appendChild(el);
+            row.querySelector('.live-guide-name-row')?.appendChild(el);
         }
         el.className = `live-guide-mode ${badge.className || ''}`.trim();
         el.title = badge.title || '';
@@ -327,7 +410,7 @@ class LiveGuideFusion {
             if (String(row.dataset.sourceId) !== String(sourceId)) return;
             if (String(row.dataset.familyKey) !== String(familyKey)) return;
             row.classList.toggle('pending-refresh', isPending);
-            row.classList.toggle('active', this.isFamilyActive(family) || isPending);
+            row.classList.toggle('playing', this.isFamilyActive(family) || isPending);
             this.updateRowBadge(row, badge);
         });
     }
@@ -538,7 +621,7 @@ class LiveGuideFusion {
                 })
                 .finally(() => {
                     this.shortEpgInflight.delete(key);
-                    this.render();
+                    this.scheduleRender();
                 });
         });
     }
@@ -559,6 +642,40 @@ class LiveGuideFusion {
         return this.getShortProgramAt(channel, date);
     }
 
+    /** The next {n} programmes starting at or after now (full guide, else short EPG). */
+    getUpcoming(channel, n = 3) {
+        const now = Date.now();
+        const collected = [];
+        const guide = this.app.epgGuide;
+        const epgChannel = this.getEpgChannel(channel);
+        if (epgChannel && guide?.programmes?.length) {
+            for (const program of guide.programmes) {
+                if (program.channelId !== epgChannel.id) continue;
+                if (new Date(program.start).getTime() >= now) {
+                    collected.push({ title: program.title, start: program.start, stop: program.stop });
+                }
+            }
+        }
+        if (!collected.length) {
+            const key = this.shortEpgKey(channel);
+            for (const program of (this.shortEpgCache.get(key) || [])) {
+                if (new Date(program.start).getTime() >= now) {
+                    collected.push({ title: program.title, start: program.start, stop: program.stop });
+                }
+            }
+        }
+        collected.sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
+        const seen = new Set();
+        const unique = [];
+        for (const program of collected) {
+            const startKey = new Date(program.start).getTime();
+            if (seen.has(startKey)) continue;
+            seen.add(startKey);
+            unique.push(program);
+        }
+        return unique.slice(0, n);
+    }
+
     formatTime(value) {
         if (!value) return '';
         return new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -573,25 +690,32 @@ class LiveGuideFusion {
         return Math.max(0, Math.min(100, ((now - start) / (stop - start)) * 100));
     }
 
-    buildSlots() {
-        const now = new Date();
-        now.setMinutes(now.getMinutes() < 30 ? 30 : 60, 0, 0);
-        return [0, 30, 60].map(offset => {
-            const slot = new Date(now);
-            slot.setMinutes(slot.getMinutes() + offset);
-            return slot;
-        });
-    }
-
     renderPreview(channel) {
-        const program = channel ? this.getProgramAt(channel, new Date()) : null;
+        if (!channel) {
+            return `
+            <div class="live-guide-preview is-empty">
+                <div class="live-guide-preview-copy">
+                    <div class="live-guide-preview-title">Aucune chaine selectionnee</div>
+                    <div class="live-guide-preview-channel">Touchez une chaine pour l apercu</div>
+                </div>
+            </div>`;
+        }
+
+        const program = this.getProgramAt(channel, new Date());
         const progress = this.getProgress(program);
         const title = program?.title || 'Pas d information';
         const start = program?.start ? this.formatTime(program.start) : '--:--';
         const stop = program?.stop ? this.formatTime(program.stop) : '--:--';
-        const logo = channel ? this.getChannelLogoSrc(channel) : '/img/placeholder.png';
+        const logo = this.getChannelLogoSrc(channel);
         const fallbackLogo = this.getChannelLogoErrorSrc(channel);
-        const group = channel?.groupTitle || this.activeGroup || '';
+        const group = channel.groupTitle || this.activeGroup || '';
+        const list = this.app.channelList;
+        const isFav = list.isFavorite(channel.sourceId, channel.id);
+        const playing = list.currentChannel;
+        const isPlaying = playing
+            && String(playing.id) === String(channel.id)
+            && String(playing.sourceId) === String(channel.sourceId);
+        const upNext = this.getUpcoming(channel, 2);
 
         return `
             <div class="live-guide-preview">
@@ -599,15 +723,25 @@ class LiveGuideFusion {
                     <img src="${logo}" alt="" onerror="this.onerror=null;this.src='${fallbackLogo}'">
                 </div>
                 <div class="live-guide-preview-copy">
+                    <div class="live-guide-preview-channel">
+                        ${this.escapeHtml(channel.name || 'Aucune chaine')}
+                        ${group ? `<span>${this.escapeHtml(group)}</span>` : ''}
+                    </div>
                     <div class="live-guide-preview-title">${this.escapeHtml(title)}</div>
                     <div class="live-guide-preview-meta">
                         <span>${this.escapeHtml(start)} - ${this.escapeHtml(stop)}</span>
                         <span class="live-guide-progress"><span style="width:${progress}%"></span></span>
                     </div>
-                    <div class="live-guide-preview-channel">
-                        ${this.escapeHtml(channel?.name || 'Aucune chaine')}
-                        ${group ? `<span>${this.escapeHtml(group)}</span>` : ''}
-                    </div>
+                    ${upNext.length ? `<ul class="live-guide-upnext">
+                        ${upNext.map(p => `<li><span class="t">${this.escapeHtml(this.formatTime(p.start))}</span> ${this.escapeHtml(p.title || 'Programme')}</li>`).join('')}
+                    </ul>` : ''}
+                </div>
+                <div class="live-guide-preview-actions">
+                    <button type="button" class="lg-btn lg-btn-primary ${isPlaying ? 'is-playing' : ''}" data-action="watch">
+                        ${isPlaying ? 'En lecture' : 'Regarder'}
+                    </button>
+                    <button type="button" class="lg-btn" data-action="fullscreen" title="Plein ecran" aria-label="Plein ecran">Plein ecran</button>
+                    <button type="button" class="lg-btn lg-btn-icon ${isFav ? 'is-fav' : ''}" data-action="favorite" title="Favori" aria-label="Favori">${isFav ? '♥' : '♡'}</button>
                 </div>
             </div>
         `;
@@ -625,47 +759,53 @@ class LiveGuideFusion {
         `;
     }
 
-    renderRows(channels, slots) {
+    renderRows(channels) {
         const families = this.buildFamilyRows(channels);
         if (!families.length) {
             return '<div class="live-guide-empty">Aucune chaine visible dans ce groupe</div>';
         }
-
         return `
-            <div class="live-guide-table">
-                <div class="live-guide-time-head">
-                    <span></span>
-                    ${slots.map(slot => `<span>${slot.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>`).join('')}
-                </div>
-                <div class="live-guide-rows">
-                    ${families.slice(0, 120).map((family, index) => this.renderRow(family, index, slots)).join('')}
-                </div>
+            <div class="live-guide-rows">
+                ${families.slice(0, 150).map((family, index) => this.renderRow(family, index)).join('')}
             </div>
         `;
     }
 
-    renderRow(family, index, slots) {
+    renderRow(family, index) {
         const channel = family.display || family.best || family.members[0];
         const isPending = this.isPendingFamily(family);
-        const isActive = this.isFamilyActive(family) || isPending;
+        const isPlaying = this.isFamilyActive(family) || isPending;
+        const isSelected = this.isFamilySelected(family);
         const badge = isPending
             ? { label: 'SCAN', className: 'pending', title: 'Verification des variantes' }
             : family.badge;
-        const variantLabel = family.members.length > 1 ? `${family.members.length} variantes` : (channel.name || '');
+        const variantLabel = family.members.length > 1 ? `${family.members.length} variantes` : '';
+        const now = this.getProgramAt(channel, new Date());
+        const next = this.getUpcoming(channel, 1)[0] || null;
+        const progress = this.getProgress(now);
         return `
-            <button class="live-guide-row ${isActive ? 'active' : ''} ${isPending ? 'pending-refresh' : ''}" data-channel-id="${channel.id}" data-source-id="${channel.sourceId}" data-family-key="${this.escapeHtml(family.familyKey)}">
-                <span class="live-guide-channel-cell">
-                    <span class="live-guide-num">${channel.num || index + 1}</span>
-                    <img src="${this.getChannelLogoSrc(channel)}" alt="" onerror="this.onerror=null;this.src='${this.getChannelLogoErrorSrc(channel)}'">
-                    <span class="live-guide-channel-name">${this.escapeHtml(family.label)}</span>
-                    <span class="live-guide-variant-count">${this.escapeHtml(variantLabel)}</span>
-                    ${badge ? `<span class="live-guide-mode ${badge.className}" title="${this.escapeHtml(badge.title)}">${badge.label}</span>` : ''}
+            <div class="live-guide-row ${isPlaying ? 'playing' : ''} ${isSelected ? 'selected' : ''} ${isPending ? 'pending-refresh' : ''}"
+                 role="button" tabindex="0"
+                 data-channel-id="${channel.id}" data-source-id="${channel.sourceId}" data-family-key="${this.escapeHtml(family.familyKey)}">
+                <span class="live-guide-num">${channel.num || index + 1}</span>
+                <img class="live-guide-logo" src="${this.getChannelLogoSrc(channel)}" alt="" onerror="this.onerror=null;this.src='${this.getChannelLogoErrorSrc(channel)}'">
+                <span class="live-guide-info">
+                    <span class="live-guide-name-row">
+                        <span class="live-guide-channel-name">${this.escapeHtml(family.label)}</span>
+                        ${variantLabel ? `<span class="live-guide-variant-count">${this.escapeHtml(variantLabel)}</span>` : ''}
+                        ${badge ? `<span class="live-guide-mode ${badge.className}" title="${this.escapeHtml(badge.title)}">${badge.label}</span>` : ''}
+                        ${isPlaying ? '<span class="live-guide-live-tag">EN DIRECT</span>' : ''}
+                    </span>
+                    <span class="live-guide-now">
+                        <span class="live-guide-now-title">${this.escapeHtml(now?.title || 'Pas d information')}</span>
+                        ${now ? `<span class="live-guide-progress"><span style="width:${progress}%"></span></span>` : ''}
+                    </span>
+                    ${next ? `<span class="live-guide-next"><span class="live-guide-next-time">${this.escapeHtml(this.formatTime(next.start))}</span> ${this.escapeHtml(next.title || 'Programme')}</span>` : ''}
                 </span>
-                ${slots.map(slot => {
-                    const program = this.getProgramAt(channel, slot);
-                    return `<span class="live-guide-program ${program ? 'has-program' : ''}">${this.escapeHtml(program?.title || 'Pas d information')}</span>`;
-                }).join('')}
-            </button>
+                <button type="button" class="live-guide-play" title="Regarder" aria-label="Regarder">
+                    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
+                </button>
+            </div>
         `;
     }
 
@@ -676,23 +816,30 @@ class LiveGuideFusion {
         this.ensureActiveGroup(groups);
         const groupChannels = this.filterGroup(channels);
         const selectedChannel = this.currentChannel || this.app.channelList.currentChannel || groupChannels[0] || channels[0] || null;
-        const slots = this.buildSlots();
-        const channelsKey = `${channels.length}:${this.activeGroup}:${selectedChannel?.id || ''}`;
-        this._lastChannelsKey = channelsKey;
+        this.currentChannel = selectedChannel;
+        this._lastChannelsKey = `${channels.length}:${this.activeGroup}:${selectedChannel?.id || ''}`;
         const shortEpgCandidates = selectedChannel
             ? [selectedChannel, ...groupChannels.slice(0, 60)]
             : groupChannels.slice(0, 60);
         this.ensureShortEpgForChannels(shortEpgCandidates);
+
+        // Preserve the channel list's scroll position across re-renders (EPG
+        // arrivals re-render the guide; without this the list jumps to the top).
+        const prevScroll = this.container.querySelector('.live-guide-rows')?.scrollTop || 0;
 
         this.container.innerHTML = `
             <div class="live-guide-shell ${this.shouldShowGroupRail() ? '' : 'groups-hidden'}">
                 ${this.renderGroups(groups)}
                 <div class="live-guide-main">
                     ${this.renderPreview(selectedChannel)}
-                    ${this.renderRows(groupChannels, slots)}
+                    ${this.renderRows(groupChannels)}
                 </div>
             </div>
         `;
+
+        const rows = this.container.querySelector('.live-guide-rows');
+        if (rows && prevScroll) rows.scrollTop = prevScroll;
+        this.updateHighlights();
         this.syncNavigationState();
         this.app.channelList.updateScanScopeHint?.();
     }
