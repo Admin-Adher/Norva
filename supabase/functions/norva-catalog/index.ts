@@ -83,12 +83,17 @@ Deno.serve(async (req) => {
 
     if (req.method === "GET" && (segments[0] === "media-genre-rails" || (segments[0] === "device" && segments[1] === "media-genre-rails"))) {
       const userId = await requireUserId(req);
-      return json(req, await listGenreRails(url, userId));
+      return json(req, await listGenreRails(req, url, userId));
     }
 
     if (req.method === "GET" && (segments[0] === "media-genre-items" || (segments[0] === "device" && segments[1] === "media-genre-items"))) {
       const userId = await requireUserId(req);
-      return json(req, await listGenreItems(url, userId));
+      return json(req, await listGenreItems(req, url, userId));
+    }
+
+    if (req.method === "GET" && (segments[0] === "media-genre-summary" || (segments[0] === "device" && segments[1] === "media-genre-summary"))) {
+      const userId = await requireUserId(req);
+      return json(req, await listGenreSummary(req, url, userId));
     }
 
     throw new HttpError(404, "Route not found");
@@ -238,7 +243,97 @@ async function listHomeRails(url: URL, userId: string) {
 // scans a broadened candidate set INCLUDING titles without a TMDB match — they
 // carry a provider category name we can still classify — so niche buckets are
 // not starved. classifyTitleBuckets maps each title onto one or more buckets.
-async function listGenreRails(url: URL, userId: string) {
+// The active profile's hidden genre buckets (x-norva-profile-id header, else the
+// default profile). Resilient: any error → empty set (no filtering).
+async function getHiddenGenres(req: Request, userId: string): Promise<Set<string>> {
+  try {
+    const headerId = req.headers.get("x-norva-profile-id");
+    let row: JsonRecord | null = null;
+    if (headerId) {
+      const { data } = await db
+        .from("cloud_account_profiles")
+        .select("hidden_genres")
+        .eq("id", headerId)
+        .eq("user_id", userId)
+        .maybeSingle();
+      row = (data as JsonRecord | null) ?? null;
+    }
+    if (!row) {
+      const { data } = await db
+        .from("cloud_account_profiles")
+        .select("hidden_genres")
+        .eq("user_id", userId)
+        .order("is_default", { ascending: false })
+        .order("sort_order", { ascending: true })
+        .limit(1)
+        .maybeSingle();
+      row = (data as JsonRecord | null) ?? null;
+    }
+    const arr = row && Array.isArray(row.hidden_genres) ? row.hidden_genres : [];
+    return new Set(arr.map((g) => String(g)));
+  } catch (_) {
+    return new Set<string>();
+  }
+}
+
+// Counts of titles per curated genre bucket across the catalog, plus the
+// profile's currently-hidden buckets. Powers the Manage Content genre view.
+async function listGenreSummary(req: Request, url: URL, userId: string) {
+  const itemType = url.searchParams.get("type") === "series" ? "series" : "movie";
+  const candidateLimit = boundedInt(url.searchParams.get("candidates"), 4000, 100, 8000);
+
+  let titles: JsonRecord[];
+  try {
+    const { data, error } = await db
+      .from("cloud_titles")
+      .select("metadata")
+      .eq("user_id", userId)
+      .eq("item_type", itemType)
+      .gt("variant_count", 0)
+      .order("synced_at", { ascending: false })
+      .limit(candidateLimit);
+    if (error) {
+      if (isMissingMaterialization(error)) return { type: itemType, genres: [], hidden: [] };
+      throwDb(error, "Unable to summarise genres");
+    }
+    titles = (data ?? []) as JsonRecord[];
+  } catch (error) {
+    if (isMissingMaterialization(error)) return { type: itemType, genres: [], hidden: [] };
+    throw error;
+  }
+
+  const counts = new Map<string, number>();
+  for (const title of titles) {
+    const meta = recordOrEmpty(title.metadata);
+    for (const bucketId of classifyTitleBuckets(meta.categoryName, asGenres(meta))) {
+      if (bucketId === "autres") continue;
+      counts.set(bucketId, (counts.get(bucketId) ?? 0) + 1);
+    }
+  }
+
+  const hidden = await getHiddenGenres(req, userId);
+  const genres = BUCKET_ORDER
+    .filter((bucketId) => bucketId !== "autres" && (counts.get(bucketId) ?? 0) > 0)
+    .map((bucketId) => ({
+      bucket: bucketId,
+      label: bucketLabel(bucketId),
+      count: counts.get(bucketId) ?? 0,
+      hidden: hidden.has(bucketId),
+    }));
+
+  return { type: itemType, genres, hidden: [...hidden] };
+}
+
+// Genres from a title's metadata (matches titleGenres but takes the metadata
+// record directly, since the summary query only selects metadata).
+function asGenres(meta: JsonRecord): unknown {
+  const tmdb = recordOrEmpty(meta.tmdb);
+  if (Array.isArray(tmdb.genres)) return tmdb.genres;
+  if (Array.isArray(meta.genres)) return meta.genres;
+  return [];
+}
+
+async function listGenreRails(req: Request, url: URL, userId: string) {
   const itemType = url.searchParams.get("type") === "series" ? "series" : "movie";
   const perRail = boundedInt(url.searchParams.get("limit"), 18, 1, 50);
   const candidateLimit = boundedInt(url.searchParams.get("candidates"), 2000, 100, 5000);
@@ -264,11 +359,17 @@ async function listGenreRails(url: URL, userId: string) {
     throw error;
   }
 
+  // Per-profile hidden genres: a title with ANY hidden bucket is dropped from
+  // the whole catalog (so e.g. a Kids profile sees no Horror anywhere).
+  const hidden = await getHiddenGenres(req, userId);
+
   // Bucket -> titles (multi-membership), capped per rail, recency preserved.
   const byBucket = new Map<string, JsonRecord[]>();
   for (const title of titles) {
     const categoryName = recordOrEmpty(title.metadata).categoryName;
-    for (const bucketId of classifyTitleBuckets(categoryName, titleGenres(title))) {
+    const buckets = classifyTitleBuckets(categoryName, titleGenres(title));
+    if (buckets.some((b) => hidden.has(b))) continue;
+    for (const bucketId of buckets) {
       if (bucketId === "autres") continue; // never surface an "Autres" rail
       const list = byBucket.get(bucketId) ?? [];
       if (list.length < perRail) {
@@ -303,13 +404,17 @@ async function listGenreRails(url: URL, userId: string) {
 
 // Full, paged list of one curated genre bucket (the rail's "Tout voir" / See
 // all). Same shape as listMediaItems so the client grid consumes it unchanged.
-async function listGenreItems(url: URL, userId: string) {
+async function listGenreItems(req: Request, url: URL, userId: string) {
   const itemType = url.searchParams.get("type") === "series" ? "series" : "movie";
   const bucket = (url.searchParams.get("bucket") || "").trim();
   const limit = boundedInt(url.searchParams.get("limit"), 36, 1, 100);
   const offset = boundedInt(url.searchParams.get("offset"), 0, 0, 1_000_000);
   const candidateLimit = boundedInt(url.searchParams.get("candidates"), 4000, 100, 8000);
   if (!bucket) throw new HttpError(400, "Missing bucket");
+
+  const hidden = await getHiddenGenres(req, userId);
+  // The bucket itself is hidden → nothing to show.
+  if (hidden.has(bucket)) return { items: [], count: 0, limit, offset, hasMore: false };
 
   let titles: JsonRecord[];
   try {
@@ -332,9 +437,10 @@ async function listGenreItems(url: URL, userId: string) {
     throw error;
   }
 
-  const matched = titles.filter((title) =>
-    classifyTitleBuckets(recordOrEmpty(title.metadata).categoryName, titleGenres(title)).includes(bucket)
-  );
+  const matched = titles.filter((title) => {
+    const buckets = classifyTitleBuckets(recordOrEmpty(title.metadata).categoryName, titleGenres(title));
+    return buckets.includes(bucket) && !buckets.some((b) => hidden.has(b));
+  });
   const pageRows = matched.slice(offset, offset + limit);
   const variantsByTitle = await listVariantsByTitleIds(pageRows.map((row) => String(row.id)));
 
