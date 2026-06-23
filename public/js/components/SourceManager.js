@@ -1299,18 +1299,99 @@ class SourceManager {
      * Reload content tree based on current type and source
      */
     reloadContentTree() {
+        // Movies / Series → catalogue-based "by genre" view (no provider needed):
+        // the genres come from the actual titles, and hide/show is per-genre and
+        // persisted on the profile (works across screens, unlike the old per-
+        // provider-category hide which never persisted on the cloud).
+        if (this.contentType === 'movies') { this.updateContentChrome('genre'); return this.loadGenreView('movie'); }
+        if (this.contentType === 'series') { this.updateContentChrome('genre'); return this.loadGenreView('series'); }
+
+        // Channels → per-provider category tree (live TV has no genres).
+        this.updateContentChrome('provider');
         const sourceId = this.contentSourceSelect?.value;
         if (!sourceId) {
-            this.contentTree.innerHTML = '<p class="hint">Choose a provider above to manage its content.</p>';
+            this.contentTree.innerHTML = '<p class="hint">Choose a provider above to manage its channels.</p>';
             return;
         }
+        this.loadContentTree(parseInt(sourceId));
+    }
 
-        if (this.contentType === 'movies') {
-            this.loadMovieCategoriesTree(parseInt(sourceId));
-        } else if (this.contentType === 'series') {
-            this.loadSeriesCategoriesTree(parseInt(sourceId));
-        } else {
-            this.loadContentTree(parseInt(sourceId));
+    // Show provider controls only for the channels view; the genre view is
+    // catalogue-wide so it hides the provider dropdown, search and Save button.
+    updateContentChrome(mode) {
+        const providerMode = mode === 'provider';
+        const header = document.querySelector('#tab-content .content-browser-header');
+        const legend = document.getElementById('content-legend');
+        if (header) header.style.display = '';
+        if (legend) legend.style.display = '';
+        const setShown = (el, show) => { if (el) el.style.display = show ? '' : 'none'; };
+        setShown(document.getElementById('content-source-select'), providerMode);
+        setShown(document.querySelector('#tab-content .search-wrapper'), providerMode);
+        setShown(document.getElementById('content-save'), providerMode);
+    }
+
+    // --- Catalogue genre view (movies / series) ---
+    async loadGenreView(itemType) {
+        this.treeData = { type: itemType + '-genres', itemType, genreView: true };
+        this.contentTree.innerHTML = '<p class="hint">Loading genres…</p>';
+        try {
+            const payload = await API.media.genreSummary({ type: itemType });
+            const genres = (payload && payload.genres) || [];
+            this.genreHidden = new Set(payload && payload.hidden ? payload.hidden : []);
+            this.genreList = genres;
+            if (!genres.length) {
+                this.contentTree.innerHTML = '<div class="screens-empty">No genres detected in your catalogue yet.<br>Add a TV provider and let Norva sync your movies & shows.</div>';
+                return;
+            }
+            this.renderGenreView(genres);
+        } catch (e) {
+            this.contentTree.innerHTML = '<p class="hint" style="color: var(--color-error);">Unable to load genres</p>';
+        }
+    }
+
+    renderGenreView(genres) {
+        const rows = genres.map((g) => {
+            const checked = !this.genreHidden.has(g.bucket);
+            return `<label class="checkbox-label channel-item" style="display:flex;align-items:center;gap:12px;padding:12px 14px" title="${this.escapeAttr(g.label)}">
+                <input type="checkbox" class="genre-checkbox" data-bucket="${this.escapeAttr(g.bucket)}" ${checked ? 'checked' : ''}>
+                <span class="channel-name" style="font-weight:600;flex:1">${this.escapeHtml(g.label)}</span>
+                <span class="setting-hint" style="margin:0">${Number(g.count) || 0}</span>
+            </label>`;
+        }).join('');
+        this.contentTree.innerHTML = `<div class="content-channels">${rows}</div>`;
+        this.contentTree.querySelectorAll('.genre-checkbox').forEach((cb) => {
+            cb.addEventListener('change', () => this.onGenreToggle(cb));
+        });
+    }
+
+    onGenreToggle(cb) {
+        const bucket = cb.dataset.bucket;
+        if (!this.genreHidden) this.genreHidden = new Set();
+        if (cb.checked) this.genreHidden.delete(bucket);
+        else this.genreHidden.add(bucket);
+        this.saveGenreHidden();
+    }
+
+    async getEditProfileId() {
+        try {
+            const active = window.NorvaCloud?.profiles?.getActiveId?.();
+            if (active) return active;
+            const res = await window.NorvaCloud.profiles.list();
+            const list = (res && (res.profiles || res)) || [];
+            const def = list.find((p) => p.is_default) || list[0];
+            return def ? def.id : null;
+        } catch (_) { return null; }
+    }
+
+    async saveGenreHidden() {
+        const status = document.getElementById('content-legend');
+        try {
+            const id = await this.getEditProfileId();
+            if (!id) { this.toast('No profile to save to', true); return; }
+            await window.NorvaCloud.profiles.update(id, { hiddenGenres: [...this.genreHidden] });
+            this.toast('Saved');
+        } catch (e) {
+            this.toast(e?.message || 'Could not save', true);
         }
     }
 
@@ -1849,6 +1930,13 @@ class SourceManager {
     }
 
     async setAllVisibility(visible) {
+        // Genre view: Show all = no hidden genres, Hide all = every genre hidden.
+        if (this.treeData?.genreView) {
+            this.genreHidden = visible ? new Set() : new Set((this.genreList || []).map((g) => g.bucket));
+            this.renderGenreView(this.genreList || []);
+            await this.saveGenreHidden();
+            return;
+        }
         if (!this.treeData || !this.treeData.groups) return;
 
         // With an active search, only affect the items currently shown — not the
@@ -1944,6 +2032,7 @@ class SourceManager {
      * Save all content visibility changes to the server
      */
     async saveContentChanges() {
+        if (this.treeData?.genreView) return; // genre view auto-saves on toggle
         if (!this.treeData) {
             alert('No content loaded to save');
             return;

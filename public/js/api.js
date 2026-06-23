@@ -543,6 +543,11 @@ const CloudAdapter = (() => {
         });
     }
 
+    async function getGenreSummary({ type = 'movie' } = {}) {
+        const normalizedType = type ? cloudTypeFromLocal(type) : 'movie';
+        return cloudHomeApi().genreSummary({ type: normalizedType });
+    }
+
     function liveDefaultPref(variant) {
         const label = String(variant?.label || '');
         let base;
@@ -1683,6 +1688,9 @@ const CloudAdapter = (() => {
                 items: (payload.items || []).map(normalizeHomeRailItem)
             };
         }
+        if (method === 'GET' && path === '/media/genre-summary') {
+            return getGenreSummary({ type: query.get('type') || 'movie' });
+        }
         if (method === 'GET' && path === '/channels/recent') {
             const requestedType = query.get('type') || 'movie';
             const limit = Math.max(1, Math.min(50, Number.parseInt(query.get('limit') || '12', 10) || 12));
@@ -2067,6 +2075,13 @@ const API = {
                 if (value !== undefined && value !== null && value !== '') search.set(key, value);
             });
             return API.request('GET', `/media/genre-items${search.toString() ? `?${search.toString()}` : ''}`);
+        },
+        genreSummary: (params = {}) => {
+            const search = new URLSearchParams();
+            Object.entries(params).forEach(([key, value]) => {
+                if (value !== undefined && value !== null && value !== '') search.set(key, value);
+            });
+            return API.request('GET', `/media/genre-summary${search.toString() ? `?${search.toString()}` : ''}`);
         }
     },
 
