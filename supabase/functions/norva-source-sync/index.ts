@@ -63,7 +63,7 @@ Deno.serve(async (req) => {
     const url = new URL(req.url);
     const segments = routeSegments(url.pathname);
     if (req.method === "GET" && segments[0] === "health") {
-      return json(req, { ok: true, service: "norva-source-sync", version: 7, liveMaterialization: true, syncProgress: true, catalogFinalize: true, catalogFinalizeBatches: true, liveFinalizeBatches: true });
+      return json(req, { ok: true, service: "norva-source-sync", version: 8, liveMaterialization: true, syncProgress: true, catalogFinalize: true, catalogFinalizeBatches: true, liveFinalizeBatches: true, yearBackfill: true });
     }
     // Premium per-user background refresh (pg_cron → here). Drives a small batch
     // of due, entitled sources through the same sync state machine — locked,
@@ -110,6 +110,14 @@ Deno.serve(async (req) => {
           limit: Math.max(1, Math.min(2000, Number(url.searchParams.get("limit")) || 1500)),
         });
         return json(req, result);
+      }
+      // Backfill release_year from TMDB for unverified titles. One batch per call
+      // (cursor-resumable); drive it in a loop until {done:true}.
+      if (segments[1] === "backfill-years") {
+        const limit = boundedInt(url.searchParams.get("limit"), 300, 1, 1000);
+        const reset = url.searchParams.get("reset") === "1";
+        const concurrency = boundedInt(url.searchParams.get("conc"), 15, 1, 50);
+        return json(req, await cronBackfillYears(supabase, limit, reset, concurrency));
       }
       return json(req, { error: "not_found" }, 404);
     }
@@ -402,6 +410,122 @@ function runInBackground(task: Promise<unknown>) {
     if (er?.waitUntil) { er.waitUntil(safe); return; }
   } catch (_) { /* ignore — fall through to detached */ }
   void safe;
+}
+
+// ── Release-year backfill ────────────────────────────────────────────────────
+// Provider VOD/series lists carry no release year, and many cloud_titles rows are
+// "provider_unverified" (TMDB id known, details never fetched) so their
+// release_year is null — leaving blanks on the browse grid even after the
+// read-time projection in norva-catalog. This walks those rows by id cursor and
+// fills release_year from TMDB: one fetch per distinct movie/series id, fanned out
+// to every row that shares it. Resumable + idempotent — the cursor in
+// norva_year_backfill_state only moves forward, and a found year is written only
+// where release_year is still null.
+function tmdbApiKey() {
+  return stringOr(
+    Deno.env.get("NORVA_TMDB_API_KEY") ?? Deno.env.get("TMDB_API_KEY") ?? Deno.env.get("TMDB_READ_TOKEN"),
+    "",
+  );
+}
+
+// number → year found; null → TMDB has no date (don't retry); "error" → transient.
+async function fetchTmdbYear(apiKey: string, itemType: string, tmdbId: string): Promise<number | null | "error"> {
+  const endpoint = itemType === "series" ? "tv" : "movie";
+  const url = new URL(`https://api.themoviedb.org/3/${endpoint}/${encodeURIComponent(tmdbId)}`);
+  const headers: Record<string, string> = {};
+  if (apiKey.startsWith("eyJ")) headers.Authorization = `Bearer ${apiKey}`;
+  else url.searchParams.set("api_key", apiKey);
+  const language = stringOr(Deno.env.get("NORVA_TMDB_LANGUAGE"), "en-US");
+  if (language) url.searchParams.set("language", language);
+  try {
+    const res = await fetch(url.toString(), { headers, signal: AbortSignal.timeout(8000) });
+    if (res.status === 404) return null;            // no such title → stop retrying
+    if (!res.ok) return "error";                    // rate-limited / 5xx → retry later
+    const body = await res.json().catch(() => null) as Record<string, unknown> | null;
+    const date = String((body?.release_date ?? body?.first_air_date) ?? "");
+    const match = date.match(/(19|20)\d{2}/);
+    if (!match) return null;                         // matched, but TMDB has no date
+    const year = Number(match[0]);
+    return Number.isFinite(year) && year >= 1900 && year <= 2100 ? year : null;
+  } catch (_) {
+    return "error";
+  }
+}
+
+async function cronBackfillYears(db: SupabaseClient, limit: number, reset: boolean, concurrency: number) {
+  const apiKey = tmdbApiKey();
+  if (!apiKey) return { error: "tmdb_key_missing", done: true };
+
+  let cursor: string | null = null;
+  if (!reset) {
+    const { data } = await db.from("norva_year_backfill_state").select("last_id").eq("id", 1).maybeSingle();
+    cursor = (data?.last_id as string | null) ?? null;
+  }
+
+  let q = db
+    .from("cloud_titles")
+    .select("id, item_type, provider_tmdb_id")
+    .is("release_year", null)
+    .not("provider_tmdb_id", "is", null)
+    .order("id", { ascending: true })
+    .limit(limit);
+  if (cursor) q = q.gt("id", cursor);
+
+  const { data: rows, error } = await q;
+  if (error) throw new HttpError(500, "backfill select failed", error.message);
+
+  const scanned = rows?.length ?? 0;
+  if (!scanned) {
+    await db.from("norva_year_backfill_state")
+      .update({ done: true, last_run: { scanned: 0, done: true, at: new Date().toISOString() }, updated_at: new Date().toISOString() })
+      .eq("id", 1);
+    return { scanned: 0, distinct: 0, found: 0, updated: 0, done: true };
+  }
+
+  // One fetch per distinct (item_type, tmdbId); remember the cursor end.
+  const distinct = new Map<string, { itemType: string; tmdbId: string }>();
+  let maxId = cursor;
+  for (const row of rows!) {
+    maxId = String(row.id);
+    const itemType = String(row.item_type);
+    const tmdbId = stringOr(row.provider_tmdb_id, "");
+    if (!tmdbId) continue;
+    distinct.set(`${itemType}:${tmdbId}`, { itemType, tmdbId });
+  }
+
+  // Fetch years with bounded concurrency (TMDB tolerates ~40 in flight).
+  const entries = [...distinct.values()];
+  const yearByKey = new Map<string, number>();
+  let next = 0;
+  const worker = async () => {
+    while (next < entries.length) {
+      const entry = entries[next++];
+      const year = await fetchTmdbYear(apiKey, entry.itemType, entry.tmdbId);
+      if (typeof year === "number") yearByKey.set(`${entry.itemType}:${entry.tmdbId}`, year);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(Math.max(1, concurrency), entries.length) }, worker));
+
+  // Write each found year to every row that shares the id and is still null.
+  let updated = 0;
+  for (const entry of entries) {
+    const year = yearByKey.get(`${entry.itemType}:${entry.tmdbId}`);
+    if (!year) continue;
+    const { count } = await db
+      .from("cloud_titles")
+      .update({ release_year: year }, { count: "exact" })
+      .eq("item_type", entry.itemType)
+      .eq("provider_tmdb_id", entry.tmdbId)
+      .is("release_year", null);
+    updated += count ?? 0;
+  }
+
+  const done = scanned < limit;
+  const summary = { scanned, distinct: distinct.size, found: yearByKey.size, updated, done };
+  await db.from("norva_year_backfill_state")
+    .update({ last_id: maxId, done, last_run: { ...summary, at: new Date().toISOString() }, updated_at: new Date().toISOString() })
+    .eq("id", 1);
+  return summary;
 }
 
 // Premium per-user background refresh — the step-5 state machine. Picks a small
