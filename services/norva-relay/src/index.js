@@ -19,7 +19,11 @@ const DEFAULT_ALLOWED_ORIGINS = [
   "http://localhost:5173",
 ];
 
-const DEFAULT_IMAGE_FALLBACK_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 960"><defs><linearGradient id="g" x1="0" x2="1" y1="0" y2="1"><stop stop-color="#0a1020"/><stop offset="1" stop-color="#1a1230"/></linearGradient><linearGradient id="n" x1="0" x2="1" y1="0" y2="1"><stop stop-color="#26d9ff"/><stop offset=".55" stop-color="#5b79ff"/><stop offset="1" stop-color="#d348ff"/></linearGradient></defs><rect width="640" height="960" rx="48" fill="url(#g)"/><path d="M182 628V354c0-36 29-65 65-65s65 29 65 65v74l85-94c33-37 95-13 95 37v235c0 36-29 65-65 65s-65-29-65-65v-64l-85 94c-33 37-95 13-95-37z" fill="none" stroke="url(#n)" stroke-width="50" stroke-linecap="round" stroke-linejoin="round"/><text x="320" y="790" text-anchor="middle" fill="#dce6ff" font-family="Arial, Helvetica, sans-serif" font-size="42" font-weight="700">Norva</text></svg>`;
+// When an upstream image is dead, the proxy redirects here: the single validated,
+// high-quality branded Norva poster served by the site. Using one canonical asset
+// (instead of an inline SVG) keeps the fallback identical everywhere — and because
+// it's a real file, an <img> shows it whether or not the page wires an onerror.
+const BRANDED_PLACEHOLDER_URL = "https://norva.tv/img/norva-media-placeholder.png";
 
 class HttpError extends Error {
   constructor(status, message, details = undefined) {
@@ -499,15 +503,15 @@ async function proxyImage(request, env, ctx, url) {
 }
 
 function fallbackImage(request, env) {
-  return new Response(request.method === "HEAD" ? null : DEFAULT_IMAGE_FALLBACK_SVG, {
-    status: 200,
+  // Redirect (don't inline a body) to the branded placeholder so every dead image
+  // resolves to the exact same validated Norva poster. A 302 keeps it temporary —
+  // if the upstream recovers, the next request proxies the real poster again.
+  return new Response(null, {
+    status: 302,
     headers: {
       ...corsHeaders(request, env),
-      "Content-Type": "image/svg+xml; charset=utf-8",
+      Location: BRANDED_PLACEHOLDER_URL,
       "Cache-Control": "public, max-age=3600, s-maxage=86400",
-      "Cross-Origin-Resource-Policy": "cross-origin",
-      "Timing-Allow-Origin": "*",
-      "X-Content-Type-Options": "nosniff",
       "X-Norva-Image-Fallback": "1",
     },
   });

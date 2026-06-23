@@ -5884,6 +5884,19 @@ kbd {
   align-content: flex-start;
 }
 
+/* Rail-host: when the Movies/Series grid hosts Netflix-style genre rails (or a
+   genre "see all" bucket) instead of a flat card grid, it must stack its rows
+   as a normal block. As a centered flex-wrap container, a rail whose cards
+   overflow gets centered — pushing its first card off the left edge — and grows
+   wider than the viewport, letting the WHOLE page scroll horizontally. display:
+   block stacks the rails full-width (first card flush to the grid padding) and
+   overflow-x:hidden guarantees only each rail's own .horizontal-scroll scrolls. */
+.movies-grid.rail-host,
+.series-grid.rail-host {
+  display: block;
+  overflow-x: hidden;
+}
+
 .series-card {
   flex: 0 0 160px;
   width: 160px;

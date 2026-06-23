@@ -262,6 +262,8 @@ class SeriesPage {
         this.bucketLoading = false;
         this.bucketObserver?.disconnect();
 
+        // Block layout so the head / grid / loader stack vertically (see .rail-host).
+        this.container.classList.add('rail-host');
         this.container.innerHTML = `
             <div class="genre-bucket-head" style="display:flex;align-items:center;gap:14px;margin:4px 0 18px">
                 <button class="btn btn-secondary btn-sm" id="genre-bucket-back" type="button">‹ All genres</button>
@@ -433,6 +435,7 @@ class SeriesPage {
         this.continueRow?.classList.add('hidden');
         if (this.countEl) this.countEl.textContent = '';
         if (this.container) {
+            this.container.classList.remove('rail-host');
             this.container.innerHTML = `
                 <div class="catalog-locked-empty">
                     <h2>Connect your TV service first</h2>
@@ -598,6 +601,7 @@ class SeriesPage {
         }
 
         this.isLoading = true;
+        this.container.classList.remove('rail-host');
         this.container.innerHTML = '<div class="loading"><div class="loading-spinner"></div></div>';
 
         try {
@@ -700,6 +704,7 @@ class SeriesPage {
                 this.filterAndRender();
                 paintedFromCache = true;
             } else {
+                this.container.classList.remove('rail-host');
                 this.container.innerHTML = '<div class="loading"><div class="loading-spinner"></div></div>';
             }
         } else {
@@ -929,6 +934,8 @@ class SeriesPage {
         console.log(`[Series] Displaying ${cards.length} cards from ${this.seriesList.length} series`);
 
         this.currentBatch = 0;
+        // Flat card grid → drop the rail-host modifier so the grid centers/wraps.
+        this.container.classList.remove('rail-host');
         this.container.innerHTML = '';
 
         // No results → disable "Random" so it isn't a silent no-op.

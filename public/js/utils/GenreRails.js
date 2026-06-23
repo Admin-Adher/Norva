@@ -113,9 +113,15 @@
         const onItemClick = options.onItemClick || function () {};
         const usable = (rails || []).filter((r) => Array.isArray(r.items) && r.items.length);
         if (!usable.length) {
+            // No rails to host → let the container go back to its centered grid
+            // layout so the empty state sits in the middle, not stuck left.
+            container.classList.remove('rail-host');
             container.innerHTML = `<div class="empty-state"><p>${esc(options.emptyText || 'No content to show yet.')}</p></div>`;
             return;
         }
+        // Stack the rails as a block (see .rail-host in main.css) so an overflowing
+        // row can't push its first card off-screen or scroll the whole page.
+        container.classList.add('rail-host');
         container.innerHTML = usable.map((rail, i) => railHtml(rail, i)).join('');
         container.querySelectorAll('.dashboard-card').forEach((card) => {
             card.addEventListener('click', () => {
@@ -157,6 +163,7 @@
     // [{ title, cards: [HTMLElement] }].
     function renderCustom(container, sections) {
         if (!container) return;
+        container.classList.add('rail-host');
         container.innerHTML = '';
         (sections || []).forEach((sec) => {
             const section = document.createElement('section');

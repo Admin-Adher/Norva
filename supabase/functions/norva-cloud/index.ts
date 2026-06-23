@@ -3335,7 +3335,7 @@ async function fetchText(url: string, timeoutMs: number, maxBytes: number, heade
 async function proxyImage(req: Request, url: URL) {
   const targetUrl = assertPublicImageUrl(url.searchParams.get("url") ?? "");
   const response = await fetchImageWithFallback(targetUrl, 12000).catch(() => null);
-  if (!response.ok) {
+  if (!response?.ok) {
     return imageFallback(req);
   }
 
@@ -3359,16 +3359,17 @@ async function proxyImage(req: Request, url: URL) {
 }
 
 function imageFallback(req: Request) {
+  // Redirect every dead image to the single validated branded Norva poster on the
+  // production domain (norva.tv) — never the stale preview origin, which can still
+  // serve an older low-quality placeholder. Keeps the fallback identical to the
+  // edge relay so users see the same branded poster regardless of which proxy ran.
   return new Response(null, {
     status: 302,
     headers: {
       ...corsHeaders(req),
-      "Location": "https://norva-eight.vercel.app/img/norva-media-placeholder.png",
-      "Cross-Origin-Resource-Policy": "cross-origin",
-      "Timing-Allow-Origin": "*",
-      "X-Content-Type-Options": "nosniff",
+      "Location": "https://norva.tv/img/norva-media-placeholder.png",
       "X-Norva-Image-Fallback": "1",
-      "Cache-Control": "public, max-age=3600, s-maxage=3600",
+      "Cache-Control": "public, max-age=3600, s-maxage=86400",
     },
   });
 }
