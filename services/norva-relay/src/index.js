@@ -1,3 +1,5 @@
+import { connect } from "cloudflare:sockets";
+
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
@@ -53,6 +55,11 @@ export default {
           },
           time: new Date().toISOString(),
         });
+      }
+
+      // TEMPORARY diagnostic — remove after the TCP-socket feasibility test.
+      if (url.pathname === "/socket-probe") {
+        return await socketProbe(request, env);
       }
 
       if (url.pathname === "/image") {
@@ -775,6 +782,93 @@ function sanitizeUpstreamReason(text) {
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, 300);
+}
+
+// TEMPORARY diagnostic — remove after the TCP-socket feasibility test. Tests
+// whether the Cloudflare relay can reach the provider's raw-IP backend node via a
+// raw TCP socket (which, unlike fetch(), is permitted to public IPs on any port).
+// Auth + redirect resolution use fetch() from the same Cloudflare egress that the
+// node token is bound to.
+async function socketProbe(request, env) {
+  const url = new URL(request.url);
+  const target = url.searchParams.get("u");
+  const ua = url.searchParams.get("ua") || "VLC/3.0.20 LibVLC/3.0.20";
+  if (!target) return json(request, env, { error: "missing ?u=<stream url>" }, 400);
+  const out = { target, ua };
+  try {
+    const resolved = await fetch(target, {
+      method: "GET",
+      headers: { "user-agent": ua, accept: "*/*", range: "bytes=0-1" },
+      redirect: "manual",
+    });
+    out.resolveStatus = resolved.status;
+    const loc = resolved.headers.get("location");
+    out.location = loc;
+    if (!(resolved.status >= 300 && resolved.status < 400) || !loc) {
+      out.note = "no redirect (auth failed or served directly)";
+      out.body = (await resolved.text().catch(() => "")).slice(0, 200);
+      return json(request, env, out, 200);
+    }
+    const node = new URL(loc, target);
+    const secure = node.protocol === "https:";
+    const port = Number(node.port) || (secure ? 443 : 80);
+    out.nodeHost = node.hostname;
+    out.nodePort = port;
+    out.nodeScheme = node.protocol;
+
+    const t1 = Date.now();
+    const socket = connect(
+      { hostname: node.hostname, port },
+      secure ? { secureTransport: "on", allowHalfOpen: false } : {},
+    );
+    try {
+      await Promise.race([
+        socket.opened,
+        new Promise((_, rej) => setTimeout(() => rej(new Error("connect timeout 6s")), 6000)),
+      ]);
+    } catch (e) {
+      out.connect = "FAILED: " + String((e && e.message) || e);
+      try { socket.close(); } catch (_) {}
+      return json(request, env, out, 200);
+    }
+    out.connect = "OK in " + (Date.now() - t1) + "ms";
+
+    const hostHeader = port === 80 || port === 443 ? node.hostname : `${node.hostname}:${port}`;
+    const reqText =
+      `GET ${node.pathname}${node.search} HTTP/1.1\r\n` +
+      `Host: ${hostHeader}\r\n` +
+      `User-Agent: ${ua}\r\n` +
+      `Accept: */*\r\n` +
+      `Range: bytes=0-1\r\n` +
+      `Connection: close\r\n\r\n`;
+    const writer = socket.writable.getWriter();
+    await writer.write(encoder.encode(reqText));
+
+    const reader = socket.readable.getReader();
+    const chunks = [];
+    let totalBytes = 0;
+    const readDeadline = Date.now() + 8000;
+    while (totalBytes < 1500 && Date.now() < readDeadline) {
+      const r = await Promise.race([
+        reader.read(),
+        new Promise((res) => setTimeout(() => res({ value: undefined, done: true }), 8000)),
+      ]);
+      if (r.done) break;
+      if (r.value) { chunks.push(r.value); totalBytes += r.value.length; }
+    }
+    const merged = new Uint8Array(totalBytes);
+    let offset = 0;
+    for (const c of chunks) { merged.set(c, offset); offset += c.length; }
+    out.socketBytes = totalBytes;
+    out.socketResponseHead = decoder.decode(merged.slice(0, 500));
+    out.firstBytesHex = Array.from(merged.slice(0, 24)).map((b) => b.toString(16).padStart(2, "0")).join(" ");
+    try { await reader.cancel(); } catch (_) {}
+    try { await writer.close(); } catch (_) {}
+    try { socket.close(); } catch (_) {}
+  } catch (e) {
+    out.error = String((e && e.message) || e);
+  }
+  return json(request, env, out, 200);
 }
 
 function corsHeaders(request, env) {
