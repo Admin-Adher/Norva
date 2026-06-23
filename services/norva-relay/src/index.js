@@ -355,6 +355,26 @@ async function proxyPlayback(request, env, claims) {
   // `bytes=0-` is left untouched (answering from byte 0 is already correct),
   // which keeps cold startup fast.
   const requestedRange = request.headers.get("range");
+  const streamKey = claims.url;
+
+  // Fast path for streams we've already learned are only reachable over a TCP
+  // socket (raw-IP / non-standard-port nodes). Skip BOTH the fetch() that would
+  // 403 ("error code: 1003") AND the bounded-range probe — the node honours
+  // open-ended ranges natively. This halves the provider round-trips on every
+  // range request after the first. Any miss falls cleanly through to the normal
+  // path (which also re-learns if the load-balancer moved the title to a node
+  // fetch() can reach).
+  if (request.method !== "HEAD" && socketHintFresh(streamKey)) {
+    if (requestedRange) headers.set("range", requestedRange);
+    try {
+      const sock = await trySocketPath(targetUrl, request, headers, env);
+      if (sock) return sock;
+    } catch (_) { /* fall through to the normal path */ }
+    clearSocketHint(streamKey);
+    headers.delete("range");
+  }
+
+  // Normal path: map open-ended seeks to bounded ranges, then fetch().
   const upstreamRange = await boundedUpstreamRange(requestedRange, targetUrl, headers);
   if (upstreamRange) headers.set("range", upstreamRange);
   else if (requestedRange) headers.set("range", requestedRange);
@@ -368,41 +388,15 @@ async function proxyPlayback(request, env, claims) {
 
   // Fallback for backend nodes that fetch() can't reach (raw IP / non-standard
   // port → 403 "error code: 1003"): resolve the provider's redirect, then stream
-  // the node over a raw TCP socket. connect() reaches public IPs on any port, and
-  // the node's session token is bound to this same Cloudflare egress (proven: the
-  // socket receives HTTP 206 video/mp4 from the node). Gated to 401/403 so working
-  // titles keep the fast fetch() path untouched; any failure falls through to the
-  // diagnostics below.
+  // the node over a raw TCP socket. On success, remember the stream so its later
+  // range requests take the fast path above. Gated to 401/403 so working titles
+  // keep the fast fetch() path untouched; any failure falls through to diagnostics.
   if (!upstream.ok && request.method !== "HEAD" && (upstream.status === 401 || upstream.status === 403)) {
     try {
-      const resolved = await fetch(targetUrl, { method: "GET", headers, redirect: "manual" });
-      const loc = resolved.status >= 300 && resolved.status < 400 ? resolved.headers.get("location") : null;
-      if (loc) {
-        const node = new URL(loc, targetUrl);
-        const ua = headers.get("user-agent") || "VLC/3.0.20 LibVLC/3.0.20";
-        const nodeResp = await fetchNodeViaSocket(node, request.method, headers.get("range"), ua);
-        upstreamFinalUrl = node.toString();
-        if (nodeResp.status >= 200 && nodeResp.status < 400 && !nodeResp.isChunked) {
-          const sockHeaders = new Headers();
-          for (const [k, v] of nodeResp.headers) {
-            const lk = k.toLowerCase();
-            if (
-              lk === "content-type" || lk === "content-length" || lk === "content-range" ||
-              lk === "accept-ranges" || lk === "etag" || lk === "last-modified"
-            ) {
-              sockHeaders.set(k, v);
-            }
-          }
-          mergeCors(sockHeaders, corsHeaders(request, env));
-          if (!sockHeaders.has("Accept-Ranges")) sockHeaders.set("Accept-Ranges", "bytes");
-          sockHeaders.set("Cache-Control", "private, max-age=30");
-          sockHeaders.set("X-Norva-Relay-Path", "socket");
-          return new Response(request.method === "HEAD" ? null : nodeResp.body, {
-            status: nodeResp.status,
-            statusText: nodeResp.statusText,
-            headers: sockHeaders,
-          });
-        }
+      const sock = await trySocketPath(targetUrl, request, headers, env);
+      if (sock) {
+        markNeedsSocket(streamKey);
+        return sock;
       }
     } catch (e) {
       console.warn(JSON.stringify({ tag: "norva-relay-socket-fallback-error", error: String((e && e.message) || e) }));
@@ -986,6 +980,65 @@ async function relayVodInfo(request, env, claims) {
   } catch (_) {
     return json(request, env, empty, 200);
   }
+}
+
+// In-isolate hint: once a stream is confirmed reachable only via the TCP socket
+// path, remember it so its later range requests skip the fetch() that 403s and the
+// bounded-range probe. Lost on a cold isolate (worst case: one extra 403 to
+// re-learn). Bounded LRU, keyed by the stream URL so it's shared across a title's
+// many range requests (and across users on the same provider account).
+const SOCKET_HINTS = new Map();
+const SOCKET_HINT_TTL_MS = 5 * 60 * 1000;
+const SOCKET_HINT_MAX = 512;
+
+function markNeedsSocket(key) {
+  if (!key) return;
+  if (SOCKET_HINTS.size >= SOCKET_HINT_MAX) {
+    const oldest = SOCKET_HINTS.keys().next().value;
+    if (oldest !== undefined) SOCKET_HINTS.delete(oldest);
+  }
+  SOCKET_HINTS.set(key, Date.now());
+}
+
+function socketHintFresh(key) {
+  const at = key ? SOCKET_HINTS.get(key) : undefined;
+  return at !== undefined && Date.now() - at < SOCKET_HINT_TTL_MS;
+}
+
+function clearSocketHint(key) {
+  if (key) SOCKET_HINTS.delete(key);
+}
+
+// Resolve the provider's redirect (auth) and stream the resulting node over a raw
+// TCP socket. Returns a streaming Response on success, or null when there's no
+// redirect / the node didn't serve a usable response (caller falls back).
+async function trySocketPath(targetUrl, request, headers, env) {
+  const resolved = await fetch(targetUrl, { method: "GET", headers, redirect: "manual" });
+  const loc = resolved.status >= 300 && resolved.status < 400 ? resolved.headers.get("location") : null;
+  if (!loc) return null;
+  const node = new URL(loc, targetUrl);
+  const ua = headers.get("user-agent") || "VLC/3.0.20 LibVLC/3.0.20";
+  const nodeResp = await fetchNodeViaSocket(node, request.method, headers.get("range"), ua);
+  if (!(nodeResp.status >= 200 && nodeResp.status < 400) || nodeResp.isChunked) return null;
+  const sockHeaders = new Headers();
+  for (const [k, v] of nodeResp.headers) {
+    const lk = k.toLowerCase();
+    if (
+      lk === "content-type" || lk === "content-length" || lk === "content-range" ||
+      lk === "accept-ranges" || lk === "etag" || lk === "last-modified"
+    ) {
+      sockHeaders.set(k, v);
+    }
+  }
+  mergeCors(sockHeaders, corsHeaders(request, env));
+  if (!sockHeaders.has("Accept-Ranges")) sockHeaders.set("Accept-Ranges", "bytes");
+  sockHeaders.set("Cache-Control", "private, max-age=30");
+  sockHeaders.set("X-Norva-Relay-Path", "socket");
+  return new Response(request.method === "HEAD" ? null : nodeResp.body, {
+    status: nodeResp.status,
+    statusText: nodeResp.statusText,
+    headers: sockHeaders,
+  });
 }
 
 function corsHeaders(request, env) {
