@@ -426,8 +426,10 @@
         }
     }
 
-    async function sourceSyncRequest(id) {
-        const path = `/sources/${encodeURIComponent(id)}/sync?country=${encodeURIComponent(resolveCountry())}`;
+    async function sourceSyncRequest(id, opts = {}) {
+        // force=1 → bypass the cloud's change-detection skip (hard refresh).
+        const force = opts && opts.force ? '&force=1' : '';
+        const path = `/sources/${encodeURIComponent(id)}/sync?country=${encodeURIComponent(resolveCountry())}${force}`;
         try {
             return await requestToBase(sourceSyncBase(), 'POST', path, {});
         } catch (error) {
@@ -675,7 +677,7 @@
                 'GET',
                 `/sources/${encodeURIComponent(id)}/epg${query(params)}`
             ),
-            sync: (id) => sourceSyncRequest(id).then((r) => { invalidateSourcesCache(); return r; }),
+            sync: (id, opts = {}) => sourceSyncRequest(id, opts).then((r) => { invalidateSourcesCache(); return r; }),
             finalize: (id, params = {}) => sourceFinalizeRequest(id, params).then((r) => { invalidateSourcesCache(); return r; }),
             remove: (id) => request('DELETE', `/sources/${encodeURIComponent(id)}`).then((r) => { invalidateSourcesCache(); return r; })
         },

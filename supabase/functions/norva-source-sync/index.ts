@@ -66,7 +66,8 @@ Deno.serve(async (req) => {
     }
     if (req.method === "POST" && segments[0] === "sources" && segments[2] === "sync") {
       const user = await requireUser(req, supabase);
-      const result = await syncCloudSource(segments[1], user.id, supabase, url.searchParams.get("country"));
+      const force = url.searchParams.get("force") === "1";
+      const result = await syncCloudSource(segments[1], user.id, supabase, url.searchParams.get("country"), { force });
       return json(req, result);
     }
     if (req.method === "POST" && segments[0] === "sources" && segments[2] === "finalize") {
@@ -212,7 +213,7 @@ async function writeSourceSyncProgress(
   if (error) console.warn("[norva-source-sync] Unable to update source sync progress", error.message);
 }
 
-async function syncCloudSource(sourceId: string, userId: string, db: SupabaseClient, country: string | null = null) {
+async function syncCloudSource(sourceId: string, userId: string, db: SupabaseClient, country: string | null = null, opts: { force?: boolean } = {}) {
   const { data: source, error } = await db
     .from("cloud_sources")
     .select("*")
@@ -222,6 +223,9 @@ async function syncCloudSource(sourceId: string, userId: string, db: SupabaseCli
   if (error) throwDb(error, "Unable to load source");
   if (!source) throw new HttpError(404, "Source not found");
   if (!source.config_ciphertext) throw new HttpError(400, "Source has no managed cloud configuration");
+
+  // Previously-imported catalogue fingerprint, for change-detection skips.
+  const previousSignature = recordOrEmpty(source.config_hint).contentSignature;
 
   const startedAt = new Date().toISOString();
   const baseHint = recordOrEmpty(source.config_hint);
@@ -259,10 +263,11 @@ async function syncCloudSource(sourceId: string, userId: string, db: SupabaseCli
 
   try {
     const config = await decryptSourceConfig(source.config_ciphertext, await getRuntimeConfig(db));
+    const syncOpts = { previousSignature, force: opts.force };
     const result = source.source_type === "xtream"
-      ? await syncXtreamSource(sourceId, userId, config, db, country, reportProgress)
+      ? await syncXtreamSource(sourceId, userId, config, db, country, reportProgress, syncOpts)
       : source.source_type === "m3u"
-        ? await syncM3uSource(sourceId, userId, config, db, country, reportProgress)
+        ? await syncM3uSource(sourceId, userId, config, db, country, reportProgress, syncOpts)
         : { total: 0 };
 
     if ((source.source_type === "xtream" || source.source_type === "m3u") && Number(result.total ?? 0) <= 0) {
@@ -278,6 +283,7 @@ async function syncCloudSource(sourceId: string, userId: string, db: SupabaseCli
         last_synced_at: syncedAt,
         config_hint: compactRecord({
           ...recordOrEmpty(source.config_hint),
+          contentSignature: (result as JsonRecord).contentSignature ?? previousSignature,
           lastSync: { ...result, syncedAt },
           syncProgress: completedSyncProgress(result, startedAt, syncedAt),
         }),
@@ -810,6 +816,7 @@ async function syncXtreamSource(
   db: SupabaseClient,
   country: string | null = null,
   reportProgress: SyncProgressReporter = async () => {},
+  opts: { previousSignature?: unknown; force?: boolean } = {},
 ) {
   const serverUrl = normalizeBaseUrl(stringOr(config.serverUrl, ""));
   const username = stringOr(config.username, "");
@@ -877,6 +884,32 @@ async function syncXtreamSource(
     ...xtreamRows(sourceId, userId, Array.isArray(series) ? series : [], "series", seriesCategoryMap),
   ];
 
+  // Change-detection: if the provider catalogue is byte-for-byte the same set we
+  // last fully imported, skip the delete+rebuild+projection. The fetch above is
+  // the only unavoidable cost; everything below is the expensive part we avoid.
+  const contentSignature = await computeContentSignature(rows);
+  if (!opts.force && opts.previousSignature && contentSignatureEquals(contentSignature, opts.previousSignature)) {
+    await reportProgress({
+      stage: "unchanged",
+      percent: 100,
+      steps: {
+        import: { status: "done", count: rows.length },
+        finalize: { status: "done" },
+      },
+    });
+    return {
+      live: liveCount,
+      movies: movieCount,
+      series: seriesCount,
+      liveCategories: liveCategoryMap.size,
+      movieCategories: vodCategoryMap.size,
+      seriesCategories: seriesCategoryMap.size,
+      total: rows.length,
+      contentSignature,
+      skipped: true,
+    };
+  }
+
   await reportProgress({
     stage: "importing",
     percent: 58,
@@ -917,7 +950,56 @@ async function syncXtreamSource(
     total: rows.length,
     liveCatalog,
     titleProjection,
+    contentSignature,
   };
+}
+
+// Cheap change-detection fingerprint of a freshly-fetched catalogue. Per item
+// type we keep the count, the newest provider `added` timestamp, and a hash of
+// the sorted external ids — so additions/removals flip the hash and the count.
+// A sync whose signature matches the last completed one can skip the heavy
+// delete+rebuild+projection entirely (the existing data is already correct).
+async function computeContentSignature(rows: JsonRecord[]): Promise<JsonRecord> {
+  const byType = new Map<string, { count: number; maxAdded: number; ids: string[] }>();
+  for (const row of rows) {
+    const type = stringOr(row.item_type, "");
+    const ext = stringOr(row.external_id, "");
+    if (!type || !ext) continue;
+    let bucket = byType.get(type);
+    if (!bucket) { bucket = { count: 0, maxAdded: 0, ids: [] }; byType.set(type, bucket); }
+    bucket.count += 1;
+    bucket.ids.push(ext);
+    const meta = isRecord(row.metadata) ? row.metadata : {};
+    const added = Number(meta.added);
+    if (Number.isFinite(added) && added > bucket.maxAdded) bucket.maxAdded = added;
+  }
+  const signature: JsonRecord = {};
+  for (const [type, bucket] of byType) {
+    bucket.ids.sort();
+    signature[type] = {
+      count: bucket.count,
+      maxAdded: bucket.maxAdded,
+      idsHash: await sha256Hex(bucket.ids.join(",")),
+    };
+  }
+  return signature;
+}
+
+// Two signatures are "the same catalogue" when every type matches on count +
+// id-set hash. maxAdded is informational only (some providers jitter it), so it
+// is deliberately excluded from the equality to avoid false "changed" results.
+function contentSignatureEquals(a: unknown, b: unknown): boolean {
+  if (!isRecord(a) || !isRecord(b)) return false;
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+  if (keys.size === 0) return false;
+  for (const key of keys) {
+    const av = a[key];
+    const bv = b[key];
+    if (!isRecord(av) || !isRecord(bv)) return false;
+    if (Number(av.count) !== Number(bv.count)) return false;
+    if (stringOr(av.idsHash, "") !== stringOr(bv.idsHash, "")) return false;
+  }
+  return true;
 }
 
 function categoryMap(items: unknown) {
@@ -991,6 +1073,7 @@ async function syncM3uSource(
   db: SupabaseClient,
   country: string | null = null,
   reportProgress: SyncProgressReporter = async () => {},
+  opts: { previousSignature?: unknown; force?: boolean } = {},
 ) {
   const playlistUrl = stringOr(config.playlistUrl, "");
   await reportProgress({
@@ -1027,6 +1110,20 @@ async function syncM3uSource(
   })));
 
   const categoryCount = new Set(rows.map((row) => stringOr(row.parent_external_id, "")).filter(Boolean)).size;
+
+  // Change-detection (same as Xtream): skip the rebuild when the playlist's
+  // channel set is unchanged since the last completed import.
+  const contentSignature = await computeContentSignature(rows);
+  if (!opts.force && opts.previousSignature && contentSignatureEquals(contentSignature, opts.previousSignature)) {
+    await reportProgress({
+      stage: "unchanged",
+      percent: 100,
+      counts: { live: rows.length, movies: 0, series: 0, total: rows.length },
+      steps: { import: { status: "done", count: rows.length }, finalize: { status: "done" } },
+    });
+    return { live: rows.length, total: rows.length, contentSignature, skipped: true };
+  }
+
   await reportProgress({
     stage: "importing",
     percent: 62,
@@ -1045,7 +1142,7 @@ async function syncM3uSource(
     steps: { import: { status: "done", count: savedRows.length }, finalize: { status: "running" } },
   });
   const liveCatalog = await refreshMaterializedLiveCatalog(db, { sourceId, userId, rows: savedRows, country: country || stringOr(config.country, "FR") });
-  return { live: rows.length, total: rows.length, liveCatalog };
+  return { live: rows.length, total: rows.length, liveCatalog, contentSignature };
 }
 
 async function replaceSourceItems(sourceId: string, userId: string, rows: JsonRecord[], db: SupabaseClient): Promise<LiveCatalogItem[]> {

@@ -1123,7 +1123,9 @@ const CloudAdapter = (() => {
         if (method === 'POST' && /^\/sources\/[^/]+\/(sync|hard-sync)$/.test(path)) {
             const parts = path.split('/');
             if (!hasUserSession()) throw new Error('Sign in to sync a TV provider.');
-            const payload = await NorvaCloud.sources.sync(await resolveSourceId(parts[2]));
+            // Hard refresh forces a full rebuild past the cloud change-detection skip.
+            const force = /\/hard-sync$/.test(path);
+            const payload = await NorvaCloud.sources.sync(await resolveSourceId(parts[2]), { force });
             clearMediaCaches();
             return normalizeSource(payload.source || {});
         }
