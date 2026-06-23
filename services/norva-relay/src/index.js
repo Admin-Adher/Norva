@@ -347,21 +347,29 @@ async function proxyPlayback(request, env, claims) {
   });
   let upstreamFinalUrl = upstream.url || targetUrl.toString();
 
-  // Some IPTV providers 302 VOD playback to a backend node addressed by a raw IP
-  // that itself sits behind Cloudflare, which then refuses the IP-host request
-  // with HTTP 403 "error code: 1003" (Direct IP Access Not Allowed). When the
-  // straight follow is rejected, re-follow the redirect chain manually, re-pointing
-  // any IP-host hop back to the provider's domain (same path/query) so Cloudflare
-  // can route it. Gated to 401/403 so working titles keep the fast path untouched.
-  if (!upstream.ok && request.method !== "HEAD" && (upstream.status === 401 || upstream.status === 403)) {
+  // The provider load-balances VOD across backend streaming nodes: each request to
+  // the origin returns a fresh 302 + token, frequently to a DIFFERENT node. This
+  // Worker can reach some nodes but not others — a redirect to an unreachable node
+  // (e.g. a streaming host on a non-standard port) comes back as 403 "error code:
+  // 1003". Since some nodes ARE reachable (proven: the same title plays when the
+  // load-balancer happens to pick a good node), retry the origin a few times on
+  // failure to land on a node this Worker can fetch. Gated to 401/403 and capped,
+  // so the happy path and working titles are never touched.
+  let nodeRetries = 0;
+  while (
+    !upstream.ok &&
+    request.method !== "HEAD" &&
+    (upstream.status === 401 || upstream.status === 403) &&
+    nodeRetries < 4
+  ) {
+    nodeRetries++;
     try {
-      const recovered = await refetchRewritingIpRedirects(targetUrl, request.method, headers);
-      if (recovered?.response) {
-        upstream = recovered.response;
-        upstreamFinalUrl = recovered.finalUrl || upstreamFinalUrl;
-      }
+      const retry = await fetch(targetUrl, { method: request.method, headers, redirect: "follow" });
+      upstream = retry;
+      upstreamFinalUrl = retry.url || upstreamFinalUrl;
+      if (retry.ok) break;
     } catch (_) {
-      // best-effort recovery; fall back to the original upstream response
+      break;
     }
   }
   rememberContentLength(targetUrl, upstream);
@@ -391,6 +399,7 @@ async function proxyPlayback(request, env, claims) {
       statusText: upstream.statusText,
       host: targetUrl.hostname,
       path: targetUrl.pathname,
+      retries: nodeRetries,
       finalUrl: upstreamFinalUrl,
       reason: reason.slice(0, 200),
     }));
@@ -766,44 +775,6 @@ function sanitizeUpstreamReason(text) {
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, 300);
-}
-
-function isIpHost(hostname) {
-  if (!hostname) return false;
-  if (hostname.startsWith("[")) return true;          // IPv6 literal, e.g. [2606:...]
-  return /^\d{1,3}(?:\.\d{1,3}){3}$/.test(hostname);   // IPv4
-}
-
-// Re-fetch following redirects manually, re-pointing any redirect hop whose host
-// is a raw IP back to the provider's domain (preserving path + query). IPTV
-// providers commonly 302 VOD to an IP-addressed backend node; when that node is
-// behind Cloudflare it answers IP-host requests with 403 "error code: 1003"
-// (Direct IP Access Not Allowed). Routing the same path via the domain lets
-// Cloudflare resolve it. Returns the final response + the URL actually fetched.
-async function refetchRewritingIpRedirects(startUrl, method, headers, maxHops = 5) {
-  let url = new URL(startUrl.toString());
-  for (let hop = 0; hop < maxHops; hop++) {
-    const resp = await fetch(url, { method, headers, redirect: "manual" });
-    const location = resp.status >= 300 && resp.status < 400 ? resp.headers.get("location") : null;
-    if (!location) return { response: resp, finalUrl: url.toString() };
-    let next;
-    try {
-      next = new URL(location, url);
-    } catch (_) {
-      return { response: resp, finalUrl: url.toString() };
-    }
-    if (isIpHost(next.hostname) && !isIpHost(startUrl.hostname)) {
-      // Swap the raw IP for the provider's hostname but KEEP the node's port,
-      // path and token. These backend nodes are Cloudflare-fronted (Spectrum) on
-      // a non-standard port and reject IP-host access with 403 "error code: 1003"
-      // (Direct IP Access Not Allowed) while accepting the same request by
-      // hostname. (Dropping the port instead just bounces back to the redirect.)
-      next.hostname = startUrl.hostname;
-    }
-    url = next;
-  }
-  const resp = await fetch(url, { method, headers, redirect: "follow" });
-  return { response: resp, finalUrl: resp.url || url.toString() };
 }
 
 function corsHeaders(request, env) {
