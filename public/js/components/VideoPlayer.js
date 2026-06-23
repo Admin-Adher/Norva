@@ -713,7 +713,10 @@ class VideoPlayer {
         if (!normalized || normalized === 'und') return null;
 
         try {
-            const displayNames = new Intl.DisplayNames([navigator.language || 'en'], { type: 'language' });
+            // Norva's UI is English everywhere — render language names in English
+            // regardless of the browser locale (otherwise an "eng" track shows as
+            // "Anglais" on a French browser).
+            const displayNames = new Intl.DisplayNames(['en'], { type: 'language' });
             const label = displayNames.of(normalized);
             if (label) return label.charAt(0).toUpperCase() + label.slice(1);
         } catch (_) {
@@ -2754,8 +2757,8 @@ class VideoPlayer {
 
         if (epgData && epgData.current) {
             programTitle.textContent = epgData.current.title;
-            const start = new Date(epgData.current.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-            const end = new Date(epgData.current.stop).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            const start = new Date(epgData.current.start).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+            const end = new Date(epgData.current.stop).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
             programTime.textContent = `${start} - ${end}`;
         } else {
             programTitle.textContent = '';
@@ -2767,7 +2770,7 @@ class VideoPlayer {
         if (epgData && epgData.upcoming) {
             epgData.upcoming.slice(0, 3).forEach(prog => {
                 const li = document.createElement('li');
-                const time = new Date(prog.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                const time = new Date(prog.start).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
                 li.textContent = `${time} - ${prog.title}`;
                 upNextList.appendChild(li);
             });

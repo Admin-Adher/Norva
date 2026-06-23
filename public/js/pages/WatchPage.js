@@ -1967,7 +1967,10 @@ class WatchPage {
         if (!normalized || normalized === 'und') return null;
 
         try {
-            const displayNames = new Intl.DisplayNames([navigator.language || 'en'], { type: 'language' });
+            // Norva's UI is English everywhere — render language names in English
+            // regardless of the browser locale (otherwise an "eng" track shows as
+            // "Anglais" on a French browser).
+            const displayNames = new Intl.DisplayNames(['en'], { type: 'language' });
             const label = displayNames.of(normalized);
             if (label) return label.charAt(0).toUpperCase() + label.slice(1);
         } catch (_) {

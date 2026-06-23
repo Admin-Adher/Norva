@@ -303,7 +303,7 @@ class SettingsPage {
                     const end = new Date(endIso);
                     const daysLeft = Math.max(0, Math.ceil((end.getTime() - Date.now()) / 86400000));
                     hint.textContent = daysLeft > 0
-                        ? `${daysLeft} day${daysLeft === 1 ? '' : 's'} left — renews ${end.toLocaleDateString()} unless cancelled.`
+                        ? `${daysLeft} day${daysLeft === 1 ? '' : 's'} left — renews ${end.toLocaleDateString('en-US')} unless cancelled.`
                         : 'Trial ended — choose a plan to keep watching.';
                 }
             }
@@ -937,7 +937,7 @@ class SettingsPage {
                     </td>
                     <td>${user.email || '<span class="hint">-</span>'}</td>
                     <td>${roleBadge}</td>
-                    <td>${user.createdAt ? new Date(user.createdAt).toLocaleDateString() : 'N/A'}</td>
+                    <td>${user.createdAt ? new Date(user.createdAt).toLocaleDateString('en-US') : 'N/A'}</td>
                     <td>
                         <button class="btn btn-sm btn-secondary" onclick="window.app.pages.settings.openEditUserModal(${user.id})">Edit</button>
                         <button class="btn btn-sm btn-error" onclick="window.app.pages.settings.deleteUser(${user.id}, '${user.username}')">Delete</button>
@@ -1122,7 +1122,7 @@ class SettingsPage {
         const name = (document.getElementById('screens-display-name')?.value || '').trim();
         try {
             this.setScreensStatus(status, 'info', 'Saving…');
-            await window.NorvaCloud.profile.save({ displayName: name, locale: navigator.language || 'fr-FR' });
+            await window.NorvaCloud.profile.save({ displayName: name, locale: navigator.language || 'en-US' });
             this.setScreensStatus(status, 'success', 'Saved.');
         } catch (e) {
             this.setScreensStatus(status, 'error', e?.message || 'Unable to save.');
@@ -1238,7 +1238,7 @@ class SettingsPage {
         const days = Math.floor(hrs / 24);
         if (days < 7) return `${days} d ago`;
         if (days < 30) return `${Math.floor(days / 7)} wk ago`;
-        return new Date(iso).toLocaleDateString();
+        return new Date(iso).toLocaleDateString('en-US');
     }
 
     async sendScreenCommand(command) {
@@ -1391,11 +1391,11 @@ class SettingsPage {
                     text = `${diffHours} hour${diffHours === 1 ? '' : 's'} ago`;
                 } else {
                     // Use absolute time for older refreshes
-                    text = lastRefreshTime.toLocaleString();
+                    text = lastRefreshTime.toLocaleString('en-US');
                 }
 
                 display.textContent = text;
-                display.title = lastRefreshTime.toLocaleString(); // Full timestamp on hover
+                display.title = lastRefreshTime.toLocaleString('en-US'); // Full timestamp on hover
             } else {
                 display.textContent = 'Never';
                 display.title = 'Sync has not run yet since server started';

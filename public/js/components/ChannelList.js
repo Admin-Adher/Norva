@@ -3047,8 +3047,8 @@ class ChannelList {
 
                 // Show current program
                 if (currentProgram) {
-                    const startTime = new Date(currentProgram.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                    const endTime = new Date(currentProgram.end).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                    const startTime = new Date(currentProgram.start).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+                    const endTime = new Date(currentProgram.end).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
                     programsHtml += `
                         <div class="epg-program current">
                             <div class="epg-program-time">${startTime} - ${endTime}</div>
@@ -3065,8 +3065,8 @@ class ChannelList {
                     .slice(0, 5);
 
                 upcoming.forEach(prog => {
-                    const startTime = new Date(prog.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                    const endTime = new Date(prog.end).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                    const startTime = new Date(prog.start).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+                    const endTime = new Date(prog.end).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
                     programsHtml += `
                         <div class="epg-program">
                             <div class="epg-program-time">${startTime} - ${endTime}</div>

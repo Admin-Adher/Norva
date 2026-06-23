@@ -232,11 +232,11 @@
     }
 
     // User's display language (2-letter) for localized titles/overviews — derived
-    // from the browser locale, defaulting to fr. The catalog serves i18n[lang]
-    // when available, else the catalogue default.
+    // from the browser locale, defaulting to en (Norva's UI is English). The catalog
+    // serves i18n[lang] when available, else the catalogue default.
     function resolveLang() {
-        const code = String(navigator.language || 'fr').toLowerCase().split('-')[0];
-        return /^[a-z]{2}$/.test(code) ? code : 'fr';
+        const code = String(navigator.language || 'en').toLowerCase().split('-')[0];
+        return /^[a-z]{2}$/.test(code) ? code : 'en';
     }
 
     function rememberProfileRegion(profile) {
@@ -264,7 +264,7 @@
                 const profile = await request('PUT', '/profile', {
                     preferredContentRegion: normalized,
                     confirmPreferredContentRegion: true,
-                    locale: navigator.language || 'fr-FR'
+                    locale: navigator.language || 'en-US'
                 });
                 rememberProfileRegion(profile);
             } catch (error) {

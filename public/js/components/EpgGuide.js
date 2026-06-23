@@ -489,7 +489,7 @@ class EpgGuide {
             <div class="epg-time-slots">
               ${timeSlots.map(slot => `
                 <div class="epg-time-slot" style="width: ${30 * this.pixelsPerMinute}px;">
-                  ${slot.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  ${slot.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })}
                 </div>
               `).join('')}
             </div>
@@ -866,7 +866,7 @@ class EpgGuide {
              data-stop="${prog.stop}">
           <div class="epg-program-title">${prog.title || 'Unknown'}</div>
           <div class="epg-program-time">
-            ${new Date(prog.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            ${new Date(prog.start).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })}
           </div>
         </div>
       `;
@@ -892,7 +892,7 @@ class EpgGuide {
         } else if (date.toDateString() === tomorrow.toDateString()) {
             this.dateDisplay.textContent = 'Tomorrow';
         } else {
-            this.dateDisplay.textContent = date.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+            this.dateDisplay.textContent = date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
         }
     }
 
@@ -955,7 +955,7 @@ class EpgGuide {
         const stop = new Date(data.stop);
 
         body.innerHTML = `
-      <p><strong>Time:</strong> ${start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - ${stop.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
+      <p><strong>Time:</strong> ${start.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })} - ${stop.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })}</p>
       <p><strong>Description:</strong></p>
       <p>${data.description || 'No description available'}</p>
     `;

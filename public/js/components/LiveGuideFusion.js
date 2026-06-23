@@ -678,7 +678,7 @@ class LiveGuideFusion {
 
     formatTime(value) {
         if (!value) return '';
-        return new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        return new Date(value).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
     }
 
     getProgress(program) {

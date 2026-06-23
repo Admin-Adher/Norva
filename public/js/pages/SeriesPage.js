@@ -588,7 +588,7 @@ class SeriesPage {
             this.categories = genres;
             const options = genres
                 .filter(g => Number(g.count) > 0)
-                .map(g => ({ value: g.bucket, label: `${g.label} · ${Number(g.count).toLocaleString()}` }));
+                .map(g => ({ value: g.bucket, label: `${g.label} · ${Number(g.count).toLocaleString('en-US')}` }));
             this.categoryMulti.setOptions(options);
         } catch (err) {
             console.error('Error loading cloud series genres:', err);

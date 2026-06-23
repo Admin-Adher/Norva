@@ -669,7 +669,7 @@ class SourceManager {
     }
 
     formatCatalogCount(value, fallback = 'Scanning') {
-        return value > 0 ? value.toLocaleString() : fallback;
+        return value > 0 ? value.toLocaleString('en-US') : fallback;
     }
 
     catalogMilestones(progress = {}, counts = {}) {
@@ -697,7 +697,7 @@ class SourceManager {
 
     renderCatalogMilestone(step) {
         const safeStatus = ['pending', 'running', 'done', 'error', 'skipped'].includes(step.status) ? step.status : 'pending';
-        const count = step.count > 0 ? `<strong>${this.escapeHtml(step.count.toLocaleString())}</strong>` : '';
+        const count = step.count > 0 ? `<strong>${this.escapeHtml(step.count.toLocaleString('en-US'))}</strong>` : '';
         const statusLabel = {
             pending: 'Waiting',
             running: 'In progress',
@@ -777,7 +777,7 @@ class SourceManager {
           <div class="source-sync-error">${this.escapeHtml(statusText.error)}</div>
         ` : ''}
         ${counts.syncedAt && phase === 'ready' ? `
-          <p class="hint">Last import: ${this.escapeHtml(new Date(counts.syncedAt).toLocaleString())}</p>
+          <p class="hint">Last import: ${this.escapeHtml(new Date(counts.syncedAt).toLocaleString('en-US'))}</p>
         ` : ''}
       </div>
     `;
@@ -944,7 +944,7 @@ class SourceManager {
                     if (estimate.needsWarning) {
                         const proceed = await this.showWarningModal({
                             title: '⚠️ Large Playlist Warning',
-                            message: `This playlist contains <strong>${estimate.count.toLocaleString()}</strong> channels.`,
+                            message: `This playlist contains <strong>${estimate.count.toLocaleString('en-US')}</strong> channels.`,
                             details: `Syncing may take several minutes and app performance may be impacted with large playlists.<br><br>Consider using a filtered M3U from your provider to include only channels you actually watch.`,
                             proceedText: 'Proceed Anyway',
                             cancelText: 'Cancel'
@@ -1105,7 +1105,7 @@ class SourceManager {
                     if (estimate.needsWarning) {
                         const proceed = await this.showWarningModal({
                             title: '⚠️ Large Playlist Warning',
-                            message: `This playlist contains <strong>${estimate.count.toLocaleString()}</strong> channels.`,
+                            message: `This playlist contains <strong>${estimate.count.toLocaleString('en-US')}</strong> channels.`,
                             details: `Syncing may take several minutes and app performance may be impacted with large playlists.<br><br>Consider using a filtered M3U from your provider to include only channels you actually watch.`,
                             proceedText: 'Proceed Anyway',
                             cancelText: 'Cancel'
@@ -1373,7 +1373,7 @@ class SourceManager {
             return `<button type="button" class="genre-card ${on ? 'is-on' : 'is-off'}" data-bucket="${this.escapeHtml(g.bucket)}" role="switch" aria-checked="${on ? 'true' : 'false'}" title="${this.escapeHtml(g.label)}">
                 <span class="genre-card-text">
                     <span class="genre-card-name">${this.escapeHtml(g.label)}</span>
-                    <span class="genre-card-count">${count.toLocaleString()} ${unit}</span>
+                    <span class="genre-card-count">${count.toLocaleString('en-US')} ${unit}</span>
                 </span>
                 <span class="genre-switch" aria-hidden="true"><span class="genre-switch-knob"></span></span>
             </button>`;
@@ -2327,7 +2327,7 @@ class SourceManager {
                     btn.disabled = false;
                     btn.innerHTML = Icons.refresh;
                     btn.classList.remove('syncing');
-                    btn.title = lastSync ? `Last Sync: ${new Date(lastSync).toLocaleString()}` : "Refresh Data";
+                    btn.title = lastSync ? `Last Sync: ${new Date(lastSync).toLocaleString('en-US')}` : "Refresh Data";
                 }
             }
 
