@@ -395,6 +395,26 @@ class SettingsPage {
             });
         }
 
+        // Keep my catalogue up to date (cloud refresh-on-open) — works on the web.
+        const autoRefreshToggle = document.getElementById('setting-auto-refresh');
+        const autoRefreshInterval = document.getElementById('setting-auto-refresh-interval');
+        const autoRefreshRow = document.getElementById('auto-refresh-interval-row');
+        if (autoRefreshToggle && this.app.player?.settings) {
+            const enabled = this.app.player.settings.autoRefreshEnabled !== false;
+            autoRefreshToggle.checked = enabled;
+            if (autoRefreshInterval) autoRefreshInterval.value = String(this.app.player.settings.autoRefreshIntervalHours || 24);
+            if (autoRefreshRow) autoRefreshRow.style.display = enabled ? '' : 'none';
+            autoRefreshToggle.addEventListener('change', () => {
+                this.app.player.settings.autoRefreshEnabled = autoRefreshToggle.checked;
+                this.app.player.saveSettings();
+                if (autoRefreshRow) autoRefreshRow.style.display = autoRefreshToggle.checked ? '' : 'none';
+            });
+            autoRefreshInterval?.addEventListener('change', () => {
+                this.app.player.settings.autoRefreshIntervalHours = parseInt(autoRefreshInterval.value, 10) || 24;
+                this.app.player.saveSettings();
+            });
+        }
+
         // EPG auto-refresh runs on a local-server timer (syncService); on the
         // plain web the cloud refreshes on its own schedule and ignores this
         // value, so hide that control there. "Last updated" stays (cloud-backed).

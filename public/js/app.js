@@ -234,7 +234,46 @@ class App {
         this.maybeShowTrialBanner();
         this.maybeShowBillingIssueBanner();
 
+        // Keep the catalogue fresh: a few seconds after launch, silently re-sync
+        // any provider that's gone stale. Non-blocking, and cheap when nothing
+        // changed (server-side change-detection skips the rebuild).
+        setTimeout(() => { this.maybeAutoRefreshSources().catch(() => {}); }, 4000);
+
         console.log('Norva initialized');
+    }
+
+    /**
+     * Refresh-on-open: silently re-sync providers that are older than the user's
+     * chosen interval. Single-flight (skips anything already syncing), background
+     * (never blocks the UI), and a no-op server-side when the catalogue is
+     * unchanged. The visible "Keep up to date" toggle lives in TV Service.
+     */
+    async maybeAutoRefreshSources() {
+        const settings = this.player?.settings || {};
+        if (settings.autoRefreshEnabled === false) return;
+        if (!window.API?.sources?.getAll) return;
+        const intervalHours = Number(settings.autoRefreshIntervalHours);
+        const staleMs = (Number.isFinite(intervalHours) && intervalHours > 0 ? intervalHours : 24) * 3600000;
+
+        let sources = [];
+        try { sources = await API.sources.getAll(); } catch (_) { return; }
+        const providers = (sources || []).filter(s => s.type === 'xtream' || s.type === 'm3u');
+        const now = Date.now();
+
+        for (const src of providers) {
+            const status = src.syncStatus || src.sync_status || '';
+            if (status === 'syncing') continue; // single-flight: don't pile on
+            const lastRaw = src.last_synced_at || src.lastSyncedAt || src.last_sync || null;
+            const lastMs = lastRaw ? new Date(lastRaw).getTime() : 0;
+            if (lastMs && (now - lastMs) < staleMs) continue; // still fresh enough
+
+            // Stale → fire a silent background sync. The /sync interceptor clears
+            // the media caches on completion, so new content shows on next nav.
+            console.log('[AutoRefresh] background sync (stale provider):', src.id);
+            Promise.resolve(API.sources.sync(src.id))
+                .then(() => { try { this.refreshSourceHealth?.(); } catch (_) {} })
+                .catch((e) => console.warn('[AutoRefresh] background sync failed', src.id, e?.message || e));
+        }
     }
 
     async refreshSourceHealth({ redirectIfBlocked = false } = {}) {

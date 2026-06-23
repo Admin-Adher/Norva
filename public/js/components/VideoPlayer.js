@@ -111,7 +111,12 @@ class VideoPlayer {
             forceRemux: false,
             autoTranscode: true,
             streamFormat: 'm3u8',
-            epgRefreshInterval: '24'
+            epgRefreshInterval: '24',
+            // Keep the catalogue fresh by re-syncing stale providers on app open
+            // (cheap thanks to server-side change-detection). Hours of staleness
+            // before a background refresh; 0/off disables it.
+            autoRefreshEnabled: true,
+            autoRefreshIntervalHours: 24
         };
     }
 

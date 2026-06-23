@@ -1872,6 +1872,8 @@ const CloudAdapter = (() => {
             upscaleEnabled: false,
             userAgentPreset: '',
             userAgentCustom: '',
+            autoRefreshEnabled: true,
+            autoRefreshIntervalHours: 24,
             autoPlayNextEpisode: true,
             groupDuplicates: true,
             duplicateStrategy: 'smart',
