@@ -57,11 +57,6 @@ export default {
         });
       }
 
-      // TEMPORARY diagnostic — remove after the TCP-socket feasibility test.
-      if (url.pathname === "/socket-probe") {
-        return await socketProbe(request, env);
-      }
-
       if (url.pathname === "/image") {
         if (request.method !== "GET" && request.method !== "HEAD") {
           return json(request, env, { error: "Method not allowed" }, 405);
@@ -354,29 +349,46 @@ async function proxyPlayback(request, env, claims) {
   });
   let upstreamFinalUrl = upstream.url || targetUrl.toString();
 
-  // The provider load-balances VOD across backend streaming nodes: each request to
-  // the origin returns a fresh 302 + token, frequently to a DIFFERENT node. This
-  // Worker can reach some nodes but not others — a redirect to an unreachable node
-  // (e.g. a streaming host on a non-standard port) comes back as 403 "error code:
-  // 1003". Since some nodes ARE reachable (proven: the same title plays when the
-  // load-balancer happens to pick a good node), retry the origin a few times on
-  // failure to land on a node this Worker can fetch. Gated to 401/403 and capped,
-  // so the happy path and working titles are never touched.
-  let nodeRetries = 0;
-  while (
-    !upstream.ok &&
-    request.method !== "HEAD" &&
-    (upstream.status === 401 || upstream.status === 403) &&
-    nodeRetries < 4
-  ) {
-    nodeRetries++;
+  // Fallback for backend nodes that fetch() can't reach (raw IP / non-standard
+  // port → 403 "error code: 1003"): resolve the provider's redirect, then stream
+  // the node over a raw TCP socket. connect() reaches public IPs on any port, and
+  // the node's session token is bound to this same Cloudflare egress (proven: the
+  // socket receives HTTP 206 video/mp4 from the node). Gated to 401/403 so working
+  // titles keep the fast fetch() path untouched; any failure falls through to the
+  // diagnostics below.
+  if (!upstream.ok && request.method !== "HEAD" && (upstream.status === 401 || upstream.status === 403)) {
     try {
-      const retry = await fetch(targetUrl, { method: request.method, headers, redirect: "follow" });
-      upstream = retry;
-      upstreamFinalUrl = retry.url || upstreamFinalUrl;
-      if (retry.ok) break;
-    } catch (_) {
-      break;
+      const resolved = await fetch(targetUrl, { method: "GET", headers, redirect: "manual" });
+      const loc = resolved.status >= 300 && resolved.status < 400 ? resolved.headers.get("location") : null;
+      if (loc) {
+        const node = new URL(loc, targetUrl);
+        const ua = headers.get("user-agent") || "VLC/3.0.20 LibVLC/3.0.20";
+        const nodeResp = await fetchNodeViaSocket(node, request.method, headers.get("range"), ua);
+        upstreamFinalUrl = node.toString();
+        if (nodeResp.status >= 200 && nodeResp.status < 400 && !nodeResp.isChunked) {
+          const sockHeaders = new Headers();
+          for (const [k, v] of nodeResp.headers) {
+            const lk = k.toLowerCase();
+            if (
+              lk === "content-type" || lk === "content-length" || lk === "content-range" ||
+              lk === "accept-ranges" || lk === "etag" || lk === "last-modified"
+            ) {
+              sockHeaders.set(k, v);
+            }
+          }
+          mergeCors(sockHeaders, corsHeaders(request, env));
+          if (!sockHeaders.has("Accept-Ranges")) sockHeaders.set("Accept-Ranges", "bytes");
+          sockHeaders.set("Cache-Control", "private, max-age=30");
+          sockHeaders.set("X-Norva-Relay-Path", "socket");
+          return new Response(request.method === "HEAD" ? null : nodeResp.body, {
+            status: nodeResp.status,
+            statusText: nodeResp.statusText,
+            headers: sockHeaders,
+          });
+        }
+      }
+    } catch (e) {
+      console.warn(JSON.stringify({ tag: "norva-relay-socket-fallback-error", error: String((e && e.message) || e) }));
     }
   }
   rememberContentLength(targetUrl, upstream);
@@ -406,7 +418,6 @@ async function proxyPlayback(request, env, claims) {
       statusText: upstream.statusText,
       host: targetUrl.hostname,
       path: targetUrl.pathname,
-      retries: nodeRetries,
       finalUrl: upstreamFinalUrl,
       reason: reason.slice(0, 200),
     }));
@@ -784,91 +795,117 @@ function sanitizeUpstreamReason(text) {
     .slice(0, 300);
 }
 
-// TEMPORARY diagnostic — remove after the TCP-socket feasibility test. Tests
-// whether the Cloudflare relay can reach the provider's raw-IP backend node via a
-// raw TCP socket (which, unlike fetch(), is permitted to public IPs on any port).
-// Auth + redirect resolution use fetch() from the same Cloudflare egress that the
-// node token is bound to.
-async function socketProbe(request, env) {
-  const url = new URL(request.url);
-  const target = url.searchParams.get("u");
-  const ua = url.searchParams.get("ua") || "VLC/3.0.20 LibVLC/3.0.20";
-  if (!target) return json(request, env, { error: "missing ?u=<stream url>" }, 400);
-  const out = { target, ua };
-  try {
-    const resolved = await fetch(target, {
-      method: "GET",
-      headers: { "user-agent": ua, accept: "*/*", range: "bytes=0-1" },
-      redirect: "manual",
-    });
-    out.resolveStatus = resolved.status;
-    const loc = resolved.headers.get("location");
-    out.location = loc;
-    if (!(resolved.status >= 300 && resolved.status < 400) || !loc) {
-      out.note = "no redirect (auth failed or served directly)";
-      out.body = (await resolved.text().catch(() => "")).slice(0, 200);
-      return json(request, env, out, 200);
-    }
-    const node = new URL(loc, target);
-    const secure = node.protocol === "https:";
-    const port = Number(node.port) || (secure ? 443 : 80);
-    out.nodeHost = node.hostname;
-    out.nodePort = port;
-    out.nodeScheme = node.protocol;
-
-    const t1 = Date.now();
-    const socket = connect(
-      { hostname: node.hostname, port },
-      secure ? { secureTransport: "on", allowHalfOpen: false } : {},
-    );
-    try {
-      await Promise.race([
-        socket.opened,
-        new Promise((_, rej) => setTimeout(() => rej(new Error("connect timeout 6s")), 6000)),
-      ]);
-    } catch (e) {
-      out.connect = "FAILED: " + String((e && e.message) || e);
-      try { socket.close(); } catch (_) {}
-      return json(request, env, out, 200);
-    }
-    out.connect = "OK in " + (Date.now() - t1) + "ms";
-
-    const hostHeader = port === 80 || port === 443 ? node.hostname : `${node.hostname}:${port}`;
-    const reqText =
-      `GET ${node.pathname}${node.search} HTTP/1.1\r\n` +
-      `Host: ${hostHeader}\r\n` +
-      `User-Agent: ${ua}\r\n` +
-      `Accept: */*\r\n` +
-      `Range: bytes=0-1\r\n` +
-      `Connection: close\r\n\r\n`;
-    const writer = socket.writable.getWriter();
-    await writer.write(encoder.encode(reqText));
-
-    const reader = socket.readable.getReader();
-    const chunks = [];
-    let totalBytes = 0;
-    const readDeadline = Date.now() + 8000;
-    while (totalBytes < 1500 && Date.now() < readDeadline) {
-      const r = await Promise.race([
-        reader.read(),
-        new Promise((res) => setTimeout(() => res({ value: undefined, done: true }), 8000)),
-      ]);
-      if (r.done) break;
-      if (r.value) { chunks.push(r.value); totalBytes += r.value.length; }
-    }
-    const merged = new Uint8Array(totalBytes);
-    let offset = 0;
-    for (const c of chunks) { merged.set(c, offset); offset += c.length; }
-    out.socketBytes = totalBytes;
-    out.socketResponseHead = decoder.decode(merged.slice(0, 500));
-    out.firstBytesHex = Array.from(merged.slice(0, 24)).map((b) => b.toString(16).padStart(2, "0")).join(" ");
-    try { await reader.cancel(); } catch (_) {}
-    try { await writer.close(); } catch (_) {}
-    try { socket.close(); } catch (_) {}
-  } catch (e) {
-    out.error = String((e && e.message) || e);
+function indexOfDoubleCRLF(buf) {
+  for (let i = 0; i + 3 < buf.length; i++) {
+    if (buf[i] === 13 && buf[i + 1] === 10 && buf[i + 2] === 13 && buf[i + 3] === 10) return i;
   }
-  return json(request, env, out, 200);
+  return -1;
+}
+
+function parseHttpResponseHead(text) {
+  const lines = text.split("\r\n");
+  const match = /^HTTP\/\d(?:\.\d)?\s+(\d{3})\s*(.*)$/.exec(lines[0] || "");
+  const status = match ? Number(match[1]) : 502;
+  const statusText = match ? match[2] : "Bad Gateway";
+  const headers = new Headers();
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i];
+    if (!line) continue;
+    const idx = line.indexOf(":");
+    if (idx > 0) {
+      try {
+        headers.append(line.slice(0, idx).trim(), line.slice(idx + 1).trim());
+      } catch (_) {
+        /* ignore invalid header */
+      }
+    }
+  }
+  return { status, statusText, headers };
+}
+
+// Fetch a backend node over a raw TCP socket and speak HTTP/1.1 by hand. Used for
+// nodes that fetch() can't reach (raw IP / non-standard port → Cloudflare 1003).
+// The response body is streamed straight from the socket to the caller, so a
+// multi-GB movie never buffers in the Worker. Returns { status, statusText,
+// headers, body, isChunked }.
+async function fetchNodeViaSocket(node, method, clientRange, ua) {
+  const secure = node.protocol === "https:";
+  const port = Number(node.port) || (secure ? 443 : 80);
+  const socket = connect(
+    { hostname: node.hostname, port },
+    secure ? { secureTransport: "on", allowHalfOpen: false } : {},
+  );
+  await Promise.race([
+    socket.opened,
+    new Promise((_, rej) => setTimeout(() => rej(new Error("node connect timeout")), 8000)),
+  ]);
+
+  const hostHeader = port === 80 || port === 443 ? node.hostname : `${node.hostname}:${port}`;
+  let req = `${method === "HEAD" ? "HEAD" : "GET"} ${node.pathname}${node.search} HTTP/1.1\r\n`;
+  req += `Host: ${hostHeader}\r\n`;
+  req += `User-Agent: ${ua}\r\n`;
+  req += `Accept: */*\r\n`;
+  if (clientRange) req += `Range: ${clientRange}\r\n`;
+  req += `Connection: close\r\n\r\n`;
+  const writer = socket.writable.getWriter();
+  await writer.write(encoder.encode(req));
+  try { writer.releaseLock(); } catch (_) { /* keep going */ }
+
+  const reader = socket.readable.getReader();
+  let buf = new Uint8Array(0);
+  let headerEnd = -1;
+  while (headerEnd < 0) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    if (value && value.length) {
+      const merged = new Uint8Array(buf.length + value.length);
+      merged.set(buf);
+      merged.set(value, buf.length);
+      buf = merged;
+      headerEnd = indexOfDoubleCRLF(buf);
+    }
+    if (buf.length > 65536) break;
+  }
+  if (headerEnd < 0) {
+    try { await reader.cancel(); } catch (_) { /* noop */ }
+    try { socket.close(); } catch (_) { /* noop */ }
+    throw new Error("node socket: no HTTP header terminator");
+  }
+  const head = parseHttpResponseHead(decoder.decode(buf.slice(0, headerEnd)));
+  const leftover = buf.slice(headerEnd + 4);
+  const isChunked = (head.headers.get("transfer-encoding") || "").toLowerCase().includes("chunked");
+
+  if (method === "HEAD") {
+    try { await reader.cancel(); } catch (_) { /* noop */ }
+    try { socket.close(); } catch (_) { /* noop */ }
+    return { status: head.status, statusText: head.statusText, headers: head.headers, body: null, isChunked };
+  }
+
+  const body = new ReadableStream({
+    start(controller) {
+      if (leftover.length) controller.enqueue(leftover);
+    },
+    async pull(controller) {
+      try {
+        const { value, done } = await reader.read();
+        if (done) {
+          controller.close();
+          try { socket.close(); } catch (_) { /* noop */ }
+          return;
+        }
+        if (value && value.length) controller.enqueue(value);
+      } catch (e) {
+        controller.error(e);
+        try { socket.close(); } catch (_) { /* noop */ }
+      }
+    },
+    cancel() {
+      try { reader.cancel(); } catch (_) { /* noop */ }
+      try { socket.close(); } catch (_) { /* noop */ }
+    },
+  });
+
+  return { status: head.status, statusText: head.statusText, headers: head.headers, body, isChunked };
 }
 
 function corsHeaders(request, env) {
