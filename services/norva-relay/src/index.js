@@ -454,6 +454,10 @@ async function proxyImage(request, env, ctx, url) {
   const target = assertPublicImageUrl(url.searchParams.get("url") ?? "", env);
   const cacheKey = new Request(`${url.origin}/image?url=${encodeURIComponent(target.href)}`, request);
   const cache = caches.default;
+  // TMDB image paths are content-immutable (a /t/p/<size><path> URL never changes
+  // bytes), so they can be cached effectively forever — meaning image.tmdb.org is
+  // hit once per asset, ever. Provider images can change, so they stay at a day.
+  const longCache = /(^|\.)image\.tmdb\.org$/i.test(target.hostname);
 
   if (request.method === "GET") {
     const cached = await cache.match(cacheKey);
@@ -469,7 +473,7 @@ async function proxyImage(request, env, ctx, url) {
     redirect: "follow",
     cf: {
       cacheEverything: true,
-      cacheTtl: 86400,
+      cacheTtl: longCache ? 31536000 : 86400,
     },
   }).catch(() => null);
 
@@ -486,7 +490,9 @@ async function proxyImage(request, env, ctx, url) {
   const headers = filteredResponseHeaders(upstream.headers);
   mergeCors(headers, corsHeaders(request, env));
   headers.set("Content-Type", contentType);
-  headers.set("Cache-Control", "public, max-age=86400, s-maxage=604800, stale-while-revalidate=86400");
+  headers.set("Cache-Control", longCache
+    ? "public, max-age=31536000, immutable"
+    : "public, max-age=86400, s-maxage=604800, stale-while-revalidate=86400");
   headers.set("Cross-Origin-Resource-Policy", "cross-origin");
   headers.set("Timing-Allow-Origin", "*");
   headers.set("X-Content-Type-Options", "nosniff");
