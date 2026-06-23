@@ -231,6 +231,14 @@
         return resolveContentRegion().region;
     }
 
+    // User's display language (2-letter) for localized titles/overviews — derived
+    // from the browser locale, defaulting to fr. The catalog serves i18n[lang]
+    // when available, else the catalogue default.
+    function resolveLang() {
+        const code = String(navigator.language || 'fr').toLowerCase().split('-')[0];
+        return /^[a-z]{2}$/.test(code) ? code : 'fr';
+    }
+
     function rememberProfileRegion(profile) {
         const region = normalizeContentRegion(profile?.preferred_content_region ?? profile?.preferredContentRegion);
         if (region) {
@@ -453,7 +461,7 @@
     }
 
     async function catalogRequest(path, params = {}, options = {}) {
-        const route = `${path}${query({ country: resolveCountry(), ...params })}`;
+        const route = `${path}${query({ country: resolveCountry(), lang: resolveLang(), ...params })}`;
         try {
             return await requestToBase(catalogBase(), 'GET', route, null, options);
         } catch (error) {

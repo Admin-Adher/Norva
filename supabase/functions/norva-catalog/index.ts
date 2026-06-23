@@ -139,6 +139,7 @@ async function listMediaItems(url: URL, userId: string) {
   const search = url.searchParams.get("q");
   const categoryId = url.searchParams.get("categoryId");
   const sort = url.searchParams.get("sort") || "default";
+  const lang = railLang(url);
   const limit = boundedInt(url.searchParams.get("limit"), 1000, 1, 1000);
   const offset = boundedInt(url.searchParams.get("offset"), 0, 0, 1_000_000);
 
@@ -167,6 +168,8 @@ async function listMediaItems(url: URL, userId: string) {
     return row;
   });
 
+  await localizeMediaTitles(items, userId, lang);
+
   return {
     items,
     count: count ?? null,
@@ -174,6 +177,39 @@ async function listMediaItems(url: URL, userId: string) {
     offset,
     hasMore: typeof count === "number" ? offset + limit < count : (data?.length ?? 0) === limit,
   };
+}
+
+// Override each grid card's title with the user's-language title when we have one
+// (cloud_titles.metadata.i18n[lang].title) — fixes provider entries that are in a
+// different language than the user (mislabeled / multi-country providers). One
+// compact indexed lookup per page; only runs when a language is requested.
+async function localizeMediaTitles(items: Array<Record<string, any>>, userId: string, lang: string | null) {
+  if (!lang || !items.length) return;
+  const tmdbIds = [...new Set(items
+    .map((row) => stringOrNull(isRecord(row.metadata) ? row.metadata.providerTmdbId : null))
+    .filter((id): id is string => Boolean(id) && id !== "0"))];
+  if (!tmdbIds.length) return;
+
+  const locByTmdb = new Map<string, string>();
+  for (let i = 0; i < tmdbIds.length; i += 500) {
+    const chunk = tmdbIds.slice(i, i + 500);
+    const { data, error } = await db
+      .from("cloud_titles")
+      .select(`provider_tmdb_id, loc:metadata->i18n->${lang}->>title`)
+      .eq("user_id", userId)
+      .in("provider_tmdb_id", chunk);
+    if (error) return; // localization is best-effort; never fail the page over it
+    for (const row of data ?? []) {
+      const id = stringOrNull((row as Record<string, unknown>).provider_tmdb_id);
+      const loc = stringOrNull((row as Record<string, unknown>).loc);
+      if (id && loc) locByTmdb.set(id, loc);
+    }
+  }
+  for (const row of items) {
+    const tmdbId = stringOrNull(isRecord(row.metadata) ? row.metadata.providerTmdbId : null);
+    const loc = tmdbId ? locByTmdb.get(tmdbId) : null;
+    if (loc) { row.title = loc; row.name = loc; }
+  }
 }
 
 function applyMediaSort<T>(query: T, sort: string): T {
@@ -238,26 +274,27 @@ async function listMediaCategories(url: URL, userId: string) {
 
 async function listHomeRails(url: URL, userId: string) {
   const limit = boundedInt(url.searchParams.get("limit"), 24, 1, 50);
+  const lang = railLang(url);
   const type = url.searchParams.get("type");
   const includeSeries = !type || type === "series";
   const includeMovies = !type || type === "movie";
   const rails: JsonRecord[] = [];
 
   if (includeMovies) {
-    rails.push(await listTitleRail(userId, "movie", "recently-added-movies", "Recently Added Movies", limit));
-    rails.push(await listGenreRail(userId, "movie", "Action", "action-movies", "Films d'action", limit));
+    rails.push(await listTitleRail(userId, "movie", "recently-added-movies", "Recently Added Movies", limit, lang));
+    rails.push(await listGenreRail(userId, "movie", "Action", "action-movies", "Films d'action", limit, lang));
   }
 
-  const watchedRail = await listBecauseYouWatchedRail(userId, { includeMovies, includeSeries, limit });
+  const watchedRail = await listBecauseYouWatchedRail(userId, { includeMovies, includeSeries, limit, lang });
   if (watchedRail) {
     rails.push(watchedRail);
   } else if (includeMovies) {
-    rails.push(await listPopularTitleRail(userId, "movie", "popular-movies", "Films populaires", limit));
+    rails.push(await listPopularTitleRail(userId, "movie", "popular-movies", "Films populaires", limit, lang));
   }
 
   if (includeSeries) {
-    rails.push(await listPopularTitleRail(userId, "series", "popular-series", "Series populaires", limit));
-    rails.push(await listTitleRail(userId, "series", "recently-added-series", "Recently Added Series", limit));
+    rails.push(await listPopularTitleRail(userId, "series", "popular-series", "Series populaires", limit, lang));
+    rails.push(await listTitleRail(userId, "series", "recently-added-series", "Recently Added Series", limit, lang));
   }
 
   return {
@@ -362,6 +399,7 @@ async function listGenreSummary(req: Request, url: URL, userId: string) {
 
 async function listGenreRails(req: Request, url: URL, userId: string) {
   const itemType = url.searchParams.get("type") === "series" ? "series" : "movie";
+  const lang = railLang(url);
   const perRail = boundedInt(url.searchParams.get("limit"), 18, 1, 50);
   const candidateLimit = boundedInt(url.searchParams.get("candidates"), 2000, 100, 5000);
 
@@ -422,7 +460,7 @@ async function listGenreRails(req: Request, url: URL, userId: string) {
       source: "titles",
       curation: { kind: "genre_bucket", bucket: bucketId },
       items: (byBucket.get(bucketId) ?? []).map((row) =>
-        titleRailItem(row, variantsByTitle.get(String(row.id)) ?? [])
+        titleRailItem(row, variantsByTitle.get(String(row.id)) ?? [], lang)
       ),
     }));
 
@@ -433,6 +471,7 @@ async function listGenreRails(req: Request, url: URL, userId: string) {
 // all). Same shape as listMediaItems so the client grid consumes it unchanged.
 async function listGenreItems(req: Request, url: URL, userId: string) {
   const itemType = url.searchParams.get("type") === "series" ? "series" : "movie";
+  const lang = railLang(url);
   const bucket = (url.searchParams.get("bucket") || "").trim();
   const limit = boundedInt(url.searchParams.get("limit"), 36, 1, 100);
   const offset = boundedInt(url.searchParams.get("offset"), 0, 0, 1_000_000);
@@ -472,7 +511,7 @@ async function listGenreItems(req: Request, url: URL, userId: string) {
   const variantsByTitle = await listVariantsByTitleIds(pageRows.map((row) => String(row.id)));
 
   return {
-    items: pageRows.map((row) => titleRailItem(row, variantsByTitle.get(String(row.id)) ?? [])),
+    items: pageRows.map((row) => titleRailItem(row, variantsByTitle.get(String(row.id)) ?? [], lang)),
     count: matched.length,
     limit,
     offset,
@@ -480,7 +519,7 @@ async function listGenreItems(req: Request, url: URL, userId: string) {
   };
 }
 
-async function listTitleRail(userId: string, itemType: "movie" | "series", id: string, title: string, limit: number) {
+async function listTitleRail(userId: string, itemType: "movie" | "series", id: string, title: string, limit: number, lang: string | null) {
   try {
     const { data: titles, error } = await db
       .from("cloud_titles")
@@ -501,7 +540,7 @@ async function listTitleRail(userId: string, itemType: "movie" | "series", id: s
       title,
       itemType,
       source: "titles",
-      items: (titles ?? []).map((row) => titleRailItem(row, variantsByTitle.get(String(row.id)) ?? [])),
+      items: (titles ?? []).map((row) => titleRailItem(row, variantsByTitle.get(String(row.id)) ?? [], lang)),
     };
   } catch (error) {
     if (isMissingMaterialization(error)) return listRawMediaRail(userId, itemType, id, title, limit);
@@ -516,6 +555,7 @@ async function listGenreRail(
   id: string,
   title: string,
   limit: number,
+  lang: string | null,
 ) {
   try {
     const candidates = await listVerifiedTitleCandidates(userId, itemType);
@@ -530,7 +570,7 @@ async function listGenreRail(
       itemType,
       source: "titles",
       curation: { kind: "genre", genre },
-      items: titles.map((row) => titleRailItem(row, variantsByTitle.get(String(row.id)) ?? [])),
+      items: titles.map((row) => titleRailItem(row, variantsByTitle.get(String(row.id)) ?? [], lang)),
     };
   } catch (error) {
     if (isMissingMaterialization(error)) return { id, title, itemType, source: "titles", items: [] };
@@ -544,6 +584,7 @@ async function listPopularTitleRail(
   id: string,
   title: string,
   limit: number,
+  lang: string | null,
 ) {
   try {
     const candidates = await listVerifiedTitleCandidates(userId, itemType);
@@ -562,7 +603,7 @@ async function listPopularTitleRail(
       itemType,
       source: "titles",
       curation: { kind: "popular", metric: "tmdb_vote_average" },
-      items: titles.map((row) => titleRailItem(row, variantsByTitle.get(String(row.id)) ?? [])),
+      items: titles.map((row) => titleRailItem(row, variantsByTitle.get(String(row.id)) ?? [], lang)),
     };
   } catch (error) {
     if (isMissingMaterialization(error)) return { id, title, itemType, source: "titles", items: [] };
@@ -572,8 +613,9 @@ async function listPopularTitleRail(
 
 async function listBecauseYouWatchedRail(
   userId: string,
-  options: { includeMovies: boolean; includeSeries: boolean; limit: number },
+  options: { includeMovies: boolean; includeSeries: boolean; limit: number; lang: string | null },
 ) {
+  const lang = options.lang;
   const itemTypes = [
     ...(options.includeMovies ? ["movie"] : []),
     ...(options.includeSeries ? ["series"] : []),
@@ -623,7 +665,7 @@ async function listBecauseYouWatchedRail(
           anchorTitle: watchedTitle.title ?? watchedTitle.original_title ?? null,
           genres,
         },
-        items: titles.map((row) => titleRailItem(row, variantsByTitle.get(String(row.id)) ?? [])),
+        items: titles.map((row) => titleRailItem(row, variantsByTitle.get(String(row.id)) ?? [], lang)),
       };
     }
   } catch (error) {
@@ -721,12 +763,25 @@ async function listVariantsByTitleIds(titleIds: string[]) {
   return variantsByTitle;
 }
 
-function titleRailItem(title: JsonRecord, variants: JsonRecord[]) {
+// User display language for localized titles/overviews: a validated 2-letter
+// code from the request. Null → serve the catalogue default language.
+function railLang(url: URL): string | null {
+  const raw = (url.searchParams.get("lang") || "").toLowerCase().trim();
+  return /^[a-z]{2}$/.test(raw) ? raw : null;
+}
+
+function titleRailItem(title: JsonRecord, variants: JsonRecord[], lang?: string | null) {
   const defaultVariant = variants[0] ?? {};
   const metadata = recordOrEmpty(title.metadata);
   const tmdb = titleTmdb(title);
   const genres = titleGenres(title);
   const overview = stringOrNull(tmdb.overview ?? metadata.overview);
+  // Localized display: serve the user's language from the per-title i18n when
+  // present, else the catalogue default (i18n is stored by the enrichment).
+  const i18n = recordOrEmpty(metadata.i18n);
+  const loc = lang ? recordOrEmpty((i18n as Record<string, unknown>)[lang]) : {};
+  const displayTitle = stringOrNull(loc.title) ?? title.title;
+  const displayOverview = stringOrNull(loc.overview) ?? overview;
   const rating = numberOrNull(tmdb.vote_average ?? metadata.vote_average);
   const runtime = numberOrNull(tmdb.runtime ?? metadata.runtime);
   const defaultVariantId = defaultVariant.id ?? title.default_variant_id ?? null;
@@ -743,8 +798,8 @@ function titleRailItem(title: JsonRecord, variants: JsonRecord[]) {
     source_id: defaultVariant.source_id ?? null,
     sourceId: defaultVariant.source_id ?? null,
     external_id: defaultVariant.external_id ?? null,
-    name: title.title,
-    title: title.title,
+    name: displayTitle,
+    title: displayTitle,
     original_title: title.original_title,
     year: title.release_year,
     poster_url: posterUrl,
@@ -752,8 +807,8 @@ function titleRailItem(title: JsonRecord, variants: JsonRecord[]) {
     stream_icon: posterUrl,
     backdrop_url: backdropUrl,
     backdropUrl: backdropUrl,
-    overview,
-    description: overview,
+    overview: displayOverview,
+    description: displayOverview,
     genres,
     rating,
     vote_average: rating,
@@ -781,8 +836,8 @@ function titleRailItem(title: JsonRecord, variants: JsonRecord[]) {
     tmdb,
     data: {
       ...metadata,
-      description: overview,
-      overview,
+      description: displayOverview,
+      overview: displayOverview,
       genres,
       rating,
       voteAverage: rating,
