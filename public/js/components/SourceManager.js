@@ -1306,14 +1306,12 @@ class SourceManager {
         if (this.contentType === 'movies') { this.updateContentChrome('genre'); return this.loadGenreView('movie'); }
         if (this.contentType === 'series') { this.updateContentChrome('genre'); return this.loadGenreView('series'); }
 
-        // Channels → per-provider category tree (live TV has no genres).
+        // Channels → per-provider category tree, defaulting to "All providers"
+        // (like Movies/Series). Picking a provider narrows the tree to it.
         this.updateContentChrome('provider');
         const sourceId = this.contentSourceSelect?.value;
-        if (!sourceId) {
-            this.contentTree.innerHTML = '<p class="hint">Choose a provider above to manage its channels.</p>';
-            return;
-        }
-        this.loadContentTree(parseInt(sourceId));
+        if (sourceId) return this.loadChannels([sourceId]);
+        return this.loadAllProvidersChannels();
     }
 
     // The provider selector is available in every view so the user can choose
@@ -1335,14 +1333,12 @@ class SourceManager {
     }
 
     // The blank (value="") provider option means different things per view: in
-    // the genre view it's the valid "All providers" default; in the channels
-    // view it's the "you must pick one" placeholder. Re-label it to match.
+    // The blank (value="") option is the valid "All providers" default in every
+    // view now (Channels included), so picking a provider is always optional.
     setProviderModeLabel(mode) {
         const select = document.getElementById('content-source-select');
         const first = select && select.options && select.options[0];
-        if (first && first.value === '') {
-            first.textContent = mode === 'provider' ? 'Choose a provider…' : 'All providers';
-        }
+        if (first && first.value === '') first.textContent = 'All providers';
     }
 
     // --- Catalogue genre view (movies / series) ---
@@ -1450,7 +1446,8 @@ class SourceManager {
             // Plain provider names only — the underlying protocol (xtream/m3u) is
             // jargon a mass-market user neither knows nor needs to see here.
             const current = select.value;
-            select.innerHTML = '<option value="">Choose a provider…</option>'
+            // Blank option = "All providers" (the default in every view now).
+            select.innerHTML = '<option value="">All providers</option>'
                 + providers.map(source =>
                     `<option value="${source.id}">${this.escapeHtml(source.name)}</option>`).join('');
             // Preserve the current selection across reloads when still present.
@@ -1461,6 +1458,11 @@ class SourceManager {
             // Grand-public dead-end guard: with no provider added yet, point the
             // user to where they can add one instead of showing an inert tree.
             this.updateContentEmptyState(providers.length);
+
+            // Auto-load the current view on first open (channels default to All
+            // providers) — no more "pick a provider first" dead-end. Re-opening
+            // the tab keeps the existing tree (and any unsaved ticks) intact.
+            if (providers.length && !this.treeData) this.reloadContentTree();
         } catch (err) {
             console.error('Error loading content sources:', err);
         }
@@ -1507,84 +1509,96 @@ class SourceManager {
     /**
      * Load content tree for a source
      */
-    async loadContentTree(sourceId) {
-        this.contentTree.innerHTML = '<p class="hint">Loading...</p>';
-        this.treeData = { type: 'channels', sourceId, groups: [] };
+    // Visibility key — source-aware so channels/categories from different
+    // providers (which can share stream/category ids) never collide.
+    vkey(type, sourceId, id) { return `${type}:${sourceId}:${id}`; }
+
+    // "All providers" entry point: gather every Xtream/M3U provider and merge
+    // their channels into one tree.
+    async loadAllProvidersChannels() {
+        let providers = [];
+        try {
+            const sources = await API.sources.getAll();
+            providers = (sources || []).filter(s => s.type === 'xtream' || s.type === 'm3u');
+        } catch (_) { /* fall through to empty state */ }
+        if (!providers.length) {
+            this.contentTree.innerHTML = '<p class="hint">No providers yet. Add a TV provider to manage its channels.</p>';
+            return;
+        }
+        return this.loadChannels(providers.map(p => String(p.id)));
+    }
+
+    // Build the channels tree from one or more providers. Each group/item is
+    // tagged with its sourceId so toggles and saves route back to the right
+    // provider; the visibility set is keyed via vkey() to stay collision-safe.
+    async loadChannels(sourceIds) {
+        const ids = (sourceIds || []).filter(Boolean).map(String);
+        this.contentTree.innerHTML = '<div class="genre-loading"><span class="genre-spinner" aria-hidden="true"></span>Loading channels…</div>';
+        this.treeData = { type: 'channels', sourceId: ids.length === 1 ? ids[0] : '', multi: ids.length !== 1, sourceIds: ids, groups: [] };
         this.expandedGroups.clear();
+        this.hiddenSet = new Set();
 
         try {
-            const source = await API.sources.getById(sourceId);
-            let channels = [];
+            const allGroups = [];
+            for (const sid of ids) {
+                let source;
+                try { source = await API.sources.getById(sid); } catch (_) { continue; }
+                if (!source || !(source.type === 'xtream' || source.type === 'm3u')) continue;
 
-            let categoryMap = {};
+                const [categories, streams, hiddenItems] = await Promise.all([
+                    API.proxy.xtream.liveCategories(sid, { includeHidden: true }).catch(() => []),
+                    API.proxy.xtream.liveStreams(sid, null, { includeHidden: true }).catch(() => []),
+                    API.channels.getHidden(sid).catch(() => [])
+                ]);
 
-            if (source.type === 'xtream' || source.type === 'm3u') {
-                // Use unified Xtream API endpoints - backend supports both source types
-                // Use includeHidden to show ALL items in the content manager
-                const categories = await API.proxy.xtream.liveCategories(sourceId, { includeHidden: true });
-                const streams = await API.proxy.xtream.liveStreams(sourceId, null, { includeHidden: true });
+                (hiddenItems || []).forEach(h => this.hiddenSet.add(this.vkey(h.item_type, sid, h.item_id)));
 
-                channels = streams;
-                categories.forEach(cat => {
-                    categoryMap[cat.category_id] = cat.category_name;
+                const categoryMap = {};
+                (categories || []).forEach(cat => { categoryMap[cat.category_id] = cat.category_name; });
+
+                const groupMap = {};
+                (streams || []).forEach(ch => {
+                    const categoryId = ch.category_id;
+                    let groupName = 'Uncategorized';
+                    if (categoryId && categoryMap[categoryId]) groupName = categoryMap[categoryId];
+                    else if (categoryId) groupName = categoryId; // M3U uses the name as id
+                    const groupKey = categoryId || groupName;
+                    if (!groupMap[groupKey]) groupMap[groupKey] = { categoryId, name: groupName, items: [] };
+                    const channelId = ch.stream_id || ch.id || ch.url;
+                    groupMap[groupKey].items.push({
+                        id: String(channelId),
+                        name: ch.name || ch.tvgName || 'Unknown',
+                        sourceId: sid,
+                        type: 'channel',
+                        original: ch
+                    });
+                });
+
+                Object.entries(groupMap).forEach(([key, group]) => {
+                    allGroups.push({
+                        id: `${sid}::${key}`,           // unique across providers
+                        sourceId: sid,
+                        sourceName: source.name || '',
+                        categoryId: group.categoryId,    // raw id for the API
+                        name: group.name,
+                        type: 'group',
+                        items: group.items
+                    });
                 });
             }
 
-            // Get currently hidden items
-            const hiddenItems = await API.channels.getHidden(sourceId);
-            this.hiddenSet = new Set(hiddenItems.map(h => `${h.item_type}:${h.item_id}`));
-            this.originalHiddenSet = new Set(this.hiddenSet); // Track original state for diffing
+            allGroups.sort((a, b) => a.name.localeCompare(b.name)
+                || String(a.sourceName).localeCompare(String(b.sourceName)));
+            this.treeData.groups = allGroups;
+            this.originalHiddenSet = new Set(this.hiddenSet);
 
-            // Group channels by category
-            const groupMap = {}; // key: categoryId, value: { name, categoryId, items }
-            channels.forEach(ch => {
-                let groupName = 'Uncategorized';
-                let categoryId = ch.category_id;
-
-                // Look up category name from map (works for both Xtream and M3U now)
-                if (categoryId && categoryMap[categoryId]) {
-                    groupName = categoryMap[categoryId];
-                } else if (categoryId) {
-                    // M3U uses category_id as the name itself
-                    groupName = categoryId;
-                }
-
-                const groupKey = categoryId || groupName;
-                if (!groupMap[groupKey]) {
-                    groupMap[groupKey] = {
-                        categoryId: categoryId,
-                        name: groupName,
-                        items: []
-                    };
-                }
-
-                // Normalize channel object
-                const channelId = ch.stream_id || ch.id || ch.url;
-                const channelName = ch.name || ch.tvgName || 'Unknown';
-
-                groupMap[groupKey].items.push({
-                    id: String(channelId),
-                    name: channelName,
-                    original: ch,
-                    type: 'channel'
-                });
-            });
-
-            // Convert to array, sorted by name
-            this.treeData.groups = Object.entries(groupMap)
-                .sort((a, b) => a[1].name.localeCompare(b[1].name))
-                .map(([key, group]) => ({
-                    id: key, // Use categoryId as the group ID
-                    name: group.name,
-                    categoryId: group.categoryId, // Store actual category_id for API calls
-                    type: 'group',
-                    items: group.items
-                }));
-
+            if (!allGroups.length) {
+                this.contentTree.innerHTML = '<div class="screens-empty">No channels found for this selection.</div>';
+                return;
+            }
             this.renderTree();
-
         } catch (err) {
-            console.error('Error loading content tree:', err);
+            console.error('Error loading channels:', err);
             this.contentTree.innerHTML = '<p class="hint" style="color: var(--color-error);">Error loading content</p>';
         }
     }
@@ -1651,38 +1665,45 @@ class SourceManager {
         const isExpanded = this.expandedGroups.has(group.id);
 
         // Group checkbox is checked if ANY child is visible (derived state)
-        const hasVisibleChild = group.items.some(item => !this.hiddenSet.has(`${item.type}:${item.id}`));
+        const hasVisibleChild = group.items.some(item => !this.hiddenSet.has(this.vkey(item.type, item.sourceId, item.id)));
         const checked = hasVisibleChild;
 
         let itemsHtml = '';
         if (isExpanded) {
             itemsHtml = `<div class="content-channels">
                 ${group.items.map(item => {
-                const itemHidden = this.hiddenSet.has(`${item.type}:${item.id}`);
+                const itemHidden = this.hiddenSet.has(this.vkey(item.type, item.sourceId, item.id));
                 return `
                     <label class="checkbox-label channel-item" title="${this.escapeHtml(item.name)}">
                         <span class="channel-name">${this.escapeHtml(item.name)}</span>
                         <input type="checkbox" class="channel-checkbox"
                                data-type="${item.type}"
-                               data-id="${item.id}"
-                               data-source-id="${this.treeData.sourceId}"
+                               data-id="${this.escapeHtml(item.id)}"
+                               data-source-id="${this.escapeHtml(item.sourceId)}"
                                ${!itemHidden ? 'checked' : ''}>
                     </label>`;
             }).join('')}
             </div>`;
         }
 
+        // When several providers are merged, show which one a category belongs to
+        // (categories with the same name can exist across providers).
+        const providerTag = (this.treeData?.multi && group.sourceName)
+            ? `<span class="group-provider">${this.escapeHtml(group.sourceName)}</span>` : '';
+
         return `
             <div class="content-group ${isExpanded ? '' : 'collapsed'}" data-group-id="${this.escapeHtml(group.id)}">
                 <div class="content-group-header">
                     <span class="group-expander">${Icons.chevronDown}</span>
                     <span class="group-name">${this.escapeHtml(group.name)}</span>
+                    ${providerTag}
                     <span class="group-count">${group.items.length}</span>
                     <label class="cg-switch" onclick="event.stopPropagation()">
                         <input type="checkbox" class="group-checkbox"
                                data-type="group"
-                               data-id="${this.escapeHtml(group.name)}"
-                               data-source-id="${this.treeData.sourceId}"
+                               data-id="${this.escapeHtml(group.id)}"
+                               data-source-id="${this.escapeHtml(group.sourceId)}"
+                               data-category-id="${this.escapeHtml(group.categoryId == null ? '' : group.categoryId)}"
                                ${checked ? 'checked' : ''}>
                     </label>
                 </div>
@@ -1882,10 +1903,11 @@ class SourceManager {
     toggleVisibility(checkbox) {
         const itemType = checkbox.dataset.type;
         const itemId = checkbox.dataset.id;
+        const sourceId = checkbox.dataset.sourceId;
         const isVisible = checkbox.checked;
 
         // Update local state only (will be persisted when Save is clicked)
-        const key = `${itemType}:${itemId}`;
+        const key = this.vkey(itemType, sourceId, itemId);
         if (isVisible) {
             this.hiddenSet.delete(key);
         } else {
@@ -1900,7 +1922,7 @@ class SourceManager {
                 const groupId = groupEl.dataset.groupId;
                 const group = this.treeData.groups.find(g => g.id === groupId);
                 if (group) {
-                    const hasVisibleChild = group.items.some(item => !this.hiddenSet.has(`${item.type}:${item.id}`));
+                    const hasVisibleChild = group.items.some(item => !this.hiddenSet.has(this.vkey(item.type, item.sourceId, item.id)));
                     groupCheckbox.checked = hasVisibleChild;
                 }
             }
@@ -1911,8 +1933,8 @@ class SourceManager {
      * Toggle all children of a group (LOCAL STATE ONLY - use Save to persist)
      */
     toggleGroupChildren(groupCb) {
-        const groupName = groupCb.dataset.id;
-        const group = this.treeData.groups.find(g => g.name === groupName);
+        const groupId = groupCb.dataset.id;
+        const group = this.treeData.groups.find(g => g.id === groupId);
         if (!group) return;
 
         const isChecked = groupCb.checked;
@@ -1926,8 +1948,8 @@ class SourceManager {
         }
 
         // Update state for the GROUP itself (if it has a categoryId)
-        if (group.categoryId) {
-            const groupKey = `${groupItemType}:${group.categoryId}`;
+        if (group.categoryId != null && group.categoryId !== '') {
+            const groupKey = this.vkey(groupItemType, group.sourceId, group.categoryId);
             if (isChecked) {
                 this.hiddenSet.delete(groupKey);
             } else {
@@ -1937,7 +1959,7 @@ class SourceManager {
 
         // Update state for all children
         group.items.forEach(item => {
-            const key = `${item.type}:${item.id}`;
+            const key = this.vkey(item.type, item.sourceId, item.id);
             if (isChecked) {
                 this.hiddenSet.delete(key);
             } else {
@@ -1987,7 +2009,7 @@ class SourceManager {
         if (this.searchQuery) {
             this.getFilteredGroups().forEach(group => {
                 group.items.forEach(item => {
-                    const key = `${item.type}:${item.id}`;
+                    const key = this.vkey(item.type, item.sourceId, item.id);
                     if (visible) this.hiddenSet.delete(key);
                     else this.hiddenSet.add(key);
                 });
@@ -2010,20 +2032,22 @@ class SourceManager {
         }
 
         try {
-            const sourceId = this.treeData.sourceId;
             const contentType = this.treeData.type; // 'channels', 'movies', or 'series'
+            // Across every provider in the current view ("All providers" merges
+            // several) — fast bulk endpoint, one call per source.
+            const sourceIds = (this.treeData.sourceIds && this.treeData.sourceIds.length)
+                ? this.treeData.sourceIds
+                : [this.treeData.sourceId].filter(Boolean);
 
-            // Use fast API endpoint (single SQL UPDATE statement)
-            if (visible) {
-                await API.channels.showAll(sourceId, contentType);
-            } else {
-                await API.channels.hideAll(sourceId, contentType);
+            for (const sid of sourceIds) {
+                if (visible) await API.channels.showAll(sid, contentType);
+                else await API.channels.hideAll(sid, contentType);
             }
 
             // Update local state to match
             this.treeData.groups.forEach(group => {
                 group.items.forEach(item => {
-                    const key = `${item.type}:${item.id}`;
+                    const key = this.vkey(item.type, item.sourceId, item.id);
                     if (visible) {
                         this.hiddenSet.delete(key);
                     } else {
@@ -2087,13 +2111,14 @@ class SourceManager {
         }
 
         try {
-            const sourceId = this.treeData.sourceId;
             const itemsToShow = [];
             const itemsToHide = [];
 
-            // Only collect items that have CHANGED from their original state
-            // Track group changes for redundancy check
-            const changedGroups = new Map(); // categoryId -> isHidden
+            // Only collect items that have CHANGED from their original state.
+            // Each group/item carries its own sourceId so a merged "All providers"
+            // save routes every change back to the right provider. Track changed
+            // groups by their unique id for the per-item redundancy check.
+            const changedGroups = new Map(); // group.id -> isHidden
 
             // First pass: Identify all changed groups
             this.treeData.groups.forEach(group => {
@@ -2101,29 +2126,26 @@ class SourceManager {
                 if (this.treeData.type === 'movies') groupItemType = 'vod_category';
                 else if (this.treeData.type === 'series') groupItemType = 'series_category';
 
-                if (group.categoryId) {
-                    const groupKey = `${groupItemType}:${group.categoryId}`;
+                if (group.categoryId != null && group.categoryId !== '') {
+                    const groupKey = this.vkey(groupItemType, group.sourceId, group.categoryId);
                     const isGroupNowHidden = this.hiddenSet.has(groupKey);
                     const wasGroupHidden = this.originalHiddenSet.has(groupKey);
 
                     if (isGroupNowHidden !== wasGroupHidden) {
-                        changedGroups.set(group.categoryId, isGroupNowHidden);
-                        if (isGroupNowHidden) {
-                            itemsToHide.push({ sourceId, itemType: groupItemType, itemId: String(group.categoryId) });
-                        } else {
-                            itemsToShow.push({ sourceId, itemType: groupItemType, itemId: String(group.categoryId) });
-                        }
+                        changedGroups.set(group.id, isGroupNowHidden);
+                        const payload = { sourceId: group.sourceId, itemType: groupItemType, itemId: String(group.categoryId) };
+                        if (isGroupNowHidden) itemsToHide.push(payload); else itemsToShow.push(payload);
                     }
                 }
             });
 
             // Second pass: Process items, skipping if redundant with group change
             this.treeData.groups.forEach(group => {
-                const groupIsChanging = changedGroups.has(group.categoryId);
-                const groupNewState = changedGroups.get(group.categoryId); // true = hiding, false = showing
+                const groupIsChanging = changedGroups.has(group.id);
+                const groupNewState = changedGroups.get(group.id); // true = hiding, false = showing
 
                 group.items.forEach(item => {
-                    const key = `${item.type}:${item.id}`;
+                    const key = this.vkey(item.type, item.sourceId, item.id);
                     const isNowHidden = this.hiddenSet.has(key);
                     const wasHidden = this.originalHiddenSet.has(key);
 
@@ -2136,11 +2158,8 @@ class SourceManager {
                             return;
                         }
 
-                        if (isNowHidden) {
-                            itemsToHide.push({ sourceId, itemType: item.type, itemId: String(item.id) });
-                        } else {
-                            itemsToShow.push({ sourceId, itemType: item.type, itemId: String(item.id) });
-                        }
+                        const payload = { sourceId: item.sourceId, itemType: item.type, itemId: String(item.id) };
+                        if (isNowHidden) itemsToHide.push(payload); else itemsToShow.push(payload);
                     }
                 });
             });

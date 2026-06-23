@@ -3862,6 +3862,19 @@ kbd {
   border-radius: 999px;
   padding: 2px 9px;
 }
+#content-tree .group-provider {
+  flex: none;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--color-accent);
+  background: var(--color-accent-dim);
+  border-radius: 999px;
+  padding: 2px 9px;
+  white-space: nowrap;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 #content-tree .cg-switch { display: inline-flex; margin: 0; cursor: pointer; }
 
 #content-tree .content-channels {
