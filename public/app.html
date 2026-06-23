@@ -749,11 +749,22 @@
 
           <!-- Sources Tab -->
           <div id="tab-sources" class="tab-content">
+            <div class="tc-intro">
+              <div class="tc-intro-icon">📡</div>
+              <div>
+                <p class="tc-intro-title">Connect your TV service</p>
+                <p class="tc-intro-text">Add the service you subscribed to. Providers usually give you either a login
+                  or a playlist link — add whichever you have. You can connect more than one.</p>
+              </div>
+            </div>
+
             <div class="source-section">
               <div class="section-header">
-                <h3>Provider account</h3>
+                <h3>Provider login</h3>
                 <button class="btn btn-primary" id="add-xtream">Add provider</button>
               </div>
+              <p class="tc-section-sub" style="margin-top: 2px;">The most common option. Use the server address,
+                username and password your provider gave you (sometimes called an “Xtream” login).</p>
               <div id="xtream-list" class="source-list"></div>
             </div>
 
@@ -762,39 +773,47 @@
                 <h3>Playlist link</h3>
                 <button class="btn btn-primary" id="add-m3u">Add playlist</button>
               </div>
+              <p class="tc-section-sub" style="margin-top: 2px;">Use this if your provider gave you a single web link
+                instead of a login (an address ending in .m3u or .m3u8).</p>
               <div id="m3u-list" class="source-list"></div>
             </div>
 
             <div class="source-section">
               <div class="section-header">
-                <h3>TV guide</h3>
+                <h3>TV guide <span style="font-weight: 400; font-size: 0.72em; color: var(--color-text-secondary);">·
+                    optional</span></h3>
                 <button class="btn btn-primary" id="add-epg">Add guide</button>
               </div>
+              <p class="tc-section-sub" style="margin-top: 2px;">A program guide (EPG) shows what’s on now and next.
+                Many provider logins already include it — only add one here if your channels have no guide.</p>
               <div id="epg-list" class="source-list"></div>
             </div>
 
             <div class="source-section">
-              <h3>TV guide refresh</h3>
+              <h3>Guide &amp; catalogue updates</h3>
+              <p class="tc-section-sub" style="margin-top: 2px;">Norva refreshes your channels and guide automatically.
+                You can also tap the refresh icon on any source above to update it right away.</p>
               <div class="setting-item">
-                <label for="epg-refresh-interval">Auto-refresh EPG data every:</label>
-                <select id="epg-refresh-interval" class="form-input">
-                  <option value="1">1 hour</option>
-                  <option value="2">2 hours</option>
-                  <option value="4">4 hours</option>
-                  <option value="12">12 hours</option>
-                  <option value="24" selected>24 hours</option>
+                <div class="setting-info">
+                  <span class="setting-label">Last updated</span>
+                  <span class="setting-hint">When your channels and guide were last refreshed.</span>
+                </div>
+                <span id="epg-last-refreshed" class="hint">Never</span>
+              </div>
+              <div class="setting-item needs-local-server">
+                <div class="setting-info">
+                  <span class="setting-label">Auto-refresh the guide</span>
+                  <span class="setting-hint">How often Norva re-fetches the program guide in the background.</span>
+                </div>
+                <select id="epg-refresh-interval" class="source-select" style="width: auto; min-width: 160px;">
+                  <option value="1">Every hour</option>
+                  <option value="2">Every 2 hours</option>
+                  <option value="4">Every 4 hours</option>
+                  <option value="12">Every 12 hours</option>
+                  <option value="24" selected>Once a day</option>
                   <option value="0">Manual only</option>
                 </select>
               </div>
-              <div class="setting-item">
-                <span class="setting-label">Last Refreshed:</span>
-                <span id="epg-last-refreshed" class="hint">Never</span>
-              </div>
-              <p class="hint">Use the <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"
-                  class="icon" style="width: 1em; height: 1em; vertical-align: middle;">
-                  <path
-                    d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z" />
-                </svg> button next to EPG sources for manual refresh</p>
             </div>
           </div>
 
@@ -1682,7 +1701,7 @@
   <script src="/js/pages/Guide.js?v=2"></script>
   <script src="/js/pages/MoviesPage.js?v=30"></script>
   <script src="/js/pages/SeriesPage.js?v=29"></script>
-  <script src="/js/pages/Settings.js?v=25"></script>
+  <script src="/js/pages/Settings.js?v=26"></script>
   <script src="/js/pages/WatchPage.js?v=88"></script>
   <script src="/js/profiles.js?v=4"></script>
   <script src="/js/app.js?v=23"></script>

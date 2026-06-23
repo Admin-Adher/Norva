@@ -395,6 +395,14 @@ class SettingsPage {
             });
         }
 
+        // EPG auto-refresh runs on a local-server timer (syncService); on the
+        // plain web the cloud refreshes on its own schedule and ignores this
+        // value, so hide that control there. "Last updated" stays (cloud-backed).
+        if (!(this.app.player?._hasLocalTranscoder?.() ?? false)) {
+            document.querySelectorAll('#tab-sources .needs-local-server')
+                .forEach(el => { el.style.display = 'none'; });
+        }
+
         // Update last refreshed display
         this.updateEpgLastRefreshed();
     }
