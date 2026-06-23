@@ -185,6 +185,43 @@ export async function refreshVodTitleProjection(options: ProjectionOptions) {
     if (error) throw error;
   }
 
+  // Foundation for the global shared title cache (docs/global-title-cache-design.md):
+  // dual-write the title-level metadata into catalog_titles, keyed globally by
+  // (item_type, provider_tmdb_id), so at scale it is enriched/stored once instead of
+  // once per user. NOT read yet — purely additive. Best-effort: a failure here must
+  // never break the per-user projection.
+  try {
+    const catalogRows: JsonRecord[] = [];
+    const seenCatalog = new Set<string>();
+    for (const titleRow of titleRows) {
+      const tmdbId = stringOrNull(titleRow.provider_tmdb_id);
+      if (!tmdbId || /^(tt)?0+$/i.test(tmdbId)) continue;
+      const catalogKey = `${titleRow.item_type}:${tmdbId}`;
+      if (seenCatalog.has(catalogKey)) continue;
+      seenCatalog.add(catalogKey);
+      catalogRows.push({
+        item_type: titleRow.item_type,
+        provider_tmdb_id: tmdbId,
+        title: titleRow.title ?? null,
+        original_title: titleRow.original_title ?? null,
+        release_year: titleRow.release_year ?? null,
+        poster_url: titleRow.poster_url ?? null,
+        backdrop_url: titleRow.backdrop_url ?? null,
+        metadata: titleRow.metadata ?? {},
+        enriched_at: syncedAt,
+        updated_at: syncedAt,
+      });
+    }
+    for (let index = 0; index < catalogRows.length; index += 500) {
+      const { error } = await options.db
+        .from("catalog_titles")
+        .upsert(catalogRows.slice(index, index + 500), { onConflict: "item_type,provider_tmdb_id" });
+      if (error) throw error;
+    }
+  } catch (error) {
+    console.warn("[vod-title-projection] catalog_titles dual-write skipped:", error instanceof Error ? error.message : error);
+  }
+
   // Push the resolved release_year onto the grid rows (cloud_media_items) so the
   // browse page can sort/paginate by year server-side. The BEFORE trigger already
   // set a title-parsed year on insert; this fills the TMDB-matched ones. Best
