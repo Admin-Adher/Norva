@@ -800,8 +800,53 @@
 
           <!-- Player Tab -->
           <div id="tab-player" class="tab-content">
+            <div class="tc-intro">
+              <div class="tc-intro-icon">🎬</div>
+              <div>
+                <p class="tc-intro-title">Playback &amp; recommendations</p>
+                <p class="tc-intro-text">Set how Norva plays and what it suggests first. The defaults work well —
+                  adjust these to match your taste. Nothing here ever hides content.</p>
+              </div>
+            </div>
+
+            <!-- How things play -->
             <div class="settings-section">
-              <h3>Keyboard Controls</h3>
+              <h3>Playback</h3>
+              <p class="tc-section-sub">How channels and videos play.</p>
+
+              <div class="setting-item">
+                <div class="setting-info">
+                  <span class="setting-label">Default volume</span>
+                  <span class="setting-hint">The level Norva starts playing at.</span>
+                </div>
+                <div class="volume-slider-container">
+                  <input type="range" id="setting-default-volume" class="volume-slider" min="0" max="100" value="80">
+                  <span id="volume-value">80%</span>
+                </div>
+              </div>
+
+              <div class="setting-item">
+                <label class="setting-toggle">
+                  <input type="checkbox" id="setting-remember-volume" checked>
+                  <span class="toggle-slider"></span>
+                </label>
+                <div class="setting-info">
+                  <span class="setting-label">Remember my volume</span>
+                  <span class="setting-hint">Start at the volume you last used, instead of the default.</span>
+                </div>
+              </div>
+
+              <div class="setting-item">
+                <label class="setting-toggle">
+                  <input type="checkbox" id="setting-autoplay-next">
+                  <span class="toggle-slider"></span>
+                </label>
+                <div class="setting-info">
+                  <span class="setting-label">Auto-play next episode</span>
+                  <span class="setting-hint">When an episode ends, automatically start the next one.</span>
+                </div>
+              </div>
+
               <div class="setting-item">
                 <label class="setting-toggle">
                   <input type="checkbox" id="setting-arrow-keys" checked>
@@ -809,61 +854,23 @@
                 </label>
                 <div class="setting-info">
                   <span class="setting-label">Arrow keys change channels</span>
-                  <span class="setting-hint">When enabled, ↑/↓ change channels and ←/→ adjust volume</span>
+                  <span class="setting-hint">With a keyboard or TV remote: ↑/↓ switch channels, ←/→ change the
+                    volume.</span>
                 </div>
               </div>
             </div>
 
+            <!-- What Norva suggests -->
             <div class="settings-section">
-              <h3>Now Playing Overlay</h3>
-              <div class="setting-item">
-                <label for="setting-overlay-duration">Display Duration (seconds)</label>
-                <input type="number" id="setting-overlay-duration" class="form-input setting-number" min="1" max="30"
-                  value="5">
-              </div>
-            </div>
+              <h3>Your taste &amp; recommendations</h3>
+              <p class="tc-section-sub">Help Norva put the right things first. These guide the order of titles and the
+                version played by default — they never hide anything.</p>
 
-            <div class="settings-section">
-              <h3>Volume Settings</h3>
               <div class="setting-item">
-                <label for="setting-default-volume">Default Volume</label>
-                <div class="volume-slider-container">
-                  <input type="range" id="setting-default-volume" class="volume-slider" min="0" max="100" value="80">
-                  <span id="volume-value">80%</span>
-                </div>
-              </div>
-              <div class="setting-item">
-                <label class="setting-toggle">
-                  <input type="checkbox" id="setting-remember-volume" checked>
-                  <span class="toggle-slider"></span>
-                </label>
                 <div class="setting-info">
-                  <span class="setting-label">Remember Last Volume</span>
-                  <span class="setting-hint">When enabled, volume persists between sessions</span>
-                </div>
-              </div>
-            </div>
-
-            <div class="settings-section">
-              <h3>Playback</h3>
-              <div class="setting-item">
-                <label class="setting-toggle">
-                  <input type="checkbox" id="setting-autoplay-next">
-                  <span class="toggle-slider"></span>
-                </label>
-                <div class="setting-info">
-                  <span class="setting-label">Auto-play Next Episode</span>
-                  <span class="setting-hint">Automatically play the next episode when one ends</span>
-                </div>
-              </div>
-            </div>
-
-            <div class="settings-section">
-              <h3>Content &amp; Discovery</h3>
-              <div class="setting-item">
-                <div class="setting-info" style="flex: 1;">
-                  <span class="setting-label">Catalog Region</span>
-                  <span class="setting-hint">Organizes Live TV, logos, categories and recommendations. It never blocks content access.</span>
+                  <span class="setting-label">Your region</span>
+                  <span class="setting-hint">Organises Live TV, logos, categories and recommendations for your area. It
+                    never blocks access to any content.</span>
                 </div>
                 <select id="setting-country" class="source-select" style="width: auto; min-width: 200px;">
                   <option value="FR">France</option>
@@ -872,21 +879,12 @@
                   <option value="INTERNATIONAL">International</option>
                 </select>
               </div>
+
               <div class="setting-item">
-                <label class="setting-toggle">
-                  <input type="checkbox" id="setting-group-duplicates" checked>
-                  <span class="toggle-slider"></span>
-                </label>
                 <div class="setting-info">
-                  <span class="setting-label">Group Duplicate Movies &amp; Series</span>
-                  <span class="setting-hint">Show one card per title even when several versions exist across sources or
-                    categories. The best version is picked automatically when playing.</span>
-                </div>
-              </div>
-              <div class="setting-item">
-                <div class="setting-info" style="flex: 1;">
-                  <span class="setting-label">Preferred Audio Language</span>
-                  <span class="setting-hint">Used to rank versions and pick the best default. Unknown language data stays visible.</span>
+                  <span class="setting-label">Preferred audio language</span>
+                  <span class="setting-hint">When several versions exist, Norva favours this language for the default
+                    pick. Unknown languages stay visible.</span>
                 </div>
                 <select id="setting-preferred-audio-language" class="source-select" style="width: auto; min-width: 200px;">
                   <option value="">No preference</option>
@@ -908,10 +906,11 @@
                   <option value="original">Original audio</option>
                 </select>
               </div>
+
               <div class="setting-item">
-                <div class="setting-info" style="flex: 1;">
-                  <span class="setting-label">Preferred Subtitle Language</span>
-                  <span class="setting-hint">Used as a soft signal for VOST/subtitled variants, not as a hard filter by default.</span>
+                <div class="setting-info">
+                  <span class="setting-label">Preferred subtitle language</span>
+                  <span class="setting-hint">A gentle nudge toward subtitled versions in this language.</span>
                 </div>
                 <select id="setting-preferred-subtitle-language" class="source-select" style="width: auto; min-width: 200px;">
                   <option value="">No preference</option>
@@ -933,20 +932,12 @@
                   <option value="zh">Chinese subtitles</option>
                 </select>
               </div>
+
               <div class="setting-item">
-                <label class="setting-toggle">
-                  <input type="checkbox" id="setting-strict-language">
-                  <span class="toggle-slider"></span>
-                </label>
                 <div class="setting-info">
-                  <span class="setting-label">Strict Language Matching</span>
-                  <span class="setting-hint">Only demotes versions confirmed incompatible. Unknown language data is kept to avoid hiding good content.</span>
-                </div>
-              </div>
-              <div class="setting-item">
-                <div class="setting-info" style="flex: 1;">
-                  <span class="setting-label">Favorite Genres</span>
-                  <span class="setting-hint">Used as a soft discovery signal for Home, Movies and Series. Unknown genre data stays visible.</span>
+                  <span class="setting-label">Favourite genres</span>
+                  <span class="setting-hint">Norva highlights more of what you like on Home, Movies and Series. Hold
+                    Ctrl / Cmd to pick several.</span>
                 </div>
                 <select id="setting-preferred-genres" class="source-select" multiple size="6" style="width: auto; min-width: 240px;">
                   <option value="action">Action</option>
@@ -969,57 +960,90 @@
                   <option value="western">Western</option>
                 </select>
               </div>
+
               <div class="setting-item">
-                <div class="setting-info" style="flex: 1;">
-                  <span class="setting-label">Preferred Version Quality</span>
-                  <span class="setting-hint">Quality to auto-pick when several versions exist.</span>
+                <div class="setting-info">
+                  <span class="setting-label">Preferred quality</span>
+                  <span class="setting-hint">Which version to play by default when several qualities exist.</span>
                 </div>
                 <select id="setting-preferred-quality" class="source-select" style="width: auto; min-width: 200px;">
                   <option value="highest">Highest available</option>
                   <option value="4k">4K</option>
                   <option value="1080p">1080p</option>
                   <option value="720p">720p</option>
-                  <option value="lowest">Lowest (save bandwidth)</option>
+                  <option value="lowest">Lowest (save data)</option>
                 </select>
-              </div>
-              <div class="setting-item">
-                <div class="setting-info" style="flex: 1;">
-                  <span class="setting-label">TMDB API Key</span>
-                  <span class="setting-hint">Optional. Enables real genres, duration filter, better posters and
-                    smarter duplicate matching. Free key at themoviedb.org → Settings → API.</span>
-                </div>
-                <input type="text" id="setting-tmdb-key" class="search-input" style="width: 300px;"
-                  placeholder="TMDB API key or read token...">
-              </div>
-              <div class="setting-item">
-                <div class="setting-info" style="flex: 1;">
-                  <span class="setting-label">Metadata Enrichment</span>
-                  <span class="setting-hint" id="tmdb-status-hint">Runs automatically after each sync when a TMDB key
-                    is set.</span>
-                </div>
-                <button class="btn btn-secondary" id="tmdb-enrich-btn" style="min-width: 140px;">Enrich Now</button>
-              </div>
-              <div class="setting-item">
-                <div class="setting-info" style="flex: 1;">
-                  <span class="setting-label">Restore incorrectly hidden titles</span>
-                  <span class="setting-hint" id="reset-broken-hint">Some movies/series may have been hidden by "Hide broken" because of a temporary connection refusal (401/403). Click to restore them — they were never actually broken.</span>
-                </div>
-                <button class="btn btn-secondary" id="reset-broken-btn" style="min-width: 140px;">Restore titles</button>
               </div>
             </div>
 
-            <div class="settings-section">
-              <h3>Keyboard Shortcuts</h3>
-              <div class="shortcuts-grid">
-                <div class="shortcut"><kbd>↑</kbd> / <kbd>↓</kbd> Channel up/down (or volume)</div>
-                <div class="shortcut"><kbd>←</kbd> / <kbd>→</kbd> Volume down/up (when arrows = channels)</div>
-                <div class="shortcut"><kbd>Space</kbd> / <kbd>K</kbd> Play/Pause</div>
-                <div class="shortcut"><kbd>F</kbd> Fullscreen</div>
-                <div class="shortcut"><kbd>M</kbd> Mute/Unmute</div>
-                <div class="shortcut"><kbd>I</kbd> Toggle info overlay</div>
-                <div class="shortcut"><kbd>PgUp</kbd> / <kbd>PgDn</kbd> Channel up/down</div>
+            <!-- Advanced (collapsed) -->
+            <details class="settings-advanced">
+              <summary class="settings-advanced-summary">
+                <span class="settings-advanced-chevron" aria-hidden="true">▸</span>
+                <span>
+                  <span class="settings-advanced-title">Advanced settings</span>
+                  <span class="settings-advanced-sub">For power users — the defaults above suit almost everyone.</span>
+                </span>
+              </summary>
+
+              <div class="settings-advanced-body">
+                <div class="setting-item">
+                  <label class="setting-toggle">
+                    <input type="checkbox" id="setting-strict-language">
+                    <span class="toggle-slider"></span>
+                  </label>
+                  <div class="setting-info">
+                    <span class="setting-label">Strict language matching</span>
+                    <span class="setting-hint">Push down versions confirmed to be in the wrong language. Unknown
+                      language data is still kept, so good content is never hidden.</span>
+                  </div>
+                </div>
+
+                <div class="setting-item pd-needs-server">
+                  <div class="setting-info" style="flex: 1;">
+                    <span class="setting-label">TMDB API key</span>
+                    <span class="setting-hint">Optional, for self-hosted setups — adds richer posters, real genres and
+                      smarter matching. Free key at themoviedb.org → Settings → API. (On norva.tv this is handled for
+                      you automatically.)</span>
+                  </div>
+                  <input type="text" id="setting-tmdb-key" class="search-input" style="width: 300px;"
+                    placeholder="TMDB API key or read token…">
+                </div>
+
+                <div class="setting-item pd-needs-server">
+                  <div class="setting-info" style="flex: 1;">
+                    <span class="setting-label">Metadata enrichment</span>
+                    <span class="setting-hint" id="tmdb-status-hint">Runs automatically after each sync when a TMDB key
+                      is set.</span>
+                  </div>
+                  <button class="btn btn-secondary" id="tmdb-enrich-btn" style="min-width: 140px;">Enrich now</button>
+                </div>
+
+                <div class="setting-item pd-needs-server">
+                  <div class="setting-info" style="flex: 1;">
+                    <span class="setting-label">Restore incorrectly hidden titles</span>
+                    <span class="setting-hint" id="reset-broken-hint">If “Hide broken” hid some titles after a temporary
+                      connection refusal (401/403), click to bring them back — they were never really broken.</span>
+                  </div>
+                  <button class="btn btn-secondary" id="reset-broken-btn" style="min-width: 140px;">Restore titles</button>
+                </div>
+
+                <div class="setting-item tc-hw-item">
+                  <div class="setting-info" style="flex: 1;">
+                    <span class="setting-label">Keyboard shortcuts</span>
+                    <div class="shortcuts-grid" style="margin-top: 10px;">
+                      <div class="shortcut"><kbd>↑</kbd> / <kbd>↓</kbd> Channel up/down (or volume)</div>
+                      <div class="shortcut"><kbd>←</kbd> / <kbd>→</kbd> Volume down/up (when arrows = channels)</div>
+                      <div class="shortcut"><kbd>Space</kbd> / <kbd>K</kbd> Play/Pause</div>
+                      <div class="shortcut"><kbd>F</kbd> Fullscreen</div>
+                      <div class="shortcut"><kbd>M</kbd> Mute/Unmute</div>
+                      <div class="shortcut"><kbd>I</kbd> Toggle info overlay</div>
+                      <div class="shortcut"><kbd>PgUp</kbd> / <kbd>PgDn</kbd> Channel up/down</div>
+                    </div>
+                  </div>
+                </div>
               </div>
-            </div>
+            </details>
           </div>
 
           <!-- Transcoding Tab -->
@@ -1658,7 +1682,7 @@
   <script src="/js/pages/Guide.js?v=2"></script>
   <script src="/js/pages/MoviesPage.js?v=30"></script>
   <script src="/js/pages/SeriesPage.js?v=29"></script>
-  <script src="/js/pages/Settings.js?v=24"></script>
+  <script src="/js/pages/Settings.js?v=25"></script>
   <script src="/js/pages/WatchPage.js?v=88"></script>
   <script src="/js/profiles.js?v=4"></script>
   <script src="/js/app.js?v=23"></script>

@@ -342,7 +342,6 @@ class SettingsPage {
 
     initPlayerSettings() {
         const arrowKeysToggle = document.getElementById('setting-arrow-keys');
-        const overlayDurationInput = document.getElementById('setting-overlay-duration');
         const defaultVolumeSlider = document.getElementById('setting-default-volume');
         const volumeValueDisplay = document.getElementById('volume-value');
         const rememberVolumeToggle = document.getElementById('setting-remember-volume');
@@ -351,7 +350,6 @@ class SettingsPage {
         // Load current settings
         if (this.app.player?.settings) {
             arrowKeysToggle.checked = this.app.player.settings.arrowKeysChangeChannel;
-            overlayDurationInput.value = this.app.player.settings.overlayDuration;
             defaultVolumeSlider.value = this.app.player.settings.defaultVolume;
             volumeValueDisplay.textContent = this.app.player.settings.defaultVolume + '%';
             rememberVolumeToggle.checked = this.app.player.settings.rememberVolume;
@@ -361,12 +359,6 @@ class SettingsPage {
         // Arrow keys toggle
         arrowKeysToggle.addEventListener('change', () => {
             this.app.player.settings.arrowKeysChangeChannel = arrowKeysToggle.checked;
-            this.app.player.saveSettings();
-        });
-
-        // Overlay duration
-        overlayDurationInput.addEventListener('change', () => {
-            this.app.player.settings.overlayDuration = parseInt(overlayDurationInput.value) || 5;
             this.app.player.saveSettings();
         });
 
@@ -408,7 +400,16 @@ class SettingsPage {
     }
 
     async initContentSettings() {
-        const groupToggle = document.getElementById('setting-group-duplicates');
+        // TMDB key / enrichment / "restore titles" only work where a local server
+        // runs (desktop / Android TV / self-hosted); on the plain web those /api
+        // endpoints don't exist (the cloud handles TMDB automatically). Hide them
+        // there so we never show a control that does nothing.
+        const hasLocalServer = this.app.player?._hasLocalTranscoder?.() ?? false;
+        if (!hasLocalServer) {
+            document.querySelectorAll('#tab-player .pd-needs-server')
+                .forEach(el => { el.style.display = 'none'; });
+        }
+
         const audioLangSelect = document.getElementById('setting-preferred-audio-language');
         const subtitleLangSelect = document.getElementById('setting-preferred-subtitle-language');
         const strictLangToggle = document.getElementById('setting-strict-language');
@@ -427,7 +428,6 @@ class SettingsPage {
             console.warn('Could not load settings for content section');
         }
 
-        if (groupToggle) groupToggle.checked = s.groupDuplicates !== false;
         const languagePrefs = window.MediaUtils?.normalizeContentPreferences
             ? window.MediaUtils.normalizeContentPreferences(s)
             : {
@@ -457,9 +457,6 @@ class SettingsPage {
             }).catch(console.error);
         }
 
-        groupToggle?.addEventListener('change', () => {
-            API.settings.update({ groupDuplicates: groupToggle.checked }).catch(console.error);
-        });
         audioLangSelect?.addEventListener('change', () => {
             API.settings.update({
                 preferredAudioLanguage: audioLangSelect.value,
