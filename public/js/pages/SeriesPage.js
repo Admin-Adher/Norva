@@ -184,6 +184,13 @@ class SeriesPage {
 
     onFiltersChanged() {
         this.persistFilters();
+        // Cloud: picking a genre opens that genre's full grid — the same dense,
+        // server-side view as a rail's "See all" — so the dropdown behaves like
+        // Manage Content's genres.
+        if (this.isCloudPagedMode()) {
+            const buckets = [...(this.categoryMulti?.getSelected() || [])];
+            if (buckets.length) { this.openGenreBucket(buckets[0]); return; }
+        }
         if (this.shouldShowRails()) {
             this.renderGenreRails();
             return;
@@ -193,6 +200,15 @@ class SeriesPage {
             return;
         }
         this.filterAndRender();
+    }
+
+    // Open a genre bucket from the filter dropdown, reusing the rail "See all"
+    // grid (paged, server-side). No-op if that bucket is already showing.
+    openGenreBucket(bucket) {
+        if (!bucket || this.activeBucket === bucket) return;
+        const T = window.GenreTaxonomy;
+        const label = (T && T.label) ? T.label(bucket) : bucket;
+        this.openBucket({ id: `genre-${bucket}`, title: label, curation: { bucket } });
     }
 
     // Netflix-style default: with no active filter/search, the cloud Series page
@@ -290,6 +306,8 @@ class SeriesPage {
         this.activeBucket = null;
         this.bucketObserver?.disconnect();
         this.bucketObserver = null;
+        // Drop the genre filter selection (set silently — we render rails below).
+        if (this.categoryMulti?.getSelected().size) this.categoryMulti.setSelected([]);
         this.renderGenreRails();
     }
 
@@ -372,6 +390,17 @@ class SeriesPage {
 
         await Promise.all([this.loadFavorites(), this.loadWatchState(), this.loadServerSettings(), this.loadPlaybackStatuses()]);
         this.renderContinueWatching();
+
+        // A genre is selected (e.g. returning to the page) → (re)open its grid.
+        if (this.isCloudPagedMode()) {
+            const selectedBuckets = [...(this.categoryMulti?.getSelected() || [])];
+            if (selectedBuckets.length) {
+                if (!this.categories.length) await this.loadCategories();
+                this.activeBucket = null;
+                this.openGenreBucket(selectedBuckets[0]);
+                return;
+            }
+        }
 
         // Default cloud view with no active filters → Netflix-style genre rails.
         if (this.shouldShowRails()) {
@@ -547,41 +576,19 @@ class SeriesPage {
 
     async loadCloudCategories() {
         try {
-            this.categories = [];
             this.hiddenCategoryIds = new Set();
-
-            const sourceId = this.sourceSelect.value;
-            const sourcesToLoad = sourceId
-                ? this.sources.filter(s => s.id === parseInt(sourceId))
-                : this.sources;
-
-            const loaded = [];
-            for (const source of sourcesToLoad) {
-                try {
-                    const cats = await API.media.categories({ sourceId: source.id, type: 'series' });
-                    if (Array.isArray(cats)) {
-                        cats.forEach(c => loaded.push({ ...c, sourceId: c.sourceId || source.id }));
-                    }
-                } catch (err) {
-                    console.warn(`Failed to load cloud series categories from source ${source.id}:`, err.message);
-                }
-            }
-
-            this.categories = loaded;
-            const options = this.categories.map(c => ({
-                value: `${c.sourceId}:${c.category_id}`,
-                label: sourcesToLoad.length > 1
-                    ? `${c.category_name} (${this.getSourceName(c.sourceId)})`
-                    : c.category_name
-            }));
+            // Mirror Manage Content: list the clean, curated genre buckets (with
+            // counts) instead of raw provider category names. Picking a genre
+            // opens that genre's full grid (see onFiltersChanged).
+            const payload = await API.media.genreSummary({ type: 'series' });
+            const genres = Array.isArray(payload) ? payload : (payload?.genres || []);
+            this.categories = genres;
+            const options = genres
+                .filter(g => Number(g.count) > 0)
+                .map(g => ({ value: g.bucket, label: `${g.label} · ${Number(g.count).toLocaleString()}` }));
             this.categoryMulti.setOptions(options);
-
-            if (this.savedFilters?.categories?.length && !this._categoriesRestored) {
-                this.categoryMulti.setSelected(this.savedFilters.categories);
-                this._categoriesRestored = true;
-            }
         } catch (err) {
-            console.error('Error loading cloud series categories:', err);
+            console.error('Error loading cloud series genres:', err);
         }
     }
 
@@ -803,10 +810,14 @@ class SeriesPage {
     matchesFilters(item) {
         if (this.hideBroken && this.isBrokenItem(item)) return false;
 
-        const selectedCats = this.categoryMulti?.getSelected();
-        if (selectedCats && selectedCats.size > 0 &&
-            !selectedCats.has(`${item.sourceId}:${item.category_id}`)) {
-            return false;
+        // Cloud mode filters genre via the dedicated grid (openGenreBucket); the
+        // self-hosted grid still filters by the selected provider category here.
+        if (!this.isCloudPagedMode()) {
+            const selectedCats = this.categoryMulti?.getSelected();
+            if (selectedCats && selectedCats.size > 0 &&
+                !selectedCats.has(`${item.sourceId}:${item.category_id}`)) {
+                return false;
+            }
         }
 
         const yearFilter = this.yearSelect?.value;
