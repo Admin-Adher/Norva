@@ -1256,8 +1256,7 @@ class SourceManager {
      * first so the user never silently loses ticks by changing view.
      */
     selectContentType(type) {
-        console.log('[ManageContent] selectContentType clicked:', type, '(was:', this.contentType + ')');
-        if (this.contentType === type) { console.log('[ManageContent] same type, no-op'); return; }
+        if (this.contentType === type) return;
         this.contentType = type;
         this.channelsBtn?.classList.toggle('active', type === 'channels');
         this.moviesBtn?.classList.toggle('active', type === 'movies');
@@ -1290,7 +1289,6 @@ class SourceManager {
      * provider replaces the in-memory data, so we save first to avoid silent loss.
      */
     async flushThenReload() {
-        console.log('[ManageContent] flushThenReload — unsaved changes:', this.hasUnsavedContentChanges());
         if (this.hasUnsavedContentChanges()) {
             await this.saveContentChanges();
         }
@@ -1305,7 +1303,6 @@ class SourceManager {
         // the genres come from the actual titles, and hide/show is per-genre and
         // persisted on the profile (works across screens, unlike the old per-
         // provider-category hide which never persisted on the cloud).
-        console.log('[ManageContent] reloadContentTree — contentType:', this.contentType);
         if (this.contentType === 'movies') { this.updateContentChrome('genre'); return this.loadGenreView('movie'); }
         if (this.contentType === 'series') { this.updateContentChrome('genre'); return this.loadGenreView('series'); }
 
@@ -1335,39 +1332,21 @@ class SourceManager {
 
     // --- Catalogue genre view (movies / series) ---
     async loadGenreView(itemType) {
-        const t0 = (typeof performance !== 'undefined' ? performance.now() : Date.now());
-        console.log('[ManageContent] loadGenreView START — itemType:', itemType);
-        console.log('[ManageContent]   active profile id:', window.NorvaCloud?.profiles?.getActiveId?.());
-        console.log('[ManageContent]   API.media.genreSummary is:', typeof API?.media?.genreSummary);
         this.treeData = { type: itemType + '-genres', itemType, genreView: true };
         this.contentTree.innerHTML = '<p class="hint">Loading genres…</p>';
         try {
-            console.log('[ManageContent]   → calling API.media.genreSummary({ type:', itemType, '})');
             const payload = await API.media.genreSummary({ type: itemType });
-            const dt = ((typeof performance !== 'undefined' ? performance.now() : Date.now()) - t0).toFixed(0);
-            console.log('[ManageContent]   ← genreSummary RESOLVED in', dt + 'ms — payload:', payload);
             const genres = (payload && payload.genres) || [];
-            console.log('[ManageContent]   genres.length:', genres.length, '| hidden:', payload && payload.hidden);
             this.genreHidden = new Set(payload && payload.hidden ? payload.hidden : []);
             this.genreList = genres;
             if (!genres.length) {
-                console.warn('[ManageContent]   NO GENRES → showing "No genres detected" empty state');
                 this.contentTree.innerHTML = '<div class="screens-empty">No genres detected in your catalogue yet.<br>Add a TV provider and let Norva sync your movies & shows.</div>';
                 return;
             }
-            console.log('[ManageContent]   rendering', genres.length, 'genre rows');
             this.renderGenreView(genres);
-            console.log('[ManageContent] loadGenreView DONE — itemType:', itemType);
         } catch (e) {
-            const dt = ((typeof performance !== 'undefined' ? performance.now() : Date.now()) - t0).toFixed(0);
-            // Surface the *real* failure — this catch previously swallowed it, so
-            // "Unable to load genres" gave us nothing to debug. Log every angle.
-            console.error('[ManageContent] loadGenreView FAILED after', dt + 'ms — itemType:', itemType);
-            console.error('[ManageContent]   error object:', e);
-            console.error('[ManageContent]   error.message:', e?.message);
-            console.error('[ManageContent]   error.status:', e?.status);
-            console.error('[ManageContent]   error.payload:', e?.payload);
-            console.error('[ManageContent]   error.stack:', e?.stack);
+            // Keep one concise breadcrumb so a future failure is never silent.
+            console.error('[ManageContent] loadGenreView failed:', e?.message || e, e);
             this.contentTree.innerHTML = '<p class="hint" style="color: var(--color-error);">Unable to load genres</p>';
         }
     }
@@ -1375,8 +1354,8 @@ class SourceManager {
     renderGenreView(genres) {
         const rows = genres.map((g) => {
             const checked = !this.genreHidden.has(g.bucket);
-            return `<label class="checkbox-label channel-item" style="display:flex;align-items:center;gap:12px;padding:12px 14px" title="${this.escapeAttr(g.label)}">
-                <input type="checkbox" class="genre-checkbox" data-bucket="${this.escapeAttr(g.bucket)}" ${checked ? 'checked' : ''}>
+            return `<label class="checkbox-label channel-item" style="display:flex;align-items:center;gap:12px;padding:12px 14px" title="${this.escapeHtml(g.label)}">
+                <input type="checkbox" class="genre-checkbox" data-bucket="${this.escapeHtml(g.bucket)}" ${checked ? 'checked' : ''}>
                 <span class="channel-name" style="font-weight:600;flex:1">${this.escapeHtml(g.label)}</span>
                 <span class="setting-hint" style="margin:0">${Number(g.count) || 0}</span>
             </label>`;

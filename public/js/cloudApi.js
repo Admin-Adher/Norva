@@ -452,26 +452,11 @@
 
     async function catalogRequest(path, params = {}, options = {}) {
         const route = `${path}${query({ country: resolveCountry(), ...params })}`;
-        const isGenre = path.indexOf('genre') !== -1;
-        if (isGenre) {
-            console.log('[ManageContent][cloudApi] catalogRequest — base:', catalogBase(), '| route:', route, '| full URL:', catalogBase() + route, '| profileHeader:', getActiveProfileId());
-        }
         try {
-            const res = await requestToBase(catalogBase(), 'GET', route, null, options);
-            if (isGenre) console.log('[ManageContent][cloudApi] catalogRequest OK (catalog base) — keys:', res && Object.keys(res));
-            return res;
+            return await requestToBase(catalogBase(), 'GET', route, null, options);
         } catch (error) {
-            if (isGenre) console.warn('[ManageContent][cloudApi] catalogRequest catalog-base FAILED — status:', error?.status, '| message:', error?.message, '| payload:', error?.payload);
             if (error.status === 404 || error.status === 405) {
-                if (isGenre) console.log('[ManageContent][cloudApi] catalogRequest → falling back to legacy request base for', route);
-                try {
-                    const res = await request('GET', route, null, options);
-                    if (isGenre) console.log('[ManageContent][cloudApi] catalogRequest OK (legacy fallback base) — keys:', res && Object.keys(res));
-                    return res;
-                } catch (fallbackErr) {
-                    if (isGenre) console.error('[ManageContent][cloudApi] catalogRequest legacy-fallback ALSO FAILED — status:', fallbackErr?.status, '| message:', fallbackErr?.message, '| payload:', fallbackErr?.payload);
-                    throw fallbackErr;
-                }
+                return request('GET', route, null, options);
             }
             throw error;
         }
