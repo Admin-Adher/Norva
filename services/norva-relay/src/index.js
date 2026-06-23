@@ -95,7 +95,7 @@ export default {
         if (claims.exp * 1000 < Date.now()) {
           return json(request, env, { error: "Relay token expired" }, 401);
         }
-        return await relayVodInfo(request, env, claims);
+        return await relayVodInfo(request, env, claims, ctx);
       }
 
       return json(request, env, { error: "Route not found" }, 404);
@@ -944,7 +944,7 @@ function normalizeAudioStream(a) {
 // any failure returns an empty (but valid) shape so the player simply shows no
 // extra detail. get_vod_info exposes a single audio stream and no subtitle list
 // (subtitled VOD here is hard-subbed), so audioTracks has at most one entry.
-async function relayVodInfo(request, env, claims) {
+async function relayVodInfo(request, env, claims, ctx) {
   const empty = { duration: null, video: null, audioTracks: [], subtitles: [] };
   try {
     const su = new URL(claims.url);
@@ -955,6 +955,21 @@ async function relayVodInfo(request, env, claims) {
     const user = parts[1];
     const pass = parts[2];
     const vodId = parts[3].replace(/\.[a-z0-9]+$/i, "");
+
+    // Cache by (provider host, vod id): the codec metadata is a property of the
+    // FILE — identical for every user/session — so one fetch serves everyone at
+    // this PoP and we drop a provider round-trip on every playback. Edge Cache API
+    // (same mechanism as the image proxy); 24h TTL since codec info is static.
+    const cacheKey = new Request(
+      `https://edge.norva.tv/__vodinfo/${encodeURIComponent(su.host)}/${encodeURIComponent(vodId)}`,
+    );
+    const cache = caches.default;
+    const cached = await cache.match(cacheKey);
+    if (cached) {
+      const hit = await cached.json().catch(() => null);
+      if (hit) return json(request, env, hit, 200);
+    }
+
     const api = `${su.protocol}//${su.host}/player_api.php?username=${encodeURIComponent(user)}&password=${encodeURIComponent(pass)}&action=get_vod_info&vod_id=${encodeURIComponent(vodId)}`;
     const ua = String(claims.ua || "VLC/3.0.20 LibVLC/3.0.20");
     const resp = await fetch(api, { headers: { "user-agent": ua, accept: "application/json" } });
@@ -963,7 +978,7 @@ async function relayVodInfo(request, env, claims) {
     const info = data && typeof data.info === "object" && data.info ? data.info : {};
     const a = info.audio && typeof info.audio === "object" ? info.audio : null;
     const v = info.video && typeof info.video === "object" ? info.video : null;
-    return json(request, env, {
+    const out = {
       duration: Number(info.duration_secs) || null,
       video: v
         ? {
@@ -976,7 +991,17 @@ async function relayVodInfo(request, env, claims) {
         : null,
       audioTracks: a ? [normalizeAudioStream(a)] : [],
       subtitles: [],
-    }, 200);
+    };
+
+    // Cache only real results — never poison the cache with a transient empty/error.
+    if (a || v) {
+      const cacheResp = new Response(JSON.stringify(out), {
+        headers: { "content-type": "application/json", "Cache-Control": "public, max-age=86400" },
+      });
+      if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(cache.put(cacheKey, cacheResp));
+      else await cache.put(cacheKey, cacheResp).catch(() => {});
+    }
+    return json(request, env, out, 200);
   } catch (_) {
     return json(request, env, empty, 200);
   }
