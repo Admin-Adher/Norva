@@ -149,5 +149,75 @@
 
     function label(id) { return LABELS[id] || 'Other'; }
 
-    window.GenreTaxonomy = { BUCKETS, BUCKET_ORDER, classifyTitle, classifyCategory, label };
+    // --- Hierarchical classification for Manage Content (frontend-only) ---
+    // Maps a provider category to a theme → sub-category node, so Manage Content
+    // can show a 2-3 level tree (theme header → sub-category group → provider
+    // categories). The browse rails stay flat and don't use this.
+    const THEME_LABELS = {
+        genres: 'Genres', animation: 'Animation', entertainment: 'Entertainment',
+        languages: 'Languages & Regions', platforms: 'Platforms', other: 'Other'
+    };
+    const THEME_ORDER = { genres: 0, animation: 1, entertainment: 2, languages: 3, platforms: 4, other: 5 };
+
+    // Streaming networks/platforms detected from the category wording.
+    const PLATFORMS = [
+        [['apple tv', 'appletv'], 'apple_tv', 'Apple TV+'],
+        [['netflix'], 'netflix', 'Netflix'],
+        [['prime video', 'amazon prime', 'amazon'], 'prime', 'Prime Video'],
+        [['disney'], 'disney', 'Disney+'],
+        [['hbo'], 'hbo', 'HBO / Max'],
+        [['paramount'], 'paramount', 'Paramount+'],
+        [['hulu'], 'hulu', 'Hulu'],
+        [['peacock'], 'peacock', 'Peacock'],
+        [['canal plus', 'canal+'], 'canal', 'Canal+']
+    ];
+    function detectPlatform(catN) {
+        for (let i = 0; i < PLATFORMS.length; i++) {
+            if (hasAny(catN, PLATFORMS[i][0])) return { id: PLATFORMS[i][1], label: PLATFORMS[i][2], order: i };
+        }
+        return null;
+    }
+
+    function node(theme, subId, subLabel, subOrder) {
+        return {
+            theme: theme,
+            themeLabel: THEME_LABELS[theme],
+            themeOrder: THEME_ORDER[theme],
+            subId: theme + ':' + subId,
+            subLabel: subLabel,
+            subOrder: subOrder || 0
+        };
+    }
+
+    function classifyCategoryNode(categoryName) {
+        const catN = norm(categoryName);
+
+        // 1) Platform (Apple TV+, Netflix…) — wins, it's the most specific.
+        const p = detectPlatform(catN);
+        if (p) return node('platforms', 'platform_' + p.id, p.label, p.order);
+
+        // 2) Animation → kids vs adult.
+        if (isAnimation(catN)) {
+            const adult = isAdult(catN) && !isKids(catN);
+            return node('animation', adult ? 'adult' : 'kids', adult ? 'Adult Animation' : 'Kids Animation', adult ? 1 : 0);
+        }
+
+        // 3) Entertainment → reality vs TV shows.
+        if (isReality(catN)) {
+            const reality = hasAny(catN, ['reality', 'tele realite', 'telerealite', 'real tv', 'الواقع']);
+            return node('entertainment', reality ? 'reality' : 'tvshows', reality ? 'Reality TV' : 'TV Shows', reality ? 0 : 1);
+        }
+
+        // 4) A real genre named in the category → Genres theme.
+        const kw = categoryGenreKeyword(catN);
+        if (kw) return node('genres', kw, label(kw), 0);
+
+        // 5) Arabic / regional → Languages & Regions.
+        if (isArabicCategory(catN)) return node('languages', 'arabic', 'Arabic Content', 0);
+
+        // 6) Fallback.
+        return node('other', 'other', 'Other', 0);
+    }
+
+    window.GenreTaxonomy = { BUCKETS, BUCKET_ORDER, classifyTitle, classifyCategory, classifyCategoryNode, label };
 })();

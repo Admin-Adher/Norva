@@ -1505,7 +1505,17 @@ class SourceManager {
             return;
         }
 
-        const html = groups.map(group => this.getGroupHtml(group)).join('');
+        // Insert a theme section header whenever the theme changes (Manage
+        // Content genre view). Groups without a theme (e.g. channels) render flat.
+        let html = '';
+        let lastTheme = null;
+        groups.forEach((group) => {
+            if (group.theme && group.theme !== lastTheme) {
+                html += `<div class="content-theme-header" style="font-size:11px;font-weight:800;letter-spacing:.09em;text-transform:uppercase;color:#6f7d96;margin:18px 4px 8px;padding-bottom:6px;border-bottom:1px solid #1c2433">${this.escapeHtml(group.theme)}</div>`;
+                lastTheme = group.theme;
+            }
+            html += this.getGroupHtml(group);
+        });
         this.contentTree.innerHTML = html;
 
         // Attach event listeners
@@ -1632,29 +1642,32 @@ class SourceManager {
         const mkItem = (cat) => ({ id: String(cat.category_id), name: cat.category_name, type: itemType, original: cat });
 
         const T = window.GenreTaxonomy;
-        if (!T) {
+        if (!T || !T.classifyCategoryNode) {
             return [{ id: `all_${itemType}`, name: 'Categories', type: 'group', items: sorted.map(mkItem) }];
         }
 
-        const byBucket = new Map();
+        // Group provider categories under (theme → sub-category) nodes. The
+        // sub-category is the checkbox group (cascades to the provider
+        // categories underneath); the theme becomes a section header rendered by
+        // renderTree(). Leaves stay provider categories, so hide/show is unchanged.
+        const bySub = new Map();
         for (const cat of sorted) {
-            const bucket = T.classifyCategory(cat.category_name);
-            const arr = byBucket.get(bucket) || [];
-            arr.push(cat);
-            byBucket.set(bucket, arr);
+            const n = T.classifyCategoryNode(cat.category_name);
+            if (!bySub.has(n.subId)) bySub.set(n.subId, { node: n, cats: [] });
+            bySub.get(n.subId).cats.push(cat);
         }
-        const groups = [];
-        for (const def of T.BUCKETS) {
-            const cats = byBucket.get(def.id);
-            if (!cats || !cats.length) continue;
-            groups.push({
-                id: `bucket_${itemType}_${def.id}`,
-                name: def.label,
-                type: 'group',
-                items: cats.map(mkItem)
-            });
-        }
-        return groups;
+        const subs = [...bySub.values()].sort((a, b) =>
+            a.node.themeOrder - b.node.themeOrder ||
+            a.node.subOrder - b.node.subOrder ||
+            a.node.subLabel.localeCompare(b.node.subLabel));
+
+        return subs.map(({ node, cats }) => ({
+            id: `node_${itemType}_${node.subId}`,
+            name: node.subLabel,
+            theme: node.themeLabel,
+            type: 'group',
+            items: cats.map(mkItem)
+        }));
     }
 
     async loadMovieCategoriesTree(sourceId) {
