@@ -185,7 +185,7 @@ export async function refreshVodTitleProjection(options: ProjectionOptions) {
     if (error) throw error;
   }
 
-  // Foundation for the global shared title cache (docs/global-title-cache-design.md):
+  // Foundation for the global shared title cache (docs/roadmap/global-title-cache-design.md):
   // dual-write the title-level metadata into catalog_titles, keyed globally by
   // (item_type, provider_tmdb_id), so at scale it is enriched/stored once instead of
   // once per user. NOT read yet — purely additive. Best-effort: a failure here must

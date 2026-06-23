@@ -1,5 +1,5 @@
 -- Global shared title cache — FOUNDATION ONLY (steps 1 & 3 of the staged migration
--- in docs/global-title-cache-design.md). This creates the table and backfills it,
+-- in docs/roadmap/global-title-cache-design.md). This creates the table and backfills it,
 -- and the projection starts dual-writing it. The read path is NOT cut over here:
 -- nothing reads catalog_titles yet, so this is additive and reversible with zero
 -- impact on rails/grid/playback. The read cutover (the high-risk, high-reward step)

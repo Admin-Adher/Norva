@@ -5,7 +5,7 @@
 > comptes externes (Play Console, Stripe, RevenueCat) disponibles.
 >
 > - **Où on en est** = ce fichier.
-> - **Comment finir** (procédures détaillées) = [`docs/billing-setup.md`](./billing-setup.md).
+> - **Comment finir** (procédures détaillées) = [`docs/roadmap/billing-setup.md`](./billing-setup.md).
 >
 > _Dernière mise à jour : 2026-06-22._
 
@@ -18,7 +18,7 @@ Toute l'infra de facturation est **construite et déployée**, en **mode `legacy
 bascule pas). Pour passer en production :
 
 1. Obtenir les comptes externes (entreprise validée → Play Console + Stripe → RevenueCat).
-2. Suivre `docs/billing-setup.md`.
+2. Suivre `docs/roadmap/billing-setup.md`.
 3. Coller 3 tokens + déployer.
 4. Basculer `NORVA_BILLING_MODE=revenuecat`.
 
@@ -169,7 +169,7 @@ Ces morceaux sont en place mais ne s'activent qu'une fois les clés fournies
 
 ## 📋 Checklist de reprise (ordonnée)
 
-> Réfs `§` = sections de `docs/billing-setup.md`.
+> Réfs `§` = sections de `docs/roadmap/billing-setup.md`.
 
 ### Phase 1 — Comptes externes (entreprise validée)
 - [ ] Créer le compte **Google Play Console** + 2 apps : `tv.norva.phone`, `tv.norva.tv`
@@ -300,4 +300,4 @@ autres). La migration s'applique via `supabase-go db push` ou l'intégration.
 | Écran de gestion d'abo | `public/subscription.html` |
 | Bridge natif | `clients/android-{phone,tv}/app/src/main/java/tv/norva/*/NorvaBilling.java` |
 | Pricing landing | `public/landing.html` + `public/index.html` + `public/css/landing.css` |
-| Runbook complet | `docs/billing-setup.md` |
+| Runbook complet | `docs/roadmap/billing-setup.md` |
