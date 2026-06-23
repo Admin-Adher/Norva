@@ -235,6 +235,34 @@ async function route(
     return { body: { ok: true } };
   }
 
+  // "What's new" feed (free in-app notification). GET unseen events; POST
+  // /content-events/seen marks them read.
+  if (scope === "content-events") {
+    if (req.method === "GET") {
+      const { data } = await db
+        .from("cloud_content_events")
+        .select("id,source_id,kind,summary,payload,created_at")
+        .eq("user_id", user.id)
+        .is("seen_at", null)
+        .order("created_at", { ascending: false })
+        .limit(20);
+      return { body: { events: data ?? [] } };
+    }
+    if (req.method === "POST" && id === "seen") {
+      const body = await req.json().catch(() => ({})) as JsonRecord;
+      const ids = Array.isArray(body.ids)
+        ? body.ids.filter((x) => typeof x === "string").slice(0, 100)
+        : null;
+      let q = db.from("cloud_content_events")
+        .update({ seen_at: new Date().toISOString() })
+        .eq("user_id", user.id)
+        .is("seen_at", null);
+      if (ids && ids.length) q = q.in("id", ids);
+      await q;
+      return { body: { ok: true } };
+    }
+  }
+
   if (scope === "billing" && id === "trial-eligibility" && req.method === "GET") {
     return { body: await getTrialEligibility(user.id, db) };
   }

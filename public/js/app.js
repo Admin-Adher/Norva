@@ -249,31 +249,58 @@ class App {
      * unchanged. The visible "Keep up to date" toggle lives in TV Service.
      */
     async maybeAutoRefreshSources() {
-        const settings = this.player?.settings || {};
-        if (settings.autoRefreshEnabled === false) return;
         if (!window.API?.sources?.getAll) return;
+        const settings = this.player?.settings || {};
+        const enabled = settings.autoRefreshEnabled !== false;
         const intervalHours = Number(settings.autoRefreshIntervalHours);
         const staleMs = (Number.isFinite(intervalHours) && intervalHours > 0 ? intervalHours : 24) * 3600000;
 
         let sources = [];
-        try { sources = await API.sources.getAll(); } catch (_) { return; }
+        try { sources = await API.sources.getAll(); } catch (_) { sources = []; }
         const providers = (sources || []).filter(s => s.type === 'xtream' || s.type === 'm3u');
         const now = Date.now();
+        const syncs = [];
 
-        for (const src of providers) {
-            const status = src.syncStatus || src.sync_status || '';
-            if (status === 'syncing') continue; // single-flight: don't pile on
-            const lastRaw = src.last_synced_at || src.lastSyncedAt || src.last_sync || null;
-            const lastMs = lastRaw ? new Date(lastRaw).getTime() : 0;
-            if (lastMs && (now - lastMs) < staleMs) continue; // still fresh enough
+        if (enabled) {
+            for (const src of providers) {
+                const status = src.syncStatus || src.sync_status || '';
+                if (status === 'syncing') continue; // single-flight: don't pile on
+                const lastRaw = src.last_synced_at || src.lastSyncedAt || src.last_sync || null;
+                const lastMs = lastRaw ? new Date(lastRaw).getTime() : 0;
+                if (lastMs && (now - lastMs) < staleMs) continue; // still fresh enough
 
-            // Stale → fire a silent background sync. The /sync interceptor clears
-            // the media caches on completion, so new content shows on next nav.
-            console.log('[AutoRefresh] background sync (stale provider):', src.id);
-            Promise.resolve(API.sources.sync(src.id))
-                .then(() => { try { this.refreshSourceHealth?.(); } catch (_) {} })
-                .catch((e) => console.warn('[AutoRefresh] background sync failed', src.id, e?.message || e));
+                // Stale → fire a silent background sync (cheap when unchanged).
+                console.log('[AutoRefresh] background sync (stale provider):', src.id);
+                syncs.push(Promise.resolve(API.sources.sync(src.id))
+                    .catch((e) => console.warn('[AutoRefresh] background sync failed', src.id, e?.message || e)));
+            }
         }
+
+        // Let the background syncs settle, then surface the "what's new" feed
+        // (also catches events from a previous session or another device).
+        try { await Promise.allSettled(syncs); } catch (_) { /* noop */ }
+        try { this.refreshSourceHealth?.(); } catch (_) { /* noop */ }
+        await this.surfaceWhatsNew();
+    }
+
+    /**
+     * Free in-app notification: show unseen "what's new" events (new movies /
+     * shows / channels detected on a recent sync), then mark them read so they
+     * don't repeat. Best-effort and silent on any error.
+     */
+    async surfaceWhatsNew() {
+        try {
+            if (!window.NorvaCloud?.contentEvents?.list) return;
+            const res = await window.NorvaCloud.contentEvents.list();
+            const events = (res && res.events) || [];
+            if (!events.length) return;
+            const summary = events.map(e => e && e.summary).filter(Boolean).slice(0, 3).join(' · ');
+            if (summary) {
+                try { this.sourceManager?.toast?.(`✨ What’s new: ${summary}`); } catch (_) { /* noop */ }
+            }
+            const ids = events.map(e => e && e.id).filter(Boolean);
+            if (ids.length) window.NorvaCloud.contentEvents.markSeen(ids);
+        } catch (_) { /* never break launch over a notification */ }
     }
 
     async refreshSourceHealth({ redirectIfBlocked = false } = {}) {

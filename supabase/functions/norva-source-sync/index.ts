@@ -292,6 +292,9 @@ async function syncCloudSource(sourceId: string, userId: string, db: SupabaseCli
       .eq("user_id", userId);
     if (updateError) throwDb(updateError, "Unable to update source sync status");
 
+    // "What's new" feed: record a capped event when the catalogue grew.
+    await maybeRecordContentEvent(db, userId, sourceId, previousSignature, result as JsonRecord);
+
     return { sourceId, status: "ready", ...result };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Source sync failed";
@@ -988,6 +991,62 @@ async function computeContentSignature(rows: JsonRecord[]): Promise<JsonRecord> 
 // Two signatures are "the same catalogue" when every type matches on count +
 // id-set hash. maxAdded is informational only (some providers jitter it), so it
 // is deliberately excluded from the equality to avoid false "changed" results.
+// Plain-language "what's new" summary from two signatures: the net per-type
+// count increase since the last sync. Net-positive only (a churned catalogue
+// that adds + removes equal amounts reads as "nothing new", which is the right
+// conservative behaviour for a notification). Drives the free in-app feed.
+function summarizeContentDelta(prev: unknown, next: unknown): { total: number; byType: JsonRecord; summary: string } {
+  const labels: Record<string, string> = { movie: "movies", series: "shows", live: "channels" };
+  const byType: JsonRecord = {};
+  const parts: string[] = [];
+  let total = 0;
+  for (const type of ["movie", "series", "live"]) {
+    const oldCount = isRecord(prev) && isRecord(prev[type]) ? Number(prev[type].count) || 0 : 0;
+    const newCount = isRecord(next) && isRecord(next[type]) ? Number(next[type].count) || 0 : 0;
+    const delta = newCount - oldCount;
+    if (delta > 0) {
+      byType[type] = delta;
+      total += delta;
+      parts.push(`${delta} new ${labels[type]}`);
+    }
+  }
+  return { total, byType, summary: parts.join(" · ") };
+}
+
+// Record a one-per-source-per-day "what's new" event when a sync actually
+// changed the catalogue. Best-effort and rate-capped; never blocks the sync.
+async function maybeRecordContentEvent(
+  db: SupabaseClient,
+  userId: string,
+  sourceId: string,
+  previousSignature: unknown,
+  result: JsonRecord,
+) {
+  try {
+    if (!previousSignature || result.skipped) return; // first import / no change
+    const delta = summarizeContentDelta(previousSignature, result.contentSignature);
+    if (delta.total <= 0) return;
+    const since = new Date(Date.now() - 20 * 60 * 60 * 1000).toISOString();
+    const { data: recent } = await db
+      .from("cloud_content_events")
+      .select("id")
+      .eq("user_id", userId)
+      .eq("source_id", sourceId)
+      .gt("created_at", since)
+      .limit(1);
+    if (recent && recent.length) return; // already notified today (free 1/day cap)
+    await db.from("cloud_content_events").insert({
+      user_id: userId,
+      source_id: sourceId,
+      kind: "new_content",
+      summary: delta.summary,
+      payload: { byType: delta.byType, total: delta.total },
+    });
+  } catch (_) {
+    // observability feature — never let it break a sync
+  }
+}
+
 function contentSignatureEquals(a: unknown, b: unknown): boolean {
   if (!isRecord(a) || !isRecord(b)) return false;
   const keys = new Set([...Object.keys(a), ...Object.keys(b)]);

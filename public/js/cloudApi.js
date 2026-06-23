@@ -635,6 +635,15 @@
             }
         },
 
+        // "What's new" feed — unseen new-content events for the in-app notification.
+        contentEvents: {
+            list: () => request('GET', '/content-events').catch(() => ({ events: [] })),
+            markSeen: (ids) => {
+                try { return request('POST', '/content-events/seen', { ids }).catch(() => null); }
+                catch (_) { return Promise.resolve(null); }
+            }
+        },
+
         billing: {
             // Account-level trial eligibility (one trial per account across every
             // rail — keyed to trial_consumed_at). Lets the paywall show "Start
