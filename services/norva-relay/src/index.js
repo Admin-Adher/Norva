@@ -793,9 +793,12 @@ async function refetchRewritingIpRedirects(startUrl, method, headers, maxHops = 
       return { response: resp, finalUrl: url.toString() };
     }
     if (isIpHost(next.hostname) && !isIpHost(startUrl.hostname)) {
+      // Swap the raw IP for the provider's hostname but KEEP the node's port,
+      // path and token. These backend nodes are Cloudflare-fronted (Spectrum) on
+      // a non-standard port and reject IP-host access with 403 "error code: 1003"
+      // (Direct IP Access Not Allowed) while accepting the same request by
+      // hostname. (Dropping the port instead just bounces back to the redirect.)
       next.hostname = startUrl.hostname;
-      next.protocol = startUrl.protocol;
-      next.port = startUrl.port;
     }
     url = next;
   }
