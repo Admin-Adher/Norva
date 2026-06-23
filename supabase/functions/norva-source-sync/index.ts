@@ -585,6 +585,15 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
 
     if (phase !== "complete") throw new HttpError(400, "Invalid catalog finalization phase");
 
+    // Safety net: the client-driven "titles" phase can stop early and leave
+    // verified titles without playable variants (vanishing from genre rails).
+    // Deterministically materialise any missing variants before marking ready.
+    try {
+      await db.rpc("heal_cloud_title_variants", { p_user_id: userId, p_source_id: sourceId });
+    } catch (healError) {
+      console.warn("[norva-source-sync] variant heal failed:", healError instanceof Error ? healError.message : healError);
+    }
+
     const syncedAt = new Date().toISOString();
     const { error: updateError } = await db
       .from("cloud_sources")
