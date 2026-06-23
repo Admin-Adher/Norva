@@ -85,8 +85,11 @@
 
     function wireArrows(container) {
         container.querySelectorAll('.scroll-wrapper').forEach((wrapper) => {
-            if (wrapper.dataset.scrollReady === '1') return;
             const scroller = wrapper.querySelector('.horizontal-scroll');
+            if (scroller && window.MediaUtils && window.MediaUtils.enhanceRailScroll) {
+                window.MediaUtils.enhanceRailScroll(scroller);
+            }
+            if (wrapper.dataset.scrollReady === '1') return;
             const left = wrapper.querySelector('.scroll-left');
             const right = wrapper.querySelector('.scroll-right');
             if (!scroller || !left || !right) return;

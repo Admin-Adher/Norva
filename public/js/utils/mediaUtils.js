@@ -715,6 +715,47 @@ const MediaUtils = (() => {
         return raw;
     }
 
+    // Make a horizontal rail (`.horizontal-scroll`) feel natural with a mouse:
+    // click-and-drag pans it like a touch swipe (and the click that follows a
+    // drag is swallowed so it doesn't open a card). Touch keeps native momentum
+    // scrolling; the wheel is left to the page so scrolling down past a rail
+    // works normally. Idempotent per element.
+    function enhanceRailScroll(scroller) {
+        if (!scroller || scroller.dataset.railEnhanced === '1') return;
+        scroller.dataset.railEnhanced = '1';
+
+        let dragging = false, moved = false, startX = 0, startLeft = 0, pid = null;
+        scroller.addEventListener('pointerdown', (e) => {
+            if (e.pointerType === 'touch' || e.button !== 0) return;
+            dragging = true; moved = false; pid = e.pointerId;
+            startX = e.clientX; startLeft = scroller.scrollLeft;
+        });
+        scroller.addEventListener('pointermove', (e) => {
+            if (!dragging) return;
+            const dx = e.clientX - startX;
+            if (!moved && Math.abs(dx) > 4) {
+                moved = true;
+                scroller.classList.add('rail-dragging');
+                try { scroller.setPointerCapture(pid); } catch (_) { /* not critical */ }
+            }
+            if (moved) scroller.scrollLeft = startLeft - dx;
+        });
+        const endDrag = () => {
+            if (!dragging) return;
+            dragging = false;
+            try { if (pid != null) scroller.releasePointerCapture(pid); } catch (_) { /* ignore */ }
+            pid = null;
+            scroller.classList.remove('rail-dragging');
+            if (moved) {
+                const swallow = (ev) => { ev.stopPropagation(); ev.preventDefault(); };
+                scroller.addEventListener('click', swallow, true);
+                setTimeout(() => scroller.removeEventListener('click', swallow, true), 60);
+            }
+        };
+        scroller.addEventListener('pointerup', endDrag);
+        scroller.addEventListener('pointercancel', endDrag);
+    }
+
     // === Misc helpers ===
 
     function escapeHtml(str) {
@@ -863,7 +904,8 @@ const MediaUtils = (() => {
         analyzeLanguageCompatibility, scoreVersionLanguage, scoreTitleForPreferences,
         orderVersionsByPreference, versionLabel, versionLanguageBadge,
         saveFilters, loadFilters, escapeHtml, tmdbPosterUrl, parseDurationToSeconds,
-        playbackHintFromItem, liveGatewayMode, safeImageUrl, downloadablePosterUrl
+        playbackHintFromItem, liveGatewayMode, safeImageUrl, downloadablePosterUrl,
+        enhanceRailScroll
     };
 })();
 

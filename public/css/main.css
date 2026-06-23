@@ -8397,8 +8397,30 @@ kbd {
   gap: 20px;
   overflow-x: auto;
   padding-bottom: 12px;
-  scroll-snap-type: x mandatory;
+  /* Gentle (not mandatory) snap so a touch swipe glides instead of fighting the
+     finger, and a horizontal flick stays in the rail instead of leaking to the
+     page / browser back-gesture. */
+  scroll-snap-type: x proximity;
+  overscroll-behavior-x: contain;
   -webkit-overflow-scrolling: touch;
+}
+
+/* Desktop: the rail is grab-and-drag (wired in MediaUtils.enhanceRailScroll). */
+@media (hover: hover) {
+  .horizontal-scroll {
+    cursor: grab;
+  }
+}
+
+.horizontal-scroll.rail-dragging {
+  scroll-snap-type: none;
+  scroll-behavior: auto;
+  user-select: none;
+}
+
+.horizontal-scroll.rail-dragging,
+.horizontal-scroll.rail-dragging * {
+  cursor: grabbing !important;
 }
 
 /* Hide scrollbar by default, show on hover */
@@ -9724,7 +9746,8 @@ mark.search-highlight {
 
 .tv-mode .movie-card:focus,
 .tv-mode .series-card:focus,
-.tv-mode .continue-card:focus {
+.tv-mode .continue-card:focus,
+.tv-mode .dashboard-card:focus {
   transform: scale(1.04);
   transition: transform 0.12s ease;
   z-index: 3;

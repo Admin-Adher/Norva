@@ -124,8 +124,11 @@ class HomePage {
 
     initScrollArrows() {
         this.container?.querySelectorAll('.scroll-wrapper').forEach(wrapper => {
-            if (wrapper.dataset.scrollReady === '1') return;
             const scrollContainer = wrapper.querySelector('.horizontal-scroll');
+            if (scrollContainer && window.MediaUtils?.enhanceRailScroll) {
+                window.MediaUtils.enhanceRailScroll(scrollContainer);
+            }
+            if (wrapper.dataset.scrollReady === '1') return;
             const leftBtn = wrapper.querySelector('.scroll-left');
             const rightBtn = wrapper.querySelector('.scroll-right');
 

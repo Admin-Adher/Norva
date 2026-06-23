@@ -162,7 +162,9 @@
             el.setAttribute('tabindex', '-1');
         }
         el.focus({ preventScroll: true });
-        el.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' });
+        // inline:'center' keeps the focused card centered as the D-pad walks a
+        // horizontal rail (instead of leaving it stuck against an edge).
+        el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'smooth' });
     }
 
     function currentFocus() {
