@@ -57,6 +57,11 @@ export default {
         });
       }
 
+      // TEMPORARY diagnostic — remove after verifying get_vod_info shape.
+      if (url.pathname === "/vod-info-probe") {
+        return await vodInfoProbe(request, env);
+      }
+
       if (url.pathname === "/image") {
         if (request.method !== "GET" && request.method !== "HEAD") {
           return json(request, env, { error: "Method not allowed" }, 405);
@@ -906,6 +911,33 @@ async function fetchNodeViaSocket(node, method, clientRange, ua) {
   });
 
   return { status: head.status, statusText: head.statusText, headers: head.headers, body, isChunked };
+}
+
+// TEMPORARY diagnostic — remove after verifying get_vod_info shape. Derives the
+// Xtream player_api get_vod_info URL from a /movie/<user>/<pass>/<id>.<ext> stream
+// URL and returns the raw provider JSON, so we can see exactly which fields carry
+// audio language / channels / bitrate / subtitles.
+async function vodInfoProbe(request, env) {
+  const url = new URL(request.url);
+  const target = url.searchParams.get("u");
+  const ua = url.searchParams.get("ua") || "VLC/3.0.20 LibVLC/3.0.20";
+  if (!target) return json(request, env, { error: "missing ?u=<stream url>" }, 400);
+  try {
+    const su = new URL(target);
+    const parts = su.pathname.split("/").filter(Boolean); // [movie, user, pass, id.ext]
+    const user = parts[1] || "";
+    const pass = parts[2] || "";
+    const vodId = (parts[3] || "").replace(/\.[a-z0-9]+$/i, "");
+    const api = `${su.protocol}//${su.host}/player_api.php?username=${encodeURIComponent(user)}&password=${encodeURIComponent(pass)}&action=get_vod_info&vod_id=${encodeURIComponent(vodId)}`;
+    const resp = await fetch(api, { headers: { "user-agent": ua, accept: "application/json" } });
+    const text = await resp.text();
+    return new Response(text.slice(0, 12000), {
+      status: resp.status,
+      headers: { ...corsHeaders(request, env), "content-type": "application/json; charset=utf-8" },
+    });
+  } catch (e) {
+    return json(request, env, { error: String((e && e.message) || e) }, 200);
+  }
 }
 
 function corsHeaders(request, env) {
