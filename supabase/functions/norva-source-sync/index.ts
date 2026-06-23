@@ -8,7 +8,7 @@ import {
   upsertLiveChannelRows,
   upsertLiveVariantRows,
 } from "../_shared/live-materialization.ts";
-import { refreshVodTitleProjection } from "../_shared/vod-title-projection.ts";
+import { refreshVodTitleProjection, validateTmdbCandidate } from "../_shared/vod-title-projection.ts";
 import type { LiveCatalogItem } from "../_shared/live-catalog.ts";
 import { getEntitlementDecision, planFeatureEntitled, realPlanCode } from "../_shared/entitlements.ts";
 
@@ -118,6 +118,13 @@ Deno.serve(async (req) => {
         const reset = url.searchParams.get("reset") === "1";
         const concurrency = boundedInt(url.searchParams.get("conc"), 15, 1, 50);
         return json(req, await cronBackfillYears(supabase, limit, reset, concurrency));
+      }
+      // Re-validate unverified titles against every language (multi-lang matching).
+      if (segments[1] === "revalidate") {
+        const limit = boundedInt(url.searchParams.get("limit"), 150, 1, 500);
+        const reset = url.searchParams.get("reset") === "1";
+        const concurrency = boundedInt(url.searchParams.get("conc"), 12, 1, 30);
+        return json(req, await cronRevalidate(supabase, limit, reset, concurrency));
       }
       return json(req, { error: "not_found" }, 404);
     }
@@ -523,6 +530,87 @@ async function cronBackfillYears(db: SupabaseClient, limit: number, reset: boole
   const done = scanned < limit;
   const summary = { scanned, distinct: distinct.size, found: yearByKey.size, updated, done };
   await db.from("norva_year_backfill_state")
+    .update({ last_id: maxId, done, last_run: { ...summary, at: new Date().toISOString() }, updated_at: new Date().toISOString() })
+    .eq("id", 1);
+  return summary;
+}
+
+// Re-validate titles that have a provider TMDB id but didn't pass the original
+// (single-language) sanity check — now scored against EVERY language
+// (alternative_titles + translations). Matches are promoted to provider_verified
+// and get their i18n stored. Cursor-resumable; drive it like the year backfill.
+async function cronRevalidate(db: SupabaseClient, limit: number, reset: boolean, concurrency: number) {
+  const apiKey = tmdbApiKey();
+  if (!apiKey) return { error: "tmdb_key_missing", done: true };
+
+  let cursor: string | null = null;
+  if (!reset) {
+    const { data } = await db.from("norva_revalidate_state").select("last_id").eq("id", 1).maybeSingle();
+    cursor = (data?.last_id as string | null) ?? null;
+  }
+
+  let q = db
+    .from("cloud_titles")
+    .select("id, item_type, provider_tmdb_id, title, original_title, release_year, metadata, poster_url, backdrop_url")
+    .in("match_status", ["provider_unverified", "weak"])
+    .not("provider_tmdb_id", "is", null)
+    .neq("provider_tmdb_id", "0")
+    .order("id", { ascending: true })
+    .limit(limit);
+  if (cursor) q = q.gt("id", cursor);
+
+  const { data: rows, error } = await q;
+  if (error) throw new HttpError(500, "revalidate select failed", error.message);
+
+  const scanned = rows?.length ?? 0;
+  if (!scanned) {
+    await db.from("norva_revalidate_state")
+      .update({ done: true, last_run: { scanned: 0, revalidated: 0, done: true, at: new Date().toISOString() }, updated_at: new Date().toISOString() })
+      .eq("id", 1);
+    return { scanned: 0, revalidated: 0, done: true };
+  }
+
+  const maxId = String(rows![rows!.length - 1].id);
+  let next = 0;
+  let revalidated = 0;
+  const worker = async () => {
+    while (next < rows!.length) {
+      const row = rows![next++];
+      const tmdbId = stringOr(row.provider_tmdb_id, "");
+      if (!tmdbId) continue;
+      const itemType = row.item_type === "series" ? "series" : "movie";
+      try {
+        const validation = await validateTmdbCandidate(apiKey, {
+          itemType,
+          tmdbId,
+          title: stringOr(row.original_title ?? row.title, ""),
+          year: row.release_year != null ? String(row.release_year) : null,
+        });
+        if (!validation.valid) continue;
+        const metadata = isRecord(row.metadata) ? row.metadata : {};
+        const { error: upErr } = await db.from("cloud_titles").update({
+          match_status: "provider_verified",
+          title: validation.title || row.title,
+          poster_url: stringOr(row.poster_url, "") || validation.posterUrl,
+          backdrop_url: stringOr(row.backdrop_url, "") || validation.backdropUrl,
+          release_year: row.release_year ?? (validation.year ? Number(validation.year) : null),
+          metadata: {
+            ...metadata,
+            tmdb: validation.details,
+            i18n: validation.i18n,
+            tmdbValidation: { valid: true, title: validation.title, year: validation.year, confidence: validation.confidence, reason: validation.reason },
+            revalidatedAt: new Date().toISOString(),
+          },
+        }).eq("id", row.id);
+        if (!upErr) revalidated += 1;
+      } catch (_) { /* a TMDB hiccup must not abort the batch */ }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(Math.max(1, concurrency), rows!.length) }, worker));
+
+  const done = scanned < limit;
+  const summary = { scanned, revalidated, done };
+  await db.from("norva_revalidate_state")
     .update({ last_id: maxId, done, last_run: { ...summary, at: new Date().toISOString() }, updated_at: new Date().toISOString() })
     .eq("id", 1);
   return summary;

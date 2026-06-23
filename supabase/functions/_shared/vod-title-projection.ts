@@ -93,6 +93,10 @@ export async function refreshVodTitleProjection(options: ProjectionOptions) {
           categoryName: row.subtitle || metadata.categoryName,
           providerIds,
           tmdb: tmdbValidation?.valid ? tmdbValidation.details : undefined,
+          // Per-language { title, overview } so the read path can serve each user
+          // their own language (the catalogue's configured language stays the
+          // default on the row's title/overview columns).
+          i18n: tmdbValidation?.valid ? tmdbValidation.i18n : undefined,
           tmdbValidation: tmdbValidation ? {
             valid: tmdbValidation.valid,
             title: tmdbValidation.title,
@@ -100,7 +104,7 @@ export async function refreshVodTitleProjection(options: ProjectionOptions) {
             confidence: tmdbValidation.confidence,
             reason: tmdbValidation.reason,
           } : undefined,
-          projectionVersion: 2,
+          projectionVersion: 3,
           syncedAt,
         }),
         synced_at: syncedAt,
@@ -208,6 +212,7 @@ type TmdbValidation = {
   posterUrl: string | null;
   backdropUrl: string | null;
   confidence: number;
+  i18n?: Record<string, { title?: string; overview?: string }>;
   reason: string;
   details?: JsonRecord;
 };
@@ -335,27 +340,57 @@ async function validateProviderTmdbIds(rows: ProjectionRow[], idsByExternalId: M
   return validations;
 }
 
-async function validateTmdbCandidate(
+export async function validateTmdbCandidate(
   apiKey: string,
   candidate: { itemType: "movie" | "series"; tmdbId: string; title: string; year: string | null },
 ): Promise<TmdbValidation> {
   const details = await fetchTmdbDetails(apiKey, candidate.itemType, candidate.tmdbId);
+
+  // Per-language titles + overviews from TMDB translations (plus country
+  // alternative titles). Used BOTH to validate (a localized provider title must
+  // match the film in ITS language, not only en/fr) and to store i18n so the read
+  // path can later serve each user their own language.
+  const translations = Array.isArray(recordOrEmpty(details.translations).translations)
+    ? recordOrEmpty(details.translations).translations as JsonRecord[]
+    : [];
+  const i18n: Record<string, { title?: string; overview?: string }> = {};
+  for (const entry of translations) {
+    const rec = recordOrEmpty(entry);
+    const lang = stringOr(rec.iso_639_1, "").toLowerCase();
+    const data = recordOrEmpty(rec.data);
+    const locTitle = stringOr(data.title ?? data.name, "");
+    const locOverview = stringOr(data.overview, "");
+    if (!lang || (!locTitle && !locOverview)) continue;
+    i18n[lang] = compactRecord({ title: locTitle || undefined, overview: locOverview || undefined });
+  }
+  const altTitles = (Array.isArray(recordOrEmpty(details.alternative_titles).titles)
+    ? recordOrEmpty(details.alternative_titles).titles as JsonRecord[]
+    : []).map((t) => stringOr(recordOrEmpty(t).title, "")).filter(Boolean);
+  const translationTitles = translations
+    .map((t) => { const d = recordOrEmpty(recordOrEmpty(t).data); return stringOr(d.title ?? d.name, ""); })
+    .filter(Boolean);
+
   const titleCandidates = uniqueStrings([
     details.title,
     details.name,
     details.original_title,
     details.original_name,
+    ...altTitles,
+    ...translationTitles,
   ]);
-  const bestTitle = titleCandidates
-    .map((title) => ({
-      title,
-      confidence: titleConfidence(candidate.title, title, candidate.year, null),
-    }))
-    .sort((a, b) => b.confidence - a.confidence)[0];
-  const title = bestTitle?.title ?? stringOr(details.title ?? details.name ?? details.original_title ?? details.original_name, "");
+
   const releaseDate = stringOr(details.release_date ?? details.first_air_date, "");
   const year = releaseDate.match(/(19|20)\d{2}/)?.[0] ?? null;
-  const confidence = Math.max(...titleCandidates.map((item) => titleConfidence(candidate.title, item, candidate.year, year)), 0);
+  // Display title = the candidate that best matches the PROVIDER title, across
+  // every language — so a French catalogue keeps "La Momie", a Spanish one "La
+  // momia" (the provider's language is the user's). i18n carries all the other
+  // languages for the read path; validation passes if ANY language matches.
+  const ranked = titleCandidates
+    .map((cand) => ({ cand, score: titleConfidence(candidate.title, cand, candidate.year, year) }))
+    .sort((a, b) => b.score - a.score);
+  const best = ranked[0];
+  const title = best?.cand || stringOr(details.title ?? details.name ?? details.original_title ?? details.original_name, "");
+  const confidence = best?.score ?? 0;
   const valid = confidence >= 0.58;
   return {
     valid,
@@ -364,6 +399,7 @@ async function validateTmdbCandidate(
     posterUrl: tmdbImageUrl(details.poster_path),
     backdropUrl: tmdbImageUrl(details.backdrop_path, "w780"),
     confidence,
+    i18n: Object.keys(i18n).length ? i18n : undefined,
     reason: valid ? "title_year_sanity_check_passed" : "title_year_sanity_check_failed",
     details: compactRecord({
       id: details.id,
@@ -389,6 +425,10 @@ async function fetchTmdbDetails(apiKey: string, itemType: "movie" | "series", tm
   const url = new URL(`https://api.themoviedb.org/3/${endpoint}/${encodeURIComponent(tmdbId)}`);
   const language = stringOr(Deno.env.get("NORVA_TMDB_LANGUAGE"), "en-US");
   if (language) url.searchParams.set("language", language);
+  // One call returns the canonical details plus every localized title/overview
+  // (translations) and country title variants — feeding both multi-language
+  // validation and the i18n store.
+  url.searchParams.set("append_to_response", "alternative_titles,translations");
   const headers: Record<string, string> = {};
   if (apiKey.startsWith("eyJ")) headers.Authorization = `Bearer ${apiKey}`;
   else url.searchParams.set("api_key", apiKey);
