@@ -3677,6 +3677,7 @@ class WatchPage {
             // fail over to another version of the same title if available
             if ([2, 3, 4].includes(error.code)) {
                 const message = error.message || 'Media error';
+                this.logRelayUpstreamDiagnostic(currentSrc);
                 if (this.retryGatewaySeekAfterFatalPlayback(message, videoAttemptId)) return;
                 this.sendPlaybackEvent('playback_error', {
                     errorCode: String(error.code),
@@ -3685,6 +3686,39 @@ class WatchPage {
                 this.handlePlaybackFailure(message)
                     .catch(error => console.warn('[WatchPage] Playback failure handler failed:', error?.message || error));
             }
+        }
+    }
+
+    /**
+     * Diagnostic only (no effect on playback or fallback): the <video> element
+     * never exposes the HTTP status behind a fatal error, so a provider 401/403/
+     * 404 is indistinguishable from a codec failure ("Video error: 4"). When a
+     * relay/direct URL fails, re-request it once with a tiny range to read the
+     * relay's X-Norva-Upstream-* headers and log the real provider status+reason,
+     * so the cause (connection limit vs wrong container vs dead link) is visible.
+     */
+    async logRelayUpstreamDiagnostic(src) {
+        try {
+            if (!src || typeof fetch !== 'function') return;
+            if (/^(blob:|data:|mediasource:)/i.test(src)) return; // engine/MSE: not a provider URL
+            const res = await fetch(src, {
+                method: 'GET',
+                headers: { Range: 'bytes=0-1' },
+                cache: 'no-store',
+            });
+            const upstreamStatus = res.headers.get('x-norva-upstream-status');
+            const upstreamReason = res.headers.get('x-norva-upstream-reason');
+            if (res.ok && !upstreamStatus) {
+                console.warn('[WatchPage] Relay upstream diagnostic: stream reachable (http=' +
+                    res.status + ') — failure was likely client-side decode/codec, not the provider.');
+                return;
+            }
+            console.warn('[WatchPage] Relay upstream diagnostic:',
+                'http=' + res.status,
+                'upstream=' + (upstreamStatus || 'n/a'),
+                'reason="' + (upstreamReason || '') + '"');
+        } catch (e) {
+            console.warn('[WatchPage] Relay upstream diagnostic failed:', e?.message || e);
         }
     }
 

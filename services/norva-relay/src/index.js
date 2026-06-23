@@ -347,6 +347,39 @@ async function proxyPlayback(request, env, claims) {
   });
   rememberContentLength(targetUrl, upstream);
 
+  // Diagnostics: when the provider rejects the stream (401/403/404/5xx) the
+  // <video> element only ever surfaces a generic "error 4", hiding whether the
+  // cause is a connection limit, a wrong container, or a dead link. Short-circuit
+  // non-OK responses with the real upstream status + a sanitized reason — exposed
+  // as headers (CORS-readable by the player) and logged to the Worker tail. The
+  // status the player sees is unchanged, so playback/fallback behaviour is
+  // identical; this only adds observability.
+  if (!upstream.ok) {
+    const errHeaders = filteredResponseHeaders(upstream.headers);
+    mergeCors(errHeaders, corsHeaders(request, env));
+    errHeaders.set("Cache-Control", "no-store");
+    errHeaders.set("X-Norva-Upstream-Status", String(upstream.status));
+    const reason = request.method === "HEAD"
+      ? ""
+      : sanitizeUpstreamReason(await upstream.text().catch(() => ""));
+    const reasonHeader = reason.replace(/[^\x20-\x7E]/g, "").trim().slice(0, 200);
+    if (reasonHeader) errHeaders.set("X-Norva-Upstream-Reason", reasonHeader);
+    console.warn(JSON.stringify({
+      tag: "norva-relay-upstream-error",
+      method: request.method,
+      status: upstream.status,
+      statusText: upstream.statusText,
+      host: targetUrl.hostname,
+      path: targetUrl.pathname,
+      reason: reason.slice(0, 200),
+    }));
+    return new Response(request.method === "HEAD" ? null : reason, {
+      status: upstream.status,
+      statusText: upstream.statusText,
+      headers: errHeaders,
+    });
+  }
+
   const responseHeaders = filteredResponseHeaders(upstream.headers);
   mergeCors(responseHeaders, corsHeaders(request, env));
   responseHeaders.set("Cache-Control", "private, max-age=30");
@@ -703,6 +736,17 @@ function copyHeader(from, to, name) {
   if (value) to.set(name, value);
 }
 
+// Provider error pages (returned with a 401/403/404/5xx) carry the real reason
+// — "Connection limit reached", "Forbidden", "Not found". Strip HTML/whitespace
+// to a short, loggable, header-safe snippet.
+function sanitizeUpstreamReason(text) {
+  return String(text || "")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 300);
+}
+
 function corsHeaders(request, env) {
   const origin = request.headers.get("Origin");
   const configured = parseCsv(env.ALLOWED_ORIGINS);
@@ -715,7 +759,7 @@ function corsHeaders(request, env) {
     "Access-Control-Allow-Origin": allowOrigin,
     "Access-Control-Allow-Headers": "authorization, range, content-type",
     "Access-Control-Allow-Methods": "GET,HEAD,POST,DELETE,OPTIONS",
-    "Access-Control-Expose-Headers": "content-length, content-range, accept-ranges, x-norva-image-cache, x-norva-image-fallback",
+    "Access-Control-Expose-Headers": "content-length, content-range, accept-ranges, x-norva-image-cache, x-norva-image-fallback, x-norva-upstream-status, x-norva-upstream-reason",
     "Access-Control-Max-Age": "86400",
     Vary: "Origin",
   };
