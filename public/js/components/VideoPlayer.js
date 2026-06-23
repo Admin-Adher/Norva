@@ -13,7 +13,10 @@ function isMobile() {
 //   2-3s the player sits behind the edge for stability).
 // - After being paused this long, snap back to live so a long-forgotten pause
 //   doesn't leave the user silently minutes behind (and frees the buffer).
-const LIVE_BEHIND_THRESHOLD_S = 10;
+// Normal HLS live latency is ~1 segment (6-12s), which is "live" for practical
+// purposes — only flag "Behind" once the user has clearly drifted past that
+// (e.g. after a pause), so a fresh start reads as LIVE rather than "Behind by Xs".
+const LIVE_BEHIND_THRESHOLD_S = 15;
 const LIVE_PAUSE_AUTOSNAP_MS = 5 * 60 * 1000;
 
 class VideoPlayer {
@@ -187,9 +190,12 @@ class VideoPlayer {
             maxMaxBufferLength: 60,        // Absolute max buffer 60 seconds
             maxBufferSize: 60 * 1000 * 1000, // 60MB max buffer size
             maxBufferHole: 1.0,            // Allow 1s holes in buffer (helps with discontinuities)
-            // Live stream settings - stay further from live edge for stability
-            liveSyncDurationCount: 3,      // Stay 3 segments behind live
-            liveMaxLatencyDurationCount: 10, // Allow up to 10 segments behind before catching up
+            // Live stream settings — start NEAR the real-time edge. The old
+            // default (3 segments ≈ 24s) made every fresh live start show
+            // "Behind by 24s": with ~6-10s segments, 1 segment keeps us close to
+            // live (normal HLS latency) while still leaving a segment of cushion.
+            liveSyncDurationCount: 1,      // Sit ~1 segment behind live (near real-time)
+            liveMaxLatencyDurationCount: 6, // Allow up to 6 segments behind before catching up
             liveBackBufferLength: 30,      // Keep 30s of back buffer for seeking
             // Audio discontinuity handling (fixes garbled audio during ad transitions)
             stretchShortVideoTrack: true,  // Stretch short segments to avoid gaps
@@ -1519,7 +1525,7 @@ class VideoPlayer {
                     if (this.hls) {
                         this.hls.destroy();
                     }
-                    this.hls = new Hls();
+                    this.hls = new Hls(this.getHlsConfig());
                     this.hls.loadSource(playlistUrl);
                     this.hls.attachMedia(this.video);
                     this.hls.on(Hls.Events.MANIFEST_PARSED, () => {
@@ -1803,7 +1809,7 @@ class VideoPlayer {
         if (target && window.PlaybackHealth?.report) {
             PlaybackHealth.report({ ...target, status: 'ok' }).catch(() => { });
         }
-        // A fresh live channel starts at the edge — begin tracking the gap.
+        // A fresh live channel starts ~1 segment from the edge — begin tracking the gap.
         if (this.isLivePlayback()) this.startLiveSyncMonitor();
     }
 
