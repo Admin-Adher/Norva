@@ -157,13 +157,85 @@ async function listMediaItems(url: URL, userId: string) {
   const { data, count, error } = await query;
   if (error) throwDb(error, "Unable to list media items");
 
+  const items = await annotateMediaItemYears(data ?? [], userId);
+
   return {
-    items: data ?? [],
+    items,
     count: count ?? null,
     limit,
     offset,
     hasMore: typeof count === "number" ? offset + limit < count : (data?.length ?? 0) === limit,
   };
+}
+
+// Provider VOD list endpoints (Xtream get_vod_streams) don't carry a release
+// year, so the browse grid showed none for the ~half of titles whose name has no
+// "(YYYY)". Backfill a year per item at read time: prefer a year in the title
+// text, then fall back to the TMDB-matched cloud_titles.release_year (served by
+// the idx_cloud_titles_tmdb index on user/type/provider_tmdb_id). The frontend
+// card reads item.year (and metadata.year), so this is all it needs to render.
+async function annotateMediaItemYears(rows: Array<Record<string, any>>, userId: string) {
+  if (!rows.length) return rows;
+
+  // Only the rows whose title has no parseable year need a TMDB lookup.
+  const neededByType = new Map<string, Set<string>>();
+  for (const row of rows) {
+    if (parseTitleYear(row?.title)) continue;
+    const tmdbId = stringOrNull(isRecord(row?.metadata) ? row.metadata.providerTmdbId : null);
+    if (!tmdbId) continue;
+    const type = String(row?.item_type ?? "");
+    if (!neededByType.has(type)) neededByType.set(type, new Set());
+    neededByType.get(type)!.add(tmdbId);
+  }
+
+  const yearByKey = new Map<string, number>(); // `${item_type}:${tmdbId}` -> year
+  for (const [type, ids] of neededByType) {
+    const idList = [...ids];
+    for (let i = 0; i < idList.length; i += 500) {
+      const chunk = idList.slice(i, i + 500);
+      const { data, error } = await db
+        .from("cloud_titles")
+        .select("provider_tmdb_id, release_year")
+        .eq("user_id", userId)
+        .eq("item_type", type)
+        .not("release_year", "is", null)
+        .in("provider_tmdb_id", chunk);
+      if (error) continue; // year is best-effort; never fail the page over it
+      for (const title of data ?? []) {
+        const id = stringOrNull(title.provider_tmdb_id);
+        if (id && typeof title.release_year === "number") {
+          yearByKey.set(`${type}:${id}`, title.release_year);
+        }
+      }
+    }
+  }
+
+  for (const row of rows) {
+    let year = parseTitleYear(row?.title);
+    if (!year) {
+      const tmdbId = stringOrNull(isRecord(row?.metadata) ? row.metadata.providerTmdbId : null);
+      if (tmdbId) year = yearByKey.get(`${String(row?.item_type ?? "")}:${tmdbId}`) ?? null;
+    }
+    if (year) {
+      row.year = year;
+      if (isRecord(row.metadata)) row.metadata.year = year;
+      else row.metadata = { year };
+    }
+  }
+  return rows;
+}
+
+// Pull a 4-digit release year out of a provider title: "(2019)" / "[2019]"
+// anywhere, or a year at the very end ("... 2019"). Mirrors the frontend's
+// MediaUtils.extractYear so the grid and rails agree.
+function parseTitleYear(title: unknown): number | null {
+  const text = stringOrNull(title);
+  if (!text) return null;
+  let match = text.match(/[([]\s*((?:19|20)\d{2})\s*[)\]]/);
+  if (!match) match = text.match(/(?:^|\s)((?:19|20)\d{2})\s*$/);
+  if (!match) return null;
+  const year = Number.parseInt(match[1], 10);
+  return Number.isFinite(year) && year >= 1900 && year <= 2100 ? year : null;
 }
 
 async function listMediaCategories(url: URL, userId: string) {
