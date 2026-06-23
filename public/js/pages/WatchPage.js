@@ -2324,6 +2324,7 @@ class WatchPage {
         this.probeDuration = null;
         this.streamStartOffset = 0;
         this._videoEncodeFallbackTried = false;
+        this.cloudAudioInfo = null;
         this.audioTracks = [];
         this.subtitleTracks = [];
         this.subtitleSourceUrl = null;
@@ -2340,6 +2341,11 @@ class WatchPage {
         if (codecProfileInfo) {
             this.applyProbeInfo(codecProfileInfo);
         }
+
+        // Enrich the audio menu with the provider's track metadata (language,
+        // codec, channels, bitrate) for cloud relay playback — the same source the
+        // mobile player uses. Best-effort, display-only; never touches playback.
+        this.enrichCloudPlaybackTracks(url);
 
         // Show loading spinner
         this.showLoading();
@@ -4323,6 +4329,48 @@ class WatchPage {
         }));
     }
 
+    // Provider track metadata (get_vod_info via the relay) for cloud playback.
+    // Display-only: it enriches the single audio entry's label to match what
+    // native players show ("English · AAC · Stereo · 128 kbps"); it never makes the
+    // entry a switchable 'probe' track, so it can't restart or break playback.
+    async enrichCloudPlaybackTracks(playbackUrl) {
+        try {
+            if (!playbackUrl || typeof fetch !== 'function') return;
+            const m = /^(https?:\/\/[^/]+)\/relay\/(.+)$/.exec(String(playbackUrl));
+            if (!m) return;
+            const res = await fetch(`${m[1]}/vod-info/${m[2]}`, { cache: 'no-store' });
+            if (!res.ok) return;
+            const data = await res.json();
+            this.cloudAudioInfo = (Array.isArray(data.audioTracks) && data.audioTracks[0]) || null;
+            if (data && data.duration && !this.probeDuration) {
+                this.probeDuration = this.normalizeDuration(data.duration);
+                this.updateDurationState();
+            }
+            this.updateAudioTracks();
+        } catch (_) { /* best-effort enrichment */ }
+    }
+
+    formatChannelLayout(layout, channels) {
+        const map = { mono: 'Mono', stereo: 'Stereo', '5.1': '5.1', '5.1(side)': '5.1', '7.1': '7.1' };
+        if (layout && map[layout]) return map[layout];
+        if (layout) return layout;
+        if (channels === 1) return 'Mono';
+        if (channels === 2) return 'Stereo';
+        return channels ? `${channels}ch` : '';
+    }
+
+    getCloudAudioLabel(a) {
+        if (!a) return 'Default';
+        const parts = [];
+        const lang = this.getLanguageDisplayName(a.language);
+        if (lang) parts.push(lang);
+        if (a.codec) parts.push(String(a.codec).toUpperCase());
+        const ch = this.formatChannelLayout(a.channelLayout, a.channels);
+        if (ch) parts.push(ch);
+        if (a.bitRate) parts.push(`${Math.round(a.bitRate / 1000)} kbps`);
+        return parts.length ? parts.join(' · ') : 'Default';
+    }
+
     getVisibleAudioTracks() {
         const hlsTracks = this.getHlsAudioTracks();
         if (hlsTracks.length > 1) return hlsTracks;
@@ -4332,6 +4380,10 @@ class WatchPage {
 
         const probeTracks = this.getProbeAudioTracks();
         if (probeTracks.length) return probeTracks;
+
+        if (this.cloudAudioInfo) {
+            return [{ source: 'none', index: -1, label: this.getCloudAudioLabel(this.cloudAudioInfo), active: true }];
+        }
 
         return [{ source: 'none', index: -1, label: 'Default', active: true }];
     }

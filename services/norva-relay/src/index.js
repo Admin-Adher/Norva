@@ -57,11 +57,6 @@ export default {
         });
       }
 
-      // TEMPORARY diagnostic — remove after verifying get_vod_info shape.
-      if (url.pathname === "/vod-info-probe") {
-        return await vodInfoProbe(request, env);
-      }
-
       if (url.pathname === "/image") {
         if (request.method !== "GET" && request.method !== "HEAD") {
           return json(request, env, { error: "Method not allowed" }, 405);
@@ -84,6 +79,23 @@ export default {
           return json(request, env, { error: "Relay token expired" }, 401);
         }
         return await proxyPlayback(request, env, claims);
+      }
+
+      // Track metadata for the player's audio/subtitle menus. The relay is the
+      // only environment that can authenticate against the provider (Deno/Supabase
+      // are IP-blocked), so it fetches the Xtream get_vod_info and returns the
+      // normalized audio/video stream details. Token-gated (same signed token as
+      // /relay/), so only a live playback session can call it.
+      if (url.pathname.startsWith("/vod-info/")) {
+        if (request.method !== "GET" && request.method !== "HEAD") {
+          return json(request, env, { error: "Method not allowed" }, 405);
+        }
+        const token = decodeURIComponent(url.pathname.slice("/vod-info/".length));
+        const claims = await verifyRelayToken(token, env.RELAY_TOKEN_SECRET);
+        if (claims.exp * 1000 < Date.now()) {
+          return json(request, env, { error: "Relay token expired" }, 401);
+        }
+        return await relayVodInfo(request, env, claims);
       }
 
       return json(request, env, { error: "Route not found" }, 404);
@@ -913,30 +925,66 @@ async function fetchNodeViaSocket(node, method, clientRange, ua) {
   return { status: head.status, statusText: head.statusText, headers: head.headers, body, isChunked };
 }
 
-// TEMPORARY diagnostic — remove after verifying get_vod_info shape. Derives the
-// Xtream player_api get_vod_info URL from a /movie/<user>/<pass>/<id>.<ext> stream
-// URL and returns the raw provider JSON, so we can see exactly which fields carry
-// audio language / channels / bitrate / subtitles.
-async function vodInfoProbe(request, env) {
-  const url = new URL(request.url);
-  const target = url.searchParams.get("u");
-  const ua = url.searchParams.get("ua") || "VLC/3.0.20 LibVLC/3.0.20";
-  if (!target) return json(request, env, { error: "missing ?u=<stream url>" }, 400);
+// Normalize one Xtream get_vod_info stream object (audio) into the player's track
+// shape. The provider has already run ffprobe, so language/channels/bitrate are
+// present in info.audio.tags / fields.
+function normalizeAudioStream(a) {
+  const tags = a && typeof a.tags === "object" && a.tags ? a.tags : {};
+  const disp = a && typeof a.disposition === "object" && a.disposition ? a.disposition : {};
+  return {
+    index: Number(a.index) || 0,
+    codec: String(a.codec_name || ""),
+    profile: String(a.profile || ""),
+    channels: Number(a.channels) || 0,
+    channelLayout: String(a.channel_layout || ""),
+    sampleRate: Number(a.sample_rate) || 0,
+    bitRate: Number(a.bit_rate) || 0,
+    language: String(tags.language || ""),
+    title: String(tags.title || ""),
+    default: disp.default === 1 || disp.default === true,
+  };
+}
+
+// Fetch the provider's get_vod_info for the stream in the relay token and return
+// normalized audio/video stream details for the player's track menus. Best-effort:
+// any failure returns an empty (but valid) shape so the player simply shows no
+// extra detail. get_vod_info exposes a single audio stream and no subtitle list
+// (subtitled VOD here is hard-subbed), so audioTracks has at most one entry.
+async function relayVodInfo(request, env, claims) {
+  const empty = { duration: null, video: null, audioTracks: [], subtitles: [] };
   try {
-    const su = new URL(target);
+    const su = new URL(claims.url);
     const parts = su.pathname.split("/").filter(Boolean); // [movie, user, pass, id.ext]
-    const user = parts[1] || "";
-    const pass = parts[2] || "";
-    const vodId = (parts[3] || "").replace(/\.[a-z0-9]+$/i, "");
+    if (parts[0] !== "movie" || !parts[1] || !parts[2] || !parts[3]) {
+      return json(request, env, empty, 200);
+    }
+    const user = parts[1];
+    const pass = parts[2];
+    const vodId = parts[3].replace(/\.[a-z0-9]+$/i, "");
     const api = `${su.protocol}//${su.host}/player_api.php?username=${encodeURIComponent(user)}&password=${encodeURIComponent(pass)}&action=get_vod_info&vod_id=${encodeURIComponent(vodId)}`;
+    const ua = String(claims.ua || "VLC/3.0.20 LibVLC/3.0.20");
     const resp = await fetch(api, { headers: { "user-agent": ua, accept: "application/json" } });
-    const text = await resp.text();
-    return new Response(text.slice(0, 12000), {
-      status: resp.status,
-      headers: { ...corsHeaders(request, env), "content-type": "application/json; charset=utf-8" },
-    });
-  } catch (e) {
-    return json(request, env, { error: String((e && e.message) || e) }, 200);
+    if (!resp.ok) return json(request, env, empty, 200);
+    const data = await resp.json().catch(() => null);
+    const info = data && typeof data.info === "object" && data.info ? data.info : {};
+    const a = info.audio && typeof info.audio === "object" ? info.audio : null;
+    const v = info.video && typeof info.video === "object" ? info.video : null;
+    return json(request, env, {
+      duration: Number(info.duration_secs) || null,
+      video: v
+        ? {
+            codec: String(v.codec_name || ""),
+            width: Number(v.width) || 0,
+            height: Number(v.height) || 0,
+            profile: String(v.profile || ""),
+            pixFmt: String(v.pix_fmt || ""),
+          }
+        : null,
+      audioTracks: a ? [normalizeAudioStream(a)] : [],
+      subtitles: [],
+    }, 200);
+  } catch (_) {
+    return json(request, env, empty, 200);
   }
 }
 
