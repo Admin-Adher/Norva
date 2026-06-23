@@ -233,16 +233,21 @@ const MediaUtils = (() => {
     }
 
     function extractYear(name, year) {
+        const maxYear = new Date().getFullYear() + 1;
+        const plausible = (v) => {
+            const n = v ? parseInt(v, 10) : NaN;
+            return (n >= 1900 && n <= maxYear) ? String(n) : null;
+        };
         if (year) {
-            const m = String(year).match(/(19|20)\d{2}/);
-            if (m) return m[0];
+            const p = plausible(String(year).match(/(19|20)\d{2}/)?.[0]);
+            if (p) return p;
         }
         if (!name) return null;
-        let m = name.match(/[([]\s*((19|20)\d{2})\s*[)\]]/);
-        if (m) return m[1];
-        m = name.trim().match(/(?:^|\s)((19|20)\d{2})$/);
-        if (m) return m[1];
-        return null;
+        const bracket = plausible(name.match(/[([]\s*((19|20)\d{2})\s*[)\]]/)?.[1]);
+        if (bracket) return bracket;
+        // A trailing bare number is often part of the title ("Demon Lord 2099") —
+        // only accept it as a year when it's plausible (not in the future).
+        return plausible(name.trim().match(/(?:^|\s)((19|20)\d{2})$/)?.[1]);
     }
 
     function normalizeTitle(name, knownYear = null) {

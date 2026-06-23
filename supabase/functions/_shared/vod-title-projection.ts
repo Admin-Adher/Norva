@@ -509,12 +509,19 @@ function cleanDisplayTitle(value: string) {
     .trim();
 }
 
-function extractYear(title: string, explicit: unknown) {
-  const fromExplicit = String(explicit ?? "").match(/(19|20)\d{2}/)?.[0];
+function extractYear(title: string, explicit: unknown): string | null {
+  const maxYear = new Date().getFullYear() + 1;
+  const plausible = (value: string | null | undefined): string | null => {
+    const n = value ? Number.parseInt(value, 10) : NaN;
+    return Number.isFinite(n) && n >= 1900 && n <= maxYear ? String(n) : null;
+  };
+  const fromExplicit = plausible(String(explicit ?? "").match(/(19|20)\d{2}/)?.[0]);
   if (fromExplicit) return fromExplicit;
-  const fromTitle = String(title || "").match(/[\[(]\s*((19|20)\d{2})\s*[\])]/)?.[1]
-    ?? String(title || "").trim().match(/(?:^|\s)((19|20)\d{2})$/)?.[1];
-  return fromTitle || null;
+  const fromBracket = plausible(String(title || "").match(/[\[(]\s*((19|20)\d{2})\s*[\])]/)?.[1]);
+  if (fromBracket) return fromBracket;
+  // A trailing bare number is often part of the title ("Demon Lord 2099") — only
+  // accept it as a release year when it's plausible (not in the future).
+  return plausible(String(title || "").trim().match(/(?:^|\s)((19|20)\d{2})$/)?.[1]);
 }
 
 function parseVersionInfo(title: string, metadata: JsonRecord) {
