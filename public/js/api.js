@@ -545,7 +545,15 @@ const CloudAdapter = (() => {
 
     async function getGenreSummary({ type = 'movie' } = {}) {
         const normalizedType = type ? cloudTypeFromLocal(type) : 'movie';
-        return cloudHomeApi().genreSummary({ type: normalizedType });
+        console.log('[ManageContent][api.js] getGenreSummary — local type:', type, '→ cloud type:', normalizedType);
+        try {
+            const res = await cloudHomeApi().genreSummary({ type: normalizedType });
+            console.log('[ManageContent][api.js] getGenreSummary OK — genres:', res?.genres?.length, res);
+            return res;
+        } catch (e) {
+            console.error('[ManageContent][api.js] getGenreSummary THREW — status:', e?.status, '| message:', e?.message, '| payload:', e?.payload, e);
+            throw e;
+        }
     }
 
     function liveDefaultPref(variant) {
