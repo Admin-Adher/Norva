@@ -10,7 +10,7 @@
   <title>Norva | Cloud media player</title>
   <meta name="description" content="Organize your compatible media source and sync playback across your screens.">
   <link rel="icon" type="image/png" href="/favicon.png">
-  <link rel="stylesheet" href="/css/main.css?v=42">
+  <link rel="stylesheet" href="/css/main.css?v=43">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@800&display=swap"
@@ -1024,205 +1024,238 @@
 
           <!-- Transcoding Tab -->
           <div id="tab-transcode" class="tab-content">
-            <div class="settings-section">
-              <h3>Detected Hardware</h3>
-              <div id="hw-info-container" class="hw-info-container">
-                <p class="hint">Loading hardware information...</p>
+            <!-- Plain-language intro: reassure that defaults are fine. -->
+            <div class="tc-intro">
+              <div class="tc-intro-icon">⚙️</div>
+              <div>
+                <p class="tc-intro-title">Playback &amp; quality</p>
+                <p class="tc-intro-text">Norva is set up to play smoothly on its own — you usually don't need to
+                  change anything here. Use these options to sharpen the picture, or to fix a channel that won't play
+                  right.</p>
               </div>
             </div>
 
+            <!-- Quality ------------------------------------------------------>
             <div class="settings-section">
-              <h3>Encoder Settings</h3>
+              <h3>Picture quality</h3>
+              <p class="tc-section-sub">Sharper looks better but uses more internet and power.</p>
+
               <div class="setting-item">
-                <div class="setting-info" style="flex: 1;">
-                  <span class="setting-label">Hardware Encoder</span>
-                  <span class="setting-hint">Which GPU chip encodes the video. Leave on Auto unless you know your
-                    hardware — NVENC = NVIDIA, AMF = AMD, QuickSync = Intel, VAAPI = Linux GPUs.</span>
-                </div>
-                <select id="setting-hw-encoder" class="source-select" style="width: auto; min-width: 200px;">
-                  <option value="auto">Auto (Recommended)</option>
-                  <option value="nvenc">NVIDIA NVENC</option>
-                  <option value="amf">AMD AMF</option>
-                  <option value="qsv">Intel QuickSync</option>
-                  <option value="vaapi">VAAPI (Linux)</option>
-                  <option value="software">Software (CPU)</option>
-                </select>
-              </div>
-              <div class="setting-item">
-                <div class="setting-info" style="flex: 1;">
-                  <span class="setting-label">Max Resolution</span>
-                  <span class="setting-hint">Limit transcoded output resolution. Lower = faster, more
-                    compatible.</span>
+                <div class="setting-info">
+                  <span class="setting-label">Maximum picture quality</span>
+                  <span class="setting-hint">How sharp the video is allowed to get. 1080p looks great on most screens;
+                    pick lower if your connection struggles.</span>
                 </div>
                 <select id="setting-max-resolution" class="source-select" style="width: auto; min-width: 200px;">
-                  <option value="4k">4K (2160p)</option>
-                  <option value="1080p" selected>1080p (Full HD)</option>
-                  <option value="720p">720p (HD)</option>
-                  <option value="480p">480p (SD)</option>
+                  <option value="4k">4K · Ultra HD</option>
+                  <option value="1080p" selected>1080p · Full HD (recommended)</option>
+                  <option value="720p">720p · HD</option>
+                  <option value="480p">480p · Standard</option>
                 </select>
               </div>
+
               <div class="setting-item">
-                <div class="setting-info" style="flex: 1;">
-                  <span class="setting-label">Quality Preset</span>
-                  <span class="setting-hint">Higher quality uses more bandwidth and CPU/GPU.</span>
+                <div class="setting-info">
+                  <span class="setting-label">Quality vs. data use</span>
+                  <span class="setting-hint">Higher gives a crisper picture but needs more data and a stronger
+                    connection.</span>
                 </div>
                 <select id="setting-quality" class="source-select" style="width: auto; min-width: 200px;">
-                  <option value="high">High</option>
-                  <option value="medium" selected>Medium</option>
-                  <option value="low">Low (Fastest)</option>
+                  <option value="high">Best picture</option>
+                  <option value="medium" selected>Balanced (recommended)</option>
+                  <option value="low">Save data</option>
                 </select>
               </div>
-              <div class="setting-item">
-                <div class="setting-info" style="flex: 1;">
-                  <span class="setting-label">Audio Mix Preset</span>
-                  <span class="setting-hint">How multi-channel audio (5.1/7.1) is mixed down to stereo for browser
-                    playback.</span>
-                </div>
-                <select id="setting-audio-mix" class="source-select" style="width: auto; min-width: 200px;">
-                  <option value="auto">Auto (Smart Copy/ITU)</option>
-                  <option value="itu">ITU-R BS.775 (Balanced)</option>
-                  <option value="night">Night Mode (Dialogue Boost)</option>
-                  <option value="cinematic">Cinematic (Wide)</option>
-                  <option value="passthrough">Passthrough (Copy)</option>
-                </select>
-              </div>
-            </div>
 
-            <div class="settings-section">
-              <h3>Upscaling</h3>
               <div class="setting-item">
                 <label class="setting-toggle">
                   <input type="checkbox" id="setting-upscale-enabled">
                   <span class="toggle-slider"></span>
                 </label>
                 <div class="setting-info">
-                  <span class="setting-label">Enable Upscaling</span>
-                  <span class="setting-hint">Upscale lower-resolution content to a higher resolution during
-                    transcoding.</span>
+                  <span class="setting-label">Sharpen older &amp; low-quality channels</span>
+                  <span class="setting-hint">Boost grainy or standard-definition channels closer to HD. Looks nicer
+                    but uses a bit more power.</span>
                 </div>
               </div>
-              <div class="setting-item" id="upscale-method-container" style="display: none;">
-                <div class="setting-info" style="flex: 1;">
-                  <span class="setting-label">Upscale Method</span>
-                  <span class="setting-hint">Hardware is faster; Software (Lanczos) is higher quality.</span>
+              <div class="setting-item tc-sub-setting" id="upscale-method-container" style="display: none;">
+                <div class="setting-info">
+                  <span class="setting-label">Sharpening method</span>
+                  <span class="setting-hint">“Faster” is lighter on your device; “Best quality” looks a little
+                    sharper.</span>
                 </div>
                 <select id="setting-upscale-method" class="source-select" style="width: auto; min-width: 200px;">
-                  <option value="hardware">Hardware (GPU)</option>
-                  <option value="software">Software (Lanczos)</option>
+                  <option value="hardware">Faster</option>
+                  <option value="software">Best quality</option>
                 </select>
               </div>
-              <div class="setting-item" id="upscale-target-container" style="display: none;">
-                <div class="setting-info" style="flex: 1;">
-                  <span class="setting-label">Upscale Target</span>
-                  <span class="setting-hint">Target resolution for upscaled output.</span>
+              <div class="setting-item tc-sub-setting" id="upscale-target-container" style="display: none;">
+                <div class="setting-info">
+                  <span class="setting-label">Sharpen up to</span>
+                  <span class="setting-hint">The quality level Norva aims for when sharpening.</span>
                 </div>
                 <select id="setting-upscale-target" class="source-select" style="width: auto; min-width: 200px;">
-                  <option value="720p">720p (HD)</option>
-                  <option value="1080p" selected>1080p (Full HD)</option>
-                  <option value="4k">4K (2160p)</option>
+                  <option value="720p">720p · HD</option>
+                  <option value="1080p" selected>1080p · Full HD</option>
+                  <option value="4k">4K · Ultra HD</option>
                 </select>
               </div>
             </div>
 
+            <!-- Troubleshooting --------------------------------------------->
             <div class="settings-section">
-              <h3>Stream Processing</h3>
-              <div class="setting-item">
-                <label class="setting-toggle">
-                  <input type="checkbox" id="setting-auto-transcode-tc">
-                  <span class="toggle-slider"></span>
-                </label>
-                <div class="setting-info">
-                  <span class="setting-label">Auto Transcode (Smart)</span>
-                  <span class="setting-hint">Automatically detect stream codecs and only transcode/remux when needed.
-                    Adds ~1-3s probe delay on first play.</span>
-                </div>
-              </div>
+              <h3>Having trouble with a channel?</h3>
+              <p class="tc-section-sub">Only switch these on if you're actually seeing the problem described — leave
+                them off otherwise.</p>
+
               <div class="setting-item">
                 <label class="setting-toggle">
                   <input type="checkbox" id="setting-force-transcode-tc">
                   <span class="toggle-slider"></span>
                 </label>
                 <div class="setting-info">
-                  <span class="setting-label">Force Audio Transcode</span>
-                  <span class="setting-hint">Transcode audio to AAC for browser compatibility. Enable if you get video
-                    but no audio (fixes Dolby/AC3/EAC3).</span>
+                  <span class="setting-label">Picture plays but no sound</span>
+                  <span class="setting-hint">Turn this on if you can see a channel but hear nothing — it fixes
+                    surround-sound formats (Dolby / AC3) that browsers can't play.</span>
                 </div>
               </div>
-              <div class="setting-item">
-                <label class="setting-toggle">
-                  <input type="checkbox" id="setting-force-video-transcode-tc">
-                  <span class="toggle-slider"></span>
-                </label>
-                <div class="setting-info">
-                  <span class="setting-label">Force Video Transcode</span>
-                  <span class="setting-hint">Force full video transcoding (burn-in subtitles, incompatible video).
-                    Uses
-                    HW encoder.</span>
-                </div>
-              </div>
-              <div class="setting-item">
-                <label class="setting-toggle">
-                  <input type="checkbox" id="setting-force-remux-tc">
-                  <span class="toggle-slider"></span>
-                </label>
-                <div class="setting-info">
-                  <span class="setting-label">Force Remux</span>
-                  <span class="setting-hint">Repackage (remux) raw .ts streams into an MP4 container without
-                    re-encoding — fast. Enable for IPTV middleware like m3u-editor or dispatcharr.</span>
-                </div>
-              </div>
-              <div class="setting-item">
-                <div class="setting-info" style="flex: 1;">
-                  <span class="setting-label">Stream Output Format</span>
-                  <span class="setting-hint">Delivery format for Xtream streams. HLS is modern and recommended;
-                    switch to MPEG-TS (older, very compatible) if you get buffering.</span>
-                </div>
-                <select id="setting-stream-format-tc" class="source-select" style="width: auto; min-width: 200px;">
-                  <option value="m3u8">HLS (m3u8) - Recommended</option>
-                  <option value="ts">MPEG-TS (ts) - Better buffer</option>
-                </select>
-              </div>
-            </div>
 
-            <div class="settings-section">
-              <h3>HTTP Settings</h3>
-              <div class="setting-item">
-                <div class="setting-info" style="flex: 1;">
-                  <span class="setting-label">User-Agent</span>
-                  <span class="setting-hint">HTTP User-Agent for stream requests. Try VLC if your provider blocks
-                    Chrome.</span>
-                </div>
-                <select id="setting-user-agent-tc" class="source-select" style="width: auto; min-width: 200px;">
-                  <option value="chrome">Chrome (Default)</option>
-                  <option value="vlc">VLC</option>
-                  <option value="tivimate">TiviMate</option>
-                  <option value="custom">Custom...</option>
-                </select>
-              </div>
-              <div class="setting-item" id="custom-user-agent-container-tc" style="display: none;">
-                <div class="setting-info" style="flex: 1;">
-                  <span class="setting-label">Custom User-Agent</span>
-                  <span class="setting-hint">Enter the exact User-Agent your provider expects (a browser or app identifier).</span>
-                </div>
-                <input type="text" id="setting-user-agent-custom-tc" class="search-input" style="width: 300px;"
-                  placeholder="e.g. Mozilla/5.0 (Windows NT 10.0; Win64; x64)">
-              </div>
-            </div>
-
-            <div class="settings-section">
-              <h3>Network</h3>
               <div class="setting-item">
                 <label class="setting-toggle">
                   <input type="checkbox" id="setting-force-proxy-tc">
                   <span class="toggle-slider"></span>
                 </label>
                 <div class="setting-info">
-                  <span class="setting-label">Force Backend Proxy</span>
-                  <span class="setting-hint">Route all streams through Norva's server instead of your browser. Enable
-                    if streams don't play directly (works around browser security blocks).</span>
+                  <span class="setting-label">A channel stays black or won't start</span>
+                  <span class="setting-hint">Turn this on to have Norva fetch streams through its own servers, which
+                    gets past blocks that can stop a channel loading.</span>
                 </div>
               </div>
+
+              <div class="setting-item">
+                <div class="setting-info">
+                  <span class="setting-label">A channel keeps buffering</span>
+                  <span class="setting-hint">If a channel stutters or pauses to load, try the smoother delivery
+                    mode.</span>
+                </div>
+                <select id="setting-stream-format-tc" class="source-select" style="width: auto; min-width: 200px;">
+                  <option value="m3u8">Standard (recommended)</option>
+                  <option value="ts">Smoother — more buffering room</option>
+                </select>
+              </div>
             </div>
+
+            <!-- Advanced (collapsed) ---------------------------------------->
+            <details class="settings-advanced">
+              <summary class="settings-advanced-summary">
+                <span class="settings-advanced-chevron" aria-hidden="true">▸</span>
+                <span>
+                  <span class="settings-advanced-title">Advanced settings</span>
+                  <span class="settings-advanced-sub">For power users — the defaults above are right for almost
+                    everyone.</span>
+                </span>
+              </summary>
+
+              <div class="settings-advanced-body">
+                <div class="setting-item">
+                  <label class="setting-toggle">
+                    <input type="checkbox" id="setting-auto-transcode-tc">
+                    <span class="toggle-slider"></span>
+                  </label>
+                  <div class="setting-info">
+                    <span class="setting-label">Smart processing</span>
+                    <span class="setting-hint">Detect each stream and only convert it when needed. Recommended on; adds
+                      a ~1–3s check on first play.</span>
+                  </div>
+                </div>
+
+                <div class="setting-item">
+                  <label class="setting-toggle">
+                    <input type="checkbox" id="setting-force-video-transcode-tc">
+                    <span class="toggle-slider"></span>
+                  </label>
+                  <div class="setting-info">
+                    <span class="setting-label">Always re-encode video</span>
+                    <span class="setting-hint">Force a full video conversion (e.g. to burn in subtitles). Much heavier —
+                      only enable if you need it.</span>
+                  </div>
+                </div>
+
+                <div class="setting-item">
+                  <label class="setting-toggle">
+                    <input type="checkbox" id="setting-force-remux-tc">
+                    <span class="toggle-slider"></span>
+                  </label>
+                  <div class="setting-info">
+                    <span class="setting-label">Repackage raw streams (remux)</span>
+                    <span class="setting-hint">Repackage raw .ts streams into MP4 without re-encoding — fast. Helps with
+                      some IPTV middleware (m3u-editor, dispatcharr).</span>
+                  </div>
+                </div>
+
+                <div class="setting-item">
+                  <div class="setting-info">
+                    <span class="setting-label">Video chip (encoder)</span>
+                    <span class="setting-hint">Which GPU handles conversion. Leave on Auto unless you know your
+                      hardware — NVENC = NVIDIA, AMF = AMD, QuickSync = Intel, VAAPI = Linux.</span>
+                  </div>
+                  <select id="setting-hw-encoder" class="source-select" style="width: auto; min-width: 200px;">
+                    <option value="auto">Auto (recommended)</option>
+                    <option value="nvenc">NVIDIA NVENC</option>
+                    <option value="amf">AMD AMF</option>
+                    <option value="qsv">Intel QuickSync</option>
+                    <option value="vaapi">VAAPI (Linux)</option>
+                    <option value="software">Software (CPU)</option>
+                  </select>
+                </div>
+
+                <div class="setting-item">
+                  <div class="setting-info">
+                    <span class="setting-label">Surround-sound mixdown</span>
+                    <span class="setting-hint">How 5.1 / 7.1 audio is folded into stereo for playback.</span>
+                  </div>
+                  <select id="setting-audio-mix" class="source-select" style="width: auto; min-width: 200px;">
+                    <option value="auto">Auto (recommended)</option>
+                    <option value="itu">Balanced</option>
+                    <option value="night">Night mode (clearer dialogue)</option>
+                    <option value="cinematic">Cinematic (wide)</option>
+                    <option value="passthrough">Keep original</option>
+                  </select>
+                </div>
+
+                <div class="setting-item">
+                  <div class="setting-info">
+                    <span class="setting-label">Connection identity</span>
+                    <span class="setting-hint">Some providers only allow certain apps. Switch this if your provider
+                      blocks the default.</span>
+                  </div>
+                  <select id="setting-user-agent-tc" class="source-select" style="width: auto; min-width: 200px;">
+                    <option value="chrome">Browser (default)</option>
+                    <option value="vlc">VLC</option>
+                    <option value="tivimate">TiviMate</option>
+                    <option value="custom">Custom…</option>
+                  </select>
+                </div>
+                <div class="setting-item tc-sub-setting" id="custom-user-agent-container-tc" style="display: none;">
+                  <div class="setting-info">
+                    <span class="setting-label">Custom connection identity</span>
+                    <span class="setting-hint">Enter the exact identifier (User-Agent) your provider expects.</span>
+                  </div>
+                  <input type="text" id="setting-user-agent-custom-tc" class="search-input" style="width: 300px;"
+                    placeholder="e.g. Mozilla/5.0 (Windows NT 10.0; Win64; x64)">
+                </div>
+
+                <div class="setting-item tc-hw-item">
+                  <div class="setting-info" style="flex: 1;">
+                    <span class="setting-label">Detected hardware</span>
+                    <span class="setting-hint">Graphics acceleration found on the device running Norva.</span>
+                    <div id="hw-info-container" class="hw-info-container">
+                      <p class="hint">Loading hardware information…</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </details>
           </div>
 
           <!-- Manage Content Tab -->

@@ -3161,6 +3161,78 @@ video::cue {
   transform: translateX(22px);
 }
 
+/* =====================================================
+   Transcoding tab — mass-market layout
+   ===================================================== */
+.tc-intro {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  padding: 16px 18px;
+  margin-bottom: var(--space-lg);
+  background:
+    radial-gradient(120% 120% at 0% 0%, rgba(59, 130, 246, 0.10), transparent 60%),
+    var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+}
+.tc-intro-icon { font-size: 22px; line-height: 1.4; flex: none; }
+.tc-intro-title { margin: 0 0 4px; font-weight: 700; font-size: 1rem; color: var(--color-text-primary); }
+.tc-intro-text { margin: 0; font-size: 0.86rem; line-height: 1.55; color: var(--color-text-secondary); }
+
+/* Short caption under a section heading. */
+.tc-section-sub {
+  margin: -6px 0 14px;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+}
+
+/* Dependent sub-options (e.g. upscaling method) sit indented under their parent. */
+.setting-item.tc-sub-setting {
+  margin-left: 22px;
+  border-left: 2px solid var(--color-accent-dim);
+  background: var(--color-bg-primary);
+}
+
+.tc-hw-item { display: block; }
+.tc-hw-item .hw-info-container { margin-top: 10px; }
+
+/* Progressive disclosure for expert options. */
+.settings-advanced {
+  margin-bottom: var(--space-xl);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-secondary);
+  overflow: hidden;
+}
+.settings-advanced-summary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 15px 18px;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+  transition: background 0.14s ease;
+}
+.settings-advanced-summary::-webkit-details-marker { display: none; }
+.settings-advanced-summary:hover { background: rgba(255, 255, 255, 0.03); }
+.settings-advanced-chevron {
+  flex: none;
+  font-size: 0.85rem;
+  color: var(--color-text-secondary);
+  transition: transform 0.18s ease;
+}
+.settings-advanced[open] .settings-advanced-chevron { transform: rotate(90deg); }
+.settings-advanced-title { display: block; font-weight: 650; font-size: 0.95rem; color: var(--color-text-primary); }
+.settings-advanced-sub { display: block; margin-top: 2px; font-size: 0.78rem; color: var(--color-text-secondary); }
+.settings-advanced-body {
+  padding: 4px 16px 16px;
+  border-top: 1px solid var(--color-border);
+}
+.settings-advanced-body .setting-item { background: var(--color-bg-primary); }
+
 /* Volume Slider */
 .volume-slider-container {
   display: flex;
