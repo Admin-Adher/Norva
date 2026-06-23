@@ -95,6 +95,22 @@ const PLAN_LIMITS: Record<string, JsonRecord> = {
   },
 };
 
+// Premium add-on feature flags (observe-mode scaffold for the auto-refresh
+// roadmap — defined here so the model stays the single source of truth shared
+// with future enforcement + the billing webhook). Paid plans and the trial get
+// them; the free/none soft-wall tiers do not, which is what the upsell + the
+// conversion-signal logging key off. Nothing is enforced while the runtime mode
+// is "observe".
+const PREMIUM_FEATURE_KEYS = [
+  "auto_refresh_background",        // refresh the catalogue while the app is closed (cloud cron)
+  "auto_refresh_fast",             // sub-daily refresh cadence
+  "content_notifications_frequent", // more than the one free daily "what's new" notification
+] as const;
+for (const [code, limits] of Object.entries(PLAN_LIMITS)) {
+  const premium = code !== "free" && code !== "none";
+  for (const key of PREMIUM_FEATURE_KEYS) limits[key] = premium;
+}
+
 const HARD_BLOCK_STATUSES = new Set(["revoked", "refunded", "fraud"]);
 
 export function getEntitlementRuntime() {
@@ -390,6 +406,62 @@ function normalizeBillingMode(value: string) {
 
 export function getBillingMode() {
   return BILLING_MODE;
+}
+
+// The plan a user would effectively be on UNDER ENFORCEMENT. Observe mode
+// rewrites planCode→"manual" and allowed→true, so for upsell/signal purposes we
+// reconstruct the real plan from the underlying reason + projection. Denied
+// reasons (no/expired access) collapse to "free" so an expired trial is treated
+// as a conversion target, not as still-entitled.
+const DENIED_REASONS = new Set([
+  "subscription_required", "trial_expired", "subscription_expired",
+  "billing_unverified", "revoked", "refunded", "fraud", "none",
+]);
+export function realPlanCode(decision: EntitlementDecision): string {
+  const reason = decision.reason.replace(/^gate0_(observe|bypass)_/, "");
+  if (DENIED_REASONS.has(reason)) return "free";
+  const projection = decision.projection as JsonRecord | null;
+  return String(projection?.plan_code || "free");
+}
+
+export function planFeatureEntitled(planCode: string, feature: string): boolean {
+  const limits = PLAN_LIMITS[planCode] ?? PLAN_LIMITS.free;
+  return Boolean(limits[feature]);
+}
+
+// Map of premium features → whether the user's real plan grants them. Exposed
+// on the entitlements decision so the client can render upsells correctly even
+// while observe mode leaves everything unlocked.
+export function featuresForDecision(decision: EntitlementDecision): JsonRecord {
+  const plan = realPlanCode(decision);
+  const features: JsonRecord = {};
+  for (const key of PREMIUM_FEATURE_KEYS) {
+    features[key] = { entitled: planFeatureEntitled(plan, key) };
+  }
+  return features;
+}
+
+// Conversion signal: record that a user reached for a premium-gated feature.
+// Best-effort and non-blocking — a signal must never break a request, and in
+// observe mode it never gates anything; it only feeds the conversion funnel.
+export async function recordEntitlementSignal(
+  db: SupabaseClient,
+  userId: string,
+  feature: string,
+  planCode: string,
+  context: JsonRecord = {},
+): Promise<void> {
+  try {
+    await db.from("cloud_entitlement_signals").insert({
+      user_id: userId,
+      feature: String(feature).slice(0, 64),
+      plan_code: planCode,
+      mode: ENTITLEMENTS_MODE,
+      context: isRecord(context) ? context : {},
+    });
+  } catch (_) {
+    // swallow — the funnel is observability, never a hard dependency
+  }
 }
 
 function normalizeEntitlementsMode(value: string) {

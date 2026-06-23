@@ -618,6 +618,13 @@
         entitlements: {
             get: () => request('GET', '/entitlements'),
             device: () => request('GET', '/device/entitlements', null, { token: getDeviceToken() }),
+            // Conversion signal (observe-mode scaffold): record that the user
+            // reached for a premium-gated feature. Best-effort, never throws.
+            recordSignal: (feature, context = {}) => {
+                try {
+                    return request('POST', '/entitlements/signal', { feature, context }).catch(() => null);
+                } catch (_) { return Promise.resolve(null); }
+            },
             isSubscriptionError: (error) => {
                 const payload = error?.payload || {};
                 const details = payload.details || {};

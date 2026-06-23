@@ -402,7 +402,8 @@ class SettingsPage {
         if (autoRefreshToggle && this.app.player?.settings) {
             const enabled = this.app.player.settings.autoRefreshEnabled !== false;
             autoRefreshToggle.checked = enabled;
-            if (autoRefreshInterval) autoRefreshInterval.value = String(this.app.player.settings.autoRefreshIntervalHours || 24);
+            let lastFreeInterval = String(this.app.player.settings.autoRefreshIntervalHours || 24);
+            if (autoRefreshInterval) autoRefreshInterval.value = lastFreeInterval;
             if (autoRefreshRow) autoRefreshRow.style.display = enabled ? '' : 'none';
             autoRefreshToggle.addEventListener('change', () => {
                 this.app.player.settings.autoRefreshEnabled = autoRefreshToggle.checked;
@@ -410,6 +411,16 @@ class SettingsPage {
                 if (autoRefreshRow) autoRefreshRow.style.display = autoRefreshToggle.checked ? '' : 'none';
             });
             autoRefreshInterval?.addEventListener('change', () => {
+                // The "even when closed" cadence is the Premium tier (cloud cron,
+                // not built yet). Selecting it logs the conversion signal, shows
+                // the upsell and reverts — nothing is enforced.
+                if (autoRefreshInterval.value === 'premium') {
+                    try { window.NorvaCloud?.entitlements?.recordSignal?.('auto_refresh_background', { source: 'frequency_select' }); } catch (_) { /* best-effort */ }
+                    try { this.app.sourceManager?.toast?.('Background updates even when Norva is closed are coming with Premium ✦'); } catch (_) { /* noop */ }
+                    autoRefreshInterval.value = lastFreeInterval;
+                    return;
+                }
+                lastFreeInterval = autoRefreshInterval.value;
                 this.app.player.settings.autoRefreshIntervalHours = parseInt(autoRefreshInterval.value, 10) || 24;
                 this.app.player.saveSettings();
             });

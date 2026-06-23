@@ -10,7 +10,7 @@ import {
 } from "../_shared/live-materialization.ts";
 import { refreshVodTitleProjection } from "../_shared/vod-title-projection.ts";
 import type { LiveCatalogItem } from "../_shared/live-catalog.ts";
-import { getBillingMode, getEntitlementDecision, getEntitlementRuntime, hasConsumedTrial, limitNumber } from "../_shared/entitlements.ts";
+import { featuresForDecision, getBillingMode, getEntitlementDecision, getEntitlementRuntime, hasConsumedTrial, limitNumber, realPlanCode, recordEntitlementSignal } from "../_shared/entitlements.ts";
 
 type JsonRecord = Record<string, unknown>;
 type CloudUser = { id: string; email?: string };
@@ -194,7 +194,8 @@ async function route(
       return { body: await listMediaItems(url, device.user_id, db) };
     }
     if (req.method === "GET" && id === "entitlements") {
-      return { body: await getEntitlementDecision(db, device.user_id) };
+      const decision = await getEntitlementDecision(db, device.user_id);
+      return { body: { ...decision, features: featuresForDecision(decision) } };
     }
     if (id === "playback" && action === "sessions" && req.method === "POST") {
       await requirePlanCapacity(device.user_id, db, "concurrent_streams", "cloud_playback_sessions", {
@@ -214,7 +215,24 @@ async function route(
   const user = await requireUser(req, db);
 
   if (scope === "entitlements" && req.method === "GET") {
-    return { body: await getEntitlementDecision(db, user.id) };
+    const decision = await getEntitlementDecision(db, user.id);
+    return { body: { ...decision, features: featuresForDecision(decision) } };
+  }
+
+  // Conversion-signal log (observe-mode scaffold): the client posts when a user
+  // reaches for a premium-gated feature. Never gates anything — just records
+  // demand against the user's real plan. { feature, context? }.
+  if (scope === "entitlements" && req.method === "POST" && id === "signal") {
+    const body = await req.json().catch(() => ({})) as JsonRecord;
+    const feature = typeof body.feature === "string" ? body.feature : "";
+    if (feature) {
+      const decision = await getEntitlementDecision(db, user.id, { autoStartTrial: false });
+      const context = body.context && typeof body.context === "object" && !Array.isArray(body.context)
+        ? body.context as JsonRecord
+        : {};
+      await recordEntitlementSignal(db, user.id, feature, realPlanCode(decision), context);
+    }
+    return { body: { ok: true } };
   }
 
   if (scope === "billing" && id === "trial-eligibility" && req.method === "GET") {
