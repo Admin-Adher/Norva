@@ -1316,8 +1316,11 @@ class SourceManager {
         this.loadContentTree(parseInt(sourceId));
     }
 
-    // Show provider controls only for the channels view; the genre view is
-    // catalogue-wide so it hides the provider dropdown, search and Save button.
+    // The provider selector is available in every view so the user can choose
+    // which provider they're managing — in the genre view it scopes which
+    // provider's catalogue the genres are counted from ("All providers" by
+    // default). Search + Save are channel-tree concepts, so they stay limited
+    // to the channels view; the genre view saves instantly on each toggle.
     updateContentChrome(mode) {
         const providerMode = mode === 'provider';
         const header = document.querySelector('#tab-content .content-browser-header');
@@ -1325,17 +1328,32 @@ class SourceManager {
         if (header) header.style.display = '';
         if (legend) legend.style.display = '';
         const setShown = (el, show) => { if (el) el.style.display = show ? '' : 'none'; };
-        setShown(document.getElementById('content-source-select'), providerMode);
+        setShown(document.getElementById('content-source-select'), true);
         setShown(document.querySelector('#tab-content .search-wrapper'), providerMode);
         setShown(document.getElementById('content-save'), providerMode);
+        this.setProviderModeLabel(mode);
+    }
+
+    // The blank (value="") provider option means different things per view: in
+    // the genre view it's the valid "All providers" default; in the channels
+    // view it's the "you must pick one" placeholder. Re-label it to match.
+    setProviderModeLabel(mode) {
+        const select = document.getElementById('content-source-select');
+        const first = select && select.options && select.options[0];
+        if (first && first.value === '') {
+            first.textContent = mode === 'provider' ? 'Choose a provider…' : 'All providers';
+        }
     }
 
     // --- Catalogue genre view (movies / series) ---
     async loadGenreView(itemType) {
-        this.treeData = { type: itemType + '-genres', itemType, genreView: true };
-        this.contentTree.innerHTML = '<p class="hint">Loading genres…</p>';
+        // Scope to the chosen provider (blank = every provider).
+        const sourceId = (this.contentSourceSelect && this.contentSourceSelect.value) || '';
+        this.treeData = { type: itemType + '-genres', itemType, genreView: true, sourceId };
+        this.contentTree.innerHTML = '<div class="genre-loading">'
+            + '<span class="genre-spinner" aria-hidden="true"></span>Loading genres…</div>';
         try {
-            const payload = await API.media.genreSummary({ type: itemType });
+            const payload = await API.media.genreSummary({ type: itemType, source: sourceId });
             const genres = (payload && payload.genres) || [];
             this.genreHidden = new Set(payload && payload.hidden ? payload.hidden : []);
             this.genreList = genres;
@@ -1352,25 +1370,45 @@ class SourceManager {
     }
 
     renderGenreView(genres) {
-        const rows = genres.map((g) => {
-            const checked = !this.genreHidden.has(g.bucket);
-            return `<label class="checkbox-label channel-item" style="display:flex;align-items:center;gap:12px;padding:12px 14px" title="${this.escapeHtml(g.label)}">
-                <input type="checkbox" class="genre-checkbox" data-bucket="${this.escapeHtml(g.bucket)}" ${checked ? 'checked' : ''}>
-                <span class="channel-name" style="font-weight:600;flex:1">${this.escapeHtml(g.label)}</span>
-                <span class="setting-hint" style="margin:0">${Number(g.count) || 0}</span>
-            </label>`;
+        const unit = this.treeData?.itemType === 'series' ? 'shows' : 'movies';
+        const cards = genres.map((g) => {
+            const on = !this.genreHidden.has(g.bucket);
+            const count = Number(g.count) || 0;
+            return `<button type="button" class="genre-card ${on ? 'is-on' : 'is-off'}" data-bucket="${this.escapeHtml(g.bucket)}" role="switch" aria-checked="${on ? 'true' : 'false'}" title="${this.escapeHtml(g.label)}">
+                <span class="genre-card-text">
+                    <span class="genre-card-name">${this.escapeHtml(g.label)}</span>
+                    <span class="genre-card-count">${count.toLocaleString()} ${unit}</span>
+                </span>
+                <span class="genre-switch" aria-hidden="true"><span class="genre-switch-knob"></span></span>
+            </button>`;
         }).join('');
-        this.contentTree.innerHTML = `<div class="content-channels">${rows}</div>`;
-        this.contentTree.querySelectorAll('.genre-checkbox').forEach((cb) => {
-            cb.addEventListener('change', () => this.onGenreToggle(cb));
+        this.contentTree.innerHTML = `<div class="genre-view">
+            <div class="genre-view-summary">${this.genreSummaryText(genres)}</div>
+            <div class="genre-grid">${cards}</div>
+        </div>`;
+        this.contentTree.querySelectorAll('.genre-card').forEach((card) => {
+            card.addEventListener('click', () => this.onGenreToggle(card));
         });
     }
 
-    onGenreToggle(cb) {
-        const bucket = cb.dataset.bucket;
+    genreSummaryText(genres) {
+        const list = genres || this.genreList || [];
+        const shown = list.filter((g) => !this.genreHidden?.has(g.bucket)).length;
+        return `<strong>${shown}</strong> of ${list.length} genres shown in Norva`;
+    }
+
+    onGenreToggle(card) {
+        const bucket = card.dataset.bucket;
         if (!this.genreHidden) this.genreHidden = new Set();
-        if (cb.checked) this.genreHidden.delete(bucket);
+        const turningOn = card.classList.contains('is-off');
+        if (turningOn) this.genreHidden.delete(bucket);
         else this.genreHidden.add(bucket);
+        // Flip the card in place for a snappy, no-flicker toggle.
+        card.classList.toggle('is-on', turningOn);
+        card.classList.toggle('is-off', !turningOn);
+        card.setAttribute('aria-checked', turningOn ? 'true' : 'false');
+        const summary = this.contentTree?.querySelector('.genre-view-summary');
+        if (summary) summary.innerHTML = this.genreSummaryText();
         this.saveGenreHidden();
     }
 

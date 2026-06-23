@@ -543,9 +543,11 @@ const CloudAdapter = (() => {
         });
     }
 
-    async function getGenreSummary({ type = 'movie' } = {}) {
+    async function getGenreSummary({ type = 'movie', source = '' } = {}) {
         const normalizedType = type ? cloudTypeFromLocal(type) : 'movie';
-        return cloudHomeApi().genreSummary({ type: normalizedType });
+        const params = { type: normalizedType };
+        if (source) params.source = source;
+        return cloudHomeApi().genreSummary(params);
     }
 
     function liveDefaultPref(variant) {
@@ -1689,7 +1691,7 @@ const CloudAdapter = (() => {
             };
         }
         if (method === 'GET' && path === '/media/genre-summary') {
-            return getGenreSummary({ type: query.get('type') || 'movie' });
+            return getGenreSummary({ type: query.get('type') || 'movie', source: query.get('source') || '' });
         }
         if (method === 'GET' && path === '/channels/recent') {
             const requestedType = query.get('type') || 'movie';

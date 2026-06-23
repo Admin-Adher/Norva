@@ -281,16 +281,24 @@ async function getHiddenGenres(req: Request, userId: string): Promise<Set<string
 async function listGenreSummary(req: Request, url: URL, userId: string) {
   const itemType = url.searchParams.get("type") === "series" ? "series" : "movie";
 
+  // Optional provider scope: Manage Content lets the user filter the genre view
+  // to a single provider. A blank / "all" value (or any non-UUID) means every
+  // provider. Validated as a UUID so we never pass junk into the RPC.
+  const sourceParam = (url.searchParams.get("source") || "").trim();
+  const sourceId =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sourceParam)
+      ? sourceParam
+      : null;
+
   // Aggregate in SQL: distinct (categoryName, tmdb genres) combos + counts.
   // Returns ~a few thousand grouped rows instead of tens of thousands of full
   // rows, which overran the function ("Unable to load genres"). The curated
   // bucket mapping stays in TS, multiplying each combo by its count.
   let rows: Array<{ category_name?: unknown; genres?: unknown; n?: unknown }>;
   try {
-    const { data, error } = await db.rpc("cloud_genre_summary", {
-      p_user_id: userId,
-      p_item_type: itemType,
-    });
+    const rpcArgs: Record<string, unknown> = { p_user_id: userId, p_item_type: itemType };
+    if (sourceId) rpcArgs.p_source_id = sourceId;
+    const { data, error } = await db.rpc("cloud_genre_summary", rpcArgs);
     if (error) {
       if (isMissingMaterialization(error)) return { type: itemType, genres: [], hidden: [] };
       throwDb(error, "Unable to summarise genres");
@@ -321,7 +329,7 @@ async function listGenreSummary(req: Request, url: URL, userId: string) {
       hidden: hidden.has(bucketId),
     }));
 
-  return { type: itemType, genres, hidden: [...hidden] };
+  return { type: itemType, source: sourceId, genres, hidden: [...hidden] };
 }
 
 async function listGenreRails(req: Request, url: URL, userId: string) {

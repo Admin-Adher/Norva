@@ -3662,6 +3662,151 @@ kbd {
 }
 
 /* =====================================================
+   Manage Content — polished scroll container + genre grid
+   ===================================================== */
+/* Lift the scroll container out of "flat grey box" territory: subtle border,
+   inner depth and a slim, self-contained scrollbar that doesn't look default. */
+.content-tree {
+  background:
+    radial-gradient(120% 80% at 50% -10%, rgba(59, 130, 246, 0.06), transparent 60%),
+    var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-lg, 20px);
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border-light) transparent;
+}
+.content-tree::-webkit-scrollbar { width: 10px; }
+.content-tree::-webkit-scrollbar-track { background: transparent; }
+.content-tree::-webkit-scrollbar-thumb {
+  background: var(--color-border-light);
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+.content-tree::-webkit-scrollbar-thumb:hover {
+  background: #52525b;
+  background-clip: padding-box;
+}
+
+/* Loading + summary line */
+.genre-loading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--color-text-secondary);
+  font-size: 0.9rem;
+  padding: 8px 2px;
+}
+.genre-spinner {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid var(--color-border-light);
+  border-top-color: var(--color-accent);
+  animation: genre-spin 0.7s linear infinite;
+}
+@keyframes genre-spin { to { transform: rotate(360deg); } }
+
+.genre-view-summary {
+  font-size: 0.82rem;
+  color: var(--color-text-secondary);
+  margin: 0 2px 16px;
+  letter-spacing: 0.01em;
+}
+.genre-view-summary strong { color: var(--color-text-primary); font-variant-numeric: tabular-nums; }
+
+/* The grid of genre toggles — the part the user called "too ugly". Now a clean,
+   responsive set of cards, each an iOS-style on/off switch. */
+.genre-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(232px, 1fr));
+  gap: 12px;
+}
+
+.genre-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  width: 100%;
+  text-align: left;
+  margin: 0;
+  padding: 14px 16px;
+  font-family: inherit;
+  color: var(--color-text-primary);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.012));
+  border: 1px solid var(--color-border);
+  border-radius: 14px;
+  cursor: pointer;
+  transition: transform 0.14s ease, border-color 0.14s ease,
+    box-shadow 0.14s ease, background 0.14s ease, opacity 0.14s ease;
+}
+.genre-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--color-border-light);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.28);
+}
+.genre-card:active { transform: translateY(0); }
+.genre-card:focus-visible {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-dim);
+}
+
+.genre-card-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.genre-card-name {
+  font-weight: 650;
+  font-size: 0.94rem;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.genre-card-count {
+  font-size: 0.76rem;
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* iOS-style switch */
+.genre-switch {
+  flex: none;
+  position: relative;
+  width: 42px;
+  height: 24px;
+  border-radius: 999px;
+  background: var(--color-bg-hover);
+  border: 1px solid var(--color-border-light);
+  transition: background 0.16s ease, border-color 0.16s ease;
+}
+.genre-switch-knob {
+  position: absolute;
+  top: 50%;
+  left: 3px;
+  transform: translateY(-50%);
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #6b7280;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+  transition: left 0.16s ease, background 0.16s ease;
+}
+.genre-card.is-on .genre-switch {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+}
+.genre-card.is-on .genre-switch-knob { left: 21px; background: #fff; }
+
+.genre-card.is-off { opacity: 0.6; }
+.genre-card.is-off .genre-card-name { color: var(--color-text-secondary); }
+.genre-card.is-off:hover { opacity: 0.85; }
+
+@media (max-width: 560px) {
+  .genre-grid { grid-template-columns: 1fr; }
+}
+
+/* =====================================================
    Scrollbar
    ===================================================== */
 ::-webkit-scrollbar {
