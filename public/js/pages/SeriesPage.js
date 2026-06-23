@@ -666,6 +666,7 @@ class SeriesPage {
             type: 'series',
             sourceId,
             categoryId,
+            sort: this.sortSelect?.value || 'default',
             q: (this.searchInput?.value || '').trim(),
             limit: this.cloudPageSize,
             offset
@@ -675,7 +676,7 @@ class SeriesPage {
     catalogCacheKey() {
         // Only the DEFAULT first screen is cached (see MoviesPage for rationale).
         const p = this.cloudPageParams(0);
-        if (p.sourceId || p.categoryId || p.q) return null;
+        if (p.sourceId || p.categoryId || p.q || (p.sort && p.sort !== 'default')) return null;
         return 'series:default';
     }
 

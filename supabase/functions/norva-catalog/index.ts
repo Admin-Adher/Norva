@@ -138,26 +138,34 @@ async function listMediaItems(url: URL, userId: string) {
   const itemType = url.searchParams.get("type");
   const search = url.searchParams.get("q");
   const categoryId = url.searchParams.get("categoryId");
+  const sort = url.searchParams.get("sort") || "default";
   const limit = boundedInt(url.searchParams.get("limit"), 1000, 1, 1000);
   const offset = boundedInt(url.searchParams.get("offset"), 0, 0, 1_000_000);
 
   let query = db
     .from("cloud_media_items")
     .select("*", { count: "exact" })
-    .eq("user_id", userId)
-    .order("title", { ascending: true })
-    .order("external_id", { ascending: true })
-    .range(offset, offset + limit - 1);
+    .eq("user_id", userId);
 
   if (sourceId) query = query.eq("source_id", sourceId);
   if (itemType) query = query.eq("item_type", itemType);
   if (categoryId) query = query.eq("parent_external_id", categoryId);
   if (search) query = query.ilike("title", `%${search}%`);
 
+  // Sort server-side so the order spans the WHOLE catalogue, not just the loaded
+  // page. Sort fields are denormalized columns (added_at / rating_num /
+  // release_year — migration 20260623230000); external_id is the stable
+  // tiebreaker that keeps offset pagination consistent across pages.
+  query = applyMediaSort(query, sort).range(offset, offset + limit - 1);
+
   const { data, count, error } = await query;
   if (error) throwDb(error, "Unable to list media items");
 
-  const items = await annotateMediaItemYears(data ?? [], userId);
+  // release_year is a first-class column now — expose it as item.year for the card.
+  const items = (data ?? []).map((row) => {
+    (row as Record<string, unknown>).year = (row as Record<string, unknown>).release_year ?? null;
+    return row;
+  });
 
   return {
     items,
@@ -168,74 +176,22 @@ async function listMediaItems(url: URL, userId: string) {
   };
 }
 
-// Provider VOD list endpoints (Xtream get_vod_streams) don't carry a release
-// year, so the browse grid showed none for the ~half of titles whose name has no
-// "(YYYY)". Backfill a year per item at read time: prefer a year in the title
-// text, then fall back to the TMDB-matched cloud_titles.release_year (served by
-// the idx_cloud_titles_tmdb index on user/type/provider_tmdb_id). The frontend
-// card reads item.year (and metadata.year), so this is all it needs to render.
-async function annotateMediaItemYears(rows: Array<Record<string, any>>, userId: string) {
-  if (!rows.length) return rows;
-
-  // Only the rows whose title has no parseable year need a TMDB lookup.
-  const neededByType = new Map<string, Set<string>>();
-  for (const row of rows) {
-    if (parseTitleYear(row?.title)) continue;
-    const tmdbId = stringOrNull(isRecord(row?.metadata) ? row.metadata.providerTmdbId : null);
-    if (!tmdbId) continue;
-    const type = String(row?.item_type ?? "");
-    if (!neededByType.has(type)) neededByType.set(type, new Set());
-    neededByType.get(type)!.add(tmdbId);
+function applyMediaSort<T>(query: T, sort: string): T {
+  const q = query as unknown as {
+    order: (col: string, opts?: { ascending?: boolean; nullsFirst?: boolean }) => T;
+  };
+  let next: T;
+  switch (sort) {
+    case "added":    next = q.order("added_at",     { ascending: false, nullsFirst: false }); break;
+    case "rating":   next = q.order("rating_num",   { ascending: false, nullsFirst: false }); break;
+    case "year":     next = q.order("release_year", { ascending: false, nullsFirst: false }); break;
+    case "year-asc": next = q.order("release_year", { ascending: true,  nullsFirst: false }); break;
+    case "name":
+    case "default":
+    default:         next = q.order("title", { ascending: true }); break;
   }
-
-  const yearByKey = new Map<string, number>(); // `${item_type}:${tmdbId}` -> year
-  for (const [type, ids] of neededByType) {
-    const idList = [...ids];
-    for (let i = 0; i < idList.length; i += 500) {
-      const chunk = idList.slice(i, i + 500);
-      const { data, error } = await db
-        .from("cloud_titles")
-        .select("provider_tmdb_id, release_year")
-        .eq("user_id", userId)
-        .eq("item_type", type)
-        .not("release_year", "is", null)
-        .in("provider_tmdb_id", chunk);
-      if (error) continue; // year is best-effort; never fail the page over it
-      for (const title of data ?? []) {
-        const id = stringOrNull(title.provider_tmdb_id);
-        if (id && typeof title.release_year === "number") {
-          yearByKey.set(`${type}:${id}`, title.release_year);
-        }
-      }
-    }
-  }
-
-  for (const row of rows) {
-    let year = parseTitleYear(row?.title);
-    if (!year) {
-      const tmdbId = stringOrNull(isRecord(row?.metadata) ? row.metadata.providerTmdbId : null);
-      if (tmdbId) year = yearByKey.get(`${String(row?.item_type ?? "")}:${tmdbId}`) ?? null;
-    }
-    if (year) {
-      row.year = year;
-      if (isRecord(row.metadata)) row.metadata.year = year;
-      else row.metadata = { year };
-    }
-  }
-  return rows;
-}
-
-// Pull a 4-digit release year out of a provider title: "(2019)" / "[2019]"
-// anywhere, or a year at the very end ("... 2019"). Mirrors the frontend's
-// MediaUtils.extractYear so the grid and rails agree.
-function parseTitleYear(title: unknown): number | null {
-  const text = stringOrNull(title);
-  if (!text) return null;
-  let match = text.match(/[([]\s*((?:19|20)\d{2})\s*[)\]]/);
-  if (!match) match = text.match(/(?:^|\s)((?:19|20)\d{2})\s*$/);
-  if (!match) return null;
-  const year = Number.parseInt(match[1], 10);
-  return Number.isFinite(year) && year >= 1900 && year <= 2100 ? year : null;
+  // Stable secondary key so a given offset always maps to the same row.
+  return (next as unknown as typeof q).order("external_id", { ascending: true });
 }
 
 async function listMediaCategories(url: URL, userId: string) {

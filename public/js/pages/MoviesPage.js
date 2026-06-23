@@ -684,6 +684,7 @@ class MoviesPage {
             type: 'movie',
             sourceId,
             categoryId,
+            sort: this.sortSelect?.value || 'default',
             q: (this.searchInput?.value || '').trim(),
             limit: this.cloudPageSize,
             offset
@@ -691,11 +692,11 @@ class MoviesPage {
     }
 
     catalogCacheKey() {
-        // Only the DEFAULT first screen (no source/category/search filter) is
-        // cached — that's the cold-load view worth painting instantly. Returns
-        // null otherwise so searches/filtered views never bloat storage.
+        // Only the DEFAULT first screen (no source/category/search filter, default
+        // sort) is cached — that's the cold-load view worth painting instantly.
+        // Returns null otherwise so searches/sorted/filtered views never bloat storage.
         const p = this.cloudPageParams(0);
-        if (p.sourceId || p.categoryId || p.q) return null;
+        if (p.sourceId || p.categoryId || p.q || (p.sort && p.sort !== 'default')) return null;
         return 'movies:default';
     }
 

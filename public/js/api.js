@@ -394,7 +394,7 @@ const CloudAdapter = (() => {
         return mapped;
     }
 
-    async function getMediaPage({ sourceId, type, q, categoryId, limit = 50, offset = 0 } = {}) {
+    async function getMediaPage({ sourceId, type, q, categoryId, sort = 'default', limit = 50, offset = 0 } = {}) {
         const cloudSourceId = sourceId ? await resolveSourceId(sourceId) : '';
         const normalizedLimit = Math.max(1, Math.min(1000, Number.parseInt(limit, 10) || 50));
         const normalizedOffset = Math.max(0, Number.parseInt(offset, 10) || 0);
@@ -403,6 +403,7 @@ const CloudAdapter = (() => {
             type: type || '',
             q: q || '',
             categoryId: categoryId || '',
+            sort: sort || 'default',
             limit: normalizedLimit,
             offset: normalizedOffset
         });
@@ -414,6 +415,7 @@ const CloudAdapter = (() => {
             type,
             q,
             categoryId,
+            sort,
             limit: normalizedLimit,
             offset: normalizedOffset
         });
@@ -1152,6 +1154,7 @@ const CloudAdapter = (() => {
                 type: query.get('type') || '',
                 q: query.get('q') || '',
                 categoryId: query.get('categoryId') || '',
+                sort: query.get('sort') || 'default',
                 limit: query.get('limit') || 120,
                 offset: query.get('offset') || 0
             });

@@ -181,6 +181,16 @@ export async function refreshVodTitleProjection(options: ProjectionOptions) {
     if (error) throw error;
   }
 
+  // Push the resolved release_year onto the grid rows (cloud_media_items) so the
+  // browse page can sort/paginate by year server-side. The BEFORE trigger already
+  // set a title-parsed year on insert; this fills the TMDB-matched ones. Best
+  // effort — a sync must never fail over a sort denormalization.
+  try {
+    await options.db.rpc("propagate_media_item_years", { p_user: options.userId, p_source: options.sourceId });
+  } catch (error) {
+    console.warn("[vod-title-projection] year propagation skipped:", error instanceof Error ? error.message : error);
+  }
+
   return {
     titles: titleRows.length,
     variants: savedVariants.length,
