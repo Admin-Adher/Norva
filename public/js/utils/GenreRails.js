@@ -19,14 +19,21 @@
 
     function posterOf(item) {
         const data = item.data || {};
-        const url = item.poster_url || item.posterUrl || item.stream_icon || item.cover
+        let url = item.poster_url || item.posterUrl || item.stream_icon || item.cover
             || data.poster || data.posterUrl || data.poster_url || data.cover || '';
         if (!url) return '/img/norva-media-placeholder.png';
-        if (/^https?:\/\//i.test(url)) return url;
         // A TMDB path (e.g. "/abc.jpg") needs the image host; our own assets keep their path.
-        return (url.charAt(0) === '/' && url.indexOf('/img') !== 0)
-            ? `https://image.tmdb.org/t/p/w342${url}`
-            : url;
+        if (!/^https?:\/\//i.test(url) && url.charAt(0) === '/' && url.indexOf('/img') !== 0) {
+            url = `https://image.tmdb.org/t/p/w342${url}`;
+        }
+        // Route through the shared resolver so insecure (http://) or cross-origin
+        // provider posters go via the image proxy. Without this, the browser blocks
+        // them as mixed content on the https app and the card falls back to the
+        // Norva placeholder even though a real poster exists.
+        if (window.MediaUtils && typeof window.MediaUtils.safeImageUrl === 'function') {
+            return window.MediaUtils.safeImageUrl(url, '/img/norva-media-placeholder.png');
+        }
+        return url;
     }
 
     function titleOf(item) {
