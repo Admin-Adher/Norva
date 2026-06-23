@@ -702,6 +702,8 @@ function titleRailItem(title: JsonRecord, variants: JsonRecord[]) {
   const rating = numberOrNull(tmdb.vote_average ?? metadata.vote_average);
   const runtime = numberOrNull(tmdb.runtime ?? metadata.runtime);
   const defaultVariantId = defaultVariant.id ?? title.default_variant_id ?? null;
+  const posterUrl = preferSecureImage(title.poster_url ?? defaultVariant.poster_url, tmdbImageUrl(tmdb.poster_path, "w500"));
+  const backdropUrl = preferSecureImage(title.backdrop_url, tmdbImageUrl(tmdb.backdrop_path, "w780"));
   return {
     id: title.id,
     title_id: title.id,
@@ -717,11 +719,11 @@ function titleRailItem(title: JsonRecord, variants: JsonRecord[]) {
     title: title.title,
     original_title: title.original_title,
     year: title.release_year,
-    poster_url: title.poster_url ?? defaultVariant.poster_url ?? null,
-    posterUrl: title.poster_url ?? defaultVariant.poster_url ?? null,
-    stream_icon: title.poster_url ?? defaultVariant.poster_url ?? null,
-    backdrop_url: title.backdrop_url ?? null,
-    backdropUrl: title.backdrop_url ?? null,
+    poster_url: posterUrl,
+    posterUrl: posterUrl,
+    stream_icon: posterUrl,
+    backdrop_url: backdropUrl,
+    backdropUrl: backdropUrl,
     overview,
     description: overview,
     genres,
@@ -771,6 +773,22 @@ function titleRailItem(title: JsonRecord, variants: JsonRecord[]) {
 
 function titleTmdb(title: JsonRecord) {
   return recordOrEmpty(recordOrEmpty(title.metadata).tmdb);
+}
+
+function tmdbImageUrl(path: unknown, size: string) {
+  const value = stringOrNull(path);
+  return value ? `https://image.tmdb.org/t/p/${size}${value}` : null;
+}
+
+// Serve a secure image. Keep https provider art (often a localized / CDN poster
+// worth preserving); when the stored image is insecure http:// (the provider's
+// own host — slow and frequently expiring) or missing, prefer the verified TMDB
+// image when one exists. http provider images with no TMDB match are kept as-is
+// (the client image proxy still serves them over https).
+function preferSecureImage(stored: unknown, tmdbUrl: string | null) {
+  const value = stringOrNull(stored);
+  if (value && !/^http:\/\//i.test(value)) return value;
+  return tmdbUrl ?? value ?? null;
 }
 
 function titleGenres(title: JsonRecord) {
