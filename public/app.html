@@ -382,6 +382,7 @@
             <option value="year">Newest</option>
             <option value="year-asc">Oldest</option>
             <option value="name">A → Z</option>
+            <option value="lang-match">Best for my languages</option>
           </select>
           <select id="movies-genre" class="source-select filter-select hidden" title="Genre">
             <option value="">All Genres</option>
@@ -400,6 +401,19 @@
             <option value="7">7+ ★</option>
             <option value="6">6+ ★</option>
             <option value="5">5+ ★</option>
+          </select>
+          <select id="movies-audio" class="source-select filter-select" title="Audio language">
+            <option value="">Any Audio</option>
+            <option value="fr">French</option>
+            <option value="en">English</option>
+            <option value="original">Original (VO)</option>
+            <option value="multi">Multi-language</option>
+          </select>
+          <select id="movies-subtitle" class="source-select filter-select" title="Subtitles">
+            <option value="">Any Subtitles</option>
+            <option value="ar">Arabic</option>
+            <option value="fr">French</option>
+            <option value="en">English</option>
           </select>
           <select id="movies-watched" class="source-select filter-select" title="Watch status">
             <option value="">All</option>
@@ -513,6 +527,7 @@
             <option value="year">Newest</option>
             <option value="year-asc">Oldest</option>
             <option value="name">A → Z</option>
+            <option value="lang-match">Best for my languages</option>
           </select>
           <select id="series-genre" class="source-select filter-select hidden" title="Genre">
             <option value="">All Genres</option>
@@ -531,6 +546,19 @@
             <option value="7">7+ ★</option>
             <option value="6">6+ ★</option>
             <option value="5">5+ ★</option>
+          </select>
+          <select id="series-audio" class="source-select filter-select" title="Audio language">
+            <option value="">Any Audio</option>
+            <option value="fr">French</option>
+            <option value="en">English</option>
+            <option value="original">Original (VO)</option>
+            <option value="multi">Multi-language</option>
+          </select>
+          <select id="series-subtitle" class="source-select filter-select" title="Subtitles">
+            <option value="">Any Subtitles</option>
+            <option value="ar">Arabic</option>
+            <option value="fr">French</option>
+            <option value="en">English</option>
           </select>
           <select id="series-watched" class="source-select filter-select" title="Watch status">
             <option value="">All</option>
@@ -927,7 +955,8 @@
                 <div class="setting-info">
                   <span class="setting-label">Preferred audio language</span>
                   <span class="setting-hint">When several versions exist, Norva favours this language for the default
-                    pick. Unknown languages stay visible.</span>
+                    pick, and it powers the “Best for my languages” sort on Movies &amp; Series.
+                    Unknown languages stay visible.</span>
                 </div>
                 <select id="setting-preferred-audio-language" class="source-select" style="width: auto; min-width: 200px;">
                   <option value="">No preference</option>
@@ -953,7 +982,9 @@
               <div class="setting-item">
                 <div class="setting-info">
                   <span class="setting-label">Preferred subtitle language</span>
-                  <span class="setting-hint">A gentle nudge toward subtitled versions in this language.</span>
+                  <span class="setting-hint">A gentle nudge toward versions with subtitles in this language (provider
+                    subtitles are burned into the picture). Also powers the “Best for my languages”
+                    sort on Movies &amp; Series.</span>
                 </div>
                 <select id="setting-preferred-subtitle-language" class="source-select" style="width: auto; min-width: 200px;">
                   <option value="">No preference</option>
@@ -1723,8 +1754,8 @@
   <script src="/js/pages/HomePage.js?v=38"></script>
   <script src="/js/pages/LivePage.js?v=5"></script>
   <script src="/js/pages/Guide.js?v=2"></script>
-  <script src="/js/pages/MoviesPage.js?v=34"></script>
-  <script src="/js/pages/SeriesPage.js?v=33"></script>
+  <script src="/js/pages/MoviesPage.js?v=35"></script>
+  <script src="/js/pages/SeriesPage.js?v=34"></script>
   <script src="/js/pages/Settings.js?v=29"></script>
   <script src="/js/pages/WatchPage.js?v=93"></script>
   <script src="/js/profiles.js?v=4"></script>

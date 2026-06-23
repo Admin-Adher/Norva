@@ -25,6 +25,8 @@ class SeriesPage {
         this.watchedSelect = document.getElementById('series-watched');
         this.addedSelect = document.getElementById('series-added');
         this.statusSelect = document.getElementById('series-status');
+        this.audioSelect = document.getElementById('series-audio');
+        this.subtitleSelect = document.getElementById('series-subtitle');
         this.groupToggleBtn = document.getElementById('series-group-toggle');
         this.hideBrokenBtn = document.getElementById('series-hide-broken-btn');
         this.randomBtn = document.getElementById('series-random');
@@ -85,7 +87,8 @@ class SeriesPage {
         });
 
         [this.sortSelect, this.genreSelect, this.yearSelect, this.ratingSelect,
-         this.watchedSelect, this.addedSelect, this.statusSelect].forEach(sel => {
+         this.watchedSelect, this.addedSelect, this.statusSelect,
+         this.audioSelect, this.subtitleSelect].forEach(sel => {
             sel?.addEventListener('change', () => this.onFiltersChanged());
         });
 
@@ -159,6 +162,8 @@ class SeriesPage {
         if (this.ratingSelect && s.rating) this.ratingSelect.value = s.rating;
         if (this.watchedSelect && s.watched) this.watchedSelect.value = s.watched;
         if (this.addedSelect && s.added) this.addedSelect.value = s.added;
+        if (this.audioSelect && s.audio) this.audioSelect.value = s.audio;
+        if (this.subtitleSelect && s.subtitle) this.subtitleSelect.value = s.subtitle;
         if (this.searchInput && s.search) this.searchInput.value = s.search;
         this.groupToggleBtn?.classList.toggle('active', this.groupDuplicates);
         this.hideBrokenBtn?.classList.toggle('active', this.hideBroken);
@@ -174,6 +179,8 @@ class SeriesPage {
             watched: this.watchedSelect?.value || '',
             added: this.addedSelect?.value || '',
             status: this.statusSelect?.value || '',
+            audio: this.audioSelect?.value || '',
+            subtitle: this.subtitleSelect?.value || '',
             search: this.searchInput?.value || '',
             group: this.groupDuplicates,
             hideBroken: this.hideBroken,
@@ -190,6 +197,10 @@ class SeriesPage {
         if (this.isCloudPagedMode()) {
             const buckets = [...(this.categoryMulti?.getSelected() || [])];
             if (buckets.length) { this.openGenreBucket(buckets[0]); return; }
+            // Audio/subtitle/burned-in filter (or "best for my languages" sort) with
+            // no genre selected → a catalogue-wide grid filtered server-side by each
+            // title's available version languages.
+            if (this.isLanguageFilterActive()) { this.openLanguageBucket(); return; }
         }
         if (this.shouldShowRails()) {
             this.renderGenreRails();
@@ -202,10 +213,48 @@ class SeriesPage {
         this.filterAndRender();
     }
 
+    // True when an audio/subtitle filter or the language-match sort is set, so the
+    // grid must go through the language-aware (title-based) server path.
+    isLanguageFilterActive() {
+        return Boolean(this.audioSelect?.value || this.subtitleSelect?.value ||
+            this.sortSelect?.value === 'lang-match');
+    }
+
+    // Catalogue-wide "All" grid carrying the active language params — reuses the
+    // genre "See all" infinite-scroll grid with the synthetic 'all' bucket.
+    openLanguageBucket() {
+        const langKey = JSON.stringify(this.currentLanguageParams());
+        if (this.activeBucket === 'all' && this.activeBucketLangKey === langKey) return;
+        this.openBucket({ id: 'genre-all', title: 'All series', curation: { bucket: 'all' } });
+    }
+
+    // Audio-language / burned-in-subtitle filter params + "best for my languages"
+    // sort, forwarded to the server genre-items endpoint. Empty keys are omitted.
+    currentLanguageParams() {
+        const params = {};
+        if (this.audioSelect?.value) params.audio = this.audioSelect.value;
+        if (this.subtitleSelect?.value) params.subs = this.subtitleSelect.value;
+        if (this.sortSelect?.value === 'lang-match') {
+            params.sort = 'lang-match';
+            const prefs = this.getPreferences();
+            if (prefs.preferredAudioLanguage) params.prefAudio = prefs.preferredAudioLanguage;
+            if (prefs.preferredSubtitleLanguage && prefs.preferredSubtitleLanguage !== 'none') {
+                params.prefSubs = prefs.preferredSubtitleLanguage;
+            }
+        }
+        const search = (this.searchInput?.value || '').trim();
+        if (search) params.q = search;
+        return params;
+    }
+
     // Open a genre bucket from the filter dropdown, reusing the rail "See all"
     // grid (paged, server-side). No-op if that bucket is already showing.
     openGenreBucket(bucket) {
-        if (!bucket || this.activeBucket === bucket) return;
+        if (!bucket) return;
+        // Re-open (re-render) when the same genre is active but the language params
+        // changed, so toggling an audio/subtitle filter refreshes the grid.
+        const langKey = JSON.stringify(this.currentLanguageParams());
+        if (this.activeBucket === bucket && this.activeBucketLangKey === langKey) return;
         const T = window.GenreTaxonomy;
         const label = (T && T.label) ? T.label(bucket) : bucket;
         this.openBucket({ id: `genre-${bucket}`, title: label, curation: { bucket } });
@@ -256,6 +305,7 @@ class SeriesPage {
         const bucket = (rail && rail.curation && rail.curation.bucket) || String((rail && rail.id) || '').replace(/^genre-/, '');
         if (!bucket) return;
         this.activeBucket = bucket;
+        this.activeBucketLangKey = JSON.stringify(this.currentLanguageParams());
         this.bucketLabel = (rail && (rail.title || rail.name)) || '';
         this.bucketOffset = 0;
         this.bucketHasMore = true;
@@ -288,7 +338,7 @@ class SeriesPage {
         if (this.bucketLoading || !this.bucketHasMore || !this.activeBucket) return;
         this.bucketLoading = true;
         try {
-            const payload = await API.media.genreItems({ type: 'series', bucket: this.activeBucket, limit: 36, offset: this.bucketOffset });
+            const payload = await API.media.genreItems({ type: 'series', bucket: this.activeBucket, limit: 36, offset: this.bucketOffset, ...this.currentLanguageParams() });
             const items = (payload && payload.items) || [];
             window.GenreRails.appendCards(this.bucketGridEl, items, {
                 startIndex: this.bucketOffset,
@@ -306,10 +356,15 @@ class SeriesPage {
 
     closeBucket() {
         this.activeBucket = null;
+        this.activeBucketLangKey = null;
         this.bucketObserver?.disconnect();
         this.bucketObserver = null;
-        // Drop the genre filter selection (set silently — we render rails below).
+        // Drop the genre + language filter selection (set silently — rails below).
         if (this.categoryMulti?.getSelected().size) this.categoryMulti.setSelected([]);
+        if (this.audioSelect) this.audioSelect.value = '';
+        if (this.subtitleSelect) this.subtitleSelect.value = '';
+        if (this.sortSelect?.value === 'lang-match') this.sortSelect.value = 'default';
+        this.persistFilters();
         this.renderGenreRails();
     }
 
@@ -352,7 +407,8 @@ class SeriesPage {
 
     resetFilters() {
         [this.sortSelect, this.genreSelect, this.yearSelect, this.ratingSelect,
-         this.watchedSelect, this.addedSelect, this.statusSelect].forEach(sel => {
+         this.watchedSelect, this.addedSelect, this.statusSelect,
+         this.audioSelect, this.subtitleSelect].forEach(sel => {
             if (sel) sel.value = sel.querySelector('option')?.value ?? '';
         });
         if (this.sortSelect) this.sortSelect.value = 'default';
@@ -370,6 +426,7 @@ class SeriesPage {
             (this.sortSelect?.value && this.sortSelect.value !== 'default') ||
             this.genreSelect?.value || this.yearSelect?.value || this.ratingSelect?.value ||
             this.watchedSelect?.value || this.addedSelect?.value || this.statusSelect?.value ||
+            this.audioSelect?.value || this.subtitleSelect?.value ||
             this.searchInput?.value || this.showFavoritesOnly || this.hideBroken === false ||
             (this.categoryMulti?.getSelected().size > 0)
         );

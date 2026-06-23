@@ -469,27 +469,106 @@ async function listGenreRails(req: Request, url: URL, userId: string) {
 
 // Full, paged list of one curated genre bucket (the rail's "Tout voir" / See
 // all). Same shape as listMediaItems so the client grid consumes it unchanged.
+// --- Audio language + burned-in subtitle filtering ----------------------------
+// cloud_titles.version_languages stores the raw lowercased provider tags
+// (vf, vff, vfq, multi, vo, vostfr, subt_ar, ...) aggregated from the title's
+// variants. A user-facing facet ("French audio", "Arabic subtitles") expands to
+// the set of tags that imply it. The taxonomy lives here (single source of truth),
+// so the stored column never needs a re-backfill when the mapping evolves.
+const AUDIO_FACET_TAGS: Record<string, string[]> = {
+  fr: ["vf", "vff", "vfq", "truefrench", "french"],
+  original: ["vo", "vost", "vostfr", "vosten", "vostes", "vostar", "vostde", "vostit", "vostpt", "vosttr", "vostnl", "vostru", "vostpl", "vosthi", "vostjpn", "vostkor", "vostzh"],
+  multi: ["multi"],
+  en: ["en", "eng", "english"],
+  es: ["es", "spa", "spanish"],
+  ar: ["ar", "ara", "arabic"],
+  de: ["de", "deu", "ger", "german"],
+  it: ["it", "ita", "italian"],
+  pt: ["pt", "por", "portuguese"],
+};
+const SUBTITLE_FACET_TAGS: Record<string, string[]> = {
+  ar: ["subt_ar", "sub_ar", "subar", "arsub", "vostar"],
+  fr: ["vostfr", "subfr", "frsub", "subt_fr", "sub_fr"],
+  en: ["vosten", "suben", "ensub", "sub_en"],
+  es: ["vostes", "subes", "sub_es"],
+  de: ["vostde", "subde", "sub_de"],
+  it: ["vostit", "subit", "sub_it"],
+  pt: ["vostpt", "subpt", "sub_pt"],
+  tr: ["vosttr", "subtr", "sub_tr"],
+  nl: ["vostnl", "subnl", "sub_nl"],
+  ru: ["vostru", "subru", "sub_ru"],
+};
+
+function normalizeFacet(value: string | null): string | null {
+  const v = (value || "").toLowerCase().trim();
+  return /^[a-z]{2,10}$/.test(v) ? v : null;
+}
+function audioFacetTags(facet: string | null): string[] {
+  return facet ? (AUDIO_FACET_TAGS[facet] ?? []) : [];
+}
+function subtitleFacetTags(facet: string | null): string[] {
+  return facet ? (SUBTITLE_FACET_TAGS[facet] ?? []) : [];
+}
+function titleVersionLanguages(title: JsonRecord): string[] {
+  const raw = (title as { version_languages?: unknown }).version_languages;
+  return Array.isArray(raw) ? raw.map((tag) => String(tag).toLowerCase()) : [];
+}
+// Each requested dimension is required (logical AND across audio + subtitles);
+// an empty dimension imposes no constraint.
+function titleMatchesLanguage(langs: string[], audioTags: string[], subTags: string[]): boolean {
+  if (audioTags.length && !audioTags.some((tag) => langs.includes(tag))) return false;
+  if (subTags.length && !subTags.some((tag) => langs.includes(tag))) return false;
+  return true;
+}
+// "Best for my languages": a preferred-audio match outweighs a preferred-subtitle
+// match; ties keep the incoming (recency) order via the stable index tiebreaker.
+function languageMatchRank(langs: string[], prefAudioTags: string[], prefSubTags: string[]): number {
+  let rank = 0;
+  if (prefAudioTags.length && prefAudioTags.some((tag) => langs.includes(tag))) rank += 2;
+  if (prefSubTags.length && prefSubTags.some((tag) => langs.includes(tag))) rank += 1;
+  return rank;
+}
+
 async function listGenreItems(req: Request, url: URL, userId: string) {
   const itemType = url.searchParams.get("type") === "series" ? "series" : "movie";
   const lang = railLang(url);
-  const bucket = (url.searchParams.get("bucket") || "").trim();
+  const bucketParam = (url.searchParams.get("bucket") || "").trim();
+  // "all" = no genre constraint (catalogue-wide), used by the client when filtering
+  // or sorting by language without a genre selected.
+  const bucket = bucketParam === "all" ? "" : bucketParam;
   const limit = boundedInt(url.searchParams.get("limit"), 36, 1, 100);
   const offset = boundedInt(url.searchParams.get("offset"), 0, 0, 1_000_000);
-  const candidateLimit = boundedInt(url.searchParams.get("candidates"), 4000, 100, 8000);
-  if (!bucket) throw new HttpError(400, "Missing bucket");
+  const candidateLimit = boundedInt(url.searchParams.get("candidates"), 6000, 100, 8000);
+  if (!bucketParam) throw new HttpError(400, "Missing bucket");
+
+  // Optional audio-language / burned-in-subtitle filters + "best for my languages"
+  // sort. All additive: absent → the query and result are identical to before.
+  const audioTags = audioFacetTags(normalizeFacet(url.searchParams.get("audio")));
+  const subTags = subtitleFacetTags(normalizeFacet(url.searchParams.get("subs")));
+  const langSort = (url.searchParams.get("sort") || "").trim() === "lang-match";
+  const prefAudioTags = langSort ? audioFacetTags(normalizeFacet(url.searchParams.get("prefAudio"))) : [];
+  const prefSubTags = langSort ? subtitleFacetTags(normalizeFacet(url.searchParams.get("prefSubs"))) : [];
+  const filterTags = [...new Set([...audioTags, ...subTags])];
+  // Optional text search so it composes with the language grid (the "all" bucket).
+  const search = (url.searchParams.get("q") || "").trim();
 
   const hidden = await getHiddenGenres(req, userId);
   // The bucket itself is hidden → nothing to show.
-  if (hidden.has(bucket)) return { items: [], count: 0, limit, offset, hasMore: false };
+  if (bucket && hidden.has(bucket)) return { items: [], count: 0, limit, offset, hasMore: false };
 
   let titles: JsonRecord[];
   try {
-    const { data, error } = await db
+    let query = db
       .from("cloud_titles")
       .select("*")
       .eq("user_id", userId)
       .eq("item_type", itemType)
-      .gt("variant_count", 0)
+      .gt("variant_count", 0);
+    // GIN-indexed pre-filter (OR across all requested tags) so the candidate cap
+    // covers the whole language-matched set; exact AND semantics are refined below.
+    if (filterTags.length) query = query.overlaps("version_languages", filterTags);
+    if (search) query = query.ilike("title", `%${search}%`);
+    const { data, error } = await query
       .order("synced_at", { ascending: false })
       .order("updated_at", { ascending: false })
       .limit(candidateLimit);
@@ -503,10 +582,27 @@ async function listGenreItems(req: Request, url: URL, userId: string) {
     throw error;
   }
 
-  const matched = titles.filter((title) => {
-    const buckets = classifyTitleBuckets(recordOrEmpty(title.metadata).categoryName, titleGenres(title));
-    return buckets.includes(bucket) && !buckets.some((b) => hidden.has(b));
+  let matched = titles.filter((title) => {
+    if (bucket || hidden.size) {
+      const buckets = classifyTitleBuckets(recordOrEmpty(title.metadata).categoryName, titleGenres(title));
+      if (bucket) {
+        if (!buckets.includes(bucket) || buckets.some((b) => hidden.has(b))) return false;
+      } else if (buckets.length && buckets.every((b) => hidden.has(b))) {
+        return false;
+      }
+    }
+    if ((audioTags.length || subTags.length) &&
+        !titleMatchesLanguage(titleVersionLanguages(title), audioTags, subTags)) return false;
+    return true;
   });
+
+  if (langSort && (prefAudioTags.length || prefSubTags.length)) {
+    matched = matched
+      .map((title, index) => ({ title, index, rank: languageMatchRank(titleVersionLanguages(title), prefAudioTags, prefSubTags) }))
+      .sort((a, b) => b.rank - a.rank || a.index - b.index)
+      .map((entry) => entry.title);
+  }
+
   const pageRows = matched.slice(offset, offset + limit);
   const variantsByTitle = await listVariantsByTitleIds(pageRows.map((row) => String(row.id)));
 

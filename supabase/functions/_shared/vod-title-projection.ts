@@ -52,6 +52,11 @@ export async function refreshVodTitleProjection(options: ProjectionOptions) {
 
   const titleRowsByKey = new Map<string, JsonRecord>();
   const variantRows: JsonRecord[] = [];
+  // Distinct version tags (vf / multi / vostfr / subt_ar ...) seen across a title's
+  // variants, aggregated onto cloud_titles.version_languages so the catalog can
+  // filter/sort the whole catalogue by audio language + burned-in subtitle
+  // availability server-side. Lowercased to match the stored column convention.
+  const languagesByKey = new Map<string, Set<string>>();
   const syncedAt = new Date().toISOString();
   let providerTmdbIds = 0;
 
@@ -114,6 +119,12 @@ export async function refreshVodTitleProjection(options: ProjectionOptions) {
     const observedTtff = observedTtffMs(metadata, playbackHint);
     const compatibility = compatibilitySeed(playbackHint, metadata, title);
     const version = parseVersionInfo(title, metadata);
+    const versionLangTag = stringOrNull(version.language);
+    if (versionLangTag) {
+      const set = languagesByKey.get(identity.key) ?? new Set<string>();
+      set.add(versionLangTag.toLowerCase());
+      languagesByKey.set(identity.key, set);
+    }
     variantRows.push({
       user_id: options.userId,
       source_id: options.sourceId,
@@ -152,6 +163,13 @@ export async function refreshVodTitleProjection(options: ProjectionOptions) {
         } : undefined,
       }),
     });
+  }
+
+  // Stamp each title with its aggregated, deduped version tags (kept fresh on
+  // every sync so removed/added variants are reflected; '{}' when none are tagged).
+  for (const [key, titleRow] of titleRowsByKey) {
+    const langs = languagesByKey.get(key);
+    (titleRow as JsonRecord).version_languages = langs ? [...langs].sort() : [];
   }
 
   const titleRows = [...titleRowsByKey.values()];
