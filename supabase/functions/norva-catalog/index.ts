@@ -280,32 +280,33 @@ async function getHiddenGenres(req: Request, userId: string): Promise<Set<string
 // profile's currently-hidden buckets. Powers the Manage Content genre view.
 async function listGenreSummary(req: Request, url: URL, userId: string) {
   const itemType = url.searchParams.get("type") === "series" ? "series" : "movie";
-  const candidateLimit = boundedInt(url.searchParams.get("candidates"), 4000, 100, 8000);
+  const candidateLimit = boundedInt(url.searchParams.get("candidates"), 30000, 100, 50000);
 
-  let titles: JsonRecord[];
+  // Count from the WHOLE catalogue (not just titles with materialised variants,
+  // and no sort) so the management view shows every genre present. Selecting
+  // only the two JSON sub-fields keeps the payload tiny — selecting full
+  // metadata + sorting 26k rows was timing out.
+  let rows: JsonRecord[];
   try {
     const { data, error } = await db
       .from("cloud_titles")
-      .select("metadata")
+      .select("category_name:metadata->>categoryName, genres:metadata->tmdb->genres")
       .eq("user_id", userId)
       .eq("item_type", itemType)
-      .gt("variant_count", 0)
-      .order("synced_at", { ascending: false })
       .limit(candidateLimit);
     if (error) {
       if (isMissingMaterialization(error)) return { type: itemType, genres: [], hidden: [] };
       throwDb(error, "Unable to summarise genres");
     }
-    titles = (data ?? []) as JsonRecord[];
+    rows = (data ?? []) as JsonRecord[];
   } catch (error) {
     if (isMissingMaterialization(error)) return { type: itemType, genres: [], hidden: [] };
     throw error;
   }
 
   const counts = new Map<string, number>();
-  for (const title of titles) {
-    const meta = recordOrEmpty(title.metadata);
-    for (const bucketId of classifyTitleBuckets(meta.categoryName, asGenres(meta))) {
+  for (const row of rows) {
+    for (const bucketId of classifyTitleBuckets(row.category_name, row.genres)) {
       if (bucketId === "autres") continue;
       counts.set(bucketId, (counts.get(bucketId) ?? 0) + 1);
     }
@@ -322,15 +323,6 @@ async function listGenreSummary(req: Request, url: URL, userId: string) {
     }));
 
   return { type: itemType, genres, hidden: [...hidden] };
-}
-
-// Genres from a title's metadata (matches titleGenres but takes the metadata
-// record directly, since the summary query only selects metadata).
-function asGenres(meta: JsonRecord): unknown {
-  const tmdb = recordOrEmpty(meta.tmdb);
-  if (Array.isArray(tmdb.genres)) return tmdb.genres;
-  if (Array.isArray(meta.genres)) return meta.genres;
-  return [];
 }
 
 async function listGenreRails(req: Request, url: URL, userId: string) {
