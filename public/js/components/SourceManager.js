@@ -1389,6 +1389,7 @@ class SourceManager {
             const id = await this.getEditProfileId();
             if (!id) { this.toast('No profile to save to', true); return; }
             await window.NorvaCloud.profiles.update(id, { hiddenGenres: [...this.genreHidden] });
+            try { API.media.clearRailCache?.(); } catch (_) { /* noop */ }
             this.toast('Saved');
         } catch (e) {
             this.toast(e?.message || 'Could not save', true);

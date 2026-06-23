@@ -2082,7 +2082,10 @@ const API = {
                 if (value !== undefined && value !== null && value !== '') search.set(key, value);
             });
             return API.request('GET', `/media/genre-summary${search.toString() ? `?${search.toString()}` : ''}`);
-        }
+        },
+        // Drop the cached home/genre rails so a hidden-genre change shows on the
+        // browse pages immediately instead of after the 2-min TTL.
+        clearRailCache: () => { try { homeRailCache.clear(); } catch (_) { /* noop */ } }
     },
 
     // Playback health (auto-detected broken/working streams)
