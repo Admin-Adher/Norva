@@ -420,6 +420,61 @@ export async function validateTmdbCandidate(
   };
 }
 
+// Search-based matching for titles with NO provider TMDB id: find a candidate by
+// title (+ year) on TMDB, then confirm it with the same full validation used for
+// provider ids. The confidence bar is higher than provider validation because
+// search is fuzzier. Returns a validated match (with i18n) + its id, or null.
+export async function searchTmdbMatch(
+  apiKey: string,
+  itemType: "movie" | "series",
+  rawTitle: string,
+  year: string | null,
+): Promise<(TmdbValidation & { tmdbId: string }) | null> {
+  const query = cleanSearchQuery(rawTitle);
+  if (query.length < 2) return null;
+  const endpoint = itemType === "series" ? "tv" : "movie";
+  const url = new URL(`https://api.themoviedb.org/3/search/${endpoint}`);
+  url.searchParams.set("query", query);
+  if (year) url.searchParams.set(itemType === "series" ? "first_air_date_year" : "year", year);
+  const language = stringOr(Deno.env.get("NORVA_TMDB_LANGUAGE"), "en-US");
+  if (language) url.searchParams.set("language", language);
+  url.searchParams.set("include_adult", "false");
+  const headers: Record<string, string> = {};
+  if (apiKey.startsWith("eyJ")) headers.Authorization = `Bearer ${apiKey}`;
+  else url.searchParams.set("api_key", apiKey);
+
+  const payload = recordOrEmpty(await fetchJsonWithHeaders(url.toString(), 8000, headers).catch(() => null));
+  const results = Array.isArray(payload.results) ? payload.results as JsonRecord[] : [];
+  if (!results.length) return null;
+
+  let best: { id: string; score: number } | null = null;
+  for (const result of results.slice(0, 6)) {
+    const rec = recordOrEmpty(result);
+    const candidateTitle = stringOr(rec.title ?? rec.name ?? rec.original_title ?? rec.original_name, "");
+    const candidateYear = stringOr(rec.release_date ?? rec.first_air_date, "").match(/(19|20)\d{2}/)?.[0] ?? null;
+    const id = stringOr(rec.id, "");
+    if (!id || !candidateTitle) continue;
+    const score = titleConfidence(rawTitle, candidateTitle, year, candidateYear);
+    if (!best || score > best.score) best = { id, score };
+  }
+  // Demand a strong title match (search is fuzzier than a provider-supplied id).
+  if (!best || best.score < 0.72) return null;
+
+  const validation = await validateTmdbCandidate(apiKey, { itemType, tmdbId: best.id, title: rawTitle, year });
+  return validation.valid ? { ...validation, tmdbId: best.id } : null;
+}
+
+// Strip bracketed segments, quality/language tags and a trailing year so the
+// title is a clean search query ("Le Roi Lion (1994) FHD MULTI" -> "Le Roi Lion").
+function cleanSearchQuery(title: string): string {
+  return String(title || "")
+    .replace(/[\[({][^\])}]*[\])}]/g, " ")
+    .replace(/\b(4k|uhd|2160p|1080p|720p|480p|fhd|hd|sd|multi|vostfr|vost|vff|vf|vo|truefrench|subt?\s*ar|sub|dub|dv)\b/gi, " ")
+    .replace(/(?:^|\s)((?:19|20)\d{2})\s*$/, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 async function fetchTmdbDetails(apiKey: string, itemType: "movie" | "series", tmdbId: string) {
   const endpoint = itemType === "series" ? "tv" : "movie";
   const url = new URL(`https://api.themoviedb.org/3/${endpoint}/${encodeURIComponent(tmdbId)}`);

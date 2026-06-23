@@ -8,7 +8,7 @@ import {
   upsertLiveChannelRows,
   upsertLiveVariantRows,
 } from "../_shared/live-materialization.ts";
-import { refreshVodTitleProjection, validateTmdbCandidate } from "../_shared/vod-title-projection.ts";
+import { refreshVodTitleProjection, validateTmdbCandidate, searchTmdbMatch } from "../_shared/vod-title-projection.ts";
 import type { LiveCatalogItem } from "../_shared/live-catalog.ts";
 import { getEntitlementDecision, planFeatureEntitled, realPlanCode } from "../_shared/entitlements.ts";
 
@@ -125,6 +125,13 @@ Deno.serve(async (req) => {
         const reset = url.searchParams.get("reset") === "1";
         const concurrency = boundedInt(url.searchParams.get("conc"), 12, 1, 30);
         return json(req, await cronRevalidate(supabase, limit, reset, concurrency));
+      }
+      // Search-match titles that have no provider TMDB id (TMDB search + confirm).
+      if (segments[1] === "search-match") {
+        const limit = boundedInt(url.searchParams.get("limit"), 100, 1, 300);
+        const reset = url.searchParams.get("reset") === "1";
+        const concurrency = boundedInt(url.searchParams.get("conc"), 8, 1, 20);
+        return json(req, await cronSearchMatch(supabase, limit, reset, concurrency));
       }
       return json(req, { error: "not_found" }, 404);
     }
@@ -611,6 +618,81 @@ async function cronRevalidate(db: SupabaseClient, limit: number, reset: boolean,
   const done = scanned < limit;
   const summary = { scanned, revalidated, done };
   await db.from("norva_revalidate_state")
+    .update({ last_id: maxId, done, last_run: { ...summary, at: new Date().toISOString() }, updated_at: new Date().toISOString() })
+    .eq("id", 1);
+  return summary;
+}
+
+// Search-based matching for UNMATCHED titles (no provider TMDB id): find the title
+// on TMDB by name+year and, when it confirms strongly, set the id + verify +
+// localize it. Cursor-resumable; drive it like the other backfills. New ids can
+// duplicate an existing tmdb: title — run the dedupe migration afterwards.
+async function cronSearchMatch(db: SupabaseClient, limit: number, reset: boolean, concurrency: number) {
+  const apiKey = tmdbApiKey();
+  if (!apiKey) return { error: "tmdb_key_missing", done: true };
+
+  let cursor: string | null = null;
+  if (!reset) {
+    const { data } = await db.from("norva_search_match_state").select("last_id").eq("id", 1).maybeSingle();
+    cursor = (data?.last_id as string | null) ?? null;
+  }
+
+  let q = db
+    .from("cloud_titles")
+    .select("id, item_type, title, original_title, release_year, metadata, poster_url, backdrop_url")
+    .eq("match_status", "unmatched")
+    .order("id", { ascending: true })
+    .limit(limit);
+  if (cursor) q = q.gt("id", cursor);
+
+  const { data: rows, error } = await q;
+  if (error) throw new HttpError(500, "search-match select failed", error.message);
+
+  const scanned = rows?.length ?? 0;
+  if (!scanned) {
+    await db.from("norva_search_match_state")
+      .update({ done: true, last_run: { scanned: 0, matched: 0, done: true, at: new Date().toISOString() }, updated_at: new Date().toISOString() })
+      .eq("id", 1);
+    return { scanned: 0, matched: 0, done: true };
+  }
+
+  const maxId = String(rows![rows!.length - 1].id);
+  let next = 0;
+  let matched = 0;
+  const worker = async () => {
+    while (next < rows!.length) {
+      const row = rows![next++];
+      const itemType = row.item_type === "series" ? "series" : "movie";
+      const title = stringOr(row.original_title ?? row.title, "");
+      if (!title) continue;
+      try {
+        const match = await searchTmdbMatch(apiKey, itemType, title, row.release_year != null ? String(row.release_year) : null);
+        if (!match) continue;
+        const metadata = isRecord(row.metadata) ? row.metadata : {};
+        const { error: upErr } = await db.from("cloud_titles").update({
+          provider_tmdb_id: match.tmdbId,
+          match_status: "provider_verified",
+          title: match.title || row.title,
+          poster_url: match.posterUrl || stringOr(row.poster_url, "") || null,
+          backdrop_url: match.backdropUrl || stringOr(row.backdrop_url, "") || null,
+          release_year: match.year ? Number(match.year) : row.release_year,
+          metadata: {
+            ...metadata,
+            tmdb: match.details,
+            i18n: match.i18n,
+            tmdbValidation: { valid: true, title: match.title, year: match.year, confidence: match.confidence, reason: match.reason },
+            searchMatchedAt: new Date().toISOString(),
+          },
+        }).eq("id", row.id);
+        if (!upErr) matched += 1;
+      } catch (_) { /* a TMDB hiccup must not abort the batch */ }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(Math.max(1, concurrency), rows!.length) }, worker));
+
+  const done = scanned < limit;
+  const summary = { scanned, matched, done };
+  await db.from("norva_search_match_state")
     .update({ last_id: maxId, done, last_run: { ...summary, at: new Date().toISOString() }, updated_at: new Date().toISOString() })
     .eq("id", 1);
   return summary;
