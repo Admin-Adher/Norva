@@ -624,6 +624,16 @@ class SettingsPage {
     }
 
     async initTranscodingSettings() {
+        // On the plain web there is no local FFmpeg transcoder, so the encoding /
+        // quality / upscaling controls do nothing. Hide everything that needs a
+        // transcoder and keep only the settings that actually work in-browser
+        // (proxy + connection identity). Desktop / Android TV keep the full set.
+        const hasLocalTranscoder = this.app.player?._hasLocalTranscoder?.() ?? false;
+        if (!hasLocalTranscoder) {
+            document.querySelectorAll('#tab-transcode .tc-needs-transcoder')
+                .forEach(el => { el.style.display = 'none'; });
+        }
+
         // Encoder settings
         const hwEncoderSelect = document.getElementById('setting-hw-encoder');
         const maxResolutionSelect = document.getElementById('setting-max-resolution');
@@ -635,7 +645,6 @@ class SettingsPage {
         const forceTranscodeToggle = document.getElementById('setting-force-transcode-tc');
         const forceVideoTranscodeToggle = document.getElementById('setting-force-video-transcode-tc');
         const forceRemuxToggle = document.getElementById('setting-force-remux-tc');
-        const streamFormatSelect = document.getElementById('setting-stream-format-tc');
 
         // User-Agent (Transcoding tab versions)
         const userAgentSelect = document.getElementById('setting-user-agent-tc');
@@ -659,7 +668,6 @@ class SettingsPage {
         if (forceTranscodeToggle) forceTranscodeToggle.checked = s.forceTranscode === true;
         if (forceVideoTranscodeToggle) forceVideoTranscodeToggle.checked = s.forceVideoTranscode === true;
         if (forceRemuxToggle) forceRemuxToggle.checked = s.forceRemux || false;
-        if (streamFormatSelect) streamFormatSelect.value = s.streamFormat || 'm3u8';
         if (userAgentSelect) userAgentSelect.value = s.userAgentPreset || 'chrome';
         if (userAgentCustomInput) userAgentCustomInput.value = s.userAgentCustom || '';
         if (customUaContainer) {
@@ -753,11 +761,6 @@ class SettingsPage {
 
         forceRemuxToggle?.addEventListener('change', () => {
             this.app.player.settings.forceRemux = forceRemuxToggle.checked;
-            this.app.player.saveSettings();
-        });
-
-        streamFormatSelect?.addEventListener('change', () => {
-            this.app.player.settings.streamFormat = streamFormatSelect.value;
             this.app.player.saveSettings();
         });
 

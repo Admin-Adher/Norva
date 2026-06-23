@@ -1030,13 +1030,13 @@
               <div>
                 <p class="tc-intro-title">Playback &amp; quality</p>
                 <p class="tc-intro-text">Norva is set up to play smoothly on its own — you usually don't need to
-                  change anything here. Use these options to sharpen the picture, or to fix a channel that won't play
+                  change anything here. These options help you fine-tune playback or fix a channel that won't play
                   right.</p>
               </div>
             </div>
 
-            <!-- Quality ------------------------------------------------------>
-            <div class="settings-section">
+            <!-- Quality (needs a local transcoder — hidden on the plain web) -->
+            <div class="settings-section tc-needs-transcoder">
               <h3>Picture quality</h3>
               <p class="tc-section-sub">Sharper looks better but uses more internet and power.</p>
 
@@ -1108,7 +1108,7 @@
               <p class="tc-section-sub">Only switch these on if you're actually seeing the problem described — leave
                 them off otherwise.</p>
 
-              <div class="setting-item">
+              <div class="setting-item tc-needs-transcoder">
                 <label class="setting-toggle">
                   <input type="checkbox" id="setting-force-transcode-tc">
                   <span class="toggle-slider"></span>
@@ -1131,18 +1131,6 @@
                     gets past blocks that can stop a channel loading.</span>
                 </div>
               </div>
-
-              <div class="setting-item">
-                <div class="setting-info">
-                  <span class="setting-label">A channel keeps buffering</span>
-                  <span class="setting-hint">If a channel stutters or pauses to load, try the smoother delivery
-                    mode.</span>
-                </div>
-                <select id="setting-stream-format-tc" class="source-select" style="width: auto; min-width: 200px;">
-                  <option value="m3u8">Standard (recommended)</option>
-                  <option value="ts">Smoother — more buffering room</option>
-                </select>
-              </div>
             </div>
 
             <!-- Advanced (collapsed) ---------------------------------------->
@@ -1157,7 +1145,7 @@
               </summary>
 
               <div class="settings-advanced-body">
-                <div class="setting-item">
+                <div class="setting-item tc-needs-transcoder">
                   <label class="setting-toggle">
                     <input type="checkbox" id="setting-auto-transcode-tc">
                     <span class="toggle-slider"></span>
@@ -1169,7 +1157,7 @@
                   </div>
                 </div>
 
-                <div class="setting-item">
+                <div class="setting-item tc-needs-transcoder">
                   <label class="setting-toggle">
                     <input type="checkbox" id="setting-force-video-transcode-tc">
                     <span class="toggle-slider"></span>
@@ -1181,7 +1169,7 @@
                   </div>
                 </div>
 
-                <div class="setting-item">
+                <div class="setting-item tc-needs-transcoder">
                   <label class="setting-toggle">
                     <input type="checkbox" id="setting-force-remux-tc">
                     <span class="toggle-slider"></span>
@@ -1193,7 +1181,7 @@
                   </div>
                 </div>
 
-                <div class="setting-item">
+                <div class="setting-item tc-needs-transcoder">
                   <div class="setting-info">
                     <span class="setting-label">Video chip (encoder)</span>
                     <span class="setting-hint">Which GPU handles conversion. Leave on Auto unless you know your
@@ -1209,7 +1197,7 @@
                   </select>
                 </div>
 
-                <div class="setting-item">
+                <div class="setting-item tc-needs-transcoder">
                   <div class="setting-info">
                     <span class="setting-label">Surround-sound mixdown</span>
                     <span class="setting-hint">How 5.1 / 7.1 audio is folded into stereo for playback.</span>
@@ -1245,7 +1233,7 @@
                     placeholder="e.g. Mozilla/5.0 (Windows NT 10.0; Win64; x64)">
                 </div>
 
-                <div class="setting-item tc-hw-item">
+                <div class="setting-item tc-hw-item tc-needs-transcoder">
                   <div class="setting-info" style="flex: 1;">
                     <span class="setting-label">Detected hardware</span>
                     <span class="setting-hint">Graphics acceleration found on the device running Norva.</span>
@@ -1670,7 +1658,7 @@
   <script src="/js/pages/Guide.js?v=2"></script>
   <script src="/js/pages/MoviesPage.js?v=30"></script>
   <script src="/js/pages/SeriesPage.js?v=29"></script>
-  <script src="/js/pages/Settings.js?v=23"></script>
+  <script src="/js/pages/Settings.js?v=24"></script>
   <script src="/js/pages/WatchPage.js?v=88"></script>
   <script src="/js/profiles.js?v=4"></script>
   <script src="/js/app.js?v=23"></script>
