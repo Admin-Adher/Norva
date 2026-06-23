@@ -30,7 +30,7 @@
     }
 
     function titleOf(item) {
-        return item.title || item.name || (item.data && (item.data.title || item.data.name)) || 'Sans titre';
+        return item.title || item.name || (item.data && (item.data.title || item.data.name)) || 'Untitled';
     }
 
     function metaOf(item) {
@@ -66,12 +66,12 @@
             <section class="dashboard-section home-rail-section" data-rail-id="${esc(rail.id || railIndex)}">
                 <div class="section-header home-rail-header" style="display:flex;align-items:center;justify-content:space-between;gap:12px">
                     <div><h2>${esc(rail.title || rail.name || '')}</h2></div>
-                    <button class="genre-see-all" type="button" data-rail-index="${railIndex}" style="background:none;border:none;color:#9db4ff;font:600 13px/1 inherit;cursor:pointer;white-space:nowrap;padding:6px 8px">Tout voir ›</button>
+                    <button class="genre-see-all" type="button" data-rail-index="${railIndex}" style="background:none;border:none;color:#9db4ff;font:600 13px/1 inherit;cursor:pointer;white-space:nowrap;padding:6px 8px">See all ›</button>
                 </div>
                 <div class="scroll-wrapper">
-                    <button class="scroll-arrow scroll-left" aria-label="Défiler à gauche" type="button"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg></button>
+                    <button class="scroll-arrow scroll-left" aria-label="Scroll left" type="button"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg></button>
                     <div class="horizontal-scroll">${cards}</div>
-                    <button class="scroll-arrow scroll-right" aria-label="Défiler à droite" type="button"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg></button>
+                    <button class="scroll-arrow scroll-right" aria-label="Scroll right" type="button"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg></button>
                 </div>
             </section>`;
     }
@@ -103,7 +103,7 @@
         const onItemClick = options.onItemClick || function () {};
         const usable = (rails || []).filter((r) => Array.isArray(r.items) && r.items.length);
         if (!usable.length) {
-            container.innerHTML = `<div class="empty-state"><p>${esc(options.emptyText || 'Aucun contenu à afficher pour le moment.')}</p></div>`;
+            container.innerHTML = `<div class="empty-state"><p>${esc(options.emptyText || 'No content to show yet.')}</p></div>`;
             return;
         }
         container.innerHTML = usable.map((rail, i) => railHtml(rail, i)).join('');
@@ -127,7 +127,7 @@
     }
 
     // Append rail-item cards into an existing grid element (used by the per-genre
-    // "Tout voir" paged grid). Each card opens via onItemClick(item).
+    // "See all" paged grid). Each card opens via onItemClick(item).
     function appendCards(gridEl, items, options) {
         if (!gridEl) return;
         options = options || {};
@@ -157,9 +157,9 @@
             const wrapper = document.createElement('div');
             wrapper.className = 'scroll-wrapper';
             wrapper.innerHTML = `
-                <button class="scroll-arrow scroll-left" aria-label="Défiler à gauche" type="button"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg></button>
+                <button class="scroll-arrow scroll-left" aria-label="Scroll left" type="button"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg></button>
                 <div class="horizontal-scroll"></div>
-                <button class="scroll-arrow scroll-right" aria-label="Défiler à droite" type="button"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg></button>`;
+                <button class="scroll-arrow scroll-right" aria-label="Scroll right" type="button"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg></button>`;
             const scroll = wrapper.querySelector('.horizontal-scroll');
             (sec.cards || []).forEach((el) => { if (el) scroll.appendChild(el); });
             section.appendChild(header);

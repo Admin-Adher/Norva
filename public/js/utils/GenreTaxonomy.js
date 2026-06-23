@@ -10,21 +10,21 @@
 
     const BUCKETS = [
         { id: 'action', label: 'Action' },
-        { id: 'aventure', label: 'Aventure' },
-        { id: 'comedie', label: 'Comédie' },
-        { id: 'drame', label: 'Drame' },
-        { id: 'scifi', label: 'Science-fiction & Fantastique' },
-        { id: 'horreur', label: 'Horreur' },
-        { id: 'thriller', label: 'Thriller & Policier' },
+        { id: 'aventure', label: 'Adventure' },
+        { id: 'comedie', label: 'Comedy' },
+        { id: 'drame', label: 'Drama' },
+        { id: 'scifi', label: 'Sci-Fi & Fantasy' },
+        { id: 'horreur', label: 'Horror' },
+        { id: 'thriller', label: 'Thriller & Crime' },
         { id: 'romance', label: 'Romance' },
-        { id: 'familial', label: 'Familial' },
-        { id: 'animation_kids', label: 'Dessins animés (enfants)' },
-        { id: 'animation_adult', label: 'Animation (adultes)' },
+        { id: 'familial', label: 'Family' },
+        { id: 'animation_kids', label: 'Kids Animation' },
+        { id: 'animation_adult', label: 'Adult Animation' },
         { id: 'kdrama', label: 'K-Drama' },
-        { id: 'telerealite', label: 'Téléréalité' },
-        { id: 'documentaires', label: 'Documentaires' },
-        { id: 'arabe', label: 'Films & séries arabes' },
-        { id: 'autres', label: 'Autres' }
+        { id: 'telerealite', label: 'Reality TV' },
+        { id: 'documentaires', label: 'Documentaries' },
+        { id: 'arabe', label: 'Arabic' },
+        { id: 'autres', label: 'Other' }
     ];
     const BUCKET_ORDER = BUCKETS.map((b) => b.id);
     const LABELS = {};
@@ -147,7 +147,7 @@
         return 'autres';
     }
 
-    function label(id) { return LABELS[id] || 'Autres'; }
+    function label(id) { return LABELS[id] || 'Other'; }
 
     window.GenreTaxonomy = { BUCKETS, BUCKET_ORDER, classifyTitle, classifyCategory, label };
 })();

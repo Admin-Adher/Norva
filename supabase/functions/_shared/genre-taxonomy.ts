@@ -18,27 +18,27 @@ export interface GenreBucket {
 // intentionally last so nothing ever disappears.
 export const GENRE_BUCKETS: GenreBucket[] = [
   { id: "action", label: "Action" },
-  { id: "aventure", label: "Aventure" },
-  { id: "comedie", label: "Comédie" },
-  { id: "drame", label: "Drame" },
-  { id: "scifi", label: "Science-fiction & Fantastique" },
-  { id: "horreur", label: "Horreur" },
-  { id: "thriller", label: "Thriller & Policier" },
+  { id: "aventure", label: "Adventure" },
+  { id: "comedie", label: "Comedy" },
+  { id: "drame", label: "Drama" },
+  { id: "scifi", label: "Sci-Fi & Fantasy" },
+  { id: "horreur", label: "Horror" },
+  { id: "thriller", label: "Thriller & Crime" },
   { id: "romance", label: "Romance" },
-  { id: "familial", label: "Familial" },
-  { id: "animation_kids", label: "Dessins animés (enfants)" },
-  { id: "animation_adult", label: "Animation (adultes)" },
+  { id: "familial", label: "Family" },
+  { id: "animation_kids", label: "Kids Animation" },
+  { id: "animation_adult", label: "Adult Animation" },
   { id: "kdrama", label: "K-Drama" },
-  { id: "telerealite", label: "Téléréalité" },
-  { id: "documentaires", label: "Documentaires" },
-  { id: "arabe", label: "Films & séries arabes" },
-  { id: "autres", label: "Autres" },
+  { id: "telerealite", label: "Reality TV" },
+  { id: "documentaires", label: "Documentaries" },
+  { id: "arabe", label: "Arabic" },
+  { id: "autres", label: "Other" },
 ];
 
 export const BUCKET_ORDER: string[] = GENRE_BUCKETS.map((b) => b.id);
 const BUCKET_LABEL = new Map(GENRE_BUCKETS.map((b) => [b.id, b.label] as const));
 export function bucketLabel(id: string): string {
-  return BUCKET_LABEL.get(id) ?? "Autres";
+  return BUCKET_LABEL.get(id) ?? "Other";
 }
 
 // Normalise latin text (strip accents/case/punctuation) while preserving

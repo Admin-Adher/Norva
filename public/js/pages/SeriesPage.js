@@ -217,7 +217,7 @@ class SeriesPage {
                 return this.loadSeries();
             }
             window.GenreRails.render(this.container, rails, {
-                emptyText: 'Aucune série à afficher pour le moment.',
+                emptyText: 'No shows to show yet.',
                 onItemClick: (item) => this.openRailItem(item),
                 onSeeAll: (rail) => this.openBucket(rail)
             });
@@ -235,7 +235,7 @@ class SeriesPage {
         if (home?.navigateToSeries) home.navigateToSeries(item);
     }
 
-    // "Tout voir" on a genre rail → a full, paged grid of that genre.
+    // "See all" on a genre rail → a full, paged grid of that genre.
     openBucket(rail) {
         const bucket = (rail && rail.curation && rail.curation.bucket) || String((rail && rail.id) || '').replace(/^genre-/, '');
         if (!bucket) return;
@@ -248,7 +248,7 @@ class SeriesPage {
 
         this.container.innerHTML = `
             <div class="genre-bucket-head" style="display:flex;align-items:center;gap:14px;margin:4px 0 18px">
-                <button class="btn btn-secondary btn-sm" id="genre-bucket-back" type="button">‹ Tous les genres</button>
+                <button class="btn btn-secondary btn-sm" id="genre-bucket-back" type="button">‹ All genres</button>
                 <h2 style="margin:0;font-size:21px">${MediaUtils.escapeHtml(this.bucketLabel)}</h2>
             </div>
             <div class="genre-bucket-grid" style="display:flex;flex-wrap:wrap;gap:16px"></div>
