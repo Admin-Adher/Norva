@@ -3708,6 +3708,7 @@ class WatchPage {
             });
             const upstreamStatus = res.headers.get('x-norva-upstream-status');
             const upstreamReason = res.headers.get('x-norva-upstream-reason');
+            const upstreamFinal = res.headers.get('x-norva-upstream-final');
             if (res.ok && !upstreamStatus) {
                 console.warn('[WatchPage] Relay upstream diagnostic: stream reachable (http=' +
                     res.status + ') — failure was likely client-side decode/codec, not the provider.');
@@ -3716,7 +3717,8 @@ class WatchPage {
             console.warn('[WatchPage] Relay upstream diagnostic:',
                 'http=' + res.status,
                 'upstream=' + (upstreamStatus || 'n/a'),
-                'reason="' + (upstreamReason || '') + '"');
+                'reason="' + (upstreamReason || '') + '"',
+                upstreamFinal ? 'final=' + upstreamFinal : '');
         } catch (e) {
             console.warn('[WatchPage] Relay upstream diagnostic failed:', e?.message || e);
         }

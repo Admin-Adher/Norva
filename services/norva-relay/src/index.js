@@ -340,11 +340,30 @@ async function proxyPlayback(request, env, claims) {
   if (upstreamRange) headers.set("range", upstreamRange);
   else if (requestedRange) headers.set("range", requestedRange);
 
-  const upstream = await fetch(targetUrl, {
+  let upstream = await fetch(targetUrl, {
     method: request.method,
     headers,
     redirect: "follow",
   });
+  let upstreamFinalUrl = upstream.url || targetUrl.toString();
+
+  // Some IPTV providers 302 VOD playback to a backend node addressed by a raw IP
+  // that itself sits behind Cloudflare, which then refuses the IP-host request
+  // with HTTP 403 "error code: 1003" (Direct IP Access Not Allowed). When the
+  // straight follow is rejected, re-follow the redirect chain manually, re-pointing
+  // any IP-host hop back to the provider's domain (same path/query) so Cloudflare
+  // can route it. Gated to 401/403 so working titles keep the fast path untouched.
+  if (!upstream.ok && request.method !== "HEAD" && (upstream.status === 401 || upstream.status === 403)) {
+    try {
+      const recovered = await refetchRewritingIpRedirects(targetUrl, request.method, headers);
+      if (recovered?.response) {
+        upstream = recovered.response;
+        upstreamFinalUrl = recovered.finalUrl || upstreamFinalUrl;
+      }
+    } catch (_) {
+      // best-effort recovery; fall back to the original upstream response
+    }
+  }
   rememberContentLength(targetUrl, upstream);
 
   // Diagnostics: when the provider rejects the stream (401/403/404/5xx) the
@@ -359,6 +378,7 @@ async function proxyPlayback(request, env, claims) {
     mergeCors(errHeaders, corsHeaders(request, env));
     errHeaders.set("Cache-Control", "no-store");
     errHeaders.set("X-Norva-Upstream-Status", String(upstream.status));
+    errHeaders.set("X-Norva-Upstream-Final", String(upstreamFinalUrl || "").replace(/[^\x20-\x7E]/g, "").slice(0, 300));
     const reason = request.method === "HEAD"
       ? ""
       : sanitizeUpstreamReason(await upstream.text().catch(() => ""));
@@ -371,6 +391,7 @@ async function proxyPlayback(request, env, claims) {
       statusText: upstream.statusText,
       host: targetUrl.hostname,
       path: targetUrl.pathname,
+      finalUrl: upstreamFinalUrl,
       reason: reason.slice(0, 200),
     }));
     return new Response(request.method === "HEAD" ? null : reason, {
@@ -747,6 +768,41 @@ function sanitizeUpstreamReason(text) {
     .slice(0, 300);
 }
 
+function isIpHost(hostname) {
+  if (!hostname) return false;
+  if (hostname.startsWith("[")) return true;          // IPv6 literal, e.g. [2606:...]
+  return /^\d{1,3}(?:\.\d{1,3}){3}$/.test(hostname);   // IPv4
+}
+
+// Re-fetch following redirects manually, re-pointing any redirect hop whose host
+// is a raw IP back to the provider's domain (preserving path + query). IPTV
+// providers commonly 302 VOD to an IP-addressed backend node; when that node is
+// behind Cloudflare it answers IP-host requests with 403 "error code: 1003"
+// (Direct IP Access Not Allowed). Routing the same path via the domain lets
+// Cloudflare resolve it. Returns the final response + the URL actually fetched.
+async function refetchRewritingIpRedirects(startUrl, method, headers, maxHops = 5) {
+  let url = new URL(startUrl.toString());
+  for (let hop = 0; hop < maxHops; hop++) {
+    const resp = await fetch(url, { method, headers, redirect: "manual" });
+    const location = resp.status >= 300 && resp.status < 400 ? resp.headers.get("location") : null;
+    if (!location) return { response: resp, finalUrl: url.toString() };
+    let next;
+    try {
+      next = new URL(location, url);
+    } catch (_) {
+      return { response: resp, finalUrl: url.toString() };
+    }
+    if (isIpHost(next.hostname) && !isIpHost(startUrl.hostname)) {
+      next.hostname = startUrl.hostname;
+      next.protocol = startUrl.protocol;
+      next.port = startUrl.port;
+    }
+    url = next;
+  }
+  const resp = await fetch(url, { method, headers, redirect: "follow" });
+  return { response: resp, finalUrl: resp.url || url.toString() };
+}
+
 function corsHeaders(request, env) {
   const origin = request.headers.get("Origin");
   const configured = parseCsv(env.ALLOWED_ORIGINS);
@@ -759,7 +815,7 @@ function corsHeaders(request, env) {
     "Access-Control-Allow-Origin": allowOrigin,
     "Access-Control-Allow-Headers": "authorization, range, content-type",
     "Access-Control-Allow-Methods": "GET,HEAD,POST,DELETE,OPTIONS",
-    "Access-Control-Expose-Headers": "content-length, content-range, accept-ranges, x-norva-image-cache, x-norva-image-fallback, x-norva-upstream-status, x-norva-upstream-reason",
+    "Access-Control-Expose-Headers": "content-length, content-range, accept-ranges, x-norva-image-cache, x-norva-image-fallback, x-norva-upstream-status, x-norva-upstream-reason, x-norva-upstream-final",
     "Access-Control-Max-Age": "86400",
     Vary: "Origin",
   };
