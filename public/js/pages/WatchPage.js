@@ -5163,6 +5163,31 @@ class WatchPage {
         this.captionsMenuOpen = false;
     }
 
+    // Local heuristic (no network): IPTV titles tag burned-in subtitles in the
+    // name — "SUBT AR" / "VOST FR" / "مترجم" … There is no extractable subtitle
+    // TRACK (the text is rendered into the picture), but we can at least tell the
+    // user it's there and in which language, instead of a blank "no track".
+    // Returns a language code, 'und' (burned but unknown language), or undefined
+    // (no burned-subtitle marker found).
+    detectBurnedSubtitleLanguage() {
+        const title = String(this.content?.title || '');
+        if (!title) return undefined;
+        const t = ' ' + title.toUpperCase() + ' ';
+        if (/مترجم|ترجمة/.test(title) || /\bVOST?\s?AR\b|\bSUBT?\s?AR\b|\bAR\s?SUBT?\b|\bVOSTAR\b/.test(t)) return 'ar';
+        if (/\bVOSTFR\b|\bVOST?\s?FR\b|\bSTFR\b|\bSUBT?\s?FR\b/.test(t)) return 'fr';
+        if (/\bVOSTEN\b|\bVOST?\s?EN\b|\bSUBT?\s?EN\b/.test(t)) return 'en';
+        if (/\bVOST\b|\bVOSTF?\b|\bSUBT\b/.test(t)) return 'und';
+        return undefined;
+    }
+
+    getBurnedSubtitleMessage() {
+        const lang = this.detectBurnedSubtitleLanguage();
+        if (lang === undefined) return 'No subtitle track in this stream.';
+        if (lang === 'und') return 'Burned-in subtitles — always on, can’t be turned off.';
+        const name = this.getLanguageDisplayName(lang) || lang.toUpperCase();
+        return `Burned-in subtitles (${name}) — always on, can’t be turned off.`;
+    }
+
     updateCaptionsTracks() {
         if (!this.captionsList || !this.video) return;
 
@@ -5220,7 +5245,7 @@ class WatchPage {
             return `<button class="captions-option ${track.active ? 'active' : ''}" data-source="${track.source}" data-index="${track.index}"${streamAttr}>${this.escapeHtml(track.label)}</button>`;
         }).join('');
         const emptyHtml = !options.length
-            ? '<div class="captions-empty">No subtitle track exposed by this stream.</div>'
+            ? `<div class="captions-empty">${this.escapeHtml(this.getBurnedSubtitleMessage())}</div>`
             : '';
         const offsetHtml = this.selectedSubtitleStreamIndex !== null && this.selectedSubtitleStreamIndex !== undefined && probeSubtitleTracks.length
             ? `<div class="captions-offset" aria-label="Subtitle sync">
