@@ -66,11 +66,13 @@ export async function refreshVodTitleProjection(options: ProjectionOptions) {
     const tmdbValidation = providerIds.tmdbId ? tmdbValidationById.get(tmdbValidationKey(itemType, providerIds.tmdbId)) : null;
     const trustedTmdbId = tmdbValidation?.valid ? providerIds.tmdbId : null;
     const trustedIds = { tmdbId: trustedTmdbId, imdbId: providerIds.imdbId };
-    const identityIds = {
-      tmdbId: trustedTmdbId,
-      imdbId: providerIds.imdbId,
-    };
-    const identity = identityForTitle(itemType, title, releaseYear, identityIds);
+    // Dedup identity binds to the PROVIDER's id whenever it's real, so a film's
+    // localized + quality variants ("Le roi lion" / "El rey leon" / "the dark
+    // knight rises p 2") collapse onto ONE canonical title — even when our en-US
+    // title-confidence check didn't pass. Validation (trustedTmdbId) still gates
+    // whether we trust TMDB *metadata*; it must never split identity. cleanId()
+    // maps the "0" no-match sentinel to null, so those fall through to norm:.
+    const identity = identityForTitle(itemType, title, releaseYear, providerIds);
     if (providerIds.tmdbId) providerTmdbIds += 1;
 
     if (!titleRowsByKey.has(identity.key)) {
@@ -98,7 +100,7 @@ export async function refreshVodTitleProjection(options: ProjectionOptions) {
             confidence: tmdbValidation.confidence,
             reason: tmdbValidation.reason,
           } : undefined,
-          projectionVersion: 1,
+          projectionVersion: 2,
           syncedAt,
         }),
         synced_at: syncedAt,
@@ -568,7 +570,11 @@ function cleanId(value: unknown) {
   const string = stringOr(value, "");
   if (!string) return null;
   const match = string.match(/tt\d+|\d+/i);
-  return match ? match[0] : null;
+  if (!match) return null;
+  // "0" / "00" / "tt0"… is the provider "no match" sentinel, never a real id —
+  // treating it as an id would collapse every unmatched title into one.
+  if (/^(tt)?0+$/i.test(match[0])) return null;
+  return match[0];
 }
 
 function stripDiacritics(value: string) {
