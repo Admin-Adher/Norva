@@ -3806,6 +3806,145 @@ kbd {
   .genre-grid { grid-template-columns: 1fr; }
 }
 
+/* -----------------------------------------------------
+   Channels (Live TV) tree — same visual language as the
+   genre grid: card sections, name-left / iOS-switch-right.
+   Scoped to #content-tree so it never touches the live
+   player's channel list (which reuses .channel-item).
+   ----------------------------------------------------- */
+#content-tree .content-group {
+  margin-bottom: 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 14px;
+  overflow: hidden;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.022), rgba(255, 255, 255, 0.006));
+}
+#content-tree .content-group-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 13px 16px;
+  background: transparent;
+  border-radius: 0;
+  cursor: pointer;
+  transition: background 0.14s ease;
+}
+#content-tree .content-group-header:hover { background: rgba(255, 255, 255, 0.03); }
+#content-tree .group-expander {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  color: var(--color-text-secondary);
+  transition: transform 0.2s ease;
+}
+#content-tree .group-expander svg { width: 15px; height: 15px; display: block; }
+#content-tree .content-group.collapsed .group-expander { transform: rotate(-90deg); }
+#content-tree .group-name {
+  flex: 1;
+  min-width: 0;
+  font-weight: 650;
+  font-size: 0.92rem;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#content-tree .group-count {
+  flex: none;
+  font-size: 0.74rem;
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  padding: 2px 9px;
+}
+#content-tree .cg-switch { display: inline-flex; margin: 0; cursor: pointer; }
+
+#content-tree .content-channels {
+  margin: 0;
+  padding: 4px 12px 12px 42px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: rgba(0, 0, 0, 0.16);
+  border-top: 1px solid var(--color-border);
+}
+#content-tree .checkbox-label.channel-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0;
+  padding: 9px 12px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  font-size: 0.88rem;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+#content-tree .checkbox-label.channel-item:hover {
+  background: rgba(255, 255, 255, 0.035);
+  border-color: var(--color-border);
+}
+#content-tree .checkbox-label.channel-item .channel-name {
+  flex: 1;
+  min-width: 0;
+  max-width: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Native checkboxes rendered as iOS switches (Manage Content only). */
+#content-tree input[type="checkbox"].group-checkbox,
+#content-tree input[type="checkbox"].channel-checkbox {
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  flex: none;
+  margin: 0;
+  width: 40px;
+  height: 23px;
+  border-radius: 999px;
+  background: var(--color-bg-hover);
+  border: 1px solid var(--color-border-light);
+  cursor: pointer;
+  transition: background 0.16s ease, border-color 0.16s ease;
+}
+#content-tree input[type="checkbox"].group-checkbox::after,
+#content-tree input[type="checkbox"].channel-checkbox::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 2px;
+  transform: translateY(-50%);
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  background: #6b7280;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+  transition: left 0.16s ease, background 0.16s ease;
+}
+#content-tree input[type="checkbox"].group-checkbox:checked,
+#content-tree input[type="checkbox"].channel-checkbox:checked {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+}
+#content-tree input[type="checkbox"].group-checkbox:checked::after,
+#content-tree input[type="checkbox"].channel-checkbox:checked::after {
+  left: 19px;
+  background: #fff;
+}
+/* Channel-row switch a touch smaller than the category master switch. */
+#content-tree input[type="checkbox"].channel-checkbox { width: 36px; height: 21px; }
+#content-tree input[type="checkbox"].channel-checkbox::after { width: 15px; height: 15px; }
+#content-tree input[type="checkbox"].channel-checkbox:checked::after { left: 17px; }
+
 /* =====================================================
    Scrollbar
    ===================================================== */

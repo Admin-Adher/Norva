@@ -1661,12 +1661,12 @@ class SourceManager {
                 const itemHidden = this.hiddenSet.has(`${item.type}:${item.id}`);
                 return `
                     <label class="checkbox-label channel-item" title="${this.escapeHtml(item.name)}">
-                        <input type="checkbox" class="channel-checkbox" 
-                               data-type="${item.type}" 
-                               data-id="${item.id}" 
-                               data-source-id="${this.treeData.sourceId}" 
-                               ${!itemHidden ? 'checked' : ''}>
                         <span class="channel-name">${this.escapeHtml(item.name)}</span>
+                        <input type="checkbox" class="channel-checkbox"
+                               data-type="${item.type}"
+                               data-id="${item.id}"
+                               data-source-id="${this.treeData.sourceId}"
+                               ${!itemHidden ? 'checked' : ''}>
                     </label>`;
             }).join('')}
             </div>`;
@@ -1676,13 +1676,14 @@ class SourceManager {
             <div class="content-group ${isExpanded ? '' : 'collapsed'}" data-group-id="${this.escapeHtml(group.id)}">
                 <div class="content-group-header">
                     <span class="group-expander">${Icons.chevronDown}</span>
-                    <label class="checkbox-label" onclick="event.stopPropagation()">
-                        <input type="checkbox" class="group-checkbox" 
-                               data-type="group" 
-                               data-id="${this.escapeHtml(group.name)}" 
-                               data-source-id="${this.treeData.sourceId}" 
+                    <span class="group-name">${this.escapeHtml(group.name)}</span>
+                    <span class="group-count">${group.items.length}</span>
+                    <label class="cg-switch" onclick="event.stopPropagation()">
+                        <input type="checkbox" class="group-checkbox"
+                               data-type="group"
+                               data-id="${this.escapeHtml(group.name)}"
+                               data-source-id="${this.treeData.sourceId}"
                                ${checked ? 'checked' : ''}>
-                        <span class="group-name">${this.escapeHtml(group.name)} (${group.items.length})</span>
                     </label>
                 </div>
                 ${itemsHtml}
