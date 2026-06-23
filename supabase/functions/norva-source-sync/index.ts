@@ -10,6 +10,7 @@ import {
 } from "../_shared/live-materialization.ts";
 import { refreshVodTitleProjection } from "../_shared/vod-title-projection.ts";
 import type { LiveCatalogItem } from "../_shared/live-catalog.ts";
+import { getEntitlementDecision, planFeatureEntitled, realPlanCode } from "../_shared/entitlements.ts";
 
 type JsonRecord = Record<string, unknown>;
 type RuntimeConfig = { sourceConfigKey: string };
@@ -63,6 +64,54 @@ Deno.serve(async (req) => {
     const segments = routeSegments(url.pathname);
     if (req.method === "GET" && segments[0] === "health") {
       return json(req, { ok: true, service: "norva-source-sync", version: 7, liveMaterialization: true, syncProgress: true, catalogFinalize: true, catalogFinalizeBatches: true, liveFinalizeBatches: true });
+    }
+    // Premium per-user background refresh (pg_cron → here). Drives a small batch
+    // of due, entitled sources through the same sync state machine — locked,
+    // backed-off and change-detection-cheap. Dormant until a user is actually
+    // entitled to auto_refresh_background.
+    //
+    // Authorized by a dedicated cron secret that lives only in Vault (single
+    // source of truth — never in this repo, an env var, or the pg_cron command).
+    // pg_cron pulls it from Vault and sends it as the bearer; here we verify it
+    // via a service_role-only SECURITY DEFINER function that returns just a
+    // boolean, so the secret never leaves the database. The service key still
+    // works as an admin fallback for manual triggering.
+    if (req.method === "POST" && segments[0] === "cron") {
+      const token = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
+      let authorized = SUPABASE_SERVICE_KEY !== "" && token === SUPABASE_SERVICE_KEY;
+      if (!authorized && token) {
+        const { data: ok } = await supabase.rpc("norva_verify_cron_secret", { presented: token });
+        authorized = ok === true;
+      }
+      if (!authorized) {
+        return json(req, { error: "forbidden" }, 403);
+      }
+      if (segments[1] === "refresh-due") {
+        return json(req, await cronRefreshDue(supabase));
+      }
+      // Service-authed finalize drivers (no user session), for recovering a
+      // source whose client-side finalize was interrupted:
+      //  • /cron/finalize/:id       — best-effort budget-bounded loop in ONE
+      //    isolate. Fine for small sources; a big catalogue can exhaust the
+      //    isolate's CPU mid-rebuild, so prefer the stepper below for those.
+      //  • /cron/finalize-step/:id  — runs exactly ONE finalize batch and returns
+      //    the next {nextPhase, nextOffset}. Call it in a loop (each call a fresh
+      //    isolate, like the client) to materialize a large source reliably.
+      if (segments[1] === "finalize" && segments[2]) {
+        return json(req, await cronFinalizeSource(supabase, segments[2], url.searchParams.get("country")));
+      }
+      if (segments[1] === "finalize-step" && segments[2]) {
+        const { data: src } = await supabase.from("cloud_sources").select("user_id").eq("id", segments[2]).maybeSingle();
+        if (!src) return json(req, { error: "source not found" }, 404);
+        const result = await finalizeCloudSource(segments[2], String(src.user_id), supabase, {
+          country: url.searchParams.get("country"),
+          phase: stringOr(url.searchParams.get("phase"), "live"),
+          offset: Number(url.searchParams.get("offset")) || 0,
+          limit: Math.max(1, Math.min(2000, Number(url.searchParams.get("limit")) || 1500)),
+        });
+        return json(req, result);
+      }
+      return json(req, { error: "not_found" }, 404);
     }
     if (req.method === "POST" && segments[0] === "sources" && segments[2] === "sync") {
       const user = await requireUser(req, supabase);
@@ -213,7 +262,7 @@ async function writeSourceSyncProgress(
   if (error) console.warn("[norva-source-sync] Unable to update source sync progress", error.message);
 }
 
-async function syncCloudSource(sourceId: string, userId: string, db: SupabaseClient, country: string | null = null, opts: { force?: boolean } = {}) {
+async function syncCloudSource(sourceId: string, userId: string, db: SupabaseClient, country: string | null = null, opts: { force?: boolean; rawOnly?: boolean } = {}) {
   const { data: source, error } = await db
     .from("cloud_sources")
     .select("*")
@@ -243,38 +292,60 @@ async function syncCloudSource(sourceId: string, userId: string, db: SupabaseCli
     },
   });
   const reportProgress: SyncProgressReporter = async (patch: JsonRecord) => {
+    // Detection-only refreshes must leave the visible sync progress completely
+    // untouched — they're invisible background checks, not a user-facing sync.
+    if (opts.rawOnly) return;
     progress = mergeSyncProgress(progress, compactRecord({ ...patch, status: "syncing", updatedAt: new Date().toISOString() }));
     await writeSourceSyncProgress(db, sourceId, userId, baseHint, progress);
   };
 
-  await db
-    .from("cloud_sources")
-    .update({
-      sync_status: "syncing",
-      sync_error: null,
-      last_synced_at: startedAt,
-      config_hint: compactRecord({
-        ...baseHint,
-        syncProgress: progress,
-      }),
-    })
-    .eq("id", sourceId)
-    .eq("user_id", userId);
+  // Background (rawOnly) refreshes don't flip the source to "syncing" up front —
+  // an unchanged catalogue must stay cleanly "ready", and a changed one only
+  // moves to the finalize-pending state once the raw import has actually landed.
+  if (!opts.rawOnly) {
+    await db
+      .from("cloud_sources")
+      .update({
+        sync_status: "syncing",
+        sync_error: null,
+        last_synced_at: startedAt,
+        config_hint: compactRecord({
+          ...baseHint,
+          syncProgress: progress,
+        }),
+      })
+      .eq("id", sourceId)
+      .eq("user_id", userId);
+  }
 
   try {
     const config = await decryptSourceConfig(source.config_ciphertext, await getRuntimeConfig(db));
-    const syncOpts = { previousSignature, force: opts.force };
+    const syncOpts = { previousSignature, force: opts.force, rawOnly: opts.rawOnly };
     const result = source.source_type === "xtream"
       ? await syncXtreamSource(sourceId, userId, config, db, country, reportProgress, syncOpts)
       : source.source_type === "m3u"
         ? await syncM3uSource(sourceId, userId, config, db, country, reportProgress, syncOpts)
         : { total: 0 };
 
+    const resultRecord = result as JsonRecord;
+
+    if (opts.rawOnly) {
+      // Detection-only (cron): never mutate the catalogue, materialization,
+      // signature or sync_status here — only surface the app-closed "what's new"
+      // signal when the provider catalogue has grown since our last full import.
+      // The real import + materialization is left to the client on next open.
+      if (resultRecord.changed) {
+        await maybeRecordContentEvent(db, userId, sourceId, previousSignature, resultRecord);
+      }
+      return { sourceId, status: "detected", changed: Boolean(resultRecord.changed), ...result };
+    }
+
     if ((source.source_type === "xtream" || source.source_type === "m3u") && Number(result.total ?? 0) <= 0) {
       throw new HttpError(422, "No playable catalog items were imported from this source");
     }
 
     const syncedAt = new Date().toISOString();
+
     const { error: updateError } = await db
       .from("cloud_sources")
       .update({
@@ -283,7 +354,7 @@ async function syncCloudSource(sourceId: string, userId: string, db: SupabaseCli
         last_synced_at: syncedAt,
         config_hint: compactRecord({
           ...recordOrEmpty(source.config_hint),
-          contentSignature: (result as JsonRecord).contentSignature ?? previousSignature,
+          contentSignature: resultRecord.contentSignature ?? previousSignature,
           lastSync: { ...result, syncedAt },
           syncProgress: completedSyncProgress(result, startedAt, syncedAt),
         }),
@@ -293,7 +364,7 @@ async function syncCloudSource(sourceId: string, userId: string, db: SupabaseCli
     if (updateError) throwDb(updateError, "Unable to update source sync status");
 
     // "What's new" feed: record a capped event when the catalogue grew.
-    await maybeRecordContentEvent(db, userId, sourceId, previousSignature, result as JsonRecord);
+    await maybeRecordContentEvent(db, userId, sourceId, previousSignature, resultRecord);
 
     return { sourceId, status: "ready", ...result };
   } catch (error) {
@@ -319,6 +390,160 @@ async function syncCloudSource(sourceId: string, userId: string, db: SupabaseCli
       .eq("user_id", userId);
     throw error;
   }
+}
+
+// Run a promise to completion after the HTTP response is sent. Supabase exposes
+// EdgeRuntime.waitUntil to keep the isolate alive for background work; fall back
+// to a detached promise where it isn't present.
+function runInBackground(task: Promise<unknown>) {
+  const safe = task.catch((e) => console.error("[cron] background task failed", e));
+  try {
+    const er = (globalThis as { EdgeRuntime?: { waitUntil?: (p: Promise<unknown>) => void } }).EdgeRuntime;
+    if (er?.waitUntil) { er.waitUntil(safe); return; }
+  } catch (_) { /* ignore — fall through to detached */ }
+  void safe;
+}
+
+// Premium per-user background refresh — the step-5 state machine. Picks a small
+// batch of DUE sources, ENFORCES the auto_refresh_background entitlement (skips
+// anyone who isn't premium), and takes a compare-and-set lock so overlapping
+// ticks can never double-run. Per source it runs a DETECTION-ONLY refresh in the
+// background: fetch the provider catalogue and compare its signature against our
+// last full import. That's the wall-clock-safe, app-closed "is there new content?"
+// signal premium pays for — on a change it records a capped "what's new" event
+// (surfaced in-app on open). It deliberately does NOT import or materialize here:
+// the full delete+rebuild+materialization overruns a single isolate on big
+// catalogues, so the proven client-driven, batched import/finalize still runs on
+// the next open. We return the HTTP response at once (work runs in the
+// background); on success the next window is scheduled, on a provider error it
+// backs off exponentially. Locking also pushes the due window out by the lock
+// TTL, so a source isn't re-picked mid-run — and if the isolate dies first, the
+// lock self-frees after that same TTL and the source is retried on a later tick.
+async function cronRefreshDue(db: SupabaseClient) {
+  const CADENCE_MS = 6 * 60 * 60 * 1000;   // premium cadence: every 6h
+  const LOCK_TTL_MS = 12 * 60 * 1000;      // a stuck/crashed run frees after 12 min
+  const BATCH = 1;                          // sources kicked per tick — kept at 1 so a
+                                            // background sync owns the isolate's budget
+  const nowMs = Date.now();
+  const nowIso = new Date(nowMs).toISOString();
+  const staleIso = new Date(nowMs - LOCK_TTL_MS).toISOString();
+  const asMs = (v: unknown) => { const m = new Date(String(v ?? "")).getTime(); return Number.isFinite(m) ? m : 0; };
+
+  const { data: due, error } = await db
+    .from("cloud_sources")
+    .select("id,user_id,source_type,auto_refresh_state,auto_refresh_next_at")
+    .in("source_type", ["xtream", "m3u"])
+    .or(`auto_refresh_next_at.is.null,auto_refresh_next_at.lte.${nowIso}`)
+    .order("auto_refresh_next_at", { ascending: true, nullsFirst: true })
+    .limit(BATCH);
+  if (error) return { ok: false, error: error.message };
+
+  const schedule = (id: string, nextMs: number, state: JsonRecord) =>
+    db.from("cloud_sources")
+      .update({ auto_refresh_next_at: new Date(nextMs).toISOString(), auto_refresh_state: state })
+      .eq("id", id); // a state without lockedAt releases the lock
+
+  const toSync: { id: string; userId: string; state: JsonRecord }[] = [];
+  let skipped = 0, notEntitled = 0;
+
+  for (const src of (due ?? [])) {
+    const id = String(src.id);
+    const userId = String(src.user_id);
+    const state = isRecord(src.auto_refresh_state) ? src.auto_refresh_state : {};
+
+    // Backing off after a recent provider error → leave it alone this tick.
+    if (asMs(state.backoffUntil) > nowMs) { skipped++; continue; }
+
+    // ENFORCE premium. Non-entitled → push the next window out a full cadence so
+    // we don't re-check it every tick.
+    let entitled = false;
+    try {
+      const decision = await getEntitlementDecision(db, userId, { autoStartTrial: false });
+      entitled = planFeatureEntitled(realPlanCode(decision), "auto_refresh_background");
+    } catch (_) { entitled = false; }
+    if (!entitled) { await schedule(id, nowMs + CADENCE_MS, { attempts: 0 }); notEntitled++; continue; }
+
+    // Compare-and-set lock: only proceed if no fresh lock is held (another tick
+    // holding it → update matches 0 rows → skip, no double-run). We also push the
+    // due window out by the lock TTL so this source isn't re-picked while its
+    // background sync runs.
+    const { data: locked } = await db
+      .from("cloud_sources")
+      .update({
+        auto_refresh_state: { ...state, lockedAt: nowIso },
+        auto_refresh_next_at: new Date(nowMs + LOCK_TTL_MS).toISOString(),
+      })
+      .eq("id", id)
+      .or(`auto_refresh_state->>lockedAt.is.null,auto_refresh_state->>lockedAt.lt.${staleIso}`)
+      .select("id");
+    if (!locked || !locked.length) { skipped++; continue; }
+
+    toSync.push({ id, userId, state });
+  }
+
+  // Drive the heavy syncs in the background so pg_net gets a fast response rather
+  // than holding the connection open for the whole import. Each job reschedules
+  // itself (next window on success, exponential backoff on a provider error).
+  if (toSync.length) {
+    runInBackground((async () => {
+      for (const job of toSync) {
+        try {
+          // Detection-only refresh: fetch the provider and compare its signature
+          // against our last full import. On a change, a capped "what's new" event
+          // is recorded (the app-closed premium signal). Wall-clock-safe — it never
+          // imports or materializes; the client does that on next open.
+          await syncCloudSource(job.id, job.userId, db, null, { force: false, rawOnly: true });
+          await schedule(job.id, Date.now() + CADENCE_MS, { attempts: 0 });
+        } catch (_) {
+          const attempts = (Number(job.state.attempts) || 0) + 1;
+          const backoff = Math.min(CADENCE_MS, 5 * 60 * 1000 * Math.pow(2, Math.min(attempts, 6)));
+          await schedule(job.id, Date.now() + backoff, { attempts, backoffUntil: new Date(Date.now() + backoff).toISOString() });
+        }
+      }
+    })());
+  }
+
+  return { ok: true, due: (due ?? []).length, locked: toSync.length, skipped, notEntitled };
+}
+
+// Service-authed entry point to finish a source's materialization without a user
+// session. Looks up the owning user and drives the resumable finalize phases in
+// the background, returning immediately.
+async function cronFinalizeSource(db: SupabaseClient, sourceId: string, country: string | null) {
+  const { data: source, error } = await db
+    .from("cloud_sources")
+    .select("id,user_id")
+    .eq("id", sourceId)
+    .maybeSingle();
+  if (error) return { ok: false, error: error.message };
+  if (!source) return { ok: false, error: "source not found" };
+  runInBackground(driveFinalizeToReady(db, sourceId, String(source.user_id), country));
+  return { ok: true, started: true, sourceId };
+}
+
+// Walk the resumable finalize phases (live → live_channels → live_variants →
+// titles → complete) to completion, bounded by a wall-clock budget so a single
+// invocation never overruns the isolate. Each phase is the same batched step the
+// client drives; if the budget is hit before "ready", the source is left
+// mid-finalize and a later call (or the client on open) resumes from there.
+async function driveFinalizeToReady(db: SupabaseClient, sourceId: string, userId: string, country: string | null) {
+  const deadline = Date.now() + 120_000;
+  let phase = "live";
+  let offset = 0;
+  let guard = 0;
+  while (Date.now() < deadline && guard++ < 400) {
+    let result: JsonRecord;
+    try {
+      result = await finalizeCloudSource(sourceId, userId, db, { country, phase, offset, limit: 1500 }) as unknown as JsonRecord;
+    } catch (e) {
+      console.error("[cron] finalize batch failed", sourceId, e);
+      return;
+    }
+    if (String(result.status) === "ready") return;
+    phase = stringOr(result.nextPhase, "complete");
+    offset = Number(result.nextOffset) || 0;
+  }
+  console.warn("[cron] finalize budget/guard hit before ready", sourceId, phase, offset);
 }
 
 type FinalizeCloudSourceOptions = {
@@ -819,7 +1044,7 @@ async function syncXtreamSource(
   db: SupabaseClient,
   country: string | null = null,
   reportProgress: SyncProgressReporter = async () => {},
-  opts: { previousSignature?: unknown; force?: boolean } = {},
+  opts: { previousSignature?: unknown; force?: boolean; rawOnly?: boolean } = {},
 ) {
   const serverUrl = normalizeBaseUrl(stringOr(config.serverUrl, ""));
   const username = stringOr(config.username, "");
@@ -891,6 +1116,16 @@ async function syncXtreamSource(
   // last fully imported, skip the delete+rebuild+projection. The fetch above is
   // the only unavoidable cost; everything below is the expensive part we avoid.
   const contentSignature = await computeContentSignature(rows);
+
+  if (opts.rawOnly) {
+    // Detection-only (cron) path: report whether the provider catalogue moved
+    // since our last full import, WITHOUT mutating anything (no delete/rebuild,
+    // no materialization, no signature write). The actual import stays with the
+    // client on next open; this only powers the app-closed "what's new" signal.
+    const changed = Boolean(opts.previousSignature) && !contentSignatureEquals(contentSignature, opts.previousSignature);
+    return { live: liveCount, movies: movieCount, series: seriesCount, total: rows.length, contentSignature, changed, detectOnly: true };
+  }
+
   if (!opts.force && opts.previousSignature && contentSignatureEquals(contentSignature, opts.previousSignature)) {
     await reportProgress({
       stage: "unchanged",
@@ -1132,7 +1367,7 @@ async function syncM3uSource(
   db: SupabaseClient,
   country: string | null = null,
   reportProgress: SyncProgressReporter = async () => {},
-  opts: { previousSignature?: unknown; force?: boolean } = {},
+  opts: { previousSignature?: unknown; force?: boolean; rawOnly?: boolean } = {},
 ) {
   const playlistUrl = stringOr(config.playlistUrl, "");
   await reportProgress({
@@ -1173,6 +1408,13 @@ async function syncM3uSource(
   // Change-detection (same as Xtream): skip the rebuild when the playlist's
   // channel set is unchanged since the last completed import.
   const contentSignature = await computeContentSignature(rows);
+
+  if (opts.rawOnly) {
+    // Detection-only (cron) path — see the matching note in syncXtreamSource.
+    const changed = Boolean(opts.previousSignature) && !contentSignatureEquals(contentSignature, opts.previousSignature);
+    return { live: rows.length, total: rows.length, contentSignature, changed, detectOnly: true };
+  }
+
   if (!opts.force && opts.previousSignature && contentSignatureEquals(contentSignature, opts.previousSignature)) {
     await reportProgress({
       stage: "unchanged",
