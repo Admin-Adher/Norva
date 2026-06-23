@@ -280,25 +280,22 @@ async function getHiddenGenres(req: Request, userId: string): Promise<Set<string
 // profile's currently-hidden buckets. Powers the Manage Content genre view.
 async function listGenreSummary(req: Request, url: URL, userId: string) {
   const itemType = url.searchParams.get("type") === "series" ? "series" : "movie";
-  const candidateLimit = boundedInt(url.searchParams.get("candidates"), 30000, 100, 50000);
 
-  // Count from the WHOLE catalogue (not just titles with materialised variants,
-  // and no sort) so the management view shows every genre present. Selecting
-  // only the two JSON sub-fields keeps the payload tiny — selecting full
-  // metadata + sorting 26k rows was timing out.
-  let rows: JsonRecord[];
+  // Aggregate in SQL: distinct (categoryName, tmdb genres) combos + counts.
+  // Returns ~a few thousand grouped rows instead of tens of thousands of full
+  // rows, which overran the function ("Unable to load genres"). The curated
+  // bucket mapping stays in TS, multiplying each combo by its count.
+  let rows: Array<{ category_name?: unknown; genres?: unknown; n?: unknown }>;
   try {
-    const { data, error } = await db
-      .from("cloud_titles")
-      .select("category_name:metadata->>categoryName, genres:metadata->tmdb->genres")
-      .eq("user_id", userId)
-      .eq("item_type", itemType)
-      .limit(candidateLimit);
+    const { data, error } = await db.rpc("cloud_genre_summary", {
+      p_user_id: userId,
+      p_item_type: itemType,
+    });
     if (error) {
       if (isMissingMaterialization(error)) return { type: itemType, genres: [], hidden: [] };
       throwDb(error, "Unable to summarise genres");
     }
-    rows = (data ?? []) as JsonRecord[];
+    rows = (data ?? []) as Array<{ category_name?: unknown; genres?: unknown; n?: unknown }>;
   } catch (error) {
     if (isMissingMaterialization(error)) return { type: itemType, genres: [], hidden: [] };
     throw error;
@@ -306,9 +303,11 @@ async function listGenreSummary(req: Request, url: URL, userId: string) {
 
   const counts = new Map<string, number>();
   for (const row of rows) {
+    const n = Number(row.n) || 0;
+    if (!n) continue;
     for (const bucketId of classifyTitleBuckets(row.category_name, row.genres)) {
       if (bucketId === "autres") continue;
-      counts.set(bucketId, (counts.get(bucketId) ?? 0) + 1);
+      counts.set(bucketId, (counts.get(bucketId) ?? 0) + n);
     }
   }
 
