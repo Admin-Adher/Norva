@@ -403,10 +403,11 @@ async function listGenreSummary(req: Request, url: URL, userId: string) {
       ? sourceParam
       : null;
 
-  // Aggregate in SQL: distinct (categoryName, tmdb genres) combos + counts.
-  // Returns ~a few thousand grouped rows instead of tens of thousands of full
-  // rows, which overran the function ("Unable to load genres"). The curated
-  // bucket mapping stays in TS, multiplying each combo by its count.
+  // Aggregate in SQL: distinct (categoryName, tmdb genres) combos + counts. The RPC
+  // groups over denormalised genre_category / genre_payload columns (kept in sync by a
+  // trigger) so it never detoasts the large metadata JSONB — see migration
+  // 20260624060000. The curated bucket mapping stays in TS, multiplying each combo by
+  // its count.
   let rows: Array<{ category_name?: unknown; genres?: unknown; n?: unknown }>;
   try {
     const rpcArgs: Record<string, unknown> = { p_user_id: userId, p_item_type: itemType };
