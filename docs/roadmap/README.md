@@ -10,7 +10,7 @@ différés**. Chaque fichier dit **quoi faire**, **quand** (le déclencheur) et
 | Sujet | Déclencheur | Fichiers |
 |---|---|---|
 | 💳 **Paiements / abonnements** | Entreprise validée → comptes externes (Play Console, Stripe, RevenueCat) | [`billing-status.md`](./billing-status.md) (état & reprise) · [`billing-setup.md`](./billing-setup.md) (runbook détaillé) |
-| 📈 **Scalabilité & cache de titres global** | Beaucoup d'users multi-pays (recoupement réel des catalogues) | [`scaling-status.md`](./scaling-status.md) (état & reprise) · [`global-title-cache-design.md`](./global-title-cache-design.md) (design détaillé) |
+| 📈 **Scalabilité produit** | Beaucoup d'users multi-pays (recoupement réel des catalogues) | [`scaling-playbook.md`](./scaling-playbook.md) (**vue d'ensemble + séquence Jour J — à lire en premier**) · [`scaling-status.md`](./scaling-status.md) (état détaillé & reprise) · [`global-title-cache-design.md`](./global-title-cache-design.md) (design) |
 
 **Convention :** `*-status.md` = où on en est + comment reprendre (à lire en
 premier) ; l'autre fichier du sujet = le design/runbook détaillé.
