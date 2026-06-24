@@ -2484,6 +2484,7 @@ class WatchPage {
             //  2. Otherwise the precomputed/relay map on content (crawled titles).
             const sessionAudioTracks = Array.isArray(options.audioTracks) ? options.audioTracks : null;
             console.log('[AudioDbg] 1. engine path | server options.audioTracks =', JSON.stringify(sessionAudioTracks),
+                '| server audioProbeDiag =', options.audioProbeDiag,
                 '| content.audioTracks =', JSON.stringify(this.content?.audioTracks || this.content?.audio_tracks || null));
             if (sessionAudioTracks && sessionAudioTracks.length) {
                 console.log('[AudioDbg] 2a. using SERVER-probed tracks (' + sessionAudioTracks.length + ')');

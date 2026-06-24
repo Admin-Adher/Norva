@@ -295,8 +295,13 @@ async function createPlaybackSession(
       // the only audio-track source for engine titles with no precomputed map (e.g. a
       // series episode with no TMDB match). Best-effort — never blocks/breaks playback.
       let audioTracks: Array<{ index: number; lang: string | null }> = [];
-      try { audioTracks = await probeOrderedAudioTracks(db, userId, targetUrl); } catch (_) { /* best-effort */ }
-      return { session, playback: { mode: "relay", url: pipe.url, tokenExpiresAt: expiresAt, ...(audioTracks.length ? { audioTracks } : {}) } };
+      let audioProbeDiag = "skip";
+      try {
+        const probed = await probeOrderedAudioTracks(db, userId, targetUrl);
+        audioTracks = probed.tracks;
+        audioProbeDiag = probed.diag;
+      } catch (e) { audioProbeDiag = `throw_${String(e && (e as Error).name || e).slice(0, 24)}`; }
+      return { session, playback: { mode: "relay", url: pipe.url, tokenExpiresAt: expiresAt, audioProbeDiag, ...(audioTracks.length ? { audioTracks } : {}) } };
     }
     const relay = await createRelayAccess(session.id, userId, targetUrl, expiresAt, db, userAgent);
     return { session, playback: { mode, url: relay.url, tokenExpiresAt: expiresAt } };
@@ -1721,28 +1726,28 @@ async function probeOrderedAudioTracks(
   db: SupabaseClient,
   userId: string,
   targetUrl: string,
-): Promise<Array<{ index: number; lang: string | null }>> {
+): Promise<{ tracks: Array<{ index: number; lang: string | null }>; diag: string }> {
   const runtimeConfig = await getRuntimeConfig(db);
-  if (!runtimeConfig.relayBaseUrl || !runtimeConfig.relayTokenSecret) return [];
+  if (!runtimeConfig.relayBaseUrl || !runtimeConfig.relayTokenSecret) return { tracks: [], diag: "noconfig" };
   const payload = JSON.stringify({ v: 1, sid: "engine-audio", uid: userId, url: targetUrl, exp: Math.floor(Date.now() / 1000) + 120 });
   const token = `${base64Url(encoder.encode(payload))}.${await hmacBase64Url(runtimeConfig.relayTokenSecret, payload)}`;
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 4000);
+  const timer = setTimeout(() => ctrl.abort(), 12000);
+  const t0 = Date.now();
   try {
     const res = await fetch(`${runtimeConfig.relayBaseUrl}/probe-audio/${token}`, { headers: { accept: "application/json" }, signal: ctrl.signal });
-    if (!res.ok) { console.log(`[engine-audio] relay probe http ${res.status}`); return []; }
+    const ms = Date.now() - t0;
+    if (!res.ok) return { tracks: [], diag: `http${res.status}_${ms}ms` };
     const info = await res.json().catch(() => null) as JsonRecord | null;
     const raw = info && Array.isArray(info.audioTracks) ? info.audioTracks as JsonRecord[] : [];
     const ordered = raw
       .map((t) => ({ index: Number(t?.index), lang: normalizeIsoLang(stringOrNull(t?.lang ?? t?.language)) }))
       .filter((t) => Number.isInteger(t.index));
-    // Lightweight telemetry (no URL/creds): how many tracks the relay returned and
-    // their languages — so a "still Audio N" report is diagnosable from the logs.
-    console.log(`[engine-audio] relay probe ok rawTracks=${raw.length} ordered=${ordered.length} langs=${JSON.stringify(ordered.map((t) => t.lang))}`);
-    return ordered;
+    // diag is surfaced to the client console (no URL/creds): rawN, the langs the relay
+    // returned, and the probe time — so a "still Audio N" report is fully diagnosable.
+    return { tracks: ordered, diag: `ok_raw${raw.length}_langs[${ordered.map((t) => t.lang ?? "null").join(",")}]_${ms}ms` };
   } catch (e) {
-    console.log(`[engine-audio] relay probe error ${String(e && (e as Error).message || e).slice(0, 80)}`);
-    return [];
+    return { tracks: [], diag: `err_${String(e && (e as Error).name || e).slice(0, 24)}_${Date.now() - t0}ms` };
   } finally {
     clearTimeout(timer);
   }
