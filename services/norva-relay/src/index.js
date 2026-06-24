@@ -98,6 +98,22 @@ export default {
         return await relayVodInfo(request, env, claims, ctx);
       }
 
+      // Deep audio-language probe: get_vod_info's DEFAULT track + a container
+      // header-probe (MP4 moov / Matroska Tracks) to enumerate EVERY audio track's
+      // language — recovers multi-audio files and titles whose default track is
+      // "und". Range requests only; token-gated like /relay/ and /vod-info/.
+      if (url.pathname.startsWith("/probe-audio/")) {
+        if (request.method !== "GET") {
+          return json(request, env, { error: "Method not allowed" }, 405);
+        }
+        const token = decodeURIComponent(url.pathname.slice("/probe-audio/".length));
+        const claims = await verifyRelayToken(token, env.RELAY_TOKEN_SECRET);
+        if (claims.exp * 1000 < Date.now()) {
+          return json(request, env, { error: "Relay token expired" }, 401);
+        }
+        return await relayProbeAudio(request, env, claims, ctx);
+      }
+
       return json(request, env, { error: "Route not found" }, 404);
     } catch (error) {
       const status = error instanceof HttpError ? error.status : 500;
@@ -1005,6 +1021,301 @@ async function relayVodInfo(request, env, claims, ctx) {
   } catch (_) {
     return json(request, env, empty, 200);
   }
+}
+
+// ── Audio-track language header-probe ──────────────────────────────────────────
+// Parses just the container header (via Range requests) to list EVERY audio
+// track's language — what get_vod_info (single default track) can't do for
+// multi-audio files or "und"-default titles. Supports ISO-BMFF (MP4/MOV) and
+// Matroska/WebM. Pure helpers (no I/O) so they're unit-testable.
+
+function readU32BE(buf, off) {
+  return buf[off] * 0x1000000 + (buf[off + 1] << 16) + (buf[off + 2] << 8) + buf[off + 3];
+}
+
+// MP4 mdhd packed language: bit15=pad, then 3×5-bit (each +0x60 => ISO-639-2 char).
+function decodeMp4Lang(hi, lo) {
+  const packed = (hi << 8) | lo;
+  if (!packed || (packed & 0x8000)) return null;
+  const s = String.fromCharCode(((packed >> 10) & 0x1f) + 0x60, ((packed >> 5) & 0x1f) + 0x60, (packed & 0x1f) + 0x60);
+  return /^[a-z]{3}$/.test(s) ? s : null;
+}
+
+// Walk ISO-BMFF boxes in [start,end); visit(type, payloadStart, payloadEnd).
+function walkMp4Boxes(buf, start, end, visit) {
+  let off = start;
+  while (off + 8 <= end) {
+    let size = readU32BE(buf, off);
+    const type = String.fromCharCode(buf[off + 4], buf[off + 5], buf[off + 6], buf[off + 7]);
+    let header = 8;
+    if (size === 1) {
+      size = readU32BE(buf, off + 8) * 0x100000000 + readU32BE(buf, off + 12);
+      header = 16;
+    } else if (size === 0) {
+      size = end - off;
+    }
+    if (size < header) break;
+    visit(type, off + header, Math.min(off + size, end));
+    off += size;
+  }
+}
+
+function mp4TrakLanguage(buf, start, end) {
+  let handler = null;
+  let lang = null;
+  walkMp4Boxes(buf, start, end, (type, ps, pe) => {
+    if (type !== "mdia") return;
+    walkMp4Boxes(buf, ps, pe, (t, s, e) => {
+      if (t === "hdlr" && s + 12 <= e) {
+        handler = String.fromCharCode(buf[s + 8], buf[s + 9], buf[s + 10], buf[s + 11]);
+      } else if (t === "mdhd") {
+        const langOff = buf[s] === 1 ? s + 4 + 28 : s + 4 + 16; // version 1 uses 64-bit dates
+        if (langOff + 2 <= e) lang = decodeMp4Lang(buf[langOff], buf[langOff + 1]);
+      }
+    });
+  });
+  return handler === "soun" ? lang : null;
+}
+
+function parseMp4AudioLanguages(buf, moovStart, moovEnd) {
+  const langs = [];
+  walkMp4Boxes(buf, moovStart, moovEnd, (type, ps, pe) => {
+    if (type === "trak") {
+      const lang = mp4TrakLanguage(buf, ps, pe);
+      if (lang) langs.push(lang);
+    }
+  });
+  return langs;
+}
+
+// Locate the moov box. Walks from the front; if absent (moov-at-end files), scans
+// for the signature (the tail buffer doesn't begin on a box boundary).
+function findMoov(buf, len) {
+  let found = null;
+  walkMp4Boxes(buf, 0, len, (type, ps, pe) => { if (type === "moov" && !found) found = { start: ps, end: pe }; });
+  if (found) return found;
+  for (let i = len - 8; i >= 4; i--) {
+    if (buf[i] === 0x6d && buf[i + 1] === 0x6f && buf[i + 2] === 0x6f && buf[i + 3] === 0x76) {
+      const size = readU32BE(buf, i - 4);
+      if (size >= 8) return { start: i + 4, end: Math.min(i - 4 + size, len) };
+    }
+  }
+  return null;
+}
+
+// EBML variable-length integer. keepMarker=true for element IDs (which include the
+// length-descriptor bits), false for sizes (which mask them off).
+function readVint(buf, off, end, keepMarker) {
+  if (off >= end || buf[off] === 0) return null;
+  const first = buf[off];
+  let mask = 0x80, length = 1;
+  while (length <= 8 && !(first & mask)) { mask >>= 1; length++; }
+  if (length > 8 || off + length > end) return null;
+  let value = keepMarker ? first : first & (mask - 1);
+  for (let i = 1; i < length; i++) value = value * 256 + buf[off + i];
+  return { value, length };
+}
+
+function walkEbml(buf, start, end, visit) {
+  let off = start;
+  while (off < end) {
+    const id = readVint(buf, off, end, true);
+    if (!id) break;
+    const size = readVint(buf, off + id.length, end, false);
+    if (!size) break;
+    const dataStart = off + id.length + size.length;
+    const remaining = end - dataStart;
+    if (remaining < 0) break;
+    const dataLen = size.value > remaining ? remaining : size.value; // clamp unknown/huge sizes
+    visit(id.value, dataStart, dataStart + dataLen);
+    off = dataStart + dataLen;
+  }
+}
+
+function ebmlAscii(buf, start, end) {
+  let s = "";
+  for (let i = start; i < end && i < start + 16; i++) {
+    if (buf[i] === 0) break;
+    s += String.fromCharCode(buf[i]);
+  }
+  return s.toLowerCase();
+}
+
+function parseMkvAudioLanguages(buf, len) {
+  const langs = [];
+  walkEbml(buf, 0, len, (id, ds, de) => {
+    if (id !== 0x18538067) return; // Segment
+    walkEbml(buf, ds, de, (id2, s2, e2) => {
+      if (id2 !== 0x1654ae6b) return; // Tracks
+      walkEbml(buf, s2, e2, (id3, s3, e3) => {
+        if (id3 !== 0xae) return; // TrackEntry
+        let trackType = null, language = null, bcp47 = null;
+        walkEbml(buf, s3, e3, (id4, s4, e4) => {
+          if (id4 === 0x83) trackType = buf[s4]; // TrackType
+          else if (id4 === 0x22b59c) language = ebmlAscii(buf, s4, e4); // Language (ISO-639-2)
+          else if (id4 === 0x22b59d) bcp47 = ebmlAscii(buf, s4, e4); // LanguageBCP47
+        });
+        if (trackType === 2) langs.push(bcp47 || language || "eng"); // audio; MKV default 'eng'
+      });
+    });
+  });
+  return langs;
+}
+
+function normalizeRelayLang(value) {
+  const v = String(value || "").toLowerCase().trim().slice(0, 3);
+  if (!v || v === "und" || v === "mis" || v === "zxx" || v === "mul") return null;
+  const map = {
+    fre: "fr", fra: "fr", eng: "en", ger: "de", deu: "de", spa: "es", ita: "it",
+    por: "pt", dut: "nl", nld: "nl", ara: "ar", rus: "ru", tur: "tr", pol: "pl",
+    hin: "hi", jpn: "ja", kor: "ko", zho: "zh", chi: "zh",
+  };
+  const code = map[v] || (v.length === 2 ? v : null);
+  return code && /^[a-z]{2}$/.test(code) ? code : null;
+}
+
+function normalizeRelayLangs(list) {
+  const out = new Set();
+  for (const l of list) {
+    const code = normalizeRelayLang(l);
+    if (code) out.add(code);
+  }
+  return [...out];
+}
+
+function parseTotalFromContentRange(value) {
+  const m = /\/(\d+)\s*$/.exec(String(value || ""));
+  return m ? Number(m[1]) : null;
+}
+
+async function readStreamUpTo(body, maxBytes) {
+  if (!body) return new Uint8Array(0);
+  const reader = body.getReader();
+  const chunks = [];
+  let received = 0;
+  try {
+    while (received < maxBytes) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      received += value.length;
+    }
+  } catch (_) { /* partial buffer is fine */ }
+  try { await reader.cancel(); } catch (_) { /* noop */ }
+  const out = new Uint8Array(Math.min(received, maxBytes));
+  let off = 0;
+  for (const c of chunks) {
+    if (off >= out.length) break;
+    const take = Math.min(c.length, out.length - off);
+    out.set(c.subarray(0, take), off);
+    off += take;
+  }
+  return out;
+}
+
+// Fetch a byte range, falling back to the raw-TCP-socket path for IP-brute nodes.
+async function probeRange(targetUrl, ua, start, endInclusive, maxBytes) {
+  const range = `bytes=${start}-${endInclusive}`;
+  const headers = new Headers({ "user-agent": ua, range, accept: "*/*" });
+  let resp = null;
+  try { resp = await fetch(targetUrl, { method: "GET", headers, redirect: "follow" }); } catch (_) { resp = null; }
+  if (!resp || (!resp.ok && resp.status !== 206)) {
+    try {
+      const manual = await fetch(targetUrl, { method: "GET", headers, redirect: "manual" });
+      const loc = manual.status >= 300 && manual.status < 400 ? manual.headers.get("location") : null;
+      if (!loc) return null;
+      const nodeResp = await fetchNodeViaSocket(new URL(loc, targetUrl), "GET", range, ua);
+      if (!(nodeResp.status >= 200 && nodeResp.status < 400) || nodeResp.isChunked) return null;
+      const total = parseTotalFromContentRange(nodeResp.headers.get("content-range")) || Number(nodeResp.headers.get("content-length")) || null;
+      return { bytes: await readStreamUpTo(nodeResp.body, maxBytes), total };
+    } catch (_) { return null; }
+  }
+  const total = parseTotalFromContentRange(resp.headers.get("content-range")) || Number(resp.headers.get("content-length")) || null;
+  return { bytes: await readStreamUpTo(resp.body, maxBytes), total };
+}
+
+// Top-level moov box location (absolute file offset + size), or null.
+function locateMoov(buf, len) {
+  let off = 0;
+  while (off + 8 <= len) {
+    let size = readU32BE(buf, off);
+    const type = String.fromCharCode(buf[off + 4], buf[off + 5], buf[off + 6], buf[off + 7]);
+    let header = 8;
+    if (size === 1) { size = readU32BE(buf, off + 8) * 0x100000000 + readU32BE(buf, off + 12); header = 16; }
+    else if (size === 0) { size = len - off; }
+    if (size < header) break;
+    if (type === "moov") return { offset: off, size };
+    off += size;
+  }
+  return null;
+}
+
+async function probeContainerLanguages(targetUrl, ua) {
+  // 256 KB head: enough for ftyp + the moov box header (faststart) or EBML/Tracks.
+  const head = await probeRange(targetUrl, ua, 0, 262143, 262144);
+  if (!head?.bytes || head.bytes.length < 16) return [];
+  const buf = head.bytes;
+  if (buf[0] === 0x1a && buf[1] === 0x45 && buf[2] === 0xdf && buf[3] === 0xa3) {
+    let langs = parseMkvAudioLanguages(buf, buf.length);
+    if (!langs.length && head.total && head.total > buf.length) {
+      const more = await probeRange(targetUrl, ua, 0, 1048575, 1048576); // 1 MB
+      if (more?.bytes) langs = parseMkvAudioLanguages(more.bytes, more.bytes.length);
+    }
+    return normalizeRelayLangs(langs);
+  }
+  // ISO-BMFF: locate the moov (faststart header is in `head`; else scan the tail),
+  // then fetch its FULL extent so every track's language box is buffered (a later
+  // track's mdhd sits after earlier tracks' bulky sample tables).
+  const located = locateMoov(buf, buf.length);
+  let moovOffset = located ? located.offset : -1;
+  let moovSize = located ? located.size : 0;
+  if (moovOffset < 0 && head.total) {
+    const TAIL = 4 * 1024 * 1024;
+    const ts = Math.max(0, head.total - TAIL);
+    const tail = await probeRange(targetUrl, ua, ts, head.total - 1, TAIL);
+    const tb = tail?.bytes;
+    if (tb) {
+      for (let i = tb.length - 8; i >= 4; i--) {
+        if (tb[i] === 0x6d && tb[i + 1] === 0x6f && tb[i + 2] === 0x6f && tb[i + 3] === 0x76) {
+          const size = readU32BE(tb, i - 4);
+          if (size >= 8) { moovOffset = ts + i - 4; moovSize = size; break; }
+        }
+      }
+    }
+  }
+  if (moovOffset < 0) return [];
+  const cap = Math.min(moovSize || 16 * 1024 * 1024, 16 * 1024 * 1024);
+  const full = await probeRange(targetUrl, ua, moovOffset, moovOffset + cap - 1, cap);
+  if (!full?.bytes || full.bytes.length < 16) return [];
+  const moov = findMoov(full.bytes, full.bytes.length); // moov now begins this buffer
+  return moov ? normalizeRelayLangs(parseMp4AudioLanguages(full.bytes, moov.start, moov.end)) : [];
+}
+
+async function relayProbeAudio(request, env, claims, ctx) {
+  const out = { audioLanguages: [] };
+  try {
+    const su = new URL(claims.url);
+    const ua = String(claims.ua || "VLC/3.0.20 LibVLC/3.0.20");
+    const langs = new Set();
+    // get_vod_info default track (cheap baseline; movie URLs only).
+    const parts = su.pathname.split("/").filter(Boolean);
+    if (parts[0] === "movie" && parts[1] && parts[2] && parts[3]) {
+      const vodId = parts[3].replace(/\.[a-z0-9]+$/i, "");
+      const api = `${su.protocol}//${su.host}/player_api.php?username=${encodeURIComponent(parts[1])}&password=${encodeURIComponent(parts[2])}&action=get_vod_info&vod_id=${encodeURIComponent(vodId)}`;
+      try {
+        const r = await fetch(api, { headers: { "user-agent": ua, accept: "application/json" } });
+        if (r.ok) {
+          const d = await r.json().catch(() => null);
+          const code = normalizeRelayLang(d?.info?.audio?.tags?.language);
+          if (code) langs.add(code);
+        }
+      } catch (_) { /* baseline is best-effort */ }
+    }
+    // Header-probe ALL tracks.
+    try { for (const c of await probeContainerLanguages(claims.url, ua)) langs.add(c); } catch (_) { /* best-effort */ }
+    out.audioLanguages = [...langs];
+  } catch (_) { /* never throw */ }
+  return json(request, env, out, 200);
 }
 
 // In-isolate hint: once a stream is confirmed reachable only via the TCP socket

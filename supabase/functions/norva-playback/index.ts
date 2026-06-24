@@ -1639,6 +1639,11 @@ async function runAudioBackfill(req: Request, db: SupabaseClient) {
   const limit = Math.max(1, Math.min(300, Number(body.limit) || 100));
   const concurrency = Math.max(1, Math.min(12, Number(body.concurrency) || 6));
   const afterId = stringOr(body.afterId, "");
+  // mode 'vod' = get_vod_info default track (cheap); 'probe' = container header-probe
+  // for ALL tracks (heavier — Range-reads the moov/Tracks). requireTag narrows to a
+  // version tag (e.g. 'multi') so the heavy probe only runs where it helps.
+  const mode = stringOr(body.mode, "vod") === "probe" ? "probe" : "vod";
+  const requireTag = stringOr(body.requireTag, "").toLowerCase().trim();
   if (!userId) throw new HttpError(400, "Missing userId");
 
   const runtimeConfig = await getRuntimeConfig(db);
@@ -1652,10 +1657,10 @@ async function runAudioBackfill(req: Request, db: SupabaseClient) {
     .eq("user_id", userId)
     .eq("item_type", itemType)
     .gt("variant_count", 0)
-    .eq("audio_languages", "{}")
-    .order("id", { ascending: true })
-    .limit(limit);
+    .eq("audio_languages", "{}");
+  if (requireTag && /^[a-z_]{1,12}$/.test(requireTag)) titlesQuery = titlesQuery.contains("version_languages", [requireTag]);
   if (afterId) titlesQuery = titlesQuery.gt("id", afterId);
+  titlesQuery = titlesQuery.order("id", { ascending: true }).limit(limit);
   const { data: titles, error } = await titlesQuery;
   if (error) throwDb(error, "Unable to list titles for backfill");
   if (!titles || !titles.length) return { processed: 0, updated: 0, lastId: afterId, hasMore: false };
@@ -1692,20 +1697,24 @@ async function runAudioBackfill(req: Request, db: SupabaseClient) {
       const signature = await hmacBase64Url(runtimeConfig.relayTokenSecret, payload);
       const token = `${base64Url(encoder.encode(payload))}.${signature}`;
 
-      const res = await fetch(`${runtimeConfig.relayBaseUrl}/vod-info/${token}`, { headers: { accept: "application/json" } });
+      const endpoint = mode === "probe" ? "probe-audio" : "vod-info";
+      const res = await fetch(`${runtimeConfig.relayBaseUrl}/${endpoint}/${token}`, { headers: { accept: "application/json" } });
       if (!res.ok) {
         diag.relayNotOk++;
         if (debug && !sample) sample = { stage: "relayNotOk", status: res.status, host: new URL(target.targetUrl).host, body: (await res.text().catch(() => "")).slice(0, 200) };
         return;
       }
       const info = await res.json().catch(() => null);
-      if (debug && !sample) sample = { stage: "relayOk", status: res.status, host: new URL(target.targetUrl).host, pathHead: new URL(target.targetUrl).pathname.split("/")[1], info };
-      const tracks = info && Array.isArray(info.audioTracks) ? info.audioTracks : [];
-      if (!tracks.length) { diag.relayEmpty++; return; }
+      if (debug && !sample) sample = { stage: "relayOk", status: res.status, host: new URL(target.targetUrl).host, mode, info };
       const codes = new Set<string>();
-      for (const track of tracks) {
-        const code = normalizeIsoLang(stringOrNull((track as JsonRecord)?.language));
-        if (code) codes.add(code);
+      if (mode === "probe") {
+        const incoming = info && Array.isArray(info.audioLanguages) ? info.audioLanguages : [];
+        if (!incoming.length) { diag.relayEmpty++; return; }
+        for (const code of incoming) { const normalized = normalizeIsoLang(stringOrNull(code)); if (normalized) codes.add(normalized); }
+      } else {
+        const tracks = info && Array.isArray(info.audioTracks) ? info.audioTracks : [];
+        if (!tracks.length) { diag.relayEmpty++; return; }
+        for (const track of tracks) { const normalized = normalizeIsoLang(stringOrNull((track as JsonRecord)?.language)); if (normalized) codes.add(normalized); }
       }
       if (!codes.size) { diag.noLang++; return; }
 
