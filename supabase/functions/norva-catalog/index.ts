@@ -733,7 +733,7 @@ async function recordObservedLanguages(req: Request, userId: string) {
   if (!codes.length) return { ok: true, updated: false };
 
   const { data, error } = await db.from("cloud_titles")
-    .select("audio_languages").eq("user_id", userId).eq("id", titleId).maybeSingle();
+    .select("audio_languages, provider_tmdb_id, item_type").eq("user_id", userId).eq("id", titleId).maybeSingle();
   if (error || !data) return { ok: true, updated: false };
   const current = Array.isArray((data as JsonRecord).audio_languages)
     ? ((data as JsonRecord).audio_languages as unknown[]).map((code) => String(code).toLowerCase())
@@ -744,6 +744,18 @@ async function recordObservedLanguages(req: Request, userId: string) {
   const { error: updateError } = await db.from("cloud_titles")
     .update({ audio_languages: merged }).eq("user_id", userId).eq("id", titleId);
   if (updateError) return { ok: true, updated: false };
+  // Scale-readiness: mirror into the global catalog cache (race-safe SQL union).
+  // Best-effort — must never block playback capture. NOTE: the Supabase builder is a
+  // thenable without .catch(), so this MUST be a try/catch, not a .catch().
+  const tmdbId = stringOrNull((data as JsonRecord).provider_tmdb_id);
+  const obsItemType = stringOrNull((data as JsonRecord).item_type);
+  if (tmdbId && obsItemType && !/^(tt)?0+$/i.test(tmdbId)) {
+    try {
+      await db.rpc("merge_catalog_title_audio", {
+        p_item_type: obsItemType, p_provider_tmdb_id: tmdbId, p_codes: codes,
+      });
+    } catch (_) { /* best-effort global mirror */ }
+  }
   return { ok: true, updated: true, audioLanguages: merged };
 }
 

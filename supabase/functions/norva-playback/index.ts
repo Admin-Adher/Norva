@@ -1653,7 +1653,7 @@ async function runAudioBackfill(req: Request, db: SupabaseClient) {
 
   let titlesQuery = db
     .from("cloud_titles")
-    .select("id, default_variant_id")
+    .select("id, default_variant_id, provider_tmdb_id")
     .eq("user_id", userId)
     .eq("item_type", itemType)
     .gt("variant_count", 0)
@@ -1726,12 +1726,28 @@ async function runAudioBackfill(req: Request, db: SupabaseClient) {
       }
       if (!codes.size) { diag.noLang++; return; }
 
+      const sortedCodes = [...codes].sort();
       const { error: updateError } = await db
         .from("cloud_titles")
-        .update({ audio_languages: [...codes].sort() })
+        .update({ audio_languages: sortedCodes })
         .eq("user_id", userId)
         .eq("id", String(title.id));
-      if (!updateError) updated += 1;
+      if (!updateError) {
+        updated += 1;
+        // Scale-readiness: mirror into the global catalog cache (race-safe SQL union).
+        // Best-effort — must never fail the per-user backfill. NOTE: the Supabase builder
+        // is a thenable without .catch(), so this MUST be a try/catch, not a .catch().
+        const tmdbId = stringOrNull(title.provider_tmdb_id);
+        if (tmdbId && !/^(tt)?0+$/i.test(tmdbId)) {
+          try {
+            await db.rpc("merge_catalog_title_audio", {
+              p_item_type: itemType,
+              p_provider_tmdb_id: tmdbId,
+              p_codes: sortedCodes,
+            });
+          } catch (_) { /* best-effort global mirror */ }
+        }
+      }
     } catch (e) {
       diag.exception++;
       if (debug && !sample) sample = { stage: "exception", error: String(e).slice(0, 200) };

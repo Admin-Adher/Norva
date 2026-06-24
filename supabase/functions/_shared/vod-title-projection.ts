@@ -208,6 +208,11 @@ export async function refreshVodTitleProjection(options: ProjectionOptions) {
   // (item_type, provider_tmdb_id), so at scale it is enriched/stored once instead of
   // once per user. NOT read yet — purely additive. Best-effort: a failure here must
   // never break the per-user projection.
+  // NOTE: audio_languages is deliberately NOT written here. It is resolved later by the
+  // crawl / playback-capture and merged via merge_catalog_title_audio() (race-safe SQL
+  // union). Ownership split — projection owns title/poster/i18n; crawl+capture own audio.
+  // Including it in this bulk upsert (even as []) would clobber crawled values, since the
+  // upsert REPLACES every column it lists. Leave it out and PostgREST preserves it.
   try {
     const catalogRows: JsonRecord[] = [];
     const seenCatalog = new Set<string>();
