@@ -2219,7 +2219,7 @@ class WatchPage {
     // feeding a MediaSource. No transcode server, no Railway. User policy is
     // "engine only": on failure we surface a clear message + telemetry rather
     // than falling back to the gateway.
-    async playWithEngine(url, { startTime = 0, playbackAttemptId } = {}) {
+    async playWithEngine(url, { startTime = 0, playbackAttemptId, audioStreamIndex = null } = {}) {
         this.destroyEngine();
         this.currentPlaybackMode = 'engine';
         this.streamStartOffset = 0;
@@ -2235,8 +2235,9 @@ class WatchPage {
             }
         });
         try {
-            await engine.load(url, { startTime });
+            await engine.load(url, { startTime, audioStreamIndex });
             if (this.isStalePlaybackAttempt(playbackAttemptId)) { this.destroyEngine(); return; }
+            try { this.syncEngineAudioTracks(); } catch (_) {}
             try { this.hideLoading(); } catch (_) {}
             this.video.play().catch((e) => this.handleAutoplayError(e));
             this.setVolumeFromStorage();
@@ -2253,6 +2254,45 @@ class WatchPage {
             try { this.norvaEngine.destroy(); } catch (_) {}
             this.norvaEngine = null;
         }
+    }
+
+    // The engine demuxes every stream but this libav build can't read per-stream
+    // language, so we list the audio streams by index and borrow language labels
+    // from the relay probe (this.audioTracks) when present. Marks the playing stream
+    // active so the menu shows the real, switchable tracks (not a single "Multi").
+    syncEngineAudioTracks() {
+        const engine = this.norvaEngine;
+        if (!engine || typeof engine.audioStreamIndices !== 'function') return;
+        const idxs = engine.audioStreamIndices();
+        const current = typeof engine.currentAudioIndex === 'function' ? engine.currentAudioIndex() : (idxs[0] ?? null);
+        this.directAudioStreamIndex = current;
+        if (!this.selectedAudioTrackUserChoice) this.selectedAudioStreamIndex = current;
+        if (idxs.length < 2) return;
+        const langByIdx = new Map((Array.isArray(this.audioTracks) ? this.audioTracks : [])
+            .filter((t) => Number.isInteger(t.index))
+            .map((t) => [t.index, t.language]));
+        this.audioTracks = idxs.map((i) => ({ index: i, language: langByIdx.get(i) || null, default: i === current }));
+        this.updateAudioTracks();
+    }
+
+    // Switch audio in the in-browser engine: re-load on the chosen stream at the
+    // current position. Fully client-side (zero-egress) — no gateway transcode.
+    async restartEngineWithSelectedAudioTrack(requestId = this._audioSwitchRequestId) {
+        if (this.isStaleAudioSwitch(requestId)) return false;
+        const url = this.baseStreamUrl || this.currentUrl;
+        const selected = this.getSelectedAudioTrack();
+        if (!url || !selected) return false;
+        const position = Math.max(0, Math.floor(this.getPlaybackPosition()));
+        try { this.setSelectedAudioPreference(selected); } catch (_) {}
+        this.hidePlaybackError();
+        this.showLoading();
+        try { this.updateTranscodeStatus('direct', `Audio: ${this.getTrackLabel(selected, 'Audio', 'audio')}`); } catch (_) {}
+        await this.playWithEngine(url, {
+            startTime: position,
+            playbackAttemptId: this._playbackAttemptId,
+            audioStreamIndex: selected.index,
+        });
+        return true;
     }
 
     reportEngineFailure(info = {}) {
@@ -4384,12 +4424,25 @@ class WatchPage {
     // playing zero-egress until the user picks another. No-op unless >=2 known languages.
     applyCloudMultiAudioTracks(probe) {
         const raw = Array.isArray(probe?.audioTracks) ? probe.audioTracks : [];
-        const seen = new Set();
-        const usable = [];
+        // index -> language from the relay probe (first wins, kept in track order).
+        const langByIdx = new Map();
         for (const t of raw) {
             const idx = Number(t?.index);
             const lang = this.normalizeTrackLanguage(t?.lang);
-            if (!Number.isInteger(idx) || !lang || lang === 'und' || seen.has(lang)) continue;
+            if (Number.isInteger(idx) && lang && lang !== 'und' && !langByIdx.has(idx)) langByIdx.set(idx, lang);
+        }
+        // Engine mode owns the track LIST (every demuxed stream); the relay only
+        // supplies the language labels, merged in by absolute stream index.
+        if (this.currentPlaybackMode === 'engine' && Array.isArray(this.audioTracks) && this.audioTracks.length >= 2) {
+            this.audioTracks = this.audioTracks.map(t => ({ ...t, language: t.language || langByIdx.get(t.index) || null }));
+            this.updateAudioTracks();
+            return;
+        }
+        // Direct play: build the switchable list from the relay probe (dedupe by lang).
+        const seen = new Set();
+        const usable = [];
+        for (const [idx, lang] of langByIdx) {
+            if (seen.has(lang)) continue;
             seen.add(lang);
             usable.push({ index: idx, language: lang });
         }
@@ -4398,8 +4451,8 @@ class WatchPage {
         let defPos = usable.findIndex(t => t.language === defLang);
         if (defPos < 0) defPos = 0;
         this.audioTracks = usable.map((t, i) => ({ index: t.index, language: t.language, default: i === defPos }));
-        this.directAudioStreamIndex = usable[defPos].index;
-        if (!this.selectedAudioTrackUserChoice) {
+        if (!Number.isInteger(this.directAudioStreamIndex)) this.directAudioStreamIndex = usable[defPos].index;
+        if (!this.selectedAudioTrackUserChoice && !Number.isInteger(this.selectedAudioStreamIndex)) {
             this.selectedAudioStreamIndex = usable[defPos].index;
         }
     }
@@ -4556,9 +4609,10 @@ class WatchPage {
             return;
         }
 
-        // The default track is already playing via zero-egress direct play — picking
-        // it again must NOT spin up a needless transcode session.
-        if (this.currentPlaybackMode === 'direct' && Number(streamIndex) === Number(this.directAudioStreamIndex)) {
+        // Already playing this track via a zero-egress path (direct play or the
+        // in-browser engine) — picking it again must NOT spin up a needless reload.
+        if ((this.currentPlaybackMode === 'direct' || this.currentPlaybackMode === 'engine')
+            && Number(streamIndex) === Number(this.directAudioStreamIndex)) {
             this.selectedAudioStreamIndex = streamIndex;
             this.selectedAudioTrackUserChoice = false;
             this.updateAudioTracks();
@@ -4622,6 +4676,11 @@ class WatchPage {
 
     async restartWithSelectedAudioTrack(requestId = this._audioSwitchRequestId) {
         if (this.isStaleAudioSwitch(requestId)) return false;
+
+        // In-browser engine: switch audio client-side (zero-egress), no gateway.
+        if (this.currentPlaybackMode === 'engine') {
+            return this.restartEngineWithSelectedAudioTrack(requestId);
+        }
 
         if (this.isCloudPlaybackMode() && this.content?.sourceId && this.content?.id) {
             return this.restartCloudGatewayWithSelectedAudioTrack(requestId);

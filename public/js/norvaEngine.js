@@ -166,8 +166,9 @@
     }
 
     // ---- public ------------------------------------------------------------
-    async load(url, { startTime = 0 } = {}) {
+    async load(url, { startTime = 0, audioStreamIndex = null } = {}) {
       this.url = url;
+      this._wantAudioIndex = Number.isInteger(audioStreamIndex) ? audioStreamIndex : null;
       const t0 = performance.now();
       this.loadStartedAt = t0;
       // Kick off wasm AND the initial network at the same time: the wasm compile
@@ -556,13 +557,20 @@
     async _detectStreams() {
       const lib = this.lib;
       this.vS = this._streams.find((s) => s.codec_type === 0) || null;
-      this.aS = this._streams.find((s) => s.codec_type === 1) || null;
+      const audios = this._streams.filter((s) => s.codec_type === 1);
+      // Honour a requested audio stream (audio-track switch); else the first audio.
+      this.aS = (this._wantAudioIndex != null ? audios.find((s) => s.index === this._wantAudioIndex) : null) || audios[0] || null;
       this.vName = this.vS ? await lib.avcodec_get_name(this.vS.codec_id) : null;
       this.aName = this.aS ? await lib.avcodec_get_name(this.aS.codec_id) : null;
       this.copyAudio = !!(this.aS && AUDIO_COPY.has(this.aName));
       this.V_IDX = 0; this.A_IDX = this.vS ? 1 : 0;
       this.log(`vidéo=${this.vName}${this.aS ? `, audio=${this.aName} (${this.copyAudio ? 'copie' : 'transcodage AAC'})` : ''}`);
     }
+
+    // All audio stream indices (absolute container order) + the selected one, so the
+    // player can build a switchable language menu and re-load on a chosen track.
+    audioStreamIndices() { return (this._streams || []).filter((s) => s.codec_type === 1).map((s) => s.index); }
+    currentAudioIndex() { return this.aS ? this.aS.index : null; }
 
     async _chooseMime() {
       const lib = this.lib;
