@@ -591,6 +591,21 @@ function titleAudioLanguages(title: JsonRecord): string[] {
   const raw = (title as { audio_languages?: unknown }).audio_languages;
   return Array.isArray(raw) ? raw.map((tag) => String(tag).toLowerCase()) : [];
 }
+// Ordered per-track audio map (absolute ffmpeg stream index -> ISO-639-1 or null), in
+// stream order. Lets the in-browser engine label each demuxed audio stream by index
+// with ZERO playback-time probe. Empty when not yet captured.
+function titleAudioTracks(title: JsonRecord): Array<{ index: number; lang: string | null }> {
+  const raw = (title as { audio_tracks?: unknown }).audio_tracks;
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((t) => {
+      const r = (t ?? {}) as JsonRecord;
+      const index = Number(r.index);
+      const lang = r.lang == null ? null : String(r.lang).toLowerCase().trim();
+      return { index, lang: lang && /^[a-z]{2}$/.test(lang) ? lang : null };
+    })
+    .filter((t) => Number.isInteger(t.index));
+}
 // Each requested dimension is required (logical AND across audio + subtitles); an
 // empty dimension imposes no constraint. Audio matches a version tag OR a real
 // captured audio-track language (audioIso); subtitles match version tags only
@@ -795,33 +810,61 @@ async function recordObservedLanguages(req: Request, userId: string) {
   const codes = [...new Set(incoming
     .map((code) => String(code).toLowerCase().trim())
     .filter((code) => /^[a-z]{2,3}$/.test(code) && code !== "und"))];
-  if (!codes.length) return { ok: true, updated: false };
+  // Ordered per-track map the player observed via a live probe (self-heal: persisting it
+  // means future playbacks of this title need ZERO probe). [{index, lang|null}, ...] in
+  // stream order; null-lang tracks kept so index/position alignment holds.
+  const orderedTracks = Array.isArray(body.audioTracks)
+    ? (body.audioTracks as unknown[])
+        .map((t) => {
+          const r = recordOrEmpty(t);
+          const index = Number(r.index);
+          const lang = r.lang == null ? null : String(r.lang).toLowerCase().trim();
+          return { index, lang: lang && /^[a-z]{2}$/.test(lang) ? lang : null };
+        })
+        .filter((t) => Number.isInteger(t.index))
+    : [];
+  if (!codes.length && !orderedTracks.length) return { ok: true, updated: false };
 
   const { data, error } = await db.from("cloud_titles")
-    .select("audio_languages, provider_tmdb_id, item_type").eq("user_id", userId).eq("id", titleId).maybeSingle();
+    .select("audio_languages, audio_tracks, provider_tmdb_id, item_type").eq("user_id", userId).eq("id", titleId).maybeSingle();
   if (error || !data) return { ok: true, updated: false };
-  const current = Array.isArray((data as JsonRecord).audio_languages)
-    ? ((data as JsonRecord).audio_languages as unknown[]).map((code) => String(code).toLowerCase())
+  const row = data as JsonRecord;
+
+  // 1) Ordered map: store only when the title has none yet — never clobber the crawl's
+  // authoritative map with a client report.
+  let storedTracks = false;
+  const haveTracks = Array.isArray(row.audio_tracks) && (row.audio_tracks as unknown[]).length > 0;
+  if (!haveTracks && orderedTracks.length) {
+    const { error: tErr } = await db.from("cloud_titles")
+      .update({ audio_tracks: orderedTracks }).eq("user_id", userId).eq("id", titleId);
+    storedTracks = !tErr;
+  }
+
+  // 2) Deduped language set: race-safe union (unchanged behavior).
+  const current = Array.isArray(row.audio_languages)
+    ? (row.audio_languages as unknown[]).map((code) => String(code).toLowerCase())
     : [];
   const merged = [...new Set([...current, ...codes])].sort();
-  if (merged.length === current.length) return { ok: true, updated: false };
-
-  const { error: updateError } = await db.from("cloud_titles")
-    .update({ audio_languages: merged }).eq("user_id", userId).eq("id", titleId);
-  if (updateError) return { ok: true, updated: false };
-  // Scale-readiness: mirror into the global catalog cache (race-safe SQL union).
-  // Best-effort — must never block playback capture. NOTE: the Supabase builder is a
-  // thenable without .catch(), so this MUST be a try/catch, not a .catch().
-  const tmdbId = stringOrNull((data as JsonRecord).provider_tmdb_id);
-  const obsItemType = stringOrNull((data as JsonRecord).item_type);
-  if (tmdbId && obsItemType && !/^(tt)?0+$/i.test(tmdbId)) {
-    try {
-      await db.rpc("merge_catalog_title_audio", {
-        p_item_type: obsItemType, p_provider_tmdb_id: tmdbId, p_codes: codes,
-      });
-    } catch (_) { /* best-effort global mirror */ }
+  const langsChanged = codes.length > 0 && merged.length !== current.length;
+  if (langsChanged) {
+    const { error: updateError } = await db.from("cloud_titles")
+      .update({ audio_languages: merged }).eq("user_id", userId).eq("id", titleId);
+    if (!updateError) {
+      // Scale-readiness: mirror into the global catalog cache (race-safe SQL union).
+      // Best-effort — must never block capture. The Supabase builder is a thenable
+      // without .catch(), so this MUST be a try/catch.
+      const tmdbId = stringOrNull(row.provider_tmdb_id);
+      const obsItemType = stringOrNull(row.item_type);
+      if (tmdbId && obsItemType && !/^(tt)?0+$/i.test(tmdbId)) {
+        try {
+          await db.rpc("merge_catalog_title_audio", {
+            p_item_type: obsItemType, p_provider_tmdb_id: tmdbId, p_codes: codes,
+          });
+        } catch (_) { /* best-effort global mirror */ }
+      }
+    }
   }
-  return { ok: true, updated: true, audioLanguages: merged };
+  return { ok: true, updated: langsChanged || storedTracks, audioLanguages: merged, audioTracksStored: storedTracks };
 }
 
 async function listTitleRail(userId: string, itemType: "movie" | "series", id: string, title: string, limit: number, lang: string | null) {
@@ -1188,6 +1231,10 @@ function titleRailItem(title: JsonRecord, variants: JsonRecord[], lang?: string 
     // audio language instead of guessing from the title. Already on the cloud_titles row.
     audio_languages: titleAudioLanguages(title),
     audioLanguages: titleAudioLanguages(title),
+    // Ordered per-track map so the player labels each engine audio stream by absolute
+    // index — real language names with NO playback-time probe.
+    audio_tracks: titleAudioTracks(title),
+    audioTracks: titleAudioTracks(title),
     version_languages: titleVersionLanguages(title),
     versionLanguages: titleVersionLanguages(title),
     metadata,

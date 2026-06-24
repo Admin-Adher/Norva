@@ -4397,8 +4397,29 @@ class WatchPage {
     // Display-only: it enriches the single audio entry's label to match what
     // native players show ("English · AAC · Stereo · 128 kbps"); it never makes the
     // entry a switchable 'probe' track, so it can't restart or break playback.
+    // Ordered per-track audio map precomputed by the crawl and served on content
+    // (audioTracks = [{index, lang|null}, ...] in absolute-stream order). Present → the
+    // player labels every track with ZERO playback-time probe.
+    getContentAudioTracks() {
+        const raw = this.content?.audioTracks || this.content?.audio_tracks;
+        if (!Array.isArray(raw)) return [];
+        return raw
+            .map((t) => ({ index: Number(t?.index), lang: (t?.lang == null ? null : String(t.lang).toLowerCase()) }))
+            .filter((t) => Number.isInteger(t.index));
+    }
+
     async enrichCloudPlaybackTracks(playbackUrl) {
         try {
+            // Robust path: a precomputed ordered map on content means real language names
+            // with NO provider hit at playback (no probe to contend with the stream, no
+            // latency). Reuse applyCloudMultiAudioTracks so the engine/direct wiring is
+            // identical to the live-probe path — only the source of the data differs.
+            const pre = this.getContentAudioTracks();
+            if (pre.length) {
+                this.applyCloudMultiAudioTracks({ audioTracks: pre });
+                this.updateAudioTracks();
+                return;
+            }
             if (!playbackUrl || typeof fetch !== 'function') return;
             const m = /^(https?:\/\/[^/]+)\/relay\/(.+)$/.exec(String(playbackUrl));
             if (!m) return;
@@ -4562,11 +4583,17 @@ class WatchPage {
                 for (let i = 0; i < native.length; i++) add(native[i]?.language);
             }
             for (const t of (Array.isArray(this.hls?.audioTracks) ? this.hls.audioTracks : [])) add(t.lang || t.language);
-            if (!codes.size) return;
-            const key = `${titleId}:${[...codes].sort().join(',')}`;
+            // Ordered per-track map from a live container probe — let the server persist the
+            // ORDER so future playbacks of this title need zero probe (self-heal). The server
+            // only stores it when the title has none yet, so re-sending is a harmless no-op.
+            const orderedTracks = (Array.isArray(this._relayAudioTracks) ? this._relayAudioTracks : [])
+                .filter((t) => Number.isInteger(t.index))
+                .map((t) => ({ index: t.index, lang: (t.lang && t.lang !== 'und') ? t.lang : null }));
+            if (!codes.size && !orderedTracks.length) return;
+            const key = `${titleId}:${[...codes].sort().join(',')}:${orderedTracks.length}`;
             if (this._observedLangsSent === key) return;
             this._observedLangsSent = key;
-            window.API?.media?.reportObservedLanguages?.({ titleId, audio: [...codes] }).catch(() => { });
+            window.API?.media?.reportObservedLanguages?.({ titleId, audio: [...codes], audioTracks: orderedTracks }).catch(() => { });
         } catch (_) { /* best-effort capture; never disrupt playback */ }
     }
 

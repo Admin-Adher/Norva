@@ -1659,6 +1659,49 @@ function normalizeIsoLang(value: string | null): string | null {
   return /^[a-z]{2}$/.test(code) ? code : null;
 }
 
+// Probe a title's container for the ORDERED per-track audio map and persist it to
+// cloud_titles.audio_tracks = [{index, lang}, ...] (absolute ffmpeg stream index ->
+// ISO-639-1, or null when undetermined). The deduped SET already lives in
+// audio_languages; this preserves ORDER so the in-browser engine (libav, which can't
+// read per-stream language tags) labels each audio stream it demuxes by absolute index
+// WITHOUT a playback-time probe. ALL audio tracks are kept in order (even null-lang ones)
+// so index/position alignment holds. Best-effort; returns true on a stored, non-empty map.
+async function persistOrderedAudioForTitle(
+  db: SupabaseClient,
+  runtimeConfig: RuntimeConfig,
+  userId: string,
+  titleId: string,
+  variant: JsonRecord,
+  fallbackItemType: string,
+): Promise<boolean> {
+  const sourceId = stringOr(variant.source_id, "");
+  const externalId = stringOr(variant.external_id, "");
+  const variantItemType = stringOr(variant.item_type, fallbackItemType);
+  if (!sourceId || !externalId) return false;
+  let targetUrl: string | null;
+  if (variantItemType === "series") {
+    targetUrl = await resolveSeriesEpisodeUrl(sourceId, externalId, userId, db).catch(() => null);
+  } else {
+    const target = await resolvePlaybackTarget(sourceId, variantItemType, externalId, userId, db).catch(() => null);
+    targetUrl = target?.targetUrl ?? null;
+  }
+  if (!targetUrl) return false;
+  const payload = JSON.stringify({ v: 1, sid: "audio-order", uid: userId, url: targetUrl, exp: Math.floor(Date.now() / 1000) + 120 });
+  const token = `${base64Url(encoder.encode(payload))}.${await hmacBase64Url(runtimeConfig.relayTokenSecret, payload)}`;
+  const res = await fetch(`${runtimeConfig.relayBaseUrl}/probe-audio/${token}`, { headers: { accept: "application/json" } });
+  if (!res.ok) return false;
+  const info = await res.json().catch(() => null) as JsonRecord | null;
+  const raw = info && Array.isArray(info.audioTracks) ? info.audioTracks as JsonRecord[] : [];
+  const ordered = raw
+    .map((t) => ({ index: Number(t?.index), lang: normalizeIsoLang(stringOrNull(t?.lang)) }))
+    .filter((t) => Number.isInteger(t.index));
+  if (!ordered.length) return false;
+  const { error } = await db.from("cloud_titles")
+    .update({ audio_tracks: ordered })
+    .eq("user_id", userId).eq("id", titleId);
+  return !error;
+}
+
 // Service-gated maintenance backfill of cloud_titles.audio_languages via the
 // relay's get_vod_info (the only path that reaches the provider — Deno egress is
 // IP-blocked). Resolves the DEFAULT audio-track language per title: a VO file's
@@ -1702,6 +1745,32 @@ async function runAudioBackfill(req: Request, db: SupabaseClient) {
   const runtimeConfig = await getRuntimeConfig(db);
   if (!runtimeConfig.relayBaseUrl || !runtimeConfig.relayTokenSecret) {
     throw new HttpError(503, "Norva Relay is not configured");
+  }
+
+  // Targeted ordered-track capture (on-demand): populate cloud_titles.audio_tracks for
+  // SPECIFIC titles now, instead of waiting for them to be re-played/re-crawled. The
+  // player serves this map directly, so a MULTI title shows real per-track language names
+  // with ZERO playback-time probe.
+  const orderedIds = Array.isArray((body as JsonRecord).orderedTitleIds)
+    ? ((body as JsonRecord).orderedTitleIds as unknown[]).filter((x): x is string => typeof x === "string" && /^[0-9a-f-]{36}$/i.test(x)).slice(0, 200)
+    : null;
+  if (orderedIds && orderedIds.length) {
+    const { data: ts } = await db.from("cloud_titles")
+      .select("id, default_variant_id").eq("user_id", userId).in("id", orderedIds);
+    const vIds = (ts ?? []).map((t) => stringOrNull((t as JsonRecord).default_variant_id)).filter(Boolean) as string[];
+    const vById = new Map<string, JsonRecord>();
+    if (vIds.length) {
+      const { data: vs } = await db.from("cloud_title_variants").select("id, source_id, external_id, item_type").in("id", vIds);
+      for (const v of vs ?? []) vById.set(String(v.id), v as JsonRecord);
+    }
+    let stored = 0;
+    for (const t of ts ?? []) {
+      const variant = vById.get(String((t as JsonRecord).default_variant_id));
+      if (!variant) continue;
+      try { if (await persistOrderedAudioForTitle(db, runtimeConfig, userId, String((t as JsonRecord).id), variant, itemType)) stored += 1; }
+      catch (_) { /* best-effort per title */ }
+    }
+    return { mode: "ordered", requested: orderedIds.length, found: (ts ?? []).length, stored };
   }
 
   // Diagnostic (ops): probe SPECIFIC titles and return, per title, the provider's
@@ -1845,10 +1914,22 @@ async function runAudioBackfill(req: Request, db: SupabaseClient) {
       }
       if (!codes.size) { diag.noLang++; await markProbed(); return; }
 
+      // Capture the ORDERED per-track map (absolute index -> lang) alongside the deduped
+      // set, so the player never has to probe at playback. mode=probe only — it's the
+      // path carrying the full container track list. Undetermined tracks kept (lang null)
+      // to preserve index/position alignment for the engine.
+      const orderedTracks = mode === "probe" && info && Array.isArray(info.audioTracks)
+        ? (info.audioTracks as JsonRecord[])
+            .map((t) => ({ index: Number(t?.index), lang: normalizeIsoLang(stringOrNull(t?.lang ?? t?.language)) }))
+            .filter((t) => Number.isInteger(t.index))
+        : [];
+
       const sortedCodes = [...codes].sort();
+      const updatePayload: JsonRecord = { audio_languages: sortedCodes, audio_probed_at: new Date().toISOString() };
+      if (orderedTracks.length) updatePayload.audio_tracks = orderedTracks;
       const { error: updateError } = await db
         .from("cloud_titles")
-        .update({ audio_languages: sortedCodes, audio_probed_at: new Date().toISOString() })
+        .update(updatePayload)
         .eq("user_id", userId)
         .eq("id", String(title.id));
       if (!updateError) {
