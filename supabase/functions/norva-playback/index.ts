@@ -1649,7 +1649,10 @@ async function runAudioBackfill(req: Request, db: SupabaseClient) {
   // for ALL tracks (heavier — Range-reads the moov/Tracks). requireTag narrows to a
   // version tag (e.g. 'multi') so the heavy probe only runs where it helps.
   const mode = stringOr(body.mode, "vod") === "probe" ? "probe" : "vod";
-  const requireTag = stringOr(body.requireTag, "").toLowerCase().trim();
+  // requireTag = comma-list of version tags (OR). Narrows the heavy probe to where the
+  // real audio language is unknown & valuable: 'multi' (many tracks), 'vostfr'/'vo'
+  // (original audio — JP for anime, etc., not encoded in the tag). Empty = all unresolved.
+  const requireTags = stringOr(body.requireTag, "").toLowerCase().split(",").map((t) => t.trim()).filter((t) => /^[a-z_]{1,12}$/.test(t));
   if (!userId) throw new HttpError(400, "Missing userId");
 
   // mode 'catalog' = fill this user's unresolved audio_languages from the GLOBAL cache
@@ -1682,7 +1685,7 @@ async function runAudioBackfill(req: Request, db: SupabaseClient) {
   // 30d retry window lets transient provider failures (e.g. 429) recover later.
   const probeRetryBefore = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString();
   titlesQuery = titlesQuery.or(`audio_probed_at.is.null,audio_probed_at.lt.${probeRetryBefore}`);
-  if (requireTag && /^[a-z_]{1,12}$/.test(requireTag)) titlesQuery = titlesQuery.contains("version_languages", [requireTag]);
+  if (requireTags.length) titlesQuery = titlesQuery.overlaps("version_languages", requireTags);
   if (afterId) titlesQuery = titlesQuery.gt("id", afterId);
   titlesQuery = titlesQuery.order("id", { ascending: true }).limit(limit);
   const { data: titles, error } = await titlesQuery;
