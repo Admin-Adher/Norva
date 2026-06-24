@@ -74,6 +74,12 @@ pas de recoupement multi-users, et c'est le changement le plus risqué du systè
   avance au lieu de re-sonder le même front ; (b) **catalog-first fill** `mode=catalog` +
   `fill_user_audio_from_catalog()` → remplit un user depuis le cache global **sans appel
   fournisseur** (dedup : sonder 1× pour tous). Migration `…030000`.
+- **Périmètre du crawl** : `requireTag` accepte une **liste** (OR via `overlaps`). 2 crons
+  pg_cron : **films** (`norva-audio-langs`, `*/8`) sur `multi,vostfr,vo,vff,vfq` (rendement
+  vostfr/vo ~80 % — l'audio original/JP des animés-films) + **séries**
+  (`norva-audio-langs-series`, `4-59/8`) via `resolveSeriesEpisodeUrl` (get_series_info →
+  1er épisode du 1er season, ~70 % rendement — un id de série seul renvoie 406). → l'audio
+  japonais des animés (films **et** séries) remonte dans le filtre au fil du crawl.
 - ⚠️ **Rien ne lit `catalog_titles` en prod** (flag OFF) → **zéro impact**, additif, réversible.
 
 ---
