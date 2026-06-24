@@ -179,6 +179,7 @@ async function listMediaItems(url: URL, userId: string) {
   });
 
   await localizeMediaTitles(items, userId, lang, itemType);
+  await attachMediaLanguages(items, userId);
 
   return {
     items,
@@ -223,6 +224,39 @@ async function localizeMediaTitles(items: Array<Record<string, any>>, userId: st
     const tmdbId = stringOrNull(isRecord(row.metadata) ? row.metadata.providerTmdbId : null);
     const loc = tmdbId ? locByTmdb.get(tmdbId) : null;
     if (loc) { row.title = loc; row.name = loc; }
+  }
+}
+
+// Attach the title's REAL detected languages (cloud_titles.audio_languages /
+// version_languages) to each grid item so the client card badge shows the actual audio
+// language instead of guessing from the title. cloud_media_items rows lack these — look
+// them up by provider_tmdb_id (per-user; always cloud_titles, not catalog_titles).
+// Best-effort, chunked — never fails the grid over a badge.
+async function attachMediaLanguages(items: Array<Record<string, any>>, userId: string) {
+  if (!items.length) return;
+  const tmdbIds = [...new Set(items
+    .map((row) => stringOrNull(isRecord(row.metadata) ? row.metadata.providerTmdbId : null))
+    .filter((id): id is string => Boolean(id) && id !== "0"))];
+  if (!tmdbIds.length) return;
+  const byTmdb = new Map<string, { audio: string[]; version: string[] }>();
+  for (let i = 0; i < tmdbIds.length; i += 500) {
+    const { data, error } = await db
+      .from("cloud_titles")
+      .select("provider_tmdb_id, audio_languages, version_languages")
+      .eq("user_id", userId)
+      .in("provider_tmdb_id", tmdbIds.slice(i, i + 500));
+    if (error) return; // best-effort; never fail the grid over the badge
+    for (const row of data ?? []) {
+      const id = stringOrNull((row as Record<string, unknown>).provider_tmdb_id);
+      if (id) byTmdb.set(id, { audio: titleAudioLanguages(row as JsonRecord), version: titleVersionLanguages(row as JsonRecord) });
+    }
+  }
+  for (const row of items) {
+    const id = stringOrNull(isRecord(row.metadata) ? row.metadata.providerTmdbId : null);
+    const hit = id ? byTmdb.get(id) : null;
+    if (!hit) continue;
+    row.audio_languages = hit.audio; row.audioLanguages = hit.audio;
+    row.version_languages = hit.version; row.versionLanguages = hit.version;
   }
 }
 
@@ -1150,6 +1184,12 @@ function titleRailItem(title: JsonRecord, variants: JsonRecord[], lang?: string 
     playbackCostScore: defaultVariant.playback_cost_score ?? null,
     last_observed_ttff_ms: defaultVariant.last_observed_ttff_ms ?? title.last_observed_ttff_ms ?? null,
     lastObservedTtffMs: defaultVariant.last_observed_ttff_ms ?? title.last_observed_ttff_ms ?? null,
+    // Real detected languages (crawl/capture) so the client card badge shows the actual
+    // audio language instead of guessing from the title. Already on the cloud_titles row.
+    audio_languages: titleAudioLanguages(title),
+    audioLanguages: titleAudioLanguages(title),
+    version_languages: titleVersionLanguages(title),
+    versionLanguages: titleVersionLanguages(title),
     metadata,
     tmdb,
     data: {

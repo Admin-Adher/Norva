@@ -48,6 +48,14 @@ const MediaUtils = (() => {
         original: 'VO'
     };
 
+    // Full language names for the descriptive card badge ("French" not "FR").
+    const LANGUAGE_NAMES = {
+        fr: 'French', en: 'English', es: 'Spanish', ar: 'Arabic', de: 'German',
+        it: 'Italian', pt: 'Portuguese', tr: 'Turkish', nl: 'Dutch', ru: 'Russian',
+        pl: 'Polish', hi: 'Hindi', ja: 'Japanese', ko: 'Korean', zh: 'Chinese',
+        original: 'Original'
+    };
+
     const LANGUAGE_ALIASES = {
         french: 'fr',
         francais: 'fr',
@@ -421,6 +429,33 @@ const MediaUtils = (() => {
         return LANGUAGE_LABELS[normalized] || String(code || '').toUpperCase();
     }
 
+    function languageDisplayFull(code) {
+        const normalized = normalizeLanguagePreference(code);
+        return LANGUAGE_NAMES[normalized] || String(code || '').toUpperCase();
+    }
+
+    // Descriptive badge from the REAL detected languages (server audio_languages /
+    // version_languages) — preferred over title-parsing. 1 lang -> full name ("French");
+    // 2-3 -> "Multi: DE/EN/FR"; >3 -> "Multi". Falls back to version tags, then null.
+    function audioLanguageBadge(audioLanguages, versionLanguages) {
+        const audio = Array.isArray(audioLanguages)
+            ? [...new Set(audioLanguages.map(c => String(c || '').toLowerCase().trim()).filter(Boolean))]
+            : [];
+        if (audio.length === 1) return languageDisplayFull(audio[0]);
+        if (audio.length >= 2 && audio.length <= 3) return `Multi: ${audio.map(languageDisplay).join('/')}`;
+        if (audio.length > 3) return 'Multi';
+        const version = Array.isArray(versionLanguages) ? versionLanguages.map(t => String(t || '').toLowerCase()) : [];
+        if (version.some(t => t === 'multi')) return 'Multi';
+        if (version.some(t => /^(vf|vff|vfq|truefrench|french)$/.test(t))) return languageDisplayFull('fr');
+        if (version.some(t => /^(en|eng|english)$/.test(t))) return languageDisplayFull('en');
+        if (version.some(t => /^(es|spa|spanish)$/.test(t))) return languageDisplayFull('es');
+        if (version.some(t => /^(ar|ara|arabic)$/.test(t))) return languageDisplayFull('ar');
+        if (version.some(t => /^(de|deu|ger|german)$/.test(t))) return languageDisplayFull('de');
+        if (version.some(t => /^(it|ita|italian)$/.test(t))) return languageDisplayFull('it');
+        if (version.some(t => /^(pt|por|portuguese)$/.test(t))) return languageDisplayFull('pt');
+        return null;
+    }
+
     function codecProfileFromItem(item = {}) {
         const data = item.data || {};
         const variant = item.defaultVariant || item.default_variant || item.variant || {};
@@ -578,6 +613,12 @@ const MediaUtils = (() => {
         }
         const firstCandidate = candidates.filter(Boolean)[0];
         if (firstCandidate) return firstCandidate;
+        // Real detected languages outrank title-parsing (the crawl fills these).
+        const detected = audioLanguageBadge(
+            item.audioLanguages || item.audio_languages,
+            item.versionLanguages || item.version_languages
+        );
+        if (detected) return detected;
         const parsed = parseVersionInfo(item.name || item.title || item.raw_title || item.rawTitle);
         if (parsed.languageSummary) return parsed.languageSummary;
         return hasRequestedLanguage ? 'Language not verified' : '';
