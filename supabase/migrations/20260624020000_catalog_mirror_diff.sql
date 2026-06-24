@@ -5,23 +5,16 @@
 -- which also makes flag-ON read output byte-identical to flag-OFF (the anti-rot proof).
 -- Read-only. security definer to read across users' cloud_titles (RLS-bypassed); the
 -- calling edge route (/catalog-mirror-verify) is service-role gated (NORVA_BACKFILL_TOKEN).
+-- NOTE: catalog_only is computed as total_catalog - compared (the join is 1:1 on the PK)
+-- rather than a correlated NOT EXISTS, which was O(catalog×cloud) and timed out on the
+-- edge function's short statement_timeout.
 create or replace function public.catalog_mirror_diff(p_item_type text default null)
 returns table (
-  compared bigint,
-  title_mismatch bigint,
-  original_title_mismatch bigint,
-  release_year_mismatch bigint,
-  poster_url_mismatch bigint,
-  backdrop_url_mismatch bigint,
-  i18n_mismatch bigint,
-  tmdb_mismatch bigint,
-  cloud_only bigint,
-  catalog_only bigint
+  compared bigint, title_mismatch bigint, original_title_mismatch bigint,
+  release_year_mismatch bigint, poster_url_mismatch bigint, backdrop_url_mismatch bigint,
+  i18n_mismatch bigint, tmdb_mismatch bigint, cloud_only bigint, catalog_only bigint
 )
-language sql
-stable
-security definer
-set search_path = public
+language sql stable security definer set search_path = public
 as $$
   with cloud as (
     select distinct on (item_type, provider_tmdb_id)
@@ -42,24 +35,26 @@ as $$
       (cat.item_type is not null) as in_catalog
     from cloud c
     left join public.catalog_titles cat using (item_type, provider_tmdb_id)
+  ),
+  agg as (
+    select
+      count(*) filter (where in_catalog) as compared,
+      count(*) filter (where in_catalog and title is distinct from cat_title) as title_mismatch,
+      count(*) filter (where in_catalog and original_title is distinct from cat_original_title) as original_title_mismatch,
+      count(*) filter (where in_catalog and release_year is distinct from cat_release_year) as release_year_mismatch,
+      count(*) filter (where in_catalog and poster_url is distinct from cat_poster_url) as poster_url_mismatch,
+      count(*) filter (where in_catalog and backdrop_url is distinct from cat_backdrop_url) as backdrop_url_mismatch,
+      count(*) filter (where in_catalog and i18n is distinct from cat_i18n) as i18n_mismatch,
+      count(*) filter (where in_catalog and tmdb is distinct from cat_tmdb) as tmdb_mismatch,
+      count(*) filter (where not in_catalog) as cloud_only
+    from joined
   )
-  select
-    count(*) filter (where in_catalog),
-    count(*) filter (where in_catalog and title is distinct from cat_title),
-    count(*) filter (where in_catalog and original_title is distinct from cat_original_title),
-    count(*) filter (where in_catalog and release_year is distinct from cat_release_year),
-    count(*) filter (where in_catalog and poster_url is distinct from cat_poster_url),
-    count(*) filter (where in_catalog and backdrop_url is distinct from cat_backdrop_url),
-    count(*) filter (where in_catalog and i18n is distinct from cat_i18n),
-    count(*) filter (where in_catalog and tmdb is distinct from cat_tmdb),
-    count(*) filter (where not in_catalog),
-    (select count(*) from public.catalog_titles cat
-       where (p_item_type is null or cat.item_type = p_item_type)
-         and not exists (
-           select 1 from public.cloud_titles c2
-            where c2.item_type = cat.item_type and c2.provider_tmdb_id = cat.provider_tmdb_id
-         ))
-  from joined;
+  select agg.compared, agg.title_mismatch, agg.original_title_mismatch, agg.release_year_mismatch,
+         agg.poster_url_mismatch, agg.backdrop_url_mismatch, agg.i18n_mismatch, agg.tmdb_mismatch,
+         agg.cloud_only,
+         (select count(*) from public.catalog_titles cat
+            where (p_item_type is null or cat.item_type = p_item_type)) - agg.compared as catalog_only
+  from agg;
 $$;
 
 revoke all on function public.catalog_mirror_diff(text) from public;
