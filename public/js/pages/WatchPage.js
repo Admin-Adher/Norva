@@ -2268,10 +2268,19 @@ class WatchPage {
         this.directAudioStreamIndex = current;
         if (!this.selectedAudioTrackUserChoice) this.selectedAudioStreamIndex = current;
         if (idxs.length < 2) return;
-        const langByIdx = new Map((Array.isArray(this.audioTracks) ? this.audioTracks : [])
-            .filter((t) => Number.isInteger(t.index))
-            .map((t) => [t.index, t.language]));
-        this.audioTracks = idxs.map((i) => ({ index: i, language: langByIdx.get(i) || null, default: i === current }));
+        // Borrow languages from the relay probe (ordered, audio-relative). Try the
+        // absolute stream index first; fall back to audio-relative POSITION so a
+        // libav-vs-container index mismatch still resolves the right language.
+        const relay = Array.isArray(this._relayAudioTracks) ? this._relayAudioTracks : [];
+        const langByIdx = new Map(relay
+            .filter((t) => Number.isInteger(t.index) && t.lang && t.lang !== 'und')
+            .map((t) => [t.index, t.lang]));
+        const posLang = (k) => (relay[k] && relay[k].lang && relay[k].lang !== 'und' ? relay[k].lang : null);
+        this.audioTracks = idxs.map((i, k) => ({
+            index: i,
+            language: langByIdx.get(i) || posLang(k),
+            default: i === current,
+        }));
         this.updateAudioTracks();
     }
 
@@ -2372,6 +2381,7 @@ class WatchPage {
         this.cloudAudioInfo = null;
         this.audioTracks = [];
         this.directAudioStreamIndex = null;
+        this._relayAudioTracks = null;
         this.subtitleTracks = [];
         this.subtitleSourceUrl = null;
         this.subtitleStartOffset = 0;
@@ -2391,7 +2401,9 @@ class WatchPage {
         // Enrich the audio menu with the provider's track metadata (language,
         // codec, channels, bitrate) for cloud relay playback — the same source the
         // mobile player uses. Best-effort, display-only; never touches playback.
-        this.enrichCloudPlaybackTracks(url);
+        // The engine path AWAITS this below (before opening the stream) so the header
+        // probe doesn't fight the engine for the provider's single connection.
+        if (options.mode !== 'engine') this.enrichCloudPlaybackTracks(url);
 
         // Show loading spinner
         this.showLoading();
@@ -2401,6 +2413,11 @@ class WatchPage {
         // container and transcodes non-browser audio to AAC client-side. No
         // gateway/transcode server. Resume seeks straight to the saved offset.
         if (options.mode === 'engine' && typeof window !== 'undefined' && window.NorvaEngine) {
+            // Probe the per-track languages FIRST (awaited) so the header fetch
+            // completes before the engine opens the stream — otherwise the two
+            // compete for the provider's single connection and the probe loses,
+            // leaving the menu with unnamed "Audio N" tracks.
+            try { await this.enrichCloudPlaybackTracks(url); } catch (_) { /* best-effort */ }
             await this.playWithEngine(url, {
                 startTime: Number(options.startTime ?? options.seekOffset ?? this.resumeTime ?? 0) || 0,
                 playbackAttemptId
@@ -4424,6 +4441,9 @@ class WatchPage {
     // playing zero-egress until the user picks another. No-op unless >=2 known languages.
     applyCloudMultiAudioTracks(probe) {
         const raw = Array.isArray(probe?.audioTracks) ? probe.audioTracks : [];
+        // Raw ORDERED tracks (audio-relative) kept for the engine path, which maps
+        // them to its demuxed streams by index (and falls back to position).
+        this._relayAudioTracks = raw.map((t) => ({ index: Number(t?.index), lang: this.normalizeTrackLanguage(t?.lang) }));
         // index -> language from the relay probe (first wins, kept in track order).
         const langByIdx = new Map();
         for (const t of raw) {
