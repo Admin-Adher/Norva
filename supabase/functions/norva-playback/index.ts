@@ -1649,6 +1649,19 @@ async function runAudioBackfill(req: Request, db: SupabaseClient) {
   const requireTag = stringOr(body.requireTag, "").toLowerCase().trim();
   if (!userId) throw new HttpError(400, "Missing userId");
 
+  // mode 'catalog' = fill this user's unresolved audio_languages from the GLOBAL cache
+  // (no provider hit). The scale dedup: a title probed by ANY user is shared to all
+  // others for free here, instead of re-probing the same provider file once per user.
+  if (stringOr(body.mode, "") === "catalog") {
+    const { data: filled, error: fillErr } = await db.rpc("fill_user_audio_from_catalog", {
+      p_user_id: userId,
+      p_item_type: itemType,
+      p_limit: Math.max(1, Math.min(20000, Number(body.limit) || 5000)),
+    });
+    if (fillErr) throwDb(fillErr, "catalog fill failed");
+    return { mode: "catalog", filled: Number(filled ?? 0) };
+  }
+
   const runtimeConfig = await getRuntimeConfig(db);
   if (!runtimeConfig.relayBaseUrl || !runtimeConfig.relayTokenSecret) {
     throw new HttpError(503, "Norva Relay is not configured");
@@ -1661,6 +1674,11 @@ async function runAudioBackfill(req: Request, db: SupabaseClient) {
     .eq("item_type", itemType)
     .gt("variant_count", 0)
     .eq("audio_languages", "{}");
+  // Progression: skip titles already probed recently so the crawl ADVANCES past
+  // genuinely-untagged titles instead of re-probing the same front of the queue forever.
+  // 30d retry window lets transient provider failures (e.g. 429) recover later.
+  const probeRetryBefore = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString();
+  titlesQuery = titlesQuery.or(`audio_probed_at.is.null,audio_probed_at.lt.${probeRetryBefore}`);
   if (requireTag && /^[a-z_]{1,12}$/.test(requireTag)) titlesQuery = titlesQuery.contains("version_languages", [requireTag]);
   if (afterId) titlesQuery = titlesQuery.gt("id", afterId);
   titlesQuery = titlesQuery.order("id", { ascending: true }).limit(limit);
@@ -1685,6 +1703,15 @@ async function runAudioBackfill(req: Request, db: SupabaseClient) {
   const lastId = String(titles[titles.length - 1].id);
 
   const processOne = async (title: JsonRecord) => {
+    // Mark a title as probed (resolved or genuinely-empty) so the progression filter
+    // advances past it. Only called after a SUCCESSFUL relay response — never on a
+    // transient relayNotOk (429), so those retry on the next pass. Best-effort.
+    const markProbed = async () => {
+      try {
+        await db.from("cloud_titles").update({ audio_probed_at: new Date().toISOString() })
+          .eq("user_id", userId).eq("id", String(title.id));
+      } catch (_) { /* best-effort progression marker */ }
+    };
     try {
       const variant = title.default_variant_id ? variantById.get(String(title.default_variant_id)) : null;
       if (!variant) { diag.noVariant++; return; }
@@ -1720,19 +1747,19 @@ async function runAudioBackfill(req: Request, db: SupabaseClient) {
       const codes = new Set<string>();
       if (mode === "probe") {
         const incoming = info && Array.isArray(info.audioLanguages) ? info.audioLanguages : [];
-        if (!incoming.length) { diag.relayEmpty++; return; }
+        if (!incoming.length) { diag.relayEmpty++; await markProbed(); return; }
         for (const code of incoming) { const normalized = normalizeIsoLang(stringOrNull(code)); if (normalized) codes.add(normalized); }
       } else {
         const tracks = info && Array.isArray(info.audioTracks) ? info.audioTracks : [];
-        if (!tracks.length) { diag.relayEmpty++; return; }
+        if (!tracks.length) { diag.relayEmpty++; await markProbed(); return; }
         for (const track of tracks) { const normalized = normalizeIsoLang(stringOrNull((track as JsonRecord)?.language)); if (normalized) codes.add(normalized); }
       }
-      if (!codes.size) { diag.noLang++; return; }
+      if (!codes.size) { diag.noLang++; await markProbed(); return; }
 
       const sortedCodes = [...codes].sort();
       const { error: updateError } = await db
         .from("cloud_titles")
-        .update({ audio_languages: sortedCodes })
+        .update({ audio_languages: sortedCodes, audio_probed_at: new Date().toISOString() })
         .eq("user_id", userId)
         .eq("id", String(title.id));
       if (!updateError) {
