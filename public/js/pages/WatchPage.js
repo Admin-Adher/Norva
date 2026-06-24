@@ -2455,6 +2455,8 @@ class WatchPage {
         this.audioTracks = [];
         this.directAudioStreamIndex = null;
         this._relayAudioTracks = null;
+        this._engineSubsEnriched = false;
+        this._engineSubsEnriching = false;
         this.subtitleTracks = [];
         this.subtitleSourceUrl = null;
         this.subtitleStartOffset = 0;
@@ -2511,10 +2513,13 @@ class WatchPage {
                 playbackAttemptId,
                 audioStreamIndex: preferredAudioIndex
             });
-            // Subtitles: the engine demuxes them but can't render them. If the file
-            // carries subtitle streams, ask the gateway to enumerate them (language +
-            // codec) so the CC menu lists them; extraction happens on selection.
-            this.enrichEngineSubtitleTracks();
+            // Subtitles: the engine demuxes them but can't render them. Enumerating
+            // them asks the gateway (ffprobe) to read the container — a SECOND provider
+            // connection. Most providers are single-connection, so firing it now (during
+            // the engine's initial buffering, before any forward buffer exists) makes the
+            // provider drop the engine's /raw stream → SourceBuffer crash. Defer it until
+            // the user opens the audio/captions menu (buffer built, drop survivable):
+            // see toggleAudioMenu()/toggleCaptionsMenu() → enrichEngineSubtitleTracks().
             return;
         }
 
@@ -4432,6 +4437,11 @@ class WatchPage {
         if (this.audioMenuOpen) {
             this.closeAudioMenu();
         } else {
+            // Engine path: enumerate audio/subtitle languages now (buffer built →
+            // the gateway's second provider connection is survivable). Populates the
+            // gateway-ffprobe audio fallback (e.g. a lone Japanese track the relay
+            // parser missed) and the subtitle list. Best-effort, runs once.
+            if (this.currentPlaybackMode === 'engine') this.enrichEngineSubtitleTracks();
             this.updateAudioTracks();
             this.audioMenu?.classList.remove('hidden');
             this.audioMenuOpen = true;
@@ -5305,16 +5315,22 @@ class WatchPage {
     // (index, language, codec) so the CC menu lists them. Extraction is on selection.
     // Best-effort + non-blocking; no-op when the file has no subtitle streams.
     async enrichEngineSubtitleTracks() {
+        // Run at most once per playback (and never two in flight). A transient gateway
+        // failure leaves _engineSubsEnriched false so the next menu-open retries.
+        if (this._engineSubsEnriched || this._engineSubsEnriching) return;
         try {
             const engine = this.norvaEngine;
             if (!engine || typeof engine.subtitleStreams !== 'function') return;
-            if (!engine.subtitleStreams().length) return; // nothing to label
+            if (!engine.subtitleStreams().length) { this._engineSubsEnriched = true; return; } // no subs → don't retry
             const base = this.engineSubtitleBaseUrl();
             if (!base) return;
+            this._engineSubsEnriching = true;
             const attempt = this._playbackAttemptId;
             const data = await fetch(base, { cache: 'no-store' })
                 .then((r) => (r.ok ? r.json() : null)).catch(() => null);
-            if (!data || this.isStalePlaybackAttempt(attempt)) return;
+            this._engineSubsEnriching = false;
+            if (!data || this.isStalePlaybackAttempt(attempt)) return; // failure → allow retry on next open
+            this._engineSubsEnriched = true;
             // Audio fallback: the gateway's ffprobe reads audio languages robustly. When
             // the relay/server probe couldn't name the audio (some MKV files leave it
             // untagged-by-our-parser), use the gateway's languages and re-sync the audio
@@ -5347,7 +5363,9 @@ class WatchPage {
             this.subtitleSourceUrl = this.baseStreamUrl || this.currentUrl;
             this.subtitleStartOffset = 0;
             this.updateCaptionsTracks();
-        } catch (_) { /* best-effort */ }
+        } catch (_) {
+            this._engineSubsEnriching = false; // best-effort; allow a later retry
+        }
     }
 
     /**
@@ -5551,6 +5569,9 @@ class WatchPage {
         if (this.captionsMenuOpen) {
             this.closeCaptionsMenu();
         } else {
+            // Engine path: enumerate subtitle tracks lazily (see toggleAudioMenu) so
+            // the gateway probe never races the engine's initial buffering. Runs once.
+            if (this.currentPlaybackMode === 'engine') this.enrichEngineSubtitleTracks();
             this.updateCaptionsTracks();
             this.captionsMenu?.classList.remove('hidden');
             this.captionsMenuOpen = true;
