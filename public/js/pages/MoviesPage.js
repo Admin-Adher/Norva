@@ -252,6 +252,29 @@ class MoviesPage {
         return params;
     }
 
+    // Dynamic filter menus: only show audio/subtitle languages actually present in
+    // the catalogue (server facets). Falls back to the static <option>s on failure.
+    async populateLanguageFacets() {
+        if (this._languageFacetsLoaded || !this.isCloudPagedMode()) return;
+        this._languageFacetsLoaded = true;
+        try {
+            const facets = await API.media.languageFacets({ type: 'movie' });
+            this.applyFacetOptions(this.audioSelect, 'Any Audio', facets && facets.audio);
+            this.applyFacetOptions(this.subtitleSelect, 'Any Subtitles', facets && facets.subtitles);
+        } catch (_) {
+            this._languageFacetsLoaded = false; // allow a retry on the next show
+        }
+    }
+
+    applyFacetOptions(select, anyLabel, facets) {
+        if (!select || !Array.isArray(facets) || !facets.length) return;
+        const current = select.value;
+        select.innerHTML = [`<option value="">${anyLabel}</option>`]
+            .concat(facets.map(f => `<option value="${MediaUtils.escapeHtml(f.value)}">${MediaUtils.escapeHtml(f.label)}</option>`))
+            .join('');
+        if (current && facets.some(f => f.value === current)) select.value = current;
+    }
+
     // Open a genre bucket from the filter dropdown, reusing the rail "See all"
     // grid (paged, server-side). No-op if that bucket is already showing.
     openGenreBucket(bucket) {
@@ -452,6 +475,7 @@ class MoviesPage {
 
         await Promise.all([this.loadFavorites(), this.loadWatchState(), this.loadServerSettings(), this.loadPlaybackStatuses()]);
         this.renderContinueWatching();
+        this.populateLanguageFacets();
 
         // A genre is selected (e.g. returning to the page) → (re)open its grid.
         if (this.isCloudPagedMode()) {

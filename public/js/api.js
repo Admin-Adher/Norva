@@ -533,7 +533,7 @@ const CloudAdapter = (() => {
         return payload;
     }
 
-    async function getGenreItems({ type = 'movie', bucket = '', limit = 36, offset = 0 } = {}) {
+    async function getGenreItems({ type = 'movie', bucket = '', limit = 36, offset = 0, audio = '', subs = '', sort = '', prefAudio = '', prefSubs = '', q = '' } = {}) {
         const normalizedType = type ? cloudTypeFromLocal(type) : 'movie';
         const normalizedLimit = Math.max(1, Math.min(100, Number.parseInt(limit, 10) || 36));
         const normalizedOffset = Math.max(0, Number.parseInt(offset, 10) || 0);
@@ -541,7 +541,10 @@ const CloudAdapter = (() => {
             type: normalizedType,
             bucket,
             limit: normalizedLimit,
-            offset: normalizedOffset
+            offset: normalizedOffset,
+            // Audio-language / burned-in-subtitle filter + "best for my languages"
+            // sort + text search — forwarded to the catalog (empty values dropped).
+            audio, subs, sort, prefAudio, prefSubs, q
         });
     }
 
@@ -1689,7 +1692,12 @@ const CloudAdapter = (() => {
             const requestedType = query.get('type') || 'movie';
             const limit = Math.max(1, Math.min(100, Number.parseInt(query.get('limit') || '36', 10) || 36));
             const offset = Math.max(0, Number.parseInt(query.get('offset') || '0', 10) || 0);
-            const payload = await getGenreItems({ type: requestedType, bucket: query.get('bucket') || '', limit, offset });
+            const payload = await getGenreItems({
+                type: requestedType, bucket: query.get('bucket') || '', limit, offset,
+                audio: query.get('audio') || '', subs: query.get('subs') || '',
+                sort: query.get('sort') || '', prefAudio: query.get('prefAudio') || '',
+                prefSubs: query.get('prefSubs') || '', q: query.get('q') || ''
+            });
             return {
                 ...payload,
                 items: (payload.items || []).map(normalizeHomeRailItem)
@@ -2091,6 +2099,17 @@ const API = {
                 if (value !== undefined && value !== null && value !== '') search.set(key, value);
             });
             return API.request('GET', `/media/genre-summary${search.toString() ? `?${search.toString()}` : ''}`);
+        },
+        // Audio/subtitle languages actually present in the catalogue (cloud-only;
+        // drives the dynamic filter menus). Empty on failure so menus fall back.
+        languageFacets: (params = {}) => {
+            try { return cloudHomeApi().languageFacets(params); }
+            catch (_) { return Promise.resolve({ audio: [], subtitles: [] }); }
+        },
+        // Best-effort capture of real audio-track languages observed at playback.
+        reportObservedLanguages: (body) => {
+            try { return cloudHomeApi().reportObservedLanguages(body); }
+            catch (_) { return Promise.resolve({ ok: false }); }
         },
         // Drop the cached home/genre rails so a hidden-genre change shows on the
         // browse pages immediately instead of after the 2-min TTL.

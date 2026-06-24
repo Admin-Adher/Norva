@@ -4172,6 +4172,7 @@ class WatchPage {
             this._playbackStatusOkReported = true;
             this.reportPlaybackStatus('ok').catch(() => { });
         }
+        this.reportObservedAudioLanguages();
     }
 
     getPlaybackHealthTarget() {
@@ -4350,6 +4351,7 @@ class WatchPage {
                 this.updateDurationState();
             }
             this.updateAudioTracks();
+            this.reportObservedAudioLanguages();
         } catch (_) { /* best-effort enrichment */ }
     }
 
@@ -4389,6 +4391,35 @@ class WatchPage {
         }
 
         return [{ source: 'none', index: -1, label: 'Default', active: true }];
+    }
+
+    // Best-effort capture of the real audio-track languages observed at playback
+    // (default track from get_vod_info + the demuxed track list) so the catalogue
+    // learns which languages a "Multi" file actually carries. Title-scoped + deduped
+    // by the code set; never disrupts playback.
+    reportObservedAudioLanguages() {
+        try {
+            if (!window.API?.isCloudMode?.()) return;
+            const titleId = this.content?.titleId || this.content?.title_id;
+            if (!titleId) return;
+            const codes = new Set();
+            const add = (lang) => {
+                const code = this.normalizeTrackLanguage(lang);
+                if (code && code !== 'und' && /^[a-z]{2,3}$/.test(code)) codes.add(code);
+            };
+            if (this.cloudAudioInfo) add(this.cloudAudioInfo.language);
+            for (const t of (Array.isArray(this.audioTracks) ? this.audioTracks : [])) add(t.language || t.lang);
+            const native = this.video?.audioTracks;
+            if (native && Number.isFinite(native.length)) {
+                for (let i = 0; i < native.length; i++) add(native[i]?.language);
+            }
+            for (const t of (Array.isArray(this.hls?.audioTracks) ? this.hls.audioTracks : [])) add(t.lang || t.language);
+            if (!codes.size) return;
+            const key = `${titleId}:${[...codes].sort().join(',')}`;
+            if (this._observedLangsSent === key) return;
+            this._observedLangsSent = key;
+            window.API?.media?.reportObservedLanguages?.({ titleId, audio: [...codes] }).catch(() => { });
+        } catch (_) { /* best-effort capture; never disrupt playback */ }
     }
 
     updateAudioTracks() {
@@ -4745,7 +4776,16 @@ class WatchPage {
             ita: 'it',
             por: 'pt',
             dut: 'nl',
-            nld: 'nl'
+            nld: 'nl',
+            ara: 'ar',
+            rus: 'ru',
+            tur: 'tr',
+            pol: 'pl',
+            hin: 'hi',
+            jpn: 'ja',
+            kor: 'ko',
+            zho: 'zh',
+            chi: 'zh'
         };
         return aliases[normalized] || normalized || 'und';
     }

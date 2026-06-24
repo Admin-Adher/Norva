@@ -472,6 +472,18 @@
         }
     }
 
+    async function catalogMutate(path, body, options = {}) {
+        const route = `${path}${query({ country: resolveCountry(), lang: resolveLang() })}`;
+        try {
+            return await requestToBase(catalogBase(), 'POST', route, body, options);
+        } catch (error) {
+            if (error.status === 404 || error.status === 405) {
+                return request('POST', route, body, options);
+            }
+            throw error;
+        }
+    }
+
     async function seriesInfoRequest(id, seriesId, options = {}) {
         const route = `/sources/${encodeURIComponent(id)}/series-info?series_id=${encodeURIComponent(seriesId)}`;
         try {
@@ -721,7 +733,9 @@
             rails: (params = {}) => catalogRequest('/home/rails', params),
             genreRails: (params = {}) => catalogRequest('/media-genre-rails', params),
             genreItems: (params = {}) => catalogRequest('/media-genre-items', params),
-            genreSummary: (params = {}) => catalogRequest('/media-genre-summary', params)
+            genreSummary: (params = {}) => catalogRequest('/media-genre-summary', params),
+            languageFacets: (params = {}) => catalogRequest('/media-language-facets', params),
+            reportObservedLanguages: (body) => catalogMutate('/media-observed-languages', body)
         },
 
         favorites: {
@@ -797,7 +811,9 @@
                 rails: (params = {}) => catalogRequest('/device/home/rails', params, { token: getDeviceToken() }),
                 genreRails: (params = {}) => catalogRequest('/device/media-genre-rails', params, { token: getDeviceToken() }),
                 genreItems: (params = {}) => catalogRequest('/device/media-genre-items', params, { token: getDeviceToken() }),
-                genreSummary: (params = {}) => catalogRequest('/device/media-genre-summary', params, { token: getDeviceToken() })
+                genreSummary: (params = {}) => catalogRequest('/device/media-genre-summary', params, { token: getDeviceToken() }),
+                languageFacets: (params = {}) => catalogRequest('/device/media-language-facets', params, { token: getDeviceToken() }),
+                reportObservedLanguages: (body) => catalogMutate('/device/media-observed-languages', body, { token: getDeviceToken() })
             },
             playback: {
                 createSession: (session) => playbackRequest(session, { token: getDeviceToken() }),

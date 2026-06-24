@@ -96,6 +96,16 @@ Deno.serve(async (req) => {
       return json(req, await listGenreSummary(req, url, userId));
     }
 
+    if (req.method === "GET" && (segments[0] === "media-language-facets" || (segments[0] === "device" && segments[1] === "media-language-facets"))) {
+      const userId = await requireUserId(req);
+      return json(req, await listLanguageFacets(url, userId));
+    }
+
+    if (req.method === "POST" && (segments[0] === "media-observed-languages" || (segments[0] === "device" && segments[1] === "media-observed-languages"))) {
+      const userId = await requireUserId(req);
+      return json(req, await recordObservedLanguages(req, userId));
+    }
+
     throw new HttpError(404, "Route not found");
   } catch (error) {
     const status = error instanceof HttpError ? error.status : 500;
@@ -509,14 +519,43 @@ function audioFacetTags(facet: string | null): string[] {
 function subtitleFacetTags(facet: string | null): string[] {
   return facet ? (SUBTITLE_FACET_TAGS[facet] ?? []) : [];
 }
+// An audio facet -> ISO code, for matching the real observed audio_languages
+// column. The opaque 'original'/'multi' facets have no single ISO (they stay
+// tag-only); a specific language like 'fr' also matches a captured 'fr' track.
+const AUDIO_FACET_ISO: Record<string, string> = {
+  fr: "fr", en: "en", es: "es", ar: "ar", de: "de", it: "it", pt: "pt",
+};
+function audioFacetIso(facet: string | null): string | null {
+  return facet ? (AUDIO_FACET_ISO[facet] ?? null) : null;
+}
+// Human labels for the facet values the dynamic menus expose (English UI).
+const AUDIO_FACET_LABELS: Record<string, string> = {
+  fr: "French", en: "English", original: "Original (VO)", multi: "Multi-language",
+  es: "Spanish", ar: "Arabic", de: "German", it: "Italian", pt: "Portuguese",
+};
+const SUBTITLE_FACET_LABELS: Record<string, string> = {
+  ar: "Arabic", fr: "French", en: "English", es: "Spanish", de: "German",
+  it: "Italian", pt: "Portuguese", tr: "Turkish", nl: "Dutch", ru: "Russian",
+};
 function titleVersionLanguages(title: JsonRecord): string[] {
   const raw = (title as { version_languages?: unknown }).version_languages;
   return Array.isArray(raw) ? raw.map((tag) => String(tag).toLowerCase()) : [];
 }
-// Each requested dimension is required (logical AND across audio + subtitles);
-// an empty dimension imposes no constraint.
-function titleMatchesLanguage(langs: string[], audioTags: string[], subTags: string[]): boolean {
-  if (audioTags.length && !audioTags.some((tag) => langs.includes(tag))) return false;
+function titleAudioLanguages(title: JsonRecord): string[] {
+  const raw = (title as { audio_languages?: unknown }).audio_languages;
+  return Array.isArray(raw) ? raw.map((tag) => String(tag).toLowerCase()) : [];
+}
+// Each requested dimension is required (logical AND across audio + subtitles); an
+// empty dimension imposes no constraint. Audio matches a version tag OR a real
+// captured audio-track language (audioIso); subtitles match version tags only
+// (burned-in subs can't be probed, so the tag is the only signal).
+function titleMatchesLanguage(title: JsonRecord, audioTags: string[], audioIso: string | null, subTags: string[]): boolean {
+  const langs = titleVersionLanguages(title);
+  if (audioTags.length || audioIso) {
+    const audioOk = (audioTags.length > 0 && audioTags.some((tag) => langs.includes(tag))) ||
+      (audioIso !== null && titleAudioLanguages(title).includes(audioIso));
+    if (!audioOk) return false;
+  }
   if (subTags.length && !subTags.some((tag) => langs.includes(tag))) return false;
   return true;
 }
@@ -543,7 +582,9 @@ async function listGenreItems(req: Request, url: URL, userId: string) {
 
   // Optional audio-language / burned-in-subtitle filters + "best for my languages"
   // sort. All additive: absent → the query and result are identical to before.
-  const audioTags = audioFacetTags(normalizeFacet(url.searchParams.get("audio")));
+  const audioFacet = normalizeFacet(url.searchParams.get("audio"));
+  const audioTags = audioFacetTags(audioFacet);
+  const audioIso = audioFacetIso(audioFacet);
   const subTags = subtitleFacetTags(normalizeFacet(url.searchParams.get("subs")));
   const langSort = (url.searchParams.get("sort") || "").trim() === "lang-match";
   const prefAudioTags = langSort ? audioFacetTags(normalizeFacet(url.searchParams.get("prefAudio"))) : [];
@@ -564,9 +605,18 @@ async function listGenreItems(req: Request, url: URL, userId: string) {
       .eq("user_id", userId)
       .eq("item_type", itemType)
       .gt("variant_count", 0);
-    // GIN-indexed pre-filter (OR across all requested tags) so the candidate cap
-    // covers the whole language-matched set; exact AND semantics are refined below.
-    if (filterTags.length) query = query.overlaps("version_languages", filterTags);
+    // GIN-indexed pre-filter (a superset OR across requested tags + the real
+    // audio-language column) so the candidate cap covers the whole matched set;
+    // exact AND semantics are refined in memory below.
+    if (audioIso) {
+      // Per-tag contains() so the or() never holds a comma INSIDE an array literal
+      // (PostgREST splits or-conditions on top-level commas). OR of contains == overlap.
+      const orParts = filterTags.map((tag) => `version_languages.cs.{${tag}}`);
+      orParts.push(`audio_languages.cs.{${audioIso}}`);
+      query = query.or(orParts.join(","));
+    } else if (filterTags.length) {
+      query = query.overlaps("version_languages", filterTags);
+    }
     if (search) query = query.ilike("title", `%${search}%`);
     const { data, error } = await query
       .order("synced_at", { ascending: false })
@@ -591,8 +641,8 @@ async function listGenreItems(req: Request, url: URL, userId: string) {
         return false;
       }
     }
-    if ((audioTags.length || subTags.length) &&
-        !titleMatchesLanguage(titleVersionLanguages(title), audioTags, subTags)) return false;
+    if ((audioTags.length || audioIso || subTags.length) &&
+        !titleMatchesLanguage(title, audioTags, audioIso, subTags)) return false;
     return true;
   });
 
@@ -613,6 +663,81 @@ async function listGenreItems(req: Request, url: URL, userId: string) {
     offset,
     hasMore: offset + limit < matched.length,
   };
+}
+
+// Dynamic menu options: which audio / burned-in-subtitle facets actually exist in
+// this user's catalogue, so the dropdowns only show real choices (no dead options).
+// Audio counts a facet present if any title carries one of its version tags OR a
+// real captured audio-track language; subtitles use the version tags only.
+async function listLanguageFacets(url: URL, userId: string) {
+  const itemType = url.searchParams.get("type") === "series" ? "series" : "movie";
+
+  async function present(orFilter: string | null, tagFilter: string[] | null): Promise<boolean> {
+    try {
+      // deno-lint-ignore no-explicit-any
+      let q: any = db.from("cloud_titles").select("id", { count: "exact", head: true })
+        .eq("user_id", userId).eq("item_type", itemType).gt("variant_count", 0);
+      if (orFilter) q = q.or(orFilter);
+      else if (tagFilter && tagFilter.length) q = q.overlaps("version_languages", tagFilter);
+      else return false;
+      const { count, error } = await q;
+      return !error && (count ?? 0) > 0;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  const audio = (await Promise.all(Object.keys(AUDIO_FACET_LABELS).map(async (facet) => {
+    const tags = audioFacetTags(facet);
+    const iso = audioFacetIso(facet);
+    let ok: boolean;
+    if (iso) {
+      // Per-tag contains() (no comma inside an array literal — see listGenreItems).
+      const parts = tags.map((tag) => `version_languages.cs.{${tag}}`);
+      parts.push(`audio_languages.cs.{${iso}}`);
+      ok = await present(parts.join(","), null);
+    } else {
+      ok = await present(null, tags);
+    }
+    return ok ? { value: facet, label: AUDIO_FACET_LABELS[facet] } : null;
+  }))).filter(Boolean);
+
+  const subtitles = (await Promise.all(Object.keys(SUBTITLE_FACET_LABELS).map(async (facet) => {
+    const ok = await present(null, subtitleFacetTags(facet));
+    return ok ? { value: facet, label: SUBTITLE_FACET_LABELS[facet] } : null;
+  }))).filter(Boolean);
+
+  return { audio, subtitles };
+}
+
+// Capture path for real audio-track languages observed at playback (the default
+// track from get_vod_info + the demuxed track list). Best-effort union into the
+// title's audio_languages, scoped to the caller's own title; never blocks
+// playback. This is what de-opaques the "Multi" tag over time.
+async function recordObservedLanguages(req: Request, userId: string) {
+  let body: JsonRecord;
+  try { body = recordOrEmpty(await req.json()); } catch (_) { throw new HttpError(400, "Invalid JSON body"); }
+  const titleId = stringOrNull(body.titleId ?? body.title_id);
+  if (!titleId || !/^[0-9a-f-]{36}$/i.test(titleId)) throw new HttpError(400, "Missing or invalid titleId");
+  const incoming = Array.isArray(body.audio) ? body.audio : [];
+  const codes = [...new Set(incoming
+    .map((code) => String(code).toLowerCase().trim())
+    .filter((code) => /^[a-z]{2,3}$/.test(code) && code !== "und"))];
+  if (!codes.length) return { ok: true, updated: false };
+
+  const { data, error } = await db.from("cloud_titles")
+    .select("audio_languages").eq("user_id", userId).eq("id", titleId).maybeSingle();
+  if (error || !data) return { ok: true, updated: false };
+  const current = Array.isArray((data as JsonRecord).audio_languages)
+    ? ((data as JsonRecord).audio_languages as unknown[]).map((code) => String(code).toLowerCase())
+    : [];
+  const merged = [...new Set([...current, ...codes])].sort();
+  if (merged.length === current.length) return { ok: true, updated: false };
+
+  const { error: updateError } = await db.from("cloud_titles")
+    .update({ audio_languages: merged }).eq("user_id", userId).eq("id", titleId);
+  if (updateError) return { ok: true, updated: false };
+  return { ok: true, updated: true, audioLanguages: merged };
 }
 
 async function listTitleRail(userId: string, itemType: "movie" | "series", id: string, title: string, limit: number, lang: string | null) {
@@ -1592,7 +1717,7 @@ function corsHeaders(req: Request) {
   return {
     "Access-Control-Allow-Origin": allowOrigin,
     "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-norva-profile-id",
-    "Access-Control-Allow-Methods": "GET,OPTIONS",
+    "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
     "Access-Control-Max-Age": "86400",
     Vary: "Origin",
   };
