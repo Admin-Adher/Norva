@@ -223,6 +223,78 @@ app.get('/raw/:token', async (req, res) => {
     require('stream').Readable.fromWeb(upstream.body).pipe(res);
 });
 
+// Subtitle support for the in-browser ENGINE (byte-pipe) path. The engine plays the
+// raw file client-side and can't render subtitles, so it asks the gateway to:
+//   - enumerate the container's subtitle tracks (no `index`): ffprobe -> JSON, or
+//   - extract a chosen TEXT track to WebVTT (`index`, windowed by `start`/`dur`).
+// Auth + source URL come from the same byte-pipe token used by /raw.
+app.get('/subtitle/:token', async (req, res) => {
+    const claims = verifyRawToken(req.params.token, GATEWAY_TOKEN);
+    if (!claims) return res.status(401).json({ error: 'Invalid byte-pipe token' });
+    if (Number(claims.exp) * 1000 < Date.now()) return res.status(401).json({ error: 'Byte-pipe token expired' });
+    const ua = claims.ua || FFMPEG_USER_AGENT;
+
+    // Enumeration: ffprobe the container, return its subtitle tracks (index, lang, codec).
+    if (req.query.index === undefined) {
+        try {
+            const profile = await probeCodecProfile(claims.url, ua);
+            res.setHeader('Cache-Control', 'private, max-age=3600');
+            return res.json({ subtitles: Array.isArray(profile?.subtitles) ? profile.subtitles : [] });
+        } catch (err) {
+            return res.status(502).json({ error: 'Subtitle probe failed', details: String((err && err.message) || err) });
+        }
+    }
+
+    // Extraction: one TEXT track -> WebVTT, windowed. Mirrors server/routes/subtitle.js
+    // (input-side -ss rebases cue timestamps to the window; the client offsets them
+    // back) so the player's existing windowed cue machinery is reused unchanged.
+    const trackIndex = Number.parseInt(req.query.index, 10);
+    if (!Number.isInteger(trackIndex) || trackIndex < 0) return res.status(400).json({ error: 'Invalid subtitle index' });
+    const startOffset = Number.parseFloat(req.query.start);
+    const hasStart = Number.isFinite(startOffset) && startOffset > 0;
+    const windowDur = Math.min(Math.max(Number.parseFloat(req.query.dur) || 300, 1), 900);
+    const outputPath = path.join(os.tmpdir(), `norva-sub-${Date.now()}-${crypto.randomUUID()}.vtt`);
+
+    const args = [
+        '-y', '-hide_banner', '-loglevel', 'error', '-nostdin',
+        '-user_agent', ua,
+        '-probesize', '2000000', '-analyzeduration', '3000000',
+        ...(hasStart ? ['-ss', String(startOffset)] : []),
+        '-i', claims.url,
+        '-map', `0:${trackIndex}`,
+        '-t', String(windowDur),
+        '-c:s', 'webvtt', '-f', 'webvtt',
+        outputPath,
+    ];
+
+    let child;
+    try { child = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'ignore', 'pipe'] }); }
+    catch (_) { return res.status(500).json({ error: 'Subtitle extraction failed' }); }
+    let stderr = '';
+    let clientClosed = false;
+    const timer = setTimeout(() => { try { child.kill('SIGKILL'); } catch (_) {} }, 30_000);
+    child.stderr.on('data', (d) => { stderr += d.toString(); });
+    res.on('close', () => { if (!res.writableEnded) { clientClosed = true; try { child.kill('SIGKILL'); } catch (_) {} } });
+    child.on('error', () => { clearTimeout(timer); if (!res.headersSent) res.status(500).end(); });
+    child.on('close', async (code) => {
+        clearTimeout(timer);
+        if (clientClosed) { fsp.unlink(outputPath).catch(() => {}); return; }
+        if (code !== 0) {
+            console.warn(`[media-gateway] /subtitle ffmpeg exit ${code}: ${stderr.slice(-300)}`);
+            fsp.unlink(outputPath).catch(() => {});
+            if (!res.headersSent) res.status(502).json({ error: 'Subtitle extraction failed' });
+            return;
+        }
+        let body = '';
+        try { body = await fsp.readFile(outputPath, 'utf8'); } catch (_) { body = ''; }
+        fsp.unlink(outputPath).catch(() => {});
+        if (!String(body || '').trim()) body = 'WEBVTT\n\n';
+        res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
+        res.setHeader('Cache-Control', 'private, max-age=3600');
+        res.send(body);
+    });
+});
+
 app.post('/sessions', requireGatewayAuth, async (req, res) => {
     try {
         const {

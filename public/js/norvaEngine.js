@@ -565,8 +565,10 @@
       this.copyAudio = !!(this.aS && AUDIO_COPY.has(this.aName));
       this.V_IDX = 0; this.A_IDX = this.vS ? 1 : 0;
       this.log(`vidéo=${this.vName}${this.aS ? `, audio=${this.aName} (${this.copyAudio ? 'copie' : 'transcodage AAC'})` : ''}`);
-      // DIAG (subtitles investigation): list every demuxed stream with its type + codec,
-      // so we can see what subtitle tracks the container carries (text vs bitmap codec).
+      // Enumerate subtitle streams (index + codec) for the player's CC menu. libav
+      // here can't read the per-stream LANGUAGE, so the language is filled by the
+      // gateway probe (same split as audio). Also logs the full stream list.
+      this._subStreams = [];
       try {
         const TY = { 0: 'video', 1: 'audio', 2: 'data', 3: 'subtitle', 4: 'attachment' };
         const parts = [];
@@ -574,15 +576,20 @@
           let nm = '?';
           try { nm = await lib.avcodec_get_name(s.codec_id); } catch (_) { /* ignore */ }
           parts.push(`${s.index}:${TY[s.codec_type] ?? s.codec_type}=${nm}`);
+          if (s.codec_type === 3) this._subStreams.push({ index: s.index, codec: nm });
         }
         this.log('streams: ' + parts.join('  '));
-      } catch (_) { /* diag best-effort */ }
+      } catch (_) { /* best-effort */ }
     }
 
     // All audio stream indices (absolute container order) + the selected one, so the
     // player can build a switchable language menu and re-load on a chosen track.
     audioStreamIndices() { return (this._streams || []).filter((s) => s.codec_type === 1).map((s) => s.index); }
     currentAudioIndex() { return this.aS ? this.aS.index : null; }
+    // Subtitle streams the container carries (absolute index + codec name), so the
+    // player can list them and request extraction of a chosen text track from the
+    // gateway. Language is not available here (libav limit) — the gateway fills it.
+    subtitleStreams() { return Array.isArray(this._subStreams) ? this._subStreams : []; }
 
     async _chooseMime() {
       const lib = this.lib;
