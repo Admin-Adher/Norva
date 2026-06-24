@@ -1704,6 +1704,46 @@ async function runAudioBackfill(req: Request, db: SupabaseClient) {
     throw new HttpError(503, "Norva Relay is not configured");
   }
 
+  // Diagnostic (ops): probe SPECIFIC titles and return, per title, the provider's
+  // get_vod_info DEFAULT-track language AND the full header-probe languages — to see
+  // whether a title's audio is detectable at all vs genuinely 'und' in the container.
+  const diagIds = Array.isArray((body as JsonRecord).titleIds)
+    ? ((body as JsonRecord).titleIds as unknown[]).filter((x): x is string => typeof x === "string" && /^[0-9a-f-]{36}$/i.test(x)).slice(0, 60)
+    : null;
+  if (diagIds && diagIds.length) {
+    const { data: dt } = await db.from("cloud_titles")
+      .select("id, title, default_variant_id, version_languages, audio_languages")
+      .eq("user_id", userId).in("id", diagIds);
+    const dvIds = (dt ?? []).map((t) => t.default_variant_id).filter(Boolean) as string[];
+    const dvById = new Map<string, JsonRecord>();
+    if (dvIds.length) {
+      const { data: dvs } = await db.from("cloud_title_variants").select("id, source_id, external_id, item_type").in("id", dvIds);
+      for (const v of dvs ?? []) dvById.set(String(v.id), v as JsonRecord);
+    }
+    const diag: JsonRecord[] = [];
+    for (const t of dt ?? []) {
+      const variant = t.default_variant_id ? dvById.get(String(t.default_variant_id)) : null;
+      if (!variant) { diag.push({ title: t.title, error: "no variant" }); continue; }
+      const sid = stringOr(variant.source_id, ""), ext = stringOr(variant.external_id, ""), vit = stringOr(variant.item_type, "movie");
+      const tgt = await resolvePlaybackTarget(sid, vit, ext, userId, db).catch(() => null);
+      const url = vit === "series" ? await resolveSeriesEpisodeUrl(sid, ext, userId, db).catch(() => null) : (tgt?.targetUrl ?? null);
+      if (!url) { diag.push({ title: t.title, error: "no target" }); continue; }
+      const payload = JSON.stringify({ v: 1, sid: "audio-diag", uid: userId, url, exp: Math.floor(Date.now() / 1000) + 120 });
+      const token = `${base64Url(encoder.encode(payload))}.${await hmacBase64Url(runtimeConfig.relayTokenSecret, payload)}`;
+      const vod = await fetch(`${runtimeConfig.relayBaseUrl}/vod-info/${token}`, { headers: { accept: "application/json" } }).then((r) => r.json()).catch(() => null);
+      const probe = await fetch(`${runtimeConfig.relayBaseUrl}/probe-audio/${token}`, { headers: { accept: "application/json" } }).then((r) => r.json()).catch(() => null);
+      const vodTracks = vod && Array.isArray(vod.audioTracks) ? (vod.audioTracks as JsonRecord[]).map((x) => stringOrNull(x.language)) : [];
+      diag.push({
+        title: String(t.title).slice(0, 50),
+        version_tags: t.version_languages,
+        vod_default_raw: vodTracks,
+        vod_default_norm: vodTracks.map((l) => normalizeIsoLang(l)).filter(Boolean),
+        probe_languages: probe && Array.isArray(probe.audioLanguages) ? probe.audioLanguages : [],
+      });
+    }
+    return { diagnostic: diag };
+  }
+
   let titlesQuery = db
     .from("cloud_titles")
     .select("id, default_variant_id, provider_tmdb_id")
@@ -1717,6 +1757,10 @@ async function runAudioBackfill(req: Request, db: SupabaseClient) {
   const probeRetryBefore = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString();
   titlesQuery = titlesQuery.or(`audio_probed_at.is.null,audio_probed_at.lt.${probeRetryBefore}`);
   if (requireTags.length) titlesQuery = titlesQuery.overlaps("version_languages", requireTags);
+  // untaggedOnly = titles with NO version tag (e.g. plain French films). These carry no
+  // language signal in the title, so they MUST be probed; ~60% expose a real default-track
+  // language via the cheap get_vod_info (mode=vod). Excluded from the tag-targeted crons.
+  if (body.untaggedOnly === true || stringOr(body.untaggedOnly, "") === "1") titlesQuery = titlesQuery.eq("version_languages", "{}");
   if (afterId) titlesQuery = titlesQuery.gt("id", afterId);
   titlesQuery = titlesQuery.order("id", { ascending: true }).limit(limit);
   const { data: titles, error } = await titlesQuery;
