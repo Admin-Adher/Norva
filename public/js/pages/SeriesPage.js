@@ -1822,6 +1822,9 @@ class SeriesPage {
         const playbackHint = MediaUtils.playbackHintFromItem
             ? MediaUtils.playbackHintFromItem(episode, { container, streamType: 'series' })
             : { container, streamType: 'series' };
+        // The played stream id is the EPISODE; pass the series id so the server can map
+        // back to this title's catalog row to reuse/persist the probed audio map.
+        if (this.currentSeries?.series_id) playbackHint.audioSeriesId = this.currentSeries.series_id;
         if (resumePlan.sessionStart > 0) {
             playbackHint.seekOffset = resumePlan.sessionStart;
             playbackHint.startOffset = resumePlan.sessionStart;

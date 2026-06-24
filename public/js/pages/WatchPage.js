@@ -994,6 +994,10 @@ class WatchPage {
         const hint = MediaUtils.playbackHintFromItem
             ? MediaUtils.playbackHintFromItem(item, base)
             : base;
+        // Series id so the server can map this episode to its catalog row (reuse/persist
+        // the probed audio map). The played stream id is the episode, not the series.
+        const seriesIdForAudio = content.seriesId || content.series_id;
+        if (streamType === 'series' && seriesIdForAudio) hint.audioSeriesId = seriesIdForAudio;
         const audioPreference = snapshot?.playback?.playbackPreferences?.audio
             || snapshot?.playbackPreferences?.audio
             || snapshot?.content?.playbackPreferences?.audio
@@ -1317,8 +1321,7 @@ class WatchPage {
             // Per-track audio languages the SERVER probed for this engine session
             // (the engine can't read them itself). Must be forwarded explicitly —
             // loadVideo gets a fresh options object, not the full playback metadata.
-            audioTracks: playbackMetadata.audioTracks || playbackMetadata.audio_tracks || null,
-            audioProbeDiag: playbackMetadata.audioProbeDiag
+            audioTracks: playbackMetadata.audioTracks || playbackMetadata.audio_tracks || null
         });
         if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
 
@@ -2272,9 +2275,7 @@ class WatchPage {
         const current = typeof engine.currentAudioIndex === 'function' ? engine.currentAudioIndex() : (idxs[0] ?? null);
         this.directAudioStreamIndex = current;
         if (!this.selectedAudioTrackUserChoice) this.selectedAudioStreamIndex = current;
-        console.log('[AudioDbg] 5. syncEngineAudioTracks | engine streams idxs =', JSON.stringify(idxs),
-            '| current =', current, '| _relayAudioTracks =', JSON.stringify(this._relayAudioTracks));
-        if (idxs.length < 2) { console.log('[AudioDbg] 5b. <2 engine audio streams -> single track, no menu'); return; }
+        if (idxs.length < 2) return;
         // Borrow languages from the relay probe (ordered, audio-relative). Try the
         // absolute stream index first; fall back to audio-relative POSITION so a
         // libav-vs-container index mismatch still resolves the right language.
@@ -2302,7 +2303,6 @@ class WatchPage {
             this.selectedAudioStreamIndex = tracks[0].index;
         }
         this.audioTracks = tracks;
-        console.log('[AudioDbg] 6. final menu tracks =', JSON.stringify(tracks.map((t) => ({ index: t.index, language: t.language, default: t.default }))));
         this.updateAudioTracks();
     }
 
@@ -2488,24 +2488,17 @@ class WatchPage {
             //     episode that's playing).
             //  2. Otherwise the precomputed/relay map on content (crawled titles).
             const sessionAudioTracks = Array.isArray(options.audioTracks) ? options.audioTracks : null;
-            console.log('[AudioDbg] 1. engine path | server options.audioTracks =', JSON.stringify(sessionAudioTracks),
-                '| server audioProbeDiag =', options.audioProbeDiag,
-                '| content.audioTracks =', JSON.stringify(this.content?.audioTracks || this.content?.audio_tracks || null));
             if (sessionAudioTracks && sessionAudioTracks.length) {
-                console.log('[AudioDbg] 2a. using SERVER-probed tracks (' + sessionAudioTracks.length + ')');
-                try { this.applyCloudMultiAudioTracks({ audioTracks: sessionAudioTracks }); } catch (e) { console.log('[AudioDbg] applyCloudMultiAudioTracks threw', e); }
+                try { this.applyCloudMultiAudioTracks({ audioTracks: sessionAudioTracks }); } catch (_) { /* best-effort */ }
             } else {
-                console.log('[AudioDbg] 2b. no server tracks -> enrichCloudPlaybackTracks(url) fallback; url=', String(url).slice(0, 80));
                 try { await this.enrichCloudPlaybackTracks(url); } catch (_) { /* best-effort */ }
             }
-            console.log('[AudioDbg] 3. after enrich | _relayAudioTracks =', JSON.stringify(this._relayAudioTracks));
             // Multi-audio files often default (file order) to an UNTAGGED track —
             // opening on it lands the user on a hidden "Audio N" entry. When the
             // relay probe shows ≥2 real languages and that default is untagged,
             // open straight on the user's language (fr → en → first named) so the
             // menu opens on a labelled track. null = keep the engine's own default.
             const preferredAudioIndex = this.preferredEngineAudioIndex();
-            console.log('[AudioDbg] 4. preferredEngineAudioIndex =', preferredAudioIndex);
             await this.playWithEngine(url, {
                 startTime: Number(options.startTime ?? options.seekOffset ?? this.resumeTime ?? 0) || 0,
                 playbackAttemptId,

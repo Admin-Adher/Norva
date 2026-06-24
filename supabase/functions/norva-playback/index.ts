@@ -289,33 +289,38 @@ async function createPlaybackSession(
     // 403s). The gateway does no transcode here — just a byte-range passthrough.
     if (body.enginePipe === true || body.engine_pipe === true) {
       const pipe = await createBytePipeAccess(session.id, userId, targetUrl, expiresAt, db, userAgent);
-      // Name the audio tracks for the in-browser engine: it streams the raw file via
-      // the gateway and can't read per-stream language tags, so the browser can't probe
-      // them. Probe the container via the relay here and return the ordered map. This is
-      // the only audio-track source for engine titles with no precomputed map (e.g. a
-      // series episode with no TMDB match). Best-effort — never blocks/breaks playback.
+      // Name the audio tracks for the in-browser engine: it streams the raw file via the
+      // gateway and can't read per-stream language tags, so the browser can't probe them.
+      //  - Reuse the title's precomputed map when present (no relay probe).
+      //  - Otherwise probe the container via the relay AND persist the map onto the title
+      //    row (so the catalog grid + the next play are instant, and the global cache is
+      //    fed). All best-effort — never blocks or breaks playback.
       let audioTracks: Array<{ index: number; lang: string | null }> = [];
-      let audioProbeDiag = "skip";
-      try {
-        const probed = await probeOrderedAudioTracks(db, userId, targetUrl);
-        audioTracks = probed.tracks;
-        audioProbeDiag = probed.diag;
-      } catch (e) { audioProbeDiag = `throw_${String(e && (e as Error).name || e).slice(0, 24)}`; }
-      // Version-independent diagnostic: record what the relay returned to a table we
-      // can read via SQL (server console.log isn't exposed, and the payload field keeps
-      // coming back undefined — likely edge-version propagation). Best-effort.
-      try {
-        let host = "";
-        try { host = new URL(targetUrl).host; } catch (_) { /* ignore */ }
-        await db.from("debug_engine_audio").insert({
-          code_version: "build57_dbg",
-          diag: audioProbeDiag,
-          n_tracks: audioTracks.length,
-          tracks: audioTracks,
-          target_host: host,
-        });
-      } catch (_) { /* best-effort */ }
-      return { session, playback: { mode: "relay", url: pipe.url, tokenExpiresAt: expiresAt, audioProbeDiag, ...(audioTracks.length ? { audioTracks } : {}) } };
+      const titleRow = await resolveEngineAudioTitleRow(db, userId, sourceId, itemType, itemId, requestedPlaybackHint)
+        .catch(() => null);
+      const precomputed = (titleRow && Array.isArray(titleRow.audio_tracks) ? titleRow.audio_tracks as JsonRecord[] : [])
+        .map((t) => ({ index: Number(t?.index), lang: stringOrNull(t?.lang) }))
+        .filter((t) => Number.isInteger(t.index));
+      if (precomputed.length) {
+        audioTracks = precomputed;
+      } else {
+        try { audioTracks = await probeOrderedAudioTracks(db, userId, targetUrl); } catch (_) { /* best-effort */ }
+        if (titleRow?.id && audioTracks.length) {
+          const codes = [...new Set(audioTracks.map((t) => t.lang).filter((l): l is string => Boolean(l)))].sort();
+          try {
+            await db.from("cloud_titles")
+              .update({ audio_tracks: audioTracks, audio_languages: codes, audio_probed_at: new Date().toISOString() })
+              .eq("user_id", userId).eq("id", titleRow.id);
+            const tmdbId = stringOrNull(titleRow.provider_tmdb_id);
+            if (tmdbId && !/^(tt)?0+$/i.test(tmdbId)) {
+              try {
+                await db.rpc("merge_catalog_title_audio", { p_item_type: itemType, p_provider_tmdb_id: tmdbId, p_codes: codes });
+              } catch (_) { /* best-effort global mirror */ }
+            }
+          } catch (_) { /* best-effort persist */ }
+        }
+      }
+      return { session, playback: { mode: "relay", url: pipe.url, tokenExpiresAt: expiresAt, ...(audioTracks.length ? { audioTracks } : {}) } };
     }
     const relay = await createRelayAccess(session.id, userId, targetUrl, expiresAt, db, userAgent);
     return { session, playback: { mode, url: relay.url, tokenExpiresAt: expiresAt } };
@@ -1740,31 +1745,64 @@ async function probeOrderedAudioTracks(
   db: SupabaseClient,
   userId: string,
   targetUrl: string,
-): Promise<{ tracks: Array<{ index: number; lang: string | null }>; diag: string }> {
+): Promise<Array<{ index: number; lang: string | null }>> {
   const runtimeConfig = await getRuntimeConfig(db);
-  if (!runtimeConfig.relayBaseUrl || !runtimeConfig.relayTokenSecret) return { tracks: [], diag: "noconfig" };
+  if (!runtimeConfig.relayBaseUrl || !runtimeConfig.relayTokenSecret) return [];
   const payload = JSON.stringify({ v: 1, sid: "engine-audio", uid: userId, url: targetUrl, exp: Math.floor(Date.now() / 1000) + 120 });
   const token = `${base64Url(encoder.encode(payload))}.${await hmacBase64Url(runtimeConfig.relayTokenSecret, payload)}`;
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 12000);
-  const t0 = Date.now();
+  const timer = setTimeout(() => ctrl.abort(), 8000);
   try {
     const res = await fetch(`${runtimeConfig.relayBaseUrl}/probe-audio/${token}`, { headers: { accept: "application/json" }, signal: ctrl.signal });
-    const ms = Date.now() - t0;
-    if (!res.ok) return { tracks: [], diag: `http${res.status}_${ms}ms` };
+    if (!res.ok) return [];
     const info = await res.json().catch(() => null) as JsonRecord | null;
     const raw = info && Array.isArray(info.audioTracks) ? info.audioTracks as JsonRecord[] : [];
-    const ordered = raw
+    return raw
       .map((t) => ({ index: Number(t?.index), lang: normalizeIsoLang(stringOrNull(t?.lang ?? t?.language)) }))
       .filter((t) => Number.isInteger(t.index));
-    // diag is surfaced to the client console (no URL/creds): rawN, the langs the relay
-    // returned, and the probe time — so a "still Audio N" report is fully diagnosable.
-    return { tracks: ordered, diag: `ok_raw${raw.length}_langs[${ordered.map((t) => t.lang ?? "null").join(",")}]_${ms}ms` };
-  } catch (e) {
-    return { tracks: [], diag: `err_${String(e && (e as Error).name || e).slice(0, 24)}_${Date.now() - t0}ms` };
+  } catch (_) {
+    return [];
   } finally {
     clearTimeout(timer);
   }
+}
+
+// Map an engine playback (source + item) to its cloud_titles row, so a probed audio
+// map can be reused (skip the relay probe) and persisted (grid + next play instant).
+// Movies map by the variant's external_id (= the played stream id). A series episode's
+// stream id is the EPISODE, not the series, so the client passes the series id in the
+// hint (audioSeriesId). Returns null when it can't resolve a row (then we just probe).
+async function resolveEngineAudioTitleRow(
+  db: SupabaseClient,
+  userId: string,
+  sourceId: string | null,
+  itemType: string,
+  itemId: string,
+  hint: JsonRecord,
+): Promise<{ id: string; audio_tracks: unknown; provider_tmdb_id: string | null } | null> {
+  if (!sourceId) return null;
+  const externalId = itemType === "series"
+    ? stringOr(hint.audioSeriesId ?? hint.audio_series_id ?? hint.seriesId ?? hint.series_id, "")
+    : itemId;
+  if (!externalId) return null;
+  const { data: variant } = await db
+    .from("cloud_title_variants")
+    .select("title_id")
+    .eq("user_id", userId)
+    .eq("source_id", sourceId)
+    .eq("item_type", itemType)
+    .eq("external_id", externalId)
+    .limit(1)
+    .maybeSingle();
+  const titleId = variant ? stringOrNull((variant as JsonRecord).title_id) : null;
+  if (!titleId) return null;
+  const { data: row } = await db
+    .from("cloud_titles")
+    .select("id, audio_tracks, provider_tmdb_id")
+    .eq("user_id", userId)
+    .eq("id", titleId)
+    .maybeSingle();
+  return row ? (row as { id: string; audio_tracks: unknown; provider_tmdb_id: string | null }) : null;
 }
 
 // Service-gated maintenance backfill of cloud_titles.audio_languages via the
