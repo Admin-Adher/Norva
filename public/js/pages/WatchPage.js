@@ -2276,12 +2276,61 @@ class WatchPage {
             .filter((t) => Number.isInteger(t.index) && t.lang && t.lang !== 'und')
             .map((t) => [t.index, t.lang]));
         const posLang = (k) => (relay[k] && relay[k].lang && relay[k].lang !== 'und' ? relay[k].lang : null);
-        this.audioTracks = idxs.map((i, k) => ({
+        let tracks = idxs.map((i, k) => ({
             index: i,
             language: langByIdx.get(i) || posLang(k),
             default: i === current,
         }));
+        // Hide untagged "Audio N" tracks once we have ≥2 real, named languages: a
+        // multi-audio file's filler streams (an untagged default + a trailing
+        // cover-art-derived track) would otherwise clutter the menu. Keep every
+        // track when fewer than 2 are named so the menu is never left blank.
+        const named = tracks.filter((t) => t.language);
+        if (named.length >= 2) tracks = named;
+        // If the engine opened on a now-hidden untagged stream (so no visible
+        // track is flagged default) and the user hasn't chosen, snap the
+        // selection onto the first real track so the menu shows an active row.
+        if (tracks.length && !tracks.some((t) => t.default) && !this.selectedAudioTrackUserChoice) {
+            tracks[0].default = true;
+            this.selectedAudioStreamIndex = tracks[0].index;
+        }
+        this.audioTracks = tracks;
         this.updateAudioTracks();
+    }
+
+    // Browser/OS locale as a 2-letter code (fr-FR -> fr) — a zero-cost signal for
+    // "the user's language" used to pick a sensible default audio track. Returns
+    // '' when it can't be resolved to a clean ISO-639-1 code.
+    preferredAudioLanguageCode() {
+        try {
+            const nav = (navigator.language || (navigator.languages && navigator.languages[0]) || '').toLowerCase();
+            const code = this.normalizeTrackLanguage(nav.split('-')[0]);
+            return /^[a-z]{2}$/.test(code) ? code : '';
+        } catch (_) {
+            return '';
+        }
+    }
+
+    // Stream index the engine should open on for a multi-audio file, or null to
+    // keep the engine's own (file-order) default. Only overrides when: there's no
+    // saved/explicit audio choice to honour, the relay probe shows ≥2 real
+    // languages, AND the file's own default (lowest-index audio stream) is
+    // UNTAGGED — i.e. it would otherwise open on a hidden "Audio N" track. Picks
+    // the user's language → en → first named.
+    preferredEngineAudioIndex() {
+        if (this.selectedAudioTrackUserChoice) return null;
+        if (this.pendingPlaybackPreferences?.audio && !this._pendingAudioPreferenceApplied) return null;
+        const relay = (Array.isArray(this._relayAudioTracks) ? this._relayAudioTracks : [])
+            .filter((t) => Number.isInteger(t.index));
+        const named = relay.filter((t) => t.lang && t.lang !== 'und');
+        if (named.length < 2) return null;
+        const naturalDefault = relay.slice().sort((a, b) => a.index - b.index)[0];
+        if (naturalDefault && naturalDefault.lang && naturalDefault.lang !== 'und') return null;
+        const want = this.preferredAudioLanguageCode();
+        const pick = (want && named.find((t) => t.lang === want))
+            || named.find((t) => t.lang === 'en')
+            || named[0];
+        return Number.isInteger(pick?.index) ? pick.index : null;
     }
 
     // Switch audio in the in-browser engine: re-load on the chosen stream at the
@@ -2418,9 +2467,16 @@ class WatchPage {
             // compete for the provider's single connection and the probe loses,
             // leaving the menu with unnamed "Audio N" tracks.
             try { await this.enrichCloudPlaybackTracks(url); } catch (_) { /* best-effort */ }
+            // Multi-audio files often default (file order) to an UNTAGGED track —
+            // opening on it lands the user on a hidden "Audio N" entry. When the
+            // relay probe shows ≥2 real languages and that default is untagged,
+            // open straight on the user's language (fr → en → first named) so the
+            // menu opens on a labelled track. null = keep the engine's own default.
+            const preferredAudioIndex = this.preferredEngineAudioIndex();
             await this.playWithEngine(url, {
                 startTime: Number(options.startTime ?? options.seekOffset ?? this.resumeTime ?? 0) || 0,
-                playbackAttemptId
+                playbackAttemptId,
+                audioStreamIndex: preferredAudioIndex
             });
             return;
         }
