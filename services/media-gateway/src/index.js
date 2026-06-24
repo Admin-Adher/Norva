@@ -53,7 +53,7 @@ const RAW_PROVIDER_RETRY_DELAYS_MS = [400, 1000, 2000, 3000, 4000, 5000, 6000, 8
 const FFMPEG_USER_AGENT = process.env.FFMPEG_USER_AGENT ||
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36 Norva/1.0';
 const MAX_LOG_TAIL = 12000;
-const GATEWAY_VERSION = 42;
+const GATEWAY_VERSION = 43;
 // Browser playback fetches HLS playlists/segments cross-origin, so these must
 // list every Norva web origin or the browser blocks the response (CORS). Keep
 // in sync with the relay's ALLOWED_ORIGINS (services/norva-relay/wrangler.jsonc).
@@ -155,6 +155,37 @@ app.post('/xtream/epg', requireGatewayAuth, async (req, res) => {
             action: normalizedAction,
             streamId,
             limit: normalizedAction === 'get_short_epg' ? limit : ''
+        });
+        const payload = await fetchProviderJson(url, sanitizeUserAgent(userAgent) || FFMPEG_USER_AGENT);
+        res.json(payload);
+    } catch (err) {
+        const status = Number.isInteger(err.status) ? err.status : 502;
+        res.status(status).json({
+            error: err.publicMessage || 'IPTV provider request failed',
+            details: err.details || undefined
+        });
+    }
+});
+
+// Xtream series metadata (get_series_info), proxied through the gateway so it
+// reaches the provider from the SAME IP as streaming. Fetched directly from the
+// Supabase edge runtime, series-info egresses a *different* (and provider-
+// blocked) datacenter IP for the same account — the provider then sees one
+// account "connected" from several IPs at once and trips its user_multi_ip
+// anti-account-sharing block (429). Routing it here collapses metadata + video
+// onto one provider-facing IP. Mirrors /xtream/epg.
+app.post('/xtream/series-info', requireGatewayAuth, async (req, res) => {
+    try {
+        const { serverUrl, username, password, seriesId, userAgent } = req.body || {};
+        if (!serverUrl || !isHttpUrl(serverUrl) || !username || !password || !seriesId) {
+            return res.status(400).json({ error: 'serverUrl, username, password and seriesId are required' });
+        }
+        const url = xtreamPlayerApiUrl({
+            serverUrl,
+            username,
+            password,
+            action: 'get_series_info',
+            params: { series_id: seriesId }
         });
         const payload = await fetchProviderJson(url, sanitizeUserAgent(userAgent) || FFMPEG_USER_AGENT);
         res.json(payload);
@@ -1348,13 +1379,23 @@ function isHttpUrl(value) {
     }
 }
 
-function xtreamPlayerApiUrl({ serverUrl, username, password, action, streamId, limit }) {
+function xtreamPlayerApiUrl({ serverUrl, username, password, action, streamId, limit, params }) {
     const url = new URL(`${String(serverUrl).replace(/\/+$/, '')}/player_api.php`);
     url.searchParams.set('username', String(username));
     url.searchParams.set('password', String(password));
     url.searchParams.set('action', action);
-    url.searchParams.set('stream_id', String(streamId));
+    if (streamId !== undefined && streamId !== null && String(streamId) !== '') {
+        url.searchParams.set('stream_id', String(streamId));
+    }
     if (limit) url.searchParams.set('limit', String(limit));
+    // Action-specific params (e.g. series_id for get_series_info, vod_id for
+    // get_vod_info). Only the caller's whitelisted keys reach the provider.
+    if (params && typeof params === 'object') {
+        for (const [key, value] of Object.entries(params)) {
+            if (value === undefined || value === null || String(value) === '') continue;
+            url.searchParams.set(key, String(value));
+        }
+    }
     return url.href;
 }
 

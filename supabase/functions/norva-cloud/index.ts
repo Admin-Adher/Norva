@@ -1961,6 +1961,24 @@ async function getXtreamSeriesInfo(url: URL, sourceId: string, userId: string, d
     throw new HttpError(400, "Series details require an Xtream source");
   }
 
+  // Route through the media gateway so series-info reaches the provider from the
+  // SAME IP as streaming. A direct fetch from this Supabase edge runtime egresses
+  // a different (provider-blocked) datacenter IP for the same account → the
+  // provider's user_multi_ip anti-sharing block (429). Fall back to a direct
+  // fetch only on gateway-side failures (missing route / unreachable / timeout).
+  const runtimeConfig = await getRuntimeConfig(db);
+  if (runtimeConfig.mediaGatewayUrl && runtimeConfig.mediaGatewayToken) {
+    try {
+      return recordOrEmpty(
+        await requestGatewaySeriesInfo(runtimeConfig, { serverUrl, username, password, seriesId }),
+      );
+    } catch (error) {
+      const status = error instanceof HttpError ? error.status : 502;
+      if (![404, 405, 502, 503, 504].includes(status)) throw error;
+      console.warn("[norva-cloud] gateway series-info unavailable, falling back to direct", status);
+    }
+  }
+
   const info = recordOrEmpty(await fetchJson(
     xtreamApiUrl({ serverUrl, username, password, action: "get_series_info" }, { series_id: seriesId }),
     20000,
@@ -3156,6 +3174,29 @@ async function requestGatewayXtreamEpg(
   const payload = await response.json().catch(() => ({}));
   if (!response || !response.ok) {
     throw new HttpError(response.status, "Media gateway refused the EPG request", payload);
+  }
+  return recordOrEmpty(payload);
+}
+
+async function requestGatewaySeriesInfo(
+  runtimeConfig: RuntimeConfig,
+  body: { serverUrl: string; username: string; password: string; seriesId: string },
+) {
+  if (!runtimeConfig.mediaGatewayUrl || !runtimeConfig.mediaGatewayToken) {
+    throw new HttpError(503, "Norva Media Gateway is not configured");
+  }
+
+  const response = await fetch(`${runtimeConfig.mediaGatewayUrl}/xtream/series-info`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${runtimeConfig.mediaGatewayToken}`,
+    },
+    body: JSON.stringify({ ...body, userAgent: "VLC/3.0.20 LibVLC/3.0.20" }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response || !response.ok) {
+    throw new HttpError(response.status, "Media gateway refused the series-info request", payload);
   }
   return recordOrEmpty(payload);
 }

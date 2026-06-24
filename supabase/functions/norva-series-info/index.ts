@@ -2,7 +2,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 
 type JsonRecord = Record<string, unknown>;
-type RuntimeConfig = { sourceConfigKey: string };
+type RuntimeConfig = { sourceConfigKey: string; mediaGatewayUrl: string; mediaGatewayToken: string };
 type CloudIdentity = { userId: string; deviceId?: string };
 
 class HttpError extends Error {
@@ -31,6 +31,8 @@ const SUPABASE_SERVICE_KEY =
   Deno.env.get("SUPABASE_SECRET_KEY") ??
   "";
 const ENV_SOURCE_CONFIG_KEY = Deno.env.get("NORVA_SOURCE_CONFIG_KEY") ?? "";
+const ENV_MEDIA_GATEWAY_URL = (Deno.env.get("NORVA_MEDIA_GATEWAY_URL") ?? "").replace(/\/+$/, "");
+const ENV_MEDIA_GATEWAY_TOKEN = Deno.env.get("NORVA_MEDIA_GATEWAY_TOKEN") ?? "";
 
 if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
   throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
@@ -100,10 +102,62 @@ async function getXtreamSeriesInfo(url: URL, sourceId: string, userId: string, d
     throw new HttpError(400, "Series details require a managed Xtream source");
   }
 
+  // Route through the media gateway so series-info reaches the provider from the
+  // SAME IP as video streaming. A direct fetch from this Supabase edge runtime
+  // egresses a different (and provider-blocked) datacenter IP for the same
+  // account, which trips the provider's user_multi_ip anti-sharing block (429).
+  // Fall back to a direct fetch only when the gateway is unconfigured or too old
+  // to know this route (404/405/503) — never worse than the previous behaviour.
+  const runtimeConfig = await getRuntimeConfig(db);
+  if (runtimeConfig.mediaGatewayUrl && runtimeConfig.mediaGatewayToken) {
+    try {
+      return recordOrEmpty(
+        await requestGatewaySeriesInfo(runtimeConfig, { serverUrl, username, password, seriesId }),
+      );
+    } catch (error) {
+      // Fall back only when the GATEWAY itself is the problem (missing route /
+      // unreachable / timeout). Provider-origin errors (401/403/429) won't improve
+      // via a direct Supabase fetch from a blocked IP — surface those instead.
+      const status = error instanceof HttpError ? error.status : 502;
+      if (![404, 405, 502, 503, 504].includes(status)) throw error;
+      console.warn("[norva-series-info] gateway series-info unavailable, falling back to direct", status);
+    }
+  }
+
   return recordOrEmpty(await fetchJson(
     xtreamApiUrl({ serverUrl, username, password, action: "get_series_info" }, { series_id: seriesId }),
     20000,
   ));
+}
+
+async function requestGatewaySeriesInfo(
+  runtimeConfig: RuntimeConfig,
+  body: { serverUrl: string; username: string; password: string; seriesId: string },
+): Promise<JsonRecord> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 20000);
+  try {
+    const response = await fetch(`${runtimeConfig.mediaGatewayUrl}/xtream/series-info`, {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${runtimeConfig.mediaGatewayToken}`,
+      },
+      body: JSON.stringify({ ...body, userAgent: "VLC/3.0.20 LibVLC/3.0.20" }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new HttpError(response.status, "Media gateway refused the series-info request", payload);
+    }
+    return recordOrEmpty(payload);
+  } catch (error) {
+    if (error instanceof HttpError) throw error;
+    const aborted = error instanceof Error && error.name === "AbortError";
+    throw new HttpError(aborted ? 504 : 502, "Unable to reach media gateway", error instanceof Error ? error.message : undefined);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function loadSourceConfig(sourceId: string, userId: string, db: SupabaseClient) {
@@ -122,16 +176,22 @@ async function loadSourceConfig(sourceId: string, userId: string, db: SupabaseCl
 async function getRuntimeConfig(db: SupabaseClient): Promise<RuntimeConfig> {
   if (runtimeConfigCache && runtimeConfigCache.expiresAt > Date.now()) return runtimeConfigCache.value;
   let sourceConfigKey = ENV_SOURCE_CONFIG_KEY;
-  if (!sourceConfigKey) {
+  let mediaGatewayUrl = ENV_MEDIA_GATEWAY_URL;
+  let mediaGatewayToken = ENV_MEDIA_GATEWAY_TOKEN;
+  if (!sourceConfigKey || !mediaGatewayUrl || !mediaGatewayToken) {
     const { data, error } = await db
       .from("cloud_runtime_config")
-      .select("value")
-      .eq("key", "NORVA_SOURCE_CONFIG_KEY")
-      .maybeSingle();
+      .select("key, value")
+      .in("key", ["NORVA_SOURCE_CONFIG_KEY", "NORVA_MEDIA_GATEWAY_URL", "NORVA_MEDIA_GATEWAY_TOKEN"]);
     if (error) console.warn("[norva-series-info] runtime config unavailable", error.message);
-    if (typeof data?.value === "string") sourceConfigKey = data.value;
+    for (const item of data ?? []) {
+      if (typeof item.value !== "string" || !item.value) continue;
+      if (item.key === "NORVA_SOURCE_CONFIG_KEY" && !sourceConfigKey) sourceConfigKey = item.value;
+      else if (item.key === "NORVA_MEDIA_GATEWAY_URL" && !mediaGatewayUrl) mediaGatewayUrl = item.value.replace(/\/+$/, "");
+      else if (item.key === "NORVA_MEDIA_GATEWAY_TOKEN" && !mediaGatewayToken) mediaGatewayToken = item.value;
+    }
   }
-  const value = { sourceConfigKey };
+  const value = { sourceConfigKey, mediaGatewayUrl, mediaGatewayToken };
   runtimeConfigCache = { value, expiresAt: Date.now() + 30_000 };
   return value;
 }
