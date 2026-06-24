@@ -135,6 +135,9 @@ Deno.serve(async (req) => {
     if (req.method === "POST" && segments[0] === "audio-backfill") {
       return json(req, await runAudioBackfill(req, supabase));
     }
+    if (req.method === "POST" && segments[0] === "catalog-mirror-verify") {
+      return json(req, await runCatalogMirrorVerify(req, supabase));
+    }
     throw new HttpError(404, "Route not found");
   } catch (error) {
     const status = error instanceof HttpError ? error.status : 500;
@@ -1759,6 +1762,32 @@ async function runAudioBackfill(req: Request, db: SupabaseClient) {
   }
 
   return { processed: titles.length, updated, diag, ...(debug ? { sample } : {}), lastId, hasMore: titles.length === limit };
+}
+
+// Read-cutover trust artifact (docs/roadmap/global-title-cache-design.md): prove
+// catalog_titles is a faithful mirror of the per-user title metadata BEFORE the
+// global-read flip is ever enabled. Read-only; service-role gated like the backfill.
+// `clean` is the gate — flipping NORVA_CATALOG_READ_SOURCE to catalog_titles is only
+// safe when this stays true across a window.
+async function runCatalogMirrorVerify(req: Request, db: SupabaseClient) {
+  const expected = Deno.env.get("NORVA_BACKFILL_TOKEN") ?? "";
+  const provided = req.headers.get("Authorization")?.match(/^Bearer\s+(.+)$/i)?.[1] ?? "";
+  if (!expected || provided !== expected) throw new HttpError(401, "Unauthorized");
+  let itemType: string | null = null;
+  try {
+    const b = await req.json();
+    if (b?.type === "movie" || b?.type === "series") itemType = b.type;
+  } catch (_) { /* optional body */ }
+  const { data, error } = await db.rpc("catalog_mirror_diff", { p_item_type: itemType });
+  if (error) throw new HttpError(500, `catalog_mirror_diff failed: ${error.message}`);
+  const row = (Array.isArray(data) ? data[0] : data) as JsonRecord | null;
+  const n = (k: string) => Number((row?.[k] as number | undefined) ?? -1);
+  const clean = !!row &&
+    n("title_mismatch") === 0 && n("original_title_mismatch") === 0 &&
+    n("release_year_mismatch") === 0 && n("poster_url_mismatch") === 0 &&
+    n("backdrop_url_mismatch") === 0 && n("i18n_mismatch") === 0 &&
+    n("tmdb_mismatch") === 0 && n("cloud_only") === 0;
+  return { ok: true, clean, diff: row };
 }
 
 function xtreamStreamUrl(config: {
