@@ -2504,6 +2504,10 @@ class WatchPage {
                 playbackAttemptId,
                 audioStreamIndex: preferredAudioIndex
             });
+            // Subtitles: the engine demuxes them but can't render them. If the file
+            // carries subtitle streams, ask the gateway to enumerate them (language +
+            // codec) so the CC menu lists them; extraction happens on selection.
+            this.enrichEngineSubtitleTracks();
             return;
         }
 
@@ -5281,6 +5285,50 @@ class WatchPage {
         return added;
     }
 
+    // Gateway subtitle endpoint base for the engine (byte-pipe) path: the playback URL
+    // is https://host/raw/<token>, and the same token authorizes https://host/subtitle/<token>.
+    engineSubtitleBaseUrl() {
+        const url = this.baseStreamUrl || this.currentUrl;
+        const m = /^(https?:\/\/[^/]+)\/raw\/(.+)$/.exec(String(url || ''));
+        return m ? `${m[1]}/subtitle/${m[2]}` : '';
+    }
+
+    // Engine path: the engine demuxes subtitle streams but can't render them. Ask the
+    // gateway (it has ffmpeg/ffprobe) to enumerate the container's subtitle tracks
+    // (index, language, codec) so the CC menu lists them. Extraction is on selection.
+    // Best-effort + non-blocking; no-op when the file has no subtitle streams.
+    async enrichEngineSubtitleTracks() {
+        try {
+            const engine = this.norvaEngine;
+            if (!engine || typeof engine.subtitleStreams !== 'function') return;
+            if (!engine.subtitleStreams().length) return; // nothing to label
+            const base = this.engineSubtitleBaseUrl();
+            if (!base) return;
+            const attempt = this._playbackAttemptId;
+            const data = await fetch(base, { cache: 'no-store' })
+                .then((r) => (r.ok ? r.json() : null)).catch(() => null);
+            if (!data || this.isStalePlaybackAttempt(attempt)) return;
+            const tracks = (Array.isArray(data.subtitles) ? data.subtitles : [])
+                .filter((s) => Number.isInteger(Number(s.index)))
+                .map((s) => ({
+                    index: Number(s.index),
+                    language: s.language || null,
+                    title: s.title || null,
+                    codec: s.codec || null,
+                    subtitleType: s.subtitleType || (s.extractable ? 'text' : 'image'),
+                    extractable: s.extractable === true,
+                    forced: s.forced === true,
+                    default: s.default === true,
+                }));
+            if (!tracks.length) return;
+            this.subtitleTracks = tracks;
+            // Windowed extraction reads from the engine /raw URL → gateway /subtitle.
+            this.subtitleSourceUrl = this.baseStreamUrl || this.currentUrl;
+            this.subtitleStartOffset = 0;
+            this.updateCaptionsTracks();
+        } catch (_) { /* best-effort */ }
+    }
+
     /**
      * Session mode: poll the growing in-process .vtt for new cues.
      */
@@ -5363,15 +5411,26 @@ class WatchPage {
             : Math.min(engine.coveredStartLocal, windowStartLocal);
         const absStart = (this.normalizeDuration(this.subtitleStartOffset) || 0) + windowStartLocal;
 
-        const params = new URLSearchParams({
-            url: engine.sourceUrl,
-            index: String(engine.streamIndex),
-            codec: String(engine.codec || ''),
-            duration: String(WINDOW)
-        });
-        if (absStart > 0) params.set('start', String(absStart));
+        // Engine path → the gateway /subtitle endpoint (same token as /raw); other
+        // paths → the local /api/subtitle extractor. Both take index/start and window
+        // duration and return rebased WebVTT, so the cue handling below is identical.
+        let extractUrl;
+        if (engine.gatewayWindowBase) {
+            const gp = new URLSearchParams({ index: String(engine.streamIndex), dur: String(WINDOW) });
+            if (absStart > 0) gp.set('start', String(absStart));
+            extractUrl = `${engine.gatewayWindowBase}?${gp.toString()}`;
+        } else {
+            const params = new URLSearchParams({
+                url: engine.sourceUrl,
+                index: String(engine.streamIndex),
+                codec: String(engine.codec || ''),
+                duration: String(WINDOW)
+            });
+            if (absStart > 0) params.set('start', String(absStart));
+            extractUrl = `/api/subtitle?${params.toString()}`;
+        }
 
-        const added = await this.fetchSubtitleCues(engine, `/api/subtitle?${params.toString()}`, windowStartLocal ? windowStartLocal : 0);
+        const added = await this.fetchSubtitleCues(engine, extractUrl, windowStartLocal ? windowStartLocal : 0);
         if (engine === this._subEngine && added >= 0) {
             engine.windowEndLocal = windowStartLocal + WINDOW;
             this.updateCaptionsTracks();
@@ -5406,6 +5465,9 @@ class WatchPage {
         const gatewaySubtitleUrl = this.currentPlaybackMode === 'gateway-session'
             ? this.gatewaySubtitleUrlForTrack(selected.index)
             : '';
+        // Engine (byte-pipe) path: windowed extraction, but from the gateway /subtitle
+        // endpoint instead of the local /api/subtitle (which doesn't exist on the cloud).
+        const gatewayWindowBase = this.currentPlaybackMode === 'engine' ? this.engineSubtitleBaseUrl() : '';
         const isSessionMode = isLocalSessionMode || Boolean(gatewaySubtitleUrl);
         const engine = {
             trackEl,
@@ -5417,6 +5479,7 @@ class WatchPage {
             mode: isLocalSessionMode ? 'session' : (gatewaySubtitleUrl ? 'gateway-session' : 'window'),
             sessionId: this.currentSessionId,
             gatewaySubtitleUrl,
+            gatewayWindowBase,
             sourceUrl: this.subtitleSourceUrl || this.baseStreamUrl || this.currentUrl,
             failures: 0
         };
