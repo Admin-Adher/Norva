@@ -30,7 +30,7 @@
 |---|---|---|
 | **Lecture / relais** | ✅ déjà | Cloudflare edge (**zéro egress**), socket TCP pour nœuds IP-brute, cache hint socket, cache `get_vod_info` 24h |
 | **Métadonnées titres** | ⚠️ per-user | `catalog_titles` (cache global) : fondation + dual-write + backfill + **read derrière flag OFF** + harnais de vérif |
-| **Langues audio** | ⚠️ per-user | `audio_languages` dans le cache global (RPC union race-safe) + **catalog-first fill** (sonde 1× pour tous) |
+| **Langues audio** | ⚠️ per-user (lu) · ✅ partagé | `audio_languages` dans le cache global (RPC union) + **catalog-first fill AUTO à l'onboarding** → un nouvel user hérite des langues déjà connues, 0 appel fournisseur |
 | **Menus / facettes** | ✅ caché | Memo LRU 60 s sur les 25 count-queries/appel |
 | **Crawl audio** | ✅ | Progression (`audio_probed_at`) + cron gentil (respecte le rate-limit fournisseur) |
 | **Observabilité** | ✅ émis | Logs `norva-relay-upstream-error` + webhook optionnel + `/provider-playback-check` |
@@ -57,11 +57,13 @@ where provider_tmdb_id is not null and provider_tmdb_id <> '' and provider_tmdb_
 `overlap` ≫ 1 (typiquement 10-100 pour des users d'un même pays) → le cache global vaut le
 coup. **Aujourd'hui = `1.00` (1 user) → ne rien basculer.**
 
-### 2. Brancher le *catalog-fill* à l'onboarding (≈ 1 ligne) — dès 2 users
-À la fin du sync d'un nouvel user, appeler `fill_user_audio_from_catalog` (ou la route
-`mode=catalog`) → il **hérite instantanément** des langues déjà sondées par les autres,
-**sans toucher le fournisseur**. C'est le gain le plus immédiat **et** la protection n°1
-contre le rate-limit fournisseur (on ne re-sonde jamais un fichier déjà connu).
+### 2. ✅ Catalog-fill à l'onboarding — FAIT (automatique)
+La projection de sync (`_shared/vod-title-projection.ts`) appelle `fill_user_audio_for_titles`
+sur chaque batch de titres → un nouvel user **hérite instantanément** des langues déjà
+sondées par les autres users du même fournisseur, **sans toucher le fournisseur**. Aucune
+action requise : dès qu'un fournisseur est couvert, le user suivant démarre rempli. (C'est
+aussi la protection n°1 contre le rate-limit : un fichier déjà connu n'est jamais re-sondé.)
+Le 2-3 jours de découverte n'est donc payé **qu'une fois** par catalogue de fournisseur.
 
 ### 3. Basculer la lecture du cache global (le gros levier ÷10-100)
 Quand `overlap` ≫ 1 :

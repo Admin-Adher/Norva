@@ -73,11 +73,14 @@ pas de recoupement multi-users, et c'est le changement le plus risqué du systè
 - **Crawl audio scale** : (a) **progression** `cloud_titles.audio_probed_at` → le crawl
   avance au lieu de re-sonder le même front ; (b) **catalog-first fill** `mode=catalog` +
   `fill_user_audio_from_catalog()` → remplit un user depuis le cache global **sans appel
-  fournisseur** (dedup : sonder 1× pour tous). Migration `…030000`.
+  fournisseur** (dedup : sonder 1× pour tous). **Branché AUTO à l'onboarding** : la
+  projection appelle `fill_user_audio_for_titles` par batch → un nouvel user d'un fournisseur
+  déjà couvert **démarre rempli** (le « 2-3 j » de découverte n'est payé qu'1× par
+  fournisseur). Migrations `…030000`, `…040000`.
 - **Périmètre du crawl** : `requireTag` accepte une **liste** (OR via `overlaps`). 2 crons
-  pg_cron : **films** (`norva-audio-langs`, `*/8`) sur `multi,vostfr,vo,vff,vfq` (rendement
-  vostfr/vo ~80 % — l'audio original/JP des animés-films) + **séries**
-  (`norva-audio-langs-series`, `4-59/8`) via `resolveSeriesEpisodeUrl` (get_series_info →
+  pg_cron : **films** (`norva-audio-langs`, `*/5`, limit 15) sur `multi,vostfr,vo,vff,vfq`
+  (rendement vostfr/vo ~80 % — l'audio original/JP des animés-films) + **séries**
+  (`norva-audio-langs-series`, `2-59/5`, limit 12) via `resolveSeriesEpisodeUrl` (get_series_info →
   1er épisode du 1er season, ~70 % rendement — un id de série seul renvoie 406). → l'audio
   japonais des animés (films **et** séries) remonte dans le filtre au fil du crawl.
 - ⚠️ **Rien ne lit `catalog_titles` en prod** (flag OFF) → **zéro impact**, additif, réversible.

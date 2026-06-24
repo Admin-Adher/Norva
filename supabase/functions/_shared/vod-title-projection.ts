@@ -213,6 +213,7 @@ export async function refreshVodTitleProjection(options: ProjectionOptions) {
   // union). Ownership split — projection owns title/poster/i18n; crawl+capture own audio.
   // Including it in this bulk upsert (even as []) would clobber crawled values, since the
   // upsert REPLACES every column it lists. Leave it out and PostgREST preserves it.
+  const catalogTmdbIds: string[] = [];
   try {
     const catalogRows: JsonRecord[] = [];
     const seenCatalog = new Set<string>();
@@ -222,6 +223,7 @@ export async function refreshVodTitleProjection(options: ProjectionOptions) {
       const catalogKey = `${titleRow.item_type}:${tmdbId}`;
       if (seenCatalog.has(catalogKey)) continue;
       seenCatalog.add(catalogKey);
+      catalogTmdbIds.push(tmdbId);
       catalogRows.push({
         item_type: titleRow.item_type,
         provider_tmdb_id: tmdbId,
@@ -243,6 +245,18 @@ export async function refreshVodTitleProjection(options: ProjectionOptions) {
     }
   } catch (error) {
     console.warn("[vod-title-projection] catalog_titles dual-write skipped:", error instanceof Error ? error.message : error);
+  }
+
+  // Catalog-first fill (scale): inherit already-known audio languages from the global
+  // cache for the just-projected titles — NO provider hit. A new user of a provider that
+  // another user already crawled gets languages INSTANTLY instead of waiting ~days for the
+  // crawl. Scoped to this batch's tmdb ids so the sync stays fast. Best-effort.
+  if (catalogTmdbIds.length) {
+    try {
+      await options.db.rpc("fill_user_audio_for_titles", { p_user_id: options.userId, p_tmdb_ids: catalogTmdbIds });
+    } catch (error) {
+      console.warn("[vod-title-projection] catalog audio fill skipped:", error instanceof Error ? error.message : error);
+    }
   }
 
   // Push the resolved release_year onto the grid rows (cloud_media_items) so the
