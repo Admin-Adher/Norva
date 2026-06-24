@@ -2471,11 +2471,20 @@ class WatchPage {
         // container and transcodes non-browser audio to AAC client-side. No
         // gateway/transcode server. Resume seeks straight to the saved offset.
         if (options.mode === 'engine' && typeof window !== 'undefined' && window.NorvaEngine) {
-            // Probe the per-track languages FIRST (awaited) so the header fetch
-            // completes before the engine opens the stream — otherwise the two
-            // compete for the provider's single connection and the probe loses,
-            // leaving the menu with unnamed "Audio N" tracks.
-            try { await this.enrichCloudPlaybackTracks(url, { forceProbe: true }); } catch (_) { /* best-effort */ }
+            // Name the per-track languages BEFORE the engine opens (the engine can't
+            // read stream-language tags itself). Two sources, in order:
+            //  1. audioTracks returned with the cloud session — the SERVER probed the
+            //     actual file via the relay. This is the only source for engine titles
+            //     with no precomputed map (the engine streams via the media gateway, so
+            //     the browser can't probe them). Most accurate for series (the exact
+            //     episode that's playing).
+            //  2. Otherwise the precomputed/relay map on content (crawled titles).
+            const sessionAudioTracks = Array.isArray(options.audioTracks) ? options.audioTracks : null;
+            if (sessionAudioTracks && sessionAudioTracks.length) {
+                try { this.applyCloudMultiAudioTracks({ audioTracks: sessionAudioTracks }); } catch (_) { /* best-effort */ }
+            } else {
+                try { await this.enrichCloudPlaybackTracks(url); } catch (_) { /* best-effort */ }
+            }
             // Multi-audio files often default (file order) to an UNTAGGED track —
             // opening on it lands the user on a hidden "Audio N" entry. When the
             // relay probe shows ≥2 real languages and that default is untagged,
@@ -4473,7 +4482,7 @@ class WatchPage {
             .filter((t) => Number.isInteger(t.index));
     }
 
-    async enrichCloudPlaybackTracks(playbackUrl, { forceProbe = false } = {}) {
+    async enrichCloudPlaybackTracks(playbackUrl) {
         try {
             // Robust path: a precomputed ordered map on content means real language names
             // with NO provider hit at playback (no probe to contend with the stream, no
@@ -4493,13 +4502,7 @@ class WatchPage {
             // the ordered per-track list, fetched together. Both best-effort, display-only.
             const infoP = fetch(`${host}/vod-info/${token}`, { cache: 'no-store' })
                 .then(r => (r.ok ? r.json() : null)).catch(() => null);
-            // Probe the ordered per-track languages when the title is known multi-audio
-            // OR forced (engine path with no precompute): the engine can't read stream
-            // languages, and an un-probed title (no TMDB match / not yet crawled, e.g. a
-            // fresh series episode) has no precomputed map — so without this it would show
-            // "Audio N". ffprobe (relay) reads the container tags; 24h edge-cached. Done
-            // here, BEFORE the engine opens, so it wins the provider's single connection.
-            const probeP = (forceProbe || this.contentLooksMultiAudio())
+            const probeP = this.contentLooksMultiAudio()
                 ? fetch(`${host}/probe-audio/${token}`, { cache: 'no-store' })
                     .then(r => (r.ok ? r.json() : null)).catch(() => null)
                 : Promise.resolve(null);

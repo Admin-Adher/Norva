@@ -289,7 +289,14 @@ async function createPlaybackSession(
     // 403s). The gateway does no transcode here — just a byte-range passthrough.
     if (body.enginePipe === true || body.engine_pipe === true) {
       const pipe = await createBytePipeAccess(session.id, userId, targetUrl, expiresAt, db, userAgent);
-      return { session, playback: { mode: "relay", url: pipe.url, tokenExpiresAt: expiresAt } };
+      // Name the audio tracks for the in-browser engine: it streams the raw file via
+      // the gateway and can't read per-stream language tags, so the browser can't probe
+      // them. Probe the container via the relay here and return the ordered map. This is
+      // the only audio-track source for engine titles with no precomputed map (e.g. a
+      // series episode with no TMDB match). Best-effort — never blocks/breaks playback.
+      let audioTracks: Array<{ index: number; lang: string | null }> = [];
+      try { audioTracks = await probeOrderedAudioTracks(db, userId, targetUrl); } catch (_) { /* best-effort */ }
+      return { session, playback: { mode: "relay", url: pipe.url, tokenExpiresAt: expiresAt, ...(audioTracks.length ? { audioTracks } : {}) } };
     }
     const relay = await createRelayAccess(session.id, userId, targetUrl, expiresAt, db, userAgent);
     return { session, playback: { mode, url: relay.url, tokenExpiresAt: expiresAt } };
@@ -1700,6 +1707,40 @@ async function persistOrderedAudioForTitle(
     .update({ audio_tracks: ordered })
     .eq("user_id", userId).eq("id", titleId);
   return !error;
+}
+
+// Probe a target's container for the ORDERED per-track audio map via the relay —
+// the only path that reaches the provider (Deno egress is IP-blocked). Returns
+// [{index, lang|null}, ...] in absolute ffmpeg-stream order, or [] on any failure.
+// Used to name audio tracks for the IN-BROWSER ENGINE: it streams the raw file via
+// the media gateway (an IP the provider accepts) and its libav build can't read
+// per-stream language tags, so the browser CANNOT probe these titles itself. The
+// relay 24h-edge-caches by (host, vod_id), so repeat plays are cheap. Best-effort,
+// short-bounded; never throws (callers stay on the no-names path on failure).
+async function probeOrderedAudioTracks(
+  db: SupabaseClient,
+  userId: string,
+  targetUrl: string,
+): Promise<Array<{ index: number; lang: string | null }>> {
+  const runtimeConfig = await getRuntimeConfig(db);
+  if (!runtimeConfig.relayBaseUrl || !runtimeConfig.relayTokenSecret) return [];
+  const payload = JSON.stringify({ v: 1, sid: "engine-audio", uid: userId, url: targetUrl, exp: Math.floor(Date.now() / 1000) + 120 });
+  const token = `${base64Url(encoder.encode(payload))}.${await hmacBase64Url(runtimeConfig.relayTokenSecret, payload)}`;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 4000);
+  try {
+    const res = await fetch(`${runtimeConfig.relayBaseUrl}/probe-audio/${token}`, { headers: { accept: "application/json" }, signal: ctrl.signal });
+    if (!res.ok) return [];
+    const info = await res.json().catch(() => null) as JsonRecord | null;
+    const raw = info && Array.isArray(info.audioTracks) ? info.audioTracks as JsonRecord[] : [];
+    return raw
+      .map((t) => ({ index: Number(t?.index), lang: normalizeIsoLang(stringOrNull(t?.lang ?? t?.language)) }))
+      .filter((t) => Number.isInteger(t.index));
+  } catch (_) {
+    return [];
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 // Service-gated maintenance backfill of cloud_titles.audio_languages via the
