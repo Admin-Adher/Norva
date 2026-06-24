@@ -2311,15 +2311,24 @@ class WatchPage {
         }
     }
 
-    // Stream index the engine should open on for a multi-audio file, or null to
-    // keep the engine's own (file-order) default. Only overrides when: there's no
-    // saved/explicit audio choice to honour, the relay probe shows ≥2 real
-    // languages, AND the file's own default (lowest-index audio stream) is
-    // UNTAGGED — i.e. it would otherwise open on a hidden "Audio N" track. Picks
-    // the user's language → en → first named.
+    // Stream index the engine should open on, or null to keep the engine's own
+    // (file-order) default. Priority:
+    //  1. An explicit/saved audio choice (resume, or a prior in-session pick) —
+    //     open straight on it so the playing audio matches the menu's tick. Without
+    //     this the engine opened on its untagged default while the menu restored
+    //     "French", so the tick and the actual audio disagreed.
+    //  2. Otherwise auto-default a multi-audio file whose own default (lowest-index
+    //     audio stream) is UNTAGGED onto the user's language (browser locale → en →
+    //     first named), so it never opens on a hidden "Audio N" track.
     preferredEngineAudioIndex() {
-        if (this.selectedAudioTrackUserChoice) return null;
-        if (this.pendingPlaybackPreferences?.audio && !this._pendingAudioPreferenceApplied) return null;
+        if (this.selectedAudioTrackUserChoice && Number.isInteger(this.selectedAudioStreamIndex)) {
+            return this.selectedAudioStreamIndex;
+        }
+        const saved = this.pendingPlaybackPreferences?.audio;
+        if (saved && !this._pendingAudioPreferenceApplied) {
+            const savedIdx = Number(saved.streamIndex ?? saved.stream_index);
+            if (Number.isInteger(savedIdx)) return savedIdx;
+        }
         const relay = (Array.isArray(this._relayAudioTracks) ? this._relayAudioTracks : [])
             .filter((t) => Number.isInteger(t.index));
         const named = relay.filter((t) => t.lang && t.lang !== 'und');
