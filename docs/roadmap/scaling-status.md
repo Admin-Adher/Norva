@@ -4,7 +4,7 @@
 > et **ce qu'il reste à faire quand Norva aura beaucoup d'users multi-pays** — pour
 > reprendre sans rien re-découvrir.
 >
-> _Dernière mise à jour : 2026-06-23._
+> _Dernière mise à jour : 2026-06-24._
 
 Branche dev : **`claude/eager-carson-2zlqwy`** · Projet Supabase : **`oupsceccxsonaalhueff`**.
 
@@ -48,16 +48,33 @@ pas de recoupement multi-users, et c'est le changement le plus risqué du systè
   (décision : « gratuit + bonne couverture arabe + fiable » n'existe pas ensemble,
   et le contenu arabe est déjà hardsubbé).
 
-### Cache de titres global — FONDATION (#3, la moitié sûre)
-- Table **`public.catalog_titles`** `(item_type, provider_tmdb_id)` créée + RLS
-  (service-role only) + sentinelle `'0'` exclue par contrainte. Migration
-  `supabase/migrations/20260623270000_catalog_titles_foundation.sql`.
-- **Backfill** : **16 751** titres matchés copiés depuis `cloud_titles`.
-- **Dual-write** best-effort dans `supabase/functions/_shared/vod-title-projection.ts`
-  (déployé sur `norva-source-sync` **et** `norva-cloud`) → chaque sync maintient
-  `catalog_titles` à jour ; un échec ici ne casse jamais la projection per-user.
-- ⚠️ **Rien ne lit `catalog_titles`** → **zéro impact** lecture (purement additif,
-  réversible).
+### Cache de titres global — FONDATION + SCALE-READY (#3)
+- Table **`public.catalog_titles`** `(item_type, provider_tmdb_id)` + RLS (service-role
+  only) + sentinelle `'0'` exclue. Migration `…270000_catalog_titles_foundation.sql`.
+  **Backfill** : **16 751** titres copiés. **Dual-write** best-effort dans
+  `_shared/vod-title-projection.ts` (sur `norva-source-sync` **et** `norva-cloud`).
+- **`audio_languages` global** (06-24) : colonne + GIN sur `catalog_titles` + RPC
+  `merge_catalog_title_audio()` (union race-safe en SQL, sentinelle-gardée, service-role).
+  Les 2 points d'écriture audio (`runAudioBackfill.processOne`, `recordObservedLanguages`)
+  miroitent dans le cache global ⇒ **une langue sondée une fois est partagée à tous**.
+  Migration `…010000`. _(Piège évité : le builder Supabase est un thenable sans `.catch()`
+  → `try/catch` obligatoire.)_
+- **Harnais de vérif** `catalog_mirror_diff()` + route service-gated
+  `POST norva-playback/catalog-mirror-verify` : prouve que `catalog_titles` est un miroir
+  fidèle (aujourd'hui **16 751 comparés, 0 mismatch, 0 cloud_only**) = **gate du flip** ET
+  preuve anti-rot (catalog==cloud ⇒ sortie flag-ON == flag-OFF). Migration `…020000`.
+- **Chemin de lecture flag-gated** `NORVA_CATALOG_READ_SOURCE` (défaut `cloud_titles`) :
+  quand `catalog_titles`, `applyCatalogOverlay()` sert les métadonnées d'affichage depuis
+  le cache global à **tous** les sites de `norva-catalog` (grille langues, rails
+  genre/titre/populaire/because-you-watched via `listVerifiedTitleCandidates`,
+  `localizeMediaTitles`). **Filtrage langue reste per-user. Défaut OFF ⇒ lecture identique.**
+- **Cache facettes** `listLanguageFacets` : memo LRU in-isolate (`${userId}:${itemType}`,
+  TTL 60s) → les 25 count-queries/appel ne tournent qu'1×/min/user.
+- **Crawl audio scale** : (a) **progression** `cloud_titles.audio_probed_at` → le crawl
+  avance au lieu de re-sonder le même front ; (b) **catalog-first fill** `mode=catalog` +
+  `fill_user_audio_from_catalog()` → remplit un user depuis le cache global **sans appel
+  fournisseur** (dedup : sonder 1× pour tous). Migration `…030000`.
+- ⚠️ **Rien ne lit `catalog_titles` en prod** (flag OFF) → **zéro impact**, additif, réversible.
 
 ---
 
@@ -68,7 +85,8 @@ pas de recoupement multi-users, et c'est le changement le plus risqué du systè
 
 - **Trigger** : quand le **recoupement multi-users** est matériel (plusieurs
   users / pays partagent les mêmes titres TMDB). Aujourd'hui ~0 % (1 catalogue) →
-  le gain (÷10-100 sur l'enrichissement TMDB + stockage) n'existe pas encore.
+  le gain (÷10-100 sur l'enrichissement TMDB + stockage) n'existe pas encore. **Mesuré
+  2026-06-24 : `overlap_factor = 1.00`, 1 user → flip toujours gardé.**
 - **Mesurer le trigger** (relancer périodiquement) :
   ```sql
   select count(*)                                              as user_title_rows,
@@ -84,29 +102,34 @@ pas de recoupement multi-users, et c'est le changement le plus risqué du systè
   1. ✅ Créer `catalog_titles`.
   2. ✅ Dual-write depuis la projection.
   3. ✅ Backfill depuis `cloud_titles`.
-  4. ⏳ **Read cutover** : faire lire `titleRailItem` / `listGenreItems` /
-     `listMediaItems` (`supabase/functions/norva-catalog/index.ts`) depuis
-     `catalog_titles` par `(item_type, provider_tmdb_id)`, **derrière un flag**,
-     **vérifié contre la sortie actuelle**. ⚠️ Changement le **plus risqué** (tous
-     les reads rails/grille). Le serve i18n est déjà lang-aware → seule la *source*
-     des métadonnées change.
-  5. ⏳ **Thin `cloud_titles`** : retirer les colonnes métadonnées migrées une fois
-     les reads stables (garder identité + lien per-user + variant_count).
+  4. ✅ **Read cutover CONSTRUIT (flag OFF)** : `applyCatalogOverlay()` sur **tous** les
+     sites de lecture de `norva-catalog` derrière `NORVA_CATALOG_READ_SOURCE`, + harnais
+     `/catalog-mirror-verify` (aujourd'hui 0 mismatch). Filtrage langue reste per-user.
+     **Le « cutover » se résume désormais à : (a) `/catalog-mirror-verify` → `clean:true`,
+     (b) poser le secret `NORVA_CATALOG_READ_SOURCE=catalog_titles` sur `norva-catalog`.**
+     ⏳ reste seulement **le flip** (gardé jusqu'au vrai recoupement).
+  5. ⏳ **Thin `cloud_titles`** : retirer les colonnes métadonnées migrées une fois les
+     reads stables sur le cache global (garder identité + lien per-user + variant_count).
+  6. ⏳ **Catalog-first fill au sync** : appeler `mode=catalog` /
+     `fill_user_audio_from_catalog` à l'onboarding d'un nouvel user → il hérite des
+     langues déjà connues sans re-sonder le fournisseur (≈1 ligne dans le finalize sync).
 - **À ajouter au cutover** : TMDB **changes API** (refresh incrémental des titres
   au `tmdb_synced_at` vieux) + **daily id exports** TMDB (seed bulk) — opèrent sur
   la table globale, une fois pour tous.
 
-### B. Monitoring par fournisseur
-- Les diagnostics relais loggent `tag:"norva-relay-upstream-error"` (status, host,
-  reason, finalUrl). → brancher une **alerte** (Cloudflare Logpush / Workers
-  Analytics Engine) **par host fournisseur** quand le taux d'échec grimpe = un
-  fournisseur a changé de pattern (nouvel auth/redirect à traiter).
+### B. Monitoring par fournisseur — ✅ émission + webhook construits
+- Le relais émet `tag:"norva-relay-upstream-error"` (status/host/reason/finalUrl) **et**,
+  si le secret **`MONITOR_WEBHOOK`** est posé, POST une alerte compacte **échantillonnée**
+  (≤1×/(host,status)/5 min, fire-and-forget via `ctx.waitUntil`). Off par défaut.
+  _(`maybeAlertUpstreamError` dans le relais — déployé via CI `deploy-relay.yml` au merge `main`.)_
+- ⏳ Optionnel à l'échelle : Logpush / Workers Analytics Engine sur le même log pour des
+  dashboards/seuils plus riches par host.
 
-### C. Harness de test multi-fournisseurs
-- Avant/pendant le lancement : un script qui, pour **1 titre par fournisseur** (un
-  par type d'abonnement de tes users), lance la lecture via le relais et vérifie un
-  `206` / flux OK (header `X-Norva-Relay-Path`). Détecte vite un fournisseur dont
-  l'auth/redirect casse, **avant** que les users s'en plaignent.
+### C. Harness de test multi-fournisseurs — ✅ construit
+- Route service-gated **`POST norva-playback/provider-playback-check`** : pour **1 film par
+  host fournisseur**, lance un Range 1 octet via le relais et vérifie **206** (+ `path`,
+  `ms`). Détecte un fournisseur dont l'auth/redirect casse **avant** les users. Vérifié
+  aujourd'hui : `{checked:1, allOk:true, path:"socket"}`.
 
 ---
 

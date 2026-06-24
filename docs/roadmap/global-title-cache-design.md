@@ -1,9 +1,14 @@
 # Global shared title cache — design (migration target)
 
-Status: **design only.** Do not implement until there is meaningful cross-user
-catalogue overlap. With one catalogue today the saving is 0% (measured), and the
-read-path cutover is the highest-risk change in the system. Design now so the
-migration is clean when the users arrive.
+Status: **2026-06-24 — read cutover BUILT behind a flag** (`NORVA_CATALOG_READ_SOURCE`,
+default OFF) **+ `audio_languages` folded into the cache + a `/catalog-mirror-verify`
+harness** (0 mismatch today). Only the **flip** (set the secret) and **thinning
+`cloud_titles`** remain, both gated on real cross-user overlap. See
+[`scaling-status.md`](./scaling-status.md) for the live state and the 2-step flip runbook.
+
+Original design note: do not flip until there is meaningful cross-user catalogue overlap —
+with one catalogue today the saving is 0% (measured), and the read-path cutover is the
+highest-risk change in the system. Designed now so the migration is clean when users arrive.
 
 ## Problem
 
