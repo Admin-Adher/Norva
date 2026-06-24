@@ -1313,7 +1313,12 @@ class WatchPage {
             mode: playbackMetadata.mode || null,
             startTime: this.resumeTime || 0,
             codecProfile: playbackMetadata.codecProfile || playbackMetadata.codec_profile || null,
-            seekOffset: loadSeekOffset
+            seekOffset: loadSeekOffset,
+            // Per-track audio languages the SERVER probed for this engine session
+            // (the engine can't read them itself). Must be forwarded explicitly —
+            // loadVideo gets a fresh options object, not the full playback metadata.
+            audioTracks: playbackMetadata.audioTracks || playbackMetadata.audio_tracks || null,
+            audioProbeDiag: playbackMetadata.audioProbeDiag
         });
         if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
 
