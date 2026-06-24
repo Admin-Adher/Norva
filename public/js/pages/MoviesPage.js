@@ -1799,7 +1799,11 @@ class MoviesPage {
             versions: versionList,
             versionIndex: 0,
             audioLanguages: movie.audioLanguages || movie.audio_languages || null,
-            versionLanguages: movie.versionLanguages || movie.version_languages || null
+            versionLanguages: movie.versionLanguages || movie.version_languages || null,
+            // Precomputed ordered per-track language map (served on the grid item by
+            // norva-catalog attachMediaLanguages). Lets the player label every audio
+            // track with zero playback-time probe — see WatchPage.getContentAudioTracks.
+            audioTracks: movie.audioTracks || movie.audio_tracks || null
         };
 
         // Open the player immediately (poster + loading animation), then resolve

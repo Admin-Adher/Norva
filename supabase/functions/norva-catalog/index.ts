@@ -228,27 +228,32 @@ async function localizeMediaTitles(items: Array<Record<string, any>>, userId: st
 }
 
 // Attach the title's REAL detected languages (cloud_titles.audio_languages /
-// version_languages) to each grid item so the client card badge shows the actual audio
-// language instead of guessing from the title. cloud_media_items rows lack these — look
-// them up by provider_tmdb_id (per-user; always cloud_titles, not catalog_titles).
-// Best-effort, chunked — never fails the grid over a badge.
+// version_languages) AND the precomputed ordered per-track map (audio_tracks) to each
+// grid item so the client card badge shows the actual audio language AND the player can
+// label every audio track with ZERO playback-time probe. cloud_media_items rows lack
+// these — look them up by provider_tmdb_id (per-user; always cloud_titles, not
+// catalog_titles). Best-effort, chunked — never fails the grid over a badge.
 async function attachMediaLanguages(items: Array<Record<string, any>>, userId: string) {
   if (!items.length) return;
   const tmdbIds = [...new Set(items
     .map((row) => stringOrNull(isRecord(row.metadata) ? row.metadata.providerTmdbId : null))
     .filter((id): id is string => Boolean(id) && id !== "0"))];
   if (!tmdbIds.length) return;
-  const byTmdb = new Map<string, { audio: string[]; version: string[] }>();
+  const byTmdb = new Map<string, { audio: string[]; version: string[]; tracks: Array<{ index: number; lang: string | null }> }>();
   for (let i = 0; i < tmdbIds.length; i += 500) {
     const { data, error } = await db
       .from("cloud_titles")
-      .select("provider_tmdb_id, audio_languages, version_languages")
+      .select("provider_tmdb_id, audio_languages, version_languages, audio_tracks")
       .eq("user_id", userId)
       .in("provider_tmdb_id", tmdbIds.slice(i, i + 500));
     if (error) return; // best-effort; never fail the grid over the badge
     for (const row of data ?? []) {
       const id = stringOrNull((row as Record<string, unknown>).provider_tmdb_id);
-      if (id) byTmdb.set(id, { audio: titleAudioLanguages(row as JsonRecord), version: titleVersionLanguages(row as JsonRecord) });
+      if (id) byTmdb.set(id, {
+        audio: titleAudioLanguages(row as JsonRecord),
+        version: titleVersionLanguages(row as JsonRecord),
+        tracks: titleAudioTracks(row as JsonRecord),
+      });
     }
   }
   for (const row of items) {
@@ -257,6 +262,10 @@ async function attachMediaLanguages(items: Array<Record<string, any>>, userId: s
     if (!hit) continue;
     row.audio_languages = hit.audio; row.audioLanguages = hit.audio;
     row.version_languages = hit.version; row.versionLanguages = hit.version;
+    // Ordered map (absolute-stream order, null-lang entries kept for position) — the
+    // player maps engine streams -> languages from this, no probe. Only set when present
+    // so titles without a crawled map fall through to the live-probe path unchanged.
+    if (hit.tracks.length) { row.audio_tracks = hit.tracks; row.audioTracks = hit.tracks; }
   }
 }
 

@@ -1625,7 +1625,10 @@ class HomePage {
             variantCount: item.variantCount || item.variant_count || data.variantCount || 1,
             defaultVariant: item.defaultVariant || item.default_variant || null,
             audioLanguages: item.audioLanguages || item.audio_languages || data.audioLanguages || data.audio_languages || null,
-            versionLanguages: item.versionLanguages || item.version_languages || data.versionLanguages || data.version_languages || null
+            versionLanguages: item.versionLanguages || item.version_languages || data.versionLanguages || data.version_languages || null,
+            // Precomputed ordered per-track language map (from the rail item / detail) so
+            // the player labels every audio track with zero playback-time probe.
+            audioTracks: item.audioTracks || item.audio_tracks || data.audioTracks || data.audio_tracks || null
         };
         if (type === 'episode' && item.data) {
             content.seriesId = item.data.seriesId || null;
