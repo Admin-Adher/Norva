@@ -942,6 +942,37 @@ async function resolvePlaybackTarget(
   throw new HttpError(400, "This media item has no playback target");
 }
 
+// Series have no directly-playable stream id — the provider 406s on a series id; only
+// EPISODES are streamable. Resolve a representative episode (first episode of the lowest
+// season) via get_series_info, so the audio header-probe has a real file to read. A
+// series' audio tracks are consistent across episodes, so one episode represents it.
+async function resolveSeriesEpisodeUrl(sourceId: string, seriesId: string, userId: string, db: SupabaseClient): Promise<string | null> {
+  const cfg = await loadSourceConfig(sourceId, userId, db).catch(() => null);
+  if (!cfg) return null;
+  const serverUrl = stringOr((cfg as JsonRecord).serverUrl, "");
+  const username = stringOr((cfg as JsonRecord).username, "");
+  const password = stringOr((cfg as JsonRecord).password, "");
+  if (!serverUrl || !username || !password) return null;
+  let base: string;
+  try { base = normalizeBaseUrl(serverUrl); } catch { return null; }
+  const api = `${base}/player_api.php?username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}&action=get_series_info&series_id=${encodeURIComponent(seriesId)}`;
+  const res = await fetch(api, { headers: { "user-agent": "NorvaCloud/1.0", accept: "application/json" } }).catch(() => null);
+  if (!res || !res.ok) return null;
+  const info = (await res.json().catch(() => null)) as JsonRecord | null;
+  const episodes = recordOrEmpty(info?.episodes);
+  // episodes is keyed by season number; pick the first episode of the lowest season.
+  for (const sk of Object.keys(episodes).sort((a, b) => Number(a) - Number(b))) {
+    const list = (episodes as JsonRecord)[sk];
+    if (Array.isArray(list) && list.length) {
+      const ep = recordOrEmpty(list[0]);
+      const epId = stringOr(ep.id, "");
+      const container = stringOr(ep.container_extension, "mp4");
+      if (epId) return xtreamStreamUrl({ serverUrl, username, password, streamType: "series", streamId: epId, container });
+    }
+  }
+  return null;
+}
+
 async function createRelayAccess(
   playbackSessionId: string,
   userId: string,
@@ -1726,10 +1757,18 @@ async function runAudioBackfill(req: Request, db: SupabaseClient) {
       const variantItemType = stringOr(variant.item_type, itemType);
       if (!sourceId || !externalId) { diag.noTarget++; return; }
 
-      const target = await resolvePlaybackTarget(sourceId, variantItemType, externalId, userId, db).catch(() => null);
-      if (!target?.targetUrl) { diag.noTarget++; return; }
+      // Series have no directly-streamable id (provider 406s on a series id) — resolve a
+      // representative episode first. A series' audio is consistent across episodes.
+      let targetUrl: string | null;
+      if (variantItemType === "series") {
+        targetUrl = await resolveSeriesEpisodeUrl(sourceId, externalId, userId, db).catch(() => null);
+      } else {
+        const target = await resolvePlaybackTarget(sourceId, variantItemType, externalId, userId, db).catch(() => null);
+        targetUrl = target?.targetUrl ?? null;
+      }
+      if (!targetUrl) { diag.noTarget++; return; }
 
-      const payload = JSON.stringify({ v: 1, sid: "audio-backfill", uid: userId, url: target.targetUrl, exp: Math.floor(Date.now() / 1000) + 120 });
+      const payload = JSON.stringify({ v: 1, sid: "audio-backfill", uid: userId, url: targetUrl, exp: Math.floor(Date.now() / 1000) + 120 });
       const signature = await hmacBase64Url(runtimeConfig.relayTokenSecret, payload);
       const token = `${base64Url(encoder.encode(payload))}.${signature}`;
 
@@ -1737,7 +1776,7 @@ async function runAudioBackfill(req: Request, db: SupabaseClient) {
       const res = await fetch(`${runtimeConfig.relayBaseUrl}/${endpoint}/${token}`, { headers: { accept: "application/json" } });
       if (!res.ok) {
         diag.relayNotOk++;
-        if (debug && !sample) sample = { stage: "relayNotOk", status: res.status, host: new URL(target.targetUrl).host, body: (await res.text().catch(() => "")).slice(0, 200) };
+        if (debug && !sample) sample = { stage: "relayNotOk", status: res.status, host: new URL(targetUrl).host, body: (await res.text().catch(() => "")).slice(0, 200) };
         return;
       }
       const info = await res.json().catch(() => null);
