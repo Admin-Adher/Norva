@@ -2475,7 +2475,7 @@ class WatchPage {
             // completes before the engine opens the stream — otherwise the two
             // compete for the provider's single connection and the probe loses,
             // leaving the menu with unnamed "Audio N" tracks.
-            try { await this.enrichCloudPlaybackTracks(url); } catch (_) { /* best-effort */ }
+            try { await this.enrichCloudPlaybackTracks(url, { forceProbe: true }); } catch (_) { /* best-effort */ }
             // Multi-audio files often default (file order) to an UNTAGGED track —
             // opening on it lands the user on a hidden "Audio N" entry. When the
             // relay probe shows ≥2 real languages and that default is untagged,
@@ -4473,7 +4473,7 @@ class WatchPage {
             .filter((t) => Number.isInteger(t.index));
     }
 
-    async enrichCloudPlaybackTracks(playbackUrl) {
+    async enrichCloudPlaybackTracks(playbackUrl, { forceProbe = false } = {}) {
         try {
             // Robust path: a precomputed ordered map on content means real language names
             // with NO provider hit at playback (no probe to contend with the stream, no
@@ -4493,7 +4493,13 @@ class WatchPage {
             // the ordered per-track list, fetched together. Both best-effort, display-only.
             const infoP = fetch(`${host}/vod-info/${token}`, { cache: 'no-store' })
                 .then(r => (r.ok ? r.json() : null)).catch(() => null);
-            const probeP = this.contentLooksMultiAudio()
+            // Probe the ordered per-track languages when the title is known multi-audio
+            // OR forced (engine path with no precompute): the engine can't read stream
+            // languages, and an un-probed title (no TMDB match / not yet crawled, e.g. a
+            // fresh series episode) has no precomputed map — so without this it would show
+            // "Audio N". ffprobe (relay) reads the container tags; 24h edge-cached. Done
+            // here, BEFORE the engine opens, so it wins the provider's single connection.
+            const probeP = (forceProbe || this.contentLooksMultiAudio())
                 ? fetch(`${host}/probe-audio/${token}`, { cache: 'no-store' })
                     .then(r => (r.ok ? r.json() : null)).catch(() => null)
                 : Promise.resolve(null);
