@@ -132,6 +132,9 @@ Deno.serve(async (req) => {
       const identity = await requireIdentity(req, supabase);
       return json(req, await expirePlaybackSession(segments[2], identity.userId, supabase));
     }
+    if (req.method === "POST" && segments[0] === "audio-backfill") {
+      return json(req, await runAudioBackfill(req, supabase));
+    }
     throw new HttpError(404, "Route not found");
   } catch (error) {
     const status = error instanceof HttpError ? error.status : 500;
@@ -1604,6 +1607,125 @@ function choosePlaybackMode(requestedMode: string, body: JsonRecord) {
   if (body.requiresRelay === true || body.requires_relay === true) return "relay";
   if (body.requiresTranscode === true || body.requires_transcode === true) return "transcode";
   return "direct";
+}
+
+// ISO-639-2/local -> ISO-639-1 for the audio_languages column.
+function normalizeIsoLang(value: string | null): string | null {
+  const v = String(value || "").toLowerCase().trim();
+  if (!v || v === "und") return null;
+  const map: Record<string, string> = {
+    fre: "fr", fra: "fr", eng: "en", ger: "de", deu: "de", spa: "es", ita: "it",
+    por: "pt", dut: "nl", nld: "nl", ara: "ar", rus: "ru", tur: "tr", pol: "pl",
+    hin: "hi", jpn: "ja", kor: "ko", zho: "zh", chi: "zh",
+  };
+  const code = map[v] || v;
+  return /^[a-z]{2}$/.test(code) ? code : null;
+}
+
+// Service-gated maintenance backfill of cloud_titles.audio_languages via the
+// relay's get_vod_info (the only path that reaches the provider — Deno egress is
+// IP-blocked). Resolves the DEFAULT audio-track language per title: a VO file's
+// single track is its real original language; a Multi file's primary track. A
+// header-probe for Multi's secondary tracks is a separate step. Resumable by id
+// cursor; best-effort per title; bounded concurrency.
+async function runAudioBackfill(req: Request, db: SupabaseClient) {
+  const expected = Deno.env.get("NORVA_BACKFILL_TOKEN") ?? "";
+  const provided = req.headers.get("Authorization")?.match(/^Bearer\s+(.+)$/i)?.[1] ?? "";
+  if (!expected || provided !== expected) throw new HttpError(401, "Unauthorized");
+
+  const body = recordOrEmpty(await req.json().catch(() => ({})));
+  const userId = stringOr(body.userId, "");
+  const itemType = stringOr(body.type, "movie") === "series" ? "series" : "movie";
+  const limit = Math.max(1, Math.min(300, Number(body.limit) || 100));
+  const concurrency = Math.max(1, Math.min(12, Number(body.concurrency) || 6));
+  const afterId = stringOr(body.afterId, "");
+  if (!userId) throw new HttpError(400, "Missing userId");
+
+  const runtimeConfig = await getRuntimeConfig(db);
+  if (!runtimeConfig.relayBaseUrl || !runtimeConfig.relayTokenSecret) {
+    throw new HttpError(503, "Norva Relay is not configured");
+  }
+
+  let titlesQuery = db
+    .from("cloud_titles")
+    .select("id, default_variant_id")
+    .eq("user_id", userId)
+    .eq("item_type", itemType)
+    .gt("variant_count", 0)
+    .eq("audio_languages", "{}")
+    .order("id", { ascending: true })
+    .limit(limit);
+  if (afterId) titlesQuery = titlesQuery.gt("id", afterId);
+  const { data: titles, error } = await titlesQuery;
+  if (error) throwDb(error, "Unable to list titles for backfill");
+  if (!titles || !titles.length) return { processed: 0, updated: 0, lastId: afterId, hasMore: false };
+
+  const variantIds = titles.map((t) => t.default_variant_id).filter(Boolean) as string[];
+  const variantById = new Map<string, JsonRecord>();
+  if (variantIds.length) {
+    const { data: variants } = await db
+      .from("cloud_title_variants")
+      .select("id, source_id, external_id, item_type")
+      .in("id", variantIds);
+    for (const v of variants ?? []) variantById.set(String(v.id), v as JsonRecord);
+  }
+
+  let updated = 0;
+  const debug = stringOr(body.debug, "") === "1";
+  const diag = { noVariant: 0, noTarget: 0, relayNotOk: 0, relayEmpty: 0, noLang: 0, exception: 0 };
+  let sample: JsonRecord | null = null;
+  const lastId = String(titles[titles.length - 1].id);
+
+  const processOne = async (title: JsonRecord) => {
+    try {
+      const variant = title.default_variant_id ? variantById.get(String(title.default_variant_id)) : null;
+      if (!variant) { diag.noVariant++; return; }
+      const sourceId = stringOr(variant.source_id, "");
+      const externalId = stringOr(variant.external_id, "");
+      const variantItemType = stringOr(variant.item_type, itemType);
+      if (!sourceId || !externalId) { diag.noTarget++; return; }
+
+      const target = await resolvePlaybackTarget(sourceId, variantItemType, externalId, userId, db).catch(() => null);
+      if (!target?.targetUrl) { diag.noTarget++; return; }
+
+      const payload = JSON.stringify({ v: 1, sid: "audio-backfill", uid: userId, url: target.targetUrl, exp: Math.floor(Date.now() / 1000) + 120 });
+      const signature = await hmacBase64Url(runtimeConfig.relayTokenSecret, payload);
+      const token = `${base64Url(encoder.encode(payload))}.${signature}`;
+
+      const res = await fetch(`${runtimeConfig.relayBaseUrl}/vod-info/${token}`, { headers: { accept: "application/json" } });
+      if (!res.ok) {
+        diag.relayNotOk++;
+        if (debug && !sample) sample = { stage: "relayNotOk", status: res.status, host: new URL(target.targetUrl).host, body: (await res.text().catch(() => "")).slice(0, 200) };
+        return;
+      }
+      const info = await res.json().catch(() => null);
+      if (debug && !sample) sample = { stage: "relayOk", status: res.status, host: new URL(target.targetUrl).host, pathHead: new URL(target.targetUrl).pathname.split("/")[1], info };
+      const tracks = info && Array.isArray(info.audioTracks) ? info.audioTracks : [];
+      if (!tracks.length) { diag.relayEmpty++; return; }
+      const codes = new Set<string>();
+      for (const track of tracks) {
+        const code = normalizeIsoLang(stringOrNull((track as JsonRecord)?.language));
+        if (code) codes.add(code);
+      }
+      if (!codes.size) { diag.noLang++; return; }
+
+      const { error: updateError } = await db
+        .from("cloud_titles")
+        .update({ audio_languages: [...codes].sort() })
+        .eq("user_id", userId)
+        .eq("id", String(title.id));
+      if (!updateError) updated += 1;
+    } catch (e) {
+      diag.exception++;
+      if (debug && !sample) sample = { stage: "exception", error: String(e).slice(0, 200) };
+    }
+  };
+
+  for (let i = 0; i < titles.length; i += concurrency) {
+    await Promise.all(titles.slice(i, i + concurrency).map((t) => processOne(t as JsonRecord)));
+  }
+
+  return { processed: titles.length, updated, diag, ...(debug ? { sample } : {}), lastId, hasMore: titles.length === limit };
 }
 
 function xtreamStreamUrl(config: {

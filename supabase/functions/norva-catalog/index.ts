@@ -524,14 +524,21 @@ function subtitleFacetTags(facet: string | null): string[] {
 // tag-only); a specific language like 'fr' also matches a captured 'fr' track.
 const AUDIO_FACET_ISO: Record<string, string> = {
   fr: "fr", en: "en", es: "es", ar: "ar", de: "de", it: "it", pt: "pt",
+  nl: "nl", ru: "ru", tr: "tr", pl: "pl", hi: "hi", ja: "ja", ko: "ko", zh: "zh",
 };
 function audioFacetIso(facet: string | null): string | null {
   return facet ? (AUDIO_FACET_ISO[facet] ?? null) : null;
 }
-// Human labels for the facet values the dynamic menus expose (English UI).
+// Human labels for the facet values the dynamic menus expose (English UI). Real
+// languages only — the opaque 'original'/'multi' version tags are deliberately
+// NOT here, so the Audio menu lists languages (English, Arabic, Korean…) rather
+// than version types. The audio_languages backfill is what makes vo/multi titles
+// surface under their real language. (AUDIO_FACET_TAGS still maps original/multi
+// for any old saved filter, it's just not offered in the menu.)
 const AUDIO_FACET_LABELS: Record<string, string> = {
-  fr: "French", en: "English", original: "Original (VO)", multi: "Multi-language",
-  es: "Spanish", ar: "Arabic", de: "German", it: "Italian", pt: "Portuguese",
+  fr: "French", en: "English", es: "Spanish", ar: "Arabic", de: "German",
+  it: "Italian", pt: "Portuguese", nl: "Dutch", ru: "Russian", tr: "Turkish",
+  pl: "Polish", hi: "Hindi", ja: "Japanese", ko: "Korean", zh: "Chinese",
 };
 const SUBTITLE_FACET_LABELS: Record<string, string> = {
   ar: "Arabic", fr: "French", en: "English", es: "Spanish", de: "German",
