@@ -301,6 +301,20 @@ async function createPlaybackSession(
         audioTracks = probed.tracks;
         audioProbeDiag = probed.diag;
       } catch (e) { audioProbeDiag = `throw_${String(e && (e as Error).name || e).slice(0, 24)}`; }
+      // Version-independent diagnostic: record what the relay returned to a table we
+      // can read via SQL (server console.log isn't exposed, and the payload field keeps
+      // coming back undefined — likely edge-version propagation). Best-effort.
+      try {
+        let host = "";
+        try { host = new URL(targetUrl).host; } catch (_) { /* ignore */ }
+        await db.from("debug_engine_audio").insert({
+          code_version: "build57_dbg",
+          diag: audioProbeDiag,
+          n_tracks: audioTracks.length,
+          tracks: audioTracks,
+          target_host: host,
+        });
+      } catch (_) { /* best-effort */ }
       return { session, playback: { mode: "relay", url: pipe.url, tokenExpiresAt: expiresAt, audioProbeDiag, ...(audioTracks.length ? { audioTracks } : {}) } };
     }
     const relay = await createRelayAccess(session.id, userId, targetUrl, expiresAt, db, userAgent);
