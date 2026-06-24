@@ -1174,7 +1174,13 @@ function parseMkvAudioTracks(buf, len) {
 }
 
 function normalizeRelayLang(value) {
-  const v = String(value || "").toLowerCase().trim().slice(0, 3);
+  // Reduce a BCP-47 / IETF tag to its primary language subtag before matching:
+  // Matroska LanguageIETF (and some muxers) write "fr-FR", "pt-BR", "zh-Hans",
+  // etc. The old `.slice(0, 3)` turned "fr-FR" into "fr-" (length 3, not in the
+  // map) → null, dropping the language for every track in such files. Split on
+  // the subtag separator first so "fr-FR" → "fr".
+  const primary = String(value || "").toLowerCase().trim().split(/[-_]/)[0];
+  const v = primary.slice(0, 3);
   if (!v || v === "und" || v === "mis" || v === "zxx" || v === "mul") return null;
   const map = {
     fre: "fr", fra: "fr", eng: "en", ger: "de", deu: "de", spa: "es", ita: "it",
@@ -1359,8 +1365,15 @@ async function relayProbeAudio(request, env, claims, ctx) {
     out.audioLanguages = [...langs];
   } catch (_) { /* never throw */ }
 
-  // Cache only a useful (non-empty) result so a transient probe miss can re-probe.
-  if (cacheKey && (out.audioTracks.length || out.audioLanguages.length)) {
+  // Cache ONLY a successful container probe (audioTracks non-empty). An empty
+  // audioTracks means the header-probe failed — every video file has >=1 audio
+  // track, so [] is never a real layout. get_vod_info's single default language
+  // can populate audioLanguages even when the probe fails; caching on that alone
+  // (the old `|| audioLanguages.length`) poisoned the 24h window with an empty
+  // track list, so the engine-path audio menu fell back to "Audio 1, Audio 2…"
+  // instead of real per-track language names. A miss re-probes next time (cheap
+  // at this scale; the precompute path handles provider load when it matters).
+  if (cacheKey && out.audioTracks.length) {
     try {
       const body = JSON.stringify(out);
       ctx.waitUntil(cache.put(cacheKey, new Response(body, {
