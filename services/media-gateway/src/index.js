@@ -53,7 +53,7 @@ const RAW_PROVIDER_RETRY_DELAYS_MS = [400, 1000, 2000, 3000, 4000, 5000, 6000, 8
 const FFMPEG_USER_AGENT = process.env.FFMPEG_USER_AGENT ||
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36 Norva/1.0';
 const MAX_LOG_TAIL = 12000;
-const GATEWAY_VERSION = 43;
+const GATEWAY_VERSION = 44;
 // Browser playback fetches HLS playlists/segments cross-origin, so these must
 // list every Norva web origin or the browser blocks the response (CORS). Keep
 // in sync with the relay's ALLOWED_ORIGINS (services/norva-relay/wrangler.jsonc).
@@ -188,6 +188,49 @@ app.post('/xtream/series-info', requireGatewayAuth, async (req, res) => {
             params: { series_id: seriesId }
         });
         const payload = await fetchProviderJson(url, sanitizeUserAgent(userAgent) || FFMPEG_USER_AGENT);
+        res.json(payload);
+    } catch (err) {
+        const status = Number.isInteger(err.status) ? err.status : 502;
+        res.status(status).json({
+            error: err.publicMessage || 'IPTV provider request failed',
+            details: err.details || undefined
+        });
+    }
+});
+
+// Generic Xtream metadata proxy (catalogue sync, VOD info, …), proxied so the
+// crawl reaches the provider from the SAME tolerated IP as streaming instead of
+// the Supabase edge IP (provider-blocked → user_multi_ip AND outright sync
+// failures). Actions are whitelisted to read-only player_api endpoints; the
+// gateway never becomes an open proxy. Catalogue payloads are large + slow, so a
+// generous per-call timeout is used (the global default is tuned for small EPG).
+const XTREAM_METADATA_ACTIONS = new Set([
+    'get_live_streams', 'get_vod_streams', 'get_series',
+    'get_live_categories', 'get_vod_categories', 'get_series_categories',
+    'get_vod_info', 'get_series_info', 'get_short_epg', 'get_simple_data_table',
+]);
+const XTREAM_METADATA_TIMEOUT_MS = clampInt(process.env.XTREAM_METADATA_TIMEOUT_MS, 45_000, 10_000, 120_000);
+app.post('/xtream/metadata', requireGatewayAuth, async (req, res) => {
+    try {
+        const { serverUrl, username, password, action, params, userAgent } = req.body || {};
+        if (!serverUrl || !isHttpUrl(serverUrl) || !username || !password || !action) {
+            return res.status(400).json({ error: 'serverUrl, username, password and action are required' });
+        }
+        if (!XTREAM_METADATA_ACTIONS.has(String(action))) {
+            return res.status(400).json({ error: `Unsupported metadata action: ${action}` });
+        }
+        const url = xtreamPlayerApiUrl({
+            serverUrl,
+            username,
+            password,
+            action: String(action),
+            params: (params && typeof params === 'object') ? params : undefined
+        });
+        const payload = await fetchProviderJson(
+            url,
+            sanitizeUserAgent(userAgent) || FFMPEG_USER_AGENT,
+            XTREAM_METADATA_TIMEOUT_MS,
+        );
         res.json(payload);
     } catch (err) {
         const status = Number.isInteger(err.status) ? err.status : 502;
@@ -1399,9 +1442,9 @@ function xtreamPlayerApiUrl({ serverUrl, username, password, action, streamId, l
     return url.href;
 }
 
-async function fetchProviderJson(url, userAgent) {
+async function fetchProviderJson(url, userAgent, timeoutMs = XTREAM_REQUEST_TIMEOUT_MS) {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), XTREAM_REQUEST_TIMEOUT_MS);
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
         const response = await fetch(url, {
             signal: controller.signal,

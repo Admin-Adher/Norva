@@ -13,7 +13,7 @@ import type { LiveCatalogItem } from "../_shared/live-catalog.ts";
 import { getEntitlementDecision, planFeatureEntitled, realPlanCode } from "../_shared/entitlements.ts";
 
 type JsonRecord = Record<string, unknown>;
-type RuntimeConfig = { sourceConfigKey: string };
+type RuntimeConfig = { sourceConfigKey: string; mediaGatewayUrl: string; mediaGatewayToken: string };
 
 class HttpError extends Error {
   status: number;
@@ -43,6 +43,8 @@ const SUPABASE_SERVICE_KEY =
   Deno.env.get("SUPABASE_SECRET_KEY") ??
   "";
 const ENV_SOURCE_CONFIG_KEY = Deno.env.get("NORVA_SOURCE_CONFIG_KEY") ?? "";
+const ENV_MEDIA_GATEWAY_URL = (Deno.env.get("NORVA_MEDIA_GATEWAY_URL") ?? "").replace(/\/+$/, "");
+const ENV_MEDIA_GATEWAY_TOKEN = Deno.env.get("NORVA_MEDIA_GATEWAY_TOKEN") ?? "";
 
 if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
   throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
@@ -1350,6 +1352,10 @@ async function syncXtreamSource(
   });
   if (!username || !password) throw new HttpError(400, "Xtream credentials are incomplete");
 
+  // Provider metadata egresses via the gateway (tolerated IP), not this Supabase
+  // edge runtime (provider-blocked IP). Cached; gateway-unconfigured → direct.
+  const runtimeConfig = await getRuntimeConfig(db);
+
   await reportProgress({
     stage: "discovering",
     percent: 18,
@@ -1361,13 +1367,15 @@ async function syncXtreamSource(
       categories: { status: "running" },
     },
   });
+  const fetchCatalog = (action: string) =>
+    fetchProviderMetadata(runtimeConfig, { serverUrl, username, password, action, timeoutMs: 25000 }).catch(() => []);
   const [live, vod, series, liveCategories, vodCategories, seriesCategories] = await Promise.all([
-    fetchJson(xtreamApiUrl({ serverUrl, username, password, action: "get_live_streams" }), 25000).catch(() => []),
-    fetchJson(xtreamApiUrl({ serverUrl, username, password, action: "get_vod_streams" }), 25000).catch(() => []),
-    fetchJson(xtreamApiUrl({ serverUrl, username, password, action: "get_series" }), 25000).catch(() => []),
-    fetchJson(xtreamApiUrl({ serverUrl, username, password, action: "get_live_categories" }), 25000).catch(() => []),
-    fetchJson(xtreamApiUrl({ serverUrl, username, password, action: "get_vod_categories" }), 25000).catch(() => []),
-    fetchJson(xtreamApiUrl({ serverUrl, username, password, action: "get_series_categories" }), 25000).catch(() => []),
+    fetchCatalog("get_live_streams"),
+    fetchCatalog("get_vod_streams"),
+    fetchCatalog("get_series"),
+    fetchCatalog("get_live_categories"),
+    fetchCatalog("get_vod_categories"),
+    fetchCatalog("get_series_categories"),
   ]);
   const liveCategoryMap = categoryMap(liveCategories);
   const vodCategoryMap = categoryMap(vodCategories);
@@ -1759,16 +1767,22 @@ async function replaceSourceItems(sourceId: string, userId: string, rows: JsonRe
 async function getRuntimeConfig(db: SupabaseClient): Promise<RuntimeConfig> {
   if (runtimeConfigCache && runtimeConfigCache.expiresAt > Date.now()) return runtimeConfigCache.value;
   let sourceConfigKey = ENV_SOURCE_CONFIG_KEY;
-  if (!sourceConfigKey) {
+  let mediaGatewayUrl = ENV_MEDIA_GATEWAY_URL;
+  let mediaGatewayToken = ENV_MEDIA_GATEWAY_TOKEN;
+  if (!sourceConfigKey || !mediaGatewayUrl || !mediaGatewayToken) {
     const { data, error } = await db
       .from("cloud_runtime_config")
-      .select("value")
-      .eq("key", "NORVA_SOURCE_CONFIG_KEY")
-      .maybeSingle();
+      .select("key, value")
+      .in("key", ["NORVA_SOURCE_CONFIG_KEY", "NORVA_MEDIA_GATEWAY_URL", "NORVA_MEDIA_GATEWAY_TOKEN"]);
     if (error) console.warn("[norva-source-sync] runtime config unavailable", error.message);
-    if (typeof data?.value === "string") sourceConfigKey = data.value;
+    for (const item of data ?? []) {
+      if (typeof item.value !== "string" || !item.value) continue;
+      if (item.key === "NORVA_SOURCE_CONFIG_KEY" && !sourceConfigKey) sourceConfigKey = item.value;
+      else if (item.key === "NORVA_MEDIA_GATEWAY_URL" && !mediaGatewayUrl) mediaGatewayUrl = item.value.replace(/\/+$/, "");
+      else if (item.key === "NORVA_MEDIA_GATEWAY_TOKEN" && !mediaGatewayToken) mediaGatewayToken = item.value;
+    }
   }
-  const value = { sourceConfigKey };
+  const value = { sourceConfigKey, mediaGatewayUrl, mediaGatewayToken };
   runtimeConfigCache = { value, expiresAt: Date.now() + 30_000 };
   return value;
 }
@@ -1803,6 +1817,69 @@ async function fetchJson(url: string, timeoutMs: number) {
   const payload = await response.json().catch(() => null);
   if (!response.ok) throw new HttpError(response.status, "IPTV provider request failed", payload);
   return payload;
+}
+
+// Fetch Xtream catalogue/VOD metadata, preferring the media gateway so the crawl
+// reaches the provider from the SAME tolerated IP as streaming. A direct fetch
+// from this Supabase edge runtime egresses a provider-BLOCKED datacenter IP —
+// both a user_multi_ip trigger and, for blocked ranges, an outright sync failure
+// (empty catalogue). Falls back to a direct fetch only on gateway-side problems
+// (missing route / unreachable / timeout), never on provider-origin errors.
+// deno-lint-ignore no-explicit-any
+async function fetchProviderMetadata(
+  runtimeConfig: RuntimeConfig,
+  args: { serverUrl: string; username: string; password: string; action: string; params?: Record<string, string>; timeoutMs?: number },
+): Promise<any> {
+  const timeoutMs = args.timeoutMs ?? 25000;
+  if (runtimeConfig.mediaGatewayUrl && runtimeConfig.mediaGatewayToken) {
+    try {
+      return await requestGatewayMetadata(runtimeConfig, args, Math.max(timeoutMs + 10000, 45000));
+    } catch (error) {
+      const status = error instanceof HttpError ? error.status : 502;
+      if (![404, 405, 502, 503, 504].includes(status)) throw error;
+      console.warn("[norva-source-sync] gateway metadata unavailable, falling back to direct", args.action, status);
+    }
+  }
+  return fetchJson(
+    xtreamApiUrl({ serverUrl: args.serverUrl, username: args.username, password: args.password, action: args.action }, args.params ?? {}),
+    timeoutMs,
+  );
+}
+
+async function requestGatewayMetadata(
+  runtimeConfig: RuntimeConfig,
+  args: { serverUrl: string; username: string; password: string; action: string; params?: Record<string, string> },
+  timeoutMs: number,
+): Promise<unknown> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(`${runtimeConfig.mediaGatewayUrl}/xtream/metadata`, {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${runtimeConfig.mediaGatewayToken}`,
+      },
+      body: JSON.stringify({
+        serverUrl: args.serverUrl,
+        username: args.username,
+        password: args.password,
+        action: args.action,
+        params: args.params ?? {},
+        userAgent: "VLC/3.0.20 LibVLC/3.0.20",
+      }),
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) throw new HttpError(response.status, "Media gateway refused the metadata request", payload);
+    return payload;
+  } catch (error) {
+    if (error instanceof HttpError) throw error;
+    const aborted = error instanceof Error && error.name === "AbortError";
+    throw new HttpError(aborted ? 504 : 502, "Unable to reach media gateway", error instanceof Error ? error.message : undefined);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function fetchText(url: string, timeoutMs: number, maxBytes: number) {
