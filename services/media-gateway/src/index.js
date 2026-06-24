@@ -239,7 +239,12 @@ app.get('/subtitle/:token', async (req, res) => {
         try {
             const profile = await probeCodecProfile(claims.url, ua);
             res.setHeader('Cache-Control', 'private, max-age=3600');
-            return res.json({ subtitles: Array.isArray(profile?.subtitles) ? profile.subtitles : [] });
+            return res.json({
+                subtitles: Array.isArray(profile?.subtitles) ? profile.subtitles : [],
+                // ffprobe also reads audio-track languages robustly; the client uses
+                // them as a fallback when the relay probe couldn't name the audio.
+                audioTracks: Array.isArray(profile?.audioTracks) ? profile.audioTracks : [],
+            });
         } catch (err) {
             return res.status(502).json({ error: 'Subtitle probe failed', details: String((err && err.message) || err) });
         }

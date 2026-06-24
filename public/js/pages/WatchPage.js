@@ -2275,7 +2275,7 @@ class WatchPage {
         const current = typeof engine.currentAudioIndex === 'function' ? engine.currentAudioIndex() : (idxs[0] ?? null);
         this.directAudioStreamIndex = current;
         if (!this.selectedAudioTrackUserChoice) this.selectedAudioStreamIndex = current;
-        if (idxs.length < 2) return;
+        if (!idxs.length) return;
         // Borrow languages from the relay probe (ordered, audio-relative). Try the
         // absolute stream index first; fall back to audio-relative POSITION so a
         // libav-vs-container index mismatch still resolves the right language.
@@ -2289,6 +2289,13 @@ class WatchPage {
             language: langByIdx.get(i) || posLang(k),
             default: i === current,
         }));
+        // Single audio stream (e.g. a VOSTFR file's lone Japanese track): show its
+        // language as one informational entry when known, instead of a bare "Default".
+        // Unknown language -> leave the default fallback untouched.
+        if (idxs.length < 2) {
+            if (tracks[0] && tracks[0].language) { this.audioTracks = tracks; this.updateAudioTracks(); }
+            return;
+        }
         // Hide untagged "Audio N" tracks once we have ≥2 real, named languages: a
         // multi-audio file's filler streams (an untagged default + a trailing
         // cover-art-derived track) would otherwise clutter the menu. Keep every
@@ -5308,6 +5315,20 @@ class WatchPage {
             const data = await fetch(base, { cache: 'no-store' })
                 .then((r) => (r.ok ? r.json() : null)).catch(() => null);
             if (!data || this.isStalePlaybackAttempt(attempt)) return;
+            // Audio fallback: the gateway's ffprobe reads audio languages robustly. When
+            // the relay/server probe couldn't name the audio (some MKV files leave it
+            // untagged-by-our-parser), use the gateway's languages and re-sync the audio
+            // menu — e.g. a VOSTFR file's lone Japanese track now shows "Japanese".
+            const gwAudio = (Array.isArray(data.audioTracks) ? data.audioTracks : [])
+                .filter((a) => Number.isInteger(Number(a.index)) && a.language)
+                .map((a) => ({ index: Number(a.index), lang: this.normalizeTrackLanguage(a.language) }))
+                .filter((a) => a.lang && a.lang !== 'und');
+            const relayHasLang = Array.isArray(this._relayAudioTracks)
+                && this._relayAudioTracks.some((t) => t.lang && t.lang !== 'und');
+            if (gwAudio.length && !relayHasLang) {
+                this._relayAudioTracks = gwAudio;
+                try { this.syncEngineAudioTracks(); } catch (_) { /* best-effort */ }
+            }
             const tracks = (Array.isArray(data.subtitles) ? data.subtitles : [])
                 .filter((s) => Number.isInteger(Number(s.index)))
                 .map((s) => ({
