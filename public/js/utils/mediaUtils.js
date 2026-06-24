@@ -948,7 +948,7 @@ const MediaUtils = (() => {
         normalizeLanguagePreference, normalizeContentPreferences, migrateLegacyLanguagePreference,
         normalizeGenrePreference, normalizeGenrePreferences, scoreGenrePreferences,
         analyzeLanguageCompatibility, scoreVersionLanguage, scoreTitleForPreferences,
-        orderVersionsByPreference, versionLabel, versionLanguageBadge,
+        orderVersionsByPreference, versionLabel, versionLanguageBadge, audioLanguageBadge,
         saveFilters, loadFilters, escapeHtml, tmdbPosterUrl, parseDurationToSeconds,
         playbackHintFromItem, liveGatewayMode, safeImageUrl, downloadablePosterUrl,
         enhanceRailScroll

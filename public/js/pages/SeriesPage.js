@@ -1852,7 +1852,9 @@ class SeriesPage {
             containerExtension: container,
             resumeTime: resumePlan.target,
             playbackPreferences,
-            durationHint
+            durationHint,
+            audioLanguages: this.currentSeries?.audioLanguages || this.currentSeries?.audio_languages || null,
+            versionLanguages: this.currentSeries?.versionLanguages || this.currentSeries?.version_languages || null
         };
 
         // Open the player immediately, then resolve the stream URL into the shell.

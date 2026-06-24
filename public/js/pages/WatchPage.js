@@ -4364,10 +4364,32 @@ class WatchPage {
         return channels ? `${channels}ch` : '';
     }
 
+    // Reliable language label from the title's server-detected audio_languages
+    // (the same ground truth behind the "Audio FR confirmed" card badge), formatted
+    // exactly like the card via MediaUtils.audioLanguageBadge: 1 lang -> "French",
+    // 2-3 -> "Multi: FR/EN/JA", >3 -> "Multi". Returns null when nothing is detected,
+    // so callers keep "Default"/"Audio" rather than fabricating a language.
+    contentAudioLanguageLabel() {
+        const audio = this.content?.audioLanguages || this.content?.audio_languages || null;
+        const version = this.content?.versionLanguages || this.content?.version_languages || null;
+        const hasAudio = Array.isArray(audio) && audio.length;
+        const hasVersion = Array.isArray(version) && version.length;
+        if (!hasAudio && !hasVersion) return null;
+        try {
+            const label = window.MediaUtils?.audioLanguageBadge?.(audio || [], version || []);
+            return label || null;
+        } catch (_) {
+            return null;
+        }
+    }
+
     getCloudAudioLabel(a) {
-        if (!a) return 'Default';
+        if (!a) return this.contentAudioLanguageLabel() || 'Default';
         const parts = [];
-        const lang = this.getLanguageDisplayName(a.language);
+        // PRIMARY: the real per-track language from get_vod_info. When the provider
+        // omits it (language:""), fall back to the title's detected language so a
+        // real-language file still reads "French · AAC · 5.1" instead of codec-only.
+        const lang = this.getLanguageDisplayName(a.language) || this.contentAudioLanguageLabel();
         if (lang) parts.push(lang);
         if (a.codec) parts.push(String(a.codec).toUpperCase());
         const ch = this.formatChannelLayout(a.channelLayout, a.channels);
@@ -4390,7 +4412,11 @@ class WatchPage {
             return [{ source: 'none', index: -1, label: this.getCloudAudioLabel(this.cloudAudioInfo), active: true }];
         }
 
-        return [{ source: 'none', index: -1, label: 'Default', active: true }];
+        // Browser can't demux video.audioTracks for direct-MP4 play, so there's no
+        // switchable track list. Show the title's detected language (matches the card
+        // badge + the native mobile player) instead of a meaningless "Default".
+        const contentLabel = this.contentAudioLanguageLabel();
+        return [{ source: 'none', index: -1, label: contentLabel || 'Default', active: true }];
     }
 
     // Best-effort capture of the real audio-track languages observed at playback

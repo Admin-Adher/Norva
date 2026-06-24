@@ -1623,7 +1623,9 @@ class HomePage {
             containerExtension: container,
             titleId: data.titleId || item.titleId || item.title_id || null,
             variantCount: item.variantCount || item.variant_count || data.variantCount || 1,
-            defaultVariant: item.defaultVariant || item.default_variant || null
+            defaultVariant: item.defaultVariant || item.default_variant || null,
+            audioLanguages: item.audioLanguages || item.audio_languages || data.audioLanguages || data.audio_languages || null,
+            versionLanguages: item.versionLanguages || item.version_languages || data.versionLanguages || data.version_languages || null
         };
         if (type === 'episode' && item.data) {
             content.seriesId = item.data.seriesId || null;

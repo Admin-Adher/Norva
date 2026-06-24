@@ -1797,7 +1797,9 @@ class MoviesPage {
             playbackPreferences,
             durationHint: movie.tmdb?.runtime ? movie.tmdb.runtime * 60 : null,
             versions: versionList,
-            versionIndex: 0
+            versionIndex: 0,
+            audioLanguages: movie.audioLanguages || movie.audio_languages || null,
+            versionLanguages: movie.versionLanguages || movie.version_languages || null
         };
 
         // Open the player immediately (poster + loading animation), then resolve
