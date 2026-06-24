@@ -1705,7 +1705,15 @@ async function runAudioBackfill(req: Request, db: SupabaseClient) {
         return;
       }
       const info = await res.json().catch(() => null);
-      if (debug && !sample) sample = { stage: "relayOk", status: res.status, host: new URL(target.targetUrl).host, mode, info };
+      if (debug && !sample) {
+        let relayHead: JsonRecord = {};
+        try {
+          const rr = await fetch(`${runtimeConfig.relayBaseUrl}/relay/${token}`, { headers: { range: "bytes=0-400" } });
+          const u8 = new Uint8Array(await rr.arrayBuffer());
+          relayHead = { status: rr.status, len: u8.length, hex: [...u8.slice(0, 16)].map((b) => b.toString(16).padStart(2, "0")).join(""), cr: rr.headers.get("content-range"), path: rr.headers.get("x-norva-relay-path") };
+        } catch (e) { relayHead = { error: String(e).slice(0, 120) }; }
+        sample = { stage: "relayOk", mode, info, relayHead };
+      }
       const codes = new Set<string>();
       if (mode === "probe") {
         const incoming = info && Array.isArray(info.audioLanguages) ? info.audioLanguages : [];
