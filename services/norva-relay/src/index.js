@@ -1065,7 +1065,8 @@ function walkMp4Boxes(buf, start, end, visit) {
 // track's mdhd language is undetermined).
 function mp4TrakInfo(buf, start, end) {
   let handler = null;
-  let lang = null;
+  let mdhdLang = null;
+  let elngLang = null;
   walkMp4Boxes(buf, start, end, (type, ps, pe) => {
     if (type !== "mdia") return;
     walkMp4Boxes(buf, ps, pe, (t, s, e) => {
@@ -1073,10 +1074,21 @@ function mp4TrakInfo(buf, start, end) {
         handler = String.fromCharCode(buf[s + 8], buf[s + 9], buf[s + 10], buf[s + 11]);
       } else if (t === "mdhd") {
         const langOff = buf[s] === 1 ? s + 4 + 28 : s + 4 + 16; // version 1 uses 64-bit dates
-        if (langOff + 2 <= e) lang = decodeMp4Lang(buf[langOff], buf[langOff + 1]);
+        if (langOff + 2 <= e) mdhdLang = decodeMp4Lang(buf[langOff], buf[langOff + 1]);
+      } else if (t === "elng" && s + 4 < e) {
+        // Extended language tag ('elng'): version+flags (4B) then a null-terminated
+        // BCP-47 string ("ja", "fr-FR", "jpn"). Multi-language muxers routinely set
+        // mdhd to "und" and put the real language here; ExoPlayer/ffmpeg (and the
+        // native mobile player) read it, so the header-probe must too — otherwise the
+        // web engine's audio menu falls back to "Audio 1, Audio 2…".
+        let str = "";
+        for (let i = s + 4; i < e && i < s + 4 + 32 && buf[i] !== 0; i++) str += String.fromCharCode(buf[i]);
+        if (str) elngLang = str;
       }
     });
   });
+  // Prefer a real 'elng' language over mdhd (which is "und" in these files).
+  const lang = normalizeRelayLang(elngLang) || mdhdLang;
   return { isAudio: handler === "soun", lang };
 }
 
@@ -1328,7 +1340,9 @@ async function relayProbeAudio(request, env, claims, ctx) {
     const su0 = new URL(claims.url);
     const p0 = su0.pathname.split("/").filter(Boolean);
     const vid0 = p0[3] ? p0[3].replace(/\.[a-z0-9]+$/i, "") : p0[3];
-    cacheKey = new Request(`https://edge.norva.tv/__probeaudio/${encodeURIComponent(su0.host)}/${encodeURIComponent(vid0 || su0.pathname)}`);
+    // The /v2 segment is a cache-version bump: it bypasses entries cached before the
+    // 'elng' language fix (which had cached und-only tracks as "Audio N…" for 24h).
+    cacheKey = new Request(`https://edge.norva.tv/__probeaudio/v2/${encodeURIComponent(su0.host)}/${encodeURIComponent(vid0 || su0.pathname)}`);
     const cached = await cache.match(cacheKey);
     if (cached) {
       const hit = await cached.json().catch(() => null);

@@ -1730,13 +1730,18 @@ async function probeOrderedAudioTracks(
   const timer = setTimeout(() => ctrl.abort(), 4000);
   try {
     const res = await fetch(`${runtimeConfig.relayBaseUrl}/probe-audio/${token}`, { headers: { accept: "application/json" }, signal: ctrl.signal });
-    if (!res.ok) return [];
+    if (!res.ok) { console.log(`[engine-audio] relay probe http ${res.status}`); return []; }
     const info = await res.json().catch(() => null) as JsonRecord | null;
     const raw = info && Array.isArray(info.audioTracks) ? info.audioTracks as JsonRecord[] : [];
-    return raw
+    const ordered = raw
       .map((t) => ({ index: Number(t?.index), lang: normalizeIsoLang(stringOrNull(t?.lang ?? t?.language)) }))
       .filter((t) => Number.isInteger(t.index));
-  } catch (_) {
+    // Lightweight telemetry (no URL/creds): how many tracks the relay returned and
+    // their languages — so a "still Audio N" report is diagnosable from the logs.
+    console.log(`[engine-audio] relay probe ok rawTracks=${raw.length} ordered=${ordered.length} langs=${JSON.stringify(ordered.map((t) => t.lang))}`);
+    return ordered;
+  } catch (e) {
+    console.log(`[engine-audio] relay probe error ${String(e && (e as Error).message || e).slice(0, 80)}`);
     return [];
   } finally {
     clearTimeout(timer);
