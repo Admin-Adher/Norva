@@ -676,8 +676,27 @@ async function listGenreItems(req: Request, url: URL, userId: string) {
 // this user's catalogue, so the dropdowns only show real choices (no dead options).
 // Audio counts a facet present if any title carries one of its version tags OR a
 // real captured audio-track language; subtitles use the version tags only.
+// In-isolate memo for the language-facets endpoint. listLanguageFacets fires ~25
+// count-queries per call, all per-user + per-item_type. Caching the result briefly
+// stops repeated page loads (and many concurrent users at scale) from re-running the
+// burst. 60s TTL bounds crawl staleness — a newly-resolved language shows up in the
+// dropdown within a minute; the actual grid (listGenreItems) is uncached and always
+// exact, so a momentarily-missing option never yields wrong results. Bounded LRU: Map
+// preserves insertion order, delete+set bumps recency, oldest evicted past the cap.
+const FACET_CACHE = new Map<string, { value: { audio: unknown[]; subtitles: unknown[] }; exp: number }>();
+const FACET_CACHE_TTL_MS = 60_000;
+const FACET_CACHE_MAX = 512;
+
 async function listLanguageFacets(url: URL, userId: string) {
   const itemType = url.searchParams.get("type") === "series" ? "series" : "movie";
+  const cacheKey = `${userId}:${itemType}`;
+  const nowMs = Date.now();
+  const hit = FACET_CACHE.get(cacheKey);
+  if (hit && hit.exp > nowMs) {
+    FACET_CACHE.delete(cacheKey); // LRU bump
+    FACET_CACHE.set(cacheKey, hit);
+    return hit.value;
+  }
 
   async function present(orFilter: string | null, tagFilter: string[] | null): Promise<boolean> {
     try {
@@ -714,7 +733,13 @@ async function listLanguageFacets(url: URL, userId: string) {
     return ok ? { value: facet, label: SUBTITLE_FACET_LABELS[facet] } : null;
   }))).filter(Boolean);
 
-  return { audio, subtitles };
+  const value = { audio, subtitles };
+  FACET_CACHE.set(cacheKey, { value, exp: nowMs + FACET_CACHE_TTL_MS });
+  if (FACET_CACHE.size > FACET_CACHE_MAX) {
+    const oldest = FACET_CACHE.keys().next().value; // oldest insertion = least-recently used
+    if (oldest !== undefined) FACET_CACHE.delete(oldest);
+  }
+  return value;
 }
 
 // Capture path for real audio-track languages observed at playback (the default
