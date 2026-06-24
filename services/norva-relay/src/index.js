@@ -1061,7 +1061,9 @@ function walkMp4Boxes(buf, start, end, visit) {
   }
 }
 
-function mp4TrakLanguage(buf, start, end) {
+// Returns { isAudio, lang } for one trak (lang may be null even for audio when the
+// track's mdhd language is undetermined).
+function mp4TrakInfo(buf, start, end) {
   let handler = null;
   let lang = null;
   walkMp4Boxes(buf, start, end, (type, ps, pe) => {
@@ -1075,18 +1077,22 @@ function mp4TrakLanguage(buf, start, end) {
       }
     });
   });
-  return handler === "soun" ? lang : null;
+  return { isAudio: handler === "soun", lang };
 }
 
-function parseMp4AudioLanguages(buf, moovStart, moovEnd) {
-  const langs = [];
+// Ordered audio tracks with the ABSOLUTE ffmpeg stream index (= trak position in
+// moov, which is how ffmpeg numbers MP4 streams) so a -map 0:<index> downstream
+// selects the right track. Includes audio tracks whose language is undetermined.
+function parseMp4AudioTracks(buf, moovStart, moovEnd) {
+  const tracks = [];
+  let streamIndex = -1; // every trak (video/audio/…) consumes one ffmpeg stream slot
   walkMp4Boxes(buf, moovStart, moovEnd, (type, ps, pe) => {
-    if (type === "trak") {
-      const lang = mp4TrakLanguage(buf, ps, pe);
-      if (lang) langs.push(lang);
-    }
+    if (type !== "trak") return;
+    streamIndex++;
+    const info = mp4TrakInfo(buf, ps, pe);
+    if (info.isAudio) tracks.push({ index: streamIndex, lang: info.lang });
   });
-  return langs;
+  return tracks;
 }
 
 // Locate the moov box. Walks from the front; if absent (moov-at-end files), scans
@@ -1142,25 +1148,29 @@ function ebmlAscii(buf, start, end) {
   return s.toLowerCase();
 }
 
-function parseMkvAudioLanguages(buf, len) {
-  const langs = [];
+// Ordered audio tracks with the ABSOLUTE ffmpeg stream index (= TrackEntry position,
+// which is how ffmpeg numbers Matroska streams).
+function parseMkvAudioTracks(buf, len) {
+  const tracks = [];
+  let streamIndex = -1; // every TrackEntry (video/audio/sub) is one ffmpeg stream slot
   walkEbml(buf, 0, len, (id, ds, de) => {
     if (id !== 0x18538067) return; // Segment
     walkEbml(buf, ds, de, (id2, s2, e2) => {
       if (id2 !== 0x1654ae6b) return; // Tracks
       walkEbml(buf, s2, e2, (id3, s3, e3) => {
         if (id3 !== 0xae) return; // TrackEntry
+        streamIndex++;
         let trackType = null, language = null, bcp47 = null;
         walkEbml(buf, s3, e3, (id4, s4, e4) => {
           if (id4 === 0x83) trackType = buf[s4]; // TrackType
           else if (id4 === 0x22b59c) language = ebmlAscii(buf, s4, e4); // Language (ISO-639-2)
           else if (id4 === 0x22b59d) bcp47 = ebmlAscii(buf, s4, e4); // LanguageBCP47
         });
-        if (trackType === 2) langs.push(bcp47 || language || "eng"); // audio; MKV default 'eng'
+        if (trackType === 2) tracks.push({ index: streamIndex, lang: bcp47 || language || "eng" }); // audio; MKV default 'eng'
       });
     });
   });
-  return langs;
+  return tracks;
 }
 
 function normalizeRelayLang(value) {
@@ -1182,6 +1192,16 @@ function normalizeRelayLangs(list) {
     if (code) out.add(code);
   }
   return [...out];
+}
+
+// Keep audio tracks IN ORDER with their absolute stream index; normalize the
+// language (null when undetermined). Order/index are preserved (unlike the deduped
+// language set) so the player can build a switchable per-track menu.
+function normalizeRelayTracks(list) {
+  return (Array.isArray(list) ? list : []).map((t) => ({
+    index: Number.isInteger(t.index) ? t.index : null,
+    lang: normalizeRelayLang(t.lang),
+  }));
 }
 
 function parseTotalFromContentRange(value) {
@@ -1251,18 +1271,18 @@ function locateMoov(buf, len) {
   return null;
 }
 
-async function probeContainerLanguages(targetUrl, ua) {
+async function probeContainerAudioTracks(targetUrl, ua) {
   // 256 KB head: enough for ftyp + the moov box header (faststart) or EBML/Tracks.
   const head = await probeRange(targetUrl, ua, 0, 262143, 262144);
   if (!head?.bytes || head.bytes.length < 16) return [];
   const buf = head.bytes;
   if (buf[0] === 0x1a && buf[1] === 0x45 && buf[2] === 0xdf && buf[3] === 0xa3) {
-    let langs = parseMkvAudioLanguages(buf, buf.length);
-    if (!langs.length && head.total && head.total > buf.length) {
+    let tracks = parseMkvAudioTracks(buf, buf.length);
+    if (!tracks.length && head.total && head.total > buf.length) {
       const more = await probeRange(targetUrl, ua, 0, 1048575, 1048576); // 1 MB
-      if (more?.bytes) langs = parseMkvAudioLanguages(more.bytes, more.bytes.length);
+      if (more?.bytes) tracks = parseMkvAudioTracks(more.bytes, more.bytes.length);
     }
-    return normalizeRelayLangs(langs);
+    return normalizeRelayTracks(tracks);
   }
   // ISO-BMFF: locate the moov (faststart header is in `head`; else scan the tail),
   // then fetch its FULL extent so every track's language box is buffered (a later
@@ -1289,15 +1309,33 @@ async function probeContainerLanguages(targetUrl, ua) {
   const full = await probeRange(targetUrl, ua, moovOffset, moovOffset + cap - 1, cap);
   if (!full?.bytes || full.bytes.length < 16) return [];
   const moov = findMoov(full.bytes, full.bytes.length); // moov now begins this buffer
-  return moov ? normalizeRelayLangs(parseMp4AudioLanguages(full.bytes, moov.start, moov.end)) : [];
+  return moov ? normalizeRelayTracks(parseMp4AudioTracks(full.bytes, moov.start, moov.end)) : [];
 }
 
 async function relayProbeAudio(request, env, claims, ctx) {
-  const out = { audioLanguages: [] };
+  // Same shape every track sees for a given file, so cache by (host, vod id) — the
+  // codec/track layout is a property of the FILE. 24h edge cache (like /vod-info)
+  // so opening the audio menu repeatedly doesn't re-probe the provider.
+  let cacheKey = null;
+  const cache = caches.default;
+  try {
+    const su0 = new URL(claims.url);
+    const p0 = su0.pathname.split("/").filter(Boolean);
+    const vid0 = p0[3] ? p0[3].replace(/\.[a-z0-9]+$/i, "") : p0[3];
+    cacheKey = new Request(`https://edge.norva.tv/__probeaudio/${encodeURIComponent(su0.host)}/${encodeURIComponent(vid0 || su0.pathname)}`);
+    const cached = await cache.match(cacheKey);
+    if (cached) {
+      const hit = await cached.json().catch(() => null);
+      if (hit) return json(request, env, hit, 200);
+    }
+  } catch (_) { cacheKey = null; }
+
+  const out = { audioLanguages: [], audioTracks: [], audioDefaultLanguage: null };
   try {
     const su = new URL(claims.url);
     const ua = String(claims.ua || "VLC/3.0.20 LibVLC/3.0.20");
     const langs = new Set();
+    let defaultLang = null;
     // get_vod_info default track (cheap baseline; movie URLs only).
     const parts = su.pathname.split("/").filter(Boolean);
     if (parts[0] === "movie" && parts[1] && parts[2] && parts[3]) {
@@ -1308,14 +1346,28 @@ async function relayProbeAudio(request, env, claims, ctx) {
         if (r.ok) {
           const d = await r.json().catch(() => null);
           const code = normalizeRelayLang(d?.info?.audio?.tags?.language);
-          if (code) langs.add(code);
+          if (code) { langs.add(code); defaultLang = code; }
         }
       } catch (_) { /* baseline is best-effort */ }
     }
-    // Header-probe ALL tracks.
-    try { for (const c of await probeContainerLanguages(claims.url, ua)) langs.add(c); } catch (_) { /* best-effort */ }
+    // Header-probe ALL tracks (ordered, with the absolute ffmpeg stream index).
+    let tracks = [];
+    try { tracks = await probeContainerAudioTracks(claims.url, ua); } catch (_) { /* best-effort */ }
+    for (const t of tracks) { if (t.lang) langs.add(t.lang); }
+    out.audioTracks = tracks;
+    out.audioDefaultLanguage = defaultLang;
     out.audioLanguages = [...langs];
   } catch (_) { /* never throw */ }
+
+  // Cache only a useful (non-empty) result so a transient probe miss can re-probe.
+  if (cacheKey && (out.audioTracks.length || out.audioLanguages.length)) {
+    try {
+      const body = JSON.stringify(out);
+      ctx.waitUntil(cache.put(cacheKey, new Response(body, {
+        headers: { "content-type": "application/json", "cache-control": "max-age=86400" },
+      })));
+    } catch (_) { /* cache is best-effort */ }
+  }
   return json(request, env, out, 200);
 }
 

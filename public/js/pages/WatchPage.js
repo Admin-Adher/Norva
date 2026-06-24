@@ -2064,12 +2064,14 @@ class WatchPage {
 
         const parts = [];
         const title = !this.isGenericTrackTitle(track.title, type) ? track.title : null;
-        const language = track.language && track.language !== 'und' ? track.language.toUpperCase() : null;
+        // Full language name ("French", "Japanese") rather than the bare code ("FR"),
+        // matching the card badge + the native mobile player.
+        const language = this.getLanguageDisplayName(track.language);
         const codec = track.codec ? String(track.codec).toUpperCase() : null;
         const channels = track.channels ? `${track.channels}ch` : null;
 
         if (title) parts.push(title);
-        if (language && !parts.some(part => part.toUpperCase() === language)) parts.push(language);
+        if (language && !parts.some(part => part.toLowerCase() === language.toLowerCase())) parts.push(language);
         if (codec && type === 'audio') parts.push(codec);
         if (channels && type === 'audio') parts.push(channels);
 
@@ -2329,6 +2331,7 @@ class WatchPage {
         this._videoEncodeFallbackTried = false;
         this.cloudAudioInfo = null;
         this.audioTracks = [];
+        this.directAudioStreamIndex = null;
         this.subtitleTracks = [];
         this.subtitleSourceUrl = null;
         this.subtitleStartOffset = 0;
@@ -4342,17 +4345,63 @@ class WatchPage {
             if (!playbackUrl || typeof fetch !== 'function') return;
             const m = /^(https?:\/\/[^/]+)\/relay\/(.+)$/.exec(String(playbackUrl));
             if (!m) return;
-            const res = await fetch(`${m[1]}/vod-info/${m[2]}`, { cache: 'no-store' });
-            if (!res.ok) return;
-            const data = await res.json();
-            this.cloudAudioInfo = (Array.isArray(data.audioTracks) && data.audioTracks[0]) || null;
-            if (data && data.duration && !this.probeDuration) {
-                this.probeDuration = this.normalizeDuration(data.duration);
-                this.updateDurationState();
+            const host = m[1], token = m[2];
+            // Default-track metadata (codec/lang/duration) + — for multi-audio titles —
+            // the ordered per-track list, fetched together. Both best-effort, display-only.
+            const infoP = fetch(`${host}/vod-info/${token}`, { cache: 'no-store' })
+                .then(r => (r.ok ? r.json() : null)).catch(() => null);
+            const probeP = this.contentLooksMultiAudio()
+                ? fetch(`${host}/probe-audio/${token}`, { cache: 'no-store' })
+                    .then(r => (r.ok ? r.json() : null)).catch(() => null)
+                : Promise.resolve(null);
+            const [data, probe] = await Promise.all([infoP, probeP]);
+            if (data) {
+                this.cloudAudioInfo = (Array.isArray(data.audioTracks) && data.audioTracks[0]) || null;
+                if (data.duration && !this.probeDuration) {
+                    this.probeDuration = this.normalizeDuration(data.duration);
+                    this.updateDurationState();
+                }
             }
+            this.applyCloudMultiAudioTracks(probe);
             this.updateAudioTracks();
             this.reportObservedAudioLanguages();
         } catch (_) { /* best-effort enrichment */ }
+    }
+
+    // True when the title is known to carry multiple audio languages (so the extra
+    // container probe to enumerate switchable per-track entries is worthwhile).
+    contentLooksMultiAudio() {
+        const a = this.content?.audioLanguages || this.content?.audio_languages;
+        if (Array.isArray(a) && a.length >= 2) return true;
+        const v = this.content?.versionLanguages || this.content?.version_languages;
+        return Array.isArray(v) && v.some(t => /^multi$/i.test(String(t)));
+    }
+
+    // Populate this.audioTracks from the relay's ordered per-track probe so a
+    // direct-play MULTI file shows real, switchable language tracks (not just "Multi").
+    // Each track carries the ABSOLUTE ffmpeg stream index, so selecting a non-default
+    // language restarts via the gateway with the correct -map. The default track keeps
+    // playing zero-egress until the user picks another. No-op unless >=2 known languages.
+    applyCloudMultiAudioTracks(probe) {
+        const raw = Array.isArray(probe?.audioTracks) ? probe.audioTracks : [];
+        const seen = new Set();
+        const usable = [];
+        for (const t of raw) {
+            const idx = Number(t?.index);
+            const lang = this.normalizeTrackLanguage(t?.lang);
+            if (!Number.isInteger(idx) || !lang || lang === 'und' || seen.has(lang)) continue;
+            seen.add(lang);
+            usable.push({ index: idx, language: lang });
+        }
+        if (usable.length < 2) return; // single/unknown -> keep the single-label path
+        const defLang = this.normalizeTrackLanguage(probe?.audioDefaultLanguage);
+        let defPos = usable.findIndex(t => t.language === defLang);
+        if (defPos < 0) defPos = 0;
+        this.audioTracks = usable.map((t, i) => ({ index: t.index, language: t.language, default: i === defPos }));
+        this.directAudioStreamIndex = usable[defPos].index;
+        if (!this.selectedAudioTrackUserChoice) {
+            this.selectedAudioStreamIndex = usable[defPos].index;
+        }
     }
 
     formatChannelLayout(layout, channels) {
@@ -4503,6 +4552,16 @@ class WatchPage {
         }
 
         if (source !== 'probe' || !Number.isInteger(streamIndex)) {
+            this.closeAudioMenu();
+            return;
+        }
+
+        // The default track is already playing via zero-egress direct play — picking
+        // it again must NOT spin up a needless transcode session.
+        if (this.currentPlaybackMode === 'direct' && Number(streamIndex) === Number(this.directAudioStreamIndex)) {
+            this.selectedAudioStreamIndex = streamIndex;
+            this.selectedAudioTrackUserChoice = false;
+            this.updateAudioTracks();
             this.closeAudioMenu();
             return;
         }
