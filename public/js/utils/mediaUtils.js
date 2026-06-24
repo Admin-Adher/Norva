@@ -142,7 +142,7 @@ const MediaUtils = (() => {
         { tag: 'VFF', re: /\bvff\b/i, language: 'fr' },
         { tag: 'VFQ', re: /\bvfq\b/i, language: 'fr' },
         { tag: 'VF', re: /\bvf\b/i, language: 'fr' },
-        { tag: 'FR', re: /(^|[^a-z])fr([^a-z]|$)/i, language: 'fr' },
+        { tag: 'FR', re: /(^|[^a-z\s])fr([^a-z\s]|$)/i, language: 'fr' },
         { tag: 'VOSTFR', re: /\bvost[\s._-]*fr\b/i, language: 'original' },
         { tag: 'VOSTEN', re: /\bvost[\s._-]*(en|eng|english)\b/i, language: 'original' },
         { tag: 'VOSTES', re: /\bvost[\s._-]*(es|spa|spanish)\b/i, language: 'original' },
@@ -159,17 +159,17 @@ const MediaUtils = (() => {
         { tag: 'VOSTKOR', re: /\bvost[\s._-]*(ko|kor|korean)\b/i, language: 'original' },
         { tag: 'VOSTZH', re: /\bvost[\s._-]*(zh|zho|chi|cn|chinese|mandarin)\b/i, language: 'original' },
         { tag: 'VO', re: /\bvo\b/i, language: 'original' },
-        { tag: 'EN', re: /(^|[^a-z])en([^a-z]|$)|\beng(lish)?\b/i, language: 'en' },
-        { tag: 'ES', re: /(^|[^a-z])es([^a-z]|$)|\bspa(nish)?\b|\bcastellano\b/i, language: 'es' },
-        { tag: 'AR', re: /(^|[^a-z])ar([^a-z]|$)|\bara(bic|be)?\b/i, language: 'ar' },
-        { tag: 'DE', re: /(^|[^a-z])de([^a-z]|$)|\b(deu|ger|german|deutsch)\b/i, language: 'de' },
+        { tag: 'EN', re: /(^|[^a-z\s])en([^a-z\s]|$)|\beng(lish)?\b/i, language: 'en' },
+        { tag: 'ES', re: /(^|[^a-z\s])es([^a-z\s]|$)|\bspa(nish)?\b|\bcastellano\b/i, language: 'es' },
+        { tag: 'AR', re: /(^|[^a-z\s])ar([^a-z\s]|$)|\bara(bic|be)?\b/i, language: 'ar' },
+        { tag: 'DE', re: /(^|[^a-z\s])de([^a-z\s]|$)|\b(deu|ger|german|deutsch)\b/i, language: 'de' },
         { tag: 'ITA', re: /\b(ita|italian|italiano)\b/i, language: 'it' },
-        { tag: 'PT', re: /(^|[^a-z])pt([^a-z]|$)|\b(por|portuguese|portugues|br|brazilian)\b/i, language: 'pt' },
-        { tag: 'TR', re: /(^|[^a-z])tr([^a-z]|$)|\b(tur|turkish)\b/i, language: 'tr' },
-        { tag: 'NL', re: /(^|[^a-z])nl([^a-z]|$)|\b(nld|dut|dutch|nederlands)\b/i, language: 'nl' },
-        { tag: 'RU', re: /(^|[^a-z])ru([^a-z]|$)|\b(rus|russian)\b/i, language: 'ru' },
-        { tag: 'PL', re: /(^|[^a-z])pl([^a-z]|$)|\b(pol|polish)\b/i, language: 'pl' },
-        { tag: 'HI', re: /(^|[^a-z])hi([^a-z]|$)|\b(hin|hindi)\b/i, language: 'hi' },
+        { tag: 'PT', re: /(^|[^a-z\s])pt([^a-z\s]|$)|\b(por|portuguese|portugues|br|brazilian)\b/i, language: 'pt' },
+        { tag: 'TR', re: /(^|[^a-z\s])tr([^a-z\s]|$)|\b(tur|turkish)\b/i, language: 'tr' },
+        { tag: 'NL', re: /(^|[^a-z\s])nl([^a-z\s]|$)|\b(nld|dut|dutch|nederlands)\b/i, language: 'nl' },
+        { tag: 'RU', re: /(^|[^a-z\s])ru([^a-z\s]|$)|\b(rus|russian)\b/i, language: 'ru' },
+        { tag: 'PL', re: /(^|[^a-z\s])pl([^a-z\s]|$)|\b(pol|polish)\b/i, language: 'pl' },
+        { tag: 'HI', re: /(^|[^a-z\s])hi([^a-z\s]|$)|\b(hin|hindi)\b/i, language: 'hi' },
         { tag: 'JPN', re: /\b(jp|jpn|japanese)\b/i, language: 'ja' },
         { tag: 'KOR', re: /\b(ko|kor|korean)\b/i, language: 'ko' },
         { tag: 'ZH', re: /\b(zh|zho|chi|cn|chinese|mandarin)\b/i, language: 'zh' }
@@ -289,7 +289,7 @@ const MediaUtils = (() => {
         const ordered = [...LANG_TAGS].sort((a, b) => b.length - a.length);
         if (!language) {
             for (const tag of ordered) {
-                const re = new RegExp(`(^|[^a-z])${tag}([^a-z]|$)`, 'i');
+                const re = new RegExp(`(^|[^a-z\\s])${tag}([^a-z\\s]|$)`, 'i');
                 if (re.test(lower)) { language = tag.toUpperCase(); break; }
             }
         }
