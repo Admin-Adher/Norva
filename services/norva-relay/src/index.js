@@ -78,7 +78,7 @@ export default {
         if (claims.exp * 1000 < Date.now()) {
           return json(request, env, { error: "Relay token expired" }, 401);
         }
-        return await proxyPlayback(request, env, claims);
+        return await proxyPlayback(request, env, claims, ctx);
       }
 
       // Track metadata for the player's audio/subtitle menus. The relay is the
@@ -352,7 +352,7 @@ async function routeSessionCoordinator(request, env) {
   });
 }
 
-async function proxyPlayback(request, env, claims) {
+async function proxyPlayback(request, env, claims, ctx) {
   const targetUrl = new URL(claims.url);
   const headers = new Headers();
   copyHeader(request.headers, headers, "accept");
@@ -448,6 +448,7 @@ async function proxyPlayback(request, env, claims) {
       finalUrl: upstreamFinalUrl,
       reason: reason.slice(0, 200),
     }));
+    maybeAlertUpstreamError(env, ctx, { host: targetUrl.hostname, status: upstream.status, method: request.method, reason, finalUrl: upstreamFinalUrl });
     return new Response(request.method === "HEAD" ? null : reason, {
       status: upstream.status,
       statusText: upstream.statusText,
@@ -1343,6 +1344,38 @@ function socketHintFresh(key) {
 
 function clearSocketHint(key) {
   if (key) SOCKET_HINTS.delete(key);
+}
+
+// Optional per-provider alerting (docs/roadmap/scaling-status.md §B). When MONITOR_WEBHOOK
+// is set, POST a compact alert on upstream errors, sampled to at most once per
+// (host,status) per 5 min so a flapping provider can't flood. Off by default (no secret
+// => no-op). Fire-and-forget via ctx.waitUntil so it never adds latency to the player's
+// error path. The structured console.warn log is emitted regardless.
+const ALERT_SENT = new Map();
+const ALERT_TTL_MS = 5 * 60 * 1000;
+const ALERT_MAX = 512;
+
+function maybeAlertUpstreamError(env, ctx, info) {
+  const webhook = env && env.MONITOR_WEBHOOK;
+  if (!webhook) return;
+  const key = `${info.host}|${info.status}`;
+  const at = ALERT_SENT.get(key);
+  if (at !== undefined && Date.now() - at < ALERT_TTL_MS) return;
+  if (ALERT_SENT.size >= ALERT_MAX) {
+    const oldest = ALERT_SENT.keys().next().value;
+    if (oldest !== undefined) ALERT_SENT.delete(oldest);
+  }
+  ALERT_SENT.set(key, Date.now());
+  const body = JSON.stringify({
+    tag: "norva-relay-upstream-error",
+    host: info.host,
+    status: info.status,
+    method: info.method,
+    reason: String(info.reason || "").slice(0, 200),
+    finalUrl: String(info.finalUrl || "").slice(0, 300),
+  });
+  const send = fetch(webhook, { method: "POST", headers: { "content-type": "application/json" }, body }).catch(() => {});
+  if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(send);
 }
 
 // Resolve the provider's redirect (auth) and stream the resulting node over a raw

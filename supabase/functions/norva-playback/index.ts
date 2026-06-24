@@ -138,6 +138,9 @@ Deno.serve(async (req) => {
     if (req.method === "POST" && segments[0] === "catalog-mirror-verify") {
       return json(req, await runCatalogMirrorVerify(req, supabase));
     }
+    if (req.method === "POST" && segments[0] === "provider-playback-check") {
+      return json(req, await runProviderPlaybackCheck(req, supabase));
+    }
     throw new HttpError(404, "Route not found");
   } catch (error) {
     const status = error instanceof HttpError ? error.status : 500;
@@ -1815,6 +1818,43 @@ async function runCatalogMirrorVerify(req: Request, db: SupabaseClient) {
     n("backdrop_url_mismatch") === 0 && n("i18n_mismatch") === 0 &&
     n("tmdb_mismatch") === 0 && n("cloud_only") === 0;
   return { ok: true, clean, diff: row };
+}
+
+// Multi-provider smoke test (docs/roadmap/scaling-status.md §C): for one movie per
+// distinct provider host, run a real 1-byte Range request through the relay and assert
+// 206 — catches a provider whose auth/redirect broke BEFORE users hit it. Service-role
+// gated; read-only.
+async function runProviderPlaybackCheck(req: Request, db: SupabaseClient) {
+  const expected = Deno.env.get("NORVA_BACKFILL_TOKEN") ?? "";
+  const provided = req.headers.get("Authorization")?.match(/^Bearer\s+(.+)$/i)?.[1] ?? "";
+  if (!expected || provided !== expected) throw new HttpError(401, "Unauthorized");
+  const body = recordOrEmpty(await req.json().catch(() => ({})));
+  const userId = stringOr(body.userId, "");
+  if (!userId) throw new HttpError(400, "Missing userId");
+  const runtimeConfig = await getRuntimeConfig(db);
+  if (!runtimeConfig.relayBaseUrl || !runtimeConfig.relayTokenSecret) throw new HttpError(503, "Norva Relay is not configured");
+
+  const { data: sources } = await db.from("cloud_sources").select("id, config_hint").eq("user_id", userId);
+  const results: JsonRecord[] = [];
+  for (const src of sources ?? []) {
+    const sourceId = String((src as JsonRecord).id);
+    const serverHost = stringOrNull((recordOrEmpty((src as JsonRecord).config_hint) as JsonRecord).serverHost) ?? "?";
+    const { data: variants } = await db.from("cloud_title_variants")
+      .select("external_id, item_type").eq("source_id", sourceId).eq("item_type", "movie").limit(1);
+    const v = (variants ?? [])[0] as JsonRecord | undefined;
+    if (!v) { results.push({ serverHost, ok: false, reason: "no movie variant" }); continue; }
+    const target = await resolvePlaybackTarget(sourceId, "movie", String(v.external_id), userId, db).catch(() => null);
+    if (!target?.targetUrl) { results.push({ serverHost, ok: false, reason: "no target" }); continue; }
+    const payload = JSON.stringify({ v: 1, sid: "provider-check", uid: userId, url: target.targetUrl, exp: Math.floor(Date.now() / 1000) + 120 });
+    const signature = await hmacBase64Url(runtimeConfig.relayTokenSecret, payload);
+    const token = `${base64Url(encoder.encode(payload))}.${signature}`;
+    const t0 = Date.now();
+    const rr = await fetch(`${runtimeConfig.relayBaseUrl}/relay/${token}`, { headers: { range: "bytes=0-1" } }).catch(() => null);
+    const ms = Date.now() - t0;
+    const status = rr?.status ?? 0;
+    results.push({ serverHost, status, ok: status === 206, ms, path: rr?.headers.get("x-norva-relay-path") ?? null });
+  }
+  return { checked: results.length, allOk: results.length > 0 && results.every((r) => r.ok), results };
 }
 
 function xtreamStreamUrl(config: {
