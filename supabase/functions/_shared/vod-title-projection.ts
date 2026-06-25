@@ -30,6 +30,12 @@ type ProjectionOptions = {
   xtreamConfig?: XtreamConfig | null;
   vodInfoLimit?: number;
   tmdbValidateLimit?: number;
+  // When set, get_vod_info is fetched through the media gateway (a provider-
+  // tolerated IP) instead of directly from this Supabase edge runtime (a
+  // provider-blocked datacenter IP). Best-effort: a provider error skips the item
+  // rather than falling back to the blocked IP.
+  mediaGatewayUrl?: string | null;
+  mediaGatewayToken?: string | null;
 };
 
 const encoder = new TextEncoder();
@@ -44,8 +50,11 @@ export async function refreshVodTitleProjection(options: ProjectionOptions) {
   );
   if (!rows.length) return { titles: 0, variants: 0, providerTmdbIds: 0, vodInfoFetched: 0 };
 
+  const gateway = options.mediaGatewayUrl && options.mediaGatewayToken
+    ? { url: options.mediaGatewayUrl.replace(/\/+$/, ""), token: options.mediaGatewayToken }
+    : null;
   const vodInfoByExternalId = options.xtreamConfig
-    ? await loadVodInfoIds(options.xtreamConfig, rows, boundedInt(options.vodInfoLimit, DEFAULT_VOD_INFO_LIMIT, 0, 1000))
+    ? await loadVodInfoIds(options.xtreamConfig, rows, boundedInt(options.vodInfoLimit, DEFAULT_VOD_INFO_LIMIT, 0, 1000), gateway)
     : new Map<string, ProviderIds>();
   const providerIdsByExternalId = collectProviderIds(rows, vodInfoByExternalId);
   const tmdbValidationById = await validateProviderTmdbIds(rows, providerIdsByExternalId, options.tmdbValidateLimit);
@@ -334,7 +343,12 @@ function extractProviderIds(value: unknown): ProviderIds {
   return { tmdbId, imdbId };
 }
 
-async function loadVodInfoIds(config: XtreamConfig, rows: ProjectionRow[], limit: number) {
+async function loadVodInfoIds(
+  config: XtreamConfig,
+  rows: ProjectionRow[],
+  limit: number,
+  gateway: { url: string; token: string } | null = null,
+) {
   const result = new Map<string, ProviderIds>();
   if (limit <= 0) return result;
   const candidates = rows
@@ -352,7 +366,7 @@ async function loadVodInfoIds(config: XtreamConfig, rows: ProjectionRow[], limit
       const externalId = stringOr(row.external_id, "");
       if (!externalId) continue;
       try {
-        const payload = await fetchJson(xtreamApiUrl(config, "get_vod_info", { vod_id: externalId }), 8000);
+        const payload = await fetchVodInfo(config, gateway, externalId, 8000);
         const ids = extractProviderIds(payload);
         if (ids.tmdbId || ids.imdbId) result.set(externalId, ids);
       } catch (_) {
@@ -363,6 +377,56 @@ async function loadVodInfoIds(config: XtreamConfig, rows: ProjectionRow[], limit
 
   await Promise.all(Array.from({ length: concurrency }, () => worker()));
   return result;
+}
+
+// get_vod_info, preferring the media gateway so the crawl reaches the provider
+// from a tolerated IP instead of the (blocked) Supabase edge IP. On a gateway-
+// side problem (missing route / unreachable / 5xx) we fall back to a direct
+// fetch; on a provider-origin error we THROW so the caller skips the item rather
+// than hammering the blocked IP for a best-effort optimisation.
+// deno-lint-ignore no-explicit-any
+async function fetchVodInfo(
+  config: XtreamConfig,
+  gateway: { url: string; token: string } | null,
+  vodId: string,
+  timeoutMs: number,
+): Promise<any> {
+  if (gateway) {
+    let response: Response | null = null;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      response = await fetch(`${gateway.url}/xtream/metadata`, {
+        method: "POST",
+        signal: controller.signal,
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${gateway.token}`,
+        },
+        body: JSON.stringify({
+          serverUrl: config.serverUrl,
+          username: config.username,
+          password: config.password,
+          action: "get_vod_info",
+          params: { vod_id: vodId },
+          userAgent: "VLC/3.0.20 LibVLC/3.0.20",
+        }),
+      });
+    } catch (_) {
+      response = null; // gateway unreachable → fall through to a direct fetch
+    } finally {
+      clearTimeout(timer);
+    }
+    if (response) {
+      if (response.ok) return await response.json().catch(() => null);
+      // Provider-origin error (e.g. 401/403/429): skip, don't fall back to the
+      // blocked Supabase IP. Only gateway-side problems fall through to direct.
+      if (![404, 405, 502, 503, 504].includes(response.status)) {
+        throw new Error(`Provider vod_info refused ${response.status}`);
+      }
+    }
+  }
+  return fetchJson(xtreamApiUrl(config, "get_vod_info", { vod_id: vodId }), timeoutMs);
 }
 
 async function validateProviderTmdbIds(rows: ProjectionRow[], idsByExternalId: Map<string, ProviderIds>, limitOverride?: number) {

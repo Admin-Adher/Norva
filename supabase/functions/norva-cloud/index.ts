@@ -1457,6 +1457,7 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
         limit: batchLimit,
       });
       const sourceType = stringOr(source.source_type, "");
+      const rcTitles = await getRuntimeConfig(db);
       const titleProjection = await refreshVodTitleProjection({
         sourceId,
         userId,
@@ -1469,6 +1470,8 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
             password: stringOr(config.password, ""),
           }
           : null,
+        mediaGatewayUrl: rcTitles.mediaGatewayUrl,
+        mediaGatewayToken: rcTitles.mediaGatewayToken,
         vodInfoLimit: boundedInt(Deno.env.get("NORVA_VOD_INFO_FINALIZE_LIMIT"), 0, 0, 1000),
         tmdbValidateLimit: boundedInt(Deno.env.get("NORVA_TMDB_VALIDATE_FINALIZE_LIMIT"), 40, 0, 1000),
       });
@@ -1683,6 +1686,11 @@ async function syncXtreamSource(
     steps: { connect: { status: "running" } },
   });
   if (!username || !password) throw new HttpError(400, "Xtream credentials are incomplete");
+
+  // Provider metadata egresses via the gateway (tolerated IP), not this Supabase
+  // edge runtime (provider-blocked IP). Cached; gateway-unconfigured → direct.
+  const runtimeConfig = await getRuntimeConfig(db);
+
   await reportProgress({
     stage: "discovering",
     percent: 18,
@@ -1694,13 +1702,15 @@ async function syncXtreamSource(
       categories: { status: "running" },
     },
   });
+  const fetchCatalog = (action: string) =>
+    fetchProviderMetadata(runtimeConfig, { serverUrl, username, password, action, timeoutMs: 25000 }).catch(() => []);
   const [live, vod, series, liveCategories, vodCategories, seriesCategories] = await Promise.all([
-    fetchJson(xtreamApiUrl({ serverUrl, username, password, action: "get_live_streams" }), 25000).catch(() => []),
-    fetchJson(xtreamApiUrl({ serverUrl, username, password, action: "get_vod_streams" }), 25000).catch(() => []),
-    fetchJson(xtreamApiUrl({ serverUrl, username, password, action: "get_series" }), 25000).catch(() => []),
-    fetchJson(xtreamApiUrl({ serverUrl, username, password, action: "get_live_categories" }), 25000).catch(() => []),
-    fetchJson(xtreamApiUrl({ serverUrl, username, password, action: "get_vod_categories" }), 25000).catch(() => []),
-    fetchJson(xtreamApiUrl({ serverUrl, username, password, action: "get_series_categories" }), 25000).catch(() => []),
+    fetchCatalog("get_live_streams"),
+    fetchCatalog("get_vod_streams"),
+    fetchCatalog("get_series"),
+    fetchCatalog("get_live_categories"),
+    fetchCatalog("get_vod_categories"),
+    fetchCatalog("get_series_categories"),
   ]);
   const liveCategoryMap = categoryMap(liveCategories);
   const vodCategoryMap = categoryMap(vodCategories);
@@ -1762,6 +1772,8 @@ async function syncXtreamSource(
     rows: savedRows,
     db,
     xtreamConfig: { serverUrl, username, password },
+    mediaGatewayUrl: runtimeConfig.mediaGatewayUrl,
+    mediaGatewayToken: runtimeConfig.mediaGatewayToken,
     vodInfoLimit: boundedInt(Deno.env.get("NORVA_VOD_INFO_SYNC_LIMIT"), 120, 0, 1000),
   });
   await reportProgress({
@@ -3359,6 +3371,67 @@ async function fetchJson(url: string, timeoutMs: number) {
   const payload = await response.json().catch(() => null);
   if (!response.ok) throw new HttpError(response.status, "IPTV provider request failed", payload);
   return payload;
+}
+
+// Fetch Xtream catalogue/VOD metadata, preferring the media gateway so the crawl
+// reaches the provider from the SAME tolerated IP as streaming instead of this
+// Supabase edge runtime's provider-BLOCKED datacenter IP (user_multi_ip + empty
+// catalogues). Falls back to a direct fetch only on gateway-side problems.
+// deno-lint-ignore no-explicit-any
+async function fetchProviderMetadata(
+  runtimeConfig: RuntimeConfig,
+  args: { serverUrl: string; username: string; password: string; action: string; params?: Record<string, string>; timeoutMs?: number },
+): Promise<any> {
+  const timeoutMs = args.timeoutMs ?? 25000;
+  if (runtimeConfig.mediaGatewayUrl && runtimeConfig.mediaGatewayToken) {
+    try {
+      return await requestGatewayMetadata(runtimeConfig, args, Math.max(timeoutMs + 10000, 45000));
+    } catch (error) {
+      const status = error instanceof HttpError ? error.status : 502;
+      if (![404, 405, 502, 503, 504].includes(status)) throw error;
+      console.warn("[norva-cloud] gateway metadata unavailable, falling back to direct", args.action, status);
+    }
+  }
+  return fetchJson(
+    xtreamApiUrl({ serverUrl: args.serverUrl, username: args.username, password: args.password, action: args.action }, args.params ?? {}),
+    timeoutMs,
+  );
+}
+
+async function requestGatewayMetadata(
+  runtimeConfig: RuntimeConfig,
+  args: { serverUrl: string; username: string; password: string; action: string; params?: Record<string, string> },
+  timeoutMs: number,
+): Promise<unknown> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(`${runtimeConfig.mediaGatewayUrl}/xtream/metadata`, {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${runtimeConfig.mediaGatewayToken}`,
+      },
+      body: JSON.stringify({
+        serverUrl: args.serverUrl,
+        username: args.username,
+        password: args.password,
+        action: args.action,
+        params: args.params ?? {},
+        userAgent: "VLC/3.0.20 LibVLC/3.0.20",
+      }),
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) throw new HttpError(response.status, "Media gateway refused the metadata request", payload);
+    return payload;
+  } catch (error) {
+    if (error instanceof HttpError) throw error;
+    const aborted = error instanceof Error && error.name === "AbortError";
+    throw new HttpError(aborted ? 504 : 502, "Unable to reach media gateway", error instanceof Error ? error.message : undefined);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function fetchText(url: string, timeoutMs: number, maxBytes: number, headers = providerHeaders()) {

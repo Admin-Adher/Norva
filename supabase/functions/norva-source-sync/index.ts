@@ -1077,6 +1077,7 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
         limit: batchLimit,
       });
       const sourceType = stringOr(source.source_type, "");
+      const rcTitles = await getRuntimeConfig(db);
       const titleProjection = await refreshVodTitleProjection({
         sourceId,
         userId,
@@ -1089,6 +1090,8 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
             password: stringOr(config.password, ""),
           }
           : null,
+        mediaGatewayUrl: rcTitles.mediaGatewayUrl,
+        mediaGatewayToken: rcTitles.mediaGatewayToken,
         vodInfoLimit: boundedInt(Deno.env.get("NORVA_VOD_INFO_FINALIZE_LIMIT"), 0, 0, 1000),
         tmdbValidateLimit: boundedInt(Deno.env.get("NORVA_TMDB_VALIDATE_FINALIZE_LIMIT"), 40, 0, 1000),
       });
@@ -1473,6 +1476,8 @@ async function syncXtreamSource(
     rows: savedRows,
     db,
     xtreamConfig: { serverUrl, username, password },
+    mediaGatewayUrl: runtimeConfig.mediaGatewayUrl,
+    mediaGatewayToken: runtimeConfig.mediaGatewayToken,
     vodInfoLimit: boundedInt(Deno.env.get("NORVA_VOD_INFO_SYNC_LIMIT"), 120, 0, 1000),
   });
   await reportProgress({
