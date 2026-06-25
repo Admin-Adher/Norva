@@ -979,6 +979,8 @@ class App {
         }
 
         this.currentPage = pageName;
+        // Hide the mobile bottom tab bar while watching (full-screen video).
+        document.body.classList.toggle('is-watching', pageName === 'watch');
 
         if (this.pages[pageName]?.show) {
             this.pages[pageName].show();

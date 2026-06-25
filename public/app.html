@@ -10,7 +10,7 @@
   <title>Norva | Cloud media player</title>
   <meta name="description" content="Organize your compatible media source and sync playback across your screens.">
   <link rel="icon" type="image/png" href="/favicon.png">
-  <link rel="stylesheet" href="/css/main.css?v=46">
+  <link rel="stylesheet" href="/css/main.css?v=47">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@800&display=swap"
@@ -108,6 +108,33 @@
       <button class="nav-profile" id="nav-profile" type="button" hidden aria-label="Switch profile">
         <img class="nav-profile-img" id="nav-profile-img" src="/img/avatars/placeholder.svg" alt="">
       </button>
+    </nav>
+
+    <!-- Mobile bottom tab bar (phones only). Reuses .nav-link + data-page so the
+         existing navigateTo handler, active-state sync, and catalog gating all
+         apply with no extra JS. Replaces the top hamburger on phones; hidden on
+         desktop/tablet. -->
+    <nav class="bottom-nav" id="bottom-nav" aria-label="Primary">
+      <a href="#" class="nav-link active" data-page="home">
+        <span class="nav-icon"><img class="icon norva-ui-icon" src="/img/icons/norva-home.svg" alt=""></span>
+        <span>Home</span>
+      </a>
+      <a href="#" class="nav-link catalog-nav-hidden" data-page="live" hidden aria-hidden="true" tabindex="-1">
+        <span class="nav-icon"><img class="icon norva-ui-icon" src="/img/icons/norva-live-tv.svg" alt=""></span>
+        <span>Live TV</span>
+      </a>
+      <a href="#" class="nav-link catalog-nav-hidden" data-page="movies" hidden aria-hidden="true" tabindex="-1">
+        <span class="nav-icon"><img class="icon norva-ui-icon" src="/img/icons/norva-movies.svg" alt=""></span>
+        <span>Movies</span>
+      </a>
+      <a href="#" class="nav-link catalog-nav-hidden" data-page="series" hidden aria-hidden="true" tabindex="-1">
+        <span class="nav-icon"><img class="icon norva-ui-icon" src="/img/icons/norva-series.svg" alt=""></span>
+        <span>Series</span>
+      </a>
+      <a href="#" class="nav-link" data-page="settings">
+        <span class="nav-icon"><img class="icon norva-ui-icon" src="/img/icons/norva-settings.svg" alt=""></span>
+        <span>Settings</span>
+      </a>
     </nav>
 
     <!-- Background catalog-enrichment progress (driven by app.js startEnrichmentProgressPoll). -->
@@ -1774,7 +1801,7 @@
   <script src="/js/pages/Settings.js?v=29"></script>
   <script src="/js/pages/WatchPage.js?v=111"></script>
   <script src="/js/profiles.js?v=6"></script>
-  <script src="/js/app.js?v=30"></script>
+  <script src="/js/app.js?v=31"></script>
   <script>
     // Check for SSO token in URL
     (function () {

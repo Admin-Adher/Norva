@@ -9809,3 +9809,76 @@ mark.search-highlight {
 .tv-mode body {
   font-size: 17px;
 }
+
+/* ============================================================
+   Mobile bottom tab bar — replaces the top hamburger on phones.
+   The .bottom-nav links reuse .nav-link + data-page, so the existing
+   navigateTo handler, active-state sync, and catalog gating all apply
+   with no extra JS. Desktop/tablet keep the top nav (this is hidden).
+   ============================================================ */
+.bottom-nav { display: none; }
+
+@media (max-width: 640px) {
+  /* Retire the top hamburger + dropdown — page nav now lives at the bottom.
+     The top bar shrinks to logo (left) + profile avatar (right). */
+  .mobile-menu-toggle { display: none !important; }
+  .navbar-menu { display: none !important; }
+
+  .bottom-nav {
+    display: flex;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 200;
+    justify-content: space-around;
+    align-items: stretch;
+    background: var(--glass-bg);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border-top: 1px solid var(--glass-border);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.25);
+  }
+  .bottom-nav .nav-link {
+    flex: 1 1 0;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    height: 56px;
+    padding: 6px 2px;
+    color: var(--text-secondary, #9aa6bd);
+    text-decoration: none;
+    opacity: 0.7;
+    transition: opacity 0.15s ease, color 0.15s ease, transform 0.1s ease;
+  }
+  .bottom-nav .nav-link .nav-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+  }
+  .bottom-nav .nav-link .nav-icon img { width: 22px; height: 22px; display: block; }
+  .bottom-nav .nav-link span:not(.nav-icon) {
+    font-size: 10px;
+    line-height: 1;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .bottom-nav .nav-link.active { opacity: 1; color: var(--primary-blue); }
+  .bottom-nav .nav-link:active { transform: scale(0.92); }
+  /* .nav-link sets display:flex, which would override the [hidden] attribute —
+     restore it so catalog tabs stay hidden until the catalog is ready. */
+  .bottom-nav .nav-link[hidden] { display: none; }
+
+  /* Keep page content clear of the fixed bar. */
+  .main-content { padding-bottom: calc(56px + env(safe-area-inset-bottom, 0px)); }
+
+  /* Hide the bar while watching so the video + its controls aren't covered. */
+  body.is-watching .bottom-nav { display: none; }
+  body.is-watching .main-content { padding-bottom: 0; }
+}
