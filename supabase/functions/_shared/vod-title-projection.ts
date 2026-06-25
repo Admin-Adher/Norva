@@ -53,8 +53,9 @@ export async function refreshVodTitleProjection(options: ProjectionOptions) {
   const gateway = options.mediaGatewayUrl && options.mediaGatewayToken
     ? { url: options.mediaGatewayUrl.replace(/\/+$/, ""), token: options.mediaGatewayToken }
     : null;
+  const projectionServerHost = options.xtreamConfig ? hostFromUrl(options.xtreamConfig.serverUrl) : "";
   const vodInfoByExternalId = options.xtreamConfig
-    ? await loadVodInfoIds(options.xtreamConfig, rows, boundedInt(options.vodInfoLimit, DEFAULT_VOD_INFO_LIMIT, 0, 1000), gateway)
+    ? await loadVodInfoIds(options.xtreamConfig, rows, boundedInt(options.vodInfoLimit, DEFAULT_VOD_INFO_LIMIT, 0, 1000), gateway, options.db, projectionServerHost)
     : new Map<string, ProviderIds>();
   const providerIdsByExternalId = collectProviderIds(rows, vodInfoByExternalId);
   const tmdbValidationById = await validateProviderTmdbIds(rows, providerIdsByExternalId, options.tmdbValidateLimit);
@@ -348,6 +349,8 @@ async function loadVodInfoIds(
   rows: ProjectionRow[],
   limit: number,
   gateway: { url: string; token: string } | null = null,
+  db: SupabaseClient | null = null,
+  serverHost = "",
 ) {
   const result = new Map<string, ProviderIds>();
   if (limit <= 0) return result;
@@ -355,13 +358,40 @@ async function loadVodInfoIds(
     .filter((row) => row.item_type === "movie")
     .sort((a, b) => Number(recordOrEmpty(b.metadata).added || 0) - Number(recordOrEmpty(a.metadata).added || 0))
     .slice(0, limit);
+  if (!candidates.length) return result;
 
+  // Cross-user reuse: the get_vod_info result (external_id -> tmdb/imdb id) is a property of
+  // the provider FILE, so a global cache populated by ANY user lets the next user skip the
+  // per-movie provider call. Read what's already resolved; only fetch the rest.
+  const pending = new Set(candidates.map((r) => stringOr(r.external_id, "")).filter(Boolean));
+  if (db && serverHost && pending.size) {
+    const ids = [...pending];
+    for (let i = 0; i < ids.length; i += 200) {
+      try {
+        const { data } = await db.from("catalog_file_tracks")
+          .select("external_id, provider_tmdb_id, provider_imdb_id")
+          .eq("server_host", serverHost).eq("item_type", "movie")
+          .not("ids_resolved_at", "is", null)
+          .in("external_id", ids.slice(i, i + 200));
+        for (const r of data ?? []) {
+          const eid = stringOr((r as JsonRecord).external_id, "");
+          if (!eid) continue;
+          pending.delete(eid); // resolved before — don't re-fetch (even if it had no id)
+          const tmdbId = stringOrNull((r as JsonRecord).provider_tmdb_id);
+          const imdbId = stringOrNull((r as JsonRecord).provider_imdb_id);
+          if (tmdbId || imdbId) result.set(eid, { tmdbId, imdbId });
+        }
+      } catch (_) { /* best-effort reuse */ }
+    }
+  }
+
+  const toFetch = candidates.filter((r) => pending.has(stringOr(r.external_id, "")));
   const concurrency = 4;
   let cursor = 0;
   async function worker() {
     for (;;) {
       const index = cursor++;
-      const row = candidates[index];
+      const row = toFetch[index];
       if (!row) return;
       const externalId = stringOr(row.external_id, "");
       if (!externalId) continue;
@@ -369,6 +399,15 @@ async function loadVodInfoIds(
         const payload = await fetchVodInfo(config, gateway, externalId, 8000);
         const ids = extractProviderIds(payload);
         if (ids.tmdbId || ids.imdbId) result.set(externalId, ids);
+        // Share to the global cache (mark resolved even when there's no id) so the next user reuses it.
+        if (db && serverHost) {
+          try {
+            await db.rpc("upsert_catalog_file_ids", {
+              p_server_host: serverHost, p_item_type: "movie", p_external_id: externalId,
+              p_tmdb_id: ids.tmdbId ?? "", p_imdb_id: ids.imdbId ?? "",
+            });
+          } catch (_) { /* best-effort global cache */ }
+        }
       } catch (_) {
         // Provider metadata is an optimization. The raw item still imports.
       }
@@ -814,6 +853,10 @@ function stringOr(value: unknown, fallback: string) {
 function stringOrNull(value: unknown) {
   const string = stringOr(value, "");
   return string || null;
+}
+
+function hostFromUrl(url: unknown): string {
+  try { return new URL(stringOr(url, "")).hostname; } catch { return ""; }
 }
 
 function cleanId(value: unknown) {
