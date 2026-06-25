@@ -412,7 +412,17 @@ class App {
                 const p = await window.NorvaCloud?.mediaItems?.enrichmentProgress?.();
                 const percent = Number(p?.percent);
                 const total = Number(p?.total) || 0;
-                if (!Number.isFinite(percent) || total < 1 || percent >= 98) {
+                // Plateau detection: some titles are genuinely unmatchable (no TMDB entry), so the
+                // % can stall below 100. Once it stops climbing for ~3 polls, enrichment is as done
+                // as it'll get → hide the bar instead of leaving it stuck forever.
+                if (percent === this._lastEnrichPercent) {
+                    this._enrichStall = (this._enrichStall || 0) + 1;
+                } else {
+                    this._enrichStall = 0;
+                    this._lastEnrichPercent = percent;
+                }
+                const stalled = (this._enrichStall || 0) >= 3;
+                if (!Number.isFinite(percent) || total < 1 || percent >= 98 || stalled) {
                     bar.hidden = true;
                 } else {
                     if (fill) fill.style.width = percent + '%';
