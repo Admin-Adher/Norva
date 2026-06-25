@@ -300,46 +300,94 @@ async function createPlaybackSession(
       let subtitleTracks: JsonRecord[] = [];
       const titleRow = await resolveEngineAudioTitleRow(db, userId, sourceId, itemType, itemId, requestedPlaybackHint)
         .catch(() => null);
+      let haveAudio = false; // this user's row already has the audio map
+      let haveSub = false;   // ...or a subtitle probe (possibly empty) so we shouldn't re-probe
       const precomputedAudio = (titleRow && Array.isArray(titleRow.audio_tracks) ? titleRow.audio_tracks as JsonRecord[] : [])
         .map((t) => ({ index: Number(t?.index), lang: stringOrNull(t?.lang) }))
         .filter((t) => Number.isInteger(t.index));
+      if (precomputedAudio.length) { audioTracks = precomputedAudio; haveAudio = true; }
       const precomputedSub = (titleRow && Array.isArray(titleRow.subtitle_tracks) ? titleRow.subtitle_tracks as JsonRecord[] : [])
         .filter((t) => Number.isInteger(Number(t?.index)));
+      if (precomputedSub.length) { subtitleTracks = precomputedSub; haveSub = true; }
       // subtitle_probed_at distinguishes "probed, file has no subs" (skip) from "never probed".
-      const subtitleProbed = Boolean(titleRow && titleRow.subtitle_probed_at);
-      if (precomputedAudio.length) audioTracks = precomputedAudio;
-      if (precomputedSub.length) subtitleTracks = precomputedSub;
-      // Probe once when audio is missing OR subtitles were never probed for this title.
-      if (!precomputedAudio.length || (!precomputedSub.length && !subtitleProbed)) {
+      if (titleRow && titleRow.subtitle_probed_at) haveSub = true;
+
+      const serverHost = hostFromUrl(targetUrl);
+      const fileExternalId = itemType === "series"
+        ? stringOr(requestedPlaybackHint.audioSeriesId ?? requestedPlaybackHint.audio_series_id ?? requestedPlaybackHint.seriesId ?? requestedPlaybackHint.series_id, "")
+        : itemId;
+
+      // Cross-user reuse: another user (or the crawl) may have already probed this exact
+      // provider file. Pull from the global per-file cache (no provider hit) and fill this
+      // user's row, before ever falling back to a probe.
+      if ((!haveAudio || !haveSub) && titleRow?.id && serverHost && fileExternalId) {
+        try {
+          const { data: fr } = await db.from("catalog_file_tracks")
+            .select("audio_tracks, subtitle_tracks, audio_probed_at, subtitle_probed_at")
+            .eq("server_host", serverHost).eq("item_type", itemType).eq("external_id", fileExternalId)
+            .maybeSingle();
+          const fileRow = fr as JsonRecord | null;
+          if (fileRow) {
+            const fill: JsonRecord = {};
+            if (!haveAudio && fileRow.audio_probed_at) {
+              const ga = (Array.isArray(fileRow.audio_tracks) ? fileRow.audio_tracks as JsonRecord[] : [])
+                .map((t) => ({ index: Number(t?.index), lang: stringOrNull(t?.lang) })).filter((t) => Number.isInteger(t.index));
+              if (ga.length) {
+                audioTracks = ga; haveAudio = true;
+                fill.audio_tracks = ga;
+                fill.audio_languages = [...new Set(ga.map((t) => t.lang).filter((l): l is string => Boolean(l)))].sort();
+                fill.audio_probed_at = new Date().toISOString();
+              }
+            }
+            if (!haveSub && fileRow.subtitle_probed_at) {
+              const gs = Array.isArray(fileRow.subtitle_tracks) ? fileRow.subtitle_tracks as JsonRecord[] : [];
+              subtitleTracks = gs; haveSub = true;
+              fill.subtitle_tracks = gs;
+              fill.subtitle_probed_at = new Date().toISOString();
+            }
+            if (Object.keys(fill).length) {
+              try { await db.from("cloud_titles").update(fill).eq("user_id", userId).eq("id", titleRow.id); } catch (_) { /* best-effort */ }
+            }
+          }
+        } catch (_) { /* best-effort global reuse */ }
+      }
+
+      // Still missing → probe the provider ONCE, persist to this user's row, and SHARE to the
+      // global file cache + fan out to every other owner so they skip the probe entirely.
+      if (!haveAudio || !haveSub) {
         let probed = { audioTracks: [] as Array<{ index: number; lang: string | null }>, subtitleTracks: [] as JsonRecord[] };
         try { probed = await probeEngineTracks(db, userId, targetUrl); } catch (_) { /* best-effort */ }
-        if (!precomputedAudio.length && probed.audioTracks.length) audioTracks = probed.audioTracks;
-        if (!precomputedSub.length) subtitleTracks = probed.subtitleTracks;
-        if (titleRow?.id) {
+        const probeOk = probed.audioTracks.length > 0; // every video has audio → audio present == parse ok
+        const gotAudio = !haveAudio && probeOk;
+        const gotSub = !haveSub && probeOk;
+        if (gotAudio) audioTracks = probed.audioTracks;
+        if (gotSub) subtitleTracks = probed.subtitleTracks;
+        if (titleRow?.id && (gotAudio || gotSub)) {
           const update: JsonRecord = {};
           let codes: string[] = [];
-          if (!precomputedAudio.length && probed.audioTracks.length) {
+          if (gotAudio) {
             codes = [...new Set(probed.audioTracks.map((t) => t.lang).filter((l): l is string => Boolean(l)))].sort();
             update.audio_tracks = probed.audioTracks;
             update.audio_languages = codes;
             update.audio_probed_at = new Date().toISOString();
           }
-          if (!precomputedSub.length) {
-            // Persist even an empty list (+ the timestamp) so a no-subtitle file isn't re-probed every play.
+          if (gotSub) {
             update.subtitle_tracks = probed.subtitleTracks;
             update.subtitle_probed_at = new Date().toISOString();
           }
-          if (Object.keys(update).length) {
-            try {
-              await db.from("cloud_titles").update(update).eq("user_id", userId).eq("id", titleRow.id);
-              const tmdbId = stringOrNull(titleRow.provider_tmdb_id);
-              if (codes.length && tmdbId && !/^(tt)?0+$/i.test(tmdbId)) {
-                try {
-                  await db.rpc("merge_catalog_title_audio", { p_item_type: itemType, p_provider_tmdb_id: tmdbId, p_codes: codes });
-                } catch (_) { /* best-effort global mirror */ }
-              }
-            } catch (_) { /* best-effort persist */ }
-          }
+          try {
+            await db.from("cloud_titles").update(update).eq("user_id", userId).eq("id", titleRow.id);
+            const tmdbId = stringOrNull(titleRow.provider_tmdb_id);
+            if (codes.length && tmdbId && !/^(tt)?0+$/i.test(tmdbId)) {
+              try {
+                await db.rpc("merge_catalog_title_audio", { p_item_type: itemType, p_provider_tmdb_id: tmdbId, p_codes: codes });
+              } catch (_) { /* best-effort global mirror */ }
+            }
+          } catch (_) { /* best-effort persist */ }
+        }
+        if (probeOk) {
+          await shareFileTracks(db, serverHost, itemType, fileExternalId,
+            gotAudio ? probed.audioTracks : [], gotSub ? probed.subtitleTracks : [], gotAudio, gotSub);
         }
       }
       return {
@@ -1773,6 +1821,8 @@ async function persistOrderedAudioForTitle(
   const { error } = await db.from("cloud_titles")
     .update({ audio_tracks: ordered, subtitle_tracks: orderedSubs, subtitle_probed_at: new Date().toISOString() })
     .eq("user_id", userId).eq("id", titleId);
+  // Cross-user share: global per-file cache + fan out to every owner.
+  await shareFileTracks(db, hostFromUrl(targetUrl), variantItemType, externalId, ordered, orderedSubs, true, true);
   return !error;
 }
 
@@ -1821,6 +1871,38 @@ async function probeEngineTracks(
   } finally {
     clearTimeout(timer);
   }
+}
+
+function hostFromUrl(url: string): string {
+  try { return new URL(url).hostname; } catch { return ""; }
+}
+
+// Cross-user track-map sharing: store the file's map in the global per-file cache AND fan it
+// out to every OTHER user owning the same provider file, so they get the tracks with zero
+// re-probe. Keyed by (server_host, item_type, external_id) — the file identity. Best-effort:
+// must never fail the probe/playback. p_has_* gates the audio/subtitle halves independently.
+async function shareFileTracks(
+  db: SupabaseClient,
+  serverHost: string,
+  itemType: string,
+  externalId: string,
+  audioTracks: JsonRecord[],
+  subtitleTracks: JsonRecord[],
+  hasAudio: boolean,
+  hasSubtitle: boolean,
+): Promise<void> {
+  if (!serverHost || !externalId || (!hasAudio && !hasSubtitle)) return;
+  const args = {
+    p_server_host: serverHost,
+    p_item_type: itemType,
+    p_external_id: externalId,
+    p_audio_tracks: audioTracks,
+    p_subtitle_tracks: subtitleTracks,
+    p_has_audio: hasAudio,
+    p_has_subtitle: hasSubtitle,
+  };
+  try { await db.rpc("upsert_catalog_file_tracks", args); } catch (_) { /* best-effort global cache */ }
+  try { await db.rpc("fanout_file_tracks_to_users", args); } catch (_) { /* best-effort fan-out */ }
 }
 
 // Map an engine playback (source + item) to its cloud_titles row, so a probed audio
@@ -2147,6 +2229,11 @@ async function runAudioBackfill(req: Request, db: SupabaseClient) {
             });
           } catch (_) { /* best-effort global mirror */ }
         }
+      }
+      // Cross-user share: store the file map in the global per-file cache + fan out to every
+      // owner (probe mode only — it carries the full ordered track list; subtitles ride along).
+      if (mode === "probe") {
+        await shareFileTracks(db, hostFromUrl(targetUrl), variantItemType, externalId, orderedTracks, orderedSubtitles, orderedTracks.length > 0, true);
       }
     } catch (e) {
       diag.exception++;
