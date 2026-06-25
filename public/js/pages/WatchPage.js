@@ -1321,7 +1321,11 @@ class WatchPage {
             // Per-track audio languages the SERVER probed for this engine session
             // (the engine can't read them itself). Must be forwarded explicitly —
             // loadVideo gets a fresh options object, not the full playback metadata.
-            audioTracks: playbackMetadata.audioTracks || playbackMetadata.audio_tracks || null
+            audioTracks: playbackMetadata.audioTracks || playbackMetadata.audio_tracks || null,
+            // Subtitle tracks the SERVER probed (same relay header-parse as audio).
+            // Known at load → the CC menu lists them AND the saved subtitle pref can
+            // be restored, without a client-side gateway probe during streaming.
+            subtitleTracks: playbackMetadata.subtitleTracks || playbackMetadata.subtitle_tracks || null
         });
         if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
 
@@ -2513,13 +2517,18 @@ class WatchPage {
                 playbackAttemptId,
                 audioStreamIndex: preferredAudioIndex
             });
-            // Subtitles: the engine demuxes them but can't render them. Enumerating
-            // them asks the gateway (ffprobe) to read the container — a SECOND provider
-            // connection. Most providers are single-connection, so firing it now (during
-            // the engine's initial buffering, before any forward buffer exists) makes the
-            // provider drop the engine's /raw stream → SourceBuffer crash. Defer it until
-            // the user opens the audio/captions menu (buffer built, drop survivable):
-            // see toggleAudioMenu()/toggleCaptionsMenu() → enrichEngineSubtitleTracks().
+            // Subtitles: the SERVER probed them (same relay header-parse as audio) and
+            // returned them in the payload — known at LOAD, so the CC menu lists them and
+            // the saved subtitle preference is restored, with NO client-side gateway probe
+            // during streaming. Enumeration is safe now (it's just payload data); the
+            // restore-ATTACH (which extracts via the gateway = a 2nd provider connection)
+            // is deferred past initial buffering inside applyEngineSubtitleTracks.
+            // Fallback: if the payload carries no subtitles (un-probed file), the lazy
+            // enrich on menu-open still applies (toggleAudioMenu/toggleCaptionsMenu).
+            const sessionSubtitleTracks = Array.isArray(options.subtitleTracks) ? options.subtitleTracks : null;
+            if (sessionSubtitleTracks && sessionSubtitleTracks.length) {
+                try { this.applyEngineSubtitleTracks(sessionSubtitleTracks, playbackAttemptId); } catch (_) { /* best-effort */ }
+            }
             return;
         }
 
@@ -5308,6 +5317,50 @@ class WatchPage {
         const url = this.baseStreamUrl || this.currentUrl;
         const m = /^(https?:\/\/[^/]+)\/raw\/(.+)$/.exec(String(url || ''));
         return m ? `${m[1]}/subtitle/${m[2]}` : '';
+    }
+
+    // Engine path: apply the subtitle tracks the SERVER probed (relay header-parse,
+    // returned in the playback payload). Known at LOAD, so the CC menu lists them and
+    // the saved subtitle preference is restored — the bug where the chosen track came
+    // back as OFF (because the lazy client enum populated the list too late to restore).
+    // Enumeration is provider-free (payload data). The restore-ATTACH extracts via the
+    // gateway (a 2nd provider connection), so it's DEFERRED past initial buffering to
+    // avoid the single-connection contention crash. Returns true when tracks applied.
+    applyEngineSubtitleTracks(tracks, playbackAttemptId) {
+        if (!Array.isArray(tracks) || !tracks.length) return false;
+        const mapped = tracks
+            .filter((s) => Number.isInteger(Number(s.index)))
+            .map((s) => ({
+                index: Number(s.index),
+                language: s.language || s.lang || null,
+                title: s.title || null,
+                codec: s.codec || null,
+                subtitleType: s.subtitleType || (s.extractable ? 'text' : 'image'),
+                extractable: s.extractable === true,
+                forced: s.forced === true,
+                default: s.default === true,
+            }));
+        if (!mapped.length) return false;
+        this.subtitleTracks = mapped;
+        this.subtitleSourceUrl = this.baseStreamUrl || this.currentUrl;
+        this.subtitleStartOffset = 0;
+        this._engineSubsEnriched = true; // server-provided → skip the client gateway probe
+        this.updateCaptionsTracks();
+        // Restore the saved choice now that the list is known. Mark the selection
+        // immediately (menu shows it), but defer the extraction-attach until the stream
+        // is stable (buffer built) so the gateway extraction doesn't fight initial buffering.
+        let restored = false;
+        try { restored = this.restorePendingSubtitlePreference(); } catch (_) { /* best-effort */ }
+        if (restored && this.selectedSubtitleStreamIndex !== null) {
+            this.updateCaptionsTracks();
+            const targetIndex = this.selectedSubtitleStreamIndex;
+            setTimeout(() => {
+                if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
+                if (this.selectedSubtitleStreamIndex !== targetIndex) return; // user changed it meanwhile
+                try { this.attachSelectedProbeSubtitleTrack(); } catch (_) { /* best-effort */ }
+            }, 5000);
+        }
+        return true;
     }
 
     // Engine path: the engine demuxes subtitle streams but can't render them. Ask the

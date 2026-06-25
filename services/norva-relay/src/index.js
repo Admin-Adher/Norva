@@ -1089,22 +1089,28 @@ function mp4TrakInfo(buf, start, end) {
   });
   // Prefer a real 'elng' language over mdhd (which is "und" in these files).
   const lang = normalizeRelayLang(elngLang) || mdhdLang;
-  return { isAudio: handler === "soun", lang };
+  return { handler, lang };
 }
 
-// Ordered audio tracks with the ABSOLUTE ffmpeg stream index (= trak position in
-// moov, which is how ffmpeg numbers MP4 streams) so a -map 0:<index> downstream
-// selects the right track. Includes audio tracks whose language is undetermined.
-function parseMp4AudioTracks(buf, moovStart, moovEnd) {
-  const tracks = [];
-  let streamIndex = -1; // every trak (video/audio/…) consumes one ffmpeg stream slot
+// Ordered audio + subtitle tracks with the ABSOLUTE ffmpeg stream index (= trak
+// position in moov, which is how ffmpeg numbers MP4 streams) so a -map 0:<index>
+// downstream selects the right track. Includes tracks whose language is undetermined.
+function parseMp4Tracks(buf, moovStart, moovEnd) {
+  const audioTracks = [];
+  const subtitleTracks = [];
+  let streamIndex = -1; // every trak (video/audio/sub) consumes one ffmpeg stream slot
   walkMp4Boxes(buf, moovStart, moovEnd, (type, ps, pe) => {
     if (type !== "trak") return;
     streamIndex++;
     const info = mp4TrakInfo(buf, ps, pe);
-    if (info.isAudio) tracks.push({ index: streamIndex, lang: info.lang });
+    if (info.handler === "soun") {
+      audioTracks.push({ index: streamIndex, lang: info.lang });
+    } else if (info.handler === "subt" || info.handler === "sbtl" || info.handler === "text" || info.handler === "clcp") {
+      // ISO-BMFF timed text (tx3g / mov_text): text, WebVTT-convertible.
+      subtitleTracks.push({ index: streamIndex, lang: info.lang || null, codec: "mov_text", subtitleType: "text", extractable: true });
+    }
   });
-  return tracks;
+  return { audioTracks, subtitleTracks };
 }
 
 // Locate the moov box. Walks from the front; if absent (moov-at-end files), scans
@@ -1160,10 +1166,11 @@ function ebmlAscii(buf, start, end) {
   return s.toLowerCase();
 }
 
-// Ordered audio tracks with the ABSOLUTE ffmpeg stream index (= TrackEntry position,
-// which is how ffmpeg numbers Matroska streams).
-function parseMkvAudioTracks(buf, len) {
-  const tracks = [];
+// Ordered audio + subtitle tracks with the ABSOLUTE ffmpeg stream index (=
+// TrackEntry position, which is how ffmpeg numbers Matroska streams).
+function parseMkvTracks(buf, len) {
+  const audioTracks = [];
+  const subtitleTracks = [];
   let streamIndex = -1; // every TrackEntry (video/audio/sub) is one ffmpeg stream slot
   walkEbml(buf, 0, len, (id, ds, de) => {
     if (id !== 0x18538067) return; // Segment
@@ -1172,17 +1179,46 @@ function parseMkvAudioTracks(buf, len) {
       walkEbml(buf, s2, e2, (id3, s3, e3) => {
         if (id3 !== 0xae) return; // TrackEntry
         streamIndex++;
-        let trackType = null, language = null, bcp47 = null;
+        let trackType = null, language = null, bcp47 = null, codecId = null, flagForced = 0;
         walkEbml(buf, s3, e3, (id4, s4, e4) => {
-          if (id4 === 0x83) trackType = buf[s4]; // TrackType
+          if (id4 === 0x83) trackType = buf[s4]; // TrackType (2=audio, 17=subtitle)
           else if (id4 === 0x22b59c) language = ebmlAscii(buf, s4, e4); // Language (ISO-639-2)
           else if (id4 === 0x22b59d) bcp47 = ebmlAscii(buf, s4, e4); // LanguageBCP47
+          else if (id4 === 0x86) codecId = ebmlAscii(buf, s4, e4); // CodecID (e.g. s_text/ass)
+          else if (id4 === 0x55aa && s4 < e4) flagForced = buf[s4]; // FlagForced
         });
-        if (trackType === 2) tracks.push({ index: streamIndex, lang: bcp47 || language || "eng" }); // audio; MKV default 'eng'
+        if (trackType === 2) {
+          audioTracks.push({ index: streamIndex, lang: bcp47 || language || "eng" }); // audio; MKV default 'eng'
+        } else if (trackType === 17) {
+          const sub = mkvSubtitleCodec(codecId); // { name, image }
+          subtitleTracks.push({
+            index: streamIndex,
+            lang: bcp47 || language || null, // subtitles have no sensible default language
+            codec: sub.name,
+            subtitleType: sub.image ? "image" : "text",
+            extractable: !sub.image,
+            forced: flagForced === 1,
+          });
+        }
       });
     });
   });
-  return tracks;
+  return { audioTracks, subtitleTracks };
+}
+
+// Matroska CodecID -> ffmpeg codec name + whether it's image-based. PGS/VobSub
+// can't convert to WebVTT (image); text codecs can. CodecID is lowercased by
+// ebmlAscii: "s_text/ass", "s_text/utf8", "s_hdmv/pgs", "s_vobsub", …
+function mkvSubtitleCodec(codecId) {
+  const id = String(codecId || "");
+  if (id.includes("ass")) return { name: "ass", image: false };
+  if (id.includes("ssa")) return { name: "ssa", image: false };
+  if (id.includes("webvtt")) return { name: "webvtt", image: false };
+  if (id.includes("utf8") || id.includes("s_text")) return { name: "subrip", image: false };
+  if (id.includes("pgs") || id.includes("hdmv")) return { name: "hdmv_pgs_subtitle", image: true };
+  if (id.includes("vobsub")) return { name: "dvd_subtitle", image: true };
+  if (id.includes("dvb")) return { name: "dvb_subtitle", image: true };
+  return { name: "subrip", image: false }; // unknown -> assume extractable text
 }
 
 function normalizeRelayLang(value) {
@@ -1289,18 +1325,19 @@ function locateMoov(buf, len) {
   return null;
 }
 
-async function probeContainerAudioTracks(targetUrl, ua) {
+async function probeContainerTracks(targetUrl, ua) {
+  const EMPTY = { audioTracks: [], subtitleTracks: [] };
   // 256 KB head: enough for ftyp + the moov box header (faststart) or EBML/Tracks.
   const head = await probeRange(targetUrl, ua, 0, 262143, 262144);
-  if (!head?.bytes || head.bytes.length < 16) return [];
+  if (!head?.bytes || head.bytes.length < 16) return EMPTY;
   const buf = head.bytes;
   if (buf[0] === 0x1a && buf[1] === 0x45 && buf[2] === 0xdf && buf[3] === 0xa3) {
-    let tracks = parseMkvAudioTracks(buf, buf.length);
-    if (!tracks.length && head.total && head.total > buf.length) {
+    let parsed = parseMkvTracks(buf, buf.length);
+    if (!parsed.audioTracks.length && head.total && head.total > buf.length) {
       const more = await probeRange(targetUrl, ua, 0, 1048575, 1048576); // 1 MB
-      if (more?.bytes) tracks = parseMkvAudioTracks(more.bytes, more.bytes.length);
+      if (more?.bytes) parsed = parseMkvTracks(more.bytes, more.bytes.length);
     }
-    return normalizeRelayTracks(tracks);
+    return normalizeRelayContainerTracks(parsed);
   }
   // ISO-BMFF: locate the moov (faststart header is in `head`; else scan the tail),
   // then fetch its FULL extent so every track's language box is buffered (a later
@@ -1322,12 +1359,30 @@ async function probeContainerAudioTracks(targetUrl, ua) {
       }
     }
   }
-  if (moovOffset < 0) return [];
+  if (moovOffset < 0) return EMPTY;
   const cap = Math.min(moovSize || 16 * 1024 * 1024, 16 * 1024 * 1024);
   const full = await probeRange(targetUrl, ua, moovOffset, moovOffset + cap - 1, cap);
-  if (!full?.bytes || full.bytes.length < 16) return [];
+  if (!full?.bytes || full.bytes.length < 16) return EMPTY;
   const moov = findMoov(full.bytes, full.bytes.length); // moov now begins this buffer
-  return moov ? normalizeRelayTracks(parseMp4AudioTracks(full.bytes, moov.start, moov.end)) : [];
+  return moov ? normalizeRelayContainerTracks(parseMp4Tracks(full.bytes, moov.start, moov.end)) : EMPTY;
+}
+
+// Normalize a {audioTracks, subtitleTracks} bundle: audio langs via the shared
+// helper; subtitles keep their codec/type/extractable flags with a normalized lang.
+function normalizeRelayContainerTracks(parsed) {
+  return {
+    audioTracks: normalizeRelayTracks(parsed.audioTracks),
+    subtitleTracks: (Array.isArray(parsed.subtitleTracks) ? parsed.subtitleTracks : [])
+      .map((t) => ({
+        index: Number.isInteger(t.index) ? t.index : null,
+        lang: normalizeRelayLang(t.lang),
+        codec: t.codec || null,
+        subtitleType: t.subtitleType || (t.extractable ? "text" : "image"),
+        extractable: t.extractable === true,
+        forced: t.forced === true,
+      }))
+      .filter((t) => t.index !== null),
+  };
 }
 
 async function relayProbeAudio(request, env, claims, ctx) {
@@ -1340,9 +1395,10 @@ async function relayProbeAudio(request, env, claims, ctx) {
     const su0 = new URL(claims.url);
     const p0 = su0.pathname.split("/").filter(Boolean);
     const vid0 = p0[3] ? p0[3].replace(/\.[a-z0-9]+$/i, "") : p0[3];
-    // The /v2 segment is a cache-version bump: it bypasses entries cached before the
-    // 'elng' language fix (which had cached und-only tracks as "Audio N…" for 24h).
-    cacheKey = new Request(`https://edge.norva.tv/__probeaudio/v2/${encodeURIComponent(su0.host)}/${encodeURIComponent(vid0 || su0.pathname)}`);
+    // The /vN segment is a cache-version bump: it bypasses entries cached before a
+    // probe-shape change. v2 = the 'elng' language fix; v3 = subtitle tracks added
+    // to the response (so audio-only entries cached pre-subtitle don't stick 24h).
+    cacheKey = new Request(`https://edge.norva.tv/__probeaudio/v3/${encodeURIComponent(su0.host)}/${encodeURIComponent(vid0 || su0.pathname)}`);
     const cached = await cache.match(cacheKey);
     if (cached) {
       const hit = await cached.json().catch(() => null);
@@ -1350,7 +1406,7 @@ async function relayProbeAudio(request, env, claims, ctx) {
     }
   } catch (_) { cacheKey = null; }
 
-  const out = { audioLanguages: [], audioTracks: [], audioDefaultLanguage: null };
+  const out = { audioLanguages: [], audioTracks: [], audioDefaultLanguage: null, subtitles: [] };
   try {
     const su = new URL(claims.url);
     const ua = String(claims.ua || "VLC/3.0.20 LibVLC/3.0.20");
@@ -1371,10 +1427,14 @@ async function relayProbeAudio(request, env, claims, ctx) {
       } catch (_) { /* baseline is best-effort */ }
     }
     // Header-probe ALL tracks (ordered, with the absolute ffmpeg stream index).
-    let tracks = [];
-    try { tracks = await probeContainerAudioTracks(claims.url, ua); } catch (_) { /* best-effort */ }
+    // One pass yields both audio AND subtitle tracks (the container header carries
+    // both), so the engine path gets subtitles with zero extra provider round-trips.
+    let container = { audioTracks: [], subtitleTracks: [] };
+    try { container = await probeContainerTracks(claims.url, ua); } catch (_) { /* best-effort */ }
+    const tracks = container.audioTracks;
     for (const t of tracks) { if (t.lang) langs.add(t.lang); }
     out.audioTracks = tracks;
+    out.subtitles = container.subtitleTracks;
     out.audioDefaultLanguage = defaultLang;
     out.audioLanguages = [...langs];
   } catch (_) { /* never throw */ }

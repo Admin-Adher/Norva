@@ -289,38 +289,69 @@ async function createPlaybackSession(
     // 403s). The gateway does no transcode here — just a byte-range passthrough.
     if (body.enginePipe === true || body.engine_pipe === true) {
       const pipe = await createBytePipeAccess(session.id, userId, targetUrl, expiresAt, db, userAgent);
-      // Name the audio tracks for the in-browser engine: it streams the raw file via the
-      // gateway and can't read per-stream language tags, so the browser can't probe them.
-      //  - Reuse the title's precomputed map when present (no relay probe).
-      //  - Otherwise probe the container via the relay AND persist the map onto the title
-      //    row (so the catalog grid + the next play are instant, and the global cache is
-      //    fed). All best-effort — never blocks or breaks playback.
+      // Name the audio AND subtitle tracks for the in-browser engine: it streams the raw
+      // file via the gateway and can't read per-stream language tags. ONE relay header-parse
+      // returns both (the container header carries both → zero extra provider round-trips).
+      //  - Reuse the title's precomputed maps when present (no probe).
+      //  - Otherwise probe + persist onto the title row, so the grid + next play are instant,
+      //    the subtitle-pref restore works (tracks known at load), and the global cache is fed.
+      // All best-effort — never blocks or breaks playback.
       let audioTracks: Array<{ index: number; lang: string | null }> = [];
+      let subtitleTracks: JsonRecord[] = [];
       const titleRow = await resolveEngineAudioTitleRow(db, userId, sourceId, itemType, itemId, requestedPlaybackHint)
         .catch(() => null);
-      const precomputed = (titleRow && Array.isArray(titleRow.audio_tracks) ? titleRow.audio_tracks as JsonRecord[] : [])
+      const precomputedAudio = (titleRow && Array.isArray(titleRow.audio_tracks) ? titleRow.audio_tracks as JsonRecord[] : [])
         .map((t) => ({ index: Number(t?.index), lang: stringOrNull(t?.lang) }))
         .filter((t) => Number.isInteger(t.index));
-      if (precomputed.length) {
-        audioTracks = precomputed;
-      } else {
-        try { audioTracks = await probeOrderedAudioTracks(db, userId, targetUrl); } catch (_) { /* best-effort */ }
-        if (titleRow?.id && audioTracks.length) {
-          const codes = [...new Set(audioTracks.map((t) => t.lang).filter((l): l is string => Boolean(l)))].sort();
-          try {
-            await db.from("cloud_titles")
-              .update({ audio_tracks: audioTracks, audio_languages: codes, audio_probed_at: new Date().toISOString() })
-              .eq("user_id", userId).eq("id", titleRow.id);
-            const tmdbId = stringOrNull(titleRow.provider_tmdb_id);
-            if (tmdbId && !/^(tt)?0+$/i.test(tmdbId)) {
-              try {
-                await db.rpc("merge_catalog_title_audio", { p_item_type: itemType, p_provider_tmdb_id: tmdbId, p_codes: codes });
-              } catch (_) { /* best-effort global mirror */ }
-            }
-          } catch (_) { /* best-effort persist */ }
+      const precomputedSub = (titleRow && Array.isArray(titleRow.subtitle_tracks) ? titleRow.subtitle_tracks as JsonRecord[] : [])
+        .filter((t) => Number.isInteger(Number(t?.index)));
+      // subtitle_probed_at distinguishes "probed, file has no subs" (skip) from "never probed".
+      const subtitleProbed = Boolean(titleRow && titleRow.subtitle_probed_at);
+      if (precomputedAudio.length) audioTracks = precomputedAudio;
+      if (precomputedSub.length) subtitleTracks = precomputedSub;
+      // Probe once when audio is missing OR subtitles were never probed for this title.
+      if (!precomputedAudio.length || (!precomputedSub.length && !subtitleProbed)) {
+        let probed = { audioTracks: [] as Array<{ index: number; lang: string | null }>, subtitleTracks: [] as JsonRecord[] };
+        try { probed = await probeEngineTracks(db, userId, targetUrl); } catch (_) { /* best-effort */ }
+        if (!precomputedAudio.length && probed.audioTracks.length) audioTracks = probed.audioTracks;
+        if (!precomputedSub.length) subtitleTracks = probed.subtitleTracks;
+        if (titleRow?.id) {
+          const update: JsonRecord = {};
+          let codes: string[] = [];
+          if (!precomputedAudio.length && probed.audioTracks.length) {
+            codes = [...new Set(probed.audioTracks.map((t) => t.lang).filter((l): l is string => Boolean(l)))].sort();
+            update.audio_tracks = probed.audioTracks;
+            update.audio_languages = codes;
+            update.audio_probed_at = new Date().toISOString();
+          }
+          if (!precomputedSub.length) {
+            // Persist even an empty list (+ the timestamp) so a no-subtitle file isn't re-probed every play.
+            update.subtitle_tracks = probed.subtitleTracks;
+            update.subtitle_probed_at = new Date().toISOString();
+          }
+          if (Object.keys(update).length) {
+            try {
+              await db.from("cloud_titles").update(update).eq("user_id", userId).eq("id", titleRow.id);
+              const tmdbId = stringOrNull(titleRow.provider_tmdb_id);
+              if (codes.length && tmdbId && !/^(tt)?0+$/i.test(tmdbId)) {
+                try {
+                  await db.rpc("merge_catalog_title_audio", { p_item_type: itemType, p_provider_tmdb_id: tmdbId, p_codes: codes });
+                } catch (_) { /* best-effort global mirror */ }
+              }
+            } catch (_) { /* best-effort persist */ }
+          }
         }
       }
-      return { session, playback: { mode: "relay", url: pipe.url, tokenExpiresAt: expiresAt, ...(audioTracks.length ? { audioTracks } : {}) } };
+      return {
+        session,
+        playback: {
+          mode: "relay",
+          url: pipe.url,
+          tokenExpiresAt: expiresAt,
+          ...(audioTracks.length ? { audioTracks } : {}),
+          ...(subtitleTracks.length ? { subtitleTracks } : {}),
+        },
+      };
     }
     const relay = await createRelayAccess(session.id, userId, targetUrl, expiresAt, db, userAgent);
     return { session, playback: { mode, url: relay.url, tokenExpiresAt: expiresAt } };
@@ -1741,27 +1772,40 @@ async function persistOrderedAudioForTitle(
 // per-stream language tags, so the browser CANNOT probe these titles itself. The
 // relay 24h-edge-caches by (host, vod_id), so repeat plays are cheap. Best-effort,
 // short-bounded; never throws (callers stay on the no-names path on failure).
-async function probeOrderedAudioTracks(
+async function probeEngineTracks(
   db: SupabaseClient,
   userId: string,
   targetUrl: string,
-): Promise<Array<{ index: number; lang: string | null }>> {
+): Promise<{ audioTracks: Array<{ index: number; lang: string | null }>; subtitleTracks: JsonRecord[] }> {
+  const empty = { audioTracks: [], subtitleTracks: [] };
   const runtimeConfig = await getRuntimeConfig(db);
-  if (!runtimeConfig.relayBaseUrl || !runtimeConfig.relayTokenSecret) return [];
+  if (!runtimeConfig.relayBaseUrl || !runtimeConfig.relayTokenSecret) return empty;
   const payload = JSON.stringify({ v: 1, sid: "engine-audio", uid: userId, url: targetUrl, exp: Math.floor(Date.now() / 1000) + 120 });
   const token = `${base64Url(encoder.encode(payload))}.${await hmacBase64Url(runtimeConfig.relayTokenSecret, payload)}`;
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 8000);
   try {
     const res = await fetch(`${runtimeConfig.relayBaseUrl}/probe-audio/${token}`, { headers: { accept: "application/json" }, signal: ctrl.signal });
-    if (!res.ok) return [];
+    if (!res.ok) return empty;
     const info = await res.json().catch(() => null) as JsonRecord | null;
-    const raw = info && Array.isArray(info.audioTracks) ? info.audioTracks as JsonRecord[] : [];
-    return raw
+    const rawAudio = info && Array.isArray(info.audioTracks) ? info.audioTracks as JsonRecord[] : [];
+    const audioTracks = rawAudio
       .map((t) => ({ index: Number(t?.index), lang: normalizeIsoLang(stringOrNull(t?.lang ?? t?.language)) }))
       .filter((t) => Number.isInteger(t.index));
+    const rawSub = info && Array.isArray(info.subtitles) ? info.subtitles as JsonRecord[] : [];
+    const subtitleTracks = rawSub
+      .map((s) => ({
+        index: Number(s?.index),
+        lang: normalizeIsoLang(stringOrNull(s?.lang ?? s?.language)),
+        codec: stringOrNull(s?.codec),
+        subtitleType: stringOrNull(s?.subtitleType) || (s?.extractable ? "text" : "image"),
+        extractable: s?.extractable === true,
+        forced: s?.forced === true,
+      }))
+      .filter((s) => Number.isInteger(s.index)) as JsonRecord[];
+    return { audioTracks, subtitleTracks };
   } catch (_) {
-    return [];
+    return empty;
   } finally {
     clearTimeout(timer);
   }
@@ -1779,7 +1823,7 @@ async function resolveEngineAudioTitleRow(
   itemType: string,
   itemId: string,
   hint: JsonRecord,
-): Promise<{ id: string; audio_tracks: unknown; provider_tmdb_id: string | null } | null> {
+): Promise<EngineTitleRow | null> {
   if (!sourceId) return null;
   const externalId = itemType === "series"
     ? stringOr(hint.audioSeriesId ?? hint.audio_series_id ?? hint.seriesId ?? hint.series_id, "")
@@ -1798,12 +1842,20 @@ async function resolveEngineAudioTitleRow(
   if (!titleId) return null;
   const { data: row } = await db
     .from("cloud_titles")
-    .select("id, audio_tracks, provider_tmdb_id")
+    .select("id, audio_tracks, subtitle_tracks, subtitle_probed_at, provider_tmdb_id")
     .eq("user_id", userId)
     .eq("id", titleId)
     .maybeSingle();
-  return row ? (row as { id: string; audio_tracks: unknown; provider_tmdb_id: string | null }) : null;
+  return row ? (row as EngineTitleRow) : null;
 }
+
+type EngineTitleRow = {
+  id: string;
+  audio_tracks: unknown;
+  subtitle_tracks: unknown;
+  subtitle_probed_at: string | null;
+  provider_tmdb_id: string | null;
+};
 
 // Service-gated maintenance backfill of cloud_titles.audio_languages via the
 // relay's get_vod_info (the only path that reaches the provider — Deno egress is
