@@ -127,14 +127,29 @@ Deno.serve(async (req) => {
 async function getEnrichmentProgress(userId: string) {
   const titlesBase = () => db.from("cloud_titles").select("id", { count: "exact", head: true })
     .eq("user_id", userId).in("item_type", ["movie", "series"]).gt("variant_count", 0);
-  const [totalRes, enrichedRes] = await Promise.all([
+  const [totalRes, enrichedRes, searchState, revalState] = await Promise.all([
     titlesBase(),
     titlesBase().not("provider_tmdb_id", "is", null),
+    db.from("norva_search_match_state").select("done").eq("id", 1).maybeSingle(),
+    db.from("norva_revalidate_state").select("done").eq("id", 1).maybeSingle(),
   ]);
   const total = totalRes.count ?? 0;
   const enriched = enrichedRes.count ?? 0;
   const percent = total > 0 ? Math.round((enriched / total) * 100) : 100;
-  return { total, enriched, percent };
+  // The background enrichment crons (search-match + revalidate) are cursor-based,
+  // one-pass scans: a title that never matches TMDB, or whose provider id never
+  // validates, is LEFT in place and the cursor moves on. So the matched % plateaus
+  // permanently — most IPTV catalogues keep a chunk with no TMDB entry plus many
+  // provider-tagged titles that never verify (here ~13% unmatched + most of the rest
+  // "provider_unverified"). "settled" = both passes have finished, i.e. there is no
+  // enrichment work left and the % will never climb again. The client uses it to STOP
+  // the progress bar instead of leaving it stuck at the plateau forever. The cron-state
+  // rows are global (one shared scan across users) — fine here: the bar is onboarding
+  // reassurance, not a per-user guarantee.
+  const searchDone = (searchState.data as { done?: boolean } | null)?.done === true;
+  const revalDone = (revalState.data as { done?: boolean } | null)?.done === true;
+  const settled = searchDone && revalDone;
+  return { total, enriched, percent, settled };
 }
 
 async function requireUserId(req: Request) {

@@ -412,9 +412,12 @@ class App {
                 const p = await window.NorvaCloud?.mediaItems?.enrichmentProgress?.();
                 const percent = Number(p?.percent);
                 const total = Number(p?.total) || 0;
-                // Plateau detection: some titles are genuinely unmatchable (no TMDB entry), so the
-                // % can stall below 100. Once it stops climbing for ~3 polls, enrichment is as done
-                // as it'll get → hide the bar instead of leaving it stuck forever.
+                // The server reports "settled" once the background enrichment crons have
+                // finished their pass. The matched % plateaus permanently (some titles never
+                // match TMDB / never verify), so settled — not the % — is what ends the bar.
+                const settled = p?.settled === true;
+                // Fallback for older edge builds without the flag: hide once the % stops
+                // climbing for ~3 polls.
                 if (percent === this._lastEnrichPercent) {
                     this._enrichStall = (this._enrichStall || 0) + 1;
                 } else {
@@ -422,7 +425,7 @@ class App {
                     this._lastEnrichPercent = percent;
                 }
                 const stalled = (this._enrichStall || 0) >= 3;
-                if (!Number.isFinite(percent) || total < 1 || percent >= 98 || stalled) {
+                if (!Number.isFinite(percent) || total < 1 || settled || stalled) {
                     bar.hidden = true;
                 } else {
                     if (fill) fill.style.width = percent + '%';
