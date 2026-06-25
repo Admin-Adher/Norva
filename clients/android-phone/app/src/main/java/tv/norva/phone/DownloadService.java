@@ -58,9 +58,10 @@ public final class DownloadService extends Service {
 
     private static final String CHANNEL = "norva_downloads";
     private static final int NOTIF_ID = 4201;
-    private static final String UA =
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-            + "(KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36";
+    // Provider streams gate on User-Agent and 401 a browser UA; match the relay's
+    // working VLC UA so offline downloads pull from the provider too. (Posters are
+    // CDN-served and accept any UA.)
+    private static final String UA = "VLC/3.0.20 LibVLC/3.0.20";
 
     private static final int R_DONE = 0, R_PAUSED = 1, R_CANCELED = 2,
             R_FAILED = 3, R_WIFI_WAIT = 4, R_STOP = 5;

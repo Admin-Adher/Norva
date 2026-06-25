@@ -55,10 +55,10 @@ public class PlayerActivity extends Activity {
     public static final String EXTRA_MEDIA_IV = "mediaIv";
     public static final String EXTRA_CONTAINER = "container";
 
-    // Browser-style UA: some IPTV providers reject unknown agents (401/403).
-    private static final String UA =
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-            + "(KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36";
+    // IPTV providers gate on User-Agent and REJECT a browser UA (this provider 401s
+    // it). Use the VLC UA the relay/gateway use successfully — the working default
+    // for the whole stack (the cloud sends no UA, so the relay falls back to VLC).
+    private static final String UA = "VLC/3.0.20 LibVLC/3.0.20";
 
     private ExoPlayer player;
     private PlayerView playerView;
