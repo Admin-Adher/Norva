@@ -46,6 +46,7 @@ class App {
         try { if (window.NorvaProfiles?.ensureSelected) await window.NorvaProfiles.ensureSelected(); } catch (_) { }
         this.applyCatalogAvailability(null);
         this.startCloudWarmKeep();
+        this.startEnrichmentProgressPoll();
 
         // Mobile menu toggle
         const mobileMenuToggle = document.getElementById('mobile-menu-toggle');
@@ -393,6 +394,36 @@ class App {
         }
         if (this._warmKeepTimer) clearInterval(this._warmKeepTimer);
         this._warmKeepTimer = setInterval(ping, 4 * 60 * 1000);
+    }
+
+    // Thin header bar showing background catalog enrichment (TMDB matching) progress, so a
+    // freshly-onboarded user understands missing posters are filling in — not broken. Hidden
+    // once the catalog is essentially enriched (>=98%) or empty. Cloud mode only, best-effort.
+    startEnrichmentProgressPoll() {
+        if (!window.API?.isCloudMode?.()) return;
+        const bar = document.getElementById('enrichment-bar');
+        if (!bar) return;
+        const fill = bar.querySelector('.enrichment-bar__fill');
+        const text = bar.querySelector('.enrichment-bar__text');
+        const tick = async () => {
+            if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+            if (!this.hasCloudSession?.()) { bar.hidden = true; return; }
+            try {
+                const p = await window.NorvaCloud?.mediaItems?.enrichmentProgress?.();
+                const percent = Number(p?.percent);
+                const total = Number(p?.total) || 0;
+                if (!Number.isFinite(percent) || total < 1 || percent >= 98) {
+                    bar.hidden = true;
+                } else {
+                    if (fill) fill.style.width = percent + '%';
+                    if (text) text.textContent = `Enrichissement du catalogue… ${percent}%`;
+                    bar.hidden = false;
+                }
+            } catch (_) { /* best-effort; keep the last shown state */ }
+        };
+        tick();
+        if (this._enrichTimer) clearInterval(this._enrichTimer);
+        this._enrichTimer = setInterval(tick, 45 * 1000);
     }
 
     async checkAuth() {

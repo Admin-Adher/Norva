@@ -56,6 +56,14 @@ Deno.serve(async (req) => {
       return json(req, { ok: true, service: "norva-catalog", version: 5, liveContract: "norva.live.logical.v1", materializedLive: true });
     }
 
+    // Background catalog-enrichment progress for the header bar: how many of the user's
+    // titles are TMDB-matched (provider_tmdb_id resolved) vs total. Climbs as the
+    // enrichment crons run; the client hides the bar once it's essentially complete.
+    if (req.method === "GET" && segments[0] === "enrichment-progress") {
+      const userId = await requireUserId(req);
+      return json(req, await getEnrichmentProgress(userId));
+    }
+
     if (req.method === "GET" && isLiveLogicalChannelsRoute(segments)) {
       const userId = await requireUserId(req);
       return json(req, await listLiveLogicalChannels(url, userId));
@@ -115,6 +123,19 @@ Deno.serve(async (req) => {
     return json(req, { error: message, details }, status);
   }
 });
+
+async function getEnrichmentProgress(userId: string) {
+  const titlesBase = () => db.from("cloud_titles").select("id", { count: "exact", head: true })
+    .eq("user_id", userId).in("item_type", ["movie", "series"]).gt("variant_count", 0);
+  const [totalRes, enrichedRes] = await Promise.all([
+    titlesBase(),
+    titlesBase().not("provider_tmdb_id", "is", null),
+  ]);
+  const total = totalRes.count ?? 0;
+  const enriched = enrichedRes.count ?? 0;
+  const percent = total > 0 ? Math.round((enriched / total) * 100) : 100;
+  return { total, enriched, percent };
+}
 
 async function requireUserId(req: Request) {
   const token = bearer(req);

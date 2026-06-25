@@ -105,6 +105,18 @@
       </div>
     </nav>
 
+    <!-- Background catalog-enrichment progress (driven by app.js startEnrichmentProgressPoll). -->
+    <div id="enrichment-bar" class="enrichment-bar" hidden>
+      <div class="enrichment-bar__fill"></div>
+      <span class="enrichment-bar__text"></span>
+    </div>
+    <style>
+      .enrichment-bar { position: relative; height: 22px; background: rgba(0,0,0,.35); display: flex; align-items: center; overflow: hidden; font-size: 12px; line-height: 1; }
+      .enrichment-bar[hidden] { display: none; }
+      .enrichment-bar__fill { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: linear-gradient(90deg, #e50914, #ff6b6b); transition: width .6s ease; }
+      .enrichment-bar__text { position: relative; z-index: 1; padding: 0 12px; color: #fff; white-space: nowrap; }
+    </style>
+
     <!-- Main Content Area -->
     <main class="main-content">
       <!-- Home (Dashboard) Page -->
@@ -1730,7 +1742,7 @@
 
   <!-- JavaScript -->
   <script src="/js/icons.js"></script>
-  <script src="/js/cloudApi.js?v=36"></script>
+  <script src="/js/cloudApi.js?v=37"></script>
   <script src="/js/authApi.js?v=2"></script>
   <script src="/js/norvaEngine.js?v=18"></script>
   <script src="/js/api.js?v=63"></script>
@@ -1757,7 +1769,7 @@
   <script src="/js/pages/Settings.js?v=29"></script>
   <script src="/js/pages/WatchPage.js?v=111"></script>
   <script src="/js/profiles.js?v=4"></script>
-  <script src="/js/app.js?v=25"></script>
+  <script src="/js/app.js?v=26"></script>
   <script>
     // Check for SSO token in URL
     (function () {

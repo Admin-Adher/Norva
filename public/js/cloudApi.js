@@ -721,6 +721,7 @@
         mediaItems: {
             list: (params = {}) => catalogRequest('/media-items', params),
             categories: (params = {}) => catalogRequest('/media-categories', params),
+            enrichmentProgress: () => catalogRequest('/enrichment-progress'),
             upsert: (sourceId, items) => request('POST', '/media-items', { sourceId, items })
         },
 
