@@ -17,3 +17,9 @@ verify_jwt = false
 # secret itself via NORVA_REVENUECAT_WEBHOOK_AUTH.
 [functions.norva-billing-webhook]
 verify_jwt = false
+
+# Supabase "Send Email Hook": called by the auth server (no user JWT) with a
+# Standard-Webhooks signature, which the function verifies itself via
+# SEND_EMAIL_HOOK_SECRET. Sends auth emails through Resend.
+[functions.norva-auth-email]
+verify_jwt = false
