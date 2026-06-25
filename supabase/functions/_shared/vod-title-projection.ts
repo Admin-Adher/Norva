@@ -58,7 +58,7 @@ export async function refreshVodTitleProjection(options: ProjectionOptions) {
     ? await loadVodInfoIds(options.xtreamConfig, rows, boundedInt(options.vodInfoLimit, DEFAULT_VOD_INFO_LIMIT, 0, 1000), gateway, options.db, projectionServerHost)
     : new Map<string, ProviderIds>();
   const providerIdsByExternalId = collectProviderIds(rows, vodInfoByExternalId);
-  const tmdbValidationById = await validateProviderTmdbIds(rows, providerIdsByExternalId, options.tmdbValidateLimit);
+  const tmdbValidationById = await validateProviderTmdbIds(rows, providerIdsByExternalId, options.tmdbValidateLimit, options.db);
 
   const titleRowsByKey = new Map<string, JsonRecord>();
   const variantRows: JsonRecord[] = [];
@@ -468,13 +468,15 @@ async function fetchVodInfo(
   return fetchJson(xtreamApiUrl(config, "get_vod_info", { vod_id: vodId }), timeoutMs);
 }
 
-async function validateProviderTmdbIds(rows: ProjectionRow[], idsByExternalId: Map<string, ProviderIds>, limitOverride?: number) {
+async function validateProviderTmdbIds(rows: ProjectionRow[], idsByExternalId: Map<string, ProviderIds>, limitOverride?: number, db: SupabaseClient | null = null) {
   const apiKey = stringOr(Deno.env.get("NORVA_TMDB_API_KEY") ?? Deno.env.get("TMDB_API_KEY") ?? Deno.env.get("TMDB_READ_TOKEN"), "");
   const limit = limitOverride === undefined
     ? boundedInt(Deno.env.get("NORVA_TMDB_VALIDATE_LIMIT"), DEFAULT_TMDB_VALIDATE_LIMIT, 0, 1000)
     : boundedInt(limitOverride, DEFAULT_TMDB_VALIDATE_LIMIT, 0, 1000);
   const validations = new Map<string, TmdbValidation>();
-  if (!apiKey || limit <= 0) return validations;
+  // No early-return on a missing apiKey: the cross-user catalog_titles reuse below can still
+  // populate validations from another user's already-validated titles (zero TMDB calls).
+  if (limit <= 0) return validations;
 
   const candidates: Array<{ key: string; itemType: "movie" | "series"; tmdbId: string; title: string; year: string | null }> = [];
   const seen = new Set<string>();
@@ -498,12 +500,58 @@ async function validateProviderTmdbIds(rows: ProjectionRow[], idsByExternalId: M
     if (candidates.length >= limit) break;
   }
 
+  // Cross-user reuse: a title's TMDB validation (canonical title/year/i18n/poster) is keyed
+  // by (item_type, provider_tmdb_id) and identical for every user, so reuse what another user
+  // already validated into catalog_titles instead of re-calling TMDB. Only TRUSTED matches
+  // (tmdbValidation.valid === true) are reused; uncertain/invalid ones fall through to a fresh
+  // validation. This is the single biggest onboarding cost for a 2nd user on the same provider.
+  let toFetch = candidates;
+  if (db && candidates.length) {
+    const remaining = new Set(candidates.map((c) => c.key));
+    const idsByType = { movie: [] as string[], series: [] as string[] };
+    for (const c of candidates) idsByType[c.itemType].push(c.tmdbId);
+    for (const itemType of ["movie", "series"] as const) {
+      const ids = idsByType[itemType];
+      for (let i = 0; i < ids.length; i += 200) {
+        try {
+          const { data } = await db.from("catalog_titles")
+            .select("provider_tmdb_id, poster_url, backdrop_url, metadata")
+            .eq("item_type", itemType)
+            .in("provider_tmdb_id", ids.slice(i, i + 200));
+          for (const r of data ?? []) {
+            const tmdbId = stringOr((r as JsonRecord).provider_tmdb_id, "");
+            if (!tmdbId) continue;
+            const md = recordOrEmpty((r as JsonRecord).metadata);
+            const tv = recordOrEmpty(md.tmdbValidation);
+            if (tv.valid !== true) continue; // only reuse a trusted match
+            const key = tmdbValidationKey(itemType, tmdbId);
+            validations.set(key, {
+              valid: true,
+              title: stringOrNull(tv.title),
+              year: stringOrNull(tv.year),
+              posterUrl: stringOrNull((r as JsonRecord).poster_url),
+              backdropUrl: stringOrNull((r as JsonRecord).backdrop_url),
+              confidence: Number(tv.confidence) || 0,
+              i18n: (md.i18n && typeof md.i18n === "object") ? md.i18n as Record<string, { title?: string; overview?: string }> : undefined,
+              reason: stringOr(tv.reason, "reused_from_catalog"),
+              details: (md.tmdb && typeof md.tmdb === "object") ? md.tmdb as JsonRecord : undefined,
+            });
+            remaining.delete(key);
+          }
+        } catch (_) { /* best-effort reuse */ }
+      }
+    }
+    toFetch = candidates.filter((c) => remaining.has(c.key));
+  }
+
+  if (!apiKey || !toFetch.length) return validations; // no key (or fully reused) → done
+
   const concurrency = 4;
   let cursor = 0;
   async function worker() {
     for (;;) {
       const index = cursor++;
-      const candidate = candidates[index];
+      const candidate = toFetch[index];
       if (!candidate) return;
       try {
         validations.set(candidate.key, await validateTmdbCandidate(apiKey, candidate));
