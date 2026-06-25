@@ -202,8 +202,13 @@ h4 {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: var(--navbar-height);
+  /* Grow by the status-bar inset and pad content down so the bar sits BELOW the
+     phone's status bar (clock/battery/notifs) while its background fills behind
+     it. safe-area-inset-top is 0 when there's no overlap, so this is a no-op on
+     desktop and on non-edge-to-edge devices. */
+  height: calc(var(--navbar-height) + var(--safe-area-inset-top));
   padding: 0 var(--space-lg);
+  padding-top: var(--safe-area-inset-top);
   padding-left: max(var(--space-lg), var(--safe-area-inset-left));
   padding-right: max(var(--space-lg), var(--safe-area-inset-right));
   background: var(--glass-bg);
@@ -4158,6 +4163,7 @@ kbd {
   /* Navigation - Hide text labels, show only icons */
   .navbar {
     padding: 0 var(--space-md);
+    padding-top: var(--safe-area-inset-top);
   }
 
   .navbar-menu {
@@ -4508,7 +4514,8 @@ kbd {
   /* Navigation - Compact with hamburger menu */
   .navbar {
     padding: 0 var(--space-sm);
-    height: 52px;
+    padding-top: var(--safe-area-inset-top);
+    height: calc(52px + var(--safe-area-inset-top));
   }
 
   .logo {
@@ -4934,7 +4941,7 @@ kbd {
   }
 
   .navbar {
-    height: 48px;
+    height: calc(48px + var(--safe-area-inset-top));
   }
 
   .brand-text {
