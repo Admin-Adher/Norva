@@ -35,6 +35,7 @@ import androidx.media3.common.text.Cue;
 import androidx.media3.common.text.CueGroup;
 import androidx.media3.datasource.DataSource;
 import androidx.media3.datasource.DefaultHttpDataSource;
+import androidx.media3.datasource.HttpDataSource;
 import androidx.media3.exoplayer.ExoPlayer;
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory;
 
@@ -124,6 +125,8 @@ public class PlayerActivity extends Activity {
     private boolean resumeApplied = false; // seek to the resume offset only once
     private String subKey;                 // SharedPreferences key for the subtitle choice
     private boolean subPrefRestored = false; // apply the saved subtitle pref only once
+    private String streamHost;               // host of the stream URL, shown in errors
+    private static final long BUFFER_TIMEOUT_MS = 35_000L; // "no data" watchdog
 
     private final SimpleDateFormat clockFmt = new SimpleDateFormat("EEE d MMM 'à' HH:mm", Locale.FRENCH);
 
@@ -155,6 +158,19 @@ public class PlayerActivity extends Activity {
         public void run() { finish(); }
     };
 
+    // Surfaces a stuck stream (connected but no playable bytes) instead of a silent
+    // spinner at 00:00, so the failure is visible and screenshot-able.
+    private final Runnable bufferWatchdog = new Runnable() {
+        @Override
+        public void run() {
+            spinner.setVisibility(View.GONE);
+            errorView.setText("Aucune donnée reçue (timeout 35s).\n"
+                    + "Le fournisseur accepte la connexion mais n'envoie pas de flux lisible."
+                    + (streamHost != null ? "\nHôte : " + streamHost : ""));
+            errorView.setVisibility(View.VISIBLE);
+        }
+    };
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -168,6 +184,7 @@ public class PlayerActivity extends Activity {
         resumeSeconds = getIntent().getIntExtra(EXTRA_RESUME_SECONDS, 0);
         subKey = subKeyFor(itemType, itemId);
         if (url == null || url.isEmpty()) { finish(); return; }
+        streamHost = hostOf(url);
 
         root = new FrameLayout(this);
         root.setBackgroundColor(Color.BLACK);
@@ -230,6 +247,13 @@ public class PlayerActivity extends Activity {
             @Override
             public void onPlaybackStateChanged(int state) {
                 spinner.setVisibility(state == Player.STATE_BUFFERING ? View.VISIBLE : View.GONE);
+                if (state == Player.STATE_BUFFERING) {
+                    // Arm the "no data" watchdog; cancel it on any other state.
+                    handler.removeCallbacks(bufferWatchdog);
+                    handler.postDelayed(bufferWatchdog, BUFFER_TIMEOUT_MS);
+                } else {
+                    handler.removeCallbacks(bufferWatchdog);
+                }
                 if (state == Player.STATE_READY) {
                     playRetries = 0;           // healthy playback resets the retry budget
                     errorView.setVisibility(View.GONE);
@@ -261,6 +285,7 @@ public class PlayerActivity extends Activity {
 
             @Override
             public void onPlayerError(PlaybackException error) {
+                handler.removeCallbacks(bufferWatchdog);
                 final int code = error.errorCode;
                 // Transient network/HTTP errors (incl. a 504 or a briefly held
                 // single-connection slot): retry once before giving up.
@@ -279,7 +304,9 @@ public class PlayerActivity extends Activity {
                     return;
                 }
                 spinner.setVisibility(View.GONE);
-                errorView.setText(friendlyError(code, error.getErrorCodeName()));
+                // Friendly line + raw technical detail (code, HTTP status, cause, host)
+                // so the failure can be read/screenshotted for diagnosis.
+                errorView.setText(friendlyError(code, error.getErrorCodeName()) + "\n\n" + diagnose(error));
                 errorView.setVisibility(View.VISIBLE);
                 reportPlaybackStatus("broken", error.getErrorCodeName());
             }
@@ -373,6 +400,31 @@ public class PlayerActivity extends Activity {
             return "Format vidéo/audio non pris en charge par cette TV.";
         }
         return "Lecture impossible (" + name + ").";
+    }
+
+    /** Compact, shareable technical detail from a playback failure (code, HTTP status, cause, host). */
+    private String diagnose(PlaybackException e) {
+        StringBuilder sb = new StringBuilder("Détails : ").append(e.getErrorCodeName());
+        Throwable c = e.getCause();
+        int depth = 0;
+        while (c != null && depth < 3) {
+            if (c instanceof HttpDataSource.InvalidResponseCodeException) {
+                sb.append("\nHTTP ").append(((HttpDataSource.InvalidResponseCodeException) c).responseCode);
+            }
+            sb.append("\n← ").append(c.getClass().getSimpleName());
+            String cm = c.getMessage();
+            if (cm != null && !cm.isEmpty()) {
+                sb.append(" : ").append(cm.length() > 160 ? cm.substring(0, 160) : cm);
+            }
+            c = c.getCause();
+            depth++;
+        }
+        if (streamHost != null && !streamHost.isEmpty()) sb.append("\nHôte : ").append(streamHost);
+        return sb.toString();
+    }
+
+    private static String hostOf(String url) {
+        try { return android.net.Uri.parse(url).getHost(); } catch (Exception e) { return null; }
     }
 
     // ==================== Overlay ====================
