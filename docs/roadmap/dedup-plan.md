@@ -52,21 +52,23 @@ genres) **once per tmdb id**; `cloud_titles` becomes a thin per-user link
 (`user_id, identity_key, provider_tmdb_id, match_status, default_variant_id,
 variant_count, audio_languages`).
 
-**Gate status (2026-06-25):** mirror-verify is **NOT clean** — 16 046 compared,
-per-field mismatches `title 185, original_title 27, release_year 106, poster 24,
-backdrop 213, i18n 209, tmdb 210`, `cloud_only 0`, `catalog_only 724`. **Cause:**
-the enrichment crons `UPDATE cloud_titles` per-user only — never `catalog_titles`
-— so the global copy drifts after each re-enrichment. ⇒ **global enrichment
-(step 1.1 below) is the real prerequisite; the flip is gated on it.** (The "0
-mismatch" in the design doc was true at sync time, before cron drift.)
+**Gate status (2026-06-25 — steps 1.1-1.3 DONE, mirror CLEAN):** a statement-level
+mirror trigger (migration `20260625120000_cloud_titles_mirror_catalog_trigger`)
+now keeps `catalog_titles` in lock-step with `cloud_titles` metadata on **every**
+write (sync, all crons, any future writer) — one bulk upsert per statement, so
+it's efficient even on the 40k-row sync and **can no longer drift**. The prior
+drift was reconciled and verified: `catalog_mirror_diff()` → all `*_mismatch = 0`,
+`cloud_only = 0`. **The read-flip (1.4) is now UNBLOCKED.** *(Earlier this showed
+~200 per-field mismatches because the crons wrote per-user `cloud_titles` only;
+the trigger replaces the need to rewrite each cron individually.)*
 
 | Step | Action | Reversible |
 |---|---|---|
-| 1.1 | **Global enrichment (the real first step)**: make the 3 crons (`/cron/search-match`, `/cron/revalidate`, `/cron/backfill-years`) + `audio-backfill` **also write `catalog_titles` by tmdb id** (drop the hardcoded `userId` → global). Stops the drift. | ✅ (background only) |
-| 1.2 | **Reconcile** the existing drift: one-shot re-upsert `catalog_titles` from `distinct on (item_type, provider_tmdb_id)` of `cloud_titles` (same logic as the foundation backfill). | ✅ |
-| 1.3 | `catalog-mirror-verify` **clean** over a window (all `*_mismatch = 0`, `cloud_only = 0`) — the gate. | — |
-| 1.4 | **Flip** `NORVA_CATALOG_READ_SOURCE=catalog_titles` on `norva-catalog`. | ✅ unset (instant) |
-| 1.5 | `refreshVodTitleProjection`: stop writing metadata into `cloud_titles` (keep the link); metadata only into `catalog_titles`. Move the genre trigger onto `catalog_titles`. | ✅ while columns exist |
+| 1.1 ✅ | **Global mirror — DONE (via trigger, not per-cron rewrite).** Statement-level AFTER INSERT/UPDATE trigger on `cloud_titles` mirrors `title/original_title/release_year/poster/backdrop/metadata` → `catalog_titles` by `(item_type, provider_tmdb_id)` on every write. Covers sync + all 3 crons + playback + any future writer. Migration `20260625120000`. | ✅ drop trigger |
+| 1.2 ✅ | **Reconcile — DONE.** One-shot re-upsert fixed the prior ~200 mismatches. | ✅ |
+| 1.3 ✅ | **Mirror clean — VERIFIED** (`catalog_mirror_diff()` all 0). Re-check after a cron cycle to confirm the trigger holds it. | — |
+| 1.4 | **Flip** `NORVA_CATALOG_READ_SOURCE=catalog_titles` on `norva-catalog` (now unblocked; needs the secret set — held until real overlap, gain ~0 today). | ✅ unset (instant) |
+| 1.5 | `refreshVodTitleProjection`: stop writing metadata into `cloud_titles` (keep the link); metadata only into `catalog_titles`. Move the genre trigger onto `catalog_titles`; drop the mirror trigger (no longer needed). | ✅ while columns exist |
 | 1.6 | **Drop** the metadata columns from `cloud_titles` + remove the per-user read fallback. | ⚠️ irreversible → last |
 
 **Rewrite:** enrichment crons = the real work (go global — this is what keeps the
