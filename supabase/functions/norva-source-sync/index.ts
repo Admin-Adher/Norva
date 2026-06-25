@@ -1093,7 +1093,9 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
         mediaGatewayUrl: rcTitles.mediaGatewayUrl,
         mediaGatewayToken: rcTitles.mediaGatewayToken,
         vodInfoLimit: boundedInt(Deno.env.get("NORVA_VOD_INFO_FINALIZE_LIMIT"), 0, 0, 1000),
-        tmdbValidateLimit: boundedInt(Deno.env.get("NORVA_TMDB_VALIDATE_FINALIZE_LIMIT"), 40, 0, 1000),
+        // Onboarding B: keep inline enrichment small so the user is released fast; the
+        // scheduled enrichment crons + the cross-user reuse + the header bar fill the rest.
+        tmdbValidateLimit: boundedInt(Deno.env.get("NORVA_TMDB_VALIDATE_FINALIZE_LIMIT"), 15, 0, 1000),
       });
       const nextOffset = Math.min(totalVod, batchOffset + rows.length);
       const done = rows.length < batchLimit || nextOffset >= totalVod;
@@ -1478,7 +1480,10 @@ async function syncXtreamSource(
     xtreamConfig: { serverUrl, username, password },
     mediaGatewayUrl: runtimeConfig.mediaGatewayUrl,
     mediaGatewayToken: runtimeConfig.mediaGatewayToken,
-    vodInfoLimit: boundedInt(Deno.env.get("NORVA_VOD_INFO_SYNC_LIMIT"), 120, 0, 1000),
+    // Onboarding B: small inline enrichment → fast release. The scheduled enrichment crons,
+    // the cross-user reuse (A), and the header bar fill the rest in the background.
+    vodInfoLimit: boundedInt(Deno.env.get("NORVA_VOD_INFO_SYNC_LIMIT"), 40, 0, 1000),
+    tmdbValidateLimit: boundedInt(Deno.env.get("NORVA_TMDB_VALIDATE_SYNC_LIMIT"), 20, 0, 1000),
   });
   await reportProgress({
     stage: "finalizing",
