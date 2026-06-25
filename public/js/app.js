@@ -984,6 +984,31 @@ class App {
             this.pages[pageName].show();
         }
     }
+
+    /**
+     * Apply a profile switch WITHOUT a full page reload (Step B). setActiveProfileId
+     * has already dropped the previous profile's favorites/history caches; land on
+     * Home (Netflix-style) and force it to refetch with the new profile, then
+     * refresh the navbar avatar. Active playback is never interrupted. Falls back
+     * to a hard reload on any error so a switch never silently leaves stale data.
+     */
+    async applyProfileSwitch(profileName) {
+        try {
+            if (this.pages.home) this.pages.home.lastLoadedAt = 0; // force a refetch
+            if (this.currentPage === 'watch') {
+                // Don't interrupt playback — Home refetches when next opened.
+            } else if (this.currentPage === 'home') {
+                await this.pages.home.show();
+            } else {
+                this.navigateTo('home');
+            }
+            if (window.NorvaProfiles?.refreshNavAvatar) await window.NorvaProfiles.refreshNavAvatar();
+            try { this.sourceManager?.toast?.(profileName ? `Profil : ${profileName}` : 'Profil changé'); } catch (_) { /* noop */ }
+        } catch (e) {
+            console.warn('[profiles] soft profile switch failed, reloading', e);
+            window.location.reload();
+        }
+    }
 }
 
 // Start app when DOM is ready

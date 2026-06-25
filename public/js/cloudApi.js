@@ -427,10 +427,13 @@
             if (id) localStorage.setItem(ACTIVE_PROFILE_KEY, String(id));
             else localStorage.removeItem(ACTIVE_PROFILE_KEY);
         } catch (_) { /* ignore */ }
-        // Switching profile invalidates the per-profile caches.
+        // Switching profile invalidates the per-profile caches. The cache keys
+        // are 'fav:' / 'hist:' (see favorites.list / history.list), NOT
+        // 'favorites' / 'history' — use the real prefixes so a soft profile
+        // switch actually drops the previous profile's data instead of leaking it.
         if (String(id || '') !== String(prev || '')) {
-            invalidateCache('favorites');
-            invalidateCache('history');
+            invalidateCache('fav');
+            invalidateCache('hist');
         }
     }
 

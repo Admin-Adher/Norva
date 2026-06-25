@@ -463,9 +463,16 @@ html.tv .np-btn{min-height:60px;font-size:18px}
       close();
       r(true);
     } else {
-      // Switcher: reload so every surface refetches with the new profile.
+      // Switcher: soft-switch in place (no full reload) so it feels instant.
+      // setActiveId above already dropped the previous profile's caches; the app
+      // shell refetches Home + refreshes the avatar. Hard-reload fallback if the
+      // shell isn't present (e.g. opened outside the SPA).
       close();
-      window.location.reload();
+      if (window.app && typeof window.app.applyProfileSwitch === 'function') {
+        window.app.applyProfileSwitch(p.name);
+      } else {
+        window.location.reload();
+      }
     }
   }
 
