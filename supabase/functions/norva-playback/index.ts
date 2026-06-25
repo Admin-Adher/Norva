@@ -1757,9 +1757,21 @@ async function persistOrderedAudioForTitle(
   const ordered = raw
     .map((t) => ({ index: Number(t?.index), lang: normalizeIsoLang(stringOrNull(t?.lang)) }))
     .filter((t) => Number.isInteger(t.index));
+  // Subtitles ride along — the relay returns both in one call (zero extra cost).
+  const subs = info && Array.isArray(info.subtitles) ? info.subtitles as JsonRecord[] : [];
+  const orderedSubs = subs
+    .map((s) => ({
+      index: Number(s?.index),
+      lang: normalizeIsoLang(stringOrNull(s?.lang ?? s?.language)),
+      codec: stringOrNull(s?.codec),
+      subtitleType: stringOrNull(s?.subtitleType) || (s?.extractable ? "text" : "image"),
+      extractable: s?.extractable === true,
+      forced: s?.forced === true,
+    }))
+    .filter((s) => Number.isInteger(s.index));
   if (!ordered.length) return false;
   const { error } = await db.from("cloud_titles")
-    .update({ audio_tracks: ordered })
+    .update({ audio_tracks: ordered, subtitle_tracks: orderedSubs, subtitle_probed_at: new Date().toISOString() })
     .eq("user_id", userId).eq("id", titleId);
   return !error;
 }
@@ -1877,7 +1889,10 @@ async function runAudioBackfill(req: Request, db: SupabaseClient) {
   // mode 'vod' = get_vod_info default track (cheap); 'probe' = container header-probe
   // for ALL tracks (heavier — Range-reads the moov/Tracks). requireTag narrows to a
   // version tag (e.g. 'multi') so the heavy probe only runs where it helps.
-  const mode = stringOr(body.mode, "vod") === "probe" ? "probe" : "vod";
+  // target='subtitle' = sweep titles missing a subtitle probe (forces the header-parse,
+  // which fills subtitle_tracks AND audio_tracks in one relay call).
+  const subtitleTarget = stringOr(body.target, "") === "subtitle";
+  const mode = (stringOr(body.mode, "vod") === "probe" || subtitleTarget) ? "probe" : "vod";
   // requireTag = comma-list of version tags (OR). Narrows the heavy probe to where the
   // real audio language is unknown & valuable: 'multi' (many tracks), 'vostfr'/'vo'
   // (original audio — JP for anime, etc., not encoded in the tag). Empty = all unresolved.
@@ -1973,13 +1988,19 @@ async function runAudioBackfill(req: Request, db: SupabaseClient) {
     .select("id, default_variant_id, provider_tmdb_id")
     .eq("user_id", userId)
     .eq("item_type", itemType)
-    .gt("variant_count", 0)
-    .eq("audio_languages", "{}");
-  // Progression: skip titles already probed recently so the crawl ADVANCES past
-  // genuinely-untagged titles instead of re-probing the same front of the queue forever.
-  // 30d retry window lets transient provider failures (e.g. 429) recover later.
-  const probeRetryBefore = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString();
-  titlesQuery = titlesQuery.or(`audio_probed_at.is.null,audio_probed_at.lt.${probeRetryBefore}`);
+    .gt("variant_count", 0);
+  if (subtitleTarget) {
+    // Subtitle sweep: titles never subtitle-probed. Independent of audio state, so it also
+    // covers titles whose audio is already resolved (the one header-parse fills both).
+    titlesQuery = titlesQuery.is("subtitle_probed_at", null);
+  } else {
+    titlesQuery = titlesQuery.eq("audio_languages", "{}");
+    // Progression: skip titles already probed recently so the crawl ADVANCES past
+    // genuinely-untagged titles instead of re-probing the same front of the queue forever.
+    // 30d retry window lets transient provider failures (e.g. 429) recover later.
+    const probeRetryBefore = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString();
+    titlesQuery = titlesQuery.or(`audio_probed_at.is.null,audio_probed_at.lt.${probeRetryBefore}`);
+  }
   if (requireTags.length) titlesQuery = titlesQuery.overlaps("version_languages", requireTags);
   // untaggedOnly = titles with NO version tag (e.g. plain French films). These carry no
   // language signal in the title, so they MUST be probed; ~60% expose a real default-track
@@ -2011,9 +2032,9 @@ async function runAudioBackfill(req: Request, db: SupabaseClient) {
     // Mark a title as probed (resolved or genuinely-empty) so the progression filter
     // advances past it. Only called after a SUCCESSFUL relay response — never on a
     // transient relayNotOk (429), so those retry on the next pass. Best-effort.
-    const markProbed = async () => {
+    const markProbed = async (extra: JsonRecord = {}) => {
       try {
-        await db.from("cloud_titles").update({ audio_probed_at: new Date().toISOString() })
+        await db.from("cloud_titles").update({ audio_probed_at: new Date().toISOString(), ...extra })
           .eq("user_id", userId).eq("id", String(title.id));
       } catch (_) { /* best-effort progression marker */ }
     };
@@ -2057,17 +2078,41 @@ async function runAudioBackfill(req: Request, db: SupabaseClient) {
         } catch (e) { relayHead = { error: String(e).slice(0, 120) }; }
         sample = { stage: "relayOk", mode, info, relayHead };
       }
+      // Subtitles ride along with the probe-mode header-parse: the relay returns audio AND
+      // subtitle tracks in ONE call, so the crawl persists subtitles for free wherever it
+      // probes audio (and the dedicated subtitle sweep, target=subtitle, uses the same path).
+      const orderedSubtitles = mode === "probe" && info && Array.isArray(info.subtitles)
+        ? (info.subtitles as JsonRecord[])
+            .map((s) => ({
+              index: Number(s?.index),
+              lang: normalizeIsoLang(stringOrNull(s?.lang ?? s?.language)),
+              codec: stringOrNull(s?.codec),
+              subtitleType: stringOrNull(s?.subtitleType) || (s?.extractable ? "text" : "image"),
+              extractable: s?.extractable === true,
+              forced: s?.forced === true,
+            }))
+            .filter((s) => Number.isInteger(s.index))
+        : [];
+      const subtitleFields: JsonRecord = mode === "probe"
+        ? { subtitle_tracks: orderedSubtitles, subtitle_probed_at: new Date().toISOString() }
+        : {};
+
       const codes = new Set<string>();
       if (mode === "probe") {
         const incoming = info && Array.isArray(info.audioLanguages) ? info.audioLanguages : [];
-        if (!incoming.length) { diag.relayEmpty++; await markProbed(); return; }
+        const hasTracks = (Array.isArray(info?.audioTracks) && info.audioTracks.length) || orderedSubtitles.length;
+        // Truly empty (no langs AND no tracks at all) = header-parse failed → mark probed
+        // (incl. subtitles) so the crawl advances, mirroring the audio progression marker.
+        if (!incoming.length && !hasTracks) { diag.relayEmpty++; await markProbed(subtitleFields); return; }
         for (const code of incoming) { const normalized = normalizeIsoLang(stringOrNull(code)); if (normalized) codes.add(normalized); }
       } else {
         const tracks = info && Array.isArray(info.audioTracks) ? info.audioTracks : [];
         if (!tracks.length) { diag.relayEmpty++; await markProbed(); return; }
         for (const track of tracks) { const normalized = normalizeIsoLang(stringOrNull((track as JsonRecord)?.language)); if (normalized) codes.add(normalized); }
       }
-      if (!codes.size) { diag.noLang++; await markProbed(); return; }
+      // No audio language resolved, but the probe SUCCEEDED (tracks/subs present): still
+      // persist subtitles + advance the audio marker so we don't re-probe forever.
+      if (!codes.size) { diag.noLang++; await markProbed(subtitleFields); return; }
 
       // Capture the ORDERED per-track map (absolute index -> lang) alongside the deduped
       // set, so the player never has to probe at playback. mode=probe only — it's the
@@ -2080,7 +2125,7 @@ async function runAudioBackfill(req: Request, db: SupabaseClient) {
         : [];
 
       const sortedCodes = [...codes].sort();
-      const updatePayload: JsonRecord = { audio_languages: sortedCodes, audio_probed_at: new Date().toISOString() };
+      const updatePayload: JsonRecord = { ...subtitleFields, audio_languages: sortedCodes, audio_probed_at: new Date().toISOString() };
       if (orderedTracks.length) updatePayload.audio_tracks = orderedTracks;
       const { error: updateError } = await db
         .from("cloud_titles")
