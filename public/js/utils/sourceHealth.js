@@ -96,6 +96,28 @@
         return progress && typeof progress === 'object' && !Array.isArray(progress) ? progress : {};
     }
 
+    // True when the source has already finished at least one full sync: its
+    // catalog is materialized and stays usable while a later refresh runs. This
+    // tells an *initial* import (which must gate the app behind "Preparing your
+    // catalog") apart from a routine background *re-sync* (which must NOT throw
+    // an already-onboarded user back to the import screen). The signal of record
+    // is config_hint.lastSync — the summary of the last *completed* sync, which
+    // is distinct from the in-flight syncProgress and only stamped on success.
+    function hasCompletedCatalog(source = {}, status = {}) {
+        const config = source.configHint || source.config_hint || {};
+        const last = config.lastSync || config.last_sync ||
+            source.lastSync || source.last_sync_result || status.lastSync || {};
+        if (last && typeof last === 'object' && !Array.isArray(last)) {
+            if (last.syncedAt || last.synced_at) return true;
+            const total = Number(
+                last.total ?? last.items ?? last.movies ?? last.series ?? last.live ?? 0
+            );
+            if (Number.isFinite(total) && total > 0) return true;
+        }
+        const catalogVersion = Number(source.catalog_version ?? source.catalogVersion ?? 0);
+        return Number.isFinite(catalogVersion) && catalogVersion > 0;
+    }
+
     function classifyError(errorText, rawStatus = '') {
         const error = lower(`${rawStatus} ${errorText}`);
         if (!error) return 'degraded';
@@ -145,10 +167,21 @@
         const readyStates = new Set(['ready', 'success', 'synced', 'complete', 'completed']);
 
         let state = 'degraded';
+        let refreshing = false;
         if (!enabled) {
             state = 'degraded';
         } else if (syncingStates.has(rawStatus) || syncingStates.has(progressStatus)) {
-            state = 'syncing';
+            // A background re-sync of an already-built catalog keeps the catalog
+            // usable, so classify it ready (flagged `refreshing`) instead of
+            // syncing — otherwise the routine auto-refresh re-triggers the
+            // full-screen onboarding gate for an onboarded user. Only a genuine
+            // *initial* import (no completed catalog yet) stays `syncing`.
+            if (hasCompletedCatalog(source, status)) {
+                state = 'ready';
+                refreshing = true;
+            } else {
+                state = 'syncing';
+            }
         } else if (error) {
             state = classifyError(error, rawStatus);
         } else if (readyStates.has(rawStatus) || readyStates.has(progressStatus) || lastSync) {
@@ -160,6 +193,7 @@
         const meta = STATE_META[state] || STATE_META.degraded;
         return {
             state,
+            refreshing,
             source,
             type: sourceType(source),
             label: meta.label,
@@ -228,6 +262,7 @@
             sources: classified,
             issues: [],
             ready,
+            refreshing: ready.some(item => item.refreshing),
             ...STATE_META.ready
         };
     }
