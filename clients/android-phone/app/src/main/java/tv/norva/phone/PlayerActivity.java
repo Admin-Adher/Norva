@@ -13,9 +13,12 @@ import android.view.WindowManager;
 import android.widget.Toast;
 
 import androidx.annotation.OptIn;
+import androidx.media3.common.C;
+import androidx.media3.common.Format;
 import androidx.media3.common.MediaItem;
 import androidx.media3.common.MimeTypes;
 import androidx.media3.common.Player;
+import androidx.media3.common.Tracks;
 import androidx.media3.common.util.UnstableApi;
 import androidx.media3.datasource.DataSource;
 import androidx.media3.datasource.DefaultHttpDataSource;
@@ -55,6 +58,7 @@ public class PlayerActivity extends Activity {
     private String sourceId;
     private String itemType;
     private String itemId;
+    private String subKey; // SharedPreferences key for the per-title subtitle choice
     private int resumeSeconds = 0;
     private boolean resumeApplied = false;
 
@@ -69,6 +73,7 @@ public class PlayerActivity extends Activity {
         itemType = getIntent().getStringExtra(EXTRA_ITEM_TYPE);
         itemId = getIntent().getStringExtra(EXTRA_ITEM_ID);
         resumeSeconds = getIntent().getIntExtra(EXTRA_RESUME_SECONDS, 0);
+        subKey = subKeyFor(itemType, itemId);
         if (url == null || url.isEmpty()) { finish(); return; }
 
         playerView = new PlayerView(this);
@@ -133,6 +138,10 @@ public class PlayerActivity extends Activity {
                 .build();
         playerView.setPlayer(player);
         playerView.setKeepScreenOn(true);
+        playerView.setShowSubtitleButton(true);
+        // Re-apply the viewer's last subtitle choice for this title before the
+        // first track selection, so it doesn't reset to the stream default.
+        applySavedSubtitlePref();
 
         player.addListener(new Player.Listener() {
             @Override
@@ -146,6 +155,13 @@ public class PlayerActivity extends Activity {
                     }
                 }
                 if (state == Player.STATE_ENDED) finish();
+            }
+
+            @Override
+            public void onTracksChanged(Tracks tracks) {
+                // Remember whatever subtitle track ends up showing (or Off) so the
+                // next launch of this title restores it.
+                persistCurrentSubtitleSelection(tracks);
             }
         });
 
@@ -177,6 +193,71 @@ public class PlayerActivity extends Activity {
             default:
                 return null;
         }
+    }
+
+    // ==================== Subtitle preference ====================
+    // Remember the viewer's subtitle choice per title so it survives reopening,
+    // matched by language (track order can change between plays) with an explicit
+    // Off sentinel. Mirrors the web player's per-title subtitle preference.
+
+    private static final String SUB_PREFS = "norva_subprefs";
+    private static final String SUB_OFF = "__off__";
+    private static final String SUB_ON = "__on__"; // a selected track with no language tag
+
+    private static String subKeyFor(String itemType, String itemId) {
+        if (itemId == null || itemId.isEmpty()) return null;
+        return (itemType == null || itemType.isEmpty() ? "movie" : itemType) + ":" + itemId;
+    }
+
+    private String loadSubPref() {
+        if (subKey == null) return null;
+        try {
+            String v = getSharedPreferences(SUB_PREFS, MODE_PRIVATE).getString(subKey, null);
+            return (v == null || v.isEmpty()) ? null : v;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private void saveSubPref(String value) {
+        if (subKey == null || value == null) return;
+        try {
+            getSharedPreferences(SUB_PREFS, MODE_PRIVATE).edit().putString(subKey, value).apply();
+        } catch (Exception ignored) { /* preference is best-effort */ }
+    }
+
+    /** Bias track selection toward the saved subtitle language (or Off) for this title. */
+    private void applySavedSubtitlePref() {
+        String pref = loadSubPref();
+        if (pref == null || player == null) return;
+        if (SUB_OFF.equals(pref)) {
+            player.setTrackSelectionParameters(player.getTrackSelectionParameters().buildUpon()
+                    .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true).build());
+        } else if (!SUB_ON.equals(pref)) {
+            player.setTrackSelectionParameters(player.getTrackSelectionParameters().buildUpon()
+                    .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+                    .setPreferredTextLanguage(pref).build());
+        }
+    }
+
+    /** Persist whichever subtitle track is currently selected (or Off) for this title. */
+    private void persistCurrentSubtitleSelection(Tracks tracks) {
+        if (subKey == null || tracks == null) return;
+        boolean hasText = false, selected = false;
+        String lang = null;
+        for (Tracks.Group g : tracks.getGroups()) {
+            if (g.getType() != C.TRACK_TYPE_TEXT) continue;
+            hasText = true;
+            for (int i = 0; i < g.length; i++) {
+                if (!g.isTrackSelected(i)) continue;
+                selected = true;
+                Format f = g.getTrackFormat(i);
+                if (f.language != null && !"und".equals(f.language)) lang = f.language;
+            }
+        }
+        if (selected) saveSubPref(lang != null ? lang : SUB_ON);
+        else if (hasText) saveSubPref(SUB_OFF);
+        // No text tracks at all: leave any existing preference untouched.
     }
 
     /** Immersive fullscreen: hide the status and navigation bars (sticky, so a

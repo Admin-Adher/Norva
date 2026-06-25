@@ -122,6 +122,8 @@ public class PlayerActivity extends Activity {
     private boolean playbackOkReported = false;
     private int resumeSeconds = 0;        // start offset for cross-device resume
     private boolean resumeApplied = false; // seek to the resume offset only once
+    private String subKey;                 // SharedPreferences key for the subtitle choice
+    private boolean subPrefRestored = false; // apply the saved subtitle pref only once
 
     private final SimpleDateFormat clockFmt = new SimpleDateFormat("EEE d MMM 'à' HH:mm", Locale.FRENCH);
 
@@ -164,6 +166,7 @@ public class PlayerActivity extends Activity {
         itemType = getIntent().getStringExtra(EXTRA_ITEM_TYPE);
         itemId = getIntent().getStringExtra(EXTRA_ITEM_ID);
         resumeSeconds = getIntent().getIntExtra(EXTRA_RESUME_SECONDS, 0);
+        subKey = subKeyFor(itemType, itemId);
         if (url == null || url.isEmpty()) { finish(); return; }
 
         root = new FrameLayout(this);
@@ -245,6 +248,9 @@ public class PlayerActivity extends Activity {
                         }
                     }
                     refreshSecondBarValues();
+                    // Restore the viewer's last subtitle choice for this title
+                    // once the track list is known (no-op if none was saved).
+                    maybeRestoreSubtitlePref();
                 }
                 if (state == Player.STATE_ENDED) finish();
                 updatePlayPauseLabel();
@@ -726,6 +732,9 @@ public class PlayerActivity extends Activity {
                         new DialogInterface.OnClickListener() {
                             @Override
                             public void onClick(DialogInterface dialog, int which) {
+                                // A manual pick is authoritative: don't let a later
+                                // STATE_READY re-apply the previously saved choice.
+                                if (trackType == C.TRACK_TYPE_TEXT) subPrefRestored = true;
                                 applyTrack(trackType, groups.get(which), indices.get(which));
                                 dialog.dismiss();
                                 refreshSecondBarValues();
@@ -740,12 +749,17 @@ public class PlayerActivity extends Activity {
             player.setTrackSelectionParameters(player.getTrackSelectionParameters().buildUpon()
                     .setTrackTypeDisabled(trackType, true).build());
             subtitleView.setVisibility(View.GONE);
+            if (trackType == C.TRACK_TYPE_TEXT) saveSubPref(SUB_OFF);
             return;
         }
         player.setTrackSelectionParameters(player.getTrackSelectionParameters().buildUpon()
                 .setTrackTypeDisabled(trackType, false)
                 .setOverrideForType(new TrackSelectionOverride(group.getMediaTrackGroup(), trackIndex))
                 .build());
+        if (trackType == C.TRACK_TYPE_TEXT) {
+            Format f = group.getTrackFormat(trackIndex);
+            saveSubPref(f.language != null && !"und".equals(f.language) ? f.language : SUB_ON);
+        }
     }
 
     private String describeTrack(Format f, int trackType, int ordinal) {
@@ -768,6 +782,73 @@ public class PlayerActivity extends Activity {
             if (f.codecs != null) s.append(" · ").append(f.codecs);
         }
         return s.toString();
+    }
+
+    // ---- Subtitle preference (remember the viewer's choice per title) ----
+    // Keyed by title and matched by language (track order can change between
+    // plays), with an explicit Off sentinel. Mirrors the web player so the
+    // chosen subtitle survives reopening instead of resetting to the default.
+
+    private static final String SUB_PREFS = "norva_subprefs";
+    private static final String SUB_OFF = "__off__";
+    private static final String SUB_ON = "__on__"; // a selected track with no language tag
+
+    private static String subKeyFor(String itemType, String itemId) {
+        if (itemId == null || itemId.isEmpty()) return null;
+        return (itemType == null || itemType.isEmpty() ? "movie" : itemType) + ":" + itemId;
+    }
+
+    private String loadSubPref() {
+        if (subKey == null) return null;
+        try {
+            String v = getSharedPreferences(SUB_PREFS, MODE_PRIVATE).getString(subKey, null);
+            return (v == null || v.isEmpty()) ? null : v;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private void saveSubPref(String value) {
+        if (subKey == null || value == null) return;
+        try {
+            getSharedPreferences(SUB_PREFS, MODE_PRIVATE).edit().putString(subKey, value).apply();
+        } catch (Exception ignored) { /* preference is best-effort */ }
+    }
+
+    /**
+     * Re-apply the saved subtitle choice for this title once the tracks are
+     * known. A saved language absent from this stream leaves ExoPlayer's default
+     * untouched; runs only once per playback (a manual pick takes precedence).
+     */
+    private void maybeRestoreSubtitlePref() {
+        if (subPrefRestored || subKey == null || player == null) return;
+        String pref = loadSubPref();
+        if (pref == null) return;
+        subPrefRestored = true;
+        if (SUB_OFF.equals(pref)) {
+            applyTrack(C.TRACK_TYPE_TEXT, null, -1);
+            refreshSecondBarValues();
+            return;
+        }
+        Tracks.Group firstText = null;
+        int firstIndex = -1;
+        for (Tracks.Group g : player.getCurrentTracks().getGroups()) {
+            if (g.getType() != C.TRACK_TYPE_TEXT) continue;
+            for (int i = 0; i < g.length; i++) {
+                if (!g.isTrackSupported(i)) continue;
+                if (firstText == null) { firstText = g; firstIndex = i; }
+                Format f = g.getTrackFormat(i);
+                if (f.language != null && f.language.equals(pref)) {
+                    applyTrack(C.TRACK_TYPE_TEXT, g, i);
+                    refreshSecondBarValues();
+                    return;
+                }
+            }
+        }
+        if (SUB_ON.equals(pref) && firstText != null) {
+            applyTrack(C.TRACK_TYPE_TEXT, firstText, firstIndex);
+            refreshSecondBarValues();
+        }
     }
 
     /** Refresh the value labels shown under each second-bar icon. */
