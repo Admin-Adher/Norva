@@ -48,6 +48,9 @@ public class PlayerActivity extends Activity {
     public static final String EXTRA_ITEM_TYPE = "itemType";
     public static final String EXTRA_ITEM_ID = "itemId";
     public static final String EXTRA_RESUME_SECONDS = "resumeSeconds";
+    // Gateway byte-pipe URL to retry with if the direct provider URL is refused
+    // (e.g. the provider 401s this device's residential IP).
+    public static final String EXTRA_FALLBACK_URL = "fallbackUrl";
     // Offline (encrypted local file) playback.
     public static final String EXTRA_LOCAL = "local";
     public static final String EXTRA_WRAPPED_KEY = "wrappedKey";
@@ -64,6 +67,8 @@ public class PlayerActivity extends Activity {
     private PlayerView playerView;
     private TextView errorView;          // shown when a stream fails, instead of a silent 00:00
     private String streamHost;           // host of the stream URL, included in the error text
+    private String fallbackUrl;          // gateway URL to retry with on a direct-URL refusal
+    private boolean fallbackTried = false;
     private String sourceId;
     private String itemType;
     private String itemId;
@@ -96,6 +101,7 @@ public class PlayerActivity extends Activity {
         subKey = subKeyFor(itemType, itemId);
         if (url == null || url.isEmpty()) { finish(); return; }
         streamHost = hostOf(url);
+        fallbackUrl = getIntent().getStringExtra(EXTRA_FALLBACK_URL);
 
         playerView = new PlayerView(this);
         // Black everywhere behind the video so letterbox/pillarbox and any
@@ -208,9 +214,16 @@ public class PlayerActivity extends Activity {
 
             @Override
             public void onPlayerError(PlaybackException error) {
+                errHandler.removeCallbacks(bufferWatchdog);
+                // Direct provider play can be refused for this device's residential IP
+                // (e.g. HTTP 401/403) or unreachable, while the cloud gateway IP is
+                // accepted. Switch to the gateway fallback once before surfacing the error.
+                if (fallbackUrl != null && !fallbackUrl.isEmpty() && !fallbackTried && isIoError(error)) {
+                    switchToFallback();
+                    return;
+                }
                 // Surface the real failure on screen (error code, HTTP status, cause,
                 // host) instead of a silent hang — so it can be read/screenshotted.
-                errHandler.removeCallbacks(bufferWatchdog);
                 showStreamError(diagnose(error));
             }
 
@@ -324,6 +337,23 @@ public class PlayerActivity extends Activity {
         errorView.setText(message);
         errorView.setVisibility(View.VISIBLE);
         errorView.bringToFront();
+    }
+
+    /** Reload from the gateway fallback URL after a direct-URL refusal (e.g. provider 401). */
+    private void switchToFallback() {
+        fallbackTried = true;
+        streamHost = hostOf(fallbackUrl);
+        errHandler.removeCallbacks(bufferWatchdog);
+        if (errorView != null) errorView.setVisibility(View.GONE);
+        player.setMediaItem(new MediaItem.Builder().setUri(fallbackUrl).build());
+        player.prepare();
+        player.setPlayWhenReady(true);
+    }
+
+    private static boolean isIoError(PlaybackException e) {
+        int code = e.errorCode;
+        return code >= PlaybackException.ERROR_CODE_IO_UNSPECIFIED
+                && code < PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED;
     }
 
     /** Compact, shareable diagnostic from a playback failure (code, HTTP status, cause, host). */

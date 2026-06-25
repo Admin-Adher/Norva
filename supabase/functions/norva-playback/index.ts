@@ -280,7 +280,20 @@ async function createPlaybackSession(
   if (error) throwDb(error, "Unable to create playback session");
 
   if (mode === "direct") {
-    return { session, playback: { mode, url: targetUrl, expiresAt } };
+    // Direct plays straight from the device's residential IP. Some providers
+    // reject that IP (e.g. HTTP 401) while accepting the media gateway's IP, so
+    // hand the native player a gateway byte-pipe URL to fall back to on an
+    // auth/IP/connection error. Minting it is just an HMAC — no DB write, no
+    // provider connection (see createBytePipeAccess) — so it's safe to attach to
+    // every direct response; the gateway only dials the provider if the device
+    // actually fetches it. Best-effort: if the gateway isn't configured, direct
+    // still works without a fallback.
+    let fallbackUrl: string | null = null;
+    try {
+      const fb = await createBytePipeAccess(session.id, userId, targetUrl, expiresAt, db, userAgent);
+      fallbackUrl = fb.url;
+    } catch (_) { /* gateway not configured — no fallback, direct unaffected */ }
+    return { session, playback: { mode, url: targetUrl, fallbackUrl, expiresAt } };
   }
 
   if (mode === "relay") {

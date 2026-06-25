@@ -127,8 +127,23 @@
 
     // Route all playback to the native player once the page classes exist
     document.addEventListener('DOMContentLoaded', () => {
-        const nativePlay = (streamUrl, title, meta, resumeSeconds) => {
+        const nativePlay = (streamUrl, title, meta, resumeSeconds, fallbackUrl) => {
             const resume = Math.max(0, Math.floor(Number(resumeSeconds) || 0));
+            const fb = fallbackUrl || '';
+            if (meta && fb && typeof bridge.playVideoResumableFallback === 'function') {
+                // Newest APK: hand the player a direct URL + a gateway fallback URL it
+                // switches to if the provider refuses the direct (residential-IP) request.
+                bridge.playVideoResumableFallback(
+                    streamUrl,
+                    fb,
+                    title,
+                    String(meta.sourceId || ''),
+                    meta.itemType || '',
+                    String(meta.itemId || ''),
+                    resume
+                );
+                return;
+            }
             if (meta && resume > 0 && typeof bridge.playVideoResumable === 'function') {
                 // New APK: start at the saved offset and report position on exit.
                 bridge.playVideoResumable(
@@ -158,15 +173,18 @@
         // { url, ... } — the cloud movie/series path opens the player shell
         // first, then resolves the stream. Support both so native playback
         // works in cloud mode (not just standalone).
-        const resolveStreamUrl = async (streamUrl) => {
+        const resolveStreamPayload = async (streamUrl) => {
             try {
-                if (typeof streamUrl !== 'function') return streamUrl || null;
+                if (typeof streamUrl !== 'function') return { url: streamUrl || null, fallbackUrl: null };
                 const resolved = await streamUrl();
-                if (typeof resolved === 'string') return resolved || null;
-                return resolved && resolved.url ? resolved.url : null;
+                if (typeof resolved === 'string') return { url: resolved || null, fallbackUrl: null };
+                return {
+                    url: resolved && resolved.url ? resolved.url : null,
+                    fallbackUrl: resolved && resolved.fallbackUrl ? resolved.fallbackUrl : null
+                };
             } catch (err) {
                 console.warn('[Native] Could not resolve stream URL:', err?.message || err);
-                return null;
+                return { url: null, fallbackUrl: null };
             }
         };
 
@@ -188,7 +206,7 @@
         };
 
         if (window.WatchPage) {
-            WatchPage.prototype.play = async function (content, streamUrl) {
+            WatchPage.prototype.play = async function (content, streamUrl, playback) {
                 try {
                     // Seed history so Continue Watching shows the title even if
                     // the viewer quits before the native player reports back.
@@ -210,18 +228,21 @@
                         }
                     })?.catch?.(() => { });
                 } catch (e) { /* history is best-effort */ }
-                const url = await resolveStreamUrl(streamUrl);
-                if (!url) return;
-                nativePlay(url, nativeTitle(content), contentMeta(content), content.resumeTime);
+                const resolved = await resolveStreamPayload(streamUrl);
+                if (!resolved.url) return;
+                // fallbackUrl: the resolver payload carries it for the movie/series
+                // path; the restore-after-refresh path passes it as the 3rd arg.
+                const fallbackUrl = resolved.fallbackUrl || (playback && playback.fallbackUrl) || null;
+                nativePlay(resolved.url, nativeTitle(content), contentMeta(content), content.resumeTime, fallbackUrl);
             };
         }
 
         if (window.VideoPlayer) {
             VideoPlayer.prototype.play = async function (channel, streamUrl) {
                 this.currentChannel = channel;
-                const url = await resolveStreamUrl(streamUrl);
-                if (!url) return;
-                nativePlay(url, channel?.name || 'Live TV', channelMeta(channel), 0);
+                const resolved = await resolveStreamPayload(streamUrl);
+                if (!resolved.url) return;
+                nativePlay(resolved.url, channel?.name || 'Live TV', channelMeta(channel), 0, resolved.fallbackUrl);
             };
         }
 

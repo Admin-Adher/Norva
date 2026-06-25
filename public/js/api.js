@@ -1630,6 +1630,9 @@ const CloudAdapter = (() => {
                     url,
                     streamUrl: url,
                     playbackUrl: url,
+                    // Native-only: gateway byte-pipe URL the native player falls back
+                    // to when the provider refuses the direct (residential-IP) request.
+                    fallbackUrl: payload.playback?.fallbackUrl || null,
                     cloud: true,
                     mode: payload.playback?.mode || mode,
                     sessionId: payload.session?.id,

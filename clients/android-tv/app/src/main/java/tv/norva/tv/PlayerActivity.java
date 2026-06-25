@@ -69,6 +69,9 @@ public class PlayerActivity extends Activity {
     public static final String EXTRA_ITEM_TYPE = "itemType";
     public static final String EXTRA_ITEM_ID = "itemId";
     public static final String EXTRA_RESUME_SECONDS = "resumeSeconds";
+    // Gateway byte-pipe URL to retry with if the direct provider URL is refused
+    // (e.g. the provider 401s this device's residential IP).
+    public static final String EXTRA_FALLBACK_URL = "fallbackUrl";
 
     // IPTV providers gate on User-Agent and REJECT a browser UA (this provider 401s
     // it). Use the VLC UA the relay/gateway use successfully — the working default
@@ -126,6 +129,8 @@ public class PlayerActivity extends Activity {
     private String subKey;                 // SharedPreferences key for the subtitle choice
     private boolean subPrefRestored = false; // apply the saved subtitle pref only once
     private String streamHost;               // host of the stream URL, shown in errors
+    private String fallbackUrl;              // gateway URL to retry with on a direct-URL refusal
+    private boolean fallbackTried = false;
     private static final long BUFFER_TIMEOUT_MS = 35_000L; // "no data" watchdog
 
     private final SimpleDateFormat clockFmt = new SimpleDateFormat("EEE d MMM 'à' HH:mm", Locale.FRENCH);
@@ -185,6 +190,7 @@ public class PlayerActivity extends Activity {
         subKey = subKeyFor(itemType, itemId);
         if (url == null || url.isEmpty()) { finish(); return; }
         streamHost = hostOf(url);
+        fallbackUrl = getIntent().getStringExtra(EXTRA_FALLBACK_URL);
 
         root = new FrameLayout(this);
         root.setBackgroundColor(Color.BLACK);
@@ -291,6 +297,13 @@ public class PlayerActivity extends Activity {
                 // single-connection slot): retry once before giving up.
                 boolean transientIo = code >= PlaybackException.ERROR_CODE_IO_UNSPECIFIED
                         && code < PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED;
+                // Direct provider play can be refused for this device's residential IP
+                // (e.g. HTTP 401/403) or unreachable, while the cloud gateway IP is
+                // accepted. Switch to the gateway fallback once before retrying/erroring.
+                if (transientIo && fallbackUrl != null && !fallbackUrl.isEmpty() && !fallbackTried && player != null) {
+                    switchToFallback();
+                    return;
+                }
                 if (transientIo && playRetries < 1 && player != null) {
                     playRetries++;
                     spinner.setVisibility(View.VISIBLE);
@@ -425,6 +438,19 @@ public class PlayerActivity extends Activity {
 
     private static String hostOf(String url) {
         try { return android.net.Uri.parse(url).getHost(); } catch (Exception e) { return null; }
+    }
+
+    /** Reload from the gateway fallback URL after a direct-URL refusal (e.g. provider 401). */
+    private void switchToFallback() {
+        fallbackTried = true;
+        playRetries = 0;             // fresh retry budget for the new URL
+        streamHost = hostOf(fallbackUrl);
+        handler.removeCallbacks(bufferWatchdog);
+        errorView.setVisibility(View.GONE);
+        spinner.setVisibility(View.VISIBLE);
+        player.setMediaItem(MediaItem.fromUri(fallbackUrl));
+        player.prepare();
+        player.setPlayWhenReady(true);
     }
 
     // ==================== Overlay ====================

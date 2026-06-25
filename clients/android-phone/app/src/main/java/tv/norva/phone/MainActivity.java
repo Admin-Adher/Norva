@@ -412,6 +412,15 @@ public class MainActivity extends Activity {
             openPlayer(url, title, sourceId, itemType, itemId, resumeSeconds);
         }
 
+        // Direct URL + a gateway fallback URL the player switches to if the provider
+        // refuses the direct (residential-IP) request with 401/403.
+        @android.webkit.JavascriptInterface
+        public void playVideoResumableFallback(final String url, final String fallbackUrl, final String title,
+                                               final String sourceId, final String itemType, final String itemId,
+                                               final int resumeSeconds) {
+            openPlayer(url, title, sourceId, itemType, itemId, resumeSeconds, fallbackUrl);
+        }
+
         // ---- Offline downloads ----
 
         /** Queue a movie for offline download. {@code json} carries url + metadata. */
@@ -653,6 +662,12 @@ public class MainActivity extends Activity {
 
     private void openPlayer(final String url, final String title, final String sourceId,
                             final String itemType, final String itemId, final int resumeSeconds) {
+        openPlayer(url, title, sourceId, itemType, itemId, resumeSeconds, null);
+    }
+
+    private void openPlayer(final String url, final String title, final String sourceId,
+                            final String itemType, final String itemId, final int resumeSeconds,
+                            final String fallbackUrl) {
         runOnUiThread(() -> {
             Intent intent = new Intent(MainActivity.this, PlayerActivity.class);
             intent.putExtra(PlayerActivity.EXTRA_URL, url);
@@ -661,6 +676,7 @@ public class MainActivity extends Activity {
             if (itemType != null) intent.putExtra(PlayerActivity.EXTRA_ITEM_TYPE, itemType);
             if (itemId != null) intent.putExtra(PlayerActivity.EXTRA_ITEM_ID, itemId);
             if (resumeSeconds > 0) intent.putExtra(PlayerActivity.EXTRA_RESUME_SECONDS, resumeSeconds);
+            if (fallbackUrl != null && !fallbackUrl.isEmpty()) intent.putExtra(PlayerActivity.EXTRA_FALLBACK_URL, fallbackUrl);
             startActivityForResult(intent, REQ_PLAYER);
         });
     }
