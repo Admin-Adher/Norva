@@ -264,6 +264,45 @@ h4 {
   gap: var(--space-xs);
 }
 
+/* Profile avatar in the navbar — always-visible, discoverable entry to the
+   "Who's watching?" switcher (no more digging into Settings to change profile).
+   margin-right:auto on the brand clusters the menu + avatar to the right and
+   keeps the avatar OUTSIDE .navbar-menu so it stays visible on mobile (where
+   .navbar-menu collapses behind the hamburger). */
+.navbar-brand { margin-right: auto; }
+.nav-profile {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  margin-left: var(--space-sm);
+  border: 2px solid transparent;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.06);
+  cursor: pointer;
+  overflow: hidden;
+  transition: border-color .18s ease, transform .18s ease;
+}
+.nav-profile:hover,
+.nav-profile:focus-visible {
+  border-color: var(--primary-blue);
+  transform: scale(1.06);
+  outline: none;
+}
+.nav-profile-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 50%;
+  display: block;
+}
+/* .nav-profile sets display:flex, which would override the [hidden] attribute —
+   restore it so JS can toggle visibility. */
+.nav-profile[hidden] { display: none; }
+
 /* Mobile Menu Toggle Button */
 .mobile-menu-toggle {
   display: none;

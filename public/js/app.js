@@ -44,6 +44,8 @@ class App {
         if (!await this.checkCloudAccess()) return;
         // Netflix-style "who's watching": pick a profile before entering the app.
         try { if (window.NorvaProfiles?.ensureSelected) await window.NorvaProfiles.ensureSelected(); } catch (_) { }
+        // Surface the always-visible navbar profile avatar (one-tap switcher).
+        try { if (window.NorvaProfiles?.refreshNavAvatar) await window.NorvaProfiles.refreshNavAvatar(); } catch (_) { }
         this.applyCatalogAvailability(null);
         this.startCloudWarmKeep();
         this.startEnrichmentProgressPoll();

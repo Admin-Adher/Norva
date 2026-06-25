@@ -10,7 +10,7 @@
   <title>Norva | Cloud media player</title>
   <meta name="description" content="Organize your compatible media source and sync playback across your screens.">
   <link rel="icon" type="image/png" href="/favicon.png">
-  <link rel="stylesheet" href="/css/main.css?v=45">
+  <link rel="stylesheet" href="/css/main.css?v=46">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@800&display=swap"
@@ -103,6 +103,11 @@
           <span>Settings</span>
         </a>
       </div>
+      <!-- Always-visible profile avatar → one-tap "Who's watching?" switcher.
+           Kept outside .navbar-menu so it stays visible on mobile. -->
+      <button class="nav-profile" id="nav-profile" type="button" hidden aria-label="Switch profile">
+        <img class="nav-profile-img" id="nav-profile-img" src="/img/avatars/placeholder.svg" alt="">
+      </button>
     </nav>
 
     <!-- Background catalog-enrichment progress (driven by app.js startEnrichmentProgressPoll). -->
@@ -1768,8 +1773,8 @@
   <script src="/js/pages/SeriesPage.js?v=38"></script>
   <script src="/js/pages/Settings.js?v=29"></script>
   <script src="/js/pages/WatchPage.js?v=111"></script>
-  <script src="/js/profiles.js?v=4"></script>
-  <script src="/js/app.js?v=28"></script>
+  <script src="/js/profiles.js?v=5"></script>
+  <script src="/js/app.js?v=29"></script>
   <script>
     // Check for SSO token in URL
     (function () {

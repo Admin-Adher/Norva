@@ -522,5 +522,37 @@ html.tv .np-btn{min-height:60px;font-size:18px}
     buildOverlay();
   }
 
-  window.NorvaProfiles = { ensureSelected, openSwitcher, openManage };
+  // The active profile object (by stored active id, else the first profile).
+  function activeProfile() {
+    const api = profilesApi();
+    const id = api && api.getActiveId ? api.getActiveId() : '';
+    return state.profiles.find((p) => p.id === id) || state.profiles[0] || null;
+  }
+
+  // Always-visible navbar avatar → opens the switcher. Discoverable entry point
+  // so users switch profile in one tap instead of digging into Settings. Also
+  // doubles as a "who am I" indicator (shows the active profile's avatar).
+  async function refreshNavAvatar() {
+    const btn = document.getElementById('nav-profile');
+    const img = document.getElementById('nav-profile-img');
+    if (!btn || !img) return;
+    if (!isCloud()) { btn.hidden = true; return; }
+    if (!state.profiles.length) {
+      try { await loadProfiles(); } catch (_) { btn.hidden = true; return; }
+    }
+    const p = activeProfile();
+    if (!p) { btn.hidden = true; return; }
+    img.onerror = () => { if (img.src.indexOf('placeholder.svg') === -1) img.src = PLACEHOLDER; };
+    img.src = avatarSrc(p.avatar_id);
+    img.alt = p.name || 'Profile';
+    btn.title = p.name ? `${p.name} — switch profile` : 'Switch profile';
+    btn.setAttribute('aria-label', p.name ? `Profile ${p.name}, switch profile` : 'Switch profile');
+    if (!btn.dataset.wired) {
+      btn.addEventListener('click', () => { openSwitcher(); });
+      btn.dataset.wired = '1';
+    }
+    btn.hidden = false;
+  }
+
+  window.NorvaProfiles = { ensureSelected, openSwitcher, openManage, refreshNavAvatar };
 })();
