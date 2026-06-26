@@ -98,6 +98,23 @@ export default {
         return await relayVodInfo(request, env, claims, ctx);
       }
 
+      // Series detail metadata. Same rationale as /vod-info/: the relay is the only
+      // egress the provider does NOT user_multi_ip-block for this account (Cloudflare,
+      // not the Railway gateway nor the Supabase edge — both datacenter IPs the provider
+      // rejects). The signed token's `url` claim is the full get_series_info
+      // player_api.php URL; the relay fetches it and returns the JSON verbatim.
+      if (url.pathname.startsWith("/series-info/")) {
+        if (request.method !== "GET" && request.method !== "HEAD") {
+          return json(request, env, { error: "Method not allowed" }, 405);
+        }
+        const token = decodeURIComponent(url.pathname.slice("/series-info/".length));
+        const claims = await verifyRelayToken(token, env.RELAY_TOKEN_SECRET);
+        if (claims.exp * 1000 < Date.now()) {
+          return json(request, env, { error: "Relay token expired" }, 401);
+        }
+        return await relaySeriesInfo(request, env, claims, ctx);
+      }
+
       // Deep audio-language probe: get_vod_info's DEFAULT track + a container
       // header-probe (MP4 moov / Matroska Tracks) to enumerate EVERY audio track's
       // language — recovers multi-audio files and titles whose default track is
@@ -954,6 +971,53 @@ function normalizeAudioStream(a) {
     title: String(tags.title || ""),
     default: disp.default === 1 || disp.default === true,
   };
+}
+
+// Fetch the provider's get_series_info from the relay and return it verbatim. Same egress
+// rationale as relayVodInfo: the Railway gateway and the Supabase edge are datacenter IPs the
+// provider user_multi_ip-blocks; the relay (Cloudflare) is the egress it accepts. The signed
+// token's `url` claim is already the full get_series_info player_api.php URL (creds included),
+// so the relay just fetches it and returns the JSON. No caching here — the Supabase
+// cloud_series_info_cache is the durable cache; the relay is only hit on a cache miss.
+async function relaySeriesInfo(request, env, claims, _ctx) {
+  let api;
+  try {
+    api = new URL(claims.url);
+  } catch {
+    return json(request, env, { error: "Invalid relay target" }, 400);
+  }
+  // Defense-in-depth: only Supabase (holding RELAY_TOKEN_SECRET) can mint tokens, but still
+  // refuse anything that isn't a player_api.php metadata call, so a future change to the
+  // minting side can never turn this into a general-purpose fetcher / open proxy.
+  if (!api.pathname.toLowerCase().endsWith("/player_api.php")) {
+    return json(request, env, { error: "Unsupported relay target" }, 400);
+  }
+  const ua = String(claims.ua || "VLC/3.0.20 LibVLC/3.0.20");
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 20000);
+  try {
+    const resp = await fetch(api, {
+      signal: controller.signal,
+      headers: { "user-agent": ua, accept: "application/json,text/plain,*/*" },
+      redirect: "follow",
+    });
+    const text = await resp.text();
+    if (!resp.ok) {
+      return json(request, env, {
+        error: "IPTV provider request failed",
+        status: resp.status,
+        details: sanitizeUpstreamReason(text),
+      }, resp.status);
+    }
+    let payload;
+    try { payload = text ? JSON.parse(text) : {}; } catch { payload = {}; }
+    return json(request, env, payload, 200);
+  } catch (err) {
+    const aborted = err && err.name === "AbortError";
+    return json(request, env, { error: "Unable to reach IPTV provider" }, aborted ? 504 : 502);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 // Fetch the provider's get_vod_info for the stream in the relay token and return

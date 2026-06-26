@@ -2,7 +2,13 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 
 type JsonRecord = Record<string, unknown>;
-type RuntimeConfig = { sourceConfigKey: string; mediaGatewayUrl: string; mediaGatewayToken: string };
+type RuntimeConfig = {
+  sourceConfigKey: string;
+  mediaGatewayUrl: string;
+  mediaGatewayToken: string;
+  relayBaseUrl: string;
+  relayTokenSecret: string;
+};
 type CloudIdentity = { userId: string; deviceId?: string };
 
 class HttpError extends Error {
@@ -33,6 +39,8 @@ const SUPABASE_SERVICE_KEY =
 const ENV_SOURCE_CONFIG_KEY = Deno.env.get("NORVA_SOURCE_CONFIG_KEY") ?? "";
 const ENV_MEDIA_GATEWAY_URL = (Deno.env.get("NORVA_MEDIA_GATEWAY_URL") ?? "").replace(/\/+$/, "");
 const ENV_MEDIA_GATEWAY_TOKEN = Deno.env.get("NORVA_MEDIA_GATEWAY_TOKEN") ?? "";
+const ENV_RELAY_BASE_URL = (Deno.env.get("NORVA_RELAY_BASE_URL") ?? "").replace(/\/+$/, "");
+const ENV_RELAY_TOKEN_SECRET = Deno.env.get("RELAY_TOKEN_SECRET") ?? "";
 
 if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
   throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
@@ -120,7 +128,7 @@ async function getXtreamSeriesInfo(url: URL, sourceId: string, userId: string, d
 
   let payload: JsonRecord;
   try {
-    payload = await fetchSeriesInfoFromProvider(db, { serverUrl, username, password, seriesId });
+    payload = await fetchSeriesInfoFromProvider(db, { serverUrl, username, password, seriesId, userId });
   } catch (error) {
     // Provider failed (most often user_multi_ip / 429). If we hold ANY cached copy — even a
     // stale one — serve it rather than failing the fiche; only surface the error when the
@@ -151,34 +159,127 @@ async function getXtreamSeriesInfo(url: URL, sourceId: string, userId: string, d
 
 async function fetchSeriesInfoFromProvider(
   db: SupabaseClient,
-  params: { serverUrl: string; username: string; password: string; seriesId: string },
+  params: { serverUrl: string; username: string; password: string; seriesId: string; userId: string },
 ): Promise<JsonRecord> {
-  const { serverUrl, username, password, seriesId } = params;
-  // Route through the media gateway so series-info reaches the provider from the SAME IP as
-  // video streaming. A direct fetch from this Supabase edge runtime egresses a different (and
-  // provider-blocked) datacenter IP for the same account, which trips the provider's
-  // user_multi_ip anti-sharing block (429). Fall back to a direct fetch only when the gateway
-  // is unconfigured or too old to know this route (404/405/5xx) — never worse than before.
+  const { serverUrl, username, password, seriesId, userId } = params;
   const runtimeConfig = await getRuntimeConfig(db);
+
+  // PRIMARY: the Cloudflare relay. The provider user_multi_ip-blocks datacenter IPs — both the
+  // Railway media gateway AND this Supabase edge runtime — but accepts Cloudflare, the same
+  // egress that streams the video. So series-info is fetched from the relay, the only reliable
+  // metadata path. Fall through ONLY on a relay-INFRA failure (route missing / 5xx / timeout):
+  // a provider-origin 429/401/403 won't improve on the (also-blocked) gateway, so we surface it
+  // and let the caller's stale-cache fallback apply.
+  if (runtimeConfig.relayBaseUrl && runtimeConfig.relayTokenSecret) {
+    try {
+      return recordOrEmpty(
+        await requestRelaySeriesInfo(runtimeConfig, { serverUrl, username, password, seriesId, userId }),
+      );
+    } catch (error) {
+      const status = error instanceof HttpError ? error.status : 502;
+      if (![404, 405, 502, 503, 504].includes(status)) throw error;
+      console.warn("[norva-series-info] relay series-info unavailable, falling back", status);
+    }
+  }
+
+  // FALLBACK: the media gateway (Railway). Kept for when the relay is unconfigured/unreachable
+  // or hasn't yet learned this route. Same provider-error semantics as the relay branch.
   if (runtimeConfig.mediaGatewayUrl && runtimeConfig.mediaGatewayToken) {
     try {
       return recordOrEmpty(
         await requestGatewaySeriesInfo(runtimeConfig, { serverUrl, username, password, seriesId }),
       );
     } catch (error) {
-      // Fall back only when the GATEWAY itself is the problem (missing route / unreachable /
-      // timeout). Provider-origin errors (401/403/429) won't improve via a direct Supabase
-      // fetch from a blocked IP — surface those so the stale-cache fallback above can apply.
       const status = error instanceof HttpError ? error.status : 502;
       if (![404, 405, 502, 503, 504].includes(status)) throw error;
       console.warn("[norva-series-info] gateway series-info unavailable, falling back to direct", status);
     }
   }
 
+  // LAST RESORT: a direct fetch from this edge runtime (also a datacenter IP — usually
+  // user_multi_ip-blocked, but the cheapest thing left to try).
   return recordOrEmpty(await fetchJson(
     xtreamApiUrl({ serverUrl, username, password, action: "get_series_info" }, { series_id: seriesId }),
     20000,
   ));
+}
+
+// Mint a short-lived signed relay token whose `url` claim is the full get_series_info
+// player_api.php URL, then fetch it through the relay (Cloudflare egress). Same HMAC token
+// shape the relay verifies for /relay/ and /vod-info/. Stateless — no cloud_relay_tokens row
+// (those track playback sessions); this is a 120s metadata token verified purely by signature.
+async function requestRelaySeriesInfo(
+  runtimeConfig: RuntimeConfig,
+  body: { serverUrl: string; username: string; password: string; seriesId: string; userId: string },
+): Promise<JsonRecord> {
+  const apiUrl = xtreamApiUrl(
+    { serverUrl: body.serverUrl, username: body.username, password: body.password, action: "get_series_info" },
+    { series_id: body.seriesId },
+  );
+  const token = await signRelayToken(runtimeConfig.relayTokenSecret, {
+    sid: `seriesinfo-${body.seriesId}`,
+    uid: body.userId || "series-info",
+    url: apiUrl,
+    ua: "VLC/3.0.20 LibVLC/3.0.20",
+    ttlSeconds: 120,
+  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 20000);
+  try {
+    const response = await fetch(`${runtimeConfig.relayBaseUrl}/series-info/${token}`, {
+      signal: controller.signal,
+      headers: { accept: "application/json" },
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new HttpError(response.status, "Relay refused the series-info request", payload);
+    }
+    return recordOrEmpty(payload);
+  } catch (error) {
+    if (error instanceof HttpError) throw error;
+    const aborted = error instanceof Error && error.name === "AbortError";
+    throw new HttpError(
+      aborted ? 504 : 502,
+      "Unable to reach Norva relay",
+      error instanceof Error ? error.message : undefined,
+    );
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function signRelayToken(
+  secret: string,
+  claims: { sid: string; uid: string; url: string; ua?: string; ttlSeconds: number },
+): Promise<string> {
+  const payload = JSON.stringify({
+    v: 1,
+    sid: claims.sid,
+    uid: claims.uid,
+    url: claims.url,
+    ...(claims.ua ? { ua: claims.ua } : {}),
+    exp: Math.floor(Date.now() / 1000) + claims.ttlSeconds,
+  });
+  const signature = await hmacBase64Url(secret, payload);
+  return `${base64Url(encoder.encode(payload))}.${signature}`;
+}
+
+function base64Url(bytes: Uint8Array): string {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+async function hmacBase64Url(secret: string, value: string): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    encoder.encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const signature = await crypto.subtle.sign("HMAC", key, encoder.encode(value));
+  return base64Url(new Uint8Array(signature));
 }
 
 async function readSeriesInfoCache(
@@ -305,20 +406,30 @@ async function getRuntimeConfig(db: SupabaseClient): Promise<RuntimeConfig> {
   let sourceConfigKey = ENV_SOURCE_CONFIG_KEY;
   let mediaGatewayUrl = ENV_MEDIA_GATEWAY_URL;
   let mediaGatewayToken = ENV_MEDIA_GATEWAY_TOKEN;
-  if (!sourceConfigKey || !mediaGatewayUrl || !mediaGatewayToken) {
+  let relayBaseUrl = ENV_RELAY_BASE_URL;
+  let relayTokenSecret = ENV_RELAY_TOKEN_SECRET;
+  if (!sourceConfigKey || !mediaGatewayUrl || !mediaGatewayToken || !relayBaseUrl || !relayTokenSecret) {
     const { data, error } = await db
       .from("cloud_runtime_config")
       .select("key, value")
-      .in("key", ["NORVA_SOURCE_CONFIG_KEY", "NORVA_MEDIA_GATEWAY_URL", "NORVA_MEDIA_GATEWAY_TOKEN"]);
+      .in("key", [
+        "NORVA_SOURCE_CONFIG_KEY",
+        "NORVA_MEDIA_GATEWAY_URL",
+        "NORVA_MEDIA_GATEWAY_TOKEN",
+        "NORVA_RELAY_BASE_URL",
+        "RELAY_TOKEN_SECRET",
+      ]);
     if (error) console.warn("[norva-series-info] runtime config unavailable", error.message);
     for (const item of data ?? []) {
       if (typeof item.value !== "string" || !item.value) continue;
       if (item.key === "NORVA_SOURCE_CONFIG_KEY" && !sourceConfigKey) sourceConfigKey = item.value;
       else if (item.key === "NORVA_MEDIA_GATEWAY_URL" && !mediaGatewayUrl) mediaGatewayUrl = item.value.replace(/\/+$/, "");
       else if (item.key === "NORVA_MEDIA_GATEWAY_TOKEN" && !mediaGatewayToken) mediaGatewayToken = item.value;
+      else if (item.key === "NORVA_RELAY_BASE_URL" && !relayBaseUrl) relayBaseUrl = item.value.replace(/\/+$/, "");
+      else if (item.key === "RELAY_TOKEN_SECRET" && !relayTokenSecret) relayTokenSecret = item.value;
     }
   }
-  const value = { sourceConfigKey, mediaGatewayUrl, mediaGatewayToken };
+  const value = { sourceConfigKey, mediaGatewayUrl, mediaGatewayToken, relayBaseUrl, relayTokenSecret };
   runtimeConfigCache = { value, expiresAt: Date.now() + 30_000 };
   return value;
 }

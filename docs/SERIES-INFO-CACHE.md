@@ -87,10 +87,25 @@ client opens fiche
        → read cloud_series_info_cache (PK lookup)
           ├─ fresh (<24h)? → return cached payload         ── NO provider call
           └─ miss/stale → fetchSeriesInfoFromProvider
-                            → media-gateway /xtream/series-info → provider
+                            → relay /series-info/<signed-token> → provider   [PRIMARY, Cloudflare egress]
+                            → (relay infra fail 404/5xx only) → media-gateway → provider  [fallback]
+                            → (gateway fail) → direct edge fetch → provider          [last resort]
                             ├─ success → stripCredentials → cache write → return
                             └─ failure → stale cache? serve it : throw
 ```
+
+**Why the relay is primary (egress, not concurrency).** The provider `user_multi_ip`-blocks
+**datacenter IPs**. Both the Railway media-gateway and the Supabase edge runtime are datacenter
+IPs it rejects — so on 2026-06-26 the gateway's metadata path (series-info, catalogue sync)
+started failing 100% of the time while the catalogue sync froze at 74%. The **relay
+(Cloudflare)** is the egress the provider *accepts* — it's the same path that streams the video
+(web `relay` mode had 0 failures while gateway `transcode` had 280). So series-info is fetched
+from the relay via a short-lived HMAC-signed token whose `url` claim is the full
+`get_series_info` player_api.php URL; `services/norva-relay` `/series-info/<token>` fetches it
+(Cloudflare egress) and returns the JSON. Token shape is identical to `/relay/` and `/vod-info/`
+(stateless HMAC, no `cloud_relay_tokens` row). The relay endpoint refuses any non-`player_api.php`
+target, so it can never become a general fetcher. Gateway/direct remain as ordered fallbacks for
+when the relay is unconfigured or its route isn't deployed yet (404 → fall through).
 
 ---
 
@@ -185,6 +200,10 @@ is **additive/reversible**. But three things must be addressed before true globa
 
 Everything is additive:
 
+- **Relay metadata route**: revert `services/norva-relay/src/index.js` (drop the `/series-info/`
+  route + `relaySeriesInfo`) and push to main; OR in `norva-series-info` set the relay branch
+  off by clearing `NORVA_RELAY_BASE_URL` in `cloud_runtime_config` — the edge fn then falls back
+  to gateway → direct automatically (no redeploy needed).
 - **Cache table**: `drop table public.cloud_series_info_cache;` (then redeploy the edge fn from
   git history before commit `42ae172`, or leave it — a missing table just makes the cache
   read/write best-effort no-ops via their try/catch).
@@ -201,7 +220,11 @@ Everything is additive:
 
 - `supabase/migrations/20260626160000_cloud_series_info_cache.sql` — cache table.
 - `supabase/functions/norva-series-info/index.ts` — read/write-through cache,
-  stale-while-error, `stripCredentials`, `isCacheableSeriesInfo`. Deployed v15.
+  stale-while-error, `stripCredentials`, `isCacheableSeriesInfo`, **relay-primary fetch**
+  (`requestRelaySeriesInfo` + `signRelayToken` + HMAC helpers; relay → gateway → direct).
+- `services/norva-relay/src/index.js` — **`/series-info/<token>` route + `relaySeriesInfo`**:
+  fetches `get_series_info` from Cloudflare egress (the IP the provider accepts), mirrors
+  `/vod-info/`. Deploys via `deploy-relay.yml` on push to `main`.
 - `supabase/functions/ENRICHMENT_CRON_SETUP.md` — off-peak crawl cadences + prune cron
   (source of truth for schedules).
 - Crons applied live: `cron.alter_job` on jobids 5/7/10/11; `cron.schedule` jobid 24 (prune).
