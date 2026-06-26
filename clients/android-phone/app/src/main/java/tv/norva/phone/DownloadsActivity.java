@@ -120,25 +120,52 @@ public final class DownloadsActivity extends Activity {
         active.setVisibility(View.GONE);
         container.addView(active);
 
-        // Controls row: Wi-Fi-only switch + Clear all.
-        LinearLayout controls = new LinearLayout(this);
-        controls.setOrientation(LinearLayout.HORIZONTAL);
-        controls.setGravity(Gravity.CENTER_VERTICAL);
-        controls.setPadding(0, dp(14), 0, dp(6));
+        // Wi-Fi-only: dedicated setting row (label + subtitle + accent-styled switch),
+        // separate from the destructive "Clear all" action.
+        LinearLayout wifiRow = new LinearLayout(this);
+        wifiRow.setOrientation(LinearLayout.HORIZONTAL);
+        wifiRow.setGravity(Gravity.CENTER_VERTICAL);
+        wifiRow.setBackground(roundedStroke(CARD, CARD_BORDER, 12));
+        wifiRow.setPadding(dp(14), dp(12), dp(14), dp(12));
+        LinearLayout wifiText = new LinearLayout(this);
+        wifiText.setOrientation(LinearLayout.VERTICAL);
+        TextView wifiLabel = new TextView(this);
+        wifiLabel.setText("Wi-Fi only");
+        wifiLabel.setTextColor(TEXT);
+        wifiLabel.setTypeface(Typeface.DEFAULT_BOLD);
+        wifiLabel.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+        TextView wifiSub = new TextView(this);
+        wifiSub.setText("Only download over Wi-Fi — saves mobile data");
+        wifiSub.setTextColor(MUTED);
+        wifiSub.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        wifiSub.setPadding(0, dp(2), 0, 0);
+        wifiText.addView(wifiLabel);
+        wifiText.addView(wifiSub);
+        wifiRow.addView(wifiText, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         Switch wifi = new Switch(this);
-        wifi.setText("Wi-Fi only");
-        wifi.setTextColor(TEXT);
-        wifi.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
         wifi.setChecked(DownloadService.getWifiOnly(this));
+        wifi.setThumbTintList(android.content.res.ColorStateList.valueOf(TEXT));
+        wifi.setTrackTintList(new android.content.res.ColorStateList(
+                new int[][]{ new int[]{ android.R.attr.state_checked }, new int[0] },
+                new int[]{ ACCENT, SUBTLE }));
         wifi.setOnCheckedChangeListener((btn, checked) -> {
             DownloadService.setWifiOnly(this, checked);
             renderNow();
         });
-        controls.addView(wifi, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        wifiRow.addView(wifi);
+        LinearLayout.LayoutParams wifiRowLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        wifiRowLp.topMargin = dp(14);
+        container.addView(wifiRow, wifiRowLp);
+
+        LinearLayout clearRow = new LinearLayout(this);
+        clearRow.setOrientation(LinearLayout.HORIZONTAL);
+        clearRow.setGravity(Gravity.END);
+        clearRow.setPadding(0, dp(10), 0, dp(2));
         TextView clearAll = pill("Clear all", SUBTLE, MUTED);
         clearAll.setOnClickListener(v -> confirmClearAll());
-        controls.addView(clearAll);
-        container.addView(controls);
+        clearRow.addView(clearAll);
+        container.addView(clearRow);
 
         empty = new TextView(this);
         empty.setText("No downloads yet.\nTap Download on a movie or episode to watch it offline.");
@@ -187,8 +214,12 @@ public final class DownloadsActivity extends Activity {
 
     private String signature(List<DownloadStore.Item> items) {
         StringBuilder sb = new StringBuilder();
+        // Include the Wi-Fi gate so the "waiting for Wi-Fi" hint + per-item "Mobile
+        // data" button repaint when the network changes (no item state change).
+        sb.append(DownloadService.getWifiOnly(this) && !onWifiNow() ? "W;" : ";");
         for (DownloadStore.Item it : items) {
             sb.append(it.id).append(it.state).append(it.downloadedBytes)
+              .append(it.allowCellular ? "C" : "")
               .append(it.posterFile == null ? "" : "p").append(';');
         }
         return sb.toString();
@@ -451,6 +482,12 @@ public final class DownloadsActivity extends Activity {
                 actions.addView(pillSpaced("Cancel", SUBTLE, MUTED, v -> confirmDelete(it)));
                 break;
             case "queued":
+                if (DownloadService.getWifiOnly(this) && !onWifiNow() && !it.allowCellular) {
+                    actions.addView(pillSpaced("Mobile data", ACCENT, TEXT, v -> {
+                        DownloadService.setAllowCellular(this, it.id, true);
+                        renderNow();
+                    }));
+                }
                 actions.addView(pillSpaced("▲", SUBTLE, TEXT, v -> {
                     DownloadService.moveInQueue(this, it.id, -1);
                     renderNow();

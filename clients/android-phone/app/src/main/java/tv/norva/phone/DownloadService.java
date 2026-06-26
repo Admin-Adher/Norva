@@ -92,12 +92,14 @@ public final class DownloadService extends Service {
     private void drainQueue() {
         try {
             while (!stopRequested) {
-                if (isWifiOnly() && !onWifi()) {
-                    registerWifiWaiter();
+                boolean metered = isWifiOnly() && !onWifi();
+                DownloadStore.Item item = nextRunnable(metered);
+                if (item == null) {
+                    // Nothing runnable now: if items are held back by Wi-Fi-only,
+                    // wait for Wi-Fi to return and resume then.
+                    if (metered && hasQueued()) registerWifiWaiter();
                     break;
                 }
-                DownloadStore.Item item = nextQueued();
-                if (item == null) break;
                 currentId = item.id;
                 int result = downloadOne(item);
                 currentId = null;
@@ -109,8 +111,8 @@ public final class DownloadService extends Service {
             }
         } finally {
             running.set(false);
-            // Pick back up anything enqueued during the gap before we stop.
-            if (!stopRequested && nextQueued() != null && !(isWifiOnly() && !onWifi())
+            // Pick back up anything runnable enqueued (or just OK'd for mobile data) during the gap.
+            if (!stopRequested && nextRunnable(isWifiOnly() && !onWifi()) != null
                     && running.compareAndSet(false, true)) {
                 worker.execute(this::drainQueue);
                 return;
@@ -205,7 +207,8 @@ public final class DownloadService extends Service {
     }
 
     static boolean getWifiOnly(Context ctx) {
-        return ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(PREF_WIFI_ONLY, false);
+        // Default ON: large video downloads should not silently burn mobile data.
+        return ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(PREF_WIFI_ONLY, true);
     }
 
     static void setWifiOnly(Context ctx, boolean on) {
@@ -213,10 +216,26 @@ public final class DownloadService extends Service {
         if (!on) startFor(ctx, null); // resume anything that was waiting for Wi-Fi
     }
 
-    private DownloadStore.Item nextQueued() {
+    /** User chose to download this ONE item on mobile data despite Wi-Fi-only.
+     *  A per-item override that never changes the global setting. */
+    static void setAllowCellular(Context ctx, String id, boolean allow) {
+        DownloadStore.Item it = DownloadStore.get(ctx, id);
+        if (it == null) return;
+        it.allowCellular = allow;
+        it.error = "";
+        if ("paused".equals(it.state) || "failed".equals(it.state)) it.state = "queued";
+        DownloadStore.put(ctx, it);
+        CONTROL.remove(id);
+        startFor(ctx, id);
+    }
+
+    /** Next "queued" item allowed to run NOW. When metered (Wi-Fi-only and off
+     *  Wi-Fi) only items the user explicitly OK'd for mobile data are eligible. */
+    private DownloadStore.Item nextRunnable(boolean metered) {
         DownloadStore.Item best = null;
         for (DownloadStore.Item it : DownloadStore.all(this)) {
             if (!"queued".equals(it.state)) continue;
+            if (metered && !it.allowCellular) continue;
             if (best == null
                     || it.queueOrder < best.queueOrder
                     || (it.queueOrder == best.queueOrder && it.createdAt < best.createdAt)) {
@@ -224,6 +243,14 @@ public final class DownloadService extends Service {
             }
         }
         return best;
+    }
+
+    /** Any item still queued, regardless of the Wi-Fi gate (to decide whether to wait for Wi-Fi). */
+    private boolean hasQueued() {
+        for (DownloadStore.Item it : DownloadStore.all(this)) {
+            if ("queued".equals(it.state)) return true;
+        }
+        return false;
     }
 
     private int downloadOne(DownloadStore.Item itemIn) {
@@ -311,7 +338,7 @@ public final class DownloadService extends Service {
                     persist(item);
                     return stopRequested ? R_STOP : R_PAUSED;
                 }
-                if (isWifiOnly() && !onWifi()) {
+                if (isWifiOnly() && !onWifi() && !item.allowCellular) {
                     byte[] tail = cipher.doFinal();
                     if (tail != null && tail.length > 0) out.write(tail);
                     item.downloadedBytes = written;
@@ -402,7 +429,7 @@ public final class DownloadService extends Service {
     // ---- Wi-Fi-only ----
 
     private boolean isWifiOnly() {
-        return getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(PREF_WIFI_ONLY, false);
+        return getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(PREF_WIFI_ONLY, true);
     }
 
     private boolean onWifi() {
