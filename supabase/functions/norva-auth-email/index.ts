@@ -148,6 +148,7 @@ function render(d: EmailData): { subject: string; html: string } {
         subject: "Reset your password — Norva",
         html: shell({ heading: "Reset your password", intro: "We received a request to reset your Norva password. Click below to choose a new one.", cta: { label: "Reset password", url } }),
       };
+    case "magiclink":     // Supabase sends "magiclink" (one word); keep the underscore alias defensively.
     case "magic_link":
       return {
         subject: "Your sign-in link — Norva",
