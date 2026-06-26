@@ -69,6 +69,21 @@ class WatchPage {
         this.captionsMenu = document.getElementById('watch-captions-menu');
         this.captionsList = document.getElementById('watch-captions-list');
 
+        // Restart / episode navigation / speed / in-player episodes selector
+        this.restartBtn = document.getElementById('watch-restart');
+        this.prevEpBtn = document.getElementById('watch-prev-ep');
+        this.nextEpBtn = document.getElementById('watch-next-ep');
+        this.episodesNavWrapper = document.getElementById('watch-episodes-wrapper');
+        this.episodesNavBtn = document.getElementById('watch-episodes-btn');
+        this.episodesNavMenu = document.getElementById('watch-episodes-menu');
+        this.episodesNavList = document.getElementById('watch-episodes-menu-list');
+        this.speedBtn = document.getElementById('watch-speed-btn');
+        this.speedMenu = document.getElementById('watch-speed-menu');
+        this.speedList = document.getElementById('watch-speed-list');
+        this._playbackRate = 1;
+        this.speedMenuOpen = false;
+        this.episodesMenuOpen = false;
+
         // Transcode Status
         this.transcodeStatusEx = document.getElementById('watch-transcode-status');
         this.qualityBadgeEl = document.getElementById('watch-quality-badge');
@@ -328,6 +343,20 @@ class WatchPage {
             this.toggleCaptionsMenu();
         });
 
+        // Restart from the beginning (movies + series)
+        this.restartBtn?.addEventListener('click', (e) => { e.stopPropagation(); this.restartFromStart(); });
+        // Episode navigation (series)
+        this.prevEpBtn?.addEventListener('click', (e) => { e.stopPropagation(); this.playPreviousEpisode(); });
+        this.nextEpBtn?.addEventListener('click', (e) => { e.stopPropagation(); this.playNextEpisode(); });
+        // In-player episodes selector (series)
+        this.episodesNavBtn?.addEventListener('click', (e) => { e.stopPropagation(); this.toggleEpisodesMenu(); });
+        // Playback speed
+        this.speedBtn?.addEventListener('click', (e) => { e.stopPropagation(); this.toggleSpeedMenu(); });
+        this.speedList?.addEventListener('click', (e) => {
+            const opt = e.target.closest('.speed-option');
+            if (opt) this.setPlaybackRate(parseFloat(opt.dataset.rate));
+        });
+
         // Close track menus when clicking outside
         document.addEventListener('click', (e) => {
             if (this.audioMenuOpen && !this.audioMenu?.contains(e.target) && e.target !== this.audioBtn) {
@@ -335,6 +364,12 @@ class WatchPage {
             }
             if (this.captionsMenuOpen && !this.captionsMenu?.contains(e.target) && e.target !== this.captionsBtn) {
                 this.closeCaptionsMenu();
+            }
+            if (this.speedMenuOpen && !this.speedMenu?.contains(e.target) && e.target !== this.speedBtn) {
+                this.closeSpeedMenu();
+            }
+            if (this.episodesMenuOpen && !this.episodesNavMenu?.contains(e.target) && e.target !== this.episodesNavBtn) {
+                this.closeEpisodesMenu();
             }
         });
 
@@ -1351,6 +1386,10 @@ class WatchPage {
             this.episodesSection?.classList.remove('hidden');
             this.renderEpisodes();
         }
+
+        // Reflect the new content in the player controls (series-only prev/next +
+        // episodes selector, and re-apply the chosen playback speed).
+        this.updateEpisodeNavUI();
 
         // Check favorite status
         await this.checkFavorite();
@@ -6183,6 +6222,40 @@ class WatchPage {
         return null;
     }
 
+    getPreviousEpisode() {
+        if (!this.seriesInfo?.episodes || !this.currentSeason || !this.currentEpisode) return null;
+
+        const seasons = Object.keys(this.seriesInfo.episodes).sort((a, b) => parseInt(a) - parseInt(b));
+        const currentSeasonEpisodes = this.seriesInfo.episodes[this.currentSeason] || [];
+
+        const currentEpIndex = currentSeasonEpisodes.findIndex(ep =>
+            parseInt(ep.episode_num) === parseInt(this.currentEpisode)
+        );
+
+        // Previous episode in the current season.
+        if (currentEpIndex > 0) {
+            return {
+                ...currentSeasonEpisodes[currentEpIndex - 1],
+                seasonNum: this.currentSeason
+            };
+        }
+
+        // Else the last episode of the previous season.
+        const currentSeasonIndex = seasons.indexOf(String(this.currentSeason));
+        if (currentSeasonIndex > 0) {
+            const prevSeason = seasons[currentSeasonIndex - 1];
+            const prevSeasonEpisodes = this.seriesInfo.episodes[prevSeason];
+            if (prevSeasonEpisodes?.length > 0) {
+                return {
+                    ...prevSeasonEpisodes[prevSeasonEpisodes.length - 1],
+                    seasonNum: prevSeason
+                };
+            }
+        }
+
+        return null;
+    }
+
     sanitizeNextEpisodeForHistory(nextEp) {
         if (!nextEp) return null;
         return {
@@ -6220,18 +6293,28 @@ class WatchPage {
     }
 
     async playNextEpisode() {
-        // Save next episode data BEFORE canceling (cancel clears the data)
-        const nextEp = this.nextEpisodePanel?.nextEpisodeData;
-
+        // From the end-of-episode panel if present, else resolve live (the
+        // persistent "next" button). cancel clears the panel data, so read first.
+        const nextEp = this.nextEpisodePanel?.nextEpisodeData || this.getNextEpisode();
         this.cancelNextEpisode();
+        this.closeEpisodesMenu();
+        await this.playEpisode(nextEp);
+    }
 
-        if (!nextEp) return;
+    async playPreviousEpisode() {
+        this.closeEpisodesMenu();
+        await this.playEpisode(this.getPreviousEpisode());
+    }
 
+    // Shared episode launcher — resolve the stream for an episode object and play
+    // it. Used by the autoplay panel, the prev/next buttons and the selector.
+    async playEpisode(ep) {
+        if (!ep) return;
         try {
-            const container = nextEp.container_extension || 'mp4';
+            const container = ep.container_extension || 'mp4';
             const playbackPreferences = this.getPlaybackPreferences();
             const playbackHint = MediaUtils.playbackHintFromItem
-                ? MediaUtils.playbackHintFromItem(nextEp, { container, streamType: 'series' })
+                ? MediaUtils.playbackHintFromItem(ep, { container, streamType: 'series' })
                 : { container, streamType: 'series' };
             const audioStreamIndex = Number(playbackPreferences?.audio?.streamIndex ?? playbackPreferences?.audio?.stream_index);
             if (Number.isInteger(audioStreamIndex)) {
@@ -6239,7 +6322,7 @@ class WatchPage {
             }
             const result = await API.proxy.xtream.getStreamUrl(
                 this.content.sourceId,
-                nextEp.id,
+                ep.id,
                 'series',
                 container,
                 playbackHint
@@ -6248,9 +6331,9 @@ class WatchPage {
             if (result?.url) {
                 this.play({
                     type: 'series',
-                    id: nextEp.id,
+                    id: ep.id,
                     title: this.content.title,
-                    subtitle: `S${nextEp.seasonNum} E${nextEp.episode_num} - ${nextEp.title || `Episode ${nextEp.episode_num}`}`,
+                    subtitle: `S${ep.seasonNum} E${ep.episode_num} - ${ep.title || `Episode ${ep.episode_num}`}`,
                     poster: this.content.poster,
                     description: this.content.description,
                     year: this.content.year,
@@ -6258,19 +6341,111 @@ class WatchPage {
                     sourceId: this.content.sourceId,
                     seriesId: this.content.seriesId,
                     seriesInfo: this.seriesInfo,
-                    currentSeason: nextEp.seasonNum,
-                    currentEpisode: nextEp.episode_num,
+                    currentSeason: ep.seasonNum,
+                    currentEpisode: ep.episode_num,
                     containerExtension: container,
                     playbackPreferences,
                     cloudPlaybackSessionId: result.sessionId
                 }, result.url, result);
             } else {
-                this.showPlaybackError('The next episode could not be started. Please try again.', { immediate: true });
+                this.showPlaybackError('This episode could not be started. Please try again.', { immediate: true });
             }
         } catch (e) {
-            console.error('Error playing next episode:', e);
-            this.showPlaybackError('The next episode could not be started. Please try again.', { immediate: true });
+            console.error('Error playing episode:', e);
+            this.showPlaybackError('This episode could not be started. Please try again.', { immediate: true });
         }
+    }
+
+    // Restart the current movie/episode from 0 (works for all VOD).
+    restartFromStart() {
+        try { Promise.resolve(this.seekToTime(0, { immediate: true })).catch(() => {}); } catch (_) {}
+        try { this.video?.play?.().catch(() => {}); } catch (_) {}
+        this.showOverlay();
+    }
+
+    // ---- Playback speed ---------------------------------------------------
+    setPlaybackRate(rate) {
+        const r = Number(rate) || 1;
+        this._playbackRate = r;
+        if (this.video) { try { this.video.playbackRate = r; } catch (_) {} }
+        this.speedList?.querySelectorAll('.speed-option').forEach((o) =>
+            o.classList.toggle('active', Math.abs(parseFloat(o.dataset.rate) - r) < 0.001));
+        this.closeSpeedMenu();
+    }
+
+    toggleSpeedMenu() { this.speedMenuOpen ? this.closeSpeedMenu() : this.openSpeedMenu(); }
+    openSpeedMenu() {
+        this.closeOtherMenus('speed');
+        this.speedMenu?.classList.remove('hidden');
+        this.speedMenuOpen = true;
+    }
+    closeSpeedMenu() { this.speedMenu?.classList.add('hidden'); this.speedMenuOpen = false; }
+
+    // ---- In-player episodes selector --------------------------------------
+    toggleEpisodesMenu() { this.episodesMenuOpen ? this.closeEpisodesMenu() : this.openEpisodesMenu(); }
+    openEpisodesMenu() {
+        this.renderEpisodesMenu();
+        this.closeOtherMenus('episodes');
+        this.episodesNavMenu?.classList.remove('hidden');
+        this.episodesMenuOpen = true;
+    }
+    closeEpisodesMenu() { this.episodesNavMenu?.classList.add('hidden'); this.episodesMenuOpen = false; }
+
+    renderEpisodesMenu() {
+        if (!this.episodesNavList) return;
+        const eps = this.seriesInfo?.episodes;
+        if (!eps) { this.episodesNavList.innerHTML = '<div class="captions-menu-empty">No episodes</div>'; return; }
+        const seasons = Object.keys(eps).sort((a, b) => parseInt(a) - parseInt(b));
+        const esc = (s) => MediaUtils.escapeHtml ? MediaUtils.escapeHtml(String(s ?? '')) : String(s ?? '');
+        let html = '';
+        for (const season of seasons) {
+            const list = eps[season] || [];
+            if (!list.length) continue;
+            if (seasons.length > 1) html += `<div class="watch-ep-season">Season ${esc(season)}</div>`;
+            for (const ep of list) {
+                const isCurrent = String(season) === String(this.currentSeason)
+                    && parseInt(ep.episode_num) === parseInt(this.currentEpisode);
+                html += `<button class="watch-ep-option${isCurrent ? ' active' : ''}" data-season="${esc(season)}" data-ep="${esc(ep.episode_num)}">
+                    <span class="watch-ep-num">${esc(ep.episode_num)}</span>
+                    <span class="watch-ep-title">${esc(ep.title || `Episode ${ep.episode_num}`)}</span>
+                </button>`;
+            }
+        }
+        this.episodesNavList.innerHTML = html || '<div class="captions-menu-empty">No episodes</div>';
+        this.episodesNavList.querySelectorAll('.watch-ep-option').forEach((btn) => {
+            btn.addEventListener('click', () => {
+                const season = btn.dataset.season;
+                const epNum = parseInt(btn.dataset.ep);
+                const ep = (this.seriesInfo.episodes[season] || []).find(e => parseInt(e.episode_num) === epNum);
+                this.closeEpisodesMenu();
+                if (ep) this.playEpisode({ ...ep, seasonNum: season });
+            });
+        });
+        // Keep the current episode in view.
+        this.episodesNavList.querySelector('.watch-ep-option.active')?.scrollIntoView({ block: 'center' });
+    }
+
+    closeOtherMenus(except) {
+        if (except !== 'audio') this.closeAudioMenu?.();
+        if (except !== 'captions') this.closeCaptionsMenu?.();
+        if (except !== 'speed') this.closeSpeedMenu?.();
+        if (except !== 'episodes') this.closeEpisodesMenu?.();
+    }
+
+    // Show/hide the series-only controls and reflect prev/next availability +
+    // the current speed on the (possibly newly created) video element.
+    updateEpisodeNavUI() {
+        const isSeries = this.contentType === 'series' && !!this.seriesInfo?.episodes;
+        [this.prevEpBtn, this.nextEpBtn, this.episodesNavWrapper].forEach((el) => { if (el) el.hidden = !isSeries; });
+        if (isSeries) {
+            if (this.prevEpBtn) this.prevEpBtn.disabled = !this.getPreviousEpisode();
+            if (this.nextEpBtn) this.nextEpBtn.disabled = !this.getNextEpisode();
+        }
+        // Loading new media resets the browser's playbackRate to 1× — reflect that
+        // in state + the speed menu so the highlight never lies.
+        this._playbackRate = 1;
+        this.speedList?.querySelectorAll('.speed-option').forEach((o) =>
+            o.classList.toggle('active', parseFloat(o.dataset.rate) === 1));
     }
 
     cancelNextEpisode() {

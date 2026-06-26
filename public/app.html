@@ -1545,6 +1545,16 @@
                 <span id="watch-time-total" class="watch-time watch-time-total">0:00</span>
               </div>
               <div class="watch-controls">
+                <button class="watch-btn" id="watch-restart" title="Restart from the beginning">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon">
+                    <path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z" />
+                  </svg>
+                </button>
+                <button class="watch-btn watch-series-only" id="watch-prev-ep" title="Previous episode" hidden>
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon">
+                    <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z" />
+                  </svg>
+                </button>
                 <button class="watch-btn" id="watch-skip-back" title="Back 10 seconds">
                   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon">
                     <path d="M11 18V6l-8.5 6 8.5 6zm.5-6l8.5 6V6l-8.5 6z" />
@@ -1566,6 +1576,11 @@
                     <path d="M4 18l8.5-6L4 6v12zm9-12v12l8.5-6L13 6z" />
                   </svg>
                   <span class="skip-label">10</span>
+                </button>
+                <button class="watch-btn watch-series-only" id="watch-next-ep" title="Next episode" hidden>
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon">
+                    <path d="M6 18l8.5-6L6 6v12zM16 6h2v12h-2z" />
+                  </svg>
                 </button>
                 <div class="watch-spacer"></div>
                 <button class="watch-btn" id="watch-mute" title="Mute">
@@ -1607,6 +1622,37 @@
                     <div class="captions-menu-title">Subtitles</div>
                     <div class="captions-menu-list" id="watch-captions-list">
                       <button class="captions-option active" data-index="-1">Off</button>
+                    </div>
+                  </div>
+                </div>
+                <!-- Episodes selector (series) -->
+                <div class="watch-captions-wrapper watch-series-only" id="watch-episodes-wrapper" hidden>
+                  <button class="watch-btn" id="watch-episodes-btn" title="Episodes">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon">
+                      <path d="M3 13h2v-2H3v2zm0 4h2v-2H3v2zm0-8h2V7H3v2zm4 4h14v-2H7v2zm0 4h14v-2H7v2zM7 7v2h14V7H7z" />
+                    </svg>
+                  </button>
+                  <div class="watch-captions-menu watch-episodes-menu hidden" id="watch-episodes-menu">
+                    <div class="captions-menu-title">Episodes</div>
+                    <div class="captions-menu-list" id="watch-episodes-menu-list"></div>
+                  </div>
+                </div>
+                <!-- Playback speed -->
+                <div class="watch-captions-wrapper">
+                  <button class="watch-btn" id="watch-speed-btn" title="Playback speed">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="icon">
+                      <path d="M20.38 8.57l-1.23 1.85a8 8 0 0 1-.22 7.58H5.07A8 8 0 0 1 15.58 6.85l1.85-1.23A10 10 0 0 0 3.35 19a2 2 0 0 0 1.72 1h13.85a2 2 0 0 0 1.74-1 10 10 0 0 0-.27-10.44zm-9.79 6.84a2 2 0 0 0 2.83 0l5.66-8.49-8.49 5.66a2 2 0 0 0 0 2.83z" />
+                    </svg>
+                  </button>
+                  <div class="watch-captions-menu hidden" id="watch-speed-menu">
+                    <div class="captions-menu-title">Speed</div>
+                    <div class="captions-menu-list" id="watch-speed-list">
+                      <button class="speed-option" data-rate="0.5">0.5&times;</button>
+                      <button class="speed-option" data-rate="0.75">0.75&times;</button>
+                      <button class="speed-option active" data-rate="1">Normal</button>
+                      <button class="speed-option" data-rate="1.25">1.25&times;</button>
+                      <button class="speed-option" data-rate="1.5">1.5&times;</button>
+                      <button class="speed-option" data-rate="2">2&times;</button>
                     </div>
                   </div>
                 </div>

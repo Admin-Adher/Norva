@@ -7265,6 +7265,58 @@ kbd {
   content: "\2713 ";
 }
 
+/* ===== Watch player: restart / prev-next ep / speed / episodes selector ===== */
+.watch-btn[hidden],
+.watch-captions-wrapper[hidden] { display: none !important; }
+.watch-btn:disabled { opacity: 0.35; pointer-events: none; }
+
+.speed-option {
+  display: block;
+  width: 100%;
+  padding: var(--space-sm) var(--space-md);
+  background: none;
+  border: none;
+  color: var(--color-text-primary);
+  text-align: left;
+  font-size: 0.875rem;
+  line-height: 1.25;
+  cursor: pointer;
+}
+.speed-option:hover { background: rgba(255, 255, 255, 0.1); }
+.speed-option.active { color: var(--color-accent); }
+.speed-option.active::before { content: "\2713 "; }
+
+/* Episodes selector menu — wider + taller than the audio/captions menus. */
+.watch-episodes-menu { min-width: 300px; }
+.watch-episodes-menu .captions-menu-list { max-height: 340px; }
+.watch-ep-season {
+  padding: var(--space-sm) var(--space-md) 4px;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+}
+.watch-ep-option {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 10px;
+  align-items: baseline;
+  width: 100%;
+  padding: var(--space-sm) var(--space-md);
+  background: none;
+  border: none;
+  color: var(--color-text-primary);
+  text-align: left;
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+.watch-ep-option:hover { background: rgba(255, 255, 255, 0.1); }
+.watch-ep-option.active { color: var(--color-accent); }
+.watch-ep-num { color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
+.watch-ep-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.watch-ep-option.active .watch-ep-num { color: var(--color-accent); }
+.captions-menu-empty { padding: var(--space-md); color: var(--color-text-muted); font-size: 0.85rem; }
+
 .captions-empty {
   padding: var(--space-sm) var(--space-md);
   color: var(--color-text-muted);
