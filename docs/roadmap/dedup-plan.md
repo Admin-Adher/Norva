@@ -52,31 +52,47 @@ genres) **once per tmdb id**; `cloud_titles` becomes a thin per-user link
 (`user_id, identity_key, provider_tmdb_id, match_status, default_variant_id,
 variant_count, audio_languages`).
 
-**Gate status (2026-06-25 — steps 1.1-1.3 DONE, mirror CLEAN):** a statement-level
-mirror trigger (migration `20260625120000_cloud_titles_mirror_catalog_trigger`)
-now keeps `catalog_titles` in lock-step with `cloud_titles` metadata on **every**
-write (sync, all crons, any future writer) — one bulk upsert per statement, so
-it's efficient even on the 40k-row sync and **can no longer drift**. The prior
-drift was reconciled and verified: `catalog_mirror_diff()` → all `*_mismatch = 0`,
-`cloud_only = 0`. **The read-flip (1.4) is now UNBLOCKED.** *(Earlier this showed
-~200 per-field mismatches because the crons wrote per-user `cloud_titles` only;
-the trigger replaces the need to rewrite each cron individually.)*
+**Gate status (2026-06-26 — Phase 1 COMPLETE, all gates shipped):** the read-flip is
+live (`NORVA_CATALOG_READ_SOURCE=catalog_titles`) and the write path now **thins
+itself in pure SQL** — no edge-function rewrite was needed. `cloud_titles.metadata`
+holds heavy title metadata for **0 tmdb-matched rows**; it lives **once** in
+`catalog_titles` and is served back by `applyCatalogOverlay`. **Measured result:
+cloud_titles 58 MB → 22 MB, DB 288 MB → 238 MB (−50 MB / −17%), with 100% of
+`genre_category` preserved.**
 
-| Step | Action | Reversible |
+| Step | Action | Status / reversibility |
 |---|---|---|
-| 1.1 ✅ | **Global mirror — DONE (via trigger, not per-cron rewrite).** Statement-level AFTER INSERT/UPDATE trigger on `cloud_titles` mirrors `title/original_title/release_year/poster/backdrop/metadata` → `catalog_titles` by `(item_type, provider_tmdb_id)` on every write. Covers sync + all 3 crons + playback + any future writer. Migration `20260625120000`. | ✅ drop trigger |
-| 1.2 ✅ | **Reconcile — DONE.** One-shot re-upsert fixed the prior ~200 mismatches. | ✅ |
-| 1.3 ✅ | **Mirror clean — VERIFIED** (`catalog_mirror_diff()` all 0). Re-check after a cron cycle to confirm the trigger holds it. | — |
-| 1.4 | **Flip** `NORVA_CATALOG_READ_SOURCE=catalog_titles` on `norva-catalog` (now unblocked; needs the secret set — held until real overlap, gain ~0 today). | ✅ unset (instant) |
-| 1.5 | `refreshVodTitleProjection`: stop writing metadata into `cloud_titles` (keep the link); metadata only into `catalog_titles`. Move the genre trigger onto `catalog_titles`; drop the mirror trigger (no longer needed). | ✅ while columns exist |
-| 1.6 | **Drop** the metadata columns from `cloud_titles` + remove the per-user read fallback. | ⚠️ irreversible → last |
+| 1.1 ✅ | **Global mirror.** Statement-level AFTER INSERT/UPDATE trigger on `cloud_titles` mirrors metadata → `catalog_titles`. Migration `20260625120000`. | ✅ done |
+| 1.2 ✅ | **Reconcile** + **1.3 ✅ mirror clean** (`catalog_mirror_diff()` all 0). | ✅ done |
+| 1.4 ✅ | **Read-flip** `NORVA_CATALOG_READ_SOURCE=catalog_titles` on `norva-catalog` (Gate 0). | ✅ unset to roll back |
+| 2A ✅ | **Genre trigger → preserve-unless-present** (`20260626083903`). Each denormalised genre column updates only when its source key is in the new metadata, else preserved — so thinning + the revalidate/search-match accumulators never wipe `genre_category`/`genre_payload` (the per-user, non-overlaid `cloud_genre_summary` keys). | ✅ re-derive from metadata |
+| 2B ✅ | **Self-thinning mirror trigger** (`20260626085352`). After mirroring, replaces `cloud_titles.metadata` with `'{}'`. `pg_trigger_depth()=1` + heavy-content + EXISTS-on-catalog guards make it recursion-terminating and gap-safe. **No TS rewrite** — supersedes the old 1.5/1.6 plan; the metadata columns are **kept** (reversible) rather than dropped. | ✅ revert to mirror-only + re-project |
+| 3 ✅ | **One-time backfill + VACUUM FULL.** Thinned 32,947 mirrored valid-tmdb rows to `'{}'`; `VACUUM FULL` on `cloud_titles` + `catalog_titles` via temporary pg_cron jobs (VACUUM can't run inside `execute_sql`'s txn). | ✅ re-project from cache |
 
-**Rewrite:** enrichment crons = the real work (go global — this is what keeps the
-mirror clean); reads already handled (overlay); sync stops duplicating.
-**Risk:** medium; the flip (1.4) rolls back via one secret; 1.6 is irreversible →
-only after the flip is stable.
-**Gain:** kills the N× metadata duplication (i18n alone is several KB/title). At
-100 users / same provider: metadata **~17 MB (1×)** vs **~1.7 GB (100×)**.
+**Why pure-SQL instead of the original 1.5/1.6 (TS rewrite + drop columns):** lower
+risk (no untestable edge-function change; the trigger logic was validated on a
+synthetic row before touching live data — the test caught both a NOT-NULL violation
+and a statement-trigger recursion bug), and **reversible** — the columns stay, so the
+flip is not a one-way door.
+
+**Validation before backfill (synthetic row):** full-metadata write → cloud thinned to
+`{}`, catalog keeps full metadata, genre cols derived; accumulator rewrite (no
+`categoryName`) → `genre_category` **preserved**, `genre_payload` refreshed; no
+stack-depth (recursion terminates at depth 2).
+
+### Rollback runbook (Gate 3 is reversible)
+The full metadata lives in `catalog_titles` (the superset). To un-thin:
+1. Revert the mirror trigger to **mirror-only** (re-apply `cloud_titles_mirror_to_catalog()`
+   without step 2) so the refill is not immediately re-thinned.
+2. `update public.cloud_titles ct set metadata = c.metadata from public.catalog_titles c
+   where c.item_type=ct.item_type and c.provider_tmdb_id=ct.provider_tmdb_id
+   and ct.metadata='{}'::jsonb and c.metadata <> '{}'::jsonb;`
+3. (optional) unset `NORVA_CATALOG_READ_SOURCE` → per-user reads again.
+
+**Flag dependency:** thinning relies on the read-flip being ON (overlay refills metadata).
+If a title ever renders with no overview/i18n, the flag is off — set it or run the
+re-project above. All thinned rows were EXISTS-guarded against `catalog_titles`, so the
+cache can always serve them.
 
 ## Phase 2 — Raw catalogue + variants dedup (per-provider) · risk HIGHER · ~2-3 sessions
 
