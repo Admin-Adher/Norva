@@ -6,6 +6,16 @@ harness** (0 mismatch today). Only the **flip** (set the secret) and **thinning
 `cloud_titles`** remain, both gated on real cross-user overlap. See
 [`scaling-status.md`](./scaling-status.md) for the live state and the 2-step flip runbook.
 
+**Update 2026-06-26 — keep-best hardening + gate replaced.** Self-thinning (step 5) is now
+live, so the per-user copy's `metadata` is deliberately emptied once mirrored — meaning the
+byte-equality `catalog_mirror_diff()` gate can never be clean again and is **obsolete**. The
+two blanket writers (TS dual-write + the `cloud_titles_mirror_to_catalog` trigger) gained a
+`catalog_titles_keep_best` BEFORE trigger that makes the cache **monotonic** (TMDB-enriched
+values never downgraded to provider-raw/null, fill-don't-overwrite, year clamped), one-shot
+reconciliation filled the display blanks, and the flip-readiness signal is now
+`catalog_titles_quality_gate()` = "catalog is never *worse* than the best cloud row" (today:
+all-zero on 16 046). `overlap_factor` is 2.05 (2 users); the flip stays gated on real scale.
+
 Original design note: do not flip until there is meaningful cross-user catalogue overlap —
 with one catalogue today the saving is 0% (measured), and the read-path cutover is the
 highest-risk change in the system. Designed now so the migration is clean when users arrive.

@@ -4,7 +4,7 @@
 > et **ce qu'il reste à faire quand Norva aura beaucoup d'users multi-pays** — pour
 > reprendre sans rien re-découvrir.
 >
-> _Dernière mise à jour : 2026-06-24._
+> _Dernière mise à jour : 2026-06-26._
 
 Branche dev : **`claude/eager-carson-2zlqwy`** · Projet Supabase : **`oupsceccxsonaalhueff`**.
 
@@ -63,6 +63,8 @@ pas de recoupement multi-users, et c'est le changement le plus risqué du systè
   `POST norva-playback/catalog-mirror-verify` : prouve que `catalog_titles` est un miroir
   fidèle (aujourd'hui **16 751 comparés, 0 mismatch, 0 cloud_only**) = **gate du flip** ET
   preuve anti-rot (catalog==cloud ⇒ sortie flag-ON == flag-OFF). Migration `…020000`.
+  **⚠️ OBSOLÈTE depuis le 2026-06-26** — voir le durcissement plus bas : l'auto-thinning vide
+  `cloud_titles.metadata`, donc l'égalité octet ne peut plus tenir. Gate de flip = `catalog_titles_quality_gate()`.
 - **Chemin de lecture flag-gated** `NORVA_CATALOG_READ_SOURCE` (défaut `cloud_titles`) :
   quand `catalog_titles`, `applyCatalogOverlay()` sert les métadonnées d'affichage depuis
   le cache global à **tous** les sites de `norva-catalog` (grille langues, rails
@@ -87,6 +89,25 @@ pas de recoupement multi-users, et c'est le changement le plus risqué du systè
   de vérité des schedules : `supabase/functions/ENRICHMENT_CRON_SETUP.md`.
 - ⚠️ **Rien ne lit `catalog_titles` en prod** (flag OFF) → **zéro impact**, additif, réversible.
 
+### Cache de titres global — DURCISSEMENT keep-best + gate qualité (2026-06-26)
+- **`overlap_factor` = 2.05** (était 1.00 ; 2ᵉ user, catalogues ~identiques) → le recoupement est
+  **réel** mais l'échelle non (2 comptes). Le flip reste gardé sur **l'échelle**, pas sur le ratio.
+- **Le gate octet `catalog_mirror_diff()` est OBSOLÈTE** : l'auto-thinning vide `cloud_titles.metadata`
+  **par design** (étape 5), donc catalog ≠ cloud pour toujours — et c'est **correct**, pas du rot.
+- **Trigger `catalog_titles_keep_best` (BEFORE, exception-guardé)** : les 2 écrivains (dual-write TS
+  `_shared/vod-title-projection.ts` + miroir `cloud_titles_mirror_to_catalog`) font des upserts **en
+  bloc sans garde** ; le trigger rend `catalog_titles` **monotone** — métadonnée/affichage TMDB-enrichi
+  **jamais** écrasé par du provider-raw/null, remplit-sans-écraser, `release_year` clampé `[1900, +1]`,
+  `audio_languages` intact. **Testé empiriquement** (downgrade bloqué / upgrade appliqué / null-fill).
+  _(Piège corrigé : `jsonb_typeof(metadata->'tmdb')` = NULL si absent ⇒ `if not NULL` sautait tout le
+  bloc ; coalescé en `false`.)_ Migrations `…154714` + fix `…155105`.
+- **Réconciliation one-shot** : rempli **481 `release_year` + 718 `backdrop_url`** vides du cache depuis
+  la meilleure ligne cloud (enrichi-puis-frais). Migration `…155504`.
+- **Nouveau gate de flip `catalog_titles_quality_gate()`** (service-role) : mesure « catalog **jamais
+  pire** que cloud » — aucun champ blanc là où cloud a une valeur, aucune perte d'enrichissement,
+  identité complète. **Aujourd'hui : tout à 0 sur 16 046** ⇒ flip *quality-ready*. Migration `…155618`.
+  **C'est lui le gate désormais**, plus `catalog_mirror_diff`.
+
 ---
 
 ## ⏳ À FAIRE quand on aura beaucoup d'users (le « ne pas oublier »)
@@ -96,8 +117,9 @@ pas de recoupement multi-users, et c'est le changement le plus risqué du systè
 
 - **Trigger** : quand le **recoupement multi-users** est matériel (plusieurs
   users / pays partagent les mêmes titres TMDB). Aujourd'hui ~0 % (1 catalogue) →
-  le gain (÷10-100 sur l'enrichissement TMDB + stockage) n'existe pas encore. **Mesuré
-  2026-06-24 : `overlap_factor = 1.00`, 1 user → flip toujours gardé.**
+  le gain (÷10-100 sur l'enrichissement TMDB + stockage) reste modeste à 2 users. **Mesuré
+  2026-06-26 : `overlap_factor = 2.05` (2 users, catalogues ~identiques) — recoupement réel
+  mais échelle insuffisante ; flip gardé sur l'échelle, pas le ratio.**
 - **Mesurer le trigger** (relancer périodiquement) :
   ```sql
   select count(*)                                              as user_title_rows,
@@ -116,7 +138,8 @@ pas de recoupement multi-users, et c'est le changement le plus risqué du systè
   4. ✅ **Read cutover CONSTRUIT (flag OFF)** : `applyCatalogOverlay()` sur **tous** les
      sites de lecture de `norva-catalog` derrière `NORVA_CATALOG_READ_SOURCE`, + harnais
      `/catalog-mirror-verify` (aujourd'hui 0 mismatch). Filtrage langue reste per-user.
-     **Le « cutover » se résume désormais à : (a) `/catalog-mirror-verify` → `clean:true`,
+     **Le « cutover » se résume désormais à : (a) `catalog_titles_quality_gate()` → tout à 0
+     (l'ancien `/catalog-mirror-verify` octet est obsolète depuis le thinning),
      (b) poser le secret `NORVA_CATALOG_READ_SOURCE=catalog_titles` sur `norva-catalog`.**
      ⏳ reste seulement **le flip** (gardé jusqu'au vrai recoupement).
   5. ⏳ **Thin `cloud_titles`** : retirer les colonnes métadonnées migrées une fois les
