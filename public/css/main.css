@@ -9889,4 +9889,46 @@ mark.search-highlight {
   /* Hide the bar while watching so the video + its controls aren't covered. */
   body.is-watching .bottom-nav { display: none; }
   body.is-watching .main-content { padding-bottom: 0; }
+
+  /* The bottom Profile tab replaces the top-right avatar on phones. */
+  #nav-profile { display: none !important; }
+  .bottom-nav .nav-link .nav-account-avatar { border-radius: 50%; object-fit: cover; }
+}
+
+/* ============================================================
+   Account bottom sheet — opened by the mobile Profile tab.
+   Reuses .modal-overlay (backdrop + hardware-back close) but docks
+   the panel to the bottom as a native-style sheet.
+   ============================================================ */
+.account-sheet { align-items: flex-end; }
+.account-panel {
+  width: 100%;
+  max-width: 520px;
+  margin: 0 auto;
+  background: var(--color-bg-secondary, #11151d);
+  border: 1px solid var(--color-border, #1f2733);
+  border-bottom: none;
+  border-radius: 18px 18px 0 0;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  box-shadow: 0 -8px 30px rgba(0, 0, 0, 0.5);
+  animation: sheetUp 0.22s ease;
+  overflow: hidden;
+}
+@keyframes sheetUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+.account-head { display: flex; align-items: center; gap: 12px; padding: 16px 16px 12px; }
+.account-avatar { width: 48px; height: 48px; border-radius: 50%; object-fit: cover; background: #0a0c11; flex: 0 0 auto; }
+.account-id { flex: 1 1 auto; min-width: 0; }
+.account-name { color: #f8fafc; font-weight: 700; font-size: 16px; line-height: 1.2; }
+.account-email { color: #8b95a9; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.account-close { width: 36px; height: 36px; flex: 0 0 auto; border-radius: 50%; border: 1px solid var(--color-border, #1f2733); background: transparent; color: #cbd5e1; font-size: 22px; line-height: 1; cursor: pointer; }
+.account-row { display: flex; align-items: center; gap: 14px; width: 100%; padding: 16px; background: transparent; border: none; border-top: 1px solid rgba(255, 255, 255, 0.06); color: #e7ecf5; font: inherit; font-size: 15px; font-weight: 600; text-align: left; cursor: pointer; }
+.account-row:active { background: rgba(255, 255, 255, 0.06); }
+.account-ic { width: 22px; height: 22px; flex: 0 0 auto; opacity: 0.9; }
+.account-row[data-act="switch"] .account-ic { border-radius: 50%; object-fit: cover; }
+.account-row-danger { color: #fda4af; }
+@media (hover: hover) { .account-row:hover { background: rgba(255, 255, 255, 0.05); } }
+/* On desktop/tablet (if ever opened there) center it as a normal modal. */
+@media (min-width: 641px) {
+  .account-sheet { align-items: center; }
+  .account-panel { border-radius: 18px; border-bottom: 1px solid var(--color-border, #1f2733); animation: modalFadeIn 0.2s ease; }
 }

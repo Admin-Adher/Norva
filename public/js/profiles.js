@@ -552,6 +552,9 @@ html.tv .np-btn{min-height:60px;font-size:18px}
     img.onerror = () => { if (img.src.indexOf('placeholder.svg') === -1) img.src = PLACEHOLDER; };
     img.src = avatarSrc(p.avatar_id);
     img.alt = p.name || 'Profile';
+    // Keep the mobile bottom-bar Profile tab's avatar in sync with the same image.
+    const tabImg = document.getElementById('nav-account-img');
+    if (tabImg) tabImg.src = avatarSrc(p.avatar_id);
     btn.title = p.name ? `${p.name} — switch profile` : 'Switch profile';
     btn.setAttribute('aria-label', p.name ? `Profile ${p.name}, switch profile` : 'Switch profile');
     if (!btn.dataset.wired) {
@@ -561,5 +564,16 @@ html.tv .np-btn{min-height:60px;font-size:18px}
     btn.hidden = false;
   }
 
-  window.NorvaProfiles = { ensureSelected, openSwitcher, openManage, refreshNavAvatar };
+  // Lightweight snapshot for the mobile account sheet (no overlay needed).
+  function current() {
+    const p = activeProfile();
+    return {
+      isCloud: isCloud(),
+      name: p ? (p.name || '') : '',
+      avatarUrl: p ? avatarSrc(p.avatar_id) : PLACEHOLDER,
+      count: state.profiles.length,
+    };
+  }
+
+  window.NorvaProfiles = { ensureSelected, openSwitcher, openManage, refreshNavAvatar, current };
 })();

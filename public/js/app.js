@@ -147,6 +147,11 @@ class App {
                 if (link.dataset.external === 'true') return;
                 // Downloads opens the NATIVE offline screen (not an SPA page) so
                 // it works with no connectivity. Phone/tablet app only.
+                if (link.dataset.action === 'account') {
+                    e.preventDefault();
+                    this.openAccountSheet();
+                    return;
+                }
                 if (link.dataset.action === 'downloads') {
                     e.preventDefault();
                     document.getElementById('mobile-menu-toggle')?.classList.remove('active');
@@ -964,6 +969,93 @@ class App {
         } catch (_) {
             return 0;
         }
+    }
+
+    // ---- Account sheet (mobile Profile tab) -------------------------------
+    // A bottom sheet that consolidates the account actions that were scattered
+    // before — profile switch (top-right avatar), Settings (bottom tab) and
+    // log out (hidden in the desktop hamburger) — into one reachable place.
+
+    openAccountSheet() {
+        const sheet = document.getElementById('account-sheet') || this.buildAccountSheet();
+        this.refreshAccountSheet(sheet);
+        sheet.classList.add('active');
+    }
+
+    closeAccountSheet() {
+        document.getElementById('account-sheet')?.classList.remove('active');
+    }
+
+    buildAccountSheet() {
+        const overlay = document.createElement('div');
+        overlay.id = 'account-sheet';
+        overlay.className = 'modal-overlay account-sheet';
+        overlay.innerHTML = `
+            <div class="account-panel" role="dialog" aria-modal="true" aria-label="Account">
+                <div class="account-head">
+                    <img id="account-avatar" class="account-avatar" src="/img/avatars/placeholder.svg" alt="">
+                    <div class="account-id">
+                        <div id="account-name" class="account-name">Profile</div>
+                        <div id="account-email" class="account-email"></div>
+                    </div>
+                    <button type="button" class="account-close" aria-label="Close">&times;</button>
+                </div>
+                <button type="button" class="account-row" data-act="switch">
+                    <img class="account-ic" src="/img/avatars/placeholder.svg" alt=""><span>Switch profile</span>
+                </button>
+                <button type="button" class="account-row" data-act="settings">
+                    <img class="account-ic" src="/img/icons/norva-settings.svg" alt=""><span>Settings</span>
+                </button>
+                <button type="button" class="account-row account-row-danger" data-act="logout">
+                    <img class="account-ic" src="/img/icons/norva-logout.svg" alt=""><span>Log out</span>
+                </button>
+            </div>`;
+        // Tapping the dimmed backdrop (not the panel) closes the sheet.
+        overlay.addEventListener('click', (e) => { if (e.target === overlay) this.closeAccountSheet(); });
+        overlay.querySelector('.account-close').addEventListener('click', () => this.closeAccountSheet());
+        overlay.querySelectorAll('.account-row').forEach((row) => {
+            row.addEventListener('click', () => {
+                const act = row.dataset.act;
+                this.closeAccountSheet();
+                if (act === 'switch') window.NorvaProfiles?.openSwitcher?.();
+                else if (act === 'settings') this.navigateTo('settings');
+                else if (act === 'logout') this.signOut();
+            });
+        });
+        document.body.appendChild(overlay);
+        return overlay;
+    }
+
+    refreshAccountSheet(sheet) {
+        const cur = (window.NorvaProfiles?.current?.()) || {};
+        const avatar = sheet.querySelector('#account-avatar');
+        const switchIc = sheet.querySelector('[data-act="switch"] .account-ic');
+        const name = sheet.querySelector('#account-name');
+        const email = sheet.querySelector('#account-email');
+        const switchRow = sheet.querySelector('[data-act="switch"]');
+        if (avatar && cur.avatarUrl) avatar.src = cur.avatarUrl;
+        if (switchIc && cur.avatarUrl) switchIc.src = cur.avatarUrl;
+        if (name) name.textContent = cur.name || 'Profile';
+        if (email) email.textContent = this.currentUser?.email || this.currentUser?.username || '';
+        // Profile switching only exists in cloud mode.
+        if (switchRow) switchRow.style.display = cur.isCloud ? '' : 'none';
+    }
+
+    // Canonical sign-out (cloud → Supabase + /account.html, else local token).
+    async signOut() {
+        const token = localStorage.getItem('authToken');
+        if (this.currentUser?.cloud && window.NorvaAuth) {
+            try { await window.NorvaAuth.signOut(); } catch (_) { /* best effort */ }
+            window.location.replace('/account.html');
+            return;
+        }
+        if (token) {
+            try {
+                await fetch('/api/auth/logout', { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
+            } catch (_) { /* best effort */ }
+        }
+        localStorage.removeItem('authToken');
+        window.location.replace('/login.html');
     }
 
     navigateTo(pageName, replaceHistory = false) {
