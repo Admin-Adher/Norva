@@ -16,7 +16,10 @@ function isMobile() {
 // Normal HLS live latency is ~1 segment (6-12s), which is "live" for practical
 // purposes — only flag "Behind" once the user has clearly drifted past that
 // (e.g. after a pause), so a fresh start reads as LIVE rather than "Behind by Xs".
-const LIVE_BEHIND_THRESHOLD_S = 15;
+// The live player now sits ~12s behind the edge (liveSyncDurationCount 3 × 4s
+// segments) for a stutter-proof buffer, so "behind" must sit above that — else
+// normal playback would falsely read "Behind by 12s". 20s clears it with margin.
+const LIVE_BEHIND_THRESHOLD_S = 20;
 const LIVE_PAUSE_AUTOSNAP_MS = 5 * 60 * 1000;
 
 class VideoPlayer {
@@ -195,12 +198,15 @@ class VideoPlayer {
             maxMaxBufferLength: 60,        // Absolute max buffer 60 seconds
             maxBufferSize: 60 * 1000 * 1000, // 60MB max buffer size
             maxBufferHole: 1.0,            // Allow 1s holes in buffer (helps with discontinuities)
-            // Live stream settings — start NEAR the real-time edge. The old
-            // default (3 segments ≈ 24s) made every fresh live start show
-            // "Behind by 24s": with ~6-10s segments, 1 segment keeps us close to
-            // live (normal HLS latency) while still leaving a segment of cushion.
-            liveSyncDurationCount: 1,      // Sit ~1 segment behind live (near real-time)
-            liveMaxLatencyDurationCount: 6, // Allow up to 6 segments behind before catching up
+            // Live stream settings. Our gateway emits 4s segments (-hls_time 4)
+            // and transcodes in real time, so it delivers a segment roughly every
+            // 4s. Sitting only 1 segment (≈4s) behind the edge left ~1 segment of
+            // forward buffer — any transcode jitter drained it and the picture
+            // stuttered. Sit ~3 segments (≈12s) behind so there's a real cushion;
+            // 12s is still well under the 20s "Behind by…" badge threshold, so the
+            // badge keeps reading LIVE. (Encode-mode 2s segments → ≈6s, also fine.)
+            liveSyncDurationCount: 3,      // ~12s of cushion at 4s segments
+            liveMaxLatencyDurationCount: 8, // catch up only past ~32s behind
             liveBackBufferLength: 30,      // Keep 30s of back buffer for seeking
             // Audio discontinuity handling (fixes garbled audio during ad transitions)
             stretchShortVideoTrack: true,  // Stretch short segments to avoid gaps
