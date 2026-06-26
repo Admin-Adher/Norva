@@ -225,10 +225,14 @@ class App {
             });
         });
 
-        // Handle browser back/forward buttons
+        // Handle browser back/forward buttons. The browser has already moved the
+        // history pointer, so reflect the popped entry WITHOUT pushing a new one
+        // (applyPage, not navigateTo) — otherwise Back stacks duplicate entries.
         window.addEventListener('popstate', (e) => {
             const page = e.state?.page || 'home';
-            this.navigateTo(page, false); // false = don't add to history
+            this._histIdx = (typeof e.state?.idx === 'number') ? e.state.idx : 0;
+            if (this.currentPage === page) return; // already showing it; idx synced
+            this.applyPage(page);
         });
 
         // Initialize home page first (it's needed for channel list)
@@ -1197,14 +1201,30 @@ class App {
             return;
         }
 
-        // Update browser history
+        // Update browser history. A monotonic `idx` lets the native Back button
+        // tell the root app entry (idx 0 → exit the app) from a step it can pop
+        // (idx > 0 → history.back()), and keeps Back tied to real tab order.
         if (replaceHistory) {
             // Replace current history entry (used on initial load)
-            history.replaceState({ page: pageName }, '', `#${pageName}`);
+            this._histIdx = 0;
+            history.replaceState({ page: pageName, idx: 0 }, '', `#${pageName}`);
         } else {
             // Add new history entry
-            history.pushState({ page: pageName }, '', `#${pageName}`);
+            this._histIdx = (this._histIdx || 0) + 1;
+            history.pushState({ page: pageName, idx: this._histIdx }, '', `#${pageName}`);
         }
+
+        this.applyPage(pageName);
+    }
+
+    /**
+     * Switch the visible page WITHOUT touching history. Used by navigateTo (after
+     * it records history) and by the popstate handler — which must NOT re-push the
+     * entry the browser just popped, or Back would stack duplicates and need
+     * several presses to move one tab.
+     */
+    applyPage(pageName) {
+        pageName = this.guardCatalogPage(pageName);
 
         // Update nav
         document.querySelectorAll('.nav-link').forEach(link => {

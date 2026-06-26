@@ -74,6 +74,16 @@
             const region = document.getElementById('norva-region-prompt');
             if (region) { region.remove(); return 'handled'; }
 
+            // Profile switcher (full-screen takeover; it carries no .active /
+            // .modal-overlay class, so the generic modal check below misses it).
+            // Consume Back even in forced-pick mode, where there's no close button
+            // to dismiss it, so Back never navigates out from under the picker.
+            const npOverlay = document.querySelector('.np-overlay');
+            if (npOverlay) {
+                npOverlay.querySelector('.np-close')?.click();
+                return 'handled';
+            }
+
             // An open modal (settings, add source, dialogs).
             const modal = document.querySelector('#modal.active, .modal-overlay.active');
             if (modal) {
@@ -115,19 +125,50 @@
                 if (back) { back.click(); return 'handled'; }
             }
 
-            // Not on Home → go Home instead of exiting.
-            const active = document.querySelector('.page.active');
-            if (active && active.id && active.id !== 'page-home') {
-                const homeLink = document.querySelector('.nav-link[data-page="home"]');
-                if (homeLink) { homeLink.click(); return 'handled'; }
+            // Movie details panel → back to the grid. Mirrors series-details: the
+            // panel toggles in-page (no history entry of its own), so Back must
+            // close it explicitly rather than fall through to tab navigation.
+            const movieDetails = document.getElementById('movie-details');
+            if (movieDetails && !movieDetails.classList.contains('hidden')) {
+                const back = document.querySelector('.movie-back-btn');
+                if (back) { back.click(); return 'handled'; }
             }
+
+            // Mobile catalogue filter sheet (Movies/Series). Click the open sheet's
+            // own close button so its cleanup (classes + body flag) runs.
+            if (document.body.classList.contains('catalog-filter-open')) {
+                document.querySelector('.mobile-open .mobile-filter-close')?.click();
+                return 'handled';
+            }
+
+            // No overlay open: step back through the in-app TAB history instead of
+            // always jumping Home. Each navigateTo() stamps a monotonic idx on its
+            // history entry, so idx > 0 means there's a previous tab to pop (Back
+            // lands on it, not Home), and idx 0 is the root entry → let the native
+            // layer exit the app. history.back() fires popstate, which restores the
+            // previous tab without re-pushing.
+            const idx = (window.history.state && typeof window.history.state.idx === 'number')
+                ? window.history.state.idx
+                : 0;
+            if (idx > 0) { window.history.back(); return 'handled'; }
         } catch (_) { /* fall through to native exit handling */ }
         return 'exit';
     };
 
     // Route all playback to the native player once the page classes exist
     document.addEventListener('DOMContentLoaded', () => {
+        // Double-tap guard. Launching the native player starts a new fullscreen
+        // Android activity and backgrounds the WebView; a rapid double-tap fires
+        // two launches before the activity covers the screen, stacking two
+        // players. Ignore a second launch inside a short window — a legitimate
+        // re-launch only happens after the viewer returns from the player (well
+        // beyond this window), so real playback is never blocked. This is the one
+        // choke point for ALL native playback (channels, movies, episodes).
+        let lastNativePlayAt = 0;
         const nativePlay = (streamUrl, title, meta, resumeSeconds, fallbackUrl) => {
+            const nowTs = Date.now();
+            if (nowTs - lastNativePlayAt < 1500) return;
+            lastNativePlayAt = nowTs;
             const resume = Math.max(0, Math.floor(Number(resumeSeconds) || 0));
             const fb = fallbackUrl || '';
             if (meta && fb && typeof bridge.playVideoResumableFallback === 'function') {
