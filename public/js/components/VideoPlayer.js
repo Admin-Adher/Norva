@@ -1940,6 +1940,7 @@ class VideoPlayer {
 
     // One compact, copy-pasteable line of live-playback state.
     _logLive(tag, extra = {}) {
+        if (!this._liveDebug) return; // silent in prod; opt-in via norva-live-debug=1
         try {
             const v = this.video;
             const ranges = [];
@@ -1991,10 +1992,12 @@ class VideoPlayer {
         // Diagnostics: hook the live HLS instance, and while the forward buffer is
         // in the danger zone log a compact line each tick — a stutter then reads as
         // a drain → STALL ▼ → RESUME ▲ sequence in the console.
-        this._instrumentHls(this.hls);
-        // Verbose per-tick buffer trace: opt-in (localStorage norva-live-debug=1)
-        // so a healthy console stays quiet. STALL/RESUME/HLS markers stay always-on.
-        if (this._liveDebug && this._liveBufferAhead() < 6 && !this.video.paused) this._logLive('buffer-low');
+        // Live diagnostics are opt-in (localStorage norva-live-debug=1) so prod
+        // stays silent; nothing here logs or attaches listeners unless enabled.
+        if (this._liveDebug) {
+            this._instrumentHls(this.hls);
+            if (this._liveBufferAhead() < 6 && !this.video.paused) this._logLive('buffer-low');
+        }
         const isBehind = behind >= LIVE_BEHIND_THRESHOLD_S;
         this._liveBadge.classList.toggle('behind', isBehind);
         this._liveBadge.classList.toggle('is-live', !isBehind);
