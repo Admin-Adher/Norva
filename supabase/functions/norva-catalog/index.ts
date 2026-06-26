@@ -525,7 +525,8 @@ async function listGenreRails(req: Request, url: URL, userId: string) {
   // Bucket -> titles (multi-membership), capped per rail, recency preserved.
   const byBucket = new Map<string, JsonRecord[]>();
   for (const title of titles) {
-    const categoryName = recordOrEmpty(title.metadata).categoryName;
+    // genre_category COLUMN survives metadata thinning; metadata.categoryName is '{}' at rest.
+    const categoryName = title.genre_category ?? recordOrEmpty(title.metadata).categoryName;
     const buckets = classifyTitleBuckets(categoryName, titleGenres(title));
     if (buckets.some((b) => hidden.has(b))) continue;
     for (const bucketId of buckets) {
@@ -741,7 +742,7 @@ async function listGenreItems(req: Request, url: URL, userId: string) {
 
   let matched = titles.filter((title) => {
     if (bucket || hidden.size) {
-      const buckets = classifyTitleBuckets(recordOrEmpty(title.metadata).categoryName, titleGenres(title));
+      const buckets = classifyTitleBuckets(title.genre_category ?? recordOrEmpty(title.metadata).categoryName, titleGenres(title));
       if (bucket) {
         if (!buckets.includes(bucket) || buckets.some((b) => hidden.has(b))) return false;
       } else if (buckets.length && buckets.every((b) => hidden.has(b))) {
@@ -1328,11 +1329,16 @@ function preferSecureImage(stored: unknown, tmdbUrl: string | null) {
 function titleGenres(title: JsonRecord) {
   const tmdb = titleTmdb(title);
   const metadata = recordOrEmpty(title.metadata);
-  const rawGenres: unknown[] = Array.isArray(tmdb.genres)
-    ? tmdb.genres
-    : Array.isArray(metadata.genres)
-      ? metadata.genres
-      : [];
+  // Prefer the denormalised genre_payload COLUMN. It survives cloud_titles metadata
+  // thinning (Phase-1 dedup), whereas metadata.tmdb.genres is '{}' at rest and only
+  // refilled by applyCatalogOverlay AFTER genre classification has already run.
+  const rawGenres: unknown[] = Array.isArray(title.genre_payload)
+    ? title.genre_payload as unknown[]
+    : Array.isArray(tmdb.genres)
+      ? tmdb.genres
+      : Array.isArray(metadata.genres)
+        ? metadata.genres
+        : [];
   return rawGenres
     .map((genre: unknown) => typeof genre === "string" ? genre : stringOrNull(recordOrEmpty(genre).name))
     .filter((genre: string | null): genre is string => Boolean(genre));
