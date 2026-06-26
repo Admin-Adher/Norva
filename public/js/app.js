@@ -922,24 +922,48 @@ class App {
     }
 
     /**
-     * Show the "Downloads" menu entry only inside the native phone/tablet APK
-     * (Netflix-style): always available there, never on the web or the Android TV
-     * app. The native downloads screen handles its own empty state.
+     * Show the "Downloads" entry only inside the phone/tablet APK AND only once
+     * the user actually has a download (queued, downloading or saved). It appears
+     * with the first download and disappears when the list is emptied, so it never
+     * permanently occupies a slot in the already 5-item mobile bottom bar. Applies
+     * to both the phone bottom tab bar and the tablet hamburger entry.
      */
     refreshDownloadsNav() {
-        const link = document.getElementById('nav-downloads');
-        if (!link) return;
-        // Downloads is a MOBILE-APP-ONLY feature (like Netflix): always available
-        // in the phone/tablet APK, never on the web or the Android TV app. Gate
-        // strictly on the phone APK's UA marker so it can't leak onto TV/web.
-        const show = /NorvaTV-AndroidPhone/i.test(navigator.userAgent || '');
-        link.hidden = !show;
-        // The `hidden` attribute alone doesn't hide a .nav-link (CSS forces
-        // display:flex and there is no [hidden] override), so toggle display too —
-        // otherwise Downloads shows on the web, where it's a dead no-op.
-        link.style.display = show ? '' : 'none';
-        link.setAttribute('aria-hidden', show ? 'false' : 'true');
-        link.tabIndex = show ? 0 : -1;
+        const links = [
+            document.getElementById('nav-downloads'),
+            document.getElementById('nav-downloads-bottom'),
+        ].filter(Boolean);
+        if (!links.length) return;
+        // Phone/tablet APK only, and only with ≥1 download. Gate on the APK's UA
+        // marker so it can never leak onto the web or the Android TV app, where
+        // the native downloads screen doesn't exist.
+        const isApk = /NorvaTV-AndroidPhone/i.test(navigator.userAgent || '');
+        const show = isApk && this.downloadsCount() >= 1;
+        for (const link of links) {
+            link.hidden = !show;
+            // .nav-link forces display:flex with no [hidden] override, so toggle
+            // display too — otherwise the entry shows where it shouldn't.
+            link.style.display = show ? '' : 'none';
+            link.setAttribute('aria-hidden', show ? 'false' : 'true');
+            link.tabIndex = show ? 0 : -1;
+        }
+    }
+
+    /**
+     * How many real downloads the native app holds — queued, downloading or done
+     * (a finished offline title still counts, so the entry stays reachable). Read
+     * synchronously from the native getDownloads() bridge; absent bridge → 0.
+     */
+    downloadsCount() {
+        const bridge = window.NorvaTVCloud || window.NodeCastNative;
+        if (!bridge || typeof bridge.getDownloads !== 'function') return 0;
+        try {
+            const list = JSON.parse(bridge.getDownloads() || '[]');
+            if (!Array.isArray(list)) return 0;
+            return list.filter((d) => d && ['queued', 'downloading', 'done'].includes(d.state)).length;
+        } catch (_) {
+            return 0;
+        }
     }
 
     navigateTo(pageName, replaceHistory = false) {

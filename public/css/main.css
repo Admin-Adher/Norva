@@ -9869,7 +9869,8 @@ mark.search-highlight {
     width: 24px;
     height: 24px;
   }
-  .bottom-nav .nav-link .nav-icon img { width: 22px; height: 22px; display: block; }
+  .bottom-nav .nav-link .nav-icon img,
+  .bottom-nav .nav-link .nav-icon svg { width: 22px; height: 22px; display: block; }
   .bottom-nav .nav-link span:not(.nav-icon) {
     font-size: 10px;
     line-height: 1;
