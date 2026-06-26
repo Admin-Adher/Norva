@@ -628,13 +628,14 @@ function startFfmpeg(session) {
         '-reconnect', '1',
         '-reconnect_streamed', '1',
         '-reconnect_at_eof', '1',
-        // Retry instead of dying when the provider returns an HTTP 5xx (server
-        // error) or 429 (rate limit). Unstable / rate-limited IPTV providers blip
-        // 502/503/429 transiently — without this ffmpeg exits code 1 on the first
-        // one ("Server returned 5XX/4XX") and the whole session fails; with it, it
-        // reconnects through the blip. (429 is the 4xx the provider returns under
-        // a request burst — see the client-side short-EPG throttle that reduces it.)
-        '-reconnect_on_http_error', '5xx,429',
+        // NOTE: deliberately NO -reconnect_on_http_error. This provider is
+        // single-connection and 429s ("user_multi_ip" / rate limit) when it sees a
+        // 2nd connection — retrying an HTTP error here makes ffmpeg HOLD the failing
+        // connect and hammer the slot, which overlaps the next attempt and triggers
+        // MORE 429s. Fast-fail instead: ffmpeg exits on the HTTP error and the
+        // gateway's own startup retry (PROVIDER_AUTH_RETRY, which first evicts the
+        // conflicting session and waits PROVIDER_SLOT_RELEASE_DELAY_MS) re-attempts
+        // cleanly. -reconnect/-reconnect_streamed still cover mid-stream drops.
         '-reconnect_delay_max', '5',
         '-rw_timeout', '15000000',
         '-user_agent', session.userAgent || FFMPEG_USER_AGENT,
