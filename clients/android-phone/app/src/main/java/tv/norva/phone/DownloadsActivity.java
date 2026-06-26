@@ -21,6 +21,7 @@ import android.view.ViewOutlineProvider;
 import android.view.Window;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
+import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -344,21 +345,24 @@ public final class DownloadsActivity extends Activity {
 
     private View movieCard(final DownloadStore.Item it) {
         LinearLayout card = card();
-        card.setOrientation(LinearLayout.HORIZONTAL);
-        card.setGravity(Gravity.CENTER_VERTICAL);
+        card.setOrientation(LinearLayout.VERTICAL);
 
-        card.addView(posterView(it, 56, 82));
+        LinearLayout top = new LinearLayout(this);
+        top.setOrientation(LinearLayout.HORIZONTAL);
+        top.setGravity(Gravity.CENTER_VERTICAL);
+        top.addView(posterView(it, 56, 82));
 
         LinearLayout mid = new LinearLayout(this);
         mid.setOrientation(LinearLayout.VERTICAL);
         mid.addView(titleText(it.title));
         mid.addView(statusText(it));
-        card.addView(mid, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        top.addView(mid, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        card.addView(top);
 
-        LinearLayout actions = new LinearLayout(this);
-        actions.setOrientation(LinearLayout.HORIZONTAL);
-        addActions(actions, it);
-        card.addView(actions);
+        // Actions go on their own full-width row (see actionsRow) so a long set
+        // — Mobile data · ▲ · ▼ · Cancel on a queued item — never clips beside the
+        // title on a narrow phone.
+        card.addView(actionsRow(it));
         return card;
     }
 
@@ -481,12 +485,9 @@ public final class DownloadsActivity extends Activity {
         label.setMaxLines(1);
         mid.addView(label);
         mid.addView(statusText(ep));
-        row.addView(mid, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        row.addView(mid);
 
-        LinearLayout actions = new LinearLayout(this);
-        actions.setOrientation(LinearLayout.HORIZONTAL);
-        addActions(actions, ep);
-        row.addView(actions);
+        row.addView(actionsRow(ep));
         return row;
     }
 
@@ -528,6 +529,21 @@ public final class DownloadsActivity extends Activity {
     }
 
     /** Add the control pills valid for this item's state into {@code actions}. */
+    /** Actions on their own full-width, horizontally-scrollable row, so a long set
+     *  of buttons never clips on a narrow phone instead of fitting beside the title. */
+    private HorizontalScrollView actionsRow(final DownloadStore.Item it) {
+        LinearLayout actions = new LinearLayout(this);
+        actions.setOrientation(LinearLayout.HORIZONTAL);
+        actions.setPadding(0, dp(8), 0, 0);
+        addActions(actions, it);
+        HorizontalScrollView sv = new HorizontalScrollView(this);
+        sv.setHorizontalScrollBarEnabled(false);
+        sv.setOverScrollMode(View.OVER_SCROLL_NEVER);
+        sv.addView(actions, new ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        return sv;
+    }
+
     private void addActions(LinearLayout actions, final DownloadStore.Item it) {
         switch (it.state) {
             case "done":
