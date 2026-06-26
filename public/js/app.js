@@ -1220,6 +1220,7 @@ class App {
         container.classList.add('in-mini');
         mini.classList.add('active');
         this.refreshLiveMiniMeta();
+        this.placeLiveMini(true); // snap to the remembered corner (no entrance slide)
     }
 
     exitLiveMini(opts = {}) {
@@ -1257,11 +1258,14 @@ class App {
                 <button type="button" class="norva-mini-btn norva-mini-close" title="Close" aria-label="Close">&times;</button>
             </div>`;
         // Expand / tapping the video → return to Live TV (show() restores the
-        // surface). A transparent hit-layer captures the tap so the moved
+        // surface). A transparent hit-layer captures the gesture so the moved
         // #video-container's own click/dblclick (toggle controls / fullscreen)
-        // never fires inside the mini.
+        // never fires inside the mini. A real drag suppresses the expand.
         const expand = () => this.navigateTo('live');
-        mini.querySelector('.norva-mini-hit').addEventListener('click', expand);
+        mini.querySelector('.norva-mini-hit').addEventListener('click', () => {
+            if (this._miniDragged) { this._miniDragged = false; return; }
+            expand();
+        });
         mini.querySelector('.norva-mini-expand').addEventListener('click', (e) => { e.stopPropagation(); expand(); });
         // Close → stop the stream (frees the provider slot) and restore the surface.
         mini.querySelector('.norva-mini-close').addEventListener('click', (e) => {
@@ -1269,7 +1273,80 @@ class App {
             this.exitLiveMini({ stop: true });
         });
         document.body.appendChild(mini);
+        this.initLiveMiniDrag(mini);
+        // Keep the mini pinned to its corner when the viewport changes.
+        window.addEventListener('resize', () => this.placeLiveMini(true));
         return mini;
+    }
+
+    /** Position the mini at its saved corner (left/top px). instant = no slide. */
+    placeLiveMini(instant) {
+        const mini = document.getElementById('norva-mini');
+        if (!mini || !mini.classList.contains('active')) return;
+        const corner = this._miniCorner || localStorage.getItem('norva_mini_corner') || 'br';
+        const vw = window.innerWidth, vh = window.innerHeight;
+        const w = mini.offsetWidth, h = mini.offsetHeight;
+        const mobile = vw <= 768;
+        const side = mobile ? 10 : 18;
+        const navH = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--navbar-height'), 10) || 64;
+        const topInset = navH + (mobile ? 10 : 12);          // clear the top navbar
+        const bottomInset = mobile ? 78 : 18;                // clear the mobile bottom nav
+        const left = corner.includes('l') ? side : Math.max(side, vw - w - side);
+        const top = corner.charAt(0) === 't' ? topInset : Math.max(topInset, vh - h - bottomInset);
+        if (instant) mini.style.transition = 'none';
+        mini.style.left = `${left}px`;
+        mini.style.top = `${top}px`;
+        mini.style.right = 'auto';
+        mini.style.bottom = 'auto';
+        if (instant) { void mini.offsetWidth; mini.style.transition = ''; } // re-arm the snap easing
+    }
+
+    /** Drag the mini with mouse or finger; on release, snap to the nearest corner
+     *  and remember it (localStorage). A <6px move counts as a tap, not a drag. */
+    initLiveMiniDrag(mini) {
+        if (!this._miniCorner) this._miniCorner = localStorage.getItem('norva_mini_corner') || 'br';
+        const THRESH = 6;
+        let pid = null, sx = 0, sy = 0, bl = 0, bt = 0, dragging = false;
+        const move = (e) => {
+            if (e.pointerId !== pid) return;
+            const dx = e.clientX - sx, dy = e.clientY - sy;
+            if (!dragging) {
+                if (Math.hypot(dx, dy) < THRESH) return;
+                dragging = true;
+                mini.classList.add('is-dragging');
+            }
+            const nl = Math.max(4, Math.min(bl + dx, window.innerWidth - mini.offsetWidth - 4));
+            const nt = Math.max(4, Math.min(bt + dy, window.innerHeight - mini.offsetHeight - 4));
+            mini.style.left = `${nl}px`;
+            mini.style.top = `${nt}px`;
+            mini.style.right = 'auto';
+            mini.style.bottom = 'auto';
+        };
+        const up = (e) => {
+            if (e.pointerId !== pid) return;
+            document.removeEventListener('pointermove', move);
+            document.removeEventListener('pointerup', up);
+            document.removeEventListener('pointercancel', up);
+            pid = null;
+            if (!dragging) return;        // a tap → let the expand click run
+            mini.classList.remove('is-dragging');
+            this._miniDragged = true;     // suppress the expand click that follows
+            const r = mini.getBoundingClientRect();
+            const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+            this._miniCorner = (cy < window.innerHeight / 2 ? 't' : 'b') + (cx < window.innerWidth / 2 ? 'l' : 'r');
+            try { localStorage.setItem('norva_mini_corner', this._miniCorner); } catch (_) { /* noop */ }
+            this.placeLiveMini();         // animate to the snapped corner
+        };
+        mini.addEventListener('pointerdown', (e) => {
+            if (e.target.closest('.norva-mini-btn')) return;  // buttons aren't drag handles
+            if (e.button != null && e.button > 0) return;     // primary mouse button / touch only
+            pid = e.pointerId;
+            const r = mini.getBoundingClientRect();
+            bl = r.left; bt = r.top; sx = e.clientX; sy = e.clientY; dragging = false;
+            document.addEventListener('pointermove', move);
+            document.addEventListener('pointerup', up);
+            document.addEventListener('pointercancel', up);
+        });
     }
 
     navigateTo(pageName, replaceHistory = false) {
