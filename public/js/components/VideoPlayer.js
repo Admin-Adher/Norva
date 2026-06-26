@@ -25,6 +25,8 @@ const LIVE_PAUSE_AUTOSNAP_MS = 5 * 60 * 1000;
 class VideoPlayer {
     constructor() {
         this.video = document.getElementById('video-player');
+        // Verbose live diagnostics opt-in: localStorage['norva-live-debug']='1'.
+        this._liveDebug = (() => { try { return localStorage.getItem('norva-live-debug') === '1'; } catch (_) { return false; } })();
 
         // iOS: ensure inline playback (not fullscreen by default)
         if (this.video) {
@@ -1862,7 +1864,7 @@ class VideoPlayer {
         this._showLiveBadge(true);
         this._updateLiveSyncBadge();
         if (this._liveSyncTimer) return;
-        this._logLive('live-start'); // a reference marker for the stutter timeline
+        if (this._liveDebug) this._logLive('live-start'); // reference marker (debug only)
         this._liveSyncTimer = setInterval(() => this._updateLiveSyncBadge(), 1000);
     }
 
@@ -1990,7 +1992,9 @@ class VideoPlayer {
         // in the danger zone log a compact line each tick — a stutter then reads as
         // a drain → STALL ▼ → RESUME ▲ sequence in the console.
         this._instrumentHls(this.hls);
-        if (this._liveBufferAhead() < 6 && !this.video.paused) this._logLive('buffer-low');
+        // Verbose per-tick buffer trace: opt-in (localStorage norva-live-debug=1)
+        // so a healthy console stays quiet. STALL/RESUME/HLS markers stay always-on.
+        if (this._liveDebug && this._liveBufferAhead() < 6 && !this.video.paused) this._logLive('buffer-low');
         const isBehind = behind >= LIVE_BEHIND_THRESHOLD_S;
         this._liveBadge.classList.toggle('behind', isBehind);
         this._liveBadge.classList.toggle('is-live', !isBehind);
