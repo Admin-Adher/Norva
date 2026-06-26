@@ -164,6 +164,9 @@ class App {
             });
         });
 
+        // Global search (movies + series) from the top bar.
+        document.getElementById('nav-search')?.addEventListener('click', () => this.openSearch());
+
         // Surface the Downloads menu entry once the native app has ≥1 download.
         this.refreshDownloadsNav();
         document.addEventListener('visibilitychange', () => {
@@ -1056,6 +1059,114 @@ class App {
         }
         localStorage.removeItem('authToken');
         window.location.replace('/login.html');
+    }
+
+    // ---- Global catalogue search (movies + series) -----------------------
+    // First-class search reachable from anywhere via the top-bar icon. Queries
+    // the movie and series catalogue in parallel (same /media-items endpoint the
+    // pages use), so it spans the whole library instead of one content type.
+
+    openSearch() {
+        const ov = document.getElementById('gsearch-overlay') || this.buildSearchOverlay();
+        ov.classList.add('active');
+        const input = ov.querySelector('#gsearch-input');
+        setTimeout(() => { try { input.focus(); input.select(); } catch (_) { /* noop */ } }, 50);
+    }
+
+    closeSearch() {
+        document.getElementById('gsearch-overlay')?.classList.remove('active');
+    }
+
+    buildSearchOverlay() {
+        const ov = document.createElement('div');
+        ov.id = 'gsearch-overlay';
+        ov.className = 'modal-overlay gsearch-overlay';
+        ov.innerHTML = `
+            <div class="gsearch-panel" role="dialog" aria-modal="true" aria-label="Search">
+                <div class="gsearch-bar">
+                    <span class="gsearch-ic"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></span>
+                    <input id="gsearch-input" type="search" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Search movies & series…">
+                    <button type="button" class="gsearch-cancel">Cancel</button>
+                </div>
+                <div class="gsearch-results" id="gsearch-results">
+                    <div class="gsearch-hint">Type at least 2 characters to search the catalogue.</div>
+                </div>
+            </div>`;
+        ov.addEventListener('click', (e) => { if (e.target === ov) this.closeSearch(); });
+        ov.querySelector('.gsearch-cancel').addEventListener('click', () => this.closeSearch());
+        const input = ov.querySelector('#gsearch-input');
+        input.addEventListener('input', () => {
+            clearTimeout(this._searchDebounce);
+            this._searchDebounce = setTimeout(() => this.runSearch(input.value.trim()), 250);
+        });
+        input.addEventListener('keydown', (e) => { if (e.key === 'Escape') this.closeSearch(); });
+        document.body.appendChild(ov);
+        return ov;
+    }
+
+    async runSearch(q) {
+        const box = document.getElementById('gsearch-results');
+        if (!box) return;
+        if (q.length < 2) {
+            box.innerHTML = '<div class="gsearch-hint">Type at least 2 characters to search the catalogue.</div>';
+            return;
+        }
+        const reqId = (this._searchReq = (this._searchReq || 0) + 1);
+        box.innerHTML = '<div class="gsearch-hint"><div class="loading-spinner"></div></div>';
+        const empty = { items: [] };
+        const [mv, sr] = await Promise.all([
+            window.API.media.page({ type: 'movie', q, limit: 24 }).catch(() => empty),
+            window.API.media.page({ type: 'series', q, limit: 24 }).catch(() => empty),
+        ]);
+        if (reqId !== this._searchReq) return; // a newer keystroke superseded this
+        this.renderSearchResults(box, q, mv.items || [], sr.items || []);
+    }
+
+    renderSearchResults(box, q, movies, series) {
+        const M = window.MediaUtils;
+        const row = (item, type) => {
+            const title = item.tmdb?.title || item.tmdb?.name || item.name || 'Untitled';
+            const poster = M.safeImageUrl(
+                item.stream_icon || item.cover || M.tmdbPosterUrl(item.tmdb),
+                '/img/norva-media-placeholder.png');
+            const year = String(item.tmdb?.release_date || item.tmdb?.first_air_date || '').slice(0, 4);
+            return `
+                <button type="button" class="gsearch-result" data-type="${type}" data-title="${M.escapeHtml(title)}">
+                    <img class="gsearch-poster" src="${M.escapeHtml(poster)}" alt="" loading="lazy"
+                         onerror="this.onerror=null;this.src='/img/norva-media-placeholder.png'">
+                    <span class="gsearch-text">
+                        <span class="gsearch-title">${M.escapeHtml(title)}</span>
+                        <span class="gsearch-sub">${type === 'series' ? 'Series' : 'Movie'}${year ? ' · ' + year : ''}</span>
+                    </span>
+                </button>`;
+        };
+        let html = '';
+        if (movies.length) html += '<div class="gsearch-section">Movies</div>' + movies.map((m) => row(m, 'movie')).join('');
+        if (series.length) html += '<div class="gsearch-section">Series</div>' + series.map((s) => row(s, 'series')).join('');
+        if (!html) {
+            box.innerHTML = `<div class="gsearch-hint">No results for “${M.escapeHtml(q)}”.</div>`;
+            return;
+        }
+        box.innerHTML = html;
+        box.querySelectorAll('.gsearch-result').forEach((el) => {
+            el.addEventListener('click', () => this.openSearchResult(el.dataset.type, el.dataset.title || q));
+        });
+    }
+
+    // Land the tapped result in its page, pre-searched to that exact title. The
+    // page's own cloudRequestId guard makes the prefill race-safe vs any load
+    // the navigation itself kicks off.
+    openSearchResult(type, title) {
+        this.closeSearch();
+        const page = type === 'series' ? 'series' : 'movies';
+        this.navigateTo(page);
+        setTimeout(() => {
+            const input = document.getElementById(page === 'series' ? 'series-search' : 'movies-search');
+            if (input) {
+                input.value = title;
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+            }
+        }, 120);
     }
 
     navigateTo(pageName, replaceHistory = false) {
