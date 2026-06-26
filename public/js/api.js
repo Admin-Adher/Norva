@@ -2196,7 +2196,30 @@ const API = {
             },
             seriesInfo: (sourceId, seriesId) =>
                 API.request('GET', `/proxy/xtream/${sourceId}/series_info?series_id=${seriesId}`),
-            shortEpg: (sourceId, streamId, limit = 8) => API.request('GET', `/proxy/xtream/${sourceId}/short_epg?stream_id=${streamId}&limit=${encodeURIComponent(limit)}`),
+            shortEpg: async (sourceId, streamId, limit = 8) => {
+                // Single-connection providers refuse short-EPG ("user_multi_ip" /
+                // 429) while a live stream holds their one connection. After the
+                // first refusal, short-circuit per-source for a few minutes so we
+                // don't spam the network tab with futile 429s — the XMLTV guide
+                // still carries program info. Multi-connection providers never trip
+                // this (they don't 429), so they keep getting short-EPG.
+                const key = String(sourceId);
+                const cooldown = (API._shortEpgCooldown = API._shortEpgCooldown || new Map());
+                if (Date.now() < (cooldown.get(key) || 0)) {
+                    const cooled = new Error('short-epg cooling down (provider single-connection)');
+                    cooled.status = 429;
+                    cooled.epgCooled = true;
+                    throw cooled;
+                }
+                try {
+                    return await API.request('GET', `/proxy/xtream/${sourceId}/short_epg?stream_id=${streamId}&limit=${encodeURIComponent(limit)}`);
+                } catch (err) {
+                    if (err?.status === 429 || /user_multi_ip|too many requests/i.test(String(err?.message || ''))) {
+                        cooldown.set(key, Date.now() + 10 * 60 * 1000);
+                    }
+                    throw err;
+                }
+            },
             getStreamUrl: (sourceId, streamId, type = 'live', container = defaultProviderContainerForType(type), options = {}) => {
                 const params = new URLSearchParams({ container });
                 Object.entries(compactPlaybackHint(options)).forEach(([key, value]) => {

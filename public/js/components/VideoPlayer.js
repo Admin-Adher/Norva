@@ -2671,7 +2671,13 @@ class VideoPlayer {
             }
             this.updateNowPlaying(channel, null);
         } catch (err) {
-            console.log('EPG data not available:', err.message);
+            // Expected on single-connection providers (user_multi_ip / 429 / cooled
+            // down): the XMLTV guide already carries program info, so stay quiet —
+            // only surface genuinely unexpected EPG failures, at debug level.
+            const msg = String(err?.message || '');
+            if (err?.status !== 429 && !err?.epgCooled && !/user_multi_ip/i.test(msg)) {
+                console.debug('EPG data not available:', msg);
+            }
             this.updateNowPlaying(channel, null);
         }
     }
