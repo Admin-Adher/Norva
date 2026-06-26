@@ -23,7 +23,6 @@ import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
-import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -142,17 +141,26 @@ public final class DownloadsActivity extends Activity {
         wifiText.addView(wifiLabel);
         wifiText.addView(wifiSub);
         wifiRow.addView(wifiText, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        Switch wifi = new Switch(this);
-        wifi.setChecked(DownloadService.getWifiOnly(this));
-        wifi.setThumbTintList(android.content.res.ColorStateList.valueOf(TEXT));
-        wifi.setTrackTintList(new android.content.res.ColorStateList(
-                new int[][]{ new int[]{ android.R.attr.state_checked }, new int[0] },
-                new int[]{ ACCENT, SUBTLE }));
-        wifi.setOnCheckedChangeListener((btn, checked) -> {
-            DownloadService.setWifiOnly(this, checked);
+        // Custom-drawn toggle — NOT the platform android.widget.Switch, which OEM
+        // skins (e.g. MIUI/Xiaomi) restyle into an unusable faint blob with stray
+        // "ON/ACTIVE" text and no visible thumb. This draws itself, so it looks and
+        // behaves identically on every device. The WHOLE ROW is tappable too, so the
+        // control is obvious and easy to hit. ON = Wi-Fi only; tap to turn OFF and
+        // allow downloads on mobile data.
+        Toggle wifi = new Toggle(this, DownloadService.getWifiOnly(this), ACCENT, 0xFF3F3F46, 0xFFF4F4F5);
+        wifi.setContentDescription("Wi-Fi only");
+        View.OnClickListener flip = v -> {
+            boolean nv = !wifi.isChecked();
+            wifi.setChecked(nv);
+            DownloadService.setWifiOnly(this, nv);
+            wifi.announceForAccessibility(nv ? "Wi-Fi only on" : "Wi-Fi only off");
             renderNow();
-        });
-        wifiRow.addView(wifi);
+        };
+        wifi.setOnClickListener(flip);
+        wifiRow.setOnClickListener(flip);
+        LinearLayout.LayoutParams wifiTogLp = new LinearLayout.LayoutParams(dp(48), dp(28));
+        wifiTogLp.leftMargin = dp(12);
+        wifiRow.addView(wifi, wifiTogLp);
         LinearLayout.LayoutParams wifiRowLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         wifiRowLp.topMargin = dp(14);
@@ -182,6 +190,65 @@ public final class DownloadsActivity extends Activity {
 
         scroll.addView(container);
         setContentView(scroll);
+    }
+
+    /**
+     * A self-drawn on/off toggle. We deliberately avoid the platform
+     * {@link android.widget.Switch}: OEM skins (notably MIUI) re-theme it into a
+     * faint, near-invisible control with stray "ON/ACTIVE" text and no clear thumb,
+     * which left users unable to find the setting. This view owns its own drawing,
+     * so it renders identically everywhere. Fixed size; tap handling is wired by the
+     * caller (both the toggle and the whole row flip it).
+     */
+    static final class Toggle extends View {
+        private boolean checked;
+        private final int onColor, offColor, thumbColor;
+        private final android.graphics.Paint paint =
+                new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+        private final float density;
+
+        Toggle(android.content.Context c, boolean checked, int onColor, int offColor, int thumbColor) {
+            super(c);
+            this.checked = checked;
+            this.onColor = onColor;
+            this.offColor = offColor;
+            this.thumbColor = thumbColor;
+            this.density = c.getResources().getDisplayMetrics().density;
+        }
+
+        boolean isChecked() { return checked; }
+
+        void setChecked(boolean v) {
+            if (v != checked) { checked = v; invalidate(); }
+        }
+
+        @Override
+        protected void onMeasure(int widthSpec, int heightSpec) {
+            setMeasuredDimension(
+                    resolveSize(Math.round(48 * density), widthSpec),
+                    resolveSize(Math.round(28 * density), heightSpec));
+        }
+
+        @Override
+        protected void onDraw(android.graphics.Canvas canvas) {
+            float w = getWidth(), h = getHeight(), r = h / 2f;
+            paint.setColor(checked ? onColor : offColor);
+            canvas.drawRoundRect(0f, 0f, w, h, r, r, paint);
+            float pad = h * 0.14f, tr = (h - 2f * pad) / 2f;
+            float cx = checked ? (w - pad - tr) : (pad + tr);
+            paint.setColor(thumbColor);
+            canvas.drawCircle(cx, h / 2f, tr, paint);
+        }
+
+        // Present as a checkable Switch to TalkBack so screen-reader users still get
+        // the control's role + on/off state (the platform Switch gave this for free).
+        @Override
+        public void onInitializeAccessibilityNodeInfo(android.view.accessibility.AccessibilityNodeInfo info) {
+            super.onInitializeAccessibilityNodeInfo(info);
+            info.setClassName("android.widget.Switch");
+            info.setCheckable(true);
+            info.setChecked(checked);
+        }
     }
 
     @Override
