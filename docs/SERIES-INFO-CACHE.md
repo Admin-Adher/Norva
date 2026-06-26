@@ -230,3 +230,38 @@ Everything is additive:
 - Crons applied live: `cron.alter_job` on jobids 5/7/10/11; `cron.schedule` jobid 24 (prune).
 - Client side (prior commit `9d16259`): `API.proxy.xtream.seriesInfo` 10-min cache +
   in-flight dedupe + retry — complements the server cache (cuts duplicate calls per browser).
+
+## 9. The hard limit: provider single-IP lock + the pre-warm auto-heal
+
+A decisive test (2026-06-26) settled where the wall is. `norva-series-prewarm` fetched
+`get_series_info` for two series **server-side, from the gateway's single stable IP**, with no
+crawls (off-peak), no active stream, sync paused, and **no user involved** — and the provider
+**still** returned `{"reason":"user_multi_ip","version":"3.0.0-dragonfly"}`. A single clean call
+from one IP getting "multi_ip" means the provider sees **another IP on the account** (a second
+device / IPTV app using the same Xtream credentials) **or** a sticky multi-IP cooldown. **No
+routing (relay, gateway, direct) can override a provider-side single-IP lock** — every metadata
+fetch must reach the provider, and it rejects all of them while it sees ≥2 IPs. This is a
+provider-account condition, not a Norva bug.
+
+**The durable fix is to never make a live call.** `norva-series-prewarm` (service-gated by
+`NORVA_BACKFILL_TOKEN`, `verify_jwt:false`) fills `cloud_series_info_cache` for every series from
+the gateway's **single stable IP**, throttled (300 ms apart), aborting after 3 consecutive 429s
+so it never hammers a locked provider. Cron `norva-series-info-prewarm` (jobid 25,
+`*/10 1-5 * * *` UTC) runs it off-peak: the **moment** the account is clean (no 2nd device, any
+cooldown expired) it fills 40 series/run, and from then on the web serves series-info entirely
+from cache — **immune** to `user_multi_ip` regardless of how many devices later connect. It
+self-heals with **zero user action** once the account is single-IP.
+
+Manual one-shot (e.g. right after the user closes other devices) — fills fast:
+```sql
+select net.http_post(
+  url := 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-series-prewarm',
+  headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' ||
+    (select decrypted_secret from vault.decrypted_secrets where name = 'norva_backfill_token')),
+  body := jsonb_build_object('sourceId','<xtream source id>','userId','<owner id>','limit',60),
+  timeout_milliseconds := 120000);
+-- progress: select count(*) from cloud_series_info_cache where server_host='apdxes.xyz';
+```
+Files: `supabase/functions/norva-series-prewarm/index.ts`, `supabase/config.toml`
+(`verify_jwt=false`). Reversible: `select cron.unschedule('norva-series-info-prewarm');` and
+drop the function.
