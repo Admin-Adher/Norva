@@ -2194,8 +2194,37 @@ const API = {
                 const query = params.length ? `?${params.join('&')}` : '';
                 return API.request('GET', `/proxy/xtream/${sourceId}/series${query}`);
             },
-            seriesInfo: (sourceId, seriesId) =>
-                API.request('GET', `/proxy/xtream/${sourceId}/series_info?series_id=${seriesId}`),
+            // Series info (the episode list) is essential, but single-connection
+            // providers 429 it with "user_multi_ip" when it collides with another
+            // cloud request. Make it resilient: serve from a short cache, dedupe
+            // concurrent calls (double-taps), and retry the transient 429 a couple
+            // of times — the collision clears within a second or two.
+            seriesInfo: (sourceId, seriesId) => {
+                const key = `${sourceId}:${seriesId}`;
+                const cache = (API._seriesInfoCache = API._seriesInfoCache || new Map());
+                const cached = cache.get(key);
+                if (cached && (Date.now() - cached.at < 10 * 60 * 1000)) return Promise.resolve(cached.data);
+                const inflight = (API._seriesInfoInflight = API._seriesInfoInflight || new Map());
+                if (inflight.has(key)) return inflight.get(key);
+                const run = (async () => {
+                    let lastErr;
+                    for (let attempt = 0; attempt < 3; attempt++) {
+                        try {
+                            const data = await API.request('GET', `/proxy/xtream/${sourceId}/series_info?series_id=${seriesId}`);
+                            cache.set(key, { at: Date.now(), data });
+                            return data;
+                        } catch (err) {
+                            lastErr = err;
+                            const transient = err?.status === 429 || /user_multi_ip|too many requests/i.test(String(err?.message || ''));
+                            if (!transient || attempt === 2) break;
+                            await new Promise(resolve => setTimeout(resolve, attempt === 0 ? 600 : 1500));
+                        }
+                    }
+                    throw lastErr;
+                })();
+                inflight.set(key, run);
+                return run.finally(() => inflight.delete(key));
+            },
             shortEpg: async (sourceId, streamId, limit = 8) => {
                 // Single-connection providers refuse short-EPG ("user_multi_ip" /
                 // 429) while a live stream holds their one connection. After the
