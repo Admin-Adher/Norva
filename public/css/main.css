@@ -10047,6 +10047,116 @@ html.tv .nav-search-btn { display: none; }
   font-size: 13px;
 }
 
+/* ===== Live mini-player (web) =========================================
+   The inline live surface (#video-container) is re-parented into this floating
+   shell when you leave Live TV mid-channel, so it keeps playing while you browse.
+   z-index 500: above page content + navbar, below modals/overlays (1000/10000),
+   so an open dialog cleanly covers it. */
+.norva-mini {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  width: 340px;
+  max-width: 44vw;
+  aspect-ratio: 16 / 9;
+  z-index: 500;
+  border-radius: 14px;
+  overflow: hidden;
+  background: #000;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  display: none;
+  animation: norva-mini-in 0.18s ease both;
+}
+.norva-mini.active { display: block; }
+@keyframes norva-mini-in {
+  from { opacity: 0; transform: translateY(12px) scale(0.96); }
+  to   { opacity: 1; transform: none; }
+}
+.norva-mini-stage { position: absolute; inset: 0; }
+.norva-mini-stage > #video-container,
+#video-container.in-mini {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  border-radius: 0;
+  pointer-events: none; /* the hit-layer owns taps inside the mini */
+}
+/* Transparent click target over the video → expand back to Live TV. */
+.norva-mini-hit {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.norva-mini #video-player {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+}
+/* The mini-bar owns the chrome — suppress the heavy inline controls/overlays. */
+#video-container.in-mini .watch-overlay,
+#video-container.in-mini #player-controls-overlay,
+#video-container.in-mini .player-overlay,
+#video-container.in-mini .now-playing-overlay,
+#video-container.in-mini .live-fullscreen-cta { display: none !important; }
+.norva-mini-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 8px 20px;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.72), transparent);
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  z-index: 2;
+}
+.norva-mini:hover .norva-mini-bar,
+.norva-mini:focus-within .norva-mini-bar { opacity: 1; }
+.norva-mini-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+}
+.norva-mini-btn {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.5);
+  color: #fff;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.norva-mini-btn:hover { background: rgba(255, 255, 255, 0.22); }
+/* While watching a movie/episode fullscreen, never show the live mini. */
+body.is-watching .norva-mini { display: none !important; }
+@media (max-width: 768px) {
+  /* Lift above the mobile bottom nav; touch has no hover, so keep the bar visible. */
+  .norva-mini { right: 10px; bottom: 76px; width: 210px; max-width: 56vw; }
+  .norva-mini-bar { opacity: 1; }
+}
+
 .gsearch-overlay { align-items: flex-start; }
 .gsearch-panel {
   width: 100%;

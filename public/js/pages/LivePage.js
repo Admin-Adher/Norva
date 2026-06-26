@@ -100,6 +100,10 @@ class LivePage {
     async show() {
         document.addEventListener('keydown', this.handleKeydown);
 
+        // Returning to Live TV: pull the player back out of the floating mini
+        // (if it was docked there) before re-rendering, so the inline surface is whole.
+        this.app.exitLiveMini?.({ restore: true });
+
         // Only reload if channels aren't already loaded
         if (this.app.channelList.channels.length === 0) {
             await this.app.channelList.loadSources();
@@ -114,6 +118,11 @@ class LivePage {
 
     hide() {
         document.removeEventListener('keydown', this.handleKeydown);
+        // Leaving Live TV while a channel plays: dock the inline player into a
+        // floating mini-player (YouTube-style) so it keeps playing while the
+        // viewer browses, instead of a hidden ghost stream. No-op if nothing is
+        // playing, on the APK, or when the browser's own PiP is active.
+        this.app.enterLiveMini?.();
     }
 }
 

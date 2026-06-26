@@ -1189,6 +1189,89 @@ class App {
         }, 140);
     }
 
+    // ---- Live mini-player (web) -------------------------------------------
+    // Leaving Live TV while a channel plays docks the inline player into a small
+    // floating window (YouTube-style) so it keeps playing while you browse, then
+    // pops back into the page on return. Re-parenting the <video>'s container in
+    // the DOM doesn't interrupt playback. Web only: the APK plays live in a native
+    // fullscreen activity, and if the viewer chose the browser's PiP that owns the
+    // float instead.
+
+    isLiveMiniActive() {
+        return Boolean(document.getElementById('norva-mini')?.classList.contains('active'));
+    }
+
+    enterLiveMini() {
+        if (window.NorvaTVCloud || window.NodeCastNative) return;          // native shell
+        if (document.body.classList.contains('norva-phone-apk')) return;   // APK
+        if (document.pictureInPictureElement) return;                      // browser PiP owns it
+        if (this.isLiveMiniActive()) return;
+        const player = this.player;
+        const container = document.getElementById('video-container');
+        if (!player || !container) return;
+        // Only dock a LIVE channel that is actually playing.
+        const playing = (typeof player.hasCurrentMedia === 'function' && player.hasCurrentMedia())
+            && (typeof player.isLivePlayback !== 'function' || player.isLivePlayback())
+            && Boolean(this.channelList?.currentChannel);
+        if (!playing) return;
+
+        const mini = document.getElementById('norva-mini') || this.buildLiveMini();
+        mini.querySelector('.norva-mini-stage').appendChild(container); // playback continues
+        container.classList.add('in-mini');
+        mini.classList.add('active');
+        this.refreshLiveMiniMeta();
+    }
+
+    exitLiveMini(opts = {}) {
+        const mini = document.getElementById('norva-mini');
+        const stop = () => { if (opts.stop) { try { this.player?.stop?.(); } catch (_) { /* noop */ } } };
+        if (!mini || !mini.classList.contains('active')) { stop(); return; }
+        const container = document.getElementById('video-container');
+        const section = document.querySelector('#page-live .player-section');
+        if (container && section) {
+            // Put the player back as the FIRST child, before #live-guide-fusion.
+            section.insertBefore(container, section.firstChild);
+            container.classList.remove('in-mini');
+        }
+        mini.classList.remove('active');
+        stop();
+    }
+
+    refreshLiveMiniMeta() {
+        const title = document.getElementById('norva-mini')?.querySelector('.norva-mini-title');
+        if (title) title.textContent = this.channelList?.currentChannel?.name || 'Live TV';
+    }
+
+    buildLiveMini() {
+        const mini = document.createElement('div');
+        mini.id = 'norva-mini';
+        mini.className = 'norva-mini';
+        mini.innerHTML = `
+            <div class="norva-mini-stage"></div>
+            <button type="button" class="norva-mini-hit" title="Back to Live TV" aria-label="Back to Live TV"></button>
+            <div class="norva-mini-bar">
+                <span class="norva-mini-title">Live TV</span>
+                <button type="button" class="norva-mini-btn norva-mini-expand" title="Back to Live TV" aria-label="Back to Live TV">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg>
+                </button>
+                <button type="button" class="norva-mini-btn norva-mini-close" title="Close" aria-label="Close">&times;</button>
+            </div>`;
+        // Expand / tapping the video → return to Live TV (show() restores the
+        // surface). A transparent hit-layer captures the tap so the moved
+        // #video-container's own click/dblclick (toggle controls / fullscreen)
+        // never fires inside the mini.
+        const expand = () => this.navigateTo('live');
+        mini.querySelector('.norva-mini-hit').addEventListener('click', expand);
+        mini.querySelector('.norva-mini-expand').addEventListener('click', (e) => { e.stopPropagation(); expand(); });
+        // Close → stop the stream (frees the provider slot) and restore the surface.
+        mini.querySelector('.norva-mini-close').addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.exitLiveMini({ stop: true });
+        });
+        document.body.appendChild(mini);
+        return mini;
+    }
+
     navigateTo(pageName, replaceHistory = false) {
         const requestedPage = pageName;
         pageName = this.guardCatalogPage(pageName);
@@ -1247,6 +1330,14 @@ class App {
 
         if (this.pages[pageName]?.show) {
             this.pages[pageName].show();
+        }
+
+        // After the switch: the watch page is its own fullscreen player, so a movie
+        // /episode must never play under a still-floating live mini. Run this LAST —
+        // the page being left has already had hide() (which may have just docked the
+        // mini), so stopping here undocks + kills it before the movie starts.
+        if (pageName === 'watch') {
+            try { this.exitLiveMini({ stop: true }); } catch (_) { /* noop */ }
         }
     }
 
