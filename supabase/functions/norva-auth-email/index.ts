@@ -22,6 +22,9 @@ const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY") ?? "";
 const HOOK_SECRET_RAW = Deno.env.get("SEND_EMAIL_HOOK_SECRET") ?? "";
 const FROM = Deno.env.get("AUTH_EMAIL_FROM") ?? "Norva <noreply@norva.tv>";
 const SUPABASE_URL = (Deno.env.get("SUPABASE_URL") ?? "").replace(/\/+$/, "");
+// Public site base for action links — keeps the email link on norva.tv instead of the
+// raw supabase.co verify URL. Override with PUBLIC_SITE_URL if the domain changes.
+const SITE_URL = (Deno.env.get("PUBLIC_SITE_URL") ?? "https://norva.tv").replace(/\/+$/, "");
 
 // The hook secret comes as "v1,whsec_<base64>" — keep just the base64 payload.
 const HOOK_SECRET_B64 = HOOK_SECRET_RAW.replace(/^v1,whsec_/, "").replace(/^whsec_/, "");
@@ -78,13 +81,15 @@ interface EmailData {
   token_hash_new?: string;
 }
 
+// Point the action link at norva.tv carrying the one-time token_hash, NOT the raw
+// {SUPABASE_URL}/auth/v1/verify URL — account.html verifies it client-side (verifyOtp),
+// so the recipient only ever sees a norva.tv address (no "oupsceccx…supabase.co").
 function verifyUrl(d: EmailData): string {
   const params = new URLSearchParams({
-    token: d.token_hash,
+    token_hash: d.token_hash,
     type: d.email_action_type,
-    redirect_to: d.redirect_to ?? "",
   });
-  return `${SUPABASE_URL}/auth/v1/verify?${params.toString()}`;
+  return `${SITE_URL}/account.html?${params.toString()}`;
 }
 
 // Branded, email-client-safe HTML (tables + inline styles, dark theme).

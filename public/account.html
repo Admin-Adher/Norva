@@ -400,7 +400,7 @@
     </main>
 
     <script src="/js/cloudApi.js?v=23"></script>
-    <script src="/js/authApi.js?v=2"></script>
+    <script src="/js/authApi.js?v=3"></script>
     <script>
         const params = new URLSearchParams(location.search);
       const returnTo = sanitizeReturnTo(params.get('returnTo')) || '/app#home';
@@ -486,6 +486,29 @@
         });
 
         async function boot() {
+            // norva.tv-native verification: the email's action link carries a one-time
+            // token_hash; verify it here via a background POST to Supabase so the user
+            // only ever sees a norva.tv URL — never the raw supabase.co/auth/v1/verify link.
+            const tokenHash = params.get('token_hash');
+            if (tokenHash) {
+                const otpType = params.get('type') || 'recovery';
+                const verified = await NorvaAuth.verifyOtp(tokenHash, otpType).catch(() => null);
+                history.replaceState({}, document.title, location.pathname); // strip the token from the address bar
+                if (!verified) {
+                    showForm('signin');
+                    setStatus('error', 'This link is invalid or has expired. Request a new one below.');
+                    return;
+                }
+                if (otpType === 'recovery' || otpType === 'invite') {
+                    tabs.style.display = 'none';
+                    showForm('password');
+                    setStatus('info', 'Verified — choose a new password.');
+                    return;
+                }
+                location.replace(returnTo);
+                return;
+            }
+
             const recovered = NorvaAuth.captureSessionFromUrl();
             if (params.get('mode') === 'recovery') {
                 tabs.style.display = 'none';

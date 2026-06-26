@@ -199,6 +199,19 @@
         return session;
     }
 
+    // Verify a one-time email token (recovery / signup / magic link / email change /
+    // invite) from a norva.tv page, so the email's action link can point at norva.tv
+    // instead of the raw supabase.co/auth/v1/verify URL. POST returns the session.
+    async function verifyOtp(tokenHash, type) {
+        const payload = await request('/auth/v1/verify', {
+            method: 'POST',
+            body: { type: type || 'recovery', token_hash: tokenHash }
+        });
+        if (payload && payload.access_token) return setSession(payload);
+        if (payload && payload.session) return setSession(payload.session);
+        return null;
+    }
+
     window.NorvaAuth = {
         get supabaseUrl() { return supabaseUrl(); },
         get publishableKey() { return publishableKey(); },
@@ -214,6 +227,7 @@
         refreshSession,
         getAccessToken,
         getUser,
-        captureSessionFromUrl
+        captureSessionFromUrl,
+        verifyOtp
     };
 })();
