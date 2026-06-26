@@ -4677,13 +4677,54 @@ class WatchPage {
         }
     }
 
+    // Title of the episode currently playing — carries the per-episode version tag
+    // (e.g. "...VOSTFR"), which the series title itself usually doesn't.
+    currentEpisodeRawTitle() {
+        try {
+            if (!this.seriesInfo?.episodes || !this.currentSeason || !this.currentEpisode) return null;
+            const eps = this.seriesInfo.episodes[this.currentSeason] || [];
+            const ep = eps.find((e) => parseInt(e.episode_num) === parseInt(this.currentEpisode));
+            return ep ? (ep.title || ep.name || null) : null;
+        } catch (_) {
+            return null;
+        }
+    }
+
+    // Player-menu fallback when no real per-track language is known: infer the audio VERSION
+    // from the provider's episode/title name (e.g. a "VOSTFR"/"VO" tag => the ORIGINAL audio,
+    // a "VF" tag => French) so the menu reads something meaningful instead of "Default".
+    // CRITICAL: "original" is NOT a language — VOSTFR can be any source language. It resolves to
+    // the title's real TMDB original_language ("Japanese", "English", "Korean"…) when known, and
+    // otherwise to a plain "VO". We never assume a specific language from the VOSTFR tag.
+    playingAudioVersionLabel() {
+        try {
+            const name = this.currentEpisodeRawTitle() || this.content?.title || '';
+            const info = window.MediaUtils?.parseVersionInfo?.(name);
+            const audioSig = (info?.audioSignals || [])[0];
+            if (!audioSig) return null;
+            if (audioSig.language === 'original') {
+                const orig = this.normalizeTrackLanguage(
+                    this.content?.originalLanguage || this.content?.original_language,
+                );
+                if (orig && orig !== 'und') {
+                    const display = this.getLanguageDisplayName(orig);
+                    if (display) return display; // real original language, e.g. "Japanese" / "English"
+                }
+                return 'VO'; // original audio, language unknown — honest, never guessed
+            }
+            return this.getLanguageDisplayName(audioSig.language) || null; // a concrete dub tag (VF…)
+        } catch (_) {
+            return null;
+        }
+    }
+
     getCloudAudioLabel(a) {
-        if (!a) return this.contentAudioLanguageLabel() || 'Default';
+        if (!a) return this.contentAudioLanguageLabel() || this.playingAudioVersionLabel() || 'Default';
         const parts = [];
         // PRIMARY: the real per-track language from get_vod_info. When the provider
         // omits it (language:""), fall back to the title's detected language so a
         // real-language file still reads "French · AAC · 5.1" instead of codec-only.
-        const lang = this.getLanguageDisplayName(a.language) || this.contentAudioLanguageLabel();
+        const lang = this.getLanguageDisplayName(a.language) || this.contentAudioLanguageLabel() || this.playingAudioVersionLabel();
         if (lang) parts.push(lang);
         if (a.codec) parts.push(String(a.codec).toUpperCase());
         const ch = this.formatChannelLayout(a.channelLayout, a.channels);
@@ -4709,7 +4750,7 @@ class WatchPage {
         // Browser can't demux video.audioTracks for direct-MP4 play, so there's no
         // switchable track list. Show the title's detected language (matches the card
         // badge + the native mobile player) instead of a meaningless "Default".
-        const contentLabel = this.contentAudioLanguageLabel();
+        const contentLabel = this.contentAudioLanguageLabel() || this.playingAudioVersionLabel();
         return [{ source: 'none', index: -1, label: contentLabel || 'Default', active: true }];
     }
 
