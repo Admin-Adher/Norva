@@ -604,51 +604,80 @@ class LiveGuideFusion {
         }) || null;
     }
 
+    // Queue missing short-EPG and drain it ONE request at a time, deferred and
+    // spaced out. Firing ~10 in parallel on render() burst-tripped the provider's
+    // rate limit (429) AND stole its request budget from live playback — which
+    // opens its provider connection right after render() — so the stream itself
+    // got 429'd and ffmpeg died. Serialised + deferred, EPG yields to playback and
+    // just trickles in; a 429 cools the whole source down and drops its queue.
     ensureShortEpgForChannels(channels = []) {
         const now = Date.now();
         const candidates = channels
             .filter(Boolean)
             .filter(channel => !this.getProgramAt(channel, new Date(now)))
             .filter(channel => this.shortEpgKey(channel))
-            .slice(0, 10);
+            .slice(0, 8);
 
-        candidates.forEach(channel => {
+        this._shortEpgQueue = this._shortEpgQueue || [];
+        this._shortEpgQueuedKeys = this._shortEpgQueuedKeys || new Set();
+        for (const channel of candidates) {
             const key = this.shortEpgKey(channel);
-            const sourceKey = String(channel.sourceId || '');
-            const sourceCooldownUntil = this.shortEpgSourceCooldown.get(sourceKey) || 0;
-            if (sourceCooldownUntil > now) return;
-
+            if (this._shortEpgQueuedKeys.has(key) || this.shortEpgInflight.has(key)) continue;
             const loadedAt = this.shortEpgLoadedAt.get(key) || 0;
-            if (this.shortEpgInflight.has(key) || now - loadedAt < 10 * 60 * 1000) return;
+            if (now - loadedAt < 10 * 60 * 1000) continue; // still fresh
+            this._shortEpgQueuedKeys.add(key);
+            this._shortEpgQueue.push(channel);
+        }
+        this._drainShortEpg();
+    }
 
-            this.shortEpgInflight.add(key);
-            API.proxy.xtream.shortEpg(channel.sourceId, channel.streamId || channel.id, 8)
-                .then(data => {
+    async _drainShortEpg() {
+        if (this._shortEpgDraining) return;
+        this._shortEpgDraining = true;
+        try {
+            // Let live playback grab the provider connection first (resumeLivePlayback
+            // fires right after the render that queued us).
+            await new Promise(resolve => setTimeout(resolve, 1200));
+            while (this._shortEpgQueue && this._shortEpgQueue.length) {
+                const channel = this._shortEpgQueue.shift();
+                const key = this.shortEpgKey(channel);
+                this._shortEpgQueuedKeys.delete(key);
+                const sourceKey = String(channel.sourceId || '');
+                const now = Date.now();
+                if ((this.shortEpgSourceCooldown.get(sourceKey) || 0) > now) continue;
+                const loadedAt = this.shortEpgLoadedAt.get(key) || 0;
+                if (this.shortEpgInflight.has(key) || now - loadedAt < 10 * 60 * 1000) continue;
+
+                this.shortEpgInflight.add(key);
+                try {
+                    const data = await API.proxy.xtream.shortEpg(channel.sourceId, channel.streamId || channel.id, 8);
                     const listings = Array.isArray(data?.epg_listings) ? data.epg_listings : [];
-                    const programmes = listings
-                        .map(listing => this.normalizeShortEpgListing(listing))
-                        .filter(Boolean);
+                    const programmes = listings.map(l => this.normalizeShortEpgListing(l)).filter(Boolean);
                     this.shortEpgCache.set(key, programmes);
                     this.shortEpgLoadedAt.set(key, Date.now());
                     if (programmes.length) this.shortEpgSourceFailures.set(sourceKey, 0);
-                })
-                .catch(err => {
+                } catch (err) {
                     const failures = (this.shortEpgSourceFailures.get(sourceKey) || 0) + 1;
                     this.shortEpgSourceFailures.set(sourceKey, failures);
                     if (err?.status === 429 || failures >= 3) {
+                        // Rate-limited: cool the source down and drop its remaining
+                        // queue — hammering a 429'd provider only makes it worse.
                         this.shortEpgSourceCooldown.set(sourceKey, Date.now() + 10 * 60 * 1000);
+                        this._shortEpgQueue = this._shortEpgQueue.filter(c => String(c.sourceId || '') !== sourceKey);
                     }
-                    if (err?.status !== 429) {
-                        console.debug('[LiveGuide] Short EPG unavailable for', channel.name, err);
-                    }
+                    if (err?.status !== 429) console.debug('[LiveGuide] Short EPG unavailable for', channel.name, err);
                     this.shortEpgCache.set(key, []);
                     this.shortEpgLoadedAt.set(key, Date.now());
-                })
-                .finally(() => {
+                } finally {
                     this.shortEpgInflight.delete(key);
                     this.scheduleRender();
-                });
-        });
+                }
+                // Space requests out so we never burst the provider's rate limit.
+                await new Promise(resolve => setTimeout(resolve, 400));
+            }
+        } finally {
+            this._shortEpgDraining = false;
+        }
     }
 
     getProgramAt(channel, date) {
