@@ -1576,6 +1576,35 @@ class SeriesPage {
         });
     }
 
+    // Open a series' detail directly from a search result: best-effort fetch its
+    // sibling versions, group them like the grid, and open the matching group.
+    // Falls back to a single-item group; returns false on failure so the caller
+    // can fall back to its own path.
+    async openByItem(item) {
+        try {
+            if (!item || item.series_id == null) return false;
+            const title = item.tmdb?.name || item.tmdb?.title || item.name || '';
+            const items = [item];
+            try {
+                const page = await API.media.page({ type: 'series', q: title, limit: 60 });
+                const seen = new Set([`${item.sourceId}:${item.series_id}`]);
+                for (const s of (page.items || [])) {
+                    const k = `${s.sourceId}:${s.series_id}`;
+                    if (!seen.has(k)) { seen.add(k); items.push(s); }
+                }
+            } catch (_) { /* best-effort: keep just the tapped item */ }
+            const inGroup = (g) => g.items.some(i =>
+                String(i.series_id) === String(item.series_id) && String(i.sourceId) === String(item.sourceId));
+            const group = MediaUtils.groupItems(items, { idField: 'series_id' }).find(inGroup)
+                || { key: 'search', items: [item], representative: item };
+            const series = group.items.find(i => String(i.series_id) === String(item.series_id)) || group.representative || item;
+            await this.showSeriesDetailsV2(series, group);
+            return true;
+        } catch (_) {
+            return false;
+        }
+    }
+
     async showSeriesDetailsV2(series, group = null) {
         this.currentSeries = series;
         this.currentSeriesGroup = group || this.currentSeriesGroup || { representative: series, items: [series] };

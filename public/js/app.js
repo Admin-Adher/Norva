@@ -1119,19 +1119,21 @@ class App {
             window.API.media.page({ type: 'series', q, limit: 24 }).catch(() => empty),
         ]);
         if (reqId !== this._searchReq) return; // a newer keystroke superseded this
-        this.renderSearchResults(box, q, mv.items || [], sr.items || []);
+        this._gsMovies = mv.items || [];
+        this._gsSeries = sr.items || [];
+        this.renderSearchResults(box, q, this._gsMovies, this._gsSeries);
     }
 
     renderSearchResults(box, q, movies, series) {
         const M = window.MediaUtils;
-        const row = (item, type) => {
+        const row = (item, type, idx) => {
             const title = item.tmdb?.title || item.tmdb?.name || item.name || 'Untitled';
             const poster = M.safeImageUrl(
                 item.stream_icon || item.cover || M.tmdbPosterUrl(item.tmdb),
                 '/img/norva-media-placeholder.png');
             const year = String(item.tmdb?.release_date || item.tmdb?.first_air_date || '').slice(0, 4);
             return `
-                <button type="button" class="gsearch-result" data-type="${type}" data-title="${M.escapeHtml(title)}">
+                <button type="button" class="gsearch-result" data-type="${type}" data-idx="${idx}">
                     <img class="gsearch-poster" src="${M.escapeHtml(poster)}" alt="" loading="lazy"
                          onerror="this.onerror=null;this.src='/img/norva-media-placeholder.png'">
                     <span class="gsearch-text">
@@ -1141,32 +1143,40 @@ class App {
                 </button>`;
         };
         let html = '';
-        if (movies.length) html += '<div class="gsearch-section">Movies</div>' + movies.map((m) => row(m, 'movie')).join('');
-        if (series.length) html += '<div class="gsearch-section">Series</div>' + series.map((s) => row(s, 'series')).join('');
+        if (movies.length) html += '<div class="gsearch-section">Movies</div>' + movies.map((m, i) => row(m, 'movie', i)).join('');
+        if (series.length) html += '<div class="gsearch-section">Series</div>' + series.map((s, i) => row(s, 'series', i)).join('');
         if (!html) {
             box.innerHTML = `<div class="gsearch-hint">No results for “${M.escapeHtml(q)}”.</div>`;
             return;
         }
         box.innerHTML = html;
         box.querySelectorAll('.gsearch-result').forEach((el) => {
-            el.addEventListener('click', () => this.openSearchResult(el.dataset.type, el.dataset.title || q));
+            el.addEventListener('click', () => this.openSearchResult(el.dataset.type, parseInt(el.dataset.idx, 10)));
         });
     }
 
-    // Land the tapped result in its page, pre-searched to that exact title. The
-    // page's own cloudRequestId guard makes the prefill race-safe vs any load
-    // the navigation itself kicks off.
-    openSearchResult(type, title) {
+    // Open the tapped result's detail directly via the page's openByItem(). If
+    // that can't resolve a detail (page not ready, fetch failed), fall back to
+    // landing on the page pre-searched to the title — the page's cloudRequestId
+    // guard makes that prefill race-safe.
+    openSearchResult(type, idx) {
+        const item = (type === 'series' ? this._gsSeries : this._gsMovies)?.[idx];
         this.closeSearch();
         const page = type === 'series' ? 'series' : 'movies';
         this.navigateTo(page);
-        setTimeout(() => {
-            const input = document.getElementById(page === 'series' ? 'series-search' : 'movies-search');
-            if (input) {
-                input.value = title;
-                input.dispatchEvent(new Event('input', { bubbles: true }));
+        const pageObj = type === 'series' ? this.pages?.series : this.pages?.movies;
+        const title = item ? (item.tmdb?.title || item.tmdb?.name || item.name || '') : '';
+        setTimeout(async () => {
+            let opened = false;
+            try { if (item && pageObj?.openByItem) opened = await pageObj.openByItem(item); } catch (_) { opened = false; }
+            if (!opened) {
+                const input = document.getElementById(page === 'series' ? 'series-search' : 'movies-search');
+                if (input && title) {
+                    input.value = title;
+                    input.dispatchEvent(new Event('input', { bubbles: true }));
+                }
             }
-        }, 120);
+        }, 140);
     }
 
     navigateTo(pageName, replaceHistory = false) {

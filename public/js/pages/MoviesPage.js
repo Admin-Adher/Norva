@@ -1315,6 +1315,36 @@ class MoviesPage {
         });
     }
 
+    // Open a movie's detail directly from a search result: best-effort fetch its
+    // sibling versions, group them exactly like the grid, and open the matching
+    // group (so the version picker is complete). Falls back to a single-item group,
+    // and returns false on any failure so the caller can fall back to its own path.
+    async openByItem(item) {
+        try {
+            if (!item || item.stream_id == null) return false;
+            const title = item.tmdb?.title || item.name || '';
+            const tapped = { ...item, sourceId: item.sourceId, id: `${item.sourceId}:${item.stream_id}` };
+            const items = [tapped];
+            try {
+                const page = await API.media.page({ type: 'movie', q: title, limit: 60 });
+                const seen = new Set([`${tapped.sourceId}:${tapped.stream_id}`]);
+                for (const m of (page.items || [])) {
+                    const k = `${m.sourceId}:${m.stream_id}`;
+                    if (!seen.has(k)) { seen.add(k); items.push({ ...m, sourceId: m.sourceId, id: k }); }
+                }
+            } catch (_) { /* best-effort: keep just the tapped item */ }
+            const inGroup = (g) => g.items.some(i =>
+                String(i.stream_id) === String(item.stream_id) && String(i.sourceId) === String(item.sourceId));
+            const group = MediaUtils.groupItems(items, { idField: 'stream_id' }).find(inGroup)
+                || { key: 'search', items: [tapped], representative: tapped };
+            const selected = group.items.find(i => String(i.stream_id) === String(item.stream_id)) || null;
+            this.openGroup(group, { selectedMovie: selected });
+            return true;
+        } catch (_) {
+            return false;
+        }
+    }
+
     getMovieDisplayTitle(movie = this.currentMovie) {
         return movie?.tmdb?.title || movie?.title || movie?.name || 'Movie';
     }
