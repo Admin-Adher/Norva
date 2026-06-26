@@ -113,9 +113,8 @@ async function getXtreamSeriesInfo(url: URL, sourceId: string, userId: string, d
   // while the entry is fresh the provider (which rate-limits hard with user_multi_ip / 429)
   // is never touched, and a later provider failure is masked by serving the cached copy.
   const serverHost = providerHost(serverUrl);
-  const forceRefresh = url.searchParams.get("refresh") === "1";
   const cached = serverHost ? await readSeriesInfoCache(db, serverHost, seriesId) : null;
-  if (cached && !forceRefresh && Date.now() - cached.fetchedAt < SERIES_INFO_FRESH_MS) {
+  if (cached && Date.now() - cached.fetchedAt < SERIES_INFO_FRESH_MS) {
     return cached.payload;
   }
 
@@ -135,6 +134,12 @@ async function getXtreamSeriesInfo(url: URL, sourceId: string, userId: string, d
     }
     throw error;
   }
+
+  // Strip any credential-bearing field before it is returned OR cached. Xtream
+  // get_series_info can embed the full user/pass stream URL in `direct_source`; the client
+  // never reads it, and this cache is cross-user, so dropping it means one account's
+  // credentials can never leak to another via a shared cache entry (or even the response body).
+  payload = stripCredentials(payload) as JsonRecord;
 
   // Cache ONLY a real series-info (episodes or info present). The provider returns {} on a
   // soft block — caching that would poison the entry, so we skip it and keep any prior copy.
@@ -233,6 +238,23 @@ function isCacheableSeriesInfo(payload: JsonRecord): boolean {
   const info = payload.info;
   if (isRecord(info) && Object.keys(info).length > 0) return true;
   return false;
+}
+
+// Recursively drop every `direct_source` key (any depth). On many Xtream panels this field
+// carries the full credentialed stream URL (…/series/USER/PASS/123.mkv). The client builds
+// playback URLs from the episode id + each user's OWN source, so this field is dead weight —
+// and since the cache is cross-user, removing it is what keeps credentials from ever leaking.
+function stripCredentials(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stripCredentials);
+  if (isRecord(value)) {
+    const out: JsonRecord = {};
+    for (const [key, child] of Object.entries(value)) {
+      if (key.toLowerCase() === "direct_source") continue;
+      out[key] = stripCredentials(child);
+    }
+    return out;
+  }
+  return value;
 }
 
 async function requestGatewaySeriesInfo(

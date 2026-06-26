@@ -46,6 +46,7 @@ provider when a sync comes due — move it off-peak too if daytime re-syncs bite
 | `norva-enrich-search-match` | `norva-source-sync/cron/search-match` | `15,45 * * * *` (every 30 min) |
 | `norva-enrich-revalidate` | `norva-source-sync/cron/revalidate` | `5 */6 * * *` (every 6 h) |
 | `norva-enrich-backfill-years` | `norva-source-sync/cron/backfill-years` | `30 3 * * *` (daily 03:30) |
+| `norva-series-info-cache-prune` | pure SQL `delete from cloud_series_info_cache` | `15 2 * * *` (daily 02:15) |
 
 > The `audio-backfill` jobs carry an explicit `userId` (the primary account whose
 > catalogue stands in for the shared provider); enrichment writes land in the
@@ -111,6 +112,12 @@ select cron.schedule('norva-enrich-backfill-years', '30 3 * * *', $cron$
     url := 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-source-sync/cron/backfill-years?limit=200&conc=12',
     headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'norva_cron_shared_secret')),
     body := '{}'::jsonb, timeout_milliseconds := 120000);
+$cron$);
+
+-- Series-info cache eviction (pure SQL, no edge/provider call). Bounds the cross-user
+-- cloud_series_info_cache to "series opened in the last 30 days". See docs/SERIES-INFO-CACHE.md.
+select cron.schedule('norva-series-info-cache-prune', '15 2 * * *', $cron$
+  delete from public.cloud_series_info_cache where fetched_at < now() - interval '30 days'
 $cron$);
 ```
 

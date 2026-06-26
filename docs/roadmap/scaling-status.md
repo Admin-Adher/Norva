@@ -80,13 +80,16 @@ pas de recoupement multi-users, et c'est le changement le plus risqué du systè
   déjà couvert **démarre rempli** (le « 2-3 j » de découverte n'est payé qu'1× par
   fournisseur). Migrations `…030000`, `…040000`.
 - **Périmètre du crawl** : `requireTag` accepte une **liste** (OR via `overlaps`). 2 crons
-  pg_cron : **films** (`norva-audio-langs`, `0,30`, limit 15) sur `multi,vostfr,vo,vff,vfq`
+  pg_cron : **films** (`norva-audio-langs`, limit 15) sur `multi,vostfr,vo,vff,vfq`
   (rendement vostfr/vo ~80 % — l'audio original/JP des animés-films) + **séries**
-  (`norva-audio-langs-series`, `10,40`, limit 12) via `resolveSeriesEpisodeUrl` (get_series_info →
+  (`norva-audio-langs-series`, limit 12) via `resolveSeriesEpisodeUrl` (get_series_info →
   1er épisode du 1er season, ~70 % rendement — un id de série seul renvoie 406). → l'audio
   japonais des animés (films **et** séries) remonte dans le filtre au fil du crawl.
-  Cadences **throttlées** (étaient `*/5`, `2-59/5`) pour réduire egress/invocations ; source
-  de vérité des schedules : `supabase/functions/ENRICHMENT_CRON_SETUP.md`.
+  Cadences **regroupées en fenêtre nocturne** (03:00–04:58 UTC, étalées 2 min) car ces
+  sondages ouvrent une connexion fournisseur **single-connection** : tournant en journée ils
+  déclenchaient `user_multi_ip` (429) sur les `series-info` des utilisateurs. Source de vérité
+  des schedules : `supabase/functions/ENRICHMENT_CRON_SETUP.md` ; analyse complète +
+  cache series-info : **`docs/SERIES-INFO-CACHE.md`**.
 - ⚠️ **Rien ne lit `catalog_titles` en prod** (flag OFF) → **zéro impact**, additif, réversible.
 
 ### Cache de titres global — DURCISSEMENT keep-best + gate qualité (2026-06-26)
