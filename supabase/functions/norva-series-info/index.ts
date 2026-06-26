@@ -44,6 +44,12 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
 
 let runtimeConfigCache: { value: RuntimeConfig; expiresAt: number } | null = null;
 
+// How long a cached series-info payload is served WITHOUT touching the provider. The
+// provider's episode list changes infrequently (new episodes of ongoing series), so a day
+// of freshness collapses provider hits to ~1/series/day across ALL users while a stale
+// entry is still served on a refresh failure — so a fiche never breaks on a provider 429.
+const SERIES_INFO_FRESH_MS = 24 * 60 * 60 * 1000;
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: corsHeaders(req) });
@@ -102,12 +108,52 @@ async function getXtreamSeriesInfo(url: URL, sourceId: string, userId: string, d
     throw new HttpError(400, "Series details require a managed Xtream source");
   }
 
-  // Route through the media gateway so series-info reaches the provider from the
-  // SAME IP as video streaming. A direct fetch from this Supabase edge runtime
-  // egresses a different (and provider-blocked) datacenter IP for the same
-  // account, which trips the provider's user_multi_ip anti-sharing block (429).
-  // Fall back to a direct fetch only when the gateway is unconfigured or too old
-  // to know this route (404/405/503) — never worse than the previous behaviour.
+  // Cross-user cache keyed by (provider host, series_id). get_series_info is identical for
+  // every user on the same provider, so the FIRST successful load is served to everyone:
+  // while the entry is fresh the provider (which rate-limits hard with user_multi_ip / 429)
+  // is never touched, and a later provider failure is masked by serving the cached copy.
+  const serverHost = providerHost(serverUrl);
+  const forceRefresh = url.searchParams.get("refresh") === "1";
+  const cached = serverHost ? await readSeriesInfoCache(db, serverHost, seriesId) : null;
+  if (cached && !forceRefresh && Date.now() - cached.fetchedAt < SERIES_INFO_FRESH_MS) {
+    return cached.payload;
+  }
+
+  let payload: JsonRecord;
+  try {
+    payload = await fetchSeriesInfoFromProvider(db, { serverUrl, username, password, seriesId });
+  } catch (error) {
+    // Provider failed (most often user_multi_ip / 429). If we hold ANY cached copy — even a
+    // stale one — serve it rather than failing the fiche; only surface the error when the
+    // cache is empty (the unavoidable cold-miss case the client-side retry handles).
+    if (cached) {
+      console.warn(
+        "[norva-series-info] provider fetch failed, serving stale cache",
+        error instanceof Error ? error.message : error,
+      );
+      return cached.payload;
+    }
+    throw error;
+  }
+
+  // Cache ONLY a real series-info (episodes or info present). The provider returns {} on a
+  // soft block — caching that would poison the entry, so we skip it and keep any prior copy.
+  if (serverHost && isCacheableSeriesInfo(payload)) {
+    await writeSeriesInfoCache(db, serverHost, seriesId, payload);
+  }
+  return payload;
+}
+
+async function fetchSeriesInfoFromProvider(
+  db: SupabaseClient,
+  params: { serverUrl: string; username: string; password: string; seriesId: string },
+): Promise<JsonRecord> {
+  const { serverUrl, username, password, seriesId } = params;
+  // Route through the media gateway so series-info reaches the provider from the SAME IP as
+  // video streaming. A direct fetch from this Supabase edge runtime egresses a different (and
+  // provider-blocked) datacenter IP for the same account, which trips the provider's
+  // user_multi_ip anti-sharing block (429). Fall back to a direct fetch only when the gateway
+  // is unconfigured or too old to know this route (404/405/5xx) — never worse than before.
   const runtimeConfig = await getRuntimeConfig(db);
   if (runtimeConfig.mediaGatewayUrl && runtimeConfig.mediaGatewayToken) {
     try {
@@ -115,9 +161,9 @@ async function getXtreamSeriesInfo(url: URL, sourceId: string, userId: string, d
         await requestGatewaySeriesInfo(runtimeConfig, { serverUrl, username, password, seriesId }),
       );
     } catch (error) {
-      // Fall back only when the GATEWAY itself is the problem (missing route /
-      // unreachable / timeout). Provider-origin errors (401/403/429) won't improve
-      // via a direct Supabase fetch from a blocked IP — surface those instead.
+      // Fall back only when the GATEWAY itself is the problem (missing route / unreachable /
+      // timeout). Provider-origin errors (401/403/429) won't improve via a direct Supabase
+      // fetch from a blocked IP — surface those so the stale-cache fallback above can apply.
       const status = error instanceof HttpError ? error.status : 502;
       if (![404, 405, 502, 503, 504].includes(status)) throw error;
       console.warn("[norva-series-info] gateway series-info unavailable, falling back to direct", status);
@@ -128,6 +174,65 @@ async function getXtreamSeriesInfo(url: URL, sourceId: string, userId: string, d
     xtreamApiUrl({ serverUrl, username, password, action: "get_series_info" }, { series_id: seriesId }),
     20000,
   ));
+}
+
+async function readSeriesInfoCache(
+  db: SupabaseClient,
+  serverHost: string,
+  seriesId: string,
+): Promise<{ payload: JsonRecord; fetchedAt: number } | null> {
+  try {
+    const { data, error } = await db
+      .from("cloud_series_info_cache")
+      .select("payload, fetched_at")
+      .eq("server_host", serverHost)
+      .eq("series_id", seriesId)
+      .maybeSingle();
+    if (error || !data || !isRecord(data.payload)) return null;
+    const fetchedAt = Date.parse(String(data.fetched_at));
+    return { payload: data.payload as JsonRecord, fetchedAt: Number.isFinite(fetchedAt) ? fetchedAt : 0 };
+  } catch {
+    return null; // the cache is best-effort — never block a fiche on a cache read
+  }
+}
+
+async function writeSeriesInfoCache(
+  db: SupabaseClient,
+  serverHost: string,
+  seriesId: string,
+  payload: JsonRecord,
+): Promise<void> {
+  try {
+    const nowIso = new Date().toISOString();
+    const { error } = await db.from("cloud_series_info_cache").upsert(
+      { server_host: serverHost, series_id: seriesId, payload, fetched_at: nowIso, updated_at: nowIso },
+      { onConflict: "server_host,series_id" },
+    );
+    if (error) {
+      console.warn("[norva-series-info] failed to write series-info cache", error.message);
+    }
+  } catch (error) {
+    console.warn(
+      "[norva-series-info] failed to write series-info cache",
+      error instanceof Error ? error.message : error,
+    );
+  }
+}
+
+function providerHost(value: string): string {
+  try {
+    return new URL(value).host;
+  } catch {
+    return "";
+  }
+}
+
+function isCacheableSeriesInfo(payload: JsonRecord): boolean {
+  const episodes = payload.episodes;
+  if (isRecord(episodes) && Object.keys(episodes).length > 0) return true;
+  const info = payload.info;
+  if (isRecord(info) && Object.keys(info).length > 0) return true;
+  return false;
 }
 
 async function requestGatewaySeriesInfo(
