@@ -19,6 +19,22 @@
     (function () {
       var host = window.location.hostname;
       var isHosted = host && host !== 'localhost' && host !== '127.0.0.1';
+
+      // Production console hygiene: silence chatty console.log/info/debug so the
+      // prod console is clean; keep warn/error for real problems. Stays verbose on
+      // localhost, or re-enable in prod via localStorage['norva-debug']='1' (then
+      // reload) for support/debugging. Runs first, so it covers every app script.
+      try {
+        var verbose = !isHosted;
+        try { verbose = verbose || localStorage.getItem('norva-debug') === '1'; } catch (_) { }
+        if (!verbose) {
+          var noop = function () { };
+          console.log = noop;
+          console.info = noop;
+          console.debug = noop;
+        }
+      } catch (_) { }
+
       if (!isHosted) return;
 
       // Native apps (Android phone/TV APK WebView) are real mobile apps — they
