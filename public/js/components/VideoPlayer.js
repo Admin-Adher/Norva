@@ -365,9 +365,28 @@ class VideoPlayer {
         // A manual seek (scrubbing back/forward in the DVR window) changes the gap.
         this.video.addEventListener('seeked', () => { if (this._liveSyncTimer) this._updateLiveSyncBadge(); });
 
-        // Loading spinner
+        // Loading spinner + live stall diagnostics. `waiting` fires when playback
+        // halts to rebuffer — i.e. the stutter. Log the buffer state so the cause
+        // is visible (aheadS≈0 → starvation; a nearby HLS error → frag/network).
         this.video.addEventListener('waiting', () => {
             this.loadingSpinner?.classList.add('show');
+            if (this.isLivePlayback()) {
+                this._liveStallAt = Date.now();
+                this._liveStallN = (this._liveStallN || 0) + 1;
+                this._logLive('STALL ▼', { stall: this._liveStallN });
+            }
+        });
+
+        this.video.addEventListener('playing', () => {
+            if (this._liveStallAt && this.isLivePlayback()) {
+                const ms = Date.now() - this._liveStallAt;
+                this._liveStallAt = 0;
+                this._logLive('RESUME ▲', { stalledMs: ms });
+            }
+        });
+
+        this.video.addEventListener('stalled', () => {
+            if (this.isLivePlayback()) this._logLive('STALLED (network idle)');
         });
 
         this.video.addEventListener('canplay', () => {
@@ -1843,6 +1862,7 @@ class VideoPlayer {
         this._showLiveBadge(true);
         this._updateLiveSyncBadge();
         if (this._liveSyncTimer) return;
+        this._logLive('live-start'); // a reference marker for the stutter timeline
         this._liveSyncTimer = setInterval(() => this._updateLiveSyncBadge(), 1000);
     }
 
@@ -1901,6 +1921,63 @@ class VideoPlayer {
         return gap < 86400 ? gap : 0;
     }
 
+    // ---- Live stall diagnostics (filter the console by "[norva-live]") -----
+    // Seconds of media buffered AHEAD of the playhead — the number that predicts a
+    // stutter: as it drains toward 0 the player is about to starve and rebuffer.
+    _liveBufferAhead() {
+        const v = this.video;
+        if (!v || !v.buffered || !v.buffered.length) return 0;
+        const t = v.currentTime;
+        for (let i = 0; i < v.buffered.length; i++) {
+            if (t >= v.buffered.start(i) - 0.25 && t <= v.buffered.end(i) + 0.01) {
+                return Math.max(0, v.buffered.end(i) - t);
+            }
+        }
+        return 0;
+    }
+
+    // One compact, copy-pasteable line of live-playback state.
+    _logLive(tag, extra = {}) {
+        try {
+            const v = this.video;
+            const ranges = [];
+            if (v && v.buffered) {
+                for (let i = 0; i < v.buffered.length; i++) {
+                    ranges.push(`${v.buffered.start(i).toFixed(1)}-${v.buffered.end(i).toFixed(1)}`);
+                }
+            }
+            const bw = (this.hls && this.hls.bandwidthEstimate) ? Math.round(this.hls.bandwidthEstimate / 1000) : null;
+            console.warn(`[norva-live] ${tag}`, JSON.stringify(Object.assign({
+                ch: this.currentChannel?.name || '',
+                t: v ? +v.currentTime.toFixed(2) : 0,
+                aheadS: +this._liveBufferAhead().toFixed(2),   // forward buffer — drains to ~0 on starvation
+                behindS: +(this.liveBehindSeconds ? this.liveBehindSeconds() : 0).toFixed(1),
+                ready: v?.readyState,                          // 4 = enough data, <3 = starved
+                net: v?.networkState,
+                rate: v?.playbackRate,
+                bwKbps: bw,
+                buffered: ranges.join(' ') || 'none'
+            }, extra)));
+        } catch (_) { /* logging must never break playback */ }
+    }
+
+    // Hook the active HLS instance once so its stall/fragment errors land in the
+    // same "[norva-live]" stream. Called from the 1s tick → covers every load path.
+    _instrumentHls(hls) {
+        if (!hls || hls._norvaDiag || typeof Hls === 'undefined') return;
+        hls._norvaDiag = true;
+        try {
+            hls.on(Hls.Events.ERROR, (_evt, data) => {
+                const d = (data && data.details) || '';
+                if (data?.fatal || /stall|nudge|hole|bufferSeek|fragLoad|fragParsing|fragGap|levelLoad|levelEmpty|bufferAppend/i.test(d)) {
+                    this._logLive(`HLS ${data?.fatal ? 'FATAL ' : ''}${data?.type || ''}/${d}`, {
+                        reason: (data && (data.reason || (data.err && data.err.message))) || ''
+                    });
+                }
+            });
+        } catch (_) { /* noop */ }
+    }
+
     _updateLiveSyncBadge() {
         if (!this.isLivePlayback() || !this._liveBadge) { this.stopLiveSyncMonitor(); return; }
         if (typeof document !== 'undefined' && document.hidden) return; // don't churn while backgrounded
@@ -1908,6 +1985,12 @@ class VideoPlayer {
         if (!(this.video?.currentTime > 0)) return;
         const behind = this.liveBehindSeconds();
         this._liveBehindSeconds = behind;
+
+        // Diagnostics: hook the live HLS instance, and while the forward buffer is
+        // in the danger zone log a compact line each tick — a stutter then reads as
+        // a drain → STALL ▼ → RESUME ▲ sequence in the console.
+        this._instrumentHls(this.hls);
+        if (this._liveBufferAhead() < 6 && !this.video.paused) this._logLive('buffer-low');
         const isBehind = behind >= LIVE_BEHIND_THRESHOLD_S;
         this._liveBadge.classList.toggle('behind', isBehind);
         this._liveBadge.classList.toggle('is-live', !isBehind);
