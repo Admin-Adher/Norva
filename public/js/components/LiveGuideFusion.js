@@ -10,6 +10,8 @@ class LiveGuideFusion {
         this._lastChannelsKey = '';
         this._renderScheduled = false;    // coalesce bursty re-renders (EPG arrivals)
         this._pendingFamilySelection = null;
+        this.searchQuery = '';            // inline channel filter (phone/tablet APK)
+        this._searchTimer = null;
         this.shortEpgCache = new Map();
         this.shortEpgLoadedAt = new Map();
         this.shortEpgInflight = new Set();
@@ -30,6 +32,10 @@ class LiveGuideFusion {
                 this.refreshBrokenChannelsInActiveGroup();
                 return;
             }
+
+            // Inline toolbar (phone/tablet APK): Hide-broken toggle + search clear.
+            if (event.target.closest('.live-guide-hidebroken')) { this.toggleHideBroken(); return; }
+            if (event.target.closest('.live-guide-search-clear')) { this.clearSearch(); return; }
 
             // Preview-bar actions (operate on the currently selected channel).
             const action = event.target.closest('[data-action]')?.dataset.action;
@@ -55,6 +61,25 @@ class LiveGuideFusion {
             if (event.target.closest('.live-guide-play, .live-guide-group, [data-action]')) return;
             const row = event.target.closest('.live-guide-row');
             if (row) { event.preventDefault(); this.previewFamilyRow(row); }
+        });
+
+        // Inline channel filter (phone/tablet APK): filter rows as you type without
+        // a full guide re-render — keeps input focus and beats the 150-row cap by
+        // re-rendering only the rows from the full filtered set.
+        this.container.addEventListener('input', (event) => {
+            if (!event.target.classList.contains('live-guide-search')) return;
+            this.searchQuery = event.target.value || '';
+            clearTimeout(this._searchTimer);
+            this._searchTimer = setTimeout(() => this.refreshRows(), 100);
+        });
+
+        // Source proxy (only shown with >1 source): forward to the real,
+        // now-hidden #source-select so existing load/filter logic stays the source
+        // of truth.
+        this.container.addEventListener('change', (event) => {
+            if (!event.target.classList.contains('live-guide-source')) return;
+            const sel = document.getElementById('source-select');
+            if (sel) { sel.value = event.target.value; sel.dispatchEvent(new Event('change')); }
         });
 
         window.addEventListener('channelChanged', (event) => {
@@ -690,6 +715,80 @@ class LiveGuideFusion {
         return Math.max(0, Math.min(100, ((now - start) / (stop - start)) * 100));
     }
 
+    isPhoneApk() {
+        return document.body.classList.contains('norva-phone-apk');
+    }
+
+    /** Filter a channel list by the inline search query (family label / name). */
+    filterBySearch(channels) {
+        const q = (this.searchQuery || '').trim().toLowerCase();
+        if (!q) return channels;
+        const list = this.app.channelList;
+        return channels.filter(channel => {
+            const label = list.getChannelFamilyLabel(channel) || channel.name || '';
+            return label.toLowerCase().includes(q);
+        });
+    }
+
+    /** Rows source: a search spans ALL channels; otherwise the active group. */
+    getRowsChannels() {
+        const channels = this.getPlayableChannels();
+        if ((this.searchQuery || '').trim()) return this.filterBySearch(channels);
+        return this.filterGroup(channels);
+    }
+
+    /** Inline header (phone/tablet APK only): search + source + Hide-broken. */
+    renderToolbar() {
+        const hideBroken = Boolean(this.app.channelList.hideBroken);
+        const q = this.escapeHtml(this.searchQuery || '');
+        return `
+            <div class="live-guide-toolbar">
+                <span class="live-guide-search-wrap">
+                    <input type="text" class="live-guide-search" placeholder="Search channels…"
+                           value="${q}" autocomplete="off" autocapitalize="none" spellcheck="false"
+                           aria-label="Search channels">
+                    ${q ? '<button type="button" class="live-guide-search-clear" title="Clear" aria-label="Clear search">&times;</button>' : ''}
+                </span>
+                ${this.renderSourcePicker()}
+                <button type="button" class="live-guide-hidebroken ${hideBroken ? 'is-active' : ''}"
+                        aria-pressed="${hideBroken ? 'true' : 'false'}">Hide broken</button>
+            </div>
+        `;
+    }
+
+    /** Source dropdown — shown only with >1 source; mirrors the hidden #source-select. */
+    renderSourcePicker() {
+        const sel = document.getElementById('source-select');
+        if (!sel) return '';
+        const realOpts = Array.from(sel.querySelectorAll('option')).filter(o => o.value);
+        if (realOpts.length <= 1) return '';
+        return `<select class="live-guide-source" aria-label="Source">${sel.innerHTML}</select>`;
+    }
+
+    /** Re-render only the rows (search keystroke) — leaves the toolbar focused. */
+    refreshRows() {
+        if (!this.container) return;
+        const rowsEl = this.container.querySelector('.live-guide-rows');
+        if (!rowsEl) return;
+        rowsEl.outerHTML = this.renderRows(this.getRowsChannels());
+        this.updateHighlights();
+    }
+
+    /** Toolbar Hide-broken toggle — mirrors the drawer button + re-renders the guide. */
+    toggleHideBroken() {
+        const list = this.app.channelList;
+        list.hideBroken = !list.hideBroken;
+        list.hideBrokenBtn?.classList.toggle('active', list.hideBroken);
+        this.render();
+    }
+
+    clearSearch() {
+        this.searchQuery = '';
+        clearTimeout(this._searchTimer);
+        this.render();
+        this.container?.querySelector('.live-guide-search')?.focus();
+    }
+
     renderPreview(channel) {
         if (!channel) {
             return `
@@ -762,7 +861,10 @@ class LiveGuideFusion {
     renderRows(channels) {
         const families = this.buildFamilyRows(channels);
         if (!families.length) {
-            return '<div class="live-guide-empty">No channels in this group</div>';
+            const msg = (this.searchQuery || '').trim()
+                ? 'No channels match your search'
+                : 'No channels in this group';
+            return `<div class="live-guide-rows"><div class="live-guide-empty">${msg}</div></div>`;
         }
         return `
             <div class="live-guide-rows">
@@ -815,7 +917,13 @@ class LiveGuideFusion {
         const groups = this.getGroups(channels);
         this.ensureActiveGroup(groups);
         const groupChannels = this.filterGroup(channels);
-        const selectedChannel = this.currentChannel || this.app.channelList.currentChannel || groupChannels[0] || channels[0] || null;
+        // Preload the last-watched channel into the preview when nothing is
+        // selected yet — the phone/tablet APK no longer auto-plays on open, so this
+        // makes resuming the last channel a single tap on "Watch".
+        const selectedChannel = this.currentChannel
+            || this.app.channelList.currentChannel
+            || this.app.channelList.findLastLiveChannel?.()
+            || groupChannels[0] || channels[0] || null;
         this.currentChannel = selectedChannel;
         this._lastChannelsKey = `${channels.length}:${this.activeGroup}:${selectedChannel?.id || ''}`;
         const shortEpgCandidates = selectedChannel
@@ -826,19 +934,37 @@ class LiveGuideFusion {
         // Preserve the channel list's scroll position across re-renders (EPG
         // arrivals re-render the guide; without this the list jumps to the top).
         const prevScroll = this.container.querySelector('.live-guide-rows')?.scrollTop || 0;
+        // Preserve search focus + caret if a background re-render lands mid-typing.
+        const searchEl = this.container.querySelector('.live-guide-search');
+        const searchHadFocus = !!searchEl && document.activeElement === searchEl;
+        const searchCaret = searchEl ? searchEl.selectionStart : null;
 
         this.container.innerHTML = `
+            ${this.isPhoneApk() ? this.renderToolbar() : ''}
             <div class="live-guide-shell ${this.shouldShowGroupRail() ? '' : 'groups-hidden'}">
                 ${this.renderGroups(groups)}
                 <div class="live-guide-main">
                     ${this.renderPreview(selectedChannel)}
-                    ${this.renderRows(groupChannels)}
+                    ${this.renderRows(this.getRowsChannels())}
                 </div>
             </div>
         `;
 
         const rows = this.container.querySelector('.live-guide-rows');
         if (rows && prevScroll) rows.scrollTop = prevScroll;
+        // Keep the source proxy in sync with the real (hidden) #source-select.
+        const srcProxy = this.container.querySelector('.live-guide-source');
+        const realSel = document.getElementById('source-select');
+        if (srcProxy && realSel) srcProxy.value = realSel.value;
+        if (searchHadFocus) {
+            const el = this.container.querySelector('.live-guide-search');
+            if (el) {
+                el.focus();
+                if (searchCaret != null) {
+                    try { el.setSelectionRange(searchCaret, searchCaret); } catch (_) { /* noop */ }
+                }
+            }
+        }
         this.updateHighlights();
         this.syncNavigationState();
         this.app.channelList.updateScanScopeHint?.();

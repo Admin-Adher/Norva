@@ -9955,14 +9955,96 @@ mark.search-highlight {
 /* TV uses its own D-pad UI; a keyboard-driven search overlay there would be janky. */
 html.tv .nav-search-btn { display: none; }
 
-/* Phone APK: the inline Live preview never plays (playback is native fullscreen),
-   so drop only the video box — the channel guide stays and grows into the freed
-   height. NB: #live-guide-fusion is a sibling nested inside .player-section, so we
-   must hide #video-container specifically, never the whole section. */
+/* Phone/tablet APK: the inline Live preview never plays (playback is native
+   fullscreen), so drop only the video box — the channel guide stays and grows
+   into the freed height. NB: #live-guide-fusion is a sibling nested inside
+   .player-section, so we must hide #video-container specifically, never the
+   whole section. */
 .norva-phone-apk #video-container { display: none; }
 .norva-phone-apk .live-guide-fusion {
   flex: 1 1 auto;
   max-height: none;
+  overflow: visible; /* page-scroll model: .player-section owns the scroll */
+}
+
+/* Phone/tablet APK: the Channels drawer/sidebar is redundant with the inline
+   guide — search + Hide-broken now live in the guide header (.live-guide-toolbar
+   below). Remove the whole drawer apparatus at ANY width (a wide tablet uses the
+   desktop layout where the sidebar is an inline column) and let .player-section,
+   which is flex:1, reclaim the full width. */
+.norva-phone-apk .channel-toggle-btn,
+.norva-phone-apk .channel-sidebar,
+.norva-phone-apk .channel-sidebar-overlay,
+.norva-phone-apk .sidebar-expand-btn { display: none !important; }
+
+/* Inline guide toolbar (rendered only on the phone/tablet APK). Sticky so the
+   search stays reachable while the guide scrolls inside .player-section. */
+.live-guide-toolbar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex: 0 0 auto;
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--color-bg-primary, #0a0e16);
+}
+.live-guide-search-wrap { position: relative; flex: 1 1 auto; min-width: 0; }
+.live-guide-search {
+  width: 100%;
+  height: 38px;
+  padding: 0 34px 0 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--color-text-primary, #fff);
+  font-size: 14px;
+}
+.live-guide-search::placeholder { color: rgba(255, 255, 255, 0.45); }
+.live-guide-search-clear {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 26px;
+  height: 26px;
+  border: 0;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+.live-guide-search-clear:hover { color: rgba(255, 255, 255, 0.85); }
+.live-guide-hidebroken {
+  flex: 0 0 auto;
+  height: 38px;
+  padding: 0 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 13px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.live-guide-hidebroken.is-active {
+  background: var(--color-accent, #6c5ce7);
+  border-color: transparent;
+  color: #fff;
+}
+.live-guide-source {
+  flex: 0 0 auto;
+  height: 38px;
+  max-width: 140px;
+  padding: 0 8px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 13px;
 }
 
 .gsearch-overlay { align-items: flex-start; }

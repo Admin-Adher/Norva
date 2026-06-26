@@ -13,7 +13,10 @@ class LivePage {
         await this.app.channelList.loadSources();
         await this.app.channelList.loadChannels();
         this.app.liveGuideFusion?.render();
-        if (document.getElementById('page-live')?.classList.contains('active')) {
+        // Phone/tablet APK: don't auto-launch the native fullscreen player on open —
+        // land on the guide and let the viewer choose (Android TV + web still resume).
+        if (document.getElementById('page-live')?.classList.contains('active')
+            && !document.body.classList.contains('norva-phone-apk')) {
             this.app.channelList.resumeLivePlayback();
         }
 
@@ -103,7 +106,10 @@ class LivePage {
             await this.app.channelList.loadChannels();
         }
         this.app.liveGuideFusion?.render();
-        this.app.channelList.resumeLivePlayback();
+        // Phone/tablet APK: no auto-launch on open (see init()).
+        if (!document.body.classList.contains('norva-phone-apk')) {
+            this.app.channelList.resumeLivePlayback();
+        }
     }
 
     hide() {
