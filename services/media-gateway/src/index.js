@@ -628,6 +628,11 @@ function startFfmpeg(session) {
         '-reconnect', '1',
         '-reconnect_streamed', '1',
         '-reconnect_at_eof', '1',
+        // Retry instead of dying when the provider returns an HTTP 5xx (server
+        // error). Unstable IPTV providers blip 502/503 transiently — without this
+        // ffmpeg exits code 1 on the first 5xx ("Server returned 5XX Server Error")
+        // and the whole session fails; with it, it reconnects through the blip.
+        '-reconnect_on_http_error', '5xx',
         '-reconnect_delay_max', '5',
         '-rw_timeout', '15000000',
         '-user_agent', session.userAgent || FFMPEG_USER_AGENT,
