@@ -9956,8 +9956,14 @@ mark.search-highlight {
 html.tv .nav-search-btn { display: none; }
 
 /* Phone APK: the inline Live preview never plays (playback is native fullscreen),
-   so drop it — the channel guide takes the freed height. */
-.norva-phone-apk .player-section { display: none; }
+   so drop only the video box — the channel guide stays and grows into the freed
+   height. NB: #live-guide-fusion is a sibling nested inside .player-section, so we
+   must hide #video-container specifically, never the whole section. */
+.norva-phone-apk #video-container { display: none; }
+.norva-phone-apk .live-guide-fusion {
+  flex: 1 1 auto;
+  max-height: none;
+}
 
 .gsearch-overlay { align-items: flex-start; }
 .gsearch-panel {
