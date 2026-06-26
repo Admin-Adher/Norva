@@ -153,7 +153,7 @@ class LiveGuideFusion {
         this.playSelection(members);
     }
 
-    /** The preview bar's "Regarder" button: play the currently selected family. */
+    /** The preview bar's "Watch" button: play the currently selected family. */
     playCurrent() {
         const channel = this.currentChannel;
         if (!channel) return;
@@ -246,9 +246,9 @@ class LiveGuideFusion {
         const hasFavorites = channels.some(channel => this.app.channelList.isFavorite(channel.sourceId, channel.id));
 
         if (hasFavorites) {
-            groups.push({ id: 'Favorites', name: 'Favoris' });
+            groups.push({ id: 'Favorites', name: 'Favorites' });
         }
-        groups.push({ id: '', name: 'Toutes les chaînes' });
+        groups.push({ id: '', name: 'All channels' });
 
         for (const channel of channels) {
             const group = channel.groupTitle || 'Uncategorized';
@@ -403,7 +403,7 @@ class LiveGuideFusion {
         };
         const isPending = this.isPendingFamily(family);
         const badge = isPending
-            ? { label: 'SCAN', className: 'pending', title: 'Verification des variantes' }
+            ? { label: 'SCAN', className: 'pending', title: 'Checking variants' }
             : this.getFamilyBadge(family);
 
         this.container.querySelectorAll('.live-guide-row').forEach(row => {
@@ -463,7 +463,7 @@ class LiveGuideFusion {
         return {
             label: `${total - problematicCount}/${total}`,
             className: 'pending',
-            title: 'Variantes partiellement testees'
+            title: 'Variants partially tested'
         };
     }
 
@@ -506,8 +506,8 @@ class LiveGuideFusion {
         if (!problematic.length) return;
 
         const scopeLabel = this.activeGroup === 'Favorites'
-            ? 'Favoris'
-            : (this.activeGroup || 'Toutes les chaînes');
+            ? 'Favorites'
+            : (this.activeGroup || 'All channels');
 
         this.app.channelList.refreshPlaybackForChannels(problematic, {
             label: scopeLabel,
@@ -695,15 +695,15 @@ class LiveGuideFusion {
             return `
             <div class="live-guide-preview is-empty">
                 <div class="live-guide-preview-copy">
-                    <div class="live-guide-preview-title">Aucune chaine selectionnee</div>
-                    <div class="live-guide-preview-channel">Touchez une chaine pour l apercu</div>
+                    <div class="live-guide-preview-title">No channel selected</div>
+                    <div class="live-guide-preview-channel">Tap a channel to preview</div>
                 </div>
             </div>`;
         }
 
         const program = this.getProgramAt(channel, new Date());
         const progress = this.getProgress(program);
-        const title = program?.title || 'Pas d information';
+        const title = program?.title || 'No info';
         const start = program?.start ? this.formatTime(program.start) : '--:--';
         const stop = program?.stop ? this.formatTime(program.stop) : '--:--';
         const logo = this.getChannelLogoSrc(channel);
@@ -724,7 +724,7 @@ class LiveGuideFusion {
                 </div>
                 <div class="live-guide-preview-copy">
                     <div class="live-guide-preview-channel">
-                        ${this.escapeHtml(channel.name || 'Aucune chaine')}
+                        ${this.escapeHtml(channel.name || 'No channel')}
                         ${group ? `<span>${this.escapeHtml(group)}</span>` : ''}
                     </div>
                     <div class="live-guide-preview-title">${this.escapeHtml(title)}</div>
@@ -738,10 +738,10 @@ class LiveGuideFusion {
                 </div>
                 <div class="live-guide-preview-actions">
                     <button type="button" class="lg-btn lg-btn-primary ${isPlaying ? 'is-playing' : ''}" data-action="watch">
-                        ${isPlaying ? 'En lecture' : 'Regarder'}
+                        ${isPlaying ? 'Playing' : 'Watch'}
                     </button>
-                    <button type="button" class="lg-btn" data-action="fullscreen" title="Plein ecran" aria-label="Plein ecran">Plein ecran</button>
-                    <button type="button" class="lg-btn lg-btn-icon ${isFav ? 'is-fav' : ''}" data-action="favorite" title="Favori" aria-label="Favori">${isFav ? '♥' : '♡'}</button>
+                    ${document.body.classList.contains('norva-phone-apk') ? '' : `<button type="button" class="lg-btn" data-action="fullscreen" title="Fullscreen" aria-label="Fullscreen">Fullscreen</button>`}
+                    <button type="button" class="lg-btn lg-btn-icon ${isFav ? 'is-fav' : ''}" data-action="favorite" title="Favorite" aria-label="Favorite">${isFav ? '♥' : '♡'}</button>
                 </div>
             </div>
         `;
@@ -762,7 +762,7 @@ class LiveGuideFusion {
     renderRows(channels) {
         const families = this.buildFamilyRows(channels);
         if (!families.length) {
-            return '<div class="live-guide-empty">Aucune chaine visible dans ce groupe</div>';
+            return '<div class="live-guide-empty">No channels in this group</div>';
         }
         return `
             <div class="live-guide-rows">
@@ -777,9 +777,9 @@ class LiveGuideFusion {
         const isPlaying = this.isFamilyActive(family) || isPending;
         const isSelected = this.isFamilySelected(family);
         const badge = isPending
-            ? { label: 'SCAN', className: 'pending', title: 'Verification des variantes' }
+            ? { label: 'SCAN', className: 'pending', title: 'Checking variants' }
             : family.badge;
-        const variantLabel = family.members.length > 1 ? `${family.members.length} variantes` : '';
+        const variantLabel = family.members.length > 1 ? `${family.members.length} variants` : '';
         const now = this.getProgramAt(channel, new Date());
         const next = this.getUpcoming(channel, 1)[0] || null;
         const progress = this.getProgress(now);
@@ -794,15 +794,15 @@ class LiveGuideFusion {
                         <span class="live-guide-channel-name">${this.escapeHtml(family.label)}</span>
                         ${variantLabel ? `<span class="live-guide-variant-count">${this.escapeHtml(variantLabel)}</span>` : ''}
                         ${badge ? `<span class="live-guide-mode ${badge.className}" title="${this.escapeHtml(badge.title)}">${badge.label}</span>` : ''}
-                        ${isPlaying ? '<span class="live-guide-live-tag">EN DIRECT</span>' : ''}
+                        ${isPlaying ? '<span class="live-guide-live-tag">LIVE</span>' : ''}
                     </span>
                     <span class="live-guide-now">
-                        <span class="live-guide-now-title">${this.escapeHtml(now?.title || 'Pas d information')}</span>
+                        <span class="live-guide-now-title">${this.escapeHtml(now?.title || 'No info')}</span>
                         ${now ? `<span class="live-guide-progress"><span style="width:${progress}%"></span></span>` : ''}
                     </span>
                     ${next ? `<span class="live-guide-next"><span class="live-guide-next-time">${this.escapeHtml(this.formatTime(next.start))}</span> ${this.escapeHtml(next.title || 'Programme')}</span>` : ''}
                 </span>
-                <button type="button" class="live-guide-play" title="Regarder" aria-label="Regarder">
+                <button type="button" class="live-guide-play" title="Watch" aria-label="Watch">
                     <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
                 </button>
             </div>

@@ -9955,6 +9955,10 @@ mark.search-highlight {
 /* TV uses its own D-pad UI; a keyboard-driven search overlay there would be janky. */
 html.tv .nav-search-btn { display: none; }
 
+/* Phone APK: the inline Live preview never plays (playback is native fullscreen),
+   so drop it — the channel guide takes the freed height. */
+.norva-phone-apk .player-section { display: none; }
+
 .gsearch-overlay { align-items: flex-start; }
 .gsearch-panel {
   width: 100%;

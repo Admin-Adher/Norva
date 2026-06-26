@@ -791,7 +791,7 @@ class ChannelList {
     getDisplayProgramInfo(channel) {
         const program = this.getProgramInfo(channel);
         const bits = [];
-        if (channel?._variantCount > 1) bits.push(`${channel._variantCount} variantes`);
+        if (channel?._variantCount > 1) bits.push(`${channel._variantCount} variants`);
         if (channel?.currentVariant?.label) bits.push(channel.currentVariant.label);
         if (program) bits.push(program);
         return bits.join(' - ');
@@ -2445,7 +2445,7 @@ class ChannelList {
         const payload = {
             sourceId: sourceId || null,
             scopeLabel: isFavorites
-                ? 'Favoris'
+                ? 'Favorites'
                 : isCategory
                     ? activeGroup
                     : 'All channels'
@@ -2490,7 +2490,7 @@ class ChannelList {
 
         this._lastPlaybackRefreshAt.set(scopeKey, Date.now());
 
-        const label = options.label || `${unique.length} chaine${unique.length > 1 ? 's' : ''}`;
+        const label = options.label || `${unique.length} channel${unique.length > 1 ? 's' : ''}`;
         return this.runPlaybackScan({
             label,
             count: unique.length,

@@ -4,6 +4,12 @@
 
 class App {
     constructor() {
+        // The phone APK plays everything in the native fullscreen player, so the
+        // Live page's inline preview is dead space and its "Fullscreen" button just
+        // duplicates "Watch". Flag it so CSS + LiveGuideFusion can drop both.
+        if (document.body && /NorvaTV-AndroidPhone/i.test(navigator.userAgent || '')) {
+            document.body.classList.add('norva-phone-apk');
+        }
         this.currentPage = 'home';
         this.pages = {};
         this.currentUser = null;
