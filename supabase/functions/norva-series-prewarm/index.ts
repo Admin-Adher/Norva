@@ -1,5 +1,4 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
-import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 
 // norva-series-prewarm - service-gated batch crawler that fills cloud_series_info_cache by
 // fetching get_series_info ONCE per series from the media gateway (a SINGLE STABLE IP - the
@@ -37,6 +36,12 @@ Deno.serve(async (req) => {
     const limit = Math.min(Math.max(Number(body.limit) || 25, 1), 200);
     const ids = Array.isArray(body.ids) ? body.ids.map((v) => String(v)) : null;
     if (!sourceId || !userId) return json({ error: "sourceId and userId required" }, 400);
+
+    // Diagnostic: read the account's active-connection COUNT (Xtream login endpoint). The user
+    // API never exposes the per-session IPs (panel-admin only), but active_cons vs max_connections
+    // tells us live-2nd-connection (>= max) vs pure cooldown (0-1). Login usually answers even
+    // during a user_multi_ip streaming/metadata block.
+    if (body.probe === "account") return json(await accountInfo(sourceId, userId));
 
     return json(await prewarm(sourceId, userId, limit, ids));
   } catch (err) {
@@ -95,6 +100,46 @@ async function prewarm(sourceId: string, userId: string, limit: number, explicit
   }
 
   return { attempted: targets.length, cached, failed429, failedOther, aborted, lastError, serverHost };
+}
+
+async function accountInfo(sourceId: string, userId: string): Promise<JsonRecord> {
+  const cfg = await getRuntimeCfg();
+  const source = await loadSource(sourceId, userId, cfg.sourceConfigKey);
+  const serverUrl = strOr(source.serverUrl);
+  const username = strOr(source.username);
+  const password = strOr(source.password);
+  const serverHost = hostOf(serverUrl);
+  if (!serverUrl || !username || !password) return { error: "source config incomplete" };
+
+  const base = serverUrl.replace(/\/+$/, "");
+  const url = `${base}/player_api.php?username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 15000);
+  try {
+    const resp = await fetch(url, { signal: ctrl.signal, headers: { "User-Agent": "VLC/3.0.20 LibVLC/3.0.20" } });
+    const data = await resp.json().catch(() => null);
+    const ui = isRecord(data) && isRecord(data.user_info) ? (data.user_info as JsonRecord) : null;
+    return {
+      serverHost,
+      httpOk: resp.ok,
+      httpStatus: resp.status,
+      user_info: ui
+        ? {
+            auth: ui.auth,
+            status: ui.status,
+            active_cons: ui.active_cons,
+            max_connections: ui.max_connections,
+            is_trial: ui.is_trial,
+            exp_date: ui.exp_date,
+          }
+        : null,
+      note: ui ? undefined : (isRecord(data) ? data : "no user_info from provider"),
+    };
+  } catch (err) {
+    return { serverHost, error: err instanceof Error ? err.message : String(err) };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function uncachedSeriesIds(sourceId: string, serverHost: string, limit: number): Promise<string[]> {
