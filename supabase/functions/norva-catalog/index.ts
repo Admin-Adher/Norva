@@ -1217,6 +1217,10 @@ function titleRailItem(title: JsonRecord, variants: JsonRecord[], lang?: string 
   const metadata = recordOrEmpty(title.metadata);
   const tmdb = titleTmdb(title);
   const genres = titleGenres(title);
+  // Provider category from the preserved genre_category COLUMN — the catalog overlay
+  // drops categoryName from verified titles' metadata, so the column is the source of
+  // truth (keeps the detail-page category label populated for rail-opened titles).
+  const categoryName = stringOrNull(title.genre_category) ?? stringOrNull(metadata.categoryName);
   const overview = stringOrNull(tmdb.overview ?? metadata.overview);
   // Localized display: serve the user's language from the per-title i18n when
   // present, else the catalogue default (i18n is stored by the enrichment).
@@ -1252,6 +1256,8 @@ function titleRailItem(title: JsonRecord, variants: JsonRecord[], lang?: string 
     overview: displayOverview,
     description: displayOverview,
     genres,
+    category_name: categoryName,
+    categoryName: categoryName,
     rating,
     vote_average: rating,
     voteAverage: rating,
@@ -1291,6 +1297,7 @@ function titleRailItem(title: JsonRecord, variants: JsonRecord[], lang?: string 
       description: displayOverview,
       overview: displayOverview,
       genres,
+      categoryName: categoryName,
       rating,
       voteAverage: rating,
       runtime,
