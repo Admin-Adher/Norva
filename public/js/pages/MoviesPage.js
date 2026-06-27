@@ -1830,6 +1830,7 @@ class MoviesPage {
             versionIndex: 0,
             audioLanguages: movie.audioLanguages || movie.audio_languages || null,
             versionLanguages: movie.versionLanguages || movie.version_languages || null,
+            originalLanguage: movie.originalLanguage || movie.original_language || null,
             // Precomputed ordered per-track language map (served on the grid item by
             // norva-catalog attachMediaLanguages). Lets the player label every audio
             // track with zero playback-time probe — see WatchPage.getContentAudioTracks.

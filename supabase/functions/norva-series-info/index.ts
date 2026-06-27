@@ -72,7 +72,12 @@ Deno.serve(async (req) => {
     if (req.method === "GET" && segments[0] === "sources" && segments[2] === "series-info") {
       const identity = await requireIdentity(req, supabase);
       const seriesInfo = await getXtreamSeriesInfo(url, segments[1], identity.userId, supabase);
-      return json(req, seriesInfo);
+      // Augment with the title's TMDB source language (global, from catalog_titles) so the player
+      // can resolve a VOSTFR/VO ("original") audio track to its real language. Best-effort; it
+      // sits next to the provider payload and never replaces a provider field.
+      const seriesId = url.searchParams.get("series_id") ?? url.searchParams.get("seriesId") ?? "";
+      const originalLanguage = await lookupSeriesOriginalLanguage(supabase, segments[1], seriesId);
+      return json(req, originalLanguage ? { ...seriesInfo, original_language: originalLanguage } : seriesInfo);
     }
     throw new HttpError(404, "Route not found");
   } catch (error) {
@@ -102,6 +107,42 @@ async function requireIdentity(req: Request, db: SupabaseClient): Promise<CloudI
   if (deviceError) throwDb(deviceError, "Unable to verify device token");
   if (!device) throw new HttpError(401, "Invalid bearer token", error?.message);
   return { userId: device.user_id, deviceId: device.id };
+}
+
+// Best-effort lookup of the title's TMDB original_language (the global catalog fact behind
+// resolving a VOSTFR/VO "original" audio track to its real language). series_id -> the series'
+// provider_tmdb_id (cloud_media_items) -> catalog_titles.original_language. Never throws.
+async function lookupSeriesOriginalLanguage(
+  db: SupabaseClient,
+  sourceId: string,
+  seriesId: string,
+): Promise<string | null> {
+  try {
+    if (!sourceId || !seriesId) return null;
+    const { data: item } = await db
+      .from("cloud_media_items")
+      .select("metadata")
+      .eq("source_id", sourceId)
+      .eq("item_type", "series")
+      .eq("external_id", seriesId)
+      .maybeSingle();
+    const tmdb = item && isRecord(item.metadata)
+      ? stringOr((item.metadata as JsonRecord).providerTmdbId, "")
+      : "";
+    if (!tmdb || !/^\d+$/.test(tmdb)) return null;
+    const { data: cat } = await db
+      .from("catalog_titles")
+      .select("original_language")
+      .eq("item_type", "series")
+      .eq("provider_tmdb_id", tmdb)
+      .maybeSingle();
+    const lang = cat && typeof (cat as JsonRecord).original_language === "string"
+      ? String((cat as JsonRecord).original_language).toLowerCase().trim()
+      : "";
+    return /^[a-z]{2,3}$/.test(lang) ? lang : null;
+  } catch {
+    return null;
+  }
 }
 
 async function getXtreamSeriesInfo(url: URL, sourceId: string, userId: string, db: SupabaseClient) {

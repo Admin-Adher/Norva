@@ -1887,6 +1887,11 @@ class SeriesPage {
             durationHint,
             audioLanguages: this.currentSeries?.audioLanguages || this.currentSeries?.audio_languages || null,
             versionLanguages: this.currentSeries?.versionLanguages || this.currentSeries?.version_languages || null,
+            // TMDB source language: lets the player resolve a VOSTFR/VO ("original") track to its
+            // real language ("Japanese"…) — never assumes one from the VOSTFR tag. Comes from the
+            // grid item (norva-catalog) or the series-info response (norva-series-info).
+            originalLanguage: this.currentSeries?.originalLanguage || this.currentSeries?.original_language
+                || this.currentSeriesInfo?.original_language || null,
             // Precomputed ordered per-track language map (when the series was crawled) so
             // the player labels every audio track with ZERO playback probe — same as movies.
             audioTracks: this.currentSeries?.audioTracks || this.currentSeries?.audio_tracks || null

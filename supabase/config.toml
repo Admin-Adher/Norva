@@ -18,6 +18,12 @@ verify_jwt = false
 [functions.norva-series-prewarm]
 verify_jwt = false
 
+# Service-gated (NORVA_BACKFILL_TOKEN) backfill that fills catalog_titles.original_language from
+# TMDB (source language, e.g. 'ja' for anime), so the player resolves a VOSTFR/VO "original"
+# audio track to its real language. Hits TMDB only, never the IPTV provider.
+[functions.norva-tmdb-origlang]
+verify_jwt = false
+
 # RevenueCat sends our shared secret in the Authorization header (not a Supabase
 # JWT), so the platform gateway check is disabled and the function verifies the
 # secret itself via NORVA_REVENUECAT_WEBHOOK_AUTH.

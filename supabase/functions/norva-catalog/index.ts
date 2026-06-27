@@ -303,6 +303,29 @@ async function attachMediaLanguages(items: Array<Record<string, any>>, userId: s
     // so titles without a crawled map fall through to the live-probe path unchanged.
     if (hit.tracks.length) { row.audio_tracks = hit.tracks; row.audioTracks = hit.tracks; }
   }
+
+  // original_language is a GLOBAL TMDB fact (not per-user, not gated by the read-cutover flag),
+  // so it's read straight from catalog_titles. The player uses it to resolve a VOSTFR/VO
+  // ("original") audio track to its real language ("Japanese"…) instead of a bare "Default".
+  try {
+    const origByTmdb = new Map<string, string>();
+    for (let i = 0; i < tmdbIds.length; i += 500) {
+      const { data } = await db
+        .from("catalog_titles")
+        .select("provider_tmdb_id, original_language")
+        .in("provider_tmdb_id", tmdbIds.slice(i, i + 500));
+      for (const c of data ?? []) {
+        const id = stringOrNull((c as JsonRecord).provider_tmdb_id);
+        const lang = stringOrNull((c as JsonRecord).original_language);
+        if (id && lang) origByTmdb.set(id, lang);
+      }
+    }
+    for (const row of items) {
+      const id = stringOrNull(isRecord(row.metadata) ? row.metadata.providerTmdbId : null);
+      const lang = id ? origByTmdb.get(id) : null;
+      if (lang) { row.original_language = lang; row.originalLanguage = lang; }
+    }
+  } catch (_) { /* best-effort; never fail the grid over original_language */ }
 }
 
 function applyMediaSort<T>(query: T, sort: string): T {
