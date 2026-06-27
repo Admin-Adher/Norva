@@ -165,6 +165,30 @@ async function route(
     };
   }
 
+  // Service-authed continuation for the resumable Xtream sync. driveXtreamSyncToReady
+  // self-invokes this between isolates to import an "8K"-scale catalogue across
+  // several short background runs. Authorized by the service key, or the Vault cron
+  // secret via a service_role-only SECURITY DEFINER check (never exposed here).
+  if (scope === "cron" && req.method === "POST") {
+    const token = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
+    let authorized = SUPABASE_SERVICE_KEY !== "" && token === SUPABASE_SERVICE_KEY;
+    if (!authorized && token) {
+      const { data: ok } = await db.rpc("norva_verify_cron_secret", { presented: token });
+      authorized = ok === true;
+    }
+    if (!authorized) throw new HttpError(403, "forbidden");
+    if (id === "sync-step" && action) {
+      const { data: src } = await db
+        .from("cloud_sources").select("user_id, source_type").eq("id", action).maybeSingle();
+      if (!src) throw new HttpError(404, "Source not found");
+      if (String(src.source_type) === "xtream") {
+        waitUntil(driveXtreamSyncToReady(action, String(src.user_id), db));
+      }
+      return { body: { ok: true, started: true, sourceId: action } };
+    }
+    throw new HttpError(404, "Route not found");
+  }
+
   if (scope === "pairing" && req.method === "POST" && id === "start") {
     return { status: 201, body: await startPairing(req, db) };
   }
@@ -1151,7 +1175,6 @@ async function writeSourceSyncProgress(
 async function syncCloudSource(sourceId: string, userId: string, db: SupabaseClient) {
   let baseHint: JsonRecord = {};
   let progress: JsonRecord = {};
-  let reportProgress: SyncProgressReporter = async () => {};
 
   try {
     const { data: source, error } = await db
@@ -1164,7 +1187,6 @@ async function syncCloudSource(sourceId: string, userId: string, db: SupabaseCli
     if (!source) throw new HttpError(404, "Source not found");
     if (!source.config_ciphertext) throw new HttpError(400, "Source has no managed cloud configuration");
 
-    const config = await decryptSourceConfig(source.config_ciphertext, await getRuntimeConfig(db));
     const startedAt = new Date().toISOString();
     baseHint = recordOrEmpty(source.config_hint);
     progress = compactRecord({
@@ -1180,32 +1202,52 @@ async function syncCloudSource(sourceId: string, userId: string, db: SupabaseCli
         connect: { status: "running" },
       },
     });
-    reportProgress = async (patch: JsonRecord) => {
-      progress = mergeSyncProgress(progress, compactRecord({ ...patch, status: "syncing", updatedAt: new Date().toISOString() }));
-      await writeSourceSyncProgress(db, sourceId, userId, baseHint, progress);
-    };
 
+    if (source.source_type === "xtream") {
+      // Big "8K" catalogues (100k+ items, 1000+ categories) can't be discovered,
+      // imported and materialized inside one edge isolate's wall-clock budget.
+      // Reset the resumable cursor for a fresh run, then hand to the driver which
+      // walks categories incrementally and self-continues across isolates until
+      // the raw catalogue is imported; the existing finalize stepper (driven by
+      // the client poll / cron) then materializes it to "ready".
+      const cursor = freshSyncCursor(startedAt);
+      await db
+        .from("cloud_sources")
+        .update({
+          sync_status: "syncing",
+          sync_error: null,
+          last_synced_at: startedAt,
+          config_hint: compactRecord({ ...baseHint, syncProgress: progress, syncCursor: cursor }),
+        })
+        .eq("id", sourceId)
+        .eq("user_id", userId);
+      await driveXtreamSyncToReady(sourceId, userId, db);
+      return;
+    }
+
+    // m3u / other source types stay on the single-isolate path (bounded size).
     await db
       .from("cloud_sources")
       .update({
         sync_status: "syncing",
         sync_error: null,
         last_synced_at: startedAt,
-        config_hint: compactRecord({
-          ...baseHint,
-          syncProgress: progress,
-        }),
+        config_hint: compactRecord({ ...baseHint, syncProgress: progress }),
       })
       .eq("id", sourceId)
       .eq("user_id", userId);
 
-    const result = source.source_type === "xtream"
-      ? await syncXtreamSource(sourceId, userId, config, db, reportProgress)
-      : source.source_type === "m3u"
-        ? await syncM3uSource(sourceId, userId, config, db, reportProgress)
-        : { total: 0 };
+    const config = await decryptSourceConfig(source.config_ciphertext, await getRuntimeConfig(db));
+    const reportProgress: SyncProgressReporter = async (patch: JsonRecord) => {
+      progress = mergeSyncProgress(progress, compactRecord({ ...patch, status: "syncing", updatedAt: new Date().toISOString() }));
+      await writeSourceSyncProgress(db, sourceId, userId, baseHint, progress);
+    };
 
-    if ((source.source_type === "xtream" || source.source_type === "m3u") && Number(result.total ?? 0) <= 0) {
+    const result = source.source_type === "m3u"
+      ? await syncM3uSource(sourceId, userId, config, db, reportProgress)
+      : { total: 0 };
+
+    if (source.source_type === "m3u" && Number(result.total ?? 0) <= 0) {
       throw new HttpError(422, "No playable catalog items were imported from this source");
     }
 
@@ -1240,6 +1282,287 @@ async function syncCloudSource(sourceId: string, userId: string, db: SupabaseCli
             status: "error",
             stage: "error",
             percent: Number(progress.percent ?? 0) || 0,
+            updatedAt: failedAt,
+            error: message,
+          }),
+        }),
+      })
+      .eq("id", sourceId)
+      .eq("user_id", userId);
+  }
+}
+
+// ── Resumable Xtream discovery ───────────────────────────────────────────────
+// State lives in cloud_sources.config_hint.syncCursor and survives across edge
+// isolates so an "8K"-scale catalogue can be imported over several short runs.
+const DISCOVER_TYPES: { type: "live" | "movie" | "series"; action: string }[] = [
+  { type: "live", action: "get_live_streams" },
+  { type: "movie", action: "get_vod_streams" },
+  { type: "series", action: "get_series" },
+];
+const DISCOVER_CONCURRENCY = 14;
+// Work budget per isolate. Kept well under the runtime's background wall-clock so
+// the self-invoke (which spawns the next isolate) always lands before recycle.
+const SYNC_DRIVE_BUDGET_MS = 90_000;
+const SYNC_MAX_CONTINUATIONS = 160;
+
+function freshSyncCursor(startedAt: string): JsonRecord {
+  return {
+    v: 1,
+    active: true,
+    phase: "discover",
+    deleted: false,
+    typeIdx: 0,
+    catIdx: 0,
+    counts: { live: 0, movies: 0, series: 0 },
+    startedAt,
+    attempts: 0,
+  };
+}
+
+function asStringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : [];
+}
+
+// Incremental import: upsert a batch of rows (no delete, no select-back). The
+// initial delete-all happens once per fresh sync; finalize reloads rows from the
+// table, so we don't need the saved rows here — keeping peak memory tiny.
+async function appendSourceItems(sourceId: string, userId: string, rows: JsonRecord[], db: SupabaseClient) {
+  for (let index = 0; index < rows.length; index += 500) {
+    const chunk = rows.slice(index, index + 500);
+    if (!chunk.length) continue;
+    const { error } = await db
+      .from("cloud_media_items")
+      .upsert(chunk, { onConflict: "source_id,item_type,external_id" });
+    if (error) throwDb(error, "Unable to save cloud media items");
+  }
+}
+
+// Fire the next isolate. The /cron/sync-step route kicks driveXtreamSyncToReady
+// in the background and returns immediately, so this await resolves fast and the
+// current (near-budget) isolate can exit cleanly.
+async function selfInvokeSyncStep(sourceId: string) {
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
+    console.error("[norva-cloud] cannot self-invoke sync-step: missing URL/service key", sourceId);
+    return;
+  }
+  const url = `${SUPABASE_URL}/functions/v1/norva-cloud/cron/sync-step/${encodeURIComponent(sourceId)}`;
+  try {
+    await fetch(url, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`, "content-type": "application/json" },
+    });
+  } catch (error) {
+    console.error("[norva-cloud] self-invoke sync-step failed", sourceId, error);
+  }
+}
+
+// Drive one isolate's worth of resumable discovery. Imports every category's
+// stream slice incrementally from a persisted cursor; when the wall-clock budget
+// is hit before the catalogue is fully imported it checkpoints and self-invokes
+// a fresh isolate. On completion it leaves the source in the finalize-pending
+// handoff state ({import: done, finalize: running}) the client/cron stepper
+// already knows how to materialize to "ready".
+async function driveXtreamSyncToReady(sourceId: string, userId: string, db: SupabaseClient) {
+  const deadline = Date.now() + SYNC_DRIVE_BUDGET_MS;
+  const { data: source, error } = await db
+    .from("cloud_sources")
+    .select("*")
+    .eq("id", sourceId)
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (error) { console.error("[norva-cloud] sync driver load failed", sourceId, error.message); return; }
+  if (!source) return;
+  if (String(source.sync_status) === "ready") return; // a stale continuation raced past completion
+
+  const baseHint = recordOrEmpty(source.config_hint);
+  let cursor = recordOrEmpty(baseHint.syncCursor);
+  if (!isRecord(baseHint.syncCursor)) cursor = freshSyncCursor(new Date().toISOString());
+  let progress = recordOrEmpty(baseHint.syncProgress);
+
+  // Single config_hint writer during discovery — re-reads the row each time so a
+  // concurrent finalize progress write is never clobbered.
+  const persist = async (progressPatch: JsonRecord | null) => {
+    if (progressPatch) {
+      progress = mergeSyncProgress(progress, compactRecord({ ...progressPatch, status: "syncing", updatedAt: new Date().toISOString() }));
+    }
+    const { data: fresh } = await db
+      .from("cloud_sources").select("config_hint").eq("id", sourceId).eq("user_id", userId).maybeSingle();
+    const freshHint = recordOrEmpty(fresh?.config_hint);
+    await db
+      .from("cloud_sources")
+      .update({
+        config_hint: compactRecord({
+          ...freshHint,
+          syncProgress: progressPatch ? progress : freshHint.syncProgress,
+          syncCursor: cursor,
+        }),
+      })
+      .eq("id", sourceId)
+      .eq("user_id", userId);
+  };
+
+  try {
+    cursor.attempts = (Number(cursor.attempts) || 0) + 1;
+    if (Number(cursor.attempts) > SYNC_MAX_CONTINUATIONS) {
+      throw new HttpError(500, "Catalog sync exceeded its continuation budget");
+    }
+
+    const runtimeConfig = await getRuntimeConfig(db);
+    const config = await decryptSourceConfig(String(source.config_ciphertext), runtimeConfig);
+    const serverUrl = normalizeBaseUrl(stringOr(config.serverUrl, ""));
+    const username = stringOr(config.username, "");
+    const password = stringOr(config.password, "");
+    if (!username || !password) throw new HttpError(400, "Xtream credentials are incomplete");
+    const fetchCatalog = (action: string, params?: Record<string, string>) =>
+      fetchProviderMetadata(runtimeConfig, { serverUrl, username, password, action, params, timeoutMs: 25000 }).catch(() => []);
+
+    // Re-fetch the (tiny) category lists each isolate for fresh id→name maps.
+    const [liveCats, vodCats, seriesCats] = await Promise.all([
+      fetchCatalog("get_live_categories"),
+      fetchCatalog("get_vod_categories"),
+      fetchCatalog("get_series_categories"),
+    ]);
+    const nameMaps: Record<string, Map<string, string>> = {
+      live: categoryMap(liveCats),
+      movie: categoryMap(vodCats),
+      series: categoryMap(seriesCats),
+    };
+
+    // Establish the stable, sorted category-id worklist once (persisted), so the
+    // cursor index stays meaningful even if the provider reorders categories.
+    if (!isRecord(cursor.cats)) {
+      cursor.cats = {
+        live: [...nameMaps.live.keys()].sort(),
+        movie: [...nameMaps.movie.keys()].sort(),
+        series: [...nameMaps.series.keys()].sort(),
+      };
+      cursor.catCounts = { live: nameMaps.live.size, movies: nameMaps.movie.size, series: nameMaps.series.size };
+    }
+    const cats = recordOrEmpty(cursor.cats);
+
+    if (!cursor.deleted) {
+      await db.from("cloud_media_items").delete().eq("source_id", sourceId).eq("user_id", userId);
+      cursor.deleted = true;
+      await persist({
+        stage: "discovering",
+        percent: 18,
+        steps: {
+          connect: { status: "done" },
+          channels: { status: "running" },
+          movies: { status: "running" },
+          series: { status: "running" },
+          categories: { status: "running" },
+        },
+      });
+    }
+
+    const counts = recordOrEmpty(cursor.counts);
+    let liveCount = Number(counts.live) || 0;
+    let movieCount = Number(counts.movies) || 0;
+    let seriesCount = Number(counts.series) || 0;
+    let typeIdx = Number(cursor.typeIdx) || 0;
+    let catIdx = Number(cursor.catIdx) || 0;
+
+    const targetsFor = (type: string): (Record<string, string> | undefined)[] => {
+      const ids = asStringArray(cats[type]);
+      return ids.length ? ids.map((id) => ({ category_id: id })) : [undefined];
+    };
+    const totalTargets = DISCOVER_TYPES.reduce((sum, d) => sum + targetsFor(d.type).length, 0);
+    const completedTargets = () => {
+      let done = catIdx;
+      for (let i = 0; i < typeIdx; i++) done += targetsFor(DISCOVER_TYPES[i].type).length;
+      return done;
+    };
+
+    let sincePersist = 0;
+    while (Date.now() < deadline && typeIdx < DISCOVER_TYPES.length) {
+      const def = DISCOVER_TYPES[typeIdx];
+      const targets = targetsFor(def.type);
+      if (catIdx >= targets.length) { typeIdx++; catIdx = 0; continue; }
+      const batch = targets.slice(catIdx, catIdx + DISCOVER_CONCURRENCY);
+      const slices = await Promise.all(batch.map((p) => fetchCatalog(def.action, p)));
+      const batchRows: JsonRecord[] = [];
+      for (const slice of slices) {
+        if (!Array.isArray(slice) || !slice.length) continue;
+        const r = xtreamRows(sourceId, userId, slice as JsonRecord[], def.type, nameMaps[def.type]);
+        for (const row of r) batchRows.push(row);
+      }
+      if (batchRows.length) {
+        await appendSourceItems(sourceId, userId, batchRows, db);
+        if (def.type === "live") liveCount += batchRows.length;
+        else if (def.type === "movie") movieCount += batchRows.length;
+        else seriesCount += batchRows.length;
+      }
+      catIdx += batch.length;
+      if (catIdx >= targets.length) { typeIdx++; catIdx = 0; }
+      cursor.typeIdx = typeIdx;
+      cursor.catIdx = catIdx;
+      cursor.counts = { live: liveCount, movies: movieCount, series: seriesCount };
+      sincePersist++;
+      if (sincePersist >= 4 || Date.now() >= deadline) {
+        sincePersist = 0;
+        const percent = Math.max(18, Math.min(57, 18 + Math.round((39 * completedTargets()) / Math.max(1, totalTargets))));
+        await persist({
+          stage: "discovering",
+          percent,
+          counts: { live: liveCount, movies: movieCount, series: seriesCount, total: liveCount + movieCount + seriesCount },
+        });
+      }
+    }
+
+    if (typeIdx < DISCOVER_TYPES.length) {
+      // Budget hit before the catalogue is fully imported → checkpoint + continue.
+      await persist(null);
+      await selfInvokeSyncStep(sourceId);
+      return;
+    }
+
+    // Catalogue fully imported → leave the finalize-pending handoff state.
+    const total = liveCount + movieCount + seriesCount;
+    if (total <= 0) throw new HttpError(422, "No playable catalog items were imported from this source");
+    const catCounts = recordOrEmpty(cursor.catCounts);
+    const liveCats2 = Number(catCounts.live) || 0;
+    const movieCats2 = Number(catCounts.movies) || 0;
+    const seriesCats2 = Number(catCounts.series) || 0;
+    const catTotal = liveCats2 + movieCats2 + seriesCats2;
+    cursor.active = false;
+    cursor.phase = "imported";
+    await persist({
+      stage: "materializing",
+      percent: 74,
+      counts: { live: liveCount, movies: movieCount, series: seriesCount, total },
+      categories: { live: liveCats2, movies: movieCats2, series: seriesCats2, total: catTotal },
+      steps: {
+        connect: { status: "done" },
+        channels: { status: "done", count: liveCount },
+        movies: { status: "done", count: movieCount },
+        series: { status: "done", count: seriesCount },
+        categories: { status: "done", count: catTotal },
+        import: { status: "done", count: total },
+        finalize: { status: "running" },
+      },
+    });
+    // The client poll and the cron finalize stepper take it from here to "ready".
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Source sync failed";
+    console.error("[norva-cloud] sync driver failed", sourceId, message);
+    const failedAt = new Date().toISOString();
+    const { data: fresh } = await db
+      .from("cloud_sources").select("config_hint").eq("id", sourceId).eq("user_id", userId).maybeSingle();
+    const freshHint = recordOrEmpty(fresh?.config_hint);
+    await db
+      .from("cloud_sources")
+      .update({
+        sync_status: "error",
+        sync_error: message,
+        last_synced_at: failedAt,
+        config_hint: compactRecord({
+          ...freshHint,
+          syncProgress: mergeSyncProgress(recordOrEmpty(freshHint.syncProgress), {
+            status: "error",
+            stage: "error",
+            percent: Number(recordOrEmpty(freshHint.syncProgress).percent) || 0,
             updatedAt: failedAt,
             error: message,
           }),
@@ -1316,8 +1639,8 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
       },
     });
 
-    const config = source.config_ciphertext
-      ? await decryptSourceConfig(String(source.config_ciphertext), await getRuntimeConfig(db)).catch(() => ({}))
+    const config: JsonRecord = source.config_ciphertext
+      ? await decryptSourceConfig(String(source.config_ciphertext), await getRuntimeConfig(db)).catch(() => ({} as JsonRecord))
       : {};
 
     const result = {
@@ -1697,160 +2020,6 @@ async function loadSourceItems(
     if (options.limit) break;
   }
   return Number.isFinite(maxRows) ? rows.slice(0, maxRows) : rows;
-}
-
-async function syncXtreamSource(
-  sourceId: string,
-  userId: string,
-  config: JsonRecord,
-  db: SupabaseClient,
-  reportProgress: SyncProgressReporter = async () => {},
-) {
-  const serverUrl = normalizeBaseUrl(stringOr(config.serverUrl, ""));
-  const username = stringOr(config.username, "");
-  const password = stringOr(config.password, "");
-  await reportProgress({
-    stage: "connecting",
-    percent: 10,
-    steps: { connect: { status: "running" } },
-  });
-  if (!username || !password) throw new HttpError(400, "Xtream credentials are incomplete");
-
-  // Provider metadata egresses via the gateway (tolerated IP), not this Supabase
-  // edge runtime (provider-blocked IP). Cached; gateway-unconfigured → direct.
-  const runtimeConfig = await getRuntimeConfig(db);
-
-  await reportProgress({
-    stage: "discovering",
-    percent: 18,
-    steps: {
-      connect: { status: "done" },
-      channels: { status: "running" },
-      movies: { status: "running" },
-      series: { status: "running" },
-      categories: { status: "running" },
-    },
-  });
-  // Provider stream lists can be enormous (100+ MB for "8K"-style catalogues), and
-  // fetching them whole OOMs the edge isolate (~256 MB) once JSON.parse expands them.
-  // Drive ingestion PER CATEGORY instead: the category lists are tiny, each category's
-  // stream slice is small, and we transform each slice into slim rows then drop the raw
-  // JSON immediately — so peak memory stays bounded no matter how big the catalogue is.
-  const fetchCatalog = (action: string, params?: Record<string, string>) =>
-    fetchProviderMetadata(runtimeConfig, { serverUrl, username, password, action, params, timeoutMs: 25000 }).catch(() => []);
-  const [liveCategories, vodCategories, seriesCategories] = await Promise.all([
-    fetchCatalog("get_live_categories"),
-    fetchCatalog("get_vod_categories"),
-    fetchCatalog("get_series_categories"),
-  ]);
-  const liveCategoryMap = categoryMap(liveCategories);
-  const vodCategoryMap = categoryMap(vodCategories);
-  const seriesCategoryMap = categoryMap(seriesCategories);
-
-  const rows: JsonRecord[] = [];
-  let liveCount = 0;
-  let movieCount = 0;
-  let seriesCount = 0;
-  const ingestByCategory = async (
-    action: string,
-    itemType: "live" | "movie" | "series",
-    catMap: Map<string, string>,
-    bump: (n: number) => void,
-  ) => {
-    const catIds = [...catMap.keys()];
-    // No categories advertised → fall back to the single bare list (small providers).
-    const targets: (Record<string, string> | undefined)[] = catIds.length
-      ? catIds.map((id) => ({ category_id: id }))
-      : [undefined];
-    // Large "8K" catalogues have 1000+ categories; fan out so the per-category
-    // round-trips don't dominate the isolate's wall-clock. Each slice is small,
-    // so even ~14 concurrent raw responses stay well within the memory budget.
-    const CONCURRENCY = 14;
-    for (let i = 0; i < targets.length; i += CONCURRENCY) {
-      const slices = await Promise.all(targets.slice(i, i + CONCURRENCY).map((p) => fetchCatalog(action, p)));
-      for (const slice of slices) {
-        if (!Array.isArray(slice) || !slice.length) continue;
-        const r = xtreamRows(sourceId, userId, slice as JsonRecord[], itemType, catMap);
-        for (const row of r) rows.push(row);
-        bump(r.length);
-      }
-    }
-  };
-  await ingestByCategory("get_live_streams", "live", liveCategoryMap, (n) => { liveCount += n; });
-  await reportProgress({ stage: "discovering", percent: 26, counts: { live: liveCount, movies: movieCount, series: seriesCount, total: liveCount + movieCount + seriesCount } });
-  await ingestByCategory("get_vod_streams", "movie", vodCategoryMap, (n) => { movieCount += n; });
-  await reportProgress({ stage: "discovering", percent: 34, counts: { live: liveCount, movies: movieCount, series: seriesCount, total: liveCount + movieCount + seriesCount } });
-  await ingestByCategory("get_series", "series", seriesCategoryMap, (n) => { seriesCount += n; });
-  const categoryCount = liveCategoryMap.size + vodCategoryMap.size + seriesCategoryMap.size;
-  await reportProgress({
-    stage: "discovered",
-    percent: 42,
-    counts: {
-      live: liveCount,
-      movies: movieCount,
-      series: seriesCount,
-      total: liveCount + movieCount + seriesCount,
-    },
-    categories: {
-      live: liveCategoryMap.size,
-      movies: vodCategoryMap.size,
-      series: seriesCategoryMap.size,
-      total: categoryCount,
-    },
-    steps: {
-      channels: { status: "done", count: liveCount },
-      movies: { status: "done", count: movieCount },
-      series: { status: "done", count: seriesCount },
-      categories: { status: "done", count: categoryCount },
-      import: { status: "running" },
-    },
-  });
-
-  await reportProgress({
-    stage: "importing",
-    percent: 58,
-    steps: { import: { status: "running", count: rows.length } },
-  });
-  const savedRows = await replaceSourceItems(sourceId, userId, rows, db);
-  await reportProgress({
-    stage: "materializing",
-    percent: 74,
-    steps: { import: { status: "done", count: savedRows.length }, finalize: { status: "running" } },
-  });
-  const liveCatalog = await refreshMaterializedLiveCatalog(db, { sourceId, userId, rows: savedRows });
-  await reportProgress({
-    stage: "building_titles",
-    percent: 86,
-    steps: { finalize: { status: "running" } },
-  });
-  const titleProjection = await refreshVodTitleProjection({
-    sourceId,
-    userId,
-    rows: savedRows,
-    db,
-    xtreamConfig: { serverUrl, username, password },
-    mediaGatewayUrl: runtimeConfig.mediaGatewayUrl,
-    mediaGatewayToken: runtimeConfig.mediaGatewayToken,
-    // Onboarding B: small inline enrichment → fast release; crons + cross-user reuse + bar fill the rest.
-    vodInfoLimit: boundedInt(Deno.env.get("NORVA_VOD_INFO_SYNC_LIMIT"), 40, 0, 1000),
-    tmdbValidateLimit: boundedInt(Deno.env.get("NORVA_TMDB_VALIDATE_SYNC_LIMIT"), 20, 0, 1000),
-  });
-  await reportProgress({
-    stage: "finalizing",
-    percent: 96,
-    steps: { finalize: { status: "running" } },
-  });
-  return {
-    live: liveCount,
-    movies: movieCount,
-    series: seriesCount,
-    liveCategories: liveCategoryMap.size,
-    movieCategories: vodCategoryMap.size,
-    seriesCategories: seriesCategoryMap.size,
-    total: rows.length,
-    liveCatalog,
-    titleProjection,
-  };
 }
 
 function categoryMap(items: unknown) {
