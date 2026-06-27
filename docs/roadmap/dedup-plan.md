@@ -98,6 +98,27 @@ cache can always serve them.
 
 *(Not in the original spec — the remaining structural piece, touches playback.)*
 
+**Started 2026-06-27** after a full DB+egress audit (below) confirmed per-user
+catalogue duplication is **92% of the database** (725 MB of 790 MB were the five
+`cloud_*` catalogue tables) — i.e. one big provider already blows the free tier.
+
+**Progress (2026-06-27):**
+- ✅ **Keystone table `public.catalog_media_items`** — global, keyed
+  `(server_host, item_type, external_id)`, RLS service-only, holds the provider-
+  derived half (display + `metadata` + `playback_hint` + sort keys). Migration
+  `20260627140000_catalog_media_items_foundation.sql`. Carries the four browse
+  sort indexes (`idx_catmi_sort_*`) so they're paid **once per provider** instead
+  of per user (they were 124 MB for a single catalogue on `cloud_media_items`).
+  **Keep-best guard** `catalog_media_items_keep_best` (BEFORE UPDATE, exception-
+  guarded) makes it monotone — provider-raw/null never overwrites an enriched
+  row; empirically validated (downgrade blocked, year clamped). Empty + additive
+  → nothing reads it yet → zero behaviour change.
+- ⏳ Next: `catalog_title_variants` + `catalog_live_*` foundation tables → bulk
+  dual-write from the sync path (NOT a per-row trigger — keeps the 272k-row import
+  fast) → backfill + a `catalog_media_mirror_diff` verify → flag-gated
+  `resolvePlaybackTarget` read from the global store → thin per-user
+  `cloud_media_items` to a membership link.
+
 **Target:** `cloud_media_items` (raw) + `cloud_title_variants` become **global per
 provider**. `playback_hint` is provider-derived (not user-derived — confirmed),
 so it globalises to the `catalog_file_tracks` shape `(server_host, item_type,
