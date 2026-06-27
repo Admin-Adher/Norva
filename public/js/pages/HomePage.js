@@ -89,7 +89,7 @@ class HomePage {
 
                 <section class="dashboard-section" id="favorite-channels-section">
                     <div class="section-header">
-                        <h2>Chaînes favorites</h2>
+                        <h2>Favorite Channels</h2>
                     </div>
                     ${this.scrollSection('favorite-channels-list', 'Loading favorites...', 'channel-tiles')}
                 </section>
@@ -884,7 +884,7 @@ class HomePage {
         const year = item.year || data.year || data.releaseYear;
         if (year) bits.push(year);
         const rating = item.rating || data.rating || data.voteAverage;
-        if (rating) bits.push(`Note ${String(rating).slice(0, 3)}`);
+        if (rating) bits.push(`★ ${String(rating).slice(0, 3)}`);
         return bits.join(' - ');
     }
 
@@ -1047,7 +1047,7 @@ class HomePage {
         const year = item.year || data.year || data.releaseYear || metadata.year;
         const rating = item.rating || data.rating || data.voteAverage || metadata.rating;
         const genres = this.genreList(item).slice(0, 2);
-        return [year, ...genres, rating ? `Note ${String(rating).slice(0, 3)}` : ''].filter(Boolean).join(' - ');
+        return [year, ...genres, rating ? `★ ${String(rating).slice(0, 3)}` : ''].filter(Boolean).join(' - ');
     }
 
     genreList(item = {}) {

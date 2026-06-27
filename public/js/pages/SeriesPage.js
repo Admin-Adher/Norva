@@ -1674,13 +1674,13 @@ class SeriesPage {
             const genres = this.getSeriesGenres(series).slice(0, 3);
             const rating = parseFloat(series.rating || series.tmdb?.vote_average);
             const ratingLabel = Number.isFinite(rating) && rating > 0
-                ? `Note ${rating.toFixed(1).replace('.0', '')}`
+                ? `★ ${rating.toFixed(1).replace('.0', '')}`
                 : '';
             const version = MediaUtils.parseVersionInfo(series.name);
             const metaParts = [
                 this.getSeriesYear(series),
-                seasonCount ? `${seasonCount} saison${seasonCount > 1 ? 's' : ''}` : '',
-                episodeCount ? `${episodeCount} épisodes` : '',
+                seasonCount ? `${seasonCount} season${seasonCount > 1 ? 's' : ''}` : '',
+                episodeCount ? `${episodeCount} episodes` : '',
                 ratingLabel,
                 ...genres,
                 version.quality,

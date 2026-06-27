@@ -1210,7 +1210,7 @@ class MoviesPage {
                 <div class="movie-play-overlay">
                     <span class="play-icon">${Icons.play}</span>
                 </div>
-                ${groupBroken ? '<span class="playback-badge" title="Playback failed">HS</span>' : ''}
+                ${groupBroken ? '<span class="playback-badge" title="Playback failed">⚠</span>' : ''}
                 ${versionCount > 1 ? `<button class="version-badge" title="Choose version">${versionCount} versions</button>` : ''}
                 ${languageBadge ? `<span class="version-language-badge ${versionCount > 1 ? 'with-version-badge' : ''}">${MediaUtils.escapeHtml(languageBadge)}</span>` : ''}
                 ${watch.status === 'watched' ? '<span class="watched-badge" title="Watched">✓</span>' : ''}
@@ -1656,7 +1656,7 @@ class MoviesPage {
 
         const version = MediaUtils.parseVersionInfo(movie.name);
         const rating = parseFloat(displayMovie.rating || displayMovie.tmdb?.vote_average);
-        const ratingLabel = Number.isFinite(rating) && rating > 0 ? `Note ${rating.toFixed(1).replace('.0', '')}` : '';
+        const ratingLabel = Number.isFinite(rating) && rating > 0 ? `★ ${rating.toFixed(1).replace('.0', '')}` : '';
         const metaParts = [
             this.getItemYear(displayMovie),
             this.getMovieDuration(displayMovie),

@@ -473,15 +473,15 @@ class LiveGuideFusion {
             return {
                 label: total > 1 ? `OK ${healthyCount}/${total}` : 'OK',
                 className: 'ok',
-                title: `${healthyCount} variante${healthyCount > 1 ? 's' : ''} fonctionnelle${healthyCount > 1 ? 's' : ''}`
+                title: `${healthyCount} working variant${healthyCount > 1 ? 's' : ''}`
             };
         }
 
         if (problematicCount === total) {
             return {
-                label: total > 1 ? `${total} HS` : 'HS',
+                label: total > 1 ? `${total} DOWN` : 'DOWN',
                 className: 'problem',
-                title: `${total} variante${total > 1 ? 's' : ''} testee${total > 1 ? 's' : ''} HS`
+                title: `${total} variant${total > 1 ? 's' : ''} tested, none working`
             };
         }
 

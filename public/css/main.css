@@ -28,6 +28,13 @@
   --color-text-secondary: #94A3B8;
   --color-text-muted: #71717a;
 
+  /* Compatibility aliases — some mobile-nav and focus rules reference these
+     legacy names. Point them at the canonical tokens so the active bottom tab
+     and focus rings render in the brand colour instead of falling back to grey
+     (the active tab was inheriting the inactive grey) or a non-brand violet. */
+  --primary-blue: var(--color-accent);
+  --text-secondary: var(--color-text-secondary);
+
   --color-border: #27272a;
   --color-border-light: #3f3f46;
 
@@ -79,6 +86,32 @@
   box-sizing: border-box;
   margin: 0;
   padding: 0;
+}
+
+/* Accessibility: a visible keyboard-focus indicator for any interactive element
+   that doesn't already define its own. :where() keeps specificity at zero, so
+   bespoke focus styles (border-highlight inputs, branded nav chips) still win,
+   and it never shows on plain mouse/touch interaction (focus-visible only). */
+:where(a, button, input, select, textarea, summary, [role="button"], [tabindex]:not([tabindex="-1"])):focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* Touch polish: remove the default grey tap-flash and give a subtle, transient
+   pressed state on touch. scale() is GPU-composited (no reflow); :active ≠ the
+   .active selected-tab class, so this never fights selected styling. */
+html {
+  -webkit-tap-highlight-color: transparent;
+}
+
+@media (hover: none) {
+  button:active,
+  .btn:active,
+  .nav-link:active,
+  [role="button"]:active {
+    transform: scale(0.97);
+    opacity: 0.85;
+  }
 }
 
 html,
