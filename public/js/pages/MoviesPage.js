@@ -1689,6 +1689,7 @@ class MoviesPage {
         this.syncDetailFavoriteButton();
         this.syncDownloadButton();
         this.renderMovieVersions(movie);
+        this.renderMoreLikeThis(movie);
 
         if (focusVersions) {
             setTimeout(() => {
@@ -1697,8 +1698,39 @@ class MoviesPage {
         }
     }
 
+    // "More like this": a genre-matched rail at the bottom of the fiche so the user
+    // keeps browsing instead of backing out. Fire-and-forget; a token guards against
+    // a stale fetch landing on a newer fiche.
+    async renderMoreLikeThis(movie) {
+        const host = this.detailsPanel;
+        if (!host || !window.GenreRails?.appendCards || !API.media?.genreItems) return;
+        const token = (this._mltToken = (this._mltToken || 0) + 1);
+        host.querySelector('.more-like-this')?.remove();
+        try {
+            const T = window.GenreTaxonomy;
+            const bucket = T ? T.classifyTitle(this.getCategoryName(movie), this.getMovieGenres(movie))[0] : null;
+            if (!bucket) return;
+            const payload = await API.media.genreItems({ type: 'movie', bucket, limit: 24, ...this.currentLanguageParams() });
+            if (token !== this._mltToken || host.classList.contains('hidden')) return;
+            const curKey = `${movie?.sourceId}:${movie?.stream_id}`;
+            const items = (payload?.items || [])
+                .filter(i => `${i.sourceId}:${i.stream_id}` !== curKey)
+                .slice(0, 18);
+            if (!items.length) return;
+            host.querySelector('.more-like-this')?.remove();
+            const section = document.createElement('section');
+            section.className = 'more-like-this';
+            section.innerHTML = '<h3 class="more-like-title">More like this</h3><div class="horizontal-scroll more-like-grid"></div>';
+            host.appendChild(section);
+            window.GenreRails.appendCards(section.querySelector('.more-like-grid'), items, {
+                onItemClick: (item) => this.openRailItem(item)
+            });
+        } catch (_) { /* the fiche works fine without related titles */ }
+    }
+
     hideDetails() {
         try { window.app?.forgetOpenFiche?.(); } catch (_) { /* noop */ }
+        this.detailsPanel?.querySelector('.more-like-this')?.remove();
         this.stopDownloadPolling();
         this.detailsPanel?.classList.add('hidden');
         this.container?.classList.remove('hidden');

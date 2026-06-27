@@ -1136,7 +1136,27 @@ class HomePage {
             });
         });
 
+        list.querySelectorAll('.ch-remove').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.removeHistoryItem(Number(btn.dataset.historyIndex));
+            });
+        });
+
         this.updateScrollArrows();
+    }
+
+    // Remove a title from Continue Watching: drop it from the row immediately, then
+    // delete the history record server-side (best-effort — it returns on a failed
+    // delete at the next refresh).
+    async removeHistoryItem(index) {
+        const item = this.historyItems[index];
+        if (!item) return;
+        this.historyItems.splice(index, 1);
+        this.renderHistory(this.historyItems);
+        const recordId = item.id;
+        if (recordId == null) return;
+        try { await window.API?.history?.remove?.(recordId); } catch (_) { /* best-effort */ }
     }
 
     createHistoryCard(item, index) {
@@ -1149,11 +1169,15 @@ class HomePage {
         const title = this.displayTitle(item);
         const subtitle = data.subtitle || this.typeLabel(type);
         const posterUrl = this.resolveImageUrl(this.posterFromItem(item), '/img/norva-media-placeholder.png');
+        const remainingMin = duration > progress ? Math.max(1, Math.round((duration - progress) / 60)) : 0;
+        const timeLeft = remainingMin > 0 ? `${remainingMin} min left` : '';
 
         return `
             <div class="dashboard-card" data-id="${this.escapeAttr(itemId)}" data-type="${this.escapeAttr(type)}" data-history-index="${index}">
                 <div class="card-image">
                     <img src="${this.escapeAttr(posterUrl)}" alt="${this.escapeAttr(title)}" loading="lazy" onerror="this.onerror=null;this.src='/img/norva-media-placeholder.png'">
+                    <button class="ch-remove" type="button" data-history-index="${index}" aria-label="Remove from Continue Watching">✕</button>
+                    ${timeLeft ? `<div class="card-timeleft">${timeLeft}</div>` : ''}
                     <div class="progress-bar-container">
                         <div class="progress-bar" style="width: ${percent}%"></div>
                     </div>
