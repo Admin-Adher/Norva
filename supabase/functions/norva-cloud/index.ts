@@ -1348,27 +1348,57 @@ function dedupeByConflictKey(rows: JsonRecord[]): JsonRecord[] {
   return [...map.values()];
 }
 
+const IMPORT_BATCH_SIZE = 250;
+
+// Retry transient contention (statement timeout / deadlock / lock / resource) with
+// backoff long enough to ride out a checkpoint/IO spike; a schema error won't
+// clear, so stop retrying it.
+async function withDbRetry(op: () => PromiseLike<{ error: unknown }>, label: string) {
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const { error } = await op();
+    if (!error) return;
+    lastError = error;
+    const msg = String((error as { message?: string }).message || error).toLowerCase();
+    if (!/timeout|deadlock|could not serialize|lock|connection|temporar|resource/.test(msg)) break;
+    await new Promise((r) => setTimeout(r, Math.min(8000, Math.round(700 * Math.pow(1.7, attempt)))));
+  }
+  if (lastError) throwDb(lastError, label);
+}
+
 // Incremental import: upsert a batch of rows (no delete, no select-back). The
 // initial delete-all happens once per fresh sync; finalize reloads rows from the
 // table, so we don't need the saved rows here — keeping peak memory tiny.
+// Small batches keep each statement well under the edge connection's 8s budget;
+// ignoreDuplicates (ON CONFLICT DO NOTHING) skips the row-lock + re-write of an
+// already-present stream (a fresh sync deletes first, so these are inserts), which
+// is far lighter on a busy DB than DO UPDATE.
 async function appendSourceItems(sourceId: string, userId: string, rows: JsonRecord[], db: SupabaseClient) {
-  for (let index = 0; index < rows.length; index += 500) {
-    const chunk = rows.slice(index, index + 500);
+  for (let index = 0; index < rows.length; index += IMPORT_BATCH_SIZE) {
+    const chunk = rows.slice(index, index + IMPORT_BATCH_SIZE);
     if (!chunk.length) continue;
-    let lastError: unknown = null;
-    // Retry transient contention (statement timeout / deadlock / lock / resource);
-    // a schema error won't clear, so stop retrying it.
-    for (let attempt = 0; attempt < 4; attempt++) {
-      const { error } = await db
-        .from("cloud_media_items")
-        .upsert(chunk, { onConflict: "source_id,item_type,external_id" });
-      if (!error) { lastError = null; break; }
-      lastError = error;
-      const msg = String((error as { message?: string }).message || error).toLowerCase();
-      if (!/timeout|deadlock|could not serialize|lock|connection|temporar|resource/.test(msg)) break;
-      await new Promise((r) => setTimeout(r, 800 * (attempt + 1)));
-    }
-    if (lastError) throwDb(lastError, "Unable to save cloud media items");
+    await withDbRetry(
+      () => db.from("cloud_media_items").upsert(chunk, { onConflict: "source_id,item_type,external_id", ignoreDuplicates: true }),
+      "Unable to save cloud media items",
+    );
+  }
+}
+
+// Clear a source's items in bounded chunks so no single DELETE exceeds the edge
+// connection's 8s statement budget (a big catalogue is 100k+ rows).
+async function deleteSourceItems(sourceId: string, userId: string, db: SupabaseClient) {
+  for (let guard = 0; guard < 2000; guard++) {
+    const { data, error } = await db
+      .from("cloud_media_items")
+      .select("id")
+      .eq("source_id", sourceId)
+      .eq("user_id", userId)
+      .limit(2000);
+    if (error) throwDb(error, "Unable to clear old catalog items");
+    if (!data || !data.length) return;
+    const ids = (data as { id: string }[]).map((r) => r.id);
+    await withDbRetry(() => db.from("cloud_media_items").delete().in("id", ids), "Unable to clear old catalog items");
+    if (data.length < 2000) return;
   }
 }
 
@@ -1489,7 +1519,7 @@ async function driveXtreamSyncToReady(sourceId: string, userId: string, db: Supa
     const cats = recordOrEmpty(cursor.cats);
 
     if (!cursor.deleted) {
-      await db.from("cloud_media_items").delete().eq("source_id", sourceId).eq("user_id", userId);
+      await deleteSourceItems(sourceId, userId, db);
       cursor.deleted = true;
       await persist({
         stage: "discovering",
