@@ -14,12 +14,12 @@ const PORT = process.env.PORT || 3000;
 // Required for correct protocol detection behind reverse proxies (nginx, Caddy, etc.)
 app.set('trust proxy', true);
 
-// CORS — allow cross-origin requests from the Vercel web version and any
-// explicitly configured origin (CORS_ORIGINS env, comma-separated).
+// CORS — allow cross-origin requests from any explicitly configured
+// origin (CORS_ORIGINS env, comma-separated).
 app.use((req, res, next) => {
     const origin = req.headers.origin || '';
     const allowed = process.env.CORS_ORIGINS ? process.env.CORS_ORIGINS.split(',').map(s => s.trim()) : [];
-    if (origin && (origin.includes('vercel.app') || allowed.includes(origin))) {
+    if (origin && allowed.includes(origin)) {
         res.setHeader('Access-Control-Allow-Origin', origin);
         res.setHeader('Access-Control-Allow-Credentials', 'true');
         res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');

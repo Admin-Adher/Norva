@@ -2,7 +2,7 @@
  * API Client - Frontend API wrapper for Norva
  */
 
-// When running from a remote host (e.g. Vercel web version), all API calls
+// When running from a remote host (e.g. the hosted web version), all API calls
 // are proxied to the configured hub URL stored in localStorage.
 function _hubBase() {
     const hub = localStorage.getItem('norva-hub-url');

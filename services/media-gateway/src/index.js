@@ -61,8 +61,6 @@ const DEFAULT_ALLOWED_ORIGINS = [
     'https://norva.tv',
     'https://app.norva.tv',
     'https://norva-web.pages.dev',
-    'https://norva-eight.vercel.app',
-    'https://norva-pgkk.vercel.app',
     'http://localhost:3000',
     'http://localhost:5173',
 ].join(',');

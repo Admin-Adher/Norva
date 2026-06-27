@@ -15,8 +15,9 @@ const HOP_BY_HOP_HEADERS = new Set([
 ]);
 
 const DEFAULT_ALLOWED_ORIGINS = [
-  "https://norva-eight.vercel.app",
-  "https://norva-pgkk.vercel.app",
+  "https://norva.tv",
+  "https://app.norva.tv",
+  "https://norva-web.pages.dev",
   "http://localhost:3000",
   "http://localhost:5173",
 ];
