@@ -1008,9 +1008,21 @@ async function listPopularTitleRail(
 ) {
   try {
     const candidates = await listVerifiedTitleCandidates(userId, itemType);
+    // Real-views signal: distinct users who have watched each title (global), so the
+    // Top 10 reflects actual viewing. TMDB rating is the tiebreak, so it still reads as
+    // a sensible ranking while views are sparse and self-improves as they accumulate.
+    const viewsByTmdb = new Map<string, number>();
+    try {
+      const { data: top } = await db.rpc("top_viewed_titles", { p_item_type: itemType, p_limit: 200 });
+      for (const r of ((top ?? []) as JsonRecord[])) {
+        viewsByTmdb.set(String(r.provider_tmdb_id), Number(r.views) || 0);
+      }
+    } catch (_) { /* function unavailable → fall back to rating-only ranking below */ }
+    const viewsOf = (row: JsonRecord) => viewsByTmdb.get(String(row.provider_tmdb_id)) ?? 0;
     const titles = candidates
-      .filter((row) => numberOrNull(titleTmdb(row).vote_average) !== null)
+      .filter((row) => numberOrNull(titleTmdb(row).vote_average) !== null || viewsOf(row) > 0)
       .sort((a, b) =>
+        viewsOf(b) - viewsOf(a) ||
         numberOr(titleTmdb(b).vote_average, 0) - numberOr(titleTmdb(a).vote_average, 0) ||
         numberOr(b.variant_count, 0) - numberOr(a.variant_count, 0) ||
         String(b.synced_at ?? b.updated_at ?? "").localeCompare(String(a.synced_at ?? a.updated_at ?? ""))
@@ -1022,7 +1034,7 @@ async function listPopularTitleRail(
       title,
       itemType,
       source: "titles",
-      curation: { kind: "popular", metric: "tmdb_vote_average" },
+      curation: { kind: "popular", metric: "views+tmdb_vote_average" },
       items: titles.map((row) => titleRailItem(row, variantsByTitle.get(String(row.id)) ?? [], lang)),
     };
   } catch (error) {
