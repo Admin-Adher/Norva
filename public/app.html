@@ -249,6 +249,14 @@
             <div class="video-container" id="video-container">
               <video id="video-player" playsinline></video>
 
+              <!-- Channel-switch splash: the target channel's logo + name painted
+                   over the black video until the first usable frame, so zapping
+                   never shows a bare black box. -->
+              <div class="channel-switch-splash hidden" id="channel-switch-splash" aria-hidden="true">
+                <img class="css-logo" id="channel-switch-logo" src="" alt="">
+                <div class="css-name" id="channel-switch-name"></div>
+              </div>
+
               <!-- Custom Controls Overlay -->
               <div class="watch-overlay hidden" id="player-controls-overlay">
                 <!-- Top Bar -->
@@ -285,6 +293,14 @@
                         class="icon icon-pause hidden">
                         <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
                       </svg>
+                    </button>
+
+                    <!-- One-hand channel zap (live TV only; shown/hidden with the live badge). -->
+                    <button class="watch-btn live-only hidden" id="player-prev-channel" type="button" title="Previous channel" aria-label="Previous channel">
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z" /></svg>
+                    </button>
+                    <button class="watch-btn live-only hidden" id="player-next-channel" type="button" title="Next channel" aria-label="Next channel">
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6z" /></svg>
                     </button>
 
                     <!-- Live status / "back to live" badge (live TV only).

@@ -361,6 +361,24 @@ class VideoPlayer {
             e.stopPropagation();
             if (this._liveBadge.classList.contains('behind')) this.jumpToLive();
         });
+
+        // Channel-switch splash (logo + name over the black video until first frame).
+        this._switchSplash = document.getElementById('channel-switch-splash');
+        this._switchSplashLogo = document.getElementById('channel-switch-logo');
+        this._switchSplashName = document.getElementById('channel-switch-name');
+
+        // One-hand channel zap (live only). The channel list owns the actual switch
+        // (and its 300ms anti-hammer debounce), so a fast tap-tap opens one session.
+        this._prevChannelBtn = document.getElementById('player-prev-channel');
+        this._nextChannelBtn = document.getElementById('player-next-channel');
+        this._prevChannelBtn?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            window.app?.channelList?.selectPrevChannel?.();
+        });
+        this._nextChannelBtn?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            window.app?.channelList?.selectNextChannel?.();
+        });
         // Track pause/resume to drive the badge and the X-min snap-to-live timer.
         this.video.addEventListener('pause', () => this._onLivePauseStateChange(true));
         this.video.addEventListener('play', () => this._onLivePauseStateChange(false));
@@ -1391,6 +1409,7 @@ class VideoPlayer {
         ++this._variantSwitchSeq;
         const cloudPlaybackSessionId = channel.cloudPlaybackSessionId || channel.playbackSessionId || null;
         this.currentChannel = channel;
+        this._showChannelSplash(channel);
         this._playbackStatusOkReported = false;
         this._liveErrorReported = false;
         this.applyQualityGroup(channel);
@@ -1824,6 +1843,7 @@ class VideoPlayer {
     markPlaybackUsable() {
         if (!this.hasCurrentMedia() || this._playbackStatusOkReported) return;
         this._playbackStatusOkReported = true;
+        this._hideChannelSplash();
         this.resetGatewayHlsRetries();
         // Playback recovered — refill the gateway re-resolve budget so a later
         // session death on this channel can self-heal again.
@@ -1885,6 +1905,29 @@ class VideoPlayer {
 
     _showLiveBadge(show) {
         this._liveBadge?.classList.toggle('hidden', !show);
+        this._prevChannelBtn?.classList.toggle('hidden', !show);
+        this._nextChannelBtn?.classList.toggle('hidden', !show);
+    }
+
+    // Paint the target channel's logo + name over the black video during a switch,
+    // so zapping never shows a bare black box. Hidden on the first usable frame
+    // (markPlaybackUsable) or on error; a 12s backstop guarantees it can't linger.
+    _showChannelSplash(channel) {
+        if (!this._switchSplash || !channel) return;
+        const logo = channel.tvgLogo || channel.stream_icon || channel.poster_url || channel.logo || '';
+        if (this._switchSplashLogo) {
+            if (logo) { this._switchSplashLogo.src = logo; this._switchSplashLogo.style.display = ''; }
+            else { this._switchSplashLogo.removeAttribute('src'); this._switchSplashLogo.style.display = 'none'; }
+        }
+        if (this._switchSplashName) this._switchSplashName.textContent = channel.name || channel.title || '';
+        this._switchSplash.classList.remove('hidden');
+        clearTimeout(this._switchSplashTimer);
+        this._switchSplashTimer = setTimeout(() => this._hideChannelSplash(), 12000);
+    }
+
+    _hideChannelSplash() {
+        clearTimeout(this._switchSplashTimer);
+        this._switchSplash?.classList.add('hidden');
     }
 
     // Furthest live position the player can reach right now (the live edge),
@@ -2910,6 +2953,7 @@ class VideoPlayer {
      */
     showError(message) {
         // Replace the spinner with the message (a failed channel must not spin forever).
+        this._hideChannelSplash();
         this.loadingSpinner?.classList.remove('show');
         this.liveFsCta?.classList.add('hidden');
         this.overlay.classList.remove('hidden');
