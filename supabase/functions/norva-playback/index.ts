@@ -986,6 +986,30 @@ async function requestEdgeCoordinator(runtimeConfig: RuntimeConfig, path: string
   }
 }
 
+// Phase 2 dedup read flag: when set to "catalog_media_items", playback resolves
+// the provider-global catalogue instead of the per-user copy. Default OFF.
+function mediaReadFromCatalog(): boolean {
+  return (Deno.env.get("NORVA_CATALOG_MEDIA_READ_SOURCE") || "").trim() === "catalog_media_items";
+}
+
+// The provider host for a source (non-secret, from config_hint). Cached in-isolate
+// so the flag-on playback path adds at most one lookup per source per isolate.
+const sourceHostCache = new Map<string, string>();
+async function resolveSourceHost(sourceId: string, userId: string, db: SupabaseClient): Promise<string> {
+  const key = `${userId}:${sourceId}`;
+  const cached = sourceHostCache.get(key);
+  if (cached !== undefined) return cached;
+  const { data } = await db
+    .from("cloud_sources")
+    .select("config_hint")
+    .eq("id", sourceId)
+    .eq("user_id", userId)
+    .maybeSingle();
+  const host = stringOr(recordOrEmpty(data?.config_hint).serverHost, "");
+  sourceHostCache.set(key, host);
+  return host;
+}
+
 async function resolvePlaybackTarget(
   sourceId: string,
   itemType: string,
@@ -994,15 +1018,37 @@ async function resolvePlaybackTarget(
   db: SupabaseClient,
   requestHint: JsonRecord = {},
 ) {
-  const { data: item, error } = await db
-    .from("cloud_media_items")
-    .select("playback_hint,metadata")
-    .eq("source_id", sourceId)
-    .eq("user_id", userId)
-    .eq("item_type", itemType)
-    .eq("external_id", itemId)
-    .maybeSingle();
-  if (error) throwDb(error, "Unable to resolve playback item");
+  // Phase 2 dedup: when the read flag is on, resolve playback_hint/metadata from
+  // the provider-global catalog_media_items (keyed by server_host) instead of the
+  // per-user copy, with a per-user fallback so a global miss can never break
+  // playback. mirror-verify proves playback_hint is byte-identical between the two,
+  // so flag-on is provably equivalent — until the per-user copy is thinned away.
+  let item: { playback_hint?: unknown; metadata?: unknown } | null = null;
+  if (mediaReadFromCatalog()) {
+    const host = await resolveSourceHost(sourceId, userId, db);
+    if (host) {
+      const { data } = await db
+        .from("catalog_media_items")
+        .select("playback_hint,metadata")
+        .eq("server_host", host)
+        .eq("item_type", itemType)
+        .eq("external_id", itemId)
+        .maybeSingle();
+      if (data) item = data;
+    }
+  }
+  if (!item) {
+    const { data, error } = await db
+      .from("cloud_media_items")
+      .select("playback_hint,metadata")
+      .eq("source_id", sourceId)
+      .eq("user_id", userId)
+      .eq("item_type", itemType)
+      .eq("external_id", itemId)
+      .maybeSingle();
+    if (error) throwDb(error, "Unable to resolve playback item");
+    item = data;
+  }
   if (!item) {
     if (itemType === "series") {
       const sourceConfig = await loadSourceConfig(sourceId, userId, db);

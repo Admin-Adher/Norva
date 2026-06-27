@@ -63,17 +63,23 @@
       peuplé (40 585/9 500) ; flag OFF → 0 (rien ne se peuple). apdxes intact.
       _Activation : `alter role authenticator set app.norva_catalog_dual_write = '1';`_
 
+### Mirror-verify + lecture playback flag-gated — construit + testé (live, flag OFF)
+- [x] **`catalog_media_mirror_diff(p_source_id)`** — le gate avant bascule : prouve que le global
+      est un miroir fidèle du per-user. Migration `20260627190000`. **Vérifié sur apdxes (40 585
+      comparés)** : `cloud_only=0`, `mismatch_playback_hint=0`, `mismatch_metadata=0`,
+      `global_weaker_*=0` ⇒ **miroir 100% fidèle**, gate VERT pour la bascule playback.
+- [x] **Lecture playback flag-gated** : `resolvePlaybackTarget` (`norva-playback`) lit
+      `playback_hint`/`metadata` depuis `catalog_media_items` (global, par `server_host`) avec
+      **fallback per-user** (un miss global ne casse jamais la lecture), derrière
+      `NORVA_CATALOG_MEDIA_READ_SOURCE` (défaut OFF). `deno check` OK ; déployé (défaut OFF =
+      lecture per-user inchangée). Comme le mirror-verify prouve `playback_hint` identique,
+      flag-ON est **prouvé équivalent**.
+
 ---
 
 ## ⏳ RESTE À FAIRE (Phase 2, multi-session, additif + réversible)
 
 Ordre conseillé. Tout reste **derrière un flag par défaut OFF** ⇒ zéro impact tant que non basculé.
-- [ ] **Mirror-verify** : `catalog_media_mirror_diff()` (sur le modèle de `catalog_mirror_diff`)
-      ⇒ prouver que le global est un miroir fidèle du per-user avant tout flip.
-- [ ] **Lecture playback flag-gated** : `resolvePlaybackTarget` (`norva-playback`) lit
-      `playback_hint` depuis `catalog_media_items` (global) + creds per-user, derrière
-      `NORVA_CATALOG_MEDIA_READ_SOURCE` (défaut OFF). _Touche la lecture (critique) → incréments
-      sûrs + mirror-verify clean d'abord._
 - [ ] **Lecture grille/live flag-gated** : `listMediaItems` + rails live lisent le global
       (overlay), filtrage/état restent per-user.
 - [ ] **Amincir le per-user** : une fois les reads stables sur le global, réduire
