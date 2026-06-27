@@ -980,7 +980,7 @@ class LiveGuideFusion {
         `;
 
         const rows = this.container.querySelector('.live-guide-rows');
-        if (rows && prevScroll) rows.scrollTop = prevScroll;
+        if (rows && prevScroll) { this._lastProgrammaticGuideScrollAt = Date.now(); rows.scrollTop = prevScroll; }
         // Keep the source proxy in sync with the real (hidden) #source-select.
         const srcProxy = this.container.querySelector('.live-guide-source');
         const realSel = document.getElementById('source-select');
@@ -996,23 +996,34 @@ class LiveGuideFusion {
         }
         this.updateHighlights();
 
-        // On first load, scroll the rows to the channel that's playing (or the previewed
-        // last-watched one) so its row is visible instead of stuck at the top — on a full
-        // lineup the highlighted row sits well below the fold. Once only: later EPG-driven
-        // re-renders restore the user's own scroll (above), so this never yanks the list.
-        if (!this._didRevealPlaying && rows) {
+        // Keep the playing row (or the previewed last-watched one) centered in the rows on
+        // load AND through the EPG-driven re-renders that land a beat later — those add
+        // now/next lines that grow the rows above and would otherwise drift the centered
+        // row off-screen. Re-center on every render UNTIL the user scrolls the guide
+        // themselves, after which their position is preserved (prevScroll, above).
+        if (rows && !this._userScrolledGuide) {
             const targetRow = rows.querySelector('.live-guide-row.playing')
                 || rows.querySelector('.live-guide-row.selected');
             if (targetRow) {
-                this._didRevealPlaying = true;
                 requestAnimationFrame(() => {
                     try {
                         const r = rows.getBoundingClientRect();
                         const pr = targetRow.getBoundingClientRect();
+                        this._lastProgrammaticGuideScrollAt = Date.now();
                         rows.scrollTop += (pr.top - r.top) - (rows.clientHeight - targetRow.offsetHeight) / 2;
                     } catch (_) { /* best-effort */ }
                 });
             }
+        }
+        // First manual scroll of the guide hands control to the user — stop auto-centering.
+        // Our own programmatic scrolls (above + the prevScroll restore) are ignored via a
+        // short time guard so they don't count as a manual scroll.
+        if (rows) {
+            rows.addEventListener('scroll', () => {
+                if (Date.now() - (this._lastProgrammaticGuideScrollAt || 0) > 250) {
+                    this._userScrolledGuide = true;
+                }
+            }, { passive: true });
         }
         this.syncNavigationState();
         this.app.channelList.updateScanScopeHint?.();
