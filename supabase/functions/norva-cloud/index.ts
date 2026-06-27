@@ -1847,7 +1847,10 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
         tmdbValidateLimit: boundedInt(Deno.env.get("NORVA_TMDB_VALIDATE_FINALIZE_LIMIT"), 0, 0, 1000),
       });
       const nextOffset = Math.min(totalVod, batchOffset + rows.length);
-      const done = rows.length < batchLimit || nextOffset >= totalVod;
+      // Done only when the catalogue is exhausted — NOT when a page is short of
+      // batchLimit (PostgREST caps reads at 1000 rows, so a full page can be
+      // < batchLimit while plenty of VOD remains).
+      const done = rows.length === 0 || nextOffset >= totalVod;
       await reportProgress({
         stage: done ? "finalizing" : "building_titles",
         percent: done ? 96 : titleFinalizePercent(nextOffset, totalVod),
