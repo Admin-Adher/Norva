@@ -9055,12 +9055,14 @@ kbd {
 
 .continue-row {
   padding: var(--space-md) var(--space-md) 0;
+  transition: padding 0.18s ease;
 }
 
 .continue-row h3 {
   font-size: 1rem;
   margin-bottom: var(--space-sm);
   color: var(--color-text-secondary);
+  transition: font-size 0.18s ease, margin-bottom 0.18s ease, opacity 0.18s ease;
 }
 
 .continue-scroller {
@@ -9086,7 +9088,7 @@ kbd {
   border-radius: var(--radius-md);
   overflow: hidden;
   cursor: pointer;
-  transition: border-color 0.15s ease, transform 0.15s ease;
+  transition: border-color 0.15s ease, transform 0.15s ease, flex-basis 0.18s ease;
 }
 
 .continue-card:hover {
@@ -9099,6 +9101,7 @@ kbd {
   height: 90px;
   object-fit: cover;
   flex-shrink: 0;
+  transition: width 0.18s ease, height 0.18s ease;
 }
 
 .continue-card-info {
@@ -9133,6 +9136,45 @@ kbd {
   margin-top: 4px;
   border-radius: var(--radius-full);
   overflow: hidden;
+}
+
+/* Compact pinned strip: while the grid is scrolled, Continue Watching shrinks
+   to reclaim vertical space but stays visible/usable at the top. */
+.continue-row.is-compact {
+  padding-top: var(--space-xs);
+  padding-bottom: 0;
+}
+
+.continue-row.is-compact h3 {
+  font-size: 0.78rem;
+  margin-bottom: 4px;
+  opacity: 0.75;
+}
+
+.continue-row.is-compact .continue-scroller {
+  gap: var(--space-xs);
+  padding-bottom: var(--space-xs);
+}
+
+.continue-row.is-compact .continue-card {
+  flex: 0 0 168px;
+}
+
+.continue-row.is-compact .continue-card img {
+  width: 40px;
+  height: 60px;
+}
+
+.continue-row.is-compact .continue-card-info {
+  padding: var(--space-xs) var(--space-xs) var(--space-xs) 0;
+}
+
+.continue-row.is-compact .continue-card-title {
+  font-size: 0.74rem;
+}
+
+.continue-row.is-compact .continue-card-subtitle {
+  display: none;
 }
 
 .mobile-filter-button,

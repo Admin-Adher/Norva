@@ -126,6 +126,10 @@ class SeriesPage {
             }
         }, { rootMargin: '200px' });
 
+        // Continue Watching shrinks to a compact pinned strip while the grid scrolls,
+        // reclaiming vertical space without disappearing.
+        this.container?.addEventListener('scroll', () => this.updateContinueCompact(), { passive: true });
+
         const favBtn = document.getElementById('series-favorites-btn');
         favBtn?.addEventListener('click', () => {
             this.showFavoritesOnly = !this.showFavoritesOnly;
@@ -1032,6 +1036,9 @@ class SeriesPage {
         // Flat card grid → drop the rail-host modifier so the grid centers/wraps.
         this.container.classList.remove('rail-host');
         this.container.innerHTML = '';
+        // Re-rendering resets scrollTop to 0 without firing a scroll event, so
+        // re-sync the compact strip to avoid it sticking shrunk at the top.
+        this.updateContinueCompact();
 
         // No results → disable "Random" so it isn't a silent no-op.
         if (this.randomBtn) this.randomBtn.disabled = cards.length === 0;
@@ -1254,6 +1261,17 @@ class SeriesPage {
         });
 
         this.continueRow.classList.remove('hidden');
+        this.updateContinueCompact();
+    }
+
+    // Toggle the compact pinned strip based on how far the grid is scrolled.
+    // Hysteresis (compact at >32px, expand at <8px) prevents flicker at the edge.
+    updateContinueCompact() {
+        if (!this.continueRow || !this.container) return;
+        const y = this.container.scrollTop || 0;
+        const compact = this.continueRow.classList.contains('is-compact');
+        if (!compact && y > 32) this.continueRow.classList.add('is-compact');
+        else if (compact && y < 8) this.continueRow.classList.remove('is-compact');
     }
 
     async resumeEpisodeFromHistory(h) {
