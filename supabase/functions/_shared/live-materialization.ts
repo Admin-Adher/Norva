@@ -33,6 +33,23 @@ export async function refreshMaterializedLiveCatalog(
   };
 }
 
+// Materialise ONE chunk of live rows (build its catalogue + upsert its channels
+// and variants) without clearing. Lets the finalize stepper walk a huge channel
+// list (50k+) in bounded slices instead of parsing it all in one isolate — which
+// exceeds the edge compute limit. Channels that recur across chunks merge by
+// logical_id; variants merge by (logical_id, stream_id, label).
+export async function materializeLiveChunk(
+  db: SupabaseLike,
+  input: { userId: string; sourceId: string; rows: LiveCatalogItem[]; country?: string },
+) {
+  const plan = buildLiveMaterializationPlan(input);
+  if (!plan.rawLive) return { rawLive: 0, logicalChannels: 0, liveVariants: 0 };
+  const insertedChannels = await upsertLiveChannelRows(db, plan.channelRows);
+  const channelIdByLogicalId = new Map(insertedChannels.map((row) => [String(row.logical_id), String(row.id)]));
+  const liveVariants = await upsertLiveVariantRows(db, plan.variantRows, channelIdByLogicalId);
+  return { rawLive: plan.rawLive, logicalChannels: plan.channelRows.length, liveVariants };
+}
+
 export function buildLiveMaterializationPlan(
   input: {
     userId: string;

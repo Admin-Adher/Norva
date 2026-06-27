@@ -4,6 +4,7 @@ import {
   buildLiveMaterializationPlan,
   clearLiveMaterialization,
   fetchLiveChannelIdMap,
+  materializeLiveChunk,
   refreshMaterializedLiveCatalog,
   upsertLiveChannelRows,
   upsertLiveVariantRows,
@@ -991,149 +992,46 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
       recoveredFromImportedItems: true,
     };
 
-    if (phase === "live") {
-      const existingLiveCatalog = await existingLiveMaterializationCounts(sourceId, userId, db);
+    if (phase === "live" || phase === "live_channels" || phase === "live_variants") {
+      const totalVod = counts.movies + counts.series;
       if (counts.live <= 0) {
-        const totalVod = counts.movies + counts.series;
         return {
-          sourceId,
-          status: "syncing",
-          phase: "live",
+          sourceId, status: "syncing", phase: "live",
           nextPhase: totalVod > 0 ? "titles" : "complete",
-          nextOffset: 0,
-          limit: batchLimit,
-          totalVod,
-          ...result,
+          nextOffset: 0, limit: batchLimit, totalVod, ...result,
           liveCatalog: { rawLive: 0, logicalChannels: 0, liveVariants: 0, skipped: true },
         };
       }
-      const liveCatalogComplete = existingLiveCatalog.logicalChannels > 0 && existingLiveCatalog.liveVariants > 0;
-      if (liveCatalogComplete) {
-        await reportProgress({
-          stage: "building_titles",
-          percent: 86,
-          steps: { finalize: { status: "running" } },
-        });
-        const totalVod = counts.movies + counts.series;
+      // Materialise the live catalogue in bounded chunks: a 50k+ channel list
+      // can't be loaded + name-parsed whole in one isolate (it exceeds the edge
+      // compute limit). Walk live rows by offset, clearing once at the start;
+      // channels/variants merge across chunks by their logical/stream keys.
+      const LIVE_CHUNK = 4000;
+      if (batchOffset === 0) await clearLiveMaterialization(db, sourceId, userId);
+      const liveChunk = await loadSourceItems(sourceId, userId, db, { itemTypes: ["live"], offset: batchOffset, limit: LIVE_CHUNK });
+      if (!liveChunk.length) {
+        await reportProgress({ stage: "building_titles", percent: 86, steps: { finalize: { status: "running" } } });
         return {
-          sourceId,
-          status: "syncing",
-          phase: "live",
+          sourceId, status: "syncing", phase: "live",
           nextPhase: totalVod > 0 ? "titles" : "complete",
-          nextOffset: 0,
-          limit: batchLimit,
-          totalVod,
-          ...result,
-          liveCatalog: { ...existingLiveCatalog, rawLive: counts.live, reused: true },
+          nextOffset: 0, limit: batchLimit, totalVod, ...result,
+          liveCatalog: { rawLive: counts.live, done: true },
         };
       }
-
-      await reportProgress({
-        stage: "building_live_channels",
-        percent: 76,
-        steps: { finalize: { status: "running" } },
-      });
-      await clearLiveMaterialization(db, sourceId, userId);
-      const livePlan = buildLiveMaterializationPlan({
-        sourceId,
-        userId,
-        rows: await loadSourceItems(sourceId, userId, db, { itemTypes: ["live"] }),
+      const mat = await materializeLiveChunk(db, {
+        sourceId, userId, rows: liveChunk,
         country: options.country || stringOr(config.country, "FR"),
       });
+      const nextOffset = batchOffset + liveChunk.length;
       await reportProgress({
         stage: "building_live_channels",
-        percent: 76,
+        percent: Math.max(76, Math.min(85, 76 + Math.round((9 * nextOffset) / Math.max(1, counts.live)))),
         steps: { finalize: { status: "running" } },
       });
       return {
-        sourceId,
-        status: "syncing",
-        phase: "live",
-        nextPhase: livePlan.channelRows.length > 0 ? "live_channels" : "titles",
-        nextOffset: 0,
-        limit: batchLimit,
-        totalLiveChannels: livePlan.channelRows.length,
-        totalLiveVariants: livePlan.variantRows.length,
-        totalVod: counts.movies + counts.series,
-        ...result,
-        liveCatalog: {
-          rawLive: livePlan.rawLive,
-          logicalChannels: livePlan.channelRows.length,
-          liveVariants: livePlan.variantRows.length,
-          reset: true,
-        },
-      };
-    }
-
-    if (phase === "live_channels") {
-      const livePlan = buildLiveMaterializationPlan({
-        sourceId,
-        userId,
-        rows: await loadSourceItems(sourceId, userId, db, { itemTypes: ["live"] }),
-        country: options.country || stringOr(config.country, "FR"),
-      });
-      const insertedChannels = await upsertLiveChannelRows(db, livePlan.channelRows, batchOffset, batchLimit);
-      const nextOffset = Math.min(livePlan.channelRows.length, batchOffset + insertedChannels.length);
-      const done = insertedChannels.length < batchLimit || nextOffset >= livePlan.channelRows.length;
-      await reportProgress({
-        stage: done ? "building_live_variants" : "building_live_channels",
-        percent: done ? 80 : liveFinalizePercent("live_channels", nextOffset, livePlan.channelRows.length),
-        steps: { finalize: { status: "running" } },
-      });
-      return {
-        sourceId,
-        status: "syncing",
-        phase: "live_channels",
-        nextPhase: done ? "live_variants" : "live_channels",
-        nextOffset: done ? 0 : nextOffset,
-        limit: batchLimit,
-        totalLiveChannels: livePlan.channelRows.length,
-        totalLiveVariants: livePlan.variantRows.length,
-        totalVod: counts.movies + counts.series,
-        done,
-        ...result,
-        liveCatalog: {
-          rawLive: livePlan.rawLive,
-          logicalChannels: nextOffset,
-          liveVariants: 0,
-        },
-      };
-    }
-
-    if (phase === "live_variants") {
-      const livePlan = buildLiveMaterializationPlan({
-          sourceId,
-          userId,
-        rows: await loadSourceItems(sourceId, userId, db, { itemTypes: ["live"] }),
-          country: options.country || stringOr(config.country, "FR"),
-      });
-      const channelIdByLogicalId = await fetchLiveChannelIdMap(db, sourceId, userId);
-      const insertedVariants = await upsertLiveVariantRows(db, livePlan.variantRows, channelIdByLogicalId, batchOffset, batchLimit);
-      const nextOffset = Math.min(livePlan.variantRows.length, batchOffset + insertedVariants);
-      const done = insertedVariants < batchLimit || nextOffset >= livePlan.variantRows.length;
-      await reportProgress({
-        stage: done ? "building_titles" : "building_live_variants",
-        percent: done ? 86 : liveFinalizePercent("live_variants", nextOffset, livePlan.variantRows.length),
-        steps: { finalize: { status: "running" } },
-      });
-      const totalVod = counts.movies + counts.series;
-      return {
-        sourceId,
-        status: "syncing",
-        phase: "live_variants",
-        nextPhase: totalVod > 0 ? "titles" : "complete",
-        nextOffset: done ? 0 : nextOffset,
-        limit: batchLimit,
-        totalVod,
-        totalLiveChannels: livePlan.channelRows.length,
-        totalLiveVariants: livePlan.variantRows.length,
-        done,
-        ...result,
-        liveCatalog: {
-          rawLive: livePlan.rawLive,
-          logicalChannels: livePlan.channelRows.length,
-          liveVariants: nextOffset,
-        },
+        sourceId, status: "syncing", phase: "live",
+        nextPhase: "live", nextOffset, limit: LIVE_CHUNK, totalVod, ...result,
+        liveCatalog: { ...mat, rawLive: counts.live, offset: nextOffset },
       };
     }
 
@@ -1163,7 +1061,9 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
         vodInfoLimit: boundedInt(Deno.env.get("NORVA_VOD_INFO_FINALIZE_LIMIT"), 0, 0, 1000),
         // Onboarding B: keep inline enrichment small so the user is released fast; the
         // scheduled enrichment crons + the cross-user reuse + the header bar fill the rest.
-        tmdbValidateLimit: boundedInt(Deno.env.get("NORVA_TMDB_VALIDATE_FINALIZE_LIMIT"), 15, 0, 1000),
+        // Defer TMDB validation to the background crons — at huge-catalogue scale
+        // it's hundreds of inline lookups; titles still appear from provider data.
+        tmdbValidateLimit: boundedInt(Deno.env.get("NORVA_TMDB_VALIDATE_FINALIZE_LIMIT"), 0, 0, 1000),
       });
       const nextOffset = Math.min(totalVod, batchOffset + rows.length);
       const done = rows.length < batchLimit || nextOffset >= totalVod;
@@ -1311,11 +1211,21 @@ async function existingLiveMaterializationCounts(sourceId: string, userId: strin
 }
 
 async function countSourceItems(sourceId: string, userId: string, db: SupabaseClient, progress: JsonRecord = {}) {
-  const [live, movies, series] = await Promise.all([
-    countRowsByType(sourceId, userId, db, "live"),
-    countRowsByType(sourceId, userId, db, "movie"),
-    countRowsByType(sourceId, userId, db, "series"),
-  ]);
+  // Prefer the counts the import already persisted (instant): an exact count(*)
+  // over a huge source can exceed the 8s statement budget on a busy DB. Fall back
+  // to counting only when no trustworthy persisted total exists (e.g. legacy rows).
+  const persisted = recordOrEmpty(progress.counts);
+  const pLive = Number(persisted.live), pMovies = Number(persisted.movies), pSeries = Number(persisted.series);
+  let live: number, movies: number, series: number;
+  if (Number(persisted.total) > 0 && [pLive, pMovies, pSeries].every(Number.isFinite)) {
+    live = pLive || 0; movies = pMovies || 0; series = pSeries || 0;
+  } else {
+    [live, movies, series] = await Promise.all([
+      countRowsByType(sourceId, userId, db, "live"),
+      countRowsByType(sourceId, userId, db, "movie"),
+      countRowsByType(sourceId, userId, db, "series"),
+    ]);
+  }
   const categories = recordOrEmpty(progress.categories);
   return {
     live,
