@@ -42,5 +42,7 @@ jobs:
             exit 1
           fi
 
+      # Deploys every function in supabase/functions/; per-function verify_jwt and
+      # import maps are read from supabase/config.toml.
       - name: Deploy all edge functions
         run: supabase functions deploy --project-ref "$SUPABASE_PROJECT_REF"
