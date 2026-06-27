@@ -1000,21 +1000,32 @@ class HomePage {
     }
 
     createRailSection(rail, railIndex) {
-        const title = this.railTitle(rail);
-        const subtitle = this.railSubtitle(rail);
+        const ranked = this.isRankedRail(rail);
+        const title = ranked
+            ? (rail.itemType === 'series' ? 'Top 10 Series' : 'Top 10 Movies')
+            : this.railTitle(rail);
+        const subtitle = ranked ? '' : this.railSubtitle(rail);
         const id = `home-rail-${this.slug(String(rail.id || railIndex))}`;
+        const items = ranked ? (rail.items || []).slice(0, 10) : rail.items;
 
         return `
-            <section class="dashboard-section home-rail-section" data-rail-id="${this.escapeAttr(rail.id || id)}">
+            <section class="dashboard-section home-rail-section${ranked ? ' is-ranked-rail' : ''}" data-rail-id="${this.escapeAttr(rail.id || id)}">
                 <div class="section-header home-rail-header">
                     <div>
                         <h2>${this.escapeHtml(title)}</h2>
                         ${subtitle ? `<p class="home-rail-subtitle">${this.escapeHtml(subtitle)}</p>` : ''}
                     </div>
                 </div>
-                ${this.scrollSection(id, 'Loading...', '', rail.items.map((item, itemIndex) => this.createRailCard(item, railIndex, itemIndex)).join(''))}
+                ${this.scrollSection(id, 'Loading...', '', items.map((item, itemIndex) => this.createRailCard(item, railIndex, itemIndex, ranked)).join(''))}
             </section>
         `;
+    }
+
+    // The server's "popular" rail (ranked by TMDB rating + provider ubiquity) is
+    // rendered as a numbered Top 10.
+    isRankedRail(rail = {}) {
+        const id = String(rail.id || '').toLowerCase();
+        return rail.curation?.kind === 'popular' || id === 'popular-movies' || id === 'popular-series';
     }
 
     railTitle(rail = {}) {
@@ -1036,7 +1047,7 @@ class HomePage {
         return '';
     }
 
-    createRailCard(item, railIndex, itemIndex) {
+    createRailCard(item, railIndex, itemIndex, ranked = false) {
         const data = item.data || {};
         const itemId = item.item_id || item.itemId || item.id || '';
         const type = item.item_type || item.itemType || item.type || 'movie';
@@ -1049,6 +1060,7 @@ class HomePage {
         return `
             <div class="dashboard-card" data-id="${this.escapeAttr(itemId)}" data-type="${this.escapeAttr(type)}" data-rail-index="${railIndex}" data-item-index="${itemIndex}">
                 <div class="card-image">
+                    ${ranked ? `<div class="rank-numeral">${itemIndex + 1}</div>` : ''}
                     <img src="${this.escapeAttr(posterUrl)}" alt="${this.escapeAttr(title)}" loading="lazy" onerror="this.onerror=null;this.src='/img/norva-media-placeholder.png'">
                     ${variantCount > 1 ? `<div class="home-card-badge">${variantCount} versions</div>` : ''}
                     ${languageBadge ? `<div class="home-card-language-badge">${this.escapeHtml(languageBadge)}</div>` : ''}
