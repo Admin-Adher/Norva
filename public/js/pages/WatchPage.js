@@ -5581,6 +5581,15 @@ class WatchPage {
         engine.coveredStartLocal = engine.coveredStartLocal === undefined
             ? windowStartLocal
             : Math.min(engine.coveredStartLocal, windowStartLocal);
+        // Engine (byte-pipe) path: the player re-bases its clock to start at currentTime 0
+        // by subtracting the file's first-frame PTS, but this extractor reads the SOURCE by
+        // absolute time. Re-derive the source offset from the engine on every tick (it is
+        // the first-frame PTS on a fresh play and converges to 0 after a seek) so cues line
+        // up with the picture from 00:00 on files whose stream doesn't start at 0. No-op
+        // (offset 0) for files that already start at 0, so existing-good playback is unchanged.
+        if (this.currentPlaybackMode === 'engine' && typeof this.norvaEngine?.subtitleSourceOffset === 'function') {
+            this.subtitleStartOffset = this.norvaEngine.subtitleSourceOffset();
+        }
         const absStart = (this.normalizeDuration(this.subtitleStartOffset) || 0) + windowStartLocal;
 
         // Engine path → the gateway /subtitle endpoint (same token as /raw); other

@@ -307,6 +307,24 @@
       return ans;
     }
 
+    // Seconds of SOURCE time that the player's currentTime is shifted FROM. The muxer
+    // re-bases its output to 0 and the SourceBuffer places it at _tsAnchor, so a source
+    // frame with PTS S is shown at currentTime (S - vBase) + _tsAnchor. A separate
+    // windowed subtitle extractor seeks the SOURCE by absolute time, so to line cues up
+    // with the picture it must seek at sourceTime = localTime + (vBase - _tsAnchor).
+    // On a FRESH play _tsAnchor is 0, so this equals the file's first-frame PTS — the
+    // reason subtitles drift from 00:00 on files whose stream doesn't start at 0. After a
+    // resume/seek _initMuxer re-bases vBase to the landed keyframe and _setVideoDts sets
+    // _tsAnchor to the same PTS, so it converges to 0. Always ≥ 0; returns 0 until the
+    // first video packet has been demuxed (vBase still unknown) or when the stream starts
+    // at 0 (the common case), making the subtitle path a no-op for files that already sync.
+    subtitleSourceOffset() {
+      if (this.vBase == null || !this.vS) return 0;
+      const baseSeconds = this.vBase * this.vS.time_base_num / this.vS.time_base_den;
+      const offset = baseSeconds - (this._tsAnchor || 0);
+      return Number.isFinite(offset) && offset > 0 ? offset : 0;
+    }
+
     destroy() {
       this.destroyed = true;
       this._stopRequested = true;
