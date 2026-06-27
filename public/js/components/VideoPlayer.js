@@ -1873,6 +1873,10 @@ class VideoPlayer {
 
     stopLiveSyncMonitor() {
         if (this._liveSyncTimer) { clearInterval(this._liveSyncTimer); this._liveSyncTimer = null; }
+        // Teardown ends any in-flight go-live suppression: the badge is hidden below, so
+        // a broken reload (no first frame) can't leave it stuck on a false "LIVE".
+        this._liveJumpInProgress = false;
+        clearTimeout(this._liveJumpResetTimer);
         this._livePausedAt = 0;
         this._liveBehindBaseSeconds = 0;
         this._liveBehindSeconds = 0;
@@ -2049,7 +2053,13 @@ class VideoPlayer {
         }
         if (this._liveBadgeText) this._liveBadgeText.textContent = 'LIVE';
         clearTimeout(this._liveJumpResetTimer);
-        this._liveJumpResetTimer = setTimeout(() => { this._liveJumpInProgress = false; }, 15000);
+        // Backstop: if neither the fresh session's first frame nor a teardown clears the
+        // suppression, end it after 10s and refresh the badge to the real state so a
+        // broken/stalled reload can't keep a false "LIVE" pinned.
+        this._liveJumpResetTimer = setTimeout(() => {
+            this._liveJumpInProgress = false;
+            this._updateLiveSyncBadge();
+        }, 10000);
 
         const ch = this.currentChannel;
         const list = window.app?.channelList;
@@ -2068,7 +2078,11 @@ class VideoPlayer {
             } catch (_) { /* fall through to the last-resort seek */ }
         }
 
-        // Last resort only (reload impossible — no channel list): seek to edge.
+        // Last resort only (reload impossible — no channel list): seek to edge. No fresh
+        // session re-arms the badge here, so end the suppression now and let the post-seek
+        // position drive the badge.
+        this._liveJumpInProgress = false;
+        clearTimeout(this._liveJumpResetTimer);
         const edge = this.liveEdgePosition();
         if (edge != null) {
             try { this.video.currentTime = Math.max(0, edge - 0.5); } catch (_) {}
