@@ -5657,6 +5657,19 @@ kbd {
   height: 18px;
 }
 
+/* The shared .play-icon rule (color:white; font-size:3rem) is for the white
+   poster-overlay icon; inside the solid Play buttons it made the icon white
+   (invisible on the light button) and off-centre. Inherit the button's dark text
+   colour and collapse the oversized inline box so the 18px icon sits centred. */
+.movie-primary-action .play-icon,
+.series-primary-action .play-icon {
+  display: inline-flex;
+  align-items: center;
+  color: inherit;
+  font-size: 0;
+  text-shadow: none;
+}
+
 .movie-secondary-action {
   color: var(--color-text-primary);
   background: rgba(255, 255, 255, 0.1);
