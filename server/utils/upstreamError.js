@@ -10,6 +10,16 @@ function classifyUpstreamError(value) {
     const sanitized = sanitizeErrorMessage(value);
     const text = sanitized.toLowerCase();
 
+    if (/user[_\s-]*multi[_\s-]*ip|multi[_\s-]*ip|max(?:imum)? connections?|active connections?|connection limit|same account.*ip|account sharing/.test(text)) {
+        return {
+            code: 'UPSTREAM_MULTI_IP',
+            upstreamStatus: 429,
+            terminal: true,
+            friendly: 'The provider says this IPTV account already has one active connection. Stop other playback attempts, wait 1–2 minutes for the provider slot to release, then retry from one device.',
+            details: sanitized
+        };
+    }
+
     if (/429|too many requests|many requests|rate limit|ratelimit/.test(text)) {
         return {
             code: 'UPSTREAM_RATE_LIMIT',
