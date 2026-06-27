@@ -20,7 +20,6 @@ function isMobile() {
 // segments) for a stutter-proof buffer, so "behind" must sit above that — else
 // normal playback would falsely read "Behind by 12s". 20s clears it with margin.
 const LIVE_BEHIND_THRESHOLD_S = 20;
-const LIVE_PAUSE_AUTOSNAP_MS = 5 * 60 * 1000;
 
 class VideoPlayer {
     constructor() {
@@ -71,7 +70,8 @@ class VideoPlayer {
         this._liveBadgeDot = null;
         this._liveBadgeText = null;
         this._liveSyncTimer = null;       // 1s badge refresh (live only)
-        this._liveAutoSnapTimer = null;   // X-min-after-pause snap-to-live
+        this._liveJumpInProgress = false; // suppress badge reversion during a go-live reload
+        this._liveJumpResetTimer = null;  // backstop that clears the suppression flag
         this._livePausedAt = 0;           // epoch ms of the current pause, else 0
         this._liveBehindBaseSeconds = 0;  // accumulated offset (native-HLS fallback)
         this._liveBehindSeconds = 0;      // last computed gap (for callers/tests)
@@ -1855,6 +1855,9 @@ class VideoPlayer {
 
     startLiveSyncMonitor() {
         if (!this.isLivePlayback() || !this._liveBadge) return;
+        // Fresh session is at the edge — clear any in-flight go-live suppression.
+        this._liveJumpInProgress = false;
+        clearTimeout(this._liveJumpResetTimer);
         this._livePausedAt = this.video?.paused ? Date.now() : 0;
         this._liveBehindBaseSeconds = 0;
         // Show as live immediately; the first tick refines it.
@@ -1870,7 +1873,6 @@ class VideoPlayer {
 
     stopLiveSyncMonitor() {
         if (this._liveSyncTimer) { clearInterval(this._liveSyncTimer); this._liveSyncTimer = null; }
-        if (this._liveAutoSnapTimer) { clearTimeout(this._liveAutoSnapTimer); this._liveAutoSnapTimer = null; }
         this._livePausedAt = 0;
         this._liveBehindBaseSeconds = 0;
         this._liveBehindSeconds = 0;
@@ -1983,6 +1985,9 @@ class VideoPlayer {
 
     _updateLiveSyncBadge() {
         if (!this.isLivePlayback() || !this._liveBadge) { this.stopLiveSyncMonitor(); return; }
+        // A go-live jump is reloading the stream — keep showing LIVE until the fresh
+        // session re-arms the badge, instead of recomputing a stale "Behind by Xs".
+        if (this._liveJumpInProgress) return;
         if (typeof document !== 'undefined' && document.hidden) return; // don't churn while backgrounded
         // Ignore the startup transient before the first real frame.
         if (!(this.video?.currentTime > 0)) return;
@@ -2029,10 +2034,22 @@ class VideoPlayer {
     // doesn't happen in the live app) — never as the normal "back to live".
     jumpToLive() {
         if (!this.isLivePlayback() || !this.video) return;
-        // Cancel the auto-snap and clear offset bookkeeping up-front.
+        // Clear offset bookkeeping up-front.
         this._livePausedAt = 0;
         this._liveBehindBaseSeconds = 0;
-        if (this._liveAutoSnapTimer) { clearTimeout(this._liveAutoSnapTimer); this._liveAutoSnapTimer = null; }
+
+        // Reflect "going live" on the badge immediately: the reload below takes a few
+        // seconds, and without this the 1s monitor keeps showing the stale "Behind by
+        // Xs" until the fresh session re-arms. Suppress monitor reversion until then
+        // (start/stopLiveSyncMonitor clear it; a 15s timeout is the backstop).
+        this._liveJumpInProgress = true;
+        if (this._liveBadge) {
+            this._liveBadge.classList.remove('behind');
+            this._liveBadge.classList.add('is-live');
+        }
+        if (this._liveBadgeText) this._liveBadgeText.textContent = 'LIVE';
+        clearTimeout(this._liveJumpResetTimer);
+        this._liveJumpResetTimer = setTimeout(() => { this._liveJumpInProgress = false; }, 15000);
 
         const ch = this.currentChannel;
         const list = window.app?.channelList;
@@ -2063,20 +2080,15 @@ class VideoPlayer {
     _onLivePauseStateChange(isPaused) {
         if (!this.isLivePlayback()) return;
         if (isPaused) {
+            // A paused live stays paused — never auto-resume. Record when the pause
+            // began so the badge can show how far behind the edge the user is.
             this._livePausedAt = Date.now();
-            // Snap back to live if the stream stays paused too long.
-            if (this._liveAutoSnapTimer) clearTimeout(this._liveAutoSnapTimer);
-            this._liveAutoSnapTimer = setTimeout(() => {
-                this._liveAutoSnapTimer = null;
-                if (this.isLivePlayback()) this.jumpToLive();
-            }, LIVE_PAUSE_AUTOSNAP_MS);
         } else {
             // Resumed: bank the time spent paused (native-HLS fallback estimate).
             if (this._livePausedAt) {
                 this._liveBehindBaseSeconds += (Date.now() - this._livePausedAt) / 1000;
                 this._livePausedAt = 0;
             }
-            if (this._liveAutoSnapTimer) { clearTimeout(this._liveAutoSnapTimer); this._liveAutoSnapTimer = null; }
         }
         if (this._liveSyncTimer) this._updateLiveSyncBadge();
     }
