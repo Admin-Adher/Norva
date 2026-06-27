@@ -858,13 +858,22 @@ async function cronResumeStuck(db: SupabaseClient) {
     .limit(100);
   if (error) return { ok: false, error: error.message };
   const resumed: string[] = [];
+  const finalizingStages = new Set(["materializing", "building_titles", "building_live_channels", "building_live_variants", "finalizing"]);
   for (const src of (data ?? [])) {
-    const cursor = recordOrEmpty(recordOrEmpty(src.config_hint).syncCursor);
-    if (cursor.active !== true || stringOr(cursor.phase, "") !== "discover") continue;
-    // Recent activity (heartbeat, or just-started with no heartbeat yet) → alive.
-    const lastSeen = stringOr(cursor.heartbeatAt, "") || stringOr(cursor.startedAt, "");
+    const hint = recordOrEmpty(src.config_hint);
+    const cursor = recordOrEmpty(hint.syncCursor);
+    const progress = recordOrEmpty(hint.syncProgress);
+    const inDiscovery = cursor.active === true && stringOr(cursor.phase, "") === "discover";
+    const inFinalize = !inDiscovery && finalizingStages.has(stringOr(progress.stage, ""));
+    if (!inDiscovery && !inFinalize) continue;
+    // Recent activity (heartbeat / startedAt for discovery, progress updatedAt for
+    // finalize) → still alive; only re-kick a genuinely stalled run.
+    const lastSeen = inDiscovery
+      ? (stringOr(cursor.heartbeatAt, "") || stringOr(cursor.startedAt, ""))
+      : stringOr(progress.updatedAt, "");
     if (lastSeen && lastSeen > staleIso) continue;
-    runInBackground(driveXtreamSyncToReady(String(src.id), String(src.user_id), db));
+    if (inDiscovery) runInBackground(driveXtreamSyncToReady(String(src.id), String(src.user_id), db));
+    else runInBackground(driveFinalizeToReady(db, String(src.id), String(src.user_id), null));
     resumed.push(String(src.id));
     if (resumed.length >= 5) break;
   }
@@ -886,29 +895,64 @@ async function cronFinalizeSource(db: SupabaseClient, sourceId: string, country:
   return { ok: true, started: true, sourceId };
 }
 
-// Walk the resumable finalize phases (live → live_channels → live_variants →
-// titles → complete) to completion, bounded by a wall-clock budget so a single
-// invocation never overruns the isolate. Each phase is the same batched step the
-// client drives; if the budget is hit before "ready", the source is left
-// mid-finalize and a later call (or the client on open) resumes from there.
+// Walk the resumable finalize phases (live → titles → complete) to completion.
+// Bounded by a wall-clock budget; the {phase, offset} cursor is persisted so a
+// fresh isolate resumes where the last left off, and the driver self-invokes the
+// next isolate at the budget — a huge catalogue (~200 batches) finishes
+// hands-off, app-closed, without the client's ~160-call ceiling.
 async function driveFinalizeToReady(db: SupabaseClient, sourceId: string, userId: string, country: string | null) {
-  const deadline = Date.now() + 120_000;
-  let phase = "live";
-  let offset = 0;
+  const deadline = Date.now() + 90_000;
+  const { data: src0 } = await db.from("cloud_sources").select("config_hint,sync_status").eq("id", sourceId).maybeSingle();
+  if (src0 && String(src0.sync_status) === "ready") return; // already done
+  const fc = recordOrEmpty(recordOrEmpty(src0?.config_hint).finalizeCursor);
+  let phase = stringOr(fc.phase, "live");
+  let offset = Number(fc.offset) || 0;
   let guard = 0;
   while (Date.now() < deadline && guard++ < 400) {
     let result: JsonRecord;
     try {
       result = await finalizeCloudSource(sourceId, userId, db, { country, phase, offset, limit: 1500 }) as unknown as JsonRecord;
     } catch (e) {
-      console.error("[cron] finalize batch failed", sourceId, e);
+      // Transient contention/compute spike → continue in a fresh isolate; a real
+      // error (e.g. 422 no items) surfaces and stops the chain.
+      const msg = e instanceof HttpError ? `${e.message} ${JSON.stringify(e.details ?? "")}` : String(e);
+      const transient = e instanceof HttpError && (e.status === 503 || /resource|timeout|compute|deadlock|lock/i.test(msg));
+      console.error("[cron] finalize batch failed", sourceId, transient ? "(transient)" : "", e);
+      if (transient) await selfInvokeFinalize(sourceId, country);
       return;
     }
-    if (String(result.status) === "ready") return;
+    if (String(result.status) === "ready") {
+      await patchSourceConfigHint(db, sourceId, (hint) => { delete hint.finalizeCursor; return hint; });
+      return;
+    }
     phase = stringOr(result.nextPhase, "complete");
     offset = Number(result.nextOffset) || 0;
+    await patchSourceConfigHint(db, sourceId, (hint) => { hint.finalizeCursor = { phase, offset }; return hint; });
   }
-  console.warn("[cron] finalize budget/guard hit before ready", sourceId, phase, offset);
+  // Budget/guard hit before ready → continue in a fresh isolate.
+  await selfInvokeFinalize(sourceId, country);
+}
+
+// Read-merge-write a single config_hint mutation (preserves concurrent writers'
+// fields like syncProgress).
+async function patchSourceConfigHint(db: SupabaseClient, sourceId: string, mutate: (hint: JsonRecord) => JsonRecord) {
+  const { data } = await db.from("cloud_sources").select("config_hint").eq("id", sourceId).maybeSingle();
+  const hint = mutate(recordOrEmpty(data?.config_hint));
+  await db.from("cloud_sources").update({ config_hint: compactRecord(hint) }).eq("id", sourceId);
+}
+
+// Kick a fresh finalize isolate (resumes from the persisted finalize cursor).
+async function selfInvokeFinalize(sourceId: string, country: string | null) {
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) return;
+  const q = country ? `?country=${encodeURIComponent(country)}` : "";
+  try {
+    await fetch(`${SUPABASE_URL}/functions/v1/norva-source-sync/cron/finalize/${encodeURIComponent(sourceId)}${q}`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`, "content-type": "application/json" },
+    });
+  } catch (error) {
+    console.error("[norva-source-sync] self-invoke finalize failed", sourceId, error);
+  }
 }
 
 type FinalizeCloudSourceOptions = {
@@ -1773,7 +1817,10 @@ async function driveXtreamSyncToReady(sourceId: string, userId: string, db: Supa
       series: seriesCount,
       total,
     });
-    // The client poll and the cron finalize stepper take it from here to "ready".
+    // Discovery done → kick the self-continuing finalize driver so a huge
+    // catalogue materialises to "ready" hands-off (the client's ~160-call loop
+    // can't finish one); idempotent with the client poll if the app is open.
+    await selfInvokeFinalize(sourceId, stringOrNull(cursor.country));
   } catch (err) {
     // Transient DB contention (timeout/lock/resource): don't fail the sync — the
     // cursor is checkpointed, so hand off to a fresh isolate where the DB may have
