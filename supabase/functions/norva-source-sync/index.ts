@@ -1372,12 +1372,14 @@ async function syncXtreamSource(
       categories: { status: "running" },
     },
   });
-  const fetchCatalog = (action: string) =>
-    fetchProviderMetadata(runtimeConfig, { serverUrl, username, password, action, timeoutMs: 25000 }).catch(() => []);
-  const [live, vod, series, liveCategories, vodCategories, seriesCategories] = await Promise.all([
-    fetchCatalog("get_live_streams"),
-    fetchCatalog("get_vod_streams"),
-    fetchCatalog("get_series"),
+  // Provider stream lists can be enormous (100+ MB for "8K"-style catalogues), and
+  // fetching them whole OOMs the edge isolate (~256 MB) once JSON.parse expands them.
+  // Drive ingestion PER CATEGORY instead: the category lists are tiny, each category's
+  // stream slice is small, and we transform each slice into slim rows then drop the raw
+  // JSON immediately — so peak memory stays bounded no matter how big the catalogue is.
+  const fetchCatalog = (action: string, params?: Record<string, string>) =>
+    fetchProviderMetadata(runtimeConfig, { serverUrl, username, password, action, params, timeoutMs: 25000 }).catch(() => []);
+  const [liveCategories, vodCategories, seriesCategories] = await Promise.all([
     fetchCatalog("get_live_categories"),
     fetchCatalog("get_vod_categories"),
     fetchCatalog("get_series_categories"),
@@ -1385,9 +1387,41 @@ async function syncXtreamSource(
   const liveCategoryMap = categoryMap(liveCategories);
   const vodCategoryMap = categoryMap(vodCategories);
   const seriesCategoryMap = categoryMap(seriesCategories);
-  const liveCount = Array.isArray(live) ? live.length : 0;
-  const movieCount = Array.isArray(vod) ? vod.length : 0;
-  const seriesCount = Array.isArray(series) ? series.length : 0;
+
+  const rows: JsonRecord[] = [];
+  let liveCount = 0;
+  let movieCount = 0;
+  let seriesCount = 0;
+  const ingestByCategory = async (
+    action: string,
+    itemType: "live" | "movie" | "series",
+    catMap: Map<string, string>,
+    bump: (n: number) => void,
+  ) => {
+    const catIds = [...catMap.keys()];
+    // No categories advertised → fall back to the single bare list (small providers).
+    const targets: (Record<string, string> | undefined)[] = catIds.length
+      ? catIds.map((id) => ({ category_id: id }))
+      : [undefined];
+    // Large "8K" catalogues have 1000+ categories; fan out so the per-category
+    // round-trips don't dominate the isolate's wall-clock. Each slice is small,
+    // so even ~14 concurrent raw responses stay well within the memory budget.
+    const CONCURRENCY = 14;
+    for (let i = 0; i < targets.length; i += CONCURRENCY) {
+      const slices = await Promise.all(targets.slice(i, i + CONCURRENCY).map((p) => fetchCatalog(action, p)));
+      for (const slice of slices) {
+        if (!Array.isArray(slice) || !slice.length) continue;
+        const r = xtreamRows(sourceId, userId, slice as JsonRecord[], itemType, catMap);
+        for (const row of r) rows.push(row);
+        bump(r.length);
+      }
+    }
+  };
+  await ingestByCategory("get_live_streams", "live", liveCategoryMap, (n) => { liveCount += n; });
+  await reportProgress({ stage: "discovering", percent: 26, counts: { live: liveCount, movies: movieCount, series: seriesCount, total: liveCount + movieCount + seriesCount } });
+  await ingestByCategory("get_vod_streams", "movie", vodCategoryMap, (n) => { movieCount += n; });
+  await reportProgress({ stage: "discovering", percent: 34, counts: { live: liveCount, movies: movieCount, series: seriesCount, total: liveCount + movieCount + seriesCount } });
+  await ingestByCategory("get_series", "series", seriesCategoryMap, (n) => { seriesCount += n; });
   const categoryCount = liveCategoryMap.size + vodCategoryMap.size + seriesCategoryMap.size;
   await reportProgress({
     stage: "discovered",
@@ -1412,12 +1446,6 @@ async function syncXtreamSource(
       import: { status: "running" },
     },
   });
-
-  const rows = [
-    ...xtreamRows(sourceId, userId, Array.isArray(live) ? live : [], "live", liveCategoryMap),
-    ...xtreamRows(sourceId, userId, Array.isArray(vod) ? vod : [], "movie", vodCategoryMap),
-    ...xtreamRows(sourceId, userId, Array.isArray(series) ? series : [], "series", seriesCategoryMap),
-  ];
 
   // Change-detection: if the provider catalogue is byte-for-byte the same set we
   // last fully imported, skip the delete+rebuild+projection. The fetch above is
