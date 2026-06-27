@@ -642,37 +642,6 @@ h4 {
   font-size: 0.75rem;
 }
 
-.playback-scan-btn {
-  width: 34px;
-  min-width: 34px;
-  height: 30px;
-  padding: 0;
-  align-items: center;
-  justify-content: center;
-  font-weight: 800;
-}
-
-.playback-scan-btn.scanning .scan-icon {
-  display: inline-block;
-  animation: live-scan-spin 0.8s linear infinite;
-}
-
-.live-scan-status {
-  flex-basis: 100%;
-  min-height: 16px;
-  color: var(--color-text-muted);
-  font-size: 0.68rem;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-@keyframes live-scan-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
 .toggle-hidden {
   display: flex;
   align-items: center;

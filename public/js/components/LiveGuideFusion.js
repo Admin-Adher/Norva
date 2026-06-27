@@ -1026,7 +1026,6 @@ class LiveGuideFusion {
             }, { passive: true });
         }
         this.syncNavigationState();
-        this.app.channelList.updateScanScopeHint?.();
     }
 }
 

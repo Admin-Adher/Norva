@@ -32,8 +32,6 @@ class ChannelList {
         this.showHiddenCheckbox = document.getElementById('show-hidden');
         this.toggleGroupsBtn = document.getElementById('toggle-groups');
         this.hideBrokenBtn = document.getElementById('live-hide-broken-btn');
-        this.scanPlaybackBtn = document.getElementById('live-scan-playback-btn');
-        this.scanStatusEl = document.getElementById('live-scan-status');
         this.contextMenu = document.getElementById('context-menu');
 
         this.channels = [];
@@ -374,8 +372,6 @@ class ChannelList {
             this.render();
             window.app?.liveGuideFusion?.render();
         });
-
-        this.scanPlaybackBtn?.addEventListener('click', () => this.scanLivePlaybackModes());
 
         window.addEventListener('playbackStatusChanged', (event) => {
             const detail = event.detail || {};
@@ -2459,51 +2455,6 @@ class ChannelList {
         return null;
     }
 
-    async scanLivePlaybackModes() {
-        const scanScope = this.getLivePlaybackScanScope();
-        return this.runPlaybackScan(scanScope, { allowReplace: true });
-    }
-
-    getLivePlaybackScanScope() {
-        const sourceValue = this.sourceSelect?.value || '';
-        const [, sourceId] = sourceValue.includes(':') ? sourceValue.split(':') : [];
-        const activeGroup = window.app?.liveGuideFusion?.activeGroup || '';
-        const isFavorites = activeGroup === 'Favorites';
-        const isCategory = Boolean(activeGroup && !isFavorites);
-
-        let scopeChannels = this.channels.filter(channel => {
-            const rawId = channel.streamId || channel.id;
-            if (this.isHidden('channel', channel.sourceId, rawId)) return false;
-            if (sourceId && String(channel.sourceId) !== String(sourceId)) return false;
-            if (isFavorites) return this.isFavorite(channel.sourceId, channel.id);
-            if (isCategory) return (channel.groupTitle || 'Uncategorized') === activeGroup;
-            return true;
-        });
-
-        const payload = {
-            sourceId: sourceId || null,
-            scopeLabel: isFavorites
-                ? 'Favorites'
-                : isCategory
-                    ? activeGroup
-                    : 'All channels'
-        };
-
-        if (isFavorites || isCategory) {
-            payload.categoryName = isCategory ? activeGroup : '';
-            payload.items = scopeChannels.map(channel => ({
-                sourceId: channel.sourceId,
-                itemId: channel.streamId || channel.id
-            }));
-        }
-
-        return {
-            label: payload.scopeLabel,
-            count: scopeChannels.length,
-            payload
-        };
-    }
-
     async refreshPlaybackForChannels(channels = [], options = {}) {
         const unique = [];
         const seen = new Set();
@@ -2545,15 +2496,6 @@ class ChannelList {
             statusFailed: options.statusFailed || 'Refresh failed',
             allowReplace: options.allowReplace !== false
         });
-    }
-
-    updateScanScopeHint() {
-        if (!this.scanPlaybackBtn) return;
-        const scope = this.getLivePlaybackScanScope();
-        this.scanPlaybackBtn.title = `Scan ${scope.label} (${scope.count} channels)`;
-        if (this.scanStatusEl && !this._isScanningPlayback && !this.scanStatusEl.textContent) {
-            this.scanStatusEl.textContent = `Scope: ${scope.label} (${scope.count})`;
-        }
     }
 
     async followLivePlaybackScan(initialResult, requestedScope = null, runId = this._playbackScanRunId) {
