@@ -216,14 +216,19 @@ app.post('/xtream/metadata', requireGatewayAuth, async (req, res) => {
         if (!serverUrl || !isHttpUrl(serverUrl) || !username || !password || !action) {
             return res.status(400).json({ error: 'serverUrl, username, password and action are required' });
         }
-        if (!XTREAM_METADATA_ACTIONS.has(String(action))) {
+        // `account_info` validates credentials: the bare player_api.php (no action)
+        // returns { user_info, server_info }. Routed through the gateway so source
+        // add/validate egresses the tolerated IP, not the provider-blocked Supabase
+        // edge IP (which trips user_multi_ip on the account's single connection).
+        const isAccountInfo = String(action) === 'account_info';
+        if (!isAccountInfo && !XTREAM_METADATA_ACTIONS.has(String(action))) {
             return res.status(400).json({ error: `Unsupported metadata action: ${action}` });
         }
         const url = xtreamPlayerApiUrl({
             serverUrl,
             username,
             password,
-            action: String(action),
+            action: isAccountInfo ? '' : String(action),
             params: (params && typeof params === 'object') ? params : undefined
         });
         const payload = await fetchProviderJson(
@@ -1435,7 +1440,9 @@ function xtreamPlayerApiUrl({ serverUrl, username, password, action, streamId, l
     const url = new URL(`${String(serverUrl).replace(/\/+$/, '')}/player_api.php`);
     url.searchParams.set('username', String(username));
     url.searchParams.set('password', String(password));
-    url.searchParams.set('action', action);
+    // Empty action → bare player_api.php (the account-info / credential-validation
+    // call). Every other caller passes a real action, so behaviour is unchanged.
+    if (action) url.searchParams.set('action', String(action));
     if (streamId !== undefined && streamId !== null && String(streamId) !== '') {
         url.searchParams.set('stream_id', String(streamId));
     }
