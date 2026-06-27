@@ -814,9 +814,10 @@ async function createSource(req: Request, userId: string, db: SupabaseClient) {
 
   const rawConfig = buildSourceConfig(sourceType, body);
   const hasManagedConfig = Object.keys(rawConfig).length > 0;
-  const validation = hasManagedConfig ? await validateCloudSource(sourceType, rawConfig) : {};
+  const runtimeConfig = await getRuntimeConfig(db);
+  const validation = hasManagedConfig ? await validateCloudSource(sourceType, rawConfig, runtimeConfig) : {};
   const configCiphertext = hasManagedConfig
-    ? await encryptSourceConfig(rawConfig, await getRuntimeConfig(db))
+    ? await encryptSourceConfig(rawConfig, runtimeConfig)
     : stringOrNull(body.configCiphertext ?? body.config_ciphertext);
   const configHint = {
     ...recordOrEmpty(body.configHint ?? body.config_hint),
@@ -877,9 +878,10 @@ async function updateSource(req: Request, id: string, userId: string, db: Supaba
   const rawConfig = buildSourceConfig(sourceType, body);
   const hasManagedConfig = Object.keys(rawConfig).length > 0;
   if (hasManagedConfig) {
-    const validation = await validateCloudSource(sourceType, rawConfig);
+    const runtimeConfig = await getRuntimeConfig(db);
+    const validation = await validateCloudSource(sourceType, rawConfig, runtimeConfig);
     patch.source_type = sourceType;
-    patch.config_ciphertext = await encryptSourceConfig(rawConfig, await getRuntimeConfig(db));
+    patch.config_ciphertext = await encryptSourceConfig(rawConfig, runtimeConfig);
     patch.config_hint = compactRecord({
       ...recordOrEmpty(existing.config_hint),
       ...recordOrEmpty(body.configHint ?? body.config_hint),
@@ -949,7 +951,32 @@ function buildSourceConfig(sourceType: string, body: JsonRecord): JsonRecord {
   return {};
 }
 
-async function validateCloudSource(sourceType: string, config: JsonRecord) {
+// Validate Xtream credentials via the media gateway (the IP the provider tolerates)
+// so adding/updating a source never trips the provider's user_multi_ip block from
+// this edge runtime's datacenter IP. Falls back to a direct edge fetch only when the
+// gateway itself can't serve the request — unconfigured, unreachable, or an older
+// build that rejects the `account_info` action (400). A provider verdict (401 bad
+// creds, 429 multi_ip) is surfaced as-is, never silently retried direct.
+async function validateXtreamAccount(
+  runtimeConfig: RuntimeConfig,
+  creds: { serverUrl: string; username: string; password: string },
+): Promise<JsonRecord> {
+  const { serverUrl, username, password } = creds;
+  if (runtimeConfig.mediaGatewayUrl && runtimeConfig.mediaGatewayToken) {
+    try {
+      return recordOrEmpty(
+        await requestGatewayMetadata(runtimeConfig, { serverUrl, username, password, action: "account_info" }, 20000),
+      );
+    } catch (error) {
+      const status = error instanceof HttpError ? error.status : 502;
+      if (![400, 404, 405, 502, 503, 504].includes(status)) throw error;
+      console.warn("[norva-cloud] gateway account-info unavailable, falling back to direct", status);
+    }
+  }
+  return recordOrEmpty(await fetchJson(xtreamApiUrl({ serverUrl, username, password }), 12000));
+}
+
+async function validateCloudSource(sourceType: string, config: JsonRecord, runtimeConfig: RuntimeConfig) {
   if (sourceType === "xtream") {
     const serverUrl = normalizeBaseUrl(stringOr(config.serverUrl, ""));
     const username = stringOr(config.username, "");
@@ -958,7 +985,7 @@ async function validateCloudSource(sourceType: string, config: JsonRecord) {
       throw new HttpError(400, "Xtream requires server URL, username and password");
     }
 
-    const payload = recordOrEmpty(await fetchJson(xtreamApiUrl({ serverUrl, username, password }), 12000));
+    const payload = await validateXtreamAccount(runtimeConfig, { serverUrl, username, password });
     const userInfo = recordOrEmpty(payload.user_info);
     const auth = String(userInfo.auth ?? "");
     if (auth !== "1" && auth.toLowerCase() !== "true") {
