@@ -1608,6 +1608,13 @@ class SeriesPage {
     async showSeriesDetailsV2(series, group = null) {
         this.currentSeries = series;
         this.currentSeriesGroup = group || this.currentSeriesGroup || { representative: series, items: [series] };
+        // Remember the open fiche so a page refresh restores it (see app.restoreOpenFiche).
+        try {
+            window.app?.rememberOpenFiche?.({
+                type: 'series', sourceId: series.sourceId, id: series.series_id,
+                title: this.getSeriesDisplayTitle(series),
+            });
+        } catch (_) { /* best-effort */ }
 
         this.pageEl?.classList.add('series-detail-open');
         this.container.classList.add('hidden');
@@ -1805,6 +1812,7 @@ class SeriesPage {
     }
 
     hideDetails() {
+        try { window.app?.forgetOpenFiche?.(); } catch (_) { /* noop */ }
         if (this._epDlTimer) { clearInterval(this._epDlTimer); this._epDlTimer = null; }
         this.detailsPanel.classList.add('hidden');
         this.container.classList.remove('hidden');

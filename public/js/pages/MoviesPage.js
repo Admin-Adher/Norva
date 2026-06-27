@@ -1602,6 +1602,13 @@ class MoviesPage {
         this.currentMovieGroup = group;
         this.currentMovieVersions = ordered;
         this.currentMovie = movie;
+        // Remember the open fiche so a page refresh restores it (see app.restoreOpenFiche).
+        try {
+            window.app?.rememberOpenFiche?.({
+                type: 'movie', sourceId: movie.sourceId, id: movie.stream_id,
+                title: this.getMovieDisplayTitle(displayMovie),
+            });
+        } catch (_) { /* best-effort */ }
 
         this.pageEl?.classList.add('movie-detail-open');
         this.container.classList.add('hidden');
@@ -1669,6 +1676,7 @@ class MoviesPage {
     }
 
     hideDetails() {
+        try { window.app?.forgetOpenFiche?.(); } catch (_) { /* noop */ }
         this.stopDownloadPolling();
         this.detailsPanel?.classList.add('hidden');
         this.container?.classList.remove('hidden');

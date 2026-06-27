@@ -250,7 +250,11 @@ class App {
         const hash = window.location.hash.slice(1); // Remove #
         const requestedInitialPage = hash && this.pages[hash] ? hash : 'home';
         const initialPage = this.guardCatalogPage(requestedInitialPage);
+        // Capture any fiche open before a refresh BEFORE navigating (applyPage may clear
+        // the stash), then re-open it once we've landed on its catalogue page.
+        const pendingFiche = this.readOpenFiche();
         this.navigateTo(initialPage, true); // true = replace history (don't add)
+        this.restoreOpenFiche(initialPage, pendingFiche);
 
         this.maybeShowTrialBanner();
         this.maybeShowBillingIssueBanner();
@@ -1189,6 +1193,46 @@ class App {
         }, 140);
     }
 
+    // ---- Keep the open movie/series fiche across a page refresh -------------
+    // The detail panel is a sub-view of the catalogue page, not a routed page, so a
+    // reload would otherwise drop back to the list. We stash the open title in
+    // sessionStorage (survives a refresh, dies with the tab) and re-open it on load
+    // via the page's openByItem() — the same id->fiche resolver the global search uses.
+    rememberOpenFiche(fiche) {
+        try {
+            if (!fiche || fiche.id == null || fiche.sourceId == null) return;
+            sessionStorage.setItem('norva-open-fiche', JSON.stringify(fiche));
+        } catch (_) { /* private mode: sessionStorage may throw */ }
+    }
+
+    forgetOpenFiche() {
+        try { sessionStorage.removeItem('norva-open-fiche'); } catch (_) { /* noop */ }
+    }
+
+    readOpenFiche() {
+        try { return JSON.parse(sessionStorage.getItem('norva-open-fiche') || 'null'); } catch (_) { return null; }
+    }
+
+    fichePageFor(fiche) {
+        return fiche?.type === 'series' ? 'series' : 'movies';
+    }
+
+    // Re-open the saved fiche once, on the page it belongs to, after a refresh.
+    restoreOpenFiche(pageName, fiche = this.readOpenFiche()) {
+        if (!fiche || this.fichePageFor(fiche) !== pageName) return;
+        const pageObj = this.pages?.[pageName];
+        if (!pageObj?.openByItem) return;
+        const item = fiche.type === 'series'
+            ? { sourceId: fiche.sourceId, series_id: fiche.id, name: fiche.title, tmdb: { name: fiche.title } }
+            : { sourceId: fiche.sourceId, stream_id: fiche.id, name: fiche.title, tmdb: { title: fiche.title } };
+        // Defer so the page's show()/DOM has settled (mirrors openSearchResult).
+        setTimeout(async () => {
+            let ok = false;
+            try { ok = await pageObj.openByItem(item); } catch (_) { ok = false; }
+            if (!ok) this.forgetOpenFiche(); // un-restorable — don't keep retrying
+        }, 150);
+    }
+
     // ---- Live mini-player (web) -------------------------------------------
     // Leaving Live TV while a channel plays docks the inline player into a small
     // floating window (YouTube-style) so it keeps playing while you browse, then
@@ -1385,6 +1429,11 @@ class App {
      */
     applyPage(pageName) {
         pageName = this.guardCatalogPage(pageName);
+
+        // Navigating to a page that doesn't own the open fiche abandons it — drop the
+        // saved-fiche token so a later refresh doesn't resurrect a detail you closed.
+        const openFiche = this.readOpenFiche();
+        if (openFiche && this.fichePageFor(openFiche) !== pageName) this.forgetOpenFiche();
 
         // Update nav
         document.querySelectorAll('.nav-link').forEach(link => {
