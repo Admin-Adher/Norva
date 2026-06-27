@@ -1432,6 +1432,21 @@ async function selfInvokeSyncStep(sourceId: string) {
   }
 }
 
+// Hand the finished discovery to the self-continuing finalize driver (lives in
+// norva-source-sync; it works the shared cursor + tables). A huge catalogue then
+// materialises to "ready" hands-off, beyond the client loop's ~160-call ceiling.
+async function selfInvokeFinalize(sourceId: string) {
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) return;
+  try {
+    await fetch(`${SUPABASE_URL}/functions/v1/norva-source-sync/cron/finalize/${encodeURIComponent(sourceId)}`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`, "content-type": "application/json" },
+    });
+  } catch (error) {
+    console.error("[norva-cloud] self-invoke finalize failed", sourceId, error);
+  }
+}
+
 // Drive one isolate's worth of resumable discovery. Imports every category's
 // stream slice incrementally from a persisted cursor; when the wall-clock budget
 // is hit before the catalogue is fully imported it checkpoints and self-invokes
@@ -1636,7 +1651,9 @@ async function driveXtreamSyncToReady(sourceId: string, userId: string, db: Supa
         finalize: { status: "running" },
       },
     });
-    // The client poll and the cron finalize stepper take it from here to "ready".
+    // Discovery done → kick the self-continuing finalize driver so a huge
+    // catalogue materialises to "ready" hands-off; idempotent with the client poll.
+    await selfInvokeFinalize(sourceId);
   } catch (err) {
     // Transient DB contention (timeout/lock/resource): don't fail the sync — the
     // cursor is checkpointed, so hand off to a fresh isolate where the DB may have
