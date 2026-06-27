@@ -104,10 +104,19 @@
         error.deviceTokenInvalid = true;
     }
 
+    // Public image CDNs that carry no provider identity — safe to serve straight
+    // to the browser instead of streaming their bytes through the Supabase edge
+    // (egress). TMDB hosts the bulk of VOD posters/backdrops, so this alone takes
+    // the dominant image-egress driver to ~zero at scale. <img> needs no CORS and
+    // a hotlink-blocked image just falls back to the placeholder. Provider-host
+    // images stay proxied: it hides the upstream and upgrades http mixed-content.
+    const DIRECT_IMAGE_CDN = /^https:\/\/(?:[a-z0-9-]+\.)?(?:tmdb\.org|themoviedb\.org)\//i;
+
     function proxyImageUrl(url) {
         const raw = String(url || '').trim();
         if (!raw) return '';
         if (/\/image\?url=/i.test(raw)) return raw;
+        if (DIRECT_IMAGE_CDN.test(raw)) return raw;
         const edge = edgeBase();
         if (edge) return `${edge}/image?url=${encodeURIComponent(raw)}`;
         return `${apiBase()}/image?url=${encodeURIComponent(raw)}`;
