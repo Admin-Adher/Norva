@@ -4,7 +4,7 @@
 > et **ce qu'il reste à faire quand Norva aura beaucoup d'users multi-pays** — pour
 > reprendre sans rien re-découvrir.
 >
-> _Dernière mise à jour : 2026-06-26._
+> _Dernière mise à jour : 2026-06-27._
 
 Branche dev : **`claude/eager-carson-2zlqwy`** · Projet Supabase : **`oupsceccxsonaalhueff`**.
 
@@ -20,6 +20,39 @@ nœuds via **socket TCP**. Trois optimisations de charge sont en place. Le gros
 levier restant — le **cache de titres global** — a sa **fondation posée** ; sa
 **bascule de lecture est volontairement différée** (zéro bénéfice tant qu'il n'y a
 pas de recoupement multi-users, et c'est le changement le plus risqué du système).
+
+---
+
+## 🔴 Audit scalabilité + soulagement (2026-06-27)
+
+Déclencheur : usage Supabase **Database 0,841/0,5 GB (168%)** + **Egress 5,935/5 GB
+(119%)** — les deux **au-dessus du free tier**, pour **un seul gros provider**
+(super8k.top, 272 764 items) et quasi aucun trafic réel. Audit complet DB + egress :
+
+**Cause racine DB — confirmée + chiffrée.** Les 5 tables catalogue per-user
+(`cloud_media_items` 357 MB · `cloud_live_logical_channels` 162 MB ·
+`cloud_title_variants` 96 MB · `cloud_live_variants` 59 MB · `cloud_titles` 51 MB)
+= **725 MB = 92% de la base** pour le catalogue d'**un** provider, copié par user.
+C'est exactement le `O(users × catalogue)` de [`dedup-plan.md`](./dedup-plan.md) →
+la **Phase 2** est la vraie correction (démarrée, voir ce doc).
+
+**Cause racine egress #1 — corrigée.** Chaque poster/backdrop passait par le proxy
+edge Supabase `/image` (egress complet par image). **78,7% des posters VOD sont des
+URLs TMDB** → désormais servis **direct** (`proxyImageUrl`, `cloudApi.js`), zéro
+egress Supabase ; les images host-fournisseur/http restent proxifiées (privacy +
+mixed-content). Drivers secondaires (EPG = ingress/compute pas egress ; selects
+catalogue `*` = 53% strippable mais le grid joue via `playbackHintFromItem` ⇒
+refactor requis) **évalués + différés** avec raison.
+
+**Soulagement immédiat appliqué (live).**
+- super8k **mis en pause** (`config_hint.paused=true`, curseurs purgés) **+ purgé**
+  (272 764 media · 88 k title_variants · 103 k live · 54 k titles) + `VACUUM FULL`.
+  **DB 790 MB → 155 MB** (168% → ~31% du quota). apdxes (l'user réel) intact.
+  Raison de la pause : finir super8k sous le schéma per-user **aggrave** le quota ;
+  il sera ré-importé dans le schéma global Phase 2 comme **test de dedup**.
+- Index sort : **non droppés** — les 4 backent de vrais tris du grid
+  (added/rating/year/title) ; ils déménagent sur `catalog_media_items` (Phase 2,
+  payés 1×/provider) plutôt qu'une suppression qui dégraderait une feature.
 
 ---
 
