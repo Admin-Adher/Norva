@@ -4277,6 +4277,36 @@ kbd {
   text-align: center;
 }
 
+/* Mobile Settings IA: lead with Account + Playback, and collapse the IPTV-technical
+   tabs behind an "Advanced" toggle so the phone Settings isn't the desktop tab wall.
+   On desktop the toggle is hidden and every tab shows as before. */
+.settings-advanced-toggle {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .settings-container .tab[data-tab="account"] { order: 0; }
+  .settings-container .tab[data-tab="player"] { order: 1; }
+
+  .settings-advanced-toggle {
+    order: 2;
+    display: inline-flex;
+    align-items: center;
+    padding: var(--space-xs) var(--space-sm);
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: var(--color-text-secondary);
+    font-size: 0.8rem;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+
+  .settings-container .tabs .tab.tab-advanced { order: 3; display: none; }
+  .settings-container .tabs.show-advanced .tab.tab-advanced { display: inline-flex; }
+  .settings-container .tabs.show-advanced .settings-advanced-toggle { color: var(--color-accent); }
+}
+
 .loading-state {
   display: flex;
   align-items: center;

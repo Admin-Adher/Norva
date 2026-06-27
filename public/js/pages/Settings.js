@@ -36,6 +36,14 @@ class SettingsPage {
             tab.addEventListener('click', () => this.switchTab(tab.dataset.tab));
         });
 
+        // Phone-only "Advanced" toggle: reveals the collapsed IPTV-technical tabs.
+        const advToggle = document.getElementById('settings-advanced-toggle');
+        advToggle?.addEventListener('click', () => {
+            const tabsEl = document.querySelector('.settings-container .tabs');
+            const open = tabsEl?.classList.toggle('show-advanced');
+            advToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+        });
+
         // Account and TV service overview
         this.initAccountSettings();
 
@@ -1265,6 +1273,13 @@ class SettingsPage {
     switchTab(tabName) {
         this.tabs.forEach(t => t.classList.toggle('active', t.dataset.tab === tabName));
         this.tabContents.forEach(c => c.classList.toggle('active', c.id === `tab-${tabName}`));
+
+        // If an "advanced" tab is activated (e.g. programmatically) while collapsed
+        // on phone, reveal the advanced group so the active tab is visible.
+        const activeTab = [...this.tabs].find(t => t.dataset.tab === tabName);
+        if (activeTab?.classList.contains('tab-advanced')) {
+            document.querySelector('.settings-container .tabs')?.classList.add('show-advanced');
+        }
 
         // Load content browser when switching to that tab
         if (tabName === 'content') {
