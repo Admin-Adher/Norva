@@ -124,6 +124,11 @@ Deno.serve(async (req) => {
         }
         return json(req, { ok: true, started: true, sourceId: segments[2] });
       }
+      // Watchdog: re-kick discovery chains whose isolate died silently (heartbeat
+      // went stale), so a big import always finishes even if the chain breaks.
+      if (segments[1] === "resume-stuck") {
+        return json(req, await cronResumeStuck(supabase));
+      }
       // Backfill release_year from TMDB for unverified titles. One batch per call
       // (cursor-resumable); drive it in a loop until {done:true}.
       if (segments[1] === "backfill-years") {
@@ -838,6 +843,33 @@ async function cronRefreshDue(db: SupabaseClient) {
   return { ok: true, due: (due ?? []).length, locked: toSync.length, skipped, notEntitled };
 }
 
+// Watchdog for the resumable discovery chain. An isolate can occasionally be
+// recycled mid-step without erroring or self-invoking (e.g. killed during a
+// backoff), leaving a source "syncing" with an active discover cursor and a stale
+// heartbeat. This re-kicks those so a big import always finishes — even app-closed.
+async function cronResumeStuck(db: SupabaseClient) {
+  const staleIso = new Date(Date.now() - 120_000).toISOString();
+  const { data, error } = await db
+    .from("cloud_sources")
+    .select("id,user_id,config_hint")
+    .eq("sync_status", "syncing")
+    .eq("source_type", "xtream")
+    .limit(100);
+  if (error) return { ok: false, error: error.message };
+  const resumed: string[] = [];
+  for (const src of (data ?? [])) {
+    const cursor = recordOrEmpty(recordOrEmpty(src.config_hint).syncCursor);
+    if (cursor.active !== true || stringOr(cursor.phase, "") !== "discover") continue;
+    // Recent activity (heartbeat, or just-started with no heartbeat yet) → alive.
+    const lastSeen = stringOr(cursor.heartbeatAt, "") || stringOr(cursor.startedAt, "");
+    if (lastSeen && lastSeen > staleIso) continue;
+    runInBackground(driveXtreamSyncToReady(String(src.id), String(src.user_id), db));
+    resumed.push(String(src.id));
+    if (resumed.length >= 5) break;
+  }
+  return { ok: true, scanned: (data ?? []).length, resumed };
+}
+
 // Service-authed entry point to finish a source's materialization without a user
 // session. Looks up the owning user and drives the resumable finalize phases in
 // the background, returning immediately.
@@ -1468,20 +1500,30 @@ function dedupeByConflictKey(rows: JsonRecord[]): JsonRecord[] {
 
 const IMPORT_BATCH_SIZE = 250;
 
-// Retry transient contention (statement timeout / deadlock / lock / resource) with
-// backoff long enough to ride out a checkpoint/IO spike; a schema error won't
-// clear, so stop retrying it.
+// Statement timeout / deadlock / lock / resource errors are transient contention
+// on a busy DB — worth retrying or handing to a fresh isolate; a schema error is not.
+function isTransientDbError(error: unknown): boolean {
+  const msg = String((error as { message?: string })?.message ?? error ?? "").toLowerCase();
+  return /timeout|deadlock|could not serialize|lock|connection|temporar|resource/.test(msg);
+}
+
+// A few quick retries to ride out a brief spike — kept short so a slow batch never
+// holds the isolate long enough to overrun its wall-clock mid-retry. On a
+// persistent transient failure, throw a tagged 503 so the driver can checkpoint
+// and continue in a fresh isolate (where the DB may have recovered).
 async function withDbRetry(op: () => PromiseLike<{ error: unknown }>, label: string) {
   let lastError: unknown = null;
-  for (let attempt = 0; attempt < 6; attempt++) {
+  for (let attempt = 0; attempt < 3; attempt++) {
     const { error } = await op();
     if (!error) return;
     lastError = error;
-    const msg = String((error as { message?: string }).message || error).toLowerCase();
-    if (!/timeout|deadlock|could not serialize|lock|connection|temporar|resource/.test(msg)) break;
-    await new Promise((r) => setTimeout(r, Math.min(8000, Math.round(700 * Math.pow(1.7, attempt)))));
+    if (!isTransientDbError(error)) break;
+    await new Promise((r) => setTimeout(r, Math.min(2500, Math.round(500 * Math.pow(1.8, attempt)))));
   }
-  if (lastError) throwDb(lastError, label);
+  if (isTransientDbError(lastError)) {
+    throw new HttpError(503, label, { transient: true, db: (lastError as { message?: string })?.message });
+  }
+  throwDb(lastError as { message?: string }, label);
 }
 
 // Incremental import: upsert a batch of rows (no delete, no select-back). The
@@ -1823,6 +1865,16 @@ async function driveXtreamSyncToReady(sourceId: string, userId: string, db: Supa
     });
     // The client poll and the cron finalize stepper take it from here to "ready".
   } catch (err) {
+    // Transient DB contention (timeout/lock/resource): don't fail the sync — the
+    // cursor is checkpointed, so hand off to a fresh isolate where the DB may have
+    // recovered. Bounded by the continuation cap so a real outage still surfaces.
+    const transient = err instanceof HttpError && err.status === 503;
+    if (transient && Number(cursor.attempts) < SYNC_MAX_CONTINUATIONS) {
+      console.warn("[norva-source-sync] transient sync error — continuing in a fresh isolate", sourceId);
+      try { await persist(null); } catch (_) { /* ignore — the cursor's last checkpoint stands */ }
+      await selfInvokeSyncStep(sourceId);
+      return;
+    }
     const message = err instanceof Error ? err.message : "Source sync failed";
     console.error("[norva-source-sync] sync driver failed", sourceId, message);
     const failedAt = new Date().toISOString();
