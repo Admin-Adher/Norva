@@ -938,10 +938,10 @@ h4 {
 
 .live-guide-preview {
   display: grid;
-  grid-template-columns: 96px minmax(0, 1fr) auto;
+  grid-template-columns: 80px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 18px;
-  padding: 14px 20px;
+  gap: 14px;
+  padding: 9px 18px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   background: linear-gradient(180deg, rgba(91, 116, 255, 0.10), rgba(91, 116, 255, 0));
 }
@@ -955,14 +955,14 @@ h4 {
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 64px;
+  height: 48px;
   border-radius: 10px;
   background: rgba(0, 0, 0, 0.34);
 }
 
 .live-guide-preview-art img {
   max-width: 80%;
-  max-height: 52px;
+  max-height: 40px;
   object-fit: contain;
 }
 
@@ -974,9 +974,9 @@ h4 {
 }
 
 .live-guide-preview-title {
-  margin-top: 3px;
+  margin-top: 1px;
   color: #eaf0ff;
-  font-size: 1.05rem;
+  font-size: 1rem;
   font-weight: 800;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -986,8 +986,8 @@ h4 {
 .live-guide-preview-meta {
   display: flex;
   align-items: center;
-  gap: 14px;
-  margin-top: 8px;
+  gap: 12px;
+  margin-top: 4px;
   color: #aeb9ff;
   font-size: 0.85rem;
 }
@@ -1018,7 +1018,7 @@ h4 {
 }
 
 .live-guide-upnext {
-  margin: 8px 0 0;
+  margin: 4px 0 0;
   padding: 0;
   list-style: none;
   display: flex;
@@ -1043,7 +1043,7 @@ h4 {
 .live-guide-preview-actions {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   align-items: stretch;
 }
 
@@ -1052,7 +1052,7 @@ h4 {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  padding: 9px 16px;
+  padding: 7px 14px;
   border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.16);
   background: rgba(255, 255, 255, 0.06);
@@ -1084,7 +1084,7 @@ h4 {
 
 .lg-btn-icon {
   font-size: 1rem;
-  padding: 9px 12px;
+  padding: 7px 11px;
 }
 
 .lg-btn-icon.is-fav {
