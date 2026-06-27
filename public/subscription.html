@@ -96,6 +96,10 @@
         try { const s = JSON.parse(localStorage.getItem('norva-cloud-session') || 'null'); return !!(s && s.user && s.user.id); }
         catch (_) { return false; }
       }
+      function appUserId() {
+        try { const s = JSON.parse(localStorage.getItem('norva-cloud-session') || 'null'); return s && s.user && s.user.id ? s.user.id : null; }
+        catch (_) { return null; }
+      }
       function subscribeHref() { return '/subscribe.html?returnTo=' + encodeURIComponent(returnTo); }
 
       async function getDecision() {
@@ -120,6 +124,27 @@
         a.setAttribute('target', '_blank');
         a.setAttribute('rel', 'noopener');
         return a;
+      }
+      // Restore purchases (native/Play): re-link an existing entitlement after a
+      // reinstall without re-paying. Only shown in a native shell where it applies.
+      function restoreButton() {
+        if (!isNative() || !(window.NorvaBilling && window.NorvaBilling.restore)) return null;
+        const b = el('button', 'btn ghost', 'Restore purchases');
+        b.addEventListener('click', async function () {
+          b.disabled = true;
+          const original = b.textContent;
+          b.textContent = 'Restoring…';
+          try {
+            await window.NorvaBilling.restore({ appUserId: appUserId() });
+            b.textContent = 'Restored — refreshing…';
+            setTimeout(function () { location.reload(); }, 900);
+          } catch (e) {
+            if (storeNote) storeNote.textContent = 'Could not restore purchases' + (e && e.message ? ': ' + e.message : '') + '.';
+            b.disabled = false;
+            b.textContent = original;
+          }
+        });
+        return b;
       }
 
       function detailRows(decision) {
@@ -227,6 +252,8 @@
           const see = el('a', 'btn', status === 'expired' ? 'Resubscribe' : 'See plans');
           see.setAttribute('href', subscribeHref());
           row.appendChild(see);
+          const rb0 = restoreButton();
+          if (rb0) row.appendChild(rb0);
           row.appendChild(backBtn('Back'));
           content.appendChild(row);
           return;
@@ -245,6 +272,8 @@
         }
         const mb = manageButton();
         if (mb) row.appendChild(mb);
+        const rb = restoreButton();
+        if (rb) row.appendChild(rb);
         row.appendChild(backBtn('Back'));
         content.appendChild(row);
       }

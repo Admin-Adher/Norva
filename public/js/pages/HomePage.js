@@ -201,6 +201,14 @@ class HomePage {
 
         this.loadPromise = (async () => {
             try {
+                // Start the catalogue GETs (history + rails) up front, in parallel
+                // with health/settings, so a ready home doesn't wait out a second
+                // network round-trip. They're pure data fetches rendered only after
+                // the setup-gate check; if the gate shows, the results go unused.
+                const railFetchLimit = Math.max(this.homeRailDisplayLimit, this.homeRailFetchLimit);
+                const historyP = window.API.request('GET', '/history?limit=18');
+                const railsP = window.API.request('GET', `/home/rails?limit=${railFetchLimit}`);
+
                 const [healthResult, settingsResult] = await Promise.allSettled([
                     this.app?.refreshSourceHealth?.() || window.NorvaSourceHealth?.loadSummary?.(),
                     window.API.settings.get()
@@ -219,6 +227,9 @@ class HomePage {
                 }
 
                 if (this.shouldShowSetupGate(sourceSummary)) {
+                    // Gate is showing; the in-flight fetches are unused — attach a
+                    // handler so a rejection never surfaces as an unhandled rejection.
+                    Promise.allSettled([historyP, railsP]);
                     this.renderSetupGate(sourceSummary || {});
                     this.lastLoadedAt = Date.now();
                     return;
@@ -226,10 +237,9 @@ class HomePage {
 
                 this.clearSetupGate();
 
-                const railFetchLimit = Math.max(this.homeRailDisplayLimit, this.homeRailFetchLimit);
                 const [historyResult, railsResult, favoritesResult] = await Promise.allSettled([
-                    window.API.request('GET', '/history?limit=18'),
-                    window.API.request('GET', `/home/rails?limit=${railFetchLimit}`),
+                    historyP,
+                    railsP,
                     this.renderFavoriteChannels()
                 ]);
 

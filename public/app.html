@@ -72,7 +72,7 @@
     })();
   </script>
   <!-- HLS.js for video playback -->
-  <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.7/dist/hls.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/hls.js@1.5.7/dist/hls.min.js"></script>
 </head>
 
 <body class="catalog-locked">
@@ -151,6 +151,10 @@
       <a href="#" class="nav-link catalog-nav-hidden" data-page="series" hidden aria-hidden="true" tabindex="-1">
         <span class="nav-icon"><img class="icon norva-ui-icon" src="/img/icons/norva-series.svg" alt=""></span>
         <span>Series</span>
+      </a>
+      <a href="#" class="nav-link" id="nav-search-bottom" data-action="search" aria-label="Search">
+        <span class="nav-icon"><svg class="icon norva-ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></span>
+        <span>Search</span>
       </a>
       <a href="#" class="nav-link" id="nav-downloads-bottom" data-action="downloads" hidden aria-hidden="true" tabindex="-1" style="display:none">
         <span class="nav-icon"><svg class="icon norva-ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14"/></svg></span>
@@ -1839,35 +1843,35 @@
   </div>
 
   <!-- JavaScript -->
-  <script src="/js/icons.js"></script>
-  <script src="/js/cloudApi.js?v=38"></script>
-  <script src="/js/authApi.js?v=2"></script>
-  <script src="/js/norvaEngine.js?v=19"></script>
-  <script src="/js/api.js?v=65"></script>
-  <script src="/js/utils/catalogCache.js?v=1"></script>
-  <script src="/js/utils/mediaUtils.js?v=10"></script>
-  <script src="/js/utils/playbackHealth.js?v=2"></script>
-  <script src="/js/utils/sourceHealth.js?v=6"></script>
-  <script src="/js/utils/tvNavigation.js?v=9"></script>
-  <script src="/js/utils/standalone.js?v=6"></script>
-  <script src="/js/utils/channelGrouping.js?v=4"></script>
-  <script src="/js/utils/GenreTaxonomy.js?v=3"></script>
-  <script src="/js/utils/GenreRails.js?v=7"></script>
-  <script src="/js/components/MultiSelect.js?v=1"></script>
-  <script src="/js/components/VideoPlayer.js?v=38"></script>
-  <script src="/js/components/ChannelList.js?v=38"></script>
-  <script src="/js/components/SourceManager.js?v=31"></script>
-  <script src="/js/components/EpgGuide.js?v=11"></script>
-  <script src="/js/components/LiveGuideFusion.js?v=15"></script>
-  <script src="/js/pages/HomePage.js?v=41"></script>
-  <script src="/js/pages/LivePage.js?v=5"></script>
-  <script src="/js/pages/Guide.js?v=2"></script>
-  <script src="/js/pages/MoviesPage.js?v=40"></script>
-  <script src="/js/pages/SeriesPage.js?v=40"></script>
-  <script src="/js/pages/Settings.js?v=29"></script>
-  <script src="/js/pages/WatchPage.js?v=112"></script>
-  <script src="/js/profiles.js?v=7"></script>
-  <script src="/js/app.js?v=32"></script>
+  <script defer src="/js/icons.js"></script>
+  <script defer src="/js/cloudApi.js?v=38"></script>
+  <script defer src="/js/authApi.js?v=2"></script>
+  <script defer src="/js/norvaEngine.js?v=19"></script>
+  <script defer src="/js/api.js?v=65"></script>
+  <script defer src="/js/utils/catalogCache.js?v=1"></script>
+  <script defer src="/js/utils/mediaUtils.js?v=10"></script>
+  <script defer src="/js/utils/playbackHealth.js?v=2"></script>
+  <script defer src="/js/utils/sourceHealth.js?v=6"></script>
+  <script defer src="/js/utils/tvNavigation.js?v=9"></script>
+  <script defer src="/js/utils/standalone.js?v=6"></script>
+  <script defer src="/js/utils/channelGrouping.js?v=4"></script>
+  <script defer src="/js/utils/GenreTaxonomy.js?v=3"></script>
+  <script defer src="/js/utils/GenreRails.js?v=7"></script>
+  <script defer src="/js/components/MultiSelect.js?v=1"></script>
+  <script defer src="/js/components/VideoPlayer.js?v=38"></script>
+  <script defer src="/js/components/ChannelList.js?v=38"></script>
+  <script defer src="/js/components/SourceManager.js?v=31"></script>
+  <script defer src="/js/components/EpgGuide.js?v=11"></script>
+  <script defer src="/js/components/LiveGuideFusion.js?v=15"></script>
+  <script defer src="/js/pages/HomePage.js?v=41"></script>
+  <script defer src="/js/pages/LivePage.js?v=5"></script>
+  <script defer src="/js/pages/Guide.js?v=2"></script>
+  <script defer src="/js/pages/MoviesPage.js?v=40"></script>
+  <script defer src="/js/pages/SeriesPage.js?v=40"></script>
+  <script defer src="/js/pages/Settings.js?v=29"></script>
+  <script defer src="/js/pages/WatchPage.js?v=112"></script>
+  <script defer src="/js/profiles.js?v=7"></script>
+  <script defer src="/js/app.js?v=32"></script>
   <script>
     // Check for SSO token in URL
     (function () {

@@ -153,6 +153,11 @@ class App {
                 if (link.dataset.external === 'true') return;
                 // Downloads opens the NATIVE offline screen (not an SPA page) so
                 // it works with no connectivity. Phone/tablet app only.
+                if (link.dataset.action === 'search') {
+                    e.preventDefault();
+                    this.openSearch();
+                    return;
+                }
                 if (link.dataset.action === 'account') {
                     e.preventDefault();
                     this.openAccountSheet();
@@ -1099,7 +1104,7 @@ class App {
             <div class="gsearch-panel" role="dialog" aria-modal="true" aria-label="Search">
                 <div class="gsearch-bar">
                     <span class="gsearch-ic"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></span>
-                    <input id="gsearch-input" type="search" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Search movies & series…">
+                    <input id="gsearch-input" type="search" inputmode="search" enterkeyhint="search" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Search movies & series…">
                     <button type="button" class="gsearch-cancel">Cancel</button>
                 </div>
                 <div class="gsearch-results" id="gsearch-results">
@@ -1113,7 +1118,21 @@ class App {
             clearTimeout(this._searchDebounce);
             this._searchDebounce = setTimeout(() => this.runSearch(input.value.trim()), 250);
         });
-        input.addEventListener('keydown', (e) => { if (e.key === 'Escape') this.closeSearch(); });
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') { this.closeSearch(); return; }
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                // Enter opens the first result if any are showing; otherwise run the
+                // search immediately (don't wait out the debounce).
+                if (this._gsMovies && this._gsMovies.length) this.openSearchResult('movie', 0);
+                else if (this._gsSeries && this._gsSeries.length) this.openSearchResult('series', 0);
+                else {
+                    clearTimeout(this._searchDebounce);
+                    const q = input.value.trim();
+                    if (q.length >= 2) this.runSearch(q);
+                }
+            }
+        });
         document.body.appendChild(ov);
         return ov;
     }
@@ -1123,6 +1142,8 @@ class App {
         if (!box) return;
         if (q.length < 2) {
             box.innerHTML = '<div class="gsearch-hint">Type at least 2 characters to search the catalogue.</div>';
+            this._gsMovies = [];
+            this._gsSeries = [];
             return;
         }
         const reqId = (this._searchReq = (this._searchReq || 0) + 1);

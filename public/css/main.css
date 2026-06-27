@@ -5831,9 +5831,14 @@ kbd {
   }
 
   .movie-detail-hero-content {
-    grid-template-columns: 104px minmax(0, 1fr);
+    grid-template-columns: 1fr;
     gap: 14px;
-    align-items: end;
+    align-items: start;
+  }
+
+  .movie-detail-hero-content .movie-detail-poster {
+    width: 116px;
+    justify-self: start;
   }
 
   .movie-detail-info h3 {
@@ -6663,9 +6668,14 @@ kbd {
   }
 
   .series-detail-hero-content {
-    grid-template-columns: 104px minmax(0, 1fr);
+    grid-template-columns: 1fr;
     gap: 14px;
-    align-items: end;
+    align-items: start;
+  }
+
+  .series-detail-hero-content .series-detail-poster {
+    width: 116px;
+    justify-self: start;
   }
 
   .series-detail-hero .series-info h3 {
