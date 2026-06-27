@@ -345,6 +345,21 @@ async function syncCloudSource(sourceId: string, userId: string, db: SupabaseCli
   });
 
   if (source.source_type === "xtream") {
+    // Idempotent re-sync: if a discovery chain is already in flight, join it
+    // instead of restarting (a restart wipes + re-imports and the two
+    // generations deadlock each other). Only force=1 forces a clean restart.
+    const cur = recordOrEmpty(baseHint.syncCursor);
+    const heartbeat = Date.parse(stringOr(cur.heartbeatAt, "")) || 0;
+    const inDiscovery = cur.active === true && stringOr(cur.phase, "") === "discover";
+    if (!opts.force && inDiscovery && String(source.sync_status) === "syncing") {
+      if (Date.now() - heartbeat < 75_000) {
+        return { sourceId, status: "syncing", started: false, joined: true };
+      }
+      // Heartbeat went stale → the chain died mid-run; resume without wiping.
+      runInBackground(driveXtreamSyncToReady(sourceId, userId, db));
+      return { sourceId, status: "syncing", started: true, resumed: true };
+    }
+
     // "8K"-scale catalogues can't be discovered + imported + materialized in one
     // edge isolate. Reset the resumable cursor, then drive discovery in the
     // background (it self-continues across isolates to the finalize-pending
@@ -1458,10 +1473,20 @@ async function appendSourceItems(sourceId: string, userId: string, rows: JsonRec
   for (let index = 0; index < rows.length; index += 500) {
     const chunk = rows.slice(index, index + 500);
     if (!chunk.length) continue;
-    const { error } = await db
-      .from("cloud_media_items")
-      .upsert(chunk, { onConflict: "source_id,item_type,external_id" });
-    if (error) throwDb(error, "Unable to save cloud catalog items");
+    let lastError: unknown = null;
+    // Retry transient contention (statement timeout / deadlock / lock / resource);
+    // a schema error won't clear, so stop retrying it.
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const { error } = await db
+        .from("cloud_media_items")
+        .upsert(chunk, { onConflict: "source_id,item_type,external_id" });
+      if (!error) { lastError = null; break; }
+      lastError = error;
+      const msg = String((error as { message?: string }).message || error).toLowerCase();
+      if (!/timeout|deadlock|could not serialize|lock|connection|temporar|resource/.test(msg)) break;
+      await new Promise((r) => setTimeout(r, 800 * (attempt + 1)));
+    }
+    if (lastError) throwDb(lastError, "Unable to save cloud catalog items");
   }
 }
 
@@ -1560,6 +1585,14 @@ async function driveXtreamSyncToReady(sourceId: string, userId: string, db: Supa
   let progress = recordOrEmpty(baseHint.syncProgress);
   const previousSignature = cursor.previousSignature ?? baseHint.contentSignature;
 
+  // Single-flight: a fresh sync (syncCloudSource) stamps a new startedAt. If this
+  // isolate sees a different one it has been superseded — stop writing so two
+  // generations don't fight over the cursor and the same rows (which deadlocks
+  // and statement-times-out under load). Self-invoke continuations keep the same
+  // startedAt, so the chain is unaffected.
+  const myRun = stringOr(cursor.startedAt, "");
+  let superseded = false;
+
   const persist = async (progressPatch: JsonRecord | null) => {
     if (progressPatch) {
       progress = mergeSyncProgress(progress, compactRecord({ ...progressPatch, status: "syncing", updatedAt: new Date().toISOString() }));
@@ -1567,6 +1600,8 @@ async function driveXtreamSyncToReady(sourceId: string, userId: string, db: Supa
     const { data: fresh } = await db
       .from("cloud_sources").select("config_hint").eq("id", sourceId).eq("user_id", userId).maybeSingle();
     const freshHint = recordOrEmpty(fresh?.config_hint);
+    if (stringOr(recordOrEmpty(freshHint.syncCursor).startedAt, myRun) !== myRun) { superseded = true; return; }
+    cursor.heartbeatAt = new Date().toISOString();
     await db
       .from("cloud_sources")
       .update({
@@ -1636,6 +1671,7 @@ async function driveXtreamSyncToReady(sourceId: string, userId: string, db: Supa
           categories: { status: "running" },
         },
       });
+      if (superseded) return;
     }
 
     const counts = recordOrEmpty(cursor.counts);
@@ -1696,10 +1732,12 @@ async function driveXtreamSyncToReady(sourceId: string, userId: string, db: Supa
           counts: { live: liveCount, movies: movieCount, series: seriesCount, total: liveCount + movieCount + seriesCount },
         });
       }
+      if (superseded) return;
     }
 
     if (typeIdx < DISCOVER_TYPES.length) {
       await persist(null);
+      if (superseded) return;
       await selfInvokeSyncStep(sourceId);
       return;
     }
@@ -1736,6 +1774,7 @@ async function driveXtreamSyncToReady(sourceId: string, userId: string, db: Supa
     const { data: fresh } = await db
       .from("cloud_sources").select("config_hint").eq("id", sourceId).eq("user_id", userId).maybeSingle();
     const freshHint = recordOrEmpty(fresh?.config_hint);
+    if (stringOr(recordOrEmpty(freshHint.syncCursor).startedAt, myRun) !== myRun) return; // superseded by a newer sync
     await db
       .from("cloud_sources")
       .update({

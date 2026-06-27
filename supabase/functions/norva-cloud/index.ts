@@ -1204,6 +1204,18 @@ async function syncCloudSource(sourceId: string, userId: string, db: SupabaseCli
     });
 
     if (source.source_type === "xtream") {
+      // Idempotent re-entry: if a discovery chain is already in flight, join it
+      // rather than restart (a restart wipes + re-imports and the two generations
+      // deadlock each other under load).
+      const cur = recordOrEmpty(baseHint.syncCursor);
+      const heartbeat = Date.parse(stringOr(cur.heartbeatAt, "")) || 0;
+      const inDiscovery = cur.active === true && stringOr(cur.phase, "") === "discover";
+      if (inDiscovery && String(source.sync_status) === "syncing") {
+        if (Date.now() - heartbeat < 75_000) return; // a chain is alive — join it
+        await driveXtreamSyncToReady(sourceId, userId, db); // stalled → resume without wiping
+        return;
+      }
+
       // Big "8K" catalogues (100k+ items, 1000+ categories) can't be discovered,
       // imported and materialized inside one edge isolate's wall-clock budget.
       // Reset the resumable cursor for a fresh run, then hand to the driver which
@@ -1343,10 +1355,20 @@ async function appendSourceItems(sourceId: string, userId: string, rows: JsonRec
   for (let index = 0; index < rows.length; index += 500) {
     const chunk = rows.slice(index, index + 500);
     if (!chunk.length) continue;
-    const { error } = await db
-      .from("cloud_media_items")
-      .upsert(chunk, { onConflict: "source_id,item_type,external_id" });
-    if (error) throwDb(error, "Unable to save cloud media items");
+    let lastError: unknown = null;
+    // Retry transient contention (statement timeout / deadlock / lock / resource);
+    // a schema error won't clear, so stop retrying it.
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const { error } = await db
+        .from("cloud_media_items")
+        .upsert(chunk, { onConflict: "source_id,item_type,external_id" });
+      if (!error) { lastError = null; break; }
+      lastError = error;
+      const msg = String((error as { message?: string }).message || error).toLowerCase();
+      if (!/timeout|deadlock|could not serialize|lock|connection|temporar|resource/.test(msg)) break;
+      await new Promise((r) => setTimeout(r, 800 * (attempt + 1)));
+    }
+    if (lastError) throwDb(lastError, "Unable to save cloud media items");
   }
 }
 
@@ -1392,6 +1414,13 @@ async function driveXtreamSyncToReady(sourceId: string, userId: string, db: Supa
   if (!isRecord(baseHint.syncCursor)) cursor = freshSyncCursor(new Date().toISOString());
   let progress = recordOrEmpty(baseHint.syncProgress);
 
+  // Single-flight: a fresh sync stamps a new startedAt. If this isolate sees a
+  // different one it has been superseded — stop writing so two generations don't
+  // fight over the cursor and the same rows (which deadlocks under load). Self-
+  // invoke continuations keep the same startedAt, so the chain is unaffected.
+  const myRun = stringOr(cursor.startedAt, "");
+  let superseded = false;
+
   // Single config_hint writer during discovery — re-reads the row each time so a
   // concurrent finalize progress write is never clobbered.
   const persist = async (progressPatch: JsonRecord | null) => {
@@ -1401,6 +1430,8 @@ async function driveXtreamSyncToReady(sourceId: string, userId: string, db: Supa
     const { data: fresh } = await db
       .from("cloud_sources").select("config_hint").eq("id", sourceId).eq("user_id", userId).maybeSingle();
     const freshHint = recordOrEmpty(fresh?.config_hint);
+    if (stringOr(recordOrEmpty(freshHint.syncCursor).startedAt, myRun) !== myRun) { superseded = true; return; }
+    cursor.heartbeatAt = new Date().toISOString();
     await db
       .from("cloud_sources")
       .update({
@@ -1471,6 +1502,7 @@ async function driveXtreamSyncToReady(sourceId: string, userId: string, db: Supa
           categories: { status: "running" },
         },
       });
+      if (superseded) return;
     }
 
     const counts = recordOrEmpty(cursor.counts);
@@ -1527,11 +1559,13 @@ async function driveXtreamSyncToReady(sourceId: string, userId: string, db: Supa
           counts: { live: liveCount, movies: movieCount, series: seriesCount, total: liveCount + movieCount + seriesCount },
         });
       }
+      if (superseded) return;
     }
 
     if (typeIdx < DISCOVER_TYPES.length) {
       // Budget hit before the catalogue is fully imported → checkpoint + continue.
       await persist(null);
+      if (superseded) return;
       await selfInvokeSyncStep(sourceId);
       return;
     }
