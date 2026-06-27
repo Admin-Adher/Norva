@@ -1324,6 +1324,18 @@ function asStringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : [];
 }
 
+// A provider commonly lists the same stream in several categories; a single
+// upsert command can't touch the same (source_id, item_type, external_id) twice
+// ("ON CONFLICT DO UPDATE command cannot affect row a second time"), so collapse
+// duplicates within a batch (keeping the last) before upserting.
+function dedupeByConflictKey(rows: JsonRecord[]): JsonRecord[] {
+  const map = new Map<string, JsonRecord>();
+  for (const row of rows) {
+    map.set(`${stringOr(row.item_type, "")}:${stringOr(row.external_id, "")}`, row);
+  }
+  return [...map.values()];
+}
+
 // Incremental import: upsert a batch of rows (no delete, no select-back). The
 // initial delete-all happens once per fresh sync; finalize reloads rows from the
 // table, so we don't need the saved rows here — keeping peak memory tiny.
@@ -1407,6 +1419,10 @@ async function driveXtreamSyncToReady(sourceId: string, userId: string, db: Supa
     if (Number(cursor.attempts) > SYNC_MAX_CONTINUATIONS) {
       throw new HttpError(500, "Catalog sync exceeded its continuation budget");
     }
+    // A continuation is making progress — clear any error left by a prior isolate.
+    if (String(source.sync_status) !== "syncing") {
+      await db.from("cloud_sources").update({ sync_status: "syncing", sync_error: null }).eq("id", sourceId).eq("user_id", userId);
+    }
 
     const runtimeConfig = await getRuntimeConfig(db);
     const config = await decryptSourceConfig(String(source.config_ciphertext), runtimeConfig);
@@ -1482,12 +1498,14 @@ async function driveXtreamSyncToReady(sourceId: string, userId: string, db: Supa
       if (catIdx >= targets.length) { typeIdx++; catIdx = 0; continue; }
       const batch = targets.slice(catIdx, catIdx + DISCOVER_CONCURRENCY);
       const slices = await Promise.all(batch.map((p) => fetchCatalog(def.action, p)));
-      const batchRows: JsonRecord[] = [];
+      const rawRows: JsonRecord[] = [];
       for (const slice of slices) {
         if (!Array.isArray(slice) || !slice.length) continue;
         const r = xtreamRows(sourceId, userId, slice as JsonRecord[], def.type, nameMaps[def.type]);
-        for (const row of r) batchRows.push(row);
+        for (const row of r) rawRows.push(row);
       }
+      // Collapse cross-category duplicates before counting/upserting.
+      const batchRows = dedupeByConflictKey(rawRows);
       if (batchRows.length) {
         await appendSourceItems(sourceId, userId, batchRows, db);
         if (def.type === "live") liveCount += batchRows.length;
