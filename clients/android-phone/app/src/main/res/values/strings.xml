@@ -1,4 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Norva</string>
+
+    <!-- Native player -->
+    <string name="player_error_title">Couldn\'t play this title</string>
+    <string name="player_retry">Retry</string>
+    <string name="player_back">Back</string>
+    <string name="player_no_data">No data received (35s timeout). The provider accepted the connection but isn\'t sending a playable stream.</string>
 </resources>

@@ -647,6 +647,7 @@ public final class DownloadsActivity extends Activity {
         i.putExtra(PlayerActivity.EXTRA_SOURCE_ID, it.sourceId);
         i.putExtra(PlayerActivity.EXTRA_ITEM_TYPE, it.itemType);
         i.putExtra(PlayerActivity.EXTRA_ITEM_ID, it.itemId);
+        if (it.positionSeconds > 0) i.putExtra(PlayerActivity.EXTRA_RESUME_SECONDS, it.positionSeconds);
         startActivity(i);
     }
 

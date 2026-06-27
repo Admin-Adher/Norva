@@ -48,7 +48,7 @@
             android:name=".PlayerActivity"
             android:configChanges="keyboard|keyboardHidden|orientation|screenLayout|screenSize|smallestScreenSize|uiMode"
             android:exported="false"
-            android:screenOrientation="sensorLandscape" />
+            android:screenOrientation="fullUser" />
 
         <!-- Offline downloads: native list of saved movies (the "Downloads" screen). -->
         <activity

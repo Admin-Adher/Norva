@@ -9,11 +9,15 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.DisplayCutout;
+import android.view.GestureDetector;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowInsets;
 import android.view.WindowManager;
+import android.widget.Button;
 import android.widget.FrameLayout;
+import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -65,8 +69,12 @@ public class PlayerActivity extends Activity {
 
     private ExoPlayer player;
     private PlayerView playerView;
-    private TextView errorView;          // shown when a stream fails, instead of a silent 00:00
+    private LinearLayout errorPanel;     // recoverable error UI (message + Retry + Back)
+    private TextView errorView;          // the diagnostic detail line inside errorPanel
     private String streamHost;           // host of the stream URL, included in the error text
+    private String originalUrl;          // the first URL we tried, used to re-prepare on Retry
+    private MediaItem originalMediaItem; // built once, replayed on Retry (carries the local MIME hint)
+    private boolean isLocal = false;     // offline (encrypted local file) playback
     private String fallbackUrl;          // gateway URL to retry with on a direct-URL refusal
     private boolean fallbackTried = false;
     private String sourceId;
@@ -75,15 +83,18 @@ public class PlayerActivity extends Activity {
     private String subKey; // SharedPreferences key for the per-title subtitle choice
     private int resumeSeconds = 0;
     private boolean resumeApplied = false;
+    private TextView seekBubble;         // transient "+10s" / "-10s" double-tap feedback
+    private final Runnable hideSeekBubble = new Runnable() {
+        @Override public void run() { if (seekBubble != null) seekBubble.setVisibility(View.GONE); }
+    };
 
     private final Handler errHandler = new Handler(Looper.getMainLooper());
     private static final long BUFFER_TIMEOUT_MS = 35_000L; // "no data" watchdog
     private final Runnable bufferWatchdog = new Runnable() {
         @Override
         public void run() {
-            showStreamError("Aucune donnée reçue (timeout 35s).\n"
-                    + "Le fournisseur accepte la connexion mais n'envoie pas de flux lisible."
-                    + (streamHost != null ? "\nHôte : " + streamHost : ""));
+            showStreamError(getString(R.string.player_no_data)
+                    + (streamHost != null ? "\nHost: " + streamHost : ""));
         }
     };
 
@@ -100,8 +111,10 @@ public class PlayerActivity extends Activity {
         resumeSeconds = getIntent().getIntExtra(EXTRA_RESUME_SECONDS, 0);
         subKey = subKeyFor(itemType, itemId);
         if (url == null || url.isEmpty()) { finish(); return; }
+        originalUrl = url;
         streamHost = hostOf(url);
         fallbackUrl = getIntent().getStringExtra(EXTRA_FALLBACK_URL);
+        isLocal = getIntent().getBooleanExtra(EXTRA_LOCAL, false);
 
         playerView = new PlayerView(this);
         // Black everywhere behind the video so letterbox/pillarbox and any
@@ -116,13 +129,48 @@ public class PlayerActivity extends Activity {
         root.setBackgroundColor(Color.BLACK);
         root.addView(playerView, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+        // Recoverable error panel: a headline + the diagnostic detail + Retry/Back,
+        // so a failed stream is a recoverable moment instead of a silent 00:00 hang.
+        errorPanel = new LinearLayout(this);
+        errorPanel.setOrientation(LinearLayout.VERTICAL);
+        errorPanel.setGravity(Gravity.CENTER);
+        errorPanel.setPadding(dp(32), dp(32), dp(32), dp(32));
+        errorPanel.setVisibility(View.GONE);
+
+        TextView errorTitle = new TextView(this);
+        errorTitle.setText(getString(R.string.player_error_title));
+        errorTitle.setTextColor(Color.WHITE);
+        errorTitle.setTextSize(20);
+        errorTitle.setGravity(Gravity.CENTER);
+        errorTitle.setPadding(0, 0, 0, dp(12));
+        errorPanel.addView(errorTitle);
+
         errorView = new TextView(this);
-        errorView.setTextColor(Color.parseColor("#ef4444"));
-        errorView.setTextSize(15);
+        errorView.setTextColor(Color.parseColor("#cbd5e1"));
+        errorView.setTextSize(13);
         errorView.setGravity(Gravity.CENTER);
-        errorView.setPadding(dp(24), dp(24), dp(24), dp(24));
-        errorView.setVisibility(View.GONE);
-        root.addView(errorView, new FrameLayout.LayoutParams(
+        errorView.setPadding(0, 0, 0, dp(24));
+        errorPanel.addView(errorView);
+
+        Button retryBtn = new Button(this);
+        retryBtn.setText(getString(R.string.player_retry));
+        retryBtn.setTextColor(Color.WHITE);
+        retryBtn.setBackgroundColor(Color.parseColor("#3B82F6"));
+        retryBtn.setOnClickListener(v -> retryPlayback());
+        LinearLayout.LayoutParams retryLp = new LinearLayout.LayoutParams(dp(220),
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        retryLp.bottomMargin = dp(12);
+        errorPanel.addView(retryBtn, retryLp);
+
+        Button backBtn = new Button(this);
+        backBtn.setText(getString(R.string.player_back));
+        backBtn.setTextColor(Color.WHITE);
+        backBtn.setBackgroundColor(Color.parseColor("#272d3a"));
+        backBtn.setOnClickListener(v -> finish());
+        errorPanel.addView(backBtn, new LinearLayout.LayoutParams(dp(220),
+                LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        root.addView(errorPanel, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.CENTER));
         setContentView(root);
 
@@ -149,9 +197,8 @@ public class PlayerActivity extends Activity {
         playerView.requestApplyInsets();
         applyImmersive();
 
-        boolean local = getIntent().getBooleanExtra(EXTRA_LOCAL, false);
         DataSource.Factory dataSourceFactory;
-        if (local) {
+        if (isLocal) {
             // Offline: decrypt the AES/CTR file with the keystore-protected key.
             try {
                 byte[] dataKey = DownloadCrypto.unwrapDataKey(
@@ -177,10 +224,15 @@ public class PlayerActivity extends Activity {
 
         player = new ExoPlayer.Builder(this)
                 .setMediaSourceFactory(new DefaultMediaSourceFactory(dataSourceFactory))
+                // Symmetric ±10s so the controller's rewind/fast-forward and the
+                // double-tap gesture both jump a predictable, equal amount.
+                .setSeekBackIncrementMs(10_000)
+                .setSeekForwardIncrementMs(10_000)
                 .build();
         playerView.setPlayer(player);
         playerView.setKeepScreenOn(true);
         playerView.setShowSubtitleButton(true);
+        installGestureOverlay();
         // Re-apply the viewer's last subtitle choice for this title before the
         // first track selection, so it doesn't reset to the stream default.
         applySavedSubtitlePref();
@@ -196,7 +248,7 @@ public class PlayerActivity extends Activity {
                 }
                 if (state == Player.STATE_READY) {
                     errHandler.removeCallbacks(bufferWatchdog);
-                    if (errorView != null) errorView.setVisibility(View.GONE);
+                    if (errorPanel != null) errorPanel.setVisibility(View.GONE);
                     if (!resumeApplied && resumeSeconds > 0) {
                         resumeApplied = true;
                         long target = resumeSeconds * 1000L;
@@ -236,13 +288,14 @@ public class PlayerActivity extends Activity {
         });
 
         MediaItem.Builder mediaItem = new MediaItem.Builder().setUri(url);
-        if (local) {
+        if (isLocal) {
             // The file extension is hidden (.enc); give ExoPlayer a MIME hint so
             // it picks the right extractor (it also sniffs the decrypted bytes).
             String mime = mimeForContainer(getIntent().getStringExtra(EXTRA_CONTAINER));
             if (mime != null) mediaItem.setMimeType(mime);
         }
-        player.setMediaItem(mediaItem.build());
+        originalMediaItem = mediaItem.build();
+        player.setMediaItem(originalMediaItem);
         player.prepare();
         player.setPlayWhenReady(true);
     }
@@ -333,10 +386,23 @@ public class PlayerActivity extends Activity {
     // ==================== Error display ====================
 
     private void showStreamError(String message) {
-        if (errorView == null) return;
+        if (errorView == null || errorPanel == null) return;
         errorView.setText(message);
-        errorView.setVisibility(View.VISIBLE);
-        errorView.bringToFront();
+        errorPanel.setVisibility(View.VISIBLE);
+        errorPanel.bringToFront();
+    }
+
+    /** Re-prepare from the original URL after the user taps Retry on the error panel. */
+    private void retryPlayback() {
+        if (player == null) return;
+        fallbackTried = false;
+        errHandler.removeCallbacks(bufferWatchdog);
+        if (errorPanel != null) errorPanel.setVisibility(View.GONE);
+        streamHost = hostOf(originalUrl);
+        player.setMediaItem(originalMediaItem != null
+                ? originalMediaItem : new MediaItem.Builder().setUri(originalUrl).build());
+        player.prepare();
+        player.setPlayWhenReady(true);
     }
 
     /** Reload from the gateway fallback URL after a direct-URL refusal (e.g. provider 401). */
@@ -344,7 +410,7 @@ public class PlayerActivity extends Activity {
         fallbackTried = true;
         streamHost = hostOf(fallbackUrl);
         errHandler.removeCallbacks(bufferWatchdog);
-        if (errorView != null) errorView.setVisibility(View.GONE);
+        if (errorPanel != null) errorPanel.setVisibility(View.GONE);
         player.setMediaItem(new MediaItem.Builder().setUri(fallbackUrl).build());
         player.prepare();
         player.setPlayWhenReady(true);
@@ -359,8 +425,8 @@ public class PlayerActivity extends Activity {
     /** Compact, shareable diagnostic from a playback failure (code, HTTP status, cause, host). */
     @OptIn(markerClass = UnstableApi.class)
     private String diagnose(PlaybackException e) {
-        StringBuilder sb = new StringBuilder("Lecture impossible\n");
-        sb.append("Code : ").append(e.getErrorCodeName());
+        StringBuilder sb = new StringBuilder("Playback failed\n");
+        sb.append("Code: ").append(e.getErrorCodeName());
         Throwable c = e.getCause();
         int depth = 0;
         while (c != null && depth < 3) {
@@ -370,12 +436,12 @@ public class PlayerActivity extends Activity {
             sb.append("\n← ").append(c.getClass().getSimpleName());
             String cm = c.getMessage();
             if (cm != null && !cm.isEmpty()) {
-                sb.append(" : ").append(cm.length() > 160 ? cm.substring(0, 160) : cm);
+                sb.append(": ").append(cm.length() > 160 ? cm.substring(0, 160) : cm);
             }
             c = c.getCause();
             depth++;
         }
-        if (streamHost != null && !streamHost.isEmpty()) sb.append("\nHôte : ").append(streamHost);
+        if (streamHost != null && !streamHost.isEmpty()) sb.append("\nHost: ").append(streamHost);
         return sb.toString();
     }
 
@@ -385,6 +451,66 @@ public class PlayerActivity extends Activity {
 
     private int dp(int v) {
         return Math.round(v * getResources().getDisplayMetrics().density);
+    }
+
+    // ==================== Touch gestures ====================
+
+    /**
+     * Double-tap the left/right half to seek -/+10s; a single tap toggles the
+     * controls. The gesture View lives in the PlayerView overlay (below the media3
+     * controller), so when the controller is showing, its buttons still receive
+     * touches normally — the overlay only handles taps while the controls are hidden.
+     */
+    @OptIn(markerClass = UnstableApi.class)
+    private void installGestureOverlay() {
+        final FrameLayout overlay = playerView.getOverlayFrameLayout();
+        if (overlay == null) return;
+
+        seekBubble = new TextView(this);
+        seekBubble.setTextColor(Color.WHITE);
+        seekBubble.setTextSize(18);
+        seekBubble.setBackgroundColor(Color.parseColor("#99000000"));
+        seekBubble.setPadding(dp(16), dp(8), dp(16), dp(8));
+        seekBubble.setVisibility(View.GONE);
+
+        final GestureDetector detector = new GestureDetector(this,
+                new GestureDetector.SimpleOnGestureListener() {
+            @Override public boolean onDown(MotionEvent e) { return true; }
+
+            @Override public boolean onSingleTapConfirmed(MotionEvent e) {
+                if (playerView.isControllerFullyVisible()) playerView.hideController();
+                else playerView.showController();
+                return true;
+            }
+
+            @Override public boolean onDoubleTap(MotionEvent e) {
+                if (player == null) return false;
+                boolean forward = e.getX() > overlay.getWidth() / 2f;
+                player.seekTo(Math.max(0, player.getCurrentPosition() + (forward ? 10_000 : -10_000)));
+                showSeekFeedback(forward ? "+10s" : "-10s");
+                return true;
+            }
+        });
+
+        View touchLayer = new View(this);
+        touchLayer.setOnTouchListener((v, ev) -> {
+            boolean handled = detector.onTouchEvent(ev);
+            if (ev.getAction() == MotionEvent.ACTION_UP) v.performClick();
+            return handled;
+        });
+        overlay.addView(touchLayer, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+        overlay.addView(seekBubble, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.CENTER));
+    }
+
+    /** Flash a "+10s" / "-10s" bubble for ~0.65s after a double-tap seek. */
+    private void showSeekFeedback(String text) {
+        if (seekBubble == null) return;
+        seekBubble.setText(text);
+        seekBubble.setVisibility(View.VISIBLE);
+        seekBubble.removeCallbacks(hideSeekBubble);
+        seekBubble.postDelayed(hideSeekBubble, 650);
     }
 
     /** Immersive fullscreen: hide the status and navigation bars (sticky, so a
@@ -415,6 +541,16 @@ public class PlayerActivity extends Activity {
             if (player != null && itemId != null && !itemId.isEmpty()) {
                 long pos = Math.max(0, player.getCurrentPosition() / 1000);
                 long dur = player.getDuration() > 0 ? player.getDuration() / 1000 : 0;
+                if (isLocal) {
+                    // Offline: persist the resume point back to the download manifest so
+                    // the next offline play picks up where this one left off (the download
+                    // id is sourceId:itemId, mirroring MainActivity.startDownload).
+                    try {
+                        String id = (sourceId == null ? "" : sourceId) + ":" + itemId;
+                        DownloadStore.Item it = DownloadStore.get(this, id);
+                        if (it != null) { it.positionSeconds = (int) pos; DownloadStore.put(this, it); }
+                    } catch (Exception ignored) { /* resume point is best-effort */ }
+                }
                 Intent data = new Intent();
                 data.putExtra("sourceId", sourceId);
                 data.putExtra("itemType", itemType);

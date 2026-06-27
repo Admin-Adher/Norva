@@ -48,6 +48,7 @@ final class DownloadStore {
         String keyIv = "";
         String mediaIv = "";
         int durationSeconds = 0;
+        int positionSeconds = 0; // last resume point for offline playback (0 = start)
         long createdAt = System.currentTimeMillis();
         long queueOrder = 0; // lower = earlier in the queue (0 -> fall back to createdAt)
         boolean allowCellular = false; // user OK'd this one on mobile data despite Wi-Fi-only
@@ -76,6 +77,7 @@ final class DownloadStore {
             o.put("keyIv", keyIv);
             o.put("mediaIv", mediaIv);
             o.put("durationSeconds", durationSeconds);
+            o.put("positionSeconds", positionSeconds);
             o.put("createdAt", createdAt);
             o.put("queueOrder", queueOrder);
             o.put("allowCellular", allowCellular);
@@ -106,6 +108,7 @@ final class DownloadStore {
             it.keyIv = o.optString("keyIv");
             it.mediaIv = o.optString("mediaIv");
             it.durationSeconds = o.optInt("durationSeconds");
+            it.positionSeconds = o.optInt("positionSeconds", 0);
             it.createdAt = o.optLong("createdAt", System.currentTimeMillis());
             it.queueOrder = o.optLong("queueOrder", it.createdAt);
             it.allowCellular = o.optBoolean("allowCellular", false);

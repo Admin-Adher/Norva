@@ -14,6 +14,8 @@ import android.net.Uri;
 import android.net.http.SslError;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.text.InputType;
 import android.view.Gravity;
 import android.view.KeyEvent;
@@ -79,6 +81,17 @@ public class MainActivity extends Activity {
     private TextView     errorText;
     private String       lastLoadedUrl;
     private long         lastBackPressMs = 0L;
+
+    // Cold-start watchdog: if a page neither finishes nor errors within the timeout
+    // (a silently hung load), surface the friendly error screen instead of stranding
+    // the user on the splash spinner.
+    private static final long LOAD_TIMEOUT_MS = 15000L;
+    private final Handler loadHandler = new Handler(Looper.getMainLooper());
+    private final Runnable loadTimeout = new Runnable() {
+        @Override public void run() {
+            if (webViewVisible) showNetworkError("Norva is taking too long to respond.");
+        }
+    };
 
     // ---- Lifecycle ----
 
@@ -182,6 +195,7 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        loadHandler.removeCallbacks(loadTimeout);
         if (webView != null) webView.destroy();
         ioPool.shutdownNow();
         super.onDestroy();
@@ -215,6 +229,7 @@ public class MainActivity extends Activity {
         webView.setWebViewClient(new WebViewClient() {
             @Override
             public void onPageFinished(WebView view, String url) {
+                loadHandler.removeCallbacks(loadTimeout);
                 hideSplash();
             }
 
@@ -375,6 +390,8 @@ public class MainActivity extends Activity {
         showSplash();
         webView.setVisibility(View.VISIBLE);
         webViewVisible = true;
+        loadHandler.removeCallbacks(loadTimeout);
+        loadHandler.postDelayed(loadTimeout, LOAD_TIMEOUT_MS);
         webView.loadUrl(url);
         webView.requestFocus();
     }
@@ -709,6 +726,7 @@ public class MainActivity extends Activity {
 
     private void showSetup(String error) {
         webViewVisible = false;
+        loadHandler.removeCallbacks(loadTimeout);
         hideSplash();
         if (errorPanel != null) errorPanel.setVisibility(View.GONE);
         webView.setVisibility(View.GONE);
@@ -834,6 +852,7 @@ public class MainActivity extends Activity {
 
     private void showNetworkError(String detail) {
         webViewVisible = false;
+        loadHandler.removeCallbacks(loadTimeout);
         hideSplash();
         webView.setVisibility(View.GONE);
         setupPanel.setVisibility(View.GONE);
