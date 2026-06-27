@@ -50,16 +50,24 @@
       ensuite (rien ne les lit ; pas de gain à 1 user) ⇒ la base reste à 155 MB. Repopulables
       en 1 appel quand le dual-write ou l'échelle arrive.
 
+### Dual-write au sync — construit + testé (live en base, flag OFF)
+- [x] **`sync_source_to_catalog(p_source_id)`** — miroir **en bloc par source** vers le global
+      (keep-best sur media, last-wins sur le raw provider), `statement_timeout` relevé à 300s
+      (survit au cap 8s de l'authenticator pour les gros catalogues). Migration `20260627170000`.
+      Testé sur apdxes : 40 585 / 27 665 / 9 500, **idempotent** (2ᵉ run = mêmes counts).
+- [x] **Trigger `trg_cloud_source_mirror_on_ready`** sur `cloud_sources` (AFTER UPDATE OF
+      sync_status, quand →`ready`) → appelle le miroir. **Un seul point** couvre tous les
+      chemins (onboarding, re-sync, cron finalize) ⇒ pas d'édition des 2 finalize stabilisés.
+      **GUC `app.norva_catalog_dual_write` (défaut OFF)** : no-op tant que non activé ⇒ zéro
+      overhead/risque. Exception-gardé. Migration `20260627180000`. **Testé** : flag ON → miroir
+      peuplé (40 585/9 500) ; flag OFF → 0 (rien ne se peuple). apdxes intact.
+      _Activation : `alter role authenticator set app.norva_catalog_dual_write = '1';`_
+
 ---
 
 ## ⏳ RESTE À FAIRE (Phase 2, multi-session, additif + réversible)
 
 Ordre conseillé. Tout reste **derrière un flag par défaut OFF** ⇒ zéro impact tant que non basculé.
-
-- [ ] **Dual-write au sync** : à la fin du finalize (`norva-source-sync` / `_shared`), upsert
-      **en bloc** (PAS un trigger par ligne — garder l'import 272k rapide) les lignes du
-      catalogue vers les tables `catalog_*`, clé `serverHost`. Réutiliser la logique de
-      `backfill_catalog_from_cloud()`.
 - [ ] **Mirror-verify** : `catalog_media_mirror_diff()` (sur le modèle de `catalog_mirror_diff`)
       ⇒ prouver que le global est un miroir fidèle du per-user avant tout flip.
 - [ ] **Lecture playback flag-gated** : `resolvePlaybackTarget` (`norva-playback`) lit

@@ -113,11 +113,18 @@ catalogue duplication is **92% of the database** (725 MB of 790 MB were the five
   guarded) makes it monotone — provider-raw/null never overwrites an enriched
   row; empirically validated (downgrade blocked, year clamped). Empty + additive
   → nothing reads it yet → zero behaviour change.
-- ⏳ Next: `catalog_title_variants` + `catalog_live_*` foundation tables → bulk
-  dual-write from the sync path (NOT a per-row trigger — keeps the 272k-row import
-  fast) → backfill + a `catalog_media_mirror_diff` verify → flag-gated
-  `resolvePlaybackTarget` read from the global store → thin per-user
-  `cloud_media_items` to a membership link.
+- ✅ **All four global foundation tables** (`catalog_media_items` +
+  `catalog_title_variants` + `catalog_live_logical_channels` + `catalog_live_variants`)
+  + the backfill/measure primitives (`backfill_catalog_from_cloud`,
+  `catalog_dedup_report`). Migrations `20260627150000`/`160000`. Validated on apdxes
+  (`dup_factor 1.00`), then truncated to stay lean.
+- ✅ **Sync-time dual-write** — `sync_source_to_catalog(p_source_id)` (bulk mirror per
+  source, 300s timeout) fired by trigger `trg_cloud_source_mirror_on_ready` on every
+  `→ready`, **GUC-gated `app.norva_catalog_dual_write` (default OFF)** so it's a no-op
+  until activated with thinning. Migrations `20260627170000`/`180000`. Tested both ways.
+- ⏳ Next: `catalog_media_mirror_diff` verify → flag-gated `resolvePlaybackTarget` read
+  from the global store → thin per-user `cloud_media_items` to a membership link → the
+  real two-user-one-provider dedup test (re-import super8k + a 2nd owner) → flip at scale.
 
 **Target:** `cloud_media_items` (raw) + `cloud_title_variants` become **global per
 provider**. `playback_hint` is provider-derived (not user-derived — confirmed),
