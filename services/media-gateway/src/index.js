@@ -160,7 +160,8 @@ app.post('/xtream/epg', requireGatewayAuth, async (req, res) => {
         const status = Number.isInteger(err.status) ? err.status : 502;
         res.status(status).json({
             error: err.publicMessage || 'IPTV provider request failed',
-            details: err.details || undefined
+            details: err.details || undefined,
+            code: err.code || undefined
         });
     }
 });
@@ -191,7 +192,8 @@ app.post('/xtream/series-info', requireGatewayAuth, async (req, res) => {
         const status = Number.isInteger(err.status) ? err.status : 502;
         res.status(status).json({
             error: err.publicMessage || 'IPTV provider request failed',
-            details: err.details || undefined
+            details: err.details || undefined,
+            code: err.code || undefined
         });
     }
 });
@@ -234,7 +236,8 @@ app.post('/xtream/metadata', requireGatewayAuth, async (req, res) => {
         const status = Number.isInteger(err.status) ? err.status : 502;
         res.status(status).json({
             error: err.publicMessage || 'IPTV provider request failed',
-            details: err.details || undefined
+            details: err.details || undefined,
+            code: err.code || undefined
         });
     }
 });
@@ -1462,9 +1465,11 @@ async function fetchProviderJson(url, userAgent, timeoutMs = XTREAM_REQUEST_TIME
         const text = await response.text();
         const payload = text ? safeJson(text) : {};
         if (!response.ok) {
-            const error = new Error('IPTV provider request failed');
-            error.status = response.status;
-            error.publicMessage = 'IPTV provider request failed';
+            const failure = classifyProviderFailure(response.status, payload);
+            const error = new Error(failure.publicMessage);
+            error.status = failure.status;
+            error.publicMessage = failure.publicMessage;
+            error.code = failure.code;
             error.details = payload;
             throw error;
         }
@@ -1487,6 +1492,29 @@ function safeJson(text) {
     } catch (_) {
         return { raw: String(text || '').slice(0, 2000) };
     }
+}
+
+function classifyProviderFailure(status, payload) {
+    const text = JSON.stringify(payload || {}).toLowerCase();
+    if (/user[_\s-]*multi[_\s-]*ip|multi[_\s-]*ip|max(?:imum)? connections?|active connections?|connection limit|same account.*ip|account sharing/.test(text)) {
+        return {
+            status: 429,
+            code: 'PROVIDER_MULTI_IP',
+            publicMessage: 'IPTV provider refused the account because it already sees one active connection. Stop all other playback attempts, wait 1–2 minutes, then retry from one device.'
+        };
+    }
+    if (status === 429 || /too many requests|rate limit|ratelimit/.test(text)) {
+        return {
+            status: 429,
+            code: 'PROVIDER_RATE_LIMIT',
+            publicMessage: 'IPTV provider is rate limiting this account. Wait a moment, then retry.'
+        };
+    }
+    return {
+        status,
+        code: 'PROVIDER_REQUEST_FAILED',
+        publicMessage: 'IPTV provider request failed'
+    };
 }
 
 function asRecord(value) {
