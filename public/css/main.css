@@ -857,7 +857,7 @@ h4 {
 }
 
 .video-container {
-  flex: 1 1 58%;
+  flex: 1 1 48%;
   position: relative;
   background: #000;
   overflow: hidden;
@@ -866,9 +866,9 @@ h4 {
 }
 
 .live-guide-fusion {
-  flex: 0 0 42%;
+  flex: 0 0 52%;
   min-height: 260px;
-  max-height: 46%;
+  max-height: 56%;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
   background:
     linear-gradient(180deg, rgba(18, 24, 38, 0.92), rgba(7, 10, 18, 0.98)),
