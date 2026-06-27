@@ -1222,9 +1222,11 @@ class App {
         if (!fiche || this.fichePageFor(fiche) !== pageName) return;
         const pageObj = this.pages?.[pageName];
         if (!pageObj?.openByItem) return;
-        const item = fiche.type === 'series'
+        // Prefer the full item stashed at open time (rich fiche); fall back to a minimal
+        // id-only item for older stashes.
+        const item = fiche.item || (fiche.type === 'series'
             ? { sourceId: fiche.sourceId, series_id: fiche.id, name: fiche.title, tmdb: { name: fiche.title } }
-            : { sourceId: fiche.sourceId, stream_id: fiche.id, name: fiche.title, tmdb: { title: fiche.title } };
+            : { sourceId: fiche.sourceId, stream_id: fiche.id, name: fiche.title, tmdb: { title: fiche.title } });
         // Defer so the page's show()/DOM has settled (mirrors openSearchResult).
         setTimeout(async () => {
             let ok = false;

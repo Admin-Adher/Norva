@@ -1613,6 +1613,8 @@ class SeriesPage {
             window.app?.rememberOpenFiche?.({
                 type: 'series', sourceId: series.sourceId, id: series.series_id,
                 title: this.getSeriesDisplayTitle(series),
+                // Stash the full item (incl. TMDB) so the restore rebuilds the rich fiche.
+                item: series,
             });
         } catch (_) { /* best-effort */ }
 
