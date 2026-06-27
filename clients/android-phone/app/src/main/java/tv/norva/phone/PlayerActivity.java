@@ -89,6 +89,7 @@ public class PlayerActivity extends Activity {
     private String subKey; // SharedPreferences key for the per-title subtitle choice
     private int resumeSeconds = 0;
     private boolean resumeApplied = false;
+    private boolean endedNaturally = false;   // reached STATE_ENDED → web autoplays next episode
     private TextView seekBubble;         // transient "+10s" / "-10s" double-tap feedback
     private final Runnable hideSeekBubble = new Runnable() {
         @Override public void run() { if (seekBubble != null) seekBubble.setVisibility(View.GONE); }
@@ -269,6 +270,7 @@ public class PlayerActivity extends Activity {
                 }
                 if (state == Player.STATE_ENDED) {
                     errHandler.removeCallbacks(bufferWatchdog);
+                    endedNaturally = true;
                     finish();
                 }
             }
@@ -566,6 +568,7 @@ public class PlayerActivity extends Activity {
                 data.putExtra("itemId", itemId);
                 data.putExtra("positionSeconds", pos);
                 data.putExtra("durationSeconds", dur);
+                data.putExtra("ended", endedNaturally);
                 setResult(RESULT_OK, data);
             }
         } catch (Exception ignored) { /* result is best-effort */ }

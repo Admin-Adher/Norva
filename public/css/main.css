@@ -4323,6 +4323,63 @@ kbd {
   pointer-events: none;
 }
 
+/* "Up next" autoplay prompt shown after a native episode ends (cancellable). */
+.up-next-banner {
+  position: fixed;
+  left: 50%;
+  bottom: calc(var(--navbar-height, 60px) + env(safe-area-inset-bottom, 0px) + 16px);
+  transform: translateX(-50%);
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: calc(100vw - 32px);
+  padding: 10px 12px 10px 16px;
+  border-radius: var(--radius-full);
+  background: rgba(10, 12, 18, 0.95);
+  border: 1px solid var(--color-border);
+  box-shadow: var(--shadow-lg);
+}
+
+.up-next-label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+}
+
+.up-next-title {
+  max-width: 40vw;
+  font-size: 0.86rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.up-next-play {
+  flex: 0 0 auto;
+  padding: 6px 14px;
+  border: none;
+  border-radius: var(--radius-full);
+  background: var(--color-accent);
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.up-next-cancel {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  cursor: pointer;
+}
+
 .loading-state {
   display: flex;
   align-items: center;

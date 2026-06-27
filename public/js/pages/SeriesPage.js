@@ -7,6 +7,9 @@
 class SeriesPage {
     constructor(app) {
         this.app = app;
+        // Native player reports a natural end → autoplay the next episode (no-op on
+        // movies / when the fiche isn't open). Harmlessly inert until the APK sends it.
+        window.addEventListener('norva-native-ended', (e) => this.onNativeEpisodeEnded(e.detail));
         this.pageEl = document.getElementById('page-series');
         this.container = document.getElementById('series-grid');
         this.sourceSelect = document.getElementById('series-source-select');
@@ -1865,6 +1868,7 @@ class SeriesPage {
 
     hideDetails() {
         try { window.app?.forgetOpenFiche?.(); } catch (_) { /* noop */ }
+        this.cancelNextEpisodePrompt();
         this.detailsPanel?.querySelector('.more-like-this')?.remove();
         if (this._epDlTimer) { clearInterval(this._epDlTimer); this._epDlTimer = null; }
         this.detailsPanel.classList.add('hidden');
@@ -1883,6 +1887,46 @@ class SeriesPage {
             if (found) return found;
         }
         return null;
+    }
+
+    // Native-player autoplay: when an episode finishes in the native player, queue
+    // the next one with a brief, cancellable "Up next" prompt. Web playback handles
+    // its own next-episode flow (WatchPage.onEnded); this only covers the native path.
+    onNativeEpisodeEnded(detail = {}) {
+        if (!detail || (detail.itemType !== 'episode' && detail.itemType !== 'series')) return;
+        // Only when this series fiche is still the open view, with its episode list.
+        if (!this.currentSeriesInfo || !this.seasonsContainer || this.detailsPanel?.classList.contains('hidden')) return;
+        const all = [...this.seasonsContainer.querySelectorAll('.episode-item')];
+        const idx = all.findIndex(el => String(el.dataset.episodeId) === String(detail.itemId));
+        if (idx < 0) return;                 // ended episode isn't in this open series
+        const nextEl = all[idx + 1];
+        if (!nextEl) return;                 // last episode — nothing to autoplay
+        this.promptNextEpisode(nextEl);
+    }
+
+    promptNextEpisode(nextEl) {
+        this.cancelNextEpisodePrompt();
+        const title = nextEl.querySelector('.episode-title')?.textContent || 'Next episode';
+        const banner = document.createElement('div');
+        banner.className = 'up-next-banner';
+        banner.innerHTML =
+            '<span class="up-next-label">Up next</span>' +
+            '<span class="up-next-title"></span>' +
+            '<button class="up-next-play" type="button">Play</button>' +
+            '<button class="up-next-cancel" type="button" aria-label="Cancel">✕</button>';
+        banner.querySelector('.up-next-title').textContent = title;
+        document.body.appendChild(banner);
+        this._upNextBanner = banner;
+        const play = () => { this.cancelNextEpisodePrompt(); this.playEpisode(nextEl); };
+        banner.querySelector('.up-next-play').addEventListener('click', play);
+        banner.querySelector('.up-next-cancel').addEventListener('click', () => this.cancelNextEpisodePrompt());
+        this._upNextTimer = setTimeout(play, 8000);
+    }
+
+    cancelNextEpisodePrompt() {
+        clearTimeout(this._upNextTimer);
+        this._upNextTimer = null;
+        if (this._upNextBanner) { this._upNextBanner.remove(); this._upNextBanner = null; }
     }
 
     async playEpisode(episodeEl) {

@@ -711,12 +711,22 @@ public class MainActivity extends Activity {
         final String itemId = data.getStringExtra("itemId");
         final long pos = data.getLongExtra("positionSeconds", 0);
         final long dur = data.getLongExtra("durationSeconds", 0);
-        if (sourceId == null || itemId == null || pos <= 0) return;
-        final String js = "window.__norvaNative && window.__norvaNative.onProgress("
-                + jsStr(sourceId) + "," + jsStr(itemType) + "," + jsStr(itemId) + "," + pos + "," + dur + ")";
-        runOnUiThread(() -> {
-            try { webView.evaluateJavascript(js, null); } catch (Exception ignored) { }
-        });
+        final boolean ended = data.getBooleanExtra("ended", false);
+        if (sourceId != null && itemId != null && pos > 0) {
+            final String js = "window.__norvaNative && window.__norvaNative.onProgress("
+                    + jsStr(sourceId) + "," + jsStr(itemType) + "," + jsStr(itemId) + "," + pos + "," + dur + ")";
+            runOnUiThread(() -> {
+                try { webView.evaluateJavascript(js, null); } catch (Exception ignored) { }
+            });
+        }
+        // Natural end → ask the web to autoplay the next episode (a no-op for movies).
+        if (ended && itemId != null) {
+            final String jsEnded = "window.__norvaNative && window.__norvaNative.onEnded && window.__norvaNative.onEnded("
+                    + jsStr(sourceId) + "," + jsStr(itemType) + "," + jsStr(itemId) + ")";
+            runOnUiThread(() -> {
+                try { webView.evaluateJavascript(jsEnded, null); } catch (Exception ignored) { }
+            });
+        }
     }
 
     private static String jsStr(String value) {

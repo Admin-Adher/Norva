@@ -63,6 +63,17 @@
         }
     };
 
+    // Natural end of a native VOD playback → let the open Series fiche autoplay the
+    // next episode. MainActivity fires this only when the player reached the end
+    // (not on a user-close), so it's harmlessly inert in older APKs that never call it.
+    window.__norvaNative.onEnded = (sourceId, itemType, itemId) => {
+        try {
+            window.dispatchEvent(new CustomEvent('norva-native-ended', {
+                detail: { sourceId: String(sourceId || ''), itemType: itemType || '', itemId: String(itemId || '') }
+            }));
+        } catch (_) { /* best-effort */ }
+    };
+
     // Hardware Back button bridge for the native phone shell. Returns 'handled'
     // when Back was consumed inside the page (an open overlay closed, or we
     // stepped back to Home) so the native layer leaves history/exit alone, else
