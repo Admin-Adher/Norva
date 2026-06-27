@@ -929,6 +929,44 @@ class ChannelList {
 
         // Start observing loader for additional batches
         this.observer.observe(this.loader);
+
+        // On first load, open the list AT the channel being watched (restored across a
+        // refresh from localStorage) instead of pinned to the top — on a long lineup the
+        // active row is highlighted but would otherwise be scrolled off-screen. Once only,
+        // so it never fights the user once they start scrolling/browsing.
+        if (!this._didInitialReveal) {
+            this._didInitialReveal = true;
+            setTimeout(() => this.revealCurrentChannel(), 60);
+        }
+    }
+
+    // Scroll the list to the channel currently playing (or the last one played, restored
+    // from localStorage after a refresh) and expand its group if it was collapsed by
+    // default. Best-effort; called once per load from render().
+    revealCurrentChannel(target = this.currentChannel || this.findLastLiveChannel()) {
+        try {
+            if (!target || !this.container || this.searchMode) return;
+            const sel = `.channel-item[data-channel-id="${target.id}"][data-source-id="${target.sourceId}"]`;
+            let item = this.container.querySelector(sel);
+            // The row may live in a batch not yet rendered on a long lineup — render
+            // forward until it exists (or we run out of groups).
+            let safety = 0;
+            while (!item && this.currentBatch * this.batchSize < this.sortedGroups.length && safety < 30) {
+                this.renderNextBatch();
+                item = this.container.querySelector(sel);
+                safety++;
+            }
+            if (!item) return;
+            // Expand its group if collapsed-by-default so the row is actually visible.
+            const header = item.closest('.channel-group')?.querySelector('.group-header.collapsed');
+            if (header) {
+                header.classList.remove('collapsed');
+                const gName = header.dataset.group;
+                if (gName) { this.collapsedGroups.delete(gName); this.saveCollapsedState(); }
+            }
+            // Defer the scroll so the expand reflow lands first.
+            requestAnimationFrame(() => { try { item.scrollIntoView({ block: 'center' }); } catch (_) {} });
+        } catch (_) { /* best-effort — never break the list render */ }
     }
 
     /**
