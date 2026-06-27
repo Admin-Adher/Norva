@@ -942,7 +942,21 @@ const MediaUtils = (() => {
         return codec.includes('aac') || codec.includes('mp4a.40.2') || codec.includes('mp3') || codec.includes('opus') || codec.includes('vorbis');
     }
 
+    // Skeleton placeholder cards for loading rails/grids — same 160px footprint as
+    // a real card so swapping in real content doesn't shift the layout. The shimmer
+    // and reduced-motion handling live in CSS (.skeleton).
+    function skeletonCards(count = 8) {
+        const card =
+            '<div class="skeleton-card" aria-hidden="true">' +
+            '<div class="skeleton skeleton-poster"></div>' +
+            '<div class="skeleton skeleton-line"></div>' +
+            '<div class="skeleton skeleton-line short"></div>' +
+            '</div>';
+        return card.repeat(Math.max(1, count));
+    }
+
     return {
+        skeletonCards,
         stripDiacritics, extractYear, normalizeTitle, computeDedupKey,
         parseVersionInfo, searchableText, groupItems, pickRepresentative,
         normalizeLanguagePreference, normalizeContentPreferences, migrateLegacyLanguagePreference,

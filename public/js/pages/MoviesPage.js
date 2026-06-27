@@ -719,7 +719,7 @@ class MoviesPage {
 
         this.isLoading = true;
         this.container.classList.remove('rail-host');
-        this.container.innerHTML = '<div class="loading"><div class="loading-spinner"></div></div>';
+        this.container.innerHTML = MediaUtils.skeletonCards(12);
 
         try {
             this.movies = [];
@@ -825,7 +825,7 @@ class MoviesPage {
                 paintedFromCache = true;
             } else {
                 this.container.classList.remove('rail-host');
-                this.container.innerHTML = '<div class="loading"><div class="loading-spinner"></div></div>';
+                this.container.innerHTML = MediaUtils.skeletonCards(12);
             }
         } else {
             this.cloudLoadingMore = true;

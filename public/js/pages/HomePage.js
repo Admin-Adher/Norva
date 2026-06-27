@@ -80,10 +80,7 @@ class HomePage {
                         <div class="section-header">
                             <h2>Selection Norva</h2>
                         </div>
-                        <div class="loading-state">
-                            <div class="loading"></div>
-                            <span>Loading recommendations...</span>
-                        </div>
+                        <div class="horizontal-scroll">${window.MediaUtils.skeletonCards(8)}</div>
                     </section>
                 </div>
 
@@ -195,12 +192,35 @@ class HomePage {
         }
     }
 
+    // Per-profile key for the persistent Home cache (history + rails). Scoped by
+    // profile because history/continue-watching and personalized rails differ per
+    // profile; NorvaCatalogCache already namespaces by account.
+    homeCacheKey() {
+        let pid = '';
+        try { pid = window.API?.profiles?.getActiveId?.() || ''; } catch (_) { /* default scope */ }
+        return 'home-dashboard:' + (pid || 'default');
+    }
+
     async loadDashboardData() {
         if (this.isLoading) return this.loadPromise;
         this.isLoading = true;
 
         this.loadPromise = (async () => {
             try {
+                // Stale-while-revalidate: if a previous Home is cached for this
+                // profile, paint it immediately so a cold relaunch shows real content
+                // (not skeletons) while the fresh data loads below. contentPreferences
+                // is already applied (show() awaits settings first), so badges match.
+                try {
+                    const cached = window.NorvaCatalogCache?.read?.(this.homeCacheKey());
+                    if (cached?.data?.rails) {
+                        const ch = Array.isArray(cached.data.history) ? cached.data.history : [];
+                        this.renderHistory(ch);
+                        this.renderCloudRails(cached.data.rails);
+                        this.renderHero(ch, this.railItems);
+                    }
+                } catch (_) { /* cache paint is best-effort */ }
+
                 // Start the catalogue GETs (history + rails) up front, in parallel
                 // with health/settings, so a ready home doesn't wait out a second
                 // network round-trip. They're pure data fetches rendered only after
@@ -252,6 +272,13 @@ class HomePage {
                 if (railsResult.status === 'fulfilled') {
                     this.renderCloudRails(railsResult.value);
                     this.renderHero(history, this.railItems);
+                    // Cache this Home for an instant next cold launch (SWR).
+                    try {
+                        window.NorvaCatalogCache?.write?.(this.homeCacheKey(), {
+                            history,
+                            rails: railsResult.value
+                        });
+                    } catch (_) { /* best-effort */ }
                 } else {
                     console.warn('[Dashboard] Home rails unavailable, using recent content fallback:', railsResult.reason);
                     await this.renderFallbackRails();
