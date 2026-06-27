@@ -1410,8 +1410,8 @@ class MoviesPage {
     getMovieActionLabel(movie = this.currentMovie) {
         const state = this.getMovieWatchState(movie);
         if (state.status === 'inprogress') return 'Resume';
-        if (state.status === 'watched') return 'Recommencer';
-        return 'Lire';
+        if (state.status === 'watched') return 'Restart';
+        return 'Play';
     }
 
     syncDetailFavoriteButton() {
@@ -1607,9 +1607,9 @@ class MoviesPage {
             window.app?.rememberOpenFiche?.({
                 type: 'movie', sourceId: movie.sourceId, id: movie.stream_id,
                 title: this.getMovieDisplayTitle(displayMovie),
-                // Stash the full item (incl. TMDB) so the restore rebuilds the rich fiche,
-                // not a bare id-only one that can't group/enrich.
-                item: { ...movie, tmdb: movie.tmdb || displayMovie.tmdb || null },
+                // Stash the whole version group so the restore rebuilds the EXACT fiche
+                // (all versions + the selected one) without re-searching.
+                group: this.currentMovieGroup,
             });
         } catch (_) { /* best-effort */ }
 

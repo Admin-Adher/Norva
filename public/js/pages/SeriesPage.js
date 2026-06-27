@@ -1541,12 +1541,12 @@ class SeriesPage {
                 ...next,
                 label: lastCompletedIndex >= 0
                     ? `Next episode S${next.seasonNum}:E${next.episodeNum}`
-                    : `Lire S${next.seasonNum}:E${next.episodeNum}`
+                    : `Play S${next.seasonNum}:E${next.episodeNum}`
             };
         }
 
         const first = flatEpisodes[0];
-        return { ...first, label: `Recommencer S${first.seasonNum}:E${first.episodeNum}` };
+        return { ...first, label: `Restart S${first.seasonNum}:E${first.episodeNum}` };
     }
 
     syncDetailFavoriteButton() {
@@ -1557,7 +1557,7 @@ class SeriesPage {
         const icon = this.detailFavoriteBtn.querySelector('.fav-icon');
         const label = this.detailFavoriteBtn.querySelector('.fav-label');
         if (icon) icon.innerHTML = isFav ? Icons.favorite : Icons.favoriteOutline;
-        if (label) label.textContent = 'Favori';
+        if (label) label.textContent = 'Favorite';
     }
 
     playPrimaryEpisode() {
@@ -1613,8 +1613,8 @@ class SeriesPage {
             window.app?.rememberOpenFiche?.({
                 type: 'series', sourceId: series.sourceId, id: series.series_id,
                 title: this.getSeriesDisplayTitle(series),
-                // Stash the full item (incl. TMDB) so the restore rebuilds the rich fiche.
-                item: series,
+                // Stash the series + its version group so the restore rebuilds the EXACT fiche.
+                series, group: this.currentSeriesGroup,
             });
         } catch (_) { /* best-effort */ }
 

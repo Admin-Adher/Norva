@@ -70,7 +70,7 @@ class HomePage {
 
                 <section class="dashboard-section hidden" id="continue-watching-section">
                     <div class="section-header">
-                        <h2>Reprendre</h2>
+                        <h2>Continue Watching</h2>
                     </div>
                     ${this.scrollSection('continue-watching-list', 'Loading history...')}
                 </section>

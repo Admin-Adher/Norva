@@ -1221,17 +1221,28 @@ class App {
     restoreOpenFiche(pageName, fiche = this.readOpenFiche()) {
         if (!fiche || this.fichePageFor(fiche) !== pageName) return;
         const pageObj = this.pages?.[pageName];
-        if (!pageObj?.openByItem) return;
-        // Prefer the full item stashed at open time (rich fiche); fall back to a minimal
-        // id-only item for older stashes.
-        const item = fiche.item || (fiche.type === 'series'
-            ? { sourceId: fiche.sourceId, series_id: fiche.id, name: fiche.title, tmdb: { name: fiche.title } }
-            : { sourceId: fiche.sourceId, stream_id: fiche.id, name: fiche.title, tmdb: { title: fiche.title } });
+        if (!pageObj) return;
         // Defer so the page's show()/DOM has settled (mirrors openSearchResult).
         setTimeout(async () => {
-            let ok = false;
-            try { ok = await pageObj.openByItem(item); } catch (_) { ok = false; }
-            if (!ok) this.forgetOpenFiche(); // un-restorable — don't keep retrying
+            try {
+                // Rebuild the EXACT fiche from the stashed version group (all versions, no
+                // re-search). Fall back to openByItem for older id-only stashes.
+                if (fiche.type === 'series' && fiche.series && pageObj.showSeriesDetailsV2) {
+                    await pageObj.showSeriesDetailsV2(fiche.series, fiche.group || null);
+                    return;
+                }
+                if (fiche.type === 'movie' && fiche.group?.items?.length && pageObj.showMovieDetails) {
+                    const selected = fiche.group.items.find(i => String(i.stream_id) === String(fiche.id)) || null;
+                    pageObj.showMovieDetails(fiche.group, selected, {});
+                    return;
+                }
+                if (pageObj.openByItem) {
+                    const item = fiche.item || (fiche.type === 'series'
+                        ? { sourceId: fiche.sourceId, series_id: fiche.id, name: fiche.title, tmdb: { name: fiche.title } }
+                        : { sourceId: fiche.sourceId, stream_id: fiche.id, name: fiche.title, tmdb: { title: fiche.title } });
+                    if (!(await pageObj.openByItem(item))) this.forgetOpenFiche();
+                }
+            } catch (_) { this.forgetOpenFiche(); }
         }, 150);
     }
 
