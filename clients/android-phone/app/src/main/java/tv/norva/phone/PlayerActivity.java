@@ -1,13 +1,16 @@
 package tv.norva.phone;
 
 import android.app.Activity;
+import android.app.PictureInPictureParams;
 import android.content.Intent;
+import android.content.res.Configuration;
 import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.util.Rational;
 import android.view.DisplayCutout;
 import android.view.GestureDetector;
 import android.view.Gravity;
@@ -22,6 +25,7 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.annotation.OptIn;
+import androidx.annotation.RequiresApi;
 import androidx.media3.common.C;
 import androidx.media3.common.Format;
 import androidx.media3.common.MediaItem;
@@ -35,6 +39,7 @@ import androidx.media3.datasource.DefaultHttpDataSource;
 import androidx.media3.datasource.HttpDataSource;
 import androidx.media3.exoplayer.ExoPlayer;
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory;
+import androidx.media3.session.MediaSession;
 import androidx.media3.ui.PlayerView;
 
 /**
@@ -68,6 +73,7 @@ public class PlayerActivity extends Activity {
     private static final String UA = "VLC/3.0.20 LibVLC/3.0.20";
 
     private ExoPlayer player;
+    private MediaSession mediaSession;   // lock-screen / media-button transport controls
     private PlayerView playerView;
     private LinearLayout errorPanel;     // recoverable error UI (message + Retry + Back)
     private TextView errorView;          // the diagnostic detail line inside errorPanel
@@ -230,6 +236,9 @@ public class PlayerActivity extends Activity {
                 .setSeekForwardIncrementMs(10_000)
                 .build();
         playerView.setPlayer(player);
+        // Bind a MediaSession so hardware/Bluetooth media buttons and the system
+        // media controls (lock screen / notification shade) drive this player.
+        try { mediaSession = new MediaSession.Builder(this, player).build(); } catch (Exception ignored) { }
         playerView.setKeepScreenOn(true);
         playerView.setShowSubtitleButton(true);
         installGestureOverlay();
@@ -566,12 +575,50 @@ public class PlayerActivity extends Activity {
     @Override
     protected void onPause() {
         super.onPause();
-        if (player != null) player.pause();
+        // Keep playing while in Picture-in-Picture; only pause when truly backgrounded.
+        boolean inPip = Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && isInPictureInPictureMode();
+        if (player != null && !inPip) player.pause();
+    }
+
+    // Picture-in-Picture: when the user leaves (Home / recents) while a video is
+    // playing, shrink into a PiP window and keep playing.
+    @Override
+    protected void onUserLeaveHint() {
+        super.onUserLeaveHint();
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
+        if (player == null || !player.isPlaying()) return;
+        try { enterPictureInPictureMode(buildPipParams()); } catch (Exception ignored) { }
+    }
+
+    @RequiresApi(Build.VERSION_CODES.O)
+    private PictureInPictureParams buildPipParams() {
+        Rational ratio = new Rational(16, 9);
+        try {
+            int w = player.getVideoSize().width;
+            int h = player.getVideoSize().height;
+            if (w > 0 && h > 0) {
+                float r = (float) w / h;
+                // Android rejects PiP aspect ratios outside roughly 1:2.39 .. 2.39:1.
+                if (r >= 0.42f && r <= 2.39f) ratio = new Rational(w, h);
+            }
+        } catch (Exception ignored) { }
+        return new PictureInPictureParams.Builder().setAspectRatio(ratio).build();
+    }
+
+    @Override
+    public void onPictureInPictureModeChanged(boolean isInPip, Configuration newConfig) {
+        super.onPictureInPictureModeChanged(isInPip, newConfig);
+        if (playerView != null) {
+            // No transport UI inside the tiny PiP window.
+            playerView.setUseController(!isInPip);
+            if (isInPip) playerView.hideController();
+        }
     }
 
     @Override
     protected void onDestroy() {
         errHandler.removeCallbacks(bufferWatchdog);
+        if (mediaSession != null) { mediaSession.release(); mediaSession = null; }
         if (player != null) { player.release(); player = null; }
         super.onDestroy();
     }

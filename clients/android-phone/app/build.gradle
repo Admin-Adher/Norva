@@ -61,6 +61,9 @@ dependencies {
     implementation "androidx.media3:media3-exoplayer:1.5.1"
     implementation "androidx.media3:media3-exoplayer-hls:1.5.1"
     implementation "androidx.media3:media3-ui:1.5.1"
+    // MediaSession so hardware/Bluetooth media buttons and the system media
+    // controls (lock screen / notification) drive the player.
+    implementation "androidx.media3:media3-session:1.5.1"
     // DataSource base classes for the offline (encrypted) download player.
     implementation "androidx.media3:media3-datasource:1.5.1"
     // NotificationCompat for the download foreground-service progress notice.
