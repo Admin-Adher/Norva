@@ -685,6 +685,17 @@
       const muxRet = await lib.ff_init_muxer(
         { format_name: 'mp4', filename: 'output', open: true, device: true, codecpars: true }, streamCtxs);
       this.oc = muxRet[0];
+      // Align the HEVC sample-entry fourcc with the codec string we advertised to
+      // MediaSource. ff_init_muxer resets codec_tag to 0 and movenc then defaults
+      // HEVC to 'hev1' — but _chooseMime advertises 'hvc1.*' (preferred), and
+      // Chromium rejects a 'hev1' init under an 'hvc1' SourceBuffer
+      // (CHUNK_DEMUXER_ERROR_APPEND_FAILED). Force the output tag to match the
+      // chosen mime. Video is stream 0 when present; H.264 ('avc1') needs nothing.
+      if (this.vS && this.vName === 'hevc') {
+        const tag = (this.mime && this.mime.includes('hev1')) ? 0x31766568 /* 'hev1' */ : 0x31637668 /* 'hvc1' */;
+        const vcp = await lib.AVStream_codecpar(muxRet[3][0]);
+        await lib.AVCodecParameters_codec_tag_s(vcp, tag);
+      }
       await lib.av_opt_set(this.oc, 'movflags', 'frag_keyframe+empty_moov+default_base_moof', lib.AV_OPT_SEARCH_CHILDREN);
       await lib.avformat_write_header(this.oc, 0);
       if (!this.pkt) this.pkt = await lib.av_packet_alloc();

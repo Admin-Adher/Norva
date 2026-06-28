@@ -166,6 +166,13 @@ async function streamRemux(id) {
     const muxRet = await lib.ff_init_muxer(
       { format_name: 'mp4', filename: 'output', open: true, device: true, codecpars: true }, streamCtxs);
     const oc = muxRet[0];
+    // Force HEVC sample-entry fourcc to 'hvc1' to match SAMPLES[id].vmime. Without
+    // this, ff_init_muxer clears codec_tag and movenc emits 'hev1', which Chromium
+    // rejects under an 'hvc1' SourceBuffer (CHUNK_DEMUXER_ERROR_APPEND_FAILED).
+    if (vS && vName === 'hevc') {
+      const vcp = await lib.AVStream_codecpar(muxRet[3][0]); // 0x31637668 = 'hvc1'
+      await lib.AVCodecParameters_codec_tag_s(vcp, 0x31637668);
+    }
     await lib.av_opt_set(oc, 'movflags', 'frag_keyframe+empty_moov+default_base_moof', lib.AV_OPT_SEARCH_CHILDREN);
     await lib.avformat_write_header(oc, 0);
     log('en-tête MP4 fragmenté écrit, remux + transcodage en cours…');
