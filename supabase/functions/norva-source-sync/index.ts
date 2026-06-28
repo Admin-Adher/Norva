@@ -1224,16 +1224,27 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
       // reads a capped 1000-row page as "short" and stops after a single batch.
       const pageCap = Math.min(batchLimit, 1000);
       const done = rows.length === 0 || rows.length < pageCap;
-      // Progress = walk position / total VOD. The keyset offset advances 1:1 with titles
-      // built (each movie/series item projects one variant), so it IS "titles built / total".
-      // Monotonicity is already guaranteed downstream — both mergeSyncProgress and the client
-      // max-clamp the percent — so a resume/re-walk can never push the bar backward. (An
-      // explicit built-count COUNT(*) here was the wrong tool: ~6s under concurrent upsert
-      // load + autovacuum, which blew the 8s batch budget and froze the cursor.)
+      // "Usable" = onboarding-complete FOR THE USER: the live phase is already done (titles
+      // only runs after it) AND the first block of movies/series is built — enough to fill
+      // Home + the first grid pages. Past this the catalogue is navigable; the rest of a
+      // huge VOD long-tail (which can take hours/days) is a SILENT background top-up, not a
+      // bar to make the user wait on. Threshold env-tunable; 0 disables (legacy behaviour).
+      const usableThreshold = (() => {
+        const t = boundedInt(Deno.env.get("NORVA_USABLE_TITLE_THRESHOLD"), 2000, 0, 200000);
+        return t > 0 ? Math.min(totalVod, t) : totalVod;
+      })();
+      const usable = nextOffset >= usableThreshold;
+      // The user-facing bar fills toward the USABLE threshold (minutes), not the whole 272k
+      // walk (hours): 86→99 over the first block, then pinned at 100 once usable. The walk
+      // keeps advancing nextOffset internally — the offset advances 1:1 with titles built —
+      // but the user already sees "ready" and the remaining work is a background top-up.
+      // (An explicit built-count COUNT(*) here was the wrong tool: ~6s under concurrent
+      // upsert load + autovacuum, which blew the 8s batch budget and froze the cursor.)
       await reportProgress({
         stage: done ? "finalizing" : "building_titles",
-        percent: done ? 99 : titleFinalizePercent(nextOffset, totalVod),
-        steps: { finalize: { status: "running" } },
+        percent: usable ? 100 : titleFinalizePercent(nextOffset, usableThreshold),
+        usable,
+        steps: { finalize: { status: usable ? "done" : "running" } },
       });
       return {
         sourceId,
@@ -1245,6 +1256,7 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
         limit: batchLimit,
         totalVod,
         done,
+        usable,
         ...result,
         titleProjection,
       };

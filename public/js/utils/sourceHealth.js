@@ -182,7 +182,13 @@
             // syncing — otherwise the routine auto-refresh re-triggers the
             // full-screen onboarding gate for an onboarded user. Only a genuine
             // *initial* import (no completed catalog yet) stays `syncing`.
-            if (hasCompletedCatalog(source, status)) {
+            //
+            // `progress.usable` is the same idea for a FIRST import: the server flips it
+            // true once Live TV + the first block of movies/series are materialised
+            // ("correctly usable"). The remaining VOD long-tail then materialises as a
+            // silent background top-up, so finish onboarding and unlock the app now
+            // rather than make the user watch a bar crawl for hours.
+            if (hasCompletedCatalog(source, status) || progress.usable === true) {
                 state = 'ready';
                 refreshing = true;
             } else {
