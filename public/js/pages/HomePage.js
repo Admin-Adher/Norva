@@ -242,6 +242,7 @@ class HomePage {
                     ? healthResult.value
                     : null;
 
+                this.sourceSummary = sourceSummary || null;
                 if (sourceSummary) {
                     this.renderServiceHealth(sourceSummary);
                 }
@@ -301,10 +302,65 @@ class HomePage {
         return this.loadPromise;
     }
 
+    // Home rails are empty. If a service is still syncing, say so and point at the
+    // content that is already browsable, instead of the "no service configured" copy.
+    renderHomeRailsEmptyState() {
+        const summary = this.sourceSummary || {};
+        if (summary.state === 'syncing') {
+            const manager = this.app?.sourceManager || window.app?.sourceManager;
+            const source = this.syncingSourceFromSummary(summary);
+            const counts = (manager && manager.catalogCountsFromSource) ? manager.catalogCountsFromSource(source || {}) : {};
+            const progress = (manager && manager.syncProgressFromSource) ? manager.syncProgressFromSource(source || {}) : {};
+            const fmt = (n) => (manager && manager.formatCatalogCount) ? manager.formatCatalogCount(n) : String(Number(n) || 0);
+            const percent = Math.max(0, Math.min(100, Math.round(Number(progress.percent) || 0)));
+            const ready = [];
+            if (Number(counts.movies) > 0) ready.push(`${fmt(counts.movies)} movies`);
+            if (Number(counts.live) > 0) ready.push(`${fmt(counts.live)} live channels`);
+            if (Number(counts.series) > 0) ready.push(`${fmt(counts.series)} series`);
+            const readyLine = ready.length
+                ? `${ready.join(' · ')} already available — open Movies, Live TV or Series while Home finishes building.`
+                : 'Your channels and movies will appear here shortly.';
+            return `
+                <section class="dashboard-section">
+                    <div class="empty-state hint home-sync-hint">
+                        <strong>Preparing your Home${percent ? ` — ${percent}%` : ''}</strong>
+                        <p>${this.escapeHtml(readyLine)}</p>
+                    </div>
+                </section>
+            `;
+        }
+        return `
+            <section class="dashboard-section">
+                <div class="empty-state hint">Add a TV service from Settings to build your Home.</div>
+            </section>
+        `;
+    }
+
     shouldShowSetupGate(summary = null) {
         if (!summary) return true;
         if (summary.state === 'ready') return false;
-        return !(summary.ready || []).length;
+        if ((summary.ready || []).length) return false;
+        // Non-blocking onboarding: once a syncing source has finished its IMPORT, the
+        // Movies/Series grids and Live channels are browsable, so don't take over Home
+        // with the full-screen gate — render whatever is ready (with a "preparing"
+        // notice) and let the rest finalize in the background. The full gate stays only
+        // while the initial import is still discovering (nothing to browse yet).
+        if (summary.state === 'syncing' && this.syncImportBrowsable(summary)) return false;
+        return true;
+    }
+
+    // True once at least one syncing source has imported its catalogue (import step
+    // done, or already in a finalize stage) — i.e. there is content to browse.
+    syncImportBrowsable(summary = {}) {
+        const finalizing = new Set(['materializing', 'building_live_channels', 'building_live_variants', 'building_titles', 'finalizing']);
+        return [...(summary.issues || []), ...(summary.sources || [])].some(item => {
+            const src = (item && item.source) || item || {};
+            const cfg = src.configHint || src.config_hint || {};
+            const prog = src.syncProgress || src.sync_progress || cfg.syncProgress || cfg.sync_progress || {};
+            const steps = (prog && prog.steps) || {};
+            const stage = String((prog && prog.stage) || '').toLowerCase();
+            return String((steps.import && steps.import.status) || '').toLowerCase() === 'done' || finalizing.has(stage);
+        });
     }
 
     clearSetupGate() {
@@ -969,11 +1025,7 @@ class HomePage {
         this.railItems = rails;
 
         if (!rails.length) {
-            container.innerHTML = `
-                <section class="dashboard-section">
-                    <div class="empty-state hint">Add a TV service from Settings to build your Home.</div>
-                </section>
-            `;
+            container.innerHTML = this.renderHomeRailsEmptyState();
             return;
         }
 
