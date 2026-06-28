@@ -20,11 +20,14 @@
   finalisation du gros provider de test (super8k) tournant **pendant les heures
   d'usage**. Quand le pool de connexions s'épuise, **tout** rame (catalog *et*
   cloud) → 500/504.
-- **Relief en place** : crons `26` (origlang) et `12` (search-match) **en pause**.
-  Pool rétabli. Voir le **runbook** plus bas pour re-diagnostiquer/réappliquer.
-- **« Optimisé au max ? » → non.** Le boot l'est ; le vrai levier suivant est
-  **structurel** : sortir les backfills lourds du chemin chaud (heures creuses /
-  hors base partagée) + la **dédup provider-global** (cf. `dedup-plan.md`).
+- **A1 fait** : crons `26` (origlang) + `12` (search-match) **déplacés en heures
+  creuses** (3-4 h UTC, comme les crawls audio) et réactivés là → le backlog
+  progresse la nuit, **zéro charge en journée**. Pool vérifié calme en journée
+  (18 conns, 1 requête longue, finalize seul). Runbook plus bas si une saturation
+  revient.
+- **« Optimisé au max ? » → non.** Le boot l'est, A1 enlève la charge de fond en
+  journée ; le levier suivant reste **structurel** : la **dédup provider-global**
+  (cf. `dedup-plan.md`) pour enlever super8k de la base partagée à la racine.
 
 ---
 
@@ -88,9 +91,16 @@ x-norva-profile-id`.
 | jobid | rôle | cadence | actif ? | note |
 |---|---|---|---|---|
 | 1 | auto-refresh-detect | `*/30` | ✅ | léger |
-| 12 | search-match (TMDB) | horaire | ⛔ **en pause** | backfill d'enrichissement — relief DB |
-| 26 | origlang-backfill | `*/30` | ⛔ **en pause** | tournait 94–127 s **toutes les ~2-5 min** (cascade depuis la finalisation) — relief DB |
+| 12 | search-match (TMDB) | `6,16,…,56 3,4 * * *` | ✅ **off-peak** | **A1** : backfill, nuit seulement (était horaire toute la journée) |
+| 13 | enrich-revalidate | `5 */6` | ✅ | toutes les 6 h (touche les heures pleines) — **candidat off-peak** si la charge de jour revient |
+| 14 | enrich-backfill-years | `30 3` | ✅ | déjà off-peak |
+| 26 | origlang-backfill | `1,11,…,51 3,4 * * *` | ✅ **off-peak** | **A1** : tournait 94–127 s en journée (`*/30`) → déplacé nuit |
 | 27 | resume-stuck (watchdog finalize) | `*/1` | ✅ | relance les sources `syncing`/`error` à curseur ; **laisser actif** (filet pour les vrais blocages) |
+
+> **A1 appliqué** : 26 et 12 sont entrelacés à 5 min d'écart dans la fenêtre 3-4 h
+> UTC (chaque run 94–127 s < l'écart → pas de chevauchement avec soi-même), nuit
+> sans users. En journée il ne reste que la finalisation super8k (pacée par
+> `NORVA_FINALIZE_THROTTLE_MS`, finie à ~89 %), qui **seule** ne sature pas le pool.
 
 > ⚠️ `cron.job` n'est **pas** modifiable en `UPDATE` direct (propriété superuser :
 > `permission denied for table job`). Utiliser les fonctions :
@@ -112,11 +122,11 @@ de lutter contre la course.
 **Non.** Le **boot** l'est. Le reste, par ordre d'impact réel :
 
 ### Tier A — le vrai goulot : charge DB de fond vs capacité (STRUCTUREL)
-1. **Sortir les backfills lourds du chemin chaud.** origlang / search-match /
-   finalize ne doivent **pas** tourner sur la base de prod partagée pendant les
-   heures d'usage. Options : fenêtre heures creuses (déjà le cas des crawls audio
-   3-4h), **cap de concurrence**, ou ressource séparée. C'est ce qui re-sature le
-   pool aujourd'hui.
+1. ✅ **FAIT (A1) — backfills d'enrichissement hors heures pleines.** origlang (26)
+   + search-match (12) déplacés en 3-4 h UTC et réactivés là (cf. tableau §2).
+   Reste de cette ligne : **finalize** super8k — laissé finir (89 %, pacé, ne
+   sature pas seul) ; **revalidate** (jobid 13, `*/6h`) à passer off-peak si une
+   charge de jour réapparaît.
 2. **Dédup provider-global (Phase 2).** super8k (272k items) sur une DB 8 Go
    partagée est l'éléphant. Le cache global (`catalog_titles`) + le read-cutover
    (cf. `scaling-playbook.md` étape 3, `dedup-plan.md`) divise stockage &
@@ -192,13 +202,14 @@ update cloud_sources
 - **Vérifier la reprise** : ré-exécuter le diagnostic — `max_age_s` retombe, plus
   de requête origlang/finalize longue, `LISTEN "pgrst"` reste (normal).
 
-### Réactivation propre (quand le catalogue est stable / heures creuses)
+### Réactivation propre = la planif off-peak A1 (déjà en place)
+Si tu as coupé 26/12 en urgence (relief), voici la planif **off-peak A1** à
+restaurer — c'est l'état nominal depuis A1, à NE PAS remettre en `*/30` / horaire
+pendant les heures d'usage :
 ```sql
-select cron.alter_job(26, schedule := '0 3 * * *', active := true);  -- ex. 3h du matin
-select cron.alter_job(12, schedule := '30 3 * * *', active := true);
+select cron.alter_job(26, schedule := '1,11,21,31,41,51 3,4 * * *', active := true);  -- origlang
+select cron.alter_job(12, schedule := '6,16,26,36,46,56 3,4 * * *', active := true);  -- search-match
 ```
-> Ne **pas** les remettre en `*/30` / horaire pendant les heures d'usage tant que
-> Tier A (sortir les backfills du chemin chaud / dédup) n'est pas fait.
 
 ---
 
