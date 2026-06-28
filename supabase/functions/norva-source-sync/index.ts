@@ -917,11 +917,12 @@ async function driveFinalizeToReady(db: SupabaseClient, sourceId: string, userId
   while (Date.now() < deadline && guard++ < 400) {
     let result: JsonRecord;
     try {
-      // Smaller titles batch: the per-batch cloud_titles/title_variant upserts (and
-      // the offset SELECT) must finish inside the authenticator's 8s statement_timeout
-      // even under concurrent read load on a huge catalogue. 1500 timed out at scale;
-      // 500 fits, at the cost of more (cheap) self-invocations.
-      const batchLimit = phase === "titles" ? 500 : 1500;
+      // Smaller titles batch: the per-batch cloud_titles/title_variant upserts must finish
+      // inside the authenticator's 8s statement_timeout even under concurrent read load AND
+      // a re-walk that re-fires the keep-best / mirror triggers on already-built rows. The
+      // upsert of 500 rows measured ~6.4s under load — too close to the ceiling — so 300
+      // buys headroom; the cost is just more (cheap) self-invocations.
+      const batchLimit = phase === "titles" ? 300 : 1500;
       result = await finalizeCloudSource(sourceId, userId, db, { country, phase, offset, afterId, limit: batchLimit }) as unknown as JsonRecord;
     } catch (e) {
       // Transient contention/compute spike → continue in a fresh isolate; a real
@@ -1131,21 +1132,15 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
       // Keyset: batchLimit (500) is below PostgREST's 1000-row cap, so a short page is
       // genuinely the last one — done when the batch is empty or under the limit.
       const done = rows.length === 0 || rows.length < batchLimit;
-      // Progress = titles BUILT / total, not the keyset walk offset. cloud_title_variants
-      // is 1:1 with projected movie/series items and only ever grows during finalize
-      // (upserts, never deletes), so built/total is genuinely monotone — it survives a
-      // cursor reset or cross-isolate resume that restarts the walk offset from 0, which
-      // would otherwise stall the bar (or appear to go backward). Best-effort: a slow/timed
-      // out count must never break the batch — fall back to the walk offset.
-      let builtVod = nextOffset;
-      try {
-        builtVod = Math.max(nextOffset, await countBuiltVodTitles(sourceId, db));
-      } catch (countError) {
-        console.warn("[norva-source-sync] built-title count skipped:", countError instanceof Error ? countError.message : countError);
-      }
+      // Progress = walk position / total VOD. The keyset offset advances 1:1 with titles
+      // built (each movie/series item projects one variant), so it IS "titles built / total".
+      // Monotonicity is already guaranteed downstream — both mergeSyncProgress and the client
+      // max-clamp the percent — so a resume/re-walk can never push the bar backward. (An
+      // explicit built-count COUNT(*) here was the wrong tool: ~6s under concurrent upsert
+      // load + autovacuum, which blew the 8s batch budget and froze the cursor.)
       await reportProgress({
         stage: done ? "finalizing" : "building_titles",
-        percent: done ? 99 : titleFinalizePercent(builtVod, totalVod),
+        percent: done ? 99 : titleFinalizePercent(nextOffset, totalVod),
         steps: { finalize: { status: "running" } },
       });
       return {
@@ -1278,20 +1273,6 @@ async function countRowsByType(sourceId: string, userId: string, db: SupabaseCli
     .eq("user_id", userId)
     .eq("item_type", itemType);
   if (error) throwDb(error, `Unable to count ${itemType} catalog items`);
-  return count ?? 0;
-}
-
-// Cumulative count of VOD title entries already materialised for this source. Used as
-// the monotone numerator for the titles-phase progress bar (built / total). Scoped by
-// source_id alone — a source has exactly one owner, and the unique index
-// (source_id, item_type, external_id) makes this an index-only range count even at
-// hundreds of thousands of rows, well within the 8s statement budget.
-async function countBuiltVodTitles(sourceId: string, db: SupabaseClient) {
-  const { count, error } = await db
-    .from("cloud_title_variants")
-    .select("id", { count: "exact", head: true })
-    .eq("source_id", sourceId);
-  if (error) throwDb(error, "Unable to count built title variants");
   return count ?? 0;
 }
 
