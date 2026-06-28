@@ -364,11 +364,22 @@ async function attachMediaLanguages(items: Array<Record<string, any>>, userId: s
     if (error) return; // best-effort; never fail the grid over the badge
     for (const row of data ?? []) {
       const id = stringOrNull((row as Record<string, unknown>).provider_tmdb_id);
-      if (id) byTmdb.set(id, {
+      if (!id) continue;
+      const next = {
         audio: titleAudioLanguages(row as JsonRecord),
         version: titleVersionLanguages(row as JsonRecord),
         tracks: titleAudioTracks(row as JsonRecord),
-      });
+      };
+      // Several per-user title rows can share a TMDB id (regional dedup leftovers).
+      // Keep the RICHEST so a row WITHOUT the crawled per-track map can't clobber a
+      // sibling that HAS it — otherwise the player loses the precomputed audio
+      // languages at random (the "Audio 1/2/3 one reload out of two" symptom).
+      const prev = byTmdb.get(id);
+      if (!prev
+        || next.tracks.length > prev.tracks.length
+        || (next.tracks.length === prev.tracks.length && next.audio.length > prev.audio.length)) {
+        byTmdb.set(id, next);
+      }
     }
   }
   for (const row of items) {
@@ -983,7 +994,11 @@ async function recordObservedLanguages(req: Request, userId: string) {
           const r = recordOrEmpty(t);
           const index = Number(r.index);
           const lang = r.lang == null ? null : String(r.lang).toLowerCase().trim();
-          return { index, lang: lang && /^[a-z]{2}$/.test(lang) ? lang : null };
+          // Accept 2- AND 3-letter ISO codes — same rule as the `codes` set above. The
+          // client only aliases the common languages to 2-letter; Persian (fas), Kurdish
+          // (kur), Albanian (sqi), Greek (ell)… arrive as 3-letter. A `{2}`-only test
+          // dropped exactly those from the persisted map, so those titles never self-healed.
+          return { index, lang: lang && /^[a-z]{2,3}$/.test(lang) && lang !== "und" ? lang : null };
         })
         .filter((t) => Number.isInteger(t.index))
     : [];
