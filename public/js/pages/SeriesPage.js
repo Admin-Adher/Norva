@@ -1181,7 +1181,7 @@ class SeriesPage {
         card.innerHTML = `
             <div class="series-poster">
                 <img src="${MediaUtils.escapeHtml(poster)}" alt="${MediaUtils.escapeHtml(displayName)}"
-                     onerror="this.onerror=null;this.src='/img/norva-media-placeholder.png'" loading="lazy">
+                     onerror="this.onerror=null;this.src='/img/norva-media-placeholder.png'" loading="lazy" decoding="async">
                 <div class="series-play-overlay">
                     <span class="play-icon">${Icons.play}</span>
                 </div>
@@ -1253,7 +1253,7 @@ class SeriesPage {
             return `
             <div class="continue-card" data-item-id="${MediaUtils.escapeHtml(h.item_id)}">
                 <img src="${MediaUtils.escapeHtml(MediaUtils.safeImageUrl(h.data?.poster, '/img/norva-media-placeholder.png'))}"
-                     onerror="this.onerror=null;this.src='/img/norva-media-placeholder.png'" loading="lazy" alt="">
+                     onerror="this.onerror=null;this.src='/img/norva-media-placeholder.png'" loading="lazy" decoding="async" alt="">
                 <div class="continue-card-info">
                     <p class="continue-card-title">${MediaUtils.escapeHtml(h.data?.title || 'Unknown')}</p>
                     <p class="continue-card-subtitle">${MediaUtils.escapeHtml(h.data?.subtitle || '')}</p>
@@ -1749,7 +1749,7 @@ class SeriesPage {
                             <div class="episode-item" data-episode-id="${MediaUtils.escapeHtml(ep.id)}" data-source-id="${series.sourceId}" data-container="${MediaUtils.escapeHtml(ep.container_extension || 'mp4')}" data-season="${MediaUtils.escapeHtml(seasonNum)}" data-episode-num="${MediaUtils.escapeHtml(ep.episode_num || '')}">
                                 <span class="episode-number">${MediaUtils.escapeHtml(ep.episode_num || '')}</span>
                                 <div class="episode-thumb">
-                                    <img src="${MediaUtils.escapeHtml(thumb)}" alt="" onerror="this.onerror=null;this.src='/img/norva-media-placeholder.png'" loading="lazy">
+                                    <img src="${MediaUtils.escapeHtml(thumb)}" alt="" onerror="this.onerror=null;this.src='/img/norva-media-placeholder.png'" loading="lazy" decoding="async">
                                     <span class="episode-play">${Icons.play}</span>
                                 </div>
                                 <div class="episode-copy">

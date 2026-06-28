@@ -1113,7 +1113,7 @@ class HomePage {
             <div class="dashboard-card" data-id="${this.escapeAttr(itemId)}" data-type="${this.escapeAttr(type)}" data-rail-index="${railIndex}" data-item-index="${itemIndex}">
                 <div class="card-image">
                     ${ranked ? `<div class="rank-numeral">${itemIndex + 1}</div>` : ''}
-                    <img src="${this.escapeAttr(posterUrl)}" alt="${this.escapeAttr(title)}" loading="lazy" onerror="this.onerror=null;this.src='/img/norva-media-placeholder.png'">
+                    <img src="${this.escapeAttr(posterUrl)}" alt="${this.escapeAttr(title)}" loading="lazy" decoding="async" onerror="this.onerror=null;this.src='/img/norva-media-placeholder.png'">
                     ${variantCount > 1 ? `<div class="home-card-badge">${variantCount} versions</div>` : ''}
                     ${languageBadge ? `<div class="home-card-language-badge">${this.escapeHtml(languageBadge)}</div>` : ''}
                     <div class="play-icon-overlay">
@@ -1239,7 +1239,7 @@ class HomePage {
         return `
             <div class="dashboard-card" data-id="${this.escapeAttr(itemId)}" data-type="${this.escapeAttr(type)}" data-history-index="${index}">
                 <div class="card-image">
-                    <img src="${this.escapeAttr(posterUrl)}" alt="${this.escapeAttr(title)}" loading="lazy" onerror="this.onerror=null;this.src='/img/norva-media-placeholder.png'">
+                    <img src="${this.escapeAttr(posterUrl)}" alt="${this.escapeAttr(title)}" loading="lazy" decoding="async" onerror="this.onerror=null;this.src='/img/norva-media-placeholder.png'">
                     <button class="ch-remove" type="button" data-history-index="${index}" aria-label="Remove from Continue Watching">✕</button>
                     ${timeLeft ? `<div class="card-timeleft">${timeLeft}</div>` : ''}
                     <div class="progress-bar-container">
@@ -1331,7 +1331,7 @@ class HomePage {
         return `
             <div class="channel-tile" data-channel-id="${this.escapeAttr(channel.id)}" data-source-id="${this.escapeAttr(channel.sourceId)}">
                 <div class="tile-logo">
-                    <img src="${this.escapeAttr(logoUrl)}" alt="${this.escapeAttr(name)}" loading="lazy" onerror="this.onerror=null;this.src='${this.escapeAttr(fallbackLogo)}'">
+                    <img src="${this.escapeAttr(logoUrl)}" alt="${this.escapeAttr(name)}" loading="lazy" decoding="async" onerror="this.onerror=null;this.src='${this.escapeAttr(fallbackLogo)}'">
                 </div>
                 <div class="tile-name" title="${this.escapeHtml(name)}">${this.escapeHtml(name)}</div>
             </div>
