@@ -46,7 +46,9 @@ class App {
         }
 
         // Check authentication first
+        window.NorvaTrace?.log?.('checkAuth() — validates the session with GoTrue (network /auth/v1/user, blocking)');
         await this.checkAuth();
+        window.NorvaTrace?.log?.('checkAuth() done', this.currentUser ? (this.currentUser.email || (this.currentUser.device ? 'paired device' : 'user')) : 'no user → redirect');
         // Collapse the launch fan-out: one /boot call seeds profile / profiles /
         // entitlements / sources / trial-eligibility so the calls right below
         // (checkCloudAccess, ensureSelected, refreshSourceHealth, the trial
@@ -56,13 +58,17 @@ class App {
         // it returns, so the very next line already dedups onto it. User
         // sessions only — paired-device screens use the device-token path.
         if (this.currentUser && !this.currentUser.device) {
+            window.NorvaTrace?.log?.('boot() fired — one /boot call seeds the caches the lines below read');
             try { window.NorvaCloud?.boot?.(); } catch (_) { /* best-effort speedup */ }
         }
+        window.NorvaTrace?.log?.('checkCloudAccess() — entitlements (served from boot cache if seeded)');
         if (!await this.checkCloudAccess()) return;
+        window.NorvaTrace?.log?.('checkCloudAccess() done');
         // Netflix-style "who's watching": pick a profile before entering the app.
         try { if (window.NorvaProfiles?.ensureSelected) await window.NorvaProfiles.ensureSelected(); } catch (_) { }
         // Surface the always-visible navbar profile avatar (one-tap switcher).
         try { if (window.NorvaProfiles?.refreshNavAvatar) await window.NorvaProfiles.refreshNavAvatar(); } catch (_) { }
+        window.NorvaTrace?.log?.('app shell ready — profile picked, router/page renders next. NorvaTrace.summary() for the full table.');
         this.applyCatalogAvailability(null);
         this.startCloudWarmKeep();
         this.startEnrichmentProgressPoll();
