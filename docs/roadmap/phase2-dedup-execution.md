@@ -115,10 +115,34 @@ where g.server_host=(select config_hint->>'serverHost' from cloud_sources where 
 
 ## ⏳ RESTE À FAIRE (Phase 2, multi-session, additif + réversible)
 
-Ordre conseillé. Tout reste **derrière un flag par défaut OFF** ⇒ zéro impact tant que non basculé.
-- [ ] **Test de dédup réel** : ré-importer super8k (user A) **dans le schéma global** + ajouter
-      un **2ᵉ user même provider** → vérifier `dup_factor ≈ 2` côté per-user mais **+0 stockage
-      global** (le vrai test « des milliers d'users d'un provider connu »).
+### Test de dédup réel — fait + mesuré (2026-06-28, apdxes 2 owners, puis nettoyé)
+
+> super8k **non utilisé** pour ce test : son catalogue (~725 MB pour **1** copie) dépasse le free
+> tier 0,5 GB **même entièrement dédupliqué** → le ré-importer mettrait le projet en surquota et
+> risquerait l'app live. **Le dédup résout la multiplication _par user_ (N→~1×) ; mais 1× super8k
+> (725 MB) nécessite le tier Pro (8 GB) quoi qu'il arrive.** Test fait sur apdxes (tient dans le quota),
+> mécanisme identique (le global est clé sur `server_host`, pas sur l'user).
+
+- [x] **2 owners de `apdxes.xyz`** (2ᵉ source marquée, copie du catalogue) → per-user **`dup_factor=2.00`**
+      (81 170 lignes, 40 585 distinctes). Global collapse à **1× = 40 585** quel que soit le nb d'owners.
+- [x] **Coût per-owner mesuré** : plein **19 MB → aminci 6 MB** (−68%, ÷3,1). Chaque champ aminci **100%
+      récupérable** du global — **prouvé en prod** : un-thin de la vraie source apdxes → 40 585/40 585
+      restaurés, 0 vide.
+- [x] **Projection (media, mesurée)** : dédup = 18 MB (global 1×) + 6 MB × N owners ; sans dédup = 19 MB × N.
+
+      | Owners | Sans dédup | Avec dédup | Gain |
+      |---|---|---|---|
+      | 2 | 38 MB | 30 MB | 21% |
+      | 10 | 190 MB | 78 MB | 59% |
+      | 100 | 1,9 GB | 618 MB | 67% |
+      | 1000 | 19 GB | ~6 GB | **68%** |
+
+      _Caveat honnête : l'overlay garde title + colonnes de tri per-user (tri grille server-side), donc le
+      coût per-owner plafonne à ~6 MB (pas ~0) ⇒ gain asymptotique **~68% (÷3,1)**. Un ÷3 de plus (per-owner
+      → ~2 MB) est possible via l'approche « replace » (grille triée entièrement depuis le global), plus
+      risquée — option future si besoin._
+- [x] **Nettoyé** : source de test + global supprimés, apdxes restauré + `ready`, DB rebaseline.
+
 - [ ] **Flip à l'échelle** : poser les secrets de lecture quand le recoupement multi-user est
       matériel. Aujourd'hui ~0 gain (1 user réel) ⇒ on **construit maintenant** (calme,
       réversible), on **bascule plus tard**.
