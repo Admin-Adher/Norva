@@ -376,6 +376,21 @@
             }
         }
 
+        // A syncing source is a healthy import in progress, not an error to repair.
+        // Route the prominent CTA to the catalog-preparation modal (progress) rather
+        // than the credential-repair form — the showEditModal path below stays
+        // reserved for genuine error states (degraded / auth_failed / expired / …).
+        if (state === 'syncing') {
+            const source = progressSourceFrom(summary);
+            if (source && manager?.showCatalogPreparation) {
+                manager.showCatalogPreparation(source, sourceType(source));
+                return true;
+            }
+            if (app?.navigateTo) app.navigateTo('settings');
+            setTimeout(() => settings?.switchTab?.('sources'), 0);
+            return true;
+        }
+
         if (primarySource && manager?.showEditModal) {
             const id = sourceId(primarySource);
             const type = sourceType(primarySource);

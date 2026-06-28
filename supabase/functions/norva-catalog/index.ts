@@ -149,7 +149,12 @@ async function getEnrichmentProgress(userId: string) {
   // reassurance, not a per-user guarantee.
   const searchDone = (searchState.data as { done?: boolean } | null)?.done === true;
   const revalDone = (revalState.data as { done?: boolean } | null)?.done === true;
-  const settled = searchDone && revalDone;
+  // The cron-state rows above are GLOBAL (one shared scan), so a brand-new user whose
+  // freshly imported titles haven't been scanned yet would otherwise be declared
+  // "settled" at a 0%/low plateau just because another user's scan finished. Guard the
+  // worst case: never settle a user who has titles but zero enriched yet. (A fully
+  // per-user settle signal needs a per-user enrichment cursor — tracked as a follow-up.)
+  const settled = searchDone && revalDone && (total === 0 || enriched > 0);
   return { total, enriched, percent, settled };
 }
 

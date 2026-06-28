@@ -612,7 +612,13 @@ class SourceManager {
         } catch (error) {
             previousPercent = 0;
         }
-        const visiblePercent = Math.max(previousPercent, rawPercent);
+        // Clamp monotonically to hide small backward jitter from re-walks that
+        // re-project already-built rows. BUT a large drop while still importing is a
+        // genuine finalize regression/restart (a fresh isolate resuming from a lower
+        // cursor) — let the bar correct downward then, instead of freezing at a stale
+        // "almost done" that never completes.
+        const regressed = !terminal.has(status) && (previousPercent - rawPercent) > 15;
+        const visiblePercent = regressed ? rawPercent : Math.max(previousPercent, rawPercent);
         nextProgress.percent = visiblePercent;
         try {
             if (terminal.has(status)) {
@@ -721,7 +727,7 @@ class SourceManager {
                 <span>${this.escapeHtml(step.label)}</span>
                 ${count}
               </span>
-              <small>${this.escapeHtml(step.detail)} - ${this.escapeHtml(statusLabel)}</small>
+              <small>${this.escapeHtml(step.detail)} — ${this.escapeHtml(statusLabel)}</small>
             </span>
           </li>
         `;
@@ -788,7 +794,7 @@ class SourceManager {
           <div class="source-sync-error">${this.escapeHtml(statusText.error)}</div>
         ` : ''}
         ${counts.syncedAt && phase === 'ready' ? `
-          <p class="hint">Last import: ${this.escapeHtml(new Date(counts.syncedAt).toLocaleString('en-US'))}</p>
+          <p class="hint">Last import: ${this.escapeHtml(new Date(counts.syncedAt).toLocaleString())}</p>
         ` : ''}
       </div>
     `;
@@ -945,7 +951,12 @@ class SourceManager {
             const { phase } = this.sourceSyncState(current);
             if (phase === 'ready' || phase === 'error') return;
 
-            if (!recoveryStarted && this.shouldRecoverCatalogFinalization(current, { requireStale: false }) && API.sources.finalize) {
+            // Only co-pilot finalize when the background driver looks genuinely stalled
+            // (>60s without a progress write). Co-piloting eagerly makes the client and
+            // the server driver drive the SAME finalize batches at once, doubling the
+            // heavy keep-best/mirror trigger load that the 300-row batch + throttle were
+            // sized to avoid — a contributor to finalize saturating Postgres.
+            if (!recoveryStarted && this.shouldRecoverCatalogFinalization(current, { requireStale: true }) && API.sources.finalize) {
                 recoveryStarted = true;
                 this.recoverCatalogFinalization(sourceId, token, (source) => {
                     current = source || current;
@@ -989,7 +1000,7 @@ class SourceManager {
                     if (estimate.needsWarning) {
                         const proceed = await this.showWarningModal({
                             title: '⚠️ Large Playlist Warning',
-                            message: `This playlist contains <strong>${estimate.count.toLocaleString('en-US')}</strong> channels.`,
+                            message: `This playlist contains <strong>${estimate.count.toLocaleString()}</strong> channels.`,
                             details: `Syncing may take several minutes and app performance may be impacted with large playlists.<br><br>Consider using a filtered M3U from your provider to include only channels you actually watch.`,
                             proceedText: 'Proceed Anyway',
                             cancelText: 'Cancel'
@@ -1150,7 +1161,7 @@ class SourceManager {
                     if (estimate.needsWarning) {
                         const proceed = await this.showWarningModal({
                             title: '⚠️ Large Playlist Warning',
-                            message: `This playlist contains <strong>${estimate.count.toLocaleString('en-US')}</strong> channels.`,
+                            message: `This playlist contains <strong>${estimate.count.toLocaleString()}</strong> channels.`,
                             details: `Syncing may take several minutes and app performance may be impacted with large playlists.<br><br>Consider using a filtered M3U from your provider to include only channels you actually watch.`,
                             proceedText: 'Proceed Anyway',
                             cancelText: 'Cancel'
@@ -1418,7 +1429,7 @@ class SourceManager {
             return `<button type="button" class="genre-card ${on ? 'is-on' : 'is-off'}" data-bucket="${this.escapeHtml(g.bucket)}" role="switch" aria-checked="${on ? 'true' : 'false'}" title="${this.escapeHtml(g.label)}">
                 <span class="genre-card-text">
                     <span class="genre-card-name">${this.escapeHtml(g.label)}</span>
-                    <span class="genre-card-count">${count.toLocaleString('en-US')} ${unit}</span>
+                    <span class="genre-card-count">${count.toLocaleString()} ${unit}</span>
                 </span>
                 <span class="genre-switch" aria-hidden="true"><span class="genre-switch-knob"></span></span>
             </button>`;
@@ -2372,7 +2383,7 @@ class SourceManager {
                     btn.disabled = false;
                     btn.innerHTML = Icons.refresh;
                     btn.classList.remove('syncing');
-                    btn.title = lastSync ? `Last Sync: ${new Date(lastSync).toLocaleString('en-US')}` : "Refresh Data";
+                    btn.title = lastSync ? `Last Sync: ${new Date(lastSync).toLocaleString()}` : "Refresh Data";
                 }
             }
 
