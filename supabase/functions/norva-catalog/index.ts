@@ -77,37 +77,37 @@ Deno.serve(async (req) => {
 
     if (req.method === "GET" && isHomeRailsRoute(segments)) {
       const userId = await requireUserId(req);
-      return json(req, await listHomeRails(url, userId));
+      return jsonCached(req, await listHomeRails(url, userId), 60);
     }
 
     if (req.method === "GET" && (segments[0] === "media-items" || (segments[0] === "device" && segments[1] === "media-items"))) {
       const userId = await requireUserId(req);
-      return json(req, await listMediaItems(url, userId));
+      return jsonCached(req, await listMediaItems(url, userId), 30);
     }
 
     if (req.method === "GET" && (segments[0] === "media-categories" || (segments[0] === "device" && segments[1] === "media-categories"))) {
       const userId = await requireUserId(req);
-      return json(req, await listMediaCategories(url, userId));
+      return jsonCached(req, await listMediaCategories(url, userId), 60);
     }
 
     if (req.method === "GET" && (segments[0] === "media-genre-rails" || (segments[0] === "device" && segments[1] === "media-genre-rails"))) {
       const userId = await requireUserId(req);
-      return json(req, await listGenreRails(req, url, userId));
+      return jsonCached(req, await listGenreRails(req, url, userId), 60);
     }
 
     if (req.method === "GET" && (segments[0] === "media-genre-items" || (segments[0] === "device" && segments[1] === "media-genre-items"))) {
       const userId = await requireUserId(req);
-      return json(req, await listGenreItems(req, url, userId));
+      return jsonCached(req, await listGenreItems(req, url, userId), 30);
     }
 
     if (req.method === "GET" && (segments[0] === "media-genre-summary" || (segments[0] === "device" && segments[1] === "media-genre-summary"))) {
       const userId = await requireUserId(req);
-      return json(req, await listGenreSummary(req, url, userId));
+      return jsonCached(req, await listGenreSummary(req, url, userId), 60);
     }
 
     if (req.method === "GET" && (segments[0] === "media-language-facets" || (segments[0] === "device" && segments[1] === "media-language-facets"))) {
       const userId = await requireUserId(req);
-      return json(req, await listLanguageFacets(url, userId));
+      return jsonCached(req, await listLanguageFacets(url, userId), 60);
     }
 
     if (req.method === "POST" && (segments[0] === "media-observed-languages" || (segments[0] === "device" && segments[1] === "media-observed-languages"))) {
@@ -2079,6 +2079,25 @@ function json(req: Request, data: unknown, status = 200) {
       ...corsHeaders(req),
       "Content-Type": "application/json; charset=utf-8",
       "Cache-Control": "no-store",
+    },
+  });
+}
+
+// Like json(), but lets the browser's private cache serve the response for a short
+// window so repeat navigations (and rapid filter toggles) skip the DB entirely —
+// keeping the catalogue pages fast even while a background job works the DB. SAFE per
+// user/profile: Vary on Authorization (per-user token) + the profile header so one
+// user/profile never reads another's cached response. The window is short, so a freshly
+// crawled title shows within ~cacheSeconds; the data is not real-time anyway.
+function jsonCached(req: Request, data: unknown, cacheSeconds: number, status = 200) {
+  const s = Math.max(0, Math.floor(cacheSeconds));
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: {
+      ...corsHeaders(req),
+      "Content-Type": "application/json; charset=utf-8",
+      "Cache-Control": s > 0 ? `private, max-age=${s}, stale-while-revalidate=${s * 2}` : "no-store",
+      "Vary": "Authorization, x-norva-profile-id",
     },
   });
 }
