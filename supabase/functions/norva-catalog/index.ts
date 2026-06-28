@@ -1584,6 +1584,45 @@ async function listLiveChannelVariants(url: URL, userId: string, logicalId: stri
   };
 }
 
+// Overlay live channel rows' heavy display fields from the provider-global
+// catalog_live_logical_channels (keyed by server_host + logical_id), mirroring
+// applyMediaCatalogOverlay. Targets the biggest live bloat — default_variant +
+// variant_preview (the TOAST-heavy JSON summaries) — plus poster/icon/playback_hint/
+// metadata, so the per-user copy can later drop them. section/lcn/title stay on the
+// per-user row (the lineup sorts on them). Fills only where global has a value.
+async function applyLiveCatalogOverlay(rows: Array<Record<string, any>>, sourceId: string, userId: string) {
+  if (!rows.length) return;
+  const { data: src } = await db.from("cloud_sources").select("config_hint").eq("id", sourceId).eq("user_id", userId).maybeSingle();
+  const host = String((src as any)?.config_hint?.serverHost || "").trim();
+  if (!host) return;
+  const ids = [...new Set(rows.map((row) => String(row.logical_id || "")).filter(Boolean))];
+  if (!ids.length) return;
+  const byId = new Map<string, Record<string, any>>();
+  for (let i = 0; i < ids.length; i += 500) {
+    const { data } = await (db as any)
+      .from("catalog_live_logical_channels")
+      .select("logical_id,title,category_name,poster_url,stream_icon,default_stream_id,variant_count,default_variant,variant_preview,playback_hint,metadata")
+      .eq("server_host", host)
+      .in("logical_id", ids.slice(i, i + 500));
+    for (const g of (data ?? []) as Array<Record<string, any>>) byId.set(String(g.logical_id), g);
+  }
+  if (!byId.size) return;
+  for (const r of rows) {
+    const g = byId.get(String(r.logical_id));
+    if (!g) continue;
+    if (g.poster_url) r.poster_url = g.poster_url;
+    if (g.stream_icon) r.stream_icon = g.stream_icon;
+    if (g.default_stream_id) r.default_stream_id = g.default_stream_id;
+    if (g.title && !String(r.title || "").trim()) r.title = g.title;
+    if (g.category_name && !String(r.category_name || "").trim()) r.category_name = g.category_name;
+    if (typeof g.variant_count === "number" && g.variant_count) r.variant_count = g.variant_count;
+    if (isRecord(g.default_variant) && Object.keys(g.default_variant).length) r.default_variant = g.default_variant;
+    if (Array.isArray(g.variant_preview) && g.variant_preview.length) r.variant_preview = g.variant_preview;
+    if (isRecord(g.playback_hint) && Object.keys(g.playback_hint).length) r.playback_hint = g.playback_hint;
+    if (isRecord(g.metadata) && Object.keys(g.metadata).length) r.metadata = g.metadata;
+  }
+}
+
 async function listMaterializedLiveLogicalChannels(
   url: URL,
   userId: string,
@@ -1596,6 +1635,11 @@ async function listMaterializedLiveLogicalChannels(
       ? await listFilteredMaterializedLiveRows(userId, options, limit, offset)
       : await listOrderedMaterializedLiveRows(userId, options, limit, offset);
     if (!rows.length) return null;
+
+    // Phase 2 dedup: overlay channel display fields from the provider-global cache.
+    if (mediaReadFromCatalog() && options.sourceId) {
+      await applyLiveCatalogOverlay(rows, options.sourceId, userId);
+    }
 
     let variantsByChannelId = new Map<string, JsonRecord[]>();
     if (options.includeVariants) {
@@ -1785,6 +1829,11 @@ async function listMaterializedLiveChannelVariants(userId: string, logicalId: st
       throwDb(error, "Unable to load materialized live channel");
     }
     if (!channel || !materializedRowMatchesCountry(channel, country)) return null;
+
+    // Phase 2 dedup: overlay this channel's display fields from the global cache.
+    if (mediaReadFromCatalog() && sourceId) {
+      await applyLiveCatalogOverlay([channel], sourceId, userId);
+    }
 
     const { data: variants, error: variantsError } = await db
       .from("cloud_live_variants")
