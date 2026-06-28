@@ -243,7 +243,12 @@ class App {
         // Initialize home page first (it's needed for channel list)
         await this.pages.home.init();
 
-        await this.refreshSourceHealth();
+        // Source health gates the catalogue-page guard + nav availability, but the Home
+        // page is always allowed and its rails fetch does not depend on it. Start health
+        // in PARALLEL so Home's data fetch overlaps it (saves a full round-trip on the
+        // common cold start to Home); only block on it when guarding a deep-link to a
+        // catalogue page, where the guard must see real availability.
+        const healthReady = this.refreshSourceHealth().catch(() => null);
 
         // Preload EPG data in background (non-blocking)
         // This ensures EPG info is available on Live TV page without visiting Guide first
@@ -254,6 +259,7 @@ class App {
         // Navigate to the page from URL hash, or default to home
         const hash = window.location.hash.slice(1); // Remove #
         const requestedInitialPage = hash && this.pages[hash] ? hash : 'home';
+        if (requestedInitialPage !== 'home') await healthReady;
         const initialPage = this.guardCatalogPage(requestedInitialPage);
         // Capture any fiche open before a refresh BEFORE navigating (applyPage may clear
         // the stash), then re-open it once we've landed on its catalogue page.
