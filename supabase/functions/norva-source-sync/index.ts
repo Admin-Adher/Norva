@@ -911,12 +911,20 @@ async function driveFinalizeToReady(db: SupabaseClient, sourceId: string, userId
   while (Date.now() < deadline && guard++ < 400) {
     let result: JsonRecord;
     try {
-      result = await finalizeCloudSource(sourceId, userId, db, { country, phase, offset, limit: 1500 }) as unknown as JsonRecord;
+      // Smaller titles batch: the per-batch cloud_titles/title_variant upserts (and
+      // the offset SELECT) must finish inside the authenticator's 8s statement_timeout
+      // even under concurrent read load on a huge catalogue. 1500 timed out at scale;
+      // 500 fits, at the cost of more (cheap) self-invocations.
+      const batchLimit = phase === "titles" ? 500 : 1500;
+      result = await finalizeCloudSource(sourceId, userId, db, { country, phase, offset, limit: batchLimit }) as unknown as JsonRecord;
     } catch (e) {
       // Transient contention/compute spike → continue in a fresh isolate; a real
-      // error (e.g. 422 no items) surfaces and stops the chain.
+      // error (e.g. 422 no items) surfaces and stops the chain. A statement timeout
+      // surfaces as a PLAIN Error (not HttpError), so match the message regardless of
+      // type — otherwise a timed-out batch wrongly stops the whole finalize.
       const msg = e instanceof HttpError ? `${e.message} ${JSON.stringify(e.details ?? "")}` : String(e);
-      const transient = e instanceof HttpError && (e.status === 503 || /resource|timeout|compute|deadlock|lock/i.test(msg));
+      const transient = (e instanceof HttpError && e.status === 503)
+        || /resource|timeout|compute|deadlock|lock|statement|canceling|57014/i.test(msg);
       console.error("[cron] finalize batch failed", sourceId, transient ? "(transient)" : "", e);
       if (transient) await selfInvokeFinalize(sourceId, country);
       return;
