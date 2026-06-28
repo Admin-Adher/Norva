@@ -1,3 +1,8 @@
+// DEPLOY NOTE: this function imports sibling modules from ../_shared. It MUST be
+// deployed by the bundling Supabase CLI (`supabase functions deploy`, run by the
+// deploy-supabase-functions.yml workflow on push to main), which inlines those
+// relative imports. Uploading the raw files via other tooling leaves the imports
+// unbundled and the function fails to boot (WORKER_ERROR). Deploy via CI only.
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { buildLiveCatalog, findLiveChannel, type LiveCatalogItem } from "../_shared/live-catalog.ts";
 import { BUCKET_ORDER, bucketLabel, classifyTitleBuckets } from "../_shared/genre-taxonomy.ts";
