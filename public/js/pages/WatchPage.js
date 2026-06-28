@@ -5751,15 +5751,37 @@ class WatchPage {
     // user it's there and in which language, instead of a blank "no track".
     // Returns a language code, 'und' (burned but unknown language), or undefined
     // (no burned-subtitle marker found).
+    contentCategoryName() {
+        const c = this.content || {};
+        return String(c.category_name || c.categoryName || c.metadata?.categoryName || c.metadata?.category_name || '');
+    }
+
+    // Burned-in subtitle intel from the cheap label+category intelligence
+    // (MediaUtils.deriveTrackIntel). The container has NO subtitle TRACK (the text is
+    // baked into the picture) so we pass hasSubtitleStream:false; a subtitle language
+    // signalled by the label/category then resolves to type 'burned-in'.
+    // Returns { code, name } | null.
+    burnedSubtitleIntel() {
+        try {
+            const r = window.MediaUtils?.deriveTrackIntel?.({
+                title: this.content?.title || '',
+                category: this.contentCategoryName(),
+                originalLanguage: this.content?.originalLanguage || this.content?.original_language,
+                hasSubtitleStream: false,
+            });
+            const s = r && r.subtitle;
+            if (s && s.type === 'burned-in') return { code: s.code || 'und', name: s.name || null };
+            return null;
+        } catch (_) {
+            return null;
+        }
+    }
+
+    // Back-compat: language code, 'und' (burned but unknown), or undefined (none).
     detectBurnedSubtitleLanguage() {
-        const title = String(this.content?.title || '');
-        if (!title) return undefined;
-        const t = ' ' + title.toUpperCase() + ' ';
-        if (/مترجم|ترجمة/.test(title) || /\bVOST?\s?AR\b|\bSUBT?\s?AR\b|\bAR\s?SUBT?\b|\bVOSTAR\b/.test(t)) return 'ar';
-        if (/\bVOSTFR\b|\bVOST?\s?FR\b|\bSTFR\b|\bSUBT?\s?FR\b/.test(t)) return 'fr';
-        if (/\bVOSTEN\b|\bVOST?\s?EN\b|\bSUBT?\s?EN\b/.test(t)) return 'en';
-        if (/\bVOST\b|\bVOSTF?\b|\bSUBT\b/.test(t)) return 'und';
-        return undefined;
+        const intel = this.burnedSubtitleIntel();
+        if (!intel) return undefined;
+        return intel.code || 'und';
     }
 
     getBurnedSubtitleMessage() {
@@ -5821,14 +5843,24 @@ class WatchPage {
             });
         }
 
-        const offActive = !anyActive;
+        // No selectable subtitle TRACK, but the label/category says the picture carries
+        // burned-in subtitles → show them as a locked, always-on entry instead of "Off".
+        const burned = !options.length ? this.burnedSubtitleIntel() : null;
+        const offActive = !anyActive && !burned;
         const optionHtml = options.map(track => {
             const streamAttr = track.streamIndex !== undefined ? ` data-stream-index="${track.streamIndex}"` : '';
             return `<button class="captions-option ${track.active ? 'active' : ''}" data-source="${track.source}" data-index="${track.index}"${streamAttr}>${this.escapeHtml(track.label)}</button>`;
         }).join('');
-        const emptyHtml = !options.length
-            ? `<div class="captions-empty">${this.escapeHtml(this.getBurnedSubtitleMessage())}</div>`
-            : '';
+        // Burned-in: the off-row becomes a locked entry (can't be turned off); otherwise
+        // the usual "Off" + "no track / burned message" applies.
+        const headerHtml = burned
+            ? `<button class="captions-option active locked" data-source="burned" data-index="-1" disabled aria-disabled="true" title="Burned into the picture — always on">🔒 ${this.escapeHtml(burned.name ? `${burned.name} — burned-in` : 'Burned-in subtitles')}</button>`
+            : `<button class="captions-option ${offActive ? 'active' : ''}" data-source="off" data-index="-1">Off</button>`;
+        const emptyHtml = burned
+            ? `<div class="captions-empty">${this.escapeHtml('Always on — subtitles are part of the picture, they can’t be turned off.')}</div>`
+            : (!options.length
+                ? `<div class="captions-empty">${this.escapeHtml(this.getBurnedSubtitleMessage())}</div>`
+                : '');
         const offsetHtml = this.selectedSubtitleStreamIndex !== null && this.selectedSubtitleStreamIndex !== undefined && probeSubtitleTracks.length
             ? `<div class="captions-offset" aria-label="Subtitle sync">
                 <div class="captions-offset-label">Sync ${this.escapeHtml(this.formatSubtitleOffset())}</div>
@@ -5839,7 +5871,7 @@ class WatchPage {
               </div>`
             : '';
 
-        this.captionsList.innerHTML = `<button class="captions-option ${offActive ? 'active' : ''}" data-source="off" data-index="-1">Off</button>${optionHtml}${emptyHtml}${offsetHtml}`;
+        this.captionsList.innerHTML = `${headerHtml}${optionHtml}${emptyHtml}${offsetHtml}`;
 
         this.captionsList.querySelectorAll('.captions-option').forEach(btn => {
             btn.addEventListener('click', () => this.selectCaptionTrack(

@@ -45,6 +45,9 @@ const MediaUtils = (() => {
         ja: 'JA',
         ko: 'KO',
         zh: 'ZH',
+        fa: 'FA',
+        sq: 'SQ',
+        el: 'EL',
         original: 'VO'
     };
 
@@ -53,6 +56,7 @@ const MediaUtils = (() => {
         fr: 'French', en: 'English', es: 'Spanish', ar: 'Arabic', de: 'German',
         it: 'Italian', pt: 'Portuguese', tr: 'Turkish', nl: 'Dutch', ru: 'Russian',
         pl: 'Polish', hi: 'Hindi', ja: 'Japanese', ko: 'Korean', zh: 'Chinese',
+        fa: 'Persian', sq: 'Albanian', el: 'Greek',
         original: 'Original'
     };
 
@@ -139,6 +143,21 @@ const MediaUtils = (() => {
         chi: 'zh',
         cn: 'zh',
         zh: 'zh',
+        persian: 'fa',
+        farsi: 'fa',
+        iranian: 'fa',
+        per: 'fa',
+        fas: 'fa',
+        fa: 'fa',
+        albanian: 'sq',
+        shqip: 'sq',
+        alb: 'sq',
+        sq: 'sq',
+        greek: 'el',
+        grec: 'el',
+        ell: 'el',
+        gre: 'el',
+        el: 'el',
         vo: 'original',
         vost: 'original',
         vostfr: 'original',
@@ -229,6 +248,64 @@ const MediaUtils = (() => {
         { tag: 'ZHSUB', re: /\b(zh|zho|chi|cn|chinese|mandarin)[\s._-]*(sub|subs|st|subtitle|subtitles)\b/i, language: 'zh' }
     ];
 
+    // IPTV VOD labels lead with a region/language prefix: "IR - …", "AR-SUBS - …",
+    // "4K-AR - …", "IN-EN - …", "ES - …". The provider's CATEGORY name carries the
+    // same convention ("IR - PERSIAN SUB/DUB", "أفلام أجنبية"). This is the most
+    // reliable language signal we have, because the container itself is usually
+    // untagged (lang = und). Map a region/language token -> ISO code.
+    const REGION_PREFIX_LANG = {
+        ir: 'fa', iran: 'fa', fa: 'fa', fas: 'fa', per: 'fa', persian: 'fa', farsi: 'fa',
+        ar: 'ar', ara: 'ar', arab: 'ar', arabic: 'ar', arabe: 'ar',
+        al: 'sq', alb: 'sq', albanian: 'sq', shqip: 'sq',
+        gr: 'el', gre: 'el', ell: 'el', greek: 'el',
+        es: 'es', spa: 'es', spanish: 'es', esp: 'es', lat: 'es', latino: 'es',
+        pt: 'pt', por: 'pt', br: 'pt', bra: 'pt', portuguese: 'pt',
+        de: 'de', ger: 'de', deu: 'de', german: 'de',
+        fr: 'fr', fre: 'fr', fra: 'fr', vf: 'fr', vff: 'fr', vfq: 'fr', truefrench: 'fr', french: 'fr',
+        en: 'en', eng: 'en', english: 'en', us: 'en', uk: 'en',
+        it: 'it', ita: 'it', italian: 'it',
+        tr: 'tr', tur: 'tr', turkish: 'tr',
+        nl: 'nl', dut: 'nl', dutch: 'nl',
+        ru: 'ru', rus: 'ru', russian: 'ru',
+        pl: 'pl', pol: 'pl', polish: 'pl',
+        in: 'hi', ind: 'hi', hi: 'hi', hin: 'hi', hindi: 'hi', // India -> Hindi (best-effort)
+        jp: 'ja', jpn: 'ja', japanese: 'ja',
+        kr: 'ko', kor: 'ko', korean: 'ko',
+        cn: 'zh', zh: 'zh', chinese: 'zh', mandarin: 'zh'
+    };
+    const SUB_MARKERS = new Set(['sub', 'subs', 'subt', 'subbed', 'subtitle', 'subtitles', 'st', 'vost', 'vostfr']);
+    const DUB_MARKERS = new Set(['dub', 'dubbed', 'dublado', 'doblado', 'doublage']);
+    const PREFIX_QUALITY = new Set(['4k', '8k', 'uhd', '2160p', '1440p', '1080p', '720p', '480p', '360p', 'fhd', 'hd', 'sd', 'hdr', 'hdr10', 'sdr', 'dv']);
+    // Arabic-script markers that mean "subtitled/translated".
+    const RTL_SUB_RE = /مترجم|ترجمة|زیرنویس|زیرنویس‌دار/;
+
+    // Parse the leading "XX - " (or "XX-YY - ") segment of an IPTV label/category
+    // into a structured language hint. Returns null when there is no usable prefix.
+    function parseLeadingRegionTag(name) {
+        const raw = String(name || '');
+        const m = raw.match(/^\s*([0-9a-z+][0-9a-z+À-ɏ\s._\-/]{0,24}?)\s*[-–—|:/]\s+/i);
+        if (!m) return null;
+        const seg = stripDiacritics(m[1]).toLowerCase();
+        const tokens = seg.split(/[^a-z0-9]+/).filter(Boolean);
+        if (!tokens.length || tokens.length > 5) return null;
+        let audioLang = null, subLang = null, hasSub = false, hasDub = false, sawLangToken = false;
+        for (const tok of tokens) {
+            if (PREFIX_QUALITY.has(tok)) continue;
+            if (SUB_MARKERS.has(tok)) { hasSub = true; continue; }
+            if (DUB_MARKERS.has(tok)) { hasDub = true; continue; }
+            const lang = REGION_PREFIX_LANG[tok];
+            if (lang) {
+                sawLangToken = true;
+                // An explicit language token wins for audio (e.g. "IN-EN" -> English);
+                // the first language also seeds the subtitle language.
+                audioLang = lang;
+                if (!subLang) subLang = lang;
+            }
+        }
+        if (!sawLangToken) return null;
+        return { audioLang, subLang, hasSub, hasDub };
+    }
+
     const NOISE_WORDS = new Set([
         '4k', 'uhd', '2160p', '2160', '1440p', 'fhd', '1080p', '1080', 'hd', '720p', '720',
         'sd', '480p', '360p', 'hdr', 'hdr10', 'dolby', 'vision', 'hevc', 'h264', 'h265', 'x264', 'x265',
@@ -310,6 +387,92 @@ const MediaUtils = (() => {
             hasMulti: signals.hasMulti,
             languageSummary: signals.summary
         };
+    }
+
+    // Scan a curated, convention-following string (a provider CATEGORY name, never a
+    // free-form film title) for language + sub/dub markers anywhere in the text.
+    // e.g. "IR - PERSIAN SUB/DUB" -> { lang: 'fa', hasSub: true, hasDub: true }.
+    function scanLanguageMarkers(text) {
+        const seg = stripDiacritics(String(text || '')).toLowerCase();
+        const tokens = seg.split(/[^a-z0-9]+/).filter(Boolean);
+        let lang = null, hasSub = false, hasDub = false;
+        for (const tok of tokens) {
+            if (SUB_MARKERS.has(tok)) { hasSub = true; continue; }
+            if (DUB_MARKERS.has(tok)) { hasDub = true; continue; }
+            if (PREFIX_QUALITY.has(tok)) continue;
+            const code = REGION_PREFIX_LANG[tok] || LANGUAGE_ALIASES[tok];
+            if (code && code !== 'original' && !lang) lang = code; // first language wins
+        }
+        if (RTL_SUB_RE.test(String(text || ''))) hasSub = true;
+        return { lang, hasSub, hasDub };
+    }
+
+    const langFullName = (code) => LANGUAGE_NAMES[code] || languageDisplayFull(code);
+
+    // Phase 1 "track intelligence" — the cheap, instant, zero-network layer. The
+    // container is usually untagged (lang=und) and burned-in subtitles are not a
+    // track at all, but the version LABEL and the provider CATEGORY follow strict
+    // IPTV conventions. Combine them with the demux result into a structured
+    // description the player can show instead of "Default" / "Off".
+    //
+    //   deriveTrackIntel({ title, category, hasSubtitleStream, originalLanguage })
+    //   -> { audio:    { code, name, isDub, confidence, source } | null,
+    //        subtitle: { code, name, type:'soft'|'burned-in'|'none'|'unknown', confidence, source } | null }
+    //
+    // Burned-in rule: a subtitle language is signalled by the label/category, yet the
+    // container exposes NO subtitle track => the text is hard-coded into the picture
+    // (e.g. "AR-SUBS", "IR - PERSIAN SUB"). Surface it as 'burned-in', not "no track".
+    function deriveTrackIntel(opts = {}) {
+        const title = String(opts.title || '');
+        const category = String(opts.category || '');
+        const haveStreamKnown = typeof opts.hasSubtitleStream === 'boolean';
+        const hasStream = opts.hasSubtitleStream === true;
+        const origCode = normalizeLanguagePreference(opts.originalLanguage || '');
+
+        const tInfo = parseVersionInfo(title);           // body-safe signals + leading prefix
+        const tRegion = parseLeadingRegionTag(title);
+        const cat = scanLanguageMarkers(category);       // curated category -> full scan
+        const concrete = (list) => (list || [])
+            .map((s) => (s && s.language && s.language !== 'original') ? s.language : null)
+            .find(Boolean) || null;
+
+        // ---- AUDIO ----
+        let audioCode = concrete(tInfo.audioSignals) || cat.lang || null;
+        const isOriginal = !audioCode && (tInfo.audioSignals || []).some((s) => s && s.language === 'original');
+        let audio = null;
+        if (audioCode) {
+            audio = { code: audioCode, name: langFullName(audioCode), isDub: true, confidence: 'inferred', source: 'label' };
+        } else if (isOriginal) {
+            audio = (origCode && origCode !== 'und')
+                ? { code: origCode, name: langFullName(origCode), isDub: false, confidence: 'inferred', source: 'original' }
+                : { code: null, name: 'VO', isDub: false, confidence: 'inferred', source: 'original' };
+        }
+
+        // ---- SUBTITLES ----
+        const titleSub = concrete(tInfo.subtitleSignals);
+        const rtl = RTL_SUB_RE.test(title) || RTL_SUB_RE.test(category);
+        const subSignalled = !!(titleSub || (tRegion && tRegion.hasSub) || cat.hasSub || rtl);
+        let subCode = titleSub
+            || (tRegion && tRegion.hasSub ? tRegion.subLang : null)
+            || (cat.hasSub ? cat.lang : null)
+            || (rtl ? (cat.lang || audioCode) : null)
+            || null;
+
+        let subtitle = null;
+        if (subSignalled) {
+            const type = hasStream ? 'soft' : (haveStreamKnown ? 'burned-in' : 'unknown');
+            subtitle = {
+                code: subCode || null,
+                name: subCode ? langFullName(subCode) : null,
+                type,
+                confidence: 'inferred',
+                source: titleSub ? 'label' : (cat.hasSub || rtl ? 'category' : 'label')
+            };
+        } else if (haveStreamKnown && !hasStream) {
+            subtitle = { code: null, name: null, type: 'none', confidence: 'observed', source: 'probe' };
+        }
+
+        return { audio, subtitle };
     }
 
     function normalizeLanguagePreference(value, kind = 'audio') {
@@ -411,6 +574,15 @@ const MediaUtils = (() => {
         TITLE_SUBTITLE_SIGNALS.forEach(signal => {
             if (signal.re.test(raw)) pushUnique(subtitles, { language: signal.language, tag: signal.tag, confidence: 'probable' });
         });
+        // Leading "XX - " region/language prefix (the dominant IPTV-VOD convention,
+        // and the only signal for languages the body never spells out, e.g. Persian).
+        const region = parseLeadingRegionTag(name);
+        if (region) {
+            if (region.audioLang) pushUnique(audio, { language: region.audioLang, tag: 'PREFIX', confidence: 'region' });
+            if (region.subLang && (region.hasSub || RTL_SUB_RE.test(String(name || '')))) {
+                pushUnique(subtitles, { language: region.subLang, tag: 'PREFIXSUB', confidence: 'region' });
+            }
+        }
         const hasMulti = /\bmulti\b/i.test(raw);
         const primaryTag = subtitles.find(item => item.tag === 'VOSTFR')?.tag
             || audio.find(item => item.language === 'fr')?.tag
@@ -958,7 +1130,7 @@ const MediaUtils = (() => {
     return {
         skeletonCards,
         stripDiacritics, extractYear, normalizeTitle, computeDedupKey,
-        parseVersionInfo, searchableText, groupItems, pickRepresentative,
+        parseVersionInfo, deriveTrackIntel, scanLanguageMarkers, parseLeadingRegionTag, searchableText, groupItems, pickRepresentative,
         normalizeLanguagePreference, normalizeContentPreferences, migrateLegacyLanguagePreference,
         normalizeGenrePreference, normalizeGenrePreferences, scoreGenrePreferences,
         analyzeLanguageCompatibility, scoreVersionLanguage, scoreTitleForPreferences,
