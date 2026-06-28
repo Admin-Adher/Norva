@@ -114,8 +114,14 @@
             );
             if (Number.isFinite(total) && total > 0) return true;
         }
+        // catalog_version defaults to 1 at source creation — BEFORE any sync completes —
+        // so `> 0` wrongly marks a fresh initial import as "already built", which downgrades
+        // its classification from `syncing` to `ready` and hides the onboarding progress gate
+        // behind an empty Home. A genuinely completed catalogue is signalled by
+        // config.lastSync.syncedAt (set by finalize) checked above; require `> 1` here so this
+        // fallback only fires if catalog_version is ever actually bumped on completion.
         const catalogVersion = Number(source.catalog_version ?? source.catalogVersion ?? 0);
-        return Number.isFinite(catalogVersion) && catalogVersion > 0;
+        return Number.isFinite(catalogVersion) && catalogVersion > 1;
     }
 
     function classifyError(errorText, rawStatus = '') {
