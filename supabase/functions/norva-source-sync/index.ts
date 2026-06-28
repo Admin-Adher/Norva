@@ -855,9 +855,11 @@ async function cronRefreshDue(db: SupabaseClient) {
 // heartbeat. This re-kicks those so a big import always finishes — even app-closed.
 async function cronResumeStuck(db: SupabaseClient) {
   // A finalize chain reports progress every batch (~4s), so 60s of silence means the
-  // background isolate was torn down and the chain broke — revive it fast (this cron
-  // runs every 30s) for smooth, quick completion. Discovery heartbeats less often, so
-  // keep its threshold conservative to avoid double-driving a still-live import.
+  // background isolate was torn down and the chain broke — revive it within ~1-2 min
+  // (this cron runs every minute). (30s was tried but exhausted pg_cron's worker pool —
+  // "job startup timeout" — so the watchdog itself stopped firing reliably; 1 min is the
+  // stable sweet spot, still 2x faster than the old 2 min.) Discovery heartbeats less
+  // often, so keep its threshold conservative to avoid double-driving a still-live import.
   const now = Date.now();
   const staleFinalizeIso = new Date(now - 60_000).toISOString();
   const staleDiscoverIso = new Date(now - 120_000).toISOString();
