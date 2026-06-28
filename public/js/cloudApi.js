@@ -739,8 +739,11 @@
         // pay a cold start (the main cause of the slow first catalog load after
         // inactivity). Cheapest touch on each function we use; best-effort.
         warmUp: () => {
+            // Cheap /health ping only. The old warm-up ran a real /media-items catalog
+            // query every 4 min, which on a loaded/bloated DB hung for the 150s edge limit
+            // holding a connection — counter-productive. A cold start on the first real
+            // call is far cheaper than a 150s hung warm-up.
             try { request('GET', '/health', null, { token: '' }).catch(() => {}); } catch (_) { /* noop */ }
-            try { catalogRequest('/media-items', { type: 'movie', limit: 1 }).catch(() => {}); } catch (_) { /* noop */ }
         },
 
         // Aggregated cold-start fetch (see boot() above): one /boot call seeds the
