@@ -125,8 +125,21 @@ Deno.serve(async (req) => {
   }
 });
 
-async function getEnrichmentProgress(userId: string) {
-  const titlesBase = () => db.from("cloud_titles").select("id", { count: "exact", head: true })
+// Short in-isolate cache for the enrichment-progress aggregate. The onboarding /
+// enrichment bar polls this every ~2s; uncached that hammered the DB with the COUNT
+// below. Keyed by user, 30s TTL, bounded size.
+type EnrichmentProgress = { total: number; enriched: number; percent: number; settled: boolean };
+const enrichmentProgressCache = new Map<string, { at: number; value: EnrichmentProgress }>();
+const ENRICHMENT_PROGRESS_TTL_MS = 30_000;
+
+async function getEnrichmentProgress(userId: string): Promise<EnrichmentProgress> {
+  const cached = enrichmentProgressCache.get(userId);
+  if (cached && Date.now() - cached.at < ENRICHMENT_PROGRESS_TTL_MS) return cached.value;
+  // ESTIMATED counts (planner row-estimate via EXPLAIN, ~ms) instead of exact full
+  // scans. On a freshly churned cloud_titles an EXACT count of ~68k rows ran 80-100s and,
+  // polled repeatedly, piled up until Postgres refused new connections and logins 504'd
+  // (a real outage). An approximate % is fine for a progress bar.
+  const titlesBase = () => db.from("cloud_titles").select("id", { count: "estimated", head: true })
     .eq("user_id", userId).in("item_type", ["movie", "series"]).gt("variant_count", 0);
   const [totalRes, enrichedRes, searchState, revalState] = await Promise.all([
     titlesBase(),
@@ -155,7 +168,17 @@ async function getEnrichmentProgress(userId: string) {
   // worst case: never settle a user who has titles but zero enriched yet. (A fully
   // per-user settle signal needs a per-user enrichment cursor — tracked as a follow-up.)
   const settled = searchDone && revalDone && (total === 0 || enriched > 0);
-  return { total, enriched, percent, settled };
+  const result: EnrichmentProgress = { total, enriched, percent, settled };
+  enrichmentProgressCache.set(userId, { at: Date.now(), value: result });
+  if (enrichmentProgressCache.size > 512) {
+    let oldestKey: string | null = null;
+    let oldestAt = Infinity;
+    for (const [k, v] of enrichmentProgressCache) {
+      if (v.at < oldestAt) { oldestAt = v.at; oldestKey = k; }
+    }
+    if (oldestKey) enrichmentProgressCache.delete(oldestKey);
+  }
+  return result;
 }
 
 async function requireUserId(req: Request) {
