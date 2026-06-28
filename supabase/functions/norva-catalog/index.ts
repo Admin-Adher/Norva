@@ -180,6 +180,46 @@ async function requireDeviceUserId(token: string) {
   return data.user_id as string;
 }
 
+// Phase 2 dedup read flag (shared with norva-playback): when set to
+// "catalog_media_items", media reads resolve the provider-global catalogue.
+function mediaReadFromCatalog(): boolean {
+  return (Deno.env.get("NORVA_CATALOG_MEDIA_READ_SOURCE") || "").trim() === "catalog_media_items";
+}
+
+// Overlay a grid page's display + playback fields from catalog_media_items (the
+// provider-global catalogue, keyed by server_host). Fills only where the global
+// carries a value — never blanks a per-user field — so it is safe when the global
+// is empty or partial. Lets the per-user cloud_media_items later drop poster/
+// backdrop/metadata/playback_hint while the grid still renders them from global.
+async function applyMediaCatalogOverlay(items: Array<Record<string, any>>, sourceId: string, userId: string) {
+  if (!items.length) return;
+  const { data: src } = await db.from("cloud_sources").select("config_hint").eq("id", sourceId).eq("user_id", userId).maybeSingle();
+  const host = String((src as any)?.config_hint?.serverHost || "").trim();
+  if (!host) return;
+  const ids = [...new Set(items.map((row) => String(row.external_id || "")).filter(Boolean))];
+  if (!ids.length) return;
+  const byKey = new Map<string, Record<string, any>>();
+  for (let i = 0; i < ids.length; i += 500) {
+    const { data } = await (db as any)
+      .from("catalog_media_items")
+      .select("item_type,external_id,title,subtitle,poster_url,backdrop_url,metadata,playback_hint")
+      .eq("server_host", host)
+      .in("external_id", ids.slice(i, i + 500));
+    for (const g of (data ?? []) as Array<Record<string, any>>) byKey.set(`${g.item_type}:${g.external_id}`, g);
+  }
+  if (!byKey.size) return;
+  for (const it of items) {
+    const g = byKey.get(`${it.item_type}:${it.external_id}`);
+    if (!g) continue;
+    if (g.poster_url) it.poster_url = g.poster_url;
+    if (g.backdrop_url) it.backdrop_url = g.backdrop_url;
+    if (g.subtitle) it.subtitle = g.subtitle;
+    if (g.title && !String(it.title || "").trim()) it.title = g.title;
+    if (isRecord(g.metadata) && Object.keys(g.metadata).length) it.metadata = g.metadata;
+    if (isRecord(g.playback_hint) && Object.keys(g.playback_hint).length) it.playback_hint = g.playback_hint;
+  }
+}
+
 async function listMediaItems(url: URL, userId: string) {
   const sourceId = url.searchParams.get("sourceId");
   const itemType = url.searchParams.get("type");
@@ -214,6 +254,16 @@ async function listMediaItems(url: URL, userId: string) {
     (row as Record<string, unknown>).year = (row as Record<string, unknown>).release_year ?? null;
     return row;
   });
+
+  // Phase 2 dedup: when the read flag is on, overlay display + playback fields from
+  // the provider-global catalog_media_items so the grid serves them from the shared
+  // catalogue (letting the per-user copy later be thinned of those heavy fields).
+  // Only fills where global has a value, so a global miss / flag-off / empty global
+  // shows per-user data unchanged; mirror-verify proves these match today. The
+  // per-user query still drives membership, filtering, sort and pagination.
+  if (mediaReadFromCatalog() && sourceId) {
+    await applyMediaCatalogOverlay(items, sourceId, userId);
+  }
 
   await localizeMediaTitles(items, userId, lang, itemType);
   await attachMediaLanguages(items, userId);
@@ -252,8 +302,8 @@ async function localizeMediaTitles(items: Array<Record<string, any>>, userId: st
     const { data, error } = await q;
     if (error) return; // localization is best-effort; never fail the page over it
     for (const row of data ?? []) {
-      const id = stringOrNull((row as Record<string, unknown>).provider_tmdb_id);
-      const loc = stringOrNull((row as Record<string, unknown>).loc);
+      const id = stringOrNull((row as unknown as Record<string, unknown>).provider_tmdb_id);
+      const loc = stringOrNull((row as unknown as Record<string, unknown>).loc);
       if (id && loc) locByTmdb.set(id, loc);
     }
   }
