@@ -170,6 +170,54 @@ de lutter contre la course.
 
 ---
 
+## 3bis. Import instantané — réutilisation du cache cross-provider
+
+**Constat (mesuré le 2026-06-28)** : **~71 %** des titres d'un compte existent déjà
+chez un autre provider, **même ID TMDB** (toi 16 037 titres, ton frère 46 603,
+**11 458 communs**). Seuls ~14 % des lignes n'ont aucun ID TMDB (non-recoupables).
+L'identité partagée est l'**ID TMDB** — **pas** le stream_id du provider (propre à
+chaque provider). L'archi exploite déjà ça :
+- `catalog_titles` = cache global keyé `(item_type, provider_tmdb_id)`.
+- À l'import, `validateProviderTmdbIds` (`_shared/vod-title-projection.ts`)
+  **réutilise** la validation TMDB d'un autre user (titre / poster / synopsis i18n /
+  backdrop / métadonnées TMDB) → **0 appel TMDB**. `fill_user_audio_for_titles` fait
+  pareil pour l'audio.
+- Trigger `cloud_titles_mirror_catalog_upd` : **toute** écriture `cloud_titles`
+  (sync, **search-match**, revalidate) propage vers `catalog_titles` → réutilisable
+  par tous les users.
+
+**#1 — FAIT : découpler la réutilisation gratuite du plafond TMDB.** Le code
+plafonnait les *candidats* à `DEFAULT_TMDB_VALIDATE_LIMIT` (120) / batch **avant**
+l'étape de réutilisation → un import « ruisselait » 120 titres à la fois. Désormais
+la réutilisation (lecture DB gratuite) tourne sur **tout le batch** (`REUSE_SCAN_CAP`),
+et le plafond 120 ne s'applique **qu'aux vrais appels TMDB** (`toFetch.slice(0, limit)`).
+→ les ~71 % déjà connus se remplissent en **1 passe** au lieu de ~130. Additif,
+best-effort, réversible.
+
+**#2 — DÉJÀ EN PLACE.** Les ids résolus par **nom** (cron `search-match`) sont
+propagés à `catalog_titles` par le trigger ci-dessus → réutilisables cross-user (pas
+de re-match par user). Le ~14 % sans ID TMDB se réduit la nuit (search-match
+off-peak, A1). Au-delà = qualité des données provider (externe, rien à coder).
+
+**#3 — MÉCANISME EN PLACE.** Chaque import remplit `catalog_titles` (dual-write +
+trigger) → **auto-réchauffement** ; #1 l'accélère (1 passe). Pré-chauffage proactif
+massif = crawl global WS4, **différé** (sensibilité DB) — à lancer hors heures si un
+jour on veut pré-remplir les titres populaires avant les users.
+
+**#4 — read-cutover : reste GATÉ.** Servir la lecture depuis `catalog_titles` (+
+amincir `cloud_titles`) = gain **stockage**, pas vitesse (déjà donnée par la
+réutilisation). Gardé OFF jusqu'à overlap ≫1. **Monitor de bascule** (à lancer de
+temps en temps) :
+```sql
+select round(count(*)::numeric / nullif(count(distinct (item_type, provider_tmdb_id)),0), 2) as overlap
+from public.cloud_titles
+where provider_tmdb_id is not null and provider_tmdb_id <> '' and provider_tmdb_id !~ '^(tt)?0+$';
+-- aujourd'hui ≈ 1.22 ; poser NORVA_CATALOG_READ_SOURCE=catalog_titles sur norva-catalog
+-- quand overlap ≥ ~3-5 ET catalog_mirror_diff stable (cf. scaling-playbook.md étape 3).
+```
+
+---
+
 ## 4. 🚑 RUNBOOK — saturation DB (pool de connexions épuisé)
 
 > Symptôme vécu **deux fois**. Repérer vite, relâcher vite, **sans** le DDL qui a

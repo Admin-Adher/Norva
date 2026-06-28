@@ -41,6 +41,11 @@ type ProjectionOptions = {
 const encoder = new TextEncoder();
 const DEFAULT_VOD_INFO_LIMIT = 120;
 const DEFAULT_TMDB_VALIDATE_LIMIT = 120;
+// Cross-user catalog_titles reuse is a FREE DB read (no TMDB call), so it runs
+// over the WHOLE batch rather than the TMDB-fetch cap below. This constant only
+// bounds the reuse scan against a pathological oversized batch; real sync batches
+// are well under it, so in practice every already-known title is filled in one pass.
+const REUSE_SCAN_CAP = 4000;
 
 export async function refreshVodTitleProjection(options: ProjectionOptions) {
   const rows = options.rows.filter((row) =>
@@ -508,7 +513,10 @@ async function validateProviderTmdbIds(rows: ProjectionRow[], idsByExternalId: M
       title,
       year: extractYear(title, metadata.year ?? metadata.releaseYear ?? metadata.release_date),
     });
-    if (candidates.length >= limit) break;
+    // NOT capped at `limit` — `limit` rate-caps the TMDB *fetches* further down;
+    // the free catalog reuse should see the whole batch so all already-known
+    // titles fill this pass instead of trickling 120 at a time.
+    if (candidates.length >= REUSE_SCAN_CAP) break;
   }
 
   // Cross-user reuse: a title's TMDB validation (canonical title/year/i18n/poster) is keyed
@@ -554,6 +562,12 @@ async function validateProviderTmdbIds(rows: ProjectionRow[], idsByExternalId: M
     }
     toFetch = candidates.filter((c) => remaining.has(c.key));
   }
+
+  // Rate-cap ONLY the real TMDB fetches. The catalog reuse above was free and was
+  // applied to the WHOLE batch, so every already-known title is already filled;
+  // here we just bound the live TMDB calls for titles nobody has validated yet.
+  // The overflow is validated on a later pass (provider/TMDB budget unchanged).
+  if (toFetch.length > limit) toFetch = toFetch.slice(0, limit);
 
   if (!apiKey || !toFetch.length) return validations; // no key (or fully reused) → done
 
