@@ -25,9 +25,14 @@
   progresse la nuit, **zéro charge en journée**. Pool vérifié calme en journée
   (18 conns, 1 requête longue, finalize seul). Runbook plus bas si une saturation
   revient.
-- **« Optimisé au max ? » → non.** Le boot l'est, A1 enlève la charge de fond en
-  journée ; le levier suivant reste **structurel** : la **dédup provider-global**
-  (cf. `dedup-plan.md`) pour enlever super8k de la base partagée à la racine.
+- **A3 fait (perf gratuite)** : les 26 politiques RLS des tables chaudes réécrites
+  `auth.uid()` → `(SELECT auth.uid())` (évalué une fois/requête, pas par ligne).
+  Advisor 26 WARN → 0. **Compute : PAS à augmenter** — DB = 789 Mo / 8 Go.
+- **A2 mesuré, reste GATÉ** : overlap catalogue = **1.22** (≪ le seuil ≫1 visé) →
+  la bascule dédup n'a pas d'intérêt aujourd'hui ; flip = one-liner gardé OFF.
+- **« Optimisé au max ? » → boot + journée : oui ; structurel : non.** Le dernier
+  gros levier (dédup provider-global) est **prêt mais déclenché par l'overlap**,
+  pas par anticipation (cf. `scaling-playbook.md`).
 
 ---
 
@@ -127,25 +132,41 @@ de lutter contre la course.
    Reste de cette ligne : **finalize** super8k — laissé finir (89 %, pacé, ne
    sature pas seul) ; **revalidate** (jobid 13, `*/6h`) à passer off-peak si une
    charge de jour réapparaît.
-2. **Dédup provider-global (Phase 2).** super8k (272k items) sur une DB 8 Go
-   partagée est l'éléphant. Le cache global (`catalog_titles`) + le read-cutover
-   (cf. `scaling-playbook.md` étape 3, `dedup-plan.md`) divise stockage &
-   enrichissement par 10-100 → enlève la pression à la racine. **Flag prêt, OFF.**
-3. **Dimensionnement compute.** Si la saturation revient même backfills à l'arrêt,
-   la taille de l'instance Postgres (add-on compute Pro) est sous-dimensionnée pour
-   `fond + premier-plan` simultanés. Lever = right-size le compute.
+2. **Dédup provider-global (Phase 2) — mesuré le 2026-06-28, reste GATÉ.** super8k
+   (272k items) est l'éléphant, mais le read-cutover ne **déduplique** que quand
+   plusieurs users **se recoupent**. Mesure du jour : **overlap = 1.22**
+   (62 637 lignes / 51 179 titres distincts) — très en-dessous du seuil ≫1 visé.
+   À 1.22 la bascule économiserait ~18 % du stockage **titres** pour un risque réel
+   → **on ne flippe pas**. Le miroir `catalog_titles` a été vérifié : les écarts vs
+   `cloud_titles` sont du **bruit de libellé fournisseur** (suffixes d'année,
+   « (HD VF) », ponctuation), **pas** de la corruption — `catalog_titles` tient une
+   canonique souvent plus propre. Flip = one-liner `NORVA_CATALOG_READ_SOURCE`,
+   gardé OFF jusqu'à overlap ≫1 (cf. `scaling-playbook.md` étape 3).
+3. ✅/N-A **Dimensionnement compute — PAS nécessaire (mesuré).** Le pic « DB pleine »
+   (168 %) est **résolu** : DB = **789 Mo / 8 Go** (~10 %). Et post-A1 le pool est
+   calme. Le problème n'était jamais la **taille** mais la **charge** de fond, déjà
+   traitée par A1. → Ne **pas** payer de compute pour l'instant.
 
 ### Tier B — norva-cloud par-requête
-4. **Cacher l'auth/session.** Chaque lecture fait encore un `getUser()`
-   (round-trip GoTrue) + requêtes DB. `/boot` collapse le **nombre** d'appels mais
-   chaque section touche la DB. Cacher la résolution de session par token réduirait
-   le coût par requête.
-5. **Pooler (pgbouncer) transaction-mode.** L'épuisement de connexions suggère que
-   le mode/池 n'est pas optimal pour des isolats nombreux et courts. À auditer.
+4. ✅ **FAIT (A3) — RLS InitPlan.** Les 26 politiques RLS des tables chaudes
+   ré-évaluaient `auth.uid()` **par ligne** ; réécrites en `(SELECT auth.uid())` →
+   évalué **une fois** par requête (migration `20260628095500_rls_initplan_fix`).
+   Sémantiquement identique (accès inchangé), gain sur **chaque** lecture/écriture
+   authentifiée, max sur l'owner à fort volume (super8k). Advisor : 26 WARN → 0.
+5. **Cacher l'auth/session.** Chaque lecture fait encore un `getUser()` (round-trip
+   GoTrue) + requêtes DB. `/boot` collapse le **nombre** d'appels mais chaque
+   section touche la DB. Cacher la résolution de session par token réduirait le coût
+   par requête. (NB advisor : l'Auth/GoTrue est plafonné à 10 connexions fixes —
+   passer en allocation « pourcentage » si on monte l'instance un jour.)
+6. **Pooler (pgbouncer) transaction-mode.** L'épuisement de connexions suggère que
+   le mode/pool n'est pas optimal pour des isolats nombreux et courts. À auditer.
 
 ### Tier C — frontend (différé, pas le goulot actuel)
-6. Code-splitting, service worker, split CSS, minify/bundle. Aident le **premier
+7. Code-splitting, service worker, split CSS, minify/bundle. Aident le **premier
    paint** mais ne sont **pas** la cause des 504 (c'est la DB). À faire après Tier A.
+8. **Hygiène DB (INFO, optionnel)** : ~22 FK sans index couvrant + ~14 index
+   inutilisés (dont `catalog_titles_audio_languages_gin`, sorts `catalog_media_items`)
+   — à nettoyer si l'écriture devient un poste, sans urgence.
 
 ---
 
