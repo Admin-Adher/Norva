@@ -2705,6 +2705,32 @@ video::cue {
   color: var(--color-text-secondary);
 }
 
+/* Quiet "still adding the rest of your library" note: the catalogue is already
+   usable; the long-tail materialises in the background. Deliberately understated. */
+.source-backgrounding {
+  margin-top: var(--space-xs);
+  font-size: 0.72rem;
+  color: var(--color-text-muted);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.source-backgrounding-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--color-accent, #4f7df3);
+  flex: 0 0 auto;
+  animation: source-backgrounding-pulse 1.6s ease-in-out infinite;
+}
+@keyframes source-backgrounding-pulse {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .source-backgrounding-dot { animation: none; }
+}
+
 .source-health-badge {
   display: inline-flex;
   align-items: center;

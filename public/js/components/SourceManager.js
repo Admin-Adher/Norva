@@ -195,6 +195,10 @@ class SourceManager {
             const progressButton = health.state === 'syncing'
                 ? `<button class="btn btn-sm btn-secondary source-progress-btn" data-action="progress" title="View catalog import progress">Progress</button>`
                 : '';
+            // Usable-but-still-topping-up: onboarding is "done" (catalogue navigable) yet the
+            // remaining VOD long-tail is still materialising in the background. Surface it as
+            // a quiet line here in Settings only — never as a blocking onboarding bar.
+            const backgrounding = this.sourceSyncState(sourceView).backgrounding === true;
             return `
       <div class="source-item ${source.enabled ? '' : 'disabled'} ${health.needsAttention ? 'needs-attention' : ''}" data-id="${this.escapeHtml(source.id)}">
         <span class="source-icon">${icons[type]}</span>
@@ -205,6 +209,7 @@ class SourceManager {
           </div>
           <div class="source-url">${this.escapeHtml(source.url || 'Managed by Norva Cloud')}</div>
           ${health.message && health.state !== 'ready' ? `<div class="source-health-message">${this.escapeHtml(health.message)}</div>` : ''}
+          ${backgrounding ? `<div class="source-backgrounding"><span class="source-backgrounding-dot" aria-hidden="true"></span>Adding the rest of your library in the background…</div>` : ''}
         </div>
         <div class="source-actions">
           ${progressButton}
@@ -643,6 +648,11 @@ class SourceManager {
 
         if (failedStates.has(status) || failedStates.has(progressStatus)) return { phase: 'error', counts, progress };
         if (readyStates.has(status) || readyStates.has(progressStatus)) return { phase: 'ready', counts, progress };
+        // Usable threshold reached (Live + first block of movies/series): the catalogue is
+        // navigable now and the rest is a background top-up. Treat as ready for the modal /
+        // onboarding gate, but flag `backgrounding` so Settings can show a quiet
+        // "still adding the rest of your library" note while the long-tail finishes.
+        if (progress.usable === true && !readyStates.has(status)) return { phase: 'ready', counts, progress, backgrounding: true };
         if (syncingStates.has(status) || syncingStates.has(progressStatus)) return { phase: 'syncing', counts, progress };
         if (counts.total > 0) return { phase: 'ready', counts, progress };
         return { phase: 'syncing', counts, progress };
