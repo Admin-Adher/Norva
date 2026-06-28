@@ -8,6 +8,49 @@
 (function () {
     'use strict';
 
+    // --- Refresh tracer --------------------------------------------------------
+    // Always-on (disable with localStorage.norva_trace="0") timeline so a page
+    // refresh reads end-to-end in the console: every cloud/catalog network round-trip,
+    // cache HIT/MISS, the auth handshake, and the boot phases — each stamped with ms
+    // since navigation start. The headline it makes obvious: a HARD refresh re-pays
+    // the network for everything because the client caches below are in-memory (a
+    // `new Map()`, wiped on reload), not persisted — so "cached in the DB" speeds the
+    // server response but the browser still does the full round-trips each reload.
+    const NorvaTrace = (function () {
+        let enabled = true;
+        try { enabled = localStorage.getItem('norva_trace') !== '0'; } catch (_) { /* private mode */ }
+        const t = () => (typeof performance !== 'undefined' && performance.now ? performance.now() : 0);
+        const marks = [];
+        const fmt = (ms) => '+' + (ms < 1000 ? Math.round(ms) + 'ms' : (ms / 1000).toFixed(2) + 's');
+        function log(label, detail) {
+            const ms = t();
+            marks.push({ ms, label, detail });
+            if (!enabled) return;
+            const d = detail == null || detail === '' ? '' : ' — ' + (typeof detail === 'object' ? JSON.stringify(detail) : detail);
+            try {
+                console.log('%c[Norva ' + fmt(ms) + ']%c ' + label + '%c' + d,
+                    'color:#6d8bff;font-weight:700', 'color:inherit', 'color:#8a93a6');
+            } catch (_) { /* console unavailable */ }
+        }
+        function time(label, startDetail) {
+            const s = t();
+            if (startDetail !== false) log('→ ' + label, startDetail);
+            return (detail) => log('← ' + label, '(' + Math.round(t() - s) + 'ms)' + (detail ? ' ' + detail : ''));
+        }
+        function summary() {
+            if (!marks.length) return;
+            try {
+                console.groupCollapsed('%c[Norva] refresh timeline — ' + marks.length + ' events over ' + fmt(t()).slice(1),
+                    'color:#6d8bff;font-weight:700');
+                console.table(marks.map((m) => ({ at: fmt(m.ms), event: m.label, detail: m.detail == null ? '' : String(typeof m.detail === 'object' ? JSON.stringify(m.detail) : m.detail) })));
+                console.groupEnd();
+            } catch (_) { /* noop */ }
+        }
+        if (enabled) { try { console.log('%c[Norva] refresh trace ON — NorvaTrace.summary() for the table; localStorage.norva_trace="0" then reload to silence.', 'color:#8a93a6'); } catch (_) { /* noop */ } }
+        return { log, time, summary, marks, get enabled() { return enabled; } };
+    })();
+    if (typeof window !== 'undefined') window.NorvaTrace = window.NorvaTrace || NorvaTrace;
+
     const DEFAULT_API_URL = 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-cloud';
     const DEFAULT_SOURCE_SYNC_URL = 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-source-sync';
     const DEFAULT_CATALOG_URL = 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-catalog';
@@ -404,8 +447,9 @@
     const _getInFlight = new Map();   // key -> promise
     function cachedGet(cacheKey, ttlMs, fetchFn) {
         const hit = _getCache.get(cacheKey);
-        if (hit && (Date.now() - hit.at) < ttlMs) return Promise.resolve(cloneJson(hit.data));
-        if (_getInFlight.has(cacheKey)) return _getInFlight.get(cacheKey).then(cloneJson);
+        if (hit && (Date.now() - hit.at) < ttlMs) { NorvaTrace.log('cache HIT (in-memory)', cacheKey + ' · age ' + Math.round((Date.now() - hit.at) / 1000) + 's'); return Promise.resolve(cloneJson(hit.data)); }
+        if (_getInFlight.has(cacheKey)) { NorvaTrace.log('cache JOIN in-flight', cacheKey); return _getInFlight.get(cacheKey).then(cloneJson); }
+        NorvaTrace.log('cache MISS → network', cacheKey);
         const p = Promise.resolve(fetchFn())
             .then((data) => { _getCache.set(cacheKey, { at: Date.now(), data }); return data; })
             .finally(() => { _getInFlight.delete(cacheKey); });
@@ -444,8 +488,9 @@
     // dependency.
     let _bootStarted = false;
     function boot() {
-        if (_bootStarted) return Promise.resolve(null);
+        if (_bootStarted) { NorvaTrace.log('boot() skipped — already started this session'); return Promise.resolve(null); }
         _bootStarted = true;
+        const _bootDone = NorvaTrace.time('boot() — 1 call seeds sources+entitlements+profiles+profile+trial');
         const p = request('GET', '/boot');
         const seedSection = (cacheKey, pick, individualFetch) => {
             if (_getInFlight.has(cacheKey)) return; // a getter already owns this fetch
@@ -467,8 +512,9 @@
             if (bundle && bundle.trialEligibility != null) {
                 _getCache.set('trialEligibility', { at: Date.now(), data: bundle.trialEligibility });
             }
+            _bootDone(bundle ? 'bundle received' : 'null → sections fall back to individual fetches');
             return bundle;
-        }).catch(() => null);
+        }).catch(() => { _bootDone('failed → sections fall back'); return null; });
     }
 
     // Active profile (Netflix-style "who's watching"). Stored per device and sent
@@ -628,6 +674,9 @@
         const activeProfileId = getActiveProfileId();
         if (activeProfileId) headers['x-norva-profile-id'] = activeProfileId;
 
+        const _trLabel = method + ' ' + String(path).split('?')[0];
+        const _trT0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : 0;
+        NorvaTrace.log('net → ' + _trLabel);
         const send = () => fetch(`${baseUrl}${path}`, {
             method,
             headers,
@@ -635,12 +684,14 @@
         });
 
         let response = await send();
+        let _trRefreshed = false;
 
         if (response.status === 401 && usingUserToken && token) {
             const fresh = await refreshAccessToken();
             if (fresh && fresh !== token) {
                 token = fresh;
                 headers.Authorization = `Bearer ${token}`;
+                _trRefreshed = true;
                 response = await send();
             }
         }
@@ -649,6 +700,8 @@
         const payload = contentType.includes('application/json')
             ? await response.json().catch(() => ({}))
             : { error: await response.text().catch(() => '') };
+
+        NorvaTrace.log('net ← ' + _trLabel, response.status + ' (' + Math.round(((typeof performance !== 'undefined' && performance.now) ? performance.now() : 0) - _trT0) + 'ms)' + (_trRefreshed ? ' [after 401→refresh]' : ''));
 
         if (!response.ok) {
             const baseMessage = payload.error || payload.message || `Norva responded with ${response.status}`;

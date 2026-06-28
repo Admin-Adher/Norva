@@ -118,6 +118,7 @@
         let session = getSession();
         if (!session) return '';
         if (session.expires_at && session.expires_at - 60 <= Math.floor(Date.now() / 1000)) {
+            window.NorvaTrace?.log?.('auth token near expiry → refreshSession (network POST /token)');
             session = await refreshSession().catch(() => null);
         }
         if (session?.access_token && window.NorvaCloud) window.NorvaCloud.setToken(session.access_token);
@@ -125,8 +126,9 @@
     }
 
     async function getUser() {
+        const _done = window.NorvaTrace?.time?.('auth getUser — token check + GoTrue /auth/v1/user');
         const token = await getAccessToken();
-        if (!token) return null;
+        if (!token) { if (_done) _done('no session token'); return null; }
         const user = await request('/auth/v1/user', { token }).catch(async (error) => {
             if (error.status === 401) {
                 const refreshed = await refreshSession().catch(() => null);
@@ -137,6 +139,7 @@
 
         const session = getSession();
         if (session) setSession({ ...session, user });
+        if (_done) _done('ok');
         return user;
     }
 

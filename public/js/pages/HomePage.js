@@ -35,6 +35,14 @@ class HomePage {
     }
 
     async show() {
+        const _homeDone = window.NorvaTrace?.time?.('HomePage.show() — home rails');
+        const _firstPaintSummary = () => {
+            // Print the whole refresh timeline once, at the first Home paint — not on
+            // every in-app navigation back to Home (that would spam the console).
+            if (window.__norvaSummaryPrinted) return;
+            window.__norvaSummaryPrinted = true;
+            window.NorvaTrace?.summary?.();
+        };
         if (!document.getElementById('home-content')) {
             this.renderLayout();
         } else {
@@ -48,10 +56,14 @@ class HomePage {
 
         if (this.lastLoadedAt && Date.now() - this.lastLoadedAt < this.dashboardTtlMs) {
             this.updateScrollArrows();
+            if (_homeDone) _homeDone('served from warm in-memory DOM (no fetch)');
+            _firstPaintSummary();
             return;
         }
 
         await this.loadDashboardData();
+        if (_homeDone) _homeDone('rails fetched + rendered');
+        _firstPaintSummary();
     }
 
     hide() {
