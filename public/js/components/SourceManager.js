@@ -805,25 +805,35 @@ class SourceManager {
             }
         };
 
-        let response = await finalize({ phase: 'live', limit: initialBatchLimit });
-        await refreshAndRender();
-
-        let phase = response?.nextPhase || 'titles';
-        let offset = Number(response?.nextOffset ?? 0) || 0;
+        // Resume from the server's persisted finalize cursor so we cooperate with the
+        // hands-off background driver (and its keyset titles walk) instead of restarting
+        // the whole finalize at phase=live/offset=0 — which would re-materialise the live
+        // catalogue and stamp the progress bar back down to its early-phase percent while
+        // the background chain is already deep into building titles.
+        const initial = await refreshAndRender();
+        const cursor = (initial?.configHint || initial?.config_hint || {}).finalizeCursor || {};
+        let phase = typeof cursor.phase === 'string' && cursor.phase ? cursor.phase : 'live';
+        let offset = Number(cursor.offset ?? 0) || 0;
+        let afterId = typeof cursor.afterId === 'string' ? cursor.afterId : '';
         let safety = 0;
-        while (this.catalogPreparationToken === token && phase && phase !== 'complete' && safety < 160) {
+        while (this.catalogPreparationToken === token && phase && phase !== 'complete' && safety < 320) {
             safety += 1;
-            response = await finalize({
+            const response = await finalize({
                 phase,
                 offset,
+                afterId,
                 limit: initialBatchLimit
             });
             await refreshAndRender();
             const nextPhase = response?.nextPhase || 'complete';
             const nextOffset = Number(response?.nextOffset ?? 0) || 0;
-            if (nextPhase === phase && nextOffset <= offset && !response?.done) break;
+            const nextAfterId = typeof response?.nextAfterId === 'string' ? response.nextAfterId : afterId;
+            // Stall guard: stop only if nothing advanced this batch (same phase, offset not
+            // past, keyset cursor unmoved, not flagged done) — otherwise keep walking.
+            if (nextPhase === phase && nextOffset <= offset && nextAfterId === afterId && !response?.done) break;
             phase = nextPhase;
             offset = nextOffset;
+            afterId = nextAfterId;
         }
 
         if (this.catalogPreparationToken !== token) return;
