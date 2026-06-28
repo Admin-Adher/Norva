@@ -476,7 +476,13 @@ class SeriesPage {
         this.hideDetails();
 
         const summary = await this.app?.refreshSourceHealth?.();
-        if (this.app?.isCatalogReady && !this.app.isCatalogReady(summary || undefined)) {
+        // Show the grid as soon as SERIES are available (even mid-sync), not only when
+        // the whole catalogue is "ready" — Live TV already does this. Falls back to the
+        // ready check if the per-category helper isn't present.
+        const seriesLocked = this.app?.catalogCategoryAvailable
+            ? !this.app.catalogCategoryAvailable('series', summary || undefined)
+            : (this.app?.isCatalogReady && !this.app.isCatalogReady(summary || undefined));
+        if (seriesLocked) {
             this.renderCatalogLocked();
             return;
         }
