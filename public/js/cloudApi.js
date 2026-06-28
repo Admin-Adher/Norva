@@ -420,8 +420,56 @@
     const SOURCES_TTL_MS = 30 * 1000;
     const FAVORITES_TTL_MS = 30 * 1000;
     const HISTORY_TTL_MS = 20 * 1000;
+    // Boot reads. Entitlements stays short (a purchase must reflect quickly; the
+    // in-memory cache is dropped on every full reload anyway, so the purchase
+    // flow's return-to-app always re-fetches). Profiles/profile change rarely and
+    // are invalidated the moment they're mutated.
+    const ENTITLEMENTS_TTL_MS = 30 * 1000;
+    const PROFILES_TTL_MS = 60 * 1000;
+    const PROFILE_TTL_MS = 60 * 1000;
     function invalidateSourcesCache() { invalidateCache('sources'); }
     function listSourcesCached() { return cachedGet('sources', SOURCES_TTL_MS, () => request('GET', '/sources')); }
+
+    // One-shot cold-start aggregation. A fresh load otherwise fans out into ~7
+    // separate norva-cloud calls (profile, profiles, entitlements, sources,
+    // trial, …), each paying its own isolate cold-start + auth — the dominant
+    // cause of slow first paint. boot() answers them from ONE /boot call and
+    // seeds the per-section caches, so the individual getters fired during
+    // startup resolve from cache instead of hitting the network.
+    //
+    // Each section is pre-registered as in-flight BEFORE /boot resolves, so a
+    // getter called mid-boot dedups onto this one request. If /boot fails, or a
+    // section comes back null (transient hiccup), that section transparently
+    // falls back to its individual fetch — boot() is a pure speedup, never a
+    // dependency.
+    let _bootStarted = false;
+    function boot() {
+        if (_bootStarted) return Promise.resolve(null);
+        _bootStarted = true;
+        const p = request('GET', '/boot');
+        const seedSection = (cacheKey, pick, individualFetch) => {
+            if (_getInFlight.has(cacheKey)) return; // a getter already owns this fetch
+            const sp = p.then((bundle) => (bundle ? pick(bundle) : null), () => null)
+                .then(async (value) => {
+                    if (value != null) { _getCache.set(cacheKey, { at: Date.now(), data: value }); return value; }
+                    const fresh = await individualFetch();
+                    _getCache.set(cacheKey, { at: Date.now(), data: fresh });
+                    return fresh;
+                })
+                .finally(() => { if (_getInFlight.get(cacheKey) === sp) _getInFlight.delete(cacheKey); });
+            _getInFlight.set(cacheKey, sp);
+        };
+        seedSection('sources', (b) => b.sources, () => request('GET', '/sources'));
+        seedSection('entitlements', (b) => b.entitlements, () => request('GET', '/entitlements'));
+        seedSection('profiles', (b) => b.profiles, () => request('GET', '/profiles'));
+        seedSection('profile', (b) => b.profile, () => request('GET', '/profile'));
+        return p.then((bundle) => {
+            if (bundle && bundle.trialEligibility != null) {
+                _getCache.set('trialEligibility', { at: Date.now(), data: bundle.trialEligibility });
+            }
+            return bundle;
+        }).catch(() => null);
+    }
 
     // Active profile (Netflix-style "who's watching"). Stored per device and sent
     // on every cloud call as x-norva-profile-id so favorites / history / continue
@@ -642,13 +690,22 @@
             try { catalogRequest('/media-items', { type: 'movie', limit: 1 }).catch(() => {}); } catch (_) { /* noop */ }
         },
 
+        // Aggregated cold-start fetch (see boot() above): one /boot call seeds the
+        // profile / profiles / entitlements / sources caches so the launch
+        // sequence makes a single norva-cloud round-trip instead of ~7.
+        boot,
+
         profile: {
-            get: async () => rememberProfileRegion(await request('GET', '/profile')),
-            save: async (profile) => rememberProfileRegion(await request('PUT', '/profile', profile))
+            get: () => cachedGet('profile', PROFILE_TTL_MS, () => request('GET', '/profile')).then(rememberProfileRegion),
+            save: async (profile) => {
+                const saved = rememberProfileRegion(await request('PUT', '/profile', profile));
+                invalidateCache('profile');
+                return saved;
+            }
         },
 
         entitlements: {
-            get: () => request('GET', '/entitlements'),
+            get: () => cachedGet('entitlements', ENTITLEMENTS_TTL_MS, () => request('GET', '/entitlements')),
             device: () => request('GET', '/device/entitlements', null, { token: getDeviceToken() }),
             // Conversion signal (observe-mode scaffold): record that the user
             // reached for a premium-gated feature. Best-effort, never throws.
@@ -680,14 +737,14 @@
             // Account-level trial eligibility (one trial per account across every
             // rail — keyed to trial_consumed_at). Lets the paywall show "Start
             // free trial" vs "Subscribe".
-            trialEligibility: () => request('GET', '/billing/trial-eligibility')
+            trialEligibility: () => cachedGet('trialEligibility', PROFILES_TTL_MS, () => request('GET', '/billing/trial-eligibility'))
         },
 
         profiles: {
-            list: () => request('GET', '/profiles'),
-            create: (profile) => request('POST', '/profiles', profile),
-            update: (id, patch) => request('PATCH', `/profiles/${encodeURIComponent(id)}`, patch),
-            remove: (id) => request('DELETE', `/profiles/${encodeURIComponent(id)}`),
+            list: () => cachedGet('profiles', PROFILES_TTL_MS, () => request('GET', '/profiles')),
+            create: (profile) => request('POST', '/profiles', profile).then((r) => { invalidateCache('profiles'); return r; }),
+            update: (id, patch) => request('PATCH', `/profiles/${encodeURIComponent(id)}`, patch).then((r) => { invalidateCache('profiles'); return r; }),
+            remove: (id) => request('DELETE', `/profiles/${encodeURIComponent(id)}`).then((r) => { invalidateCache('profiles'); return r; }),
             getActiveId: getActiveProfileId,
             setActiveId: setActiveProfileId,
             avatarUrl: (avatarId) => '/img/avatars/' + encodeURIComponent(String(avatarId || 'avatar-01')) + '.png',
