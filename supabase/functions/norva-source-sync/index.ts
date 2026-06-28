@@ -1126,9 +1126,21 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
       // Keyset: batchLimit (500) is below PostgREST's 1000-row cap, so a short page is
       // genuinely the last one — done when the batch is empty or under the limit.
       const done = rows.length === 0 || rows.length < batchLimit;
+      // Progress = titles BUILT / total, not the keyset walk offset. cloud_title_variants
+      // is 1:1 with projected movie/series items and only ever grows during finalize
+      // (upserts, never deletes), so built/total is genuinely monotone — it survives a
+      // cursor reset or cross-isolate resume that restarts the walk offset from 0, which
+      // would otherwise stall the bar (or appear to go backward). Best-effort: a slow/timed
+      // out count must never break the batch — fall back to the walk offset.
+      let builtVod = nextOffset;
+      try {
+        builtVod = Math.max(nextOffset, await countBuiltVodTitles(sourceId, db));
+      } catch (countError) {
+        console.warn("[norva-source-sync] built-title count skipped:", countError instanceof Error ? countError.message : countError);
+      }
       await reportProgress({
         stage: done ? "finalizing" : "building_titles",
-        percent: done ? 96 : titleFinalizePercent(nextOffset, totalVod),
+        percent: done ? 99 : titleFinalizePercent(builtVod, totalVod),
         steps: { finalize: { status: "running" } },
       });
       return {
@@ -1233,7 +1245,7 @@ function finalizePhasePercent(phase: string, offset: number, counts: { live: num
   if (phase === "live_channels") return liveFinalizePercent("live_channels", offset, counts.live);
   if (phase === "live_variants") return liveFinalizePercent("live_variants", offset, counts.live);
   if (phase === "titles") return titleFinalizePercent(offset, counts.movies + counts.series);
-  if (phase === "complete") return 96;
+  if (phase === "complete") return 99;
   return 74;
 }
 
@@ -1243,10 +1255,14 @@ function liveFinalizePercent(phase: string, offset: number, total: number) {
   return Math.max(80, Math.min(86, Math.round(80 + ratio * 6)));
 }
 
-function titleFinalizePercent(offset: number, totalVod: number) {
-  if (!totalVod) return 96;
-  const ratio = Math.max(0, Math.min(1, offset / totalVod));
-  return Math.max(86, Math.min(95, Math.round(86 + ratio * 9)));
+function titleFinalizePercent(built: number, totalVod: number) {
+  if (!totalVod) return 99;
+  const ratio = Math.max(0, Math.min(1, built / totalVod));
+  // Wide band (86→99): on a huge catalogue the titles phase is by far the longest part
+  // of the finalize (hundreds of thousands of items), so it gets the largest share of
+  // the bar. A narrow band made the percent appear frozen for the whole phase. The
+  // "complete" phase then lands it on 100 via completedSyncProgress.
+  return Math.max(86, Math.min(99, Math.round(86 + ratio * 13)));
 }
 
 async function countRowsByType(sourceId: string, userId: string, db: SupabaseClient, itemType: string) {
@@ -1257,6 +1273,20 @@ async function countRowsByType(sourceId: string, userId: string, db: SupabaseCli
     .eq("user_id", userId)
     .eq("item_type", itemType);
   if (error) throwDb(error, `Unable to count ${itemType} catalog items`);
+  return count ?? 0;
+}
+
+// Cumulative count of VOD title entries already materialised for this source. Used as
+// the monotone numerator for the titles-phase progress bar (built / total). Scoped by
+// source_id alone — a source has exactly one owner, and the unique index
+// (source_id, item_type, external_id) makes this an index-only range count even at
+// hundreds of thousands of rows, well within the 8s statement budget.
+async function countBuiltVodTitles(sourceId: string, db: SupabaseClient) {
+  const { count, error } = await db
+    .from("cloud_title_variants")
+    .select("id", { count: "exact", head: true })
+    .eq("source_id", sourceId);
+  if (error) throwDb(error, "Unable to count built title variants");
   return count ?? 0;
 }
 
