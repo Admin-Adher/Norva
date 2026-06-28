@@ -273,8 +273,19 @@ export async function refreshVodTitleProjection(options: ProjectionOptions) {
   // browse page can sort/paginate by year server-side. The BEFORE trigger already
   // set a title-parsed year on insert; this fills the TMDB-matched ones. Best
   // effort — a sync must never fail over a sort denormalization.
+  // SCOPE TO THIS BATCH'S ROWS (m.id = any(ids)) — the whole-source variant joined all
+  // ~216k media items to cloud_titles on a JSONB-extracted field every batch (no index),
+  // an O(n)-per-batch / O(n²)-total scan that blew the 8s statement timeout on a huge
+  // catalogue and froze the finalize. Per-batch the update is a PK lookup over ~300 ids.
+  const yearItemIds = rows
+    .map((row) => row.id)
+    .filter((id): id is string => typeof id === "string" && id.length > 0);
   try {
-    await options.db.rpc("propagate_media_item_years", { p_user: options.userId, p_source: options.sourceId });
+    await options.db.rpc("propagate_media_item_years", {
+      p_user: options.userId,
+      p_source: options.sourceId,
+      p_item_ids: yearItemIds.length ? yearItemIds : null,
+    });
   } catch (error) {
     console.warn("[vod-title-projection] year propagation skipped:", error instanceof Error ? error.message : error);
   }
