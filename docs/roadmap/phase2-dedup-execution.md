@@ -75,17 +75,40 @@
       lecture per-user inchangée). Comme le mirror-verify prouve `playback_hint` identique,
       flag-ON est **prouvé équivalent**.
 
+### Lecture grille flag-gated + amincissement — construits + testés (live, flag OFF)
+- [x] **Lecture grille flag-gated** : `listMediaItems` (`norva-catalog`) **superpose** poster/
+      backdrop/subtitle/metadata/playback_hint depuis `catalog_media_items` (`applyMediaCatalogOverlay`,
+      par `server_host`) quand `NORVA_CATALOG_MEDIA_READ_SOURCE=catalog_media_items`. La requête
+      per-user garde membership/tri/pagination ; l'overlay ne remplit que si le global a une valeur
+      (miss/flag-off/global vide ⇒ données per-user inchangées). `deno check` OK, **déployé** (défaut
+      OFF). _Approche overlay (comme Phase 1) plutôt que réécrire la requête = sûr sur ce chemin._
+- [x] **Amincissement per-user** : `thin_source_media_items(p_source_id)` vide poster/backdrop/
+      subtitle/metadata/playback_hint des lignes `cloud_media_items` **uniquement là où le global les
+      détient** (l'overlay refill toujours) ; garde title + colonnes de tri + membership. **Validé en
+      transaction rollback** : 40 585 lignes, **100% des champs récupérables du global** (meta 40585/
+      40585, playback_hint 40585/40585), per-user lourd **282 B → ~10 B/ligne**, puis ROLLBACK (rien
+      persisté). Migration `20260627200000`. **GATÉ SUR L'ÉCHELLE — pas exécuté à 1 user** (à 1 owner,
+      global + per-user aminci coûte PLUS qu'une ligne per-user pleine ; le gain n'apparaît qu'à 2+
+      users même provider). Un-thin = refill depuis le global (SQL ci-dessous).
+
+```sql
+-- un-thin (réversibilité) : refill les champs amincis depuis le global
+update cloud_media_items m set
+  poster_url = coalesce(nullif(m.poster_url,''), g.poster_url),
+  backdrop_url = coalesce(nullif(m.backdrop_url,''), g.backdrop_url),
+  metadata = case when m.metadata='{}'::jsonb then g.metadata else m.metadata end,
+  playback_hint = case when m.playback_hint='{}'::jsonb then g.playback_hint else m.playback_hint end
+from catalog_media_items g
+where g.server_host=(select config_hint->>'serverHost' from cloud_sources where id=m.source_id)
+  and g.item_type=m.item_type and g.external_id=m.external_id and m.source_id='<source>';
+```
+
 ---
 
 ## ⏳ RESTE À FAIRE (Phase 2, multi-session, additif + réversible)
 
 Ordre conseillé. Tout reste **derrière un flag par défaut OFF** ⇒ zéro impact tant que non basculé.
-- [ ] **Lecture grille/live flag-gated** : `listMediaItems` + rails live lisent le global
-      (overlay), filtrage/état restent per-user.
-- [ ] **Amincir le per-user** : une fois les reads stables sur le global, réduire
-      `cloud_media_items` / `cloud_live_*` / `cloud_title_variants` à un **lien d'appartenance**
-      (`user_id, source_id, external_id, available`) + `VACUUM FULL`. **C'est ici que le gain
-      stockage se matérialise.**
+- [ ] **Lecture live flag-gated** : rails/grille live lisent `catalog_live_*` (même overlay), état per-user.
 - [ ] **Test de dédup réel** : ré-importer super8k (user A) **dans le schéma global** + ajouter
       un **2ᵉ user même provider** → vérifier `dup_factor ≈ 2` côté per-user mais **+0 stockage
       global** (le vrai test « des milliers d'users d'un provider connu »).
