@@ -18,7 +18,7 @@
             severity: 1,
             label: 'Checking',
             title: 'Preparing your TV service',
-            message: 'Norva is importing channels, movies and series. This can take a few minutes.',
+            message: 'Norva is importing your channels, movies and series. A large library can take a while — you can start watching as titles appear.',
             action: 'View service'
         },
         ready: {
@@ -189,7 +189,19 @@
                 state = 'syncing';
             }
         } else if (error) {
-            state = classifyError(error, rawStatus);
+            const errorState = classifyError(error, rawStatus);
+            // A background re-sync that hits a TRANSIENT provider error (timeout,
+            // unreachable, vague degraded) must not downgrade an already-built
+            // catalog: the last import is still fully browsable. Keep it
+            // ready+refreshing and let the watchdog retry silently. Only a hard
+            // auth/expiry verdict (the user must act) still surfaces. Initial
+            // imports (no completed catalog yet) surface every error as before.
+            if (hasCompletedCatalog(source, status) && errorState !== 'auth_failed' && errorState !== 'expired') {
+                state = 'ready';
+                refreshing = true;
+            } else {
+                state = errorState;
+            }
         } else if (readyStates.has(rawStatus) || readyStates.has(progressStatus) || lastSync) {
             state = 'ready';
         } else if (rawStatus === 'idle' || rawStatus === 'new') {

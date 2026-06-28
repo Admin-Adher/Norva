@@ -391,6 +391,7 @@ async function route(
           phase: stringOr(body.phase ?? url.searchParams.get("phase"), "live"),
           offset: boundedInt(body.offset ?? url.searchParams.get("offset"), 0, 0, 1_000_000),
           limit: boundedInt(body.limit ?? url.searchParams.get("limit"), 1000, 1, 2000),
+          afterId: stringOr(body.afterId ?? url.searchParams.get("afterId"), ""),
         }),
       };
     }
@@ -1740,6 +1741,7 @@ type FinalizeCloudSourceOptions = {
   phase: string;
   offset: number;
   limit: number;
+  afterId?: string;
 };
 
 async function finalizeCloudSource(sourceId: string, userId: string, db: SupabaseClient, options: FinalizeCloudSourceOptions) {
@@ -1758,6 +1760,7 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
   const phase = normalizeFinalizePhase(options.phase);
   const batchLimit = Math.max(1, Math.min(2000, options.limit || 1000));
   const batchOffset = Math.max(0, options.offset || 0);
+  const batchAfterId = stringOr(options.afterId, "");
   const counts = await countSourceItems(sourceId, userId, db, existingProgress);
   let progress: JsonRecord = compactRecord({
     ...existingProgress,
@@ -1863,7 +1866,7 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
       const totalVod = counts.movies + counts.series;
       const rows = await loadSourceItems(sourceId, userId, db, {
         itemTypes: ["movie", "series"],
-        offset: batchOffset,
+        afterId: batchAfterId,
         limit: batchLimit,
       });
       const sourceType = stringOr(source.source_type, "");
@@ -1889,13 +1892,15 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
         tmdbValidateLimit: boundedInt(Deno.env.get("NORVA_TMDB_VALIDATE_FINALIZE_LIMIT"), 0, 0, 1000),
       });
       const nextOffset = Math.min(totalVod, batchOffset + rows.length);
-      // Done only when the catalogue is exhausted — NOT when a page is short of
-      // batchLimit (PostgREST caps reads at 1000 rows, so a full page can be
-      // < batchLimit while plenty of VOD remains).
-      const done = rows.length === 0 || nextOffset >= totalVod;
+      const nextAfterId = rows.length ? String((rows[rows.length - 1] as { id?: unknown }).id ?? batchAfterId) : batchAfterId;
+      // Keyset walk identical to norva-source-sync (advance by id), so a finalize
+      // cursor handed off between the engines stays consistent and a keyset
+      // position is never re-applied as a raw offset. batchLimit (<=1000 here) is
+      // at/under the PostgREST page cap, so a short page is genuinely the last one.
+      const done = rows.length === 0 || rows.length < batchLimit;
       await reportProgress({
         stage: done ? "finalizing" : "building_titles",
-        percent: done ? 96 : titleFinalizePercent(nextOffset, totalVod),
+        percent: done ? 99 : titleFinalizePercent(nextOffset, totalVod),
         steps: { finalize: { status: "running" } },
       });
       return {
@@ -1904,6 +1909,7 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
         phase: "titles",
         nextPhase: done ? "complete" : "titles",
         nextOffset,
+        nextAfterId,
         limit: batchLimit,
         totalVod,
         done,
@@ -1913,6 +1919,16 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
     }
 
     if (phase !== "complete") throw new HttpError(400, "Invalid catalog finalization phase");
+
+    // Safety net (mirrors norva-source-sync): a client-driven titles phase can stop
+    // early and leave verified titles without playable variants (they vanish from
+    // genre rails). Heal them before marking ready, so this fallback engine never
+    // declares a partial catalog "ready" with missing variants.
+    try {
+      await db.rpc("heal_cloud_title_variants", { p_user_id: userId, p_source_id: sourceId });
+    } catch (healError) {
+      console.warn("[norva-cloud] variant heal failed:", healError instanceof Error ? healError.message : healError);
+    }
 
     const syncedAt = new Date().toISOString();
     const { error: updateError } = await db
@@ -1982,7 +1998,7 @@ function finalizePhasePercent(phase: string, offset: number, counts: { live: num
   if (phase === "live_channels") return liveFinalizePercent("live_channels", offset, counts.live);
   if (phase === "live_variants") return liveFinalizePercent("live_variants", offset, counts.live);
   if (phase === "titles") return titleFinalizePercent(offset, counts.movies + counts.series);
-  if (phase === "complete") return 96;
+  if (phase === "complete") return 99;
   return 74;
 }
 
@@ -1993,9 +2009,11 @@ function liveFinalizePercent(phase: string, offset: number, total: number) {
 }
 
 function titleFinalizePercent(offset: number, totalVod: number) {
-  if (!totalVod) return 96;
+  // Band aligned with norva-source-sync (86 -> 99) so the same physical progress
+  // shows the same % whichever engine drives finalize.
+  if (!totalVod) return 99;
   const ratio = Math.max(0, Math.min(1, offset / totalVod));
-  return Math.max(86, Math.min(95, Math.round(86 + ratio * 9)));
+  return Math.max(86, Math.min(99, Math.round(86 + ratio * 13)));
 }
 
 async function countRowsByType(sourceId: string, userId: string, db: SupabaseClient, itemType: string) {
@@ -2062,6 +2080,7 @@ type LoadSourceItemsOptions = {
   itemTypes?: string[];
   offset?: number;
   limit?: number;
+  afterId?: string;
 };
 
 async function loadSourceItems(
@@ -2072,24 +2091,38 @@ async function loadSourceItems(
 ): Promise<LiveCatalogItem[]> {
   const rows: LiveCatalogItem[] = [];
   const pageSize = options.limit ? Math.max(1, Math.min(2000, options.limit)) : 1000;
-  const startOffset = Math.max(0, options.offset ?? 0);
   const maxRows = options.limit ? pageSize : Number.POSITIVE_INFINITY;
-  for (let offset = startOffset; rows.length < maxRows; offset += pageSize) {
+  // Keyset mode (WHERE id > afterId, ORDER BY id) when an afterId is supplied —
+  // identical to norva-source-sync's loadSourceItems, so a finalize cursor is
+  // portable between the two engines (the client falls back from one to the other
+  // on a 5xx). Offset mode is kept for the live phase + other callers.
+  const keyset = typeof options.afterId === "string";
+  let afterId = options.afterId || "";
+  for (let offset = Math.max(0, options.offset ?? 0); rows.length < maxRows; offset += pageSize) {
     let query = db
       .from("cloud_media_items")
       .select("id,source_id,item_type,external_id,parent_external_id,title,subtitle,poster_url,metadata,playback_hint,available")
       .eq("source_id", sourceId)
-      .eq("user_id", userId)
-      .order("item_type", { ascending: true })
-      .order("external_id", { ascending: true });
+      .eq("user_id", userId);
     const itemTypes = (options.itemTypes || []).filter(Boolean);
     if (itemTypes.length === 1) query = query.eq("item_type", itemTypes[0]);
     else if (itemTypes.length > 1) query = query.in("item_type", itemTypes);
 
-    const { data, error } = await query.range(offset, offset + pageSize - 1);
+    if (keyset) {
+      query = query.order("id", { ascending: true }).limit(pageSize);
+      if (afterId) query = query.gt("id", afterId);
+    } else {
+      query = query
+        .order("item_type", { ascending: true })
+        .order("external_id", { ascending: true })
+        .range(offset, offset + pageSize - 1);
+    }
+
+    const { data, error } = await query;
     if (error) throwDb(error, "Unable to load imported catalog items");
     if (!Array.isArray(data) || !data.length) break;
     rows.push(...(data as LiveCatalogItem[]));
+    if (keyset) afterId = String((data[data.length - 1] as { id?: unknown }).id ?? "");
     if (data.length < pageSize) break;
     if (options.limit) break;
   }

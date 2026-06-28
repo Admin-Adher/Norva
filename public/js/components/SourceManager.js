@@ -669,7 +669,7 @@ class SourceManager {
     }
 
     formatCatalogCount(value, fallback = 'Scanning') {
-        return value > 0 ? value.toLocaleString('en-US') : fallback;
+        return value > 0 ? value.toLocaleString() : fallback;
     }
 
     catalogMilestones(progress = {}, counts = {}) {
@@ -697,14 +697,22 @@ class SourceManager {
 
     renderCatalogMilestone(step) {
         const safeStatus = ['pending', 'running', 'done', 'error', 'skipped'].includes(step.status) ? step.status : 'pending';
-        const count = step.count > 0 ? `<strong>${this.escapeHtml(step.count.toLocaleString('en-US'))}</strong>` : '';
-        const statusLabel = {
-            pending: 'Waiting',
-            running: 'In progress',
-            done: 'Done',
-            error: 'Needs attention',
-            skipped: 'Skipped'
-        }[safeStatus] || 'Waiting';
+        const count = step.count > 0 ? `<strong>${this.escapeHtml(step.count.toLocaleString())}</strong>` : '';
+        // Discovery steps (channels/movies/series/categories) report "done" the
+        // moment the provider COUNT is known — long before those items are
+        // materialised and browsable. Render their done-state as "Found" so the
+        // timeline never implies the content is ready to watch yet; only the
+        // import/finalize steps carry a true "Done".
+        const isDiscovery = ['channels', 'movies', 'series', 'categories'].includes(step.key);
+        const statusLabel = (isDiscovery && safeStatus === 'done')
+            ? 'Found'
+            : ({
+                pending: 'Waiting',
+                running: 'In progress',
+                done: 'Done',
+                error: 'Needs attention',
+                skipped: 'Skipped'
+            }[safeStatus] || 'Waiting');
         return `
           <li class="source-sync-milestone source-sync-milestone-${this.escapeHtml(safeStatus)}">
             <span class="source-sync-dot" aria-hidden="true"></span>
@@ -761,6 +769,9 @@ class SourceManager {
             <small>groups found</small>
           </div>
         </div>
+        ${phase === 'syncing' ? `
+          <p class="hint source-sync-found-note">These are titles detected from your provider. They become watchable as Norva finishes preparing them — you can keep browsing while this runs.</p>
+        ` : ''}
         <div class="source-sync-progress-wrap">
           <div class="source-sync-progress ${determinate ? 'is-determinate' : ''}" style="--source-sync-percent: ${this.escapeHtml(String(percent))}%;" aria-label="Catalog import progress">
             <span></span>
@@ -837,8 +848,20 @@ class SourceManager {
         }
 
         if (this.catalogPreparationToken !== token) return;
-        await API.sources.finalize(sourceId, { phase: 'complete' });
-        await refreshAndRender();
+        if (phase === 'complete') {
+            // The titles walk reported done (nextPhase became 'complete'), so run
+            // the complete phase: it heals variants and marks the source ready.
+            // This is the ONLY path that declares the catalog finished.
+            await API.sources.finalize(sourceId, { phase: 'complete' });
+            await refreshAndRender();
+        } else {
+            // We exited on a stall (cursor unmoved) or the safety cap, with the
+            // walk NOT done. Do NOT force phase:'complete' — that would stamp a
+            // partial catalog as ready/100%. Hand back to the background finalize
+            // driver + the 1-min watchdog, which own the persisted cursor and
+            // resume from exactly where we stopped. Just reflect the real state.
+            await refreshAndRender();
+        }
     }
 
     isRecoverableFinalizeResourceError(error) {

@@ -883,7 +883,11 @@ async function cronResumeStuck(db: SupabaseClient) {
     const progress = recordOrEmpty(hint.syncProgress);
     const finalizeCursor = recordOrEmpty(hint.finalizeCursor);
     const isError = String(src.sync_status) === "error";
-    const inDiscovery = !isError && cursor.active === true && stringOr(cursor.phase, "") === "discover";
+    // Resume discovery even when the source errored: a large/slow discovery that
+    // exhausted its continuation budget — or hit any non-503 error — still carries
+    // an active discover cursor and must be picked back up, not stranded behind a
+    // "Repair login" card. driveXtreamSyncToReady resets the budget on revival.
+    const inDiscovery = cursor.active === true && stringOr(cursor.phase, "") === "discover";
     // A finalize is resumable when it's actively in a finalize stage, OR it errored but
     // still carries a finalize cursor (so we know where to pick the build back up).
     const inFinalize = !inDiscovery
@@ -1729,13 +1733,18 @@ async function driveXtreamSyncToReady(sourceId: string, userId: string, db: Supa
   };
 
   try {
+    // Watchdog revival: this isolate is restarting a source the watchdog found
+    // stalled or errored (status != "syncing"). Clear the error AND reset the
+    // continuation budget FIRST, so a discovery that previously exhausted the
+    // budget (or hit a non-503 error) gets a fresh run instead of immediately
+    // re-tripping the cap just below.
+    if (String(source.sync_status) !== "syncing") {
+      cursor.attempts = 0;
+      await db.from("cloud_sources").update({ sync_status: "syncing", sync_error: null }).eq("id", sourceId).eq("user_id", userId);
+    }
     cursor.attempts = (Number(cursor.attempts) || 0) + 1;
     if (Number(cursor.attempts) > SYNC_MAX_CONTINUATIONS) {
       throw new HttpError(500, "Catalog sync exceeded its continuation budget");
-    }
-    // A continuation is making progress — clear any error left by a prior isolate.
-    if (String(source.sync_status) !== "syncing") {
-      await db.from("cloud_sources").update({ sync_status: "syncing", sync_error: null }).eq("id", sourceId).eq("user_id", userId);
     }
 
     const runtimeConfig = await getRuntimeConfig(db);
@@ -1793,6 +1802,10 @@ async function driveXtreamSyncToReady(sourceId: string, userId: string, db: Supa
     let seriesCount = Number(counts.series) || 0;
     let typeIdx = Number(cursor.typeIdx) || 0;
     let catIdx = Number(cursor.catIdx) || 0;
+    // Snapshot the walk position so we can tell, at the end of this isolate,
+    // whether real progress was made (and reset the continuation budget if so).
+    const startTypeIdx = typeIdx;
+    const startCatIdx = catIdx;
 
     const targetsFor = (type: string): (Record<string, string> | undefined)[] => {
       const ids = asStringArray(cats[type]);
@@ -1847,6 +1860,12 @@ async function driveXtreamSyncToReady(sourceId: string, userId: string, db: Supa
       }
       if (superseded) return;
     }
+
+    // Real progress this isolate → reset the continuation budget so only a
+    // genuinely stuck (zero-progress) loop can ever trip SYNC_MAX_CONTINUATIONS.
+    // A healthy large import self-invokes hundreds of times and must never
+    // self-abort just for being big.
+    if (typeIdx !== startTypeIdx || catIdx !== startCatIdx) cursor.attempts = 0;
 
     if (typeIdx < DISCOVER_TYPES.length) {
       await persist(null);
