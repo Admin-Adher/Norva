@@ -1490,6 +1490,37 @@ async function selfInvokeFinalize(sourceId: string) {
   }
 }
 
+// Global heavy-import budget — shared with norva-source-sync's engine via the same
+// DB-counted admission control. New env NORVA_MAX_CONCURRENT_IMPORTS; legacy fallback
+// NORVA_MAX_CONCURRENT_FINALIZE so existing config keeps working.
+function heavyImportBudget(): number {
+  return boundedInt(Deno.env.get("NORVA_MAX_CONCURRENT_IMPORTS") ?? Deno.env.get("NORVA_MAX_CONCURRENT_FINALIZE"), 3, 0, 50);
+}
+
+// Global admission control for heavy imports (discovery). Bounds how many IPTV catalogues
+// import at once so N simultaneous huge providers can't saturate the shared Postgres — the
+// failure that starved GoTrue and 504'd login. Deterministic priority by created_at: admit
+// only when FEWER than `max` OLDER syncing xtream sources run ahead, so the oldest N always
+// progress (no deadlock) and newer ones queue. Fails CLOSED (defer) on query error — backing
+// off is safe under the very load this guards. A deferred fresh import stays "syncing" and is
+// resumed by the source-sync watchdog's stalled-import safety net once a slot frees.
+async function admitHeavyImport(db: SupabaseClient, sourceId: string, createdAt: string | null, max: number): Promise<boolean> {
+  if (max <= 0) return true;
+  if (!createdAt) return true;
+  try {
+    const { count, error } = await db.from("cloud_sources")
+      .select("id", { count: "exact", head: true })
+      .eq("sync_status", "syncing")
+      .eq("source_type", "xtream")
+      .lt("created_at", createdAt)
+      .neq("id", sourceId);
+    if (error) return false;
+    return (count ?? 0) < max;
+  } catch (_) {
+    return false;
+  }
+}
+
 // Drive one isolate's worth of resumable discovery. Imports every category's
 // stream slice incrementally from a persisted cursor; when the wall-clock budget
 // is hit before the catalogue is fully imported it checkpoints and self-invokes
@@ -1507,6 +1538,11 @@ async function driveXtreamSyncToReady(sourceId: string, userId: string, db: Supa
   if (error) { console.error("[norva-cloud] sync driver load failed", sourceId, error.message); return; }
   if (!source) return;
   if (String(source.sync_status) === "ready") return; // a stale continuation raced past completion
+  // Global admission control: over budget → return without starting. syncCloudSource has
+  // already written an active "discover" cursor (freshSyncCursor) whose heartbeat goes stale
+  // after ~2 min with no run, so the source-sync watchdog's existing discovery branch resumes
+  // this source once an older import finishes — a clean no-op defer needs no bookkeeping here.
+  if (!(await admitHeavyImport(db, sourceId, source.created_at ? String(source.created_at) : null, heavyImportBudget()))) return;
 
   const baseHint = recordOrEmpty(source.config_hint);
   let cursor = recordOrEmpty(baseHint.syncCursor);

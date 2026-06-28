@@ -872,6 +872,9 @@ async function cronResumeStuck(db: SupabaseClient) {
     .select("id,user_id,sync_status,config_hint")
     .in("sync_status", ["syncing", "error"])
     .eq("source_type", "xtream")
+    // Oldest-first so the highest-priority queued import (the one admitHeavyImport will
+    // admit next) is among the ≤5 we re-kick — slots free up to the front of the queue.
+    .order("created_at", { ascending: true })
     .limit(100);
   if (error) return { ok: false, error: error.message };
   const resumed: string[] = [];
@@ -931,6 +934,40 @@ async function cronFinalizeSource(db: SupabaseClient, sourceId: string, country:
   return { ok: true, started: true, sourceId };
 }
 
+// Resolve the global heavy-import budget — discovery AND finalize share it, so it bounds
+// total concurrent imports, not just finalizers. New env NORVA_MAX_CONCURRENT_IMPORTS;
+// falls back to the legacy NORVA_MAX_CONCURRENT_FINALIZE so existing config keeps working.
+function heavyImportBudget(): number {
+  return boundedInt(Deno.env.get("NORVA_MAX_CONCURRENT_IMPORTS") ?? Deno.env.get("NORVA_MAX_CONCURRENT_FINALIZE"), 3, 0, 50);
+}
+
+// Global admission control for heavy imports (discovery + finalize). Bounds how many IPTV
+// catalogues actively import at once so N simultaneous huge ("8K") providers can't saturate
+// the shared Postgres — the exact failure that starved GoTrue's connections and 504'd login.
+// Priority is deterministic by created_at: a source is admitted only when FEWER than `max`
+// OLDER syncing xtream sources run ahead of it, so the oldest N always progress (no mutual-
+// defer deadlock) and newer ones queue, resumed by the 1-min watchdog the instant a slot
+// frees. Fails CLOSED — if we can't confirm we're under budget (a COUNT timeout under the
+// very load this guards), we DEFER; backing off is the safe move and the watchdog retries.
+// Re-checked on every continuation, so steady state converges to exactly `max` concurrent
+// regardless of start-up races (a briefly over-admitted source self-corrects next batch).
+async function admitHeavyImport(db: SupabaseClient, sourceId: string, createdAt: string | null, max: number): Promise<boolean> {
+  if (max <= 0) return true;     // cap disabled (env 0)
+  if (!createdAt) return true;   // no ordering key (shouldn't happen) → don't strand it
+  try {
+    const { count, error } = await db.from("cloud_sources")
+      .select("id", { count: "exact", head: true })
+      .eq("sync_status", "syncing")
+      .eq("source_type", "xtream")
+      .lt("created_at", createdAt)
+      .neq("id", sourceId);
+    if (error) return false;     // fail CLOSED — defer; watchdog retries
+    return (count ?? 0) < max;
+  } catch (_) {
+    return false;                // fail CLOSED
+  }
+}
+
 // Walk the resumable finalize phases (live → titles → complete) to completion.
 // Bounded by a wall-clock budget; the {phase, offset} cursor is persisted so a
 // fresh isolate resumes where the last left off, and the driver self-invokes the
@@ -941,25 +978,11 @@ async function driveFinalizeToReady(db: SupabaseClient, sourceId: string, userId
   const { data: src0 } = await db.from("cloud_sources").select("config_hint,sync_status,created_at").eq("id", sourceId).maybeSingle();
   if (src0 && String(src0.sync_status) === "ready") return; // already done
 
-  // Soft global concurrency cap: bound how many heavy imports finalize at once so
-  // N simultaneous huge ("8K") catalogues can't saturate the shared Postgres. The
-  // priority is deterministic by created_at — we defer ONLY if `maxConcurrent`
-  // OLDER syncing xtream sources are already running ahead of us, so the oldest N
-  // always make progress (no mutual-defer deadlock) and newer ones queue. On defer
-  // we just return; the source stays "syncing" with its finalize cursor, so the
-  // 1-min watchdog re-checks it and resumes the moment a slot frees. Env-tunable;
-  // 0 disables. Fails open: any query hiccup → count 0 → proceed. At 1-2 imports
-  // this never triggers, so it's invisible until real concurrency arrives.
-  const maxConcurrent = boundedInt(Deno.env.get("NORVA_MAX_CONCURRENT_FINALIZE"), 3, 0, 50);
-  if (maxConcurrent > 0 && src0?.created_at) {
-    const { count } = await db.from("cloud_sources")
-      .select("id", { count: "exact", head: true })
-      .eq("sync_status", "syncing")
-      .eq("source_type", "xtream")
-      .lt("created_at", String(src0.created_at))
-      .neq("id", sourceId);
-    if ((count ?? 0) >= maxConcurrent) return; // too many older imports ahead — let the watchdog retry us
-  }
+  // Global admission control (discovery + finalize share ONE budget): defer if too many
+  // older imports run ahead. Deferring just returns — the source stays "syncing" with its
+  // finalize cursor, so the 1-min watchdog resumes it the instant a slot frees. See
+  // admitHeavyImport for the deterministic-priority / fail-closed semantics.
+  if (!(await admitHeavyImport(db, sourceId, src0?.created_at ? String(src0.created_at) : null, heavyImportBudget()))) return;
 
   // Single-flight lease (anti-herd): one finalize worker per source. The every-minute
   // watchdog + the self-invoke chain would otherwise stack concurrent finalizers whose
@@ -1017,6 +1040,10 @@ async function driveFinalizeToReady(db: SupabaseClient, sourceId: string, userId
       // Refresh the single-flight lease before the next batch (folded into the cursor
       // write so it adds no extra round-trip): keeps the watchdog from double-driving us.
       hint.finalizeLease = { until: new Date(Date.now() + leaseTtlMs).toISOString() };
+      // Drop the now-dead discovery cursor (cats + sig maps, ~13 KB) if a source reached
+      // finalize before that cleanup deployed — otherwise every heartbeat re-writes it for
+      // nothing. Discovery is long done here; its signature lives in contentSignature.
+      delete hint.syncCursor;
       return hint;
     });
     // Yield the DB to foreground traffic between batches (see throttleMs above).
@@ -1826,6 +1853,12 @@ async function driveXtreamSyncToReady(sourceId: string, userId: string, db: Supa
       cursor.attempts = 0;
       await db.from("cloud_sources").update({ sync_status: "syncing", sync_error: null }).eq("id", sourceId).eq("user_id", userId);
     }
+    // Global admission control: cap concurrent heavy imports (see admitHeavyImport). The
+    // source is "syncing" now, so deferring here parks it for the 1-min watchdog — checked
+    // BEFORE the attempts increment so a queued source never burns its continuation budget.
+    if (!(await admitHeavyImport(db, sourceId, source.created_at ? String(source.created_at) : null, heavyImportBudget()))) {
+      return; // queued — resumed when an older import finishes
+    }
     cursor.attempts = (Number(cursor.attempts) || 0) + 1;
     if (Number(cursor.attempts) > SYNC_MAX_CONTINUATIONS) {
       throw new HttpError(500, "Catalog sync exceeded its continuation budget");
@@ -1994,10 +2027,15 @@ async function driveXtreamSyncToReady(sourceId: string, userId: string, db: Supa
       .from("cloud_sources").select("config_hint").eq("id", sourceId).eq("user_id", userId).maybeSingle();
     const freshHint = recordOrEmpty(fresh?.config_hint);
     if (stringOr(recordOrEmpty(freshHint.syncCursor).startedAt, myRun) !== myRun) return; // superseded by a newer sync
+    // Discovery is done (cursor.active=false) and its signature is now promoted to the
+    // top-level contentSignature — so DROP the fat syncCursor (cats + per-item sig maps,
+    // ~13 KB) instead of carrying it through the whole finalize and into the ready state.
+    // It was re-written on every finalize heartbeat (every ~2.5s) for nothing, bloating WAL
+    // and the login-critical cloud_sources row; compactRecord strips the undefined key.
     await db
       .from("cloud_sources")
       .update({
-        config_hint: compactRecord({ ...freshHint, contentSignature, syncProgress: progress, syncCursor: cursor }),
+        config_hint: compactRecord({ ...freshHint, contentSignature, syncProgress: progress, syncCursor: undefined }),
       })
       .eq("id", sourceId)
       .eq("user_id", userId);
