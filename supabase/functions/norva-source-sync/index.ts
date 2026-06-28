@@ -893,6 +893,14 @@ async function cronResumeStuck(db: SupabaseClient) {
     const inFinalize = !inDiscovery
       && (finalizingStages.has(stringOr(progress.stage, "")) || (isError && finalizePhases.has(stringOr(finalizeCursor.phase, ""))));
     if (!inDiscovery && !inFinalize) continue;
+    // Single-flight gate: a live finalize worker forward-dates this lease before every
+    // batch. While it's unexpired a worker IS alive — even if its last progress write is
+    // old because the batch is slow under load — so don't stack a duplicate finalizer.
+    // That duplicate-herd is exactly what saturated Postgres and broke logins. An
+    // expired/absent lease means the worker died: fall through and resume it.
+    const finalizeLease = recordOrEmpty(hint.finalizeLease);
+    const leaseUntil = stringOr(finalizeLease.until, "");
+    if (inFinalize && leaseUntil && leaseUntil > new Date(now).toISOString()) continue;
     // Recent activity (heartbeat / startedAt for discovery, progress updatedAt for
     // finalize) → still alive; only re-kick a genuinely stalled run.
     const lastSeen = inDiscovery
@@ -953,6 +961,16 @@ async function driveFinalizeToReady(db: SupabaseClient, sourceId: string, userId
     if ((count ?? 0) >= maxConcurrent) return; // too many older imports ahead — let the watchdog retry us
   }
 
+  // Single-flight lease (anti-herd): one finalize worker per source. The every-minute
+  // watchdog + the self-invoke chain would otherwise stack concurrent finalizers whose
+  // batches slow each other past the 60s staleness gate, snowballing into a Postgres-
+  // saturating herd — the failure that starved GoTrue's connections and locked users
+  // out. We forward-date a lease before each batch; the watchdog skips a source whose
+  // lease is still fresh, and the lease auto-expires if this isolate dies, so a
+  // genuinely-dead finalize is still revived after the TTL.
+  const leaseTtlMs = boundedInt(Deno.env.get("NORVA_FINALIZE_LEASE_TTL_MS"), 240_000, 30_000, 900_000);
+  await stampFinalizeLease(db, sourceId, leaseTtlMs); // cover the first batch immediately
+
   const fc = recordOrEmpty(recordOrEmpty(src0?.config_hint).finalizeCursor);
   let phase = stringOr(fc.phase, "live");
   let offset = Number(fc.offset) || 0;
@@ -988,13 +1006,19 @@ async function driveFinalizeToReady(db: SupabaseClient, sourceId: string, userId
       return;
     }
     if (String(result.status) === "ready") {
-      await patchSourceConfigHint(db, sourceId, (hint) => { delete hint.finalizeCursor; return hint; });
+      await patchSourceConfigHint(db, sourceId, (hint) => { delete hint.finalizeCursor; delete hint.finalizeLease; return hint; });
       return;
     }
     phase = stringOr(result.nextPhase, "complete");
     offset = Number(result.nextOffset) || 0;
     afterId = stringOr(result.nextAfterId, afterId);
-    await patchSourceConfigHint(db, sourceId, (hint) => { hint.finalizeCursor = { phase, offset, afterId }; return hint; });
+    await patchSourceConfigHint(db, sourceId, (hint) => {
+      hint.finalizeCursor = { phase, offset, afterId };
+      // Refresh the single-flight lease before the next batch (folded into the cursor
+      // write so it adds no extra round-trip): keeps the watchdog from double-driving us.
+      hint.finalizeLease = { until: new Date(Date.now() + leaseTtlMs).toISOString() };
+      return hint;
+    });
     // Yield the DB to foreground traffic between batches (see throttleMs above).
     if (throttleMs > 0 && Date.now() < deadline) await new Promise((r) => setTimeout(r, throttleMs));
   }
@@ -1008,6 +1032,18 @@ async function patchSourceConfigHint(db: SupabaseClient, sourceId: string, mutat
   const { data } = await db.from("cloud_sources").select("config_hint").eq("id", sourceId).maybeSingle();
   const hint = mutate(recordOrEmpty(data?.config_hint));
   await db.from("cloud_sources").update({ config_hint: compactRecord(hint) }).eq("id", sourceId);
+}
+
+// Forward-date the finalize single-flight lease so the watchdog treats this worker as
+// alive across a (possibly slow) batch. Best-effort: a write hiccup just means the
+// watchdog might resume sooner — it never blocks the finalize itself.
+async function stampFinalizeLease(db: SupabaseClient, sourceId: string, ttlMs: number) {
+  try {
+    await patchSourceConfigHint(db, sourceId, (hint) => {
+      hint.finalizeLease = { until: new Date(Date.now() + ttlMs).toISOString() };
+      return hint;
+    });
+  } catch (_) { /* best-effort heartbeat */ }
 }
 
 // Kick a fresh finalize isolate (resumes from the persisted finalize cursor).
