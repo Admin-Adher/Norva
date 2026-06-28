@@ -1893,11 +1893,12 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
       });
       const nextOffset = Math.min(totalVod, batchOffset + rows.length);
       const nextAfterId = rows.length ? String((rows[rows.length - 1] as { id?: unknown }).id ?? batchAfterId) : batchAfterId;
-      // Keyset walk identical to norva-source-sync (advance by id), so a finalize
-      // cursor handed off between the engines stays consistent and a keyset
-      // position is never re-applied as a raw offset. batchLimit (<=1000 here) is
-      // at/under the PostgREST page cap, so a short page is genuinely the last one.
-      const done = rows.length === 0 || rows.length < batchLimit;
+      // Keyset walk identical to norva-source-sync (advance by id) so a cursor handed
+      // off between engines stays consistent and a keyset position is never re-applied
+      // as a raw offset. Cap the done-comparison at PostgREST's 1000-row response
+      // limit so batchLimit >= 1000 never reads a capped page as "short" and stops early.
+      const pageCap = Math.min(batchLimit, 1000);
+      const done = rows.length === 0 || rows.length < pageCap;
       await reportProgress({
         stage: done ? "finalizing" : "building_titles",
         percent: done ? 99 : titleFinalizePercent(nextOffset, totalVod),
