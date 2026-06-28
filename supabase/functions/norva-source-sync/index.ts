@@ -933,6 +933,13 @@ async function driveFinalizeToReady(db: SupabaseClient, sourceId: string, userId
   let offset = Number(fc.offset) || 0;
   let afterId = stringOr(fc.afterId, "");
   let guard = 0;
+  // Throttle between batches so this background finalize never monopolises the shared
+  // DB: the per-batch title upserts fire several heavy triggers, and run back-to-back
+  // they saturate Postgres so live browse queries (normally ~tens of ms) time out. A
+  // pause between batches keeps the finalize's duty-cycle well under 100%, leaving slots
+  // for foreground traffic — a huge provider can finish in the background without ever
+  // making the app feel slow. Tunable via env without a redeploy (0 disables).
+  const throttleMs = boundedInt(Deno.env.get("NORVA_FINALIZE_THROTTLE_MS"), 2500, 0, 30000);
   while (Date.now() < deadline && guard++ < 400) {
     let result: JsonRecord;
     try {
@@ -963,6 +970,8 @@ async function driveFinalizeToReady(db: SupabaseClient, sourceId: string, userId
     offset = Number(result.nextOffset) || 0;
     afterId = stringOr(result.nextAfterId, afterId);
     await patchSourceConfigHint(db, sourceId, (hint) => { hint.finalizeCursor = { phase, offset, afterId }; return hint; });
+    // Yield the DB to foreground traffic between batches (see throttleMs above).
+    if (throttleMs > 0 && Date.now() < deadline) await new Promise((r) => setTimeout(r, throttleMs));
   }
   // Budget/guard hit before ready → continue in a fresh isolate.
   await selfInvokeFinalize(sourceId, country);
