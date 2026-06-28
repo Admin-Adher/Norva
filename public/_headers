@@ -1,0 +1,27 @@
+# Cloudflare Pages cache rules.
+# Rules apply top-to-bottom; for a duplicated header the LAST matching rule wins,
+# so the general default comes first and the specific overrides come after.
+
+# Default for everything (notably the HTML entry points): always revalidate, so a
+# new deploy's freshly-versioned asset references are picked up immediately. The
+# revalidation is a cheap conditional request (304 when unchanged).
+/*
+  Cache-Control: public, max-age=0, must-revalidate
+
+# Versioned JS/CSS (every reference carries ?v=<hash>, rewritten on each deploy by
+# scripts/hash-asset-versions.js). A changed file gets a new URL, so we can cache the
+# old URL forever — repeat visits re-use the bytes with zero network.
+/js/*
+  Cache-Control: public, max-age=31536000, immutable
+/css/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# Images are referenced without a version query, so cache a week (not immutable) and
+# revalidate in the background — long enough to make repeat visits fast, short enough
+# that an in-place asset update still propagates.
+/img/*
+  Cache-Control: public, max-age=604800, stale-while-revalidate=2592000
+
+# Static fonts/icons bundled with the app (if any) — same treatment as images.
+/fonts/*
+  Cache-Control: public, max-age=604800, stale-while-revalidate=2592000
