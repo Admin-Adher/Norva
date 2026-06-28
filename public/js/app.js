@@ -47,6 +47,17 @@ class App {
 
         // Check authentication first
         await this.checkAuth();
+        // Collapse the launch fan-out: one /boot call seeds profile / profiles /
+        // entitlements / sources / trial-eligibility so the calls right below
+        // (checkCloudAccess, ensureSelected, refreshSourceHealth, the trial
+        // banner …) resolve from cache instead of each paying a separate
+        // norva-cloud cold start — the dominant cause of slow first paint. Fire
+        // it synchronously here: boot() claims the in-flight cache slots before
+        // it returns, so the very next line already dedups onto it. User
+        // sessions only — paired-device screens use the device-token path.
+        if (this.currentUser && !this.currentUser.device) {
+            try { window.NorvaCloud?.boot?.(); } catch (_) { /* best-effort speedup */ }
+        }
         if (!await this.checkCloudAccess()) return;
         // Netflix-style "who's watching": pick a profile before entering the app.
         try { if (window.NorvaProfiles?.ensureSelected) await window.NorvaProfiles.ensureSelected(); } catch (_) { }

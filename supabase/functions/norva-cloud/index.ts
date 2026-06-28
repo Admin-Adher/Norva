@@ -115,6 +115,9 @@ Deno.serve(async (req) => {
       return await proxyImage(req, url);
     }
     const result = await route(req, url, segments, supabase);
+    if (req.method === "GET" && typeof result.cache === "number" && result.cache > 0) {
+      return jsonCached(req, result.body, result.cache, result.status ?? 200);
+    }
     return json(req, result.body, result.status ?? 200);
   } catch (error) {
     const status = error instanceof HttpError ? error.status : 500;
@@ -142,7 +145,7 @@ async function route(
   url: URL,
   segments: string[],
   db: SupabaseClient,
-): Promise<{ status?: number; body: unknown }> {
+): Promise<{ status?: number; body: unknown; cache?: number }> {
   const [scope, id, action] = segments;
 
   if (req.method === "GET" && scope === "health") {
@@ -240,6 +243,38 @@ async function route(
 
   const user = await requireUser(req, db);
 
+  // Cold-start aggregation: a fresh app load otherwise fans out into ~7 separate
+  // norva-cloud calls (profile, profiles, entitlements, sources, trial, …), each
+  // paying its own isolate cold-start + auth round-trip — the dominant cause of a
+  // slow first paint. /boot answers them all from ONE isolate and ONE auth, with
+  // the sections fetched in parallel. Best-effort per section: a failing query
+  // returns null so the client transparently falls back to its individual fetch.
+  if (scope === "boot" && req.method === "GET") {
+    const [profileRes, profilesRes, entitlementsRes, sourcesRes, trialRes] = await Promise.allSettled([
+      getProfile(user.id, db),
+      listProfiles(user.id, db),
+      (async () => {
+        const decision = await getEntitlementDecision(db, user.id);
+        return { ...decision, features: featuresForDecision(decision) };
+      })(),
+      listSources(user.id, db),
+      getTrialEligibility(user.id, db),
+    ]);
+    // Any section may be null on a transient hiccup; the client seeds only the
+    // sections it received and falls back to an individual fetch for the rest, so
+    // a null is never misread as "no data" — it just means "not seeded".
+    const settled = <T>(r: PromiseSettledResult<T>): T | null => (r.status === "fulfilled" ? r.value : null);
+    return {
+      body: {
+        profile: settled(profileRes),
+        profiles: settled(profilesRes),
+        entitlements: settled(entitlementsRes),
+        sources: settled(sourcesRes),
+        trialEligibility: settled(trialRes),
+      },
+    };
+  }
+
   if (scope === "entitlements" && req.method === "GET") {
     const decision = await getEntitlementDecision(db, user.id);
     return { body: { ...decision, features: featuresForDecision(decision) } };
@@ -290,10 +325,14 @@ async function route(
   }
 
   if (scope === "billing" && id === "trial-eligibility" && req.method === "GET") {
-    return { body: await getTrialEligibility(user.id, db) };
+    return { body: await getTrialEligibility(user.id, db), cache: 60 };
   }
 
   if (scope === "profiles") {
+    // NOTE: deliberately not edge-cached. The client mutates this list
+    // (create/update/remove) and immediately re-lists, so a browser-cached stale
+    // copy would hide a just-created profile. The in-memory client cache (which
+    // is invalidated on every write) is the correct layer here.
     if (req.method === "GET" && !id) return { body: await listProfiles(user.id, db) };
     if (req.method === "POST" && !id) return { status: 201, body: await createProfile(req, user.id, db) };
     if ((req.method === "PATCH" || req.method === "PUT") && id) return { body: await updateProfile(req, id, user.id, db) };
@@ -301,6 +340,9 @@ async function route(
   }
 
   if (!scope || scope === "profile") {
+    // Not edge-cached for the same reason as /profiles: it is edited in Settings
+    // and a stale browser copy would briefly show the old name/avatar after a
+    // save. Client-side cache (invalidated on save) covers the dedup.
     if (req.method === "GET") return { body: await getProfile(user.id, db) };
     if (req.method === "PUT" || req.method === "PATCH") {
       return { body: await upsertProfile(req, user.id, db) };
@@ -4162,6 +4204,25 @@ function json(req: Request, data: unknown, status = 200) {
       ...corsHeaders(req),
       "Content-Type": "application/json; charset=utf-8",
       "Cache-Control": "no-store",
+    },
+  });
+}
+
+// Same as json() but with a short PRIVATE browser cache. `private` keeps the
+// per-user payload out of any shared/CDN cache; Vary on Authorization +
+// x-norva-profile-id keys it per token + active profile so a cached response can
+// never leak across accounts. Used for the stable boot reads (profile, profiles,
+// trial eligibility) that change rarely — repeat navigations and hard reloads
+// within the TTL skip the edge function entirely.
+function jsonCached(req: Request, data: unknown, cacheSeconds: number, status = 200) {
+  const s = Math.max(0, Math.floor(cacheSeconds));
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: {
+      ...corsHeaders(req),
+      "Content-Type": "application/json; charset=utf-8",
+      "Cache-Control": s > 0 ? `private, max-age=${s}, stale-while-revalidate=${s * 2}` : "no-store",
+      Vary: "Origin, Authorization, x-norva-profile-id",
     },
   });
 }
