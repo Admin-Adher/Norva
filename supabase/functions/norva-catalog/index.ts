@@ -473,28 +473,43 @@ async function listHomeRails(url: URL, userId: string) {
   const type = url.searchParams.get("type");
   const includeSeries = !type || type === "series";
   const includeMovies = !type || type === "movie";
-  const rails: JsonRecord[] = [];
 
-  if (includeMovies) {
-    rails.push(await listTitleRail(userId, "movie", "recently-added-movies", "Recently Added Movies", limit, lang));
-    rails.push(await listGenreRail(userId, "movie", "Action", "action-movies", "Films d'action", limit, lang));
-  }
+  // Fire every rail query in PARALLEL — they are independent reads. They used to run
+  // as ~6 sequential awaits, so the endpoint's latency was the SUM of all rails; on a
+  // big (or storm-bloated) catalogue that blew past the client's 150s idle timeout, so
+  // /home/rails 504'd and Home fell back to "recent content" (the reported slow load).
+  // Parallel = total ≈ the slowest single rail. (popular-movies is always fired as the
+  // because-you-watched fallback and simply discarded when watch history exists — one
+  // extra concurrent read, zero added wall-clock.)
+  const when = <T>(cond: boolean, fn: () => Promise<T>): Promise<T | null> => (cond ? fn() : Promise.resolve(null));
+  const [
+    recentMovies,
+    actionMovies,
+    watchedRail,
+    popularMovies,
+    popularSeries,
+    recentSeries,
+  ] = await Promise.all([
+    when(includeMovies, () => listTitleRail(userId, "movie", "recently-added-movies", "Recently Added Movies", limit, lang)),
+    when(includeMovies, () => listGenreRail(userId, "movie", "Action", "action-movies", "Films d'action", limit, lang)),
+    listBecauseYouWatchedRail(userId, { includeMovies, includeSeries, limit, lang }),
+    when(includeMovies, () => listPopularTitleRail(userId, "movie", "popular-movies", "Films populaires", limit, lang)),
+    when(includeSeries, () => listPopularTitleRail(userId, "series", "popular-series", "Series populaires", limit, lang)),
+    when(includeSeries, () => listTitleRail(userId, "series", "recently-added-series", "Recently Added Series", limit, lang)),
+  ]);
 
-  const watchedRail = await listBecauseYouWatchedRail(userId, { includeMovies, includeSeries, limit, lang });
-  if (watchedRail) {
-    rails.push(watchedRail);
-  } else if (includeMovies) {
-    rails.push(await listPopularTitleRail(userId, "movie", "popular-movies", "Films populaires", limit, lang));
-  }
-
-  if (includeSeries) {
-    rails.push(await listPopularTitleRail(userId, "series", "popular-series", "Series populaires", limit, lang));
-    rails.push(await listTitleRail(userId, "series", "recently-added-series", "Recently Added Series", limit, lang));
-  }
+  // Assemble in the intended display order.
+  const rails: Array<JsonRecord | null> = [
+    recentMovies,
+    actionMovies,
+    watchedRail ?? popularMovies, // because-you-watched, else popular movies
+    popularSeries,
+    recentSeries,
+  ];
 
   return {
     contract: "norva.home.rails.v1",
-    rails: rails.filter((rail) => Array.isArray(rail.items) && rail.items.length > 0),
+    rails: rails.filter((rail): rail is JsonRecord => !!rail && Array.isArray(rail.items) && rail.items.length > 0),
   };
 }
 
