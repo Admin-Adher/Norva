@@ -128,6 +128,16 @@
       this.log = typeof opts.log === 'function' ? opts.log : () => {};
       this.onReady = typeof opts.onReady === 'function' ? opts.onReady : () => {};
       this.onSeek = typeof opts.onSeek === 'function' ? opts.onSeek : () => {};
+      // libav log verbosity. Default ERROR: libav's INFO default floods the
+      // console AND costs real CPU — FFmpeg formats + writes every line through
+      // the Emscripten TTY once per block, and the matroska demuxer logs a
+      // benign warning for every MKV block carrying BlockAdditions without a
+      // MaxBlockAdditionID. Raising the threshold makes FFmpeg skip that work at
+      // the source (measured ~2× faster demux on affected files). Real errors
+      // still surface. Pass opts.verbose (or set window.NORVA_LIBAV_VERBOSE) to
+      // restore full libav logging when debugging.
+      this._verbose = opts.verbose === true ||
+        (typeof window !== 'undefined' && window.NORVA_LIBAV_VERBOSE === true);
       this._cueIndex = null;      // [{t, off}] time→byte index from MKV cues
       this._prefetching = false;  // single-flight guard for scrub prefetch
       this._smallNextRead = false;// next demuxer read after a seek uses a small window
@@ -179,6 +189,9 @@
       const factory = await factoryP;
       const LibAV = factory.LibAV || factory.default.LibAV;
       this.lib = await LibAV({ base: LIBAV_BASE });
+      // Quiet libav at the source before any demuxing (see _verbose above). The
+      // call proxies into the worker, so it governs the thread that does the work.
+      try { await this.lib.av_log_set_level(this._verbose ? this.lib.AV_LOG_VERBOSE : this.lib.AV_LOG_ERROR); } catch (_) {}
       this.timings.wasmMs = Math.round(performance.now() - t0);
       this.log(`libav prêt (${this.lib.libavjsMode}) en ${(this.timings.wasmMs / 1000).toFixed(1)}s`);
 

@@ -65,6 +65,13 @@ async function getLibav() {
   log('Chargement du moteur libav.js sur-mesure…');
   const t0 = performance.now();
   libav = await LibAV({ base: '/webengine/vendor/libav' });
+  // Quiet libav at the source: its INFO default floods the console and costs CPU
+  // (FFmpeg formats + writes every line through the Emscripten TTY once per block;
+  // the matroska demuxer logs a benign warning for every MKV block with
+  // BlockAdditions but no MaxBlockAdditionID). ERROR skips that work at the source
+  // (~2× faster demux on affected files) while keeping real errors. Set
+  // window.NORVA_LIBAV_VERBOSE=true to restore full logging when debugging.
+  try { await libav.av_log_set_level(window.NORVA_LIBAV_VERBOSE === true ? libav.AV_LOG_VERBOSE : libav.AV_LOG_ERROR); } catch (_) {}
   log(`moteur prêt en ${((performance.now() - t0) / 1000).toFixed(1)} s (mode ${libav.libavjsMode})`);
   return libav;
 }
