@@ -376,6 +376,55 @@ select cron.alter_job(12, schedule := '6,16,26,36,46,56 3,4 * * *', active := tr
 
 ---
 
+## Incident 2026-06-28 — panne login (auth/v1/token 504) + 3 causes racines
+
+Symptôme : `auth/v1/token` (password & refresh) en **504**, GoTrue n'arrive plus à
+ouvrir une connexion (`dial tcp [::1]:5432: i/o timeout`) → impossible de se
+connecter. DB non saturée en *connexions* (15/60) mais **CPU/IO saturé** : Postgres
+ne peut plus *forker* un backend pour GoTrue.
+
+**3 causes racines empilées (toutes corrigées + déployées) :**
+1. **Troupeau de finalize** (`norva-source-sync`). Le watchdog (jobid 27, chaque
+   minute) ne sautait un finalize que si son dernier progrès datait de <60s. Sous
+   charge un lot de titres dépasse 60s → un worker vivant paraît mort → le watchdog
+   lance un *doublon* → lots plus lents → plus de faux re-kicks → **6-12 workers
+   concurrents** martelant `cloud_titles`. **Fix** : *single-flight lease*
+   (`config_hint.finalizeLease.until = now+TTL`, défaut 240s, env
+   `NORVA_FINALIZE_LEASE_TTL_MS`) posée avant chaque lot ; le watchdog saute toute
+   source dont le bail est frais. Commit `d76053f`.
+2. **`getEnrichmentProgress` (norva-catalog) en COUNT exact sur table ballonnée.**
+   2× `count(exact)` sur `cloud_titles (movie/series, variant_count>0)` ≈ 68k lignes ;
+   sur un `cloud_titles` fraîchement churné (post-troupeau) → **80-100s par requête**
+   (vu dans les logs postgres : `duration: 100000 ms`). La barre d'enrichissement
+   *poll toutes les ~2s* → empilement plus vite que ça ne finit → Postgres refuse
+   les connexions → 504. **C'est ce qui faisait flapper le login même après l'arrêt
+   du troupeau.** **Fix** : `count:"estimated"` (estimation planner, ~ms) + cache
+   in-isolate 30s/user. Commit `234986f`.
+3. **Bloat `cloud_titles`** (churn massif du finalize). Laissé à l'autovacuum une
+   fois la charge retombée ; le fix #2 rend le hot-path indépendant du bloat.
+
+**Levier de relief d'urgence (quand on ne peut même plus `UPDATE`)** — les *lectures*
+passent mais les *écritures* timeout (contention WAL). Boucle qui force l'état +
+tue les requêtes clientes longues, à relancer jusqu'à ce qu'elle prenne :
+```sql
+do $$ declare n int; begin
+  for n in 1..28 loop
+    -- (ex.) sortir une source du troupeau :
+    update cloud_sources set sync_status='ready' where id='<id>' and sync_status<>'ready';
+    perform pg_terminate_backend(pid) from pg_stat_activity
+      where datname=current_database() and state='active' and pid<>pg_backend_pid()
+        and backend_type='client backend' and usename='authenticator'
+        and now()-query_start > interval '3 seconds';
+    perform pg_sleep(0.4);
+  end loop; end$$;
+```
+Pause du watchdog : `select cron.alter_job(job_id:=27, active:=false);` (réactiver
+ensuite). **Piège** : `UPDATE cron.job` direct = *permission denied* → passer par
+`cron.alter_job`. **Piège** : ne JAMAIS poser de `statement_timeout` sur le rôle
+`authenticator` (déjà causé un PGRST002). Diag clé : `get_logs service=postgres` →
+chercher les `duration: …ms plan:` pour la requête coupable ; `get_logs service=auth`
+→ `failed to connect host=localhost supabase_auth_admin`.
+
 ## Liens
 - [`scaling-playbook.md`](./scaling-playbook.md) — séquence Jour J multi-users.
 - [`dedup-plan.md`](./dedup-plan.md) / [`phase2-dedup-execution.md`](./phase2-dedup-execution.md) — dédup provider-global (le levier structurel Tier A #2).
