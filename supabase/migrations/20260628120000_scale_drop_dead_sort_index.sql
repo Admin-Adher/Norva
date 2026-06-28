@@ -1,0 +1,12 @@
+-- Scaling hardening (2026-06-28): drop the dead `rating` grid-sort index on
+-- cloud_media_items. Measured 0 index scans over the stats lifetime (the "sort by
+-- rating" grid view is effectively unused) while costing 30 MB on the per-user raw
+-- catalogue table — pure write-amplification + disk on every import. The other three
+-- sort indexes (added / year / title) stay: they back grid sorts that ARE used, and
+-- they migrate to catalog_media_items when the global-cache read cutover flips.
+--
+-- Reversible: recreate with
+--   CREATE INDEX idx_cmi_sort_rating ON public.cloud_media_items
+--     USING btree (user_id, item_type, rating_num DESC NULLS LAST, external_id);
+-- (in prod it was dropped CONCURRENTLY; this migration is for fresh-DB reproducibility).
+DROP INDEX IF EXISTS public.idx_cmi_sort_rating;
