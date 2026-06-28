@@ -1172,26 +1172,34 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
     return { sourceId, status: "ready", ...result };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Source finalization failed";
-    const failedAt = new Date().toISOString();
-    await db
-      .from("cloud_sources")
-      .update({
-        sync_status: "error",
-        sync_error: message,
-        last_synced_at: failedAt,
-        config_hint: compactRecord({
-          ...baseHint,
-          syncProgress: mergeSyncProgress(progress, {
-            status: "error",
-            stage: "error",
-            percent: Number(progress.percent ?? 0) || 0,
-            updatedAt: failedAt,
-            error: message,
+    // A statement timeout / lock / resource spike is transient at scale — keep the
+    // source in its syncing/finalizing state (do NOT flip to "error") so the driver's
+    // self-invoke AND the resume-stuck watchdog both pick it up and continue from the
+    // cursor. Only a genuine failure marks the source errored.
+    const transient = (error instanceof HttpError && error.status === 503)
+      || /resource|timeout|compute|deadlock|lock|statement|canceling|57014/i.test(message);
+    if (!transient) {
+      const failedAt = new Date().toISOString();
+      await db
+        .from("cloud_sources")
+        .update({
+          sync_status: "error",
+          sync_error: message,
+          last_synced_at: failedAt,
+          config_hint: compactRecord({
+            ...baseHint,
+            syncProgress: mergeSyncProgress(progress, {
+              status: "error",
+              stage: "error",
+              percent: Number(progress.percent ?? 0) || 0,
+              updatedAt: failedAt,
+              error: message,
+            }),
           }),
-        }),
-      })
-      .eq("id", sourceId)
-      .eq("user_id", userId);
+        })
+        .eq("id", sourceId)
+        .eq("user_id", userId);
+    }
     throw error;
   }
 }
