@@ -144,6 +144,7 @@
       // The muxer re-bases output to 0; _tsAnchor is the real time muxer-0 maps to,
       // applied via SourceBuffer.timestampOffset so seeks/resume land on target.
       this._tsAnchor = 0; this._tsApplied = 0; this._firstVpktPending = false;
+      this._gopFloorPts = null;   // after a seek, drop video PTS below the landing keyframe (open-GOP leading B-frames)
       this._skipSeekTo = null;    // suppress the self-induced seeking event on resume
       this.lib = null;
       this.url = null;
@@ -773,6 +774,14 @@
         const writeList = [];
         for (const k in packets) for (const p of packets[k]) {
           if (this.vS && p.stream_index === this.vS.index) {
+            // Open-GOP seek/resume: a seek lands on a keyframe, but the demuxer then
+            // emits leading B-frames whose PTS is BEFORE that keyframe (they reference
+            // pre-seek frames we never decoded). If muxed, the fMP4 media segment would
+            // not start with a random-access point in PRESENTATION order, so Chromium
+            // rejects the append (CHUNK_DEMUXER_ERROR_APPEND_FAILED) — this is why
+            // resuming a part-watched title failed while a fresh start did not. Drop
+            // them so the keyframe is the first frame in both decode and display order.
+            if (this.vBase !== null && this._gopFloorPts !== null && to64(p.pts, p.ptshi) < this._gopFloorPts) continue;
             p.stream_index = this.V_IDX; this._setVideoDts(p); writeList.push(p);
           } else if (this.aS && p.stream_index === this.aS.index) {
             if (this.copyAudio) { p.stream_index = this.A_IDX; writeList.push(p); }
@@ -823,7 +832,7 @@
         this._tsAnchor = pts * this.vS.time_base_num / this.vS.time_base_den;
         this._firstVpktPending = false;
       }
-      if (this.vBase === null) { this.vBase = pts; this.vFd0 = (p.duration || 0) > 0 ? p.duration : 1; this.vOffset = D_REORDER * this.vFd0; }
+      if (this.vBase === null) { this.vBase = pts; this.vFd0 = (p.duration || 0) > 0 ? p.duration : 1; this.vOffset = D_REORDER * this.vFd0; this._gopFloorPts = pts; }
       const [lo, hi] = from64(this.vBase + this.vCum - this.vOffset);
       p.dts = lo; p.dtshi = hi;
       this.vCum += (p.duration || 0) > 0 ? p.duration : 1;
