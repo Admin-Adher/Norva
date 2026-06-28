@@ -930,8 +930,29 @@ async function cronFinalizeSource(db: SupabaseClient, sourceId: string, country:
 // hands-off, app-closed, without the client's ~160-call ceiling.
 async function driveFinalizeToReady(db: SupabaseClient, sourceId: string, userId: string, country: string | null) {
   const deadline = Date.now() + 90_000;
-  const { data: src0 } = await db.from("cloud_sources").select("config_hint,sync_status").eq("id", sourceId).maybeSingle();
+  const { data: src0 } = await db.from("cloud_sources").select("config_hint,sync_status,created_at").eq("id", sourceId).maybeSingle();
   if (src0 && String(src0.sync_status) === "ready") return; // already done
+
+  // Soft global concurrency cap: bound how many heavy imports finalize at once so
+  // N simultaneous huge ("8K") catalogues can't saturate the shared Postgres. The
+  // priority is deterministic by created_at — we defer ONLY if `maxConcurrent`
+  // OLDER syncing xtream sources are already running ahead of us, so the oldest N
+  // always make progress (no mutual-defer deadlock) and newer ones queue. On defer
+  // we just return; the source stays "syncing" with its finalize cursor, so the
+  // 1-min watchdog re-checks it and resumes the moment a slot frees. Env-tunable;
+  // 0 disables. Fails open: any query hiccup → count 0 → proceed. At 1-2 imports
+  // this never triggers, so it's invisible until real concurrency arrives.
+  const maxConcurrent = boundedInt(Deno.env.get("NORVA_MAX_CONCURRENT_FINALIZE"), 3, 0, 50);
+  if (maxConcurrent > 0 && src0?.created_at) {
+    const { count } = await db.from("cloud_sources")
+      .select("id", { count: "exact", head: true })
+      .eq("sync_status", "syncing")
+      .eq("source_type", "xtream")
+      .lt("created_at", String(src0.created_at))
+      .neq("id", sourceId);
+    if ((count ?? 0) >= maxConcurrent) return; // too many older imports ahead — let the watchdog retry us
+  }
+
   const fc = recordOrEmpty(recordOrEmpty(src0?.config_hint).finalizeCursor);
   let phase = stringOr(fc.phase, "live");
   let offset = Number(fc.offset) || 0;
@@ -1161,9 +1182,12 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
       });
       const nextOffset = Math.min(totalVod, batchOffset + rows.length);
       const nextAfterId = rows.length ? String((rows[rows.length - 1] as { id?: unknown }).id ?? batchAfterId) : batchAfterId;
-      // Keyset: batchLimit (500) is below PostgREST's 1000-row cap, so a short page is
-      // genuinely the last one — done when the batch is empty or under the limit.
-      const done = rows.length === 0 || rows.length < batchLimit;
+      // Keyset done: a page shorter than the effective page size is the last one.
+      // Cap the comparison at PostgREST's 1000-row response limit, so a caller that
+      // passes batchLimit >= 1000 (e.g. /cron/finalize-step's 1500 default) never
+      // reads a capped 1000-row page as "short" and stops after a single batch.
+      const pageCap = Math.min(batchLimit, 1000);
+      const done = rows.length === 0 || rows.length < pageCap;
       // Progress = walk position / total VOD. The keyset offset advances 1:1 with titles
       // built (each movie/series item projects one variant), so it IS "titles built / total".
       // Monotonicity is already guaranteed downstream — both mergeSyncProgress and the client
@@ -1556,19 +1580,20 @@ function isTransientDbError(error: unknown): boolean {
 // holds the isolate long enough to overrun its wall-clock mid-retry. On a
 // persistent transient failure, throw a tagged 503 so the driver can checkpoint
 // and continue in a fresh isolate (where the DB may have recovered).
-async function withDbRetry(op: () => PromiseLike<{ error: unknown }>, label: string) {
+async function withDbRetry<T extends { error: unknown }>(op: () => PromiseLike<T>, label: string): Promise<T> {
   let lastError: unknown = null;
   for (let attempt = 0; attempt < 3; attempt++) {
-    const { error } = await op();
-    if (!error) return;
-    lastError = error;
-    if (!isTransientDbError(error)) break;
+    const result = await op();
+    if (!result.error) return result;
+    lastError = result.error;
+    if (!isTransientDbError(result.error)) break;
     await new Promise((r) => setTimeout(r, Math.min(2500, Math.round(500 * Math.pow(1.8, attempt)))));
   }
   if (isTransientDbError(lastError)) {
     throw new HttpError(503, label, { transient: true, db: (lastError as { message?: string })?.message });
   }
   throwDb(lastError as { message?: string }, label);
+  throw lastError; // unreachable (throwDb throws) — satisfies the Promise<T> return type
 }
 
 // Incremental import: upsert a batch of rows (no delete, no select-back). The
@@ -1578,15 +1603,26 @@ async function withDbRetry(op: () => PromiseLike<{ error: unknown }>, label: str
 // ignoreDuplicates (ON CONFLICT DO NOTHING) skips the row-lock + re-write of an
 // already-present stream (a fresh sync deletes first, so these are inserts), which
 // is far lighter on a busy DB than DO UPDATE.
-async function appendSourceItems(sourceId: string, userId: string, rows: JsonRecord[], db: SupabaseClient) {
+async function appendSourceItems(sourceId: string, userId: string, rows: JsonRecord[], db: SupabaseClient): Promise<number> {
+  // Returns the number of rows ACTUALLY inserted. `ignoreDuplicates` makes the
+  // upsert an INSERT ... ON CONFLICT DO NOTHING, so a stream already imported from
+  // another category (a prior discovery iteration) is dropped here; `count:'exact'`
+  // counts only the real inserts (counts the small batch, NOT the whole table, so
+  // no 8s-budget risk and no row data returned — peak memory stays tiny). The
+  // caller uses this for the "found" counts so cross-category duplicates can't
+  // inflate them or the titles denominator.
+  let inserted = 0;
   for (let index = 0; index < rows.length; index += IMPORT_BATCH_SIZE) {
     const chunk = rows.slice(index, index + IMPORT_BATCH_SIZE);
     if (!chunk.length) continue;
-    await withDbRetry(
-      () => db.from("cloud_media_items").upsert(chunk, { onConflict: "source_id,item_type,external_id", ignoreDuplicates: true }),
+    const res = await withDbRetry(
+      () => db.from("cloud_media_items").upsert(chunk, { onConflict: "source_id,item_type,external_id", ignoreDuplicates: true, count: "exact" }),
       "Unable to save cloud catalog items",
     );
+    const c = (res as { count?: number | null }).count;
+    inserted += typeof c === "number" ? c : chunk.length;
   }
+  return inserted;
 }
 
 // Clear a source's items in bounded chunks so no single DELETE exceeds the edge
@@ -1837,10 +1873,13 @@ async function driveXtreamSyncToReady(sourceId: string, userId: string, db: Supa
         updateSig(sig, def.type, stringOr(row.external_id, ""), Number(recordOrEmpty(row.metadata).added));
       }
       if (batchRows.length) {
-        await appendSourceItems(sourceId, userId, batchRows, db);
-        if (def.type === "live") liveCount += batchRows.length;
-        else if (def.type === "movie") movieCount += batchRows.length;
-        else seriesCount += batchRows.length;
+        // Count only rows the upsert ACTUALLY inserted — a stream already imported
+        // from another category in a prior iteration is dropped (ignoreDuplicates),
+        // so cross-category duplicates no longer inflate the "found" counts/totalVod.
+        const insertedNow = await appendSourceItems(sourceId, userId, batchRows, db);
+        if (def.type === "live") liveCount += insertedNow;
+        else if (def.type === "movie") movieCount += insertedNow;
+        else seriesCount += insertedNow;
       }
       catIdx += batch.length;
       if (catIdx >= targets.length) { typeIdx++; catIdx = 0; }

@@ -773,7 +773,7 @@ class SourceManager {
           <p class="hint source-sync-found-note">These are titles detected from your provider. They become watchable as Norva finishes preparing them — you can keep browsing while this runs.</p>
         ` : ''}
         <div class="source-sync-progress-wrap">
-          <div class="source-sync-progress ${determinate ? 'is-determinate' : ''}" style="--source-sync-percent: ${this.escapeHtml(String(percent))}%;" aria-label="Catalog import progress">
+          <div class="source-sync-progress ${determinate ? 'is-determinate' : ''}" style="--source-sync-percent: ${this.escapeHtml(String(percent))}%;" role="progressbar" aria-label="Catalog import progress" aria-valuemin="0" aria-valuemax="100"${determinate ? ` aria-valuenow="${Math.round(percent)}"` : ''}>
             <span></span>
           </div>
           ${determinate ? `<small>${this.escapeHtml(String(Math.round(percent)))}%</small>` : ''}
@@ -881,10 +881,13 @@ class SourceManager {
         const sourceId = initialSource.id || initialSource.cloudId || initialSource.cloud_id;
         const token = Symbol('catalog-preparation');
         this.catalogPreparationToken = token;
+        const previouslyFocused = document.activeElement;
 
         const closeToSettings = async () => {
             if (this.catalogPreparationToken === token) this.catalogPreparationToken = null;
             modal.classList.remove('active');
+            // Restore focus to whatever opened the dialog (keyboard / SR users).
+            try { previouslyFocused && previouslyFocused.focus && previouslyFocused.focus({ preventScroll: true }); } catch (_) { /* noop */ }
             await this.loadSources();
             this.notifySourceHealthChanged();
         };
@@ -924,13 +927,21 @@ class SourceManager {
         modal.querySelector('.modal-close').onclick = closeToSettings;
         modal.classList.add('active');
         render(initialSource);
+        // Move focus into the dialog so keyboard / screen-reader users land inside it.
+        try { (modal.querySelector('.modal-close') || modal).focus({ preventScroll: true }); } catch (_) { /* noop */ }
 
         if (!sourceId) return;
 
         let current = initialSource;
         let recoveryStarted = false;
-        for (let attempt = 0; attempt < 90; attempt += 1) {
-            if (this.catalogPreparationToken !== token) return;
+        let attempt = 0;
+        // Poll until a terminal state OR the modal is closed/backgrounded (the token
+        // guard clears on close). Fast (2s) for the first ~3 min while the user is
+        // likely watching, then slow to 15s so a long import (an 8K catalogue takes
+        // hours) keeps a LIVE, updating bar instead of silently freezing at e.g. 92%
+        // — a frozen bar reads as a crash. The slow endpoint is client-cached, so
+        // long-lived polling is cheap, and the token guard stops it cleanly.
+        while (this.catalogPreparationToken === token) {
             const { phase } = this.sourceSyncState(current);
             if (phase === 'ready' || phase === 'error') return;
 
@@ -943,7 +954,8 @@ class SourceManager {
                     .catch(err => console.warn('[SourceManager] Catalog finalization recovery failed:', err));
             }
 
-            await new Promise(resolve => setTimeout(resolve, 2000));
+            attempt += 1;
+            await new Promise(resolve => setTimeout(resolve, attempt <= 90 ? 2000 : 15000));
             if (this.catalogPreparationToken !== token) return;
 
             try {
