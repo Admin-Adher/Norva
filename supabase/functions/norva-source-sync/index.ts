@@ -854,7 +854,13 @@ async function cronRefreshDue(db: SupabaseClient) {
 // backoff), leaving a source "syncing" with an active discover cursor and a stale
 // heartbeat. This re-kicks those so a big import always finishes — even app-closed.
 async function cronResumeStuck(db: SupabaseClient) {
-  const staleIso = new Date(Date.now() - 120_000).toISOString();
+  // A finalize chain reports progress every batch (~4s), so 60s of silence means the
+  // background isolate was torn down and the chain broke — revive it fast (this cron
+  // runs every 30s) for smooth, quick completion. Discovery heartbeats less often, so
+  // keep its threshold conservative to avoid double-driving a still-live import.
+  const now = Date.now();
+  const staleFinalizeIso = new Date(now - 60_000).toISOString();
+  const staleDiscoverIso = new Date(now - 120_000).toISOString();
   const { data, error } = await db
     .from("cloud_sources")
     .select("id,user_id,config_hint")
@@ -876,6 +882,7 @@ async function cronResumeStuck(db: SupabaseClient) {
     const lastSeen = inDiscovery
       ? (stringOr(cursor.heartbeatAt, "") || stringOr(cursor.startedAt, ""))
       : stringOr(progress.updatedAt, "");
+    const staleIso = inDiscovery ? staleDiscoverIso : staleFinalizeIso;
     if (lastSeen && lastSeen > staleIso) continue;
     if (inDiscovery) runInBackground(driveXtreamSyncToReady(String(src.id), String(src.user_id), db));
     else runInBackground(driveFinalizeToReady(db, String(src.id), String(src.user_id), null));
