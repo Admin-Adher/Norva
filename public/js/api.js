@@ -2105,9 +2105,34 @@ const API = {
         },
         // Audio/subtitle languages actually present in the catalogue (cloud-only;
         // drives the dynamic filter menus). Empty on failure so menus fall back.
+        // Cached in localStorage for 10 min: the server computes this menu with a burst
+        // of count-queries, and it barely changes mid-session — so we serve the cached
+        // menu on every page open / periodic tick instead of re-hitting the endpoint.
+        // The grid filter itself stays exact, so a momentarily-stale option is harmless.
         languageFacets: (params = {}) => {
-            try { return cloudHomeApi().languageFacets(params); }
+            const type = params && params.type === 'series' ? 'series' : 'movie';
+            const key = `norva-facets-${type}`;
+            const TTL = 600000; // 10 min
+            try {
+                const raw = localStorage.getItem(key);
+                if (raw) {
+                    const cached = JSON.parse(raw);
+                    if (cached && cached.exp > Date.now() && cached.value) {
+                        return Promise.resolve(cached.value);
+                    }
+                }
+            } catch (_) { /* ignore parse/quota */ }
+            let p;
+            try { p = cloudHomeApi().languageFacets(params); }
             catch (_) { return Promise.resolve({ audio: [], subtitles: [] }); }
+            return Promise.resolve(p).then((value) => {
+                try {
+                    if (value && (Array.isArray(value.audio) || Array.isArray(value.subtitles))) {
+                        localStorage.setItem(key, JSON.stringify({ exp: Date.now() + TTL, value }));
+                    }
+                } catch (_) { /* ignore quota */ }
+                return value;
+            }).catch(() => ({ audio: [], subtitles: [] }));
         },
         // Best-effort capture of real audio-track languages observed at playback.
         reportObservedLanguages: (body) => {

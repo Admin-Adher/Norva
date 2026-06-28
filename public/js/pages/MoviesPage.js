@@ -499,7 +499,7 @@ class MoviesPage {
         // track the crawl in near-real-time. Gentle (server-memoized 60s, skips DOM work
         // when unchanged); cleared in hide().
         if (this._facetTimer) clearInterval(this._facetTimer);
-        this._facetTimer = setInterval(() => this.populateLanguageFacets(), 120000);
+        this._facetTimer = setInterval(() => this.populateLanguageFacets(), 600000);
 
         // A genre is selected (e.g. returning to the page) → (re)open its grid.
         if (this.isCloudPagedMode()) {
