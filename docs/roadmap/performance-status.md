@@ -426,6 +426,7 @@ chercher les `duration: …ms plan:` pour la requête coupable ; `get_logs servi
 → `failed to connect host=localhost supabase_auth_admin`.
 
 ## Liens
+- [`2026-06-28-session-log.md`](./2026-06-28-session-log.md) — **journal complet** de la journée (panne login + refresh 616 s→1,71 s + onboarding « utilisable » + upgrade SMALL + reprise super8k).
 - [`scaling-playbook.md`](./scaling-playbook.md) — séquence Jour J multi-users.
 - [`dedup-plan.md`](./dedup-plan.md) / [`phase2-dedup-execution.md`](./phase2-dedup-execution.md) — dédup provider-global (le levier structurel Tier A #2).
 - [`../ARCHITECTURE-RELIABILITY.md`](../ARCHITECTURE-RELIABILITY.md) — architecture de fiabilité.

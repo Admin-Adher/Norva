@@ -9,23 +9,26 @@
     'use strict';
 
     // --- Refresh tracer --------------------------------------------------------
-    // Always-on (disable with localStorage.norva_trace="0") timeline so a page
+    // Opt-in (enable with localStorage.norva_trace="1" then reload) timeline so a page
     // refresh reads end-to-end in the console: every cloud/catalog network round-trip,
     // cache HIT/MISS, the auth handshake, and the boot phases — each stamped with ms
-    // since navigation start. The headline it makes obvious: a HARD refresh re-pays
-    // the network for everything because the client caches below are in-memory (a
+    // since navigation start. Off by default → zero console noise and zero overhead in
+    // production. The headline it makes obvious when on: a HARD refresh re-pays the
+    // network for everything because the client caches below are in-memory (a
     // `new Map()`, wiped on reload), not persisted — so "cached in the DB" speeds the
     // server response but the browser still does the full round-trips each reload.
     const NorvaTrace = (function () {
-        let enabled = true;
-        try { enabled = localStorage.getItem('norva_trace') !== '0'; } catch (_) { /* private mode */ }
+        // Opt-in: silent (zero output, zero overhead) unless explicitly enabled with
+        // localStorage.norva_trace="1" then reload. Keeps the production console clean.
+        let enabled = false;
+        try { enabled = localStorage.getItem('norva_trace') === '1'; } catch (_) { /* private mode */ }
         const t = () => (typeof performance !== 'undefined' && performance.now ? performance.now() : 0);
         const marks = [];
         const fmt = (ms) => '+' + (ms < 1000 ? Math.round(ms) + 'ms' : (ms / 1000).toFixed(2) + 's');
         function log(label, detail) {
+            if (!enabled) return;
             const ms = t();
             marks.push({ ms, label, detail });
-            if (!enabled) return;
             const d = detail == null || detail === '' ? '' : ' — ' + (typeof detail === 'object' ? JSON.stringify(detail) : detail);
             try {
                 console.log('%c[Norva ' + fmt(ms) + ']%c ' + label + '%c' + d,
@@ -46,7 +49,7 @@
                 console.groupEnd();
             } catch (_) { /* noop */ }
         }
-        if (enabled) { try { console.log('%c[Norva] refresh trace ON — NorvaTrace.summary() for the table; localStorage.norva_trace="0" then reload to silence.', 'color:#8a93a6'); } catch (_) { /* noop */ } }
+        if (enabled) { try { console.log('%c[Norva] refresh trace ON (localStorage.norva_trace="1"). NorvaTrace.summary() for the table; remove the flag + reload to silence.', 'color:#8a93a6'); } catch (_) { /* noop */ } }
         return { log, time, summary, marks, get enabled() { return enabled; } };
     })();
     if (typeof window !== 'undefined') window.NorvaTrace = window.NorvaTrace || NorvaTrace;
