@@ -10,6 +10,11 @@
   <title>Norva | Cloud media player</title>
   <meta name="description" content="Organize your compatible media source and sync playback across your screens.">
   <link rel="icon" type="image/png" href="/favicon.png">
+  <!-- Warm the TLS connection to the API origin before the first data fetch (every
+       catalogue/auth call goes here) — saves a full DNS+TCP+TLS round-trip on cold load. -->
+  <link rel="preconnect" href="https://oupsceccxsonaalhueff.supabase.co" crossorigin>
+  <link rel="dns-prefetch" href="https://image.tmdb.org">
+  <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
   <link rel="stylesheet" href="/css/main.css?v=50">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>

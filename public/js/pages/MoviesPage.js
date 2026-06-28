@@ -1212,7 +1212,7 @@ class MoviesPage {
         card.innerHTML = `
             <div class="movie-poster">
                 <img src="${MediaUtils.escapeHtml(poster)}" alt="${MediaUtils.escapeHtml(displayName)}"
-                     onerror="this.onerror=null;this.src='/img/norva-media-placeholder.png'" loading="lazy">
+                     onerror="this.onerror=null;this.src='/img/norva-media-placeholder.png'" loading="lazy" decoding="async">
                 <div class="movie-play-overlay">
                     <span class="play-icon">${Icons.play}</span>
                 </div>
@@ -1278,7 +1278,7 @@ class MoviesPage {
             <div class="continue-card" data-item-id="${MediaUtils.escapeHtml(h.item_id)}"
                  data-source-id="${h.source_id || h.data?.sourceId || ''}">
                 <img src="${MediaUtils.escapeHtml(MediaUtils.safeImageUrl(h.data?.poster, '/img/norva-media-placeholder.png'))}"
-                     onerror="this.onerror=null;this.src='/img/norva-media-placeholder.png'" loading="lazy" alt="">
+                     onerror="this.onerror=null;this.src='/img/norva-media-placeholder.png'" loading="lazy" decoding="async" alt="">
                 <div class="continue-card-info">
                     <p class="continue-card-title">${MediaUtils.escapeHtml(h.data?.title || 'Unknown')}</p>
                     <div class="card-progress"><div class="card-progress-fill" style="width:${ratio}%"></div></div>
