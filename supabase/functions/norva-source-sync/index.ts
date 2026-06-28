@@ -861,21 +861,31 @@ async function cronResumeStuck(db: SupabaseClient) {
   const now = Date.now();
   const staleFinalizeIso = new Date(now - 60_000).toISOString();
   const staleDiscoverIso = new Date(now - 120_000).toISOString();
+  // Include "error" so a finalize that tripped a non-terminal failure isn't stranded:
+  // if it has a finalize cursor (it was mid-build), the watchdog resumes it from there
+  // (finalizeCloudSource resets sync_status back to "syncing" on its first batch). A 60s
+  // staleness gate keeps this to ~one retry/min for a genuinely broken source.
   const { data, error } = await db
     .from("cloud_sources")
-    .select("id,user_id,config_hint")
-    .eq("sync_status", "syncing")
+    .select("id,user_id,sync_status,config_hint")
+    .in("sync_status", ["syncing", "error"])
     .eq("source_type", "xtream")
     .limit(100);
   if (error) return { ok: false, error: error.message };
   const resumed: string[] = [];
   const finalizingStages = new Set(["materializing", "building_titles", "building_live_channels", "building_live_variants", "finalizing"]);
+  const finalizePhases = new Set(["live", "live_channels", "live_variants", "titles", "complete"]);
   for (const src of (data ?? [])) {
     const hint = recordOrEmpty(src.config_hint);
     const cursor = recordOrEmpty(hint.syncCursor);
     const progress = recordOrEmpty(hint.syncProgress);
-    const inDiscovery = cursor.active === true && stringOr(cursor.phase, "") === "discover";
-    const inFinalize = !inDiscovery && finalizingStages.has(stringOr(progress.stage, ""));
+    const finalizeCursor = recordOrEmpty(hint.finalizeCursor);
+    const isError = String(src.sync_status) === "error";
+    const inDiscovery = !isError && cursor.active === true && stringOr(cursor.phase, "") === "discover";
+    // A finalize is resumable when it's actively in a finalize stage, OR it errored but
+    // still carries a finalize cursor (so we know where to pick the build back up).
+    const inFinalize = !inDiscovery
+      && (finalizingStages.has(stringOr(progress.stage, "")) || (isError && finalizePhases.has(stringOr(finalizeCursor.phase, ""))));
     if (!inDiscovery && !inFinalize) continue;
     // Recent activity (heartbeat / startedAt for discovery, progress updatedAt for
     // finalize) → still alive; only re-kick a genuinely stalled run.
@@ -1195,14 +1205,19 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
 
     return { sourceId, status: "ready", ...result };
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Source finalization failed";
-    // A statement timeout / lock / resource spike is transient at scale — keep the
-    // source in its syncing/finalizing state (do NOT flip to "error") so the driver's
-    // self-invoke AND the resume-stuck watchdog both pick it up and continue from the
-    // cursor. Only a genuine failure marks the source errored.
-    const transient = (error instanceof HttpError && error.status === 503)
-      || /resource|timeout|compute|deadlock|lock|statement|canceling|57014/i.test(message);
-    if (!transient) {
+    const message = error instanceof Error ? error.message : (String(error) || "Source finalization failed");
+    // Default to RESUMABLE: the titles grind is long and a mid-finalize source has a lot
+    // built (cursor + tens of thousands of variants). Keep it "syncing" for ANY non-terminal
+    // failure — a statement timeout, a deadlock, an isolate torn down mid-batch, or an
+    // unexpected non-Error throw (which surfaces as the generic "Source finalization failed"
+    // and must NOT be mistaken for terminal) — so the self-invoke chain AND the watchdog
+    // resume it from the cursor. Only a genuine TERMINAL error (a 4xx that won't change on
+    // retry: no items / not found / bad request, but never 429 rate-limit) marks it errored.
+    // Flipping to "error" on a transient blip used to strand a 26%-built catalogue forever,
+    // because the watchdog skips errored sources.
+    const terminal = error instanceof HttpError
+      && error.status >= 400 && error.status < 500 && error.status !== 429;
+    if (terminal) {
       const failedAt = new Date().toISOString();
       await db
         .from("cloud_sources")
