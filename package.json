@@ -9,11 +9,12 @@
         "dev": "node --watch server/index.js",
         "verify:region": "node scripts/verify-region-model.js",
         "hash:assets": "node scripts/hash-asset-versions.js",
+        "patch:libav": "node scripts/patch-libav-logs.js",
         "cloudflare:whoami": "wrangler whoami",
-        "deploy:cloudflare": "npm run hash:assets && wrangler pages deploy public --project-name norva-web --branch main",
+        "deploy:cloudflare": "npm run patch:libav && npm run hash:assets && wrangler pages deploy public --project-name norva-web --branch main",
         "desktop": "electron .",
         "rebuild:electron": "electron-rebuild -f -w better-sqlite3",
-        "build:desktop": "npm run rebuild:electron && electron-builder --win portable --x64",
+        "build:desktop": "npm run patch:libav && npm run rebuild:electron && electron-builder --win portable --x64",
         "test": "node --test tests/*.test.js"
     },
     "dependencies": {
