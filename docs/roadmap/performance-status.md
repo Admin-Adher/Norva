@@ -235,6 +235,65 @@ where provider_tmdb_id is not null and provider_tmdb_id <> '' and provider_tmdb_
 
 ---
 
+## 3ter. Validation TMDB de masse — analyse & plan (DIFFÉRÉ)
+
+> **Pourquoi** : exploiter les 71 % de recouvrement en **qualité** (poster/synopsis/
+> i18n canoniques TMDB) suppose que `catalog_titles` soit **validé**. Or seuls
+> ~1 600 / ~50 000 titres distincts le sont. Ce bloc capture travail + mécanisme +
+> débit + estimation, pour reprendre sans re-creuser. _Mesuré 2026-06-28._
+
+**État mesuré**
+- À valider : **~63 843 lignes** `cloud_titles` (`match_status in
+  ('provider_unverified','weak')` + ID TMDB), soit **~50 000 titres distincts**
+  (52 267 distincts avec ID − 1 608 déjà validés).
+- Les `unmatched` (sans ID, ~10 120) sont quasi-exhaustés par le name-match
+  (`search-match` à `done`, ~1 822 promus au total). Le reste ne matche pas par nom.
+- 97 % des titres ont déjà un poster **provider** → l'app s'affiche ; la validation
+  apporte la **qualité** TMDB, **pas** la vitesse.
+
+**Mécanisme = cron `revalidate` (jobid 13)** — `cronRevalidate` dans
+`supabase/functions/norva-source-sync/index.ts` :
+- Route `POST /cron/revalidate?limit=150&conc=12[&reset=1]` (auth : service key ou
+  secret cron Vault).
+- Sélectionne `provider_unverified`/`weak` **avec** ID → `validateTmdbCandidate`
+  (TMDB details + traductions) → promeut en `provider_verified` si confiance ≥ 0,58
+  → écrit `cloud_titles` → **trigger mirror** → `catalog_titles`.
+- Curseur résumable `norva_revalidate_state.last_id` = **UUID aléatoire** (ordre non
+  chronologique) → les lignes ajoutées/échouées après le passage du curseur ne sont
+  **pas** revues. État actuel : `done=true`, curseur en bout → **`reset=1`** requis
+  pour re-balayer.
+
+**Débit & estimation** (goulot = **triggers DB par ligne**, pas TMDB ~50 req/s) :
+
+| Régime | Durée | App |
+|---|---|---|
+| Flat-out, DB au repos (chaîne auto-invoquée) | **~2-4 h** | dégradée |
+| Non-stop en journée (contention + trafic + finalize super8k) | **~½-1 jour** | **re-saturée (annule A1)** |
+| Hors heures, throttlé (fenêtre 3-4 h, conc bornée) | **~3-5 nuits** | fluide ✅ |
+
+**Mises en garde**
+1. **Pas 100 %** : le garde-fou de confiance (0,58) rejette les titres provider
+   « sales » (`Film (HD VF) 2020 MULTI`) → **~60-85 %** de promotion attendue.
+2. **Cible mouvante** : super8k finalise encore (~89 %) et ajoute des
+   `provider_unverified` → **attendre la fin de super8k** avant le run de masse.
+3. **~64k appels TMDB** en rafale (dans les limites TMDB, mais soutenu).
+
+**Plan reco (à reprendre)**
+1. Attendre que super8k finisse (sync_status → ready, plus de `finalizeCursor`).
+2. Câbler une **chaîne de validation bornée off-peak** : `reset=1` du curseur
+   revalidate + auto-invocation dans la fenêtre 3-4 h UTC, conc plafonnée + throttle
+   inter-batch (façon `NORVA_FINALIZE_THROTTLE_MS`). Vide les ~50k en ~3-5 nuits sans
+   toucher la fluidité de jour. *(Alt : run court « one-shot » surveillé, en
+   acceptant ~quelques h d'app ralentie.)*
+3. Surveiller la montée :
+   ```sql
+   select count(*) filter (where (metadata->'tmdbValidation'->>'valid')='true') as validated,
+          count(*) as total
+   from public.catalog_titles;   -- validated doit grimper de ~1 600 vers ~40-50k
+   ```
+
+---
+
 ## 4. 🚑 RUNBOOK — saturation DB (pool de connexions épuisé)
 
 > Symptôme vécu **deux fois**. Repérer vite, relâcher vite, **sans** le DDL qui a
