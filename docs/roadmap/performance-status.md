@@ -186,13 +186,30 @@ chaque provider). L'archi exploite déjà ça :
   (sync, **search-match**, revalidate) propage vers `catalog_titles` → réutilisable
   par tous les users.
 
-**#1 — FAIT : découpler la réutilisation gratuite du plafond TMDB.** Le code
-plafonnait les *candidats* à `DEFAULT_TMDB_VALIDATE_LIMIT` (120) / batch **avant**
-l'étape de réutilisation → un import « ruisselait » 120 titres à la fois. Désormais
-la réutilisation (lecture DB gratuite) tourne sur **tout le batch** (`REUSE_SCAN_CAP`),
-et le plafond 120 ne s'applique **qu'aux vrais appels TMDB** (`toFetch.slice(0, limit)`).
-→ les ~71 % déjà connus se remplissent en **1 passe** au lieu de ~130. Additif,
-best-effort, réversible.
+**#1 — FAIT (code correct) mais DORMANT en prod — mesuré le 2026-06-28.** Le code
+plafonnait les *candidats* à 120/batch **avant** la réutilisation ; corrigé pour que
+la réutilisation (lecture DB gratuite) voie **tout le batch** (`REUSE_SCAN_CAP`) et
+que le plafond 120 ne s'applique **qu'aux vrais appels TMDB** (`toFetch.slice(0, limit)`).
+**MAIS la mesure révèle que ça ne change rien en prod**, pour 2 raisons :
+1. **La validation TMDB inline est désactivée à l'import** : les 2 seuls appelants
+   (finalize norva-source-sync + norva-cloud) passent `tmdbValidateLimit=0`
+   (`NORVA_TMDB_VALIDATE_FINALIZE_LIMIT`, défaut 0 — *« defer to crons, release the
+   user fast »*) → `validateProviderTmdbIds` fait un early-return à `limit<=0`, donc
+   la réutilisation **ne tourne jamais** sur le chemin d'import.
+2. **Le cache validé est minuscule** : sur 72 762 titres, **97 % ont déjà un poster
+   (provider)** mais seuls **~1 800 sont validés TMDB** (`provider_verified` ;
+   1 608 dans `catalog_titles`). 60 798 ont un ID TMDB mais **non validés**.
+→ **L'import est DÉJÀ instantané** via les données provider (poster + titre
+immédiats) — c'est le but du `limit=0`. Le cache cross-provider apporte de la
+**qualité** (métadonnées TMDB canoniques), pas de la vitesse, et cette couche est
+aujourd'hui **off inline + sous-alimentée**. #1 reste en place (correct, inoffensif),
+prêt à payer **le jour où la validation TMDB peuple le cache** (cf. ci-dessous).
+
+**Le vrai levier (différé)** : faire tourner la **validation TMDB en masse, hors
+heures**, pour peupler `catalog_titles` (de ~1 600 → ~50 000 validés). C'est le job
+lourd (TMDB + triggers DB) volontairement différé pour la fluidité — à lancer
+délibérément off-peak. Une fois le cache validé, la réutilisation + #1 paient
+automatiquement pour le 2ᵉ user (qualité instantanée, 0 appel TMDB).
 
 **#2 — DÉJÀ EN PLACE.** Les ids résolus par **nom** (cron `search-match`) sont
 propagés à `catalog_titles` par le trigger ci-dessus → réutilisables cross-user (pas
