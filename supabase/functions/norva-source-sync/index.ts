@@ -110,6 +110,7 @@ Deno.serve(async (req) => {
           country: url.searchParams.get("country"),
           phase: stringOr(url.searchParams.get("phase"), "live"),
           offset: Number(url.searchParams.get("offset")) || 0,
+          afterId: stringOr(url.searchParams.get("afterId"), ""),
           limit: Math.max(1, Math.min(2000, Number(url.searchParams.get("limit")) || 1500)),
         });
         return json(req, result);
@@ -166,6 +167,10 @@ Deno.serve(async (req) => {
         country: url.searchParams.get("country"),
         phase: stringOr(url.searchParams.get("phase"), "live"),
         offset: boundedInt(url.searchParams.get("offset"), 0, 0, 1_000_000),
+        // Keyset cursor for the titles phase — the client threads it back from each
+        // response so it resumes the same forward walk the background driver uses
+        // (and cooperates with it) instead of re-scanning by OFFSET.
+        afterId: stringOr(url.searchParams.get("afterId"), ""),
         limit: boundedInt(url.searchParams.get("limit"), 1000, 1, 2000),
       });
       return json(req, result);
