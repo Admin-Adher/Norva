@@ -907,6 +907,7 @@ async function driveFinalizeToReady(db: SupabaseClient, sourceId: string, userId
   const fc = recordOrEmpty(recordOrEmpty(src0?.config_hint).finalizeCursor);
   let phase = stringOr(fc.phase, "live");
   let offset = Number(fc.offset) || 0;
+  let afterId = stringOr(fc.afterId, "");
   let guard = 0;
   while (Date.now() < deadline && guard++ < 400) {
     let result: JsonRecord;
@@ -916,7 +917,7 @@ async function driveFinalizeToReady(db: SupabaseClient, sourceId: string, userId
       // even under concurrent read load on a huge catalogue. 1500 timed out at scale;
       // 500 fits, at the cost of more (cheap) self-invocations.
       const batchLimit = phase === "titles" ? 500 : 1500;
-      result = await finalizeCloudSource(sourceId, userId, db, { country, phase, offset, limit: batchLimit }) as unknown as JsonRecord;
+      result = await finalizeCloudSource(sourceId, userId, db, { country, phase, offset, afterId, limit: batchLimit }) as unknown as JsonRecord;
     } catch (e) {
       // Transient contention/compute spike → continue in a fresh isolate; a real
       // error (e.g. 422 no items) surfaces and stops the chain. A statement timeout
@@ -935,7 +936,8 @@ async function driveFinalizeToReady(db: SupabaseClient, sourceId: string, userId
     }
     phase = stringOr(result.nextPhase, "complete");
     offset = Number(result.nextOffset) || 0;
-    await patchSourceConfigHint(db, sourceId, (hint) => { hint.finalizeCursor = { phase, offset }; return hint; });
+    afterId = stringOr(result.nextAfterId, afterId);
+    await patchSourceConfigHint(db, sourceId, (hint) => { hint.finalizeCursor = { phase, offset, afterId }; return hint; });
   }
   // Budget/guard hit before ready → continue in a fresh isolate.
   await selfInvokeFinalize(sourceId, country);
@@ -967,6 +969,7 @@ type FinalizeCloudSourceOptions = {
   country: string | null;
   phase: string;
   offset: number;
+  afterId?: string;
   limit: number;
 };
 
@@ -986,6 +989,7 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
   const phase = normalizeFinalizePhase(options.phase);
   const batchLimit = Math.max(1, Math.min(2000, options.limit || 1000));
   const batchOffset = Math.max(0, options.offset || 0);
+  const batchAfterId = stringOr(options.afterId, "");
   const counts = await countSourceItems(sourceId, userId, db, existingProgress);
   let progress: JsonRecord = compactRecord({
     ...existingProgress,
@@ -1091,7 +1095,7 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
       const totalVod = counts.movies + counts.series;
       const rows = await loadSourceItems(sourceId, userId, db, {
         itemTypes: ["movie", "series"],
-        offset: batchOffset,
+        afterId: batchAfterId,
         limit: batchLimit,
       });
       const sourceType = stringOr(source.source_type, "");
@@ -1118,10 +1122,10 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
         tmdbValidateLimit: boundedInt(Deno.env.get("NORVA_TMDB_VALIDATE_FINALIZE_LIMIT"), 0, 0, 1000),
       });
       const nextOffset = Math.min(totalVod, batchOffset + rows.length);
-      // Done only when the catalogue is exhausted — NOT when a page is short of
-      // batchLimit (PostgREST caps reads at 1000 rows, so a full page can be
-      // < batchLimit while plenty of VOD remains).
-      const done = rows.length === 0 || nextOffset >= totalVod;
+      const nextAfterId = rows.length ? String((rows[rows.length - 1] as { id?: unknown }).id ?? batchAfterId) : batchAfterId;
+      // Keyset: batchLimit (500) is below PostgREST's 1000-row cap, so a short page is
+      // genuinely the last one — done when the batch is empty or under the limit.
+      const done = rows.length === 0 || rows.length < batchLimit;
       await reportProgress({
         stage: done ? "finalizing" : "building_titles",
         percent: done ? 96 : titleFinalizePercent(nextOffset, totalVod),
@@ -1133,6 +1137,7 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
         phase: "titles",
         nextPhase: done ? "complete" : "titles",
         nextOffset,
+        nextAfterId,
         limit: batchLimit,
         totalVod,
         done,
@@ -1307,6 +1312,7 @@ async function countSourceItems(sourceId: string, userId: string, db: SupabaseCl
 type LoadSourceItemsOptions = {
   itemTypes?: string[];
   offset?: number;
+  afterId?: string;
   limit?: number;
 };
 
@@ -1318,24 +1324,37 @@ async function loadSourceItems(
 ): Promise<LiveCatalogItem[]> {
   const rows: LiveCatalogItem[] = [];
   const pageSize = options.limit ? Math.max(1, Math.min(2000, options.limit)) : 1000;
-  const startOffset = Math.max(0, options.offset ?? 0);
   const maxRows = options.limit ? pageSize : Number.POSITIVE_INFINITY;
-  for (let offset = startOffset; rows.length < maxRows; offset += pageSize) {
+  // Keyset mode (WHERE id > afterId, ORDER BY id): constant-time regardless of
+  // position — used by the titles finalize so it doesn't slow down as OFFSET would
+  // scan+skip ever more rows on a huge catalogue. Offset mode kept for other callers.
+  const keyset = typeof options.afterId === "string";
+  let afterId = options.afterId || "";
+  for (let offset = Math.max(0, options.offset ?? 0); rows.length < maxRows; offset += pageSize) {
     let query = db
       .from("cloud_media_items")
       .select("id,source_id,item_type,external_id,parent_external_id,title,subtitle,poster_url,metadata,playback_hint,available")
       .eq("source_id", sourceId)
-      .eq("user_id", userId)
-      .order("item_type", { ascending: true })
-      .order("external_id", { ascending: true });
+      .eq("user_id", userId);
     const itemTypes = (options.itemTypes || []).filter(Boolean);
     if (itemTypes.length === 1) query = query.eq("item_type", itemTypes[0]);
     else if (itemTypes.length > 1) query = query.in("item_type", itemTypes);
 
-    const { data, error } = await query.range(offset, offset + pageSize - 1);
+    if (keyset) {
+      query = query.order("id", { ascending: true }).limit(pageSize);
+      if (afterId) query = query.gt("id", afterId);
+    } else {
+      query = query
+        .order("item_type", { ascending: true })
+        .order("external_id", { ascending: true })
+        .range(offset, offset + pageSize - 1);
+    }
+
+    const { data, error } = await query;
     if (error) throwDb(error, "Unable to load imported catalog items");
     if (!Array.isArray(data) || !data.length) break;
     rows.push(...data as LiveCatalogItem[]);
+    if (keyset) afterId = String((data[data.length - 1] as { id?: unknown }).id ?? "");
     if (data.length < pageSize) break;
     if (options.limit) break;
   }
