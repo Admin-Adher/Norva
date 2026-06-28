@@ -82,6 +82,14 @@
       per-user garde membership/tri/pagination ; l'overlay ne remplit que si le global a une valeur
       (miss/flag-off/global vide ⇒ données per-user inchangées). `deno check` OK, **déployé** (défaut
       OFF). _Approche overlay (comme Phase 1) plutôt que réécrire la requête = sûr sur ce chemin._
+- [x] **Lecture live flag-gated** : `listMaterializedLiveLogicalChannels` + le détail chaîne
+      (`norva-catalog`) superposent les champs lourds de chaîne depuis `catalog_live_logical_channels`
+      (`applyLiveCatalogOverlay`, par `server_host`+`logical_id`) — cible le **TOAST 79 MB**
+      (`default_variant` + `variant_preview`) + poster/icon/playback_hint/metadata ; section/lcn/title
+      restent per-user (tri lineup). Même flag. `deno check` OK, **déployé** (défaut OFF). **Validé en
+      rollback** : 9 500/9 500 chaînes matchées, `default_variant` + `variant_preview` **100%
+      récupérables** du global. _(L'overlay/amincissement des lignes `cloud_live_variants` — 59 MB,
+      clé `logical_channel_id` — reste une petite étape ultérieure.)_
 - [x] **Amincissement per-user** : `thin_source_media_items(p_source_id)` vide poster/backdrop/
       subtitle/metadata/playback_hint des lignes `cloud_media_items` **uniquement là où le global les
       détient** (l'overlay refill toujours) ; garde title + colonnes de tri + membership. **Validé en
@@ -108,7 +116,6 @@ where g.server_host=(select config_hint->>'serverHost' from cloud_sources where 
 ## ⏳ RESTE À FAIRE (Phase 2, multi-session, additif + réversible)
 
 Ordre conseillé. Tout reste **derrière un flag par défaut OFF** ⇒ zéro impact tant que non basculé.
-- [ ] **Lecture live flag-gated** : rails/grille live lisent `catalog_live_*` (même overlay), état per-user.
 - [ ] **Test de dédup réel** : ré-importer super8k (user A) **dans le schéma global** + ajouter
       un **2ᵉ user même provider** → vérifier `dup_factor ≈ 2` côté per-user mais **+0 stockage
       global** (le vrai test « des milliers d'users d'un provider connu »).
