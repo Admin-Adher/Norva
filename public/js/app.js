@@ -373,18 +373,42 @@ class App {
     }
 
     guardCatalogPage(pageName) {
-        return this.isCatalogPage(pageName) && !this.isCatalogReady() ? 'home' : pageName;
+        if (!this.isCatalogPage(pageName)) return pageName;
+        // Allow a catalog page during sync once its own category has content.
+        return (this.isCatalogReady() || this.catalogCategoryAvailable(pageName)) ? pageName : 'home';
+    }
+
+    // True once a syncing (or ready) source has at least one item of this category.
+    // The page name ('live' | 'movies' | 'series') maps directly to the progress
+    // counts keys, which fill progressively during discovery (movies/live first,
+    // series once reached) — so each tab can be revealed as soon as it has content.
+    catalogCategoryAvailable(category, summary = this.sourceHealthSummary) {
+        if (this.isCatalogReady(summary)) return true;
+        const sources = [...(summary?.issues || []), ...(summary?.sources || [])];
+        return sources.some(item => {
+            const src = (item && item.source) || item || {};
+            const cfg = src.configHint || src.config_hint || {};
+            const prog = src.syncProgress || src.sync_progress || cfg.syncProgress || cfg.sync_progress || {};
+            const counts = (prog && prog.counts) || {};
+            return Number(counts[category]) > 0;
+        });
     }
 
     applyCatalogAvailability(summary = this.sourceHealthSummary) {
         const ready = this.isCatalogReady(summary);
-        document.body.classList.toggle('catalog-locked', !ready);
+        let anyShown = false;
         document.querySelectorAll('.nav-link[data-page="live"], .nav-link[data-page="movies"], .nav-link[data-page="series"]').forEach(link => {
-            link.classList.toggle('catalog-nav-hidden', !ready);
-            link.hidden = !ready;
-            link.setAttribute('aria-hidden', ready ? 'false' : 'true');
-            link.tabIndex = ready ? 0 : -1;
+            // Reveal each catalog tab individually as soon as its category has at least
+            // one item — Movies/Live TV/Series appear progressively during onboarding
+            // instead of all-or-nothing once the whole catalogue is ready.
+            const show = ready || this.catalogCategoryAvailable(link.getAttribute('data-page'), summary);
+            if (show) anyShown = true;
+            link.classList.toggle('catalog-nav-hidden', !show);
+            link.hidden = !show;
+            link.setAttribute('aria-hidden', show ? 'false' : 'true');
+            link.tabIndex = show ? 0 : -1;
         });
+        document.body.classList.toggle('catalog-locked', !ready && !anyShown);
     }
 
     hasCloudSession() {
