@@ -481,9 +481,17 @@ class App {
         if (!bar) return;
         const fill = bar.querySelector('.enrichment-bar__fill');
         const text = bar.querySelector('.enrichment-bar__text');
+        const stop = () => { if (this._enrichTimer) { clearInterval(this._enrichTimer); this._enrichTimer = null; } };
+        this._stopEnrichPoll = stop;
         const tick = async () => {
             if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
-            if (!this.hasCloudSession?.()) { bar.hidden = true; return; }
+            if (!this.hasCloudSession?.()) { bar.hidden = true; stop(); return; }
+            // Never overlap: enrichment-progress can be slow under DB load, and an
+            // unguarded 45s interval stacked several in-flight requests that EACH held a
+            // connection for up to the 150s edge limit — a real contributor to connection-
+            // pool exhaustion (the whole-DB stall seen in the refresh trace). One at a time.
+            if (this._enrichInFlight) return;
+            this._enrichInFlight = true;
             try {
                 const p = await window.NorvaCloud?.mediaItems?.enrichmentProgress?.();
                 const percent = Number(p?.percent);
@@ -501,18 +509,27 @@ class App {
                     this._lastEnrichPercent = percent;
                 }
                 const stalled = (this._enrichStall || 0) >= 3;
+                this._enrichFails = 0;
                 if (!Number.isFinite(percent) || total < 1 || settled || stalled) {
                     bar.hidden = true;
+                    stop(); // done/settled — stop polling entirely instead of hitting the DB forever
                 } else {
                     if (fill) fill.style.width = percent + '%';
                     if (text) text.textContent = `Enrichissement du catalogue… ${percent}%`;
                     bar.hidden = false;
                 }
-            } catch (_) { /* best-effort; keep the last shown state */ }
+            } catch (_) {
+                // Back off a struggling DB: give up after a few consecutive failures
+                // rather than re-polling a slow endpoint forever.
+                this._enrichFails = (this._enrichFails || 0) + 1;
+                if (this._enrichFails >= 3) { bar.hidden = true; stop(); }
+            } finally {
+                this._enrichInFlight = false;
+            }
         };
         tick();
         if (this._enrichTimer) clearInterval(this._enrichTimer);
-        this._enrichTimer = setInterval(tick, 45 * 1000);
+        this._enrichTimer = setInterval(tick, 60 * 1000);
     }
 
     async checkAuth() {
