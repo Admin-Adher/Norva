@@ -4575,14 +4575,17 @@ class WatchPage {
             const m = /^(https?:\/\/[^/]+)\/relay\/(.+)$/.exec(String(playbackUrl));
             if (!m) return;
             const host = m[1], token = m[2];
-            // Default-track metadata (codec/lang/duration) + — for multi-audio titles —
-            // the ordered per-track list, fetched together. Both best-effort, display-only.
+            // No precomputed map (we early-returned above if we had one), so probe the file's
+            // real audio tracks at play time — UNGATED. The old contentLooksMultiAudio() gate
+            // meant a single-/unknown-language file was NEVER probed and fell to a bare
+            // "Default" menu; since the precompute crawl only reaches a few % of the catalogue,
+            // that was nearly every title. Probing here gives the real language (e.g. Persian)
+            // for whatever the user actually watches, 24h-cached relay-side, and the result is
+            // reported back to populate the shared cache for next time / other users.
             const infoP = fetch(`${host}/vod-info/${token}`, { cache: 'no-store' })
                 .then(r => (r.ok ? r.json() : null)).catch(() => null);
-            const probeP = this.contentLooksMultiAudio()
-                ? fetch(`${host}/probe-audio/${token}`, { cache: 'no-store' })
-                    .then(r => (r.ok ? r.json() : null)).catch(() => null)
-                : Promise.resolve(null);
+            const probeP = fetch(`${host}/probe-audio/${token}`, { cache: 'no-store' })
+                .then(r => (r.ok ? r.json() : null)).catch(() => null);
             const [data, probe] = await Promise.all([infoP, probeP]);
             if (data) {
                 this.cloudAudioInfo = (Array.isArray(data.audioTracks) && data.audioTracks[0]) || null;
@@ -4592,6 +4595,22 @@ class WatchPage {
                 }
             }
             this.applyCloudMultiAudioTracks(probe);
+            // Seed the single-label path: applyCloudMultiAudioTracks builds a switchable list
+            // only for >=2 languages and bails for one. So for a mono-/single-language file we
+            // feed the probe's detected language(s) into content.audio_languages, which is the
+            // ground truth contentAudioLanguageLabel() reads — the menu then shows the REAL
+            // language ("Persian") instead of "Default". Untagged streams stay "und" -> dropped.
+            if (probe && Array.isArray(probe.audioLanguages) && probe.audioLanguages.length && this.content) {
+                const langs = probe.audioLanguages
+                    .map((l) => this.normalizeTrackLanguage(l))
+                    .filter((l) => l && l !== 'und');
+                if (langs.length) {
+                    const existing = Array.isArray(this.content.audio_languages) ? this.content.audio_languages : [];
+                    const merged = Array.from(new Set([...existing, ...langs]));
+                    this.content.audio_languages = merged;
+                    this.content.audioLanguages = merged;
+                }
+            }
             this.updateAudioTracks();
             this.reportObservedAudioLanguages();
         } catch (_) { /* best-effort enrichment */ }
