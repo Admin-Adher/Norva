@@ -2568,8 +2568,12 @@ video::cue {
 }
 
 .norva-setup-sync-panel .source-sync-card strong {
-  white-space: normal;
-  overflow-wrap: anywhere;
+  white-space: nowrap;
+  overflow-wrap: normal;
+  word-break: normal;
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-size: clamp(1.7rem, 2.8vw, 2.35rem);
   line-height: 1;
   font-variant-numeric: tabular-nums;
@@ -2892,7 +2896,12 @@ video::cue {
   color: var(--color-text-primary);
   font-size: 1.45rem;
   line-height: 1.15;
-  overflow-wrap: anywhere;
+  white-space: nowrap;
+  overflow-wrap: normal;
+  word-break: normal;
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .source-sync-progress-wrap {
