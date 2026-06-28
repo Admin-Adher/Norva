@@ -5473,7 +5473,18 @@ class WatchPage {
         try {
             const engine = this.norvaEngine;
             if (!engine || typeof engine.subtitleStreams !== 'function') return;
-            if (!engine.subtitleStreams().length) { this._engineSubsEnriched = true; return; } // no subs → don't retry
+            // The gateway ffprobe returns BOTH the subtitle tracks AND robust audio-track
+            // languages. A multi-audio file with NO embedded subtitles still needs that
+            // audio fallback — otherwise its menu is stuck on "Audio 1/2/3" every time the
+            // relay probe was refused (e.g. a single-slot provider that 458s the second
+            // connection). So don't bail on "no subtitles" alone: also run when there are
+            // ≥2 audio streams whose languages we don't yet know. One success persists via
+            // reportObservedAudioLanguages, so the next play of this title needs zero probe.
+            const subCount = engine.subtitleStreams().length;
+            const audioCount = typeof engine.audioStreamIndices === 'function' ? engine.audioStreamIndices().length : 0;
+            const audioLangKnown = Array.isArray(this._relayAudioTracks)
+                && this._relayAudioTracks.some((t) => t.lang && t.lang !== 'und');
+            if (!subCount && !(audioCount >= 2 && !audioLangKnown)) { this._engineSubsEnriched = true; return; } // nothing to enrich → don't retry
             const base = this.engineSubtitleBaseUrl();
             if (!base) return;
             this._engineSubsEnriching = true;
@@ -5496,6 +5507,9 @@ class WatchPage {
             if (gwAudio.length && !relayHasLang) {
                 this._relayAudioTracks = gwAudio;
                 try { this.syncEngineAudioTracks(); } catch (_) { /* best-effort */ }
+                // Self-heal: persist the gateway-discovered languages now so the next play
+                // of this title is served the map and needs no probe at all (deterministic).
+                try { this.reportObservedAudioLanguages(); } catch (_) { /* best-effort capture */ }
             }
             const tracks = (Array.isArray(data.subtitles) ? data.subtitles : [])
                 .filter((s) => Number.isInteger(Number(s.index)))
