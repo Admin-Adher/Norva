@@ -112,3 +112,4 @@ exports** TMDB → opèrent **une fois pour tous** sur `catalog_titles`, pas par
 ## Liens
 - [`scaling-status.md`](./scaling-status.md) — état détaillé, chemins de code, reprise.
 - [`global-title-cache-design.md`](./global-title-cache-design.md) — design du cache de titres global.
+- [`performance-status.md`](./performance-status.md) — optim du démarrage (boot) + **runbook anti-saturation DB** (charge de fond vs premier-plan).
