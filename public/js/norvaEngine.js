@@ -151,7 +151,7 @@
     av1: ['av01.0.08M.08'],
   };
 
-  const ENGINE_VERSION = 22;
+  const ENGINE_VERSION = 23;
 
   class NorvaEngine {
     constructor(videoEl, opts = {}) {
@@ -900,15 +900,28 @@
         // Chromium's parser fail (CHUNK_DEMUXER_ERROR_APPEND_FAILED). It must never
         // be enqueued — endOfStream() finalises the buffer instead.
         if (this._dropWrites) { d.trailerBytesDropped = (d.trailerBytesDropped || 0) + data.length; return; }
+        // libav.js hands `data` as a signed Int8Array view into the Emscripten HEAP.
+        // Copy it out as an UNSIGNED Uint8Array (reinterpret the same bytes) — the bytes
+        // are identical for MSE, but every byte ≥128 must read unsigned or box-size math
+        // (b<<24|…) goes negative and corrupts the diagnostics (e.g. 0xA1 -> 0xFFFFFFA1).
+        const chunk = new Uint8Array(data.buffer, data.byteOffset, data.byteLength).slice();
         // Trace write position vs the running high-water mark BEFORE consuming.
         try {
           const isSeek = pos < d.writeHighWater;
-          if (isSeek) { d.seekWrites++; if (d.firstSeek == null) d.firstSeek = { pos, len: data.length, highWater: d.writeHighWater, atWrite: d.writes.length }; }
-          if (d.writes.length < 40) d.writes.push({ pos, len: data.length, seek: isSeek });
-          if (pos + data.length > d.writeHighWater) d.writeHighWater = pos + data.length;
+          if (isSeek) { d.seekWrites++; if (d.firstSeek == null) d.firstSeek = { pos, len: chunk.length, highWater: d.writeHighWater, atWrite: d.writes.length }; }
+          if (d.writes.length < 40) {
+            const rec = { pos, len: chunk.length, seek: isSeek };
+            // Small writes are the structural ones (box headers / moof / size fields) —
+            // capture their full bytes so the failing tail can be read directly.
+            if (chunk.length <= 600) {
+              let hx = ''; for (let i = 0; i < chunk.length; i++) hx += (chunk[i] < 16 ? '0' : '') + chunk[i].toString(16);
+              rec.hex = hx;
+            }
+            d.writes.push(rec);
+          }
+          if (pos + chunk.length > d.writeHighWater) d.writeHighWater = pos + chunk.length;
         } catch (_) {}
-        written += data.length;
-        const chunk = data.slice(0);
+        written += chunk.length;
         try {
           if (this._diagHeaderPhase) {
             d.initBytes += chunk.length;
