@@ -2064,13 +2064,20 @@ async function detectUntaggedAudioLanguages(opts: {
       if (lang) { const entry = byIndex.get(t.index); if (entry) { entry.lang = lang; filled++; } }
     } catch (_) { /* best-effort per track */ }
   }
-  if (!filled) return;
+  const nowIso = new Date().toISOString();
+  if (!filled) {
+    // Mark attempted even on no-detection (silent/music/undetectable) so the backfill queue
+    // advances instead of re-trying this file every tick. 30d retry window (see the candidate
+    // query) lets a future detector improvement re-attempt it.
+    try { await db.from("cloud_titles").update({ whisper_attempted_at: nowIso }).eq("user_id", userId).eq("id", titleId); } catch (_) { /* best-effort */ }
+    return;
+  }
 
   const enriched = audioTracks.map((t) => ({ index: t.index, lang: t.lang ?? null }));
   const codes = [...new Set(enriched.map((t) => t.lang).filter((l): l is string => Boolean(l)))].sort();
   try {
     await db.from("cloud_titles")
-      .update({ audio_tracks: enriched, audio_languages: codes, audio_probed_at: new Date().toISOString() })
+      .update({ audio_tracks: enriched, audio_languages: codes, audio_probed_at: nowIso, whisper_attempted_at: nowIso })
       .eq("user_id", userId).eq("id", titleId);
     if (codes.length && tmdbId && !/^(tt)?0+$/i.test(tmdbId)) {
       try { await db.rpc("merge_catalog_title_audio", { p_item_type: itemType, p_provider_tmdb_id: tmdbId, p_codes: codes }); } catch (_) { /* best-effort global mirror */ }
@@ -2249,10 +2256,16 @@ async function runAudioBackfill(req: Request, db: SupabaseClient) {
       throw new HttpError(503, "Media gateway is not configured");
     }
     const wConcurrency = Math.max(1, Math.min(Number(body.concurrency) || 1, 4));
+    // Select REAL candidates DB-side: titles whose audio_tracks still hold an untagged (lang null)
+    // track, skipping those attempted within the retry window so the queue advances instead of
+    // re-trying the same front forever. (The old in-memory filter scanned the first N titles by id,
+    // so the sparse untagged residual was almost never in the window → it did nothing.)
+    const whisperRetryBefore = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString();
     let wq = db.from("cloud_titles")
       .select("id, default_variant_id, provider_tmdb_id, audio_tracks")
       .eq("user_id", userId).eq("item_type", itemType).gt("variant_count", 0)
-      .not("audio_tracks", "is", null);
+      .contains("audio_tracks", [{ lang: null }])
+      .or(`whisper_attempted_at.is.null,whisper_attempted_at.lt.${whisperRetryBefore}`);
     if (afterId) wq = wq.gt("id", afterId);
     wq = wq.order("id", { ascending: true }).limit(limit);
     const { data: wrows, error: wErr } = await wq;
@@ -2262,7 +2275,7 @@ async function runAudioBackfill(req: Request, db: SupabaseClient) {
 
     const candidates = wrows.filter((t) => {
       const arr = Array.isArray((t as JsonRecord).audio_tracks) ? (t as JsonRecord).audio_tracks as JsonRecord[] : [];
-      return arr.length >= 2 && arr.some((x) => !stringOrNull(x?.lang));
+      return arr.some((x) => !stringOrNull(x?.lang));
     });
     const wvIds = candidates.map((t) => stringOrNull((t as JsonRecord).default_variant_id)).filter(Boolean) as string[];
     const wvById = new Map<string, JsonRecord>();

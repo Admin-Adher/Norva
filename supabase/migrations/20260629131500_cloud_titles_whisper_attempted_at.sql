@@ -1,0 +1,11 @@
+-- Mark whisper language-detection attempts (success OR failure) so the offline whisper
+-- backfill queue advances and a silent/undetectable file isn't re-probed forever.
+--
+-- The whisper backfill selects titles whose audio_tracks still contain an untagged track
+-- (lang null) and runs the gateway's whisper.cpp on a mid-film clip. Without an attempt
+-- marker a file that yields no detectable speech stays a candidate and is re-tried every
+-- tick, clogging the front of the queue. This column lets the backfill skip rows attempted
+-- within a long retry window (so a future detector improvement can still re-attempt).
+--
+-- Additive, nullable, no default → fast (no table rewrite). Idempotent.
+alter table public.cloud_titles add column if not exists whisper_attempted_at timestamptz;

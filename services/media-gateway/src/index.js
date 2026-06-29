@@ -109,6 +109,12 @@ const WHISPER_BIN = process.env.WHISPER_BIN || '';
 const WHISPER_MODEL = process.env.WHISPER_MODEL || '';
 const WHISPER_THREADS = clampInt(process.env.WHISPER_THREADS, 4, 1, 16);
 const WHISPER_TIMEOUT_MS = clampInt(process.env.WHISPER_TIMEOUT_MS, 60_000, 5_000, 300_000);
+// Bounded mid-film sweep for language detection: a film opens with logos/silence/music, so
+// sampling at offset 0 detects nothing. Try these offsets (seconds) in order and stop at the
+// first clip with real speech; a clip past the file's end yields no WAV and is skipped. Bounded
+// (≤ length) so it never hammers a single-connection provider. Override via WHISPER_SWEEP_OFFSETS.
+const WHISPER_SWEEP_OFFSETS = (process.env.WHISPER_SWEEP_OFFSETS || '600,1500,300')
+    .split(',').map((s) => Number.parseInt(s.trim(), 10)).filter((n) => Number.isFinite(n) && n >= 0);
 const LIVE_INPUT_ANALYZE_DURATION_US = clampInt(process.env.LIVE_INPUT_ANALYZE_DURATION_US, 1_500_000, 250_000, 10_000_000);
 const LIVE_INPUT_PROBE_SIZE_BYTES = clampInt(process.env.LIVE_INPUT_PROBE_SIZE_BYTES, 2_000_000, 64_000, 10_000_000);
 const VOD_INPUT_ANALYZE_DURATION_US = clampInt(process.env.VOD_INPUT_ANALYZE_DURATION_US, 8_000_000, 250_000, 30_000_000);
@@ -141,7 +147,7 @@ const RAW_PROVIDER_RETRY_DELAYS_MS = [1500, 5000, 9000, 9000, 9000, 9000, 9000, 
 const FFMPEG_USER_AGENT = process.env.FFMPEG_USER_AGENT ||
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36 Norva/1.0';
 const MAX_LOG_TAIL = 12000;
-const GATEWAY_VERSION = 52;
+const GATEWAY_VERSION = 53;
 // Browser playback fetches HLS playlists/segments cross-origin, so these must
 // list every Norva web origin or the browser blocks the response (CORS). Keep
 // in sync with the relay's ALLOWED_ORIGINS (services/norva-relay/wrangler.jsonc).
@@ -557,31 +563,51 @@ app.get('/detect-language/:token', async (req, res) => {
 
     const trackIndex = Number.parseInt(req.query.index, 10);
     if (!Number.isInteger(trackIndex) || trackIndex < 0) return res.status(400).json({ error: 'Invalid audio index' });
-    const startOffset = Number.parseFloat(req.query.start);
     const dur = Math.min(Math.max(Number.parseFloat(req.query.dur) || 20, 4), 60);
+    // An explicit ?start pins a single offset (caller knows where speech is); otherwise sweep the
+    // bounded mid-film offsets and stop at the first clip that actually contains speech.
+    const explicitStart = Number.parseFloat(req.query.start);
+    const offsets = (Number.isFinite(explicitStart) && explicitStart >= 0) ? [explicitStart] : WHISPER_SWEEP_OFFSETS;
 
-    let wavPath = null;
     try {
-        wavPath = await extractAudioWav(claims.url, ua, trackIndex, Number.isFinite(startOffset) && startOffset > 0 ? startOffset : 0, dur);
-        if (!wavPath) return res.status(502).json({ error: 'Audio extraction failed' });
-        const whisper = await runWhisperDetect(wavPath);
-        const det = detectLanguageFromText(whisper.text);
-        // Prefer the transcript detector when confident (it disambiguates script families);
-        // otherwise fall back to whisper.cpp's own language id.
-        const language = det.confident ? det.lang : (whisper.lang || null);
+        let best = null;          // best partial result across offsets (most words), as a fallback
+        let extractions = 0;      // bound the provider connections
+        for (const off of offsets) {
+            let wavPath = null;
+            try {
+                wavPath = await extractAudioWav(claims.url, ua, trackIndex, off > 0 ? off : 0, dur);
+                if (!wavPath) continue;   // extraction failed or offset past the file's end → next offset
+                extractions++;
+                const whisper = await runWhisperDetect(wavPath);
+                const det = detectLanguageFromText(whisper.text);
+                // Prefer the transcript detector when confident (disambiguates script families);
+                // otherwise fall back to whisper.cpp's own language id.
+                const language = det.confident ? det.lang : (whisper.lang || null);
+                const result = {
+                    language,
+                    candidate: det.lang || whisper.lang || null,
+                    confidence: det.confident ? det.score : (whisper.prob || 0),
+                    whisperLang: whisper.lang || null,
+                    wordCount: det.words,
+                    sample: String(whisper.text || '').slice(0, 160),
+                    offset: off,
+                };
+                // "Good" = a clear transcript with a language → real speech. Stop sweeping. A
+                // silent/music clip yields ~no words → keep the best partial and try the next offset.
+                if (language && det.words >= 4) {
+                    res.setHeader('Cache-Control', 'private, max-age=3600');
+                    return res.json(result);
+                }
+                if (!best || result.wordCount > best.wordCount) best = result;
+            } catch (_) { /* try the next offset */ }
+            finally { if (wavPath) fsp.unlink(wavPath).catch(() => {}); }
+        }
+        if (extractions === 0) return res.status(502).json({ error: 'Audio extraction failed' });
+        // No clip had clear speech → return the best partial (language may be null).
         res.setHeader('Cache-Control', 'private, max-age=3600');
-        return res.json({
-            language,
-            candidate: det.lang || whisper.lang || null,
-            confidence: det.confident ? det.score : (whisper.prob || 0),
-            whisperLang: whisper.lang || null,
-            wordCount: det.words,
-            sample: String(whisper.text || '').slice(0, 160),
-        });
+        return res.json(best || { language: null, candidate: null, confidence: 0, whisperLang: null, wordCount: 0, sample: '' });
     } catch (err) {
         return res.status(502).json({ error: 'Language detection failed', details: String((err && err.message) || err) });
-    } finally {
-        if (wavPath) fsp.unlink(wavPath).catch(() => {});
     }
 });
 
