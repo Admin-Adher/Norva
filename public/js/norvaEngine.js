@@ -151,7 +151,7 @@
     av1: ['av01.0.08M.08'],
   };
 
-  const ENGINE_VERSION = 17;
+  const ENGINE_VERSION = 18;
 
   class NorvaEngine {
     constructor(videoEl, opts = {}) {
@@ -841,6 +841,13 @@
       d.muxerInits = (d.muxerInits || 0) + 1;
       d.initBoxes = null; d.initBytes = 0; d.firstMediaBoxes = null; d.firstMediaBytes = 0;
       d.firstVideoPkt = null;
+      // Cumulative top-level box walker over the muxer's full output stream (it writes
+      // in fixed AVIO blocks that do NOT align to fragment boundaries, so per-chunk
+      // box parsing is useless — this stitches them). Reveals the real structure
+      // Chromium sees: ftyp moov moof mdat moof mdat … and flags any anomaly (a 2nd
+      // moov/ftyp = spurious re-init; a box whose size doesn't add up).
+      this._boxCarry = null; d.boxRemain = 0; d.boxSeq = []; d.boxBad = null;
+      d.moofCount = 0; d.moovCount = 0; d.ftypCount = 0; d.boxTotal = 0;
       this._diagHeaderPhase = true;
       // ff_init_muxer(device:true) re-creates the 'output' writer device; remove
       // any stale one from a prior init (e.g. a re-seek) or it can collide.
@@ -862,6 +869,7 @@
             d.firstMediaBytes = chunk.length;
             d.firstMediaBoxes = mp4Boxes(chunk);
           }
+          this._diagTrackBoxes(chunk);
         } catch (_) {}
         this.queue.push(chunk); this._drain();
       };
@@ -1099,6 +1107,52 @@
       return 0;
     }
 
+    // Stitch the muxer's AVIO-block writes back into a top-level box sequence. State
+    // lives on this._boxCarry (a partial box header straddling two blocks) and
+    // this._diag.boxRemain (bytes left in the box currently being skipped). Diagnostics
+    // only; swallows everything.
+    _diagTrackBoxes(chunk) {
+      const d = this._diag;
+      d.boxTotal += chunk.length;
+      let buf = chunk;
+      if (this._boxCarry && this._boxCarry.length) {
+        buf = new Uint8Array(this._boxCarry.length + chunk.length);
+        buf.set(this._boxCarry, 0); buf.set(chunk, this._boxCarry.length);
+        this._boxCarry = null;
+      }
+      let p = 0;
+      const len = buf.length;
+      let steps = 0;
+      while (steps++ < 100000) {
+        if (d.boxRemain > 0) {                 // inside a box body → skip
+          const skip = Math.min(d.boxRemain, len - p);
+          d.boxRemain -= skip; p += skip;
+          if (p >= len) return;                // body continues into next block
+        }
+        if (len - p < 8) { this._boxCarry = p < len ? buf.slice(p) : null; return; }
+        let size = ((buf[p] << 24) | (buf[p + 1] << 16) | (buf[p + 2] << 8) | buf[p + 3]) >>> 0;
+        const type = String.fromCharCode(buf[p + 4], buf[p + 5], buf[p + 6], buf[p + 7]);
+        let hdr = 8;
+        if (size === 1) {
+          if (len - p < 16) { this._boxCarry = buf.slice(p); return; }
+          size = (((buf[p + 8] << 24) | (buf[p + 9] << 16) | (buf[p + 10] << 8) | buf[p + 11]) >>> 0) * 4294967296
+               + (((buf[p + 12] << 24) | (buf[p + 13] << 16) | (buf[p + 14] << 8) | buf[p + 15]) >>> 0);
+          hdr = 16;
+        } else if (size === 0) { size = (len - p); }
+        if (!/^[\x20-\x7e]{4}$/.test(type) || size < hdr) {
+          if (!d.boxBad) d.boxBad = 'bad box after ' + d.boxSeq.length + ' boxes (~' + Math.round(d.boxTotal / 1024) + 'KB) type="' + type + '" size=' + size;
+          return;                              // desynced — stop, the bad-box marker is the finding
+        }
+        if (type === 'moof') d.moofCount++;
+        else if (type === 'moov') d.moovCount++;
+        else if (type === 'ftyp') d.ftypCount++;
+        // Keep a compact sequence: collapse runs of moof/mdat so it stays readable.
+        if (d.boxSeq.length < 60) d.boxSeq.push(type + '(' + size + ')');
+        else if (d.boxSeq[d.boxSeq.length - 1] !== '…') d.boxSeq.push('…');
+        p += hdr; d.boxRemain = size - hdr;
+      }
+    }
+
     // Full picture of what the engine fed MediaSource + the live element/buffer state.
     // Built for the CHUNK_DEMUXER_ERROR_APPEND_FAILED post-mortem: pairs the codec/box
     // decisions (from _diag) with the current SourceBuffer/MediaSource/video status so a
@@ -1117,6 +1171,9 @@
         muxerInits: d.muxerInits, initBoxes: d.initBoxes, initBytes: d.initBytes,
         firstMediaBoxes: d.firstMediaBoxes, firstMediaBytes: d.firstMediaBytes,
         firstVideoPkt: d.firstVideoPkt, droppedOpenGop: d.droppedOpenGop,
+        // full top-level box stream the muxer produced (stitched across AVIO blocks)
+        boxSeq: d.boxSeq, boxBad: d.boxBad, boxTotalKB: d.boxTotal != null ? Math.round(d.boxTotal / 1024) : null,
+        moofCount: d.moofCount, moovCount: d.moovCount, ftypCount: d.ftypCount,
         // append accounting
         appendCount: d.appendCount, appendBytes: d.appendBytes,
         recentAppends: d.recentAppends, appendErrors: d.appendErrors,

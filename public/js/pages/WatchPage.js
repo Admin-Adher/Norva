@@ -2445,11 +2445,13 @@ class WatchPage {
                 console.warn('codec string:', snap.videoCodecString, '| candidates', snap.videoCands, '| audioTag', snap.audioTag);
                 console.warn('init segment:', snap.initBoxes, '(' + snap.initBytes + ' B) | muxerInits', snap.muxerInits);
                 console.warn('1st media   :', snap.firstMediaBoxes, '(' + snap.firstMediaBytes + ' B)');
+                console.warn('box stream  : moof×' + snap.moofCount, 'moov×' + snap.moovCount, 'ftyp×' + snap.ftypCount, '| ' + snap.boxTotalKB + 'KB | BAD:', snap.boxBad || 'none');
+                console.warn('box seq     :', JSON.stringify(snap.boxSeq));
                 console.warn('1st vid pkt :', JSON.stringify(snap.firstVideoPkt), '| droppedOpenGop', snap.droppedOpenGop);
                 console.warn('appends     :', snap.appendCount, 'ok /', snap.appendBytes, 'B | sbErrorEvents', snap.sbErrorEvents, '| queueLen', snap.queueLen, '| trailerDropped', snap.trailerBytesDropped);
                 console.warn('pump exit   :', snap.pumpExitReason, '| res', snap.pumpExitRes, '| fetched', snap.exitFetchMB, 'MB /', snap.exitFetches, 'fetches | lastReadErr', snap.lastReadError);
-                console.warn('recentAppend:', snap.recentAppends);
-                console.warn('appendErrors:', snap.appendErrors);
+                console.warn('recentAppend:', JSON.stringify(snap.recentAppends));
+                console.warn('appendErrors:', JSON.stringify(snap.appendErrors));
                 console.warn('SourceBuffer:', JSON.stringify(snap.sb));
                 console.warn('MediaSource :', JSON.stringify(snap.ms));
                 console.warn('video elem  :', JSON.stringify(snap.video));
@@ -2490,6 +2492,8 @@ class WatchPage {
                     engineVideoErrorCode: snap?.video?.error?.code ?? null,
                     enginePumpExit: snap?.pumpExitReason ?? null,
                     engineLastReadError: snap?.lastReadError ?? null,
+                    engineBoxBad: snap?.boxBad ?? null,
+                    engineMoovCount: snap?.moovCount ?? null,
                     engineSnapshot: snap || null
                 }
             });
