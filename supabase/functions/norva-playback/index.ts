@@ -97,7 +97,7 @@ Deno.serve(async (req) => {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 19,
+        version: 20,
         entitlements: true,
         entitlementsMode: entitlementRuntime.mode,
         entitlementsEnforced: entitlementRuntime.enforced,
@@ -153,6 +153,10 @@ Deno.serve(async (req) => {
     if (req.method === "POST" && segments[0] === "generated-subtitle-notify") {
       const identity = await requireIdentity(req, supabase);
       return json(req, await setGeneratedSubtitleNotify(req, identity.userId, supabase));
+    }
+    if (req.method === "GET" && segments[0] === "generated-subtitle-langs") {
+      await requireIdentity(req, supabase);
+      return json(req, { targets: await getTranslateTargets(await getRuntimeConfig(supabase)) });
     }
     if (req.method === "POST" && segments[0] === "catalog-mirror-verify") {
       return json(req, await runCatalogMirrorVerify(req, supabase));
@@ -2257,6 +2261,99 @@ async function transcribeEnqueue(
   return { status: "processing", jobId, providerKey: pkey, gateway: gwBody };
 }
 
+// Phase 3 (3b) ASYNC translation: translate a cached transcript into a target language on the gateway
+// (Argos / CTranslate2) and cache the result cross-user (kind='translation', lang=target). Reuses the
+// transcript claim RPC + transcribe-callback — translation is pure text on the gateway (NO provider
+// connection, no audio), so it never contends with playback. Requires the source transcript to be
+// ready first; returns {status:'transcript-required'} otherwise so the client can produce it (3a).
+async function translateEnqueue(
+  db: SupabaseClient,
+  userId: string,
+  runtimeConfig: RuntimeConfig,
+  opts: { titleId?: string; sourceId?: string; externalId?: string; itemType?: string; targetLang: string; force?: boolean },
+): Promise<JsonRecord> {
+  if (!runtimeConfig.mediaGatewayUrl || !runtimeConfig.mediaGatewayToken) throw new HttpError(503, "Media gateway is not configured");
+  const target = stringOr(opts.targetLang, "").toLowerCase();
+  if (!/^[a-z]{2,3}$/.test(target)) throw new HttpError(400, "invalid target lang");
+  const { sourceId, externalId, itemType } = await resolveSubtitleTarget(db, userId, opts);
+  // Provider key from the stored source row (cached DB lookup, NO provider round-trip — translation
+  // works purely off the cached transcript).
+  const pkey = (await resolveSourceIdentity(sourceId, userId, db)).key;
+  if (!pkey) throw new HttpError(422, "no provider key for source");
+
+  const baseSel = db.from("catalog_generated_subtitles").select("status, vtt, source_lang, job_id")
+    .eq("provider_key", pkey).eq("item_type", itemType).eq("external_id", externalId);
+  // A ready translation short-circuits straight from the cache.
+  const { data: tr } = await baseSel.eq("kind", "translation").eq("lang", target).maybeSingle();
+  const trRec = tr as JsonRecord | null;
+  if (trRec?.status === "ready" && !opts.force) {
+    return { status: "ready", cached: true, jobId: trRec.job_id, providerKey: pkey, kind: "translation", lang: target };
+  }
+
+  // Need the SOURCE transcript (3a) before we can translate it.
+  const { data: src } = await db.from("catalog_generated_subtitles").select("status, vtt, source_lang, job_id")
+    .eq("provider_key", pkey).eq("item_type", itemType).eq("external_id", externalId)
+    .eq("kind", "transcript").eq("lang", "src").maybeSingle();
+  const srcRec = src as JsonRecord | null;
+  if (!srcRec || srcRec.status !== "ready") {
+    return { status: "transcript-required", providerKey: pkey, kind: "translation", lang: target, transcriptStatus: srcRec?.status ?? "none" };
+  }
+  const sourceLang = (stringOr(srcRec.source_lang, "") || "en").toLowerCase();
+  if (sourceLang === target) {
+    // The transcript is already in the requested language — serve it directly, no translation needed.
+    return { status: "ready", cached: true, sameLang: true, kind: "transcript", lang: "src", providerKey: pkey };
+  }
+  const sourceVtt = stringOr(srcRec.vtt, "");
+  if (!sourceVtt) return { status: "error", error: "empty source transcript", providerKey: pkey, kind: "translation", lang: target };
+
+  // Atomically claim the translation job (separate cache row, kind=translation + lang=target).
+  const PROCESSING_TTL_MS = 30 * 60 * 1000; // translation is fast (~min); a stale lock clears quickly
+  const jobId = crypto.randomUUID();
+  const { data: claim, error: claimErr } = await db.rpc("claim_generated_subtitle_job", {
+    p_provider_key: pkey, p_item_type: itemType, p_external_id: externalId, p_kind: "translation", p_lang: target,
+    p_new_job_id: jobId, p_processing_ttl_ms: PROCESSING_TTL_MS, p_force: opts.force === true,
+  });
+  if (claimErr) throwDb(claimErr, "translation claim failed");
+  const claimRow = (Array.isArray(claim) ? claim[0] : claim) as JsonRecord | null;
+  if (!claimRow?.won) {
+    return { status: stringOr(claimRow?.status, "processing"), cached: true, jobId: claimRow?.job_id ?? null, providerKey: pkey, kind: "translation", lang: target };
+  }
+
+  const cbUrl = `${Deno.env.get("SUPABASE_URL") ?? ""}/functions/v1/norva-playback/transcribe-callback`;
+  let gwStatus = 0, gwBody: JsonRecord | null = null;
+  try {
+    const gw = await fetch(`${runtimeConfig.mediaGatewayUrl}/translate-async`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${runtimeConfig.mediaGatewayToken}` },
+      body: JSON.stringify({ jobId, callback: cbUrl, source: sourceLang, target, vtt: sourceVtt }),
+      signal: AbortSignal.timeout(20000),
+    });
+    gwStatus = gw.status; gwBody = await gw.json().catch(() => null) as JsonRecord | null;
+  } catch (_) { gwStatus = 0; }
+  if (gwStatus !== 202) {
+    await db.from("catalog_generated_subtitles").update({ status: "failed", error: `translate gateway ${gwStatus}`, updated_at: new Date().toISOString() }).eq("job_id", jobId);
+    return { status: "error", jobId, providerKey: pkey, gatewayStatus: gwStatus, gateway: gwBody, kind: "translation", lang: target };
+  }
+  return { status: "processing", jobId, providerKey: pkey, kind: "translation", lang: target };
+}
+
+// Available translation TARGET languages (the gateway's installed Argos set). Cached briefly so the
+// captions menu can list them without a per-open round-trip. Empty when translation isn't configured.
+let translateTargetsCache: { value: string[]; expiresAt: number } | null = null;
+async function getTranslateTargets(runtimeConfig: RuntimeConfig): Promise<string[]> {
+  if (translateTargetsCache && translateTargetsCache.expiresAt > Date.now()) return translateTargetsCache.value;
+  let value: string[] = [];
+  if (runtimeConfig.mediaGatewayUrl) {
+    try {
+      const r = await fetch(`${runtimeConfig.mediaGatewayUrl}/health`, { signal: AbortSignal.timeout(5000) });
+      const j = await r.json().catch(() => null) as JsonRecord | null;
+      if (j && Array.isArray(j.translateTargets)) value = (j.translateTargets as unknown[]).map((x) => String(x)).filter((x) => /^[a-z]{2,3}$/.test(x));
+    } catch (_) { /* gateway down → empty list */ }
+  }
+  translateTargetsCache = { value, expiresAt: Date.now() + 5 * 60 * 1000 };
+  return value;
+}
+
 // Phase 3 (3a) user-facing read: resolve a title to its cross-user transcript-cache row and return
 // the delivery state. Status 'ready' carries the VTT body (the player attaches it as a text track);
 // 'processing'/'failed'/'none' tell the client to poll, retry, or trigger. providerKey-scoped, so
@@ -2295,6 +2392,14 @@ async function getGeneratedSubtitle(req: Request, userId: string, db: SupabaseCl
 async function postGeneratedSubtitle(req: Request, userId: string, db: SupabaseClient): Promise<JsonRecord> {
   const runtimeConfig = await getRuntimeConfig(db);
   const body = recordOrEmpty(await req.json().catch(() => ({})));
+  // Phase 3b: a translation request (kind='translation' or a target lang) routes to the Argos path.
+  const target = stringOr(body.targetLang, "").toLowerCase();
+  if (stringOr(body.kind, "transcript") === "translation" || (target && target !== "src")) {
+    return await translateEnqueue(db, userId, runtimeConfig, {
+      titleId: stringOr(body.titleId, ""), sourceId: stringOr(body.sourceId, ""), externalId: stringOr(body.externalId, ""),
+      itemType: stringOr(body.itemType, ""), targetLang: target, force: body.force === true,
+    });
+  }
   const r = await transcribeEnqueue(db, userId, runtimeConfig, {
     titleId: stringOr(body.titleId, ""),
     sourceId: stringOr(body.sourceId, ""),

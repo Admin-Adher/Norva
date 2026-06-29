@@ -910,7 +910,9 @@
             generatedSubtitle: (params = {}) => playbackSessionRequest('GET', `/generated-subtitle${query(params)}`),
             requestGeneratedSubtitle: (body) => playbackSessionRequest('POST', '/generated-subtitle', body),
             // Per-viewer "email me when these AI subtitles are ready" opt-in/out (enabled:false removes it).
-            notifyGeneratedSubtitle: (body) => playbackSessionRequest('POST', '/generated-subtitle-notify', body)
+            notifyGeneratedSubtitle: (body) => playbackSessionRequest('POST', '/generated-subtitle-notify', body),
+            // Phase 3b: available translation target languages (the gateway's installed Argos set).
+            translateLangs: () => playbackSessionRequest('GET', '/generated-subtitle-langs')
         },
 
         device: {

@@ -118,6 +118,50 @@ const WHISPER_SWEEP_OFFSETS = (process.env.WHISPER_SWEEP_OFFSETS || '600,1500,30
 // Full transcription (Phase 3) runs whisper on a whole film → much longer than the 20s LID clip.
 const WHISPER_TRANSCRIBE_TIMEOUT_MS = clampInt(process.env.WHISPER_TRANSCRIBE_TIMEOUT_MS, 1_200_000, 30_000, 7_200_000);
 const AUDIO_EXTRACT_TIMEOUT_MS = clampInt(process.env.AUDIO_EXTRACT_TIMEOUT_MS, 1_800_000, 30_000, 7_200_000);
+// Phase 3b — offline subtitle translation (Argos / CTranslate2 models, see src/translate.py).
+// ARGOS_PYTHON_BIN runs the bundled script against models under ARGOS_MODELS_DIR; an empty/missing
+// models dir disables the /translate* endpoints. Pure CPU on a cached VTT — no provider connection.
+const ARGOS_MODELS_DIR = process.env.ARGOS_MODELS_DIR || '/opt/argos-models';
+const ARGOS_PYTHON_BIN = process.env.ARGOS_PYTHON_BIN || '/opt/argos-venv/bin/python3';
+const ARGOS_TRANSLATE_SCRIPT = path.join(__dirname, 'translate.py');
+const ARGOS_TRANSLATE_TIMEOUT_MS = clampInt(process.env.ARGOS_TRANSLATE_TIMEOUT_MS, 600_000, 30_000, 3_600_000);
+const MAX_TRANSLATE_QUEUE = clampInt(process.env.MAX_TRANSLATE_QUEUE, 100, 1, 1000);
+const argosHasPair = (a, b) => {
+    try { return fs.existsSync(path.join(ARGOS_MODELS_DIR, `${a}_${b}`, 'model', 'model.bin')); } catch (_) { return false; }
+};
+// Scan the models dir once at boot for the count of installed pairs (→ /health + enable flag).
+function scanArgosPairs() {
+    let pairs = 0;
+    try {
+        for (const name of fs.readdirSync(ARGOS_MODELS_DIR)) {
+            if (/^[a-z]{2,3}_[a-z]{2,3}$/.test(name) && argosHasPair(...name.split('_'))) pairs++;
+        }
+    } catch (_) { /* dir missing → translation disabled */ }
+    return pairs;
+}
+const ARGOS_ENABLED = scanArgosPairs() > 0;
+// Servable when there's a direct model or an English pivot (source->en->target).
+function argosCanServe(source, target) {
+    if (!ARGOS_ENABLED || !/^[a-z]{2,3}$/.test(source) || !/^[a-z]{2,3}$/.test(target)) return false;
+    if (source === target) return true;
+    if (argosHasPair(source, target)) return true;
+    return source !== 'en' && target !== 'en' && argosHasPair(source, 'en') && argosHasPair('en', target);
+}
+// Selectable target languages = those reachable from English (every target pivots through en),
+// plus 'en' itself when any X->en model is present.
+function argosTargets() {
+    const out = [];
+    try {
+        let anyToEn = false;
+        for (const name of fs.readdirSync(ARGOS_MODELS_DIR)) {
+            const en = /^en_([a-z]{2,3})$/.exec(name);
+            if (en && argosHasPair('en', en[1])) out.push(en[1]);
+            if (/^[a-z]{2,3}_en$/.test(name) && argosHasPair(name.slice(0, -3), 'en')) anyToEn = true;
+        }
+        if (anyToEn) out.push('en');
+    } catch (_) { /* none */ }
+    return Array.from(new Set(out)).sort();
+}
 const LIVE_INPUT_ANALYZE_DURATION_US = clampInt(process.env.LIVE_INPUT_ANALYZE_DURATION_US, 1_500_000, 250_000, 10_000_000);
 const LIVE_INPUT_PROBE_SIZE_BYTES = clampInt(process.env.LIVE_INPUT_PROBE_SIZE_BYTES, 2_000_000, 64_000, 10_000_000);
 const VOD_INPUT_ANALYZE_DURATION_US = clampInt(process.env.VOD_INPUT_ANALYZE_DURATION_US, 8_000_000, 250_000, 30_000_000);
@@ -150,7 +194,7 @@ const RAW_PROVIDER_RETRY_DELAYS_MS = [1500, 5000, 9000, 9000, 9000, 9000, 9000, 
 const FFMPEG_USER_AGENT = process.env.FFMPEG_USER_AGENT ||
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36 Norva/1.0';
 const MAX_LOG_TAIL = 12000;
-const GATEWAY_VERSION = 58;
+const GATEWAY_VERSION = 59;
 // Browser playback fetches HLS playlists/segments cross-origin, so these must
 // list every Norva web origin or the browser blocks the response (CORS). Keep
 // in sync with the relay's ALLOWED_ORIGINS (services/norva-relay/wrangler.jsonc).
@@ -210,6 +254,8 @@ app.get('/health', (req, res) => {
         probeStats,
         codecProfileCacheSize: codecProfileCache.size,
         languageDetect: Boolean(WHISPER_BIN && WHISPER_MODEL),
+        translate: ARGOS_ENABLED,
+        translateTargets: ARGOS_ENABLED ? argosTargets() : [],
         providerProxy: providerProxyAgents.length > 0,
         providerProxyPool: providerProxyAgents.length,
         inbandHeaderParse: INBAND_HEADER_PARSE,
@@ -681,6 +727,46 @@ app.post('/transcribe-async/:token', (req, res) => {
     return res.status(202).json({ queued: true, position: transcribeQueue.length, busy: transcribeBusy });
 });
 
+// Phase 3b async translation: translate a cached transcript VTT into a target language and POST the
+// result to the edge callback (reuses the transcribe-callback shape: { jobId, ok, vtt, segments }).
+// No provider connection (pure text on the gateway) → auth is the gateway token (edge→gateway), like
+// /xtream/* — not a byte-pipe token. Body: { jobId, callback, source, target, vtt }.
+app.post('/translate-async', requireGatewayAuth, (req, res) => {
+    if (!ARGOS_ENABLED) return res.status(503).json({ error: 'Translation not configured' });
+    const body = req.body || {};
+    const jobId = String(body.jobId || '');
+    const callbackUrl = String(body.callback || '');
+    const source = String(body.source || '').toLowerCase();
+    const target = String(body.target || '').toLowerCase();
+    const vtt = String(body.vtt || '');
+    if (!jobId || !/^https:\/\/[^/]+\.supabase\.co\//.test(callbackUrl)) {
+        return res.status(400).json({ error: 'jobId and a valid supabase callback are required' });
+    }
+    if (!/^[a-z]{2,3}$/.test(source) || !/^[a-z]{2,3}$/.test(target)) return res.status(400).json({ error: 'invalid source/target' });
+    if (!vtt.trim()) return res.status(400).json({ error: 'vtt is required' });
+    if (!argosCanServe(source, target)) return res.status(422).json({ error: `unsupported pair ${source}->${target}` });
+    const ok = enqueueTranslate({ vtt, source, target, jobId, callbackUrl });
+    if (!ok) return res.status(429).json({ error: 'Translation queue full' });
+    return res.status(202).json({ queued: true, position: translateQueue.length, busy: translateBusy });
+});
+
+// Sync translate (debug / benchmark): returns the translated VTT directly. Gateway-auth only.
+app.post('/translate', requireGatewayAuth, async (req, res) => {
+    if (!ARGOS_ENABLED) return res.status(503).json({ error: 'Translation not configured' });
+    const body = req.body || {};
+    const source = String(body.source || '').toLowerCase();
+    const target = String(body.target || '').toLowerCase();
+    const vtt = String(body.vtt || '');
+    if (!/^[a-z]{2,3}$/.test(source) || !/^[a-z]{2,3}$/.test(target) || !vtt.trim()) {
+        return res.status(400).json({ error: 'source, target, vtt required' });
+    }
+    if (!argosCanServe(source, target)) return res.status(422).json({ error: `unsupported pair ${source}->${target}` });
+    const t0 = Date.now();
+    const r = await runArgos(vtt, source, target);
+    if (!r.ok) return res.status(502).json({ error: 'Translation failed', details: r.error });
+    return res.json({ vtt: r.vtt, segments: (r.vtt.match(/-->/g) || []).length, ms: Date.now() - t0 });
+});
+
 // Extract a mono/16 kHz pcm_s16le WAV of one audio track to a temp file. Resolves the path, or
 // null on failure. `dur` 0 = the whole track (full-film transcription); >0 = a clip. `timeoutMs`
 // defaults to 30 s (LID clip) — pass a longer value for a full-film extraction.
@@ -877,6 +963,70 @@ async function runTranscribeJob(job) {
             signal: AbortSignal.timeout(30000),
         });
     } catch (e) { console.warn('[media-gateway] transcribe callback failed', jobId, String((e && e.message) || e)); }
+}
+
+// Phase 3b translation queue — a SEPARATE lane from transcription. Translation is pure CPU on a
+// cached VTT (no provider connection, ~20-45s/film), so it must not wait behind a 40-min whisper
+// job, nor block one. A gateway restart loses in-flight jobs → the edge reaper re-enqueues rows
+// stuck in 'processing'.
+const translateQueue = [];
+let translateBusy = false;
+function enqueueTranslate(job) {
+    if (translateQueue.length >= MAX_TRANSLATE_QUEUE) return false;
+    translateQueue.push(job);
+    queueMicrotask(drainTranslateQueue);
+    return true;
+}
+async function drainTranslateQueue() {
+    if (translateBusy) return;
+    translateBusy = true;
+    try {
+        while (translateQueue.length) {
+            const job = translateQueue.shift();
+            await runTranslateJob(job).catch((e) => console.warn('[media-gateway] translate job error', String((e && e.message) || e)));
+        }
+    } finally { translateBusy = false; }
+}
+// Run translate.py on a VTT: pipe the request in on stdin, read the translated VTT from stdout.
+// Resolves { ok, vtt } or { ok:false, error } (the script emits a JSON error on stderr + exit code).
+function runArgos(vtt, source, target) {
+    return new Promise((resolve) => {
+        let child;
+        try {
+            child = spawn(ARGOS_PYTHON_BIN, [ARGOS_TRANSLATE_SCRIPT], {
+                stdio: ['pipe', 'pipe', 'pipe'],
+                env: { ...process.env, ARGOS_MODELS_DIR },
+            });
+        } catch (e) { return resolve({ ok: false, error: 'spawn failed: ' + String((e && e.message) || e) }); }
+        let out = '', err = '';
+        const timer = setTimeout(() => { try { child.kill('SIGKILL'); } catch (_) {} }, ARGOS_TRANSLATE_TIMEOUT_MS);
+        child.stdout.on('data', (d) => { out += d.toString(); });
+        child.stderr.on('data', (d) => { err += d.toString(); });
+        child.on('error', (e) => { clearTimeout(timer); resolve({ ok: false, error: String((e && e.message) || e) }); });
+        child.on('close', (code) => {
+            clearTimeout(timer);
+            if (code === 0 && out.trim()) return resolve({ ok: true, vtt: out });
+            let msg = `translate exit ${code}`;
+            try { const j = JSON.parse((err.trim().split('\n').pop() || '')); if (j && j.error) msg = j.error; } catch (_) {}
+            resolve({ ok: false, error: msg });
+        });
+        try { child.stdin.write(JSON.stringify({ vtt, source, target })); child.stdin.end(); } catch (_) { /* close handler resolves */ }
+    });
+}
+async function runTranslateJob(job) {
+    const { vtt, source, target, jobId, callbackUrl } = job;
+    const r = await runArgos(vtt, source, target);
+    const payload = r.ok
+        ? { jobId, ok: true, vtt: r.vtt, sourceLang: target, segments: (r.vtt.match(/-->/g) || []).length }
+        : { jobId, ok: false, error: String(r.error || 'translate failed').slice(0, 300) };
+    try {
+        await fetch(callbackUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${GATEWAY_TOKEN}` },
+            body: JSON.stringify(payload),
+            signal: AbortSignal.timeout(30000),
+        });
+    } catch (e) { console.warn('[media-gateway] translate callback failed', jobId, String((e && e.message) || e)); }
 }
 
 // Detect the language of a (Whisper) transcript with zero dependencies. Non-Latin scripts are

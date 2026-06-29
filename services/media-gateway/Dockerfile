@@ -18,10 +18,23 @@ RUN git clone --depth 1 https://github.com/ggml-org/whisper.cpp.git \
 # --- runtime stage ---
 FROM node:20-bookworm-slim
 
-# ffmpeg for remux/extraction; libgomp1 for whisper.cpp's OpenMP.
+# ffmpeg for remux/extraction; libgomp1 for whisper.cpp's OpenMP; python3 for Argos translation.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg ca-certificates libgomp1 \
+    && apt-get install -y --no-install-recommends ffmpeg ca-certificates libgomp1 python3 python3-venv \
     && rm -rf /var/lib/apt/lists/*
+
+# --- Phase 3b: Argos subtitle translation (CTranslate2 + SentencePiece — deliberately NOT the full
+# argostranslate package, so no torch/stanza/spacy → much lighter image). A venv + the model set for
+# ARGOS_LANGS (en is always the English pivot). Placed before the app COPYs so the heavy model layer
+# (~1.3 GB for the default set) caches independently of source edits. Override ARGOS_LANGS to trim.
+ARG ARGOS_LANGS=fr,es,ar,de,it,pt
+RUN python3 -m venv /opt/argos-venv \
+    && /opt/argos-venv/bin/pip install --no-cache-dir --upgrade pip \
+    && /opt/argos-venv/bin/pip install --no-cache-dir ctranslate2 sentencepiece
+COPY scripts/fetch_argos_models.py /tmp/fetch_argos_models.py
+RUN ARGOS_LANGS="${ARGOS_LANGS}" ARGOS_MODELS_DIR=/opt/argos-models \
+        /opt/argos-venv/bin/python3 /tmp/fetch_argos_models.py \
+    && rm -f /tmp/fetch_argos_models.py
 
 WORKDIR /app
 
@@ -40,6 +53,9 @@ ENV OUTPUT_DIR=/tmp/norva-media-gateway
 # Language-detection (Phase 2). Unset WHISPER_BIN to disable the /detect-language endpoint.
 ENV WHISPER_BIN=/usr/local/bin/whisper-cli
 ENV WHISPER_MODEL=/opt/whisper/ggml-model.bin
+# Translation (Phase 3b). Empty/missing ARGOS_MODELS_DIR disables the /translate* endpoints.
+ENV ARGOS_MODELS_DIR=/opt/argos-models
+ENV ARGOS_PYTHON_BIN=/opt/argos-venv/bin/python3
 
 EXPOSE 8080
 

@@ -124,6 +124,14 @@ class WatchPage {
         this._aiNotifyOptedIn = false;
         this._aiEtaTargetMs = 0;
         this._aiCountdownTimer = null;
+        // Phase 3b translation: per-target state, the gateway's available targets (fetched once,
+        // global), the lang of the AI track currently showing, and a target picked before the
+        // source transcript was ready (auto-fired once it lands).
+        this._translations = new Map();        // lang -> { state: 'processing'|'ready'|'failed', vtt }
+        this._aiTranslateTargets = null;       // array of available target codes, or null until fetched
+        this._aiActiveLang = null;             // lang code of the AI <track> currently showing
+        this._pendingTranslateTarget = null;
+        this._translatePollTimers = new Map(); // lang -> interval id
         this.selectedAudioStreamIndex = null;
         this.selectedAudioTrackUserChoice = false;
         this.pendingPlaybackPreferences = null;
@@ -2698,6 +2706,7 @@ class WatchPage {
         this.stopAiSubtitlePolling();
         this._aiNotifyOptedIn = false;
         this._aiEtaTargetMs = 0;
+        this._resetTranslations();
         this.clearExternalSubtitleTracks();
         this.updateAudioTracks();
         this.updateCaptionsTracks();
@@ -5375,6 +5384,8 @@ class WatchPage {
     clearExternalSubtitleTracks() {
         this.stopSubtitleEngine();
         this.stopAiSubtitlePolling();
+        this.stopAllTranslatePolling();
+        this._aiActiveLang = null;
         this.video?.querySelectorAll('track[data-norva-probe-subtitle="true"], track[data-norva-ai-subtitle="true"]').forEach(track => {
             if (track.track) {
                 track.track.mode = 'disabled';
@@ -6154,10 +6165,46 @@ class WatchPage {
             // Terminal: the audio was transcribed but yielded no dialogue (silence / music only).
             return `<button class="captions-option locked" data-source="ai" data-index="-1" disabled aria-disabled="true" title="The audio was transcribed but no speech was found">${this.escapeHtml('AI subtitles — no speech detected')}</button>`;
         }
+        const srcLang = this.normalizeTrackLanguage(this.aiSubtitleLang);
+        // The transcript row is "active" only when the SOURCE track shows (a translation showing
+        // makes _aiActiveLang the target instead) — so source vs translation never both read active.
+        const transcriptActive = this.aiSubtitleState === 'ready' && this._aiActiveLang && this._aiActiveLang === srcLang;
         const label = this.aiSubtitleState === 'ready'
-            ? (showing ? 'AI subtitles' : 'AI subtitles — show')
+            ? (transcriptActive ? 'AI subtitles (original)' : 'AI subtitles — show original')
             : 'Generate AI subtitles';
-        return `<button class="captions-option ${showing ? 'active' : ''}" data-source="ai" data-index="-1">✨ ${this.escapeHtml(label)}</button>`;
+        let html = `<button class="captions-option ${transcriptActive ? 'active' : ''}" data-source="ai" data-index="-1">✨ ${this.escapeHtml(label)}</button>`;
+        if (this.aiSubtitleState === 'ready') html += this._aiTranslateRowsHtml();
+        return html;
+    }
+
+    // Phase 3b: one row per available translation TARGET language (shown once the source transcript
+    // is ready). Reflects each target's own state machine: idle → translating… → active / retry.
+    _aiTranslateRowsHtml() {
+        const src = this.normalizeTrackLanguage(this.aiSubtitleLang);
+        const targets = (this._aiTranslateTargets || []).filter((l) => l && l !== src);
+        if (!targets.length) return '';
+        const rows = targets.map((lang) => {
+            const st = (this._translations.get(lang) || {}).state || 'idle';
+            const name = this.escapeHtml(this._langDisplayName(lang));
+            if (st === 'processing') {
+                return `<button class="captions-option locked" data-action="ai-translate" data-lang="${lang}" disabled aria-disabled="true" title="Translating on the server — this is quick">🌐 ${name} — ${this.escapeHtml('translating…')}</button>`;
+            }
+            if (st === 'failed') {
+                return `<button class="captions-option" data-action="ai-translate" data-lang="${lang}">🌐 ${name} — ${this.escapeHtml('retry')}</button>`;
+            }
+            const active = this._aiActiveLang === lang;
+            return `<button class="captions-option ${active ? 'active' : ''}" data-action="ai-translate" data-lang="${lang}">🌐 ${name}</button>`;
+        }).join('');
+        return `<div class="captions-subhead">${this.escapeHtml('Translate to')}</div>${rows}`;
+    }
+
+    _langDisplayName(code) {
+        const N = {
+            fr: 'Français', en: 'English', es: 'Español', ar: 'العربية', de: 'Deutsch', it: 'Italiano',
+            pt: 'Português', nl: 'Nederlands', ru: 'Русский', tr: 'Türkçe', pl: 'Polski', sv: 'Svenska',
+            ro: 'Română', uk: 'Українська', zh: '中文', ja: '日本語', ko: '한국어', hi: 'हिन्दी',
+        };
+        return N[code] || String(code || '').toUpperCase();
     }
 
     // Human title for the email body (and the in-menu copy). Best-effort across the shapes content
@@ -6260,6 +6307,14 @@ class WatchPage {
                 this.aiSubtitleState = 'ready';
                 this.aiSubtitleVtt = vtt;
                 this.aiSubtitleLang = lang;
+                this._ensureTranslateTargets();
+                // A translation target picked before the transcript existed → fire it now.
+                if (this._pendingTranslateTarget && this._pendingTranslateTarget !== lang) {
+                    const t = this._pendingTranslateTarget; this._pendingTranslateTarget = null;
+                    this.requestAiTranslation(t);
+                } else {
+                    this._pendingTranslateTarget = null;
+                }
             } else {
                 // Transcription finished but produced nothing to show — terminal "no speech" state.
                 this.aiSubtitleState = 'empty';
@@ -6333,6 +6388,7 @@ class WatchPage {
             this.aiSubtitleState = 'idle';
             this._aiNotifyOptedIn = false;
             this._aiEtaTargetMs = 0;
+            this._resetTranslations();
         }
         this._aiSubtitleTitleId = key;
 
@@ -6379,6 +6435,142 @@ class WatchPage {
 
     // Parse a whisper VTT and feed its cues into a src-less <track>. Replaces any active text
     // track (AI subs are the chosen track). Honors the current subtitle sync offset.
+    // Fetch the gateway's installed translation targets once (global, not per-title). Re-renders the
+    // menu when they land so the "Translate to" rows appear.
+    async _ensureTranslateTargets() {
+        if (this._aiTranslateTargets !== null) return;
+        this._aiTranslateTargets = []; // guard against concurrent fetches while in flight
+        try {
+            const res = await window.NorvaCloud?.playback?.translateLangs?.();
+            this._aiTranslateTargets = Array.isArray(res?.targets) ? res.targets.map((x) => this.normalizeTrackLanguage(x)).filter(Boolean) : [];
+        } catch (_) { this._aiTranslateTargets = []; }
+        this.updateCaptionsTracks();
+    }
+
+    stopTranslatePolling(lang) {
+        const t = this._translatePollTimers.get(lang);
+        if (t) { clearInterval(t); this._translatePollTimers.delete(lang); }
+    }
+
+    stopAllTranslatePolling() {
+        if (!this._translatePollTimers) return;
+        for (const t of this._translatePollTimers.values()) clearInterval(t);
+        this._translatePollTimers.clear();
+    }
+
+    // Drop per-title translation state (kept: _aiTranslateTargets, which is gateway-global).
+    _resetTranslations() {
+        this.stopAllTranslatePolling();
+        this._translations?.clear();
+        this._pendingTranslateTarget = null;
+        this._aiActiveLang = null;
+    }
+
+    startTranslatePolling(lang, params, key) {
+        this.stopTranslatePolling(lang);
+        const startedAt = Date.now();
+        const MAX_MS = 10 * 60 * 1000; // translation is fast (~min); cap the poll generously at 10 min
+        const timer = setInterval(async () => {
+            if (this._aiSubtitleKey() !== key) { this.stopTranslatePolling(lang); return; }
+            if (Date.now() - startedAt > MAX_MS) {
+                this.stopTranslatePolling(lang);
+                this._translations.set(lang, { state: 'failed', vtt: null });
+                this.updateCaptionsTracks();
+                return;
+            }
+            try { await this._pollTranslateOnce(lang, params, key); } catch (_) { /* transient — keep polling */ }
+        }, 12000);
+        this._translatePollTimers.set(lang, timer);
+    }
+
+    // GET the translation cache row once; attach + finalize when ready.
+    async _pollTranslateOnce(lang, params, key) {
+        const got = await window.NorvaCloud.playback.generatedSubtitle({
+            sourceId: params.sourceId, externalId: params.externalId, itemType: params.itemType,
+            titleId: params.titleId, kind: 'translation', lang,
+        });
+        if (!got || this._aiSubtitleKey() !== key) return false;
+        const status = String(got.status || 'none');
+        if (status === 'ready') {
+            this.stopTranslatePolling(lang);
+            const vtt = String(got.vtt || '');
+            if (vtt && this.attachGeneratedSubtitleTrack(vtt, lang)) {
+                this._translations.set(lang, { state: 'ready', vtt });
+            } else {
+                this._translations.set(lang, { state: 'failed', vtt: null }); // ready but no cues
+            }
+            this.updateCaptionsTracks();
+            return true;
+        }
+        if (status === 'failed') {
+            this.stopTranslatePolling(lang);
+            this._translations.set(lang, { state: 'failed', vtt: null });
+            this.updateCaptionsTracks();
+            return true;
+        }
+        // none / processing → keep waiting
+        this._translations.set(lang, { state: 'processing', vtt: null });
+        return false;
+    }
+
+    // Entry point for a "🌐 Translate to <lang>" row. Re-attaches a cached translation instantly;
+    // otherwise enqueues an Argos translation of the (ready) transcript and polls until it lands.
+    async requestAiTranslation(lang) {
+        lang = this.normalizeTrackLanguage(lang);
+        if (!lang || !this._canRequestAiSubtitles()) return;
+        const key = this._aiSubtitleKey();
+        const api = window.NorvaCloud.playback;
+
+        const cached = this._translations.get(lang);
+        if (cached && cached.state === 'ready' && cached.vtt) {
+            this.attachGeneratedSubtitleTrack(cached.vtt, lang);
+            this.updateCaptionsTracks();
+            return;
+        }
+
+        const params = this._aiSubtitleParams();
+        if (!params) return;
+        try {
+            const cloudId = await window.API?.resolveCloudSourceId?.(params.sourceId);
+            if (cloudId) params.sourceId = String(cloudId);
+        } catch (_) { /* fall back to the raw id */ }
+
+        this._translations.set(lang, { state: 'processing', vtt: null });
+        this.updateCaptionsTracks();
+        try {
+            const enq = await api.requestGeneratedSubtitle({
+                sourceId: params.sourceId, externalId: params.externalId, itemType: params.itemType,
+                titleId: params.titleId, kind: 'translation', targetLang: lang,
+            });
+            const status = String(enq?.status || 'none');
+            if (status === 'ready' && enq.sameLang) {
+                // The transcript is already in the requested language — just show it.
+                this._translations.set(lang, { state: 'ready', vtt: this.aiSubtitleVtt });
+                if (this.aiSubtitleVtt) this.attachGeneratedSubtitleTrack(this.aiSubtitleVtt, this.aiSubtitleLang);
+                this.updateCaptionsTracks();
+                return;
+            }
+            if (status === 'ready') { await this._pollTranslateOnce(lang, params, key); return; }
+            if (status === 'transcript-required') {
+                // The source transcript was evicted/never made — produce it, then auto-translate.
+                this._pendingTranslateTarget = lang;
+                this._translations.delete(lang);
+                this.requestAiSubtitles();
+                return;
+            }
+            if (status === 'error') {
+                this._translations.set(lang, { state: 'failed', vtt: null });
+                this.updateCaptionsTracks();
+                return;
+            }
+            this.startTranslatePolling(lang, params, key); // processing
+        } catch (err) {
+            console.warn('[WatchPage] AI translate enqueue failed:', err?.status, err?.message || err, '| lang:', lang);
+            this._translations.set(lang, { state: 'failed', vtt: null });
+            this.updateCaptionsTracks();
+        }
+    }
+
     attachGeneratedSubtitleTrack(vtt, lang = 'und') {
         if (!this.video) return false;
         const cues = this.parseVttCues(vtt);
@@ -6407,6 +6599,7 @@ class WatchPage {
             if (trackEl.track) trackEl.track.mode = 'showing';
             this.updateCaptionsTracks();
         }, 0);
+        this._aiActiveLang = trackEl.srclang || null;
         return true;
     }
 
@@ -6469,6 +6662,11 @@ class WatchPage {
         const aiAvailable = !options.length && this._canRequestAiSubtitles();
         const aiShowing = aiAvailable && this.aiSubtitleTrackShowing();
         anyActive = anyActive || aiShowing;
+        // Once a transcript is ready, lazily fetch the gateway's translation targets (one-shot) so
+        // the "Translate to" rows can render. Guarded inside, so this is a cheap no-op afterwards.
+        if (aiAvailable && this.aiSubtitleState === 'ready' && this._aiTranslateTargets === null) {
+            this._ensureTranslateTargets();
+        }
 
         // No selectable subtitle TRACK, but the label/category says the picture carries
         // burned-in subtitles → show them as a locked, always-on entry instead of "Off".
@@ -6515,6 +6713,13 @@ class WatchPage {
         this.captionsList.querySelector('[data-action="ai-notify"]')?.addEventListener('click', (event) => {
             event.stopPropagation();
             this.toggleAiNotify();
+        });
+
+        this.captionsList.querySelectorAll('[data-action="ai-translate"]').forEach(btn => {
+            btn.addEventListener('click', (event) => {
+                event.stopPropagation();
+                this.requestAiTranslation(btn.dataset.lang);
+            });
         });
 
         this.captionsList.querySelectorAll('.captions-offset-btn').forEach(btn => {
