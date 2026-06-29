@@ -135,3 +135,35 @@ sans `src` via `addCue()` (même chemin sans rechargement que les sous-titres pr
 → `ready` avec VTT FR propre (9 cues, `source_lang:fr`) ; 2ᵉ appel → `cached:true`, **même** `jobId`
 (pas de doublon) ; callback `failed` réécrit bien la ligne par `job_id` (transitoire « Audio extraction
 failed », réussite au retry).
+
+## 9. UX d'attente : compte à rebours + notif email (2026-06-29, v19)
+
+Le `⏳ generating…` opaque (35-45 min) ne disait rien au viewer et l'obligeait à garder l'onglet ouvert.
+
+**Player** : la ligne « génération » affiche maintenant un **compte à rebours** (ETA ≈ 0,4× la durée,
+clampé 8-60 min, tické *en place* pour ne pas reconstruire le popover chaque seconde ; repli
+« finishing up… » plutôt que de prétendre fini). Et un toggle **« 🔔 Notify me by email when ready »** :
+on s'abonne, on peut fermer l'onglet — l'email arrive dès que le VTT atterrit (et il est caché, donc
+chargement instantané ensuite). Chip optimiste, revert si le compte n'a pas d'email. Reset au
+changement de titre.
+
+**Edge** (`norva-playback` v19) : nouvelle route `POST /generated-subtitle-notify` (opt-in/out). Le
+cache transcript étant **cross-user**, l'abonnement vit dans sa propre table par `(user, fichier)` :
+`public.catalog_generated_subtitle_notifications` (`status = pending|sent|skipped|failed`, unique sur
+`(user_id, provider_key, item_type, external_id, kind, lang)`, service-role only). La route est
+**volontairement légère** : elle dérive le `providerKey` depuis la ligne source stockée (lookup DB
+caché, **aucun** aller-retour provider), donc toggler en pleine lecture ne peut pas ouvrir une 2ᵉ
+connexion provider (piège `user_multi_ip`). `runTranscribeCallback` fan-out les abonnés en attente :
+`ready` avec speech → email Resend + `sent` ; `ready` mais vide → `skipped` (rien à montrer, pas
+d'email) ; `failed` → `failed` (silencieux). Best-effort : un échec d'envoi ne fait jamais échouer le
+callback. Email branché sur Resend (mêmes secrets que `norva-auth-email`, projet-wide), gabarit HTML
+brandé sombre.
+
+**Vérifié en prod** : v19 live (`/health`), route `401` sans auth ; callback réel (token gateway via
+`net.http_post`) sur job synthétique `ready/segments:0` → cache `ready`, abonné `skipped`, **aucun
+email** (chemin no-speech), rows nettoyées.
+
+> Repère deep-link : l'email pointe vers `norva.tv` (pas de lien direct vers le film). La fiche est
+> rétablie via `sessionStorage` (`norva-open-fiche`, meurt avec l'onglet) et keyée sur l'alias source
+> **local** au navigateur — un deep-link serveur exact demanderait un routage fiche par URL + une
+> résolution cloud→local de la source. À faire comme amélioration séparée si besoin.

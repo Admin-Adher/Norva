@@ -31,6 +31,8 @@ résout les imports `../_shared`). Ne jamais déployer une edge function via un 
 | **Phase 1** | Langue audio **déduite** (label/catégorie/région/orig-lang) en fallback ; sous-titres **incrustés** → entrée « 🔒 verrouillée » au lieu de « Off » | `mediaUtils.js`, `WatchPage.js`, `tests/trackIntel.test.js` |
 | Catalogue | Badge de langue qui clignotait « une fois sur deux » au rechargement → ligne la plus riche gardée ; auto-guérison des langues 3 lettres (fas/kur/sqi/ell) | `supabase/functions/norva-catalog/index.ts` |
 | Gateway | **Cache du profil ffprobe** par URL (moins de sondes répétées → moins de 458) | `services/media-gateway/src/index.js` (v48) |
+| Edge | **Crons d'enrichissement déférés pendant une lecture live** (`userHasLiveSession()` : event < 4 min OU session `ready` non expirée → sonde relais audio-langs **et** backfill whisper renvoient `skipped: live-session`). Fixe le `user_multi_ip` (stream IP gateway + sonde IP Cloudflare = 2 IPs → panel mono-IP 429). On-demand non gardé. `ignoreLiveSession:true` bypass. **Vérifié prod** (user live → `skipped`). | `norva-playback` (v18) |
+| Edge + Player | **UX d'attente sous-titres IA** : compte à rebours ETA + toggle **« 🔔 Notify me by email »** (opt-in par titre, route `POST /generated-subtitle-notify` légère sans appel provider, fan-out email Resend au callback). **Vérifié prod** (callback réel → `skipped` no-speech, 0 email). Détail `PHASE3-AI-SUBTITLES.md` §9. | `norva-playback` (v19), `WatchPage.js`, `cloudApi.js`, migration `…_generated_subtitle_notifications` |
 
 ## Ce qui est DÉPLOYÉ mais derrière un FLAG (à activer pour en profiter)
 
