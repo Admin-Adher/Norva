@@ -63,18 +63,49 @@ Gated by `NORVA_WHISPER_DETECT` (runtime config / env). **Off by default** → n
 
 **Single-slot caveat:** the WAV extraction is a second provider connection, so on a single-slot
 source (e.g. `super8k.top`) it can lose to the live `/raw` stream (458) and yield nothing that
-play (it retries on the next first-probe of an untagged file). The single-slot-friendly
-alternative is an **offline backfill** (detect untagged tracks when nothing is streaming) — not
-yet built; add it if the inline path proves too contended.
+play. Use the **offline backfill** below instead on single-slot accounts.
+
+## Offline backfill — `POST /audio-backfill` `{ "mode": "whisper" }` (DONE, single-slot-safe)
+
+The single-slot-friendly path: run it **when nothing is streaming** (manually or via cron), so
+the WAV extraction never contends with a live stream. It walks titles whose `audio_tracks` still
+have untagged entries (lang null), resolves each title's provider URL, and runs the gateway
+`/detect-language` per untagged track (reusing the same detect+persist logic). Service-gated by
+the `NORVA_BACKFILL_TOKEN` bearer, like the other backfill modes.
+
+```bash
+curl -X POST "$EDGE/norva-playback/audio-backfill" \
+  -H "Authorization: Bearer $NORVA_BACKFILL_TOKEN" -H 'content-type: application/json' \
+  -d '{"mode":"whisper","userId":"<uuid>","type":"movie","limit":100,"concurrency":1}'
+# → { mode, processed, candidates, detected, lastId, hasMore }. Page with afterId=lastId while hasMore.
+```
+
+`concurrency` defaults to **1** (serialized — safe for single-slot; each detection is one
+provider connection); raise it (max 4) only on multi-connection providers. Resumable by `afterId`
+cursor. Does NOT require `NORVA_WHISPER_DETECT` (that flag only gates the inline trigger); it does
+require the gateway with whisper deployed.
 
 ## Enabling
 
 1. Deploy the gateway (`services/media-gateway`) — the new Dockerfile builds whisper.cpp + the
    model and exposes `/detect-language`. Confirm `GET /health` → `languageDetect: true`.
-2. Set `NORVA_WHISPER_DETECT=true` (runtime config row or edge env) and deploy `norva-playback`
-   (push to `main`).
-3. Play a multi-audio title with an untagged track; after the first play the languages persist,
-   so the next play (and the grid badge) show them with no probe.
+2. Deploy `norva-playback` (push to `main`) — ships both the inline trigger and the `whisper`
+   backfill mode.
+3. Then either:
+   - **Offline backfill (recommended for single-slot):** `POST /audio-backfill {"mode":"whisper",…}`
+     when nothing is streaming. No flag needed.
+   - **Inline self-heal:** set `NORVA_WHISPER_DETECT=true` and it detects automatically on first
+     play (best on multi-connection providers).
+
+### Where does `NORVA_WHISPER_DETECT` go?
+
+It's read in `getRuntimeConfig`, from **either** source (env wins):
+- **Edge env / secret** — `supabase secrets set NORVA_WHISPER_DETECT=true` (or the Dashboard →
+  Edge Functions → Secrets). Applies after the next deploy.
+- **DB runtime config** — a row in `cloud_runtime_config`:
+  `insert into cloud_runtime_config (key, value) values ('NORVA_WHISPER_DETECT','true')
+   on conflict (key) do update set value = excluded.value;` (picked up within ~30 s — the config
+  cache TTL — no redeploy needed). Only affects the **inline** trigger; the backfill ignores it.
 
 No relay or Workers AI changes are needed (the earlier Workers AI approach was dropped in favour
 of self-hosted whisper.cpp).

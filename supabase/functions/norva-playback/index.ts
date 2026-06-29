@@ -2215,6 +2215,69 @@ async function runAudioBackfill(req: Request, db: SupabaseClient) {
     return { diagnostic: diag };
   }
 
+  // mode 'whisper' = OFFLINE language detection (single-slot-safe alternative to the inline
+  // trigger). Walks titles whose audio_tracks still have UNTAGGED entries (lang null) and runs
+  // the gateway's self-hosted whisper.cpp per untagged track. Meant to run when nothing is
+  // streaming, so the WAV extraction doesn't contend with a live stream. Serialized by default
+  // (concurrency 1) since each detection is a provider connection; resumable by id cursor.
+  if (stringOr(body.mode, "") === "whisper") {
+    if (!runtimeConfig.mediaGatewayUrl || !runtimeConfig.mediaGatewayToken) {
+      throw new HttpError(503, "Media gateway is not configured");
+    }
+    const wConcurrency = Math.max(1, Math.min(Number(body.concurrency) || 1, 4));
+    let wq = db.from("cloud_titles")
+      .select("id, default_variant_id, provider_tmdb_id, audio_tracks")
+      .eq("user_id", userId).eq("item_type", itemType).gt("variant_count", 0)
+      .not("audio_tracks", "is", null);
+    if (afterId) wq = wq.gt("id", afterId);
+    wq = wq.order("id", { ascending: true }).limit(limit);
+    const { data: wrows, error: wErr } = await wq;
+    if (wErr) throwDb(wErr, "Unable to list titles for whisper backfill");
+    if (!wrows || !wrows.length) return { mode: "whisper", processed: 0, candidates: 0, detected: 0, lastId: afterId, hasMore: false };
+    const wLastId = String(wrows[wrows.length - 1].id);
+
+    const candidates = wrows.filter((t) => {
+      const arr = Array.isArray((t as JsonRecord).audio_tracks) ? (t as JsonRecord).audio_tracks as JsonRecord[] : [];
+      return arr.length >= 2 && arr.some((x) => !stringOrNull(x?.lang));
+    });
+    const wvIds = candidates.map((t) => stringOrNull((t as JsonRecord).default_variant_id)).filter(Boolean) as string[];
+    const wvById = new Map<string, JsonRecord>();
+    if (wvIds.length) {
+      const { data: vs } = await db.from("cloud_title_variants").select("id, source_id, external_id, item_type").in("id", wvIds);
+      for (const v of vs ?? []) wvById.set(String(v.id), v as JsonRecord);
+    }
+
+    let detected = 0;
+    const wExp = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+    const runOne = async (t: JsonRecord) => {
+      try {
+        const variant = wvById.get(String(t.default_variant_id));
+        if (!variant) return;
+        const sourceId = stringOr(variant.source_id, ""), externalId = stringOr(variant.external_id, ""), vit = stringOr(variant.item_type, itemType);
+        if (!sourceId || !externalId) return;
+        const targetUrl = vit === "series"
+          ? await resolveSeriesEpisodeUrl(sourceId, externalId, userId, db).catch(() => null)
+          : ((await resolvePlaybackTarget(sourceId, vit, externalId, userId, db).catch(() => null))?.targetUrl ?? null);
+        if (!targetUrl) return;
+        const audioTracks = ((t.audio_tracks as JsonRecord[]) || [])
+          .map((x) => ({ index: Number(x?.index), lang: stringOrNull(x?.lang) }))
+          .filter((x) => Number.isInteger(x.index));
+        const before = audioTracks.filter((x) => x.lang).length;
+        await detectUntaggedAudioLanguages({
+          db, runtimeConfig, userId, targetUrl, userAgent: null,
+          audioTracks, titleId: String(t.id), tmdbId: stringOrNull(t.provider_tmdb_id),
+          serverHost: hostFromUrl(targetUrl), itemType: vit, fileExternalId: externalId,
+          sessionId: "whisper-backfill", expiresAt: wExp,
+        });
+        if (audioTracks.filter((x) => x.lang).length > before) detected += 1;
+      } catch (_) { /* best-effort per title */ }
+    };
+    for (let i = 0; i < candidates.length; i += wConcurrency) {
+      await Promise.all(candidates.slice(i, i + wConcurrency).map(runOne));
+    }
+    return { mode: "whisper", processed: wrows.length, candidates: candidates.length, detected, lastId: wLastId, hasMore: wrows.length === limit };
+  }
+
   let titlesQuery = db
     .from("cloud_titles")
     .select("id, default_variant_id, provider_tmdb_id")
