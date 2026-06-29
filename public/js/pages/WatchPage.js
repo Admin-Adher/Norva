@@ -1271,8 +1271,24 @@ class WatchPage {
         this.returnPage = content.type === 'movie' ? 'movies' : 'series';
         // Known total duration (TMDB runtime / episode duration) used as a
         // timeline fallback when ffprobe can't determine the duration
-        const codecProfileDuration = this.durationFromCodecProfile(playbackMetadata.codecProfile || playbackMetadata.codec_profile);
+        const codecProfile = playbackMetadata.codecProfile || playbackMetadata.codec_profile || null;
+        const codecProfileDuration = this.durationFromCodecProfile(codecProfile);
         this.durationHint = this.normalizeDuration(content.durationHint) || codecProfileDuration;
+        this._diagCodecProfile = codecProfile;
+        this._timelineDiagLogged = null;
+        // Timeline diagnostics: why a title does/doesn't get a seek bar. The bar needs a duration,
+        // which for a gateway-session comes from durationHint (catalog runtime OR the gateway codec
+        // profile's durationSeconds — incl. the MPEG-TS size*8/bitrate estimate). Logged at load.
+        console.log('[WatchPage] timeline diag (load):', {
+            mode: playbackMetadata.mode || playbackMetadata.playbackMode || null,
+            container: this.containerExtension,
+            contentDurationHint: content.durationHint ?? null,
+            codecProfilePresent: Boolean(codecProfile),
+            codecProfileDurationSeconds: codecProfile ? (codecProfile.durationSeconds ?? codecProfile.duration_seconds ?? codecProfile.duration ?? null) : null,
+            codecProfileBitRate: codecProfile ? (codecProfile.bitRate ?? codecProfile.bit_rate ?? null) : null,
+            codecProfileDuration,
+            resolvedDurationHint: this.durationHint,
+        });
         this._lastKnownPlaybackPosition = this.resumeTime || 0;
         this._lastKnownPlaybackDuration = this.durationHint || 0;
         this.resetTrackSelectionState();
@@ -3877,10 +3893,31 @@ class WatchPage {
         }
 
         if (!duration) {
+            // Diagnose the missing seek bar exactly once per playback (this runs on every tick).
+            if (this._timelineDiagLogged !== 'hidden') {
+                this._timelineDiagLogged = 'hidden';
+                const v = this.video;
+                console.log('[WatchPage] timeline diag (no seek bar — getDisplayDuration null):', {
+                    mode: this.currentPlaybackMode,
+                    isVod: this.isVodContent(),
+                    probeDuration: this.probeDuration,
+                    durationHint: this.durationHint,
+                    getProbeDuration: this.getProbeDuration(),
+                    videoDuration: v ? v.duration : null,
+                    videoDurationFinite: v ? Number.isFinite(v.duration) : null,
+                    streamStartOffset: this.streamStartOffset,
+                    codecProfileDurationSeconds: this._diagCodecProfile
+                        ? (this._diagCodecProfile.durationSeconds ?? this._diagCodecProfile.duration_seconds ?? null) : null,
+                });
+            }
             if (this.timeTotal) this.timeTotal.textContent = '';
             this.setProgressState(false, false);
             this.setProgressValue(0);
             return null;
+        }
+        if (this._timelineDiagLogged !== 'shown') {
+            this._timelineDiagLogged = 'shown';
+            console.log('[WatchPage] timeline diag: seek bar shown, duration =', duration, 'mode =', this.currentPlaybackMode);
         }
 
         if (this.timeTotal) {
