@@ -2246,6 +2246,46 @@ async function runAudioBackfill(req: Request, db: SupabaseClient) {
     return { diagnostic: diag };
   }
 
+  // Phase 3 (3a) transcription trigger / benchmark: build the byte-pipe token (the edge holds the
+  // gateway token) and call /transcribe, returning the gateway timings. rtf = whisperMs/audioSec
+  // decides on-demand viability. titleId + optional index/start/dur (dur 0 = whole film). No cache
+  // yet — this is the de-risking probe before the full 3a/3b/3c build.
+  if (stringOr(body.mode, "") === "transcribe") {
+    if (!runtimeConfig.mediaGatewayUrl || !runtimeConfig.mediaGatewayToken) throw new HttpError(503, "Media gateway is not configured");
+    const titleId = stringOr(body.titleId, "");
+    if (!titleId) throw new HttpError(400, "titleId is required");
+    const { data: trow } = await db.from("cloud_titles")
+      .select("default_variant_id").eq("user_id", userId).eq("id", titleId).maybeSingle();
+    const variantId = stringOr((trow as JsonRecord | null)?.default_variant_id, "");
+    if (!variantId) throw new HttpError(404, "title or variant not found");
+    const { data: variant } = await db.from("cloud_title_variants")
+      .select("source_id, external_id, item_type").eq("id", variantId).maybeSingle();
+    const vrec = variant as JsonRecord | null;
+    const vSource = stringOr(vrec?.source_id, ""), vExternal = stringOr(vrec?.external_id, ""), vItem = stringOr(vrec?.item_type, "movie");
+    if (!vSource || !vExternal) throw new HttpError(404, "variant not found");
+    const tUrl = vItem === "series"
+      ? await resolveSeriesEpisodeUrl(vSource, vExternal, userId, db).catch(() => null)
+      : ((await resolvePlaybackTarget(vSource, vItem, vExternal, userId, db).catch(() => null))?.targetUrl ?? null);
+    if (!tUrl) throw new HttpError(422, "no playback target");
+    const idx = Number.isInteger(Number(body.index)) ? Number(body.index) : 1;
+    const start = Math.max(0, Number(body.start) || 0);
+    const dur = Math.max(0, Number(body.dur) || 0);
+    const exp = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+    const pipe = await createBytePipeAccess("transcribe-bench", userId, tUrl, exp, db, null);
+    const base = pipe.url.replace("/raw/", "/transcribe/");
+    const tRes = await fetch(`${base}?index=${idx}&start=${start}&dur=${dur}`, { signal: AbortSignal.timeout(25 * 60 * 1000) });
+    const tBody = await tRes.json().catch(() => null) as JsonRecord | null;
+    const vtt = stringOr(tBody?.vtt, "");
+    return {
+      mode: "transcribe", ok: tRes.ok, status: tRes.status,
+      language: tBody?.language ?? null, audioSec: tBody?.audioSec ?? null,
+      extractMs: tBody?.extractMs ?? null, whisperMs: tBody?.whisperMs ?? null,
+      rtf: tBody?.rtf ?? null, segments: tBody?.segments ?? null,
+      vttChars: vtt.length, vttSample: vtt.slice(0, 500),
+      error: tRes.ok ? null : (tBody?.error ?? null),
+    };
+  }
+
   // mode 'whisper' = OFFLINE language detection (single-slot-safe alternative to the inline
   // trigger). Walks titles whose audio_tracks still have UNTAGGED entries (lang null) and runs
   // the gateway's self-hosted whisper.cpp per untagged track. Meant to run when nothing is

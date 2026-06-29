@@ -115,6 +115,9 @@ const WHISPER_TIMEOUT_MS = clampInt(process.env.WHISPER_TIMEOUT_MS, 60_000, 5_00
 // (≤ length) so it never hammers a single-connection provider. Override via WHISPER_SWEEP_OFFSETS.
 const WHISPER_SWEEP_OFFSETS = (process.env.WHISPER_SWEEP_OFFSETS || '600,1500,300')
     .split(',').map((s) => Number.parseInt(s.trim(), 10)).filter((n) => Number.isFinite(n) && n >= 0);
+// Full transcription (Phase 3) runs whisper on a whole film → much longer than the 20s LID clip.
+const WHISPER_TRANSCRIBE_TIMEOUT_MS = clampInt(process.env.WHISPER_TRANSCRIBE_TIMEOUT_MS, 1_200_000, 30_000, 7_200_000);
+const AUDIO_EXTRACT_TIMEOUT_MS = clampInt(process.env.AUDIO_EXTRACT_TIMEOUT_MS, 1_800_000, 30_000, 7_200_000);
 const LIVE_INPUT_ANALYZE_DURATION_US = clampInt(process.env.LIVE_INPUT_ANALYZE_DURATION_US, 1_500_000, 250_000, 10_000_000);
 const LIVE_INPUT_PROBE_SIZE_BYTES = clampInt(process.env.LIVE_INPUT_PROBE_SIZE_BYTES, 2_000_000, 64_000, 10_000_000);
 const VOD_INPUT_ANALYZE_DURATION_US = clampInt(process.env.VOD_INPUT_ANALYZE_DURATION_US, 8_000_000, 250_000, 30_000_000);
@@ -147,7 +150,7 @@ const RAW_PROVIDER_RETRY_DELAYS_MS = [1500, 5000, 9000, 9000, 9000, 9000, 9000, 
 const FFMPEG_USER_AGENT = process.env.FFMPEG_USER_AGENT ||
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36 Norva/1.0';
 const MAX_LOG_TAIL = 12000;
-const GATEWAY_VERSION = 53;
+const GATEWAY_VERSION = 54;
 // Browser playback fetches HLS playlists/segments cross-origin, so these must
 // list every Norva web origin or the browser blocks the response (CORS). Keep
 // in sync with the relay's ALLOWED_ORIGINS (services/norva-relay/wrangler.jsonc).
@@ -611,9 +614,54 @@ app.get('/detect-language/:token', async (req, res) => {
     }
 });
 
+// Phase 3: full timestamped transcription → WebVTT. Extracts the whole audio track (dur 0) or a
+// [start, start+dur] window (benchmarking) and runs whisper.cpp -ovtt. Returns the VTT + timings;
+// rtf = whisperMs / audioSec is the benchmark number (on-demand viable if rtf is small). Same
+// byte-pipe token as /raw. HEAVY + LONG — meant for a job/queue, never the hot path.
+app.get('/transcribe/:token', async (req, res) => {
+    const claims = verifyRawToken(req.params.token, GATEWAY_TOKEN);
+    if (!claims) return res.status(401).json({ error: 'Invalid byte-pipe token' });
+    if (Number(claims.exp) * 1000 < Date.now()) return res.status(401).json({ error: 'Byte-pipe token expired' });
+    if (!WHISPER_BIN || !WHISPER_MODEL) return res.status(503).json({ error: 'Transcription not configured' });
+    const ua = claims.ua || FFMPEG_USER_AGENT;
+
+    const trackIndex = Number.parseInt(req.query.index, 10);
+    if (!Number.isInteger(trackIndex) || trackIndex < 0) return res.status(400).json({ error: 'Invalid audio index' });
+    const startOffset = Math.max(0, Number.parseFloat(req.query.start) || 0);
+    const dur = Math.max(0, Number.parseFloat(req.query.dur) || 0);  // 0 = whole track
+    const forceLang = /^[a-z]{2,3}$/i.test(String(req.query.lang || '')) ? String(req.query.lang).toLowerCase() : '';
+
+    let wavPath = null;
+    try {
+        const e0 = Date.now();
+        wavPath = await extractAudioWav(claims.url, ua, trackIndex, startOffset, dur, AUDIO_EXTRACT_TIMEOUT_MS);
+        const extractMs = Date.now() - e0;
+        if (!wavPath) return res.status(502).json({ error: 'Audio extraction failed' });
+        let audioSec = 0;
+        try { audioSec = (await fsp.stat(wavPath)).size / (16000 * 2); } catch (_) { audioSec = 0; } // 16kHz mono s16le = 32000 B/s
+        const w = await runWhisperVtt(wavPath, forceLang);
+        const segments = (w.vtt.match(/-->/g) || []).length;
+        return res.json({
+            vtt: w.vtt,
+            language: w.lang,
+            confidence: w.prob,
+            audioSec: Math.round(audioSec),
+            segments,
+            extractMs,
+            whisperMs: w.ms,
+            rtf: audioSec > 0 ? Number((w.ms / 1000 / audioSec).toFixed(3)) : null,
+        });
+    } catch (err) {
+        return res.status(502).json({ error: 'Transcription failed', details: String((err && err.message) || err) });
+    } finally {
+        if (wavPath) fsp.unlink(wavPath).catch(() => {});
+    }
+});
+
 // Extract a mono/16 kHz pcm_s16le WAV of one audio track to a temp file. Resolves the path, or
-// null on failure. 30 s kill timer.
-function extractAudioWav(url, ua, trackIndex, startOffset, dur) {
+// null on failure. `dur` 0 = the whole track (full-film transcription); >0 = a clip. `timeoutMs`
+// defaults to 30 s (LID clip) — pass a longer value for a full-film extraction.
+function extractAudioWav(url, ua, trackIndex, startOffset, dur, timeoutMs = 30_000) {
     return new Promise((resolve) => {
         const outputPath = path.join(os.tmpdir(), `norva-audio-${Date.now()}-${crypto.randomUUID()}.wav`);
         const args = [
@@ -623,7 +671,7 @@ function extractAudioWav(url, ua, trackIndex, startOffset, dur) {
             ...(startOffset > 0 ? ['-ss', String(startOffset)] : []),
             '-i', url,
             '-map', `0:${trackIndex}`,
-            '-t', String(dur),
+            ...(dur > 0 ? ['-t', String(dur)] : []),
             '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', '-f', 'wav',
             outputPath,
         ];
@@ -631,7 +679,7 @@ function extractAudioWav(url, ua, trackIndex, startOffset, dur) {
         try { child = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'ignore', 'pipe'], env: proxyEnvFor(proxyKeyFromUrl(url)) }); }
         catch (_) { return resolve(null); }
         let stderr = '';
-        const timer = setTimeout(() => { try { child.kill('SIGKILL'); } catch (_) {} }, 30_000);
+        const timer = setTimeout(() => { try { child.kill('SIGKILL'); } catch (_) {} }, timeoutMs);
         child.stderr.on('data', (d) => { stderr += d.toString(); });
         child.on('error', () => { clearTimeout(timer); resolve(null); });
         child.on('close', async (code) => {
@@ -678,6 +726,40 @@ function runWhisperDetect(wavPath) {
             fsp.unlink(outPrefix + '.txt').catch(() => {});
             if (code !== 0 && !text && !lang) console.warn(`[media-gateway] whisper exit ${code}: ${stderr.slice(-300)}`);
             resolve({ text: String(text || '').trim(), lang, prob });
+        });
+    });
+}
+
+// Phase 3: full timestamped transcription to WebVTT. whisper.cpp emits VTT natively (-ovtt).
+// Resolves { vtt, lang, prob, ms } (empties on failure). forceLang pins the source language.
+function runWhisperVtt(wavPath, forceLang) {
+    return new Promise((resolve) => {
+        const t0 = Date.now();
+        const outPrefix = wavPath.replace(/\.wav$/i, '');
+        const args = [
+            '-m', WHISPER_MODEL,
+            '-f', wavPath,
+            '-l', (forceLang && /^[a-z]{2,3}$/i.test(forceLang)) ? forceLang : 'auto',
+            '-ovtt', '-of', outPrefix,
+            '-t', String(WHISPER_THREADS),
+        ];
+        let child;
+        try { child = spawn(WHISPER_BIN, args, { stdio: ['ignore', 'ignore', 'pipe'] }); }
+        catch (_) { return resolve({ vtt: '', lang: null, prob: 0, ms: 0 }); }
+        let stderr = '';
+        const timer = setTimeout(() => { try { child.kill('SIGKILL'); } catch (_) {} }, WHISPER_TRANSCRIBE_TIMEOUT_MS);
+        child.stderr.on('data', (d) => { stderr += d.toString(); });
+        child.on('error', () => { clearTimeout(timer); resolve({ vtt: '', lang: null, prob: 0, ms: Date.now() - t0 }); });
+        child.on('close', async (code) => {
+            clearTimeout(timer);
+            const m = stderr.match(/auto-detected language:\s*([a-z]{2,3})\s*\(p\s*=\s*([\d.]+)\)/i);
+            const lang = m ? m[1].toLowerCase() : (forceLang || null);
+            const prob = m ? (Number(m[2]) || 0) : 0;
+            let vtt = '';
+            try { vtt = await fsp.readFile(outPrefix + '.vtt', 'utf8'); } catch (_) { vtt = ''; }
+            fsp.unlink(outPrefix + '.vtt').catch(() => {});
+            if (code !== 0 && !vtt) console.warn(`[media-gateway] whisper-vtt exit ${code}: ${stderr.slice(-300)}`);
+            resolve({ vtt: String(vtt || '').trim(), lang, prob, ms: Date.now() - t0 });
         });
     });
 }
