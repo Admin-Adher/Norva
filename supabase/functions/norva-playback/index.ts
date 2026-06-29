@@ -97,7 +97,7 @@ Deno.serve(async (req) => {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 17,
+        version: 18,
         entitlements: true,
         entitlementsMode: entitlementRuntime.mode,
         entitlementsEnforced: entitlementRuntime.enforced,
@@ -2324,6 +2324,22 @@ async function runTranscribeCallback(req: Request, db: SupabaseClient) {
   return { ok: true, jobId, status: patch.status };
 }
 
+// True when the user is actively watching right now: a fresh playback event (the player emits
+// heartbeats during playback) or a still-valid 'ready' session (covers the gap before the first
+// event). Autonomous provider probes defer while this holds — a live stream egresses from the
+// gateway's residential proxy IP, a relay probe from Cloudflare, and the provider's single-IP panel
+// ("user_multi_ip") then 429s one of them. Enrichment resumes a few minutes after playback stops.
+async function userHasLiveSession(db: SupabaseClient, userId: string): Promise<boolean> {
+  if (!userId) return false;
+  const sinceIso = new Date(Date.now() - 4 * 60 * 1000).toISOString();
+  const { data: ev } = await db.from("cloud_playback_events")
+    .select("id").eq("user_id", userId).gt("created_at", sinceIso).limit(1);
+  if (ev && ev.length) return true;
+  const { data: sess } = await db.from("cloud_playback_sessions")
+    .select("id").eq("user_id", userId).eq("status", "ready").gt("expires_at", new Date().toISOString()).limit(1);
+  return Boolean(sess && sess.length);
+}
+
 // Service-gated maintenance backfill of cloud_titles.audio_languages via the
 // relay's get_vod_info (the only path that reaches the provider — Deno egress is
 // IP-blocked). Resolves the DEFAULT audio-track language per title: a VO file's
@@ -2504,6 +2520,10 @@ async function runAudioBackfill(req: Request, db: SupabaseClient) {
     if (!runtimeConfig.mediaGatewayUrl || !runtimeConfig.mediaGatewayToken) {
       throw new HttpError(503, "Media gateway is not configured");
     }
+    // Defer while the user is live (avoids a 2nd provider connection / IP next to their stream).
+    if (body.ignoreLiveSession !== true && await userHasLiveSession(db, userId)) {
+      return { mode: "whisper", skipped: "live-session", processed: 0, candidates: 0, detected: 0 };
+    }
     const wConcurrency = Math.max(1, Math.min(Number(body.concurrency) || 1, 4));
     // Select REAL candidates DB-side via RPC (raw jsonb @>): titles whose audio_tracks still hold
     // an untagged (lang null) track, skipping those attempted within the retry window so the queue
@@ -2559,6 +2579,14 @@ async function runAudioBackfill(req: Request, db: SupabaseClient) {
       await Promise.all(candidates.slice(i, i + wConcurrency).map(runOne));
     }
     return { mode: "whisper", processed: wrows.length, candidates: candidates.length, detected, lastId: wLastId, hasMore: wrows.length === limit };
+  }
+
+  // Autonomous provider probe (audio-langs / subtitle backfill via the relay). Defer while the user
+  // is live: the live stream (gateway/residential IP) and a relay probe (Cloudflare IP) hit the
+  // provider from two IPs at once → its single-IP panel returns 429 user_multi_ip and breaks live
+  // browsing. ignoreLiveSession bypasses this for a manual/one-shot backfill.
+  if (body.ignoreLiveSession !== true && await userHasLiveSession(db, userId)) {
+    return { mode, skipped: "live-session", processed: 0, updated: 0, userId };
   }
 
   let titlesQuery = db
