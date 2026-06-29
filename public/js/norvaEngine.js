@@ -151,7 +151,7 @@
     av1: ['av01.0.08M.08'],
   };
 
-  const ENGINE_VERSION = 18;
+  const ENGINE_VERSION = 19;
 
   class NorvaEngine {
     constructor(videoEl, opts = {}) {
@@ -848,6 +848,12 @@
       // moov/ftyp = spurious re-init; a box whose size doesn't add up).
       this._boxCarry = null; d.boxRemain = 0; d.boxSeq = []; d.boxBad = null;
       d.moofCount = 0; d.moovCount = 0; d.ftypCount = 0; d.boxTotal = 0;
+      // Write-position trace. A streaming muxer must write strictly forward; if movenc
+      // seeks BACK (pos < the running high-water mark) to patch a box size, appending
+      // the chunks in call-order to MSE produces a corrupt byte stream (a chunk valid
+      // in isolation, broken once concatenated) → CHUNK_DEMUXER_ERROR_APPEND_FAILED.
+      // This records the first writes + counts backward seeks so we can prove it.
+      d.writes = []; d.seekWrites = 0; d.writeHighWater = 0; d.firstSeek = null;
       this._diagHeaderPhase = true;
       // ff_init_muxer(device:true) re-creates the 'output' writer device; remove
       // any stale one from a prior init (e.g. a re-seek) or it can collide.
@@ -858,6 +864,13 @@
         // Chromium's parser fail (CHUNK_DEMUXER_ERROR_APPEND_FAILED). It must never
         // be enqueued — endOfStream() finalises the buffer instead.
         if (this._dropWrites) { d.trailerBytesDropped = (d.trailerBytesDropped || 0) + data.length; return; }
+        // Trace write position vs the running high-water mark BEFORE consuming.
+        try {
+          const isSeek = pos < d.writeHighWater;
+          if (isSeek) { d.seekWrites++; if (d.firstSeek == null) d.firstSeek = { pos, len: data.length, highWater: d.writeHighWater, atWrite: d.writes.length }; }
+          if (d.writes.length < 40) d.writes.push({ pos, len: data.length, seek: isSeek });
+          if (pos + data.length > d.writeHighWater) d.writeHighWater = pos + data.length;
+        } catch (_) {}
         written += data.length;
         const chunk = data.slice(0);
         try {
@@ -868,6 +881,12 @@
           } else if (d.firstMediaBoxes == null) {
             d.firstMediaBytes = chunk.length;
             d.firstMediaBoxes = mp4Boxes(chunk);
+            // Hex of this same chunk's first 16 bytes — compare against boxHex[1]
+            // (what the cumulative walker reads at the 2nd box) to confirm whether the
+            // call-order concatenation matches the chunk seen in isolation.
+            let fh = '';
+            for (let i = 0; i < Math.min(16, chunk.length); i++) fh += (chunk[i] < 16 ? '0' : '') + chunk[i].toString(16);
+            d.firstMediaHex = fh;
           }
           this._diagTrackBoxes(chunk);
         } catch (_) {}
@@ -1139,6 +1158,14 @@
                + (((buf[p + 12] << 24) | (buf[p + 13] << 16) | (buf[p + 14] << 8) | buf[p + 15]) >>> 0);
           hdr = 16;
         } else if (size === 0) { size = (len - p); }
+        // Raw hex of the first few box headers — the ground truth of what bytes are
+        // actually at each boundary (settles any size/type ambiguity).
+        if (!d.boxHex) d.boxHex = [];
+        if (d.boxHex.length < 6) {
+          let hx = '';
+          for (let i = p; i < Math.min(p + 16, len); i++) hx += (buf[i] < 16 ? '0' : '') + buf[i].toString(16);
+          d.boxHex.push(hx);
+        }
         if (!/^[\x20-\x7e]{4}$/.test(type) || size < hdr) {
           if (!d.boxBad) d.boxBad = 'bad box after ' + d.boxSeq.length + ' boxes (~' + Math.round(d.boxTotal / 1024) + 'KB) type="' + type + '" size=' + size;
           return;                              // desynced — stop, the bad-box marker is the finding
@@ -1174,6 +1201,10 @@
         // full top-level box stream the muxer produced (stitched across AVIO blocks)
         boxSeq: d.boxSeq, boxBad: d.boxBad, boxTotalKB: d.boxTotal != null ? Math.round(d.boxTotal / 1024) : null,
         moofCount: d.moofCount, moovCount: d.moovCount, ftypCount: d.ftypCount,
+        boxHex: d.boxHex, firstMediaHex: d.firstMediaHex,
+        // write-position trace: backward seeks here mean the muxer is NOT streaming
+        // linearly and call-order concatenation corrupts the stream.
+        writes: d.writes, seekWrites: d.seekWrites, firstSeek: d.firstSeek, writeHighWater: d.writeHighWater,
         // append accounting
         appendCount: d.appendCount, appendBytes: d.appendBytes,
         recentAppends: d.recentAppends, appendErrors: d.appendErrors,

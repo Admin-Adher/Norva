@@ -2447,6 +2447,9 @@ class WatchPage {
                 console.warn('1st media   :', snap.firstMediaBoxes, '(' + snap.firstMediaBytes + ' B)');
                 console.warn('box stream  : moof×' + snap.moofCount, 'moov×' + snap.moovCount, 'ftyp×' + snap.ftypCount, '| ' + snap.boxTotalKB + 'KB | BAD:', snap.boxBad || 'none');
                 console.warn('box seq     :', JSON.stringify(snap.boxSeq));
+                console.warn('box hex     :', JSON.stringify(snap.boxHex), '| firstMediaHex', snap.firstMediaHex);
+                console.warn('writes(seek):', 'seekWrites=' + snap.seekWrites, '| firstSeek', JSON.stringify(snap.firstSeek), '| highWater', snap.writeHighWater);
+                console.warn('writes log  :', JSON.stringify(snap.writes));
                 console.warn('1st vid pkt :', JSON.stringify(snap.firstVideoPkt), '| droppedOpenGop', snap.droppedOpenGop);
                 console.warn('appends     :', snap.appendCount, 'ok /', snap.appendBytes, 'B | sbErrorEvents', snap.sbErrorEvents, '| queueLen', snap.queueLen, '| trailerDropped', snap.trailerBytesDropped);
                 console.warn('pump exit   :', snap.pumpExitReason, '| res', snap.pumpExitRes, '| fetched', snap.exitFetchMB, 'MB /', snap.exitFetches, 'fetches | lastReadErr', snap.lastReadError);
@@ -2494,6 +2497,7 @@ class WatchPage {
                     engineLastReadError: snap?.lastReadError ?? null,
                     engineBoxBad: snap?.boxBad ?? null,
                     engineMoovCount: snap?.moovCount ?? null,
+                    engineSeekWrites: snap?.seekWrites ?? null,
                     engineSnapshot: snap || null
                 }
             });
