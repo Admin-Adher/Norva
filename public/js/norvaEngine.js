@@ -151,7 +151,7 @@
     av1: ['av01.0.08M.08'],
   };
 
-  const ENGINE_VERSION = 19;
+  const ENGINE_VERSION = 20;
 
   class NorvaEngine {
     constructor(videoEl, opts = {}) {
@@ -216,6 +216,11 @@
       this.vBase = null; this.vCum = 0; this.vFd0 = 0; this.vOffset = 0;
       this._onSeeking = this._handleSeeking.bind(this);
       this._onTimeUpdate = this._handleTimeUpdate.bind(this);
+      // Engine-wide abort: destroy() fires it so EVERY in-flight byte-range fetch is
+      // cancelled at once. Without this a torn-down engine's fetch keeps running to its
+      // own 30–60s timeout, holding the single provider slot and making the NEXT title
+      // 458 ("max connections"). Aborting on destroy frees the slot in ~8s instead.
+      this._ac = new AbortController();
       // Deep diagnostics for CHUNK_DEMUXER_ERROR_APPEND_FAILED on VOD open: a
       // running record of the exact bytes/boxes/codec decisions that fed MSE, so a
       // rejected append can be explained instead of just observed. Pure accounting,
@@ -403,6 +408,9 @@
     destroy() {
       this.destroyed = true;
       this._stopRequested = true;
+      // Cancel every in-flight byte-range fetch so the provider connection drops now and
+      // the single slot is released for the next title (instead of lingering to timeout).
+      try { this._ac.abort(); } catch (_) {}
       if (this._gate) { this._gate(); this._gate = null; }
       try { this.video.removeEventListener('seeking', this._onSeeking); } catch (_) {}
       try { this.video.removeEventListener('timeupdate', this._onTimeUpdate); } catch (_) {}
@@ -422,9 +430,12 @@
 
     // ---- setup -------------------------------------------------------------
     async _probeSize(url) {
-      // Bound the probe so a stalled gateway/provider can't hang the engine.
+      // Bound the probe so a stalled gateway/provider can't hang the engine; also abort
+      // it if the engine is destroyed (so the slot is released immediately).
       const ac = new AbortController();
-      const to = setTimeout(() => { try { ac.abort(); } catch (_) {} }, 30000);
+      const onAbort = () => { try { ac.abort(); } catch (_) {} };
+      this._ac.signal.addEventListener('abort', onAbort, { once: true });
+      const to = setTimeout(onAbort, 30000);
       let r;
       try {
         r = await fetch(url, { headers: { Range: 'bytes=0-1' }, signal: ac.signal });
@@ -432,6 +443,7 @@
         throw new Error('PROBE_FETCH:' + String((e && e.message) || e));
       } finally {
         clearTimeout(to);
+        try { this._ac.signal.removeEventListener('abort', onAbort); } catch (_) {}
       }
       const cr = r.headers.get('content-range');
       // A range-honouring origin replies 206 + Content-Range. A 200 means the
@@ -632,7 +644,9 @@
     // Fetch [start, end) (exclusive) as one ranged request, bounded by a timeout.
     async _fetchRange(start, end) {
       const ac = new AbortController();
-      const to = setTimeout(() => { try { ac.abort(); } catch (_) {} }, 60000);
+      const onAbort = () => { try { ac.abort(); } catch (_) {} };
+      this._ac.signal.addEventListener('abort', onAbort, { once: true });
+      const to = setTimeout(onAbort, 60000);
       const ft0 = performance.now();
       try {
         const r = await fetch(this.url, { headers: { Range: `bytes=${start}-${end - 1}` }, signal: ac.signal });
@@ -652,6 +666,7 @@
         return out;
       } finally {
         clearTimeout(to);
+        try { this._ac.signal.removeEventListener('abort', onAbort); } catch (_) {}
       }
     }
 

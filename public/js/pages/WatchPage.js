@@ -1929,7 +1929,9 @@ class WatchPage {
     // NOT a structurally broken title. These must never trigger "hide broken"
     // because the title itself is fine — only the provider slot was busy.
     isConnectionLimitError(message) {
-        return /UPSTREAM_(UNAUTHORIZED|RATE_LIMIT|FORBIDDEN)|401|403|429|Unauthorized|Forbidden|Too Many Requests|rate limit/i.test(message || '');
+        // 458 = single-slot provider "max connections" (transient, frees in seconds) —
+        // treat like a connection block so we never mark the title broken or hard-spin.
+        return /UPSTREAM_(UNAUTHORIZED|RATE_LIMIT|FORBIDDEN)|401|403|429|\b458\b|Unauthorized|Forbidden|Too Many Requests|rate limit|max connection/i.test(message || '');
     }
 
     getProbeFailureText(info) {
@@ -1946,6 +1948,12 @@ class WatchPage {
         const text = this.sanitizePlaybackMessage(message);
         const cloud = this.isCloudPlaybackMode();
 
+        if (/\b458\b|max connection/i.test(text)) {
+            return 'This provider allows only one stream at a time and the slot is busy right now. Stop any other playback, wait a few seconds, then press play again — it frees up shortly after the previous video stops.';
+        }
+        if (/NO_SUPPORTED_MIME/i.test(text)) {
+            return "This file's video/audio format isn't supported by in-browser playback. Open the title in the Norva app (TV / mobile / tablet) to play it.";
+        }
         if (/429|Too Many Requests|Many Requests|rate limit/i.test(text)) {
             return cloud
                 ? "The provider is limiting connections (429). The cloud server's IP is likely throttled: close other playbacks, or watch this title from the Norva TV/mobile app (or a local hub) on your network, then try again."
@@ -2275,37 +2283,62 @@ class WatchPage {
         this.currentPlaybackMode = 'engine';
         this.streamStartOffset = 0;
         try { this.updateTranscodeStatus('direct', 'Navigateur'); } catch (_) {}
-        const engine = this.norvaEngine = new window.NorvaEngine(this.video, {
-            // Arm in-band subtitle capture before the demux pump starts (flag-gated) so cues
-            // are buffered from the first packet — eliminates the gap-before-visible delay.
-            inbandSubtitles: this._inbandSubsEnabled(),
-            report: (info) => this.reportEngineFailure(info),
-            log: (m) => console.log('[NorvaEngine] ' + m),
-            onReady: (timings) => { console.log('[NorvaEngine] ready', timings); },
-            onSeek: (timings) => {
-                console.log('[NorvaEngine] seek', timings);
-                // Dedicated seek telemetry (backend accepts the 'seek' event type).
-                try { this.sendPlaybackEvent('seek', { metadata: { seekTimings: timings } }); } catch (_) {}
-            }
-        });
-        try {
-            await engine.load(url, { startTime, audioStreamIndex });
-            if (this.isStalePlaybackAttempt(playbackAttemptId)) { this.destroyEngine(); return; }
-            try { this.syncEngineAudioTracks(); } catch (_) {}
-            // In-band subtitles: start capturing text-subtitle packets from the very start
-            // (the demuxer runs ahead of playback) so a later selection shows cues with no
-            // gap and no provider connection. Flag-gated; cheap (text payloads are tiny).
+
+        // Single-slot providers (e.g. super8k) answer HTTP 458 "max connections" while
+        // their one slot is still held by a just-closed playback — it frees ~8s after
+        // the previous connection drops. Failing straight to "unplayable" is what left
+        // the user staring at an endless spinner. Instead retry the whole load a few
+        // times with backoff: reopening a title right after another recovers on its own
+        // once the slot frees, and the status badge shows it's reconnecting (not frozen).
+        const SLOT_BUSY_RETRIES = 3;
+        const isSlotBusy = (m) => /\b458\b|_458\b|max connection/i.test(String(m || ''));
+        for (let attempt = 0; ; attempt++) {
+            const engine = this.norvaEngine = new window.NorvaEngine(this.video, {
+                // Arm in-band subtitle capture before the demux pump starts (flag-gated) so cues
+                // are buffered from the first packet — eliminates the gap-before-visible delay.
+                inbandSubtitles: this._inbandSubsEnabled(),
+                report: (info) => this.reportEngineFailure(info),
+                log: (m) => console.log('[NorvaEngine] ' + m),
+                onReady: (timings) => { console.log('[NorvaEngine] ready', timings); },
+                onSeek: (timings) => {
+                    console.log('[NorvaEngine] seek', timings);
+                    // Dedicated seek telemetry (backend accepts the 'seek' event type).
+                    try { this.sendPlaybackEvent('seek', { metadata: { seekTimings: timings } }); } catch (_) {}
+                }
+            });
             try {
-                if (this._inbandSubsEnabled() && engine.hasInbandSubtitles?.()) engine.enableSubtitleCapture();
-            } catch (_) { /* best-effort */ }
-            try { this.hideLoading(); } catch (_) {}
-            this.video.play().catch((e) => this.handleAutoplayError(e));
-            this.setVolumeFromStorage();
-        } catch (e) {
-            if (this.isStalePlaybackAttempt(playbackAttemptId)) { this.destroyEngine(); return; }
-            this.reportEngineFailure({ stage: 'load', message: String(e && (e.message || e)) });
-            this.destroyEngine();
-            this.handleEngineUnplayable(e);
+                await engine.load(url, { startTime, audioStreamIndex });
+                if (this.isStalePlaybackAttempt(playbackAttemptId)) { this.destroyEngine(); return; }
+                try { this.syncEngineAudioTracks(); } catch (_) {}
+                // In-band subtitles: start capturing text-subtitle packets from the very start
+                // (the demuxer runs ahead of playback) so a later selection shows cues with no
+                // gap and no provider connection. Flag-gated; cheap (text payloads are tiny).
+                try {
+                    if (this._inbandSubsEnabled() && engine.hasInbandSubtitles?.()) engine.enableSubtitleCapture();
+                } catch (_) { /* best-effort */ }
+                try { this.updateTranscodeStatus('direct', 'Navigateur'); } catch (_) {}
+                try { this.hideLoading(); } catch (_) {}
+                this.video.play().catch((e) => this.handleAutoplayError(e));
+                this.setVolumeFromStorage();
+                return;
+            } catch (e) {
+                if (this.isStalePlaybackAttempt(playbackAttemptId)) { this.destroyEngine(); return; }
+                const msg = String(e && (e.message || e));
+                if (isSlotBusy(msg) && attempt < SLOT_BUSY_RETRIES) {
+                    this.destroyEngine();
+                    const waitMs = 2000 + attempt * 2000; // 2s, 4s, 6s — slot frees ~8s after the prior drop
+                    console.warn(`[NorvaEngine] slot busy (458), retry ${attempt + 1}/${SLOT_BUSY_RETRIES} in ${waitMs}ms`);
+                    try { this.showLoading(); } catch (_) {}
+                    try { this.updateTranscodeStatus('direct', `Flux occupé, reconnexion… (${attempt + 2}/${SLOT_BUSY_RETRIES + 1})`); } catch (_) {}
+                    await new Promise((r) => setTimeout(r, waitMs));
+                    if (this.isStalePlaybackAttempt(playbackAttemptId)) { this.destroyEngine(); return; }
+                    continue;
+                }
+                this.reportEngineFailure({ stage: 'load', message: msg });
+                this.destroyEngine();
+                this.handleEngineUnplayable(e);
+                return;
+            }
         }
     }
 
@@ -2505,11 +2538,11 @@ class WatchPage {
     }
 
     handleEngineUnplayable(e) {
-        const detail = String((e && (e.message || e)) || '');
-        const msg = detail.includes('NO_SUPPORTED_MIME')
-            ? "This format can't be played in this browser. Open the title in the Norva app (TV / mobile / tablet) to play it."
-            : "Browser playback failed. Open the title in the Norva app (TV / mobile / tablet).";
-        this.showPlaybackError(msg, { immediate: true });
+        // Pass the raw reason through; showPlaybackError → getFriendlyPlaybackError maps
+        // it to a clear message (458 slot-busy, NO_SUPPORTED_MIME, 401/403, …) and keeps
+        // the original code as the small detail line for diagnosis.
+        const detail = String((e && (e.message || e)) || 'Browser playback failed.');
+        this.showPlaybackError(detail, { immediate: true });
     }
 
     async loadVideo(url, options = {}) {
