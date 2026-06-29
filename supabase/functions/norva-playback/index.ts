@@ -139,6 +139,9 @@ Deno.serve(async (req) => {
     if (req.method === "POST" && segments[0] === "audio-backfill") {
       return json(req, await runAudioBackfill(req, supabase));
     }
+    if (req.method === "POST" && segments[0] === "transcribe-callback") {
+      return json(req, await runTranscribeCallback(req, supabase));
+    }
     if (req.method === "POST" && segments[0] === "catalog-mirror-verify") {
       return json(req, await runCatalogMirrorVerify(req, supabase));
     }
@@ -2138,6 +2141,27 @@ type EngineTitleRow = {
 // single track is its real original language; a Multi file's primary track. A
 // header-probe for Multi's secondary tracks is a separate step. Resumable by id
 // cursor; best-effort per title; bounded concurrency.
+// Phase 3 (3a): the gateway calls this back when an async transcription finishes (auth = the shared
+// gateway token). Writes the VTT into the cross-user cache by job_id → every user of that panel
+// gets the subtitles. Best-effort idempotent (a late/duplicate callback just re-writes the row).
+async function runTranscribeCallback(req: Request, db: SupabaseClient) {
+  const runtimeConfig = await getRuntimeConfig(db);
+  const provided = req.headers.get("Authorization")?.match(/^Bearer\s+(.+)$/i)?.[1] ?? "";
+  if (!runtimeConfig.mediaGatewayToken || provided !== runtimeConfig.mediaGatewayToken) throw new HttpError(401, "Unauthorized");
+  const body = recordOrEmpty(await req.json().catch(() => ({})));
+  const jobId = stringOr(body.jobId, "");
+  if (!jobId) throw new HttpError(400, "jobId is required");
+  const nowIso = new Date().toISOString();
+  const patch: JsonRecord = body.ok === true
+    ? { status: "ready", vtt: stringOr(body.vtt, ""), source_lang: stringOrNull(body.sourceLang),
+        audio_sec: Number.isFinite(Number(body.audioSec)) ? Number(body.audioSec) : null,
+        segments: Number.isFinite(Number(body.segments)) ? Number(body.segments) : null, error: null, updated_at: nowIso }
+    : { status: "failed", error: stringOr(body.error, "unknown").slice(0, 300), updated_at: nowIso };
+  const { error } = await db.from("catalog_generated_subtitles").update(patch).eq("job_id", jobId);
+  if (error) throwDb(error, "transcribe callback update failed");
+  return { ok: true, jobId, status: patch.status };
+}
+
 async function runAudioBackfill(req: Request, db: SupabaseClient) {
   const expected = Deno.env.get("NORVA_BACKFILL_TOKEN") ?? "";
   const provided = req.headers.get("Authorization")?.match(/^Bearer\s+(.+)$/i)?.[1] ?? "";
@@ -2284,6 +2308,55 @@ async function runAudioBackfill(req: Request, db: SupabaseClient) {
       vttChars: vtt.length, vttSample: vtt.slice(0, 500),
       error: tRes.ok ? null : (tBody?.error ?? null),
     };
+  }
+
+  // Phase 3 (3a) ASYNC enqueue: kick off a background full-film transcription on the gateway and
+  // cache the VTT cross-user (keyed by providerKey + file) when it calls back. Returns immediately.
+  // titleId + optional index (default 1 = first audio). 'ready' returns the cache straight away.
+  if (stringOr(body.mode, "") === "transcribe-enqueue") {
+    if (!runtimeConfig.mediaGatewayUrl || !runtimeConfig.mediaGatewayToken) throw new HttpError(503, "Media gateway is not configured");
+    const titleId = stringOr(body.titleId, "");
+    if (!titleId) throw new HttpError(400, "titleId is required");
+    const { data: trow } = await db.from("cloud_titles").select("default_variant_id").eq("user_id", userId).eq("id", titleId).maybeSingle();
+    const variantId = stringOr((trow as JsonRecord | null)?.default_variant_id, "");
+    if (!variantId) throw new HttpError(404, "title or variant not found");
+    const { data: variant } = await db.from("cloud_title_variants").select("source_id, external_id, item_type").eq("id", variantId).maybeSingle();
+    const vrec = variant as JsonRecord | null;
+    const vSource = stringOr(vrec?.source_id, ""), vExternal = stringOr(vrec?.external_id, ""), vItem = stringOr(vrec?.item_type, "movie");
+    if (!vSource || !vExternal) throw new HttpError(404, "variant not found");
+    const tUrl = vItem === "series"
+      ? await resolveSeriesEpisodeUrl(vSource, vExternal, userId, db).catch(() => null)
+      : ((await resolvePlaybackTarget(vSource, vItem, vExternal, userId, db).catch(() => null))?.targetUrl ?? null);
+    if (!tUrl) throw new HttpError(422, "no playback target");
+    const pkey = (await resolveSourceIdentity(vSource, userId, db)).key || hostFromUrl(tUrl);
+    const { data: existing } = await db.from("catalog_generated_subtitles")
+      .select("status, job_id").eq("provider_key", pkey).eq("item_type", vItem).eq("external_id", vExternal)
+      .eq("kind", "transcript").eq("lang", "src").maybeSingle();
+    const exrec = existing as JsonRecord | null;
+    if (exrec?.status === "ready" && !body.force) return { mode: "transcribe-enqueue", status: "ready", cached: true, jobId: exrec.job_id };
+    const jobId = crypto.randomUUID();
+    const { error: upErr } = await db.from("catalog_generated_subtitles").upsert({
+      provider_key: pkey, item_type: vItem, external_id: vExternal, kind: "transcript", lang: "src",
+      status: "processing", job_id: jobId, error: null, updated_at: new Date().toISOString(),
+    }, { onConflict: "provider_key,item_type,external_id,kind,lang" });
+    if (upErr) throwDb(upErr, "enqueue upsert failed");
+    const idx = Number.isInteger(Number(body.index)) ? Number(body.index) : 1;
+    const bStart = Math.max(0, Number(body.start) || 0);
+    const bDur = Math.max(0, Number(body.dur) || 0); // 0 = whole film (prod); >0 = clip (pipeline test)
+    const exp = new Date(Date.now() + 2 * 3600 * 1000).toISOString();
+    const pipe = await createBytePipeAccess("transcribe-job", userId, tUrl, exp, db, null);
+    const cbUrl = `${Deno.env.get("SUPABASE_URL") ?? ""}/functions/v1/norva-playback/transcribe-callback`;
+    const asyncUrl = `${pipe.url.replace("/raw/", "/transcribe-async/")}?index=${idx}&jobId=${jobId}&callback=${encodeURIComponent(cbUrl)}&start=${bStart}&dur=${bDur}`;
+    let gwStatus = 0, gwBody: JsonRecord | null = null;
+    try {
+      const gw = await fetch(asyncUrl, { method: "POST", signal: AbortSignal.timeout(20000) });
+      gwStatus = gw.status; gwBody = await gw.json().catch(() => null) as JsonRecord | null;
+    } catch (_) { gwStatus = 0; }
+    if (gwStatus !== 202) {
+      await db.from("catalog_generated_subtitles").update({ status: "failed", error: `enqueue gateway ${gwStatus}`, updated_at: new Date().toISOString() }).eq("job_id", jobId);
+      return { mode: "transcribe-enqueue", status: "error", jobId, gatewayStatus: gwStatus, gateway: gwBody };
+    }
+    return { mode: "transcribe-enqueue", status: "processing", jobId, providerKey: pkey, gateway: gwBody };
   }
 
   // mode 'whisper' = OFFLINE language detection (single-slot-safe alternative to the inline

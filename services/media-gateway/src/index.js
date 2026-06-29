@@ -150,7 +150,7 @@ const RAW_PROVIDER_RETRY_DELAYS_MS = [1500, 5000, 9000, 9000, 9000, 9000, 9000, 
 const FFMPEG_USER_AGENT = process.env.FFMPEG_USER_AGENT ||
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36 Norva/1.0';
 const MAX_LOG_TAIL = 12000;
-const GATEWAY_VERSION = 54;
+const GATEWAY_VERSION = 55;
 // Browser playback fetches HLS playlists/segments cross-origin, so these must
 // list every Norva web origin or the browser blocks the response (CORS). Keep
 // in sync with the relay's ALLOWED_ORIGINS (services/norva-relay/wrangler.jsonc).
@@ -658,6 +658,29 @@ app.get('/transcribe/:token', async (req, res) => {
     }
 });
 
+// Phase 3 async transcription: accept a job (202) and run it in the background, then POST the VTT
+// to the edge callback. Params in the query (no body parser needed). callback must be a supabase.co
+// URL (the byte-pipe token already gates the caller to whoever holds the gateway token = the edge).
+app.post('/transcribe-async/:token', (req, res) => {
+    const claims = verifyRawToken(req.params.token, GATEWAY_TOKEN);
+    if (!claims) return res.status(401).json({ error: 'Invalid byte-pipe token' });
+    if (Number(claims.exp) * 1000 < Date.now()) return res.status(401).json({ error: 'Byte-pipe token expired' });
+    if (!WHISPER_BIN || !WHISPER_MODEL) return res.status(503).json({ error: 'Transcription not configured' });
+    const index = Number.parseInt(req.query.index, 10);
+    if (!Number.isInteger(index) || index < 0) return res.status(400).json({ error: 'Invalid audio index' });
+    const jobId = String(req.query.jobId || '');
+    const callbackUrl = String(req.query.callback || '');
+    if (!jobId || !/^https:\/\/[^/]+\.supabase\.co\//.test(callbackUrl)) {
+        return res.status(400).json({ error: 'jobId and a valid supabase callback are required' });
+    }
+    const start = Math.max(0, Number.parseFloat(req.query.start) || 0);
+    const dur = Math.max(0, Number.parseFloat(req.query.dur) || 0); // 0 = whole track (production); >0 = clip (test)
+    const ua = claims.ua || FFMPEG_USER_AGENT;
+    const ok = enqueueTranscribe({ url: claims.url, ua, index, jobId, callbackUrl, start, dur });
+    if (!ok) return res.status(429).json({ error: 'Transcription queue full' });
+    return res.status(202).json({ queued: true, position: transcribeQueue.length, busy: transcribeBusy });
+});
+
 // Extract a mono/16 kHz pcm_s16le WAV of one audio track to a temp file. Resolves the path, or
 // null on failure. `dur` 0 = the whole track (full-film transcription); >0 = a clip. `timeoutMs`
 // defaults to 30 s (LID clip) — pass a longer value for a full-film extraction.
@@ -762,6 +785,60 @@ function runWhisperVtt(wavPath, forceLang) {
             resolve({ vtt: String(vtt || '').trim(), lang, prob, ms: Date.now() - t0 });
         });
     });
+}
+
+// Phase 3 transcription job queue (in-process, concurrency 1). A full-film transcription is many
+// minutes long, so /transcribe-async accepts a job (202) and runs it in the BACKGROUND, then POSTs
+// the result to the edge callback (auth = the shared gateway token). A gateway restart loses
+// in-flight jobs → the edge reaper re-enqueues rows stuck in 'processing'. Concurrency 1 keeps
+// whisper from starving the stream-proxying duties of this same instance.
+const transcribeQueue = [];
+let transcribeBusy = false;
+const MAX_TRANSCRIBE_QUEUE = clampInt(process.env.MAX_TRANSCRIBE_QUEUE, 50, 1, 500);
+
+function enqueueTranscribe(job) {
+    if (transcribeQueue.length >= MAX_TRANSCRIBE_QUEUE) return false;
+    transcribeQueue.push(job);
+    queueMicrotask(drainTranscribeQueue);
+    return true;
+}
+async function drainTranscribeQueue() {
+    if (transcribeBusy) return;
+    transcribeBusy = true;
+    try {
+        while (transcribeQueue.length) {
+            const job = transcribeQueue.shift();
+            await runTranscribeJob(job).catch((e) => console.warn('[media-gateway] transcribe job error', String((e && e.message) || e)));
+        }
+    } finally { transcribeBusy = false; }
+}
+async function runTranscribeJob(job) {
+    const { url, ua, index, jobId, callbackUrl, start = 0, dur = 0 } = job;
+    let wavPath = null, payload;
+    try {
+        wavPath = await extractAudioWav(url, ua, index, start, dur, AUDIO_EXTRACT_TIMEOUT_MS); // dur 0 = whole track
+        if (!wavPath) {
+            payload = { jobId, ok: false, error: 'Audio extraction failed' };
+        } else {
+            let audioSec = 0;
+            try { audioSec = Math.round((await fsp.stat(wavPath)).size / (16000 * 2)); } catch (_) { audioSec = 0; }
+            const w = await runWhisperVtt(wavPath, '');
+            const segments = (w.vtt.match(/-->/g) || []).length;
+            payload = w.vtt
+                ? { jobId, ok: true, vtt: w.vtt, sourceLang: w.lang, audioSec, segments }
+                : { jobId, ok: false, error: 'Transcription produced no output' };
+        }
+    } catch (e) {
+        payload = { jobId, ok: false, error: String((e && e.message) || e).slice(0, 300) };
+    } finally { if (wavPath) fsp.unlink(wavPath).catch(() => {}); }
+    try {
+        await fetch(callbackUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${GATEWAY_TOKEN}` },
+            body: JSON.stringify(payload),
+            signal: AbortSignal.timeout(30000),
+        });
+    } catch (e) { console.warn('[media-gateway] transcribe callback failed', jobId, String((e && e.message) || e)); }
 }
 
 // Detect the language of a (Whisper) transcript with zero dependencies. Non-Latin scripts are

@@ -1,7 +1,9 @@
 # --- whisper.cpp build stage: compile a static CLI + fetch the model (Phase 2 audio-track
 # language detection, fully self-hosted / no paid API). Same Debian base as runtime → ABI-safe.
 FROM debian:bookworm-slim AS whisper
-ARG WHISPER_MODEL=base
+# `small` (~466 MB) — better accuracy than `base` for transcription/subtitles (Phase 3); ~3x slower
+# (~0.3 RTF on CPU → ~30-45 min/2h film, background only). Also used by the Phase 2 LID clip.
+ARG WHISPER_MODEL=small
 RUN apt-get update \
     && apt-get install -y --no-install-recommends git build-essential cmake ca-certificates wget \
     && rm -rf /var/lib/apt/lists/*
