@@ -6022,6 +6022,10 @@ class WatchPage {
         if (this.aiSubtitleState === 'failed') {
             return `<button class="captions-option" data-source="ai" data-index="-1">⚠️ ${this.escapeHtml('AI subtitles failed — retry')}</button>`;
         }
+        if (this.aiSubtitleState === 'empty') {
+            // Terminal: the audio was transcribed but yielded no dialogue (silence / music only).
+            return `<button class="captions-option locked" data-source="ai" data-index="-1" disabled aria-disabled="true" title="The audio was transcribed but no speech was found">${this.escapeHtml('AI subtitles — no speech detected')}</button>`;
+        }
         const label = this.aiSubtitleState === 'ready'
             ? (showing ? 'AI subtitles' : 'AI subtitles — show')
             : 'Generate AI subtitles';
@@ -6035,18 +6039,28 @@ class WatchPage {
         }
     }
 
-    // Apply a /generated-subtitle response to the state machine. Returns true once a 'ready'
-    // VTT has been attached. Ignores stale responses (title switched mid-flight).
+    // Apply a /generated-subtitle response to the state machine. Returns true on any TERMINAL
+    // state (ready or empty) so the caller stops; 'ready' is terminal regardless of body, because
+    // a transcript with no cues (genuine silence/music) is a final answer, not a reason to keep
+    // polling forever. Ignores stale responses (title switched mid-flight).
     _applyAiSubtitleResponse(res, titleId) {
         if (!res || this._aiSubtitleTitleIdFor() !== titleId) return false;
         const status = String(res.status || 'none');
-        if (status === 'ready' && res.vtt) {
-            this.aiSubtitleState = 'ready';
-            this.aiSubtitleVtt = String(res.vtt);
-            this.aiSubtitleLang = this.normalizeTrackLanguage(res.sourceLang || res.source_lang || 'und');
+        if (status === 'ready') {
             this._aiSubtitleTitleId = titleId;
             this.stopAiSubtitlePolling();
-            this.attachGeneratedSubtitleTrack(this.aiSubtitleVtt, this.aiSubtitleLang);
+            const vtt = String(res.vtt || '');
+            const lang = this.normalizeTrackLanguage(res.sourceLang || res.source_lang || 'und');
+            // attachGeneratedSubtitleTrack returns false when the VTT has no usable cues.
+            if (vtt && this.attachGeneratedSubtitleTrack(vtt, lang)) {
+                this.aiSubtitleState = 'ready';
+                this.aiSubtitleVtt = vtt;
+                this.aiSubtitleLang = lang;
+            } else {
+                // Transcription finished but produced nothing to show — terminal "no speech" state.
+                this.aiSubtitleState = 'empty';
+                this.aiSubtitleVtt = null;
+            }
             this.updateCaptionsTracks();
             return true;
         }

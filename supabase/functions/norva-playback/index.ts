@@ -2192,28 +2192,31 @@ async function transcribeEnqueue(
   const tUrl = await resolveVariantUrl(db, userId, sourceId, externalId, itemType);
   if (!tUrl) throw new HttpError(422, "no playback target");
   const pkey = (await resolveSourceIdentity(sourceId, userId, db)).key || hostFromUrl(tUrl);
+  // A blank provider key would collide every unkeyed title onto one cache row — refuse rather
+  // than cross-contaminate transcripts. (Shouldn't happen: tUrl is a real, host-bearing URL.)
+  if (!pkey) throw new HttpError(422, "no provider key for source");
+  // Fast path: a ready transcript is served straight from the cache (no gateway pipe build).
   const { data: existing } = await db.from("catalog_generated_subtitles")
-    .select("status, job_id, updated_at").eq("provider_key", pkey).eq("item_type", itemType).eq("external_id", externalId)
+    .select("status, job_id").eq("provider_key", pkey).eq("item_type", itemType).eq("external_id", externalId)
     .eq("kind", "transcript").eq("lang", "src").maybeSingle();
   const exrec = existing as JsonRecord | null;
   if (exrec?.status === "ready" && !opts.force) return { status: "ready", cached: true, jobId: exrec.job_id, providerKey: pkey };
-  // Coalesce concurrent triggers: while a job is in flight (and fresh), reuse it instead of
-  // piling a duplicate transcription onto the single-slot gateway. A stale 'processing' row
-  // (older than the worst-case film runtime) is treated as dead and re-enqueued. The cap also
-  // lets `force` bypass everything for an explicit redo.
+  // Atomically claim the job. The RPC's ON CONFLICT ... WHERE makes "take over the row" a single
+  // race-free decision, so two concurrent triggers can't both enqueue a duplicate transcription
+  // onto the single-slot gateway: exactly one wins and proceeds, the loser reuses the live job.
+  // A still-fresh 'processing' row (within the TTL) blocks takeover; a stale one is reclaimed.
   const PROCESSING_TTL_MS = 90 * 60 * 1000;
-  if (exrec?.status === "processing" && !opts.force) {
-    const updatedMs = exrec.updated_at ? new Date(String(exrec.updated_at)).getTime() : 0;
-    if (updatedMs && Date.now() - updatedMs < PROCESSING_TTL_MS) {
-      return { status: "processing", cached: true, jobId: exrec.job_id, providerKey: pkey };
-    }
-  }
   const jobId = crypto.randomUUID();
-  const { error: upErr } = await db.from("catalog_generated_subtitles").upsert({
-    provider_key: pkey, item_type: itemType, external_id: externalId, kind: "transcript", lang: "src",
-    status: "processing", job_id: jobId, error: null, updated_at: new Date().toISOString(),
-  }, { onConflict: "provider_key,item_type,external_id,kind,lang" });
-  if (upErr) throwDb(upErr, "enqueue upsert failed");
+  const { data: claim, error: claimErr } = await db.rpc("claim_generated_subtitle_job", {
+    p_provider_key: pkey, p_item_type: itemType, p_external_id: externalId, p_kind: "transcript", p_lang: "src",
+    p_new_job_id: jobId, p_processing_ttl_ms: PROCESSING_TTL_MS, p_force: opts.force === true,
+  });
+  if (claimErr) throwDb(claimErr, "enqueue claim failed");
+  const claimRow = (Array.isArray(claim) ? claim[0] : claim) as JsonRecord | null;
+  if (!claimRow?.won) {
+    // Another trigger owns a fresh job (or it just turned ready) — reuse it, don't double-enqueue.
+    return { status: stringOr(claimRow?.status, "processing"), cached: true, jobId: claimRow?.job_id ?? null, providerKey: pkey };
+  }
   const idx = Number.isInteger(Number(opts.index)) ? Number(opts.index) : 1;
   const bStart = Math.max(0, Number(opts.start) || 0);
   const bDur = Math.max(0, Number(opts.dur) || 0); // 0 = whole film (prod); >0 = clip (pipeline test)
