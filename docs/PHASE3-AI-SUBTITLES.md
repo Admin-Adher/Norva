@@ -167,3 +167,40 @@ email** (chemin no-speech), rows nettoyées.
 > rétablie via `sessionStorage` (`norva-open-fiche`, meurt avec l'onglet) et keyée sur l'alias source
 > **local** au navigateur — un deep-link serveur exact demanderait un routage fiche par URL + une
 > résolution cloud→local de la source. À faire comme amélioration séparée si besoin.
+
+## 10. 3b — traduction Argos (multi-cible) (2026-06-29, gateway v59 / edge v20)
+
+Traduire le transcript whisper dans la langue choisie par le viewer. **Clé : la traduction tourne
+sur le VTT déjà caché — AUCUNE connexion provider, pas d'audio** → zéro contention avec la lecture
+(pas de `user_multi_ip`), et c'est rapide (~20-45 s/film). Caché cross-user comme le transcript.
+
+**Moteur** (`services/media-gateway/src/translate.py`) : **CTranslate2 + SentencePiece directement**
+(PAS le paquet `argostranslate` complet → pas de torch/stanza/spacy → image bien plus légère). On
+traduit **cue par cue** (assez court pour ne pas avoir besoin de segmentation de phrases) : split par
+ligne, garde verbatim les lignes sans lettre (`...`, `42`, `♪`), batch. Paires arbitraires **pivotent
+par l'anglais** (`source→en→target`), comme Argos. Validé en local : FR/ES corrects, pivot fr→en→es
+correct, ~34 cues/s (4 threads).
+
+**Modèles** (`scripts/fetch_argos_models.py`, build-time) : télécharge + normalise les modèles
+`en↔X` pour `ARGOS_LANGS` (défaut `fr,es,ar,de,it,pt` ≈ 1,3 Go ; en est toujours le pivot →
+définit AUSSI les langues source traduisibles). Streaming + retry (les gros paquets, ex. `es_en`
+~285 Mo, tronquaient sur un read bufferisé). Couche Docker placée tôt → cachée indépendamment du code.
+
+**Gateway** (`GATEWAY_VERSION` 59) : `POST /translate-async` (gateway-auth, body
+`{jobId,callback,source,target,vtt}`) → file séparée (lane à part de la transcription) → spawn
+`translate.py` → POST callback edge (même forme que transcribe). `POST /translate` (sync, debug).
+`/health` expose `translate` + `translateTargets`.
+
+**Edge** (`norva-playback` v20) : `translateEnqueue()` — `providerKey` depuis la ligne source (caché,
+**0 appel provider**), **réutilise** le claim RPC (`kind=translation`, `lang=target`) + le
+`transcribe-callback`. Exige le transcript source `ready` (sinon `transcript-required`) ; sert le
+transcript tel quel si `source==target` (`sameLang`). `POST /generated-subtitle` route
+`kind=translation`/`targetLang` vers lui ; le `GET` sert déjà `kind=translation&lang`. Nouveau
+`GET /generated-subtitle-langs` (cache 5 min) expose les cibles du gateway.
+
+**Player** (`WatchPage.js`) : une fois le transcript prêt, une ligne **« 🌐 Translate to <langue> »**
+par cible dispo (noms localisés). Machine à états par cible (`translating…` / actif / retry), sonde le
+cache traduction, attache comme toute piste IA. Choisir une cible avant que le transcript existe →
+différé puis auto-déclenché à l'arrivée. État remis à zéro au changement de titre.
+
+**Reste** : 3c (cron whitelist nocturne pré-génération transcript + traduction ; reaper jobs bloqués).

@@ -33,6 +33,7 @@ résout les imports `../_shared`). Ne jamais déployer une edge function via un 
 | Gateway | **Cache du profil ffprobe** par URL (moins de sondes répétées → moins de 458) | `services/media-gateway/src/index.js` (v48) |
 | Edge | **Crons d'enrichissement déférés pendant une lecture live** (`userHasLiveSession()` : event < 4 min OU session `ready` non expirée → sonde relais audio-langs **et** backfill whisper renvoient `skipped: live-session`). Fixe le `user_multi_ip` (stream IP gateway + sonde IP Cloudflare = 2 IPs → panel mono-IP 429). On-demand non gardé. `ignoreLiveSession:true` bypass. **Vérifié prod** (user live → `skipped`). | `norva-playback` (v18) |
 | Edge + Player | **UX d'attente sous-titres IA** : compte à rebours ETA + toggle **« 🔔 Notify me by email »** (opt-in par titre, route `POST /generated-subtitle-notify` légère sans appel provider, fan-out email Resend au callback). **Vérifié prod** (callback réel → `skipped` no-speech, 0 email). Détail `PHASE3-AI-SUBTITLES.md` §9. | `norva-playback` (v19), `WatchPage.js`, `cloudApi.js`, migration `…_generated_subtitle_notifications` |
+| **Phase 3b** Gateway+Edge+Player | **Traduction sous-titres IA multi-cible** (Argos / CTranslate2+SentencePiece sur la gateway — pivot par l'anglais, **0 connexion provider**, ~20-45 s/film, cache cross-user `kind=translation`). Sélecteur « 🌐 Translate to … » au player une fois le transcript prêt. `ARGOS_LANGS` (défaut `fr,es,ar,de,it,pt`) configurable. Détail `PHASE3-AI-SUBTITLES.md` §10. | gateway v59 (`translate.py`, `fetch_argos_models.py`, Dockerfile), `norva-playback` (v20), `WatchPage.js`, `cloudApi.js` |
 
 ## Ce qui est DÉPLOYÉ mais derrière un FLAG (à activer pour en profiter)
 
@@ -67,7 +68,7 @@ curl -X POST "$EDGE/norva-playback/audio-backfill" \
 |------|-------|-------------|------|
 | 1 | audio + sous-titres incrustés | langue audio déduite + UI sous-titres incrustés verrouillés | ✅ **fait, live** |
 | 2 | audio | whisper.cpp détecte la vraie langue d'une piste non taguée (self-hosted, gratuit) | ✅ **fait & ACTIF** (flag inline `on` + cron whisper off-peak) |
-| 3 | sous-titres | **sous-titres auto** : Whisper transcrit l'audio → VTT quand aucun sous-titre texte ; + **traduction Argos** vers ta langue | 🟡 **3a fait & live** (transcription async + cache cross-user + livraison + bouton player) ; 3b Argos + 3c cron whitelist/reaper à faire |
+| 3 | sous-titres | **sous-titres auto** : Whisper transcrit l'audio → VTT quand aucun sous-titre texte ; + **traduction Argos** vers ta langue | 🟢 **3a + 3b faits** (transcription async + cache cross-user + livraison + bouton player + **traduction multi-cible Argos**) ; reste **3c** (cron whitelist nocturne + reaper) |
 | 4 | sous-titres | **OCR (Tesseract)** : sous-titres image (PGS/VOBSUB) → texte ; potentiellement incrustés dans l'image | ❌ à faire |
 
 Hors-plan (correctifs livrés en cours de route) : extraction sous-titres texte in-band (ci-dessus),
@@ -77,8 +78,11 @@ fix flicker catalogue, cache de profil gateway, fixes moteur (BlockAdditions/HEV
 il « suffit » d'une transcription complète horodatée (au lieu d'un clip de 20 s) + Argos pour traduire.
 **3a livré (2026-06-29)** : transcription async film-entier → cache cross-user `catalog_generated_subtitles`
 (claim atomique anti-doublon sur le slot unique) → routes `GET/POST generated-subtitle` → bouton
-« ✨ AI subtitles » au player. Détail complet dans `docs/PHASE3-AI-SUBTITLES.md` §8. Reste 3b (Argos) + 3c
-(cron whitelist nocturne + reaper jobs bloqués).
+« ✨ AI subtitles » au player. Détail complet dans `docs/PHASE3-AI-SUBTITLES.md` §8.
+**3b livré (2026-06-29)** : **traduction multi-cible Argos** (CTranslate2+SentencePiece sur la gateway,
+pivot par l'anglais, 0 connexion provider) → cache cross-user `kind=translation` → sélecteur de langue
+« 🌐 Translate to … » au player. `gateway v59` / `edge v20`. Détail `docs/PHASE3-AI-SUBTITLES.md` §10.
+Reste **3c** (cron whitelist nocturne pré-génération + reaper jobs bloqués).
 
 ## Enrichment / backfill — état & stratégie par provider
 
