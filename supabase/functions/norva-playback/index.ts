@@ -9,6 +9,7 @@ type RuntimeConfig = {
   mediaGatewayUrl: string;
   mediaGatewayToken: string;
   sourceConfigKey: string;
+  whisperDetect: boolean; // Phase 2: detect untagged audio-track languages via the relay (Workers AI). Off by default.
 };
 type CloudIdentity = { userId: string; deviceId?: string };
 
@@ -38,6 +39,7 @@ const RUNTIME_CONFIG_KEYS = [
   "NORVA_MEDIA_GATEWAY_URL",
   "NORVA_MEDIA_GATEWAY_TOKEN",
   "NORVA_SOURCE_CONFIG_KEY",
+  "NORVA_WHISPER_DETECT",
 ];
 const PROVIDER_SLOT_RELEASE_DELAY_MS = boundedInt(
   Deno.env.get("NORVA_PROVIDER_SLOT_RELEASE_DELAY_MS") ?? Deno.env.get("PROVIDER_SLOT_RELEASE_DELAY_MS"),
@@ -69,6 +71,7 @@ const ENV_RELAY_TOKEN_SECRET = Deno.env.get("RELAY_TOKEN_SECRET") ?? "";
 const ENV_MEDIA_GATEWAY_URL = trimTrailingSlash(Deno.env.get("NORVA_MEDIA_GATEWAY_URL") ?? "");
 const ENV_MEDIA_GATEWAY_TOKEN = Deno.env.get("NORVA_MEDIA_GATEWAY_TOKEN") ?? "";
 const ENV_SOURCE_CONFIG_KEY = Deno.env.get("NORVA_SOURCE_CONFIG_KEY") ?? "";
+const ENV_WHISPER_DETECT = Deno.env.get("NORVA_WHISPER_DETECT") ?? "";
 
 if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
   throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
@@ -402,6 +405,21 @@ async function createPlaybackSession(
         if (probeOk) {
           await shareFileTracks(db, serverHost, itemType, fileExternalId,
             gotAudio ? probed.audioTracks : [], gotSub ? probed.subtitleTracks : [], gotAudio, gotSub);
+        }
+        // Phase 2 (flag-gated): a freshly probed file may still carry UNTAGGED audio tracks
+        // (lang null) — no provider/demux language. Detect them via Whisper IN THE BACKGROUND
+        // and re-persist, so the next play is fully named. Runs once (right after the first
+        // probe), best-effort, never blocks the response. Off unless NORVA_WHISPER_DETECT=true.
+        if (gotAudio && titleRow?.id && serverHost && fileExternalId
+          && audioTracks.length >= 2 && audioTracks.some((t) => !t.lang)) {
+          const rc = await getRuntimeConfig(db);
+          if (rc.whisperDetect && rc.relayBaseUrl && rc.relayTokenSecret && rc.mediaGatewayUrl) {
+            runBackground(detectUntaggedAudioLanguages({
+              db, runtimeConfig: rc, userId, targetUrl, userAgent,
+              audioTracks, titleId: titleRow.id, tmdbId: stringOrNull(titleRow.provider_tmdb_id),
+              serverHost, itemType, fileExternalId, sessionId: session.id, expiresAt,
+            }));
+          }
         }
       }
       return {
@@ -1767,6 +1785,7 @@ async function getRuntimeConfig(db: SupabaseClient): Promise<RuntimeConfig> {
     mediaGatewayUrl: trimTrailingSlash(ENV_MEDIA_GATEWAY_URL || fromDb.get("NORVA_MEDIA_GATEWAY_URL") || ""),
     mediaGatewayToken: ENV_MEDIA_GATEWAY_TOKEN || fromDb.get("NORVA_MEDIA_GATEWAY_TOKEN") || "",
     sourceConfigKey: ENV_SOURCE_CONFIG_KEY || fromDb.get("NORVA_SOURCE_CONFIG_KEY") || "",
+    whisperDetect: (ENV_WHISPER_DETECT || fromDb.get("NORVA_WHISPER_DETECT") || "") === "true",
   };
   runtimeConfigCache = { value, expiresAt: Date.now() + 30_000 };
   return value;
@@ -1963,6 +1982,84 @@ async function shareFileTracks(
   };
   try { await db.rpc("upsert_catalog_file_tracks", args); } catch (_) { /* best-effort global cache */ }
   try { await db.rpc("fanout_file_tracks_to_users", args); } catch (_) { /* best-effort fan-out */ }
+}
+
+// Keep a best-effort task alive past the response on Supabase Edge (background work) without
+// blocking it. Falls back to fire-and-forget where EdgeRuntime.waitUntil isn't present.
+function runBackground(p: Promise<unknown>): void {
+  const task = p.catch(() => {});
+  try {
+    const er = (globalThis as { EdgeRuntime?: { waitUntil?: (p: Promise<unknown>) => void } }).EdgeRuntime;
+    if (er && typeof er.waitUntil === "function") er.waitUntil(task);
+  } catch (_) { /* fire-and-forget */ }
+}
+
+// Phase 2: detect the language of UNTAGGED audio tracks via the relay (Workers AI Whisper) and
+// re-persist the enriched map. The gateway extracts a short WAV per track (it has ffmpeg); the
+// relay transcribes + detects. ENRICH-only: fills a null lang, never overrides. Best-effort and
+// background — never blocks playback. NOTE: the WAV extraction is a 2nd provider connection, so
+// on a single-slot source it can lose to the live stream (458); the offline backfill path is the
+// single-slot-friendly alternative.
+async function detectUntaggedAudioLanguages(opts: {
+  db: SupabaseClient;
+  runtimeConfig: RuntimeConfig;
+  userId: string;
+  targetUrl: string;
+  userAgent: string | null;
+  audioTracks: Array<{ index: number; lang: string | null }>;
+  titleId: string;
+  tmdbId: string | null;
+  serverHost: string;
+  itemType: string;
+  fileExternalId: string;
+  sessionId: string;
+  expiresAt: string;
+}): Promise<void> {
+  const { db, runtimeConfig, userId, targetUrl, userAgent, audioTracks, titleId, tmdbId, serverHost, itemType, fileExternalId, sessionId, expiresAt } = opts;
+  if (!runtimeConfig.relayBaseUrl || !runtimeConfig.relayTokenSecret || !runtimeConfig.mediaGatewayUrl || !runtimeConfig.mediaGatewayToken) return;
+  const untagged = audioTracks.filter((t) => !t.lang && Number.isInteger(t.index)).slice(0, 5);
+  if (!untagged.length) return;
+
+  // Gateway byte-pipe token → derive the /audio-sample base from the /raw URL.
+  let audioSampleBase: string;
+  try {
+    const pipe = await createBytePipeAccess(sessionId, userId, targetUrl, expiresAt, db, userAgent);
+    audioSampleBase = pipe.url.replace("/raw/", "/audio-sample/");
+  } catch (_) { return; }
+
+  // Relay token for /detect-language (mirrors the probe token).
+  const payload = JSON.stringify({ v: 1, sid: "lang-detect", uid: userId, url: targetUrl, exp: Math.floor(Date.now() / 1000) + 300 });
+  const relayToken = `${base64Url(encoder.encode(payload))}.${await hmacBase64Url(runtimeConfig.relayTokenSecret, payload)}`;
+  const detectUrl = `${runtimeConfig.relayBaseUrl}/detect-language/${relayToken}`;
+
+  const byIndex = new Map(audioTracks.map((t) => [t.index, t]));
+  let filled = 0;
+  for (const t of untagged) {
+    try {
+      const wavRes = await fetch(`${audioSampleBase}?index=${t.index}&dur=20`, { signal: AbortSignal.timeout(30_000) });
+      if (!wavRes.ok) continue;
+      const wav = await wavRes.arrayBuffer();
+      if (wav.byteLength < 4000) continue;
+      const detRes = await fetch(detectUrl, { method: "POST", body: wav, headers: { "content-type": "audio/wav" }, signal: AbortSignal.timeout(30_000) });
+      if (!detRes.ok) continue;
+      const det = await detRes.json().catch(() => null) as JsonRecord | null;
+      const lang = normalizeIsoLang(stringOrNull(det?.language));
+      if (lang) { const entry = byIndex.get(t.index); if (entry) { entry.lang = lang; filled++; } }
+    } catch (_) { /* best-effort per track */ }
+  }
+  if (!filled) return;
+
+  const enriched = audioTracks.map((t) => ({ index: t.index, lang: t.lang ?? null }));
+  const codes = [...new Set(enriched.map((t) => t.lang).filter((l): l is string => Boolean(l)))].sort();
+  try {
+    await db.from("cloud_titles")
+      .update({ audio_tracks: enriched, audio_languages: codes, audio_probed_at: new Date().toISOString() })
+      .eq("user_id", userId).eq("id", titleId);
+    if (codes.length && tmdbId && !/^(tt)?0+$/i.test(tmdbId)) {
+      try { await db.rpc("merge_catalog_title_audio", { p_item_type: itemType, p_provider_tmdb_id: tmdbId, p_codes: codes }); } catch (_) { /* best-effort global mirror */ }
+    }
+  } catch (_) { /* best-effort persist */ }
+  try { await shareFileTracks(db, serverHost, itemType, fileExternalId, enriched, [], true, false); } catch (_) { /* best-effort */ }
 }
 
 // Map an engine playback (source + item) to its cloud_titles row, so a probed audio

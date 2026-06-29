@@ -43,22 +43,33 @@ minute, so light use stays within free limits.
 ffmpeg extracts a mono/16 kHz `pcm_s16le` WAV of audio stream `N` and returns `audio/wav`.
 Mirrors the proven `/subtitle` extraction. Same byte-pipe token as `/raw`.
 
-## Step 3 — trigger + persist (TO DECIDE)
+## Step 3 — inline self-heal trigger (DONE, flag-gated)
 
-Two ways to wire the trigger; pick per the trade-off:
+In `norva-playback` (engine path), right after the **first** probe of a file, if untagged audio
+tracks remain it runs `detectUntaggedAudioLanguages` in the **background**
+(`EdgeRuntime.waitUntil`) — never blocking the response — and re-persists the enriched map to
+`cloud_titles.audio_tracks` + `audio_languages`, mirrored to `catalog_file_tracks` and
+`merge_catalog_title_audio`. Runs once per file (the probe runs once, then the map is cached),
+best-effort, capped at 5 untagged tracks.
 
-- **Inline self-heal (flag-gated), during playback.** After the engine-path probe, if untagged
-  tracks remain, run detection in the background (`EdgeRuntime.waitUntil`) and persist for next
-  play. Automatic, but it's a second provider connection during streaming (single-slot 458
-  risk) and bills Workers AI per untagged play until cached. Ship behind an off-by-default
-  config flag.
-- **Offline backfill (service-gated), out of band.** Extend `runAudioBackfill` with a Whisper
-  mode that walks titles with untagged `audio_tracks` and detects them when nothing is playing.
-  No playback-time slot contention, controlled cost, but runs on demand/cron rather than
-  automatically.
+Gated by `NORVA_WHISPER_DETECT` (runtime config / env). **Off by default** → no behaviour
+change and no Workers AI cost until enabled.
 
-Both persist identically (`cloud_titles.audio_tracks` + `audio_languages`, mirrored to
-`catalog_file_tracks`), so the player and grid get the language with zero further work.
+**Single-slot caveat:** the per-track WAV extraction is a second provider connection, so on a
+single-slot source (e.g. `super8k.top`) it can lose to the live `/raw` stream (458) and silently
+yield nothing that play (it retries on the next first-probe of an untagged file). The
+single-slot-friendly alternative is an **offline backfill** (extend `runAudioBackfill` with a
+Whisper mode that detects untagged tracks when nothing is streaming) — not yet built; add it if
+the inline path proves too contended on single-slot accounts.
+
+## Enabling
+
+1. Confirm Workers AI is enabled on the Cloudflare account, then deploy the relay (push to
+   `main`) so `/detect-language` + the `ai` binding go live.
+2. Deploy the gateway (`services/media-gateway`) so `/audio-sample` is available.
+3. Set `NORVA_WHISPER_DETECT=true` (runtime config row or edge env) and deploy `norva-playback`.
+4. Play a multi-audio title with an untagged track; after the first play the languages persist,
+   so the next play (and the grid badge) show them with no probe.
 
 ## Deployment notes
 
