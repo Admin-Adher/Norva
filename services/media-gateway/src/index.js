@@ -71,7 +71,7 @@ const RAW_PROVIDER_RETRY_DELAYS_MS = [400, 1000, 2000, 3000, 4000, 5000, 6000, 8
 const FFMPEG_USER_AGENT = process.env.FFMPEG_USER_AGENT ||
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36 Norva/1.0';
 const MAX_LOG_TAIL = 12000;
-const GATEWAY_VERSION = 46;
+const GATEWAY_VERSION = 47;
 // Browser playback fetches HLS playlists/segments cross-origin, so these must
 // list every Norva web origin or the browser blocks the response (CORS). Keep
 // in sync with the relay's ALLOWED_ORIGINS (services/norva-relay/wrangler.jsonc).
@@ -464,6 +464,64 @@ app.get('/subtitle/:token', async (req, res) => {
         res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
         res.setHeader('Cache-Control', 'private, max-age=3600');
         res.send(body);
+    });
+});
+
+// Phase 2: extract a short mono/16 kHz WAV of ONE audio track for language detection. The
+// relay (Workers AI Whisper) can't decode media, so the gateway (ffmpeg) makes the clip and
+// the caller forwards it to the relay's /detect-language. Same byte-pipe token as /raw. Used
+// only when a track has no language from the provider/demux, and the result is cached, so this
+// (a second provider connection) runs at most once per untagged file.
+app.get('/audio-sample/:token', async (req, res) => {
+    const claims = verifyRawToken(req.params.token, GATEWAY_TOKEN);
+    if (!claims) return res.status(401).json({ error: 'Invalid byte-pipe token' });
+    if (Number(claims.exp) * 1000 < Date.now()) return res.status(401).json({ error: 'Byte-pipe token expired' });
+    const ua = claims.ua || FFMPEG_USER_AGENT;
+
+    const trackIndex = Number.parseInt(req.query.index, 10);
+    if (!Number.isInteger(trackIndex) || trackIndex < 0) return res.status(400).json({ error: 'Invalid audio index' });
+    const startOffset = Number.parseFloat(req.query.start);
+    const hasStart = Number.isFinite(startOffset) && startOffset > 0;
+    const dur = Math.min(Math.max(Number.parseFloat(req.query.dur) || 20, 4), 60);
+    const outputPath = path.join(os.tmpdir(), `norva-audio-${Date.now()}-${crypto.randomUUID()}.wav`);
+
+    const args = [
+        '-y', '-hide_banner', '-loglevel', 'error', '-nostdin',
+        '-user_agent', ua,
+        '-probesize', '2000000', '-analyzeduration', '3000000',
+        ...(hasStart ? ['-ss', String(startOffset)] : []),
+        '-i', claims.url,
+        '-map', `0:${trackIndex}`,
+        '-t', String(dur),
+        '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', '-f', 'wav',
+        outputPath,
+    ];
+
+    let child;
+    try { child = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'ignore', 'pipe'] }); }
+    catch (_) { return res.status(500).json({ error: 'Audio extraction failed' }); }
+    let stderr = '';
+    let clientClosed = false;
+    const timer = setTimeout(() => { try { child.kill('SIGKILL'); } catch (_) {} }, 30_000);
+    child.stderr.on('data', (d) => { stderr += d.toString(); });
+    res.on('close', () => { if (!res.writableEnded) { clientClosed = true; try { child.kill('SIGKILL'); } catch (_) {} } });
+    child.on('error', () => { clearTimeout(timer); if (!res.headersSent) res.status(500).end(); });
+    child.on('close', async (code) => {
+        clearTimeout(timer);
+        if (clientClosed) { fsp.unlink(outputPath).catch(() => {}); return; }
+        if (code !== 0) {
+            console.warn(`[media-gateway] /audio-sample ffmpeg exit ${code}: ${stderr.slice(-300)}`);
+            fsp.unlink(outputPath).catch(() => {});
+            if (!res.headersSent) res.status(502).json({ error: 'Audio extraction failed' });
+            return;
+        }
+        let buf = null;
+        try { buf = await fsp.readFile(outputPath); } catch (_) { buf = null; }
+        fsp.unlink(outputPath).catch(() => {});
+        if (!buf || buf.length < 4000) { if (!res.headersSent) res.status(502).json({ error: 'Empty audio sample' }); return; }
+        res.setHeader('Content-Type', 'audio/wav');
+        res.setHeader('Cache-Control', 'private, max-age=3600');
+        res.send(buf);
     });
 });
 
