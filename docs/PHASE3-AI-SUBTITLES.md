@@ -203,4 +203,11 @@ par cible dispo (noms localisés). Machine à états par cible (`translating…`
 cache traduction, attache comme toute piste IA. Choisir une cible avant que le transcript existe →
 différé puis auto-déclenché à l'arrivée. État remis à zéro au changement de titre.
 
+**Vérifié en prod (2026-06-29)** : gateway `v59` `/health` → `translate:true`, `translateTargets:
+['ar','de','en','es','fr','it','pt']` (les 6 langues + en pivot, ~1,3 Go de modèles téléchargés au
+build). Appel réel `POST /translate` (token gateway via `net.http_post`) en→fr → `200` VTT FR correct,
+dialogue multi-ligne préservé (« Nous devons partir tout de suite, ils arrivent. » / « - Où est
+l'argent ? / - Je l'ai caché sous le pont. »), **615 ms** pour 2 cues. Edge `v20` live, route
+`/generated-subtitle-langs` câblée (`401` sans auth).
+
 **Reste** : 3c (cron whitelist nocturne pré-génération transcript + traduction ; reaper jobs bloqués).

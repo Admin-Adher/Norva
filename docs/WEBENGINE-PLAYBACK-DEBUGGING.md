@@ -153,6 +153,31 @@ group by 1,2,3 order by max(e.created_at) desc;
     est cachée, et un échec est mémorisé (dégradation propre). Logs de diag ajoutés côté player
     (`[WatchPage] timeline diag`) : `codecProfilePresent`, `codecProfileDurationSeconds`, `durationHint`.
 
+### ❓ Pourquoi les VOD `.ts` passent par le gateway (et pourquoi c'est plus lent à charger)
+**La cause en une ligne : le moteur in-browser ne sait pas démuxer le MPEG-TS.** Le moteur
+(`NorvaEngine`) est un **libav compilé en WASM** (`libav-6.8.8.0-norva.wasm`), volontairement **léger** :
+il n'embarque QUE les démuxeurs **Matroska/WebM + QuickTime/MOV (mp4)**. Pas de démuxeur **MPEG-TS**.
+Donc un fichier `.ts` ne peut **physiquement pas** être ouvert/remuxé dans le navigateur (`DEMUX_OPEN`),
+et l'éligibilité moteur (`api.js` → `engineCanPlayContainer`, allowlist `mkv/webm/mp4/mov/…`) l'écarte
+d'office → il part au **gateway transcode**.
+
+**Pourquoi le gateway est plus lent que le moteur :**
+- Moteur (mkv/mp4) = **remux stream-copy en local**, dans le navigateur, directement depuis le byte-pipe.
+  Pas de ré-encodage, pas de saut serveur → démarrage quasi instantané.
+- Gateway (ts) = **ré-encodage serveur complet** (ffmpeg) → HLS segmenté → re-télécharge à travers le
+  proxy résidentiel. On force le **transcode complet** (pas un simple remux-copy) car un copy TS→HLS est
+  peu fiable (discontinuités PCR/timestamps → `manifestLoadError`). Ré-encoder = CPU + latence de
+  démarrage (il faut transcoder en avance avant de servir les segments). D'où le « ça marche mais c'est
+  plus long ».
+
+**Comment l'accélérer (amélioration possible, non faite) :** **recompiler le WASM avec le démuxeur
+`mpegts`** (`--enable-demuxer=mpegts` + parsers). Le moteur pourrait alors **remuxer le TS en local**
+comme un mkv (rapide, sans gateway) pour le cas courant **H.264 + AAC** ; il transcoderait juste l'audio
+côté client pour **H.264 + AC3** (déjà ce qu'il fait pour les mkv AC3). Le gateway ne resterait
+nécessaire que pour les codecs vraiment non décodables par le navigateur (**MPEG-2 vidéo**, DTS/TrueHD).
+⚠️ À tester : le remux-copy TS→fMP4 peut buter sur les mêmes discontinuités PCR que le remux gateway ;
+le muxer non-seekable du moteur pourrait les absorber, mais ça demande un build Emscripten + validation.
+
 ### Bug #4 — mkv ne démarre pas alors que mp4 oui : IP datacenter bloquée (GATEWAY_VERSION 51) ✅ racine
 - **Symptôme** : sur le **même provider**, les mp4 (`direct`) jouaient mais les mkv (`engine`/`relay`) `458`aient, **au même instant**.
 - **Diagnostic** (télémétrie) : `playback_mode='direct'` → `first_frame` OK ; `playback_mode='engine'` → `BLOCK_HTTP_458`. Donc le slot n'est pas saturé : le provider **458 spécifiquement l'IP datacenter** (Railway), pas l'IP résidentielle du navigateur. (La rafale de retries pendant le debug avait probablement fait flaguer l'IP.)
