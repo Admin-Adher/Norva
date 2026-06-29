@@ -3076,7 +3076,15 @@ class WatchPage {
 
     togglePlay() {
         if (this.video.paused) {
-            this.video.play().catch(console.error);
+            // Nothing loaded yet (e.g. mid media-switch, before the engine attaches its
+            // MediaSource) → play() would reject with NotSupportedError. No-op instead.
+            if (!this.video.src && !this.video.currentSrc) return;
+            this.video.play().catch((e) => {
+                // These are benign here: NotSupportedError = source not ready/torn down,
+                // AbortError = a newer load() superseded this play. Don't spam the console.
+                if (e && (e.name === 'NotSupportedError' || e.name === 'AbortError')) return;
+                console.error(e);
+            });
         } else {
             this.video.pause();
         }

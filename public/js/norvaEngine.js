@@ -360,20 +360,15 @@
       try { this.video.removeEventListener('seeking', this._onSeeking); } catch (_) {}
       try { this.video.removeEventListener('timeupdate', this._onTimeUpdate); } catch (_) {}
       // Stop draining: drop any pending segments so a late updateend can't append to the
-      // old SourceBuffer after we've detached (fast media-switch race).
+      // old SourceBuffer after we've detached (fast media-switch race — the real fix for
+      // CHUNK_DEMUXER_ERROR_APPEND_FAILED, together with the destroyed-guard in _drain()).
       this.queue.length = 0;
-      // Reset the shared <video> so the NEXT engine attaches its MediaSource to a clean
-      // element instead of inheriting this stream's buffered ranges / pending appends —
-      // otherwise a quick switch yields CHUNK_DEMUXER_ERROR_APPEND_FAILED on the new pipe.
-      // BUT only if the element still shows OUR stream: on a rapid 3-way switch a newer
-      // engine may already own the <video>, and we must not clear its MediaSource.
-      const ownsVideo = this._objectUrl && this.video.src === this._objectUrl;
       try { if (this.ms && this.ms.readyState === 'open') this.ms.endOfStream(); } catch (_) {}
       try { if (this._objectUrl) URL.revokeObjectURL(this._objectUrl); } catch (_) {}
-      if (ownsVideo) {
-        // removeAttribute+load() empties cleanly (fires 'emptied', not 'error').
-        try { this.video.removeAttribute('src'); this.video.load(); } catch (_) {}
-      }
+      // We deliberately do NOT removeAttribute('src')+load() here: the next engine's
+      // _attachMediaSource sets a fresh src, which already runs the media element's reset
+      // (drops buffered ranges + pending appends). Clearing it here left an empty-src window
+      // where togglePlay()'s video.play() threw "NotSupportedError: no supported sources".
       try { if (this.lib && this.lib.terminate) this.lib.terminate(); } catch (_) {}
       this.lib = null;
     }
