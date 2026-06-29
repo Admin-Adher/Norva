@@ -151,7 +151,7 @@
     av1: ['av01.0.08M.08'],
   };
 
-  const ENGINE_VERSION = 24;
+  const ENGINE_VERSION = 25;
 
   class NorvaEngine {
     constructor(videoEl, opts = {}) {
@@ -488,6 +488,10 @@
       // with a faked 206 — the usual reason a fully-fetched, authenticated source still "can't be
       // opened" with no read error. Cheap, cache-only, no extra connection.
       this._captureSourceHead();
+      // This libav build has no MPEG-TS demuxer — detect TS from the head (0x47 sync repeating at
+      // the 188-byte packet stride, or 192-byte M2TS) and bail with a precise reason BEFORE wasting
+      // a libav open, so the player falls back to the gateway transcode (full ffmpeg) cleanly.
+      if (this._sourceLooksLikeMpegTs()) throw new Error('SOURCE_UNSUPPORTED_CONTAINER:mpegts');
       let fmtCtx, streams;
       try {
         [fmtCtx, streams] = await lib.ff_init_demuxer_file('input');
@@ -508,6 +512,20 @@
         const durUs = to64(await lib.AVFormatContext_duration(fmtCtx), await lib.AVFormatContext_durationhi(fmtCtx));
         this.durationSec = durUs > 0 ? durUs / 1e6 : 0;
       } catch (_) { this.durationSec = 0; }
+    }
+
+    // MPEG-TS detector: a 188-byte transport stream repeats the 0x47 sync byte every 188 bytes; a
+    // 192-byte M2TS has the sync at offset 4. Two aligned sync bytes is a reliable tell (no false
+    // positive on mkv/mp4, whose first byte is EBML magic / a box size). Cache-only, no fetch.
+    _sourceLooksLikeMpegTs() {
+      try {
+        const w = this._raCache && this._raCache.find((x) => x.start === 0);
+        const b = w && w.buf;
+        if (!b || b.length < 189) return false;
+        if (b[0] === 0x47 && b[188] === 0x47) return true;                       // 188-byte TS
+        if (b.length >= 197 && b[4] === 0x47 && b[196] === 0x47) return true;    // 192-byte M2TS
+        return false;
+      } catch (_) { return false; }
     }
 
     // Snapshot the first bytes of the source (from the cached first window — no extra fetch) and

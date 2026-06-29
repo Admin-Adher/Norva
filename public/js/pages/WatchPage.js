@@ -1986,8 +1986,8 @@ class WatchPage {
             // the video (stream offline, link expired provider-side, or geo/auth wall on the file).
             return 'This stream is unavailable right now — the provider returned an error page instead of the video (it may be offline or the link expired). Try another version, or reopen the title in a moment.';
         }
-        if (/DEMUX_OPEN/i.test(text)) {
-            return "In-browser playback couldn't open this file's container. Try another version, or open the title in the Norva app (TV / mobile / tablet) — your progress is synced.";
+        if (/SOURCE_UNSUPPORTED_CONTAINER|DEMUX_OPEN/i.test(text)) {
+            return "In-browser playback couldn't open this file's container (e.g. MPEG-TS). Try another version, or open the title in the Norva app (TV / mobile / tablet) — your progress is synced.";
         }
         if (/provider (closed|refused)|4XX Client Error|Error opening input|Invalid data|Stream ends prematurely|I\/O error/i.test(text)) {
             return 'The provider closed or refused this stream. Try another version or wait before retrying.';
@@ -2350,11 +2350,57 @@ class WatchPage {
                     if (this.isStalePlaybackAttempt(playbackAttemptId)) { this.destroyEngine(); return; }
                     continue;
                 }
+                // Read the source-head verdict before tearing the engine down: a real-media demux
+                // failure is worth a gateway-transcode retry; a provider error page is not.
+                let sourceHead = null;
+                try { sourceHead = this.norvaEngine?.engineSnapshot?.()?.sourceHead || null; } catch (_) {}
                 this.reportEngineFailure({ stage: 'load', message: msg });
                 this.destroyEngine();
+                // The engine's libav build can't demux every container (no MPEG-TS/PS, AVI, WMV, FLV).
+                // When it received REAL media it couldn't open — an explicit unsupported-container
+                // signal, or a DEMUX_OPEN whose head wasn't a provider error doc — fall back to the
+                // gateway transcode (full ffmpeg) instead of a dead-end banner. A non-media head
+                // (provider error page) is NOT retried: transcode would just refetch the same error.
+                const realMediaDemuxFail = /SOURCE_UNSUPPORTED_CONTAINER/i.test(msg)
+                    || (/DEMUX_OPEN/i.test(msg) && !(sourceHead && sourceHead.notMedia));
+                if (realMediaDemuxFail && await this.fallbackEngineToTranscode(playbackAttemptId)) return;
                 this.handleEngineUnplayable(e);
                 return;
             }
+        }
+    }
+
+    // Engine could not demux this container (e.g. MPEG-TS, which this libav build lacks). Re-resolve
+    // the title forcing the gateway transcode path (server-side ffmpeg → browser-safe HLS) and play
+    // that. Only ever runs after an engine load already failed, so it can't regress a working title.
+    async fallbackEngineToTranscode(playbackAttemptId) {
+        const c = this.content || {};
+        if (!c.sourceId || !c.id) return false;
+        if (this.isStalePlaybackAttempt(playbackAttemptId)) return false;
+        const type = c.type === 'series' ? 'series' : 'movie';
+        const startOffset = Math.max(0, Number(this.resumeTime) || 0);
+        console.warn('[WatchPage] engine cannot demux this container — falling back to gateway transcode');
+        try { this.showLoading(); } catch (_) {}
+        try { this.updateTranscodeStatus('transcoding', 'Conversion serveur…'); } catch (_) {}
+        let result;
+        try {
+            result = await API.proxy.xtream.getStreamUrl(c.sourceId, c.id, type, c.containerExtension || 'mp4', {
+                mode: 'transcode', seekOffset: startOffset, startOffset, resumeTime: startOffset
+            });
+        } catch (err) {
+            console.warn('[WatchPage] transcode fallback resolve failed:', err?.message || err);
+            return false;
+        }
+        if (this.isStalePlaybackAttempt(playbackAttemptId)) return true;
+        if (!result?.url) return false;
+        result.seekOffset = startOffset;
+        result.startOffset = startOffset;
+        try {
+            await this.play(c, result.url, result);
+            return true;
+        } catch (err) {
+            console.warn('[WatchPage] transcode fallback play failed:', err?.message || err);
+            return false;
         }
     }
 

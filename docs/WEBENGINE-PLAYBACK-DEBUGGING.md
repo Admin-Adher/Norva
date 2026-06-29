@@ -117,9 +117,23 @@ group by 1,2,3 order by max(e.created_at) desc;
   exposée dans `engineSnapshot().sourceHead` (loggée + télémétrie), donc la prochaine occurrence dit
   **exactement** quoi. `getFriendlyPlaybackError` mappe `SOURCE_NOT_MEDIA` (« le provider a renvoyé une page
   d'erreur au lieu de la vidéo ») et `DEMUX_OPEN` (« ouvre dans l'app »).
-- **Suite si `sourceHead.kind` est nul** (vraies données média illisibles par libav-wasm) : ajouter un
-  **repli transcode serveur** (gateway-session) pour ces titres — non fait (risque sur le happy-path,
-  non testable hors navigateur) ; à câbler une fois la cause confirmée par la télémétrie.
+- **Cause confirmée (ENGINE_VERSION 25)** : `sourceHead` a renvoyé `kind:media` avec **1ᵉʳ octet 0x47**
+  (`'G'`) = **octet de sync MPEG-TS**. Le build libav custom (`libav-6.8.8.0-norva.wasm`) n'embarque que
+  les démuxeurs **Matroska/WebM + QuickTime/MOV (mp4)** — **pas** MPEG-TS/PS, AVI, WMV/ASF, FLV. Donc un
+  film servi en **`.ts`** (fréquent côté IPTV) routé vers le moteur → `DEMUX_OPEN`. Or la décision
+  d'éligibilité moteur (`api.js`, `engineVod`) ne prenait **que** « non browser-safe », donc TS/avi/wmv/
+  flv/mpeg/vob partaient au moteur incapable.
+- **Fix (3 couches, ENGINE_VERSION 25)** :
+  1. **`api.js`** — `engineVod` exige désormais `engineCanPlayContainer(container)` (allowlist
+     mkv/webm/mp4/mov/…). Un conteneur connu non-démuxable part directement au **gateway transcode**.
+  2. **Moteur** — `_sourceLooksLikeMpegTs()` (sync 0x47 au stride 188 / M2TS 192) lève
+     `SOURCE_UNSUPPORTED_CONTAINER:mpegts` **avant** d'attaquer libav (cas d'un conteneur mal-étiqueté
+     `mp4` qui est en fait du TS — typique d'une reprise).
+  3. **Player** — `fallbackEngineToTranscode()` : sur un échec moteur **média réel** (signal explicite,
+     ou `DEMUX_OPEN` dont `sourceHead.notMedia !== true`), re-résout en `mode:'transcode'` et joue le
+     gateway-session. Ne tourne **qu'après** un échec moteur → zéro régression sur un titre qui marche.
+     Une tête **non-média** (page d'erreur provider) n'est **pas** retentée (le transcode re-tomberait
+     sur la même erreur).
 
 ### Bug #4 — mkv ne démarre pas alors que mp4 oui : IP datacenter bloquée (GATEWAY_VERSION 51) ✅ racine
 - **Symptôme** : sur le **même provider**, les mp4 (`direct`) jouaient mais les mkv (`engine`/`relay`) `458`aient, **au même instant**.
@@ -158,7 +172,7 @@ Les fournisseurs IPTV bloquent les plages d'IP datacenter (anti-revente). Le nav
 ## 5. État final (vérifié en prod)
 - mkv via moteur : `first_frame` + `play_started` + resume/pause/seek en `playback_mode='engine'`, **plus aucun `CHUNK_DEMUXER`**.
 - Combinaison gagnante = **proxy résidentiel** (octets circulent) + **muxer non-seekable** (octets valides).
-- Versions : `ENGINE_VERSION 24` (capture/classification `sourceHead` sur échec d'ouverture), `GATEWAY_VERSION 51`.
+- Versions : `ENGINE_VERSION 25` (TS détecté → repli gateway transcode ; `sourceHead` sur échec d'ouverture), `GATEWAY_VERSION 51`.
 
 ## 6. Runbook — « un mkv ne se lance plus »
 1. `GET https://norva-production.up.railway.app/health` → vérifier `version` et `providerProxy`.

@@ -990,6 +990,18 @@ const CloudAdapter = (() => {
         ].includes(normalizedContainer);
     }
 
+    // Containers the in-browser engine's libav build can actually DEMUX. The custom build ships
+    // only the Matroska/WebM and QuickTime/MOV (mp4) demuxers — NOT MPEG-TS/PS, AVI, WMV/ASF or
+    // FLV. Routing one of those to the engine yields `DEMUX_OPEN:Could not open source file`; they
+    // must take the gateway transcode path (full ffmpeg) instead. Unknown/empty container → let the
+    // engine try (it self-detects; the runtime TS guard + transcode fallback handle a mislabeled one).
+    const ENGINE_DEMUXABLE_CONTAINERS = new Set(['mkv', 'webm', 'mka', 'mp4', 'm4v', 'mov', 'm4a', '3gp', '3g2']);
+    function engineCanPlayContainer(container) {
+        const c = String(container || '').split('?')[0].split('#')[0].toLowerCase();
+        if (!c) return true;
+        return ENGINE_DEMUXABLE_CONTAINERS.has(c);
+    }
+
     function normalizeCodecToken(value) {
         return String(value || '').toLowerCase().replace(/[^a-z0-9.]+/g, '');
     }
@@ -1416,6 +1428,7 @@ const CloudAdapter = (() => {
                 const engineVod = isVodPlayback
                     && !nativePlayer
                     && !browserSafeVod
+                    && engineCanPlayContainer(container)
                     && typeof window !== 'undefined'
                     && Boolean(window.NorvaEngine);
                 const mode = forcedMode
