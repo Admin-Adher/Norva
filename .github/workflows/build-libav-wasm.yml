@@ -1,0 +1,51 @@
+name: build-libav-wasm
+
+# Manually-triggered build of the custom "norva" libav.js WASM (the in-browser demux/remux engine),
+# adding the MPEG-TS demuxer so .ts VOD remuxes in the browser instead of the slow gateway transcode.
+# Runs here (not in the dev sandbox) because the sandbox's egress proxy truncates the ~1 GB
+# Emscripten toolchain. Commits the rebuilt WASM back to the working branch.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch to build on and commit the artifacts to
+        required: true
+        default: claude/webm-block-additions-error-pj16xm
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Setup Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 3.1.74
+
+      - name: Build libav norva variant (+ mpegts)
+        run: bash scripts/build-libav-norva.sh
+
+      - name: Commit rebuilt WASM
+        run: |
+          git config user.name "norva-ci"
+          git config user.email "ci@users.noreply.github.com"
+          git add public/webengine/vendor/libav/
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "build: libav norva WASM with MPEG-TS demuxer (in-browser .ts remux)"
+            git push origin HEAD:${{ github.event.inputs.ref }}
+          fi
