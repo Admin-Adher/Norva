@@ -2289,6 +2289,12 @@ class WatchPage {
             await engine.load(url, { startTime, audioStreamIndex });
             if (this.isStalePlaybackAttempt(playbackAttemptId)) { this.destroyEngine(); return; }
             try { this.syncEngineAudioTracks(); } catch (_) {}
+            // In-band subtitles: start capturing text-subtitle packets from the very start
+            // (the demuxer runs ahead of playback) so a later selection shows cues with no
+            // gap and no provider connection. Flag-gated; cheap (text payloads are tiny).
+            try {
+                if (this._inbandSubsEnabled() && engine.hasInbandSubtitles?.()) engine.enableSubtitleCapture();
+            } catch (_) { /* best-effort */ }
             try { this.hideLoading(); } catch (_) {}
             this.video.play().catch((e) => this.handleAutoplayError(e));
             this.setVolumeFromStorage();
@@ -5418,6 +5424,40 @@ class WatchPage {
         return m ? `${m[1]}/subtitle/${m[2]}` : '';
     }
 
+    // Feature flag for engine in-band subtitles (ships dark). Enable in the browser with
+    // localStorage.setItem('norvaInbandSubs','1'). Lets text subtitles render on single-slot
+    // sources where the gateway extraction (a 2nd provider connection) is refused (458).
+    _inbandSubsEnabled() {
+        try { return localStorage.getItem('norvaInbandSubs') === '1'; } catch (_) { return false; }
+    }
+
+    // In-band engine subtitles: pull the cues the engine built from its demuxed packets
+    // (already in player-local time) and append the unseen ones to the TextTrack. No network,
+    // no provider connection. Polled while the track is selected.
+    subtitleEngineInbandTick(engine) {
+        if (engine !== this._subEngine || !engine.trackEl?.track) return;
+        const cues = this.norvaEngine?.getSubtitleCues?.(engine.streamIndex) || [];
+        if (!cues.length) return;
+        const textTrack = engine.trackEl.track;
+        const off = this.normalizeSubtitleOffset(engine.subtitleOffsetSeconds || 0);
+        let added = 0;
+        let inferredLanguage = false;
+        for (const c of cues) {
+            if (!c || !c.text) continue;
+            const start = Math.max(0, c.start + off);
+            const end = Math.max(start + 0.05, c.end + off);
+            const key = `${start.toFixed(3)}|${end.toFixed(3)}|${c.text}`;
+            if (engine.seenCues.has(key)) continue;
+            engine.seenCues.add(key);
+            try {
+                textTrack.addCue(new VTTCue(start, end, c.text));
+                inferredLanguage = this.maybeInferSubtitleLanguage(engine, c.text) || inferredLanguage;
+                added++;
+            } catch (_) { /* malformed cue, skip */ }
+        }
+        if (added || inferredLanguage) this.updateCaptionsTracks();
+    }
+
     // Engine path: apply the subtitle tracks the SERVER probed (relay header-parse,
     // returned in the playback payload). Known at LOAD, so the CC menu lists them and
     // the saved subtitle preference is restored — the bug where the chosen track came
@@ -5682,6 +5722,15 @@ class WatchPage {
         // Engine (byte-pipe) path: windowed extraction, but from the gateway /subtitle
         // endpoint instead of the local /api/subtitle (which doesn't exist on the cloud).
         const gatewayWindowBase = this.currentPlaybackMode === 'engine' ? this.engineSubtitleBaseUrl() : '';
+        // In-band engine subtitles (no provider connection): when the byte-pipe engine can
+        // turn its own demuxed text-subtitle packets into cues, prefer that over the gateway
+        // extraction — a 2nd provider connection that 458s on a single-slot source, so the
+        // chosen track silently shows nothing. Flag-gated (localStorage.norvaInbandSubs='1').
+        const useInbandSubs = this.currentPlaybackMode === 'engine'
+            && this._inbandSubsEnabled()
+            && typeof this.norvaEngine?.hasInbandSubtitles === 'function'
+            && this.norvaEngine.hasInbandSubtitles()
+            && this.isSubtitleExtractable(selected);
         const isSessionMode = isLocalSessionMode || Boolean(gatewaySubtitleUrl);
         const engine = {
             trackEl,
@@ -5699,7 +5748,13 @@ class WatchPage {
         };
         this._subEngine = engine;
 
-        if (isSessionMode && (this.currentSessionId || gatewaySubtitleUrl)) {
+        if (useInbandSubs) {
+            // No network: the engine decodes cues from packets it already demuxed.
+            engine.mode = 'engine-inband';
+            try { this.norvaEngine.enableSubtitleCapture(); } catch (_) { /* best-effort */ }
+            this.subtitleEngineInbandTick(engine);
+            this._subEngineTimer = setInterval(() => this.subtitleEngineInbandTick(engine), 1000);
+        } else if (isSessionMode && (this.currentSessionId || gatewaySubtitleUrl)) {
             this.subtitleSessionTick(engine);
             // Session subtitles are local files written by the same FFmpeg
             // process as the video. Poll them often so a newly written cue is

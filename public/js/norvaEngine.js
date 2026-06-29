@@ -24,6 +24,10 @@
   // Audio codecs the browser decodes natively inside fMP4 → copy (no transcode).
   const AUDIO_COPY = new Set(['aac', 'opus', 'flac']);
   const AUDIO_MIME = { aac: 'mp4a.40.2', opus: 'opus', flac: 'flac' };
+  // Subtitle codecs whose packet payload IS text (so we can turn demuxed packets into
+  // cues with no decoder and no provider connection). Image subs (pgs/dvdsub/dvb) need
+  // OCR and are excluded here.
+  const TEXT_SUB_CODECS = new Set(['subrip', 'srt', 'ass', 'ssa', 'mov_text', 'webvtt', 'text', 'vtt']);
 
   // How far ahead of currentTime we keep the SourceBuffer filled. The pump
   // pauses above MAX and resumes below MIN → bounded memory/CPU on long films.
@@ -145,6 +149,13 @@
       // applied via SourceBuffer.timestampOffset so seeks/resume land on target.
       this._tsAnchor = 0; this._tsApplied = 0; this._firstVpktPending = false;
       this._gopFloorPts = null;   // after a seek, drop video PTS below the landing keyframe (open-GOP leading B-frames)
+      // In-band text-subtitle capture: turn demuxed subtitle packets into cues with no
+      // provider connection (reuses bytes the engine already streams). Dormant until the
+      // player calls enableSubtitleCapture(); flag-off = zero cost in the pump loop.
+      this._subCapture = false;
+      this._subMeta = null;        // streamIndex -> { codec, tbNum, tbDen, text }
+      this._subCues = new Map();   // streamIndex -> [{ startSrc, endSrc, text }] in SOURCE seconds
+      this._subTextDecoder = null;
       this._skipSeekTo = null;    // suppress the self-induced seeking event on resume
       this.lib = null;
       this.url = null;
@@ -601,6 +612,7 @@
       // here can't read the per-stream LANGUAGE, so the language is filled by the
       // gateway probe (same split as audio). Also logs the full stream list.
       this._subStreams = [];
+      this._subMeta = new Map();
       try {
         const TY = { 0: 'video', 1: 'audio', 2: 'data', 3: 'subtitle', 4: 'attachment' };
         const parts = [];
@@ -608,7 +620,11 @@
           let nm = '?';
           try { nm = await lib.avcodec_get_name(s.codec_id); } catch (_) { /* ignore */ }
           parts.push(`${s.index}:${TY[s.codec_type] ?? s.codec_type}=${nm}`);
-          if (s.codec_type === 3) this._subStreams.push({ index: s.index, codec: nm });
+          if (s.codec_type === 3) {
+            const text = TEXT_SUB_CODECS.has(nm);
+            this._subStreams.push({ index: s.index, codec: nm, text });
+            this._subMeta.set(s.index, { codec: nm, tbNum: s.time_base_num, tbDen: s.time_base_den, text });
+          }
         }
         this.log('streams: ' + parts.join('  '));
       } catch (_) { /* best-effort */ }
@@ -622,6 +638,73 @@
     // player can list them and request extraction of a chosen text track from the
     // gateway. Language is not available here (libav limit) — the gateway fills it.
     subtitleStreams() { return Array.isArray(this._subStreams) ? this._subStreams : []; }
+
+    // True when the container carries at least one TEXT subtitle stream we can turn into
+    // cues in-band (no provider connection). Image subs (PGS…) don't count — they need OCR.
+    hasInbandSubtitles() {
+      return !!(this._subMeta && [...this._subMeta.values()].some((m) => m.text));
+    }
+
+    // The player calls this when a text subtitle is selected. From then on the pump loop
+    // collects every text-subtitle packet (cheap — text is tiny) so the chosen track's
+    // cues are available without the gateway's 2nd provider connection (which 458s on a
+    // single-slot source). Idempotent.
+    enableSubtitleCapture() { this._subCapture = true; }
+
+    // Cues for a subtitle stream in player-LOCAL seconds (already rebased to currentTime),
+    // so the caller can addCue() directly. Empty until the first video packet sets vBase.
+    getSubtitleCues(streamIndex) {
+      const arr = this._subCues.get(Number(streamIndex));
+      if (!arr || !arr.length || this.vBase == null || !this.vS) return [];
+      const vBaseSec = this.vBase * this.vS.time_base_num / this.vS.time_base_den;
+      const anchor = this._tsAnchor || 0;
+      const out = [];
+      for (const c of arr) {
+        const start = (c.startSrc - vBaseSec) + anchor;
+        const end = (c.endSrc - vBaseSec) + anchor;
+        if (Number.isFinite(start) && end > start) out.push({ start, end, text: c.text });
+      }
+      return out;
+    }
+
+    // Demux-loop hook: append a text-subtitle packet to its stream's cue buffer (SOURCE
+    // time). Best-effort; never throws into the remux path.
+    _captureSubtitlePacket(p) {
+      const meta = this._subMeta && this._subMeta.get(p.stream_index);
+      if (!meta || !meta.text || !p.data || !p.data.length || !meta.tbDen) return;
+      const arr = this._subCues.get(p.stream_index) || [];
+      if (arr.length >= 20000) return; // safety cap (a long film is ~1-2k cues)
+      const text = this._subtitlePacketText(p.data, meta.codec);
+      if (!text) return;
+      const tb = meta.tbNum / meta.tbDen;
+      const startSrc = to64(p.pts, p.ptshi) * tb;
+      const durTicks = (p.duration && p.duration > 0) ? p.duration : 0;
+      const endSrc = durTicks > 0 ? startSrc + durTicks * tb : startSrc + 4; // 4s default when no duration
+      if (!Number.isFinite(startSrc)) return;
+      arr.push({ startSrc, endSrc, text });
+      if (!this._subCues.has(p.stream_index)) this._subCues.set(p.stream_index, arr);
+    }
+
+    // Convert a text-subtitle packet payload to plain cue text per codec.
+    _subtitlePacketText(data, codec) {
+      const dec = this._subTextDecoder || (this._subTextDecoder = new TextDecoder('utf-8', { fatal: false }));
+      let raw;
+      if (codec === 'mov_text') {
+        // tx3g: 2-byte big-endian length prefix + UTF-8 text (+ optional style boxes after).
+        if (data.length < 2) return '';
+        const len = (data[0] << 8) | data[1];
+        raw = dec.decode(data.subarray(2, 2 + Math.min(len, data.length - 2)));
+      } else if (codec === 'ass' || codec === 'ssa') {
+        // MKV ASS packet: ReadOrder,Layer,Style,Name,MarginL,MarginR,MarginV,Effect,Text
+        const line = dec.decode(data);
+        const parts = line.split(',');
+        raw = parts.length >= 9 ? parts.slice(8).join(',') : line;
+        raw = raw.replace(/\{\\[^}]*\}/g, '').replace(/\\[Nn]/g, '\n'); // strip override tags, unescape line breaks
+      } else {
+        raw = dec.decode(data); // subrip / srt / webvtt / text: payload is the text
+      }
+      return raw.replace(/\r/g, '').replace(/<[^>]+>/g, '').trim();
+    }
 
     async _chooseMime() {
       const lib = this.lib;
@@ -703,6 +786,10 @@
       // reset video DTS grid for this (re)start
       this.vBase = null; this.vCum = 0; this.vFd0 = 0; this.vOffset = 0;
       this.fg = null; this.fsrc = null; this.fsink = null; // filter is lazy per run
+      // Drop captured cues: a seek re-demuxes from the new point and re-bases vBase/_tsAnchor,
+      // so old-epoch cues would convert to the wrong local time. The player keeps the cues it
+      // already added (correct for their times) and re-accumulates as the new region demuxes.
+      if (this._subCues) this._subCues.clear();
     }
 
     async _seekDemuxer(t) {
@@ -790,6 +877,10 @@
               const enc = await this._encodeAudio(fr, false);
               for (const ep of enc) writeList.push(ep);
             }
+          } else if (this._subCapture && this._subMeta && this._subMeta.has(p.stream_index)) {
+            // In-band text subtitles: collect the cue, never mux it (subtitles aren't in
+            // the fMP4 output). Best-effort so a malformed packet never breaks playback.
+            try { this._captureSubtitlePacket(p); } catch (_) { /* ignore */ }
           }
         }
         if (writeList.length) await lib.ff_write_multi(this.oc, this.pkt, writeList);
