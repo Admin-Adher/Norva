@@ -131,3 +131,4 @@ n'aurait fait que contourner le symptôme).
 - `docs/WHISPER-AUDIO-LANGUAGE-DETECTION.md` — Phase 2 (whisper.cpp self-hosted)
 - `supabase/functions/ENRICHMENT_CRON_SETUP.md` — **flotte backfill pg_cron** (cadences par-provider, SQL réel, rationale fréquence-vs-concurrence) ⭐
 - `docs/PROVIDER-IDENTITY-DEDUP.md` — **audit miroirs d'URL + design `provider_key`** (l'URL ≠ le fournisseur ; dédup cross-user) ⭐
+- `docs/PHASE3-AI-SUBTITLES.md` — **cadrage Phase 3** (sous-titres IA : whisper→VTT + Argos ; déclenchement hybride)
