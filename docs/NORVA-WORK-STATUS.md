@@ -23,6 +23,8 @@ résout les imports `../_shared`). Ne jamais déployer une edge function via un 
 | Moteur web | Spam log `BlockAdditions` filtré + `av_log` au niveau ERROR | `public/webengine/vendor/libav/*`, `norvaEngine.js`, `scripts/patch-libav-logs.js` |
 | Moteur web | HEVC tagué `hvc1`/`hev1` selon le mime (fixe `CHUNK_DEMUXER_ERROR_APPEND_FAILED`) | `norvaEngine.js`, `stream.html` |
 | Moteur web | Drop des B-frames open-GOP au resume/seek (fixe l'erreur en boucle à la reprise) | `norvaEngine.js` |
+| Moteur web | **Trailer MP4 (`mfra`/`mfro`) plus jamais ajouté au SourceBuffer** (fixe `CHUNK_DEMUXER_ERROR_APPEND_FAILED` quand la lecture s'arrête tôt — provider mono-slot qui coupe). Cause trouvée via le snapshot de diag. | `norvaEngine.js` (ENGINE_VERSION 17) |
+| Moteur web | **Diagnostics profonds** sur échec moteur : `engineSnapshot()` (mime/codecs, boîtes fMP4 init+média, 1er paquet vidéo keyframe, ring des derniers append, raison de sortie du pump + dernière erreur de read, état SourceBuffer/MediaSource/video) → console groupée + télémétrie `playback_error` | `norvaEngine.js`, `WatchPage.js` (`reportEngineFailure`) |
 | **Phase 1** | Langue audio **déduite** (label/catégorie/région/orig-lang) en fallback ; sous-titres **incrustés** → entrée « 🔒 verrouillée » au lieu de « Off » | `mediaUtils.js`, `WatchPage.js`, `tests/trackIntel.test.js` |
 | Catalogue | Badge de langue qui clignotait « une fois sur deux » au rechargement → ligne la plus riche gardée ; auto-guérison des langues 3 lettres (fas/kur/sqi/ell) | `supabase/functions/norva-catalog/index.ts` |
 | Gateway | **Cache du profil ffprobe** par URL (moins de sondes répétées → moins de 458) | `services/media-gateway/src/index.js` (v48) |
