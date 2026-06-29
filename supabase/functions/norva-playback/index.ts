@@ -329,7 +329,9 @@ async function createPlaybackSession(
       // subtitle_probed_at distinguishes "probed, file has no subs" (skip) from "never probed".
       if (titleRow && titleRow.subtitle_probed_at) haveSub = true;
 
-      const serverHost = hostFromUrl(targetUrl);
+      // Cross-mirror cache key (providerKey when known, else the host) — drives the
+      // global file-track read, the share/fan-out, and the whisper-detect cache below.
+      const serverHost = await resolveFileTracksKey(sourceId, userId, db, targetUrl);
       const fileExternalId = itemType === "series"
         ? stringOr(requestedPlaybackHint.audioSeriesId ?? requestedPlaybackHint.audio_series_id ?? requestedPlaybackHint.seriesId ?? requestedPlaybackHint.series_id, "")
         : itemId;
@@ -1010,12 +1012,20 @@ function mediaReadFromCatalog(): boolean {
   return (Deno.env.get("NORVA_CATALOG_MEDIA_READ_SOURCE") || "").trim() === "catalog_media_items";
 }
 
-// The provider host for a source (non-secret, from config_hint). Cached in-isolate
-// so the flag-on playback path adds at most one lookup per source per isolate.
-const sourceHostCache = new Map<string, string>();
-async function resolveSourceHost(sourceId: string, userId: string, db: SupabaseClient): Promise<string> {
-  const key = `${userId}:${sourceId}`;
-  const cached = sourceHostCache.get(key);
+// Provider identity for a source (non-secret, from config_hint). Cached in-isolate so
+// the playback path adds at most one lookup per source per isolate.
+//  - host: the configured provider hostname.
+//  - key:  the canonical CROSS-MIRROR cache key = providerKey when computed, else host.
+//          A reseller hands out many URLs (DNS aliases / reverse-proxies) for ONE Xtream
+//          panel — same catalogue + content IDs — so the hostname FRAGMENTS the cross-user
+//          file-track cache. providerKey (a hash of the panel's category taxonomy, written
+//          by norva-source-sync) collapses every mirror of a panel into one cache entry.
+//          Falls back to host when no providerKey exists yet → identical to the old
+//          behaviour (defensive, no-op until keys populate). See docs/PROVIDER-IDENTITY-DEDUP.md.
+const sourceIdentityCache = new Map<string, { host: string; key: string }>();
+async function resolveSourceIdentity(sourceId: string, userId: string, db: SupabaseClient): Promise<{ host: string; key: string }> {
+  const cacheKey = `${userId}:${sourceId}`;
+  const cached = sourceIdentityCache.get(cacheKey);
   if (cached !== undefined) return cached;
   const { data } = await db
     .from("cloud_sources")
@@ -1023,9 +1033,23 @@ async function resolveSourceHost(sourceId: string, userId: string, db: SupabaseC
     .eq("id", sourceId)
     .eq("user_id", userId)
     .maybeSingle();
-  const host = stringOr(recordOrEmpty(data?.config_hint).serverHost, "");
-  sourceHostCache.set(key, host);
-  return host;
+  const hint = recordOrEmpty(data?.config_hint);
+  const host = stringOr(hint.serverHost, "");
+  const providerKey = stringOr(hint.providerKey, "");
+  const identity = { host, key: providerKey || host };
+  sourceIdentityCache.set(cacheKey, identity);
+  return identity;
+}
+// catalog_media_items keying stays on the hostname (its writer writes the hostname;
+// re-keying it on providerKey is a scoped follow-up — see the dedup doc).
+async function resolveSourceHost(sourceId: string, userId: string, db: SupabaseClient): Promise<string> {
+  return (await resolveSourceIdentity(sourceId, userId, db)).host;
+}
+// Cross-mirror cache key for catalog_file_tracks. Falls back to the stream URL host when
+// the source has neither providerKey nor serverHost (rare; preserves old behaviour).
+async function resolveFileTracksKey(sourceId: string, userId: string, db: SupabaseClient, fallbackUrl: string): Promise<string> {
+  const { key } = await resolveSourceIdentity(sourceId, userId, db);
+  return key || hostFromUrl(fallbackUrl);
 }
 
 async function resolvePlaybackTarget(
@@ -1901,7 +1925,7 @@ async function persistOrderedAudioForTitle(
     .update({ audio_tracks: ordered, subtitle_tracks: orderedSubs, subtitle_probed_at: new Date().toISOString() })
     .eq("user_id", userId).eq("id", titleId);
   // Cross-user share: global per-file cache + fan out to every owner.
-  await shareFileTracks(db, hostFromUrl(targetUrl), variantItemType, externalId, ordered, orderedSubs, true, true);
+  await shareFileTracks(db, await resolveFileTracksKey(sourceId, userId, db, targetUrl), variantItemType, externalId, ordered, orderedSubs, true, true);
   return !error;
 }
 
@@ -2266,7 +2290,7 @@ async function runAudioBackfill(req: Request, db: SupabaseClient) {
         await detectUntaggedAudioLanguages({
           db, runtimeConfig, userId, targetUrl, userAgent: null,
           audioTracks, titleId: String(t.id), tmdbId: stringOrNull(t.provider_tmdb_id),
-          serverHost: hostFromUrl(targetUrl), itemType: vit, fileExternalId: externalId,
+          serverHost: await resolveFileTracksKey(sourceId, userId, db, targetUrl), itemType: vit, fileExternalId: externalId,
           sessionId: "whisper-backfill", expiresAt: wExp,
         });
         if (audioTracks.filter((x) => x.lang).length > before) detected += 1;
@@ -2446,7 +2470,7 @@ async function runAudioBackfill(req: Request, db: SupabaseClient) {
       // Cross-user share: store the file map in the global per-file cache + fan out to every
       // owner (probe mode only — it carries the full ordered track list; subtitles ride along).
       if (mode === "probe") {
-        await shareFileTracks(db, hostFromUrl(targetUrl), variantItemType, externalId, orderedTracks, orderedSubtitles, orderedTracks.length > 0, true);
+        await shareFileTracks(db, await resolveFileTracksKey(sourceId, userId, db, targetUrl), variantItemType, externalId, orderedTracks, orderedSubtitles, orderedTracks.length > 0, true);
       }
     } catch (e) {
       diag.exception++;

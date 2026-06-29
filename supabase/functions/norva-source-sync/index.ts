@@ -338,6 +338,13 @@ async function syncCloudSource(sourceId: string, userId: string, db: SupabaseCli
     }
     if (!result) return { sourceId, status: "detected", changed: false };
     if (result.changed) await maybeRecordContentEvent(db, userId, sourceId, previousSignature, result);
+    // Persist the provider identity (additive). Existing sources acquire providerKey on
+    // the next detect tick — no full re-sync needed — so the cross-user dedup activates
+    // on its own. Read-merge-write to avoid clobbering a concurrent syncProgress writer.
+    const detectedKey = stringOr(result.providerKey, "");
+    if (detectedKey && detectedKey !== stringOr(recordOrEmpty(source.config_hint).providerKey, "")) {
+      await patchSourceConfigHint(db, sourceId, (hint) => ({ ...hint, providerKey: detectedKey }));
+    }
     return { sourceId, status: "detected", changed: Boolean(result.changed), ...result };
   }
 
@@ -1785,8 +1792,9 @@ async function detectXtreamChange(
     }
   }
   const contentSignature = finalizeSig(sig);
+  const providerKey = await providerKeyFromCategoryMaps(maps);
   const changed = Boolean(previousSignature) && !contentSignatureEquals(contentSignature, previousSignature);
-  return { live: liveCount, movies: movieCount, series: seriesCount, total: liveCount + movieCount + seriesCount, contentSignature, changed, detectOnly: true };
+  return { live: liveCount, movies: movieCount, series: seriesCount, total: liveCount + movieCount + seriesCount, contentSignature, changed, detectOnly: true, providerKey };
 }
 
 // Drive one isolate's worth of resumable discovery. Imports every category's
@@ -2032,10 +2040,16 @@ async function driveXtreamSyncToReady(sourceId: string, userId: string, db: Supa
     // ~13 KB) instead of carrying it through the whole finalize and into the ready state.
     // It was re-written on every finalize heartbeat (every ~2.5s) for nothing, bloating WAL
     // and the login-critical cloud_sources row; compactRecord strips the undefined key.
+    // Provider identity from the freshly-fetched category taxonomy (this isolate
+    // re-fetches it at the top). Stable + mirror-invariant; only overwrite when we
+    // actually computed one, so a transient empty fetch never drops a prior key.
+    const providerKey = await providerKeyFromCategoryMaps(nameMaps);
+    const finalHint: JsonRecord = { ...freshHint, contentSignature, syncProgress: progress, syncCursor: undefined };
+    if (providerKey) finalHint.providerKey = providerKey;
     await db
       .from("cloud_sources")
       .update({
-        config_hint: compactRecord({ ...freshHint, contentSignature, syncProgress: progress, syncCursor: undefined }),
+        config_hint: compactRecord(finalHint),
       })
       .eq("id", sourceId)
       .eq("user_id", userId);
@@ -2205,6 +2219,29 @@ function categoryMap(items: unknown) {
     if (id && name) categories.set(id, name);
   }
   return categories;
+}
+
+// Stable, mirror-invariant provider identity. A reseller commonly hands out many
+// URLs (DNS aliases / reverse-proxies) for ONE Xtream panel — same catalogue, same
+// content IDs — so the hostname does NOT identify the provider. The category
+// taxonomy does: it is byte-identical across every mirror and distinctive per panel,
+// and (unlike the per-title idsHash) it does not drift as titles are added. We hash
+// the sorted set of category NAMES (the human taxonomy is more stable than ids,
+// which a panel can renumber). providerKey lets the cross-user caches collapse all
+// mirrors of one panel into a single entry. See docs/PROVIDER-IDENTITY-DEDUP.md.
+async function providerKeyFromCategoryMaps(maps: Record<string, Map<string, string>>): Promise<string> {
+  const names = new Set<string>();
+  for (const type of ["live", "movie", "series"]) {
+    const m = maps[type];
+    if (!m) continue;
+    for (const name of m.values()) {
+      const n = name.trim().toLowerCase();
+      if (n) names.add(n);
+    }
+  }
+  if (names.size === 0) return ""; // no taxonomy fetched → can't fingerprint; caller falls back to host
+  const hex = await sha256Hex([...names].sort().join("\n"));
+  return `x:${hex.slice(0, 24)}`;
 }
 
 function xtreamRows(

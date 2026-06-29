@@ -1,6 +1,7 @@
 # Identité fournisseur & dédup cross-user (provider_key)
 
-**Statut : audit fait + design validé. Implémentation à dérouler (cf. « Rollout » en bas).**
+**Statut : audit fait + design validé + A & B implémentés sur la branche (rien en prod).**
+**Reste : merge → appliquer la migration RPC → backfill C (cf. « Rollout » §5).**
 **Décision produit (2026-06-29) : identité AUTOMATIQUE (empreinte) + label d'affichage optionnel.**
 
 ## 1. L'audit — l'URL ne détermine PAS le fournisseur
@@ -45,21 +46,28 @@ du contenu identique, et sur mono-slot ça **gaspille le slot unique**.
 
 ## 3. Le design — `provider_key` automatique
 
-**Clé d'identité** (mirror-invariante, stable dans le temps, distincte entre panels) :
+**Clé d'identité** (mirror-invariante, stable dans le temps, distincte entre panels) —
+telle qu'**implémentée** (`providerKeyFromCategoryMaps` dans `norva-source-sync`) :
 
 ```
-providerKey = "x:" + sha256( normalize(user_info.message) + "|" +
-                             sorted( "{category_id}:{category_name}" sur vod+series+live ) )[:24]
+providerKey = "x:" + sha256( sorted_unique( lowercase(trim(category_name)) sur live+vod+series ).join("\n") )[:24]
 ```
 
-**Pourquoi les catégories + message, et pas le `idsHash` complet :**
-- `idsHash` (déjà calculé par `computeContentSignature`) est mirror-invariant MAIS **dérive** à
-  chaque ajout de contenu → mauvaise clé stable. Et il faut la liste VOD complète (~70 Mo).
-- Les **catégories** sont minuscules (3 petits appels), **mirror-invariantes** (prouvé : même
-  fingerprint sur 5 miroirs) et **stables** (la taxonomie change rarement, contrairement au
-  catalogue). Le `message` ajoute la marque du panel et désambiguïse les taxonomies génériques.
-- Vérifié empiriquement : `5d11549e…` identique sur `super8k.top` / `boost8k.top` / `cf.satiran.cc`
-  / `pro.amjadottstore.com` / `gold.api-cdn.cloud`.
+**Pourquoi les NOMS de catégories, et pas le `idsHash` complet ni l'id de catégorie :**
+- `idsHash` (per-title, `finalizeSig`) est mirror-invariant MAIS **dérive** à chaque ajout de
+  contenu → mauvaise clé stable. Et il faut la liste VOD complète (~70 Mo).
+- Les **catégories** sont minuscules (3 petits appels, déjà faits par la sync), **mirror-invariantes**
+  (prouvé) et **stables** (la taxonomie bouge rarement, contrairement au catalogue).
+- On hash les **noms** (pas les `category_id`) car un panel peut renuméroter ses ids ; le nom est
+  la taxonomie humaine, plus stable. Set unique + trié → déterministe → **même clé sur tous les
+  miroirs** quelle que soit la casse/l'ordre d'entrée.
+- Vérifié empiriquement (noms seuls) : `x:c45055afc8aa774631c13e59` identique sur `super8k.top` /
+  `boost8k.top` / `cf.satiran.cc`. (Valeur indicative — le tri JS des noms non-ASCII peut donner
+  une valeur légèrement différente du calcul bash ; ce qui compte = l'edge est interne-cohérent.)
+- **Hypothèse / risque résiduel** : deux panels DIFFÉRENTS avec une taxonomie de catégories
+  *byte-identique* (mêmes ~1700 noms) partageraient une clé → fan-out croisé erroné. Négligeable
+  (la taxonomie complète d'un panel est très distinctive ; une collision = quasi-certainement le
+  même backend). Si jamais ça mord à grande échelle, ajouter un ancrage de contenu à la clé.
 
 **Disponible tôt** : les catégories sont récupérées dès l'ajout/validation de la source (avant la
 grosse sync) → on peut détecter « ce panel est déjà enrichi » **immédiatement** et éviter de
@@ -68,48 +76,79 @@ re-sonder → instantané pour le nouvel inscrit.
 **Label d'affichage** : `config_hint.displayLabel` (optionnel, saisi par l'user, **cosmétique** —
 jamais utilisé comme clé). Si absent → on affiche le `message` du panel ou le hostname.
 
-## 4. Implémentation (par incréments, défensive)
+## 4. Implémentation — état réel (branche `claude/webm-block-additions-error-pj16xm`)
 
-**Incrément A — calcul & stockage de l'identité (additif, INERTE, zéro risque)**
-- `norva-source-sync` : à l'ajout/validation ET en fin de sync, calculer `providerKey` (message +
-  catégories) et écrire `config_hint.providerKey`, `config_hint.providerMessage`. Passer/garder
-  `config_hint.displayLabel`. Purement additif à un blob jsonb → rien ne le lit encore.
+**Incrément A — calcul & stockage de l'identité ✅ FAIT (additif, INERTE)**
+- `norva-source-sync` : helper `providerKeyFromCategoryMaps()`. `providerKey` calculé (a) en fin de
+  sync complète (`driveXtreamSyncToReady`, depuis `nameMaps` déjà en scope) et (b) à chaque détection
+  (`detectXtreamChange` → persisté via `patchSourceConfigHint`, donc **les sources existantes
+  acquièrent la clé au prochain tick `refresh-due` sans re-sync complète**). N'écrase jamais une clé
+  par une valeur vide. Purement additif à `config_hint` → rien ne le lit tant que B n'est pas mergé.
 
-**Incrément B — re-clé des caches sur `providerKey` (cutover, défensif)**
-- Migration : `fanout_file_tracks_to_users` joint sur
-  `coalesce(s.config_hint->>'providerKey', s.config_hint->>'serverHost') = p_server_host`.
-  → **rétro-compatible** : sans `providerKey`, c'est exactement le comportement actuel (no-op).
-- `norva-playback` : la clé de cache devient `providerKeyForSource(source) ?? hostFromUrl(url)`
-  (sites : ~332, 406, 413, 1904, 2055, 2269, 2449). Idem `catalog_media_items` côté
-  `norva-catalog` / `norva-series-info`.
-- L'`upsert_catalog_file_tracks` ne change PAS (il stocke la clé qu'on lui passe).
+**Incrément B — re-clé du cache `catalog_file_tracks` sur `providerKey` ✅ FAIT (défensif)**
+- `norva-playback` : helpers `resolveSourceIdentity()` (cache in-isolate de `{host, key}` où
+  `key = providerKey || serverHost`) + `resolveFileTracksKey(...)` (fallback `hostFromUrl(url)`).
+  Les 4 sites du cache file-tracks (engine ~332 → read/share/whisper ; `persistOrderedAudioForTitle`
+  ~1904 ; whisper-backfill ~2269 ; audio-backfill cron ~2449) utilisent désormais cette clé.
+- Migration `20260629121000_fanout_file_tracks_provider_key.sql` : `fanout_file_tracks_to_users`
+  joint sur `coalesce(s.config_hint->>'providerKey', s.config_hint->>'serverHost') = p_server_host`.
+  Corps UPDATE identique à l'original. `upsert_catalog_file_tracks` inchangé (stocke la clé reçue).
+- **Rétro-compatible / no-op aujourd'hui** : 0 source n'a de `providerKey` → `coalesce`=`serverHost`.
+  Dry-run lecture seule sur 200 lignes réelles : owners OLD == NEW (200=200, 0 diff). Prouvé inerte.
+- **Hors scope (suit)** : `catalog_media_items` reste keyé par hostname (son writer écrit pendant
+  l'import, avant que la clé soit finalisée ; et ses lectures retombent toujours sur le per-user →
+  un mauvais key = simple miss, jamais une casse). Re-clé = follow-up dédié.
 
-**Incrément C — backfill one-shot (post-merge, quand les providerKey existent)**
-- Pour chaque provider connu : `update catalog_file_tracks set server_host = <providerKey>
-  where server_host = <hostname>` (idem `catalog_media_items`), pour que les ~25k lignes
-  existantes basculent sous la clé canonique (sinon simple cache-miss → re-sonde, non bloquant).
+**Incrément C — backfill one-shot 🔜 POST-MERGE (préparé, NON appliqué)**
+Une fois `providerKey` peuplé sur les sources existantes (prochain tick `refresh-due`), basculer les
+lignes file-tracks existantes du hostname vers la clé canonique (sinon : simple cache-miss + re-sonde,
+non bloquant). Lit la **vraie** clé depuis `config_hint` (jamais une valeur calculée hors-edge) :
+```sql
+with mapping as (
+  select distinct config_hint->>'serverHost' as host, config_hint->>'providerKey' as pk
+  from public.cloud_sources
+  where config_hint->>'providerKey' is not null and config_hint->>'serverHost' is not null
+)
+-- 1) copie les lignes host-keyed vers la clé providerKey (ignore si déjà présente)
+insert into public.catalog_file_tracks
+  (server_host, item_type, external_id, audio_tracks, subtitle_tracks, audio_probed_at, subtitle_probed_at, updated_at)
+select m.pk, c.item_type, c.external_id, c.audio_tracks, c.subtitle_tracks, c.audio_probed_at, c.subtitle_probed_at, c.updated_at
+from public.catalog_file_tracks c join mapping m on c.server_host = m.host
+on conflict (server_host, item_type, external_id) do nothing;
+-- 2) supprime les anciennes lignes host-keyed
+with mapping as (
+  select distinct config_hint->>'serverHost' as host, config_hint->>'providerKey' as pk
+  from public.cloud_sources
+  where config_hint->>'providerKey' is not null and config_hint->>'serverHost' is not null
+)
+delete from public.catalog_file_tracks c using mapping m where c.server_host = m.host;
+```
 
-**Incrément D — UI**
-- Onboarding : champ « nom de ton fournisseur » (optionnel) → `displayLabel`. Affichage du label
-  (ou message panel) à la place du hostname dans la gestion des sources.
+**Incrément D — label d'affichage ✅ DÉJÀ COUVERT (pas de nouveau code)**
+La création de source (`norva-cloud/createSource`) **exige déjà** un `display_name` saisi par l'user
+à l'onboarding → c'est le label cosmétique optionnel. On a délibérément **évité** d'ajouter un champ
+« nom du fournisseur » servant d'IDENTITÉ (c'est l'auto-`providerKey` qui s'en charge). Les spreads
+`config_hint` préservent `providerKey` à chaque update/sync. Rien à ajouter.
 
-**Incrément E (bonus) — failover miroirs**
-- Stocker la liste des miroirs par `providerKey` ; basculer sur un backup si l'URL active tombe.
+**Incrément E (bonus, non fait) — failover miroirs**
+Stocker la liste des miroirs par `providerKey` ; basculer sur un backup si l'URL active tombe.
 
 ## 5. Rollout & risque
 
-- A/B/C/D sont sur la branche `claude/webm-block-additions-error-pj16xm`. Les edge functions ne
-  déploient **que sur merge `main`** (`deploy-supabase-functions.yml`) → la branche est inerte en prod.
-- **Ne RIEN appliquer à la prod en avance du code** (la migration B est rétro-compatible, mais on
-  garde code+SQL synchrones). Ordre : merge (A+B+D) → vérifier que la sync écrit `providerKey` →
-  lancer le backfill C → vérifier un hit cross-miroir.
-- **Risque principal** : la RPC `fanout_file_tracks_to_users` sert l'enrichissement LIVE du frère.
-  Le `coalesce` la rend no-op tant qu'aucun `providerKey` n'existe → pas de régression. À
-  dry-run en lecture seule (reproduire le JOIN) avant déploiement.
+- A + B + migration sont sur la branche. Les edge functions ne déploient **que sur merge `main`**
+  (`deploy-supabase-functions.yml`) → branche inerte en prod. **Rien appliqué à la prod.**
+- **Ordre post-merge :** (1) appliquer la migration `20260629121000…` (RPC `coalesce`, prouvée no-op)
+  — à faire **avec/juste après** le merge, sinon la fanout (ancienne, join `serverHost` seul)
+  renverra 0 pour les sources keyed → cache rempli mais pas de push cross-user (dégradé, pas cassé) ;
+  (2) attendre que `refresh-due` peuple `providerKey` sur les 2 sources (ou forcer un detect) ;
+  (3) lancer le backfill C ; (4) vérifier un hit cross-miroir.
+- **Risque principal** : `fanout_file_tracks_to_users` sert l'enrichissement LIVE du frère. Le
+  `coalesce` la rend no-op tant qu'aucun `providerKey` n'existe → pas de régression (dry-run prouvé).
 - **Rollback** : retirer `providerKey` de `config_hint` → tout retombe sur `serverHost`.
 
 ## 6. Vérifié dans cet environnement
 - Audit miroirs : 100 % concluant (md5 identiques, IDs identiques films/séries/épisodes).
-- Fingerprint `providerKey` (message + catégories) : identique sur 5 miroirs, calculé hors-ligne.
-- ⚠️ Non testable ici : le comportement runtime des RPC/edge (pas de provider/MSE/ffmpeg) → à
-  valider en prod après merge, en lecture seule d'abord.
+- Fingerprint `providerKey` : identique sur les miroirs testés (calcul hors-ligne).
+- `node`/esbuild transpile OK sur `norva-source-sync` + `norva-playback` édités.
+- Migration RPC : dry-run lecture seule prouve OLD == NEW (no-op) tant que `providerKey` absent.
+- ⚠️ Non testable ici : runtime RPC/edge (pas de provider/MSE/ffmpeg) → valider en prod post-merge.
