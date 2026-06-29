@@ -6231,25 +6231,38 @@ class WatchPage {
         }
         this._aiSubtitleTitleId = key;
 
+        console.log('[WatchPage] AI subtitles request', params);
         // 1) Read the shared cache — another user (or a prior session) may already have it.
         try {
             const got = await api.generatedSubtitle(params);
             if (this._applyAiSubtitleResponse(got, key)) return;
             if (this.aiSubtitleState === 'processing') { this.startAiSubtitlePolling(params, key); return; }
-        } catch (_) { /* fall through to trigger */ }
+        } catch (err) {
+            console.warn('[WatchPage] AI subtitles GET failed:', err?.status, err?.message || err, err?.details || '');
+            /* fall through to trigger */
+        }
 
         // 2) Nothing usable yet → trigger a background transcription and poll for it.
         this.aiSubtitleState = 'processing';
         this.updateCaptionsTracks();
         try {
             const enq = await api.requestGeneratedSubtitle(params);
+            console.log('[WatchPage] AI subtitles enqueue reply:', enq);
             // The enqueue reply carries status but no VTT body; if the server already had it
             // cached ('ready'), fetch the body right away instead of waiting a poll cycle.
             if (enq && String(enq.status) === 'ready') {
                 const got = await api.generatedSubtitle(params);
                 if (this._applyAiSubtitleResponse(got, key)) return;
             }
-        } catch (_) {
+            // The enqueue itself can report a terminal error (e.g. couldn't resolve the stream).
+            if (enq && String(enq.status) === 'error') {
+                console.warn('[WatchPage] AI subtitles enqueue returned error:', enq);
+                this.aiSubtitleState = 'failed';
+                this.updateCaptionsTracks();
+                return;
+            }
+        } catch (err) {
+            console.warn('[WatchPage] AI subtitles enqueue failed:', err?.status, err?.message || err, err?.details || '');
             this.aiSubtitleState = 'failed';
             this.updateCaptionsTracks();
             return;

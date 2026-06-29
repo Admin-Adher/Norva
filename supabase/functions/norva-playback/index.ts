@@ -2484,6 +2484,9 @@ async function runAudioBackfill(req: Request, db: SupabaseClient) {
   if (stringOr(body.mode, "") === "transcribe-enqueue") {
     const r = await transcribeEnqueue(db, userId, runtimeConfig, {
       titleId: stringOr(body.titleId, ""),
+      sourceId: stringOr(body.sourceId, ""),
+      externalId: stringOr(body.externalId, ""),
+      itemType: stringOr(body.itemType, ""),
       index: Number.isInteger(Number(body.index)) ? Number(body.index) : undefined,
       start: Number(body.start) || 0,
       dur: Number(body.dur) || 0,
