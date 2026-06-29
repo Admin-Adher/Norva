@@ -2687,7 +2687,7 @@ class WatchPage {
         this.selectedAudioTrackUserChoice = false;
         // Reset the AI-subtitle UI state for the incoming title. The cached VTT is title-keyed,
         // so a genuine replay of the same title keeps its 'ready' state; any other title starts idle.
-        const aiSameTitle = this._aiSubtitleTitleId && this._aiSubtitleTitleId === this._aiSubtitleTitleIdFor() && this.aiSubtitleVtt;
+        const aiSameTitle = this._aiSubtitleTitleId && this._aiSubtitleTitleId === this._aiSubtitleKey() && this.aiSubtitleVtt;
         this.aiSubtitleState = aiSameTitle ? 'ready' : 'idle';
         if (!aiSameTitle) { this.aiSubtitleVtt = null; this._aiSubtitleTitleId = null; }
         this.clearExternalSubtitleTracks();
@@ -6089,17 +6089,32 @@ class WatchPage {
     // probe/engine subtitle paths — no reload, no flicker.
     // ============================================================
 
-    _aiSubtitleTitleIdFor() {
-        return String(this.content?.titleId || this.content?.title_id || this.content?.data?.titleId || '');
+    // The file coordinates the edge needs to find/produce a transcript. The player always holds
+    // these for a cloud VOD (it just used them to resolve the stream), so AI subs no longer depend
+    // on a cloud_titles UUID being present. titleId is sent too when available (a cheap fast-path).
+    // Returns null for anything that isn't an on-demand movie (live/series excluded — series would
+    // need an episode-level external id, a later refinement).
+    _aiSubtitleParams() {
+        const c = this.content || {};
+        const type = String(this.contentType || c.type || '').toLowerCase();
+        if (type !== 'movie') return null;
+        const sourceId = String(c.sourceId || c.source_id || '');
+        const externalId = String(c.id || c.streamId || c.stream_id || (this.getTelemetryItemId ? this.getTelemetryItemId() : '') || '');
+        if (!sourceId || !externalId) return null;
+        const titleId = String(c.titleId || c.title_id || c.data?.titleId || '');
+        return { sourceId, externalId, itemType: 'movie', titleId };
     }
 
-    // AI subs only make sense for cloud on-demand titles: we need a cloud title id the edge
-    // can resolve to a provider file, and a backend route to call. Live channels are excluded.
+    // Stable in-session key for a title's AI-subtitle state (cache reuse + stale-response guards).
+    _aiSubtitleKey() {
+        const p = this._aiSubtitleParams();
+        return p ? `${p.sourceId}:${p.itemType}:${p.externalId}` : '';
+    }
+
+    // AI subs only make sense for cloud on-demand titles with a backend route to call.
     _canRequestAiSubtitles() {
-        if (!this._aiSubtitleTitleIdFor()) return false;
+        if (!this._aiSubtitleParams()) return false;
         if (typeof this.isCloudPlaybackMode === 'function' && !this.isCloudPlaybackMode()) return false;
-        const type = String(this.contentType || this.content?.type || '').toLowerCase();
-        if (type === 'live' || type === 'channel') return false;
         return Boolean(window.NorvaCloud?.playback?.generatedSubtitle);
     }
 
@@ -6139,11 +6154,11 @@ class WatchPage {
     // state (ready or empty) so the caller stops; 'ready' is terminal regardless of body, because
     // a transcript with no cues (genuine silence/music) is a final answer, not a reason to keep
     // polling forever. Ignores stale responses (title switched mid-flight).
-    _applyAiSubtitleResponse(res, titleId) {
-        if (!res || this._aiSubtitleTitleIdFor() !== titleId) return false;
+    _applyAiSubtitleResponse(res, key) {
+        if (!res || this._aiSubtitleKey() !== key) return false;
         const status = String(res.status || 'none');
         if (status === 'ready') {
-            this._aiSubtitleTitleId = titleId;
+            this._aiSubtitleTitleId = key;
             this.stopAiSubtitlePolling();
             const vtt = String(res.vtt || '');
             const lang = this.normalizeTrackLanguage(res.sourceLang || res.source_lang || 'und');
@@ -6173,12 +6188,12 @@ class WatchPage {
         return false;
     }
 
-    startAiSubtitlePolling(titleId) {
+    startAiSubtitlePolling(params, key) {
         this.stopAiSubtitlePolling();
         const startedAt = Date.now();
         const MAX_MS = 60 * 60 * 1000; // a 2h film transcodes in ~35-45 min on CPU; cap the poll at 1h
         this._aiSubtitlePollTimer = setInterval(async () => {
-            if (this._aiSubtitleTitleIdFor() !== titleId) { this.stopAiSubtitlePolling(); return; }
+            if (this._aiSubtitleKey() !== key) { this.stopAiSubtitlePolling(); return; }
             if (Date.now() - startedAt > MAX_MS) {
                 this.aiSubtitleState = 'failed';
                 this.stopAiSubtitlePolling();
@@ -6186,8 +6201,8 @@ class WatchPage {
                 return;
             }
             try {
-                const got = await window.NorvaCloud.playback.generatedSubtitle({ titleId });
-                this._applyAiSubtitleResponse(got, titleId);
+                const got = await window.NorvaCloud.playback.generatedSubtitle(params);
+                this._applyAiSubtitleResponse(got, key);
             } catch (_) { /* transient — keep polling */ }
         }, 20000);
     }
@@ -6197,48 +6212,49 @@ class WatchPage {
     // there yet, triggers a background transcription and polls until it lands.
     async requestAiSubtitles() {
         if (!this._canRequestAiSubtitles()) return;
-        const titleId = this._aiSubtitleTitleIdFor();
+        const params = this._aiSubtitleParams();
+        const key = this._aiSubtitleKey();
         const api = window.NorvaCloud.playback;
 
         // Same title, already produced this session → just (re)attach from cache.
-        if (this.aiSubtitleState === 'ready' && this.aiSubtitleVtt && this._aiSubtitleTitleId === titleId) {
+        if (this.aiSubtitleState === 'ready' && this.aiSubtitleVtt && this._aiSubtitleTitleId === key) {
             this.attachGeneratedSubtitleTrack(this.aiSubtitleVtt, this.aiSubtitleLang);
             this.updateCaptionsTracks();
             return;
         }
 
         // Switched titles → drop any stale state/timer before starting fresh.
-        if (this._aiSubtitleTitleId !== titleId) {
+        if (this._aiSubtitleTitleId !== key) {
             this.stopAiSubtitlePolling();
             this.aiSubtitleVtt = null;
             this.aiSubtitleState = 'idle';
         }
-        this._aiSubtitleTitleId = titleId;
+        this._aiSubtitleTitleId = key;
 
         // 1) Read the shared cache — another user (or a prior session) may already have it.
         try {
-            const got = await api.generatedSubtitle({ titleId });
-            if (this._applyAiSubtitleResponse(got, titleId)) return;
-            if (this.aiSubtitleState === 'processing') { this.startAiSubtitlePolling(titleId); return; }
+            const got = await api.generatedSubtitle(params);
+            if (this._applyAiSubtitleResponse(got, key)) return;
+            if (this.aiSubtitleState === 'processing') { this.startAiSubtitlePolling(params, key); return; }
         } catch (_) { /* fall through to trigger */ }
 
         // 2) Nothing usable yet → trigger a background transcription and poll for it.
         this.aiSubtitleState = 'processing';
         this.updateCaptionsTracks();
         try {
-            const enq = await api.requestGeneratedSubtitle({ titleId });
+            const enq = await api.requestGeneratedSubtitle(params);
             // The enqueue reply carries status but no VTT body; if the server already had it
             // cached ('ready'), fetch the body right away instead of waiting a poll cycle.
             if (enq && String(enq.status) === 'ready') {
-                const got = await api.generatedSubtitle({ titleId });
-                if (this._applyAiSubtitleResponse(got, titleId)) return;
+                const got = await api.generatedSubtitle(params);
+                if (this._applyAiSubtitleResponse(got, key)) return;
             }
         } catch (_) {
             this.aiSubtitleState = 'failed';
             this.updateCaptionsTracks();
             return;
         }
-        this.startAiSubtitlePolling(titleId);
+        this.startAiSubtitlePolling(params, key);
     }
 
     // Parse a whisper VTT and feed its cues into a src-less <track>. Replaces any active text

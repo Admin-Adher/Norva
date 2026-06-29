@@ -97,7 +97,7 @@ Deno.serve(async (req) => {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 16,
+        version: 17,
         entitlements: true,
         entitlementsMode: entitlementRuntime.mode,
         entitlementsEnforced: entitlementRuntime.enforced,
@@ -2162,6 +2162,25 @@ async function resolveTitleVariant(
   return { sourceId, externalId, itemType };
 }
 
+// Resolve the (sourceId, externalId, itemType) that key a subtitle cache row. Accepts EITHER the
+// player's direct file coordinates (sourceId + externalId [+ itemType]) — what a catalog/gateway
+// playback always has — OR a cloud_titles titleId (resolved via its default variant). Direct coords
+// win, so the feature works even when the client doesn't hold a cloud_titles UUID.
+async function resolveSubtitleTarget(
+  db: SupabaseClient,
+  userId: string,
+  opts: { titleId?: string; sourceId?: string; externalId?: string; itemType?: string },
+): Promise<{ sourceId: string; externalId: string; itemType: string }> {
+  const sourceId = stringOr(opts.sourceId, ""), externalId = stringOr(opts.externalId, "");
+  if (sourceId && externalId) {
+    const itemType = stringOr(opts.itemType, "movie") === "series" ? "series" : "movie";
+    return { sourceId, externalId, itemType };
+  }
+  const titleId = stringOr(opts.titleId, "");
+  if (!titleId) throw new HttpError(400, "titleId or (sourceId, externalId) is required");
+  return resolveTitleVariant(db, userId, titleId);
+}
+
 // Resolve a variant's current playback URL (series episode vs movie target). null if unreachable.
 async function resolveVariantUrl(
   db: SupabaseClient,
@@ -2183,12 +2202,10 @@ async function transcribeEnqueue(
   db: SupabaseClient,
   userId: string,
   runtimeConfig: RuntimeConfig,
-  opts: { titleId: string; index?: number; start?: number; dur?: number; force?: boolean },
+  opts: { titleId?: string; sourceId?: string; externalId?: string; itemType?: string; index?: number; start?: number; dur?: number; force?: boolean },
 ): Promise<JsonRecord> {
   if (!runtimeConfig.mediaGatewayUrl || !runtimeConfig.mediaGatewayToken) throw new HttpError(503, "Media gateway is not configured");
-  const titleId = stringOr(opts.titleId, "");
-  if (!titleId) throw new HttpError(400, "titleId is required");
-  const { sourceId, externalId, itemType } = await resolveTitleVariant(db, userId, titleId);
+  const { sourceId, externalId, itemType } = await resolveSubtitleTarget(db, userId, opts);
   const tUrl = await resolveVariantUrl(db, userId, sourceId, externalId, itemType);
   if (!tUrl) throw new HttpError(422, "no playback target");
   const pkey = (await resolveSourceIdentity(sourceId, userId, db)).key || hostFromUrl(tUrl);
@@ -2242,12 +2259,15 @@ async function transcribeEnqueue(
 // one transcription serves every user of that panel. lang defaults to 'src' (whisper transcript).
 async function getGeneratedSubtitle(req: Request, userId: string, db: SupabaseClient): Promise<JsonRecord> {
   const url = new URL(req.url);
-  const titleId = stringOr(url.searchParams.get("titleId"), "");
-  if (!titleId) throw new HttpError(400, "titleId is required");
   const kind = stringOr(url.searchParams.get("kind"), "transcript") === "translation" ? "translation" : "transcript";
   const lang = stringOr(url.searchParams.get("lang"), kind === "translation" ? "" : "src");
   if (kind === "translation" && !lang) throw new HttpError(400, "lang is required for translation");
-  const { sourceId, externalId, itemType } = await resolveTitleVariant(db, userId, titleId);
+  const { sourceId, externalId, itemType } = await resolveSubtitleTarget(db, userId, {
+    titleId: stringOr(url.searchParams.get("titleId"), ""),
+    sourceId: stringOr(url.searchParams.get("sourceId"), ""),
+    externalId: stringOr(url.searchParams.get("externalId"), ""),
+    itemType: stringOr(url.searchParams.get("itemType"), ""),
+  });
   const pkey = (await resolveSourceIdentity(sourceId, userId, db)).key;
   if (!pkey) return { status: "none", providerKey: null };
   const { data: row } = await db.from("catalog_generated_subtitles")
@@ -2273,6 +2293,9 @@ async function postGeneratedSubtitle(req: Request, userId: string, db: SupabaseC
   const body = recordOrEmpty(await req.json().catch(() => ({})));
   const r = await transcribeEnqueue(db, userId, runtimeConfig, {
     titleId: stringOr(body.titleId, ""),
+    sourceId: stringOr(body.sourceId, ""),
+    externalId: stringOr(body.externalId, ""),
+    itemType: stringOr(body.itemType, ""),
     index: Number.isInteger(Number(body.index)) ? Number(body.index) : undefined,
     force: body.force === true,
     // dur 0 = whole film; user triggers never clip (clipping is a pipeline-test affordance only).
