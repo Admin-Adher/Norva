@@ -31,6 +31,16 @@ const CODEC_PROBE_SIZE_BYTES = clampInt(process.env.CODEC_PROBE_SIZE_BYTES, 2_00
 // Set CODEC_PROFILE_CACHE_TTL_MS=0 to disable.
 const CODEC_PROFILE_CACHE_TTL_MS = clampInt(process.env.CODEC_PROFILE_CACHE_TTL_MS, 60 * 60 * 1000, 0, 24 * 60 * 60 * 1000);
 const CODEC_PROFILE_CACHE_MAX = clampInt(process.env.CODEC_PROFILE_CACHE_MAX, 5_000, 0, 100_000);
+// IN-BAND HEADER PARSE (stage 2, OFF by default). When enabled, /raw tees the file's
+// LEADING bytes (which the engine fetches first anyway) into memory; a codec probe then
+// runs ffprobe on those local bytes instead of opening a SECOND provider connection —
+// the connection a single-slot provider 458s. Covers MKV + faststart MP4 (header at
+// front); falls back to the provider probe when the local bytes don't parse (e.g. an
+// MP4 with moov at the end). Memory is bounded by bytes/entry × entries.
+const INBAND_HEADER_PARSE = (process.env.INBAND_HEADER_PARSE || 'false') === 'true';
+const INBAND_HEADER_BYTES = clampInt(process.env.INBAND_HEADER_BYTES, 4_000_000, 256_000, 32_000_000);
+const INBAND_HEADER_CACHE_MAX = clampInt(process.env.INBAND_HEADER_CACHE_MAX, 16, 0, 256);
+const INBAND_HEADER_TTL_MS = clampInt(process.env.INBAND_HEADER_TTL_MS, 5 * 60 * 1000, 0, 60 * 60 * 1000);
 const LIVE_INPUT_ANALYZE_DURATION_US = clampInt(process.env.LIVE_INPUT_ANALYZE_DURATION_US, 1_500_000, 250_000, 10_000_000);
 const LIVE_INPUT_PROBE_SIZE_BYTES = clampInt(process.env.LIVE_INPUT_PROBE_SIZE_BYTES, 2_000_000, 64_000, 10_000_000);
 const VOD_INPUT_ANALYZE_DURATION_US = clampInt(process.env.VOD_INPUT_ANALYZE_DURATION_US, 8_000_000, 250_000, 30_000_000);
@@ -61,7 +71,7 @@ const RAW_PROVIDER_RETRY_DELAYS_MS = [400, 1000, 2000, 3000, 4000, 5000, 6000, 8
 const FFMPEG_USER_AGENT = process.env.FFMPEG_USER_AGENT ||
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36 Norva/1.0';
 const MAX_LOG_TAIL = 12000;
-const GATEWAY_VERSION = 45;
+const GATEWAY_VERSION = 46;
 // Browser playback fetches HLS playlists/segments cross-origin, so these must
 // list every Norva web origin or the browser blocks the response (CORS). Keep
 // in sync with the relay's ALLOWED_ORIGINS (services/norva-relay/wrangler.jsonc).
@@ -87,6 +97,9 @@ const TRANSCODE_AUDIO_ARGS = [
 const sessions = new Map();
 // sourceUrl -> { profile, expiresAt }. Populated by probeCodecProfile (cached wrapper).
 const codecProfileCache = new Map();
+// sourceUrl -> { chunks: Buffer[], len, done, capturing, updatedAt }. Leading bytes tee'd
+// from /raw so a codec probe can read the header locally (no 2nd provider connection).
+const headerByteCache = new Map();
 const lastFailures = [];
 const probeStats = {
     attempts: 0,
@@ -94,6 +107,7 @@ const probeStats = {
     failures: 0,
     empty: 0,
     cacheHits: 0,
+    inbandHits: 0,
     last: null,
     lastFailure: null
 };
@@ -116,6 +130,8 @@ app.get('/health', (req, res) => {
         maxSubtitleTracks: MAX_SUBTITLE_TRACKS,
         probeStats,
         codecProfileCacheSize: codecProfileCache.size,
+        inbandHeaderParse: INBAND_HEADER_PARSE,
+        headerByteCacheSize: headerByteCache.size,
         activeSessions: activeSessionCount(),
         totalSessions: sessions.size,
         lastFailureCount: lastFailures.length,
@@ -312,8 +328,67 @@ app.get('/raw/:token', async (req, res) => {
     if (!upstream.headers.get('accept-ranges')) res.setHeader('Accept-Ranges', 'bytes');
     res.setHeader('Cache-Control', 'private, max-age=30');
     if (method === 'HEAD' || !upstream.body) { res.end(); return; }
-    require('stream').Readable.fromWeb(upstream.body).pipe(res);
+    const nodeStream = require('stream').Readable.fromWeb(upstream.body);
+    // In-band header capture: if this response carries the file's LEADING bytes, tee them
+    // (best-effort) so a later codec probe reads the header locally instead of opening a
+    // second provider connection. Attached BEFORE pipe() so no leading chunk is missed;
+    // never throws into the pipe; respects pipe backpressure (no data flows while paused).
+    if (INBAND_HEADER_PARSE) {
+        try { maybeCaptureHeaderBytes(claims.url, upstream, nodeStream); } catch (_) { /* never break the byte pipe */ }
+    }
+    nodeStream.pipe(res);
 });
+
+// Tee the leading bytes of a /raw response into headerByteCache when the response starts
+// at offset 0 (status 200, or 206 with content-range "bytes 0-..."). Appends until
+// INBAND_HEADER_BYTES is reached, then detaches. First writer per URL wins; concurrent
+// range reads for the same file are ignored so chunks never interleave.
+function maybeCaptureHeaderBytes(sourceUrl, upstream, nodeStream) {
+    if (!sourceUrl || INBAND_HEADER_BYTES <= 0) return;
+    const status = upstream.status;
+    if (status === 200) {
+        // full body -> starts at 0
+    } else if (status === 206) {
+        const cr = upstream.headers.get('content-range') || '';
+        if (!/^bytes\s+0-/i.test(cr)) return; // not the leading range
+    } else {
+        return;
+    }
+    const existing = headerByteCache.get(sourceUrl);
+    if (existing && (existing.done || existing.capturing)) return; // already captured / in progress
+    // Bound entry count (Map keeps insertion order -> first key is oldest).
+    while (INBAND_HEADER_CACHE_MAX > 0 && headerByteCache.size >= INBAND_HEADER_CACHE_MAX) {
+        const oldest = headerByteCache.keys().next().value;
+        if (oldest === undefined || oldest === sourceUrl) break;
+        headerByteCache.delete(oldest);
+    }
+    const entry = { chunks: [], len: 0, done: false, capturing: true, updatedAt: Date.now() };
+    headerByteCache.set(sourceUrl, entry);
+    const onData = (chunk) => {
+        try {
+            if (entry.done) return;
+            entry.chunks.push(chunk);
+            entry.len += chunk.length;
+            entry.updatedAt = Date.now();
+            if (entry.len >= INBAND_HEADER_BYTES) {
+                entry.done = true;
+                entry.capturing = false;
+                nodeStream.removeListener('data', onData);
+            }
+        } catch (_) { /* best-effort capture */ }
+    };
+    const finalize = () => {
+        entry.capturing = false;
+        nodeStream.removeListener('data', onData);
+        nodeStream.removeListener('end', finalize);
+        nodeStream.removeListener('error', finalize);
+        nodeStream.removeListener('close', finalize);
+    };
+    nodeStream.on('data', onData);
+    nodeStream.once('end', finalize);
+    nodeStream.once('error', finalize);
+    nodeStream.once('close', finalize);
+}
 
 // Subtitle support for the in-browser ENGINE (byte-pipe) path. The engine plays the
 // raw file client-side and can't render subtitles, so it asks the gateway to:
@@ -947,58 +1022,17 @@ function hasHeAacMarker(value) {
     );
 }
 
-// Cached front for probeCodecProfileUncached: a successful profile for a given
-// source URL is reused for CODEC_PROFILE_CACHE_TTL_MS so repeated probes of the same
-// file skip the provider entirely (no extra connection → no single-slot 458). Failures
-// and empty profiles are NOT cached, so a transient refusal retries on the next call.
-async function probeCodecProfile(sourceUrl, userAgent) {
-    if (CODEC_PROFILE_CACHE_TTL_MS > 0 && sourceUrl) {
-        const hit = codecProfileCache.get(sourceUrl);
-        if (hit) {
-            if (hit.expiresAt > Date.now()) {
-                probeStats.cacheHits += 1;
-                return hit.profile;
-            }
-            codecProfileCache.delete(sourceUrl); // expired
-        }
-    }
-    const profile = await probeCodecProfileUncached(sourceUrl, userAgent);
-    if (CODEC_PROFILE_CACHE_TTL_MS > 0 && sourceUrl && hasUsefulCodecProfile(profile)) {
-        codecProfileCache.set(sourceUrl, { profile, expiresAt: Date.now() + CODEC_PROFILE_CACHE_TTL_MS });
-        // Bound memory: Map preserves insertion order, so the first key is the oldest.
-        while (CODEC_PROFILE_CACHE_MAX > 0 && codecProfileCache.size > CODEC_PROFILE_CACHE_MAX) {
-            const oldest = codecProfileCache.keys().next().value;
-            if (oldest === undefined) break;
-            codecProfileCache.delete(oldest);
-        }
-    }
-    return profile;
-}
-
-async function probeCodecProfileUncached(sourceUrl, userAgent) {
-    const startedAt = Date.now();
-    probeStats.attempts += 1;
-    const args = [
-        '-v', 'error',
-        '-rw_timeout', '8000000',
-        '-user_agent', userAgent || FFMPEG_USER_AGENT,
-        '-headers', 'Accept: */*\r\nConnection: keep-alive\r\n',
-        '-analyzeduration', String(CODEC_PROBE_ANALYZE_DURATION_US),
-        '-probesize', String(CODEC_PROBE_SIZE_BYTES),
-        '-show_streams',
-        '-show_format',
-        '-print_format', 'json',
-        sourceUrl
-    ];
-
-    const payload = await runFfprobe(args, CODEC_PROBE_TIMEOUT_MS, sourceUrl);
+// Map an ffprobe JSON payload (-show_streams -show_format) to the codec profile the
+// rest of the gateway consumes. Shared by the provider probe and the in-band local
+// header probe so both yield identical shapes (incl. per-track audio languages).
+function buildCodecProfile(payload, startedAt, probeSource) {
     const streams = Array.isArray(payload.streams) ? payload.streams : [];
     const video = streams.find((stream) => stream?.codec_type === 'video') || {};
     const audioStreams = streams.filter((stream) => stream?.codec_type === 'audio');
     const subtitleStreams = streams.filter((stream) => stream?.codec_type === 'subtitle');
     const audio = audioStreams[0] || {};
     const format = asRecord(payload.format);
-    const profile = compactRecord({
+    return compactRecord({
         videoCodec: stringOrNull(video.codec_name),
         videoProfile: stringOrNull(video.profile),
         videoWidth: nullableInt(video.width),
@@ -1041,10 +1075,113 @@ async function probeCodecProfileUncached(sourceUrl, userAgent) {
         container: stringOrNull(format.format_name),
         durationSeconds: nullableFloat(format.duration),
         bitRate: nullableInt(format.bit_rate),
-        probeSource: 'gateway_probe',
+        probeSource: probeSource || 'gateway_probe',
         probeMs: Math.max(1, Date.now() - startedAt),
         probedAt: new Date().toISOString()
     });
+}
+
+// Store a successful profile in the codec-profile cache (TTL + size cap). No-op for
+// empty/failed profiles, so a transient probe failure still retries next time.
+function cacheCodecProfile(sourceUrl, profile) {
+    if (CODEC_PROFILE_CACHE_TTL_MS <= 0 || !sourceUrl || !hasUsefulCodecProfile(profile)) return;
+    codecProfileCache.set(sourceUrl, { profile, expiresAt: Date.now() + CODEC_PROFILE_CACHE_TTL_MS });
+    // Bound memory: Map preserves insertion order, so the first key is the oldest.
+    while (CODEC_PROFILE_CACHE_MAX > 0 && codecProfileCache.size > CODEC_PROFILE_CACHE_MAX) {
+        const oldest = codecProfileCache.keys().next().value;
+        if (oldest === undefined) break;
+        codecProfileCache.delete(oldest);
+    }
+}
+
+// Run ffprobe on the in-band-captured leading bytes (a local temp file) so we learn the
+// track languages WITHOUT a provider connection. Returns a useful profile or null (caller
+// then falls back to the provider probe — e.g. an MP4 whose moov sits at the end, so the
+// leading bytes don't parse). Best-effort; never throws.
+async function probeFromHeaderBytes(sourceUrl) {
+    const entry = headerByteCache.get(sourceUrl);
+    if (!entry || entry.len <= 0) return null;
+    // Need a meaningful header slice: a completed capture, or at least 256 KB so far.
+    if (!entry.done && entry.len < 256_000) return null;
+    const buf = Buffer.concat(entry.chunks, entry.len);
+    const tmpFile = path.join(OUTPUT_DIR, `hdr-${crypto.randomBytes(8).toString('hex')}.bin`);
+    const startedAt = Date.now();
+    try {
+        await fsp.mkdir(OUTPUT_DIR, { recursive: true });
+        await fsp.writeFile(tmpFile, buf);
+        const args = [
+            '-v', 'error',
+            '-analyzeduration', String(CODEC_PROBE_ANALYZE_DURATION_US),
+            '-probesize', String(Math.min(buf.length, CODEC_PROBE_SIZE_BYTES)),
+            '-show_streams',
+            '-show_format',
+            '-print_format', 'json',
+            tmpFile
+        ];
+        const payload = await runFfprobe(args, CODEC_PROBE_TIMEOUT_MS, sourceUrl);
+        const profile = buildCodecProfile(payload, startedAt, 'gateway_inband');
+        return hasUsefulCodecProfile(profile) ? profile : null;
+    } catch (_) {
+        return null;
+    } finally {
+        fsp.unlink(tmpFile).catch(() => {});
+    }
+}
+
+// Cached front for probeCodecProfileUncached. Resolution order, cheapest first:
+//   1. codec-profile cache (memory, no work)              -> probeStats.cacheHits
+//   2. in-band header bytes tee'd from /raw (local probe) -> probeStats.inbandHits, ZERO provider conn
+//   3. provider probe (opens a connection)                -> probeStats.successes
+// A successful profile for a source URL is reused for CODEC_PROFILE_CACHE_TTL_MS. Failures
+// and empty profiles are NOT cached, so a transient refusal retries on the next call.
+async function probeCodecProfile(sourceUrl, userAgent) {
+    if (CODEC_PROFILE_CACHE_TTL_MS > 0 && sourceUrl) {
+        const hit = codecProfileCache.get(sourceUrl);
+        if (hit) {
+            if (hit.expiresAt > Date.now()) {
+                probeStats.cacheHits += 1;
+                return hit.profile;
+            }
+            codecProfileCache.delete(sourceUrl); // expired
+        }
+    }
+    if (INBAND_HEADER_PARSE && sourceUrl) {
+        try {
+            const local = await probeFromHeaderBytes(sourceUrl);
+            if (local && hasUsefulCodecProfile(local)) {
+                probeStats.inbandHits += 1;
+                cacheCodecProfile(sourceUrl, local);
+                headerByteCache.delete(sourceUrl); // header no longer needed
+                return local;
+            }
+        } catch (_) { /* fall back to the provider probe */ }
+    }
+    const profile = await probeCodecProfileUncached(sourceUrl, userAgent);
+    cacheCodecProfile(sourceUrl, profile);
+    return profile;
+}
+
+async function probeCodecProfileUncached(sourceUrl, userAgent) {
+    const startedAt = Date.now();
+    probeStats.attempts += 1;
+    const args = [
+        '-v', 'error',
+        '-rw_timeout', '8000000',
+        '-user_agent', userAgent || FFMPEG_USER_AGENT,
+        '-headers', 'Accept: */*\r\nConnection: keep-alive\r\n',
+        '-analyzeduration', String(CODEC_PROBE_ANALYZE_DURATION_US),
+        '-probesize', String(CODEC_PROBE_SIZE_BYTES),
+        '-show_streams',
+        '-show_format',
+        '-print_format', 'json',
+        sourceUrl
+    ];
+
+    const payload = await runFfprobe(args, CODEC_PROBE_TIMEOUT_MS, sourceUrl);
+    const profile = buildCodecProfile(payload, startedAt, 'gateway_probe');
+    const streams = Array.isArray(payload.streams) ? payload.streams : [];
+    const audioStreams = streams.filter((stream) => stream?.codec_type === 'audio');
+    const subtitleStreams = streams.filter((stream) => stream?.codec_type === 'subtitle');
     if (hasUsefulCodecProfile(profile)) {
         probeStats.successes += 1;
         probeStats.last = compactRecord({
@@ -1737,6 +1874,12 @@ setInterval(() => {
     // Purge expired codec-profile cache entries (read-path also evicts lazily).
     for (const [key, entry] of codecProfileCache) {
         if (entry.expiresAt <= now) codecProfileCache.delete(key);
+    }
+    // Purge stale in-band header buffers (only needed transiently around playback start).
+    if (INBAND_HEADER_TTL_MS > 0) {
+        for (const [key, entry] of headerByteCache) {
+            if (now - entry.updatedAt >= INBAND_HEADER_TTL_MS) headerByteCache.delete(key);
+        }
     }
 }, 60 * 1000).unref();
 
