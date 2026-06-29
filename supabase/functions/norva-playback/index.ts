@@ -413,7 +413,7 @@ async function createPlaybackSession(
         if (gotAudio && titleRow?.id && serverHost && fileExternalId
           && audioTracks.length >= 2 && audioTracks.some((t) => !t.lang)) {
           const rc = await getRuntimeConfig(db);
-          if (rc.whisperDetect && rc.relayBaseUrl && rc.relayTokenSecret && rc.mediaGatewayUrl) {
+          if (rc.whisperDetect && rc.mediaGatewayUrl && rc.mediaGatewayToken) {
             runBackground(detectUntaggedAudioLanguages({
               db, runtimeConfig: rc, userId, targetUrl, userAgent,
               audioTracks, titleId: titleRow.id, tmdbId: stringOrNull(titleRow.provider_tmdb_id),
@@ -1994,12 +1994,12 @@ function runBackground(p: Promise<unknown>): void {
   } catch (_) { /* fire-and-forget */ }
 }
 
-// Phase 2: detect the language of UNTAGGED audio tracks via the relay (Workers AI Whisper) and
-// re-persist the enriched map. The gateway extracts a short WAV per track (it has ffmpeg); the
-// relay transcribes + detects. ENRICH-only: fills a null lang, never overrides. Best-effort and
-// background — never blocks playback. NOTE: the WAV extraction is a 2nd provider connection, so
-// on a single-slot source it can lose to the live stream (458); the offline backfill path is the
-// single-slot-friendly alternative.
+// Phase 2: detect the language of UNTAGGED audio tracks via the gateway's self-hosted
+// whisper.cpp (no paid API), then re-persist the enriched map. The gateway extracts a short WAV
+// per track, runs whisper.cpp + a transcript detector, and returns the language. ENRICH-only:
+// fills a null lang, never overrides. Best-effort and background — never blocks playback. NOTE:
+// the WAV extraction is a 2nd provider connection, so on a single-slot source it can lose to the
+// live stream (458); an offline backfill is the single-slot-friendly alternative.
 async function detectUntaggedAudioLanguages(opts: {
   db: SupabaseClient;
   runtimeConfig: RuntimeConfig;
@@ -2016,33 +2016,26 @@ async function detectUntaggedAudioLanguages(opts: {
   expiresAt: string;
 }): Promise<void> {
   const { db, runtimeConfig, userId, targetUrl, userAgent, audioTracks, titleId, tmdbId, serverHost, itemType, fileExternalId, sessionId, expiresAt } = opts;
-  if (!runtimeConfig.relayBaseUrl || !runtimeConfig.relayTokenSecret || !runtimeConfig.mediaGatewayUrl || !runtimeConfig.mediaGatewayToken) return;
+  if (!runtimeConfig.mediaGatewayUrl || !runtimeConfig.mediaGatewayToken) return;
   const untagged = audioTracks.filter((t) => !t.lang && Number.isInteger(t.index)).slice(0, 5);
   if (!untagged.length) return;
 
-  // Gateway byte-pipe token → derive the /audio-sample base from the /raw URL.
-  let audioSampleBase: string;
+  // Gateway byte-pipe token → derive the /detect-language base from the /raw URL. The gateway
+  // extracts a WAV per track, runs whisper.cpp + a transcript detector locally (no paid API,
+  // no relay round-trip), and returns the language. ENRICH-only.
+  let detectBase: string;
   try {
     const pipe = await createBytePipeAccess(sessionId, userId, targetUrl, expiresAt, db, userAgent);
-    audioSampleBase = pipe.url.replace("/raw/", "/audio-sample/");
+    detectBase = pipe.url.replace("/raw/", "/detect-language/");
   } catch (_) { return; }
-
-  // Relay token for /detect-language (mirrors the probe token).
-  const payload = JSON.stringify({ v: 1, sid: "lang-detect", uid: userId, url: targetUrl, exp: Math.floor(Date.now() / 1000) + 300 });
-  const relayToken = `${base64Url(encoder.encode(payload))}.${await hmacBase64Url(runtimeConfig.relayTokenSecret, payload)}`;
-  const detectUrl = `${runtimeConfig.relayBaseUrl}/detect-language/${relayToken}`;
 
   const byIndex = new Map(audioTracks.map((t) => [t.index, t]));
   let filled = 0;
   for (const t of untagged) {
     try {
-      const wavRes = await fetch(`${audioSampleBase}?index=${t.index}&dur=20`, { signal: AbortSignal.timeout(30_000) });
-      if (!wavRes.ok) continue;
-      const wav = await wavRes.arrayBuffer();
-      if (wav.byteLength < 4000) continue;
-      const detRes = await fetch(detectUrl, { method: "POST", body: wav, headers: { "content-type": "audio/wav" }, signal: AbortSignal.timeout(30_000) });
-      if (!detRes.ok) continue;
-      const det = await detRes.json().catch(() => null) as JsonRecord | null;
+      const res = await fetch(`${detectBase}?index=${t.index}&dur=20`, { signal: AbortSignal.timeout(90_000) });
+      if (!res.ok) continue;
+      const det = await res.json().catch(() => null) as JsonRecord | null;
       const lang = normalizeIsoLang(stringOrNull(det?.language));
       if (lang) { const entry = byIndex.get(t.index); if (entry) { entry.lang = lang; filled++; } }
     } catch (_) { /* best-effort per track */ }

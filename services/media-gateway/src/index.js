@@ -41,6 +41,12 @@ const INBAND_HEADER_PARSE = (process.env.INBAND_HEADER_PARSE || 'false') === 'tr
 const INBAND_HEADER_BYTES = clampInt(process.env.INBAND_HEADER_BYTES, 4_000_000, 256_000, 32_000_000);
 const INBAND_HEADER_CACHE_MAX = clampInt(process.env.INBAND_HEADER_CACHE_MAX, 16, 0, 256);
 const INBAND_HEADER_TTL_MS = clampInt(process.env.INBAND_HEADER_TTL_MS, 5 * 60 * 1000, 0, 60 * 60 * 1000);
+// whisper.cpp audio-track language detection (Phase 2, self-hosted / free). Unset WHISPER_BIN
+// or WHISPER_MODEL to disable the /detect-language endpoint.
+const WHISPER_BIN = process.env.WHISPER_BIN || '';
+const WHISPER_MODEL = process.env.WHISPER_MODEL || '';
+const WHISPER_THREADS = clampInt(process.env.WHISPER_THREADS, 4, 1, 16);
+const WHISPER_TIMEOUT_MS = clampInt(process.env.WHISPER_TIMEOUT_MS, 60_000, 5_000, 300_000);
 const LIVE_INPUT_ANALYZE_DURATION_US = clampInt(process.env.LIVE_INPUT_ANALYZE_DURATION_US, 1_500_000, 250_000, 10_000_000);
 const LIVE_INPUT_PROBE_SIZE_BYTES = clampInt(process.env.LIVE_INPUT_PROBE_SIZE_BYTES, 2_000_000, 64_000, 10_000_000);
 const VOD_INPUT_ANALYZE_DURATION_US = clampInt(process.env.VOD_INPUT_ANALYZE_DURATION_US, 8_000_000, 250_000, 30_000_000);
@@ -71,7 +77,7 @@ const RAW_PROVIDER_RETRY_DELAYS_MS = [400, 1000, 2000, 3000, 4000, 5000, 6000, 8
 const FFMPEG_USER_AGENT = process.env.FFMPEG_USER_AGENT ||
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36 Norva/1.0';
 const MAX_LOG_TAIL = 12000;
-const GATEWAY_VERSION = 47;
+const GATEWAY_VERSION = 48;
 // Browser playback fetches HLS playlists/segments cross-origin, so these must
 // list every Norva web origin or the browser blocks the response (CORS). Keep
 // in sync with the relay's ALLOWED_ORIGINS (services/norva-relay/wrangler.jsonc).
@@ -130,6 +136,7 @@ app.get('/health', (req, res) => {
         maxSubtitleTracks: MAX_SUBTITLE_TRACKS,
         probeStats,
         codecProfileCacheSize: codecProfileCache.size,
+        languageDetect: Boolean(WHISPER_BIN && WHISPER_MODEL),
         inbandHeaderParse: INBAND_HEADER_PARSE,
         headerByteCacheSize: headerByteCache.size,
         activeSessions: activeSessionCount(),
@@ -467,63 +474,184 @@ app.get('/subtitle/:token', async (req, res) => {
     });
 });
 
-// Phase 2: extract a short mono/16 kHz WAV of ONE audio track for language detection. The
-// relay (Workers AI Whisper) can't decode media, so the gateway (ffmpeg) makes the clip and
-// the caller forwards it to the relay's /detect-language. Same byte-pipe token as /raw. Used
-// only when a track has no language from the provider/demux, and the result is cached, so this
-// (a second provider connection) runs at most once per untagged file.
-app.get('/audio-sample/:token', async (req, res) => {
+// Phase 2: detect the language of ONE audio track, fully self-hosted (no paid API). ffmpeg
+// extracts a short mono/16 kHz WAV of the track, whisper.cpp identifies the spoken language,
+// and a transcript-based detector resolves script-family ambiguities (Persian/Kurdish/Urdu vs
+// Arabic, Ukrainian/Serbian vs Russian). Same byte-pipe token as /raw. Used only for untagged
+// tracks and cached upstream, so this 2nd provider connection runs at most once per file.
+app.get('/detect-language/:token', async (req, res) => {
     const claims = verifyRawToken(req.params.token, GATEWAY_TOKEN);
     if (!claims) return res.status(401).json({ error: 'Invalid byte-pipe token' });
     if (Number(claims.exp) * 1000 < Date.now()) return res.status(401).json({ error: 'Byte-pipe token expired' });
+    if (!WHISPER_BIN || !WHISPER_MODEL) return res.status(503).json({ error: 'Language detection not configured' });
     const ua = claims.ua || FFMPEG_USER_AGENT;
 
     const trackIndex = Number.parseInt(req.query.index, 10);
     if (!Number.isInteger(trackIndex) || trackIndex < 0) return res.status(400).json({ error: 'Invalid audio index' });
     const startOffset = Number.parseFloat(req.query.start);
-    const hasStart = Number.isFinite(startOffset) && startOffset > 0;
     const dur = Math.min(Math.max(Number.parseFloat(req.query.dur) || 20, 4), 60);
-    const outputPath = path.join(os.tmpdir(), `norva-audio-${Date.now()}-${crypto.randomUUID()}.wav`);
 
-    const args = [
-        '-y', '-hide_banner', '-loglevel', 'error', '-nostdin',
-        '-user_agent', ua,
-        '-probesize', '2000000', '-analyzeduration', '3000000',
-        ...(hasStart ? ['-ss', String(startOffset)] : []),
-        '-i', claims.url,
-        '-map', `0:${trackIndex}`,
-        '-t', String(dur),
-        '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', '-f', 'wav',
-        outputPath,
-    ];
-
-    let child;
-    try { child = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'ignore', 'pipe'] }); }
-    catch (_) { return res.status(500).json({ error: 'Audio extraction failed' }); }
-    let stderr = '';
-    let clientClosed = false;
-    const timer = setTimeout(() => { try { child.kill('SIGKILL'); } catch (_) {} }, 30_000);
-    child.stderr.on('data', (d) => { stderr += d.toString(); });
-    res.on('close', () => { if (!res.writableEnded) { clientClosed = true; try { child.kill('SIGKILL'); } catch (_) {} } });
-    child.on('error', () => { clearTimeout(timer); if (!res.headersSent) res.status(500).end(); });
-    child.on('close', async (code) => {
-        clearTimeout(timer);
-        if (clientClosed) { fsp.unlink(outputPath).catch(() => {}); return; }
-        if (code !== 0) {
-            console.warn(`[media-gateway] /audio-sample ffmpeg exit ${code}: ${stderr.slice(-300)}`);
-            fsp.unlink(outputPath).catch(() => {});
-            if (!res.headersSent) res.status(502).json({ error: 'Audio extraction failed' });
-            return;
-        }
-        let buf = null;
-        try { buf = await fsp.readFile(outputPath); } catch (_) { buf = null; }
-        fsp.unlink(outputPath).catch(() => {});
-        if (!buf || buf.length < 4000) { if (!res.headersSent) res.status(502).json({ error: 'Empty audio sample' }); return; }
-        res.setHeader('Content-Type', 'audio/wav');
+    let wavPath = null;
+    try {
+        wavPath = await extractAudioWav(claims.url, ua, trackIndex, Number.isFinite(startOffset) && startOffset > 0 ? startOffset : 0, dur);
+        if (!wavPath) return res.status(502).json({ error: 'Audio extraction failed' });
+        const whisper = await runWhisperDetect(wavPath);
+        const det = detectLanguageFromText(whisper.text);
+        // Prefer the transcript detector when confident (it disambiguates script families);
+        // otherwise fall back to whisper.cpp's own language id.
+        const language = det.confident ? det.lang : (whisper.lang || null);
         res.setHeader('Cache-Control', 'private, max-age=3600');
-        res.send(buf);
-    });
+        return res.json({
+            language,
+            candidate: det.lang || whisper.lang || null,
+            confidence: det.confident ? det.score : (whisper.prob || 0),
+            whisperLang: whisper.lang || null,
+            wordCount: det.words,
+            sample: String(whisper.text || '').slice(0, 160),
+        });
+    } catch (err) {
+        return res.status(502).json({ error: 'Language detection failed', details: String((err && err.message) || err) });
+    } finally {
+        if (wavPath) fsp.unlink(wavPath).catch(() => {});
+    }
 });
+
+// Extract a mono/16 kHz pcm_s16le WAV of one audio track to a temp file. Resolves the path, or
+// null on failure. 30 s kill timer.
+function extractAudioWav(url, ua, trackIndex, startOffset, dur) {
+    return new Promise((resolve) => {
+        const outputPath = path.join(os.tmpdir(), `norva-audio-${Date.now()}-${crypto.randomUUID()}.wav`);
+        const args = [
+            '-y', '-hide_banner', '-loglevel', 'error', '-nostdin',
+            '-user_agent', ua,
+            '-probesize', '2000000', '-analyzeduration', '3000000',
+            ...(startOffset > 0 ? ['-ss', String(startOffset)] : []),
+            '-i', url,
+            '-map', `0:${trackIndex}`,
+            '-t', String(dur),
+            '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', '-f', 'wav',
+            outputPath,
+        ];
+        let child;
+        try { child = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'ignore', 'pipe'] }); }
+        catch (_) { return resolve(null); }
+        let stderr = '';
+        const timer = setTimeout(() => { try { child.kill('SIGKILL'); } catch (_) {} }, 30_000);
+        child.stderr.on('data', (d) => { stderr += d.toString(); });
+        child.on('error', () => { clearTimeout(timer); resolve(null); });
+        child.on('close', async (code) => {
+            clearTimeout(timer);
+            if (code !== 0) {
+                console.warn(`[media-gateway] audio-extract ffmpeg exit ${code}: ${stderr.slice(-300)}`);
+                fsp.unlink(outputPath).catch(() => {});
+                return resolve(null);
+            }
+            let ok = false;
+            try { ok = (await fsp.stat(outputPath)).size > 4000; } catch (_) { ok = false; }
+            resolve(ok ? outputPath : null);
+        });
+    });
+}
+
+// Run whisper.cpp on a WAV: auto-detect language + transcribe. Resolves { text, lang, prob };
+// best-effort (empties on failure). `lang`/`prob` are parsed from whisper's own LID line.
+function runWhisperDetect(wavPath) {
+    return new Promise((resolve) => {
+        const outPrefix = wavPath.replace(/\.wav$/i, '');
+        const args = [
+            '-m', WHISPER_MODEL,
+            '-f', wavPath,
+            '-l', 'auto',
+            '-nt',                 // no timestamps -> clean transcript
+            '-otxt', '-of', outPrefix,
+            '-t', String(WHISPER_THREADS),
+        ];
+        let child;
+        try { child = spawn(WHISPER_BIN, args, { stdio: ['ignore', 'ignore', 'pipe'] }); }
+        catch (_) { return resolve({ text: '', lang: null, prob: 0 }); }
+        let stderr = '';
+        const timer = setTimeout(() => { try { child.kill('SIGKILL'); } catch (_) {} }, WHISPER_TIMEOUT_MS);
+        child.stderr.on('data', (d) => { stderr += d.toString(); });
+        child.on('error', () => { clearTimeout(timer); resolve({ text: '', lang: null, prob: 0 }); });
+        child.on('close', async (code) => {
+            clearTimeout(timer);
+            const m = stderr.match(/auto-detected language:\s*([a-z]{2,3})\s*\(p\s*=\s*([\d.]+)\)/i);
+            const lang = m ? m[1].toLowerCase() : null;
+            const prob = m ? (Number(m[2]) || 0) : 0;
+            let text = '';
+            try { text = await fsp.readFile(outPrefix + '.txt', 'utf8'); } catch (_) { text = ''; }
+            fsp.unlink(outPrefix + '.txt').catch(() => {});
+            if (code !== 0 && !text && !lang) console.warn(`[media-gateway] whisper exit ${code}: ${stderr.slice(-300)}`);
+            resolve({ text: String(text || '').trim(), lang, prob });
+        });
+    });
+}
+
+// Detect the language of a (Whisper) transcript with zero dependencies. Non-Latin scripts are
+// resolved by Unicode range (high confidence, incl. Persian/Kurdish/Urdu vs Arabic by the
+// letters Arabic lacks, and Ukrainian/Serbian vs Russian by distinctive Cyrillic letters);
+// Latin-script languages by stop-word frequency. Returns { lang, score, confident, words }.
+// `confident` is conservative so the caller only enriches on a clear result.
+function detectLanguageFromText(raw) {
+  const text = String(raw || "").trim();
+  const letters = text.replace(/[^\p{L}]/gu, "");
+  const words = text.split(/\s+/).filter(Boolean);
+  const out = (lang, score, confident) => ({ lang, score, confident, words: words.length });
+  if (letters.length < 12) return out(null, 0, false); // script detection needs only letters
+
+  const total = letters.length;
+  const frac = (re) => (text.match(re) || []).length / total;
+  const arabic = frac(/[؀-ۿݐ-ݿ]/g);
+  if (arabic > 0.3) {
+    // Letters Arabic does not use → Perso-Arabic family.
+    const perso = /[پچژگیک]/.test(text); // pe che zhe gaf farsi-yeh keheh
+    if (perso) {
+      if (/[ڵەێۆڕ]/.test(text)) return out("ku", 0.8, true); // Sorani Kurdish
+      if (/[ھٹڈںہ]/.test(text)) return out("ur", 0.75, true); // Urdu
+      return out("fa", 0.82, true); // Persian
+    }
+    return out("ar", 0.85, true);
+  }
+  if (frac(/[֐-׿]/g) > 0.3) return out("he", 0.9, true);
+  if (frac(/[Ͱ-Ͽ]/g) > 0.3) return out("el", 0.9, true);
+  if (frac(/[぀-ヿ]/g) > 0.08) return out("ja", 0.9, true);
+  if (frac(/[가-힯]/g) > 0.2) return out("ko", 0.9, true);
+  if (frac(/[一-鿿]/g) > 0.2) return out("zh", 0.82, true);
+  if (frac(/[ऀ-ॿ]/g) > 0.3) return out("hi", 0.82, true);
+  if (frac(/[฀-๿]/g) > 0.3) return out("th", 0.9, true);
+  if (frac(/[Ѐ-ӿ]/g) > 0.3) {
+    if (/[іїєґ]/i.test(text)) return out("uk", 0.8, true);
+    if (/[ђћњљџ]/i.test(text)) return out("sr", 0.75, true);
+    return out("ru", 0.78, true);
+  }
+
+  // Latin script → stop-word frequency (needs whitespace-delimited words).
+  if (words.length < 3) return out(null, 0, false);
+  const lower = " " + text.toLowerCase().replace(/[^\p{L}\s]/gu, " ").replace(/\s+/g, " ").trim() + " ";
+  const STOP = {
+    en: ["the", "and", "you", "that", "this", "with", "for", "are", "was", "have", "what", "not", "but"],
+    fr: ["le", "la", "les", "de", "des", "un", "une", "et", "est", "que", "pas", "vous", "nous", "je", "ne", "pour", "dans"],
+    es: ["el", "la", "los", "las", "de", "que", "no", "es", "un", "una", "por", "con", "para", "pero", "como", "está"],
+    it: ["il", "la", "che", "di", "non", "un", "una", "per", "sono", "con", "ma", "questo", "come", "ci"],
+    pt: ["o", "a", "de", "que", "não", "um", "uma", "para", "com", "você", "mais", "como", "mas", "está"],
+    de: ["der", "die", "das", "und", "ist", "nicht", "ein", "eine", "ich", "wir", "mit", "auch", "was", "sie"],
+    nl: ["de", "het", "een", "en", "ik", "je", "niet", "dat", "is", "wat", "met", "voor", "maar"],
+    tr: ["bir", "bu", "ve", "için", "ben", "sen", "var", "yok", "ama", "çok", "daha", "gibi", "değil"],
+    ro: ["si", "de", "la", "un", "nu", "este", "ce", "cu", "mai", "dar", "sa", "pe", "să"],
+    pl: ["nie", "to", "jest", "sie", "się", "na", "że", "co", "jak", "ale", "tak", "jestem"],
+    sv: ["och", "att", "det", "som", "en", "ett", "jag", "är", "inte", "har", "den", "för"],
+  };
+  let best = null, bestScore = 0, second = 0;
+  for (const [lang, stops] of Object.entries(STOP)) {
+    let hits = 0;
+    for (const w of stops) if (lower.includes(" " + w + " ")) hits++;
+    const score = hits / stops.length;
+    if (score > bestScore) { second = bestScore; bestScore = score; best = lang; }
+    else if (score > second) second = score;
+  }
+  const confident = bestScore >= 0.18 && (bestScore - second) >= 0.08;
+  return out(best, +bestScore.toFixed(2), confident);
+}
 
 app.post('/sessions', requireGatewayAuth, async (req, res) => {
     try {
