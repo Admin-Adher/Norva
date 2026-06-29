@@ -70,14 +70,16 @@ const PROVIDER_AUTH_RETRY_DELAY_MS = clampInt(process.env.PROVIDER_AUTH_RETRY_DE
 // single-slot provider can 401/403/429 one whose connection slot from the prior
 // read hasn't released yet (~PROVIDER_SLOT_RELEASE_DELAY_MS). ffmpeg rides this
 // out via auto-reconnect; mirror it here with a few quick retries so a transient
-// provider auth blip doesn't abort playback. Delays stay short to keep range
-// throughput usable, then back off toward the slot-release window.
-const RAW_PROVIDER_RETRY_LIMIT = clampInt(process.env.RAW_PROVIDER_RETRY_LIMIT, 5, 0, 8);
-const RAW_PROVIDER_RETRY_DELAYS_MS = [400, 1000, 2000, 3000, 4000, 5000, 6000, 8000];
+// provider auth blip doesn't abort playback. Fewer attempts with LONGER quiet gaps:
+// a single-slot provider only frees the slot after it sees no connection for a
+// stretch (~8s), so packing many quick retries keeps poking it and the slot never
+// goes quiet. Bigger gaps give the provider real silence to release between tries.
+const RAW_PROVIDER_RETRY_LIMIT = clampInt(process.env.RAW_PROVIDER_RETRY_LIMIT, 3, 0, 8);
+const RAW_PROVIDER_RETRY_DELAYS_MS = [1500, 5000, 9000, 9000, 9000, 9000, 9000, 9000];
 const FFMPEG_USER_AGENT = process.env.FFMPEG_USER_AGENT ||
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36 Norva/1.0';
 const MAX_LOG_TAIL = 12000;
-const GATEWAY_VERSION = 49;
+const GATEWAY_VERSION = 50;
 // Browser playback fetches HLS playlists/segments cross-origin, so these must
 // list every Norva web origin or the browser blocks the response (CORS). Keep
 // in sync with the relay's ALLOWED_ORIGINS (services/norva-relay/wrangler.jsonc).

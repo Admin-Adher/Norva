@@ -151,7 +151,7 @@
     av1: ['av01.0.08M.08'],
   };
 
-  const ENGINE_VERSION = 20;
+  const ENGINE_VERSION = 21;
 
   class NorvaEngine {
     constructor(videoEl, opts = {}) {
@@ -264,7 +264,16 @@
 
       let m = performance.now();
       await prefetchP;
-      if (!this.size) this.size = await this._probeSize(url);
+      if (!this.size) {
+        // The first-window fetch already failed. If it was a provider slot/auth block
+        // (401/403/429/458), do NOT open a SECOND connection to re-probe the size: it
+        // will hit the same block and just hammers a single-slot provider (doubling the
+        // /raw load per attempt, which keeps the slot from going quiet). Surface it now
+        // and let the player's retry wait for the slot, then try cleanly.
+        const pe = this._prefetchError;
+        if (pe && /_(401|403|429|458)\b/.test(String((pe && pe.message) || pe))) throw pe;
+        this.size = await this._probeSize(url);
+      }
       this.timings.probeMs = Math.round(performance.now() - m);
       m = performance.now(); await this._openInput(); this.timings.openInputMs = Math.round(performance.now() - m);
       m = performance.now(); await this._detectStreams(); this.mime = await this._chooseMime(); this.timings.detectMimeMs = Math.round(performance.now() - m);
@@ -312,7 +321,8 @@
         // the parallel collision on the single-slot provider. The MKV tail (cues)
         // is fetched lazily on the first seek — the demuxer doesn't need it to open.
         await this._cacheWindow(0, RA_FIRST_WINDOW);
-      } catch (_) { /* load()'s fallback probe / _openInput surface the real error */ }
+        this._prefetchError = null;
+      } catch (e) { this._prefetchError = e; /* load() decides: re-probe, or surface a slot/auth block */ }
     }
 
     async seek(t) {
