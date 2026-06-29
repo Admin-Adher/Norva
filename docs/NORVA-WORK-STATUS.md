@@ -79,25 +79,30 @@ il « suffit » d'une transcription complète horodatée (au lieu d'un clip de 2
 L'enrichissement (langue audio + sous-titres) tourne en **flotte pg_cron** qui POST vers les
 routes edge. Détail complet + SQL réel : `supabase/functions/ENRICHMENT_CRON_SETUP.md`.
 
-**Deux comptes, deux providers mono-connexion DISTINCTS** → deux flottes en parallèle (le slot
-unique est **par compte**, donc aucune collision entre les deux) :
+**TROIS providers mono-connexion DISTINCTS** → flottes en parallèle (slot **par compte**, aucune
+collision entre providers). **Parité premium : 4 dimensions par provider** (audio films · audio
+séries · sous-titres films · whisper résidu) = 12 jobs pg_cron, **0 échec**.
 
-| Provider | Compte | `get_vod_info` | Stratégie backfill | État |
-|----------|--------|----------------|--------------------|------|
-| `super8k.top` | owner `c5be5ac4…` | ❌ vide (`relayEmpty:60`) → 'vod' mort | **header-probe** (lecture d'entête via relais). Bulk films `*/3` 24/7 conc 1 ; tagués/séries/sous-titres off-peak `0-5`. | résidu probe ~à jour (re-probé en continu) ; reste `noLang` → whisper |
-| `apdxes.xyz` | frère `0b971271…` | ✅ marche (`relayEmpty:0`) | **`vod`** (métadonnées via relais, **non limité par le slot**) → `3,8,…,58` conc 2, 24/7. | ~23 % des films probés, en montée (drain rapide via vod) |
+| Provider | Compte | `get_vod_info` | Méthode | État (29/06) |
+|----------|--------|----------------|---------|------|
+| `super8k.top` | owner `c5be5ac4…` | ❌ vide → 'vod' mort | **probe** (header) | **gros chantier** : ~92k titres, **~7 % audio fait**, ~500/h → **~1 sem** pour l'audio films (sous-titres/séries : plus lent) |
+| `apdxes.xyz` | frère `0b971271…` | ✅ marche | **vod** films (rapide) + probe séries/subs | films ~**34 %**, drain rapide (~1 j) ; 429 sur **toute** concurrence (vod compris) |
+| `mandara.cc` = **AÎRO** | dédié `7bdab1df…` | ❌ vide → 'vod' mort | **probe** | nouveau (9,5k films + 2,2k séries), sonde démarrée |
 
-**Pourquoi FRÉQUENCE et pas concurrence** : sur un provider mono-connexion, lancer le backfill
-en conc ≥2 fait 429 les connexions surnuméraires (1 seul slot) → travail gaspillé. On reste donc
-**conc 1** mais on **lance le bulk en continu** (`*/3`, 24/7) pour garder le slot occupé ~100 %
-pendant l'absence de l'owner ; les jobs secondaires sont parqués **off-peak (`0-5` UTC)** pour ne
-pas se disputer le slot le jour. apdxes échappe à la règle car son `vod` passe par le relais
-(métadonnées, pas le slot de stream) → conc 2 OK.
+> ⚠️ **Correction** : une note précédente disait « super8k résidu ~à jour » — **faux** (lecture
+> erronée de la petite taille du *cache de sonde*). Le vrai catalogue fait **92k titres, ~7 % résolus** ;
+> c'est le **gros chantier ~1 semaine**, pas « à jour ». apdxes (vod) est le rapide.
 
-**Cache cross-user** : les écritures atterrissent dans les caches globaux (`catalog_file_tracks`
-par server+fichier, `catalog_titles` par TMDB), **partagés entre tous les users du même provider**.
-→ un **nouvel inscrit sur un provider déjà enrichi voit les langues/sous-titres instantanément**
-(zéro nouvelle sonde). C'est pour ça qu'**un seul compte par provider** suffit à piloter la flotte.
+**Slot unique = time-sharing dans le temps** (pas de concurrence). Par provider : **films audio le
+jour `6-23 UTC`** (`*/3` probe ou `*/5` vod), **séries + sous-titres + whisper la nuit `0-5 UTC`**
+décalés de 3 min (cycle 9) → jamais deux accès simultanés. `langs` (films tagués) **supprimé**
+(redondant avec le bulk `untagged`). apdxes 429 même sur métadonnées → son vod aussi en `6-23`.
+
+**Cache cross-user keyé par `providerKey`** (cf. `PROVIDER-IDENTITY-DEDUP.md`, LIVE) : les écritures
+vont dans les caches globaux (`catalog_file_tracks`, `catalog_titles`), **partagés par tout user du
+même panel — tous les miroirs d'URL fusionnent sous un seul `providerKey`**. → un **nouvel inscrit
+sur un panel déjà sondé hérite langues/sous-titres instantanément** (zéro sonde), **même après
+suppression du compte pilote** (les caches globaux ne sont liés à aucun user/source).
 
 **Correctif débloquant (synchro catalogue du frère)** : `cloud_media_items → cloud_live_variants`
 est `ON DELETE CASCADE` mais `cloud_live_variants(media_item_id)` n'était **pas indexé** → vider

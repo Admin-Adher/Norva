@@ -17,11 +17,11 @@ updates the existing job), so this file is the source of truth for the cadences.
 Originally most of these ran **every 5 min** indiscriminately, burning ~72 cron
 fires/hour → disproportionate Edge-invocation + egress cost (and constant `UPDATE`
 churn that bloats the title tables). Now the cadence is **shaped by what each job
-touches**: the single **bulk movie probe** runs hot (24/7 `*/3`, ~20 fires/h) to
-drain the catalogue while the owner is away, and *everything else* is throttled
-and parked off-peak (a few fires/h). Each job is a queue-drainer, so a tick that
-finds nothing is cheap. Re-raise / lower the bulk cadence as catalogue turnover
-and user activity change.
+touches**: per provider, the **films-audio bulk** runs frequently in a **day window
+6-23 UTC** (`*/3` probe or `*/5` vod), and séries/sous-titres/whisper are parked in a
+**staggered night window 0-5 UTC** (see the 2026-06-29 v2 note for the full design).
+Each job is a queue-drainer, so a tick that finds nothing is cheap. Re-raise / lower
+cadence as catalogue turnover and user activity change.
 
 ## Off-peak window (provider single-connection collision)
 
@@ -31,11 +31,13 @@ open several provider connections per tick (internal `concurrency` 3–4), so wh
 a tick overlapped a user opening a series fiche, the user-facing `series-info`
 (via the gateway) took the 429 — the "I'm connected nowhere yet it 429s" symptom.
 
-Fix (current design — see the dated note below for the full rationale): only the
-**bulk movie probe** (`norva-audio-langs-untagged`) runs 24/7 at **concurrency 1**
-(one slot, kept ~100 % busy by frequency, never by parallelism); every *other*
-provider-touching job is parked in a **staggered 00:00–05:58 UTC off-peak window**
-so it never disputes the slot with the bulk drainer *or* with a daytime user.
+Fix (current design — full rationale in the 2026-06-29 v2 note below): this
+single-connection rule applies to **every panel** (super8k & AÎRO too — all
+mono-connexion; apdxes even 429s on metadata). Per provider, **films-audio** runs in a
+**day window 6-23 UTC** at concurrency 1 (vod conc 2 for apdxes), and
+**séries/sous-titres/whisper** run in a **staggered night window 0-5 UTC** (cycle 9,
+3 min apart) so two accesses never hit the one slot at once — neither each other nor a
+daytime user.
 `series-info` is additionally cached server-side (`cloud_series_info_cache` +
 `norva-series-info`), so a once-fetched series never hits the provider again. The
 TMDB jobs below touch TMDB (not the provider) but are *also* parked off-peak to
@@ -43,37 +45,52 @@ keep the daytime egress quiet. The catalogue auto-refresh (`norva-auto-refresh-d
 jobid 1) also touches the provider when a sync comes due — move it off-peak too if
 daytime re-syncs bite.
 
-> **2026-06-29 — débit max single-slot, par provider.** Deux comptes, deux providers
-> mono-connexion **distincts** : `super8k.top` (owner `c5be5ac4…`) et `apdxes.xyz`
-> (frère `0b971271…`). Les crons sont **par-uuid** ; comme les providers diffèrent, les
-> deux flottes tournent **en parallèle sans collision** (le slot unique est par compte).
+> **2026-06-29 (v2) — parité premium 4 dimensions × N providers, fenêtres disjointes.**
+> **TROIS** providers mono-connexion : `super8k.top` (owner `c5be5ac4…`), `apdxes.xyz`
+> (frère `0b971271…`), `mandara.cc` = panel **AÎRO** (compte catalogue dédié `7bdab1df…`).
+> Les crons sont **par-uuid**. Providers distincts = comptes/slots distincts → **flottes en
+> parallèle sans collision** entre providers. Les écritures atterrissent dans les caches
+> cross-user keyés par **`providerKey`** (cf. `docs/PROVIDER-IDENTITY-DEDUP.md`) → tout user
+> d'un **miroir** du même panel hérite instantanément.
 >
-> **Levier sur un slot unique = FRÉQUENCE, pas concurrence.** En conc ≥2 sur un
-> mono-connexion, les connexions surnuméraires se font 429 (1 seul slot) → travail
-> gaspillé. Donc : **conc 1**, mais lancé **en continu** pour garder le slot occupé ~100%.
+> **4 dimensions par provider** : audio films · audio séries · sous-titres films · whisper
+> (résidu non-tagué). `langs` (films tagués) a été **supprimé** : redondant avec `untagged`
+> (qui sonde TOUS les films non résolus, tagués compris).
 >
-> **super8k : `vod` est mort** (`get_vod_info` renvoie vide → `relayEmpty:60`) → seul le
-> **`probe`** (lecture d'entête via relais, ~50% résolu/tick) marche. Le bulk films probe
-> tourne **24/7 toutes les 3 min** (drainage principal) ; les jobs secondaires passent
-> **off-peak** pour ne pas lui disputer le slot en journée. ~6k résolus/jour → catalogue
-> résoluble (~1 sem). Le résidu `noLang` (fichier sans métadonnée) → whisper / inline.
+> **Slot unique = il faut time-sharer dans le TEMPS, pas paralléliser.** Tout ce qui touche
+> le provider (probe ET, pour apdxes, même les métadonnées vod) compte pour l'unique
+> connexion. Donc, par provider :
+> - **Films (audio)** = le gros → fenêtre **jour 6-23 UTC**, fréquent (`*/3`/`*/5`).
+> - **Séries + sous-titres + whisper** → fenêtre **nuit 0-5 UTC**, **décalés de 3 min**
+>   (cycle 9 : `0-59/9`, `3-59/9`, `6-59/9`) → jamais deux accès simultanés sur le slot.
 >
-> **apdxes : `vod` MARCHE** (`updated:6/8`, `relayEmpty:0`) → backfill **`vod`** rapide
-> (métadonnées, non limité par le slot) → ses ~8k finis en < 1 jour.
->
-> Si l'owner regarde un film pendant un tick : au pire 1 (lui) + 1 (probe bref) → un
-> retry géré (logique 458/429). Réversible : restaurer `… 3,4 * * *` (off-peak).
+> **Méthode par panel** : `vod` (`get_vod_info` expose l'audio → métadonnées via relais,
+> rapide) si dispo, sinon **`probe`** (lecture d'entête, ~500/h en conc 1). Vérifier d'abord
+> `get_vod_info` (une ligne d'essai suffit) :
+> - **super8k** : `vod` mort (`relayEmpty:60`) → tout en **probe**. Gros chantier : ~92k
+>   titres, ~7 % résolus, débit ~500/h → **~1 semaine** pour l'audio films (PAS « à jour »,
+>   ancienne note erronée corrigée). Sous-titres/séries (nuit) → plus lents (semaines) ; le
+>   cache **persiste** donc ça se complète tout seul.
+> - **apdxes** : `vod` MARCHE (`relayEmpty:0`) → films en **vod** (rapide, ~1 jour). Mais
+>   apdxes **429 sur toute concurrence** (même métadonnée) → vod aussi restreint 6-23.
+> - **AÎRO** : `vod` mort (`get_vod_info` = métadonnées descriptives, pas de bloc audio) →
+>   tout en **probe**. ~9,5k films + 2,2k séries.
 
-### Flotte backfill provider (audio / sous-titres) — touche le slot de stream
+### Flotte backfill provider — 4 dimensions × 3 providers (touche le slot)
 
-| Job | uuid / provider | Travail | Cadence | limit / conc |
+| Provider (uuid) | Films audio — jour 6-23 | Séries — `0-59/9` 0-5 | Sous-titres — `3-59/9` 0-5 | Whisper — `6-59/9` 0-5 |
 |---|---|---|---|---|
-| `norva-audio-langs-untagged` | super8k (`c5be5ac4…`) | movie **probe** (bulk, tous non-résolus) | `*/3 * * * *` — 24/7, toutes les 3 min | 25 / 1 |
-| `norva-audio-langs` | super8k | movie probe (tagués prioritaires) | `0,30 0-5 * * *` — off-peak | 15 / 1 |
-| `norva-audio-langs-series` | super8k | series probe | `2,32 0-5 * * *` — off-peak | 15 / 1 |
-| `norva-subtitle-backfill-movie` | super8k | movie subtitle | `6,36 0-5 * * *` — off-peak | 10 / 1 |
-| `norva-audio-langs-whisper` | super8k | movie **whisper** (résidu non-tagué) | `8,28,48 0-5 * * *` — off-peak | 4 / 1 |
-| `norva-audio-langs-jeremy` | apdxes (`0b971271…`) | movie **vod** (métadonnées, rapide) | `3,8,…,58 * * * *` — toutes les 5 min | 50 / 2 |
+| **super8k** (`c5be5ac4…`) probe | `norva-audio-langs-untagged` `*/3` (25) | `norva-audio-langs-series` (15) | `norva-subtitle-backfill-movie` (10) | `norva-audio-langs-whisper` (4) |
+| **apdxes** (`0b971271…`) vod films | `norva-audio-langs-jeremy` **vod** `3-58/5` (50, conc 2) | `norva-audio-langs-jeremy-series` (15) | `norva-subtitle-backfill-jeremy` (10) | `norva-audio-langs-jeremy-whisper` (4) |
+| **AÎRO** (`7bdab1df…`) probe | `norva-audio-langs-airo` `1-58/3` (25) | `norva-audio-langs-airo-series` (15) | `norva-subtitle-backfill-airo` (10) | `norva-audio-langs-airo-whisper` (4) |
+
+(limit entre parenthèses ; conc 1 sauf apdxes films vod conc 2. Sous-titres = `target:subtitle` ;
+non redondant avec l'audio : couvre les films dont l'audio fut déduit par nom — donc jamais
+header-probé — dont les sous-titres restent inconnus. whisper = `mode:whisper`.)
+
+> **Note pg_cron** : les 3 providers ont leurs jobs de nuit aux mêmes minutes (0/3/6…) →
+> jusqu'à 3 jobs simultanés (comptes distincts → aucune collision provider). Si un « job
+> startup timeout » apparaît, décaler les minutes par provider.
 
 ### TMDB & maintenance — ne touchent PAS le slot de stream
 
@@ -86,23 +103,26 @@ daytime re-syncs bite.
 | `norva-series-info-cache-prune` | pure SQL `delete from cloud_series_info_cache` | `15 2 * * *` — quotidien 02:15 |
 
 > Each `audio-backfill` job carries an explicit `userId` — **one driving account per
-> provider** (`c5be5ac4…` for super8k, `0b971271…` for apdxes). Enrichment writes land
-> in the cross-user global caches (`catalog_file_tracks`, `catalog_titles`), shared by
-> every user of that provider, so a single account drives each provider's fleet and any
-> later same-provider signup inherits the results instantly.
+> provider** (`c5be5ac4…` super8k, `0b971271…` apdxes, `7bdab1df…` AÎRO). Enrichment writes
+> land in the cross-user global caches (`catalog_file_tracks` keyed by **providerKey**,
+> `catalog_titles`), shared by every user of that panel (all mirror URLs collapse to one
+> providerKey), so a single account drives each panel's fleet and any later same-panel
+> signup inherits the results instantly — even after the driving account is deleted (the
+> global caches are not tied to a user/source; see `docs/PROVIDER-IDENTITY-DEDUP.md`).
 
 ## (Re)create — run via execute_sql, NOT as a migration
 
 ```sql
 -- Audio/subtitle backfill → norva-playback/audio-backfill  (Vault: norva_backfill_token)
--- DEUX providers mono-connexion distincts → deux flottes en parallèle (slot par compte).
--- Levier sur 1 slot = FRÉQUENCE, pas concurrence : conc 1 partout sur super8k, mais le bulk
--- tourne 24/7. apdxes accepte 'vod' (métadonnées via relais, non limité par le slot) → conc 2.
--- timeout 110s < intervalle, pour ne jamais empiler deux ticks.
+-- TROIS providers mono-connexion, 4 dimensions chacun. Slot unique par compte → on TIME-SHARE
+-- dans le temps : films audio le JOUR (6-23), séries/sous-titres/whisper la NUIT (0-5) décalés
+-- de 3 min (cycle 9 : 0-59/9, 3-59/9, 6-59/9) → jamais deux accès simultanés sur le slot.
+-- super8k/AÎRO = probe (vod mort) ; apdxes = vod pour les films (mais 429 sur TOUTE concurrence
+-- → vod aussi restreint 6-23). timeout 110s < intervalle. providerKey : cf PROVIDER-IDENTITY-DEDUP.
 
--- super8k BULK : header-probe de TOUS les films non-résolus (sans requireTag), 24/7 toutes
--- les 3 min. C'est le drainage principal (get_vod_info renvoie vide sur super8k → 'vod' mort).
-select cron.schedule('norva-audio-langs-untagged', '*/3 * * * *', $cron$
+-- ───────── super8k (probe) — userId c5be5ac4… ─────────
+-- films audio bulk : header-probe de TOUS les films non-résolus, jour 6-23 (libère 0-5).
+select cron.schedule('norva-audio-langs-untagged', '*/3 6-23 * * *', $cron$
   select net.http_post(
     url := 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-playback/audio-backfill',
     headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'norva_backfill_token')),
@@ -110,19 +130,9 @@ select cron.schedule('norva-audio-langs-untagged', '*/3 * * * *', $cron$
     timeout_milliseconds := 110000
   );
 $cron$);
+-- (`norva-audio-langs` films-tagués SUPPRIMÉ — redondant avec untagged, qui sonde TOUS les films.)
 
--- super8k : films tagués prioritaires (requireTag), off-peak pour ne pas disputer le slot au bulk.
-select cron.schedule('norva-audio-langs', '0,30 0-5 * * *', $cron$
-  select net.http_post(
-    url := 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-playback/audio-backfill',
-    headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'norva_backfill_token')),
-    body := jsonb_build_object('userId','c5be5ac4-3700-4a25-9509-8eaf7771fdb6','type','movie','mode','probe','requireTag','multi,vostfr,vo,vff,vfq','limit',15,'concurrency',1),
-    timeout_milliseconds := 110000
-  );
-$cron$);
-
--- super8k : séries (probe), off-peak.
-select cron.schedule('norva-audio-langs-series', '2,32 0-5 * * *', $cron$
+select cron.schedule('norva-audio-langs-series', '0-59/9 0-5 * * *', $cron$
   select net.http_post(
     url := 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-playback/audio-backfill',
     headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'norva_backfill_token')),
@@ -131,8 +141,7 @@ select cron.schedule('norva-audio-langs-series', '2,32 0-5 * * *', $cron$
   );
 $cron$);
 
--- super8k : sous-titres films, off-peak.
-select cron.schedule('norva-subtitle-backfill-movie', '6,36 0-5 * * *', $cron$
+select cron.schedule('norva-subtitle-backfill-movie', '3-59/9 0-5 * * *', $cron$
   select net.http_post(
     url := 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-playback/audio-backfill',
     headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'norva_backfill_token')),
@@ -141,9 +150,18 @@ select cron.schedule('norva-subtitle-backfill-movie', '6,36 0-5 * * *', $cron$
   );
 $cron$);
 
--- apdxes (frère, 0b971271…) : get_vod_info MARCHE (relayEmpty:0) → backfill 'vod' rapide
--- (métadonnées via relais, NON limité par le slot de stream) → conc 2, toutes les 5 min, 24/7.
-select cron.schedule('norva-audio-langs-jeremy', '3,8,13,18,23,28,33,38,43,48,53,58 * * * *', $cron$
+select cron.schedule('norva-audio-langs-whisper', '6-59/9 0-5 * * *', $cron$
+  select net.http_post(
+    url := 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-playback/audio-backfill',
+    headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'norva_backfill_token')),
+    body := jsonb_build_object('userId','c5be5ac4-3700-4a25-9509-8eaf7771fdb6','type','movie','mode','whisper','limit',4,'concurrency',1),
+    timeout_milliseconds := 110000
+  );
+$cron$);
+
+-- ───────── apdxes (vod films) — userId 0b971271… ─────────
+-- films audio : get_vod_info MARCHE → 'vod' (métadonnées). 429 sur toute concurrence → 6-23, conc 2.
+select cron.schedule('norva-audio-langs-jeremy', '3-58/5 6-23 * * *', $cron$
   select net.http_post(
     url := 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-playback/audio-backfill',
     headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'norva_backfill_token')),
@@ -152,13 +170,66 @@ select cron.schedule('norva-audio-langs-jeremy', '3,8,13,18,23,28,33,38,43,48,53
   );
 $cron$);
 
--- whisper: detect the truly-untagged residual (multi-track titles with an unknown
--- track that probe/vod can't resolve). Serialized; small. See WHISPER-AUDIO-* doc.
-select cron.schedule('norva-audio-langs-whisper', '8,28,48 0-5 * * *', $cron$
+select cron.schedule('norva-audio-langs-jeremy-series', '0-59/9 0-5 * * *', $cron$
   select net.http_post(
     url := 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-playback/audio-backfill',
     headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'norva_backfill_token')),
-    body := jsonb_build_object('userId','c5be5ac4-3700-4a25-9509-8eaf7771fdb6','type','movie','mode','whisper','limit',4,'concurrency',1),
+    body := jsonb_build_object('userId','0b971271-9fa1-4547-8dc6-ab64dcbb9d33','type','series','mode','probe','limit',15,'concurrency',1),
+    timeout_milliseconds := 110000
+  );
+$cron$);
+
+select cron.schedule('norva-subtitle-backfill-jeremy', '3-59/9 0-5 * * *', $cron$
+  select net.http_post(
+    url := 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-playback/audio-backfill',
+    headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'norva_backfill_token')),
+    body := jsonb_build_object('userId','0b971271-9fa1-4547-8dc6-ab64dcbb9d33','type','movie','target','subtitle','limit',10,'concurrency',1),
+    timeout_milliseconds := 110000
+  );
+$cron$);
+
+select cron.schedule('norva-audio-langs-jeremy-whisper', '6-59/9 0-5 * * *', $cron$
+  select net.http_post(
+    url := 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-playback/audio-backfill',
+    headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'norva_backfill_token')),
+    body := jsonb_build_object('userId','0b971271-9fa1-4547-8dc6-ab64dcbb9d33','type','movie','mode','whisper','limit',4,'concurrency',1),
+    timeout_milliseconds := 110000
+  );
+$cron$);
+
+-- ───────── AÎRO (mandara.cc, probe) — userId 7bdab1df… ─────────
+select cron.schedule('norva-audio-langs-airo', '1-58/3 6-23 * * *', $cron$
+  select net.http_post(
+    url := 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-playback/audio-backfill',
+    headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'norva_backfill_token')),
+    body := jsonb_build_object('userId','7bdab1df-80e6-46f9-bcdf-84b6595819a8','type','movie','mode','probe','limit',25,'concurrency',1),
+    timeout_milliseconds := 110000
+  );
+$cron$);
+
+select cron.schedule('norva-audio-langs-airo-series', '0-59/9 0-5 * * *', $cron$
+  select net.http_post(
+    url := 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-playback/audio-backfill',
+    headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'norva_backfill_token')),
+    body := jsonb_build_object('userId','7bdab1df-80e6-46f9-bcdf-84b6595819a8','type','series','mode','probe','limit',15,'concurrency',1),
+    timeout_milliseconds := 110000
+  );
+$cron$);
+
+select cron.schedule('norva-subtitle-backfill-airo', '3-59/9 0-5 * * *', $cron$
+  select net.http_post(
+    url := 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-playback/audio-backfill',
+    headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'norva_backfill_token')),
+    body := jsonb_build_object('userId','7bdab1df-80e6-46f9-bcdf-84b6595819a8','type','movie','target','subtitle','limit',10,'concurrency',1),
+    timeout_milliseconds := 110000
+  );
+$cron$);
+
+select cron.schedule('norva-audio-langs-airo-whisper', '6-59/9 0-5 * * *', $cron$
+  select net.http_post(
+    url := 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-playback/audio-backfill',
+    headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'norva_backfill_token')),
+    body := jsonb_build_object('userId','7bdab1df-80e6-46f9-bcdf-84b6595819a8','type','movie','mode','whisper','limit',4,'concurrency',1),
     timeout_milliseconds := 110000
   );
 $cron$);
