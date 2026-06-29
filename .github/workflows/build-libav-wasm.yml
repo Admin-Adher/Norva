@@ -12,9 +12,20 @@ on:
         description: Branch to build on and commit the artifacts to
         required: true
         default: claude/webm-block-additions-error-pj16xm
+  # API dispatch isn't available to the integration token, so also run when the build
+  # script / this workflow changes on the feature branch (the WASM commit lands in a
+  # different path, so it does not re-trigger).
+  push:
+    branches: [claude/webm-block-additions-error-pj16xm]
+    paths:
+      - scripts/build-libav-norva.sh
+      - .github/workflows/build-libav-wasm.yml
 
 permissions:
   contents: write
+
+env:
+  TARGET_REF: ${{ github.event.inputs.ref || github.ref_name }}
 
 jobs:
   build:
@@ -23,7 +34,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.ref }}
+          ref: ${{ github.event.inputs.ref || github.ref_name }}
 
       - name: Setup Node
         uses: actions/setup-node@v4
