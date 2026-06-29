@@ -132,6 +132,18 @@ export default {
         return await relayProbeAudio(request, env, claims, ctx);
       }
 
+      if (url.pathname.startsWith("/detect-language/")) {
+        if (request.method !== "POST") {
+          return json(request, env, { error: "Method not allowed" }, 405);
+        }
+        const token = decodeURIComponent(url.pathname.slice("/detect-language/".length));
+        const claims = await verifyRelayToken(token, env.RELAY_TOKEN_SECRET);
+        if (claims.exp * 1000 < Date.now()) {
+          return json(request, env, { error: "Relay token expired" }, 401);
+        }
+        return await relayDetectLanguage(request, env, claims);
+      }
+
       return json(request, env, { error: "Route not found" }, 404);
     } catch (error) {
       const status = error instanceof HttpError ? error.status : 500;
@@ -1647,6 +1659,100 @@ function mergeCors(headers, cors) {
   for (const [name, value] of Object.entries(cors)) {
     headers.set(name, value);
   }
+}
+
+// Phase 2 — audio-track LANGUAGE detection. The gateway extracts a short mono/16 kHz WAV of
+// an untagged audio track (it has ffmpeg; this Worker can't decode) and POSTs the bytes here.
+// Workers AI Whisper transcribes in the SOURCE language; we then detect the language of the
+// transcript. Returns a code ONLY when confident — callers ENRICH, never override a
+// provider/demux-supplied language.
+async function relayDetectLanguage(request, env, claims) {
+  if (!env.AI) return json(request, env, { error: "Workers AI not configured" }, 503);
+  const buf = await request.arrayBuffer();
+  if (!buf || buf.byteLength < 4000) return json(request, env, { error: "Audio clip too small" }, 400);
+  if (buf.byteLength > 16 * 1024 * 1024) return json(request, env, { error: "Audio clip too large" }, 413);
+  let text = "";
+  try {
+    const out = await env.AI.run("@cf/openai/whisper", { audio: [...new Uint8Array(buf)] });
+    text = (out && typeof out.text === "string") ? out.text : "";
+  } catch (e) {
+    return json(request, env, { error: "Transcription failed", details: String((e && e.message) || e) }, 502);
+  }
+  const det = detectLanguageFromText(text);
+  return json(request, env, {
+    language: det.confident ? det.lang : null, // only a confident result is actionable
+    candidate: det.lang,
+    confidence: det.score,
+    confident: det.confident,
+    wordCount: det.words,
+    sample: text.slice(0, 160),
+  });
+}
+
+// Detect the language of a (Whisper) transcript with zero dependencies. Non-Latin scripts are
+// resolved by Unicode range (high confidence, incl. Persian/Kurdish/Urdu vs Arabic by the
+// letters Arabic lacks, and Ukrainian/Serbian vs Russian by distinctive Cyrillic letters);
+// Latin-script languages by stop-word frequency. Returns { lang, score, confident, words }.
+// `confident` is conservative so the caller only enriches on a clear result.
+function detectLanguageFromText(raw) {
+  const text = String(raw || "").trim();
+  const letters = text.replace(/[^\p{L}]/gu, "");
+  const words = text.split(/\s+/).filter(Boolean);
+  const out = (lang, score, confident) => ({ lang, score, confident, words: words.length });
+  if (letters.length < 12) return out(null, 0, false); // script detection needs only letters
+
+  const total = letters.length;
+  const frac = (re) => (text.match(re) || []).length / total;
+  const arabic = frac(/[؀-ۿݐ-ݿ]/g);
+  if (arabic > 0.3) {
+    // Letters Arabic does not use → Perso-Arabic family.
+    const perso = /[پچژگیک]/.test(text); // pe che zhe gaf farsi-yeh keheh
+    if (perso) {
+      if (/[ڵەێۆڕ]/.test(text)) return out("ku", 0.8, true); // Sorani Kurdish
+      if (/[ھٹڈںہ]/.test(text)) return out("ur", 0.75, true); // Urdu
+      return out("fa", 0.82, true); // Persian
+    }
+    return out("ar", 0.85, true);
+  }
+  if (frac(/[֐-׿]/g) > 0.3) return out("he", 0.9, true);
+  if (frac(/[Ͱ-Ͽ]/g) > 0.3) return out("el", 0.9, true);
+  if (frac(/[぀-ヿ]/g) > 0.08) return out("ja", 0.9, true);
+  if (frac(/[가-힯]/g) > 0.2) return out("ko", 0.9, true);
+  if (frac(/[一-鿿]/g) > 0.2) return out("zh", 0.82, true);
+  if (frac(/[ऀ-ॿ]/g) > 0.3) return out("hi", 0.82, true);
+  if (frac(/[฀-๿]/g) > 0.3) return out("th", 0.9, true);
+  if (frac(/[Ѐ-ӿ]/g) > 0.3) {
+    if (/[іїєґ]/i.test(text)) return out("uk", 0.8, true);
+    if (/[ђћњљџ]/i.test(text)) return out("sr", 0.75, true);
+    return out("ru", 0.78, true);
+  }
+
+  // Latin script → stop-word frequency (needs whitespace-delimited words).
+  if (words.length < 3) return out(null, 0, false);
+  const lower = " " + text.toLowerCase().replace(/[^\p{L}\s]/gu, " ").replace(/\s+/g, " ").trim() + " ";
+  const STOP = {
+    en: ["the", "and", "you", "that", "this", "with", "for", "are", "was", "have", "what", "not", "but"],
+    fr: ["le", "la", "les", "de", "des", "un", "une", "et", "est", "que", "pas", "vous", "nous", "je", "ne", "pour", "dans"],
+    es: ["el", "la", "los", "las", "de", "que", "no", "es", "un", "una", "por", "con", "para", "pero", "como", "está"],
+    it: ["il", "la", "che", "di", "non", "un", "una", "per", "sono", "con", "ma", "questo", "come", "ci"],
+    pt: ["o", "a", "de", "que", "não", "um", "uma", "para", "com", "você", "mais", "como", "mas", "está"],
+    de: ["der", "die", "das", "und", "ist", "nicht", "ein", "eine", "ich", "wir", "mit", "auch", "was", "sie"],
+    nl: ["de", "het", "een", "en", "ik", "je", "niet", "dat", "is", "wat", "met", "voor", "maar"],
+    tr: ["bir", "bu", "ve", "için", "ben", "sen", "var", "yok", "ama", "çok", "daha", "gibi", "değil"],
+    ro: ["si", "de", "la", "un", "nu", "este", "ce", "cu", "mai", "dar", "sa", "pe", "să"],
+    pl: ["nie", "to", "jest", "sie", "się", "na", "że", "co", "jak", "ale", "tak", "jestem"],
+    sv: ["och", "att", "det", "som", "en", "ett", "jag", "är", "inte", "har", "den", "för"],
+  };
+  let best = null, bestScore = 0, second = 0;
+  for (const [lang, stops] of Object.entries(STOP)) {
+    let hits = 0;
+    for (const w of stops) if (lower.includes(" " + w + " ")) hits++;
+    const score = hits / stops.length;
+    if (score > bestScore) { second = bestScore; bestScore = score; best = lang; }
+    else if (score > second) second = score;
+  }
+  const confident = bestScore >= 0.18 && (bestScore - second) >= 0.08;
+  return out(best, +bestScore.toFixed(2), confident);
 }
 
 function json(request, env, body, status = 200) {
