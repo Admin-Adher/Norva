@@ -142,6 +142,16 @@ group by 1,2,3 order by max(e.created_at) desc;
   seul **le chiffre** manquait. Fix : `estimateDurationFromFormat()` (gateway) = `size*8/bitrate`
   (estimation CBR) quand `format.duration` est absent → remplit `durationSeconds` → seek bar. Ne touche
   rien quand `ffprobe` donne déjà une durée.
+  - **Vraie racine (GATEWAY_VERSION 58)** : l'estimation v57 ne tournait jamais car la **sonde codec
+    était purement et simplement désactivée pour le TS** ! `shouldProbeCodecProfile()` faisait
+    `if (container === 'm3u8' || container === 'ts') return false;`. Or le live est déjà exclu plus haut
+    (`streamType==='live'`), donc cette ligne ne bloquait que le **TS VOD**. Résultat : aucun
+    `codecProfile` → aucune durée. Cross-check DB : `cloud_media_items.playback_hint.codecProfile` pour
+    le titre = `durationSeconds`/`bitRate`/`probedAt` **tous nuls**. Fix : ne plus exclure `ts` (ni
+    `m2ts`/`mts`) pour la VOD — seul `m3u8` (playlist, pas un fichier) et le live restent exclus. La
+    sonde s'exécute avant le transcode (séquentiel → pas de 2ᵉ connexion concurrente sur un mono-slot),
+    est cachée, et un échec est mémorisé (dégradation propre). Logs de diag ajoutés côté player
+    (`[WatchPage] timeline diag`) : `codecProfilePresent`, `codecProfileDurationSeconds`, `durationHint`.
 
 ### Bug #4 — mkv ne démarre pas alors que mp4 oui : IP datacenter bloquée (GATEWAY_VERSION 51) ✅ racine
 - **Symptôme** : sur le **même provider**, les mp4 (`direct`) jouaient mais les mkv (`engine`/`relay`) `458`aient, **au même instant**.
@@ -180,7 +190,7 @@ Les fournisseurs IPTV bloquent les plages d'IP datacenter (anti-revente). Le nav
 ## 5. État final (vérifié en prod)
 - mkv via moteur : `first_frame` + `play_started` + resume/pause/seek en `playback_mode='engine'`, **plus aucun `CHUNK_DEMUXER`**.
 - Combinaison gagnante = **proxy résidentiel** (octets circulent) + **muxer non-seekable** (octets valides).
-- Versions : `ENGINE_VERSION 25` (TS détecté → repli gateway transcode ; `sourceHead` sur échec d'ouverture), `GATEWAY_VERSION 51`.
+- Versions : `ENGINE_VERSION 25` (TS détecté → repli gateway transcode ; `sourceHead` sur échec d'ouverture), `GATEWAY_VERSION 58` (sonde codec autorisée pour le TS VOD + estimation de durée → seek bar).
 
 ## 6. Runbook — « un mkv ne se lance plus »
 1. `GET https://norva-production.up.railway.app/health` → vérifier `version` et `providerProxy`.

@@ -150,7 +150,7 @@ const RAW_PROVIDER_RETRY_DELAYS_MS = [1500, 5000, 9000, 9000, 9000, 9000, 9000, 
 const FFMPEG_USER_AGENT = process.env.FFMPEG_USER_AGENT ||
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36 Norva/1.0';
 const MAX_LOG_TAIL = 12000;
-const GATEWAY_VERSION = 57;
+const GATEWAY_VERSION = 58;
 // Browser playback fetches HLS playlists/segments cross-origin, so these must
 // list every Norva web origin or the browser blocks the response (CORS). Keep
 // in sync with the relay's ALLOWED_ORIGINS (services/norva-relay/wrangler.jsonc).
@@ -1818,13 +1818,19 @@ function shouldProbeMissingSubtitleTracks(profile, playbackHint, sourceUrl) {
 function shouldProbeCodecProfile(playbackHint, sourceUrl) {
     const hint = asRecord(playbackHint);
     const streamType = String(hint.streamType || hint.stream_type || hint.itemType || hint.item_type || '').toLowerCase();
+    // Live/channel TS is an endless stream — never probe it (ffprobe would hang). VOD is finite.
     if (streamType === 'live' || streamType === 'channel') return false;
+    // m3u8 is a playlist, not a probeable media file. NOTE: `ts` is intentionally NOT skipped here —
+    // a VOD .ts movie (very common on IPTV) is a finite file we DO want to probe, both for its codec
+    // metadata and, crucially, its duration (→ durationSeconds → the player's seek bar). Live TS is
+    // already excluded above, so allowing it here only affects on-demand titles.
     const container = String(hint.container || '').toLowerCase();
-    if (container === 'm3u8' || container === 'ts') return false;
+    if (container === 'm3u8') return false;
     try {
         const extension = path.extname(new URL(sourceUrl).pathname).replace(/^\./, '').toLowerCase();
-        if (extension === 'm3u8' || extension === 'ts') return false;
-        return ['mp4', 'mkv', 'avi', 'mov', 'webm', 'wmv', 'flv', 'mpeg', 'mpg', 'vob'].includes(extension) || streamType === 'movie' || streamType === 'series';
+        if (extension === 'm3u8') return false;
+        return ['mp4', 'mkv', 'avi', 'mov', 'webm', 'wmv', 'flv', 'mpeg', 'mpg', 'vob', 'ts', 'm2ts', 'mts'].includes(extension)
+            || streamType === 'movie' || streamType === 'series';
     } catch (_) {
         return streamType === 'movie' || streamType === 'series';
     }
