@@ -6098,9 +6098,10 @@ class WatchPage {
         const c = this.content || {};
         const type = String(this.contentType || c.type || '').toLowerCase();
         if (type !== 'movie') return null;
-        // The edge resolves against the CLOUD source id (a UUID), not the raw provider/local source
-        // id on content.sourceId (e.g. "900016"). getTelemetrySourceId() returns the cloud UUID.
-        const sourceId = (this.getTelemetrySourceId ? this.getTelemetrySourceId() : '') || '';
+        // Raw source id as the player holds it (cloud UUID OR a local/provider alias like "900016").
+        // requestAiSubtitles() resolves it to the cloud UUID before calling the edge; here we just
+        // need a stable, present id so the menu entry shows and the in-session key is consistent.
+        const sourceId = String((this.getTelemetrySourceId ? this.getTelemetrySourceId() : '') || c.sourceId || c.source_id || c.cloudSourceId || '');
         const externalId = String(c.id || c.streamId || c.stream_id || (this.getTelemetryItemId ? this.getTelemetryItemId() : '') || '');
         if (!sourceId || !externalId) return null;
         const titleId = String(c.titleId || c.title_id || c.data?.titleId || '');
@@ -6217,6 +6218,14 @@ class WatchPage {
         const params = this._aiSubtitleParams();
         const key = this._aiSubtitleKey();
         const api = window.NorvaCloud.playback;
+
+        // The edge keys every cloud route off the CLOUD source UUID, but content.sourceId may be a
+        // local/provider alias (e.g. "900016", a browser-local id). Resolve it the same way the
+        // playback path does, so the edge can find the title. The in-session key stays on the raw id.
+        try {
+            const cloudId = await window.API?.resolveCloudSourceId?.(params.sourceId);
+            if (cloudId) params.sourceId = String(cloudId);
+        } catch (_) { /* fall back to the raw id */ }
 
         // Same title, already produced this session → just (re)attach from cache.
         if (this.aiSubtitleState === 'ready' && this.aiSubtitleVtt && this._aiSubtitleTitleId === key) {

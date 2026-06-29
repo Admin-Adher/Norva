@@ -1959,6 +1959,7 @@ const CloudAdapter = (() => {
         request,
         isCloudMode: _shouldUseCloud,
         hasUserSession,
+        resolveSourceId,
         cloudSourcesApi,
         cloudMediaApi,
         cloudLiveApi,
@@ -1986,6 +1987,11 @@ function routeToSubscribeWall(error) {
 const API = {
     isCloudMode: () => _shouldUseCloud(),
     getMode: () => _shouldUseCloud() ? 'cloud' : 'local',
+
+    // Resolve a (possibly local/provider) source id to the CLOUD source UUID — the id every
+    // cloud edge route keys off. Mirrors what getStreamUrl does internally. Returns the input
+    // unchanged when not in cloud mode or already a UUID.
+    resolveCloudSourceId: (id) => (_shouldUseCloud() ? CloudAdapter.resolveSourceId(id) : Promise.resolve(id)),
 
     /**
      * Make API request
