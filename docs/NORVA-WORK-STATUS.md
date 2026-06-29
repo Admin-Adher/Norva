@@ -125,3 +125,4 @@ n'aurait fait que contourner le symptôme).
 - `docs/WEBENGINE-INBAND-SUBTITLES.md` — sous-titres texte in-band
 - `docs/WHISPER-AUDIO-LANGUAGE-DETECTION.md` — Phase 2 (whisper.cpp self-hosted)
 - `supabase/functions/ENRICHMENT_CRON_SETUP.md` — **flotte backfill pg_cron** (cadences par-provider, SQL réel, rationale fréquence-vs-concurrence) ⭐
+- `docs/PROVIDER-IDENTITY-DEDUP.md` — **audit miroirs d'URL + design `provider_key`** (l'URL ≠ le fournisseur ; dédup cross-user) ⭐
