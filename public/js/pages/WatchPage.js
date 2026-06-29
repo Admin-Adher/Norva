@@ -2384,8 +2384,12 @@ class WatchPage {
         try { this.updateTranscodeStatus('transcoding', 'Conversion serveur…'); } catch (_) {}
         let result;
         try {
+            // Force a FULL re-encode (not remux): the engine already proved this is non-browser-safe
+            // real media (TS, possibly mislabeled mp4), and a TS stream-copy remux into HLS is the
+            // exact thing that just failed. gatewayMode:'transcode' skips the doomed remux attempt.
             result = await API.proxy.xtream.getStreamUrl(c.sourceId, c.id, type, c.containerExtension || 'mp4', {
-                mode: 'transcode', seekOffset: startOffset, startOffset, resumeTime: startOffset
+                mode: 'transcode', gatewayMode: 'transcode', audioMode: 'transcode',
+                seekOffset: startOffset, startOffset, resumeTime: startOffset
             });
         } catch (err) {
             console.warn('[WatchPage] transcode fallback resolve failed:', err?.message || err);

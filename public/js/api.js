@@ -1033,7 +1033,10 @@ const CloudAdapter = (() => {
     function shouldVodUseGatewayTranscode(container, playbackHint = {}) {
         const normalizedContainer = String(container || '').split('?')[0].split('#')[0].toLowerCase();
         const videoCodec = normalizeCodecToken(playbackHint.videoCodec);
-        const unsafeContainer = ['mkv', 'webm', 'avi', 'wmv', 'flv', 'vob'].includes(normalizedContainer);
+        // MPEG-TS/PS (ts/m2ts/mpeg/…) join the classic unsafe containers: a stream-COPY remux of TS
+        // into HLS is unreliable (PCR/timestamp discontinuities, codec quirks → manifestLoadError),
+        // so TS goes straight to a full re-encode instead of failing remux then retrying.
+        const unsafeContainer = ['mkv', 'webm', 'avi', 'wmv', 'flv', 'vob', 'ts', 'mpegts', 'm2ts', 'mts', 'mpeg', 'mpg', 'ps'].includes(normalizedContainer);
         const unsafeVideo = videoCodec && !(
             videoCodec.includes('h264') ||
             videoCodec.includes('avc1') ||
