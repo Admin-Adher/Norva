@@ -23,6 +23,14 @@ const XTREAM_REQUEST_TIMEOUT_MS = clampInt(process.env.XTREAM_REQUEST_TIMEOUT_MS
 const CODEC_PROBE_TIMEOUT_MS = clampInt(process.env.CODEC_PROBE_TIMEOUT_MS, 12_000, 1_000, 30_000);
 const CODEC_PROBE_ANALYZE_DURATION_US = clampInt(process.env.CODEC_PROBE_ANALYZE_DURATION_US, 2_000_000, 250_000, 20_000_000);
 const CODEC_PROBE_SIZE_BYTES = clampInt(process.env.CODEC_PROBE_SIZE_BYTES, 2_000_000, 64_000, 20_000_000);
+// Cache the ffprobe codec profile per source URL so repeated probes of the SAME
+// file (audio-menu re-open, /subtitle enumeration, a fresh session) don't each open
+// a new provider connection — that extra connection is what a single-slot provider
+// 458s, intermittently blanking the audio-track languages. TTL-bounded + size-capped;
+// only successful profiles are cached, so a transient probe failure still retries.
+// Set CODEC_PROFILE_CACHE_TTL_MS=0 to disable.
+const CODEC_PROFILE_CACHE_TTL_MS = clampInt(process.env.CODEC_PROFILE_CACHE_TTL_MS, 60 * 60 * 1000, 0, 24 * 60 * 60 * 1000);
+const CODEC_PROFILE_CACHE_MAX = clampInt(process.env.CODEC_PROFILE_CACHE_MAX, 5_000, 0, 100_000);
 const LIVE_INPUT_ANALYZE_DURATION_US = clampInt(process.env.LIVE_INPUT_ANALYZE_DURATION_US, 1_500_000, 250_000, 10_000_000);
 const LIVE_INPUT_PROBE_SIZE_BYTES = clampInt(process.env.LIVE_INPUT_PROBE_SIZE_BYTES, 2_000_000, 64_000, 10_000_000);
 const VOD_INPUT_ANALYZE_DURATION_US = clampInt(process.env.VOD_INPUT_ANALYZE_DURATION_US, 8_000_000, 250_000, 30_000_000);
@@ -53,7 +61,7 @@ const RAW_PROVIDER_RETRY_DELAYS_MS = [400, 1000, 2000, 3000, 4000, 5000, 6000, 8
 const FFMPEG_USER_AGENT = process.env.FFMPEG_USER_AGENT ||
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36 Norva/1.0';
 const MAX_LOG_TAIL = 12000;
-const GATEWAY_VERSION = 44;
+const GATEWAY_VERSION = 45;
 // Browser playback fetches HLS playlists/segments cross-origin, so these must
 // list every Norva web origin or the browser blocks the response (CORS). Keep
 // in sync with the relay's ALLOWED_ORIGINS (services/norva-relay/wrangler.jsonc).
@@ -77,12 +85,15 @@ const TRANSCODE_AUDIO_ARGS = [
 ];
 
 const sessions = new Map();
+// sourceUrl -> { profile, expiresAt }. Populated by probeCodecProfile (cached wrapper).
+const codecProfileCache = new Map();
 const lastFailures = [];
 const probeStats = {
     attempts: 0,
     successes: 0,
     failures: 0,
     empty: 0,
+    cacheHits: 0,
     last: null,
     lastFailure: null
 };
@@ -104,6 +115,7 @@ app.get('/health', (req, res) => {
         codecProbeSizeBytes: CODEC_PROBE_SIZE_BYTES,
         maxSubtitleTracks: MAX_SUBTITLE_TRACKS,
         probeStats,
+        codecProfileCacheSize: codecProfileCache.size,
         activeSessions: activeSessionCount(),
         totalSessions: sessions.size,
         lastFailureCount: lastFailures.length,
@@ -935,7 +947,35 @@ function hasHeAacMarker(value) {
     );
 }
 
+// Cached front for probeCodecProfileUncached: a successful profile for a given
+// source URL is reused for CODEC_PROFILE_CACHE_TTL_MS so repeated probes of the same
+// file skip the provider entirely (no extra connection → no single-slot 458). Failures
+// and empty profiles are NOT cached, so a transient refusal retries on the next call.
 async function probeCodecProfile(sourceUrl, userAgent) {
+    if (CODEC_PROFILE_CACHE_TTL_MS > 0 && sourceUrl) {
+        const hit = codecProfileCache.get(sourceUrl);
+        if (hit) {
+            if (hit.expiresAt > Date.now()) {
+                probeStats.cacheHits += 1;
+                return hit.profile;
+            }
+            codecProfileCache.delete(sourceUrl); // expired
+        }
+    }
+    const profile = await probeCodecProfileUncached(sourceUrl, userAgent);
+    if (CODEC_PROFILE_CACHE_TTL_MS > 0 && sourceUrl && hasUsefulCodecProfile(profile)) {
+        codecProfileCache.set(sourceUrl, { profile, expiresAt: Date.now() + CODEC_PROFILE_CACHE_TTL_MS });
+        // Bound memory: Map preserves insertion order, so the first key is the oldest.
+        while (CODEC_PROFILE_CACHE_MAX > 0 && codecProfileCache.size > CODEC_PROFILE_CACHE_MAX) {
+            const oldest = codecProfileCache.keys().next().value;
+            if (oldest === undefined) break;
+            codecProfileCache.delete(oldest);
+        }
+    }
+    return profile;
+}
+
+async function probeCodecProfileUncached(sourceUrl, userAgent) {
     const startedAt = Date.now();
     probeStats.attempts += 1;
     const args = [
@@ -1693,6 +1733,10 @@ setInterval(() => {
         if (session.expiresAt.getTime() < now) {
             stopSession(session).catch((err) => console.error('[media-gateway] cleanup failed:', err));
         }
+    }
+    // Purge expired codec-profile cache entries (read-path also evicts lazily).
+    for (const [key, entry] of codecProfileCache) {
+        if (entry.expiresAt <= now) codecProfileCache.delete(key);
     }
 }, 60 * 1000).unref();
 
