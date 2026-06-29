@@ -100,6 +100,27 @@ group by 1,2,3 order by max(e.created_at) desc;
   - Engine : sur blocage `401/403/429/458` au prefetch, **ne pas ouvrir une 2ᵉ connexion** pour re-sonder la taille (évite de doubler la charge sur un mono-slot).
   - Gateway (`GATEWAY_VERSION 50`) : moins de retries `458`, espacés plus large (3 essais, gaps 1,5/5/9 s) → laisse le provider « respirer » pour libérer le slot.
 
+### Bug #5 — `DEMUX_OPEN:Could not open source file` (reprise) : octets non-média servis en 206 (ENGINE_VERSION 24)
+- **Symptôme** : à la reprise (`restoreFromResumeSnapshot`), échec immédiat `stage:'load'` avec
+  `message:'DEMUX_OPEN:Could not open source file'`. **`size` connu** (ex. 863 MB), **`lastReadError:null`**,
+  `0 fetch`, aucune piste détectée (`mime:null`).
+- **Diagnostic** : la reprise re-résout pourtant une URL **fraîche** (`getStreamUrl`, token valide) — la
+  1ʳᵉ fenêtre se télécharge (d'où la taille), donc **pas** un souci d'auth/expiration. libav reçoit des
+  octets authentifiés qu'il **ne sait pas ouvrir**, sans erreur de read → soit le provider/proxy a renvoyé
+  une **page d'erreur (HTML) / un JSON** en **206** (lien expiré côté provider, flux hors-ligne, mur
+  géo/auth sur le fichier), soit un mp4 **moov-at-end** dont le provider falsifie les Range de queue.
+- **Fix (diagnostic + message clair, sans risque sur le happy-path)** : `_openInput` capture la **tête de
+  la source** (`_captureSourceHead`, lecture **cache-only**, 64 o) et la classe : un 1ᵉʳ octet imprimable
+  `<` → HTML, `{`/`[` → JSON (un vrai conteneur démarre par une taille de box / magie EBML **non
+  imprimable** → zéro faux positif). Si non-média → on lève **`SOURCE_NOT_MEDIA:<kind>:<extrait>`** au lieu
+  du `DEMUX_OPEN` générique ; sinon on garde `DEMUX_OPEN` (conteneur réellement illisible). La tête est
+  exposée dans `engineSnapshot().sourceHead` (loggée + télémétrie), donc la prochaine occurrence dit
+  **exactement** quoi. `getFriendlyPlaybackError` mappe `SOURCE_NOT_MEDIA` (« le provider a renvoyé une page
+  d'erreur au lieu de la vidéo ») et `DEMUX_OPEN` (« ouvre dans l'app »).
+- **Suite si `sourceHead.kind` est nul** (vraies données média illisibles par libav-wasm) : ajouter un
+  **repli transcode serveur** (gateway-session) pour ces titres — non fait (risque sur le happy-path,
+  non testable hors navigateur) ; à câbler une fois la cause confirmée par la télémétrie.
+
 ### Bug #4 — mkv ne démarre pas alors que mp4 oui : IP datacenter bloquée (GATEWAY_VERSION 51) ✅ racine
 - **Symptôme** : sur le **même provider**, les mp4 (`direct`) jouaient mais les mkv (`engine`/`relay`) `458`aient, **au même instant**.
 - **Diagnostic** (télémétrie) : `playback_mode='direct'` → `first_frame` OK ; `playback_mode='engine'` → `BLOCK_HTTP_458`. Donc le slot n'est pas saturé : le provider **458 spécifiquement l'IP datacenter** (Railway), pas l'IP résidentielle du navigateur. (La rafale de retries pendant le debug avait probablement fait flaguer l'IP.)
@@ -137,7 +158,7 @@ Les fournisseurs IPTV bloquent les plages d'IP datacenter (anti-revente). Le nav
 ## 5. État final (vérifié en prod)
 - mkv via moteur : `first_frame` + `play_started` + resume/pause/seek en `playback_mode='engine'`, **plus aucun `CHUNK_DEMUXER`**.
 - Combinaison gagnante = **proxy résidentiel** (octets circulent) + **muxer non-seekable** (octets valides).
-- Versions : `ENGINE_VERSION 23`, `GATEWAY_VERSION 51`.
+- Versions : `ENGINE_VERSION 24` (capture/classification `sourceHead` sur échec d'ouverture), `GATEWAY_VERSION 51`.
 
 ## 6. Runbook — « un mkv ne se lance plus »
 1. `GET https://norva-production.up.railway.app/health` → vérifier `version` et `providerProxy`.
@@ -147,6 +168,10 @@ Les fournisseurs IPTV bloquent les plages d'IP datacenter (anti-revente). Le nav
    - `seekWrites>0` → régression du writer non-seekable (vérifier `mkstreamwriterdev` / `device:false`).
    - `CHUNK_DEMUXER` avec `seekWrites=0` + `boxSeq` propre → regarder le `hex` des petites écritures de queue (fragment incomplet ?).
    - `pumpExitReason='readerr'` + `lastReadError` → coupure réseau/proxy en cours de stream.
+   - `DEMUX_OPEN` / `SOURCE_NOT_MEDIA` avec `lastReadError=null` + `size` connu → octets non-média servis
+     en 206. Lire `engineSnapshot().sourceHead` : `kind:'html'/'json'` → page d'erreur provider (flux
+     hors-ligne / lien expiré côté provider) ; `kind:null` → vraies données, conteneur illisible par
+     libav-wasm (candidat au repli transcode). Cf. Bug #5.
 4. Le snapshot complet est dans `metadata->'engineSnapshot'` (lisible direct, pas besoin de la console du user).
 
 ## 7. Reste à faire (mineur / suite)

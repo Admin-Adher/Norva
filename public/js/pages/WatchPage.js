@@ -1981,6 +1981,14 @@ class WatchPage {
         if (/5\d\d|Service Unavailable|server error/i.test(text)) {
             return 'The provider is temporarily unavailable for this stream. Try another version or retry in a moment.';
         }
+        if (/SOURCE_NOT_MEDIA/i.test(text)) {
+            // The byte-pipe fetched fine but the provider returned an error page / JSON instead of
+            // the video (stream offline, link expired provider-side, or geo/auth wall on the file).
+            return 'This stream is unavailable right now — the provider returned an error page instead of the video (it may be offline or the link expired). Try another version, or reopen the title in a moment.';
+        }
+        if (/DEMUX_OPEN/i.test(text)) {
+            return "In-browser playback couldn't open this file's container. Try another version, or open the title in the Norva app (TV / mobile / tablet) — your progress is synced.";
+        }
         if (/provider (closed|refused)|4XX Client Error|Error opening input|Invalid data|Stream ends prematurely|I\/O error/i.test(text)) {
             return 'The provider closed or refused this stream. Try another version or wait before retrying.';
         }
@@ -2489,6 +2497,7 @@ class WatchPage {
                 console.warn('box stream  : moof×' + snap.moofCount, 'moov×' + snap.moovCount, 'ftyp×' + snap.ftypCount, '| ' + snap.boxTotalKB + 'KB | BAD:', snap.boxBad || 'none');
                 console.warn('box seq     :', JSON.stringify(snap.boxSeq));
                 console.warn('box hex     :', JSON.stringify(snap.boxHex), '| firstMediaHex', snap.firstMediaHex);
+                console.warn('source head :', snap.sourceHead ? (snap.sourceHead.kind || 'media') + ' | "' + snap.sourceHead.ascii + '"' : 'n/a');
                 console.warn('writes(seek):', 'seekWrites=' + snap.seekWrites, '| firstSeek', JSON.stringify(snap.firstSeek), '| highWater', snap.writeHighWater);
                 console.warn('writes log  :', JSON.stringify(snap.writes));
                 console.warn('1st vid pkt :', JSON.stringify(snap.firstVideoPkt), '| droppedOpenGop', snap.droppedOpenGop);

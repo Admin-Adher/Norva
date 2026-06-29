@@ -151,7 +151,7 @@
     av1: ['av01.0.08M.08'],
   };
 
-  const ENGINE_VERSION = 23;
+  const ENGINE_VERSION = 24;
 
   class NorvaEngine {
     constructor(videoEl, opts = {}) {
@@ -483,21 +483,58 @@
           await lib.ff_block_reader_dev_send('input', pos, null, { error: e });
         }
       };
+      // Capture the source head now (from the prefetched first window) so a demux-open failure can
+      // be diagnosed: a real container header vs a provider/proxy error document (HTML/JSON) served
+      // with a faked 206 — the usual reason a fully-fetched, authenticated source still "can't be
+      // opened" with no read error. Cheap, cache-only, no extra connection.
+      this._captureSourceHead();
       let fmtCtx, streams;
       try {
         [fmtCtx, streams] = await lib.ff_init_demuxer_file('input');
       } catch (e) {
-        // Surface the real fetch reason (RANGE_UNSUPPORTED / BLOCK_HTTP_xxx)
-        // instead of libav's generic "error opening input".
-        throw new Error(this._lastReadError
-          ? String(this._lastReadError.message || this._lastReadError)
-          : ('DEMUX_OPEN:' + String((e && e.message) || e)));
+        // A real read error (RANGE_UNSUPPORTED / BLOCK_HTTP_xxx) wins — surface it verbatim.
+        if (this._lastReadError) throw new Error(String(this._lastReadError.message || this._lastReadError));
+        // Bytes fetched fine but aren't a video: the provider returned an error page/JSON, not the
+        // stream. Surface that precisely so the friendly-error layer can say so (and we stop blaming
+        // libav). Otherwise keep the generic DEMUX_OPEN for a genuinely unparseable container.
+        const head = this._diag && this._diag.sourceHead;
+        if (head && head.notMedia) {
+          throw new Error('SOURCE_NOT_MEDIA:' + head.kind + ':' + String(head.ascii || '').trim().slice(0, 48));
+        }
+        throw new Error('DEMUX_OPEN:' + String((e && e.message) || e));
       }
       this.fmtCtx = fmtCtx; this._streams = streams;
       try {
         const durUs = to64(await lib.AVFormatContext_duration(fmtCtx), await lib.AVFormatContext_durationhi(fmtCtx));
         this.durationSec = durUs > 0 ? durUs / 1e6 : 0;
       } catch (_) { this.durationSec = 0; }
+    }
+
+    // Snapshot the first bytes of the source (from the cached first window — no extra fetch) and
+    // classify an obviously non-media head: a provider/proxy that 206s an HTML error page or a JSON
+    // error instead of the file. Real containers start with a non-printable box-size / EBML magic,
+    // so '<' or '{'/'[' as the first printable byte is a reliable non-media tell (no false positive
+    // on mp4/mkv). Stored on the diagnostic snapshot and used to throw a precise SOURCE_NOT_MEDIA.
+    _captureSourceHead(n = 64) {
+      try {
+        if (!this._diag || this._diag.sourceHead) return;
+        const w = this._raCache && this._raCache.find((x) => x.start === 0);
+        if (!w || !w.buf || !w.buf.length) return;
+        const head = w.buf.subarray(0, Math.min(n, w.buf.length));
+        let hex = '', ascii = '';
+        for (let i = 0; i < head.length; i++) {
+          const b = head[i];
+          hex += b.toString(16).padStart(2, '0');
+          ascii += (b >= 0x20 && b < 0x7f) ? String.fromCharCode(b) : '.';
+        }
+        let i0 = 0;
+        while (i0 < head.length && (head[i0] === 0x20 || head[i0] === 0x09 || head[i0] === 0x0a || head[i0] === 0x0d)) i0++;
+        const c = head[i0];
+        let kind = null;
+        if (c === 0x3c) kind = 'html';                       // '<'
+        else if (c === 0x7b || c === 0x5b) kind = 'json';    // '{' or '['
+        this._diag.sourceHead = { hex, ascii, len: head.length, kind, notMedia: !!kind };
+      } catch (_) { /* diagnostic only — never throws */ }
     }
 
     // Serve [pos, pos+len) from a cached window, fetching a fresh RA_WINDOW-sized
@@ -1251,6 +1288,9 @@
         boxSeq: d.boxSeq, boxBad: d.boxBad, boxTotalKB: d.boxTotal != null ? Math.round(d.boxTotal / 1024) : null,
         moofCount: d.moofCount, moovCount: d.moovCount, ftypCount: d.ftypCount,
         boxHex: d.boxHex, firstMediaHex: d.firstMediaHex,
+        // first bytes of the source (set on a demux-open failure): tells a real container apart
+        // from a provider error page/JSON served with a faked 206 (the no-read-error open failure).
+        sourceHead: d.sourceHead,
         // write-position trace: backward seeks here mean the muxer is NOT streaming
         // linearly and call-order concatenation corrupts the stream.
         writes: d.writes, seekWrites: d.seekWrites, firstSeek: d.firstSeek, writeHighWater: d.writeHighWater,
