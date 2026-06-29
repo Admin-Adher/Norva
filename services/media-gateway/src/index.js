@@ -72,12 +72,12 @@ const PROVIDER_AUTH_RETRY_DELAY_MS = clampInt(process.env.PROVIDER_AUTH_RETRY_DE
 // out via auto-reconnect; mirror it here with a few quick retries so a transient
 // provider auth blip doesn't abort playback. Delays stay short to keep range
 // throughput usable, then back off toward the slot-release window.
-const RAW_PROVIDER_RETRY_LIMIT = clampInt(process.env.RAW_PROVIDER_RETRY_LIMIT, 4, 0, 8);
+const RAW_PROVIDER_RETRY_LIMIT = clampInt(process.env.RAW_PROVIDER_RETRY_LIMIT, 5, 0, 8);
 const RAW_PROVIDER_RETRY_DELAYS_MS = [400, 1000, 2000, 3000, 4000, 5000, 6000, 8000];
 const FFMPEG_USER_AGENT = process.env.FFMPEG_USER_AGENT ||
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36 Norva/1.0';
 const MAX_LOG_TAIL = 12000;
-const GATEWAY_VERSION = 48;
+const GATEWAY_VERSION = 49;
 // Browser playback fetches HLS playlists/segments cross-origin, so these must
 // list every Norva web origin or the browser blocks the response (CORS). Keep
 // in sync with the relay's ALLOWED_ORIGINS (services/norva-relay/wrangler.jsonc).
@@ -299,9 +299,12 @@ app.get('/raw/:token', async (req, res) => {
     if (req.headers.accept) headers.accept = req.headers.accept;
     const method = req.method === 'HEAD' ? 'HEAD' : 'GET';
 
-    // Retry transient provider auth/slot failures (single-slot 401/403/429) so a
+    // Retry transient provider auth/slot failures (single-slot 401/403/429/458) so a
     // burst of byte-range reads doesn't get one connection rejected and abort the
-    // whole pump. Anything else (206/200/404/...) passes straight through.
+    // whole pump. 458 = "max connections": on a reload/resume the new stream opens
+    // while the PRIOR session's slot is still releasing (~8s), so the first /raw 458s
+    // and playback dies (PROBE_HTTP_458). The backoff below spans that release window.
+    // Anything else (206/200/404/...) passes straight through.
     const maxAttempts = 1 + RAW_PROVIDER_RETRY_LIMIT;
     let upstream = null;
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
@@ -315,7 +318,7 @@ app.get('/raw/:token', async (req, res) => {
             await sleep(RAW_PROVIDER_RETRY_DELAYS_MS[attempt - 1] || 4000);
             continue;
         }
-        const retryable = upstream.status === 401 || upstream.status === 403 || upstream.status === 429;
+        const retryable = upstream.status === 401 || upstream.status === 403 || upstream.status === 429 || upstream.status === 458;
         if (retryable && attempt < maxAttempts) {
             try { await upstream.body?.cancel(); } catch (_) {} // free the slot before retrying
             if (ac.signal.aborted) { try { res.end(); } catch (_) {} return; }
