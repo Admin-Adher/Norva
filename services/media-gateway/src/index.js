@@ -8,28 +8,66 @@ const express = require('express');
 
 const app = express();
 
-// Optional residential proxy for ALL outbound provider traffic. Some IPTV providers
+// Residential proxy POOL for ALL outbound provider traffic. Some IPTV providers
 // 458/block datacenter IPs (e.g. Railway) while serving residential IPs fine; routing
-// the gateway's provider requests through a residential proxy makes the provider see a
-// residential exit IP. Set PROVIDER_PROXY_URL (e.g. http://user:pass@host:port) as an
-// env var — never commit it. undici is only required when the proxy is configured.
-const PROVIDER_PROXY_URL = (process.env.PROVIDER_PROXY_URL || '').trim();
-let providerProxyAgent = null;
-if (PROVIDER_PROXY_URL) {
+// the gateway's provider requests through residential proxies makes the provider see a
+// residential exit IP.
+//
+//   PROVIDER_PROXY_URLS  comma/space/newline-separated list of proxy URLs
+//                        (e.g. http://user:pass@host:port). Used as a POOL.
+//   PROVIDER_PROXY_URL   single URL (back-compat). Merged into the pool.
+//
+// Each provider ACCOUNT is pinned to ONE pool IP (sticky by a stable key — the Norva
+// user id, or host+username from the stream URL). Stickiness matters: a single account
+// hitting from many IPs looks like a proxy and gets flagged; one stable residential IP
+// per account looks normal. Across many users the pool spreads load over the IPs (less
+// density per IP, more aggregate bandwidth). undici is only loaded when a proxy is set.
+// Secrets live in env only — never commit them.
+const providerProxyUrls = ((process.env.PROVIDER_PROXY_URLS || process.env.PROVIDER_PROXY_URL || '')
+    .split(/[\s,]+/).map((s) => s.trim()).filter(Boolean));
+let providerProxyAgents = [];
+if (providerProxyUrls.length) {
     try {
         const { ProxyAgent } = require('undici');
-        providerProxyAgent = new ProxyAgent(PROVIDER_PROXY_URL);
-        // Node's built-in fetch ignores http_proxy env (it needs the dispatcher above),
-        // but spawned ffmpeg/ffprobe DO honour http_proxy/https_proxy — set them so the
-        // transcode/probe paths also exit through the residential IP. Provider URLs are
-        // http(s); Supabase/internal fetch() stays direct (fetch ignores these env vars).
-        if (!process.env.http_proxy) process.env.http_proxy = PROVIDER_PROXY_URL;
-        if (!process.env.https_proxy) process.env.https_proxy = PROVIDER_PROXY_URL;
-        console.log('[media-gateway] provider proxy ENABLED (outbound provider traffic routed through PROVIDER_PROXY_URL)');
+        providerProxyAgents = providerProxyUrls.map((u) => new ProxyAgent(u));
+        // Node's built-in fetch ignores http_proxy env (it needs the per-request dispatcher),
+        // but spawned ffmpeg/ffprobe DO honour http_proxy/https_proxy. Set a default (first
+        // pool IP) so any spawn without an explicit per-request env still exits residential;
+        // per-request spawns override it via proxyEnvFor(). Supabase/internal fetch() stays
+        // direct (fetch ignores these env vars).
+        if (!process.env.http_proxy) process.env.http_proxy = providerProxyUrls[0];
+        if (!process.env.https_proxy) process.env.https_proxy = providerProxyUrls[0];
+        console.log(`[media-gateway] provider proxy ENABLED — pool of ${providerProxyAgents.length} residential IP(s), sticky per account`);
     } catch (err) {
-        console.error('[media-gateway] PROVIDER_PROXY_URL set but proxy could not be initialised:', (err && err.message) || err);
-        providerProxyAgent = null;
+        console.error('[media-gateway] PROVIDER_PROXY_URL(S) set but proxy could not be initialised:', (err && err.message) || err);
+        providerProxyAgents = [];
     }
+}
+// FNV-1a hash → stable index into the pool for a given key (same key → same IP).
+function poolIndexForKey(key) {
+    if (providerProxyAgents.length <= 1) return 0;
+    const s = String(key || '');
+    let h = 2166136261;
+    for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+    return (h >>> 0) % providerProxyAgents.length;
+}
+// Per-account sticky key from a provider stream URL: host + the username path segment
+// (Xtream: /movie|series|live/USER/PASS/ID.ext → USER), falling back to the host.
+function proxyKeyFromUrl(url) {
+    try {
+        const u = new URL(url);
+        const segs = u.pathname.split('/').filter(Boolean);
+        return u.host + (segs.length >= 2 ? '/' + segs[1] : '');
+    } catch (_) { return String(url || ''); }
+}
+function pickProxyAgent(key) {
+    return providerProxyAgents.length ? providerProxyAgents[poolIndexForKey(key)] : null;
+}
+// Spawn env routing a child (ffmpeg/ffprobe) through this key's sticky pool IP.
+function proxyEnvFor(key) {
+    if (!providerProxyAgents.length) return undefined;
+    const url = providerProxyUrls[poolIndexForKey(key)];
+    return { ...process.env, http_proxy: url, https_proxy: url, HTTP_PROXY: url, HTTPS_PROXY: url };
 }
 
 const PORT = Number.parseInt(process.env.PORT || '8080', 10);
@@ -103,7 +141,7 @@ const RAW_PROVIDER_RETRY_DELAYS_MS = [1500, 5000, 9000, 9000, 9000, 9000, 9000, 
 const FFMPEG_USER_AGENT = process.env.FFMPEG_USER_AGENT ||
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36 Norva/1.0';
 const MAX_LOG_TAIL = 12000;
-const GATEWAY_VERSION = 51;
+const GATEWAY_VERSION = 52;
 // Browser playback fetches HLS playlists/segments cross-origin, so these must
 // list every Norva web origin or the browser blocks the response (CORS). Keep
 // in sync with the relay's ALLOWED_ORIGINS (services/norva-relay/wrangler.jsonc).
@@ -163,7 +201,8 @@ app.get('/health', (req, res) => {
         probeStats,
         codecProfileCacheSize: codecProfileCache.size,
         languageDetect: Boolean(WHISPER_BIN && WHISPER_MODEL),
-        providerProxy: Boolean(providerProxyAgent),
+        providerProxy: providerProxyAgents.length > 0,
+        providerProxyPool: providerProxyAgents.length,
         inbandHeaderParse: INBAND_HEADER_PARSE,
         headerByteCacheSize: headerByteCache.size,
         activeSessions: activeSessionCount(),
@@ -336,7 +375,7 @@ app.get('/raw/:token', async (req, res) => {
     let upstream = null;
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
         try {
-            upstream = await fetch(claims.url, { method, headers, redirect: 'follow', signal: ac.signal, dispatcher: providerProxyAgent || undefined });
+            upstream = await fetch(claims.url, { method, headers, redirect: 'follow', signal: ac.signal, dispatcher: pickProxyAgent(claims.uid || proxyKeyFromUrl(claims.url)) || undefined });
         } catch (err) {
             if (ac.signal.aborted) { try { res.end(); } catch (_) {} return; }
             if (attempt >= maxAttempts) {
@@ -477,7 +516,7 @@ app.get('/subtitle/:token', async (req, res) => {
     ];
 
     let child;
-    try { child = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'ignore', 'pipe'] }); }
+    try { child = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'ignore', 'pipe'], env: proxyEnvFor(claims.uid || proxyKeyFromUrl(claims.url)) }); }
     catch (_) { return res.status(500).json({ error: 'Subtitle extraction failed' }); }
     let stderr = '';
     let clientClosed = false;
@@ -563,7 +602,7 @@ function extractAudioWav(url, ua, trackIndex, startOffset, dur) {
             outputPath,
         ];
         let child;
-        try { child = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'ignore', 'pipe'] }); }
+        try { child = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'ignore', 'pipe'], env: proxyEnvFor(proxyKeyFromUrl(url)) }); }
         catch (_) { return resolve(null); }
         let stderr = '';
         const timer = setTimeout(() => { try { child.kill('SIGKILL'); } catch (_) {} }, 30_000);
@@ -1004,7 +1043,7 @@ function startFfmpeg(session) {
 
     appendSubtitleOutputs(args, session, postInputSeek);
 
-    const child = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'ignore', 'pipe'] });
+    const child = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'ignore', 'pipe'], env: proxyEnvFor(session.userId || proxyKeyFromUrl(session.sourceUrl)) });
     session.status = 'starting';
 
     child.stderr.on('data', (chunk) => {
@@ -1857,7 +1896,7 @@ async function fetchProviderJson(url, userAgent, timeoutMs = XTREAM_REQUEST_TIME
     try {
         const response = await fetch(url, {
             signal: controller.signal,
-            dispatcher: providerProxyAgent || undefined,
+            dispatcher: pickProxyAgent(proxyKeyFromUrl(url)) || undefined,
             headers: {
                 'Accept': 'application/json,text/plain,*/*',
                 'User-Agent': userAgent
