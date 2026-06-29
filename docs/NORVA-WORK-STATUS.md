@@ -65,7 +65,7 @@ curl -X POST "$EDGE/norva-playback/audio-backfill" \
 |------|-------|-------------|------|
 | 1 | audio + sous-titres incrustés | langue audio déduite + UI sous-titres incrustés verrouillés | ✅ **fait, live** |
 | 2 | audio | whisper.cpp détecte la vraie langue d'une piste non taguée (self-hosted, gratuit) | ✅ **fait & ACTIF** (flag inline `on` + cron whisper off-peak) |
-| 3 | sous-titres | **sous-titres auto** : Whisper transcrit l'audio → VTT quand aucun sous-titre texte ; + **traduction Argos** vers ta langue | ❌ à faire |
+| 3 | sous-titres | **sous-titres auto** : Whisper transcrit l'audio → VTT quand aucun sous-titre texte ; + **traduction Argos** vers ta langue | 🟡 **3a fait & live** (transcription async + cache cross-user + livraison + bouton player) ; 3b Argos + 3c cron whitelist/reaper à faire |
 | 4 | sous-titres | **OCR (Tesseract)** : sous-titres image (PGS/VOBSUB) → texte ; potentiellement incrustés dans l'image | ❌ à faire |
 
 Hors-plan (correctifs livrés en cours de route) : extraction sous-titres texte in-band (ci-dessus),
@@ -73,6 +73,10 @@ fix flicker catalogue, cache de profil gateway, fixes moteur (BlockAdditions/HEV
 
 **Note Phase 3 :** réutilise l'infra Phase 2 (whisper.cpp + extraction audio déjà sur la gateway) —
 il « suffit » d'une transcription complète horodatée (au lieu d'un clip de 20 s) + Argos pour traduire.
+**3a livré (2026-06-29)** : transcription async film-entier → cache cross-user `catalog_generated_subtitles`
+(claim atomique anti-doublon sur le slot unique) → routes `GET/POST generated-subtitle` → bouton
+« ✨ AI subtitles » au player. Détail complet dans `docs/PHASE3-AI-SUBTITLES.md` §8. Reste 3b (Argos) + 3c
+(cron whitelist nocturne + reaper jobs bloqués).
 
 ## Enrichment / backfill — état & stratégie par provider
 
@@ -131,4 +135,4 @@ n'aurait fait que contourner le symptôme).
 - `docs/WHISPER-AUDIO-LANGUAGE-DETECTION.md` — Phase 2 (whisper.cpp self-hosted)
 - `supabase/functions/ENRICHMENT_CRON_SETUP.md` — **flotte backfill pg_cron** (cadences par-provider, SQL réel, rationale fréquence-vs-concurrence) ⭐
 - `docs/PROVIDER-IDENTITY-DEDUP.md` — **audit miroirs d'URL + design `provider_key`** (l'URL ≠ le fournisseur ; dédup cross-user) ⭐
-- `docs/PHASE3-AI-SUBTITLES.md` — **cadrage Phase 3** (sous-titres IA : whisper→VTT + Argos ; déclenchement hybride)
+- `docs/PHASE3-AI-SUBTITLES.md` — **Phase 3** (sous-titres IA : whisper→VTT + Argos) ; **3a livré §8**, 3b/3c cadrés
