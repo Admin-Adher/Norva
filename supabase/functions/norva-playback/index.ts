@@ -2264,7 +2264,7 @@ async function runAudioBackfill(req: Request, db: SupabaseClient) {
     const whisperRetryBefore = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString();
     const { data: wrows, error: wErr } = await db.rpc("whisper_candidate_titles", {
       p_user: userId, p_item_type: itemType, p_limit: limit,
-      p_retry_before: whisperRetryBefore, p_after: afterId ?? null,
+      p_retry_before: whisperRetryBefore, p_after: afterId || null,
     });
     if (wErr) throwDb(wErr, "Unable to list titles for whisper backfill");
     if (!wrows || !wrows.length) return { mode: "whisper", processed: 0, candidates: 0, detected: 0, lastId: afterId, hasMore: false };
