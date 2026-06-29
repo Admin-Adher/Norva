@@ -151,7 +151,7 @@
     av1: ['av01.0.08M.08'],
   };
 
-  const ENGINE_VERSION = 16;
+  const ENGINE_VERSION = 17;
 
   class NorvaEngine {
     constructor(videoEl, opts = {}) {
@@ -220,6 +220,7 @@
       // running record of the exact bytes/boxes/codec decisions that fed MSE, so a
       // rejected append can be explained instead of just observed. Pure accounting,
       // no effect on playback. Surfaced via engineSnapshot().
+      this._dropWrites = false;       // when true, muxer onwrite bytes are discarded (trailer)
       this._diag = {
         mime: null, videoCodecString: null, videoCands: null, audioTag: null,
         vName: null, aName: null, copyAudio: null, durationSec: null,
@@ -227,9 +228,12 @@
         firstMediaBoxes: null, firstMediaBytes: 0,
         firstVideoPkt: null,          // { pts, dts, key, idx }
         appendCount: 0, appendBytes: 0,
+        recentAppends: [],            // ring of last appended chunks' box layouts (find the failing one)
         appendErrors: [],             // [{ n, bytes, boxes, err, sbUpdating, msState }]
         sbErrorEvents: 0,
         droppedOpenGop: 0,
+        pumpExitReason: null, pumpExitRes: null, lastReadError: null,
+        trailerBytesDropped: 0,
       };
     }
 
@@ -842,6 +846,11 @@
       // any stale one from a prior init (e.g. a re-seek) or it can collide.
       try { await lib.unlink('output'); } catch (_) {}
       lib.onwrite = (name, pos, data) => {
+        // The MP4 trailer (mfra/mfro, written by av_write_trailer) is file-seeking
+        // metadata, NOT a media segment. Appending it to the SourceBuffer makes
+        // Chromium's parser fail (CHUNK_DEMUXER_ERROR_APPEND_FAILED). It must never
+        // be enqueued — endOfStream() finalises the buffer instead.
+        if (this._dropWrites) { d.trailerBytesDropped = (d.trailerBytesDropped || 0) + data.length; return; }
         written += data.length;
         const chunk = data.slice(0);
         try {
@@ -981,15 +990,30 @@
       } while ((res === 0 || res === -lib.EAGAIN) && !this._stopRequested && !this.destroyed);
 
       if (this._stopRequested || this.destroyed) return;
+      // Why the read loop ended. A clean AVERROR_EOF is normal end-of-file; anything
+      // else means the byte source stopped early (single-slot 458 / dropped provider
+      // connection), which is the real cause when a title "ends" after a few seconds.
+      const isEof = (typeof lib.AVERROR_EOF === 'number') ? res === lib.AVERROR_EOF : res < 0;
+      this._diag.pumpExitReason = this._stopRequested ? 'stop' : (isEof ? 'eof' : 'readerr');
+      this._diag.pumpExitRes = res;
+      this._diag.lastReadError = this._lastReadError ? errStr(this._lastReadError).slice(0, 200) : null;
+      this._diag.exitFetches = this._fetchCount;
+      this._diag.exitFetchMB = Math.round((this._fetchBytes / 1048576) * 10) / 10;
+      if (!isEof) this.log('pump exit (read stopped early) res=' + res + ' fetched=' + this._diag.exitFetchMB + 'MB lastReadErr=' + (this._diag.lastReadError || '-'));
       // EOF: flush audio + trailer + endOfStream
       if (this.aS && !this.copyAudio) {
         const fr = await lib.ff_decode_multi(this.decCtx, this.decPkt, this.decFrame, [], true);
         const enc = await this._encodeAudio(fr, true);
         if (enc.length) await lib.ff_write_multi(this.oc, this.pkt, enc);
       }
-      await lib.av_write_trailer(this.oc);
+      // Drop the trailer's bytes (mfra/mfro): they are file-seeking metadata, NOT a
+      // valid MSE media segment. Appending them is what produced
+      // CHUNK_DEMUXER_ERROR_APPEND_FAILED on an early/partial read. endOfStream()
+      // below finalises the buffer cleanly without them.
+      this._dropWrites = true;
+      try { await lib.av_write_trailer(this.oc); } finally { this._dropWrites = false; }
       this.ended = true; this._drain();
-      this.log('flux terminé (EOF)');
+      this.log('flux terminé (' + this._diag.pumpExitReason + ')');
     }
 
     async _encodeAudio(frames, fin) {
@@ -1044,6 +1068,12 @@
         try {
           sb.appendBuffer(chunk);
           d.appendCount++; d.appendBytes += chunk.length;
+          // Keep the box layout of the last few appends. The fatal
+          // CHUNK_DEMUXER_ERROR_APPEND_FAILED is reported asynchronously on the
+          // element (not thrown here), so the chunk that broke the parser is the most
+          // recent append at the time the 'error' event fires — this ring exposes it.
+          d.recentAppends.push({ n: d.appendCount, bytes: chunk.length, boxes: mp4Boxes(chunk), tsOffset: this._tsApplied });
+          if (d.recentAppends.length > 6) d.recentAppends.shift();
         } catch (e) {
           // The synchronous throw here is usually QuotaExceededError / InvalidState;
           // a bad-bytes rejection arrives later on the element as
@@ -1089,8 +1119,12 @@
         firstVideoPkt: d.firstVideoPkt, droppedOpenGop: d.droppedOpenGop,
         // append accounting
         appendCount: d.appendCount, appendBytes: d.appendBytes,
-        appendErrors: d.appendErrors, sbErrorEvents: d.sbErrorEvents,
+        recentAppends: d.recentAppends, appendErrors: d.appendErrors,
+        sbErrorEvents: d.sbErrorEvents, trailerBytesDropped: d.trailerBytesDropped,
         queueLen: this.queue ? this.queue.length : null,
+        // why the read loop stopped (early stop = source died, e.g. single-slot 458)
+        pumpExitReason: d.pumpExitReason, pumpExitRes: d.pumpExitRes,
+        lastReadError: d.lastReadError, exitFetches: d.exitFetches, exitFetchMB: d.exitFetchMB,
         // pipeline / timing state
         tsAnchor: this._tsAnchor, tsApplied: this._tsApplied,
         vBase: this.vBase, gopFloorPts: this._gopFloorPts,

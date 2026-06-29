@@ -2446,7 +2446,9 @@ class WatchPage {
                 console.warn('init segment:', snap.initBoxes, '(' + snap.initBytes + ' B) | muxerInits', snap.muxerInits);
                 console.warn('1st media   :', snap.firstMediaBoxes, '(' + snap.firstMediaBytes + ' B)');
                 console.warn('1st vid pkt :', JSON.stringify(snap.firstVideoPkt), '| droppedOpenGop', snap.droppedOpenGop);
-                console.warn('appends     :', snap.appendCount, 'ok /', snap.appendBytes, 'B | sbErrorEvents', snap.sbErrorEvents, '| queueLen', snap.queueLen);
+                console.warn('appends     :', snap.appendCount, 'ok /', snap.appendBytes, 'B | sbErrorEvents', snap.sbErrorEvents, '| queueLen', snap.queueLen, '| trailerDropped', snap.trailerBytesDropped);
+                console.warn('pump exit   :', snap.pumpExitReason, '| res', snap.pumpExitRes, '| fetched', snap.exitFetchMB, 'MB /', snap.exitFetches, 'fetches | lastReadErr', snap.lastReadError);
+                console.warn('recentAppend:', snap.recentAppends);
                 console.warn('appendErrors:', snap.appendErrors);
                 console.warn('SourceBuffer:', JSON.stringify(snap.sb));
                 console.warn('MediaSource :', JSON.stringify(snap.ms));
@@ -2486,6 +2488,8 @@ class WatchPage {
                     engineFirstVideoKey: snap?.firstVideoPkt ? !!snap.firstVideoPkt.key : null,
                     engineAppendCount: snap?.appendCount ?? null,
                     engineVideoErrorCode: snap?.video?.error?.code ?? null,
+                    enginePumpExit: snap?.pumpExitReason ?? null,
+                    engineLastReadError: snap?.lastReadError ?? null,
                     engineSnapshot: snap || null
                 }
             });
