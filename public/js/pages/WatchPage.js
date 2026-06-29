@@ -111,6 +111,14 @@ class WatchPage {
         this.selectedSubtitleStreamIndex = null;
         this.subtitleOffsetSeconds = 0;
         this.selectedSubtitleTrackUserChoice = false;
+        // Phase 3 AI subtitles (self-hosted whisper transcript, served from the cross-user
+        // cache). State machine: idle → processing (background transcription) → ready | failed.
+        // The ready VTT is cached in-session so re-selecting re-attaches without a refetch.
+        this.aiSubtitleState = 'idle';
+        this.aiSubtitleVtt = null;
+        this.aiSubtitleLang = 'und';
+        this._aiSubtitleTitleId = null;
+        this._aiSubtitlePollTimer = null;
         this.selectedAudioStreamIndex = null;
         this.selectedAudioTrackUserChoice = false;
         this.pendingPlaybackPreferences = null;
@@ -2602,6 +2610,11 @@ class WatchPage {
         this.selectedSubtitleTrackUserChoice = false;
         this.selectedAudioStreamIndex = null;
         this.selectedAudioTrackUserChoice = false;
+        // Reset the AI-subtitle UI state for the incoming title. The cached VTT is title-keyed,
+        // so a genuine replay of the same title keeps its 'ready' state; any other title starts idle.
+        const aiSameTitle = this._aiSubtitleTitleId && this._aiSubtitleTitleId === this._aiSubtitleTitleIdFor() && this.aiSubtitleVtt;
+        this.aiSubtitleState = aiSameTitle ? 'ready' : 'idle';
+        if (!aiSameTitle) { this.aiSubtitleVtt = null; this._aiSubtitleTitleId = null; }
         this.clearExternalSubtitleTracks();
         this.updateAudioTracks();
         this.updateCaptionsTracks();
@@ -5257,12 +5270,23 @@ class WatchPage {
 
     clearExternalSubtitleTracks() {
         this.stopSubtitleEngine();
-        this.video?.querySelectorAll('track[data-norva-probe-subtitle="true"]').forEach(track => {
+        this.stopAiSubtitlePolling();
+        this.video?.querySelectorAll('track[data-norva-probe-subtitle="true"], track[data-norva-ai-subtitle="true"]').forEach(track => {
             if (track.track) {
                 track.track.mode = 'disabled';
             }
             track.remove();
         });
+    }
+
+    // True for the src-less <track> elements we own (probe extraction + AI transcript), whose
+    // cues we feed via addCue(). The CC menu lists these through their own metadata/state rows,
+    // so the native-textTrack enumeration must skip them to avoid a duplicate entry.
+    _isManagedTextTrack(textTrack) {
+        const owned = this.video?.querySelectorAll('track[data-norva-probe-subtitle="true"], track[data-norva-ai-subtitle="true"]');
+        if (!owned) return false;
+        for (const el of owned) if (el.track === textTrack) return true;
+        return false;
     }
 
     isSubtitleExtractable(track) {
@@ -5958,6 +5982,188 @@ class WatchPage {
         return `Burned-in subtitles (${name}) — always on, can’t be turned off.`;
     }
 
+    // ============================================================
+    // Phase 3 AI subtitles
+    //
+    // When a title has no usable text subtitle track, the viewer can ask Norva to
+    // transcribe the spoken audio with the self-hosted whisper.cpp on the gateway.
+    // The result is cached cross-user (keyed by providerKey + file), so the first
+    // viewer of a panel pays the (background) cost and everyone else reuses it for
+    // free. The VTT is fed into a src-less <track> via addCue(), exactly like the
+    // probe/engine subtitle paths — no reload, no flicker.
+    // ============================================================
+
+    _aiSubtitleTitleIdFor() {
+        return String(this.content?.titleId || this.content?.title_id || this.content?.data?.titleId || '');
+    }
+
+    // AI subs only make sense for cloud on-demand titles: we need a cloud title id the edge
+    // can resolve to a provider file, and a backend route to call. Live channels are excluded.
+    _canRequestAiSubtitles() {
+        if (!this._aiSubtitleTitleIdFor()) return false;
+        if (typeof this.isCloudPlaybackMode === 'function' && !this.isCloudPlaybackMode()) return false;
+        const type = String(this.contentType || this.content?.type || '').toLowerCase();
+        if (type === 'live' || type === 'channel') return false;
+        return Boolean(window.NorvaCloud?.playback?.generatedSubtitle);
+    }
+
+    aiSubtitleTrackShowing() {
+        const el = this.video?.querySelector('track[data-norva-ai-subtitle="true"]');
+        return Boolean(el && el.track && el.track.mode === 'showing');
+    }
+
+    // Menu entry reflecting the AI-subtitle state machine. Rendered as a normal .captions-option
+    // so the existing click wiring routes it to selectCaptionTrack('ai', …).
+    _aiSubtitleMenuHtml() {
+        const showing = this.aiSubtitleTrackShowing();
+        if (this.aiSubtitleState === 'processing') {
+            return `<button class="captions-option locked" data-source="ai" data-index="-1" disabled aria-disabled="true" title="Transcribing the audio with AI — runs in the background, can take a few minutes">⏳ ${this.escapeHtml('AI subtitles — generating…')}</button>`;
+        }
+        if (this.aiSubtitleState === 'failed') {
+            return `<button class="captions-option" data-source="ai" data-index="-1">⚠️ ${this.escapeHtml('AI subtitles failed — retry')}</button>`;
+        }
+        const label = this.aiSubtitleState === 'ready'
+            ? (showing ? 'AI subtitles' : 'AI subtitles — show')
+            : 'Generate AI subtitles';
+        return `<button class="captions-option ${showing ? 'active' : ''}" data-source="ai" data-index="-1">✨ ${this.escapeHtml(label)}</button>`;
+    }
+
+    stopAiSubtitlePolling() {
+        if (this._aiSubtitlePollTimer) {
+            clearInterval(this._aiSubtitlePollTimer);
+            this._aiSubtitlePollTimer = null;
+        }
+    }
+
+    // Apply a /generated-subtitle response to the state machine. Returns true once a 'ready'
+    // VTT has been attached. Ignores stale responses (title switched mid-flight).
+    _applyAiSubtitleResponse(res, titleId) {
+        if (!res || this._aiSubtitleTitleIdFor() !== titleId) return false;
+        const status = String(res.status || 'none');
+        if (status === 'ready' && res.vtt) {
+            this.aiSubtitleState = 'ready';
+            this.aiSubtitleVtt = String(res.vtt);
+            this.aiSubtitleLang = this.normalizeTrackLanguage(res.sourceLang || res.source_lang || 'und');
+            this._aiSubtitleTitleId = titleId;
+            this.stopAiSubtitlePolling();
+            this.attachGeneratedSubtitleTrack(this.aiSubtitleVtt, this.aiSubtitleLang);
+            this.updateCaptionsTracks();
+            return true;
+        }
+        if (status === 'failed') {
+            this.aiSubtitleState = 'failed';
+            this.stopAiSubtitlePolling();
+            this.updateCaptionsTracks();
+            return false;
+        }
+        if (status === 'processing') {
+            this.aiSubtitleState = 'processing';
+            this.updateCaptionsTracks();
+        }
+        return false;
+    }
+
+    startAiSubtitlePolling(titleId) {
+        this.stopAiSubtitlePolling();
+        const startedAt = Date.now();
+        const MAX_MS = 60 * 60 * 1000; // a 2h film transcodes in ~35-45 min on CPU; cap the poll at 1h
+        this._aiSubtitlePollTimer = setInterval(async () => {
+            if (this._aiSubtitleTitleIdFor() !== titleId) { this.stopAiSubtitlePolling(); return; }
+            if (Date.now() - startedAt > MAX_MS) {
+                this.aiSubtitleState = 'failed';
+                this.stopAiSubtitlePolling();
+                this.updateCaptionsTracks();
+                return;
+            }
+            try {
+                const got = await window.NorvaCloud.playback.generatedSubtitle({ titleId });
+                this._applyAiSubtitleResponse(got, titleId);
+            } catch (_) { /* transient — keep polling */ }
+        }, 20000);
+    }
+
+    // Entry point for the "AI subtitles" menu row. Idempotent across states: a cached ready VTT
+    // re-attaches instantly; otherwise it reads the cross-user cache, and if nothing usable is
+    // there yet, triggers a background transcription and polls until it lands.
+    async requestAiSubtitles() {
+        if (!this._canRequestAiSubtitles()) return;
+        const titleId = this._aiSubtitleTitleIdFor();
+        const api = window.NorvaCloud.playback;
+
+        // Same title, already produced this session → just (re)attach from cache.
+        if (this.aiSubtitleState === 'ready' && this.aiSubtitleVtt && this._aiSubtitleTitleId === titleId) {
+            this.attachGeneratedSubtitleTrack(this.aiSubtitleVtt, this.aiSubtitleLang);
+            this.updateCaptionsTracks();
+            return;
+        }
+
+        // Switched titles → drop any stale state/timer before starting fresh.
+        if (this._aiSubtitleTitleId !== titleId) {
+            this.stopAiSubtitlePolling();
+            this.aiSubtitleVtt = null;
+            this.aiSubtitleState = 'idle';
+        }
+        this._aiSubtitleTitleId = titleId;
+
+        // 1) Read the shared cache — another user (or a prior session) may already have it.
+        try {
+            const got = await api.generatedSubtitle({ titleId });
+            if (this._applyAiSubtitleResponse(got, titleId)) return;
+            if (this.aiSubtitleState === 'processing') { this.startAiSubtitlePolling(titleId); return; }
+        } catch (_) { /* fall through to trigger */ }
+
+        // 2) Nothing usable yet → trigger a background transcription and poll for it.
+        this.aiSubtitleState = 'processing';
+        this.updateCaptionsTracks();
+        try {
+            const enq = await api.requestGeneratedSubtitle({ titleId });
+            // The enqueue reply carries status but no VTT body; if the server already had it
+            // cached ('ready'), fetch the body right away instead of waiting a poll cycle.
+            if (enq && String(enq.status) === 'ready') {
+                const got = await api.generatedSubtitle({ titleId });
+                if (this._applyAiSubtitleResponse(got, titleId)) return;
+            }
+        } catch (_) {
+            this.aiSubtitleState = 'failed';
+            this.updateCaptionsTracks();
+            return;
+        }
+        this.startAiSubtitlePolling(titleId);
+    }
+
+    // Parse a whisper VTT and feed its cues into a src-less <track>. Replaces any active text
+    // track (AI subs are the chosen track). Honors the current subtitle sync offset.
+    attachGeneratedSubtitleTrack(vtt, lang = 'und') {
+        if (!this.video) return false;
+        const cues = this.parseVttCues(vtt);
+        if (!cues.length) return false;
+
+        this.clearExternalSubtitleTracks();
+        this.selectedSubtitleStreamIndex = null;
+
+        const trackEl = document.createElement('track');
+        trackEl.kind = 'subtitles';
+        trackEl.label = 'AI subtitles';
+        trackEl.srclang = this.normalizeTrackLanguage(lang) || 'und';
+        trackEl.dataset.norvaAiSubtitle = 'true';
+        this.video.appendChild(trackEl);
+
+        const textTrack = trackEl.track;
+        if (!textTrack) { trackEl.remove(); return false; }
+        textTrack.mode = 'showing';
+        const offset = this.normalizeSubtitleOffset(this.subtitleOffsetSeconds) || 0;
+        for (const c of cues) {
+            const start = Math.max(0, c.start + offset);
+            const end = Math.max(start + 0.05, c.end + offset);
+            try { textTrack.addCue(new VTTCue(start, end, c.text)); } catch (_) { /* skip malformed cue */ }
+        }
+        setTimeout(() => {
+            if (trackEl.track) trackEl.track.mode = 'showing';
+            this.updateCaptionsTracks();
+        }, 0);
+        return true;
+    }
+
     updateCaptionsTracks() {
         if (!this.captionsList || !this.video) return;
 
@@ -5982,6 +6188,9 @@ class WatchPage {
         } else {
             for (let i = 0; i < tracks.length; i++) {
                 const track = tracks[i];
+                // Skip the src-less <track>s we manage (probe extraction + AI transcript) — they
+                // have their own menu rows, so listing them here too would double them up.
+                if (this._isManagedTextTrack(track)) continue;
                 if (track.kind === 'subtitles' || track.kind === 'captions') {
                     const label = track.label || track.language || `Subtitle ${i + 1}`;
                     const active = track.mode === 'showing';
@@ -6009,6 +6218,12 @@ class WatchPage {
             });
         }
 
+        // AI subtitles: offered only when there is no real text subtitle track to pick. The
+        // row reflects the transcription state machine and, once ready, shows like any track.
+        const aiAvailable = !options.length && this._canRequestAiSubtitles();
+        const aiShowing = aiAvailable && this.aiSubtitleTrackShowing();
+        anyActive = anyActive || aiShowing;
+
         // No selectable subtitle TRACK, but the label/category says the picture carries
         // burned-in subtitles → show them as a locked, always-on entry instead of "Off".
         const burned = !options.length ? this.burnedSubtitleIntel() : null;
@@ -6022,9 +6237,12 @@ class WatchPage {
         const headerHtml = burned
             ? `<button class="captions-option active locked" data-source="burned" data-index="-1" disabled aria-disabled="true" title="Burned into the picture — always on">🔒 ${this.escapeHtml(burned.name ? `${burned.name} — burned-in` : 'Burned-in subtitles')}</button>`
             : `<button class="captions-option ${offActive ? 'active' : ''}" data-source="off" data-index="-1">Off</button>`;
+        const aiHtml = aiAvailable ? this._aiSubtitleMenuHtml() : '';
+        // When AI subtitles are on offer, the "no track" message would contradict the row, so
+        // suppress it (the AI row + its own title text carry the message instead).
         const emptyHtml = burned
             ? `<div class="captions-empty">${this.escapeHtml('Always on — subtitles are part of the picture, they can’t be turned off.')}</div>`
-            : (!options.length
+            : (!options.length && !aiAvailable
                 ? `<div class="captions-empty">${this.escapeHtml(this.getBurnedSubtitleMessage())}</div>`
                 : '');
         const offsetHtml = this.selectedSubtitleStreamIndex !== null && this.selectedSubtitleStreamIndex !== undefined && probeSubtitleTracks.length
@@ -6037,7 +6255,7 @@ class WatchPage {
               </div>`
             : '';
 
-        this.captionsList.innerHTML = `${headerHtml}${optionHtml}${emptyHtml}${offsetHtml}`;
+        this.captionsList.innerHTML = `${headerHtml}${optionHtml}${aiHtml}${emptyHtml}${offsetHtml}`;
 
         this.captionsList.querySelectorAll('.captions-option').forEach(btn => {
             btn.addEventListener('click', () => this.selectCaptionTrack(
@@ -6066,6 +6284,19 @@ class WatchPage {
         if (this.hls) {
             this.hls.subtitleDisplay = false;
             this.hls.subtitleTrack = -1;
+        }
+
+        // AI subtitles run their own state machine (read cache → trigger → poll → attach), so
+        // they short-circuit the standard track-selection tail. The menu stays open while a
+        // transcription is in flight so the viewer sees the "generating…" / "retry" feedback.
+        if (source === 'ai') {
+            this.selectedSubtitleStreamIndex = null;
+            this.selectedSubtitleTrackUserChoice = true;
+            this.clearPendingPreference('subtitle');
+            await this.requestAiSubtitles();
+            this.updateCaptionsTracks();
+            if (this.aiSubtitleState === 'ready') this.closeCaptionsMenu();
+            return;
         }
 
         if (source === 'off') {

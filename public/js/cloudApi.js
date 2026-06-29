@@ -903,7 +903,12 @@
             getSession: (id) => playbackSessionRequest('GET', `/playback/sessions/${encodeURIComponent(id)}`),
             expireSession: (id) => playbackSessionRequest('POST', `/playback/sessions/${encodeURIComponent(id)}/expire`),
             event: (event) => playbackSessionRequest('POST', '/playback/events', event),
-            summary: (params = {}) => playbackSessionRequest('GET', `/telemetry/summary${query(params)}`)
+            summary: (params = {}) => playbackSessionRequest('GET', `/telemetry/summary${query(params)}`),
+            // Phase 3 AI subtitles (whisper transcript): read the cross-user cache state
+            // for a title (status none|processing|ready|failed, VTT body when ready), and
+            // trigger a background transcription the first viewer pays for, the rest reuse.
+            generatedSubtitle: (params = {}) => playbackSessionRequest('GET', `/generated-subtitle${query(params)}`),
+            requestGeneratedSubtitle: (body) => playbackSessionRequest('POST', '/generated-subtitle', body)
         },
 
         device: {
