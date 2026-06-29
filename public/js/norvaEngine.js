@@ -151,7 +151,7 @@
     av1: ['av01.0.08M.08'],
   };
 
-  const ENGINE_VERSION = 21;
+  const ENGINE_VERSION = 22;
 
   class NorvaEngine {
     constructor(videoEl, opts = {}) {
@@ -880,9 +880,20 @@
       // This records the first writes + counts backward seeks so we can prove it.
       d.writes = []; d.seekWrites = 0; d.writeHighWater = 0; d.firstSeek = null;
       this._diagHeaderPhase = true;
-      // ff_init_muxer(device:true) re-creates the 'output' writer device; remove
-      // any stale one from a prior init (e.g. a re-seek) or it can collide.
+      // Remove any stale 'output' device from a prior init (e.g. a re-seek) — it would
+      // collide with the fresh device below.
       try { await lib.unlink('output'); } catch (_) {}
+      // CRITICAL: create the output as a NON-SEEKABLE stream writer (mkstreamwriterdev),
+      // not the seekable writer ff_init_muxer(device:true) would install. On a seekable
+      // output movenc patches box sizes by seeking BACKWARD after writing a fragment;
+      // since the engine forwards onwrite chunks to MediaSource in call-order, those
+      // late patches land at the wrong byte offset and corrupt the stream
+      // (CHUNK_DEMUXER_ERROR_APPEND_FAILED — confirmed via seekWrites>0 in diagnostics).
+      // A non-seekable output forces movenc into pure streaming mode: it computes every
+      // box size up front (frag_keyframe buffers each fragment) and writes strictly
+      // forward — exactly what fMP4-over-MSE needs. ff_init_muxer then opens this device
+      // instead of creating its own (device:false, open:true).
+      await lib.mkstreamwriterdev('output');
       lib.onwrite = (name, pos, data) => {
         // The MP4 trailer (mfra/mfro, written by av_write_trailer) is file-seeking
         // metadata, NOT a media segment. Appending it to the SourceBuffer makes
@@ -918,7 +929,7 @@
         this.queue.push(chunk); this._drain();
       };
       const muxRet = await lib.ff_init_muxer(
-        { format_name: 'mp4', filename: 'output', open: true, device: true, codecpars: true }, streamCtxs);
+        { format_name: 'mp4', filename: 'output', open: true, device: false, codecpars: true }, streamCtxs);
       this.oc = muxRet[0];
       // Align the HEVC sample-entry fourcc with the codec string we advertised to
       // MediaSource. ff_init_muxer resets codec_tag to 0 and movenc then defaults
