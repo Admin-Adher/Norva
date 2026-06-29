@@ -53,7 +53,7 @@ provider when a sync comes due — move it off-peak too if daytime re-syncs bite
 | `norva-audio-langs-series` | `…/audio-backfill` (series, probe) | `2,12,22,32,42,52 * * * *` | 1 |
 | `norva-audio-langs-untagged` | `…/audio-backfill` (movie, **vod** = métadonnées) | `4,14,24,34,44,54 * * * *` | 4 |
 | `norva-subtitle-backfill-movie` | `…/audio-backfill` (movie, subtitle) | `6,16,26,36,46,56 * * * *` | 1 |
-| `norva-audio-langs-whisper` | `…/audio-backfill` (movie, **whisper** = résidu non-tagué) | `8,28,48 * * * *` | 1 |
+| `norva-audio-langs-whisper` | `…/audio-backfill` (movie, **whisper** = résidu non-tagué) | `8,28,48 0-5 * * *` (off-peak, petit) | 1 |
 | `norva-enrich-search-match` | `norva-source-sync/cron/search-match` | `15,45 * * * *` (every 30 min) |
 | `norva-enrich-revalidate` | `norva-source-sync/cron/revalidate` | `5 */6 * * *` (every 6 h) |
 | `norva-enrich-backfill-years` | `norva-source-sync/cron/backfill-years` | `30 3 * * *` (daily 03:30) |
@@ -107,7 +107,7 @@ $cron$);
 
 -- whisper: detect the truly-untagged residual (multi-track titles with an unknown
 -- track that probe/vod can't resolve). Serialized; small. See WHISPER-AUDIO-* doc.
-select cron.schedule('norva-audio-langs-whisper', '8,28,48 * * * *', $cron$
+select cron.schedule('norva-audio-langs-whisper', '8,28,48 0-5 * * *', $cron$
   select net.http_post(
     url := 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-playback/audio-backfill',
     headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'norva_backfill_token')),
