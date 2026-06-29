@@ -134,6 +134,14 @@ group by 1,2,3 order by max(e.created_at) desc;
      gateway-session. Ne tourne **qu'après** un échec moteur → zéro régression sur un titre qui marche.
      Une tête **non-média** (page d'erreur provider) n'est **pas** retentée (le transcode re-tomberait
      sur la même erreur).
+- **Suite — barre de progression sur un transcode TS (GATEWAY_VERSION 57)** : le TS rejoue bien via le
+  gateway transcode, mais **sans timeline** : le MPEG-TS n'a pas de durée globale → `ffprobe`
+  `format.duration` vide → `codecProfile.durationSeconds` nul → pas de `durationHint` → pas de seek bar
+  (et le transcode à la volée est une playlist HLS qui grandit, sans `#EXT-X-ENDLIST`). Toute la
+  plomberie durée existe déjà (gateway `codecProfile.durationSeconds` → edge → client `durationHint`) ;
+  seul **le chiffre** manquait. Fix : `estimateDurationFromFormat()` (gateway) = `size*8/bitrate`
+  (estimation CBR) quand `format.duration` est absent → remplit `durationSeconds` → seek bar. Ne touche
+  rien quand `ffprobe` donne déjà une durée.
 
 ### Bug #4 — mkv ne démarre pas alors que mp4 oui : IP datacenter bloquée (GATEWAY_VERSION 51) ✅ racine
 - **Symptôme** : sur le **même provider**, les mp4 (`direct`) jouaient mais les mkv (`engine`/`relay`) `458`aient, **au même instant**.

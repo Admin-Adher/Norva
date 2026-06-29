@@ -150,7 +150,7 @@ const RAW_PROVIDER_RETRY_DELAYS_MS = [1500, 5000, 9000, 9000, 9000, 9000, 9000, 
 const FFMPEG_USER_AGENT = process.env.FFMPEG_USER_AGENT ||
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36 Norva/1.0';
 const MAX_LOG_TAIL = 12000;
-const GATEWAY_VERSION = 56;
+const GATEWAY_VERSION = 57;
 // Browser playback fetches HLS playlists/segments cross-origin, so these must
 // list every Norva web origin or the browser blocks the response (CORS). Keep
 // in sync with the relay's ALLOWED_ORIGINS (services/norva-relay/wrangler.jsonc).
@@ -1551,7 +1551,11 @@ function buildCodecProfile(payload, startedAt, probeSource) {
             });
         }),
         container: stringOrNull(format.format_name),
-        durationSeconds: nullableFloat(format.duration),
+        // MPEG-TS (and other stream containers) carry no global duration, so ffprobe leaves
+        // format.duration empty even when it knows the overall bit rate and file size. Fall back to
+        // size*8/bitrate (CBR estimate — plenty accurate to draw a seek bar) so an on-the-fly TS
+        // transcode still gets a timeline instead of a duration-less, unseekable player.
+        durationSeconds: nullableFloat(format.duration) || estimateDurationFromFormat(format),
         bitRate: nullableInt(format.bit_rate),
         probeSource: probeSource || 'gateway_probe',
         probeMs: Math.max(1, Date.now() - startedAt),
@@ -2207,6 +2211,17 @@ function nullableFloat(value) {
     if (value === null || value === undefined || value === '') return null;
     const parsed = Number.parseFloat(String(value));
     return Number.isFinite(parsed) ? parsed : null;
+}
+
+// Estimate media duration from an ffprobe `format` block when it has no `duration` (e.g. MPEG-TS):
+// seconds ≈ size_bytes * 8 / overall_bit_rate. CBR approximation — good enough for a scrub bar.
+// Returns null unless both size and bit rate are known and the result is a sane (0, 24h) value.
+function estimateDurationFromFormat(format) {
+    const size = nullableFloat(format && format.size);
+    const bitRate = nullableFloat(format && format.bit_rate);
+    if (!size || size <= 0 || !bitRate || bitRate <= 0) return null;
+    const seconds = (size * 8) / bitRate;
+    return Number.isFinite(seconds) && seconds > 0 && seconds < 24 * 60 * 60 ? seconds : null;
 }
 
 function normalizeSeekOffset(value) {
