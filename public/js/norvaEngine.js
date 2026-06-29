@@ -359,8 +359,21 @@
       if (this._gate) { this._gate(); this._gate = null; }
       try { this.video.removeEventListener('seeking', this._onSeeking); } catch (_) {}
       try { this.video.removeEventListener('timeupdate', this._onTimeUpdate); } catch (_) {}
+      // Stop draining: drop any pending segments so a late updateend can't append to the
+      // old SourceBuffer after we've detached (fast media-switch race).
+      this.queue.length = 0;
+      // Reset the shared <video> so the NEXT engine attaches its MediaSource to a clean
+      // element instead of inheriting this stream's buffered ranges / pending appends —
+      // otherwise a quick switch yields CHUNK_DEMUXER_ERROR_APPEND_FAILED on the new pipe.
+      // BUT only if the element still shows OUR stream: on a rapid 3-way switch a newer
+      // engine may already own the <video>, and we must not clear its MediaSource.
+      const ownsVideo = this._objectUrl && this.video.src === this._objectUrl;
       try { if (this.ms && this.ms.readyState === 'open') this.ms.endOfStream(); } catch (_) {}
-      try { if (this.video.src && this.video.src.startsWith('blob:')) URL.revokeObjectURL(this.video.src); } catch (_) {}
+      try { if (this._objectUrl) URL.revokeObjectURL(this._objectUrl); } catch (_) {}
+      if (ownsVideo) {
+        // removeAttribute+load() empties cleanly (fires 'emptied', not 'error').
+        try { this.video.removeAttribute('src'); this.video.load(); } catch (_) {}
+      }
       try { if (this.lib && this.lib.terminate) this.lib.terminate(); } catch (_) {}
       this.lib = null;
     }
@@ -736,7 +749,8 @@
 
     async _attachMediaSource() {
       this.ms = new MediaSource();
-      this.video.src = URL.createObjectURL(this.ms);
+      this._objectUrl = URL.createObjectURL(this.ms);
+      this.video.src = this._objectUrl;
       await new Promise((res, rej) => {
         const to = setTimeout(() => rej(new Error('SOURCEOPEN_TIMEOUT')), 15000);
         this.ms.addEventListener('sourceopen', () => { clearTimeout(to); res(); }, { once: true });
@@ -938,6 +952,7 @@
 
     // ---- MSE buffer plumbing ----------------------------------------------
     _drain() {
+      if (this.destroyed) return; // a late updateend after destroy must not append to a dead pipe
       const sb = this.sb;
       if (!sb || sb.updating) return;
       // Apply the seek/resume placement offset before appending media (only when
