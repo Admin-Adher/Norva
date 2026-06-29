@@ -119,6 +119,11 @@ class WatchPage {
         this.aiSubtitleLang = 'und';
         this._aiSubtitleTitleId = null;
         this._aiSubtitlePollTimer = null;
+        // "Generating…" UX: a coarse ETA countdown (transcription runs at ~0.4× realtime) plus a
+        // per-title "email me when it's ready" opt-in so the viewer needn't watch the spinner.
+        this._aiNotifyOptedIn = false;
+        this._aiEtaTargetMs = 0;
+        this._aiCountdownTimer = null;
         this.selectedAudioStreamIndex = null;
         this.selectedAudioTrackUserChoice = false;
         this.pendingPlaybackPreferences = null;
@@ -2690,6 +2695,9 @@ class WatchPage {
         const aiSameTitle = this._aiSubtitleTitleId && this._aiSubtitleTitleId === this._aiSubtitleKey() && this.aiSubtitleVtt;
         this.aiSubtitleState = aiSameTitle ? 'ready' : 'idle';
         if (!aiSameTitle) { this.aiSubtitleVtt = null; this._aiSubtitleTitleId = null; }
+        this.stopAiSubtitlePolling();
+        this._aiNotifyOptedIn = false;
+        this._aiEtaTargetMs = 0;
         this.clearExternalSubtitleTracks();
         this.updateAudioTracks();
         this.updateCaptionsTracks();
@@ -6131,7 +6139,13 @@ class WatchPage {
     _aiSubtitleMenuHtml() {
         const showing = this.aiSubtitleTrackShowing();
         if (this.aiSubtitleState === 'processing') {
-            return `<button class="captions-option locked" data-source="ai" data-index="-1" disabled aria-disabled="true" title="Transcribing the audio with AI — runs in the background, can take a few minutes">⏳ ${this.escapeHtml('AI subtitles — generating…')}</button>`;
+            this._ensureAiEta();
+            const eta = this._aiEtaText();
+            const head = `<button class="captions-option locked" data-source="ai" data-index="-1" disabled aria-disabled="true" title="Transcribing the audio with AI in the background — you can keep watching or close the tab.">⏳ ${this.escapeHtml('AI subtitles — generating')}${eta ? ` · <span data-ai-countdown>${this.escapeHtml(eta)}</span>` : ''}</button>`;
+            const on = this._aiNotifyOptedIn;
+            const notifyLabel = on ? "We'll email you when it's ready" : 'Notify me by email when ready';
+            const notify = `<button class="captions-option ${on ? 'active' : ''}" data-action="ai-notify" type="button" title="${this.escapeHtml(on ? 'You\'ll get an email the moment your AI subtitles finish.' : 'Get an email when your AI subtitles finish — no need to wait here.')}">${on ? '🔔' : '🔕'} ${this.escapeHtml(notifyLabel)}</button>`;
+            return head + notify;
         }
         if (this.aiSubtitleState === 'failed') {
             return `<button class="captions-option" data-source="ai" data-index="-1">⚠️ ${this.escapeHtml('AI subtitles failed — retry')}</button>`;
@@ -6146,11 +6160,87 @@ class WatchPage {
         return `<button class="captions-option ${showing ? 'active' : ''}" data-source="ai" data-index="-1">✨ ${this.escapeHtml(label)}</button>`;
     }
 
+    // Human title for the email body (and the in-menu copy). Best-effort across the shapes content
+    // takes (cloud catalog vs tmdb-enriched vs raw provider item).
+    _aiTitleLabel() {
+        const c = this.content || {};
+        return String(c.name || c.title || c.tmdb?.title || c.tmdb?.name || c.data?.title || c.data?.name || '').trim().slice(0, 200);
+    }
+
+    // Set a coarse completion target once, when a transcription starts (or when we discover one is
+    // already in flight). Whisper runs at ~0.4× realtime on CPU, so a 95-min film ≈ ~38 min; clamp
+    // to [8, 60] min. It's an estimate (the single-slot gateway may queue), so the countdown falls
+    // back to "finishing up…" rather than ever claiming it's done.
+    _ensureAiEta() {
+        if (this._aiEtaTargetMs && this._aiEtaTargetMs > Date.now()) return;
+        const dur = Number(this.video?.duration);
+        const base = (Number.isFinite(dur) && dur > 0) ? dur : 95 * 60;
+        const etaSec = Math.min(60 * 60, Math.max(8 * 60, base * 0.4));
+        this._aiEtaTargetMs = Date.now() + etaSec * 1000;
+    }
+
+    _aiEtaText() {
+        if (!this._aiEtaTargetMs) return '';
+        const remMs = this._aiEtaTargetMs - Date.now();
+        if (remMs <= 0) return 'finishing up…';
+        const t = Math.round(remMs / 1000);
+        const m = Math.floor(t / 60), s = t % 60;
+        return `~${m}:${String(s).padStart(2, '0')} left`;
+    }
+
+    // Tick the countdown text in place (no full menu rebuild — that would churn the open popover and
+    // re-bind handlers every second). Cheap no-op while the menu is closed (the span isn't in the DOM).
+    _startAiCountdown() {
+        this._stopAiCountdown();
+        this._aiCountdownTimer = setInterval(() => {
+            if (this.aiSubtitleState !== 'processing') { this._stopAiCountdown(); return; }
+            const span = this.captionsList?.querySelector('[data-ai-countdown]');
+            if (span) span.textContent = this._aiEtaText();
+        }, 1000);
+    }
+
+    _stopAiCountdown() {
+        if (this._aiCountdownTimer) { clearInterval(this._aiCountdownTimer); this._aiCountdownTimer = null; }
+    }
+
+    // Toggle the per-title "email me when ready" opt-in. Optimistic (flips the chip immediately),
+    // then registers/cancels server-side via the cheap notify route (no provider call). Reverts the
+    // chip if the server can't honour it (e.g. the account has no email on file).
+    async toggleAiNotify() {
+        if (this.aiSubtitleState !== 'processing') return;
+        const enabled = !this._aiNotifyOptedIn;
+        this._aiNotifyOptedIn = enabled;
+        this.updateCaptionsTracks();
+        try {
+            const params = this._aiSubtitleParams();
+            if (!params || !window.NorvaCloud?.playback?.notifyGeneratedSubtitle) return;
+            try {
+                const cloudId = await window.API?.resolveCloudSourceId?.(params.sourceId);
+                if (cloudId) params.sourceId = String(cloudId);
+            } catch (_) { /* fall back to the raw id */ }
+            const res = await window.NorvaCloud.playback.notifyGeneratedSubtitle({
+                sourceId: params.sourceId, externalId: params.externalId, itemType: params.itemType,
+                titleId: params.titleId, titleLabel: this._aiTitleLabel(), enabled,
+            });
+            if (enabled && res && res.ok === false) {
+                // Couldn't register (no email / no provider key) — undo the optimistic chip.
+                this._aiNotifyOptedIn = false;
+                this.updateCaptionsTracks();
+                console.warn('[WatchPage] AI notify opt-in not registered:', res.reason || '');
+            }
+        } catch (err) {
+            console.warn('[WatchPage] AI notify toggle failed:', err?.status, err?.message || err);
+            this._aiNotifyOptedIn = !enabled;
+            this.updateCaptionsTracks();
+        }
+    }
+
     stopAiSubtitlePolling() {
         if (this._aiSubtitlePollTimer) {
             clearInterval(this._aiSubtitlePollTimer);
             this._aiSubtitlePollTimer = null;
         }
+        this._stopAiCountdown();
     }
 
     // Apply a /generated-subtitle response to the state machine. Returns true on any TERMINAL
@@ -6186,6 +6276,8 @@ class WatchPage {
         }
         if (status === 'processing') {
             this.aiSubtitleState = 'processing';
+            this._ensureAiEta();
+            this._startAiCountdown();
             this.updateCaptionsTracks();
         }
         return false;
@@ -6239,6 +6331,8 @@ class WatchPage {
             this.stopAiSubtitlePolling();
             this.aiSubtitleVtt = null;
             this.aiSubtitleState = 'idle';
+            this._aiNotifyOptedIn = false;
+            this._aiEtaTargetMs = 0;
         }
         this._aiSubtitleTitleId = key;
 
@@ -6255,6 +6349,8 @@ class WatchPage {
 
         // 2) Nothing usable yet → trigger a background transcription and poll for it.
         this.aiSubtitleState = 'processing';
+        this._ensureAiEta();
+        this._startAiCountdown();
         this.updateCaptionsTracks();
         try {
             const enq = await api.requestGeneratedSubtitle(params);
@@ -6408,11 +6504,17 @@ class WatchPage {
         this.captionsList.innerHTML = `${headerHtml}${optionHtml}${aiHtml}${emptyHtml}${offsetHtml}`;
 
         this.captionsList.querySelectorAll('.captions-option').forEach(btn => {
+            if (btn.dataset.action) return; // non-track actions (e.g. ai-notify) wire themselves below
             btn.addEventListener('click', () => this.selectCaptionTrack(
                 btn.dataset.source,
                 parseInt(btn.dataset.index, 10),
                 btn.dataset.streamIndex !== undefined ? parseInt(btn.dataset.streamIndex, 10) : null
             ));
+        });
+
+        this.captionsList.querySelector('[data-action="ai-notify"]')?.addEventListener('click', (event) => {
+            event.stopPropagation();
+            this.toggleAiNotify();
         });
 
         this.captionsList.querySelectorAll('.captions-offset-btn').forEach(btn => {

@@ -97,7 +97,7 @@ Deno.serve(async (req) => {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 18,
+        version: 19,
         entitlements: true,
         entitlementsMode: entitlementRuntime.mode,
         entitlementsEnforced: entitlementRuntime.enforced,
@@ -149,6 +149,10 @@ Deno.serve(async (req) => {
     if (req.method === "POST" && segments[0] === "generated-subtitle") {
       const identity = await requireIdentity(req, supabase);
       return json(req, await postGeneratedSubtitle(req, identity.userId, supabase));
+    }
+    if (req.method === "POST" && segments[0] === "generated-subtitle-notify") {
+      const identity = await requireIdentity(req, supabase);
+      return json(req, await setGeneratedSubtitleNotify(req, identity.userId, supabase));
     }
     if (req.method === "POST" && segments[0] === "catalog-mirror-verify") {
       return json(req, await runCatalogMirrorVerify(req, supabase));
@@ -2303,6 +2307,135 @@ async function postGeneratedSubtitle(req: Request, userId: string, db: SupabaseC
   return { kind: "transcript", lang: "src", ...r };
 }
 
+// Phase 3 (3a): per-viewer "email me when it's ready" opt-in for a pending AI transcription.
+// The transcript cache (catalog_generated_subtitles) is CROSS-USER, so the notification preference
+// lives in its own per-(user, file) table. Deliberately cheap: it resolves the provider key from
+// the stored source row (a cached DB lookup — NO provider round-trip), so toggling this while a
+// stream is live can never open a 2nd provider connection (the user_multi_ip trap). Reversible:
+// enabled=false deletes the subscription. transcribe-callback fans these out when the job lands.
+async function setGeneratedSubtitleNotify(req: Request, userId: string, db: SupabaseClient): Promise<JsonRecord> {
+  const body = recordOrEmpty(await req.json().catch(() => ({})));
+  const { sourceId, externalId, itemType } = await resolveSubtitleTarget(db, userId, {
+    titleId: stringOr(body.titleId, ""),
+    sourceId: stringOr(body.sourceId, ""),
+    externalId: stringOr(body.externalId, ""),
+    itemType: stringOr(body.itemType, ""),
+  });
+  const kind = stringOr(body.kind, "transcript") === "translation" ? "translation" : "transcript";
+  const lang = stringOr(body.lang, kind === "translation" ? "" : "src");
+  if (kind === "translation" && !lang) throw new HttpError(400, "lang is required for translation");
+  // Same provider key the enqueue/cache uses — when present it's the stored providerKey, so the
+  // callback match is exact. No stored key → we can't reliably match the cross-user row at
+  // callback time, so report that and let the client keep the toggle purely local.
+  const pkey = (await resolveSourceIdentity(sourceId, userId, db)).key;
+  if (!pkey) return { ok: false, enabled: false, reason: "no provider key for source" };
+
+  const enabled = body.enabled !== false; // default true
+  if (!enabled) {
+    await db.from("catalog_generated_subtitle_notifications").delete()
+      .eq("user_id", userId).eq("provider_key", pkey).eq("item_type", itemType)
+      .eq("external_id", externalId).eq("kind", kind).eq("lang", lang);
+    return { ok: true, enabled: false };
+  }
+
+  let email = "";
+  try { const { data } = await db.auth.admin.getUserById(userId); email = stringOr(data?.user?.email, ""); }
+  catch (_) { /* fall through to the no-email branch */ }
+  if (!email) return { ok: false, enabled: false, reason: "no email on account" };
+
+  const nowIso = new Date().toISOString();
+  const { error } = await db.from("catalog_generated_subtitle_notifications").upsert({
+    user_id: userId, email, provider_key: pkey, item_type: itemType, external_id: externalId,
+    kind, lang, title_label: stringOr(body.titleLabel, "").slice(0, 300) || null,
+    status: "pending", created_at: nowIso, sent_at: null,
+  }, { onConflict: "user_id,provider_key,item_type,external_id,kind,lang" });
+  if (error) throwDb(error, "notify registration failed");
+  return { ok: true, enabled: true };
+}
+
+// Branded, email-client-safe "your subtitles are ready" HTML (tables + inline styles, dark theme),
+// mirroring norva-auth-email so the two transactional senders look like one product.
+function subtitleReadyEmailHtml(titleLabel: string, siteUrl: string): string {
+  const title = (titleLabel || "your film").replace(/[<>]/g, "");
+  return `<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#0a0c11">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#0a0c11">
+    <tr><td align="center" style="padding:32px 16px">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;background:#11151d;border:1px solid #1f2733;border-radius:16px;overflow:hidden">
+        <tr><td style="padding:32px 32px 8px;text-align:center">
+          <img src="https://norva.tv/img/norva-app-icon.png" width="48" height="48" alt="Norva" style="border-radius:12px">
+          <div style="color:#ffffff;font-family:'Century Gothic',Arial,sans-serif;font-size:22px;font-weight:600;letter-spacing:-.02em;margin-top:10px">Norva</div>
+        </td></tr>
+        <tr><td style="padding:18px 32px 6px;text-align:center">
+          <h1 style="margin:0;color:#f8fafc;font-family:Arial,sans-serif;font-size:21px;font-weight:800">✨ Your AI subtitles are ready</h1>
+        </td></tr>
+        <tr><td style="padding:10px 32px 22px;text-align:center;color:#9aa6bd;font-family:Arial,sans-serif;font-size:15px;line-height:1.6">
+          We finished transcribing <strong style="color:#dbe3f4">${title}</strong>. Re-open the film on Norva and pick <strong style="color:#dbe3f4">✨ AI subtitles</strong> in the captions menu to watch with them.
+        </td></tr>
+        <tr><td align="center" style="padding:8px 0 28px">
+          <a href="${siteUrl}" style="display:inline-block;background:#5b7cfa;color:#ffffff;font-weight:700;font-size:15px;text-decoration:none;padding:14px 30px;border-radius:10px">Open Norva</a>
+        </td></tr>
+        <tr><td style="padding:18px 32px 28px;border-top:1px solid #1f2733;color:#5f6b85;font-family:Arial,sans-serif;font-size:12px;line-height:1.6;text-align:center">
+          You're getting this because you asked to be notified when these subtitles finished. They're cached, so they'll load instantly next time.
+        </td></tr>
+      </table>
+      <div style="color:#3b4254;font-family:Arial,sans-serif;font-size:11px;margin-top:16px">© Norva</div>
+    </td></tr>
+  </table>
+</body></html>`;
+}
+
+// Send one "subtitles ready" email through Resend (same key/sender as norva-auth-email; secrets are
+// project-wide). Returns true on a 2xx; never throws (a send failure must not break the callback).
+async function sendSubtitleReadyEmail(to: string, titleLabel: string): Promise<boolean> {
+  const key = Deno.env.get("RESEND_API_KEY") ?? "";
+  const from = Deno.env.get("AUTH_EMAIL_FROM") ?? "Norva <noreply@norva.tv>";
+  const site = (Deno.env.get("PUBLIC_SITE_URL") ?? "https://norva.tv").replace(/\/+$/, "");
+  if (!key || !to) return false;
+  const subject = `Your AI subtitles for “${titleLabel || "your film"}” are ready — Norva`;
+  try {
+    const res = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ from, to: [to], subject, html: subtitleReadyEmailHtml(titleLabel, site) }),
+    });
+    if (!res.ok) { console.error("[norva-playback] subtitle-ready email failed", res.status, await res.text().catch(() => "")); return false; }
+    return true;
+  } catch (e) { console.error("[norva-playback] subtitle-ready email error", String(e)); return false; }
+}
+
+// Fan out pending "email me" subscriptions for a transcript that just finished. Ready WITH speech
+// → email each subscriber and mark 'sent'. Ready but EMPTY (no dialogue) → mark 'skipped' (there's
+// nothing to show, so no email). Failed → mark 'failed' (silent — we don't nag on failure).
+async function dispatchSubtitleNotifications(db: SupabaseClient, row: JsonRecord | null): Promise<void> {
+  if (!row) return;
+  const status = stringOr(row.status, "");
+  if (status !== "ready" && status !== "failed") return;
+  const providerKey = stringOr(row.provider_key, ""), itemType = stringOr(row.item_type, "");
+  const externalId = stringOr(row.external_id, ""), kind = stringOr(row.kind, "transcript"), lang = stringOr(row.lang, "src");
+  if (!providerKey || !externalId) return;
+  const { data: subs } = await db.from("catalog_generated_subtitle_notifications")
+    .select("id, email, title_label")
+    .eq("provider_key", providerKey).eq("item_type", itemType).eq("external_id", externalId)
+    .eq("kind", kind).eq("lang", lang).eq("status", "pending");
+  const rows = (subs ?? []) as JsonRecord[];
+  if (!rows.length) return;
+  const nowIso = new Date().toISOString();
+  const hasSpeech = status === "ready" && Number(row.segments ?? 0) > 0;
+  if (!hasSpeech) {
+    await db.from("catalog_generated_subtitle_notifications")
+      .update({ status: status === "ready" ? "skipped" : "failed", sent_at: nowIso })
+      .in("id", rows.map((s) => String(s.id)));
+    return;
+  }
+  for (const s of rows) {
+    const ok = await sendSubtitleReadyEmail(stringOr(s.email, ""), stringOr(s.title_label, ""));
+    await db.from("catalog_generated_subtitle_notifications")
+      .update({ status: ok ? "sent" : "failed", sent_at: nowIso }).eq("id", String(s.id));
+  }
+}
+
 // Phase 3 (3a): the gateway calls this back when an async transcription finishes (auth = the shared
 // gateway token). Writes the VTT into the cross-user cache by job_id → every user of that panel
 // gets the subtitles. Best-effort idempotent (a late/duplicate callback just re-writes the row).
@@ -2319,8 +2452,13 @@ async function runTranscribeCallback(req: Request, db: SupabaseClient) {
         audio_sec: Number.isFinite(Number(body.audioSec)) ? Number(body.audioSec) : null,
         segments: Number.isFinite(Number(body.segments)) ? Number(body.segments) : null, error: null, updated_at: nowIso }
     : { status: "failed", error: stringOr(body.error, "unknown").slice(0, 300), updated_at: nowIso };
-  const { error } = await db.from("catalog_generated_subtitles").update(patch).eq("job_id", jobId);
+  const { data: updated, error } = await db.from("catalog_generated_subtitles").update(patch).eq("job_id", jobId)
+    .select("provider_key, item_type, external_id, kind, lang, status, segments").maybeSingle();
   if (error) throwDb(error, "transcribe callback update failed");
+  // Email anyone who opted in for this transcript (best-effort: a send/dispatch failure here must
+  // not fail the callback, or the gateway will think the result was lost and the row stays stuck).
+  try { await dispatchSubtitleNotifications(db, updated as JsonRecord | null); }
+  catch (e) { console.error("[norva-playback] notify dispatch failed", String(e)); }
   return { ok: true, jobId, status: patch.status };
 }
 

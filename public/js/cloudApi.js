@@ -908,7 +908,9 @@
             // for a title (status none|processing|ready|failed, VTT body when ready), and
             // trigger a background transcription the first viewer pays for, the rest reuse.
             generatedSubtitle: (params = {}) => playbackSessionRequest('GET', `/generated-subtitle${query(params)}`),
-            requestGeneratedSubtitle: (body) => playbackSessionRequest('POST', '/generated-subtitle', body)
+            requestGeneratedSubtitle: (body) => playbackSessionRequest('POST', '/generated-subtitle', body),
+            // Per-viewer "email me when these AI subtitles are ready" opt-in/out (enabled:false removes it).
+            notifyGeneratedSubtitle: (body) => playbackSessionRequest('POST', '/generated-subtitle-notify', body)
         },
 
         device: {
