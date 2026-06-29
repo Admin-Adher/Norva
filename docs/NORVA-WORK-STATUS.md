@@ -83,6 +83,8 @@ il « suffit » d'une transcription complète horodatée (au lieu d'un clip de 2
   → à valider côté prod.
 
 ## Réf. docs détaillées
+- `docs/WEBENGINE-PLAYBACK-DEBUGGING.md` — **débogage lecture mkv** (les 4 bugs, diagnostic `engineSnapshot`, proxy résidentiel, runbook) ⭐
+- `docs/ARCHITECTURE-RELIABILITY.md` — ADR datacenter-IP / plans de lecture
 - `docs/WEBENGINE-LIBAV-LOGGING.md` — fix du spam log libav
 - `docs/WEBENGINE-HEVC-PLAYBACK.md` — tag hvc1/hev1
 - `docs/WEBENGINE-GATEWAY-INBAND-PROBE.md` — cache + in-band header parse (audio)
