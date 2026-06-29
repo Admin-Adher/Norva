@@ -150,7 +150,7 @@ const RAW_PROVIDER_RETRY_DELAYS_MS = [1500, 5000, 9000, 9000, 9000, 9000, 9000, 
 const FFMPEG_USER_AGENT = process.env.FFMPEG_USER_AGENT ||
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36 Norva/1.0';
 const MAX_LOG_TAIL = 12000;
-const GATEWAY_VERSION = 55;
+const GATEWAY_VERSION = 56;
 // Browser playback fetches HLS playlists/segments cross-origin, so these must
 // list every Norva web origin or the browser blocks the response (CORS). Keep
 // in sync with the relay's ALLOWED_ORIGINS (services/norva-relay/wrangler.jsonc).
@@ -753,6 +753,43 @@ function runWhisperDetect(wavPath) {
     });
 }
 
+// whisper hallucinates repetition on music/silence (it loops a phrase). Deterministic cleanup:
+// collapse repeated sentences inside one cue, drop a cue identical to the previous, and drop the
+// common end-of-video hallucinations. Never hurts genuine dialogue beyond rare exact-repeat lines.
+const VTT_HALLUCINATION = /^(sous[- ]?titr(es|age)|merci d.avoir regard|thanks? for watching|amara\.org|♪+|\[?\s*(musique|music|applause|applaudissements)\s*\]?)/i;
+function collapseRepeats(text) {
+    const parts = String(text).split(/(?<=[.!?。…])\s+|\s+-\s+/).map((s) => s.trim()).filter(Boolean);
+    const kept = [];
+    let lastNorm = '';
+    for (const p of parts) {
+        const norm = p.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+        if (!norm || norm === lastNorm) continue;
+        lastNorm = norm;
+        kept.push(p);
+    }
+    return kept.join(' ');
+}
+function cleanVtt(vtt) {
+    if (!vtt) return vtt;
+    const blocks = String(vtt).replace(/\r/g, '').trim().split(/\n\s*\n/);
+    const out = ['WEBVTT'];
+    let lastNorm = '';
+    for (const block of blocks) {
+        const blk = block.trim();
+        if (!blk || (/^WEBVTT/i.test(blk) && !blk.includes('-->'))) continue;
+        const lns = blk.split('\n');
+        const tsIdx = lns.findIndex((l) => l.includes('-->'));
+        if (tsIdx === -1) continue;
+        const ts = lns[tsIdx].trim();
+        const text = collapseRepeats(lns.slice(tsIdx + 1).join(' ').trim());
+        const norm = text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+        if (!norm || norm === lastNorm || VTT_HALLUCINATION.test(text.trim())) continue;
+        lastNorm = norm;
+        out.push(`${ts}\n${text}`);
+    }
+    return out.join('\n\n') + '\n';
+}
+
 // Phase 3: full timestamped transcription to WebVTT. whisper.cpp emits VTT natively (-ovtt).
 // Resolves { vtt, lang, prob, ms } (empties on failure). forceLang pins the source language.
 function runWhisperVtt(wavPath, forceLang) {
@@ -765,6 +802,7 @@ function runWhisperVtt(wavPath, forceLang) {
             '-l', (forceLang && /^[a-z]{2,3}$/i.test(forceLang)) ? forceLang : 'auto',
             '-ovtt', '-of', outPrefix,
             '-t', String(WHISPER_THREADS),
+            '-mc', '0',  // no cross-window text context → breaks whisper's repetition loops on music/silence
         ];
         let child;
         try { child = spawn(WHISPER_BIN, args, { stdio: ['ignore', 'ignore', 'pipe'] }); }
@@ -782,7 +820,7 @@ function runWhisperVtt(wavPath, forceLang) {
             try { vtt = await fsp.readFile(outPrefix + '.vtt', 'utf8'); } catch (_) { vtt = ''; }
             fsp.unlink(outPrefix + '.vtt').catch(() => {});
             if (code !== 0 && !vtt) console.warn(`[media-gateway] whisper-vtt exit ${code}: ${stderr.slice(-300)}`);
-            resolve({ vtt: String(vtt || '').trim(), lang, prob, ms: Date.now() - t0 });
+            resolve({ vtt: cleanVtt(String(vtt || '').trim()), lang, prob, ms: Date.now() - t0 });
         });
     });
 }
