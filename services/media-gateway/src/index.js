@@ -8,6 +8,30 @@ const express = require('express');
 
 const app = express();
 
+// Optional residential proxy for ALL outbound provider traffic. Some IPTV providers
+// 458/block datacenter IPs (e.g. Railway) while serving residential IPs fine; routing
+// the gateway's provider requests through a residential proxy makes the provider see a
+// residential exit IP. Set PROVIDER_PROXY_URL (e.g. http://user:pass@host:port) as an
+// env var — never commit it. undici is only required when the proxy is configured.
+const PROVIDER_PROXY_URL = (process.env.PROVIDER_PROXY_URL || '').trim();
+let providerProxyAgent = null;
+if (PROVIDER_PROXY_URL) {
+    try {
+        const { ProxyAgent } = require('undici');
+        providerProxyAgent = new ProxyAgent(PROVIDER_PROXY_URL);
+        // Node's built-in fetch ignores http_proxy env (it needs the dispatcher above),
+        // but spawned ffmpeg/ffprobe DO honour http_proxy/https_proxy — set them so the
+        // transcode/probe paths also exit through the residential IP. Provider URLs are
+        // http(s); Supabase/internal fetch() stays direct (fetch ignores these env vars).
+        if (!process.env.http_proxy) process.env.http_proxy = PROVIDER_PROXY_URL;
+        if (!process.env.https_proxy) process.env.https_proxy = PROVIDER_PROXY_URL;
+        console.log('[media-gateway] provider proxy ENABLED (outbound provider traffic routed through PROVIDER_PROXY_URL)');
+    } catch (err) {
+        console.error('[media-gateway] PROVIDER_PROXY_URL set but proxy could not be initialised:', (err && err.message) || err);
+        providerProxyAgent = null;
+    }
+}
+
 const PORT = Number.parseInt(process.env.PORT || '8080', 10);
 const GATEWAY_TOKEN = process.env.GATEWAY_TOKEN || process.env.NORVA_MEDIA_GATEWAY_TOKEN || '';
 const PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL || '').replace(/\/+$/, '');
@@ -79,7 +103,7 @@ const RAW_PROVIDER_RETRY_DELAYS_MS = [1500, 5000, 9000, 9000, 9000, 9000, 9000, 
 const FFMPEG_USER_AGENT = process.env.FFMPEG_USER_AGENT ||
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36 Norva/1.0';
 const MAX_LOG_TAIL = 12000;
-const GATEWAY_VERSION = 50;
+const GATEWAY_VERSION = 51;
 // Browser playback fetches HLS playlists/segments cross-origin, so these must
 // list every Norva web origin or the browser blocks the response (CORS). Keep
 // in sync with the relay's ALLOWED_ORIGINS (services/norva-relay/wrangler.jsonc).
@@ -139,6 +163,7 @@ app.get('/health', (req, res) => {
         probeStats,
         codecProfileCacheSize: codecProfileCache.size,
         languageDetect: Boolean(WHISPER_BIN && WHISPER_MODEL),
+        providerProxy: Boolean(providerProxyAgent),
         inbandHeaderParse: INBAND_HEADER_PARSE,
         headerByteCacheSize: headerByteCache.size,
         activeSessions: activeSessionCount(),
@@ -311,7 +336,7 @@ app.get('/raw/:token', async (req, res) => {
     let upstream = null;
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
         try {
-            upstream = await fetch(claims.url, { method, headers, redirect: 'follow', signal: ac.signal });
+            upstream = await fetch(claims.url, { method, headers, redirect: 'follow', signal: ac.signal, dispatcher: providerProxyAgent || undefined });
         } catch (err) {
             if (ac.signal.aborted) { try { res.end(); } catch (_) {} return; }
             if (attempt >= maxAttempts) {
@@ -1832,6 +1857,7 @@ async function fetchProviderJson(url, userAgent, timeoutMs = XTREAM_REQUEST_TIME
     try {
         const response = await fetch(url, {
             signal: controller.signal,
+            dispatcher: providerProxyAgent || undefined,
             headers: {
                 'Accept': 'application/json,text/plain,*/*',
                 'User-Agent': userAgent
