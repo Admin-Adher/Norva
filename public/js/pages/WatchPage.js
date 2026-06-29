@@ -6098,7 +6098,9 @@ class WatchPage {
         const c = this.content || {};
         const type = String(this.contentType || c.type || '').toLowerCase();
         if (type !== 'movie') return null;
-        const sourceId = String(c.sourceId || c.source_id || '');
+        // The edge resolves against the CLOUD source id (a UUID), not the raw provider/local source
+        // id on content.sourceId (e.g. "900016"). getTelemetrySourceId() returns the cloud UUID.
+        const sourceId = (this.getTelemetrySourceId ? this.getTelemetrySourceId() : '') || '';
         const externalId = String(c.id || c.streamId || c.stream_id || (this.getTelemetryItemId ? this.getTelemetryItemId() : '') || '');
         if (!sourceId || !externalId) return null;
         const titleId = String(c.titleId || c.title_id || c.data?.titleId || '');
