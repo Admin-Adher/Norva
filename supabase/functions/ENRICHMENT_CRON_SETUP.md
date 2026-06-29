@@ -37,12 +37,23 @@ TMDB (not the provider), so they stay spread across the day. The catalogue
 auto-refresh (`norva-source-sync/cron/refresh-due`, jobid 1) also touches the
 provider when a sync comes due — move it off-peak too if daytime re-syncs bite.
 
-| Job | Endpoint | Cadence |
-|---|---|---|
-| `norva-audio-langs` | `norva-playback/audio-backfill` (movie, probe) | `0,8,16,24,32,40,48,56 3,4 * * *` (off-peak, ~16/night) |
-| `norva-audio-langs-series` | `norva-playback/audio-backfill` (series, probe) | `2,10,18,26,34,42,50,58 3,4 * * *` (off-peak, ~16/night) |
-| `norva-audio-langs-untagged` | `norva-playback/audio-backfill` (movie, vod, untagged) | `4,12,20,28,36,44,52 3,4 * * *` (off-peak, ~14/night) |
-| `norva-subtitle-backfill-movie` | `norva-playback/audio-backfill` (movie, subtitle) | `6,14,22,30,38,46,54 3,4 * * *` (off-peak, ~14/night) |
+> **2026-06-29 — bascule 24/7 (single-slot-safe).** L'owner n'utilise pas le site en
+> journée et veut drainer le backlog (≈64k titres sans langue) plus vite. Les jobs
+> qui ouvrent une connexion **stream** (`probe`/`subtitle`/`whisper`) passent en
+> **concurrence 1** et sont **décalés de 2 min** (cycle de 10 min) → il n'y a JAMAIS
+> plus d'**UNE** connexion stream de backfill à la fois : le backfill ne se heurte
+> donc jamais lui-même. Le `vod` reste métadonnées (relais `get_vod_info`, pas une
+> connexion stream) → parallélisable. Si l'owner regarde un film pendant un tick, le
+> pire est 1 (lui) + 1 (backfill) → un retry géré (cf. logique 458/429), pas une
+> tempête. Réversible : restaurer `… 3,4 * * *` (off-peak 2 h) ci-dessous.
+
+| Job | Endpoint | Cadence (24/7, décalé) | conc |
+|---|---|---|---|
+| `norva-audio-langs` | `…/audio-backfill` (movie, probe) | `0,10,20,30,40,50 * * * *` | 1 |
+| `norva-audio-langs-series` | `…/audio-backfill` (series, probe) | `2,12,22,32,42,52 * * * *` | 1 |
+| `norva-audio-langs-untagged` | `…/audio-backfill` (movie, **vod** = métadonnées) | `4,14,24,34,44,54 * * * *` | 4 |
+| `norva-subtitle-backfill-movie` | `…/audio-backfill` (movie, subtitle) | `6,16,26,36,46,56 * * * *` | 1 |
+| `norva-audio-langs-whisper` | `…/audio-backfill` (movie, **whisper** = résidu non-tagué) | `8,28,48 * * * *` | 1 |
 | `norva-enrich-search-match` | `norva-source-sync/cron/search-match` | `15,45 * * * *` (every 30 min) |
 | `norva-enrich-revalidate` | `norva-source-sync/cron/revalidate` | `5 */6 * * *` (every 6 h) |
 | `norva-enrich-backfill-years` | `norva-source-sync/cron/backfill-years` | `30 3 * * *` (daily 03:30) |
@@ -56,39 +67,52 @@ provider when a sync comes due — move it off-peak too if daytime re-syncs bite
 
 ```sql
 -- Audio/subtitle backfill → norva-playback/audio-backfill  (Vault: norva_backfill_token)
-select cron.schedule('norva-audio-langs', '0,8,16,24,32,40,48,56 3,4 * * *', $cron$
+-- 24/7 staggered, stream-touching jobs concurrency 1 (max ONE provider stream
+-- connection at a time). vod = metadata (relay), parallel-safe. timeout 110s < 120s gap.
+select cron.schedule('norva-audio-langs', '0,10,20,30,40,50 * * * *', $cron$
   select net.http_post(
     url := 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-playback/audio-backfill',
     headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'norva_backfill_token')),
-    body := jsonb_build_object('userId','c5be5ac4-3700-4a25-9509-8eaf7771fdb6','type','movie','mode','probe','requireTag','multi,vostfr,vo,vff,vfq','limit',15,'concurrency',3),
-    timeout_milliseconds := 120000
+    body := jsonb_build_object('userId','c5be5ac4-3700-4a25-9509-8eaf7771fdb6','type','movie','mode','probe','requireTag','multi,vostfr,vo,vff,vfq','limit',10,'concurrency',1),
+    timeout_milliseconds := 110000
   );
 $cron$);
 
-select cron.schedule('norva-audio-langs-series', '2,10,18,26,34,42,50,58 3,4 * * *', $cron$
+select cron.schedule('norva-audio-langs-series', '2,12,22,32,42,52 * * * *', $cron$
   select net.http_post(
     url := 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-playback/audio-backfill',
     headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'norva_backfill_token')),
-    body := jsonb_build_object('userId','c5be5ac4-3700-4a25-9509-8eaf7771fdb6','type','series','mode','probe','limit',12,'concurrency',3),
-    timeout_milliseconds := 120000
+    body := jsonb_build_object('userId','c5be5ac4-3700-4a25-9509-8eaf7771fdb6','type','series','mode','probe','limit',8,'concurrency',1),
+    timeout_milliseconds := 110000
   );
 $cron$);
 
-select cron.schedule('norva-audio-langs-untagged', '4,12,20,28,36,44,52 3,4 * * *', $cron$
+select cron.schedule('norva-audio-langs-untagged', '4,14,24,34,44,54 * * * *', $cron$
   select net.http_post(
     url := 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-playback/audio-backfill',
     headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'norva_backfill_token')),
-    body := jsonb_build_object('userId','c5be5ac4-3700-4a25-9509-8eaf7771fdb6','type','movie','mode','vod','untaggedOnly',true,'limit',40,'concurrency',4),
-    timeout_milliseconds := 120000
+    body := jsonb_build_object('userId','c5be5ac4-3700-4a25-9509-8eaf7771fdb6','type','movie','mode','vod','untaggedOnly',true,'limit',60,'concurrency',4),
+    timeout_milliseconds := 110000
   );
 $cron$);
 
-select cron.schedule('norva-subtitle-backfill-movie', '6,14,22,30,38,46,54 3,4 * * *', $cron$
+select cron.schedule('norva-subtitle-backfill-movie', '6,16,26,36,46,56 * * * *', $cron$
   select net.http_post(
     url := 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-playback/audio-backfill',
     headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'norva_backfill_token')),
-    body := jsonb_build_object('userId','c5be5ac4-3700-4a25-9509-8eaf7771fdb6','type','movie','target','subtitle','limit',10,'concurrency',3),
-    timeout_milliseconds := 120000
+    body := jsonb_build_object('userId','c5be5ac4-3700-4a25-9509-8eaf7771fdb6','type','movie','target','subtitle','limit',8,'concurrency',1),
+    timeout_milliseconds := 110000
+  );
+$cron$);
+
+-- whisper: detect the truly-untagged residual (multi-track titles with an unknown
+-- track that probe/vod can't resolve). Serialized; small. See WHISPER-AUDIO-* doc.
+select cron.schedule('norva-audio-langs-whisper', '8,28,48 * * * *', $cron$
+  select net.http_post(
+    url := 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-playback/audio-backfill',
+    headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'norva_backfill_token')),
+    body := jsonb_build_object('userId','c5be5ac4-3700-4a25-9509-8eaf7771fdb6','type','movie','mode','whisper','limit',4,'concurrency',1),
+    timeout_milliseconds := 110000
   );
 $cron$);
 
