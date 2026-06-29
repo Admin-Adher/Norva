@@ -92,6 +92,34 @@
     return Object.prototype.toString.call(e);
   }
 
+  // Walk the top-level ISO-BMFF/fMP4 boxes in a chunk so a rejected append can be
+  // described by what it actually contained (ftyp/moov = init segment;
+  // styp/moof/mdat = media fragment). Returns e.g. "ftyp(28) moov(1037)" or, on a
+  // malformed/truncated box, a "?" marker — diagnostics only, never throws.
+  function mp4Boxes(data, limit = 8) {
+    const out = [];
+    try {
+      const b = data instanceof Uint8Array ? data : new Uint8Array(data);
+      let p = 0;
+      while (p + 8 <= b.length && out.length < limit) {
+        let size = ((b[p] << 24) | (b[p + 1] << 16) | (b[p + 2] << 8) | b[p + 3]) >>> 0;
+        const type = String.fromCharCode(b[p + 4], b[p + 5], b[p + 6], b[p + 7]);
+        // Non-printable type → not a box boundary (we're mid-stream / desynced).
+        if (!/^[\x20-\x7e]{4}$/.test(type)) { out.push('?@' + p); break; }
+        let hdr = 8;
+        if (size === 1) { // 64-bit largesize
+          size = (((b[p + 8] << 24) | (b[p + 9] << 16) | (b[p + 10] << 8) | b[p + 11]) >>> 0) * 4294967296
+               + (((b[p + 12] << 24) | (b[p + 13] << 16) | (b[p + 14] << 8) | b[p + 15]) >>> 0);
+          hdr = 16;
+        } else if (size === 0) { size = b.length - p; } // to end of chunk
+        out.push(type + '(' + size + ')');
+        if (size < hdr) { out.push('!badsize'); break; }
+        p += size;
+      }
+    } catch (_) { out.push('!err'); }
+    return out.join(' ');
+  }
+
   let libavLoaderPromise = null;
   function loadLibavFactory() {
     if (!libavLoaderPromise) libavLoaderPromise = import(LIBAV_LOADER);
@@ -123,7 +151,7 @@
     av1: ['av01.0.08M.08'],
   };
 
-  const ENGINE_VERSION = 15;
+  const ENGINE_VERSION = 16;
 
   class NorvaEngine {
     constructor(videoEl, opts = {}) {
@@ -188,6 +216,21 @@
       this.vBase = null; this.vCum = 0; this.vFd0 = 0; this.vOffset = 0;
       this._onSeeking = this._handleSeeking.bind(this);
       this._onTimeUpdate = this._handleTimeUpdate.bind(this);
+      // Deep diagnostics for CHUNK_DEMUXER_ERROR_APPEND_FAILED on VOD open: a
+      // running record of the exact bytes/boxes/codec decisions that fed MSE, so a
+      // rejected append can be explained instead of just observed. Pure accounting,
+      // no effect on playback. Surfaced via engineSnapshot().
+      this._diag = {
+        mime: null, videoCodecString: null, videoCands: null, audioTag: null,
+        vName: null, aName: null, copyAudio: null, durationSec: null,
+        initBoxes: null, initBytes: 0,
+        firstMediaBoxes: null, firstMediaBytes: 0,
+        firstVideoPkt: null,          // { pts, dts, key, idx }
+        appendCount: 0, appendBytes: 0,
+        appendErrors: [],             // [{ n, bytes, boxes, err, sbUpdating, msState }]
+        sbErrorEvents: 0,
+        droppedOpenGop: 0,
+      };
     }
 
     // ---- public ------------------------------------------------------------
@@ -732,12 +775,17 @@
         else if (this.vName === 'hevc') exact = hevcCodecString(ed);
         if (exact) cands.push(exact);
         cands = cands.concat(VIDEO_FALLBACKS[this.vName] || []);
+        this._diag.videoCodecString = exact;
       }
       const aTag = this.aS ? (this.copyAudio ? (AUDIO_MIME[this.aName] || 'mp4a.40.2') : 'mp4a.40.2') : null;
+      this._diag.videoCands = cands.slice();
+      this._diag.audioTag = aTag;
+      this._diag.vName = this.vName; this._diag.aName = this.aName;
+      this._diag.copyAudio = this.copyAudio; this._diag.durationSec = this.durationSec;
       const hasMSE = ('MediaSource' in window) && typeof MediaSource.isTypeSupported === 'function';
       for (const v of cands) {
         const mime = 'video/mp4; codecs="' + v + (aTag ? ',' + aTag : '') + '"';
-        if (hasMSE && MediaSource.isTypeSupported(mime)) { this.log('mime: ' + mime); return mime; }
+        if (hasMSE && MediaSource.isTypeSupported(mime)) { this.log('mime: ' + mime); this._diag.mime = mime; return mime; }
       }
       throw new Error('NO_SUPPORTED_MIME:' + this.vName + '/' + (this.aName || 'novideoaudio') + ' cands=' + cands.join('|'));
     }
@@ -754,7 +802,11 @@
       this.sb.mode = 'segments';
       if (this.durationSec > 0) { try { this.ms.duration = this.durationSec; } catch (_) {} }
       this.sb.addEventListener('updateend', () => this._drain());
-      this.sb.addEventListener('error', () => this.log('SourceBuffer error'));
+      this.sb.addEventListener('error', () => {
+        this._diag.sbErrorEvents++;
+        try { this.log('SourceBuffer error — snapshot ' + JSON.stringify(this.engineSnapshot())); }
+        catch (_) { this.log('SourceBuffer error'); }
+      });
     }
 
     async _initEncoder() {
@@ -778,10 +830,32 @@
                                                   : [this.encCodecpar, 1, AAC_SAMPLE_RATE]);
       let written = 0;
       this._initSegPending = true;
+      // Diagnostics: a fresh muxer emits a new init segment (ftyp+moov) then media
+      // fragments. Reset the per-segment capture, bump the init counter, and mark the
+      // header-write phase so onwrite can tell init bytes from media bytes.
+      const d = this._diag;
+      d.muxerInits = (d.muxerInits || 0) + 1;
+      d.initBoxes = null; d.initBytes = 0; d.firstMediaBoxes = null; d.firstMediaBytes = 0;
+      d.firstVideoPkt = null;
+      this._diagHeaderPhase = true;
       // ff_init_muxer(device:true) re-creates the 'output' writer device; remove
       // any stale one from a prior init (e.g. a re-seek) or it can collide.
       try { await lib.unlink('output'); } catch (_) {}
-      lib.onwrite = (name, pos, data) => { written += data.length; this.queue.push(data.slice(0)); this._drain(); };
+      lib.onwrite = (name, pos, data) => {
+        written += data.length;
+        const chunk = data.slice(0);
+        try {
+          if (this._diagHeaderPhase) {
+            d.initBytes += chunk.length;
+            const boxes = mp4Boxes(chunk);
+            d.initBoxes = d.initBoxes ? d.initBoxes + ' + ' + boxes : boxes;
+          } else if (d.firstMediaBoxes == null) {
+            d.firstMediaBytes = chunk.length;
+            d.firstMediaBoxes = mp4Boxes(chunk);
+          }
+        } catch (_) {}
+        this.queue.push(chunk); this._drain();
+      };
       const muxRet = await lib.ff_init_muxer(
         { format_name: 'mp4', filename: 'output', open: true, device: true, codecpars: true }, streamCtxs);
       this.oc = muxRet[0];
@@ -798,6 +872,9 @@
       }
       await lib.av_opt_set(this.oc, 'movflags', 'frag_keyframe+empty_moov+default_base_moof', lib.AV_OPT_SEARCH_CHILDREN);
       await lib.avformat_write_header(this.oc, 0);
+      // Header (ftyp+moov init segment) flushed; subsequent onwrite chunks are media.
+      this._diagHeaderPhase = false;
+      this.log('diag init seg: ' + (d.initBoxes || '(none)') + ' bytes=' + d.initBytes + ' mime=' + (this.mime || '?'));
       if (!this.pkt) this.pkt = await lib.av_packet_alloc();
       // reset video DTS grid for this (re)start
       this.vBase = null; this.vCum = 0; this.vFd0 = 0; this.vOffset = 0;
@@ -884,7 +961,7 @@
             // rejects the append (CHUNK_DEMUXER_ERROR_APPEND_FAILED) — this is why
             // resuming a part-watched title failed while a fresh start did not. Drop
             // them so the keyframe is the first frame in both decode and display order.
-            if (this.vBase !== null && this._gopFloorPts !== null && to64(p.pts, p.ptshi) < this._gopFloorPts) continue;
+            if (this.vBase !== null && this._gopFloorPts !== null && to64(p.pts, p.ptshi) < this._gopFloorPts) { this._diag.droppedOpenGop++; continue; }
             p.stream_index = this.V_IDX; this._setVideoDts(p); writeList.push(p);
           } else if (this.aS && p.stream_index === this.aS.index) {
             if (this.copyAudio) { p.stream_index = this.A_IDX; writeList.push(p); }
@@ -943,6 +1020,14 @@
       const [lo, hi] = from64(this.vBase + this.vCum - this.vOffset);
       p.dts = lo; p.dtshi = hi;
       this.vCum += (p.duration || 0) > 0 ? p.duration : 1;
+      // Diagnostics: the first video packet of a segment must be a keyframe in
+      // presentation order, or Chromium rejects the media fragment append. Record it.
+      if (this._diag && this._diag.firstVideoPkt == null) {
+        this._diag.firstVideoPkt = {
+          ptsSrc: pts, dtsHL: hi + ':' + lo, key: !!(p.flags & 1),
+          dur: p.duration || 0, anchor: this._tsAnchor, gopFloor: this._gopFloorPts,
+        };
+      }
     }
 
     // ---- MSE buffer plumbing ----------------------------------------------
@@ -953,8 +1038,25 @@
       // Apply the seek/resume placement offset before appending media (only when
       // idle; harmless on the sample-less init segment).
       if (this._tsAnchor !== this._tsApplied) { try { sb.timestampOffset = this._tsAnchor; this._tsApplied = this._tsAnchor; } catch (_) {} }
-      if (this.queue.length) { try { sb.appendBuffer(this.queue.shift()); } catch (e) { this.log('append err ' + errStr(e)); } }
-      else if (this.ended && this.ms && this.ms.readyState === 'open') { try { this.ms.endOfStream(); } catch (_) {} }
+      if (this.queue.length) {
+        const chunk = this.queue.shift();
+        const d = this._diag;
+        try {
+          sb.appendBuffer(chunk);
+          d.appendCount++; d.appendBytes += chunk.length;
+        } catch (e) {
+          // The synchronous throw here is usually QuotaExceededError / InvalidState;
+          // a bad-bytes rejection arrives later on the element as
+          // CHUNK_DEMUXER_ERROR_APPEND_FAILED. Capture both, with what the chunk held.
+          const rec = {
+            n: d.appendCount, bytes: chunk.length, boxes: mp4Boxes(chunk),
+            err: errStr(e), sbUpdating: sb.updating,
+            msState: this.ms && this.ms.readyState, tsOffset: this._tsApplied,
+          };
+          if (d.appendErrors.length < 8) d.appendErrors.push(rec);
+          this.log('append err #' + d.appendCount + ' [' + rec.boxes + '] ' + rec.err);
+        }
+      } else if (this.ended && this.ms && this.ms.readyState === 'open') { try { this.ms.endOfStream(); } catch (_) {} }
     }
 
     _bufferedAhead() {
@@ -965,6 +1067,57 @@
         }
       } catch (_) {}
       return 0;
+    }
+
+    // Full picture of what the engine fed MediaSource + the live element/buffer state.
+    // Built for the CHUNK_DEMUXER_ERROR_APPEND_FAILED post-mortem: pairs the codec/box
+    // decisions (from _diag) with the current SourceBuffer/MediaSource/video status so a
+    // rejected append is explained, not just reported. Read-only, never throws.
+    engineSnapshot() {
+      const d = this._diag || {};
+      const snap = {
+        engineVersion: ENGINE_VERSION,
+        url: this.url ? String(this.url).slice(0, 120) : null,
+        size: this.size,
+        // codec / mime decisions
+        mime: d.mime, vName: d.vName, aName: d.aName,
+        videoCodecString: d.videoCodecString, videoCands: d.videoCands, audioTag: d.audioTag,
+        copyAudio: d.copyAudio, durationSec: d.durationSec,
+        // what the muxer emitted
+        muxerInits: d.muxerInits, initBoxes: d.initBoxes, initBytes: d.initBytes,
+        firstMediaBoxes: d.firstMediaBoxes, firstMediaBytes: d.firstMediaBytes,
+        firstVideoPkt: d.firstVideoPkt, droppedOpenGop: d.droppedOpenGop,
+        // append accounting
+        appendCount: d.appendCount, appendBytes: d.appendBytes,
+        appendErrors: d.appendErrors, sbErrorEvents: d.sbErrorEvents,
+        queueLen: this.queue ? this.queue.length : null,
+        // pipeline / timing state
+        tsAnchor: this._tsAnchor, tsApplied: this._tsApplied,
+        vBase: this.vBase, gopFloorPts: this._gopFloorPts,
+        ended: this.ended, destroyed: this.destroyed,
+        pumpRunning: this._pumpRunning, seeking: this._seeking,
+        timings: this.timings,
+      };
+      try {
+        const sb = this.sb;
+        if (sb) {
+          const ranges = [];
+          for (let i = 0; i < sb.buffered.length; i++) ranges.push([+sb.buffered.start(i).toFixed(2), +sb.buffered.end(i).toFixed(2)]);
+          snap.sb = { updating: sb.updating, mode: sb.mode, timestampOffset: sb.timestampOffset, buffered: ranges };
+        } else snap.sb = null;
+      } catch (e) { snap.sb = 'err:' + errStr(e); }
+      try { snap.ms = this.ms ? { readyState: this.ms.readyState, duration: this.ms.duration, sbCount: this.ms.sourceBuffers && this.ms.sourceBuffers.length } : null; }
+      catch (e) { snap.ms = 'err:' + errStr(e); }
+      try {
+        const v = this.video;
+        snap.video = v ? {
+          readyState: v.readyState, networkState: v.networkState,
+          currentTime: +(.0 + v.currentTime).toFixed(2), paused: v.paused,
+          error: v.error ? { code: v.error.code, message: v.error.message || '' } : null,
+          hasSrc: !!v.src, currentSrcKind: v.currentSrc ? (v.currentSrc.startsWith('blob:') ? 'blob' : 'other') : null,
+        } : null;
+      } catch (e) { snap.video = 'err:' + errStr(e); }
+      return snap;
     }
 
     _isBuffered(t) {

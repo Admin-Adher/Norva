@@ -2431,6 +2431,31 @@ class WatchPage {
 
     reportEngineFailure(info = {}) {
         console.warn('[NorvaEngine] failed', info);
+        // Deep snapshot of the engine state at the moment of failure — the codec/mime
+        // decisions, the exact fMP4 boxes that were appended, the first-video-packet
+        // keyframe flag, append errors, and the live SourceBuffer/MediaSource/video
+        // status. This is what turns a bare CHUNK_DEMUXER_ERROR_APPEND_FAILED into a
+        // diagnosable cause. Logged in full to the console; key fields go to telemetry.
+        let snap = null;
+        try { snap = this.norvaEngine?.engineSnapshot?.() || null; } catch (_) {}
+        if (snap) {
+            try {
+                console.group('[NorvaEngine] failure snapshot');
+                console.warn('mime        :', snap.mime, '| video', snap.vName, '| audio', snap.aName, '| copyAudio', snap.copyAudio);
+                console.warn('codec string:', snap.videoCodecString, '| candidates', snap.videoCands, '| audioTag', snap.audioTag);
+                console.warn('init segment:', snap.initBoxes, '(' + snap.initBytes + ' B) | muxerInits', snap.muxerInits);
+                console.warn('1st media   :', snap.firstMediaBoxes, '(' + snap.firstMediaBytes + ' B)');
+                console.warn('1st vid pkt :', JSON.stringify(snap.firstVideoPkt), '| droppedOpenGop', snap.droppedOpenGop);
+                console.warn('appends     :', snap.appendCount, 'ok /', snap.appendBytes, 'B | sbErrorEvents', snap.sbErrorEvents, '| queueLen', snap.queueLen);
+                console.warn('appendErrors:', snap.appendErrors);
+                console.warn('SourceBuffer:', JSON.stringify(snap.sb));
+                console.warn('MediaSource :', JSON.stringify(snap.ms));
+                console.warn('video elem  :', JSON.stringify(snap.video));
+                console.warn('timings     :', JSON.stringify(snap.timings));
+                console.warn('full snapshot:', snap);
+                console.groupEnd();
+            } catch (_) { console.warn('[NorvaEngine] failure snapshot', snap); }
+        }
         try {
             // Use the server-accepted 'playback_error' event type and pack the
             // engine context into errorMessage so it persists even if the event
@@ -2438,14 +2463,30 @@ class WatchPage {
             const v = this.norvaEngine?.vName || this.currentStreamInfo?.video || '?';
             const a = this.norvaEngine?.aName || '?';
             const c = this.containerExtension || '?';
+            // Compact one-line digest of the snapshot for the persisted errorMessage.
+            let digest = '';
+            if (snap) {
+                const ae = (snap.appendErrors && snap.appendErrors[0]) || null;
+                digest = ` | mime=${snap.mime || '?'} init=[${snap.initBoxes || '?'}] media=[${snap.firstMediaBoxes || '?'}]`
+                    + ` vpkt=${snap.firstVideoPkt ? (snap.firstVideoPkt.key ? 'key' : 'NONKEY') + '@' + snap.firstVideoPkt.ptsSrc : '?'}`
+                    + ` appends=${snap.appendCount} verr=${snap.video && snap.video.error ? snap.video.error.code : '-'}`
+                    + (ae ? ` appendErr0=[${ae.boxes}]:${ae.err}` : '');
+            }
             this.sendPlaybackEvent('playback_error', {
                 errorCode: 'ENGINE_' + (info.stage || 'unknown'),
-                errorMessage: `engine ${info.stage || 'unknown'} container=${c} video=${v} audio=${a} :: ${String(info.message || '').slice(0, 300)}`,
+                errorMessage: `engine ${info.stage || 'unknown'} container=${c} video=${v} audio=${a} :: ${String(info.message || '').slice(0, 200)}${digest}`.slice(0, 600),
                 metadata: {
                     engineStage: info.stage || null,
                     engineVideoCodec: v,
                     engineAudioCodec: a,
-                    engineContainer: c
+                    engineContainer: c,
+                    engineMime: snap?.mime || null,
+                    engineInitBoxes: snap?.initBoxes || null,
+                    engineFirstMediaBoxes: snap?.firstMediaBoxes || null,
+                    engineFirstVideoKey: snap?.firstVideoPkt ? !!snap.firstVideoPkt.key : null,
+                    engineAppendCount: snap?.appendCount ?? null,
+                    engineVideoErrorCode: snap?.video?.error?.code ?? null,
+                    engineSnapshot: snap || null
                 }
             });
         } catch (_) {}
