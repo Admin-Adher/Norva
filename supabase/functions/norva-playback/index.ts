@@ -2256,19 +2256,16 @@ async function runAudioBackfill(req: Request, db: SupabaseClient) {
       throw new HttpError(503, "Media gateway is not configured");
     }
     const wConcurrency = Math.max(1, Math.min(Number(body.concurrency) || 1, 4));
-    // Select REAL candidates DB-side: titles whose audio_tracks still hold an untagged (lang null)
-    // track, skipping those attempted within the retry window so the queue advances instead of
-    // re-trying the same front forever. (The old in-memory filter scanned the first N titles by id,
-    // so the sparse untagged residual was almost never in the window → it did nothing.)
+    // Select REAL candidates DB-side via RPC (raw jsonb @>): titles whose audio_tracks still hold
+    // an untagged (lang null) track, skipping those attempted within the retry window so the queue
+    // advances instead of re-trying the same front forever. (The old in-memory filter scanned the
+    // first N titles by id, so the sparse untagged residual was almost never in the window → it did
+    // nothing. PostgREST can't cleanly express the jsonb-array containment, hence the RPC.)
     const whisperRetryBefore = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString();
-    let wq = db.from("cloud_titles")
-      .select("id, default_variant_id, provider_tmdb_id, audio_tracks")
-      .eq("user_id", userId).eq("item_type", itemType).gt("variant_count", 0)
-      .contains("audio_tracks", [{ lang: null }])
-      .or(`whisper_attempted_at.is.null,whisper_attempted_at.lt.${whisperRetryBefore}`);
-    if (afterId) wq = wq.gt("id", afterId);
-    wq = wq.order("id", { ascending: true }).limit(limit);
-    const { data: wrows, error: wErr } = await wq;
+    const { data: wrows, error: wErr } = await db.rpc("whisper_candidate_titles", {
+      p_user: userId, p_item_type: itemType, p_limit: limit,
+      p_retry_before: whisperRetryBefore, p_after: afterId ?? null,
+    });
     if (wErr) throwDb(wErr, "Unable to list titles for whisper backfill");
     if (!wrows || !wrows.length) return { mode: "whisper", processed: 0, candidates: 0, detected: 0, lastId: afterId, hasMore: false };
     const wLastId = String(wrows[wrows.length - 1].id);
