@@ -110,11 +110,14 @@ group by 1,2,3 order by max(e.created_at) desc;
 ### Pourquoi
 Les fournisseurs IPTV bloquent les plages d'IP datacenter (anti-revente). Le navigateur en `direct` sort par l'IP résidentielle de l'utilisateur → OK. Le moteur passe par la gateway (IP Railway) → bloqué. Router le trafic provider de la gateway via un **proxy résidentiel** fait voir au provider une IP résidentielle.
 
-### Implémentation (`services/media-gateway/src/index.js`, GATEWAY_VERSION 51)
-- Env **`PROVIDER_PROXY_URL`** (ex. `http://user:pass@host:port`). Vide → aucun changement.
-- Si défini : un **undici `ProxyAgent`** sert de `dispatcher` aux deux `fetch` provider (`/raw` + l'API Xtream JSON), et `http_proxy`/`https_proxy` sont exportés pour que les **ffmpeg/ffprobe** spawnés sortent aussi par le proxy. (Le `fetch` Node ignore ces env → les appels Supabase/internes restent directs.)
-- `undici` ajouté en dépendance (chargé seulement si le proxy est configuré).
-- `GET /health` → `providerProxy: true/false`.
+### Implémentation (`services/media-gateway/src/index.js`, GATEWAY_VERSION ≥ 52 — **pool**)
+- Env **`PROVIDER_PROXY_URLS`** = liste (séparée par virgule/espace/retour-ligne) d'URLs proxy → **pool**. `PROVIDER_PROXY_URL` (singulier) marche toujours (fusionné, pool de 1 = comportement identique). Vide → aucun changement.
+- Chaque **compte provider** est épinglé à **UNE** IP du pool (hash FNV-1a d'une clé stable : `uid` Norva sur les routes tokenisées, sinon `host+username` extrait de l'URL). **Sticky** = un compte = toujours la même IP (anti-flag) ; sur N users la charge se répartit ~uniformément sur les IPs.
+- `dispatcher: pickProxyAgent(key)` sur les `fetch` (`/raw` + Xtream JSON) ; `env: proxyEnvFor(key)` (http_proxy/https_proxy) par-spawn pour les **ffmpeg/ffprobe** (sous-titres, extraction audio whisper, transcode), avec une IP par défaut (1ʳᵉ du pool) en filet. Le `fetch` Node ignore ces env → Supabase/interne reste direct.
+- `undici` en dépendance (chargé seulement si le proxy est configuré).
+- `GET /health` → `providerProxy: true/false` + `providerProxyPool: <taille>`.
+
+**Config Railway (pool de 5)** : `PROVIDER_PROXY_URLS` = les 5 URLs Evomi (une par IP — le mot de passe Evomi encode l'IP cible : `user:<IP>_<secret>`), séparées par des virgules ou des retours-ligne. Vérifier `GET /health` → `providerProxyPool:5`.
 
 ### Configurer (Railway)
 1. Acheter une **Static Residential** dédiée (chez Evomi : « Private IPs », ~$2.50/IP, **bande passante illimitée**). **Pas** de résidentiel rotatif **au Go** (vidéo = facture ruineuse), **pas** de datacenter (même blocage). Couper l'option « High Concurrency » (inutile en mono-ligne).
