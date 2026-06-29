@@ -51,7 +51,7 @@ provider when a sync comes due — move it off-peak too if daytime re-syncs bite
 |---|---|---|---|
 | `norva-audio-langs` | `…/audio-backfill` (movie, probe) | `0,10,20,30,40,50 * * * *` | 1 |
 | `norva-audio-langs-series` | `…/audio-backfill` (series, probe) | `2,12,22,32,42,52 * * * *` | 1 |
-| `norva-audio-langs-untagged` | `…/audio-backfill` (movie, **vod** = métadonnées) | `4,14,24,34,44,54 * * * *` | 4 |
+| `norva-audio-langs-untagged` | `…/audio-backfill` (movie, **probe** — vod inutile sur super8k : `get_vod_info` renvoie vide) | `4,9,…,59 * * * *` (toutes les 5 min) | 1 |
 | `norva-subtitle-backfill-movie` | `…/audio-backfill` (movie, subtitle) | `6,16,26,36,46,56 * * * *` | 1 |
 | `norva-audio-langs-whisper` | `…/audio-backfill` (movie, **whisper** = résidu non-tagué) | `8,28,48 0-5 * * *` (off-peak, petit) | 1 |
 | `norva-enrich-search-match` | `norva-source-sync/cron/search-match` | `15,45 * * * *` (every 30 min) |
@@ -87,11 +87,13 @@ select cron.schedule('norva-audio-langs-series', '2,12,22,32,42,52 * * * *', $cr
   );
 $cron$);
 
-select cron.schedule('norva-audio-langs-untagged', '4,14,24,34,44,54 * * * *', $cron$
+-- super8k.top: get_vod_info renvoie vide (relayEmpty:60) → 'vod' inutile. On header-probe
+-- (résout ~50%/tick), sans requireTag pour couvrir les non-tagués. conc 1 (mono-slot).
+select cron.schedule('norva-audio-langs-untagged', '4,9,14,19,24,29,34,39,44,49,54,59 * * * *', $cron$
   select net.http_post(
     url := 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-playback/audio-backfill',
     headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'norva_backfill_token')),
-    body := jsonb_build_object('userId','c5be5ac4-3700-4a25-9509-8eaf7771fdb6','type','movie','mode','vod','untaggedOnly',true,'limit',60,'concurrency',4),
+    body := jsonb_build_object('userId','c5be5ac4-3700-4a25-9509-8eaf7771fdb6','type','movie','mode','probe','limit',20,'concurrency',1),
     timeout_milliseconds := 110000
   );
 $cron$);
