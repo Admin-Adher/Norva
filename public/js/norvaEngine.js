@@ -153,6 +153,9 @@
       // provider connection (reuses bytes the engine already streams). Dormant until the
       // player calls enableSubtitleCapture(); flag-off = zero cost in the pump loop.
       this._subCapture = false;
+      // When set, capture is auto-armed in _detectStreams (before the pump starts) so the
+      // cue buffer is filled from the first demuxed packet — no gap when a track is picked.
+      this._subCaptureWanted = opts.inbandSubtitles === true;
       this._subMeta = null;        // streamIndex -> { codec, tbNum, tbDen, text }
       this._subCues = new Map();   // streamIndex -> [{ startSrc, endSrc, text }] in SOURCE seconds
       this._subTextDecoder = null;
@@ -628,6 +631,10 @@
         }
         this.log('streams: ' + parts.join('  '));
       } catch (_) { /* best-effort */ }
+      // Arm subtitle capture BEFORE the pump starts so no early text-subtitle packet is
+      // missed (the demuxer runs ahead of playback; arming late would leave a gap that the
+      // playhead has to consume before cues appear — the "delay after selecting" symptom).
+      if (this._subCaptureWanted && this.hasInbandSubtitles()) this._subCapture = true;
     }
 
     // All audio stream indices (absolute container order) + the selected one, so the

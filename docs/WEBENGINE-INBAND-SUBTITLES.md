@@ -18,8 +18,12 @@ no decoder, no extra connection) and exposes them as cues:
 - `NorvaEngine.hasInbandSubtitles()` — true if the file has a text subtitle stream
   (subrip/srt, ass/ssa, mov_text, webvtt). Image subs (PGS/DVD/DVB) are excluded — they
   need OCR (Phase 4).
-- `NorvaEngine.enableSubtitleCapture()` — start collecting (called at playback start so
-  there's no coverage gap; the demuxer runs ahead of the playhead).
+- `NorvaEngine.enableSubtitleCapture()` — start collecting. Capture is also auto-armed
+  **before the demux pump starts** when the engine is constructed with
+  `{ inbandSubtitles: true }` (the client passes the flag through). Arming pre-pump is what
+  avoids the "delay after selecting" symptom: the demuxer runs ahead of the playhead, so
+  arming late would leave a gap (up to the ~45 s read-ahead) the playhead must consume
+  before cues appear. Armed from the first packet, the buffer always covers the playhead.
 - `NorvaEngine.getSubtitleCues(streamIndex)` — cues in **player-local** seconds (already
   rebased to `currentTime`), ready for `TextTrack.addCue()`.
 

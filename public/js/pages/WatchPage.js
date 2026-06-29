@@ -2276,6 +2276,9 @@ class WatchPage {
         this.streamStartOffset = 0;
         try { this.updateTranscodeStatus('direct', 'Navigateur'); } catch (_) {}
         const engine = this.norvaEngine = new window.NorvaEngine(this.video, {
+            // Arm in-band subtitle capture before the demux pump starts (flag-gated) so cues
+            // are buffered from the first packet — eliminates the gap-before-visible delay.
+            inbandSubtitles: this._inbandSubsEnabled(),
             report: (info) => this.reportEngineFailure(info),
             log: (m) => console.log('[NorvaEngine] ' + m),
             onReady: (timings) => { console.log('[NorvaEngine] ready', timings); },
