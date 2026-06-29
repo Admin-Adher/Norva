@@ -2207,7 +2207,7 @@ async function transcribeEnqueue(
   if (!runtimeConfig.mediaGatewayUrl || !runtimeConfig.mediaGatewayToken) throw new HttpError(503, "Media gateway is not configured");
   const { sourceId, externalId, itemType } = await resolveSubtitleTarget(db, userId, opts);
   const tUrl = await resolveVariantUrl(db, userId, sourceId, externalId, itemType);
-  if (!tUrl) throw new HttpError(422, "no playback target");
+  if (!tUrl) throw new HttpError(422, `no playback target (source=${sourceId} ext=${externalId} type=${itemType})`);
   const pkey = (await resolveSourceIdentity(sourceId, userId, db)).key || hostFromUrl(tUrl);
   // A blank provider key would collide every unkeyed title onto one cache row — refuse rather
   // than cross-contaminate transcripts. (Shouldn't happen: tUrl is a real, host-bearing URL.)

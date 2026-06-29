@@ -6262,7 +6262,7 @@ class WatchPage {
                 return;
             }
         } catch (err) {
-            console.warn('[WatchPage] AI subtitles enqueue failed:', err?.status, err?.message || err, err?.details || '');
+            console.warn('[WatchPage] AI subtitles enqueue failed:', err?.status, err?.message || err, '| sent:', JSON.stringify(params), err?.details || '');
             this.aiSubtitleState = 'failed';
             this.updateCaptionsTracks();
             return;
