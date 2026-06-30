@@ -4,8 +4,10 @@
 > (et en cas d'**échec persistant**) — pour qu'il puisse fermer l'app et être rappelé. **Anglais uniquement**
 > (Norva est English-only, pas d'i18n en roadmap).
 >
-> **État au 30/06** : design validé, **prep livrée** (table + templates), **reste à câbler** (cron digest +
-> hooks + UX + push mobile Phase 2).
+> **État au 30/06** : design validé. **Phase 1 livrée** (table + templates + cron digest + hooks + UX), en
+> **branche/held**. **Phase 2 (push FCM natif) codée** côté Norva (table tokens + envoi FCM + bridge Android +
+> web), **held** ; reste le **setup Firebase** + la **release Play Store** (côté owner). Déploiement groupé une
+> fois la dédup validée.
 
 ---
 
@@ -59,10 +61,42 @@ seule fois** :
   les 503 transitoires.
 - **Refreshs auto = silencieux** (seulement les imports initiaux).
 
-## 6. UX (À FAIRE)
-- **Message à l'ajout** : « You'll get an email (all devices) — and a mobile notification — when it's ready.
-  You can close the app. »
-- **Bannière/toast in-app** à la complétion si l'app est ouverte (réutilise le polling catalogue existant).
+## 6. UX (✅ livré, branche)
+- **Message à l'ajout** : lead email (fiable app-fermée) + « The mobile app will notify you too » (bannière
+  in-app maintenant ; push native Phase 2). Cf. `app.js`.
+- **Bannière/toast in-app** à la complétion si l'app est ouverte : `startImportWatcher()`/`stopImportWatcher()`
+  (poller 30 s auto-stop, toast « 🎉 <provider> is ready to watch! » sur transition syncing→ready).
+
+## 6bis. Phase 2 — Push FCM natif (✅ codé côté Norva, held ; setup Firebase + release = owner)
+Objectif : notifier l'appareil **app fermée** (« Your Promax catalog is ready 🎬 »). Pipeline complet :
+
+**Flux** : Android wrapper récupère le **token FCM** → le cache en prefs → **bridge JS** `NorvaTVCloud.getPushToken()`
+→ le web (`app.js registerPushToken`) **POST `/push-token`** → backend stocke dans `cloud_push_tokens` →
+le **cron digest** (`norva-import-notify`), après avoir marqué l'email `sent`, **envoie aussi la push** via
+**FCM HTTP v1** (OAuth service-account) à tous les tokens de l'user (supprime les tokens `UNREGISTERED`).
+
+**Ce qui est codé (branche, held)** :
+- **Table** `cloud_push_tokens` (migration `20260630230000`, **appliquée live**) : `token PK, user_id, platform
+  ('android'|'ios'|'web'), created_at/updated_at/last_seen_at`, RLS service-only.
+- **`_shared/fcm.ts`** : OAuth RS256 (JWT signé Web Crypto, scope `firebase.messaging`, token caché 1 h) +
+  `sendFcmPush(token, {title, body, data})` → `…/messages:send`. `fcmConfigured()` lit l'env `FCM_SERVICE_ACCOUNT`.
+- **`norva-import-notify`** : `sendPushForGroup` (lit `cloud_push_tokens`, envoie, purge UNREGISTERED), appelé
+  après l'email pour `import_completed`/`import_failed`. Si `FCM_SERVICE_ACCOUNT` absent → no-op (email seul).
+- **`norva-cloud`** : route `POST /push-token` → `registerPushToken` (upsert `onConflict: token`).
+- **Web** `app.js` : `registerPushToken()` (lit `NorvaTVCloud.getPushToken`, retries, dédup, POST).
+- **Android** : `firebase-messaging` (BoM 33.7.0) + plugin `google-services` ; `NorvaMessagingService`
+  (onNewToken cache, onMessageReceived notif) ; `MainActivity.setupPush()` (perm POST_NOTIFICATIONS + cache token)
+  + `CloudBridge.getPushToken()` ; service déclaré au manifest.
+
+**⚠️ Étapes manuelles (owner) avant que la push fonctionne** :
+1. **Firebase Console** → créer le projet → ajouter l'app Android `tv.norva.phone` → télécharger
+   **`google-services.json`** → le déposer dans `clients/android-phone/app/` (le build échoue sans).
+2. **Service account** (Firebase → Paramètres → Comptes de service → générer une clé privée JSON) → poser le
+   JSON **complet** dans le secret edge **`FCM_SERVICE_ACCOUNT`** (Supabase → Edge Functions → Secrets).
+3. **Release Play Store** d'une nouvelle version du wrapper (le bridge + le service n'existent que dans ce build).
+> Tant que ces 3 étapes ne sont pas faites, **rien ne casse** : pas de `FCM_SERVICE_ACCOUNT` → l'envoyeur saute
+> la push (email seul) ; pas de `google-services.json` → seul un build Android local échouerait (le CI release
+> est l'endroit où ce fichier est fourni). L'email Phase 1 reste pleinement fonctionnel sans Firebase.
 
 ## 7. Statut des tâches
 | # | Tâche | État |
@@ -70,8 +104,8 @@ seule fois** :
 | 37 | Table + **cron digest** (envoyeur) | ✅ table (live) · ✅ fonction `norva-import-notify` (branche, **non déployée**) · ⏳ `cron.schedule` à enregistrer AU déploiement |
 | 38 | Hooks lifecycle dans le moteur partagé | ✅ dans `_shared/xtream-sync.ts` (branche, non déployé) |
 | 39 | Templates email anglais brandés | ✅ `_shared/import-email.ts` |
-| 40 | UX ajout + bannière in-app | ⏳ |
-| 41 | **Phase 2** push FCM natif (mobile app-fermée) | ⏳ projet à part |
+| 40 | UX ajout + bannière in-app | ✅ `app.js` (message ajout + watcher in-app) (branche) |
+| 41 | **Phase 2** push FCM natif (mobile app-fermée) | ✅ codé côté Norva (branche, held) · ⏳ setup Firebase + release Play Store (owner) |
 | 42 | Auto-peuplement registre providerKey→nom | ✅ `recordProviderIdentity` dans le moteur (branche) |
 
 ## 8. Fichiers
@@ -81,10 +115,20 @@ seule fois** :
   + `recordProviderIdentity` (registre). `norva-source-sync` ajoute `import_completed`/`import_failed` au finalize.
 - `supabase/functions/norva-import-notify/index.ts` — **l'envoyeur digest** : lit la file (events ≥ 60 s pour
   laisser un burst se tasser), groupe par `(user, kind)`, résout email (`auth.users`) + nom (`cloud_sources`)
-  + compteurs (`cloud_media_items` pour completed), rend via les templates, envoie via Resend, passe en `sent`.
-  Auth = `norva_verify_cron_secret`. **Cron à enregistrer au déploiement** (SQL dans l'en-tête du fichier,
-  secret `norva_cron_shared_secret`).
+  + compteurs (`cloud_media_items` pour completed), rend via les templates, envoie via Resend, passe en `sent`,
+  **puis envoie la push FCM** (`sendPushForGroup`) pour completed/failed. Auth = `norva_verify_cron_secret`.
+  **Cron à enregistrer au déploiement** (SQL dans l'en-tête du fichier, secret `norva_cron_shared_secret`).
+- `supabase/migrations/20260630230000_push_tokens.sql` — table `cloud_push_tokens` (appliquée live).
+- `supabase/functions/_shared/fcm.ts` — FCM HTTP v1 : OAuth service-account (JWT RS256 Web Crypto) +
+  `sendFcmPush` + `fcmConfigured`.
+- `supabase/functions/norva-cloud/index.ts` — route `POST /push-token` → `registerPushToken` (upsert token).
+- `public/js/app.js` — `registerPushToken` (bridge `NorvaTVCloud.getPushToken` → POST `/push-token`).
+- `clients/android-phone/` — `build.gradle` + `app/build.gradle` (plugin `google-services` + `firebase-messaging`
+  BoM 33.7.0), `NorvaMessagingService.java` (token cache + notif), `MainActivity.java` (`setupPush` +
+  `CloudBridge.getPushToken`), `AndroidManifest.xml` (déclaration du service).
 
 > **Ordre de déploiement** (tout ensemble, une fois la dédup validée en profondeur) : push `main` (déploie
-> moteur+hooks+`norva-import-notify`), PUIS `cron.schedule('norva-import-notify-digest', '*/2 * * * *', …)`.
-> Ne PAS enregistrer le cron avant le déploiement (il taperait une fonction 404).
+> moteur+hooks+`norva-import-notify`+route `/push-token`), PUIS `cron.schedule('norva-import-notify-digest',
+> '*/2 * * * *', …)`. Ne PAS enregistrer le cron avant le déploiement (il taperait une fonction 404).
+> La **push FCM** ne s'active que quand l'owner pose `FCM_SERVICE_ACCOUNT` + `google-services.json` + release
+> Play Store (cf. §6bis) ; sans ça, l'email Phase 1 fonctionne seul, rien ne casse.

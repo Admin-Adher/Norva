@@ -15,6 +15,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { renderImportStarted, renderImportCompleted, renderImportFailed, type ProviderStat } from "../_shared/import-email.ts";
+import { sendFcmPush, fcmConfigured } from "../_shared/fcm.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? Deno.env.get("SUPABASE_SERVICE_KEY") ?? "";
@@ -64,6 +65,38 @@ function renderFor(kind: string, firstName: string | null, providers: ProviderSt
   return null;
 }
 
+// Short push copy (mobile, app-closed). Completed/failed only — "started" stays email-only (the user
+// just acted and is likely in the app).
+function pushTextFor(kind: string, providers: ProviderStat[]): { title: string; body: string } {
+  const many = providers.length > 1;
+  if (kind === "import_completed") {
+    const p0 = providers[0] ?? { name: "Your catalog" };
+    const stats = many ? `${providers.length} catalogs ready` : [
+      p0.movies ? `${p0.movies.toLocaleString("en-US")} movies` : "",
+      p0.series ? `${p0.series.toLocaleString("en-US")} series` : "",
+      p0.channels ? `${p0.channels.toLocaleString("en-US")} channels` : "",
+    ].filter(Boolean).join(" · ");
+    return { title: many ? "Your catalogs are ready 🎬" : `${p0.name} is ready 🎬`, body: stats || "Your catalog is ready to watch." };
+  }
+  return { title: "Import issue", body: `We hit a snag importing ${providers.map((p) => p.name).join(", ")}. We're on it.` };
+}
+
+// Send an FCM push to all of a user's registered devices (best-effort). Dead tokens (UNREGISTERED) are
+// purged. Runs alongside the email so app-closed mobile users are notified too.
+async function sendPushForGroup(db: SupabaseClient, userId: string, kind: string, providers: ProviderStat[]): Promise<void> {
+  if (!fcmConfigured()) return;
+  try {
+    const { data: toks } = await db.from("cloud_push_tokens").select("token").eq("user_id", userId);
+    const tokens = [...new Set((toks ?? []).map((t) => String((t as { token?: string }).token)).filter(Boolean))];
+    if (!tokens.length) return;
+    const { title, body } = pushTextFor(kind, providers);
+    for (const token of tokens) {
+      const r = await sendFcmPush(token, { title, body, data: { kind } });
+      if (r.unregistered) { try { await db.from("cloud_push_tokens").delete().eq("token", token); } catch (_) { /* noop */ } }
+    }
+  } catch (_) { /* best-effort */ }
+}
+
 async function runDigest(db: SupabaseClient): Promise<Record<string, number>> {
   const cutoff = new Date(Date.now() - SETTLE_MS).toISOString();
   const { data, error } = await db.from("cloud_import_notifications")
@@ -111,6 +144,8 @@ async function runDigest(db: SupabaseClient): Promise<Record<string, number>> {
       }
       await db.from("cloud_import_notifications").update({ status: "sent", sent_at: new Date().toISOString() }).in("id", ids);
       sent += ids.length;
+      // Mobile push (app-closed) alongside the email, for the actionable kinds.
+      if (kind === "import_completed" || kind === "import_failed") await sendPushForGroup(db, userId, kind, providers);
     } catch (e) {
       console.error("[norva-import-notify] group failed", userId, kind, e instanceof Error ? e.message : e);
       // leave pending → retried next run

@@ -64,6 +64,16 @@
             android:name=".DownloadService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <!-- Firebase Cloud Messaging: receives "your catalog is ready" pushes (caches the
+             device token, shows foreground notifications). exported=false — only FCM delivers here. -->
+        <service
+            android:name=".NorvaMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.messaging.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
     </application>
 
 </manifest>

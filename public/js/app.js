@@ -72,6 +72,7 @@ class App {
         this.applyCatalogAvailability(null);
         this.startCloudWarmKeep();
         this.startEnrichmentProgressPoll();
+        if (this.currentUser && !this.currentUser.device) this.registerPushToken(); // native FCM token (Android wrapper only; no-op in browser)
 
         // Mobile menu toggle
         const mobileMenuToggle = document.getElementById('mobile-menu-toggle');
@@ -420,6 +421,24 @@ class App {
 
     stopImportWatcher() {
         if (this._importWatchTimer) { clearInterval(this._importWatchTimer); this._importWatchTimer = null; }
+    }
+
+    // Phase 2 native push: read the FCM token the Android wrapper exposes via its JS bridge
+    // (window.NorvaTVCloud.getPushToken) and register it with the backend so the digest sender can push
+    // to this device when the app is closed. No-op in a plain browser (no bridge). Best-effort.
+    async registerPushToken() {
+        try {
+            const bridge = window.NorvaTVCloud;
+            if (!bridge || typeof bridge.getPushToken !== 'function') return;
+            let token = '';
+            for (let i = 0; i < 6 && !token; i++) {                 // FCM token may not be ready at first launch
+                try { token = String(bridge.getPushToken() || ''); } catch (_) { token = ''; }
+                if (!token) await new Promise((r) => setTimeout(r, 1500));
+            }
+            if (!token || this._lastPushToken === token) return;
+            await window.API?.request?.('POST', '/push-token', { token, platform: 'android' });
+            this._lastPushToken = token;
+        } catch (_) { /* best-effort */ }
     }
 
     isCatalogPage(pageName) {

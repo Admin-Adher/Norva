@@ -426,6 +426,10 @@ async function route(
     if (req.method === "DELETE" && id) return { body: await deleteOwned("cloud_watch_history", id, user.id, db) };
   }
 
+  if (scope === "push-token" && req.method === "POST" && !id) {
+    return { status: 201, body: await registerPushToken(req, user.id, db) };
+  }
+
   if (scope === "pairing" && req.method === "POST" && id === "approve") {
     await requirePlanCapacity(user.id, db, "trusted_devices", "cloud_devices", {
       revoked: false,
@@ -3831,6 +3835,23 @@ function routeSegments(pathname: string) {
   const parts = pathname.split("/").filter(Boolean);
   if (parts[0] === "norva-cloud") parts.shift();
   return parts;
+}
+
+// Phase 2 push: the mobile app's WebView posts its FCM token here (authenticated). Service-role upsert
+// into the service-only cloud_push_tokens (keyed by token); the digest sender reads these to push.
+async function registerPushToken(req: Request, userId: string, db: SupabaseClient): Promise<JsonRecord> {
+  const body = await readJson(req);
+  const token = stringOr(body.token, "");
+  if (!token) throw new HttpError(400, "Missing push token");
+  const platformRaw = String(body.platform ?? "android");
+  const platform = ["android", "ios", "web"].includes(platformRaw) ? platformRaw : "android";
+  const now = new Date().toISOString();
+  const { error } = await db.from("cloud_push_tokens").upsert(
+    [{ token, user_id: userId, platform, updated_at: now, last_seen_at: now }],
+    { onConflict: "token" },
+  );
+  if (error) throwDb(error, "Unable to register push token");
+  return { ok: true };
 }
 
 async function readJson(req: Request): Promise<JsonRecord> {

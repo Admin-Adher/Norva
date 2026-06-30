@@ -1,3 +1,6 @@
 plugins {
     id "com.android.application" version "8.7.3" apply false
+    // Firebase Cloud Messaging (push). Requires app/google-services.json (Firebase Console →
+    // Project settings → add Android app tv.norva.phone → download). The build fails without it.
+    id "com.google.gms.google-services" version "4.4.2" apply false
 }

@@ -1,5 +1,7 @@
 plugins {
     id "com.android.application"
+    // Wires google-services.json into the build for Firebase Cloud Messaging (push).
+    id "com.google.gms.google-services"
 }
 
 // Release signing is supplied by CI via env (see .github/workflows/android-release.yml).
@@ -71,4 +73,8 @@ dependencies {
     // In-app subscriptions (Google Play Billing) through RevenueCat. Pin a
     // tested version before release; "8.+" resolves the latest v8 line.
     implementation "com.revenuecat.purchases:purchases:8.+"
+    // Firebase Cloud Messaging: push notifications ("your catalog is ready") delivered even when the
+    // app is closed. The BoM pins compatible Firebase versions; messaging pulls the FCM SDK + service.
+    implementation platform("com.google.firebase:firebase-bom:33.7.0")
+    implementation "com.google.firebase:firebase-messaging"
 }

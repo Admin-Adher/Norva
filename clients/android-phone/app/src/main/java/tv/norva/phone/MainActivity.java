@@ -39,6 +39,8 @@ import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import com.google.firebase.messaging.FirebaseMessaging;
+
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -143,6 +145,10 @@ public class MainActivity extends Activity {
         if (!hasNetwork() && !DownloadStore.all(this).isEmpty()) {
             startActivity(new Intent(this, DownloadsActivity.class));
         }
+
+        // Push: ask for notification permission and cache the FCM token so the web
+        // bridge (getPushToken) can hand it to the backend for "catalog ready" pushes.
+        setupPush();
     }
 
     @Override
@@ -490,6 +496,19 @@ public class MainActivity extends Activity {
         public void restore(final String requestId) {
             NorvaBilling.restore((status, error) -> sendBillingResult(requestId, status, null, error));
         }
+
+        // ---- Push notifications (FCM) ----
+
+        /**
+         * The device's FCM token, cached by NorvaMessagingService / setupPush. The web app
+         * reads it and registers it with the backend so the digest sender can push "catalog
+         * ready" notifications to this device while the app is closed. Empty until FCM resolves it.
+         */
+        @android.webkit.JavascriptInterface
+        public String getPushToken() {
+            return getSharedPreferences(NorvaMessagingService.PREFS, MODE_PRIVATE)
+                    .getString(NorvaMessagingService.KEY_TOKEN, "");
+        }
     }
 
     /** Post a billing result back to the web layer (subscribe.html / billing.js). */
@@ -655,6 +674,26 @@ public class MainActivity extends Activity {
                     != PackageManager.PERMISSION_GRANTED) {
             runOnUiThread(() -> requestPermissions(
                     new String[]{ Manifest.permission.POST_NOTIFICATIONS }, REQ_NOTIF_PERM));
+        }
+    }
+
+    /**
+     * Push setup: request notification permission (Android 13+) and resolve the FCM token,
+     * caching it in the shared prefs the messaging service uses. The web bridge reads it via
+     * CloudBridge.getPushToken and registers it with the backend. Best-effort and silent —
+     * if Firebase isn't initialized (e.g. a dev build without google-services.json), push
+     * simply stays off and the rest of the app is unaffected.
+     */
+    private void setupPush() {
+        ensureNotifPermission();
+        try {
+            FirebaseMessaging.getInstance().getToken().addOnSuccessListener(token -> {
+                if (token == null || token.isEmpty()) return;
+                getSharedPreferences(NorvaMessagingService.PREFS, MODE_PRIVATE)
+                        .edit().putString(NorvaMessagingService.KEY_TOKEN, token).apply();
+            });
+        } catch (Throwable ignored) {
+            // No Firebase / no google-services.json — push disabled, app continues normally.
         }
     }
 
