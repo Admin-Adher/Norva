@@ -24,7 +24,7 @@ WORK="$(mktemp -d)"
 # AND encoder; format-* = demuxer AND muxer. Video is COPIED (no video decoder), but TS carries no
 # extradata, so the H.264/HEVC parsers are required for the mp4 muxer to build avcC/hvcC.
 FRAGMENTS='[
-  "avformat","avcodec","avfilter","swresample","audio-filters","avfcbridge",
+  "avformat","avcodec","avfilter","swresample","audio-filters","avfcbridge","avbsf",
   "format-webm","format-mp4","demuxer-ogg","format-flac","parser-flac","codec-flac","format-wav",
   "demuxer-mpegts",
   "codec-aac","parser-aac",
@@ -33,7 +33,8 @@ FRAGMENTS='[
   "decoder-vorbis","decoder-alac","decoder-truehd","decoder-mlp",
   "decoder-pcm_s16be",
   "codec-libopus",
-  "parser-h264","parser-hevc","parser-mpeg4video","parser-mpegvideo"
+  "parser-h264","parser-hevc","parser-mpeg4video","parser-mpegvideo",
+  "bsf-extract_extradata","bsf-h264_mp4toannexb","bsf-hevc_mp4toannexb"
 ]'
 
 echo "### fetching libav.js $VER source"
