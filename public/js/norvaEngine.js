@@ -248,7 +248,7 @@
     av1: ['av01.0.08M.08'],
   };
 
-  const ENGINE_VERSION = 36;
+  const ENGINE_VERSION = 37;
 
   class NorvaEngine {
     constructor(videoEl, opts = {}) {
@@ -904,9 +904,26 @@
         await lib.copyin_u8(aptr, asc);
         await lib.AVCodecParameters_extradata_s(this.aS.codecpar, aptr);
         await lib.AVCodecParameters_extradata_size_s(this.aS.codecpar, asc.length);
+        // Force the codecpar sample_rate + channels to MATCH the esds config we just injected.
+        // movenc writes the mp4a sample entry from the codecpar; if the TS parser left those 0/
+        // stale (or they disagree with the esds), Chrome rejects the audio —
+        // PIPELINE_ERROR_DECODE "Failed to send audio packet for decoding". Derived from the ASC.
+        const freqIdx = ((asc[0] & 0x7) << 1) | (asc[1] >> 7);
+        const chan = (asc[1] >> 3) & 0xf;
+        const AAC_RATES = [96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350];
+        const sr = AAC_RATES[freqIdx] || 0;
+        const ch = chan === 7 ? 8 : chan;
+        try { if (sr) await lib.AVCodecParameters_sample_rate_s(this.aS.codecpar, sr); } catch (_) {}
+        if (ch) {
+          try { await lib.AVCodecParameters_channels_s(this.aS.codecpar, ch); } catch (_) {}
+          try { await lib.AVCodecParameters_ch_layout_nb_channels_s(this.aS.codecpar, ch); } catch (_) {}
+        }
         this._stripAdts = true;
-        if (this._diag) this._diag.injectedAudioAsc = asc.length;
-        this.log('TS: injected AAC esds config (' + asc.length + ' B) + armed ADTS strip');
+        if (this._diag) {
+          this._diag.injectedAudioAsc = asc.length;
+          this._diag.audioCfg = { asc: Array.from(asc).map((b) => (b < 16 ? '0' : '') + b.toString(16)).join(''), sr, ch, aot: (asc[0] >> 3) & 0x1f };
+        }
+        this.log('TS: injected AAC esds (' + asc.length + ' B, ' + sr + 'Hz/' + ch + 'ch) + armed ADTS strip');
       }
       if (!sps || !pps) { this.log('TS: no in-band SPS/PPS found — H.264 config unavailable'); return; }
       const avcc = buildAvcC(sps, pps);
@@ -1531,7 +1548,7 @@
         firstMediaBoxes: d.firstMediaBoxes, firstMediaBytes: d.firstMediaBytes,
         firstVideoPkt: d.firstVideoPkt, droppedOpenGop: d.droppedOpenGop,
         droppedPreKey: d.droppedPreKey || 0, droppedPreKeyAudio: d.droppedPreKeyAudio || 0,
-        injectedExtradata: d.injectedExtradata || 0, injectedAudioAsc: d.injectedAudioAsc || 0, stripAdts: !!this._stripAdts,
+        injectedExtradata: d.injectedExtradata || 0, injectedAudioAsc: d.injectedAudioAsc || 0, stripAdts: !!this._stripAdts, audioCfg: d.audioCfg || null,
         // full top-level box stream the muxer produced (stitched across AVIO blocks)
         boxSeq: d.boxSeq, boxBad: d.boxBad, boxTotalKB: d.boxTotal != null ? Math.round(d.boxTotal / 1024) : null,
         moofCount: d.moofCount, moovCount: d.moovCount, ftypCount: d.ftypCount,
