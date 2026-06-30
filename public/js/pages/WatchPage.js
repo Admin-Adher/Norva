@@ -1222,6 +1222,10 @@ class WatchPage {
      */
     async play(content, streamUrl, playback = {}) {
         const playbackAttemptId = this.beginPlaybackAttempt();
+        // Fresh user-initiated playback → reset the engine mid-stream retry budget (the
+        // automatic engine retries in onError don't go through play(), so they don't reset it).
+        this._engineMidRetries = 0;
+        this._engineRetryFromPos = 0;
         // `streamUrl` may be an async resolver: we render the player shell +
         // loading animation first, then await it. Resolve it later (after the
         // shell is on screen) so the metadata below uses what we have upfront.
@@ -2376,6 +2380,19 @@ class WatchPage {
                     try { this.showLoading(); } catch (_) {}
                     try { this.updateTranscodeStatus('direct', `Flux occupé, reconnexion… (${attempt + 2}/${SLOT_BUSY_RETRIES + 1})`); } catch (_) {}
                     await new Promise((r) => setTimeout(r, waitMs));
+                    if (this.isStalePlaybackAttempt(playbackAttemptId)) { this.destroyEngine(); return; }
+                    continue;
+                }
+                // A SOURCEOPEN_TIMEOUT means the browser deferred opening the MediaSource (a known
+                // intermittent quirk) — it clears on a fresh engine attempt, which is exactly why
+                // the user's MANUAL retries succeed. Retry in-place a couple of times before any
+                // fallback: cheap (just re-create the engine), and it keeps the fast browser path.
+                const ENGINE_SETUP_RETRIES = 2;
+                if (/SOURCEOPEN_TIMEOUT/i.test(msg) && attempt < ENGINE_SETUP_RETRIES) {
+                    this.destroyEngine();
+                    console.warn(`[NorvaEngine] SOURCEOPEN_TIMEOUT, retry ${attempt + 1}/${ENGINE_SETUP_RETRIES}`);
+                    try { this.showLoading(); } catch (_) {}
+                    await new Promise((r) => setTimeout(r, 400));
                     if (this.isStalePlaybackAttempt(playbackAttemptId)) { this.destroyEngine(); return; }
                     continue;
                 }
@@ -3954,6 +3971,16 @@ class WatchPage {
     updateProgress() {
         if (!this.video) return;
 
+        // Sustained engine playback past the last mid-stream retry point → refresh the retry
+        // budget, so a long film that blips occasionally keeps using the fast engine path
+        // instead of exhausting 2 lifetime retries and dropping to the gateway forever.
+        if (this._engineMidRetries > 0 && this.currentPlaybackMode === 'engine') {
+            const pos = Number(this.getPlaybackPosition());
+            if (Number.isFinite(pos) && pos > (this._engineRetryFromPos || 0) + 15) {
+                this._engineMidRetries = 0;
+            }
+        }
+
         const duration = this.updateDurationState();
         if (!duration) return;
 
@@ -4108,7 +4135,25 @@ class WatchPage {
             // path for those, so fall back to it instead of a dead-end banner (worst case = today).
             let wasTs = false;
             try { wasTs = Boolean(this.norvaEngine?.engineSnapshot?.()?.looksLikeMpegTs); } catch (_) {}
+            // Capture where playback stopped BEFORE teardown, so a retry resumes there.
+            const resumeAt = Math.max(0, Math.floor(Number(this.video?.currentTime) || Number(this.resumeTime) || 0));
+            const engineUrl = this.baseStreamUrl || this.currentUrl;
             this.destroyEngine();
+            // A mid-stream engine error on a TS is usually a transient source/session hiccup (the
+            // single-slot /raw connection dropping, a timestamp discontinuity) — a fresh engine
+            // attempt resuming from where it stopped clears it, which is why the user's manual
+            // retries succeed. Do it automatically a couple of times (counter resets on the next
+            // first_frame) BEFORE the gateway fallback, so a blip doesn't bounce them to the slow path.
+            this._engineMidRetries = this._engineMidRetries || 0;
+            if (wasTs && engineUrl && this._engineMidRetries < 2 && !this.isStalePlaybackAttempt(videoAttemptId)) {
+                this._engineMidRetries++;
+                this._engineRetryFromPos = resumeAt; // updateProgress() refreshes the budget once playback passes this + 15s
+                console.warn(`[WatchPage] engine mid-stream error (code=${err.code}) — retry ${this._engineMidRetries}/2 from ${resumeAt}s`);
+                try { this.showLoading(); } catch (_) {}
+                this.playWithEngine(engineUrl, { startTime: resumeAt, playbackAttemptId: videoAttemptId })
+                    .catch(() => { /* playWithEngine owns its own fallback chain */ });
+                return;
+            }
             if (wasTs) {
                 this.fallbackEngineToTranscode(videoAttemptId)
                     .then((ok) => { if (!ok) this.handleEngineUnplayable(new Error('MEDIA_ERR_' + err.code)); })
