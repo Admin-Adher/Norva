@@ -991,13 +991,13 @@ const CloudAdapter = (() => {
     }
 
     // Containers the in-browser engine's libav build can actually DEMUX. The custom build ships the
-    // Matroska/WebM and QuickTime/MOV (mp4) demuxers. It ALSO carries the MPEG-TS demuxer, but TS is
-    // NOT routed here yet: H.264 SPS/PPS are in-band (annexb), so the mp4 muxer can't write a complete
-    // moov in the init segment without extra extradata-extraction + delay_moov + init-capture work
-    // (in progress, validated against a local TS sample). Until that lands, .ts takes the gateway
-    // transcode path. NOT in the engine: MPEG-PS, AVI, WMV/ASF, FLV. Unknown/empty container → let the
-    // engine try (it self-detects).
-    const ENGINE_DEMUXABLE_CONTAINERS = new Set(['mkv', 'webm', 'mka', 'mp4', 'm4v', 'mov', 'm4a', '3gp', '3g2']);
+    // Matroska/WebM, QuickTime/MOV (mp4) AND MPEG-TS demuxers, so .ts remuxes in-browser (fast) instead
+    // of the slow gateway transcode. For TS the engine synthesises the H.264 avcC from the in-band
+    // SPS/PPS (they're not in the container header) so the mp4 moov is valid. NOT in the engine:
+    // MPEG-PS, AVI, WMV/ASF, FLV → gateway transcode. A TS whose video the browser can't decode
+    // (MPEG-2, or HEVC without the hvcC path / browser support) fails the SourceBuffer append and the
+    // player's fallback re-routes it to the gateway. Unknown/empty container → let the engine try.
+    const ENGINE_DEMUXABLE_CONTAINERS = new Set(['mkv', 'webm', 'mka', 'mp4', 'm4v', 'mov', 'm4a', '3gp', '3g2', 'ts', 'mpegts', 'm2ts', 'mts']);
     function engineCanPlayContainer(container) {
         const c = String(container || '').split('?')[0].split('#')[0].toLowerCase();
         if (!c) return true;

@@ -143,6 +143,29 @@
     const consStr = cons.length ? '.' + cons.map((b) => b.toString(16).toUpperCase().padStart(2, '0')).join('.') : '';
     return 'hvc1.' + space + pidc + '.' + rev.toString(16).toUpperCase() + '.' + (tier ? 'H' : 'L') + level + consStr;
   }
+  // Split an annexb H.264 bitstream into NAL units (payload after each 00 00 01 / 00 00 00 01
+  // start code). Used to lift the in-band SPS/PPS out of an MPEG-TS keyframe.
+  function annexbNals(buf) {
+    const out = []; let i = 0;
+    while (i < buf.length - 3) {
+      if (buf[i] === 0 && buf[i + 1] === 0 && (buf[i + 2] === 1 || (buf[i + 2] === 0 && buf[i + 3] === 1))) {
+        const sc = buf[i + 2] === 1 ? 3 : 4; let j = i + sc;
+        while (j < buf.length - 3 && !(buf[j] === 0 && buf[j + 1] === 0 && (buf[j + 2] === 1 || (buf[j + 2] === 0 && buf[j + 3] === 1)))) j++;
+        out.push(buf.slice(i + sc, j === buf.length - 3 ? buf.length : j)); i = j;
+      } else i++;
+    }
+    return out;
+  }
+  // Build an avcC (AVCDecoderConfigurationRecord) from one SPS + one PPS NAL. profile/compat/level
+  // come from SPS bytes 1..3; 4-byte NAL length (0xFF). This is what an MP4 moov needs as the H.264
+  // decoder config — MPEG-TS doesn't carry it (SPS/PPS are in-band), so we synthesise it.
+  function buildAvcC(sps, pps) {
+    return new Uint8Array([
+      1, sps[1], sps[2], sps[3], 0xff, 0xe0 | 1,
+      (sps.length >> 8) & 0xff, sps.length & 0xff, ...sps,
+      1, (pps.length >> 8) & 0xff, pps.length & 0xff, ...pps,
+    ]);
+  }
   // Generic fallbacks if extradata parsing yields an unsupported string.
   const VIDEO_FALLBACKS = {
     h264: ['avc1.640028', 'avc1.4d4028', 'avc1.42e01e'],
@@ -151,7 +174,7 @@
     av1: ['av01.0.08M.08'],
   };
 
-  const ENGINE_VERSION = 27;
+  const ENGINE_VERSION = 28;
 
   class NorvaEngine {
     constructor(videoEl, opts = {}) {
@@ -276,7 +299,7 @@
       }
       this.timings.probeMs = Math.round(performance.now() - m);
       m = performance.now(); await this._openInput(); this.timings.openInputMs = Math.round(performance.now() - m);
-      m = performance.now(); await this._detectStreams(); this.mime = await this._chooseMime(); this.timings.detectMimeMs = Math.round(performance.now() - m);
+      m = performance.now(); await this._detectStreams(); await this._ensureVideoExtradata(); this.mime = await this._chooseMime(); this.timings.detectMimeMs = Math.round(performance.now() - m);
       m = performance.now(); await this._attachMediaSource(); this.timings.mediaSourceMs = Math.round(performance.now() - m);
       m = performance.now(); if (this.copyAudio === false && this.aS) await this._initEncoder(); this.timings.encoderMs = Math.round(performance.now() - m);
       m = performance.now(); await this._initMuxer(); this.timings.muxerMs = Math.round(performance.now() - m);
@@ -747,6 +770,44 @@
       this.copyAudio = !!(this.aS && AUDIO_COPY.has(this.aName));
       this.V_IDX = 0; this.A_IDX = this.vS ? 1 : 0;
       this.log(`vidéo=${this.vName}${this.aS ? `, audio=${this.aName} (${this.copyAudio ? 'copie' : 'transcodage AAC'})` : ''}`);
+    }
+
+    // MPEG-TS carries the H.264 SPS/PPS IN-BAND (annexb), not in the container header — so the video
+    // codecpar has no extradata, and the mp4 muxer would write an empty avcC into the moov, which MSE
+    // rejects (CHUNK_DEMUXER_ERROR_APPEND_FAILED). Lift the SPS/PPS out of the first keyframe, build
+    // the avcC, and inject it onto the stream BEFORE the muxer is set up. No-op for mkv/mp4 (extradata
+    // already present) and for non-H.264 video (HEVC TS would need hvcC — handled by gateway fallback).
+    async _ensureVideoExtradata() {
+      const lib = this.lib;
+      if (!this.vS || this.vName !== 'h264') return;
+      const cp = await lib.ff_copyout_codecpar(this.vS.codecpar);
+      if (cp.extradata && cp.extradata.length > 0) return;
+      if (!this.pkt) this.pkt = await lib.av_packet_alloc();
+      try { await this._seekDemuxer(0); } catch (_) { /* read from wherever the demuxer is */ }
+      let sps = null, pps = null;
+      for (let i = 0; i < 24 && !(sps && pps); i++) {
+        let res, packets;
+        try { [res, packets] = await lib.ff_read_frame_multi(this.fmtCtx, this.pkt, { limit: 256 * 1024 }); }
+        catch (_) { break; }
+        for (const k in packets) for (const p of packets[k]) {
+          if (p.stream_index !== this.vS.index) continue;
+          for (const n of annexbNals(p.data)) {
+            const t = n[0] & 0x1f;
+            if (t === 7 && !sps) sps = n; else if (t === 8 && !pps) pps = n;
+          }
+        }
+        if (res !== 0 && res !== -lib.EAGAIN) break;
+      }
+      // Rewind so the pump starts cleanly (the caller seeks to the resume point afterwards).
+      try { await this._seekDemuxer(0); } catch (_) {}
+      if (!sps || !pps) { this.log('TS: no in-band SPS/PPS found — H.264 config unavailable'); return; }
+      const avcc = buildAvcC(sps, pps);
+      const ptr = await lib.malloc(avcc.length);
+      await lib.copyin_u8(ptr, avcc);
+      await lib.AVCodecParameters_extradata_s(this.vS.codecpar, ptr);
+      await lib.AVCodecParameters_extradata_size_s(this.vS.codecpar, avcc.length);
+      if (this._diag) this._diag.injectedExtradata = avcc.length;
+      this.log('TS: injected H.264 avcC (' + avcc.length + ' B) from in-band SPS/PPS');
       // Enumerate subtitle streams (index + codec) for the player's CC menu. libav
       // here can't read the per-stream LANGUAGE, so the language is filled by the
       // gateway probe (same split as audio). Also logs the full stream list.
@@ -1315,6 +1376,7 @@
         firstMediaBoxes: d.firstMediaBoxes, firstMediaBytes: d.firstMediaBytes,
         firstVideoPkt: d.firstVideoPkt, droppedOpenGop: d.droppedOpenGop,
         droppedPreKey: d.droppedPreKey || 0, droppedPreKeyAudio: d.droppedPreKeyAudio || 0,
+        injectedExtradata: d.injectedExtradata || 0,
         // full top-level box stream the muxer produced (stitched across AVIO blocks)
         boxSeq: d.boxSeq, boxBad: d.boxBad, boxTotalKB: d.boxTotal != null ? Math.round(d.boxTotal / 1024) : null,
         moofCount: d.moofCount, moovCount: d.moovCount, ftypCount: d.ftypCount,
