@@ -58,21 +58,31 @@
     });
   });
 
-  // Compact-on-scroll header: toggle a single class when crossing a threshold
-  // (rAF-throttled, state-guarded — no per-frame style writes). The shrink
-  // itself is a CSS transition, so this stays cheap.
+  // Direction-aware compact header: scrolling DOWN condenses the bar into the
+  // island, scrolling UP brings the full bar back, and it's always full at the
+  // very top. rAF-throttled and state-guarded (one class toggle only on a real
+  // change) so it stays cheap; the morph itself is a CSS transition.
   function setupCompactNav() {
     if (!nav) return;
     let compact = false;
     let ticking = false;
-    const update = () => {
-      const y = window.pageYOffset || document.documentElement.scrollTop || 0;
-      const should = y > 40;
-      if (should !== compact) {
-        compact = should;
+    let lastY = window.pageYOffset || document.documentElement.scrollTop || 0;
+    const TOP = 40;    // always expanded at/near the top
+    const DELTA = 8;   // ignore scroll jitter / tiny moves
+    const setCompact = (v) => {
+      if (v !== compact) {
+        compact = v;
         nav.classList.toggle('compact', compact);
       }
+    };
+    const update = () => {
       ticking = false;
+      const y = Math.max(0, window.pageYOffset || document.documentElement.scrollTop || 0);
+      if (y <= TOP) { lastY = y; setCompact(false); return; } // near top → large
+      const dy = y - lastY;
+      if (Math.abs(dy) < DELTA) return; // not a meaningful move yet; anchor stays so slow scroll still accumulates
+      lastY = y;
+      setCompact(dy > 0); // down → compact, up → large
     };
     window.addEventListener('scroll', () => {
       if (!ticking) {
