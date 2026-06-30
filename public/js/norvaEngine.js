@@ -248,7 +248,7 @@
     av1: ['av01.0.08M.08'],
   };
 
-  const ENGINE_VERSION = 33;
+  const ENGINE_VERSION = 34;
 
   class NorvaEngine {
     constructor(videoEl, opts = {}) {
@@ -1553,9 +1553,11 @@
       catch (e) { snap.ms = 'err:' + errStr(e); }
       try {
         const v = this.video;
+        let vbuf = [];
+        try { for (let i = 0; i < v.buffered.length; i++) vbuf.push([+v.buffered.start(i).toFixed(2), +v.buffered.end(i).toFixed(2)]); } catch (_) {}
         snap.video = v ? {
           readyState: v.readyState, networkState: v.networkState,
-          currentTime: +(.0 + v.currentTime).toFixed(2), paused: v.paused,
+          currentTime: +(.0 + v.currentTime).toFixed(2), paused: v.paused, buffered: vbuf,
           error: v.error ? { code: v.error.code, message: v.error.message || '' } : null,
           hasSrc: !!v.src, currentSrcKind: v.currentSrc ? (v.currentSrc.startsWith('blob:') ? 'blob' : 'other') : null,
         } : null;

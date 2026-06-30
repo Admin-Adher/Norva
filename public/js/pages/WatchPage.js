@@ -2647,7 +2647,23 @@ class WatchPage {
                     engineBoxBad: snap?.boxBad ?? null,
                     engineMoovCount: snap?.moovCount ?? null,
                     engineSeekWrites: snap?.seekWrites ?? null,
-                    engineSnapshot: snap || null
+                    // COMPACT snapshot only: the full snapshot (boxHex/boxSeq/writes/recentAppends/
+                    // appendErrors arrays) grows with fragment count and a large engine run was
+                    // exceeding the event payload limit → the whole playback_error was rejected and
+                    // lost. Persist just the decisive fields so failures are always diagnosable.
+                    engineSnapshot: snap ? {
+                        engineVersion: snap.engineVersion, mime: snap.mime,
+                        ptsEpoch: snap.ptsEpoch, tsAnchor: snap.tsAnchor, tsApplied: snap.tsApplied,
+                        firstVideoPkt: snap.firstVideoPkt,
+                        droppedPreKey: snap.droppedPreKey, droppedPreKeyAudio: snap.droppedPreKeyAudio,
+                        injectedExtradata: snap.injectedExtradata, injectedAudioAsc: snap.injectedAudioAsc, stripAdts: snap.stripAdts,
+                        appendCount: snap.appendCount, appendBytes: snap.appendBytes, sbErrorEvents: snap.sbErrorEvents,
+                        moofCount: snap.moofCount, boxBad: snap.boxBad, boxTotalKB: snap.boxTotalKB,
+                        pumpExitReason: snap.pumpExitReason, lastReadError: snap.lastReadError,
+                        exitFetchMB: snap.exitFetchMB, looksLikeMpegTs: snap.looksLikeMpegTs,
+                        seekWrites: snap.seekWrites, firstSeek: snap.firstSeek,
+                        video: snap.video, sb: snap.sb, ms: snap.ms, timings: snap.timings,
+                    } : null
                 }
             });
         } catch (_) {}
