@@ -2703,8 +2703,9 @@ async function getHistoryItem(req: Request, url: URL, userId: string, db: Supaba
 async function listHistory(req: Request, url: URL, userId: string, db: SupabaseClient) {
   const profileId = await resolveProfileId(req, userId, db);
   const limit = boundedInt(url.searchParams.get("limit"), 100, 1, 500);
-  const readySourceIds = await listHistorySourceIds(userId, db);
-  if (!readySourceIds.length) return { history: [] };
+  const sources = await listHistorySources(userId, db);
+  if (!sources.length) return { history: [] };
+  const readySourceIds = sources.map((s) => s.id);
 
   const { data, error } = await db
     .from("cloud_watch_history")
@@ -2715,10 +2716,22 @@ async function listHistory(req: Request, url: URL, userId: string, db: SupabaseC
     .order("updated_at", { ascending: false })
     .limit(limit);
   if (error) throwDb(error, "Unable to list history");
-  return { history: data ?? [] };
+
+  // Orphan handling (Layer 1): hide resume cards for movies the provider has since dropped
+  // from its catalogue — the "Continue Watching shows a media that 404s on click" problem.
+  // Gated on a STABLY-synced source (sync_status ready/completed) so a mid-sync empty-catalogue
+  // window can never hide a still-valid resume, and the underlying row is preserved untouched
+  // so the card returns automatically if the title comes back. Scoped to movies, whose
+  // history item_id maps 1:1 to cloud_media_items.external_id (series history is not keyed the
+  // same way, so it is left untouched). Fail-safe: any error keeps every item.
+  const stableSourceIds = new Set(
+    sources.filter((s) => s.status === "ready" || s.status === "completed").map((s) => s.id),
+  );
+  const history = await pruneUnavailableHistory(data ?? [], userId, stableSourceIds, db);
+  return { history };
 }
 
-async function listHistorySourceIds(userId: string, db: SupabaseClient) {
+async function listHistorySources(userId: string, db: SupabaseClient) {
   const { data, error } = await db
     .from("cloud_sources")
     .select("id,sync_status,sync_error,last_synced_at")
@@ -2731,8 +2744,61 @@ async function listHistorySourceIds(userId: string, db: SupabaseClient) {
       const status = String(source.sync_status || "").toLowerCase();
       return status === "ready" || status === "completed" || Boolean(source.last_synced_at);
     })
-    .map((source: Record<string, unknown>) => String(source.id))
-    .filter(Boolean);
+    .map((source: Record<string, unknown>) => ({
+      id: String(source.id),
+      status: String(source.sync_status || "").toLowerCase(),
+    }))
+    .filter((s) => Boolean(s.id));
+}
+
+// Drop history entries for movies whose specific stream no longer exists in the catalogue
+// (provider removed it). Only movies on a stably-synced source are eligible; everything else
+// passes through unchanged. On any DB error we return the rows untouched (never hide a card
+// because of a transient read failure).
+async function pruneUnavailableHistory(
+  rows: Array<Record<string, unknown>>,
+  userId: string,
+  stableSourceIds: Set<string>,
+  db: SupabaseClient,
+) {
+  const eligible = (r: Record<string, unknown>) =>
+    String(r.item_type) === "movie" &&
+    r.source_id != null &&
+    stableSourceIds.has(String(r.source_id)) &&
+    r.item_id != null && String(r.item_id) !== "";
+
+  const candidates = rows.filter(eligible);
+  if (!candidates.length) return rows;
+
+  // Batch existence checks per source: which external_ids are still in the catalogue.
+  const present = new Set<string>(); // `${source_id}:${external_id}`
+  const idsBySource = new Map<string, Set<string>>();
+  for (const r of candidates) {
+    const sid = String(r.source_id);
+    const set = idsBySource.get(sid) ?? new Set<string>();
+    set.add(String(r.item_id));
+    idsBySource.set(sid, set);
+  }
+  for (const [sid, idSet] of idsBySource) {
+    const ids = [...idSet];
+    for (let i = 0; i < ids.length; i += 500) {
+      const chunk = ids.slice(i, i + 500);
+      const { data, error } = await db
+        .from("cloud_media_items")
+        .select("external_id")
+        .eq("user_id", userId)
+        .eq("source_id", sid)
+        .eq("item_type", "movie")
+        .in("external_id", chunk);
+      if (error) return rows; // fail-safe: keep everything on any read error
+      for (const row of data ?? []) present.add(`${sid}:${String((row as Record<string, unknown>).external_id)}`);
+    }
+  }
+
+  return rows.filter((r) => {
+    if (!eligible(r)) return true;
+    return present.has(`${String(r.source_id)}:${String(r.item_id)}`);
+  });
 }
 
 async function saveHistory(req: Request, userId: string, db: SupabaseClient) {
