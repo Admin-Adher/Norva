@@ -248,7 +248,7 @@
     av1: ['av01.0.08M.08'],
   };
 
-  const ENGINE_VERSION = 34;
+  const ENGINE_VERSION = 35;
 
   class NorvaEngine {
     constructor(videoEl, opts = {}) {
@@ -294,6 +294,7 @@
       this._subCues = new Map();   // streamIndex -> [{ startSrc, endSrc, text }] in SOURCE seconds
       this._subTextDecoder = null;
       this._skipSeekTo = null;    // suppress the self-induced seeking event on resume
+      this._nudgeDone = true;     // one-shot: nudge the playhead onto the first buffered byte after a seek/resume (set false on seek/resume)
       this.lib = null;
       this.url = null;
       this.size = 0;
@@ -394,7 +395,7 @@
       if (startTime > 0.25) {
         // Resume: anchor the SB to the resume point (refined to the real keyframe
         // PTS by _setVideoDts) so data lands at startTime, not at 0.
-        this._tsAnchor = startTime; this._firstVpktPending = true;
+        this._tsAnchor = startTime; this._firstVpktPending = true; this._nudgeDone = false;
         await this._seekDemuxer(startTime);
         // We've positioned the demuxer/pump; ignore the seeking event this fires.
         this._skipSeekTo = startTime;
@@ -455,7 +456,7 @@
         // to the cue time as a fallback, then _setVideoDts refines it to the real
         // keyframe PTS so the seek lands exactly on target (not at 0 → spinner).
         this._tsAnchor = this._cueTimeForTime(t); if (this._tsAnchor == null) this._tsAnchor = t;
-        this._firstVpktPending = true;
+        this._firstVpktPending = true; this._nudgeDone = false;
         step = 'initMuxer'; await this._initMuxer();   // fresh init segment → onwrite
         this._startPump();
         this.seekTimings = {
@@ -1398,6 +1399,22 @@
       if (this.destroyed) return; // a late updateend after destroy must not append to a dead pipe
       const sb = this.sb;
       if (!sb || sb.updating) return;
+      // Resume/seek lands on the nearest keyframe, which an APPROXIMATE seek can place AFTER the
+      // requested time — so the first buffered byte sits ahead of video.currentTime, the playhead
+      // is in a gap with no data, and the element stalls forever ("calé", no audio, frozen). Once
+      // the first media is buffered, nudge the playhead onto it. One-shot per seek/resume; the
+      // target is inside the buffer so _handleSeeking ignores it (no re-demux).
+      if (!this._nudgeDone && this.video && sb.buffered.length && !this.video.seeking) {
+        try {
+          const bs = sb.buffered.start(0);
+          if (this.video.currentTime < bs - 0.5) {
+            this._skipSeekTo = bs + 0.05;
+            this.log('nudge playhead ' + this.video.currentTime.toFixed(2) + ' → ' + (bs + 0.05).toFixed(2) + ' (seek landed past target)');
+            this.video.currentTime = bs + 0.05;
+          }
+        } catch (_) { /* best-effort */ }
+        this._nudgeDone = true;
+      }
       // Apply the seek/resume placement offset before appending media (only when
       // idle; harmless on the sample-less init segment).
       if (this._tsAnchor !== this._tsApplied) { try { sb.timestampOffset = this._tsAnchor; this._tsApplied = this._tsAnchor; } catch (_) {} }
