@@ -188,7 +188,7 @@ mkv (rapide, sans gateway) pour le cas courant **H.264/HEVC + AAC/AC3** (transco
 - Le WASM est servi en `cache-control: max-age=0, must-revalidate` → les navigateurs revalident et
   récupèrent le nouveau build au rechargement (pas de cache périmé).
 
-#### Remux TS in-browser — couches de remise en forme pour MSE (ENGINE_VERSION 27→31)
+#### Remux TS in-browser — couches de remise en forme pour MSE (ENGINE_VERSION 27→36)
 Le démuxeur `mpegts` ne suffit pas : un `.ts` ne porte **rien** de ce que le mp4/MSE exige dans l'en-tête
 de conteneur. Il a fallu reconstruire, côté JS, ce que le conteneur ne fournit pas. Chaque couche a été
 un `CHUNK_DEMUXER_ERROR_APPEND_FAILED` distinct (diagnostiqués sur snapshots console réels) :
@@ -211,6 +211,27 @@ un `CHUNK_DEMUXER_ERROR_APPEND_FAILED` distinct (diagnostiqués sur snapshots co
    rebuild WASM) : `adtsToAsc()` synthétise l'ASC (AOT/sample-rate/canaux) injecté en extradata audio, et
    `stripAdts()` retire les en-têtes ADTS de chaque paquet (raw AAC). Gardé sur **AAC stream-copy sans
    extradata conteneur** = TS uniquement ; mkv/mp4 (AAC raw) intouchés.
+6. **Reprise : curseur dans un trou (v33→v36) — la racine de « calé »/écran noir.** Sur une **reprise**
+   (resume à T), le seek approximatif TS tombe sur la keyframe la plus proche, souvent **APRÈS** T : les
+   données se bufferisent à partir de la keyframe (ex. 636s) mais `video.currentTime` reste à T (625s) →
+   **11s de trou sans données au curseur** → gel permanent (le navigateur ne saute jamais dans le trou),
+   puis sur-buffering « dans le vide » → `code=3`. Diagnostiqué **uniquement** via le snapshot Supabase
+   (`currentTime:625` vs `buffered:[[636,805]]`). Sous-bugs successifs : (a) le seek ignorait l'**epoch
+   PTS** du TS (premier PTS ≠ 0) → ajouté à la cible de seek + soustrait de l'ancre (`_ptsEpoch`, v33) ;
+   (b) le vrai correctif (**v36**) : une fois les 1ʳᵉˢ données bufferisées, **recaler `currentTime` sur le
+   début réel du buffer** (`bufferedStart+0.05`). Piège qui a coûté une itération : ne **pas** garder sur
+   `!video.seeking` — à la reprise l'élément est *coincé* en seek vers une position sans données, donc
+   `seeking` reste vrai et la garde bloquait le recalage censé le débloquer. La cible étant dans le buffer,
+   `_handleSeeking` l'ignore (pas de re-démux). One-shot par reprise/seek ; démarrage frais intouché.
+
+**Outillage de diagnostic (incontournable pour ces couches)** : (a) **oracle MSE local impossible** pour
+H.264 (Chromium open-source du sandbox sans codecs proprio) → validation locale = re-démux libav (trop
+tolérant) ; le vrai oracle = le **navigateur de l'user + télémétrie Supabase**. (b) Les snapshots d'échec
+**ne persistaient pas** : le retry moteur fermait la session, et l'edge **404-ait** tout event portant une
+session morte (« Playback session not found ») → snapshot perdu pile quand il faut. Corrigé : event d'échec
+envoyé **sans `playbackSessionId`** (client) + edge enregistre **non-lié** au lieu de 404 (norva-playback
+v21). Snapshot moteur **compacté** (sans les gros tableaux boxHex/writes) pour rester sous la limite de
+payload, avec **plages bufferisées (`sb`/`video`) + `currentTime`** = ce qui a permis de voir le trou.
 
 ⚠️ **Limite de validation locale.** Le Chromium du sandbox est le **build open-source** (Playwright) :
 `MediaSource.isTypeSupported` renvoie **false pour avc1/mp4a/hvc1** (codecs propriétaires absents) — donc
@@ -259,10 +280,15 @@ Les fournisseurs IPTV bloquent les plages d'IP datacenter (anti-revente). Le nav
 ## 5. État final (vérifié en prod)
 - mkv via moteur : `first_frame` + `play_started` + resume/pause/seek en `playback_mode='engine'`, **plus aucun `CHUNK_DEMUXER`**.
 - Combinaison gagnante = **proxy résidentiel** (octets circulent) + **muxer non-seekable** (octets valides).
-- Versions : `ENGINE_VERSION 31` (**TS démuxé/remuxé en navigateur** via le WASM `+mpegts` ; remise en
-  forme MSE en 5 couches — garde keyframe, avcC synthétisé + extension High-profile, annexb→AVCC,
-  **AAC ADTS→ASC + strip** ; repli gateway si le navigateur ne décode pas le codec ; `sourceHead` sur
-  échec d'ouverture), `GATEWAY_VERSION 59` (Argos translate ; sonde codec TS VOD + estimation de durée → seek bar).
+- Versions : `ENGINE_VERSION 36` (**TS démuxé/remuxé en navigateur** via le WASM `+mpegts`, **lecture
+  fraîche ET reprise OK** ; remise en forme MSE en 6 couches — garde keyframe, avcC synthétisé + extension
+  High-profile, annexb→AVCC, **AAC ADTS→ASC + strip**, **recalage curseur reprise (epoch + nudge)** ;
+  auto-retry moteur sur SOURCEOPEN/mediaerror ; repli gateway si le navigateur ne décode pas le codec ;
+  `sourceHead` sur échec d'ouverture), `norva-playback v21` (event d'échec enregistré même session morte),
+  `GATEWAY_VERSION 59` (Argos translate ; sonde codec TS VOD + estimation de durée → seek bar).
+- ⏳ Reste optionnel : le repli gateway de secours (`fallbackEngineToTranscode`) peut encore 404
+  (« Gateway session not found ») — rarement atteint depuis que l'auto-retry moteur récupère les hoquets ;
+  à durcir (session fraîche) si la télémétrie montre qu'on y tombe.
 
 ## 6. Runbook — « un mkv ne se lance plus »
 1. `GET https://norva-production.up.railway.app/health` → vérifier `version` et `providerProxy`.
