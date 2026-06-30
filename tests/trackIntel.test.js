@@ -62,6 +62,21 @@ test('no false positives on ordinary film titles', () => {
     assert.strictEqual(M.parseVersionInfo('IT (2017)').audioSignals.length, 0);
 });
 
+test('spelled-out language NAMES in a title are not mistaken for an audio tag', () => {
+    // Regression: full language words ("Italian", "English", …) are common title words and used to
+    // false-positive ("The Italian Job"→it). They must NOT resolve to an audio language from the title.
+    for (const t of [
+        'The Italian Job (2003)', 'The English Patient (1996)', 'Spanish Affair',
+        'Chinese Zodiac (2012)', 'Japanese Story', 'The Russian Bride', 'Turkish Delight',
+        'The Polish Brothers', 'A Portuguese Tale', 'Dutch (1991)', 'Korean Cinema',
+    ]) {
+        assert.strictEqual(M.deriveTrackIntel({ title: t, hasSubtitleStream: false }).audio, null, t);
+    }
+    // …but a delimiter-guarded abbreviation tag still works, and the curated category still resolves names.
+    assert.strictEqual(M.deriveTrackIntel({ title: 'The Secret Agent (2025) [ITA]', hasSubtitleStream: false }).audio.name, 'Italian');
+    assert.strictEqual(M.deriveTrackIntel({ title: 'Some Movie', category: 'IT - ITALIANO', hasSubtitleStream: false }).audio.name, 'Italian');
+});
+
 test('probed, no subtitle signal -> subtitle type "none"', () => {
     assert.deepStrictEqual(sub('DE - The Secret Agent (2025)', '', false), { name: null, type: 'none' });
 });

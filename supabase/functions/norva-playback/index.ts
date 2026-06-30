@@ -97,7 +97,7 @@ Deno.serve(async (req) => {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 25,
+        version: 26,
         entitlements: true,
         entitlementsMode: entitlementRuntime.mode,
         entitlementsEnforced: entitlementRuntime.enforced,
@@ -2217,22 +2217,33 @@ async function transcribeEnqueue(
   db: SupabaseClient,
   userId: string,
   runtimeConfig: RuntimeConfig,
-  opts: { titleId?: string; sourceId?: string; externalId?: string; itemType?: string; index?: number; start?: number; dur?: number; force?: boolean },
+  opts: { titleId?: string; sourceId?: string; externalId?: string; itemType?: string; index?: number; start?: number; dur?: number; force?: boolean; respectFailedCooldown?: boolean },
 ): Promise<JsonRecord> {
   if (!runtimeConfig.mediaGatewayUrl || !runtimeConfig.mediaGatewayToken) throw new HttpError(503, "Media gateway is not configured");
   const { sourceId, externalId, itemType } = await resolveSubtitleTarget(db, userId, opts);
   const tUrl = await resolveVariantUrl(db, userId, sourceId, externalId, itemType);
   if (!tUrl) throw new HttpError(422, `no playback target (source=${sourceId} ext=${externalId} type=${itemType})`);
-  const pkey = (await resolveSourceIdentity(sourceId, userId, db)).key || hostFromUrl(tUrl);
+  // Require a real provider key (no hostFromUrl fallback): the READ paths (getGeneratedSubtitle,
+  // translateEnqueue) key on .key only, so a host-keyed write would be a zombie the player can never
+  // read back. Fail loudly instead — all sources carry a providerKey today.
+  const pkey = (await resolveSourceIdentity(sourceId, userId, db)).key;
   // A blank provider key would collide every unkeyed title onto one cache row — refuse rather
   // than cross-contaminate transcripts. (Shouldn't happen: tUrl is a real, host-bearing URL.)
   if (!pkey) throw new HttpError(422, "no provider key for source");
   // Fast path: a ready transcript is served straight from the cache (no gateway pipe build).
   const { data: existing } = await db.from("catalog_generated_subtitles")
-    .select("status, job_id").eq("provider_key", pkey).eq("item_type", itemType).eq("external_id", externalId)
+    .select("status, job_id, updated_at").eq("provider_key", pkey).eq("item_type", itemType).eq("external_id", externalId)
     .eq("kind", "transcript").eq("lang", "src").maybeSingle();
   const exrec = existing as JsonRecord | null;
   if (exrec?.status === "ready" && !opts.force) return { status: "ready", cached: true, jobId: exrec.job_id, providerKey: pkey };
+  // Failed-cooldown: a title that just FAILED isn't re-attempted by the nightly whitelist for 24h, so a
+  // permanently-broken title can't re-burn a whisper slot every night and starve fresh candidates.
+  // On-demand (no flag) ignores this and retries immediately when the viewer asks.
+  const FAILED_COOLDOWN_MS = 24 * 3600 * 1000;
+  if (opts.respectFailedCooldown && exrec?.status === "failed" && !opts.force
+      && Date.parse(stringOr(exrec.updated_at, "")) > Date.now() - FAILED_COOLDOWN_MS) {
+    return { status: "failed", cached: true, cooldown: true, jobId: exrec.job_id, providerKey: pkey };
+  }
   // Atomically claim the job. The RPC's ON CONFLICT ... WHERE makes "take over the row" a single
   // race-free decision, so two concurrent triggers can't both enqueue a duplicate transcription
   // onto the single-slot gateway: exactly one wins and proceeds, the loser reuses the live job.
@@ -2290,19 +2301,26 @@ async function ocrEnqueue(
   const { sourceId, externalId, itemType } = await resolveSubtitleTarget(db, userId, opts);
   const tUrl = await resolveVariantUrl(db, userId, sourceId, externalId, itemType);
   if (!tUrl) throw new HttpError(422, `no playback target (source=${sourceId} ext=${externalId} type=${itemType})`);
-  const pkey = (await resolveSourceIdentity(sourceId, userId, db)).key || hostFromUrl(tUrl);
+  // Require a real provider key (no hostFromUrl fallback): the READ paths (getGeneratedSubtitle,
+  // translateEnqueue) key on .key only, so a host-keyed write would be a zombie the player can never
+  // read back. Fail loudly instead — all sources carry a providerKey today.
+  const pkey = (await resolveSourceIdentity(sourceId, userId, db)).key;
   if (!pkey) throw new HttpError(422, "no provider key for source");
   const lang = (stringOr(opts.lang, "").toLowerCase().match(/^[a-z]{2,3}$/)?.[0]) || "und";
+  // Per-track cache key: a title can have several image tracks of the same language (incl. 'und'),
+  // so distinguish them by stream index — `<lang>#<idx>` — while keeping `lang` bare for tesseract +
+  // the player's <track srclang>. getGeneratedSubtitle forms the identical key from its ?index=.
+  const cacheLang = `${lang}#${idx}`;
   // Fast path: a ready OCR track is served straight from the cache (no gateway pipe build).
   const { data: existing } = await db.from("catalog_generated_subtitles")
     .select("status, job_id").eq("provider_key", pkey).eq("item_type", itemType).eq("external_id", externalId)
-    .eq("kind", "ocr").eq("lang", lang).maybeSingle();
+    .eq("kind", "ocr").eq("lang", cacheLang).maybeSingle();
   const exrec = existing as JsonRecord | null;
   if (exrec?.status === "ready" && !opts.force) return { status: "ready", cached: true, jobId: exrec.job_id, providerKey: pkey, kind: "ocr", lang };
   const PROCESSING_TTL_MS = 90 * 60 * 1000;
   const jobId = crypto.randomUUID();
   const { data: claim, error: claimErr } = await db.rpc("claim_generated_subtitle_job", {
-    p_provider_key: pkey, p_item_type: itemType, p_external_id: externalId, p_kind: "ocr", p_lang: lang,
+    p_provider_key: pkey, p_item_type: itemType, p_external_id: externalId, p_kind: "ocr", p_lang: cacheLang,
     p_new_job_id: jobId, p_processing_ttl_ms: PROCESSING_TTL_MS, p_force: opts.force === true,
   });
   if (claimErr) throwDb(claimErr, "ocr enqueue claim failed");
@@ -2434,6 +2452,11 @@ async function getGeneratedSubtitle(req: Request, userId: string, db: SupabaseCl
     ? "src"
     : stringOr(url.searchParams.get("lang"), kind === "ocr" ? "und" : "");
   if (kind === "translation" && !lang) throw new HttpError(400, "lang is required for translation");
+  // OCR is per image-sub TRACK: a title can carry several image tracks of the same language (incl.
+  // untagged 'und'), so the cache row is keyed by `<lang>#<streamIndex>` to keep them distinct. The
+  // returned `lang` stays the bare code (for the player's <track srclang> + display).
+  const ocrIdx = url.searchParams.get("index");
+  const cacheLang = (kind === "ocr" && ocrIdx !== null && /^\d+$/.test(ocrIdx)) ? `${lang}#${ocrIdx}` : lang;
   const { sourceId, externalId, itemType } = await resolveSubtitleTarget(db, userId, {
     titleId: stringOr(url.searchParams.get("titleId"), ""),
     sourceId: stringOr(url.searchParams.get("sourceId"), ""),
@@ -2445,7 +2468,7 @@ async function getGeneratedSubtitle(req: Request, userId: string, db: SupabaseCl
   const { data: row } = await db.from("catalog_generated_subtitles")
     .select("status, vtt, source_lang, segments, audio_sec, job_id, updated_at")
     .eq("provider_key", pkey).eq("item_type", itemType).eq("external_id", externalId)
-    .eq("kind", kind).eq("lang", lang).maybeSingle();
+    .eq("kind", kind).eq("lang", cacheLang).maybeSingle();
   const rec = row as JsonRecord | null;
   if (!rec) return { status: "none", providerKey: pkey, kind, lang };
   const status = stringOr(rec.status, "none");
@@ -2737,7 +2760,12 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
   }
 
   const runtimeConfig = await getRuntimeConfig(db);
-  if (!runtimeConfig.relayBaseUrl || !runtimeConfig.relayTokenSecret) {
+  // The transcribe/ocr/whisper modes talk ONLY to the media gateway (they re-check it themselves),
+  // never the relay — so they must not be gated on the relay being configured. Only the relay-using
+  // modes (probe / vod-info capture, sync transcribe) require it.
+  const gatewayOnlyMode = ["transcribe", "transcribe-enqueue", "ocr-enqueue", "transcribe-whitelist", "whisper"]
+    .includes(stringOr(body.mode, ""));
+  if (!gatewayOnlyMode && (!runtimeConfig.relayBaseUrl || !runtimeConfig.relayTokenSecret)) {
     throw new HttpError(503, "Norva Relay is not configured");
   }
 
@@ -2857,8 +2885,9 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
       externalId: stringOr(body.externalId, ""),
       itemType: stringOr(body.itemType, ""),
       index: Number.isInteger(Number(body.index)) ? Number(body.index) : undefined,
-      start: Number(body.start) || 0,
-      dur: Number(body.dur) || 0,
+      // Always whole-track (dur 0): the async path CACHES the VTT as the full transcript, so a
+      // partial clip (dur>0) would poison the cache. Clip benchmarking lives in the sync 'transcribe'
+      // mode, which returns the VTT inline and never writes the cache.
       force: body.force === true,
     });
     return { mode: "transcribe-enqueue", ...r };
@@ -2911,11 +2940,13 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
       const titleId = stringOr(row.title_id, "");
       if (!titleId) continue;
       try {
-        const r = await transcribeEnqueue(db, userId, runtimeConfig, { titleId });
+        // respectFailedCooldown: skip a title that failed in the last 24h so it can't re-burn a
+        // slot every night; a fresh candidate is tried instead.
+        const r = await transcribeEnqueue(db, userId, runtimeConfig, { titleId, respectFailedCooldown: true });
         if (stringOr(r.status, "") === "processing" && r.cached !== true) {
           enqueued += 1; started.push({ titleId, jobId: r.jobId ?? null, priority: row.priority });
         } else if (stringOr(r.status, "") === "error") errored += 1;
-        else cached += 1; // ready, or someone else's in-flight job
+        else cached += 1; // ready, in-flight, or in failed-cooldown
       } catch (_) { errored += 1; }
     }
     return { mode: "transcribe-whitelist", candidates: rows.length, enqueued, cached, errored, started };
@@ -2962,12 +2993,20 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
 
     let detected = 0;
     const wExp = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+    // STRUCTURAL dead-ends (no variant / no source+external id) are permanent — mark them attempted so
+    // they leave the candidate set and can't clog the cursor-less front-of-queue forever. TRANSIENT
+    // failures (URL won't resolve, thrown errors) are NOT marked: a provider outage must not defer a
+    // whole provider's untagged tracks for the 30-day retry window — they retry next run.
+    const markWhisperAttempted = (titleId: string) =>
+      db.from("cloud_titles").update({ whisper_attempted_at: new Date().toISOString() })
+        .eq("id", titleId).eq("user_id", userId).then(() => {}, () => {});
     const runOne = async (t: JsonRecord) => {
+      const titleId = String(t.id);
       try {
         const variant = wvById.get(String(t.default_variant_id));
-        if (!variant) return;
+        if (!variant) { await markWhisperAttempted(titleId); return; }
         const sourceId = stringOr(variant.source_id, ""), externalId = stringOr(variant.external_id, ""), vit = stringOr(variant.item_type, itemType);
-        if (!sourceId || !externalId) return;
+        if (!sourceId || !externalId) { await markWhisperAttempted(titleId); return; }
         const targetUrl = vit === "series"
           ? await resolveSeriesEpisodeUrl(sourceId, externalId, userId, db).catch(() => null)
           : ((await resolvePlaybackTarget(sourceId, vit, externalId, userId, db).catch(() => null))?.targetUrl ?? null);

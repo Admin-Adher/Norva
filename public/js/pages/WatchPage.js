@@ -6156,11 +6156,19 @@ class WatchPage {
     // Returns { code, name } | null.
     burnedSubtitleIntel() {
         try {
+            // Burned-in subtitles are a VOD concept; a live channel/group whose name happens to carry a
+            // sub marker must NOT show a permanent "always on" lock.
+            const type = String(this.contentType || this.content?.type || '').toLowerCase();
+            if (type === 'live' || type === 'channel' || type === 'tv') return null;
             const r = window.MediaUtils?.deriveTrackIntel?.({
                 title: this.content?.title || '',
                 category: this.contentCategoryName(),
                 originalLanguage: this.content?.originalLanguage || this.content?.original_language,
-                hasSubtitleStream: false,
+                // Feed REAL stream presence (text OR image track). If the container exposes any subtitle
+                // track it is toggleable / OCR-able — NOT burned into the picture — so deriveTrackIntel
+                // returns 'soft', not 'burned-in'. Hardcoding false used to claim a PGS/VOBSUB title was
+                // burned-in while the menu simultaneously offered an "OCR → text" row for that track.
+                hasSubtitleStream: Array.isArray(this.subtitleTracks) && this.subtitleTracks.length > 0,
             });
             const s = r && r.subtitle;
             if (s && s.type === 'burned-in') return { code: s.code || 'und', name: s.name || null };
@@ -6333,7 +6341,9 @@ class WatchPage {
             return;
         }
 
-        const getParams = { ...params, kind: 'ocr', lang: entry.lang };
+        // index is part of the OCR cache key (the edge forms `<lang>#<index>`), so the read GET must
+        // carry it too — otherwise two image tracks of the same language read the same cache row.
+        const getParams = { ...params, kind: 'ocr', lang: entry.lang, index: streamIndex };
         entry.state = 'processing';
         this.updateCaptionsTracks();
         // 1) shared cache (another viewer may already have OCR'd this track).

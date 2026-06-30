@@ -647,7 +647,7 @@ app.get('/detect-language/:token', async (req, res) => {
         for (const off of offsets) {
             let wavPath = null;
             try {
-                wavPath = await extractAudioWav(claims.url, ua, trackIndex, off > 0 ? off : 0, dur);
+                wavPath = await extractAudioWav(claims.url, ua, trackIndex, off > 0 ? off : 0, dur, 30_000, claims.uid);
                 if (!wavPath) continue;   // extraction failed or offset past the file's end → next offset
                 extractions++;
                 const whisper = await runWhisperDetect(wavPath);
@@ -703,7 +703,7 @@ app.get('/transcribe/:token', async (req, res) => {
     let wavPath = null;
     try {
         const e0 = Date.now();
-        wavPath = await extractAudioWav(claims.url, ua, trackIndex, startOffset, dur, AUDIO_EXTRACT_TIMEOUT_MS);
+        wavPath = await extractAudioWav(claims.url, ua, trackIndex, startOffset, dur, AUDIO_EXTRACT_TIMEOUT_MS, claims.uid);
         const extractMs = Date.now() - e0;
         if (!wavPath) return res.status(502).json({ error: 'Audio extraction failed' });
         let audioSec = 0;
@@ -745,7 +745,7 @@ app.post('/transcribe-async/:token', (req, res) => {
     const start = Math.max(0, Number.parseFloat(req.query.start) || 0);
     const dur = Math.max(0, Number.parseFloat(req.query.dur) || 0); // 0 = whole track (production); >0 = clip (test)
     const ua = claims.ua || FFMPEG_USER_AGENT;
-    const ok = enqueueTranscribe({ url: claims.url, ua, index, jobId, callbackUrl, start, dur });
+    const ok = enqueueTranscribe({ url: claims.url, ua, index, jobId, callbackUrl, start, dur, uid: claims.uid });
     if (!ok) return res.status(429).json({ error: 'Transcription queue full' });
     return res.status(202).json({ queued: true, position: transcribeQueue.length, busy: transcribeBusy });
 });
@@ -770,7 +770,7 @@ app.post('/ocr-async/:token', (req, res) => {
     // fmt selects the pipeline: 'pgs' (.sup parser) vs 'vobsub'/'dvb' (ffmpeg sub2video → frames).
     const fmt = ['pgs', 'vobsub', 'dvb'].includes(String(req.query.fmt || '')) ? String(req.query.fmt) : 'pgs';
     const ua = claims.ua || FFMPEG_USER_AGENT;
-    const ok = enqueueOcr({ url: claims.url, ua, index, jobId, callbackUrl, lang, fmt });
+    const ok = enqueueOcr({ url: claims.url, ua, index, jobId, callbackUrl, lang, fmt, uid: claims.uid });
     if (!ok) return res.status(429).json({ error: 'OCR queue full' });
     return res.status(202).json({ queued: true, position: ocrQueue.length, busy: ocrBusy });
 });
@@ -818,7 +818,7 @@ app.post('/translate', requireGatewayAuth, async (req, res) => {
 // Extract a mono/16 kHz pcm_s16le WAV of one audio track to a temp file. Resolves the path, or
 // null on failure. `dur` 0 = the whole track (full-film transcription); >0 = a clip. `timeoutMs`
 // defaults to 30 s (LID clip) — pass a longer value for a full-film extraction.
-function extractAudioWav(url, ua, trackIndex, startOffset, dur, timeoutMs = 30_000) {
+function extractAudioWav(url, ua, trackIndex, startOffset, dur, timeoutMs = 30_000, proxyKey = '') {
     return new Promise((resolve) => {
         const outputPath = path.join(os.tmpdir(), `norva-audio-${Date.now()}-${crypto.randomUUID()}.wav`);
         const args = [
@@ -833,7 +833,7 @@ function extractAudioWav(url, ua, trackIndex, startOffset, dur, timeoutMs = 30_0
             outputPath,
         ];
         let child;
-        try { child = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'ignore', 'pipe'], env: proxyEnvFor(proxyKeyFromUrl(url)) }); }
+        try { child = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'ignore', 'pipe'], env: proxyEnvFor(proxyKey || proxyKeyFromUrl(url)) }); }
         catch (_) { return resolve(null); }
         let stderr = '';
         const timer = setTimeout(() => { try { child.kill('SIGKILL'); } catch (_) {} }, timeoutMs);
@@ -985,10 +985,10 @@ async function drainTranscribeQueue() {
     } finally { transcribeBusy = false; }
 }
 async function runTranscribeJob(job) {
-    const { url, ua, index, jobId, callbackUrl, start = 0, dur = 0 } = job;
+    const { url, ua, index, jobId, callbackUrl, start = 0, dur = 0, uid = '' } = job;
     let wavPath = null, payload;
     try {
-        wavPath = await extractAudioWav(url, ua, index, start, dur, AUDIO_EXTRACT_TIMEOUT_MS); // dur 0 = whole track
+        wavPath = await extractAudioWav(url, ua, index, start, dur, AUDIO_EXTRACT_TIMEOUT_MS, uid); // dur 0 = whole track
         if (!wavPath) {
             payload = { jobId, ok: false, error: 'Audio extraction failed' };
         } else {
@@ -1106,7 +1106,7 @@ async function drainOcrQueue() {
 // surface WHY extraction failed (the audio path's opaque "failed" cost real debugging time). Subtitle
 // streams are sparse across the file, so `-c:s copy` must demux the whole input — index is the
 // absolute ffprobe stream index from the probe.
-function extractSubtitleSup(url, ua, trackIndex, timeoutMs = SUP_EXTRACT_TIMEOUT_MS) {
+function extractSubtitleSup(url, ua, trackIndex, timeoutMs = SUP_EXTRACT_TIMEOUT_MS, proxyKey = '') {
     return new Promise((resolve) => {
         const outputPath = path.join(os.tmpdir(), `norva-sub-${Date.now()}-${crypto.randomUUID()}.sup`);
         const args = [
@@ -1119,7 +1119,7 @@ function extractSubtitleSup(url, ua, trackIndex, timeoutMs = SUP_EXTRACT_TIMEOUT
             outputPath,
         ];
         let child;
-        try { child = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'ignore', 'pipe'], env: proxyEnvFor(proxyKeyFromUrl(url)) }); }
+        try { child = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'ignore', 'pipe'], env: proxyEnvFor(proxyKey || proxyKeyFromUrl(url)) }); }
         catch (e) { return resolve({ ok: false, error: 'spawn failed: ' + String((e && e.message) || e) }); }
         let stderr = '';
         const timer = setTimeout(() => { try { child.kill('SIGKILL'); } catch (_) {} }, timeoutMs);
@@ -1167,7 +1167,7 @@ function runOcrPython(supPath, lang) {
 // VOBSUB/DVB: render the image-sub track to timed PNGs with ffmpeg's sub2video filter (decodes the
 // bitmap stream; showinfo logs each frame's PTS) into a temp dir + showinfo.log. Resolves
 // { ok:true, dir } or { ok:false, error } (the ffmpeg error tail). One ffmpeg pass over the URL.
-function extractSubtitleFrames(url, ua, trackIndex, timeoutMs = SUP_EXTRACT_TIMEOUT_MS) {
+function extractSubtitleFrames(url, ua, trackIndex, timeoutMs = SUP_EXTRACT_TIMEOUT_MS, proxyKey = '') {
     return new Promise((resolve) => {
         const dir = path.join(os.tmpdir(), `norva-imgsub-${Date.now()}-${crypto.randomUUID()}`);
         try { fs.mkdirSync(dir, { recursive: true }); } catch (e) { return resolve({ ok: false, error: 'mkdir failed: ' + String((e && e.message) || e) }); }
@@ -1182,7 +1182,7 @@ function extractSubtitleFrames(url, ua, trackIndex, timeoutMs = SUP_EXTRACT_TIME
             path.join(dir, 'f_%05d.png'),
         ];
         let child;
-        try { child = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'ignore', 'pipe'], env: proxyEnvFor(proxyKeyFromUrl(url)) }); }
+        try { child = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'ignore', 'pipe'], env: proxyEnvFor(proxyKey || proxyKeyFromUrl(url)) }); }
         catch (e) { return resolve({ ok: false, error: 'spawn failed: ' + String((e && e.message) || e) }); }
         let stderr = '';
         const timer = setTimeout(() => { try { child.kill('SIGKILL'); } catch (_) {} }, timeoutMs);
@@ -1236,13 +1236,13 @@ function runOcrImgsubPython(frameDir, lang) {
 const OCR_EXTRACT_RETRIES = clampInt(process.env.OCR_EXTRACT_RETRIES, 2, 0, 5);
 const OCR_EXTRACT_BACKOFF_MS = clampInt(process.env.OCR_EXTRACT_BACKOFF_MS, 30_000, 5_000, 300_000);
 async function runOcrJob(job) {
-    const { url, ua, index, jobId, callbackUrl, lang, fmt = 'pgs' } = job;
+    const { url, ua, index, jobId, callbackUrl, lang, fmt = 'pgs', uid = '' } = job;
     const useFrames = fmt === 'vobsub' || fmt === 'dvb';  // sub2video path; else PGS .sup parser
     let supPath = null, frameDir = null, payload;
     try {
         let ex = { ok: false, error: 'not attempted' };
         for (let attempt = 0; attempt <= OCR_EXTRACT_RETRIES; attempt++) {
-            ex = useFrames ? await extractSubtitleFrames(url, ua, index) : await extractSubtitleSup(url, ua, index);
+            ex = useFrames ? await extractSubtitleFrames(url, ua, index, SUP_EXTRACT_TIMEOUT_MS, uid) : await extractSubtitleSup(url, ua, index, SUP_EXTRACT_TIMEOUT_MS, uid);
             if (ex.ok) break;
             if (ex.dir) { fsp.rm(ex.dir, { recursive: true, force: true }).catch(() => {}); ex.dir = null; } // drop partial dir
             if (/\b(401|403)\b|Unauthorized|Forbidden/i.test(ex.error || '')) break; // abuse/auth block — do not hammer

@@ -186,20 +186,26 @@ const MediaUtils = (() => {
         { tag: 'VOSTKOR', re: /\bvost[\s._-]*(ko|kor|korean)\b/i, language: 'original' },
         { tag: 'VOSTZH', re: /\bvost[\s._-]*(zh|zho|chi|cn|chinese|mandarin)\b/i, language: 'original' },
         { tag: 'VO', re: /\bvo\b/i, language: 'original' },
-        { tag: 'EN', re: /(^|[^a-z\s])en([^a-z\s]|$)|\beng(lish)?\b/i, language: 'en' },
-        { tag: 'ES', re: /(^|[^a-z\s])es([^a-z\s]|$)|\bspa(nish)?\b|\bcastellano\b/i, language: 'es' },
-        { tag: 'AR', re: /(^|[^a-z\s])ar([^a-z\s]|$)|\bara(bic|be)?\b/i, language: 'ar' },
-        { tag: 'DE', re: /(^|[^a-z\s])de([^a-z\s]|$)|\b(deu|ger|german|deutsch)\b/i, language: 'de' },
-        { tag: 'ITA', re: /\b(ita|italian|italiano)\b/i, language: 'it' },
-        { tag: 'PT', re: /(^|[^a-z\s])pt([^a-z\s]|$)|\b(por|portuguese|portugues|br|brazilian)\b/i, language: 'pt' },
-        { tag: 'TR', re: /(^|[^a-z\s])tr([^a-z\s]|$)|\b(tur|turkish)\b/i, language: 'tr' },
-        { tag: 'NL', re: /(^|[^a-z\s])nl([^a-z\s]|$)|\b(nld|dut|dutch|nederlands)\b/i, language: 'nl' },
-        { tag: 'RU', re: /(^|[^a-z\s])ru([^a-z\s]|$)|\b(rus|russian)\b/i, language: 'ru' },
-        { tag: 'PL', re: /(^|[^a-z\s])pl([^a-z\s]|$)|\b(pol|polish)\b/i, language: 'pl' },
-        { tag: 'HI', re: /(^|[^a-z\s])hi([^a-z\s]|$)|\b(hin|hindi)\b/i, language: 'hi' },
-        { tag: 'JPN', re: /\b(jp|jpn|japanese)\b/i, language: 'ja' },
-        { tag: 'KOR', re: /\b(ko|kor|korean)\b/i, language: 'ko' },
-        { tag: 'ZH', re: /\b(zh|zho|chi|cn|chinese|mandarin)\b/i, language: 'zh' }
+        // Audio language from a FREE-FORM TITLE: abbreviations only, each delimiter-guarded
+        // (^|[^a-z\s])…([^a-z\s]|$). The spelled-out language NAMES (italian/english/spanish/…) were
+        // removed here because they are common English title words — "The Italian Job"→it, "The English
+        // Patient"→en, "Chinese Zodiac"→zh were systematic false positives. Full names still resolve from
+        // the curated CATEGORY via scanLanguageMarkers (token-exact), and the VOST*/SUB* forms below keep
+        // their full words because they are anchored to a vost/sub marker and so can't fire on a title word.
+        { tag: 'EN', re: /(^|[^a-z\s])(en|eng)([^a-z\s]|$)/i, language: 'en' },
+        { tag: 'ES', re: /(^|[^a-z\s])(es|spa)([^a-z\s]|$)/i, language: 'es' },
+        { tag: 'AR', re: /(^|[^a-z\s])(ar|ara)([^a-z\s]|$)/i, language: 'ar' },
+        { tag: 'DE', re: /(^|[^a-z\s])(de|deu|ger)([^a-z\s]|$)/i, language: 'de' },
+        { tag: 'ITA', re: /(^|[^a-z\s])(ita)([^a-z\s]|$)/i, language: 'it' },
+        { tag: 'PT', re: /(^|[^a-z\s])(pt|por|br)([^a-z\s]|$)/i, language: 'pt' },
+        { tag: 'TR', re: /(^|[^a-z\s])(tr|tur)([^a-z\s]|$)/i, language: 'tr' },
+        { tag: 'NL', re: /(^|[^a-z\s])(nl|nld|dut)([^a-z\s]|$)/i, language: 'nl' },
+        { tag: 'RU', re: /(^|[^a-z\s])(ru|rus)([^a-z\s]|$)/i, language: 'ru' },
+        { tag: 'PL', re: /(^|[^a-z\s])(pl|pol)([^a-z\s]|$)/i, language: 'pl' },
+        { tag: 'HI', re: /(^|[^a-z\s])(hi|hin)([^a-z\s]|$)/i, language: 'hi' },
+        { tag: 'JPN', re: /(^|[^a-z\s])(jp|jpn)([^a-z\s]|$)/i, language: 'ja' },
+        { tag: 'KOR', re: /(^|[^a-z\s])(ko|kor)([^a-z\s]|$)/i, language: 'ko' },
+        { tag: 'ZH', re: /(^|[^a-z\s])(zh|zho|cn)([^a-z\s]|$)/i, language: 'zh' }
     ];
 
     const TITLE_SUBTITLE_SIGNALS = [

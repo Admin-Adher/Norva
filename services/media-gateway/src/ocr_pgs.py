@@ -73,10 +73,13 @@ def decode_rle(data, width, height):
         if top == 0x00:
             run = b2 & 0x3F
         elif top == 0x40:
+            if i >= n: break                          # truncated run → salvage what we have
             run = ((b2 & 0x3F) << 8) | data[i]; i += 1
         elif top == 0x80:
+            if i >= n: break
             run = b2 & 0x3F; color = data[i]; i += 1
         else:                                         # 0xC0
+            if i + 1 >= n: break
             run = ((b2 & 0x3F) << 8) | data[i]; i += 1; color = data[i]; i += 1
         line.extend(bytes([color]) * run)
     if line:
@@ -220,12 +223,15 @@ def _compose(comp, objects, palette, Image):
         o = objects.get(co["id"])
         if not o or o["w"] <= 0 or o["h"] <= 0:
             continue
-        idx = decode_rle(o["rle"], o["w"], o["h"])
-        px = bytearray(len(idx))
-        for k, pidx in enumerate(idx):
-            y, a = palette.get(pidx, (0, 0))
-            px[k] = (y * a) // 255
-        imgs.append(Image.frombytes("L", (o["w"], o["h"]), bytes(px)))
+        try:                                          # one corrupt object → skip it, keep the rest
+            idx = decode_rle(o["rle"], o["w"], o["h"])
+            px = bytearray(len(idx))
+            for k, pidx in enumerate(idx):
+                y, a = palette.get(pidx, (0, 0))
+                px[k] = (y * a) // 255
+            imgs.append(Image.frombytes("L", (o["w"], o["h"]), bytes(px)))
+        except Exception:
+            continue
     if not imgs:
         return None
     # MVP: stack multiple objects vertically (rare); usually one object per cue
@@ -276,10 +282,15 @@ def _clean_text(text):
 
 
 def _ts(t):
-    if t is None:
+    # Decompose in integer milliseconds so rounding can never emit a 60.000 seconds field
+    # (e.g. 119.9996 → "00:01:60.000", which is invalid WebVTT and gets dropped by parsers).
+    if t is None or t < 0:
         t = 0.0
-    h = int(t // 3600); m = int((t % 3600) // 60); s = t % 60
-    return "%02d:%02d:%06.3f" % (h, m, s)
+    ms = int(round(t * 1000))
+    h, ms = divmod(ms, 3_600_000)
+    m, ms = divmod(ms, 60_000)
+    s, ms = divmod(ms, 1000)
+    return "%02d:%02d:%02d.%03d" % (h, m, s, ms)
 
 
 def to_vtt(cues, lang):
@@ -288,7 +299,10 @@ def to_vtt(cues, lang):
     for c in cues:
         start = c["start"]
         end = c["end"] if (c["end"] is not None and c["end"] > start) else start + 2.0
-        txt = ocr_image(c["img"], lang)
+        try:                                          # a failing/slow cue is skipped, not fatal to the job
+            txt = ocr_image(c["img"], lang)
+        except Exception:
+            continue
         if not txt:
             continue
         k += 1
