@@ -798,7 +798,7 @@ class SourceManager {
           ${milestones}
         </ol>
         ${phase === 'syncing' ? `
-          <p class="hint">You can let this continue in the background. Norva will keep this service visible in Settings while it prepares the catalog.</p>
+          <p class="hint source-sync-notify-note">📨 <strong>You can close the app</strong> — we'll email you the moment your catalog is ready, on every device. The mobile app will notify you too. Norva keeps preparing it in the background.</p>
         ` : ''}
         ${phase === 'error' ? `
           <div class="source-sync-error">${this.escapeHtml(statusText.error)}</div>
@@ -1028,6 +1028,7 @@ class SourceManager {
             const createdSource = await API.sources.create({ type, name, url, username, password });
             await this.loadSources();
             this.notifySourceHealthChanged();
+            try { window.app?.startImportWatcher?.(); } catch (_) { /* noop */ } // toast when this import finishes
             this.showCatalogPreparation(createdSource, type);
 
             // Refresh the watch surfaces in the background. The onboarding progress

@@ -366,6 +366,7 @@ class App {
             const summary = await window.NorvaSourceHealth.loadSummary();
             this.sourceHealthSummary = summary;
             this.applyCatalogAvailability(summary);
+            this.startImportWatcher(); // self-stops when nothing is importing
 
             if (redirectIfBlocked && this.isCatalogPage(this.currentPage) && !this.isCatalogReady()) {
                 this.navigateTo('home', true);
@@ -384,6 +385,41 @@ class App {
             this.applyCatalogAvailability(this.sourceHealthSummary);
             return this.sourceHealthSummary;
         }
+    }
+
+    // In-app completion banner: poll the sources list and toast when a catalog import finishes
+    // (syncing -> ready) while the app is open. Self-stopping — it only runs while something is
+    // importing, and the add-provider flow re-kicks it. Pairs with the email/push notifications for
+    // when the app is closed. The first tick records a baseline (no toast on initial load).
+    startImportWatcher() {
+        if (this._importWatchTimer) return;
+        if (!this._importStates) this._importStates = new Map();
+        const SYNCING = new Set(['syncing', 'checking', 'pending', 'connecting', 'discovering', 'discovered', 'importing', 'materializing', 'building_titles', 'building_live_channels', 'building_live_variants', 'finalizing']);
+        const tick = async () => {
+            let anySyncing = false;
+            try {
+                const sources = await (window.API?.sources?.getAll?.() ?? []);
+                for (const s of (Array.isArray(sources) ? sources : [])) {
+                    const id = String(s.id ?? s.sourceId ?? '');
+                    if (!id) continue;
+                    const status = String(s.sync_status || s.syncStatus || '').toLowerCase();
+                    const was = this._importStates.get(id);
+                    this._importStates.set(id, status);
+                    if (SYNCING.has(status)) anySyncing = true;
+                    // Toast only on a real syncing -> ready transition (skip the baseline pass).
+                    if (was && was !== status && status === 'ready' && SYNCING.has(was)) {
+                        try { this.sourceManager?.toast?.(`🎉 ${s.name || s.display_name || 'Your catalog'} is ready to watch!`); } catch (_) { /* noop */ }
+                    }
+                }
+            } catch (_) { /* best-effort */ }
+            if (!anySyncing) this.stopImportWatcher();
+        };
+        this._importWatchTimer = setInterval(tick, 30 * 1000);
+        tick(); // prime baseline immediately
+    }
+
+    stopImportWatcher() {
+        if (this._importWatchTimer) { clearInterval(this._importWatchTimer); this._importWatchTimer = null; }
     }
 
     isCatalogPage(pageName) {
