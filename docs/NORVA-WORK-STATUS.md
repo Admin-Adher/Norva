@@ -70,7 +70,7 @@ curl -X POST "$EDGE/norva-playback/audio-backfill" \
 | 1 | audio + sous-titres incrustés | langue audio déduite + UI sous-titres incrustés verrouillés | ✅ **fait, live** |
 | 2 | audio | whisper.cpp détecte la vraie langue d'une piste non taguée (self-hosted, gratuit) | ✅ **fait & ACTIF** (flag inline `on` + cron whisper off-peak) |
 | 3 | sous-titres | **sous-titres auto** : Whisper transcrit l'audio → VTT quand aucun sous-titre texte ; + **traduction Argos** vers ta langue | ✅ **PHASE 3 COMPLÈTE** : 3a (transcription async + cache cross-user + livraison + bouton player) + 3b (**traduction multi-cible Argos**) + 3c (**cron whitelist nocturne par provider + reaper**) — tout live |
-| 4 | sous-titres | **OCR (Tesseract)** : sous-titres image (PGS/VOBSUB) → texte ; potentiellement incrustés dans l'image | ❌ à faire |
+| 4 | sous-titres | **OCR (Tesseract)** : sous-titres image (PGS/VOBSUB) → texte | 🟡 **PGS en cours** : pipeline gateway (`ocr_pgs.py` + `/ocr-async`) + edge v24 (`ocrEnqueue`) **déployés & prouvés bout-en-bout** ; reste UI player + intégration off-peak (blocage = limite connexion provider 429, pas le code). Détail `docs/PHASE4-OCR-SUBTITLES.md` |
 
 Hors-plan (correctifs livrés en cours de route) : extraction sous-titres texte in-band (ci-dessus),
 fix flicker catalogue, cache de profil gateway, fixes moteur (BlockAdditions/HEVC/open-GOP).
