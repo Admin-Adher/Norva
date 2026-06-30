@@ -97,7 +97,7 @@ Deno.serve(async (req) => {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 24,
+        version: 25,
         entitlements: true,
         entitlementsMode: entitlementRuntime.mode,
         entitlementsEnforced: entitlementRuntime.enforced,
@@ -2282,7 +2282,7 @@ async function ocrEnqueue(
   db: SupabaseClient,
   userId: string,
   runtimeConfig: RuntimeConfig,
-  opts: { titleId?: string; sourceId?: string; externalId?: string; itemType?: string; index?: number; lang?: string; force?: boolean },
+  opts: { titleId?: string; sourceId?: string; externalId?: string; itemType?: string; index?: number; lang?: string; fmt?: string; force?: boolean },
 ): Promise<JsonRecord> {
   if (!runtimeConfig.mediaGatewayUrl || !runtimeConfig.mediaGatewayToken) throw new HttpError(503, "Media gateway is not configured");
   const idx = Number(opts.index);
@@ -2314,7 +2314,8 @@ async function ocrEnqueue(
   const pipe = await createBytePipeAccess("ocr-job", userId, tUrl, exp, db, null);
   const cbUrl = `${Deno.env.get("SUPABASE_URL") ?? ""}/functions/v1/norva-playback/transcribe-callback`;
   const tessLang = TESS_LANG_MAP[lang] || "";
-  const asyncUrl = `${pipe.url.replace("/raw/", "/ocr-async/")}?index=${idx}&jobId=${jobId}&callback=${encodeURIComponent(cbUrl)}${tessLang ? `&lang=${tessLang}` : ""}`;
+  const fmt = ["pgs", "vobsub", "dvb"].includes(stringOr(opts.fmt, "")) ? stringOr(opts.fmt, "") : "pgs";
+  const asyncUrl = `${pipe.url.replace("/raw/", "/ocr-async/")}?index=${idx}&jobId=${jobId}&callback=${encodeURIComponent(cbUrl)}&fmt=${fmt}${tessLang ? `&lang=${tessLang}` : ""}`;
   let gwStatus = 0, gwBody: JsonRecord | null = null;
   try {
     const gw = await fetch(asyncUrl, { method: "POST", signal: AbortSignal.timeout(20000) });
@@ -2468,7 +2469,7 @@ async function postGeneratedSubtitle(req: Request, userId: string, db: SupabaseC
       titleId: stringOr(body.titleId, ""), sourceId: stringOr(body.sourceId, ""), externalId: stringOr(body.externalId, ""),
       itemType: stringOr(body.itemType, ""),
       index: Number.isInteger(Number(body.index)) ? Number(body.index) : undefined,
-      lang: stringOr(body.lang, ""), force: body.force === true,
+      lang: stringOr(body.lang, ""), fmt: stringOr(body.fmt, ""), force: body.force === true,
     });
   }
   // Phase 3b: a translation request (kind='translation' or a target lang) routes to the Argos path.
@@ -2877,6 +2878,7 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
       itemType: stringOr(body.itemType, ""),
       index: Number.isInteger(Number(body.index)) ? Number(body.index) : undefined,
       lang: stringOr(body.lang, ""),
+      fmt: stringOr(body.fmt, ""),
       force: body.force === true,
     });
     return { mode: "ocr-enqueue", ...r };

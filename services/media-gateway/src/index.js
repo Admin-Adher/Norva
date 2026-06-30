@@ -168,6 +168,10 @@ function argosTargets() {
 // installed there); tesseract-ocr is on PATH. Disabled if either the script or tesseract is missing.
 const OCR_PYTHON_BIN = process.env.OCR_PYTHON_BIN || ARGOS_PYTHON_BIN;
 const OCR_SCRIPT = path.join(__dirname, 'ocr_pgs.py');
+// VOBSUB (dvd_subtitle) + DVB (dvb_subtitle): no clean container to copy out, so we let ffmpeg DECODE
+// the stream and render it with sub2video → timed PNGs, then ocr_imgsub.py OCRs them (reusing ocr_pgs
+// helpers). One code path for both formats; PGS keeps its direct .sup parser.
+const OCR_SCRIPT_IMGSUB = path.join(__dirname, 'ocr_imgsub.py');
 const OCR_TESSERACT_BIN = process.env.TESSERACT_BIN || 'tesseract';
 const OCR_LANGS = process.env.OCR_LANGS || 'eng+fra+spa+deu+ita+por';
 const OCR_TIMEOUT_MS = clampInt(process.env.OCR_TIMEOUT_MS, 900_000, 30_000, 3_600_000);
@@ -763,8 +767,10 @@ app.post('/ocr-async/:token', (req, res) => {
         return res.status(400).json({ error: 'jobId and a valid supabase callback are required' });
     }
     const lang = /^[a-z+]{3,40}$/.test(String(req.query.lang || '')) ? String(req.query.lang) : OCR_LANGS;
+    // fmt selects the pipeline: 'pgs' (.sup parser) vs 'vobsub'/'dvb' (ffmpeg sub2video → frames).
+    const fmt = ['pgs', 'vobsub', 'dvb'].includes(String(req.query.fmt || '')) ? String(req.query.fmt) : 'pgs';
     const ua = claims.ua || FFMPEG_USER_AGENT;
-    const ok = enqueueOcr({ url: claims.url, ua, index, jobId, callbackUrl, lang });
+    const ok = enqueueOcr({ url: claims.url, ua, index, jobId, callbackUrl, lang, fmt });
     if (!ok) return res.status(429).json({ error: 'OCR queue full' });
     return res.status(202).json({ queued: true, position: ocrQueue.length, busy: ocrBusy });
 });
@@ -1158,6 +1164,69 @@ function runOcrPython(supPath, lang) {
     });
 }
 
+// VOBSUB/DVB: render the image-sub track to timed PNGs with ffmpeg's sub2video filter (decodes the
+// bitmap stream; showinfo logs each frame's PTS) into a temp dir + showinfo.log. Resolves
+// { ok:true, dir } or { ok:false, error } (the ffmpeg error tail). One ffmpeg pass over the URL.
+function extractSubtitleFrames(url, ua, trackIndex, timeoutMs = SUP_EXTRACT_TIMEOUT_MS) {
+    return new Promise((resolve) => {
+        const dir = path.join(os.tmpdir(), `norva-imgsub-${Date.now()}-${crypto.randomUUID()}`);
+        try { fs.mkdirSync(dir, { recursive: true }); } catch (e) { return resolve({ ok: false, error: 'mkdir failed: ' + String((e && e.message) || e) }); }
+        const args = [
+            '-y', '-hide_banner', '-loglevel', 'info', '-nostdin',
+            '-user_agent', ua,
+            '-probesize', '5000000', '-analyzeduration', '8000000',
+            '-i', url,
+            // sub2video is auto-inserted before showinfo; native sub resolution (resolution-agnostic).
+            '-filter_complex', `[0:${trackIndex}]showinfo[v]`,
+            '-map', '[v]', '-vsync', 'passthrough', '-start_number', '0',
+            path.join(dir, 'f_%05d.png'),
+        ];
+        let child;
+        try { child = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'ignore', 'pipe'], env: proxyEnvFor(proxyKeyFromUrl(url)) }); }
+        catch (e) { return resolve({ ok: false, error: 'spawn failed: ' + String((e && e.message) || e) }); }
+        let stderr = '';
+        const timer = setTimeout(() => { try { child.kill('SIGKILL'); } catch (_) {} }, timeoutMs);
+        // showinfo is verbose (one line/frame) — keep the tail bounded but enough for a long film.
+        child.stderr.on('data', (d) => { stderr += d.toString(); if (stderr.length > 24_000_000) stderr = stderr.slice(-16_000_000); });
+        child.on('error', (e) => { clearTimeout(timer); resolve({ ok: false, error: String((e && e.message) || e), dir }); });
+        child.on('close', async (code) => {
+            clearTimeout(timer);
+            try { await fsp.writeFile(path.join(dir, 'showinfo.log'), stderr); } catch (_) { /* python falls back to file order */ }
+            let nframes = 0;
+            try { nframes = (await fsp.readdir(dir)).filter((f) => f.endsWith('.png')).length; } catch (_) { nframes = 0; }
+            if (code !== 0 && !nframes) {
+                console.warn(`[media-gateway] imgsub-extract ffmpeg exit ${code}: ${stderr.split('\n').filter(Boolean).pop() || 'no stderr'}`);
+                return resolve({ ok: false, error: `ffmpeg exit ${code}: ${stderr.split('\n').filter(Boolean).pop() || 'no stderr'}`, dir });
+            }
+            if (!nframes) return resolve({ ok: false, error: `no subtitle frames rendered on stream ${trackIndex}`, dir });
+            resolve({ ok: true, dir });
+        });
+    });
+}
+
+// Run ocr_imgsub.py on a rendered frame dir: pipe { dir, lang } in, read the WebVTT from stdout.
+function runOcrImgsubPython(frameDir, lang) {
+    return new Promise((resolve) => {
+        let child;
+        try {
+            child = spawn(OCR_PYTHON_BIN, [OCR_SCRIPT_IMGSUB], { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env }, cwd: __dirname });
+        } catch (e) { return resolve({ ok: false, error: 'spawn failed: ' + String((e && e.message) || e) }); }
+        let out = '', err = '';
+        const timer = setTimeout(() => { try { child.kill('SIGKILL'); } catch (_) {} }, OCR_TIMEOUT_MS);
+        child.stdout.on('data', (d) => { out += d.toString(); });
+        child.stderr.on('data', (d) => { err += d.toString(); });
+        child.on('error', (e) => { clearTimeout(timer); resolve({ ok: false, error: String((e && e.message) || e) }); });
+        child.on('close', (code) => {
+            clearTimeout(timer);
+            if (code === 0 && out.trim()) return resolve({ ok: true, vtt: out });
+            let msg = `ocr exit ${code}`;
+            try { const j = JSON.parse((err.trim().split('\n').pop() || '')); if (j && j.error) msg = j.error; } catch (_) {}
+            resolve({ ok: false, error: msg });
+        });
+        try { child.stdin.write(JSON.stringify({ dir: frameDir, lang })); child.stdin.end(); } catch (_) { /* close handler resolves */ }
+    });
+}
+
 // Provider panels allow a single concurrent connection, and extracting an image-sub track demuxes the
 // whole file (sparse packets) → a long-held connection that collides with the panel's limit. So a
 // transient `429`-style 4XX gets a couple of LONG, well-spaced retries — never a burst, because
@@ -1167,21 +1236,24 @@ function runOcrPython(supPath, lang) {
 const OCR_EXTRACT_RETRIES = clampInt(process.env.OCR_EXTRACT_RETRIES, 2, 0, 5);
 const OCR_EXTRACT_BACKOFF_MS = clampInt(process.env.OCR_EXTRACT_BACKOFF_MS, 30_000, 5_000, 300_000);
 async function runOcrJob(job) {
-    const { url, ua, index, jobId, callbackUrl, lang } = job;
-    let supPath = null, payload;
+    const { url, ua, index, jobId, callbackUrl, lang, fmt = 'pgs' } = job;
+    const useFrames = fmt === 'vobsub' || fmt === 'dvb';  // sub2video path; else PGS .sup parser
+    let supPath = null, frameDir = null, payload;
     try {
         let ex = { ok: false, error: 'not attempted' };
         for (let attempt = 0; attempt <= OCR_EXTRACT_RETRIES; attempt++) {
-            ex = await extractSubtitleSup(url, ua, index);
+            ex = useFrames ? await extractSubtitleFrames(url, ua, index) : await extractSubtitleSup(url, ua, index);
             if (ex.ok) break;
+            if (ex.dir) { fsp.rm(ex.dir, { recursive: true, force: true }).catch(() => {}); ex.dir = null; } // drop partial dir
             if (/\b(401|403)\b|Unauthorized|Forbidden/i.test(ex.error || '')) break; // abuse/auth block — do not hammer
             if (attempt < OCR_EXTRACT_RETRIES) await sleep(OCR_EXTRACT_BACKOFF_MS * (attempt + 1)); // 30s, 60s — spaced, not a burst
         }
         if (!ex.ok) {
             payload = { jobId, ok: false, error: ('Subtitle extraction failed: ' + ex.error).slice(0, 300) };
         } else {
-            supPath = ex.path;
-            const r = await runOcrPython(supPath, lang || OCR_LANGS);
+            let r;
+            if (useFrames) { frameDir = ex.dir; r = await runOcrImgsubPython(frameDir, lang || OCR_LANGS); }
+            else { supPath = ex.path; r = await runOcrPython(supPath, lang || OCR_LANGS); }
             const segments = r.ok ? (r.vtt.match(/-->/g) || []).length : 0;
             payload = (r.ok && segments > 0)
                 ? { jobId, ok: true, vtt: r.vtt, segments, sourceLang: null }
@@ -1189,7 +1261,10 @@ async function runOcrJob(job) {
         }
     } catch (e) {
         payload = { jobId, ok: false, error: String((e && e.message) || e).slice(0, 300) };
-    } finally { if (supPath) fsp.unlink(supPath).catch(() => {}); }
+    } finally {
+        if (supPath) fsp.unlink(supPath).catch(() => {});
+        if (frameDir) fsp.rm(frameDir, { recursive: true, force: true }).catch(() => {});
+    }
     try {
         await fetch(callbackUrl, {
             method: 'POST',

@@ -6241,11 +6241,21 @@ class WatchPage {
     // <track> path as AI subtitles. Per-track state, keyed by the subtitle STREAM index.
     // ============================================================
 
-    // The PGS image-sub tracks we can offer OCR for (gated like AI subs: cloud on-demand movie).
+    // The image-sub tracks we can OCR (gated like AI subs: cloud on-demand movie). Covers PGS
+    // (Blu-ray), VOBSUB (DVD) and DVB — the gateway picks the right pipeline from `fmt`.
     getOcrableSubtitleTracks() {
         if (!this._canRequestAiSubtitles()) return [];
         return (Array.isArray(this.subtitleTracks) ? this.subtitleTracks : []).filter((t) =>
-            t && String(t.subtitleType || '').toLowerCase() === 'image' && /pgs/i.test(String(t.codec || '')));
+            t && String(t.subtitleType || '').toLowerCase() === 'image' && this._ocrFmtOf(t));
+    }
+
+    // Map a track codec to the gateway OCR pipeline, or '' if not an OCR-able image codec.
+    _ocrFmtOf(track) {
+        const c = String(track?.codec || '').toLowerCase();
+        if (/pgs/.test(c)) return 'pgs';
+        if (/dvd|vobsub/.test(c)) return 'vobsub';
+        if (/dvb/.test(c)) return 'dvb';
+        return '';
     }
 
     _ocrLangOf(track) {
@@ -6300,7 +6310,7 @@ class WatchPage {
         }).join('');
     }
 
-    async requestOcrSubtitle(streamIndex, lang) {
+    async requestOcrSubtitle(streamIndex, lang, fmt = 'pgs') {
         const base = this._aiSubtitleParams();
         if (!base || !Number.isInteger(streamIndex)) return;
         const api = window.NorvaCloud?.playback;
@@ -6333,7 +6343,7 @@ class WatchPage {
         } catch (_) { /* fall through to trigger */ }
         // 2) trigger an OCR pass and poll for it.
         try {
-            const enq = await api.requestGeneratedSubtitle({ ...params, kind: 'ocr', index: streamIndex, lang: entry.lang });
+            const enq = await api.requestGeneratedSubtitle({ ...params, kind: 'ocr', index: streamIndex, lang: entry.lang, fmt });
             if (enq && String(enq.status) === 'ready') {
                 const got = await api.generatedSubtitle(getParams);
                 if (this._applyOcrResponse(streamIndex, got, key)) return;
@@ -7000,7 +7010,7 @@ class WatchPage {
             this.selectedSubtitleTrackUserChoice = true;
             this.clearPendingPreference('subtitle');
             const track = this.getOcrableSubtitleTracks().find((t) => Number(t.index) === streamIndex);
-            await this.requestOcrSubtitle(streamIndex, this._ocrLangOf(track));
+            await this.requestOcrSubtitle(streamIndex, this._ocrLangOf(track), this._ocrFmtOf(track) || 'pgs');
             this.updateCaptionsTracks();
             if (this._ocrStateFor(streamIndex) === 'ready') this.closeCaptionsMenu();
             return;
