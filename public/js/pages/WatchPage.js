@@ -2662,7 +2662,7 @@ class WatchPage {
                         ptsEpoch: snap.ptsEpoch, tsAnchor: snap.tsAnchor, tsApplied: snap.tsApplied,
                         firstVideoPkt: snap.firstVideoPkt,
                         droppedPreKey: snap.droppedPreKey, droppedPreKeyAudio: snap.droppedPreKeyAudio,
-                        injectedExtradata: snap.injectedExtradata, injectedAudioAsc: snap.injectedAudioAsc, stripAdts: snap.stripAdts,
+                        injectedExtradata: snap.injectedExtradata, injectedAudioAsc: snap.injectedAudioAsc, stripAdts: snap.stripAdts, audioCfg: snap.audioCfg,
                         appendCount: snap.appendCount, appendBytes: snap.appendBytes, sbErrorEvents: snap.sbErrorEvents,
                         moofCount: snap.moofCount, boxBad: snap.boxBad, boxTotalKB: snap.boxTotalKB,
                         pumpExitReason: snap.pumpExitReason, lastReadError: snap.lastReadError,
