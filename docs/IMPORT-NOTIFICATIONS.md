@@ -67,14 +67,24 @@ seule fois** :
 ## 7. Statut des tâches
 | # | Tâche | État |
 |---|---|---|
-| 37 | Table `cloud_import_notifications` | ✅ table faite · ⏳ cron digest à faire |
-| 38 | Hooks lifecycle dans le moteur partagé | ⏳ bloqué par la dédup (#36) |
+| 37 | Table + **cron digest** (envoyeur) | ✅ table (live) · ✅ fonction `norva-import-notify` (branche, **non déployée**) · ⏳ `cron.schedule` à enregistrer AU déploiement |
+| 38 | Hooks lifecycle dans le moteur partagé | ✅ dans `_shared/xtream-sync.ts` (branche, non déployé) |
 | 39 | Templates email anglais brandés | ✅ `_shared/import-email.ts` |
 | 40 | UX ajout + bannière in-app | ⏳ |
 | 41 | **Phase 2** push FCM natif (mobile app-fermée) | ⏳ projet à part |
+| 42 | Auto-peuplement registre providerKey→nom | ✅ `recordProviderIdentity` dans le moteur (branche) |
 
 ## 8. Fichiers
-- `supabase/migrations/20260630210000_import_lifecycle_notifications.sql` — table (appliquée live).
-- `supabase/functions/_shared/import-email.ts` — templates anglais (livré, importé par rien encore).
-- À venir : route cron digest (vraisemblablement dans `norva-cloud` ou une petite fonction dédiée +
-  `cron.schedule`), hooks dans `_shared/xtream-sync.ts`, message UX + bannière côté `public/js`.
+- `supabase/migrations/20260630210000_import_lifecycle_notifications.sql` — table file (appliquée live).
+- `supabase/functions/_shared/import-email.ts` — templates anglais brandés (render functions pures).
+- `supabase/functions/_shared/xtream-sync.ts` — hooks `enqueueImportNotification` (started/completed/failed)
+  + `recordProviderIdentity` (registre). `norva-source-sync` ajoute `import_completed`/`import_failed` au finalize.
+- `supabase/functions/norva-import-notify/index.ts` — **l'envoyeur digest** : lit la file (events ≥ 60 s pour
+  laisser un burst se tasser), groupe par `(user, kind)`, résout email (`auth.users`) + nom (`cloud_sources`)
+  + compteurs (`cloud_media_items` pour completed), rend via les templates, envoie via Resend, passe en `sent`.
+  Auth = `norva_verify_cron_secret`. **Cron à enregistrer au déploiement** (SQL dans l'en-tête du fichier,
+  secret `norva_cron_shared_secret`).
+
+> **Ordre de déploiement** (tout ensemble, une fois la dédup validée en profondeur) : push `main` (déploie
+> moteur+hooks+`norva-import-notify`), PUIS `cron.schedule('norva-import-notify-digest', '*/2 * * * *', …)`.
+> Ne PAS enregistrer le cron avant le déploiement (il taperait une fonction 404).
