@@ -1,11 +1,11 @@
 # Phase 3 — Sous-titres IA (whisper → VTT + Argos)
 
-**Statut : 3a LIVRÉ (transcription async + cache + livraison + player, en prod). 3b/3c = cadrage.**
+**Statut : PHASE 3 COMPLÈTE — 3a (transcription) + 3b (Argos) + 3c (orchestration nocturne) en prod.**
 **Décisions produit (2026-06-29) : déclenchement HYBRIDE · v1 = transcription + traduction Argos d'un coup.**
 
-> **Mise à jour 2026-06-29 — 3a en production.** La chaîne transcription → cache cross-user → livraison
-> au player est déployée et vérifiée bout-en-bout (cf. §8 « 3a tel que livré »). 3b (Argos) et 3c
-> (orchestration : cron whitelist + reaper) restent à faire ; le reste de ce document garde la spec d'origine.
+> **Mise à jour 2026-06-30 — Phase 3 terminée.** 3a (transcription async → cache cross-user → player,
+> §8), 3b (traduction Argos multi-cible, §10) et 3c (whitelist nocturne par provider + reaper, §11)
+> sont déployés et vérifiés bout-en-bout. Le reste du document garde la spec d'origine.
 
 ## 1. But
 
@@ -73,7 +73,8 @@ source déjà détectée, cache cross-user keyé par `providerKey` (cf. `PROVIDE
   cross-user + endpoints de livraison + le player charge le VTT. (Toute la chaîne
   transcription→livraison→cache est validée. Détail en §8.)
 - **3b** : Argos (VTT source → langue user) + modèles. (Le « dans MA langue ».)
-- **3c** : orchestration hybride (UI à-la-demande ✅ ; reste : cron whitelist nocturne + reaper jobs bloqués).
+- **3c — ✅ LIVRÉ** : orchestration hybride complète (UI à-la-demande ✅ ; cron whitelist nocturne par
+  provider ✅ ; reaper jobs bloqués ✅). Détail en §11.
 
 ## 6. À décider à l'implémentation
 - Modèle whisper transcription (`base` vs `small`/`medium`) — benchmark vitesse/précision sur la gateway.
@@ -91,7 +92,7 @@ source déjà détectée, cache cross-user keyé par `providerKey` (cf. `PROVIDE
 | cache cross-user `providerKey` | ✅ (live) → ✅ **table `catalog_generated_subtitles`** (3a, live) |
 | whisper **VTT horodaté** | ✅ **3a (live)** |
 | **Argos** traduction | ❌ neuf (3b) |
-| orchestration hybride + UI | 🟡 UI à-la-demande ✅ (3a) ; cron whitelist + reaper ❌ (3c) |
+| orchestration hybride + UI | ✅ UI à-la-demande (3a) + cron whitelist nocturne + reaper (3c, live) |
 
 ## 8. 3a tel que livré (2026-06-29)
 
@@ -210,4 +211,56 @@ dialogue multi-ligne préservé (« Nous devons partir tout de suite, ils arrive
 l'argent ? / - Je l'ai caché sous le pont. »), **615 ms** pour 2 cues. Edge `v20` live, route
 `/generated-subtitle-langs` câblée (`401` sans auth).
 
-**Reste** : 3c (cron whitelist nocturne pré-génération transcript + traduction ; reaper jobs bloqués).
+**Reste** : ~~3c~~ → **LIVRÉ** (cf. §11).
+
+## 11. 3c — orchestration nocturne : whitelist pré-génération + reaper (2026-06-30, edge v23)
+
+Dernier morceau de Phase 3. Deux pièces : (1) un **reaper** qui débloque les jobs whisper
+coincés en `processing`, (2) un **cron whitelist nocturne** qui pré-génère les sous-titres IA
+des titres « chauds » de chaque provider, pour qu'ils soient déjà prêts avant qu'un user les
+demande.
+
+### a. Reaper (cron `norva-generated-subtitle-reaper`, jobid 55, `*/30 * * * *`)
+SQL pur (pas d'edge) : passe en `failed` toute ligne `catalog_generated_subtitles` restée
+`status='processing'` depuis **> 2 h** (jobs gateway morts / callback jamais reçu). Évite qu'un
+job zombie bloque éternellement le cache cross-user d'un titre.
+
+### b. Whitelist candidates — RPC `whitelist_subtitle_candidates(p_user uuid, p_limit int)`
+Renvoie les titres « chauds » de l'user qui n'ont **pas** encore de sous-titre texte extractible
+(`not (subtitle_tracks @> '[{"extractable":true}]')`), triés par priorité :
+- **priorité 0** = récemment joués (≤ 21 j, via `cloud_playback_events → cloud_title_variants → title_id`) ;
+- **priorité 1** = nouveautés films (`release_year ≥ année-1`, déjà sondés `subtitle_probed_at not null`).
+
+Choix produit (2026-06-30) : **« les deux combinés »**, priorité au récemment-joué. Ordonné
+`priority asc, updated_at desc`. Accordé à `service_role`.
+
+### c. Mode edge `transcribe-whitelist` (route `audio-backfill`, `runOneDimension`)
+`body = { userId, mode:'transcribe-whitelist', limit }`. Sur-échantillonne (`p_limit = max(limit*6, 20)`,
+la plupart des candidats sont déjà cachés) puis appelle `transcribeEnqueue({titleId})` jusqu'à avoir
+**`limit` NOUVEAUX** jobs enqueués — les titres déjà `ready` ou en vol pour un autre user sont sautés
+et **ne comptent pas**, donc chaque run avance au-delà des déjà-faits. **Différé si l'user est live**
+(`userHasLiveSession` → `skipped:'live-session'` ; la lecture audio serait une 2ᵉ connexion provider à
+côté de son stream → `user_multi_ip`). Renvoie `{candidates, enqueued, cached, errored, started[]}`.
+
+### d. Crons nocturnes par provider (staggered, fenêtre nuit)
+| jobname | jobid | schedule (UTC) | user |
+|---|---|---|---|
+| `norva-subtitle-pregen-jeremy` | 56 | `20 0 * * *` | jeremy |
+| `norva-subtitle-pregen-airo` | 57 | `25 0 * * *` | airo |
+| `norva-subtitle-pregen-super8k` | 58 | `30 0 * * *` | super8k |
+
+`limit:2` par run, échelonnés 00:20/00:25/00:30 pour ne pas se chevaucher (un seul slot provider
+à la fois). Même secret `norva_backfill_token`, `timeout_milliseconds:=110000`.
+
+### e. Vérifié en prod (2026-06-30)
+- Edge `v23` `/health` déployé (Action `deploy-supabase-functions` ✅ sur `a460cf8`).
+- Appel réel `mode:'transcribe-whitelist'` **jeremy** (live à ce moment) → `200` `{skipped:'live-session'}`
+  → garde live OK.
+- Appel réel **super8k** (non-live) → `200` `{candidates:20, enqueued:1, started:[{titleId, jobId,
+  priority:0}]}` → **chaîne bout-en-bout prouvée** : RPC candidats → claim → ligne
+  `catalog_generated_subtitles` créée → POST gateway.
+- ⚠️ Le job de test a fini `failed` « Audio extraction failed » en < 1 s (problème d'extraction
+  côté gateway **sur ce titre précis**, pas du câblage 3c). Comportement attendu : le titre reste
+  candidat et sera **re-tenté la nuit suivante**. Sur 3 j, le pipeline whisper a par ailleurs
+  produit 1 `ready` (3a OK). *Affinage futur possible : exclure du candidate-set les titres
+  échoués récemment pour ne pas monopoliser un slot sur un stream cassé.*

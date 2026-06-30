@@ -69,7 +69,7 @@ curl -X POST "$EDGE/norva-playback/audio-backfill" \
 |------|-------|-------------|------|
 | 1 | audio + sous-titres incrustés | langue audio déduite + UI sous-titres incrustés verrouillés | ✅ **fait, live** |
 | 2 | audio | whisper.cpp détecte la vraie langue d'une piste non taguée (self-hosted, gratuit) | ✅ **fait & ACTIF** (flag inline `on` + cron whisper off-peak) |
-| 3 | sous-titres | **sous-titres auto** : Whisper transcrit l'audio → VTT quand aucun sous-titre texte ; + **traduction Argos** vers ta langue | 🟢 **3a + 3b faits** (transcription async + cache cross-user + livraison + bouton player + **traduction multi-cible Argos**) ; reste **3c** (cron whitelist nocturne + reaper) |
+| 3 | sous-titres | **sous-titres auto** : Whisper transcrit l'audio → VTT quand aucun sous-titre texte ; + **traduction Argos** vers ta langue | ✅ **PHASE 3 COMPLÈTE** : 3a (transcription async + cache cross-user + livraison + bouton player) + 3b (**traduction multi-cible Argos**) + 3c (**cron whitelist nocturne par provider + reaper**) — tout live |
 | 4 | sous-titres | **OCR (Tesseract)** : sous-titres image (PGS/VOBSUB) → texte ; potentiellement incrustés dans l'image | ❌ à faire |
 
 Hors-plan (correctifs livrés en cours de route) : extraction sous-titres texte in-band (ci-dessus),
@@ -83,7 +83,13 @@ il « suffit » d'une transcription complète horodatée (au lieu d'un clip de 2
 **3b livré (2026-06-29)** : **traduction multi-cible Argos** (CTranslate2+SentencePiece sur la gateway,
 pivot par l'anglais, 0 connexion provider) → cache cross-user `kind=translation` → sélecteur de langue
 « 🌐 Translate to … » au player. `gateway v59` / `edge v20`. Détail `docs/PHASE3-AI-SUBTITLES.md` §10.
-Reste **3c** (cron whitelist nocturne pré-génération + reaper jobs bloqués).
+**3c livré (2026-06-30, edge v23)** : orchestration nocturne. **Reaper** (cron `*/30`, passe en `failed`
+les jobs `processing` > 2 h). **Whitelist nocturne par provider** : RPC `whitelist_subtitle_candidates`
+(titres chauds sans sous-titre texte = récemment joués ≤21 j + nouveautés films, priorité au joué) →
+mode edge `transcribe-whitelist` (enqueue N nouveaux jobs whisper, saute les déjà-faits, différé si
+user live) → 3 crons staggerés 00:20/00:25/00:30 UTC (jeremy/airo/super8k, `limit:2`). Vérifié bout-en-bout
+(super8k non-live → `{candidates:20, enqueued:1}`, job dispatché à la gateway). Détail `docs/PHASE3-AI-SUBTITLES.md` §11.
+**Phase 3 terminée** — reste seulement Phase 4 (OCR PGS/VOBSUB).
 
 ## Enrichment / backfill — état & stratégie par provider
 
@@ -142,4 +148,4 @@ n'aurait fait que contourner le symptôme).
 - `docs/WHISPER-AUDIO-LANGUAGE-DETECTION.md` — Phase 2 (whisper.cpp self-hosted)
 - `supabase/functions/ENRICHMENT_CRON_SETUP.md` — **flotte backfill pg_cron** (cadences par-provider, SQL réel, rationale fréquence-vs-concurrence) ⭐
 - `docs/PROVIDER-IDENTITY-DEDUP.md` — **audit miroirs d'URL + design `provider_key`** (l'URL ≠ le fournisseur ; dédup cross-user) ⭐
-- `docs/PHASE3-AI-SUBTITLES.md` — **Phase 3** (sous-titres IA : whisper→VTT + Argos) ; **3a livré §8**, 3b/3c cadrés
+- `docs/PHASE3-AI-SUBTITLES.md` — **Phase 3 COMPLÈTE** (sous-titres IA : whisper→VTT + Argos) ; **3a §8, 3b §10, 3c §11** tous livrés

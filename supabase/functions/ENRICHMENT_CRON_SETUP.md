@@ -116,6 +116,28 @@ Pour activer/désactiver un provider : ajouter/retirer `'fallthrough', true` du 
 jour (`cron.alter_job(<jobid>, command := $cmd$ … $cmd$)`). Vérifié live (apdxes : films vod `processed:0`
 → bascule séries `processed:15`, `200`).
 
+#### Sous-titres IA — pré-génération nocturne whitelist + reaper (Phase 3c, edge v23)
+
+Pré-génère les **sous-titres IA** (whisper → VTT) des titres « chauds » de chaque provider pour
+qu'ils soient déjà prêts avant qu'un user les demande. Détail produit : `docs/PHASE3-AI-SUBTITLES.md` §11.
+
+| jobname | jobid | schedule (UTC) | provider | body |
+|---|---|---|---|---|
+| `norva-subtitle-pregen-jeremy` | 56 | `20 0 * * *` | apdxes (`0b971271…`) | `mode:transcribe-whitelist, limit:2` |
+| `norva-subtitle-pregen-airo` | 57 | `25 0 * * *` | AÎRO (`7bdab1df…`) | `mode:transcribe-whitelist, limit:2` |
+| `norva-subtitle-pregen-super8k` | 58 | `30 0 * * *` | super8k (`c5be5ac4…`) | `mode:transcribe-whitelist, limit:2` |
+| `norva-generated-subtitle-reaper` | 55 | `*/30 * * * *` | — (SQL pur) | passe `failed` les jobs `processing` > 2 h |
+
+- **Candidats** : RPC `whitelist_subtitle_candidates(p_user, p_limit)` → titres sans sous-titre texte
+  extractible, **récemment joués (≤21 j, priorité 0)** + **nouveautés films (priorité 1)**, ordre
+  `priority asc, updated_at desc`.
+- **Mode `transcribe-whitelist`** (`runOneDimension`) : sur-échantillonne (`p_limit=max(limit*6,20)`),
+  enqueue `limit` **nouveaux** jobs (saute les `ready`/en-vol → avance au-delà des déjà-faits).
+  **Touche le slot** (lecture audio provider) → garde `userHasLiveSession()` (`skipped:live-session`).
+- Staggerés 00:20/00:25/00:30 pour ne pas se chevaucher (1 slot provider à la fois).
+- Vérifié live (super8k non-live : `{candidates:20, enqueued:1, started:[{priority:0}]}`, `200`, job
+  dispatché à la gateway ; jeremy live : `{skipped:'live-session'}`).
+
 ### TMDB & maintenance — ne touchent PAS le slot de stream
 
 | Job | Endpoint / action | Cadence |
@@ -256,6 +278,44 @@ select cron.schedule('norva-audio-langs-airo-whisper', '6-59/9 0-5 * * *', $cron
     body := jsonb_build_object('userId','7bdab1df-80e6-46f9-bcdf-84b6595819a8','type','movie','mode','whisper','limit',4,'concurrency',1),
     timeout_milliseconds := 110000
   );
+$cron$);
+
+-- Sous-titres IA — pré-génération nocturne whitelist (Phase 3c). Staggerés 00:20/25/30, limit 2.
+select cron.schedule('norva-subtitle-pregen-jeremy', '20 0 * * *', $cron$
+  select net.http_post(
+    url := 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-playback/audio-backfill',
+    headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'norva_backfill_token')),
+    body := jsonb_build_object('userId','0b971271-9fa1-4547-8dc6-ab64dcbb9d33','mode','transcribe-whitelist','limit',2),
+    timeout_milliseconds := 110000
+  );
+$cron$);
+
+select cron.schedule('norva-subtitle-pregen-airo', '25 0 * * *', $cron$
+  select net.http_post(
+    url := 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-playback/audio-backfill',
+    headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'norva_backfill_token')),
+    body := jsonb_build_object('userId','7bdab1df-80e6-46f9-bcdf-84b6595819a8','mode','transcribe-whitelist','limit',2),
+    timeout_milliseconds := 110000
+  );
+$cron$);
+
+select cron.schedule('norva-subtitle-pregen-super8k', '30 0 * * *', $cron$
+  select net.http_post(
+    url := 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-playback/audio-backfill',
+    headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'norva_backfill_token')),
+    body := jsonb_build_object('userId','c5be5ac4-3700-4a25-9509-8eaf7771fdb6','mode','transcribe-whitelist','limit',2),
+    timeout_milliseconds := 110000
+  );
+$cron$);
+
+-- Reaper sous-titres IA — débloque les jobs whisper coincés (SQL pur, pas d'edge).
+select cron.schedule('norva-generated-subtitle-reaper', '*/30 * * * *', $cron$
+  update public.catalog_generated_subtitles
+     set status = 'failed',
+         error = coalesce(error, '') || ' [reaped: stuck in processing > 2h]',
+         updated_at = now()
+   where status = 'processing'
+     and updated_at < now() - interval '2 hours';
 $cron$);
 
 -- TMDB enrichment → norva-source-sync/cron/*  (Vault: norva_cron_shared_secret)
