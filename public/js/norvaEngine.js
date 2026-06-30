@@ -209,6 +209,37 @@
     if (e) a.push(0xfc | (e.cf & 3), 0xf8 | (e.bl & 7), 0xf8 | (e.bc & 7), 0 /* numSPSExt */);
     return new Uint8Array(a);
   }
+  // MPEG-TS carries AAC as ADTS frames (7/9-byte header per frame), but mp4 needs RAW AAC
+  // with the config in the esds (AudioSpecificConfig) — the aac_adtstoasc transform. Without
+  // it the moov's esds is empty AND the mdat samples keep their ADTS headers, so MSE rejects
+  // the audio (CHUNK_DEMUXER_ERROR_APPEND_FAILED) the same way an empty avcC breaks video.
+  // Synthesise the 2-byte ASC from one ADTS header (audioObjectType, sampleRateIndex, channels).
+  function adtsToAsc(d) {
+    if (!(d && d.length >= 4 && d[0] === 0xff && (d[1] & 0xf0) === 0xf0)) return null;
+    const aot = ((d[2] >> 6) & 0x3) + 1;          // MPEG-4 Audio Object Type (profile + 1)
+    const freq = (d[2] >> 2) & 0xf;               // sampling_frequency_index
+    const chan = ((d[2] & 1) << 2) | ((d[3] >> 6) & 0x3); // channel_configuration
+    return new Uint8Array([(aot << 3) | (freq >> 1), ((freq & 1) << 7) | (chan << 3)]);
+  }
+  // Strip the ADTS header(s) from an AAC packet, returning the concatenated raw frame payload(s).
+  // One TS packet is usually one frame, but loop to be robust. Pass-through if not ADTS.
+  function stripAdts(d) {
+    if (!(d && d.length >= 7 && d[0] === 0xff && (d[1] & 0xf0) === 0xf0)) return d;
+    const parts = [];
+    let i = 0;
+    while (i + 7 <= d.length && d[i] === 0xff && (d[i + 1] & 0xf0) === 0xf0) {
+      const hlen = (d[i + 1] & 1) ? 7 : 9; // protection_absent ? no CRC (7) : CRC (9)
+      const flen = ((d[i + 3] & 3) << 11) | (d[i + 4] << 3) | ((d[i + 5] >> 5) & 7);
+      if (flen < hlen || i + flen > d.length) break;
+      parts.push(d.subarray(i + hlen, i + flen));
+      i += flen;
+    }
+    if (!parts.length) return d;
+    if (parts.length === 1) return parts[0];
+    let tot = 0; for (const p of parts) tot += p.length;
+    const out = new Uint8Array(tot); let o = 0; for (const p of parts) { out.set(p, o); o += p.length; }
+    return out;
+  }
   // Generic fallbacks if extradata parsing yields an unsupported string.
   const VIDEO_FALLBACKS = {
     h264: ['avc1.640028', 'avc1.4d4028', 'avc1.42e01e'],
@@ -217,7 +248,7 @@
     av1: ['av01.0.08M.08'],
   };
 
-  const ENGINE_VERSION = 30;
+  const ENGINE_VERSION = 31;
 
   class NorvaEngine {
     constructor(videoEl, opts = {}) {
@@ -244,6 +275,7 @@
       this._tsAnchor = 0; this._tsApplied = 0; this._firstVpktPending = false;
       this._gopFloorPts = null;   // after a seek, drop video PTS below the landing keyframe (open-GOP leading B-frames)
       this._convertAnnexb = false; // MPEG-TS: convert each annexb video access unit to AVCC for the mp4 muxer
+      this._stripAdts = false;     // MPEG-TS: strip ADTS headers from AAC packets (raw AAC for the mp4 esds)
       // In-band text-subtitle capture: turn demuxed subtitle packets into cues with no
       // provider connection (reuses bytes the engine already streams). Dormant until the
       // player calls enableSubtitleCapture(); flag-off = zero cost in the pump loop.
@@ -827,23 +859,41 @@
       const cp = await lib.ff_copyout_codecpar(this.vS.codecpar);
       if (cp.extradata && cp.extradata.length > 0) return;
       if (!this.pkt) this.pkt = await lib.av_packet_alloc();
+      // AAC stream-copied from TS is ADTS-framed with no esds config — needs the same in-band
+      // lift as the video SPS/PPS. Only when copying AAC and the container gave no extradata.
+      const acp = (this.aS && this.copyAudio && this.aName === 'aac') ? await lib.ff_copyout_codecpar(this.aS.codecpar) : null;
+      const wantAdts = !!(acp && !(acp.extradata && acp.extradata.length > 0));
       try { await this._seekDemuxer(0); } catch (_) { /* read from wherever the demuxer is */ }
-      let sps = null, pps = null;
-      for (let i = 0; i < 24 && !(sps && pps); i++) {
+      let sps = null, pps = null, asc = null;
+      for (let i = 0; i < 24 && !(sps && pps && (asc || !wantAdts)); i++) {
         let res, packets;
         try { [res, packets] = await lib.ff_read_frame_multi(this.fmtCtx, this.pkt, { limit: 256 * 1024 }); }
         catch (_) { break; }
         for (const k in packets) for (const p of packets[k]) {
-          if (p.stream_index !== this.vS.index) continue;
-          for (const n of annexbNals(p.data)) {
-            const t = n[0] & 0x1f;
-            if (t === 7 && !sps) sps = n; else if (t === 8 && !pps) pps = n;
+          if (p.stream_index === this.vS.index) {
+            for (const n of annexbNals(p.data)) {
+              const t = n[0] & 0x1f;
+              if (t === 7 && !sps) sps = n; else if (t === 8 && !pps) pps = n;
+            }
+          } else if (wantAdts && p.stream_index === this.aS.index && !asc) {
+            asc = adtsToAsc(p.data);
           }
         }
         if (res !== 0 && res !== -lib.EAGAIN) break;
       }
       // Rewind so the pump starts cleanly (the caller seeks to the resume point afterwards).
       try { await this._seekDemuxer(0); } catch (_) {}
+      // Audio: inject the AudioSpecificConfig (esds) and arm ADTS-header stripping in the pump,
+      // so the mp4 carries raw AAC + a valid config (else MSE rejects the audio).
+      if (wantAdts && asc) {
+        const aptr = await lib.malloc(asc.length);
+        await lib.copyin_u8(aptr, asc);
+        await lib.AVCodecParameters_extradata_s(this.aS.codecpar, aptr);
+        await lib.AVCodecParameters_extradata_size_s(this.aS.codecpar, asc.length);
+        this._stripAdts = true;
+        if (this._diag) this._diag.injectedAudioAsc = asc.length;
+        this.log('TS: injected AAC esds config (' + asc.length + ' B) + armed ADTS strip');
+      }
       if (!sps || !pps) { this.log('TS: no in-band SPS/PPS found — H.264 config unavailable'); return; }
       const avcc = buildAvcC(sps, pps);
       const ptr = await lib.malloc(avcc.length);
@@ -1226,7 +1276,7 @@
             // ALIGNED at the keyframe (no audio lead → no MSE stall). No-op on a fresh start (video is
             // processed first and anchors vBase before any audio) and when there's no video stream.
             if (this.vS && this.vBase === null) { this._diag.droppedPreKeyAudio = (this._diag.droppedPreKeyAudio || 0) + 1; continue; }
-            if (this.copyAudio) { p.stream_index = this.A_IDX; writeList.push(p); }
+            if (this.copyAudio) { p.stream_index = this.A_IDX; if (this._stripAdts) p.data = stripAdts(p.data); writeList.push(p); }
             else {
               const fr = await lib.ff_decode_multi(this.decCtx, this.decPkt, this.decFrame, [p], false);
               const enc = await this._encodeAudio(fr, false);
@@ -1425,7 +1475,7 @@
         firstMediaBoxes: d.firstMediaBoxes, firstMediaBytes: d.firstMediaBytes,
         firstVideoPkt: d.firstVideoPkt, droppedOpenGop: d.droppedOpenGop,
         droppedPreKey: d.droppedPreKey || 0, droppedPreKeyAudio: d.droppedPreKeyAudio || 0,
-        injectedExtradata: d.injectedExtradata || 0,
+        injectedExtradata: d.injectedExtradata || 0, injectedAudioAsc: d.injectedAudioAsc || 0, stripAdts: !!this._stripAdts,
         // full top-level box stream the muxer produced (stitched across AVIO blocks)
         boxSeq: d.boxSeq, boxBad: d.boxBad, boxTotalKB: d.boxTotal != null ? Math.round(d.boxTotal / 1024) : null,
         moofCount: d.moofCount, moovCount: d.moovCount, ftypCount: d.ftypCount,
