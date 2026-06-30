@@ -1707,21 +1707,18 @@ async function appendSourceItems(sourceId: string, userId: string, rows: JsonRec
   return inserted;
 }
 
-// Clear a source's items in bounded chunks so no single DELETE exceeds the edge
-// connection's 8s statement budget (a big catalogue is 100k+ rows).
+// Clear a source's items in bounded chunks. Uses a server-side batched-delete RPC (subquery LIMIT)
+// rather than SELECT-ids → .delete().in('id', [...]): a 2000-element IN list builds a ~74KB request
+// URL that PostgREST/proxy rejects, which made clearing a large catalogue (100k+ rows) fail
+// deterministically and strand the whole sync. The RPC deletes a chunk in ~0.7s incl. FK cascades.
 async function deleteSourceItems(sourceId: string, userId: string, db: SupabaseClient) {
-  for (let guard = 0; guard < 2000; guard++) {
-    const { data, error } = await db
-      .from("cloud_media_items")
-      .select("id")
-      .eq("source_id", sourceId)
-      .eq("user_id", userId)
-      .limit(2000);
+  for (let guard = 0; guard < 5000; guard++) {
+    const { data, error } = await db.rpc("delete_source_items_batch", {
+      p_source: sourceId, p_user: userId, p_limit: 2000,
+    });
     if (error) throwDb(error, "Unable to clear old catalog items");
-    if (!data || !data.length) return;
-    const ids = (data as { id: string }[]).map((r) => r.id);
-    await withDbRetry(() => db.from("cloud_media_items").delete().in("id", ids), "Unable to clear old catalog items");
-    if (data.length < 2000) return;
+    const n = Number(Array.isArray(data) ? data[0] : data) || 0;
+    if (n < 2000) return;
   }
 }
 
