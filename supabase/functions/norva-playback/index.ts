@@ -97,7 +97,7 @@ Deno.serve(async (req) => {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 22,
+        version: 23,
         entitlements: true,
         entitlementsMode: entitlementRuntime.mode,
         entitlementsEnforced: entitlementRuntime.enforced,
@@ -2789,6 +2789,43 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
       force: body.force === true,
     });
     return { mode: "transcribe-enqueue", ...r };
+  }
+
+  // mode 'transcribe-whitelist' (Phase 3c): nightly pre-generation of AI subtitles for a provider's
+  // "hot" titles (recently played + new-release films that lack a text subtitle), most-wanted first
+  // via whitelist_subtitle_candidates. transcribeEnqueue only POSTs to the gateway queue (fast); the
+  // gateway serialises the actual whisper runs (concurrency 1), so enqueuing a small N just feeds the
+  // night queue. Deferred while a user is live (the audio read would be a 2nd provider connection
+  // beside their stream → user_multi_ip). `limit` = how many NEW jobs to start (cached/in-flight
+  // titles are skipped and don't count, so the run keeps advancing past already-done ones).
+  if (stringOr(body.mode, "") === "transcribe-whitelist") {
+    if (!runtimeConfig.mediaGatewayUrl || !runtimeConfig.mediaGatewayToken) {
+      throw new HttpError(503, "Media gateway is not configured");
+    }
+    if (body.ignoreLiveSession !== true && await userHasLiveSession(db, userId)) {
+      return { mode: "transcribe-whitelist", skipped: "live-session", enqueued: 0 };
+    }
+    const want = Math.max(1, Math.min(Number(body.limit) || 2, 10));
+    const { data: cands, error: candErr } = await db.rpc("whitelist_subtitle_candidates", {
+      p_user: userId, p_limit: Math.max(want * 6, 20), // over-fetch: most candidates are already cached
+    });
+    if (candErr) throwDb(candErr, "Unable to list whitelist candidates");
+    const rows = Array.isArray(cands) ? cands as JsonRecord[] : [];
+    let enqueued = 0, cached = 0, errored = 0;
+    const started: JsonRecord[] = [];
+    for (const row of rows) {
+      if (enqueued >= want) break;
+      const titleId = stringOr(row.title_id, "");
+      if (!titleId) continue;
+      try {
+        const r = await transcribeEnqueue(db, userId, runtimeConfig, { titleId });
+        if (stringOr(r.status, "") === "processing" && r.cached !== true) {
+          enqueued += 1; started.push({ titleId, jobId: r.jobId ?? null, priority: row.priority });
+        } else if (stringOr(r.status, "") === "error") errored += 1;
+        else cached += 1; // ready, or someone else's in-flight job
+      } catch (_) { errored += 1; }
+    }
+    return { mode: "transcribe-whitelist", candidates: rows.length, enqueued, cached, errored, started };
   }
 
   // mode 'whisper' = OFFLINE language detection (single-slot-safe alternative to the inline
