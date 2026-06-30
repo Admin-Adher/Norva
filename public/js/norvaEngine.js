@@ -248,7 +248,7 @@
     av1: ['av01.0.08M.08'],
   };
 
-  const ENGINE_VERSION = 31;
+  const ENGINE_VERSION = 32;
 
   class NorvaEngine {
     constructor(videoEl, opts = {}) {
@@ -357,7 +357,11 @@
       this.lib = await LibAV({ base: LIBAV_BASE });
       // Quiet libav at the source before any demuxing (see _verbose above). The
       // call proxies into the worker, so it governs the thread that does the work.
-      try { await this.lib.av_log_set_level(this._verbose ? this.lib.AV_LOG_VERBOSE : this.lib.AV_LOG_ERROR); } catch (_) {}
+      // FATAL (not ERROR) for the normal path: MPEG-TS sources emit ERROR-level
+      // "Invalid timestamps" per packet (a benign source quirk libav clamps), which
+      // floods the console with hundreds of lines and buries real diagnostics. The
+      // engine surfaces genuine failures via telemetry + engineSnapshot, not libav logs.
+      try { await this.lib.av_log_set_level(this._verbose ? this.lib.AV_LOG_VERBOSE : this.lib.AV_LOG_FATAL); } catch (_) {}
       this.timings.wasmMs = Math.round(performance.now() - t0);
       this.log(`libav prêt (${this.lib.libavjsMode}) en ${(this.timings.wasmMs / 1000).toFixed(1)}s`);
 
@@ -1034,13 +1038,30 @@
     }
 
     async _attachMediaSource() {
-      this.ms = new MediaSource();
-      this._objectUrl = URL.createObjectURL(this.ms);
-      this.video.src = this._objectUrl;
-      await new Promise((res, rej) => {
-        const to = setTimeout(() => rej(new Error('SOURCEOPEN_TIMEOUT')), 15000);
-        this.ms.addEventListener('sourceopen', () => { clearTimeout(to); res(); }, { once: true });
-      });
+      // The browser sometimes DEFERS opening a freshly-attached MediaSource (intermittent
+      // SOURCEOPEN_TIMEOUT → spinner; a manual retry then works). Two defences: call load()
+      // to force the resource-selection algorithm to run NOW, and retry the attach once with
+      // a fresh MediaSource before giving up (the player's gateway fallback catches a 2nd miss).
+      let lastErr = null;
+      for (let attempt = 0; attempt < 2 && !this.destroyed; attempt++) {
+        try {
+          if (this._objectUrl) { try { URL.revokeObjectURL(this._objectUrl); } catch (_) {} this._objectUrl = null; }
+          this.ms = new MediaSource();
+          this._objectUrl = URL.createObjectURL(this.ms);
+          this.video.src = this._objectUrl;
+          try { this.video.load(); } catch (_) {}
+          await new Promise((res, rej) => {
+            const to = setTimeout(() => rej(new Error('SOURCEOPEN_TIMEOUT')), attempt === 0 ? 8000 : 15000);
+            this.ms.addEventListener('sourceopen', () => { clearTimeout(to); res(); }, { once: true });
+          });
+          lastErr = null;
+          break;
+        } catch (e) {
+          lastErr = e;
+          this.log('attachMediaSource try ' + (attempt + 1) + ' failed: ' + (e && e.message));
+        }
+      }
+      if (lastErr) throw lastErr;
       this.sb = this.ms.addSourceBuffer(this.mime);
       this.sb.mode = 'segments';
       if (this.durationSec > 0) { try { this.ms.duration = this.durationSec; } catch (_) {} }

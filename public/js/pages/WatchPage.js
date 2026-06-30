@@ -2385,13 +2385,16 @@ class WatchPage {
                 try { sourceHead = this.norvaEngine?.engineSnapshot?.()?.sourceHead || null; } catch (_) {}
                 this.reportEngineFailure({ stage: 'load', message: msg });
                 this.destroyEngine();
-                // The engine's libav build can't demux every container (no MPEG-TS/PS, AVI, WMV, FLV).
-                // When it received REAL media it couldn't open — an explicit unsupported-container
-                // signal, or a DEMUX_OPEN whose head wasn't a provider error doc — fall back to the
-                // gateway transcode (full ffmpeg) instead of a dead-end banner. A non-media head
-                // (provider error page) is NOT retried: transcode would just refetch the same error.
-                const realMediaDemuxFail = /SOURCE_UNSUPPORTED_CONTAINER/i.test(msg)
-                    || (/DEMUX_OPEN/i.test(msg) && !(sourceHead && sourceHead.notMedia));
+                // When the engine fails on REAL media (anything but a provider error page),
+                // fall back to the gateway transcode (full ffmpeg) instead of a dead-end banner.
+                // This covers: containers the libav build can't demux (SOURCE_UNSUPPORTED_CONTAINER,
+                // DEMUX_OPEN on a real head), AND engine setup failures the browser couldn't
+                // complete — SOURCEOPEN_TIMEOUT (MediaSource never opened), NO_SUPPORTED_MIME, etc.
+                // Previously only the demux cases fell back, so a SOURCEOPEN_TIMEOUT left the user
+                // on an endless spinner. A non-media head (provider error page) is NOT retried:
+                // transcode would just refetch the same error.
+                const providerErrorHead = !!(sourceHead && sourceHead.notMedia);
+                const realMediaDemuxFail = !providerErrorHead;
                 if (realMediaDemuxFail && await this.fallbackEngineToTranscode(playbackAttemptId)) return;
                 this.handleEngineUnplayable(e);
                 return;
