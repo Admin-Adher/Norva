@@ -1688,37 +1688,47 @@ async function withDbRetry<T extends { error: unknown }>(op: () => PromiseLike<T
   throw lastError; // unreachable (throwDb throws) — satisfies the Promise<T> return type
 }
 
-// Incremental import: upsert a batch of rows (no delete, no select-back). The
-// initial delete-all happens once per fresh sync; finalize reloads rows from the
-// table, so we don't need the saved rows here — keeping peak memory tiny.
-// Small batches keep each statement well under the edge connection's 8s budget;
-// ignoreDuplicates (ON CONFLICT DO NOTHING) skips the row-lock + re-write of an
-// already-present stream (a fresh sync deletes first, so these are inserts), which
-// is far lighter on a busy DB than DO UPDATE.
+// Incremental import: insert a batch of rows (no select-back; finalize reloads rows from the table,
+// so peak memory stays tiny). Legacy runs delete the catalogue upfront so these are pure inserts;
+// Layer 3 runs keep the catalogue and additionally stamp each row's catalog_version (see below).
+// Small batches keep each statement well under the edge connection's 8s budget.
 async function appendSourceItems(sourceId: string, userId: string, rows: JsonRecord[], db: SupabaseClient, runVersion: number | null = null): Promise<number> {
-  // Returns rows affected by the batch (used only for a cosmetic progress count — the authoritative
-  // per-type totals are recomputed from the table at completion).
+  // Returns rows ACTUALLY inserted. `ignoreDuplicates` => INSERT ... ON CONFLICT DO NOTHING, so a
+  // stream already present (re-import or a cross-category dup) is skipped; `count:'exact'` counts
+  // only real inserts (small batch, no row data back — peak memory stays tiny). Used for the cosmetic
+  // progress count.
   //
-  // Legacy path (runVersion == null): `ignoreDuplicates` => INSERT ... ON CONFLICT DO NOTHING, so a
-  // stream already imported from another category is skipped (a fresh legacy sync deletes first, so
-  // these are inserts). `count:'exact'` counts only real inserts.
-  //
-  // Layer 3 path (runVersion set): stamp every row with catalog_version=runVersion and DO UPDATE on
-  // conflict, so a row the provider STILL lists is marked seen-this-run (whether new or pre-existing)
-  // and survives the end-of-run prune. xtreamRows omits created_at / added_at / rating_num /
-  // release_year, so re-seen rows keep their timestamps + enrichment (an improvement over the legacy
-  // delete-then-reinsert, which dropped them every refresh).
+  // Layer 3 (runVersion set): new rows carry catalog_version from the insert payload; already-present
+  // rows are then marked seen-this-run by a TARGETED single-column UPDATE — deliberately NOT a full
+  // ON CONFLICT DO UPDATE, so a re-seen title keeps the codec profile / enrichment that norva-playback
+  // writes back into metadata + playback_hint instead of being clobbered with bare provider values.
+  // Rows the run never re-sees keep their old/NULL version and are pruned at completion.
   let inserted = 0;
   for (let index = 0; index < rows.length; index += IMPORT_BATCH_SIZE) {
     const chunk = rows.slice(index, index + IMPORT_BATCH_SIZE);
     if (!chunk.length) continue;
     const payload = runVersion == null ? chunk : chunk.map((r) => ({ ...r, catalog_version: runVersion }));
     const res = await withDbRetry(
-      () => db.from("cloud_media_items").upsert(payload, { onConflict: "source_id,item_type,external_id", ignoreDuplicates: runVersion == null, count: "exact" }),
+      () => db.from("cloud_media_items").upsert(payload, { onConflict: "source_id,item_type,external_id", ignoreDuplicates: true, count: "exact" }),
       "Unable to save cloud catalog items",
     );
     const c = (res as { count?: number | null }).count;
     inserted += typeof c === "number" ? c : chunk.length;
+    if (runVersion != null) {
+      // Mark the whole batch as seen-this-run (new rows already are; re-seen rows get only their
+      // catalog_version bumped, enrichment untouched). A discovery iteration is a single item_type,
+      // and IMPORT_BATCH_SIZE (250) keeps the IN list far under the URL limit that broke the old
+      // 2000-id delete.
+      const itemType = stringOr(chunk[0].item_type, "");
+      const ids = chunk.map((r) => stringOr(r.external_id, "")).filter(Boolean);
+      if (itemType && ids.length) {
+        await withDbRetry(
+          () => db.from("cloud_media_items").update({ catalog_version: runVersion })
+            .eq("source_id", sourceId).eq("user_id", userId).eq("item_type", itemType).in("external_id", ids),
+          "Unable to mark seen catalog items",
+        );
+      }
+    }
   }
   return inserted;
 }
@@ -2118,6 +2128,13 @@ async function driveXtreamSyncToReady(sourceId: string, userId: string, db: Supa
       const healthy = fetchErrors === 0 && removeFraction <= PRUNE_MAX_REMOVE_FRACTION;
       if (healthy) {
         if (wouldRemove > 0) {
+          // Single-flight guard, re-checked immediately before the DELETE: a force re-sync that
+          // started while we finished discovery would be re-stamping rows with ITS runVersion, and
+          // pruning "version != ours" would delete those fresh rows. Bail if we no longer own the
+          // cursor — the superseding run will prune at its own completion.
+          const { data: guardFresh } = await db
+            .from("cloud_sources").select("config_hint").eq("id", sourceId).eq("user_id", userId).maybeSingle();
+          if (stringOr(recordOrEmpty(recordOrEmpty(guardFresh?.config_hint).syncCursor).startedAt, myRun) !== myRun) return;
           const removed = await pruneStaleSourceItems(sourceId, userId, Number(cursor.runVersion), db);
           console.log("[norva-source-sync] Layer3 pruned removed titles", sourceId, "removed", removed);
         }
