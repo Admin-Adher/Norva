@@ -45,9 +45,21 @@ Renvoie, en lecture seule :
 - **Écritures muxer** : `writes` (trace `{pos,len,seek,hex}` des 40 premières), `seekWrites` (nb d'écritures en **arrière** = muxer non-séquentiel), `firstSeek`, `writeHighWater`.
 - **Append MSE** : `appendCount`/`appendBytes`, `recentAppends` (ring), `appendErrors`, `sbErrorEvents`, `trailerBytesDropped`, `queueLen`.
 - **Sortie du pump** : `pumpExitReason` (`eof`/`readerr`/`stop`), `pumpExitRes`, `lastReadError`, `exitFetchMB`.
-- **État live** : `sb` (buffered ranges, updating, timestampOffset), `ms` (readyState, duration), `video` (readyState, networkState, `error.code`, paused).
+- **État live** : `sb` (buffered ranges, updating, timestampOffset), `ms` (readyState, duration), `video`
+  (readyState, networkState, `error.code` **+ `error.message`** = le message Chrome précis, `currentTime`,
+  **`buffered`**, paused).
+- **Reprise/seek TS** : `tsAnchor`/`tsApplied` (placement), `ptsEpoch` (epoch PTS du TS).
+- **Audio TS** : `injectedAudioAsc`, `stripAdts`, **`audioCfg`** (`{asc, sr, ch, chanCfg, aot}`) — la config
+  AAC exacte, indispensable pour les `PIPELINE_ERROR_DECODE` audio.
 
-Câblé dans `WatchPage.reportEngineFailure()` : groupe console + champs clés dans la télémétrie `playback_error`.
+Câblé dans `WatchPage.reportEngineFailure()` : groupe console (snapshot **complet**) + snapshot **compact**
+(champs décisifs, sans les gros tableaux) dans la télémétrie `playback_error`.
+
+> ⚠️ **Piège résolu (#16) — sinon on débogue à l'aveugle** : l'event d'échec partait avec le
+> `playbackSessionId`, mais l'auto-retry ferme la session avant que le POST n'arrive → l'edge **404-ait**
+> (« Playback session not found ») et **jetait tout le snapshot**, pile quand il faut. Fix : event d'échec
+> envoyé **sans session** (client) + edge l'enregistre **non-lié** (norva-playback 21). Et le snapshot
+> complet dépassait la limite de payload sur les longs runs → snapshot **compact** en télémétrie.
 
 > ⚠️ **Piège résolu** : libav.js passe `data` (onwrite) en **`Int8Array` signé**
 > (HEAP Emscripten). Lire `octet<<24` sur du signé corrompt les calculs (0xA1 → 0xFFFFFFA1).
@@ -78,7 +90,42 @@ group by 1,2,3 order by max(e.created_at) desc;
 ```
 `first_frame` / `play_started` en `playback_mode='engine'` = la lecture mkv marche.
 
-## 3. Bugs trouvés & corrigés (chronologie)
+## 3. Bugs trouvés & corrigés
+
+> **Règle d'équipe : tout bug corrigé est noté ici** — symptôme observable, cause racine, correctif
+> (+ version/commit). Quand une lecture casse, on commence par la **table ci-dessous** (scan par
+> symptôme), puis on lit le détail. Pour un nouveau bug : ajouter une ligne à la table + une entrée détaillée.
+
+### 3.0 Table de référence rapide — symptôme → cause → correctif
+
+Le symptôme = ce qu'on voit (message d'erreur Chrome, log, ou `engineSnapshot` Supabase). Trier d'abord
+par le **message MediaError** puis par le **delta du snapshot** (ex. `currentTime` vs `buffered`).
+
+| # | Symptôme observable (erreur / snapshot) | Cause racine | Correctif | Réf |
+|---|---|---|---|---|
+| 1 | Crash ~7 s en lecture, fin de fichier | trailer MP4 (`mfra`) appendé à MSE | `_dropWrites` avant `av_write_trailer` → `endOfStream()` | ENGINE 17 |
+| 2 | `CHUNK_DEMUXER` à l'ouverture/reprise mkv ; `seekWrites>0` | muxer **seekable** → écritures en arrière → flux non-linéaire | `mkstreamwriterdev` + `device:false` (muxer non-seekable) | ENGINE 22 |
+| 3 | Spinner infini / `458` au démarrage | slot unique provider tenu par une connexion zombie | retries backoff (slot libre ~8 s) | ENGINE 20 |
+| 4 | mkv `458` mais mp4 OK **au même instant** | IP **datacenter** Railway bloquée par le provider (pas le slot) | **proxy résidentiel** sur la gateway (§4) | GATEWAY 51 |
+| 5 | `DEMUX_OPEN:Could not open source` en reprise, `lastReadError=null` | octets **non-média** servis en faux 206 (page d'erreur provider) | `sourceHead` classifie ; repli transcode si média réel | ENGINE 24-25 |
+| 6 | `CHUNK_DEMUXER` sur `.ts` (`looksLikeMpegTs`), 1ʳᵉ frame non-IDR | seek TS approximatif tombe **mid-GOP** (pas d'index keyframe) | **garde keyframe** : drop non-IDR avant d'ancrer `vBase` | ENGINE 27 |
+| 7 | `.ts` : init = `ftyp` seul, avcC vide dans le moov | H.264 TS porte SPS/PPS **in-band** (annexb), pas dans le conteneur | lire SPS/PPS de la 1ʳᵉ keyframe → **synthétiser l'avcC**, injecter avant le muxer | ENGINE 28 |
+| 8 | `.ts` : mdat commence par `00000001…` (annexb), `CHUNK_DEMUXER` | movenc **copie** la vidéo TS telle quelle (start codes), MSE veut un préfixe de longueur | **annexb→AVCC** par access unit + drop NAL AUD/SPS/PPS du mdat | ENGINE 29 |
+| 9 | `.ts` **High-profile** (`avc1.64xxxx`) casse, Main OK | avcC High profile **doit** porter `chroma_format_idc`+bit-depths | `spsHighExt()` ajoute l'extension quand le profil l'exige | ENGINE 30 |
+| 10 | `.ts` casse **quel que soit le profil vidéo** ; audio rejeté | AAC TS en **ADTS sans esds** → esds vide + samples ADTS | `aac_adtstoasc` en JS : `adtsToAsc()` (ASC) + `stripAdts()` (raw AAC) | ENGINE 31 |
+| 11 | Reprise « calé » : figé, **pas de son**, noir ; `buffered=[T+k,…]` mais `currentTime=T` | seek approx tombe sur une keyframe **après** la cible → curseur dans un **trou** sans données | **nudge** : recaler `currentTime` sur `bufferedStart`. ⚠️ **ne pas** garder sur `!video.seeking` (l'élément est coincé en seek → garde bloque le nudge) | ENGINE 33→36 |
+| 11b| (variante) reprise mal placée sur certains TS | seek/ancre ignorent l'**epoch PTS** du TS (1ᵉʳ PTS ≠ 0) | `_ptsEpoch` : +epoch au seek, −epoch à l'ancre | ENGINE 33 |
+| 12 | `PIPELINE_ERROR_DECODE: Failed to send audio packet` (démarrage frais) | esds/mp4a incohérents : `sample_rate`/`channels` à 0 ou ≠ esds | forcer `sample_rate`/`channels` du codecpar = config ASC | ENGINE 37 |
+| 13 | idem #12 et ASC pourtant correct (AAC-LC) | AAC **`channel_config=0`** : canaux définis in-band (PCE), non représentable en ASC 2 o | **transcoder l'audio** (le décodeur lit le PCE nativement) au lieu de copier | ENGINE 38 |
+| 14 | `SOURCEOPEN_TIMEOUT`, `appends=0`, spinner | le navigateur **diffère** l'ouverture du MediaSource | `video.load()` forcé + **retry** de l'attache (2×) ; repli gateway élargi | ENGINE 32 |
+| 15 | Console noyée de centaines de lignes `Invalid timestamps` | MPEG-TS émet ce log libav au niveau **ERROR** par paquet (bénin, clampé) | `av_log_set_level(FATAL)` hors mode verbose | ENGINE 32 |
+| 16 | Snapshots d'échec **absents** de Supabase (diag aveugle) | (a) retry ferme la session → edge **404** « session not found » ; (b) snapshot trop gros → payload rejeté | (a) event d'échec **sans `playbackSessionId`** (client) + edge enregistre **non-lié** (norva-playback 21) ; (b) snapshot **compact** (sans gros tableaux) | ENGINE 34 / EDGE 21 |
+
+**Garde-fous transverses** : (a) tout échec moteur sur média réel **bascule sur le gateway transcode** (jamais
+de spinner mort) ; (b) sur `SOURCEOPEN`/mediaerror le moteur **auto-retry** (les retries manuels marchaient) ;
+(c) **oracle MSE local impossible** pour H.264/AAC (Chromium sandbox open-source sans codecs proprio) → la
+validation = navigateur réel + **télémétrie Supabase** (voir §2). ⏳ Reste à durcir : repli gateway
+(`fallbackEngineToTranscode`) qui peut 404 (« Gateway session not found ») si l'engine échoue *vraiment*.
 
 ### Bug #1 — crash ~7 s : trailer MP4 appendé (ENGINE_VERSION 17)
 - **Symptôme** : la lecture jouait quelques secondes puis `CHUNK_DEMUXER`.
@@ -286,35 +333,51 @@ Les fournisseurs IPTV bloquent les plages d'IP datacenter (anti-revente). Le nav
 ## 5. État final (vérifié en prod)
 - mkv via moteur : `first_frame` + `play_started` + resume/pause/seek en `playback_mode='engine'`, **plus aucun `CHUNK_DEMUXER`**.
 - Combinaison gagnante = **proxy résidentiel** (octets circulent) + **muxer non-seekable** (octets valides).
-- Versions : `ENGINE_VERSION 36` (**TS démuxé/remuxé en navigateur** via le WASM `+mpegts`, **lecture
-  fraîche ET reprise OK** ; remise en forme MSE en 6 couches — garde keyframe, avcC synthétisé + extension
-  High-profile, annexb→AVCC, **AAC ADTS→ASC + strip**, **recalage curseur reprise (epoch + nudge)** ;
-  auto-retry moteur sur SOURCEOPEN/mediaerror ; repli gateway si le navigateur ne décode pas le codec ;
-  `sourceHead` sur échec d'ouverture), `norva-playback v21` (event d'échec enregistré même session morte),
-  `GATEWAY_VERSION 59` (Argos translate ; sonde codec TS VOD + estimation de durée → seek bar).
+- **TS via moteur** (Bêtes de flic, Toxic…) : démarrage frais + **reprise** + seek en `playback_mode='engine'`,
+  y compris High-profile et audio `channel_config=0` (transcodé). Films mp4 → `direct`.
+- Combinaison gagnante = **proxy résidentiel** (octets circulent) + **muxer non-seekable** (octets valides).
+- Versions : `ENGINE_VERSION 38` (**TS démuxé/remuxé en navigateur** via le WASM `+mpegts`, **lecture
+  fraîche ET reprise OK** ; remise en forme MSE — garde keyframe, avcC synthétisé + extension High-profile,
+  annexb→AVCC, **AAC ADTS→ASC + strip**, **recalage curseur reprise (epoch + nudge)**, **audio chan_config=0
+  → transcode** ; auto-retry moteur sur SOURCEOPEN/mediaerror ; repli gateway si le navigateur ne décode pas
+  le codec ; `sourceHead` sur échec d'ouverture), `norva-playback v21` (event d'échec enregistré même session
+  morte), `GATEWAY_VERSION 59` (Argos translate ; sonde codec TS VOD + estimation de durée → seek bar).
 - ⏳ Reste optionnel : le repli gateway de secours (`fallbackEngineToTranscode`) peut encore 404
   (« Gateway session not found ») — rarement atteint depuis que l'auto-retry moteur récupère les hoquets ;
   à durcir (session fraîche) si la télémétrie montre qu'on y tombe.
 
-## 6. Runbook — « un mkv ne se lance plus »
+## 6. Runbook — « une lecture casse »
 1. `GET https://norva-production.up.railway.app/health` → vérifier `version` et `providerProxy`.
 2. Requête SQL §2 sur `cloud_playback_events` (20 dernières min) : regarder `playback_mode`, `error_message`, `engineSnapshot`.
-3. Lecture du verdict :
-   - `PROBE_HTTP_458` / `BLOCK_HTTP_458` **uniquement en `engine`** + `direct` OK → IP datacenter/slot. Vérifier le proxy (`providerProxy:true`), l'IP non flaguée, le slot libre (rien d'autre connecté au compte).
-   - `seekWrites>0` → régression du writer non-seekable (vérifier `mkstreamwriterdev` / `device:false`).
-   - `CHUNK_DEMUXER` avec `seekWrites=0` + `boxSeq` propre → regarder le `hex` des petites écritures de queue (fragment incomplet ?).
-   - `CHUNK_DEMUXER` sur un **`.ts`** (`looksLikeMpegTs:true`) → vérifier dans le snapshot : `injectedExtradata>0`
-     (avcC vidéo synthétisé), `injectedAudioAsc>0` + `stripAdts:true` (esds/ADTS audio). Si un `.ts` casse
-     avec `injectedAudioAsc:0`, l'AAC n'a pas été reconfiguré (esds vide = rejet audio). Cf. couches TS ci-dessus.
+   Pour un échec moteur, lire d'abord `engineSnapshot.video.error.message` (le message Chrome précis) +
+   `currentTime` vs `sb.buffered`.
+3. **Verdict** — croiser le symptôme avec la **table §3.0** ; cas les plus fréquents :
+   - `PROBE_HTTP_458` / `BLOCK_HTTP_458` **uniquement en `engine`** + `direct` OK → IP datacenter/slot. Vérifier le proxy (`providerProxy:true`), l'IP non flaguée, le slot libre. (#4)
+   - `seekWrites>0` → régression du writer non-seekable (`mkstreamwriterdev` / `device:false`). (#2)
+   - `PIPELINE_ERROR_DECODE: Failed to send audio packet` → audio. Lire `audioCfg` : `chanCfg:0` → doit
+     transcoder (#13) ; `sr`/`ch` à 0 ou ≠ esds → mismatch codecpar (#12). (Tester aussi en forçant le
+     transcode audio si l'AAC est exotique.)
+   - **`buffered` non vide mais `currentTime` AVANT `buffered[0]`** (reprise figée, pas de son) → trou de
+     reprise : le nudge n'a pas recalé le curseur. Vérifier `tsAnchor` vs `currentTime` + le log `nudge playhead`. (#11)
+   - `CHUNK_DEMUXER` sur `.ts` (`looksLikeMpegTs:true`) → vérifier `injectedExtradata>0`, `injectedAudioAsc>0`
+     + `stripAdts:true`. `injectedAudioAsc:0` non transcodé = esds vide = rejet audio. (#7-10)
+   - `SOURCEOPEN_TIMEOUT` + `appends=0` → MediaSource non ouvert ; le retry+`video.load()` doit récupérer. (#14)
    - `pumpExitReason='readerr'` + `lastReadError` → coupure réseau/proxy en cours de stream.
-   - `DEMUX_OPEN` / `SOURCE_NOT_MEDIA` avec `lastReadError=null` + `size` connu → octets non-média servis
-     en 206. Lire `engineSnapshot().sourceHead` : `kind:'html'/'json'` → page d'erreur provider (flux
-     hors-ligne / lien expiré côté provider) ; `kind:null` → vraies données, conteneur illisible par
-     libav-wasm (candidat au repli transcode). Cf. Bug #5.
-4. Le snapshot complet est dans `metadata->'engineSnapshot'` (lisible direct, pas besoin de la console du user).
+   - `DEMUX_OPEN`/`SOURCE_NOT_MEDIA` + `lastReadError=null` + `size` connu → octets non-média en faux 206.
+     Lire `sourceHead` : `kind:'html'/'json'` → page d'erreur provider ; `kind:null` → conteneur illisible. (#5)
+4. Le snapshot **compact** (champs décisifs) est dans `metadata->'engineSnapshot'` même après teardown
+   (cf. #16) ; le snapshot complet reste loggé en console côté user.
+5. **Reproduire en local quand c'est un échec de remux** (pas MSE) : `scripts/` + un échantillon `.ts` →
+   re-démux libav de la sortie du moteur (valide la structure/octets, PAS le rendu MSE — Chromium sandbox
+   sans codecs proprio). Voir les scripts de validation utilisés pour les couches TS.
 
 ## 7. Reste à faire (mineur / suite)
+- **Durcir le repli gateway** (`fallbackEngineToTranscode`) : il peut 404 « Gateway session not found »
+  (manifest demandé avant que le transcode ne soit prêt / session pas fraîche). Rarement atteint (l'engine
+  encaisse tout ce qu'on a testé + auto-retry), mais c'est LE filet pour un flux que l'engine ne sait
+  vraiment pas gérer → re-résoudre une session fraîche + retries manifest. (tâche dédiée)
 - 🔐 Régénérer le mot de passe Evomi exposé en chat, le remettre dans `PROVIDER_PROXY_URL`.
 - Optionnel : durcir le pump contre les hoquets réseau du proxy (`TypeError: Failed to fetch` transitoire → retry au lieu de remonter l'erreur).
 - Optionnel : alléger les diagnostics (walker + hex) une fois la stabilité confirmée.
+- Optionnel : optim du démarrage TS (~15 s de seek dû à la double-recherche d'extradata au load).
 - Roadmap produit : Phase 3 (sous-titres auto Whisper + Argos), Phase 4 (OCR PGS/VOBSUB) — cf. `NORVA-WORK-STATUS.md`.
