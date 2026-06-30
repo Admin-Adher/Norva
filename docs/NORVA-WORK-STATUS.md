@@ -119,12 +119,19 @@ décalés de 3 min (cycle 9) → jamais deux accès simultanés. `langs` (films 
 
 > **MISE À JOUR 30/06 (nouveaux providers + état courant)** — le tableau ci-dessus est historique.
 > État actuel : **jeremy** = `hernandez.jeremy@outlook.fr` (`0b971271…`) → **IPTV Ferran** ;
-> **airo** = `projethorizon2030@gmail.com` (`7bdab1df…`) → **Airysat + IPTV Ninja + KING365 + Opplex**
-> (4 panels sur un compte). Les crons sont **par `userId`** → un nouveau provider sur un compte déjà
-> câblé est sondé **automatiquement** (rien à créer). **Tous les jobs jeremy passés en
+> **airo** = `projethorizon2030@gmail.com` (`7bdab1df…`) → **Airysat + IPTV Ninja + KING365 + Opplex +
+> Promax 4K OTT** (5 panels sur un compte). Les crons sont **par `userId`** → un nouveau provider sur un
+> compte déjà câblé est sondé **automatiquement** (rien à créer). **Tous les jobs jeremy passés en
 > `concurrency:1`** (Ferran = panel neuf de limite inconnue ; `audio-langs-jeremy` jobid 36 : 2→1 via
 > `cron.alter_job`) → 1 connexion max + crons de nuit décalées = pas de 429/abuse. Mapping complet +
-> détails : `docs/ORPHAN-HANDLING.md` §6.
+> détails : `docs/ORPHAN-HANDLING.md` §6. **Admission control** = 3 gros imports simultanés max
+> (`NORVA_MAX_CONCURRENT_IMPORTS`, défaut 3) ; les plus récents sont mis en file et admis par le watchdog
+> dès qu'un slot se libère (vérifié en prod le 30/06).
+>
+> ⚠️ **Incident 30/06 (résolu)** : le déploiement Couche 3 a introduit un **doublon de fonction top-level**
+> (`countSourceItems`) → `norva-source-sync` **503 sur toutes ses routes** (boot Deno KO) → les 4 imports en
+> cours figés ~45 min. Corrigé par renommage (`countSourceItemsTotal`, commit `6826ff8`) + sweep anti-doublon
+> ajouté au process. **esbuild ne détecte PAS** ce cas — détail + prévention dans `docs/SYNC-ENGINE-DEDUP.md` §4.
 
 **Cache cross-user keyé par `providerKey`** (cf. `PROVIDER-IDENTITY-DEDUP.md`, LIVE) : les écritures
 vont dans les caches globaux (`catalog_file_tracks`, `catalog_titles`), **partagés par tout user du
@@ -162,3 +169,5 @@ n'aurait fait que contourner le symptôme).
 - `docs/PHASE3-AI-SUBTITLES.md` — **Phase 3 COMPLÈTE** (sous-titres IA : whisper→VTT + Argos) ; **3a §8, 3b §10, 3c §11** tous livrés
 - `docs/PHASE4-OCR-SUBTITLES.md` — **Phase 4** OCR sous-titres image (PGS direct + VOBSUB/DVB via `sub2video`)
 - `docs/ORPHAN-HANDLING.md` — **gestion des orphelins de catalogue** (Couche 1 Continue Watching + Couche 3 upsert-puis-prune + mémoire opérationnelle comptes/providers/crons) ⭐
+- `docs/SYNC-ENGINE-DEDUP.md` — **WIP : dédup du moteur de sync dupliqué (norva-cloud vs norva-source-sync)** + post-mortem de l'incident 503 (doublon `countSourceItems` → boot Deno KO). Explique pourquoi la Couche 3 est *dormante* tant que la dédup n'est pas faite ⭐
+- `docs/IMPORT-NOTIFICATIONS.md` — **WIP : notifications cycle de vie d'import** (email start/done/fail + digest, anglais ; table + templates livrés, cron+hooks à faire ; push FCM = Phase 2)
