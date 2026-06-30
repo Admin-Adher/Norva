@@ -1,10 +1,19 @@
-# Phase 4 — OCR des sous-titres image (PGS / VOBSUB → texte)
+# Phase 4 — OCR des sous-titres image (PGS / VOBSUB / DVB → texte)
 
-**Statut (2026-06-30) : MVP PGS LIVRÉ — pipeline gateway + edge v24 + backoff 429 + UI player
-on-demand, tous déployés ; parser prouvé (selftest) ; chaîne backend prouvée bout-en-bout. La
-contrainte restante est la connexion provider (429/401), pas le code — atténuée par le backoff +
-le modèle on-demand caché. Reste : validation sur vrai flux PGS quand une connexion est libre.
-VOBSUB/DVB = après le PGS.**
+**Statut (2026-06-30) : PGS + VOBSUB + DVB LIVRÉS — gateway + edge v25 + backoff 429 + UI player
+on-demand, tous déployés ; les deux parsers prouvés (selftests PASS) ; chaîne backend prouvée. La
+contrainte restante est la connexion provider (429/401), pas le code — atténuée par le backoff + le
+modèle on-demand caché. Reste : validation sur un vrai flux image quand une connexion est libre.**
+
+## 0. Deux pipelines, un cache
+
+- **PGS** (`hdmv_pgs_subtitle`) : format `.sup` propre → parsé **directement** (`ocr_pgs.py`, PTS exact).
+- **VOBSUB** (`dvd_subtitle`) + **DVB** (`dvb_subtitle`) : pas de conteneur propre à copier → on laisse
+  **ffmpeg décoder** et rendre via le filtre **`sub2video` → PNG horodatés** (`showinfo` logue le PTS
+  de chaque frame), puis OCR des frames (`ocr_imgsub.py`). **Un seul chemin** pour VOBSUB+DVB.
+- Les deux réutilisent les helpers OCR/VTT de `ocr_pgs.py` (tesseract + nettoyage + assemblage VTT) et
+  le **même cache** `catalog_generated_subtitles` (`kind='ocr'`, `lang=<langue piste>`). Le player passe
+  `fmt` (dérivé du codec) ; l'edge le transmet à `/ocr-async?fmt=`.
 
 But : les pistes de sous-titres **image** (PGS Blu-ray, VOBSUB DVD, DVB) ne sont pas extractibles en
 texte (`extractable:false`, « burn-in requis »). La Phase 4 les **OCR** → WebVTT, **caché cross-user**
@@ -89,6 +98,8 @@ ffmpeg exit 1: … Server returned 401 Unauthorized ← l'anti-abus du panel a t
   nocturne « réchauffe 1 titre le plus demandé » reste possible plus tard si utile.
 - [ ] Validation sur vrai flux PGS quand une connexion provider est libre (le test du 2026-06-30 a été
       bloqué par un `429` puis `401` = anti-abus du panel ; ne pas marteler — cf. §3).
-- [ ] Limitations MVP connues du parser : objet/ODS unique par cue (les très grands bitmaps multi-ODS
-      seraient tronqués) ; une seule piste image par langue par titre (clé de cache). À étendre si besoin.
-- [ ] Après PGS validé : **VOBSUB** (`.idx/.sub`) puis **DVB**.
+- [x] **VOBSUB + DVB** : pipeline `sub2video` (`ocr_imgsub.py`, selftest PASS), routé par `fmt` côté
+      gateway/edge/player. Même cache + UI que PGS.
+- [ ] Limitations MVP connues : parser PGS = objet/ODS unique par cue (très grands bitmaps multi-ODS
+      tronqués) ; une piste image par langue par titre (clé de cache) ; `sub2video` rend la frame entière
+      (on recadre au contenu avant OCR). À affiner si besoin.
