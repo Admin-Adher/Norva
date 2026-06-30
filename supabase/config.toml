@@ -35,3 +35,10 @@ verify_jwt = false
 # SEND_EMAIL_HOOK_SECRET. Sends auth emails through Resend.
 [functions.norva-auth-email]
 verify_jwt = false
+
+# Import-lifecycle digest sender, driven by pg_cron with our shared cron secret
+# in the Authorization header (not a Supabase JWT). The gateway JWT check is
+# disabled so the request reaches the function, which verifies the secret itself
+# via norva_verify_cron_secret (same pattern as the source-sync crons).
+[functions.norva-import-notify]
+verify_jwt = false
