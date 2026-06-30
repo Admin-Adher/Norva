@@ -151,7 +151,7 @@
     av1: ['av01.0.08M.08'],
   };
 
-  const ENGINE_VERSION = 25;
+  const ENGINE_VERSION = 26;
 
   class NorvaEngine {
     constructor(videoEl, opts = {}) {
@@ -488,10 +488,11 @@
       // with a faked 206 — the usual reason a fully-fetched, authenticated source still "can't be
       // opened" with no read error. Cheap, cache-only, no extra connection.
       this._captureSourceHead();
-      // This libav build has no MPEG-TS demuxer — detect TS from the head (0x47 sync repeating at
-      // the 188-byte packet stride, or 192-byte M2TS) and bail with a precise reason BEFORE wasting
-      // a libav open, so the player falls back to the gateway transcode (full ffmpeg) cleanly.
-      if (this._sourceLooksLikeMpegTs()) throw new Error('SOURCE_UNSUPPORTED_CONTAINER:mpegts');
+      // MPEG-TS is now demuxable in-browser (this libav build carries the mpegts demuxer + the
+      // h264/hevc/aac parsers it needs), so we no longer bail on a TS head — libav opens it and we
+      // remux it like any other container. A TS the engine still can't play (e.g. MPEG-2 video, which
+      // we copy but the browser can't decode) fails the SourceBuffer append later, and the player's
+      // existing fallback re-routes it to the gateway transcode.
       let fmtCtx, streams;
       try {
         [fmtCtx, streams] = await lib.ff_init_demuxer_file('input');
@@ -1309,6 +1310,10 @@
         // first bytes of the source (set on a demux-open failure): tells a real container apart
         // from a provider error page/JSON served with a faked 206 (the no-read-error open failure).
         sourceHead: d.sourceHead,
+        // True when the source bytes are MPEG-TS (0x47 sync stride). The engine now demuxes TS, but a
+        // TS whose video the browser can't decode (MPEG-2, unsupported HEVC) fails at append — the
+        // player uses this to fall back to the gateway transcode instead of a dead-end banner.
+        looksLikeMpegTs: this._sourceLooksLikeMpegTs(),
         // write-position trace: backward seeks here mean the muxer is NOT streaming
         // linearly and call-order concatenation corrupts the stream.
         writes: d.writes, seekWrites: d.seekWrites, firstSeek: d.firstSeek, writeHighWater: d.writeHighWater,
