@@ -211,6 +211,12 @@ un `CHUNK_DEMUXER_ERROR_APPEND_FAILED` distinct (diagnostiqués sur snapshots co
    rebuild WASM) : `adtsToAsc()` synthétise l'ASC (AOT/sample-rate/canaux) injecté en extradata audio, et
    `stripAdts()` retire les en-têtes ADTS de chaque paquet (raw AAC). Gardé sur **AAC stream-copy sans
    extradata conteneur** = TS uniquement ; mkv/mp4 (AAC raw) intouchés.
+   - **Sous-cas `channel_config=0` (v38)** : certains AAC définissent le layout de canaux **in-band**
+     (un PCE dans le 1ᵉʳ raw_data_block), **non représentable** dans un ASC 2 octets → une piste copiée
+     avec un esds `chan=0` est rejetée (`PIPELINE_ERROR_DECODE: Failed to send audio packet`). Détecté
+     via la config ADTS → on **transcode l'audio** (le décodeur lit le PCE nativement, l'encodeur écrit
+     un esds propre) au lieu de copier. Aussi : forcer `sample_rate`/`channels` du codecpar = esds injecté
+     (v37) pour que l'en-tête mp4a et l'esds concordent.
 6. **Reprise : curseur dans un trou (v33→v36) — la racine de « calé »/écran noir.** Sur une **reprise**
    (resume à T), le seek approximatif TS tombe sur la keyframe la plus proche, souvent **APRÈS** T : les
    données se bufferisent à partir de la keyframe (ex. 636s) mais `video.currentTime` reste à T (625s) →
