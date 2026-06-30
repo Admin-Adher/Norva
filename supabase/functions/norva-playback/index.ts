@@ -97,7 +97,7 @@ Deno.serve(async (req) => {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 23,
+        version: 24,
         entitlements: true,
         entitlementsMode: entitlementRuntime.mode,
         entitlementsEnforced: entitlementRuntime.enforced,
@@ -2268,6 +2268,65 @@ async function transcribeEnqueue(
   return { status: "processing", jobId, providerKey: pkey, gateway: gwBody };
 }
 
+// Phase 4: OCR of a PGS (Blu-ray) image-subtitle track → WebVTT, cached cross-user
+// (kind='ocr', lang=<track language>). Mirrors transcribeEnqueue: claim the job, then POST to the
+// gateway /ocr-async, which extracts the image-sub track to a .sup and runs tesseract per cue; the
+// shared transcribe-callback writes the VTT back by job_id. `index` = the image-sub stream index to
+// OCR; `lang` = that track's language (it IS the cache key, so two image tracks of different
+// languages cache independently, and a 2-letter hint maps to a tesseract model for accuracy).
+// Touches the provider (one sub-stream read) → the caller live-guards it (user_multi_ip).
+const TESS_LANG_MAP: Record<string, string> = {
+  en: "eng", fr: "fra", es: "spa", de: "deu", it: "ita", pt: "por", nl: "nld",
+};
+async function ocrEnqueue(
+  db: SupabaseClient,
+  userId: string,
+  runtimeConfig: RuntimeConfig,
+  opts: { titleId?: string; sourceId?: string; externalId?: string; itemType?: string; index?: number; lang?: string; force?: boolean },
+): Promise<JsonRecord> {
+  if (!runtimeConfig.mediaGatewayUrl || !runtimeConfig.mediaGatewayToken) throw new HttpError(503, "Media gateway is not configured");
+  const idx = Number(opts.index);
+  if (!Number.isInteger(idx) || idx < 0) throw new HttpError(400, "a valid subtitle stream index is required for OCR");
+  const { sourceId, externalId, itemType } = await resolveSubtitleTarget(db, userId, opts);
+  const tUrl = await resolveVariantUrl(db, userId, sourceId, externalId, itemType);
+  if (!tUrl) throw new HttpError(422, `no playback target (source=${sourceId} ext=${externalId} type=${itemType})`);
+  const pkey = (await resolveSourceIdentity(sourceId, userId, db)).key || hostFromUrl(tUrl);
+  if (!pkey) throw new HttpError(422, "no provider key for source");
+  const lang = (stringOr(opts.lang, "").toLowerCase().match(/^[a-z]{2,3}$/)?.[0]) || "und";
+  // Fast path: a ready OCR track is served straight from the cache (no gateway pipe build).
+  const { data: existing } = await db.from("catalog_generated_subtitles")
+    .select("status, job_id").eq("provider_key", pkey).eq("item_type", itemType).eq("external_id", externalId)
+    .eq("kind", "ocr").eq("lang", lang).maybeSingle();
+  const exrec = existing as JsonRecord | null;
+  if (exrec?.status === "ready" && !opts.force) return { status: "ready", cached: true, jobId: exrec.job_id, providerKey: pkey, kind: "ocr", lang };
+  const PROCESSING_TTL_MS = 90 * 60 * 1000;
+  const jobId = crypto.randomUUID();
+  const { data: claim, error: claimErr } = await db.rpc("claim_generated_subtitle_job", {
+    p_provider_key: pkey, p_item_type: itemType, p_external_id: externalId, p_kind: "ocr", p_lang: lang,
+    p_new_job_id: jobId, p_processing_ttl_ms: PROCESSING_TTL_MS, p_force: opts.force === true,
+  });
+  if (claimErr) throwDb(claimErr, "ocr enqueue claim failed");
+  const claimRow = (Array.isArray(claim) ? claim[0] : claim) as JsonRecord | null;
+  if (!claimRow?.won) {
+    return { status: stringOr(claimRow?.status, "processing"), cached: true, jobId: claimRow?.job_id ?? null, providerKey: pkey, kind: "ocr", lang };
+  }
+  const exp = new Date(Date.now() + 2 * 3600 * 1000).toISOString();
+  const pipe = await createBytePipeAccess("ocr-job", userId, tUrl, exp, db, null);
+  const cbUrl = `${Deno.env.get("SUPABASE_URL") ?? ""}/functions/v1/norva-playback/transcribe-callback`;
+  const tessLang = TESS_LANG_MAP[lang] || "";
+  const asyncUrl = `${pipe.url.replace("/raw/", "/ocr-async/")}?index=${idx}&jobId=${jobId}&callback=${encodeURIComponent(cbUrl)}${tessLang ? `&lang=${tessLang}` : ""}`;
+  let gwStatus = 0, gwBody: JsonRecord | null = null;
+  try {
+    const gw = await fetch(asyncUrl, { method: "POST", signal: AbortSignal.timeout(20000) });
+    gwStatus = gw.status; gwBody = await gw.json().catch(() => null) as JsonRecord | null;
+  } catch (_) { gwStatus = 0; }
+  if (gwStatus !== 202) {
+    await db.from("catalog_generated_subtitles").update({ status: "failed", error: `enqueue gateway ${gwStatus}`, updated_at: new Date().toISOString() }).eq("job_id", jobId);
+    return { status: "error", jobId, providerKey: pkey, kind: "ocr", lang, gatewayStatus: gwStatus, gateway: gwBody };
+  }
+  return { status: "processing", jobId, providerKey: pkey, kind: "ocr", lang, gateway: gwBody };
+}
+
 // Phase 3 (3b) ASYNC translation: translate a cached transcript into a target language on the gateway
 // (Argos / CTranslate2) and cache the result cross-user (kind='translation', lang=target). Reuses the
 // transcript claim RPC + transcribe-callback — translation is pure text on the gateway (NO provider
@@ -2367,8 +2426,12 @@ async function getTranslateTargets(runtimeConfig: RuntimeConfig): Promise<string
 // one transcription serves every user of that panel. lang defaults to 'src' (whisper transcript).
 async function getGeneratedSubtitle(req: Request, userId: string, db: SupabaseClient): Promise<JsonRecord> {
   const url = new URL(req.url);
-  const kind = stringOr(url.searchParams.get("kind"), "transcript") === "translation" ? "translation" : "transcript";
-  const lang = stringOr(url.searchParams.get("lang"), kind === "translation" ? "" : "src");
+  const rawKind = stringOr(url.searchParams.get("kind"), "transcript");
+  const kind = rawKind === "translation" ? "translation" : (rawKind === "ocr" ? "ocr" : "transcript");
+  // ocr/translation are per-track/per-target → lang is the cache key; transcript is always 'src'.
+  const lang = kind === "transcript"
+    ? "src"
+    : stringOr(url.searchParams.get("lang"), kind === "ocr" ? "und" : "");
   if (kind === "translation" && !lang) throw new HttpError(400, "lang is required for translation");
   const { sourceId, externalId, itemType } = await resolveSubtitleTarget(db, userId, {
     titleId: stringOr(url.searchParams.get("titleId"), ""),
@@ -2399,6 +2462,15 @@ async function getGeneratedSubtitle(req: Request, userId: string, db: SupabaseCl
 async function postGeneratedSubtitle(req: Request, userId: string, db: SupabaseClient): Promise<JsonRecord> {
   const runtimeConfig = await getRuntimeConfig(db);
   const body = recordOrEmpty(await req.json().catch(() => ({})));
+  // Phase 4: an OCR request (kind='ocr') routes to the tesseract path for an image-sub track.
+  if (stringOr(body.kind, "transcript") === "ocr") {
+    return await ocrEnqueue(db, userId, runtimeConfig, {
+      titleId: stringOr(body.titleId, ""), sourceId: stringOr(body.sourceId, ""), externalId: stringOr(body.externalId, ""),
+      itemType: stringOr(body.itemType, ""),
+      index: Number.isInteger(Number(body.index)) ? Number(body.index) : undefined,
+      lang: stringOr(body.lang, ""), force: body.force === true,
+    });
+  }
   // Phase 3b: a translation request (kind='translation' or a target lang) routes to the Argos path.
   const target = stringOr(body.targetLang, "").toLowerCase();
   if (stringOr(body.kind, "transcript") === "translation" || (target && target !== "src")) {
@@ -2789,6 +2861,25 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
       force: body.force === true,
     });
     return { mode: "transcribe-enqueue", ...r };
+  }
+
+  // Phase 4 service path: kick an OCR pass on a specific image-sub track (index + lang required).
+  // Shares ocrEnqueue() with the user-authed POST generated-subtitle route. Live-guarded like the
+  // other provider-touching dimensions (the .sup read is a provider connection).
+  if (stringOr(body.mode, "") === "ocr-enqueue") {
+    if (body.ignoreLiveSession !== true && await userHasLiveSession(db, userId)) {
+      return { mode: "ocr-enqueue", skipped: "live-session" };
+    }
+    const r = await ocrEnqueue(db, userId, runtimeConfig, {
+      titleId: stringOr(body.titleId, ""),
+      sourceId: stringOr(body.sourceId, ""),
+      externalId: stringOr(body.externalId, ""),
+      itemType: stringOr(body.itemType, ""),
+      index: Number.isInteger(Number(body.index)) ? Number(body.index) : undefined,
+      lang: stringOr(body.lang, ""),
+      force: body.force === true,
+    });
+    return { mode: "ocr-enqueue", ...r };
   }
 
   // mode 'transcribe-whitelist' (Phase 3c): nightly pre-generation of AI subtitles for a provider's
