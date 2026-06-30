@@ -1096,6 +1096,10 @@ async function drainOcrQueue() {
 // Extract one image-subtitle track to a self-contained .sup (PGS) with `-c:s copy` (no re-encode,
 // no decode) so ocr_pgs.py gets the raw PGS bitstream with its PTS intact. Resolves the file path
 // or null on failure / empty output.
+// Resolves { ok:true, path } or { ok:false, error } (the ffmpeg stderr tail), so the OCR callback can
+// surface WHY extraction failed (the audio path's opaque "failed" cost real debugging time). Subtitle
+// streams are sparse across the file, so `-c:s copy` must demux the whole input — index is the
+// absolute ffprobe stream index from the probe.
 function extractSubtitleSup(url, ua, trackIndex, timeoutMs = SUP_EXTRACT_TIMEOUT_MS) {
     return new Promise((resolve) => {
         const outputPath = path.join(os.tmpdir(), `norva-sub-${Date.now()}-${crypto.randomUUID()}.sup`);
@@ -1110,21 +1114,22 @@ function extractSubtitleSup(url, ua, trackIndex, timeoutMs = SUP_EXTRACT_TIMEOUT
         ];
         let child;
         try { child = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'ignore', 'pipe'], env: proxyEnvFor(proxyKeyFromUrl(url)) }); }
-        catch (_) { return resolve(null); }
+        catch (e) { return resolve({ ok: false, error: 'spawn failed: ' + String((e && e.message) || e) }); }
         let stderr = '';
         const timer = setTimeout(() => { try { child.kill('SIGKILL'); } catch (_) {} }, timeoutMs);
         child.stderr.on('data', (d) => { stderr += d.toString(); });
-        child.on('error', () => { clearTimeout(timer); resolve(null); });
+        child.on('error', (e) => { clearTimeout(timer); resolve({ ok: false, error: String((e && e.message) || e) }); });
         child.on('close', async (code) => {
             clearTimeout(timer);
             if (code !== 0) {
                 console.warn(`[media-gateway] sup-extract ffmpeg exit ${code}: ${stderr.slice(-300)}`);
                 fsp.unlink(outputPath).catch(() => {});
-                return resolve(null);
+                return resolve({ ok: false, error: `ffmpeg exit ${code}: ${stderr.trim().split('\n').pop() || 'no stderr'}` });
             }
-            let ok = false;
-            try { ok = (await fsp.stat(outputPath)).size > 64; } catch (_) { ok = false; }
-            resolve(ok ? outputPath : null);
+            let size = 0;
+            try { size = (await fsp.stat(outputPath)).size; } catch (_) { size = 0; }
+            if (size <= 64) { fsp.unlink(outputPath).catch(() => {}); return resolve({ ok: false, error: `empty .sup (${size}B) — no PGS packets on stream ${trackIndex}` }); }
+            resolve({ ok: true, path: outputPath });
         });
     });
 }
@@ -1157,10 +1162,11 @@ async function runOcrJob(job) {
     const { url, ua, index, jobId, callbackUrl, lang } = job;
     let supPath = null, payload;
     try {
-        supPath = await extractSubtitleSup(url, ua, index);
-        if (!supPath) {
-            payload = { jobId, ok: false, error: 'Subtitle extraction failed' };
+        const ex = await extractSubtitleSup(url, ua, index);
+        if (!ex.ok) {
+            payload = { jobId, ok: false, error: ('Subtitle extraction failed: ' + ex.error).slice(0, 300) };
         } else {
+            supPath = ex.path;
             const r = await runOcrPython(supPath, lang || OCR_LANGS);
             const segments = r.ok ? (r.vtt.match(/-->/g) || []).length : 0;
             payload = (r.ok && segments > 0)
