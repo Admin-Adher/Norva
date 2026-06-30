@@ -1158,11 +1158,25 @@ function runOcrPython(supPath, lang) {
     });
 }
 
+// Provider panels allow a single concurrent connection, and extracting an image-sub track demuxes the
+// whole file (sparse packets) → a long-held connection that collides with the panel's limit. So a
+// transient `429`-style 4XX gets a couple of LONG, well-spaced retries — never a burst, because
+// bursting is exactly what trips a panel's abuse protection into a temporary 401/403 block. An
+// auth/abuse block is NOT retried here: backing off entirely (let the off-peak cron try much later) is
+// the only safe move.
+const OCR_EXTRACT_RETRIES = clampInt(process.env.OCR_EXTRACT_RETRIES, 2, 0, 5);
+const OCR_EXTRACT_BACKOFF_MS = clampInt(process.env.OCR_EXTRACT_BACKOFF_MS, 30_000, 5_000, 300_000);
 async function runOcrJob(job) {
     const { url, ua, index, jobId, callbackUrl, lang } = job;
     let supPath = null, payload;
     try {
-        const ex = await extractSubtitleSup(url, ua, index);
+        let ex = { ok: false, error: 'not attempted' };
+        for (let attempt = 0; attempt <= OCR_EXTRACT_RETRIES; attempt++) {
+            ex = await extractSubtitleSup(url, ua, index);
+            if (ex.ok) break;
+            if (/\b(401|403)\b|Unauthorized|Forbidden/i.test(ex.error || '')) break; // abuse/auth block — do not hammer
+            if (attempt < OCR_EXTRACT_RETRIES) await sleep(OCR_EXTRACT_BACKOFF_MS * (attempt + 1)); // 30s, 60s — spaced, not a burst
+        }
         if (!ex.ok) {
             payload = { jobId, ok: false, error: ('Subtitle extraction failed: ' + ex.error).slice(0, 300) };
         } else {
