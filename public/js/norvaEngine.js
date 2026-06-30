@@ -248,7 +248,7 @@
     av1: ['av01.0.08M.08'],
   };
 
-  const ENGINE_VERSION = 35;
+  const ENGINE_VERSION = 36;
 
   class NorvaEngine {
     constructor(videoEl, opts = {}) {
@@ -1404,7 +1404,10 @@
       // is in a gap with no data, and the element stalls forever ("calé", no audio, frozen). Once
       // the first media is buffered, nudge the playhead onto it. One-shot per seek/resume; the
       // target is inside the buffer so _handleSeeking ignores it (no re-demux).
-      if (!this._nudgeDone && this.video && sb.buffered.length && !this.video.seeking) {
+      // NB: do NOT guard on !video.seeking — on resume the element is STUCK seeking to the
+      // (dataless) requested time, so seeking stays true forever and the guard would block the
+      // very nudge that unsticks it. Setting currentTime here just retargets that pending seek.
+      if (!this._nudgeDone && this.video && sb.buffered.length) {
         try {
           const bs = sb.buffered.start(0);
           if (this.video.currentTime < bs - 0.5) {
@@ -1412,8 +1415,8 @@
             this.log('nudge playhead ' + this.video.currentTime.toFixed(2) + ' → ' + (bs + 0.05).toFixed(2) + ' (seek landed past target)');
             this.video.currentTime = bs + 0.05;
           }
-        } catch (_) { /* best-effort */ }
-        this._nudgeDone = true;
+          this._nudgeDone = true;
+        } catch (_) { /* retry on the next drain */ }
       }
       // Apply the seek/resume placement offset before appending media (only when
       // idle; harmless on the sample-less init segment).
