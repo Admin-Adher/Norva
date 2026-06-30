@@ -92,6 +92,30 @@ header-probé — dont les sous-titres restent inconnus. whisper = `mode:whisper
 > jusqu'à 3 jobs simultanés (comptes distincts → aucune collision provider). Si un « job
 > startup timeout » apparaît, décaler les minutes par provider.
 
+#### Bascule automatique « fallthrough » (jour épuisé → on draine les dimensions de nuit) — edge v22
+
+Les 3 crons de **jour** (films audio) portent `'fallthrough', true` dans leur body. Quand la
+dimension primaire (films audio) renvoie **0 candidat** (`processed:0`), la route
+`runAudioBackfill` enchaîne **automatiquement** sur la dimension suivante non terminée du **même
+provider**, dans cet ordre, et traite **un** lot puis s'arrête :
+
+```
+films audio (vod/probe) → séries audio (probe) → sous-titres films → sous-titres séries → whisper films → whisper séries
+```
+
+→ dès que les films audio d'un provider sont finis, **sa fenêtre de jour accélère les dimensions
+qui étaient nuit-only** (elles reçoivent jour **+** nuit). No-op tant que les films ne sont pas finis.
+
+**Slot-safe** (invariant : jamais 2 accès simultanés) : les dimensions s'enchaînent **strictement
+en séquentiel** (un accès provider à la fois) ; chaque dimension garde son garde `userHasLiveSession()` ;
+la chaîne **s'arrête net** (`skipped:live-session`) dès qu'un user regarde → jamais de 2ᵉ connexion
+provider à côté d'un stream live (`user_multi_ip`). Code : `runAudioBackfill` (wrapper auth + chaîne) +
+`runOneDimension` (logique par dimension, inchangée), `supabase/functions/norva-playback/index.ts`.
+
+Pour activer/désactiver un provider : ajouter/retirer `'fallthrough', true` du body de son cron de
+jour (`cron.alter_job(<jobid>, command := $cmd$ … $cmd$)`). Vérifié live (apdxes : films vod `processed:0`
+→ bascule séries `processed:15`, `200`).
+
 ### TMDB & maintenance — ne touchent PAS le slot de stream
 
 | Job | Endpoint / action | Cadence |
