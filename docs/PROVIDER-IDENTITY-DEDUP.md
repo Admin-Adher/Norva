@@ -152,3 +152,43 @@ Stocker la liste des miroirs par `providerKey` ; basculer sur un backup si l'URL
 - `node`/esbuild transpile OK sur `norva-source-sync` + `norva-playback` édités.
 - Migration RPC : dry-run lecture seule prouve OLD == NEW (no-op) tant que `providerKey` absent.
 - ⚠️ Non testable ici : runtime RPC/edge (pas de provider/MSE/ffmpeg) → valider en prod post-merge.
+
+## 7. Registre d'identités provider (`catalog_provider_identities`) — pour le DASHBOARD ADMIN
+Table qui **nomme** chaque empreinte (`providerKey` → nom humain). C'est la **source de vérité** du futur
+dashboard admin et elle **survit à la suppression** d'une source/compte (les caches de sonde persistent,
+keyés par `providerKey` ou `server_host`). Migration `20260630220000_provider_identity_registry.sql`.
+
+Schéma : `provider_key (PK), display_name, status ('active'|'deleted'), notes, first_seen, last_seen`.
+Service-only (RLS). **Vue dashboard** : JOIN à `catalog_file_tracks` (group by `server_host`) pour le
+**footprint live** (nb de sondes en cache, dernière sonde) ; à `cloud_sources` pour les sources actives ;
+à `catalog_generated_subtitles` (col `provider_key`) pour les sous-titres IA générés.
+
+**Peuplement** :
+- **Actifs** : auto-dérivés de `cloud_sources` (`config_hint->>'providerKey'`). ⚠️ **TODO** : faire
+  **upsert par le moteur** dès qu'il calcule un `providerKey` (à câbler dans `_shared/xtream-sync.ts`
+  après la dédup — cf. `SYNC-ENGINE-DEDUP.md`), pour que le registre reste à jour sans seed manuel.
+- **Supprimés/historiques** : labels manuels (connaissance produit durable), seedés dans la migration.
+
+**Mappings connus au 30/06** (empreinte → nom) :
+
+| `providerKey` | Nom | Statut | Sondes en cache |
+|---|---|---|---|
+| `x:f5be3bb7a67f79041f4e5174` | **AtlasPro** (apdxes.xyz) | 🔴 supprimé (abuse 27/06) | 24 965 |
+| `x:0066336cbe4f603a40eaf27a` | Strng IPTV 8K | 🟢 actif | 3 741 |
+| `x:045daa5715a90bba3bfcfcae` | IPTV Ninja Premium Plus | 🟢 actif | 399 |
+| `x:5aaacb35239991f93835f575` | Airysat | 🟢 actif | 159 |
+| `x:e75e064649e5f9c80b14b681` | Promax 4K OTT | 🟢 actif | 58 |
+| `x:c75fcba6cfe532e66b0f9c86` | IPTV Ferran | 🟢 actif | 0 (sonde à démarrer) |
+| `x:dd3cbe0e7b11336eaca2ddf9` | KING365 | 🟢 actif | 0 (empreinte fraîche) |
+| `x:93d4de80882a2a475524545a` | *non identifié* | 🔴 supprimé | 4 215 |
+| `x:2cb272cba2117a8ffe1d8b33` | *non identifié* | 🔴 supprimé | 1 991 |
+| `x:65e5aaaf9fabb424ea1f5557` | *non identifié* | 🔴 supprimé | 1 100 |
+| `fun-fun2026.lol` | *non identifié (host legacy)* | 🔴 supprimé | 22 |
+
+> **AtlasPro = `x:f5be3bb7…`** : identification par footprint (plus gros cache orphelin, fin de sonde le
+> 27/06 = suppression, volume ≈ 34 % de son catalogue, cohérent avec l'historique). Le hash étant à sens
+> unique, ce n'est pas une preuve cryptographique mais l'empreinte est sans ambiguïté. **Opplex** n'a pas
+> encore d'empreinte (arrive au prochain tick de détection) → pas encore au registre.
+>
+> **Payoff** : re-brancher AtlasPro (n'importe quelle URL) recalcule `x:f5be3bb7…` → hérite des 24 965
+> sondes instantanément. **Ne JAMAIS purger les caches orphelins.**
