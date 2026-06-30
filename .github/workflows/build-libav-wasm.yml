@@ -58,5 +58,5 @@ jobs:
             echo "No changes to commit."
           else
             git commit -m "build: libav norva WASM with MPEG-TS demuxer (in-browser .ts remux)"
-            git push origin HEAD:${{ github.event.inputs.ref }}
+            git push origin "HEAD:$TARGET_REF"
           fi
