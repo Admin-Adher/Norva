@@ -1547,7 +1547,12 @@ class WatchPage {
         const duration = this.getDisplayDuration?.() || this.getValidDuration?.() || 0;
         return {
             eventType,
-            playbackSessionId: this.currentCloudPlaybackSessionId || this.playbackTelemetry?.sessionId || null,
+            // Failure events fire as the session is torn down/retried; passing the dead session id
+            // makes the edge 404 the whole event (lost snapshot). Callers can force-omit it with
+            // extra.playbackSessionId = null to record the event unlinked instead.
+            playbackSessionId: ('playbackSessionId' in extra)
+                ? extra.playbackSessionId
+                : (this.currentCloudPlaybackSessionId || this.playbackTelemetry?.sessionId || null),
             sourceId: this.getTelemetrySourceId(),
             itemType: this.contentType || this.content?.type || '',
             itemId: this.getTelemetryItemId(),
@@ -2629,6 +2634,7 @@ class WatchPage {
                     + (ae ? ` appendErr0=[${ae.boxes}]:${ae.err}` : '');
             }
             this.sendPlaybackEvent('playback_error', {
+                playbackSessionId: null, // record even after the session is torn down (see buildPlaybackEventPayload)
                 errorCode: 'ENGINE_' + (info.stage || 'unknown'),
                 errorMessage: `engine ${info.stage || 'unknown'} container=${c} video=${v} audio=${a} :: ${String(info.message || '').slice(0, 200)}${digest}`.slice(0, 600),
                 metadata: {
