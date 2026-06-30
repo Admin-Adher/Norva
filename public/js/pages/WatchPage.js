@@ -4100,7 +4100,18 @@ class WatchPage {
             // before the engine has attached its MediaSource. Not a real failure.
             if (!err || !err.code || /Empty src/i.test(err.message || '')) return;
             this.reportEngineFailure({ stage: 'mediaerror', message: 'code=' + err.code + ' ' + (err.message || '') });
+            // A TS the engine demuxed but the browser can't DECODE (MPEG-2 video, or HEVC on a browser
+            // without HEVC) errors here, after a clean load. The gateway transcode is the known-good
+            // path for those, so fall back to it instead of a dead-end banner (worst case = today).
+            let wasTs = false;
+            try { wasTs = Boolean(this.norvaEngine?.engineSnapshot?.()?.looksLikeMpegTs); } catch (_) {}
             this.destroyEngine();
+            if (wasTs) {
+                this.fallbackEngineToTranscode(videoAttemptId)
+                    .then((ok) => { if (!ok) this.handleEngineUnplayable(new Error('MEDIA_ERR_' + err.code)); })
+                    .catch(() => this.handleEngineUnplayable(new Error('MEDIA_ERR_' + err.code)));
+                return;
+            }
             this.handleEngineUnplayable(new Error('MEDIA_ERR_' + err.code));
             return;
         }
