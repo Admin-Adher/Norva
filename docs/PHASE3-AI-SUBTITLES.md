@@ -259,8 +259,18 @@ côté de son stream → `user_multi_ip`). Renvoie `{candidates, enqueued, cache
 - Appel réel **super8k** (non-live) → `200` `{candidates:20, enqueued:1, started:[{titleId, jobId,
   priority:0}]}` → **chaîne bout-en-bout prouvée** : RPC candidats → claim → ligne
   `catalog_generated_subtitles` créée → POST gateway.
-- ⚠️ Le job de test a fini `failed` « Audio extraction failed » en < 1 s (problème d'extraction
-  côté gateway **sur ce titre précis**, pas du câblage 3c). Comportement attendu : le titre reste
-  candidat et sera **re-tenté la nuit suivante**. Sur 3 j, le pipeline whisper a par ailleurs
-  produit 1 `ready` (3a OK). *Affinage futur possible : exclure du candidate-set les titres
-  échoués récemment pour ne pas monopoliser un slot sur un stream cassé.*
+- ⚠️ Le job de test a fini `failed` « Audio extraction failed » en < 1 s — **ce n'est PAS le titre
+  ni le câblage 3c**. Diagnostic (2026-06-30) : **le provider super8k tout entier** (`x:0066…`,
+  `super8k.top`) échoue l'extraction audio à ce moment. Reproduit sur 3 titres super8k (le placeholder
+  2026 *1350344*, le vrai film *Kung Fu Panda 4* en piste entière **et** en clip 20 s) → toujours
+  fast-fail. Un **autre provider** (`x:93d4…`) a transcrit un film entier de 89 min sans souci la veille
+  (3a sain). Cause racine probable : la **source super8k est bloquée en `sync_status:error`**
+  (« Unable to clear old catalog items », coincée en phase `connect` depuis 2026-06-29 20:03) → ce
+  re-sync en boucle **monopolise le slot de connexion du provider** → toute extraction (2ᵉ connexion)
+  est refusée → ffmpeg exit≠0 immédiat. **Leçon** : « Audio extraction failed » fast-fail = problème de
+  **connexion provider** (creds expirées / max-connections / sync coincé), pas du titre. Vérifier
+  `cloud_sources.sync_status` + tester un **autre** provider avant d'incriminer le pipeline.
+- Comportement attendu : super8k reste candidat, re-tenté à la nuit (00:30 UTC, off-peak = pas de
+  contention avec le cron probe de jour). *Affinage futur noté : (a) exclure du candidate-set les
+  titres échoués récemment ; (b) court-circuit par provider si N extractions consécutives échouent
+  (évite de brûler les 2 slots de nuit sur un provider down).*
