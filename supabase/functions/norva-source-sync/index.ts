@@ -1570,6 +1570,10 @@ const DISCOVER_CONCURRENCY = 14;
 // the self-invoke (which spawns the next isolate) always lands before recycle.
 const SYNC_DRIVE_BUDGET_MS = 90_000;
 const SYNC_MAX_CONTINUATIONS = 160;
+// Layer 3 prune safety: a healthy refresh removes only a few vanished titles. If a completed run
+// would delete more than this fraction of the catalogue, treat the discovery as untrustworthy
+// (provider outage / soft-expiry returning a thin list) and KEEP the prior items instead.
+const PRUNE_MAX_REMOVE_FRACTION = 0.5;
 
 function freshSyncCursor(startedAt: string, extra: JsonRecord = {}): JsonRecord {
   return {
@@ -1583,6 +1587,12 @@ function freshSyncCursor(startedAt: string, extra: JsonRecord = {}): JsonRecord 
     sig: emptySig(),
     startedAt,
     attempts: 0,
+    // Layer 3 (orphan root-fix): a unique, monotonic version for THIS run. Its presence opts the
+    // run into upsert-then-prune (no upfront delete; prune only the rows not re-seen, and only after
+    // a healthy discovery). Continuations reuse it; legacy cursors (pre-deploy) lack it and keep the
+    // old delete-then-reimport path, so this is safe to ship mid-sync. fetchErrors gates the prune.
+    runVersion: Date.now(),
+    fetchErrors: 0,
     ...extra,
   };
 }
@@ -1685,26 +1695,74 @@ async function withDbRetry<T extends { error: unknown }>(op: () => PromiseLike<T
 // ignoreDuplicates (ON CONFLICT DO NOTHING) skips the row-lock + re-write of an
 // already-present stream (a fresh sync deletes first, so these are inserts), which
 // is far lighter on a busy DB than DO UPDATE.
-async function appendSourceItems(sourceId: string, userId: string, rows: JsonRecord[], db: SupabaseClient): Promise<number> {
-  // Returns the number of rows ACTUALLY inserted. `ignoreDuplicates` makes the
-  // upsert an INSERT ... ON CONFLICT DO NOTHING, so a stream already imported from
-  // another category (a prior discovery iteration) is dropped here; `count:'exact'`
-  // counts only the real inserts (counts the small batch, NOT the whole table, so
-  // no 8s-budget risk and no row data returned — peak memory stays tiny). The
-  // caller uses this for the "found" counts so cross-category duplicates can't
-  // inflate them or the titles denominator.
+async function appendSourceItems(sourceId: string, userId: string, rows: JsonRecord[], db: SupabaseClient, runVersion: number | null = null): Promise<number> {
+  // Returns rows affected by the batch (used only for a cosmetic progress count — the authoritative
+  // per-type totals are recomputed from the table at completion).
+  //
+  // Legacy path (runVersion == null): `ignoreDuplicates` => INSERT ... ON CONFLICT DO NOTHING, so a
+  // stream already imported from another category is skipped (a fresh legacy sync deletes first, so
+  // these are inserts). `count:'exact'` counts only real inserts.
+  //
+  // Layer 3 path (runVersion set): stamp every row with catalog_version=runVersion and DO UPDATE on
+  // conflict, so a row the provider STILL lists is marked seen-this-run (whether new or pre-existing)
+  // and survives the end-of-run prune. xtreamRows omits created_at / added_at / rating_num /
+  // release_year, so re-seen rows keep their timestamps + enrichment (an improvement over the legacy
+  // delete-then-reinsert, which dropped them every refresh).
   let inserted = 0;
   for (let index = 0; index < rows.length; index += IMPORT_BATCH_SIZE) {
     const chunk = rows.slice(index, index + IMPORT_BATCH_SIZE);
     if (!chunk.length) continue;
+    const payload = runVersion == null ? chunk : chunk.map((r) => ({ ...r, catalog_version: runVersion }));
     const res = await withDbRetry(
-      () => db.from("cloud_media_items").upsert(chunk, { onConflict: "source_id,item_type,external_id", ignoreDuplicates: true, count: "exact" }),
+      () => db.from("cloud_media_items").upsert(payload, { onConflict: "source_id,item_type,external_id", ignoreDuplicates: runVersion == null, count: "exact" }),
       "Unable to save cloud catalog items",
     );
     const c = (res as { count?: number | null }).count;
     inserted += typeof c === "number" ? c : chunk.length;
   }
   return inserted;
+}
+
+// Layer 3 completion helpers. Count the rows THIS run re-saw (catalog_version=runVersion), per type
+// — the authoritative catalogue totals (DO UPDATE inflates the running count via cross-category
+// touches, so we recompute from the table).
+async function countSeenByType(sourceId: string, userId: string, version: number, db: SupabaseClient) {
+  const out: Record<string, number> = { live: 0, movie: 0, series: 0 };
+  for (const t of ["live", "movie", "series"]) {
+    const { count, error } = await db
+      .from("cloud_media_items")
+      .select("id", { count: "exact", head: true })
+      .eq("source_id", sourceId).eq("user_id", userId).eq("item_type", t).eq("catalog_version", version);
+    if (error) throwDb(error, "Unable to count discovered catalog items");
+    out[t] = count || 0;
+  }
+  return { live: out.live, movie: out.movie, series: out.series };
+}
+
+// Total rows currently held for the source (any version). seenTotal subtracted from this gives the
+// count that WOULD be pruned — used to refuse an implausibly-large removal.
+async function countSourceItems(sourceId: string, userId: string, db: SupabaseClient): Promise<number> {
+  const { count, error } = await db
+    .from("cloud_media_items")
+    .select("id", { count: "exact", head: true })
+    .eq("source_id", sourceId).eq("user_id", userId);
+  if (error) throwDb(error, "Unable to count catalog items");
+  return count || 0;
+}
+
+// Delete the rows a healthy run did NOT re-see (provider-removed titles), via the batched RPC.
+async function pruneStaleSourceItems(sourceId: string, userId: string, version: number, db: SupabaseClient): Promise<number> {
+  let removed = 0;
+  for (let guard = 0; guard < 5000; guard++) {
+    const { data, error } = await db.rpc("prune_stale_source_items", {
+      p_source: sourceId, p_user: userId, p_version: version, p_limit: 2000,
+    });
+    if (error) throwDb(error, "Unable to prune removed catalog items");
+    const n = Number(Array.isArray(data) ? data[0] : data) || 0;
+    removed += n;
+    if (n < 2000) return removed;
+  }
+  return removed;
 }
 
 // Clear a source's items in bounded chunks. Uses a server-side batched-delete RPC (subquery LIMIT)
@@ -1875,8 +1933,12 @@ async function driveXtreamSyncToReady(sourceId: string, userId: string, db: Supa
     const username = stringOr(config.username, "");
     const password = stringOr(config.password, "");
     if (!username || !password) throw new HttpError(400, "Xtream credentials are incomplete");
+    // A provider error here used to be silently swallowed to [] — which let a rate-limited /
+    // expired account look like a legitimately-empty catalogue and decimate it. Count the failures
+    // so the Layer 3 prune can refuse to run on an unhealthy discovery (cursor.fetchErrors).
     const fetchCatalog = (action: string, params?: Record<string, string>) =>
-      fetchProviderMetadata(runtimeConfig, { serverUrl, username, password, action, params, timeoutMs: 25000 }).catch(() => []);
+      fetchProviderMetadata(runtimeConfig, { serverUrl, username, password, action, params, timeoutMs: 25000 })
+        .catch(() => { cursor.fetchErrors = (Number(cursor.fetchErrors) || 0) + 1; return []; });
 
     const [liveCats, vodCats, seriesCats] = await Promise.all([
       fetchCatalog("get_live_categories"),
@@ -1901,20 +1963,31 @@ async function driveXtreamSyncToReady(sourceId: string, userId: string, db: Supa
     if (!isRecord(cursor.sig)) cursor.sig = emptySig();
     const sig = recordOrEmpty(cursor.sig);
 
-    if (!cursor.deleted) {
+    const discoverStartedPatch = {
+      stage: "discovering",
+      percent: 18,
+      steps: {
+        connect: { status: "done" },
+        channels: { status: "running" },
+        movies: { status: "running" },
+        series: { status: "running" },
+        categories: { status: "running" },
+      },
+    };
+    if (cursor.runVersion) {
+      // Layer 3: NO upfront delete. We upsert onto the live catalogue (stamping each row with
+      // runVersion) and prune only the not-re-seen rows at the end, gated on a healthy discovery —
+      // so a partial/rate-limited run can never empty the catalogue.
+      if (!cursor.discoverStarted) {
+        cursor.discoverStarted = true;
+        await persist(discoverStartedPatch);
+        if (superseded) return;
+      }
+    } else if (!cursor.deleted) {
+      // Legacy path (pre-Layer-3 cursors, e.g. a sync already in flight at deploy time).
       await deleteSourceItems(sourceId, userId, db);
       cursor.deleted = true;
-      await persist({
-        stage: "discovering",
-        percent: 18,
-        steps: {
-          connect: { status: "done" },
-          channels: { status: "running" },
-          movies: { status: "running" },
-          series: { status: "running" },
-          categories: { status: "running" },
-        },
-      });
+      await persist(discoverStartedPatch);
       if (superseded) return;
     }
 
@@ -1962,7 +2035,7 @@ async function driveXtreamSyncToReady(sourceId: string, userId: string, db: Supa
         // Count only rows the upsert ACTUALLY inserted — a stream already imported
         // from another category in a prior iteration is dropped (ignoreDuplicates),
         // so cross-category duplicates no longer inflate the "found" counts/totalVod.
-        const insertedNow = await appendSourceItems(sourceId, userId, batchRows, db);
+        const insertedNow = await appendSourceItems(sourceId, userId, batchRows, db, cursor.runVersion ? Number(cursor.runVersion) : null);
         if (def.type === "live") liveCount += insertedNow;
         else if (def.type === "movie") movieCount += insertedNow;
         else seriesCount += insertedNow;
@@ -1999,8 +2072,63 @@ async function driveXtreamSyncToReady(sourceId: string, userId: string, db: Supa
       return;
     }
 
+    // Layer 3: recompute authoritative per-type totals from the table (DO UPDATE inflates the
+    // running counts via cross-category re-touches), then decide whether it's safe to prune.
+    if (cursor.runVersion) {
+      const seen = await countSeenByType(sourceId, userId, Number(cursor.runVersion), db);
+      liveCount = seen.live; movieCount = seen.movie; seriesCount = seen.series;
+    }
     const total = liveCount + movieCount + seriesCount;
-    if (total <= 0) throw new HttpError(422, "No playable catalog items were imported from this source");
+
+    if (total <= 0) {
+      // A versioned REFRESH that re-saw nothing (provider down / rate-limited) must not nuke the
+      // prior catalogue nor flip to "error" (which the 1-min watchdog would re-hammer). If we still
+      // hold items from a previous run, keep serving them and finish quietly without touching the
+      // signature. Only a genuinely empty FIRST sync (no prior items) is a real failure.
+      if (cursor.runVersion) {
+        const existing = await countSourceItems(sourceId, userId, db);
+        if (existing > 0) {
+          console.warn("[norva-source-sync] Layer3 refresh re-saw 0 items; kept prior catalogue", sourceId, "fetchErrors", Number(cursor.fetchErrors) || 0);
+          const { data: keepFresh } = await db
+            .from("cloud_sources").select("config_hint").eq("id", sourceId).eq("user_id", userId).maybeSingle();
+          const keepHint = recordOrEmpty(keepFresh?.config_hint);
+          if (stringOr(recordOrEmpty(keepHint.syncCursor).startedAt, myRun) !== myRun) return; // superseded
+          await db.from("cloud_sources").update({
+            sync_status: "ready",
+            config_hint: compactRecord({
+              ...keepHint,
+              syncCursor: undefined,
+              syncProgress: mergeSyncProgress(recordOrEmpty(keepHint.syncProgress), {
+                status: "ready", stage: "ready", percent: 100, updatedAt: new Date().toISOString(),
+                note: "refresh_no_items_kept_prior",
+              }),
+            }),
+          }).eq("id", sourceId).eq("user_id", userId);
+          return;
+        }
+      }
+      throw new HttpError(422, "No playable catalog items were imported from this source");
+    }
+
+    if (cursor.runVersion) {
+      const totalHeld = await countSourceItems(sourceId, userId, db);
+      const wouldRemove = Math.max(0, totalHeld - total);
+      const fetchErrors = Number(cursor.fetchErrors) || 0;
+      const removeFraction = wouldRemove / Math.max(1, totalHeld);
+      const healthy = fetchErrors === 0 && removeFraction <= PRUNE_MAX_REMOVE_FRACTION;
+      if (healthy) {
+        if (wouldRemove > 0) {
+          const removed = await pruneStaleSourceItems(sourceId, userId, Number(cursor.runVersion), db);
+          console.log("[norva-source-sync] Layer3 pruned removed titles", sourceId, "removed", removed);
+        }
+      } else {
+        // Unsafe to prune — keep the prior items (the table is now a safe superset old+new). The
+        // source still serves, Layer 1 hides any stale title-orphans, and the next HEALTHY run
+        // prunes them. This is what stops a rate-limited account from emptying the catalogue.
+        console.warn("[norva-source-sync] Layer3 prune skipped", sourceId, JSON.stringify({ reason: fetchErrors ? "fetch_errors" : "implausible_removal", fetchErrors, wouldRemove, totalHeld }));
+      }
+    }
+
     const catCounts = recordOrEmpty(cursor.catCounts);
     const liveCats2 = Number(catCounts.live) || 0;
     const movieCats2 = Number(catCounts.movies) || 0;
