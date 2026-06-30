@@ -61,6 +61,44 @@ const SYNC_MAX_CONTINUATIONS = 160;
 // (provider outage / soft-expiry returning a thin list) and KEEP the prior items instead.
 const PRUNE_MAX_REMOVE_FRACTION = 0.5;
 
+// Import-lifecycle notification queue (Phase 1). The engine only ENQUEUES events here; a separate
+// digest cron groups + sends them. unique(source_id, kind) is the idempotency guard, so even though
+// the engine self-invokes across dozens of isolates this fires exactly once per source per kind —
+// which also makes started/completed FIRST-IMPORT-ONLY (a later refresh's insert is a no-op). Always
+// best-effort: a notification must never fail a sync.
+export async function enqueueImportNotification(
+  db: SupabaseClient,
+  userId: string,
+  sourceId: string,
+  kind: "import_started" | "import_completed" | "import_failed",
+  payload: JsonRecord = {},
+): Promise<void> {
+  try {
+    await db.from("cloud_import_notifications")
+      .upsert([{ user_id: userId, source_id: sourceId, kind, payload }], { onConflict: "source_id,kind", ignoreDuplicates: true });
+  } catch (_) { /* best-effort — never fail a sync over a notification */ }
+}
+
+// Admin-dashboard registry: keep providerKey -> human name current. Called wherever the engine
+// computes a providerKey (detect + discovery completion). DO UPDATE only display_name/status/last_seen,
+// so manual notes on a historical/deleted provider survive a re-add. Best-effort.
+export async function recordProviderIdentity(
+  db: SupabaseClient,
+  sourceId: string,
+  userId: string,
+  providerKey: string | null | undefined,
+): Promise<void> {
+  if (!providerKey) return;
+  try {
+    const { data } = await db.from("cloud_sources").select("display_name").eq("id", sourceId).eq("user_id", userId).maybeSingle();
+    const name = stringOr((data as JsonRecord | null)?.display_name, providerKey);
+    await db.from("catalog_provider_identities").upsert(
+      [{ provider_key: providerKey, display_name: name, status: "active", last_seen: new Date().toISOString(), updated_at: new Date().toISOString() }],
+      { onConflict: "provider_key" },
+    );
+  } catch (_) { /* best-effort */ }
+}
+
 export function freshSyncCursor(startedAt: string, extra: JsonRecord = {}): JsonRecord {
   return {
     v: 1,
@@ -397,6 +435,7 @@ export async function detectXtreamChange(
   }
   const contentSignature = finalizeSig(sig);
   const providerKey = await providerKeyFromCategoryMaps(maps);
+  await recordProviderIdentity(db, sourceId, userId, providerKey);
   const changed = Boolean(previousSignature) && !contentSignatureEquals(contentSignature, previousSignature);
   return { live: liveCount, movies: movieCount, series: seriesCount, total: liveCount + movieCount + seriesCount, contentSignature, changed, detectOnly: true, providerKey };
 }
@@ -529,6 +568,7 @@ export async function driveXtreamSyncToReady(sourceId: string, userId: string, d
       // so a partial/rate-limited run can never empty the catalogue.
       if (!cursor.discoverStarted) {
         cursor.discoverStarted = true;
+        await enqueueImportNotification(db, userId, sourceId, "import_started");
         await persist(discoverStartedPatch);
         if (superseded) return;
       }
@@ -536,6 +576,7 @@ export async function driveXtreamSyncToReady(sourceId: string, userId: string, d
       // Legacy path (pre-Layer-3 cursors, e.g. a sync already in flight at deploy time).
       await deleteSourceItems(sourceId, userId, db);
       cursor.deleted = true;
+      await enqueueImportNotification(db, userId, sourceId, "import_started");
       await persist(discoverStartedPatch);
       if (superseded) return;
     }
@@ -727,6 +768,7 @@ export async function driveXtreamSyncToReady(sourceId: string, userId: string, d
     const providerKey = await providerKeyFromCategoryMaps(nameMaps);
     const finalHint: JsonRecord = { ...freshHint, contentSignature, syncProgress: progress, syncCursor: undefined };
     if (providerKey) finalHint.providerKey = providerKey;
+    await recordProviderIdentity(db, sourceId, userId, providerKey);
     await db
       .from("cloud_sources")
       .update({
@@ -783,6 +825,8 @@ export async function driveXtreamSyncToReady(sourceId: string, userId: string, d
       })
       .eq("id", sourceId)
       .eq("user_id", userId);
+    // Persistent failure (non-transient / continuation budget exhausted) → notify once.
+    await enqueueImportNotification(db, userId, sourceId, "import_failed", { error: message });
   }
 }
 

@@ -12,7 +12,7 @@ import {
 import { refreshVodTitleProjection, validateTmdbCandidate, searchTmdbMatch } from "../_shared/vod-title-projection.ts";
 import type { LiveCatalogItem } from "../_shared/live-catalog.ts";
 import { getEntitlementDecision, planFeatureEntitled, realPlanCode } from "../_shared/entitlements.ts";
-import { driveXtreamSyncToReady, freshSyncCursor, detectXtreamChange } from "../_shared/xtream-sync.ts";
+import { driveXtreamSyncToReady, freshSyncCursor, detectXtreamChange, enqueueImportNotification } from "../_shared/xtream-sync.ts";
 
 type JsonRecord = Record<string, unknown>;
 type RuntimeConfig = { sourceConfigKey: string; mediaGatewayUrl: string; mediaGatewayToken: string };
@@ -1325,6 +1325,10 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
       .eq("user_id", userId);
     if (updateError) throwDb(updateError, "Unable to update source sync status");
 
+    // Import reached READY → notify once (first import only; the queue's unique(source_id,kind)
+    // makes a later refresh's completion a no-op). The digest cron resolves name + counts at send time.
+    await enqueueImportNotification(db, userId, sourceId, "import_completed");
+
     return { sourceId, status: "ready", ...result };
   } catch (error) {
     const message = error instanceof Error ? error.message : (String(error) || "Source finalization failed");
@@ -1360,6 +1364,8 @@ async function finalizeCloudSource(sourceId: string, userId: string, db: Supabas
         })
         .eq("id", sourceId)
         .eq("user_id", userId);
+      // Terminal finalize failure (4xx, non-429) → notify once.
+      await enqueueImportNotification(db, userId, sourceId, "import_failed", { error: message });
     }
     throw error;
   }
