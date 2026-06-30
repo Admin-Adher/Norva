@@ -1750,8 +1750,10 @@ async function countSeenByType(sourceId: string, userId: string, version: number
 }
 
 // Total rows currently held for the source (any version). seenTotal subtracted from this gives the
-// count that WOULD be pruned — used to refuse an implausibly-large removal.
-async function countSourceItems(sourceId: string, userId: string, db: SupabaseClient): Promise<number> {
+// count that WOULD be pruned — used to refuse an implausibly-large removal. NB: named distinctly from
+// the finalize-side countSourceItems(…, progress) above — a duplicate top-level `function` name is a
+// SyntaxError in a Deno ES module (boots the whole function to 503), which esbuild does NOT flag.
+async function countSourceItemsTotal(sourceId: string, userId: string, db: SupabaseClient): Promise<number> {
   const { count, error } = await db
     .from("cloud_media_items")
     .select("id", { count: "exact", head: true })
@@ -2096,7 +2098,7 @@ async function driveXtreamSyncToReady(sourceId: string, userId: string, db: Supa
       // hold items from a previous run, keep serving them and finish quietly without touching the
       // signature. Only a genuinely empty FIRST sync (no prior items) is a real failure.
       if (cursor.runVersion) {
-        const existing = await countSourceItems(sourceId, userId, db);
+        const existing = await countSourceItemsTotal(sourceId, userId, db);
         if (existing > 0) {
           console.warn("[norva-source-sync] Layer3 refresh re-saw 0 items; kept prior catalogue", sourceId, "fetchErrors", Number(cursor.fetchErrors) || 0);
           const { data: keepFresh } = await db
@@ -2121,7 +2123,7 @@ async function driveXtreamSyncToReady(sourceId: string, userId: string, db: Supa
     }
 
     if (cursor.runVersion) {
-      const totalHeld = await countSourceItems(sourceId, userId, db);
+      const totalHeld = await countSourceItemsTotal(sourceId, userId, db);
       const wouldRemove = Math.max(0, totalHeld - total);
       const fetchErrors = Number(cursor.fetchErrors) || 0;
       const removeFraction = wouldRemove / Math.max(1, totalHeld);
