@@ -3,7 +3,7 @@ const fs = require('fs');
 const fsp = require('fs/promises');
 const os = require('os');
 const path = require('path');
-const { spawn } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 const express = require('express');
 
 const app = express();
@@ -162,6 +162,23 @@ function argosTargets() {
     } catch (_) { /* none */ }
     return Array.from(new Set(out)).sort();
 }
+// Phase 4 — OCR of PGS (Blu-ray / hdmv_pgs_subtitle) image subtitles → WebVTT (see src/ocr_pgs.py).
+// The gateway extracts the image-sub track to a self-contained .sup, then ocr_pgs.py parses the PGS
+// bitstream (exact per-cue PTS) and runs tesseract on each cue's bitmap. Reuses the argos venv (Pillow
+// installed there); tesseract-ocr is on PATH. Disabled if either the script or tesseract is missing.
+const OCR_PYTHON_BIN = process.env.OCR_PYTHON_BIN || ARGOS_PYTHON_BIN;
+const OCR_SCRIPT = path.join(__dirname, 'ocr_pgs.py');
+const OCR_TESSERACT_BIN = process.env.TESSERACT_BIN || 'tesseract';
+const OCR_LANGS = process.env.OCR_LANGS || 'eng+fra+spa+deu+ita+por';
+const OCR_TIMEOUT_MS = clampInt(process.env.OCR_TIMEOUT_MS, 900_000, 30_000, 3_600_000);
+const SUP_EXTRACT_TIMEOUT_MS = clampInt(process.env.SUP_EXTRACT_TIMEOUT_MS, 600_000, 30_000, 3_600_000);
+const MAX_OCR_QUEUE = clampInt(process.env.MAX_OCR_QUEUE, 100, 1, 1000);
+const OCR_ENABLED = (() => {
+    try {
+        if (!fs.existsSync(OCR_SCRIPT)) return false;
+        return spawnSync(OCR_TESSERACT_BIN, ['--version'], { timeout: 5000 }).status === 0;
+    } catch (_) { return false; }
+})();
 const LIVE_INPUT_ANALYZE_DURATION_US = clampInt(process.env.LIVE_INPUT_ANALYZE_DURATION_US, 1_500_000, 250_000, 10_000_000);
 const LIVE_INPUT_PROBE_SIZE_BYTES = clampInt(process.env.LIVE_INPUT_PROBE_SIZE_BYTES, 2_000_000, 64_000, 10_000_000);
 const VOD_INPUT_ANALYZE_DURATION_US = clampInt(process.env.VOD_INPUT_ANALYZE_DURATION_US, 8_000_000, 250_000, 30_000_000);
@@ -256,6 +273,8 @@ app.get('/health', (req, res) => {
         languageDetect: Boolean(WHISPER_BIN && WHISPER_MODEL),
         translate: ARGOS_ENABLED,
         translateTargets: ARGOS_ENABLED ? argosTargets() : [],
+        ocr: OCR_ENABLED,
+        ocrLangs: OCR_ENABLED ? OCR_LANGS : '',
         providerProxy: providerProxyAgents.length > 0,
         providerProxyPool: providerProxyAgents.length,
         inbandHeaderParse: INBAND_HEADER_PARSE,
@@ -727,6 +746,29 @@ app.post('/transcribe-async/:token', (req, res) => {
     return res.status(202).json({ queued: true, position: transcribeQueue.length, busy: transcribeBusy });
 });
 
+// Phase 4 async OCR: accept a job (202) for a PGS image-sub track and run it in the background, then
+// POST the OCR'd VTT to the edge callback — same callback shape as /transcribe-async ({ jobId, ok,
+// vtt, segments, sourceLang }). Byte-pipe token gates the caller (= the edge); `index` is the
+// subtitle stream index to extract. HEAVY + LONG (whole-track extract + per-cue tesseract).
+app.post('/ocr-async/:token', (req, res) => {
+    const claims = verifyRawToken(req.params.token, GATEWAY_TOKEN);
+    if (!claims) return res.status(401).json({ error: 'Invalid byte-pipe token' });
+    if (Number(claims.exp) * 1000 < Date.now()) return res.status(401).json({ error: 'Byte-pipe token expired' });
+    if (!OCR_ENABLED) return res.status(503).json({ error: 'OCR not configured' });
+    const index = Number.parseInt(req.query.index, 10);
+    if (!Number.isInteger(index) || index < 0) return res.status(400).json({ error: 'Invalid subtitle index' });
+    const jobId = String(req.query.jobId || '');
+    const callbackUrl = String(req.query.callback || '');
+    if (!jobId || !/^https:\/\/[^/]+\.supabase\.co\//.test(callbackUrl)) {
+        return res.status(400).json({ error: 'jobId and a valid supabase callback are required' });
+    }
+    const lang = /^[a-z+]{3,40}$/.test(String(req.query.lang || '')) ? String(req.query.lang) : OCR_LANGS;
+    const ua = claims.ua || FFMPEG_USER_AGENT;
+    const ok = enqueueOcr({ url: claims.url, ua, index, jobId, callbackUrl, lang });
+    if (!ok) return res.status(429).json({ error: 'OCR queue full' });
+    return res.status(202).json({ queued: true, position: ocrQueue.length, busy: ocrBusy });
+});
+
 // Phase 3b async translation: translate a cached transcript VTT into a target language and POST the
 // result to the edge callback (reuses the transcribe-callback shape: { jobId, ok, vtt, segments }).
 // No provider connection (pure text on the gateway) → auth is the gateway token (edge→gateway), like
@@ -1027,6 +1069,115 @@ async function runTranslateJob(job) {
             signal: AbortSignal.timeout(30000),
         });
     } catch (e) { console.warn('[media-gateway] translate callback failed', jobId, String((e && e.message) || e)); }
+}
+
+// Phase 4 OCR queue — its OWN lane (a long whisper job must not block an OCR pass, nor vice-versa).
+// Concurrency 1 within the lane so per-cue tesseract doesn't starve the instance's stream-proxying.
+// A gateway restart loses in-flight jobs → the edge reaper re-enqueues rows stuck in 'processing'.
+const ocrQueue = [];
+let ocrBusy = false;
+function enqueueOcr(job) {
+    if (ocrQueue.length >= MAX_OCR_QUEUE) return false;
+    ocrQueue.push(job);
+    queueMicrotask(drainOcrQueue);
+    return true;
+}
+async function drainOcrQueue() {
+    if (ocrBusy) return;
+    ocrBusy = true;
+    try {
+        while (ocrQueue.length) {
+            const job = ocrQueue.shift();
+            await runOcrJob(job).catch((e) => console.warn('[media-gateway] ocr job error', String((e && e.message) || e)));
+        }
+    } finally { ocrBusy = false; }
+}
+
+// Extract one image-subtitle track to a self-contained .sup (PGS) with `-c:s copy` (no re-encode,
+// no decode) so ocr_pgs.py gets the raw PGS bitstream with its PTS intact. Resolves the file path
+// or null on failure / empty output.
+function extractSubtitleSup(url, ua, trackIndex, timeoutMs = SUP_EXTRACT_TIMEOUT_MS) {
+    return new Promise((resolve) => {
+        const outputPath = path.join(os.tmpdir(), `norva-sub-${Date.now()}-${crypto.randomUUID()}.sup`);
+        const args = [
+            '-y', '-hide_banner', '-loglevel', 'error', '-nostdin',
+            '-user_agent', ua,
+            '-probesize', '5000000', '-analyzeduration', '8000000',
+            '-i', url,
+            '-map', `0:${trackIndex}`,
+            '-c:s', 'copy', '-f', 'sup',
+            outputPath,
+        ];
+        let child;
+        try { child = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'ignore', 'pipe'], env: proxyEnvFor(proxyKeyFromUrl(url)) }); }
+        catch (_) { return resolve(null); }
+        let stderr = '';
+        const timer = setTimeout(() => { try { child.kill('SIGKILL'); } catch (_) {} }, timeoutMs);
+        child.stderr.on('data', (d) => { stderr += d.toString(); });
+        child.on('error', () => { clearTimeout(timer); resolve(null); });
+        child.on('close', async (code) => {
+            clearTimeout(timer);
+            if (code !== 0) {
+                console.warn(`[media-gateway] sup-extract ffmpeg exit ${code}: ${stderr.slice(-300)}`);
+                fsp.unlink(outputPath).catch(() => {});
+                return resolve(null);
+            }
+            let ok = false;
+            try { ok = (await fsp.stat(outputPath)).size > 64; } catch (_) { ok = false; }
+            resolve(ok ? outputPath : null);
+        });
+    });
+}
+
+// Run ocr_pgs.py on a .sup: pipe { sup, lang } in on stdin, read the WebVTT from stdout.
+// Resolves { ok, vtt } or { ok:false, error } (the script emits a JSON error on stderr + exit code).
+function runOcrPython(supPath, lang) {
+    return new Promise((resolve) => {
+        let child;
+        try {
+            child = spawn(OCR_PYTHON_BIN, [OCR_SCRIPT], { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env } });
+        } catch (e) { return resolve({ ok: false, error: 'spawn failed: ' + String((e && e.message) || e) }); }
+        let out = '', err = '';
+        const timer = setTimeout(() => { try { child.kill('SIGKILL'); } catch (_) {} }, OCR_TIMEOUT_MS);
+        child.stdout.on('data', (d) => { out += d.toString(); });
+        child.stderr.on('data', (d) => { err += d.toString(); });
+        child.on('error', (e) => { clearTimeout(timer); resolve({ ok: false, error: String((e && e.message) || e) }); });
+        child.on('close', (code) => {
+            clearTimeout(timer);
+            if (code === 0 && out.trim()) return resolve({ ok: true, vtt: out });
+            let msg = `ocr exit ${code}`;
+            try { const j = JSON.parse((err.trim().split('\n').pop() || '')); if (j && j.error) msg = j.error; } catch (_) {}
+            resolve({ ok: false, error: msg });
+        });
+        try { child.stdin.write(JSON.stringify({ sup: supPath, lang })); child.stdin.end(); } catch (_) { /* close handler resolves */ }
+    });
+}
+
+async function runOcrJob(job) {
+    const { url, ua, index, jobId, callbackUrl, lang } = job;
+    let supPath = null, payload;
+    try {
+        supPath = await extractSubtitleSup(url, ua, index);
+        if (!supPath) {
+            payload = { jobId, ok: false, error: 'Subtitle extraction failed' };
+        } else {
+            const r = await runOcrPython(supPath, lang || OCR_LANGS);
+            const segments = r.ok ? (r.vtt.match(/-->/g) || []).length : 0;
+            payload = (r.ok && segments > 0)
+                ? { jobId, ok: true, vtt: r.vtt, segments, sourceLang: null }
+                : { jobId, ok: false, error: String(r.error || 'OCR produced no cues').slice(0, 300) };
+        }
+    } catch (e) {
+        payload = { jobId, ok: false, error: String((e && e.message) || e).slice(0, 300) };
+    } finally { if (supPath) fsp.unlink(supPath).catch(() => {}); }
+    try {
+        await fetch(callbackUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${GATEWAY_TOKEN}` },
+            body: JSON.stringify(payload),
+            signal: AbortSignal.timeout(30000),
+        });
+    } catch (e) { console.warn('[media-gateway] ocr callback failed', jobId, String((e && e.message) || e)); }
 }
 
 // Detect the language of a (Whisper) transcript with zero dependencies. Non-Latin scripts are
