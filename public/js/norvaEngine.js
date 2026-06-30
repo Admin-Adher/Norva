@@ -151,7 +151,7 @@
     av1: ['av01.0.08M.08'],
   };
 
-  const ENGINE_VERSION = 26;
+  const ENGINE_VERSION = 27;
 
   class NorvaEngine {
     constructor(videoEl, opts = {}) {
@@ -1093,18 +1093,29 @@
         let packets;
         [res, packets] = await lib.ff_read_frame_multi(this.fmtCtx, this.pkt, { limit: 512 * 1024 });
         const writeList = [];
-        for (const k in packets) for (const p of packets[k]) {
+        // Process the video stream FIRST in each batch, so its keyframe gate anchors vBase before any
+        // audio in the same batch is evaluated (keeps fresh-start audio while letting a mid-GOP resume
+        // hold audio until the keyframe).
+        const pktKeys = Object.keys(packets);
+        if (this.vS) pktKeys.sort((a, b) => (Number(a) === this.vS.index ? -1 : (Number(b) === this.vS.index ? 1 : 0)));
+        for (const k of pktKeys) for (const p of packets[k]) {
           if (this.vS && p.stream_index === this.vS.index) {
-            // Open-GOP seek/resume: a seek lands on a keyframe, but the demuxer then
-            // emits leading B-frames whose PTS is BEFORE that keyframe (they reference
-            // pre-seek frames we never decoded). If muxed, the fMP4 media segment would
-            // not start with a random-access point in PRESENTATION order, so Chromium
-            // rejects the append (CHUNK_DEMUXER_ERROR_APPEND_FAILED) — this is why
-            // resuming a part-watched title failed while a fresh start did not. Drop
-            // them so the keyframe is the first frame in both decode and display order.
+            // MSE requires the first video sample of a media segment to be a keyframe. A precise seek
+            // (mkv index) lands on one, but an APPROXIMATE seek — MPEG-TS has no exact keyframe index —
+            // lands mid-GOP, so the first packet read is a non-keyframe. Drop leading non-key video
+            // until the first keyframe BEFORE anchoring vBase, or Chromium rejects the non-IDR first
+            // append (CHUNK_DEMUXER_ERROR_APPEND_FAILED — why resuming a .ts failed but a fresh start
+            // did not). AV_PKT_FLAG_KEY === 1.
+            if (this.vBase === null && !(p.flags & 1)) { this._diag.droppedPreKey = (this._diag.droppedPreKey || 0) + 1; continue; }
+            // Open-GOP: after the keyframe, drop leading B-frames whose PTS is BEFORE it (they
+            // reference pre-seek frames), so the keyframe is first in presentation order too.
             if (this.vBase !== null && this._gopFloorPts !== null && to64(p.pts, p.ptshi) < this._gopFloorPts) { this._diag.droppedOpenGop++; continue; }
             p.stream_index = this.V_IDX; this._setVideoDts(p); writeList.push(p);
           } else if (this.aS && p.stream_index === this.aS.index) {
+            // Hold audio until the first video keyframe is anchored, so a mid-GOP resume starts A/V
+            // ALIGNED at the keyframe (no audio lead → no MSE stall). No-op on a fresh start (video is
+            // processed first and anchors vBase before any audio) and when there's no video stream.
+            if (this.vS && this.vBase === null) { this._diag.droppedPreKeyAudio = (this._diag.droppedPreKeyAudio || 0) + 1; continue; }
             if (this.copyAudio) { p.stream_index = this.A_IDX; writeList.push(p); }
             else {
               const fr = await lib.ff_decode_multi(this.decCtx, this.decPkt, this.decFrame, [p], false);
@@ -1303,6 +1314,7 @@
         muxerInits: d.muxerInits, initBoxes: d.initBoxes, initBytes: d.initBytes,
         firstMediaBoxes: d.firstMediaBoxes, firstMediaBytes: d.firstMediaBytes,
         firstVideoPkt: d.firstVideoPkt, droppedOpenGop: d.droppedOpenGop,
+        droppedPreKey: d.droppedPreKey || 0, droppedPreKeyAudio: d.droppedPreKeyAudio || 0,
         // full top-level box stream the muxer produced (stitched across AVIO blocks)
         boxSeq: d.boxSeq, boxBad: d.boxBad, boxTotalKB: d.boxTotal != null ? Math.round(d.boxTotal / 1024) : null,
         moofCount: d.moofCount, moovCount: d.moovCount, ftypCount: d.ftypCount,
