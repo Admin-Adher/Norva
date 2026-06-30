@@ -102,6 +102,8 @@
     const groups = [
       ['.hero-content', 'left'],
       ['.hero-visual', 'right'],
+      ['.logo-wall .logo-wall-label', 'up'],
+      ['.logo-chip', 'up'],
       ['.trust-grid article', 'up'],
       ['.split-section > div:first-child', 'left'],
       ['.split-section .sync-panel', 'right'],
@@ -113,12 +115,14 @@
       ['.feature-grid article', 'up'],
       ['.devices-section > .eyebrow, .devices-section > h2, .devices-section > .section-copy', 'up'],
       ['.device-grid article', 'up'],
+      ['.infra-banner', 'up'],
       ['.clarity-section > .eyebrow, .clarity-section > h2, .clarity-section > .section-copy', 'up'],
       ['.clarity-grid article, .warning-note', 'up'],
       ['.pricing-section > .eyebrow, .pricing-section > h2, .pricing-section > .section-copy', 'up'],
       ['.pricing-grid article, .pricing-section > small', 'up'],
       ['.faq-section > .eyebrow, .faq-section > h2', 'up'],
       ['.faq-item', 'up'],
+      ['.simpler-promo .promo-card', 'up'],
       ['.final-cta', 'up'],
       ['.landing-footer > *', 'up']
     ];
