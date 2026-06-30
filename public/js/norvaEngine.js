@@ -248,7 +248,7 @@
     av1: ['av01.0.08M.08'],
   };
 
-  const ENGINE_VERSION = 32;
+  const ENGINE_VERSION = 33;
 
   class NorvaEngine {
     constructor(videoEl, opts = {}) {
@@ -273,6 +273,13 @@
       // The muxer re-bases output to 0; _tsAnchor is the real time muxer-0 maps to,
       // applied via SourceBuffer.timestampOffset so seeks/resume land on target.
       this._tsAnchor = 0; this._tsApplied = 0; this._firstVpktPending = false;
+      // MPEG-TS PTS carries an arbitrary epoch (e.g. the PCR start), so a "playback time t"
+      // is NOT t*time_base in the stream — it is epoch + t*time_base. mp4/mkv start at ~0, so
+      // this stays 0 for them. Captured from the first video PTS on TS; used by _seekDemuxer
+      // (add it to the seek target) and _setVideoDts (subtract it to get a playback-relative
+      // anchor that matches video.currentTime). Without it, resume/seek on TS lands the data
+      // at the wrong timeline position → the playhead starves while MB buffer elsewhere.
+      this._ptsEpoch = 0; // in the video stream's time_base ticks
       this._gopFloorPts = null;   // after a seek, drop video PTS below the landing keyframe (open-GOP leading B-frames)
       this._convertAnnexb = false; // MPEG-TS: convert each annexb video access unit to AVCC for the mp4 muxer
       this._stripAdts = false;     // MPEG-TS: strip ADTS headers from AAC packets (raw AAC for the mp4 esds)
@@ -875,6 +882,8 @@
         catch (_) { break; }
         for (const k in packets) for (const p of packets[k]) {
           if (p.stream_index === this.vS.index) {
+            // First video PTS at the stream start = the MPEG-TS epoch (see _ptsEpoch).
+            if (this._ptsEpoch === 0) { const e = to64(p.pts, p.ptshi); if (Number.isFinite(e) && e > 0) this._ptsEpoch = e; }
             for (const n of annexbNals(p.data)) {
               const t = n[0] & 0x1f;
               if (t === 7 && !sps) sps = n; else if (t === 8 && !pps) pps = n;
@@ -1209,10 +1218,15 @@
       const lib = this.lib;
       const s = this.vS || this.aS;
       const tb = s.time_base_den / s.time_base_num;
-      const ts = Math.max(0, Math.round(t * tb));
+      // avformat_seek_file wants an ABSOLUTE timestamp (stream epoch + playback time). For
+      // MPEG-TS the epoch is non-zero, so omitting it seeks before the stream start and the
+      // demuxer clamps to the beginning — the resume reads the wrong region. (epoch is in the
+      // video time_base; only add it when seeking that stream; 0 for mp4/mkv → unchanged.)
+      const epoch = (s === this.vS) ? (this._ptsEpoch || 0) : 0;
+      const ts = Math.max(0, Math.round(t * tb) + epoch);
       const [lo, hi] = from64(ts);
       await lib.avformat_seek_file_approx(this.fmtCtx, s.index, lo, hi, 0);
-      this.log(`seek demuxer → ${t.toFixed(1)}s`);
+      this.log(`seek demuxer → ${t.toFixed(1)}s (abs ts ${ts}${epoch ? ', epoch ' + epoch : ''})`);
     }
 
     // ---- teardown for re-seek ---------------------------------------------
@@ -1360,8 +1374,9 @@
     _setVideoDts(p) {
       const pts = to64(p.pts, p.ptshi);
       if (this._firstVpktPending && this.vS) {
-        // Real keyframe PTS → exact placement of the re-based-to-0 output.
-        this._tsAnchor = pts * this.vS.time_base_num / this.vS.time_base_den;
+        // Real keyframe PTS → exact placement of the re-based-to-0 output. Subtract the MPEG-TS
+        // epoch so the anchor is PLAYBACK-relative (matching video.currentTime); 0 for mp4/mkv.
+        this._tsAnchor = (pts - (this._ptsEpoch || 0)) * this.vS.time_base_num / this.vS.time_base_den;
         this._firstVpktPending = false;
       }
       if (this.vBase === null) { this.vBase = pts; this.vFd0 = (p.duration || 0) > 0 ? p.duration : 1; this.vOffset = D_REORDER * this.vFd0; this._gopFloorPts = pts; }
@@ -1520,7 +1535,7 @@
         pumpExitReason: d.pumpExitReason, pumpExitRes: d.pumpExitRes,
         lastReadError: d.lastReadError, exitFetches: d.exitFetches, exitFetchMB: d.exitFetchMB,
         // pipeline / timing state
-        tsAnchor: this._tsAnchor, tsApplied: this._tsApplied,
+        tsAnchor: this._tsAnchor, tsApplied: this._tsApplied, ptsEpoch: this._ptsEpoch,
         vBase: this.vBase, gopFloorPts: this._gopFloorPts,
         ended: this.ended, destroyed: this.destroyed,
         pumpRunning: this._pumpRunning, seeking: this._seeking,
