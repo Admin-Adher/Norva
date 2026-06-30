@@ -188,6 +188,40 @@ mkv (rapide, sans gateway) pour le cas courant **H.264/HEVC + AAC/AC3** (transco
 - Le WASM est servi en `cache-control: max-age=0, must-revalidate` → les navigateurs revalident et
   récupèrent le nouveau build au rechargement (pas de cache périmé).
 
+#### Remux TS in-browser — couches de remise en forme pour MSE (ENGINE_VERSION 27→31)
+Le démuxeur `mpegts` ne suffit pas : un `.ts` ne porte **rien** de ce que le mp4/MSE exige dans l'en-tête
+de conteneur. Il a fallu reconstruire, côté JS, ce que le conteneur ne fournit pas. Chaque couche a été
+un `CHUNK_DEMUXER_ERROR_APPEND_FAILED` distinct (diagnostiqués sur snapshots console réels) :
+1. **Seek sur non-keyframe (v27)** — un seek approximatif (le TS n'a pas d'index keyframe) tombe en plein
+   GOP ; MSE exige une keyframe en 1ʳᵉ frame de segment. → **garde keyframe** (drop des frames non-IDR
+   avant d'ancrer `vBase`).
+2. **avcC vide (v28)** — H.264 en TS porte SPS/PPS **in-band** (annexb), pas dans l'en-tête → le moov
+   sortait avec un avcC vide. → **on lit SPS/PPS de la 1ʳᵉ keyframe et on synthétise l'avcC**, injecté
+   dans le codecpar **avant** l'init du muxer.
+3. **mdat en annexb (v29)** — movenc **copie** la vidéo TS telle quelle ; le mdat restait en annexb
+   (start codes) alors que MSE lit un préfixe de longueur. → **annexb→AVCC** (longueur 4 o) par access
+   unit, + drop des NAL AUD(9)/SPS(7)/PPS(8) du mdat (les params vivent dans l'avcC).
+4. **Extension avcC High-profile (v30)** — un avcC High profile (`avc1.64xxxx`) **doit** porter
+   `chroma_format_idc` + bit-depths ; absents pour Main (`avc1.4d40xx`), d'où « marche en Main, casse en
+   High ». → `spsHighExt()` (Exp-Golomb du SPS) ajoute l'extension quand le profil l'exige.
+5. **AAC ADTS → ASC (v31) — la racine audio, longtemps masquée.** Le TS porte l'**AAC en ADTS** (en-tête
+   7/9 o par frame) **sans esds** ; le muxer mp4 sortait un **esds vide** ET des samples mdat encore
+   **ADTS** → MSE rejette l'**audio**, **quel que soit le profil vidéo** (donc « High-profile » était un
+   leurre — *tous* les `.ts` cassaient). C'est la transform standard `aac_adtstoasc`, faite en JS (pas de
+   rebuild WASM) : `adtsToAsc()` synthétise l'ASC (AOT/sample-rate/canaux) injecté en extradata audio, et
+   `stripAdts()` retire les en-têtes ADTS de chaque paquet (raw AAC). Gardé sur **AAC stream-copy sans
+   extradata conteneur** = TS uniquement ; mkv/mp4 (AAC raw) intouchés.
+
+⚠️ **Limite de validation locale.** Le Chromium du sandbox est le **build open-source** (Playwright) :
+`MediaSource.isTypeSupported` renvoie **false pour avc1/mp4a/hvc1** (codecs propriétaires absents) — donc
+**pas d'oracle MSE H.264/AAC en local** (vérifié via CDP : seuls vp8/vp9/vorbis passent). La seule
+validation locale possible = **re-démux libav de la sortie du moteur** (trop tolérant : il a laissé passer
+le Main alors que MSE strict aurait calé). Les couches 1-4 ont donc été des hypothèses validées au
+re-démux puis confirmées/infirmées sur le **navigateur réel de l'user** (chaque tour = un rechargement +
+un snapshot console). La couche 5 (audio), elle, est **prouvée au niveau octet en local** (la sortie porte
+l'ASC injecté dans l'esds et le 1ᵉʳ sample audio est du raw AAC sans sync `0xFFF`) — défaut certain, pas
+une supposition. Le garde-fou `onError`→gateway fait que **la lecture n'est jamais cassée** entre-temps.
+
 ### Bug #4 — mkv ne démarre pas alors que mp4 oui : IP datacenter bloquée (GATEWAY_VERSION 51) ✅ racine
 - **Symptôme** : sur le **même provider**, les mp4 (`direct`) jouaient mais les mkv (`engine`/`relay`) `458`aient, **au même instant**.
 - **Diagnostic** (télémétrie) : `playback_mode='direct'` → `first_frame` OK ; `playback_mode='engine'` → `BLOCK_HTTP_458`. Donc le slot n'est pas saturé : le provider **458 spécifiquement l'IP datacenter** (Railway), pas l'IP résidentielle du navigateur. (La rafale de retries pendant le debug avait probablement fait flaguer l'IP.)
@@ -225,7 +259,10 @@ Les fournisseurs IPTV bloquent les plages d'IP datacenter (anti-revente). Le nav
 ## 5. État final (vérifié en prod)
 - mkv via moteur : `first_frame` + `play_started` + resume/pause/seek en `playback_mode='engine'`, **plus aucun `CHUNK_DEMUXER`**.
 - Combinaison gagnante = **proxy résidentiel** (octets circulent) + **muxer non-seekable** (octets valides).
-- Versions : `ENGINE_VERSION 26` (**TS démuxé/remuxé en navigateur** via le WASM `+mpegts` ; repli gateway si le navigateur ne décode pas le codec ; `sourceHead` sur échec d'ouverture), `GATEWAY_VERSION 59` (Argos translate ; sonde codec TS VOD + estimation de durée → seek bar).
+- Versions : `ENGINE_VERSION 31` (**TS démuxé/remuxé en navigateur** via le WASM `+mpegts` ; remise en
+  forme MSE en 5 couches — garde keyframe, avcC synthétisé + extension High-profile, annexb→AVCC,
+  **AAC ADTS→ASC + strip** ; repli gateway si le navigateur ne décode pas le codec ; `sourceHead` sur
+  échec d'ouverture), `GATEWAY_VERSION 59` (Argos translate ; sonde codec TS VOD + estimation de durée → seek bar).
 
 ## 6. Runbook — « un mkv ne se lance plus »
 1. `GET https://norva-production.up.railway.app/health` → vérifier `version` et `providerProxy`.
@@ -234,6 +271,9 @@ Les fournisseurs IPTV bloquent les plages d'IP datacenter (anti-revente). Le nav
    - `PROBE_HTTP_458` / `BLOCK_HTTP_458` **uniquement en `engine`** + `direct` OK → IP datacenter/slot. Vérifier le proxy (`providerProxy:true`), l'IP non flaguée, le slot libre (rien d'autre connecté au compte).
    - `seekWrites>0` → régression du writer non-seekable (vérifier `mkstreamwriterdev` / `device:false`).
    - `CHUNK_DEMUXER` avec `seekWrites=0` + `boxSeq` propre → regarder le `hex` des petites écritures de queue (fragment incomplet ?).
+   - `CHUNK_DEMUXER` sur un **`.ts`** (`looksLikeMpegTs:true`) → vérifier dans le snapshot : `injectedExtradata>0`
+     (avcC vidéo synthétisé), `injectedAudioAsc>0` + `stripAdts:true` (esds/ADTS audio). Si un `.ts` casse
+     avec `injectedAudioAsc:0`, l'AAC n'a pas été reconfiguré (esds vide = rejet audio). Cf. couches TS ci-dessus.
    - `pumpExitReason='readerr'` + `lastReadError` → coupure réseau/proxy en cours de stream.
    - `DEMUX_OPEN` / `SOURCE_NOT_MEDIA` avec `lastReadError=null` + `size` connu → octets non-média servis
      en 206. Lire `engineSnapshot().sourceHead` : `kind:'html'/'json'` → page d'erreur provider (flux
