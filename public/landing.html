@@ -12,7 +12,18 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Outfit:wght@800&display=swap"
     rel="stylesheet">
-  <link rel="stylesheet" href="/css/landing.css?v=24">
+  <script>
+    // Flag constrained devices BEFORE the stylesheet applies (no flash), so the
+    // landing drops expensive real-time blur there. Desktop keeps full glass.
+    try {
+      var n = navigator;
+      var lite = (window.matchMedia && (matchMedia('(pointer: coarse)').matches || matchMedia('(max-width: 1024px)').matches))
+        || (n.hardwareConcurrency && n.hardwareConcurrency <= 6)
+        || (n.deviceMemory && n.deviceMemory <= 6);
+      if (lite) document.documentElement.classList.add('norva-lite');
+    } catch (e) {}
+  </script>
+  <link rel="stylesheet" href="/css/landing.css?v=25">
 </head>
 
 <body>
@@ -322,7 +333,7 @@
     <p class="footer-bottom">&copy; 2026 Norva. Norva is a media player. No content is provided.</p>
   </footer>
 
-  <script src="/js/starfield.js?v=3"></script>
+  <script src="/js/starfield.js?v=4"></script>
   <script src="/js/landing.js?v=5"></script>
 </body>
 

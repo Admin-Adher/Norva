@@ -351,9 +351,12 @@ h1 {
   gap: 24px;
   border: 1px solid var(--glass-line);
   border-radius: 18px;
-  background: rgba(8, 13, 28, 0.72);
-  -webkit-backdrop-filter: blur(22px) saturate(150%);
-  backdrop-filter: blur(22px) saturate(150%);
+  /* Near-opaque on purpose: a sticky bar with backdrop-filter must re-blur the
+     whole scrolling page (and the twinkling starfield) every frame — the single
+     worst scroll-jank pattern. On the dark page an opaque bar looks the same. */
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0)),
+    rgba(9, 14, 30, 0.96);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.08),
     0 22px 50px -22px rgba(0, 0, 0, 0.7);
@@ -2112,61 +2115,55 @@ main,
 }
 
 /* =====================================================================
-   Touch / small-screen performance
-   Real-time backdrop blur on ~40 surfaces and a fixed background are the
-   main scroll-jank culprits on phones. Drop both on touch devices and keep
-   the translucent look — desktop keeps the full glass treatment.
+   Constrained-device performance
+   Real-time backdrop blur on ~40 surfaces (and a fixed background) forces a
+   full re-blur every frame over the scrolling page + twinkling canvas — the
+   main scroll-jank source on phones. Drop both on small/touch screens AND on
+   any device starfield.js flags as constrained (html.norva-lite, set early in
+   <head>). Desktop keeps the full glass treatment.
    ===================================================================== */
-@media (max-width: 820px), (pointer: coarse) {
-  body {
-    background-attachment: scroll;
-  }
+@media (max-width: 1024px), (pointer: coarse) {
+  body { background-attachment: scroll; }
 
-  .landing-nav,
-  .trust-grid article,
-  .feature-grid article,
-  .device-grid article,
-  .step-grid article,
-  .pricing-grid article,
-  .clarity-grid article,
-  .preference-card,
-  .sync-panel,
-  .faq-item,
-  .logo-chip,
-  .eyebrow,
-  .secondary-btn,
-  .billing-toggle,
-  .device-grid,
-  .infra-window,
-  .browser-mock,
-  .promo-card,
-  .poster-row span {
+  :is(.trust-grid article, .feature-grid article, .device-grid article,
+      .step-grid article, .pricing-grid article, .clarity-grid article,
+      .preference-card, .sync-panel, .faq-item, .device-grid, .logo-chip,
+      .eyebrow, .secondary-btn, .billing-toggle, .infra-window, .browser-mock,
+      .promo-card, .poster-row span) {
     -webkit-backdrop-filter: none !important;
     backdrop-filter: none !important;
   }
 
-  /* Slightly firmer glass so cards stay crisp without the blur. */
-  .trust-grid article,
-  .feature-grid article,
-  .device-grid article,
-  .step-grid article,
-  .pricing-grid article,
-  .clarity-grid article,
-  .preference-card,
-  .sync-panel,
-  .faq-item {
+  :is(.trust-grid article, .feature-grid article, .device-grid article,
+      .step-grid article, .pricing-grid article, .clarity-grid article,
+      .preference-card, .sync-panel, .faq-item) {
     background:
       linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.012)),
       rgba(15, 23, 44, 0.86);
   }
 
-  .landing-nav {
-    background: rgba(8, 13, 28, 0.92);
-  }
-
-  /* Skip the blur-in filter on touch (keeps the fade/slide reveal). */
-  .reveal-ready .scroll-reveal,
-  .reveal-ready .scroll-reveal.is-visible {
-    filter: none !important;
-  }
+  .scroll-reveal { filter: none !important; }
 }
+
+/* JS-flagged constrained devices (covers touch laptops / low-core / low-RAM
+   that the media query above can miss). Same treatment, any viewport. */
+html.norva-lite body { background-attachment: scroll; }
+
+html.norva-lite :is(.trust-grid article, .feature-grid article, .device-grid article,
+    .step-grid article, .pricing-grid article, .clarity-grid article,
+    .preference-card, .sync-panel, .faq-item, .device-grid, .logo-chip,
+    .eyebrow, .secondary-btn, .billing-toggle, .infra-window, .browser-mock,
+    .promo-card, .poster-row span) {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+html.norva-lite :is(.trust-grid article, .feature-grid article, .device-grid article,
+    .step-grid article, .pricing-grid article, .clarity-grid article,
+    .preference-card, .sync-panel, .faq-item) {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.012)),
+    rgba(15, 23, 44, 0.86);
+}
+
+html.norva-lite .scroll-reveal { filter: none !important; }

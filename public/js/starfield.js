@@ -7,13 +7,12 @@
  * Performance:
  *  - Stars are drawn from a pre-rendered sprite via drawImage (no per-frame
  *    arc()/createRadialGradient()/string allocation).
- *  - DPR is capped (1 on touch/low-power, 2 elsewhere) and star count scales to
- *    viewport area.
- *  - On touch devices parallax is disabled, so a scroll never forces a
- *    scroll-coupled redraw — the field just twinkles.
+ *  - On constrained devices (html.norva-lite, set early in <head>) DPR is capped
+ *    to 1, fewer stars are used, parallax is off, the loop is throttled to
+ *    ~30fps, and rendering PAUSES during scroll so the main thread is free for
+ *    a smooth scroll (parallax is off there, so nothing visible is lost).
  *  - Paused when the tab is hidden; fully static under prefers-reduced-motion.
- *  - Positions are viewport fractions seeded ONCE, so a resize only rescales
- *    (no reshuffle on the iOS Safari toolbar show/hide).
+ *  - Positions are viewport fractions seeded ONCE, so a resize only rescales.
  */
 (function () {
   'use strict';
@@ -29,15 +28,19 @@
       ? window.matchMedia('(prefers-reduced-motion: reduce)')
       : { matches: false, addEventListener: function () {}, addListener: function () {} };
 
+    // "lite" is decided in the <head> inline script (html.norva-lite); fall back
+    // to a local check so the field still behaves if that script didn't run.
     var coarse = false;
     try {
-      coarse = (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) ||
-        Math.min(window.innerWidth, window.innerHeight) <= 820;
-    } catch (e) { coarse = window.innerWidth <= 820; }
+      coarse = document.documentElement.classList.contains('norva-lite') ||
+        (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) ||
+        Math.min(window.innerWidth, window.innerHeight) <= 1024;
+    } catch (e) { coarse = window.innerWidth <= 1024; }
 
     var DPR_CAP = coarse ? 1 : 2;
-    var DENSITY = coarse ? 15000 : 9200; // larger = fewer stars
+    var DENSITY = coarse ? 16000 : 9200; // larger = fewer stars
     var PARALLAX = coarse ? 0 : 1;       // no scroll-coupled redraw on touch
+    var FRAME_MIN = coarse ? 32 : 0;     // ~30fps cap on constrained devices
 
     var canvas = document.createElement('canvas');
     canvas.className = 'norva-stars';
@@ -55,8 +58,6 @@
     var ctx = canvas.getContext('2d', { alpha: true });
     if (!ctx) return;
 
-    // Pre-rendered soft round sprites (white + faint blue). Drawn with
-    // globalAlpha per star — far cheaper than a gradient per frame.
     function makeSprite(rgb) {
       var S = 32;
       var c = document.createElement('canvas');
@@ -73,13 +74,12 @@
     var spriteWhite = makeSprite('255,255,255');
     var spriteBlue = makeSprite('150,200,255');
 
-    var dpr = 1, W = 0, H = 0, stars = [], glints = [], raf = 0;
+    var dpr = 1, W = 0, H = 0, stars = [], glints = [], raf = 0, lastPaint = 0;
     var scrollY = window.pageYOffset || document.documentElement.scrollTop || 0;
-    var running = false;
+    var running = false, paused = false;
 
     function rand(a, b) { return a + Math.random() * (b - a); }
 
-    // Resize the backing store only — never touches star data.
     function fit() {
       dpr = Math.min(window.devicePixelRatio || 1, DPR_CAP);
       W = window.innerWidth;
@@ -89,9 +89,8 @@
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     }
 
-    // Generate the field once; positions are fractions of the viewport.
     function seed() {
-      var count = Math.max(30, Math.min(coarse ? 130 : 220, Math.round((W * H) / DENSITY)));
+      var count = Math.max(28, Math.min(coarse ? 110 : 220, Math.round((W * H) / DENSITY)));
       stars = [];
       for (var i = 0; i < count; i++) {
         var depth = Math.random();
@@ -162,16 +161,20 @@
       ctx.globalCompositeOperation = 'source-over';
     }
 
-    function loop() {
-      if (!running) return;
-      paint(true);
+    function loop(now) {
+      if (!running || paused) return;
       raf = window.requestAnimationFrame(loop);
+      if (FRAME_MIN && now - lastPaint < FRAME_MIN) return;
+      lastPaint = now;
+      paint(true);
     }
 
     function start() {
       window.cancelAnimationFrame(raf);
+      paused = false;
       if (motionQuery.matches) { running = false; paint(false); return; }
       running = true;
+      lastPaint = 0;
       raf = window.requestAnimationFrame(loop);
     }
 
@@ -180,15 +183,29 @@
       window.cancelAnimationFrame(raf);
     }
 
+    var scrollIdle;
     window.addEventListener('scroll', function () {
       scrollY = window.pageYOffset || document.documentElement.scrollTop || 0;
+      // On constrained devices, freeze the canvas while scrolling so the main
+      // thread is free. Parallax is off there, so nothing visible is lost.
+      if (coarse && running && !motionQuery.matches) {
+        if (!paused) { paused = true; window.cancelAnimationFrame(raf); }
+        clearTimeout(scrollIdle);
+        scrollIdle = setTimeout(function () {
+          paused = false;
+          if (running && !document.hidden) {
+            lastPaint = 0;
+            raf = window.requestAnimationFrame(loop);
+          }
+        }, 220);
+      }
     }, { passive: true });
 
     var resizeTimer;
     window.addEventListener('resize', function () {
       clearTimeout(resizeTimer);
       resizeTimer = setTimeout(function () {
-        fit(); // rescale only
+        fit();
         if (motionQuery.matches) paint(false);
       }, 200);
     });
