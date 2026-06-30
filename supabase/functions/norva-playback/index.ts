@@ -97,7 +97,7 @@ Deno.serve(async (req) => {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 21,
+        version: 22,
         entitlements: true,
         entitlementsMode: entitlementRuntime.mode,
         entitlementsEnforced: entitlementRuntime.enforced,
@@ -2600,8 +2600,38 @@ async function runAudioBackfill(req: Request, db: SupabaseClient) {
   const expected = Deno.env.get("NORVA_BACKFILL_TOKEN") ?? "";
   const provided = req.headers.get("Authorization")?.match(/^Bearer\s+(.+)$/i)?.[1] ?? "";
   if (!expected || provided !== expected) throw new HttpError(401, "Unauthorized");
-
   const body = recordOrEmpty(await req.json().catch(() => ({})));
+
+  // One dimension per call by default. With fallthrough:true (set on the DAYTIME audio-films
+  // crons), once the primary dimension runs out of candidates we DRAIN the next unfinished
+  // dimension for the same provider — so a finished daytime window accelerates the night-only
+  // dimensions (series / subtitles / whisper) instead of idling. `processed` is the candidate
+  // count, so processed===0 means "this dimension is done" → advance to the next.
+  // SLOT-SAFE: dimensions run STRICTLY sequentially (one provider access at a time); each keeps
+  // its own userHasLiveSession() guard; the chain STOPS the instant a user is live (skipped) so
+  // it can never open a 2nd provider connection next to a live stream (the user_multi_ip trap).
+  if (body.fallthrough !== true) return await runOneDimension(db, body);
+  const fuId = stringOr(body.userId, "");
+  const chain: JsonRecord[] = [
+    body,                                                                   // primary (the cron's own: films audio/vod)
+    { userId: fuId, type: "series", mode: "probe", limit: 15, concurrency: 1 },
+    { userId: fuId, type: "movie", target: "subtitle", limit: 10, concurrency: 1 },
+    { userId: fuId, type: "series", target: "subtitle", limit: 10, concurrency: 1 },
+    { userId: fuId, type: "movie", mode: "whisper", limit: 4, concurrency: 1 },
+    { userId: fuId, type: "series", mode: "whisper", limit: 4, concurrency: 1 },
+  ];
+  const tried: JsonRecord[] = [];
+  for (const dim of chain) {
+    const r = (await runOneDimension(db, dim)) as JsonRecord;
+    const processed = Number(r?.processed ?? 0);
+    tried.push({ type: stringOr(dim.type, "?"), kind: dim.target ? "subtitle" : stringOr(dim.mode, "vod"), processed, skipped: stringOrNull(r?.skipped) });
+    if (r?.skipped) return { mode: "fallthrough", stoppedAt: "live-session", tried };   // user live → stop the whole chain
+    if (processed > 0) return { mode: "fallthrough", workedOn: tried[tried.length - 1], tried, result: r };
+  }
+  return { mode: "fallthrough", exhausted: true, tried };
+}
+
+async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
   const userId = stringOr(body.userId, "");
   const itemType = stringOr(body.type, "movie") === "series" ? "series" : "movie";
   const limit = Math.max(1, Math.min(300, Number(body.limit) || 100));
