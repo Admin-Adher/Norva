@@ -158,31 +158,56 @@
   }
   // Convert an annexb H.264 access unit (start-code-delimited NALs, as MPEG-TS delivers) into AVCC
   // (4-byte-length-prefixed NALs, as MP4/movenc needs). movenc copies TS video as-is, so without this
-  // the mdat holds annexb and MSE reads a start code as a NAL length → CHUNK_DEMUXER_ERROR. The AUD
-  // (type 9) is dropped; SPS/PPS stay in-band (harmless, also in the avcC). No-op-safe for AVCC input
-  // is the CALLER's job (only TS sources are converted).
+  // the mdat holds annexb and MSE reads a start code as a NAL length → CHUNK_DEMUXER_ERROR. AUD (9)
+  // and the parameter sets SPS (7) / PPS (8) are dropped — the params live in the avcC, matching
+  // ffmpeg's mp4 output. (Only TS sources are converted — the caller gates on _convertAnnexb.)
   function annexbToAvcc(data) {
     const ns = annexbNals(data);
+    const drop = (t) => t === 9 || t === 7 || t === 8;
     let tot = 0;
-    for (const n of ns) { if ((n[0] & 0x1f) === 9) continue; tot += 4 + n.length; }
+    for (const n of ns) { if (drop(n[0] & 0x1f)) continue; tot += 4 + n.length; }
     const out = new Uint8Array(tot); let o = 0;
     for (const n of ns) {
-      if ((n[0] & 0x1f) === 9) continue;
+      if (drop(n[0] & 0x1f)) continue;
       out[o] = (n.length >>> 24) & 0xff; out[o + 1] = (n.length >>> 16) & 0xff;
       out[o + 2] = (n.length >>> 8) & 0xff; out[o + 3] = n.length & 0xff;
       out.set(n, o + 4); o += 4 + n.length;
     }
     return out;
   }
+  // High-profile avcC extension (chroma_format_idc + bit_depths) parsed from the SPS. profile_idc
+  // 100/110/122/244/… carry these, and strict MP4 parsers (Chromium MSE) REQUIRE them in the avcC —
+  // omitting them is why a High-profile (avc1.64xxxx) TS failed while Main worked. Reads only the
+  // leading Exp-Golomb fields of the de-emulated RBSP. null when no extension applies.
+  const HIGH_PROFILES = new Set([100, 110, 122, 244, 44, 83, 86, 118, 128, 138, 139, 134, 135]);
+  function spsHighExt(sps) {
+    if (!HIGH_PROFILES.has(sps[1])) return null;
+    const r = [];
+    for (let i = 1; i < sps.length; i++) { if (i >= 3 && sps[i] === 3 && sps[i - 1] === 0 && sps[i - 2] === 0) continue; r.push(sps[i]); }
+    let bp = 3, bit = 0; // skip profile_idc / constraint_flags / level_idc
+    const u1 = () => { const b = (r[bp] >> (7 - bit)) & 1; bit++; if (bit === 8) { bit = 0; bp++; } return b; };
+    const ue = () => { let z = 0; while (u1() === 0 && z < 32) z++; let v = 0; for (let i = 0; i < z; i++) v = (v << 1) | u1(); return v + (1 << z) - 1; };
+    try {
+      ue();                 // seq_parameter_set_id
+      const cf = ue();      // chroma_format_idc
+      if (cf === 3) u1();   // separate_colour_plane_flag
+      const bl = ue();      // bit_depth_luma_minus8
+      const bc = ue();      // bit_depth_chroma_minus8
+      return { cf, bl, bc };
+    } catch (_) { return null; }
+  }
   // Build an avcC (AVCDecoderConfigurationRecord) from one SPS + one PPS NAL. profile/compat/level
-  // come from SPS bytes 1..3; 4-byte NAL length (0xFF). This is what an MP4 moov needs as the H.264
-  // decoder config — MPEG-TS doesn't carry it (SPS/PPS are in-band), so we synthesise it.
+  // come from SPS bytes 1..3; 4-byte NAL length (0xFF). MPEG-TS doesn't carry it (SPS/PPS are in-band),
+  // so we synthesise it — including the High-profile extension when the SPS calls for it.
   function buildAvcC(sps, pps) {
-    return new Uint8Array([
+    const a = [
       1, sps[1], sps[2], sps[3], 0xff, 0xe0 | 1,
       (sps.length >> 8) & 0xff, sps.length & 0xff, ...sps,
       1, (pps.length >> 8) & 0xff, pps.length & 0xff, ...pps,
-    ]);
+    ];
+    const e = spsHighExt(sps);
+    if (e) a.push(0xfc | (e.cf & 3), 0xf8 | (e.bl & 7), 0xf8 | (e.bc & 7), 0 /* numSPSExt */);
+    return new Uint8Array(a);
   }
   // Generic fallbacks if extradata parsing yields an unsupported string.
   const VIDEO_FALLBACKS = {
@@ -192,7 +217,7 @@
     av1: ['av01.0.08M.08'],
   };
 
-  const ENGINE_VERSION = 29;
+  const ENGINE_VERSION = 30;
 
   class NorvaEngine {
     constructor(videoEl, opts = {}) {
