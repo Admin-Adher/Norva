@@ -1,7 +1,8 @@
 plugins {
     id "com.android.application"
-    // Wires google-services.json into the build for Firebase Cloud Messaging (push).
-    id "com.google.gms.google-services"
+    // The Firebase google-services plugin is applied conditionally at the bottom of this
+    // file — only when app/google-services.json is present — so CI/debug builds (which have
+    // no config file) still compile. See the apply block after dependencies.
 }
 
 // Release signing is supplied by CI via env (see .github/workflows/android-release.yml).
@@ -75,6 +76,16 @@ dependencies {
     implementation "com.revenuecat.purchases:purchases:8.+"
     // Firebase Cloud Messaging: push notifications ("your catalog is ready") delivered even when the
     // app is closed. The BoM pins compatible Firebase versions; messaging pulls the FCM SDK + service.
+    // The SDK compiles without google-services.json; only the plugin (below) needs the config file.
     implementation platform("com.google.firebase:firebase-bom:33.7.0")
     implementation "com.google.firebase:firebase-messaging"
+}
+
+// Apply the Firebase google-services plugin ONLY when the config file is present. CI debug builds
+// (and any local build) ship no google-services.json, so the plugin stays off and the build still
+// compiles — push is simply inert in those builds. The signed Play Store release, built once the
+// owner drops app/google-services.json in place, applies it and wires real FCM. The plugin itself
+// is on the classpath via the root build.gradle (declared `apply false`).
+if (file("google-services.json").exists()) {
+    apply plugin: "com.google.gms.google-services"
 }

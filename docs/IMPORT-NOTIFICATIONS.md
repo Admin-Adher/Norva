@@ -90,13 +90,15 @@ le **cron digest** (`norva-import-notify`), après avoir marqué l'email `sent`,
 
 **⚠️ Étapes manuelles (owner) avant que la push fonctionne** :
 1. **Firebase Console** → créer le projet → ajouter l'app Android `tv.norva.phone` → télécharger
-   **`google-services.json`** → le déposer dans `clients/android-phone/app/` (le build échoue sans).
+   **`google-services.json`** → le déposer dans `clients/android-phone/app/`. Le plugin `google-services`
+   est appliqué **conditionnellement** (seulement si ce fichier existe) : sans lui, les builds CI/debug
+   compilent quand même (push inerte) ; la release Play Store l'applique et active le vrai FCM.
 2. **Service account** (Firebase → Paramètres → Comptes de service → générer une clé privée JSON) → poser le
    JSON **complet** dans le secret edge **`FCM_SERVICE_ACCOUNT`** (Supabase → Edge Functions → Secrets).
 3. **Release Play Store** d'une nouvelle version du wrapper (le bridge + le service n'existent que dans ce build).
 > Tant que ces 3 étapes ne sont pas faites, **rien ne casse** : pas de `FCM_SERVICE_ACCOUNT` → l'envoyeur saute
-> la push (email seul) ; pas de `google-services.json` → seul un build Android local échouerait (le CI release
-> est l'endroit où ce fichier est fourni). L'email Phase 1 reste pleinement fonctionnel sans Firebase.
+> la push (email seul) ; pas de `google-services.json` → le plugin reste désactivé, **les builds CI/debug
+> compilent quand même** (push inerte). L'email Phase 1 reste pleinement fonctionnel sans Firebase.
 
 ## 7. Statut des tâches
 | # | Tâche | État |

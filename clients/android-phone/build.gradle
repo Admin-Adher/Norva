@@ -1,6 +1,8 @@
 plugins {
     id "com.android.application" version "8.7.3" apply false
-    // Firebase Cloud Messaging (push). Requires app/google-services.json (Firebase Console →
-    // Project settings → add Android app tv.norva.phone → download). The build fails without it.
+    // Firebase Cloud Messaging (push). On the classpath only (apply false); app/build.gradle applies
+    // it conditionally, when app/google-services.json exists (Firebase Console → Project settings →
+    // add Android app tv.norva.phone → download). Absent the file, the plugin stays off so CI/debug
+    // builds still compile — real FCM activates in the release build once the owner drops the file in.
     id "com.google.gms.google-services" version "4.4.2" apply false
 }
