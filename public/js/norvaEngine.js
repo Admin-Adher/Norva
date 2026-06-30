@@ -156,6 +156,24 @@
     }
     return out;
   }
+  // Convert an annexb H.264 access unit (start-code-delimited NALs, as MPEG-TS delivers) into AVCC
+  // (4-byte-length-prefixed NALs, as MP4/movenc needs). movenc copies TS video as-is, so without this
+  // the mdat holds annexb and MSE reads a start code as a NAL length → CHUNK_DEMUXER_ERROR. The AUD
+  // (type 9) is dropped; SPS/PPS stay in-band (harmless, also in the avcC). No-op-safe for AVCC input
+  // is the CALLER's job (only TS sources are converted).
+  function annexbToAvcc(data) {
+    const ns = annexbNals(data);
+    let tot = 0;
+    for (const n of ns) { if ((n[0] & 0x1f) === 9) continue; tot += 4 + n.length; }
+    const out = new Uint8Array(tot); let o = 0;
+    for (const n of ns) {
+      if ((n[0] & 0x1f) === 9) continue;
+      out[o] = (n.length >>> 24) & 0xff; out[o + 1] = (n.length >>> 16) & 0xff;
+      out[o + 2] = (n.length >>> 8) & 0xff; out[o + 3] = n.length & 0xff;
+      out.set(n, o + 4); o += 4 + n.length;
+    }
+    return out;
+  }
   // Build an avcC (AVCDecoderConfigurationRecord) from one SPS + one PPS NAL. profile/compat/level
   // come from SPS bytes 1..3; 4-byte NAL length (0xFF). This is what an MP4 moov needs as the H.264
   // decoder config — MPEG-TS doesn't carry it (SPS/PPS are in-band), so we synthesise it.
@@ -174,7 +192,7 @@
     av1: ['av01.0.08M.08'],
   };
 
-  const ENGINE_VERSION = 28;
+  const ENGINE_VERSION = 29;
 
   class NorvaEngine {
     constructor(videoEl, opts = {}) {
@@ -200,6 +218,7 @@
       // applied via SourceBuffer.timestampOffset so seeks/resume land on target.
       this._tsAnchor = 0; this._tsApplied = 0; this._firstVpktPending = false;
       this._gopFloorPts = null;   // after a seek, drop video PTS below the landing keyframe (open-GOP leading B-frames)
+      this._convertAnnexb = false; // MPEG-TS: convert each annexb video access unit to AVCC for the mp4 muxer
       // In-band text-subtitle capture: turn demuxed subtitle packets into cues with no
       // provider connection (reuses bytes the engine already streams). Dormant until the
       // player calls enableSubtitleCapture(); flag-off = zero cost in the pump loop.
@@ -807,6 +826,9 @@
       await lib.AVCodecParameters_extradata_s(this.vS.codecpar, ptr);
       await lib.AVCodecParameters_extradata_size_s(this.vS.codecpar, avcc.length);
       if (this._diag) this._diag.injectedExtradata = avcc.length;
+      // The TS video is annexb; movenc copies it as-is, so the pump must convert each access unit to
+      // AVCC (length-prefixed) to match the avcC we just injected — else MSE rejects the mdat.
+      this._convertAnnexb = true;
       this.log('TS: injected H.264 avcC (' + avcc.length + ' B) from in-band SPS/PPS');
       // Enumerate subtitle streams (index + codec) for the player's CC menu. libav
       // here can't read the per-stream LANGUAGE, so the language is filled by the
@@ -1171,7 +1193,9 @@
             // Open-GOP: after the keyframe, drop leading B-frames whose PTS is BEFORE it (they
             // reference pre-seek frames), so the keyframe is first in presentation order too.
             if (this.vBase !== null && this._gopFloorPts !== null && to64(p.pts, p.ptshi) < this._gopFloorPts) { this._diag.droppedOpenGop++; continue; }
-            p.stream_index = this.V_IDX; this._setVideoDts(p); writeList.push(p);
+            p.stream_index = this.V_IDX;
+            if (this._convertAnnexb) p.data = annexbToAvcc(p.data); // MPEG-TS: annexb → AVCC for mp4
+            this._setVideoDts(p); writeList.push(p);
           } else if (this.aS && p.stream_index === this.aS.index) {
             // Hold audio until the first video keyframe is anchored, so a mid-GOP resume starts A/V
             // ALIGNED at the keyframe (no audio lead → no MSE stall). No-op on a fresh start (video is
