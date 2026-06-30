@@ -58,6 +58,32 @@
     });
   });
 
+  // Compact-on-scroll header: toggle a single class when crossing a threshold
+  // (rAF-throttled, state-guarded — no per-frame style writes). The shrink
+  // itself is a CSS transition, so this stays cheap.
+  function setupCompactNav() {
+    if (!nav) return;
+    let compact = false;
+    let ticking = false;
+    const update = () => {
+      const y = window.pageYOffset || document.documentElement.scrollTop || 0;
+      const should = y > 40;
+      if (should !== compact) {
+        compact = should;
+        nav.classList.toggle('compact', compact);
+      }
+      ticking = false;
+    };
+    window.addEventListener('scroll', () => {
+      if (!ticking) {
+        ticking = true;
+        window.requestAnimationFrame(update);
+      }
+    }, { passive: true });
+    update();
+  }
+  setupCompactNav();
+
   function setupBillingToggle() {
     const opts = Array.from(document.querySelectorAll('.billing-opt'));
     if (!opts.length) return;
