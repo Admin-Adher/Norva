@@ -170,13 +170,23 @@ d'office → il part au **gateway transcode**.
   démarrage (il faut transcoder en avance avant de servir les segments). D'où le « ça marche mais c'est
   plus long ».
 
-**Comment l'accélérer (amélioration possible, non faite) :** **recompiler le WASM avec le démuxeur
-`mpegts`** (`--enable-demuxer=mpegts` + parsers). Le moteur pourrait alors **remuxer le TS en local**
-comme un mkv (rapide, sans gateway) pour le cas courant **H.264 + AAC** ; il transcoderait juste l'audio
-côté client pour **H.264 + AC3** (déjà ce qu'il fait pour les mkv AC3). Le gateway ne resterait
-nécessaire que pour les codecs vraiment non décodables par le navigateur (**MPEG-2 vidéo**, DTS/TrueHD).
-⚠️ À tester : le remux-copy TS→fMP4 peut buter sur les mêmes discontinuités PCR que le remux gateway ;
-le muxer non-seekable du moteur pourrait les absorber, mais ça demande un build Emscripten + validation.
+**✅ FAIT (ENGINE_VERSION 26) — TS lisible en navigateur.** Le WASM a été **recompilé avec le démuxeur
+`mpegts`** (+ parsers h264/hevc/aac/mpeg). Le moteur remuxe maintenant le `.ts` **en local** comme un
+mkv (rapide, sans gateway) pour le cas courant **H.264/HEVC + AAC/AC3** (transcode audio client si AC3).
+- **Build** : impossible dans le sandbox de dev (le proxy tronque la chaîne Emscripten ~1 Go, `git clone`
+  externe bloqué) → workflow **GitHub Actions `build-libav-wasm`** + `scripts/build-libav-norva.sh` qui
+  reconstruit la config exacte (énumérée depuis le WASM livré : démux mkv/mp4 + mux fMP4 + décodeurs
+  audio + encodeur AAC, **aucun décodeur vidéo**) **+ `demuxer-mpegts`**, build sur runner propre, recommit
+  du WASM. Config validée en local d'abord (`mkconfig`), `mpegts` vérifié enregistré après build
+  (`av_find_input_format('mpegts')≠0`).
+- **Routage** (`api.js`) : `ts/mpegts/m2ts/mts` ajoutés à `ENGINE_DEMUXABLE_CONTAINERS` → le `.ts` part
+  au moteur. Il reste dans le set « conteneur unsafe » → repli gateway transcode conservé.
+- **Garde-fou** (`WatchPage.onError`) : un TS que le moteur démuxe mais que le **navigateur ne sait pas
+  décoder** (MPEG-2 vidéo, HEVC sans support navigateur) échoue à l'append après un load propre →
+  **repli gateway transcode** (via `engineSnapshot().looksLikeMpegTs`) au lieu d'une bannière. Donc au
+  pire = comportement d'avant (gateway), au mieux = moteur rapide.
+- Le WASM est servi en `cache-control: max-age=0, must-revalidate` → les navigateurs revalident et
+  récupèrent le nouveau build au rechargement (pas de cache périmé).
 
 ### Bug #4 — mkv ne démarre pas alors que mp4 oui : IP datacenter bloquée (GATEWAY_VERSION 51) ✅ racine
 - **Symptôme** : sur le **même provider**, les mp4 (`direct`) jouaient mais les mkv (`engine`/`relay`) `458`aient, **au même instant**.
@@ -215,7 +225,7 @@ Les fournisseurs IPTV bloquent les plages d'IP datacenter (anti-revente). Le nav
 ## 5. État final (vérifié en prod)
 - mkv via moteur : `first_frame` + `play_started` + resume/pause/seek en `playback_mode='engine'`, **plus aucun `CHUNK_DEMUXER`**.
 - Combinaison gagnante = **proxy résidentiel** (octets circulent) + **muxer non-seekable** (octets valides).
-- Versions : `ENGINE_VERSION 25` (TS détecté → repli gateway transcode ; `sourceHead` sur échec d'ouverture), `GATEWAY_VERSION 58` (sonde codec autorisée pour le TS VOD + estimation de durée → seek bar).
+- Versions : `ENGINE_VERSION 26` (**TS démuxé/remuxé en navigateur** via le WASM `+mpegts` ; repli gateway si le navigateur ne décode pas le codec ; `sourceHead` sur échec d'ouverture), `GATEWAY_VERSION 59` (Argos translate ; sonde codec TS VOD + estimation de durée → seek bar).
 
 ## 6. Runbook — « un mkv ne se lance plus »
 1. `GET https://norva-production.up.railway.app/health` → vérifier `version` et `providerProxy`.
