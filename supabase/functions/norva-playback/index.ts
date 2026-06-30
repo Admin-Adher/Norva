@@ -97,7 +97,7 @@ Deno.serve(async (req) => {
       return json(req, {
         ok: true,
         service: "norva-playback",
-        version: 20,
+        version: 21,
         entitlements: true,
         entitlementsMode: entitlementRuntime.mode,
         entitlementsEnforced: entitlementRuntime.enforced,
@@ -628,6 +628,7 @@ async function recordPlaybackEvent(
   let itemId = stringOr(body.itemId ?? body.item_id ?? body.id, "");
   let playbackMode = stringOrNull(body.playbackMode ?? body.playback_mode ?? body.mode);
 
+  let sessionLinked = false;
   if (playbackSessionId) {
     const { data: session, error } = await db
       .from("cloud_playback_sessions")
@@ -636,12 +637,18 @@ async function recordPlaybackEvent(
       .eq("user_id", userId)
       .maybeSingle();
     if (error) throwDb(error, "Unable to verify playback session");
-    if (!session) throw new HttpError(404, "Playback session not found");
-    sourceId = sourceId ?? stringOrNull(session.source_id);
-    deviceId = deviceId ?? stringOrNull(session.device_id);
-    itemType = itemType || stringOr(session.item_type, "");
-    itemId = itemId || stringOr(session.item_id, "");
-    playbackMode = playbackMode ?? stringOrNull(session.mode);
+    if (session) {
+      sessionLinked = true;
+      sourceId = sourceId ?? stringOrNull(session.source_id);
+      deviceId = deviceId ?? stringOrNull(session.device_id);
+      itemType = itemType || stringOr(session.item_type, "");
+      itemId = itemId || stringOr(session.item_id, "");
+      playbackMode = playbackMode ?? stringOrNull(session.mode);
+    }
+    // If the session is already gone, DON'T drop the event: a late event (e.g. a failure
+    // snapshot posted after the engine tore down / retried, or an end-of-playback ping)
+    // still carries itemType/itemId and is exactly the diagnostic we must not lose. Record
+    // it UNLINKED instead of 404ing — which silently lost every post-teardown error report.
   }
 
   if (!itemType || !itemId) throw new HttpError(400, "itemType and itemId are required");
@@ -658,7 +665,7 @@ async function recordPlaybackEvent(
     .insert({
       user_id: userId,
       device_id: deviceId,
-      playback_session_id: playbackSessionId,
+      playback_session_id: sessionLinked ? playbackSessionId : null,
       source_id: sourceId,
       item_type: itemType,
       item_id: itemId,
