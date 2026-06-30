@@ -7,6 +7,11 @@
  *
  * Cheap and considerate: DPR-capped, star count scaled to viewport area,
  * paused when the tab is hidden, and fully static under prefers-reduced-motion.
+ *
+ * Star positions are stored as viewport fractions (0..1) and seeded ONCE, so a
+ * resize only rescales the field — it never reshuffles. That matters on mobile:
+ * iOS Safari fires `resize` whenever its toolbar collapses/expands during
+ * scroll, and a reshuffle there would be very visible.
  */
 (function () {
   'use strict';
@@ -20,20 +25,20 @@
   function init() {
     var motionQuery = window.matchMedia
       ? window.matchMedia('(prefers-reduced-motion: reduce)')
-      : { matches: false, addEventListener: function () {} };
+      : { matches: false, addEventListener: function () {}, addListener: function () {} };
 
     var canvas = document.createElement('canvas');
     canvas.className = 'norva-stars';
     canvas.setAttribute('aria-hidden', 'true');
     // Essentials inline so the field works even if the CSS rule is missing.
-    var s = canvas.style;
-    s.position = 'fixed';
-    s.top = s.left = '0';
-    s.width = '100%';
-    s.height = '100%';
-    s.zIndex = '-1';
-    s.pointerEvents = 'none';
-    s.display = 'block';
+    var cs = canvas.style;
+    cs.position = 'fixed';
+    cs.top = cs.left = '0';
+    cs.width = '100%';
+    cs.height = '100%';
+    cs.zIndex = '-1';
+    cs.pointerEvents = 'none';
+    cs.display = 'block';
     document.body.appendChild(canvas);
 
     var ctx = canvas.getContext('2d', { alpha: true });
@@ -45,42 +50,46 @@
 
     function rand(a, b) { return a + Math.random() * (b - a); }
 
-    function build() {
+    // Resize the backing store to the viewport. Does NOT touch the star data,
+    // so it is safe to call on every resize (incl. mobile toolbar churn).
+    function fit() {
       dpr = Math.min(window.devicePixelRatio || 1, 2);
       W = window.innerWidth;
       H = window.innerHeight;
       canvas.width = Math.max(1, Math.round(W * dpr));
       canvas.height = Math.max(1, Math.round(H * dpr));
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
 
+    // Generate the field once. Positions are fractions of the viewport.
+    function seed() {
       var count = Math.max(36, Math.min(220, Math.round((W * H) / 9200)));
       stars = [];
       for (var i = 0; i < count; i++) {
         var depth = Math.random(); // 0 = far, 1 = near
         stars.push({
-          x: Math.random() * W,
-          y: Math.random() * H,
+          nx: Math.random(),
+          ny: Math.random(),
           r: rand(0.4, 1.4) * (0.7 + depth * 0.6),
           base: rand(0.10, 0.42) * (0.55 + depth * 0.6),
           amp: rand(0.25, 0.6),
           sp: rand(0.35, 1.25),
-          ph: rand(0, Math.PI * 2),
+          ph: rand(0, 6.2832),
           par: 0.012 + depth * 0.055,
           tint: Math.random() < 0.18
         });
       }
-
       glints = [];
       var gc = Math.max(2, Math.round(count / 30));
       for (var j = 0; j < gc; j++) {
         glints.push({
-          x: Math.random() * W,
-          y: Math.random() * H,
+          nx: Math.random(),
+          ny: Math.random(),
           r: rand(1.0, 1.7),
           base: rand(0.26, 0.5),
           amp: rand(0.4, 0.7),
           sp: rand(0.45, 1.0),
-          ph: rand(0, Math.PI * 2),
+          ph: rand(0, 6.2832),
           par: 0.035 + Math.random() * 0.05,
           tint: Math.random() < 0.5
         });
@@ -88,25 +97,25 @@
     }
 
     function wrap(y, span) {
-      return ((y % span) + span) % span - 100;
+      y = y % span;
+      if (y < 0) y += span;
+      return y - 100;
     }
 
     function draw(t) {
       if (!running) return;
-      var time = t * 0.001;
-      var sc = scrollY;
+      var time = t * 0.001, sc = scrollY, spanS = H + 200, i, st, a, x, y;
       ctx.clearRect(0, 0, W, H);
       ctx.globalCompositeOperation = 'lighter';
 
-      var spanS = H + 200, i, st, a, y;
       for (i = 0; i < stars.length; i++) {
         st = stars[i];
         a = st.base + st.amp * st.base * Math.sin(time * st.sp + st.ph);
         if (a <= 0.012) continue;
-        y = wrap(st.y - sc * st.par, spanS);
+        y = wrap(st.ny * spanS - sc * st.par, spanS);
         ctx.beginPath();
         ctx.fillStyle = (st.tint ? 'rgba(150,196,255,' : 'rgba(255,255,255,') + Math.min(0.78, a) + ')';
-        ctx.arc(st.x, y, st.r, 0, 6.2832);
+        ctx.arc(st.nx * W, y, st.r, 0, 6.2832);
         ctx.fill();
       }
 
@@ -114,20 +123,21 @@
         st = glints[i];
         a = st.base + st.amp * st.base * Math.sin(time * st.sp + st.ph);
         if (a <= 0.02) continue;
-        y = wrap(st.y - sc * st.par, spanS);
+        x = st.nx * W;
+        y = wrap(st.ny * spanS - sc * st.par, spanS);
         var col = st.tint ? '120,210,255' : '255,255,255';
         var halo = st.r * 6;
-        var g = ctx.createRadialGradient(st.x, y, 0, st.x, y, halo);
+        var g = ctx.createRadialGradient(x, y, 0, x, y, halo);
         g.addColorStop(0, 'rgba(' + col + ',' + Math.min(0.85, a) + ')');
         g.addColorStop(0.45, 'rgba(' + col + ',' + Math.min(0.3, a * 0.35) + ')');
         g.addColorStop(1, 'rgba(' + col + ',0)');
         ctx.fillStyle = g;
         ctx.beginPath();
-        ctx.arc(st.x, y, halo, 0, 6.2832);
+        ctx.arc(x, y, halo, 0, 6.2832);
         ctx.fill();
         ctx.beginPath();
         ctx.fillStyle = (st.tint ? 'rgba(150,210,255,' : 'rgba(255,255,255,') + Math.min(0.92, a) + ')';
-        ctx.arc(st.x, y, st.r * 0.7, 0, 6.2832);
+        ctx.arc(x, y, st.r * 0.7, 0, 6.2832);
         ctx.fill();
       }
 
@@ -142,7 +152,7 @@
         var st = stars[i];
         ctx.beginPath();
         ctx.fillStyle = (st.tint ? 'rgba(150,196,255,' : 'rgba(255,255,255,') + Math.min(0.55, st.base + st.amp * st.base * 0.5) + ')';
-        ctx.arc(st.x, st.y, st.r, 0, 6.2832);
+        ctx.arc(st.nx * W, st.ny * H, st.r, 0, 6.2832);
         ctx.fill();
       }
       ctx.globalCompositeOperation = 'source-over';
@@ -168,7 +178,7 @@
     window.addEventListener('resize', function () {
       clearTimeout(resizeTimer);
       resizeTimer = setTimeout(function () {
-        build();
+        fit(); // rescale only — fractional star positions are preserved
         if (motionQuery.matches) drawStatic();
       }, 200);
     });
@@ -182,7 +192,8 @@
     if (motionQuery.addEventListener) motionQuery.addEventListener('change', onMotionChange);
     else if (motionQuery.addListener) motionQuery.addListener(onMotionChange);
 
-    build();
+    fit();
+    seed();
     start();
   }
 })();

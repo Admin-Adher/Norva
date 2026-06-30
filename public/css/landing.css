@@ -102,6 +102,12 @@ body {
   pointer-events: none;
 }
 
+@media print {
+  .norva-stars {
+    display: none !important;
+  }
+}
+
 a {
   color: inherit;
   text-decoration: none;
