@@ -90,6 +90,18 @@ body {
   }
 }
 
+/* Decorative starfield — painted behind all content; glass cards frost it via
+   their backdrop-filter. Animation/static handling lives in starfield.js. */
+.norva-stars {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: -1;
+  display: block;
+  pointer-events: none;
+}
+
 a {
   color: inherit;
   text-decoration: none;
