@@ -132,6 +132,11 @@ class WatchPage {
         this._aiActiveLang = null;             // lang code of the AI <track> currently showing
         this._pendingTranslateTarget = null;
         this._translatePollTimers = new Map(); // lang -> interval id
+        // Phase 4 OCR: image (PGS) subtitle tracks aren't text-extractable; the viewer can OCR one to
+        // text. Per-track state machine, keyed by the subtitle STREAM index (a title can have several
+        // image tracks). Same cache/attach plumbing as AI subs (cross-user, src-less <track>).
+        this._ocr = new Map();                 // streamIndex -> { state, vtt, lang, pollTimer, titleKey }
+        this._ocrActiveStreamIndex = null;     // streamIndex of the OCR <track> currently showing
         this.selectedAudioStreamIndex = null;
         this.selectedAudioTrackUserChoice = false;
         this.pendingPlaybackPreferences = null;
@@ -5466,7 +5471,9 @@ class WatchPage {
         this.stopSubtitleEngine();
         this.stopAiSubtitlePolling();
         this.stopAllTranslatePolling();
+        this._stopAllOcrPolling();
         this._aiActiveLang = null;
+        this._ocrActiveStreamIndex = null;
         this.video?.querySelectorAll('track[data-norva-probe-subtitle="true"], track[data-norva-ai-subtitle="true"]').forEach(track => {
             if (track.track) {
                 track.track.mode = 'disabled';
@@ -6226,6 +6233,152 @@ class WatchPage {
         return Boolean(el && el.track && el.track.mode === 'showing');
     }
 
+    // ============================================================
+    // Phase 4 OCR — image (PGS) subtitle tracks → text
+    // Blu-ray PGS subtitles are bitmaps, not text, so they can't be extracted as a WebVTT. The
+    // viewer can OCR one on demand: the edge runs tesseract on the gateway, caches the VTT
+    // cross-user (kind='ocr', lang=<track language>), and we attach it via the same src-less
+    // <track> path as AI subtitles. Per-track state, keyed by the subtitle STREAM index.
+    // ============================================================
+
+    // The PGS image-sub tracks we can offer OCR for (gated like AI subs: cloud on-demand movie).
+    getOcrableSubtitleTracks() {
+        if (!this._canRequestAiSubtitles()) return [];
+        return (Array.isArray(this.subtitleTracks) ? this.subtitleTracks : []).filter((t) =>
+            t && String(t.subtitleType || '').toLowerCase() === 'image' && /pgs/i.test(String(t.codec || '')));
+    }
+
+    _ocrLangOf(track) {
+        return this.normalizeTrackLanguage(track?.language || track?.lang || '') || 'und';
+    }
+
+    _ocrEntry(streamIndex) {
+        let e = this._ocr.get(streamIndex);
+        if (!e) { e = { state: 'idle', vtt: null, lang: 'und', pollTimer: null, titleKey: null }; this._ocr.set(streamIndex, e); }
+        return e;
+    }
+
+    // State for THIS title only — a stale entry from a previous title reads as idle.
+    _ocrStateFor(streamIndex) {
+        const e = this._ocr.get(streamIndex);
+        return (e && e.titleKey === this._aiSubtitleKey()) ? e.state : 'idle';
+    }
+
+    _stopOcrPolling(streamIndex) {
+        const e = this._ocr.get(streamIndex);
+        if (e?.pollTimer) { clearInterval(e.pollTimer); e.pollTimer = null; }
+    }
+
+    _stopAllOcrPolling() {
+        if (!this._ocr) return;
+        for (const e of this._ocr.values()) { if (e.pollTimer) { clearInterval(e.pollTimer); e.pollTimer = null; } }
+    }
+
+    _attachOcrTrack(streamIndex, vtt, lang) {
+        const ok = this.attachGeneratedSubtitleTrack(vtt, lang);
+        if (ok) this._ocrActiveStreamIndex = streamIndex;
+        return ok;
+    }
+
+    // Menu rows for the title's PGS tracks, reflecting each track's OCR state machine.
+    _ocrSubtitleMenuHtml(tracks) {
+        return tracks.map((t) => {
+            const idx = Number(t.index);
+            const lang = this._ocrLangOf(t);
+            const tag = lang && lang !== 'und' ? ` · ${lang.toUpperCase()}` : '';
+            const base = `OCR${tag}`;
+            const state = this._ocrStateFor(idx);
+            if (state === 'processing') {
+                return `<button class="captions-option locked" data-source="ocr" data-index="-1" data-stream-index="${idx}" disabled aria-disabled="true" title="Reading the image subtitles with OCR in the background — you can keep watching.">⏳ ${this.escapeHtml(base + ' — generating')}</button>`;
+            }
+            if (state === 'failed') {
+                return `<button class="captions-option" data-source="ocr" data-index="-1" data-stream-index="${idx}">⚠️ ${this.escapeHtml(base + ' failed — retry')}</button>`;
+            }
+            const active = state === 'ready' && this._ocrActiveStreamIndex === idx;
+            const label = state === 'ready' ? base : `${base} → text`;
+            return `<button class="captions-option ${active ? 'active' : ''}" data-source="ocr" data-index="-1" data-stream-index="${idx}">🔤 ${this.escapeHtml(label)}</button>`;
+        }).join('');
+    }
+
+    async requestOcrSubtitle(streamIndex, lang) {
+        const base = this._aiSubtitleParams();
+        if (!base || !Number.isInteger(streamIndex)) return;
+        const api = window.NorvaCloud?.playback;
+        if (!api?.generatedSubtitle) return;
+        const key = this._aiSubtitleKey();
+        const entry = this._ocrEntry(streamIndex);
+        entry.lang = lang || 'und';
+        entry.titleKey = key;
+
+        const params = { ...base };
+        try {
+            const cloudId = await window.API?.resolveCloudSourceId?.(params.sourceId);
+            if (cloudId) params.sourceId = String(cloudId);
+        } catch (_) { /* raw id */ }
+
+        // Already produced this session → just re-attach from cache.
+        if (entry.state === 'ready' && entry.vtt) {
+            this._attachOcrTrack(streamIndex, entry.vtt, entry.lang);
+            this.updateCaptionsTracks();
+            return;
+        }
+
+        const getParams = { ...params, kind: 'ocr', lang: entry.lang };
+        entry.state = 'processing';
+        this.updateCaptionsTracks();
+        // 1) shared cache (another viewer may already have OCR'd this track).
+        try {
+            const got = await api.generatedSubtitle(getParams);
+            if (this._applyOcrResponse(streamIndex, got, key)) return;
+        } catch (_) { /* fall through to trigger */ }
+        // 2) trigger an OCR pass and poll for it.
+        try {
+            const enq = await api.requestGeneratedSubtitle({ ...params, kind: 'ocr', index: streamIndex, lang: entry.lang });
+            if (enq && String(enq.status) === 'ready') {
+                const got = await api.generatedSubtitle(getParams);
+                if (this._applyOcrResponse(streamIndex, got, key)) return;
+            }
+            if (enq && String(enq.status) === 'error') {
+                entry.state = 'failed'; this.updateCaptionsTracks(); return;
+            }
+        } catch (err) {
+            console.warn('[WatchPage] OCR enqueue failed:', err?.status, err?.message || err);
+            entry.state = 'failed'; this.updateCaptionsTracks(); return;
+        }
+        this._startOcrPolling(streamIndex, getParams, key);
+    }
+
+    _applyOcrResponse(streamIndex, got, key) {
+        if (this._aiSubtitleKey() !== key) return true; // title changed → stop this flow
+        const entry = this._ocrEntry(streamIndex);
+        const status = String(got?.status || 'none');
+        if (status === 'ready' && got.vtt) {
+            entry.vtt = got.vtt;
+            entry.lang = this.normalizeTrackLanguage(got.lang) || entry.lang;
+            entry.state = this._attachOcrTrack(streamIndex, got.vtt, entry.lang) ? 'ready' : 'failed';
+            this._stopOcrPolling(streamIndex);
+            this.updateCaptionsTracks();
+            return true;
+        }
+        if (status === 'failed') {
+            entry.state = 'failed'; this._stopOcrPolling(streamIndex); this.updateCaptionsTracks(); return true;
+        }
+        if (status === 'processing') { entry.state = 'processing'; return false; }
+        return false; // 'none' → caller triggers
+    }
+
+    _startOcrPolling(streamIndex, getParams, key) {
+        this._stopOcrPolling(streamIndex);
+        const entry = this._ocrEntry(streamIndex);
+        const startedAt = Date.now();
+        const MAX_MS = 60 * 60 * 1000; // a full-film OCR can be long; cap the poll generously
+        entry.pollTimer = setInterval(async () => {
+            if (this._aiSubtitleKey() !== key) { this._stopOcrPolling(streamIndex); return; }
+            if (Date.now() - startedAt > MAX_MS) { this._stopOcrPolling(streamIndex); entry.state = 'failed'; this.updateCaptionsTracks(); return; }
+            try { const got = await window.NorvaCloud.playback.generatedSubtitle(getParams); this._applyOcrResponse(streamIndex, got, key); } catch (_) { /* transient — keep polling */ }
+        }, 20000);
+    }
+
     // Menu entry reflecting the AI-subtitle state machine. Rendered as a normal .captions-option
     // so the existing click wiring routes it to selectCaptionTrack('ai', …).
     _aiSubtitleMenuHtml() {
@@ -6763,11 +6916,14 @@ class WatchPage {
             ? `<button class="captions-option active locked" data-source="burned" data-index="-1" disabled aria-disabled="true" title="Burned into the picture — always on">🔒 ${this.escapeHtml(burned.name ? `${burned.name} — burned-in` : 'Burned-in subtitles')}</button>`
             : `<button class="captions-option ${offActive ? 'active' : ''}" data-source="off" data-index="-1">Off</button>`;
         const aiHtml = aiAvailable ? this._aiSubtitleMenuHtml() : '';
-        // When AI subtitles are on offer, the "no track" message would contradict the row, so
-        // suppress it (the AI row + its own title text carry the message instead).
+        // Phase 4: PGS image tracks get an "OCR → text" row each (offered alongside any text/AI rows).
+        const ocrTracks = this.getOcrableSubtitleTracks();
+        const ocrHtml = ocrTracks.length ? this._ocrSubtitleMenuHtml(ocrTracks) : '';
+        // When AI/OCR subtitles are on offer, the "no track" message would contradict the rows, so
+        // suppress it (the AI/OCR rows + their own title text carry the message instead).
         const emptyHtml = burned
             ? `<div class="captions-empty">${this.escapeHtml('Always on — subtitles are part of the picture, they can’t be turned off.')}</div>`
-            : (!options.length && !aiAvailable
+            : (!options.length && !aiAvailable && !ocrTracks.length
                 ? `<div class="captions-empty">${this.escapeHtml(this.getBurnedSubtitleMessage())}</div>`
                 : '');
         const offsetHtml = this.selectedSubtitleStreamIndex !== null && this.selectedSubtitleStreamIndex !== undefined && probeSubtitleTracks.length
@@ -6780,7 +6936,7 @@ class WatchPage {
               </div>`
             : '';
 
-        this.captionsList.innerHTML = `${headerHtml}${optionHtml}${aiHtml}${emptyHtml}${offsetHtml}`;
+        this.captionsList.innerHTML = `${headerHtml}${optionHtml}${aiHtml}${ocrHtml}${emptyHtml}${offsetHtml}`;
 
         this.captionsList.querySelectorAll('.captions-option').forEach(btn => {
             if (btn.dataset.action) return; // non-track actions (e.g. ai-notify) wire themselves below
@@ -6834,6 +6990,19 @@ class WatchPage {
             await this.requestAiSubtitles();
             this.updateCaptionsTracks();
             if (this.aiSubtitleState === 'ready') this.closeCaptionsMenu();
+            return;
+        }
+
+        // Phase 4 OCR: an image (PGS) track → run tesseract on the gateway, attach the VTT. Own
+        // state machine (read cache → trigger → poll → attach), keyed by the subtitle stream index.
+        if (source === 'ocr' && Number.isInteger(streamIndex)) {
+            this.selectedSubtitleStreamIndex = null;
+            this.selectedSubtitleTrackUserChoice = true;
+            this.clearPendingPreference('subtitle');
+            const track = this.getOcrableSubtitleTracks().find((t) => Number(t.index) === streamIndex);
+            await this.requestOcrSubtitle(streamIndex, this._ocrLangOf(track));
+            this.updateCaptionsTracks();
+            if (this._ocrStateFor(streamIndex) === 'ready') this.closeCaptionsMenu();
             return;
         }
 
