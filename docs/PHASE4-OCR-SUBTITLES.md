@@ -1,8 +1,10 @@
 # Phase 4 — OCR des sous-titres image (PGS / VOBSUB → texte)
 
-**Statut (2026-06-30) : pipeline PGS construit + déployé bout-en-bout ; backend prouvé ;
-blocage restant = la contrainte de connexion provider (429), pas le code. Reste : UI player +
-intégration off-peak sérialisée. VOBSUB/DVB = après le PGS.**
+**Statut (2026-06-30) : MVP PGS LIVRÉ — pipeline gateway + edge v24 + backoff 429 + UI player
+on-demand, tous déployés ; parser prouvé (selftest) ; chaîne backend prouvée bout-en-bout. La
+contrainte restante est la connexion provider (429/401), pas le code — atténuée par le backoff +
+le modèle on-demand caché. Reste : validation sur vrai flux PGS quand une connexion est libre.
+VOBSUB/DVB = après le PGS.**
 
 But : les pistes de sous-titres **image** (PGS Blu-ray, VOBSUB DVD, DVB) ne sont pas extractibles en
 texte (`extractable:false`, « burn-in requis »). La Phase 4 les **OCR** → WebVTT, **caché cross-user**
@@ -33,9 +35,10 @@ player / cron ──► edge ocrEnqueue ──► gateway /ocr-async ──► f
     de cache, donc 2 pistes image de langues ≠ → 2 lignes ≠) → POST `/ocr-async` avec l'index + un
     indice de langue tesseract. Le `transcribe-callback` (partagé, par `job_id`) écrit le VTT.
   - `GET/POST generated-subtitle` : acceptent `kind='ocr'`. Mode service `ocr-enqueue` (live-guardé).
-- **Player** : ⏳ **à faire** — remplacer « burn-in requis » sur une piste image par un bouton
-  « OCR → texte » avec la même machine à états que les sous-titres IA (`attachGeneratedSubtitleTrack`
-  reste inchangé : un VTT est un VTT).
+- **Player** (`public/js/pages/WatchPage.js`) : ✅ **livré** — chaque piste PGS a une ligne
+  « 🔤 OCR → text » dans le menu CC, machine à états par piste (idle → processing → ready | failed,
+  clé = index de stream), même flux on-demand que les sous-titres IA (lecture cache → trigger → poll
+  → `attachGeneratedSubtitleTrack`). Additif pur : aucune piste PGS → menu inchangé.
 
 ## 2. Vérifié (2026-06-30)
 
@@ -75,10 +78,17 @@ ffmpeg exit 1: … Server returned 401 Unauthorized ← l'anti-abus du panel a t
 3. **Piggyback lecture** (plus tard) : quand un user lit un titre à pistes PGS, le gateway a déjà le
    fichier ouvert → extraire le `.sup` sur la même connexion plutôt qu'en ouvrir une 2ᵉ.
 
-## 4. Reste à faire
-- [ ] UI player : bouton « OCR → texte » sur les pistes image + machine à états (idle/processing/ready/failed).
-- [ ] Intégration provider-safe (off-peak sérialisé + backoff 429/401) — cf. §3.
-- [ ] Validation sur vrai flux PGS quand une connexion est libre (via le cron nocturne, sans marteler).
+## 4. Fait / reste à faire
+- [x] **UI player** : bouton « OCR → text » par piste PGS + machine à états (cf. §1).
+- [x] **Backoff provider-safe** : retry 429 espacé (30s/60s), pas de retry sur 401/403 (anti-abus) —
+      `OCR_EXTRACT_RETRIES`/`OCR_EXTRACT_BACKOFF_MS` côté gateway (cf. §3).
+- **Décision** : OCR **on-demand** (déclenché au player, caché cross-user) plutôt qu'un **pré-gen
+  nocturne en masse**. Raison : extraire une piste image = **demux du fichier entier** (~tout le film
+  téléchargé via la connexion provider) → trop coûteux pour 509 titres en bloc. En on-demand, le 1ᵉʳ
+  spectateur d'un titre paie le coût (quelques min), tous les suivants l'ont gratis (cache). Un cron
+  nocturne « réchauffe 1 titre le plus demandé » reste possible plus tard si utile.
+- [ ] Validation sur vrai flux PGS quand une connexion provider est libre (le test du 2026-06-30 a été
+      bloqué par un `429` puis `401` = anti-abus du panel ; ne pas marteler — cf. §3).
 - [ ] Limitations MVP connues du parser : objet/ODS unique par cue (les très grands bitmaps multi-ODS
       seraient tronqués) ; une seule piste image par langue par titre (clé de cache). À étendre si besoin.
 - [ ] Après PGS validé : **VOBSUB** (`.idx/.sub`) puis **DVB**.
