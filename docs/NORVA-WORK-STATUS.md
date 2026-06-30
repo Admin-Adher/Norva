@@ -35,6 +35,8 @@ résout les imports `../_shared`). Ne jamais déployer une edge function via un 
 | Edge + Player | **UX d'attente sous-titres IA** : compte à rebours ETA + toggle **« 🔔 Notify me by email »** (opt-in par titre, route `POST /generated-subtitle-notify` légère sans appel provider, fan-out email Resend au callback). **Vérifié prod** (callback réel → `skipped` no-speech, 0 email). Détail `PHASE3-AI-SUBTITLES.md` §9. | `norva-playback` (v19), `WatchPage.js`, `cloudApi.js`, migration `…_generated_subtitle_notifications` |
 | Enrichment | **Bascule auto « fallthrough »** : quand l'audio films d'un provider est fini, sa **fenêtre de jour draine les dimensions de nuit** (séries → sous-titres → whisper) → jour+nuit ≈ 2× plus vite. Slot-safe (séquentiel, garde live, stop si user regarde). Flag `'fallthrough',true` sur les 3 crons de jour. Vérifié live (apdxes films `0` → séries `15`). Détail `ENRICHMENT_CRON_SETUP.md`. | `norva-playback` (v22), `cron.alter_job` jobs 10/36/41 |
 | **Phase 3b** Gateway+Edge+Player | **Traduction sous-titres IA multi-cible** (Argos / CTranslate2+SentencePiece sur la gateway — pivot par l'anglais, **0 connexion provider**, ~20-45 s/film, cache cross-user `kind=translation`). Sélecteur « 🌐 Translate to … » au player une fois le transcript prêt. `ARGOS_LANGS` (défaut `fr,es,ar,de,it,pt`) configurable. Détail `PHASE3-AI-SUBTITLES.md` §10. | gateway v59 (`translate.py`, `fetch_argos_models.py`, Dockerfile), `norva-playback` (v20), `WatchPage.js`, `cloudApi.js` |
+| **Orphelins — Couche 1** | **Continue Watching ne montre plus un média retiré du catalogue** (le « cas Airysat » : clic → 404). `listHistory` retire les lignes **films** dont le `external_id` a disparu de `cloud_media_items`, **uniquement** si la source est stablement `ready` (jamais en plein sync), **non destructif** + **fail-safe**. Toutes les autres surfaces titres filtraient déjà `variant_count>0`. Détail `docs/ORPHAN-HANDLING.md` §2. | `norva-cloud` (commit `7ce2451`) |
+| **Orphelins — Couche 3 (racine)** | **Le sync ne peut plus jamais vider le catalogue.** Upsert-puis-prune : plus de delete en amont, marquage `catalog_version` par run (UPDATE ciblé → enrichissement préservé), prune **gated** (0 erreur fetch **ET** <50 % de suppression + re-check single-flight avant DELETE) ; un refresh qui re-voit 0 item **garde l'ancien catalogue** (pas de re-hammer). **Rétro-compatible** (curseurs legacy = ancien chemin → déployable en plein sync). Revue adversariale (2 trouvailles corrigées) + mécanique DB validée. Détail `docs/ORPHAN-HANDLING.md` §3. | `norva-source-sync` (commit `965c1c3`), migration `20260630160000_layer3_catalog_versioning.sql` |
 
 ## Ce qui est DÉPLOYÉ mais derrière un FLAG (à activer pour en profiter)
 
@@ -115,6 +117,15 @@ jour `6-23 UTC`** (`*/3` probe ou `*/5` vod), **séries + sous-titres + whisper 
 décalés de 3 min (cycle 9) → jamais deux accès simultanés. `langs` (films tagués) **supprimé**
 (redondant avec le bulk `untagged`). apdxes 429 même sur métadonnées → son vod aussi en `6-23`.
 
+> **MISE À JOUR 30/06 (nouveaux providers + état courant)** — le tableau ci-dessus est historique.
+> État actuel : **jeremy** = `hernandez.jeremy@outlook.fr` (`0b971271…`) → **IPTV Ferran** ;
+> **airo** = `projethorizon2030@gmail.com` (`7bdab1df…`) → **Airysat + IPTV Ninja + KING365 + Opplex**
+> (4 panels sur un compte). Les crons sont **par `userId`** → un nouveau provider sur un compte déjà
+> câblé est sondé **automatiquement** (rien à créer). **Tous les jobs jeremy passés en
+> `concurrency:1`** (Ferran = panel neuf de limite inconnue ; `audio-langs-jeremy` jobid 36 : 2→1 via
+> `cron.alter_job`) → 1 connexion max + crons de nuit décalées = pas de 429/abuse. Mapping complet +
+> détails : `docs/ORPHAN-HANDLING.md` §6.
+
 **Cache cross-user keyé par `providerKey`** (cf. `PROVIDER-IDENTITY-DEDUP.md`, LIVE) : les écritures
 vont dans les caches globaux (`catalog_file_tracks`, `catalog_titles`), **partagés par tout user du
 même panel — tous les miroirs d'URL fusionnent sous un seul `providerKey`**. → un **nouvel inscrit
@@ -149,3 +160,5 @@ n'aurait fait que contourner le symptôme).
 - `supabase/functions/ENRICHMENT_CRON_SETUP.md` — **flotte backfill pg_cron** (cadences par-provider, SQL réel, rationale fréquence-vs-concurrence) ⭐
 - `docs/PROVIDER-IDENTITY-DEDUP.md` — **audit miroirs d'URL + design `provider_key`** (l'URL ≠ le fournisseur ; dédup cross-user) ⭐
 - `docs/PHASE3-AI-SUBTITLES.md` — **Phase 3 COMPLÈTE** (sous-titres IA : whisper→VTT + Argos) ; **3a §8, 3b §10, 3c §11** tous livrés
+- `docs/PHASE4-OCR-SUBTITLES.md` — **Phase 4** OCR sous-titres image (PGS direct + VOBSUB/DVB via `sub2video`)
+- `docs/ORPHAN-HANDLING.md` — **gestion des orphelins de catalogue** (Couche 1 Continue Watching + Couche 3 upsert-puis-prune + mémoire opérationnelle comptes/providers/crons) ⭐
