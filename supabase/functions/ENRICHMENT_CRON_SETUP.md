@@ -76,13 +76,25 @@ daytime re-syncs bite.
 > - **AÎRO** : `vod` mort (`get_vod_info` = métadonnées descriptives, pas de bloc audio) →
 >   tout en **probe**. ~9,5k films + 2,2k séries.
 
+> **2026-07-01 (v3) — AÎRO = 5 hôtes distincts → crons PAR-PANEL (parallélisme).** Le compte
+> `7bdab1df…` s'est révélé porter **5 panels distincts** (Airysat / Ninja / KING365 / Opplex /
+> Promax, ~334k films), pas un seul host. Draîné par `user_id` seul, les 5 partageaient **UN**
+> slot sérialisé → ~52 j de 1er passage (vs ~5 j pour super8k, 70k, mono-host dédié). Correctif :
+> un scope **`sourceId`** (RPC `audio_backfill_candidates`, variant-driven) fait qu'un cron ne
+> draine **qu'un** panel → chaque hôte a son slot et ils avancent **en parallèle**. **Charge
+> par-hôte inchangée** (1 connexion/hôte, juste plus mise en file avec les voisins ; hôtes
+> distincts → pas de `user_multi_ip`) → chaque panel AÎRO reçoit désormais le **même traitement
+> que super8k**. `mode:whisper` étant aussi une connexion provider, `whisper_candidate_titles`
+> gagne un `p_source` (scopé) ; le fallthrough propage `sourceId` sur **toutes** les dimensions.
+> Détail des crons + `sourceId` dans la section SQL « AÎRO — 5 PANELS PARALLÉLISÉS » plus bas.
+
 ### Flotte backfill provider — 4 dimensions × 3 providers (touche le slot)
 
 | Provider (uuid) | Films audio — jour 6-23 | Séries — `0-59/9` 0-5 | Sous-titres — `3-59/9` 0-5 | Whisper — `6-59/9` 0-5 |
 |---|---|---|---|---|
 | **super8k** (`c5be5ac4…`) probe | `norva-audio-langs-untagged` `*/3` (25) | `norva-audio-langs-series` (15) | `norva-subtitle-backfill-movie` (10) | `norva-audio-langs-whisper` (4) |
 | **apdxes** (`0b971271…`) vod films | `norva-audio-langs-jeremy` **vod** `3-58/5` (50, conc 2) | `norva-audio-langs-jeremy-series` (15) | `norva-subtitle-backfill-jeremy` (10) | `norva-audio-langs-jeremy-whisper` (4) |
-| **AÎRO** (`7bdab1df…`) probe | `norva-audio-langs-airo` `1-58/3` (25) | `norva-audio-langs-airo-series` (15) | `norva-subtitle-backfill-airo` (10) | `norva-audio-langs-airo-whisper` (4) |
+| **AÎRO** (`7bdab1df…`) probe | **5 panels parallélisés** — voir §v3 ci-dessous | (par-panel, fallthrough) | (géants: nuit dédiée) | (via fallthrough) |
 
 (limit entre parenthèses ; conc 1 sauf apdxes films vod conc 2. Sous-titres = `target:subtitle` ;
 non redondant avec l'audio : couvre les films dont l'audio fut déduit par nom — donc jamais
@@ -243,42 +255,110 @@ select cron.schedule('norva-audio-langs-jeremy-whisper', '6-59/9 0-5 * * *', $cr
   );
 $cron$);
 
--- ───────── AÎRO (mandara.cc, probe) — userId 7bdab1df… ─────────
-select cron.schedule('norva-audio-langs-airo', '1-58/3 6-23 * * *', $cron$
+-- ───────── AÎRO — 5 PANELS PARALLÉLISÉS (probe) — userId 7bdab1df… ─────────
+-- v3 (2026-07-01) : le compte AÎRO porte 5 hôtes DISTINCTS (Airysat / Ninja / KING365 /
+-- Opplex / Promax, ~334k films). Avant, un seul cron drainait par user_id → les 5 panels
+-- partageaient UN slot sérialisé (~52 j pour un 1er passage). Maintenant chaque panel a SON
+-- cron scopé par 'sourceId' (RPC audio_backfill_candidates) → ils s'enrichissent EN PARALLÈLE.
+-- Charge par-hôte INCHANGÉE (chaque hôte voit toujours 1 connexion — juste plus mise en file
+-- avec ses voisins ; hôtes distincts → aucun user_multi_ip). 'fallthrough',true : dès qu'un
+-- panel a fini ses films, sa fenêtre de jour draine SES séries/sous-titres/whisper (scopés).
+-- Cadences shaped par la taille du pool : géants (Ninja/Promax) au débit super8k (*/3, ~500/h),
+-- moyens/petits moins fréquents. Minutes décalées (0/1/2/4/5) pour étaler les fires pg_cron.
+-- source_ids : Ninja 976e7bbd… · Promax 3eb5999e… · Opplex 9579e61b… · KING365 4e3d7dd8… ·
+-- Airysat f660f738… (voir admin_provider_overview / cloud_sources).
+
+-- Films audio — JOUR 6-23, fallthrough (draine séries/sous-titres/whisper du panel une fois fini)
+select cron.schedule('norva-audio-airo-ninja', '0-59/3 6-23 * * *', $cron$
   select net.http_post(
     url := 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-playback/audio-backfill',
     headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'norva_backfill_token')),
-    body := jsonb_build_object('userId','7bdab1df-80e6-46f9-bcdf-84b6595819a8','type','movie','mode','probe','limit',25,'concurrency',1),
+    body := jsonb_build_object('userId','7bdab1df-80e6-46f9-bcdf-84b6595819a8','sourceId','976e7bbd-f433-4a41-821d-3cb983c73921','type','movie','mode','probe','limit',25,'concurrency',1,'fallthrough',true),
     timeout_milliseconds := 110000
   );
 $cron$);
 
-select cron.schedule('norva-audio-langs-airo-series', '0-59/9 0-5 * * *', $cron$
+select cron.schedule('norva-audio-airo-promax', '1-59/3 6-23 * * *', $cron$
   select net.http_post(
     url := 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-playback/audio-backfill',
     headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'norva_backfill_token')),
-    body := jsonb_build_object('userId','7bdab1df-80e6-46f9-bcdf-84b6595819a8','type','series','mode','probe','limit',15,'concurrency',1),
+    body := jsonb_build_object('userId','7bdab1df-80e6-46f9-bcdf-84b6595819a8','sourceId','3eb5999e-117b-4196-aaaf-4304e80a48ff','type','movie','mode','probe','limit',25,'concurrency',1,'fallthrough',true),
     timeout_milliseconds := 110000
   );
 $cron$);
 
-select cron.schedule('norva-subtitle-backfill-airo', '3-59/9 0-5 * * *', $cron$
+select cron.schedule('norva-audio-airo-opplex', '2-59/6 6-23 * * *', $cron$
   select net.http_post(
     url := 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-playback/audio-backfill',
     headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'norva_backfill_token')),
-    body := jsonb_build_object('userId','7bdab1df-80e6-46f9-bcdf-84b6595819a8','type','movie','target','subtitle','limit',10,'concurrency',1),
+    body := jsonb_build_object('userId','7bdab1df-80e6-46f9-bcdf-84b6595819a8','sourceId','9579e61b-5cda-4ea2-8b40-7996de8af32a','type','movie','mode','probe','limit',25,'concurrency',1,'fallthrough',true),
     timeout_milliseconds := 110000
   );
 $cron$);
 
-select cron.schedule('norva-audio-langs-airo-whisper', '6-59/9 0-5 * * *', $cron$
+select cron.schedule('norva-audio-airo-king365', '4-59/12 6-23 * * *', $cron$
   select net.http_post(
     url := 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-playback/audio-backfill',
     headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'norva_backfill_token')),
-    body := jsonb_build_object('userId','7bdab1df-80e6-46f9-bcdf-84b6595819a8','type','movie','mode','whisper','limit',4,'concurrency',1),
+    body := jsonb_build_object('userId','7bdab1df-80e6-46f9-bcdf-84b6595819a8','sourceId','4e3d7dd8-9123-4bd6-9a02-36cc92e40a33','type','movie','mode','probe','limit',25,'concurrency',1,'fallthrough',true),
     timeout_milliseconds := 110000
   );
 $cron$);
+
+select cron.schedule('norva-audio-airo-airysat', '5-59/30 6-23 * * *', $cron$
+  select net.http_post(
+    url := 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-playback/audio-backfill',
+    headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'norva_backfill_token')),
+    body := jsonb_build_object('userId','7bdab1df-80e6-46f9-bcdf-84b6595819a8','sourceId','f660f738-dbd6-43f8-acc0-b91784bfa138','type','movie','mode','probe','limit',25,'concurrency',1,'fallthrough',true),
+    timeout_milliseconds := 110000
+  );
+$cron$);
+
+-- NUIT 0-5 — SEULEMENT pour les 2 géants (films = semaines → il faut avancer leurs séries/sous-
+-- titres en parallèle des films). Petits panels : couverts par le fallthrough de jour dès que leurs
+-- films sont finis. Whisper = via fallthrough (scopé au panel). Minutes décalées par hôte (Ninja
+-- 0/3, Promax 1/4) ; même hôte jamais 2 accès simultanés (≥3 min, connexions courtes).
+select cron.schedule('norva-audio-airo-ninja-series', '0-59/9 0-5 * * *', $cron$
+  select net.http_post(
+    url := 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-playback/audio-backfill',
+    headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'norva_backfill_token')),
+    body := jsonb_build_object('userId','7bdab1df-80e6-46f9-bcdf-84b6595819a8','sourceId','976e7bbd-f433-4a41-821d-3cb983c73921','type','series','mode','probe','limit',15,'concurrency',1),
+    timeout_milliseconds := 110000
+  );
+$cron$);
+
+select cron.schedule('norva-subtitle-airo-ninja', '3-59/9 0-5 * * *', $cron$
+  select net.http_post(
+    url := 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-playback/audio-backfill',
+    headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'norva_backfill_token')),
+    body := jsonb_build_object('userId','7bdab1df-80e6-46f9-bcdf-84b6595819a8','sourceId','976e7bbd-f433-4a41-821d-3cb983c73921','type','movie','target','subtitle','limit',10,'concurrency',1),
+    timeout_milliseconds := 110000
+  );
+$cron$);
+
+select cron.schedule('norva-audio-airo-promax-series', '1-59/9 0-5 * * *', $cron$
+  select net.http_post(
+    url := 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-playback/audio-backfill',
+    headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'norva_backfill_token')),
+    body := jsonb_build_object('userId','7bdab1df-80e6-46f9-bcdf-84b6595819a8','sourceId','3eb5999e-117b-4196-aaaf-4304e80a48ff','type','series','mode','probe','limit',15,'concurrency',1),
+    timeout_milliseconds := 110000
+  );
+$cron$);
+
+select cron.schedule('norva-subtitle-airo-promax', '4-59/9 0-5 * * *', $cron$
+  select net.http_post(
+    url := 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-playback/audio-backfill',
+    headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'norva_backfill_token')),
+    body := jsonb_build_object('userId','7bdab1df-80e6-46f9-bcdf-84b6595819a8','sourceId','3eb5999e-117b-4196-aaaf-4304e80a48ff','type','movie','target','subtitle','limit',10,'concurrency',1),
+    timeout_milliseconds := 110000
+  );
+$cron$);
+
+-- Retrait des anciens crons AÎRO account-wide (remplacés par les crons par-panel ci-dessus) :
+--   select cron.unschedule('norva-audio-langs-airo');
+--   select cron.unschedule('norva-audio-langs-airo-series');
+--   select cron.unschedule('norva-subtitle-backfill-airo');
+--   select cron.unschedule('norva-audio-langs-airo-whisper');
 
 -- Sous-titres IA — pré-génération nocturne whitelist (Phase 3c). Staggerés 00:20/25/30, limit 2.
 select cron.schedule('norva-subtitle-pregen-jeremy', '20 0 * * *', $cron$
