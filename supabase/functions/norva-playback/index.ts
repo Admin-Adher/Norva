@@ -3106,8 +3106,12 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
           q = q.eq("audio_languages", "{}");
           // Progression: skip titles already probed recently so the crawl ADVANCES past
           // genuinely-untagged titles instead of re-probing the same front of the queue forever.
-          // 30d retry window lets transient provider failures (e.g. 429) recover later.
-          const probeRetryBefore = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString();
+          // 180d re-probe window: transient failures (relay 429/5xx) never set audio_probed_at —
+          // they retry next tick — so this window only governs DETERMINISTIC negatives (relay ok,
+          // container has no usable audio language). Re-probing those is near-certain waste, so we
+          // stretch it to twice a year (no-op during first pass; frees the connection slot after).
+          // Mirrors audio_backfill_candidates' 180d window (per-source path) — keep the two in sync.
+          const probeRetryBefore = new Date(Date.now() - 180 * 24 * 3600 * 1000).toISOString();
           q = q.or(`audio_probed_at.is.null,audio_probed_at.lt.${probeRetryBefore}`);
         }
         if (requireTags.length) q = q.overlaps("version_languages", requireTags);
