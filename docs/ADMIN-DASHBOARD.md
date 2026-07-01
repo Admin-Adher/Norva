@@ -142,6 +142,21 @@ scopée à un seul `user_id`) :
 Perf : scopée à un `user_id` indexé — ~3,5 s sur le plus gros pilote (airo, 334k titres, plan parallèle),
 < 1 s pour un user normal (index scan sur `cloud_titles(user_id, …)`). Aucune agrégation multi-tenant.
 
+**Couche relationnelle (le cœur CRM).** La fiche porte 3 panneaux interactifs, alimentés par
+**`admin_client_crm(p_user_id)`** → `{ tags, all_tags, notes, timeline }` :
+- **🏷️ Tags & segments** — tables `admin_tags` (catalogue : VIP / À risque / Pilote / Nouveau /
+  Support, couleur = classe de badge) + `admin_client_tags` (join client↔tag). Chips retirables +
+  chips « + » pour appliquer un tag existant + « ＋ créer » (`admin_tag_create` puis auto-application).
+  Ajout/retrait via `admin_tag_toggle(user, tag, on)`.
+- **📝 Notes internes** — table `admin_notes` (body, auteur = email JWT, date). Ajout
+  `admin_note_add(user, body)`, suppression `admin_note_delete(note_id)`.
+- **🕑 Timeline** — `admin_events` (événements réels : note/tag/action admin) **UNION** d'événements
+  **synthétiques** dérivés de l'existant (inscription depuis `auth.users`, provider ajouté & dernier
+  sync depuis `cloud_sources`) → timeline utile immédiatement, sans attendre les hooks lifecycle.
+
+Toutes les tables sont **RLS-on sans policy** → accessibles uniquement via les RPCs SECURITY DEFINER
+`is_admin()`-gatées ci-dessus. Auteur d'une action = l'email du JWT admin.
+
 ---
 
 ## 6. Actions
@@ -169,8 +184,10 @@ vérif `app_metadata.role === 'admin'`). Retrouve le propriétaire de la source 
 | `…090000_admin_dashboard_scale_driving_accounts.sql` | `admin_enrichment_accounts` + scope Ops aux pilotes (cap 300) |
 | `…110000_admin_users_page.sql` | RPC Users paginée |
 | `…120000_admin_user_detail.sql` | RPC détail par user (profil + sources + enrichissement) |
+| `…130000_admin_user_detail_volatile.sql` | hotfix : `admin_user_detail` VOLATILE (SET interdit en STABLE) |
+| `…140000_admin_crm_relational.sql` | tables notes/tags/client_tags/events + RPCs CRM (read + mutations) |
 
-**Objets DB** : `is_admin()`, `refresh_admin_dashboard()`, `admin_overview/_sources/_enrichment_coverage/_cron_health`, `admin_users_page(…)`, `admin_user_detail(uuid)`, table `admin_dashboard_cache`, `admin_audit_log`, `admin_enrichment_accounts`. Cron `admin-dashboard-refresh` (`*/5 * * * *`).
+**Objets DB** : `is_admin()`, `refresh_admin_dashboard()`, `admin_overview/_sources/_enrichment_coverage/_cron_health`, `admin_users_page(…)`, `admin_user_detail(uuid)`, `admin_client_crm(uuid)`, `admin_note_add/_note_delete/_tag_create/_tag_toggle`, tables `admin_dashboard_cache`, `admin_audit_log`, `admin_enrichment_accounts`, `admin_notes`, `admin_tags`, `admin_client_tags`, `admin_events`. Cron `admin-dashboard-refresh` (`*/5 * * * *`).
 
 **Edge** : route `/admin/resync/{sourceId}` dans `supabase/functions/norva-source-sync/index.ts`.
 

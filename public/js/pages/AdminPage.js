@@ -159,6 +159,25 @@ class AdminPage {
 #page-admin .umeta{color:var(--color-text-secondary,#9aa);font-size:12px;margin:6px 0 20px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
 #page-admin .fiche-grid{display:grid;grid-template-columns:1fr;gap:18px;}
 #page-admin .soon{color:#66707e;font-size:13px;font-style:italic;}
+#page-admin .tag-row{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;}
+#page-admin .tag-chip .crm-tag-remove{background:none;border:0;color:inherit;cursor:pointer;font-size:12px;padding:0 0 0 3px;opacity:.7;}
+#page-admin .tag-chip .crm-tag-remove:hover{opacity:1;}
+#page-admin .tag-add-row{display:flex;flex-wrap:wrap;gap:6px;align-items:center;}
+#page-admin .tag-add-chip{background:#ffffff0d;border:1px dashed var(--color-border,#2a2a38);color:#9aa;border-radius:20px;padding:2px 9px;font-size:11px;cursor:pointer;}
+#page-admin .tag-add-chip:hover{color:#fff;border-color:#5b7cfa;}
+#page-admin .note-add{display:flex;gap:8px;margin-bottom:12px;}
+#page-admin .note-add textarea{flex:1;background:var(--color-bg-primary,#0d0d0f);border:1px solid var(--color-border,#2a2a38);color:#fff;border-radius:8px;padding:8px 10px;font-size:13px;resize:vertical;font-family:inherit;}
+#page-admin .note-add button{align-self:flex-start;background:#5b7cfa;color:#fff;border:0;border-radius:8px;padding:8px 14px;cursor:pointer;font-weight:600;font-size:13px;}
+#page-admin .note-item{border-top:1px solid var(--color-border,#20202a);padding:9px 0;}
+#page-admin .note-body{color:var(--color-text-primary,#e8e8ee);font-size:13px;white-space:pre-wrap;word-break:break-word;}
+#page-admin .note-meta{color:#66707e;font-size:11px;margin-top:3px;}
+#page-admin .note-meta .crm-note-del{background:none;border:0;color:#ff6b6b88;cursor:pointer;font-size:11px;margin-left:8px;}
+#page-admin .note-meta .crm-note-del:hover{color:#ff6b6b;}
+#page-admin .tl{display:flex;flex-direction:column;}
+#page-admin .tl-item{display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--color-border,#1b1b24);}
+#page-admin .tl-ic{width:22px;text-align:center;}
+#page-admin .tl-sum{flex:1;font-size:13px;color:var(--color-text-primary,#e8e8ee);}
+#page-admin .tl-at{color:#66707e;font-size:11px;white-space:nowrap;}
 @media(max-width:900px){
   #page-admin .crm-sidebar{width:60px;padding:14px 8px;}
   #page-admin .crm-nav-item .lb,#page-admin .crm-brand span:last-child,#page-admin .crm-side-foot{display:none;}
@@ -191,6 +210,15 @@ class AdminPage {
             const ur = e.target.closest('.user-row');
             if (ur && !e.target.closest('button,a')) { this._navigate('client:' + ur.dataset.userId); return; }
             if (e.target.closest('.crm-back')) { this._navigate('clients'); return; }
+            // Fiche relational actions
+            const tRem = e.target.closest('.crm-tag-remove');
+            if (tRem) { this._crmMutate('admin_tag_toggle', { p_user_id: this._crmUser, p_tag_id: tRem.dataset.tagId, p_on: false }); return; }
+            const tAdd = e.target.closest('.crm-tag-add');
+            if (tAdd) { this._crmMutate('admin_tag_toggle', { p_user_id: this._crmUser, p_tag_id: tAdd.dataset.tagId, p_on: true }); return; }
+            if (e.target.closest('.crm-tag-create')) { this._crmCreateTag(); return; }
+            if (e.target.closest('.crm-note-add')) { this._crmAddNote(); return; }
+            const nDel = e.target.closest('.crm-note-del');
+            if (nDel) { this._crmMutate('admin_note_delete', { p_note_id: nDel.dataset.noteId }); return; }
         });
         this.built = true;
     }
@@ -336,6 +364,7 @@ class AdminPage {
 
     // ── Page: Client detail (fiche 360°, full page) ──
     async _pageClientDetail(userId) {
+        this._crmUser = userId;
         this._setCrumb('Clients › fiche');
         const v = this._view();
         v.innerHTML = `<div class="crm-page">
@@ -345,10 +374,82 @@ class AdminPage {
         try {
             const d = await this._rpc('admin_user_detail', { p_user_id: userId });
             this._renderFiche(d);
+            this._loadCrm(userId);   // relational panels (tags/notes/timeline), non-blocking
         } catch (e) {
             const b = document.getElementById('fiche-body');
             if (b) b.innerHTML = `<div class="admin-err">Erreur : ${AdminPage.esc(e.message)}</div>`;
         }
+    }
+
+    // ── CRM relational panels (tags / notes / timeline) ──
+    async _loadCrm(userId) {
+        try {
+            this._crm = await this._rpc('admin_client_crm', { p_user_id: userId }) || {};
+            this._renderCrm();
+        } catch (e) {
+            ['fiche-tags', 'fiche-notes', 'fiche-timeline'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.innerHTML = `<div class="admin-err">Erreur : ${AdminPage.esc(e.message)}</div>`;
+            });
+        }
+    }
+
+    _renderCrm() {
+        const c = this._crm || {};
+        const tags = Array.isArray(c.tags) ? c.tags : [];
+        const all = Array.isArray(c.all_tags) ? c.all_tags : [];
+        const notes = Array.isArray(c.notes) ? c.notes : [];
+        const timeline = Array.isArray(c.timeline) ? c.timeline : [];
+        const applied = new Set(tags.map(t => t.id));
+
+        const tagsEl = document.getElementById('fiche-tags');
+        if (tagsEl) {
+            const cur = tags.length
+                ? tags.map(t => `<span class="badge ${AdminPage.tagColor(t.color)} tag-chip">${AdminPage.esc(t.label)} <button class="crm-tag-remove" data-tag-id="${AdminPage.esc(t.id)}" title="Retirer">×</button></span>`).join('')
+                : '<span class="ssub">Aucun tag.</span>';
+            const avail = all.filter(t => !applied.has(t.id))
+                .map(t => `<button class="crm-tag-add tag-add-chip" data-tag-id="${AdminPage.esc(t.id)}">+ ${AdminPage.esc(t.label)}</button>`).join('');
+            tagsEl.innerHTML = `<div class="tag-row">${cur}</div><div class="tag-add-row">${avail}<button class="crm-tag-create tag-add-chip">＋ créer</button></div>`;
+        }
+
+        const notesEl = document.getElementById('fiche-notes');
+        if (notesEl) {
+            const list = notes.length
+                ? notes.map(n => `<div class="note-item"><div class="note-body">${AdminPage.esc(n.body)}</div>
+                    <div class="note-meta">${AdminPage.esc(n.author_email || 'admin')} · ${AdminPage.esc(AdminPage.timeAgo(n.created_at))}
+                    <button class="crm-note-del" data-note-id="${AdminPage.esc(n.id)}" title="Supprimer">supprimer</button></div></div>`).join('')
+                : '<div class="ssub">Aucune note.</div>';
+            notesEl.innerHTML = `<div class="note-add"><textarea id="crm-note-input" rows="2" placeholder="Ajouter une note interne…"></textarea><button class="crm-note-add">Ajouter</button></div>${list}`;
+        }
+
+        const tlEl = document.getElementById('fiche-timeline');
+        if (tlEl) {
+            const icon = (k) => ({ signup: '🎉', provider_added: '📡', sync: '🔄', note_added: '📝', tag_added: '🏷️', tag_removed: '🏷️', resync: '↻', admin_action: '⚡' }[k] || '•');
+            tlEl.innerHTML = timeline.length
+                ? '<div class="tl">' + timeline.map(e => `<div class="tl-item"><span class="tl-ic">${icon(e.kind)}</span><span class="tl-sum">${AdminPage.esc(e.summary)}</span><span class="tl-at" title="${e.at ? AdminPage.esc(new Date(e.at).toLocaleString('fr-FR')) : ''}">${e.at ? AdminPage.esc(AdminPage.timeAgo(e.at)) : ''}</span></div>`).join('') + '</div>'
+                : '<div class="ssub">Aucun événement.</div>';
+        }
+    }
+
+    async _crmMutate(fn, params) {
+        try { await this._rpc(fn, params); await this._loadCrm(this._crmUser); }
+        catch (e) { window.alert('Erreur : ' + e.message); }
+    }
+    async _crmAddNote() {
+        const ta = document.getElementById('crm-note-input');
+        const body = ta ? ta.value.trim() : '';
+        if (!body) return;
+        await this._crmMutate('admin_note_add', { p_user_id: this._crmUser, p_body: body });
+    }
+    async _crmCreateTag() {
+        const label = (window.prompt('Nom du tag / segment :') || '').trim();
+        if (!label) return;
+        const color = (window.prompt('Couleur : gray, green, red, amber ou blue', 'blue') || 'blue').trim();
+        try {
+            const t = await this._rpc('admin_tag_create', { p_label: label, p_color: color });
+            if (t && t.id) await this._rpc('admin_tag_toggle', { p_user_id: this._crmUser, p_tag_id: t.id, p_on: true });
+            await this._loadCrm(this._crmUser);
+        } catch (e) { window.alert('Erreur : ' + e.message); }
     }
 
     _renderFiche(d) {
@@ -415,9 +516,9 @@ class AdminPage {
             <div class="fiche-grid">
               <div class="admin-block"><h2>📡 Sources (${sources.length})</h2><div class="scroll">${srcHtml}</div></div>
               <div class="admin-block"><h2>⚙️ Enrichissement audio par panel</h2><div class="scroll">${enrHtml}</div></div>
-              <div class="admin-block"><h2>🏷️ Tags & segments</h2><div class="card soon">Bientôt — couche relationnelle (étape B).</div></div>
-              <div class="admin-block"><h2>📝 Notes internes</h2><div class="card soon">Bientôt — notes par client (étape B).</div></div>
-              <div class="admin-block"><h2>🕑 Timeline d'activité</h2><div class="card soon">Bientôt — événements (inscription, provider, sync, email…) (étape B).</div></div>
+              <div class="admin-block"><h2>🏷️ Tags & segments</h2><div id="fiche-tags" class="card"><div class="ssub">Chargement…</div></div></div>
+              <div class="admin-block"><h2>📝 Notes internes</h2><div id="fiche-notes" class="card"><div class="ssub">Chargement…</div></div></div>
+              <div class="admin-block"><h2>🕑 Timeline d'activité</h2><div id="fiche-timeline" class="card"><div class="ssub">Chargement…</div></div></div>
             </div>`;
     }
 
@@ -616,6 +717,8 @@ class AdminPage {
     }
 
     static n(x) { return x == null ? '—' : Number(x).toLocaleString('fr-FR'); }
+    // Stored tag colour → badge class (fall back to gray for anything unexpected).
+    static tagColor(c) { return ['gray', 'green', 'red', 'amber', 'blue'].includes(c) ? c : 'gray'; }
     // Concise French relative time ("il y a 3 j", "il y a 2 h"). Absolute value kept as tooltip.
     static timeAgo(d) {
         const t = new Date(d).getTime();
