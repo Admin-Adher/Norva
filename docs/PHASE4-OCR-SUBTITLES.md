@@ -5,6 +5,12 @@ on-demand, tous déployés ; les deux parsers prouvés (selftests PASS) ; chaîn
 contrainte restante est la connexion provider (429/401), pas le code — atténuée par le backoff + le
 modèle on-demand caché. Reste : validation sur un vrai flux image quand une connexion est libre.**
 
+> **Note statut (2026-07-01)** : la validation sur un **vrai flux image** reste **PENDANTE**. C'est
+> **on-demand par design** (le 1ᵉʳ spectateur paie le coût, tous les suivants l'ont via cache) ; le
+> **cron OCR nocturne a été délibérément PAS construit** pour éviter l'anti-abus provider (`429 → 401`).
+> Conséquence : **non finissable à distance** — il faut soit un **vrai user jouant un titre à sous-titres
+> image**, soit **décider d'assumer le risque provider** avec un cron off-peak sérialisé (cf. §3).
+
 ## 0. Deux pipelines, un cache
 
 - **PGS** (`hdmv_pgs_subtitle`) : format `.sup` propre → parsé **directement** (`ocr_pgs.py`, PTS exact).

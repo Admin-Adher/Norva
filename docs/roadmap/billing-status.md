@@ -27,6 +27,60 @@ Projet Supabase : **`oupsceccxsonaalhueff`**.
 
 ---
 
+## ⚠️ MISE À JOUR 2026-07-01 — réalité high-risk & pivot Gumroad (hybride)
+
+> **À lire avant tout le reste de ce fichier.** Le plan « RevenueCat + Stripe/Web
+> Billing » ci-dessous **reste valable pour la moitié MOBILE** (Play/Apple), mais
+> le **rail WEB change** : Stripe n'est plus l'option, on passe par **Gumroad**.
+
+**Norva est classé HIGH-RISK par les processeurs de paiement.** L'IPTV est
+refusée par la quasi-totalité des acquéreurs « self-serve » :
+
+- **Stripe** et **Paddle** refusent l'IPTV ([Paddle AUP](https://www.paddle.com/help/start/intro-to-paddle/what-am-i-not-allowed-to-sell-on-paddle)).
+- **Lemon Squeezy** le **bannit explicitement** ([produits interdits](https://docs.lemonsqueezy.com/help/getting-started/prohibited-products)).
+- **Seul Gumroad** accepte ce type de produit.
+
+**Blocage architectural** : **RevenueCat n'intègre PAS Gumroad**. Les moteurs de
+paiement web de RevenueCat = **Stripe + Paddle uniquement**
+([RevenueCat payment integrations](https://www.revenuecat.com/docs/web/payment-integrations)).
+Donc **« RevenueCat + Gumroad » est IMPOSSIBLE**.
+
+### Nouvelle archi recommandée = HYBRIDE
+
+- **MOBILE (Play / Apple)** → **RevenueCat** : pas de refus high-risk ici, ce sont
+  **Google / Apple** qui encaissent. → toute l'infra RC existante (dormante)
+  **reste valable** pour ce rail.
+- **WEB** → **Gumroad DIRECT** (sans RevenueCat).
+- Les **deux rails écrivent dans la MÊME table `cloud_entitlement_projection`**,
+  déjà conçue **agnostique de la source** → aucune refonte du modèle d'entitlements.
+
+### Analyse des frais Gumroad → annuel-first indispensable
+
+Frais Gumroad ≈ **10 % + 0,50 $ + 2,9 % + 0,30 $** (soit ~**0,80 $ fixe** + ~12,9 %).
+Les 0,80 $ fixes **tuent les petits mensuels** :
+
+| Plan | Prix | Frais Gumroad estimés | Part des frais |
+|---|---|---|---|
+| Mensuel | 4,99 | ~1,44 (≈ 0,80 fixe + 12,9 %) | **~29 %** |
+| Annuel | ~49,90 | ~7,2 (≈ 0,80 fixe + 12,9 %) | **~15 %** |
+
+→ **Annuel-first indispensable** : les 0,80 $ fixes rendent les petits mensuels
+non rentables ; il faut pousser l'abonnement annuel.
+
+### Option : rail CRYPTO secondaire
+
+Rail **crypto** possible (**BTCPay / NOWPayments**, ~**0,5–1 %**, **zéro
+chargeback**) alimentant la **même projection** `cloud_entitlement_projection`.
+
+### 📌 STATUT — EN PAUSE
+
+Le billing est **EN PAUSE** en attente de la **décision processeur/frais de
+l'owner** (Gumroad annuel-first ± crypto, ou une alternative). L'**infra RC
+existante reste DORMANTE** (valable pour la moitié mobile) ; la **projection
+d'entitlements est prête pour n'importe quelle source**.
+
+---
+
 ## Modèle d'abonnement (décidé 2026-06-22)
 
 - **Essai 7 j avec carte** (Play : moyen de paiement du compte Google ; Web : carte via RC Web Billing/Stripe). Conversion auto sauf annulation. **Pas de palier gratuit permanent payant** — mais un palier `free` de navigation (voir ci-dessous).
@@ -168,6 +222,11 @@ Ces morceaux sont en place mais ne s'activent qu'une fois les clés fournies
 ---
 
 ## 📋 Checklist de reprise (ordonnée)
+
+> ⚠️ **Depuis le pivot du 2026-07-01** : cette checklist concerne désormais
+> surtout le **rail MOBILE (RevenueCat / Play)**. Le **rail WEB passe par
+> Gumroad** (pas RevenueCat) — à documenter séparément une fois la décision de
+> l'owner prise (cf. section « MISE À JOUR 2026-07-01 » en haut).
 
 > Réfs `§` = sections de `docs/roadmap/billing-setup.md`.
 

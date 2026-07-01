@@ -34,8 +34,12 @@ mais avaient 2 clés différentes). Refonte en 2 couches :
 - **Phase 2 (push FCM native, app fermée)** : table `cloud_push_tokens`, `_shared/fcm.ts` (FCM HTTP v1, OAuth
   service-account), envoi dans le digest (`sendPushForGroup`), route `POST /push-token`, web (`registerPushToken`
   via bridge `NorvaTVCloud`), Android (`NorvaMessagingService` + `setupPush` + `getPushToken`, plugin
-  google-services **conditionnel**). **Backend armé** (secret `FCM_SERVICE_ACCOUNT` posé). Détail :
-  `IMPORT-NOTIFICATIONS.md` + `FCM-PUSH-SETUP.md`.
+  google-services **conditionnel**). **Backend armé** (secret Supabase `FCM_SERVICE_ACCOUNT` posé) ;
+  `google-services.json` posé en **secret GitHub `GOOGLE_SERVICES_JSON`** (injecté au build, jamais commité — le
+  secret scanning bloque la clé). **AAB signé v1.1.0 / versionCode 2 buildé avec succès** (keystore
+  `norva-upload.jks` + 4 secrets GitHub `ANDROID_KEYSTORE_*`). **⏳ BLOCAGE** : l'owner **n'a pas encore de
+  compte Google Play Console** (message envoyé au support Google, en attente) → prochaine étape = upload de l'AAB
+  en Test interne dès l'ouverture du compte. Détail : `IMPORT-NOTIFICATIONS.md` + `FCM-PUSH-SETUP.md`.
 
 ### 3. Release Android (FCM) — en cours, bloquée sur le compte Play Console
 - **AAB signé buildé avec succès** (workflow `android-release.yml`, run #2 vert, phone + TV, versionCode **2** /
@@ -63,8 +67,23 @@ mais avaient 2 clés différentes). Refonte en 2 couches :
   → **Nouveau flux de déploiement : PR-merge** (push branche → PR → merge via API en tant qu'admin). Bonus : les
   commits sortent **Verified**. Détail : `REPO-PROTECTION.md`.
 
+### 6. Billing — réalité high-risk + pivot Gumroad hybride ⏸️ EN PAUSE
+- Norva = **HIGH-RISK** pour les processeurs : **Stripe / Paddle / Lemon Squeezy REFUSENT l'IPTV** (Lemon Squeezy
+  le bannit explicitement). **Seul Gumroad accepte.**
+- **CRITIQUE** : **RevenueCat n'intègre PAS Gumroad** (ses moteurs web = Stripe + Paddle uniquement) → « RC +
+  Gumroad » **impossible**.
+- **Nouvelle archi recommandée = HYBRIDE** : **RevenueCat pour le MOBILE** (Play / Apple — pas de refus high-risk,
+  c'est Google/Apple qui encaissent) + **Gumroad DIRECT pour le WEB** ; les deux écrivent dans la **même table
+  `cloud_entitlement_projection`** (agnostique de la source, déjà conçue ainsi).
+- **Frais Gumroad** = 10 % + 50¢ + 2,9 % + 30¢ ≈ **29 % sur un mensuel à 4,99**, **~15 % sur l'annuel** → **ANNUEL-FIRST
+  indispensable** (les 80¢ fixes tuent les petits mensuels). Option : **rail CRYPTO secondaire** (BTCPay / NOWPayments,
+  ~0,5-1 %, zéro chargeback) alimentant la même projection.
+- **⏸️ STATUT** : billing **EN PAUSE** en attente de la décision processeur/frais de l'owner (Gumroad annuel-first
+  ± crypto, ou alternative). L'infra RC existante reste **DORMANTE** (valable pour la moitié mobile) ; la projection
+  d'entitlements est prête pour n'importe quelle source. Détail : `docs/roadmap/billing-status.md`.
+
 > **Références de cette session** : `PROVIDER-IDENTITY-DEDUP.md` §8 · `IMPORT-NOTIFICATIONS.md` · `FCM-PUSH-SETUP.md`
-> · `REPO-PROTECTION.md` · `clients/PLAY_STORE.md`.
+> · `REPO-PROTECTION.md` · `clients/PLAY_STORE.md` · `docs/roadmap/billing-status.md`.
 
 ---
 
@@ -107,7 +126,7 @@ résout les imports `../_shared`). Ne jamais déployer une edge function via un 
 
 | Fonctionnalité | Flag / activation | Défaut | Reco |
 |----------------|-------------------|--------|------|
-| **Sous-titres texte in-band** (le moteur lit ses propres paquets, zéro 2ᵉ connexion → fixe « rien ne s'affiche » sur mono-slot) | `localStorage.setItem('norvaInbandSubs','1')` dans le navigateur (par appareil) | off | Tu l'as testé OK. À passer **on par défaut** dans `WatchPage._inbandSubsEnabled()` quand tu es confiant (sinon chaque appareil doit poser le flag). |
+| **Sous-titres texte in-band** (le moteur lit ses propres paquets, zéro 2ᵉ connexion → fixe « rien ne s'affiche » sur mono-slot) | **ON par défaut** (`WatchPage._inbandSubsEnabled()`) ; **opt-out par appareil** via `localStorage.setItem('norvaInbandSubs','0')` | **on** | ✅ Déployé, on par défaut. Chaque appareil peut se désinscrire avec `norvaInbandSubs='0'`. |
 | **Phase 2 — détection langue audio, inline** (à la lecture, en arrière-plan) | `NORVA_WHISPER_DETECT=true` (voir ci-dessous) | **on** (ligne `cloud_runtime_config`, activé 2026-06) | ⚠️ Sur mono-slot, l'extraction = 2ᵉ connexion. Le **gros du résidu passe par le cron whisper off-peak** (ci-dessous) ; l'inline ne sert plus que de filet ponctuel. |
 | **Phase 2 — détection langue audio, backfill hors-ligne** | cron `norva-audio-langs-whisper` (`8,28,48 0-5 * * *`) → `POST /audio-backfill {"mode":"whisper"}` + `NORVA_BACKFILL_TOKEN` | **actif** | ✅ **Recommandé mono-slot** : tourne off-peak quand personne ne regarde. |
 | Gateway **in-band header parse** (récupère les langues audio depuis l'entête déjà streamée, optimisation mono-slot) | env gateway `INBAND_HEADER_PARSE=true` | off | Optionnel ; active si l'audio mono-slot reste capricieux. |
