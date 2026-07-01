@@ -1041,15 +1041,18 @@ function mediaReadFromCatalog(): boolean {
 // Provider identity for a source (non-secret, from config_hint). Cached in-isolate so
 // the playback path adds at most one lookup per source per isolate.
 //  - host: the configured provider hostname.
-//  - key:  the canonical CROSS-MIRROR cache key = providerKey when computed, else host.
-//          A reseller hands out many URLs (DNS aliases / reverse-proxies) for ONE Xtream
-//          panel — same catalogue + content IDs — so the hostname FRAGMENTS the cross-user
-//          file-track cache. providerKey (a hash of the panel's category taxonomy, written
-//          by norva-source-sync) collapses every mirror of a panel into one cache entry.
-//          Falls back to host when no providerKey exists yet → identical to the old
-//          behaviour (defensive, no-op until keys populate). See docs/PROVIDER-IDENTITY-DEDUP.md.
-const sourceIdentityCache = new Map<string, { host: string; key: string }>();
-async function resolveSourceIdentity(sourceId: string, userId: string, db: SupabaseClient): Promise<{ host: string; key: string }> {
+//  - key:  the canonical CROSS-MIRROR cache key. Phase B: the STABLE provider IDENTITY id when the
+//          source resolves to one — so two resellers of ONE panel (different providerKey) AND a
+//          taxonomy-drifted key all share a single cross-user cache. A reseller hands out many URLs
+//          (DNS aliases / reverse-proxies) for one Xtream panel, and the panel's category taxonomy
+//          drifts, so keying on either hostname or providerKey FRAGMENTS the cache. The identity id
+//          (resolved from stream-ID overlap, see docs/PROVIDER-IDENTITY-DEDUP.md §8) is invariant to
+//          both. Falls back to providerKey, then host, so an unresolved/deleted-provider source keeps
+//          the old behaviour exactly (defensive).
+//  - fingerprint: the raw providerKey (pre-identity). Kept so a read can fall back to the old key
+//          during the transition window before the cache backfill runs.
+const sourceIdentityCache = new Map<string, { host: string; key: string; fingerprint: string }>();
+async function resolveSourceIdentity(sourceId: string, userId: string, db: SupabaseClient): Promise<{ host: string; key: string; fingerprint: string }> {
   const cacheKey = `${userId}:${sourceId}`;
   const cached = sourceIdentityCache.get(cacheKey);
   if (cached !== undefined) return cached;
@@ -1062,7 +1065,21 @@ async function resolveSourceIdentity(sourceId: string, userId: string, db: Supab
   const hint = recordOrEmpty(data?.config_hint);
   const host = stringOr(hint.serverHost, "");
   const providerKey = stringOr(hint.providerKey, "");
-  const identity = { host, key: providerKey || host };
+  let key = providerKey || host;
+  if (providerKey) {
+    // Upgrade to the canonical identity id when this fingerprint resolves to one (Phase B). A missing
+    // identity (unresolved / deleted provider) simply keeps the providerKey — no regression.
+    try {
+      const { data: idRow } = await db
+        .from("catalog_provider_identities")
+        .select("identity_id")
+        .eq("provider_key", providerKey)
+        .maybeSingle();
+      const identityId = stringOr((idRow as JsonRecord | null)?.identity_id, "");
+      if (identityId) key = identityId;
+    } catch (_) { /* keep the providerKey fallback */ }
+  }
+  const identity = { host, key, fingerprint: providerKey || host };
   sourceIdentityCache.set(cacheKey, identity);
   return identity;
 }
@@ -2463,12 +2480,21 @@ async function getGeneratedSubtitle(req: Request, userId: string, db: SupabaseCl
     externalId: stringOr(url.searchParams.get("externalId"), ""),
     itemType: stringOr(url.searchParams.get("itemType"), ""),
   });
-  const pkey = (await resolveSourceIdentity(sourceId, userId, db)).key;
+  const ident = await resolveSourceIdentity(sourceId, userId, db);
+  const pkey = ident.key;
   if (!pkey) return { status: "none", providerKey: null };
-  const { data: row } = await db.from("catalog_generated_subtitles")
+  let { data: row } = await db.from("catalog_generated_subtitles")
     .select("status, vtt, source_lang, segments, audio_sec, job_id, updated_at")
     .eq("provider_key", pkey).eq("item_type", itemType).eq("external_id", externalId)
     .eq("kind", kind).eq("lang", cacheLang).maybeSingle();
+  // Transition fallback: a VTT generated before the identity re-key still lives under the raw
+  // providerKey until the cache backfill moves it — serve it instead of regenerating.
+  if (!row && ident.fingerprint && ident.fingerprint !== pkey) {
+    ({ data: row } = await db.from("catalog_generated_subtitles")
+      .select("status, vtt, source_lang, segments, audio_sec, job_id, updated_at")
+      .eq("provider_key", ident.fingerprint).eq("item_type", itemType).eq("external_id", externalId)
+      .eq("kind", kind).eq("lang", cacheLang).maybeSingle());
+  }
   const rec = row as JsonRecord | null;
   if (!rec) return { status: "none", providerKey: pkey, kind, lang };
   const status = stringOr(rec.status, "none");

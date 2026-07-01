@@ -238,16 +238,29 @@ probing deux fois) ; et chaque dérive orpheline les caches keyés par providerK
   (`94c49af9…`, « IPTV Ferran ») portant **4 empreintes** (2 miroirs actifs + l'ancienne clé Ferran +
   le host legacy `fun-fun2026.lol`, ces 2 en `superseded`).
 
-### 8.4 Phase B (à faire, délibérée) — re-clé des caches cross-user sur `identity_id`
-Migrer `catalog_generated_subtitles` (col `provider_key`) et `catalog_file_tracks` (col `server_host`)
-de la clé-empreinte vers **`identity_id`** :
-1. Ajouter `identity_id` à ces tables (nullable) + backfill via `catalog_provider_identities.identity_id`.
-2. Faire lire/écrire les 4+ sites de cache par `identity_id` (fallback empreinte pendant la transition).
-3. Adapter `fanout_file_tracks_to_users` pour joindre sur l'identité.
-4. Warm-up : recopier les lignes existantes vers l'`identity_id`.
-> **C'est là que tombe le vrai gain** (miroirs partagent les caches ; la dérive n'orpheline plus rien).
-> **Risque** : touche le chemin PLAYBACK (`catalog_file_tracks` = pistes audio/sous-titres au playback) →
-> migration prudente, fallback pendant la transition, pas de big-bang. **À lancer sur feu vert explicite.**
+### 8.4 Phase B — re-clé des caches cross-user sur `identity_id` (✅ LIVRÉE)
+Les deux caches cross-user passent de la clé-empreinte (volatile) à l'`identity_id` (stable). **Point de
+levier unique** : `resolveSourceIdentity` dans `norva-playback` — c'est le seul endroit qui dérive la clé,
+donc le changer re-clé d'un coup `catalog_file_tracks` (lecture/écriture/fanout) **et** toutes les ops
+`catalog_generated_subtitles` (transcript/ocr/translation).
+
+**Implémenté :**
+1. `resolveSourceIdentity` renvoie `key = identity_id` (résolu via `catalog_provider_identities`), fallback
+   `providerKey` → `host` si pas d'identité (source non résolue / provider supprimé = comportement d'avant).
+   Ajoute `fingerprint` (le providerKey brut) au retour, mémoïsé in-isolate.
+2. `getGeneratedSubtitle` : **fallback lecture** sur le `fingerprint` brut si l'identité rate → un VTT généré
+   avant la re-clé reste servi pendant la transition (pas de régénération).
+3. `fanout_file_tracks_to_users` : join sur l'identité — **rétro-compatible** (match `identity_id` OU
+   `providerKey`/host), donc sûr à appliquer avant le déploiement. Migration `20260701010000`.
+4. **Backfill de fusion** (migration `20260701020000`, à lancer APRÈS le déploiement) : fusionne les lignes
+   éparpillées d'un panel (les 4 clés Opplex/Ferran) sous l'`identity_id`, garde la ligne la plus complète,
+   supprime les anciennes. Idempotent. Les lignes keyées par hostname (sous-cache tmdb/imdb de
+   `vod-title-projection`) restent — c'est le follow-up **Phase B.2**.
+
+> **Sécurité** : ces caches **dégradent proprement** — un miss = on re-sonde (chemin normal), jamais une
+> casse playback. Le fallback fingerprint + le join rétro-compatible rendent la transition sans régression.
+> **Le gain** : Opplex 38→387 fichiers lisibles (×10), Ferran 123→387 (×3), 228 sondes orphelines
+> récupérées, et les 2 crons deviennent 2 ouvriers parallèles sur un seul catalogue (≈2× plus vite, 0 re-sonde).
 
 ### 8.5 Suite optionnelle
 - **Empreintes supprimées sans items** (AtlasPro + 3 non-identifiés) : restent des lignes registre sans
