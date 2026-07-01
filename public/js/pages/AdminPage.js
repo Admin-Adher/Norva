@@ -102,6 +102,8 @@ class AdminPage {
 #page-admin .pname{font-weight:600;}
 #page-admin .pacct{font-size:11px;color:var(--color-text-secondary,#9aa);}
 #page-admin .ssub{font-size:12px;color:var(--color-text-secondary,#9aa);margin:-4px 0 12px;}
+#page-admin .resync-btn{background:var(--color-bg-secondary,#181818);color:var(--color-accent,#e50914);border:1px solid var(--color-border,#2a2a2a);border-radius:6px;padding:2px 9px;cursor:pointer;font-size:12px;white-space:nowrap;}
+#page-admin .resync-btn:disabled{opacity:.5;cursor:default;}
 #page-admin .bar{height:6px;border-radius:3px;background:#333;overflow:hidden;min-width:60px;display:inline-block;vertical-align:middle;margin-right:6px;}
 #page-admin .bar>i{display:block;height:100%;background:#3ecf8e;}
 #page-admin .admin-err{color:#ff6b6b;padding:10px;}
@@ -120,6 +122,11 @@ class AdminPage {
 </div>`;
         const btn = root.querySelector('#admin-refresh');
         if (btn) btn.addEventListener('click', () => this.refresh());
+        // Delegated handler for the per-source re-sync buttons (rows are re-rendered each refresh).
+        root.addEventListener('click', (e) => {
+            const b = e.target.closest('.resync-btn');
+            if (b) { e.preventDefault(); this._resync(b); }
+        });
         this.built = true;
     }
 
@@ -177,7 +184,7 @@ class AdminPage {
         const sorted = rows.slice().sort((a, b) =>
             String(a.owner_email).localeCompare(String(b.owner_email)) ||
             String(a.display_name).localeCompare(String(b.display_name)));
-        const head = `<tr><th>Compte</th><th>Provider</th><th>Statut</th><th class="num">Items</th><th class="num">Variants</th><th class="num">Films</th><th class="num">Séries</th><th>Identité</th></tr>`;
+        const head = `<tr><th>Compte</th><th>Provider</th><th>Statut</th><th class="num">Items</th><th class="num">Variants</th><th class="num">Films</th><th class="num">Séries</th><th>Identité</th><th>Action</th></tr>`;
         let prevOwner = null;
         const body = sorted.map(r => {
             const bad = r.incomplete === true;
@@ -196,9 +203,30 @@ class AdminPage {
                 <td class="num">${AdminPage.n(r.movie_titles)}</td>
                 <td class="num">${AdminPage.n(r.series_titles)}</td>
                 <td>${r.identity_name ? AdminPage.esc(r.identity_name) : '<span class="badge gray">non résolue</span>'}</td>
+                <td><button class="resync-btn" data-source="${AdminPage.esc(r.source_id)}" title="Forcer un re-sync complet de cette source">↻ re-sync</button></td>
             </tr>`;
         }).join('');
         el.innerHTML = `<table><thead>${head}</thead><tbody>${body}</tbody></table>`;
+    }
+
+    async _resync(btn) {
+        const sourceId = btn.dataset.source;
+        if (!sourceId || btn.disabled) return;
+        const orig = btn.textContent;
+        btn.disabled = true; btn.textContent = '…';
+        try {
+            const res = await fetch(`${this._sbUrl()}/functions/v1/norva-source-sync/admin/resync/${sourceId}`, {
+                method: 'POST',
+                headers: { apikey: this._sbKey(), Authorization: `Bearer ${this._token()}`, 'Content-Type': 'application/json' },
+                body: '{}'
+            });
+            if (!res.ok) throw new Error(String(res.status));
+            btn.textContent = '✓ lancé';
+            setTimeout(() => this.refresh(), 6000);   // let the background sync progress, then re-read
+        } catch (e) {
+            btn.textContent = '✗ ' + AdminPage.esc(e.message || 'err');
+            setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 3500);
+        }
     }
 
     _renderEnrich(rows) {
