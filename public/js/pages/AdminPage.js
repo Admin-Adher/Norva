@@ -72,7 +72,8 @@ class AdminPage {
         if (this.built) return;
         root.innerHTML = `
 <style>
-#page-admin .admin-wrap{max-width:1280px;margin:0 auto;padding:var(--space-lg,24px);}
+#page-admin{height:100%;overflow-y:auto;-webkit-overflow-scrolling:touch;}
+#page-admin .admin-wrap{max-width:1280px;margin:0 auto;padding:var(--space-lg,24px) var(--space-lg,24px) 80px;}
 #page-admin .admin-head{display:flex;align-items:center;gap:14px;margin-bottom:20px;flex-wrap:wrap;}
 #page-admin .admin-head h1{font-size:24px;font-weight:700;margin:0;color:var(--color-text-primary,#fff);}
 #page-admin #admin-refresh{background:var(--color-accent,#e50914);color:#fff;border:0;border-radius:8px;padding:8px 14px;cursor:pointer;font-weight:600;}
