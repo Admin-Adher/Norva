@@ -1,7 +1,15 @@
-# Dashboard Admin — Ops (Santé · Users · Providers · Enrichissement · Crons)
+# CRM Admin Norva (Cockpit · Clients · Providers · Moteur · Système)
 
-**Statut : LIVE en production.** Page admin cloud-only, visible uniquement pour les comptes dont le
-JWT porte `app_metadata.role = 'admin'`. Construite en snapshot caché (Ops) + sections live (Users).
+**Statut : LIVE en production.** Admin cloud-only, visible uniquement pour les comptes dont le JWT
+porte `app_metadata.role = 'admin'`.
+
+> **Structure CRM (depuis v11).** Cliquer « Admin » entre dans un **shell CRM** dédié : sidebar gauche
+> persistante + **routing interne** state-based (`this._route`) et une zone de contenu scrollable.
+> Pages : **Cockpit** (KPIs), **Clients** (liste paginée → **fiche 360° pleine page**), **Providers**
+> (sources), **Moteur** (enrichissement + crons), **Système** (audit/infra — à venir). Chaque page
+> requête sa propre RPC (server-cached) à la navigation ; un bouton « ↻ Rafraîchir » recharge la page
+> courante. Les sections historiques ci-dessous sont maintenant réparties dans ces pages ; les RPCs et
+> la sémantique sont inchangées.
 
 > Repère rapide : la page est servie par `public/js/pages/AdminPage.js`, les données viennent de
 > **RPCs PostgREST** appelées directement avec le JWT de l'admin (aucune edge function → marche même
@@ -167,10 +175,11 @@ vérif `app_metadata.role === 'admin'`). Retrouve le propriétaire de la source 
 **Edge** : route `/admin/resync/{sourceId}` dans `supabase/functions/norva-source-sync/index.ts`.
 
 **Frontend** :
-- `public/js/pages/AdminPage.js` — page autonome (RPC client `_rpc`, `isAdmin`, `show`, `_ensureLayout`,
-  `refresh`, renderers `_renderOverview/_renderSources/_renderEnrich/_renderCron`, Users
-  `_loadUsers/_renderUsers`, détail `_openUserDetail/_renderUserDetail`, actions `_resync`, helpers
-  `cronHuman/timeAgo/n/esc`). Chargé `?v=10`.
+- `public/js/pages/AdminPage.js` — **shell CRM** autonome (RPC client `_rpc`, `isAdmin`, `show`,
+  `_ensureLayout` [sidebar + topbar + `#crm-view`], routing `_navigate`, pages `_pageCockpit/
+  _pageClients/_pageClientDetail/_pageProviders/_pageMoteur/_pageSysteme`, fiche `_renderFiche`,
+  renderers `_renderOverview/_renderSources/_renderEnrich/_renderCron/_renderUsers`, `_loadUsers`,
+  actions `_resync`, helpers `cronHuman/timeAgo/n/esc`). Chargé `?v=11`.
 - `public/app.html` — lien nav caché `#nav-admin`, `<div id="page-admin" class="page">`, `<script>`.
 - `public/js/app.js` — enregistrement `this.pages.admin`, gating de nav via `isAdmin()`.
 

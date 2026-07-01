@@ -1,20 +1,25 @@
 /**
- * Norva Admin Dashboard — Ops MVP (Health · Providers · Enrichment · Crons).
+ * Norva Admin — bespoke CRM shell.
  *
- * Cloud-only. Data comes from PostgREST RPCs (`admin_overview`, `admin_sources`,
- * `admin_enrichment_coverage`, `admin_cron_health`) called directly with the user's
- * Supabase JWT — NO edge function (so it works even while edge deploys are down).
- * Every RPC is gated SERVER-SIDE by is_admin() (app_metadata.role='admin'); a
- * non-admin token gets "not authorized". The client-side gating below is UX only.
+ * Cloud-only. When the user opens "Admin" they enter a dedicated CRM layout: a left sidebar with
+ * internal routing (Cockpit · Clients · Providers · Moteur · Système) and a scrollable content area.
+ * Data comes from PostgREST RPCs called directly with the user's Supabase JWT — NO edge function (so
+ * it works even while edge deploys are down). Every RPC is gated SERVER-SIDE by is_admin()
+ * (app_metadata.role='admin'); a non-admin token gets "not authorized". Client-side gating is UX only.
+ *
+ * Internal routing is state-based (this._route): 'cockpit' | 'clients' | 'client:<uuid>' |
+ * 'providers' | 'moteur' | 'systeme'. Each page fetches its own (server-cached) RPC on navigation.
  */
 class AdminPage {
     constructor(app) {
         this.app = app;
         this.built = false;
         this._isAdmin = null; // cached tri-state (null = unknown)
-        // Users section is LIVE/paginated (not part of the cached snapshot). Its own state.
+        this._route = 'cockpit';
+        // Clients list is LIVE/paginated (not part of the cached snapshot). Its own state.
         this._users = { page: 0, limit: 25, search: '', sort: 'created_desc', total: 0 };
         this._usersDebounce = null;
+        this._lastTs = null; // snapshot refreshed_at for the topbar
     }
 
     // ── direct PostgREST RPC client (mirrors authApi.js config resolution) ──
@@ -59,11 +64,21 @@ class AdminPage {
     async show() {
         if (!(await this.isAdmin())) { this.app.navigateTo('home'); return; }
         this._ensureLayout();
-        await this.refresh();
+        this._navigate(this._route || 'cockpit');
     }
     hide() { }
 
-    // ── layout ──
+    // ── CRM shell ──
+    static NAV() {
+        return [
+            { key: 'cockpit', label: 'Cockpit', icon: '🎯' },
+            { key: 'clients', label: 'Clients', icon: '👥' },
+            { key: 'providers', label: 'Providers', icon: '📡' },
+            { key: 'moteur', label: 'Moteur', icon: '⚙️' },
+            { key: 'systeme', label: 'Système', icon: '🛡️' }
+        ];
+    }
+
     _ensureLayout() {
         let root = document.getElementById('page-admin');
         if (!root) {
@@ -73,25 +88,41 @@ class AdminPage {
             (document.querySelector('.main-content') || document.getElementById('main-content') || document.body).appendChild(root);
         }
         if (this.built) return;
+        const nav = AdminPage.NAV().map(n =>
+            `<button class="crm-nav-item" data-route="${n.key}"><span class="ic">${n.icon}</span><span class="lb">${n.label}</span></button>`).join('');
         root.innerHTML = `
 <style>
-#page-admin{height:100%;overflow-y:auto;-webkit-overflow-scrolling:touch;}
-#page-admin .admin-wrap{max-width:1280px;margin:0 auto;padding:var(--space-lg,24px) var(--space-lg,24px) 80px;}
-#page-admin .admin-head{display:flex;align-items:center;gap:14px;margin-bottom:20px;flex-wrap:wrap;}
-#page-admin .admin-head h1{font-size:24px;font-weight:700;margin:0;color:var(--color-text-primary,#fff);}
-#page-admin #admin-refresh{background:var(--color-accent,#e50914);color:#fff;border:0;border-radius:8px;padding:8px 14px;cursor:pointer;font-weight:600;}
-#page-admin #admin-ts{color:var(--color-text-secondary,#9aa);font-size:13px;}
-#page-admin .admin-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;margin-bottom:26px;}
-#page-admin .kpi{background:var(--color-bg-secondary,#181818);border:1px solid var(--color-border,#2a2a2a);border-radius:10px;padding:14px;}
+#page-admin{height:100%;overflow:hidden;}
+#page-admin *{box-sizing:border-box;}
+#page-admin .crm-shell{display:flex;height:100%;background:var(--color-bg-primary,#0d0d0f);}
+#page-admin .crm-sidebar{width:232px;flex-shrink:0;background:var(--color-bg-secondary,#141418);border-right:1px solid var(--color-border,#242430);display:flex;flex-direction:column;overflow-y:auto;padding:16px 12px;}
+#page-admin .crm-brand{display:flex;align-items:center;gap:9px;padding:6px 8px 16px;font-weight:800;font-size:16px;color:var(--color-text-primary,#fff);}
+#page-admin .crm-brand .dot{width:22px;height:22px;border-radius:7px;background:linear-gradient(135deg,#5b7cfa,#a855f7);display:inline-block;}
+#page-admin .crm-nav-item{display:flex;align-items:center;gap:11px;width:100%;background:none;border:0;color:var(--color-text-secondary,#9aa);padding:10px 11px;border-radius:9px;cursor:pointer;font-size:14px;font-weight:500;text-align:left;margin-bottom:2px;}
+#page-admin .crm-nav-item .ic{font-size:16px;width:20px;text-align:center;}
+#page-admin .crm-nav-item:hover{background:#ffffff0a;color:var(--color-text-primary,#fff);}
+#page-admin .crm-nav-item.active{background:#5b7cfa1f;color:#a9bcff;font-weight:600;}
+#page-admin .crm-side-foot{margin-top:auto;padding:12px 10px 4px;font-size:11px;color:#66707e;line-height:1.5;}
+#page-admin .crm-main{flex:1;min-width:0;overflow-y:auto;-webkit-overflow-scrolling:touch;}
+#page-admin .crm-topbar{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:14px;padding:14px 26px;background:rgba(13,13,15,.86);backdrop-filter:blur(8px);border-bottom:1px solid var(--color-border,#242430);}
+#page-admin .crm-crumb{font-size:15px;font-weight:700;color:var(--color-text-primary,#fff);}
+#page-admin .crm-spacer{flex:1;}
+#page-admin #crm-refresh{background:#5b7cfa;color:#fff;border:0;border-radius:8px;padding:7px 13px;cursor:pointer;font-weight:600;font-size:13px;}
+#page-admin #crm-ts{color:#66707e;font-size:12px;}
+#page-admin .crm-page{max-width:1240px;margin:0 auto;padding:24px 26px 90px;}
+#page-admin .crm-h1{font-size:22px;font-weight:700;margin:0 0 4px;color:var(--color-text-primary,#fff);}
+#page-admin .crm-sub{color:var(--color-text-secondary,#9aa);font-size:13px;margin:0 0 22px;}
+#page-admin .admin-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(158px,1fr));gap:12px;margin-bottom:26px;}
+#page-admin .kpi{background:var(--color-bg-secondary,#16161c);border:1px solid var(--color-border,#242430);border-radius:11px;padding:15px;}
 #page-admin .kpi .v{font-size:26px;font-weight:700;color:var(--color-text-primary,#fff);line-height:1.1;}
-#page-admin .kpi .l{font-size:12px;color:var(--color-text-secondary,#9aa);margin-top:4px;text-transform:uppercase;letter-spacing:.4px;}
+#page-admin .kpi .l{font-size:11px;color:var(--color-text-secondary,#9aa);margin-top:5px;text-transform:uppercase;letter-spacing:.4px;}
 #page-admin .kpi.alert{border-color:#e5091455;background:#e5091412;}
 #page-admin .kpi.alert .v{color:#ff6b6b;}
 #page-admin .kpi.ok .v{color:#3ecf8e;}
 #page-admin .admin-block{margin-bottom:30px;}
-#page-admin .admin-block h2{font-size:16px;font-weight:600;margin:0 0 10px;color:var(--color-text-primary,#fff);}
+#page-admin .admin-block h2{font-size:15px;font-weight:600;margin:0 0 10px;color:var(--color-text-primary,#fff);}
 #page-admin table{width:100%;border-collapse:collapse;font-size:13px;}
-#page-admin th,#page-admin td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--color-border,#242424);white-space:nowrap;}
+#page-admin th,#page-admin td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--color-border,#20202a);white-space:nowrap;}
 #page-admin th{color:var(--color-text-secondary,#9aa);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.4px;}
 #page-admin td.num{text-align:right;font-variant-numeric:tabular-nums;}
 #page-admin tr.bad{background:#e5091412;}
@@ -101,134 +132,157 @@ class AdminPage {
 #page-admin .badge.gray{background:#8884;color:#bbb;}
 #page-admin .badge.amber{background:#f5a62322;color:#f5c15a;}
 #page-admin .badge.blue{background:#4a9eff22;color:#7ab8ff;}
-#page-admin tr.group-start td{border-top:2px solid var(--color-border,#2a2a2a);}
+#page-admin tr.group-start td{border-top:2px solid var(--color-border,#2a2a38);}
 #page-admin .pname{font-weight:600;}
 #page-admin .pacct{font-size:11px;color:var(--color-text-secondary,#9aa);}
 #page-admin .ssub{font-size:12px;color:var(--color-text-secondary,#9aa);margin:-4px 0 12px;}
-#page-admin .resync-btn{background:var(--color-bg-secondary,#181818);color:var(--color-accent,#e50914);border:1px solid var(--color-border,#2a2a2a);border-radius:6px;padding:2px 9px;cursor:pointer;font-size:12px;white-space:nowrap;}
+#page-admin .resync-btn{background:var(--color-bg-secondary,#181820);color:#a9bcff;border:1px solid var(--color-border,#2a2a38);border-radius:6px;padding:2px 9px;cursor:pointer;font-size:12px;white-space:nowrap;}
 #page-admin .resync-btn:disabled{opacity:.5;cursor:default;}
-#page-admin .bar{height:6px;border-radius:3px;background:#333;overflow:hidden;min-width:60px;display:inline-block;vertical-align:middle;margin-right:6px;}
+#page-admin .bar{height:6px;border-radius:3px;background:#2a2a34;overflow:hidden;min-width:60px;display:inline-block;vertical-align:middle;margin-right:6px;}
 #page-admin .bar>i{display:block;height:100%;background:#3ecf8e;}
 #page-admin .admin-err{color:#ff6b6b;padding:10px;}
 #page-admin .scroll{overflow-x:auto;}
+#page-admin .card{background:var(--color-bg-secondary,#16161c);border:1px solid var(--color-border,#242430);border-radius:12px;padding:18px 20px;}
 #page-admin .users-controls{display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap;}
-#page-admin .users-controls input,#page-admin .users-controls select{background:var(--color-bg-secondary,#181818);border:1px solid var(--color-border,#2a2a2a);color:var(--color-text-primary,#fff);border-radius:8px;padding:7px 11px;font-size:13px;}
-#page-admin .users-controls input{min-width:240px;flex:1;max-width:360px;}
+#page-admin .users-controls input,#page-admin .users-controls select{background:var(--color-bg-secondary,#16161c);border:1px solid var(--color-border,#2a2a38);color:var(--color-text-primary,#fff);border-radius:8px;padding:8px 12px;font-size:13px;}
+#page-admin .users-controls input{min-width:240px;flex:1;max-width:380px;}
 #page-admin .users-pager{display:flex;align-items:center;gap:14px;margin-top:12px;}
-#page-admin .users-pager button{background:var(--color-bg-secondary,#181818);color:var(--color-text-primary,#fff);border:1px solid var(--color-border,#2a2a2a);border-radius:8px;padding:6px 12px;cursor:pointer;font-size:13px;}
+#page-admin .users-pager button{background:var(--color-bg-secondary,#181820);color:var(--color-text-primary,#fff);border:1px solid var(--color-border,#2a2a38);border-radius:8px;padding:6px 12px;cursor:pointer;font-size:13px;}
 #page-admin .users-pager button:disabled{opacity:.4;cursor:default;}
 #page-admin .users-pager span{color:var(--color-text-secondary,#9aa);font-size:13px;font-variant-numeric:tabular-nums;}
 #page-admin tr.user-row{cursor:pointer;}
 #page-admin tr.user-row:hover{background:#ffffff0d;}
-#page-admin .umodal{position:fixed;inset:0;background:rgba(0,0,0,.62);display:none;align-items:flex-start;justify-content:center;z-index:1000;padding:40px 16px;overflow-y:auto;-webkit-overflow-scrolling:touch;}
-#page-admin .umodal.open{display:flex;}
-#page-admin .umodal-card{background:var(--color-bg-secondary,#181818);border:1px solid var(--color-border,#2a2a2a);border-radius:12px;max-width:920px;width:100%;padding:20px 22px 26px;box-shadow:0 20px 60px rgba(0,0,0,.5);}
-#page-admin .umodal-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px;}
-#page-admin .umodal-head h3{margin:0;font-size:18px;font-weight:700;word-break:break-all;}
-#page-admin .umodal-close{background:none;border:0;color:#9aa;font-size:26px;cursor:pointer;line-height:1;padding:0 4px;}
-#page-admin .umeta{color:var(--color-text-secondary,#9aa);font-size:12px;margin-bottom:18px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
-#page-admin .umodal .admin-block{margin-bottom:20px;}
+#page-admin .crm-back{background:none;border:0;color:#a9bcff;cursor:pointer;font-size:13px;padding:0;margin-bottom:12px;}
+#page-admin .fiche-head{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:4px;}
+#page-admin .fiche-avatar{width:46px;height:46px;border-radius:50%;background:linear-gradient(135deg,#5b7cfa,#a855f7);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:18px;color:#fff;flex-shrink:0;}
+#page-admin .fiche-title{font-size:20px;font-weight:700;color:#fff;word-break:break-all;}
+#page-admin .umeta{color:var(--color-text-secondary,#9aa);font-size:12px;margin:6px 0 20px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
+#page-admin .fiche-grid{display:grid;grid-template-columns:1fr;gap:18px;}
+#page-admin .soon{color:#66707e;font-size:13px;font-style:italic;}
+@media(max-width:900px){
+  #page-admin .crm-sidebar{width:60px;padding:14px 8px;}
+  #page-admin .crm-nav-item .lb,#page-admin .crm-brand span:last-child,#page-admin .crm-side-foot{display:none;}
+  #page-admin .crm-page{padding:20px 16px 80px;}
+}
 </style>
-<div class="admin-wrap">
-  <div class="admin-head">
-    <h1>⚙️ Admin — Ops</h1>
-    <button id="admin-refresh">↻ Rafraîchir</button>
-    <span id="admin-ts"></span>
-  </div>
-  <section id="admin-overview" class="admin-cards"></section>
-  <section class="admin-block">
-    <h2>👥 Utilisateurs</h2>
-    <div class="ssub">Liste paginée — recherche par email, tri. Agrégation bornée par page (scalable à des milliers d'users).</div>
-    <div class="users-controls">
-      <input id="admin-users-search" type="search" placeholder="Rechercher un email…" autocomplete="off" />
-      <select id="admin-users-sort">
-        <option value="created_desc">Plus récents</option>
-        <option value="created_asc">Plus anciens</option>
-        <option value="active_desc">Dernière activité</option>
-        <option value="email_asc">Email A→Z</option>
-      </select>
+<div class="crm-shell">
+  <aside class="crm-sidebar">
+    <div class="crm-brand"><span class="dot"></span><span>Norva CRM</span></div>
+    <nav id="crm-nav">${nav}</nav>
+    <div class="crm-side-foot">Admin · accès restreint<br>rôle app_metadata.role</div>
+  </aside>
+  <main class="crm-main">
+    <div class="crm-topbar">
+      <span class="crm-crumb" id="crm-crumb">Cockpit</span>
+      <span class="crm-spacer"></span>
+      <span id="crm-ts"></span>
+      <button id="crm-refresh">↻ Rafraîchir</button>
     </div>
-    <div class="scroll"><div id="admin-users"></div></div>
-    <div class="users-pager">
-      <button id="admin-users-prev">← Précédent</button>
-      <span id="admin-users-range"></span>
-      <button id="admin-users-next">Suivant →</button>
-    </div>
-  </section>
-  <section class="admin-block"><h2>📡 Providers / Sources</h2><div class="ssub">Panels pilotes + sources en problème (sync incomplète / erreur) — borné à l'échelle</div><div class="scroll"><div id="admin-sources"></div></div></section>
-  <section class="admin-block"><h2>⚙️ Enrichissement par panel</h2><div class="ssub">Comptes pilotes d'enrichissement uniquement (les autres users héritent via le cache cross-user)</div><div class="scroll"><div id="admin-enrich"></div></div></section>
-  <section class="admin-block"><h2>⏱️ Crons</h2><div class="scroll"><div id="admin-cron"></div></div></section>
-</div>
-<div class="umodal" id="admin-user-modal">
-  <div class="umodal-card">
-    <div class="umodal-head"><h3 id="admin-user-modal-title">Utilisateur</h3><button class="umodal-close" id="admin-user-modal-close" aria-label="Fermer">×</button></div>
-    <div id="admin-user-modal-body"></div>
-  </div>
+    <div id="crm-view"></div>
+  </main>
 </div>`;
-        const btn = root.querySelector('#admin-refresh');
-        if (btn) btn.addEventListener('click', () => this.refresh());
-        // Delegated handler: re-sync buttons, user-row clicks, and modal dismissal (rows/modal
-        // are re-rendered, so delegate from the stable root).
+        // Delegated handlers on the stable root: sidebar nav, refresh, re-sync buttons, client rows.
         root.addEventListener('click', (e) => {
+            const navItem = e.target.closest('.crm-nav-item');
+            if (navItem) { this._navigate(navItem.dataset.route); return; }
+            if (e.target.closest('#crm-refresh')) { this._navigate(this._route); return; }
             const b = e.target.closest('.resync-btn');
             if (b) { e.preventDefault(); this._resync(b); return; }
-            if (e.target.closest('.umodal-close') || e.target.id === 'admin-user-modal') { this._closeUserDetail(); return; }
             const ur = e.target.closest('.user-row');
-            if (ur && !e.target.closest('button,a')) { this._openUserDetail(ur.dataset.userId, ur.dataset.email); }
-        });
-        document.addEventListener('keydown', (e) => { if (e.key === 'Escape') this._closeUserDetail(); });
-        // Users section controls (static elements, built once).
-        const usearch = root.querySelector('#admin-users-search');
-        if (usearch) usearch.addEventListener('input', () => {
-            clearTimeout(this._usersDebounce);
-            this._usersDebounce = setTimeout(() => {
-                this._users.search = usearch.value.trim();
-                this._users.page = 0;
-                this._loadUsers();
-            }, 300);
-        });
-        const usort = root.querySelector('#admin-users-sort');
-        if (usort) usort.addEventListener('change', () => {
-            this._users.sort = usort.value; this._users.page = 0; this._loadUsers();
-        });
-        const uprev = root.querySelector('#admin-users-prev');
-        if (uprev) uprev.addEventListener('click', () => {
-            if (this._users.page > 0) { this._users.page -= 1; this._loadUsers(); }
-        });
-        const unext = root.querySelector('#admin-users-next');
-        if (unext) unext.addEventListener('click', () => {
-            const s = this._users;
-            if ((s.page + 1) * s.limit < s.total) { s.page += 1; this._loadUsers(); }
+            if (ur && !e.target.closest('button,a')) { this._navigate('client:' + ur.dataset.userId); return; }
+            if (e.target.closest('.crm-back')) { this._navigate('clients'); return; }
         });
         this.built = true;
     }
 
-    async refresh() {
-        this._loadUsers();   // live/paginated — independent of the cached snapshot below
-        const ts = document.getElementById('admin-ts');
-        if (ts) ts.textContent = 'chargement…';
+    _setCrumb(text, ts) {
+        const c = document.getElementById('crm-crumb'); if (c) c.textContent = text;
+        const t = document.getElementById('crm-ts');
+        if (t) t.textContent = ts ? ('snapshot · ' + new Date(ts).toLocaleTimeString('fr-FR') + ' · auto 5 min') : '';
+    }
+    _setActiveNav(route) {
+        document.querySelectorAll('#page-admin .crm-nav-item').forEach(el =>
+            el.classList.toggle('active', el.dataset.route === (route.startsWith('client') ? 'clients' : route)));
+    }
+    _view() { return document.getElementById('crm-view'); }
+
+    _navigate(route) {
+        this._route = route;
+        this._setActiveNav(route);
+        if (route === 'cockpit') this._pageCockpit();
+        else if (route === 'clients') this._pageClients();
+        else if (route.startsWith('client:')) this._pageClientDetail(route.slice(7));
+        else if (route === 'providers') this._pageProviders();
+        else if (route === 'moteur') this._pageMoteur();
+        else if (route === 'systeme') this._pageSysteme();
+        else this._pageCockpit();
+    }
+
+    // ── Page: Cockpit ──
+    async _pageCockpit() {
+        this._setCrumb('Cockpit', this._lastTs);
+        const v = this._view();
+        v.innerHTML = `<div class="crm-page">
+            <h1 class="crm-h1">🎯 Cockpit</h1>
+            <p class="crm-sub">Santé de l'écosystème Norva en un coup d'œil.</p>
+            <section id="admin-overview" class="admin-cards"><div class="ssub">Chargement…</div></section>
+        </div>`;
         try {
-            const [ov, sources, enrich, cron] = await Promise.all([
-                this._rpc('admin_overview'),
-                this._rpc('admin_sources'),
-                this._rpc('admin_enrichment_coverage'),
-                this._rpc('admin_cron_health')
-            ]);
-            this._renderOverview(ov);
-            this._renderSources(Array.isArray(sources) ? sources : []);
-            this._renderEnrich(Array.isArray(enrich) ? enrich : []);
-            this._renderCron(Array.isArray(cron) ? cron : []);
-            if (ts) ts.textContent = 'snapshot · ' + (ov && ov.refreshed_at
-                ? new Date(ov.refreshed_at).toLocaleTimeString('fr-FR') : new Date().toLocaleTimeString('fr-FR'))
-                + ' · auto 5 min';
+            const o = await this._rpc('admin_overview');
+            this._lastTs = o && o.refreshed_at ? o.refreshed_at : this._lastTs;
+            this._setCrumb('Cockpit', this._lastTs);
+            this._renderOverview(o);
         } catch (e) {
-            if (ts) ts.textContent = '';
-            const ov = document.getElementById('admin-overview');
-            if (ov) ov.innerHTML = `<div class="admin-err">Erreur de chargement : ${AdminPage.esc(e.message)}</div>`;
+            const el = document.getElementById('admin-overview');
+            if (el) el.innerHTML = `<div class="admin-err">Erreur : ${AdminPage.esc(e.message)}</div>`;
         }
     }
 
-    // ── Users (live paginated) ──
+    // ── Page: Clients (list) ──
+    _pageClients() {
+        this._setCrumb('Clients');
+        const v = this._view();
+        v.innerHTML = `<div class="crm-page">
+            <h1 class="crm-h1">👥 Clients</h1>
+            <p class="crm-sub">Liste paginée — recherche, tri, clic pour la fiche 360°. Agrégation bornée par page (scalable).</p>
+            <div class="users-controls">
+              <input id="admin-users-search" type="search" placeholder="Rechercher un email…" autocomplete="off" value="${AdminPage.esc(this._users.search)}" />
+              <select id="admin-users-sort">
+                <option value="created_desc">Plus récents</option>
+                <option value="created_asc">Plus anciens</option>
+                <option value="active_desc">Dernière activité</option>
+                <option value="email_asc">Email A→Z</option>
+              </select>
+            </div>
+            <div class="scroll"><div id="admin-users"></div></div>
+            <div class="users-pager">
+              <button id="admin-users-prev">← Précédent</button>
+              <span id="admin-users-range"></span>
+              <button id="admin-users-next">Suivant →</button>
+            </div>
+        </div>`;
+        const sortSel = document.getElementById('admin-users-sort');
+        if (sortSel) sortSel.value = this._users.sort;
+        // Wire controls (re-created on each navigation to this page).
+        const usearch = document.getElementById('admin-users-search');
+        if (usearch) usearch.addEventListener('input', () => {
+            clearTimeout(this._usersDebounce);
+            this._usersDebounce = setTimeout(() => {
+                this._users.search = usearch.value.trim(); this._users.page = 0; this._loadUsers();
+            }, 300);
+        });
+        if (sortSel) sortSel.addEventListener('change', () => {
+            this._users.sort = sortSel.value; this._users.page = 0; this._loadUsers();
+        });
+        const prev = document.getElementById('admin-users-prev');
+        if (prev) prev.addEventListener('click', () => { if (this._users.page > 0) { this._users.page -= 1; this._loadUsers(); } });
+        const next = document.getElementById('admin-users-next');
+        if (next) next.addEventListener('click', () => {
+            const s = this._users; if ((s.page + 1) * s.limit < s.total) { s.page += 1; this._loadUsers(); }
+        });
+        this._loadUsers();
+    }
+
     async _loadUsers() {
         const el = document.getElementById('admin-users');
         const range = document.getElementById('admin-users-range');
@@ -237,10 +291,7 @@ class AdminPage {
         if (range) range.textContent = '…';
         try {
             const res = await this._rpc('admin_users_page', {
-                p_limit: s.limit,
-                p_offset: s.page * s.limit,
-                p_search: s.search || null,
-                p_sort: s.sort
+                p_limit: s.limit, p_offset: s.page * s.limit, p_search: s.search || null, p_sort: s.sort
             });
             const rows = (res && Array.isArray(res.rows)) ? res.rows : [];
             s.total = Number(res && res.total) || 0;
@@ -271,7 +322,7 @@ class AdminPage {
             const last = r.last_sign_in_at
                 ? `<span title="${AdminPage.esc(new Date(r.last_sign_in_at).toLocaleString('fr-FR'))}">${AdminPage.esc(AdminPage.timeAgo(r.last_sign_in_at))}</span>`
                 : '<span class="badge gray">jamais</span>';
-            return `<tr class="user-row" data-user-id="${AdminPage.esc(r.user_id)}" data-email="${AdminPage.esc(r.email || '')}" title="Voir le détail">
+            return `<tr class="user-row" data-user-id="${AdminPage.esc(r.user_id)}" data-email="${AdminPage.esc(r.email || '')}" title="Voir la fiche">
                 <td>${AdminPage.esc(r.email || '—')}${driver}</td>
                 <td>${role}</td>
                 <td class="num">${AdminPage.n(r.sources_count)}</td>
@@ -283,43 +334,36 @@ class AdminPage {
         el.innerHTML = `<table><thead>${head}</thead><tbody>${body}</tbody></table>`;
     }
 
-    // ── User detail (modal, on row click) ──
-    _closeUserDetail() {
-        const m = document.getElementById('admin-user-modal');
-        if (m) m.classList.remove('open');
-    }
-
-    async _openUserDetail(userId, email) {
-        if (!userId) return;
-        const modal = document.getElementById('admin-user-modal');
-        const title = document.getElementById('admin-user-modal-title');
-        const body = document.getElementById('admin-user-modal-body');
-        if (!modal || !body) return;
-        if (title) title.textContent = email || 'Utilisateur';
-        body.innerHTML = '<div class="ssub">Chargement…</div>';
-        modal.classList.add('open');
+    // ── Page: Client detail (fiche 360°, full page) ──
+    async _pageClientDetail(userId) {
+        this._setCrumb('Clients › fiche');
+        const v = this._view();
+        v.innerHTML = `<div class="crm-page">
+            <button class="crm-back">← Retour aux clients</button>
+            <div id="fiche-body"><div class="ssub">Chargement…</div></div>
+        </div>`;
         try {
             const d = await this._rpc('admin_user_detail', { p_user_id: userId });
-            this._renderUserDetail(d);
+            this._renderFiche(d);
         } catch (e) {
-            body.innerHTML = `<div class="admin-err">Erreur : ${AdminPage.esc(e.message)}</div>`;
+            const b = document.getElementById('fiche-body');
+            if (b) b.innerHTML = `<div class="admin-err">Erreur : ${AdminPage.esc(e.message)}</div>`;
         }
     }
 
-    _renderUserDetail(d) {
-        const body = document.getElementById('admin-user-modal-body');
+    _renderFiche(d) {
+        const body = document.getElementById('fiche-body');
         if (!body) return;
         const u = (d && d.user) || {};
         const sources = (d && Array.isArray(d.sources)) ? d.sources : [];
         const enrich = (d && Array.isArray(d.enrichment)) ? d.enrichment : [];
+        const email = u.email || 'Utilisateur';
+        this._setCrumb('Clients › ' + email);
         const day = (x) => x ? new Date(x).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
         const role = u.role === 'admin' ? '<span class="badge amber">admin</span>' : '<span class="badge gray">user</span>';
         const driver = u.is_driver ? '<span class="badge blue">pilote</span>' : '';
         const conf = u.email_confirmed ? '<span class="badge green">email vérifié</span>' : '<span class="badge red">email non vérifié</span>';
-        const meta = `<div class="umeta">${role} ${driver} ${conf}
-            <span>· inscrit ${AdminPage.esc(day(u.created_at))}</span>
-            <span>· dernière activité ${u.last_sign_in_at ? AdminPage.esc(AdminPage.timeAgo(u.last_sign_in_at)) : 'jamais'}</span>
-            ${u.auth_provider ? `<span>· via ${AdminPage.esc(u.auth_provider)}</span>` : ''}</div>`;
+        const initial = (email[0] || '?').toUpperCase();
 
         let srcHtml;
         if (!sources.length) srcHtml = '<div class="ssub">Aucune source.</div>';
@@ -359,12 +403,77 @@ class AdminPage {
             enrHtml = `<table><thead><tr><th>Panel</th><th>Type</th><th class="num">Total</th><th class="num">Audio résolu</th><th class="num">Jamais sondé</th><th class="num">Sondé 24h</th><th class="num">ST trouvés</th></tr></thead><tbody>${rows}</tbody></table>`;
         }
 
-        body.innerHTML = `${meta}
-            <div class="admin-block"><h2>📡 Sources (${sources.length})</h2><div class="scroll">${srcHtml}</div></div>
-            <div class="admin-block"><h2>⚙️ Enrichissement audio par panel</h2><div class="scroll">${enrHtml}</div></div>`;
+        body.innerHTML = `
+            <div class="fiche-head">
+              <div class="fiche-avatar">${AdminPage.esc(initial)}</div>
+              <div><div class="fiche-title">${AdminPage.esc(email)}</div>
+              <div class="umeta">${role} ${driver} ${conf}
+                <span>· inscrit ${AdminPage.esc(day(u.created_at))}</span>
+                <span>· dernière activité ${u.last_sign_in_at ? AdminPage.esc(AdminPage.timeAgo(u.last_sign_in_at)) : 'jamais'}</span>
+                ${u.auth_provider ? `<span>· via ${AdminPage.esc(u.auth_provider)}</span>` : ''}</div></div>
+            </div>
+            <div class="fiche-grid">
+              <div class="admin-block"><h2>📡 Sources (${sources.length})</h2><div class="scroll">${srcHtml}</div></div>
+              <div class="admin-block"><h2>⚙️ Enrichissement audio par panel</h2><div class="scroll">${enrHtml}</div></div>
+              <div class="admin-block"><h2>🏷️ Tags & segments</h2><div class="card soon">Bientôt — couche relationnelle (étape B).</div></div>
+              <div class="admin-block"><h2>📝 Notes internes</h2><div class="card soon">Bientôt — notes par client (étape B).</div></div>
+              <div class="admin-block"><h2>🕑 Timeline d'activité</h2><div class="card soon">Bientôt — événements (inscription, provider, sync, email…) (étape B).</div></div>
+            </div>`;
     }
 
-    // ── renderers ──
+    // ── Page: Providers ──
+    async _pageProviders() {
+        this._setCrumb('Providers', this._lastTs);
+        const v = this._view();
+        v.innerHTML = `<div class="crm-page">
+            <h1 class="crm-h1">📡 Providers / Sources</h1>
+            <p class="crm-sub">Panels pilotes + sources en problème (sync incomplète / erreur) — borné à l'échelle.</p>
+            <div class="scroll"><div id="admin-sources"><div class="ssub">Chargement…</div></div></div>
+        </div>`;
+        try {
+            const sources = await this._rpc('admin_sources');
+            this._renderSources(Array.isArray(sources) ? sources : []);
+        } catch (e) {
+            const el = document.getElementById('admin-sources');
+            if (el) el.innerHTML = `<div class="admin-err">Erreur : ${AdminPage.esc(e.message)}</div>`;
+        }
+    }
+
+    // ── Page: Moteur (enrichment + crons) ──
+    async _pageMoteur() {
+        this._setCrumb('Moteur', this._lastTs);
+        const v = this._view();
+        v.innerHTML = `<div class="crm-page">
+            <h1 class="crm-h1">⚙️ Moteur d'enrichissement</h1>
+            <p class="crm-sub">Couverture par panel (comptes pilotes) + crons jour/nuit.</p>
+            <div class="admin-block"><h2>Enrichissement par panel</h2><div class="scroll"><div id="admin-enrich"><div class="ssub">Chargement…</div></div></div></div>
+            <div class="admin-block"><h2>⏱️ Crons</h2><div class="scroll"><div id="admin-cron"></div></div></div>
+        </div>`;
+        try {
+            const [enrich, cron] = await Promise.all([
+                this._rpc('admin_enrichment_coverage'),
+                this._rpc('admin_cron_health')
+            ]);
+            this._renderEnrich(Array.isArray(enrich) ? enrich : []);
+            this._renderCron(Array.isArray(cron) ? cron : []);
+        } catch (e) {
+            const el = document.getElementById('admin-enrich');
+            if (el) el.innerHTML = `<div class="admin-err">Erreur : ${AdminPage.esc(e.message)}</div>`;
+        }
+    }
+
+    // ── Page: Système (placeholder for audit / infra / flags) ──
+    _pageSysteme() {
+        this._setCrumb('Système');
+        const v = this._view();
+        v.innerHTML = `<div class="crm-page">
+            <h1 class="crm-h1">🛡️ Système & Audit</h1>
+            <p class="crm-sub">Santé infra, journal d'audit admin, feature flags.</p>
+            <div class="card soon">Bientôt — journal d'audit (admin_audit_log), santé gateway/relay/edge, feature flags.</div>
+        </div>`;
+    }
+
+    // ── shared renderers ──
     _renderOverview(o) {
         o = o || {};
         const el = document.getElementById('admin-overview');
@@ -373,6 +482,7 @@ class AdminPage {
         const n = (x) => (x == null ? '—' : Number(x).toLocaleString('fr-FR'));
         el.innerHTML = [
             card(n(o.users_total), 'Users', o.users_active_7d ? 'ok' : ''),
+            card(n(o.users_active_7d), 'Actifs 7 j'),
             card(n(o.sources_total), 'Sources'),
             card(n(o.sources_incomplete), 'Sync incomplète', Number(o.sources_incomplete) > 0 ? 'alert' : 'ok'),
             card(n(o.sources_error), 'Sources en erreur', Number(o.sources_error) > 0 ? 'alert' : 'ok'),
@@ -390,7 +500,7 @@ class AdminPage {
     _renderSources(rows) {
         const el = document.getElementById('admin-sources');
         if (!el) return;
-        // Group providers by account so a customer's panels sit together.
+        if (!rows.length) { el.innerHTML = '<div class="ssub">Aucune source.</div>'; return; }
         const sorted = rows.slice().sort((a, b) =>
             String(a.owner_email).localeCompare(String(b.owner_email)) ||
             String(a.display_name).localeCompare(String(b.display_name)));
@@ -432,7 +542,6 @@ class AdminPage {
             });
             if (!res.ok) throw new Error(String(res.status));
             btn.textContent = '✓ lancé';
-            setTimeout(() => this.refresh(), 6000);   // let the background sync progress, then re-read
         } catch (e) {
             btn.textContent = '✗ ' + AdminPage.esc(e.message || 'err');
             setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 3500);
@@ -442,12 +551,9 @@ class AdminPage {
     _renderEnrich(rows) {
         const el = document.getElementById('admin-enrich');
         if (!el) return;
+        if (!rows.length) { el.innerHTML = '<div class="ssub">Aucune donnée.</div>'; return; }
         const barCell = (a, p) => `<td class="num"><span class="bar"><i style="width:${Math.min(100, Number(p) || 0)}%"></i></span>${AdminPage.n(a)} (${p == null ? 0 : p}%)</td>`;
         const eta = (r) => {
-            // "1ʳᵉ passe terminée" = never_probed 0 → tout a été sondé au moins une fois. Ce n'est PAS
-            // "100% résolu" : le reste (audio résolu < 100%) est « und » dans le conteneur (piste sans
-            // langue déclarée), que le probe ne peut pas résoudre — seul whisper le peut. Le libellé
-            // dit donc "sondé", pas "complet", pour ne pas contredire une barre Audio résolu à 61%.
             if (Number(r.never_probed) === 0) {
                 const undPct = Math.max(0, Math.round((100 - (Number(r.resolved_pct) || 0)) * 10) / 10);
                 return `<span class="badge green" title="1ʳᵉ passe de sondage terminée : chaque titre a été sondé au moins une fois. Les ~${undPct}% non résolus sont « und » dans le conteneur (aucune langue déclarée) — seul whisper peut les résoudre.">✓ sondé</span>`;
@@ -455,7 +561,6 @@ class AdminPage {
             if (Number(r.probed_24h) === 0) return '<span class="badge red">⏸ à l\'arrêt</span>';
             return `~${AdminPage.n(r.eta_days)} j`;
         };
-        // Group by provider so a panel's films + séries sit together (account → panel → films first).
         const sorted = rows.slice().sort((a, b) =>
             String(a.owner_email).localeCompare(String(b.owner_email)) ||
             String(a.panel).localeCompare(String(b.panel)) ||
@@ -533,9 +638,8 @@ class AdminPage {
         else if ((m = min.match(/^\*\/(\d+)$/))) minLabel = `toutes les ${m[1]} min`;
         else if ((m = min.match(/^\d+-\d+\/(\d+)$/))) minLabel = `toutes les ${m[1]} min`;
         else if (/,/.test(min)) { const a = min.split(',').map(Number); const s = a.length > 1 ? a[1] - a[0] : 0; minLabel = s > 0 ? `toutes les ${s} min` : `${a.length}×/h`; }
-        else if (/^\d+$/.test(min)) minLabel = null;        // single minute → "1×/j à HhMM"
+        else if (/^\d+$/.test(min)) minLabel = null;
         else return expr;
-        // hour
         if ((m = hr.match(/^\*\/(\d+)$/))) return `toutes les ${m[1]} h`;
         let hrLabel = '';
         if (hr === '*') hrLabel = '';
