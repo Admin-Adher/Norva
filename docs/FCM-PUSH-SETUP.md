@@ -34,21 +34,25 @@ token FCM (Android) → cache prefs → `NorvaTVCloud.getPushToken()` → `app.j
 
 ## 2. Les 3 étapes (côté owner)
 
-### Étape 1 — Projet Firebase + `google-services.json`
+### Étape 1 — Projet Firebase + `google-services.json` (via secret GitHub)
 1. Aller sur **https://console.firebase.google.com** → **Créer un projet** (nom : `Norva`). Google Analytics
-   optionnel (peut être désactivé).
+   optionnel (peut être désactivé). *(Projet réel : `norva-ecosystem`.)*
 2. Dans le projet → icône Android (« Ajouter une app ») → **Nom du package** : `tv.norva.phone` (exactement —
    c'est l'`applicationId` du wrapper). Surnom optionnel. **SHA-1 non requis** pour FCM (laisser vide).
 3. **Télécharger `google-services.json`**.
-4. Le placer dans le repo à **`clients/android-phone/app/google-services.json`** puis le **commiter et pusher**
-   sur `main`.
-   - ⚠️ Il **doit être commité** : le workflow de release fait un checkout simple (pas d'injection de secret),
-     et le plugin ne s'active que si le fichier est présent (`if (file("google-services.json").exists())`).
-   - ✅ Ce n'est **pas** un secret : `google-services.json` est de la config client embarquée dans chaque APK
-     (n'importe qui peut l'extraire). Le commiter est standard et sûr. (Ne PAS y confondre avec la clé service
-     account de l'étape 2, qui est un vrai secret et ne va JAMAIS dans le repo.)
+4. **NE PAS le commiter** dans le repo (public + le *secret scanning* de GitHub **bloque** le push à cause de
+   la clé API Google). À la place, le déposer en **secret GitHub** :
+   - GitHub → **Settings → Secrets and variables → Actions → New repository secret**
+   - Nom : **`GOOGLE_SERVICES_JSON`**
+   - Valeur : **coller tout le contenu** du fichier `google-services.json` (ouvre-le dans un éditeur, copie tout).
+   - Le workflow de build **écrit le fichier depuis ce secret** avant Gradle (`.github/workflows/android-release.yml`
+     + `build.yml`). Le fichier reste `.gitignore` → jamais dans l'historique.
+   - ✅ Distinction : la clé API dans `google-services.json` est de la config client (embarquée dans l'APK), mais
+     on la garde hors du repo par propreté + pour ne pas déclencher le secret scanning. La **vraie** clé secrète
+     (service account, étape 2) ne va JAMAIS dans le repo non plus — elle vit dans le secret **edge Supabase**.
 
-*Résultat* : les builds Android (debug CI + release) appliquent le plugin et initialisent Firebase.
+*Résultat* : les builds Android (debug CI + release) matérialisent le fichier depuis le secret → le plugin
+s'applique → Firebase est initialisé. Sans le secret, le plugin reste off et le build compile quand même.
 
 ### Étape 2 — Secret `FCM_SERVICE_ACCOUNT` (Supabase)
 1. Firebase Console → **Paramètres du projet** (roue crantée) → onglet **Comptes de service**.

@@ -45,6 +45,20 @@ jobs:
           fi
           echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.keystore"
 
+      # Firebase config for FCM push. Kept OUT of git (public repo + secret scanning) and written here
+      # from the GOOGLE_SERVICES_JSON secret (paste the whole google-services.json as the secret value).
+      # Absent → the conditional google-services plugin stays off and the build still succeeds (no push).
+      - name: Write google-services.json (Firebase / FCM)
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          if [ -n "$GOOGLE_SERVICES_JSON" ]; then
+            printf '%s' "$GOOGLE_SERVICES_JSON" > clients/android-phone/app/google-services.json
+            echo "Wrote google-services.json ($(wc -c < clients/android-phone/app/google-services.json) bytes)."
+          else
+            echo "::warning::GOOGLE_SERVICES_JSON secret not set — FCM plugin stays off in this build."
+          fi
+
       - name: Build signed release AAB
         working-directory: clients/android-phone
         env:
