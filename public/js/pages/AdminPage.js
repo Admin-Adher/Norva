@@ -101,6 +101,7 @@ class AdminPage {
 #page-admin tr.group-start td{border-top:2px solid var(--color-border,#2a2a2a);}
 #page-admin .pname{font-weight:600;}
 #page-admin .pacct{font-size:11px;color:var(--color-text-secondary,#9aa);}
+#page-admin .ssub{font-size:12px;color:var(--color-text-secondary,#9aa);margin:-4px 0 12px;}
 #page-admin .bar{height:6px;border-radius:3px;background:#333;overflow:hidden;min-width:60px;display:inline-block;vertical-align:middle;margin-right:6px;}
 #page-admin .bar>i{display:block;height:100%;background:#3ecf8e;}
 #page-admin .admin-err{color:#ff6b6b;padding:10px;}
@@ -113,8 +114,8 @@ class AdminPage {
     <span id="admin-ts"></span>
   </div>
   <section id="admin-overview" class="admin-cards"></section>
-  <section class="admin-block"><h2>📡 Providers / Sources</h2><div class="scroll"><div id="admin-sources"></div></div></section>
-  <section class="admin-block"><h2>⚙️ Enrichissement par panel</h2><div class="scroll"><div id="admin-enrich"></div></div></section>
+  <section class="admin-block"><h2>📡 Providers / Sources</h2><div class="ssub">Panels pilotes + sources en problème (sync incomplète / erreur) — borné à l'échelle</div><div class="scroll"><div id="admin-sources"></div></div></section>
+  <section class="admin-block"><h2>⚙️ Enrichissement par panel</h2><div class="ssub">Comptes pilotes d'enrichissement uniquement (les autres users héritent via le cache cross-user)</div><div class="scroll"><div id="admin-enrich"></div></div></section>
   <section class="admin-block"><h2>⏱️ Crons</h2><div class="scroll"><div id="admin-cron"></div></div></section>
 </div>`;
         const btn = root.querySelector('#admin-refresh');
