@@ -95,6 +95,8 @@ class AdminPage {
 #page-admin .badge.red{background:#e5091422;color:#ff6b6b;}
 #page-admin .badge.green{background:#3ecf8e22;color:#3ecf8e;}
 #page-admin .badge.gray{background:#8884;color:#bbb;}
+#page-admin .badge.amber{background:#f5a62322;color:#f5c15a;}
+#page-admin .badge.blue{background:#4a9eff22;color:#7ab8ff;}
 #page-admin .bar{height:6px;border-radius:3px;background:#333;overflow:hidden;min-width:60px;display:inline-block;vertical-align:middle;margin-right:6px;}
 #page-admin .bar>i{display:block;height:100%;background:#3ecf8e;}
 #page-admin .admin-err{color:#ff6b6b;padding:10px;}
@@ -130,7 +132,9 @@ class AdminPage {
             this._renderSources(Array.isArray(sources) ? sources : []);
             this._renderEnrich(Array.isArray(enrich) ? enrich : []);
             this._renderCron(Array.isArray(cron) ? cron : []);
-            if (ts) ts.textContent = 'à jour · ' + new Date().toLocaleTimeString();
+            if (ts) ts.textContent = 'snapshot · ' + (ov && ov.refreshed_at
+                ? new Date(ov.refreshed_at).toLocaleTimeString('fr-FR') : new Date().toLocaleTimeString('fr-FR'))
+                + ' · auto 5 min';
         } catch (e) {
             if (ts) ts.textContent = '';
             const ov = document.getElementById('admin-overview');
@@ -188,18 +192,21 @@ class AdminPage {
     _renderEnrich(rows) {
         const el = document.getElementById('admin-enrich');
         if (!el) return;
-        const pct = (a, t) => (t > 0 ? Math.round(1000 * a / t) / 10 : 0);
-        const barCell = (a, t) => {
-            const p = pct(a, t);
-            return `<td class="num"><span class="bar"><i style="width:${Math.min(100, p)}%"></i></span>${AdminPage.n(a)} (${p}%)</td>`;
+        const barCell = (a, p) => `<td class="num"><span class="bar"><i style="width:${Math.min(100, Number(p) || 0)}%"></i></span>${AdminPage.n(a)} (${p == null ? 0 : p}%)</td>`;
+        const eta = (r) => {
+            if (Number(r.never_probed) === 0) return '<span class="badge green">✓ complet</span>';
+            if (Number(r.probed_24h) === 0) return '<span class="badge red">⏸ à l\'arrêt</span>';
+            return `~${AdminPage.n(r.eta_days)} j`;
         };
-        const head = `<tr><th>Panel</th><th>Type</th><th class="num">Total</th><th class="num">Audio résolu</th><th class="num">Sondé 24h</th><th class="num">Sous-titres trouvés</th></tr>`;
+        const head = `<tr><th>Panel</th><th>Type</th><th class="num">Total</th><th class="num">Audio résolu</th><th class="num">Jamais sondé</th><th class="num">Sondé 24h</th><th>ETA 1er passage</th><th class="num">ST trouvés</th></tr>`;
         const body = rows.map(r => `<tr>
             <td>${AdminPage.esc(r.panel)}</td>
-            <td>${AdminPage.esc(r.item_type)}</td>
+            <td>${r.item_type === 'series' ? 'séries' : 'films'}</td>
             <td class="num">${AdminPage.n(r.total)}</td>
-            ${barCell(Number(r.audio_resolved), Number(r.total))}
+            ${barCell(r.resolved, r.resolved_pct)}
+            <td class="num">${AdminPage.n(r.never_probed)}</td>
             <td class="num">${AdminPage.n(r.probed_24h)}</td>
+            <td>${eta(r)}</td>
             <td class="num">${AdminPage.n(r.subtitle_found)}</td>
         </tr>`).join('');
         el.innerHTML = `<table><thead>${head}</thead><tbody>${body}</tbody></table>`;
@@ -208,7 +215,9 @@ class AdminPage {
     _renderCron(rows) {
         const el = document.getElementById('admin-cron');
         if (!el) return;
-        const head = `<tr><th>Job</th><th>Cadence</th><th>État</th><th>Dernier run</th><th class="num">Échecs 24h</th></tr>`;
+        const winBadge = (w) => w === 'jour' ? '<span class="badge amber">☀️ jour</span>'
+            : (w === 'nuit' ? '<span class="badge blue">🌙 nuit</span>' : '<span class="badge gray">—</span>');
+        const head = `<tr><th>Fenêtre</th><th>Dimension</th><th>Job</th><th>Cadence</th><th>État</th><th>Dernier run</th><th class="num">Échecs 24h</th></tr>`;
         const body = rows.map(r => {
             const paused = r.active === false;
             const failing = Number(r.fails_24h) > 0;
@@ -216,6 +225,8 @@ class AdminPage {
                 : (failing ? `<span class="badge red">échecs</span>` : `<span class="badge green">actif</span>`);
             const last = r.last_run ? new Date(r.last_run).toLocaleString('fr-FR') : '—';
             return `<tr class="${failing ? 'bad' : ''}">
+                <td>${winBadge(r.window)}</td>
+                <td>${AdminPage.esc(r.kind)}</td>
                 <td>${AdminPage.esc(r.jobname)}</td>
                 <td>${AdminPage.esc(r.schedule)}</td>
                 <td>${state}</td>
