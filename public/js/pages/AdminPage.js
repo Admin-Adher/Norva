@@ -152,6 +152,9 @@ class AdminPage {
 #page-admin .users-controls{display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap;}
 #page-admin .users-controls input,#page-admin .users-controls select{background:var(--color-bg-secondary,#16161c);border:1px solid var(--color-border,#2a2a38);color:var(--color-text-primary,#fff);border-radius:8px;padding:8px 12px;font-size:13px;}
 #page-admin .users-controls input{min-width:240px;flex:1;max-width:380px;}
+#page-admin .users-controls button{background:var(--color-bg-secondary,#16161c);border:1px solid var(--color-border,#2a2a38);color:#a9bcff;border-radius:8px;padding:8px 13px;font-size:13px;cursor:pointer;font-weight:600;}
+#page-admin .users-controls button:hover{border-color:#5b7cfa;}
+#page-admin .users-controls button:disabled{opacity:.5;cursor:default;}
 #page-admin .users-pager{display:flex;align-items:center;gap:14px;margin-top:12px;}
 #page-admin .users-pager button{background:var(--color-bg-secondary,#181820);color:var(--color-text-primary,#fff);border:1px solid var(--color-border,#2a2a38);border-radius:8px;padding:6px 12px;cursor:pointer;font-size:13px;}
 #page-admin .users-pager button:disabled{opacity:.4;cursor:default;}
@@ -263,6 +266,7 @@ class AdminPage {
             const actBtn = e.target.closest('.act-btn');
             if (actBtn) { this._userAction(actBtn); return; }
             if (e.target.closest('#sys-infra-refresh')) { this._loadInfra(); return; }
+            if (e.target.closest('#sys-audit-more')) { this._loadAudit(false); return; }
             if (e.target.closest('.flag-create')) { this._flagCreate(); return; }
             const fDel = e.target.closest('.flag-del');
             if (fDel) {
@@ -358,6 +362,7 @@ class AdminPage {
                 <option value="email_asc">Email A→Z</option>
               </select>
               <select id="admin-users-tag"><option value="">Tous les segments</option></select>
+              <button id="admin-users-csv" title="Exporter la liste filtrée en CSV (max 10 000 lignes)">⬇ CSV</button>
             </div>
             <div class="scroll"><div id="admin-users"></div></div>
             <div class="users-pager">
@@ -384,6 +389,8 @@ class AdminPage {
             this._fillTagOptions(tagSel);
             tagSel.addEventListener('change', () => { this._users.tagId = tagSel.value; this._users.page = 0; this._loadUsers(); });
         }
+        const csvBtn = document.getElementById('admin-users-csv');
+        if (csvBtn) csvBtn.addEventListener('click', () => this._exportUsersCsv(csvBtn));
         const prev = document.getElementById('admin-users-prev');
         if (prev) prev.addEventListener('click', () => { if (this._users.page > 0) { this._users.page -= 1; this._loadUsers(); } });
         const next = document.getElementById('admin-users-next');
@@ -456,6 +463,40 @@ class AdminPage {
             </tr>`;
         }).join('');
         el.innerHTML = `<table><thead>${head}</thead><tbody>${body}</tbody></table>`;
+    }
+
+    // CSV export of the CURRENT filter (search + segment), up to 10k rows in one RPC call.
+    async _exportUsersCsv(btn) {
+        if (btn.disabled) return;
+        const orig = btn.textContent;
+        btn.disabled = true; btn.textContent = '…';
+        try {
+            const rows = await this._rpc('admin_users_export', {
+                p_search: this._users.search || null,
+                p_tag_id: this._users.tagId || null
+            });
+            const list = Array.isArray(rows) ? rows : [];
+            // Strict CSV: every field quoted, internal quotes doubled, CRLF lines, BOM for Excel.
+            const q = (v) => `"${String(v == null ? '' : v).replace(/"/g, '""')}"`;
+            const header = ['email', 'role', 'suspendu', 'email_verifie', 'inscrit', 'derniere_activite', 'sources', 'segments', 'user_id'];
+            const lines = [header.map(q).join(',')].concat(list.map(r => [
+                r.email, r.role, r.banned ? 'oui' : 'non', r.email_confirmed ? 'oui' : 'non',
+                r.created_at || '', r.last_sign_in_at || '', r.sources_count, r.tags || '', r.user_id
+            ].map(q).join(',')));
+            const blob = new Blob(['\uFEFF' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            const d = new Date();
+            a.download = `norva-clients-${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}.csv`;
+            document.body.appendChild(a); a.click(); a.remove();
+            setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+            btn.textContent = `✓ ${list.length}`;
+            setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 2500);
+        } catch (e) {
+            btn.textContent = '✗ erreur';
+            window.alert('Export impossible : ' + e.message);
+            setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 2500);
+        }
     }
 
     // ── Page: Client detail (fiche 360°, full page) ──
@@ -718,17 +759,36 @@ class AdminPage {
             <div class="admin-block"><h2>📜 Journal d'audit</h2><div id="sys-audit"><div class="ssub">Chargement…</div></div></div>
         </div>`;
         try {
-            const [o, feed] = await Promise.all([this._rpc('admin_overview'), this._rpc('admin_audit_feed', { p_limit: 80 })]);
+            const o = await this._rpc('admin_overview');
             this._lastTs = o && o.refreshed_at ? o.refreshed_at : this._lastTs;
             this._setCrumb('Système', this._lastTs);
             this._renderSysHealth(o);
-            this._renderAudit(Array.isArray(feed) ? feed : []);
         } catch (e) {
             const el = document.getElementById('sys-health');
             if (el) el.innerHTML = `<div class="admin-err">Erreur : ${AdminPage.esc(e.message)}</div>`;
         }
+        this._loadAudit(true);
         this._loadInfra();
         this._loadFlags();
+    }
+
+    // Keyset-paginated audit feed: each "Charger plus" fetches the batch strictly OLDER than the
+    // last loaded row (created_at cursor) — no OFFSET, constant cost at any depth.
+    async _loadAudit(reset) {
+        const el = document.getElementById('sys-audit');
+        if (!el) return;
+        if (reset || !this._audit) this._audit = { rows: [], done: false };
+        const a = this._audit;
+        try {
+            const last = a.rows.length ? a.rows[a.rows.length - 1].created_at : null;
+            const batch = await this._rpc('admin_audit_feed', { p_limit: 80, p_before: last });
+            const list = Array.isArray(batch) ? batch : [];
+            a.rows = a.rows.concat(list);
+            a.done = list.length < 80;
+            this._renderAudit(a.rows);
+        } catch (e) {
+            el.innerHTML = `<div class="admin-err">Erreur : ${AdminPage.esc(e.message)}</div>`;
+        }
     }
 
     async _loadInfra() {
@@ -814,11 +874,13 @@ class AdminPage {
         if (!el) return;
         if (!rows.length) { el.innerHTML = '<div class="ssub">Aucune action enregistrée pour l\'instant.</div>'; return; }
         const icon = (k) => ({ note_added: '📝', tag_added: '🏷️', tag_removed: '🏷️', admin_action: '⚡', resync: '↻', signup: '🎉', sync_started: '▶️', sync_done: '✅', sync_failed: '⚠️' }[k] || '•');
+        const more = (this._audit && !this._audit.done)
+            ? '<div style="margin-top:12px"><button id="sys-audit-more" class="tag-add-chip">⌄ Charger plus</button></div>' : '';
         el.innerHTML = '<div class="tl">' + rows.map(e => `<div class="tl-item audit-row"${e.user_id ? ` data-user-id="${AdminPage.esc(e.user_id)}"` : ''}>
             <span class="tl-ic">${icon(e.kind)}</span>
             <span class="tl-sum">${AdminPage.esc(e.summary)}${e.client_email ? ` <span class="al-owner">· ${AdminPage.esc(e.client_email)}</span>` : ''}${e.actor ? ` <span class="ssub">par ${AdminPage.esc(e.actor)}</span>` : ''}</span>
             <span class="tl-at" title="${e.created_at ? AdminPage.esc(new Date(e.created_at).toLocaleString('fr-FR')) : ''}">${e.created_at ? AdminPage.esc(AdminPage.timeAgo(e.created_at)) : ''}</span>
-        </div>`).join('') + '</div>';
+        </div>`).join('') + '</div>' + more;
     }
 
     // ── shared renderers ──
