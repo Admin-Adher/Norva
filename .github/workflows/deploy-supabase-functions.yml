@@ -10,6 +10,12 @@ name: Deploy Supabase Edge Functions
 #
 # Note: database migrations are NOT auto-applied here (DDL on prod stays a
 # deliberate, reviewed step) — only the edge functions are deployed.
+#
+# Transient failure: the CLI occasionally exits with `unexpected update function
+# status 500: {"message":"Failed to set function store"}` on a single function
+# (Supabase's function-store backend, not the bundle — bundling succeeds). It is
+# transient; re-run this workflow (Actions → Run workflow, or push again). Only
+# the affected function needs redeploying; the others report "No change found".
 
 on:
   workflow_dispatch:
