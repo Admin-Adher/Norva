@@ -51,8 +51,12 @@ jobs:
 
       - name: Commit rebuilt WASM
         run: |
-          git config user.name "norva-ci"
-          git config user.email "ci@users.noreply.github.com"
+          # Canonical GitHub Actions bot identity. The old "ci@users.noreply.github.com" was the
+          # legacy noreply address of the unrelated GitHub user @ci, so GitHub mis-attributed this
+          # bot commit to that stranger and listed them as a repo "Contributor". This identity maps
+          # to no real person.
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add public/webengine/vendor/libav/
           if git diff --cached --quiet; then
             echo "No changes to commit."
