@@ -77,10 +77,12 @@ milliers d'users. Redesign (migration `…scale_driving_accounts`) :
 
 ## 4. Sections & données
 
-### Overview (KPIs)
-`admin_overview` → blob `overview`. Cartes : Users (+ actifs 7 j), Sources, Sync incomplète, Sources en
-erreur, Films, Séries, Identités actives, Crons actifs / en pause / échecs 24 h, Sous-titres IA
-prêts / échoués.
+### Cockpit (KPIs + alertes)
+`admin_overview` → blob `overview`. Cartes santé + **croissance** : Users, Actifs 24 h / 7 j,
+**Nouveaux 7 j / 30 j**, Sources, Sync incomplète, Sources en erreur, Films, Séries, Identités, Crons
+actifs / pause / échecs 24 h, Sous-titres IA prêts / échoués. **Bloc Alertes** : dérive côté client les
+sources en problème (erreur / sync incomplète) depuis `admin_sources` et les rend **cliquables → fiche
+du client** (le blob `sources` porte désormais `user_id`). « Aucune alerte » si tout est sain.
 
 ### 👥 Users (live, paginé) — voir §5.
 
@@ -111,12 +113,14 @@ Fenêtre, Dimension (audio films / séries / sous-titres / whisper / tmdb / noti
 
 ## 5. Section Users (live, paginée)
 
-**RPC `admin_users_page(p_limit=25, p_offset=0, p_search=null, p_sort='created_desc')`** → `jsonb`
-`{ total, limit, offset, rows[] }`. SECURITY DEFINER, gatée `is_admin()`, `grant execute` à
-`authenticated` uniquement (revoke public/anon).
+**RPC `admin_users_page(p_limit=25, p_offset=0, p_search=null, p_sort='created_desc', p_tag_id=null)`**
+→ `jsonb` `{ total, limit, offset, rows[], all_tags[] }`. SECURITY DEFINER, gatée `is_admin()`,
+`grant execute` à `authenticated` uniquement (revoke public/anon).
 
 Chaque row : `user_id, email, created_at, last_sign_in_at, email_confirmed, role, is_driver,
-sources_count`. Tris : `created_desc | created_asc | active_desc | email_asc`. Recherche : `email ilike`.
+sources_count, tags[]` (segments du client). Tris : `created_desc | created_asc | active_desc |
+email_asc`. Recherche : `email ilike`. **Filtre par segment** : `p_tag_id` restreint aux clients
+portant ce tag ; `all_tags` alimente le sélecteur de filtre côté UI (colonne « Segments » dans la liste).
 
 **Scalable — O(taille de page)** :
 - `total` = un seul `count(*)` sur `auth.users` (+ filtre email éventuel).
