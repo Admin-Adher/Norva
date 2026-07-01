@@ -184,7 +184,14 @@ Deno.serve(async (req) => {
     if (req.method === "POST" && segments[0] === "admin" && segments[1] === "resync") {
       const expected = Deno.env.get("NORVA_BACKFILL_TOKEN") ?? "";
       const provided = req.headers.get("Authorization")?.match(/^Bearer\s+(.+)$/i)?.[1] ?? "";
-      if (!expected || provided !== expected) throw new HttpError(401, "Unauthorized");
+      // Accept EITHER the service backfill token (SQL/ops) OR an admin user JWT (dashboard button):
+      // app_metadata.role='admin' is server-set, so verifying it here is a real authorization check.
+      let authed = Boolean(expected) && provided === expected;
+      if (!authed && provided) {
+        const { data: au } = await supabase.auth.getUser(provided);
+        authed = ((au?.user?.app_metadata as Record<string, unknown> | undefined)?.role) === "admin";
+      }
+      if (!authed) throw new HttpError(401, "Unauthorized");
       const sourceId = segments[2];
       if (!sourceId) throw new HttpError(400, "Missing source id");
       const { data: src } = await supabase.from("cloud_sources").select("user_id").eq("id", sourceId).maybeSingle();
