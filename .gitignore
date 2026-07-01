@@ -32,3 +32,6 @@ supabase/.temp/
 *.dat
 
 __pycache__/
+
+# Firebase Android config — injected at build time from the GOOGLE_SERVICES_JSON secret, never committed.
+clients/android-phone/app/google-services.json
