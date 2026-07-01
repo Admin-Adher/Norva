@@ -82,8 +82,33 @@ mais avaient 2 clés différentes). Refonte en 2 couches :
   ± crypto, ou alternative). L'infra RC existante reste **DORMANTE** (valable pour la moitié mobile) ; la projection
   d'entitlements est prête pour n'importe quelle source. Détail : `docs/roadmap/billing-status.md`.
 
-> **Références de cette session** : `PROVIDER-IDENTITY-DEDUP.md` §8 · `IMPORT-NOTIFICATIONS.md` · `FCM-PUSH-SETUP.md`
-> · `REPO-PROTECTION.md` · `clients/PLAY_STORE.md` · `docs/roadmap/billing-status.md`.
+### 7. Enrichissement AÎRO — parallélisation par-panel (source-scoped) 🟡 CODÉ/MERGÉ, deploy en attente
+Constat data : le compte pilote **AÎRO** (`7bdab1df…`) porte **5 hôtes DISTINCTS** (Airysat / Ninja / KING365 /
+Opplex / Promax, ~334k films), pas un seul. L'enrichissement drainait par `user_id` seul → les 5 partageaient **UN**
+slot sérialisé → **~52 j** pour un 1er passage complet, vs **~5 j** pour un compte mono-hôte (super8k, 70k). (Mon
+diagnostic initial « petits panels starvés » était **faux** : le balayage est équitable ; les petits (Airysat 61 %,
+KING365 58 %) sont les **plus** avancés, les gros (Ninja/Promax) montent lentement car énormes.)
+- **✅ LIVE (base)** — RPC **`audio_backfill_candidates`** (scope `sourceId`, **variant-driven** borné au panel, no
+  ORDER BY car les marqueurs `audio_probed_at`/`subtitle_probed_at` pilotent la progression ; **plpgsql + `format(%L)`**
+  pour éviter le plan générique qui mis-coûtait les petits panels 10-21 s → **~1 s** partout). `whisper_candidate_titles`
+  gagne un **`p_source`** optionnel (variant-driven quand scopé ; `p_source` null = comportement account-wide **inchangé**,
+  rétro-compatible). Migrations appliquées + testées live.
+- **✅ MERGÉ sur `main`** — edge : chemin `sourceId` dans `runOneDimension` (additif, chemin account-wide inchangé) +
+  propagation du `sourceId` dans la **chaîne fallthrough** (sinon un cron de panel ouvrirait une connexion sur l'hôte
+  d'un AUTRE panel → `user_multi_ip`). Doc `ENRICHMENT_CRON_SETUP.md` **v3** (SQL exact des 9 crons + retrait des 4).
+- **🚧 EN ATTENTE de deploy** — l'edge `norva-playback` (**v91→v92**) ne se déploie pas : **incident Supabase**
+  « Project status change failures in multiple regions » (2026-07-01, capacité intermittente → `Failed to set function
+  store` 500 ; leur consigne = **retenter**). **Aucune régression** : les **4 crons AÎRO account-wide tournent toujours**
+  (enrichissement normal) ; **aucun cron par-panel créé** (ils sont tenus exprès : sans le nouvel edge, `sourceId` serait
+  ignoré → drain account-wide ×5 → risque `user_multi_ip`). **Dès que v92 est en ligne** : créer les **9 crons par-panel**
+  (5 jour `fallthrough` + 4 nuit géants) et retirer les **4 account-wide** (`norva-audio-langs-airo` + `-series` +
+  `norva-subtitle-backfill-airo` + `-whisper`). Le principe : **charge par-hôte inchangée** (1 connexion/hôte, plus
+  time-sharée avec ses voisins ; hôtes distincts → pas de collision) → chaque panel AÎRO reçoit le **traitement super8k**.
+  Détail : `ENRICHMENT_CRON_SETUP.md` §v3.
+
+> **Références de cette session** : `PROVIDER-IDENTITY-DEDUP.md` §8 · `ENRICHMENT_CRON_SETUP.md` (v3 par-panel) ·
+> `IMPORT-NOTIFICATIONS.md` · `FCM-PUSH-SETUP.md` · `REPO-PROTECTION.md` · `clients/PLAY_STORE.md` ·
+> `docs/roadmap/billing-status.md`.
 
 ---
 
