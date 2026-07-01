@@ -98,6 +98,9 @@ class AdminPage {
 #page-admin .badge.gray{background:#8884;color:#bbb;}
 #page-admin .badge.amber{background:#f5a62322;color:#f5c15a;}
 #page-admin .badge.blue{background:#4a9eff22;color:#7ab8ff;}
+#page-admin tr.group-start td{border-top:2px solid var(--color-border,#2a2a2a);}
+#page-admin .pname{font-weight:600;}
+#page-admin .pacct{font-size:11px;color:var(--color-text-secondary,#9aa);}
 #page-admin .bar{height:6px;border-radius:3px;background:#333;overflow:hidden;min-width:60px;display:inline-block;vertical-align:middle;margin-right:6px;}
 #page-admin .bar>i{display:block;height:100%;background:#3ecf8e;}
 #page-admin .admin-err{color:#ff6b6b;padding:10px;}
@@ -169,16 +172,23 @@ class AdminPage {
     _renderSources(rows) {
         const el = document.getElementById('admin-sources');
         if (!el) return;
-        const head = `<tr><th>Panel</th><th>Compte</th><th>Statut</th><th class="num">Items</th><th class="num">Variants</th><th class="num">Films</th><th class="num">Séries</th><th>Identité</th></tr>`;
-        const body = rows.map(r => {
+        // Group providers by account so a customer's panels sit together.
+        const sorted = rows.slice().sort((a, b) =>
+            String(a.owner_email).localeCompare(String(b.owner_email)) ||
+            String(a.display_name).localeCompare(String(b.display_name)));
+        const head = `<tr><th>Compte</th><th>Provider</th><th>Statut</th><th class="num">Items</th><th class="num">Variants</th><th class="num">Films</th><th class="num">Séries</th><th>Identité</th></tr>`;
+        let prevOwner = null;
+        const body = sorted.map(r => {
             const bad = r.incomplete === true;
+            const newGroup = r.owner_email !== prevOwner;
+            prevOwner = r.owner_email;
             const status = bad
                 ? `<span class="badge red">sync incomplète</span>`
                 : (r.sync_error ? `<span class="badge red">${AdminPage.esc(r.sync_status || 'error')}</span>`
                     : `<span class="badge green">${AdminPage.esc(r.sync_status || 'ready')}</span>`);
-            return `<tr class="${bad ? 'bad' : ''}">
+            return `<tr class="${newGroup ? 'group-start' : ''} ${bad ? 'bad' : ''}">
+                <td>${newGroup ? `<span class="pacct">${AdminPage.esc(r.owner_email || '—')}</span>` : ''}</td>
                 <td>${AdminPage.esc(r.display_name)}</td>
-                <td>${AdminPage.esc(r.owner_email || '—')}</td>
                 <td>${status}</td>
                 <td class="num">${AdminPage.n(r.media_items)}</td>
                 <td class="num">${AdminPage.n(r.variants)}</td>
@@ -199,9 +209,21 @@ class AdminPage {
             if (Number(r.probed_24h) === 0) return '<span class="badge red">⏸ à l\'arrêt</span>';
             return `~${AdminPage.n(r.eta_days)} j`;
         };
-        const head = `<tr><th>Panel</th><th>Type</th><th class="num">Total</th><th class="num">Audio résolu</th><th class="num">Jamais sondé</th><th class="num">Sondé 24h</th><th>ETA 1er passage</th><th class="num">ST trouvés</th></tr>`;
-        const body = rows.map(r => `<tr>
-            <td>${AdminPage.esc(r.panel)}</td>
+        // Group by provider so a panel's films + séries sit together (account → panel → films first).
+        const sorted = rows.slice().sort((a, b) =>
+            String(a.owner_email).localeCompare(String(b.owner_email)) ||
+            String(a.panel).localeCompare(String(b.panel)) ||
+            ((a.item_type === 'series') ? 1 : 0) - ((b.item_type === 'series') ? 1 : 0));
+        const head = `<tr><th>Provider</th><th>Type</th><th class="num">Total</th><th class="num">Audio résolu</th><th class="num">Jamais sondé</th><th class="num">Sondé 24h</th><th>ETA 1er passage</th><th class="num">ST trouvés</th></tr>`;
+        let prevPanel = null;
+        const body = sorted.map(r => {
+            const newGroup = r.panel !== prevPanel;
+            prevPanel = r.panel;
+            const panelCell = newGroup
+                ? `<td><div class="pname">${AdminPage.esc(r.panel)}</div><div class="pacct">${AdminPage.esc(r.owner_email || '')}</div></td>`
+                : `<td></td>`;
+            return `<tr class="${newGroup ? 'group-start' : ''}">
+            ${panelCell}
             <td>${r.item_type === 'series' ? 'séries' : 'films'}</td>
             <td class="num">${AdminPage.n(r.total)}</td>
             ${barCell(r.resolved, r.resolved_pct)}
@@ -209,7 +231,8 @@ class AdminPage {
             <td class="num">${AdminPage.n(r.probed_24h)}</td>
             <td>${eta(r)}</td>
             <td class="num">${AdminPage.n(r.subtitle_found)}</td>
-        </tr>`).join('');
+        </tr>`;
+        }).join('');
         el.innerHTML = `<table><thead>${head}</thead><tbody>${body}</tbody></table>`;
     }
 
@@ -219,14 +242,17 @@ class AdminPage {
         const winBadge = (w) => w === 'jour' ? '<span class="badge amber">☀️ jour</span>'
             : (w === 'nuit' ? '<span class="badge blue">🌙 nuit</span>' : '<span class="badge gray">—</span>');
         const head = `<tr><th>Fenêtre</th><th>Dimension</th><th>Job</th><th>Cadence</th><th>État</th><th>Dernier run</th><th class="num">Échecs 24h</th></tr>`;
+        let prevWin = null;
         const body = rows.map(r => {
             const paused = r.active === false;
             const failing = Number(r.fails_24h) > 0;
+            const newGroup = r.window !== prevWin;
+            prevWin = r.window;
             const state = paused ? `<span class="badge gray">pause</span>`
                 : (failing ? `<span class="badge red">échecs</span>` : `<span class="badge green">actif</span>`);
             const last = r.last_run ? new Date(r.last_run).toLocaleString('fr-FR') : '—';
-            return `<tr class="${failing ? 'bad' : ''}">
-                <td>${winBadge(r.window)}</td>
+            return `<tr class="${newGroup ? 'group-start' : ''} ${failing ? 'bad' : ''}">
+                <td>${newGroup ? winBadge(r.window) : ''}</td>
                 <td>${AdminPage.esc(r.kind)}</td>
                 <td>${AdminPage.esc(r.jobname)}</td>
                 <td>${AdminPage.esc(r.schedule)}</td>
