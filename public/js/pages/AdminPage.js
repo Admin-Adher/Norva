@@ -118,6 +118,16 @@ class AdminPage {
 #page-admin .users-pager button{background:var(--color-bg-secondary,#181818);color:var(--color-text-primary,#fff);border:1px solid var(--color-border,#2a2a2a);border-radius:8px;padding:6px 12px;cursor:pointer;font-size:13px;}
 #page-admin .users-pager button:disabled{opacity:.4;cursor:default;}
 #page-admin .users-pager span{color:var(--color-text-secondary,#9aa);font-size:13px;font-variant-numeric:tabular-nums;}
+#page-admin tr.user-row{cursor:pointer;}
+#page-admin tr.user-row:hover{background:#ffffff0d;}
+#page-admin .umodal{position:fixed;inset:0;background:rgba(0,0,0,.62);display:none;align-items:flex-start;justify-content:center;z-index:1000;padding:40px 16px;overflow-y:auto;-webkit-overflow-scrolling:touch;}
+#page-admin .umodal.open{display:flex;}
+#page-admin .umodal-card{background:var(--color-bg-secondary,#181818);border:1px solid var(--color-border,#2a2a2a);border-radius:12px;max-width:920px;width:100%;padding:20px 22px 26px;box-shadow:0 20px 60px rgba(0,0,0,.5);}
+#page-admin .umodal-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px;}
+#page-admin .umodal-head h3{margin:0;font-size:18px;font-weight:700;word-break:break-all;}
+#page-admin .umodal-close{background:none;border:0;color:#9aa;font-size:26px;cursor:pointer;line-height:1;padding:0 4px;}
+#page-admin .umeta{color:var(--color-text-secondary,#9aa);font-size:12px;margin-bottom:18px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
+#page-admin .umodal .admin-block{margin-bottom:20px;}
 </style>
 <div class="admin-wrap">
   <div class="admin-head">
@@ -148,14 +158,25 @@ class AdminPage {
   <section class="admin-block"><h2>📡 Providers / Sources</h2><div class="ssub">Panels pilotes + sources en problème (sync incomplète / erreur) — borné à l'échelle</div><div class="scroll"><div id="admin-sources"></div></div></section>
   <section class="admin-block"><h2>⚙️ Enrichissement par panel</h2><div class="ssub">Comptes pilotes d'enrichissement uniquement (les autres users héritent via le cache cross-user)</div><div class="scroll"><div id="admin-enrich"></div></div></section>
   <section class="admin-block"><h2>⏱️ Crons</h2><div class="scroll"><div id="admin-cron"></div></div></section>
+</div>
+<div class="umodal" id="admin-user-modal">
+  <div class="umodal-card">
+    <div class="umodal-head"><h3 id="admin-user-modal-title">Utilisateur</h3><button class="umodal-close" id="admin-user-modal-close" aria-label="Fermer">×</button></div>
+    <div id="admin-user-modal-body"></div>
+  </div>
 </div>`;
         const btn = root.querySelector('#admin-refresh');
         if (btn) btn.addEventListener('click', () => this.refresh());
-        // Delegated handler for the per-source re-sync buttons (rows are re-rendered each refresh).
+        // Delegated handler: re-sync buttons, user-row clicks, and modal dismissal (rows/modal
+        // are re-rendered, so delegate from the stable root).
         root.addEventListener('click', (e) => {
             const b = e.target.closest('.resync-btn');
-            if (b) { e.preventDefault(); this._resync(b); }
+            if (b) { e.preventDefault(); this._resync(b); return; }
+            if (e.target.closest('.umodal-close') || e.target.id === 'admin-user-modal') { this._closeUserDetail(); return; }
+            const ur = e.target.closest('.user-row');
+            if (ur && !e.target.closest('button,a')) { this._openUserDetail(ur.dataset.userId, ur.dataset.email); }
         });
+        document.addEventListener('keydown', (e) => { if (e.key === 'Escape') this._closeUserDetail(); });
         // Users section controls (static elements, built once).
         const usearch = root.querySelector('#admin-users-search');
         if (usearch) usearch.addEventListener('input', () => {
@@ -250,7 +271,7 @@ class AdminPage {
             const last = r.last_sign_in_at
                 ? `<span title="${AdminPage.esc(new Date(r.last_sign_in_at).toLocaleString('fr-FR'))}">${AdminPage.esc(AdminPage.timeAgo(r.last_sign_in_at))}</span>`
                 : '<span class="badge gray">jamais</span>';
-            return `<tr>
+            return `<tr class="user-row" data-user-id="${AdminPage.esc(r.user_id)}" data-email="${AdminPage.esc(r.email || '')}" title="Voir le détail">
                 <td>${AdminPage.esc(r.email || '—')}${driver}</td>
                 <td>${role}</td>
                 <td class="num">${AdminPage.n(r.sources_count)}</td>
@@ -260,6 +281,87 @@ class AdminPage {
             </tr>`;
         }).join('');
         el.innerHTML = `<table><thead>${head}</thead><tbody>${body}</tbody></table>`;
+    }
+
+    // ── User detail (modal, on row click) ──
+    _closeUserDetail() {
+        const m = document.getElementById('admin-user-modal');
+        if (m) m.classList.remove('open');
+    }
+
+    async _openUserDetail(userId, email) {
+        if (!userId) return;
+        const modal = document.getElementById('admin-user-modal');
+        const title = document.getElementById('admin-user-modal-title');
+        const body = document.getElementById('admin-user-modal-body');
+        if (!modal || !body) return;
+        if (title) title.textContent = email || 'Utilisateur';
+        body.innerHTML = '<div class="ssub">Chargement…</div>';
+        modal.classList.add('open');
+        try {
+            const d = await this._rpc('admin_user_detail', { p_user_id: userId });
+            this._renderUserDetail(d);
+        } catch (e) {
+            body.innerHTML = `<div class="admin-err">Erreur : ${AdminPage.esc(e.message)}</div>`;
+        }
+    }
+
+    _renderUserDetail(d) {
+        const body = document.getElementById('admin-user-modal-body');
+        if (!body) return;
+        const u = (d && d.user) || {};
+        const sources = (d && Array.isArray(d.sources)) ? d.sources : [];
+        const enrich = (d && Array.isArray(d.enrichment)) ? d.enrichment : [];
+        const day = (x) => x ? new Date(x).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+        const role = u.role === 'admin' ? '<span class="badge amber">admin</span>' : '<span class="badge gray">user</span>';
+        const driver = u.is_driver ? '<span class="badge blue">pilote</span>' : '';
+        const conf = u.email_confirmed ? '<span class="badge green">email vérifié</span>' : '<span class="badge red">email non vérifié</span>';
+        const meta = `<div class="umeta">${role} ${driver} ${conf}
+            <span>· inscrit ${AdminPage.esc(day(u.created_at))}</span>
+            <span>· dernière activité ${u.last_sign_in_at ? AdminPage.esc(AdminPage.timeAgo(u.last_sign_in_at)) : 'jamais'}</span>
+            ${u.auth_provider ? `<span>· via ${AdminPage.esc(u.auth_provider)}</span>` : ''}</div>`;
+
+        let srcHtml;
+        if (!sources.length) srcHtml = '<div class="ssub">Aucune source.</div>';
+        else {
+            const rows = sources.map(s => {
+                const bad = s.incomplete === true || s.sync_error || s.sync_status === 'sync_error';
+                const status = s.incomplete === true ? '<span class="badge red">sync incomplète</span>'
+                    : (bad ? `<span class="badge red">${AdminPage.esc(s.sync_status || 'error')}</span>`
+                        : `<span class="badge green">${AdminPage.esc(s.sync_status || 'ready')}</span>`);
+                return `<tr class="${bad ? 'bad' : ''}">
+                    <td>${AdminPage.esc(s.display_name)}</td>
+                    <td>${status}</td>
+                    <td class="num">${AdminPage.n(s.media_items)}</td>
+                    <td class="num">${AdminPage.n(s.variants)}</td>
+                    <td class="num">${AdminPage.n(s.movie_titles)}</td>
+                    <td class="num">${AdminPage.n(s.series_titles)}</td>
+                    <td>${s.identity_name ? AdminPage.esc(s.identity_name) : '<span class="badge gray">non résolue</span>'}</td>
+                    <td>${s.last_synced_at ? AdminPage.esc(AdminPage.timeAgo(s.last_synced_at)) : '—'}</td>
+                    <td><button class="resync-btn" data-source="${AdminPage.esc(s.source_id)}" title="Forcer un re-sync complet">↻ re-sync</button></td>
+                </tr>`;
+            }).join('');
+            srcHtml = `<table><thead><tr><th>Provider</th><th>Statut</th><th class="num">Items</th><th class="num">Variants</th><th class="num">Films</th><th class="num">Séries</th><th>Identité</th><th>Dernier sync</th><th>Action</th></tr></thead><tbody>${rows}</tbody></table>`;
+        }
+
+        let enrHtml;
+        if (!enrich.length) enrHtml = '<div class="ssub">Aucun titre enrichi (pas de VOD ou catalogue vide).</div>';
+        else {
+            const rows = enrich.map(r => `<tr>
+                <td>${AdminPage.esc(r.panel)}</td>
+                <td>${r.item_type === 'series' ? 'séries' : 'films'}</td>
+                <td class="num">${AdminPage.n(r.total)}</td>
+                <td class="num"><span class="bar"><i style="width:${Math.min(100, Number(r.resolved_pct) || 0)}%"></i></span>${AdminPage.n(r.resolved)} (${r.resolved_pct == null ? 0 : r.resolved_pct}%)</td>
+                <td class="num">${AdminPage.n(r.never_probed)}</td>
+                <td class="num">${AdminPage.n(r.probed_24h)}</td>
+                <td class="num">${AdminPage.n(r.subtitle_found)}</td>
+            </tr>`).join('');
+            enrHtml = `<table><thead><tr><th>Panel</th><th>Type</th><th class="num">Total</th><th class="num">Audio résolu</th><th class="num">Jamais sondé</th><th class="num">Sondé 24h</th><th class="num">ST trouvés</th></tr></thead><tbody>${rows}</tbody></table>`;
+        }
+
+        body.innerHTML = `${meta}
+            <div class="admin-block"><h2>📡 Sources (${sources.length})</h2><div class="scroll">${srcHtml}</div></div>
+            <div class="admin-block"><h2>⚙️ Enrichissement audio par panel</h2><div class="scroll">${enrHtml}</div></div>`;
     }
 
     // ── renderers ──
