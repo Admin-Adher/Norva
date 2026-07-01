@@ -16,6 +16,11 @@ name: Deploy Supabase Edge Functions
 # (Supabase's function-store backend, not the bundle — bundling succeeds). It is
 # transient; re-run this workflow (Actions → Run workflow, or push again). Only
 # the affected function needs redeploying; the others report "No change found".
+#
+# 2026-07-01: correlated with Supabase incident "Project status change failures
+# in multiple regions" — intermittent capacity issues where deploys "may fail
+# intermittently or require one or more retries to complete successfully". Fix is
+# to keep re-running until a run lands (no code change needed).
 
 on:
   workflow_dispatch:
