@@ -82,21 +82,118 @@ async function ping(url: string): Promise<JsonRecord> {
   }
 }
 
+// ── Proactive ops alerting (pg_cron → /ops-alert every 15 min) ─────────────────────────────────
+// Checks are CHEAP: counters come from the precomputed admin_dashboard_cache overview (refreshed
+// every 5 min by its own cron) + two live pings (gateway/relay). Each problem has a stable key with
+// a 6h cooldown persisted in admin_alert_state so an ongoing incident emails at most 4×/day — and
+// the state row is DELETED the moment its condition heals, so a NEW occurrence alerts immediately.
+const ALERT_COOLDOWN_MS = 6 * 3600 * 1000;
+
+async function runOpsAlertSweep(): Promise<JsonRecord> {
+  // 1) Snapshot counters (free) + staleness of the snapshot itself.
+  const { data: cache } = await admin.from("admin_dashboard_cache")
+    .select("overview, refreshed_at").eq("id", 1).maybeSingle();
+  const ov = (cache?.overview ?? {}) as JsonRecord;
+  const refreshedAt = cache?.refreshed_at ? new Date(String(cache.refreshed_at)).getTime() : 0;
+  const snapshotAgeMin = refreshedAt ? Math.round((Date.now() - refreshedAt) / 60000) : Infinity;
+
+  // 2) Live infra pings.
+  const { gateway, relay } = await resolveInfraUrls();
+  const [gw, rl] = await Promise.all([
+    gateway ? ping(gateway) : Promise.resolve(null),
+    relay ? ping(relay) : Promise.resolve(null),
+  ]);
+
+  // 3) Conditions → stable keys. `detail` goes into the email body.
+  const problems: { key: string; detail: string }[] = [];
+  if (snapshotAgeMin > 20) problems.push({ key: "snapshot_stale", detail: `Snapshot admin non rafraîchi depuis ${snapshotAgeMin} min (cron admin-dashboard-refresh en panne ?)` });
+  if (Number(ov.sources_error) > 0) problems.push({ key: "sources_error", detail: `${ov.sources_error} source(s) en erreur de sync` });
+  if (Number(ov.sources_incomplete) > 0) problems.push({ key: "sources_incomplete", detail: `${ov.sources_incomplete} source(s) en sync incomplète (VOD sans variants)` });
+  if (Number(ov.cron_fails_24h) > 0) problems.push({ key: "cron_fails", detail: `${ov.cron_fails_24h} échec(s) de cron sur 24 h` });
+  if (gw && gw.ok !== true) problems.push({ key: "gateway_down", detail: `Gateway injoignable (${String(gw.error ?? "timeout")})` });
+  if (rl && rl.ok !== true) problems.push({ key: "relay_down", detail: `Relay injoignable (${String(rl.error ?? "timeout")})` });
+
+  // 4) Cooldown state: alert only keys not alerted within the window; heal (delete) resolved keys.
+  const { data: stateRows } = await admin.from("admin_alert_state").select("key, last_alerted_at");
+  const state = new Map<string, number>();
+  for (const r of (stateRows ?? []) as JsonRecord[]) state.set(String(r.key), new Date(String(r.last_alerted_at)).getTime());
+  const activeKeys = new Set(problems.map((p) => p.key));
+  const healed = [...state.keys()].filter((k) => !activeKeys.has(k));
+  if (healed.length) await admin.from("admin_alert_state").delete().in("key", healed);
+  const toAlert = problems.filter((p) => (state.get(p.key) ?? 0) < Date.now() - ALERT_COOLDOWN_MS);
+
+  // 5) Email every admin (app_metadata.role) about the newly-alertable problems.
+  let emailed: string[] = [];
+  if (toAlert.length) {
+    const resendKey = Deno.env.get("RESEND_API_KEY") ?? "";
+    const from = Deno.env.get("AUTH_EMAIL_FROM") ?? "Norva <noreply@norva.tv>";
+    const { data: admins } = await admin.rpc("admin_alert_recipients").then(
+      (r) => r,
+      () => ({ data: null }),
+    );
+    const recipients = Array.isArray(admins) ? (admins as string[]) : [];
+    if (resendKey && recipients.length) {
+      const items = toAlert.map((p) => `<li style="margin:6px 0;color:#e8e8ee">${p.detail}</li>`).join("");
+      const html = `<body style="margin:0;padding:24px;background:#0a0c11;font-family:Arial,sans-serif">
+        <div style="max-width:520px;margin:0 auto;background:#11151d;border:1px solid #1f2733;border-radius:14px;padding:22px 26px">
+          <h2 style="margin:0 0 6px;color:#ff6b6b;font-size:18px">⚠️ Norva Ops — ${toAlert.length} alerte${toAlert.length > 1 ? "s" : ""}</h2>
+          <p style="margin:0 0 14px;color:#9aa4b2;font-size:13px">Sweep automatique (15 min). Prochain rappel de ces alertes dans 6 h si non résolues.</p>
+          <ul style="margin:0 0 16px;padding-left:20px;font-size:14px">${items}</ul>
+          <a href="https://norva.tv/app.html" style="display:inline-block;background:#5b7cfa;color:#fff;font-weight:700;font-size:13px;text-decoration:none;padding:10px 20px;border-radius:9px">Ouvrir le CRM</a>
+        </div></body>`;
+      try {
+        const res = await fetch("https://api.resend.com/emails", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${resendKey}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ from, to: recipients, subject: `⚠️ Norva Ops — ${toAlert.map((p) => p.key).join(", ")}`, html }),
+        });
+        if (res.ok) {
+          emailed = recipients;
+          const now = new Date().toISOString();
+          await admin.from("admin_alert_state").upsert(
+            toAlert.map((p) => ({ key: p.key, last_alerted_at: now, details: p.detail })),
+            { onConflict: "key" },
+          );
+        }
+      } catch (_) { /* email failure → no state update → retried next sweep */ }
+    }
+  }
+
+  return {
+    checked: ["snapshot_stale", "sources_error", "sources_incomplete", "cron_fails", "gateway_down", "relay_down"],
+    problems, alerted: toAlert.map((p) => p.key), healed, emailed,
+    snapshotAgeMin: Number.isFinite(snapshotAgeMin) ? snapshotAgeMin : null,
+  };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders(req) });
   try {
     if (req.method !== "POST") return json(req, { error: "Method not allowed" }, 405);
 
-    // ── admin gate ──
+    const segments = new URL(req.url).pathname.split("/").filter(Boolean);
     const token = req.headers.get("Authorization")?.match(/^Bearer\s+(.+)$/i)?.[1] ?? "";
     if (!token) return json(req, { error: "Missing bearer token" }, 401);
+
+    // ── route: /ops-alert — proactive alerting sweep (pg_cron every 15 min). Dual auth: the
+    // service backfill token (cron) OR an admin JWT (manual test from the dashboard). ──
+    if (segments[segments.length - 1] === "ops-alert") {
+      const expected = Deno.env.get("NORVA_BACKFILL_TOKEN") ?? "";
+      let authed = Boolean(expected) && token === expected;
+      if (!authed) {
+        const { data: sa } = await admin.auth.getUser(token);
+        authed = ((sa?.user?.app_metadata as JsonRecord | undefined)?.role) === "admin";
+      }
+      if (!authed) return json(req, { error: "not authorized" }, 403);
+      return json(req, await runOpsAlertSweep());
+    }
+
+    // ── admin gate (all other routes) ──
     const { data: au } = await admin.auth.getUser(token);
     const actorRole = (au?.user?.app_metadata as JsonRecord | undefined)?.role;
     if (actorRole !== "admin") return json(req, { error: "not authorized" }, 403);
     const actorEmail = au?.user?.email ?? null;
     const actorId = au?.user?.id ?? "";
-
-    const segments = new URL(req.url).pathname.split("/").filter(Boolean);
 
     // ── route: /health — real-time infra reachability (edge/DB/gateway/relay) ──
     if (segments[segments.length - 1] === "health") {

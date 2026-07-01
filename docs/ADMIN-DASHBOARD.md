@@ -219,6 +219,17 @@ Fonction edge dédiée **`norva-admin`** (service-role, `verify_jwt=false`, mais
   `norva-admin-events-prune` (dim. 04:15 UTC) supprime les événements > 180 jours — la table reste
   bornée à l'échelle (les événements sync sont déjà exactement-une-fois par source/kind).
 
+### 🔔 Alerting proactif (email sans ouvrir le dashboard)
+Cron **`norva-ops-alert`** (toutes les 15 min) → `POST norva-admin/ops-alert` (token backfill, ou JWT
+admin pour un test manuel). La route vérifie : **snapshot_stale** (> 20 min → la machinerie cron est
+en panne), **sources_error**, **sources_incomplete**, **cron_fails_24h** (compteurs lus depuis le
+cache — gratuit) + **gateway_down** / **relay_down** (pings live). **Cooldown 6 h par clé** via
+`admin_alert_state` (un incident continu = 4 emails/jour max) ; la ligne d'état est supprimée dès que
+la condition guérit → une nouvelle occurrence alerte immédiatement. Email Resend (`RESEND_API_KEY`,
+from `AUTH_EMAIL_FROM`) à tous les admins (`admin_alert_recipients()`, service-only — les emails
+admins ne sont pas énumérables depuis le client). Échec d'envoi → pas de mise à jour d'état → retenté
+au sweep suivant.
+
 ### Hooks timeline (événements lifecycle réels)
 `enqueueImportNotification` (moteur de sync partagé) écrit désormais aussi un `admin_events`
 (`sync_started` / `sync_done` / `sync_failed`) — **exactement une fois par source/kind** (le `.select()`
