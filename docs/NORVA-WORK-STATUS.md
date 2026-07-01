@@ -3,6 +3,71 @@
 État de tout ce qui a été livré, où ça vit, si c'est **actif** ou **derrière un flag**, et comment
 l'activer. Mis à jour au fil des sessions.
 
+---
+
+## 🗓️ MISE À JOUR 2026-07-01 — session (identités, notifications, sécurité, release Android)
+
+Tout ci-dessous est **livré et déployé sur `main`** sauf mention contraire. Détails dans les docs dédiées.
+
+### 1. Identité fournisseur — refonte long terme (Phases A / B / B.2) ✅ LIVE
+Le `providerKey` basé sur la **taxonomie de catégories** était le mauvais signal : volatile (la clé de Ferran a
+muté toute seule en 8 h) et il a **raté un miroir à 100 %** (Opplex & Ferran partagent 40 555/40 555 stream IDs
+mais avaient 2 clés différentes). Refonte en 2 couches :
+- **Phase A** — empreinte sur les **stream IDs** (échantillon bottom-256 md5 = MinHash, mirror-robuste,
+  taxonomie-indépendant) + **`provider_identities`** (entité canonique, résolution Jaccard côté serveur via RPC
+  `norva_resolve_provider_identity`, advisory-lock anti-doublon) + vue `admin_provider_overview`. Backfill des 7
+  sources → **6 identités** ; **Opplex + Ferran fusionnés** (1 identité, 4 empreintes dont 2 `superseded`).
+- **Phase B** — les caches cross-user (`catalog_file_tracks`, `catalog_generated_subtitles`) re-keyés sur
+  `identity_id` via l'unique point `resolveSourceIdentity` (fallback empreinte pendant transition + backfill de
+  fusion). Gain mesuré : Opplex 38→387 fichiers lisibles, Ferran 123→387, 228 sondes orphelines récupérées, les 2
+  crons deviennent 2 ouvriers sur 1 catalogue partagé.
+- **Phase B.2** — sous-cache tmdb/imdb (`vod-title-projection`) keyé sur l'identité (cohérence). 0 backfill (vide).
+- **Phase C** (retirer le providerKey-taxonomie) — **DIFFÉRÉE** volontairement (analyse 9-agents : bénéfice déjà
+  acquis par A/B ; risque de re-fragmentation pour zéro gain). **Déclencheur pour la faire** : couverture
+  enrichissement ~15-25 % OU ~10+ providers. Détail : `PROVIDER-IDENTITY-DEDUP.md` §8.
+
+### 2. Notifications de cycle de vie d'import ✅ LIVE (email) · ⏳ push (attend Play Store)
+- **Phase 1 (email)** : table `cloud_import_notifications` (idempotence `unique(source_id,kind)`), hooks
+  lifecycle dans le moteur partagé (`import_started/completed/failed`), templates anglais brandés
+  (`_shared/import-email.ts`), **cron digest `norva-import-notify-digest`** (`*/2`, groupe par user+kind, fenêtre
+  60 s) — **vérifié : 235 firings, 0 échec, HTTP 200**.
+- **Phase 2 (push FCM native, app fermée)** : table `cloud_push_tokens`, `_shared/fcm.ts` (FCM HTTP v1, OAuth
+  service-account), envoi dans le digest (`sendPushForGroup`), route `POST /push-token`, web (`registerPushToken`
+  via bridge `NorvaTVCloud`), Android (`NorvaMessagingService` + `setupPush` + `getPushToken`, plugin
+  google-services **conditionnel**). **Backend armé** (secret `FCM_SERVICE_ACCOUNT` posé). Détail :
+  `IMPORT-NOTIFICATIONS.md` + `FCM-PUSH-SETUP.md`.
+
+### 3. Release Android (FCM) — en cours, bloquée sur le compte Play Console
+- **AAB signé buildé avec succès** (workflow `android-release.yml`, run #2 vert, phone + TV, versionCode **2** /
+  versionName **1.1.0**). Keystore d'upload créé (`norva-upload.jks`) + 4 secrets GitHub posés.
+- `google-services.json` **injecté au build depuis le secret `GOOGLE_SERVICES_JSON`** (gitignored, jamais commité —
+  le secret scanning GitHub bloque la clé). Projet Firebase = **norva-ecosystem**, app `tv.norva.phone`.
+- **⏳ BLOCAGE ACTUEL** : l'owner **n'a pas encore de compte Google Play Console** (message envoyé au support
+  Google, en attente). Dès que le compte est ouvert → upload l'AAB en **Test interne** → installer sur le tel →
+  token FCM enregistré → tester la push end-to-end. Guide clic-par-clic : `FCM-PUSH-SETUP.md` + `clients/PLAY_STORE.md`.
+- ⚠️ Rappel : la push ne peut être **testée end-to-end** qu'après avoir un appareil avec l'app releasée (aucun token
+  n'existe avant). Le backend, lui, est prêt.
+
+### 4. Sécurité — investigation « contributeur ci Catalin » ✅ RÉSOLU (aucune intrusion)
+- Le contributeur **`ci` / « Catalin »** vu sur GitHub = **fausse attribution par email**, PAS un accès. Collaborateurs
+  du repo = **Admin-Adher seul**. Le seul commit attribué = le build WASM du bot, dont l'email
+  `ci@users.noreply.github.com` correspond par collision au user GitHub `@ci`. Contenu = uniquement les artefacts
+  `vendor/libav` (aucun code source/config/secret touché).
+- **Correctif** : le workflow `build-libav-wasm.yml` committe désormais en `github-actions[bot]` (plus de
+  mis-attribution). Détail dans l'historique git + `REPO-PROTECTION.md`.
+
+### 5. Protection de `main` + flux de déploiement ✅ EN PLACE (changement de process)
+- **Ruleset `protect main`** (Active) : Restrict deletions + Block force pushes. Protège contre réécriture
+  d'historique / suppression.
+- **Conséquence** : le push direct de l'automatisation (assistant) est refusé (son acteur n'est pas dans la bypass).
+  → **Nouveau flux de déploiement : PR-merge** (push branche → PR → merge via API en tant qu'admin). Bonus : les
+  commits sortent **Verified**. Détail : `REPO-PROTECTION.md`.
+
+> **Références de cette session** : `PROVIDER-IDENTITY-DEDUP.md` §8 · `IMPORT-NOTIFICATIONS.md` · `FCM-PUSH-SETUP.md`
+> · `REPO-PROTECTION.md` · `clients/PLAY_STORE.md`.
+
+---
+
 ## Surfaces de déploiement (toutes auto-déployées sur push `main`)
 
 | Surface | Quoi | Déploiement |
@@ -169,5 +234,11 @@ n'aurait fait que contourner le symptôme).
 - `docs/PHASE3-AI-SUBTITLES.md` — **Phase 3 COMPLÈTE** (sous-titres IA : whisper→VTT + Argos) ; **3a §8, 3b §10, 3c §11** tous livrés
 - `docs/PHASE4-OCR-SUBTITLES.md` — **Phase 4** OCR sous-titres image (PGS direct + VOBSUB/DVB via `sub2video`)
 - `docs/ORPHAN-HANDLING.md` — **gestion des orphelins de catalogue** (Couche 1 Continue Watching + Couche 3 upsert-puis-prune + mémoire opérationnelle comptes/providers/crons) ⭐
-- `docs/SYNC-ENGINE-DEDUP.md` — **WIP : dédup du moteur de sync dupliqué (norva-cloud vs norva-source-sync)** + post-mortem de l'incident 503 (doublon `countSourceItems` → boot Deno KO). Explique pourquoi la Couche 3 est *dormante* tant que la dédup n'est pas faite ⭐
-- `docs/IMPORT-NOTIFICATIONS.md` — **WIP : notifications cycle de vie d'import** (email start/done/fail + digest, anglais ; table + templates livrés, cron+hooks à faire ; push FCM = Phase 2)
+- `docs/SYNC-ENGINE-DEDUP.md` — dédup du moteur de sync (norva-cloud vs norva-source-sync) **✅ FAITE** (moteur
+  extrait dans `_shared/xtream-sync.ts`, Couche 3 active) + post-mortem de l'incident 503 (doublon
+  `countSourceItems` → boot Deno KO). ⭐
+- `docs/IMPORT-NOTIFICATIONS.md` — notifications cycle de vie d'import **✅ Phase 1 (email) LIVE** (table +
+  templates + cron digest + hooks) · **Phase 2 (push FCM) codée**, attend le setup Firebase/Play Store (cf. §6bis)
+- `docs/PROVIDER-IDENTITY-DEDUP.md` §8 — **refonte identité stream-ID (Phases A/B/B.2) LIVE** ; Phase C différée ⭐
+- `docs/FCM-PUSH-SETUP.md` — guide owner : Firebase + secrets + release Play Store (push native app-fermée)
+- `docs/REPO-PROTECTION.md` — protection `main` (ruleset) + flux de déploiement PR-merge
