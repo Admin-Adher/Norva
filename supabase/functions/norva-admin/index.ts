@@ -62,6 +62,7 @@ Deno.serve(async (req) => {
     const actorRole = (au?.user?.app_metadata as JsonRecord | undefined)?.role;
     if (actorRole !== "admin") return json(req, { error: "not authorized" }, 403);
     const actorEmail = au?.user?.email ?? null;
+    const actorId = au?.user?.id ?? "";
 
     // ── route: /user/:id/:action ──
     const segments = new URL(req.url).pathname.split("/").filter(Boolean);
@@ -85,6 +86,14 @@ Deno.serve(async (req) => {
       if (error) return json(req, { error: error.message }, 400);
       await logEvent(userId, "admin_action", "Email de confirmation renvoyé", actorEmail);
       return json(req, { ok: true, message: "Email de confirmation renvoyé." });
+    }
+
+    // Anti self-lockout: an admin cannot demote or suspend their OWN account (would strand the panel).
+    if (userId === actorId && action === "role" && String(body.role) === "user") {
+      return json(req, { error: "Vous ne pouvez pas retirer votre propre rôle admin." }, 400);
+    }
+    if (userId === actorId && action === "suspend" && (body.suspend === true || body.suspend === "true")) {
+      return json(req, { error: "Vous ne pouvez pas suspendre votre propre compte." }, 400);
     }
 
     if (action === "role") {

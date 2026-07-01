@@ -184,6 +184,8 @@ class AdminPage {
 #page-admin .tl-ic{width:22px;text-align:center;}
 #page-admin .tl-sum{flex:1;font-size:13px;color:var(--color-text-primary,#e8e8ee);}
 #page-admin .tl-at{color:#66707e;font-size:11px;white-space:nowrap;}
+#page-admin .audit-row[data-user-id]{cursor:pointer;}
+#page-admin .audit-row[data-user-id]:hover{background:#ffffff0a;}
 #page-admin .alert-card{display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:var(--color-bg-secondary,#16161c);border:1px solid #e5091433;border-left:3px solid #e50914;border-radius:9px;padding:11px 14px;margin-bottom:8px;}
 #page-admin .alert-card[data-user-id]{cursor:pointer;}
 #page-admin .alert-card[data-user-id]:hover{background:#e5091412;}
@@ -231,6 +233,8 @@ class AdminPage {
             if (ur && !e.target.closest('button,a')) { this._navigate('client:' + ur.dataset.userId); return; }
             const ac = e.target.closest('.alert-card[data-user-id]');
             if (ac) { this._navigate('client:' + ac.dataset.userId); return; }
+            const au = e.target.closest('.audit-row[data-user-id]');
+            if (au) { this._navigate('client:' + au.dataset.userId); return; }
             if (e.target.closest('.crm-back')) { this._navigate('clients'); return; }
             // Fiche relational actions
             const tRem = e.target.closest('.crm-tag-remove');
@@ -486,7 +490,7 @@ class AdminPage {
 
         const tlEl = document.getElementById('fiche-timeline');
         if (tlEl) {
-            const icon = (k) => ({ signup: '🎉', provider_added: '📡', sync: '🔄', note_added: '📝', tag_added: '🏷️', tag_removed: '🏷️', resync: '↻', admin_action: '⚡' }[k] || '•');
+            const icon = (k) => ({ signup: '🎉', provider_added: '📡', sync: '🔄', sync_started: '▶️', sync_done: '✅', sync_failed: '⚠️', note_added: '📝', tag_added: '🏷️', tag_removed: '🏷️', resync: '↻', admin_action: '⚡' }[k] || '•');
             tlEl.innerHTML = timeline.length
                 ? '<div class="tl">' + timeline.map(e => `<div class="tl-item"><span class="tl-ic">${icon(e.kind)}</span><span class="tl-sum">${AdminPage.esc(e.summary)}</span><span class="tl-at" title="${e.at ? AdminPage.esc(new Date(e.at).toLocaleString('fr-FR')) : ''}">${e.at ? AdminPage.esc(AdminPage.timeAgo(e.at)) : ''}</span></div>`).join('') + '</div>'
                 : '<div class="ssub">Aucun événement.</div>';
@@ -667,15 +671,56 @@ class AdminPage {
         }
     }
 
-    // ── Page: Système (placeholder for audit / infra / flags) ──
-    _pageSysteme() {
-        this._setCrumb('Système');
+    // ── Page: Système (snapshot health + admin audit feed) ──
+    async _pageSysteme() {
+        this._setCrumb('Système', this._lastTs);
         const v = this._view();
         v.innerHTML = `<div class="crm-page">
             <h1 class="crm-h1">🛡️ Système & Audit</h1>
-            <p class="crm-sub">Santé infra, journal d'audit admin, feature flags.</p>
-            <div class="card soon">Bientôt — journal d'audit (admin_audit_log), santé gateway/relay/edge, feature flags.</div>
+            <p class="crm-sub">Santé du snapshot + journal d'audit des actions admin.</p>
+            <section id="sys-health" class="admin-cards"><div class="ssub">Chargement…</div></section>
+            <div class="admin-block"><h2>📜 Journal d'audit</h2><div id="sys-audit"><div class="ssub">Chargement…</div></div></div>
         </div>`;
+        try {
+            const [o, feed] = await Promise.all([this._rpc('admin_overview'), this._rpc('admin_audit_feed', { p_limit: 80 })]);
+            this._lastTs = o && o.refreshed_at ? o.refreshed_at : this._lastTs;
+            this._setCrumb('Système', this._lastTs);
+            this._renderSysHealth(o);
+            this._renderAudit(Array.isArray(feed) ? feed : []);
+        } catch (e) {
+            const el = document.getElementById('sys-health');
+            if (el) el.innerHTML = `<div class="admin-err">Erreur : ${AdminPage.esc(e.message)}</div>`;
+        }
+    }
+
+    _renderSysHealth(o) {
+        o = o || {};
+        const el = document.getElementById('sys-health');
+        if (!el) return;
+        const card = (val, l, cls) => `<div class="kpi ${cls || ''}"><div class="v">${val}</div><div class="l">${l}</div></div>`;
+        const n = AdminPage.n;
+        const fresh = o.refreshed_at && (Date.now() - new Date(o.refreshed_at).getTime()) < 12 * 60000;
+        el.innerHTML = [
+            card(AdminPage.esc(o.refreshed_at ? AdminPage.timeAgo(o.refreshed_at) : '—'), 'Dernier snapshot', fresh ? 'ok' : 'alert'),
+            card(n(o.cron_active), 'Crons actifs', 'ok'),
+            card(n(o.cron_paused), 'Crons en pause'),
+            card(n(o.cron_fails_24h), 'Échecs cron 24h', Number(o.cron_fails_24h) > 0 ? 'alert' : 'ok'),
+            card(n(o.sources_error), 'Sources en erreur', Number(o.sources_error) > 0 ? 'alert' : 'ok'),
+            card(n(o.gensubs_processing), 'ST IA en cours'),
+            card(n(o.gensubs_failed), 'ST IA échoués', Number(o.gensubs_failed) > 0 ? 'alert' : '')
+        ].join('');
+    }
+
+    _renderAudit(rows) {
+        const el = document.getElementById('sys-audit');
+        if (!el) return;
+        if (!rows.length) { el.innerHTML = '<div class="ssub">Aucune action enregistrée pour l\'instant.</div>'; return; }
+        const icon = (k) => ({ note_added: '📝', tag_added: '🏷️', tag_removed: '🏷️', admin_action: '⚡', resync: '↻', signup: '🎉', sync_started: '▶️', sync_done: '✅', sync_failed: '⚠️' }[k] || '•');
+        el.innerHTML = '<div class="tl">' + rows.map(e => `<div class="tl-item audit-row"${e.user_id ? ` data-user-id="${AdminPage.esc(e.user_id)}"` : ''}>
+            <span class="tl-ic">${icon(e.kind)}</span>
+            <span class="tl-sum">${AdminPage.esc(e.summary)}${e.client_email ? ` <span class="al-owner">· ${AdminPage.esc(e.client_email)}</span>` : ''}${e.actor ? ` <span class="ssub">par ${AdminPage.esc(e.actor)}</span>` : ''}</span>
+            <span class="tl-at" title="${e.created_at ? AdminPage.esc(new Date(e.created_at).toLocaleString('fr-FR')) : ''}">${e.created_at ? AdminPage.esc(AdminPage.timeAgo(e.created_at)) : ''}</span>
+        </div>`).join('') + '</div>';
     }
 
     // ── shared renderers ──
