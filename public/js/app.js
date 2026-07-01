@@ -28,6 +28,7 @@ class App {
         this.pages.series = new SeriesPage(this);
         this.pages.settings = new SettingsPage(this);
         this.pages.watch = new WatchPage(this);
+        this.pages.admin = new AdminPage(this);
         this.entitlement = null;
         this.sourceHealthSummary = null;
         this.catalogPages = new Set(['live', 'movies', 'series']);
@@ -609,6 +610,19 @@ class App {
                     device: !user
                 };
                 this.addLogoutButton();
+                // Reveal the Admin nav ONLY for real admins. In cloud mode currentUser.role is
+                // always 'admin' (hardcoded above), so it can't gate — the authoritative check is
+                // the server-side is_admin() RPC (app_metadata.role in the JWT). Non-admins never
+                // see the link, and even if they did, every admin RPC rejects them.
+                this.pages.admin?.isAdmin?.().then((ok) => {
+                    if (!ok) return;
+                    document.querySelectorAll('[data-page="admin"]').forEach((l) => {
+                        l.hidden = false;
+                        l.removeAttribute('aria-hidden');
+                        l.style.display = '';
+                        l.tabIndex = 0;
+                    });
+                }).catch(() => {});
                 return;
             } catch (err) {
                 console.error('Cloud authentication error:', err);
