@@ -79,9 +79,13 @@ export async function enqueueImportNotification(
   } catch (_) { /* best-effort — never fail a sync over a notification */ }
 }
 
-// Admin-dashboard registry: keep providerKey -> human name current. Called wherever the engine
-// computes a providerKey (detect + discovery completion). DO UPDATE only display_name/status/last_seen,
-// so manual notes on a historical/deleted provider survive a re-add. Best-effort.
+// Admin-dashboard registry + canonical IDENTITY resolution. Called wherever the engine computes a
+// providerKey (detect + discovery completion). The RPC keeps the providerKey -> name registry current
+// (DO UPDATE only name/status/last_seen, so manual notes survive a re-add) AND resolves this source to a
+// canonical provider_identity by STREAM-ID overlap — mirror-robust and taxonomy-independent, so two
+// resellers of one panel (e.g. Opplex/Ferran) collapse to a single identity and a taxonomy-drift key
+// change re-links instead of forking. All set math runs server-side, next to the data, under a single
+// advisory lock so concurrent isolates can't mint duplicate identities. Best-effort; never blocks a sync.
 export async function recordProviderIdentity(
   db: SupabaseClient,
   sourceId: string,
@@ -92,10 +96,11 @@ export async function recordProviderIdentity(
   try {
     const { data } = await db.from("cloud_sources").select("display_name").eq("id", sourceId).eq("user_id", userId).maybeSingle();
     const name = stringOr((data as JsonRecord | null)?.display_name, providerKey);
-    await db.from("catalog_provider_identities").upsert(
-      [{ provider_key: providerKey, display_name: name, status: "active", last_seen: new Date().toISOString(), updated_at: new Date().toISOString() }],
-      { onConflict: "provider_key" },
-    );
+    await db.rpc("norva_resolve_provider_identity", {
+      p_source_id: sourceId,
+      p_provider_key: providerKey,
+      p_display_name: name,
+    });
   } catch (_) { /* best-effort */ }
 }
 

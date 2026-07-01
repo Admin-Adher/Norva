@@ -4,6 +4,12 @@
 **Reste : merge → appliquer la migration RPC → backfill C (cf. « Rollout » §5).**
 **Décision produit (2026-06-29) : identité AUTOMATIQUE (empreinte) + label d'affichage optionnel.**
 
+> **⚠️ MISE À JOUR MAJEURE (2026-07-01) — voir §8.** Le providerKey basé sur la **taxonomie de catégories**
+> (§3) s'est révélé volatile et incorrect : il a **raté un miroir à 100 %** (Opplex & Ferran partagent
+> 40 555/40 555 stream IDs mais ont eu 2 clés différentes car leurs catégories diffèrent d'une seule). Le
+> §8 décrit le **redesign long terme livré** : empreinte sur les **stream IDs** + couche d'**identité
+> canonique** (`provider_identities`). Les §1–7 restent l'historique de l'approche taxonomie.
+
 ## 1. L'audit — l'URL ne détermine PAS le fournisseur
 
 Le revendeur a fourni **22+ URLs pour un seul compte** chez « Strong IPTV 8K » (panel Xtream).
@@ -192,3 +198,64 @@ Service-only (RLS). **Vue dashboard** : JOIN à `catalog_file_tracks` (group by 
 >
 > **Payoff** : re-brancher AtlasPro (n'importe quelle URL) recalcule `x:f5be3bb7…` → hérite des 24 965
 > sondes instantanément. **Ne JAMAIS purger les caches orphelins.**
+
+## 8. Redesign long terme (2026-07-01) — empreinte STREAM-ID + identité canonique
+
+### 8.1 Pourquoi la taxonomie était le mauvais signal (preuve live)
+Le providerKey de §3 hache les **noms de catégories**. Or les catégories sont **cosmétiques** (chaque
+revendeur les renomme ; elles dérivent). Constaté en prod :
+- **Opplex** et **Ferran** partagent **40 555 / 40 555 stream IDs de films (100 %)** — même panel, deux
+  revendeurs — MAIS ont eu **deux providerKeys différents** (`x:8170c3bd` vs `x:999dec89`) parce que
+  leurs listes de catégories diffèrent d'**une seule** (397 vs 396 catégories live). → **miroir raté.**
+- La clé de **Ferran a muté toute seule** (`x:c75fcba6` → `x:999dec89`) en 8 h par simple dérive de
+  taxonomie. → **empreinte volatile** : caches orphelins + identité fragmentée.
+
+**Coût réel** : miroirs non fusionnés = 2× le travail cross-user (sous-titres whisper générés deux fois,
+probing deux fois) ; et chaque dérive orpheline les caches keyés par providerKey (dont
+`catalog_generated_subtitles`, cher à régénérer).
+
+### 8.2 Le design — 2 couches
+1. **Empreinte sur le CONTENU stable = les stream IDs (`external_id`).** Les miroirs les partagent à
+   l'identique ; les renommages de catégories n'y touchent pas. On garde par identité un **échantillon
+   bottom-256 par md5** des stream IDs films+séries (un *bottom-k MinHash sketch* : déterministe, réparti
+   sur toute la plage d'IDs — pas de collision sur les petits entiers) et on **matche par recouvrement de
+   Jaccard** (seuil 0.5 ; miroirs ≈ 1.0, panels distincts ≈ 0).
+2. **Identité canonique `provider_identities`** (UUID) vers laquelle **plusieurs empreintes résolvent**
+   (plusieurs → une). C'est l'**entité du dashboard admin** et la **clé stable** sur laquelle les caches
+   cross-user migreront (Phase B) — pour survivre à la dérive, aux miroirs, aux changements de schéma.
+
+### 8.3 Ce qui est LIVRÉ (Phase A — appliqué en prod + hook déployé)
+- Migration `20260701000000_provider_identity_resolution.sql` (**appliquée live**) :
+  - table `provider_identities` (entité canonique + `stream_sample text[]` + GIN index) ;
+  - `catalog_provider_identities.identity_id` (FK) + statut élargi (`superseded`) ;
+  - **RPC `norva_resolve_provider_identity(source_id, provider_key, display_name)`** : calcule
+    l'échantillon depuis `cloud_media_items`, tient à jour le registre nom↔empreinte, **résout-ou-crée**
+    l'identité par recouvrement Jaccard, sous **`pg_advisory_xact_lock`** (pas de doublon d'identité en
+    concurrence). Défensif : < 32 items → diffère la résolution (garde le registre à jour quand même) ;
+  - vue **`admin_provider_overview`** (1 ligne/identité + ses empreintes + `fingerprint_count`).
+- Hook `recordProviderIdentity` (`_shared/xtream-sync.ts`) **rebranché sur la RPC** — déployé.
+- **Backfill des 7 sources** exécuté → **6 identités** ; **Opplex + Ferran fusionnés** en une identité
+  (`94c49af9…`, « IPTV Ferran ») portant **4 empreintes** (2 miroirs actifs + l'ancienne clé Ferran +
+  le host legacy `fun-fun2026.lol`, ces 2 en `superseded`).
+
+### 8.4 Phase B (à faire, délibérée) — re-clé des caches cross-user sur `identity_id`
+Migrer `catalog_generated_subtitles` (col `provider_key`) et `catalog_file_tracks` (col `server_host`)
+de la clé-empreinte vers **`identity_id`** :
+1. Ajouter `identity_id` à ces tables (nullable) + backfill via `catalog_provider_identities.identity_id`.
+2. Faire lire/écrire les 4+ sites de cache par `identity_id` (fallback empreinte pendant la transition).
+3. Adapter `fanout_file_tracks_to_users` pour joindre sur l'identité.
+4. Warm-up : recopier les lignes existantes vers l'`identity_id`.
+> **C'est là que tombe le vrai gain** (miroirs partagent les caches ; la dérive n'orpheline plus rien).
+> **Risque** : touche le chemin PLAYBACK (`catalog_file_tracks` = pistes audio/sous-titres au playback) →
+> migration prudente, fallback pendant la transition, pas de big-bang. **À lancer sur feu vert explicite.**
+
+### 8.5 Suite optionnelle
+- **Empreintes supprimées sans items** (AtlasPro + 3 non-identifiés) : restent des lignes registre sans
+  identité canonique (aucun item pour les fingerprinter). On peut leur créer des *identity shells* si le
+  dashboard veut les afficher comme entités.
+- **Phase C** : retirer le providerKey-taxonomie au profit de l'empreinte stream-ID comme unique signal.
+
+### 8.6 Vérifié (2026-07-01)
+- Overlap Opplex∩Ferran = **40 555/40 555 (100 %)** — même panel prouvé par stream IDs.
+- Migration appliquée ✅ ; backfill → Opplex & Ferran **même `identity_id`** ✅ ; 6 identités pour 7 sources.
+- `esbuild` parse + sweep anti-duplication sur le moteur partagé ✅.
