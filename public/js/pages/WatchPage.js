@@ -5748,11 +5748,12 @@ class WatchPage {
         return m ? `${m[1]}/subtitle/${m[2]}` : '';
     }
 
-    // Feature flag for engine in-band subtitles (ships dark). Enable in the browser with
-    // localStorage.setItem('norvaInbandSubs','1'). Lets text subtitles render on single-slot
-    // sources where the gateway extraction (a 2nd provider connection) is refused (458).
+    // Engine in-band subtitles are now ON by default (tested OK): the engine reads its own
+    // subtitle packets, so text subtitles render on single-slot sources where the gateway
+    // extraction (a 2nd provider connection) is refused (458). A device can opt OUT with
+    // localStorage.setItem('norvaInbandSubs','0').
     _inbandSubsEnabled() {
-        try { return localStorage.getItem('norvaInbandSubs') === '1'; } catch (_) { return false; }
+        try { return localStorage.getItem('norvaInbandSubs') !== '0'; } catch (_) { return true; }
     }
 
     // In-band engine subtitles: pull the cues the engine built from its demuxed packets
