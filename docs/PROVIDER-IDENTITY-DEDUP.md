@@ -272,6 +272,13 @@ avec les pistes audio/sous-titres dans la même table. **Aucun backfill** : le c
 - **Empreintes supprimées sans items** (AtlasPro + 3 non-identifiés) : restent des lignes registre sans
   identité canonique (aucun item pour les fingerprinter). On peut leur créer des *identity shells* si le
   dashboard veut les afficher comme entités.
+- **Re-clé de `catalog_media_items` sur `identity_id` = STAYS DEFERRED** (à faire **avec la Phase 2
+  raw-catalogue dormante**, pas maintenant). Raison exacte : (a) son chemin de **LECTURE est éteint** —
+  flag `NORVA_CATALOG_MEDIA_READ_SOURCE off`, lié à la dédup Phase 2 raw-catalogue dormante, elle-même
+  gated sur overlap `>=3` ; et (b) son **writer écrit le hostname EN PLEIN import**, avant que l'identité
+  soit résolue. Donc re-clé **maintenant** = **zéro bénéfice actif** (personne ne lit cette clé) + **risque
+  prématuré** (on toucherait un writer inline hostname-first). → on la re-clé **en même temps que la Phase 2**,
+  quand le chemin de lecture s'allume.
 - **Phase C** : retirer le providerKey-taxonomie au profit de l'empreinte stream-ID comme unique signal.
 
 ### 8.6 Vérifié (2026-07-01)
