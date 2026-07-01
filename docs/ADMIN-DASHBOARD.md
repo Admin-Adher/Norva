@@ -6,8 +6,8 @@ porte `app_metadata.role = 'admin'`.
 > **Structure CRM (depuis v11).** Cliquer « Admin » entre dans un **shell CRM** dédié : sidebar gauche
 > persistante + **routing interne** state-based (`this._route`) et une zone de contenu scrollable.
 > Pages : **Cockpit** (KPIs + alertes), **Clients** (liste paginée → **fiche 360° pleine page**),
-> **Providers** (sources), **Moteur** (enrichissement + crons), **Système** (santé snapshot + journal
-> d'audit). Chaque page
+> **Providers** (sources), **Identités** (graphe des identités canoniques), **Moteur** (enrichissement
+> + crons), **Système** (santé + infra + flags + journal d'audit). Chaque page
 > requête sa propre RPC (server-cached) à la navigation ; un bouton « ↻ Rafraîchir » recharge la page
 > courante. Les sections historiques ci-dessous sont maintenant réparties dans ces pages ; les RPCs et
 > la sémantique sont inchangées.
@@ -94,6 +94,14 @@ erreur / **sync incomplète**), Items, Variants, Films, Séries, Identité réso
   (finalize bloqué). Un provider **live-only** (ex. AtlasPro : 10 843 chaînes live, 0 VOD) a
   légitimement 0 variant → **pas** flaggé (correctif `…incomplete_vod_only`).
 
+### 🧬 Identités fournisseurs (page dédiée)
+RPC `admin_identities()` → une carte par **identité canonique** (`provider_identities`, ≈ 1 par panel
+amont réel) : statut, nb de clés provider, first/last seen, **marques** (chips ; > 1 marque = badge
+**« miroir multi-marques »**, ex. Opplex ≡ Ferran) et les `cloud_sources` qui la portent (compte,
+pilote, statut, dernier sync ; lignes cliquables → fiche client ; cap 50/identité). Mapping
+source→identité par `display_name ∈ marques` (comme partout ailleurs — `cloud_sources` n'a pas de
+colonne provider_key), servi par l'index `idx_cloud_sources_display_name`.
+
 ### ⚙️ Enrichissement par panel
 `admin_enrichment_coverage` → blob `coverage`. Comptes pilotes uniquement. Par panel × type
 (films/séries) : Total, **Audio résolu** (barre + %), **Jamais sondé**, **Sondé 24 h**,
@@ -140,6 +148,16 @@ portant ce tag ; `all_tags` alimente le sélecteur de filtre côté UI (colonne 
 ← Précédent / Suivant → avec « X–Y sur N ». Badge bleu **pilote** si compte d'enrichissement, badge
 rôle admin/user, activité en relatif (`timeAgo`, date exacte au survol). Chargée **indépendamment** du
 snapshot caché : une section Ops en erreur ne bloque pas Users et inversement.
+
+**⬇ Export CSV** : RPC `admin_users_export(p_search, p_tag_id, p_limit≤10000)` — mêmes filtres que la
+liste ; CSV strict côté client (champs quotés, quotes doublées, CRLF, BOM Excel) →
+`norva-clients-YYYYMMDD.csv`. Au-delà de 10k lignes exportées, passer à un export serveur par lots
+(seuil documenté).
+
+**Actions groupées par segment** : quand un segment est filtré, une barre propose **＋ appliquer un
+autre tag à tous** et **− retirer ce tag de tous** (RPC `admin_tag_bulk(p_tag, 'apply'|'remove',
+p_other)`) — une transaction, un `admin_events` par client affecté (« (groupé) »), confirmations UI
+avec le compte total.
 
 ### Détail d'un user (au clic sur une ligne)
 Chaque ligne est cliquable → ouvre une **modale** (`_openUserDetail` / `_renderUserDetail`, fermeture par
@@ -213,9 +231,11 @@ Fonction edge dédiée **`norva-admin`** (service-role, `verify_jwt=false`, mais
   - **`maintenance_banner`** → lu par l'app via l'RPC **anon** `app_public_flags()` (whitelist :
     n'expose QUE ce flag) ; `public/js/maintenance-banner.js` pose une bannière fixe en bas pour tous
     les visiteurs (re-check toutes les 60 s). `signups_open` reste un exemple non câblé.
-- **Journal d'audit** : `admin_audit_feed(p_limit, p_kind)` → derniers `admin_events` **globaux**
-  (toutes actions admin, jointe à l'email du client) → liste cliquable → fiche. Servi par l'index
-  global `idx_admin_events_created (created_at desc)`. **Rétention** : cron hebdo
+- **Journal d'audit** : `admin_audit_feed(p_limit, p_kind, p_before)` → derniers `admin_events`
+  **globaux** (toutes actions admin, jointe à l'email du client) → liste cliquable → fiche.
+  **Pagination keyset** : « ⌄ Charger plus » recharge des lots de 80 strictement plus anciens que le
+  dernier chargé (curseur `created_at`, pas d'OFFSET). Servi par l'index global
+  `idx_admin_events_created (created_at desc)`. **Rétention** : cron hebdo
   `norva-admin-events-prune` (dim. 04:15 UTC) supprime les événements > 180 jours — la table reste
   bornée à l'échelle (les événements sync sont déjà exactement-une-fois par source/kind).
 

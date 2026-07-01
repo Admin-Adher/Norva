@@ -75,6 +75,7 @@ class AdminPage {
             { key: 'cockpit', label: 'Cockpit', icon: '🎯' },
             { key: 'clients', label: 'Clients', icon: '👥' },
             { key: 'providers', label: 'Providers', icon: '📡' },
+            { key: 'identites', label: 'Identités', icon: '🧬' },
             { key: 'moteur', label: 'Moteur', icon: '⚙️' },
             { key: 'systeme', label: 'Système', icon: '🛡️' }
         ];
@@ -155,6 +156,12 @@ class AdminPage {
 #page-admin .users-controls button{background:var(--color-bg-secondary,#16161c);border:1px solid var(--color-border,#2a2a38);color:#a9bcff;border-radius:8px;padding:8px 13px;font-size:13px;cursor:pointer;font-weight:600;}
 #page-admin .users-controls button:hover{border-color:#5b7cfa;}
 #page-admin .users-controls button:disabled{opacity:.5;cursor:default;}
+#page-admin .bulk-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:#5b7cfa12;border:1px solid #5b7cfa33;border-radius:9px;padding:9px 13px;margin-bottom:12px;font-size:13px;color:var(--color-text-primary,#e8e8ee);}
+#page-admin .bulk-bar select{background:var(--color-bg-secondary,#16161c);border:1px solid var(--color-border,#2a2a38);color:#fff;border-radius:7px;padding:5px 9px;font-size:12px;}
+#page-admin .bulk-bar button{background:var(--color-bg-secondary,#16161c);border:1px solid var(--color-border,#2a2a38);color:#a9bcff;border-radius:7px;padding:5px 11px;font-size:12px;cursor:pointer;font-weight:600;}
+#page-admin .bulk-bar button:hover{border-color:#5b7cfa;}
+#page-admin .bulk-bar button.danger{color:#ff6b6b;}
+#page-admin .bulk-bar button.danger:hover{border-color:#e50914;background:#e5091412;}
 #page-admin .users-pager{display:flex;align-items:center;gap:14px;margin-top:12px;}
 #page-admin .users-pager button{background:var(--color-bg-secondary,#181820);color:var(--color-text-primary,#fff);border:1px solid var(--color-border,#2a2a38);border-radius:8px;padding:6px 12px;cursor:pointer;font-size:13px;}
 #page-admin .users-pager button:disabled{opacity:.4;cursor:default;}
@@ -267,6 +274,8 @@ class AdminPage {
             if (actBtn) { this._userAction(actBtn); return; }
             if (e.target.closest('#sys-infra-refresh')) { this._loadInfra(); return; }
             if (e.target.closest('#sys-audit-more')) { this._loadAudit(false); return; }
+            if (e.target.closest('#bulk-apply-btn')) { this._bulkTag('apply'); return; }
+            if (e.target.closest('#bulk-remove-btn')) { this._bulkTag('remove'); return; }
             if (e.target.closest('.flag-create')) { this._flagCreate(); return; }
             const fDel = e.target.closest('.flag-del');
             if (fDel) {
@@ -302,6 +311,7 @@ class AdminPage {
         else if (route === 'clients') this._pageClients();
         else if (route.startsWith('client:')) this._pageClientDetail(route.slice(7));
         else if (route === 'providers') this._pageProviders();
+        else if (route === 'identites') this._pageIdentites();
         else if (route === 'moteur') this._pageMoteur();
         else if (route === 'systeme') this._pageSysteme();
         else this._pageCockpit();
@@ -364,6 +374,7 @@ class AdminPage {
               <select id="admin-users-tag"><option value="">Tous les segments</option></select>
               <button id="admin-users-csv" title="Exporter la liste filtrée en CSV (max 10 000 lignes)">⬇ CSV</button>
             </div>
+            <div id="admin-users-bulk"></div>
             <div class="scroll"><div id="admin-users"></div></div>
             <div class="users-pager">
               <button id="admin-users-prev">← Précédent</button>
@@ -415,6 +426,7 @@ class AdminPage {
             s.total = Number(res && res.total) || 0;
             if (res && Array.isArray(res.all_tags)) { this._allTags = res.all_tags; this._fillTagOptions(document.getElementById('admin-users-tag')); }
             this._renderUsers(rows);
+            this._renderBulkBar();
             const from = s.total === 0 ? 0 : s.page * s.limit + 1;
             const to = Math.min(s.total, (s.page + 1) * s.limit);
             if (range) range.textContent = `${AdminPage.n(from)}–${AdminPage.n(to)} sur ${AdminPage.n(s.total)}`;
@@ -463,6 +475,47 @@ class AdminPage {
             </tr>`;
         }).join('');
         el.innerHTML = `<table><thead>${head}</thead><tbody>${body}</tbody></table>`;
+    }
+
+    // Bulk segment actions — only shown when a segment filter is active. Applies to EVERY client
+    // bearing the tag (not just the current page); the RPC logs one timeline event per client.
+    _renderBulkBar() {
+        const el = document.getElementById('admin-users-bulk');
+        if (!el) return;
+        const tagId = this._users.tagId;
+        if (!tagId) { el.innerHTML = ''; return; }
+        const tag = this._allTags.find(t => t.id === tagId);
+        const others = this._allTags.filter(t => t.id !== tagId);
+        const opts = others.map(t => `<option value="${AdminPage.esc(t.id)}">${AdminPage.esc(t.label)}</option>`).join('');
+        el.innerHTML = `<div class="bulk-bar">
+            <span>Actions sur le segment <span class="badge ${AdminPage.tagColor(tag && tag.color)}">${AdminPage.esc(tag ? tag.label : '?')}</span> — ${AdminPage.n(this._users.total)} client${this._users.total > 1 ? 's' : ''} :</span>
+            ${others.length ? `<select id="bulk-tag-select">${opts}</select><button id="bulk-apply-btn">＋ appliquer à tous</button>` : ''}
+            <button id="bulk-remove-btn" class="danger">− retirer ce tag de tous</button>
+        </div>`;
+    }
+
+    async _bulkTag(action) {
+        const tagId = this._users.tagId;
+        if (!tagId) return;
+        const tag = this._allTags.find(t => t.id === tagId);
+        const label = tag ? tag.label : '?';
+        let other = null;
+        if (action === 'apply') {
+            const sel = document.getElementById('bulk-tag-select');
+            other = sel ? sel.value : null;
+            if (!other) return;
+            const otherLabel = (this._allTags.find(t => t.id === other) || {}).label || '?';
+            if (!window.confirm(`Appliquer le tag « ${otherLabel} » aux ${this._users.total} client(s) du segment « ${label} » ?`)) return;
+        } else {
+            if (!window.confirm(`Retirer le tag « ${label} » de TOUS les clients qui le portent ? (le tag lui-même est conservé)`)) return;
+        }
+        try {
+            const r = await this._rpc('admin_tag_bulk', { p_tag: tagId, p_action: action, p_other: other });
+            window.alert(`✓ ${AdminPage.n(r && r.count)} client(s) ${action === 'apply' ? 'tagué(s)' : 'détagué(s)'}.`);
+            if (action === 'remove') { this._users.tagId = ''; const sel = document.getElementById('admin-users-tag'); if (sel) sel.value = ''; }
+            this._users.page = 0;
+            this._loadUsers();
+        } catch (e) { window.alert('Erreur : ' + e.message); }
     }
 
     // CSV export of the CURRENT filter (search + segment), up to 10k rows in one RPC call.
@@ -717,6 +770,57 @@ class AdminPage {
             const el = document.getElementById('admin-sources');
             if (el) el.innerHTML = `<div class="admin-err">Erreur : ${AdminPage.esc(e.message)}</div>`;
         }
+    }
+
+    // ── Page: Identités (canonical provider identities) ──
+    async _pageIdentites() {
+        this._setCrumb('Identités');
+        const v = this._view();
+        v.innerHTML = `<div class="crm-page">
+            <h1 class="crm-h1">🧬 Identités fournisseurs</h1>
+            <p class="crm-sub">Une identité = un panel amont réel (dédup par empreinte de stream IDs). Plusieurs marques sur une même identité = revente miroir — le cache cross-user les fusionne.</p>
+            <div id="admin-identities"><div class="ssub">Chargement…</div></div>
+        </div>`;
+        try {
+            const ids = await this._rpc('admin_identities');
+            this._renderIdentities(Array.isArray(ids) ? ids : []);
+        } catch (e) {
+            const el = document.getElementById('admin-identities');
+            if (el) el.innerHTML = `<div class="admin-err">Erreur : ${AdminPage.esc(e.message)}</div>`;
+        }
+    }
+
+    _renderIdentities(list) {
+        const el = document.getElementById('admin-identities');
+        if (!el) return;
+        if (!list.length) { el.innerHTML = '<div class="ssub">Aucune identité résolue.</div>'; return; }
+        el.innerHTML = list.map(it => {
+            const brands = Array.isArray(it.brands) ? it.brands : [];
+            const sources = Array.isArray(it.sources) ? it.sources : [];
+            const status = it.status === 'active' ? '<span class="badge green">active</span>'
+                : `<span class="badge gray">${AdminPage.esc(it.status || '—')}</span>`;
+            const mirror = brands.length > 1
+                ? ' <span class="badge amber" title="Plusieurs marques revendues pointent vers le même panel amont">miroir multi-marques</span>' : '';
+            const brandChips = brands.map(b => `<span class="badge blue">${AdminPage.esc(b)}</span>`).join(' ');
+            const rows = sources.map(s => {
+                const clickable = s.user_id ? ` class="user-row" data-user-id="${AdminPage.esc(s.user_id)}" title="Voir la fiche client"` : '';
+                return `<tr${clickable}>
+                    <td>${AdminPage.esc(s.display_name)}</td>
+                    <td><span class="pacct">${AdminPage.esc(s.owner_email || '—')}</span>${s.is_driver ? ' <span class="badge blue">pilote</span>' : ''}</td>
+                    <td>${s.sync_status === 'ready' ? '<span class="badge green">ready</span>' : `<span class="badge gray">${AdminPage.esc(s.sync_status || '—')}</span>`}</td>
+                    <td>${s.last_synced_at ? AdminPage.esc(AdminPage.timeAgo(s.last_synced_at)) : '—'}</td>
+                </tr>`;
+            }).join('');
+            const srcTable = sources.length
+                ? `<div class="scroll"><table><thead><tr><th>Source</th><th>Compte</th><th>Statut</th><th>Dernier sync</th></tr></thead><tbody>${rows}</tbody></table></div>`
+                : '<div class="ssub">Aucune source ne porte cette identité.</div>';
+            return `<div class="card" style="margin-bottom:16px">
+                <div style="margin-bottom:10px"><div class="pname" style="font-size:16px">${AdminPage.esc(it.display_name)} ${status}${mirror}</div>
+                <div class="pacct">${AdminPage.n(it.key_count)} clé${Number(it.key_count) > 1 ? 's' : ''} provider · vue ${it.first_seen ? AdminPage.esc(AdminPage.timeAgo(it.first_seen)) : '—'} · dernière activité ${it.last_seen ? AdminPage.esc(AdminPage.timeAgo(it.last_seen)) : '—'}</div></div>
+                <div class="tag-row">${brandChips}</div>
+                ${srcTable}
+            </div>`;
+        }).join('');
     }
 
     // ── Page: Moteur (enrichment + crons) ──
