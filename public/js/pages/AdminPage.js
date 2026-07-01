@@ -200,6 +200,21 @@ class AdminPage {
 #page-admin .act-btn.act-danger:hover{border-color:#e50914;background:#e5091412;}
 #page-admin .act-btn.act-unsuspend{color:#3ecf8e;border-color:#3ecf8e33;}
 #page-admin .act-btn.act-unsuspend:hover{border-color:#3ecf8e;background:#3ecf8e12;}
+#page-admin .mini-btn{background:none;border:1px solid var(--color-border,#2a2a38);color:#9aa;border-radius:6px;padding:1px 8px;cursor:pointer;font-size:12px;margin-left:8px;vertical-align:middle;}
+#page-admin .mini-btn:hover{color:#fff;border-color:#5b7cfa;}
+#page-admin .flag-row{display:flex;align-items:center;gap:13px;padding:11px 0;border-bottom:1px solid var(--color-border,#20202a);}
+#page-admin .flag-meta{flex:1;min-width:0;}
+#page-admin .flag-key{font-weight:600;font-family:monospace;font-size:13px;color:#e8e8ee;}
+#page-admin .flag-desc{font-size:12px;color:#9aa;}
+#page-admin .flag-del{background:none;border:0;color:#ff6b6b88;cursor:pointer;font-size:19px;line-height:1;}
+#page-admin .flag-del:hover{color:#ff6b6b;}
+#page-admin .flag-add{margin-top:12px;}
+#page-admin .switch{position:relative;display:inline-block;width:40px;height:22px;flex-shrink:0;}
+#page-admin .switch input{opacity:0;width:0;height:0;}
+#page-admin .switch .slider{position:absolute;inset:0;background:#3a3a44;border-radius:22px;transition:.2s;cursor:pointer;}
+#page-admin .switch .slider:before{content:"";position:absolute;height:16px;width:16px;left:3px;bottom:3px;background:#fff;border-radius:50%;transition:.2s;}
+#page-admin .switch input:checked+.slider{background:#3ecf8e;}
+#page-admin .switch input:checked+.slider:before{transform:translateX(18px);}
 @media(max-width:900px){
   #page-admin .crm-sidebar{width:60px;padding:14px 8px;}
   #page-admin .crm-nav-item .lb,#page-admin .crm-brand span:last-child,#page-admin .crm-side-foot{display:none;}
@@ -247,6 +262,20 @@ class AdminPage {
             if (nDel) { this._crmMutate('admin_note_delete', { p_note_id: nDel.dataset.noteId }); return; }
             const actBtn = e.target.closest('.act-btn');
             if (actBtn) { this._userAction(actBtn); return; }
+            if (e.target.closest('#sys-infra-refresh')) { this._loadInfra(); return; }
+            if (e.target.closest('.flag-create')) { this._flagCreate(); return; }
+            const fDel = e.target.closest('.flag-del');
+            if (fDel) {
+                if (window.confirm(`Supprimer le flag « ${fDel.dataset.key} » ?`)) {
+                    this._rpc('admin_flag_delete', { p_key: fDel.dataset.key }).then(() => this._loadFlags()).catch(err => window.alert('Erreur : ' + err.message));
+                }
+                return;
+            }
+        });
+        // Feature-flag switches fire 'change', not 'click' — delegate separately.
+        root.addEventListener('change', (e) => {
+            const ft = e.target.closest('.flag-toggle');
+            if (ft) this._flagToggle(ft);
         });
         this.built = true;
     }
@@ -677,8 +706,11 @@ class AdminPage {
         const v = this._view();
         v.innerHTML = `<div class="crm-page">
             <h1 class="crm-h1">🛡️ Système & Audit</h1>
-            <p class="crm-sub">Santé du snapshot + journal d'audit des actions admin.</p>
+            <p class="crm-sub">Santé du snapshot & infra temps réel · feature flags · journal d'audit.</p>
+            <div class="kpi-gtitle">📸 Snapshot</div>
             <section id="sys-health" class="admin-cards"><div class="ssub">Chargement…</div></section>
+            <div class="admin-block"><h2>🌐 Infra temps réel <button id="sys-infra-refresh" class="mini-btn" title="Re-ping">↻</button></h2><div id="sys-infra" class="admin-cards"><div class="ssub">Ping…</div></div></div>
+            <div class="admin-block"><h2>🚩 Feature flags</h2><div id="sys-flags"><div class="ssub">Chargement…</div></div></div>
             <div class="admin-block"><h2>📜 Journal d'audit</h2><div id="sys-audit"><div class="ssub">Chargement…</div></div></div>
         </div>`;
         try {
@@ -691,6 +723,68 @@ class AdminPage {
             const el = document.getElementById('sys-health');
             if (el) el.innerHTML = `<div class="admin-err">Erreur : ${AdminPage.esc(e.message)}</div>`;
         }
+        this._loadInfra();
+        this._loadFlags();
+    }
+
+    async _loadInfra() {
+        const el = document.getElementById('sys-infra');
+        if (!el) return;
+        el.innerHTML = '<div class="ssub">Ping…</div>';
+        try {
+            const res = await fetch(`${this._sbUrl()}/functions/v1/norva-admin/health`, {
+                method: 'POST',
+                headers: { apikey: this._sbKey(), Authorization: `Bearer ${this._token()}`, 'Content-Type': 'application/json' },
+                body: '{}'
+            });
+            const d = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(d.error || String(res.status));
+            this._renderInfra(d);
+        } catch (e) { el.innerHTML = `<div class="admin-err">Erreur : ${AdminPage.esc(e.message)}</div>`; }
+    }
+
+    _renderInfra(d) {
+        const el = document.getElementById('sys-infra');
+        if (!el) return;
+        const svc = (label, s) => {
+            s = s || {};
+            if (s.configured === false) return `<div class="kpi"><div class="v" style="font-size:15px;color:#9aa">non configuré</div><div class="l">${label}</div></div>`;
+            const up = s.ok === true;
+            return `<div class="kpi ${up ? 'ok' : 'alert'}"><div class="v" style="font-size:17px">${up ? `🟢 ${AdminPage.n(s.ms)} ms` : '🔴 down'}</div><div class="l">${label}${s.status ? ` · ${s.status}` : ''}</div></div>`;
+        };
+        el.innerHTML = [svc('Edge', d.edge), svc('Base de données', d.db), svc('Gateway', d.gateway), svc('Relay', d.relay)].join('');
+    }
+
+    async _loadFlags() {
+        const el = document.getElementById('sys-flags');
+        if (!el) return;
+        try {
+            const flags = await this._rpc('admin_flags_list');
+            this._renderFlags(Array.isArray(flags) ? flags : []);
+        } catch (e) { el.innerHTML = `<div class="admin-err">Erreur : ${AdminPage.esc(e.message)}</div>`; }
+    }
+
+    _renderFlags(flags) {
+        const el = document.getElementById('sys-flags');
+        if (!el) return;
+        const rows = flags.map(f => `<div class="flag-row">
+            <label class="switch"><input type="checkbox" class="flag-toggle" data-key="${AdminPage.esc(f.key)}" ${f.enabled ? 'checked' : ''}><span class="slider"></span></label>
+            <div class="flag-meta"><div class="flag-key">${AdminPage.esc(f.key)}</div><div class="flag-desc">${AdminPage.esc(f.description || '')}${f.updated_by ? ` · ${AdminPage.esc(f.updated_by)}` : ''}</div></div>
+            <button class="flag-del" data-key="${AdminPage.esc(f.key)}" title="Supprimer le flag">×</button>
+        </div>`).join('');
+        el.innerHTML = `${rows || '<div class="ssub">Aucun flag.</div>'}<div class="flag-add"><button class="flag-create tag-add-chip">＋ créer un flag</button></div>`;
+    }
+
+    async _flagToggle(input) {
+        try { await this._rpc('admin_flag_set', { p_key: input.dataset.key, p_enabled: input.checked }); }
+        catch (e) { input.checked = !input.checked; window.alert('Erreur : ' + e.message); }
+    }
+    async _flagCreate() {
+        const key = (window.prompt('Clé du flag (a-z, 0-9, _) :') || '').trim();
+        if (!key) return;
+        const desc = (window.prompt('Description :') || '').trim();
+        try { await this._rpc('admin_flag_create', { p_key: key, p_description: desc || null }); this._loadFlags(); }
+        catch (e) { window.alert('Erreur : ' + e.message); }
     }
 
     _renderSysHealth(o) {

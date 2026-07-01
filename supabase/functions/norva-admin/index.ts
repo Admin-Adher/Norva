@@ -50,6 +50,38 @@ async function logEvent(userId: string, kind: string, summary: string, actor: st
   catch (_) { /* best-effort audit */ }
 }
 
+// Infra URLs live server-side (edge secrets first, else the cloud_runtime_config table). We only need
+// reachability, so resolving them here — not exposing them to the browser — is the point of /health.
+async function resolveInfraUrls(): Promise<{ gateway: string; relay: string }> {
+  let gateway = (Deno.env.get("NORVA_MEDIA_GATEWAY_URL") ?? "").replace(/\/+$/, "");
+  let relay = (Deno.env.get("NORVA_RELAY_BASE_URL") ?? "").replace(/\/+$/, "");
+  if (!gateway || !relay) {
+    try {
+      const { data } = await admin.from("cloud_runtime_config").select("key,value")
+        .in("key", ["NORVA_MEDIA_GATEWAY_URL", "NORVA_RELAY_BASE_URL"]);
+      for (const r of (data ?? []) as JsonRecord[]) {
+        const v = String(r.value ?? "").replace(/\/+$/, "");
+        if (r.key === "NORVA_MEDIA_GATEWAY_URL" && !gateway) gateway = v;
+        if (r.key === "NORVA_RELAY_BASE_URL" && !relay) relay = v;
+      }
+    } catch (_) { /* best-effort */ }
+  }
+  return { gateway, relay };
+}
+
+// Liveness ping: ANY HTTP response (even 404) means the host is reachable ("up"); a network error or
+// timeout means "down". Robust without knowing each service's exact health path.
+async function ping(url: string): Promise<JsonRecord> {
+  const start = performance.now();
+  try {
+    const res = await fetch(url, { method: "GET", signal: AbortSignal.timeout(4500) });
+    await res.body?.cancel().catch(() => {});
+    return { ok: true, status: res.status, ms: Math.round(performance.now() - start) };
+  } catch (e) {
+    return { ok: false, ms: Math.round(performance.now() - start), error: String((e as Error)?.message ?? e).slice(0, 80) };
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders(req) });
   try {
@@ -64,8 +96,28 @@ Deno.serve(async (req) => {
     const actorEmail = au?.user?.email ?? null;
     const actorId = au?.user?.id ?? "";
 
-    // ── route: /user/:id/:action ──
     const segments = new URL(req.url).pathname.split("/").filter(Boolean);
+
+    // ── route: /health — real-time infra reachability (edge/DB/gateway/relay) ──
+    if (segments[segments.length - 1] === "health") {
+      const dbStart = performance.now();
+      let db: JsonRecord;
+      try { await admin.from("admin_dashboard_cache").select("id").limit(1); db = { ok: true, ms: Math.round(performance.now() - dbStart) }; }
+      catch (e) { db = { ok: false, ms: Math.round(performance.now() - dbStart), error: String((e as Error)?.message ?? e).slice(0, 80) }; }
+      const { gateway, relay } = await resolveInfraUrls();
+      const [gw, rl] = await Promise.all([
+        gateway ? ping(gateway) : Promise.resolve({ configured: false } as JsonRecord),
+        relay ? ping(relay) : Promise.resolve({ configured: false } as JsonRecord),
+      ]);
+      return json(req, {
+        edge: { ok: true },
+        db,
+        gateway: { configured: Boolean(gateway), ...gw },
+        relay: { configured: Boolean(relay), ...rl },
+      });
+    }
+
+    // ── route: /user/:id/:action ──
     const i = segments.indexOf("user");
     const userId = i >= 0 ? segments[i + 1] : "";
     const action = i >= 0 ? segments[i + 2] : "";
