@@ -120,6 +120,20 @@ sources_count`. Tris : `created_desc | created_asc | active_desc | email_asc`. R
 rôle admin/user, activité en relatif (`timeAgo`, date exacte au survol). Chargée **indépendamment** du
 snapshot caché : une section Ops en erreur ne bloque pas Users et inversement.
 
+### Détail d'un user (au clic sur une ligne)
+Chaque ligne est cliquable → ouvre une **modale** (`_openUserDetail` / `_renderUserDetail`, fermeture par
+×, clic backdrop ou Échap). Données via **RPC `admin_user_detail(p_user_id uuid)`** → `jsonb`
+`{ user, sources[], enrichment[] }` (SECURITY DEFINER, `is_admin()`, `set local statement_timeout='60s'`,
+scopée à un seul `user_id`) :
+- **user** : rôle, pilote, email vérifié, inscription, dernière activité, provider d'auth.
+- **sources** : chaque provider du user — statut (ready / erreur / sync incomplète), items, variants,
+  films, séries, identité résolue, dernier sync, + **bouton ↻ re-sync** (même route `/admin/resync/{id}`).
+- **enrichment** : couverture audio **par panel × type** pour CE user (total, résolu %, jamais sondé,
+  sondé 24 h, ETA, ST trouvés).
+
+Perf : scopée à un `user_id` indexé — ~3,5 s sur le plus gros pilote (airo, 334k titres, plan parallèle),
+< 1 s pour un user normal (index scan sur `cloud_titles(user_id, …)`). Aucune agrégation multi-tenant.
+
 ---
 
 ## 6. Actions
@@ -146,15 +160,17 @@ vérif `app_metadata.role === 'admin'`). Retrouve le propriétaire de la source 
 | `…080000_admin_incomplete_vod_only.sql` | « sync incomplète » = VOD-only (pas live-only) |
 | `…090000_admin_dashboard_scale_driving_accounts.sql` | `admin_enrichment_accounts` + scope Ops aux pilotes (cap 300) |
 | `…110000_admin_users_page.sql` | RPC Users paginée |
+| `…120000_admin_user_detail.sql` | RPC détail par user (profil + sources + enrichissement) |
 
-**Objets DB** : `is_admin()`, `refresh_admin_dashboard()`, `admin_overview/_sources/_enrichment_coverage/_cron_health`, `admin_users_page(…)`, table `admin_dashboard_cache`, `admin_audit_log`, `admin_enrichment_accounts`. Cron `admin-dashboard-refresh` (`*/5 * * * *`).
+**Objets DB** : `is_admin()`, `refresh_admin_dashboard()`, `admin_overview/_sources/_enrichment_coverage/_cron_health`, `admin_users_page(…)`, `admin_user_detail(uuid)`, table `admin_dashboard_cache`, `admin_audit_log`, `admin_enrichment_accounts`. Cron `admin-dashboard-refresh` (`*/5 * * * *`).
 
 **Edge** : route `/admin/resync/{sourceId}` dans `supabase/functions/norva-source-sync/index.ts`.
 
 **Frontend** :
 - `public/js/pages/AdminPage.js` — page autonome (RPC client `_rpc`, `isAdmin`, `show`, `_ensureLayout`,
   `refresh`, renderers `_renderOverview/_renderSources/_renderEnrich/_renderCron`, Users
-  `_loadUsers/_renderUsers`, actions `_resync`, helpers `cronHuman/timeAgo/n/esc`). Chargé `?v=9`.
+  `_loadUsers/_renderUsers`, détail `_openUserDetail/_renderUserDetail`, actions `_resync`, helpers
+  `cronHuman/timeAgo/n/esc`). Chargé `?v=10`.
 - `public/app.html` — lien nav caché `#nav-admin`, `<div id="page-admin" class="page">`, `<script>`.
 - `public/js/app.js` — enregistrement `this.pages.admin`, gating de nav via `isAdmin()`.
 
