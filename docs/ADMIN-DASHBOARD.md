@@ -197,9 +197,14 @@ Fonction edge dédiée **`norva-admin`** (service-role, `verify_jwt=false`, mais
   Bouton ↻ pour re-ping. Rien n'est exposé au navigateur — seul le statut/latence remonte.
 - **Feature flags** : `admin_feature_flags` (key/enabled/description) + RPCs `admin_flags_list` /
   `admin_flag_set` / `admin_flag_create` / `admin_flag_delete` (is_admin gated). Switches on/off,
-  création, suppression. **Surface de gestion** : un flag stocke son état ; son EFFET vient quand un
-  consommateur le lit. Reader SQL `public.feature_flag(key)` (défaut false) pour le câblage par flag.
-  Seed : `enrichment_paused`, `signups_open`, `maintenance_banner` (inertes tant que non câblés).
+  création, suppression. Reader SQL server-only `public.feature_flag(key)` (défaut false, révoqué
+  d'anon/authenticated). **Flags câblés à de vrais consommateurs** :
+  - **`enrichment_paused`** → `norva-playback/audio-backfill` (`runAudioBackfill`) court-circuite tout
+    le backfill au prochain tick quand le flag est ON — **kill switch provider** (fail-open si le flag
+    est illisible). Aucune connexion provider ouverte tant qu'il est actif.
+  - **`maintenance_banner`** → lu par l'app via l'RPC **anon** `app_public_flags()` (whitelist :
+    n'expose QUE ce flag) ; `public/js/maintenance-banner.js` pose une bannière fixe en bas pour tous
+    les visiteurs (re-check toutes les 60 s). `signups_open` reste un exemple non câblé.
 - **Journal d'audit** : `admin_audit_feed(p_limit, p_kind)` → derniers `admin_events` **globaux**
   (toutes actions admin, jointe à l'email du client) → liste cliquable → fiche.
 
