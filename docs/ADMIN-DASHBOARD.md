@@ -165,13 +165,24 @@ Toutes les tables sont **RLS-on sans policy** → accessibles uniquement via les
 
 ## 6. Actions
 
-### Re-sync d'une source (bouton ↻ dans Providers)
+### Re-sync d'une source (bouton ↻ dans Providers / fiche)
 Route edge **`POST norva-source-sync/admin/resync/{sourceId}`**. Accepte **soit** le
 `NORVA_BACKFILL_TOKEN` (service), **soit** un **JWT admin** (`supabase.auth.getUser(token)` puis
 vérif `app_metadata.role === 'admin'`). Retrouve le propriétaire de la source et lance
 `syncCloudSource(sourceId, ownerId, …, { force:true })` — qui kicke la chaîne
 `driveXtreamSyncToReady` en arrière-plan et **répond immédiatement**. Côté UI : le bouton passe à
-« ✓ lancé », effet visible quelques minutes plus tard (asynchrone) → auto-refresh à +6 s.
+« ✓ lancé ».
+
+### Actions client avancées (fiche → bloc ⚡ Actions)
+Fonction edge dédiée **`norva-admin`** (service-role, `verify_jwt=false`, mais gate en-code :
+`getUser(token)` → `app_metadata.role === 'admin'`). Chaque action écrit un `admin_events`
+(`admin_action`) → visible dans la timeline. Routes POST :
+- **`/user/:id/resend-confirmation`** — `auth.resend({type:'signup'})` (passe par le Send Email Hook
+  `norva-auth-email` → template Resend). N'apparaît que si l'email n'est pas confirmé.
+- **`/user/:id/role`** `{role:'admin'|'user'}` — `auth.admin.updateUserById(app_metadata.role)` (merge).
+  Confirmation UI (opération sensible : accorde/retire l'accès admin).
+- **`/user/:id/suspend`** `{suspend:bool}` — `auth.admin.updateUserById(ban_duration)` (bannit ~100 ans
+  ou `none`). La fiche badge « suspendu » (`admin_user_detail.user.banned` = `banned_until > now()`).
 
 ---
 
