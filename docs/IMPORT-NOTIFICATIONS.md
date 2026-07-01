@@ -50,9 +50,8 @@ Render functions pures, sans effet de bord, chacune prend un **tableau** de prov
   side. [Contact support] »*.
 - Style brandé identique à `norva-auth-email` (thème sombre, logo, CTA `#5b7cfa`).
 
-## 5. Les hooks de cycle de vie (À FAIRE — dans le moteur partagé)
-À insérer dans `_shared/xtream-sync.ts` (**après** la dédup — cf. `SYNC-ENGINE-DEDUP.md`) pour exister **une
-seule fois** :
+## 5. Les hooks de cycle de vie (✅ FAIT — dans le moteur partagé)
+Intégrés dans `_shared/xtream-sync.ts` (donc **une seule fois**, post-dédup) et **déployés** :
 - `import_started` : à l'ajout, **1er sync seulement** (pas les refreshs). Insert `ON CONFLICT DO NOTHING`.
 - `import_completed` : quand finalize passe `ready`, **1ère fois seulement**. payload = compteurs
   (movies/series/channels). À la complétion, **`skipped` un éventuel `import_failed` pending** de la même
