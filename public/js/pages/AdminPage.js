@@ -114,6 +114,11 @@ class AdminPage {
 #page-admin .crm-h1{font-size:22px;font-weight:700;margin:0 0 4px;color:var(--color-text-primary,#fff);}
 #page-admin .crm-sub{color:var(--color-text-secondary,#9aa);font-size:13px;margin:0 0 22px;}
 #page-admin .admin-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(158px,1fr));gap:12px;margin-bottom:26px;}
+#page-admin .kpi-groups{margin-bottom:24px;}
+#page-admin .kpi-group{margin-bottom:20px;}
+#page-admin .kpi-group:last-child{margin-bottom:0;}
+#page-admin .kpi-gtitle{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#7a8494;margin:0 0 9px 2px;}
+#page-admin .kpi-group .admin-cards{margin-bottom:0;}
 #page-admin .kpi{background:var(--color-bg-secondary,#16161c);border:1px solid var(--color-border,#242430);border-radius:11px;padding:15px;}
 #page-admin .kpi .v{font-size:26px;font-weight:700;color:var(--color-text-primary,#fff);line-height:1.1;}
 #page-admin .kpi .l{font-size:11px;color:var(--color-text-secondary,#9aa);margin-top:5px;text-transform:uppercase;letter-spacing:.4px;}
@@ -262,7 +267,7 @@ class AdminPage {
         v.innerHTML = `<div class="crm-page">
             <h1 class="crm-h1">🎯 Cockpit</h1>
             <p class="crm-sub">Santé de l'écosystème Norva en un coup d'œil.</p>
-            <section id="admin-overview" class="admin-cards"><div class="ssub">Chargement…</div></section>
+            <section id="admin-overview" class="kpi-groups"><div class="ssub">Chargement…</div></section>
             <div class="admin-block"><h2>🚨 Alertes</h2><div id="admin-alerts"><div class="ssub">Chargement…</div></div></div>
         </div>`;
         try {
@@ -628,23 +633,33 @@ class AdminPage {
         if (!el) return;
         const card = (v, l, cls) => `<div class="kpi ${cls || ''}"><div class="v">${v}</div><div class="l">${l}</div></div>`;
         const n = (x) => (x == null ? '—' : Number(x).toLocaleString('fr-FR'));
+        const group = (title, cards) => `<div class="kpi-group"><div class="kpi-gtitle">${title}</div><div class="admin-cards">${cards.join('')}</div></div>`;
         el.innerHTML = [
-            card(n(o.users_total), 'Users', o.users_active_7d ? 'ok' : ''),
-            card(n(o.users_active_24h), 'Actifs 24 h'),
-            card(n(o.users_active_7d), 'Actifs 7 j'),
-            card(n(o.users_new_7d), 'Nouveaux 7 j', Number(o.users_new_7d) > 0 ? 'ok' : ''),
-            card(n(o.users_new_30d), 'Nouveaux 30 j'),
-            card(n(o.sources_total), 'Sources'),
-            card(n(o.sources_incomplete), 'Sync incomplète', Number(o.sources_incomplete) > 0 ? 'alert' : 'ok'),
-            card(n(o.sources_error), 'Sources en erreur', Number(o.sources_error) > 0 ? 'alert' : 'ok'),
-            card(n(o.titles_movie), 'Films'),
-            card(n(o.titles_series), 'Séries'),
-            card(n(o.identities_active), 'Identités'),
-            card(n(o.cron_active), 'Crons actifs', 'ok'),
-            card(n(o.cron_fails_24h), 'Échecs cron 24h', Number(o.cron_fails_24h) > 0 ? 'alert' : 'ok'),
-            card(n(o.cron_paused), 'Crons en pause'),
-            card(n(o.gensubs_ready), 'Sous-titres IA prêts'),
-            card(n(o.gensubs_failed), 'Sous-titres IA échoués', Number(o.gensubs_failed) > 0 ? 'alert' : '')
+            group('👥 Clients & croissance', [
+                card(n(o.users_total), 'Users', o.users_active_7d ? 'ok' : ''),
+                card(n(o.users_active_24h), 'Actifs 24 h'),
+                card(n(o.users_active_7d), 'Actifs 7 j'),
+                card(n(o.users_new_7d), 'Nouveaux 7 j', Number(o.users_new_7d) > 0 ? 'ok' : ''),
+                card(n(o.users_new_30d), 'Nouveaux 30 j')
+            ]),
+            group('📡 Providers & catalogue', [
+                card(n(o.sources_total), 'Sources'),
+                card(n(o.sources_incomplete), 'Sync incomplète', Number(o.sources_incomplete) > 0 ? 'alert' : 'ok'),
+                card(n(o.sources_error), 'Sources en erreur', Number(o.sources_error) > 0 ? 'alert' : 'ok'),
+                card(n(o.identities_active), 'Identités'),
+                card(n(o.titles_movie), 'Films'),
+                card(n(o.titles_series), 'Séries')
+            ]),
+            group('🎬 Sous-titres IA', [
+                card(n(o.gensubs_ready), 'Prêts', 'ok'),
+                card(n(o.gensubs_processing), 'En cours'),
+                card(n(o.gensubs_failed), 'Échoués', Number(o.gensubs_failed) > 0 ? 'alert' : '')
+            ]),
+            group('⏱️ Crons', [
+                card(n(o.cron_active), 'Actifs', 'ok'),
+                card(n(o.cron_paused), 'En pause'),
+                card(n(o.cron_fails_24h), 'Échecs 24 h', Number(o.cron_fails_24h) > 0 ? 'alert' : 'ok')
+            ])
         ].join('');
     }
 
