@@ -252,10 +252,16 @@ donc le changer re-clé d'un coup `catalog_file_tracks` (lecture/écriture/fanou
    avant la re-clé reste servi pendant la transition (pas de régénération).
 3. `fanout_file_tracks_to_users` : join sur l'identité — **rétro-compatible** (match `identity_id` OU
    `providerKey`/host), donc sûr à appliquer avant le déploiement. Migration `20260701010000`.
-4. **Backfill de fusion** (migration `20260701020000`, à lancer APRÈS le déploiement) : fusionne les lignes
+4. **Backfill de fusion** (migration `20260701020000`, lancée APRÈS le déploiement) : fusionne les lignes
    éparpillées d'un panel (les 4 clés Opplex/Ferran) sous l'`identity_id`, garde la ligne la plus complète,
-   supprime les anciennes. Idempotent. Les lignes keyées par hostname (sous-cache tmdb/imdb de
-   `vod-title-projection`) restent — c'est le follow-up **Phase B.2**.
+   supprime les anciennes. Idempotent. **Vérifié** : Ferran 4 clés → 1 identité (393 fichiers), 0 perte.
+
+### 8.4bis Phase B.2 — sous-cache tmdb/imdb de `vod-title-projection` (✅ LIVRÉE)
+`loadVodInfoIds` keyait le sous-cache d'ids provider (tmdb/imdb) par **hostname** (`hostFromUrl(serverUrl)`),
+donc fragmenté entre miroirs. Ajout de `resolveProjectionCacheKey` (même chaîne que le playback :
+`identity_id → providerKey → hostname`) → le sous-cache d'ids est maintenant keyé par identité, cohérent
+avec les pistes audio/sous-titres dans la même table. **Aucun backfill** : le cache d'ids était vide
+(0 ligne `ids_resolved_at`) → purement forward-looking.
 
 > **Sécurité** : ces caches **dégradent proprement** — un miss = on re-sonde (chemin normal), jamais une
 > casse playback. Le fallback fingerprint + le join rétro-compatible rendent la transition sans régression.

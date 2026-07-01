@@ -47,6 +47,28 @@ const DEFAULT_TMDB_VALIDATE_LIMIT = 120;
 // are well under it, so in practice every already-known title is filled in one pass.
 const REUSE_SCAN_CAP = 4000;
 
+// Phase B.2: key the tmdb/imdb id sub-cache on the SAME stable provider identity the playback path
+// uses (identity_id -> providerKey -> hostname), so mirrors of one panel share resolved ids instead of
+// fragmenting by hostname. Best-effort: any failure falls back to the hostname (old behaviour).
+async function resolveProjectionCacheKey(
+  db: SupabaseClient, sourceId: string, userId: string, serverUrl: string,
+): Promise<string> {
+  try {
+    const { data } = await db.from("cloud_sources").select("config_hint")
+      .eq("id", sourceId).eq("user_id", userId).maybeSingle();
+    const hint = (data?.config_hint && typeof data.config_hint === "object") ? data.config_hint as JsonRecord : {};
+    const host = stringOr(hint.serverHost, "") || hostFromUrl(serverUrl);
+    const providerKey = stringOr(hint.providerKey, "");
+    if (!providerKey) return host;
+    const { data: idRow } = await db.from("catalog_provider_identities").select("identity_id")
+      .eq("provider_key", providerKey).maybeSingle();
+    const identityId = stringOr((idRow as JsonRecord | null)?.identity_id, "");
+    return identityId || providerKey;
+  } catch (_) {
+    return hostFromUrl(serverUrl);
+  }
+}
+
 export async function refreshVodTitleProjection(options: ProjectionOptions) {
   const rows = options.rows.filter((row) =>
     (row.item_type === "movie" || row.item_type === "series") &&
@@ -58,7 +80,9 @@ export async function refreshVodTitleProjection(options: ProjectionOptions) {
   const gateway = options.mediaGatewayUrl && options.mediaGatewayToken
     ? { url: options.mediaGatewayUrl.replace(/\/+$/, ""), token: options.mediaGatewayToken }
     : null;
-  const projectionServerHost = options.xtreamConfig ? hostFromUrl(options.xtreamConfig.serverUrl) : "";
+  const projectionServerHost = options.xtreamConfig
+    ? await resolveProjectionCacheKey(options.db, options.sourceId, options.userId, options.xtreamConfig.serverUrl)
+    : "";
   const vodInfoByExternalId = options.xtreamConfig
     ? await loadVodInfoIds(options.xtreamConfig, rows, boundedInt(options.vodInfoLimit, DEFAULT_VOD_INFO_LIMIT, 0, 1000), gateway, options.db, projectionServerHost)
     : new Map<string, ProviderIds>();
