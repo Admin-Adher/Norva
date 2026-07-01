@@ -2734,13 +2734,17 @@ async function runAudioBackfill(req: Request, db: SupabaseClient) {
   // it can never open a 2nd provider connection next to a live stream (the user_multi_ip trap).
   if (body.fallthrough !== true) return await runOneDimension(db, body);
   const fuId = stringOr(body.userId, "");
+  // Carry the primary cron's panel scope (sourceId) into EVERY drained dimension. Without this the
+  // chain would fall back to account-wide draining and could open a provider connection on ANOTHER
+  // panel's host — re-introducing the user_multi_ip collision the per-panel split exists to avoid.
+  const fuScope = stringOr(body.sourceId, "") ? { sourceId: stringOr(body.sourceId, "") } : {};
   const chain: JsonRecord[] = [
-    body,                                                                   // primary (the cron's own: films audio/vod)
-    { userId: fuId, type: "series", mode: "probe", limit: 15, concurrency: 1 },
-    { userId: fuId, type: "movie", target: "subtitle", limit: 10, concurrency: 1 },
-    { userId: fuId, type: "series", target: "subtitle", limit: 10, concurrency: 1 },
-    { userId: fuId, type: "movie", mode: "whisper", limit: 4, concurrency: 1 },
-    { userId: fuId, type: "series", mode: "whisper", limit: 4, concurrency: 1 },
+    body,                                                                   // primary (already carries sourceId)
+    { userId: fuId, ...fuScope, type: "series", mode: "probe", limit: 15, concurrency: 1 },
+    { userId: fuId, ...fuScope, type: "movie", target: "subtitle", limit: 10, concurrency: 1 },
+    { userId: fuId, ...fuScope, type: "series", target: "subtitle", limit: 10, concurrency: 1 },
+    { userId: fuId, ...fuScope, type: "movie", mode: "whisper", limit: 4, concurrency: 1 },
+    { userId: fuId, ...fuScope, type: "series", mode: "whisper", limit: 4, concurrency: 1 },
   ];
   const tried: JsonRecord[] = [];
   for (const dim of chain) {
@@ -2759,6 +2763,11 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
   const limit = Math.max(1, Math.min(300, Number(body.limit) || 100));
   const concurrency = Math.max(1, Math.min(12, Number(body.concurrency) || 6));
   const afterId = stringOr(body.afterId, "");
+  // Optional per-panel scope. A driving account can hold SEVERAL distinct provider hosts (e.g.
+  // AÎRO's 5 panels). With sourceId set, every candidate query is scoped to that one source so
+  // each host gets its own cron/connection slot and they enrich in PARALLEL — without raising any
+  // single host's per-connection load (distinct hosts → no user_multi_ip). Empty = account-wide.
+  const sourceId = stringOr(body.sourceId, "");
   // mode 'vod' = get_vod_info default track (cheap); 'probe' = container header-probe
   // for ALL tracks (heavier — Range-reads the moov/Tracks). requireTag narrows to a
   // version tag (e.g. 'multi') so the heavy probe only runs where it helps.
@@ -3001,6 +3010,7 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
     const { data: wrows, error: wErr } = await db.rpc("whisper_candidate_titles", {
       p_user: userId, p_item_type: itemType, p_limit: limit,
       p_retry_before: whisperRetryBefore, p_after: afterId || null,
+      p_source: sourceId || null,   // per-panel scope: keep whisper's provider hit on this source's host only
     });
     if (wErr) throwDb(wErr, "Unable to list titles for whisper backfill");
     if (!wrows || !wrows.length) return { mode: "whisper", processed: 0, candidates: 0, detected: 0, lastId: afterId, hasMore: false };
@@ -3064,32 +3074,49 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
     return { mode, skipped: "live-session", processed: 0, updated: 0, userId };
   }
 
-  let titlesQuery = db
-    .from("cloud_titles")
-    .select("id, default_variant_id, provider_tmdb_id")
-    .eq("user_id", userId)
-    .eq("item_type", itemType)
-    .gt("variant_count", 0);
-  if (subtitleTarget) {
-    // Subtitle sweep: titles never subtitle-probed. Independent of audio state, so it also
-    // covers titles whose audio is already resolved (the one header-parse fills both).
-    titlesQuery = titlesQuery.is("subtitle_probed_at", null);
-  } else {
-    titlesQuery = titlesQuery.eq("audio_languages", "{}");
-    // Progression: skip titles already probed recently so the crawl ADVANCES past
-    // genuinely-untagged titles instead of re-probing the same front of the queue forever.
-    // 30d retry window lets transient provider failures (e.g. 429) recover later.
-    const probeRetryBefore = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString();
-    titlesQuery = titlesQuery.or(`audio_probed_at.is.null,audio_probed_at.lt.${probeRetryBefore}`);
-  }
-  if (requireTags.length) titlesQuery = titlesQuery.overlaps("version_languages", requireTags);
   // untaggedOnly = titles with NO version tag (e.g. plain French films). These carry no
   // language signal in the title, so they MUST be probed; ~60% expose a real default-track
   // language via the cheap get_vod_info (mode=vod). Excluded from the tag-targeted crons.
-  if (body.untaggedOnly === true || stringOr(body.untaggedOnly, "") === "1") titlesQuery = titlesQuery.eq("version_languages", "{}");
-  if (afterId) titlesQuery = titlesQuery.gt("id", afterId);
-  titlesQuery = titlesQuery.order("id", { ascending: true }).limit(limit);
-  const { data: titles, error } = await titlesQuery;
+  const untaggedOnly = body.untaggedOnly === true || stringOr(body.untaggedOnly, "") === "1";
+  // Per-panel scope (sourceId) → audio_backfill_candidates RPC: the SAME filter (audio unresolved
+  // + 30d probe-retry window, OR never subtitle-probed) but scoped to one source, variant-driven so
+  // work is bounded by that source. Account-wide (no sourceId) keeps the original PostgREST path.
+  const titlesResult = sourceId
+    ? await db.rpc("audio_backfill_candidates", {
+        p_user: userId,
+        p_source: sourceId,
+        p_item_type: itemType,
+        p_target: subtitleTarget ? "subtitle" : "audio",
+        p_require_tags: requireTags.length ? requireTags : null,
+        p_untagged_only: untaggedOnly,
+        p_limit: limit,
+      })
+    : await (() => {
+        let q = db
+          .from("cloud_titles")
+          .select("id, default_variant_id, provider_tmdb_id")
+          .eq("user_id", userId)
+          .eq("item_type", itemType)
+          .gt("variant_count", 0);
+        if (subtitleTarget) {
+          // Subtitle sweep: titles never subtitle-probed. Independent of audio state, so it also
+          // covers titles whose audio is already resolved (the one header-parse fills both).
+          q = q.is("subtitle_probed_at", null);
+        } else {
+          q = q.eq("audio_languages", "{}");
+          // Progression: skip titles already probed recently so the crawl ADVANCES past
+          // genuinely-untagged titles instead of re-probing the same front of the queue forever.
+          // 30d retry window lets transient provider failures (e.g. 429) recover later.
+          const probeRetryBefore = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString();
+          q = q.or(`audio_probed_at.is.null,audio_probed_at.lt.${probeRetryBefore}`);
+        }
+        if (requireTags.length) q = q.overlaps("version_languages", requireTags);
+        if (untaggedOnly) q = q.eq("version_languages", "{}");
+        if (afterId) q = q.gt("id", afterId);
+        return q.order("id", { ascending: true }).limit(limit);
+      })();
+  const titles = titlesResult.data as { id: string; default_variant_id: string | null; provider_tmdb_id: string | null }[] | null;
+  const error = titlesResult.error;
   if (error) throwDb(error, "Unable to list titles for backfill");
   if (!titles || !titles.length) return { processed: 0, updated: 0, lastId: afterId, hasMore: false };
 
