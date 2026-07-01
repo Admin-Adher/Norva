@@ -5,8 +5,9 @@ porte `app_metadata.role = 'admin'`.
 
 > **Structure CRM (depuis v11).** Cliquer « Admin » entre dans un **shell CRM** dédié : sidebar gauche
 > persistante + **routing interne** state-based (`this._route`) et une zone de contenu scrollable.
-> Pages : **Cockpit** (KPIs), **Clients** (liste paginée → **fiche 360° pleine page**), **Providers**
-> (sources), **Moteur** (enrichissement + crons), **Système** (audit/infra — à venir). Chaque page
+> Pages : **Cockpit** (KPIs + alertes), **Clients** (liste paginée → **fiche 360° pleine page**),
+> **Providers** (sources), **Moteur** (enrichissement + crons), **Système** (santé snapshot + journal
+> d'audit). Chaque page
 > requête sa propre RPC (server-cached) à la navigation ; un bouton « ↻ Rafraîchir » recharge la page
 > courante. Les sections historiques ci-dessous sont maintenant réparties dans ces pages ; les RPCs et
 > la sémantique sont inchangées.
@@ -183,6 +184,21 @@ Fonction edge dédiée **`norva-admin`** (service-role, `verify_jwt=false`, mais
   Confirmation UI (opération sensible : accorde/retire l'accès admin).
 - **`/user/:id/suspend`** `{suspend:bool}` — `auth.admin.updateUserById(ban_duration)` (bannit ~100 ans
   ou `none`). La fiche badge « suspendu » (`admin_user_detail.user.banned` = `banned_until > now()`).
+
+**Anti auto-verrouillage** : `norva-admin` refuse à un admin de **se rétrograder** (`role→user`) ou de
+**se suspendre** lui-même (`userId === actorId`) — évite de se verrouiller hors du panneau.
+
+### 🛡️ Page Système — journal d'audit + santé
+`admin_audit_feed(p_limit, p_kind)` → derniers `admin_events` **globaux** (toutes actions admin,
+jointe à l'email du client) → liste cliquable → fiche. Plus un bandeau santé dérivé de `admin_overview`
+(fraîcheur du snapshot, crons actifs/pause/échecs, sources en erreur, ST IA en cours/échoués).
+
+### Hooks timeline (événements lifecycle réels)
+`enqueueImportNotification` (moteur de sync partagé) écrit désormais aussi un `admin_events`
+(`sync_started` / `sync_done` / `sync_failed`) — **exactement une fois par source/kind** (le `.select()`
+sur l'upsert `ignoreDuplicates` ne renvoie que les insertions neuves). Ces événements réels rejoignent
+la timeline de la fiche et le journal d'audit, en plus des événements synthétiques (inscription,
+provider ajouté, dernier sync).
 
 ---
 

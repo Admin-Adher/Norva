@@ -74,8 +74,20 @@ export async function enqueueImportNotification(
   payload: JsonRecord = {},
 ): Promise<void> {
   try {
-    await db.from("cloud_import_notifications")
-      .upsert([{ user_id: userId, source_id: sourceId, kind, payload }], { onConflict: "source_id,kind", ignoreDuplicates: true });
+    // .select() → ignoreDuplicates returns ONLY newly-inserted rows (DO NOTHING doesn't return
+    // conflicts), so we can mirror this exact-once lifecycle event into the admin CRM timeline
+    // without duplicating it across the engine's self-invocations.
+    const { data: ins } = await db.from("cloud_import_notifications")
+      .upsert([{ user_id: userId, source_id: sourceId, kind, payload }], { onConflict: "source_id,kind", ignoreDuplicates: true })
+      .select("id");
+    if (ins && ins.length) {
+      try {
+        const summary = kind === "import_started" ? "Import démarré"
+          : kind === "import_completed" ? "Import terminé" : "Import échoué";
+        const evKind = kind === "import_failed" ? "sync_failed" : kind === "import_completed" ? "sync_done" : "sync_started";
+        await db.from("admin_events").insert([{ user_id: userId, kind: evKind, summary, meta: { source_id: sourceId, ...payload }, actor: "système" }]);
+      } catch (_) { /* best-effort admin timeline — never fail a sync */ }
+    }
   } catch (_) { /* best-effort — never fail a sync over a notification */ }
 }
 
