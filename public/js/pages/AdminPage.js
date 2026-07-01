@@ -234,7 +234,14 @@ class AdminPage {
         if (!el) return;
         const barCell = (a, p) => `<td class="num"><span class="bar"><i style="width:${Math.min(100, Number(p) || 0)}%"></i></span>${AdminPage.n(a)} (${p == null ? 0 : p}%)</td>`;
         const eta = (r) => {
-            if (Number(r.never_probed) === 0) return '<span class="badge green">✓ complet</span>';
+            // "1ʳᵉ passe terminée" = never_probed 0 → tout a été sondé au moins une fois. Ce n'est PAS
+            // "100% résolu" : le reste (audio résolu < 100%) est « und » dans le conteneur (piste sans
+            // langue déclarée), que le probe ne peut pas résoudre — seul whisper le peut. Le libellé
+            // dit donc "sondé", pas "complet", pour ne pas contredire une barre Audio résolu à 61%.
+            if (Number(r.never_probed) === 0) {
+                const undPct = Math.max(0, Math.round((100 - (Number(r.resolved_pct) || 0)) * 10) / 10);
+                return `<span class="badge green" title="1ʳᵉ passe de sondage terminée : chaque titre a été sondé au moins une fois. Les ~${undPct}% non résolus sont « und » dans le conteneur (aucune langue déclarée) — seul whisper peut les résoudre.">✓ sondé</span>`;
+            }
             if (Number(r.probed_24h) === 0) return '<span class="badge red">⏸ à l\'arrêt</span>';
             return `~${AdminPage.n(r.eta_days)} j`;
         };
