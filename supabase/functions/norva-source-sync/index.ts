@@ -176,6 +176,22 @@ Deno.serve(async (req) => {
       });
       return json(req, result);
     }
+    // Admin/service re-sync: force a full re-sync of ANY source by id (service-token auth,
+    // NOT a user JWT). Looks up the source's owner so it re-syncs under the correct user —
+    // powers the admin dashboard "re-sync" action + one-off ops (e.g. a sync that stalled
+    // mid-finalize during an incident). driveXtreamSyncToReady runs the whole chain in the
+    // background; this returns immediately.
+    if (req.method === "POST" && segments[0] === "admin" && segments[1] === "resync") {
+      const expected = Deno.env.get("NORVA_BACKFILL_TOKEN") ?? "";
+      const provided = req.headers.get("Authorization")?.match(/^Bearer\s+(.+)$/i)?.[1] ?? "";
+      if (!expected || provided !== expected) throw new HttpError(401, "Unauthorized");
+      const sourceId = segments[2];
+      if (!sourceId) throw new HttpError(400, "Missing source id");
+      const { data: src } = await supabase.from("cloud_sources").select("user_id").eq("id", sourceId).maybeSingle();
+      if (!src) throw new HttpError(404, "Source not found");
+      const result = await syncCloudSource(sourceId, String(src.user_id), supabase, url.searchParams.get("country"), { force: true });
+      return json(req, { adminResync: true, sourceId, ...(result as JsonRecord) });
+    }
     throw new HttpError(404, "Route not found");
   } catch (error) {
     const status = error instanceof HttpError ? error.status : 500;

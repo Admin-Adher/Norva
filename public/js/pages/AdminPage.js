@@ -255,7 +255,7 @@ class AdminPage {
                 <td>${newGroup ? winBadge(r.window) : ''}</td>
                 <td>${AdminPage.esc(r.kind)}</td>
                 <td>${AdminPage.esc(r.jobname)}</td>
-                <td>${AdminPage.esc(r.schedule)}</td>
+                <td><span title="${AdminPage.esc(r.schedule)}">${AdminPage.esc(AdminPage.cronHuman(r.schedule))}</span></td>
                 <td>${state}</td>
                 <td>${AdminPage.esc(last)} <span class="badge gray">${AdminPage.esc(r.last_status || '')}</span></td>
                 <td class="num">${AdminPage.n(r.fails_24h)}</td>
@@ -265,6 +265,31 @@ class AdminPage {
     }
 
     static n(x) { return x == null ? '—' : Number(x).toLocaleString('fr-FR'); }
+    // cron expression → concise French label (raw kept as tooltip). Falls back to raw on anything odd.
+    static cronHuman(expr) {
+        const p = String(expr || '').trim().split(/\s+/);
+        if (p.length < 5) return expr || '—';
+        const [min, hr] = p;
+        let m, minLabel;
+        if (min === '*') minLabel = 'chaque min';
+        else if ((m = min.match(/^\*\/(\d+)$/))) minLabel = `toutes les ${m[1]} min`;
+        else if ((m = min.match(/^\d+-\d+\/(\d+)$/))) minLabel = `toutes les ${m[1]} min`;
+        else if (/,/.test(min)) { const a = min.split(',').map(Number); const s = a.length > 1 ? a[1] - a[0] : 0; minLabel = s > 0 ? `toutes les ${s} min` : `${a.length}×/h`; }
+        else if (/^\d+$/.test(min)) minLabel = null;        // single minute → "1×/j à HhMM"
+        else return expr;
+        // hour
+        if ((m = hr.match(/^\*\/(\d+)$/))) return `toutes les ${m[1]} h`;
+        let hrLabel = '';
+        if (hr === '*') hrLabel = '';
+        else if ((m = hr.match(/^(\d+)-(\d+)$/))) hrLabel = `${m[1]}h–${m[2]}h`;
+        else if (/,/.test(hr)) { const a = hr.split(','); hrLabel = `${a[0]}h–${a[a.length - 1]}h`; }
+        else if (/^\d+$/.test(hr)) hrLabel = `${hr}h`;
+        if (minLabel === null) {
+            const mm = String(min).padStart(2, '0');
+            return /^\d+$/.test(hr) ? `1×/j à ${hr}h${mm}` : `à :${mm}`;
+        }
+        return hrLabel ? `${minLabel} · ${hrLabel}` : minLabel;
+    }
     static esc(s) {
         return String(s == null ? '' : s).replace(/[&<>"']/g, c => (
             { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
