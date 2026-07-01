@@ -119,6 +119,10 @@
           <span class="nav-icon"><svg class="icon norva-ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14"/></svg></span>
           <span>Downloads</span>
         </a>
+        <a href="#" class="nav-link" id="nav-admin" data-page="admin" hidden aria-hidden="true" tabindex="-1">
+          <span class="nav-icon">⚙️</span>
+          <span>Admin</span>
+        </a>
         <a href="#" class="nav-link" data-page="settings">
           <span class="nav-icon"><img class="icon norva-ui-icon" src="/img/icons/norva-settings.svg" alt=""></span>
           <span>Settings</span>
@@ -1521,6 +1525,9 @@
         </div>
       </div>
 
+      <!-- Admin Dashboard (Ops MVP) - hidden nav, admin-only (server-verified) -->
+      <div id="page-admin" class="page"></div>
+
       <!-- Watch Page (VOD Player) - Not in navigation -->
       <div id="page-watch" class="page watch-page">
         <!-- Video Section (100vh) -->
@@ -1893,7 +1900,8 @@
   <script defer src="/js/pages/Settings.js?v=29"></script>
   <script defer src="/js/pages/WatchPage.js?v=113"></script>
   <script defer src="/js/profiles.js?v=7"></script>
-  <script defer src="/js/app.js?v=34"></script>
+  <script defer src="/js/pages/AdminPage.js?v=1"></script>
+  <script defer src="/js/app.js?v=35"></script>
   <script>
     // Check for SSO token in URL
     (function () {
