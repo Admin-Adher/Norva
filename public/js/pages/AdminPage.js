@@ -17,7 +17,8 @@ class AdminPage {
         this._isAdmin = null; // cached tri-state (null = unknown)
         this._route = 'cockpit';
         // Clients list is LIVE/paginated (not part of the cached snapshot). Its own state.
-        this._users = { page: 0, limit: 25, search: '', sort: 'created_desc', total: 0 };
+        this._users = { page: 0, limit: 25, search: '', sort: 'created_desc', tagId: '', total: 0 };
+        this._allTags = [];
         this._usersDebounce = null;
         this._lastTs = null; // snapshot refreshed_at for the topbar
     }
@@ -178,6 +179,12 @@ class AdminPage {
 #page-admin .tl-ic{width:22px;text-align:center;}
 #page-admin .tl-sum{flex:1;font-size:13px;color:var(--color-text-primary,#e8e8ee);}
 #page-admin .tl-at{color:#66707e;font-size:11px;white-space:nowrap;}
+#page-admin .alert-card{display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:var(--color-bg-secondary,#16161c);border:1px solid #e5091433;border-left:3px solid #e50914;border-radius:9px;padding:11px 14px;margin-bottom:8px;}
+#page-admin .alert-card[data-user-id]{cursor:pointer;}
+#page-admin .alert-card[data-user-id]:hover{background:#e5091412;}
+#page-admin .alert-card .al-name{font-weight:600;color:var(--color-text-primary,#fff);}
+#page-admin .alert-card .al-owner{color:var(--color-text-secondary,#9aa);font-size:12px;}
+#page-admin .alert-card .al-err{color:#ff9b9b;font-size:11px;font-family:monospace;}
 @media(max-width:900px){
   #page-admin .crm-sidebar{width:60px;padding:14px 8px;}
   #page-admin .crm-nav-item .lb,#page-admin .crm-brand span:last-child,#page-admin .crm-side-foot{display:none;}
@@ -209,6 +216,8 @@ class AdminPage {
             if (b) { e.preventDefault(); this._resync(b); return; }
             const ur = e.target.closest('.user-row');
             if (ur && !e.target.closest('button,a')) { this._navigate('client:' + ur.dataset.userId); return; }
+            const ac = e.target.closest('.alert-card[data-user-id]');
+            if (ac) { this._navigate('client:' + ac.dataset.userId); return; }
             if (e.target.closest('.crm-back')) { this._navigate('clients'); return; }
             // Fiche relational actions
             const tRem = e.target.closest('.crm-tag-remove');
@@ -254,16 +263,35 @@ class AdminPage {
             <h1 class="crm-h1">🎯 Cockpit</h1>
             <p class="crm-sub">Santé de l'écosystème Norva en un coup d'œil.</p>
             <section id="admin-overview" class="admin-cards"><div class="ssub">Chargement…</div></section>
+            <div class="admin-block"><h2>🚨 Alertes</h2><div id="admin-alerts"><div class="ssub">Chargement…</div></div></div>
         </div>`;
         try {
-            const o = await this._rpc('admin_overview');
+            const [o, sources] = await Promise.all([this._rpc('admin_overview'), this._rpc('admin_sources')]);
             this._lastTs = o && o.refreshed_at ? o.refreshed_at : this._lastTs;
             this._setCrumb('Cockpit', this._lastTs);
             this._renderOverview(o);
+            this._renderAlerts(Array.isArray(sources) ? sources : []);
         } catch (e) {
             const el = document.getElementById('admin-overview');
             if (el) el.innerHTML = `<div class="admin-err">Erreur : ${AdminPage.esc(e.message)}</div>`;
         }
+    }
+
+    _renderAlerts(sources) {
+        const el = document.getElementById('admin-alerts');
+        if (!el) return;
+        const problems = sources.filter(s => s.incomplete === true || s.sync_error || s.sync_status === 'sync_error');
+        if (!problems.length) { el.innerHTML = '<div class="card"><span class="badge green">✓</span> Aucune alerte — tout est sain.</div>'; return; }
+        el.innerHTML = problems.map(s => {
+            const kind = s.incomplete === true ? 'sync incomplète' : (s.sync_status || 'erreur');
+            const uid = s.user_id ? ` alert-card" data-user-id="${AdminPage.esc(s.user_id)}` : '"';
+            return `<div class="alert-card${uid}" title="${s.user_id ? 'Ouvrir la fiche client' : ''}">
+                <span class="badge red">${AdminPage.esc(kind)}</span>
+                <span class="al-name">${AdminPage.esc(s.display_name)}</span>
+                <span class="al-owner">${AdminPage.esc(s.owner_email || '')}</span>
+                ${s.sync_error ? `<span class="al-err">${AdminPage.esc(String(s.sync_error).slice(0, 80))}</span>` : ''}
+            </div>`;
+        }).join('');
     }
 
     // ── Page: Clients (list) ──
@@ -281,6 +309,7 @@ class AdminPage {
                 <option value="active_desc">Dernière activité</option>
                 <option value="email_asc">Email A→Z</option>
               </select>
+              <select id="admin-users-tag"><option value="">Tous les segments</option></select>
             </div>
             <div class="scroll"><div id="admin-users"></div></div>
             <div class="users-pager">
@@ -302,6 +331,11 @@ class AdminPage {
         if (sortSel) sortSel.addEventListener('change', () => {
             this._users.sort = sortSel.value; this._users.page = 0; this._loadUsers();
         });
+        const tagSel = document.getElementById('admin-users-tag');
+        if (tagSel) {
+            this._fillTagOptions(tagSel);
+            tagSel.addEventListener('change', () => { this._users.tagId = tagSel.value; this._users.page = 0; this._loadUsers(); });
+        }
         const prev = document.getElementById('admin-users-prev');
         if (prev) prev.addEventListener('click', () => { if (this._users.page > 0) { this._users.page -= 1; this._loadUsers(); } });
         const next = document.getElementById('admin-users-next');
@@ -319,10 +353,12 @@ class AdminPage {
         if (range) range.textContent = '…';
         try {
             const res = await this._rpc('admin_users_page', {
-                p_limit: s.limit, p_offset: s.page * s.limit, p_search: s.search || null, p_sort: s.sort
+                p_limit: s.limit, p_offset: s.page * s.limit, p_search: s.search || null,
+                p_sort: s.sort, p_tag_id: s.tagId || null
             });
             const rows = (res && Array.isArray(res.rows)) ? res.rows : [];
             s.total = Number(res && res.total) || 0;
+            if (res && Array.isArray(res.all_tags)) { this._allTags = res.all_tags; this._fillTagOptions(document.getElementById('admin-users-tag')); }
             this._renderUsers(rows);
             const from = s.total === 0 ? 0 : s.page * s.limit + 1;
             const to = Math.min(s.total, (s.page + 1) * s.limit);
@@ -337,22 +373,33 @@ class AdminPage {
         }
     }
 
+    _fillTagOptions(sel) {
+        if (!sel) return;
+        const cur = this._users.tagId || '';
+        sel.innerHTML = '<option value="">Tous les segments</option>' +
+            this._allTags.map(t => `<option value="${AdminPage.esc(t.id)}">${AdminPage.esc(t.label)}</option>`).join('');
+        sel.value = cur;
+    }
+
     _renderUsers(rows) {
         const el = document.getElementById('admin-users');
         if (!el) return;
         if (!rows.length) { el.innerHTML = '<div class="ssub">Aucun utilisateur.</div>'; return; }
-        const head = `<tr><th>Email</th><th>Rôle</th><th class="num">Sources</th><th>Inscrit</th><th>Dernière activité</th><th>Email vérifié</th></tr>`;
+        const head = `<tr><th>Email</th><th>Rôle</th><th>Segments</th><th class="num">Sources</th><th>Inscrit</th><th>Dernière activité</th><th>Email vérifié</th></tr>`;
         const day = (d) => d ? new Date(d).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
         const body = rows.map(r => {
             const role = r.role === 'admin' ? '<span class="badge amber">admin</span>' : '<span class="badge gray">user</span>';
             const driver = r.is_driver ? ' <span class="badge blue" title="Compte pilote d\'enrichissement">pilote</span>' : '';
             const conf = r.email_confirmed ? '<span class="badge green">✓</span>' : '<span class="badge red">non</span>';
+            const tags = (Array.isArray(r.tags) ? r.tags : [])
+                .map(t => `<span class="badge ${AdminPage.tagColor(t.color)}">${AdminPage.esc(t.label)}</span>`).join(' ') || '<span class="ssub">—</span>';
             const last = r.last_sign_in_at
                 ? `<span title="${AdminPage.esc(new Date(r.last_sign_in_at).toLocaleString('fr-FR'))}">${AdminPage.esc(AdminPage.timeAgo(r.last_sign_in_at))}</span>`
                 : '<span class="badge gray">jamais</span>';
             return `<tr class="user-row" data-user-id="${AdminPage.esc(r.user_id)}" data-email="${AdminPage.esc(r.email || '')}" title="Voir la fiche">
                 <td>${AdminPage.esc(r.email || '—')}${driver}</td>
                 <td>${role}</td>
+                <td>${tags}</td>
                 <td class="num">${AdminPage.n(r.sources_count)}</td>
                 <td>${AdminPage.esc(day(r.created_at))}</td>
                 <td>${last}</td>
@@ -583,7 +630,10 @@ class AdminPage {
         const n = (x) => (x == null ? '—' : Number(x).toLocaleString('fr-FR'));
         el.innerHTML = [
             card(n(o.users_total), 'Users', o.users_active_7d ? 'ok' : ''),
+            card(n(o.users_active_24h), 'Actifs 24 h'),
             card(n(o.users_active_7d), 'Actifs 7 j'),
+            card(n(o.users_new_7d), 'Nouveaux 7 j', Number(o.users_new_7d) > 0 ? 'ok' : ''),
+            card(n(o.users_new_30d), 'Nouveaux 30 j'),
             card(n(o.sources_total), 'Sources'),
             card(n(o.sources_incomplete), 'Sync incomplète', Number(o.sources_incomplete) > 0 ? 'alert' : 'ok'),
             card(n(o.sources_error), 'Sources en erreur', Number(o.sources_error) > 0 ? 'alert' : 'ok'),
