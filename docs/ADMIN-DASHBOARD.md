@@ -125,8 +125,16 @@ portant ce tag ; `all_tags` alimente le sélecteur de filtre côté UI (colonne 
 
 **Scalable — O(taille de page)** :
 - `total` = un seul `count(*)` sur `auth.users` (+ filtre email éventuel).
-- `rows` = page LIMIT/OFFSET ; la seule agrégation par ligne (`sources_count`) est un lookup indexé sur
-  `cloud_sources(user_id)`, exécuté au plus `p_limit` (≤ 100) fois. **Jamais de full-scan.**
+- `rows` = page LIMIT/OFFSET ; les agrégations par ligne (`sources_count`, `tags`) sont des lookups
+  indexés (`cloud_sources(user_id)`, `admin_client_tags(user_id)`), exécutés au plus `p_limit` (≤ 100)
+  fois. **Jamais de full-scan.** La recherche accepte aussi un **UUID exact** (workflows support).
+- Chaque row porte `banned` → badge « suspendu » visible dès la liste.
+
+**Seuils de scale connus (documentés, pas bloquants au niveau « milliers d'users »)** :
+- Recherche email : `ilike '%…%'` sans index trigram → linéaire sur `auth.users`. OK jusqu'à ~100k
+  users ; au-delà, prévoir un profil public indexé pg_trgm (on n'indexe pas `auth.users`, schéma géré).
+- Pagination OFFSET : coût croissant en profondeur extrême ; au-delà de ~100k users, passer en keyset
+  (cursor `created_at,id`). Non nécessaire avant.
 
 **UI** (`_loadUsers` / `_renderUsers`) : recherche debounced 300 ms, select de tri, pagination
 ← Précédent / Suivant → avec « X–Y sur N ». Badge bleu **pilote** si compte d'enrichissement, badge
@@ -206,7 +214,10 @@ Fonction edge dédiée **`norva-admin`** (service-role, `verify_jwt=false`, mais
     n'expose QUE ce flag) ; `public/js/maintenance-banner.js` pose une bannière fixe en bas pour tous
     les visiteurs (re-check toutes les 60 s). `signups_open` reste un exemple non câblé.
 - **Journal d'audit** : `admin_audit_feed(p_limit, p_kind)` → derniers `admin_events` **globaux**
-  (toutes actions admin, jointe à l'email du client) → liste cliquable → fiche.
+  (toutes actions admin, jointe à l'email du client) → liste cliquable → fiche. Servi par l'index
+  global `idx_admin_events_created (created_at desc)`. **Rétention** : cron hebdo
+  `norva-admin-events-prune` (dim. 04:15 UTC) supprime les événements > 180 jours — la table reste
+  bornée à l'échelle (les événements sync sont déjà exactement-une-fois par source/kind).
 
 ### Hooks timeline (événements lifecycle réels)
 `enqueueImportNotification` (moteur de sync partagé) écrit désormais aussi un `admin_events`
