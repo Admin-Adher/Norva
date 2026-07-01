@@ -1,10 +1,11 @@
-# Norva — Dédup du moteur de sync Xtream (WIP) + post-mortem incident 503
+# Norva — Dédup du moteur de sync Xtream (✅ FAIT) + post-mortem incident 503
 
-> **État au 30/06** : **NON terminé.** La Couche 3 (orphelins) est live dans `norva-source-sync` mais
-> **dormante en pratique** parce que le moteur de sync est **dupliqué** et que le chemin d'ajout de
-> provider passe par la copie `norva-cloud` (ancien code). Le refactor de déduplication a été **commencé
-> puis annulé** suite à un incident (un déploiement Couche 3 a fait tomber `norva-source-sync` en 503).
-> Ce doc = état exact + plan de reprise + leçon de l'incident.
+> **✅ TERMINÉ (2026-06-30/07-01).** Le moteur a été **extrait dans `_shared/xtream-sync.ts`**
+> (`driveXtreamSyncToReady`, `freshSyncCursor`, `detectXtreamChange`) ; `norva-cloud` **et**
+> `norva-source-sync` l'importent → **une seule copie**. La **Couche 3 est active** (le chemin versionné se
+> propage) et les **hooks de notification + `recordProviderIdentity` vivent dans ce module partagé** (donc
+> une seule fois). L'incident 503 (doublon top-level `countSourceItems`) est corrigé + un sweep anti-doublon
+> a été ajouté au process. Le reste de ce doc = plan historique + leçon de l'incident.
 
 ---
 
