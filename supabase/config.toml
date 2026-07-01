@@ -42,3 +42,10 @@ verify_jwt = false
 # via norva_verify_cron_secret (same pattern as the source-sync crons).
 [functions.norva-import-notify]
 verify_jwt = false
+
+# Privileged admin actions on users (resend confirmation / change role / suspend).
+# The gateway JWT check is disabled so the OPTIONS preflight and the request reach
+# the function, which verifies the caller is an admin itself (getUser + app_metadata
+# .role === 'admin') before using the service role to act.
+[functions.norva-admin]
+verify_jwt = false

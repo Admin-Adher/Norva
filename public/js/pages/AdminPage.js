@@ -190,6 +190,14 @@ class AdminPage {
 #page-admin .alert-card .al-name{font-weight:600;color:var(--color-text-primary,#fff);}
 #page-admin .alert-card .al-owner{color:var(--color-text-secondary,#9aa);font-size:12px;}
 #page-admin .alert-card .al-err{color:#ff9b9b;font-size:11px;font-family:monospace;}
+#page-admin .act-row{display:flex;flex-wrap:wrap;gap:10px;}
+#page-admin .act-btn{background:var(--color-bg-primary,#0d0d0f);border:1px solid var(--color-border,#2a2a38);color:var(--color-text-primary,#fff);border-radius:8px;padding:9px 14px;cursor:pointer;font-size:13px;font-weight:600;}
+#page-admin .act-btn:hover{border-color:#5b7cfa;}
+#page-admin .act-btn:disabled{opacity:.5;cursor:default;}
+#page-admin .act-btn.act-danger{color:#ff6b6b;border-color:#e5091433;}
+#page-admin .act-btn.act-danger:hover{border-color:#e50914;background:#e5091412;}
+#page-admin .act-btn.act-unsuspend{color:#3ecf8e;border-color:#3ecf8e33;}
+#page-admin .act-btn.act-unsuspend:hover{border-color:#3ecf8e;background:#3ecf8e12;}
 @media(max-width:900px){
   #page-admin .crm-sidebar{width:60px;padding:14px 8px;}
   #page-admin .crm-nav-item .lb,#page-admin .crm-brand span:last-child,#page-admin .crm-side-foot{display:none;}
@@ -233,6 +241,8 @@ class AdminPage {
             if (e.target.closest('.crm-note-add')) { this._crmAddNote(); return; }
             const nDel = e.target.closest('.crm-note-del');
             if (nDel) { this._crmMutate('admin_note_delete', { p_note_id: nDel.dataset.noteId }); return; }
+            const actBtn = e.target.closest('.act-btn');
+            if (actBtn) { this._userAction(actBtn); return; }
         });
         this.built = true;
     }
@@ -483,6 +493,39 @@ class AdminPage {
         }
     }
 
+    // Privileged user actions → norva-admin edge (service-role, admin-JWT-gated).
+    async _userAction(btn) {
+        const uid = btn.dataset.userId;
+        if (!uid || btn.disabled) return;
+        let path, body = {};
+        if (btn.classList.contains('act-resend')) { path = `user/${uid}/resend-confirmation`; }
+        else if (btn.classList.contains('act-role')) {
+            const role = btn.dataset.role;
+            if (!window.confirm(`Changer le rôle de cet utilisateur en « ${role} » ?`)) return;
+            path = `user/${uid}/role`; body = { role };
+        } else if (btn.classList.contains('act-suspend')) {
+            const suspend = btn.dataset.suspend === 'true';
+            if (!window.confirm(suspend ? 'Suspendre ce compte ? Il ne pourra plus se connecter.' : 'Réactiver ce compte ?')) return;
+            path = `user/${uid}/suspend`; body = { suspend };
+        } else return;
+        const orig = btn.textContent;
+        btn.disabled = true; btn.textContent = '…';
+        try {
+            const res = await fetch(`${this._sbUrl()}/functions/v1/norva-admin/${path}`, {
+                method: 'POST',
+                headers: { apikey: this._sbKey(), Authorization: `Bearer ${this._token()}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.error || String(res.status));
+            if (data.message) window.alert(data.message);
+            this._navigate('client:' + uid);   // reload fiche to reflect the new state
+        } catch (e) {
+            btn.textContent = '✗ ' + AdminPage.esc(e.message);
+            setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 3000);
+        }
+    }
+
     async _crmMutate(fn, params) {
         try { await this._rpc(fn, params); await this._loadCrm(this._crmUser); }
         catch (e) { window.alert('Erreur : ' + e.message); }
@@ -516,7 +559,15 @@ class AdminPage {
         const role = u.role === 'admin' ? '<span class="badge amber">admin</span>' : '<span class="badge gray">user</span>';
         const driver = u.is_driver ? '<span class="badge blue">pilote</span>' : '';
         const conf = u.email_confirmed ? '<span class="badge green">email vérifié</span>' : '<span class="badge red">email non vérifié</span>';
+        const banned = u.banned ? '<span class="badge red">suspendu</span>' : '';
         const initial = (email[0] || '?').toUpperCase();
+        const uid = AdminPage.esc(u.user_id);
+        const roleTarget = u.role === 'admin' ? 'user' : 'admin';
+        const actions = `<div class="act-row">
+            ${!u.email_confirmed ? `<button class="act-btn act-resend" data-user-id="${uid}">✉️ Renvoyer la confirmation</button>` : ''}
+            <button class="act-btn act-role" data-user-id="${uid}" data-role="${roleTarget}">🔑 Passer ${roleTarget}</button>
+            <button class="act-btn ${u.banned ? 'act-unsuspend' : 'act-danger'} act-suspend" data-user-id="${uid}" data-suspend="${u.banned ? 'false' : 'true'}">${u.banned ? '✅ Réactiver' : '⛔ Suspendre'}</button>
+        </div>`;
 
         let srcHtml;
         if (!sources.length) srcHtml = '<div class="ssub">Aucune source.</div>';
@@ -560,12 +611,13 @@ class AdminPage {
             <div class="fiche-head">
               <div class="fiche-avatar">${AdminPage.esc(initial)}</div>
               <div><div class="fiche-title">${AdminPage.esc(email)}</div>
-              <div class="umeta">${role} ${driver} ${conf}
+              <div class="umeta">${role} ${driver} ${conf} ${banned}
                 <span>· inscrit ${AdminPage.esc(day(u.created_at))}</span>
                 <span>· dernière activité ${u.last_sign_in_at ? AdminPage.esc(AdminPage.timeAgo(u.last_sign_in_at)) : 'jamais'}</span>
                 ${u.auth_provider ? `<span>· via ${AdminPage.esc(u.auth_provider)}</span>` : ''}</div></div>
             </div>
             <div class="fiche-grid">
+              <div class="admin-block"><h2>⚡ Actions</h2><div class="card">${actions}</div></div>
               <div class="admin-block"><h2>📡 Sources (${sources.length})</h2><div class="scroll">${srcHtml}</div></div>
               <div class="admin-block"><h2>⚙️ Enrichissement audio par panel</h2><div class="scroll">${enrHtml}</div></div>
               <div class="admin-block"><h2>🏷️ Tags & segments</h2><div id="fiche-tags" class="card"><div class="ssub">Chargement…</div></div></div>
