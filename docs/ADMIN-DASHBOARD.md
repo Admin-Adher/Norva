@@ -188,10 +188,20 @@ Fonction edge dédiée **`norva-admin`** (service-role, `verify_jwt=false`, mais
 **Anti auto-verrouillage** : `norva-admin` refuse à un admin de **se rétrograder** (`role→user`) ou de
 **se suspendre** lui-même (`userId === actorId`) — évite de se verrouiller hors du panneau.
 
-### 🛡️ Page Système — journal d'audit + santé
-`admin_audit_feed(p_limit, p_kind)` → derniers `admin_events` **globaux** (toutes actions admin,
-jointe à l'email du client) → liste cliquable → fiche. Plus un bandeau santé dérivé de `admin_overview`
-(fraîcheur du snapshot, crons actifs/pause/échecs, sources en erreur, ST IA en cours/échoués).
+### 🛡️ Page Système — santé, infra, flags, audit
+- **Snapshot** : bandeau santé dérivé de `admin_overview` (fraîcheur du snapshot, crons
+  actifs/pause/échecs, sources en erreur, ST IA en cours/échoués).
+- **Infra temps réel** : `POST norva-admin/health` (admin-gated) ping **côté serveur** gateway + relay
+  (URLs = secrets, résolues via env → `cloud_runtime_config`) + un `select` DB. Réponse HTTP = « up »
+  + latence ms ; timeout/erreur = « down ». L'edge est « up » implicitement (la fonction répond).
+  Bouton ↻ pour re-ping. Rien n'est exposé au navigateur — seul le statut/latence remonte.
+- **Feature flags** : `admin_feature_flags` (key/enabled/description) + RPCs `admin_flags_list` /
+  `admin_flag_set` / `admin_flag_create` / `admin_flag_delete` (is_admin gated). Switches on/off,
+  création, suppression. **Surface de gestion** : un flag stocke son état ; son EFFET vient quand un
+  consommateur le lit. Reader SQL `public.feature_flag(key)` (défaut false) pour le câblage par flag.
+  Seed : `enrichment_paused`, `signups_open`, `maintenance_banner` (inertes tant que non câblés).
+- **Journal d'audit** : `admin_audit_feed(p_limit, p_kind)` → derniers `admin_events` **globaux**
+  (toutes actions admin, jointe à l'email du client) → liste cliquable → fiche.
 
 ### Hooks timeline (événements lifecycle réels)
 `enqueueImportNotification` (moteur de sync partagé) écrit désormais aussi un `admin_events`
