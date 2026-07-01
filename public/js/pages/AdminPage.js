@@ -332,8 +332,8 @@ class AdminPage {
         if (!problems.length) { el.innerHTML = '<div class="card"><span class="badge green">✓</span> Aucune alerte — tout est sain.</div>'; return; }
         el.innerHTML = problems.map(s => {
             const kind = s.incomplete === true ? 'sync incomplète' : (s.sync_status || 'erreur');
-            const uid = s.user_id ? ` alert-card" data-user-id="${AdminPage.esc(s.user_id)}` : '"';
-            return `<div class="alert-card${uid}" title="${s.user_id ? 'Ouvrir la fiche client' : ''}">
+            const uidAttr = s.user_id ? ` data-user-id="${AdminPage.esc(s.user_id)}" title="Ouvrir la fiche client"` : '';
+            return `<div class="alert-card"${uidAttr}>
                 <span class="badge red">${AdminPage.esc(kind)}</span>
                 <span class="al-name">${AdminPage.esc(s.display_name)}</span>
                 <span class="al-owner">${AdminPage.esc(s.owner_email || '')}</span>
@@ -350,7 +350,7 @@ class AdminPage {
             <h1 class="crm-h1">👥 Clients</h1>
             <p class="crm-sub">Liste paginée — recherche, tri, clic pour la fiche 360°. Agrégation bornée par page (scalable).</p>
             <div class="users-controls">
-              <input id="admin-users-search" type="search" placeholder="Rechercher un email…" autocomplete="off" value="${AdminPage.esc(this._users.search)}" />
+              <input id="admin-users-search" type="search" placeholder="Rechercher un email ou un ID…" autocomplete="off" value="${AdminPage.esc(this._users.search)}" />
               <select id="admin-users-sort">
                 <option value="created_desc">Plus récents</option>
                 <option value="created_asc">Plus anciens</option>
@@ -438,6 +438,7 @@ class AdminPage {
         const body = rows.map(r => {
             const role = r.role === 'admin' ? '<span class="badge amber">admin</span>' : '<span class="badge gray">user</span>';
             const driver = r.is_driver ? ' <span class="badge blue" title="Compte pilote d\'enrichissement">pilote</span>' : '';
+            const banned = r.banned ? ' <span class="badge red" title="Compte suspendu">suspendu</span>' : '';
             const conf = r.email_confirmed ? '<span class="badge green">✓</span>' : '<span class="badge red">non</span>';
             const tags = (Array.isArray(r.tags) ? r.tags : [])
                 .map(t => `<span class="badge ${AdminPage.tagColor(t.color)}">${AdminPage.esc(t.label)}</span>`).join(' ') || '<span class="ssub">—</span>';
@@ -445,7 +446,7 @@ class AdminPage {
                 ? `<span title="${AdminPage.esc(new Date(r.last_sign_in_at).toLocaleString('fr-FR'))}">${AdminPage.esc(AdminPage.timeAgo(r.last_sign_in_at))}</span>`
                 : '<span class="badge gray">jamais</span>';
             return `<tr class="user-row" data-user-id="${AdminPage.esc(r.user_id)}" data-email="${AdminPage.esc(r.email || '')}" title="Voir la fiche">
-                <td>${AdminPage.esc(r.email || '—')}${driver}</td>
+                <td>${AdminPage.esc(r.email || '—')}${driver}${banned}</td>
                 <td>${role}</td>
                 <td>${tags}</td>
                 <td class="num">${AdminPage.n(r.sources_count)}</td>
@@ -695,8 +696,11 @@ class AdminPage {
             this._renderEnrich(Array.isArray(enrich) ? enrich : []);
             this._renderCron(Array.isArray(cron) ? cron : []);
         } catch (e) {
-            const el = document.getElementById('admin-enrich');
-            if (el) el.innerHTML = `<div class="admin-err">Erreur : ${AdminPage.esc(e.message)}</div>`;
+            const msg = `<div class="admin-err">Erreur : ${AdminPage.esc(e.message)}</div>`;
+            const en = document.getElementById('admin-enrich');
+            const cr = document.getElementById('admin-cron');
+            if (en) en.innerHTML = msg;
+            if (cr) cr.innerHTML = msg;   // both sections share the fetch — show the failure in both
         }
     }
 
