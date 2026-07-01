@@ -2724,6 +2724,14 @@ async function runAudioBackfill(req: Request, db: SupabaseClient) {
   if (!expected || provided !== expected) throw new HttpError(401, "Unauthorized");
   const body = recordOrEmpty(await req.json().catch(() => ({})));
 
+  // Global kill switch (admin feature flag): when enrichment_paused is ON, skip all backfill work so
+  // NO provider connection is opened this tick — an ops pause (incident, provider protection). One
+  // cheap flag read; FAIL-OPEN (a transient read error keeps enriching rather than silently halting).
+  try {
+    const { data: paused } = await db.rpc("feature_flag", { p_key: "enrichment_paused" });
+    if (paused === true) return { paused: true, skipped: "enrichment_paused" };
+  } catch (_) { /* fail-open: keep enriching if the flag can't be read */ }
+
   // One dimension per call by default. With fallthrough:true (set on the DAYTIME audio-films
   // crons), once the primary dimension runs out of candidates we DRAIN the next unfinished
   // dimension for the same provider — so a finished daytime window accelerates the night-only
