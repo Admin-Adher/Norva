@@ -12,6 +12,9 @@ class AdminPage {
         this.app = app;
         this.built = false;
         this._isAdmin = null; // cached tri-state (null = unknown)
+        // Users section is LIVE/paginated (not part of the cached snapshot). Its own state.
+        this._users = { page: 0, limit: 25, search: '', sort: 'created_desc', total: 0 };
+        this._usersDebounce = null;
     }
 
     // ── direct PostgREST RPC client (mirrors authApi.js config resolution) ──
@@ -108,6 +111,13 @@ class AdminPage {
 #page-admin .bar>i{display:block;height:100%;background:#3ecf8e;}
 #page-admin .admin-err{color:#ff6b6b;padding:10px;}
 #page-admin .scroll{overflow-x:auto;}
+#page-admin .users-controls{display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap;}
+#page-admin .users-controls input,#page-admin .users-controls select{background:var(--color-bg-secondary,#181818);border:1px solid var(--color-border,#2a2a2a);color:var(--color-text-primary,#fff);border-radius:8px;padding:7px 11px;font-size:13px;}
+#page-admin .users-controls input{min-width:240px;flex:1;max-width:360px;}
+#page-admin .users-pager{display:flex;align-items:center;gap:14px;margin-top:12px;}
+#page-admin .users-pager button{background:var(--color-bg-secondary,#181818);color:var(--color-text-primary,#fff);border:1px solid var(--color-border,#2a2a2a);border-radius:8px;padding:6px 12px;cursor:pointer;font-size:13px;}
+#page-admin .users-pager button:disabled{opacity:.4;cursor:default;}
+#page-admin .users-pager span{color:var(--color-text-secondary,#9aa);font-size:13px;font-variant-numeric:tabular-nums;}
 </style>
 <div class="admin-wrap">
   <div class="admin-head">
@@ -116,6 +126,25 @@ class AdminPage {
     <span id="admin-ts"></span>
   </div>
   <section id="admin-overview" class="admin-cards"></section>
+  <section class="admin-block">
+    <h2>👥 Utilisateurs</h2>
+    <div class="ssub">Liste paginée — recherche par email, tri. Agrégation bornée par page (scalable à des milliers d'users).</div>
+    <div class="users-controls">
+      <input id="admin-users-search" type="search" placeholder="Rechercher un email…" autocomplete="off" />
+      <select id="admin-users-sort">
+        <option value="created_desc">Plus récents</option>
+        <option value="created_asc">Plus anciens</option>
+        <option value="active_desc">Dernière activité</option>
+        <option value="email_asc">Email A→Z</option>
+      </select>
+    </div>
+    <div class="scroll"><div id="admin-users"></div></div>
+    <div class="users-pager">
+      <button id="admin-users-prev">← Précédent</button>
+      <span id="admin-users-range"></span>
+      <button id="admin-users-next">Suivant →</button>
+    </div>
+  </section>
   <section class="admin-block"><h2>📡 Providers / Sources</h2><div class="ssub">Panels pilotes + sources en problème (sync incomplète / erreur) — borné à l'échelle</div><div class="scroll"><div id="admin-sources"></div></div></section>
   <section class="admin-block"><h2>⚙️ Enrichissement par panel</h2><div class="ssub">Comptes pilotes d'enrichissement uniquement (les autres users héritent via le cache cross-user)</div><div class="scroll"><div id="admin-enrich"></div></div></section>
   <section class="admin-block"><h2>⏱️ Crons</h2><div class="scroll"><div id="admin-cron"></div></div></section>
@@ -127,10 +156,34 @@ class AdminPage {
             const b = e.target.closest('.resync-btn');
             if (b) { e.preventDefault(); this._resync(b); }
         });
+        // Users section controls (static elements, built once).
+        const usearch = root.querySelector('#admin-users-search');
+        if (usearch) usearch.addEventListener('input', () => {
+            clearTimeout(this._usersDebounce);
+            this._usersDebounce = setTimeout(() => {
+                this._users.search = usearch.value.trim();
+                this._users.page = 0;
+                this._loadUsers();
+            }, 300);
+        });
+        const usort = root.querySelector('#admin-users-sort');
+        if (usort) usort.addEventListener('change', () => {
+            this._users.sort = usort.value; this._users.page = 0; this._loadUsers();
+        });
+        const uprev = root.querySelector('#admin-users-prev');
+        if (uprev) uprev.addEventListener('click', () => {
+            if (this._users.page > 0) { this._users.page -= 1; this._loadUsers(); }
+        });
+        const unext = root.querySelector('#admin-users-next');
+        if (unext) unext.addEventListener('click', () => {
+            const s = this._users;
+            if ((s.page + 1) * s.limit < s.total) { s.page += 1; this._loadUsers(); }
+        });
         this.built = true;
     }
 
     async refresh() {
+        this._loadUsers();   // live/paginated — independent of the cached snapshot below
         const ts = document.getElementById('admin-ts');
         if (ts) ts.textContent = 'chargement…';
         try {
@@ -152,6 +205,61 @@ class AdminPage {
             const ov = document.getElementById('admin-overview');
             if (ov) ov.innerHTML = `<div class="admin-err">Erreur de chargement : ${AdminPage.esc(e.message)}</div>`;
         }
+    }
+
+    // ── Users (live paginated) ──
+    async _loadUsers() {
+        const el = document.getElementById('admin-users');
+        const range = document.getElementById('admin-users-range');
+        if (!el) return;
+        const s = this._users;
+        if (range) range.textContent = '…';
+        try {
+            const res = await this._rpc('admin_users_page', {
+                p_limit: s.limit,
+                p_offset: s.page * s.limit,
+                p_search: s.search || null,
+                p_sort: s.sort
+            });
+            const rows = (res && Array.isArray(res.rows)) ? res.rows : [];
+            s.total = Number(res && res.total) || 0;
+            this._renderUsers(rows);
+            const from = s.total === 0 ? 0 : s.page * s.limit + 1;
+            const to = Math.min(s.total, (s.page + 1) * s.limit);
+            if (range) range.textContent = `${AdminPage.n(from)}–${AdminPage.n(to)} sur ${AdminPage.n(s.total)}`;
+            const prev = document.getElementById('admin-users-prev');
+            const next = document.getElementById('admin-users-next');
+            if (prev) prev.disabled = s.page <= 0;
+            if (next) next.disabled = to >= s.total;
+        } catch (e) {
+            if (range) range.textContent = '';
+            el.innerHTML = `<div class="admin-err">Erreur : ${AdminPage.esc(e.message)}</div>`;
+        }
+    }
+
+    _renderUsers(rows) {
+        const el = document.getElementById('admin-users');
+        if (!el) return;
+        if (!rows.length) { el.innerHTML = '<div class="ssub">Aucun utilisateur.</div>'; return; }
+        const head = `<tr><th>Email</th><th>Rôle</th><th class="num">Sources</th><th>Inscrit</th><th>Dernière activité</th><th>Email vérifié</th></tr>`;
+        const day = (d) => d ? new Date(d).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+        const body = rows.map(r => {
+            const role = r.role === 'admin' ? '<span class="badge amber">admin</span>' : '<span class="badge gray">user</span>';
+            const driver = r.is_driver ? ' <span class="badge blue" title="Compte pilote d\'enrichissement">pilote</span>' : '';
+            const conf = r.email_confirmed ? '<span class="badge green">✓</span>' : '<span class="badge red">non</span>';
+            const last = r.last_sign_in_at
+                ? `<span title="${AdminPage.esc(new Date(r.last_sign_in_at).toLocaleString('fr-FR'))}">${AdminPage.esc(AdminPage.timeAgo(r.last_sign_in_at))}</span>`
+                : '<span class="badge gray">jamais</span>';
+            return `<tr>
+                <td>${AdminPage.esc(r.email || '—')}${driver}</td>
+                <td>${role}</td>
+                <td class="num">${AdminPage.n(r.sources_count)}</td>
+                <td>${AdminPage.esc(day(r.created_at))}</td>
+                <td>${last}</td>
+                <td>${conf}</td>
+            </tr>`;
+        }).join('');
+        el.innerHTML = `<table><thead>${head}</thead><tbody>${body}</tbody></table>`;
     }
 
     // ── renderers ──
@@ -301,6 +409,18 @@ class AdminPage {
     }
 
     static n(x) { return x == null ? '—' : Number(x).toLocaleString('fr-FR'); }
+    // Concise French relative time ("il y a 3 j", "il y a 2 h"). Absolute value kept as tooltip.
+    static timeAgo(d) {
+        const t = new Date(d).getTime();
+        if (!Number.isFinite(t)) return '—';
+        const s = Math.max(0, Math.round((Date.now() - t) / 1000));
+        if (s < 60) return "à l'instant";
+        const m = Math.round(s / 60); if (m < 60) return `il y a ${m} min`;
+        const h = Math.round(m / 60); if (h < 24) return `il y a ${h} h`;
+        const j = Math.round(h / 24); if (j < 31) return `il y a ${j} j`;
+        const mo = Math.round(j / 30); if (mo < 12) return `il y a ${mo} mois`;
+        return `il y a ${Math.round(mo / 12)} an${mo >= 24 ? 's' : ''}`;
+    }
     // cron expression → concise French label (raw kept as tooltip). Falls back to raw on anything odd.
     static cronHuman(expr) {
         const p = String(expr || '').trim().split(/\s+/);
