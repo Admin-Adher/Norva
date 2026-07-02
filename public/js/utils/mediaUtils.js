@@ -368,6 +368,32 @@ const MediaUtils = (() => {
         return `${slug}|${y || ''}`;
     }
 
+    // Human display form of a provider/scene release name:
+    //   "[ Torrent911.me ] Guardians.Of.The.Galaxy.Vol.3.2023.Vostfr.Hdrip.X264"
+    //   → "Guardians Of The Galaxy Vol 3 2023"
+    // DISPLAY ONLY (unlike normalizeTitle, case is preserved and nothing is deduped).
+    // Conservative on purpose: strips leading bracketed release-site ads, de-dots only
+    // clearly dot-separated scene names, cuts at unambiguous rip/codec tokens, then pops
+    // trailing language/version markers. Falls back to the input when cleaning would
+    // empty the name (e.g. the film "[REC]").
+    const HARD_RELEASE_TOKENS = /^(webrip|web-?dl|hdrip|brrip|bdrip|dvdrip|hdtv|hdlight|hdcam|camrip|hdts|blu-?ray|x264|x265|h264|h265|hevc|avc|aac|ac3|eac3|dts|10bit|8bit|2160p|1080p|720p|480p|4klight)$/i;
+    const SOFT_RELEASE_TOKENS = /^(french|truefrench|vostfr|vost|vff|vfq|vf|vo|multi|subfrench|final|proper|repack|internal|extended|unrated|custom)$/i;
+    function cleanReleaseName(value) {
+        const raw = String(value || '').trim();
+        if (!raw) return raw;
+        let text = raw.replace(/^\s*(?:[\[(][^\])]{0,60}[\])]\s*)+/, '').trim();
+        if (!/\s/.test(text) && /^\S+(?:\.\S+){3,}$/.test(text)) text = text.replace(/\./g, ' ');
+        const tokens = text.split(/\s+/).filter(Boolean);
+        let cut = tokens.length;
+        for (let i = 1; i < tokens.length; i++) {   // never cut the leading token
+            if (HARD_RELEASE_TOKENS.test(tokens[i])) { cut = i; break; }
+        }
+        const kept = tokens.slice(0, cut);
+        while (kept.length > 1 && SOFT_RELEASE_TOKENS.test(kept[kept.length - 1])) kept.pop();
+        const out = kept.join(' ').replace(/[\s\-–—:|.]+$/g, '').trim();
+        return out || raw;
+    }
+
     function parseVersionInfo(name) {
         const raw = String(name || '');
         let quality = null, qualityScore = 0;
@@ -1135,7 +1161,7 @@ const MediaUtils = (() => {
 
     return {
         skeletonCards,
-        stripDiacritics, extractYear, normalizeTitle, computeDedupKey,
+        stripDiacritics, extractYear, normalizeTitle, computeDedupKey, cleanReleaseName,
         parseVersionInfo, deriveTrackIntel, scanLanguageMarkers, parseLeadingRegionTag, searchableText, groupItems, pickRepresentative,
         normalizeLanguagePreference, normalizeContentPreferences, migrateLegacyLanguagePreference,
         normalizeGenrePreference, normalizeGenrePreferences, scoreGenrePreferences,

@@ -2210,6 +2210,78 @@ async function detectUntaggedAudioLanguages(opts: {
   try { await shareFileTracks(db, serverHost, itemType, fileExternalId, enriched, [], true, false); } catch (_) { /* best-effort */ }
 }
 
+// Verify TAGGED-but-contradictory tracks (mistagged containers — "German" on a French film).
+// Providers mux scene releases with wrong container language tags; the probe stores tags as-is
+// and whisper LID only ever ran on UNTAGGED tracks, so a wrong tag was permanent and
+// user-visible (player audio menu prefers cloud audio_tracks; language filters use
+// audio_languages). This listens to the ACTUAL speech via the gateway's whisper.cpp and
+// rewrites the track lang when the verdict is confident (≥4 clear words).
+// Returns "corrected" | "confirmed" | "unclear" — or null on a TRANSIENT failure (byte-pipe
+// down, every clip 503/timeout), which must NOT mark the title verified (retry next tick).
+// "unclear" (silence/music at the sampled offsets) IS marked — re-listening soon won't do
+// better, and unmarked rows would clog the cursor-less verify queue head forever.
+async function verifyTaggedAudioLanguages(opts: {
+  db: SupabaseClient;
+  runtimeConfig: RuntimeConfig;
+  userId: string;
+  targetUrl: string;
+  audioTracks: Array<{ index: number; lang: string | null }>;
+  suspectLangs: string[];
+  titleId: string;
+  tmdbId: string | null;
+  serverHost: string;
+  itemType: string;
+  fileExternalId: string;
+  expiresAt: string;
+}): Promise<"corrected" | "confirmed" | "unclear" | null> {
+  const { db, runtimeConfig, userId, targetUrl, audioTracks, suspectLangs, titleId, tmdbId, serverHost, itemType, fileExternalId, expiresAt } = opts;
+  if (!runtimeConfig.mediaGatewayUrl || !runtimeConfig.mediaGatewayToken) return null;
+  const nowIso = new Date().toISOString();
+  const markVerified = async (extra: JsonRecord = {}) => {
+    try {
+      await db.from("cloud_titles").update({ audio_lang_verified_at: nowIso, ...extra })
+        .eq("user_id", userId).eq("id", titleId);
+    } catch (_) { /* best-effort marker */ }
+  };
+  const suspects = audioTracks.filter((t) => t.lang && suspectLangs.includes(t.lang) && Number.isInteger(t.index)).slice(0, 2);
+  if (!suspects.length) { await markVerified(); return "confirmed"; } // summary/map disagree — nothing to listen to
+  let detectBase: string;
+  try {
+    const pipe = await createBytePipeAccess("whisper-verify", userId, targetUrl, expiresAt, db, null);
+    detectBase = pipe.url.replace("/raw/", "/detect-language/");
+  } catch (_) { return null; }
+
+  let changed = false, confirmedTracks = 0, silent = 0, transient = 0;
+  for (const t of suspects) {
+    try {
+      const res = await fetch(`${detectBase}?index=${t.index}&dur=20`, { signal: AbortSignal.timeout(90_000) });
+      if (!res.ok) { transient++; continue; } // incl. the gateway's 503 account-slot-busy
+      const det = await res.json().catch(() => null) as JsonRecord | null;
+      const lang = normalizeIsoLang(stringOrNull(det?.language));
+      const words = Number(det?.wordCount ?? 0);
+      if (!lang || words < 4) { silent++; continue; }   // no clear speech at the sampled offsets
+      if (lang === t.lang) { confirmedTracks++; continue; } // the tag was right after all
+      t.lang = lang; changed = true;                    // the spoken language wins
+    } catch (_) { transient++; }
+  }
+
+  if (changed) {
+    const enriched = audioTracks.map((t) => ({ index: t.index, lang: t.lang ?? null }));
+    const codes = [...new Set(enriched.map((t) => t.lang).filter((l): l is string => Boolean(l)))].sort();
+    await markVerified({ audio_tracks: enriched, audio_languages: codes });
+    // NOTE: the global mirror is a race-safe UNION — it gains the corrected lang but cannot
+    // unlearn the wrong one (union semantics protect other panels' genuinely-foreign files).
+    if (codes.length && tmdbId && !/^(tt)?0+$/i.test(tmdbId)) {
+      try { await db.rpc("merge_catalog_title_audio", { p_item_type: itemType, p_provider_tmdb_id: tmdbId, p_codes: codes }); } catch (_) { /* best-effort */ }
+    }
+    try { await shareFileTracks(db, serverHost, itemType, fileExternalId, enriched, [], true, false); } catch (_) { /* best-effort */ }
+    return "corrected";
+  }
+  if (!confirmedTracks && !silent) return null;          // pure transport failure → retry next tick
+  await markVerified();
+  return confirmedTracks && !silent ? "confirmed" : "unclear";
+}
+
 // Map an engine playback (source + item) to its cloud_titles row, so a probed audio
 // map can be reused (skip the relay probe) and persisted (grid + next play instant).
 // Movies map by the variant's external_id (= the played stream id). A series episode's
@@ -3214,6 +3286,71 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
       return { mode: "whisper", skipped: "pregen-active", processed: 0, candidates: 0, detected: 0 };
     }
     await bumpEnrichmentHeartbeat(db, userId);
+
+    // ── Phase VERIFY (fix "German tag on a French film") ────────────────────────────────
+    // Titles carrying an explicit French marker whose probed languages hold NO fr: the
+    // container tag contradicts the packaging — whisper listens to the actual speech and
+    // corrects the catalog (which also fixes the player's audio menu: it prefers cloud
+    // audio_tracks over container tags). Bounded (≤ verifyLimit titles/tick, ≤ 2 suspect
+    // tracks each, sequential) and runs BEFORE the untagged phase: these are live,
+    // user-visible wrong labels, not just missing ones. 429 mismatches counted live on
+    // 2026-07-02 (360 with a track map). 90d re-verify window; best-effort throughout.
+    const FRENCH_MARKER_PATTERN = "(^(fr|vf|vff|truefrench)[ \\-▎|])|\\((fr|vf)\\)|french";
+    const verifyLimit = Math.max(0, Math.min(Number(body.verifyLimit ?? Math.ceil(limit / 2)), 6));
+    let verified = 0, corrected = 0;
+    if (verifyLimit > 0) {
+      try {
+        const verifyRetryBefore = new Date(Date.now() - 90 * 24 * 3600 * 1000).toISOString();
+        // Per-panel crons (sourceId set) filter AFTER resolving variants → over-fetch.
+        const overFetch = sourceId ? verifyLimit * 5 : verifyLimit;
+        const { data: srows } = await db.from("cloud_titles")
+          .select("id, default_variant_id, provider_tmdb_id, audio_tracks, audio_languages")
+          .eq("user_id", userId).eq("item_type", itemType)
+          .gt("variant_count", 0)
+          .not("audio_probed_at", "is", null)
+          .not("audio_tracks", "is", null)
+          .neq("audio_languages", "{}")
+          .not("audio_languages", "cs", "{fr}")
+          .filter("title", "imatch", FRENCH_MARKER_PATTERN)
+          .or(`audio_lang_verified_at.is.null,audio_lang_verified_at.lt.${verifyRetryBefore}`)
+          .order("id", { ascending: true }).limit(overFetch);
+        const suspectsAll = (srows ?? []) as JsonRecord[];
+        const svIds = suspectsAll.map((t) => stringOrNull(t.default_variant_id)).filter(Boolean) as string[];
+        const svById = new Map<string, JsonRecord>();
+        if (svIds.length) {
+          const { data: vs } = await db.from("cloud_title_variants").select("id, source_id, external_id, item_type").in("id", svIds);
+          for (const v of vs ?? []) svById.set(String(v.id), v as JsonRecord);
+        }
+        const vExp = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+        for (const t of suspectsAll) {
+          if (verified >= verifyLimit) break;
+          const variant = t.default_variant_id ? svById.get(String(t.default_variant_id)) : null;
+          if (!variant) continue;
+          const vSourceId = stringOr(variant.source_id, "");
+          if (sourceId && vSourceId !== sourceId) continue; // per-panel cron: stay on this host
+          const externalId = stringOr(variant.external_id, "");
+          const vit = stringOr(variant.item_type, itemType);
+          if (!vSourceId || !externalId) continue;
+          const targetUrl = vit === "series"
+            ? await resolveSeriesEpisodeUrl(vSourceId, externalId, userId, db).catch(() => null)
+            : ((await resolvePlaybackTarget(vSourceId, vit, externalId, userId, db).catch(() => null))?.targetUrl ?? null);
+          if (!targetUrl) continue;
+          const tracks = ((t.audio_tracks as JsonRecord[]) || [])
+            .map((x) => ({ index: Number(x?.index), lang: stringOrNull(x?.lang) }))
+            .filter((x) => Number.isInteger(x.index));
+          const outcome = await verifyTaggedAudioLanguages({
+            db, runtimeConfig, userId, targetUrl, audioTracks: tracks,
+            suspectLangs: [...new Set(tracks.map((x) => x.lang).filter((l): l is string => Boolean(l) && l !== "fr"))],
+            titleId: String(t.id), tmdbId: stringOrNull(t.provider_tmdb_id),
+            serverHost: await resolveFileTracksKey(vSourceId, userId, db, targetUrl),
+            itemType: vit, fileExternalId: externalId, expiresAt: vExp,
+          });
+          if (outcome) verified += 1;
+          if (outcome === "corrected") corrected += 1;
+        }
+      } catch (_) { /* verify phase is best-effort — never blocks the untagged phase */ }
+    }
+
     const wConcurrency = Math.max(1, Math.min(Number(body.concurrency) || 1, 4));
     // Select REAL candidates DB-side via RPC (raw jsonb @>): titles whose audio_tracks still hold
     // an untagged (lang null) track, skipping those attempted within the retry window so the queue
@@ -3227,7 +3364,7 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
       p_source: sourceId || null,   // per-panel scope: keep whisper's provider hit on this source's host only
     });
     if (wErr) throwDb(wErr, "Unable to list titles for whisper backfill");
-    if (!wrows || !wrows.length) return { mode: "whisper", processed: 0, candidates: 0, detected: 0, lastId: afterId, hasMore: false };
+    if (!wrows || !wrows.length) return { mode: "whisper", processed: verified, verified, corrected, candidates: 0, detected: 0, lastId: afterId, hasMore: false };
     const wLastId = String(wrows[wrows.length - 1].id);
 
     const candidates = wrows.filter((t) => {
@@ -3277,7 +3414,7 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
     for (let i = 0; i < candidates.length; i += wConcurrency) {
       await Promise.all(candidates.slice(i, i + wConcurrency).map(runOne));
     }
-    return { mode: "whisper", processed: wrows.length, candidates: candidates.length, detected, lastId: wLastId, hasMore: wrows.length === limit };
+    return { mode: "whisper", processed: wrows.length + verified, verified, corrected, candidates: candidates.length, detected, lastId: wLastId, hasMore: wrows.length === limit };
   }
 
   // Autonomous provider probe (audio-langs / subtitle backfill via the relay). Defer while the user

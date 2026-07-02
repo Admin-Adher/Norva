@@ -1475,6 +1475,9 @@ class SeriesPage {
         let title = String(ep?.title || ep?.name || '').trim();
         const episodeNum = ep?.episode_num || ep?.episodeNumber || '';
         if (!title) return `Episode ${episodeNum || ''}`.trim();
+        // Scene-release episode names ("[ Torrent911.my ] Station.19.S07E08.FRENCH.WEBRip.x264")
+        // come straight from the panel's series-info payload — display-clean them first.
+        title = MediaUtils.cleanReleaseName(title) || title;
 
         const seriesNames = [
             this.getSeriesDisplayTitle(),
