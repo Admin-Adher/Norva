@@ -295,6 +295,9 @@ class WatchPage {
         this.progressSlider?.addEventListener('input', (e) => this.previewSeek(e.target.value));
         this.progressSlider?.addEventListener('change', (e) => this.commitSeek(e.target.value));
         this.progressSlider?.addEventListener('pointerup', (e) => this.commitSeek(e.target.value));
+        // Seek thumbnails: storyboard preview above the timeline while hovering/scrubbing.
+        this.progressSlider?.addEventListener('pointermove', (e) => this.updateSeekThumb(e));
+        this.progressSlider?.addEventListener('pointerleave', () => this.hideSeekThumb());
 
         // Video events
         this.video?.addEventListener('timeupdate', () => {
@@ -1345,6 +1348,8 @@ class WatchPage {
         this.nextEpisodeDismissed = false;
         this.resetSkipIntroState();
         this.loadIntroMarkers();
+        this.resetStoryboard();
+        this.loadStoryboard();
 
         // Paint the player shell (poster + title + loading animation) FIRST so the
         // player appears instantly on click — before stopping the previous stream
@@ -1639,6 +1644,95 @@ class WatchPage {
             this.resumeTime = absolute;
             this.retryPlaybackInPlace(absolute);
         }
+    }
+
+    // ==================== Seek thumbnails (storyboard) ====================
+    // A single sprite JPEG (grid-regular tiles) generated server-side per title,
+    // cross-user cached. First playback enqueues it (the job is deferred while
+    // this account watches — one provider connection); later plays get hover
+    // previews on the timeline like Netflix.
+
+    resetStoryboard() {
+        this._storyboard = null;
+        this._storyboardImage = null;
+        this._storyboardFetched = false;
+        this.hideSeekThumb();
+    }
+
+    async loadStoryboard() {
+        if (this.contentType !== 'movie' && this.contentType !== 'series') return;
+        if (this._storyboardFetched || !this.content?.sourceId || !this.content?.id) return;
+        this._storyboardFetched = true;
+        try {
+            const res = await window.NorvaCloud?.playback?.storyboard?.({
+                sourceId: this.content.sourceId,
+                externalId: this.content.id,
+                itemType: this.content.type === 'series' ? 'series' : 'movie',
+                enqueue: 1,
+                duration: Math.round(this.durationHint || 0)
+            });
+            if (res?.status === 'ready' && res.spriteUrl && Number(res.intervalSec) > 0) {
+                const img = new Image();
+                img.onload = () => {
+                    this._storyboard = res;
+                    this._storyboardImage = img;
+                };
+                img.src = res.spriteUrl;
+            }
+        } catch (_) { /* thumbnails are progressive enhancement */ }
+    }
+
+    ensureSeekThumb() {
+        let thumb = document.getElementById('watch-seek-thumb');
+        if (!thumb) {
+            thumb = document.createElement('div');
+            thumb.id = 'watch-seek-thumb';
+            thumb.className = 'watch-seek-thumb hidden';
+            thumb.innerHTML = '<div class="watch-seek-thumb-img"></div><div class="watch-seek-thumb-time"></div>';
+            this.progressContainer?.appendChild(thumb);
+        }
+        return thumb;
+    }
+
+    updateSeekThumb(event) {
+        const sb = this._storyboard;
+        const img = this._storyboardImage;
+        if (!sb || !img || !this.progressSlider) return;
+        const duration = this.getDisplayDuration();
+        if (!duration) return;
+        const rect = this.progressSlider.getBoundingClientRect();
+        if (!rect.width) return;
+        const ratio = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
+        const time = ratio * duration;
+        const cols = Math.max(1, Number(sb.cols) || 10);
+        const rows = Math.max(1, Number(sb.rows) || 1);
+        const count = Math.max(1, Number(sb.count) || cols * rows);
+        const tile = Math.min(count - 1, Math.max(0, Math.floor(time / sb.intervalSec)));
+        const tileW = img.naturalWidth / cols;
+        const tileH = img.naturalHeight / rows;
+        if (!tileW || !tileH) return;
+
+        const thumb = this.ensureSeekThumb();
+        const displayW = 212;
+        const scale = displayW / tileW;
+        thumb.style.width = `${displayW}px`;
+        thumb.style.height = `${Math.round(tileH * scale)}px`;
+        const inner = thumb.querySelector('.watch-seek-thumb-img');
+        inner.style.backgroundImage = `url("${sb.spriteUrl}")`;
+        inner.style.backgroundSize = `${Math.round(img.naturalWidth * scale)}px ${Math.round(img.naturalHeight * scale)}px`;
+        inner.style.backgroundPosition = `-${Math.round((tile % cols) * tileW * scale)}px -${Math.round(Math.floor(tile / cols) * tileH * scale)}px`;
+        thumb.querySelector('.watch-seek-thumb-time').textContent = this.formatTime(time);
+
+        // Anchor above the cursor, clamped inside the timeline.
+        const containerRect = this.progressContainer?.getBoundingClientRect() || rect;
+        const half = displayW / 2 + 4;
+        const x = Math.min(containerRect.width - half, Math.max(half, event.clientX - containerRect.left));
+        thumb.style.left = `${Math.round(x)}px`;
+        thumb.classList.remove('hidden');
+    }
+
+    hideSeekThumb() {
+        document.getElementById('watch-seek-thumb')?.classList.add('hidden');
     }
 
     /**

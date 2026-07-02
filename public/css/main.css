@@ -10543,6 +10543,49 @@ mark.search-highlight {
 }
 
 /* ============================================================
+   Seek thumbnails — storyboard preview above the timeline
+   ============================================================ */
+
+.watch-progress-container {
+  position: relative;
+}
+
+.watch-seek-thumb {
+  position: absolute;
+  bottom: 30px;
+  transform: translateX(-50%);
+  border: 2px solid rgba(255, 255, 255, 0.85);
+  border-radius: 6px;
+  overflow: hidden;
+  background: #000;
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+  z-index: 30;
+}
+
+.watch-seek-thumb.hidden {
+  display: none;
+}
+
+.watch-seek-thumb-img {
+  width: 100%;
+  height: 100%;
+  background-repeat: no-repeat;
+}
+
+.watch-seek-thumb-time {
+  position: absolute;
+  bottom: 4px;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #fff;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.95);
+}
+
+/* ============================================================
    TV mode (Android TV WebView client) — D-pad focus ring
    ============================================================ */
 
