@@ -4,6 +4,11 @@ Audit mené par 4 agents parallèles (web, mobile, Android TV, benchmark feature
 vérifié avec preuve `fichier:ligne`. 79 constats au total : **4 bloquants, ~30 majeurs, le reste
 mineurs**. Ce document est la synthèse consolidée et classée ; il sert de backlog UX.
 
+> **Décision owner 2026-07-02 : Tizen est HORS PÉRIMÈTRE.** Les supports retenus sont le web,
+> l'APK Android mobile et l'APK Android TV. Les constats Tizen (bloquants 1-2, chantier Lot 2 #6)
+> sont conservés ci-dessous pour trace mais ne sont pas à traiter. Restent donc **2 bloquants**
+> (casting, PWA) et le backlog des 3 supports.
+
 Complète l'audit interne existant `docs/audits/mobile-ux-audit-vs-netflix.md`.
 
 ---
