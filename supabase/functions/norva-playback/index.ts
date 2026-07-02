@@ -2728,6 +2728,49 @@ async function userHasLiveSession(db: SupabaseClient, userId: string): Promise<b
   return Boolean(sess && sess.length);
 }
 
+// Exhausted-dimension short-circuit (cron audit #11, corrected fix). A dimension that returned 0
+// candidates still cost a full variant-driven panel scan per tick (airysat: 357ms/46k buffers to
+// return 0; ninja post-drain: up to 360 ticks/day × 172k-variant scans). The scan visits EVERY
+// panel variant regardless of pending-set size, so shrinking the set can't fix it — instead we
+// remember "this (user, source, dimension) is dry" and skip it entirely for a SHORT TTL. 30 min is
+// deliberate: the auto-refresh importer lands new titles every ~30 min, so staleness is bounded by
+// one refresh cycle; a tick that DOES process work clears the mark early. Fail-open everywhere.
+const EXHAUSTED_TTL_MS = 30 * 60 * 1000;
+
+// Only candidate-driven sweeps participate — targeted/on-demand modes (titleIds, orderedTitleIds,
+// catalog fill, transcribe/ocr paths) must never be short-circuited. null = not a sweep.
+function sweepDimKey(body: JsonRecord): string | null {
+  if (Array.isArray(body.orderedTitleIds) || Array.isArray(body.titleIds)) return null;
+  const mode = stringOr(body.mode, "");
+  const subtitleTarget = stringOr(body.target, "") === "subtitle";
+  if (!subtitleTarget && !["", "vod", "probe", "whisper"].includes(mode)) return null;
+  const itemType = stringOr(body.type, "movie") === "series" ? "series" : "movie";
+  const dim = subtitleTarget ? "subtitle" : (mode || "vod");
+  return `${stringOr(body.userId, "")}:${stringOr(body.sourceId, "") || "*"}:${itemType}:${dim}`;
+}
+
+async function exhaustedMap(db: SupabaseClient, keys: (string | null)[]): Promise<Map<string, number>> {
+  const map = new Map<string, number>();
+  const wanted = keys.filter((k): k is string => Boolean(k));
+  if (!wanted.length) return map;
+  try {
+    const { data } = await db.from("enrichment_exhausted").select("k, exhausted_until").in("k", wanted);
+    for (const r of (data ?? []) as JsonRecord[]) map.set(String(r.k), new Date(String(r.exhausted_until)).getTime());
+  } catch (_) { /* fail-open: unreadable state = no short-circuit */ }
+  return map;
+}
+
+async function recordExhaustion(db: SupabaseClient, key: string, processed: number, skipped: unknown) {
+  try {
+    if (skipped) return;                              // live-session ticks say nothing about the panel
+    if (processed > 0) { await db.from("enrichment_exhausted").delete().eq("k", key); return; }
+    await db.from("enrichment_exhausted").upsert(
+      { k: key, exhausted_until: new Date(Date.now() + EXHAUSTED_TTL_MS).toISOString(), updated_at: new Date().toISOString() },
+      { onConflict: "k" },
+    );
+  } catch (_) { /* best-effort */ }
+}
+
 // Service-gated maintenance backfill of cloud_titles.audio_languages via the
 // relay's get_vod_info (the only path that reaches the provider — Deno egress is
 // IP-blocked). Resolves the DEFAULT audio-track language per title: a VO file's
@@ -2756,7 +2799,18 @@ async function runAudioBackfill(req: Request, db: SupabaseClient) {
   // SLOT-SAFE: dimensions run STRICTLY sequentially (one provider access at a time); each keeps
   // its own userHasLiveSession() guard; the chain STOPS the instant a user is live (skipped) so
   // it can never open a 2nd provider connection next to a live stream (the user_multi_ip trap).
-  if (body.fallthrough !== true) return await runOneDimension(db, body);
+  if (body.fallthrough !== true) {
+    // Single-dim path (night crons): same short-circuit as the chain below.
+    const soloKey = sweepDimKey(body);
+    if (!soloKey) return await runOneDimension(db, body);
+    const soloEx = await exhaustedMap(db, [soloKey]);
+    if ((soloEx.get(soloKey) ?? 0) > Date.now()) {
+      return { skipped: "exhausted", key: soloKey, until: new Date(soloEx.get(soloKey)!).toISOString() };
+    }
+    const soloRes = (await runOneDimension(db, body)) as JsonRecord;
+    await recordExhaustion(db, soloKey, Number(soloRes?.processed ?? 0), soloRes?.skipped);
+    return soloRes;
+  }
   const fuId = stringOr(body.userId, "");
   // Carry the primary cron's panel scope (sourceId) into EVERY drained dimension. Without this the
   // chain would fall back to account-wide draining and could open a provider connection on ANOTHER
@@ -2770,11 +2824,23 @@ async function runAudioBackfill(req: Request, db: SupabaseClient) {
     { userId: fuId, ...fuScope, type: "movie", mode: "whisper", limit: 4, concurrency: 1 },
     { userId: fuId, ...fuScope, type: "series", mode: "whisper", limit: 4, concurrency: 1 },
   ];
+  // ONE indexed read fetches the exhaustion state of the whole chain; dry dimensions are skipped
+  // without touching their panel (a fully-exhausted tick costs ~2 cheap queries instead of 6 scans).
+  const chainKeys = chain.map((dim) => sweepDimKey(dim));
+  const ex = await exhaustedMap(db, chainKeys);
   const tried: JsonRecord[] = [];
-  for (const dim of chain) {
+  for (let i = 0; i < chain.length; i++) {
+    const dim = chain[i];
+    const key = chainKeys[i];
+    const kind = dim.target ? "subtitle" : stringOr(dim.mode, "vod");
+    if (key && (ex.get(key) ?? 0) > Date.now()) {
+      tried.push({ type: stringOr(dim.type, "?"), kind, skipped: "exhausted" });
+      continue;
+    }
     const r = (await runOneDimension(db, dim)) as JsonRecord;
     const processed = Number(r?.processed ?? 0);
-    tried.push({ type: stringOr(dim.type, "?"), kind: dim.target ? "subtitle" : stringOr(dim.mode, "vod"), processed, skipped: stringOrNull(r?.skipped) });
+    if (key) await recordExhaustion(db, key, processed, r?.skipped);
+    tried.push({ type: stringOr(dim.type, "?"), kind, processed, skipped: stringOrNull(r?.skipped) });
     if (r?.skipped) return { mode: "fallthrough", stoppedAt: "live-session", tried };   // user live → stop the whole chain
     if (processed > 0) return { mode: "fallthrough", workedOn: tried[tried.length - 1], tried, result: r };
   }
