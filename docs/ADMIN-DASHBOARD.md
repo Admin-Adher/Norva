@@ -113,9 +113,16 @@ colonne provider_key), servi par l'index `idx_cloud_sources_display_name`.
   finie — *tout* sondé au moins une fois, **≠ 100 % résolu** : le reste est `und` conteneur, résolvable
   seulement par whisper). Badge **⏸ à l'arrêt** si `sondé_24h = 0` et qu'il reste des titres.
 
+### 🎯 Matching TMDB (bloc de la page Moteur)
+Trois compteurs de l'overview — `tmdb_year_backlog` (années manquantes), `tmdb_unmatched`,
+`tmdb_unverified` — counts bon marché via les index partiels du Lot 2 de l'audit crons. Drainés
+chaque nuit par backfill-years (1000/j) / search-match (3 600/j) / revalidate (2 000/j) : **ils
+doivent baisser de jour en jour** — c'est le signal de santé de ces crons (cf.
+docs/CRON-OPTIMIZATION-AUDIT.md).
+
 ### ⏱️ Crons
 `admin_cron_health` → blob `cron`. Groupé par fenêtre (☀️ jour 6-23 UTC / 🌙 nuit 0-5 UTC). Colonnes :
-Fenêtre, Dimension (audio films / séries / sous-titres / whisper / tmdb / notif / maintenance), Job,
+Fenêtre, Dimension (audio films / séries / sous-titres / whisper / tmdb / notif / sync / maintenance), Job,
 **Cadence humaine** (`AdminPage.cronHuman` : `0-59/3 6-23 * * *` → « toutes les 3 min · 6h–23h »), État
 (actif / pause / échecs), Dernier run, Échecs 24 h.
 - **Échecs 24 h** compte `status = 'failed'` (pas `<> 'succeeded'`, qui attrapait à tort les jobs

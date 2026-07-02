@@ -12,6 +12,25 @@ Like `norva-source-sync/CRON_SETUP.md`, this is **not a migration**: apply with
 secret value appears here. `cron.schedule(name, …)` is idempotent (re-running
 updates the existing job), so this file is the source of truth for the cadences.
 
+## 2026-07-02 — Audit & optimisation de la flotte (v4)
+
+> Trace complète : `docs/CRON-OPTIMIZATION-AUDIT.md` (méthode, findings, mesures, preuves live).
+> Résumé de ce qui a changé dans CETTE flotte :
+>
+> - **Court-circuit `enrichment_exhausted`** : une (source, dimension) qui retourne 0 candidat est
+>   sautée 30 min (TTL aligné sur l'auto-refresh) ; un tick productif efface la marque. Un tick à
+>   sec coûte ~2 requêtes PK au lieu de scans de panel. Les modes ciblés (titleIds/catalog/
+>   transcribe) ne sont jamais court-circuités. Table `public.enrichment_exhausted` (service-only).
+> - **Index candidats** : `idx_cloud_titles_whisper_pending` (partiel `@>`), `idx_cloud_titles_audio_sweep`.
+> - **Memo config source** (edge, TTL 60 s) : 1 lookup/déchiffrement par tick au lieu de 1/titre.
+> - **Crons TMDB ressuscités** (curseur cyclique + `done` latché + marqueurs `*_attempted_at` 90 j) et
+>   limits montées : backfill-years `limit=1000`, search-match `limit=300`, revalidate `limit=500`.
+> - **Gardes SQL** (`WHERE EXISTS`) sur resume-stuck / import-notify-digest / auto-refresh-detect.
+> - **Autres jobs** : admin-dashboard-refresh `2-57/10` (réécrit, ~8 s/run), reaper horaire,
+>   rétentions `norva-cron-history-prune` (7 j) + `norva-admin-events-prune` (180 j),
+>   series-info-prewarm **retiré** (cassé ; conditions de ré-activation dans la migration
+>   `20260702120000`), series-info-cache-prune 90 j.
+
 ## Cadences (throttled)
 
 Originally most of these ran **every 5 min** indiscriminately, burning ~72 cron
