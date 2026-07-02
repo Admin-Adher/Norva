@@ -2638,26 +2638,37 @@ async function getGeneratedSubtitle(req: Request, userId: string, db: SupabaseCl
   const ident = await resolveSourceIdentity(sourceId, userId, db);
   const pkey = ident.key;
   if (!pkey) return { status: "none", providerKey: null };
+  const COLS = "status, vtt, source_lang, segments, audio_sec, job_id, updated_at, error, stage, claimed_by";
   let { data: row } = await db.from("catalog_generated_subtitles")
-    .select("status, vtt, source_lang, segments, audio_sec, job_id, updated_at")
+    .select(COLS)
     .eq("provider_key", pkey).eq("item_type", itemType).eq("external_id", externalId)
     .eq("kind", kind).eq("lang", cacheLang).maybeSingle();
   // Transition fallback: a VTT generated before the identity re-key still lives under the raw
   // providerKey until the cache backfill moves it — serve it instead of regenerating.
   if (!row && ident.fingerprint && ident.fingerprint !== pkey) {
     ({ data: row } = await db.from("catalog_generated_subtitles")
-      .select("status, vtt, source_lang, segments, audio_sec, job_id, updated_at")
+      .select(COLS)
       .eq("provider_key", ident.fingerprint).eq("item_type", itemType).eq("external_id", externalId)
       .eq("kind", kind).eq("lang", cacheLang).maybeSingle());
   }
   const rec = row as JsonRecord | null;
   if (!rec) return { status: "none", providerKey: pkey, kind, lang };
   const status = stringOr(rec.status, "none");
+  const partialVtt = status === "processing" ? stringOr(rec.vtt, "") : "";
   return {
     status, kind, lang, providerKey: pkey, jobId: rec.job_id ?? null,
     sourceLang: rec.source_lang ?? null, segments: rec.segments ?? null, audioSec: rec.audio_sec ?? null,
     updatedAt: rec.updated_at ?? null,
-    vtt: status === "ready" ? stringOr(rec.vtt, "") : null,
+    // The real failure cause (creds-redacted at the source) — the player shows a short human
+    // reason and keeps the full text in a tooltip, instead of a blind "failed — retry".
+    error: status === "failed" ? stringOrNull(rec.error) : null,
+    // Honest progress: gateway heartbeats stamp the stage (queued/deferred/extracting/
+    // transcribing); "deferred because of YOUR playback" only when the requester is the claimer.
+    stage: status === "processing" ? stringOrNull(rec.stage) : null,
+    deferredByYou: status === "processing" && stringOr(rec.stage, "") === "deferred" && stringOr(rec.claimed_by, "") === userId,
+    // Progressive delivery: a partial VTT streams in while transcription continues.
+    partial: Boolean(partialVtt),
+    vtt: status === "ready" ? stringOr(rec.vtt, "") : (partialVtt || null),
   };
 }
 
