@@ -69,6 +69,15 @@ function proxyEnvFor(key) {
     const url = providerProxyUrls[poolIndexForKey(key)];
     return { ...process.env, http_proxy: url, https_proxy: url, HTTP_PROXY: url, HTTPS_PROXY: url };
 }
+// Xtream URLs embed credentials in the path (/movie/USER/PASS/id.ext) and in query params
+// (username=…&password=…). Any error string that may quote a provider URL (ffmpeg stderr)
+// MUST pass through here before leaving the process — job-callback errors land verbatim in
+// the DB and the admin UI.
+function redactCreds(s) {
+    return String(s || '')
+        .replace(/\/(movie|series|live)\/[^/\s]+\/[^/\s]+\//gi, '/$1/***/***/')
+        .replace(/(username|password)=[^&\s'"]+/gi, '$1=***');
+}
 
 const PORT = Number.parseInt(process.env.PORT || '8080', 10);
 const GATEWAY_TOKEN = process.env.GATEWAY_TOKEN || process.env.NORVA_MEDIA_GATEWAY_TOKEN || '';
@@ -215,7 +224,7 @@ const RAW_PROVIDER_RETRY_DELAYS_MS = [1500, 5000, 9000, 9000, 9000, 9000, 9000, 
 const FFMPEG_USER_AGENT = process.env.FFMPEG_USER_AGENT ||
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36 Norva/1.0';
 const MAX_LOG_TAIL = 12000;
-const GATEWAY_VERSION = 59;
+const GATEWAY_VERSION = 60;
 // Browser playback fetches HLS playlists/segments cross-origin, so these must
 // list every Norva web origin or the browser blocks the response (CORS). Keep
 // in sync with the relay's ALLOWED_ORIGINS (services/norva-relay/wrangler.jsonc).
@@ -644,11 +653,13 @@ app.get('/detect-language/:token', async (req, res) => {
     try {
         let best = null;          // best partial result across offsets (most words), as a fallback
         let extractions = 0;      // bound the provider connections
+        let lastExtractErr = '';  // surfaced when EVERY offset failed (was an opaque constant string)
         for (const off of offsets) {
             let wavPath = null;
             try {
-                wavPath = await extractAudioWav(claims.url, ua, trackIndex, off > 0 ? off : 0, dur, 30_000, claims.uid);
-                if (!wavPath) continue;   // extraction failed or offset past the file's end → next offset
+                const ex = await extractAudioWav(claims.url, ua, trackIndex, off > 0 ? off : 0, dur, 30_000, claims.uid);
+                if (!ex.ok) { lastExtractErr = ex.error; continue; }   // failed or offset past the file's end → next offset
+                wavPath = ex.path;
                 extractions++;
                 const whisper = await runWhisperDetect(wavPath);
                 const det = detectLanguageFromText(whisper.text);
@@ -674,7 +685,7 @@ app.get('/detect-language/:token', async (req, res) => {
             } catch (_) { /* try the next offset */ }
             finally { if (wavPath) fsp.unlink(wavPath).catch(() => {}); }
         }
-        if (extractions === 0) return res.status(502).json({ error: 'Audio extraction failed' });
+        if (extractions === 0) return res.status(502).json({ error: 'Audio extraction failed', details: lastExtractErr });
         // No clip had clear speech → return the best partial (language may be null).
         res.setHeader('Cache-Control', 'private, max-age=3600');
         return res.json(best || { language: null, candidate: null, confidence: 0, whisperLang: null, wordCount: 0, sample: '' });
@@ -703,9 +714,10 @@ app.get('/transcribe/:token', async (req, res) => {
     let wavPath = null;
     try {
         const e0 = Date.now();
-        wavPath = await extractAudioWav(claims.url, ua, trackIndex, startOffset, dur, AUDIO_EXTRACT_TIMEOUT_MS, claims.uid);
+        const ex = await extractAudioWav(claims.url, ua, trackIndex, startOffset, dur, AUDIO_EXTRACT_TIMEOUT_MS, claims.uid);
         const extractMs = Date.now() - e0;
-        if (!wavPath) return res.status(502).json({ error: 'Audio extraction failed' });
+        if (!ex.ok) return res.status(502).json({ error: 'Audio extraction failed', details: ex.error });
+        wavPath = ex.path;
         let audioSec = 0;
         try { audioSec = (await fsp.stat(wavPath)).size / (16000 * 2); } catch (_) { audioSec = 0; } // 16kHz mono s16le = 32000 B/s
         const w = await runWhisperVtt(wavPath, forceLang);
@@ -815,9 +827,12 @@ app.post('/translate', requireGatewayAuth, async (req, res) => {
     return res.json({ vtt: r.vtt, segments: (r.vtt.match(/-->/g) || []).length, ms: Date.now() - t0 });
 });
 
-// Extract a mono/16 kHz pcm_s16le WAV of one audio track to a temp file. Resolves the path, or
-// null on failure. `dur` 0 = the whole track (full-film transcription); >0 = a clip. `timeoutMs`
-// defaults to 30 s (LID clip) — pass a longer value for a full-film extraction.
+// Extract a mono/16 kHz pcm_s16le WAV of one audio track to a temp file. Resolves
+// { ok:true, path } or { ok:false, error } — the error carries the REAL cause (ffmpeg stderr
+// tail / timeout kill / tiny output), creds-redacted, mirroring extractSubtitleSup: the opaque
+// null of the first version made 7 failed pregen jobs indistinguishable in the admin.
+// `dur` 0 = the whole track (full-film transcription); >0 = a clip. `timeoutMs` defaults to
+// 30 s (LID clip) — pass a longer value for a full-film extraction.
 function extractAudioWav(url, ua, trackIndex, startOffset, dur, timeoutMs = 30_000, proxyKey = '') {
     return new Promise((resolve) => {
         const outputPath = path.join(os.tmpdir(), `norva-audio-${Date.now()}-${crypto.randomUUID()}.wav`);
@@ -834,21 +849,27 @@ function extractAudioWav(url, ua, trackIndex, startOffset, dur, timeoutMs = 30_0
         ];
         let child;
         try { child = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'ignore', 'pipe'], env: proxyEnvFor(proxyKey || proxyKeyFromUrl(url)) }); }
-        catch (_) { return resolve(null); }
+        catch (e) { return resolve({ ok: false, error: 'spawn failed: ' + String((e && e.message) || e) }); }
         let stderr = '';
-        const timer = setTimeout(() => { try { child.kill('SIGKILL'); } catch (_) {} }, timeoutMs);
+        let timedOut = false;
+        const timer = setTimeout(() => { timedOut = true; try { child.kill('SIGKILL'); } catch (_) {} }, timeoutMs);
         child.stderr.on('data', (d) => { stderr += d.toString(); });
-        child.on('error', () => { clearTimeout(timer); resolve(null); });
+        child.on('error', (e) => { clearTimeout(timer); resolve({ ok: false, error: 'ffmpeg error: ' + String((e && e.message) || e) }); });
         child.on('close', async (code) => {
             clearTimeout(timer);
+            const tail = redactCreds(stderr.trim().split('\n').filter(Boolean).pop() || 'no stderr');
             if (code !== 0) {
-                console.warn(`[media-gateway] audio-extract ffmpeg exit ${code}: ${stderr.slice(-300)}`);
+                console.warn(`[media-gateway] audio-extract ffmpeg exit ${code}: ${redactCreds(stderr.slice(-300))}`);
                 fsp.unlink(outputPath).catch(() => {});
-                return resolve(null);
+                return resolve({ ok: false, error: timedOut ? `extract timeout after ${Math.round(timeoutMs / 1000)}s: ${tail}` : `ffmpeg exit ${code}: ${tail}` });
             }
-            let ok = false;
-            try { ok = (await fsp.stat(outputPath)).size > 4000; } catch (_) { ok = false; }
-            resolve(ok ? outputPath : null);
+            let size = 0;
+            try { size = (await fsp.stat(outputPath)).size; } catch (_) { size = 0; }
+            if (size <= 4000) {
+                fsp.unlink(outputPath).catch(() => {});
+                return resolve({ ok: false, error: `empty/tiny WAV (${size}B) — no audio decoded (${tail})` });
+            }
+            resolve({ ok: true, path: outputPath });
         });
     });
 }
@@ -925,7 +946,10 @@ function cleanVtt(vtt) {
 }
 
 // Phase 3: full timestamped transcription to WebVTT. whisper.cpp emits VTT natively (-ovtt).
-// Resolves { vtt, lang, prob, ms } (empties on failure). forceLang pins the source language.
+// Resolves { vtt, lang, prob, ms, failReason } — vtt empty on failure, and failReason then says
+// WHY (timeout SIGKILL vs crash vs spawn): whisper.cpp only writes the -ovtt file at completion,
+// so a timeout kill leaves no partial VTT and used to surface as an opaque "no output".
+// forceLang pins the source language.
 function runWhisperVtt(wavPath, forceLang) {
     return new Promise((resolve) => {
         const t0 = Date.now();
@@ -940,11 +964,12 @@ function runWhisperVtt(wavPath, forceLang) {
         ];
         let child;
         try { child = spawn(WHISPER_BIN, args, { stdio: ['ignore', 'ignore', 'pipe'] }); }
-        catch (_) { return resolve({ vtt: '', lang: null, prob: 0, ms: 0 }); }
+        catch (e) { return resolve({ vtt: '', lang: null, prob: 0, ms: 0, failReason: 'whisper spawn failed: ' + String((e && e.message) || e) }); }
         let stderr = '';
-        const timer = setTimeout(() => { try { child.kill('SIGKILL'); } catch (_) {} }, WHISPER_TRANSCRIBE_TIMEOUT_MS);
+        let timedOut = false;
+        const timer = setTimeout(() => { timedOut = true; try { child.kill('SIGKILL'); } catch (_) {} }, WHISPER_TRANSCRIBE_TIMEOUT_MS);
         child.stderr.on('data', (d) => { stderr += d.toString(); });
-        child.on('error', () => { clearTimeout(timer); resolve({ vtt: '', lang: null, prob: 0, ms: Date.now() - t0 }); });
+        child.on('error', (e) => { clearTimeout(timer); resolve({ vtt: '', lang: null, prob: 0, ms: Date.now() - t0, failReason: 'whisper error: ' + String((e && e.message) || e) }); });
         child.on('close', async (code) => {
             clearTimeout(timer);
             const m = stderr.match(/auto-detected language:\s*([a-z]{2,3})\s*\(p\s*=\s*([\d.]+)\)/i);
@@ -954,7 +979,10 @@ function runWhisperVtt(wavPath, forceLang) {
             try { vtt = await fsp.readFile(outPrefix + '.vtt', 'utf8'); } catch (_) { vtt = ''; }
             fsp.unlink(outPrefix + '.vtt').catch(() => {});
             if (code !== 0 && !vtt) console.warn(`[media-gateway] whisper-vtt exit ${code}: ${stderr.slice(-300)}`);
-            resolve({ vtt: cleanVtt(String(vtt || '').trim()), lang, prob, ms: Date.now() - t0 });
+            const failReason = vtt ? null
+                : timedOut ? `whisper killed by timeout after ${Math.round((Date.now() - t0) / 1000)}s (no partial VTT is written)`
+                : `whisper exit ${code} wrote no VTT: ${stderr.trim().split('\n').filter(Boolean).pop() || 'no stderr'}`;
+            resolve({ vtt: cleanVtt(String(vtt || '').trim()), lang, prob, ms: Date.now() - t0, failReason });
         });
     });
 }
@@ -988,20 +1016,21 @@ async function runTranscribeJob(job) {
     const { url, ua, index, jobId, callbackUrl, start = 0, dur = 0, uid = '' } = job;
     let wavPath = null, payload;
     try {
-        wavPath = await extractAudioWav(url, ua, index, start, dur, AUDIO_EXTRACT_TIMEOUT_MS, uid); // dur 0 = whole track
-        if (!wavPath) {
-            payload = { jobId, ok: false, error: 'Audio extraction failed' };
+        const ex = await extractAudioWav(url, ua, index, start, dur, AUDIO_EXTRACT_TIMEOUT_MS, uid); // dur 0 = whole track
+        if (!ex.ok) {
+            payload = { jobId, ok: false, error: ('Audio extraction failed: ' + ex.error).slice(0, 300) };
         } else {
+            wavPath = ex.path;
             let audioSec = 0;
             try { audioSec = Math.round((await fsp.stat(wavPath)).size / (16000 * 2)); } catch (_) { audioSec = 0; }
             const w = await runWhisperVtt(wavPath, '');
             const segments = (w.vtt.match(/-->/g) || []).length;
             payload = w.vtt
                 ? { jobId, ok: true, vtt: w.vtt, sourceLang: w.lang, audioSec, segments }
-                : { jobId, ok: false, error: 'Transcription produced no output' };
+                : { jobId, ok: false, error: ('Transcription produced no output: ' + (w.failReason || 'unknown')).slice(0, 300) };
         }
     } catch (e) {
-        payload = { jobId, ok: false, error: String((e && e.message) || e).slice(0, 300) };
+        payload = { jobId, ok: false, error: redactCreds(String((e && e.message) || e)).slice(0, 300) };
     } finally { if (wavPath) fsp.unlink(wavPath).catch(() => {}); }
     try {
         await fetch(callbackUrl, {
@@ -1128,9 +1157,11 @@ function extractSubtitleSup(url, ua, trackIndex, timeoutMs = SUP_EXTRACT_TIMEOUT
         child.on('close', async (code) => {
             clearTimeout(timer);
             if (code !== 0) {
-                console.warn(`[media-gateway] sup-extract ffmpeg exit ${code}: ${stderr.slice(-300)}`);
+                console.warn(`[media-gateway] sup-extract ffmpeg exit ${code}: ${redactCreds(stderr.slice(-300))}`);
                 fsp.unlink(outputPath).catch(() => {});
-                return resolve({ ok: false, error: `ffmpeg exit ${code}: ${stderr.trim().split('\n').pop() || 'no stderr'}` });
+                // redactCreds: the stderr line quotes the provider URL, whose path embeds the
+                // account's username/password — this string lands verbatim in the DB/admin UI.
+                return resolve({ ok: false, error: `ffmpeg exit ${code}: ${redactCreds(stderr.trim().split('\n').pop() || 'no stderr')}` });
             }
             let size = 0;
             try { size = (await fsp.stat(outputPath)).size; } catch (_) { size = 0; }
@@ -1195,8 +1226,9 @@ function extractSubtitleFrames(url, ua, trackIndex, timeoutMs = SUP_EXTRACT_TIME
             let nframes = 0;
             try { nframes = (await fsp.readdir(dir)).filter((f) => f.endsWith('.png')).length; } catch (_) { nframes = 0; }
             if (code !== 0 && !nframes) {
-                console.warn(`[media-gateway] imgsub-extract ffmpeg exit ${code}: ${stderr.split('\n').filter(Boolean).pop() || 'no stderr'}`);
-                return resolve({ ok: false, error: `ffmpeg exit ${code}: ${stderr.split('\n').filter(Boolean).pop() || 'no stderr'}`, dir });
+                const tail = redactCreds(stderr.split('\n').filter(Boolean).pop() || 'no stderr');
+                console.warn(`[media-gateway] imgsub-extract ffmpeg exit ${code}: ${tail}`);
+                return resolve({ ok: false, error: `ffmpeg exit ${code}: ${tail}`, dir });
             }
             if (!nframes) return resolve({ ok: false, error: `no subtitle frames rendered on stream ${trackIndex}`, dir });
             resolve({ ok: true, dir });
