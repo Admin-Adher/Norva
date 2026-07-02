@@ -1602,6 +1602,12 @@ class App {
         const openFiche = this.readOpenFiche();
         if (openFiche && this.fichePageFor(openFiche) !== pageName) this.forgetOpenFiche();
 
+        // Remember where the outgoing page was scrolled (page-level scroller, e.g.
+        // #page-home; Movies/Series grids save their own scroller in hide()).
+        this._pageScroll = this._pageScroll || {};
+        const prevPageEl = document.getElementById(`page-${this.currentPage}`);
+        if (prevPageEl) this._pageScroll[this.currentPage] = prevPageEl.scrollTop || 0;
+
         // Update nav
         document.querySelectorAll('.nav-link').forEach(link => {
             link.classList.toggle('active', link.dataset.page === pageName);
@@ -1623,6 +1629,20 @@ class App {
 
         if (this.pages[pageName]?.show) {
             this.pages[pageName].show();
+        }
+
+        // Restore the incoming page's position (two passes: instant, and once
+        // async content has had a beat to paint back at full height).
+        const savedTop = this._pageScroll[pageName] || 0;
+        if (savedTop > 0) {
+            const restore = () => {
+                const el = document.getElementById(`page-${pageName}`);
+                if (el && Math.abs(el.scrollTop - savedTop) > 4 && el.scrollHeight > savedTop) {
+                    el.scrollTop = savedTop;
+                }
+            };
+            requestAnimationFrame(restore);
+            setTimeout(restore, 350);
         }
 
         // After the switch: the watch page is its own fullscreen player, so a movie

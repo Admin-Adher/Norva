@@ -131,7 +131,10 @@ class SeriesPage {
 
         // Continue Watching shrinks to a compact pinned strip while the grid scrolls,
         // reclaiming vertical space without disappearing.
-        this.container?.addEventListener('scroll', () => this.updateContinueCompact(), { passive: true });
+        this.container?.addEventListener('scroll', () => {
+            this.updateContinueCompact();
+            this.restoreRecycledCards();
+        }, { passive: true });
 
         const favBtn = document.getElementById('series-favorites-btn');
         favBtn?.addEventListener('click', () => {
@@ -307,6 +310,7 @@ class SeriesPage {
 
     async renderGenreRails() {
         this.railsView = true;
+        this._viewRenderedAt = Date.now();
         this.activeBucket = null;
         this.bucketObserver?.disconnect();
         if (this.countEl) this.countEl.textContent = '';
@@ -500,6 +504,16 @@ class SeriesPage {
         if (this._facetTimer) clearInterval(this._facetTimer);
         this._facetTimer = setInterval(() => this.populateLanguageFacets(), 600000);
 
+        // Returning to a recently rendered view (grid or rails): keep the DOM as-is
+        // and restore the scroll position instead of re-rendering back to the top.
+        if (this._viewRenderedAt && Date.now() - this._viewRenderedAt < 300000
+            && this.container?.childElementCount > 0
+            && !this.container.querySelector('.catalog-locked-empty')) {
+            const saved = this._savedScrollTop || 0;
+            if (saved > 0) requestAnimationFrame(() => { this.container.scrollTop = saved; });
+            return;
+        }
+
         // A genre is selected (e.g. returning to the page) → (re)open its grid.
         if (this.isCloudPagedMode()) {
             const selectedBuckets = [...(this.categoryMulti?.getSelected() || [])];
@@ -529,6 +543,8 @@ class SeriesPage {
 
     hide() {
         if (this._facetTimer) { clearInterval(this._facetTimer); this._facetTimer = null; }
+        // Scroll restoration: the grid is its own scroller, remembered per visit.
+        this._savedScrollTop = this.container?.scrollTop || 0;
     }
 
     renderCatalogLocked() {
@@ -1042,9 +1058,11 @@ class SeriesPage {
         console.log(`[Series] Displaying ${cards.length} cards from ${this.seriesList.length} series`);
 
         this.currentBatch = 0;
+        this._winStart = 0; // virtualization: index of the first card still in the DOM
         // Flat card grid → drop the rail-host modifier so the grid centers/wraps.
         this.container.classList.remove('rail-host');
         this.container.innerHTML = '';
+        this._viewRenderedAt = Date.now();
         // Re-rendering resets scrollTop to 0 without firing a scroll event, so
         // re-sync the compact strip to avoid it sticking shrunk at the top.
         this.updateContinueCompact();
@@ -1057,6 +1075,13 @@ class SeriesPage {
             return;
         }
 
+        // Virtualization spacer: stands in for the recycled cards above the
+        // window so the scrollbar geometry (and position) never jumps.
+        const spacer = document.createElement('div');
+        spacer.className = 'grid-spacer';
+        spacer.style.height = '0px';
+        this.container.appendChild(spacer);
+
         const loader = document.createElement('div');
         loader.className = 'series-loader';
         loader.innerHTML = '<div class="loading-spinner"></div>';
@@ -1067,6 +1092,51 @@ class SeriesPage {
         }
 
         this.observer.observe(loader);
+    }
+
+    // === Grid virtualization (same window/recycle scheme as MoviesPage) ===
+
+    static get GRID_DOM_CARD_CAP() { return 360; }
+
+    recycleOffscreenCards() {
+        const spacer = this.container?.querySelector('.grid-spacer');
+        if (!spacer) return;
+        let rendered = this.currentBatch * this.batchSize - (this._winStart || 0);
+        while (rendered > SeriesPage.GRID_DOM_CARD_CAP) {
+            const before = this.container.scrollHeight;
+            let removed = 0;
+            let node = spacer.nextElementSibling;
+            while (node && removed < this.batchSize && node.classList.contains('series-card')) {
+                const next = node.nextElementSibling;
+                node.remove();
+                removed++;
+                node = next;
+            }
+            if (!removed) break;
+            const delta = before - this.container.scrollHeight;
+            spacer.style.height = `${(parseFloat(spacer.style.height) || 0) + Math.max(0, delta)}px`;
+            this._winStart = (this._winStart || 0) + removed;
+            rendered -= removed;
+        }
+    }
+
+    restoreRecycledCards() {
+        const spacer = this.container?.querySelector('.grid-spacer');
+        if (!spacer || !(this._winStart > 0)) return;
+        const spacerHeight = parseFloat(spacer.style.height) || 0;
+        if (spacerHeight <= 0 || this.container.scrollTop > spacerHeight + 600) return;
+
+        const start = Math.max(0, this._winStart - this.batchSize);
+        const fragment = document.createDocumentFragment();
+        for (let i = start; i < this._winStart; i++) {
+            const data = this.filteredCards[i];
+            if (data) fragment.appendChild(this.buildCard(data));
+        }
+        const before = this.container.scrollHeight;
+        spacer.after(fragment);
+        const delta = this.container.scrollHeight - before;
+        spacer.style.height = `${Math.max(0, spacerHeight - delta)}px`;
+        this._winStart = start;
     }
 
     sortCards(cards) {
@@ -1152,6 +1222,7 @@ class SeriesPage {
         }
 
         this.currentBatch++;
+        this.recycleOffscreenCards();
 
         if (end >= this.filteredCards.length && loader && !(this.isCloudPagedMode() && this.cloudHasMore)) {
             loader.style.display = 'none';

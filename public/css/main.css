@@ -10463,6 +10463,15 @@ mark.search-highlight {
   display: none;
 }
 
+/* Grid virtualization: full-width height stand-in for recycled cards. */
+.movies-grid .grid-spacer,
+.series-grid .grid-spacer {
+  grid-column: 1 / -1;
+  width: 100%;
+  padding: 0;
+  margin: 0;
+}
+
 /* ============================================================
    TV mode (Android TV WebView client) — D-pad focus ring
    ============================================================ */
