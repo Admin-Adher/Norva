@@ -550,17 +550,29 @@ async function cronBackfillYears(db: SupabaseClient, limit: number, reset: boole
   const apiKey = tmdbApiKey();
   if (!apiKey) return { error: "tmdb_key_missing", done: true };
 
+  // Cursor is CYCLIC (cron audit fix): it previously latched at the catalogue's max id forever, so
+  // every title imported below it — 99.9994% of new UUIDv4 ids — was permanently invisible and the
+  // cron became a no-op (22.7k year-less titles accumulated). At each pass end the cursor resets to
+  // null; `done` is LATCHED true after the first full pass and never flips back (norva-catalog's
+  // onboarding `settled` flag reads it — a wrap must not un-settle the progress bar).
   let cursor: string | null = null;
+  let priorDone = false;
   if (!reset) {
-    const { data } = await db.from("norva_year_backfill_state").select("last_id").eq("id", 1).maybeSingle();
+    const { data } = await db.from("norva_year_backfill_state").select("last_id, done").eq("id", 1).maybeSingle();
     cursor = (data?.last_id as string | null) ?? null;
+    priorDone = data?.done === true;
   }
 
+  // Skip titles attempted within 90 days (year_backfill_attempted_at, set on every scan below):
+  // known TMDB no-date failures stop re-burning API calls on every pass, and each pass converges
+  // on NEW/retryable candidates only.
+  const retryBefore = new Date(Date.now() - 90 * 24 * 3600 * 1000).toISOString();
   let q = db
     .from("cloud_titles")
     .select("id, item_type, provider_tmdb_id")
     .is("release_year", null)
     .not("provider_tmdb_id", "is", null)
+    .or(`year_backfill_attempted_at.is.null,year_backfill_attempted_at.lt.${retryBefore}`)
     .order("id", { ascending: true })
     .limit(limit);
   if (cursor) q = q.gt("id", cursor);
@@ -571,9 +583,9 @@ async function cronBackfillYears(db: SupabaseClient, limit: number, reset: boole
   const scanned = rows?.length ?? 0;
   if (!scanned) {
     await db.from("norva_year_backfill_state")
-      .update({ done: true, last_run: { scanned: 0, done: true, at: new Date().toISOString() }, updated_at: new Date().toISOString() })
+      .update({ last_id: null, done: true, last_run: { scanned: 0, done: true, wrapped: true, at: new Date().toISOString() }, updated_at: new Date().toISOString() })
       .eq("id", 1);
-    return { scanned: 0, distinct: 0, found: 0, updated: 0, done: true };
+    return { scanned: 0, distinct: 0, found: 0, updated: 0, done: true, wrapped: true };
   }
 
   // One fetch per distinct (item_type, tmdbId); remember the cursor end.
@@ -614,10 +626,20 @@ async function cronBackfillYears(db: SupabaseClient, limit: number, reset: boole
     updated += count ?? 0;
   }
 
-  const done = scanned < limit;
+  // Mark EVERY scanned row as attempted (found or not) — successes leave the candidate set via
+  // release_year anyway; failures stop being re-fetched for 90 days. Chunked (URL-length safety).
+  const scannedIds = rows!.map((r) => String(r.id));
+  const attemptedAt = new Date().toISOString();
+  for (let i = 0; i < scannedIds.length; i += 200) {
+    await db.from("cloud_titles").update({ year_backfill_attempted_at: attemptedAt })
+      .in("id", scannedIds.slice(i, i + 200));
+  }
+
+  const passEnded = scanned < limit;
+  const done = priorDone || passEnded;              // latched: never flips back to false
   const summary = { scanned, distinct: distinct.size, found: yearByKey.size, updated, done };
   await db.from("norva_year_backfill_state")
-    .update({ last_id: maxId, done, last_run: { ...summary, at: new Date().toISOString() }, updated_at: new Date().toISOString() })
+    .update({ last_id: passEnded ? null : maxId, done, last_run: { ...summary, wrapped: passEnded, at: new Date().toISOString() }, updated_at: new Date().toISOString() })
     .eq("id", 1);
   return summary;
 }
@@ -630,18 +652,24 @@ async function cronRevalidate(db: SupabaseClient, limit: number, reset: boolean,
   const apiKey = tmdbApiKey();
   if (!apiKey) return { error: "tmdb_key_missing", done: true };
 
+  // Cyclic cursor + latched done + 90d attempt marker — same audit fix as cronBackfillYears
+  // (the cursor used to latch at max id forever, making this cron a permanent no-op).
   let cursor: string | null = null;
+  let priorDone = false;
   if (!reset) {
-    const { data } = await db.from("norva_revalidate_state").select("last_id").eq("id", 1).maybeSingle();
+    const { data } = await db.from("norva_revalidate_state").select("last_id, done").eq("id", 1).maybeSingle();
     cursor = (data?.last_id as string | null) ?? null;
+    priorDone = data?.done === true;
   }
 
+  const retryBefore = new Date(Date.now() - 90 * 24 * 3600 * 1000).toISOString();
   let q = db
     .from("cloud_titles")
     .select("id, item_type, provider_tmdb_id, title, original_title, release_year, metadata, poster_url, backdrop_url")
     .in("match_status", ["provider_unverified", "weak"])
     .not("provider_tmdb_id", "is", null)
     .neq("provider_tmdb_id", "0")
+    .or(`revalidate_attempted_at.is.null,revalidate_attempted_at.lt.${retryBefore}`)
     .order("id", { ascending: true })
     .limit(limit);
   if (cursor) q = q.gt("id", cursor);
@@ -652,9 +680,9 @@ async function cronRevalidate(db: SupabaseClient, limit: number, reset: boolean,
   const scanned = rows?.length ?? 0;
   if (!scanned) {
     await db.from("norva_revalidate_state")
-      .update({ done: true, last_run: { scanned: 0, revalidated: 0, done: true, at: new Date().toISOString() }, updated_at: new Date().toISOString() })
+      .update({ last_id: null, done: true, last_run: { scanned: 0, revalidated: 0, done: true, wrapped: true, at: new Date().toISOString() }, updated_at: new Date().toISOString() })
       .eq("id", 1);
-    return { scanned: 0, revalidated: 0, done: true };
+    return { scanned: 0, revalidated: 0, done: true, wrapped: true };
   }
 
   const maxId = String(rows![rows!.length - 1].id);
@@ -695,10 +723,18 @@ async function cronRevalidate(db: SupabaseClient, limit: number, reset: boolean,
   };
   await Promise.all(Array.from({ length: Math.min(Math.max(1, concurrency), rows!.length) }, worker));
 
-  const done = scanned < limit;
+  const scannedIds = rows!.map((r) => String(r.id));
+  const attemptedAt = new Date().toISOString();
+  for (let i = 0; i < scannedIds.length; i += 200) {
+    await db.from("cloud_titles").update({ revalidate_attempted_at: attemptedAt })
+      .in("id", scannedIds.slice(i, i + 200));
+  }
+
+  const passEnded = scanned < limit;
+  const done = priorDone || passEnded;
   const summary = { scanned, revalidated, done };
   await db.from("norva_revalidate_state")
-    .update({ last_id: maxId, done, last_run: { ...summary, at: new Date().toISOString() }, updated_at: new Date().toISOString() })
+    .update({ last_id: passEnded ? null : maxId, done, last_run: { ...summary, wrapped: passEnded, at: new Date().toISOString() }, updated_at: new Date().toISOString() })
     .eq("id", 1);
   return summary;
 }
@@ -711,16 +747,21 @@ async function cronSearchMatch(db: SupabaseClient, limit: number, reset: boolean
   const apiKey = tmdbApiKey();
   if (!apiKey) return { error: "tmdb_key_missing", done: true };
 
+  // Cyclic cursor + latched done + 90d attempt marker — same audit fix as cronBackfillYears.
   let cursor: string | null = null;
+  let priorDone = false;
   if (!reset) {
-    const { data } = await db.from("norva_search_match_state").select("last_id").eq("id", 1).maybeSingle();
+    const { data } = await db.from("norva_search_match_state").select("last_id, done").eq("id", 1).maybeSingle();
     cursor = (data?.last_id as string | null) ?? null;
+    priorDone = data?.done === true;
   }
 
+  const retryBefore = new Date(Date.now() - 90 * 24 * 3600 * 1000).toISOString();
   let q = db
     .from("cloud_titles")
     .select("id, item_type, title, original_title, release_year, metadata, poster_url, backdrop_url")
     .eq("match_status", "unmatched")
+    .or(`search_match_attempted_at.is.null,search_match_attempted_at.lt.${retryBefore}`)
     .order("id", { ascending: true })
     .limit(limit);
   if (cursor) q = q.gt("id", cursor);
@@ -731,9 +772,9 @@ async function cronSearchMatch(db: SupabaseClient, limit: number, reset: boolean
   const scanned = rows?.length ?? 0;
   if (!scanned) {
     await db.from("norva_search_match_state")
-      .update({ done: true, last_run: { scanned: 0, matched: 0, done: true, at: new Date().toISOString() }, updated_at: new Date().toISOString() })
+      .update({ last_id: null, done: true, last_run: { scanned: 0, matched: 0, done: true, wrapped: true, at: new Date().toISOString() }, updated_at: new Date().toISOString() })
       .eq("id", 1);
-    return { scanned: 0, matched: 0, done: true };
+    return { scanned: 0, matched: 0, done: true, wrapped: true };
   }
 
   const maxId = String(rows![rows!.length - 1].id);
@@ -770,10 +811,18 @@ async function cronSearchMatch(db: SupabaseClient, limit: number, reset: boolean
   };
   await Promise.all(Array.from({ length: Math.min(Math.max(1, concurrency), rows!.length) }, worker));
 
-  const done = scanned < limit;
+  const scannedIds = rows!.map((r) => String(r.id));
+  const attemptedAt = new Date().toISOString();
+  for (let i = 0; i < scannedIds.length; i += 200) {
+    await db.from("cloud_titles").update({ search_match_attempted_at: attemptedAt })
+      .in("id", scannedIds.slice(i, i + 200));
+  }
+
+  const passEnded = scanned < limit;
+  const done = priorDone || passEnded;
   const summary = { scanned, matched, done };
   await db.from("norva_search_match_state")
-    .update({ last_id: maxId, done, last_run: { ...summary, at: new Date().toISOString() }, updated_at: new Date().toISOString() })
+    .update({ last_id: passEnded ? null : maxId, done, last_run: { ...summary, wrapped: passEnded, at: new Date().toISOString() }, updated_at: new Date().toISOString() })
     .eq("id", 1);
   return summary;
 }
