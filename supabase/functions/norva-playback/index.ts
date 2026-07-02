@@ -1201,6 +1201,16 @@ async function resolvePlaybackTarget(
 // EPISODES are streamable. Resolve a representative episode (first episode of the lowest
 // season) via get_series_info, so the audio header-probe has a real file to read. A
 // series' audio tracks are consistent across episodes, so one episode represents it.
+//
+// Resolution order (séries fix, post cron-audit): Ninja and Ferran REJECT the edge's direct
+// datacenter-IP get_series_info — their séries sat at ~0 probed forever (5/37 999 and 7/10 676,
+// every candidate noTarget), while Promax/super8k/Airysat/KING365 tolerate it. So:
+//   1. cloud_series_info_cache — zero provider hit (filled by the fiche read-through);
+//   2. the media gateway's /xtream/series-info — the residential IP the panel already trusts
+//      (same path the fiche prewarm used; VLC UA like the gateway's streaming identity);
+//   3. the historical direct call — kept for gateway-down / not-configured.
+// Calls stay strictly sequential inside a probe tick (concurrency 1) — same single-connection
+// discipline as before, just from an IP the panel accepts.
 async function resolveSeriesEpisodeUrl(sourceId: string, seriesId: string, userId: string, db: SupabaseClient): Promise<string | null> {
   const cfg = await loadSourceConfig(sourceId, userId, db).catch(() => null);
   if (!cfg) return null;
@@ -1210,22 +1220,57 @@ async function resolveSeriesEpisodeUrl(sourceId: string, seriesId: string, userI
   if (!serverUrl || !username || !password) return null;
   let base: string;
   try { base = normalizeBaseUrl(serverUrl); } catch { return null; }
+
+  // episodes is keyed by season number; pick the first episode of the lowest season.
+  const episodeUrlFrom = (info: JsonRecord | null): string | null => {
+    const episodes = recordOrEmpty(info?.episodes);
+    for (const sk of Object.keys(episodes).sort((a, b) => Number(a) - Number(b))) {
+      const list = (episodes as JsonRecord)[sk];
+      if (Array.isArray(list) && list.length) {
+        const ep = recordOrEmpty(list[0]);
+        const epId = stringOr(ep.id, "");
+        const container = stringOr(ep.container_extension, "mp4");
+        if (epId) return xtreamStreamUrl({ serverUrl, username, password, streamType: "series", streamId: epId, container });
+      }
+    }
+    return null;
+  };
+
+  // 1) Series-info cache (keyed server_host + series_id, PK-indexed) — no provider hit at all.
+  try {
+    const host = new URL(base).host;
+    const { data: row } = await db.from("cloud_series_info_cache")
+      .select("payload").eq("server_host", host).eq("series_id", seriesId).maybeSingle();
+    const cached = episodeUrlFrom(recordOrEmpty((row as JsonRecord | null)?.payload));
+    if (cached) return cached;
+  } catch (_) { /* cache unavailable → fall through */ }
+
+  // 2) Media gateway (residential IP): the only path Ninja/Ferran accept.
+  try {
+    const rc = await getRuntimeConfig(db);
+    if (rc.mediaGatewayUrl && rc.mediaGatewayToken) {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 12000);
+      try {
+        const resp = await fetch(`${rc.mediaGatewayUrl}/xtream/series-info`, {
+          method: "POST",
+          signal: ctrl.signal,
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${rc.mediaGatewayToken}` },
+          body: JSON.stringify({ serverUrl, username, password, seriesId, userAgent: "VLC/3.0.20 LibVLC/3.0.20" }),
+        });
+        if (resp.ok) {
+          const viaGateway = episodeUrlFrom(recordOrEmpty(await resp.json().catch(() => null)));
+          if (viaGateway) return viaGateway;
+        }
+      } finally { clearTimeout(timer); }
+    }
+  } catch (_) { /* gateway hiccup → fall through to direct */ }
+
+  // 3) Historical direct call (works on panels that tolerate datacenter IPs).
   const api = `${base}/player_api.php?username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}&action=get_series_info&series_id=${encodeURIComponent(seriesId)}`;
   const res = await fetch(api, { headers: { "user-agent": "NorvaCloud/1.0", accept: "application/json" } }).catch(() => null);
   if (!res || !res.ok) return null;
-  const info = (await res.json().catch(() => null)) as JsonRecord | null;
-  const episodes = recordOrEmpty(info?.episodes);
-  // episodes is keyed by season number; pick the first episode of the lowest season.
-  for (const sk of Object.keys(episodes).sort((a, b) => Number(a) - Number(b))) {
-    const list = (episodes as JsonRecord)[sk];
-    if (Array.isArray(list) && list.length) {
-      const ep = recordOrEmpty(list[0]);
-      const epId = stringOr(ep.id, "");
-      const container = stringOr(ep.container_extension, "mp4");
-      if (epId) return xtreamStreamUrl({ serverUrl, username, password, streamType: "series", streamId: epId, container });
-    }
-  }
-  return null;
+  return episodeUrlFrom((await res.json().catch(() => null)) as JsonRecord | null);
 }
 
 async function createRelayAccess(
