@@ -7,9 +7,12 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="mobile-web-app-capable" content="yes">
+  <meta name="theme-color" content="#0a0a0f">
   <title>Norva | Cloud media player</title>
   <meta name="description" content="Organize your compatible media source and sync playback across your screens.">
   <link rel="icon" type="image/png" href="/favicon.png">
+  <link rel="manifest" href="/manifest.json">
+  <link rel="apple-touch-icon" href="/img/icons/icon-192.png">
   <!-- Warm the TLS connection to the API origin before the first data fetch (every
        catalogue/auth call goes here) — saves a full DNS+TCP+TLS round-trip on cold load. -->
   <link rel="preconnect" href="https://oupsceccxsonaalhueff.supabase.co" crossorigin>
@@ -77,7 +80,26 @@
     })();
   </script>
   <!-- HLS.js for video playback -->
-  <script defer src="https://cdn.jsdelivr.net/npm/hls.js@1.5.7/dist/hls.min.js"></script>
+  <!-- hls.js (~400 KB) is only needed at playback time: injected lazily after
+       first paint (idle), or immediately when the app boots straight into a
+       Live/Watch view. Playback always starts well after this resolves. -->
+  <script>
+    (function () {
+      let injected = false;
+      window.ensureHls = function () {
+        if (injected || window.Hls) return;
+        injected = true;
+        const s = document.createElement('script');
+        s.src = 'https://cdn.jsdelivr.net/npm/hls.js@1.5.7/dist/hls.min.js';
+        document.head.appendChild(s);
+      };
+      if (/#(live|watch)/.test(location.hash)) { window.ensureHls(); return; }
+      window.addEventListener('load', function () {
+        if ('requestIdleCallback' in window) requestIdleCallback(window.ensureHls, { timeout: 4000 });
+        else setTimeout(window.ensureHls, 2500);
+      });
+    })();
+  </script>
 </head>
 
 <body class="catalog-locked">
@@ -1901,9 +1923,21 @@
   <script defer src="/js/pages/Settings.js?v=29"></script>
   <script defer src="/js/pages/WatchPage.js?v=114"></script>
   <script defer src="/js/profiles.js?v=7"></script>
-  <script defer src="/js/pages/AdminPage.js?v=22"></script>
+  <!-- AdminPage.js (76 KB, admin-only) is lazy-loaded by app.ensureAdminPage(). -->
   <script defer src="/js/maintenance-banner.js?v=1"></script>
   <script defer src="/js/app.js?v=35"></script>
+  <script>
+    // PWA: register the app-shell service worker (network-first — a deploy always
+    // wins; the cache only serves when offline). Skipped inside the native APK
+    // shells, whose WebView has its own asset story.
+    (function () {
+      if (!('serviceWorker' in navigator)) return;
+      if (/NorvaTV-Android/i.test(navigator.userAgent)) return;
+      window.addEventListener('load', function () {
+        navigator.serviceWorker.register('/sw.js').catch(function () { /* PWA optional */ });
+      });
+    })();
+  </script>
   <script>
     // Check for SSO token in URL
     (function () {

@@ -1,0 +1,40 @@
+{
+  "id": "/app.html",
+  "name": "Norva",
+  "short_name": "Norva",
+  "description": "Your media universe — movies, series and live TV across all your screens.",
+  "start_url": "/app.html?pwa=1#home",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0a0a0f",
+  "theme_color": "#0a0a0f",
+  "categories": ["entertainment", "video"],
+  "icons": [
+    { "src": "/img/icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/img/icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/img/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    {
+      "name": "Home",
+      "url": "/app.html?pwa=1#home",
+      "icons": [{ "src": "/img/icons/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Movies",
+      "url": "/app.html?pwa=1#movies",
+      "icons": [{ "src": "/img/icons/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Series",
+      "url": "/app.html?pwa=1#series",
+      "icons": [{ "src": "/img/icons/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Live TV",
+      "url": "/app.html?pwa=1#live",
+      "icons": [{ "src": "/img/icons/icon-192.png", "sizes": "192x192" }]
+    }
+  ]
+}
