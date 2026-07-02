@@ -2387,7 +2387,7 @@ async function transcribeEnqueue(
   db: SupabaseClient,
   userId: string,
   runtimeConfig: RuntimeConfig,
-  opts: { titleId?: string; sourceId?: string; externalId?: string; itemType?: string; index?: number; start?: number; dur?: number; force?: boolean; respectFailedCooldown?: boolean },
+  opts: { titleId?: string; sourceId?: string; externalId?: string; itemType?: string; index?: number; start?: number; dur?: number; force?: boolean; respectFailedCooldown?: boolean; origin?: string },
 ): Promise<JsonRecord> {
   if (!runtimeConfig.mediaGatewayUrl || !runtimeConfig.mediaGatewayToken) throw new HttpError(503, "Media gateway is not configured");
   const { sourceId, externalId, itemType } = await resolveSubtitleTarget(db, userId, opts);
@@ -2437,7 +2437,10 @@ async function transcribeEnqueue(
   const exp = new Date(Date.now() + 2 * 3600 * 1000).toISOString();
   const pipe = await createBytePipeAccess("transcribe-job", userId, tUrl, exp, db, null);
   const cbUrl = `${Deno.env.get("SUPABASE_URL") ?? ""}/functions/v1/norva-playback/transcribe-callback`;
-  const asyncUrl = `${pipe.url.replace("/raw/", "/transcribe-async/")}?index=${idx}&jobId=${jobId}&callback=${encodeURIComponent(cbUrl)}&start=${bStart}&dur=${bDur}`;
+  // origin drives the gateway's priority classes: a viewer waiting in front of the player jumps
+  // ahead of the nightly pregen batch (viewer > service > pregen).
+  const origin = ["viewer", "service", "pregen"].includes(stringOr(opts.origin, "")) ? stringOr(opts.origin, "") : "service";
+  const asyncUrl = `${pipe.url.replace("/raw/", "/transcribe-async/")}?index=${idx}&jobId=${jobId}&callback=${encodeURIComponent(cbUrl)}&start=${bStart}&dur=${bDur}&origin=${origin}`;
   let gwStatus = 0, gwBody: JsonRecord | null = null;
   try {
     const gw = await fetch(asyncUrl, { method: "POST", signal: AbortSignal.timeout(20000) });
@@ -2638,26 +2641,37 @@ async function getGeneratedSubtitle(req: Request, userId: string, db: SupabaseCl
   const ident = await resolveSourceIdentity(sourceId, userId, db);
   const pkey = ident.key;
   if (!pkey) return { status: "none", providerKey: null };
+  const COLS = "status, vtt, source_lang, segments, audio_sec, job_id, updated_at, error, stage, claimed_by";
   let { data: row } = await db.from("catalog_generated_subtitles")
-    .select("status, vtt, source_lang, segments, audio_sec, job_id, updated_at")
+    .select(COLS)
     .eq("provider_key", pkey).eq("item_type", itemType).eq("external_id", externalId)
     .eq("kind", kind).eq("lang", cacheLang).maybeSingle();
   // Transition fallback: a VTT generated before the identity re-key still lives under the raw
   // providerKey until the cache backfill moves it — serve it instead of regenerating.
   if (!row && ident.fingerprint && ident.fingerprint !== pkey) {
     ({ data: row } = await db.from("catalog_generated_subtitles")
-      .select("status, vtt, source_lang, segments, audio_sec, job_id, updated_at")
+      .select(COLS)
       .eq("provider_key", ident.fingerprint).eq("item_type", itemType).eq("external_id", externalId)
       .eq("kind", kind).eq("lang", cacheLang).maybeSingle());
   }
   const rec = row as JsonRecord | null;
   if (!rec) return { status: "none", providerKey: pkey, kind, lang };
   const status = stringOr(rec.status, "none");
+  const partialVtt = status === "processing" ? stringOr(rec.vtt, "") : "";
   return {
     status, kind, lang, providerKey: pkey, jobId: rec.job_id ?? null,
     sourceLang: rec.source_lang ?? null, segments: rec.segments ?? null, audioSec: rec.audio_sec ?? null,
     updatedAt: rec.updated_at ?? null,
-    vtt: status === "ready" ? stringOr(rec.vtt, "") : null,
+    // The real failure cause (creds-redacted at the source) — the player shows a short human
+    // reason and keeps the full text in a tooltip, instead of a blind "failed — retry".
+    error: status === "failed" ? stringOrNull(rec.error) : null,
+    // Honest progress: gateway heartbeats stamp the stage (queued/deferred/extracting/
+    // transcribing); "deferred because of YOUR playback" only when the requester is the claimer.
+    stage: status === "processing" ? stringOrNull(rec.stage) : null,
+    deferredByYou: status === "processing" && stringOr(rec.stage, "") === "deferred" && stringOr(rec.claimed_by, "") === userId,
+    // Progressive delivery: a partial VTT streams in while transcription continues.
+    partial: Boolean(partialVtt),
+    vtt: status === "ready" ? stringOr(rec.vtt, "") : (partialVtt || null),
   };
 }
 
@@ -2679,10 +2693,38 @@ async function postGeneratedSubtitle(req: Request, userId: string, db: SupabaseC
   // Phase 3b: a translation request (kind='translation' or a target lang) routes to the Argos path.
   const target = stringOr(body.targetLang, "").toLowerCase();
   if (stringOr(body.kind, "transcript") === "translation" || (target && target !== "src")) {
-    return await translateEnqueue(db, userId, runtimeConfig, {
+    const tr = await translateEnqueue(db, userId, runtimeConfig, {
       titleId: stringOr(body.titleId, ""), sourceId: stringOr(body.sourceId, ""), externalId: stringOr(body.externalId, ""),
       itemType: stringOr(body.itemType, ""), targetLang: target, force: body.force === true,
     });
+    // Chained click (language picked at click time, body.chain): no transcript yet → record the
+    // intention SERVER-SIDE as a 'pending-transcript' translation row (it survives closing the
+    // tab — the transcript callback resolves it) and kick the transcript in the same call.
+    if (body.chain === true && target && stringOr(tr.status, "") === "transcript-required") {
+      const { sourceId, externalId, itemType } = await resolveSubtitleTarget(db, userId, {
+        titleId: stringOr(body.titleId, ""), sourceId: stringOr(body.sourceId, ""), externalId: stringOr(body.externalId, ""),
+        itemType: stringOr(body.itemType, ""),
+      });
+      const pkey = stringOr(tr.providerKey, "");
+      if (pkey && /^[a-z]{2,3}$/.test(target)) {
+        const nowIso = new Date().toISOString();
+        // Never clobbers a live/ready row (insert-if-absent)…
+        await db.from("catalog_generated_subtitles").upsert({
+          provider_key: pkey, item_type: itemType, external_id: externalId, kind: "translation", lang: target,
+          status: "pending-transcript", job_id: crypto.randomUUID(), error: null, claimed_by: userId, updated_at: nowIso,
+        }, { onConflict: "provider_key,item_type,external_id,kind,lang", ignoreDuplicates: true });
+        // …but a previously-FAILED translation must not block the fresh chain: flip it to pending.
+        await db.from("catalog_generated_subtitles")
+          .update({ status: "pending-transcript", claimed_by: userId, error: null, updated_at: nowIso })
+          .eq("provider_key", pkey).eq("item_type", itemType).eq("external_id", externalId)
+          .eq("kind", "translation").eq("lang", target).eq("status", "failed");
+      }
+      const t = await transcribeEnqueue(db, userId, runtimeConfig, {
+        titleId: stringOr(body.titleId, ""), sourceId, externalId, itemType, origin: "viewer",
+      });
+      return { kind: "transcript", lang: "src", chained: target, ...t };
+    }
+    return tr;
   }
   const r = await transcribeEnqueue(db, userId, runtimeConfig, {
     titleId: stringOr(body.titleId, ""),
@@ -2691,6 +2733,7 @@ async function postGeneratedSubtitle(req: Request, userId: string, db: SupabaseC
     itemType: stringOr(body.itemType, ""),
     index: Number.isInteger(Number(body.index)) ? Number(body.index) : undefined,
     force: body.force === true,
+    origin: "viewer", // a human is waiting in front of the player — outranks the pregen batch
     // dur 0 = whole film; user triggers never clip (clipping is a pipeline-test affordance only).
   });
   return { kind: "transcript", lang: "src", ...r };
@@ -2836,19 +2879,125 @@ async function runTranscribeCallback(req: Request, db: SupabaseClient) {
   const jobId = stringOr(body.jobId, "");
   if (!jobId) throw new HttpError(400, "jobId is required");
   const nowIso = new Date().toISOString();
+
+  // NON-TERMINAL heartbeat: the gateway stamps the job's stage (queued/deferred/extracting/
+  // transcribing) and keeps updated_at fresh — a live job deferred for hours is no longer
+  // reaped at 2h nor re-claimed at 90min mid-flight. Never touches status.
+  if (body.heartbeat === true) {
+    const stage = ["queued", "deferred", "extracting", "transcribing"].includes(stringOr(body.stage, ""))
+      ? stringOr(body.stage, "") : null;
+    await db.from("catalog_generated_subtitles")
+      .update({ stage, updated_at: nowIso })
+      .eq("job_id", jobId).eq("status", "processing"); // never resurrect a terminal row
+    return { ok: true, heartbeat: true, jobId, stage };
+  }
+
+  // NON-TERMINAL partial delivery (V2 chunked pipeline): a growing VTT streams in while the
+  // transcription continues — the player attaches it minutes after the real start.
+  if (body.partial === true) {
+    await db.from("catalog_generated_subtitles")
+      .update({
+        vtt: stringOr(body.vtt, ""), source_lang: stringOrNull(body.sourceLang),
+        segments: Number.isFinite(Number(body.segments)) ? Number(body.segments) : null,
+        stage: "transcribing", updated_at: nowIso,
+      })
+      .eq("job_id", jobId).eq("status", "processing");
+    return { ok: true, partial: true, jobId };
+  }
+
   const patch: JsonRecord = body.ok === true
     ? { status: "ready", vtt: stringOr(body.vtt, ""), source_lang: stringOrNull(body.sourceLang),
         audio_sec: Number.isFinite(Number(body.audioSec)) ? Number(body.audioSec) : null,
-        segments: Number.isFinite(Number(body.segments)) ? Number(body.segments) : null, error: null, updated_at: nowIso }
-    : { status: "failed", error: stringOr(body.error, "unknown").slice(0, 300), updated_at: nowIso };
+        segments: Number.isFinite(Number(body.segments)) ? Number(body.segments) : null, error: null, stage: null, updated_at: nowIso }
+    : { status: "failed", error: stringOr(body.error, "unknown").slice(0, 300), stage: null, updated_at: nowIso };
   const { data: updated, error } = await db.from("catalog_generated_subtitles").update(patch).eq("job_id", jobId)
-    .select("provider_key, item_type, external_id, kind, lang, status, segments").maybeSingle();
+    .select("provider_key, item_type, external_id, kind, lang, status, segments, source_lang, vtt, claimed_by").maybeSingle();
   if (error) throwDb(error, "transcribe callback update failed");
+  // Server-side translation chaining: a transcript landing (ready OR failed) resolves every
+  // 'pending-transcript' intention recorded at click time — works with the viewer's tab closed.
+  const updRec = updated as JsonRecord | null;
+  if (updRec && stringOr(updRec.kind, "") === "transcript") {
+    try { await resolvePendingTranslations(db, runtimeConfig, updRec); }
+    catch (e) { console.error("[norva-playback] pending-translation chain failed", String(e)); }
+  }
   // Email anyone who opted in for this transcript (best-effort: a send/dispatch failure here must
   // not fail the callback, or the gateway will think the result was lost and the row stays stuck).
   try { await dispatchSubtitleNotifications(db, updated as JsonRecord | null); }
   catch (e) { console.error("[norva-playback] notify dispatch failed", String(e)); }
   return { ok: true, jobId, status: patch.status };
+}
+
+// Resolve the 'pending-transcript' translation intentions of a transcript that just landed:
+// same language → served the transcript directly (zero cost); translatable → POST the gateway's
+// pure-CPU /translate-async (no provider connection, ~20-45s/film — the subtitle in the picked
+// language arrives ~1 min after the transcript, tab open or not); untranslatable/failed source →
+// the pending row is failed with a clear reason (never left orphaned — the reaper also backstops
+// at 24h). Each pending row is claimed via a status-guarded UPDATE, so a concurrent viewer click
+// (translateEnqueue) and this chain can't double-enqueue.
+async function resolvePendingTranslations(db: SupabaseClient, runtimeConfig: RuntimeConfig, tr: JsonRecord) {
+  const pkey = stringOr(tr.provider_key, ""), itemType = stringOr(tr.item_type, ""), externalId = stringOr(tr.external_id, "");
+  if (!pkey || !itemType || !externalId) return;
+  const { data: pendings } = await db.from("catalog_generated_subtitles")
+    .select("lang")
+    .eq("provider_key", pkey).eq("item_type", itemType).eq("external_id", externalId)
+    .eq("kind", "translation").eq("status", "pending-transcript");
+  const rows = (pendings ?? []) as JsonRecord[];
+  if (!rows.length) return;
+  const nowIso = new Date().toISOString();
+  const ready = stringOr(tr.status, "") === "ready";
+  const vtt = stringOr(tr.vtt, "");
+  const segments = Number(tr.segments ?? 0);
+  const sourceLang = (stringOr(tr.source_lang, "") || "en").toLowerCase();
+  const cbUrl = `${Deno.env.get("SUPABASE_URL") ?? ""}/functions/v1/norva-playback/transcribe-callback`;
+  for (const p of rows) {
+    const target = stringOr(p.lang, "");
+    if (!target) continue;
+    const failPending = async (msg: string) => {
+      await db.from("catalog_generated_subtitles")
+        .update({ status: "failed", error: msg.slice(0, 300), updated_at: nowIso })
+        .eq("provider_key", pkey).eq("item_type", itemType).eq("external_id", externalId)
+        .eq("kind", "translation").eq("lang", target).eq("status", "pending-transcript");
+    };
+    if (!ready) { await failPending("source transcript failed"); continue; }
+    if (!vtt || segments <= 0) { await failPending("no speech in the source transcript"); continue; }
+    if (sourceLang === target) {
+      // The film already speaks the requested language — the transcript IS the answer.
+      const { data: upd } = await db.from("catalog_generated_subtitles")
+        .update({ status: "ready", vtt, source_lang: sourceLang, segments, error: null, stage: null, updated_at: nowIso })
+        .eq("provider_key", pkey).eq("item_type", itemType).eq("external_id", externalId)
+        .eq("kind", "translation").eq("lang", target).eq("status", "pending-transcript")
+        .select("lang").maybeSingle();
+      if (upd) {
+        try { await dispatchSubtitleNotifications(db, { provider_key: pkey, item_type: itemType, external_id: externalId, kind: "translation", lang: target, status: "ready", segments }); }
+        catch (_) { /* best-effort */ }
+      }
+      continue;
+    }
+    if (!runtimeConfig.mediaGatewayUrl || !runtimeConfig.mediaGatewayToken) { await failPending("translation gateway not configured"); continue; }
+    const jobId = crypto.randomUUID();
+    const { data: claimed } = await db.from("catalog_generated_subtitles")
+      .update({ status: "processing", job_id: jobId, error: null, stage: null, updated_at: nowIso })
+      .eq("provider_key", pkey).eq("item_type", itemType).eq("external_id", externalId)
+      .eq("kind", "translation").eq("lang", target).eq("status", "pending-transcript")
+      .select("lang").maybeSingle();
+    if (!claimed) continue; // raced away (a viewer click claimed it first)
+    let gwStatus = 0, gwErr = "";
+    try {
+      const gw = await fetch(`${runtimeConfig.mediaGatewayUrl}/translate-async`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${runtimeConfig.mediaGatewayToken}` },
+        body: JSON.stringify({ jobId, callback: cbUrl, source: sourceLang, target, vtt }),
+        signal: AbortSignal.timeout(20000),
+      });
+      gwStatus = gw.status;
+      if (gwStatus !== 202) gwErr = stringOr(((await gw.json().catch(() => null)) as JsonRecord | null)?.error, "");
+    } catch (_) { gwStatus = 0; }
+    if (gwStatus !== 202) {
+      await db.from("catalog_generated_subtitles")
+        .update({ status: "failed", error: (gwErr || `translate gateway ${gwStatus}`).slice(0, 300), updated_at: nowIso })
+        .eq("job_id", jobId);
+    }
+  }
 }
 
 // True when the user is actively watching right now: a fresh playback event (the player emits
@@ -3258,7 +3407,7 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
       try {
         // respectFailedCooldown: skip a title that failed in the last 24h so it can't re-burn a
         // slot every night; a fresh candidate is tried instead.
-        const r = await transcribeEnqueue(db, userId, runtimeConfig, { titleId, respectFailedCooldown: true });
+        const r = await transcribeEnqueue(db, userId, runtimeConfig, { titleId, respectFailedCooldown: true, origin: "pregen" });
         if (stringOr(r.status, "") === "processing" && r.cached !== true) {
           enqueued += 1; started.push({ titleId, jobId: r.jobId ?? null, priority: row.priority });
         } else if (stringOr(r.status, "") === "error") errored += 1;
