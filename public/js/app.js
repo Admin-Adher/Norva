@@ -28,7 +28,9 @@ class App {
         this.pages.series = new SeriesPage(this);
         this.pages.settings = new SettingsPage(this);
         this.pages.watch = new WatchPage(this);
-        this.pages.admin = new AdminPage(this);
+        // AdminPage (76 KB) is admin-only: loaded on demand (ensureAdminPage) so
+        // every non-admin phone stops downloading/parsing it at boot.
+        this.pages.admin = null;
         this.entitlement = null;
         this.sourceHealthSummary = null;
         this.catalogPages = new Set(['live', 'movies', 'series']);
@@ -614,7 +616,7 @@ class App {
                 // always 'admin' (hardcoded above), so it can't gate — the authoritative check is
                 // the server-side is_admin() RPC (app_metadata.role in the JWT). Non-admins never
                 // see the link, and even if they did, every admin RPC rejects them.
-                this.pages.admin?.isAdmin?.().then((ok) => {
+                this.checkIsAdmin().then((ok) => {
                     if (!ok) return;
                     document.querySelectorAll('[data-page="admin"]').forEach((l) => {
                         l.hidden = false;
@@ -1097,8 +1099,10 @@ class App {
         // Phone/tablet APK only, and only with ≥1 download. Gate on the APK's UA
         // marker so it can never leak onto the web or the Android TV app, where
         // the native downloads screen doesn't exist.
+        // Always visible in the APK (Netflix keeps its Downloads tab even at
+        // zero state — the native screen owns the empty-state guidance).
         const isApk = /NorvaTV-AndroidPhone/i.test(navigator.userAgent || '');
-        const show = isApk && this.downloadsCount() >= 1;
+        const show = isApk;
         for (const link of links) {
             link.hidden = !show;
             // .nav-link forces display:flex with no [hidden] override, so toggle
@@ -1602,6 +1606,12 @@ class App {
         const openFiche = this.readOpenFiche();
         if (openFiche && this.fichePageFor(openFiche) !== pageName) this.forgetOpenFiche();
 
+        // Remember where the outgoing page was scrolled (page-level scroller, e.g.
+        // #page-home; Movies/Series grids save their own scroller in hide()).
+        this._pageScroll = this._pageScroll || {};
+        const prevPageEl = document.getElementById(`page-${this.currentPage}`);
+        if (prevPageEl) this._pageScroll[this.currentPage] = prevPageEl.scrollTop || 0;
+
         // Update nav
         document.querySelectorAll('.nav-link').forEach(link => {
             link.classList.toggle('active', link.dataset.page === pageName);
@@ -1621,8 +1631,30 @@ class App {
         // Hide the mobile bottom tab bar while watching (full-screen video).
         document.body.classList.toggle('is-watching', pageName === 'watch');
 
-        if (this.pages[pageName]?.show) {
+        // Playback pages want hls.js in flight before any stream resolves.
+        if (pageName === 'live' || pageName === 'watch') window.ensureHls?.();
+
+        if (pageName === 'admin' && !this.pages.admin) {
+            // Lazy route: fetch + instantiate AdminPage on first entry only.
+            this.ensureAdminPage()
+                .then((page) => { if (this.currentPage === 'admin') page?.show?.(); })
+                .catch((err) => console.error('[App] AdminPage load failed:', err));
+        } else if (this.pages[pageName]?.show) {
             this.pages[pageName].show();
+        }
+
+        // Restore the incoming page's position (two passes: instant, and once
+        // async content has had a beat to paint back at full height).
+        const savedTop = this._pageScroll[pageName] || 0;
+        if (savedTop > 0) {
+            const restore = () => {
+                const el = document.getElementById(`page-${pageName}`);
+                if (el && Math.abs(el.scrollTop - savedTop) > 4 && el.scrollHeight > savedTop) {
+                    el.scrollTop = savedTop;
+                }
+            };
+            requestAnimationFrame(restore);
+            setTimeout(restore, 350);
         }
 
         // After the switch: the watch page is its own fullscreen player, so a movie
@@ -1632,6 +1664,51 @@ class App {
         if (pageName === 'watch') {
             try { this.exitLiveMini({ stop: true }); } catch (_) { /* noop */ }
         }
+    }
+
+    /** Load AdminPage's script on demand and instantiate it (admin-only route). */
+    async ensureAdminPage() {
+        if (this.pages.admin) return this.pages.admin;
+        if (!this._adminPageLoading) {
+            this._adminPageLoading = new Promise((resolve, reject) => {
+                if (window.AdminPage) { resolve(); return; }
+                const s = document.createElement('script');
+                s.src = '/js/pages/AdminPage.js?v=22';
+                s.onload = () => resolve();
+                s.onerror = () => { this._adminPageLoading = null; reject(new Error('AdminPage.js failed to load')); };
+                document.head.appendChild(s);
+            });
+        }
+        await this._adminPageLoading;
+        if (!this.pages.admin && window.AdminPage) this.pages.admin = new AdminPage(this);
+        return this.pages.admin;
+    }
+
+    /**
+     * Lightweight authoritative admin check (server-side is_admin() RPC) that
+     * doesn't require AdminPage to be loaded — it gates whether the Admin nav
+     * link (and thus the lazy AdminPage download) is ever offered at all.
+     */
+    async checkIsAdmin() {
+        if (this._isAdminCached !== undefined) return this._isAdminCached;
+        try {
+            if (!window.API?.isCloudMode?.()) { this._isAdminCached = false; return false; }
+            const sbUrl = (localStorage.getItem('norva-supabase-url') || window.NORVA_SUPABASE_URL
+                || 'https://oupsceccxsonaalhueff.supabase.co').replace(/\/+$/, '');
+            const sbKey = localStorage.getItem('norva-supabase-key') || window.NORVA_SUPABASE_PUBLISHABLE_KEY
+                || 'sb_publishable_LJwYVgPGHYNYTDk7s3eOew_6TU73Fcw';
+            let token = '';
+            try { token = (JSON.parse(localStorage.getItem('norva-cloud-session') || 'null') || {}).access_token || ''; } catch (_) { }
+            const res = await fetch(`${sbUrl}/rest/v1/rpc/is_admin`, {
+                method: 'POST',
+                headers: { apikey: sbKey, Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+                body: '{}'
+            });
+            this._isAdminCached = res.ok && (await res.json()) === true;
+        } catch (_) {
+            this._isAdminCached = false;
+        }
+        return this._isAdminCached;
     }
 
     /**

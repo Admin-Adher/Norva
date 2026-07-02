@@ -132,8 +132,12 @@ class MoviesPage {
 
         // Continue Watching shrinks to a compact pinned strip while the grid scrolls,
         // reclaiming vertical space without disappearing. Hysteresis avoids flicker
-        // right at the threshold.
-        this.container?.addEventListener('scroll', () => this.updateContinueCompact(), { passive: true });
+        // right at the threshold. The same listener drives the virtualization
+        // window (re-materialize recycled cards when scrolling back up).
+        this.container?.addEventListener('scroll', () => {
+            this.updateContinueCompact();
+            this.restoreRecycledCards();
+        }, { passive: true });
 
         // Favorites filter toggle
         const favBtn = document.getElementById('movies-favorites-btn');
@@ -310,6 +314,7 @@ class MoviesPage {
 
     async renderGenreRails() {
         this.railsView = true;
+        this._viewRenderedAt = Date.now();
         if (this.countEl) this.countEl.textContent = '';
         this.resetBtn?.classList.add('hidden');
         if (this.randomBtn) this.randomBtn.disabled = true; // "Random" needs the flat grid.
@@ -501,6 +506,16 @@ class MoviesPage {
         if (this._facetTimer) clearInterval(this._facetTimer);
         this._facetTimer = setInterval(() => this.populateLanguageFacets(), 600000);
 
+        // Returning to a recently rendered view (grid or rails): keep the DOM as-is
+        // and restore the scroll position instead of re-rendering back to the top.
+        if (this._viewRenderedAt && Date.now() - this._viewRenderedAt < 300000
+            && this.container?.childElementCount > 0
+            && !this.container.querySelector('.catalog-locked-empty')) {
+            const saved = this._savedScrollTop || 0;
+            if (saved > 0) requestAnimationFrame(() => { this.container.scrollTop = saved; });
+            return;
+        }
+
         // A genre is selected (e.g. returning to the page) → (re)open its grid.
         if (this.isCloudPagedMode()) {
             const selectedBuckets = [...(this.categoryMulti?.getSelected() || [])];
@@ -530,6 +545,8 @@ class MoviesPage {
 
     hide() {
         if (this._facetTimer) { clearInterval(this._facetTimer); this._facetTimer = null; }
+        // Scroll restoration: the grid is its own scroller, remembered per visit.
+        this._savedScrollTop = this.container?.scrollTop || 0;
     }
 
     renderCatalogLocked() {
@@ -1072,9 +1089,11 @@ class MoviesPage {
         console.log(`[Movies] Displaying ${cards.length} cards from ${this.movies.length} movies`);
 
         this.currentBatch = 0;
+        this._winStart = 0; // virtualization: index of the first card still in the DOM
         // Flat card grid → drop the rail-host modifier so the grid centers/wraps.
         this.container.classList.remove('rail-host');
         this.container.innerHTML = '';
+        this._viewRenderedAt = Date.now();
         // Re-rendering resets scrollTop to 0 without firing a scroll event, so
         // re-sync the compact strip to avoid it sticking shrunk at the top.
         this.updateContinueCompact();
@@ -1087,6 +1106,13 @@ class MoviesPage {
             return;
         }
 
+        // Virtualization spacer: stands in for the recycled cards above the
+        // window so the scrollbar geometry (and position) never jumps.
+        const spacer = document.createElement('div');
+        spacer.className = 'grid-spacer';
+        spacer.style.height = '0px';
+        this.container.appendChild(spacer);
+
         const loader = document.createElement('div');
         loader.className = 'movies-loader';
         loader.innerHTML = '<div class="loading-spinner"></div>';
@@ -1097,6 +1123,56 @@ class MoviesPage {
         }
 
         this.observer.observe(loader);
+    }
+
+    // === Grid virtualization =================================================
+    // The infinite scroll used to append 24-card batches FOREVER (a 500k-title
+    // catalog = unbounded DOM). The window keeps at most ~15 batches alive:
+    // scrolling down recycles the top cards into a height-preserving spacer;
+    // scrolling back up rebuilds them from `filteredCards` (cards are pure
+    // functions of their data, so nothing needs to be retained).
+
+    static get GRID_DOM_CARD_CAP() { return 360; }
+
+    recycleOffscreenCards() {
+        const spacer = this.container?.querySelector('.grid-spacer');
+        if (!spacer) return;
+        let rendered = this.currentBatch * this.batchSize - (this._winStart || 0);
+        while (rendered > MoviesPage.GRID_DOM_CARD_CAP) {
+            const before = this.container.scrollHeight;
+            let removed = 0;
+            let node = spacer.nextElementSibling;
+            while (node && removed < this.batchSize && node.classList.contains('movie-card')) {
+                const next = node.nextElementSibling;
+                node.remove();
+                removed++;
+                node = next;
+            }
+            if (!removed) break;
+            const delta = before - this.container.scrollHeight;
+            spacer.style.height = `${(parseFloat(spacer.style.height) || 0) + Math.max(0, delta)}px`;
+            this._winStart = (this._winStart || 0) + removed;
+            rendered -= removed;
+        }
+    }
+
+    restoreRecycledCards() {
+        const spacer = this.container?.querySelector('.grid-spacer');
+        if (!spacer || !(this._winStart > 0)) return;
+        const spacerHeight = parseFloat(spacer.style.height) || 0;
+        if (spacerHeight <= 0 || this.container.scrollTop > spacerHeight + 600) return;
+
+        const start = Math.max(0, this._winStart - this.batchSize);
+        const fragment = document.createDocumentFragment();
+        for (let i = start; i < this._winStart; i++) {
+            const data = this.filteredCards[i];
+            if (data) fragment.appendChild(this.buildCard(data));
+        }
+        const before = this.container.scrollHeight;
+        spacer.after(fragment);
+        const delta = this.container.scrollHeight - before;
+        spacer.style.height = `${Math.max(0, spacerHeight - delta)}px`;
+        this._winStart = start;
     }
 
     sortCards(cards) {
@@ -1183,6 +1259,7 @@ class MoviesPage {
         }
 
         this.currentBatch++;
+        this.recycleOffscreenCards();
 
         if (end >= this.filteredCards.length && loader && !(this.isCloudPagedMode() && this.cloudHasMore)) {
             loader.style.display = 'none';
@@ -1212,9 +1289,11 @@ class MoviesPage {
         const groupBroken = group.items.every(item => this.isBrokenItem(item));
         const languageBadge = MediaUtils.versionLanguageBadge(movie, this.getPreferences());
 
+        const srcset = MediaUtils.tmdbSrcset(poster);
         card.innerHTML = `
             <div class="movie-poster">
                 <img src="${MediaUtils.escapeHtml(poster)}" alt="${MediaUtils.escapeHtml(displayName)}"
+                     ${srcset ? `srcset="${MediaUtils.escapeHtml(srcset)}" sizes="(max-width: 640px) 45vw, 190px"` : ''}
                      onerror="this.onerror=null;this.src='/img/norva-media-placeholder.png'" loading="lazy" decoding="async">
                 <div class="movie-play-overlay">
                     <span class="play-icon">${Icons.play}</span>
@@ -1248,6 +1327,26 @@ class MoviesPage {
             } else {
                 this.openGroup(group);
             }
+        });
+
+        // Hover preview (desktop): bigger art + instant Play / Details.
+        card.__norvaHover = () => ({
+            title: displayName,
+            meta: [year, movie.tmdb?.runtime ? `${movie.tmdb.runtime} min` : '', movie.rating ? `★ ${movie.rating}` : '']
+                .filter(Boolean).join(' · '),
+            poster,
+            backdrop: MediaUtils.safeImageUrl(this.getMovieBackdrop(movie), '') || null,
+            onPlay: () => {
+                this.openGroup(group);
+                let tries = 0;
+                const tick = () => {
+                    const btn = document.querySelector('#movie-details:not(.hidden) #movie-primary-action');
+                    if (btn && !btn.disabled) { btn.click(); return; }
+                    if (++tries < 12) setTimeout(tick, 250);
+                };
+                setTimeout(tick, 150);
+            },
+            onDetails: () => this.openGroup(group)
         });
 
         return card;
@@ -1699,12 +1798,53 @@ class MoviesPage {
         this.syncDownloadButton();
         this.renderMovieVersions(movie);
         this.renderMoreLikeThis(movie);
+        this.renderFicheExtras(displayMovie);
 
         if (focusVersions) {
             setTimeout(() => {
                 this.detailsPanel?.querySelector('.movie-versions-section')?.scrollIntoView({ block: 'start' });
             }, 50);
         }
+    }
+
+    // Live TMDB extras on the fiche: trailer button + cast/director credits.
+    // Fire-and-forget with a token so a stale fetch never paints a newer fiche.
+    async renderFicheExtras(displayMovie) {
+        const token = (this._ficheExtrasToken = (this._ficheExtrasToken || 0) + 1);
+        this.detailsPanel?.querySelector('.detail-credits')?.remove();
+        this.detailsPanel?.querySelector('.detail-trailer-btn')?.remove();
+        const tmdbId = displayMovie?.provider_tmdb_id || displayMovie?.providerTmdbId
+            || displayMovie?.tmdb_id || displayMovie?.tmdb?.id || displayMovie?.metadata?.providerTmdbId;
+        if (!tmdbId || /^(tt)?0+$/i.test(String(tmdbId)) || !window.NorvaCloud?.media?.tmdbMeta) return;
+        try {
+            const meta = await NorvaCloud.media.tmdbMeta({ type: 'movie', tmdbId: String(tmdbId) });
+            if (token !== this._ficheExtrasToken || !meta?.available) return;
+
+            const plotEl = document.getElementById('movie-detail-plot');
+            const people = [];
+            const castNames = (meta.cast || []).slice(0, 6).map(c => c.name).filter(Boolean);
+            if (castNames.length) people.push(`<span class="detail-credits-label">Cast</span> ${MediaUtils.escapeHtml(castNames.join(', '))}`);
+            if ((meta.directors || []).length) people.push(`<span class="detail-credits-label">Director</span> ${MediaUtils.escapeHtml(meta.directors.join(', '))}`);
+            if (people.length && plotEl) {
+                const credits = document.createElement('div');
+                credits.className = 'detail-credits';
+                credits.innerHTML = people.map(p => `<div class="detail-credits-row">${p}</div>`).join('');
+                plotEl.insertAdjacentElement('afterend', credits);
+            }
+
+            if (meta.trailerKey) {
+                const actions = this.detailsPanel?.querySelector('.movie-detail-actions');
+                if (actions && !actions.querySelector('.detail-trailer-btn')) {
+                    const btn = document.createElement('button');
+                    btn.type = 'button';
+                    btn.className = 'btn btn-ghost detail-trailer-btn';
+                    btn.innerHTML = '▶ Trailer';
+                    btn.addEventListener('click', () =>
+                        MediaUtils.openTrailerLightbox(meta.trailerKey, this.getMovieDisplayTitle(displayMovie)));
+                    actions.appendChild(btn);
+                }
+            }
+        } catch (_) { /* extras are progressive enhancement */ }
     }
 
     // "More like this": a genre-matched rail at the bottom of the fiche so the user

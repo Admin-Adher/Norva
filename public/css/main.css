@@ -1546,11 +1546,12 @@ h4 {
   }
 }
 
-/* Closed Caption styling */
+/* Closed Caption styling — user-tunable via the captions menu's Appearance
+   panel (WatchPage sets the --norva-sub-* custom properties on :root). */
 video::cue {
-  background-color: rgba(0, 0, 0, 0.8);
-  color: #fff;
-  font-size: 1.2em;
+  background-color: var(--norva-sub-bg, rgba(0, 0, 0, 0.8));
+  color: var(--norva-sub-color, #fff);
+  font-size: calc(1.2em * var(--norva-sub-scale, 1));
   font-family: inherit;
   padding: 0.2em 0.5em;
 }
@@ -10210,37 +10211,439 @@ mark.search-highlight {
    ============================================================ */
 
 #watch-video::cue {
-  background: rgba(0, 0, 0, 0.6);
-  color: #fff;
-  font-size: 1.05em;
+  background: var(--norva-sub-bg, rgba(0, 0, 0, 0.6));
+  color: var(--norva-sub-color, #fff);
+  font-size: calc(1.05em * var(--norva-sub-scale, 1));
   line-height: 1.3;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
   white-space: pre-line;
+}
+
+/* Captions menu — Appearance panel (size / background / color) */
+.captions-style {
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  margin-top: 8px;
+  padding: 10px 14px 6px;
+}
+
+.captions-style-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 0;
+}
+
+.captions-style-name {
+  font-size: 0.85rem;
+  color: var(--color-text-secondary, #a1a1aa);
+}
+
+/* "Skip intro" — bottom-right of the video, above the control bar */
+.watch-skip-intro {
+  position: absolute;
+  right: 28px;
+  bottom: 118px;
+  z-index: 24;
+  padding: 12px 22px;
+  background: rgba(22, 22, 30, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  border-radius: 6px;
+  color: #fff;
+  font-size: 0.95rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.15s ease;
+}
+
+.watch-skip-intro:hover,
+.watch-skip-intro:focus {
+  background: rgba(255, 255, 255, 0.95);
+  color: #0a0a0f;
+  transform: scale(1.03);
+}
+
+.watch-skip-intro.hidden {
+  display: none;
+}
+
+/* ============================================================
+   Fiche extras — TMDB credits + trailer lightbox
+   ============================================================ */
+
+.detail-credits {
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.detail-credits-row {
+  font-size: 0.9rem;
+  color: var(--color-text-secondary, #a1a1aa);
+  line-height: 1.45;
+}
+
+.detail-credits-label {
+  color: var(--color-text-muted, #71717a);
+  font-weight: 600;
+  margin-right: 6px;
+}
+
+.detail-credits-label::after {
+  content: ' ·';
+}
+
+.trailer-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  background: rgba(5, 5, 10, 0.92);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4vh 4vw;
+}
+
+.trailer-lightbox-inner {
+  position: relative;
+  width: min(1100px, 100%);
+  aspect-ratio: 16 / 9;
+  background: #000;
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.7);
+}
+
+.trailer-lightbox-inner iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+.trailer-lightbox-close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 2;
+  width: 38px;
+  height: 38px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+.trailer-lightbox-close:hover,
+.trailer-lightbox-close:focus {
+  background: rgba(255, 255, 255, 0.9);
+  color: #0a0a0f;
+}
+
+/* ============================================================
+   Hover preview — floating expanded card (desktop pointer only)
+   ============================================================ */
+
+.hover-preview {
+  position: fixed;
+  z-index: 900;
+  background: #16161e;
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.72);
+  opacity: 0;
+  transform: scale(0.94);
+  transition: opacity 0.16s ease, transform 0.16s ease;
+  pointer-events: none;
+}
+
+.hover-preview.visible {
+  opacity: 1;
+  transform: scale(1);
+  pointer-events: auto;
+}
+
+.hover-preview.hidden {
+  display: none;
+}
+
+.hover-preview-art {
+  aspect-ratio: 16 / 9;
+  background: #0a0a0f;
+  overflow: hidden;
+}
+
+.hover-preview-art img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.hover-preview-body {
+  padding: 14px 16px 16px;
+}
+
+.hover-preview-title {
+  font-size: 1.02rem;
+  font-weight: 700;
+  color: #fff;
+  margin-bottom: 4px;
+}
+
+.hover-preview-meta {
+  font-size: 0.82rem;
+  color: var(--color-text-secondary, #a1a1aa);
+  margin-bottom: 12px;
+}
+
+.hover-preview-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.hover-preview-actions button {
+  flex: 0 0 auto;
+  padding: 8px 16px;
+  border: none;
+  border-radius: 6px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.hover-preview-play {
+  background: #fff;
+  color: #0a0a0f;
+}
+
+.hover-preview-play:hover {
+  background: #e4e4f2;
+}
+
+.hover-preview-info {
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+}
+
+.hover-preview-info:hover {
+  background: rgba(255, 255, 255, 0.24);
+}
+
+/* ============================================================
+   Home billboard — rotation dots + trailer button
+   ============================================================ */
+
+.home-hero-dots {
+  display: flex;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.home-hero-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: none;
+  padding: 0;
+  background: rgba(255, 255, 255, 0.35);
+  cursor: pointer;
+  transition: background 0.2s ease, transform 0.2s ease;
+}
+
+.home-hero-dot.active {
+  background: #fff;
+  transform: scale(1.25);
+}
+
+.home-hero-desc.hidden {
+  display: none;
+}
+
+/* Grid virtualization: full-width height stand-in for recycled cards. */
+.movies-grid .grid-spacer,
+.series-grid .grid-spacer {
+  grid-column: 1 / -1;
+  width: 100%;
+  padding: 0;
+  margin: 0;
+}
+
+/* ============================================================
+   Chromecast (web sender) — cast button + active-session bar
+   ============================================================ */
+
+.watch-cast-btn {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  z-index: 26;
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 50%;
+  background: rgba(10, 10, 15, 0.6);
+  color: #fff;
+  cursor: pointer;
+}
+
+.watch-cast-btn:hover,
+.watch-cast-btn:focus {
+  background: rgba(255, 255, 255, 0.9);
+  color: #0a0a0f;
+}
+
+.watch-cast-btn.hidden {
+  display: none;
+}
+
+.watch-cast-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 27;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 20px;
+  background: rgba(10, 10, 15, 0.85);
+  color: #fff;
+}
+
+.watch-cast-bar.hidden {
+  display: none;
+}
+
+.watch-cast-bar-label {
+  flex: 1;
+  font-size: 0.95rem;
+}
+
+.watch-cast-toggle,
+.watch-cast-stop {
+  border: none;
+  border-radius: 6px;
+  padding: 8px 14px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+}
+
+.watch-cast-stop {
+  background: #3b82f6;
+}
+
+/* ============================================================
+   Seek thumbnails — storyboard preview above the timeline
+   ============================================================ */
+
+.watch-progress-container {
+  position: relative;
+}
+
+.watch-seek-thumb {
+  position: absolute;
+  bottom: 30px;
+  transform: translateX(-50%);
+  border: 2px solid rgba(255, 255, 255, 0.85);
+  border-radius: 6px;
+  overflow: hidden;
+  background: #000;
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+  z-index: 30;
+}
+
+.watch-seek-thumb.hidden {
+  display: none;
+}
+
+.watch-seek-thumb-img {
+  width: 100%;
+  height: 100%;
+  background-repeat: no-repeat;
+}
+
+.watch-seek-thumb-time {
+  position: absolute;
+  bottom: 4px;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #fff;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.95);
 }
 
 /* ============================================================
    TV mode (Android TV WebView client) — D-pad focus ring
    ============================================================ */
 
+/* 10-foot focus: a high-luminance white ring reads from the couch on a dark
+   grid where a medium-blue one disappears (Netflix uses the same trick). */
 .tv-mode *:focus {
-  outline: 3px solid var(--color-accent) !important;
-  outline-offset: 2px;
+  outline: 4px solid #ffffff !important;
+  outline-offset: 3px;
   border-radius: var(--radius-sm);
   scroll-margin: 120px;
+  box-shadow: 0 0 0 7px rgba(0, 0, 0, 0.55);
 }
 
 .tv-mode .movie-card:focus,
 .tv-mode .series-card:focus,
 .tv-mode .continue-card:focus,
-.tv-mode .dashboard-card:focus {
-  transform: scale(1.04);
+.tv-mode .dashboard-card:focus,
+.tv-mode .channel-tile:focus {
+  transform: scale(1.09);
   transition: transform 0.12s ease;
   z-index: 3;
+}
+
+/* Dim the siblings of the focused card so the ring pops even harder. Scoped to
+   rows/grids that hold a focused card (:focus-within), never the whole page. */
+.tv-mode .horizontal-scroll:focus-within .dashboard-card:not(:focus),
+.tv-mode .horizontal-scroll:focus-within .continue-card:not(:focus),
+.tv-mode .horizontal-scroll:focus-within .channel-tile:not(:focus),
+.tv-mode .movies-grid:focus-within .movie-card:not(:focus),
+.tv-mode .series-grid:focus-within .series-card:not(:focus) {
+  opacity: 0.62;
+  transition: opacity 0.15s ease;
 }
 
 /* TV viewports sit far away: slightly larger base text */
 .tv-mode body {
   font-size: 17px;
+}
+
+/* Overscan/title-safe margins: env(safe-area-inset-*) is 0 on Android TV, and
+   many panels crop ~2-5% at the edges. Pad the shell so the navbar and edge
+   cards are never clipped (≈5% horizontal / 3% vertical at 1080p). */
+.tv-mode .navbar {
+  padding-left: 48px;
+  padding-right: 48px;
+  padding-top: 20px;
+}
+
+.tv-mode .main-content {
+  padding-left: 48px;
+  padding-right: 48px;
+  padding-bottom: 27px;
+}
+
+/* The watch page is edge-to-edge video by design — no overscan padding. */
+.tv-mode .main-content #page-watch {
+  margin-left: -48px;
+  margin-right: -48px;
 }
 
 /* ============================================================

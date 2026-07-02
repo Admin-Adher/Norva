@@ -1146,6 +1146,43 @@ const MediaUtils = (() => {
         return codec.includes('aac') || codec.includes('mp4a.40.2') || codec.includes('mp3') || codec.includes('opus') || codec.includes('vorbis');
     }
 
+    /**
+     * Fullscreen YouTube trailer lightbox (fiches + billboard). youtube-nocookie
+     * embed, closed by ✕ / backdrop click / Escape.
+     */
+    function openTrailerLightbox(youtubeKey, title = '') {
+        if (!youtubeKey) return;
+        document.getElementById('norva-trailer-lightbox')?.remove();
+        const ov = document.createElement('div');
+        ov.id = 'norva-trailer-lightbox';
+        ov.className = 'trailer-lightbox';
+        ov.innerHTML = `
+            <div class="trailer-lightbox-inner">
+                <button type="button" class="trailer-lightbox-close" aria-label="Close trailer">✕</button>
+                <iframe src="https://www.youtube-nocookie.com/embed/${encodeURIComponent(youtubeKey)}?autoplay=1&rel=0&modestbranding=1"
+                    title="${escapeHtml(title || 'Trailer')}"
+                    allow="autoplay; encrypted-media; fullscreen" allowfullscreen></iframe>
+            </div>`;
+        const close = () => ov.remove();
+        ov.addEventListener('click', (e) => { if (e.target === ov) close(); });
+        ov.querySelector('.trailer-lightbox-close').addEventListener('click', close);
+        document.addEventListener('keydown', function esc(e) {
+            if (e.key === 'Escape') { close(); document.removeEventListener('keydown', esc); }
+        });
+        document.body.appendChild(ov);
+    }
+
+    /**
+     * TMDB srcset for poster <img>s: the CDN serves the same path at several
+     * widths, so small screens stop over-fetching and large ones stop upscaling.
+     * Returns '' for non-TMDB URLs (single provider size — nothing to vary).
+     */
+    function tmdbSrcset(url) {
+        const m = /^(https:\/\/image\.tmdb\.org\/t\/p\/)w\d+(\/.+)$/.exec(String(url || ''));
+        if (!m) return '';
+        return `${m[1]}w185${m[2]} 185w, ${m[1]}w342${m[2]} 342w, ${m[1]}w500${m[2]} 500w`;
+    }
+
     // Skeleton placeholder cards for loading rails/grids — same 160px footprint as
     // a real card so swapping in real content doesn't shift the layout. The shimmer
     // and reduced-motion handling live in CSS (.skeleton).
@@ -1169,7 +1206,7 @@ const MediaUtils = (() => {
         orderVersionsByPreference, versionLabel, versionLanguageBadge, audioLanguageBadge,
         saveFilters, loadFilters, escapeHtml, tmdbPosterUrl, parseDurationToSeconds,
         playbackHintFromItem, liveGatewayMode, safeImageUrl, downloadablePosterUrl,
-        enhanceRailScroll
+        enhanceRailScroll, openTrailerLightbox, tmdbSrcset
     };
 })();
 

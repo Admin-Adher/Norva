@@ -3,6 +3,8 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- Google Play Billing (in-app subscriptions via RevenueCat). -->
     <uses-permission android:name="com.android.vending.BILLING" />
+    <!-- Watch Next ("Play Next") row on the Android TV launcher. -->
+    <uses-permission android:name="com.android.providers.tv.permission.WRITE_EPG_DATA" />
 
     <uses-feature
         android:name="android.software.leanback"
@@ -25,11 +27,27 @@
             android:name=".MainActivity"
             android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenLayout|screenSize|smallestScreenSize|uiMode"
             android:exported="true"
+            android:launchMode="singleTask"
             android:screenOrientation="landscape">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- Watch Next / deep-link entry: norva://open?sourceId=..&itemType=..&itemId=..
+                 (used by the launcher's Play Next row to resume a title in-app). -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="norva" android:host="open" />
+            </intent-filter>
+            <!-- Voice/remote search hand-off: the query is forwarded to the web app's
+                 global search. (Launcher-level catalog search needs a Google Media
+                 Actions feed — a partner program, out of client scope.) -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEARCH" />
+                <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
         <activity

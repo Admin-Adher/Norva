@@ -74,6 +74,56 @@
         } catch (_) { /* best-effort */ }
     };
 
+    // The native player's "À suivre" overlay picked the next episode (button or
+    // countdown) → same flow as onEnded but skipping the web-side 8s prompt.
+    window.__norvaNative.onPlayNext = (sourceId, itemType, itemId) => {
+        try {
+            window.dispatchEvent(new CustomEvent('norva-native-ended', {
+                detail: {
+                    sourceId: String(sourceId || ''), itemType: itemType || '',
+                    itemId: String(itemId || ''), immediate: true
+                }
+            }));
+        } catch (_) { /* best-effort */ }
+    };
+
+    // Deep-link entry (Android TV Watch Next card, share links): resume the item
+    // from the cloud history. Returns synchronously; the lookup runs async.
+    window.__norvaNative.openItem = (sourceId, itemType, itemId) => {
+        (async () => {
+            try {
+                const home = window.app?.pages?.home;
+                const items = await window.API?.history?.getAll?.(200);
+                const match = (items || []).find((it) =>
+                    String(it.item_id ?? it.itemId ?? it.id) === String(itemId) &&
+                    String(it.source_id ?? it.sourceId ?? '') === String(sourceId));
+                if (match && home?.openRailItem) {
+                    home.openRailItem(match, true);
+                    return;
+                }
+                // Not in history (e.g. cleared): land on the right catalog page.
+                window.app?.navigateTo?.(itemType === 'series' || itemType === 'episode' ? 'series' : 'movies');
+            } catch (_) { /* best-effort */ }
+        })();
+        return true;
+    };
+
+    // Voice/remote search hand-off from the native shell: open the global search
+    // overlay pre-filled with the spoken query.
+    window.__norvaNative.openSearch = (query) => {
+        try {
+            window.app?.openSearch?.();
+            const input = document.getElementById('gsearch-input');
+            if (input) {
+                input.value = String(query || '');
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+            }
+            return true;
+        } catch (_) {
+            return false;
+        }
+    };
+
     // Hardware Back button bridge for the native phone shell. Returns 'handled'
     // when Back was consumed inside the page (an open overlay closed, or we
     // stepped back to Home) so the native layer leaves history/exit alone, else
@@ -176,12 +226,32 @@
         // beyond this window), so real playback is never blocked. This is the one
         // choke point for ALL native playback (channels, movies, episodes).
         let lastNativePlayAt = 0;
-        const nativePlay = (streamUrl, title, meta, resumeSeconds, fallbackUrl) => {
+        const nativePlay = (streamUrl, title, meta, resumeSeconds, fallbackUrl, extras) => {
             const nowTs = Date.now();
             if (nowTs - lastNativePlayAt < 1500) return;
             lastNativePlayAt = nowTs;
             const resume = Math.max(0, Math.floor(Number(resumeSeconds) || 0));
             const fb = fallbackUrl || '';
+            if (meta && typeof bridge.playVideoJson === 'function') {
+                // Newest APK: one JSON payload. Extras feed the launcher's Play Next
+                // card (poster) and the native "À suivre" overlay (nextTitle).
+                let poster = '';
+                try {
+                    if (extras?.poster) poster = new URL(extras.poster, location.origin).href;
+                } catch (_) { /* art is optional */ }
+                bridge.playVideoJson(JSON.stringify({
+                    url: streamUrl,
+                    fallbackUrl: fb,
+                    title: title || 'Norva',
+                    sourceId: String(meta.sourceId || ''),
+                    itemType: meta.itemType || '',
+                    itemId: String(meta.itemId || ''),
+                    resumeSeconds: resume,
+                    poster,
+                    nextTitle: extras?.nextTitle || ''
+                }));
+                return;
+            }
             if (meta && fb && typeof bridge.playVideoResumableFallback === 'function') {
                 // Newest APK: hand the player a direct URL + a gateway fallback URL it
                 // switches to if the provider refuses the direct (residential-IP) request.
@@ -285,7 +355,10 @@
                 // fallbackUrl: the resolver payload carries it for the movie/series
                 // path; the restore-after-refresh path passes it as the 3rd arg.
                 const fallbackUrl = resolved.fallbackUrl || (playback && playback.fallbackUrl) || null;
-                nativePlay(resolved.url, nativeTitle(content), contentMeta(content), content.resumeTime, fallbackUrl);
+                nativePlay(resolved.url, nativeTitle(content), contentMeta(content), content.resumeTime, fallbackUrl, {
+                    poster: content.poster || '',
+                    nextTitle: content.nextEpisodeLabel || ''
+                });
             };
         }
 

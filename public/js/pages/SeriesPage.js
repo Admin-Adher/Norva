@@ -131,7 +131,10 @@ class SeriesPage {
 
         // Continue Watching shrinks to a compact pinned strip while the grid scrolls,
         // reclaiming vertical space without disappearing.
-        this.container?.addEventListener('scroll', () => this.updateContinueCompact(), { passive: true });
+        this.container?.addEventListener('scroll', () => {
+            this.updateContinueCompact();
+            this.restoreRecycledCards();
+        }, { passive: true });
 
         const favBtn = document.getElementById('series-favorites-btn');
         favBtn?.addEventListener('click', () => {
@@ -307,6 +310,7 @@ class SeriesPage {
 
     async renderGenreRails() {
         this.railsView = true;
+        this._viewRenderedAt = Date.now();
         this.activeBucket = null;
         this.bucketObserver?.disconnect();
         if (this.countEl) this.countEl.textContent = '';
@@ -500,6 +504,16 @@ class SeriesPage {
         if (this._facetTimer) clearInterval(this._facetTimer);
         this._facetTimer = setInterval(() => this.populateLanguageFacets(), 600000);
 
+        // Returning to a recently rendered view (grid or rails): keep the DOM as-is
+        // and restore the scroll position instead of re-rendering back to the top.
+        if (this._viewRenderedAt && Date.now() - this._viewRenderedAt < 300000
+            && this.container?.childElementCount > 0
+            && !this.container.querySelector('.catalog-locked-empty')) {
+            const saved = this._savedScrollTop || 0;
+            if (saved > 0) requestAnimationFrame(() => { this.container.scrollTop = saved; });
+            return;
+        }
+
         // A genre is selected (e.g. returning to the page) → (re)open its grid.
         if (this.isCloudPagedMode()) {
             const selectedBuckets = [...(this.categoryMulti?.getSelected() || [])];
@@ -529,6 +543,8 @@ class SeriesPage {
 
     hide() {
         if (this._facetTimer) { clearInterval(this._facetTimer); this._facetTimer = null; }
+        // Scroll restoration: the grid is its own scroller, remembered per visit.
+        this._savedScrollTop = this.container?.scrollTop || 0;
     }
 
     renderCatalogLocked() {
@@ -1042,9 +1058,11 @@ class SeriesPage {
         console.log(`[Series] Displaying ${cards.length} cards from ${this.seriesList.length} series`);
 
         this.currentBatch = 0;
+        this._winStart = 0; // virtualization: index of the first card still in the DOM
         // Flat card grid → drop the rail-host modifier so the grid centers/wraps.
         this.container.classList.remove('rail-host');
         this.container.innerHTML = '';
+        this._viewRenderedAt = Date.now();
         // Re-rendering resets scrollTop to 0 without firing a scroll event, so
         // re-sync the compact strip to avoid it sticking shrunk at the top.
         this.updateContinueCompact();
@@ -1057,6 +1075,13 @@ class SeriesPage {
             return;
         }
 
+        // Virtualization spacer: stands in for the recycled cards above the
+        // window so the scrollbar geometry (and position) never jumps.
+        const spacer = document.createElement('div');
+        spacer.className = 'grid-spacer';
+        spacer.style.height = '0px';
+        this.container.appendChild(spacer);
+
         const loader = document.createElement('div');
         loader.className = 'series-loader';
         loader.innerHTML = '<div class="loading-spinner"></div>';
@@ -1067,6 +1092,51 @@ class SeriesPage {
         }
 
         this.observer.observe(loader);
+    }
+
+    // === Grid virtualization (same window/recycle scheme as MoviesPage) ===
+
+    static get GRID_DOM_CARD_CAP() { return 360; }
+
+    recycleOffscreenCards() {
+        const spacer = this.container?.querySelector('.grid-spacer');
+        if (!spacer) return;
+        let rendered = this.currentBatch * this.batchSize - (this._winStart || 0);
+        while (rendered > SeriesPage.GRID_DOM_CARD_CAP) {
+            const before = this.container.scrollHeight;
+            let removed = 0;
+            let node = spacer.nextElementSibling;
+            while (node && removed < this.batchSize && node.classList.contains('series-card')) {
+                const next = node.nextElementSibling;
+                node.remove();
+                removed++;
+                node = next;
+            }
+            if (!removed) break;
+            const delta = before - this.container.scrollHeight;
+            spacer.style.height = `${(parseFloat(spacer.style.height) || 0) + Math.max(0, delta)}px`;
+            this._winStart = (this._winStart || 0) + removed;
+            rendered -= removed;
+        }
+    }
+
+    restoreRecycledCards() {
+        const spacer = this.container?.querySelector('.grid-spacer');
+        if (!spacer || !(this._winStart > 0)) return;
+        const spacerHeight = parseFloat(spacer.style.height) || 0;
+        if (spacerHeight <= 0 || this.container.scrollTop > spacerHeight + 600) return;
+
+        const start = Math.max(0, this._winStart - this.batchSize);
+        const fragment = document.createDocumentFragment();
+        for (let i = start; i < this._winStart; i++) {
+            const data = this.filteredCards[i];
+            if (data) fragment.appendChild(this.buildCard(data));
+        }
+        const before = this.container.scrollHeight;
+        spacer.after(fragment);
+        const delta = this.container.scrollHeight - before;
+        spacer.style.height = `${Math.max(0, spacerHeight - delta)}px`;
+        this._winStart = start;
     }
 
     sortCards(cards) {
@@ -1152,6 +1222,7 @@ class SeriesPage {
         }
 
         this.currentBatch++;
+        this.recycleOffscreenCards();
 
         if (end >= this.filteredCards.length && loader && !(this.isCloudPagedMode() && this.cloudHasMore)) {
             loader.style.display = 'none';
@@ -1178,9 +1249,11 @@ class SeriesPage {
         const groupBroken = group.items.every(item => this.isBrokenItem(item));
         const languageBadge = MediaUtils.versionLanguageBadge(series, this.getPreferences());
 
+        const srcset = MediaUtils.tmdbSrcset(poster);
         card.innerHTML = `
             <div class="series-poster">
                 <img src="${MediaUtils.escapeHtml(poster)}" alt="${MediaUtils.escapeHtml(displayName)}"
+                     ${srcset ? `srcset="${MediaUtils.escapeHtml(srcset)}" sizes="(max-width: 640px) 45vw, 190px"` : ''}
                      onerror="this.onerror=null;this.src='/img/norva-media-placeholder.png'" loading="lazy" decoding="async">
                 <div class="series-play-overlay">
                     <span class="play-icon">${Icons.play}</span>
@@ -1213,6 +1286,26 @@ class SeriesPage {
             } else {
                 this.openGroup(group);
             }
+        });
+
+        // Hover preview (desktop): bigger art + instant Play (featured episode) / Details.
+        card.__norvaHover = () => ({
+            title: displayName,
+            meta: [year, series.tmdb?.number_of_seasons ? `${series.tmdb.number_of_seasons} seasons` : '',
+                series.rating ? `★ ${series.rating}` : ''].filter(Boolean).join(' · '),
+            poster,
+            backdrop: MediaUtils.safeImageUrl(this.getSeriesBackdrop(series), '') || null,
+            onPlay: () => {
+                this.openGroup(group);
+                let tries = 0;
+                const tick = () => {
+                    const btn = document.querySelector('#series-details:not(.hidden) #series-primary-action');
+                    if (btn && !btn.disabled) { btn.click(); return; }
+                    if (++tries < 16) setTimeout(tick, 250);
+                };
+                setTimeout(tick, 200);
+            },
+            onDetails: () => this.openGroup(group)
         });
 
         return card;
@@ -1662,6 +1755,7 @@ class SeriesPage {
         document.getElementById('series-plot').textContent = series.tmdb?.overview || series.plot || 'No summary available yet.';
         this.syncDetailFavoriteButton();
         this.renderMoreLikeThis(series);
+        this.renderFicheExtras(series);
 
         this.seasonsContainer.innerHTML = '<div class="loading"><div class="loading-spinner"></div></div>';
         if (this.primaryActionBtn) {
@@ -1844,6 +1938,47 @@ class SeriesPage {
         return { friendly, detail };
     }
 
+    // Live TMDB extras on the fiche: trailer button + cast/creator credits.
+    // Fire-and-forget with a token so a stale fetch never paints a newer fiche.
+    async renderFicheExtras(series) {
+        const token = (this._ficheExtrasToken = (this._ficheExtrasToken || 0) + 1);
+        this.detailsPanel?.querySelector('.detail-credits')?.remove();
+        this.detailsPanel?.querySelector('.detail-trailer-btn')?.remove();
+        const tmdbId = series?.provider_tmdb_id || series?.providerTmdbId
+            || series?.tmdb_id || series?.tmdb?.id || series?.metadata?.providerTmdbId;
+        if (!tmdbId || /^(tt)?0+$/i.test(String(tmdbId)) || !window.NorvaCloud?.media?.tmdbMeta) return;
+        try {
+            const meta = await NorvaCloud.media.tmdbMeta({ type: 'series', tmdbId: String(tmdbId) });
+            if (token !== this._ficheExtrasToken || !meta?.available) return;
+
+            const plotEl = document.getElementById('series-plot');
+            const people = [];
+            const castNames = (meta.cast || []).slice(0, 6).map(c => c.name).filter(Boolean);
+            if (castNames.length) people.push(`<span class="detail-credits-label">Cast</span> ${MediaUtils.escapeHtml(castNames.join(', '))}`);
+            const makers = (meta.creators || []).length ? meta.creators : (meta.directors || []);
+            if (makers.length) people.push(`<span class="detail-credits-label">Created by</span> ${MediaUtils.escapeHtml(makers.join(', '))}`);
+            if (people.length && plotEl) {
+                const credits = document.createElement('div');
+                credits.className = 'detail-credits';
+                credits.innerHTML = people.map(p => `<div class="detail-credits-row">${p}</div>`).join('');
+                plotEl.insertAdjacentElement('afterend', credits);
+            }
+
+            if (meta.trailerKey) {
+                const actions = this.detailsPanel?.querySelector('.series-detail-actions');
+                if (actions && !actions.querySelector('.detail-trailer-btn')) {
+                    const btn = document.createElement('button');
+                    btn.type = 'button';
+                    btn.className = 'btn btn-ghost detail-trailer-btn';
+                    btn.innerHTML = '▶ Trailer';
+                    btn.addEventListener('click', () =>
+                        MediaUtils.openTrailerLightbox(meta.trailerKey, this.getSeriesDisplayTitle(series)));
+                    actions.appendChild(btn);
+                }
+            }
+        } catch (_) { /* extras are progressive enhancement */ }
+    }
+
     // "More like this": a genre-matched rail at the bottom of the series fiche so the
     // user keeps browsing instead of backing out. Fire-and-forget; a token guards a
     // stale fetch from landing on a newer fiche.
@@ -1910,6 +2045,13 @@ class SeriesPage {
         if (idx < 0) return;                 // ended episode isn't in this open series
         const nextEl = all[idx + 1];
         if (!nextEl) return;                 // last episode — nothing to autoplay
+        // The native "À suivre" overlay already ran its own countdown/choice:
+        // chain straight into the next episode, no second prompt.
+        if (detail.immediate) {
+            this.cancelNextEpisodePrompt();
+            this.playEpisode(nextEl);
+            return;
+        }
         this.promptNextEpisode(nextEl);
     }
 
@@ -1981,6 +2123,22 @@ class SeriesPage {
         // Episode duration ("00:42:10") as timeline fallback
         const durationText = episodeEl.querySelector('.episode-duration')?.textContent;
         const durationHint = (h?.duration) || MediaUtils.parseDurationToSeconds(durationText);
+        // Follower label for the native player's end-of-stream "À suivre" overlay
+        // (season boundaries included: the flat episode list is in play order).
+        let nextEpisodeLabel = null;
+        const flatEpisodes = this.seasonsContainer
+            ? [...this.seasonsContainer.querySelectorAll('.episode-item')] : [];
+        const flatIdx = flatEpisodes.indexOf(episodeEl);
+        const nextEpisodeEl = flatIdx >= 0 ? flatEpisodes[flatIdx + 1] : null;
+        if (nextEpisodeEl) {
+            const nTitle = nextEpisodeEl.querySelector('.episode-title')?.textContent || '';
+            const nNum = nextEpisodeEl.dataset.episodeNum
+                || nextEpisodeEl.querySelector('.episode-number')?.textContent?.replace('E', '') || '';
+            const nSeason = nextEpisodeEl.dataset.season
+                || nextEpisodeEl.closest('.season-group')?.querySelector('.season-name')?.textContent?.match(/Season (\d+)/)?.[1]
+                || seasonNum;
+            nextEpisodeLabel = `S${nSeason} E${nNum}${nTitle ? ' - ' + nTitle : ''}`;
+        }
         const content = {
             type: 'series',
             id: episodeId,
@@ -1992,6 +2150,9 @@ class SeriesPage {
             rating: this.currentSeries?.rating,
             sourceId: sourceId,
             seriesId: this.currentSeries?.series_id,
+            // TMDB id keys the cross-user skip-intro markers for this season.
+            providerTmdbId: this.currentSeries?.provider_tmdb_id || this.currentSeries?.providerTmdbId
+                || this.currentSeries?.tmdb?.id || null,
             seriesInfo: this.currentSeriesInfo,
             currentSeason: seasonNum,
             currentEpisode: episodeNum,
@@ -2008,7 +2169,8 @@ class SeriesPage {
                 || this.currentSeriesInfo?.original_language || null,
             // Precomputed ordered per-track language map (when the series was crawled) so
             // the player labels every audio track with ZERO playback probe — same as movies.
-            audioTracks: this.currentSeries?.audioTracks || this.currentSeries?.audio_tracks || null
+            audioTracks: this.currentSeries?.audioTracks || this.currentSeries?.audio_tracks || null,
+            nextEpisodeLabel
         };
 
         // Open the player immediately, then resolve the stream URL into the shell.

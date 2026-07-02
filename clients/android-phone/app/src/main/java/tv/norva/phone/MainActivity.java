@@ -112,22 +112,8 @@ public class MainActivity extends Activity {
         buildSplash();
         showSplash();
 
-        // Handle norva://pair deep link
-        Intent intent = getIntent();
-        if (Intent.ACTION_VIEW.equals(intent.getAction())) {
-            Uri data = intent.getData();
-            if (data != null
-                    && "norva".equals(data.getScheme())
-                    && "pair".equals(data.getHost())) {
-                String hubUrl = data.getQueryParameter("hub");
-                String code   = data.getQueryParameter("code");
-                if (hubUrl != null && code != null) {
-                    prefs().edit().putString(PREF_SERVER_URL, hubUrl).putString(PREF_MODE, "server").apply();
-                    connect(hubUrl + "/pair-approve.html?code=" + code);
-                    return;
-                }
-            }
-        }
+        // Handle norva://pair and https://norva.tv/... deep links
+        if (handleDeepLink(getIntent())) return;
 
         String mode = prefs().getString(PREF_MODE, null);
         String saved = prefs().getString(PREF_SERVER_URL, null);
@@ -149,6 +135,49 @@ public class MainActivity extends Activity {
         // Push: ask for notification permission and cache the FCM token so the web
         // bridge (getPushToken) can hand it to the backend for "catalog ready" pushes.
         setupPush();
+    }
+
+    /**
+     * norva://pair (QR pairing) and https://norva.tv App Links. Returns true when
+     * the intent fully decided the initial navigation (pairing flow).
+     */
+    private boolean handleDeepLink(Intent intent) {
+        if (intent == null || !Intent.ACTION_VIEW.equals(intent.getAction())) return false;
+        Uri data = intent.getData();
+        if (data == null) return false;
+        if ("norva".equals(data.getScheme()) && "pair".equals(data.getHost())) {
+            String hubUrl = data.getQueryParameter("hub");
+            String code   = data.getQueryParameter("code");
+            if (hubUrl != null && code != null) {
+                prefs().edit().putString(PREF_SERVER_URL, hubUrl).putString(PREF_MODE, "server").apply();
+                connect(hubUrl + "/pair-approve.html?code=" + code);
+                return true;
+            }
+            return false;
+        }
+        if ("https".equals(data.getScheme()) && "norva.tv".equals(data.getHost())) {
+            // A shared title/app link: open it in the cloud shell (the web app's
+            // deep-link router reads the #fragment and opens the right fiche).
+            String url = data.toString();
+            if (!url.contains("mobile=1")) {
+                int hash = url.indexOf('#');
+                String base = hash >= 0 ? url.substring(0, hash) : url;
+                String frag = hash >= 0 ? url.substring(hash) : "";
+                url = base + (base.contains("?") ? "&mobile=1" : "?mobile=1") + frag;
+            }
+            prefs().edit().putString(PREF_MODE, "cloud").apply();
+            connectCloud(url);
+            return true;
+        }
+        return false;
+    }
+
+    /** App Link / pairing link tapped while the app is already running. */
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        handleDeepLink(intent);
     }
 
     @Override

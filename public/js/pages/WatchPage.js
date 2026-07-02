@@ -295,6 +295,9 @@ class WatchPage {
         this.progressSlider?.addEventListener('input', (e) => this.previewSeek(e.target.value));
         this.progressSlider?.addEventListener('change', (e) => this.commitSeek(e.target.value));
         this.progressSlider?.addEventListener('pointerup', (e) => this.commitSeek(e.target.value));
+        // Seek thumbnails: storyboard preview above the timeline while hovering/scrubbing.
+        this.progressSlider?.addEventListener('pointermove', (e) => this.updateSeekThumb(e));
+        this.progressSlider?.addEventListener('pointerleave', () => this.hideSeekThumb());
 
         // Video events
         this.video?.addEventListener('timeupdate', () => {
@@ -326,6 +329,9 @@ class WatchPage {
         this.video?.addEventListener('playing', () => this.markPlaybackUsable());
         this.video?.addEventListener('pause', () => this.onPause());
         this.video?.addEventListener('ended', () => this.onEnded());
+        this.setupMediaSessionHandlers();
+        this.applySubtitleStyle();
+        this.setupCastIntegration();
         this.video?.addEventListener('error', (e) => this.onError(e));
         this.video?.addEventListener('waiting', () => this.showLoading());
         this.video?.addEventListener('canplay', () => {
@@ -1340,6 +1346,10 @@ class WatchPage {
         // Reset state
         this.cancelNextEpisode();
         this.nextEpisodeDismissed = false;
+        this.resetSkipIntroState();
+        this.loadIntroMarkers();
+        this.resetStoryboard();
+        this.loadStoryboard();
 
         // Paint the player shell (poster + title + loading animation) FIRST so the
         // player appears instantly on click — before stopping the previous stream
@@ -1457,6 +1467,272 @@ class WatchPage {
             textEl.textContent = title || 'Now Playing';
             indicator.classList.remove('hidden');
         }
+        this.updateMediaSessionMetadata();
+    }
+
+    // ==================== Media Session (lock screen / hardware keys) ====
+
+    /**
+     * Lock-screen & hardware transport controls for mobile-web playback:
+     * artwork + title on the lock screen, play/pause/±10s/seek-to handlers.
+     * Safe no-op on browsers without the Media Session API.
+     */
+    setupMediaSessionHandlers() {
+        const ms = navigator.mediaSession;
+        if (!ms || this._mediaSessionWired) return;
+        this._mediaSessionWired = true;
+        const safe = (action, handler) => {
+            try { ms.setActionHandler(action, handler); } catch (_) { /* unsupported action */ }
+        };
+        safe('play', () => { try { this.video?.play(); } catch (_) { } });
+        safe('pause', () => { try { this.video?.pause(); } catch (_) { } });
+        safe('seekbackward', (d) => this.skip(-(d?.seekOffset || 10)));
+        safe('seekforward', (d) => this.skip(d?.seekOffset || 10));
+        safe('seekto', (d) => {
+            if (typeof d?.seekTime === 'number') this.seekToTime(d.seekTime, { immediate: true });
+        });
+    }
+
+    updateMediaSessionMetadata() {
+        const ms = navigator.mediaSession;
+        if (!ms || !window.MediaMetadata || !this.content) return;
+        try {
+            const artwork = [];
+            if (this.content.poster) {
+                let posterUrl = this.content.poster;
+                try { posterUrl = new URL(posterUrl, location.origin).href; } catch (_) { }
+                artwork.push({ src: posterUrl, sizes: '342x513', type: 'image/jpeg' });
+            }
+            ms.metadata = new MediaMetadata({
+                title: this.content.title || 'Norva',
+                artist: this.content.subtitle || 'Norva',
+                artwork
+            });
+        } catch (_) { /* metadata is cosmetic */ }
+    }
+
+    updateMediaSessionPosition() {
+        const ms = navigator.mediaSession;
+        if (!ms || typeof ms.setPositionState !== 'function') return;
+        try {
+            const duration = this.getDisplayDuration();
+            if (!duration || !isFinite(duration) || duration <= 0) return;
+            const position = Math.min(Math.max(0, this.getPlaybackPosition() || 0), duration);
+            ms.setPositionState({
+                duration,
+                position,
+                playbackRate: this.video?.playbackRate || 1
+            });
+        } catch (_) { /* position state is cosmetic */ }
+    }
+
+    // ==================== Chromecast (web sender) ====================
+    // The receiver fetches server-served URLs itself (gateway HLS / relay MP4);
+    // engine (MSE) titles are re-resolved through a gateway transcode first.
+    // Local playback is fully released before the receiver connects, so
+    // single-connection provider accounts still see exactly one stream.
+
+    setupCastIntegration() {
+        if (!window.NorvaCast?.supported) return;
+        NorvaCast.ensureSdk();
+        NorvaCast.onStateChange(() => this.updateCastButton());
+        setTimeout(() => this.updateCastButton(), 4000); // discovery is async
+    }
+
+    updateCastButton() {
+        const section = document.querySelector('.watch-video-section');
+        if (!section) return;
+        let btn = document.getElementById('watch-cast-btn');
+        const available = window.NorvaCast?.devicesAvailable?.();
+        if (!btn && available) {
+            btn = document.createElement('button');
+            btn.id = 'watch-cast-btn';
+            btn.type = 'button';
+            btn.className = 'watch-cast-btn';
+            btn.title = 'Cast to TV';
+            btn.setAttribute('aria-label', 'Cast to TV');
+            btn.innerHTML = '<svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M1,18v3h3C4,19.34 2.66,18 1,18zM1,14v2c2.76,0 5,2.24 5,5h2C8,17.13 4.87,14 1,14zM1,10v2c4.97,0 9,4.03 9,9h2C12,14.92 7.07,10 1,10zM21,3H3C1.9,3 1,3.9 1,5v3h2V5h18v14h-7v2h7c1.1,0 2,-0.9 2,-2V5C23,3.9 22.1,3 21,3z"/></svg>';
+            btn.addEventListener('click', () => this.startCasting());
+            section.appendChild(btn);
+        }
+        if (btn) btn.classList.toggle('hidden', !available);
+    }
+
+    async startCasting() {
+        if (!this.content) return;
+        if (window.NorvaCast?.isCasting?.()) {
+            this.showCastBar(NorvaCast.deviceName());
+            return;
+        }
+        try {
+            const position = Math.max(0, Math.floor(this.getPlaybackPosition() || 0));
+            const wasEngine = this.currentPlaybackMode === 'engine';
+            let castUrl = null;
+            if (!wasEngine && /^https?:\/\//i.test(this.baseStreamUrl || '')) {
+                castUrl = this.baseStreamUrl; // gateway HLS / relay MP4: receiver-fetchable
+            }
+            try { this.video?.pause(); } catch (_) { }
+
+            if (!castUrl) {
+                // Engine (MSE) title: free the provider slot, then resolve a
+                // gateway transcode playlist starting at the current position.
+                await this.releasePlaybackPipelineForRetry();
+                await this.waitForProviderSlotRelease(800);
+                const itemType = this.content.type === 'series' ? 'series' : 'movie';
+                const result = await API.proxy.xtream.getStreamUrl(
+                    this.content.sourceId, this.content.id, itemType,
+                    this.containerExtension || 'mp4',
+                    {
+                        gatewayMode: 'transcode', audioMode: 'transcode',
+                        ...this.getSelectedAudioPlaybackOptions(),
+                        seekOffset: position, startOffset: position, resumeTime: position
+                    });
+                if (!result?.url || !/^https?:\/\//i.test(result.url)) {
+                    throw new Error('No castable stream URL');
+                }
+                castUrl = result.url;
+                this._castBaseOffset = position; // playlist time 0 == this absolute position
+            } else {
+                this._castBaseOffset = this.streamStartOffset || 0;
+            }
+
+            const device = await NorvaCast.castMedia({
+                url: castUrl,
+                title: [this.content.title, this.content.subtitle].filter(Boolean).join(' — '),
+                poster: this.content.poster,
+                currentTime: wasEngine ? 0 : Math.max(0, position - (this._castBaseOffset || 0)),
+                live: false
+            });
+            // The receiver now owns the provider slot — local playback fully off.
+            if (!wasEngine) await this.releasePlaybackPipelineForRetry();
+            this.hideLoading();
+            this.showCastBar(device);
+        } catch (error) {
+            console.warn('[WatchPage] Cast failed:', error?.message || error);
+            this.app?.showToast?.('Cast unavailable for this title', 'error');
+        }
+    }
+
+    showCastBar(device) {
+        const section = document.querySelector('.watch-video-section');
+        if (!section) return;
+        let bar = document.getElementById('watch-cast-bar');
+        if (!bar) {
+            bar = document.createElement('div');
+            bar.id = 'watch-cast-bar';
+            bar.className = 'watch-cast-bar';
+            bar.innerHTML = `
+                <span class="watch-cast-bar-label"></span>
+                <button type="button" class="watch-cast-toggle" title="Play/Pause">⏯</button>
+                <button type="button" class="watch-cast-stop">Stop casting</button>`;
+            bar.querySelector('.watch-cast-toggle').addEventListener('click', () => NorvaCast.togglePlayback());
+            bar.querySelector('.watch-cast-stop').addEventListener('click', () => this.stopCasting());
+            section.appendChild(bar);
+        }
+        bar.querySelector('.watch-cast-bar-label').textContent = `Casting to ${device}`;
+        bar.classList.remove('hidden');
+    }
+
+    async stopCasting() {
+        const remote = window.NorvaCast?.remotePosition?.() || 0;
+        try { NorvaCast.endSession(); } catch (_) { }
+        document.getElementById('watch-cast-bar')?.classList.add('hidden');
+        // Resume locally where the receiver stopped.
+        const absolute = Math.max(0, Math.floor((this._castBaseOffset || 0) + remote - 2));
+        if (this.content?.sourceId && this.content?.id) {
+            this.content.resumeTime = absolute;
+            this.resumeTime = absolute;
+            this.retryPlaybackInPlace(absolute);
+        }
+    }
+
+    // ==================== Seek thumbnails (storyboard) ====================
+    // A single sprite JPEG (grid-regular tiles) generated server-side per title,
+    // cross-user cached. First playback enqueues it (the job is deferred while
+    // this account watches — one provider connection); later plays get hover
+    // previews on the timeline like Netflix.
+
+    resetStoryboard() {
+        this._storyboard = null;
+        this._storyboardImage = null;
+        this._storyboardFetched = false;
+        this.hideSeekThumb();
+    }
+
+    async loadStoryboard() {
+        if (this.contentType !== 'movie' && this.contentType !== 'series') return;
+        if (this._storyboardFetched || !this.content?.sourceId || !this.content?.id) return;
+        this._storyboardFetched = true;
+        try {
+            const res = await window.NorvaCloud?.playback?.storyboard?.({
+                sourceId: this.content.sourceId,
+                externalId: this.content.id,
+                itemType: this.content.type === 'series' ? 'series' : 'movie',
+                enqueue: 1,
+                duration: Math.round(this.durationHint || 0)
+            });
+            if (res?.status === 'ready' && res.spriteUrl && Number(res.intervalSec) > 0) {
+                const img = new Image();
+                img.onload = () => {
+                    this._storyboard = res;
+                    this._storyboardImage = img;
+                };
+                img.src = res.spriteUrl;
+            }
+        } catch (_) { /* thumbnails are progressive enhancement */ }
+    }
+
+    ensureSeekThumb() {
+        let thumb = document.getElementById('watch-seek-thumb');
+        if (!thumb) {
+            thumb = document.createElement('div');
+            thumb.id = 'watch-seek-thumb';
+            thumb.className = 'watch-seek-thumb hidden';
+            thumb.innerHTML = '<div class="watch-seek-thumb-img"></div><div class="watch-seek-thumb-time"></div>';
+            this.progressContainer?.appendChild(thumb);
+        }
+        return thumb;
+    }
+
+    updateSeekThumb(event) {
+        const sb = this._storyboard;
+        const img = this._storyboardImage;
+        if (!sb || !img || !this.progressSlider) return;
+        const duration = this.getDisplayDuration();
+        if (!duration) return;
+        const rect = this.progressSlider.getBoundingClientRect();
+        if (!rect.width) return;
+        const ratio = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
+        const time = ratio * duration;
+        const cols = Math.max(1, Number(sb.cols) || 10);
+        const rows = Math.max(1, Number(sb.rows) || 1);
+        const count = Math.max(1, Number(sb.count) || cols * rows);
+        const tile = Math.min(count - 1, Math.max(0, Math.floor(time / sb.intervalSec)));
+        const tileW = img.naturalWidth / cols;
+        const tileH = img.naturalHeight / rows;
+        if (!tileW || !tileH) return;
+
+        const thumb = this.ensureSeekThumb();
+        const displayW = 212;
+        const scale = displayW / tileW;
+        thumb.style.width = `${displayW}px`;
+        thumb.style.height = `${Math.round(tileH * scale)}px`;
+        const inner = thumb.querySelector('.watch-seek-thumb-img');
+        inner.style.backgroundImage = `url("${sb.spriteUrl}")`;
+        inner.style.backgroundSize = `${Math.round(img.naturalWidth * scale)}px ${Math.round(img.naturalHeight * scale)}px`;
+        inner.style.backgroundPosition = `-${Math.round((tile % cols) * tileW * scale)}px -${Math.round(Math.floor(tile / cols) * tileH * scale)}px`;
+        thumb.querySelector('.watch-seek-thumb-time').textContent = this.formatTime(time);
+
+        // Anchor above the cursor, clamped inside the timeline.
+        const containerRect = this.progressContainer?.getBoundingClientRect() || rect;
+        const half = displayW / 2 + 4;
+        const x = Math.min(containerRect.width - half, Math.max(half, event.clientX - containerRect.left));
+        thumb.style.left = `${Math.round(x)}px`;
+        thumb.classList.remove('hidden');
+    }
+
+    hideSeekThumb() {
+        document.getElementById('watch-seek-thumb')?.classList.add('hidden');
     }
 
     /**
@@ -3367,6 +3643,7 @@ class WatchPage {
         if (!Number.isFinite(nextPercent)) return;
 
         const target = (nextPercent / 100) * duration;
+        this.recordIntroSeekSignal(target);
         this.setProgressValue(nextPercent);
         this.trackPlaybackPosition({ position: target, force: true });
         this.saveResumeSnapshotThrottled(true);
@@ -4008,6 +4285,9 @@ class WatchPage {
             }
         }
 
+        this.updateMediaSessionPosition();
+        this.updateSkipIntroVisibility();
+
         const duration = this.updateDurationState();
         if (!duration) return;
 
@@ -4076,6 +4356,7 @@ class WatchPage {
         this.playPauseBtn?.querySelector('.icon-play')?.classList.add('hidden');
         this.playPauseBtn?.querySelector('.icon-pause')?.classList.remove('hidden');
         this.centerPlayBtn?.classList.remove('show');
+        try { if (navigator.mediaSession) navigator.mediaSession.playbackState = 'playing'; } catch (_) { }
 
         if (!this._playStartedReported) {
             this._playStartedReported = true;
@@ -4094,6 +4375,7 @@ class WatchPage {
         this.playPauseBtn?.querySelector('.icon-play')?.classList.remove('hidden');
         this.playPauseBtn?.querySelector('.icon-pause')?.classList.add('hidden');
         this.centerPlayBtn?.classList.add('show');
+        try { if (navigator.mediaSession) navigator.mediaSession.playbackState = 'paused'; } catch (_) { }
         this.trackPlaybackPosition({ force: true });
         this.saveResumeSnapshotThrottled(true);
         this.saveProgress({ force: true });
@@ -4540,9 +4822,9 @@ class WatchPage {
         const refreshHint = providerBlocked
             ? "No need to refresh: this block comes from the provider. Watch this title from the TV/mobile app or a local hub (your network), or try again later."
             : refreshScheduled
-                ? 'The page will refresh automatically in 2 seconds. If the problem persists, refresh the page manually.'
-                : 'If the problem persists, refresh the page manually.';
-        const refreshBtnLabel = providerBlocked ? 'Retry' : 'Refresh now';
+                ? 'Retrying automatically in 2 seconds…'
+                : 'If the problem persists, use Retry below.';
+        const refreshBtnLabel = providerBlocked ? 'Retry' : 'Retry now';
 
         errorEl.innerHTML = `
             <div class="watch-error-box">
@@ -4555,7 +4837,7 @@ class WatchPage {
         errorEl.classList.remove('hidden');
         document.getElementById('watch-error-refresh-btn')?.addEventListener('click', () => {
             this.clearPlaybackErrorRefreshTimer();
-            window.location.reload();
+            this.retryPlaybackInPlace();
         });
 
         // HLS/transcode sessions can recover just after an error callback fired.
@@ -4605,12 +4887,64 @@ class WatchPage {
                 this.trackPlaybackPosition({ force: true });
                 this.saveResumeSnapshotThrottled(true);
             } catch (_) {
-                // Continue with the refresh even if local persistence fails.
+                // Continue with the retry even if local persistence fails.
             }
-            window.location.reload();
+            this.retryPlaybackInPlace();
         }, this.playbackErrorRefreshDelayMs);
 
         return true;
+    }
+
+    /**
+     * Restart the stream pipeline in place — no document reload, so the SPA
+     * state, the player shell and the resume position all survive. Falls back
+     * to a hard refresh only when the in-place path itself fails (or when
+     * there is no content to retry against).
+     */
+    async retryPlaybackInPlace(positionOverride = null) {
+        if (this._inPlaceRetryRunning) return;
+        if (!this.content?.sourceId || !this.content?.id) {
+            window.location.reload();
+            return;
+        }
+        this._inPlaceRetryRunning = true;
+        try {
+            this.hidePlaybackError();
+            this.showLoading();
+            // A fresh user-driven retry re-arms the whole fallback ladder
+            // (relay → gateway transcode → encode) for the new attempt.
+            this._cloudRelayFallbackTried = false;
+            this._cloudGatewayTranscodeFallbackTried = false;
+            this._videoEncodeFallbackTried = false;
+            this._handlingPlaybackFailure = false;
+
+            await this.releasePlaybackPipelineForRetry();
+            await this.waitForProviderSlotRelease(800);
+
+            const position = positionOverride !== null
+                ? Math.max(0, Math.floor(positionOverride))
+                : Math.max(0, Math.floor(this.getResumeSnapshotPosition()) - 3);
+            const itemType = this.content.type === 'series' ? 'series' : 'movie';
+            const container = this.containerExtension || 'mp4';
+            const playbackHint = {
+                ...this.getSelectedAudioPlaybackOptions(),
+                seekOffset: position,
+                startOffset: position,
+                resumeTime: position
+            };
+            const result = await API.proxy.xtream.getStreamUrl(
+                this.content.sourceId, this.content.id, itemType, container, playbackHint);
+            if (!result?.url) throw new Error('No stream URL from retry');
+            this.content.cloudPlaybackSessionId = result.sessionId || null;
+            await this.loadVideo(result.url, this.playbackMetadataFromResult(result, {
+                playbackAttemptId: this._playbackAttemptId
+            }));
+        } catch (error) {
+            console.warn('[WatchPage] In-place retry failed, falling back to a page refresh:', error?.message || error);
+            window.location.reload();
+        } finally {
+            this._inPlaceRetryRunning = false;
+        }
     }
 
     clearPlaybackErrorRefreshTimer() {
@@ -7070,7 +7404,28 @@ class WatchPage {
               </div>`
             : '';
 
-        this.captionsList.innerHTML = `${headerHtml}${optionHtml}${aiHtml}${ocrHtml}${emptyHtml}${offsetHtml}`;
+        const subStyle = this.getSubtitleStyle();
+        const styleHtml = `
+            <div class="captions-style" aria-label="Subtitle appearance">
+                <div class="captions-offset-label">Appearance</div>
+                <div class="captions-style-row">
+                    <span class="captions-style-name">Size · ${Math.round(subStyle.scale * 100)}%</span>
+                    <span class="captions-offset-controls">
+                        <button type="button" class="captions-offset-btn" data-style-action="scale-down">A−</button>
+                        <button type="button" class="captions-offset-btn" data-style-action="scale-up">A+</button>
+                    </span>
+                </div>
+                <div class="captions-style-row">
+                    <span class="captions-style-name">Background</span>
+                    <button type="button" class="captions-offset-btn" data-style-action="bg">${this.escapeHtml(subStyle.bgLabel)}</button>
+                </div>
+                <div class="captions-style-row">
+                    <span class="captions-style-name">Color</span>
+                    <button type="button" class="captions-offset-btn" data-style-action="color">${this.escapeHtml(subStyle.colorLabel)}</button>
+                </div>
+            </div>`;
+
+        this.captionsList.innerHTML = `${headerHtml}${optionHtml}${aiHtml}${ocrHtml}${emptyHtml}${offsetHtml}${styleHtml}`;
 
         this.captionsList.querySelectorAll('.captions-option').forEach(btn => {
             if (btn.dataset.action) return; // non-track actions (e.g. ai-notify) wire themselves below
@@ -7109,9 +7464,68 @@ class WatchPage {
         this.captionsList.querySelectorAll('.captions-offset-btn').forEach(btn => {
             btn.addEventListener('click', (event) => {
                 event.stopPropagation();
+                if (btn.dataset.styleAction) {
+                    this.adjustSubtitleStyle(btn.dataset.styleAction);
+                    return;
+                }
                 this.applySubtitleOffsetDelta(Number(btn.dataset.offsetDelta) || 0);
             });
         });
+    }
+
+    // ==================== Subtitle appearance ====================
+    // User-tunable cue styling (size / background / color) applied through CSS
+    // custom properties consumed by the ::cue rules — works for embedded, AI
+    // and OCR tracks alike. Persisted per device.
+
+    getSubtitleStyle() {
+        const defaults = { scale: 1, bg: 'dim', color: 'white' };
+        let saved = null;
+        try { saved = JSON.parse(localStorage.getItem('norva-subtitle-style') || 'null'); } catch (_) { }
+        const s = { ...defaults, ...(saved && typeof saved === 'object' ? saved : {}) };
+        const bgMap = {
+            dim: ['rgba(0, 0, 0, 0.6)', 'Dark'],
+            solid: ['rgba(0, 0, 0, 0.95)', 'Black'],
+            none: ['transparent', 'None']
+        };
+        const colorMap = {
+            white: ['#ffffff', 'White'],
+            yellow: ['#ffe14d', 'Yellow'],
+            cyan: ['#8be9fd', 'Cyan']
+        };
+        const bg = bgMap[s.bg] || bgMap.dim;
+        const color = colorMap[s.color] || colorMap.white;
+        return { ...s, bgValue: bg[0], bgLabel: bg[1], colorValue: color[0], colorLabel: color[1] };
+    }
+
+    saveSubtitleStyle(patch) {
+        const current = this.getSubtitleStyle();
+        const next = { scale: current.scale, bg: current.bg, color: current.color, ...patch };
+        next.scale = Math.min(1.6, Math.max(0.7, Math.round(next.scale * 100) / 100));
+        try { localStorage.setItem('norva-subtitle-style', JSON.stringify(next)); } catch (_) { }
+        this.applySubtitleStyle();
+    }
+
+    applySubtitleStyle() {
+        const s = this.getSubtitleStyle();
+        const root = document.documentElement;
+        root.style.setProperty('--norva-sub-scale', String(s.scale));
+        root.style.setProperty('--norva-sub-bg', s.bgValue);
+        root.style.setProperty('--norva-sub-color', s.colorValue);
+    }
+
+    adjustSubtitleStyle(action) {
+        const s = this.getSubtitleStyle();
+        if (action === 'scale-up') this.saveSubtitleStyle({ scale: s.scale + 0.15 });
+        else if (action === 'scale-down') this.saveSubtitleStyle({ scale: s.scale - 0.15 });
+        else if (action === 'bg') {
+            const order = ['dim', 'solid', 'none'];
+            this.saveSubtitleStyle({ bg: order[(order.indexOf(s.bg) + 1) % order.length] });
+        } else if (action === 'color') {
+            const order = ['white', 'yellow', 'cyan'];
+            this.saveSubtitleStyle({ color: order[(order.indexOf(s.color) + 1) % order.length] });
+        }
+        this.updateCaptionsTracks(); // repaint the panel's live values
     }
 
     async selectCaptionTrack(source, index, streamIndex = null) {
@@ -7539,6 +7953,102 @@ class WatchPage {
     }
 
     // === Next Episode ===
+
+    // ==================== Skip intro (crowd-learned markers) ====================
+    // Netflix ships editorial intro timestamps; Norva learns them from real
+    // usage instead: early forward seeks on a series season are aggregated
+    // server-side (à la SponsorBlock) and served back as [start, end] markers.
+    // Zero provider connections involved.
+
+    resetSkipIntroState() {
+        this._introMarkers = null;
+        this._introSkipUsed = false;
+        this._introSignalSent = false;
+        this._introFetchKey = null;
+        document.getElementById('watch-skip-intro')?.classList.add('hidden');
+    }
+
+    introMarkerParams() {
+        if (this.contentType !== 'series') return null;
+        const tmdbId = this.content?.providerTmdbId || this.content?.data?.providerTmdbId
+            || this.content?.tmdb?.id || null;
+        const season = parseInt(this.content?.currentSeason ?? this.currentSeason, 10);
+        if (!tmdbId || /^(tt)?0+$/i.test(String(tmdbId)) || !Number.isFinite(season)) return null;
+        return { tmdbId: String(tmdbId), season };
+    }
+
+    async loadIntroMarkers() {
+        const params = this.introMarkerParams();
+        if (!params) return;
+        const key = `${params.tmdbId}:${params.season}`;
+        if (this._introFetchKey === key && this._introMarkers) return;
+        this._introFetchKey = key;
+        try {
+            const res = await window.NorvaCloud?.media?.introMarkers?.(params);
+            const end = Number(res?.introEnd ?? res?.intro_end);
+            if (Number.isFinite(end) && end > 4) {
+                this._introMarkers = {
+                    start: Math.max(0, Number(res.introStart ?? res.intro_start) || 0),
+                    end
+                };
+            }
+        } catch (_) { /* markers are progressive enhancement */ }
+    }
+
+    updateSkipIntroVisibility() {
+        const m = this._introMarkers;
+        if (!m || this._introSkipUsed) return;
+        const pos = this.getPlaybackPosition();
+        if (!Number.isFinite(pos)) return;
+        const btn = this.ensureSkipIntroButton();
+        const visible = pos >= m.start && pos < m.end - 1;
+        btn.classList.toggle('hidden', !visible);
+    }
+
+    ensureSkipIntroButton() {
+        let btn = document.getElementById('watch-skip-intro');
+        if (!btn) {
+            btn = document.createElement('button');
+            btn.id = 'watch-skip-intro';
+            btn.type = 'button';
+            btn.className = 'watch-skip-intro hidden';
+            btn.textContent = 'Skip intro';
+            btn.addEventListener('click', () => this.skipIntro());
+            document.querySelector('.watch-video-section')?.appendChild(btn);
+        }
+        return btn;
+    }
+
+    skipIntro() {
+        const m = this._introMarkers;
+        if (!m) return;
+        this._introSkipUsed = true;
+        document.getElementById('watch-skip-intro')?.classList.add('hidden');
+        Promise.resolve(this.seekToTime(m.end, { immediate: true })).catch(() => { });
+    }
+
+    /**
+     * An early, medium-size forward jump is the "I skipped the intro" gesture.
+     * Report it once per playback; the server aggregates across viewers and
+     * starts serving markers once enough independent samples agree.
+     */
+    recordIntroSeekSignal(target) {
+        try {
+            if (this._introSignalSent) return;
+            const params = this.introMarkerParams();
+            if (!params) return;
+            const from = this.getPlaybackPosition();
+            const jump = target - from;
+            if (from >= 0 && from <= 240 && jump >= 20 && jump <= 240 && target <= 420) {
+                this._introSignalSent = true;
+                window.NorvaCloud?.media?.introSignal?.({
+                    ...params,
+                    from: Math.round(from),
+                    seekTo: Math.round(target)
+                })?.catch?.(() => { });
+            }
+        } catch (_) { /* learning is best-effort */ }
+    }
 
     getNextEpisode() {
         if (!this.seriesInfo?.episodes || !this.currentSeason || !this.currentEpisode) return null;

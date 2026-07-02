@@ -120,6 +120,24 @@ Deno.serve(async (req) => {
       return json(req, await recordObservedLanguages(req, userId));
     }
 
+    // Live TMDB extras (trailer + cast/directors) for the fiches. Proxied here so
+    // the TMDB key stays server-side; invariant per title → long CDN cache.
+    if (req.method === "GET" && (segments[0] === "tmdb-meta" || (segments[0] === "device" && segments[1] === "tmdb-meta"))) {
+      await requireUserId(req);
+      return jsonCached(req, await getTmdbMeta(url), 86400);
+    }
+
+    // Crowd-learned "skip intro" markers (tmdbId + season).
+    if (req.method === "GET" && (segments[0] === "intro-markers" || (segments[0] === "device" && segments[1] === "intro-markers"))) {
+      await requireUserId(req);
+      return jsonCached(req, await getIntroMarkers(url), 300);
+    }
+
+    if (req.method === "POST" && (segments[0] === "intro-signal" || (segments[0] === "device" && segments[1] === "intro-signal"))) {
+      const userId = await requireUserId(req);
+      return json(req, await recordIntroSignal(req, userId));
+    }
+
     throw new HttpError(404, "Route not found");
   } catch (error) {
     const status = error instanceof HttpError ? error.status : 500;
@@ -184,6 +202,139 @@ async function getEnrichmentProgress(userId: string): Promise<EnrichmentProgress
     if (oldestKey) enrichmentProgressCache.delete(oldestKey);
   }
   return result;
+}
+
+// ==================== TMDB extras (fiches: trailer + credits) ====================
+
+const TMDB_META_TTL_MS = 6 * 3_600_000;
+const tmdbMetaCache = new Map<string, { at: number; value: JsonRecord }>();
+
+function tmdbApiKey(): string {
+  return (
+    Deno.env.get("NORVA_TMDB_API_KEY") ??
+    Deno.env.get("TMDB_API_KEY") ??
+    Deno.env.get("TMDB_READ_TOKEN") ??
+    ""
+  ).trim();
+}
+
+async function getTmdbMeta(url: URL): Promise<JsonRecord> {
+  const type = url.searchParams.get("type") === "series" ? "tv" : "movie";
+  const tmdbId = String(url.searchParams.get("tmdbId") || "").trim();
+  if (!/^\d+$/.test(tmdbId) || /^0+$/.test(tmdbId)) throw new HttpError(400, "tmdbId must be a TMDB numeric id");
+  const key = tmdbApiKey();
+  if (!key) return { available: false };
+
+  const lang2 = (url.searchParams.get("lang") || "en").slice(0, 2).toLowerCase();
+  const cacheKey = `${type}:${tmdbId}:${lang2}`;
+  const cached = tmdbMetaCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < TMDB_META_TTL_MS) return cached.value;
+
+  const params = new URLSearchParams({
+    append_to_response: "videos,credits",
+    language: lang2 === "fr" ? "fr-FR" : "en-US",
+    // Trailers are often only tagged in en (or untagged) — widen the video pull.
+    include_video_language: `${lang2},en,null`,
+  });
+  const headers: Record<string, string> = {};
+  if (key.startsWith("eyJ")) headers.Authorization = `Bearer ${key}`;
+  else params.set("api_key", key);
+
+  const res = await fetch(`https://api.themoviedb.org/3/${type}/${tmdbId}?${params}`, { headers });
+  if (res.status === 404) return { available: false };
+  if (!res.ok) throw new HttpError(502, `TMDB responded ${res.status}`);
+  const data = await res.json() as JsonRecord;
+
+  type TmdbVideo = { site?: string; type?: string; key?: string; name?: string; official?: boolean };
+  const videos = Array.isArray((data.videos as JsonRecord | undefined)?.results)
+    ? (data.videos as { results: TmdbVideo[] }).results : [];
+  const yt = videos.filter((v) => v?.site === "YouTube" && v?.key);
+  const trailer = yt.find((v) => v.type === "Trailer" && v.official)
+    ?? yt.find((v) => v.type === "Trailer")
+    ?? yt.find((v) => v.type === "Teaser");
+
+  type TmdbPerson = { name?: string; character?: string; job?: string; profile_path?: string | null };
+  const credits = (data.credits ?? {}) as { cast?: TmdbPerson[]; crew?: TmdbPerson[] };
+  const cast = (Array.isArray(credits.cast) ? credits.cast : []).slice(0, 12)
+    .map((c) => ({ name: c?.name ?? "", character: c?.character ?? "", profile: c?.profile_path ?? null }))
+    .filter((c) => c.name);
+  const directors = (Array.isArray(credits.crew) ? credits.crew : [])
+    .filter((c) => c?.job === "Director").slice(0, 3).map((c) => c?.name ?? "").filter(Boolean);
+  const creators = (Array.isArray(data.created_by) ? data.created_by as TmdbPerson[] : [])
+    .slice(0, 3).map((c) => c?.name ?? "").filter(Boolean);
+
+  const value: JsonRecord = {
+    available: true,
+    trailerKey: trailer?.key ?? null,
+    trailerName: trailer?.name ?? null,
+    cast,
+    directors,
+    creators,
+  };
+  tmdbMetaCache.set(cacheKey, { at: Date.now(), value });
+  if (tmdbMetaCache.size > 1024) {
+    const oldest = [...tmdbMetaCache.entries()].sort((a, b) => a[1].at - b[1].at)[0];
+    if (oldest) tmdbMetaCache.delete(oldest[0]);
+  }
+  return value;
+}
+
+// ==================== Skip-intro markers (crowd-learned) ====================
+// One upserted signal per (title, season, user): the early-forward-seek gesture.
+// Markers are served once ≥3 independent viewers agree, as the median of their
+// jumps — self-correcting, no editorial data and zero provider connections.
+
+function medianOf(values: number[]): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid] : Math.round((sorted[mid - 1] + sorted[mid]) / 2);
+}
+
+async function getIntroMarkers(url: URL): Promise<JsonRecord> {
+  const tmdbId = String(url.searchParams.get("tmdbId") || "").trim();
+  const season = Number.parseInt(url.searchParams.get("season") || "", 10);
+  if (!/^\d+$/.test(tmdbId) || !Number.isFinite(season) || season < 0 || season > 100) {
+    throw new HttpError(400, "tmdbId and season are required");
+  }
+  const { data, error } = await db
+    .from("catalog_intro_signals")
+    .select("seek_from,seek_to")
+    .eq("provider_tmdb_id", tmdbId)
+    .eq("season", season)
+    .limit(200);
+  if (error) throwDb(error, "Unable to read intro markers");
+  const rows = (data ?? []) as Array<{ seek_from: number; seek_to: number }>;
+  if (rows.length < 3) return { available: false, samples: rows.length };
+  const introEnd = medianOf(rows.map((r) => Number(r.seek_to) || 0));
+  const introStart = Math.max(0, medianOf(rows.map((r) => Number(r.seek_from) || 0)) - 15);
+  if (!(introEnd > introStart + 5)) return { available: false, samples: rows.length };
+  return { available: true, introStart, introEnd, samples: rows.length };
+}
+
+async function recordIntroSignal(req: Request, userId: string): Promise<JsonRecord> {
+  const body = await req.json().catch(() => ({})) as JsonRecord;
+  const tmdbId = String(body.tmdbId ?? "").trim();
+  const season = Number.parseInt(String(body.season ?? ""), 10);
+  const from = Math.round(Number(body.from ?? NaN));
+  const seekTo = Math.round(Number(body.seekTo ?? NaN));
+  if (!/^\d+$/.test(tmdbId) || !Number.isFinite(season) || season < 0 || season > 100) {
+    throw new HttpError(400, "tmdbId and season are required");
+  }
+  // Same gesture window the client enforces — revalidated server-side.
+  if (!Number.isFinite(from) || !Number.isFinite(seekTo)
+    || from < 0 || from > 240 || seekTo < 20 || seekTo > 420 || seekTo - from < 15) {
+    return { recorded: false };
+  }
+  const { error } = await db.from("catalog_intro_signals").upsert({
+    provider_tmdb_id: tmdbId,
+    season,
+    user_id: userId,
+    seek_from: from,
+    seek_to: seekTo,
+    updated_at: new Date().toISOString(),
+  }, { onConflict: "provider_tmdb_id,season,user_id" });
+  if (error) throwDb(error, "Unable to record intro signal");
+  return { recorded: true };
 }
 
 async function requireUserId(req: Request) {

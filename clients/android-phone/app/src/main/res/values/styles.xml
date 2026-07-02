@@ -1,4 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="AppTheme" parent="android:style/Theme.NoTitleBar.Fullscreen"/>
+    <!-- Browsing keeps the status bar (clock/battery/notifications stay visible,
+         like Netflix); only the player goes immersive via its own theme below. -->
+    <style name="AppTheme" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:statusBarColor">#0A0A0F</item>
+        <item name="android:navigationBarColor">#0A0A0F</item>
+        <item name="android:windowBackground">#0A0A0F</item>
+    </style>
+
+    <!-- Fullscreen playback: PlayerActivity layers immersive-sticky on top. -->
+    <style name="PlayerTheme" parent="android:style/Theme.Material.NoActionBar.Fullscreen">
+        <item name="android:windowBackground">@android:color/black</item>
+    </style>
 </resources>

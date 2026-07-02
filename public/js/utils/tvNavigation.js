@@ -251,8 +251,15 @@
         e.stopPropagation(); // keep LivePage zapping & co. out of TV navigation
 
         if (!focused) {
-            // Nothing focused yet: enter the active page before falling back
-            // to global navigation links.
+            // Nothing focused: prefer restoring the remembered card (focus lost
+            // to a re-render or a native-player round-trip keeps its position),
+            // else enter the active page before global navigation links.
+            const page = activePage();
+            if (lastFocusedCard && lastFocusedPageId === page?.id &&
+                page.contains(lastFocusedCard) && isVisible(lastFocusedCard)) {
+                focusElement(lastFocusedCard);
+                return;
+            }
             const pageCandidates = getPageCandidates();
             const first = e.key === 'ArrowUp'
                 ? pageCandidates[pageCandidates.length - 1]
@@ -306,6 +313,69 @@
     modalObserver.observe(document.body, {
         attributes: true, subtree: true, attributeFilter: ['class']
     });
+
+    // ---- Initial focus & focus restoration -------------------------------
+    // Netflix always lands focus somewhere visible. Two mechanisms:
+    //  1. When the active page changes (or first paints its cards), focus its
+    //     first candidate so a ring is visible before any arrow press.
+    //  2. When focus dies (native player return, list re-render removing the
+    //     focused card), re-anchor to the remembered card or its neighbor.
+
+    let lastFocusedCard = null;          // last card-like element we focused
+    let lastFocusedPageId = null;
+
+    document.addEventListener('focusin', () => {
+        const el = document.activeElement;
+        if (el && el !== document.body && el.matches?.(INTERACTIVE_SELECTOR)) {
+            lastFocusedCard = el;
+            lastFocusedPageId = activePage()?.id || null;
+        }
+    });
+
+    function ensurePageFocus() {
+        // Never steal focus from an open modal or a text field being edited.
+        if (openModal() || isTextField(document.activeElement)) return;
+        if (currentFocus()) return;
+        const page = activePage();
+        if (!page) return;
+        // Prefer restoring the exact card (still attached + same page), else its
+        // nearest surviving neighbor via the remembered element's position.
+        if (lastFocusedCard && lastFocusedPageId === page.id &&
+            page.contains(lastFocusedCard) && isVisible(lastFocusedCard)) {
+            focusElement(lastFocusedCard);
+            return;
+        }
+        const first = getPageCandidates()[0];
+        if (first) focusElement(first);
+    }
+
+    // Page switches: the router toggles .page.active — watch for it, then let
+    // the page paint (rails/grids render async) before landing focus.
+    let pendingFocusTimer = null;
+    function scheduleEnsureFocus(delay) {
+        clearTimeout(pendingFocusTimer);
+        pendingFocusTimer = setTimeout(ensurePageFocus, delay);
+    }
+
+    const pageObserver = new MutationObserver((mutations) => {
+        for (const m of mutations) {
+            if (m.target.classList?.contains('page') && m.target.classList.contains('active')) {
+                scheduleEnsureFocus(350);
+                return;
+            }
+        }
+    });
+    document.querySelectorAll('.page').forEach((p) =>
+        pageObserver.observe(p, { attributes: true, attributeFilter: ['class'] }));
+
+    // Boot: the first page renders its content async — a couple of passes catch
+    // both the fast (cached rails) and slow (network) paint.
+    scheduleEnsureFocus(800);
+    setTimeout(() => { if (!currentFocus()) ensurePageFocus(); }, 2500);
+
+    // Returning from the native player (the WebView regains window focus with
+    // document.activeElement reset to <body>): restore the launch card's ring.
+    window.addEventListener('focus', () => scheduleEnsureFocus(250));
 
     // Bridge for the Android client's hardware Back button.
     // Returns 'modal' / 'nav' when it handled Back internally, else 'exit'.

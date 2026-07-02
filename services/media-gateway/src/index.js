@@ -241,14 +241,18 @@ const RAW_PROVIDER_RETRY_DELAYS_MS = [1500, 5000, 9000, 9000, 9000, 9000, 9000, 
 const FFMPEG_USER_AGENT = process.env.FFMPEG_USER_AGENT ||
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36 Norva/1.0';
 const MAX_LOG_TAIL = 12000;
-const GATEWAY_VERSION = 61;
+const GATEWAY_VERSION = 62;
 // Browser playback fetches HLS playlists/segments cross-origin, so these must
 // list every Norva web origin or the browser blocks the response (CORS). Keep
 // in sync with the relay's ALLOWED_ORIGINS (services/norva-relay/wrangler.jsonc).
+// www.gstatic.com is the Chromecast Default Media Receiver: its HLS player
+// fetches playlists/segments with that Origin, so casting needs it allowed
+// (the session token in the URL keeps access gated exactly as for browsers).
 const DEFAULT_ALLOWED_ORIGINS = [
     'https://norva.tv',
     'https://app.norva.tv',
     'https://norva-web.pages.dev',
+    'https://www.gstatic.com',
     'http://localhost:3000',
     'http://localhost:5173',
 ].join(',');
@@ -823,6 +827,34 @@ app.post('/ocr-async/:token', (req, res) => {
     return res.status(202).json({ queued: true, position: ocrQueue.indexOf(job) + 1, busy: ocrBusy });
 });
 
+// Seek-thumbnail storyboard: extract keyframe tiles into ONE sprite JPEG, PUT it to the signed
+// Supabase Storage upload URL, then POST the tile metadata to the edge callback. Rides the same
+// job queue as transcription (account lock, pregen gate, priority classes) — one provider
+// connection, deferred while the account is watching.
+app.post('/storyboard-async/:token', (req, res) => {
+    const claims = verifyRawToken(req.params.token, GATEWAY_TOKEN);
+    if (!claims) return res.status(401).json({ error: 'Invalid byte-pipe token' });
+    if (Number(claims.exp) * 1000 < Date.now()) return res.status(401).json({ error: 'Byte-pipe token expired' });
+    const jobId = String(req.query.jobId || '');
+    const callbackUrl = String(req.query.callback || '');
+    if (!jobId || !/^https:\/\/[^/]+\.supabase\.co\//.test(callbackUrl)) {
+        return res.status(400).json({ error: 'jobId and a valid supabase callback are required' });
+    }
+    const uploadUrl = String(req.query.uploadUrl || '');
+    if (!/^https:\/\/[^/]+\.supabase\.co\/storage\//.test(uploadUrl)) {
+        return res.status(400).json({ error: 'a supabase storage uploadUrl is required' });
+    }
+    const duration = Math.max(0, Number.parseFloat(req.query.duration) || 0);
+    const prio = JOB_PRIORITY[String(req.query.origin || '')] ?? 1;
+    const job = {
+        kind: 'storyboard', url: claims.url, ua: claims.ua || FFMPEG_USER_AGENT,
+        jobId, callbackUrl, uploadUrl, duration, uid: claims.uid, prio,
+    };
+    const ok = enqueueTranscribe(job);
+    if (!ok) return res.status(429).json({ error: 'Job queue full' });
+    return res.status(202).json({ queued: true, position: transcribeQueue.indexOf(job) + 1 });
+});
+
 // Phase 3b async translation: translate a cached transcript VTT into a target language and POST the
 // result to the edge callback (reuses the transcribe-callback shape: { jobId, ok, vtt, segments }).
 // No provider connection (pure text on the gateway) → auth is the gateway token (edge→gateway), like
@@ -1250,6 +1282,7 @@ async function drainTranscribeQueue() {
     } finally { transcribeBusy = false; }
 }
 async function runTranscribeJob(job) {
+    if (job.kind === 'storyboard') return runStoryboardJob(job);
     const { url, ua, index, jobId, callbackUrl, start = 0, dur = 0, uid = '' } = job;
     let wavPath = null, payload;
     try {
@@ -1294,6 +1327,104 @@ async function runTranscribeJob(job) {
             signal: AbortSignal.timeout(30000),
         });
     } catch (e) { console.warn('[media-gateway] transcribe callback failed', jobId, String((e && e.message) || e)); }
+}
+
+// ==================== Storyboard (seek thumbnails) ====================
+// One ffmpeg pass over the file (keyframe-only decode) produces a single sprite
+// JPEG of up to 200 tiles at a regular interval, tiled in-process (`tile=`) —
+// no intermediate frame files. Timestamps are grid-regular; the nearest-keyframe
+// approximation is exactly how coarse seek thumbs behave elsewhere.
+const STORYBOARD_TILE_WIDTH = 212;
+const STORYBOARD_MAX_TILES = 200;
+const STORYBOARD_COLS = 10;
+
+function extractStoryboardSprite(url, ua, intervalSec, cols, rows, outputPath, timeoutMs, proxyKey = '') {
+    return new Promise((resolve) => {
+        const args = [
+            '-y', '-hide_banner', '-loglevel', 'error', '-nostdin',
+            '-reconnect', '1', '-reconnect_streamed', '1',
+            '-reconnect_delay_max', '5',
+            '-rw_timeout', '15000000',
+            '-headers', 'Accept: */*\r\nConnection: keep-alive\r\n',
+            '-user_agent', ua,
+            '-probesize', '2000000', '-analyzeduration', '3000000',
+            '-skip_frame', 'nokey', // decode keyframes only — the pass is network-bound, not CPU-bound
+            '-i', url,
+            '-map', '0:v:0',
+            '-vf', `fps=1/${intervalSec},scale=${STORYBOARD_TILE_WIDTH}:-2,tile=${cols}x${rows}`,
+            '-frames:v', '1',
+            '-q:v', '5',
+            outputPath,
+        ];
+        let child;
+        try { child = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'ignore', 'pipe'], env: proxyEnvFor(proxyKey || proxyKeyFromUrl(url)) }); }
+        catch (e) { return resolve({ ok: false, error: 'spawn failed: ' + String((e && e.message) || e) }); }
+        let stderr = '';
+        let timedOut = false;
+        const timer = setTimeout(() => { timedOut = true; try { child.kill('SIGKILL'); } catch (_) {} }, timeoutMs);
+        child.stderr.on('data', (d) => { stderr += d.toString(); });
+        child.on('error', (e) => { clearTimeout(timer); resolve({ ok: false, error: 'ffmpeg error: ' + String((e && e.message) || e) }); });
+        child.on('close', async (code) => {
+            clearTimeout(timer);
+            const tail = redactCreds(stderr.trim().split('\n').filter(Boolean).pop() || 'no stderr');
+            // A truncated read can still have flushed a usable (partial) sprite — accept any
+            // plausible JPEG; only a missing/tiny file is a failure.
+            let size = 0;
+            try { size = (await fsp.stat(outputPath)).size; } catch (_) { size = 0; }
+            if (size > 20_000) return resolve({ ok: true, path: outputPath });
+            fsp.unlink(outputPath).catch(() => {});
+            if (code !== 0) {
+                console.warn(`[media-gateway] storyboard ffmpeg exit ${code}: ${redactCreds(stderr.slice(-300))}`);
+                return resolve({ ok: false, error: timedOut ? `storyboard timeout after ${Math.round(timeoutMs / 1000)}s: ${tail}` : `ffmpeg exit ${code}: ${tail}` });
+            }
+            return resolve({ ok: false, error: `empty/tiny sprite (${size}B) — no video decoded (${tail})` });
+        });
+    });
+}
+
+async function runStoryboardJob(job) {
+    const { url, ua, jobId, callbackUrl, uploadUrl, duration = 0, uid = '' } = job;
+    const outputPath = path.join(os.tmpdir(), `norva-sb-${Date.now()}-${crypto.randomUUID()}.jpg`);
+    let payload;
+    try {
+        postJobHeartbeat(job, 'extracting');
+        const dur = duration > 0 ? duration : 2 * 3600; // unknown duration → assume a 2h grid
+        const intervalSec = Math.max(10, Math.ceil(dur / STORYBOARD_MAX_TILES));
+        const count = Math.max(1, Math.min(STORYBOARD_MAX_TILES, Math.floor(dur / intervalSec) || 1));
+        const rows = Math.max(1, Math.ceil(count / STORYBOARD_COLS));
+        // The pass reads the whole file at provider speed: budget ~0.6× duration,
+        // floored at 15 min for shorts and capped at 75 min for slow panels.
+        const timeoutMs = Math.min(75 * 60_000, Math.max(15 * 60_000, Math.round(dur * 600)));
+        const r = await withAccountJobLock(accountJobKey(uid, url), () =>
+            extractStoryboardSprite(url, ua, intervalSec, STORYBOARD_COLS, rows, outputPath, timeoutMs, uid));
+        if (!r.ok) {
+            payload = { jobId, ok: false, error: ('Storyboard extraction failed: ' + r.error).slice(0, 300) };
+        } else {
+            // Upload OUTSIDE the account lock — pure HTTPS to Supabase Storage.
+            const sprite = await fsp.readFile(outputPath);
+            const up = await fetch(uploadUrl, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'image/jpeg', 'x-upsert': 'true' },
+                body: sprite,
+                signal: AbortSignal.timeout(120_000),
+            });
+            payload = up.ok
+                ? { jobId, ok: true, cols: STORYBOARD_COLS, rows, count, intervalSec, bytes: sprite.length }
+                : { jobId, ok: false, error: `Storage upload failed (${up.status})` };
+        }
+    } catch (e) {
+        payload = { jobId, ok: false, error: redactCreds(String((e && e.message) || e)).slice(0, 300) };
+    } finally {
+        fsp.unlink(outputPath).catch(() => {});
+    }
+    try {
+        await fetch(callbackUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${GATEWAY_TOKEN}` },
+            body: JSON.stringify(payload),
+            signal: AbortSignal.timeout(30000),
+        });
+    } catch (e) { console.warn('[media-gateway] storyboard callback failed', jobId, String((e && e.message) || e)); }
 }
 
 // V2 chunked whole-film transcription: extraction segments into CHUNK_SEC WAVs while whisper

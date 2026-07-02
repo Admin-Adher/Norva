@@ -16,8 +16,8 @@ android {
         applicationId "tv.norva.tv"
         minSdk 23
         targetSdk 35
-        versionCode 12
-        versionName "3.7.0-hybrid"
+        versionCode 13
+        versionName "3.8.0-hybrid"
 
         // RevenueCat public SDK key, injected at build time. Empty by default so
         // local/debug builds need no key (see docs/roadmap/billing-setup.md §7).
@@ -81,6 +81,11 @@ dependencies {
     // the APK can also be assembled with raw SDK tools (no gradle daemon).
     implementation "androidx.media3:media3-exoplayer:1.5.1"
     implementation "androidx.media3:media3-exoplayer-hls:1.5.1"
+    // MediaSession: Google Assistant voice transport ("pause", "reprends") and
+    // the Android TV now-playing card drive the player.
+    implementation "androidx.media3:media3-session:1.5.1"
+    // Watch Next ("Play Next") row on the Android TV home screen.
+    implementation "androidx.tvprovider:tvprovider:1.0.0"
     // In-app subscriptions (Google Play Billing) through RevenueCat. Pin a
     // tested version before release; "8.+" resolves the latest v8 line.
     implementation "com.revenuecat.purchases:purchases:8.+"

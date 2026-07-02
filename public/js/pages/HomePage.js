@@ -28,6 +28,48 @@ class HomePage {
                 this.loadDashboardData();
             }
         });
+
+        // Hover preview (desktop): rails render via innerHTML + delegation, so the
+        // preview data is resolved from the card's rail/history indices on demand.
+        window.NorvaHoverPreview?.register('.dashboard-card', (card) => {
+            let item = null;
+            if (card.dataset.historyIndex !== undefined) {
+                item = this.historyItems?.[Number(card.dataset.historyIndex)] || null;
+            } else if (card.dataset.railIndex !== undefined) {
+                const rail = this.railItems?.[Number(card.dataset.railIndex)];
+                item = rail?.items?.[Number(card.dataset.itemIndex)] || null;
+            }
+            if (!item) return null;
+            const isResume = card.dataset.historyIndex !== undefined;
+            const type = item.item_type || item.itemType || item.type || 'movie';
+            return {
+                title: this.displayTitle(item),
+                meta: this.cardMeta(item) || this.typeLabel(type),
+                poster: this.resolveImageUrl(this.posterFromItem(item), ''),
+                backdrop: this.backdropFromItem(item) ? this.resolveImageUrl(this.backdropFromItem(item), '') : null,
+                onPlay: () => isResume || type === 'channel'
+                    ? this.openRailItem(item, isResume)
+                    : this.openRailItemWithAutoplay(item),
+                onDetails: () => this.openRailItem(item, false)
+            };
+        });
+    }
+
+    /**
+     * Hover-preview "Play": open the fiche through the normal path, then press
+     * its primary action once it's enabled (resume-aware label and all).
+     */
+    openRailItemWithAutoplay(item) {
+        this.openRailItem(item, false);
+        let tries = 0;
+        const tick = () => {
+            const btn = document.querySelector(
+                '#movie-details:not(.hidden) #movie-primary-action, '
+                + '#series-details:not(.hidden) #series-primary-action');
+            if (btn && !btn.disabled) { btn.click(); return; }
+            if (++tries < 12) setTimeout(tick, 250);
+        };
+        setTimeout(tick, 200);
     }
 
     async init() {
@@ -931,53 +973,159 @@ class HomePage {
         this.renderCloudRails({ rails });
     }
 
+    /**
+     * Rotating billboard: a resume entry (if any) followed by a curated set of
+     * rail items with a real backdrop, crossfaded every 9s. Rotation pauses on
+     * hover and while the tab is hidden; a trailer button appears when TMDB has
+     * one for the current item.
+     */
     renderHero(history = [], rails = []) {
         const hero = document.getElementById('home-hero');
         if (!hero) return;
 
-        const firstHistory = history.find(item => this.posterFromItem(item) && this.hasUsefulDisplayTitle(item));
-        const firstRailItem = rails
-            .flatMap(rail => rail.items || [])
-            .find(item => this.posterFromItem(item) && this.hasUsefulDisplayTitle(item));
-        const item = firstHistory || firstRailItem;
+        const usable = (item) => this.posterFromItem(item) && this.hasUsefulDisplayTitle(item);
+        const firstHistory = history.find(usable) || null;
+        const seen = new Set();
+        const railPicks = [];
+        for (const item of rails.flatMap(rail => rail.items || [])) {
+            if (railPicks.length >= 6) break;
+            if (!usable(item) || !this.backdropFromItem(item)) continue;
+            const key = `${item.source_id || item.sourceId || ''}:${item.item_id || item.itemId || item.id || ''}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            railPicks.push(item);
+        }
+        const slides = [
+            ...(firstHistory ? [{ item: firstHistory, isResume: true }] : []),
+            ...railPicks.map(item => ({ item, isResume: false }))
+        ];
 
-        if (!item) {
+        clearInterval(this._heroTimer);
+        this._heroTimer = null;
+
+        if (!slides.length) {
             this.heroItem = null;
             hero.classList.add('hidden');
             hero.innerHTML = '';
             return;
         }
 
-        this.heroItem = item;
-        const data = item.data || {};
-        const title = this.displayTitle(item);
-        const type = item.item_type || item.itemType || item.type || 'movie';
-        const subtitle = this.heroSubtitle(item);
-        const description = this.descriptionFromItem(item);
-        const poster = this.resolveImageUrl(this.backdropFromItem(item) || this.posterFromItem(item), '/img/norva-media-placeholder.png');
-        const action = firstHistory ? 'Resume' : (type === 'series' ? 'Open' : 'Play');
+        this._heroSlides = slides;
+        this._heroIndex = 0;
 
         hero.classList.remove('hidden');
         hero.innerHTML = `
-            <div class="home-hero-bg" style="background-image:url('${this.escapeAttr(poster)}')"></div>
+            <div class="home-hero-bg" data-hero-layer="a"></div>
+            <div class="home-hero-bg" data-hero-layer="b" style="opacity:0"></div>
             <div class="home-hero-content">
-                <div class="home-hero-kicker">${this.escapeHtml(subtitle)}</div>
-                <h1>${this.escapeHtml(title)}</h1>
-                ${description ? `<p>${this.escapeHtml(description)}</p>` : ''}
+                <div class="home-hero-kicker"></div>
+                <h1></h1>
+                <p class="home-hero-desc"></p>
                 <div class="home-hero-actions">
-                    <button class="btn btn-primary home-hero-play" id="home-hero-play">${this.escapeHtml(action)}</button>
+                    <button class="btn btn-primary home-hero-play" id="home-hero-play"></button>
                     <button class="btn btn-ghost home-hero-more" id="home-hero-more">Details</button>
+                    <button class="btn btn-ghost home-hero-trailer hidden" id="home-hero-trailer">▶ Trailer</button>
                 </div>
+                ${slides.length > 1 ? `<div class="home-hero-dots">${slides.map((_, i) =>
+                    `<button type="button" class="home-hero-dot" data-hero-dot="${i}" aria-label="Billboard ${i + 1}"></button>`).join('')}</div>` : ''}
             </div>
         `;
 
+        const currentSlide = () => this._heroSlides[this._heroIndex] || this._heroSlides[0];
         hero.querySelector('#home-hero-play')?.addEventListener('click', () => {
-            this.openRailItem(item, firstHistory);
+            const s = currentSlide();
+            s.isResume ? this.openRailItem(s.item, true) : this.openRailItemWithAutoplay(s.item);
         });
         hero.querySelector('#home-hero-more')?.addEventListener('click', () => {
-            if (type === 'series') this.navigateToSeries(item);
-            else this.openRailItem(item, firstHistory);
+            const s = currentSlide();
+            const type = s.item.item_type || s.item.itemType || s.item.type || 'movie';
+            if (type === 'series') this.navigateToSeries(s.item);
+            else this.openRailItem(s.item, false);
         });
+        hero.querySelector('#home-hero-trailer')?.addEventListener('click', () => {
+            const key = this._heroTrailerKey;
+            if (key) MediaUtils.openTrailerLightbox(key, this.displayTitle(currentSlide().item));
+        });
+        hero.querySelectorAll('.home-hero-dot').forEach((dot) => {
+            dot.addEventListener('click', () => this.showHeroSlide(Number(dot.dataset.heroDot)));
+        });
+        hero.addEventListener('mouseenter', () => { this._heroHovered = true; });
+        hero.addEventListener('mouseleave', () => { this._heroHovered = false; });
+
+        this.showHeroSlide(0, { instant: true });
+
+        if (slides.length > 1) {
+            this._heroTimer = setInterval(() => {
+                if (document.hidden || this._heroHovered) return;
+                if (this.app?.currentPage !== 'home') return;
+                this.showHeroSlide((this._heroIndex + 1) % this._heroSlides.length);
+            }, 9000);
+        }
+    }
+
+    showHeroSlide(index, { instant = false } = {}) {
+        const hero = document.getElementById('home-hero');
+        const slide = this._heroSlides?.[index];
+        if (!hero || !slide) return;
+        this._heroIndex = index;
+        this.heroItem = slide.item;
+
+        const item = slide.item;
+        const type = item.item_type || item.itemType || item.type || 'movie';
+        const backdrop = this.resolveImageUrl(
+            this.backdropFromItem(item) || this.posterFromItem(item), '/img/norva-media-placeholder.png');
+
+        // Crossfade: paint the hidden layer, then swap opacities once the image
+        // is decoded so the fade never shows a half-loaded backdrop.
+        const layers = hero.querySelectorAll('.home-hero-bg');
+        const front = [...layers].find(l => l.style.opacity !== '0') || layers[0];
+        const back = [...layers].find(l => l !== front) || layers[0];
+        const paint = () => {
+            back.style.backgroundImage = `url('${String(backdrop).replace(/'/g, '%27')}')`;
+            if (instant || front === back) {
+                back.style.opacity = '1';
+                if (front !== back) front.style.opacity = '0';
+            } else {
+                back.style.transition = front.style.transition = 'opacity 0.9s ease';
+                back.style.opacity = '1';
+                front.style.opacity = '0';
+            }
+        };
+        const img = new Image();
+        img.onload = paint;
+        img.onerror = paint;
+        img.src = backdrop;
+
+        const kicker = hero.querySelector('.home-hero-kicker');
+        if (kicker) kicker.textContent = this.heroSubtitle(item);
+        const titleEl = hero.querySelector('h1');
+        if (titleEl) titleEl.textContent = this.displayTitle(item);
+        const desc = hero.querySelector('.home-hero-desc');
+        if (desc) {
+            const text = this.descriptionFromItem(item) || '';
+            desc.textContent = text;
+            desc.classList.toggle('hidden', !text);
+        }
+        const playBtn = hero.querySelector('#home-hero-play');
+        if (playBtn) playBtn.textContent = slide.isResume ? 'Resume' : 'Play';
+        hero.querySelectorAll('.home-hero-dot').forEach((dot, i) =>
+            dot.classList.toggle('active', i === index));
+
+        // Trailer availability for THIS slide (async, guarded by index).
+        this._heroTrailerKey = null;
+        const trailerBtn = hero.querySelector('#home-hero-trailer');
+        trailerBtn?.classList.add('hidden');
+        const tmdbId = item.provider_tmdb_id || item.providerTmdbId || item.tmdb_id
+            || item.data?.providerTmdbId || item.metadata?.providerTmdbId;
+        if (tmdbId && !/^(tt)?0+$/i.test(String(tmdbId)) && window.NorvaCloud?.media?.tmdbMeta) {
+            NorvaCloud.media.tmdbMeta({ type: type === 'series' ? 'series' : 'movie', tmdbId: String(tmdbId) })
+                .then((meta) => {
+                    if (this._heroIndex !== index || !meta?.trailerKey) return;
+                    this._heroTrailerKey = meta.trailerKey;
+                    trailerBtn?.classList.remove('hidden');
+                })
+                .catch(() => { /* trailer is optional */ });
+        }
     }
 
     heroSubtitle(item) {
@@ -1125,7 +1273,9 @@ class HomePage {
             <div class="dashboard-card" data-id="${this.escapeAttr(itemId)}" data-type="${this.escapeAttr(type)}" data-rail-index="${railIndex}" data-item-index="${itemIndex}">
                 <div class="card-image">
                     ${ranked ? `<div class="rank-numeral">${itemIndex + 1}</div>` : ''}
-                    <img src="${this.escapeAttr(posterUrl)}" alt="${this.escapeAttr(title)}" loading="lazy" decoding="async" onerror="this.onerror=null;this.src='/img/norva-media-placeholder.png'">
+                    <img src="${this.escapeAttr(posterUrl)}" alt="${this.escapeAttr(title)}" loading="lazy" decoding="async"
+                         ${MediaUtils.tmdbSrcset?.(posterUrl) ? `srcset="${this.escapeAttr(MediaUtils.tmdbSrcset(posterUrl))}" sizes="(max-width: 640px) 40vw, 220px"` : ''}
+                         onerror="this.onerror=null;this.src='/img/norva-media-placeholder.png'">
                     ${variantCount > 1 ? `<div class="home-card-badge">${variantCount} versions</div>` : ''}
                     ${languageBadge ? `<div class="home-card-language-badge">${this.escapeHtml(languageBadge)}</div>` : ''}
                     <div class="play-icon-overlay">

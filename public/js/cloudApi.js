@@ -853,6 +853,15 @@
             upsert: (sourceId, items) => request('POST', '/media-items', { sourceId, items })
         },
 
+        media: {
+            // Live TMDB extras (videos/credits) for the fiches — proxied by the
+            // edge so the TMDB key never reaches the browser; cached CDN-side.
+            tmdbMeta: (params = {}) => catalogRequest('/tmdb-meta', params),
+            // Crowd-learned skip-intro markers, keyed on tmdbId+season.
+            introMarkers: (params = {}) => catalogRequest('/intro-markers', params),
+            introSignal: (body = {}) => catalogMutate('/intro-signal', body)
+        },
+
         live: {
             logicalChannels: (params = {}) => catalogRequest('/live/logical-channels', params),
             variants: (channelId, params = {}) => catalogRequest(`/live/channel/${encodeURIComponent(channelId)}/variants`, params)
@@ -912,7 +921,10 @@
             // Per-viewer "email me when these AI subtitles are ready" opt-in/out (enabled:false removes it).
             notifyGeneratedSubtitle: (body) => playbackSessionRequest('POST', '/generated-subtitle-notify', body),
             // Phase 3b: available translation target languages (the gateway's installed Argos set).
-            translateLangs: () => playbackSessionRequest('GET', '/generated-subtitle-langs')
+            translateLangs: () => playbackSessionRequest('GET', '/generated-subtitle-langs'),
+            // Seek-thumbnail storyboard: cache state (ready → sprite URL + tile grid);
+            // pass enqueue:1 to trigger generation (deferred while the account watches).
+            storyboard: (params = {}) => playbackSessionRequest('GET', `/storyboard${query(params)}`)
         },
 
         device: {
