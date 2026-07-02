@@ -785,9 +785,14 @@ app.post('/transcribe-async/:token', (req, res) => {
     const start = Math.max(0, Number.parseFloat(req.query.start) || 0);
     const dur = Math.max(0, Number.parseFloat(req.query.dur) || 0); // 0 = whole track (production); >0 = clip (test)
     const ua = claims.ua || FFMPEG_USER_AGENT;
-    const ok = enqueueTranscribe({ url: claims.url, ua, index, jobId, callbackUrl, start, dur, uid: claims.uid });
+    // Priority class from the edge's origin tag: a viewer waiting in front of the player jumps
+    // ahead of the nightly pregen batch (viewer=0 > service=1 > pregen=2).
+    const prio = JOB_PRIORITY[String(req.query.origin || '')] ?? 1;
+    const job = { url: claims.url, ua, index, jobId, callbackUrl, start, dur, uid: claims.uid, prio };
+    const ok = enqueueTranscribe(job);
     if (!ok) return res.status(429).json({ error: 'Transcription queue full' });
-    return res.status(202).json({ queued: true, position: transcribeQueue.length, busy: transcribeBusy });
+    // position = where THIS job sits after priority insertion (1-based), not the queue tail.
+    return res.status(202).json({ queued: true, position: transcribeQueue.indexOf(job) + 1, busy: transcribeBusy });
 });
 
 // Phase 4 async OCR: accept a job (202) for a PGS image-sub track and run it in the background, then
@@ -810,9 +815,12 @@ app.post('/ocr-async/:token', (req, res) => {
     // fmt selects the pipeline: 'pgs' (.sup parser) vs 'vobsub'/'dvb' (ffmpeg sub2video → frames).
     const fmt = ['pgs', 'vobsub', 'dvb'].includes(String(req.query.fmt || '')) ? String(req.query.fmt) : 'pgs';
     const ua = claims.ua || FFMPEG_USER_AGENT;
-    const ok = enqueueOcr({ url: claims.url, ua, index, jobId, callbackUrl, lang, fmt, uid: claims.uid });
+    // OCR is viewer-triggered by nature — same priority classes for symmetry.
+    const prio = JOB_PRIORITY[String(req.query.origin || '')] ?? 0;
+    const job = { url: claims.url, ua, index, jobId, callbackUrl, lang, fmt, uid: claims.uid, prio };
+    const ok = enqueueOcr(job);
     if (!ok) return res.status(429).json({ error: 'OCR queue full' });
-    return res.status(202).json({ queued: true, position: ocrQueue.length, busy: ocrBusy });
+    return res.status(202).json({ queued: true, position: ocrQueue.indexOf(job) + 1, busy: ocrBusy });
 });
 
 // Phase 3b async translation: translate a cached transcript VTT into a target language and POST the
