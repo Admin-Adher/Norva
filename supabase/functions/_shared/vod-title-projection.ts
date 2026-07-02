@@ -831,11 +831,33 @@ function normalizeTitle(value: string, year: string | null = null) {
     .trim();
 }
 
+// Display form of a provider name. Beyond the historical trailing-quality strip, handles
+// scene-release names ("[ Torrent911.me ] Guardians.Of.The.Galaxy.Vol.3.2023.Vostfr.Hdrip.X264"
+// → "Guardians Of The Galaxy Vol 3 2023"): leading bracketed release-site ads, dotted separators,
+// a cut at unambiguous rip/codec tokens, then trailing language/version markers. Conservative —
+// falls back to the input when cleaning would empty the name (e.g. the film "[REC]"). DISPLAY
+// ONLY: identity_key comes from normalizeTitle(raw), which already strips all of this, so
+// improving the display form never re-keys a title (no dupes on re-sync). Mirrors the frontend
+// MediaUtils.cleanReleaseName — keep the two in sync.
+const HARD_RELEASE_TOKENS = /^(webrip|web-?dl|hdrip|brrip|bdrip|dvdrip|hdtv|hdlight|hdcam|camrip|hdts|blu-?ray|x264|x265|h264|h265|hevc|avc|aac|ac3|eac3|dts|10bit|8bit|2160p|1080p|720p|480p|4klight)$/i;
+const SOFT_RELEASE_TOKENS = /^(french|truefrench|vostfr|vost|vff|vfq|vf|vo|multi|subfrench|final|proper|repack|internal|extended|unrated|custom)$/i;
 function cleanDisplayTitle(value: string) {
-  return String(value || "Norva")
+  const raw = String(value || "Norva").replace(/\s+/g, " ").trim();
+  let text = raw.replace(/^\s*(?:[\[(][^\])]{0,60}[\])]\s*)+/, "").trim();
+  if (!/\s/.test(text) && /^\S+(?:\.\S+){3,}$/.test(text)) text = text.replace(/\./g, " ");
+  const tokens = text.split(/\s+/).filter(Boolean);
+  let cut = tokens.length;
+  for (let i = 1; i < tokens.length; i++) {   // never cut the leading token
+    if (HARD_RELEASE_TOKENS.test(tokens[i])) { cut = i; break; }
+  }
+  const kept = tokens.slice(0, cut);
+  while (kept.length > 1 && SOFT_RELEASE_TOKENS.test(kept[kept.length - 1])) kept.pop();
+  const out = kept.join(" ")
     .replace(/\s+\b(4K|UHD|2160p|1080p|720p|FHD|HD|SD|MULTI|VOSTFR|VOST|VF|SUBT AR|SUB AR)\b\s*$/i, "")
+    .replace(/[\s\-–—:|.]+$/g, "")
     .replace(/\s+/g, " ")
     .trim();
+  return out || raw;
 }
 
 function extractYear(title: string, explicit: unknown): string | null {

@@ -921,10 +921,16 @@ const CloudAdapter = (() => {
     }
 
     function usefulTitle(value) {
-        const title = String(value ?? '').replace(/\s+/g, ' ').trim();
+        let title = String(value ?? '').replace(/\s+/g, ' ').trim();
         if (!title) return '';
         const normalized = title.toLowerCase();
         if (['0', 'null', 'undefined', 'unknown', 'unknown title', 'norva'].includes(normalized)) return '';
+        // Display-clean scene-release names ("[ Torrent911.me ] Name.Year.Vostfr.X264" → "Name Year")
+        // at the single point every playback/display name funnels through. raw_title fields keep the
+        // raw value (version/quality parsers read those, not this display form).
+        if (typeof window !== 'undefined' && window.MediaUtils?.cleanReleaseName) {
+            title = window.MediaUtils.cleanReleaseName(title) || title;
+        }
         return title;
     }
 
