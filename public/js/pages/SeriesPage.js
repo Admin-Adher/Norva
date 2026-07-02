@@ -2015,6 +2015,9 @@ class SeriesPage {
             rating: this.currentSeries?.rating,
             sourceId: sourceId,
             seriesId: this.currentSeries?.series_id,
+            // TMDB id keys the cross-user skip-intro markers for this season.
+            providerTmdbId: this.currentSeries?.provider_tmdb_id || this.currentSeries?.providerTmdbId
+                || this.currentSeries?.tmdb?.id || null,
             seriesInfo: this.currentSeriesInfo,
             currentSeason: seasonNum,
             currentEpisode: episodeNum,
