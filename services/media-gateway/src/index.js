@@ -301,6 +301,11 @@ app.get('/health', (req, res) => {
         ocrLangs: OCR_ENABLED ? OCR_LANGS : '',
         providerProxy: providerProxyAgents.length > 0,
         providerProxyPool: providerProxyAgents.length,
+        transcribeQueueDepth: transcribeQueue.length,
+        transcribeBusy,
+        ocrQueueDepth: ocrQueue.length,
+        ocrBusy,
+        translateQueueDepth: translateQueue.length,
         inbandHeaderParse: INBAND_HEADER_PARSE,
         headerByteCacheSize: headerByteCache.size,
         activeSessions: activeSessionCount(),
@@ -1031,6 +1036,62 @@ async function withAccountJobLock(key, fn) {
     }
 }
 
+// Crons ↔ jobs coordination, direction (b) (fix #3 of the subtitle-failures audit): before a
+// queued job opens its provider connection, ask the edge whether the account's slot is safe —
+// no live viewer and no enrichment tick heartbeat in the last ~2.5 min. The edge is the only
+// party that can see relay-side cron activity: the 01/07 super8k failures were a pregen ffmpeg
+// landing mid relay-probe batch, second-exact. The enqueue-time stagger (00:20/25/30) only
+// staggers the ENQUEUE — this queue executes 15-50 min later, in the middle of the cron grid.
+// Deferred jobs rotate to the back of their lane so other accounts keep flowing; fail-open (an
+// unreachable gate — incl. a 404 while the edge route rolls out — never wedges the queue; the
+// account lock and the edge-side tick skip still bound the damage).
+const JOB_GATE_POLL_MS = clampInt(process.env.JOB_GATE_POLL_MS, 60_000, 5_000, 600_000);
+const JOB_GATE_MAX_DEFERRALS = clampInt(process.env.JOB_GATE_MAX_DEFERRALS, 240, 1, 2000);
+async function shouldDeferJob(job) {
+    try {
+        const gateUrl = String(job.callbackUrl || '').replace(/\/[^/]*$/, '/pregen-gate');
+        if (!/^https:\/\/[^/]+\.supabase\.co\//.test(gateUrl)) return false;
+        const resp = await fetch(gateUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${GATEWAY_TOKEN}` },
+            body: JSON.stringify({ userId: job.uid || '' }),
+            signal: AbortSignal.timeout(10_000),
+        });
+        if (!resp.ok) return false;
+        const body = await resp.json().catch(() => null);
+        return Boolean(body && body.defer === true);
+    } catch (_) { return false; }
+}
+async function postDeferFailCallback(kind, job) {
+    const minutes = Math.round((JOB_GATE_POLL_MS * JOB_GATE_MAX_DEFERRALS) / 60000);
+    try {
+        await fetch(job.callbackUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${GATEWAY_TOKEN}` },
+            body: JSON.stringify({ jobId: job.jobId, ok: false, error: `Deferred too long: the account's provider slot stayed busy (live viewer or enrichment) for ~${minutes} min` }),
+            signal: AbortSignal.timeout(30000),
+        });
+    } catch (e) { console.warn(`[media-gateway] ${kind} defer-fail callback failed`, job.jobId, String((e && e.message) || e)); }
+}
+// Shift the next runnable job off `queue`; a deferred job rotates to the back so other accounts
+// keep flowing. Returns null when every queued job is deferred (the caller sleeps and rescans).
+async function nextRunnableJob(queue, kind) {
+    const n = queue.length;
+    for (let i = 0; i < n; i++) {
+        const job = queue.shift();
+        if (!job) return null;
+        if (!(await shouldDeferJob(job))) { job.gateDeferrals = 0; return job; }
+        job.gateDeferrals = (job.gateDeferrals || 0) + 1;
+        if (job.gateDeferrals > JOB_GATE_MAX_DEFERRALS) {
+            console.warn(`[media-gateway] ${kind} job ${job.jobId} deferred too long — failing back to the edge`);
+            await postDeferFailCallback(kind, job);
+            continue; // consumed (failed) — inspect the next queued job
+        }
+        queue.push(job);
+    }
+    return null;
+}
+
 // Phase 3 transcription job queue (in-process, concurrency 1). A full-film transcription is many
 // minutes long, so /transcribe-async accepts a job (202) and runs it in the BACKGROUND, then POSTs
 // the result to the edge callback (auth = the shared gateway token). A gateway restart loses
@@ -1051,7 +1112,8 @@ async function drainTranscribeQueue() {
     transcribeBusy = true;
     try {
         while (transcribeQueue.length) {
-            const job = transcribeQueue.shift();
+            const job = await nextRunnableJob(transcribeQueue, 'transcribe');
+            if (!job) { await sleep(JOB_GATE_POLL_MS); continue; }
             await runTranscribeJob(job).catch((e) => console.warn('[media-gateway] transcribe job error', String((e && e.message) || e)));
         }
     } finally { transcribeBusy = false; }
@@ -1167,7 +1229,8 @@ async function drainOcrQueue() {
     ocrBusy = true;
     try {
         while (ocrQueue.length) {
-            const job = ocrQueue.shift();
+            const job = await nextRunnableJob(ocrQueue, 'ocr');
+            if (!job) { await sleep(JOB_GATE_POLL_MS); continue; }
             await runOcrJob(job).catch((e) => console.warn('[media-gateway] ocr job error', String((e && e.message) || e)));
         }
     } finally { ocrBusy = false; }

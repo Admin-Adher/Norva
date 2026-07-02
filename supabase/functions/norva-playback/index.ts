@@ -142,6 +142,9 @@ Deno.serve(async (req) => {
     if (req.method === "POST" && segments[0] === "transcribe-callback") {
       return json(req, await runTranscribeCallback(req, supabase));
     }
+    if (req.method === "POST" && segments[0] === "pregen-gate") {
+      return json(req, await runPregenGate(req, supabase));
+    }
     if (req.method === "GET" && segments[0] === "generated-subtitle") {
       const identity = await requireIdentity(req, supabase);
       return json(req, await getGeneratedSubtitle(req, identity.userId, supabase));
@@ -2348,6 +2351,7 @@ async function transcribeEnqueue(
   const { data: claim, error: claimErr } = await db.rpc("claim_generated_subtitle_job", {
     p_provider_key: pkey, p_item_type: itemType, p_external_id: externalId, p_kind: "transcript", p_lang: "src",
     p_new_job_id: jobId, p_processing_ttl_ms: PROCESSING_TTL_MS, p_force: opts.force === true,
+    p_claimed_by: userId, // whose provider slot the job's ffmpeg will hold → this account's crons yield
   });
   if (claimErr) throwDb(claimErr, "enqueue claim failed");
   const claimRow = (Array.isArray(claim) ? claim[0] : claim) as JsonRecord | null;
@@ -2417,6 +2421,7 @@ async function ocrEnqueue(
   const { data: claim, error: claimErr } = await db.rpc("claim_generated_subtitle_job", {
     p_provider_key: pkey, p_item_type: itemType, p_external_id: externalId, p_kind: "ocr", p_lang: cacheLang,
     p_new_job_id: jobId, p_processing_ttl_ms: PROCESSING_TTL_MS, p_force: opts.force === true,
+    p_claimed_by: userId, // whose provider slot the job's ffmpeg will hold → this account's crons yield
   });
   if (claimErr) throwDb(claimErr, "ocr enqueue claim failed");
   const claimRow = (Array.isArray(claim) ? claim[0] : claim) as JsonRecord | null;
@@ -2790,6 +2795,58 @@ async function userHasLiveSession(db: SupabaseClient, userId: string): Promise<b
   return Boolean(sess && sess.length);
 }
 
+// Crons ↔ pregen coordination (subtitle-failures audit, fix #3). Two independent directions:
+//  (a) an enrichment tick SKIPS an account while a pregen/OCR job claimed by that account is in
+//      flight (status='processing', fresh): the job's gateway ffmpeg holds the account's single
+//      provider slot for up to ~45 min, and a relay probe beside it is exactly the 2-connection
+//      collision ("user_multi_ip") that burned the 01/07 super8k jobs;
+//  (b) the gateway polls /pregen-gate before opening a job's provider connection and defers while
+//      a tick ran in the last ENRICH_TICK_DEFER_MS or a viewer is live — the reverse collision
+//      (job landing mid-tick), proven second-exact in the audit.
+// Both fail-open: coordination must never wedge enrichment or the gateway queue.
+const ENRICH_TICK_DEFER_MS = 150 * 1000;        // ticks run ≤ ~110 s (cron timeout) + margin
+const PREGEN_ACTIVE_TTL_MS = 2 * 3600 * 1000;   // matches the stale-processing reaper threshold
+
+async function accountPregenActive(db: SupabaseClient, userId: string): Promise<boolean> {
+  if (!userId) return false;
+  try {
+    const sinceIso = new Date(Date.now() - PREGEN_ACTIVE_TTL_MS).toISOString();
+    const { data } = await db.from("catalog_generated_subtitles")
+      .select("job_id").eq("claimed_by", userId).eq("status", "processing")
+      .gt("updated_at", sinceIso).limit(1);
+    return Boolean(data && data.length);
+  } catch (_) { return false; } // fail-open: unreadable state must not stall enrichment
+}
+
+// One upsert per provider-touching dimension run; /pregen-gate reads it to defer gateway jobs.
+async function bumpEnrichmentHeartbeat(db: SupabaseClient, userId: string) {
+  try {
+    await db.from("enrichment_tick_heartbeat").upsert(
+      { user_id: userId, ticked_at: new Date().toISOString() },
+      { onConflict: "user_id" },
+    );
+  } catch (_) { /* best-effort */ }
+}
+
+// POST /pregen-gate (gateway-token auth, like transcribe-callback): { userId } → { defer, reason }.
+// The gateway is blind to relay-side cron activity and viewer sessions — this is its one window.
+async function runPregenGate(req: Request, db: SupabaseClient) {
+  const runtimeConfig = await getRuntimeConfig(db);
+  const provided = req.headers.get("Authorization")?.match(/^Bearer\s+(.+)$/i)?.[1] ?? "";
+  if (!runtimeConfig.mediaGatewayToken || provided !== runtimeConfig.mediaGatewayToken) throw new HttpError(401, "Unauthorized");
+  const body = recordOrEmpty(await req.json().catch(() => ({})));
+  const userId = stringOr(body.userId, "");
+  if (!userId) return { defer: false, reason: "no-user" };
+  if (await userHasLiveSession(db, userId)) return { defer: true, reason: "live-session" };
+  try {
+    const sinceIso = new Date(Date.now() - ENRICH_TICK_DEFER_MS).toISOString();
+    const { data } = await db.from("enrichment_tick_heartbeat")
+      .select("user_id").eq("user_id", userId).gt("ticked_at", sinceIso).limit(1);
+    if (data && data.length) return { defer: true, reason: "enrichment-tick" };
+  } catch (_) { /* fail-open */ }
+  return { defer: false };
+}
+
 // Exhausted-dimension short-circuit (cron audit #11, corrected fix). A dimension that returned 0
 // candidates still cost a full variant-driven panel scan per tick (airysat: 357ms/46k buffers to
 // return 0; ninja post-drain: up to 360 ticks/day × 172k-variant scans). The scan visits EVERY
@@ -2903,7 +2960,7 @@ async function runAudioBackfill(req: Request, db: SupabaseClient) {
     const processed = Number(r?.processed ?? 0);
     if (key) await recordExhaustion(db, key, processed, r?.skipped);
     tried.push({ type: stringOr(dim.type, "?"), kind, processed, skipped: stringOrNull(r?.skipped) });
-    if (r?.skipped) return { mode: "fallthrough", stoppedAt: "live-session", tried };   // user live → stop the whole chain
+    if (r?.skipped) return { mode: "fallthrough", stoppedAt: r.skipped, tried };   // live viewer / in-flight pregen → stop the whole chain
     if (processed > 0) return { mode: "fallthrough", workedOn: tried[tried.length - 1], tried, result: r };
   }
   return { mode: "fallthrough", exhausted: true, tried };
@@ -3152,6 +3209,11 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
     if (body.ignoreLiveSession !== true && await userHasLiveSession(db, userId)) {
       return { mode: "whisper", skipped: "live-session", processed: 0, candidates: 0, detected: 0 };
     }
+    // Same for an in-flight pregen/OCR job of this account (its ffmpeg holds the provider slot).
+    if (body.ignoreLiveSession !== true && await accountPregenActive(db, userId)) {
+      return { mode: "whisper", skipped: "pregen-active", processed: 0, candidates: 0, detected: 0 };
+    }
+    await bumpEnrichmentHeartbeat(db, userId);
     const wConcurrency = Math.max(1, Math.min(Number(body.concurrency) || 1, 4));
     // Select REAL candidates DB-side via RPC (raw jsonb @>): titles whose audio_tracks still hold
     // an untagged (lang null) track, skipping those attempted within the retry window so the queue
@@ -3225,6 +3287,12 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
   if (body.ignoreLiveSession !== true && await userHasLiveSession(db, userId)) {
     return { mode, skipped: "live-session", processed: 0, updated: 0, userId };
   }
+  // A pregen/OCR job claimed by this account is holding (or about to hold) the provider slot
+  // from the gateway's IP — a relay probe beside it is exactly the 2-connection collision.
+  if (body.ignoreLiveSession !== true && await accountPregenActive(db, userId)) {
+    return { mode, skipped: "pregen-active", processed: 0, updated: 0, userId };
+  }
+  await bumpEnrichmentHeartbeat(db, userId); // /pregen-gate defers gateway jobs while ticks run
 
   // untaggedOnly = titles with NO version tag (e.g. plain French films). These carry no
   // language signal in the title, so they MUST be probed; ~60% expose a real default-track
