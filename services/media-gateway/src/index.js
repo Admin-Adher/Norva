@@ -125,7 +125,18 @@ const WHISPER_TIMEOUT_MS = clampInt(process.env.WHISPER_TIMEOUT_MS, 60_000, 5_00
 const WHISPER_SWEEP_OFFSETS = (process.env.WHISPER_SWEEP_OFFSETS || '600,1500,300')
     .split(',').map((s) => Number.parseInt(s.trim(), 10)).filter((n) => Number.isFinite(n) && n >= 0);
 // Full transcription (Phase 3) runs whisper on a whole film → much longer than the 20s LID clip.
+// This flat value is a FLOOR: the effective budget adapts to the WAV's real duration (see
+// whisperBudgetMs) because a long film at a flat 20 min was mathematically guaranteed to be
+// SIGKILLed with zero output (both 07-02 "Transcription produced no output" failures).
 const WHISPER_TRANSCRIBE_TIMEOUT_MS = clampInt(process.env.WHISPER_TRANSCRIBE_TIMEOUT_MS, 1_200_000, 30_000, 7_200_000);
+// Adaptive budget: measured RTF on this box is ~0.09-0.15 (8-13 min of whisper for 5 342-6 360 s
+// of audio) → 0.5×duration gives 3-5× headroom while still bounding a hung run. pcm_s16le
+// 16 kHz mono = 32 000 bytes/second, so duration comes free from the WAV size.
+const WHISPER_RTF_BUDGET = Math.min(Math.max(Number(process.env.WHISPER_RTF_BUDGET) || 0.5, 0.2), 3);
+function whisperBudgetMs(audioSec) {
+    if (!Number.isFinite(audioSec) || audioSec <= 0) return WHISPER_TRANSCRIBE_TIMEOUT_MS;
+    return Math.max(WHISPER_TRANSCRIBE_TIMEOUT_MS, Math.round(audioSec * WHISPER_RTF_BUDGET * 1000));
+}
 const AUDIO_EXTRACT_TIMEOUT_MS = clampInt(process.env.AUDIO_EXTRACT_TIMEOUT_MS, 1_800_000, 30_000, 7_200_000);
 // Phase 3b — offline subtitle translation (Argos / CTranslate2 models, see src/translate.py).
 // ARGOS_PYTHON_BIN runs the bundled script against models under ARGOS_MODELS_DIR; an empty/missing
@@ -726,7 +737,7 @@ app.get('/transcribe/:token', async (req, res) => {
         wavPath = ex.path;
         let audioSec = 0;
         try { audioSec = (await fsp.stat(wavPath)).size / (16000 * 2); } catch (_) { audioSec = 0; } // 16kHz mono s16le = 32000 B/s
-        const w = await runWhisperVtt(wavPath, forceLang);
+        const w = await runWhisperVtt(wavPath, forceLang, whisperBudgetMs(audioSec));
         const segments = (w.vtt.match(/-->/g) || []).length;
         return res.json({
             vtt: w.vtt,
@@ -955,8 +966,8 @@ function cleanVtt(vtt) {
 // Resolves { vtt, lang, prob, ms, failReason } — vtt empty on failure, and failReason then says
 // WHY (timeout SIGKILL vs crash vs spawn): whisper.cpp only writes the -ovtt file at completion,
 // so a timeout kill leaves no partial VTT and used to surface as an opaque "no output".
-// forceLang pins the source language.
-function runWhisperVtt(wavPath, forceLang) {
+// forceLang pins the source language. `timeoutMs` = the adaptive budget (whisperBudgetMs).
+function runWhisperVtt(wavPath, forceLang, timeoutMs = WHISPER_TRANSCRIBE_TIMEOUT_MS) {
     return new Promise((resolve) => {
         const t0 = Date.now();
         const outPrefix = wavPath.replace(/\.wav$/i, '');
@@ -973,7 +984,7 @@ function runWhisperVtt(wavPath, forceLang) {
         catch (e) { return resolve({ vtt: '', lang: null, prob: 0, ms: 0, failReason: 'whisper spawn failed: ' + String((e && e.message) || e) }); }
         let stderr = '';
         let timedOut = false;
-        const timer = setTimeout(() => { timedOut = true; try { child.kill('SIGKILL'); } catch (_) {} }, WHISPER_TRANSCRIBE_TIMEOUT_MS);
+        const timer = setTimeout(() => { timedOut = true; try { child.kill('SIGKILL'); } catch (_) {} }, timeoutMs);
         child.stderr.on('data', (d) => { stderr += d.toString(); });
         child.on('error', (e) => { clearTimeout(timer); resolve({ vtt: '', lang: null, prob: 0, ms: Date.now() - t0, failReason: 'whisper error: ' + String((e && e.message) || e) }); });
         child.on('close', async (code) => {
@@ -1057,7 +1068,7 @@ async function runTranscribeJob(job) {
             wavPath = ex.path;
             let audioSec = 0;
             try { audioSec = Math.round((await fsp.stat(wavPath)).size / (16000 * 2)); } catch (_) { audioSec = 0; }
-            const w = await runWhisperVtt(wavPath, '');
+            const w = await runWhisperVtt(wavPath, '', whisperBudgetMs(audioSec));
             const segments = (w.vtt.match(/-->/g) || []).length;
             payload = w.vtt
                 ? { jobId, ok: true, vtt: w.vtt, sourceLang: w.lang, audioSec, segments }
