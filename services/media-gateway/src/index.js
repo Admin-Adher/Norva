@@ -1077,6 +1077,34 @@ async function shouldDeferJob(job) {
         return Boolean(body && body.defer === true);
     } catch (_) { return false; }
 }
+// Priority classes for the background lanes: a VIEWER waiting in front of the player outranks
+// the nightly pregen batch (which outranks nothing else). Jobs carry `prio` from the enqueue
+// route's `origin` param (viewer=0, service=1, pregen=2; absent → 1). Insertion is stable
+// WITHIN a class (append after the last same-class job), so same-priority jobs stay FIFO.
+const JOB_PRIORITY = { viewer: 0, service: 1, pregen: 2 };
+function jobPrio(job) { return Number.isInteger(job?.prio) ? job.prio : 1; }
+function insertByPriority(queue, job) {
+    const p = jobPrio(job);
+    let i = queue.length;
+    while (i > 0 && jobPrio(queue[i - 1]) > p) i--;
+    queue.splice(i, 0, job);
+}
+
+// Non-terminal job heartbeat: stamps the row's stage (queued/deferred/extracting/transcribing)
+// AND bumps updated_at — so a job legitimately deferred for hours (viewer watching on a
+// single-slot account) is no longer reaped at 2h or re-claimed at 90min mid-flight, and the
+// player can show honest progress instead of an opaque "processing". Fire-and-forget.
+function postJobHeartbeat(job, stage) {
+    try {
+        fetch(job.callbackUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${GATEWAY_TOKEN}` },
+            body: JSON.stringify({ jobId: job.jobId, heartbeat: true, stage }),
+            signal: AbortSignal.timeout(10_000),
+        }).catch(() => {});
+    } catch (_) { /* best-effort */ }
+}
+
 async function postDeferFailCallback(kind, job) {
     const minutes = Math.round((JOB_GATE_POLL_MS * JOB_GATE_MAX_DEFERRALS) / 60000);
     try {
@@ -1088,23 +1116,28 @@ async function postDeferFailCallback(kind, job) {
         });
     } catch (e) { console.warn(`[media-gateway] ${kind} defer-fail callback failed`, job.jobId, String((e && e.message) || e)); }
 }
-// Shift the next runnable job off `queue`; a deferred job rotates to the back so other accounts
-// keep flowing. Returns null when every queued job is deferred (the caller sleeps and rescans).
+// Shift the next runnable job off `queue`; deferred jobs collect in a SIDE list during the scan
+// and re-enter by priority class only after it — re-pushing them inline would break the scan
+// invariant (a deferred high-priority job would be re-visited in the same pass, burning its
+// deferral budget n× faster and starving lower classes). Returns null when every queued job is
+// deferred (the caller sleeps and rescans).
 async function nextRunnableJob(queue, kind) {
-    const n = queue.length;
-    for (let i = 0; i < n; i++) {
+    const deferred = [];
+    let picked = null;
+    while (queue.length) {
         const job = queue.shift();
-        if (!job) return null;
-        if (!(await shouldDeferJob(job))) { job.gateDeferrals = 0; return job; }
+        if (!(await shouldDeferJob(job))) { job.gateDeferrals = 0; picked = job; break; }
         job.gateDeferrals = (job.gateDeferrals || 0) + 1;
         if (job.gateDeferrals > JOB_GATE_MAX_DEFERRALS) {
             console.warn(`[media-gateway] ${kind} job ${job.jobId} deferred too long — failing back to the edge`);
             await postDeferFailCallback(kind, job);
             continue; // consumed (failed) — inspect the next queued job
         }
-        queue.push(job);
+        postJobHeartbeat(job, 'deferred'); // keeps the row alive (reaper/claim) + honest UI state
+        deferred.push(job);
     }
-    return null;
+    for (const j of deferred) insertByPriority(queue, j);
+    return picked;
 }
 
 // Phase 3 transcription job queue (in-process, concurrency 1). A full-film transcription is many
@@ -1118,7 +1151,8 @@ const MAX_TRANSCRIBE_QUEUE = clampInt(process.env.MAX_TRANSCRIBE_QUEUE, 50, 1, 5
 
 function enqueueTranscribe(job) {
     if (transcribeQueue.length >= MAX_TRANSCRIBE_QUEUE) return false;
-    transcribeQueue.push(job);
+    insertByPriority(transcribeQueue, job); // viewer clicks jump ahead of the nightly pregen batch
+    postJobHeartbeat(job, 'queued');
     queueMicrotask(drainTranscribeQueue);
     return true;
 }
@@ -1137,6 +1171,7 @@ async function runTranscribeJob(job) {
     const { url, ua, index, jobId, callbackUrl, start = 0, dur = 0, uid = '' } = job;
     let wavPath = null, payload;
     try {
+        postJobHeartbeat(job, 'extracting');
         let ex = { ok: false, error: 'not attempted' };
         for (let attempt = 0; attempt <= AUDIO_EXTRACT_RETRIES; attempt++) {
             // Account lock per ATTEMPT: the 30/60s backoff sleeps must not hold the slot.
@@ -1150,6 +1185,7 @@ async function runTranscribeJob(job) {
             payload = { jobId, ok: false, error: ('Audio extraction failed: ' + ex.error).slice(0, 300) };
         } else {
             wavPath = ex.path;
+            postJobHeartbeat(job, 'transcribing');
             let audioSec = 0;
             try { audioSec = Math.round((await fsp.stat(wavPath)).size / (16000 * 2)); } catch (_) { audioSec = 0; }
             const w = await runWhisperVtt(wavPath, '', whisperBudgetMs(audioSec));
@@ -1242,7 +1278,8 @@ const ocrQueue = [];
 let ocrBusy = false;
 function enqueueOcr(job) {
     if (ocrQueue.length >= MAX_OCR_QUEUE) return false;
-    ocrQueue.push(job);
+    insertByPriority(ocrQueue, job);
+    postJobHeartbeat(job, 'queued');
     queueMicrotask(drainOcrQueue);
     return true;
 }
@@ -1402,6 +1439,7 @@ async function runOcrJob(job) {
     const useFrames = fmt === 'vobsub' || fmt === 'dvb';  // sub2video path; else PGS .sup parser
     let supPath = null, frameDir = null, payload;
     try {
+        postJobHeartbeat(job, 'extracting');
         let ex = { ok: false, error: 'not attempted' };
         for (let attempt = 0; attempt <= OCR_EXTRACT_RETRIES; attempt++) {
             // Account lock per ATTEMPT (not around the loop): the 30/60 s backoff sleeps must not

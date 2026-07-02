@@ -2847,13 +2847,39 @@ async function runTranscribeCallback(req: Request, db: SupabaseClient) {
   const jobId = stringOr(body.jobId, "");
   if (!jobId) throw new HttpError(400, "jobId is required");
   const nowIso = new Date().toISOString();
+
+  // NON-TERMINAL heartbeat: the gateway stamps the job's stage (queued/deferred/extracting/
+  // transcribing) and keeps updated_at fresh — a live job deferred for hours is no longer
+  // reaped at 2h nor re-claimed at 90min mid-flight. Never touches status.
+  if (body.heartbeat === true) {
+    const stage = ["queued", "deferred", "extracting", "transcribing"].includes(stringOr(body.stage, ""))
+      ? stringOr(body.stage, "") : null;
+    await db.from("catalog_generated_subtitles")
+      .update({ stage, updated_at: nowIso })
+      .eq("job_id", jobId).eq("status", "processing"); // never resurrect a terminal row
+    return { ok: true, heartbeat: true, jobId, stage };
+  }
+
+  // NON-TERMINAL partial delivery (V2 chunked pipeline): a growing VTT streams in while the
+  // transcription continues — the player attaches it minutes after the real start.
+  if (body.partial === true) {
+    await db.from("catalog_generated_subtitles")
+      .update({
+        vtt: stringOr(body.vtt, ""), source_lang: stringOrNull(body.sourceLang),
+        segments: Number.isFinite(Number(body.segments)) ? Number(body.segments) : null,
+        stage: "transcribing", updated_at: nowIso,
+      })
+      .eq("job_id", jobId).eq("status", "processing");
+    return { ok: true, partial: true, jobId };
+  }
+
   const patch: JsonRecord = body.ok === true
     ? { status: "ready", vtt: stringOr(body.vtt, ""), source_lang: stringOrNull(body.sourceLang),
         audio_sec: Number.isFinite(Number(body.audioSec)) ? Number(body.audioSec) : null,
-        segments: Number.isFinite(Number(body.segments)) ? Number(body.segments) : null, error: null, updated_at: nowIso }
-    : { status: "failed", error: stringOr(body.error, "unknown").slice(0, 300), updated_at: nowIso };
+        segments: Number.isFinite(Number(body.segments)) ? Number(body.segments) : null, error: null, stage: null, updated_at: nowIso }
+    : { status: "failed", error: stringOr(body.error, "unknown").slice(0, 300), stage: null, updated_at: nowIso };
   const { data: updated, error } = await db.from("catalog_generated_subtitles").update(patch).eq("job_id", jobId)
-    .select("provider_key, item_type, external_id, kind, lang, status, segments").maybeSingle();
+    .select("provider_key, item_type, external_id, kind, lang, status, segments, source_lang, vtt, claimed_by").maybeSingle();
   if (error) throwDb(error, "transcribe callback update failed");
   // Email anyone who opted in for this transcript (best-effort: a send/dispatch failure here must
   // not fail the callback, or the gateway will think the result was lost and the row stays stuck).
