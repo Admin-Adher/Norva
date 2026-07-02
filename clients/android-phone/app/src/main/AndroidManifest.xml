@@ -20,12 +20,13 @@
         android:label="@string/app_name"
         android:networkSecurityConfig="@xml/network_security_config"
         android:usesCleartextTraffic="true"
-        android:theme="@android:style/Theme.NoTitleBar.Fullscreen">
+        android:theme="@style/AppTheme">
 
         <activity
             android:name=".MainActivity"
             android:configChanges="keyboard|keyboardHidden|orientation|screenLayout|screenSize|uiMode"
             android:exported="true"
+            android:launchMode="singleTask"
             android:screenOrientation="portrait">
 
             <!-- Launcher intent -->
@@ -42,6 +43,18 @@
                 <data android:scheme="norva" android:host="pair" />
             </intent-filter>
 
+            <!-- https App Links: a shared norva.tv title/app link opens the app.
+                 autoVerify requires /.well-known/assetlinks.json on norva.tv with
+                 the release-signing SHA-256 (see public/.well-known/assetlinks.json);
+                 until verified, Android still offers the app as a link handler. -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="norva.tv" android:path="/app.html" />
+                <data android:scheme="https" android:host="norva.tv" android:pathPrefix="/t/" />
+            </intent-filter>
+
         </activity>
 
         <activity
@@ -50,6 +63,7 @@
             android:exported="false"
             android:resizeableActivity="true"
             android:supportsPictureInPicture="true"
+            android:theme="@style/PlayerTheme"
             android:screenOrientation="fullUser" />
 
         <!-- Offline downloads: native list of saved movies (the "Downloads" screen). -->
@@ -58,6 +72,11 @@
             android:configChanges="keyboard|keyboardHidden|orientation|screenLayout|screenSize|uiMode"
             android:exported="false"
             android:screenOrientation="portrait" />
+
+        <!-- Chromecast: Cast framework bootstrap (Default Media Receiver). -->
+        <meta-data
+            android:name="com.google.android.gms.cast.framework.OPTIONS_PROVIDER_CLASS_NAME"
+            android:value="tv.norva.phone.CastOptionsProvider" />
 
         <!-- Foreground service that downloads + AES-encrypts media off the home network. -->
         <service

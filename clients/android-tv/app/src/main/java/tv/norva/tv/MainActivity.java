@@ -56,6 +56,17 @@ public class MainActivity extends Activity {
     private Button errorRetryBtn;
     private String lastLoadedUrl;
 
+    // Poster/title of the playback in flight, kept for the launcher's Play Next
+    // row (the player result only carries ids + position).
+    private String lastPlayTitle;
+    private String lastPlayPoster;
+
+    // Deep-link JS (Watch Next click, voice search) queued until the web app is
+    // loaded; pumped with retries because the SPA needs a moment to boot.
+    private String pendingJs;
+    private int pendingJsTries;
+    private final android.os.Handler uiHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -83,6 +94,70 @@ public class MainActivity extends Activity {
             prefs().edit().putString(PREF_MODE, "cloud").apply();
             connectCloudPairing();
         }
+
+        handleLaunchIntent(getIntent());
+    }
+
+    /** Watch Next click / voice search re-entry while the app is already running. */
+    @Override
+    protected void onNewIntent(android.content.Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        handleLaunchIntent(intent);
+    }
+
+    /**
+     * norva://open?sourceId=..&itemType=..&itemId=.. (Play Next card) opens the
+     * title in-app; ACTION_SEARCH forwards the spoken/typed query to the web
+     * app's global search. Both are queued as JS and pumped once the SPA is up.
+     */
+    private void handleLaunchIntent(android.content.Intent intent) {
+        if (intent == null) return;
+        String action = intent.getAction();
+        if (android.content.Intent.ACTION_VIEW.equals(action) && intent.getData() != null) {
+            android.net.Uri data = intent.getData();
+            if ("norva".equals(data.getScheme()) && "open".equals(data.getHost())) {
+                String sourceId = data.getQueryParameter("sourceId");
+                String itemType = data.getQueryParameter("itemType");
+                String itemId = data.getQueryParameter("itemId");
+                if (sourceId != null && itemId != null) {
+                    queuePendingJs("(window.__norvaNative && window.__norvaNative.openItem) ? "
+                            + "(window.__norvaNative.openItem(" + jsStr(sourceId) + "," + jsStr(itemType)
+                            + "," + jsStr(itemId) + "), 'ok') : 'retry'");
+                }
+            }
+        } else if (android.content.Intent.ACTION_SEARCH.equals(action)) {
+            String query = intent.getStringExtra(android.app.SearchManager.QUERY);
+            if (query != null && !query.trim().isEmpty()) {
+                queuePendingJs("(window.__norvaNative && window.__norvaNative.openSearch) ? "
+                        + "(window.__norvaNative.openSearch(" + jsStr(query.trim()) + "), 'ok') : 'retry'");
+            }
+        }
+    }
+
+    private void queuePendingJs(String js) {
+        pendingJs = js;
+        pendingJsTries = 0;
+        pumpPendingJs();
+    }
+
+    /** Retry the queued deep-link JS until the SPA exposes its hooks (~30 s cap). */
+    private void pumpPendingJs() {
+        final String js = pendingJs;
+        if (js == null || webView == null) return;
+        if (pendingJsTries++ > 20) { pendingJs = null; return; }
+        webView.evaluateJavascript(js, new ValueCallback<String>() {
+            @Override
+            public void onReceiveValue(String value) {
+                if (value != null && value.contains("ok")) {
+                    if (js.equals(pendingJs)) pendingJs = null;
+                    return;
+                }
+                uiHandler.postDelayed(new Runnable() {
+                    @Override public void run() { pumpPendingJs(); }
+                }, 1500);
+            }
+        });
     }
 
     private SharedPreferences prefs() {
@@ -321,6 +396,13 @@ public class MainActivity extends Activity {
             MainActivity.this.openPlayer(url, title, null, null, null);
         }
 
+        // Extensible launch: one JSON payload instead of ever-longer signatures.
+        // Carries poster (Play Next artwork) and nextTitle ("À suivre" overlay).
+        @android.webkit.JavascriptInterface
+        public void playVideoJson(final String json) {
+            MainActivity.this.playFromJson(json);
+        }
+
         @android.webkit.JavascriptInterface
         public void playVideoWithMeta(final String url, final String title, final String sourceId,
                                       final String itemType, final String itemId) {
@@ -377,6 +459,13 @@ public class MainActivity extends Activity {
         @android.webkit.JavascriptInterface
         public void playVideo(final String url, final String title) {
             MainActivity.this.openPlayer(url, title, null, null, null);
+        }
+
+        // Extensible launch: one JSON payload instead of ever-longer signatures.
+        // Carries poster (Play Next artwork) and nextTitle ("À suivre" overlay).
+        @android.webkit.JavascriptInterface
+        public void playVideoJson(final String json) {
+            MainActivity.this.playFromJson(json);
         }
 
         @android.webkit.JavascriptInterface
@@ -446,9 +535,17 @@ public class MainActivity extends Activity {
     private void openPlayer(final String url, final String title, final String sourceId,
                             final String itemType, final String itemId, final int resumeSeconds,
                             final String fallbackUrl) {
+        openPlayer(url, title, sourceId, itemType, itemId, resumeSeconds, fallbackUrl, null, null);
+    }
+
+    private void openPlayer(final String url, final String title, final String sourceId,
+                            final String itemType, final String itemId, final int resumeSeconds,
+                            final String fallbackUrl, final String poster, final String nextTitle) {
         runOnUiThread(new Runnable() {
             @Override
             public void run() {
+                lastPlayTitle = title;
+                lastPlayPoster = poster;
                 android.content.Intent intent = new android.content.Intent(MainActivity.this, PlayerActivity.class);
                 intent.putExtra(PlayerActivity.EXTRA_URL, url);
                 intent.putExtra(PlayerActivity.EXTRA_TITLE, title);
@@ -457,9 +554,35 @@ public class MainActivity extends Activity {
                 if (itemId != null) intent.putExtra(PlayerActivity.EXTRA_ITEM_ID, itemId);
                 if (resumeSeconds > 0) intent.putExtra(PlayerActivity.EXTRA_RESUME_SECONDS, resumeSeconds);
                 if (fallbackUrl != null && !fallbackUrl.isEmpty()) intent.putExtra(PlayerActivity.EXTRA_FALLBACK_URL, fallbackUrl);
+                if (nextTitle != null && !nextTitle.isEmpty()) intent.putExtra(PlayerActivity.EXTRA_NEXT_TITLE, nextTitle);
                 startActivityForResult(intent, REQ_PLAYER);
             }
         });
+    }
+
+    /** JSON-payload launch used by the newest web bridge (playVideoJson). */
+    private void playFromJson(String json) {
+        try {
+            org.json.JSONObject o = new org.json.JSONObject(json);
+            String url = o.optString("url");
+            if (url.isEmpty()) return;
+            openPlayer(url,
+                    o.optString("title", "Norva"),
+                    emptyToNull(o.optString("sourceId")),
+                    emptyToNull(o.optString("itemType")),
+                    emptyToNull(o.optString("itemId")),
+                    o.optInt("resumeSeconds", 0),
+                    emptyToNull(o.optString("fallbackUrl")),
+                    emptyToNull(o.optString("poster")),
+                    emptyToNull(o.optString("nextTitle")));
+        } catch (Exception ignored) {
+            // A malformed payload simply doesn't start playback; the web side
+            // falls back to the legacy fixed-signature bridge methods.
+        }
+    }
+
+    private static String emptyToNull(String s) {
+        return (s == null || s.isEmpty()) ? null : s;
     }
 
     /**
@@ -476,15 +599,61 @@ public class MainActivity extends Activity {
         final String itemId = data.getStringExtra("itemId");
         final long pos = data.getLongExtra("positionSeconds", 0);
         final long dur = data.getLongExtra("durationSeconds", 0);
-        if (sourceId == null || itemId == null || pos <= 0) return;
-        final String js = "window.__norvaNative && window.__norvaNative.onProgress("
-                + jsStr(sourceId) + "," + jsStr(itemType) + "," + jsStr(itemId) + "," + pos + "," + dur + ")";
-        runOnUiThread(new Runnable() {
+        final boolean ended = data.getBooleanExtra("ended", false);
+        final boolean playNext = data.getBooleanExtra("playNext", false);
+        final boolean openEpisodes = data.getBooleanExtra("openEpisodes", false);
+        if (sourceId == null || itemId == null) return;
+        if (pos > 0) {
+            final String js = "window.__norvaNative && window.__norvaNative.onProgress("
+                    + jsStr(sourceId) + "," + jsStr(itemType) + "," + jsStr(itemId) + "," + pos + "," + dur + ")";
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    try { webView.evaluateJavascript(js, null); } catch (Exception ignored) { }
+                }
+            });
+        }
+
+        // Launcher "Play Next": keep the row in sync with real progress. A title
+        // watched to (nearly) the end leaves the row; an in-progress one joins it.
+        final boolean watchedOut = ended || (dur > 0 && pos >= dur * 95 / 100);
+        final String wnTitle = lastPlayTitle;
+        final String wnPoster = lastPlayPoster;
+        new Thread(new Runnable() {
             @Override
             public void run() {
-                try { webView.evaluateJavascript(js, null); } catch (Exception ignored) { }
+                if (watchedOut) {
+                    WatchNextHelper.remove(MainActivity.this, sourceId, itemType, itemId);
+                } else if (pos >= 60 && !"channel".equals(itemType)) {
+                    WatchNextHelper.publishContinue(MainActivity.this, sourceId, itemType, itemId,
+                            wnTitle, wnPoster, pos * 1000L, dur * 1000L);
+                }
             }
-        });
+        }, "norva-watch-next").start();
+
+        // Series chaining: the player's "À suivre" overlay picked the next episode
+        // (playNext), the stream simply ended (ended → web-side autoplay), or the
+        // viewer asked for the episode list (openEpisodes → reopen the fiche).
+        String chainJs = null;
+        if (playNext) {
+            chainJs = "window.__norvaNative && window.__norvaNative.onPlayNext && window.__norvaNative.onPlayNext("
+                    + jsStr(sourceId) + "," + jsStr(itemType) + "," + jsStr(itemId) + ")";
+        } else if (ended) {
+            chainJs = "window.__norvaNative && window.__norvaNative.onEnded && window.__norvaNative.onEnded("
+                    + jsStr(sourceId) + "," + jsStr(itemType) + "," + jsStr(itemId) + ")";
+        } else if (openEpisodes) {
+            chainJs = "window.__norvaNative && window.__norvaNative.openItem && window.__norvaNative.openItem("
+                    + jsStr(sourceId) + "," + jsStr(itemType) + "," + jsStr(itemId) + ")";
+        }
+        if (chainJs != null) {
+            final String finalChainJs = chainJs;
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    try { webView.evaluateJavascript(finalChainJs, null); } catch (Exception ignored) { }
+                }
+            });
+        }
     }
 
     /** Post a billing result back to the web layer (subscribe.html / billing.js). */
@@ -657,12 +826,37 @@ public class MainActivity extends Activity {
                         runOnUiThread(new Runnable() {
                             @Override
                             public void run() {
-                                if (webView.canGoBack()) webView.goBack();
-                                else finish();
+                                // 'exit' = the SPA is on Home with nothing to close.
+                                // Its pushState entries make canGoBack() true forever,
+                                // so going back would just cycle tab history — confirm
+                                // the exit instead (Netflix behavior).
+                                if ("exit".equals(v)) {
+                                    showExitDialog();
+                                } else if (webView.canGoBack()) {
+                                    webView.goBack();
+                                } else {
+                                    showExitDialog();
+                                }
                             }
                         });
                     }
                 });
+    }
+
+    /** "Quitter Norva ?" confirmation on BACK from the Home screen. */
+    private void showExitDialog() {
+        try {
+            new android.app.AlertDialog.Builder(this, android.app.AlertDialog.THEME_DEVICE_DEFAULT_DARK)
+                    .setTitle("Quitter Norva ?")
+                    .setPositiveButton("Quitter", new android.content.DialogInterface.OnClickListener() {
+                        @Override
+                        public void onClick(android.content.DialogInterface dialog, int which) { finish(); }
+                    })
+                    .setNegativeButton("Annuler", null)
+                    .show();
+        } catch (Exception e) {
+            finish();
+        }
     }
 
     @Override

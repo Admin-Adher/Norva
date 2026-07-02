@@ -90,10 +90,21 @@ public class PlayerActivity extends Activity {
     private int resumeSeconds = 0;
     private boolean resumeApplied = false;
     private boolean endedNaturally = false;   // reached STATE_ENDED → web autoplays next episode
-    private TextView seekBubble;         // transient "+10s" / "-10s" double-tap feedback
+    private TextView seekBubble;         // transient "+10s" / "🔆 60%" gesture feedback
     private final Runnable hideSeekBubble = new Runnable() {
         @Override public void run() { if (seekBubble != null) seekBubble.setVisibility(View.GONE); }
     };
+    // Vertical-drag gesture state: 0 none, 1 brightness (left half), 2 volume (right half)
+    private int verticalDragMode = 0;
+    private float gestureStartBrightness = 0.5f;
+    private int gestureStartVolume = 0;
+
+    // Chromecast: discovery + session hand-over (see CastSupport).
+    private CastSupport castSupport;
+    private android.widget.ImageButton castButton;
+    private LinearLayout castBar;
+    private TextView castBarLabel;
+    private String mediaTitle;
 
     private final Handler errHandler = new Handler(Looper.getMainLooper());
     private static final long BUFFER_TIMEOUT_MS = 35_000L; // "no data" watchdog
@@ -112,6 +123,7 @@ public class PlayerActivity extends Activity {
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
 
         String url = getIntent().getStringExtra(EXTRA_URL);
+        mediaTitle = getIntent().getStringExtra(EXTRA_TITLE);
         sourceId = getIntent().getStringExtra(EXTRA_SOURCE_ID);
         itemType = getIntent().getStringExtra(EXTRA_ITEM_TYPE);
         itemId = getIntent().getStringExtra(EXTRA_ITEM_ID);
@@ -243,6 +255,9 @@ public class PlayerActivity extends Activity {
         playerView.setKeepScreenOn(true);
         playerView.setShowSubtitleButton(true);
         installGestureOverlay();
+        // Chromecast: the receiver fetches the provider URL itself from the same
+        // home network. Local (encrypted) downloads can't be cast.
+        if (!isLocal) installCastSupport(root);
         // Re-apply the viewer's last subtitle choice for this title before the
         // first track selection, so it doesn't reset to the stream default.
         applySavedSubtitlePref();
@@ -467,8 +482,12 @@ public class PlayerActivity extends Activity {
     // ==================== Touch gestures ====================
 
     /**
-     * Double-tap the left/right half to seek -/+10s; a single tap toggles the
-     * controls. The gesture View lives in the PlayerView overlay (below the media3
+     * Touch gestures on the video surface (Netflix parity):
+     *   - single tap toggles the controls,
+     *   - double-tap left/right half seeks -/+10s,
+     *   - vertical drag on the LEFT half adjusts screen brightness,
+     *   - vertical drag on the RIGHT half adjusts media volume.
+     * The gesture View lives in the PlayerView overlay (below the media3
      * controller), so when the controller is showing, its buttons still receive
      * touches normally — the overlay only handles taps while the controls are hidden.
      */
@@ -484,9 +503,30 @@ public class PlayerActivity extends Activity {
         seekBubble.setPadding(dp(16), dp(8), dp(16), dp(8));
         seekBubble.setVisibility(View.GONE);
 
+        final android.media.AudioManager audio =
+                (android.media.AudioManager) getSystemService(AUDIO_SERVICE);
+
         final GestureDetector detector = new GestureDetector(this,
                 new GestureDetector.SimpleOnGestureListener() {
-            @Override public boolean onDown(MotionEvent e) { return true; }
+            @Override public boolean onDown(MotionEvent e) {
+                // Anchor the drag: current brightness/volume become the baseline.
+                gestureStartBrightness = getWindow().getAttributes().screenBrightness;
+                if (gestureStartBrightness < 0) {
+                    // "System default" — read the actual setting so the first drag
+                    // starts from what the user sees, not from an arbitrary jump.
+                    try {
+                        gestureStartBrightness = android.provider.Settings.System.getInt(
+                                getContentResolver(),
+                                android.provider.Settings.System.SCREEN_BRIGHTNESS) / 255f;
+                    } catch (Exception ex) {
+                        gestureStartBrightness = 0.5f;
+                    }
+                }
+                gestureStartVolume = audio == null ? 0
+                        : audio.getStreamVolume(android.media.AudioManager.STREAM_MUSIC);
+                verticalDragMode = 0;
+                return true;
+            }
 
             @Override public boolean onSingleTapConfirmed(MotionEvent e) {
                 if (playerView.isControllerFullyVisible()) playerView.hideController();
@@ -501,18 +541,145 @@ public class PlayerActivity extends Activity {
                 showSeekFeedback(forward ? "+10s" : "-10s");
                 return true;
             }
+
+            @Override
+            public boolean onScroll(MotionEvent e1, MotionEvent e2, float dx, float dy) {
+                if (e1 == null || e2 == null) return false;
+                float totalDy = e1.getY() - e2.getY(); // up = positive
+                float totalDx = Math.abs(e2.getX() - e1.getX());
+                // Engage only on a clearly vertical drag, and never over the
+                // controller (its buttons/seek bar own touches when visible).
+                if (verticalDragMode == 0) {
+                    if (Math.abs(totalDy) < dp(24) || totalDx > Math.abs(totalDy)) return false;
+                    if (playerView.isControllerFullyVisible()) return false;
+                    verticalDragMode = e1.getX() < overlay.getWidth() / 2f ? 1 : 2;
+                }
+                float range = overlay.getHeight() * 0.75f; // full swipe ≈ full scale
+                if (verticalDragMode == 1) {
+                    float b = Math.max(0.02f, Math.min(1f, gestureStartBrightness + totalDy / range));
+                    WindowManager.LayoutParams lp = getWindow().getAttributes();
+                    lp.screenBrightness = b;
+                    getWindow().setAttributes(lp);
+                    showSeekFeedback("🔆 " + Math.round(b * 100) + "%");
+                } else if (audio != null) {
+                    int max = audio.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC);
+                    int v = Math.round(Math.max(0, Math.min(max,
+                            gestureStartVolume + (totalDy / range) * max)));
+                    audio.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, v, 0);
+                    showSeekFeedback("🔊 " + Math.round(v * 100f / max) + "%");
+                }
+                return true;
+            }
         });
 
         View touchLayer = new View(this);
         touchLayer.setOnTouchListener((v, ev) -> {
             boolean handled = detector.onTouchEvent(ev);
-            if (ev.getAction() == MotionEvent.ACTION_UP) v.performClick();
+            if (ev.getAction() == MotionEvent.ACTION_UP) {
+                verticalDragMode = 0;
+                v.performClick();
+            }
             return handled;
         });
         overlay.addView(touchLayer, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
         overlay.addView(seekBubble, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.CENTER));
+    }
+
+    // ==================== Chromecast ====================
+
+    /**
+     * Cast button (top-right, shown when devices are on the network) + a
+     * "Diffusion sur X" banner while a session is active. The local player
+     * pauses the instant the session starts, so the provider still sees a
+     * single connection (the receiver's, from the same home IP).
+     */
+    private void installCastSupport(FrameLayout root) {
+        castButton = new android.widget.ImageButton(this);
+        castButton.setImageResource(R.drawable.ic_cast);
+        castButton.setBackgroundColor(Color.parseColor("#66000000"));
+        castButton.setPadding(dp(12), dp(12), dp(12), dp(12));
+        castButton.setContentDescription("Diffuser (Chromecast)");
+        castButton.setVisibility(View.GONE);
+        castButton.setOnClickListener(v -> { if (castSupport != null) castSupport.showRoutePicker(); });
+        FrameLayout.LayoutParams btnLp = new FrameLayout.LayoutParams(
+                dp(48), dp(48), Gravity.TOP | Gravity.END);
+        btnLp.topMargin = dp(20);
+        btnLp.rightMargin = dp(20);
+        root.addView(castButton, btnLp);
+
+        castBar = new LinearLayout(this);
+        castBar.setOrientation(LinearLayout.HORIZONTAL);
+        castBar.setGravity(Gravity.CENTER_VERTICAL);
+        castBar.setBackgroundColor(Color.parseColor("#CC0A0A0F"));
+        castBar.setPadding(dp(20), dp(12), dp(20), dp(12));
+        castBar.setVisibility(View.GONE);
+
+        castBarLabel = new TextView(this);
+        castBarLabel.setTextColor(Color.WHITE);
+        castBarLabel.setTextSize(15);
+        LinearLayout.LayoutParams labelLp = new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        castBar.addView(castBarLabel, labelLp);
+
+        Button pauseBtn = new Button(this);
+        pauseBtn.setText("⏯");
+        pauseBtn.setTextColor(Color.WHITE);
+        pauseBtn.setBackgroundColor(Color.parseColor("#33FFFFFF"));
+        pauseBtn.setOnClickListener(v -> { if (castSupport != null) castSupport.toggleRemotePlayback(); });
+        LinearLayout.LayoutParams pauseLp = new LinearLayout.LayoutParams(
+                dp(56), LinearLayout.LayoutParams.WRAP_CONTENT);
+        pauseLp.rightMargin = dp(10);
+        castBar.addView(pauseBtn, pauseLp);
+
+        Button stopBtn = new Button(this);
+        stopBtn.setText("Arrêter");
+        stopBtn.setTextColor(Color.WHITE);
+        stopBtn.setBackgroundColor(Color.parseColor("#3B82F6"));
+        stopBtn.setOnClickListener(v -> { if (castSupport != null) castSupport.endSession(); });
+        castBar.addView(stopBtn, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        root.addView(castBar, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT,
+                Gravity.TOP));
+
+        castSupport = new CastSupport(this, new CastSupport.Listener() {
+            @Override
+            public void onRouteAvailabilityChanged(boolean available) {
+                runOnUiThread(() -> {
+                    if (castButton != null) castButton.setVisibility(available ? View.VISIBLE : View.GONE);
+                });
+            }
+
+            @Override
+            public void onCastStarted(String deviceName) {
+                runOnUiThread(() -> {
+                    long pos = player == null ? 0 : Math.max(0, player.getCurrentPosition());
+                    String castUrl = fallbackTried && fallbackUrl != null ? fallbackUrl : originalUrl;
+                    boolean live = "channel".equals(itemType);
+                    castSupport.loadMedia(castUrl, mediaTitle, null, live ? 0 : pos, live);
+                    if (player != null) player.pause();
+                    if (castBarLabel != null) castBarLabel.setText("Diffusion sur " + deviceName);
+                    if (castBar != null) castBar.setVisibility(View.VISIBLE);
+                });
+            }
+
+            @Override
+            public void onCastEnded(long resumePositionMs) {
+                runOnUiThread(() -> {
+                    if (castBar != null) castBar.setVisibility(View.GONE);
+                    if (player != null) {
+                        if (resumePositionMs > 0 && !"channel".equals(itemType)) {
+                            player.seekTo(resumePositionMs);
+                        }
+                        player.play();
+                    }
+                });
+            }
+        });
+        castSupport.start();
     }
 
     /** Flash a "+10s" / "-10s" bubble for ~0.65s after a double-tap seek. */
@@ -621,6 +788,7 @@ public class PlayerActivity extends Activity {
     @Override
     protected void onDestroy() {
         errHandler.removeCallbacks(bufferWatchdog);
+        if (castSupport != null) { castSupport.stop(); castSupport = null; }
         if (mediaSession != null) { mediaSession.release(); mediaSession = null; }
         if (player != null) { player.release(); player = null; }
         super.onDestroy();

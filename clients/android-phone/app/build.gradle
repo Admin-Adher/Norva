@@ -19,8 +19,8 @@ android {
         applicationId "tv.norva.phone"
         minSdk 23
         targetSdk 35
-        versionCode 2
-        versionName "1.1.0"
+        versionCode 3
+        versionName "1.2.0"
 
         // RevenueCat public SDK key, injected at build time. Empty by default so
         // local/debug builds need no key (see docs/roadmap/billing-setup.md §7).
@@ -67,6 +67,10 @@ dependencies {
     // MediaSession so hardware/Bluetooth media buttons and the system media
     // controls (lock screen / notification) drive the player.
     implementation "androidx.media3:media3-session:1.5.1"
+    // Chromecast: Cast framework session/RemoteMediaClient + mediarouter
+    // discovery. The picker is a plain AlertDialog (no AppCompat).
+    implementation "com.google.android.gms:play-services-cast-framework:21.5.0"
+    implementation "androidx.mediarouter:mediarouter:1.7.0"
     // DataSource base classes for the offline (encrypted) download player.
     implementation "androidx.media3:media3-datasource:1.5.1"
     // NotificationCompat for the download foreground-service progress notice.

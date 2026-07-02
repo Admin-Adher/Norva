@@ -38,6 +38,7 @@ import androidx.media3.datasource.DefaultHttpDataSource;
 import androidx.media3.datasource.HttpDataSource;
 import androidx.media3.exoplayer.ExoPlayer;
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory;
+import androidx.media3.session.MediaSession;
 
 import org.json.JSONObject;
 
@@ -72,6 +73,9 @@ public class PlayerActivity extends Activity {
     // Gateway byte-pipe URL to retry with if the direct provider URL is refused
     // (e.g. the provider 401s this device's residential IP).
     public static final String EXTRA_FALLBACK_URL = "fallbackUrl";
+    // Next-episode label ("S2 E5 — Titre") for the end-of-stream "À suivre" overlay.
+    // Absent → end-of-stream simply closes the player (movies, live).
+    public static final String EXTRA_NEXT_TITLE = "nextTitle";
 
     // IPTV providers gate on User-Agent and REJECT a browser UA (this provider 401s
     // it). Use the VLC UA the relay/gateway use successfully — the working default
@@ -83,6 +87,7 @@ public class PlayerActivity extends Activity {
     private static final int SUBTLE = Color.parseColor("#B4B4C0");
 
     private ExoPlayer player;
+    private MediaSession mediaSession; // Assistant voice transport + now-playing card
     private SurfaceView surfaceView;
     private TextView subtitleView;
     private ProgressBar spinner;
@@ -132,6 +137,26 @@ public class PlayerActivity extends Activity {
     private String fallbackUrl;              // gateway URL to retry with on a direct-URL refusal
     private boolean fallbackTried = false;
     private static final long BUFFER_TIMEOUT_MS = 35_000L; // "no data" watchdog
+
+    // End-of-stream: "À suivre" overlay (series binge) and exit reporting.
+    private String nextTitle;                 // next-episode label, null for movies/live
+    private boolean endedNaturally = false;   // reached STATE_ENDED (vs user close)
+    private boolean playNextChosen = false;   // viewer picked (or countdown chose) next episode
+    private boolean openEpisodesChosen = false; // viewer asked for the episode list (fiche)
+    private LinearLayout nextPanel;           // the overlay itself, built lazily
+    private TextView nextCountdownView;
+    private int nextCountdownSecs;
+    private final Runnable nextCountdownTick = new Runnable() {
+        @Override
+        public void run() {
+            nextCountdownSecs--;
+            if (nextCountdownSecs <= 0) { chooseNextEpisode(); return; }
+            if (nextCountdownView != null) {
+                nextCountdownView.setText("Lecture dans " + nextCountdownSecs + " s");
+            }
+            handler.postDelayed(this, 1000);
+        }
+    };
 
     private final SimpleDateFormat clockFmt = new SimpleDateFormat("EEE d MMM 'à' HH:mm", Locale.FRENCH);
 
@@ -191,6 +216,7 @@ public class PlayerActivity extends Activity {
         if (url == null || url.isEmpty()) { finish(); return; }
         streamHost = hostOf(url);
         fallbackUrl = getIntent().getStringExtra(EXTRA_FALLBACK_URL);
+        nextTitle = getIntent().getStringExtra(EXTRA_NEXT_TITLE);
 
         root = new FrameLayout(this);
         root.setBackgroundColor(Color.BLACK);
@@ -248,6 +274,9 @@ public class PlayerActivity extends Activity {
                 .setMediaSourceFactory(new DefaultMediaSourceFactory(dataSourceFactory))
                 .build();
         player.setVideoSurfaceView(surfaceView);
+        // MediaSession: Assistant voice transport ("mets pause", "reprends"), the
+        // Android TV now-playing card and hardware transport keys drive the player.
+        try { mediaSession = new MediaSession.Builder(this, player).build(); } catch (Exception ignored) { }
 
         player.addListener(new Player.Listener() {
             @Override
@@ -282,7 +311,7 @@ public class PlayerActivity extends Activity {
                     // once the track list is known (no-op if none was saved).
                     maybeRestoreSubtitlePref();
                 }
-                if (state == Player.STATE_ENDED) finish();
+                if (state == Player.STATE_ENDED) onStreamEnded();
                 updatePlayPauseLabel();
             }
 
@@ -440,6 +469,101 @@ public class PlayerActivity extends Activity {
         try { return android.net.Uri.parse(url).getHost(); } catch (Exception e) { return null; }
     }
 
+    // ==================== End of stream / "À suivre" ====================
+
+    /**
+     * Natural end of the stream. Series episodes with a known follower get a
+     * Netflix-style "À suivre" overlay (10 s countdown, Lire maintenant /
+     * Retour); everything else closes the player, reporting `ended` so the web
+     * layer can chain its own autoplay.
+     */
+    private void onStreamEnded() {
+        endedNaturally = true;
+        if (nextTitle != null && !nextTitle.isEmpty() && nextPanel == null) {
+            showNextEpisodePanel();
+        } else if (nextPanel == null) {
+            finish();
+        }
+    }
+
+    private void showNextEpisodePanel() {
+        hideOverlayNow();
+        handler.removeCallbacks(hideControlsRunnable);
+
+        nextPanel = new LinearLayout(this);
+        nextPanel.setOrientation(LinearLayout.VERTICAL);
+        nextPanel.setBackgroundColor(PANEL);
+        nextPanel.setPadding(dp(28), dp(20), dp(28), dp(20));
+
+        TextView kicker = new TextView(this);
+        kicker.setText("À suivre");
+        kicker.setTextColor(SUBTLE);
+        kicker.setTextSize(14);
+        nextPanel.addView(kicker);
+
+        TextView titleView = new TextView(this);
+        titleView.setText(nextTitle);
+        titleView.setTextColor(Color.WHITE);
+        titleView.setTextSize(20);
+        titleView.setPadding(0, dp(4), 0, dp(4));
+        nextPanel.addView(titleView);
+
+        nextCountdownView = new TextView(this);
+        nextCountdownView.setTextColor(ACCENT);
+        nextCountdownView.setTextSize(15);
+        nextCountdownView.setPadding(0, 0, 0, dp(14));
+        nextPanel.addView(nextCountdownView);
+
+        LinearLayout buttons = new LinearLayout(this);
+        buttons.setOrientation(LinearLayout.HORIZONTAL);
+        nextPanel.addView(buttons);
+
+        android.widget.Button playBtn = new android.widget.Button(this);
+        playBtn.setText("▶  Lire maintenant");
+        playBtn.setTextColor(Color.parseColor("#0A0A0F"));
+        playBtn.setBackgroundColor(Color.parseColor("#E4E4F2"));
+        playBtn.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { chooseNextEpisode(); }
+        });
+        LinearLayout.LayoutParams playLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        playLp.rightMargin = dp(12);
+        buttons.addView(playBtn, playLp);
+
+        android.widget.Button backBtn = new android.widget.Button(this);
+        backBtn.setText("Retour");
+        backBtn.setTextColor(Color.WHITE);
+        backBtn.setBackgroundColor(Color.parseColor("#33FFFFFF"));
+        backBtn.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { cancelNextPanel(); }
+        });
+        buttons.addView(backBtn);
+
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.BOTTOM | Gravity.END);
+        lp.rightMargin = dp(48);
+        lp.bottomMargin = dp(48);
+        root.addView(nextPanel, lp);
+
+        nextCountdownSecs = 10;
+        nextCountdownView.setText("Lecture dans " + nextCountdownSecs + " s");
+        handler.postDelayed(nextCountdownTick, 1000);
+        playBtn.requestFocus();
+    }
+
+    /** Close with playNext so MainActivity asks the web layer to launch the follower. */
+    private void chooseNextEpisode() {
+        playNextChosen = true;
+        handler.removeCallbacks(nextCountdownTick);
+        finish();
+    }
+
+    private void cancelNextPanel() {
+        handler.removeCallbacks(nextCountdownTick);
+        finish();
+    }
+
     /** Reload from the gateway fallback URL after a direct-URL refusal (e.g. provider 401). */
     private void switchToFallback() {
         fallbackTried = true;
@@ -587,6 +711,18 @@ public class PlayerActivity extends Activity {
         sleepValue = addBarItem(R.drawable.ic_player_sleep, "Veille", "Off", new Runnable() {
             @Override public void run() { cycleSleep(); }
         });
+        // Series-only shortcuts: jump to the next episode without waiting for the
+        // end, and reopen the episode list (the fiche behind the player).
+        if (nextTitle != null && !nextTitle.isEmpty()) {
+            addBarItem(R.drawable.ic_player_skip_forward, "Suivant", "Épisode", new Runnable() {
+                @Override public void run() { chooseNextEpisode(); }
+            });
+        }
+        if ("episode".equals(itemType)) {
+            addBarItem(R.drawable.ic_player_expand_less, "Épisodes", "Liste", new Runnable() {
+                @Override public void run() { openEpisodesChosen = true; finish(); }
+            });
+        }
     }
 
     /** One second-bar entry: icon on top, caption + live value below. */
@@ -1097,6 +1233,13 @@ public class PlayerActivity extends Activity {
         int code = event.getKeyCode();
         int repeat = event.getRepeatCount();
 
+        // "À suivre" overlay open: BACK closes the player, everything else uses
+        // the native focus traversal between the two buttons.
+        if (nextPanel != null) {
+            if (code == KeyEvent.KEYCODE_BACK) { cancelNextPanel(); return true; }
+            return super.dispatchKeyEvent(event);
+        }
+
         if (code == KeyEvent.KEYCODE_BACK) {
             if (secondBarVisible) { closeSecondBar(); return true; }
             if (controlsVisible) { hideOverlayNow(); return true; }
@@ -1198,6 +1341,9 @@ public class PlayerActivity extends Activity {
                 data.putExtra("itemId", itemId);
                 data.putExtra("positionSeconds", pos);
                 data.putExtra("durationSeconds", dur);
+                data.putExtra("ended", endedNaturally);
+                data.putExtra("playNext", playNextChosen);
+                data.putExtra("openEpisodes", openEpisodesChosen);
                 setResult(RESULT_OK, data);
             }
         } catch (Exception ignored) { /* result is best-effort */ }
@@ -1207,6 +1353,7 @@ public class PlayerActivity extends Activity {
     @Override
     protected void onDestroy() {
         handler.removeCallbacksAndMessages(null);
+        if (mediaSession != null) { mediaSession.release(); mediaSession = null; }
         if (player != null) { player.release(); player = null; }
         super.onDestroy();
     }
