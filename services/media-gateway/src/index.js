@@ -138,6 +138,12 @@ function whisperBudgetMs(audioSec) {
     return Math.max(WHISPER_TRANSCRIBE_TIMEOUT_MS, Math.round(audioSec * WHISPER_RTF_BUDGET * 1000));
 }
 const AUDIO_EXTRACT_TIMEOUT_MS = clampInt(process.env.AUDIO_EXTRACT_TIMEOUT_MS, 1_800_000, 30_000, 7_200_000);
+// Job-level extraction retry (mirrors the OCR extractors' d7cdbce pattern): a transient slot
+// refusal (a 3s relay probe holding the panel) becomes recoverable instead of burning the job
+// for 24h. LONG spaced backoff, never a burst, and a 401/403 abuse block is NOT retried —
+// backing off entirely is the only safe move on a panel's anti-abuse.
+const AUDIO_EXTRACT_RETRIES = clampInt(process.env.AUDIO_EXTRACT_RETRIES, 2, 0, 5);
+const AUDIO_EXTRACT_BACKOFF_MS = clampInt(process.env.AUDIO_EXTRACT_BACKOFF_MS, 30_000, 5_000, 300_000);
 // Phase 3b — offline subtitle translation (Argos / CTranslate2 models, see src/translate.py).
 // ARGOS_PYTHON_BIN runs the bundled script against models under ARGOS_MODELS_DIR; an empty/missing
 // models dir disables the /translate* endpoints. Pure CPU on a cached VTT — no provider connection.
@@ -860,6 +866,15 @@ function extractAudioWav(url, ua, trackIndex, startOffset, dur, timeoutMs = 30_0
         const outputPath = path.join(os.tmpdir(), `norva-audio-${Date.now()}-${crypto.randomUUID()}.wav`);
         const args = [
             '-y', '-hide_banner', '-loglevel', 'error', '-nostdin',
+            // Mid-stream drop resilience, copied from the playback ffmpeg: without these, a
+            // whole-film extraction dies on the FIRST connection reset (a 3s relay probe
+            // releasing the slot was enough). Deliberately NO -reconnect_on_http_error — on a
+            // single-slot panel, retrying an HTTP error HOLDS the failing connect and hammers
+            // the slot into more 429s; the job-level retry below re-attempts cleanly instead.
+            '-reconnect', '1', '-reconnect_streamed', '1',
+            '-reconnect_delay_max', '5',
+            '-rw_timeout', '15000000',
+            '-headers', 'Accept: */*\r\nConnection: keep-alive\r\n',
             '-user_agent', ua,
             '-probesize', '2000000', '-analyzeduration', '3000000',
             ...(startOffset > 0 ? ['-ss', String(startOffset)] : []),
@@ -1122,8 +1137,15 @@ async function runTranscribeJob(job) {
     const { url, ua, index, jobId, callbackUrl, start = 0, dur = 0, uid = '' } = job;
     let wavPath = null, payload;
     try {
-        const ex = await withAccountJobLock(accountJobKey(uid, url), () =>
-            extractAudioWav(url, ua, index, start, dur, AUDIO_EXTRACT_TIMEOUT_MS, uid)); // dur 0 = whole track
+        let ex = { ok: false, error: 'not attempted' };
+        for (let attempt = 0; attempt <= AUDIO_EXTRACT_RETRIES; attempt++) {
+            // Account lock per ATTEMPT: the 30/60s backoff sleeps must not hold the slot.
+            ex = await withAccountJobLock(accountJobKey(uid, url), () =>
+                extractAudioWav(url, ua, index, start, dur, AUDIO_EXTRACT_TIMEOUT_MS, uid)); // dur 0 = whole track
+            if (ex.ok) break;
+            if (/\b(401|403)\b|Unauthorized|Forbidden/i.test(ex.error || '')) break; // abuse/auth block — do not hammer
+            if (attempt < AUDIO_EXTRACT_RETRIES) await sleep(AUDIO_EXTRACT_BACKOFF_MS * (attempt + 1)); // 30s, 60s — spaced, not a burst
+        }
         if (!ex.ok) {
             payload = { jobId, ok: false, error: ('Audio extraction failed: ' + ex.error).slice(0, 300) };
         } else {
