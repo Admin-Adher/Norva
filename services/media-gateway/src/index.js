@@ -69,6 +69,15 @@ function proxyEnvFor(key) {
     const url = providerProxyUrls[poolIndexForKey(key)];
     return { ...process.env, http_proxy: url, https_proxy: url, HTTP_PROXY: url, HTTPS_PROXY: url };
 }
+// Xtream URLs embed credentials in the path (/movie/USER/PASS/id.ext) and in query params
+// (username=…&password=…). Any error string that may quote a provider URL (ffmpeg stderr)
+// MUST pass through here before leaving the process — job-callback errors land verbatim in
+// the DB and the admin UI.
+function redactCreds(s) {
+    return String(s || '')
+        .replace(/\/(movie|series|live)\/[^/\s]+\/[^/\s]+\//gi, '/$1/***/***/')
+        .replace(/(username|password)=[^&\s'"]+/gi, '$1=***');
+}
 
 const PORT = Number.parseInt(process.env.PORT || '8080', 10);
 const GATEWAY_TOKEN = process.env.GATEWAY_TOKEN || process.env.NORVA_MEDIA_GATEWAY_TOKEN || '';
@@ -116,8 +125,25 @@ const WHISPER_TIMEOUT_MS = clampInt(process.env.WHISPER_TIMEOUT_MS, 60_000, 5_00
 const WHISPER_SWEEP_OFFSETS = (process.env.WHISPER_SWEEP_OFFSETS || '600,1500,300')
     .split(',').map((s) => Number.parseInt(s.trim(), 10)).filter((n) => Number.isFinite(n) && n >= 0);
 // Full transcription (Phase 3) runs whisper on a whole film → much longer than the 20s LID clip.
+// This flat value is a FLOOR: the effective budget adapts to the WAV's real duration (see
+// whisperBudgetMs) because a long film at a flat 20 min was mathematically guaranteed to be
+// SIGKILLed with zero output (both 07-02 "Transcription produced no output" failures).
 const WHISPER_TRANSCRIBE_TIMEOUT_MS = clampInt(process.env.WHISPER_TRANSCRIBE_TIMEOUT_MS, 1_200_000, 30_000, 7_200_000);
+// Adaptive budget: measured RTF on this box is ~0.09-0.15 (8-13 min of whisper for 5 342-6 360 s
+// of audio) → 0.5×duration gives 3-5× headroom while still bounding a hung run. pcm_s16le
+// 16 kHz mono = 32 000 bytes/second, so duration comes free from the WAV size.
+const WHISPER_RTF_BUDGET = Math.min(Math.max(Number(process.env.WHISPER_RTF_BUDGET) || 0.5, 0.2), 3);
+function whisperBudgetMs(audioSec) {
+    if (!Number.isFinite(audioSec) || audioSec <= 0) return WHISPER_TRANSCRIBE_TIMEOUT_MS;
+    return Math.max(WHISPER_TRANSCRIBE_TIMEOUT_MS, Math.round(audioSec * WHISPER_RTF_BUDGET * 1000));
+}
 const AUDIO_EXTRACT_TIMEOUT_MS = clampInt(process.env.AUDIO_EXTRACT_TIMEOUT_MS, 1_800_000, 30_000, 7_200_000);
+// Job-level extraction retry (mirrors the OCR extractors' d7cdbce pattern): a transient slot
+// refusal (a 3s relay probe holding the panel) becomes recoverable instead of burning the job
+// for 24h. LONG spaced backoff, never a burst, and a 401/403 abuse block is NOT retried —
+// backing off entirely is the only safe move on a panel's anti-abuse.
+const AUDIO_EXTRACT_RETRIES = clampInt(process.env.AUDIO_EXTRACT_RETRIES, 2, 0, 5);
+const AUDIO_EXTRACT_BACKOFF_MS = clampInt(process.env.AUDIO_EXTRACT_BACKOFF_MS, 30_000, 5_000, 300_000);
 // Phase 3b — offline subtitle translation (Argos / CTranslate2 models, see src/translate.py).
 // ARGOS_PYTHON_BIN runs the bundled script against models under ARGOS_MODELS_DIR; an empty/missing
 // models dir disables the /translate* endpoints. Pure CPU on a cached VTT — no provider connection.
@@ -215,7 +241,7 @@ const RAW_PROVIDER_RETRY_DELAYS_MS = [1500, 5000, 9000, 9000, 9000, 9000, 9000, 
 const FFMPEG_USER_AGENT = process.env.FFMPEG_USER_AGENT ||
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36 Norva/1.0';
 const MAX_LOG_TAIL = 12000;
-const GATEWAY_VERSION = 59;
+const GATEWAY_VERSION = 60;
 // Browser playback fetches HLS playlists/segments cross-origin, so these must
 // list every Norva web origin or the browser blocks the response (CORS). Keep
 // in sync with the relay's ALLOWED_ORIGINS (services/norva-relay/wrangler.jsonc).
@@ -281,6 +307,11 @@ app.get('/health', (req, res) => {
         ocrLangs: OCR_ENABLED ? OCR_LANGS : '',
         providerProxy: providerProxyAgents.length > 0,
         providerProxyPool: providerProxyAgents.length,
+        transcribeQueueDepth: transcribeQueue.length,
+        transcribeBusy,
+        ocrQueueDepth: ocrQueue.length,
+        ocrBusy,
+        translateQueueDepth: translateQueue.length,
         inbandHeaderParse: INBAND_HEADER_PARSE,
         headerByteCacheSize: headerByteCache.size,
         activeSessions: activeSessionCount(),
@@ -644,11 +675,18 @@ app.get('/detect-language/:token', async (req, res) => {
     try {
         let best = null;          // best partial result across offsets (most words), as a fallback
         let extractions = 0;      // bound the provider connections
+        let lastExtractErr = '';  // surfaced when EVERY offset failed (was an opaque constant string)
+        const lockKey = accountJobKey(claims.uid, claims.url);
         for (const off of offsets) {
             let wavPath = null;
             try {
-                wavPath = await extractAudioWav(claims.url, ua, trackIndex, off > 0 ? off : 0, dur, 30_000, claims.uid);
-                if (!wavPath) continue;   // extraction failed or offset past the file's end → next offset
+                // Fast-fail rather than queue behind a long extraction: the edge caller has its own
+                // HTTP timeout — waiting minutes here would spend a provider hit after it hung up.
+                if (isAccountJobBusy(lockKey)) { lastExtractErr = 'account provider slot busy (background job in progress)'; break; }
+                const ex = await withAccountJobLock(lockKey, () =>
+                    extractAudioWav(claims.url, ua, trackIndex, off > 0 ? off : 0, dur, 30_000, claims.uid));
+                if (!ex.ok) { lastExtractErr = ex.error; continue; }   // failed or offset past the file's end → next offset
+                wavPath = ex.path;
                 extractions++;
                 const whisper = await runWhisperDetect(wavPath);
                 const det = detectLanguageFromText(whisper.text);
@@ -674,7 +712,7 @@ app.get('/detect-language/:token', async (req, res) => {
             } catch (_) { /* try the next offset */ }
             finally { if (wavPath) fsp.unlink(wavPath).catch(() => {}); }
         }
-        if (extractions === 0) return res.status(502).json({ error: 'Audio extraction failed' });
+        if (extractions === 0) return res.status(502).json({ error: 'Audio extraction failed', details: lastExtractErr });
         // No clip had clear speech → return the best partial (language may be null).
         res.setHeader('Cache-Control', 'private, max-age=3600');
         return res.json(best || { language: null, candidate: null, confidence: 0, whisperLang: null, wordCount: 0, sample: '' });
@@ -703,12 +741,14 @@ app.get('/transcribe/:token', async (req, res) => {
     let wavPath = null;
     try {
         const e0 = Date.now();
-        wavPath = await extractAudioWav(claims.url, ua, trackIndex, startOffset, dur, AUDIO_EXTRACT_TIMEOUT_MS, claims.uid);
+        const ex = await withAccountJobLock(accountJobKey(claims.uid, claims.url), () =>
+            extractAudioWav(claims.url, ua, trackIndex, startOffset, dur, AUDIO_EXTRACT_TIMEOUT_MS, claims.uid));
         const extractMs = Date.now() - e0;
-        if (!wavPath) return res.status(502).json({ error: 'Audio extraction failed' });
+        if (!ex.ok) return res.status(502).json({ error: 'Audio extraction failed', details: ex.error });
+        wavPath = ex.path;
         let audioSec = 0;
         try { audioSec = (await fsp.stat(wavPath)).size / (16000 * 2); } catch (_) { audioSec = 0; } // 16kHz mono s16le = 32000 B/s
-        const w = await runWhisperVtt(wavPath, forceLang);
+        const w = await runWhisperVtt(wavPath, forceLang, whisperBudgetMs(audioSec));
         const segments = (w.vtt.match(/-->/g) || []).length;
         return res.json({
             vtt: w.vtt,
@@ -815,14 +855,26 @@ app.post('/translate', requireGatewayAuth, async (req, res) => {
     return res.json({ vtt: r.vtt, segments: (r.vtt.match(/-->/g) || []).length, ms: Date.now() - t0 });
 });
 
-// Extract a mono/16 kHz pcm_s16le WAV of one audio track to a temp file. Resolves the path, or
-// null on failure. `dur` 0 = the whole track (full-film transcription); >0 = a clip. `timeoutMs`
-// defaults to 30 s (LID clip) — pass a longer value for a full-film extraction.
+// Extract a mono/16 kHz pcm_s16le WAV of one audio track to a temp file. Resolves
+// { ok:true, path } or { ok:false, error } — the error carries the REAL cause (ffmpeg stderr
+// tail / timeout kill / tiny output), creds-redacted, mirroring extractSubtitleSup: the opaque
+// null of the first version made 7 failed pregen jobs indistinguishable in the admin.
+// `dur` 0 = the whole track (full-film transcription); >0 = a clip. `timeoutMs` defaults to
+// 30 s (LID clip) — pass a longer value for a full-film extraction.
 function extractAudioWav(url, ua, trackIndex, startOffset, dur, timeoutMs = 30_000, proxyKey = '') {
     return new Promise((resolve) => {
         const outputPath = path.join(os.tmpdir(), `norva-audio-${Date.now()}-${crypto.randomUUID()}.wav`);
         const args = [
             '-y', '-hide_banner', '-loglevel', 'error', '-nostdin',
+            // Mid-stream drop resilience, copied from the playback ffmpeg: without these, a
+            // whole-film extraction dies on the FIRST connection reset (a 3s relay probe
+            // releasing the slot was enough). Deliberately NO -reconnect_on_http_error — on a
+            // single-slot panel, retrying an HTTP error HOLDS the failing connect and hammers
+            // the slot into more 429s; the job-level retry below re-attempts cleanly instead.
+            '-reconnect', '1', '-reconnect_streamed', '1',
+            '-reconnect_delay_max', '5',
+            '-rw_timeout', '15000000',
+            '-headers', 'Accept: */*\r\nConnection: keep-alive\r\n',
             '-user_agent', ua,
             '-probesize', '2000000', '-analyzeduration', '3000000',
             ...(startOffset > 0 ? ['-ss', String(startOffset)] : []),
@@ -834,21 +886,27 @@ function extractAudioWav(url, ua, trackIndex, startOffset, dur, timeoutMs = 30_0
         ];
         let child;
         try { child = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'ignore', 'pipe'], env: proxyEnvFor(proxyKey || proxyKeyFromUrl(url)) }); }
-        catch (_) { return resolve(null); }
+        catch (e) { return resolve({ ok: false, error: 'spawn failed: ' + String((e && e.message) || e) }); }
         let stderr = '';
-        const timer = setTimeout(() => { try { child.kill('SIGKILL'); } catch (_) {} }, timeoutMs);
+        let timedOut = false;
+        const timer = setTimeout(() => { timedOut = true; try { child.kill('SIGKILL'); } catch (_) {} }, timeoutMs);
         child.stderr.on('data', (d) => { stderr += d.toString(); });
-        child.on('error', () => { clearTimeout(timer); resolve(null); });
+        child.on('error', (e) => { clearTimeout(timer); resolve({ ok: false, error: 'ffmpeg error: ' + String((e && e.message) || e) }); });
         child.on('close', async (code) => {
             clearTimeout(timer);
+            const tail = redactCreds(stderr.trim().split('\n').filter(Boolean).pop() || 'no stderr');
             if (code !== 0) {
-                console.warn(`[media-gateway] audio-extract ffmpeg exit ${code}: ${stderr.slice(-300)}`);
+                console.warn(`[media-gateway] audio-extract ffmpeg exit ${code}: ${redactCreds(stderr.slice(-300))}`);
                 fsp.unlink(outputPath).catch(() => {});
-                return resolve(null);
+                return resolve({ ok: false, error: timedOut ? `extract timeout after ${Math.round(timeoutMs / 1000)}s: ${tail}` : `ffmpeg exit ${code}: ${tail}` });
             }
-            let ok = false;
-            try { ok = (await fsp.stat(outputPath)).size > 4000; } catch (_) { ok = false; }
-            resolve(ok ? outputPath : null);
+            let size = 0;
+            try { size = (await fsp.stat(outputPath)).size; } catch (_) { size = 0; }
+            if (size <= 4000) {
+                fsp.unlink(outputPath).catch(() => {});
+                return resolve({ ok: false, error: `empty/tiny WAV (${size}B) — no audio decoded (${tail})` });
+            }
+            resolve({ ok: true, path: outputPath });
         });
     });
 }
@@ -925,8 +983,11 @@ function cleanVtt(vtt) {
 }
 
 // Phase 3: full timestamped transcription to WebVTT. whisper.cpp emits VTT natively (-ovtt).
-// Resolves { vtt, lang, prob, ms } (empties on failure). forceLang pins the source language.
-function runWhisperVtt(wavPath, forceLang) {
+// Resolves { vtt, lang, prob, ms, failReason } — vtt empty on failure, and failReason then says
+// WHY (timeout SIGKILL vs crash vs spawn): whisper.cpp only writes the -ovtt file at completion,
+// so a timeout kill leaves no partial VTT and used to surface as an opaque "no output".
+// forceLang pins the source language. `timeoutMs` = the adaptive budget (whisperBudgetMs).
+function runWhisperVtt(wavPath, forceLang, timeoutMs = WHISPER_TRANSCRIBE_TIMEOUT_MS) {
     return new Promise((resolve) => {
         const t0 = Date.now();
         const outPrefix = wavPath.replace(/\.wav$/i, '');
@@ -940,11 +1001,12 @@ function runWhisperVtt(wavPath, forceLang) {
         ];
         let child;
         try { child = spawn(WHISPER_BIN, args, { stdio: ['ignore', 'ignore', 'pipe'] }); }
-        catch (_) { return resolve({ vtt: '', lang: null, prob: 0, ms: 0 }); }
+        catch (e) { return resolve({ vtt: '', lang: null, prob: 0, ms: 0, failReason: 'whisper spawn failed: ' + String((e && e.message) || e) }); }
         let stderr = '';
-        const timer = setTimeout(() => { try { child.kill('SIGKILL'); } catch (_) {} }, WHISPER_TRANSCRIBE_TIMEOUT_MS);
+        let timedOut = false;
+        const timer = setTimeout(() => { timedOut = true; try { child.kill('SIGKILL'); } catch (_) {} }, timeoutMs);
         child.stderr.on('data', (d) => { stderr += d.toString(); });
-        child.on('error', () => { clearTimeout(timer); resolve({ vtt: '', lang: null, prob: 0, ms: Date.now() - t0 }); });
+        child.on('error', (e) => { clearTimeout(timer); resolve({ vtt: '', lang: null, prob: 0, ms: Date.now() - t0, failReason: 'whisper error: ' + String((e && e.message) || e) }); });
         child.on('close', async (code) => {
             clearTimeout(timer);
             const m = stderr.match(/auto-detected language:\s*([a-z]{2,3})\s*\(p\s*=\s*([\d.]+)\)/i);
@@ -954,9 +1016,95 @@ function runWhisperVtt(wavPath, forceLang) {
             try { vtt = await fsp.readFile(outPrefix + '.vtt', 'utf8'); } catch (_) { vtt = ''; }
             fsp.unlink(outPrefix + '.vtt').catch(() => {});
             if (code !== 0 && !vtt) console.warn(`[media-gateway] whisper-vtt exit ${code}: ${stderr.slice(-300)}`);
-            resolve({ vtt: cleanVtt(String(vtt || '').trim()), lang, prob, ms: Date.now() - t0 });
+            const failReason = vtt ? null
+                : timedOut ? `whisper killed by timeout after ${Math.round((Date.now() - t0) / 1000)}s (no partial VTT is written)`
+                : `whisper exit ${code} wrote no VTT: ${stderr.trim().split('\n').filter(Boolean).pop() || 'no stderr'}`;
+            resolve({ vtt: cleanVtt(String(vtt || '').trim()), lang, prob, ms: Date.now() - t0, failReason });
         });
     });
+}
+
+// ONE provider-touching background ffmpeg per account at a time, ACROSS lanes (fix #2 of the
+// subtitle-failures audit). The transcribe, OCR and detect-language lanes each serialize
+// internally, but nothing stopped two lanes from opening two simultaneous connections on the
+// same single-slot panel account (pregen extraction + whisper-LID sweep → instant user_multi_ip
+// refusal — the 02/07 super8k failures). Keyed by the byte-pipe uid (the account whose provider
+// credentials the URL carries), falling back to the URL host key. The lock wraps only the
+// provider-connected phase (ffmpeg extraction) — whisper/tesseract are pure CPU and run outside
+// it. Viewer-interactive paths (/raw, /subtitle, playback) are NOT serialized here: they have
+// their own slot-eviction machinery and must never wait behind a long extraction.
+const accountJobLocks = new Map(); // key -> tail promise of the wait chain
+function accountJobKey(uid, url) { return String(uid || '') || proxyKeyFromUrl(url); }
+function isAccountJobBusy(key) { return accountJobLocks.has(key); }
+async function withAccountJobLock(key, fn) {
+    if (!key) return fn();
+    const prev = accountJobLocks.get(key) || Promise.resolve();
+    let release;
+    const gate = new Promise((r) => { release = r; });
+    const tail = prev.then(() => gate);
+    accountJobLocks.set(key, tail);
+    await prev;
+    try { return await fn(); }
+    finally {
+        release();
+        if (accountJobLocks.get(key) === tail) accountJobLocks.delete(key);
+    }
+}
+
+// Crons ↔ jobs coordination, direction (b) (fix #3 of the subtitle-failures audit): before a
+// queued job opens its provider connection, ask the edge whether the account's slot is safe —
+// no live viewer and no enrichment tick heartbeat in the last ~2.5 min. The edge is the only
+// party that can see relay-side cron activity: the 01/07 super8k failures were a pregen ffmpeg
+// landing mid relay-probe batch, second-exact. The enqueue-time stagger (00:20/25/30) only
+// staggers the ENQUEUE — this queue executes 15-50 min later, in the middle of the cron grid.
+// Deferred jobs rotate to the back of their lane so other accounts keep flowing; fail-open (an
+// unreachable gate — incl. a 404 while the edge route rolls out — never wedges the queue; the
+// account lock and the edge-side tick skip still bound the damage).
+const JOB_GATE_POLL_MS = clampInt(process.env.JOB_GATE_POLL_MS, 60_000, 5_000, 600_000);
+const JOB_GATE_MAX_DEFERRALS = clampInt(process.env.JOB_GATE_MAX_DEFERRALS, 240, 1, 2000);
+async function shouldDeferJob(job) {
+    try {
+        const gateUrl = String(job.callbackUrl || '').replace(/\/[^/]*$/, '/pregen-gate');
+        if (!/^https:\/\/[^/]+\.supabase\.co\//.test(gateUrl)) return false;
+        const resp = await fetch(gateUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${GATEWAY_TOKEN}` },
+            body: JSON.stringify({ userId: job.uid || '' }),
+            signal: AbortSignal.timeout(10_000),
+        });
+        if (!resp.ok) return false;
+        const body = await resp.json().catch(() => null);
+        return Boolean(body && body.defer === true);
+    } catch (_) { return false; }
+}
+async function postDeferFailCallback(kind, job) {
+    const minutes = Math.round((JOB_GATE_POLL_MS * JOB_GATE_MAX_DEFERRALS) / 60000);
+    try {
+        await fetch(job.callbackUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${GATEWAY_TOKEN}` },
+            body: JSON.stringify({ jobId: job.jobId, ok: false, error: `Deferred too long: the account's provider slot stayed busy (live viewer or enrichment) for ~${minutes} min` }),
+            signal: AbortSignal.timeout(30000),
+        });
+    } catch (e) { console.warn(`[media-gateway] ${kind} defer-fail callback failed`, job.jobId, String((e && e.message) || e)); }
+}
+// Shift the next runnable job off `queue`; a deferred job rotates to the back so other accounts
+// keep flowing. Returns null when every queued job is deferred (the caller sleeps and rescans).
+async function nextRunnableJob(queue, kind) {
+    const n = queue.length;
+    for (let i = 0; i < n; i++) {
+        const job = queue.shift();
+        if (!job) return null;
+        if (!(await shouldDeferJob(job))) { job.gateDeferrals = 0; return job; }
+        job.gateDeferrals = (job.gateDeferrals || 0) + 1;
+        if (job.gateDeferrals > JOB_GATE_MAX_DEFERRALS) {
+            console.warn(`[media-gateway] ${kind} job ${job.jobId} deferred too long — failing back to the edge`);
+            await postDeferFailCallback(kind, job);
+            continue; // consumed (failed) — inspect the next queued job
+        }
+        queue.push(job);
+    }
+    return null;
 }
 
 // Phase 3 transcription job queue (in-process, concurrency 1). A full-film transcription is many
@@ -979,7 +1127,8 @@ async function drainTranscribeQueue() {
     transcribeBusy = true;
     try {
         while (transcribeQueue.length) {
-            const job = transcribeQueue.shift();
+            const job = await nextRunnableJob(transcribeQueue, 'transcribe');
+            if (!job) { await sleep(JOB_GATE_POLL_MS); continue; }
             await runTranscribeJob(job).catch((e) => console.warn('[media-gateway] transcribe job error', String((e && e.message) || e)));
         }
     } finally { transcribeBusy = false; }
@@ -988,20 +1137,29 @@ async function runTranscribeJob(job) {
     const { url, ua, index, jobId, callbackUrl, start = 0, dur = 0, uid = '' } = job;
     let wavPath = null, payload;
     try {
-        wavPath = await extractAudioWav(url, ua, index, start, dur, AUDIO_EXTRACT_TIMEOUT_MS, uid); // dur 0 = whole track
-        if (!wavPath) {
-            payload = { jobId, ok: false, error: 'Audio extraction failed' };
+        let ex = { ok: false, error: 'not attempted' };
+        for (let attempt = 0; attempt <= AUDIO_EXTRACT_RETRIES; attempt++) {
+            // Account lock per ATTEMPT: the 30/60s backoff sleeps must not hold the slot.
+            ex = await withAccountJobLock(accountJobKey(uid, url), () =>
+                extractAudioWav(url, ua, index, start, dur, AUDIO_EXTRACT_TIMEOUT_MS, uid)); // dur 0 = whole track
+            if (ex.ok) break;
+            if (/\b(401|403)\b|Unauthorized|Forbidden/i.test(ex.error || '')) break; // abuse/auth block — do not hammer
+            if (attempt < AUDIO_EXTRACT_RETRIES) await sleep(AUDIO_EXTRACT_BACKOFF_MS * (attempt + 1)); // 30s, 60s — spaced, not a burst
+        }
+        if (!ex.ok) {
+            payload = { jobId, ok: false, error: ('Audio extraction failed: ' + ex.error).slice(0, 300) };
         } else {
+            wavPath = ex.path;
             let audioSec = 0;
             try { audioSec = Math.round((await fsp.stat(wavPath)).size / (16000 * 2)); } catch (_) { audioSec = 0; }
-            const w = await runWhisperVtt(wavPath, '');
+            const w = await runWhisperVtt(wavPath, '', whisperBudgetMs(audioSec));
             const segments = (w.vtt.match(/-->/g) || []).length;
             payload = w.vtt
                 ? { jobId, ok: true, vtt: w.vtt, sourceLang: w.lang, audioSec, segments }
-                : { jobId, ok: false, error: 'Transcription produced no output' };
+                : { jobId, ok: false, error: ('Transcription produced no output: ' + (w.failReason || 'unknown')).slice(0, 300) };
         }
     } catch (e) {
-        payload = { jobId, ok: false, error: String((e && e.message) || e).slice(0, 300) };
+        payload = { jobId, ok: false, error: redactCreds(String((e && e.message) || e)).slice(0, 300) };
     } finally { if (wavPath) fsp.unlink(wavPath).catch(() => {}); }
     try {
         await fetch(callbackUrl, {
@@ -1093,7 +1251,8 @@ async function drainOcrQueue() {
     ocrBusy = true;
     try {
         while (ocrQueue.length) {
-            const job = ocrQueue.shift();
+            const job = await nextRunnableJob(ocrQueue, 'ocr');
+            if (!job) { await sleep(JOB_GATE_POLL_MS); continue; }
             await runOcrJob(job).catch((e) => console.warn('[media-gateway] ocr job error', String((e && e.message) || e)));
         }
     } finally { ocrBusy = false; }
@@ -1128,9 +1287,11 @@ function extractSubtitleSup(url, ua, trackIndex, timeoutMs = SUP_EXTRACT_TIMEOUT
         child.on('close', async (code) => {
             clearTimeout(timer);
             if (code !== 0) {
-                console.warn(`[media-gateway] sup-extract ffmpeg exit ${code}: ${stderr.slice(-300)}`);
+                console.warn(`[media-gateway] sup-extract ffmpeg exit ${code}: ${redactCreds(stderr.slice(-300))}`);
                 fsp.unlink(outputPath).catch(() => {});
-                return resolve({ ok: false, error: `ffmpeg exit ${code}: ${stderr.trim().split('\n').pop() || 'no stderr'}` });
+                // redactCreds: the stderr line quotes the provider URL, whose path embeds the
+                // account's username/password — this string lands verbatim in the DB/admin UI.
+                return resolve({ ok: false, error: `ffmpeg exit ${code}: ${redactCreds(stderr.trim().split('\n').pop() || 'no stderr')}` });
             }
             let size = 0;
             try { size = (await fsp.stat(outputPath)).size; } catch (_) { size = 0; }
@@ -1195,8 +1356,9 @@ function extractSubtitleFrames(url, ua, trackIndex, timeoutMs = SUP_EXTRACT_TIME
             let nframes = 0;
             try { nframes = (await fsp.readdir(dir)).filter((f) => f.endsWith('.png')).length; } catch (_) { nframes = 0; }
             if (code !== 0 && !nframes) {
-                console.warn(`[media-gateway] imgsub-extract ffmpeg exit ${code}: ${stderr.split('\n').filter(Boolean).pop() || 'no stderr'}`);
-                return resolve({ ok: false, error: `ffmpeg exit ${code}: ${stderr.split('\n').filter(Boolean).pop() || 'no stderr'}`, dir });
+                const tail = redactCreds(stderr.split('\n').filter(Boolean).pop() || 'no stderr');
+                console.warn(`[media-gateway] imgsub-extract ffmpeg exit ${code}: ${tail}`);
+                return resolve({ ok: false, error: `ffmpeg exit ${code}: ${tail}`, dir });
             }
             if (!nframes) return resolve({ ok: false, error: `no subtitle frames rendered on stream ${trackIndex}`, dir });
             resolve({ ok: true, dir });
@@ -1242,7 +1404,10 @@ async function runOcrJob(job) {
     try {
         let ex = { ok: false, error: 'not attempted' };
         for (let attempt = 0; attempt <= OCR_EXTRACT_RETRIES; attempt++) {
-            ex = useFrames ? await extractSubtitleFrames(url, ua, index, SUP_EXTRACT_TIMEOUT_MS, uid) : await extractSubtitleSup(url, ua, index, SUP_EXTRACT_TIMEOUT_MS, uid);
+            // Account lock per ATTEMPT (not around the loop): the 30/60 s backoff sleeps must not
+            // hold the account's slot — another lane may legitimately use it between our tries.
+            ex = await withAccountJobLock(accountJobKey(uid, url), () =>
+                useFrames ? extractSubtitleFrames(url, ua, index, SUP_EXTRACT_TIMEOUT_MS, uid) : extractSubtitleSup(url, ua, index, SUP_EXTRACT_TIMEOUT_MS, uid));
             if (ex.ok) break;
             if (ex.dir) { fsp.rm(ex.dir, { recursive: true, force: true }).catch(() => {}); ex.dir = null; } // drop partial dir
             if (/\b(401|403)\b|Unauthorized|Forbidden/i.test(ex.error || '')) break; // abuse/auth block — do not hammer
