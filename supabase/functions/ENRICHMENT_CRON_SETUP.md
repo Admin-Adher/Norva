@@ -165,7 +165,14 @@ qu'ils soient déjà prêts avant qu'un user les demande. Détail produit : `doc
 - **Mode `transcribe-whitelist`** (`runOneDimension`) : sur-échantillonne (`p_limit=max(limit*6,20)`),
   enqueue `limit` **nouveaux** jobs (saute les `ready`/en-vol → avance au-delà des déjà-faits).
   **Touche le slot** (lecture audio provider) → garde `userHasLiveSession()` (`skipped:live-session`).
-- Staggerés 00:20/00:25/00:30 pour ne pas se chevaucher (1 slot provider à la fois).
+- Staggerés 00:20/00:25/00:30 pour ne pas se chevaucher (1 slot provider à la fois). **Attention :
+  le stagger ne protège que l'ENQUEUE** — la queue gateway (concurrency 1) exécute les jobs
+  15-50 min plus tard, en plein grid des crons nuit. La vraie protection est la **coordination
+  crons ↔ pregen** (audit 2026-07-02, `docs/SUBTITLE-PREGEN-RELIABILITY.md`) : (a) les dimensions
+  d'enrichissement skippent un compte tant qu'un job pregen/OCR `claimed_by` lui est en vol
+  (`skipped:pregen-active`, TTL 2 h) ; (b) le gateway POST `norva-playback/pregen-gate` avant
+  d'ouvrir la connexion provider et défère si viewer live ou heartbeat de tick < 150 s
+  (`enrichment_tick_heartbeat`). Fail-open des deux côtés.
 - Vérifié live (super8k non-live : `{candidates:20, enqueued:1, started:[{priority:0}]}`, `200`, job
   dispatché à la gateway ; jeremy live : `{skipped:'live-session'}`).
 
