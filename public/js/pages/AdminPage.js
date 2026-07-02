@@ -296,7 +296,7 @@ class AdminPage {
     _setCrumb(text, ts) {
         const c = document.getElementById('crm-crumb'); if (c) c.textContent = text;
         const t = document.getElementById('crm-ts');
-        if (t) t.textContent = ts ? ('snapshot · ' + new Date(ts).toLocaleTimeString('fr-FR') + ' · auto 5 min') : '';
+        if (t) t.textContent = ts ? ('snapshot · ' + new Date(ts).toLocaleTimeString('fr-FR') + ' · auto 10 min') : '';
     }
     _setActiveNav(route) {
         document.querySelectorAll('#page-admin .crm-nav-item').forEach(el =>
