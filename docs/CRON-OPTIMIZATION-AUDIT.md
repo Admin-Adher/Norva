@@ -115,3 +115,22 @@ Audit des datas visibles après tous ces changements :
 - Réutiliser `tc` pour les KPIs titres de l'overview : écarté — reposait sur l'invariant
   « variant_count>0 ⇒ default_variant_id valide » ; un scan dédié `tt` garde la sémantique exacte
   pour ~320 ms.
+
+## 10. Addendum 2026-07-02 — fix du sondage séries (Ninja/Ferran)
+
+Révélé par le badge « ⏸ à l'arrêt » du dashboard post-alignement : **Ninja 5/37 999 et Ferran
+7/10 676 séries sondées depuis toujours**, alors que leurs crons nuit tournaient chaque nuit
+(Promax, créé identiquement, tourne à ~616/24 h). Cause : `resolveSeriesEpisodeUrl` appelait
+`get_series_info` **en direct depuis l'edge** (IP datacenter) — ces deux panels la rejettent →
+`noTarget` sur chaque candidat → `audio_probed_at` jamais posé → les mêmes 15 titres re-tentés
+chaque tick sans progression possible.
+
+Fix (norva-playback) — cascade de résolution d'épisode :
+1. **`cloud_series_info_cache`** (PK `server_host`+`series_id`) — zéro hit provider ;
+2. **gateway `/xtream/series-info`** (IP résidentielle que le panel accepte déjà — le chemin du
+   prewarm fiches ; UA VLC, timeout 12 s) ;
+3. **appel direct historique** en fallback (gateway down / non configuré).
+
+Discipline mono-connexion inchangée (appels strictement séquentiels, concurrency 1). Débloque
+~48 700 séries structurellement insondables. À noter : « à l'arrêt » sur KING365/Opplex séries
+reste NORMAL (design films-d'abord sur slot unique ; reprise auto par fallthrough).
