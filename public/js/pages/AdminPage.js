@@ -829,17 +829,20 @@ class AdminPage {
         const v = this._view();
         v.innerHTML = `<div class="crm-page">
             <h1 class="crm-h1">⚙️ Moteur d'enrichissement</h1>
-            <p class="crm-sub">Couverture par panel (comptes pilotes) + crons jour/nuit.</p>
+            <p class="crm-sub">Couverture par panel (comptes pilotes) + matching TMDB + crons jour/nuit.</p>
             <div class="admin-block"><h2>Enrichissement par panel</h2><div class="scroll"><div id="admin-enrich"><div class="ssub">Chargement…</div></div></div></div>
+            <div class="admin-block"><h2>🎯 Matching TMDB</h2><div class="ssub">Backlogs drainés par les crons nocturnes (backfill-years 1000/j · search-match 3 600/j · revalidate 2 000/j) — ces compteurs doivent baisser de jour en jour.</div><section id="admin-tmdb" class="admin-cards"></section></div>
             <div class="admin-block"><h2>⏱️ Crons</h2><div class="scroll"><div id="admin-cron"></div></div></div>
         </div>`;
         try {
-            const [enrich, cron] = await Promise.all([
+            const [enrich, cron, ov] = await Promise.all([
                 this._rpc('admin_enrichment_coverage'),
-                this._rpc('admin_cron_health')
+                this._rpc('admin_cron_health'),
+                this._rpc('admin_overview')
             ]);
             this._renderEnrich(Array.isArray(enrich) ? enrich : []);
             this._renderCron(Array.isArray(cron) ? cron : []);
+            this._renderTmdb(ov || {});
         } catch (e) {
             const msg = `<div class="admin-err">Erreur : ${AdminPage.esc(e.message)}</div>`;
             const en = document.getElementById('admin-enrich');
@@ -847,6 +850,18 @@ class AdminPage {
             if (en) en.innerHTML = msg;
             if (cr) cr.innerHTML = msg;   // both sections share the fetch — show the failure in both
         }
+    }
+
+    _renderTmdb(o) {
+        const el = document.getElementById('admin-tmdb');
+        if (!el) return;
+        const card = (v, l, cls) => `<div class="kpi ${cls || ''}"><div class="v">${AdminPage.n(v)}</div><div class="l">${l}</div></div>`;
+        // These fields appear after the post-audit snapshot refresh; '—' until then.
+        el.innerHTML = [
+            card(o.tmdb_year_backlog, 'Années manquantes', Number(o.tmdb_year_backlog) === 0 ? 'ok' : ''),
+            card(o.tmdb_unmatched, 'Non matchés TMDB'),
+            card(o.tmdb_unverified, 'À revalider')
+        ].join('');
     }
 
     // ── Page: Système (snapshot health + admin audit feed) ──
