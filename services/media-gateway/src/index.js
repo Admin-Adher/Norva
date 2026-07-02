@@ -654,10 +654,15 @@ app.get('/detect-language/:token', async (req, res) => {
         let best = null;          // best partial result across offsets (most words), as a fallback
         let extractions = 0;      // bound the provider connections
         let lastExtractErr = '';  // surfaced when EVERY offset failed (was an opaque constant string)
+        const lockKey = accountJobKey(claims.uid, claims.url);
         for (const off of offsets) {
             let wavPath = null;
             try {
-                const ex = await extractAudioWav(claims.url, ua, trackIndex, off > 0 ? off : 0, dur, 30_000, claims.uid);
+                // Fast-fail rather than queue behind a long extraction: the edge caller has its own
+                // HTTP timeout — waiting minutes here would spend a provider hit after it hung up.
+                if (isAccountJobBusy(lockKey)) { lastExtractErr = 'account provider slot busy (background job in progress)'; break; }
+                const ex = await withAccountJobLock(lockKey, () =>
+                    extractAudioWav(claims.url, ua, trackIndex, off > 0 ? off : 0, dur, 30_000, claims.uid));
                 if (!ex.ok) { lastExtractErr = ex.error; continue; }   // failed or offset past the file's end → next offset
                 wavPath = ex.path;
                 extractions++;
@@ -714,7 +719,8 @@ app.get('/transcribe/:token', async (req, res) => {
     let wavPath = null;
     try {
         const e0 = Date.now();
-        const ex = await extractAudioWav(claims.url, ua, trackIndex, startOffset, dur, AUDIO_EXTRACT_TIMEOUT_MS, claims.uid);
+        const ex = await withAccountJobLock(accountJobKey(claims.uid, claims.url), () =>
+            extractAudioWav(claims.url, ua, trackIndex, startOffset, dur, AUDIO_EXTRACT_TIMEOUT_MS, claims.uid));
         const extractMs = Date.now() - e0;
         if (!ex.ok) return res.status(502).json({ error: 'Audio extraction failed', details: ex.error });
         wavPath = ex.path;
@@ -987,6 +993,33 @@ function runWhisperVtt(wavPath, forceLang) {
     });
 }
 
+// ONE provider-touching background ffmpeg per account at a time, ACROSS lanes (fix #2 of the
+// subtitle-failures audit). The transcribe, OCR and detect-language lanes each serialize
+// internally, but nothing stopped two lanes from opening two simultaneous connections on the
+// same single-slot panel account (pregen extraction + whisper-LID sweep → instant user_multi_ip
+// refusal — the 02/07 super8k failures). Keyed by the byte-pipe uid (the account whose provider
+// credentials the URL carries), falling back to the URL host key. The lock wraps only the
+// provider-connected phase (ffmpeg extraction) — whisper/tesseract are pure CPU and run outside
+// it. Viewer-interactive paths (/raw, /subtitle, playback) are NOT serialized here: they have
+// their own slot-eviction machinery and must never wait behind a long extraction.
+const accountJobLocks = new Map(); // key -> tail promise of the wait chain
+function accountJobKey(uid, url) { return String(uid || '') || proxyKeyFromUrl(url); }
+function isAccountJobBusy(key) { return accountJobLocks.has(key); }
+async function withAccountJobLock(key, fn) {
+    if (!key) return fn();
+    const prev = accountJobLocks.get(key) || Promise.resolve();
+    let release;
+    const gate = new Promise((r) => { release = r; });
+    const tail = prev.then(() => gate);
+    accountJobLocks.set(key, tail);
+    await prev;
+    try { return await fn(); }
+    finally {
+        release();
+        if (accountJobLocks.get(key) === tail) accountJobLocks.delete(key);
+    }
+}
+
 // Phase 3 transcription job queue (in-process, concurrency 1). A full-film transcription is many
 // minutes long, so /transcribe-async accepts a job (202) and runs it in the BACKGROUND, then POSTs
 // the result to the edge callback (auth = the shared gateway token). A gateway restart loses
@@ -1016,7 +1049,8 @@ async function runTranscribeJob(job) {
     const { url, ua, index, jobId, callbackUrl, start = 0, dur = 0, uid = '' } = job;
     let wavPath = null, payload;
     try {
-        const ex = await extractAudioWav(url, ua, index, start, dur, AUDIO_EXTRACT_TIMEOUT_MS, uid); // dur 0 = whole track
+        const ex = await withAccountJobLock(accountJobKey(uid, url), () =>
+            extractAudioWav(url, ua, index, start, dur, AUDIO_EXTRACT_TIMEOUT_MS, uid)); // dur 0 = whole track
         if (!ex.ok) {
             payload = { jobId, ok: false, error: ('Audio extraction failed: ' + ex.error).slice(0, 300) };
         } else {
@@ -1274,7 +1308,10 @@ async function runOcrJob(job) {
     try {
         let ex = { ok: false, error: 'not attempted' };
         for (let attempt = 0; attempt <= OCR_EXTRACT_RETRIES; attempt++) {
-            ex = useFrames ? await extractSubtitleFrames(url, ua, index, SUP_EXTRACT_TIMEOUT_MS, uid) : await extractSubtitleSup(url, ua, index, SUP_EXTRACT_TIMEOUT_MS, uid);
+            // Account lock per ATTEMPT (not around the loop): the 30/60 s backoff sleeps must not
+            // hold the account's slot — another lane may legitimately use it between our tries.
+            ex = await withAccountJobLock(accountJobKey(uid, url), () =>
+                useFrames ? extractSubtitleFrames(url, ua, index, SUP_EXTRACT_TIMEOUT_MS, uid) : extractSubtitleSup(url, ua, index, SUP_EXTRACT_TIMEOUT_MS, uid));
             if (ex.ok) break;
             if (ex.dir) { fsp.rm(ex.dir, { recursive: true, force: true }).catch(() => {}); ex.dir = null; } // drop partial dir
             if (/\b(401|403)\b|Unauthorized|Forbidden/i.test(ex.error || '')) break; // abuse/auth block — do not hammer
