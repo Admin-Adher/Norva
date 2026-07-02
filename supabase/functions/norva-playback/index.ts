@@ -3080,7 +3080,7 @@ const EXHAUSTED_TTL_MS = 30 * 60 * 1000;
 // Only candidate-driven sweeps participate — targeted/on-demand modes (titleIds, orderedTitleIds,
 // catalog fill, transcribe/ocr paths) must never be short-circuited. null = not a sweep.
 function sweepDimKey(body: JsonRecord): string | null {
-  if (Array.isArray(body.orderedTitleIds) || Array.isArray(body.titleIds)) return null;
+  if (Array.isArray(body.orderedTitleIds) || Array.isArray(body.titleIds) || Array.isArray(body.verifyTitleIds)) return null;
   const mode = stringOr(body.mode, "");
   const subtitleTarget = stringOr(body.target, "") === "subtitle";
   if (!subtitleTarget && !["", "vod", "probe", "whisper"].includes(mode)) return null;
@@ -3436,33 +3436,36 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
     }
     await bumpEnrichmentHeartbeat(db, userId);
 
-    // ── Phase VERIFY (fix "German tag on a French film") ────────────────────────────────
-    // Titles carrying an explicit French marker whose probed languages hold NO fr: the
-    // container tag contradicts the packaging — whisper listens to the actual speech and
-    // corrects the catalog (which also fixes the player's audio menu: it prefers cloud
-    // audio_tracks over container tags). Bounded (≤ verifyLimit titles/tick, ≤ 2 suspect
-    // tracks each, sequential) and runs BEFORE the untagged phase: these are live,
-    // user-visible wrong labels, not just missing ones. 429 mismatches counted live on
-    // 2026-07-02 (360 with a track map). 90d re-verify window; best-effort throughout.
-    const FRENCH_MARKER_PATTERN = "(^(fr|vf|vff|truefrench)[ \\-▎|])|\\((fr|vf)\\)|french";
-    const verifyLimit = Math.max(0, Math.min(Number(body.verifyLimit ?? Math.ceil(limit / 2)), 6));
+    // ── Phase VERIFY (fix "German tag on a French film", "Bangla tag on a Hindi film") ──
+    // Container tags that contradict strong signals — whisper listens to the actual speech
+    // and corrects the catalog (which also fixes the player's audio menu: it prefers cloud
+    // audio_tracks over container tags). Candidates come from the audio_tag_suspects RPC:
+    // class 1 = FR-marked title without fr (429 measured live), class 2 = a SINGLE probed
+    // language whose name is literally a word of the title (the releaser pattern that tagged
+    // the Hindi film "Bhooth Bangla" as Bengali) — class 2 served first. Explicit
+    // body.verifyTitleIds bypasses the candidate query entirely (targeted support runs).
+    // Bounded (≤ verifyLimit titles/tick, ≤ 2 suspect tracks each, sequential) and runs
+    // BEFORE the untagged phase. 90d re-verify window; best-effort throughout.
+    const explicitVerifyIds = Array.isArray(body.verifyTitleIds)
+      ? (body.verifyTitleIds as unknown[]).map(String).filter(Boolean).slice(0, 10) : [];
+    const verifyLimit = explicitVerifyIds.length
+      ? explicitVerifyIds.length
+      : Math.max(0, Math.min(Number(body.verifyLimit ?? Math.ceil(limit / 2)), 6));
     let verified = 0, corrected = 0;
     if (verifyLimit > 0) {
       try {
         const verifyRetryBefore = new Date(Date.now() - 90 * 24 * 3600 * 1000).toISOString();
         // Per-panel crons (sourceId set) filter AFTER resolving variants → over-fetch.
         const overFetch = sourceId ? verifyLimit * 5 : verifyLimit;
-        const { data: srows } = await db.from("cloud_titles")
-          .select("id, default_variant_id, provider_tmdb_id, audio_tracks, audio_languages")
-          .eq("user_id", userId).eq("item_type", itemType)
-          .gt("variant_count", 0)
-          .not("audio_probed_at", "is", null)
-          .not("audio_tracks", "is", null)
-          .neq("audio_languages", "{}")
-          .not("audio_languages", "cs", "{fr}")
-          .filter("title", "imatch", FRENCH_MARKER_PATTERN)
-          .or(`audio_lang_verified_at.is.null,audio_lang_verified_at.lt.${verifyRetryBefore}`)
-          .order("id", { ascending: true }).limit(overFetch);
+        const { data: srows } = explicitVerifyIds.length
+          ? await db.from("cloud_titles")
+              .select("id, default_variant_id, provider_tmdb_id, audio_tracks, audio_languages")
+              .eq("user_id", userId).eq("item_type", itemType)
+              .in("id", explicitVerifyIds)
+              .not("audio_tracks", "is", null)
+          : await db.rpc("audio_tag_suspects", {
+              p_user: userId, p_item_type: itemType, p_limit: overFetch, p_retry_before: verifyRetryBefore,
+            });
         const suspectsAll = (srows ?? []) as JsonRecord[];
         const svIds = suspectsAll.map((t) => stringOrNull(t.default_variant_id)).filter(Boolean) as string[];
         const svById = new Map<string, JsonRecord>();
