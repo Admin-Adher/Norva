@@ -245,10 +245,14 @@ const GATEWAY_VERSION = 61;
 // Browser playback fetches HLS playlists/segments cross-origin, so these must
 // list every Norva web origin or the browser blocks the response (CORS). Keep
 // in sync with the relay's ALLOWED_ORIGINS (services/norva-relay/wrangler.jsonc).
+// www.gstatic.com is the Chromecast Default Media Receiver: its HLS player
+// fetches playlists/segments with that Origin, so casting needs it allowed
+// (the session token in the URL keeps access gated exactly as for browsers).
 const DEFAULT_ALLOWED_ORIGINS = [
     'https://norva.tv',
     'https://app.norva.tv',
     'https://norva-web.pages.dev',
+    'https://www.gstatic.com',
     'http://localhost:3000',
     'http://localhost:5173',
 ].join(',');

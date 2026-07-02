@@ -10473,6 +10473,76 @@ mark.search-highlight {
 }
 
 /* ============================================================
+   Chromecast (web sender) — cast button + active-session bar
+   ============================================================ */
+
+.watch-cast-btn {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  z-index: 26;
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 50%;
+  background: rgba(10, 10, 15, 0.6);
+  color: #fff;
+  cursor: pointer;
+}
+
+.watch-cast-btn:hover,
+.watch-cast-btn:focus {
+  background: rgba(255, 255, 255, 0.9);
+  color: #0a0a0f;
+}
+
+.watch-cast-btn.hidden {
+  display: none;
+}
+
+.watch-cast-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 27;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 20px;
+  background: rgba(10, 10, 15, 0.85);
+  color: #fff;
+}
+
+.watch-cast-bar.hidden {
+  display: none;
+}
+
+.watch-cast-bar-label {
+  flex: 1;
+  font-size: 0.95rem;
+}
+
+.watch-cast-toggle,
+.watch-cast-stop {
+  border: none;
+  border-radius: 6px;
+  padding: 8px 14px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+}
+
+.watch-cast-stop {
+  background: #3b82f6;
+}
+
+/* ============================================================
    TV mode (Android TV WebView client) — D-pad focus ring
    ============================================================ */
 

@@ -328,6 +328,7 @@ class WatchPage {
         this.video?.addEventListener('ended', () => this.onEnded());
         this.setupMediaSessionHandlers();
         this.applySubtitleStyle();
+        this.setupCastIntegration();
         this.video?.addEventListener('error', (e) => this.onError(e));
         this.video?.addEventListener('waiting', () => this.showLoading());
         this.video?.addEventListener('canplay', () => {
@@ -1518,6 +1519,126 @@ class WatchPage {
                 playbackRate: this.video?.playbackRate || 1
             });
         } catch (_) { /* position state is cosmetic */ }
+    }
+
+    // ==================== Chromecast (web sender) ====================
+    // The receiver fetches server-served URLs itself (gateway HLS / relay MP4);
+    // engine (MSE) titles are re-resolved through a gateway transcode first.
+    // Local playback is fully released before the receiver connects, so
+    // single-connection provider accounts still see exactly one stream.
+
+    setupCastIntegration() {
+        if (!window.NorvaCast?.supported) return;
+        NorvaCast.ensureSdk();
+        NorvaCast.onStateChange(() => this.updateCastButton());
+        setTimeout(() => this.updateCastButton(), 4000); // discovery is async
+    }
+
+    updateCastButton() {
+        const section = document.querySelector('.watch-video-section');
+        if (!section) return;
+        let btn = document.getElementById('watch-cast-btn');
+        const available = window.NorvaCast?.devicesAvailable?.();
+        if (!btn && available) {
+            btn = document.createElement('button');
+            btn.id = 'watch-cast-btn';
+            btn.type = 'button';
+            btn.className = 'watch-cast-btn';
+            btn.title = 'Cast to TV';
+            btn.setAttribute('aria-label', 'Cast to TV');
+            btn.innerHTML = '<svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M1,18v3h3C4,19.34 2.66,18 1,18zM1,14v2c2.76,0 5,2.24 5,5h2C8,17.13 4.87,14 1,14zM1,10v2c4.97,0 9,4.03 9,9h2C12,14.92 7.07,10 1,10zM21,3H3C1.9,3 1,3.9 1,5v3h2V5h18v14h-7v2h7c1.1,0 2,-0.9 2,-2V5C23,3.9 22.1,3 21,3z"/></svg>';
+            btn.addEventListener('click', () => this.startCasting());
+            section.appendChild(btn);
+        }
+        if (btn) btn.classList.toggle('hidden', !available);
+    }
+
+    async startCasting() {
+        if (!this.content) return;
+        if (window.NorvaCast?.isCasting?.()) {
+            this.showCastBar(NorvaCast.deviceName());
+            return;
+        }
+        try {
+            const position = Math.max(0, Math.floor(this.getPlaybackPosition() || 0));
+            const wasEngine = this.currentPlaybackMode === 'engine';
+            let castUrl = null;
+            if (!wasEngine && /^https?:\/\//i.test(this.baseStreamUrl || '')) {
+                castUrl = this.baseStreamUrl; // gateway HLS / relay MP4: receiver-fetchable
+            }
+            try { this.video?.pause(); } catch (_) { }
+
+            if (!castUrl) {
+                // Engine (MSE) title: free the provider slot, then resolve a
+                // gateway transcode playlist starting at the current position.
+                await this.releasePlaybackPipelineForRetry();
+                await this.waitForProviderSlotRelease(800);
+                const itemType = this.content.type === 'series' ? 'series' : 'movie';
+                const result = await API.proxy.xtream.getStreamUrl(
+                    this.content.sourceId, this.content.id, itemType,
+                    this.containerExtension || 'mp4',
+                    {
+                        gatewayMode: 'transcode', audioMode: 'transcode',
+                        ...this.getSelectedAudioPlaybackOptions(),
+                        seekOffset: position, startOffset: position, resumeTime: position
+                    });
+                if (!result?.url || !/^https?:\/\//i.test(result.url)) {
+                    throw new Error('No castable stream URL');
+                }
+                castUrl = result.url;
+                this._castBaseOffset = position; // playlist time 0 == this absolute position
+            } else {
+                this._castBaseOffset = this.streamStartOffset || 0;
+            }
+
+            const device = await NorvaCast.castMedia({
+                url: castUrl,
+                title: [this.content.title, this.content.subtitle].filter(Boolean).join(' — '),
+                poster: this.content.poster,
+                currentTime: wasEngine ? 0 : Math.max(0, position - (this._castBaseOffset || 0)),
+                live: false
+            });
+            // The receiver now owns the provider slot — local playback fully off.
+            if (!wasEngine) await this.releasePlaybackPipelineForRetry();
+            this.hideLoading();
+            this.showCastBar(device);
+        } catch (error) {
+            console.warn('[WatchPage] Cast failed:', error?.message || error);
+            this.app?.showToast?.('Cast unavailable for this title', 'error');
+        }
+    }
+
+    showCastBar(device) {
+        const section = document.querySelector('.watch-video-section');
+        if (!section) return;
+        let bar = document.getElementById('watch-cast-bar');
+        if (!bar) {
+            bar = document.createElement('div');
+            bar.id = 'watch-cast-bar';
+            bar.className = 'watch-cast-bar';
+            bar.innerHTML = `
+                <span class="watch-cast-bar-label"></span>
+                <button type="button" class="watch-cast-toggle" title="Play/Pause">⏯</button>
+                <button type="button" class="watch-cast-stop">Stop casting</button>`;
+            bar.querySelector('.watch-cast-toggle').addEventListener('click', () => NorvaCast.togglePlayback());
+            bar.querySelector('.watch-cast-stop').addEventListener('click', () => this.stopCasting());
+            section.appendChild(bar);
+        }
+        bar.querySelector('.watch-cast-bar-label').textContent = `Casting to ${device}`;
+        bar.classList.remove('hidden');
+    }
+
+    async stopCasting() {
+        const remote = window.NorvaCast?.remotePosition?.() || 0;
+        try { NorvaCast.endSession(); } catch (_) { }
+        document.getElementById('watch-cast-bar')?.classList.add('hidden');
+        // Resume locally where the receiver stopped.
+        const absolute = Math.max(0, Math.floor((this._castBaseOffset || 0) + remote - 2));
+        if (this.content?.sourceId && this.content?.id) {
+            this.content.resumeTime = absolute;
+            this.resumeTime = absolute;
+            this.retryPlaybackInPlace(absolute);
+        }
     }
 
     /**
@@ -4686,7 +4807,7 @@ class WatchPage {
      * to a hard refresh only when the in-place path itself fails (or when
      * there is no content to retry against).
      */
-    async retryPlaybackInPlace() {
+    async retryPlaybackInPlace(positionOverride = null) {
         if (this._inPlaceRetryRunning) return;
         if (!this.content?.sourceId || !this.content?.id) {
             window.location.reload();
@@ -4706,7 +4827,9 @@ class WatchPage {
             await this.releasePlaybackPipelineForRetry();
             await this.waitForProviderSlotRelease(800);
 
-            const position = Math.max(0, Math.floor(this.getResumeSnapshotPosition()) - 3);
+            const position = positionOverride !== null
+                ? Math.max(0, Math.floor(positionOverride))
+                : Math.max(0, Math.floor(this.getResumeSnapshotPosition()) - 3);
             const itemType = this.content.type === 'series' ? 'series' : 'movie';
             const container = this.containerExtension || 'mp4';
             const playbackHint = {
