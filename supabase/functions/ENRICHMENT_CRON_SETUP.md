@@ -147,6 +147,26 @@ Pour activer/désactiver un provider : ajouter/retirer `'fallthrough', true` du 
 jour (`cron.alter_job(<jobid>, command := $cmd$ … $cmd$)`). Vérifié live (apdxes : films vod `processed:0`
 → bascule séries `processed:15`, `200`).
 
+#### Whisper nuit — LID des pistes non taguées + VERIFY des tags menteurs (v5, 2026-07-02)
+
+Le mode `whisper` exécute DEUX phases par tick : (1) **verify** — candidats via la RPC
+`audio_tag_suspects` (classe 1 : titre marqué FR sans `fr` sondé ; classe 2 : langue unique dont
+le nom figure dans le titre — pattern releaser « Bhooth Bangla » tagué `bn` alors que le film est
+hindi ; classe 2 servie en premier ; `verifyTitleIds` dans le body = vérification ciblée à la
+demande) ; (2) **LID** des pistes non taguées (inchangé). Couverture whisper complétée le 02/07 :
+**AÎRO n'avait AUCUN cron whisper** → 5 nouveaux crons per-panel, offsets cycle-9 sans collision :
+
+| jobname | schedule | panel |
+|---|---|---|
+| `norva-whisper-airo-ninja` | `6-59/9 0-5` | Ninja (`976e7bbd…`) |
+| `norva-whisper-airo-promax` | `7-59/9 0-5` | Promax (`3eb5999e…`) |
+| `norva-whisper-airo-airysat` | `2-59/9 0-5` | Airysat (`f660f738…`) |
+| `norva-whisper-airo-king365` | `5-59/9 0-5` | KING365 (`4e3d7dd8…`) |
+| `norva-whisper-airo-opplex` | `8-59/9 0-5` | Opplex (`9579e61b…`) |
+
+(super8k jobid 33 et jeremy jobid 54, account-wide `6-59/9 0-5`, inchangés — ils exécutent aussi
+la phase verify désormais.)
+
 #### Sous-titres IA — pré-génération nocturne whitelist + reaper (Phase 3c, edge v23)
 
 Pré-génère les **sous-titres IA** (whisper → VTT) des titres « chauds » de chaque provider pour
