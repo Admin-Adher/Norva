@@ -1648,7 +1648,8 @@ class HomePage {
             const title = String(value ?? '').replace(/\s+/g, ' ').trim();
             if (!title) continue;
             if (['0', 'null', 'undefined', 'unknown', 'unknown title', 'norva'].includes(title.toLowerCase())) continue;
-            return title;
+            // Display-clean scene-release names ("[ Torrent911.me ] Name.Year.X264" → "Name Year").
+            return MediaUtils.cleanReleaseName(title) || title;
         }
         return '';
     }

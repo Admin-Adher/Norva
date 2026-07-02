@@ -1205,7 +1205,10 @@ class MoviesPage {
         const isFav = group.items.some(i => this.favoriteIds.has(`${i.sourceId}:${i.stream_id}`));
         const watch = this.getWatchStatus(group.items);
         const versionCount = group.items.length;
-        const displayName = (this.groupDuplicates && movie.tmdb?.title) ? movie.tmdb.title : movie.name;
+        // cleanReleaseName: grid cards render the provider's raw stream name ("[ Torrent911.cc ] …")
+        // straight from the client catalog cache — display-clean it (the raw value stays in the
+        // data for the version/quality parsers).
+        const displayName = (this.groupDuplicates && movie.tmdb?.title) ? movie.tmdb.title : MediaUtils.cleanReleaseName(movie.name);
         const groupBroken = group.items.every(item => this.isBrokenItem(item));
         const languageBadge = MediaUtils.versionLanguageBadge(movie, this.getPreferences());
 
@@ -1280,7 +1283,7 @@ class MoviesPage {
                 <img src="${MediaUtils.escapeHtml(MediaUtils.safeImageUrl(h.data?.poster, '/img/norva-media-placeholder.png'))}"
                      onerror="this.onerror=null;this.src='/img/norva-media-placeholder.png'" loading="lazy" decoding="async" alt="">
                 <div class="continue-card-info">
-                    <p class="continue-card-title">${MediaUtils.escapeHtml(h.data?.title || 'Unknown')}</p>
+                    <p class="continue-card-title">${MediaUtils.escapeHtml(MediaUtils.cleanReleaseName(h.data?.title || '') || 'Unknown')}</p>
                     <div class="card-progress"><div class="card-progress-fill" style="width:${ratio}%"></div></div>
                 </div>
             </div>`;
@@ -1371,7 +1374,7 @@ class MoviesPage {
     }
 
     getMovieDisplayTitle(movie = this.currentMovie) {
-        return movie?.tmdb?.title || movie?.title || movie?.name || 'Movie';
+        return movie?.tmdb?.title || MediaUtils.cleanReleaseName(movie?.title || movie?.name || '') || 'Movie';
     }
 
     getMoviePoster(movie = this.currentMovie) {
@@ -1603,7 +1606,7 @@ class MoviesPage {
             return `
                 <button class="movie-version-item ${active ? 'active' : ''}" type="button" data-index="${index}">
                     <span class="movie-version-main">${MediaUtils.escapeHtml(bits.join(' - ') || `Version ${index + 1}`)}</span>
-                    <span class="movie-version-sub">${MediaUtils.escapeHtml(item.name || this.getMovieDisplayTitle(item))}</span>
+                    <span class="movie-version-sub">${MediaUtils.escapeHtml(MediaUtils.cleanReleaseName(item.name) || this.getMovieDisplayTitle(item))}</span>
                     ${state.status === 'inprogress' ? '<span class="movie-version-progress">En cours</span>' : ''}
                     ${state.status === 'watched' ? '<span class="movie-version-progress">Vu</span>' : ''}
                 </button>`;
@@ -1809,7 +1812,7 @@ class MoviesPage {
                 ${ordered.map((item, i) => `
                     <button class="version-item" data-index="${i}">
                         <span class="version-item-label">${MediaUtils.escapeHtml(MediaUtils.versionLabel(item, this.getSourceName(item.sourceId)))}</span>
-                        <span class="version-item-name">${MediaUtils.escapeHtml(item.name)}</span>
+                        <span class="version-item-name">${MediaUtils.escapeHtml(MediaUtils.cleanReleaseName(item.name))}</span>
                     </button>
                 `).join('')}
             </div>

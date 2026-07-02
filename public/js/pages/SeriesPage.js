@@ -1174,7 +1174,7 @@ class SeriesPage {
         const isFav = group.items.some(i => this.favoriteIds.has(`${i.sourceId}:${i.series_id}`));
         const started = this.isGroupStarted(group.items);
         const versionCount = group.items.length;
-        const displayName = (this.groupDuplicates && series.tmdb?.title) ? series.tmdb.title : series.name;
+        const displayName = (this.groupDuplicates && series.tmdb?.title) ? series.tmdb.title : MediaUtils.cleanReleaseName(series.name);
         const groupBroken = group.items.every(item => this.isBrokenItem(item));
         const languageBadge = MediaUtils.versionLanguageBadge(series, this.getPreferences());
 
@@ -1397,7 +1397,7 @@ class SeriesPage {
         if (!modal || !body) return;
 
         const ordered = MediaUtils.orderVersionsByPreference(group.items, this.getPreferences());
-        title.textContent = group.representative.tmdb?.title || group.representative.name;
+        title.textContent = group.representative.tmdb?.title || MediaUtils.cleanReleaseName(group.representative.name);
 
         body.innerHTML = `
             <p class="hint" style="margin-bottom: 8px;">Choose a version to open:</p>
@@ -1428,7 +1428,7 @@ class SeriesPage {
     }
 
     getSeriesDisplayTitle(series = this.currentSeries) {
-        return series?.tmdb?.title || series?.tmdb?.name || series?.name || 'Series';
+        return series?.tmdb?.title || series?.tmdb?.name || MediaUtils.cleanReleaseName(series?.name || '') || 'Series';
     }
 
     getSeriesPoster(series = this.currentSeries) {
