@@ -1910,6 +1910,13 @@ class SeriesPage {
         if (idx < 0) return;                 // ended episode isn't in this open series
         const nextEl = all[idx + 1];
         if (!nextEl) return;                 // last episode — nothing to autoplay
+        // The native "À suivre" overlay already ran its own countdown/choice:
+        // chain straight into the next episode, no second prompt.
+        if (detail.immediate) {
+            this.cancelNextEpisodePrompt();
+            this.playEpisode(nextEl);
+            return;
+        }
         this.promptNextEpisode(nextEl);
     }
 
@@ -1981,6 +1988,22 @@ class SeriesPage {
         // Episode duration ("00:42:10") as timeline fallback
         const durationText = episodeEl.querySelector('.episode-duration')?.textContent;
         const durationHint = (h?.duration) || MediaUtils.parseDurationToSeconds(durationText);
+        // Follower label for the native player's end-of-stream "À suivre" overlay
+        // (season boundaries included: the flat episode list is in play order).
+        let nextEpisodeLabel = null;
+        const flatEpisodes = this.seasonsContainer
+            ? [...this.seasonsContainer.querySelectorAll('.episode-item')] : [];
+        const flatIdx = flatEpisodes.indexOf(episodeEl);
+        const nextEpisodeEl = flatIdx >= 0 ? flatEpisodes[flatIdx + 1] : null;
+        if (nextEpisodeEl) {
+            const nTitle = nextEpisodeEl.querySelector('.episode-title')?.textContent || '';
+            const nNum = nextEpisodeEl.dataset.episodeNum
+                || nextEpisodeEl.querySelector('.episode-number')?.textContent?.replace('E', '') || '';
+            const nSeason = nextEpisodeEl.dataset.season
+                || nextEpisodeEl.closest('.season-group')?.querySelector('.season-name')?.textContent?.match(/Season (\d+)/)?.[1]
+                || seasonNum;
+            nextEpisodeLabel = `S${nSeason} E${nNum}${nTitle ? ' - ' + nTitle : ''}`;
+        }
         const content = {
             type: 'series',
             id: episodeId,
@@ -2008,7 +2031,8 @@ class SeriesPage {
                 || this.currentSeriesInfo?.original_language || null,
             // Precomputed ordered per-track language map (when the series was crawled) so
             // the player labels every audio track with ZERO playback probe — same as movies.
-            audioTracks: this.currentSeries?.audioTracks || this.currentSeries?.audio_tracks || null
+            audioTracks: this.currentSeries?.audioTracks || this.currentSeries?.audio_tracks || null,
+            nextEpisodeLabel
         };
 
         // Open the player immediately, then resolve the stream URL into the shell.
