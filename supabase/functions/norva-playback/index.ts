@@ -1211,27 +1211,36 @@ async function resolvePlaybackTarget(
 //   3. the historical direct call — kept for gateway-down / not-configured.
 // Calls stay strictly sequential inside a probe tick (concurrency 1) — same single-connection
 // discipline as before, just from an IP the panel accepts.
-async function resolveSeriesEpisodeUrl(sourceId: string, seriesId: string, userId: string, db: SupabaseClient): Promise<string | null> {
+// emptySeries=true only when the GATEWAY returned an authoritative series-info payload (an `info`
+// object — Xtream auth errors carry `user_info`, not `info`) that contains no episode: the série is
+// an empty shell on the panel, a deterministic negative the caller may mark probed (180d window).
+// Never inferred from the direct path (Ninja/Ferran feed junk to datacenter IPs) nor from the cache
+// (could be stale) — a transient failure must stay indistinguishable from "retry next tick".
+async function resolveSeriesEpisode(sourceId: string, seriesId: string, userId: string, db: SupabaseClient): Promise<{ url: string | null; emptySeries: boolean }> {
+  const miss = { url: null, emptySeries: false };
   const cfg = await loadSourceConfig(sourceId, userId, db).catch(() => null);
-  if (!cfg) return null;
+  if (!cfg) return miss;
   const serverUrl = stringOr((cfg as JsonRecord).serverUrl, "");
   const username = stringOr((cfg as JsonRecord).username, "");
   const password = stringOr((cfg as JsonRecord).password, "");
-  if (!serverUrl || !username || !password) return null;
+  if (!serverUrl || !username || !password) return miss;
   let base: string;
-  try { base = normalizeBaseUrl(serverUrl); } catch { return null; }
+  try { base = normalizeBaseUrl(serverUrl); } catch { return miss; }
 
-  // episodes is keyed by season number; pick the first episode of the lowest season.
+  // episodes is keyed by season number ({"1":[...]}), but some panels return a plain array
+  // (of season arrays or flat episode objects) — accept all three shapes; pick the first episode.
   const episodeUrlFrom = (info: JsonRecord | null): string | null => {
-    const episodes = recordOrEmpty(info?.episodes);
-    for (const sk of Object.keys(episodes).sort((a, b) => Number(a) - Number(b))) {
-      const list = (episodes as JsonRecord)[sk];
-      if (Array.isArray(list) && list.length) {
-        const ep = recordOrEmpty(list[0]);
-        const epId = stringOr(ep.id, "");
-        const container = stringOr(ep.container_extension, "mp4");
-        if (epId) return xtreamStreamUrl({ serverUrl, username, password, streamType: "series", streamId: epId, container });
-      }
+    const raw = info?.episodes;
+    const groups: unknown[] = Array.isArray(raw)
+      ? raw
+      : isRecord(raw)
+        ? Object.keys(raw).sort((a, b) => Number(a) - Number(b)).map((k) => (raw as JsonRecord)[k])
+        : [];
+    for (const group of groups) {
+      const ep = recordOrEmpty(Array.isArray(group) ? group[0] : group);
+      const epId = stringOr(ep.id, "");
+      const container = stringOr(ep.container_extension, "mp4");
+      if (epId) return xtreamStreamUrl({ serverUrl, username, password, streamType: "series", streamId: epId, container });
     }
     return null;
   };
@@ -1242,7 +1251,7 @@ async function resolveSeriesEpisodeUrl(sourceId: string, seriesId: string, userI
     const { data: row } = await db.from("cloud_series_info_cache")
       .select("payload").eq("server_host", host).eq("series_id", seriesId).maybeSingle();
     const cached = episodeUrlFrom(recordOrEmpty((row as JsonRecord | null)?.payload));
-    if (cached) return cached;
+    if (cached) return { url: cached, emptySeries: false };
   } catch (_) { /* cache unavailable → fall through */ }
 
   // 2) Media gateway (residential IP): the only path Ninja/Ferran accept.
@@ -1259,8 +1268,12 @@ async function resolveSeriesEpisodeUrl(sourceId: string, seriesId: string, userI
           body: JSON.stringify({ serverUrl, username, password, seriesId, userAgent: "VLC/3.0.20 LibVLC/3.0.20" }),
         });
         if (resp.ok) {
-          const viaGateway = episodeUrlFrom(recordOrEmpty(await resp.json().catch(() => null)));
-          if (viaGateway) return viaGateway;
+          const body = recordOrEmpty(await resp.json().catch(() => null));
+          const viaGateway = episodeUrlFrom(body);
+          if (viaGateway) return { url: viaGateway, emptySeries: false };
+          // Authoritative fiche with no episode → empty shell; skip the direct call (same
+          // panel would give the same answer — one provider hit saved).
+          if (isRecord(body.info)) return { url: null, emptySeries: true };
         }
       } finally { clearTimeout(timer); }
     }
@@ -1269,8 +1282,12 @@ async function resolveSeriesEpisodeUrl(sourceId: string, seriesId: string, userI
   // 3) Historical direct call (works on panels that tolerate datacenter IPs).
   const api = `${base}/player_api.php?username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}&action=get_series_info&series_id=${encodeURIComponent(seriesId)}`;
   const res = await fetch(api, { headers: { "user-agent": "NorvaCloud/1.0", accept: "application/json" } }).catch(() => null);
-  if (!res || !res.ok) return null;
-  return episodeUrlFrom((await res.json().catch(() => null)) as JsonRecord | null);
+  if (!res || !res.ok) return miss;
+  return { url: episodeUrlFrom((await res.json().catch(() => null)) as JsonRecord | null), emptySeries: false };
+}
+
+async function resolveSeriesEpisodeUrl(sourceId: string, seriesId: string, userId: string, db: SupabaseClient): Promise<string | null> {
+  return (await resolveSeriesEpisode(sourceId, seriesId, userId, db)).url;
 }
 
 async function createRelayAccess(
@@ -3271,7 +3288,7 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
 
   let updated = 0;
   const debug = stringOr(body.debug, "") === "1";
-  const diag = { noVariant: 0, noTarget: 0, relayNotOk: 0, relayEmpty: 0, noLang: 0, exception: 0 };
+  const diag = { noVariant: 0, noTarget: 0, emptySeries: 0, relayNotOk: 0, relayEmpty: 0, noLang: 0, exception: 0 };
   let sample: JsonRecord | null = null;
   const lastId = String(titles[titles.length - 1].id);
 
@@ -3296,13 +3313,27 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
       // Series have no directly-streamable id (provider 406s on a series id) — resolve a
       // representative episode first. A series' audio is consistent across episodes.
       let targetUrl: string | null;
+      let seriesEmpty = false;
       if (variantItemType === "series") {
-        targetUrl = await resolveSeriesEpisodeUrl(sourceId, externalId, userId, db).catch(() => null);
+        const resolved = await resolveSeriesEpisode(sourceId, externalId, userId, db).catch(() => ({ url: null, emptySeries: false }));
+        targetUrl = resolved.url;
+        seriesEmpty = resolved.emptySeries;
       } else {
         const target = await resolvePlaybackTarget(sourceId, variantItemType, externalId, userId, db).catch(() => null);
         targetUrl = target?.targetUrl ?? null;
       }
-      if (!targetUrl) { diag.noTarget++; return; }
+      if (!targetUrl) {
+        // Empty shell confirmed by the panel (fiche with zero episode): a deterministic
+        // negative — mark probed (audio + subtitles, mirroring relayEmpty) so the crawl
+        // advances instead of re-resolving the same episode-less séries every tick.
+        if (seriesEmpty) {
+          diag.emptySeries++;
+          await markProbed(mode === "probe" ? { subtitle_tracks: [], subtitle_probed_at: new Date().toISOString() } : {});
+        } else {
+          diag.noTarget++;
+        }
+        return;
+      }
 
       const payload = JSON.stringify({ v: 1, sid: "audio-backfill", uid: userId, url: targetUrl, exp: Math.floor(Date.now() / 1000) + 120 });
       const signature = await hmacBase64Url(runtimeConfig.relayTokenSecret, payload);
