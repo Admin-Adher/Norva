@@ -134,3 +134,25 @@ Fix (norva-playback) — cascade de résolution d'épisode :
 Discipline mono-connexion inchangée (appels strictement séquentiels, concurrency 1). Débloque
 ~48 700 séries structurellement insondables. À noter : « à l'arrêt » sur KING365/Opplex séries
 reste NORMAL (design films-d'abord sur slot unique ; reprise auto par fallthrough).
+
+**Second fix révélé par le test live (PR #62)** : sur Airysat, les 13 candidats `noTarget`
+résiduels étaient la cascade qui fonctionnait — la fiche du panel (gateway, mise en cache par le
+prewarm de test : payload `info`+`seasons`, zéro clé `episodes`) contient **aucun épisode**. Des
+coquilles vides côté provider. Or `noTarget` ne posait jamais `audio_probed_at` → re-résolution
+éternelle à chaque tick, et sur le chemin per-source (RPC sans curseur) elles occupent la tête de
+file en permanence — risque de blocage total de la progression si les N premiers candidats d'un
+panel sont vides. Fix :
+- `resolveSeriesEpisode` retourne `{url, emptySeries}` ; `emptySeries=true` UNIQUEMENT sur un 200
+  gateway portant un objet `info` sans épisode (autoritaire — les erreurs d'auth Xtream portent
+  `user_info`). Jamais inféré du chemin direct (Ninja/Ferran y renvoient du junk) ni du cache
+  (peut être périmé) : un échec transitoire reste un retry.
+- Coquille vide → `markProbed` audio **+ sous-titres** (miroir du précédent `relayEmpty`),
+  fenêtre 180 j pour re-vérifier ; compteur `diag.emptySeries` ; appel direct sauté quand le
+  gateway a répondu (1 hit provider économisé).
+- `episodeUrlFrom` durci : accepte `episodes` en objet clé-saison, tableau de saisons ou tableau
+  plat (les formes tableau étaient lues « vide » → auraient été mal marquées 180 j).
+
+**Preuve live (Airysat)** : tick avant fix `noTarget:13` ; après déploiement
+`{"emptySeries":13, "noTarget":0}` puis `audio_backfill_candidates → 0` — file séries **drainée à
+100 %** (333 sondées + 13 coquilles marquées). Preuve définitive Ninja/Ferran : demain matin,
+`Sondé 24h > 0` sur leurs lignes séries après les crons nuit (0-5 UTC).
