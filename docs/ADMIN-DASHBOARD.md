@@ -47,7 +47,10 @@ films/séries/variants sur des centaines de milliers de titres, par source) dép
   (`overview`, `sources`, `coverage`, `cron`) + `refreshed_at`.
 - **`refresh_admin_dashboard()`** (SECURITY DEFINER, `set local statement_timeout = '180s'`) calcule les
   4 blobs et upsert la ligne. Le `180s` n'est possible que parce que la fonction tourne en definer.
-- **pg_cron `admin-dashboard-refresh`** (`*/5 * * * *`) rappelle la fonction toutes les 5 minutes.
+- **pg_cron `admin-dashboard-refresh`** (`2-57/10 * * * *`) rappelle la fonction toutes les 10 minutes
+  (décalé de +2 min pour éviter les minutes :00/:30 où 8-10 jobs partent ensemble). Réécrite en CTE
+  une-passe (audit crons 2026-07-02) : ~31-37 s → **~8 s** par run, `work_mem 64MB` local (fin des
+  spills disque ~218 Mo/run).
 - Les RPCs Ops (`admin_overview`/`admin_sources`/`admin_enrichment_coverage`/`admin_cron_health`) ne
   font que **lire le blob** correspondant depuis la ligne cachée → réponse instantanée, jamais de timeout.
 
@@ -275,7 +278,7 @@ provider ajouté, dernier sync).
 | `…130000_admin_user_detail_volatile.sql` | hotfix : `admin_user_detail` VOLATILE (SET interdit en STABLE) |
 | `…140000_admin_crm_relational.sql` | tables notes/tags/client_tags/events + RPCs CRM (read + mutations) |
 
-**Objets DB** : `is_admin()`, `refresh_admin_dashboard()`, `admin_overview/_sources/_enrichment_coverage/_cron_health`, `admin_users_page(…)`, `admin_user_detail(uuid)`, `admin_client_crm(uuid)`, `admin_note_add/_note_delete/_tag_create/_tag_toggle`, tables `admin_dashboard_cache`, `admin_audit_log`, `admin_enrichment_accounts`, `admin_notes`, `admin_tags`, `admin_client_tags`, `admin_events`. Cron `admin-dashboard-refresh` (`*/5 * * * *`).
+**Objets DB** : `is_admin()`, `refresh_admin_dashboard()`, `admin_overview/_sources/_enrichment_coverage/_cron_health`, `admin_users_page(…)`, `admin_user_detail(uuid)`, `admin_client_crm(uuid)`, `admin_note_add/_note_delete/_tag_create/_tag_toggle`, tables `admin_dashboard_cache`, `admin_audit_log`, `admin_enrichment_accounts`, `admin_notes`, `admin_tags`, `admin_client_tags`, `admin_events`. Cron `admin-dashboard-refresh` (`2-57/10 * * * *`). Rétention historique cron : `norva-cron-history-prune` (7 j, hebdo).
 
 **Edge** : route `/admin/resync/{sourceId}` dans `supabase/functions/norva-source-sync/index.ts`.
 
@@ -307,7 +310,7 @@ provider ajouté, dernier sync).
 ## 9. Historique des correctifs notables
 
 - **`admin_sources: 500` (57014)** : timeout 8 s sur agrégations par source → **résolu** par le cache
-  précalculé + cron 5 min.
+  précalculé + cron 10 min.
 - **« 1 échec cron 24 h » fantôme** : le metric comptait `status <> 'succeeded'` (attrapait
   running/starting) → passé à `status = 'failed'`.
 - **AtlasPro « sync incomplète » faux positif** : provider live-only (0 VOD) → détecteur restreint aux
