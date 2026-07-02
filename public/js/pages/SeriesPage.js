@@ -1178,9 +1178,11 @@ class SeriesPage {
         const groupBroken = group.items.every(item => this.isBrokenItem(item));
         const languageBadge = MediaUtils.versionLanguageBadge(series, this.getPreferences());
 
+        const srcset = MediaUtils.tmdbSrcset(poster);
         card.innerHTML = `
             <div class="series-poster">
                 <img src="${MediaUtils.escapeHtml(poster)}" alt="${MediaUtils.escapeHtml(displayName)}"
+                     ${srcset ? `srcset="${MediaUtils.escapeHtml(srcset)}" sizes="(max-width: 640px) 45vw, 190px"` : ''}
                      onerror="this.onerror=null;this.src='/img/norva-media-placeholder.png'" loading="lazy" decoding="async">
                 <div class="series-play-overlay">
                     <span class="play-icon">${Icons.play}</span>
@@ -1213,6 +1215,26 @@ class SeriesPage {
             } else {
                 this.openGroup(group);
             }
+        });
+
+        // Hover preview (desktop): bigger art + instant Play (featured episode) / Details.
+        card.__norvaHover = () => ({
+            title: displayName,
+            meta: [year, series.tmdb?.number_of_seasons ? `${series.tmdb.number_of_seasons} seasons` : '',
+                series.rating ? `★ ${series.rating}` : ''].filter(Boolean).join(' · '),
+            poster,
+            backdrop: MediaUtils.safeImageUrl(this.getSeriesBackdrop(series), '') || null,
+            onPlay: () => {
+                this.openGroup(group);
+                let tries = 0;
+                const tick = () => {
+                    const btn = document.querySelector('#series-details:not(.hidden) #series-primary-action');
+                    if (btn && !btn.disabled) { btn.click(); return; }
+                    if (++tries < 16) setTimeout(tick, 250);
+                };
+                setTimeout(tick, 200);
+            },
+            onDetails: () => this.openGroup(group)
         });
 
         return card;
@@ -1662,6 +1684,7 @@ class SeriesPage {
         document.getElementById('series-plot').textContent = series.tmdb?.overview || series.plot || 'No summary available yet.';
         this.syncDetailFavoriteButton();
         this.renderMoreLikeThis(series);
+        this.renderFicheExtras(series);
 
         this.seasonsContainer.innerHTML = '<div class="loading"><div class="loading-spinner"></div></div>';
         if (this.primaryActionBtn) {
@@ -1842,6 +1865,47 @@ class SeriesPage {
         }
 
         return { friendly, detail };
+    }
+
+    // Live TMDB extras on the fiche: trailer button + cast/creator credits.
+    // Fire-and-forget with a token so a stale fetch never paints a newer fiche.
+    async renderFicheExtras(series) {
+        const token = (this._ficheExtrasToken = (this._ficheExtrasToken || 0) + 1);
+        this.detailsPanel?.querySelector('.detail-credits')?.remove();
+        this.detailsPanel?.querySelector('.detail-trailer-btn')?.remove();
+        const tmdbId = series?.provider_tmdb_id || series?.providerTmdbId
+            || series?.tmdb_id || series?.tmdb?.id || series?.metadata?.providerTmdbId;
+        if (!tmdbId || /^(tt)?0+$/i.test(String(tmdbId)) || !window.NorvaCloud?.media?.tmdbMeta) return;
+        try {
+            const meta = await NorvaCloud.media.tmdbMeta({ type: 'series', tmdbId: String(tmdbId) });
+            if (token !== this._ficheExtrasToken || !meta?.available) return;
+
+            const plotEl = document.getElementById('series-plot');
+            const people = [];
+            const castNames = (meta.cast || []).slice(0, 6).map(c => c.name).filter(Boolean);
+            if (castNames.length) people.push(`<span class="detail-credits-label">Cast</span> ${MediaUtils.escapeHtml(castNames.join(', '))}`);
+            const makers = (meta.creators || []).length ? meta.creators : (meta.directors || []);
+            if (makers.length) people.push(`<span class="detail-credits-label">Created by</span> ${MediaUtils.escapeHtml(makers.join(', '))}`);
+            if (people.length && plotEl) {
+                const credits = document.createElement('div');
+                credits.className = 'detail-credits';
+                credits.innerHTML = people.map(p => `<div class="detail-credits-row">${p}</div>`).join('');
+                plotEl.insertAdjacentElement('afterend', credits);
+            }
+
+            if (meta.trailerKey) {
+                const actions = this.detailsPanel?.querySelector('.series-detail-actions');
+                if (actions && !actions.querySelector('.detail-trailer-btn')) {
+                    const btn = document.createElement('button');
+                    btn.type = 'button';
+                    btn.className = 'btn btn-ghost detail-trailer-btn';
+                    btn.innerHTML = '▶ Trailer';
+                    btn.addEventListener('click', () =>
+                        MediaUtils.openTrailerLightbox(meta.trailerKey, this.getSeriesDisplayTitle(series)));
+                    actions.appendChild(btn);
+                }
+            }
+        } catch (_) { /* extras are progressive enhancement */ }
     }
 
     // "More like this": a genre-matched rail at the bottom of the series fiche so the

@@ -1212,9 +1212,11 @@ class MoviesPage {
         const groupBroken = group.items.every(item => this.isBrokenItem(item));
         const languageBadge = MediaUtils.versionLanguageBadge(movie, this.getPreferences());
 
+        const srcset = MediaUtils.tmdbSrcset(poster);
         card.innerHTML = `
             <div class="movie-poster">
                 <img src="${MediaUtils.escapeHtml(poster)}" alt="${MediaUtils.escapeHtml(displayName)}"
+                     ${srcset ? `srcset="${MediaUtils.escapeHtml(srcset)}" sizes="(max-width: 640px) 45vw, 190px"` : ''}
                      onerror="this.onerror=null;this.src='/img/norva-media-placeholder.png'" loading="lazy" decoding="async">
                 <div class="movie-play-overlay">
                     <span class="play-icon">${Icons.play}</span>
@@ -1248,6 +1250,26 @@ class MoviesPage {
             } else {
                 this.openGroup(group);
             }
+        });
+
+        // Hover preview (desktop): bigger art + instant Play / Details.
+        card.__norvaHover = () => ({
+            title: displayName,
+            meta: [year, movie.tmdb?.runtime ? `${movie.tmdb.runtime} min` : '', movie.rating ? `★ ${movie.rating}` : '']
+                .filter(Boolean).join(' · '),
+            poster,
+            backdrop: MediaUtils.safeImageUrl(this.getMovieBackdrop(movie), '') || null,
+            onPlay: () => {
+                this.openGroup(group);
+                let tries = 0;
+                const tick = () => {
+                    const btn = document.querySelector('#movie-details:not(.hidden) #movie-primary-action');
+                    if (btn && !btn.disabled) { btn.click(); return; }
+                    if (++tries < 12) setTimeout(tick, 250);
+                };
+                setTimeout(tick, 150);
+            },
+            onDetails: () => this.openGroup(group)
         });
 
         return card;
@@ -1699,12 +1721,53 @@ class MoviesPage {
         this.syncDownloadButton();
         this.renderMovieVersions(movie);
         this.renderMoreLikeThis(movie);
+        this.renderFicheExtras(displayMovie);
 
         if (focusVersions) {
             setTimeout(() => {
                 this.detailsPanel?.querySelector('.movie-versions-section')?.scrollIntoView({ block: 'start' });
             }, 50);
         }
+    }
+
+    // Live TMDB extras on the fiche: trailer button + cast/director credits.
+    // Fire-and-forget with a token so a stale fetch never paints a newer fiche.
+    async renderFicheExtras(displayMovie) {
+        const token = (this._ficheExtrasToken = (this._ficheExtrasToken || 0) + 1);
+        this.detailsPanel?.querySelector('.detail-credits')?.remove();
+        this.detailsPanel?.querySelector('.detail-trailer-btn')?.remove();
+        const tmdbId = displayMovie?.provider_tmdb_id || displayMovie?.providerTmdbId
+            || displayMovie?.tmdb_id || displayMovie?.tmdb?.id || displayMovie?.metadata?.providerTmdbId;
+        if (!tmdbId || /^(tt)?0+$/i.test(String(tmdbId)) || !window.NorvaCloud?.media?.tmdbMeta) return;
+        try {
+            const meta = await NorvaCloud.media.tmdbMeta({ type: 'movie', tmdbId: String(tmdbId) });
+            if (token !== this._ficheExtrasToken || !meta?.available) return;
+
+            const plotEl = document.getElementById('movie-detail-plot');
+            const people = [];
+            const castNames = (meta.cast || []).slice(0, 6).map(c => c.name).filter(Boolean);
+            if (castNames.length) people.push(`<span class="detail-credits-label">Cast</span> ${MediaUtils.escapeHtml(castNames.join(', '))}`);
+            if ((meta.directors || []).length) people.push(`<span class="detail-credits-label">Director</span> ${MediaUtils.escapeHtml(meta.directors.join(', '))}`);
+            if (people.length && plotEl) {
+                const credits = document.createElement('div');
+                credits.className = 'detail-credits';
+                credits.innerHTML = people.map(p => `<div class="detail-credits-row">${p}</div>`).join('');
+                plotEl.insertAdjacentElement('afterend', credits);
+            }
+
+            if (meta.trailerKey) {
+                const actions = this.detailsPanel?.querySelector('.movie-detail-actions');
+                if (actions && !actions.querySelector('.detail-trailer-btn')) {
+                    const btn = document.createElement('button');
+                    btn.type = 'button';
+                    btn.className = 'btn btn-ghost detail-trailer-btn';
+                    btn.innerHTML = '▶ Trailer';
+                    btn.addEventListener('click', () =>
+                        MediaUtils.openTrailerLightbox(meta.trailerKey, this.getMovieDisplayTitle(displayMovie)));
+                    actions.appendChild(btn);
+                }
+            }
+        } catch (_) { /* extras are progressive enhancement */ }
     }
 
     // "More like this": a genre-matched rail at the bottom of the fiche so the user
