@@ -1787,7 +1787,18 @@ function isProjectionMissing(error: unknown) {
   return record.code === "42P01" || String(record.message || "").includes("cloud_title");
 }
 
+// Short-TTL memo (cron audit, Lot 3): the enrichment sweeps call this PER TITLE via
+// resolvePlaybackTarget/resolveSeriesEpisodeUrl — 1 PostgREST round-trip + 1 AES-GCM decrypt per
+// probed title (~45k/day) for a config that changes only when the user edits credentials. 60s TTL
+// covers a whole tick (25 sequential lookups → 1); the same runtimeConfigCache pattern as above.
+// Config edits propagate within ≤60s — enrichment tolerates that; playback paths were already
+// per-request. Errors/misses are NOT cached (a 404 keeps its original semantics).
+const sourceConfigCache = new Map<string, { value: JsonRecord; expiresAt: number }>();
+
 async function loadSourceConfig(sourceId: string, userId: string, db: SupabaseClient) {
+  const cacheKey = `${userId}:${sourceId}`;
+  const cached = sourceConfigCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) return cached.value;
   const { data: source, error } = await db
     .from("cloud_sources")
     .select("config_ciphertext")
@@ -1796,7 +1807,12 @@ async function loadSourceConfig(sourceId: string, userId: string, db: SupabaseCl
     .maybeSingle();
   if (error) throwDb(error, "Unable to load source config");
   if (!source?.config_ciphertext) throw new HttpError(404, "Source config not found");
-  return decryptSourceConfig(source.config_ciphertext, await getRuntimeConfig(db));
+  const value = await decryptSourceConfig(source.config_ciphertext, await getRuntimeConfig(db));
+  sourceConfigCache.set(cacheKey, { value, expiresAt: Date.now() + 60_000 });
+  if (sourceConfigCache.size > 500) {                 // bound the isolate's memory (multi-tenant)
+    for (const [k, v] of sourceConfigCache) { if (v.expiresAt <= Date.now()) sourceConfigCache.delete(k); }
+  }
+  return value;
 }
 
 async function assertOwnedSource(id: string, userId: string, db: SupabaseClient) {
