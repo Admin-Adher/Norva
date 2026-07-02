@@ -241,7 +241,7 @@ const RAW_PROVIDER_RETRY_DELAYS_MS = [1500, 5000, 9000, 9000, 9000, 9000, 9000, 
 const FFMPEG_USER_AGENT = process.env.FFMPEG_USER_AGENT ||
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36 Norva/1.0';
 const MAX_LOG_TAIL = 12000;
-const GATEWAY_VERSION = 60;
+const GATEWAY_VERSION = 61;
 // Browser playback fetches HLS playlists/segments cross-origin, so these must
 // list every Norva web origin or the browser blocks the response (CORS). Keep
 // in sync with the relay's ALLOWED_ORIGINS (services/norva-relay/wrangler.jsonc).
@@ -919,6 +919,80 @@ function extractAudioWav(url, ua, trackIndex, startOffset, dur, timeoutMs = 30_0
     });
 }
 
+// V2 chunked pipeline: segment the extraction into CHUNK_SEC WAV files (-f segment) so whisper
+// can start on chunk 1 while ffmpeg is still downloading the rest — total wall time becomes
+// max(extraction, whisper) + one chunk instead of extraction + whisper, partial subtitles reach
+// the player minutes after the real start, and a whisper hang/kill costs ONE chunk instead of
+// the whole film (the two 43-min SIGKILL burns of 2026-07-02 were exactly that).
+const TRANSCRIBE_CHUNK_SEC = clampInt(process.env.TRANSCRIBE_CHUNK_SEC, 300, 60, 1800);
+// Per-chunk whisper budget: a 300s chunk transcribes in ~30-60s (RTF 0.1-0.2); 5 min is a hang,
+// not a slow run. Deliberately NOT whisperBudgetMs (its 20-min floor would defeat the bounding).
+const CHUNK_WHISPER_TIMEOUT_MS = clampInt(process.env.CHUNK_WHISPER_TIMEOUT_MS, 300_000, 60_000, 1_800_000);
+
+// Segmenting variant of extractAudioWav: same input/resilience flags, but writes
+// dir/chunk-%04d.wav pieces of chunkSec each (-reset_timestamps 1 → every chunk starts at 0;
+// audio-only segmentation is sample-accurate, so chunk N covers exactly [N*chunkSec, …)).
+// Resolves { ok, error } when ffmpeg exits; chunk files appear in `dir` as they complete.
+function extractAudioWavChunks(url, ua, trackIndex, timeoutMs, proxyKey, chunkSec, dir) {
+    return new Promise((resolve) => {
+        const args = [
+            '-y', '-hide_banner', '-loglevel', 'error', '-nostdin',
+            '-reconnect', '1', '-reconnect_streamed', '1',
+            '-reconnect_delay_max', '5',
+            '-rw_timeout', '15000000',
+            '-headers', 'Accept: */*\r\nConnection: keep-alive\r\n',
+            '-user_agent', ua,
+            '-probesize', '2000000', '-analyzeduration', '3000000',
+            '-i', url,
+            '-map', `0:${trackIndex}`,
+            '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le',
+            '-f', 'segment', '-segment_time', String(chunkSec), '-reset_timestamps', '1',
+            path.join(dir, 'chunk-%04d.wav'),
+        ];
+        let child;
+        try { child = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'ignore', 'pipe'], env: proxyEnvFor(proxyKey || proxyKeyFromUrl(url)) }); }
+        catch (e) { return resolve({ ok: false, error: 'spawn failed: ' + String((e && e.message) || e) }); }
+        let stderr = '';
+        let timedOut = false;
+        const timer = setTimeout(() => { timedOut = true; try { child.kill('SIGKILL'); } catch (_) {} }, timeoutMs);
+        child.stderr.on('data', (d) => { stderr += d.toString(); });
+        child.on('error', (e) => { clearTimeout(timer); resolve({ ok: false, error: 'ffmpeg error: ' + String((e && e.message) || e) }); });
+        child.on('close', (code) => {
+            clearTimeout(timer);
+            const tail = redactCreds(stderr.trim().split('\n').filter(Boolean).pop() || 'no stderr');
+            if (code !== 0) {
+                console.warn(`[media-gateway] chunked-extract ffmpeg exit ${code}: ${redactCreds(stderr.slice(-300))}`);
+                return resolve({ ok: false, error: timedOut ? `extract timeout after ${Math.round(timeoutMs / 1000)}s: ${tail}` : `ffmpeg exit ${code}: ${tail}` });
+            }
+            resolve({ ok: true });
+        });
+    });
+}
+
+// Shift every cue of a (chunk) VTT by offsetSec and return the cue BLOCKS (header dropped) —
+// the stitcher joins blocks from all chunks and runs cleanVtt for cross-chunk dedup. Only the
+// timing line is rewritten, so cue text containing time-like strings is safe.
+function shiftVttBlocks(vtt, offsetSec) {
+    const out = [];
+    const blocks = String(vtt || '').replace(/\r/g, '').trim().split(/\n\s*\n/);
+    for (const block of blocks) {
+        const lines = block.trim().split('\n');
+        const ti = lines.findIndex((l) => l.includes('-->'));
+        if (ti === -1) continue;
+        lines[ti] = lines[ti].replace(/(?:\d{1,2}:)?\d{2}:\d{2}\.\d{3}/g, (ts) => {
+            const parts = ts.split(':');
+            let sec = 0;
+            if (parts.length === 3) sec = Number(parts[0]) * 3600 + Number(parts[1]) * 60 + Number.parseFloat(parts[2]);
+            else sec = Number(parts[0]) * 60 + Number.parseFloat(parts[1]);
+            sec = Math.max(0, sec + offsetSec);
+            const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec - h * 3600 - m * 60;
+            return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${s.toFixed(3).padStart(6, '0')}`;
+        });
+        out.push(lines.join('\n'));
+    }
+    return out;
+}
+
 // Run whisper.cpp on a WAV: auto-detect language + transcribe. Resolves { text, lang, prob };
 // best-effort (empties on failure). `lang`/`prob` are parsed from whisper's own LID line.
 function runWhisperDetect(wavPath) {
@@ -1180,27 +1254,34 @@ async function runTranscribeJob(job) {
     let wavPath = null, payload;
     try {
         postJobHeartbeat(job, 'extracting');
-        let ex = { ok: false, error: 'not attempted' };
-        for (let attempt = 0; attempt <= AUDIO_EXTRACT_RETRIES; attempt++) {
-            // Account lock per ATTEMPT: the 30/60s backoff sleeps must not hold the slot.
-            ex = await withAccountJobLock(accountJobKey(uid, url), () =>
-                extractAudioWav(url, ua, index, start, dur, AUDIO_EXTRACT_TIMEOUT_MS, uid)); // dur 0 = whole track
-            if (ex.ok) break;
-            if (/\b(401|403)\b|Unauthorized|Forbidden/i.test(ex.error || '')) break; // abuse/auth block — do not hammer
-            if (attempt < AUDIO_EXTRACT_RETRIES) await sleep(AUDIO_EXTRACT_BACKOFF_MS * (attempt + 1)); // 30s, 60s — spaced, not a burst
-        }
-        if (!ex.ok) {
-            payload = { jobId, ok: false, error: ('Audio extraction failed: ' + ex.error).slice(0, 300) };
+        if (dur === 0) {
+            // Whole-film production path → CHUNKED pipeline (extraction and whisper overlap,
+            // partial VTT streams to the edge as chunks land).
+            payload = await runChunkedTranscription(job);
         } else {
-            wavPath = ex.path;
-            postJobHeartbeat(job, 'transcribing');
-            let audioSec = 0;
-            try { audioSec = Math.round((await fsp.stat(wavPath)).size / (16000 * 2)); } catch (_) { audioSec = 0; }
-            const w = await runWhisperVtt(wavPath, '', whisperBudgetMs(audioSec));
-            const segments = (w.vtt.match(/-->/g) || []).length;
-            payload = w.vtt
-                ? { jobId, ok: true, vtt: w.vtt, sourceLang: w.lang, audioSec, segments }
-                : { jobId, ok: false, error: ('Transcription produced no output: ' + (w.failReason || 'unknown')).slice(0, 300) };
+            // Clip/benchmark path (dur>0): single-shot, unchanged.
+            let ex = { ok: false, error: 'not attempted' };
+            for (let attempt = 0; attempt <= AUDIO_EXTRACT_RETRIES; attempt++) {
+                // Account lock per ATTEMPT: the 30/60s backoff sleeps must not hold the slot.
+                ex = await withAccountJobLock(accountJobKey(uid, url), () =>
+                    extractAudioWav(url, ua, index, start, dur, AUDIO_EXTRACT_TIMEOUT_MS, uid));
+                if (ex.ok) break;
+                if (/\b(401|403)\b|Unauthorized|Forbidden/i.test(ex.error || '')) break; // abuse/auth block — do not hammer
+                if (attempt < AUDIO_EXTRACT_RETRIES) await sleep(AUDIO_EXTRACT_BACKOFF_MS * (attempt + 1)); // 30s, 60s — spaced, not a burst
+            }
+            if (!ex.ok) {
+                payload = { jobId, ok: false, error: ('Audio extraction failed: ' + ex.error).slice(0, 300) };
+            } else {
+                wavPath = ex.path;
+                postJobHeartbeat(job, 'transcribing');
+                let audioSec = 0;
+                try { audioSec = Math.round((await fsp.stat(wavPath)).size / (16000 * 2)); } catch (_) { audioSec = 0; }
+                const w = await runWhisperVtt(wavPath, '', whisperBudgetMs(audioSec));
+                const segments = (w.vtt.match(/-->/g) || []).length;
+                payload = w.vtt
+                    ? { jobId, ok: true, vtt: w.vtt, sourceLang: w.lang, audioSec, segments }
+                    : { jobId, ok: false, error: ('Transcription produced no output: ' + (w.failReason || 'unknown')).slice(0, 300) };
+            }
         }
     } catch (e) {
         payload = { jobId, ok: false, error: redactCreds(String((e && e.message) || e)).slice(0, 300) };
@@ -1213,6 +1294,103 @@ async function runTranscribeJob(job) {
             signal: AbortSignal.timeout(30000),
         });
     } catch (e) { console.warn('[media-gateway] transcribe callback failed', jobId, String((e && e.message) || e)); }
+}
+
+// V2 chunked whole-film transcription: extraction segments into CHUNK_SEC WAVs while whisper
+// consumes them concurrently (the account lock is held by the EXTRACTION only — whisper is pure
+// CPU). Chunk 0 auto-detects the language, later chunks force it (consistency + no per-chunk LID
+// drift). Each finished chunk re-stitches the full VTT (cue timestamps shifted by its offset,
+// cleanVtt for cross-chunk dedup) and posts a PARTIAL callback → the player shows cues minutes
+// after the real start. A whisper hang/kill costs one chunk (counted as a gap), not the film.
+// Extraction retries only when ZERO chunks were produced (an instant slot refusal); a mid-film
+// cut fails honestly rather than re-downloading everything.
+async function runChunkedTranscription(job) {
+    const { url, ua, index, jobId, callbackUrl, uid = '' } = job;
+    const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'norva-chunks-'));
+    const chunkRe = /^chunk-(\d{4})\.wav$/;
+    let extractionSettled = false;
+    let extractionResult = { ok: false, error: 'not started' };
+    try {
+        // Extraction under the account lock for its WHOLE lifetime (the provider connection).
+        const extractionDone = withAccountJobLock(accountJobKey(uid, url), async () => {
+            let ex = { ok: false, error: 'not attempted' };
+            for (let attempt = 0; attempt <= AUDIO_EXTRACT_RETRIES; attempt++) {
+                ex = await extractAudioWavChunks(url, ua, index, AUDIO_EXTRACT_TIMEOUT_MS, uid, TRANSCRIBE_CHUNK_SEC, dir);
+                if (ex.ok) break;
+                if (/\b(401|403)\b|Unauthorized|Forbidden/i.test(ex.error || '')) break; // abuse/auth block
+                let produced = 0;
+                try { produced = (await fsp.readdir(dir)).filter((f) => chunkRe.test(f)).length; } catch (_) { produced = 0; }
+                if (produced > 0) break; // mid-film cut: don't re-download the whole file
+                if (attempt < AUDIO_EXTRACT_RETRIES) await sleep(AUDIO_EXTRACT_BACKOFF_MS * (attempt + 1));
+            }
+            return ex;
+        }).then((r) => { extractionSettled = true; extractionResult = r; return r; });
+
+        // Consumer: transcribe chunks as they complete (chunk N is complete when N+1 exists or
+        // the extraction has exited).
+        const blocks = [];
+        let lang = '';
+        let chunksDone = 0, gaps = 0, totalAudioSec = 0, announcedTranscribing = false;
+        for (let idx = 0; ; idx++) {
+            const name = `chunk-${String(idx).padStart(4, '0')}.wav`;
+            const p = path.join(dir, name);
+            // Wait until this chunk is complete (or extraction settled without producing it).
+            for (;;) {
+                const files = await fsp.readdir(dir).catch(() => []);
+                const has = files.includes(name);
+                const hasNext = files.includes(`chunk-${String(idx + 1).padStart(4, '0')}.wav`);
+                if (has && (hasNext || extractionSettled)) break;
+                if (!has && extractionSettled) break;
+                await sleep(1500);
+            }
+            const exists = (await fsp.readdir(dir).catch(() => [])).includes(name);
+            if (!exists) break; // no more chunks
+            if (!announcedTranscribing) { announcedTranscribing = true; postJobHeartbeat(job, 'transcribing'); }
+            try { totalAudioSec += (await fsp.stat(p)).size / (16000 * 2); } catch (_) { /* best-effort */ }
+            const w = await runWhisperVtt(p, lang, CHUNK_WHISPER_TIMEOUT_MS);
+            fsp.unlink(p).catch(() => {});
+            if (w.vtt) {
+                if (!lang && w.lang) lang = w.lang; // chunk 0 detects, the rest are forced
+                blocks.push(...shiftVttBlocks(w.vtt, idx * TRANSCRIBE_CHUNK_SEC));
+                chunksDone++;
+                // Partial delivery: re-stitch + dedup, stream to the edge (player picks it up on
+                // its next poll). Chunks land ~45s+ apart — no extra throttling needed.
+                try {
+                    const partialVtt = cleanVtt('WEBVTT\n\n' + blocks.join('\n\n'));
+                    const partialSegs = (partialVtt.match(/-->/g) || []).length;
+                    await fetch(callbackUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${GATEWAY_TOKEN}` },
+                        body: JSON.stringify({ jobId, partial: true, vtt: partialVtt, sourceLang: lang || null, segments: partialSegs }),
+                        signal: AbortSignal.timeout(15000),
+                    });
+                } catch (_) { /* partials are best-effort */ }
+            } else {
+                gaps++; // one lost chunk, not a lost film
+                console.warn(`[media-gateway] chunk ${idx} of job ${jobId} produced no VTT: ${w.failReason || 'unknown'}`);
+            }
+        }
+
+        const ex = await extractionDone;
+        const audioSec = Math.round(totalAudioSec);
+        if (!ex.ok && chunksDone === 0) {
+            return { jobId, ok: false, error: ('Audio extraction failed: ' + ex.error).slice(0, 300) };
+        }
+        if (!ex.ok) {
+            return { jobId, ok: false, error: (`Extraction died mid-film after ${chunksDone} chunk(s): ` + ex.error).slice(0, 300) };
+        }
+        if (!chunksDone) {
+            return { jobId, ok: false, error: 'Transcription produced no output: every chunk failed or the film has no audio' };
+        }
+        if (gaps > chunksDone) {
+            return { jobId, ok: false, error: `Transcription too degraded: whisper failed on ${gaps}/${gaps + chunksDone} chunks` };
+        }
+        const finalVtt = cleanVtt('WEBVTT\n\n' + blocks.join('\n\n'));
+        const segments = (finalVtt.match(/-->/g) || []).length;
+        return { jobId, ok: true, vtt: finalVtt, sourceLang: lang || null, audioSec, segments };
+    } finally {
+        fsp.rm(dir, { recursive: true, force: true }).catch(() => {});
+    }
 }
 
 // Phase 3b translation queue — a SEPARATE lane from transcription. Translation is pure CPU on a
