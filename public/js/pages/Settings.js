@@ -90,7 +90,8 @@ class SettingsPage {
         // Support tickets: dedicated page (open a ticket, see replies) — replies
         // also arrive by email, and the CRM tracks the whole thread.
         document.getElementById('settings-support-btn')?.addEventListener('click', () => {
-            window.location.href = '/support.html';
+            const returnTo = window.location.pathname + window.location.search + '#settings';
+            window.location.href = '/support.html?returnTo=' + encodeURIComponent(returnTo);
         });
 
         // Account deletion uses the dedicated page (session-aware, typed

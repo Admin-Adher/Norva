@@ -344,7 +344,8 @@
           modal.appendChild(el('p', null, 'Tell us what went wrong and we’ll help — most issues are sorted within a day. ' + keepNote));
           const row = actionsRow();
           const mail = el('a', 'btn', 'Contact support');
-          mail.setAttribute('href', '/support.html?subject=' + encodeURIComponent('Issue before cancelling'));
+          mail.setAttribute('href', '/support.html?subject=' + encodeURIComponent('Issue before cancelling') +
+            '&returnTo=' + encodeURIComponent('/subscription.html'));
           row.appendChild(mail);
           row.appendChild(cancelNowButton());
           modal.appendChild(row);
