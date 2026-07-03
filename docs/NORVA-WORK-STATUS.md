@@ -5,6 +5,23 @@ l'activer. Mis à jour au fil des sessions.
 
 ---
 
+## 🗓️ MISE À JOUR 2026-07-03 — Cast Chromecast (Lot A) ⏳ sur branche
+
+**Sur `claude/webm-block-additions-error-pj16xm`, pas encore mergé `main`.** Quick-wins UX du
+sender Google Cast web (Default Media Receiver), sans récepteur custom :
+- **Annuler ≠ erreur** (`requestSession` `cancel` normalisé, silencieux, lecture locale reprise) ;
+- **sous-titres au cast** (Track VTT : sidecar `sub_<index>.vtt` embarqué, ou IA en `data:` URI ;
+  retry-sans-piste → ne casse jamais la lecture) ;
+- **garde-fou formats** (mkv/ts/HEVC/legacy → transcode gateway au lieu d'échec opaque) ;
+- **progression sauvée pendant le cast** (10 s + flush `pagehide` → Continue Watching à jour) ;
+- **barre enrichie** (seek scrubbable + temps, ±10 s, play/pause, épisode suivant même session, stop) ;
+- **bouton dans la barre de contrôle**, visible dès découverte d'un device (fin du trou de 4 s).
+
+Reste **Lot B** (récepteur CAF custom : branding TV, rendu sous-titres/audio, file d'épisodes) +
+cast depuis les fiches, AirPlay iOS, cast live. Détail complet : **`CAST-CHROMECAST.md`**.
+
+---
+
 ## 🗓️ MISE À JOUR 2026-07-01 — session (identités, notifications, sécurité, release Android)
 
 Tout ci-dessous est **livré et déployé sur `main`** sauf mention contraire. Détails dans les docs dédiées.
