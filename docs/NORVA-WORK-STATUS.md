@@ -36,6 +36,27 @@ qu'avec la build de l'étape 2. Détail : `CAST-CHROMECAST.md`.
 
 ---
 
+## 🗓️ MISE À JOUR 2026-07-03 — Rail de paiement Stancer (web) ✅ mergé + déployé, INERT
+
+Tunnel de paiement web **Stancer** conçu, construit, **validé E2E en mode test**, déployé (PR #79,
+merge `f9ed115`). **Détail complet : `docs/PAYMENTS-STATUS.md`** (+ conception `STANCER-BILLING.md`).
+
+- **Déployé** : `norva-stancer` (checkout), `norva-stancer-webhook` (re-fetch + capture token),
+  `norva-stancer-billing` (cron débit — jobid **82**, `23 * * * *`, actif). Migration
+  `20260703170000` appliquée live (tables `cloud_stancer_*` + `provider='stancer'`).
+- **Web** : `billing.js` chemin Stancer + `subscribe.html` ; `billing-config.stancer.enabled=false`.
+- **Modèle** : essai 7 j **Option B** (auto 0,50 € `capture:false` → tokenise, empreinte minimale) →
+  débit du vrai montant à J+7 via le token (`POST /v1/checkout/`). PCI SAQ-A (page hébergée).
+- **E2E validé** : checkout → token → essai → cron débite 4,99 € (`response 00`) → `active`.
+  5 bugs trouvés & corrigés (order_id/unique_id ≤36, GET pluriel, plan_code/provider contraints).
+- **INERT** en prod : rien ne prélève tant que `stancer.enabled`/flags non basculés + clé reste `test`.
+
+**Interrupteurs go-live restants** : `STANCER_WEBHOOK_TOKEN` + URL webhook Stancer ;
+`stancer.enabled=true` ; `NORVA_LIFECYCLE_BILLING_LIVE=true` ; clé `sprod_` + `NORVA_STANCER_MODE=live` ;
+sortie du mode `legacy` + `enforce`. Checklist : `docs/PAYMENTS-STATUS.md` §9.
+
+---
+
 ## 🗓️ MISE À JOUR 2026-07-03 — Lot « onboarding » ✅ mergé + déployé (PR #78)
 
 Audit d'onboarding (`docs/audits/ONBOARDING-CONVERSION-AUDIT.md`, V1) → 7 chantiers livrés
