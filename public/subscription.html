@@ -59,7 +59,7 @@
   <script src="/js/cloudApi.js"></script>
   <script src="/js/authApi.js"></script>
   <script src="/js/billing-config.js?v=4"></script>
-  <script src="/js/billing.js?v=3"></script>
+  <script src="/js/billing.js?v=4"></script>
   <script>
     // Return from a Stancer hosted checkout: finalize it (capture the tokenized card + start the
     // trial) with no webhook needed, then reload cleanly so the page renders the new trial state.
@@ -78,7 +78,11 @@
   <script>
     (function () {
       const params = new URLSearchParams(location.search);
-      const returnTo = params.get('returnTo') || '/app#home';
+      // Only trust a same-site path for the "Back" button (guards against an open
+      // redirect if returnTo were ever tampered with, and against landing on the
+      // marketing site instead of the app).
+      function safeLocalPath(v) { return (typeof v === 'string' && /^\/(?!\/)/.test(v)) ? v : '/app#home'; }
+      const returnTo = safeLocalPath(params.get('returnTo'));
       const content = document.getElementById('content');
       const storeNote = document.getElementById('store-note');
       const SUB_STATUSES = ['trialing', 'active', 'cancelled_at_period_end', 'past_due', 'grace'];

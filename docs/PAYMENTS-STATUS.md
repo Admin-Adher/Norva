@@ -4,14 +4,21 @@
 > `STANCER-BILLING.md` ; ce document dit **où on en est**, ce qui est **déployé/testé**, et la
 > marche à suivre pour **passer live**.
 >
-> **Dernière mise à jour : 2026-07-03.**
+> **Dernière mise à jour : 2026-07-03 (soir — go-live test + validation navigateur réelle).**
 
 ## 0. En une phrase
 
-Le **rail de paiement web = Stancer** est **codé, testé end-to-end en mode test, déployé en prod, et
-INERT** (rien ne prélève tant que les interrupteurs ne sont pas basculés). Architecture multi-rail :
+Le **rail de paiement web = Stancer** est **codé, validé de bout en bout dans un vrai navigateur en
+mode test, activé et déployé en prod** — et **INERT côté argent** (clé `stest_`, aucun prélèvement
+réel tant que la clé prod + les interrupteurs ne sont pas basculés). Architecture multi-rail :
 **web = Stancer**, **Android mobile/TV = Google Play Billing**, **consolidation =
 `cloud_entitlement_projection`** (source de vérité unique, déjà en place).
+
+> **Validation réelle 2026-07-03** : parcours complet exécuté depuis le navigateur — `subscribe.html`
+> → page hébergée Stancer (empreinte **0,50 € EUR**) → carte `4000…0077` → retour `/confirm` →
+> **essai `trialing` posé en base** (`provider=stancer, plan_code=plus, trial_ends_at=+7j,
+> card_token stocké`) ; débit récurrent **USD** re-vérifié via sonde (`/v1/checkout` → `response 00`,
+> `to_capture`). Voir le journal détaillé au **§11**.
 
 ## 1. Modèle (rappel)
 
@@ -156,8 +163,72 @@ litiges, remboursements). À brancher plus tard si besoin (voir §6). Son emplac
 pas dans « Développeurs » du dashboard Stancer (clés d'API only) — regarder « Mon Compte » ou
 demander au support Stancer. **Non bloquant pour le lancement.**
 
-> À valider au 1ᵉʳ vrai test checkout : le retour `?stancer=done` → `/confirm` pose bien `trialing`
-> (logique identique au sim E2E, chemin user-auth standard).
+> ✅ **Validé le 2026-07-03** au 1ᵉʳ vrai test navigateur : le retour `?stancer=done` → `/confirm`
+> pose bien `trialing` (voir §11).
+
+## 11. Journal go-live & validation navigateur (2026-07-03)
+
+Chronologie de la mise en service et **de chaque bug trouvé au test réel + sa correction**. Chaque
+ligne = une PR mergée sur `main` (déploie front + edge). À conserver comme mémoire du lot.
+
+### 11.1 Demandes traitées (lot « checkout & go-live »)
+- **Page légale → anglais** (`mentions-legales.html`) — Norva est full english. PR #81.
+- **Réassurance checkout** — encart « No charge today… 0,50 € released… never debited », affiché
+  uniquement sur le chemin **web Stancer** (le Play Billing natif n'a pas d'empreinte). PR #81, ajusté €.
+- **Devise USD** pour les prélèvements + symbole `$` sur tous les prix (subscribe/landing/index),
+  reçu en `$`, défaut de colonne `cloud_stancer_payments.currency='usd'` (migr. `20260703180000`). PR #81.
+- **Activation** `billing-config.stancer.enabled=true` (+ cache-busters). PR #81.
+- **Page hébergée Stancer** : **pas** brandable à 100 % en mode redirect (logo + nom du compte).
+
+### 11.2 Bugs trouvés au test navigateur réel & corrections
+1. **`Failed to fetch` au clic « Subscribe »** → CORS. `billing.js` envoie l'en-tête `apikey`, mais
+   `norva-stancer` n'autorisait que `authorization, content-type`. Le preflight était rejeté avant
+   d'atteindre la fonction. **Fix** : `Access-Control-Allow-Headers: authorization, x-client-info,
+   apikey, content-type` (aligné sur norva-cloud/playback/catalog). PR #82. *(L'E2E côté serveur ne
+   déclenche jamais de preflight → jamais vu avant.)*
+2. **`Card payment paym_… is not ready for authorization`** sur la page Stancer (le formulaire carte
+   ne s'affiche pas). Fausse piste : `auth:true` → **422 `extra fields not permitted`** sur
+   `/v2/payment_intents/` (`auth` n'existe que sur l'ancienne API `/v2/payments`). Ce champ cassait
+   la création du paiement (« Could not start checkout »). **Reverté**. PR #83 (tentative) → #84 (revert).
+3. **Vraie cause du #2 = la devise.** Matrice de test (`/selftest {cases:[…]}` + tests hébergés
+   manuels A/B) : **EUR `capture:false` OK**, **USD `capture:true` OK**, **USD `capture:false` →
+   « not ready for authorization »**. ⇒ **l'autorisation seule (`capture:false`) en USD n'est pas
+   activée sur le compte Stancer** ; les captures USD marchent. **Pont** : empreinte de validation
+   **0,50 € EUR** (`capture:false`) + prélèvements plan **USD**. Débit token USD re-vérifié via sonde
+   `/selftest {charge:{pi,currency:"usd"}}` → `response 00`, `to_capture`. PR #85. **Action owner** :
+   demander au support Stancer l'activation des **autorisations USD**, puis repasser l'empreinte en
+   `usd` (1 ligne dans `norva-stancer/checkout`).
+4. **Settings → « Norva Access » figé sur « Full access »** (n'affichait pas l'état réel). Le
+   `decision` porte pourtant le vrai `status`/`plan_code`/`projection` même en mode `observe`. **Fix** :
+   `accessLabel`/`accessHint` affichent Trial / Active / Ending soon / Payment due / Payment retrying /
+   Plan expired + dates ; « Full access » gardé seulement s'il n'y a **pas** d'abonnement réel. PR #86.
+5. **`subscription.html` (retour) affichait le message générique** « Paid plans aren't switched on »
+   malgré l'essai réel. Court-circuit observe-mode déplacé **après** la vérif d'un abonnement réel.
+   PR #87.
+6. **« Back to Norva » renvoyait dans l'app-home (perçu « norva.tv ») au lieu de Settings**, +
+   **`Settings.js` chargé en `?v=12` par le vrai fichier app servi**. Découverte : `/app` sert
+   `public/app/index.html` (et `/app.html` **308-redirige** vers `/app`) — donc le bump précédent sur
+   `app.html` ne touchait pas les users. **Fix** : (a) `returnTo` **propagé** subscribe.html →
+   `billing.js` → edge `/checkout` (validé same-site, anti open-redirect) → `return_url` → page de
+   retour → bouton « Back » revient à l'origine (Settings) ; (b) cache-buster `Settings.js` bumpé sur
+   **`app/index.html` (v12→v31)** — le fichier réellement servi ; billing.js v3→v4. PR #88.
+
+### 11.3 Preuve de bout en bout (en base, mode test)
+`cloud_entitlement_projection` pour le compte de test après le vrai checkout :
+`status=trialing · provider=stancer · plan_code=plus · trial_ends_at=2026-07-10 · card_token=card_…adM7 ·
+plan=plus · period=monthly · amount_cents=499`. Sonde débit : `POST /v1/checkout {currency:"usd",
+amount:100}` → `response 00`, `status to_capture`, `fee 16`.
+
+### 11.4 Détail mineur connu
+- `card_last4` **non stocké** au `/confirm` (Stancer a renvoyé la carte en *string* `card_…`, sans
+  `last4`, via `GET /v2/payment_intents/`). Cosmétique, non affiché. Enrichissable plus tard (fetch
+  carte dédié) si on veut afficher « •••• 0077 ».
+
+### 11.5 Deux fichiers d'app en parallèle (dette repérée)
+`public/app.html` **et** `public/app/index.html` coexistent ; **seul `app/index.html` est servi**
+(`/app.html` → 308 → `/app`). Leurs numéros de version de scripts ont divergé (ex. `Settings.js`
+était en v30 sur `app.html` mais v12 sur `app/index.html`). **À rationaliser** un jour (supprimer le
+doublon ou générer l'un depuis l'autre) pour éviter de bumper le mauvais fichier.
 
 ## Voir aussi
 
