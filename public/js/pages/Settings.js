@@ -73,13 +73,15 @@ class SettingsPage {
 
         document.getElementById('settings-manage-plan-btn')?.addEventListener('click', () => {
             const returnTo = window.location.pathname + window.location.search + '#settings';
-            // A live subscription → the management screen (details, cancel/update
-            // via Play or the billing portal); otherwise → the plan picker. Both
-            // web and native are store-allowed for in-app management/purchase
-            // (only external web payment links are not).
+            // A real membership → the management screen (status, cancel, update
+            // payment); otherwise → the plan picker. Routed on the REAL status —
+            // the membership exists in the decision even while billing is only
+            // observed, so gating this on `enforced` would wrongly send a trialing
+            // user to the plan picker. Both web and native are store-allowed for
+            // in-app management/purchase (only external payment links are not).
             const ent = this.app?.entitlement || window.NorvaEntitlement;
-            const st = String(ent?.status || '');
-            const hasSub = ent?.enforced === true &&
+            const st = String(ent?.status || '').toLowerCase();
+            const hasSub =
                 ['active', 'trialing', 'cancelled_at_period_end', 'past_due', 'grace'].indexOf(st) !== -1;
             const dest = hasSub ? '/subscription.html' : '/subscribe.html';
             window.location.href = dest + '?returnTo=' + encodeURIComponent(returnTo);
