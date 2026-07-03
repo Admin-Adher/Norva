@@ -93,6 +93,24 @@
     } catch (_) { return {}; }
   }
 
+  // Read-only billing profile for display (plan/period/amount + card last4/exp).
+  // Returns null when not signed in, not enabled, or nothing on file.
+  async function stancerProfile() {
+    if (!isStancerEnabled()) return null;
+    const cfg = CONFIG.stancer || {};
+    const base = ((window.NorvaAuth && NorvaAuth.supabaseUrl) || 'https://oupsceccxsonaalhueff.supabase.co').replace(/\/+$/, '');
+    const apikey = (window.NorvaAuth && NorvaAuth.publishableKey) || '';
+    const token = await sessionToken();
+    if (!token) return null;
+    try {
+      const res = await fetch(base + (cfg.profileUrl || '/functions/v1/norva-stancer/profile'), {
+        headers: { 'apikey': apikey, 'Authorization': 'Bearer ' + token },
+      });
+      const data = await res.json().catch(function () { return {}; });
+      return (data && data.profile) || null;
+    } catch (_) { return null; }
+  }
+
   function err(message, code, data) {
     return Object.assign(new Error(message), { code: code || 'error', data: data });
   }
@@ -226,6 +244,7 @@
     isWebBillingConfigured: isWebBillingConfigured,
     isStancerEnabled: isStancerEnabled,
     confirmStancer: confirmStancer,
+    stancerProfile: stancerProfile,
     purchase: purchase,
     restore: restore,
     login: login,

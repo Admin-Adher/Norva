@@ -59,7 +59,7 @@
   <script src="/js/cloudApi.js"></script>
   <script src="/js/authApi.js"></script>
   <script src="/js/billing-config.js?v=4"></script>
-  <script src="/js/billing.js?v=4"></script>
+  <script src="/js/billing.js?v=5"></script>
   <script>
     // Return from a Stancer hosted checkout: finalize it (capture the tokenized card + start the
     // trial) with no webhook needed, then reload cleanly so the page renders the new trial state.
@@ -166,6 +166,24 @@
         return b;
       }
 
+      // Async, cosmetic: once the Stancer billing profile loads, slot a
+      // "Payment method — •••• 1234" row into the card's details (web rail only).
+      function appendPaymentMethod(card, decision) {
+        try {
+          const provider = String((decision.projection || {}).provider || '');
+          if (provider !== 'stancer' || isNative()) return;
+          if (!(window.NorvaBilling && window.NorvaBilling.stancerProfile)) return;
+          window.NorvaBilling.stancerProfile().then(function (p) {
+            if (!p || !p.card_last4) return;
+            const d = el('div', 'detail');
+            d.appendChild(el('span', null, 'Payment method'));
+            d.appendChild(el('b', null, '•••• ' + p.card_last4 + (p.card_exp ? ' · exp ' + p.card_exp : '')));
+            const msg = card.querySelector('.msg');
+            if (msg) card.insertBefore(d, msg); else card.appendChild(d);
+          }).catch(function () { /* cosmetic only */ });
+        } catch (_) { /* cosmetic only */ }
+      }
+
       function detailRows(decision) {
         const proj = decision.projection || {};
         const frag = document.createDocumentFragment();
@@ -235,6 +253,7 @@
           card.appendChild(detailRows(decision));
           card.appendChild(el('p', 'msg warn', "We couldn't take your last payment. Update your payment method to keep watching — your access stays on during a short grace period."));
           content.appendChild(card);
+          appendPaymentMethod(card, decision);
           const row = el('div', 'actions');
           const mb = manageButton(isNative() ? 'Update on Google Play' : 'Update payment', true);
           if (mb) row.appendChild(mb);
@@ -282,6 +301,8 @@
           content.appendChild(row);
           return;
         }
+
+        appendPaymentMethod(card, decision);
 
         // Actions for trialing / active / cancelled.
         const row = el('div', 'actions');

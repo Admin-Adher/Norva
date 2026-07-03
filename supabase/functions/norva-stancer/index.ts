@@ -79,6 +79,20 @@ async function fetchPI(piId: string): Promise<Record<string, unknown> | null> {
   return await res.json().catch(() => null);
 }
 
+// Fetch a card object — the payment_intent often returns the card as a bare
+// "card_…" string, so this recovers last4/expiry. Best-effort, display-only.
+async function fetchCard(cardId: string): Promise<{ last4?: string; exp?: string } | null> {
+  const res = await fetch(`${STANCER_API}/v1/cards/${encodeURIComponent(cardId)}`, { headers: { Authorization: basicAuth() } });
+  if (!res.ok) return null;
+  const c = await res.json().catch(() => null) as Record<string, unknown> | null;
+  if (!c) return null;
+  const last4 = c.last4 ? String(c.last4) : undefined;
+  const exp = (c.exp_month && c.exp_year)
+    ? `${String(c.exp_month).padStart(2, "0")}/${String(c.exp_year).slice(-2)}`
+    : undefined;
+  return { last4, exp };
+}
+
 // The card comes back as a string ("card_…") or an object {id,last4,…}.
 function cardFrom(card: unknown): { id: string; last4?: string } | null {
   if (!card) return null;
@@ -216,6 +230,18 @@ Deno.serve(async (req) => {
     return json({ ok: true, url: String(pi.body.url), pi_id: String(pi.body.id) });
   }
 
+  // ── /profile — user-authed: read-only billing profile for display (plan + card) ──
+  if (req.method === "GET" && path === "/profile") {
+    const jwt = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
+    if (!jwt) return json({ error: "Not signed in" }, 401);
+    const { data: u } = await db.auth.getUser(jwt);
+    const user = u?.user;
+    if (!user?.id) return json({ error: "Not signed in" }, 401);
+    const { data: row } = await db.from("cloud_stancer_customers")
+      .select("plan,period,amount_cents,card_last4,card_exp").eq("user_id", user.id).maybeSingle();
+    return json({ ok: true, profile: row ?? null });
+  }
+
   // ── /confirm — user-authed: finalize a completed checkout (no webhook needed) ──
   // The return page (/subscription.html?stancer=done) calls this. Re-fetches the payment_intent,
   // captures the tokenized card, and moves the projection to a Stancer trial. Idempotent and safe:
@@ -251,9 +277,18 @@ Deno.serve(async (req) => {
     const nowIso = new Date().toISOString();
     const plan = String(meta.plan ?? "plus") === "family" ? "family" : "plus";
     const custId = pi.customer ? String(pi.customer) : undefined;
+    // Display enrichment: the PI usually returns the card as a bare token string, so
+    // recover last4/expiry from the card object ("•••• 0077" in the subscription UI).
+    let last4 = card.last4;
+    let cardExp: string | undefined;
+    if (!last4) {
+      const info = await fetchCard(card.id);
+      if (info) { last4 = info.last4; cardExp = info.exp; }
+    }
     // Only touches these columns — plan/period/amount set at /checkout are preserved.
     await db.from("cloud_stancer_customers").upsert({
-      user_id: user.id, stancer_customer_id: custId, card_token: card.id, card_last4: card.last4 ?? undefined, updated_at: nowIso,
+      user_id: user.id, stancer_customer_id: custId, card_token: card.id,
+      card_last4: last4 ?? undefined, card_exp: cardExp ?? undefined, updated_at: nowIso,
     });
     await db.from("cloud_entitlement_projection").upsert({
       user_id: user.id, status: "trialing", provider: "stancer", provider_customer_id: custId,
