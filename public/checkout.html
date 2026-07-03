@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#090b10">
+  <title>Norva — Secure checkout</title>
+  <meta name="robots" content="noindex">
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #090b10; --panel: #11151d; --line: #283246; --text: #f8fafc;
+      --muted: #a8b3c7; --quiet: #6b7690; --accent: #5b7cfa; --coral: #ff8067;
+      --pink: #b579ff; --green: #34d399; --danger: #fb7185;
+    }
+    body {
+      min-height: 100vh; background: var(--bg); color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+      display: grid; place-items: center; padding: 22px;
+    }
+    .wrap { width: min(940px, 100%); }
+    .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; }
+    .brand img { width: 40px; height: 40px; border-radius: 8px; }
+    .brand span { font-size: 20px; font-weight: 800; }
+    h1 { font-size: clamp(24px, 5vw, 34px); line-height: 1.1; margin-bottom: 6px; }
+    .sub { color: var(--muted); font-size: 15px; margin-bottom: 22px; }
+    .grid { display: grid; grid-template-columns: 380px 1fr; gap: 18px; align-items: start; }
+    @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
+    .card { border: 1px solid var(--line); border-radius: 14px; padding: 22px; background: var(--panel); }
+
+    /* ── Order summary ──────────────────────────────────────────────────── */
+    .plan-name { font-family: Outfit, Inter, sans-serif; font-size: 22px; font-weight: 800; }
+    .plan-tag { color: var(--muted); font-size: 13px; margin: 2px 0 14px; }
+    .price-row { display: flex; align-items: baseline; gap: 6px; padding: 14px 0;
+      border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); margin-bottom: 14px; }
+    .price-row .amount { font-family: Outfit, Inter, sans-serif; font-size: 34px; font-weight: 800; }
+    .price-row .cur { font-size: 19px; font-weight: 700; vertical-align: super; }
+    .price-row .per { color: var(--muted); font-size: 14px; font-weight: 600; }
+    .after-trial { color: var(--quiet); font-size: 12.5px; margin: -6px 0 12px; }
+    ul.features { list-style: none; display: grid; gap: 8px; color: #cbd3e8; font-size: 13.5px; }
+    ul.features li::before { content: "✓"; color: var(--green); margin-right: 8px; font-weight: 800; }
+    .assurance { display: flex; gap: 10px; align-items: flex-start; margin-top: 16px;
+      padding: 12px 14px; border: 1px solid rgba(52,211,153,0.35); border-radius: 12px;
+      background: rgba(52,211,153,0.08); color: #dbe7ff; font-size: 12.5px; line-height: 1.55; }
+    .assurance b { color: #eafff5; }
+    .assurance-ico { font-size: 17px; line-height: 1.2; }
+
+    /* ── Payment panel ──────────────────────────────────────────────────── */
+    .pay-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+    .pay-head h2 { font-size: 16px; }
+    .secure { display: inline-flex; align-items: center; gap: 6px; color: var(--quiet); font-size: 12px; }
+    .frame-shell { position: relative; border: 1px solid var(--line); border-radius: 12px;
+      overflow: hidden; background: #0d1118; min-height: 460px; }
+    .frame-shell iframe { display: block; width: 100%; height: 520px; border: 0; background: transparent; }
+    .frame-loading { position: absolute; inset: 0; display: grid; place-items: center;
+      color: var(--muted); font-size: 14px; background: #0d1118; transition: opacity .25s; }
+    .frame-loading.hide { opacity: 0; pointer-events: none; }
+    .spinner { width: 26px; height: 26px; border: 3px solid var(--line); border-top-color: var(--pink);
+      border-radius: 50%; animation: spin 0.9s linear infinite; margin: 0 auto 12px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .pay-foot { display: flex; justify-content: space-between; align-items: center; gap: 10px;
+      margin-top: 12px; color: var(--quiet); font-size: 12px; flex-wrap: wrap; }
+    .pay-foot a { color: var(--accent); }
+    .status { margin-top: 14px; padding: 13px; border-radius: 10px; border: 1px solid var(--line);
+      background: #151b26; color: #dbe7ff; line-height: 1.5; font-size: 14px; display: none; }
+    .status.show { display: block; }
+    .status.error { border-color: rgba(251,113,133,0.5); color: #fecdd3; background: rgba(80,24,36,0.3); }
+    .btn { min-height: 46px; border: 0; border-radius: 10px; padding: 0 18px; color: #fff;
+      background: var(--accent); font: inherit; font-weight: 800; cursor: pointer;
+      display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
+    .btn.ghost { background: #242c3d; color: #dbe7ff; border: 1px solid #344158; }
+    .btn:focus-visible { outline: 3px solid var(--pink); outline-offset: 3px; }
+
+    /* ── Success state ──────────────────────────────────────────────────── */
+    .success { text-align: center; padding: 34px 22px; border: 1px solid var(--line);
+      border-radius: 14px; background: var(--panel); max-width: 520px; margin: 0 auto; display: none; }
+    .success.show { display: block; }
+    .badge-ok { display: inline-grid; place-items: center; width: 50px; height: 50px; border-radius: 50%;
+      background: rgba(52,211,153,.15); color: var(--green); font-size: 26px; margin-bottom: 12px; }
+    .success h2 { font-size: 22px; margin-bottom: 8px; }
+    .success p { color: var(--muted); font-size: 15px; line-height: 1.6; margin-bottom: 20px; }
+    .back-row { margin-top: 16px; }
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <div class="brand"><img src="/favicon.png" alt=""><span>Norva</span></div>
+
+    <div id="checkout-view">
+      <h1>Start your free trial</h1>
+      <p class="sub">7 days free on every screen — cancel anytime before the trial ends.</p>
+
+      <div class="grid">
+        <!-- Order summary -->
+        <section class="card" aria-label="Order summary">
+          <div class="plan-name" id="sum-plan">Norva</div>
+          <p class="plan-tag" id="sum-tag">Everything Norva does, on your main screens.</p>
+          <div class="price-row">
+            <span class="cur">$</span><span class="amount" id="sum-amount">4.99</span>
+            <span class="per" id="sum-per">/mo after your 7-day free trial</span>
+          </div>
+          <p class="after-trial" id="sum-after">Today: $0.00 — your plan starts only after the trial.</p>
+          <ul class="features" id="sum-features">
+            <li>2 simultaneous streams</li>
+            <li>Up to 5 profiles</li>
+            <li>Sync across Web, phone, tablet &amp; TV</li>
+            <li>Offline mode on compatible devices</li>
+            <li>Every Norva feature included</li>
+          </ul>
+          <div class="assurance">
+            <span class="assurance-ico" aria-hidden="true">🔒</span>
+            <div><b>No charge today.</b> We place a temporary <b>€0.50</b> authorization to verify your
+              card — it is <b>released right away and never debited</b>. Your first payment happens only
+              after the 7-day trial, and only if you don't cancel.</div>
+          </div>
+        </section>
+
+        <!-- Payment -->
+        <section class="card" aria-label="Payment">
+          <div class="pay-head">
+            <h2>Payment details</h2>
+            <span class="secure" title="PCI-DSS — card data never touches Norva servers">🛡️ Secured &amp; encrypted</span>
+          </div>
+          <div class="frame-shell">
+            <iframe id="pay-frame" title="Secure card form" allow="payment"></iframe>
+            <div class="frame-loading" id="frame-loading">
+              <div><div class="spinner"></div>Preparing your secure card form…</div>
+            </div>
+          </div>
+          <div class="pay-foot">
+            <span>Card processing by Stancer (EU) — Norva never sees your card number.</span>
+            <a id="fallback-link" href="#" target="_blank" rel="noopener" hidden>Trouble? Open the payment page in a new tab</a>
+          </div>
+          <div class="status" id="status"></div>
+        </section>
+      </div>
+
+      <div class="back-row"><a class="btn ghost" id="cancel-btn" href="/subscribe.html">← Back to plans</a></div>
+    </div>
+
+    <!-- Success -->
+    <div class="success" id="success-view">
+      <span class="badge-ok" aria-hidden="true">✓</span>
+      <h2>Your free trial has started</h2>
+      <p>You have full access to Norva on every screen. You won't be charged until your
+        7-day trial ends — cancel anytime before then.</p>
+      <a class="btn" id="continue-btn" href="/app#home">Continue to Norva</a>
+    </div>
+  </main>
+
+  <script src="/js/cloudApi.js"></script>
+  <script src="/js/authApi.js"></script>
+  <script src="/js/billing-config.js?v=4"></script>
+  <script src="/js/billing.js?v=6"></script>
+  <script>
+    (function () {
+      const params = new URLSearchParams(location.search);
+      function safeLocalPath(v) { return (typeof v === 'string' && /^\/(?!\/)/.test(v)) ? v : '/app#home'; }
+      const plan = params.get('plan') === 'family' ? 'family' : 'plus';
+      const period = params.get('period') === 'annual' ? 'annual' : 'monthly';
+      const returnTo = safeLocalPath(params.get('returnTo'));
+
+      const statusEl = document.getElementById('status');
+      const frame = document.getElementById('pay-frame');
+      const loading = document.getElementById('frame-loading');
+      const fallback = document.getElementById('fallback-link');
+
+      function setStatus(msg, isError) {
+        statusEl.textContent = msg;
+        statusEl.classList.toggle('error', Boolean(isError));
+        statusEl.classList.add('show');
+      }
+
+      // ── Order summary from config (display only — amounts are server-side) ──
+      const cfg = (window.NORVA_BILLING_CONFIG && NORVA_BILLING_CONFIG.stancer) || {};
+      const prices = (cfg.plans || {})[plan] || {};
+      const displayPrice = period === 'annual' ? (prices.annual || '') : (prices.monthly || '');
+      if (plan === 'family') {
+        document.getElementById('sum-plan').textContent = 'Norva Family';
+        document.getElementById('sum-tag').textContent = 'The full Norva experience for the whole home.';
+        document.getElementById('sum-features').firstElementChild.textContent = '5 simultaneous streams';
+      }
+      if (displayPrice) document.getElementById('sum-amount').textContent = displayPrice;
+      document.getElementById('sum-per').textContent =
+        (period === 'annual' ? '/yr' : '/mo') + ' after your 7-day free trial';
+      document.getElementById('cancel-btn').setAttribute('href', '/subscribe.html?returnTo=' + encodeURIComponent(returnTo));
+      document.getElementById('continue-btn').setAttribute('href', returnTo);
+
+      // ── Auth gate: checkout needs a signed-in account ─────────────────────
+      let session = null;
+      try { session = JSON.parse(localStorage.getItem('norva-cloud-session') || 'null'); } catch (_) {}
+      if (!(session && session.user && session.user.id)) {
+        location.replace('/account.html?returnTo=' + encodeURIComponent(location.pathname + location.search));
+        return;
+      }
+
+      // ── Create the payment intent and embed the Stancer card form ─────────
+      function boot() {
+        statusEl.classList.remove('show');
+        loading.classList.remove('hide');
+        window.NorvaBilling.stancerCheckoutUrl({ plan: plan, period: period, returnTo: returnTo })
+          .then(function (data) {
+            frame.src = data.url;
+            fallback.setAttribute('href', data.url);
+            fallback.hidden = false;
+            frame.addEventListener('load', function () { loading.classList.add('hide'); }, { once: true });
+            // Belt & braces: hide the skeleton even if the load event is swallowed.
+            setTimeout(function () { loading.classList.add('hide'); }, 6000);
+          })
+          .catch(function (e) {
+            loading.classList.add('hide');
+            if (e && e.code === 'not_signed_in') {
+              location.replace('/account.html?returnTo=' + encodeURIComponent(location.pathname + location.search));
+              return;
+            }
+            setStatus('Could not start the secure checkout' + (e && e.message ? ': ' + e.message : '') + ' — please retry.', true);
+            const retry = document.createElement('button');
+            retry.className = 'btn ghost';
+            retry.style.marginTop = '10px';
+            retry.textContent = 'Retry';
+            retry.addEventListener('click', function () { retry.remove(); boot(); });
+            statusEl.appendChild(document.createElement('br'));
+            statusEl.appendChild(retry);
+          });
+      }
+      boot();
+
+      // ── Completion: the bridge page (same-origin) posts back when paid ────
+      let finishing = false;
+      async function finish() {
+        if (finishing) return;
+        finishing = true;
+        loading.classList.remove('hide');
+        loading.firstElementChild.innerHTML = '<div class="spinner"></div>Confirming your trial…';
+        // /confirm re-fetches the payment server-side; retry briefly while Stancer settles.
+        let ok = false;
+        for (let i = 0; i < 5; i++) {
+          try {
+            const r = await window.NorvaBilling.confirmStancer();
+            if (r && r.status === 'trialing') { ok = true; break; }
+          } catch (_) { /* retry */ }
+          await new Promise(function (res) { setTimeout(res, 1300); });
+        }
+        document.getElementById('checkout-view').style.display = 'none';
+        const success = document.getElementById('success-view');
+        if (!ok) {
+          // Very unlikely: payment done but confirm still pending — reassure, don't alarm.
+          success.querySelector('p').textContent =
+            "Payment received — we're finalizing your trial. It will appear on your account within a minute.";
+        }
+        success.classList.add('show');
+        try { document.getElementById('continue-btn').focus(); } catch (_) {}
+      }
+      window.addEventListener('message', function (ev) {
+        if (ev.origin !== location.origin) return;
+        if (ev.data && ev.data.type === 'norva:stancer:done') finish();
+      });
+    })();
+  </script>
+</body>
+</html>
