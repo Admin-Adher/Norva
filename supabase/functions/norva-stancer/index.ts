@@ -176,7 +176,7 @@ Deno.serve(async (req) => {
     const user = u?.user;
     if (!user?.id || !user.email) return json({ error: "Not signed in" }, 401);
 
-    let payload: { plan?: string; period?: string; returnTo?: string } = {};
+    let payload: { plan?: string; period?: string; returnTo?: string; embed?: boolean } = {};
     try { payload = await req.json(); } catch (_) { /* defaults below */ }
     const plan = payload.plan === "family" ? "family" : "plus";
     const period = payload.period === "annual" ? "annual" : "monthly";
@@ -198,8 +198,13 @@ Deno.serve(async (req) => {
     // or protocol-relative URL — so this can't become an open redirect.
     const rawReturn = typeof payload.returnTo === "string" ? payload.returnTo : "";
     const safeReturn = /^\/(?!\/)/.test(rawReturn) ? rawReturn.slice(0, 512) : "";
-    const returnUrl = `${RETURN_BASE}/subscription.html?stancer=done` +
-      (safeReturn ? `&returnTo=${encodeURIComponent(safeReturn)}` : "");
+    // embed:true → the checkout runs inside checkout.html (Stancer form in an iframe);
+    // the payment then returns to the tiny bridge page, which postMessages the parent
+    // (or, if opened top-level, forwards to the classic subscription.html?stancer=done).
+    const returnUrl = payload.embed === true
+      ? `${RETURN_BASE}/checkout-done.html${safeReturn ? `?returnTo=${encodeURIComponent(safeReturn)}` : ""}`
+      : `${RETURN_BASE}/subscription.html?stancer=done` +
+        (safeReturn ? `&returnTo=${encodeURIComponent(safeReturn)}` : "");
     // Trial setup (Option B — minimal footprint): authorize a small validation amount (€0.50) with
     // capture:false → validates + tokenizes the card, NO plan charge now. The hold auto-releases; the
     // real plan amount (from plan_code) is charged at trial end by norva-stancer-billing. `amount`

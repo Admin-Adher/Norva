@@ -53,25 +53,41 @@
     } catch (_) { return Promise.resolve(''); }
   }
 
-  // Open a Stancer checkout: ask our edge function for a hosted-page URL, then redirect.
-  // Plan/period are derived from the same opts subscribe.html already sends.
+  // Open a Stancer checkout. The web flow now stays on norva.tv: we navigate to the
+  // branded checkout page (checkout.html), which embeds the Stancer card form in an
+  // iframe. Plan/period are derived from the same opts subscribe.html already sends.
   async function stancerCheckout(opts) {
+    const token = await sessionToken();
+    if (!token) throw err('Please sign in first', 'not_signed_in');
+    const plan = opts.planCode === 'family' ? 'family' : 'plus';
+    const period = /annual/i.test(String(opts.packageId || '')) ? 'annual' : 'monthly';
+    const qs = new URLSearchParams({ plan: plan, period: period });
+    if (opts.returnTo) qs.set('returnTo', String(opts.returnTo));
+    window.location.assign('/checkout.html?' + qs.toString());
+    return { status: 'redirect' };
+  }
+
+  // Used by checkout.html: create the payment intent and return the hosted-page URL
+  // WITHOUT redirecting (embed:true → the return leg goes through checkout-done.html).
+  async function stancerCheckoutUrl(opts) {
     const cfg = CONFIG.stancer || {};
     const base = ((window.NorvaAuth && NorvaAuth.supabaseUrl) || 'https://oupsceccxsonaalhueff.supabase.co').replace(/\/+$/, '');
     const apikey = (window.NorvaAuth && NorvaAuth.publishableKey) || '';
     const token = await sessionToken();
     if (!token) throw err('Please sign in first', 'not_signed_in');
-    const plan = opts.planCode === 'family' ? 'family' : 'plus';
-    const period = /annual/i.test(String(opts.packageId || '')) ? 'annual' : 'monthly';
     const res = await fetch(base + (cfg.checkoutUrl || '/functions/v1/norva-stancer/checkout'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'apikey': apikey, 'Authorization': 'Bearer ' + token },
-      body: JSON.stringify({ plan: plan, period: period, returnTo: opts.returnTo || '' }),
+      body: JSON.stringify({
+        plan: opts.plan === 'family' ? 'family' : 'plus',
+        period: opts.period === 'annual' ? 'annual' : 'monthly',
+        returnTo: opts.returnTo || '',
+        embed: true,
+      }),
     });
     const data = await res.json().catch(function () { return {}; });
     if (!res.ok || !data.url) throw err(data.error || 'Could not start checkout', 'stancer_error', data);
-    window.location.assign(data.url); // → Stancer hosted payment page (PCI, 3DS)
-    return { status: 'redirect' };
+    return data; // { url, pi_id }
   }
 
   // Finalize a Stancer checkout on the return page (no webhook needed): the edge function re-fetches
@@ -245,6 +261,7 @@
     isStancerEnabled: isStancerEnabled,
     confirmStancer: confirmStancer,
     stancerProfile: stancerProfile,
+    stancerCheckoutUrl: stancerCheckoutUrl,
     purchase: purchase,
     restore: restore,
     login: login,
