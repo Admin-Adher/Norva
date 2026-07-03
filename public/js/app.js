@@ -1635,9 +1635,14 @@ class App {
         if (pageName === 'live' || pageName === 'watch') window.ensureHls?.();
 
         if (pageName === 'admin' && !this.pages.admin) {
-            // Lazy route: fetch + instantiate AdminPage on first entry only.
-            this.ensureAdminPage()
-                .then((page) => { if (this.currentPage === 'admin') page?.show?.(); })
+            // Lazy web-only route: re-verify the admin claim server-side BEFORE
+            // even downloading AdminPage.js; APK shells and non-admins bounce home.
+            this.checkIsAdmin()
+                .then((ok) => {
+                    if (!ok) { this.navigateTo('home'); return null; }
+                    return this.ensureAdminPage();
+                })
+                .then((page) => { if (page && this.currentPage === 'admin') page.show?.(); })
                 .catch((err) => console.error('[App] AdminPage load failed:', err));
         } else if (this.pages[pageName]?.show) {
             this.pages[pageName].show();
@@ -1692,6 +1697,9 @@ class App {
     async checkIsAdmin() {
         if (this._isAdminCached !== undefined) return this._isAdminCached;
         try {
+            // Admin is a web-only surface: the APK shells never show the entry
+            // (ops work belongs on a desktop browser, not a phone/TV WebView).
+            if (/NorvaTV-Android/i.test(navigator.userAgent || '')) { this._isAdminCached = false; return false; }
             if (!window.API?.isCloudMode?.()) { this._isAdminCached = false; return false; }
             const sbUrl = (localStorage.getItem('norva-supabase-url') || window.NORVA_SUPABASE_URL
                 || 'https://oupsceccxsonaalhueff.supabase.co').replace(/\/+$/, '');
