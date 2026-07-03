@@ -180,7 +180,7 @@
   <script src="/js/cloudApi.js"></script>
   <script src="/js/authApi.js"></script>
   <script src="/js/billing-config.js?v=4"></script>
-  <script src="/js/billing.js?v=7"></script>
+  <script src="/js/billing.js?v=8"></script>
   <script>
     (function () {
       const params = new URLSearchParams(window.location.search);
@@ -212,7 +212,9 @@
 
       // Clear "trial started" confirmation so the renewal terms are explicit
       // before the user continues — reduces surprise charges / chargebacks.
-      function showTrialConfirmation() {
+      // `result` (from NorvaBilling.purchase) tailors the copy for the one-click
+      // plan-change path — existing subscribers change plans with no card re-entry.
+      function showTrialConfirmation(result) {
         ['.grid', '.toggle', '.row'].forEach(function (sel) {
           const el = document.querySelector(sel);
           if (el) el.style.display = 'none';
@@ -222,7 +224,17 @@
         const title = document.getElementById('confirm-title');
         const msg = document.getElementById('confirm-msg');
         const cont = document.getElementById('confirm-continue');
-        if (trialEligible) {
+        const rs = result && result.status;
+        if (rs === 'plan_changed') {
+          title.textContent = 'Plan updated';
+          msg.textContent = 'Your new plan is active right away. The new price applies from your next billing cycle — nothing extra is charged today.';
+        } else if (rs === 'plan_scheduled') {
+          title.textContent = 'Plan change scheduled';
+          msg.textContent = 'Your new plan starts at your next billing cycle — you keep everything you already paid for until then.';
+        } else if (rs === 'unchanged') {
+          title.textContent = "You're already on this plan";
+          msg.textContent = 'No changes were made — your plan stays exactly as it is.';
+        } else if (trialEligible) {
           title.textContent = 'Your free trial has started';
           msg.textContent = "You have full access now and won't be charged until your 7-day trial ends. Cancel anytime before then.";
         } else {
@@ -273,14 +285,14 @@
         button.textContent = 'Opening checkout…';
         try {
           window.NorvaBilling.login(uid);
-          await window.NorvaBilling.purchase({
+          const result = await window.NorvaBilling.purchase({
             packageId: packageId,
             productId: card.dataset.product,
             planCode: card.dataset.plan,
             appUserId: uid,
             returnTo: returnTo, // Stancer web → carried through so the return page can go back here.
           });
-          showTrialConfirmation();
+          showTrialConfirmation(result);
         } catch (e) {
           if (e && e.code === 'cancelled') {
             setStatus('Checkout cancelled. You can pick a plan whenever you\'re ready.', false);

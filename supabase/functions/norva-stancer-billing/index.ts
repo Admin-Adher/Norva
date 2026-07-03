@@ -89,13 +89,16 @@ async function chargeToken(cardToken: string, customerId: string | null, amount:
 async function chargeUser(db: SupabaseClient, row: Row, kind: "first_charge" | "renewal", cycleAnchor: string | null): Promise<string> {
   // Amount + period live on the mapping row (plan_code is constrained to plus/family).
   const { data: cust } = await db.from("cloud_stancer_customers")
-    .select("stancer_customer_id,card_token,period,amount_cents").eq("user_id", row.user_id).maybeSingle();
-  const c = cust as { card_token?: string; stancer_customer_id?: string; period?: string; amount_cents?: number } | null;
+    .select("stancer_customer_id,card_token,plan,period,amount_cents").eq("user_id", row.user_id).maybeSingle();
+  const c = cust as { card_token?: string; stancer_customer_id?: string; plan?: string; period?: string; amount_cents?: number } | null;
   const cardToken = c?.card_token;
   const customerId = c?.stancer_customer_id ?? null;
   const period = c?.period === "annual" ? "annual" : "monthly";
   const amount = c?.amount_cents ?? 0;
-  const planLabel = row.plan_code === "family" ? "Norva Family" : "Norva";
+  // The mapping row carries what THIS charge is for (incl. a scheduled downgrade
+  // from /change-plan) — prefer it over the projection's possibly-stale plan_code.
+  const mappedPlan = c?.plan === "family" ? "family" : (c?.plan === "plus" ? "plus" : null);
+  const planLabel = (mappedPlan ?? row.plan_code) === "family" ? "Norva Family" : "Norva";
   if (!cardToken || !amount) {
     // No token/amount on file → cannot charge. Fail to past_due so dunning asks for a card update.
     await db.from("cloud_entitlement_projection").update({ status: "past_due", last_event_at: new Date().toISOString() }).eq("user_id", row.user_id);
@@ -114,6 +117,9 @@ async function chargeUser(db: SupabaseClient, row: Row, kind: "first_charge" | "
     const nextEnd = addPeriod(base, period);
     await db.from("cloud_entitlement_projection").update({
       status: "active", provider: "stancer", current_period_end: nextEnd,
+      // Sync the entitled plan to what was just charged — this is where a
+      // scheduled downgrade (mapping row updated by /change-plan) takes effect.
+      ...(mappedPlan ? { plan_code: mappedPlan } : {}),
       dunning_stage: 0, dunning_last_at: null, last_event_at: nowIso, last_verified_at: nowIso,
     }).eq("user_id", row.user_id);
     try { await db.from("cloud_stancer_payments").upsert({ pi_id: `charge_${uniqueId}`, user_id: row.user_id, kind, amount, currency: "usd", status: "captured", order_id: uniqueId, updated_at: nowIso }); } catch (_) { /* noop */ }
