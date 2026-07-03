@@ -29,7 +29,8 @@ Contrairement à Stripe Billing, **Stancer n'a pas d'objet « subscription/plan/
 - **Base URL** : `https://api.stancer.com`. **Auth** : HTTP Basic, la **clé API en username** (pas de
   mot de passe). Clés `sprod_xxx` (live) / `stest_xxx` (test).
 - **Créer un paiement** : `POST /v2/payment_intents/` — champs `amount` (centimes), `currency`
-  (`eur`), `customer` (`cust_xxx`, optionnel), `capture`, `methods_allowed` (`"card"`/`"sepa"`),
+  (`usd` — Stancer accepte USD, settlement EUR côté banque), `customer` (`cust_xxx`, optionnel),
+  `capture`, `methods_allowed` (`"card"`/`"sepa"`),
   `return_url`. Réponse : `id` (`pi_xxx`) + **`url`** = page hébergée
   `https://payment.stancer.com/payment_intents/pi_xxx`.
 - **Relire un paiement** : `GET /v2/payment_intent/<pi_id>` → `status`.
@@ -40,7 +41,7 @@ Contrairement à Stripe Billing, **Stancer n'a pas d'objet « subscription/plan/
 
 > ✅ **Schéma v2 CONFIRMÉ contre le sandbox test (2026-07-03, via `norva-stancer/selftest`)** :
 > - `POST /v2/customers/` `{name,email}` → `{ id: "cust_…" }`.
-> - `POST /v2/payment_intents/` `{ amount:<cents>, currency:"eur", capture, methods_allowed:["card"]
+> - `POST /v2/payment_intents/` `{ amount:<cents>, currency:"usd", capture, methods_allowed:["card"]
 >   (⚠️ un tableau, pas une string), return_url, order_id, customer, metadata, description }` →
 >   `{ id:"pi_…", url:"https://payment.stancer.com/[test_]pi_…" (page hébergée autonome, pas de clé
 >   publique requise), status:"require_payment_method", card:null (renseigné après paiement),
@@ -104,7 +105,7 @@ Réutilise `cloud_entitlement_projection` (source de vérité). Ajouts (slice ch
 | `renderReceipt` → cron | Reçu de paiement sur débit capturé | **Livré (slice C)** (dans `norva-stancer-billing`) |
 
 > ✅ **Débit du token CONFIRMÉ en test (2026-07-03)** : `POST /v1/checkout/`
-> `{ amount, currency:"eur", card:"card_…", customer:"cust_…", unique_id }` → `status:"captured"`,
+> `{ amount, currency:"usd", card:"card_…", customer:"cust_…", unique_id }` → `status:"captured"`,
 > `response:"00"`. `unique_id = "<user_id>:<cycle>"` rend le débit **idempotent** (aucun double-débit
 > si le cron rejoue). Cartes de test : `4000000000000077` (auto-capturé), `4000000000009995`
 > (fonds insuffisants), `4000000000000002` (refus). Reste à valider en E2E (slice C) : le parcours

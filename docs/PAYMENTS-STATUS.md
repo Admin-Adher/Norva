@@ -18,12 +18,18 @@ INERT** (rien ne prélève tant que les interrupteurs ne sont pas basculés). Ar
 Stancer **n'a pas d'objet abonnement natif** → Norva **orchestre lui-même l'essai et le récurrent**
 via un **token card-on-file** :
 
-- **Essai 7 j (Option B — empreinte minimale)** : au checkout, autorisation **0,50 €**
+- **Essai 7 j (Option B — empreinte minimale)** : au checkout, autorisation **0,50 $**
   (`capture:false`) sur la page hébergée → **valide + tokenise** la carte sans débiter le plan
-  (l'empreinte se libère seule). Le **vrai montant** (4,99 € / 8,99 €) est prélevé **à J+7** puis à
+  (l'empreinte se libère seule). Le **vrai montant** (4,99 $ / 8,99 $) est prélevé **à J+7** puis à
   chaque échéance par le cron, en réutilisant le token.
+- **Devise = USD** (dollar). Stancer accepte USD (settlement en EUR côté banque) — choisi comme
+  devise mondiale pour le scaling international. Le checkout hébergé, le débit récurrent et le reçu
+  sont tous en `usd`. Minimum documenté Stancer = 0,50 (EUR) ; le seuil USD est à confirmer au
+  1ᵉʳ test réel — si l'auto de 0,50 $ est refusée pour montant trop bas, relever `VALIDATION_CENTS`.
 - **PCI** : page de paiement **hébergée** Stancer → Norva ne voit jamais le numéro de carte (SAQ-A) ;
-  3DS automatique.
+  3DS automatique. La page hébergée n'est **pas** brandable à 100 % (mode redirect : logo + nom du
+  compte seulement) ; la réassurance « 0,50 $ non débité » est donc affichée sur **notre**
+  `subscribe.html` avant la redirection.
 
 ## 2. Ce qui est construit & déployé
 
@@ -42,11 +48,11 @@ via un **token card-on-file** :
 
 - Base : `https://api.stancer.com` · Auth : **HTTP Basic**, la clé API en username (`sprod_…`/`stest_…`).
 - **Créer customer** : `POST /v2/customers/` `{name,email}` → `cust_…`.
-- **Créer paiement (hébergé)** : `POST /v2/payment_intents/` `{amount(cents), currency:"eur",
+- **Créer paiement (hébergé)** : `POST /v2/payment_intents/` `{amount(cents), currency:"usd",
   capture:false, methods_allowed:["card"] (tableau !), return_url, order_id (≤36 car.), customer,
   metadata}` → `{ id:"pi_…", url:"https://payment.stancer.com/[test_]pi_…", status, card }`.
 - **Relire un paiement** : `GET /v2/payment_intents/{pi_id}` (**pluriel**).
-- **Débiter un token (récurrent)** : `POST /v1/checkout/` `{amount, currency:"eur", card:"card_…",
+- **Débiter un token (récurrent)** : `POST /v1/checkout/` `{amount, currency:"usd", card:"card_…",
   customer:"cust_…", unique_id (≤36 car.)}` → `{status:"captured"/"to_capture", response:"00"}`.
 - Statuts : `require_payment_method` → `authorized` (capture:false) → `to_capture`/`captured`.
 
@@ -64,6 +70,10 @@ Cycle complet exécuté avec de vraies ressources Stancer de test :
 GET du webhook en **pluriel** ; `card` est une **string** ; `plan_code` contraint (plan sur la
 projection, période+montant sur `cloud_stancer_customers`) ; `provider='stancer'` absent de la liste
 blanche.
+
+> ⚠️ L'E2E ci-dessus a tourné en **EUR**. Le passage en **USD** est un simple changement de champ
+> (`currency:"usd"`) sur des appels au schéma identique — à **re-confirmer** lors du test réel en
+> mode test du go-live (checklist §9).
 
 ## 5. Base de données
 
@@ -86,7 +96,9 @@ Edge function secrets (Supabase → Project Settings → Edge Functions → Secr
 Dashboard Stancer → Développeurs → Webhooks : URL =
 `https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-stancer-webhook?t=<STANCER_WEBHOOK_TOKEN>`.
 
-`public/js/billing-config.js` → `stancer.enabled` : `false` (à passer `true` au go-live).
+`public/js/billing-config.js` → `stancer.enabled` : **`true`** ✅ (le checkout web route désormais
+vers Stancer ; test/live piloté **uniquement** par la clé edge `STANCER_SECRET_KEY`). Cache-buster
+`billing-config.js?v=4` sur `subscribe.html` + `subscription.html`.
 
 ## 7. Crons
 
@@ -102,12 +114,22 @@ Dashboard Stancer → Développeurs → Webhooks : URL =
 
 ## 9. Checklist go-live
 
-1. ☐ Poser `STANCER_WEBHOOK_TOKEN` + configurer l'URL webhook dans Stancer.
-2. ☐ `billing-config.stancer.enabled = true` (+ redeploy front).
-3. ☐ `NORVA_LIFECYCLE_BILLING_LIVE = true` (allume rappel J-2 / dunning / reçus).
-4. ☐ **Test réel en mode test** : achat via `subscribe.html` → vérifier webhook + cycle complet.
-5. ☐ Bascule prod : `STANCER_SECRET_KEY = sprod_…` + `NORVA_STANCER_MODE = live`.
-6. ☐ Sortir du mode `legacy` (essai à carte) + enforcement `enforce`.
+**Ordre recommandé** — on reste en **mode test** jusqu'à la bascule (étape 5) : d'abord vérifier le
+cycle complet avec une carte de test, **puis** seulement passer la clé prod. Tant que la clé est
+`stest_…`, un vrai visiteur web verra un checkout de test (ses vraies cartes ne passeront pas) — sans
+risque financier (enforcement = `observe`, aucun paywall forcé), mais gardez la fenêtre courte.
+
+1. ☐ *(optionnel)* Poser `STANCER_WEBHOOK_TOKEN` + URL webhook — **non bloquant**, le rail est
+   auto-suffisant via `/confirm` (voir §10).
+2. ✅ `billing-config.stancer.enabled = true` — **fait** (déployé au merge du front).
+3. ☐ `NORVA_LIFECYCLE_BILLING_LIVE = true` (allume rappel J-2 / dunning / reçus) — secret edge, côté owner.
+4. ☐ **Test réel en mode test** : `subscribe.html` → carte `4000000000000077` → retour
+   `/subscription.html?stancer=done` → `/confirm` pose `trialing` ; vérifier l'auto **0,50 $** (et
+   qu'elle n'est pas rejetée pour minimum USD) + le cycle complet.
+5. ☐ Bascule prod : `STANCER_SECRET_KEY = sprod_…` + `NORVA_STANCER_MODE = live` (secrets edge, côté
+   owner — **aucun redeploy front nécessaire**, le flag `enabled` est déjà `true`).
+6. ☐ Sortir du mode `legacy` (essai à carte) + enforcement `enforce` (`NORVA_BILLING_MODE` /
+   `NORVA_ENTITLEMENTS_MODE`, secrets edge, côté owner).
 
 ## 10. Webhook OPTIONNEL — le rail est auto-suffisant (`/confirm`)
 
