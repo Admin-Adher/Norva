@@ -1106,6 +1106,32 @@ async function resolveFileTracksKey(sourceId: string, userId: string, db: Supaba
   return key || hostFromUrl(fallbackUrl);
 }
 
+// Anti-ban footprint policy for a source's provider identity. Returns null unless the identity
+// is marked low_footprint (provider_footprint_policy). When set, the audio-backfill runner routes
+// probes through the gateway's residential IP and honours the hourly budget (provider_probe_hits).
+async function getFootprint(
+  db: SupabaseClient,
+  sourceId: string,
+  userId: string,
+): Promise<{ lowFootprint: boolean; identityKey: string; allowed: boolean; maxPerHour: number | null; hits: number } | null> {
+  try {
+    const ident = await resolveSourceIdentity(sourceId, userId, db);
+    if (!ident.key) return null;
+    const { data } = await db.rpc("provider_footprint_budget", { p_identity_key: ident.key });
+    const row = (Array.isArray(data) ? data[0] : data) as JsonRecord | null;
+    if (!row || stringOr(row.mode, "standard") !== "low_footprint") return null;
+    return {
+      lowFootprint: true,
+      identityKey: ident.key,
+      allowed: row.allowed !== false,
+      maxPerHour: (row.max_probes_per_hour ?? null) as number | null,
+      hits: Number(row.hits_last_hour ?? 0),
+    };
+  } catch (_) {
+    return null;
+  }
+}
+
 async function resolvePlaybackTarget(
   sourceId: string,
   itemType: string,
@@ -3766,6 +3792,16 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
   let sample: JsonRecord | null = null;
   const lastId = String(titles[titles.length - 1].id);
 
+  // Anti-ban: for a low_footprint provider identity, probes go through the gateway's residential
+  // IP and are capped per hour. Resolved once per tick (per-panel crons set sourceId). Over budget
+  // → skip the tick entirely so the crawl stays under the provider's abuse threshold.
+  const footprint = (sourceId && mode === "probe" && runtimeConfig.mediaGatewayUrl && runtimeConfig.mediaGatewayToken)
+    ? await getFootprint(db, sourceId, userId)
+    : null;
+  if (footprint && !footprint.allowed) {
+    return { mode, updated: 0, processed: 0, deferred: "footprint_budget", identityKey: footprint.identityKey, hitsLastHour: footprint.hits, maxPerHour: footprint.maxPerHour };
+  }
+
   const processOne = async (title: JsonRecord) => {
     // Mark a title as probed (resolved or genuinely-empty) so the progression filter
     // advances past it. Only called after a SUCCESSFUL relay response — never on a
@@ -3809,18 +3845,41 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
         return;
       }
 
-      const payload = JSON.stringify({ v: 1, sid: "audio-backfill", uid: userId, url: targetUrl, exp: Math.floor(Date.now() / 1000) + 120 });
-      const signature = await hmacBase64Url(runtimeConfig.relayTokenSecret, payload);
-      const token = `${base64Url(encoder.encode(payload))}.${signature}`;
+      let info: JsonRecord | null = null;
+      let token = "";
+      if (footprint?.lowFootprint && mode === "probe") {
+        // Low-footprint provider (anti-ban): route the header-probe through the gateway's
+        // RESIDENTIAL IP instead of the Cloudflare relay, so a mono-connection anti-abuse
+        // account is seen from ONE household IP (probe + metadata + playback). Same JSON shape.
+        try {
+          const gw = await fetch(`${runtimeConfig.mediaGatewayUrl}/probe-audio`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${runtimeConfig.mediaGatewayToken}` },
+            body: JSON.stringify({ url: targetUrl, userAgent: "VLC/3.0.20 LibVLC/3.0.20" }),
+          });
+          if (!gw.ok) {
+            diag.relayNotOk++;
+            if (debug && !sample) sample = { stage: "gatewayProbeNotOk", status: gw.status, host: new URL(targetUrl).host };
+            return;
+          }
+          info = await gw.json().catch(() => null);
+        } catch (_) { diag.relayNotOk++; return; }
+        // Count the provider hit against the identity's hourly budget (observability + cap).
+        try { await db.rpc("provider_footprint_record_hit", { p_identity_key: footprint.identityKey }); } catch (_) { /* best-effort */ }
+      } else {
+        const payload = JSON.stringify({ v: 1, sid: "audio-backfill", uid: userId, url: targetUrl, exp: Math.floor(Date.now() / 1000) + 120 });
+        const signature = await hmacBase64Url(runtimeConfig.relayTokenSecret, payload);
+        token = `${base64Url(encoder.encode(payload))}.${signature}`;
 
-      const endpoint = mode === "probe" ? "probe-audio" : "vod-info";
-      const res = await fetch(`${runtimeConfig.relayBaseUrl}/${endpoint}/${token}`, { headers: { accept: "application/json" } });
-      if (!res.ok) {
-        diag.relayNotOk++;
-        if (debug && !sample) sample = { stage: "relayNotOk", status: res.status, host: new URL(targetUrl).host, body: (await res.text().catch(() => "")).slice(0, 200) };
-        return;
+        const endpoint = mode === "probe" ? "probe-audio" : "vod-info";
+        const res = await fetch(`${runtimeConfig.relayBaseUrl}/${endpoint}/${token}`, { headers: { accept: "application/json" } });
+        if (!res.ok) {
+          diag.relayNotOk++;
+          if (debug && !sample) sample = { stage: "relayNotOk", status: res.status, host: new URL(targetUrl).host, body: (await res.text().catch(() => "")).slice(0, 200) };
+          return;
+        }
+        info = await res.json().catch(() => null);
       }
-      const info = await res.json().catch(() => null);
       if (debug && !sample) {
         let relayHead: JsonRecord = {};
         try {

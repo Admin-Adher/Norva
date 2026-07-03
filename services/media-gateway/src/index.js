@@ -241,7 +241,7 @@ const RAW_PROVIDER_RETRY_DELAYS_MS = [1500, 5000, 9000, 9000, 9000, 9000, 9000, 
 const FFMPEG_USER_AGENT = process.env.FFMPEG_USER_AGENT ||
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36 Norva/1.0';
 const MAX_LOG_TAIL = 12000;
-const GATEWAY_VERSION = 62;
+const GATEWAY_VERSION = 63;
 // Browser playback fetches HLS playlists/segments cross-origin, so these must
 // list every Norva web origin or the browser blocks the response (CORS). Keep
 // in sync with the relay's ALLOWED_ORIGINS (services/norva-relay/wrangler.jsonc).
@@ -654,6 +654,36 @@ app.get('/subtitle/:token', async (req, res) => {
         res.setHeader('Cache-Control', 'private, max-age=3600');
         res.send(body);
     });
+});
+
+// Audio-language probe over the RESIDENTIAL proxy IP (anti-ban « faible empreinte »). The
+// audio-backfill crawl normally header-probes via the Cloudflare relay, so a mono-connection
+// anti-abuse account is seen from Cloudflare (probes) AND the residential proxy (metadata) at
+// once → user_multi_ip / account-sharing bans. For a low_footprint identity the edge routes the
+// probe HERE instead: ffprobe egresses the same sticky residential IP as everything else, so the
+// provider sees one household. Returns the SAME shape as norva-relay /probe-audio so the
+// edge runner consumes it unchanged (audioLanguages / audioTracks / subtitles).
+app.post('/probe-audio', requireGatewayAuth, async (req, res) => {
+    try {
+        const { url, userAgent } = req.body || {};
+        if (!url || !isHttpUrl(url)) {
+            return res.status(400).json({ error: 'url is required' });
+        }
+        const ua = sanitizeUserAgent(userAgent) || 'VLC/3.0.20 LibVLC/3.0.20';
+        const profile = await probeCodecProfile(url, ua); // ffprobe via the residential proxy
+        const audioTracks = Array.isArray(profile?.audioTracks) ? profile.audioTracks : [];
+        const subtitles = Array.isArray(profile?.subtitles) ? profile.subtitles : [];
+        const audioLanguages = [];
+        let audioDefaultLanguage = null;
+        for (const t of audioTracks) {
+            if (t.language && !audioLanguages.includes(t.language)) audioLanguages.push(t.language);
+            if (t.default && !audioDefaultLanguage) audioDefaultLanguage = t.language || null;
+        }
+        res.json({ audioLanguages, audioTracks, audioDefaultLanguage, subtitles });
+    } catch (err) {
+        const status = Number.isInteger(err.status) ? err.status : 502;
+        res.status(status).json({ error: err.publicMessage || 'Audio probe failed', code: err.code || undefined });
+    }
 });
 
 // Phase 2: detect the language of ONE audio track, fully self-hosted (no paid API). ffmpeg

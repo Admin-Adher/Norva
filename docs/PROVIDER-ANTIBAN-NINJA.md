@@ -61,10 +61,32 @@ Cible : rendre le crawl **indiscernable d'un foyer normal** sur un provider anti
 5. **Profil « empreinte » par provider** — flag `low_footprint` sur la source ; crawl agressif
    conservé seulement pour les providers qui le tolèrent (super8k, apdxes…).
 
+## Statut d'implémentation
+
+- **Slice 0 — flag + observabilité** ✅ *livré* (migration `20260703140000_provider_footprint_policy`,
+  appliquée live). Table `provider_footprint_policy` (clé = `resolveSourceIdentity().key`) +
+  `provider_probe_hits` (compteur horaire) + RPC `provider_footprint_budget` / `_record_hit`.
+  Ninja (`d8453dc1-…`) = `low_footprint`, plafond **40/h**.
+- **Slice 1 — IP résidentielle unique** ✅ *codé (branche, pas encore déployé)*.
+  - Gateway : nouvel endpoint `POST /probe-audio` (v63) → `probeCodecProfile` (ffprobe via le
+    **proxy résidentiel**), même shape JSON que le relay.
+  - Edge (`runOneDimension`/`processOne`) : pour une identité `low_footprint`, le probe part vers la
+    **gateway** au lieu du relay Cloudflare + enregistre un hit (`provider_footprint_record_hit`), et
+    la tick est **sautée si over-budget** (`provider_footprint_budget.allowed`). Inerte pour tous les
+    autres providers (chemin relay inchangé) et pour Ninja tant que ses crons sont coupés.
+- **Slice 2** (jitter + mutex incl. lecture + cap par-probe) et **Slice 3** (lazy/metadata-first +
+  re-schedule crons domptés) : à faire.
+
+**Séquence de déploiement** : (1) déployer la **gateway** v63, (2) merger l'**edge**, (3) *seulement
+ensuite* re-scheduler les crons Ninja (Slice 3). Ordre important : ne pas ré-activer les crons avant
+que la gateway serve `/probe-audio`.
+
 ## Checklist de ré-activation Ninja
 
-- [ ] Identifiants remplacés dans l'app (ré-encrypte `config_ciphertext` + re-sync).
-- [ ] Mode faible empreinte livré (points 1-3 au minimum) + testé.
+- [x] Identifiants remplacés dans l'app (ré-encrypte `config_ciphertext` + re-sync).
+- [x] Slice 0 (flag/budget) livré ; Slice 1 (IP résidentielle unique) codé.
+- [ ] Déployer gateway v63 + merger l'edge.
+- [ ] Slice 2 (jitter + mutex lecture) + Slice 3 (lazy/metadata-first).
 - [ ] Re-scheduler les crons Ninja **en version domptée** (cadence réduite) depuis `ENRICHMENT_CRON_SETUP.md`.
 - [ ] Surveiller `active_cons` / 401 côté provider + `résolu_24h > 0` au dashboard pendant 48 h.
 
