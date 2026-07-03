@@ -413,10 +413,15 @@ async function proxyPlayback(request, env, claims, ctx) {
   if (upstreamRange) headers.set("range", upstreamRange);
   else if (requestedRange) headers.set("range", requestedRange);
 
+  // Tie the upstream fetch to an AbortController so a client disconnect tears the
+  // provider TCP connection down IMMEDIATELY instead of returning it to the keepalive
+  // pool — on single-slot providers a lingering connection keeps 458ing the retries.
+  const upstreamAbort = new AbortController();
   let upstream = await fetch(targetUrl, {
     method: request.method,
     headers,
     redirect: "follow",
+    signal: upstreamAbort.signal,
   });
   let upstreamFinalUrl = upstream.url || targetUrl.toString();
 
@@ -467,6 +472,21 @@ async function proxyPlayback(request, env, claims, ctx) {
       reason: reason.slice(0, 200),
     }));
     maybeAlertUpstreamError(env, ctx, { host: targetUrl.hostname, status: upstream.status, method: request.method, reason, finalUrl: upstreamFinalUrl });
+    // Provider slot-busy (458 "max connections"): transient — tell the player HOW
+    // LONG to back off (Retry-After spans the ~8s release window) and hand it a
+    // structured body it can classify without string-scraping.
+    if (upstream.status === 458 || /max connections?|connection limit/i.test(reason)) {
+      errHeaders.set("Retry-After", "8");
+      errHeaders.set("Content-Type", "application/json");
+      const body = request.method === "HEAD" ? null : JSON.stringify({
+        error: "provider_slot_busy",
+        code: "PROVIDER_BUSY",
+        upstreamStatus: upstream.status,
+        retryAfterMs: 8000,
+        reason: reasonHeader || "max connections",
+      });
+      return new Response(body, { status: upstream.status, statusText: upstream.statusText, headers: errHeaders });
+    }
     return new Response(request.method === "HEAD" ? null : reason, {
       status: upstream.status,
       statusText: upstream.statusText,
@@ -481,7 +501,7 @@ async function proxyPlayback(request, env, claims, ctx) {
   if (request.method === "HEAD" || !isHlsPlaylist(targetUrl, upstream.headers)) {
     // Advertise range support so the player enables client-side seeking.
     if (!responseHeaders.has("Accept-Ranges")) responseHeaders.set("Accept-Ranges", "bytes");
-    return new Response(upstream.body, {
+    return new Response(abortOnCancel(upstream.body, upstreamAbort), {
       status: upstream.status,
       statusText: upstream.statusText,
       headers: responseHeaders,
@@ -490,7 +510,7 @@ async function proxyPlayback(request, env, claims, ctx) {
 
   const contentLength = Number.parseInt(upstream.headers.get("content-length") ?? "0", 10);
   if (Number.isFinite(contentLength) && contentLength > 2_000_000) {
-    return new Response(upstream.body, {
+    return new Response(abortOnCancel(upstream.body, upstreamAbort), {
       status: upstream.status,
       statusText: upstream.statusText,
       headers: responseHeaders,
@@ -563,6 +583,30 @@ async function resolveContentLength(targetUrl, baseHeaders) {
     }
   } catch (_) { /* fall back to the original range */ }
   return NaN;
+}
+
+// Wrap an upstream body so a DOWNSTREAM cancel (client closed the tab / the engine
+// aborted its fetch) aborts the UPSTREAM connection instead of letting the runtime
+// return it to the keepalive pool. On single-slot IPTV providers that lingering
+// pooled connection is exactly what keeps the next attempt 458ing.
+function abortOnCancel(body, controller) {
+  if (!body) return body;
+  try {
+    const reader = body.getReader();
+    return new ReadableStream({
+      async pull(c) {
+        const { done, value } = await reader.read();
+        if (done) { c.close(); return; }
+        c.enqueue(value);
+      },
+      cancel(reason) {
+        try { reader.cancel(reason); } catch (_) { /* already done */ }
+        try { controller.abort(); } catch (_) { /* already aborted */ }
+      },
+    });
+  } catch (_) {
+    return body; // body already consumed/locked — pass through untouched
+  }
 }
 
 async function boundedUpstreamRange(rangeHeader, targetUrl, baseHeaders) {
@@ -1626,7 +1670,7 @@ function corsHeaders(request, env) {
     "Access-Control-Allow-Origin": allowOrigin,
     "Access-Control-Allow-Headers": "authorization, range, content-type",
     "Access-Control-Allow-Methods": "GET,HEAD,POST,DELETE,OPTIONS",
-    "Access-Control-Expose-Headers": "content-length, content-range, accept-ranges, x-norva-image-cache, x-norva-image-fallback, x-norva-upstream-status, x-norva-upstream-reason, x-norva-upstream-final",
+    "Access-Control-Expose-Headers": "content-length, content-range, accept-ranges, retry-after, x-norva-image-cache, x-norva-image-fallback, x-norva-upstream-status, x-norva-upstream-reason, x-norva-upstream-final",
     "Access-Control-Max-Age": "86400",
     Vary: "Origin",
   };

@@ -78,9 +78,12 @@ router.post('/session', async (req, res) => {
         // yet. Rather than failing the title outright, wait for the slot to
         // free up and try again a couple of times before giving up.
         const RETRYABLE_CODES = new Set([
-            'UPSTREAM_UNAUTHORIZED', 'UPSTREAM_FORBIDDEN', 'UPSTREAM_RATE_LIMIT'
+            'UPSTREAM_UNAUTHORIZED', 'UPSTREAM_FORBIDDEN', 'UPSTREAM_RATE_LIMIT',
+            'UPSTREAM_PROVIDER_BUSY'
         ]);
-        const RETRY_DELAYS_MS = [1800, 3500]; // before attempt 2, then attempt 3
+        // 2s + 6s + 9s spans the provider's ~8s slot-release window (the old
+        // 1.8s+3.5s topped out at 5.3s total — always INSIDE the busy window).
+        const RETRY_DELAYS_MS = [2000, 6000, 9000];
         const MAX_ATTEMPTS = RETRY_DELAYS_MS.length + 1;
 
         let lastUpstream = null;
@@ -115,12 +118,14 @@ router.post('/session', async (req, res) => {
         }
 
         const upstream = lastUpstream || normalizeUpstreamError('Playlist not generated in time');
+        if (upstream.code === 'UPSTREAM_PROVIDER_BUSY') res.set('Retry-After', '8');
         return res.status(upstream.terminal ? 502 : 500).json({
             error: upstream.friendly,
             details: upstream.details.slice(-300),
             code: upstream.code,
             upstreamStatus: upstream.upstreamStatus,
-            terminal: upstream.terminal
+            terminal: upstream.terminal,
+            ...(upstream.code === 'UPSTREAM_PROVIDER_BUSY' ? { retryAfter: 8 } : {})
         });
 
     } catch (err) {

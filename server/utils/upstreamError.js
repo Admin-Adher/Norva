@@ -90,6 +90,20 @@ function classifyUpstreamError(value) {
         };
     }
 
+    // ffmpeg reports an upstream HTTP 458 (provider "max connections") as the literal
+    // "Server returned 4XX Client Error, but not one of 40{0,1,3,4}" — the number 458
+    // never appears. That state is TRANSIENT (the slot frees ~8s after the previous
+    // consumer drops), so it must be classified retryable, not terminal.
+    if (/(?:\b|_)458\b|max connections?|4xx client error, but not one of/.test(text)) {
+        return {
+            code: 'UPSTREAM_PROVIDER_BUSY',
+            upstreamStatus: 458,
+            terminal: false,
+            friendly: 'The provider allows only one active stream and the previous slot has not released yet. Retrying shortly…',
+            details: sanitized
+        };
+    }
+
     if (/4xx client error|error opening input|invalid data|stream ends prematurely|i\/o error|connection reset|connection refused/.test(text)) {
         return {
             code: 'UPSTREAM_REFUSED',

@@ -1131,8 +1131,30 @@ class VideoPlayer {
             this.handlePlaybackError(err.message || 'Media error');
         });
 
-        // Initialize HLS.js if supported
-        if (Hls.isSupported()) {
+        // Initialize HLS.js if supported. The runtime may still be loading (vendored
+        // file / CDN fallback) — in that case set it up as soon as ensureHls resolves;
+        // every playback path also guards, so nothing crashes if it never arrives.
+        if (typeof Hls !== 'undefined' && Hls.isSupported()) {
+            this.setupHlsRuntime();
+        } else if (window.ensureHls) {
+            window.ensureHls().then((ok) => {
+                if (ok && typeof Hls !== 'undefined' && Hls.isSupported() && !this.hls) this.setupHlsRuntime();
+            }).catch(() => { /* playback paths degrade to native HLS / engine */ });
+        }
+
+        // Keyboard controls
+        document.addEventListener('keydown', (e) => this.handleKeyboard(e));
+
+        // Click on video shows overlay
+        this.video.addEventListener('click', () => this.showNowPlayingOverlay());
+    }
+
+    /**
+     * Create the persistent Hls instance + its error/track listeners. Split out of
+     * init() so it can run lazily once the hls.js runtime finishes loading.
+     */
+    setupHlsRuntime() {
+        {
             this.hls = new Hls(this.getHlsConfig());
             this.lastDiscontinuity = -1; // Track discontinuity changes
 
@@ -1280,12 +1302,6 @@ class VideoPlayer {
                 this.video.play().catch(e => console.log('Autoplay prevented:', e));
             });
         }
-
-        // Keyboard controls
-        document.addEventListener('keydown', (e) => this.handleKeyboard(e));
-
-        // Click on video shows overlay
-        this.video.addEventListener('click', () => this.showNowPlayingOverlay());
     }
 
     /**
@@ -1438,6 +1454,9 @@ class VideoPlayer {
 
             // Determine if HLS or direct stream
             this.currentUrl = streamUrl;
+            // The hls.js runtime is vendored + lazy: make sure it's there before any
+            // Hls.* decision below (falls through to native/transcode paths if not).
+            try { if (typeof Hls === 'undefined' && window.ensureHls) await window.ensureHls(); } catch (_) { /* guarded below */ }
             this.resetGatewayHlsRetries();
             if (this.shouldAutoFallbackVariants()) this.armCurrentVariantFallback();
             // Relay-HLS live URLs are /relay/<token> (no ".m3u8" in the path) but
@@ -1568,14 +1587,7 @@ class VideoPlayer {
                 // But for minimize drift, I'll copy the block logic for HLS playback init
                 // Actually, I can just fall through if I set looksLikeHls = true?
                 // No, play logic is sequential.
-                if (Hls.isSupported()) {
-                    // Start HLS
-                    // ... this repeats code. I should probably just set currentUrl and let HLS block handle?
-                    // But HLS block is lower down.
-                    // I will just execute the HLS init here as before.
-
-                    // Actually, easiest way is to re-assign streamUrl and goto start? No.
-                    // Copy existing forceTranscode block logic
+                if (typeof Hls !== 'undefined' && Hls.isSupported()) {
                     if (this.hls) {
                         this.hls.destroy();
                     }
@@ -1596,6 +1608,12 @@ class VideoPlayer {
 
                     return; // Exit
                 }
+                // No hls.js runtime: hand the session to playHls, which loads the
+                // runtime (or degrades to native HLS) instead of abandoning the
+                // transcode session that was just started.
+                this.playHls(playlistUrl);
+                this.updateNowPlaying(channel);
+                return;
             }
 
             // CHECK: Force Audio Transcode (Copy Video) - legacy forceTranscode setting
@@ -1687,7 +1705,7 @@ class VideoPlayer {
             }
 
             // Priority 1: Use HLS.js for HLS streams on browsers that support it
-            if (looksLikeHls && Hls.isSupported()) {
+            if (looksLikeHls && typeof Hls !== 'undefined' && Hls.isSupported()) {
                 this.updateTranscodeStatus('direct', 'Direct HLS');
 
                 // Use playHls helper logic here (or extract it)
@@ -1796,6 +1814,22 @@ class VideoPlayer {
      * Helper to play HLS stream (reduces duplication)
      */
     playHls(url) {
+        if (typeof Hls === 'undefined') {
+            // hls.js runtime missing (CDN blocked and vendored copy still loading).
+            // Load it and retry once; else degrade to native HLS (Safari) or surface
+            // a typed error — never a bare ReferenceError.
+            const load = window.ensureHls ? window.ensureHls() : Promise.resolve(false);
+            load.then((ok) => {
+                if (ok && typeof Hls !== 'undefined') { this.playHls(url); return; }
+                if (this.video.canPlayType('application/vnd.apple.mpegurl')) {
+                    this.video.src = url;
+                    this.video.play().catch(() => {});
+                } else {
+                    this.handlePlaybackError('HLS_RUNTIME_UNAVAILABLE — hls.js could not be loaded');
+                }
+            });
+            return;
+        }
         if (this.hls) {
             this.hls.destroy();
         }
@@ -2312,6 +2346,7 @@ class VideoPlayer {
     }
 
     retryGatewayHlsStartup(data = {}) {
+        if (typeof Hls === 'undefined') return false;
         if (!this.hls) return false;
         // Live "provider HLS via relay" (no-Railway default) failed — provider has
         // no HLS, or the browser can't decode it (HEVC/AC3). Fall back to the
@@ -2426,6 +2461,7 @@ class VideoPlayer {
     // re-selects it. Bounded to one fallback per channel so a truly dead source
     // can't loop.
     tryLiveCodecFallback(data = {}) {
+        if (typeof Hls === 'undefined') return false;
         try {
             if (!this.isLivePlayback()) return false;
             const onRelay = this.isRelayPlaybackUrl(this.currentUrl);
