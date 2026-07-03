@@ -393,6 +393,67 @@ Deno.serve(async (req) => {
     return json({ ok: true, status: "trialing", kind });
   }
 
+  // ── /change-plan — user-authed: ONE-CLICK plan change, no card re-entry ──────
+  // The card token is already on file, so an existing subscriber never re-types
+  // their card to change plans (upsell-friendly). Money-safe semantics:
+  //   upgrade  (new price ≥ current) → applies IMMEDIATELY (limits unlock now),
+  //            the new price is charged from the next cycle — no charge today.
+  //   downgrade (new price < current) → SCHEDULED for the next cycle: the mapping
+  //            row carries the future plan/amount, the projection keeps the paid
+  //            plan until renewal (the billing cron syncs plan_code on charge).
+  // Falls back to the checkout flow when there is no live sub or no card on file.
+  if (req.method === "POST" && path === "/change-plan") {
+    const jwt = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
+    if (!jwt) return json({ error: "Not signed in" }, 401);
+    const { data: u } = await db.auth.getUser(jwt);
+    const user = u?.user;
+    if (!user?.id) return json({ error: "Not signed in" }, 401);
+
+    let payload: { plan?: string; period?: string } = {};
+    try { payload = await req.json(); } catch (_) { /* defaults below */ }
+    const plan = payload.plan === "family" ? "family" : "plus";
+    const period = payload.period === "annual" ? "annual" : "monthly";
+    const amount = PRICES[plan]?.[period];
+    if (!amount) return json({ error: "Unknown plan" }, 400);
+
+    const { data: projRow } = await db.from("cloud_entitlement_projection")
+      .select("status,provider,trial_ends_at,current_period_end,plan_code")
+      .eq("user_id", user.id).maybeSingle();
+    const proj = projRow as { status?: string; provider?: string; trial_ends_at?: string; current_period_end?: string; plan_code?: string } | null;
+    const { data: custRow } = await db.from("cloud_stancer_customers")
+      .select("card_token,plan,period,amount_cents").eq("user_id", user.id).maybeSingle();
+    const cust = custRow as { card_token?: string; plan?: string; period?: string; amount_cents?: number } | null;
+
+    const nowMs = Date.now();
+    const trialEndMs = proj?.trial_ends_at ? new Date(proj.trial_ends_at).getTime() : 0;
+    const periodEndMs = proj?.current_period_end ? new Date(proj.current_period_end).getTime() : 0;
+    const st = String(proj?.status ?? "");
+    const live = String(proj?.provider ?? "") === "stancer" && (
+      (st === "trialing" && trialEndMs > nowMs) ||
+      (st === "active" && (periodEndMs === 0 || periodEndMs > nowMs)) ||
+      (st === "cancelled_at_period_end" && periodEndMs > nowMs)
+    );
+    if (!live) return json({ ok: false, reason: "no_live_sub" });
+    if (!cust?.card_token) return json({ ok: false, reason: "requires_card" });
+    if (cust.plan === plan && cust.period === period) return json({ ok: true, status: "unchanged", plan, period });
+
+    const nowIso = new Date().toISOString();
+    const currentAmount = cust.amount_cents ?? 0;
+    const upgrade = amount >= currentAmount;
+    // The mapping row always carries what the NEXT charge should be.
+    await db.from("cloud_stancer_customers").upsert({
+      user_id: user.id, plan, period, amount_cents: amount, updated_at: nowIso,
+    });
+    const patch: Record<string, unknown> = { last_event_at: nowIso };
+    if (upgrade) patch.plan_code = plan; // limits unlock immediately
+    if (st === "cancelled_at_period_end") {
+      // Choosing a plan while a cancellation is pending = resuming.
+      patch.status = trialEndMs > nowMs ? "trialing" : "active";
+    }
+    await db.from("cloud_entitlement_projection").update(patch).eq("user_id", user.id);
+    return json({ ok: true, status: upgrade ? "plan_changed" : "plan_scheduled", plan, period });
+  }
+
   // ── /cancel — user-authed: stop auto-renewal; access runs to the period end ──
   // Honors the "cancel anytime" promise for the Stancer (web) rail. The billing
   // cron only charges trialing/active rows, so a cancelled row is never charged.

@@ -263,6 +263,18 @@ Les 4 P0 de l'audit V3 (`docs/audits/ONBOARDING-AUDIT-V3.md` §E.2) :
    **supprimés** ; les triggers **sécurité** (mdp/e-mail/nouvel appareil) et
    `norva_send_branded_email` conservés. Un seul système : `norva-lifecycle`.
 
+### 11.5bis Upsell sans friction — changement de plan en 1 clic (sans carte)
+
+`POST /change-plan` (user-authé) : un abonné existant change de plan **sans re-saisir sa carte**
+(le token est déjà en base). Sémantique protectrice du revenu : **upgrade** (prix ≥ actuel) →
+appliqué **immédiatement** (limites débloquées), nouveau prix au prochain cycle, rien débité
+aujourd'hui ; **downgrade** → **programmé au prochain cycle** (mapping mis à jour, `plan_code`
+synchronisé par le cron au moment du débit — l'abonné garde ce qu'il a payé). Même plan → `unchanged`.
+Fallback automatique vers le checkout (`no_live_sub` / `requires_card`). Câblage : `billing.js`
+`stancerChangePlan` + court-circuit dans `stancerCheckout` ; `subscribe.html` affiche « Plan
+updated » / « Plan change scheduled » / « You're already on this plan ». Le kind `plan_change` du
+checkout (11.5-2) reste le fallback avec carte.
+
 ### 11.6 Deux fichiers d'app en parallèle (dette repérée)
 `public/app.html` **et** `public/app/index.html` coexistent ; **seul `app/index.html` est servi**
 (`/app.html` → 308 → `/app`). Leurs numéros de version de scripts ont divergé (ex. `Settings.js`

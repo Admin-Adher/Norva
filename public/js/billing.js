@@ -61,6 +61,14 @@
     if (!token) throw err('Please sign in first', 'not_signed_in');
     const plan = opts.planCode === 'family' ? 'family' : 'plus';
     const period = /annual/i.test(String(opts.packageId || '')) ? 'annual' : 'monthly';
+    // Existing subscriber with a card on file → change the plan in ONE CLICK,
+    // no card re-entry. Server decides; anything else falls through to checkout.
+    try {
+      const change = await stancerChangePlan(plan, period);
+      if (change && change.ok && change.status) {
+        return { status: change.status, plan: plan, period: period };
+      }
+    } catch (_) { /* fall through to the checkout flow */ }
     const qs = new URLSearchParams({ plan: plan, period: period });
     if (opts.returnTo) qs.set('returnTo', String(opts.returnTo));
     window.location.assign('/checkout.html?' + qs.toString());
@@ -110,6 +118,23 @@
   function stancerCancel() { return stancerAction('cancel'); }
   // Undo a pending cancellation before the period ends.
   function stancerResume() { return stancerAction('resume'); }
+
+  // ONE-CLICK plan change for existing subscribers — the card token is already on
+  // file, so no card re-entry (upsell without friction). Returns {ok:true, status:
+  // 'plan_changed'|'plan_scheduled'|'unchanged'} or {ok:false, reason:'no_live_sub'
+  // |'requires_card'} → caller falls back to the checkout flow.
+  async function stancerChangePlan(plan, period) {
+    const base = ((window.NorvaAuth && NorvaAuth.supabaseUrl) || 'https://oupsceccxsonaalhueff.supabase.co').replace(/\/+$/, '');
+    const apikey = (window.NorvaAuth && NorvaAuth.publishableKey) || '';
+    const token = await sessionToken();
+    if (!token) throw err('Please sign in first', 'not_signed_in');
+    const res = await fetch(base + '/functions/v1/norva-stancer/change-plan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'apikey': apikey, 'Authorization': 'Bearer ' + token },
+      body: JSON.stringify({ plan: plan, period: period }),
+    });
+    return await res.json().catch(function () { return { ok: false, reason: 'error' }; });
+  }
 
   // Finalize a Stancer checkout on the return page (no webhook needed): the edge function re-fetches
   // the payment, captures the tokenized card and starts the trial. Returns {status:'trialing'|'pending'|…}.
@@ -285,6 +310,7 @@
     stancerCheckoutUrl: stancerCheckoutUrl,
     stancerCancel: stancerCancel,
     stancerResume: stancerResume,
+    stancerChangePlan: stancerChangePlan,
     purchase: purchase,
     restore: restore,
     login: login,
