@@ -275,6 +275,32 @@ Fallback automatique vers le checkout (`no_live_sub` / `requires_card`). Câblag
 updated » / « Plan change scheduled » / « You're already on this plan ». Le kind `plan_change` du
 checkout (11.5-2) reste le fallback avec carte.
 
+### 11.5ter Lot P1 post-audit (conversion & rétention) — livré (hors Play Store)
+
+1. **Relance abandon checkout** : `norva-lifecycle/runAbandoned` (gated `NORVA_LIFECYCLE_BILLING_LIVE`)
+   — un e-mail + push unique, 2–48 h après un checkout ouvert non complété (`require_payment_method`),
+   deep-link retour dans `checkout.html` avec le plan choisi ; skip + stamp si complété ailleurs.
+   Colonne `cloud_stancer_payments.reminder_sent_at` + index partiel (migr. `20260703210000`,
+   appliquée live). Template `renderAbandonedCheckout`.
+2. **Deep-links landing** : les CTA des cartes de prix portent **plan + période** (suivent le toggle
+   annuel) → `/account.html?returnTo=/subscribe.html?plan=…&period=…` ; `subscribe.html` lit les
+   params : période appliquée, carte choisie surlignée (`.preselected`). L'intention prix n'est plus
+   perdue à l'inscription.
+3. **Push billing (FCM)** : `pushUser` dans `norva-lifecycle` (infra `_shared/fcm.ts` +
+   `cloud_push_tokens`, purge des tokens morts) — rappel J-2, échec de paiement (dunning), win-back
+   et relance abandon partent désormais **e-mail + push**.
+4. **`past_due` → `expired`** : `runExpirePastDue` — dunning épuisé (palier 3 + 7 j) ou bloqué 21 j →
+   `expired` (provider stancer uniquement ; RevenueCat reste piloté par le webhook store). Le
+   win-back peut enfin se déclencher.
+5. **`paywall.html`** : l'état refusé propose **« See plans »** (→ picker) au lieu de « Manage
+   account ».
+6. **Bandeaux in-app sur le statut réel** : compte à rebours d'essai et incident de paiement
+   s'affichent dès que le statut réel est `trialing`/`past_due` — plus besoin d'`enforce`.
+
+*Restent P1 côté owner : activer OAuth (config Supabase), témoignages réels, support Stancer
+(autorisations USD), et la **publication Play Store** (volontairement différée — « il faut qu'on
+soit parfait »).*
+
 ### 11.6 Deux fichiers d'app en parallèle (dette repérée)
 `public/app.html` **et** `public/app/index.html` coexistent ; **seul `app/index.html` est servi**
 (`/app.html` → 308 → `/app`). Leurs numéros de version de scripts ont divergé (ex. `Settings.js`

@@ -163,8 +163,13 @@
       function showDenied(decision) {
         const message = decision?.message || storedDenial()?.message || 'Norva access is required to keep watching.';
         setStatus(message, true);
-        primaryBtn.textContent = 'Manage account';
-        primaryBtn.onclick = () => { window.location.href = accountLink.href; };
+        // A denied user's next step is picking a plan — send them to the plan
+        // picker, not the account page (audit V3, E.2-9). Account stays available
+        // via the secondary button.
+        primaryBtn.textContent = 'See plans';
+        primaryBtn.onclick = () => {
+          window.location.href = '/subscribe.html?returnTo=' + encodeURIComponent(returnTo || '/app#home');
+        };
       }
 
       function hasAnyCloudSession() {

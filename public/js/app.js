@@ -793,14 +793,14 @@ class App {
         window.location.replace('/paywall.html?returnTo=' + encodeURIComponent(returnTo || '/'));
     }
 
-    // Gentle "X days left in your trial" banner. Only shows when a trial is
-    // actually enforced (dormant in observe mode), reads the entitlement's
-    // trial end date, is dismissible, and re-appears as the day count changes so
-    // it never nags twice in the same day.
+    // Gentle "X days left in your trial" banner. Shows whenever the REAL status
+    // is a running trial — the decision carries it even while billing is only
+    // observed, and the countdown is true information either way. Dismissible,
+    // re-appears as the day count changes so it never nags twice in the same day.
     maybeShowTrialBanner() {
         try {
             const ent = this.entitlement || window.NorvaEntitlement;
-            if (!ent || ent.enforced !== true || ent.status !== 'trialing') return;
+            if (!ent || ent.status !== 'trialing') return;
             const endIso = ent.projection?.trial_ends_at || ent.projection?.current_period_end;
             if (!endIso) return;
             const msLeft = new Date(endIso).getTime() - Date.now();
@@ -840,12 +840,12 @@ class App {
     }
 
     // Payment-issue banner: a failed renewal puts the account in a short grace
-    // window (still enforced). Nudge the user to fix billing before access is
-    // cut, linking to the subscription manager. Dormant in observe mode.
+    // window. Nudge the user to fix billing before access is cut, linking to the
+    // subscription manager. Keyed on the REAL status (true even in observe mode).
     maybeShowBillingIssueBanner() {
         try {
             const ent = this.entitlement || window.NorvaEntitlement;
-            if (!ent || ent.enforced !== true) return;
+            if (!ent) return;
             const status = ent.status || (ent.projection && ent.projection.status) || '';
             if (!(status === 'past_due' || status === 'grace' || ent.reason === 'billing_grace')) return;
             if (sessionStorage.getItem('norva-billing-banner-dismissed') === '1') return;
