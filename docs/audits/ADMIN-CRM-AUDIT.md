@@ -275,3 +275,31 @@ Vérifié live après application : snapshot expose `billing_*` + `users_watchin
 billing sont classés, `admin_finance` agrège correctement (MRR-essai 8,99 $, 1 essai < 48 h,
 funnel 5 étapes). Restent P1 : tickets, actions billing admin, journal emails, devices, état des
 gates billing dans Système, identité par empreinte.
+
+## Addendum 2 — comptes internes + module Support (même jour, demande owner)
+
+Migration `20260704010000_internal_accounts_support.sql` (appliquée live en 3 parties) +
+`norva-support` (nouvelle edge function) + `public/support.html` + AdminPage v25 :
+
+1. **Comptes internes / VIP** : les 3 comptes existants (owner + hernandez.jeremy@outlook.fr)
+   étaient des comptes de test Stancer qui faussaient les datas. Nouveau registre
+   `admin_internal_accounts` (backfillé avec les 3) : **exclu de TOUTES les métriques finance**
+   (`admin_finance`, compteurs `billing_*` du snapshot, `norva_funnel_daily` — vérifié : funnel
+   vide, MRR 0, compteurs 0 après application). Accès **VIP permanent** posé (system / active /
+   family / fin 2099) sauf sur le rail stancer de test (conservé pour les E2E). Badge « interne »
+   dans la liste Clients + état/toggle « ⭐ marquer interne » dans la fiche (journalisé) — tout
+   futur compte de test s'exclut en un clic.
+2. **Module Support complet** :
+   - **Client** : `support.html` (anglais, brandé) — ouvrir un ticket, fils de discussion,
+     réponse ; bouton « Contact support » dans Settings (web + APK) ; le cancel-flow
+     « Something isn't working » pointe désormais sur la page support (motif tracé) au lieu d'un
+     mailto.
+   - **Emails** : chaque message client → email à **support@norva.tv** (reply-to = client) ;
+     chaque réponse admin depuis le CRM → email brandé au client (« Open my support page »).
+   - **CRM** : page **🎫 Support** sous Clients (onglets À répondre / Ouverts / En attente /
+     Fermés / Tous, aperçu du dernier message, tri « à répondre » en tête), **vue ticket** (fil
+     complet, réponse, fermer/rouvrir, lien fiche), **panneau « Tickets support » dans la fiche**
+     (compact, ouverts d'abord, scalable — total affiché si > 10), **badge rouge sidebar** =
+     tickets à répondre.
+   - **Alerting** : ops-alert emaile si un ticket attend une réponse depuis **> 24 h**
+     (`support_stale`), compteurs support dans le snapshot.

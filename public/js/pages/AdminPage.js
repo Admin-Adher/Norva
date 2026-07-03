@@ -75,6 +75,7 @@ class AdminPage {
             { key: 'cockpit', label: 'Cockpit', icon: '🎯' },
             { key: 'finance', label: 'Finance', icon: '💶' },
             { key: 'clients', label: 'Clients', icon: '👥' },
+            { key: 'support', label: 'Support', icon: '🎫' },
             { key: 'providers', label: 'Providers', icon: '📡' },
             { key: 'identites', label: 'Identités', icon: '🧬' },
             { key: 'moteur', label: 'Moteur', icon: '⚙️' },
@@ -292,6 +293,7 @@ class AdminPage {
             if (ft) this._flagToggle(ft);
         });
         this.built = true;
+        this._refreshSupportBadge();
     }
 
     _setCrumb(text, ts) {
@@ -300,8 +302,20 @@ class AdminPage {
         if (t) t.textContent = ts ? ('snapshot · ' + new Date(ts).toLocaleTimeString('fr-FR') + ' · auto 10 min') : '';
     }
     _setActiveNav(route) {
+        const mapped = route.startsWith('client') ? 'clients' : (route.startsWith('ticket') ? 'support' : route);
         document.querySelectorAll('#page-admin .crm-nav-item').forEach(el =>
-            el.classList.toggle('active', el.dataset.route === (route.startsWith('client') ? 'clients' : route)));
+            el.classList.toggle('active', el.dataset.route === mapped));
+    }
+
+    // Sidebar badge: tickets awaiting an admin reply. Refreshed on shell build + support pages.
+    async _refreshSupportBadge() {
+        try {
+            const c = await this._rpc('admin_support_counts') || {};
+            const item = document.querySelector('#page-admin .crm-nav-item[data-route="support"] .lb');
+            if (!item) return;
+            const n = Number(c.needs_reply) || 0;
+            item.innerHTML = 'Support' + (n > 0 ? ` <span class="badge red" style="margin-left:6px">${n}</span>` : '');
+        } catch (_) { /* cosmetic */ }
     }
     _view() { return document.getElementById('crm-view'); }
 
@@ -311,6 +325,8 @@ class AdminPage {
         if (route === 'cockpit') this._pageCockpit();
         else if (route === 'finance') this._pageFinance();
         else if (route === 'clients') this._pageClients();
+        else if (route === 'support') this._pageSupport();
+        else if (route.startsWith('ticket:')) this._pageTicket(route.slice(7));
         else if (route.startsWith('client:')) this._pageClientDetail(route.slice(7));
         else if (route === 'providers') this._pageProviders();
         else if (route === 'identites') this._pageIdentites();
@@ -482,6 +498,137 @@ class AdminPage {
         });
     }
 
+    // ── Page: Support (tickets list) ──
+    async _pageSupport(filter) {
+        this._setCrumb('Support');
+        this._supportFilter = filter !== undefined ? filter : (this._supportFilter || 'needs_reply');
+        const v = this._view();
+        const tabs = [['needs_reply', 'À répondre'], ['open', 'Ouverts'], ['pending', 'En attente'], ['closed', 'Fermés'], ['', 'Tous']];
+        v.innerHTML = `<div class="crm-page">
+            <h1 class="crm-h1">🎫 Support</h1>
+            <p class="crm-sub">Tickets clients — chaque message client envoie un email à support@norva.tv ; répondre ici trace le fil ET email le client.</p>
+            <div class="users-controls">${tabs.map(t =>
+                `<button class="sup-tab" data-filter="${t[0]}" style="${t[0] === this._supportFilter ? 'border-color:#5b7cfa;color:#fff' : ''}">${t[1]}</button>`).join('')}
+            </div>
+            <div class="scroll"><div id="sup-list"><div class="ssub">Chargement…</div></div></div>
+        </div>`;
+        v.querySelectorAll('.sup-tab').forEach(b => b.addEventListener('click', () => this._pageSupport(b.dataset.filter)));
+        this._refreshSupportBadge();
+        try {
+            const res = await this._rpc('admin_support_list', { p_status: this._supportFilter || null, p_limit: 100, p_offset: 0 });
+            this._renderSupportList((res && res.rows) || []);
+        } catch (e) {
+            const el = document.getElementById('sup-list');
+            if (el) el.innerHTML = `<div class="admin-err">Erreur : ${AdminPage.esc(e.message)}</div>`;
+        }
+    }
+
+    _renderSupportList(rows) {
+        const el = document.getElementById('sup-list');
+        if (!el) return;
+        if (!rows.length) { el.innerHTML = '<div class="card"><span class="badge green">✓</span> Aucun ticket dans cette vue.</div>'; return; }
+        const chip = (t) => t.status === 'closed' ? '<span class="badge gray">fermé</span>'
+            : (t.last_from === 'user' ? '<span class="badge red">à répondre</span>' : '<span class="badge green">répondu</span>');
+        el.innerHTML = `<table><thead><tr><th></th><th>Client</th><th>Sujet</th><th>Dernier message</th><th class="num">Messages</th><th>Ouvert</th></tr></thead><tbody>` +
+            rows.map(t => `<tr class="user-row" data-ticket-id="${AdminPage.esc(t.id)}" title="Ouvrir le ticket">
+                <td>${chip(t)}</td>
+                <td>${AdminPage.esc(t.email || t.user_id)}</td>
+                <td><b>${AdminPage.esc(t.subject)}</b><div class="pacct" style="max-width:340px;overflow:hidden;text-overflow:ellipsis">${AdminPage.esc(t.last_body || '')}</div></td>
+                <td>${AdminPage.esc(AdminPage.timeAgo(t.last_message_at))} <span class="pacct">(${t.last_from === 'user' ? 'client' : 'nous'})</span></td>
+                <td class="num">${AdminPage.n(t.msg_count)}</td>
+                <td>${AdminPage.esc(AdminPage.timeAgo(t.created_at))}</td>
+            </tr>`).join('') + '</tbody></table>';
+        el.querySelectorAll('tr[data-ticket-id]').forEach(r =>
+            r.addEventListener('click', () => this._navigate('ticket:' + r.dataset.ticketId)));
+    }
+
+    // ── Page: single ticket (thread + reply + status) ──
+    async _pageTicket(ticketId) {
+        this._setCrumb('Support › ticket');
+        const v = this._view();
+        v.innerHTML = `<div class="crm-page">
+            <button class="crm-back" data-back="support">← Retour aux tickets</button>
+            <div id="ticket-body"><div class="ssub">Chargement…</div></div>
+        </div>`;
+        const back = v.querySelector('[data-back]');
+        if (back) back.addEventListener('click', (e) => { e.stopPropagation(); this._navigate('support'); });
+        try {
+            const d = await this._rpc('admin_support_ticket', { p_id: ticketId });
+            this._renderTicket(d || {});
+        } catch (e) {
+            const b = document.getElementById('ticket-body');
+            if (b) b.innerHTML = `<div class="admin-err">Erreur : ${AdminPage.esc(e.message)}</div>`;
+        }
+    }
+
+    _renderTicket(d) {
+        const body = document.getElementById('ticket-body');
+        if (!body) return;
+        const t = d.ticket || {};
+        const msgs = Array.isArray(d.messages) ? d.messages : [];
+        this._setCrumb('Support › ' + (t.subject || 'ticket'));
+        const chip = t.status === 'closed' ? '<span class="badge gray">fermé</span>'
+            : (t.last_from === 'user' ? '<span class="badge red">à répondre</span>' : '<span class="badge green">répondu — en attente client</span>');
+        const thread = msgs.map(m => `
+            <div style="max-width:86%;margin:10px 0;padding:11px 14px;border-radius:12px;font-size:13.5px;line-height:1.55;white-space:pre-wrap;word-break:break-word;
+                        ${m.from_admin ? 'background:#14261f;border:1px solid #1f4436;' : 'background:#1c2433;margin-left:auto;'}">
+                <div style="font-size:11px;color:#66707e;font-weight:700;margin-bottom:4px">
+                    ${m.from_admin ? '🛟 ' + AdminPage.esc(m.author_email || 'support') : '👤 ' + AdminPage.esc(m.author_email || 'client')} · ${AdminPage.esc(AdminPage.timeAgo(m.created_at))}</div>
+                ${AdminPage.esc(m.body)}
+            </div>`).join('');
+        body.innerHTML = `
+            <div class="fiche-head" style="margin-bottom:10px">
+              <div><div class="fiche-title" style="font-size:18px">${AdminPage.esc(t.subject || '—')}</div>
+              <div class="umeta">${chip}
+                <span>· <a href="#" id="tk-client" style="color:#a9bcff">${AdminPage.esc(t.email || t.user_id || '')}</a></span>
+                <span>· ouvert ${t.created_at ? AdminPage.esc(AdminPage.timeAgo(t.created_at)) : '—'}</span></div></div>
+            </div>
+            <div class="card" style="margin-bottom:14px">${thread || '<div class="ssub">Aucun message.</div>'}</div>
+            <div class="card">
+              <textarea id="tk-reply" rows="3" placeholder="Répondre au client (le message part par email en anglais côté client — écris en anglais)…"
+                style="width:100%;background:var(--color-bg-primary,#0d0d0f);border:1px solid var(--color-border,#2a2a38);color:#fff;border-radius:8px;padding:10px 12px;font:inherit;font-size:13px;resize:vertical"></textarea>
+              <div class="act-row" style="margin-top:10px">
+                <button class="act-btn" id="tk-send" style="background:#5b7cfa;border-color:#5b7cfa">📤 Envoyer la réponse</button>
+                ${t.status !== 'closed'
+                    ? '<button class="act-btn act-danger" id="tk-close">✔ Fermer le ticket</button>'
+                    : '<button class="act-btn act-unsuspend" id="tk-reopen">↺ Rouvrir</button>'}
+              </div>
+              <div class="ssub" style="margin-top:8px">Envoyer une réponse passe le ticket « en attente client » et lui envoie un email.</div>
+            </div>`;
+        const client = document.getElementById('tk-client');
+        if (client && t.user_id) client.addEventListener('click', (e) => { e.preventDefault(); this._navigate('client:' + t.user_id); });
+        const send = document.getElementById('tk-send');
+        if (send) send.addEventListener('click', async () => {
+            const ta = document.getElementById('tk-reply');
+            const text = ta ? ta.value.trim() : '';
+            if (!text) return;
+            send.disabled = true; send.textContent = 'Envoi…';
+            try { await this._supportEdge('/admin/reply', { ticket_id: t.id, body: text }); this._pageTicket(t.id); this._refreshSupportBadge(); }
+            catch (e) { send.disabled = false; send.textContent = '✗ ' + AdminPage.esc(e.message); }
+        });
+        const closeBtn = document.getElementById('tk-close');
+        if (closeBtn) closeBtn.addEventListener('click', async () => {
+            try { await this._supportEdge('/admin/status', { ticket_id: t.id, status: 'closed' }); this._pageTicket(t.id); this._refreshSupportBadge(); }
+            catch (e) { window.alert('Erreur : ' + e.message); }
+        });
+        const reopen = document.getElementById('tk-reopen');
+        if (reopen) reopen.addEventListener('click', async () => {
+            try { await this._supportEdge('/admin/status', { ticket_id: t.id, status: 'open' }); this._pageTicket(t.id); this._refreshSupportBadge(); }
+            catch (e) { window.alert('Erreur : ' + e.message); }
+        });
+    }
+
+    async _supportEdge(path, bodyObj) {
+        const res = await fetch(`${this._sbUrl()}/functions/v1/norva-support${path}`, {
+            method: 'POST',
+            headers: { apikey: this._sbKey(), Authorization: `Bearer ${this._token()}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify(bodyObj || {})
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || String(res.status));
+        return data;
+    }
+
     // ── Page: Clients (list) ──
     _pageClients() {
         this._setCrumb('Clients');
@@ -597,6 +744,7 @@ class AdminPage {
         const body = rows.map(r => {
             const role = r.role === 'admin' ? '<span class="badge amber">admin</span>' : '<span class="badge gray">user</span>';
             const driver = r.is_driver ? ' <span class="badge blue" title="Compte pilote d\'enrichissement">pilote</span>' : '';
+            const internal = r.is_internal ? ' <span class="badge amber" title="Compte interne — exclu des stats finance">interne</span>' : '';
             const banned = r.banned ? ' <span class="badge red" title="Compte suspendu">suspendu</span>' : '';
             const conf = r.email_confirmed ? '<span class="badge green">✓</span>' : '<span class="badge red">non</span>';
             const tags = (Array.isArray(r.tags) ? r.tags : [])
@@ -605,7 +753,7 @@ class AdminPage {
                 ? `<span title="${AdminPage.esc(new Date(r.last_sign_in_at).toLocaleString('fr-FR'))}">${AdminPage.esc(AdminPage.timeAgo(r.last_sign_in_at))}</span>`
                 : '<span class="badge gray">jamais</span>';
             return `<tr class="user-row" data-user-id="${AdminPage.esc(r.user_id)}" data-email="${AdminPage.esc(r.email || '')}" title="Voir la fiche">
-                <td>${AdminPage.esc(r.email || '—')}${driver}${banned}</td>
+                <td>${AdminPage.esc(r.email || '—')}${driver}${internal}${banned}</td>
                 <td>${AdminPage.billingBadge(r.billing_status, r.plan_code)}</td>
                 <td>${role}</td>
                 <td>${tags}</td>
@@ -707,8 +855,9 @@ class AdminPage {
         try {
             const d = await this._rpc('admin_user_detail', { p_user_id: userId });
             this._renderFiche(d);
-            this._loadCrm(userId);      // relational panels (tags/notes/timeline), non-blocking
-            this._loadBilling(userId);  // subscription & payments panel, non-blocking
+            this._loadCrm(userId);         // relational panels (tags/notes/timeline), non-blocking
+            this._loadBilling(userId);     // subscription & payments panel, non-blocking
+            this._loadUserTickets(userId); // support tickets panel, non-blocking
         } catch (e) {
             const b = document.getElementById('fiche-body');
             if (b) b.innerHTML = `<div class="admin-err">Erreur : ${AdminPage.esc(e.message)}</div>`;
@@ -735,13 +884,29 @@ class AdminPage {
         const money = AdminPage.money, esc = AdminPage.esc;
         const dt = (d) => d ? new Date(d).toLocaleString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
 
+        const row = (label, val) => `<div style="display:flex;justify-content:space-between;gap:12px;padding:7px 0;border-bottom:1px solid var(--color-border,#20202a);font-size:13px"><span style="color:#9aa">${label}</span><span style="color:#fff;font-weight:600;text-align:right">${val}</span></div>`;
+        // Internal-account state + toggle: internal accounts (owner/family/tests) are EXCLUDED from
+        // every finance metric and get permanent VIP access.
+        const internalRow = row('Compte interne',
+            (b.is_internal ? '<span class="badge amber">interne — exclu des stats</span> ' : '<span class="ssub">non</span> ') +
+            `<button class="mini-btn" id="fiche-internal-toggle" data-on="${b.is_internal ? 'false' : 'true'}">${b.is_internal ? 'retirer' : '⭐ marquer interne'}</button>`);
+        function wireInternalToggle(self) {
+            const btn = document.getElementById('fiche-internal-toggle');
+            if (!btn) return;
+            btn.addEventListener('click', async () => {
+                btn.disabled = true;
+                try { await self._rpc('admin_internal_toggle', { p_user_id: self._crmUser, p_on: btn.dataset.on === 'true' }); self._loadBilling(self._crmUser); }
+                catch (e) { btn.disabled = false; window.alert('Erreur : ' + e.message); }
+            });
+        }
+
         if (!p && !m && !pays.length) {
-            el.innerHTML = '<div class="ssub">Aucun abonnement ni paiement — compte gratuit.</div>';
+            el.innerHTML = internalRow + '<div class="ssub" style="margin-top:8px">Aucun abonnement ni paiement — compte gratuit.</div>';
+            wireInternalToggle(this);
             return;
         }
 
-        const row = (label, val) => `<div style="display:flex;justify-content:space-between;gap:12px;padding:7px 0;border-bottom:1px solid var(--color-border,#20202a);font-size:13px"><span style="color:#9aa">${label}</span><span style="color:#fff;font-weight:600;text-align:right">${val}</span></div>`;
-        let details = '';
+        let details = internalRow;
         if (p) {
             details += row('Statut', AdminPage.billingBadge(p.status, p.plan_code) + (p.provider ? ` <span class="badge gray">${esc(p.provider)}</span>` : ''));
             if (m && m.plan) details += row('Plan facturé', `${esc(m.plan)} · ${esc(m.period || '—')} · ${money(m.amount_cents)}`);
@@ -776,6 +941,32 @@ class AdminPage {
         el.innerHTML = `${details}
             ${payRows ? `<div style="margin-top:14px"><div class="kpi-gtitle">Historique des paiements</div><div class="scroll"><table><thead><tr><th>Date</th><th>Type</th><th>Statut</th><th class="num">Montant</th></tr></thead><tbody>${payRows}</tbody></table></div></div>` : ''}
             ${fbRows}`;
+        wireInternalToggle(this);
+    }
+
+    // ── Fiche: support tickets panel (open first, newest first, click → thread) ──
+    async _loadUserTickets(userId) {
+        const el = document.getElementById('fiche-tickets');
+        if (!el) return;
+        try {
+            const res = await this._rpc('admin_support_list', { p_user_id: userId, p_limit: 10, p_offset: 0 });
+            const rows = (res && res.rows) || [];
+            if (!rows.length) { el.innerHTML = '<div class="ssub">Aucun ticket.</div>'; return; }
+            const chip = (t) => t.status === 'closed' ? '<span class="badge gray">fermé</span>'
+                : (t.last_from === 'user' ? '<span class="badge red">à répondre</span>' : '<span class="badge green">répondu</span>');
+            el.innerHTML = rows.map(t => `
+                <div class="tl-item" data-ticket-id="${AdminPage.esc(t.id)}" style="cursor:pointer" title="Ouvrir le ticket">
+                    ${chip(t)}
+                    <span class="tl-sum" style="margin-left:8px"><b>${AdminPage.esc(t.subject)}</b>
+                      <span class="pacct">· ${AdminPage.n(t.msg_count)} msg</span></span>
+                    <span class="tl-at">${AdminPage.esc(AdminPage.timeAgo(t.last_message_at))}</span>
+                </div>`).join('') +
+                ((res.total > rows.length) ? `<div class="ssub" style="margin-top:8px">${AdminPage.n(res.total - rows.length)} autre(s) — voir la page Support.</div>` : '');
+            el.querySelectorAll('[data-ticket-id]').forEach(r =>
+                r.addEventListener('click', () => this._navigate('ticket:' + r.dataset.ticketId)));
+        } catch (e) {
+            el.innerHTML = `<div class="admin-err">Erreur : ${AdminPage.esc(e.message)}</div>`;
+        }
     }
 
     // ── CRM relational panels (tags / notes / timeline) ──
@@ -954,6 +1145,7 @@ class AdminPage {
             <div class="fiche-grid">
               <div class="admin-block"><h2>⚡ Actions</h2><div class="card">${actions}</div></div>
               <div class="admin-block"><h2>💳 Abonnement & paiements</h2><div id="fiche-billing" class="card"><div class="ssub">Chargement…</div></div></div>
+              <div class="admin-block"><h2>🎫 Tickets support</h2><div id="fiche-tickets" class="card"><div class="ssub">Chargement…</div></div></div>
               <div class="admin-block"><h2>📡 Sources (${sources.length})</h2><div class="scroll">${srcHtml}</div></div>
               <div class="admin-block"><h2>⚙️ Enrichissement audio par panel</h2><div class="scroll">${enrHtml}</div></div>
               <div class="admin-block"><h2>🏷️ Tags & segments</h2><div id="fiche-tags" class="card"><div class="ssub">Chargement…</div></div></div>
