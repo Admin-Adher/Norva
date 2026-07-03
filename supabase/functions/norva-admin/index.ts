@@ -117,6 +117,7 @@ async function runOpsAlertSweep(): Promise<JsonRecord> {
   if (Number(ov.billing_cron_fails_24h) > 0) problems.push({ key: "billing_cron_fails", detail: `${ov.billing_cron_fails_24h} échec(s) sur les crons BILLING (norva-stancer-billing / norva-lifecycle) en 24 h — le moteur de revenu est peut-être en panne` });
   if (Number(ov.billing_past_due) >= 3) problems.push({ key: "billing_past_due", detail: `${ov.billing_past_due} abonnement(s) en échec de paiement (past_due/grace) simultanés` });
   if (st && st.ok !== true) problems.push({ key: "stancer_down", detail: `API Stancer injoignable (${String(st.error ?? "timeout")}) — les paiements ne passent plus` });
+  if (Number(ov.support_stale_24h) > 0) problems.push({ key: "support_stale", detail: `${ov.support_stale_24h} ticket(s) support sans réponse depuis plus de 24 h` });
 
   // 4) Cooldown state: alert only keys not alerted within the window; heal (delete) resolved keys.
   const { data: stateRows } = await admin.from("admin_alert_state").select("key, last_alerted_at");
@@ -165,7 +166,7 @@ async function runOpsAlertSweep(): Promise<JsonRecord> {
   }
 
   return {
-    checked: ["snapshot_stale", "sources_error", "sources_incomplete", "cron_fails", "gateway_down", "relay_down", "billing_cron_fails", "billing_past_due", "stancer_down"],
+    checked: ["snapshot_stale", "sources_error", "sources_incomplete", "cron_fails", "gateway_down", "relay_down", "billing_cron_fails", "billing_past_due", "stancer_down", "support_stale"],
     problems, alerted: toAlert.map((p) => p.key), healed, emailed,
     snapshotAgeMin: Number.isFinite(snapshotAgeMin) ? snapshotAgeMin : null,
   };

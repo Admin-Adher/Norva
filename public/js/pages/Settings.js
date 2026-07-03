@@ -87,6 +87,12 @@ class SettingsPage {
             window.location.href = dest + '?returnTo=' + encodeURIComponent(returnTo);
         });
 
+        // Support tickets: dedicated page (open a ticket, see replies) — replies
+        // also arrive by email, and the CRM tracks the whole thread.
+        document.getElementById('settings-support-btn')?.addEventListener('click', () => {
+            window.location.href = '/support.html';
+        });
+
         // Account deletion uses the dedicated page (session-aware, typed
         // confirmation), which also works inside the APK WebView and is the same
         // public URL Play requires for web-based deletion.

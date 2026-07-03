@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#090b10">
+  <title>Norva Support</title>
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #090b10; --panel: #11151d; --line: #283246; --text: #f8fafc;
+      --muted: #a8b3c7; --quiet: #6b7690; --accent: #5b7cfa; --pink: #b579ff;
+      --green: #34d399; --amber: #fbbf24;
+    }
+    body { min-height: 100vh; background: var(--bg); color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+      display: flex; justify-content: center; padding: 22px; }
+    .wrap { width: min(640px, 100%); }
+    .brand { display: flex; align-items: center; gap: 12px; margin: 8px 0 18px; }
+    .brand img { width: 40px; height: 40px; border-radius: 8px; }
+    .brand span { font-size: 20px; font-weight: 800; }
+    h1 { font-size: clamp(24px, 5vw, 32px); margin-bottom: 6px; }
+    .sub { color: var(--muted); font-size: 14px; margin-bottom: 22px; }
+    .card { border: 1px solid var(--line); border-radius: 14px; padding: 20px; background: var(--panel); margin-bottom: 18px; }
+    .card h2 { font-size: 16px; margin-bottom: 12px; }
+    label { display: block; font-size: 13px; color: var(--muted); margin: 10px 0 6px; }
+    input[type=text], textarea { width: 100%; background: var(--bg); border: 1px solid var(--line);
+      border-radius: 10px; color: var(--text); padding: 11px 12px; font: inherit; font-size: 14px; }
+    textarea { min-height: 110px; resize: vertical; }
+    input:focus, textarea:focus { outline: 2px solid var(--pink); outline-offset: 1px; }
+    .btn { min-height: 46px; border: 0; border-radius: 10px; padding: 0 20px; color: #fff;
+      background: var(--accent); font: inherit; font-weight: 800; cursor: pointer; margin-top: 14px;
+      display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
+    .btn.ghost { background: #242c3d; color: #dbe7ff; border: 1px solid #344158; }
+    .btn:disabled { opacity: .6; cursor: default; }
+    .note { color: var(--quiet); font-size: 12px; margin-top: 10px; line-height: 1.5; }
+    .ok-msg { color: var(--green); font-size: 14px; margin-top: 12px; }
+    .err-msg { color: #fb7185; font-size: 14px; margin-top: 12px; }
+    .ticket { border: 1px solid var(--line); border-radius: 12px; margin-bottom: 10px; overflow: hidden; }
+    .ticket-head { display: flex; align-items: center; gap: 10px; padding: 13px 15px; cursor: pointer; }
+    .ticket-head:hover { background: #ffffff08; }
+    .ticket-subject { flex: 1; font-weight: 700; font-size: 14px; min-width: 0;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .chip { flex-shrink: 0; padding: 3px 10px; border-radius: 999px; font-size: 11px; font-weight: 800; text-transform: uppercase; }
+    .chip.open { background: rgba(91,124,250,.18); color: #a9bcff; }
+    .chip.pending { background: rgba(52,211,153,.15); color: var(--green); }
+    .chip.closed { background: rgba(255,255,255,.07); color: var(--quiet); }
+    .ticket-age { color: var(--quiet); font-size: 12px; flex-shrink: 0; }
+    .thread { display: none; padding: 4px 15px 15px; border-top: 1px solid var(--line); }
+    .ticket.expanded .thread { display: block; }
+    .msg { max-width: 88%; margin: 10px 0; padding: 10px 13px; border-radius: 12px; font-size: 14px;
+      line-height: 1.55; white-space: pre-wrap; word-break: break-word; }
+    .msg.user { background: #1c2433; margin-left: auto; border-bottom-right-radius: 4px; }
+    .msg.admin { background: rgba(52,211,153,.1); border: 1px solid rgba(52,211,153,.25); border-bottom-left-radius: 4px; }
+    .msg .who { font-size: 11px; color: var(--quiet); margin-bottom: 4px; font-weight: 700; }
+    .reply-row { display: flex; gap: 8px; margin-top: 10px; }
+    .reply-row textarea { min-height: 44px; flex: 1; }
+    .reply-row .btn { margin-top: 0; min-height: 44px; }
+    .loading { color: var(--muted); padding: 12px 2px; }
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <div class="brand"><img src="/favicon.png" alt=""><span>Norva</span></div>
+    <h1>Support</h1>
+    <p class="sub">Tell us what's wrong — we usually reply within a day, straight to this page and your inbox.</p>
+
+    <div class="card" id="new-ticket-card">
+      <h2>Open a ticket</h2>
+      <div id="signin-needed" style="display:none">
+        <p class="note">Sign in to contact support from your account.</p>
+        <a class="btn" id="signin-link" href="/account.html?returnTo=%2Fsupport.html">Sign in</a>
+      </div>
+      <form id="ticket-form" style="display:none">
+        <label for="t-subject">Subject</label>
+        <input type="text" id="t-subject" maxlength="180" placeholder="e.g. Playback stops after a few minutes" required>
+        <label for="t-body">What happened?</label>
+        <textarea id="t-body" maxlength="8000" placeholder="Describe the issue — device, what you tried, any error message." required></textarea>
+        <button type="submit" class="btn" id="t-submit">Send to support</button>
+        <div id="t-feedback"></div>
+        <p class="note">Your ticket goes to our support team and every reply lands here and in your email.</p>
+      </form>
+    </div>
+
+    <div class="card">
+      <h2>Your tickets</h2>
+      <div id="tickets"><div class="loading">Loading…</div></div>
+    </div>
+  </main>
+
+  <script src="/js/cloudApi.js"></script>
+  <script src="/js/authApi.js"></script>
+  <script>
+    (function () {
+      const BASE = ((window.NorvaAuth && NorvaAuth.supabaseUrl) || 'https://oupsceccxsonaalhueff.supabase.co').replace(/\/+$/, '') + '/functions/v1/norva-support';
+      const APIKEY = (window.NorvaAuth && NorvaAuth.publishableKey) || '';
+
+      function token() {
+        try { return (JSON.parse(localStorage.getItem('norva-cloud-session') || 'null') || {}).access_token || ''; }
+        catch (_) { return ''; }
+      }
+      async function call(path, opts) {
+        const t = token();
+        if (!t) throw new Error('not_signed_in');
+        const res = await fetch(BASE + path, Object.assign({
+          headers: { 'Content-Type': 'application/json', 'apikey': APIKEY, 'Authorization': 'Bearer ' + t }
+        }, opts || {}));
+        const data = await res.json().catch(function () { return {}; });
+        if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+        return data;
+      }
+      function esc(s) {
+        return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+          return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+        });
+      }
+      function timeAgo(d) {
+        const s = Math.max(0, Math.round((Date.now() - new Date(d).getTime()) / 1000));
+        if (s < 60) return 'just now';
+        const m = Math.round(s / 60); if (m < 60) return m + ' min ago';
+        const h = Math.round(m / 60); if (h < 24) return h + ' h ago';
+        return Math.round(h / 24) + ' d ago';
+      }
+
+      const signedIn = !!token();
+      document.getElementById('signin-needed').style.display = signedIn ? 'none' : 'block';
+      document.getElementById('ticket-form').style.display = signedIn ? 'block' : 'none';
+
+      // Deep-link prefill (e.g. the cancel flow sends ?subject=…).
+      const params = new URLSearchParams(location.search);
+      if (params.get('subject')) document.getElementById('t-subject').value = params.get('subject').slice(0, 180);
+
+      async function loadTickets() {
+        const el = document.getElementById('tickets');
+        if (!signedIn) { el.innerHTML = '<p class="note">Sign in to see your tickets.</p>'; return; }
+        try {
+          const data = await call('/mine', { method: 'GET' });
+          renderTickets(data.tickets || [], data.messages || []);
+        } catch (e) {
+          el.innerHTML = '<p class="err-msg">Could not load your tickets: ' + esc(e.message) + '</p>';
+        }
+      }
+
+      function renderTickets(tickets, messages) {
+        const el = document.getElementById('tickets');
+        if (!tickets.length) { el.innerHTML = '<p class="note">No tickets yet. If something\'s wrong, open one above — we\'re quick.</p>'; return; }
+        const byTicket = {};
+        messages.forEach(function (m) { (byTicket[m.ticket_id] = byTicket[m.ticket_id] || []).push(m); });
+        el.innerHTML = tickets.map(function (t) {
+          const msgs = (byTicket[t.id] || []).map(function (m) {
+            return '<div class="msg ' + (m.from_admin ? 'admin' : 'user') + '">' +
+              '<div class="who">' + (m.from_admin ? 'Norva support' : 'You') + ' · ' + esc(timeAgo(m.created_at)) + '</div>' +
+              esc(m.body) + '</div>';
+          }).join('');
+          const chip = t.status === 'closed' ? '<span class="chip closed">closed</span>'
+            : (t.last_from === 'admin' ? '<span class="chip pending">replied</span>' : '<span class="chip open">open</span>');
+          const reply = t.status === 'closed' ? '<p class="note">This ticket is closed — open a new one if you need anything else.</p>'
+            : '<div class="reply-row"><textarea placeholder="Reply…" data-reply="' + esc(t.id) + '"></textarea>' +
+              '<button class="btn ghost" data-send="' + esc(t.id) + '">Send</button></div>';
+          return '<div class="ticket" data-ticket="' + esc(t.id) + '">' +
+            '<div class="ticket-head">' + chip +
+            '<span class="ticket-subject">' + esc(t.subject) + '</span>' +
+            '<span class="ticket-age">' + esc(timeAgo(t.last_message_at)) + '</span></div>' +
+            '<div class="thread">' + msgs + reply + '</div></div>';
+        }).join('');
+
+        el.querySelectorAll('.ticket-head').forEach(function (h) {
+          h.addEventListener('click', function () { h.parentElement.classList.toggle('expanded'); });
+        });
+        el.querySelectorAll('[data-send]').forEach(function (b) {
+          b.addEventListener('click', async function () {
+            const id = b.dataset.send;
+            const ta = el.querySelector('textarea[data-reply="' + id + '"]');
+            const body = ta ? ta.value.trim() : '';
+            if (!body) return;
+            b.disabled = true; b.textContent = '…';
+            try { await call('/reply', { method: 'POST', body: JSON.stringify({ ticket_id: id, body: body }) }); loadTickets(); }
+            catch (e) { b.disabled = false; b.textContent = 'Send'; window.alert('Could not send: ' + e.message); }
+          });
+        });
+      }
+
+      document.getElementById('ticket-form').addEventListener('submit', async function (ev) {
+        ev.preventDefault();
+        const subject = document.getElementById('t-subject').value.trim();
+        const body = document.getElementById('t-body').value.trim();
+        const fb = document.getElementById('t-feedback');
+        const btn = document.getElementById('t-submit');
+        if (subject.length < 3 || body.length < 5) { fb.innerHTML = '<p class="err-msg">Please fill in a subject and a message.</p>'; return; }
+        btn.disabled = true; btn.textContent = 'Sending…';
+        try {
+          await call('/create', { method: 'POST', body: JSON.stringify({ subject: subject, body: body }) });
+          fb.innerHTML = '<p class="ok-msg">✓ Ticket sent — we\'ll get back to you shortly.</p>';
+          document.getElementById('t-subject').value = '';
+          document.getElementById('t-body').value = '';
+          loadTickets();
+        } catch (e) {
+          fb.innerHTML = '<p class="err-msg">Could not send: ' + esc(e.message) + '</p>';
+        }
+        btn.disabled = false; btn.textContent = 'Send to support';
+      });
+
+      loadTickets();
+    })();
+  </script>
+</body>
+</html>

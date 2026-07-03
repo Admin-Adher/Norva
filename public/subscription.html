@@ -343,8 +343,8 @@
           modal.appendChild(el('h2', null, "Sorry about that — let's fix it"));
           modal.appendChild(el('p', null, 'Tell us what went wrong and we’ll help — most issues are sorted within a day. ' + keepNote));
           const row = actionsRow();
-          const mail = el('a', 'btn', 'Email support@norva.tv');
-          mail.setAttribute('href', 'mailto:support@norva.tv?subject=Norva%20issue%20(before%20cancelling)');
+          const mail = el('a', 'btn', 'Contact support');
+          mail.setAttribute('href', '/support.html?subject=' + encodeURIComponent('Issue before cancelling'));
           row.appendChild(mail);
           row.appendChild(cancelNowButton());
           modal.appendChild(row);
