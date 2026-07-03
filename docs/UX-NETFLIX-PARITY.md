@@ -107,3 +107,59 @@ APK Android mobile, APK Android TV) ont été implémentés en 8 commits.
 - Minification/bundling complet du front (étape de build à introduire).
 - Cast des chaînes live depuis le web (le pairing cloud « lire sur TV » couvre
   déjà le cas ; le VOD est couvert par le sender).
+
+---
+
+# Lot 2 — mineurs + transversal (2026-07-03)
+
+Suite du lot 1 (les 28 bloquants/majeurs). Traité en 3 PR : #70 (fix Admin),
+#71 (mineurs + transversal). Décisions owner : **Tizen hors périmètre**,
+**interface EN-only pour l'instant** (i18n multilingue plus tard).
+
+## Correctif — bouton Admin
+Le lien `#nav-admin` ne portait que `hidden` (écrasé par `.nav-link{display:flex}`)
+→ visible pour tous. Corrigé (`display:none` + reveal admin-only). Admin devient
+**web-only** (jamais chargé dans les APK) ; la route re-vérifie `is_admin` avant de
+télécharger AdminPage.js.
+
+## Mineurs Android TV
+Chevron d'options focusable · dialog « Exit Norva? » + entrée Connection settings
+(plus seulement la touche MENU) · PIP · strings player en anglais · ré-ancrage du
+focus au plus proche après re-render · `<select>` → liste custom à la télécommande.
+
+## Mineurs Android mobile
+Play/pause en PiP (RemoteAction) · verrouillage des contrôles · pinch-to-zoom
+(fit↔zoom) · smart downloads (auto-queue de l'épisode suivant, payload `next` attaché
+par le web) · splash brandé (core-splashscreen) · cibles tactiles ≥44px (coarse
+pointer).
+
+## Mineurs web
+Skeletons sur toutes les rails · raccourcis J/L/C/N/0-9 · undo toast sur suppression
+Continue Watching (helper `app.showToast`) · panneau épisode suivant enrichi (still +
+synopsis + Watch Credits) · « Are you still watching? » après 3 autoplays · états
+vides avec CTA · bannière offline · badge NEW <14j (`MediaUtils.isRecentlyAdded`) ·
+indicateur de débit Mbps dans le badge qualité.
+
+## Transversal
+- **Anglais (viewer)** : sweep FR→EN de tout le chrome viewer (web + player TV +
+  rail titles `norva-catalog`). Endonyms de langues conservés (UX correcte).
+- **Recherche fuzzy** : `pg_trgm` + index trigramme sur `cloud_media_items.title` +
+  RPC `search_media_items` (substring d'abord, puis similarité), branché dans
+  `listMediaItems`. Vérifié : « intersteller » → « Interstellar ».
+  *Recherche par acteur = chantier séparé (le cast n'est pas stocké).*
+- **Thumbs 👍/👎** : table `cloud_title_ratings` + routes `/ratings` (norva-cloud) +
+  `NorvaCloud.ratings` + boutons sur les fiches film/série (toggle-off).
+- **Inbox notifications** : réutilise `cloud_content_events` ; feed `?all=1`
+  (seen+unseen + unread, sans auto-mark) + cloche navbar + point non-lu + dropdown
+  qui marque lu à l'ouverture.
+- **My List unifiée** : rail Home cross-type (films+séries) rendu depuis name+poster
+  désormais persistés à l'ajout en favori (`item_name`/`item_meta`) ; les chaînes
+  gardent leur rail dédié.
+- **A11y** : `:focus-visible` global (clavier, TV exclu) + aria-labels sur les boutons
+  icône ; aria-live déjà sur les toasts/notifications.
+
+## Migrations (appliquées live via MCP, committées)
+`20260703120000_search_media_fuzzy`, `20260703130000_title_ratings`.
+
+## Reste chantier (non fait, assumé)
+Recherche par acteur (backfill cast), minification/bundling front, player Tizen.
