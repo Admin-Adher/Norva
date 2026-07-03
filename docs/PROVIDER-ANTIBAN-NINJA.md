@@ -90,13 +90,22 @@ Cible : rendre le crawl **indiscernable d'un foyer normal** sur un provider anti
 ensuite* re-scheduler les crons Ninja domptés. Ordre important : ne pas ré-activer les crons avant
 que la gateway serve `/probe-audio`.
 
+## Déployé + validé (2026-07-03)
+
+**Mergé** (PR #73, `27cc534`) → gateway **v63** (Railway) + edge (Supabase Actions) + frontend
+(Cloudflare) déployés et vérifiés. **Test tick validé live** : 3 films Ninja sondés via l'IP
+résidentielle → résolus **« de | en »**, **3 hits** dans `provider_probe_hits`, `diag` tout à zéro
+(0 relayNotOk / 0 noTarget / 0 footprintCapped). **Crons domptés actifs** : `norva-audio-airo-ninja`
+(jobid 79, `4-59/12`, films limit 12) + `norva-audio-airo-ninja-series` (jobid 80, `9-59/12`, séries
+limit 8), conc 1 + jitter + mutex lecture + cap 40/h.
+
 ## Checklist de ré-activation Ninja
 
 - [x] Identifiants remplacés dans l'app (ré-encrypte `config_ciphertext` + re-sync).
 - [x] Slice 0-4 codés (flag/budget, IP résidentielle, cap/jitter/mutex, dashboard) ; Slice 0+4-SQL live.
-- [ ] Déployer gateway v63 + merger l'edge.
-- [ ] Re-scheduler les crons Ninja **domptés** (commandes dans `ENRICHMENT_CRON_SETUP.md`).
-- [ ] Surveiller 48 h : `provider_probe_hits` ≤ 40/h, `résolu_24h > 0`, pas de 401 barfik, alarme « provider muet » éteinte.
+- [x] Déployer gateway v63 + merger l'edge (PR #73, gateway v63 confirmée).
+- [x] Re-scheduler les crons Ninja **domptés** (jobid 79/80).
+- [ ] **Surveiller 48 h** : `provider_probe_hits` ≤ 40/h, `résolu_24h > 0`, pas de 401 barfik, alarme « provider muet » éteinte. *(sous-titres/whisper Ninja à ajouter après cette fenêtre.)*
 
 ## Bug dashboard connexe (révélé par cet incident)
 
