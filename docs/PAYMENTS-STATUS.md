@@ -49,10 +49,11 @@ via un **token card-on-file** :
 - Base : `https://api.stancer.com` · Auth : **HTTP Basic**, la clé API en username (`sprod_…`/`stest_…`).
 - **Créer customer** : `POST /v2/customers/` `{name,email}` → `cust_…`.
 - **Créer paiement (hébergé)** : `POST /v2/payment_intents/` `{amount(cents), currency:"usd",
-  capture:false, methods_allowed:["card"] (tableau !), **auth:true**, return_url, order_id (≤36 car.),
-  customer, metadata}` → `{ id:"pi_…", url:"https://payment.stancer.com/[test_]pi_…", status, card }`.
-  ⚠️ **`auth:true` OBLIGATOIRE** sur la page hébergée : force le 3DS. Sans lui, le formulaire carte ne
-  s'affiche pas et Stancer renvoie `Card payment paym_… is not ready for authorization`.
+  capture:false, methods_allowed:["card"] (tableau !), return_url, order_id (≤36 car.), customer,
+  metadata}` → `{ id:"pi_…", url:"https://payment.stancer.com/[test_]pi_…", status, card }`.
+  ⚠️ **PAS de champ `auth`** sur les payment_intents (422 `extra fields not permitted`, confirmé via
+  selftest) ; le 3DS y est implicite (`threeds:"required"` dans la réponse). `auth` n'existe que sur
+  l'ancienne API `/v2/payments`.
 - **Relire un paiement** : `GET /v2/payment_intents/{pi_id}` (**pluriel**).
 - **Débiter un token (récurrent)** : `POST /v1/checkout/` `{amount, currency:"usd", card:"card_…",
   customer:"cust_…", unique_id (≤36 car.)}` → `{status:"captured"/"to_capture", response:"00"}`.
