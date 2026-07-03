@@ -98,7 +98,7 @@
       window.ensureHls = function () {
         if (typeof window.Hls !== 'undefined') return Promise.resolve(true);
         if (pending) return pending;
-        pending = inject('/js/vendor/hls-1.5.7.min.js').then(function (ok) {
+        pending = inject('/js/vendor/hls-1.5.7.min.js?v=1').then(function (ok) {
           return ok || inject('https://cdn.jsdelivr.net/npm/hls.js@1.5.7/dist/hls.min.js');
         }).then(function (ok) {
           if (!ok) { pending = null; console.error('[Norva] hls.js could not be loaded (local + CDN failed)'); }
