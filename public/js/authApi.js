@@ -104,6 +104,19 @@
         return setSession(payload);
     }
 
+    // Social sign-in (Google/Apple/etc.) via Supabase GoTrue. Full-page redirect to
+    // the provider; on return, GoTrue appends the session to the URL fragment of
+    // `redirectTo`, which captureSessionFromUrl() picks up. Requires the provider to
+    // be enabled in the Supabase dashboard (Auth → Providers) and `redirectTo` to be
+    // allow-listed in Auth → URL Configuration. No-ops for an empty provider.
+    function signInWithOAuth(provider, redirectTo) {
+        if (!provider) return;
+        const url = new URL(`${supabaseUrl()}/auth/v1/authorize`);
+        url.searchParams.set('provider', provider);
+        url.searchParams.set('redirect_to', redirectTo || `${location.origin}/account.html`);
+        location.assign(url.toString());
+    }
+
     async function refreshSession() {
         const current = getSession();
         if (!current?.refresh_token) return null;

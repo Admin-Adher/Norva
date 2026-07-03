@@ -49,3 +49,8 @@ verify_jwt = false
 # .role === 'admin') before using the service role to act.
 [functions.norva-admin]
 verify_jwt = false
+
+# Lifecycle / billing emails cron (welcome always; trial J-2 reminder, dunning, win-back
+# gated behind NORVA_LIFECYCLE_BILLING_LIVE). Cron-authenticated via norva_verify_cron_secret.
+[functions.norva-lifecycle]
+verify_jwt = false
