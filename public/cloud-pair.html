@@ -138,6 +138,35 @@
             font-size: 13px;
             margin-top: 12px;
         }
+        .qr-wrap {
+            display: grid;
+            place-items: center;
+            gap: 12px;
+            margin-bottom: 6px;
+        }
+        .qr {
+            width: clamp(168px, 26vw, 248px);
+            aspect-ratio: 1 / 1;
+            background: #fff;
+            padding: 12px;
+            border-radius: 14px;
+            box-shadow: 0 12px 34px rgba(0, 0, 0, 0.32);
+        }
+        .qr:empty { display: none; }
+        .qr svg { width: 100%; height: 100%; display: block; }
+        .qr-caption {
+            color: var(--text);
+            font-size: clamp(15px, 2vw, 20px);
+            font-weight: 800;
+        }
+        .code-alt { color: var(--muted); font-size: 14px; }
+        .code-divider {
+            color: var(--quiet);
+            font-size: 12px;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+            margin: 20px 0 4px;
+        }
         @media (max-width: 720px) {
             body { padding: 24px; }
             .steps { grid-template-columns: 1fr; }
@@ -152,13 +181,18 @@
 
         <section class="steps" aria-label="Pairing steps">
             <div class="step"><strong>1. Open Norva Account</strong>Use your phone, tablet or computer.</div>
-            <div class="step"><strong>2. Enter this code</strong>Approve the trusted screen from your account.</div>
+            <div class="step"><strong>2. Scan or enter the code</strong>Scan the QR with your phone camera, or enter the code in your account.</div>
             <div class="step"><strong>3. Start watching</strong>The TV opens Norva Watch with your cloud library.</div>
         </section>
 
         <section class="code-box" aria-live="polite">
+            <div class="qr-wrap">
+                <div class="qr" id="qr" aria-hidden="true"></div>
+                <div class="qr-caption">Scan with your phone camera to sign in</div>
+                <div class="code-alt">Or open <span class="url" id="pair-url"></span> and enter the code below</div>
+            </div>
+            <div class="code-divider">Pairing code</div>
             <div class="code" id="code">...</div>
-            <div class="url" id="pair-url"></div>
             <div class="timer" id="timer"></div>
         </section>
 
@@ -170,10 +204,27 @@
     </main>
 
     <script src="/js/cloudApi.js?v=23"></script>
+    <script src="/js/vendor/qrcode.js?v=1"></script>
     <script>
         const params = new URLSearchParams(location.search);
         const codeEl = document.getElementById('code');
+        const qrEl = document.getElementById('qr');
         const pairUrlEl = document.getElementById('pair-url');
+
+        // Render a scannable QR of the approval URL (CSP-safe inline SVG, no data: URI).
+        // Falls back silently to the code + URL if the vendored encoder didn't load.
+        function renderQr(url) {
+            if (!qrEl) return;
+            if (typeof qrcode !== 'function') { qrEl.innerHTML = ''; return; }
+            try {
+                const qr = qrcode(0, 'M');
+                qr.addData(url);
+                qr.make();
+                qrEl.innerHTML = qr.createSvgTag({ cellSize: 6, margin: 1, scalable: true });
+            } catch (_) {
+                qrEl.innerHTML = '';
+            }
+        }
         const timerEl = document.getElementById('timer');
         const statusEl = document.getElementById('status');
         const accountLink = document.getElementById('account-link');
@@ -197,6 +248,7 @@
             clearInterval(commandHandle);
             codeEl.textContent = '...';
             pairUrlEl.textContent = '';
+            if (qrEl) qrEl.innerHTML = '';
             timerEl.textContent = '';
             setStatus('', 'Creating pairing code...');
 
@@ -219,6 +271,7 @@
                 codeEl.textContent = currentCode;
                 pairUrlEl.textContent = pairUrl;
                 accountLink.href = pairPath;
+                renderQr(pairUrl);
                 setStatus('', 'Waiting for approval...');
                 updateTimer();
                 pollHandle = setInterval(pollPairing, 2500);
