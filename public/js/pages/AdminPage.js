@@ -17,7 +17,7 @@ class AdminPage {
         this._isAdmin = null; // cached tri-state (null = unknown)
         this._route = 'cockpit';
         // Clients list is LIVE/paginated (not part of the cached snapshot). Its own state.
-        this._users = { page: 0, limit: 25, search: '', sort: 'created_desc', tagId: '', total: 0 };
+        this._users = { page: 0, limit: 25, search: '', sort: 'created_desc', tagId: '', billing: '', total: 0 };
         this._allTags = [];
         this._usersDebounce = null;
         this._lastTs = null; // snapshot refreshed_at for the topbar
@@ -73,6 +73,7 @@ class AdminPage {
     static NAV() {
         return [
             { key: 'cockpit', label: 'Cockpit', icon: '🎯' },
+            { key: 'finance', label: 'Finance', icon: '💶' },
             { key: 'clients', label: 'Clients', icon: '👥' },
             { key: 'providers', label: 'Providers', icon: '📡' },
             { key: 'identites', label: 'Identités', icon: '🧬' },
@@ -308,6 +309,7 @@ class AdminPage {
         this._route = route;
         this._setActiveNav(route);
         if (route === 'cockpit') this._pageCockpit();
+        else if (route === 'finance') this._pageFinance();
         else if (route === 'clients') this._pageClients();
         else if (route.startsWith('client:')) this._pageClientDetail(route.slice(7));
         else if (route === 'providers') this._pageProviders();
@@ -356,6 +358,130 @@ class AdminPage {
         }).join('');
     }
 
+    // ── Page: Finance (MRR / statuts / encaissé / funnel / churn / paiements) ──
+    async _pageFinance() {
+        this._setCrumb('Finance');
+        const v = this._view();
+        v.innerHTML = `<div class="crm-page">
+            <h1 class="crm-h1">💶 Finance</h1>
+            <p class="crm-sub">Revenus par plan/période/rail, abonnés par statut, encaissements, funnel de conversion et churn — données live.</p>
+            <div id="fin-body"><div class="ssub">Chargement…</div></div>
+        </div>`;
+        try {
+            const f = await this._rpc('admin_finance');
+            this._renderFinance(f || {});
+        } catch (e) {
+            const el = document.getElementById('fin-body');
+            if (el) el.innerHTML = `<div class="admin-err">Erreur : ${AdminPage.esc(e.message)}</div>`;
+        }
+    }
+
+    _renderFinance(f) {
+        const el = document.getElementById('fin-body');
+        if (!el) return;
+        const n = AdminPage.n, money = AdminPage.money, esc = AdminPage.esc;
+        const card = (v2, l, cls) => `<div class="kpi ${cls || ''}"><div class="v">${v2}</div><div class="l">${l}</div></div>`;
+        const counts = f.counts || {};
+        const up = f.upcoming || {};
+        const day = (d) => d ? new Date(d).toLocaleString('fr-FR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—';
+
+        // Status cards are the daily working views: each one opens Clients pre-filtered.
+        const statusCard = (v2, l, filter, cls) =>
+            `<div class="kpi fin-status ${cls || ''}" data-billing="${filter}" style="cursor:pointer" title="Voir ces clients"><div class="v">${v2}</div><div class="l">${l}</div></div>`;
+
+        const byPlan = Array.isArray(f.by_plan) ? f.by_plan : [];
+        const planRows = byPlan.map(r => `<tr>
+            <td>${esc(r.plan_code)}</td><td>${esc(r.period)}</td><td><span class="badge blue">${esc(r.provider)}</span></td>
+            <td class="num">${n(r.n)}</td><td class="num">${money(r.mrr_cents)}</td>
+        </tr>`).join('');
+
+        const FUNNEL_ORDER = ['signup', 'source_added', 'first_play', 'checkout_open', 'trial_start', 'trial_convert', 'renewal', 'cancel', 'save', 'winback_return'];
+        const FUNNEL_LABELS = { signup: 'Inscriptions', source_added: '1ʳᵉ source ajoutée', first_play: '1ʳᵉ lecture', checkout_open: 'Checkout ouvert', trial_start: 'Essai démarré', trial_convert: 'Essai → payant', renewal: 'Renouvellements', cancel: 'Annulations', save: 'Saves (contre-offre)', winback_return: 'Retours win-back' };
+        const funnelMap = {};
+        (Array.isArray(f.funnel_30d) ? f.funnel_30d : []).forEach(r => { funnelMap[r.stage] = r.users; });
+        const funnelRows = FUNNEL_ORDER.filter(s => funnelMap[s] != null).map(s =>
+            `<tr><td>${FUNNEL_LABELS[s] || esc(s)}</td><td class="num">${n(funnelMap[s])}</td></tr>`).join('');
+
+        const REASONS = { too_expensive: 'Trop cher', not_using: 'Utilise pas assez', technical: 'Problème technique', other: 'Autre', skipped: 'Non précisé' };
+        const reasonRows = (Array.isArray(f.cancel_reasons) ? f.cancel_reasons : []).map(r =>
+            `<tr><td>${REASONS[r.reason] || esc(r.reason)}</td><td class="num">${n(r.n)}</td></tr>`).join('');
+        const savesTotal = Number(f.saves_total) || 0;
+        const cancelsTotal = Number(f.cancels_total) || 0;
+        const saveRate = (savesTotal + cancelsTotal) > 0 ? Math.round(100 * savesTotal / (savesTotal + cancelsTotal)) : null;
+
+        const KIND_LABELS = { trial_setup: 'essai (carte)', first_charge: '1ᵉʳ prélèvement', renewal: 'renouvellement', plan_change: 'changement plan', resubscribe: 'réabonnement', card_update: 'MAJ carte' };
+        const payBadge = (s) => s === 'captured' ? '<span class="badge green">captured</span>'
+            : (s === 'authorized' || s === 'to_capture') ? `<span class="badge blue">${esc(s)}</span>`
+            : (s === 'require_payment_method') ? '<span class="badge amber">non finalisé</span>'
+            : `<span class="badge gray">${esc(s)}</span>`;
+        const payRows = (Array.isArray(f.recent_payments) ? f.recent_payments : []).map(p => `<tr class="user-row" data-user-id="${esc(p.user_id)}" title="Voir la fiche">
+            <td>${esc(day(p.at))}</td><td>${esc(p.email || p.user_id)}</td>
+            <td>${KIND_LABELS[p.kind] || esc(p.kind)}</td><td>${payBadge(p.status)}</td>
+            <td class="num">${money(p.amount)} <span class="pacct">${esc(String(p.currency || '').toUpperCase())}</span></td>
+        </tr>`).join('');
+
+        el.innerHTML = `
+            <div class="kpi-group"><div class="kpi-gtitle">💶 Revenus récurrents</div><div class="admin-cards">
+                ${card(money(f.mrr_cents), 'MRR', Number(f.mrr_cents) > 0 ? 'ok' : '')}
+                ${card(money(f.arr_cents), 'ARR')}
+                ${card(money(f.mrr_trial_cents), 'MRR en essai (à venir)')}
+                ${card(money(f.collected_30d_cents), 'Encaissé 30 j', Number(f.collected_30d_cents) > 0 ? 'ok' : '')}
+                ${card(n(f.conversions_7d), 'Conversions 7 j')}
+                ${Number(f.mrr_unknown_n) > 0 ? card(n(f.mrr_unknown_n), 'Abos sans montant connu (manuel/store)') : ''}
+            </div></div>
+            <div class="kpi-group"><div class="kpi-gtitle">👥 Abonnés par statut — cliquer pour ouvrir la liste</div><div class="admin-cards">
+                ${statusCard(n(counts.trialing), 'En essai', 'trialing', 'ok')}
+                ${statusCard(n(counts.active), 'Actifs payants', 'active', 'ok')}
+                ${statusCard(n(counts.past_due), 'Échec paiement', 'past_due', Number(counts.past_due) > 0 ? 'alert' : '')}
+                ${statusCard(n(counts.cancel_pending), 'Annulation prévue', 'cancel_pending', Number(counts.cancel_pending) > 0 ? 'alert' : '')}
+                ${statusCard(n(counts.expired), 'Expirés', 'expired')}
+            </div></div>
+            <div class="admin-block"><h2>📅 Échéances</h2><div class="admin-cards">
+                ${card(n(up.trial_charges_48h_n), 'Essais → prélèvement < 48 h')}
+                ${card(money(up.trial_charges_48h_cents), 'Montant essais < 48 h')}
+                ${card(n(up.renewals_7d_n), 'Renouvellements < 7 j')}
+                ${card(money(up.renewals_7d_cents), 'Montant renouv. < 7 j')}
+                ${Number(f.discounts_pending) > 0 ? card(n(f.discounts_pending), 'Remises 50% en attente') : ''}
+            </div></div>
+            <div class="admin-block"><h2>📊 MRR par plan, période & rail</h2><div class="scroll">
+                ${planRows ? `<table><thead><tr><th>Plan</th><th>Période</th><th>Rail</th><th class="num">Abonnés</th><th class="num">MRR</th></tr></thead><tbody>${planRows}</tbody></table>` : '<div class="ssub">Aucun abonnement payant.</div>'}
+            </div></div>
+            <div class="admin-block"><h2>🔀 Funnel de conversion (30 j)</h2><div class="scroll">
+                ${funnelRows ? `<table><thead><tr><th>Étape</th><th class="num">Utilisateurs uniques</th></tr></thead><tbody>${funnelRows}</tbody></table>` : '<div class="ssub">Aucune donnée funnel sur 30 j.</div>'}
+            </div></div>
+            <div class="admin-block"><h2>🛑 Annulations & rétention</h2>
+                <div class="admin-cards" style="margin-bottom:14px">
+                    ${card(n(cancelsTotal), 'Annulations (total)')}
+                    ${card(n(savesTotal), 'Saves contre-offre', savesTotal > 0 ? 'ok' : '')}
+                    ${saveRate != null ? card(saveRate + ' %', 'Taux de save', saveRate >= 20 ? 'ok' : '') : ''}
+                </div>
+                ${reasonRows ? `<div class="scroll"><table><thead><tr><th>Raison d'annulation</th><th class="num">Clients</th></tr></thead><tbody>${reasonRows}</tbody></table></div>` : '<div class="ssub">Aucune annulation enregistrée — les raisons s\'accumuleront ici.</div>'}
+            </div>
+            <div class="admin-block"><h2>🧾 Derniers paiements (50) <button id="fin-csv" class="mini-btn" title="Exporter en CSV">⬇ CSV</button></h2><div class="scroll">
+                ${payRows ? `<table><thead><tr><th>Date</th><th>Client</th><th>Type</th><th>Statut</th><th class="num">Montant</th></tr></thead><tbody>${payRows}</tbody></table>` : '<div class="ssub">Aucun paiement.</div>'}
+            </div></div>`;
+
+        // Status cards → Clients pre-filtered; CSV of the recent payments table.
+        el.querySelectorAll('.fin-status').forEach(c => c.addEventListener('click', () => {
+            this._users.billing = c.dataset.billing || '';
+            this._users.page = 0;
+            this._navigate('clients');
+        }));
+        const csv = document.getElementById('fin-csv');
+        if (csv) csv.addEventListener('click', () => {
+            const rows = Array.isArray(f.recent_payments) ? f.recent_payments : [];
+            const q = (x) => `"${String(x == null ? '' : x).replace(/"/g, '""')}"`;
+            const lines = [['date', 'email', 'type', 'statut', 'montant_cents', 'devise', 'pi_id', 'user_id'].map(q).join(',')]
+                .concat(rows.map(p => [p.at, p.email, p.kind, p.status, p.amount, p.currency, p.pi_id, p.user_id].map(q).join(',')));
+            const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = 'norva-paiements.csv';
+            document.body.appendChild(a); a.click(); a.remove();
+            setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+        });
+    }
+
     // ── Page: Clients (list) ──
     _pageClients() {
         this._setCrumb('Clients');
@@ -370,6 +496,15 @@ class AdminPage {
                 <option value="created_asc">Plus anciens</option>
                 <option value="active_desc">Dernière activité</option>
                 <option value="email_asc">Email A→Z</option>
+              </select>
+              <select id="admin-users-billing">
+                <option value="">Tous les abonnements</option>
+                <option value="trialing">En essai</option>
+                <option value="active">Actifs payants</option>
+                <option value="past_due">Échec paiement</option>
+                <option value="cancel_pending">Annulation prévue</option>
+                <option value="expired">Expirés</option>
+                <option value="free">Sans abonnement</option>
               </select>
               <select id="admin-users-tag"><option value="">Tous les segments</option></select>
               <button id="admin-users-csv" title="Exporter la liste filtrée en CSV (max 10 000 lignes)">⬇ CSV</button>
@@ -395,6 +530,11 @@ class AdminPage {
         if (sortSel) sortSel.addEventListener('change', () => {
             this._users.sort = sortSel.value; this._users.page = 0; this._loadUsers();
         });
+        const billSel = document.getElementById('admin-users-billing');
+        if (billSel) {
+            billSel.value = this._users.billing || '';
+            billSel.addEventListener('change', () => { this._users.billing = billSel.value; this._users.page = 0; this._loadUsers(); });
+        }
         const tagSel = document.getElementById('admin-users-tag');
         if (tagSel) {
             this._fillTagOptions(tagSel);
@@ -420,7 +560,7 @@ class AdminPage {
         try {
             const res = await this._rpc('admin_users_page', {
                 p_limit: s.limit, p_offset: s.page * s.limit, p_search: s.search || null,
-                p_sort: s.sort, p_tag_id: s.tagId || null
+                p_sort: s.sort, p_tag_id: s.tagId || null, p_billing_status: s.billing || null
             });
             const rows = (res && Array.isArray(res.rows)) ? res.rows : [];
             s.total = Number(res && res.total) || 0;
@@ -452,7 +592,7 @@ class AdminPage {
         const el = document.getElementById('admin-users');
         if (!el) return;
         if (!rows.length) { el.innerHTML = '<div class="ssub">Aucun utilisateur.</div>'; return; }
-        const head = `<tr><th>Email</th><th>Rôle</th><th>Segments</th><th class="num">Sources</th><th>Inscrit</th><th>Dernière activité</th><th>Email vérifié</th></tr>`;
+        const head = `<tr><th>Email</th><th>Abonnement</th><th>Rôle</th><th>Segments</th><th class="num">Sources</th><th>Inscrit</th><th>Dernière activité</th><th>Email vérifié</th></tr>`;
         const day = (d) => d ? new Date(d).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
         const body = rows.map(r => {
             const role = r.role === 'admin' ? '<span class="badge amber">admin</span>' : '<span class="badge gray">user</span>';
@@ -466,6 +606,7 @@ class AdminPage {
                 : '<span class="badge gray">jamais</span>';
             return `<tr class="user-row" data-user-id="${AdminPage.esc(r.user_id)}" data-email="${AdminPage.esc(r.email || '')}" title="Voir la fiche">
                 <td>${AdminPage.esc(r.email || '—')}${driver}${banned}</td>
+                <td>${AdminPage.billingBadge(r.billing_status, r.plan_code)}</td>
                 <td>${role}</td>
                 <td>${tags}</td>
                 <td class="num">${AdminPage.n(r.sources_count)}</td>
@@ -526,14 +667,16 @@ class AdminPage {
         try {
             const rows = await this._rpc('admin_users_export', {
                 p_search: this._users.search || null,
-                p_tag_id: this._users.tagId || null
+                p_tag_id: this._users.tagId || null,
+                p_billing_status: this._users.billing || null
             });
             const list = Array.isArray(rows) ? rows : [];
             // Strict CSV: every field quoted, internal quotes doubled, CRLF lines, BOM for Excel.
             const q = (v) => `"${String(v == null ? '' : v).replace(/"/g, '""')}"`;
-            const header = ['email', 'role', 'suspendu', 'email_verifie', 'inscrit', 'derniere_activite', 'sources', 'segments', 'user_id'];
+            const header = ['email', 'statut_abo', 'plan', 'periode', 'montant_cents', 'role', 'suspendu', 'email_verifie', 'inscrit', 'derniere_activite', 'sources', 'segments', 'user_id'];
             const lines = [header.map(q).join(',')].concat(list.map(r => [
-                r.email, r.role, r.banned ? 'oui' : 'non', r.email_confirmed ? 'oui' : 'non',
+                r.email, r.billing_status || 'free', r.plan_code || '', r.billing_period || '', r.amount_cents == null ? '' : r.amount_cents,
+                r.role, r.banned ? 'oui' : 'non', r.email_confirmed ? 'oui' : 'non',
                 r.created_at || '', r.last_sign_in_at || '', r.sources_count, r.tags || '', r.user_id
             ].map(q).join(',')));
             const blob = new Blob(['\uFEFF' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
@@ -564,11 +707,75 @@ class AdminPage {
         try {
             const d = await this._rpc('admin_user_detail', { p_user_id: userId });
             this._renderFiche(d);
-            this._loadCrm(userId);   // relational panels (tags/notes/timeline), non-blocking
+            this._loadCrm(userId);      // relational panels (tags/notes/timeline), non-blocking
+            this._loadBilling(userId);  // subscription & payments panel, non-blocking
         } catch (e) {
             const b = document.getElementById('fiche-body');
             if (b) b.innerHTML = `<div class="admin-err">Erreur : ${AdminPage.esc(e.message)}</div>`;
         }
+    }
+
+    // ── Fiche: subscription & payments panel (billing rail) ──
+    async _loadBilling(userId) {
+        const el = document.getElementById('fiche-billing');
+        if (!el) return;
+        try {
+            const b = await this._rpc('admin_user_billing', { p_user_id: userId }) || {};
+            this._renderBillingPanel(el, b);
+        } catch (e) {
+            el.innerHTML = `<div class="admin-err">Erreur : ${AdminPage.esc(e.message)}</div>`;
+        }
+    }
+
+    _renderBillingPanel(el, b) {
+        const p = b.projection || null;
+        const m = b.mapping || null;
+        const pays = Array.isArray(b.payments) ? b.payments : [];
+        const feedback = Array.isArray(b.cancel_feedback) ? b.cancel_feedback : [];
+        const money = AdminPage.money, esc = AdminPage.esc;
+        const dt = (d) => d ? new Date(d).toLocaleString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
+
+        if (!p && !m && !pays.length) {
+            el.innerHTML = '<div class="ssub">Aucun abonnement ni paiement — compte gratuit.</div>';
+            return;
+        }
+
+        const row = (label, val) => `<div style="display:flex;justify-content:space-between;gap:12px;padding:7px 0;border-bottom:1px solid var(--color-border,#20202a);font-size:13px"><span style="color:#9aa">${label}</span><span style="color:#fff;font-weight:600;text-align:right">${val}</span></div>`;
+        let details = '';
+        if (p) {
+            details += row('Statut', AdminPage.billingBadge(p.status, p.plan_code) + (p.provider ? ` <span class="badge gray">${esc(p.provider)}</span>` : ''));
+            if (m && m.plan) details += row('Plan facturé', `${esc(m.plan)} · ${esc(m.period || '—')} · ${money(m.amount_cents)}`);
+            if (p.trial_ends_at) details += row(new Date(p.trial_ends_at) > new Date() ? 'Essai jusqu\'au' : 'Essai terminé le', esc(dt(p.trial_ends_at)));
+            if (p.current_period_end) details += row('Fin de période', esc(dt(p.current_period_end)));
+            if (m && m.card_last4) details += row('Carte', `•••• ${esc(m.card_last4)}${m.card_exp ? ' · exp ' + esc(m.card_exp) : ''}`);
+            if (Number(p.dunning_stage) > 0) details += row('Dunning', `<span class="badge red">relance ${esc(String(p.dunning_stage))}/3</span>${p.dunning_last_at ? ' · ' + esc(AdminPage.timeAgo(p.dunning_last_at)) : ''}`);
+            if (m && m.discount_next_pct) details += row('Prochaine charge', `<span class="badge green">−${esc(String(m.discount_next_pct))} %</span> (contre-offre)`);
+            else if (m && m.save_offer_used_at) details += row('Contre-offre', `utilisée ${esc(AdminPage.timeAgo(m.save_offer_used_at))}`);
+            const mails = [];
+            if (p.welcome_email_at) mails.push('welcome ' + AdminPage.timeAgo(p.welcome_email_at));
+            if (p.trial_reminder_email_at) mails.push('rappel J-2 ' + AdminPage.timeAgo(p.trial_reminder_email_at));
+            if (p.winback_email_at) mails.push('win-back ' + AdminPage.timeAgo(p.winback_email_at));
+            if (mails.length) details += row('Emails lifecycle', esc(mails.join(' · ')));
+        }
+
+        const KIND_LABELS = { trial_setup: 'essai (carte)', first_charge: '1ᵉʳ prélèvement', renewal: 'renouvellement', plan_change: 'changement plan', resubscribe: 'réabonnement', card_update: 'MAJ carte' };
+        const payBadge = (s) => s === 'captured' ? '<span class="badge green">captured</span>'
+            : (s === 'authorized' || s === 'to_capture') ? `<span class="badge blue">${esc(s)}</span>`
+            : (s === 'require_payment_method') ? '<span class="badge amber">non finalisé</span>'
+            : `<span class="badge gray">${esc(s)}</span>`;
+        const payRows = pays.map(x => `<tr>
+            <td>${esc(dt(x.updated_at || x.created_at))}</td>
+            <td>${KIND_LABELS[x.kind] || esc(x.kind)}</td>
+            <td>${payBadge(x.status)}</td>
+            <td class="num">${money(x.amount)}</td>
+        </tr>`).join('');
+
+        const REASONS = { too_expensive: 'trop cher', not_using: 'utilise pas assez', technical: 'problème technique', other: 'autre', skipped: 'non précisé' };
+        const fbRows = feedback.map(x => `<div class="ssub" style="margin-top:6px">${x.action === 'saved' ? '💚 Contre-offre acceptée' : '🛑 Annulation'} — raison : <b style="color:#e8e8ee">${REASONS[x.reason] || esc(x.reason)}</b> · ${esc(AdminPage.timeAgo(x.created_at))}</div>`).join('');
+
+        el.innerHTML = `${details}
+            ${payRows ? `<div style="margin-top:14px"><div class="kpi-gtitle">Historique des paiements</div><div class="scroll"><table><thead><tr><th>Date</th><th>Type</th><th>Statut</th><th class="num">Montant</th></tr></thead><tbody>${payRows}</tbody></table></div></div>` : ''}
+            ${fbRows}`;
     }
 
     // ── CRM relational panels (tags / notes / timeline) ──
@@ -614,7 +821,7 @@ class AdminPage {
 
         const tlEl = document.getElementById('fiche-timeline');
         if (tlEl) {
-            const icon = (k) => ({ signup: '🎉', provider_added: '📡', sync: '🔄', sync_started: '▶️', sync_done: '✅', sync_failed: '⚠️', note_added: '📝', tag_added: '🏷️', tag_removed: '🏷️', resync: '↻', admin_action: '⚡' }[k] || '•');
+            const icon = (k) => ({ signup: '🎉', provider_added: '📡', sync: '🔄', sync_started: '▶️', sync_done: '✅', sync_failed: '⚠️', note_added: '📝', tag_added: '🏷️', tag_removed: '🏷️', resync: '↻', admin_action: '⚡', billing: '💳', trial_started: '🚀', cancelled: '🛑', saved: '💚' }[k] || '•');
             tlEl.innerHTML = timeline.length
                 ? '<div class="tl">' + timeline.map(e => `<div class="tl-item"><span class="tl-ic">${icon(e.kind)}</span><span class="tl-sum">${AdminPage.esc(e.summary)}</span><span class="tl-at" title="${e.at ? AdminPage.esc(new Date(e.at).toLocaleString('fr-FR')) : ''}">${e.at ? AdminPage.esc(AdminPage.timeAgo(e.at)) : ''}</span></div>`).join('') + '</div>'
                 : '<div class="ssub">Aucun événement.</div>';
@@ -746,6 +953,7 @@ class AdminPage {
             </div>
             <div class="fiche-grid">
               <div class="admin-block"><h2>⚡ Actions</h2><div class="card">${actions}</div></div>
+              <div class="admin-block"><h2>💳 Abonnement & paiements</h2><div id="fiche-billing" class="card"><div class="ssub">Chargement…</div></div></div>
               <div class="admin-block"><h2>📡 Sources (${sources.length})</h2><div class="scroll">${srcHtml}</div></div>
               <div class="admin-block"><h2>⚙️ Enrichissement audio par panel</h2><div class="scroll">${enrHtml}</div></div>
               <div class="admin-block"><h2>🏷️ Tags & segments</h2><div id="fiche-tags" class="card"><div class="ssub">Chargement…</div></div></div>
@@ -1010,11 +1218,23 @@ class AdminPage {
         const card = (v, l, cls) => `<div class="kpi ${cls || ''}"><div class="v">${v}</div><div class="l">${l}</div></div>`;
         const n = (x) => (x == null ? '—' : Number(x).toLocaleString('fr-FR'));
         const group = (title, cards) => `<div class="kpi-group"><div class="kpi-gtitle">${title}</div><div class="admin-cards">${cards.join('')}</div></div>`;
+        const money = AdminPage.money;
         el.innerHTML = [
+            group('💶 Revenus', [
+                card(money(o.billing_mrr_cents), 'MRR', Number(o.billing_mrr_cents) > 0 ? 'ok' : ''),
+                card(n(o.billing_trialing), 'En essai'),
+                card(n(o.billing_active), 'Actifs payants', Number(o.billing_active) > 0 ? 'ok' : ''),
+                card(n(o.billing_past_due), 'Échecs paiement', Number(o.billing_past_due) > 0 ? 'alert' : 'ok'),
+                card(n(o.billing_conversions_7d), 'Conversions 7 j'),
+                card(money(o.billing_collected_30d_cents), 'Encaissé 30 j')
+            ]),
             group('👥 Clients & croissance', [
                 card(n(o.users_total), 'Users', o.users_active_7d ? 'ok' : ''),
-                card(n(o.users_active_24h), 'Actifs 24 h'),
-                card(n(o.users_active_7d), 'Actifs 7 j'),
+                // "Connectés" = last_sign_in_at (sessions persist — undercounts real activity);
+                // "Regardent" = distinct watch-history users, the truthful activity signal.
+                card(n(o.users_active_24h), 'Connectés 24 h'),
+                card(n(o.users_active_7d), 'Connectés 7 j'),
+                card(n(o.users_watching_7d), 'Regardent 7 j', Number(o.users_watching_7d) > 0 ? 'ok' : ''),
                 card(n(o.users_new_7d), 'Nouveaux 7 j', Number(o.users_new_7d) > 0 ? 'ok' : ''),
                 card(n(o.users_new_30d), 'Nouveaux 30 j')
             ]),
@@ -1135,7 +1355,8 @@ class AdminPage {
         const el = document.getElementById('admin-cron');
         if (!el) return;
         const winBadge = (w) => w === 'jour' ? '<span class="badge amber">☀️ jour</span>'
-            : (w === 'nuit' ? '<span class="badge blue">🌙 nuit</span>' : '<span class="badge gray">—</span>');
+            : (w === 'nuit' ? '<span class="badge blue">🌙 nuit</span>'
+            : (w === 'continu' ? '<span class="badge green">♾️ continu</span>' : '<span class="badge gray">—</span>'));
         const head = `<tr><th>Fenêtre</th><th>Dimension</th><th>Job</th><th>Cadence</th><th>État</th><th>Dernier run</th><th class="num">Échecs 24h</th></tr>`;
         let prevWin = null;
         const body = rows.map(r => {
@@ -1160,6 +1381,25 @@ class AdminPage {
     }
 
     static n(x) { return x == null ? '—' : Number(x).toLocaleString('fr-FR'); }
+    // Cents → "4,99 $" (USD, admin UI is French-formatted).
+    static money(cents) {
+        if (cents == null || !Number.isFinite(Number(cents))) return '—';
+        return (Number(cents) / 100).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' $';
+    }
+    // Subscription status → badge (label + colour). Plan appended when known.
+    static billingBadge(status, planCode) {
+        const plan = planCode === 'family' ? ' Family' : '';
+        const map = {
+            trialing: ['blue', 'essai' + plan],
+            active: ['green', 'actif' + plan],
+            past_due: ['red', 'échec paiement'],
+            grace: ['red', 'échec paiement'],
+            cancelled_at_period_end: ['amber', 'annulation prévue'],
+            expired: ['gray', 'expiré']
+        };
+        const m = map[String(status || '').toLowerCase()];
+        return m ? `<span class="badge ${m[0]}">${AdminPage.esc(m[1])}</span>` : '<span class="ssub">—</span>';
+    }
     // Stored tag colour → badge class (fall back to gray for anything unexpected).
     static tagColor(c) { return ['gray', 'green', 'red', 'amber', 'blue'].includes(c) ? c : 'gray'; }
     // Concise French relative time ("il y a 3 j", "il y a 2 h"). Absolute value kept as tooltip.

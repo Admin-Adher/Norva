@@ -240,3 +240,38 @@ segments dynamiques sauvegardés · topbar identité admin.
 
 *Suite de `ONBOARDING-AUDIT-V4-DATA.md` (funnel & billing) — ce document couvre la face admin.
 Voir `docs/PAYMENTS-STATUS.md` pour l'état du rail de paiement que la page Finance exposera.*
+
+---
+
+## Addendum — lot P0 livré (même jour)
+
+Migration `20260703240000_admin_finance_p0.sql` (appliquée live) + `AdminPage.js` (v24) +
+`norva-admin` :
+
+- **P0-1 Page Finance 💶** : `admin_finance()` live — MRR/ARR (+ MRR-essai « à venir »,
+  abos sans montant connu à part), abonnés par statut (cartes cliquables → Clients pré-filtrés),
+  échéances (essais → prélèvement < 48 h, renouvellements < 7 j, remises 50 % en attente),
+  MRR par plan × période × rail, funnel 30 j (libellés français), annulations / saves / taux de
+  save / raisons, 50 derniers paiements (lignes cliquables → fiche) + export CSV.
+- **P0-2 Fiche : panneau « 💳 Abonnement & paiements »** : `admin_user_billing(uuid)` — statut,
+  plan facturé, carte, dates essai/période, dunning, remise en attente, stamps emails lifecycle,
+  historique complet des paiements, feedback d'annulation.
+- **P0-3 Cockpit : groupe « 💶 Revenus »** en tête (MRR, essais, actifs payants, échecs paiement,
+  conversions 7 j, encaissé 30 j) depuis le snapshot.
+- **P0-4 Clients** : colonne « Abonnement » (badge statut+plan), filtre par statut d'abo
+  (`p_billing_status` : essai / actifs / échec paiement / annulation prévue / expirés / sans abo),
+  export CSV enrichi (statut, plan, période, montant).
+- **P0-5 Alerting billing** : ops-alert +3 conditions — `billing_cron_fails` (échecs des crons
+  norva-stancer-billing / norva-lifecycle nommément), `billing_past_due` (≥ 3 simultanés),
+  `stancer_down` (ping api.stancer.com).
+- **P0-6 Correctifs périmés** : crons reclassés `billing`/`lifecycle` + fenêtre « ♾️ continu »
+  (tri en tête de table) ; Cockpit « Actifs » → « **Connectés** 24 h/7 j » + nouvelle carte
+  « **Regardent** 7 j » (`users_watching_*` sur watch_history) ; **timeline client** enrichie à la
+  volée : checkout/carte validée/prélèvements/MAJ carte/changement plan/réabonnement
+  (`cloud_stancer_payments`), essai démarré, annulation avec raison, contre-offre acceptée
+  (`cloud_cancel_feedback`).
+
+Vérifié live après application : snapshot expose `billing_*` + `users_watching_*`, les 2 crons
+billing sont classés, `admin_finance` agrège correctement (MRR-essai 8,99 $, 1 essai < 48 h,
+funnel 5 étapes). Restent P1 : tickets, actions billing admin, journal emails, devices, état des
+gates billing dans Système, identité par empreinte.
