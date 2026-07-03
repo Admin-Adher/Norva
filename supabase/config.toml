@@ -64,3 +64,8 @@ verify_jwt = false
 # cron-authed and test-mode only; /checkout is user-authed (verifies the JWT itself).
 [functions.norva-stancer]
 verify_jwt = false
+
+# Stancer recurring-billing cron — the only place that charges a saved card. INERT until
+# STANCER_SECRET_KEY is set. Cron-authenticated via norva_verify_cron_secret.
+[functions.norva-stancer-billing]
+verify_jwt = false

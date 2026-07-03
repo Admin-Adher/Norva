@@ -96,11 +96,19 @@ Réutilise `cloud_entitlement_projection` (source de vérité). Ajouts (slice ch
 |---|---|---|
 | `norva-stancer-webhook` (edge) | Reçoit les events, **re-fetch** le pi, mappe → projection | **Scaffold inerte livré** |
 | `public/js/billing-config.js` | Bloc `stancer` (désactivé par défaut) | **Livré (inerte)** |
-| `norva-stancer/checkout` (edge) | Crée customer + payment_intent(tokenize), renvoie l'url hébergée | Slice suivante |
-| `norva-stancer-billing` (cron) | Prélève le token à la fin d'essai + aux échéances ; échec → past_due | Slice suivante (**code qui prélève**) |
-| `subscribe.html` / `billing.js` | Route web → `checkout` → redirect page hébergée | Slice suivante |
-| Migration `cloud_stancer_*` | Mapping + journal | Slice suivante |
-| `renderReceipt` → webhook | Reçu de paiement (template déjà prêt) | Slice suivante |
+| `norva-stancer/checkout` (edge) | Crée customer + payment_intent(capture:false → tokenise), renvoie l'url hébergée | **Livré (slice A)** |
+| `norva-stancer-billing` (cron) | Prélève le token à la fin d'essai + aux échéances ; échec → past_due | **Livré (slice B)** |
+| `norva-stancer-webhook` | Re-fetch + capture du `card_…` + statut → projection (plan/essai posés) | **Livré** |
+| Migration `cloud_stancer_*` | Mapping + journal | **Livré (slice A)**, appliquée live |
+| `subscribe.html` / `billing.js` | Route web → `checkout` → redirect page hébergée | Slice C |
+| `renderReceipt` → webhook | Reçu de paiement (template déjà prêt) | Slice C |
+
+> ✅ **Débit du token CONFIRMÉ en test (2026-07-03)** : `POST /v1/checkout/`
+> `{ amount, currency:"eur", card:"card_…", customer:"cust_…", unique_id }` → `status:"captured"`,
+> `response:"00"`. `unique_id = "<user_id>:<cycle>"` rend le débit **idempotent** (aucun double-débit
+> si le cron rejoue). Cartes de test : `4000000000000077` (auto-capturé), `4000000000009995`
+> (fonds insuffisants), `4000000000000002` (refus). Reste à valider en E2E (slice C) : le parcours
+> hébergé `capture:false` → apparition du `card_…` sur le payment_intent → débit par le cron.
 
 ## 6. Secrets & configuration (côté owner)
 

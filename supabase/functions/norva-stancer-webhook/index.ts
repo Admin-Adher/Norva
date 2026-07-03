@@ -20,6 +20,7 @@ const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? Deno.env.get("S
 const STANCER_SECRET_KEY = Deno.env.get("STANCER_SECRET_KEY") ?? "";           // sprod_… / stest_…  (absent → inert)
 const STANCER_WEBHOOK_TOKEN = Deno.env.get("STANCER_WEBHOOK_TOKEN") ?? "";     // optional ?t= url filter
 const STANCER_API = "https://api.stancer.com";
+const TRIAL_DAYS = 7;
 
 const CORS = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, content-type" };
 const json = (body: unknown, status = 200) =>
@@ -40,12 +41,23 @@ function extractPaymentIntentId(body: Record<string, unknown>): string | null {
 }
 
 // Re-fetch the authoritative payment_intent from Stancer.
-async function fetchPaymentIntent(piId: string): Promise<{ id: string; status: string; customer?: string; metadata?: Record<string, unknown> } | null> {
+async function fetchPaymentIntent(piId: string): Promise<{ id: string; status: string; customer?: string; card?: unknown; metadata?: Record<string, unknown> } | null> {
   const res = await fetch(`${STANCER_API}/v2/payment_intent/${encodeURIComponent(piId)}`, {
     headers: { Authorization: basicAuth(), "Content-Type": "application/json" },
   });
   if (!res.ok) { console.error("[stancer-webhook] re-fetch failed", piId, res.status); return null; }
   return await res.json().catch(() => null);
+}
+
+// The card can come back as a nested object {id,last4,…} or a bare id string.
+function cardFrom(card: unknown): { id: string; last4?: string; exp?: string } | null {
+  if (!card) return null;
+  if (typeof card === "string") return card.startsWith("card_") ? { id: card } : null;
+  const c = card as Record<string, unknown>;
+  const id = String(c.id ?? "");
+  if (!id.startsWith("card_")) return null;
+  const exp = c.exp_month && c.exp_year ? `${c.exp_month}/${String(c.exp_year).slice(-2)}` : undefined;
+  return { id, last4: c.last4 ? String(c.last4) : undefined, exp };
 }
 
 // Authoritative Stancer status → projection status (trial vs paid distinction is set by the
@@ -81,6 +93,19 @@ async function handle(db: SupabaseClient, piId: string): Promise<Record<string, 
   const next = projectionStatusFor(String(pi.status ?? ""), who.kind);
   if (!next) return { handled: false, reason: `no_mapping_for_${pi.status}` };
 
+  // Capture the reusable card token (card_…) so the billing cron can charge it later.
+  const card = cardFrom(pi.card);
+  if (card) {
+    try {
+      await db.from("cloud_stancer_customers").upsert({
+        user_id: who.userId,
+        stancer_customer_id: pi.customer ?? undefined,
+        card_token: card.id, card_last4: card.last4 ?? undefined, card_exp: card.exp ?? undefined,
+        updated_at: new Date().toISOString(),
+      });
+    } catch (_) { /* table arrives with the checkout slice */ }
+  }
+
   // Idempotent journal update (best-effort; table arrives with the checkout slice).
   try {
     await db.from("cloud_stancer_payments").update({ status: pi.status }).eq("pi_id", pi.id);
@@ -88,8 +113,20 @@ async function handle(db: SupabaseClient, piId: string): Promise<Record<string, 
 
   const patch: Record<string, unknown> = { status: next, provider: "stancer", last_event_at: new Date().toISOString() };
   if (pi.customer) patch.provider_customer_id = pi.customer;
-  const { error } = await db.from("cloud_entitlement_projection").update(patch).eq("user_id", who.userId);
-  if (error) return { handled: false, reason: "projection_update_failed" };
+
+  // Trial-setup success → stamp plan + a fresh 7-day trial window, so norva-stancer-billing knows the
+  // plan/period to charge and when. plan_code encodes "<plan>_<period>" (e.g. "plus_monthly").
+  const meta = pi.metadata && typeof pi.metadata === "object" ? pi.metadata as Record<string, unknown> : {};
+  if (who.kind === "trial_setup" && next === "trialing") {
+    const plan = String(meta.plan ?? "plus");
+    const period = String(meta.period ?? "monthly");
+    patch.plan_code = `${plan}_${period}`;
+    patch.trial_ends_at = new Date(Date.now() + TRIAL_DAYS * 86400_000).toISOString();
+    patch.trial_consumed_at = new Date().toISOString();
+  }
+
+  const { error } = await db.from("cloud_entitlement_projection").upsert({ user_id: who.userId, ...patch });
+  if (error) return { handled: false, reason: "projection_update_failed", detail: error.message };
   return { handled: true, user: who.userId, status: pi.status, projection: next };
 }
 
