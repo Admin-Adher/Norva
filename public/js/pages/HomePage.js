@@ -678,9 +678,9 @@ class HomePage {
         container.innerHTML = `
             <section class="norva-setup-gate norva-setup-connect" data-setup-state="not_configured" data-paired-screen="false">
                 <div class="norva-setup-connect-card">
-                    <div class="norva-setup-kicker">Norva setup</div>
-                    <h1>Enter your service details</h1>
-                    <p>Paste the complete link from your TV service, or enter the server URL, username and password separately.</p>
+                    <div class="norva-setup-kicker">Account created ✓ · One step to watch</div>
+                    <h1>Connect your TV service to start watching</h1>
+                    <p>Paste the complete link from the TV service you already use — Norva reads it and builds your catalog automatically. No card needed to connect; you only add your own authorized source.</p>
                     <form class="norva-setup-inline-form" id="home-tv-service-form" autocomplete="off">
                         <div class="form-group">
                             <label for="home-source-url">Provider URL or complete Xtream link</label>
