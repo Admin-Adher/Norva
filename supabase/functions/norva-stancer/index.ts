@@ -111,8 +111,31 @@ Deno.serve(async (req) => {
     const cust = await stancerPost("/v2/customers/", { name: "Norva Test", email: "test@norva.tv" });
     // Optional matrix: {"cases":[{currency,amount,capture}]} — diagnoses hosted-page behaviour per
     // currency/amount/capture (e.g. "not ready for authorization" seen on USD checkouts).
-    let payload: { cases?: { currency?: string; amount?: number; capture?: boolean }[] } = {};
+    let payload: {
+      cases?: { currency?: string; amount?: number; capture?: boolean }[];
+      charge?: { pi?: string; amount?: number; currency?: string };
+    } = {};
     try { payload = await req.json(); } catch (_) { /* default single case below */ }
+
+    // Optional charge probe: {"charge":{pi,amount,currency}} — reuses the card token saved on an
+    // existing TEST payment intent to exercise the /v1/checkout token-charge rail per currency
+    // (validates the recurring USD charge before a real trial reaches its end).
+    if (payload.charge?.pi) {
+      const src = await fetchPI(String(payload.charge.pi));
+      const card = src ? cardFrom(src.card) : null;
+      if (!card) return json({ ok: false, error: "charge probe: no card token on that payment intent", pi_status: src?.status ?? null });
+      const res = await fetch(`${STANCER_API}/v1/checkout/`, {
+        method: "POST",
+        headers: { Authorization: basicAuth(), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          amount: payload.charge.amount ?? 100, currency: payload.charge.currency ?? "usd",
+          card: card.id, customer: src?.customer ? String(src.customer) : undefined,
+          unique_id: `selftest${Date.now().toString(36)}`.slice(0, 36), description: "selftest charge probe",
+        }),
+      });
+      const body = await res.json().catch(() => ({}));
+      return json({ ok: true, charge_probe: { currency: payload.charge.currency ?? "usd", amount: payload.charge.amount ?? 100, http: res.status, body } });
+    }
     const cases = (payload.cases?.length ? payload.cases : [{ currency: "usd", amount: 499, capture: false }]).slice(0, 6);
     const results: Record<string, unknown>[] = [];
     for (let i = 0; i < cases.length; i++) {
@@ -157,13 +180,18 @@ Deno.serve(async (req) => {
     });
 
     const returnUrl = `${RETURN_BASE}/subscription.html?stancer=done`;
-    // Trial setup (Option B — minimal footprint): authorize a small validation amount ($0.50) with
+    // Trial setup (Option B — minimal footprint): authorize a small validation amount (€0.50) with
     // capture:false → validates + tokenizes the card, NO plan charge now. The hold auto-releases; the
     // real plan amount (from plan_code) is charged at trial end by norva-stancer-billing. `amount`
     // above is only used by the cron's price table via plan_code, not here.
     const VALIDATION_CENTS = 50;
+    // Validation hold in EUR: authorization-only (capture:false) is enabled on this Stancer account
+    // for EUR but NOT USD — a USD auth-only card payment comes back "not ready for authorization" on
+    // the hosted page, while USD captures work fine (matrix selftest + manual test, 2026-07-03).
+    // Plan charges stay in USD (norva-stancer-billing). Flip to "usd" once Stancer support enables
+    // USD authorizations on the account.
     const pi = await stancerPost("/v2/payment_intents/", {
-      amount: VALIDATION_CENTS, currency: "usd", capture: false, methods_allowed: ["card"],
+      amount: VALIDATION_CENTS, currency: "eur", capture: false, methods_allowed: ["card"],
       return_url: returnUrl, order_id: ref(user.id), customer: custId,
       description: `Norva ${plan} ${period} — card validation for 7-day free trial`,
       metadata: { user_id: user.id, kind: "trial_setup", plan, period },
