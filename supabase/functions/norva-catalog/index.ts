@@ -419,6 +419,28 @@ async function listMediaItems(url: URL, userId: string) {
     .select("*", { count: "exact" })
     .eq("user_id", userId);
 
+  // Fuzzy search: a typed title query routes through the trigram-ranked RPC (typo
+  // tolerance + substring-first ordering) instead of a plain ILIKE, when it's a
+  // pure title search (no source/category filter the RPC doesn't model).
+  if (search && itemType && !sourceId && !categoryId) {
+    const q = search.trim();
+    if (q.length >= 2) {
+      const { data: hits, error: rpcErr } = await db.rpc("search_media_items", {
+        p_user: userId, p_item_type: itemType, p_q: q, p_limit: Math.min(limit, 50),
+      });
+      if (!rpcErr && Array.isArray(hits)) {
+        const items = (hits as Array<Record<string, unknown>>).map((row) => {
+          row.year = row.release_year ?? null;
+          return row;
+        });
+        await localizeMediaTitles(items, userId, lang, itemType);
+        await attachMediaLanguages(items, userId);
+        return { items, count: items.length, limit, offset: 0, hasMore: false };
+      }
+      // RPC unavailable (pre-migration / error) → fall through to ILIKE below.
+    }
+  }
+
   if (sourceId) query = query.eq("source_id", sourceId);
   if (itemType) query = query.eq("item_type", itemType);
   if (categoryId) query = query.eq("parent_external_id", categoryId);
@@ -658,10 +680,10 @@ async function listHomeRails(url: URL, userId: string) {
     recentSeries,
   ] = await Promise.all([
     when(includeMovies, () => listTitleRail(userId, "movie", "recently-added-movies", "Recently Added Movies", limit, lang)),
-    when(includeMovies, () => listGenreRail(userId, "movie", "Action", "action-movies", "Films d'action", limit, lang)),
+    when(includeMovies, () => listGenreRail(userId, "movie", "Action", "action-movies", "Action Movies", limit, lang)),
     listBecauseYouWatchedRail(userId, { includeMovies, includeSeries, limit, lang }),
-    when(includeMovies, () => listPopularTitleRail(userId, "movie", "popular-movies", "Films populaires", limit, lang)),
-    when(includeSeries, () => listPopularTitleRail(userId, "series", "popular-series", "Series populaires", limit, lang)),
+    when(includeMovies, () => listPopularTitleRail(userId, "movie", "popular-movies", "Popular Movies", limit, lang)),
+    when(includeSeries, () => listPopularTitleRail(userId, "series", "popular-series", "Popular Series", limit, lang)),
     when(includeSeries, () => listTitleRail(userId, "series", "recently-added-series", "Recently Added Series", limit, lang)),
   ]);
 
@@ -1352,7 +1374,7 @@ async function listBecauseYouWatchedRail(
       const variantsByTitle = await listVariantsByTitleIds(titles.map((row) => String(row.id)));
       return {
         id: `because-you-watched-${watchedId}`,
-        title: "Parce que vous avez regarde",
+        title: "Because You Watched",
         itemType,
         source: "titles",
         curation: {

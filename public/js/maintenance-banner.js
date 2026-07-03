@@ -16,7 +16,7 @@
     if (document.getElementById('norva-maint-banner')) return;
     var b = document.createElement('div');
     b.id = 'norva-maint-banner';
-    b.textContent = '🛠️ Maintenance en cours — certaines fonctionnalités peuvent être temporairement indisponibles.';
+    b.textContent = '🛠️ Maintenance in progress — some features may be temporarily unavailable.';
     b.style.cssText = 'position:fixed;bottom:0;left:0;right:0;z-index:99999;background:#f5a623;color:#111;'
       + 'font-weight:600;font-size:13px;text-align:center;padding:9px 14px;box-shadow:0 -2px 8px rgba(0,0,0,.35);';
     document.body.appendChild(b);

@@ -122,6 +122,8 @@ class SeriesPage {
             await this.toggleFavorite(this.currentSeriesGroup, this.detailFavoriteBtn);
             this.syncDetailFavoriteButton();
         });
+        document.getElementById('series-thumb-up')?.addEventListener('click', () => this.setRating(1));
+        document.getElementById('series-thumb-down')?.addEventListener('click', () => this.setRating(-1));
 
         this.observer = new IntersectionObserver((entries) => {
             if (entries[0].isIntersecting && !this.isLoading) {
@@ -1273,7 +1275,7 @@ class SeriesPage {
                 ${versionCount > 1 ? `<button class="version-badge" title="Choose version">${versionCount} versions</button>` : ''}
                 ${languageBadge ? `<span class="version-language-badge ${versionCount > 1 ? 'with-version-badge' : ''}">${MediaUtils.escapeHtml(languageBadge)}</span>` : ''}
                 ${started ? '<span class="watched-badge inprogress-badge" title="Watching">▶</span>' : ''}
-                <button class="favorite-btn ${isFav ? 'active' : ''}" title="${isFav ? 'Remove from Favorites' : 'Add to Favorites'}">
+                <button class="favorite-btn ${isFav ? 'active' : ''}" aria-label="${isFav ? 'Remove from Favorites' : 'Add to Favorites'}" title="${isFav ? 'Remove from Favorites' : 'Add to Favorites'}">
                     <span class="fav-icon">${isFav ? Icons.favorite : Icons.favoriteOutline}</span>
                 </button>
             </div>
@@ -1694,6 +1696,38 @@ class SeriesPage {
         if (label) label.textContent = 'Favorite';
     }
 
+    // === Thumbs up/down (per-profile title rating) ===
+
+    paintThumbButtons(rating) {
+        document.getElementById('series-thumb-up')?.classList.toggle('active', rating === 1);
+        document.getElementById('series-thumb-down')?.classList.toggle('active', rating === -1);
+    }
+
+    async loadRating() {
+        this._currentRating = 0;
+        this.paintThumbButtons(0);
+        const series = this.currentSeries;
+        if (!series || !window.NorvaCloud?.ratings) return;
+        try {
+            const res = await NorvaCloud.ratings.get({ itemType: 'series', itemId: series.series_id });
+            this._currentRating = Number(res?.rating) || 0;
+            this.paintThumbButtons(this._currentRating);
+        } catch (_) { /* ratings are cloud-only / best-effort */ }
+    }
+
+    async setRating(value) {
+        const series = this.currentSeries;
+        if (!series || !window.NorvaCloud?.ratings) return;
+        const next = this._currentRating === value ? 0 : value;
+        this._currentRating = next;
+        this.paintThumbButtons(next);
+        try {
+            await NorvaCloud.ratings.set({ sourceId: series.sourceId, itemId: series.series_id, itemType: 'series', rating: next });
+        } catch (_) {
+            this.app?.showToast?.('Could not save your rating', { type: 'error' });
+        }
+    }
+
     playPrimaryEpisode() {
         const episodeId = this.primaryActionBtn?.dataset?.episodeId;
         if (!episodeId) return;
@@ -1765,6 +1799,7 @@ class SeriesPage {
         document.getElementById('series-title').textContent = this.getSeriesDisplayTitle(series);
         document.getElementById('series-plot').textContent = series.tmdb?.overview || series.plot || 'No summary available yet.';
         this.syncDetailFavoriteButton();
+        this.loadRating();
         this.renderMoreLikeThis(series);
         this.renderFicheExtras(series);
 
@@ -1848,7 +1883,7 @@ class SeriesPage {
                             const ratio = history?.ratio || 0;
                             const ratioPercent = Math.max(0, Math.min(100, Math.round(ratio * 100)));
                             const marker = ratio >= 0.95 ? '<span class="episode-watched" title="Watched">✓</span>'
-                                : (ratio > 0.02 ? '<span class="episode-watched inprogress" title="En cours">◐</span>' : '');
+                                : (ratio > 0.02 ? '<span class="episode-watched inprogress" title="In progress">◐</span>' : '');
                             const cleanTitle = this.cleanEpisodeTitle(ep, seasonNum);
                             const duration = this.formatEpisodeDuration(ep.duration);
                             const description = ep.plot || ep.info?.plot || ep.overview || '';
@@ -2431,7 +2466,11 @@ class SeriesPage {
                 btn.classList.add('active');
                 btn.title = 'Remove from Favorites';
                 if (iconSpan) iconSpan.innerHTML = Icons.favorite;
-                await API.favorites.add(series.sourceId, series.series_id, 'series');
+                await API.favorites.add(series.sourceId, series.series_id, 'series', {
+                    name: this.getSeriesDisplayTitle(series),
+                    poster: this.getSeriesPoster(series),
+                    type: 'series'
+                });
             }
         } catch (err) {
             console.error('Error toggling favorite:', err);

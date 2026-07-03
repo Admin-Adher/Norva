@@ -1373,7 +1373,7 @@
       this._dropWrites = true;
       try { await lib.av_write_trailer(this.oc); } finally { this._dropWrites = false; }
       this.ended = true; this._drain();
-      this.log('flux terminé (' + this._diag.pumpExitReason + ')');
+      this.log('stream ended (' + this._diag.pumpExitReason + ')');
     }
 
     async _encodeAudio(frames, fin) {

@@ -347,23 +347,90 @@ class App {
     }
 
     /**
-     * Free in-app notification: show unseen "what's new" events (new movies /
-     * shows / channels detected on a recent sync), then mark them read so they
-     * don't repeat. Best-effort and silent on any error.
+     * Notifications inbox: a bell in the navbar with an unread dot and a dropdown
+     * feed of recent "what's new" events (new movies/shows/channels + catalog
+     * ready). Replaces the old one-shot toast — the feed persists and opening it
+     * (not app launch) is what marks entries read. Best-effort, silent on error.
      */
     async surfaceWhatsNew() {
         try {
-            if (!window.NorvaCloud?.contentEvents?.list) return;
-            const res = await window.NorvaCloud.contentEvents.list();
-            const events = (res && res.events) || [];
-            if (!events.length) return;
-            const summary = events.map(e => e && e.summary).filter(Boolean).slice(0, 3).join(' · ');
-            if (summary) {
-                try { this.sourceManager?.toast?.(`✨ What’s new: ${summary}`); } catch (_) { /* noop */ }
-            }
-            const ids = events.map(e => e && e.id).filter(Boolean);
-            if (ids.length) window.NorvaCloud.contentEvents.markSeen(ids);
+            await this.refreshNotifications();
         } catch (_) { /* never break launch over a notification */ }
+    }
+
+    async refreshNotifications() {
+        const bell = document.getElementById('nav-bell');
+        if (!bell || !window.NorvaCloud?.contentEvents?.inbox) return;
+        const res = await window.NorvaCloud.contentEvents.inbox();
+        this._notifEvents = (res && res.events) || [];
+        this._notifUnread = Number(res && res.unread) || 0;
+        bell.hidden = false;
+        bell.setAttribute('aria-expanded', 'false');
+        const dot = document.getElementById('nav-bell-dot');
+        if (dot) dot.hidden = this._notifUnread === 0;
+        if (!this._notifBound) {
+            this._notifBound = true;
+            bell.addEventListener('click', (e) => { e.stopPropagation(); this.toggleNotifications(); });
+        }
+    }
+
+    toggleNotifications() {
+        const open = document.getElementById('norva-notif-panel');
+        if (open) { open.remove(); document.getElementById('nav-bell')?.setAttribute('aria-expanded', 'false'); return; }
+        const bell = document.getElementById('nav-bell');
+        const panel = document.createElement('div');
+        panel.id = 'norva-notif-panel';
+        panel.className = 'norva-notif-panel';
+        panel.setAttribute('role', 'dialog');
+        panel.setAttribute('aria-label', 'Notifications');
+        const events = this._notifEvents || [];
+        const timeAgo = (iso) => {
+            const s = Math.max(0, (Date.now() - Date.parse(iso)) / 1000);
+            if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+            if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+            return `${Math.floor(s / 86400)}d ago`;
+        };
+        const esc = (t) => String(t == null ? '' : t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+        panel.innerHTML = `
+            <div class="norva-notif-head">Notifications</div>
+            <div class="norva-notif-list">
+                ${events.length
+                ? events.map(e => `
+                    <div class="norva-notif-item${e.seen_at ? '' : ' unread'}">
+                        <div class="norva-notif-summary">✨ ${esc(e.summary || 'New content')}</div>
+                        <div class="norva-notif-time">${esc(timeAgo(e.created_at))}</div>
+                    </div>`).join('')
+                : '<div class="norva-notif-empty">No notifications yet.</div>'}
+            </div>`;
+        document.body.appendChild(panel);
+        // Position under the bell.
+        try {
+            const r = bell.getBoundingClientRect();
+            panel.style.top = `${Math.round(r.bottom + 8)}px`;
+            panel.style.right = `${Math.round(window.innerWidth - r.right)}px`;
+        } catch (_) { /* default CSS position */ }
+        bell?.setAttribute('aria-expanded', 'true');
+        // Opening the inbox marks the unseen entries read.
+        const unseenIds = events.filter(e => !e.seen_at).map(e => e.id).filter(Boolean);
+        if (unseenIds.length) {
+            window.NorvaCloud.contentEvents.markSeen(unseenIds);
+            this._notifUnread = 0;
+            document.getElementById('nav-bell-dot')?.setAttribute('hidden', '');
+            events.forEach(e => { e.seen_at = e.seen_at || new Date().toISOString(); });
+        }
+        // Dismiss on outside click / Escape.
+        const close = (ev) => {
+            if (ev.type === 'keydown' && ev.key !== 'Escape') return;
+            if (ev.type === 'click' && (panel.contains(ev.target) || bell?.contains(ev.target))) return;
+            panel.remove();
+            bell?.setAttribute('aria-expanded', 'false');
+            document.removeEventListener('click', close, true);
+            document.removeEventListener('keydown', close, true);
+        };
+        setTimeout(() => {
+            document.addEventListener('click', close, true);
+            document.addEventListener('keydown', close, true);
+        }, 0);
     }
 
     async refreshSourceHealth({ redirectIfBlocked = false } = {}) {
@@ -1793,7 +1860,7 @@ class App {
                 this.navigateTo('home');
             }
             if (window.NorvaProfiles?.refreshNavAvatar) await window.NorvaProfiles.refreshNavAvatar();
-            try { this.sourceManager?.toast?.(profileName ? `Profil : ${profileName}` : 'Profil changé'); } catch (_) { /* noop */ }
+            try { this.sourceManager?.toast?.(profileName ? `Profile: ${profileName}` : 'Profile changed'); } catch (_) { /* noop */ }
         } catch (e) {
             console.warn('[profiles] soft profile switch failed, reloading', e);
             window.location.reload();

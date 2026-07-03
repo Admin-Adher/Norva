@@ -786,6 +786,8 @@
         // "What's new" feed — unseen new-content events for the in-app notification.
         contentEvents: {
             list: () => request('GET', '/content-events').catch(() => ({ events: [] })),
+            // Inbox feed: seen + unseen history + unread count, WITHOUT marking seen.
+            inbox: () => request('GET', '/content-events?all=1').catch(() => ({ events: [], unread: 0 })),
             markSeen: (ids) => {
                 try { return request('POST', '/content-events/seen', { ids }).catch(() => null); }
                 catch (_) { return Promise.resolve(null); }
@@ -881,6 +883,12 @@
                 () => request('GET', `/favorites${query(params)}`)),
             add: (favorite) => request('POST', '/favorites', favorite).then((r) => { invalidateCache('fav'); return r; }),
             remove: (id) => request('DELETE', `/favorites/${encodeURIComponent(id)}`).then((r) => { invalidateCache('fav'); return r; })
+        },
+
+        // Thumbs up/down on a title (per profile). rating 1=up, -1=down, 0=clear.
+        ratings: {
+            get: (params = {}) => request('GET', `/ratings${query(params)}`),
+            set: (body) => request('POST', '/ratings', body)
         },
 
         history: {

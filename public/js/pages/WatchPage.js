@@ -2685,7 +2685,7 @@ class WatchPage {
                     const waitMs = 2000 + attempt * 2000; // 2s, 4s, 6s — slot frees ~8s after the prior drop
                     console.warn(`[NorvaEngine] slot busy (458), retry ${attempt + 1}/${SLOT_BUSY_RETRIES} in ${waitMs}ms`);
                     try { this.showLoading(); } catch (_) {}
-                    try { this.updateTranscodeStatus('direct', `Flux occupé, reconnexion… (${attempt + 2}/${SLOT_BUSY_RETRIES + 1})`); } catch (_) {}
+                    try { this.updateTranscodeStatus('direct', `Stream busy, reconnecting… (${attempt + 2}/${SLOT_BUSY_RETRIES + 1})`); } catch (_) {}
                     await new Promise((r) => setTimeout(r, waitMs));
                     if (this.isStalePlaybackAttempt(playbackAttemptId)) { this.destroyEngine(); return; }
                     continue;

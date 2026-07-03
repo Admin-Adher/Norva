@@ -138,6 +138,13 @@ class HomePage {
                     </section>
                 </div>
 
+                <section class="dashboard-section hidden" id="my-list-section">
+                    <div class="section-header">
+                        <h2>My List</h2>
+                    </div>
+                    ${this.scrollSection('my-list-list', 'Loading your list...')}
+                </section>
+
                 <section class="dashboard-section" id="favorite-channels-section">
                     <div class="section-header">
                         <h2>Favorite Channels</h2>
@@ -316,6 +323,7 @@ class HomePage {
                     railsP,
                     this.renderFavoriteChannels()
                 ]);
+                this.renderMyList();
 
                 const history = historyResult.status === 'fulfilled' && Array.isArray(historyResult.value)
                     ? historyResult.value
@@ -1131,7 +1139,7 @@ class HomePage {
         const type = item.item_type || item.itemType || item.type;
         const data = item.data || {};
         const bits = [];
-        if (item.progress || data.progress) bits.push('A reprendre');
+        if (item.progress || data.progress) bits.push('Resume');
         bits.push(type === 'series' ? 'Series' : type === 'channel' ? 'Live TV' : 'Movie');
         const year = item.year || data.year || data.releaseYear;
         if (year) bits.push(year);
@@ -1454,6 +1462,61 @@ class HomePage {
             return;
         }
         this.playItem(item, isResume);
+    }
+
+    /**
+     * Unified "My List" rail: favourited movies + series (rendered from the
+     * name/poster persisted on the favorite row) in one cross-type rail. Channels
+     * keep their own "Favorite Channels" rail. Rows without a poster (favorited
+     * before name/meta persistence) are skipped — they self-heal on re-favorite.
+     */
+    async renderMyList() {
+        const list = document.getElementById('my-list-list');
+        const section = document.getElementById('my-list-section');
+        if (!list || !section) return;
+        try {
+            const favs = await window.API.request('GET', '/favorites');
+            const rows = (Array.isArray(favs) ? favs : (favs?.favorites || []))
+                .filter(f => ['movie', 'series'].includes(f.item_type || f.itemType))
+                .map(f => {
+                    const meta = f.item_meta || f.itemMeta || {};
+                    return {
+                        item_id: f.item_id ?? f.itemId,
+                        source_id: f.source_id ?? f.sourceId,
+                        item_type: f.item_type ?? f.itemType,
+                        title: f.item_name ?? f.itemName ?? '',
+                        poster: meta.poster || '',
+                    };
+                })
+                .filter(r => r.poster && r.title)
+                .slice(0, 20);
+
+            if (!rows.length) { section.classList.add('hidden'); return; }
+            section.classList.remove('hidden');
+            list.innerHTML = rows.map((r, i) => `
+                <div class="dashboard-card" data-mylist-index="${i}" data-type="${this.escapeAttr(r.item_type)}">
+                    <div class="card-image">
+                        <img src="${this.escapeAttr(this.resolveImageUrl(r.poster, '/img/norva-media-placeholder.png'))}"
+                             alt="${this.escapeAttr(r.title)}" loading="lazy" decoding="async"
+                             onerror="this.onerror=null;this.src='/img/norva-media-placeholder.png'">
+                        <div class="play-icon-overlay"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></div>
+                    </div>
+                    <div class="card-info">
+                        <div class="card-title" title="${this.escapeHtml(r.title)}">${this.escapeHtml(r.title)}</div>
+                        <div class="card-subtitle">${this.typeLabel(r.item_type)}</div>
+                    </div>
+                </div>`).join('');
+            this._myListRows = rows;
+            list.querySelectorAll('.dashboard-card').forEach(card => {
+                card.addEventListener('click', () => {
+                    const r = this._myListRows[Number(card.dataset.mylistIndex)];
+                    if (r) this.openRailItem(r, false);
+                });
+            });
+            this.updateScrollArrows();
+        } catch (_) {
+            section.classList.add('hidden');
+        }
     }
 
     async renderFavoriteChannels() {
