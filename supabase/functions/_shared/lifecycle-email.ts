@@ -142,3 +142,26 @@ export function renderWinback(firstName: string | null): Rendered {
     }),
   };
 }
+
+// Checkout-abandonment reminder: the user opened a checkout (card check) but never
+// completed it. One email, sent 2–48h later; deep-links back into the checkout with
+// the plan/period they had picked.
+export function renderAbandonedCheckout(firstName: string | null, opts: { plan?: string; period?: string }): Rendered {
+  const plan = opts.plan === "family" ? "family" : "plus";
+  const period = opts.period === "annual" ? "annual" : "monthly";
+  const planName = plan === "family" ? "Norva Family" : "Norva";
+  const url = `${SITE_URL}/checkout.html?plan=${plan}&period=${period}`;
+  return {
+    subject: "Your Norva free trial is one step away",
+    html: shell({
+      heading: "Finish setting up your free trial",
+      bodyHtml: `${greet(firstName)}<br><br>
+        You were one step away from starting your <b style="color:#cdd6e6">${planName}</b> free trial —
+        the quick card check wasn't completed. There is <b style="color:#cdd6e6">no charge today</b>:
+        we only place a temporary €0.50 authorization that is released right away and never debited.
+        Your 7 days of full access start the moment the check completes.`,
+      cta: { label: "Finish setup", url },
+      note: `Changed your mind? Just ignore this — nothing was charged and nothing will be.`,
+    }),
+  };
+}

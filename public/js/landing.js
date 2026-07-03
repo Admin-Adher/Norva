@@ -98,9 +98,16 @@
     const opts = Array.from(document.querySelectorAll('.billing-opt'));
     if (!opts.length) return;
     const prices = Array.from(document.querySelectorAll('.pricing-grid .price'));
+    // Plan CTAs carry the chosen plan + period through signup into the plan
+    // picker, so the visitor's pricing intent is never lost.
+    const planCtas = Array.from(document.querySelectorAll('.pricing-grid a[data-plan]'));
 
     function apply(period) {
       const isAnnual = period === 'annual';
+      planCtas.forEach(a => {
+        const dest = '/subscribe.html?plan=' + a.dataset.plan + '&period=' + (isAnnual ? 'annual' : 'monthly');
+        a.setAttribute('href', '/account.html?returnTo=' + encodeURIComponent(dest));
+      });
       opts.forEach(opt => {
         const active = opt.dataset.period === period;
         opt.classList.toggle('is-active', active);

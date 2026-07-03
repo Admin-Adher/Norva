@@ -23,8 +23,9 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import {
-  renderWelcome, renderTrialEnding, renderPaymentFailed, renderWinback, type Rendered,
+  renderWelcome, renderTrialEnding, renderPaymentFailed, renderWinback, renderAbandonedCheckout, type Rendered,
 } from "../_shared/lifecycle-email.ts";
+import { sendFcmPush, fcmConfigured } from "../_shared/fcm.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? Deno.env.get("SUPABASE_SERVICE_KEY") ?? "";
@@ -70,6 +71,19 @@ async function emailUser(db: SupabaseClient, userId: string, make: (firstName: s
   return true;
 }
 
+// Best-effort billing push on the existing FCM rail (same pattern as import-notify):
+// rides along the emails so the reminder reaches the phone even with mail unread.
+async function pushUser(db: SupabaseClient, userId: string, title: string, body: string, kind: string): Promise<void> {
+  if (!fcmConfigured()) return;
+  try {
+    const { data: toks } = await db.from("cloud_push_tokens").select("token").eq("user_id", userId);
+    for (const t of (toks ?? []) as { token: string }[]) {
+      const r = await sendFcmPush(t.token, { title, body, data: { kind } });
+      if (r.unregistered) { try { await db.from("cloud_push_tokens").delete().eq("token", t.token); } catch (_) { /* noop */ } }
+    }
+  } catch (_) { /* push is best-effort — never block the email path */ }
+}
+
 async function runWelcome(db: SupabaseClient): Promise<number> {
   const since = new Date(Date.now() - WELCOME_WINDOW_H * 3600_000).toISOString();
   const { data } = await db.from("cloud_entitlement_projection")
@@ -104,6 +118,8 @@ async function runTrialReminder(db: SupabaseClient): Promise<number> {
     try {
       if (await emailUser(db, row.user_id, (fn) => renderTrialEnding(fn, { endsAt: row.trial_ends_at ?? "", planLabel: planLabel(row.plan_code) }))) {
         await db.from("cloud_entitlement_projection").update({ trial_reminder_email_at: new Date().toISOString() }).eq("user_id", row.user_id);
+        await pushUser(db, row.user_id, "Your free trial ends in 2 days",
+          "Your Norva plan starts then — cancel anytime before if you change your mind.", "trial_ending");
         sent++;
       }
     } catch (e) { console.error("[norva-lifecycle] trial reminder failed", row.user_id, e instanceof Error ? e.message : e); }
@@ -128,6 +144,8 @@ async function runDunning(db: SupabaseClient): Promise<number> {
         await db.from("cloud_entitlement_projection")
           .update({ dunning_stage: stage, dunning_last_at: new Date().toISOString() })
           .eq("user_id", row.user_id);
+        await pushUser(db, row.user_id, "Payment issue on your Norva plan",
+          "We couldn't process your payment — update your card to keep watching.", "payment_failed");
         sent++;
       }
     } catch (e) { console.error("[norva-lifecycle] dunning failed", row.user_id, e instanceof Error ? e.message : e); }
@@ -150,11 +168,81 @@ async function runWinback(db: SupabaseClient): Promise<number> {
     try {
       if (await emailUser(db, row.user_id, (fn) => renderWinback(fn))) {
         await db.from("cloud_entitlement_projection").update({ winback_email_at: new Date().toISOString() }).eq("user_id", row.user_id);
+        await pushUser(db, row.user_id, "Your Norva catalog is waiting",
+          "Pick up right where you left off — reactivate anytime.", "winback");
         sent++;
       }
     } catch (e) { console.error("[norva-lifecycle] winback failed", row.user_id, e instanceof Error ? e.message : e); }
   }
   return sent;
+}
+
+// Checkout-abandonment relance: one email (+push), 2–48h after a card-check
+// checkout was opened but never completed. Skips users who finished elsewhere.
+async function runAbandoned(db: SupabaseClient): Promise<number> {
+  const lo = new Date(Date.now() - 48 * 3600_000).toISOString();
+  const hi = new Date(Date.now() - 2 * 3600_000).toISOString();
+  const { data } = await db.from("cloud_stancer_payments")
+    .select("pi_id,user_id,created_at")
+    .in("kind", ["trial_setup", "resubscribe"])
+    .eq("status", "require_payment_method")
+    .is("reminder_sent_at", null)
+    .gte("created_at", lo).lte("created_at", hi)
+    .order("created_at", { ascending: false })
+    .limit(BATCH);
+  const seen = new Set<string>();
+  let sent = 0;
+  for (const row of (data ?? []) as { pi_id: string; user_id: string }[]) {
+    if (seen.has(row.user_id)) continue;
+    seen.add(row.user_id);
+    try {
+      // Completed through another payment (or another device)? Stamp + skip.
+      const { data: proj } = await db.from("cloud_entitlement_projection")
+        .select("status").eq("user_id", row.user_id).maybeSingle();
+      const st = String((proj as { status?: string } | null)?.status ?? "");
+      const stamp = () => db.from("cloud_stancer_payments")
+        .update({ reminder_sent_at: new Date().toISOString() })
+        .eq("user_id", row.user_id).eq("status", "require_payment_method").is("reminder_sent_at", null);
+      if (["trialing", "active", "cancelled_at_period_end"].includes(st)) { await stamp(); continue; }
+      // Deep-link back into the checkout with the plan they had picked.
+      const { data: cust } = await db.from("cloud_stancer_customers")
+        .select("plan,period").eq("user_id", row.user_id).maybeSingle();
+      const c = cust as { plan?: string; period?: string } | null;
+      if (await emailUser(db, row.user_id, (fn) => renderAbandonedCheckout(fn, { plan: c?.plan, period: c?.period }))) {
+        await stamp();
+        await pushUser(db, row.user_id, "Your free trial is one step away",
+          "Finish the quick card check — no charge today.", "abandoned_checkout");
+        sent++;
+      }
+    } catch (e) { console.error("[norva-lifecycle] abandoned failed", row.user_id, e instanceof Error ? e.message : e); }
+  }
+  return sent;
+}
+
+// Close the dunning loop: a Stancer past_due that exhausted its 3 reminders (7+ days
+// ago), or that has been stuck for 21+ days, becomes `expired` — access ends cleanly
+// and the win-back email can eventually re-engage. RevenueCat rows are untouched
+// (the store webhook owns their expiration).
+async function runExpirePastDue(db: SupabaseClient): Promise<number> {
+  const nowIso = new Date().toISOString();
+  const staleDunning = new Date(Date.now() - 7 * 86400_000).toISOString();
+  const staleAny = new Date(Date.now() - 21 * 86400_000).toISOString();
+  let expired = 0;
+  const { data: exhausted } = await db.from("cloud_entitlement_projection")
+    .select("user_id").eq("provider", "stancer").eq("status", "past_due")
+    .gte("dunning_stage", 3).lte("dunning_last_at", staleDunning).limit(BATCH);
+  const { data: stuck } = await db.from("cloud_entitlement_projection")
+    .select("user_id").eq("provider", "stancer").eq("status", "past_due")
+    .lte("last_event_at", staleAny).limit(BATCH);
+  const ids = new Set<string>([
+    ...((exhausted ?? []) as { user_id: string }[]).map((r) => r.user_id),
+    ...((stuck ?? []) as { user_id: string }[]).map((r) => r.user_id),
+  ]);
+  for (const userId of ids) {
+    await db.from("cloud_entitlement_projection").update({ status: "expired", last_event_at: nowIso }).eq("user_id", userId);
+    expired++;
+  }
+  return expired;
 }
 
 Deno.serve(async (req) => {
@@ -174,7 +262,9 @@ Deno.serve(async (req) => {
     if (BILLING_LIVE) {
       out.trial_reminder = await runTrialReminder(db);
       out.dunning = await runDunning(db);
+      out.expired_past_due = await runExpirePastDue(db);
       out.winback = await runWinback(db);
+      out.abandoned = await runAbandoned(db);
     }
     return json({ ok: true, ...out });
   } catch (e) {

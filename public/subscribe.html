@@ -78,6 +78,8 @@
     /* Keyboard / D-pad focus ring — matters most on Android TV (10-foot view). */
     .period:focus-visible, .buy:focus-visible, .btn:focus-visible, .confirm .btn:focus-visible { outline: 3px solid var(--pink); outline-offset: 3px; }
     .card:focus-within { border-color: var(--pink); }
+    /* Landing deep-link (?plan=…) — pre-highlight the plan the visitor picked. */
+    .card.preselected { border-color: var(--pink); box-shadow: 0 0 50px rgba(181,121,255,.28); }
     /* Bigger, easier targets on the TV remote. */
     html.tv .toggle button { padding: 14px 26px; font-size: 18px; }
     html.tv .btn { min-height: 64px; font-size: 18px; }
@@ -396,7 +398,18 @@
         } catch (_) { /* ignore */ }
       }
 
-      applyPeriod('monthly');
+      // Landing deep-link: honor the plan/period the visitor picked on the
+      // pricing section (?plan=family&period=annual) — intent is never lost.
+      const wantedPeriod = params.get('period') === 'annual' ? 'annual' : 'monthly';
+      const wantedPlan = params.get('plan');
+      applyPeriod(wantedPeriod);
+      if (wantedPlan === 'plus' || wantedPlan === 'family') {
+        const chosen = document.querySelector('.card[data-plan="' + wantedPlan + '"]');
+        if (chosen) {
+          chosen.classList.add('preselected');
+          try { chosen.scrollIntoView({ block: 'nearest' }); } catch (_) {}
+        }
+      }
       window.NorvaBilling.login(appUserId());
       loadTrialEligibility();
       checkExisting();
