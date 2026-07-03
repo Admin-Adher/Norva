@@ -1,9 +1,15 @@
 package tv.norva.phone;
 
 import android.app.Activity;
+import android.app.PendingIntent;
 import android.app.PictureInPictureParams;
+import android.app.RemoteAction;
+import android.content.BroadcastReceiver;
+import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.res.Configuration;
+import android.graphics.drawable.Icon;
 import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
 import android.os.Build;
@@ -14,6 +20,7 @@ import android.util.Rational;
 import android.view.DisplayCutout;
 import android.view.GestureDetector;
 import android.view.Gravity;
+import android.view.ScaleGestureDetector;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowInsets;
@@ -40,6 +47,7 @@ import androidx.media3.datasource.HttpDataSource;
 import androidx.media3.exoplayer.ExoPlayer;
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory;
 import androidx.media3.session.MediaSession;
+import androidx.media3.ui.AspectRatioFrameLayout;
 import androidx.media3.ui.PlayerView;
 
 /**
@@ -98,6 +106,23 @@ public class PlayerActivity extends Activity {
     private int verticalDragMode = 0;
     private float gestureStartBrightness = 0.5f;
     private int gestureStartVolume = 0;
+
+    // PiP transport actions (play/pause buttons on the mini window).
+    private static final String ACTION_PIP_CONTROL = "tv.norva.phone.PIP_CONTROL";
+    private static final String EXTRA_PIP_ACTION = "pipAction";
+    private BroadcastReceiver pipReceiver;
+
+    // Lock controls: swallow every gesture until explicitly unlocked.
+    private boolean controlsLocked = false;
+    private Button lockBtn;
+    private Button unlockBtn;
+    private final Runnable hideUnlockBtn = new Runnable() {
+        @Override public void run() { if (unlockBtn != null) unlockBtn.setVisibility(View.GONE); }
+    };
+
+    // Pinch-to-zoom: fit <-> zoom (crop) like Netflix.
+    private ScaleGestureDetector scaleDetector;
+    private float pinchAccum = 1f;
 
     // Chromecast: discovery + session hand-over (see CastSupport).
     private CastSupport castSupport;
@@ -252,6 +277,22 @@ public class PlayerActivity extends Activity {
         // Bind a MediaSession so hardware/Bluetooth media buttons and the system
         // media controls (lock screen / notification shade) drive this player.
         try { mediaSession = new MediaSession.Builder(this, player).build(); } catch (Exception ignored) { }
+        // PiP transport: the mini window's play/pause button broadcasts back here.
+        pipReceiver = new BroadcastReceiver() {
+            @Override public void onReceive(Context c, Intent intent) {
+                if (!ACTION_PIP_CONTROL.equals(intent.getAction()) || player == null) return;
+                if ("pause".equals(intent.getStringExtra(EXTRA_PIP_ACTION))) player.pause();
+                else player.play();
+                refreshPipActions();
+            }
+        };
+        try {
+            if (Build.VERSION.SDK_INT >= 33) {
+                registerReceiver(pipReceiver, new IntentFilter(ACTION_PIP_CONTROL), Context.RECEIVER_NOT_EXPORTED);
+            } else {
+                registerReceiver(pipReceiver, new IntentFilter(ACTION_PIP_CONTROL));
+            }
+        } catch (Exception ignored) { pipReceiver = null; }
         playerView.setKeepScreenOn(true);
         playerView.setShowSubtitleButton(true);
         installGestureOverlay();
@@ -303,6 +344,11 @@ public class PlayerActivity extends Activity {
                 // Surface the real failure on screen (error code, HTTP status, cause,
                 // host) instead of a silent hang — so it can be read/screenshotted.
                 showStreamError(diagnose(error));
+            }
+
+            @Override
+            public void onIsPlayingChanged(boolean isPlaying) {
+                refreshPipActions(); // keep the PiP button icon in sync
             }
 
             @Override
@@ -529,13 +575,14 @@ public class PlayerActivity extends Activity {
             }
 
             @Override public boolean onSingleTapConfirmed(MotionEvent e) {
+                if (controlsLocked) { flashUnlockButton(); return true; }
                 if (playerView.isControllerFullyVisible()) playerView.hideController();
                 else playerView.showController();
                 return true;
             }
 
             @Override public boolean onDoubleTap(MotionEvent e) {
-                if (player == null) return false;
+                if (player == null || controlsLocked) return false;
                 boolean forward = e.getX() > overlay.getWidth() / 2f;
                 player.seekTo(Math.max(0, player.getCurrentPosition() + (forward ? 10_000 : -10_000)));
                 showSeekFeedback(forward ? "+10s" : "-10s");
@@ -549,6 +596,7 @@ public class PlayerActivity extends Activity {
                 float totalDx = Math.abs(e2.getX() - e1.getX());
                 // Engage only on a clearly vertical drag, and never over the
                 // controller (its buttons/seek bar own touches when visible).
+                if (controlsLocked || (scaleDetector != null && scaleDetector.isInProgress())) return false;
                 if (verticalDragMode == 0) {
                     if (Math.abs(totalDy) < dp(24) || totalDx > Math.abs(totalDy)) return false;
                     if (playerView.isControllerFullyVisible()) return false;
@@ -572,8 +620,27 @@ public class PlayerActivity extends Activity {
             }
         });
 
+        // Pinch: fit <-> zoom (crop). Cumulative factor decided on gesture end so a
+        // wobbly pinch doesn't flip modes mid-gesture.
+        scaleDetector = new ScaleGestureDetector(this, new ScaleGestureDetector.SimpleOnScaleGestureListener() {
+            @Override public boolean onScale(ScaleGestureDetector d) { pinchAccum *= d.getScaleFactor(); return true; }
+            @Override public void onScaleEnd(ScaleGestureDetector d) {
+                if (!controlsLocked) {
+                    if (pinchAccum > 1.15f) {
+                        playerView.setResizeMode(AspectRatioFrameLayout.RESIZE_MODE_ZOOM);
+                        showSeekFeedback("Zoom");
+                    } else if (pinchAccum < 0.87f) {
+                        playerView.setResizeMode(AspectRatioFrameLayout.RESIZE_MODE_FIT);
+                        showSeekFeedback("Fit");
+                    }
+                }
+                pinchAccum = 1f;
+            }
+        });
+
         View touchLayer = new View(this);
         touchLayer.setOnTouchListener((v, ev) -> {
+            scaleDetector.onTouchEvent(ev);
             boolean handled = detector.onTouchEvent(ev);
             if (ev.getAction() == MotionEvent.ACTION_UP) {
                 verticalDragMode = 0;
@@ -585,6 +652,57 @@ public class PlayerActivity extends Activity {
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
         overlay.addView(seekBubble, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.CENTER));
+
+        // Lock controls: shown alongside the controller; when locked, every
+        // gesture is swallowed and only the transient unlock pill responds.
+        lockBtn = new Button(this);
+        lockBtn.setText("\uD83D\uDD12 Lock");
+        lockBtn.setTextColor(Color.WHITE);
+        lockBtn.setBackgroundColor(Color.parseColor("#66000000"));
+        lockBtn.setOnClickListener(v -> setControlsLocked(true));
+        FrameLayout.LayoutParams lockLp = new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT,
+                Gravity.TOP | Gravity.START);
+        lockLp.topMargin = dp(20);
+        lockLp.leftMargin = dp(20);
+        overlay.addView(lockBtn, lockLp);
+        playerView.setControllerVisibilityListener((PlayerView.ControllerVisibilityListener) visibility ->
+                lockBtn.setVisibility(visibility == View.VISIBLE && !controlsLocked ? View.VISIBLE : View.GONE));
+        lockBtn.setVisibility(View.GONE);
+
+        unlockBtn = new Button(this);
+        unlockBtn.setText("\uD83D\uDD13 Unlock");
+        unlockBtn.setTextColor(Color.WHITE);
+        unlockBtn.setBackgroundColor(Color.parseColor("#99000000"));
+        unlockBtn.setVisibility(View.GONE);
+        unlockBtn.setOnClickListener(v -> setControlsLocked(false));
+        FrameLayout.LayoutParams unlockLp = new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT,
+                Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+        unlockLp.topMargin = dp(28);
+        overlay.addView(unlockBtn, unlockLp);
+    }
+
+    private void setControlsLocked(boolean locked) {
+        controlsLocked = locked;
+        playerView.setUseController(!locked);
+        if (locked) {
+            playerView.hideController();
+            lockBtn.setVisibility(View.GONE);
+            flashUnlockButton();
+        } else {
+            unlockBtn.removeCallbacks(hideUnlockBtn);
+            unlockBtn.setVisibility(View.GONE);
+            playerView.showController();
+        }
+    }
+
+    /** While locked, a tap reveals the unlock pill for a few seconds. */
+    private void flashUnlockButton() {
+        if (unlockBtn == null) return;
+        unlockBtn.setVisibility(View.VISIBLE);
+        unlockBtn.removeCallbacks(hideUnlockBtn);
+        unlockBtn.postDelayed(hideUnlockBtn, 3000);
     }
 
     // ==================== Chromecast ====================
@@ -772,7 +890,29 @@ public class PlayerActivity extends Activity {
                 if (r >= 0.42f && r <= 2.39f) ratio = new Rational(w, h);
             }
         } catch (Exception ignored) { }
-        return new PictureInPictureParams.Builder().setAspectRatio(ratio).build();
+        PictureInPictureParams.Builder b = new PictureInPictureParams.Builder().setAspectRatio(ratio);
+        // Transport control on the mini window (Netflix PiP shows play/pause).
+        try {
+            boolean playing = player != null && player.isPlaying();
+            Intent i = new Intent(ACTION_PIP_CONTROL)
+                    .setPackage(getPackageName())
+                    .putExtra(EXTRA_PIP_ACTION, playing ? "pause" : "play");
+            PendingIntent pi = PendingIntent.getBroadcast(this, playing ? 1 : 2, i,
+                    PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+            Icon icon = Icon.createWithResource(this,
+                    playing ? android.R.drawable.ic_media_pause : android.R.drawable.ic_media_play);
+            b.setActions(java.util.Collections.singletonList(
+                    new RemoteAction(icon, playing ? "Pause" : "Play", "Play/Pause", pi)));
+        } catch (Exception ignored) { /* actions are optional */ }
+        return b.build();
+    }
+
+    /** Re-issue the PiP params so the play/pause button reflects the new state. */
+    private void refreshPipActions() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
+        try {
+            if (isInPictureInPictureMode()) setPictureInPictureParams(buildPipParams());
+        } catch (Exception ignored) { }
     }
 
     @Override
@@ -788,6 +928,7 @@ public class PlayerActivity extends Activity {
     @Override
     protected void onDestroy() {
         errHandler.removeCallbacks(bufferWatchdog);
+        if (pipReceiver != null) { try { unregisterReceiver(pipReceiver); } catch (Exception ignored) { } pipReceiver = null; }
         if (castSupport != null) { castSupport.stop(); castSupport = null; }
         if (mediaSession != null) { mediaSession.release(); mediaSession = null; }
         if (player != null) { player.release(); player = null; }

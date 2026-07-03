@@ -152,12 +152,11 @@ class HomePage {
     }
 
     scrollSection(id, loadingText, extraClass = '', content = '') {
-        const body = content || `
-                    <div class="loading-state">
-                        <div class="loading"></div>
-                        <span>${this.escapeHtml(loadingText)}</span>
-                    </div>
-        `;
+        // Skeleton cards instead of a bare spinner+text, so every rail matches the
+        // main "Selection" rail's loading treatment (no layout jump on swap-in).
+        const body = content || (window.MediaUtils?.skeletonCards
+            ? window.MediaUtils.skeletonCards(8)
+            : `<div class="loading-state"><div class="loading"></div><span>${this.escapeHtml(loadingText)}</span></div>`);
         return `
             <div class="scroll-wrapper">
                 <button class="scroll-arrow scroll-left" aria-label="Scroll left">
@@ -1268,11 +1267,14 @@ class HomePage {
         const meta = this.cardMeta(item);
         const variantCount = Number(item.variantCount || item.variant_count || data.variantCount || 0);
         const languageBadge = this.cardLanguageBadge(item);
+        // "New" corner badge, except on the ranked Top-10 rails (the numeral owns that corner).
+        const isNew = !ranked && MediaUtils.isRecentlyAdded?.(item);
 
         return `
             <div class="dashboard-card" data-id="${this.escapeAttr(itemId)}" data-type="${this.escapeAttr(type)}" data-rail-index="${railIndex}" data-item-index="${itemIndex}">
                 <div class="card-image">
                     ${ranked ? `<div class="rank-numeral">${itemIndex + 1}</div>` : ''}
+                    ${isNew ? '<span class="new-badge">NEW</span>' : ''}
                     <img src="${this.escapeAttr(posterUrl)}" alt="${this.escapeAttr(title)}" loading="lazy" decoding="async"
                          ${MediaUtils.tmdbSrcset?.(posterUrl) ? `srcset="${this.escapeAttr(MediaUtils.tmdbSrcset(posterUrl))}" sizes="(max-width: 640px) 40vw, 220px"` : ''}
                          onerror="this.onerror=null;this.src='/img/norva-media-placeholder.png'">
@@ -1381,8 +1383,26 @@ class HomePage {
         this.historyItems.splice(index, 1);
         this.renderHistory(this.historyItems);
         const recordId = item.id;
-        if (recordId == null) return;
-        try { await window.API?.history?.remove?.(recordId); } catch (_) { /* best-effort */ }
+
+        // Undo window: hold the server delete for a few seconds so a mis-tap is
+        // fully recoverable (Netflix removes silently — this is friendlier).
+        let undone = false;
+        const commit = async () => {
+            if (undone || recordId == null) return;
+            try { await window.API?.history?.remove?.(recordId); } catch (_) { /* best-effort */ }
+        };
+        const toast = this.app?.showToast?.('Removed from Continue Watching', {
+            action: 'Undo',
+            duration: 5000,
+            onAction: () => {
+                undone = true;
+                this.historyItems.splice(Math.min(index, this.historyItems.length), 0, item);
+                this.renderHistory(this.historyItems);
+            }
+        });
+        // Persist the delete once the undo window closes (toast auto-dismiss ≈ 5s).
+        setTimeout(commit, 5200);
+        if (!toast) commit(); // no toast host (edge case) → delete immediately
     }
 
     createHistoryCard(item, index) {

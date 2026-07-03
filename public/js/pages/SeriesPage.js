@@ -1071,7 +1071,15 @@ class SeriesPage {
         if (this.randomBtn) this.randomBtn.disabled = cards.length === 0;
 
         if (cards.length === 0) {
-            this.container.innerHTML = '<div class="empty-state"><p>No series found</p></div>';
+            const filtered = this.hasActiveFilters();
+            this.container.innerHTML = `
+                <div class="empty-state rich-empty">
+                    <div class="empty-icon">📺</div>
+                    <h3>${filtered ? 'No series match these filters' : 'No series here yet'}</h3>
+                    <p>${filtered ? 'Try widening your search, genre or language filters.' : 'Series appear as soon as Norva finishes preparing your catalog.'}</p>
+                    ${filtered ? '<button class="btn btn-primary" id="series-empty-reset">Clear filters</button>' : ''}
+                </div>`;
+            this.container.querySelector('#series-empty-reset')?.addEventListener('click', () => this.resetFilters?.());
             return;
         }
 
@@ -1248,10 +1256,13 @@ class SeriesPage {
         const displayName = (this.groupDuplicates && series.tmdb?.title) ? series.tmdb.title : MediaUtils.cleanReleaseName(series.name);
         const groupBroken = group.items.every(item => this.isBrokenItem(item));
         const languageBadge = MediaUtils.versionLanguageBadge(series, this.getPreferences());
+        // "New" corner badge for series added in the last two weeks (not started).
+        const isNew = !started && group.items.some(i => MediaUtils.isRecentlyAdded(i));
 
         const srcset = MediaUtils.tmdbSrcset(poster);
         card.innerHTML = `
             <div class="series-poster">
+                ${isNew ? '<span class="new-badge">NEW</span>' : ''}
                 <img src="${MediaUtils.escapeHtml(poster)}" alt="${MediaUtils.escapeHtml(displayName)}"
                      ${srcset ? `srcset="${MediaUtils.escapeHtml(srcset)}" sizes="(max-width: 640px) 45vw, 190px"` : ''}
                      onerror="this.onerror=null;this.src='/img/norva-media-placeholder.png'" loading="lazy" decoding="async">
@@ -2212,15 +2223,36 @@ class SeriesPage {
      * No UI side-effects (so it can be looped for a whole season). Returns
      * 'queued' | 'skip' (already saved/in flight); throws if the URL can't resolve.
      */
-    async queueEpisodeDownload(episodeEl) {
+    async queueEpisodeDownload(episodeEl, { includeNext = false } = {}) {
         const bridge = this.nativeDownloadBridge();
         if (!bridge || !episodeEl) return 'skip';
+        const payload = await this.buildEpisodeDownloadPayload(episodeEl);
+        if (!payload) return 'skip';
+        // Smart downloads: attach the FOLLOWING episode's payload so the native
+        // service can auto-queue it when this one completes (single-episode
+        // downloads only — season batches already queue everything).
+        if (includeNext) {
+            const all = [...(this.seasonsContainer?.querySelectorAll('.episode-item') || [])];
+            const nextEl = all[all.indexOf(episodeEl) + 1];
+            if (nextEl && !['done', 'downloading', 'queued'].includes(
+                this.episodeDownloadState(`${parseInt(nextEl.dataset.sourceId)}:${nextEl.dataset.episodeId}`))) {
+                try {
+                    payload.next = await this.buildEpisodeDownloadPayload(nextEl, { allowInFlight: true });
+                } catch (_) { /* the chain link is optional */ }
+            }
+        }
+        bridge.downloadMedia(JSON.stringify(payload));
+        return 'queued';
+    }
+
+    /** Resolve one episode's direct URL + metadata into a native download payload. */
+    async buildEpisodeDownloadPayload(episodeEl, { allowInFlight = false } = {}) {
         const episodeId = episodeEl.dataset.episodeId;
         const sourceId = parseInt(episodeEl.dataset.sourceId);
         const container = episodeEl.dataset.container || 'mp4';
         const id = `${sourceId}:${episodeId}`;
         const state = this.episodeDownloadState(id);
-        if (state === 'done' || state === 'downloading' || state === 'queued') return 'skip';
+        if (!allowInFlight && (state === 'done' || state === 'downloading' || state === 'queued')) return null;
         const episode = this.findEpisodeById(episodeId)
             || { id: episodeId, container_extension: container, type: 'episode', streamType: 'series' };
         const seasonNum = episodeEl.dataset.season || '1';
@@ -2232,7 +2264,7 @@ class SeriesPage {
         const result = await API.proxy.xtream.getStreamUrl(sourceId, episodeId, 'series', container, playbackHint);
         if (!result || !result.url) throw new Error('No stream URL');
         const showTitle = this.currentSeries?.tmdb?.title || this.currentSeries?.name || 'Series';
-        const payload = {
+        return {
             url: result.url,
             sourceId: String(sourceId),
             itemId: String(episodeId),
@@ -2246,8 +2278,6 @@ class SeriesPage {
             container,
             durationSeconds: 0
         };
-        bridge.downloadMedia(JSON.stringify(payload));
-        return 'queued';
     }
 
     /** Queue a single episode for offline download (per-episode button). */
@@ -2262,7 +2292,7 @@ class SeriesPage {
         try {
             btn?.classList.add('busy');
             await this.prepareForPlaybackSession();
-            await this.queueEpisodeDownload(episodeEl);
+            await this.queueEpisodeDownload(episodeEl, { includeNext: true });
             window.app?.refreshDownloadsNav?.();
         } catch (err) {
             console.warn('[Download] episode failed:', err?.message || err);

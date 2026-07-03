@@ -261,6 +261,12 @@ class App {
             this.applyPage(page);
         });
 
+        // Offline banner: the SPA can't fetch fresh data with no network, so tell
+        // the user instead of leaving stale/empty rails looking broken.
+        window.addEventListener('offline', () => this.updateOfflineBanner(false));
+        window.addEventListener('online', () => this.updateOfflineBanner(true));
+        if (!navigator.onLine) this.updateOfflineBanner(false);
+
         // Initialize home page first (it's needed for channel list)
         await this.pages.home.init();
 
@@ -1669,6 +1675,56 @@ class App {
         if (pageName === 'watch') {
             try { this.exitLiveMini({ stop: true }); } catch (_) { /* noop */ }
         }
+    }
+
+    /**
+     * Lightweight toast with an optional action button (used for undo, etc.).
+     * Auto-dismisses after `duration` ms; clicking the action fires `onAction`
+     * and cancels the dismiss. Returns the element so callers can dismiss early.
+     */
+    showToast(message, { action = '', onAction = null, type = 'info', duration = 5000 } = {}) {
+        let host = document.getElementById('norva-toasts');
+        if (!host) {
+            host = document.createElement('div');
+            host.id = 'norva-toasts';
+            host.className = 'norva-toasts';
+            host.setAttribute('role', 'status');
+            host.setAttribute('aria-live', 'polite');
+            document.body.appendChild(host);
+        }
+        const toast = document.createElement('div');
+        toast.className = `norva-toast norva-toast-${type}`;
+        const span = document.createElement('span');
+        span.className = 'norva-toast-msg';
+        span.textContent = message;
+        toast.appendChild(span);
+        let timer = null;
+        const dismiss = () => { clearTimeout(timer); toast.classList.remove('show'); setTimeout(() => toast.remove(), 200); };
+        if (action && typeof onAction === 'function') {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'norva-toast-action';
+            btn.textContent = action;
+            btn.addEventListener('click', () => { dismiss(); try { onAction(); } catch (_) { /* noop */ } });
+            toast.appendChild(btn);
+        }
+        host.appendChild(toast);
+        requestAnimationFrame(() => toast.classList.add('show'));
+        timer = setTimeout(dismiss, duration);
+        return { dismiss };
+    }
+
+    /** Show/hide the "You're offline" banner. */
+    updateOfflineBanner(online) {
+        let banner = document.getElementById('norva-offline-banner');
+        if (online) { banner?.remove(); return; }
+        if (banner) return;
+        banner = document.createElement('div');
+        banner.id = 'norva-offline-banner';
+        banner.className = 'norva-offline-banner';
+        banner.setAttribute('role', 'status');
+        banner.textContent = "You're offline — showing what's cached. Reconnect to browse and play.";
+        document.body.appendChild(banner);
     }
 
     /** Load AdminPage's script on demand and instantiate it (admin-only route). */

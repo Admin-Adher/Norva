@@ -216,6 +216,17 @@ public final class DownloadService extends Service {
         if (!on) startFor(ctx, null); // resume anything that was waiting for Wi-Fi
     }
 
+    static final String PREF_SMART = "smart_downloads";
+
+    /** Smart downloads: when an episode finishes, auto-queue the next one. Off by default. */
+    static boolean getSmartDownloads(Context ctx) {
+        return ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(PREF_SMART, false);
+    }
+
+    static void setSmartDownloads(Context ctx, boolean on) {
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(PREF_SMART, on).apply();
+    }
+
     /** User chose to download this ONE item on mobile data despite Wi-Fi-only.
      *  A per-item override that never changes the global setting. */
     static void setAllowCellular(Context ctx, String id, boolean allow) {
@@ -366,6 +377,7 @@ public final class DownloadService extends Service {
             item.state = "done";
             item.url = "";
             persist(item);
+            maybeQueueSmartNext(item);
             return R_DONE;
         } catch (Exception e) {
             fail(item, String.valueOf(e.getMessage()));
@@ -373,6 +385,56 @@ public final class DownloadService extends Service {
         } finally {
             closeQuietly(out);
             if (conn != null) conn.disconnect();
+        }
+    }
+
+    /**
+     * Smart downloads: an episode just finished — queue its stored follower
+     * (payload attached by the web at enqueue time). Best-effort and idempotent:
+     * an already-known id, a missing payload, or the toggle being off all no-op.
+     */
+    private void maybeQueueSmartNext(DownloadStore.Item done) {
+        try {
+            if (!getSmartDownloads(this)) return;
+            if (done.nextJson == null || done.nextJson.isEmpty()) return;
+            org.json.JSONObject o = new org.json.JSONObject(done.nextJson);
+            String url = o.optString("url");
+            String sourceId = o.optString("sourceId");
+            String itemId = o.optString("itemId");
+            if (url.isEmpty() || sourceId.isEmpty() || itemId.isEmpty()) return;
+            String id = sourceId + ":" + itemId;
+            if (DownloadStore.get(this, id) != null) return; // already queued/saved
+
+            DownloadStore.Item it = new DownloadStore.Item();
+            it.id = id;
+            it.sourceId = sourceId;
+            it.itemId = itemId;
+            it.itemType = o.optString("itemType", "episode");
+            it.title = o.optString("title", "Episode");
+            it.subtitle = o.optString("subtitle", "");
+            it.season = o.optInt("season", 0);
+            it.episodeNum = o.optInt("episode", 0);
+            it.episodeTitle = o.optString("episodeTitle", "");
+            it.posterUrl = o.optString("posterUrl", "");
+            it.container = o.optString("container", "mp4");
+            it.url = url;
+            it.durationSeconds = o.optInt("durationSeconds", 0);
+            it.state = "queued";
+            it.createdAt = System.currentTimeMillis();
+            it.queueOrder = it.createdAt;
+            org.json.JSONObject next = o.optJSONObject("next"); // chain S01E03 after S01E02 etc.
+            it.nextJson = next != null ? next.toString() : "";
+
+            byte[] dataKey = DownloadCrypto.newDataKey();
+            byte[] mediaIv = DownloadCrypto.newMediaIv();
+            DownloadCrypto.Wrapped w = DownloadCrypto.wrapDataKey(dataKey);
+            it.wrappedKey = DownloadCrypto.b64(w.blob);
+            it.keyIv = DownloadCrypto.b64(w.iv);
+            it.mediaIv = DownloadCrypto.b64(mediaIv);
+            DownloadStore.put(this, it);
+            startFor(this, id);
+        } catch (Exception ignored) {
+            // Smart chaining is a convenience; the finished download is untouched.
         }
     }
 

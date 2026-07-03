@@ -119,7 +119,7 @@ public class PlayerActivity extends Activity {
     private int videoW = 0, videoH = 0;
     private int playRetries = 0; // transient-error retry budget per stream
     private int aspectMode = 0; // 0 fit, 1 zoom (crop), 2 stretch
-    private final String[] ASPECT_LABELS = {"Normal", "Zoom", "Étirer"};
+    private final String[] ASPECT_LABELS = {"Normal", "Zoom", "Stretch"};
     private final float[] SPEEDS = {0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f};
     private int speedIndex = 2;
     private int sleepMinutes = 0;
@@ -152,13 +152,13 @@ public class PlayerActivity extends Activity {
             nextCountdownSecs--;
             if (nextCountdownSecs <= 0) { chooseNextEpisode(); return; }
             if (nextCountdownView != null) {
-                nextCountdownView.setText("Lecture dans " + nextCountdownSecs + " s");
+                nextCountdownView.setText("Playing in " + nextCountdownSecs + "s");
             }
             handler.postDelayed(this, 1000);
         }
     };
 
-    private final SimpleDateFormat clockFmt = new SimpleDateFormat("EEE d MMM 'à' HH:mm", Locale.FRENCH);
+    private final SimpleDateFormat clockFmt = new SimpleDateFormat("EEE d MMM · HH:mm", Locale.ENGLISH);
 
     // Keyboard scrubbing: arrows adjust a pending target shown live on the bar,
     // and the actual seek is committed shortly after the last press (so holding
@@ -194,9 +194,9 @@ public class PlayerActivity extends Activity {
         @Override
         public void run() {
             spinner.setVisibility(View.GONE);
-            errorView.setText("Aucune donnée reçue (timeout 35s).\n"
-                    + "Le fournisseur accepte la connexion mais n'envoie pas de flux lisible."
-                    + (streamHost != null ? "\nHôte : " + streamHost : ""));
+            errorView.setText("No data received (35s timeout).\n"
+                    + "The provider accepts the connection but sends no playable stream."
+                    + (streamHost != null ? "\nHost: " + streamHost : ""));
             errorView.setVisibility(View.VISIBLE);
         }
     };
@@ -423,30 +423,30 @@ public class PlayerActivity extends Activity {
     /** Map ExoPlayer error codes to clear French messages for the viewer. */
     private String friendlyError(int code, String name) {
         if (code == PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS) {
-            return "Flux refusé ou serveur du fournisseur indisponible.\n"
-                    + "La chaîne/le titre est peut-être hors-ligne, ou votre compte est limité à une connexion.";
+            return "Stream refused or the provider's server is unavailable.\n"
+                    + "The channel/title may be offline, or your account is limited to one connection.";
         }
         if (code == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED
                 || code == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT) {
-            return "Connexion au flux impossible (réseau ou serveur trop lent).";
+            return "Could not connect to the stream (network issue or server too slow).";
         }
         if (code == PlaybackException.ERROR_CODE_IO_INVALID_HTTP_CONTENT_TYPE
                 || code == PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED
                 || code == PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED
                 || code == PlaybackException.ERROR_CODE_PARSING_MANIFEST_UNSUPPORTED
                 || code == PlaybackException.ERROR_CODE_PARSING_MANIFEST_MALFORMED) {
-            return "Ce titre est indisponible chez le fournisseur\n(le serveur ne renvoie pas de vidéo valide).";
+            return "This title is unavailable from the provider\n(the server does not return valid video).";
         }
         if (code == PlaybackException.ERROR_CODE_DECODING_FORMAT_UNSUPPORTED
                 || code == PlaybackException.ERROR_CODE_DECODER_INIT_FAILED) {
-            return "Format vidéo/audio non pris en charge par cette TV.";
+            return "Video/audio format not supported by this TV.";
         }
-        return "Lecture impossible (" + name + ").";
+        return "Playback failed (" + name + ").";
     }
 
     /** Compact, shareable technical detail from a playback failure (code, HTTP status, cause, host). */
     private String diagnose(PlaybackException e) {
-        StringBuilder sb = new StringBuilder("Détails : ").append(e.getErrorCodeName());
+        StringBuilder sb = new StringBuilder("Details: ").append(e.getErrorCodeName());
         Throwable c = e.getCause();
         int depth = 0;
         while (c != null && depth < 3) {
@@ -456,12 +456,12 @@ public class PlayerActivity extends Activity {
             sb.append("\n← ").append(c.getClass().getSimpleName());
             String cm = c.getMessage();
             if (cm != null && !cm.isEmpty()) {
-                sb.append(" : ").append(cm.length() > 160 ? cm.substring(0, 160) : cm);
+                sb.append(": ").append(cm.length() > 160 ? cm.substring(0, 160) : cm);
             }
             c = c.getCause();
             depth++;
         }
-        if (streamHost != null && !streamHost.isEmpty()) sb.append("\nHôte : ").append(streamHost);
+        if (streamHost != null && !streamHost.isEmpty()) sb.append("\nHost: ").append(streamHost);
         return sb.toString();
     }
 
@@ -496,7 +496,7 @@ public class PlayerActivity extends Activity {
         nextPanel.setPadding(dp(28), dp(20), dp(28), dp(20));
 
         TextView kicker = new TextView(this);
-        kicker.setText("À suivre");
+        kicker.setText("Up next");
         kicker.setTextColor(SUBTLE);
         kicker.setTextSize(14);
         nextPanel.addView(kicker);
@@ -519,7 +519,7 @@ public class PlayerActivity extends Activity {
         nextPanel.addView(buttons);
 
         android.widget.Button playBtn = new android.widget.Button(this);
-        playBtn.setText("▶  Lire maintenant");
+        playBtn.setText("▶  Play now");
         playBtn.setTextColor(Color.parseColor("#0A0A0F"));
         playBtn.setBackgroundColor(Color.parseColor("#E4E4F2"));
         playBtn.setOnClickListener(new View.OnClickListener() {
@@ -531,7 +531,7 @@ public class PlayerActivity extends Activity {
         buttons.addView(playBtn, playLp);
 
         android.widget.Button backBtn = new android.widget.Button(this);
-        backBtn.setText("Retour");
+        backBtn.setText("Back");
         backBtn.setTextColor(Color.WHITE);
         backBtn.setBackgroundColor(Color.parseColor("#33FFFFFF"));
         backBtn.setOnClickListener(new View.OnClickListener() {
@@ -547,7 +547,7 @@ public class PlayerActivity extends Activity {
         root.addView(nextPanel, lp);
 
         nextCountdownSecs = 10;
-        nextCountdownView.setText("Lecture dans " + nextCountdownSecs + " s");
+        nextCountdownView.setText("Playing in " + nextCountdownSecs + "s");
         handler.postDelayed(nextCountdownTick, 1000);
         playBtn.requestFocus();
     }
@@ -667,9 +667,10 @@ public class PlayerActivity extends Activity {
             @Override public void run() { seekBy(10000); }
         });
 
-        // Chevron toggles the second bar (remote uses DPAD up/down instead)
+        // Chevron toggles the second bar. Focusable so the options bar has a
+        // visible, Enter-able affordance (not just the undiscoverable D-pad Down).
         chevron = makePlainIconButton(R.drawable.ic_player_expand_more, "Player options", 44, 10, ACCENT);
-        chevron.setFocusable(false);
+        chevron.setFocusable(true);
         chevron.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { toggleSecondBar(); }
         });
@@ -693,33 +694,33 @@ public class PlayerActivity extends Activity {
         parent.addView(secondBar, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        videoValue = addBarItem(R.drawable.ic_player_quality, "Vidéo", "—", new Runnable() {
-            @Override public void run() { showTrackDialog(C.TRACK_TYPE_VIDEO, "Piste vidéo"); }
+        videoValue = addBarItem(R.drawable.ic_player_quality, "Video", "—", new Runnable() {
+            @Override public void run() { showTrackDialog(C.TRACK_TYPE_VIDEO, "Video track"); }
         });
         audioValue = addBarItem(R.drawable.ic_player_audio, "Audio", "—", new Runnable() {
-            @Override public void run() { showTrackDialog(C.TRACK_TYPE_AUDIO, "Piste audio"); }
+            @Override public void run() { showTrackDialog(C.TRACK_TYPE_AUDIO, "Audio track"); }
         });
-        subValue = addBarItem(R.drawable.ic_player_captions, "Sous-titres", "Off", new Runnable() {
-            @Override public void run() { showTrackDialog(C.TRACK_TYPE_TEXT, "Sous-titres"); }
+        subValue = addBarItem(R.drawable.ic_player_captions, "Subtitles", "Off", new Runnable() {
+            @Override public void run() { showTrackDialog(C.TRACK_TYPE_TEXT, "Subtitles"); }
         });
-        aspectValue = addBarItem(R.drawable.ic_player_pip, "Ratio", ASPECT_LABELS[0], new Runnable() {
+        aspectValue = addBarItem(R.drawable.ic_player_pip, "Aspect", ASPECT_LABELS[0], new Runnable() {
             @Override public void run() { cycleAspect(); }
         });
-        speedValue = addBarItem(R.drawable.ic_player_speed, "Vitesse", "1×", new Runnable() {
+        speedValue = addBarItem(R.drawable.ic_player_speed, "Speed", "1×", new Runnable() {
             @Override public void run() { cycleSpeed(); }
         });
-        sleepValue = addBarItem(R.drawable.ic_player_sleep, "Veille", "Off", new Runnable() {
+        sleepValue = addBarItem(R.drawable.ic_player_sleep, "Sleep", "Off", new Runnable() {
             @Override public void run() { cycleSleep(); }
         });
         // Series-only shortcuts: jump to the next episode without waiting for the
         // end, and reopen the episode list (the fiche behind the player).
         if (nextTitle != null && !nextTitle.isEmpty()) {
-            addBarItem(R.drawable.ic_player_skip_forward, "Suivant", "Épisode", new Runnable() {
+            addBarItem(R.drawable.ic_player_skip_forward, "Next", "Episode", new Runnable() {
                 @Override public void run() { chooseNextEpisode(); }
             });
         }
         if ("episode".equals(itemType)) {
-            addBarItem(R.drawable.ic_player_expand_less, "Épisodes", "Liste", new Runnable() {
+            addBarItem(R.drawable.ic_player_expand_less, "Episodes", "List", new Runnable() {
                 @Override public void run() { openEpisodesChosen = true; finish(); }
             });
         }
@@ -936,7 +937,7 @@ public class PlayerActivity extends Activity {
         }
 
         if (labels.size() <= (isText ? 1 : 0)) {
-            toast(isText ? "Aucun sous-titre dans ce flux" : "Aucune autre piste");
+            toast(isText ? "No subtitles in this stream" : "No other track");
             return;
         }
 
@@ -987,12 +988,12 @@ public class PlayerActivity extends Activity {
         if (f.label != null && !f.label.isEmpty()) s.append(f.label);
         else if (f.language != null && !"und".equals(f.language))
             s.append(new Locale(f.language).getDisplayLanguage(Locale.getDefault()));
-        else s.append(trackType == C.TRACK_TYPE_AUDIO ? "Audio " : "Sous-titre ").append(ordinal);
+        else s.append(trackType == C.TRACK_TYPE_AUDIO ? "Audio " : "Subtitle ").append(ordinal);
         if (f.language != null && !"und".equals(f.language)) s.append(" [").append(f.language).append("]");
         if (trackType == C.TRACK_TYPE_AUDIO) {
             if (f.channelCount == 6) s.append(" · 5.1");
             else if (f.channelCount == 8) s.append(" · 7.1");
-            else if (f.channelCount == 2) s.append(" · stéréo");
+            else if (f.channelCount == 2) s.append(" · stereo");
             if (f.codecs != null) s.append(" · ").append(f.codecs);
         }
         return s.toString();
@@ -1322,6 +1323,33 @@ public class PlayerActivity extends Activity {
         secondBarVisible = false;
         secondBar.setVisibility(View.GONE);
         chevron.setImageResource(R.drawable.ic_player_expand_more);
+    }
+
+    // ==================== Picture-in-Picture ====================
+    // HOME while playing shrinks into a PiP window instead of killing playback
+    // (Android TV supports it since O; launchers without it just background us).
+
+    @Override
+    protected void onUserLeaveHint() {
+        super.onUserLeaveHint();
+        if (android.os.Build.VERSION.SDK_INT < 26) return;
+        if (player == null || !player.isPlaying() || nextPanel != null) return;
+        try {
+            android.util.Rational ratio = new android.util.Rational(16, 9);
+            if (videoW > 0 && videoH > 0) {
+                float r = (float) videoW / videoH;
+                if (r >= 0.42f && r <= 2.39f) ratio = new android.util.Rational(videoW, videoH);
+            }
+            enterPictureInPictureMode(new android.app.PictureInPictureParams.Builder()
+                    .setAspectRatio(ratio).build());
+        } catch (Exception ignored) { /* PiP unsupported on this device */ }
+    }
+
+    @Override
+    public void onPictureInPictureModeChanged(boolean isInPip, android.content.res.Configuration newConfig) {
+        super.onPictureInPictureModeChanged(isInPip, newConfig);
+        if (isInPip) hideOverlayNow();
+        else showControls();
     }
 
     /**

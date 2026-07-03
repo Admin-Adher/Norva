@@ -1102,7 +1102,15 @@ class MoviesPage {
         if (this.randomBtn) this.randomBtn.disabled = cards.length === 0;
 
         if (cards.length === 0) {
-            this.container.innerHTML = '<div class="empty-state"><p>No movies found</p></div>';
+            const filtered = this.hasActiveFilters();
+            this.container.innerHTML = `
+                <div class="empty-state rich-empty">
+                    <div class="empty-icon">🎬</div>
+                    <h3>${filtered ? 'No movies match these filters' : 'No movies here yet'}</h3>
+                    <p>${filtered ? 'Try widening your search, genre or language filters.' : 'Movies appear as soon as Norva finishes preparing your catalog.'}</p>
+                    ${filtered ? '<button class="btn btn-primary" id="movies-empty-reset">Clear filters</button>' : ''}
+                </div>`;
+            this.container.querySelector('#movies-empty-reset')?.addEventListener('click', () => this.resetFilters?.());
             return;
         }
 
@@ -1288,10 +1296,13 @@ class MoviesPage {
         const displayName = (this.groupDuplicates && movie.tmdb?.title) ? movie.tmdb.title : MediaUtils.cleanReleaseName(movie.name);
         const groupBroken = group.items.every(item => this.isBrokenItem(item));
         const languageBadge = MediaUtils.versionLanguageBadge(movie, this.getPreferences());
+        // "New" corner badge for titles added in the last two weeks (unwatched).
+        const isNew = watch.status !== 'watched' && group.items.some(i => MediaUtils.isRecentlyAdded(i));
 
         const srcset = MediaUtils.tmdbSrcset(poster);
         card.innerHTML = `
             <div class="movie-poster">
+                ${isNew ? '<span class="new-badge">NEW</span>' : ''}
                 <img src="${MediaUtils.escapeHtml(poster)}" alt="${MediaUtils.escapeHtml(displayName)}"
                      ${srcset ? `srcset="${MediaUtils.escapeHtml(srcset)}" sizes="(max-width: 640px) 45vw, 190px"` : ''}
                      onerror="this.onerror=null;this.src='/img/norva-media-placeholder.png'" loading="lazy" decoding="async">

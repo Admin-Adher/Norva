@@ -40,6 +40,8 @@ class WatchPage {
         // Next episode
         this.nextEpisodePanel = document.getElementById('watch-next-episode');
         this.nextEpisodeTitle = document.getElementById('next-episode-title');
+        this.nextEpisodeStill = document.getElementById('next-episode-still');
+        this.nextEpisodeSynopsis = document.getElementById('next-episode-synopsis');
         this.nextCountdown = document.getElementById('next-countdown');
         this.nextPlayNowBtn = document.getElementById('next-play-now');
         this.nextCancelBtn = document.getElementById('next-cancel');
@@ -1346,6 +1348,7 @@ class WatchPage {
         // Reset state
         this.cancelNextEpisode();
         this.nextEpisodeDismissed = false;
+        document.getElementById('watch-still-watching')?.remove();
         this.resetSkipIntroState();
         this.loadIntroMarkers();
         this.resetStoryboard();
@@ -2209,10 +2212,28 @@ class WatchPage {
         if (!this.qualityBadgeEl) return;
 
         if (this.currentStreamInfo?.height > 0) {
-            this.qualityBadgeEl.textContent = this.getQualityLabel(this.currentStreamInfo.height);
+            const label = this.getQualityLabel(this.currentStreamInfo.height);
+            const rate = this.getBitrateLabel();
+            this.qualityBadgeEl.textContent = rate ? `${label} · ${rate}` : label;
             this.qualityBadgeEl.classList.remove('hidden');
         } else {
             this.qualityBadgeEl.classList.add('hidden');
+        }
+    }
+
+    /**
+     * Live throughput label (Mbps) from hls.js's bandwidth estimate — the audit
+     * flagged it as computed-but-hidden. Empty when no estimate is available
+     * (engine/direct playback), so the badge stays resolution-only there.
+     */
+    getBitrateLabel() {
+        try {
+            const bps = this.hls?.bandwidthEstimate;
+            if (!bps || !isFinite(bps) || bps <= 0) return '';
+            const mbps = bps / 1_000_000;
+            return mbps >= 10 ? `${Math.round(mbps)} Mbps` : `${mbps.toFixed(1)} Mbps`;
+        } catch (_) {
+            return '';
         }
     }
 
@@ -4287,6 +4308,14 @@ class WatchPage {
 
         this.updateMediaSessionPosition();
         this.updateSkipIntroVisibility();
+        // Refresh the throughput readout ~every 5s while an HLS estimate exists.
+        if (this.hls && this.currentStreamInfo?.height > 0) {
+            const now = Date.now();
+            if (now - (this._bitrateBadgeAt || 0) > 5000) {
+                this._bitrateBadgeAt = now;
+                this.updateQualityBadge();
+            }
+        }
 
         const duration = this.updateDurationState();
         if (!duration) return;
@@ -7665,6 +7694,38 @@ class WatchPage {
                 this.toggleMute();
                 this.showOverlay();
                 break;
+            case 'j':
+                e.preventDefault();
+                this.skip(-10);
+                this.showOverlay();
+                break;
+            case 'l':
+                e.preventDefault();
+                this.skip(10);
+                this.showOverlay();
+                break;
+            case 'c':
+                // Toggle subtitles: last-used track back on, or off (YouTube parity).
+                e.preventDefault();
+                this.toggleCaptionsShortcut();
+                this.showOverlay();
+                break;
+            case 'n':
+                // Next episode (series only; no-op on movies).
+                e.preventDefault();
+                if (this.contentType === 'series' && this.getNextEpisode()) this.playNextEpisode();
+                break;
+            case '0': case '1': case '2': case '3': case '4':
+            case '5': case '6': case '7': case '8': case '9': {
+                // Number keys jump to N×10% of the timeline (YouTube parity).
+                e.preventDefault();
+                const duration = this.getDisplayDuration();
+                if (duration) {
+                    this.seekToTime((Number(e.key) / 10) * duration, { immediate: true });
+                    this.showOverlay();
+                }
+                break;
+            }
             case 'Escape':
                 if (document.fullscreenElement) {
                     document.exitFullscreen();
@@ -7673,6 +7734,30 @@ class WatchPage {
                 }
                 break;
         }
+    }
+
+    /**
+     * `c`: flip subtitles off/on. Off remembers the active selection; on
+     * restores it (or picks the first available track when none was chosen yet).
+     */
+    toggleCaptionsShortcut() {
+        try {
+            const tracks = this.video?.textTracks || [];
+            let active = null;
+            for (let i = 0; i < tracks.length; i++) {
+                if (tracks[i].mode === 'showing') { active = i; break; }
+            }
+            if (active !== null) {
+                this._captionsShortcutMemory = active;
+                tracks[active].mode = 'hidden';
+                return;
+            }
+            const restore = this._captionsShortcutMemory ?? 0;
+            if (tracks.length > 0) {
+                const idx = Math.min(restore, tracks.length - 1);
+                tracks[idx].mode = 'showing';
+            }
+        } catch (_) { /* shortcut is best-effort */ }
     }
 
     // === Details Section ===
@@ -8135,6 +8220,24 @@ class WatchPage {
 
         const autoCountdown = options.autoCountdown !== false;
         this.nextEpisodeTitle.textContent = `S${nextEp.seasonNum} E${nextEp.episode_num} - ${nextEp.title || `Episode ${nextEp.episode_num}`}`;
+        // Richer panel (Netflix parity): a still, a one-line synopsis, and the
+        // Cancel button reads "Watch Credits" so dismissing is an explicit choice.
+        if (this.nextEpisodeStill) {
+            const still = MediaUtils.safeImageUrl(
+                nextEp.info?.movie_image || nextEp.movie_image || nextEp.still || nextEp.cover_big || nextEp.poster || '', '');
+            if (still) {
+                this.nextEpisodeStill.src = still;
+                this.nextEpisodeStill.hidden = false;
+                this.nextEpisodeStill.onerror = () => { this.nextEpisodeStill.hidden = true; };
+            } else {
+                this.nextEpisodeStill.hidden = true;
+            }
+        }
+        if (this.nextEpisodeSynopsis) {
+            const synopsis = String(nextEp.info?.plot || nextEp.plot || nextEp.description || '').trim();
+            this.nextEpisodeSynopsis.textContent = synopsis;
+            this.nextEpisodeSynopsis.hidden = !synopsis;
+        }
         this.nextEpisodePanel.classList.remove('hidden');
         this.nextEpisodePanel.nextEpisodeData = nextEp;
 
@@ -8149,18 +8252,58 @@ class WatchPage {
             this.nextCountdown.textContent = this.nextEpisodeCountdown;
 
             if (this.nextEpisodeCountdown <= 0) {
-                this.playNextEpisode();
+                this.playNextEpisode({ auto: true });
             }
         }, 1000);
     }
 
-    async playNextEpisode() {
+    async playNextEpisode(options = {}) {
         // From the end-of-episode panel if present, else resolve live (the
         // persistent "next" button). cancel clears the panel data, so read first.
         const nextEp = this.nextEpisodePanel?.nextEpisodeData || this.getNextEpisode();
+        // "Are you still watching?" — after several UNINTERRUPTED auto-plays,
+        // pause the binge and ask, so a title doesn't stream to an empty room all
+        // night. A manual Play (button/shortcut) resets the counter.
+        if (options.auto) {
+            this._consecutiveAutoplays = (this._consecutiveAutoplays || 0) + 1;
+            if (this._consecutiveAutoplays >= 3) {
+                this.cancelNextEpisode();
+                this.showStillWatchingPrompt(nextEp);
+                return;
+            }
+        } else {
+            this._consecutiveAutoplays = 0;
+        }
         this.cancelNextEpisode();
         this.closeEpisodesMenu();
         await this.playEpisode(nextEp);
+    }
+
+    /**
+     * Idle guard: after N back-to-back auto-plays, pause and confirm someone is
+     * still there. Continue resets the counter and resumes the binge; dismissing
+     * leaves the player paused on the finished episode.
+     */
+    showStillWatchingPrompt(nextEp) {
+        try { this.video?.pause(); } catch (_) { /* best-effort */ }
+        document.getElementById('watch-still-watching')?.remove();
+        const overlay = document.createElement('div');
+        overlay.id = 'watch-still-watching';
+        overlay.className = 'watch-still-watching';
+        overlay.innerHTML = `
+            <div class="still-watching-box">
+                <h3>Are you still watching?</h3>
+                <p>Playback paused after a few episodes.</p>
+                <button type="button" class="btn btn-primary" id="still-watching-continue">Continue Watching</button>
+            </div>`;
+        const section = document.querySelector('.watch-video-section') || document.getElementById('page-watch');
+        section?.appendChild(overlay);
+        overlay.querySelector('#still-watching-continue')?.addEventListener('click', () => {
+            overlay.remove();
+            this._consecutiveAutoplays = 0;
+            this.closeEpisodesMenu();
+            this.playEpisode(nextEp);
+        });
     }
 
     async playPreviousEpisode() {

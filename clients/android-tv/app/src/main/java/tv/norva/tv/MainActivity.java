@@ -332,7 +332,7 @@ public class MainActivity extends Activity {
         setupPanel.addView(statusText);
 
         TextView tip = new TextView(this);
-        tip.setText("Press MENU on the remote at any time for advanced connection options.");
+        tip.setText("Advanced connection options: press MENU, or press BACK from Home and pick \"Connection settings\".");
         tip.setTextColor(Color.parseColor("#71717a"));
         tip.setTextSize(13);
         tip.setPadding(0, dp(24), 0, 0);
@@ -843,16 +843,27 @@ public class MainActivity extends Activity {
                 });
     }
 
-    /** "Quitter Norva ?" confirmation on BACK from the Home screen. */
+    /**
+     * "Exit Norva?" confirmation on BACK from the Home screen. Also the
+     * discoverable doorway to the connection settings — many TV remotes have
+     * no MENU key, and this dialog is one BACK press away from anywhere.
+     */
     private void showExitDialog() {
         try {
             new android.app.AlertDialog.Builder(this, android.app.AlertDialog.THEME_DEVICE_DEFAULT_DARK)
-                    .setTitle("Quitter Norva ?")
-                    .setPositiveButton("Quitter", new android.content.DialogInterface.OnClickListener() {
+                    .setTitle("Exit Norva?")
+                    .setPositiveButton("Exit", new android.content.DialogInterface.OnClickListener() {
                         @Override
                         public void onClick(android.content.DialogInterface dialog, int which) { finish(); }
                     })
-                    .setNegativeButton("Annuler", null)
+                    .setNeutralButton("Connection settings", new android.content.DialogInterface.OnClickListener() {
+                        @Override
+                        public void onClick(android.content.DialogInterface dialog, int which) {
+                            showSetup(null);
+                            if (advancedPanel != null) advancedPanel.setVisibility(View.VISIBLE);
+                        }
+                    })
+                    .setNegativeButton("Cancel", null)
                     .show();
         } catch (Exception e) {
             finish();

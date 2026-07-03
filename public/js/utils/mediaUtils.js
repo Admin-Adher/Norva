@@ -1183,6 +1183,23 @@ const MediaUtils = (() => {
         return `${m[1]}w185${m[2]} 185w, ${m[1]}w342${m[2]} 342w, ${m[1]}w500${m[2]} 500w`;
     }
 
+    /**
+     * "New" flag: true when a title was added within the last `days` (default 14).
+     * Reads the provider `added`/`added_at` field (Xtream unix-seconds or ISO).
+     * Returns false when the timestamp is missing/unparseable — no false NEWs.
+     */
+    function isRecentlyAdded(item, days = 14) {
+        const raw = item?.added ?? item?.added_at ?? item?.data?.added ?? item?.metadata?.added;
+        if (!raw) return false;
+        let ms = 0;
+        const num = parseInt(raw, 10);
+        if (!isNaN(num) && num > 0) ms = num < 10000000000 ? num * 1000 : num;
+        else ms = Date.parse(raw) || 0;
+        if (!ms) return false;
+        const now = Date.now();
+        return ms <= now && (now - ms) < days * 86400000;
+    }
+
     // Skeleton placeholder cards for loading rails/grids — same 160px footprint as
     // a real card so swapping in real content doesn't shift the layout. The shimmer
     // and reduced-motion handling live in CSS (.skeleton).
@@ -1206,7 +1223,7 @@ const MediaUtils = (() => {
         orderVersionsByPreference, versionLabel, versionLanguageBadge, audioLanguageBadge,
         saveFilters, loadFilters, escapeHtml, tmdbPosterUrl, parseDurationToSeconds,
         playbackHintFromItem, liveGatewayMode, safeImageUrl, downloadablePosterUrl,
-        enhanceRailScroll, openTrailerLightbox, tmdbSrcset
+        enhanceRailScroll, openTrailerLightbox, tmdbSrcset, isRecentlyAdded
     };
 })();
 

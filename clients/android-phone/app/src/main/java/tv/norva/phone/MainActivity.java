@@ -99,6 +99,9 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        // Branded system splash (dark background + icon) instead of a blank
+        // window then black flash; must be installed before super.onCreate().
+        try { androidx.core.splashscreen.SplashScreen.installSplashScreen(this); } catch (Exception ignored) { }
         super.onCreate(savedInstanceState);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
 
@@ -599,6 +602,10 @@ public class MainActivity extends Activity {
             it.container = sanitizeContainer(o.optString("container", "mp4"));
             it.url = url;
             it.durationSeconds = o.optInt("durationSeconds", 0);
+            // Smart downloads: the web attaches the FOLLOWING episode's payload; the
+            // service auto-queues it when this one completes (if the toggle is on).
+            org.json.JSONObject next = o.optJSONObject("next");
+            it.nextJson = next != null ? next.toString() : "";
             it.state = "queued";
             it.createdAt = System.currentTimeMillis();
             it.queueOrder = it.createdAt; // FIFO by default; reorder edits this

@@ -12,4 +12,11 @@
     <style name="PlayerTheme" parent="android:style/Theme.Material.NoActionBar.Fullscreen">
         <item name="android:windowBackground">@android:color/black</item>
     </style>
+    <!-- Branded cold-start splash: dark brand background + app icon, then the
+         normal theme takes over (core-splashscreen backports pre-12). -->
+    <style name="Theme.NorvaSplash" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">#0A0A0F</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_launcher</item>
+        <item name="postSplashScreenTheme">@style/AppTheme</item>
+    </style>
 </resources>
