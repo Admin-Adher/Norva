@@ -8,26 +8,27 @@ l'activer. Mis à jour au fil des sessions.
 ## ⚠️ Actions owner en attente (checklist vivante)
 
 Ces étapes **ne peuvent pas être faites par l'agent** (secrets Play Console, compte Google,
-build/publish signés). Elles bloquent la **release du natif**. Ordre logique :
+build/publish signés). Elles bloquent la **release du natif**. Ordre logique.
+**Suivi détaillé + pas-à-pas : `clients/PLAY_STORE_RELEASE_STATUS.md`.**
 
-1. **Compte Google Play Console** — ⏳ *bloquant racine*. Sans lui, aucun upload possible.
-   Message envoyé au support Google, en attente d'ouverture. → débloque 2, 3, 4.
-   Réf : `IMPORT-NOTIFICATIONS.md`, `FCM-PUSH-SETUP.md`.
-2. **Build/publish des APK** — versions **déjà bumpées en source** (TV `3.8.0-hybrid` /
-   versionCode 13, phone `1.2.0` / versionCode 3, cf. `clients/android-*/app/build.gradle`),
-   **mais jamais buildées/publiées**. Dernière build documentée = **v1.1.0 / versionCode 2**
-   (release FCM). Lancer `.github/workflows/android-release.yml` (manuel ou tag `v*`) puis
-   uploader les AAB en Test interne. → **porte tout le natif** : cast natif, gestes player,
-   Watch Next, « À suivre ».
-3. **assetlinks SHA-256** — remplacer le placeholder
+1. **Compte Google Play Console** — ✅ **obtenu** (2026-07-03). → débloque 2, 3, 4.
+2. **Build des AAB signés** — ✅ **fait**. Keystore d'origine détenu par l'owner (hors-repo) ;
+   les 4 secrets Android + `GOOGLE_SERVICES_JSON` sont posés dans GitHub. Dernier build vert =
+   **run #3** (`android-release.yml`, `main`, 2026-07-03) → 2 AAB signés en artéfacts
+   (phone `1.2.0`/vc3, TV `3.8.0`/vc13). **Reste à faire** : créer les 2 apps Console +
+   **uploader** les AAB en Test interne (accepter Play App Signing). → porte tout le natif
+   (cast natif, gestes player, Watch Next, « À suivre »).
+3. **assetlinks SHA-256** — ⏳ remplacer le placeholder
    `REPLACE_WITH_RELEASE_SIGNING_SHA256_FROM_PLAY_CONSOLE` dans
-   `public/.well-known/assetlinks.json` par l'empreinte SHA-256 de la signature **release**
-   (Play Console → Intégrité de l'app, ou keystore). Fichier déjà correct par ailleurs
-   (seul `tv.norva.phone` déclare les App Links https `norva.tv`). Sans ça, un lien `norva.tv`
-   s'ouvre quand même dans l'app **mais après confirmation Android** (pas de vérif auto).
-   Réf : `UX-NETFLIX-PARITY.md` #15.
-4. **FCM push** — `GOOGLE_SERVICES_JSON` (secret GitHub) et `FCM_SERVICE_ACCOUNT` (secret
-   Supabase) déjà posés ; il ne reste que la publication de l'APK (étape 2). Réf : `FCM-PUSH-SETUP.md`.
+   `public/.well-known/assetlinks.json` par l'empreinte **de la clé de signature générée par
+   Google** (Play Console → app phone → Intégrité de l'app), **pas** la clé d'upload. Dispo
+   seulement **après** l'upload (étape 2). Fichier déjà correct par ailleurs (seul
+   `tv.norva.phone` déclare les App Links https `norva.tv`). Réf : `UX-NETFLIX-PARITY.md` #15.
+4. **FCM push** — `GOOGLE_SERVICES_JSON` (GitHub) + `FCM_SERVICE_ACCOUNT` (Supabase) déjà posés ;
+   le build les embarque déjà. Il ne reste que la publication de l'APK (étape 2). Réf : `FCM-PUSH-SETUP.md`.
+5. **E-mail de support** — ✅ **fait**. `support@norva.tv` : réception via Cloudflare Email
+   Routing → `norva.support@gmail.com` ; envoi « en tant que » via SMTP Resend. Pages légales à
+   jour (données KBIS + médiateur CM2C). Détail : `clients/PLAY_STORE_RELEASE_STATUS.md` (annexe).
 
 **Lien avec le Cast (Lot A, 2026-07-03)** : le Lot A cast est **web uniquement** (sender Google
 Cast, déployé via `main`). Le **cast natif** (les APK ont leur propre intégration Cast) n'arrive
