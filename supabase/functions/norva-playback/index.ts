@@ -335,7 +335,22 @@ async function createPlaybackSession(
     // the provider accepts), not the Cloudflare relay (which the provider's WAF
     // 403s). The gateway does no transcode here — just a byte-range passthrough.
     if (body.enginePipe === true || body.engine_pipe === true) {
+      // Register the raw byte-pipe in the SAME cross-device ledger as transcode:
+      // starting it evicts a lingering gateway transcode (real DELETE → frees the
+      // provider slot) or another device's pipe (raw-pump abort at the gateway),
+      // instead of the two lanes silently fighting a single-slot provider (458).
+      // Coordinator unavailable → null → plays exactly as before (best-effort).
+      const rawCoordination = await prepareEdgeSessionCoordinator({
+        userId, sourceId, deviceId, itemType, itemId, targetUrlHash, expiresAt,
+      }, db);
+      if (rawCoordination?.waitMs) await sleep(rawCoordination.waitMs);
       const pipe = await createBytePipeAccess(session.id, userId, targetUrl, expiresAt, db, userAgent);
+      await commitEdgeSessionCoordinator(rawCoordination, {
+        playbackSessionId: session.id,
+        gatewaySessionId: null,
+        lane: "raw",
+        itemType, itemId, targetUrlHash, expiresAt,
+      });
       // Name the audio AND subtitle tracks for the in-browser engine: it streams the raw
       // file via the gateway and can't read per-stream language tags. ONE relay header-parse
       // returns both (the container header carries both → zero extra provider round-trips).
@@ -972,6 +987,7 @@ async function commitEdgeSessionCoordinator(
   options: {
     playbackSessionId: string;
     gatewaySessionId: string | null;
+    lane?: string;
     itemType: string;
     itemId: string;
     targetUrlHash: string;
@@ -986,6 +1002,7 @@ async function commitEdgeSessionCoordinator(
     deviceKey: coordination.deviceKey,
     playbackSessionId: options.playbackSessionId,
     gatewaySessionId: options.gatewaySessionId,
+    lane: options.lane,
     itemType: options.itemType,
     itemId: options.itemId,
     targetHash: options.targetUrlHash,

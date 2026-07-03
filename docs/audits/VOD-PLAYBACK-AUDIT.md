@@ -99,12 +99,43 @@ plus toute la TV live.
 - **Session fantôme** : la connexion amont du relay se ferme dès que le client décroche —
   le slot se libère réellement au lieu de traîner dans le pool keepalive.
 
-## 6. Suites (P1, notées — pas dans ce lot)
+## 6. Lot P1 — ledger de slots raw↔transcode (LIVRÉ, 2ᵉ passe même jour)
 
-- **Ledger raw↔transcode au relay** : enregistrer les streams /raw dans le
-  ProviderSessionCoordinator (single-flight par compte à travers les deux lanes) + alarm
-  DO pour faucher les sessions zombies. Écarté de ce lot : DO round-trip sur le hot path
-  de chaque range request — mérite un design posé (heartbeat piggyback), pas un rush.
-- Consommer les erreurs typées (`code`/`Retry-After`) côté client en PRIORITÉ sur les
-  regex texte (les regex restent le fallback pour les vieux gateways).
-- Sonde bytes=0-0 du relay : la sauter quand le coordinateur signale une contention.
+Le design retenu évite tout coût sur le hot path des chunks : la comptabilité se fait
+**au resolve** (une fois par titre) et **en mémoire du gateway** (zéro round-trip réseau
+par range request).
+
+- **Gateway — ledger de pumps** (`rawPumps`) : chaque pipe `/raw` est enregistrée avec
+  son `sid` (session de lecture) + `proxyKey` (host+username provider) + `ownerHash`
+  (sha256 du userId). Règles :
+  1. une **nouvelle session** de lecture aborte les pumps de la session PRÉCÉDENTE sur
+     le même compte (le déclencheur exact du bug : un crash/retry moteur laissait
+     l'ancienne pump drainer le slot) — les lectures range **concurrentes de la même
+     session sont épargnées** (`keepSid`) ;
+  2. un **démarrage transcode** (`POST /sessions`) aborte les pumps raw du même compte
+     avant de lancer ffmpeg (comptées dans le sleep de libération) ;
+  3. **`DELETE /raw-pumps?ownerKey=<sha256>`** : kill-switch cross-device pour le
+     coordinateur (jamais d'identifiants bruts — hash uniquement).
+- **Coordinateur DO (relay)** :
+  - `loadState` **fauche réellement** les enregistrements expirés (avant : drop
+    silencieux pendant que le ffmpeg/pump zombie tenait le slot) — DELETE gateway pour
+    les sessions transcode, `/raw-pumps` pour la lane raw ;
+  - **`alarm()`** : reaping sans trafic, armé par `saveState` sur la prochaine expiration ;
+  - `start()` fauche aussi les conflits qu'il écartait silencieusement ; `end()` aborte
+    les pumps de la session terminée ;
+  - **waitMs proportionné** : 8 s seulement si un ffmpeg gateway a été évincé ; 1,5 s si
+    seulement une pump raw (l'abort coupe le TCP immédiatement) ; 0 sinon — fini le
+    stall aveugle.
+- **Edge (norva-playback)** : le mode `enginePipe` (raw) passe par le MÊME
+  prepare→wait→commit que le transcode (`lane:"raw"`), donc : démarrer le moteur évince
+  un transcode fantôme (DELETE réel → slot libéré), démarrer un transcode évince la pipe
+  d'un autre appareil. Coordinateur indisponible → comportement identique à avant
+  (best-effort).
+- **Erreurs typées** : chaîne vérifiée de bout en bout — gateway `503 {code:PROVIDER_BUSY,
+  details:"…(HTTP 458 max connections)"}` → edge `HttpError.details` → client
+  `error.payload` + message (les classificateurs matchent sans string-scraping fragile).
+- Tests : +4 tests de câblage (`tests/vod-playback-matrix.test.js`, 26/26 verts au total)
+  verrouillent le ledger, le keepSid, le kill-switch, l'alarm et la lane raw.
+
+Sonde bytes=0-0 du relay Cloudflare sous contention : non traitée (le chemin moteur ne
+passe pas par le relay CF ; impact résiduel négligeable).

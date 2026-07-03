@@ -214,6 +214,7 @@ export class ProviderSessionCoordinator {
       : [];
 
     const gatewayExpired = await this.expireSessions(conflicts);
+    const rawAborted = await this.expireRawPumps(conflicts.filter((session) => session.lane === "raw" && !session.gatewaySessionId));
     state.active = state.active.filter((session) => !conflicts.some((conflict) => conflict.id === session.id));
 
     const lockTtlMs = boundedInt(body.lockTtlMs ?? body.lock_ttl_ms, 20_000, 2_000, 120_000);
@@ -231,15 +232,20 @@ export class ProviderSessionCoordinator {
     state.locks.push(lock);
     await this.saveState(state);
 
-    const waitMs = conflicts.length
+    // A gateway ffmpeg needs the full slot-release window (~8s); an aborted raw
+    // pump tears its TCP connection immediately, so a short settle is enough —
+    // and no conflict means no wait at all.
+    const hadGatewayConflict = conflicts.some((session) => session.gatewaySessionId);
+    const waitMs = hadGatewayConflict
       ? boundedInt(this.env.PROVIDER_SLOT_RELEASE_DELAY_MS, 8000, 0, 15_000)
-      : 0;
+      : conflicts.length ? 1500 : 0;
 
     return {
       ok: true,
       lockId: lock.id,
       expiredSessions: conflicts.length,
       gatewayExpired,
+      rawAborted,
       waitMs,
     };
   }
@@ -263,10 +269,21 @@ export class ProviderSessionCoordinator {
       itemType: stringOrNull(body.itemType ?? body.item_type),
       itemId: stringOrNull(body.itemId ?? body.item_id),
       targetHash: stringOrNull(body.targetHash ?? body.target_hash),
+      lane: stringOrNull(body.lane),
       createdAt: new Date().toISOString(),
       expiresAt: normalizeExpiresAt(body.expiresAt ?? body.expires_at),
     };
 
+    // Conflicting records used to be dropped SILENTLY here — their gateway ffmpeg
+    // or raw pump kept holding the provider slot. Reap them for real.
+    const evicted = state.active.filter((active) => {
+      if (session.playbackSessionId && active.playbackSessionId === session.playbackSessionId) return false;
+      return isConflictingSession(active, session);
+    });
+    if (evicted.length) {
+      await this.expireSessions(evicted.filter((active) => active.gatewaySessionId));
+      await this.expireRawPumps(evicted.filter((active) => active.lane === "raw" && !active.gatewaySessionId));
+    }
     state.active = state.active.filter((active) => {
       if (session.playbackSessionId && active.playbackSessionId === session.playbackSessionId) return false;
       return !isConflictingSession(active, session);
@@ -292,10 +309,11 @@ export class ProviderSessionCoordinator {
     });
 
     const gatewayExpired = await this.expireSessions(matches);
+    const rawAborted = await this.expireRawPumps(matches.filter((session) => session.lane === "raw" && !session.gatewaySessionId));
     state.active = state.active.filter((session) => !matches.some((match) => match.id === session.id));
     await this.saveState(state);
 
-    return { ok: true, endedSessions: matches.length, gatewayExpired };
+    return { ok: true, endedSessions: matches.length, gatewayExpired, rawAborted };
   }
 
   async abort(body) {
@@ -311,19 +329,69 @@ export class ProviderSessionCoordinator {
   async loadState() {
     const now = Date.now();
     const state = (await this.state.storage.get("state")) || { active: [], locks: [] };
-    state.active = (Array.isArray(state.active) ? state.active : []).filter((session) => {
+    const activeAll = Array.isArray(state.active) ? state.active : [];
+    const lapsed = activeAll.filter((session) => {
       const expiresAt = Date.parse(session.expiresAt || "");
-      return Number.isFinite(expiresAt) && expiresAt > now;
+      return !(Number.isFinite(expiresAt) && expiresAt > now);
     });
+    state.active = activeAll.filter((session) => !lapsed.includes(session));
     state.locks = (Array.isArray(state.locks) ? state.locks : []).filter((lock) => {
       const expiresAt = Date.parse(lock.expiresAt || "");
       return Number.isFinite(expiresAt) && expiresAt > now;
     });
+    if (lapsed.length) {
+      // Zombie reaping: an expired RECORD used to vanish silently while its gateway
+      // ffmpeg / raw pump kept pulling provider bytes (and holding the slot).
+      await this.expireSessions(lapsed.filter((session) => session.gatewaySessionId));
+      await this.expireRawPumps(lapsed.filter((session) => session.lane === "raw" && !session.gatewaySessionId));
+    }
     return state;
   }
 
   async saveState(state) {
     await this.state.storage.put("state", state);
+    // Alarm-driven reaping: without traffic, expired records (and the provider
+    // slots their sessions hold) would linger until the next request arrives.
+    try {
+      const now = Date.now();
+      const expiries = [...state.active, ...state.locks]
+        .map((entry) => Date.parse(entry.expiresAt || ""))
+        .filter((ts) => Number.isFinite(ts) && ts > now);
+      if (expiries.length) await this.state.storage.setAlarm(Math.min(...expiries) + 1000);
+      else await this.state.storage.deleteAlarm();
+    } catch (_) { /* alarms unavailable — traffic-driven reaping still applies */ }
+  }
+
+  // Fired by the storage alarm set in saveState: loadState reaps whatever lapsed,
+  // saveState persists the pruned state and re-arms for the next expiry.
+  async alarm() {
+    const state = await this.loadState();
+    await this.saveState(state);
+  }
+
+  // Cross-device raw-pump eviction: ask the gateway to abort the live byte-pipes
+  // of these owners (keyed by the sha256 owner hash — the DO never stores raw ids
+  // or credentials). Mirrors expireSessions for the raw lane.
+  async expireRawPumps(sessions) {
+    if (!sessions.length || !this.env.NORVA_MEDIA_GATEWAY_URL || !this.env.NORVA_MEDIA_GATEWAY_TOKEN) return 0;
+    const owners = [...new Set(sessions.map((session) => session.ownerKey).filter(Boolean))];
+    let aborted = 0;
+    await Promise.allSettled(owners.map(async (ownerKey) => {
+      const response = await fetch(
+        `${trimTrailingSlash(this.env.NORVA_MEDIA_GATEWAY_URL)}/raw-pumps?ownerKey=${encodeURIComponent(ownerKey)}`,
+        {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${this.env.NORVA_MEDIA_GATEWAY_TOKEN}` },
+        },
+      );
+      if (response.ok) {
+        const body = await response.json().catch(() => ({}));
+        aborted += Number(body.aborted) || 0;
+      } else {
+        console.warn("[norva-session-coordinator] raw-pump eviction refused", response.status);
+      }
+    }));
+    return aborted;
   }
 
   async expireSessions(sessions) {

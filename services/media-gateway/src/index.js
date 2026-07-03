@@ -60,6 +60,40 @@ function proxyKeyFromUrl(url) {
         return u.host + (segs.length >= 2 ? '/' + segs[1] : '');
     } catch (_) { return String(url || ''); }
 }
+// ── Raw byte-pipe ledger ─────────────────────────────────────────────────────
+// One playback session per provider account: pumps are tagged with their playback
+// session id (claims.sid). A NEW session's first /raw aborts pumps left by a PRIOR
+// session on the same account (an engine crash/retry leaves the old pump draining —
+// exactly what keeps a single-slot provider answering 458), a conflicting transcode
+// start aborts them all, and the relay's session coordinator can evict them
+// cross-device via DELETE /raw-pumps (keyed by sha256(userId) — no credentials).
+const rawPumps = new Set(); // { ac, sid, proxyKey, ownerHash }
+
+function sha256Hex(value) {
+    return crypto.createHash('sha256').update(String(value || '')).digest('hex');
+}
+function registerRawPump(entry) {
+    rawPumps.add(entry);
+    return entry;
+}
+function releaseRawPump(entry) {
+    rawPumps.delete(entry);
+}
+// Abort pumps matching `filter`, sparing `keepSid` (legitimate concurrent range
+// reads within the SAME playback session must survive).
+function abortRawPumps(filter, keepSid, reason) {
+    let aborted = 0;
+    for (const pump of [...rawPumps]) {
+        if (!filter(pump)) continue;
+        if (keepSid && pump.sid && pump.sid === keepSid) continue;
+        try { pump.ac.abort(); } catch (_) { /* already gone */ }
+        rawPumps.delete(pump);
+        aborted += 1;
+    }
+    if (aborted) console.log(`[media-gateway] aborted ${aborted} stale raw pump(s) — ${reason}`);
+    return aborted;
+}
+
 function pickProxyAgent(key) {
     return providerProxyAgents.length ? providerProxyAgents[poolIndexForKey(key)] : null;
 }
@@ -472,7 +506,18 @@ app.get('/raw/:token', async (req, res) => {
     if (Number(claims.exp) * 1000 < Date.now()) return res.status(401).json({ error: 'Byte-pipe token expired' });
 
     const ac = new AbortController();
-    res.on('close', () => ac.abort());
+    // Supersede any pump left by a PREVIOUS playback session on this account —
+    // same-session concurrency (parallel range reads) is spared via claims.sid.
+    const pumpProxyKey = proxyKeyFromUrl(claims.url);
+    const pump = registerRawPump({
+        ac,
+        sid: claims.sid || null,
+        proxyKey: pumpProxyKey,
+        ownerHash: claims.uid ? sha256Hex(claims.uid) : null,
+    });
+    abortRawPumps((p) => p !== pump && p.proxyKey === pumpProxyKey, claims.sid || null,
+        `superseded by playback ${String(claims.sid || 'unknown').slice(0, 8)}`);
+    res.on('close', () => { ac.abort(); releaseRawPump(pump); });
     const headers = { 'user-agent': claims.ua || FFMPEG_USER_AGENT };
     if (req.headers.range) headers.range = req.headers.range;
     if (req.headers.accept) headers.accept = req.headers.accept;
@@ -1937,6 +1982,12 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             stoppedConflictingSessions += await stopConflictingSourceSessions(sourceUrl);
         }
 
+        // Stale engine byte-pipes on the same account hold the same provider slot as
+        // the transcode about to start (the engine just failed over here) — abort them
+        // like any other conflicting session so ffmpeg doesn't open against a 458.
+        stoppedConflictingSessions += abortRawPumps(
+            (p) => p.proxyKey === proxyKeyFromUrl(sourceUrl), null, 'transcode session start');
+
         if (stoppedConflictingSessions > 0 && PROVIDER_SLOT_RELEASE_DELAY_MS > 0) {
             console.log(`[media-gateway] waiting ${PROVIDER_SLOT_RELEASE_DELAY_MS}ms for provider slot release after stopping ${stoppedConflictingSessions} session(s)`);
             await sleep(PROVIDER_SLOT_RELEASE_DELAY_MS);
@@ -2050,6 +2101,16 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
         console.error('[media-gateway] create session failed:', err);
         res.status(500).json({ error: 'Failed to create media session' });
     }
+});
+
+// Cross-device kill-switch used by the relay's ProviderSessionCoordinator: abort
+// every live raw byte-pipe registered for an owner (keyed by sha256(userId) — the
+// coordinator only ever stores hashes, never credentials or raw ids).
+app.delete('/raw-pumps', requireGatewayAuth, (req, res) => {
+    const ownerKey = String(req.query.ownerKey || req.body?.ownerKey || '').trim().toLowerCase();
+    if (!/^[0-9a-f]{64}$/.test(ownerKey)) return res.status(400).json({ error: 'ownerKey (sha256 hex) required' });
+    const aborted = abortRawPumps((p) => p.ownerHash === ownerKey, null, 'coordinator eviction');
+    res.json({ ok: true, aborted });
 });
 
 app.get('/sessions/:id', requireGatewayAuth, (req, res) => {
