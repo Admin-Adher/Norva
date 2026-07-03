@@ -42,7 +42,8 @@ function extractPaymentIntentId(body: Record<string, unknown>): string | null {
 
 // Re-fetch the authoritative payment_intent from Stancer.
 async function fetchPaymentIntent(piId: string): Promise<{ id: string; status: string; customer?: string; card?: unknown; metadata?: Record<string, unknown> } | null> {
-  const res = await fetch(`${STANCER_API}/v2/payment_intent/${encodeURIComponent(piId)}`, {
+  // NB: the retrieve endpoint is PLURAL (/v2/payment_intents/), confirmed against the live sandbox.
+  const res = await fetch(`${STANCER_API}/v2/payment_intents/${encodeURIComponent(piId)}`, {
     headers: { Authorization: basicAuth(), "Content-Type": "application/json" },
   });
   if (!res.ok) { console.error("[stancer-webhook] re-fetch failed", piId, res.status); return null; }
@@ -118,9 +119,8 @@ async function handle(db: SupabaseClient, piId: string): Promise<Record<string, 
   // plan/period to charge and when. plan_code encodes "<plan>_<period>" (e.g. "plus_monthly").
   const meta = pi.metadata && typeof pi.metadata === "object" ? pi.metadata as Record<string, unknown> : {};
   if (who.kind === "trial_setup" && next === "trialing") {
-    const plan = String(meta.plan ?? "plus");
-    const period = String(meta.period ?? "monthly");
-    patch.plan_code = `${plan}_${period}`;
+    // plan_code is constrained to plus/family/… — the period+amount live on cloud_stancer_customers.
+    patch.plan_code = String(meta.plan ?? "plus") === "family" ? "family" : "plus";
     patch.trial_ends_at = new Date(Date.now() + TRIAL_DAYS * 86400_000).toISOString();
     patch.trial_consumed_at = new Date().toISOString();
   }

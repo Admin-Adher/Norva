@@ -87,34 +87,37 @@ async function chargeToken(cardToken: string, customerId: string | null, amount:
 
 // Process one due user (trial-first-charge or renewal). `cycleAnchor` keys the idempotent unique_id.
 async function chargeUser(db: SupabaseClient, row: Row, kind: "first_charge" | "renewal", cycleAnchor: string | null): Promise<string> {
-  const plan = parsePlan(row.plan_code);
-  if (!plan) return "no_plan";
+  // Amount + period live on the mapping row (plan_code is constrained to plus/family).
   const { data: cust } = await db.from("cloud_stancer_customers")
-    .select("stancer_customer_id,card_token").eq("user_id", row.user_id).maybeSingle();
-  const cardToken = (cust as { card_token?: string } | null)?.card_token;
-  const customerId = (cust as { stancer_customer_id?: string } | null)?.stancer_customer_id ?? null;
-  if (!cardToken) {
-    // No token on file → cannot charge. Fail to past_due so dunning asks for a card update.
+    .select("stancer_customer_id,card_token,period,amount_cents").eq("user_id", row.user_id).maybeSingle();
+  const c = cust as { card_token?: string; stancer_customer_id?: string; period?: string; amount_cents?: number } | null;
+  const cardToken = c?.card_token;
+  const customerId = c?.stancer_customer_id ?? null;
+  const period = c?.period === "annual" ? "annual" : "monthly";
+  const amount = c?.amount_cents ?? 0;
+  const planLabel = row.plan_code === "family" ? "Norva Family" : "Norva";
+  if (!cardToken || !amount) {
+    // No token/amount on file → cannot charge. Fail to past_due so dunning asks for a card update.
     await db.from("cloud_entitlement_projection").update({ status: "past_due", last_event_at: new Date().toISOString() }).eq("user_id", row.user_id);
-    return "no_card";
+    return cardToken ? "no_plan" : "no_card";
   }
 
   // Stancer caps unique_id at 36 chars. Dashless uuid (32) + a compact base36 cycle-day (~4) keeps it
   // globally unique per (user, cycle) so a re-run never double-charges the SAME cycle.
   const cycleDay = Math.floor((Date.parse(String(cycleAnchor ?? "")) || Date.now()) / 86400000).toString(36);
   const uniqueId = (row.user_id.replace(/-/g, "") + cycleDay).slice(0, 36);
-  const outcome = await chargeToken(cardToken, customerId, plan.amount, uniqueId, `Norva ${plan.plan} ${plan.period} — ${kind}`);
+  const outcome = await chargeToken(cardToken, customerId, amount, uniqueId, `${planLabel} ${period} — ${kind}`);
 
   const nowIso = new Date().toISOString();
   if (outcome === "captured") {
     const base = kind === "first_charge" ? row.trial_ends_at : row.current_period_end;
-    const nextEnd = addPeriod(base, plan.period);
+    const nextEnd = addPeriod(base, period);
     await db.from("cloud_entitlement_projection").update({
       status: "active", provider: "stancer", current_period_end: nextEnd,
       dunning_stage: 0, dunning_last_at: null, last_event_at: nowIso, last_verified_at: nowIso,
     }).eq("user_id", row.user_id);
-    try { await db.from("cloud_stancer_payments").upsert({ pi_id: `charge_${uniqueId}`, user_id: row.user_id, kind, amount: plan.amount, currency: "eur", status: "captured", order_id: uniqueId, updated_at: nowIso }); } catch (_) { /* noop */ }
-    await sendReceipt(db, row.user_id, `Norva ${plan.plan === "family" ? "Family" : ""}`.trim(), plan.amount, nextEnd);
+    try { await db.from("cloud_stancer_payments").upsert({ pi_id: `charge_${uniqueId}`, user_id: row.user_id, kind, amount, currency: "eur", status: "captured", order_id: uniqueId, updated_at: nowIso }); } catch (_) { /* noop */ }
+    await sendReceipt(db, row.user_id, planLabel, amount, nextEnd);
     return "charged";
   }
   // Failed → past_due (dunning handled by norva-lifecycle).

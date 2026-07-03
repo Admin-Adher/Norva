@@ -114,6 +114,12 @@ Deno.serve(async (req) => {
     const custId = await ensureCustomer(db, user.id, user.email, name);
     if (!custId) return json({ error: "Could not open a billing profile" }, 502);
 
+    // Record the recurring plan on the mapping row — the billing cron reads amount/period from here
+    // (projection.plan_code is constrained to plus/family and can't carry the period).
+    await db.from("cloud_stancer_customers").upsert({
+      user_id: user.id, stancer_customer_id: custId, plan, period, amount_cents: amount, updated_at: new Date().toISOString(),
+    });
+
     const returnUrl = `${RETURN_BASE}/subscription.html?stancer=done`;
     // Trial setup (Option B — minimal footprint): authorize a small validation amount (€0.50) with
     // capture:false → validates + tokenizes the card, NO plan charge now. The hold auto-releases; the
