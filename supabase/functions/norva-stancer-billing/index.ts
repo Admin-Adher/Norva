@@ -127,7 +127,7 @@ async function chargeUser(db: SupabaseClient, row: Row, kind: "first_charge" | "
 
 async function run(db: SupabaseClient): Promise<Record<string, number>> {
   const nowIso = new Date().toISOString();
-  const out = { trial_charged: 0, renew_charged: 0, failed: 0, no_card: 0 };
+  const out = { trial_charged: 0, renew_charged: 0, failed: 0, no_card: 0, ended: 0 };
 
   // 1) Trials whose 7 days are up.
   const { data: trials } = await db.from("cloud_entitlement_projection")
@@ -145,6 +145,17 @@ async function run(db: SupabaseClient): Promise<Record<string, number>> {
   for (const row of (renewals ?? []) as Row[]) {
     const r = await chargeUser(db, row, "renewal", row.current_period_end);
     if (r === "charged") out.renew_charged++; else if (r === "no_card") out.no_card++; else if (r === "failed") out.failed++;
+  }
+
+  // 3) Cancelled plans whose paid (or trial) period is over → expired. Never charged
+  //    (the charge queries above only touch trialing/active); this closes the state
+  //    machine so the win-back email can eventually re-engage them.
+  const { data: ended } = await db.from("cloud_entitlement_projection")
+    .select("user_id")
+    .eq("provider", "stancer").eq("status", "cancelled_at_period_end").lte("current_period_end", nowIso).limit(BATCH);
+  for (const row of (ended ?? []) as { user_id: string }[]) {
+    await db.from("cloud_entitlement_projection").update({ status: "expired", last_event_at: nowIso }).eq("user_id", row.user_id);
+    out.ended++;
   }
 
   return out;
