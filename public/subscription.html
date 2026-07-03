@@ -204,8 +204,13 @@
           return;
         }
 
-        // Dormant: billing not enforced yet (observe / Gate 0 / local hub).
-        if (decision.enforced === false || decision.mode === 'observe') {
+        // Dormant: billing not enforced yet (observe / Gate 0 / local hub) — BUT only
+        // when there is no real membership on file. A real subscription (trial, active,
+        // past due, …) still renders its true state below even while only observed, so
+        // the return page after checkout reflects the actual trial, not "full access".
+        const realStatus = String(decision.status || (decision.projection && decision.projection.status) || 'none').toLowerCase();
+        const hasRealSub = SUB_STATUSES.indexOf(realStatus) !== -1;
+        if ((decision.enforced === false || decision.mode === 'observe') && !hasRealSub) {
           const card = el('div', 'card');
           card.appendChild(el('span', 'pill muted', 'Active'));
           card.appendChild(el('div', 'plan-name', 'Norva'));
