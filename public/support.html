@@ -11,81 +11,130 @@
     :root {
       --bg: #090b10; --panel: #11151d; --line: #283246; --text: #f8fafc;
       --muted: #a8b3c7; --quiet: #6b7690; --accent: #5b7cfa; --pink: #b579ff;
-      --green: #34d399; --amber: #fbbf24;
+      --coral: #ff8067; --green: #34d399; --amber: #fbbf24; --danger: #fb7185;
     }
     body { min-height: 100vh; background: var(--bg); color: var(--text);
       font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-      display: flex; justify-content: center; padding: 22px; }
+      display: flex; justify-content: center;
+      padding: max(22px, env(safe-area-inset-top)) max(22px, env(safe-area-inset-right))
+               calc(28px + env(safe-area-inset-bottom)) max(22px, env(safe-area-inset-left)); }
     .wrap { width: min(640px, 100%); }
-    .brand { display: flex; align-items: center; gap: 12px; margin: 8px 0 18px; }
-    .brand img { width: 40px; height: 40px; border-radius: 8px; }
+    .back { display: inline-flex; align-items: center; gap: 7px; color: var(--muted);
+      text-decoration: none; font-size: 14px; font-weight: 700; padding: 6px 2px; margin-bottom: 12px; }
+    .back:hover { color: var(--text); }
+    .brand { display: flex; align-items: center; gap: 12px; margin: 2px 0 20px; }
+    .brand img { width: 40px; height: 40px; border-radius: 10px; box-shadow: 0 4px 14px rgba(0,0,0,.35); }
     .brand span { font-size: 20px; font-weight: 800; }
-    h1 { font-size: clamp(24px, 5vw, 32px); margin-bottom: 6px; }
-    .sub { color: var(--muted); font-size: 14px; margin-bottom: 22px; }
-    .card { border: 1px solid var(--line); border-radius: 14px; padding: 20px; background: var(--panel); margin-bottom: 18px; }
-    .card h2 { font-size: 16px; margin-bottom: 12px; }
-    label { display: block; font-size: 13px; color: var(--muted); margin: 10px 0 6px; }
+    h1 { font-size: clamp(26px, 5vw, 34px); font-weight: 800; letter-spacing: -.02em; margin-bottom: 8px; }
+    .sub { color: var(--muted); font-size: 15px; line-height: 1.55; max-width: 52ch; margin-bottom: 24px; }
+    .card { border: 1px solid var(--line); border-radius: 14px; padding: 24px; background: var(--panel); margin-bottom: 18px; }
+    .card h2 { font-size: 16px; margin-bottom: 14px; }
+    label { display: block; font-size: 13px; color: var(--muted); margin: 12px 0 6px; }
+    label:first-of-type { margin-top: 0; }
+    .field-row { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+    .counter { font-size: 12px; color: var(--quiet); font-variant-numeric: tabular-nums; }
+    .counter.near { color: var(--amber); }
     input[type=text], textarea { width: 100%; background: var(--bg); border: 1px solid var(--line);
       border-radius: 10px; color: var(--text); padding: 11px 12px; font: inherit; font-size: 14px; }
-    textarea { min-height: 110px; resize: vertical; }
-    input:focus, textarea:focus { outline: 2px solid var(--pink); outline-offset: 1px; }
-    .btn { min-height: 46px; border: 0; border-radius: 10px; padding: 0 20px; color: #fff;
-      background: var(--accent); font: inherit; font-weight: 800; cursor: pointer; margin-top: 14px;
-      display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
+    textarea { min-height: 118px; resize: vertical; }
+    input:focus-visible, textarea:focus-visible { outline: 2px solid var(--pink); outline-offset: 1px; }
+    .btn { min-height: 46px; min-width: 128px; border: 0; border-radius: 10px; padding: 0 20px; color: #fff;
+      background: var(--accent); font: inherit; font-weight: 800; cursor: pointer; margin-top: 16px;
+      display: inline-flex; align-items: center; justify-content: center; gap: 8px; text-decoration: none; }
+    .btn.primary { background: linear-gradient(135deg, var(--coral), var(--pink)); color: #0b1220; }
     .btn.ghost { background: #242c3d; color: #dbe7ff; border: 1px solid #344158; }
     .btn:disabled { opacity: .6; cursor: default; }
-    .note { color: var(--quiet); font-size: 12px; margin-top: 10px; line-height: 1.5; }
-    .ok-msg { color: var(--green); font-size: 14px; margin-top: 12px; }
-    .err-msg { color: #fb7185; font-size: 14px; margin-top: 12px; }
+    .btn:focus-visible, .ticket-head:focus-visible { outline: 2px solid var(--pink); outline-offset: 2px; }
+    .spin { width: 15px; height: 15px; border: 2px solid rgba(11,18,32,.35); border-top-color: #0b1220;
+      border-radius: 50%; animation: spin .7s linear infinite; }
+    .btn.ghost .spin, .btn.accent .spin { border-color: rgba(255,255,255,.3); border-top-color: #fff; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .note { color: var(--quiet); font-size: 12px; margin-top: 12px; line-height: 1.5; }
+    .err-msg { color: var(--danger); font-size: 14px; margin-top: 12px; }
+    .empty { text-align: center; padding: 28px 12px; color: var(--muted); font-size: 14px; line-height: 1.5; }
+    .empty .ico { font-size: 26px; display: block; margin-bottom: 8px; opacity: .8; }
+    /* Success confirmation block after sending a ticket. */
+    .confirm { display: flex; gap: 14px; align-items: flex-start; background: rgba(52,211,153,.08);
+      border: 1px solid rgba(52,211,153,.3); border-radius: 12px; padding: 15px 16px; margin-bottom: 16px; }
+    .confirm .badge-ok { flex-shrink: 0; width: 40px; height: 40px; border-radius: 50%;
+      display: inline-grid; place-items: center; background: rgba(52,211,153,.16); color: var(--green); font-size: 21px; }
+    .confirm b { display: block; color: var(--text); font-size: 15px; margin-bottom: 2px; }
+    .confirm span { color: var(--muted); font-size: 13.5px; line-height: 1.5; }
+    /* Ticket accordions. */
     .ticket { border: 1px solid var(--line); border-radius: 12px; margin-bottom: 10px; overflow: hidden; }
-    .ticket-head { display: flex; align-items: center; gap: 10px; padding: 13px 15px; cursor: pointer; }
+    .ticket-head { display: flex; align-items: center; gap: 10px; width: 100%; padding: 13px 15px;
+      cursor: pointer; background: none; border: 0; color: inherit; font: inherit; text-align: left; }
     .ticket-head:hover { background: #ffffff08; }
+    .ticket-chev { color: var(--quiet); font-size: 11px; flex-shrink: 0; transition: transform .15s ease; }
+    .ticket.expanded .ticket-chev { transform: rotate(90deg); }
     .ticket-subject { flex: 1; font-weight: 700; font-size: 14px; min-width: 0;
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .chip { flex-shrink: 0; padding: 3px 10px; border-radius: 999px; font-size: 11px; font-weight: 800; text-transform: uppercase; }
+    .chip { flex-shrink: 0; padding: 3px 10px; border-radius: 999px; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .03em; }
     .chip.open { background: rgba(91,124,250,.18); color: #a9bcff; }
-    .chip.pending { background: rgba(52,211,153,.15); color: var(--green); }
+    .chip.replied { background: rgba(52,211,153,.15); color: var(--green); }
     .chip.closed { background: rgba(255,255,255,.07); color: var(--quiet); }
     .ticket-age { color: var(--quiet); font-size: 12px; flex-shrink: 0; }
-    .thread { display: none; padding: 4px 15px 15px; border-top: 1px solid var(--line); }
+    .thread { display: none; padding: 6px 15px 15px; border-top: 1px solid var(--line); }
     .ticket.expanded .thread { display: block; }
     .msg { max-width: 88%; margin: 10px 0; padding: 10px 13px; border-radius: 12px; font-size: 14px;
       line-height: 1.55; white-space: pre-wrap; word-break: break-word; }
     .msg.user { background: #1c2433; margin-left: auto; border-bottom-right-radius: 4px; }
     .msg.admin { background: rgba(52,211,153,.1); border: 1px solid rgba(52,211,153,.25); border-bottom-left-radius: 4px; }
     .msg .who { font-size: 11px; color: var(--quiet); margin-bottom: 4px; font-weight: 700; }
-    .reply-row { display: flex; gap: 8px; margin-top: 10px; }
-    .reply-row textarea { min-height: 44px; flex: 1; }
-    .reply-row .btn { margin-top: 0; min-height: 44px; }
-    .loading { color: var(--muted); padding: 12px 2px; }
+    .reply-row { display: flex; gap: 8px; margin-top: 12px; align-items: flex-end; }
+    .reply-row textarea { min-height: 46px; flex: 1; }
+    .reply-row .btn { margin-top: 0; min-height: 46px; min-width: 96px; }
+    .reply-fb { color: var(--danger); font-size: 13px; margin-top: 6px; }
+    .loading { color: var(--muted); padding: 14px 2px; }
+    .skeleton { height: 46px; border-radius: 12px; margin-bottom: 10px;
+      background: linear-gradient(90deg, #141922 25%, #1b212c 50%, #141922 75%);
+      background-size: 200% 100%; animation: sk 1.2s ease-in-out infinite; }
+    @keyframes sk { to { background-position: -200% 0; } }
+    @media (max-width: 420px) {
+      .reply-row { flex-direction: column; }
+      .reply-row .btn { width: 100%; }
+    }
+    @media (max-width: 640px) {
+      input[type=text], textarea { font-size: 16px; } /* ≥16px suppresses iOS focus-zoom */
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { transition: none !important; animation: none !important; scroll-behavior: auto !important; }
+    }
   </style>
 </head>
 <body>
   <main class="wrap">
-    <div class="brand"><img src="/favicon.png" alt=""><span>Norva</span></div>
+    <a class="back" id="back-link" href="/app#settings">← Back</a>
+    <div class="brand"><img src="/img/norva-app-icon.png" alt=""><span>Norva</span></div>
     <h1>Support</h1>
     <p class="sub">Tell us what's wrong — we usually reply within a day, straight to this page and your inbox.</p>
 
     <div class="card" id="new-ticket-card">
       <h2>Open a ticket</h2>
       <div id="signin-needed" style="display:none">
-        <p class="note">Sign in to contact support from your account.</p>
-        <a class="btn" id="signin-link" href="/account.html?returnTo=%2Fsupport.html">Sign in</a>
+        <p class="note" style="margin-top:0">Sign in to contact support from your account.</p>
+        <a class="btn" id="signin-link" href="/account.html">Sign in</a>
       </div>
       <form id="ticket-form" style="display:none">
+        <div id="t-feedback" role="status" aria-live="polite" aria-atomic="true" tabindex="-1"></div>
         <label for="t-subject">Subject</label>
-        <input type="text" id="t-subject" maxlength="180" placeholder="e.g. Playback stops after a few minutes" required>
-        <label for="t-body">What happened?</label>
-        <textarea id="t-body" maxlength="8000" placeholder="Describe the issue — device, what you tried, any error message." required></textarea>
-        <button type="submit" class="btn" id="t-submit">Send to support</button>
-        <div id="t-feedback"></div>
+        <input type="text" id="t-subject" maxlength="180" aria-describedby="t-subject-count"
+               placeholder="e.g. Playback stops after a few minutes" required>
+        <div class="field-row">
+          <label for="t-body" style="margin-top:12px">What happened?</label>
+          <span class="counter" id="t-body-count" aria-live="polite">0 / 8000</span>
+        </div>
+        <textarea id="t-body" maxlength="8000" aria-describedby="t-body-count"
+                  placeholder="Describe the issue — device, what you tried, any error message."></textarea>
+        <div id="t-error" class="err-msg" role="alert"></div>
+        <button type="submit" class="btn primary" id="t-submit">Send to support</button>
         <p class="note">Your ticket goes to our support team and every reply lands here and in your email.</p>
       </form>
     </div>
 
     <div class="card">
       <h2>Your tickets</h2>
-      <div id="tickets"><div class="loading">Loading…</div></div>
+      <div id="tickets"><div class="skeleton"></div><div class="skeleton"></div></div>
     </div>
   </main>
 
@@ -96,18 +145,37 @@
       const BASE = ((window.NorvaAuth && NorvaAuth.supabaseUrl) || 'https://oupsceccxsonaalhueff.supabase.co').replace(/\/+$/, '') + '/functions/v1/norva-support';
       const APIKEY = (window.NorvaAuth && NorvaAuth.publishableKey) || '';
 
-      function token() {
-        try { return (JSON.parse(localStorage.getItem('norva-cloud-session') || 'null') || {}).access_token || ''; }
-        catch (_) { return ''; }
+      // Same-site guard: only a path starting with a single "/" is trusted, so returnTo can never
+      // become an open redirect or bounce to the marketing site. Default back to Settings (the entry
+      // point for "Contact support").
+      function safeLocalPath(v) { return (typeof v === 'string' && /^\/(?!\/)/.test(v)) ? v : '/app#settings'; }
+      const params = new URLSearchParams(location.search);
+      const returnTo = safeLocalPath(params.get('returnTo'));
+      document.getElementById('back-link').setAttribute('href', returnTo);
+      // Preserve the whole current URL (incl. returnTo) across the sign-in round-trip.
+      document.getElementById('signin-link').setAttribute('href',
+        '/account.html?returnTo=' + encodeURIComponent(location.pathname + location.search));
+
+      // Route auth through NorvaAuth so the token is refreshed if near expiry (the rest of the app
+      // does the same). Falls back to a raw read only if NorvaAuth somehow isn't loaded.
+      function hasSession() {
+        try { return !!(window.NorvaAuth && NorvaAuth.getSession && NorvaAuth.getSession()); }
+        catch (_) { return false; }
+      }
+      async function token() {
+        try {
+          if (window.NorvaAuth && NorvaAuth.getAccessToken) return (await NorvaAuth.getAccessToken()) || '';
+          return (JSON.parse(localStorage.getItem('norva-cloud-session') || 'null') || {}).access_token || '';
+        } catch (_) { return ''; }
       }
       async function call(path, opts) {
-        const t = token();
-        if (!t) throw new Error('not_signed_in');
+        const t = await token();
+        if (!t) throw new Error('Your session has expired — please sign in again.');
         const res = await fetch(BASE + path, Object.assign({
           headers: { 'Content-Type': 'application/json', 'apikey': APIKEY, 'Authorization': 'Bearer ' + t }
         }, opts || {}));
         const data = await res.json().catch(function () { return {}; });
-        if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+        if (!res.ok) throw new Error(data.error || ('Something went wrong (HTTP ' + res.status + ')'));
         return data;
       }
       function esc(s) {
@@ -122,81 +190,151 @@
         const h = Math.round(m / 60); if (h < 24) return h + ' h ago';
         return Math.round(h / 24) + ' d ago';
       }
+      function spinner(label) { return '<span class="spin" aria-hidden="true"></span>' + label; }
+      // Ticket ids are server UUIDs, but guard CSS.escape for older Android TV WebViews.
+      function cssEsc(s) { return (window.CSS && CSS.escape) ? CSS.escape(String(s)) : String(s).replace(/["\\]/g, '\\$&'); }
 
-      const signedIn = !!token();
+      const signedIn = hasSession();
       document.getElementById('signin-needed').style.display = signedIn ? 'none' : 'block';
       document.getElementById('ticket-form').style.display = signedIn ? 'block' : 'none';
 
-      // Deep-link prefill (e.g. the cancel flow sends ?subject=…).
-      const params = new URLSearchParams(location.search);
-      if (params.get('subject')) document.getElementById('t-subject').value = params.get('subject').slice(0, 180);
+      // Character counters (also cover silent-truncation of the maxlength fields).
+      const subjEl = document.getElementById('t-subject');
+      const bodyEl = document.getElementById('t-body');
+      const bodyCount = document.getElementById('t-body-count');
+      const subjCount = document.createElement('span');
+      subjCount.id = 't-subject-count'; subjCount.className = 'counter'; subjCount.style.cssText = 'display:block;margin-top:4px';
+      subjEl.insertAdjacentElement('afterend', subjCount);
+      function updateCounter(el, out, max) {
+        const n = el.value.length;
+        out.textContent = n + ' / ' + max;
+        out.classList.toggle('near', n >= max * 0.9);
+      }
+      subjEl.addEventListener('input', function () { updateCounter(subjEl, subjCount, 180); });
+      bodyEl.addEventListener('input', function () { updateCounter(bodyEl, bodyCount, 8000); });
+      updateCounter(subjEl, subjCount, 180); updateCounter(bodyEl, bodyCount, 8000);
 
-      async function loadTickets() {
+      // Deep-link prefill (e.g. the cancel flow sends ?subject=…).
+      if (params.get('subject')) { subjEl.value = params.get('subject').slice(0, 180); updateCounter(subjEl, subjCount, 180); }
+
+      // opts: { expandIds:Set<string>, scrollId:string } — preserve open accordions across reloads
+      // and scroll a specific ticket's latest message into view (after a reply / new ticket).
+      async function loadTickets(opts) {
+        opts = opts || {};
         const el = document.getElementById('tickets');
-        if (!signedIn) { el.innerHTML = '<p class="note">Sign in to see your tickets.</p>'; return; }
+        if (!signedIn) { el.innerHTML = '<div class="empty">Sign in to see your tickets.</div>'; return; }
         try {
           const data = await call('/mine', { method: 'GET' });
-          renderTickets(data.tickets || [], data.messages || []);
+          renderTickets(el, data.tickets || [], data.messages || [], opts);
         } catch (e) {
-          el.innerHTML = '<p class="err-msg">Could not load your tickets: ' + esc(e.message) + '</p>';
+          // Non-destructive on a post-action refresh: keep whatever is on screen, surface a note.
+          if (el.children.length && !el.querySelector('.skeleton')) {
+            const n = document.createElement('div'); n.className = 'note'; n.textContent = 'Could not refresh your tickets: ' + e.message;
+            el.appendChild(n);
+          } else {
+            el.innerHTML = '<div class="empty">Could not load your tickets — ' + esc(e.message) + '</div>';
+          }
         }
       }
 
-      function renderTickets(tickets, messages) {
-        const el = document.getElementById('tickets');
-        if (!tickets.length) { el.innerHTML = '<p class="note">No tickets yet. If something\'s wrong, open one above — we\'re quick.</p>'; return; }
+      function renderTickets(el, tickets, messages, opts) {
+        if (!tickets.length) {
+          el.innerHTML = '<div class="empty"><span class="ico" aria-hidden="true">📭</span>No tickets yet. If something\'s wrong, open one above — we\'re quick.</div>';
+          return;
+        }
+        const open = opts.expandIds || new Set();
+        if (opts.scrollId) open.add(String(opts.scrollId));
         const byTicket = {};
         messages.forEach(function (m) { (byTicket[m.ticket_id] = byTicket[m.ticket_id] || []).push(m); });
         el.innerHTML = tickets.map(function (t) {
+          const id = String(t.id);
+          const isOpen = open.has(id);
           const msgs = (byTicket[t.id] || []).map(function (m) {
             return '<div class="msg ' + (m.from_admin ? 'admin' : 'user') + '">' +
               '<div class="who">' + (m.from_admin ? 'Norva support' : 'You') + ' · ' + esc(timeAgo(m.created_at)) + '</div>' +
               esc(m.body) + '</div>';
           }).join('');
           const chip = t.status === 'closed' ? '<span class="chip closed">closed</span>'
-            : (t.last_from === 'admin' ? '<span class="chip pending">replied</span>' : '<span class="chip open">open</span>');
-          const reply = t.status === 'closed' ? '<p class="note">This ticket is closed — open a new one if you need anything else.</p>'
-            : '<div class="reply-row"><textarea placeholder="Reply…" data-reply="' + esc(t.id) + '"></textarea>' +
-              '<button class="btn ghost" data-send="' + esc(t.id) + '">Send</button></div>';
-          return '<div class="ticket" data-ticket="' + esc(t.id) + '">' +
-            '<div class="ticket-head">' + chip +
-            '<span class="ticket-subject">' + esc(t.subject) + '</span>' +
-            '<span class="ticket-age">' + esc(timeAgo(t.last_message_at)) + '</span></div>' +
-            '<div class="thread">' + msgs + reply + '</div></div>';
+            : (t.last_from === 'admin' ? '<span class="chip replied">replied</span>' : '<span class="chip open">open</span>');
+          const reply = t.status === 'closed'
+            ? '<p class="note">This ticket is closed — open a new one above if you need anything else.</p>'
+            : '<div class="reply-row">' +
+                '<textarea placeholder="Reply…" aria-label="Reply to: ' + esc(t.subject) + '" data-reply="' + esc(id) + '"></textarea>' +
+                '<button type="button" class="btn ghost" data-send="' + esc(id) + '">Send</button>' +
+              '</div><p class="reply-fb" role="alert" data-reply-fb="' + esc(id) + '"></p>';
+          return '<div class="ticket' + (isOpen ? ' expanded' : '') + '" data-ticket="' + esc(id) + '">' +
+            '<button type="button" class="ticket-head" aria-expanded="' + (isOpen ? 'true' : 'false') + '" aria-controls="thread-' + esc(id) + '">' +
+              '<span class="ticket-chev" aria-hidden="true">▸</span>' + chip +
+              '<span class="ticket-subject">' + esc(t.subject) + '</span>' +
+              '<span class="ticket-age">' + esc(timeAgo(t.last_message_at)) + '</span>' +
+            '</button>' +
+            '<div class="thread" id="thread-' + esc(id) + '">' + msgs + reply + '</div></div>';
         }).join('');
 
         el.querySelectorAll('.ticket-head').forEach(function (h) {
-          h.addEventListener('click', function () { h.parentElement.classList.toggle('expanded'); });
-        });
-        el.querySelectorAll('[data-send]').forEach(function (b) {
-          b.addEventListener('click', async function () {
-            const id = b.dataset.send;
-            const ta = el.querySelector('textarea[data-reply="' + id + '"]');
-            const body = ta ? ta.value.trim() : '';
-            if (!body) return;
-            b.disabled = true; b.textContent = '…';
-            try { await call('/reply', { method: 'POST', body: JSON.stringify({ ticket_id: id, body: body }) }); loadTickets(); }
-            catch (e) { b.disabled = false; b.textContent = 'Send'; window.alert('Could not send: ' + e.message); }
+          h.addEventListener('click', function () {
+            const t = h.parentElement;
+            const nowOpen = t.classList.toggle('expanded');
+            h.setAttribute('aria-expanded', nowOpen ? 'true' : 'false');
           });
         });
+        el.querySelectorAll('[data-send]').forEach(function (b) {
+          b.addEventListener('click', function () { sendReply(el, b); });
+        });
+
+        // Scroll the target ticket's latest message into view (after reply / new ticket).
+        if (opts.scrollId) {
+          const target = el.querySelector('.ticket[data-ticket="' + cssEsc(opts.scrollId) + '"]');
+          if (target) {
+            const last = target.querySelectorAll('.msg');
+            (last.length ? last[last.length - 1] : target).scrollIntoView({ block: 'center' });
+          }
+        }
       }
 
+      async function sendReply(el, b) {
+        const id = b.dataset.send;
+        const ta = el.querySelector('textarea[data-reply="' + cssEsc(id) + '"]');
+        const fb = el.querySelector('[data-reply-fb="' + cssEsc(id) + '"]');
+        const body = ta ? ta.value.trim() : '';
+        if (fb) fb.textContent = '';
+        if (!body) { if (ta) ta.focus(); return; }
+        b.disabled = true; b.innerHTML = spinner('');
+        // Preserve which tickets are open, and scroll this one after the reload.
+        const openIds = new Set([].map.call(el.querySelectorAll('.ticket.expanded'), function (t) { return t.dataset.ticket; }));
+        try {
+          await call('/reply', { method: 'POST', body: JSON.stringify({ ticket_id: id, body: body }) });
+          await loadTickets({ expandIds: openIds, scrollId: id });
+        } catch (e) {
+          b.disabled = false; b.textContent = 'Send';
+          if (fb) fb.textContent = 'Could not send: ' + e.message;
+        }
+      }
+
+      const fb = document.getElementById('t-feedback');
+      const errEl = document.getElementById('t-error');
       document.getElementById('ticket-form').addEventListener('submit', async function (ev) {
         ev.preventDefault();
-        const subject = document.getElementById('t-subject').value.trim();
-        const body = document.getElementById('t-body').value.trim();
-        const fb = document.getElementById('t-feedback');
+        const subject = subjEl.value.trim();
+        const body = bodyEl.value.trim();
         const btn = document.getElementById('t-submit');
-        if (subject.length < 3 || body.length < 5) { fb.innerHTML = '<p class="err-msg">Please fill in a subject and a message.</p>'; return; }
-        btn.disabled = true; btn.textContent = 'Sending…';
+        errEl.textContent = ''; fb.innerHTML = '';
+        if (subject.length < 3 || body.length < 5) {
+          errEl.textContent = 'Please add a subject and describe what happened.';
+          (subject.length < 3 ? subjEl : bodyEl).focus();
+          return;
+        }
+        btn.disabled = true; btn.innerHTML = spinner('Sending…');
         try {
-          await call('/create', { method: 'POST', body: JSON.stringify({ subject: subject, body: body }) });
-          fb.innerHTML = '<p class="ok-msg">✓ Ticket sent — we\'ll get back to you shortly.</p>';
-          document.getElementById('t-subject').value = '';
-          document.getElementById('t-body').value = '';
-          loadTickets();
+          const res = await call('/create', { method: 'POST', body: JSON.stringify({ subject: subject, body: body }) });
+          fb.innerHTML = '<div class="confirm"><span class="badge-ok" aria-hidden="true">✓</span>' +
+            '<div><b>Ticket sent</b><span>We\'ve got it and emailed our support team. Replies land right here and in your inbox.</span></div></div>';
+          subjEl.value = ''; bodyEl.value = '';
+          updateCounter(subjEl, subjCount, 180); updateCounter(bodyEl, bodyCount, 8000);
+          fb.focus();
+          await loadTickets({ scrollId: res && res.ticket_id });
         } catch (e) {
-          fb.innerHTML = '<p class="err-msg">Could not send: ' + esc(e.message) + '</p>';
+          errEl.textContent = 'Could not send: ' + e.message;
         }
         btn.disabled = false; btn.textContent = 'Send to support';
       });
