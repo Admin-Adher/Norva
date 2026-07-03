@@ -144,8 +144,8 @@ export function renderWinback(firstName: string | null): Rendered {
 }
 
 // Checkout-abandonment reminder: the user opened a checkout (card check) but never
-// completed it. One email, sent 2–48h later; deep-links back into the checkout with
-// the plan/period they had picked.
+// completed it. One email, sent 1–48h later (recovery peaks within the hour);
+// deep-links back into the checkout with the plan/period they had picked.
 export function renderAbandonedCheckout(firstName: string | null, opts: { plan?: string; period?: string }): Rendered {
   const plan = opts.plan === "family" ? "family" : "plus";
   const period = opts.period === "annual" ? "annual" : "monthly";

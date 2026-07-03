@@ -99,8 +99,8 @@
     return data; // { url, pi_id, kind }
   }
 
-  // POST an account-scoped Stancer action (cancel / resume) and return the response.
-  async function stancerAction(action) {
+  // POST an account-scoped Stancer action (cancel / resume / save-offer) and return the response.
+  async function stancerAction(action, body) {
     const base = ((window.NorvaAuth && NorvaAuth.supabaseUrl) || 'https://oupsceccxsonaalhueff.supabase.co').replace(/\/+$/, '');
     const apikey = (window.NorvaAuth && NorvaAuth.publishableKey) || '';
     const token = await sessionToken();
@@ -108,16 +108,23 @@
     const res = await fetch(base + '/functions/v1/norva-stancer/' + action, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'apikey': apikey, 'Authorization': 'Bearer ' + token },
-      body: '{}',
+      body: JSON.stringify(body || {}),
     });
     const data = await res.json().catch(function () { return {}; });
     if (!res.ok) throw err(data.error || 'Request failed', 'stancer_error', data);
     return data;
   }
   // Cancel at period end (access continues until then, nothing further is charged).
-  function stancerCancel() { return stancerAction('cancel'); }
+  // The optional reason comes from the cancel flow — analytics only, never a condition.
+  function stancerCancel(reason) { return stancerAction('cancel', reason ? { reason: reason } : null); }
   // Undo a pending cancellation before the period ends.
   function stancerResume() { return stancerAction('resume'); }
+  // Accept the cancel-flow counter-offer (50% off the next payment, one-shot).
+  // Returns {ok:true, discount_pct} or {ok:false, reason:'already_used'|'not_eligible'}.
+  async function stancerSaveOffer(reason) {
+    try { return await stancerAction('save-offer', reason ? { reason: reason } : null); }
+    catch (e) { return { ok: false, reason: (e && e.code) || 'error' }; }
+  }
 
   // ONE-CLICK plan change for existing subscribers — the card token is already on
   // file, so no card re-entry (upsell without friction). Returns {ok:true, status:
@@ -310,6 +317,7 @@
     stancerCheckoutUrl: stancerCheckoutUrl,
     stancerCancel: stancerCancel,
     stancerResume: stancerResume,
+    stancerSaveOffer: stancerSaveOffer,
     stancerChangePlan: stancerChangePlan,
     purchase: purchase,
     restore: restore,
