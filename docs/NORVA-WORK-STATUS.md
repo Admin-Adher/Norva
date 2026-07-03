@@ -5,6 +5,36 @@ l'activer. Mis à jour au fil des sessions.
 
 ---
 
+## ⚠️ Actions owner en attente (checklist vivante)
+
+Ces étapes **ne peuvent pas être faites par l'agent** (secrets Play Console, compte Google,
+build/publish signés). Elles bloquent la **release du natif**. Ordre logique :
+
+1. **Compte Google Play Console** — ⏳ *bloquant racine*. Sans lui, aucun upload possible.
+   Message envoyé au support Google, en attente d'ouverture. → débloque 2, 3, 4.
+   Réf : `IMPORT-NOTIFICATIONS.md`, `FCM-PUSH-SETUP.md`.
+2. **Build/publish des APK** — versions **déjà bumpées en source** (TV `3.8.0-hybrid` /
+   versionCode 13, phone `1.2.0` / versionCode 3, cf. `clients/android-*/app/build.gradle`),
+   **mais jamais buildées/publiées**. Dernière build documentée = **v1.1.0 / versionCode 2**
+   (release FCM). Lancer `.github/workflows/android-release.yml` (manuel ou tag `v*`) puis
+   uploader les AAB en Test interne. → **porte tout le natif** : cast natif, gestes player,
+   Watch Next, « À suivre ».
+3. **assetlinks SHA-256** — remplacer le placeholder
+   `REPLACE_WITH_RELEASE_SIGNING_SHA256_FROM_PLAY_CONSOLE` dans
+   `public/.well-known/assetlinks.json` par l'empreinte SHA-256 de la signature **release**
+   (Play Console → Intégrité de l'app, ou keystore). Fichier déjà correct par ailleurs
+   (seul `tv.norva.phone` déclare les App Links https `norva.tv`). Sans ça, un lien `norva.tv`
+   s'ouvre quand même dans l'app **mais après confirmation Android** (pas de vérif auto).
+   Réf : `UX-NETFLIX-PARITY.md` #15.
+4. **FCM push** — `GOOGLE_SERVICES_JSON` (secret GitHub) et `FCM_SERVICE_ACCOUNT` (secret
+   Supabase) déjà posés ; il ne reste que la publication de l'APK (étape 2). Réf : `FCM-PUSH-SETUP.md`.
+
+**Lien avec le Cast (Lot A, 2026-07-03)** : le Lot A cast est **web uniquement** (sender Google
+Cast, déployé via `main`). Le **cast natif** (les APK ont leur propre intégration Cast) n'arrive
+qu'avec la build de l'étape 2. Détail : `CAST-CHROMECAST.md`.
+
+---
+
 ## 🗓️ MISE À JOUR 2026-07-03 — Cast Chromecast (Lot A) ⏳ sur branche
 
 **Sur `claude/webm-block-additions-error-pj16xm`, pas encore mergé `main`.** Quick-wins UX du
