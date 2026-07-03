@@ -1100,7 +1100,9 @@ class AdminPage {
                 const undPct = Math.max(0, Math.round((100 - (Number(r.resolved_pct) || 0)) * 10) / 10);
                 return `<span class="badge green" title="1ʳᵉ passe de sondage terminée : chaque titre a été sondé au moins une fois. Les ~${undPct}% non résolus sont « und » dans le conteneur (aucune langue déclarée) — seul whisper peut les résoudre.">✓ sondé</span>`;
             }
+            if (Number(r.probed_24h) >= 20 && Number(r.resolved_24h) === 0) return `<span class="badge red" title="Sondé ${AdminPage.n(r.probed_24h)} en 24 h mais 0 langue résolue — provider probablement muet / identifiants morts / banni (le signal qui a manqué pour l'incident Ninja).">⚠ provider muet</span>`;
             if (Number(r.probed_24h) === 0) return '<span class="badge red">⏸ à l\'arrêt</span>';
+            if (Number.isFinite(Number(r.eta_days)) && Number(r.eta_days) > 365) return `<span class="badge gray" title="~${AdminPage.n(r.eta_days)} j au rythme actuel — débit quasi nul, chiffre non actionnable.">≫ 1 an</span>`;
             return `~${AdminPage.n(r.eta_days)} j`;
         };
         const sorted = rows.slice().sort((a, b) =>
