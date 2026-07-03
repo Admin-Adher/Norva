@@ -3,8 +3,10 @@
 //
 // v2 API schema CONFIRMED against the live test sandbox (2026-07-03):
 //   POST /v2/customers/        {name,email} → { id: cust_… }
-//   POST /v2/payment_intents/  {amount(cents),currency:"usd",capture,methods_allowed:["card"],auth:true(3DS),
+//   POST /v2/payment_intents/  {amount(cents),currency:"usd",capture,methods_allowed:["card"],
 //                               return_url,order_id,customer,metadata,description}
+//                               (NB: NO `auth` field here — 422 "extra fields not permitted"; 3DS is
+//                               implicit on the hosted page, the response carries threeds:"required")
 //     → { id: pi_…, url: "https://payment.stancer.com/[test_]pi_…", status:"require_payment_method",
 //         card:null(until paid), threeds:"required" }
 //
@@ -107,11 +109,26 @@ Deno.serve(async (req) => {
     if (!isTestKey()) return json({ error: "selftest refuses to run on a non-test key" }, 400);
     const returnUrl = `${RETURN_BASE}/subscription.html?stancer=selftest`;
     const cust = await stancerPost("/v2/customers/", { name: "Norva Test", email: "test@norva.tv" });
-    const pi = await stancerPost("/v2/payment_intents/", {
-      amount: 499, currency: "usd", capture: false, methods_allowed: ["card"], auth: true,
-      return_url: returnUrl, order_id: "selftest", customer: cust.ok ? cust.body.id : undefined,
-    });
-    return json({ ok: true, mode: STANCER_MODE, customer: cust, payment_intent: pi });
+    // Optional matrix: {"cases":[{currency,amount,capture}]} — diagnoses hosted-page behaviour per
+    // currency/amount/capture (e.g. "not ready for authorization" seen on USD checkouts).
+    let payload: { cases?: { currency?: string; amount?: number; capture?: boolean }[] } = {};
+    try { payload = await req.json(); } catch (_) { /* default single case below */ }
+    const cases = (payload.cases?.length ? payload.cases : [{ currency: "usd", amount: 499, capture: false }]).slice(0, 6);
+    const results: Record<string, unknown>[] = [];
+    for (let i = 0; i < cases.length; i++) {
+      const c = cases[i];
+      const pi = await stancerPost("/v2/payment_intents/", {
+        amount: c.amount ?? 499, currency: c.currency ?? "usd", capture: c.capture ?? false, methods_allowed: ["card"],
+        return_url: returnUrl, order_id: `selftest${Date.now().toString(36)}${i}`.slice(0, 36),
+        customer: cust.ok ? cust.body.id : undefined,
+      });
+      results.push({
+        currency: c.currency ?? "usd", amount: c.amount ?? 499, capture: c.capture ?? false,
+        ok: pi.ok, http: pi.status, id: pi.body?.id, url: pi.body?.url, status: pi.body?.status,
+        error: pi.ok ? undefined : pi.body,
+      });
+    }
+    return json({ ok: true, mode: STANCER_MODE, customer: cust.ok ? cust.body.id : cust, results });
   }
 
   // ── /checkout — user-authed: open a trial-setup hosted payment ─────────────
@@ -147,9 +164,6 @@ Deno.serve(async (req) => {
     const VALIDATION_CENTS = 50;
     const pi = await stancerPost("/v2/payment_intents/", {
       amount: VALIDATION_CENTS, currency: "usd", capture: false, methods_allowed: ["card"],
-      // auth:true forces 3DS on the hosted page. Without it the card payment stays "not ready for
-      // authorization" and the card form never renders (the integrated payment page requires it).
-      auth: true,
       return_url: returnUrl, order_id: ref(user.id), customer: custId,
       description: `Norva ${plan} ${period} — card validation for 7-day free trial`,
       metadata: { user_id: user.id, kind: "trial_setup", plan, period },
