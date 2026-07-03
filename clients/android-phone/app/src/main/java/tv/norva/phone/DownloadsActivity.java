@@ -167,6 +167,46 @@ public final class DownloadsActivity extends Activity {
         wifiRowLp.topMargin = dp(14);
         container.addView(wifiRow, wifiRowLp);
 
+        // Smart downloads: finished episode -> its follower joins the queue
+        // automatically (payload attached by the web at enqueue time).
+        LinearLayout smartRow = new LinearLayout(this);
+        smartRow.setOrientation(LinearLayout.HORIZONTAL);
+        smartRow.setGravity(Gravity.CENTER_VERTICAL);
+        smartRow.setBackground(roundedStroke(CARD, CARD_BORDER, 12));
+        smartRow.setPadding(dp(14), dp(12), dp(14), dp(12));
+        LinearLayout smartText = new LinearLayout(this);
+        smartText.setOrientation(LinearLayout.VERTICAL);
+        TextView smartLabel = new TextView(this);
+        smartLabel.setText("Smart downloads");
+        smartLabel.setTextColor(TEXT);
+        smartLabel.setTypeface(Typeface.DEFAULT_BOLD);
+        smartLabel.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+        TextView smartSub = new TextView(this);
+        smartSub.setText("When an episode finishes, queue the next one automatically");
+        smartSub.setTextColor(MUTED);
+        smartSub.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        smartSub.setPadding(0, dp(2), 0, 0);
+        smartText.addView(smartLabel);
+        smartText.addView(smartSub);
+        smartRow.addView(smartText, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        Toggle smart = new Toggle(this, DownloadService.getSmartDownloads(this), ACCENT, 0xFF3F3F46, 0xFFF4F4F5);
+        smart.setContentDescription("Smart downloads");
+        View.OnClickListener smartFlip = v -> {
+            boolean nv = !smart.isChecked();
+            smart.setChecked(nv);
+            DownloadService.setSmartDownloads(this, nv);
+            smart.announceForAccessibility(nv ? "Smart downloads on" : "Smart downloads off");
+        };
+        smart.setOnClickListener(smartFlip);
+        smartRow.setOnClickListener(smartFlip);
+        LinearLayout.LayoutParams smartTogLp = new LinearLayout.LayoutParams(dp(48), dp(28));
+        smartTogLp.leftMargin = dp(12);
+        smartRow.addView(smart, smartTogLp);
+        LinearLayout.LayoutParams smartRowLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        smartRowLp.topMargin = dp(10);
+        container.addView(smartRow, smartRowLp);
+
         LinearLayout clearRow = new LinearLayout(this);
         clearRow.setOrientation(LinearLayout.HORIZONTAL);
         clearRow.setGravity(Gravity.END);

@@ -301,6 +301,24 @@ async function route(
   // /content-events/seen marks them read.
   if (scope === "content-events") {
     if (req.method === "GET") {
+      // ?all=1 → the inbox feed: seen + unseen (recent history) plus an unread
+      // count, and does NOT mark anything seen. Default (no flag) keeps the legacy
+      // "unseen only" behavior for the one-shot launch toast.
+      const all = url.searchParams.get("all") === "1";
+      if (all) {
+        const [feedRes, unreadRes] = await Promise.all([
+          db.from("cloud_content_events")
+            .select("id,source_id,kind,summary,payload,created_at,seen_at")
+            .eq("user_id", user.id)
+            .order("created_at", { ascending: false })
+            .limit(40),
+          db.from("cloud_content_events")
+            .select("id", { count: "exact", head: true })
+            .eq("user_id", user.id)
+            .is("seen_at", null),
+        ]);
+        return { body: { events: feedRes.data ?? [], unread: unreadRes.count ?? 0 } };
+      }
       const { data } = await db
         .from("cloud_content_events")
         .select("id,source_id,kind,summary,payload,created_at")
@@ -411,6 +429,13 @@ async function route(
     if (req.method === "GET" && !id) return { body: await listFavorites(req, url, user.id, db) };
     if (req.method === "POST" && !id) return { status: 201, body: await addFavorite(req, user.id, db) };
     if (req.method === "DELETE" && id) return { body: await deleteOwned("cloud_favorites", id, user.id, db) };
+  }
+
+  if (scope === "ratings") {
+    // Thumbs up/down on a title. GET ?itemType[&itemId] → current rating(s);
+    // POST {itemId,itemType,rating} sets (1/-1) or clears (0); per profile.
+    if (req.method === "GET" && !id) return { body: await getRating(req, url, user.id, db) };
+    if (req.method === "POST" && !id) return { body: await setRating(req, user.id, db) };
   }
 
   if (scope === "history") {
@@ -2194,6 +2219,51 @@ async function addFavorite(req: Request, userId: string, db: SupabaseClient) {
     .single();
   if (error) throwDb(error, "Unable to save favorite");
   return { favorite: data };
+}
+
+async function getRating(req: Request, url: URL, userId: string, db: SupabaseClient) {
+  const profileId = await resolveProfileId(req, userId, db);
+  const itemType = stringOr(url.searchParams.get("itemType") ?? url.searchParams.get("item_type"), "");
+  const itemId = stringOrNull(url.searchParams.get("itemId") ?? url.searchParams.get("item_id"));
+  let query = db.from("cloud_title_ratings")
+    .select("source_id,item_type,item_id,rating")
+    .eq("user_id", userId).eq("profile_id", profileId);
+  if (itemType) query = query.eq("item_type", itemType);
+  if (itemId) query = query.eq("item_id", itemId);
+  const { data, error } = await query;
+  if (error) throwDb(error, "Unable to read ratings");
+  if (itemId) {
+    const row = (data ?? [])[0] as { rating?: number } | undefined;
+    return { rating: row?.rating ?? 0 };
+  }
+  return { ratings: data ?? [] };
+}
+
+async function setRating(req: Request, userId: string, db: SupabaseClient) {
+  const body = await readJson(req);
+  const sourceId = stringOr(body.sourceId ?? body.source_id, "");
+  const itemType = stringOr(body.itemType ?? body.item_type, "movie");
+  const itemId = stringOr(body.itemId ?? body.item_id, "");
+  const rating = Number(body.rating);
+  if (!sourceId || !itemId) throw new HttpError(400, "sourceId and itemId are required");
+  if (![1, -1, 0].includes(rating)) throw new HttpError(400, "rating must be 1, -1 or 0");
+  await assertOwnedSource(sourceId, userId, db);
+  const profileId = await resolveProfileId(req, userId, db);
+
+  // 0 clears the rating (untoggle); 1/-1 upsert the like/dislike.
+  if (rating === 0) {
+    const { error } = await db.from("cloud_title_ratings").delete()
+      .eq("user_id", userId).eq("profile_id", profileId)
+      .eq("source_id", sourceId).eq("item_type", itemType).eq("item_id", itemId);
+    if (error) throwDb(error, "Unable to clear rating");
+    return { rating: 0 };
+  }
+  const { error } = await db.from("cloud_title_ratings").upsert({
+    user_id: userId, profile_id: profileId, source_id: sourceId,
+    item_type: itemType, item_id: itemId, rating, updated_at: new Date().toISOString(),
+  }, { onConflict: "user_id,profile_id,source_id,item_type,item_id" });
+  if (error) throwDb(error, "Unable to save rating");
+  return { rating };
 }
 
 async function getHistoryItem(req: Request, url: URL, userId: string, db: SupabaseClient) {

@@ -75,6 +75,8 @@ dependencies {
     implementation "androidx.media3:media3-datasource:1.5.1"
     // NotificationCompat for the download foreground-service progress notice.
     implementation "androidx.core:core:1.13.1"
+    // Branded cold-start splash (Android 12+ native, backported below).
+    implementation "androidx.core:core-splashscreen:1.0.1"
     // In-app subscriptions (Google Play Billing) through RevenueCat. Pin a
     // tested version before release; "8.+" resolves the latest v8 line.
     implementation "com.revenuecat.purchases:purchases:8.+"

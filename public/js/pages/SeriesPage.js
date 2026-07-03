@@ -122,6 +122,8 @@ class SeriesPage {
             await this.toggleFavorite(this.currentSeriesGroup, this.detailFavoriteBtn);
             this.syncDetailFavoriteButton();
         });
+        document.getElementById('series-thumb-up')?.addEventListener('click', () => this.setRating(1));
+        document.getElementById('series-thumb-down')?.addEventListener('click', () => this.setRating(-1));
 
         this.observer = new IntersectionObserver((entries) => {
             if (entries[0].isIntersecting && !this.isLoading) {
@@ -1071,7 +1073,15 @@ class SeriesPage {
         if (this.randomBtn) this.randomBtn.disabled = cards.length === 0;
 
         if (cards.length === 0) {
-            this.container.innerHTML = '<div class="empty-state"><p>No series found</p></div>';
+            const filtered = this.hasActiveFilters();
+            this.container.innerHTML = `
+                <div class="empty-state rich-empty">
+                    <div class="empty-icon">📺</div>
+                    <h3>${filtered ? 'No series match these filters' : 'No series here yet'}</h3>
+                    <p>${filtered ? 'Try widening your search, genre or language filters.' : 'Series appear as soon as Norva finishes preparing your catalog.'}</p>
+                    ${filtered ? '<button class="btn btn-primary" id="series-empty-reset">Clear filters</button>' : ''}
+                </div>`;
+            this.container.querySelector('#series-empty-reset')?.addEventListener('click', () => this.resetFilters?.());
             return;
         }
 
@@ -1248,10 +1258,13 @@ class SeriesPage {
         const displayName = (this.groupDuplicates && series.tmdb?.title) ? series.tmdb.title : MediaUtils.cleanReleaseName(series.name);
         const groupBroken = group.items.every(item => this.isBrokenItem(item));
         const languageBadge = MediaUtils.versionLanguageBadge(series, this.getPreferences());
+        // "New" corner badge for series added in the last two weeks (not started).
+        const isNew = !started && group.items.some(i => MediaUtils.isRecentlyAdded(i));
 
         const srcset = MediaUtils.tmdbSrcset(poster);
         card.innerHTML = `
             <div class="series-poster">
+                ${isNew ? '<span class="new-badge">NEW</span>' : ''}
                 <img src="${MediaUtils.escapeHtml(poster)}" alt="${MediaUtils.escapeHtml(displayName)}"
                      ${srcset ? `srcset="${MediaUtils.escapeHtml(srcset)}" sizes="(max-width: 640px) 45vw, 190px"` : ''}
                      onerror="this.onerror=null;this.src='/img/norva-media-placeholder.png'" loading="lazy" decoding="async">
@@ -1262,7 +1275,7 @@ class SeriesPage {
                 ${versionCount > 1 ? `<button class="version-badge" title="Choose version">${versionCount} versions</button>` : ''}
                 ${languageBadge ? `<span class="version-language-badge ${versionCount > 1 ? 'with-version-badge' : ''}">${MediaUtils.escapeHtml(languageBadge)}</span>` : ''}
                 ${started ? '<span class="watched-badge inprogress-badge" title="Watching">▶</span>' : ''}
-                <button class="favorite-btn ${isFav ? 'active' : ''}" title="${isFav ? 'Remove from Favorites' : 'Add to Favorites'}">
+                <button class="favorite-btn ${isFav ? 'active' : ''}" aria-label="${isFav ? 'Remove from Favorites' : 'Add to Favorites'}" title="${isFav ? 'Remove from Favorites' : 'Add to Favorites'}">
                     <span class="fav-icon">${isFav ? Icons.favorite : Icons.favoriteOutline}</span>
                 </button>
             </div>
@@ -1683,6 +1696,38 @@ class SeriesPage {
         if (label) label.textContent = 'Favorite';
     }
 
+    // === Thumbs up/down (per-profile title rating) ===
+
+    paintThumbButtons(rating) {
+        document.getElementById('series-thumb-up')?.classList.toggle('active', rating === 1);
+        document.getElementById('series-thumb-down')?.classList.toggle('active', rating === -1);
+    }
+
+    async loadRating() {
+        this._currentRating = 0;
+        this.paintThumbButtons(0);
+        const series = this.currentSeries;
+        if (!series || !window.NorvaCloud?.ratings) return;
+        try {
+            const res = await NorvaCloud.ratings.get({ itemType: 'series', itemId: series.series_id });
+            this._currentRating = Number(res?.rating) || 0;
+            this.paintThumbButtons(this._currentRating);
+        } catch (_) { /* ratings are cloud-only / best-effort */ }
+    }
+
+    async setRating(value) {
+        const series = this.currentSeries;
+        if (!series || !window.NorvaCloud?.ratings) return;
+        const next = this._currentRating === value ? 0 : value;
+        this._currentRating = next;
+        this.paintThumbButtons(next);
+        try {
+            await NorvaCloud.ratings.set({ sourceId: series.sourceId, itemId: series.series_id, itemType: 'series', rating: next });
+        } catch (_) {
+            this.app?.showToast?.('Could not save your rating', { type: 'error' });
+        }
+    }
+
     playPrimaryEpisode() {
         const episodeId = this.primaryActionBtn?.dataset?.episodeId;
         if (!episodeId) return;
@@ -1754,6 +1799,7 @@ class SeriesPage {
         document.getElementById('series-title').textContent = this.getSeriesDisplayTitle(series);
         document.getElementById('series-plot').textContent = series.tmdb?.overview || series.plot || 'No summary available yet.';
         this.syncDetailFavoriteButton();
+        this.loadRating();
         this.renderMoreLikeThis(series);
         this.renderFicheExtras(series);
 
@@ -1837,7 +1883,7 @@ class SeriesPage {
                             const ratio = history?.ratio || 0;
                             const ratioPercent = Math.max(0, Math.min(100, Math.round(ratio * 100)));
                             const marker = ratio >= 0.95 ? '<span class="episode-watched" title="Watched">✓</span>'
-                                : (ratio > 0.02 ? '<span class="episode-watched inprogress" title="En cours">◐</span>' : '');
+                                : (ratio > 0.02 ? '<span class="episode-watched inprogress" title="In progress">◐</span>' : '');
                             const cleanTitle = this.cleanEpisodeTitle(ep, seasonNum);
                             const duration = this.formatEpisodeDuration(ep.duration);
                             const description = ep.plot || ep.info?.plot || ep.overview || '';
@@ -2212,15 +2258,36 @@ class SeriesPage {
      * No UI side-effects (so it can be looped for a whole season). Returns
      * 'queued' | 'skip' (already saved/in flight); throws if the URL can't resolve.
      */
-    async queueEpisodeDownload(episodeEl) {
+    async queueEpisodeDownload(episodeEl, { includeNext = false } = {}) {
         const bridge = this.nativeDownloadBridge();
         if (!bridge || !episodeEl) return 'skip';
+        const payload = await this.buildEpisodeDownloadPayload(episodeEl);
+        if (!payload) return 'skip';
+        // Smart downloads: attach the FOLLOWING episode's payload so the native
+        // service can auto-queue it when this one completes (single-episode
+        // downloads only — season batches already queue everything).
+        if (includeNext) {
+            const all = [...(this.seasonsContainer?.querySelectorAll('.episode-item') || [])];
+            const nextEl = all[all.indexOf(episodeEl) + 1];
+            if (nextEl && !['done', 'downloading', 'queued'].includes(
+                this.episodeDownloadState(`${parseInt(nextEl.dataset.sourceId)}:${nextEl.dataset.episodeId}`))) {
+                try {
+                    payload.next = await this.buildEpisodeDownloadPayload(nextEl, { allowInFlight: true });
+                } catch (_) { /* the chain link is optional */ }
+            }
+        }
+        bridge.downloadMedia(JSON.stringify(payload));
+        return 'queued';
+    }
+
+    /** Resolve one episode's direct URL + metadata into a native download payload. */
+    async buildEpisodeDownloadPayload(episodeEl, { allowInFlight = false } = {}) {
         const episodeId = episodeEl.dataset.episodeId;
         const sourceId = parseInt(episodeEl.dataset.sourceId);
         const container = episodeEl.dataset.container || 'mp4';
         const id = `${sourceId}:${episodeId}`;
         const state = this.episodeDownloadState(id);
-        if (state === 'done' || state === 'downloading' || state === 'queued') return 'skip';
+        if (!allowInFlight && (state === 'done' || state === 'downloading' || state === 'queued')) return null;
         const episode = this.findEpisodeById(episodeId)
             || { id: episodeId, container_extension: container, type: 'episode', streamType: 'series' };
         const seasonNum = episodeEl.dataset.season || '1';
@@ -2232,7 +2299,7 @@ class SeriesPage {
         const result = await API.proxy.xtream.getStreamUrl(sourceId, episodeId, 'series', container, playbackHint);
         if (!result || !result.url) throw new Error('No stream URL');
         const showTitle = this.currentSeries?.tmdb?.title || this.currentSeries?.name || 'Series';
-        const payload = {
+        return {
             url: result.url,
             sourceId: String(sourceId),
             itemId: String(episodeId),
@@ -2246,8 +2313,6 @@ class SeriesPage {
             container,
             durationSeconds: 0
         };
-        bridge.downloadMedia(JSON.stringify(payload));
-        return 'queued';
     }
 
     /** Queue a single episode for offline download (per-episode button). */
@@ -2262,7 +2327,7 @@ class SeriesPage {
         try {
             btn?.classList.add('busy');
             await this.prepareForPlaybackSession();
-            await this.queueEpisodeDownload(episodeEl);
+            await this.queueEpisodeDownload(episodeEl, { includeNext: true });
             window.app?.refreshDownloadsNav?.();
         } catch (err) {
             console.warn('[Download] episode failed:', err?.message || err);
@@ -2401,7 +2466,11 @@ class SeriesPage {
                 btn.classList.add('active');
                 btn.title = 'Remove from Favorites';
                 if (iconSpan) iconSpan.innerHTML = Icons.favorite;
-                await API.favorites.add(series.sourceId, series.series_id, 'series');
+                await API.favorites.add(series.sourceId, series.series_id, 'series', {
+                    name: this.getSeriesDisplayTitle(series),
+                    poster: this.getSeriesPoster(series),
+                    type: 'series'
+                });
             }
         } catch (err) {
             console.error('Error toggling favorite:', err);

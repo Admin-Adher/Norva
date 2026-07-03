@@ -122,6 +122,8 @@ class MoviesPage {
             if (this.currentMovieGroup) this.toggleFavorite(this.currentMovieGroup, this.detailFavoriteBtn);
         });
         this.detailDownloadBtn?.addEventListener('click', () => this.onDownloadClick());
+        document.getElementById('movie-thumb-up')?.addEventListener('click', () => this.setRating(1));
+        document.getElementById('movie-thumb-down')?.addEventListener('click', () => this.setRating(-1));
 
         // Lazy loading
         this.observer = new IntersectionObserver((entries) => {
@@ -1102,7 +1104,15 @@ class MoviesPage {
         if (this.randomBtn) this.randomBtn.disabled = cards.length === 0;
 
         if (cards.length === 0) {
-            this.container.innerHTML = '<div class="empty-state"><p>No movies found</p></div>';
+            const filtered = this.hasActiveFilters();
+            this.container.innerHTML = `
+                <div class="empty-state rich-empty">
+                    <div class="empty-icon">🎬</div>
+                    <h3>${filtered ? 'No movies match these filters' : 'No movies here yet'}</h3>
+                    <p>${filtered ? 'Try widening your search, genre or language filters.' : 'Movies appear as soon as Norva finishes preparing your catalog.'}</p>
+                    ${filtered ? '<button class="btn btn-primary" id="movies-empty-reset">Clear filters</button>' : ''}
+                </div>`;
+            this.container.querySelector('#movies-empty-reset')?.addEventListener('click', () => this.resetFilters?.());
             return;
         }
 
@@ -1288,10 +1298,13 @@ class MoviesPage {
         const displayName = (this.groupDuplicates && movie.tmdb?.title) ? movie.tmdb.title : MediaUtils.cleanReleaseName(movie.name);
         const groupBroken = group.items.every(item => this.isBrokenItem(item));
         const languageBadge = MediaUtils.versionLanguageBadge(movie, this.getPreferences());
+        // "New" corner badge for titles added in the last two weeks (unwatched).
+        const isNew = watch.status !== 'watched' && group.items.some(i => MediaUtils.isRecentlyAdded(i));
 
         const srcset = MediaUtils.tmdbSrcset(poster);
         card.innerHTML = `
             <div class="movie-poster">
+                ${isNew ? '<span class="new-badge">NEW</span>' : ''}
                 <img src="${MediaUtils.escapeHtml(poster)}" alt="${MediaUtils.escapeHtml(displayName)}"
                      ${srcset ? `srcset="${MediaUtils.escapeHtml(srcset)}" sizes="(max-width: 640px) 45vw, 190px"` : ''}
                      onerror="this.onerror=null;this.src='/img/norva-media-placeholder.png'" loading="lazy" decoding="async">
@@ -1303,7 +1316,7 @@ class MoviesPage {
                 ${languageBadge ? `<span class="version-language-badge ${versionCount > 1 ? 'with-version-badge' : ''}">${MediaUtils.escapeHtml(languageBadge)}</span>` : ''}
                 ${watch.status === 'watched' ? '<span class="watched-badge" title="Watched">✓</span>' : ''}
                 ${watch.status === 'inprogress' ? `<div class="card-progress"><div class="card-progress-fill" style="width:${Math.round(watch.ratio * 100)}%"></div></div>` : ''}
-                <button class="favorite-btn ${isFav ? 'active' : ''}" title="${isFav ? 'Remove from Favorites' : 'Add to Favorites'}">
+                <button class="favorite-btn ${isFav ? 'active' : ''}" aria-label="${isFav ? 'Remove from Favorites' : 'Add to Favorites'}" title="${isFav ? 'Remove from Favorites' : 'Add to Favorites'}">
                     <span class="fav-icon">${isFav ? Icons.favorite : Icons.favoriteOutline}</span>
                 </button>
             </div>
@@ -1552,6 +1565,39 @@ class MoviesPage {
         if (label) label.textContent = 'Favorite';
     }
 
+    // === Thumbs up/down (per-profile title rating) ===
+
+    paintThumbButtons(rating) {
+        document.getElementById('movie-thumb-up')?.classList.toggle('active', rating === 1);
+        document.getElementById('movie-thumb-down')?.classList.toggle('active', rating === -1);
+    }
+
+    async loadRating() {
+        this._currentRating = 0;
+        this.paintThumbButtons(0);
+        const movie = this.currentMovie;
+        if (!movie || !window.NorvaCloud?.ratings) return;
+        try {
+            const res = await NorvaCloud.ratings.get({ itemType: 'movie', itemId: movie.stream_id });
+            this._currentRating = Number(res?.rating) || 0;
+            this.paintThumbButtons(this._currentRating);
+        } catch (_) { /* ratings are cloud-only / best-effort */ }
+    }
+
+    async setRating(value) {
+        const movie = this.currentMovie;
+        if (!movie || !window.NorvaCloud?.ratings) return;
+        // Clicking the active thumb clears it (toggle-off), like Netflix.
+        const next = this._currentRating === value ? 0 : value;
+        this._currentRating = next;
+        this.paintThumbButtons(next);
+        try {
+            await NorvaCloud.ratings.set({ sourceId: movie.sourceId, itemId: movie.stream_id, itemType: 'movie', rating: next });
+        } catch (_) {
+            this.app?.showToast?.('Could not save your rating', { type: 'error' });
+        }
+    }
+
     // === Offline downloads (native phone/tablet app only) ===
 
     /** The native download bridge, present only inside the Norva mobile APK. */
@@ -1706,7 +1752,7 @@ class MoviesPage {
                 <button class="movie-version-item ${active ? 'active' : ''}" type="button" data-index="${index}">
                     <span class="movie-version-main">${MediaUtils.escapeHtml(bits.join(' - ') || `Version ${index + 1}`)}</span>
                     <span class="movie-version-sub">${MediaUtils.escapeHtml(MediaUtils.cleanReleaseName(item.name) || this.getMovieDisplayTitle(item))}</span>
-                    ${state.status === 'inprogress' ? '<span class="movie-version-progress">En cours</span>' : ''}
+                    ${state.status === 'inprogress' ? '<span class="movie-version-progress">In progress</span>' : ''}
                     ${state.status === 'watched' ? '<span class="movie-version-progress">Vu</span>' : ''}
                 </button>`;
         }).join('');
@@ -1795,6 +1841,7 @@ class MoviesPage {
         }
 
         this.syncDetailFavoriteButton();
+        this.loadRating();
         this.syncDownloadButton();
         this.renderMovieVersions(movie);
         this.renderMoreLikeThis(movie);
@@ -2095,7 +2142,11 @@ class MoviesPage {
                 btn.classList.add('active');
                 btn.title = 'Remove from Favorites';
                 if (iconSpan) iconSpan.innerHTML = Icons.favorite;
-                await API.favorites.add(movie.sourceId, movie.stream_id, 'movie');
+                await API.favorites.add(movie.sourceId, movie.stream_id, 'movie', {
+                    name: this.getMovieDisplayTitle(movie),
+                    poster: this.getMoviePoster(movie),
+                    type: 'movie'
+                });
             }
         } catch (err) {
             console.error('Error toggling favorite:', err);

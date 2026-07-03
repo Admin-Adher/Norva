@@ -180,6 +180,48 @@
         );
     }
 
+    /**
+     * TV replacement for the native <select> spinner: a focus-trapped overlay
+     * listing the options as big remote-friendly rows. Reuses the modal plumbing
+     * (`.modal-overlay.active` confines navigation; BACK/Escape closes it).
+     */
+    function openTvSelect(select) {
+        if (!select || !select.options?.length) return;
+        document.getElementById('tv-select-overlay')?.remove();
+        const ov = document.createElement('div');
+        ov.id = 'tv-select-overlay';
+        ov.className = 'modal-overlay active tv-select-overlay';
+        const label = select.getAttribute('aria-label')
+            || select.closest('label')?.textContent?.trim()
+            || document.querySelector(`label[for="${select.id}"]`)?.textContent?.trim()
+            || 'Choose an option';
+        const rows = [...select.options].map((opt, i) =>
+            `<button type="button" class="tv-select-option${opt.selected ? ' selected' : ''}" data-index="${i}">
+                ${opt.selected ? '✓ ' : ''}${opt.textContent}
+            </button>`).join('');
+        ov.innerHTML = `
+            <div class="tv-select-panel" role="listbox" aria-label="${label.replace(/"/g, '&quot;')}">
+                <div class="tv-select-title">${label}</div>
+                <div class="tv-select-list">${rows}</div>
+                <button type="button" class="modal-close tv-select-cancel">Cancel</button>
+            </div>`;
+        const close = () => { ov.remove(); focusElement(select); };
+        ov.querySelector('.tv-select-cancel').onclick = close;
+        ov.addEventListener('click', (ev) => { if (ev.target === ov) close(); });
+        ov.querySelectorAll('.tv-select-option').forEach((btn) => {
+            btn.addEventListener('click', () => {
+                const idx = Number(btn.dataset.index);
+                if (select.selectedIndex !== idx) {
+                    select.selectedIndex = idx;
+                    select.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+                close();
+            });
+        });
+        document.body.appendChild(ov);
+        focusElement(ov.querySelector('.tv-select-option.selected') || ov.querySelector('.tv-select-option'));
+    }
+
     function onWatchPageWithHiddenControls() {
         const watchActive = document.getElementById('page-watch')?.classList.contains('active');
         if (!watchActive) return false;
@@ -221,9 +263,14 @@
                 (window.app?.channelList?.searchMode || window.app?.channelList?.zeroState);
             if (isEnter || e.key === 'ArrowLeft' || e.key === 'ArrowRight' || ownsVerticalKeys) return;
         }
-        // <select>: arrows navigate away (never trapped); Enter opens the
-        // native picker through the default behavior
-        if (focused?.tagName === 'SELECT' && isEnter) return;
+        // <select>: arrows navigate away (never trapped); Enter opens a custom
+        // full-screen option list instead of the WebView's tiny native spinner.
+        if (focused?.tagName === 'SELECT' && isEnter) {
+            e.preventDefault();
+            e.stopPropagation();
+            openTvSelect(focused);
+            return;
+        }
 
         // Fullscreen playback with hidden controls: arrows belong to the
         // player (skip/volume); Enter just brings the controls back
@@ -253,7 +300,7 @@
         if (!focused) {
             // Nothing focused: prefer restoring the remembered card (focus lost
             // to a re-render or a native-player round-trip keeps its position),
-            // else enter the active page before global navigation links.
+            // else its nearest surviving neighbor, else enter the active page.
             const page = activePage();
             if (lastFocusedCard && lastFocusedPageId === page?.id &&
                 page.contains(lastFocusedCard) && isVisible(lastFocusedCard)) {
@@ -261,9 +308,10 @@
                 return;
             }
             const pageCandidates = getPageCandidates();
-            const first = e.key === 'ArrowUp'
+            const anchored = lastFocusedPageId === page?.id ? nearestToLastRect(pageCandidates) : null;
+            const first = anchored || (e.key === 'ArrowUp'
                 ? pageCandidates[pageCandidates.length - 1]
-                : pageCandidates[0];
+                : pageCandidates[0]);
             focusElement(first || getCandidates()[0] || null);
             return;
         }
@@ -323,14 +371,33 @@
 
     let lastFocusedCard = null;          // last card-like element we focused
     let lastFocusedPageId = null;
+    let lastFocusRect = null;            // where it was — re-anchor point after re-renders
 
     document.addEventListener('focusin', () => {
         const el = document.activeElement;
         if (el && el !== document.body && el.matches?.(INTERACTIVE_SELECTOR)) {
             lastFocusedCard = el;
             lastFocusedPageId = activePage()?.id || null;
+            try { lastFocusRect = el.getBoundingClientRect(); } catch (_) { lastFocusRect = null; }
         }
     });
+
+    // When a re-render removed the focused card, land on its nearest surviving
+    // neighbor (by screen distance) instead of snapping back to the page's first
+    // candidate — the user keeps their place in the list.
+    function nearestToLastRect(candidates) {
+        if (!lastFocusRect || !candidates.length) return candidates[0] || null;
+        const cx = lastFocusRect.left + lastFocusRect.width / 2;
+        const cy = lastFocusRect.top + lastFocusRect.height / 2;
+        let best = null;
+        let bestDist = Infinity;
+        for (const el of candidates) {
+            const c = centerOf(el);
+            const d = (c.x - cx) * (c.x - cx) + (c.y - cy) * (c.y - cy);
+            if (d < bestDist) { bestDist = d; best = el; }
+        }
+        return best;
+    }
 
     function ensurePageFocus() {
         // Never steal focus from an open modal or a text field being edited.
@@ -345,8 +412,9 @@
             focusElement(lastFocusedCard);
             return;
         }
-        const first = getPageCandidates()[0];
-        if (first) focusElement(first);
+        const candidates = getPageCandidates();
+        const target = lastFocusedPageId === page.id ? nearestToLastRect(candidates) : candidates[0];
+        if (target) focusElement(target);
     }
 
     // Page switches: the router toggles .page.active — watch for it, then let

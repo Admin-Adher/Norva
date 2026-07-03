@@ -52,6 +52,7 @@ final class DownloadStore {
         long createdAt = System.currentTimeMillis();
         long queueOrder = 0; // lower = earlier in the queue (0 -> fall back to createdAt)
         boolean allowCellular = false; // user OK'd this one on mobile data despite Wi-Fi-only
+        String nextJson = "";  // smart downloads: payload of the FOLLOWING episode, queued on completion
 
         JSONObject toJson() throws Exception {
             JSONObject o = new JSONObject();
@@ -81,6 +82,7 @@ final class DownloadStore {
             o.put("createdAt", createdAt);
             o.put("queueOrder", queueOrder);
             o.put("allowCellular", allowCellular);
+            o.put("nextJson", nextJson);
             return o;
         }
 
@@ -112,6 +114,7 @@ final class DownloadStore {
             it.createdAt = o.optLong("createdAt", System.currentTimeMillis());
             it.queueOrder = o.optLong("queueOrder", it.createdAt);
             it.allowCellular = o.optBoolean("allowCellular", false);
+            it.nextJson = o.optString("nextJson", "");
             return it;
         }
     }

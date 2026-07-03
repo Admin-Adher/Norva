@@ -10646,6 +10646,61 @@ mark.search-highlight {
   margin-right: -48px;
 }
 
+/* TV replacement for the native <select> spinner (remote-friendly rows). */
+.tv-select-overlay {
+  z-index: 1300;
+}
+
+.tv-select-panel {
+  background: #16161e;
+  border-radius: 12px;
+  padding: 24px 20px;
+  min-width: 420px;
+  max-width: 640px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: auto;
+}
+
+.tv-select-title {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #fff;
+  padding: 0 8px 10px;
+}
+
+.tv-select-list {
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tv-select-option,
+.tv-select-cancel {
+  text-align: left;
+  padding: 14px 16px;
+  border: none;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #e4e4f2;
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+.tv-select-option.selected {
+  background: rgba(255, 255, 255, 0.14);
+  font-weight: 600;
+}
+
+.tv-select-cancel {
+  margin-top: 8px;
+  text-align: center;
+  color: var(--color-text-secondary, #a1a1aa);
+}
+
 /* ============================================================
    Mobile bottom tab bar — replaces the top hamburger on phones.
    The .bottom-nav links reuse .nav-link + data-page, so the existing
@@ -11051,4 +11106,245 @@ body.is-watching .norva-mini { display: none !important; }
 @media (min-width: 641px) {
   .gsearch-overlay { align-items: center; }
   .gsearch-panel { height: auto; max-height: 80vh; border: 1px solid var(--color-border, #1f2733); border-radius: 16px; overflow: hidden; }
+}
+
+/* ============================================================
+   Touch targets — raise the sub-44px interactive rows on
+   coarse-pointer (finger) devices only; desktop keeps its density.
+   ============================================================ */
+@media (pointer: coarse) {
+  .live-guide-group,
+  .watch-error-refresh-btn,
+  #page-movies .movies-controls .btn,
+  #page-series .series-controls .btn,
+  #page-movies .filter-toggle,
+  #page-series .filter-toggle,
+  #page-movies .filter-reset,
+  #page-series .filter-reset {
+    min-height: 44px !important;
+    height: auto !important;
+  }
+}
+
+/* ============================================================
+   Web minors — toast, offline banner, NEW badge, still-watching,
+   richer next-episode panel, rich empty states.
+   ============================================================ */
+
+/* Toasts (undo, etc.) */
+.norva-toasts {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  z-index: 1400;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: center;
+  pointer-events: none;
+}
+
+.norva-toast {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 16px;
+  border-radius: 10px;
+  background: #1c1c26;
+  color: #fff;
+  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.5);
+  font-size: 0.92rem;
+  opacity: 0;
+  transform: translateY(10px);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  pointer-events: auto;
+  max-width: min(92vw, 460px);
+}
+
+.norva-toast.show { opacity: 1; transform: translateY(0); }
+.norva-toast-error { background: #3a1d1d; }
+
+.norva-toast-action {
+  border: none;
+  background: transparent;
+  color: #8be9fd;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 4px 6px;
+  white-space: nowrap;
+}
+
+/* Offline banner (top, full width) */
+.norva-offline-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 1350;
+  padding: 8px 16px;
+  text-align: center;
+  font-size: 0.86rem;
+  color: #0a0a0f;
+  background: #f4c95d;
+}
+
+/* "New" corner badge on cards */
+.new-badge {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 3;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: #e50914;
+  color: #fff;
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+}
+
+/* "Are you still watching?" overlay */
+.watch-still-watching {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(5, 5, 10, 0.82);
+}
+
+.still-watching-box {
+  text-align: center;
+  padding: 32px 28px;
+  max-width: 420px;
+}
+
+.still-watching-box h3 { font-size: 1.4rem; margin-bottom: 8px; color: #fff; }
+.still-watching-box p { color: var(--color-text-secondary, #a1a1aa); margin-bottom: 20px; }
+
+/* Richer next-episode panel */
+.watch-next-episode .next-still {
+  width: 128px;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border-radius: 6px;
+  flex: 0 0 auto;
+}
+
+.watch-next-episode .next-synopsis {
+  font-size: 0.82rem;
+  color: var(--color-text-secondary, #a1a1aa);
+  margin-top: 4px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.watch-next-episode .next-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+}
+
+/* Rich empty states (grids) */
+.rich-empty {
+  text-align: center;
+  padding: 56px 20px;
+  max-width: 460px;
+  margin: 0 auto;
+}
+
+.rich-empty .empty-icon { font-size: 2.6rem; margin-bottom: 12px; }
+.rich-empty h3 { font-size: 1.2rem; color: #fff; margin-bottom: 6px; }
+.rich-empty p { color: var(--color-text-secondary, #a1a1aa); margin-bottom: 18px; }
+
+/* ============================================================
+   Transversal — thumbs, notifications bell/inbox, focus-visible.
+   ============================================================ */
+
+/* Thumbs up/down on the fiche */
+.thumb-btn {
+  font-size: 1.05rem;
+  line-height: 1;
+  opacity: 0.75;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.thumb-btn:hover { opacity: 1; }
+
+.thumb-btn.active {
+  opacity: 1;
+  transform: scale(1.12);
+  background: rgba(255, 255, 255, 0.14);
+}
+
+/* Notifications bell + unread dot */
+.nav-bell-btn {
+  position: relative;
+  background: transparent;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  padding: 6px;
+  display: inline-flex;
+  align-items: center;
+}
+
+.nav-bell-dot {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #e50914;
+  border: 2px solid var(--color-bg, #0a0a0f);
+}
+
+.norva-notif-panel {
+  position: fixed;
+  top: 60px;
+  right: 16px;
+  z-index: 1300;
+  width: min(92vw, 360px);
+  max-height: 70vh;
+  overflow: hidden;
+  background: #16161e;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.6);
+  display: flex;
+  flex-direction: column;
+}
+
+.norva-notif-head {
+  padding: 14px 16px;
+  font-weight: 700;
+  color: #fff;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.norva-notif-list { overflow-y: auto; }
+
+.norva-notif-item {
+  padding: 12px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.norva-notif-item.unread { background: rgba(109, 139, 255, 0.08); }
+.norva-notif-summary { font-size: 0.9rem; color: #e4e4f2; }
+.norva-notif-time { font-size: 0.75rem; color: var(--color-text-muted, #71717a); margin-top: 3px; }
+.norva-notif-empty { padding: 28px 16px; text-align: center; color: var(--color-text-secondary, #a1a1aa); }
+
+/* Accessibility: a clear keyboard focus ring everywhere, without adding an
+   outline for mouse users (:focus-visible only fires for keyboard/AT). Excludes
+   TV mode, which draws its own high-contrast 10-foot ring. */
+:root:not(.tv-mode) :focus-visible {
+  outline: 3px solid #6d8bff;
+  outline-offset: 2px;
+  border-radius: 4px;
 }

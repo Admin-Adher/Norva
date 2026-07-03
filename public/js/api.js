@@ -1334,7 +1334,7 @@ const CloudAdapter = (() => {
                 // Fail fast for a short window instead of piling on more connections,
                 // so the single-slot cooldown lifts and the next try succeeds.
                 if (!hasNativeOrLocal && type === 'live' && _isLiveBlocked(sourceId)) {
-                    const liveBackoff = new Error('Chaîne momentanément indisponible (fournisseur saturé) — réessaie dans quelques secondes.');
+                    const liveBackoff = new Error('Channel temporarily unavailable (provider busy) — try again in a few seconds.');
                     liveBackoff.liveProviderBackoff = true;
                     throw liveBackoff;
                 }
@@ -1485,7 +1485,7 @@ const CloudAdapter = (() => {
                     });
                     const engineUrl = enginePayload.playback?.url || enginePayload.url;
                     if (!engineUrl) {
-                        const e = new Error('Engine: relais indisponible (URL brute manquante).');
+                        const e = new Error('Engine: relay unavailable (raw URL missing).');
                         e.engineUnavailable = true;
                         throw e;
                     }
@@ -2200,8 +2200,14 @@ const API = {
             if (params.length) url += '?' + params.join('&');
             return API.request('GET', url);
         },
-        add: (sourceId, itemId, itemType = 'channel') =>
-            API.request('POST', '/favorites', { sourceId, itemId, itemType }),
+        add: (sourceId, itemId, itemType = 'channel', meta = null) =>
+            API.request('POST', '/favorites', {
+                sourceId, itemId, itemType,
+                // Persist name + poster so the unified "My List" rail can render
+                // directly from the favorite row (no per-item catalog lookup).
+                ...(meta && meta.name ? { itemName: meta.name } : {}),
+                ...(meta && (meta.poster || meta.type) ? { itemMeta: { poster: meta.poster || '', type: meta.type || itemType } } : {})
+            }),
         remove: (sourceId, itemId, itemType = 'channel') =>
             API.request('DELETE', '/favorites', { sourceId, itemId, itemType }),
         check: (sourceId, itemId, itemType = 'channel') =>
