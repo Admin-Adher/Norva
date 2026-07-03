@@ -670,6 +670,15 @@ app.post('/probe-audio', requireGatewayAuth, async (req, res) => {
             return res.status(400).json({ error: 'url is required' });
         }
         const ua = sanitizeUserAgent(userAgent) || 'VLC/3.0.20 LibVLC/3.0.20';
+        // Concurrency 1 incl. playback: never probe while a real viewer holds this account's single
+        // provider connection — that overlap is exactly the user_multi_ip / account-sharing signal
+        // that got the account banned. Match on the account key (host + username in the stream path).
+        const probeKey = proxyKeyFromUrl(url);
+        const accountBusy = Array.from(sessions.values()).some(
+            (s) => s && s.sourceUrl && proxyKeyFromUrl(s.sourceUrl) === probeKey && isSessionBlockingProviderSlot(s));
+        if (accountBusy) {
+            return res.status(409).json({ error: 'Account busy (active playback)', code: 'account_busy' });
+        }
         const profile = await probeCodecProfile(url, ua); // ffprobe via the residential proxy
         const audioTracks = Array.isArray(profile?.audioTracks) ? profile.audioTracks : [];
         const subtitles = Array.isArray(profile?.subtitles) ? profile.subtitles : [];

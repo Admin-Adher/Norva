@@ -3788,7 +3788,7 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
 
   let updated = 0;
   const debug = stringOr(body.debug, "") === "1";
-  const diag = { noVariant: 0, noTarget: 0, emptySeries: 0, relayNotOk: 0, relayEmpty: 0, noLang: 0, exception: 0 };
+  const diag = { noVariant: 0, noTarget: 0, emptySeries: 0, relayNotOk: 0, relayEmpty: 0, noLang: 0, exception: 0, footprintCapped: 0 };
   let sample: JsonRecord | null = null;
   const lastId = String(titles[titles.length - 1].id);
 
@@ -3801,6 +3801,10 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
   if (footprint && !footprint.allowed) {
     return { mode, updated: 0, processed: 0, deferred: "footprint_budget", identityKey: footprint.identityKey, hitsLastHour: footprint.hits, maxPerHour: footprint.maxPerHour };
   }
+  // Low-footprint pacing: serialize (concurrency 1), cap this tick to the remaining hourly budget,
+  // and jitter each provider hit so the crawl doesn't look like a metronome.
+  const effConcurrency = footprint?.lowFootprint ? 1 : concurrency;
+  let lowFpProbed = 0;
 
   const processOne = async (title: JsonRecord) => {
     // Mark a title as probed (resolved or genuinely-empty) so the progression filter
@@ -3851,6 +3855,13 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
         // Low-footprint provider (anti-ban): route the header-probe through the gateway's
         // RESIDENTIAL IP instead of the Cloudflare relay, so a mono-connection anti-abuse
         // account is seen from ONE household IP (probe + metadata + playback). Same JSON shape.
+        if (footprint.maxPerHour != null && (footprint.hits + lowFpProbed) >= footprint.maxPerHour) {
+          diag.footprintCapped++;
+          return; // over the hourly budget → leave this title for a later tick (no stamp)
+        }
+        lowFpProbed++;
+        // Human-like spacing between provider hits (concurrency is forced to 1 here).
+        await new Promise((r) => setTimeout(r, 200 + Math.floor(Math.random() * 1000)));
         try {
           const gw = await fetch(`${runtimeConfig.mediaGatewayUrl}/probe-audio`, {
             method: "POST",
@@ -3970,8 +3981,8 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
     }
   };
 
-  for (let i = 0; i < titles.length; i += concurrency) {
-    await Promise.all(titles.slice(i, i + concurrency).map((t) => processOne(t as JsonRecord)));
+  for (let i = 0; i < titles.length; i += effConcurrency) {
+    await Promise.all(titles.slice(i, i + effConcurrency).map((t) => processOne(t as JsonRecord)));
   }
 
   return { processed: titles.length, updated, diag, ...(debug ? { sample } : {}), lastId, hasMore: titles.length === limit };
