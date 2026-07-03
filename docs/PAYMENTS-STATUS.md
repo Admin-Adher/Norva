@@ -18,17 +18,20 @@ INERT** (rien ne prélève tant que les interrupteurs ne sont pas basculés). Ar
 Stancer **n'a pas d'objet abonnement natif** → Norva **orchestre lui-même l'essai et le récurrent**
 via un **token card-on-file** :
 
-- **Essai 7 j (Option B — empreinte minimale)** : au checkout, autorisation **0,50 $**
-  (`capture:false`) sur la page hébergée → **valide + tokenise** la carte sans débiter le plan
-  (l'empreinte se libère seule). Le **vrai montant** (4,99 $ / 8,99 $) est prélevé **à J+7** puis à
-  chaque échéance par le cron, en réutilisant le token.
-- **Devise = USD** (dollar). Stancer accepte USD (settlement en EUR côté banque) — choisi comme
-  devise mondiale pour le scaling international. Le checkout hébergé, le débit récurrent et le reçu
-  sont tous en `usd`. Minimum documenté Stancer = 0,50 (EUR) ; le seuil USD est à confirmer au
-  1ᵉʳ test réel — si l'auto de 0,50 $ est refusée pour montant trop bas, relever `VALIDATION_CENTS`.
+- **Essai 7 j (Option B — empreinte minimale)** : au checkout, autorisation **0,50 €** (EUR,
+  `capture:false`) sur la page hébergée → **valide + tokenise** la carte sans débiter le plan
+  (l'empreinte se libère seule). Le **vrai montant** (4,99 $ / 8,99 $, USD) est prélevé **à J+7**
+  puis à chaque échéance par le cron, en réutilisant le token.
+- **Devise = USD pour les prélèvements**, **EUR pour l'empreinte de validation**. Diagnostic
+  2026-07-03 (matrice selftest + tests manuels) : sur ce compte Stancer, **l'autorisation seule
+  (`capture:false`) en USD est refusée** — la page hébergée renvoie `Card payment paym_… is not
+  ready for authorization` — alors que **les captures USD passent** et que **l'autorisation EUR
+  passe**. Pont adopté : empreinte 0,50 € (EUR) + débits plan en `usd`. **Action** : demander au
+  support Stancer (espace client) l'activation des **autorisations USD**, puis repasser l'empreinte
+  en `usd` (1 ligne dans `norva-stancer/checkout`).
 - **PCI** : page de paiement **hébergée** Stancer → Norva ne voit jamais le numéro de carte (SAQ-A) ;
   3DS automatique. La page hébergée n'est **pas** brandable à 100 % (mode redirect : logo + nom du
-  compte seulement) ; la réassurance « 0,50 $ non débité » est donc affichée sur **notre**
+  compte seulement) ; la réassurance « 0,50 € non débité » est donc affichée sur **notre**
   `subscribe.html` avant la redirection.
 
 ## 2. Ce qui est construit & déployé
@@ -127,8 +130,11 @@ risque financier (enforcement = `observe`, aucun paywall forcé), mais gardez la
 2. ✅ `billing-config.stancer.enabled = true` — **fait** (déployé au merge du front).
 3. ☐ `NORVA_LIFECYCLE_BILLING_LIVE = true` (allume rappel J-2 / dunning / reçus) — secret edge, côté owner.
 4. ☐ **Test réel en mode test** : `subscribe.html` → carte `4000000000000077` → retour
-   `/subscription.html?stancer=done` → `/confirm` pose `trialing` ; vérifier l'auto **0,50 $** (et
-   qu'elle n'est pas rejetée pour minimum USD) + le cycle complet.
+   `/subscription.html?stancer=done` → `/confirm` pose `trialing` ; vérifier l'auto **0,50 €**
+   (empreinte EUR, voir §1) + sonde selftest `{"charge":{pi,currency:"usd"}}` = débit token **USD**
+   OK, + le cycle complet.
+7. ☐ **Support Stancer** : demander l'activation des **autorisations USD** (auth-only) sur le compte,
+   puis repasser l'empreinte de validation en `usd` (1 ligne, `norva-stancer/checkout`).
 5. ☐ Bascule prod : `STANCER_SECRET_KEY = sprod_…` + `NORVA_STANCER_MODE = live` (secrets edge, côté
    owner — **aucun redeploy front nécessaire**, le flag `enabled` est déjà `true`).
 6. ☐ Sortir du mode `legacy` (essai à carte) + enforcement `enforce` (`NORVA_BILLING_MODE` /
