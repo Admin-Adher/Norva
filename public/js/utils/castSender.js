@@ -85,12 +85,31 @@ window.NorvaCast = (() => {
         return 'video/mp4';
     }
 
-    /** Open the device picker (if needed) and load the media on the receiver. */
-    async function castMedia({ url, title, poster, currentTime = 0, live = false }) {
+    // Normalise the picker-cancel case: chrome.cast rejects requestSession() with
+    // the bare string 'cancel' (or an error whose .code is 'cancel') when the user
+    // dismisses the device sheet. Surface it with a stable .code so callers can stay
+    // silent instead of showing a spurious "cast failed" error.
+    function isCancel(err) {
+        if (!err) return false;
+        if (err === 'cancel' || err.code === 'cancel') return true;
+        return chrome.cast.ErrorCode && err.code === chrome.cast.ErrorCode.CANCEL;
+    }
+
+    /**
+     * Open the device picker (if needed) and load the media on the receiver.
+     * `subtitles` (optional): [{ url, lang, name }] — VTT side-loaded as receiver
+     * text tracks and activated, so Norva's embedded/AI subtitles survive casting.
+     */
+    async function castMedia({ url, title, poster, currentTime = 0, live = false, subtitles = [] }) {
         const ctx = context();
         if (!ctx || !url) throw new Error('Cast unavailable');
         if (!ctx.getCurrentSession()) {
-            await ctx.requestSession(); // shows the browser's device picker
+            try {
+                await ctx.requestSession(); // shows the browser's device picker
+            } catch (err) {
+                if (isCancel(err)) { const e = new Error('cast-cancelled'); e.code = 'cancel'; throw e; }
+                throw (err instanceof Error) ? err : new Error(String(err?.description || err || 'Cast session failed'));
+            }
         }
         const session = ctx.getCurrentSession();
         if (!session) throw new Error('No cast session');
@@ -106,16 +125,67 @@ window.NorvaCast = (() => {
         }
         mediaInfo.metadata = meta;
 
-        const request = new chrome.cast.media.LoadRequest(mediaInfo);
-        request.autoplay = true;
-        request.currentTime = Math.max(0, Math.floor(currentTime));
-        await session.loadMedia(request);
+        // Side-load subtitle tracks (VTT). The receiver fetches each trackContentId
+        // itself, so only absolute URLs / data: URIs are usable — WatchPage resolves
+        // those before calling. Text tracks default OFF unless we activate them below.
+        const wanted = (Array.isArray(subtitles) ? subtitles : []).filter(s => s && s.url);
+        const builtTracks = wanted.map((s, i) => {
+            const t = new chrome.cast.media.Track(i + 1, chrome.cast.media.TrackType.TEXT);
+            t.trackContentId = s.url;
+            t.trackContentType = 'text/vtt';
+            t.subtype = chrome.cast.media.TextTrackType.SUBTITLES;
+            t.name = s.name || 'Subtitles';
+            t.language = s.lang || 'und';
+            return t;
+        });
+
+        const load = async (withSubs) => {
+            mediaInfo.tracks = withSubs ? builtTracks : undefined;
+            const request = new chrome.cast.media.LoadRequest(mediaInfo);
+            request.autoplay = true;
+            request.currentTime = Math.max(0, Math.floor(currentTime));
+            if (withSubs && builtTracks.length) request.activeTrackIds = [1]; // the track the user had on
+            await session.loadMedia(request);
+        };
+
+        // Subtitles must never break playback: if a receiver rejects a side-loaded
+        // track (some can't fetch the VTT / data: URI), retry once with media only.
+        try {
+            await load(builtTracks.length > 0);
+        } catch (err) {
+            if (!builtTracks.length) throw err;
+            await load(false);
+        }
         return deviceName();
+    }
+
+    function currentMedia() {
+        try { return context()?.getCurrentSession()?.getMediaSession() || null; } catch (_) { return null; }
+    }
+
+    /** Duration the receiver reports for the loaded media (playlist-relative). */
+    function remoteDuration() {
+        try { return Math.max(0, currentMedia()?.media?.duration || 0); } catch (_) { return 0; }
+    }
+
+    function remoteIsPaused() {
+        try { return currentMedia()?.playerState === chrome.cast.media.PlayerState.PAUSED; } catch (_) { return false; }
+    }
+
+    /** Seek the receiver to an absolute (playlist-relative) second. */
+    function seekTo(seconds) {
+        try {
+            const media = currentMedia();
+            if (!media) return;
+            const req = new chrome.cast.media.SeekRequest();
+            req.currentTime = Math.max(0, Math.floor(seconds || 0));
+            media.seek(req, () => { }, () => { });
+        } catch (_) { /* best-effort */ }
     }
 
     function remotePosition() {
         try {
-            const media = context()?.getCurrentSession()?.getMediaSession();
+            const media = currentMedia();
             if (!media) return 0;
             return Math.max(0, media.getEstimatedTime ? media.getEstimatedTime() : (media.currentTime || 0));
         } catch (_) {
@@ -125,7 +195,7 @@ window.NorvaCast = (() => {
 
     function togglePlayback() {
         try {
-            const media = context()?.getCurrentSession()?.getMediaSession();
+            const media = currentMedia();
             if (!media) return;
             const paused = media.playerState === chrome.cast.media.PlayerState.PAUSED;
             const req = paused ? new chrome.cast.media.PlayRequest() : new chrome.cast.media.PauseRequest();
@@ -150,6 +220,9 @@ window.NorvaCast = (() => {
         deviceName,
         castMedia,
         remotePosition,
+        remoteDuration,
+        remoteIsPaused,
+        seekTo,
         togglePlayback,
         endSession,
         onStateChange

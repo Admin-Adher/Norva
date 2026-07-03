@@ -1538,27 +1538,42 @@ class WatchPage {
     setupCastIntegration() {
         if (!window.NorvaCast?.supported) return;
         NorvaCast.ensureSdk();
+        // The cast button lives in the control bar (markup) so it sits with the
+        // other transport controls instead of floating. Wire it once.
+        const btn = document.getElementById('watch-cast');
+        if (btn && !btn._norvaBound) {
+            btn._norvaBound = true;
+            btn.addEventListener('click', () => this.startCasting());
+        }
+        // Drive visibility purely off cast-state changes (no fixed blind window):
+        // discovery is async, so also re-check on a few short ticks after mount.
         NorvaCast.onStateChange(() => this.updateCastButton());
-        setTimeout(() => this.updateCastButton(), 4000); // discovery is async
+        [1500, 4000, 8000].forEach(t => setTimeout(() => this.updateCastButton(), t));
+        this.updateCastButton();
     }
 
     updateCastButton() {
-        const section = document.querySelector('.watch-video-section');
-        if (!section) return;
-        let btn = document.getElementById('watch-cast-btn');
-        const available = window.NorvaCast?.devicesAvailable?.();
-        if (!btn && available) {
-            btn = document.createElement('button');
-            btn.id = 'watch-cast-btn';
-            btn.type = 'button';
-            btn.className = 'watch-cast-btn';
-            btn.title = 'Cast to TV';
-            btn.setAttribute('aria-label', 'Cast to TV');
-            btn.innerHTML = '<svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M1,18v3h3C4,19.34 2.66,18 1,18zM1,14v2c2.76,0 5,2.24 5,5h2C8,17.13 4.87,14 1,14zM1,10v2c4.97,0 9,4.03 9,9h2C12,14.92 7.07,10 1,10zM21,3H3C1.9,3 1,3.9 1,5v3h2V5h18v14h-7v2h7c1.1,0 2,-0.9 2,-2V5C23,3.9 22.1,3 21,3z"/></svg>';
-            btn.addEventListener('click', () => this.startCasting());
-            section.appendChild(btn);
-        }
-        if (btn) btn.classList.toggle('hidden', !available);
+        const btn = document.getElementById('watch-cast');
+        if (!btn) return;
+        const available = !!window.NorvaCast?.devicesAvailable?.();
+        btn.classList.toggle('hidden', !available);
+        // Reflect an active session (a device already streaming) so the icon reads
+        // as "casting" and a tap re-opens the cast bar instead of a fresh picker.
+        const casting = !!window.NorvaCast?.isCasting?.();
+        btn.classList.toggle('is-casting', casting);
+        btn.title = casting ? 'Casting — show controls' : 'Cast to TV';
+    }
+
+    // The Default Media Receiver plays MP4 / WebM / HLS — NOT Matroska, raw TS or
+    // most legacy muxes. Casting those directly fails opaquely on the device, so
+    // they get re-resolved through a gateway transcode instead.
+    isCastSafeDirectUrl(url) {
+        if (!/^https?:\/\//i.test(url || '')) return false;
+        let path = String(url).toLowerCase();
+        const q = path.indexOf('?'); if (q > 0) path = path.slice(0, q);
+        if (/\.(mkv|ts|avi|flv|wmv|mov|m2ts|mpg|mpeg)$/.test(path)) return false;
+        // Known-good extension, or an extension-less gateway session/playlist path.
+        return /\.(m3u8|mp4|webm)$/.test(path) || !/\.[a-z0-9]{2,4}$/.test(path);
     }
 
     async startCasting() {
@@ -1567,18 +1582,20 @@ class WatchPage {
             this.showCastBar(NorvaCast.deviceName());
             return;
         }
+        const position = Math.max(0, Math.floor(this.getPlaybackPosition() || 0));
+        let toreDown = false;
         try {
-            const position = Math.max(0, Math.floor(this.getPlaybackPosition() || 0));
             const wasEngine = this.currentPlaybackMode === 'engine';
-            let castUrl = null;
-            if (!wasEngine && /^https?:\/\//i.test(this.baseStreamUrl || '')) {
-                castUrl = this.baseStreamUrl; // gateway HLS / relay MP4: receiver-fetchable
-            }
+            // Only hand the receiver a URL its player can actually decode.
+            let castUrl = (!wasEngine && this.isCastSafeDirectUrl(this.baseStreamUrl))
+                ? this.baseStreamUrl
+                : null;
             try { this.video?.pause(); } catch (_) { }
 
             if (!castUrl) {
-                // Engine (MSE) title: free the provider slot, then resolve a
-                // gateway transcode playlist starting at the current position.
+                // Engine (MSE) title, or a container the receiver can't play: free the
+                // provider slot, then resolve a gateway transcode playlist from here.
+                toreDown = true;
                 await this.releasePlaybackPipelineForRetry();
                 await this.waitForProviderSlotRelease(800);
                 const itemType = this.content.type === 'series' ? 'series' : 'movie';
@@ -1603,17 +1620,86 @@ class WatchPage {
                 url: castUrl,
                 title: [this.content.title, this.content.subtitle].filter(Boolean).join(' — '),
                 poster: this.content.poster,
-                currentTime: wasEngine ? 0 : Math.max(0, position - (this._castBaseOffset || 0)),
-                live: false
+                currentTime: toreDown ? 0 : Math.max(0, position - (this._castBaseOffset || 0)),
+                live: false,
+                subtitles: this.getCastSubtitles(castUrl)
             });
-            // The receiver now owns the provider slot — local playback fully off.
-            if (!wasEngine) await this.releasePlaybackPipelineForRetry();
+            // The receiver now owns the provider slot — release local playback fully.
+            if (!toreDown) { try { await this.releasePlaybackPipelineForRetry(); } catch (_) { } }
             this.hideLoading();
+            // _castConfirmed is set by updateCastBar once a live session is observed,
+            // so a transient not-yet-STARTED tick can't auto-stop us here.
+            this._castConfirmed = false;
             this.showCastBar(device);
+            this.startCastProgressSync();
+            this.updateCastButton();
         } catch (error) {
+            this.hideLoading();
+            // Restore local playback: the viewer cancelled the picker, or the cast
+            // failed after we had already torn the local pipeline down.
+            if (toreDown) { try { this.retryPlaybackInPlace(position); } catch (_) { } }
+            else { try { await this.video?.play(); } catch (_) { } }
+            if (error?.code === 'cancel') return; // dismissing the sheet is not an error
             console.warn('[WatchPage] Cast failed:', error?.message || error);
             this.app?.showToast?.('Cast unavailable for this title', 'error');
         }
+    }
+
+    // Resolve the currently-selected subtitle into a receiver-fetchable VTT track.
+    // Embedded tracks map to the gateway sub_<index>.vtt sidecar; AI/generated
+    // captions (held as text) ship as a data: URI. Returns [] when none apply.
+    getCastSubtitles(castUrl) {
+        const out = [];
+        try {
+            const selected = this.getSelectedSubtitleTrack?.();
+            if (selected && Number.isInteger(Number(selected.index))) {
+                let subUrl = '';
+                if (/\/playlist\.m3u8(\?|$)/i.test(castUrl || '')) {
+                    try {
+                        const u = new URL(castUrl, window.location.href);
+                        u.pathname = u.pathname.replace(/\/playlist\.m3u8$/i, `/sub_${selected.index}.vtt`);
+                        subUrl = u.toString();
+                    } catch (_) { /* fall through */ }
+                }
+                if (!subUrl) subUrl = this.gatewaySubtitleUrlForTrack?.(selected.index) || '';
+                if (/^https?:\/\//i.test(subUrl)) {
+                    out.push({ url: subUrl, lang: this.normalizeTrackLanguage(selected.language) || 'und', name: 'Subtitles' });
+                    return out;
+                }
+            }
+            // AI / translated captions currently shown — text in memory → data: URI.
+            if (this._aiActiveVtt && typeof this._aiActiveVtt === 'string') {
+                const b64 = this._toBase64Utf8(this._aiActiveVtt);
+                if (b64 && b64.length < 700000) {
+                    out.push({ url: `data:text/vtt;base64,${b64}`, lang: this._aiActiveLang || 'und', name: 'AI subtitles' });
+                }
+            }
+        } catch (_) { /* no subtitles → cast without, no regression */ }
+        return out;
+    }
+
+    _toBase64Utf8(str) {
+        try { return btoa(unescape(encodeURIComponent(str))); } catch (_) { return ''; }
+    }
+
+    _fmtCast(seconds) {
+        const s = Math.max(0, Math.floor(seconds || 0));
+        const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+        const mm = h ? String(m).padStart(2, '0') : String(m);
+        return (h ? `${h}:` : '') + `${mm}:${String(sec).padStart(2, '0')}`;
+    }
+
+    // Full playback duration (for the scrub bar / progress), independent of where
+    // the cast playlist starts.
+    _castTotalDuration() {
+        const disp = this.getDisplayDuration?.() || 0;
+        if (disp > 0) return disp;
+        return (this._castBaseOffset || 0) + (window.NorvaCast?.remoteDuration?.() || 0);
+    }
+
+    castSeekBy(delta) {
+        const rel = Math.max(0, (window.NorvaCast?.remotePosition?.() || 0) + delta);
+        window.NorvaCast?.seekTo?.(rel);
     }
 
     showCastBar(device) {
@@ -1625,21 +1711,177 @@ class WatchPage {
             bar.id = 'watch-cast-bar';
             bar.className = 'watch-cast-bar';
             bar.innerHTML = `
-                <span class="watch-cast-bar-label"></span>
-                <button type="button" class="watch-cast-toggle" title="Play/Pause">⏯</button>
-                <button type="button" class="watch-cast-stop">Stop casting</button>`;
-            bar.querySelector('.watch-cast-toggle').addEventListener('click', () => NorvaCast.togglePlayback());
-            bar.querySelector('.watch-cast-stop').addEventListener('click', () => this.stopCasting());
+                <img class="watch-cast-bar-poster" alt="" hidden>
+                <div class="watch-cast-bar-main">
+                    <div class="watch-cast-bar-title"></div>
+                    <div class="watch-cast-bar-label"></div>
+                    <div class="watch-cast-bar-scrub">
+                        <span class="watch-cast-time cur">0:00</span>
+                        <input type="range" class="watch-cast-seek" min="0" max="1000" value="0" aria-label="Seek">
+                        <span class="watch-cast-time dur">0:00</span>
+                    </div>
+                </div>
+                <div class="watch-cast-bar-controls">
+                    <button type="button" class="watch-cast-ctl" data-act="back" title="Back 10s" aria-label="Back 10 seconds">⏪</button>
+                    <button type="button" class="watch-cast-ctl watch-cast-toggle" data-act="toggle" title="Play/Pause" aria-label="Play or pause">⏯</button>
+                    <button type="button" class="watch-cast-ctl" data-act="fwd" title="Forward 10s" aria-label="Forward 10 seconds">⏩</button>
+                    <button type="button" class="watch-cast-ctl watch-cast-next" data-act="next" title="Next episode" aria-label="Next episode" hidden>⏭</button>
+                    <button type="button" class="watch-cast-stop" data-act="stop">Stop</button>
+                </div>`;
+            bar.addEventListener('click', (e) => {
+                const act = e.target.closest('[data-act]')?.dataset.act;
+                if (!act) return;
+                if (act === 'toggle') window.NorvaCast?.togglePlayback?.();
+                else if (act === 'back') this.castSeekBy(-10);
+                else if (act === 'fwd') this.castSeekBy(10);
+                else if (act === 'next') this.castNextEpisode();
+                else if (act === 'stop') this.stopCasting();
+            });
+            const seek = bar.querySelector('.watch-cast-seek');
+            seek.addEventListener('input', () => { this._castSeeking = true; });
+            seek.addEventListener('change', () => {
+                const total = this._castTotalDuration();
+                const min = this._castBaseOffset || 0;
+                const absTarget = min + (Number(seek.value) / 1000) * Math.max(0, total - min);
+                window.NorvaCast?.seekTo?.(Math.max(0, absTarget - min));
+                this._castSeeking = false;
+            });
             section.appendChild(bar);
         }
+        const poster = bar.querySelector('.watch-cast-bar-poster');
+        if (this.content?.poster) { poster.src = this.content.poster; poster.hidden = false; } else { poster.hidden = true; }
+        bar.querySelector('.watch-cast-bar-title').textContent =
+            [this.content?.title, this.content?.subtitle].filter(Boolean).join(' — ') || 'Norva';
         bar.querySelector('.watch-cast-bar-label').textContent = `Casting to ${device}`;
+        bar.querySelector('.watch-cast-next').hidden = !(this.contentType === 'series' && this.getNextEpisode());
         bar.classList.remove('hidden');
+        clearInterval(this._castBarTimer);
+        this._castBarTimer = setInterval(() => this.updateCastBar(), 1000);
+        this.updateCastBar();
+    }
+
+    updateCastBar() {
+        const bar = document.getElementById('watch-cast-bar');
+        if (!bar || bar.classList.contains('hidden')) return;
+        if (window.NorvaCast?.isCasting?.()) {
+            this._castConfirmed = true;
+        } else if (this._castConfirmed) {
+            // The receiver was stopped from the TV / another sender — tidy up locally.
+            this.stopCasting();
+            return;
+        }
+        const rel = window.NorvaCast?.remotePosition?.() || 0;
+        const min = this._castBaseOffset || 0;
+        const abs = min + rel;
+        const total = this._castTotalDuration();
+        bar.querySelector('.cur').textContent = this._fmtCast(abs);
+        bar.querySelector('.dur').textContent = total ? this._fmtCast(total) : '';
+        const seek = bar.querySelector('.watch-cast-seek');
+        if (!this._castSeeking && total > min) {
+            seek.value = String(Math.max(0, Math.min(1000, Math.round(((abs - min) / (total - min)) * 1000))));
+        }
+        const paused = window.NorvaCast?.remoteIsPaused?.();
+        bar.querySelector('.watch-cast-toggle').textContent = paused ? '▶' : '⏸';
+    }
+
+    startCastProgressSync() {
+        this.stopCastProgressSync();
+        // Keep Continue Watching current while the receiver plays (local player is off).
+        this._castProgressTimer = setInterval(() => this.saveCastProgress(), 10000);
+        this._castFlush = () => { if (document.visibilityState === 'hidden') this.saveCastProgress(); };
+        document.addEventListener('visibilitychange', this._castFlush);
+        window.addEventListener('pagehide', this._castFlush);
+    }
+
+    stopCastProgressSync() {
+        if (this._castProgressTimer) { clearInterval(this._castProgressTimer); this._castProgressTimer = null; }
+        if (this._castFlush) {
+            document.removeEventListener('visibilitychange', this._castFlush);
+            window.removeEventListener('pagehide', this._castFlush);
+            this._castFlush = null;
+        }
+    }
+
+    async saveCastProgress() {
+        if (!this.content || !window.NorvaCast?.isCasting?.()) return;
+        const rel = window.NorvaCast.remotePosition() || 0;
+        const absolute = Math.max(0, Math.floor((this._castBaseOffset || 0) + rel));
+        const total = this._castTotalDuration();
+        const duration = total > 0 ? Math.floor(total) : Math.floor(this._lastKnownPlaybackDuration || 0);
+        if (!absolute || !duration) return;
+        const progress = Math.min(absolute, duration);
+        try {
+            this.saveResumeSnapshot?.({ position: progress });
+            const data = {
+                title: this.content.title || 'Unknown Title',
+                subtitle: this.content.subtitle || (this.content.type === 'movie' ? 'Movie' : 'Series'),
+                poster: this.content.poster,
+                sourceId: this.content.sourceId,
+                containerExtension: this.containerExtension,
+                durationHint: duration,
+                playbackPreferences: this.getPlaybackPreferences?.(),
+                seriesId: this.content.seriesId || null,
+                currentSeason: this.currentSeason || null,
+                currentEpisode: this.currentEpisode || null,
+                nextEpisode: this.content.type === 'series' ? this.sanitizeNextEpisodeForHistory(this.getNextEpisode()) : null
+            };
+            await window.API.request('POST', '/history', {
+                id: this.content.id,
+                type: this.content.type === 'movie' ? 'movie' : 'episode',
+                sourceId: this.content.sourceId,
+                progress, duration, data
+            });
+        } catch (err) {
+            console.warn('[Cast] progress save failed:', err);
+        }
+    }
+
+    // Load the next episode onto the SAME receiver session (no new picker).
+    async castNextEpisode() {
+        const nextEp = this.getNextEpisode?.();
+        if (!nextEp || !this.content?.sourceId) return;
+        try {
+            await this.saveCastProgress();
+            const container = nextEp.container_extension || 'mp4';
+            const prefs = this.getPlaybackPreferences?.() || {};
+            const audioStreamIndex = Number(prefs?.audio?.streamIndex ?? prefs?.audio?.stream_index);
+            const hint = {
+                gatewayMode: 'transcode', audioMode: 'transcode',
+                ...this.getSelectedAudioPlaybackOptions?.(),
+                seekOffset: 0, startOffset: 0, resumeTime: 0
+            };
+            if (Number.isInteger(audioStreamIndex)) hint.audioStreamIndex = audioStreamIndex;
+            const result = await API.proxy.xtream.getStreamUrl(this.content.sourceId, nextEp.id, 'series', container, hint);
+            if (!result?.url || !/^https?:\/\//i.test(result.url)) throw new Error('No stream for next episode');
+            // Advance the episode context so the bar + progress target the new episode.
+            this.currentSeason = nextEp.seasonNum ?? this.currentSeason;
+            this.currentEpisode = nextEp.episode_num ?? this.currentEpisode;
+            this.content.id = nextEp.id;
+            this.content.subtitle = nextEp.title || `S${this.currentSeason}·E${this.currentEpisode}`;
+            this.containerExtension = container;
+            this._castBaseOffset = 0;
+            const device = await NorvaCast.castMedia({
+                url: result.url,
+                title: [this.content.title, this.content.subtitle].filter(Boolean).join(' — '),
+                poster: this.content.poster,
+                currentTime: 0, live: false
+            });
+            this.showCastBar(device);
+        } catch (err) {
+            console.warn('[Cast] next episode failed:', err);
+            this.app?.showToast?.('Could not cast the next episode', 'error');
+        }
     }
 
     async stopCasting() {
         const remote = window.NorvaCast?.remotePosition?.() || 0;
+        try { await this.saveCastProgress(); } catch (_) { }
+        this.stopCastProgressSync();
+        if (this._castBarTimer) { clearInterval(this._castBarTimer); this._castBarTimer = null; }
+        this._castConfirmed = false;
         try { NorvaCast.endSession(); } catch (_) { }
         document.getElementById('watch-cast-bar')?.classList.add('hidden');
+        this.updateCastButton();
         // Resume locally where the receiver stopped.
         const absolute = Math.max(0, Math.floor((this._castBaseOffset || 0) + remote - 2));
         if (this.content?.sourceId && this.content?.id) {
@@ -5836,6 +6078,7 @@ class WatchPage {
         this.stopAllTranslatePolling();
         this._stopAllOcrPolling();
         this._aiActiveLang = null;
+        this._aiActiveVtt = null;
         this._ocrActiveStreamIndex = null;
         this.video?.querySelectorAll('track[data-norva-probe-subtitle="true"], track[data-norva-ai-subtitle="true"]').forEach(track => {
             if (track.track) {
@@ -7330,6 +7573,7 @@ class WatchPage {
             this.updateCaptionsTracks();
         }, 0);
         this._aiActiveLang = trackEl.srclang || null;
+        this._aiActiveVtt = vtt || null; // kept so casting can side-load these captions
         return true;
     }
 
