@@ -113,11 +113,15 @@ Deno.serve(async (req) => {
     if (!custId) return json({ error: "Could not open a billing profile" }, 502);
 
     const returnUrl = `${RETURN_BASE}/subscription.html?stancer=done`;
-    // Trial setup: authorize (capture:false) → validates + tokenizes the card, no debit now.
+    // Trial setup (Option B — minimal footprint): authorize a small validation amount (€0.50) with
+    // capture:false → validates + tokenizes the card, NO plan charge now. The hold auto-releases; the
+    // real plan amount (from plan_code) is charged at trial end by norva-stancer-billing. `amount`
+    // above is only used by the cron's price table via plan_code, not here.
+    const VALIDATION_CENTS = 50;
     const pi = await stancerPost("/v2/payment_intents/", {
-      amount, currency: "eur", capture: false, methods_allowed: ["card"],
+      amount: VALIDATION_CENTS, currency: "eur", capture: false, methods_allowed: ["card"],
       return_url: returnUrl, order_id: `${user.id}:trial`, customer: custId,
-      description: `Norva ${plan} ${period} — 7-day trial setup`,
+      description: `Norva ${plan} ${period} — card validation for 7-day free trial`,
       metadata: { user_id: user.id, kind: "trial_setup", plan, period },
     });
     if (!pi.ok || !pi.body.id || !pi.body.url) {
