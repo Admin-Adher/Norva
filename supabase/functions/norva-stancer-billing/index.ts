@@ -99,8 +99,10 @@ async function chargeUser(db: SupabaseClient, row: Row, kind: "first_charge" | "
     return "no_card";
   }
 
-  const cycleKey = String(cycleAnchor ?? Math.floor(Date.now() / 86400000));
-  const uniqueId = `${row.user_id}:${cycleKey}`;
+  // Stancer caps unique_id at 36 chars. Dashless uuid (32) + a compact base36 cycle-day (~4) keeps it
+  // globally unique per (user, cycle) so a re-run never double-charges the SAME cycle.
+  const cycleDay = Math.floor((Date.parse(String(cycleAnchor ?? "")) || Date.now()) / 86400000).toString(36);
+  const uniqueId = (row.user_id.replace(/-/g, "") + cycleDay).slice(0, 36);
   const outcome = await chargeToken(cardToken, customerId, plan.amount, uniqueId, `Norva ${plan.plan} ${plan.period} — ${kind}`);
 
   const nowIso = new Date().toISOString();

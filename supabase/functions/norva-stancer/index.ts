@@ -41,6 +41,8 @@ const json = (body: unknown, status = 200) =>
 
 function basicAuth(): string { return "Basic " + btoa(`${STANCER_SECRET_KEY}:`); }
 function isTestKey(): boolean { return STANCER_MODE === "test" || STANCER_SECRET_KEY.startsWith("stest"); }
+// Stancer caps order_id at 36 chars — a dashless uuid is 32, which fits.
+function ref(userId: string): string { return userId.replace(/-/g, "").slice(0, 36); }
 
 async function stancerPost(path: string, body: Record<string, unknown>) {
   const res = await fetch(`${STANCER_API}${path}`, {
@@ -120,7 +122,7 @@ Deno.serve(async (req) => {
     const VALIDATION_CENTS = 50;
     const pi = await stancerPost("/v2/payment_intents/", {
       amount: VALIDATION_CENTS, currency: "eur", capture: false, methods_allowed: ["card"],
-      return_url: returnUrl, order_id: `${user.id}:trial`, customer: custId,
+      return_url: returnUrl, order_id: ref(user.id), customer: custId,
       description: `Norva ${plan} ${period} — card validation for 7-day free trial`,
       metadata: { user_id: user.id, kind: "trial_setup", plan, period },
     });
@@ -132,7 +134,7 @@ Deno.serve(async (req) => {
     await db.from("cloud_stancer_payments").upsert({
       pi_id: String(pi.body.id), user_id: user.id, kind: "trial_setup",
       amount, currency: "eur", status: String(pi.body.status ?? "require_payment_method"),
-      order_id: `${user.id}:trial`, updated_at: new Date().toISOString(),
+      order_id: ref(user.id), updated_at: new Date().toISOString(),
     });
 
     return json({ ok: true, url: String(pi.body.url), pi_id: String(pi.body.id) });
