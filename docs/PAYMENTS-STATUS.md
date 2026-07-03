@@ -109,13 +109,24 @@ Dashboard Stancer → Développeurs → Webhooks : URL =
 5. ☐ Bascule prod : `STANCER_SECRET_KEY = sprod_…` + `NORVA_STANCER_MODE = live`.
 6. ☐ Sortir du mode `legacy` (essai à carte) + enforcement `enforce`.
 
-## 10. À vérifier au 1ᵉʳ webhook réel
+## 10. Webhook OPTIONNEL — le rail est auto-suffisant (`/confirm`)
 
-Le **format exact du payload** envoyé par Stancer n'a pas encore été observé (à l'E2E, le webhook a
-été simulé par re-fetch direct). Le webhook extrait un id `pi_…`. **Si Stancer envoie un `paym_…`**
-(l'id du paiement plutôt que du payment_intent), c'est un ajustement de ~2 lignes dans
-`norva-stancer-webhook` (`extractPaymentIntentId` + un re-fetch `paym`). À valider dès le premier
-webhook réel.
+Le rail **ne dépend pas** du webhook Stancer pour fonctionner :
+
+- **Fin de checkout** : la page de retour `/subscription.html?stancer=done` appelle
+  `norva-stancer/confirm` (user-authé) qui **re-fetch** le paiement, capture le token et pose
+  l'essai `trialing` — exactement la logique validée à l'E2E, mais côté navigateur (l'utilisateur
+  est présent, plus fiable qu'un webhook). Sécurité : ne confirme que le paiement dont
+  `metadata.user_id` == l'utilisateur authentifié.
+- **Renouvellements** : pilotés par le **cron** `norva-stancer-billing`, pas par le webhook.
+
+Le **webhook `norva-stancer-webhook` reste un filet de sécurité optionnel** (événements async :
+litiges, remboursements). À brancher plus tard si besoin (voir §6). Son emplacement de config n'est
+pas dans « Développeurs » du dashboard Stancer (clés d'API only) — regarder « Mon Compte » ou
+demander au support Stancer. **Non bloquant pour le lancement.**
+
+> À valider au 1ᵉʳ vrai test checkout : le retour `?stancer=done` → `/confirm` pose bien `trialing`
+> (logique identique au sim E2E, chemin user-auth standard).
 
 ## Voir aussi
 

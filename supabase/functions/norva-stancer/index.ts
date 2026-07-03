@@ -68,6 +68,25 @@ async function ensureCustomer(db: SupabaseClient, userId: string, email: string,
   return custId;
 }
 
+const TRIAL_DAYS = 7;
+
+// Retrieve a payment_intent (PLURAL endpoint) — the authoritative status + card token.
+async function fetchPI(piId: string): Promise<Record<string, unknown> | null> {
+  const res = await fetch(`${STANCER_API}/v2/payment_intents/${encodeURIComponent(piId)}`, { headers: { Authorization: basicAuth() } });
+  if (!res.ok) return null;
+  return await res.json().catch(() => null);
+}
+
+// The card comes back as a string ("card_…") or an object {id,last4,…}.
+function cardFrom(card: unknown): { id: string; last4?: string } | null {
+  if (!card) return null;
+  if (typeof card === "string") return card.startsWith("card_") ? { id: card } : null;
+  const c = card as Record<string, unknown>;
+  const id = String(c.id ?? "");
+  if (!id.startsWith("card_")) return null;
+  return { id, last4: c.last4 ? String(c.last4) : undefined };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   const url = new URL(req.url);
@@ -144,6 +163,54 @@ Deno.serve(async (req) => {
     });
 
     return json({ ok: true, url: String(pi.body.url), pi_id: String(pi.body.id) });
+  }
+
+  // ── /confirm — user-authed: finalize a completed checkout (no webhook needed) ──
+  // The return page (/subscription.html?stancer=done) calls this. Re-fetches the payment_intent,
+  // captures the tokenized card, and moves the projection to a Stancer trial. Idempotent and safe:
+  // only confirms a payment whose metadata.user_id matches the authenticated caller.
+  if (req.method === "POST" && path === "/confirm") {
+    const jwt = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
+    if (!jwt) return json({ error: "Not signed in" }, 401);
+    const { data: u } = await db.auth.getUser(jwt);
+    const user = u?.user;
+    if (!user?.id) return json({ error: "Not signed in" }, 401);
+
+    let payload: { pi_id?: string } = {};
+    try { payload = await req.json(); } catch (_) { /* optional */ }
+    let piId = String(payload.pi_id ?? "");
+    if (!piId) {
+      const { data: last } = await db.from("cloud_stancer_payments")
+        .select("pi_id").eq("user_id", user.id).eq("kind", "trial_setup")
+        .order("created_at", { ascending: false }).limit(1).maybeSingle();
+      piId = String((last as { pi_id?: string } | null)?.pi_id ?? "");
+    }
+    if (!piId) return json({ ok: false, status: "no_payment" });
+
+    const pi = await fetchPI(piId);
+    if (!pi) return json({ ok: false, status: "not_found" });
+    const meta = (pi.metadata && typeof pi.metadata === "object") ? pi.metadata as Record<string, unknown> : {};
+    if (String(meta.user_id ?? "") !== user.id) return json({ error: "Forbidden" }, 403);
+
+    const s = String(pi.status ?? "").toLowerCase();
+    const paid = s === "authorized" || s === "captured" || s === "to_capture";
+    const card = cardFrom(pi.card);
+    if (!paid || !card) return json({ ok: true, status: pi.status, pending: true });
+
+    const nowIso = new Date().toISOString();
+    const plan = String(meta.plan ?? "plus") === "family" ? "family" : "plus";
+    const custId = pi.customer ? String(pi.customer) : undefined;
+    // Only touches these columns — plan/period/amount set at /checkout are preserved.
+    await db.from("cloud_stancer_customers").upsert({
+      user_id: user.id, stancer_customer_id: custId, card_token: card.id, card_last4: card.last4 ?? undefined, updated_at: nowIso,
+    });
+    await db.from("cloud_entitlement_projection").upsert({
+      user_id: user.id, status: "trialing", provider: "stancer", provider_customer_id: custId,
+      plan_code: plan, trial_ends_at: new Date(Date.now() + TRIAL_DAYS * 86400_000).toISOString(),
+      trial_consumed_at: nowIso, last_event_at: nowIso,
+    });
+    try { await db.from("cloud_stancer_payments").update({ status: pi.status }).eq("pi_id", piId); } catch (_) { /* noop */ }
+    return json({ ok: true, status: "trialing" });
   }
 
   return json({ error: "Not found" }, 404);

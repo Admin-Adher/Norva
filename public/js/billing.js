@@ -74,6 +74,25 @@
     return { status: 'redirect' };
   }
 
+  // Finalize a Stancer checkout on the return page (no webhook needed): the edge function re-fetches
+  // the payment, captures the tokenized card and starts the trial. Returns {status:'trialing'|'pending'|…}.
+  async function confirmStancer() {
+    if (!isStancerEnabled()) return { skipped: true };
+    const cfg = CONFIG.stancer || {};
+    const base = ((window.NorvaAuth && NorvaAuth.supabaseUrl) || 'https://oupsceccxsonaalhueff.supabase.co').replace(/\/+$/, '');
+    const apikey = (window.NorvaAuth && NorvaAuth.publishableKey) || '';
+    const token = await sessionToken();
+    if (!token) return { skipped: true };
+    try {
+      const res = await fetch(base + (cfg.confirmUrl || '/functions/v1/norva-stancer/confirm'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'apikey': apikey, 'Authorization': 'Bearer ' + token },
+        body: '{}',
+      });
+      return await res.json().catch(function () { return {}; });
+    } catch (_) { return {}; }
+  }
+
   function err(message, code, data) {
     return Object.assign(new Error(message), { code: code || 'error', data: data });
   }
@@ -206,6 +225,7 @@
     hasNativeBilling: hasNativeBilling,
     isWebBillingConfigured: isWebBillingConfigured,
     isStancerEnabled: isStancerEnabled,
+    confirmStancer: confirmStancer,
     purchase: purchase,
     restore: restore,
     login: login,
