@@ -2015,6 +2015,19 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
             const detail = session.lastError || 'Playlist was not generated';
             rememberFailure(session, detail);
             await stopSession(session);
+            // Slot-busy upstream → a typed, retryable error. The "(HTTP 458 max
+            // connections)" token also keeps the web client's text classifiers
+            // matching (ffmpeg's own message never contains the number 458).
+            if (isProviderSlotBusyFailure(session)) {
+                res.set('Retry-After', '8');
+                return res.status(503).json({
+                    error: 'Provider connection slot busy',
+                    code: 'PROVIDER_BUSY',
+                    upstreamStatus: 458,
+                    retryAfter: 8,
+                    details: `${detail} (HTTP 458 max connections)`
+                });
+            }
             return res.status(502).json({
                 error: 'Failed to start media session',
                 details: detail
@@ -2100,7 +2113,8 @@ function isProviderConcurrencyFailure(session) {
     if (!text) return false;
     // The Xtream provider answers a connection it can't grant (single slot still
     // held) with 401/403, and a stale slot often surfaces as a timeout/reset.
-    return text.includes('401')
+    return isProviderSlotBusyFailure(session)
+        || text.includes('401')
         || text.includes('unauthorized')
         || text.includes('403')
         || text.includes('forbidden')
@@ -2110,12 +2124,30 @@ function isProviderConcurrencyFailure(session) {
         || text.includes('-10054');
 }
 
+// The provider's "max connections" slot-busy state specifically. CRITICAL detail:
+// ffmpeg (libavformat http.c) reports an upstream 458 as the literal stderr string
+// "Server returned 4XX Client Error, but not one of 40{0,1,3,4}" — the number 458
+// never appears — so that catch-all IS the 458 signature on the transcode lane.
+function isProviderSlotBusyFailure(session) {
+    const text = String((session && session.lastError) || '').toLowerCase();
+    if (!text) return false;
+    return text.includes('458')
+        || text.includes('max connection')
+        || text.includes('429')
+        || text.includes('too many requests')
+        || text.includes('4xx client error, but not one of');
+}
+
 // Start FFmpeg and wait for the first playlist. If startup fails because the
 // provider's single connection slot wasn't free yet (401/403/timeout), wait for
 // the slot to release and retry, instead of bubbling a 502 that pushes the web
 // client into a relay/direct fallback it can never play (e.g. MKV in-browser).
 async function startSessionWithProviderRetry(session) {
-    const maxAttempts = 1 + PROVIDER_AUTH_RETRY_LIMIT;
+    // Slot-busy (458) gets its own, longer ladder: the provider frees the slot ~8s
+    // after the previous consumer drops, so 2s/6s/9s spans the release window.
+    // Plain auth failures keep the single fast retry (fast-fail on dead channels).
+    const SLOT_BUSY_RETRY_DELAYS_MS = [2000, 6000, 9000];
+    const maxAttempts = 1 + Math.max(PROVIDER_AUTH_RETRY_LIMIT, SLOT_BUSY_RETRY_DELAYS_MS.length);
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
         if (attempt > 1) {
             await stopChildProcess(session.ffmpeg).catch(() => {});
@@ -2131,9 +2163,16 @@ async function startSessionWithProviderRetry(session) {
             if (session.status === 'starting') session.status = 'ready';
             return true;
         } catch (err) {
-            if (attempt >= maxAttempts || !isProviderConcurrencyFailure(session)) return false;
-            console.warn(`[media-gateway] provider slot busy for ${session.id} (attempt ${attempt}/${maxAttempts}); waiting ${PROVIDER_AUTH_RETRY_DELAY_MS}ms before retry`);
-            await sleep(PROVIDER_AUTH_RETRY_DELAY_MS);
+            const slotBusy = isProviderSlotBusyFailure(session);
+            const authRetryBudget = 1 + PROVIDER_AUTH_RETRY_LIMIT;
+            if (attempt >= maxAttempts
+                || !isProviderConcurrencyFailure(session)
+                || (!slotBusy && attempt >= authRetryBudget)) return false;
+            const waitMs = slotBusy
+                ? SLOT_BUSY_RETRY_DELAYS_MS[Math.min(attempt - 1, SLOT_BUSY_RETRY_DELAYS_MS.length - 1)]
+                : PROVIDER_AUTH_RETRY_DELAY_MS;
+            console.warn(`[media-gateway] provider ${slotBusy ? 'slot busy (458)' : 'auth failure'} for ${session.id} (attempt ${attempt}/${maxAttempts}); waiting ${waitMs}ms before retry`);
+            await sleep(waitMs);
         }
     }
     return false;
@@ -3129,6 +3168,13 @@ function classifyProviderFailure(status, payload) {
             status: 429,
             code: 'PROVIDER_MULTI_IP',
             publicMessage: 'IPTV provider refused the account because it already sees one active connection. Stop all other playback attempts, wait 1–2 minutes, then retry from one device.'
+        };
+    }
+    if (status === 458) {
+        return {
+            status: 503,
+            code: 'PROVIDER_BUSY',
+            publicMessage: 'IPTV provider connection slot busy (HTTP 458 max connections). Retry in a few seconds.'
         };
     }
     if (status === 429 || /too many requests|rate limit|ratelimit/.test(text)) {

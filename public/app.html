@@ -79,25 +79,34 @@
       }
     })();
   </script>
-  <!-- HLS.js for video playback -->
-  <!-- hls.js (~400 KB) is only needed at playback time: injected lazily after
-       first paint (idle), or immediately when the app boots straight into a
-       Live/Watch view. Playback always starts well after this resolves. -->
+  <!-- hls.js loader — VENDORED local copy first (immune to adblockers / CDN outages /
+       captive proxies, the cause of "Hls is not defined" crashes), CDN as fallback.
+       window.ensureHls() returns a cached promise resolving true once window.Hls exists;
+       every playback path awaits or guards on it. Warmed immediately at boot. -->
   <script>
     (function () {
-      let injected = false;
+      var pending = null;
+      function inject(src) {
+        return new Promise(function (resolve) {
+          var s = document.createElement('script');
+          s.src = src; s.async = true;
+          s.onload = function () { resolve(typeof window.Hls !== 'undefined'); };
+          s.onerror = function () { resolve(false); };
+          document.head.appendChild(s);
+        });
+      }
       window.ensureHls = function () {
-        if (injected || window.Hls) return;
-        injected = true;
-        const s = document.createElement('script');
-        s.src = 'https://cdn.jsdelivr.net/npm/hls.js@1.5.7/dist/hls.min.js';
-        document.head.appendChild(s);
+        if (typeof window.Hls !== 'undefined') return Promise.resolve(true);
+        if (pending) return pending;
+        pending = inject('/js/vendor/hls-1.5.7.min.js').then(function (ok) {
+          return ok || inject('https://cdn.jsdelivr.net/npm/hls.js@1.5.7/dist/hls.min.js');
+        }).then(function (ok) {
+          if (!ok) { pending = null; console.error('[Norva] hls.js could not be loaded (local + CDN failed)'); }
+          return ok;
+        });
+        return pending;
       };
-      if (/#(live|watch)/.test(location.hash)) { window.ensureHls(); return; }
-      window.addEventListener('load', function () {
-        if ('requestIdleCallback' in window) requestIdleCallback(window.ensureHls, { timeout: 4000 });
-        else setTimeout(window.ensureHls, 2500);
-      });
+      window.ensureHls();
     })();
   </script>
 </head>
@@ -1938,7 +1947,7 @@
   <script defer src="/js/utils/GenreTaxonomy.js?v=3"></script>
   <script defer src="/js/utils/GenreRails.js?v=7"></script>
   <script defer src="/js/components/MultiSelect.js?v=1"></script>
-  <script defer src="/js/components/VideoPlayer.js?v=38"></script>
+  <script defer src="/js/components/VideoPlayer.js?v=39"></script>
   <script defer src="/js/components/ChannelList.js?v=38"></script>
   <script defer src="/js/components/SourceManager.js?v=32"></script>
   <script defer src="/js/components/EpgGuide.js?v=11"></script>
@@ -1949,7 +1958,7 @@
   <script defer src="/js/pages/MoviesPage.js?v=41"></script>
   <script defer src="/js/pages/SeriesPage.js?v=42"></script>
   <script defer src="/js/pages/Settings.js?v=34"></script>
-  <script defer src="/js/pages/WatchPage.js?v=114"></script>
+  <script defer src="/js/pages/WatchPage.js?v=115"></script>
   <script defer src="/js/profiles.js?v=7"></script>
   <!-- AdminPage.js (76 KB, admin-only) is lazy-loaded by app.ensureAdminPage(). -->
   <script defer src="/js/maintenance-banner.js?v=1"></script>

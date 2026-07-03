@@ -2521,7 +2521,16 @@ class WatchPage {
     isConnectionLimitError(message) {
         // 458 = single-slot provider "max connections" (transient, frees in seconds) —
         // treat like a connection block so we never mark the title broken or hard-spin.
-        return /UPSTREAM_(UNAUTHORIZED|RATE_LIMIT|FORBIDDEN)|401|403|429|\b458\b|Unauthorized|Forbidden|Too Many Requests|rate limit|max connection/i.test(message || '');
+        // NB: (?:\b|_)458 — underscore is a word char in JS regex, so \b458\b can NEVER
+        // match "BLOCK_HTTP_458"/"PROBE_HTTP_458" (the exact codes the engine emits).
+        return /UPSTREAM_(UNAUTHORIZED|RATE_LIMIT|FORBIDDEN)|401|403|429|(?:\b|_)458\b|Unauthorized|Forbidden|Too Many Requests|rate limit|max connection/i.test(message || '');
+    }
+
+    // Provider single-slot "max connections" (HTTP 458): transient — the slot frees
+    // ~8s after the previous consumer drops. Matches the engine's BLOCK_HTTP_458 /
+    // PROBE_HTTP_458 codes AND the gateway's typed PROVIDER_BUSY details.
+    isProviderBusyError(message) {
+        return /(?:\b|_)458\b|PROVIDER_BUSY|max connections?/i.test(String(message || ''));
     }
 
     getProbeFailureText(info) {
@@ -2538,7 +2547,7 @@ class WatchPage {
         const text = this.sanitizePlaybackMessage(message);
         const cloud = this.isCloudPlaybackMode();
 
-        if (/\b458\b|max connection/i.test(text)) {
+        if (this.isProviderBusyError(text)) {
             return 'This provider allows only one stream at a time and the slot is busy right now. Stop any other playback, wait a few seconds, then press play again — it frees up shortly after the previous video stops.';
         }
         if (/NO_SUPPORTED_MIME/i.test(text)) {
@@ -2889,7 +2898,7 @@ class WatchPage {
         // times with backoff: reopening a title right after another recovers on its own
         // once the slot frees, and the status badge shows it's reconnecting (not frozen).
         const SLOT_BUSY_RETRIES = 3;
-        const isSlotBusy = (m) => /\b458\b|_458\b|max connection/i.test(String(m || ''));
+        const isSlotBusy = (m) => this.isProviderBusyError(m);
         for (let attempt = 0; ; attempt++) {
             const engine = this.norvaEngine = new window.NorvaEngine(this.video, {
                 // Arm in-band subtitle capture before the demux pump starts (flag-gated) so cues
@@ -2924,7 +2933,10 @@ class WatchPage {
                 const msg = String(e && (e.message || e));
                 if (isSlotBusy(msg) && attempt < SLOT_BUSY_RETRIES) {
                     this.destroyEngine();
-                    const waitMs = 2000 + attempt * 2000; // 2s, 4s, 6s — slot frees ~8s after the prior drop
+                    // Give the relay's upstream socket a moment to actually drop —
+                    // the client-side abort alone leaves it lingering briefly.
+                    await this.waitForProviderSlotRelease(800);
+                    const waitMs = 4000 + attempt * 4000; // 4s, 8s, 12s — the slot frees ~8s after the prior drop
                     console.warn(`[NorvaEngine] slot busy (458), retry ${attempt + 1}/${SLOT_BUSY_RETRIES} in ${waitMs}ms`);
                     try { this.showLoading(); } catch (_) {}
                     try { this.updateTranscodeStatus('direct', `Stream busy, reconnecting… (${attempt + 2}/${SLOT_BUSY_RETRIES + 1})`); } catch (_) {}
@@ -2944,6 +2956,22 @@ class WatchPage {
                     await new Promise((r) => setTimeout(r, 400));
                     if (this.isStalePlaybackAttempt(playbackAttemptId)) { this.destroyEngine(); return; }
                     continue;
+                }
+                // Slot still busy after every in-line retry: the provider's connection
+                // limit is the bottleneck, NOT the container — nothing was even fetched.
+                // A transcode fallback would open yet ANOTHER upstream connection against
+                // the same saturated slot (and 458 too), deepening the contention. Surface
+                // the real condition instead (the error UI maps 458 to a clear "one stream
+                // at a time" message and suppresses the aggressive 2s auto-refresh), and
+                // schedule ONE longer retry spanning the provider's ~8s slot-release window.
+                if (isSlotBusy(msg)) {
+                    this.reportEngineFailure({ stage: 'load', message: msg });
+                    this.destroyEngine();
+                    // showPlaybackError classifies this as provider-busy: specific
+                    // "one stream at a time" message + ONE ~15s scheduled retry
+                    // (guard-railed to once per minute per title).
+                    this.handleEngineUnplayable(e);
+                    return;
                 }
                 // Read the source-head verdict before tearing the engine down: a real-media demux
                 // failure is worth a gateway-transcode retry; a provider error page is not.
@@ -3540,8 +3568,13 @@ class WatchPage {
             looksLikeHls
         });
 
-        // Use HLS.js for HLS streams
-        if (looksLikeHls && Hls.isSupported()) {
+        // Use HLS.js for HLS streams. The runtime is vendored+lazy — for an HLS URL,
+        // wait for it once; if it truly can't load, the else branch (direct src) still
+        // works natively on Safari, and the media-error ladder covers the rest.
+        if (looksLikeHls && typeof Hls === 'undefined' && window.ensureHls) {
+            try { await window.ensureHls(); } catch (_) { /* degrade below */ }
+        }
+        if (looksLikeHls && typeof Hls !== 'undefined' && Hls.isSupported()) {
             if (this.isStalePlaybackAttempt(playbackAttemptId)) return;
             this.updateTranscodeStatus(isGatewaySessionUrl ? 'transcoding' : 'direct', isGatewaySessionUrl ? 'Norva Gateway' : 'Direct HLS');
             this.currentPlaybackMode = isGatewaySessionUrl ? 'gateway-session' : 'direct-hls';
@@ -3575,6 +3608,19 @@ class WatchPage {
     playHls(url, options = {}) {
         const { autoplay = true } = options;
         const playbackAttemptId = options.playbackAttemptId ?? this._playbackAttemptId;
+
+        if (typeof Hls === 'undefined') {
+            // hls.js runtime unavailable (vendored copy + CDN both failed — rare).
+            // Native HLS (Safari) still works via a plain src; otherwise surface a
+            // typed error instead of a ReferenceError.
+            if (this.video.canPlayType('application/vnd.apple.mpegurl')) {
+                this.video.src = url;
+                this.video.play().catch(() => {});
+            } else {
+                this.handleEngineUnplayable(new Error('HLS_RUNTIME_UNAVAILABLE — hls.js could not be loaded'));
+            }
+            return;
+        }
 
         if (this.hls) {
             this.hls.destroy();
@@ -5088,14 +5134,24 @@ class WatchPage {
         // A provider auth / rate-limit block (401/403/429) does not clear on a
         // reload — auto-refreshing just spins on the same blocked path. Skip it
         // and point the user to a residential path (native app / local hub).
-        const providerBlocked = this.isConnectionLimitError(safeMessage);
-        const refreshScheduled = providerBlocked ? false : this.schedulePlaybackErrorRefresh();
-        const refreshHint = providerBlocked
-            ? "No need to refresh: this block comes from the provider. Watch this title from the TV/mobile app or a local hub (your network), or try again later."
-            : refreshScheduled
-                ? 'Retrying automatically in 2 seconds…'
-                : 'If the problem persists, use Retry below.';
-        const refreshBtnLabel = providerBlocked ? 'Retry' : 'Retry now';
+        const providerBusy = this.isProviderBusyError(safeMessage);
+        const providerBlocked = !providerBusy && this.isConnectionLimitError(safeMessage);
+        // Provider slot-busy (458) is transient: schedule ONE longer retry that lands
+        // safely past the ~8s slot-release window (the guard caps it at one/minute).
+        // A hard block (401/403/429) does NOT clear on refresh — no auto-retry there.
+        const refreshScheduled = providerBusy
+            ? this.schedulePlaybackErrorRefresh(15000)
+            : providerBlocked ? false : this.schedulePlaybackErrorRefresh();
+        const refreshHint = providerBusy
+            ? (refreshScheduled
+                ? 'The slot usually frees a few seconds after the other stream stops — retrying automatically in ~15 seconds…'
+                : 'If the slot is still busy, stop the other playback and press Retry.')
+            : providerBlocked
+                ? "No need to refresh: this block comes from the provider. Watch this title from the TV/mobile app or a local hub (your network), or try again later."
+                : refreshScheduled
+                    ? 'Retrying automatically in 2 seconds…'
+                    : 'If the problem persists, use Retry below.';
+        const refreshBtnLabel = (providerBusy || providerBlocked) ? 'Retry' : 'Retry now';
 
         errorEl.innerHTML = `
             <div class="watch-error-box">
@@ -5133,7 +5189,7 @@ class WatchPage {
         return contentKey || window.location.href;
     }
 
-    schedulePlaybackErrorRefresh() {
+    schedulePlaybackErrorRefresh(delayMs = this.playbackErrorRefreshDelayMs) {
         this.clearPlaybackErrorRefreshTimer();
 
         const key = this.getPlaybackErrorRefreshGuardKey();
@@ -5161,7 +5217,7 @@ class WatchPage {
                 // Continue with the retry even if local persistence fails.
             }
             this.retryPlaybackInPlace();
-        }, this.playbackErrorRefreshDelayMs);
+        }, delayMs);
 
         return true;
     }
@@ -5211,6 +5267,13 @@ class WatchPage {
                 playbackAttemptId: this._playbackAttemptId
             }));
         } catch (error) {
+            // A slot still busy after the retry is a provider-side state — a full page
+            // reload would just replay the whole cascade against the same busy slot.
+            if (this.isProviderBusyError(error?.message)) {
+                console.warn('[WatchPage] In-place retry hit a busy provider slot:', error?.message || error);
+                this.showPlaybackError(error?.message || 'BLOCK_HTTP_458', { immediate: true });
+                return;
+            }
             console.warn('[WatchPage] In-place retry failed, falling back to a page refresh:', error?.message || error);
             window.location.reload();
         } finally {

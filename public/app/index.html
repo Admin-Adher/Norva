@@ -44,8 +44,36 @@
       }
     })();
   </script>
-  <!-- HLS.js for video playback -->
-  <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.7/dist/hls.min.js"></script>
+  <!-- hls.js loader — VENDORED local copy first (immune to adblockers / CDN outages /
+       captive proxies, the cause of "Hls is not defined" crashes), CDN as fallback.
+       window.ensureHls() returns a cached promise resolving true once window.Hls exists;
+       every playback path awaits or guards on it. Warmed immediately at boot. -->
+  <script>
+    (function () {
+      var pending = null;
+      function inject(src) {
+        return new Promise(function (resolve) {
+          var s = document.createElement('script');
+          s.src = src; s.async = true;
+          s.onload = function () { resolve(typeof window.Hls !== 'undefined'); };
+          s.onerror = function () { resolve(false); };
+          document.head.appendChild(s);
+        });
+      }
+      window.ensureHls = function () {
+        if (typeof window.Hls !== 'undefined') return Promise.resolve(true);
+        if (pending) return pending;
+        pending = inject('/js/vendor/hls-1.5.7.min.js').then(function (ok) {
+          return ok || inject('https://cdn.jsdelivr.net/npm/hls.js@1.5.7/dist/hls.min.js');
+        }).then(function (ok) {
+          if (!ok) { pending = null; console.error('[Norva] hls.js could not be loaded (local + CDN failed)'); }
+          return ok;
+        });
+        return pending;
+      };
+      window.ensureHls();
+    })();
+  </script>
 </head>
 
 <body class="catalog-locked">
@@ -1482,7 +1510,7 @@
   <script src="/js/utils/standalone.js?v=3"></script>
   <script src="/js/utils/channelGrouping.js?v=4"></script>
   <script src="/js/components/MultiSelect.js?v=1"></script>
-  <script src="/js/components/VideoPlayer.js?v=18"></script>
+  <script src="/js/components/VideoPlayer.js?v=19"></script>
   <script src="/js/components/ChannelList.js?v=28"></script>
   <script src="/js/components/SourceManager.js?v=19"></script>
   <script src="/js/components/EpgGuide.js?v=10"></script>
@@ -1493,7 +1521,7 @@
   <script src="/js/pages/MoviesPage.js?v=19"></script>
   <script src="/js/pages/SeriesPage.js?v=18"></script>
   <script src="/js/pages/Settings.js?v=34"></script>
-  <script src="/js/pages/WatchPage.js?v=77"></script>
+  <script src="/js/pages/WatchPage.js?v=78"></script>
   <script src="/js/app.js?v=18"></script>
   <script>
     // Check for SSO token in URL
