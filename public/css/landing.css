@@ -1453,6 +1453,13 @@ main,
   color: #fff;
 }
 
+.price .price-cur {
+  font-size: 30px;
+  font-weight: 700;
+  vertical-align: super;
+  margin-right: 1px;
+}
+
 .price .price-period {
   color: var(--muted);
   font-family: Inter, sans-serif;

@@ -27,8 +27,11 @@ window.NORVA_BILLING_CONFIG = {
   // which returns a Stancer hosted-payment-page URL to redirect to (PCI-safe,
   // 3DS automatic). Card charging + recurring is orchestrated server-side.
   stancer: {
-    enabled: false,
-    mode: 'test',                                   // 'test' | 'live' (matches the edge key)
+    // ENABLED: the web checkout now routes to Stancer. Test vs live is decided ENTIRELY by the
+    // edge secret STANCER_SECRET_KEY (stest_… → test, sprod_… → live) + NORVA_STANCER_MODE, NOT by
+    // this flag. While the edge key is stest_…, real cards won't work — only Stancer test cards do.
+    enabled: true,
+    mode: 'test',                                   // informational only (real mode = edge secret)
     checkoutUrl: '/functions/v1/norva-stancer/checkout',
     // Called by the return page to finalize the checkout without a webhook.
     confirmUrl: '/functions/v1/norva-stancer/confirm',
