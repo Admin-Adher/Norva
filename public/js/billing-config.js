@@ -30,6 +30,8 @@ window.NORVA_BILLING_CONFIG = {
     enabled: false,
     mode: 'test',                                   // 'test' | 'live' (matches the edge key)
     checkoutUrl: '/functions/v1/norva-stancer/checkout',
+    // Called by the return page to finalize the checkout without a webhook.
+    confirmUrl: '/functions/v1/norva-stancer/confirm',
     // Display prices per plan/period (amounts are charged server-side in cents).
     plans: {
       plus:   { monthly: '4.99', annual: '41.99' },
