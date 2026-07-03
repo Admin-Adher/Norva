@@ -180,3 +180,40 @@ test('no unguarded Hls dereference at decision points', () => {
     });
   }
 });
+
+// ── 5) raw↔transcode slot ledger wiring (P1 follow-up lot) ──────────────────────
+// These lock the CROSS-LANE single-flight wiring: a gateway restart or refactor
+// that drops any of these markers reintroduces the 458 contention storm.
+test('gateway: raw-pump ledger wired at /raw, /sessions and DELETE /raw-pumps', () => {
+  const src = read('services/media-gateway/src/index.js');
+  assert.ok(src.includes('const rawPumps = new Set()'), 'pump ledger missing');
+  assert.ok(/registerRawPump\(\{\s*ac,/.test(src), '/raw must register its pump');
+  assert.ok(src.includes("p !== pump && p.proxyKey === pumpProxyKey"), '/raw must supersede prior-session pumps');
+  assert.ok(src.includes("abortRawPumps(\n            (p) => p.proxyKey === proxyKeyFromUrl(sourceUrl)")
+    || /stoppedConflictingSessions \+= abortRawPumps\(/.test(src), '/sessions must abort conflicting raw pumps');
+  assert.ok(src.includes("app.delete('/raw-pumps', requireGatewayAuth"), 'coordinator kill-switch endpoint missing');
+  assert.ok(src.includes('ownerHash: claims.uid ? sha256Hex(claims.uid) : null'), 'owner hash keying missing');
+});
+
+test('gateway: same-session concurrent range reads are spared (keepSid)', () => {
+  const src = read('services/media-gateway/src/index.js');
+  assert.ok(src.includes('if (keepSid && pump.sid && pump.sid === keepSid) continue;'),
+    'abortRawPumps must spare same-playback concurrency');
+});
+
+test('relay coordinator: zombie reaping, alarm, raw-lane eviction', () => {
+  const src = read('services/norva-relay/src/index.js');
+  assert.ok(src.includes('async expireRawPumps(sessions)'), 'expireRawPumps missing');
+  assert.ok(src.includes('/raw-pumps?ownerKey='), 'gateway kill-switch call missing');
+  assert.ok(src.includes('async alarm()'), 'DO alarm handler missing');
+  assert.ok(src.includes('setAlarm(Math.min(...expiries)'), 'alarm arming missing');
+  assert.ok(src.includes('lapsed.filter((session) => session.gatewaySessionId)'), 'lapsed gateway reaping missing');
+  assert.ok(src.includes('const hadGatewayConflict'), 'proportionate waitMs missing');
+});
+
+test('edge: raw lane registered in the coordinator at resolve time', () => {
+  const src = read('supabase/functions/norva-playback/index.ts');
+  assert.ok(src.includes('const rawCoordination = await prepareEdgeSessionCoordinator'), 'raw prepare missing');
+  assert.ok(src.includes('lane: "raw"'), 'raw lane marker missing');
+  assert.ok(src.includes('lane: options.lane'), 'commit lane passthrough missing');
+});
