@@ -37,14 +37,22 @@ default), this is your *upload* key; Google holds the app signing key.
 
 - Application IDs (immutable after first publish): `tv.norva.phone`, `tv.norva.tv`.
 - Target/compile SDK 35, min SDK 23. ✅ (meets Play's API-35 requirement.)
+- **Android App Links** (`public/.well-known/assetlinks.json`): only the phone
+  app declares `autoVerify` https links to `norva.tv` (`/app.html`, `/t/`), so
+  the file lists **only** `tv.norva.phone` — the TV app uses the `norva://open`
+  custom scheme and needs no entry. ⚠️ **Last repo blocker:** replace
+  `REPLACE_WITH_RELEASE_SIGNING_SHA256_FROM_PLAY_CONSOLE` with the **App signing
+  key** SHA-256 from Play Console → (phone app) → Test and release → App
+  integrity → App signing key certificate, then commit + deploy.
 
 ## 3. Privacy policy — **[repo, done] + [console]**
 
 - Hosted at `https://norva.tv/privacy.html` and `…/terms.html`, linked in-app
   (login screen + Settings → Account) and in the web footer.
 - **[console]** Paste the privacy policy URL in the Play Console store listing.
-- ⚠️ Replace the placeholder operator/legal-entity name in `public/privacy.html`
-  and `public/terms.html` with your registered entity and governing law.
+- ✅ Operator/legal entity filled in with real data (Adrien Hernandez EI,
+  RCS Paris 824 852 081) across `privacy.html`, `terms.html` and
+  `mentions-legales.html`; French governing law + consumer mediator (CM2C) set.
 
 ## 4. Account deletion — **[repo, done] + [console]**
 
