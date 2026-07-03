@@ -291,29 +291,31 @@ class SettingsPage {
             this.app.entitlement = decision;
             window.NorvaEntitlement = decision;
 
-            const label = this.accessLabel(decision);
-            plan.textContent = label;
-            hint.textContent = decision.message || 'Norva access is active.';
-            if (decision.enforced === false || decision.mode === 'observe') {
+            // Show the REAL membership state (trial / active / past due / grace /
+            // ending / expired) — it is present in the decision even while billing
+            // is only OBSERVED, not enforced. Only the genuine "no plan yet" case
+            // falls back to the open-access wording.
+            const REAL_STATUSES = ['trialing', 'active', 'cancelled_at_period_end', 'past_due', 'grace', 'expired'];
+            const hasRealSub = REAL_STATUSES.indexOf(String(decision.status || '').toLowerCase()) !== -1;
+            const observing = decision.enforced === false || decision.mode === 'observe';
+
+            plan.textContent = this.accessLabel(decision);
+            hint.textContent = this.accessHint(decision);
+
+            if (observing && !hasRealSub) {
+                // No subscription yet → access is open in observe mode.
+                plan.textContent = 'Full access';
                 hint.textContent = 'You have full access to Norva.';
-                // Keep billing surfaces dark until the go-live bascule: hide the web
-                // "Manage plan" entry point while entitlements are only being observed.
                 if (button && !isNativeShell()) button.style.display = 'none';
-            }
-            if (decision.failOpen && decision.enforced !== false && decision.mode !== 'observe') {
-                hint.textContent = `${hint.textContent} Last known access is being honored while billing is checked.`;
+            } else if (button && !isNativeShell()) {
+                // A real membership exists (even while observed) → let the user open
+                // the plan-management surface so the state is inspectable/actionable.
+                button.style.display = '';
+                button.textContent = 'Manage plan';
             }
 
-            // On an enforced trial, surface days left + renewal date (anti-surprise).
-            if (decision.enforced === true && decision.status === 'trialing') {
-                const endIso = decision.projection?.trial_ends_at || decision.projection?.current_period_end;
-                if (endIso) {
-                    const end = new Date(endIso);
-                    const daysLeft = Math.max(0, Math.ceil((end.getTime() - Date.now()) / 86400000));
-                    hint.textContent = daysLeft > 0
-                        ? `${daysLeft} day${daysLeft === 1 ? '' : 's'} left — renews ${end.toLocaleDateString('en-US')} unless cancelled.`
-                        : 'Trial ended — choose a plan to keep watching.';
-                }
+            if (decision.failOpen && !observing) {
+                hint.textContent = `${hint.textContent} Last known access is being honored while billing is checked.`;
             }
         } catch (err) {
             console.warn('[Settings] Unable to load Norva access:', err);
@@ -322,16 +324,67 @@ class SettingsPage {
         }
     }
 
+    // Human plan name from a plan_code ('plus' is marketed as plain "Norva").
+    planName(decision = {}) {
+        const plan = String(decision.planCode || decision.plan_code || decision.projection?.plan_code || '').toLowerCase();
+        if (plan === 'family') return 'Norva Family';
+        if (plan === 'premium') return 'Norva Premium';
+        if (plan === 'plus') return 'Norva';
+        return null;
+    }
+
+    // Big label = the real membership state. Falls back to "Full access" only when
+    // there is genuinely no subscription (handled by the caller in observe mode).
     accessLabel(decision = {}) {
-        if (decision.enforced === false || decision.mode === 'observe') {
-            return 'Full access';
+        const status = String(decision.status || '').toLowerCase();
+        const name = this.planName(decision);
+        const withPlan = (suffix) => name ? `${name} · ${suffix}` : suffix;
+        switch (status) {
+            case 'trialing': return withPlan('Free trial');
+            case 'active': return withPlan('Active');
+            case 'cancelled_at_period_end': return withPlan('Ending soon');
+            case 'past_due': return withPlan('Payment due');
+            case 'grace': return withPlan('Payment retrying');
+            case 'expired': return 'Plan expired';
+            default: return 'Full access';
         }
-        const plan = String(decision.planCode || decision.plan_code || 'trial');
-        const status = String(decision.status || 'unknown').replace(/_/g, ' ');
-        const planLabel = plan === 'trial'
-            ? 'Trial'
-            : plan.charAt(0).toUpperCase() + plan.slice(1);
-        return `${planLabel} - ${status}`;
+    }
+
+    // Sub-text = what the state means + the relevant date, in plain language.
+    accessHint(decision = {}) {
+        const status = String(decision.status || '').toLowerCase();
+        const p = decision.projection || {};
+        const fmt = (iso) => { try { return new Date(iso).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }); } catch (_) { return null; } };
+        const daysLeft = (iso) => { const t = new Date(iso).getTime(); return Number.isFinite(t) ? Math.max(0, Math.ceil((t - Date.now()) / 86400000)) : null; };
+        switch (status) {
+            case 'trialing': {
+                const endIso = p.trial_ends_at || p.current_period_end;
+                const d = endIso ? daysLeft(endIso) : null;
+                const when = endIso ? fmt(endIso) : null;
+                if (d != null && when) {
+                    return d > 0
+                        ? `Free trial — ${d} day${d === 1 ? '' : 's'} left. Renews ${when} unless cancelled.`
+                        : `Trial ends today (${when}). You’ll be charged unless you cancel.`;
+                }
+                return 'Your free trial is active.';
+            }
+            case 'active': {
+                const when = p.current_period_end ? fmt(p.current_period_end) : null;
+                return when ? `Your plan renews on ${when}. Cancel anytime.` : 'Your plan is active.';
+            }
+            case 'cancelled_at_period_end': {
+                const when = p.current_period_end ? fmt(p.current_period_end) : null;
+                return when ? `Access continues until ${when}, then your plan ends.` : 'Your plan ends at the end of the current period.';
+            }
+            case 'past_due':
+                return 'Your last payment didn’t go through. Update your payment method to keep access.';
+            case 'grace':
+                return 'We’re retrying your payment — access continues in the meantime.';
+            case 'expired':
+                return 'Your plan has expired. Choose a plan to keep watching.';
+            default:
+                return 'You have full access to Norva.';
+        }
     }
 
     async refreshSourceHealthCard() {
