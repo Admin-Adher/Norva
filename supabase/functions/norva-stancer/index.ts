@@ -176,12 +176,38 @@ Deno.serve(async (req) => {
     const user = u?.user;
     if (!user?.id || !user.email) return json({ error: "Not signed in" }, 401);
 
-    let payload: { plan?: string; period?: string; returnTo?: string; embed?: boolean } = {};
+    let payload: { plan?: string; period?: string; returnTo?: string; embed?: boolean; intent?: string } = {};
     try { payload = await req.json(); } catch (_) { /* defaults below */ }
     const plan = payload.plan === "family" ? "family" : "plus";
     const period = payload.period === "annual" ? "annual" : "monthly";
     const amount = PRICES[plan]?.[period];
     if (!amount) return json({ error: "Unknown plan" }, 400);
+
+    // ── Checkout KIND, decided SERVER-SIDE from the account's real state ──────
+    // Closes the "re-trial" hole: /confirm applies exactly what the PI's
+    // metadata.kind says, and that kind is fixed here — never by the client:
+    //   trial_setup — trial never consumed → the ONLY path that grants trial days.
+    //   plan_change — trial consumed + live entitlement → swap plan/token, keep
+    //                 status & dates (no new trial, no double charge; the new
+    //                 amount applies at the next cycle).
+    //   resubscribe — trial consumed + no live entitlement → active immediately,
+    //                 first charge picked up by the billing cron (period due now).
+    //   card_update — explicit intent from the manage page → swap the token only.
+    const { data: projRow } = await db.from("cloud_entitlement_projection")
+      .select("status,trial_consumed_at,trial_ends_at,current_period_end")
+      .eq("user_id", user.id).maybeSingle();
+    const proj = projRow as { status?: string; trial_consumed_at?: string; trial_ends_at?: string; current_period_end?: string } | null;
+    const nowMs = Date.now();
+    const trialEndMs = proj?.trial_ends_at ? new Date(proj.trial_ends_at).getTime() : 0;
+    const periodEndMs = proj?.current_period_end ? new Date(proj.current_period_end).getTime() : 0;
+    const projStatus = String(proj?.status ?? "");
+    const liveEntitlement =
+      (projStatus === "trialing" && trialEndMs > nowMs) ||
+      (projStatus === "active" && (periodEndMs === 0 || periodEndMs > nowMs)) ||
+      (projStatus === "cancelled_at_period_end" && periodEndMs > nowMs);
+    let kind = "trial_setup";
+    if (payload.intent === "update_card") kind = "card_update";
+    else if (proj?.trial_consumed_at) kind = liveEntitlement ? "plan_change" : "resubscribe";
 
     const name = String(user.user_metadata?.display_name ?? user.user_metadata?.name ?? "").trim();
     const custId = await ensureCustomer(db, user.id, user.email, name);
@@ -189,9 +215,13 @@ Deno.serve(async (req) => {
 
     // Record the recurring plan on the mapping row — the billing cron reads amount/period from here
     // (projection.plan_code is constrained to plus/family and can't carry the period).
-    await db.from("cloud_stancer_customers").upsert({
-      user_id: user.id, stancer_customer_id: custId, plan, period, amount_cents: amount, updated_at: new Date().toISOString(),
-    });
+    // card_update must NOT touch it: the user is only swapping the card, and defaulted
+    // plan/period values would corrupt e.g. a family/annual subscriber's mapping.
+    if (kind !== "card_update") {
+      await db.from("cloud_stancer_customers").upsert({
+        user_id: user.id, stancer_customer_id: custId, plan, period, amount_cents: amount, updated_at: new Date().toISOString(),
+      });
+    }
 
     // Carry the caller's origin so the return page can send the user back where they
     // started (e.g. Settings). Only a same-site path is accepted — never an absolute
@@ -215,11 +245,17 @@ Deno.serve(async (req) => {
     // the hosted page, while USD captures work fine (matrix selftest + manual test, 2026-07-03).
     // Plan charges stay in USD (norva-stancer-billing). Flip to "usd" once Stancer support enables
     // USD authorizations on the account.
+    const DESCRIPTIONS: Record<string, string> = {
+      trial_setup: `Norva ${plan} ${period} — card validation for 7-day free trial`,
+      plan_change: `Norva ${plan} ${period} — plan change (card check, not charged)`,
+      resubscribe: `Norva ${plan} ${period} — resubscribe (card check; first charge follows)`,
+      card_update: `Norva — payment method update (card check, not charged)`,
+    };
     const pi = await stancerPost("/v2/payment_intents/", {
       amount: VALIDATION_CENTS, currency: "eur", capture: false, methods_allowed: ["card"],
       return_url: returnUrl, order_id: ref(user.id), customer: custId,
-      description: `Norva ${plan} ${period} — card validation for 7-day free trial`,
-      metadata: { user_id: user.id, kind: "trial_setup", plan, period },
+      description: DESCRIPTIONS[kind],
+      metadata: { user_id: user.id, kind, plan, period },
     });
     if (!pi.ok || !pi.body.id || !pi.body.url) {
       console.error("[norva-stancer] payment_intent failed", pi.status, JSON.stringify(pi.body).slice(0, 300));
@@ -227,12 +263,12 @@ Deno.serve(async (req) => {
     }
 
     await db.from("cloud_stancer_payments").upsert({
-      pi_id: String(pi.body.id), user_id: user.id, kind: "trial_setup",
+      pi_id: String(pi.body.id), user_id: user.id, kind,
       amount, currency: "usd", status: String(pi.body.status ?? "require_payment_method"),
       order_id: ref(user.id), updated_at: new Date().toISOString(),
     });
 
-    return json({ ok: true, url: String(pi.body.url), pi_id: String(pi.body.id) });
+    return json({ ok: true, url: String(pi.body.url), pi_id: String(pi.body.id), kind });
   }
 
   // ── /profile — user-authed: read-only billing profile for display (plan + card) ──
@@ -263,7 +299,8 @@ Deno.serve(async (req) => {
     let piId = String(payload.pi_id ?? "");
     if (!piId) {
       const { data: last } = await db.from("cloud_stancer_payments")
-        .select("pi_id").eq("user_id", user.id).eq("kind", "trial_setup")
+        .select("pi_id").eq("user_id", user.id)
+        .in("kind", ["trial_setup", "plan_change", "resubscribe", "card_update"])
         .order("created_at", { ascending: false }).limit(1).maybeSingle();
       piId = String((last as { pi_id?: string } | null)?.pi_id ?? "");
     }
@@ -281,6 +318,7 @@ Deno.serve(async (req) => {
 
     const nowIso = new Date().toISOString();
     const plan = String(meta.plan ?? "plus") === "family" ? "family" : "plus";
+    const kind = String(meta.kind ?? "trial_setup");
     const custId = pi.customer ? String(pi.customer) : undefined;
     // Display enrichment: the PI usually returns the card as a bare token string, so
     // recover last4/expiry from the card object ("•••• 0077" in the subscription UI).
@@ -290,18 +328,144 @@ Deno.serve(async (req) => {
       const info = await fetchCard(card.id);
       if (info) { last4 = info.last4; cardExp = info.exp; }
     }
+    // Common to every kind: save/replace the card token.
     // Only touches these columns — plan/period/amount set at /checkout are preserved.
     await db.from("cloud_stancer_customers").upsert({
       user_id: user.id, stancer_customer_id: custId, card_token: card.id,
       card_last4: last4 ?? undefined, card_exp: cardExp ?? undefined, updated_at: nowIso,
     });
+    try { await db.from("cloud_stancer_payments").update({ status: pi.status }).eq("pi_id", piId); } catch (_) { /* noop */ }
+
+    const { data: curRow } = await db.from("cloud_entitlement_projection")
+      .select("status,trial_ends_at,trial_consumed_at").eq("user_id", user.id).maybeSingle();
+    const cur = curRow as { status?: string; trial_ends_at?: string; trial_consumed_at?: string } | null;
+    const curStatus = String(cur?.status ?? "");
+
+    if (kind === "card_update") {
+      // Token swap only — status and billing dates untouched. If the sub was stuck
+      // on a failed payment, requeue it: back to active with the period due NOW so
+      // the billing cron retries the charge within the hour on the new card.
+      if (curStatus === "past_due" || curStatus === "grace") {
+        await db.from("cloud_entitlement_projection").update({
+          status: "active", provider: "stancer", current_period_end: nowIso, last_event_at: nowIso,
+        }).eq("user_id", user.id);
+        return json({ ok: true, status: "retrying", kind });
+      }
+      return json({ ok: true, status: "updated", kind });
+    }
+
+    if (kind === "plan_change") {
+      // Live subscriber picked a (possibly different) plan: swap the plan, keep the
+      // status and every date — no new trial, no double charge. The new amount was
+      // recorded on the mapping row at /checkout and applies at the next cycle.
+      const patch: Record<string, unknown> = {
+        provider: "stancer", provider_customer_id: custId, plan_code: plan, last_event_at: nowIso,
+      };
+      if (curStatus === "cancelled_at_period_end") {
+        // Picking a plan while a cancellation is pending = resuming.
+        patch.status = (cur?.trial_ends_at && new Date(cur.trial_ends_at).getTime() > Date.now()) ? "trialing" : "active";
+      }
+      await db.from("cloud_entitlement_projection").update(patch).eq("user_id", user.id);
+      return json({ ok: true, status: "plan_changed", kind });
+    }
+
+    if (kind === "resubscribe") {
+      // Trial already consumed and no live entitlement: activate now, first charge
+      // is due immediately (the billing cron picks it up on its next run).
+      await db.from("cloud_entitlement_projection").upsert({
+        user_id: user.id, status: "active", provider: "stancer", provider_customer_id: custId,
+        plan_code: plan, current_period_end: nowIso, last_event_at: nowIso,
+      });
+      return json({ ok: true, status: "active", kind });
+    }
+
+    // trial_setup — the ONLY path that grants trial days. Replay-guarded: once the
+    // trial has been consumed, re-confirming an old setup PI must never mint fresh
+    // days (it would otherwise reset trial_ends_at to now+7d on every call).
+    if (cur?.trial_consumed_at) {
+      return json({ ok: true, status: curStatus || "trialing", kind, note: "already_confirmed" });
+    }
     await db.from("cloud_entitlement_projection").upsert({
       user_id: user.id, status: "trialing", provider: "stancer", provider_customer_id: custId,
       plan_code: plan, trial_ends_at: new Date(Date.now() + TRIAL_DAYS * 86400_000).toISOString(),
       trial_consumed_at: nowIso, last_event_at: nowIso,
     });
-    try { await db.from("cloud_stancer_payments").update({ status: pi.status }).eq("pi_id", piId); } catch (_) { /* noop */ }
-    return json({ ok: true, status: "trialing" });
+    return json({ ok: true, status: "trialing", kind });
+  }
+
+  // ── /cancel — user-authed: stop auto-renewal; access runs to the period end ──
+  // Honors the "cancel anytime" promise for the Stancer (web) rail. The billing
+  // cron only charges trialing/active rows, so a cancelled row is never charged.
+  if (req.method === "POST" && path === "/cancel") {
+    const jwt = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
+    if (!jwt) return json({ error: "Not signed in" }, 401);
+    const { data: u } = await db.auth.getUser(jwt);
+    const user = u?.user;
+    if (!user?.id) return json({ error: "Not signed in" }, 401);
+
+    const { data: row } = await db.from("cloud_entitlement_projection")
+      .select("status,provider,trial_ends_at,current_period_end").eq("user_id", user.id).maybeSingle();
+    const p = row as { status?: string; provider?: string; trial_ends_at?: string; current_period_end?: string } | null;
+    if (!p || String(p.provider ?? "") !== "stancer") {
+      return json({ error: "No cancellable Norva plan on this account" }, 400);
+    }
+    const st = String(p.status ?? "");
+    const nowIso = new Date().toISOString();
+    if (st === "trialing") {
+      // Cancel during the trial: nothing will ever be charged; access runs to the
+      // trial end (current_period_end must carry it — the entitlement check for
+      // cancelled_at_period_end reads current_period_end, not trial_ends_at).
+      const accessUntil = p.trial_ends_at ?? nowIso;
+      await db.from("cloud_entitlement_projection").update({
+        status: "cancelled_at_period_end", current_period_end: accessUntil, last_event_at: nowIso,
+      }).eq("user_id", user.id);
+      return json({ ok: true, status: "cancelled_at_period_end", access_until: accessUntil });
+    }
+    if (st === "active") {
+      await db.from("cloud_entitlement_projection").update({
+        status: "cancelled_at_period_end", last_event_at: nowIso,
+      }).eq("user_id", user.id);
+      return json({ ok: true, status: "cancelled_at_period_end", access_until: p.current_period_end ?? null });
+    }
+    if (st === "past_due" || st === "grace") {
+      // Payment already failing — cancelling closes it out cleanly (win-back later).
+      await db.from("cloud_entitlement_projection").update({
+        status: "expired", last_event_at: nowIso,
+      }).eq("user_id", user.id);
+      return json({ ok: true, status: "expired" });
+    }
+    if (st === "cancelled_at_period_end") {
+      return json({ ok: true, status: st, access_until: p.current_period_end ?? null });
+    }
+    return json({ error: "Nothing to cancel" }, 400);
+  }
+
+  // ── /resume — user-authed: undo a pending cancellation before it takes effect ──
+  if (req.method === "POST" && path === "/resume") {
+    const jwt = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
+    if (!jwt) return json({ error: "Not signed in" }, 401);
+    const { data: u } = await db.auth.getUser(jwt);
+    const user = u?.user;
+    if (!user?.id) return json({ error: "Not signed in" }, 401);
+
+    const { data: row } = await db.from("cloud_entitlement_projection")
+      .select("status,provider,trial_ends_at,current_period_end").eq("user_id", user.id).maybeSingle();
+    const p = row as { status?: string; provider?: string; trial_ends_at?: string; current_period_end?: string } | null;
+    if (!p || String(p.provider ?? "") !== "stancer" || String(p.status ?? "") !== "cancelled_at_period_end") {
+      return json({ error: "No pending cancellation to resume" }, 400);
+    }
+    const periodEndMs = p.current_period_end ? new Date(p.current_period_end).getTime() : 0;
+    if (!periodEndMs || periodEndMs <= Date.now()) {
+      return json({ error: "The plan has already ended — resubscribe instead" }, 400);
+    }
+    const nowIso = new Date().toISOString();
+    // Back to where it was: still inside the trial window → trialing (charged at
+    // trial end); otherwise a paid period → active (renewed at period end).
+    const backTo = (p.trial_ends_at && new Date(p.trial_ends_at).getTime() > Date.now()) ? "trialing" : "active";
+    await db.from("cloud_entitlement_projection").update({
+      status: backTo, last_event_at: nowIso,
+    }).eq("user_id", user.id);
+    return json({ ok: true, status: backTo });
   }
 
   return json({ error: "Not found" }, 404);

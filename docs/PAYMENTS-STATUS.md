@@ -234,7 +234,36 @@ amount:100}` → `response 00`, `status to_capture`, `fee 16`.
   `billing.js` : le chemin web Stancer navigue vers `checkout.html`, + `stancerCheckoutUrl()`
   (embed) ; lien secours « ouvrir la page de paiement dans un onglet ».
 
-### 11.5 Deux fichiers d'app en parallèle (dette repérée)
+### 11.5 Lot P0 post-audit V3 (gestion post-paiement) — livré
+
+Les 4 P0 de l'audit V3 (`docs/audits/ONBOARDING-AUDIT-V3.md` §E.2) :
+
+1. **Annulation self-serve (P0-1)** : `POST /cancel` (trialing → `cancelled_at_period_end` avec
+   `current_period_end = trial_ends_at` ; active → `cancelled_at_period_end` ; past_due/grace →
+   `expired`) + `POST /resume` (annulation en attente → retour trialing/actif). Le cron ne débite
+   que trialing/active → un abonné annulé n'est **jamais** débité. Sweep cron :
+   `cancelled_at_period_end` échu → `expired` (le win-back peut se déclencher). UI
+   `subscription.html` : boutons **Cancel plan** (confirm), **Resume plan** (API), rail web Stancer.
+2. **Guard anti re-trial (P0-2)** : le **kind** du checkout est décidé **côté serveur** dans
+   `/checkout` à partir de l'état réel du compte et figé dans `metadata.kind` du PI :
+   `trial_setup` (essai jamais consommé — **seul** chemin qui accorde des jours d'essai) ·
+   `plan_change` (essai consommé + entitlement vivant → swap plan/token, statut & dates
+   préservés, nouveau montant au cycle suivant) · `resubscribe` (essai consommé + rien de vivant →
+   `active` immédiat, 1ᵉʳ débit ramassé par le cron : `current_period_end = now`) ·
+   `card_update`. `/confirm` honore le kind ; **garde anti-replay** : re-confirmer un vieux PI
+   trial_setup ne re-crédite jamais 7 jours (`trial_consumed_at` vérifié).
+3. **MAJ de carte (P0-3)** : `intent=update_card` → re-checkout étiqueté (empreinte 0,50 €,
+   token remplacé, **statut/périodes intouchés** ; mapping plan/période préservé). Cas `past_due` :
+   après le swap, retour `active` avec période due **maintenant** → le cron retente le débit sous
+   l'heure sur la nouvelle carte (la boucle dunning est fermée). Boutons « Update payment
+   method » (primaire sur Payment issue, secondaire sur trialing/active). `checkout.html` adapte
+   toute sa copy au kind (Update / Change plan / Reactivate / Trial).
+4. **E-mails legacy déprogrammés (P0-4)** : migration `20260703200000` (appliquée live) — triggers
+   bienvenue-on-confirm, cron J-3 `norva-trial-ending`, trigger past_due, trigger status-change
+   **supprimés** ; les triggers **sécurité** (mdp/e-mail/nouvel appareil) et
+   `norva_send_branded_email` conservés. Un seul système : `norva-lifecycle`.
+
+### 11.6 Deux fichiers d'app en parallèle (dette repérée)
 `public/app.html` **et** `public/app/index.html` coexistent ; **seul `app/index.html` est servi**
 (`/app.html` → 308 → `/app`). Leurs numéros de version de scripts ont divergé (ex. `Settings.js`
 était en v30 sur `app.html` mais v12 sur `app/index.html`). **À rationaliser** un jour (supprimer le

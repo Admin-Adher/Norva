@@ -152,13 +152,14 @@
   <script src="/js/cloudApi.js"></script>
   <script src="/js/authApi.js"></script>
   <script src="/js/billing-config.js?v=4"></script>
-  <script src="/js/billing.js?v=6"></script>
+  <script src="/js/billing.js?v=7"></script>
   <script>
     (function () {
       const params = new URLSearchParams(location.search);
       function safeLocalPath(v) { return (typeof v === 'string' && /^\/(?!\/)/.test(v)) ? v : '/app#home'; }
       const plan = params.get('plan') === 'family' ? 'family' : 'plus';
       const period = params.get('period') === 'annual' ? 'annual' : 'monthly';
+      const intent = params.get('intent') === 'update_card' ? 'update_card' : '';
       const returnTo = safeLocalPath(params.get('returnTo'));
 
       const statusEl = document.getElementById('status');
@@ -195,12 +196,38 @@
         return;
       }
 
+      // ── Adapt the page copy to what this checkout actually does ───────────
+      // The KIND is decided server-side (/checkout) from the account's real state:
+      // trial_setup | plan_change | resubscribe | card_update.
+      let checkoutKind = 'trial_setup';
+      function applyKindCopy(kind) {
+        checkoutKind = kind || 'trial_setup';
+        const h1 = document.querySelector('#checkout-view h1');
+        const sub = document.querySelector('#checkout-view .sub');
+        const after = document.getElementById('sum-after');
+        if (checkoutKind === 'card_update') {
+          h1.textContent = 'Update your payment method';
+          sub.textContent = 'Enter your new card — it becomes the card used for your Norva plan.';
+          after.textContent = 'Today: $0.00 — card check only (€0.50 hold, released right away).';
+        } else if (checkoutKind === 'plan_change') {
+          h1.textContent = 'Change your plan';
+          sub.textContent = 'Your new plan applies right away — no extra charge today, the new price starts next cycle.';
+          after.textContent = 'Today: $0.00 — card check only, your current period is already paid.';
+        } else if (checkoutKind === 'resubscribe') {
+          h1.textContent = 'Reactivate your plan';
+          sub.textContent = 'Welcome back — your plan starts as soon as your card is checked.';
+          after.textContent = 'Billed today — your first payment is processed right after the card check.';
+        }
+      }
+      if (intent === 'update_card') applyKindCopy('card_update');
+
       // ── Create the payment intent and embed the Stancer card form ─────────
       function boot() {
         statusEl.classList.remove('show');
         loading.classList.remove('hide');
-        window.NorvaBilling.stancerCheckoutUrl({ plan: plan, period: period, returnTo: returnTo })
+        window.NorvaBilling.stancerCheckoutUrl({ plan: plan, period: period, returnTo: returnTo, intent: intent })
           .then(function (data) {
+            applyKindCopy(data.kind);
             frame.src = data.url;
             fallback.setAttribute('href', data.url);
             fallback.hidden = false;
@@ -227,27 +254,41 @@
       boot();
 
       // ── Completion: the bridge page (same-origin) posts back when paid ────
+      const DONE_STATUSES = ['trialing', 'active', 'plan_changed', 'updated', 'retrying'];
+      const SUCCESS_COPY = {
+        trial_setup: ['Your free trial has started',
+          "You have full access to Norva on every screen. You won't be charged until your 7-day trial ends — cancel anytime before then."],
+        plan_change: ['Plan updated',
+          'Your new plan is active right away. The new price applies from your next billing cycle.'],
+        resubscribe: ['Welcome back — your plan is active',
+          'Your first payment is being processed and your receipt is on its way by email.'],
+        card_update: ['Payment method updated',
+          'Your new card is saved and will be used for your Norva payments from now on.'],
+      };
       let finishing = false;
       async function finish() {
         if (finishing) return;
         finishing = true;
         loading.classList.remove('hide');
-        loading.firstElementChild.innerHTML = '<div class="spinner"></div>Confirming your trial…';
+        loading.firstElementChild.innerHTML = '<div class="spinner"></div>Finalizing…';
         // /confirm re-fetches the payment server-side; retry briefly while Stancer settles.
-        let ok = false;
+        let done = false;
         for (let i = 0; i < 5; i++) {
           try {
             const r = await window.NorvaBilling.confirmStancer();
-            if (r && r.status === 'trialing') { ok = true; break; }
+            if (r && DONE_STATUSES.indexOf(String(r.status)) !== -1) { done = true; break; }
           } catch (_) { /* retry */ }
           await new Promise(function (res) { setTimeout(res, 1300); });
         }
         document.getElementById('checkout-view').style.display = 'none';
         const success = document.getElementById('success-view');
-        if (!ok) {
+        const copy = SUCCESS_COPY[checkoutKind] || SUCCESS_COPY.trial_setup;
+        success.querySelector('h2').textContent = copy[0];
+        success.querySelector('p').textContent = copy[1];
+        if (!done) {
           // Very unlikely: payment done but confirm still pending — reassure, don't alarm.
           success.querySelector('p').textContent =
-            "Payment received — we're finalizing your trial. It will appear on your account within a minute.";
+            "Payment received — we're finalizing your account. It will be reflected within a minute.";
         }
         success.classList.add('show');
         try { document.getElementById('continue-btn').focus(); } catch (_) {}

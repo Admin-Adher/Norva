@@ -59,7 +59,7 @@
   <script src="/js/cloudApi.js"></script>
   <script src="/js/authApi.js"></script>
   <script src="/js/billing-config.js?v=4"></script>
-  <script src="/js/billing.js?v=6"></script>
+  <script src="/js/billing.js?v=7"></script>
   <script>
     // Return from a Stancer hosted checkout: finalize it (capture the tokenized card + start the
     // trial) with no webhook needed, then reload cleanly so the page renders the new trial state.
@@ -184,6 +184,56 @@
         } catch (_) { /* cosmetic only */ }
       }
 
+      // Self-serve controls for the web (Stancer) rail — native manages via Google Play.
+      function isStancerWeb(decision) {
+        return String((decision.projection || {}).provider || '') === 'stancer' && !isNative();
+      }
+      // "Cancel plan" — cancels at period end via the API (nothing further charged).
+      function cancelButton(decision) {
+        if (!isStancerWeb(decision) || !(window.NorvaBilling && window.NorvaBilling.stancerCancel)) return null;
+        const b = el('button', 'btn ghost', 'Cancel plan');
+        b.addEventListener('click', async function () {
+          const st = String(decision.status || '');
+          const warn = (st === 'past_due' || st === 'grace')
+            ? 'Cancel your Norva plan now? Your access ends immediately and nothing further is charged.'
+            : 'Cancel your Norva plan? You keep full access until the end of the current period, and nothing further will be charged.';
+          if (!window.confirm(warn)) return;
+          b.disabled = true; b.textContent = 'Cancelling…';
+          try { await window.NorvaBilling.stancerCancel(); location.reload(); }
+          catch (e) {
+            b.disabled = false; b.textContent = 'Cancel plan';
+            if (storeNote) storeNote.textContent = 'Could not cancel' + (e && e.message ? ': ' + e.message : '') + ' — please retry or contact support@norva.tv.';
+          }
+        });
+        return b;
+      }
+      // "Update payment method" — labeled re-checkout that swaps the card token only.
+      function updateCardLink(decision, primary) {
+        if (!isStancerWeb(decision)) return null;
+        const a = el('a', primary ? 'btn warn' : 'btn ghost', 'Update payment method');
+        a.setAttribute('href', '/checkout.html?intent=update_card&returnTo=' + encodeURIComponent('/subscription.html'));
+        return a;
+      }
+      // "Resume plan" — undoes a pending cancellation via the API (web/Stancer);
+      // other rails keep the classic link to the plan picker.
+      function resumeControl(decision) {
+        if (isStancerWeb(decision) && window.NorvaBilling && window.NorvaBilling.stancerResume) {
+          const b = el('button', 'btn', 'Resume plan');
+          b.addEventListener('click', async function () {
+            b.disabled = true; b.textContent = 'Resuming…';
+            try { await window.NorvaBilling.stancerResume(); location.reload(); }
+            catch (e) {
+              b.disabled = false; b.textContent = 'Resume plan';
+              if (storeNote) storeNote.textContent = 'Could not resume' + (e && e.message ? ': ' + e.message : '') + '.';
+            }
+          });
+          return b;
+        }
+        const a = el('a', 'btn', 'Resume plan');
+        a.setAttribute('href', subscribeHref());
+        return a;
+      }
+
       function detailRows(decision) {
         const proj = decision.projection || {};
         const frag = document.createDocumentFragment();
@@ -255,8 +305,13 @@
           content.appendChild(card);
           appendPaymentMethod(card, decision);
           const row = el('div', 'actions');
+          // Web/Stancer → our own card-update flow; native → Google Play.
+          const uc = updateCardLink(decision, true);
+          if (uc) row.appendChild(uc);
           const mb = manageButton(isNative() ? 'Update on Google Play' : 'Update payment', true);
           if (mb) row.appendChild(mb);
+          const cx = cancelButton(decision);
+          if (cx) row.appendChild(cx);
           row.appendChild(backBtn('Back'));
           content.appendChild(row);
           return;
@@ -307,16 +362,20 @@
         // Actions for trialing / active / cancelled.
         const row = el('div', 'actions');
         if (status === 'cancelled_at_period_end') {
-          const resume = el('a', 'btn', 'Resume plan');
-          resume.setAttribute('href', subscribeHref());
-          row.appendChild(resume);
+          row.appendChild(resumeControl(decision));
         } else {
           const change = el('a', 'btn ghost', 'Change plan');
           change.setAttribute('href', subscribeHref());
           row.appendChild(change);
+          const uc = updateCardLink(decision, false);
+          if (uc) row.appendChild(uc);
         }
         const mb = manageButton();
         if (mb) row.appendChild(mb);
+        if (status !== 'cancelled_at_period_end') {
+          const cx = cancelButton(decision);
+          if (cx) row.appendChild(cx);
+        }
         const rb = restoreButton();
         if (rb) row.appendChild(rb);
         row.appendChild(backBtn('Back'));

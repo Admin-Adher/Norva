@@ -83,12 +83,33 @@
         period: opts.period === 'annual' ? 'annual' : 'monthly',
         returnTo: opts.returnTo || '',
         embed: true,
+        intent: opts.intent || undefined, // 'update_card' → token swap flow
       }),
     });
     const data = await res.json().catch(function () { return {}; });
     if (!res.ok || !data.url) throw err(data.error || 'Could not start checkout', 'stancer_error', data);
-    return data; // { url, pi_id }
+    return data; // { url, pi_id, kind }
   }
+
+  // POST an account-scoped Stancer action (cancel / resume) and return the response.
+  async function stancerAction(action) {
+    const base = ((window.NorvaAuth && NorvaAuth.supabaseUrl) || 'https://oupsceccxsonaalhueff.supabase.co').replace(/\/+$/, '');
+    const apikey = (window.NorvaAuth && NorvaAuth.publishableKey) || '';
+    const token = await sessionToken();
+    if (!token) throw err('Please sign in first', 'not_signed_in');
+    const res = await fetch(base + '/functions/v1/norva-stancer/' + action, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'apikey': apikey, 'Authorization': 'Bearer ' + token },
+      body: '{}',
+    });
+    const data = await res.json().catch(function () { return {}; });
+    if (!res.ok) throw err(data.error || 'Request failed', 'stancer_error', data);
+    return data;
+  }
+  // Cancel at period end (access continues until then, nothing further is charged).
+  function stancerCancel() { return stancerAction('cancel'); }
+  // Undo a pending cancellation before the period ends.
+  function stancerResume() { return stancerAction('resume'); }
 
   // Finalize a Stancer checkout on the return page (no webhook needed): the edge function re-fetches
   // the payment, captures the tokenized card and starts the trial. Returns {status:'trialing'|'pending'|…}.
@@ -262,6 +283,8 @@
     confirmStancer: confirmStancer,
     stancerProfile: stancerProfile,
     stancerCheckoutUrl: stancerCheckoutUrl,
+    stancerCancel: stancerCancel,
+    stancerResume: stancerResume,
     purchase: purchase,
     restore: restore,
     login: login,
