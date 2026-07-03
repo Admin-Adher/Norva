@@ -100,8 +100,8 @@ Réutilise `cloud_entitlement_projection` (source de vérité). Ajouts (slice ch
 | `norva-stancer-billing` (cron) | Prélève le token à la fin d'essai + aux échéances ; échec → past_due | **Livré (slice B)** |
 | `norva-stancer-webhook` | Re-fetch + capture du `card_…` + statut → projection (plan/essai posés) | **Livré** |
 | Migration `cloud_stancer_*` | Mapping + journal | **Livré (slice A)**, appliquée live |
-| `subscribe.html` / `billing.js` | Route web → `checkout` → redirect page hébergée | Slice C |
-| `renderReceipt` → webhook | Reçu de paiement (template déjà prêt) | Slice C |
+| `subscribe.html` / `billing.js` | Route web → `checkout` → redirect page hébergée | **Livré (slice C)** |
+| `renderReceipt` → cron | Reçu de paiement sur débit capturé | **Livré (slice C)** (dans `norva-stancer-billing`) |
 
 > ✅ **Débit du token CONFIRMÉ en test (2026-07-03)** : `POST /v1/checkout/`
 > `{ amount, currency:"eur", card:"card_…", customer:"cust_…", unique_id }` → `status:"captured"`,

@@ -19,12 +19,34 @@
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
+import { renderReceipt } from "../_shared/lifecycle-email.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? Deno.env.get("SUPABASE_SERVICE_KEY") ?? "";
 const STANCER_SECRET_KEY = Deno.env.get("STANCER_SECRET_KEY") ?? "";
+const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY") ?? "";
+const FROM = Deno.env.get("AUTH_EMAIL_FROM") ?? "Norva <noreply@norva.tv>";
 const STANCER_API = "https://api.stancer.com";
 const BATCH = 100;
+
+// Best-effort payment receipt after a successful charge.
+async function sendReceipt(db: SupabaseClient, userId: string, planLabel: string, amountCents: number, periodEnd: string): Promise<void> {
+  if (!RESEND_API_KEY) return;
+  try {
+    const { data: u } = await db.auth.admin.getUserById(userId);
+    const email = u?.user?.email;
+    if (!email) return;
+    const m = u?.user?.user_metadata ?? {};
+    const full = String((m as Record<string, unknown>).display_name ?? (m as Record<string, unknown>).name ?? "").trim();
+    const first = full ? full.split(/\s+/)[0] : null;
+    const r = renderReceipt(first, { planLabel, amount: `€${(amountCents / 100).toFixed(2)}`, periodEnd });
+    await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${RESEND_API_KEY}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ from: FROM, to: [email], subject: r.subject, html: r.html }),
+    });
+  } catch (_) { /* best-effort */ }
+}
 
 const PRICES: Record<string, Record<string, number>> = {
   plus:   { monthly: 499, annual: 4199 },
@@ -84,11 +106,13 @@ async function chargeUser(db: SupabaseClient, row: Row, kind: "first_charge" | "
   const nowIso = new Date().toISOString();
   if (outcome === "captured") {
     const base = kind === "first_charge" ? row.trial_ends_at : row.current_period_end;
+    const nextEnd = addPeriod(base, plan.period);
     await db.from("cloud_entitlement_projection").update({
-      status: "active", provider: "stancer", current_period_end: addPeriod(base, plan.period),
+      status: "active", provider: "stancer", current_period_end: nextEnd,
       dunning_stage: 0, dunning_last_at: null, last_event_at: nowIso, last_verified_at: nowIso,
     }).eq("user_id", row.user_id);
     try { await db.from("cloud_stancer_payments").upsert({ pi_id: `charge_${uniqueId}`, user_id: row.user_id, kind, amount: plan.amount, currency: "eur", status: "captured", order_id: uniqueId, updated_at: nowIso }); } catch (_) { /* noop */ }
+    await sendReceipt(db, row.user_id, `Norva ${plan.plan === "family" ? "Family" : ""}`.trim(), plan.amount, nextEnd);
     return "charged";
   }
   // Failed → past_due (dunning handled by norva-lifecycle).

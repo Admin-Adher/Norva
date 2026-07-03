@@ -158,8 +158,8 @@
 
   <script src="/js/cloudApi.js"></script>
   <script src="/js/authApi.js"></script>
-  <script src="/js/billing-config.js?v=2"></script>
-  <script src="/js/billing.js?v=2"></script>
+  <script src="/js/billing-config.js?v=3"></script>
+  <script src="/js/billing.js?v=3"></script>
   <script>
     (function () {
       const params = new URLSearchParams(window.location.search);
@@ -241,7 +241,8 @@
           window.location.href = '/account.html?returnTo=' + encodeURIComponent(window.location.pathname + window.location.search);
           return;
         }
-        if (!window.NorvaBilling.hasNativeBilling() && !window.NorvaBilling.isWebBillingConfigured()) {
+        if (!window.NorvaBilling.hasNativeBilling() && !window.NorvaBilling.isWebBillingConfigured()
+            && !window.NorvaBilling.isStancerEnabled()) {
           setStatus('Billing is not configured yet on this platform. Please try again once setup is complete.', true);
           return;
         }
