@@ -36,6 +36,28 @@ qu'avec la build de l'étape 2. Détail : `CAST-CHROMECAST.md`.
 
 ---
 
+## 🗓️ MISE À JOUR 2026-07-03 — Lot « onboarding » ✅ mergé + déployé (PR #78)
+
+Audit d'onboarding (`docs/audits/ONBOARDING-CONVERSION-AUDIT.md`, V1) → 7 chantiers livrés
+(`ONBOARDING-AUDIT-V2.md` = journal + audit refait sur l'état « après »). Merge `3dc7f80`,
+Supabase deploy #103 vert, Cloudflare Pages sur `main`.
+
+- 🟢 **Live** : preuve sociale honnête (`index.html`/`landing.html`) ; copy d'activation à momentum
+  (`HomePage.js`) ; QR sign-in TV (`cloud-pair.html` + `js/vendor/qrcode.js`) ; **e-mail de
+  bienvenue** (`norva-lifecycle`, cron jobid 81 `*/15`, testé HTTP 200).
+- 🟡 **Dormant** : login social Google/Apple (`authApi.js`/`account.html`, `OAUTH_PROVIDERS=[]`) —
+  activer après config Supabase.
+- 🟠 **Gaté** `NORVA_LIFECYCLE_BILLING_LIVE` : rappel J-2, dunning, win-back (`_shared/lifecycle-email.ts`).
+  `renderReceipt` prêt mais non branché sur `norva-billing-webhook`.
+- Migration additive `20260703160000` (marqueurs de cycle) appliquée live.
+
+**Interrupteurs restants (owner)** : (1) config OAuth Supabase + `OAUTH_PROVIDERS` ; (2) rail
+paiement **Stancer** (web) → puis `NORVA_LIFECYCLE_BILLING_LIVE=true` + `enforce` + reçu webhook +
+portail d'annulation. Le lot a comblé l'UX acquisition/activation/rétention ; **le cœur monétisation
+reste bloqué par l'absence de rail paiement live** (prochain jalon).
+
+---
+
 ## 🗓️ MISE À JOUR 2026-07-03 — Cast Chromecast (Lot A) ⏳ sur branche
 
 **Sur `claude/webm-block-additions-error-pj16xm`, pas encore mergé `main`.** Quick-wins UX du

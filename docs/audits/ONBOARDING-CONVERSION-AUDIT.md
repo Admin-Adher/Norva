@@ -1,5 +1,9 @@
 # Norva — Audit onboarding & tunnel de conversion (web · Android TV · mobile)
 
+> **➡️ Une V2 post-implémentation existe : `ONBOARDING-AUDIT-V2.md`** — elle journalise le lot
+> onboarding livré (PR #78) et refait l'audit sur l'état « après ». Ce document-ci reste la
+> photo « avant » de référence.
+
 > Audit **ancré dans le code réel** (parcours tel qu'il est *câblé*, pas tel qu'il est *pensé*),
 > benchmarké contre les meilleurs tunnels d'abonnement au monde, et assorti de recommandations
 > priorisées et spécifiques au positionnement de Norva.
