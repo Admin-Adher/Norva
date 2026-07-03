@@ -12,6 +12,22 @@ Like `norva-source-sync/CRON_SETUP.md`, this is **not a migration**: apply with
 secret value appears here. `cron.schedule(name, …)` is idempotent (re-running
 updates the existing job), so this file is the source of truth for the cadences.
 
+## ⛔ 2026-07-03 — Ninja (`operator1.barfik.org`) PAUSÉ en lazy-only (anti-ban)
+
+> **Les 4 crons Ninja sont DÉSACTIVÉS live** (`cron.unschedule`) — NE PAS les ré-appliquer tant que
+> le « mode faible empreinte » n'est pas livré : `norva-audio-airo-ninja` (jobid 61),
+> `norva-audio-airo-ninja-series` (66), `norva-subtitle-airo-ninja` (67),
+> `norva-whisper-airo-ninja` (73).
+>
+> Cause : l'ancien compte Ninja a été **banni automatiquement** par le provider (« comportement
+> suspect / partage de compte / trop de requêtes »). Diagnostic : notre crawl de fond tapait le
+> provider mono-connexion depuis **plusieurs classes d'IP** (probes → Cloudflare `norva-relay` ;
+> metadata → proxy résidentiel gateway) à **~7 410 probes/jour**, sans mutex incluant la lecture.
+> Le compte a été remplacé ; pour ne pas rebannir le nouveau, Ninja tourne **sans crawl de fond**
+> (enrichissement uniquement à la lecture réelle) jusqu'à ce que le mode faible empreinte existe
+> (1 IP résidentielle unique + cap de débit + concurrence 1 incl. lecture). Détail :
+> `docs/PROVIDER-ANTIBAN-NINJA.md`.
+
 ## 2026-07-02 — Audit & optimisation de la flotte (v4)
 
 > Trace complète : `docs/CRON-OPTIMIZATION-AUDIT.md` (méthode, findings, mesures, preuves live).

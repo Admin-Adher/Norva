@@ -52,6 +52,18 @@ cast depuis les fiches, AirPlay iOS, cast live. Détail complet : **`CAST-CHROME
 
 ---
 
+## 🗓️ MISE À JOUR 2026-07-03 — Ninja banni (anti-ban provider) ⚠️
+
+Le provider Ninja (`operator1.barfik.org`) avait **banni l'ancien compte** (comportement suspect :
+multi-IP + ~7 410 probes/jour + concurrence). Diagnostic complet (root cause = login périmé →
+401 ; films masquaient via stamp-sur-échec ; séries exposaient via ETA « 12 664 j »). Compte
+remplacé. **Mesure immédiate : Ninja passé en lazy-only** — les 4 crons de fond désactivés live
+(`cron.unschedule` : jobid 61/66/67/73) pour ne pas rebannir le nouveau compte. Reste à livrer le
+**mode faible empreinte** (1 IP résidentielle unique + cap débit + concurrence 1 incl. lecture)
+avant de ré-activer le crawl. Détail : `docs/PROVIDER-ANTIBAN-NINJA.md`.
+
+---
+
 ## 🗓️ MISE À JOUR 2026-07-01 — session (identités, notifications, sécurité, release Android)
 
 Tout ci-dessous est **livré et déployé sur `main`** sauf mention contraire. Détails dans les docs dédiées.
