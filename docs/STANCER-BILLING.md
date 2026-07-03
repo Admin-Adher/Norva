@@ -38,6 +38,18 @@ Contrairement à Stripe Billing, **Stancer n'a pas d'objet « subscription/plan/
 - **Récurrent** : 1ᵉʳ paiement avec `tokenize` → **card token** ; les débits suivants réutilisent le
   token (paiement API sans redirection).
 
+> ✅ **Schéma v2 CONFIRMÉ contre le sandbox test (2026-07-03, via `norva-stancer/selftest`)** :
+> - `POST /v2/customers/` `{name,email}` → `{ id: "cust_…" }`.
+> - `POST /v2/payment_intents/` `{ amount:<cents>, currency:"eur", capture, methods_allowed:["card"]
+>   (⚠️ un tableau, pas une string), return_url, order_id, customer, metadata, description }` →
+>   `{ id:"pi_…", url:"https://payment.stancer.com/[test_]pi_…" (page hébergée autonome, pas de clé
+>   publique requise), status:"require_payment_method", card:null (renseigné après paiement),
+>   threeds:"required" }`.
+> - **Essai sans débit immédiat** : `capture:false` (autorisation) → valide + tokenise la carte sans
+>   débiter. Le débit réel (fin d'essai + renouvellements) se fait dans le cron `norva-stancer-billing`
+>   en réutilisant le `card` (`card_…`) renseigné sur le payment_intent après paiement. *(À valider en
+>   slice B : récupération du `card_…` + requête de débit du token.)*
+
 > ⚠️ **Vérification des webhooks** : le schéma de signature n'est pas publiquement documenté sur les
 > pages concept. **Design retenu, robuste quel que soit le schéma** : à réception d'un webhook, on
 > **NE fait PAS confiance au corps** — on **re-fetch le `payment_intent` par son ID** via l'API
