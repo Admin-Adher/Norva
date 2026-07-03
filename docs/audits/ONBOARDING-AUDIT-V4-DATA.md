@@ -371,3 +371,27 @@ sortie (cancel flow sans contre-offre) et la récupération (smart retries, win-
 - **Blinkist (étude de cas publiée)** : +23 % trials, −55 % plaintes, opt-in push 6→74 %.
 - ⚠️ Confiance faible mais directionnel : FirstPageSage (opt-out 48,8 % vs opt-in 18,2 %),
   HubSpot (champs de formulaire, donnée ancienne).
+
+---
+
+## Addendum — mise en œuvre immédiate (même jour)
+
+Les 5 découvertes ont été traitées le jour de l'audit (détail : `docs/PAYMENTS-STATUS.md`
+§11.5quater) :
+
+1. **P0-3 livré** : cancel flow raison → contre-offre 50 % one-shot (`/save-offer`,
+   `cloud_cancel_feedback`, remise appliquée par le cron) — annulation réelle toujours à 1 clic.
+2. **P0-2 en cours côté owner** : email envoyé à Stancer pour activer les autorisations USD +
+   **Apple Pay / Google Pay** ; le code est prêt (iframe `allow="payment"`), il ne restera qu'à
+   basculer l'empreinte EUR→USD.
+3. **P0-1 partiel** : promesse du rappel J-2 affichée sur subscribe + checkout (P1-1 aussi) ;
+   welcome email et connection-gate déjà conformes ; le « paywall sur la lecture, pas sur
+   l'entrée » est acté comme décision au moment de l'enforce.
+4. **P0-5 livré** : vue `norva_funnel_daily` (rétroactive, service-role) — toutes les étapes
+   dérivées des tables existantes, vérifiée en live.
+5. **P2-5 actualisé** : l'owner bénéficie de **15 % de frais Play** (programme activé en Play
+   Console) — la matrice de décision à la publication devient 0 % / ~10 % / 15 %.
+
+P1-2 (relance ~1 h) livré également. Restent ouverts : P0-4 (config OAuth, owner), P1-3 (smart
+retries — audit des capacités Stancer), P1-4 (pré-sélection annuel), P1-5 (enforce, dernière
+étape du go-live), et le P2.

@@ -177,11 +177,14 @@ async function runWinback(db: SupabaseClient): Promise<number> {
   return sent;
 }
 
-// Checkout-abandonment relance: one email (+push), 2–48h after a card-check
+// Checkout-abandonment relance: one email (+push), 1–48h after a card-check
 // checkout was opened but never completed. Skips users who finished elsewhere.
+// The low bound is ~1h ON PURPOSE: abandoned-checkout recovery peaks when the
+// reminder lands within the hour and roughly halves after 24h (Klaviyo/SaleCycle
+// 2024) — with the cron running every 15 min, the send lands at ≈1h-1h15.
 async function runAbandoned(db: SupabaseClient): Promise<number> {
   const lo = new Date(Date.now() - 48 * 3600_000).toISOString();
-  const hi = new Date(Date.now() - 2 * 3600_000).toISOString();
+  const hi = new Date(Date.now() - 1 * 3600_000).toISOString();
   const { data } = await db.from("cloud_stancer_payments")
     .select("pi_id,user_id,created_at")
     .in("kind", ["trial_setup", "resubscribe"])

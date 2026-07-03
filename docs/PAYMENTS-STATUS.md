@@ -301,6 +301,55 @@ checkout (11.5-2) reste le fallback avec carte.
 (autorisations USD), et la **publication Play Store** (volontairement différée — « il faut qu'on
 soit parfait »).*
 
+### 11.5quater Lot V4 « data » (post-audit V4) — livré
+
+L'audit V4 (`docs/audits/ONBOARDING-AUDIT-V4-DATA.md`) a confronté chaque pratique aux chiffres
+publiés du marché. Les 5 découvertes ont été traitées ainsi :
+
+1. **Cancel flow avec contre-offre** (les cancel flows B2C sauvent 20-22 % des annulations —
+   Churnkey ; remise acceptée à ~54 %) : `subscription.html` remplace le `confirm()` par un
+   modal **raison → offre contextuelle → confirmation** :
+   - raisons whitelistées (`too_expensive`/`not_using`/`technical`/`other`/`skipped`),
+     journalisées dans **`cloud_cancel_feedback`** (service-role only) ;
+   - `too_expensive`/`not_using` → **offre one-shot « 50 % off next payment »**
+     (`POST /save-offer`, gardée par `save_offer_used_at` ; `discount_next_pct` sur la ligne
+     mapping) ; accepter pendant une annulation en attente = resume ;
+   - `technical` → mailto support + cancel direct ; annuler reste accessible à **chaque étape**
+     (lien « Skip and cancel now » dès l'étape 1 — conformité click-to-cancel) ;
+   - le cron de facturation applique la remise sur LA prochaine charge (min 50 ¢), la consomme
+     **au succès seulement** (un échec la conserve pour le retry), reçu « (50 % off applied) » ;
+   - `past_due`/`grace` gardent le confirm direct (pas d'offre quand un paiement est dû) ;
+   - `subscription.html` affiche « Next payment — 50 % off applied » quand la remise est posée.
+2. **Apple Pay / Google Pay** (+7,4 %/méthode, Apple Pay +22,3 % — Stripe) : **owner a écrit à
+   Stancer** (2026-07-03) pour activer les autorisations USD **et** Apple/Google Pay. Côté code
+   tout est prêt : l'iframe checkout porte déjà `allow="payment"`, les wallets apparaîtront
+   automatiquement sur la page hébergée. Au retour de Stancer : flip `currency:"eur"`→`"usd"`
+   dans `/checkout` (une ligne, commentée sur place) → l'empreinte devient $0.50.
+3. **Activation avant essai** (55,4 % des cancels d'essai au J0 — Adapty) : le welcome email
+   était déjà centré « connect your first source » et la Home a déjà son connection-gate ; la
+   **promesse du rappel J-2** est maintenant affichée sur `subscribe.html` ET `checkout.html`
+   (« We'll email you a reminder 2 days before your trial ends » — cas Blinkist : +23 % de
+   démarrages d'essai). Décision à prendre AU MOMENT de l'enforce : gater la **lecture** plutôt
+   que l'entrée d'app, pour laisser connecter la source avant de payer (value-before-payment).
+4. **Instrumentation funnel** : plutôt qu'un tracking client fragile, une **vue dérivée
+   rétroactive** `norva_funnel_daily` (service-role only) compte les utilisateurs uniques par
+   jour et par étape à partir des tables existantes : signup (projection), source_added
+   (1re `cloud_sources`), first_play (1re `cloud_watch_history`), checkout_open
+   (`cloud_stancer_payments` trial_setup/resubscribe), trial_start (`trial_consumed_at`),
+   trial_convert / renewal (charges capturées), cancel / save (`cloud_cancel_feedback`),
+   winback_return (resubscribe complété). Vérifiée en live sur les comptes de test.
+   Requête type : `select * from norva_funnel_daily order by day desc, stage;`
+5. **Play Store** : owner a activé dans la Play Console le programme donnant **15 % de frais**
+   (au lieu de 30 %). Matrice de décision à la publication : APK login-only (0 %, conforme
+   « consumption-only ») / lien externe in-app US-UK-EEE (~10 %, permis depuis le 30-06-2026)
+   / **Play Billing à 15 %** (le cas Dipsea chiffre l'arbitrage volume-vs-commission : web-only
+   = −⅓ d'essais, revenu net/user ≈ égal).
+
+Aussi dans ce lot : **relance abandon resserrée à ~1 h** (borne basse 2 h→1 h dans
+`runAbandoned` ; optimum documenté Klaviyo/SaleCycle — la conversion chute de moitié après
+24 h). Migration appliquée live : `20260703230000_cancel_save_offer_and_funnel.sql`.
+`billing.js` → v9 (subscribe/checkout/subscription).
+
 ### 11.6 Deux fichiers d'app en parallèle (dette repérée)
 `public/app.html` **et** `public/app/index.html` coexistent ; **seul `app/index.html` est servi**
 (`/app.html` → 308 → `/app`). Leurs numéros de version de scripts ont divergé (ex. `Settings.js`

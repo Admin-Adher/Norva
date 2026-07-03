@@ -71,6 +71,21 @@ async function ensureCustomer(db: SupabaseClient, userId: string, email: string,
 }
 
 const TRIAL_DAYS = 7;
+// One-shot cancel-flow counter-offer: percentage off the NEXT charge (applied once by
+// the billing cron, then cleared). 50% mirrors the market's best-accepted save offer.
+const SAVE_OFFER_PCT = 50;
+const CANCEL_REASONS = new Set(["too_expensive", "not_using", "technical", "other", "skipped"]);
+
+// Cancellation-feedback journal (reasons + saves) — feeds norva_funnel_daily. Best-effort:
+// analytics must never block a cancellation.
+async function logCancelFeedback(db: SupabaseClient, userId: string, reason: string, action: "cancelled" | "saved", statusAt: string, offer?: string): Promise<void> {
+  try {
+    await db.from("cloud_cancel_feedback").insert({
+      user_id: userId, reason: CANCEL_REASONS.has(reason) ? reason : "skipped",
+      action, status_at: statusAt || null, offer: offer ?? null,
+    });
+  } catch (_) { /* best-effort */ }
+}
 
 // Retrieve a payment_intent (PLURAL endpoint) — the authoritative status + card token.
 async function fetchPI(piId: string): Promise<Record<string, unknown> | null> {
@@ -243,8 +258,11 @@ Deno.serve(async (req) => {
     // Validation hold in EUR: authorization-only (capture:false) is enabled on this Stancer account
     // for EUR but NOT USD — a USD auth-only card payment comes back "not ready for authorization" on
     // the hosted page, while USD captures work fine (matrix selftest + manual test, 2026-07-03).
-    // Plan charges stay in USD (norva-stancer-billing). Flip to "usd" once Stancer support enables
-    // USD authorizations on the account.
+    // Plan charges stay in USD (norva-stancer-billing). Owner asked Stancer support (2026-07-03) to
+    // enable USD authorizations AND Apple Pay / Google Pay on the account. Once confirmed:
+    //   • flip currency below to "usd" (hold becomes $0.50);
+    //   • wallets appear on the hosted page automatically — the checkout iframe already carries
+    //     allow="payment", nothing else to change client-side.
     const DESCRIPTIONS: Record<string, string> = {
       trial_setup: `Norva ${plan} ${period} — card validation for 7-day free trial`,
       plan_change: `Norva ${plan} ${period} — plan change (card check, not charged)`,
@@ -279,7 +297,8 @@ Deno.serve(async (req) => {
     const user = u?.user;
     if (!user?.id) return json({ error: "Not signed in" }, 401);
     const { data: row } = await db.from("cloud_stancer_customers")
-      .select("plan,period,amount_cents,card_last4,card_exp").eq("user_id", user.id).maybeSingle();
+      .select("plan,period,amount_cents,card_last4,card_exp,save_offer_used_at,discount_next_pct")
+      .eq("user_id", user.id).maybeSingle();
     return json({ ok: true, profile: row ?? null });
   }
 
@@ -457,12 +476,18 @@ Deno.serve(async (req) => {
   // ── /cancel — user-authed: stop auto-renewal; access runs to the period end ──
   // Honors the "cancel anytime" promise for the Stancer (web) rail. The billing
   // cron only charges trialing/active rows, so a cancelled row is never charged.
+  // Accepts an optional {reason} from the cancel flow — journaled for analytics,
+  // never a condition: the cancellation itself always goes through.
   if (req.method === "POST" && path === "/cancel") {
     const jwt = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
     if (!jwt) return json({ error: "Not signed in" }, 401);
     const { data: u } = await db.auth.getUser(jwt);
     const user = u?.user;
     if (!user?.id) return json({ error: "Not signed in" }, 401);
+
+    let payload: { reason?: string } = {};
+    try { payload = await req.json(); } catch (_) { /* reason is optional */ }
+    const reason = String(payload.reason ?? "skipped");
 
     const { data: row } = await db.from("cloud_entitlement_projection")
       .select("status,provider,trial_ends_at,current_period_end").eq("user_id", user.id).maybeSingle();
@@ -480,12 +505,14 @@ Deno.serve(async (req) => {
       await db.from("cloud_entitlement_projection").update({
         status: "cancelled_at_period_end", current_period_end: accessUntil, last_event_at: nowIso,
       }).eq("user_id", user.id);
+      await logCancelFeedback(db, user.id, reason, "cancelled", st);
       return json({ ok: true, status: "cancelled_at_period_end", access_until: accessUntil });
     }
     if (st === "active") {
       await db.from("cloud_entitlement_projection").update({
         status: "cancelled_at_period_end", last_event_at: nowIso,
       }).eq("user_id", user.id);
+      await logCancelFeedback(db, user.id, reason, "cancelled", st);
       return json({ ok: true, status: "cancelled_at_period_end", access_until: p.current_period_end ?? null });
     }
     if (st === "past_due" || st === "grace") {
@@ -493,12 +520,58 @@ Deno.serve(async (req) => {
       await db.from("cloud_entitlement_projection").update({
         status: "expired", last_event_at: nowIso,
       }).eq("user_id", user.id);
+      await logCancelFeedback(db, user.id, reason, "cancelled", st);
       return json({ ok: true, status: "expired" });
     }
     if (st === "cancelled_at_period_end") {
       return json({ ok: true, status: st, access_until: p.current_period_end ?? null });
     }
     return json({ error: "Nothing to cancel" }, 400);
+  }
+
+  // ── /save-offer — user-authed: accept the cancel-flow counter-offer ──────────
+  // One-shot per customer: 50% off the NEXT charge (trial first charge or renewal),
+  // applied by the billing cron then cleared. If a cancellation was already pending,
+  // accepting the offer also resumes the plan. Never creates entitlement by itself.
+  if (req.method === "POST" && path === "/save-offer") {
+    const jwt = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
+    if (!jwt) return json({ error: "Not signed in" }, 401);
+    const { data: u } = await db.auth.getUser(jwt);
+    const user = u?.user;
+    if (!user?.id) return json({ error: "Not signed in" }, 401);
+
+    let payload: { reason?: string } = {};
+    try { payload = await req.json(); } catch (_) { /* reason is optional */ }
+    const reason = String(payload.reason ?? "skipped");
+
+    const { data: row } = await db.from("cloud_entitlement_projection")
+      .select("status,provider,trial_ends_at,current_period_end").eq("user_id", user.id).maybeSingle();
+    const p = row as { status?: string; provider?: string; trial_ends_at?: string; current_period_end?: string } | null;
+    const st = String(p?.status ?? "");
+    const nowMs = Date.now();
+    const periodEndMs = p?.current_period_end ? new Date(p.current_period_end).getTime() : 0;
+    const eligibleStatus = st === "trialing" || st === "active" ||
+      (st === "cancelled_at_period_end" && periodEndMs > nowMs);
+    if (!p || String(p.provider ?? "") !== "stancer" || !eligibleStatus) {
+      return json({ ok: false, reason: "not_eligible" });
+    }
+    const { data: custRow } = await db.from("cloud_stancer_customers")
+      .select("save_offer_used_at").eq("user_id", user.id).maybeSingle();
+    if ((custRow as { save_offer_used_at?: string } | null)?.save_offer_used_at) {
+      return json({ ok: false, reason: "already_used" });
+    }
+
+    const nowIso = new Date().toISOString();
+    await db.from("cloud_stancer_customers").upsert({
+      user_id: user.id, discount_next_pct: SAVE_OFFER_PCT, save_offer_used_at: nowIso, updated_at: nowIso,
+    });
+    if (st === "cancelled_at_period_end") {
+      // Accepting the offer while a cancellation is pending = staying.
+      const backTo = (p.trial_ends_at && new Date(p.trial_ends_at).getTime() > nowMs) ? "trialing" : "active";
+      await db.from("cloud_entitlement_projection").update({ status: backTo, last_event_at: nowIso }).eq("user_id", user.id);
+    }
+    await logCancelFeedback(db, user.id, reason, "saved", st, `discount${SAVE_OFFER_PCT}`);
+    return json({ ok: true, status: "offer_applied", discount_pct: SAVE_OFFER_PCT });
   }
 
   // ── /resume — user-authed: undo a pending cancellation before it takes effect ──

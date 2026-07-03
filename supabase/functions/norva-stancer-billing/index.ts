@@ -89,12 +89,16 @@ async function chargeToken(cardToken: string, customerId: string | null, amount:
 async function chargeUser(db: SupabaseClient, row: Row, kind: "first_charge" | "renewal", cycleAnchor: string | null): Promise<string> {
   // Amount + period live on the mapping row (plan_code is constrained to plus/family).
   const { data: cust } = await db.from("cloud_stancer_customers")
-    .select("stancer_customer_id,card_token,plan,period,amount_cents").eq("user_id", row.user_id).maybeSingle();
-  const c = cust as { card_token?: string; stancer_customer_id?: string; plan?: string; period?: string; amount_cents?: number } | null;
+    .select("stancer_customer_id,card_token,plan,period,amount_cents,discount_next_pct").eq("user_id", row.user_id).maybeSingle();
+  const c = cust as { card_token?: string; stancer_customer_id?: string; plan?: string; period?: string; amount_cents?: number; discount_next_pct?: number } | null;
   const cardToken = c?.card_token;
   const customerId = c?.stancer_customer_id ?? null;
   const period = c?.period === "annual" ? "annual" : "monthly";
   const amount = c?.amount_cents ?? 0;
+  // One-shot save-offer discount (cancel flow): applied to THIS charge, cleared on
+  // success only — a failed charge keeps it so the dunning retry still honors it.
+  const discountPct = (typeof c?.discount_next_pct === "number" && c.discount_next_pct >= 1 && c.discount_next_pct <= 99)
+    ? c.discount_next_pct : 0;
   // The mapping row carries what THIS charge is for (incl. a scheduled downgrade
   // from /change-plan) — prefer it over the projection's possibly-stale plan_code.
   const mappedPlan = c?.plan === "family" ? "family" : (c?.plan === "plus" ? "plus" : null);
@@ -109,7 +113,9 @@ async function chargeUser(db: SupabaseClient, row: Row, kind: "first_charge" | "
   // globally unique per (user, cycle) so a re-run never double-charges the SAME cycle.
   const cycleDay = Math.floor((Date.parse(String(cycleAnchor ?? "")) || Date.now()) / 86400000).toString(36);
   const uniqueId = (row.user_id.replace(/-/g, "") + cycleDay).slice(0, 36);
-  const outcome = await chargeToken(cardToken, customerId, amount, uniqueId, `${planLabel} ${period} — ${kind}`);
+  const chargeAmount = discountPct ? Math.max(50, Math.round(amount * (100 - discountPct) / 100)) : amount;
+  const desc = `${planLabel} ${period} — ${kind}${discountPct ? ` (${discountPct}% off)` : ""}`;
+  const outcome = await chargeToken(cardToken, customerId, chargeAmount, uniqueId, desc);
 
   const nowIso = new Date().toISOString();
   if (outcome === "captured") {
@@ -122,8 +128,12 @@ async function chargeUser(db: SupabaseClient, row: Row, kind: "first_charge" | "
       ...(mappedPlan ? { plan_code: mappedPlan } : {}),
       dunning_stage: 0, dunning_last_at: null, last_event_at: nowIso, last_verified_at: nowIso,
     }).eq("user_id", row.user_id);
-    try { await db.from("cloud_stancer_payments").upsert({ pi_id: `charge_${uniqueId}`, user_id: row.user_id, kind, amount, currency: "usd", status: "captured", order_id: uniqueId, updated_at: nowIso }); } catch (_) { /* noop */ }
-    await sendReceipt(db, row.user_id, planLabel, amount, nextEnd);
+    if (discountPct) {
+      // The save-offer discount is one-shot: consumed by this successful charge.
+      try { await db.from("cloud_stancer_customers").update({ discount_next_pct: null, updated_at: nowIso }).eq("user_id", row.user_id); } catch (_) { /* noop */ }
+    }
+    try { await db.from("cloud_stancer_payments").upsert({ pi_id: `charge_${uniqueId}`, user_id: row.user_id, kind, amount: chargeAmount, currency: "usd", status: "captured", order_id: uniqueId, updated_at: nowIso }); } catch (_) { /* noop */ }
+    await sendReceipt(db, row.user_id, discountPct ? `${planLabel} (${discountPct}% off applied)` : planLabel, chargeAmount, nextEnd);
     return "charged";
   }
   // Failed → past_due (dunning handled by norva-lifecycle).

@@ -42,6 +42,23 @@
     .btn:focus-visible { outline: 3px solid var(--pink); outline-offset: 3px; }
     .note { color: var(--quiet); font-size: 12px; line-height: 1.5; margin-top: 16px; }
     .loading { color: var(--muted); padding: 24px 4px; }
+    /* Cancel flow modal (reason → contextual counter-offer → confirm). */
+    .modal-back { position: fixed; inset: 0; background: rgba(4,6,10,.72); display: grid;
+      place-items: center; padding: 20px; z-index: 50; }
+    .modal { width: min(460px, 100%); background: var(--panel); border: 1px solid var(--line);
+      border-radius: 14px; padding: 22px; max-height: 90vh; overflow-y: auto; }
+    .modal h2 { font-size: 19px; margin-bottom: 4px; }
+    .modal p { color: var(--muted); font-size: 14px; line-height: 1.55; margin: 8px 0 0; }
+    .reasons { display: grid; gap: 8px; margin: 16px 0 2px; }
+    .reasons label { display: flex; gap: 10px; align-items: center; border: 1px solid var(--line);
+      border-radius: 10px; padding: 12px 14px; cursor: pointer; font-size: 14px; color: var(--text); }
+    .reasons label:has(input:checked) { border-color: var(--pink); background: rgba(181,121,255,.08); }
+    .offer { border: 1px solid rgba(52,211,153,.4); background: rgba(52,211,153,.08);
+      border-radius: 12px; padding: 14px 16px; margin-top: 14px; font-size: 14px; line-height: 1.55; }
+    .offer b { color: var(--green); }
+    .btn.danger { background: transparent; border: 1px solid var(--danger); color: var(--danger); }
+    .linkish { background: none; border: 0; color: var(--quiet); font: inherit; font-size: 13px;
+      cursor: pointer; text-decoration: underline; margin-top: 14px; display: inline-block; padding: 0; }
     html.tv .btn { min-height: 64px; font-size: 18px; }
   </style>
 </head>
@@ -59,7 +76,7 @@
   <script src="/js/cloudApi.js"></script>
   <script src="/js/authApi.js"></script>
   <script src="/js/billing-config.js?v=4"></script>
-  <script src="/js/billing.js?v=8"></script>
+  <script src="/js/billing.js?v=9"></script>
   <script>
     // Return from a Stancer hosted checkout: finalize it (capture the tokenized card + start the
     // trial) with no webhook needed, then reload cleanly so the page renders the new trial state.
@@ -174,12 +191,22 @@
           if (provider !== 'stancer' || isNative()) return;
           if (!(window.NorvaBilling && window.NorvaBilling.stancerProfile)) return;
           window.NorvaBilling.stancerProfile().then(function (p) {
-            if (!p || !p.card_last4) return;
-            const d = el('div', 'detail');
-            d.appendChild(el('span', null, 'Payment method'));
-            d.appendChild(el('b', null, '•••• ' + p.card_last4 + (p.card_exp ? ' · exp ' + p.card_exp : '')));
+            if (!p) return;
             const msg = card.querySelector('.msg');
-            if (msg) card.insertBefore(d, msg); else card.appendChild(d);
+            function slot(node) { if (msg) card.insertBefore(node, msg); else card.appendChild(node); }
+            if (p.card_last4) {
+              const d = el('div', 'detail');
+              d.appendChild(el('span', null, 'Payment method'));
+              d.appendChild(el('b', null, '•••• ' + p.card_last4 + (p.card_exp ? ' · exp ' + p.card_exp : '')));
+              slot(d);
+            }
+            // A pending save-offer discount (cancel flow) applies to the next charge.
+            if (p.discount_next_pct) {
+              const d2 = el('div', 'detail');
+              d2.appendChild(el('span', null, 'Next payment'));
+              d2.appendChild(el('b', null, p.discount_next_pct + '% off applied'));
+              slot(d2);
+            }
           }).catch(function () { /* cosmetic only */ });
         } catch (_) { /* cosmetic only */ }
       }
@@ -188,22 +215,172 @@
       function isStancerWeb(decision) {
         return String((decision.projection || {}).provider || '') === 'stancer' && !isNative();
       }
-      // "Cancel plan" — cancels at period end via the API (nothing further charged).
+      // Cancel via the API, with the reason from the cancel flow (analytics only).
+      async function doCancel(reason) {
+        try { await window.NorvaBilling.stancerCancel(reason || 'skipped'); location.reload(); }
+        catch (e) {
+          if (storeNote) storeNote.textContent = 'Could not cancel' + (e && e.message ? ': ' + e.message : '') + ' — please retry or contact support@norva.tv.';
+        }
+      }
+
+      // Cancel flow: reason → contextual counter-offer (50% off next payment / support)
+      // → confirm. Cancelling stays honest and short: a "cancel now" path is reachable
+      // from every step, and the offer is one-shot per customer (server-guarded).
+      function openCancelFlow(decision) {
+        const trialing = String(decision.status || '') === 'trialing';
+        const back = el('div', 'modal-back');
+        const modal = el('div', 'modal');
+        modal.setAttribute('role', 'dialog');
+        modal.setAttribute('aria-modal', 'true');
+        back.appendChild(modal);
+        document.body.appendChild(back);
+        function close() { back.remove(); }
+        back.addEventListener('click', function (e) { if (e.target === back) close(); });
+        document.addEventListener('keydown', function esc(e) {
+          if (e.key === 'Escape') { close(); document.removeEventListener('keydown', esc); }
+        });
+
+        let reason = 'skipped';
+        const keepNote = trialing
+          ? "You keep full access until your trial ends, and you won't be charged."
+          : 'You keep full access until the end of the current period, and nothing further will be charged.';
+
+        function actionsRow() { return el('div', 'actions'); }
+        function keepButton() {
+          const k = el('button', 'btn ghost', 'Keep my plan');
+          k.addEventListener('click', close);
+          return k;
+        }
+        function cancelNowButton(label) {
+          const c = el('button', 'btn danger', label || 'Cancel my plan');
+          c.addEventListener('click', function () { c.disabled = true; c.textContent = 'Cancelling…'; doCancel(reason); });
+          return c;
+        }
+
+        function stepReason() {
+          modal.innerHTML = '';
+          modal.appendChild(el('h2', null, 'Before you go…'));
+          modal.appendChild(el('p', null, 'Mind telling us the main reason? One tap — it really helps us improve Norva.'));
+          const list = el('div', 'reasons');
+          [['too_expensive', 'It costs too much'],
+           ['not_using', "I'm not using it enough"],
+           ['technical', "Something isn't working"],
+           ['other', 'Another reason']].forEach(function (r) {
+            const lab = el('label');
+            const input = document.createElement('input');
+            input.type = 'radio'; input.name = 'cancel-reason'; input.value = r[0];
+            lab.appendChild(input);
+            lab.appendChild(el('span', null, r[1]));
+            list.appendChild(lab);
+          });
+          modal.appendChild(list);
+          const row = actionsRow();
+          const cont = el('button', 'btn', 'Continue');
+          cont.addEventListener('click', function () {
+            const sel = modal.querySelector('input[name="cancel-reason"]:checked');
+            reason = sel ? sel.value : 'skipped';
+            stepNext();
+          });
+          row.appendChild(cont);
+          row.appendChild(keepButton());
+          modal.appendChild(row);
+          const skip = el('button', 'linkish', 'Skip and cancel now');
+          skip.addEventListener('click', function () { reason = 'skipped'; stepConfirm(); });
+          modal.appendChild(skip);
+        }
+
+        async function stepNext() {
+          if (reason === 'technical') return stepSupport();
+          if (reason !== 'too_expensive' && reason !== 'not_using') return stepConfirm();
+          // Price/usage objections → the one-shot 50% counter-offer, if still available.
+          let used = false;
+          try {
+            const p = window.NorvaBilling.stancerProfile ? await window.NorvaBilling.stancerProfile() : null;
+            used = !!(p && (p.save_offer_used_at || p.discount_next_pct));
+          } catch (_) { /* offer check is best-effort */ }
+          if (used) return stepConfirm();
+          stepOffer();
+        }
+
+        function stepOffer() {
+          modal.innerHTML = '';
+          modal.appendChild(el('h2', null, 'How about half price instead?'));
+          const offer = el('div', 'offer');
+          offer.appendChild(el('div', null, ''));
+          offer.firstChild.innerHTML = 'Stay with Norva and get <b>50% off your ' + (trialing ? 'first' : 'next') +
+            ' payment</b> — applied automatically, no code needed.';
+          modal.appendChild(offer);
+          modal.appendChild(el('p', null, 'One-time offer. Your plan and everything you set up stay exactly as they are.'));
+          const row = actionsRow();
+          const take = el('button', 'btn', 'Get 50% off and stay');
+          take.addEventListener('click', async function () {
+            take.disabled = true; take.textContent = 'Applying…';
+            const r = await window.NorvaBilling.stancerSaveOffer(reason);
+            if (r && r.ok) return stepSaved();
+            stepConfirm("The offer isn't available on this account.");
+          });
+          row.appendChild(take);
+          row.appendChild(cancelNowButton());
+          modal.appendChild(row);
+          const keep = el('button', 'linkish', 'Keep my plan as it is');
+          keep.addEventListener('click', close);
+          modal.appendChild(keep);
+        }
+
+        function stepSaved() {
+          modal.innerHTML = '';
+          modal.appendChild(el('h2', null, 'Done — 50% off your ' + (trialing ? 'first' : 'next') + ' payment 🎉'));
+          modal.appendChild(el('p', null, "It's applied automatically. Thanks for staying with Norva."));
+          const row = actionsRow();
+          const ok = el('button', 'btn', 'Close');
+          ok.addEventListener('click', function () { location.reload(); });
+          row.appendChild(ok);
+          modal.appendChild(row);
+        }
+
+        function stepSupport() {
+          modal.innerHTML = '';
+          modal.appendChild(el('h2', null, "Sorry about that — let's fix it"));
+          modal.appendChild(el('p', null, 'Tell us what went wrong and we’ll help — most issues are sorted within a day. ' + keepNote));
+          const row = actionsRow();
+          const mail = el('a', 'btn', 'Email support@norva.tv');
+          mail.setAttribute('href', 'mailto:support@norva.tv?subject=Norva%20issue%20(before%20cancelling)');
+          row.appendChild(mail);
+          row.appendChild(cancelNowButton());
+          modal.appendChild(row);
+          const keep = el('button', 'linkish', 'Keep my plan');
+          keep.addEventListener('click', close);
+          modal.appendChild(keep);
+        }
+
+        function stepConfirm(note) {
+          modal.innerHTML = '';
+          modal.appendChild(el('h2', null, 'Cancel your plan?'));
+          if (note) modal.appendChild(el('p', null, note));
+          modal.appendChild(el('p', null, keepNote));
+          const row = actionsRow();
+          row.appendChild(cancelNowButton());
+          row.appendChild(keepButton());
+          modal.appendChild(row);
+        }
+
+        stepReason();
+      }
+
+      // "Cancel plan" — opens the cancel flow (past-due plans keep the direct
+      // confirm: the offer doesn't apply while a payment is owed).
       function cancelButton(decision) {
         if (!isStancerWeb(decision) || !(window.NorvaBilling && window.NorvaBilling.stancerCancel)) return null;
         const b = el('button', 'btn ghost', 'Cancel plan');
-        b.addEventListener('click', async function () {
+        b.addEventListener('click', function () {
           const st = String(decision.status || '');
-          const warn = (st === 'past_due' || st === 'grace')
-            ? 'Cancel your Norva plan now? Your access ends immediately and nothing further is charged.'
-            : 'Cancel your Norva plan? You keep full access until the end of the current period, and nothing further will be charged.';
-          if (!window.confirm(warn)) return;
-          b.disabled = true; b.textContent = 'Cancelling…';
-          try { await window.NorvaBilling.stancerCancel(); location.reload(); }
-          catch (e) {
-            b.disabled = false; b.textContent = 'Cancel plan';
-            if (storeNote) storeNote.textContent = 'Could not cancel' + (e && e.message ? ': ' + e.message : '') + ' — please retry or contact support@norva.tv.';
+          if (st === 'past_due' || st === 'grace') {
+            if (!window.confirm('Cancel your Norva plan now? Your access ends immediately and nothing further is charged.')) return;
+            b.disabled = true; b.textContent = 'Cancelling…';
+            doCancel('skipped');
+            return;
           }
+          openCancelFlow(decision);
         });
         return b;
       }
