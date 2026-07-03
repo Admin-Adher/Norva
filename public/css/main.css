@@ -10476,33 +10476,6 @@ mark.search-highlight {
    Chromecast (web sender) — cast button + active-session bar
    ============================================================ */
 
-.watch-cast-btn {
-  position: absolute;
-  top: 18px;
-  right: 18px;
-  z-index: 26;
-  width: 44px;
-  height: 44px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: none;
-  border-radius: 50%;
-  background: rgba(10, 10, 15, 0.6);
-  color: #fff;
-  cursor: pointer;
-}
-
-.watch-cast-btn:hover,
-.watch-cast-btn:focus {
-  background: rgba(255, 255, 255, 0.9);
-  color: #0a0a0f;
-}
-
-.watch-cast-btn.hidden {
-  display: none;
-}
-
 .watch-cast-bar {
   position: absolute;
   top: 0;
@@ -10511,9 +10484,11 @@ mark.search-highlight {
   z-index: 27;
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 12px 20px;
-  background: rgba(10, 10, 15, 0.85);
+  gap: 14px;
+  padding: 12px 18px;
+  background: rgba(10, 12, 18, 0.92);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
   color: #fff;
 }
 
@@ -10521,25 +10496,153 @@ mark.search-highlight {
   display: none;
 }
 
-.watch-cast-bar-label {
-  flex: 1;
-  font-size: 0.95rem;
+.watch-cast-bar-poster {
+  width: 46px;
+  height: 68px;
+  object-fit: cover;
+  border-radius: 6px;
+  flex: 0 0 auto;
+  background: #1a1f2b;
 }
 
-.watch-cast-toggle,
+.watch-cast-bar-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.watch-cast-bar-title {
+  font-weight: 700;
+  font-size: 0.98rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.watch-cast-bar-label {
+  font-size: 0.8rem;
+  color: #9fb0c9;
+}
+
+.watch-cast-bar-scrub {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.watch-cast-time {
+  font-size: 0.75rem;
+  color: #c7d2e0;
+  font-variant-numeric: tabular-nums;
+  flex: 0 0 auto;
+  min-width: 40px;
+}
+
+.watch-cast-time.dur {
+  text-align: right;
+}
+
+.watch-cast-seek {
+  flex: 1;
+  min-width: 80px;
+  height: 4px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: rgba(255, 255, 255, 0.22);
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.watch-cast-seek::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: #fff;
+  cursor: pointer;
+}
+
+.watch-cast-seek::-moz-range-thumb {
+  width: 13px;
+  height: 13px;
+  border: none;
+  border-radius: 50%;
+  background: #fff;
+  cursor: pointer;
+}
+
+.watch-cast-bar-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.watch-cast-ctl {
+  border: none;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  font-size: 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.watch-cast-ctl:hover,
+.watch-cast-ctl:focus-visible {
+  background: rgba(255, 255, 255, 0.24);
+}
+
+.watch-cast-ctl[hidden] {
+  display: none;
+}
+
 .watch-cast-stop {
   border: none;
-  border-radius: 6px;
-  padding: 8px 14px;
-  font-size: 0.88rem;
-  font-weight: 600;
+  border-radius: 8px;
+  padding: 9px 15px;
+  font-size: 0.85rem;
+  font-weight: 700;
   cursor: pointer;
-  background: rgba(255, 255, 255, 0.16);
+  background: #3b82f6;
   color: #fff;
 }
 
-.watch-cast-stop {
-  background: #3b82f6;
+.watch-cast-stop:hover,
+.watch-cast-stop:focus-visible {
+  background: #2f6fe0;
+}
+
+/* Cast button in the control bar reads as "active" while a session is live */
+.watch-btn.is-casting {
+  color: #5b9dff;
+}
+
+@media (max-width: 560px) {
+  .watch-cast-bar {
+    gap: 10px;
+    padding: 10px 12px;
+  }
+
+  .watch-cast-bar-poster {
+    display: none;
+  }
+
+  .watch-cast-time {
+    min-width: 34px;
+  }
+
+  .watch-cast-ctl {
+    width: 34px;
+    height: 34px;
+  }
 }
 
 /* ============================================================

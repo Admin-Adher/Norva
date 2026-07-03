@@ -1801,7 +1801,7 @@ class App {
             this._adminPageLoading = new Promise((resolve, reject) => {
                 if (window.AdminPage) { resolve(); return; }
                 const s = document.createElement('script');
-                s.src = '/js/pages/AdminPage.js?v=22';
+                s.src = '/js/pages/AdminPage.js?v=23';
                 s.onload = () => resolve();
                 s.onerror = () => { this._adminPageLoading = null; reject(new Error('AdminPage.js failed to load')); };
                 document.head.appendChild(s);

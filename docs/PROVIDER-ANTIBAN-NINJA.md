@@ -1,0 +1,105 @@
+# Provider anti-ban — incident Ninja & mode faible empreinte (2026-07-03)
+
+## Incident
+
+La ligne « ⏸ à l'arrêt » des **séries Ninja** au dashboard (ETA « ~12 664 j ») a révélé, après
+diagnostic, que le compte provider Ninja (`operator1.barfik.org`) renvoyait **401 Unauthorized**.
+Le revendeur a confirmé :
+
+> « Le compte avait reçu un **bannissement automatique pour comportement suspect**. Il envoyait
+> beaucoup de requêtes au serveur, il y a peut-être eu un **partage de compte** ou une **forte
+> consommation des ressources**. Je vous en ai donné un de remplacement. »
+
+**Le ban a très probablement été déclenché par le crawl d'enrichissement de Norva lui-même.**
+
+## Diagnostic — pourquoi les films *paraissaient* sains mais tout était cassé
+
+- `operator1.barfik.org` up & rapide (401 en ~0,5 s) → pas un timeout ni l'IP.
+- Films Ninja (24 h) : **7 410 sondés, 0 résolus** → 100 % d'échec, mais **stampés** quand même
+  (le chemin film `relayEmpty → markProbed`, `norva-playback/index.ts:3858`) → le dashboard
+  affichait un débit « sain » mensonger (7 410/j « sondé », 0,4 % résolu au total).
+- Séries : chemin `noTarget` (`index.ts:3807`) **ne stampe pas** → pool jamais drainé → ETA absurde
+  mais **honnête**. Ce sont les séries qui ont dit la vérité.
+- Les identifiants **stockés en base étaient périmés** (username `s3jfe2tutsvl`, rejeté 401). Un
+  login de remplacement (`jf3l5j3245`) testé : `auth:1`, **Active**, `get_series` = 42 135,
+  `get_series_info` = épisodes OK. Le provider est vivant ; c'est bien l'ancien login qui était banni.
+
+## Les 3 vecteurs de ban (mappés aux mots du revendeur)
+
+| Revendeur | Cause Norva | Preuve |
+|---|---|---|
+| « partage de compte » | Compte `max_connections:1` vu depuis **3 classes d'IP** : probes films → **Cloudflare** (`norva-relay.workers.dev`), metadata/series-info → **proxy résidentiel** gateway (Railway), lecture user → IP maison. | `norva-relay:103`, `media-gateway:12-40` |
+| « beaucoup de requêtes » | **~7 410 probes films/jour** + séries + syncs catalogue (un humain en fait une poignée). | DB `probed_24h` |
+| « forte consommation » | Milliers d'ouvertures de connexion/jour ; le **mutex de fond exclut la lecture** (`media-gateway:1034`) et les probes passent par un **service séparé** (Cloudflare, verrou distinct) → probe possible **pendant** une lecture = 2 connexions simultanées. | `media-gateway:1027-1034` |
+
+Note : le probe film ne tire qu'un **byte-range** (léger en bande passante) — le problème est le
+**nombre de requêtes + le multi-IP + la concurrence**, pas la conso brute.
+
+## Mesure immédiate prise (2026-07-03) — lazy-only
+
+Les **4 crons de fond Ninja** ont été **désactivés live** (`cron.unschedule`) :
+`norva-audio-airo-ninja` (61), `norva-audio-airo-ninja-series` (66), `norva-subtitle-airo-ninja`
+(67), `norva-whisper-airo-ninja` (73). → **0 crawl de fond** ; lecture / sync / catalogue intacts.
+Le nouveau compte peut être branché sans reproduire le comportement qui a banni l'ancien.
+(Noté aussi dans `supabase/functions/ENRICHMENT_CRON_SETUP.md`.)
+
+## Mode « faible empreinte » — plan (à livrer avant de ré-activer le crawl Ninja)
+
+Cible : rendre le crawl **indiscernable d'un foyer normal** sur un provider anti-abus.
+
+1. **Une seule IP résidentielle pour TOUT le provider** — router les probes films par le **proxy
+   résidentiel de la gateway** (comme la metadata), plus par le worker Cloudflare. Le compte
+   n'apparaît que depuis **une IP maison stable, sticky-par-compte** → tue le signal multi-IP.
+   *(Levier le plus décisif.)*
+2. **Cap de débit strict + jitter** par provider marqué « anti-abus » — quelques dizaines de
+   probes/heure max, étalées, quiet-hours. Le cache persiste → ça se complète lentement et
+   invisiblement (au lieu de 7 410/j).
+3. **Concurrence 1 réelle, lecture incluse** — un seul accès provider à la fois, **jamais** un probe
+   pendant une lecture, unifié relay + gateway, + cooldown entre requêtes.
+4. **Metadata-first / lazy** — préférer `get_vod_info` / `get_series_info` (JSON, ressemble à de la
+   navigation) et n'ouvrir un flux que sur **lecture réelle** ou en dernier recours.
+5. **Profil « empreinte » par provider** — flag `low_footprint` sur la source ; crawl agressif
+   conservé seulement pour les providers qui le tolèrent (super8k, apdxes…).
+
+## Statut d'implémentation
+
+- **Slice 0 — flag + observabilité** ✅ *livré* (migration `20260703140000_provider_footprint_policy`,
+  appliquée live). Table `provider_footprint_policy` (clé = `resolveSourceIdentity().key`) +
+  `provider_probe_hits` (compteur horaire) + RPC `provider_footprint_budget` / `_record_hit`.
+  Ninja (`d8453dc1-…`) = `low_footprint`, plafond **40/h**.
+- **Slice 1 — IP résidentielle unique** ✅ *codé (branche, pas encore déployé)*.
+  - Gateway : nouvel endpoint `POST /probe-audio` (v63) → `probeCodecProfile` (ffprobe via le
+    **proxy résidentiel**), même shape JSON que le relay.
+  - Edge (`runOneDimension`/`processOne`) : pour une identité `low_footprint`, le probe part vers la
+    **gateway** au lieu du relay Cloudflare + enregistre un hit (`provider_footprint_record_hit`), et
+    la tick est **sautée si over-budget** (`provider_footprint_budget.allowed`). Inerte pour tous les
+    autres providers (chemin relay inchangé) et pour Ninja tant que ses crons sont coupés.
+- **Slice 2 — cap + jitter + concurrence 1 incl. lecture** ✅ *codé (branche)*.
+  - Edge : concurrence forcée à **1**, **cap par-probe** sur le budget horaire restant, **jitter**
+    0,2-1,2 s entre hits.
+  - Gateway `/probe-audio` : refuse **409 `account_busy`** si une lecture réelle tient la connexion
+    unique du compte (match host+username sur les sessions actives) → jamais de chevauchement viewer.
+- **Slice 4 — honnêteté dashboard** ✅ *codé + SQL live*. `refresh_admin_dashboard()` expose
+  `resolved_24h` ; AdminPage : alarme **« ⚠ provider muet »** (sondé_24h ≥ 20 & résolu_24h = 0) +
+  garde-fou ETA **« ≫ 1 an »**. Vérifié live : Ninja films = sondé 6410 / résolu 0 → alarme.
+- **Slice 3 — lazy/metadata-first + crons domptés** ⏳ *doc / deploy-gated*. Commandes cron domptées
+  (cadence réduite, cap 40/h auto) prêtes dans `ENRICHMENT_CRON_SETUP.md` (à appliquer après deploy).
+  Metadata-first inapplicable à Ninja (`get_vod_info` sans bloc audio) ; lazy-à-la-lecture = complément.
+
+**Séquence de déploiement** : (1) déployer la **gateway** v63, (2) merger l'**edge**, (3) *seulement
+ensuite* re-scheduler les crons Ninja domptés. Ordre important : ne pas ré-activer les crons avant
+que la gateway serve `/probe-audio`.
+
+## Checklist de ré-activation Ninja
+
+- [x] Identifiants remplacés dans l'app (ré-encrypte `config_ciphertext` + re-sync).
+- [x] Slice 0-4 codés (flag/budget, IP résidentielle, cap/jitter/mutex, dashboard) ; Slice 0+4-SQL live.
+- [ ] Déployer gateway v63 + merger l'edge.
+- [ ] Re-scheduler les crons Ninja **domptés** (commandes dans `ENRICHMENT_CRON_SETUP.md`).
+- [ ] Surveiller 48 h : `provider_probe_hits` ≤ 40/h, `résolu_24h > 0`, pas de 401 barfik, alarme « provider muet » éteinte.
+
+## Bug dashboard connexe (révélé par cet incident)
+
+`sondé_24h` élevé + **`résolu_24h = 0`** = signal « provider mort », aujourd'hui **invisible** (les
+films affichent un débit sain grâce au stamp-sur-échec). À remonter comme alarme, en plus du
+garde-fou d'ETA (cf. réflexion dashboard).

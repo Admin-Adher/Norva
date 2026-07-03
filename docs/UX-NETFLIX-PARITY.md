@@ -163,3 +163,40 @@ indicateur de débit Mbps dans le badge qualité.
 
 ## Reste chantier (non fait, assumé)
 Recherche par acteur (backfill cast), minification/bundling front, player Tizen.
+
+---
+
+# Cast (Chromecast) — Lot A quick-wins (2026-07-03)
+
+Le sender Google Cast (`public/js/utils/castSender.js` + `WatchPage`) tournait sur
+le **Default Media Receiver**. Lot A corrige les frictions sans récepteur custom
+(pas d'enregistrement Google Cast Developer Console).
+
+- **Annuler ≠ erreur** : `requestSession()` rejette avec `cancel` quand on ferme le
+  sélecteur d'appareils → normalisé (`err.code = 'cancel'`) et traité en silence
+  (fini le toast « Cast unavailable » + le `Cast failed: cancel` en console). La
+  lecture locale reprend là où on l'a laissée.
+- **Sous-titres au cast** : `castMedia({ subtitles })` monte des `Track` VTT sur le
+  récepteur et les active. `WatchPage.getCastSubtitles()` résout une URL récupérable :
+  piste embarquée → sidecar `sub_<index>.vtt` (gateway/HLS), sinon sous-titres IA/
+  traduits en mémoire → `data:` URI (garde-fou de taille). Si le récepteur refuse la
+  piste, `loadMedia` retente **sans** sous-titres → les sous-titres ne peuvent jamais
+  casser la lecture.
+- **Garde-fou formats** : `isCastSafeDirectUrl()` — mkv/ts/HEVC & muxes legacy ne sont
+  plus envoyés en direct au Default Receiver (échec opaque) ; ils passent par le
+  transcode gateway comme les titres moteur.
+- **Progression pendant le cast** : `startCastProgressSync()` sauvegarde la position
+  (`remotePosition` + `_castBaseOffset`) toutes les 10 s + flush sur `pagehide`/
+  onglet caché → Continue Watching reste à jour même onglet fermé.
+- **Barre de cast enrichie** : affiche/titre, barre de seek scrubbable + temps
+  courant/total, −10 s / play-pause / +10 s, **épisode suivant** (recharge sur la même
+  session, sans nouveau sélecteur), Stop. Rafraîchie 1×/s ; auto-nettoyage si la
+  session est coupée depuis la TV.
+- **Bouton cast dans la barre de contrôle** (`#watch-cast`, à côté de PiP/plein écran),
+  visible dès qu'un récepteur est découvert (piloté par les events `CAST_STATE_CHANGED`,
+  fin du trou aveugle de 4 s) ; accent visuel quand une session est active.
+
+## Reste chantier cast (Lot B, non fait)
+Récepteur CAF custom Norva (branding TV, rendu natif sous-titres/audio, file
+d'épisodes, contrôleur étendu), cast depuis les fiches/catalogue, AirPlay iOS,
+cast du live TV.
