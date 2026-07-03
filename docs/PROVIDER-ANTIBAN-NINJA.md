@@ -74,21 +74,29 @@ Cible : rendre le crawl **indiscernable d'un foyer normal** sur un provider anti
     **gateway** au lieu du relay Cloudflare + enregistre un hit (`provider_footprint_record_hit`), et
     la tick est **sautée si over-budget** (`provider_footprint_budget.allowed`). Inerte pour tous les
     autres providers (chemin relay inchangé) et pour Ninja tant que ses crons sont coupés.
-- **Slice 2** (jitter + mutex incl. lecture + cap par-probe) et **Slice 3** (lazy/metadata-first +
-  re-schedule crons domptés) : à faire.
+- **Slice 2 — cap + jitter + concurrence 1 incl. lecture** ✅ *codé (branche)*.
+  - Edge : concurrence forcée à **1**, **cap par-probe** sur le budget horaire restant, **jitter**
+    0,2-1,2 s entre hits.
+  - Gateway `/probe-audio` : refuse **409 `account_busy`** si une lecture réelle tient la connexion
+    unique du compte (match host+username sur les sessions actives) → jamais de chevauchement viewer.
+- **Slice 4 — honnêteté dashboard** ✅ *codé + SQL live*. `refresh_admin_dashboard()` expose
+  `resolved_24h` ; AdminPage : alarme **« ⚠ provider muet »** (sondé_24h ≥ 20 & résolu_24h = 0) +
+  garde-fou ETA **« ≫ 1 an »**. Vérifié live : Ninja films = sondé 6410 / résolu 0 → alarme.
+- **Slice 3 — lazy/metadata-first + crons domptés** ⏳ *doc / deploy-gated*. Commandes cron domptées
+  (cadence réduite, cap 40/h auto) prêtes dans `ENRICHMENT_CRON_SETUP.md` (à appliquer après deploy).
+  Metadata-first inapplicable à Ninja (`get_vod_info` sans bloc audio) ; lazy-à-la-lecture = complément.
 
 **Séquence de déploiement** : (1) déployer la **gateway** v63, (2) merger l'**edge**, (3) *seulement
-ensuite* re-scheduler les crons Ninja (Slice 3). Ordre important : ne pas ré-activer les crons avant
+ensuite* re-scheduler les crons Ninja domptés. Ordre important : ne pas ré-activer les crons avant
 que la gateway serve `/probe-audio`.
 
 ## Checklist de ré-activation Ninja
 
 - [x] Identifiants remplacés dans l'app (ré-encrypte `config_ciphertext` + re-sync).
-- [x] Slice 0 (flag/budget) livré ; Slice 1 (IP résidentielle unique) codé.
+- [x] Slice 0-4 codés (flag/budget, IP résidentielle, cap/jitter/mutex, dashboard) ; Slice 0+4-SQL live.
 - [ ] Déployer gateway v63 + merger l'edge.
-- [ ] Slice 2 (jitter + mutex lecture) + Slice 3 (lazy/metadata-first).
-- [ ] Re-scheduler les crons Ninja **en version domptée** (cadence réduite) depuis `ENRICHMENT_CRON_SETUP.md`.
-- [ ] Surveiller `active_cons` / 401 côté provider + `résolu_24h > 0` au dashboard pendant 48 h.
+- [ ] Re-scheduler les crons Ninja **domptés** (commandes dans `ENRICHMENT_CRON_SETUP.md`).
+- [ ] Surveiller 48 h : `provider_probe_hits` ≤ 40/h, `résolu_24h > 0`, pas de 401 barfik, alarme « provider muet » éteinte.
 
 ## Bug dashboard connexe (révélé par cet incident)
 

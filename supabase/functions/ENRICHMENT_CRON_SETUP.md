@@ -28,6 +28,41 @@ updates the existing job), so this file is the source of truth for the cadences.
 > (1 IP résidentielle unique + cap de débit + concurrence 1 incl. lecture). Détail :
 > `docs/PROVIDER-ANTIBAN-NINJA.md`.
 
+### Ninja — ré-activation domptée (à appliquer APRÈS déploiement gateway v63 + edge)
+
+Le **mode faible empreinte est livré** (Slice 0-2, branche) : plafond **40/h**
+(`provider_footprint_policy`, identité `d8453dc1-…`), probes via l'**IP résidentielle** de la gateway
+(`POST /probe-audio`), **concurrence 1** + jitter 0,2-1,2 s + **mutex lecture** (la gateway renvoie
+409 `account_busy` si un viewer tient la connexion). Tout est automatique côté runner dès qu'une
+identité est `low_footprint` — la cadence des crons ne fait que fournir des ticks ; le plafond 40/h
+reste la vraie limite, donc **pas de split jour/nuit** (le mutex gère le chevauchement lecture).
+Séquence : déployer gateway v63 → merger l'edge → **PUIS** :
+
+```sql
+select cron.schedule('norva-audio-airo-ninja', '4-59/12 * * * *', $cron$
+  select net.http_post(
+    url := 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-playback/audio-backfill',
+    headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'norva_backfill_token')),
+    body := jsonb_build_object('userId','7bdab1df-80e6-46f9-bcdf-84b6595819a8','sourceId','976e7bbd-f433-4a41-821d-3cb983c73921','type','movie','mode','probe','limit',12,'concurrency',1,'fallthrough',true),
+    timeout_milliseconds := 110000 ); $cron$);
+select cron.schedule('norva-audio-airo-ninja-series', '9-59/12 * * * *', $cron$
+  select net.http_post(
+    url := 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-playback/audio-backfill',
+    headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'norva_backfill_token')),
+    body := jsonb_build_object('userId','7bdab1df-80e6-46f9-bcdf-84b6595819a8','sourceId','976e7bbd-f433-4a41-821d-3cb983c73921','type','series','mode','probe','limit',8,'concurrency',1),
+    timeout_milliseconds := 110000 ); $cron$);
+```
+
+Sous-titres/whisper Ninja : ajoutés **plus tard**, une fois l'audio validé (48 h sans re-ban,
+`résolu_24h > 0`). Après activation, vérifier : dashboard **« ⚠ provider muet » absent**,
+`select count(*) from provider_probe_hits where identity_key='d8453dc1-…' and occurred_at > now()-interval '1 hour'` **≤ 40**,
+gateway health sans 401 barfik. Tuner `max_probes_per_hour` (`provider_footprint_policy`) si besoin.
+
+**Lazy / metadata-first** : pour Ninja (panel AÎRO), `get_vod_info` **n'expose pas** le bloc audio
+(« vod mort », cf. note v2) → pas de raccourci metadata possible ; l'enrichissement passe forcément
+par le header-probe (désormais résidentiel + capé). L'enrichissement à la **lecture réelle** reste
+le complément gratuit (zéro connexion en plus).
+
 ## 2026-07-02 — Audit & optimisation de la flotte (v4)
 
 > Trace complète : `docs/CRON-OPTIMIZATION-AUDIT.md` (méthode, findings, mesures, preuves live).

@@ -57,10 +57,12 @@ cast depuis les fiches, AirPlay iOS, cast live. Détail complet : **`CAST-CHROME
 Le provider Ninja (`operator1.barfik.org`) avait **banni l'ancien compte** (comportement suspect :
 multi-IP + ~7 410 probes/jour + concurrence). Diagnostic complet (root cause = login périmé →
 401 ; films masquaient via stamp-sur-échec ; séries exposaient via ETA « 12 664 j »). Compte
-remplacé. **Mesure immédiate : Ninja passé en lazy-only** — les 4 crons de fond désactivés live
-(`cron.unschedule` : jobid 61/66/67/73) pour ne pas rebannir le nouveau compte. Reste à livrer le
-**mode faible empreinte** (1 IP résidentielle unique + cap débit + concurrence 1 incl. lecture)
-avant de ré-activer le crawl. Détail : `docs/PROVIDER-ANTIBAN-NINJA.md`.
+remplacé (nouveau login testé OK : auth/séries/épisodes). **Mesure immédiate : Ninja passé en
+lazy-only** — les 4 crons de fond désactivés live (`cron.unschedule` : jobid 61/66/67/73). Puis
+**mode faible empreinte codé (Slice 0-4, branche)** : plafond 40/h (`provider_footprint_policy`),
+probes via IP résidentielle gateway (`/probe-audio` v63), concurrence 1 + jitter + mutex lecture
+(409 `account_busy`), alarme dashboard « provider muet » + garde-fou ETA. **Reste** : déployer
+gateway v63 + merger edge, puis re-scheduler les crons domptés. Détail : `docs/PROVIDER-ANTIBAN-NINJA.md`.
 
 ---
 
