@@ -54,3 +54,18 @@ verify_jwt = false
 # gated behind NORVA_LIFECYCLE_BILLING_LIVE). Cron-authenticated via norva_verify_cron_secret.
 [functions.norva-lifecycle]
 verify_jwt = false
+
+# Stancer (web payment rail) webhook. INERT until STANCER_SECRET_KEY is set. Verifies by re-fetching
+# the payment_intent from Stancer (no trust in the raw body); optional ?t= URL token filter.
+[functions.norva-stancer-webhook]
+verify_jwt = false
+
+# Stancer checkout + diagnostics. INERT until STANCER_SECRET_KEY is set. /health is open; /selftest is
+# cron-authed and test-mode only; /checkout is user-authed (verifies the JWT itself).
+[functions.norva-stancer]
+verify_jwt = false
+
+# Stancer recurring-billing cron — the only place that charges a saved card. INERT until
+# STANCER_SECRET_KEY is set. Cron-authenticated via norva_verify_cron_secret.
+[functions.norva-stancer-billing]
+verify_jwt = false

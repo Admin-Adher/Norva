@@ -20,4 +20,20 @@ window.NORVA_BILLING_CONFIG = {
   // customer-center or Stripe billing-portal link). Empty = no web "manage"
   // button until configured. Native uses the Google Play subscriptions page.
   webCustomerPortalUrl: '',
+
+  // ── Stancer (web payment rail — see docs/STANCER-BILLING.md) ──────────────
+  // Inert until `enabled:true` AND the STANCER_SECRET_KEY edge secret is set.
+  // The web checkout (subscribe.html) calls the norva-stancer/checkout function,
+  // which returns a Stancer hosted-payment-page URL to redirect to (PCI-safe,
+  // 3DS automatic). Card charging + recurring is orchestrated server-side.
+  stancer: {
+    enabled: false,
+    mode: 'test',                                   // 'test' | 'live' (matches the edge key)
+    checkoutUrl: '/functions/v1/norva-stancer/checkout',
+    // Display prices per plan/period (amounts are charged server-side in cents).
+    plans: {
+      plus:   { monthly: '4.99', annual: '41.99' },
+      family: { monthly: '8.99', annual: '75.99' },
+    },
+  },
 };

@@ -38,6 +38,42 @@
     return Boolean(CONFIG.webBillingEnabled && CONFIG.revenueCatWebPublicKey);
   }
 
+  // Web payment via Stancer (French gateway, hosted payment page). Enabled per config.
+  function isStancerEnabled() {
+    return Boolean(CONFIG.stancer && CONFIG.stancer.enabled);
+  }
+
+  function sessionToken() {
+    if (window.NorvaAuth && typeof NorvaAuth.getAccessToken === 'function') {
+      return Promise.resolve(NorvaAuth.getAccessToken()).catch(function () { return ''; });
+    }
+    try {
+      const s = JSON.parse(localStorage.getItem('norva-cloud-session') || 'null');
+      return Promise.resolve((s && s.access_token) || '');
+    } catch (_) { return Promise.resolve(''); }
+  }
+
+  // Open a Stancer checkout: ask our edge function for a hosted-page URL, then redirect.
+  // Plan/period are derived from the same opts subscribe.html already sends.
+  async function stancerCheckout(opts) {
+    const cfg = CONFIG.stancer || {};
+    const base = ((window.NorvaAuth && NorvaAuth.supabaseUrl) || 'https://oupsceccxsonaalhueff.supabase.co').replace(/\/+$/, '');
+    const apikey = (window.NorvaAuth && NorvaAuth.publishableKey) || '';
+    const token = await sessionToken();
+    if (!token) throw err('Please sign in first', 'not_signed_in');
+    const plan = opts.planCode === 'family' ? 'family' : 'plus';
+    const period = /annual/i.test(String(opts.packageId || '')) ? 'annual' : 'monthly';
+    const res = await fetch(base + (cfg.checkoutUrl || '/functions/v1/norva-stancer/checkout'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'apikey': apikey, 'Authorization': 'Bearer ' + token },
+      body: JSON.stringify({ plan: plan, period: period }),
+    });
+    const data = await res.json().catch(function () { return {}; });
+    if (!res.ok || !data.url) throw err(data.error || 'Could not start checkout', 'stancer_error', data);
+    window.location.assign(data.url); // → Stancer hosted payment page (PCI, 3DS)
+    return { status: 'redirect' };
+  }
+
   function err(message, code, data) {
     return Object.assign(new Error(message), { code: code || 'error', data: data });
   }
@@ -125,6 +161,9 @@
     if (hasNativeBilling()) {
       return callNative('purchase', [String(opts.packageId || opts.productId || ''), String(opts.planCode || '')]);
     }
+    if (isStancerEnabled()) {
+      return stancerCheckout(opts); // web → Stancer hosted page (redirects away)
+    }
     const purchases = await ensureWeb(opts.appUserId);
     const pkg = await webPackage(purchases, opts.packageId, opts.productId);
     if (!pkg) throw err('Plan not available', 'no_package');
@@ -166,6 +205,7 @@
     isNative: isNative,
     hasNativeBilling: hasNativeBilling,
     isWebBillingConfigured: isWebBillingConfigured,
+    isStancerEnabled: isStancerEnabled,
     purchase: purchase,
     restore: restore,
     login: login,
