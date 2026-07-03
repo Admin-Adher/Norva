@@ -162,7 +162,7 @@ Deno.serve(async (req) => {
     const user = u?.user;
     if (!user?.id || !user.email) return json({ error: "Not signed in" }, 401);
 
-    let payload: { plan?: string; period?: string } = {};
+    let payload: { plan?: string; period?: string; returnTo?: string } = {};
     try { payload = await req.json(); } catch (_) { /* defaults below */ }
     const plan = payload.plan === "family" ? "family" : "plus";
     const period = payload.period === "annual" ? "annual" : "monthly";
@@ -179,7 +179,13 @@ Deno.serve(async (req) => {
       user_id: user.id, stancer_customer_id: custId, plan, period, amount_cents: amount, updated_at: new Date().toISOString(),
     });
 
-    const returnUrl = `${RETURN_BASE}/subscription.html?stancer=done`;
+    // Carry the caller's origin so the return page can send the user back where they
+    // started (e.g. Settings). Only a same-site path is accepted — never an absolute
+    // or protocol-relative URL — so this can't become an open redirect.
+    const rawReturn = typeof payload.returnTo === "string" ? payload.returnTo : "";
+    const safeReturn = /^\/(?!\/)/.test(rawReturn) ? rawReturn.slice(0, 512) : "";
+    const returnUrl = `${RETURN_BASE}/subscription.html?stancer=done` +
+      (safeReturn ? `&returnTo=${encodeURIComponent(safeReturn)}` : "");
     // Trial setup (Option B — minimal footprint): authorize a small validation amount (€0.50) with
     // capture:false → validates + tokenizes the card, NO plan charge now. The hold auto-releases; the
     // real plan amount (from plan_code) is charged at trial end by norva-stancer-billing. `amount`

@@ -180,7 +180,7 @@
   <script src="/js/cloudApi.js"></script>
   <script src="/js/authApi.js"></script>
   <script src="/js/billing-config.js?v=4"></script>
-  <script src="/js/billing.js?v=3"></script>
+  <script src="/js/billing.js?v=4"></script>
   <script>
     (function () {
       const params = new URLSearchParams(window.location.search);
@@ -278,6 +278,7 @@
             productId: card.dataset.product,
             planCode: card.dataset.plan,
             appUserId: uid,
+            returnTo: returnTo, // Stancer web → carried through so the return page can go back here.
           });
           showTrialConfirmation();
         } catch (e) {

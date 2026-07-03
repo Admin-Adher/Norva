@@ -66,7 +66,7 @@
     const res = await fetch(base + (cfg.checkoutUrl || '/functions/v1/norva-stancer/checkout'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'apikey': apikey, 'Authorization': 'Bearer ' + token },
-      body: JSON.stringify({ plan: plan, period: period }),
+      body: JSON.stringify({ plan: plan, period: period, returnTo: opts.returnTo || '' }),
     });
     const data = await res.json().catch(function () { return {}; });
     if (!res.ok || !data.url) throw err(data.error || 'Could not start checkout', 'stancer_error', data);
