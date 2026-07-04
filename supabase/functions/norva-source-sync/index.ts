@@ -148,10 +148,14 @@ Deno.serve(async (req) => {
         return json(req, await cronRevalidate(supabase, limit, reset, concurrency));
       }
       // Search-match titles that have no provider TMDB id (TMDB search + confirm).
+      // Caps raised for backlog burn-down: ~459k browsable titles were never
+      // attempted at the old 300/run cap (~65 days to clear). A run at limit=1000,
+      // conc=15 is ~1.2k TMDB calls in ~35s (well under the 120s cron timeout and
+      // TMDB's ~50 req/s), so the nightly schedule clears the backlog in days.
       if (segments[1] === "search-match") {
-        const limit = boundedInt(url.searchParams.get("limit"), 100, 1, 300);
+        const limit = boundedInt(url.searchParams.get("limit"), 100, 1, 1500);
         const reset = url.searchParams.get("reset") === "1";
-        const concurrency = boundedInt(url.searchParams.get("conc"), 8, 1, 20);
+        const concurrency = boundedInt(url.searchParams.get("conc"), 8, 1, 30);
         return json(req, await cronSearchMatch(supabase, limit, reset, concurrency));
       }
       return json(req, { error: "not_found" }, 404);
@@ -761,6 +765,7 @@ async function cronSearchMatch(db: SupabaseClient, limit: number, reset: boolean
     .from("cloud_titles")
     .select("id, item_type, title, original_title, release_year, metadata, poster_url, backdrop_url")
     .eq("match_status", "unmatched")
+    .gt("variant_count", 0) // only spend TMDB calls on titles a user can actually browse/play
     .or(`search_match_attempted_at.is.null,search_match_attempted_at.lt.${retryBefore}`)
     .order("id", { ascending: true })
     .limit(limit);

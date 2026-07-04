@@ -108,6 +108,29 @@ de récence du lot 1. Prouvé en base (compte de 71 007 films) :
 - Test de parité `tests/genre-taxonomy-parity.test.js` : verrou anti-drift entre les 3 copies
   du classifieur (TS edge / JS navigateur / SQL). **Backfill : 576 k lignes, index GIN valide.**
 
+## Lot 3 — posters manquants = backlog d'enrichissement TMDB (pas un bug d'affichage)
+
+Une fois le catalogue complet exposé par bucket, beaucoup de cartes montraient le
+placeholder « N ». Cause prouvée en base : ce ne sont PAS des images cassées — ce sont des
+titres `match_status = 'unmatched'` (aucun rapprochement TMDB → aucun poster / titre pollué
+type « 47 Ronin (FHD MULTI) », « Percy Jackson (SD VF) »). Or **459 311 titres navigables
+(98,6 % des non-matchés) n'avaient JAMAIS été tentés** par le cron search-match. Ces films
+sont pourtant sur TMDB (47 Ronin = id 64686, score de match ~0.92) — ils n'avaient
+simplement jamais été atteints, le cron tournant à 300/run × 24/j = ~7,2k/j (≈ 65 j de retard).
+
+**Correctifs :**
+- **Cron search-match accéléré** (`norva-source-sync` + migration `20260704180000`) :
+  plafonds edge 300→1500 / conc 20→30, filtre `variant_count>0` (zéro appel TMDB gâché sur
+  les entrées mortes), planification `limit=1000 conc=15 */5 0-11 * * *` (~144k titres/j) →
+  le backlog de ~459k se vide en **~3-4 jours** (budget TMDB ~5 req/s moyen, sous les 50 req/s).
+  Le `searchTmdbMatch` nettoie déjà les suffixes (`cleanSearchQuery`), donc ces titres
+  matchent dès qu'ils sont atteints. Kick manuel au déploiement pour démarrer tout de suite.
+- **Affichage posters-first (non destructif)** dans `norva-catalog` : la grille « See all »
+  ordonne les titres AVEC poster d'abord (`poster_url` non-null), la longue traîne
+  non-enrichie passe en fin (rien n'est masqué, le compte reste le total navigable) ; les
+  **rails** de genre ne montrent que des titres avec poster (aperçu curé). Au fil de
+  l'enrichissement, les blancs se remplissent tout seuls.
+
 ## Portée : web ET Android (TV + mobile)
 Les apps Android sont des **wrappers WebView natifs** (`clients/android-phone`,
 `clients/android-tv`) qui chargent le site live `norva.tv`. Donc : (1) les correctifs
