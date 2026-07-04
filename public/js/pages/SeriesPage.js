@@ -16,7 +16,8 @@ class SeriesPage {
         this.searchInput = document.getElementById('series-search');
         this.detailsPanel = document.getElementById('series-details');
         this.seasonsContainer = document.getElementById('series-seasons');
-        this.seasonSelect = document.getElementById('series-season-select');
+        this.seasonTabs = document.getElementById('series-season-tabs');
+        this._activeSeason = null;
         this.primaryActionBtn = document.getElementById('series-primary-action');
         this.playStartBtn = document.getElementById('series-play-start');
         this.detailFavoriteBtn = document.getElementById('series-detail-favorite');
@@ -117,7 +118,6 @@ class SeriesPage {
             this.hideDetails();
         });
 
-        this.seasonSelect?.addEventListener('change', () => this.applySelectedSeason());
         this.primaryActionBtn?.addEventListener('click', () => this.playPrimaryEpisode());
         this.playStartBtn?.addEventListener('click', () => this.playPrimaryEpisode({ fromStart: true }));
         this.detailFavoriteBtn?.addEventListener('click', async (e) => {
@@ -1884,11 +1884,22 @@ class SeriesPage {
     }
 
     applySelectedSeason() {
-        if (!this.seasonSelect || !this.seasonsContainer) return;
-        const selected = this.seasonSelect.value;
+        if (!this.seasonsContainer) return;
+        const selected = this._activeSeason;
         this.seasonsContainer.querySelectorAll('.season-group').forEach(group => {
-            group.classList.toggle('hidden-by-select', selected && group.dataset.season !== selected);
+            group.classList.toggle('hidden-by-select', selected != null && group.dataset.season !== String(selected));
         });
+        this.seasonTabs?.querySelectorAll('.season-tab').forEach(tab => {
+            const on = String(tab.dataset.season) === String(selected);
+            tab.classList.toggle('active', on);
+            tab.setAttribute('aria-selected', on ? 'true' : 'false');
+            tab.tabIndex = on ? 0 : -1; // roving tabindex: one stop for the whole tablist
+        });
+    }
+
+    setActiveSeason(seasonNum) {
+        this._activeSeason = seasonNum == null ? null : String(seasonNum);
+        this.applySelectedSeason();
     }
 
     // Open a series' detail directly from a search result: best-effort fetch its
@@ -2024,12 +2035,28 @@ class SeriesPage {
             }
 
             const featured = this.getFeaturedEpisode(flatEpisodes, watchedEpisodes);
-            if (this.seasonSelect) {
-                this.seasonSelect.innerHTML = seasons.map(seasonNum =>
-                    `<option value="${MediaUtils.escapeHtml(seasonNum)}">Season ${MediaUtils.escapeHtml(seasonNum)}</option>`
-                ).join('');
-                this.seasonSelect.disabled = seasons.length <= 1;
-                if (featured) this.seasonSelect.value = featured.seasonNum;
+            this._activeSeason = featured ? String(featured.seasonNum)
+                : (seasons.length ? String(seasons[0]) : null);
+            if (this.seasonTabs) {
+                const seasonLabel = (n) => String(n) === '0' ? 'Specials' : `Season ${n}`;
+                this.seasonTabs.innerHTML = seasons.map(seasonNum => {
+                    const count = Array.isArray(info.episodes[seasonNum]) ? info.episodes[seasonNum].length : 0;
+                    const on = String(seasonNum) === String(this._activeSeason);
+                    return `<button class="season-tab ${on ? 'active' : ''}" type="button" role="tab" aria-selected="${on ? 'true' : 'false'}" tabindex="${on ? 0 : -1}" data-season="${MediaUtils.escapeHtml(seasonNum)}"><span class="season-tab-label">${MediaUtils.escapeHtml(seasonLabel(seasonNum))}</span><span class="season-tab-count">${count}</span></button>`;
+                }).join('');
+                this.seasonTabs.classList.toggle('single-season', seasons.length <= 1);
+                const tabEls = [...this.seasonTabs.querySelectorAll('.season-tab')];
+                tabEls.forEach(tab => {
+                    tab.addEventListener('click', () => this.setActiveSeason(tab.dataset.season));
+                    // Tablist keyboard: Left/Right move + activate the adjacent season.
+                    tab.addEventListener('keydown', (e) => {
+                        if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+                        e.preventDefault();
+                        const idx = tabEls.indexOf(tab);
+                        const next = tabEls[e.key === 'ArrowRight' ? idx + 1 : idx - 1];
+                        if (next) { this.setActiveSeason(next.dataset.season); next.focus(); }
+                    });
+                });
             }
 
             // Resume context: how far into the featured episode we are, and minutes left.
