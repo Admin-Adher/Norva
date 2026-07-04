@@ -9,12 +9,12 @@
 --
 -- The edge caps were raised (norva-source-sync: limit 300→1500, conc 20→30) and the
 -- query now filters variant_count>0 (no TMDB calls on dead entries). Here we bump the
--- schedule: limit=1000 conc=15 per run, every 5 min across hours 0-11 UTC (~144
--- runs/day ≈ 144k titles/day) — clears the ~459k browsable backlog in ~3-4 days.
+-- schedule: limit=1000 conc=15 per run, every 5 min around the clock (~288 runs/day ≈
+-- 288k titles/day) — clears the ~459k browsable backlog in ~1-2 days, then self-limits
+-- (once the backlog is drained each run only scans the few newly-synced unmatched rows).
 --
--- Budget check: ~1.2k TMDB calls/run in ~35s (< the 120s http_post timeout); ~144k
--- titles/day ≈ ~5 req/s average, ~30-40 req/s peak at conc 15 — under TMDB's ~50 req/s.
--- Off-peak hours (0-11 UTC ≈ 01-12 Paris) keep it away from prime-time DB load.
+-- Budget check: ~1.2k TMDB calls/run in ~35s (< the 120s http_post timeout); ~288k
+-- titles/day ≈ ~8 req/s average, ~30-40 req/s peak at conc 15 — under TMDB's ~50 req/s.
 
 do $$
 declare v bigint;
@@ -23,7 +23,7 @@ begin
   if v is not null then
     perform cron.alter_job(
       v,
-      schedule => '*/5 0-11 * * *',
+      schedule => '*/5 * * * *',
       command  => $c$
   select net.http_post(
     url := 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-source-sync/cron/search-match?limit=1000&conc=15',
