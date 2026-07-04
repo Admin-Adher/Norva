@@ -1778,6 +1778,202 @@ class SeriesPage {
         return watchedEpisodes;
     }
 
+    // === Manual "mark watched / unwatched" (per episode + per season) ===
+
+    // Persist watched=true as a completed history row (progress≈duration), or delete the
+    // row for watched=false, then mirror it into this.historyItems so the UI reflects it
+    // without a full reload. Uses the same POST /history shape as the player's saveProgress.
+    async setEpisodeWatched(episodeId, seasonNum, episodeNum, watched, series = this.currentSeries) {
+        if (!series || episodeId == null) return;
+        const eid = String(episodeId);
+        const sid = String(series.series_id);
+        // Scope every lookup by (episode item_id + this series) so a movie or another
+        // series that happens to share the numeric id is never touched.
+        const sameEp = (h) => h.item_type === 'episode' && String(h.item_id) === eid && String(h.data?.seriesId) === sid;
+        if (watched) {
+            const ep = this.findEpisodeById(eid) || {};
+            const duration = MediaUtils.parseDurationToSeconds(ep.duration)
+                || Number(ep.info?.duration_secs) || 1800;
+            const data = {
+                title: this.getSeriesDisplayTitle(series),
+                subtitle: `S${seasonNum} E${episodeNum}`,
+                poster: this.getSeriesPoster(series),
+                sourceId: series.sourceId,
+                seriesId: series.series_id,
+                currentSeason: seasonNum,
+                currentEpisode: episodeNum,
+            };
+            const saved = await API.history.save({
+                id: eid, type: 'episode', sourceId: series.sourceId,
+                progress: duration, duration, data,
+            });
+            this.historyItems = (this.historyItems || []).filter(h => !sameEp(h));
+            // Keep the server's DB id so a later unwatch deletes THIS exact row.
+            this.historyItems.push({ id: saved?.id ?? saved?.item?.id ?? null, item_type: 'episode', item_id: eid, progress: duration, duration, completed: true, data });
+            this.startedSeriesIds?.add?.(series.series_id); // grid "started" state matches at once
+        } else {
+            // Delete the exact row by its DB id when known — item_id alone is ambiguous
+            // (shared VOD/episode namespace) and the server only scans the newest 500 rows.
+            const existing = (this.historyItems || []).find(sameEp);
+            await API.history.remove(existing?.id != null ? existing.id : eid);
+            this.historyItems = (this.historyItems || []).filter(h => !sameEp(h));
+        }
+    }
+
+    async toggleEpisodeWatched(row) {
+        const episodeId = row?.dataset?.episodeId;
+        if (!episodeId || !this.currentSeries) return;
+        const watched = (this.getSeriesHistoryMap().get(String(episodeId))?.ratio || 0) >= 0.95;
+        const btn = row.querySelector('.episode-mark');
+        if (btn) btn.disabled = true;
+        try {
+            await this.setEpisodeWatched(episodeId, row.dataset.season, row.dataset.episodeNum, !watched);
+            this.repaintEpisodeWatchState();
+        } catch (_) {
+            this.app?.showToast?.('Could not update watch state', { type: 'error' });
+        } finally {
+            if (btn) btn.disabled = false;
+        }
+    }
+
+    async toggleSeasonWatched(seasonNum) {
+        if (seasonNum == null || !this.currentSeriesInfo) return;
+        const series = this.currentSeries;                       // pin the target series
+        if (!series) return;
+        const eps = Array.isArray(this.currentSeriesInfo.episodes?.[seasonNum])
+            ? this.currentSeriesInfo.episodes[seasonNum] : [];
+        if (!eps.length) return;
+        const map = this.getSeriesHistoryMap(series);
+        // If every episode is already watched → the button un-watches the whole season.
+        const allWatched = eps.every(ep => (map.get(String(ep.id))?.ratio || 0) >= 0.95);
+        const target = !allWatched;
+        // Guard CSS.escape like the sibling downloadSeason (some WebViews lack it).
+        const esc = (window.CSS && CSS.escape) ? CSS.escape(String(seasonNum)) : String(seasonNum);
+        const btn = this.seasonsContainer?.querySelector(`.season-mark-all[data-season="${esc}"]`);
+        if (btn) { btn.disabled = true; btn.textContent = target ? 'Marking…' : 'Updating…'; }
+        let failed = false;
+        try {
+            // Sequential to keep the history writes gentle and deterministic.
+            for (const ep of eps) {
+                // Bail if the user switched version / left mid-loop, so we never write
+                // watch rows for these episodes onto a DIFFERENT series.
+                if (this.currentSeries !== series) break;
+                const already = (map.get(String(ep.id))?.ratio || 0) >= 0.95;
+                if (already === target) continue;
+                try {
+                    await this.setEpisodeWatched(ep.id, seasonNum, ep.episode_num || '', target, series);
+                } catch (_) { failed = true; }
+            }
+        } finally {
+            // Repaint whatever DID change (even on a partial failure), only if still on this fiche.
+            if (this.currentSeries === series) this.repaintEpisodeWatchState();
+            if (btn) btn.disabled = false;
+            this.refreshSeasonMarkButtons();
+            if (failed) this.app?.showToast?.('Some episodes could not be updated', { type: 'error' });
+        }
+    }
+
+    // Toggle each season button's label between "Mark season as watched" / "…unwatched".
+    refreshSeasonMarkButtons() {
+        if (!this.seasonsContainer || !this.currentSeriesInfo) return;
+        const map = this.getSeriesHistoryMap();
+        this.seasonsContainer.querySelectorAll('.season-mark-all').forEach(btn => {
+            const s = btn.dataset.season;
+            const eps = Array.isArray(this.currentSeriesInfo.episodes?.[s]) ? this.currentSeriesInfo.episodes[s] : [];
+            const allWatched = eps.length > 0 && eps.every(ep => (map.get(String(ep.id))?.ratio || 0) >= 0.95);
+            btn.textContent = allWatched ? 'Mark season as unwatched' : 'Mark season as watched';
+            btn.classList.toggle('is-watched', allWatched);
+        });
+    }
+
+    // Patch markers / progress / up-next / mark buttons / the primary action in place,
+    // without re-fetching or re-rendering the whole episode list.
+    repaintEpisodeWatchState() {
+        if (!this.seasonsContainer || !this.currentSeries) return;
+        const map = this.getSeriesHistoryMap();
+        const flat = this.currentSeriesInfo ? this.flattenEpisodes(this.currentSeriesInfo) : [];
+        const featured = this.getFeaturedEpisode(flat, map);
+        const featuredId = featured ? String(featured.episode.id) : null;
+
+        this.seasonsContainer.querySelectorAll('.episode-item').forEach(row => {
+            const id = String(row.dataset.episodeId);
+            const ratio = map.get(id)?.ratio || 0;
+            const watched = ratio >= 0.95;
+            const inProgress = ratio > 0.02 && ratio < 0.95;
+            const pct = Math.max(0, Math.min(100, Math.round(ratio * 100)));
+            const titleRow = row.querySelector('.episode-title-row');
+
+            // In-progress marker (◐) only. A WATCHED episode is shown by the filled mark
+            // button, so we don't also stamp a ✓ in the title (avoids a double checkmark).
+            let marker = row.querySelector('.episode-watched');
+            if (inProgress && !watched) {
+                if (!marker) {
+                    marker = document.createElement('span');
+                    marker.className = 'episode-watched inprogress';
+                    row.querySelector('.episode-title')?.insertAdjacentElement('afterend', marker);
+                }
+                marker.classList.add('inprogress');
+                marker.textContent = '◐';
+                marker.title = 'In progress';
+            } else if (marker) {
+                marker.remove();
+            }
+
+            // progress bar
+            let bar = row.querySelector('.episode-progress');
+            if (pct > 0 && pct < 95) {
+                if (!bar) {
+                    bar = document.createElement('div');
+                    bar.className = 'episode-progress';
+                    bar.innerHTML = '<div></div>';
+                    row.querySelector('.episode-copy')?.appendChild(bar);
+                }
+                if (bar.firstElementChild) bar.firstElementChild.style.width = `${pct}%`;
+            } else if (bar) {
+                bar.remove();
+            }
+
+            // up-next highlight
+            const isUp = featuredId && id === featuredId;
+            row.classList.toggle('episode-up-next', !!isUp);
+            let flag = row.querySelector('.episode-upnext-flag');
+            if (isUp && !flag) {
+                flag = document.createElement('span');
+                flag.className = 'episode-upnext-flag';
+                flag.textContent = 'Up next';
+                titleRow?.appendChild(flag);
+            } else if (!isUp && flag) {
+                flag.remove();
+            }
+
+            // mark button — ✓ only when watched, empty circle otherwise (so an unwatched
+            // row's button doesn't read as "already watched", esp. on touch).
+            const btn = row.querySelector('.episode-mark');
+            if (btn) {
+                btn.classList.toggle('is-watched', watched);
+                btn.setAttribute('aria-pressed', watched ? 'true' : 'false');
+                btn.title = watched ? 'Mark as unwatched' : 'Mark as watched';
+                btn.textContent = watched ? '✓' : '';
+            }
+        });
+
+        // primary action + "Play from start" reflect the recomputed featured episode
+        if (this.primaryActionBtn && featured) {
+            const h = map.get(featuredId);
+            const isResuming = (h?.ratio || 0) > 0.02 && (h?.ratio || 0) < 0.95;
+            const minsLeft = (isResuming && h?.duration > 0) ? Math.max(0, Math.round((h.duration - h.progress) / 60)) : 0;
+            const label = `${featured.label}${minsLeft ? ` · ${minsLeft} min left` : ''}`;
+            this.primaryActionBtn.disabled = false;
+            this.primaryActionBtn.dataset.episodeId = featured.episode.id;
+            this.primaryActionBtn.innerHTML = `<span class="play-icon">${Icons.play}</span><span>${MediaUtils.escapeHtml(label)}</span>`;
+            if (this.playStartBtn) {
+                this.playStartBtn.style.display = isResuming ? '' : 'none';
+                this.playStartBtn.dataset.episodeId = featured.episode.id;
+            }
+        }
+        this.refreshSeasonMarkButtons();
+    }
+
     flattenEpisodes(info) {
         const rows = [];
         const seasons = Object.keys(info?.episodes || {}).sort((a, b) => parseInt(a) - parseInt(b));
@@ -1955,6 +2151,17 @@ class SeriesPage {
                         span.textContent = year;
                         titleRow.appendChild(span);
                     }
+                }
+                // Fill a MISSING synopsis from TMDB (a real provider description is kept),
+                // so an episode reads the same across versions even when one provider ships
+                // no plot. Never overwrites an existing description.
+                if (te.overview && !row.querySelector('.episode-description')) {
+                    const desc = document.createElement('p');
+                    desc.className = 'episode-description';
+                    desc.textContent = te.overview;
+                    const titleRow = row.querySelector('.episode-title-row');
+                    if (titleRow) titleRow.insertAdjacentElement('afterend', desc);
+                    else row.querySelector('.episode-copy')?.appendChild(desc);
                 }
             });
         } catch (_) {
@@ -2155,13 +2362,17 @@ class SeriesPage {
                             <span class="season-download-label">Download season</span>
                         </button>
                     </div>
+                    <div class="season-actions">
+                        <button class="season-mark-all" type="button" data-season="${MediaUtils.escapeHtml(seasonNum)}">Mark season as watched</button>
+                    </div>
                     <div class="episode-list">
                         ${episodes.map(ep => {
                             const history = watchedEpisodes.get(String(ep.id));
                             const ratio = history?.ratio || 0;
                             const ratioPercent = Math.max(0, Math.min(100, Math.round(ratio * 100)));
-                            const marker = ratio >= 0.95 ? '<span class="episode-watched" title="Watched">✓</span>'
-                                : (ratio > 0.02 ? '<span class="episode-watched inprogress" title="In progress">◐</span>' : '');
+                            const watched = ratio >= 0.95;
+                            const marker = (ratio > 0.02 && ratio < 0.95)
+                                ? '<span class="episode-watched inprogress" title="In progress">◐</span>' : '';
                             const cleanTitle = this.cleanEpisodeTitle(ep, seasonNum);
                             const duration = this.formatEpisodeDuration(ep.duration);
                             const description = ep.plot || ep.info?.plot || ep.overview || '';
@@ -2183,10 +2394,13 @@ class SeriesPage {
                                     ${description ? `<p class="episode-description">${MediaUtils.escapeHtml(description)}</p>` : ''}
                                     ${ratioPercent > 0 && ratioPercent < 95 ? `<div class="episode-progress"><div style="width:${ratioPercent}%"></div></div>` : ''}
                                 </div>
-                                <span class="episode-duration">${MediaUtils.escapeHtml(duration)}</span>
-                                <button class="episode-download" type="button" title="Download for offline" style="display:none">
-                                    <span class="episode-download-icon">&#x2193;</span>
-                                </button>
+                                <div class="episode-actions">
+                                    <span class="episode-duration">${MediaUtils.escapeHtml(duration)}</span>
+                                    <button class="episode-mark ${watched ? 'is-watched' : ''}" type="button" aria-pressed="${watched ? 'true' : 'false'}" title="${watched ? 'Mark as unwatched' : 'Mark as watched'}">${watched ? '✓' : ''}</button>
+                                    <button class="episode-download" type="button" title="Download for offline" style="display:none">
+                                        <span class="episode-download-icon">&#x2193;</span>
+                                    </button>
+                                </div>
                             </div>`;
                         }).join('')}
                     </div>
@@ -2197,8 +2411,8 @@ class SeriesPage {
             this.seasonsContainer.querySelectorAll('.episode-item').forEach(ep => {
                 ep.addEventListener('click', () => this.playEpisode(ep));
                 // Keyboard / TV-remote: rows are role=button tabindex=0 → activate on Enter/Space.
-                // Ignore keys that bubbled up from a focused child (e.g. the native download
-                // button) so activating it doesn't also start playback.
+                // Ignore keys that bubbled up from a focused child (e.g. the mark/download
+                // buttons) so activating them doesn't also start playback.
                 ep.addEventListener('keydown', (e) => {
                     if (e.target !== ep) return;
                     if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
@@ -2206,7 +2420,19 @@ class SeriesPage {
                         this.playEpisode(ep);
                     }
                 });
+                // Manual mark watched / unwatched (stopPropagation so the row doesn't play).
+                ep.querySelector('.episode-mark')?.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    this.toggleEpisodeWatched(ep);
+                });
             });
+            this.seasonsContainer.querySelectorAll('.season-mark-all').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    this.toggleSeasonWatched(btn.dataset.season);
+                });
+            });
+            this.refreshSeasonMarkButtons();
             // Offline download per episode + per season (native phone/tablet app only).
             if (this.nativeDownloadBridge()) {
                 this.seasonsContainer.querySelectorAll('.episode-download').forEach(btn => {

@@ -7047,6 +7047,107 @@ kbd {
   font-variant-numeric: tabular-nums;
 }
 
+/* Manual "mark watched" — per episode + per season. */
+.episode-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+/* The native download button carries its own margin elsewhere; inside the flex
+   actions row the gap already spaces it, so cancel the double spacing. */
+.episode-actions .episode-download {
+  margin-left: 0;
+}
+
+.episode-mark {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 1.5px solid rgba(255, 255, 255, 0.25);
+  background: transparent;
+  color: rgba(224, 231, 255, 0.6);
+  font-size: 0.85rem;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--transition-fast), background var(--transition-fast),
+    border-color var(--transition-fast), color var(--transition-fast);
+}
+
+.episode-item:hover .episode-mark,
+.episode-item:focus-within .episode-mark,
+.episode-mark.is-watched {
+  opacity: 1;
+}
+
+.episode-mark:hover {
+  border-color: rgba(98, 135, 255, 0.6);
+  color: var(--color-text-primary);
+}
+
+.episode-mark.is-watched {
+  background: #9db4ff;
+  border-color: #9db4ff;
+  color: #0b1020;
+}
+
+.episode-mark:focus-visible {
+  opacity: 1;
+  outline: 2px solid rgba(98, 135, 255, 0.9);
+  outline-offset: 2px;
+}
+
+.episode-mark:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Touch devices have no hover — always show the toggle so it stays reachable. */
+@media (hover: none) {
+  .episode-mark {
+    opacity: 0.85;
+  }
+}
+
+.season-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding: 2px 0 10px;
+}
+
+.season-mark-all {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--color-text-secondary);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  padding: 6px 14px;
+  cursor: pointer;
+  transition: color var(--transition-fast), background var(--transition-fast), border-color var(--transition-fast);
+}
+
+.season-mark-all:hover {
+  color: var(--color-text-primary);
+  border-color: rgba(98, 135, 255, 0.5);
+}
+
+.season-mark-all.is-watched {
+  color: #cdd9ff;
+  border-color: rgba(98, 135, 255, 0.45);
+  background: rgba(98, 135, 255, 0.14);
+}
+
+.season-mark-all:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 .series-details .episode-number {
   width: auto;
   justify-self: center;
@@ -7239,7 +7340,7 @@ kbd {
   }
 
   .series-details .episode-item {
-    grid-template-columns: 28px 92px minmax(0, 1fr);
+    grid-template-columns: 28px 92px minmax(0, 1fr) auto;
     gap: 10px;
     padding: 12px 0;
   }
@@ -7248,9 +7349,14 @@ kbd {
     display: none;
   }
 
+  /* Actions get their own (4th) column and stack so a narrow phone stays tidy. */
+  .series-details .episode-actions {
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 6px;
+  }
+
   .series-details .episode-duration {
-    grid-column: 3;
-    justify-self: start;
     font-size: 0.78rem;
   }
 }
