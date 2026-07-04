@@ -56,7 +56,7 @@
         return `
             <div class="dashboard-card" data-rail-index="${railIndex}" data-item-index="${itemIndex}">
                 <div class="card-image">
-                    <img src="${esc(posterOf(item))}" alt="${esc(t)}" loading="lazy" decoding="async" onerror="this.onerror=null;this.src='/img/norva-media-placeholder.png'">
+                    <img src="${esc(posterOf(item))}" alt="${esc(t)}" loading="lazy" decoding="async" onerror="this.onerror=null;this.srcset='';this.src='/img/norva-media-placeholder.png'">
                     ${variantCount > 1 ? `<div class="home-card-badge">${variantCount} versions</div>` : ''}
                     <div class="play-icon-overlay"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></div>
                 </div>

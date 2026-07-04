@@ -1367,7 +1367,7 @@ class MoviesPage {
                 ${isNew ? '<span class="new-badge">NEW</span>' : ''}
                 <img src="${MediaUtils.escapeHtml(poster)}" alt="${MediaUtils.escapeHtml(displayName)}"
                      ${srcset ? `srcset="${MediaUtils.escapeHtml(srcset)}" sizes="(max-width: 640px) 45vw, 190px"` : ''}
-                     onerror="this.onerror=null;this.src='/img/norva-media-placeholder.png'" loading="lazy" decoding="async">
+                     onerror="this.onerror=null;this.srcset='';this.src='/img/norva-media-placeholder.png'" loading="lazy" decoding="async">
                 <div class="movie-play-overlay">
                     <span class="play-icon">${Icons.play}</span>
                 </div>
@@ -1453,7 +1453,7 @@ class MoviesPage {
             <div class="continue-card" data-item-id="${MediaUtils.escapeHtml(h.item_id)}"
                  data-source-id="${h.source_id || h.data?.sourceId || ''}">
                 <img src="${MediaUtils.escapeHtml(MediaUtils.safeImageUrl(h.data?.poster, '/img/norva-media-placeholder.png'))}"
-                     onerror="this.onerror=null;this.src='/img/norva-media-placeholder.png'" loading="lazy" decoding="async" alt="">
+                     onerror="this.onerror=null;this.srcset='';this.src='/img/norva-media-placeholder.png'" loading="lazy" decoding="async" alt="">
                 <div class="continue-card-info">
                     <p class="continue-card-title">${MediaUtils.escapeHtml(MediaUtils.cleanReleaseName(h.data?.title || '') || 'Unknown')}</p>
                     <div class="card-progress"><div class="card-progress-fill" style="width:${ratio}%"></div></div>
