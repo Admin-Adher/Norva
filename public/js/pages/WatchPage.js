@@ -6820,6 +6820,15 @@ class WatchPage {
             && typeof this.norvaEngine?.hasInbandSubtitles === 'function'
             && this.norvaEngine.hasInbandSubtitles()
             && this.isSubtitleExtractable(selected);
+        // Diagnostic: which subtitle path served this selection. engine-inband is instant
+        // (cues captured from playback start); gateway-window means the engine didn't take
+        // the in-band path (→ slow first extraction) — the fields explain why.
+        console.warn('[WatchPage] subtitle path:',
+            useInbandSubs ? 'engine-inband (instant)' : (isLocalSessionMode || gatewaySubtitleUrl ? 'session' : 'gateway-window'),
+            '| mode=', this.currentPlaybackMode,
+            '| hasInband=', this.norvaEngine?.hasInbandSubtitles?.(),
+            '| extractable=', this.isSubtitleExtractable(selected),
+            '| codec=', selected.codec, '| index=', selected.index);
         const isSessionMode = isLocalSessionMode || Boolean(gatewaySubtitleUrl);
         const engine = {
             trackEl,
