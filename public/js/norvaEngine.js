@@ -28,6 +28,15 @@
   // cues with no decoder and no provider connection). Image subs (pgs/dvdsub/dvb) need
   // OCR and are excluded here.
   const TEXT_SUB_CODECS = new Set(['subrip', 'srt', 'ass', 'ssa', 'mov_text', 'webvtt', 'text', 'vtt']);
+  // Bitmap/image subtitle codecs — these DO need OCR and cannot be turned into cues in-band.
+  // Everything else on a subtitle stream is treated as text (see below): the explicit
+  // allowlist above can miss a codec name variant, and a missed text track silently falls
+  // back to the slow gateway extraction ("delay after selecting"). Classifying by this
+  // denylist instead means any non-image subtitle codec is captured in-band from the start.
+  const IMAGE_SUB_CODECS = new Set([
+    'hdmv_pgs_subtitle', 'pgssub', 'dvd_subtitle', 'dvdsub',
+    'dvb_subtitle', 'dvbsub', 'dvb_teletext', 'xsub',
+  ]);
 
   // How far ahead of currentTime we keep the SourceBuffer filled. The pump
   // pauses above MAX and resumes below MIN → bounded memory/CPU on long films.
@@ -987,7 +996,9 @@
           try { nm = await lib.avcodec_get_name(s.codec_id); } catch (_) { /* ignore */ }
           parts.push(`${s.index}:${TY[s.codec_type] ?? s.codec_type}=${nm}`);
           if (s.codec_type === 3) {
-            const text = TEXT_SUB_CODECS.has(nm);
+            // Text = known text codec OR any subtitle codec that isn't a known bitmap one.
+            // (A missed text codec would fall back to the slow gateway extraction.)
+            const text = TEXT_SUB_CODECS.has(nm) || !IMAGE_SUB_CODECS.has(nm);
             this._subStreams.push({ index: s.index, codec: nm, text });
             this._subMeta.set(s.index, { codec: nm, tbNum: s.time_base_num, tbDen: s.time_base_den, text });
           }
