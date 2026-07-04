@@ -38,7 +38,7 @@ généralisation) mis en place pendant la session Movies/Series. Ces crons sont 
 |-------|---------|----------|------|-----------------|
 | 12 | `norva-enrich-search-match` | `*/3 * * * *` | matching TMDB des titres non matchés (`/cron/search-match?limit=1000&conc=15`) | **focalisé jeremy** (`&user=0b971271-…`) |
 | 84 | `norva-enrich-guardian-revert` | `*/10 * * * *` | quand l'éligible de jeremy < 300 → **retire `&user=` du job 12** (repasse global) puis **se supprime** | garde-fou, actif |
-| 85 | `norva-catalog-reconcile` | `*/5 * * * *` | `norva_reconcile_catalog('0b971271-…')` — refusionne + rafraîchit posters | **focalisé jeremy** |
+| 85 | `norva-catalog-reconcile` | `1-59/3 0-6 * * *` | `norva_reconcile_catalog(null, 3000)` — canonicalize + posters + `dedup_key` (résilient, advisory-lock, batché) | **global, nuit only** |
 
 Note : jobs 12/85 focalisés sur le compte de vérif (`jeremy`) — le dedup serveur
 (`list_media_items_deduped`) est live pour **tous**, mais n'**agit** que là où `dedup_key`
@@ -75,8 +75,39 @@ from cloud_media_items;
 --   where jobid=85 order by start_time desc limit 5;
 ```
 
-**Une fois drainé** (`media_backlog` ≈ 0) : le reconcile reste en global (maintien) ;
-optionnellement repasser à `*/5` pour alléger : `cron.alter_job(85, schedule:='*/5 * * * *')`.
+**Une fois drainé** (`media_backlog` ≈ 0) : le reconcile reste en global (maintien).
+Pour accélérer le drain, élargir la fenêtre (ex. `1-59/3 * * * *` = 24/7) — à ne faire
+que si le Home reste instantané sous la charge.
+
+## Incident 2026-07-04 : le drain global saturait le Home (corrigé)
+
+Passer le job 85 en global `10000`/`*/3` **24/7** a saturé l'I/O de la base : le Home
+restait bloqué sur ses skeletons (Continue Watching / Selection Norva). Deux causes,
+deux correctifs durables :
+
+1. **Le reconcile lui-même** — chaque run faisait un UPDATE 10k sur `cloud_media_items`
+   (trigger `cmi_set_sort_cols` par-ligne ~7-10 ms) → 120 s de churn de `shared_buffers`
+   en continu, plus des runs qui **se chevauchaient** (deadlock sur l'index unique
+   `identity_key` contre le search-match job 12, tous deux `*/3` → même minute) et des
+   **statement_timeout** (canonicalize non batché = 0 progrès sur timeout).
+   → migration `20260704220000_resilient_reconcile.sql` :
+   - `norva_canonicalize_titles_for_user(uuid, p_limit)` **batché** + **savepoint par
+     groupe** (un deadlock transitoire saute 1 groupe, pas tout le run) ;
+   - `norva_reconcile_catalog` prend un **advisory lock** (`pg_try_advisory_lock`) →
+     jamais deux runs en //, et **wrap chaque étape** (un échec ne perd pas les autres) ;
+   - défaut batch 5000. Cron rappelé en **`1-59/3 0-6`** (nuit only) + batch **3000**.
+
+2. **Le Home appelait `top_viewed_titles()` en live** (rail « Selection Norva »/Top 10).
+   La fonction joignait `cloud_watch_history` ⋈ `cloud_title_variants` (755k) ⋈
+   `cloud_titles` avec `v.external_id in (h.item_id, h.parent_item_id)` — ce IN sur deux
+   colonnes de la ligne externe empêchait l'usage de l'index `(source_id, item_type,
+   external_id)` → **seq scan 755k** à chaque chargement (>60 s cache froid).
+   → migration `20260704221000_top_viewed_fast.sql` : réécrit en **LATERAL** pour driver
+   depuis les ~90 lignes d'historique et Index-Scanner les variantes (`external_id =
+   ANY(array)`). Coût 382, **>60 s → ~220 ms**. Sémantique identique, aucune modif edge.
+
+**Leçon** : tout drain de masse global doit être **advisory-locked, batché petit, et
+fenêtré la nuit** ; et aucun rail Home ne doit exécuter d'agrégat non-indexé en live.
 
 Vérification post-généralisation :
 ```sql
