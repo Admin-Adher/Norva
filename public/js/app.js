@@ -607,13 +607,17 @@ class App {
         this._warmKeepTimer = setInterval(ping, 4 * 60 * 1000);
     }
 
-    // Thin header bar showing background catalog enrichment (TMDB matching) progress, so a
-    // freshly-onboarded user understands missing posters are filling in — not broken. Hidden
-    // once the catalog is essentially enriched (>=98%) or empty. Cloud mode only, best-effort.
+    // Thin header bar showing background catalog enrichment (TMDB matching) progress. Kept
+    // OFF for end users — a red "Enrichissement… 18%" banner reads as an error, and a
+    // background re-enrichment of an already-live catalog is an internal concern, not
+    // something to surface. Opt-in via localStorage['norva-show-enrichment']='1' for debugging.
     startEnrichmentProgressPoll() {
         if (!window.API?.isCloudMode?.()) return;
         const bar = document.getElementById('enrichment-bar');
         if (!bar) return;
+        let showEnrichment = false;
+        try { showEnrichment = localStorage.getItem('norva-show-enrichment') === '1'; } catch (_) { /* ignore */ }
+        if (!showEnrichment) { bar.hidden = true; return; }
         const fill = bar.querySelector('.enrichment-bar__fill');
         const text = bar.querySelector('.enrichment-bar__text');
         const stop = () => { if (this._enrichTimer) { clearInterval(this._enrichTimer); this._enrichTimer = null; } };
@@ -1386,7 +1390,7 @@ class App {
             return `
                 <button type="button" class="gsearch-result" data-type="${type}" data-idx="${idx}">
                     <img class="gsearch-poster" src="${M.escapeHtml(poster)}" alt="" loading="lazy"
-                         onerror="this.onerror=null;this.src='/img/norva-media-placeholder.png'">
+                         onerror="this.onerror=null;this.srcset='';this.src='/img/norva-media-placeholder.png'">
                     <span class="gsearch-text">
                         <span class="gsearch-title">${M.escapeHtml(title)}</span>
                         <span class="gsearch-sub">${type === 'series' ? 'Series' : 'Movie'}${year ? ' · ' + year : ''}</span>

@@ -8386,7 +8386,7 @@ class WatchPage {
             <div class="watch-recommended-card" data-id="${movie.stream_id}" data-source="${sourceId}">
                 <img src="${MediaUtils.escapeHtml(MediaUtils.safeImageUrl(movie.stream_icon || movie.cover, '/img/norva-media-placeholder.png'))}"
                      alt="${MediaUtils.escapeHtml(movie.name)}"
-                     onerror="this.onerror=null;this.src='/img/norva-media-placeholder.png'" loading="lazy">
+                     onerror="this.onerror=null;this.srcset='';this.src='/img/norva-media-placeholder.png'" loading="lazy">
                 <p>${MediaUtils.escapeHtml(movie.name)}</p>
             </div>
         `).join('');

@@ -1452,7 +1452,7 @@ class HomePage {
                     ${isNew ? '<span class="new-badge">NEW</span>' : ''}
                     <img src="${this.escapeAttr(posterUrl)}" alt="${this.escapeAttr(title)}" loading="lazy" decoding="async"
                          ${MediaUtils.tmdbSrcset?.(posterUrl) ? `srcset="${this.escapeAttr(MediaUtils.tmdbSrcset(posterUrl))}" sizes="(max-width: 640px) 40vw, 220px"` : ''}
-                         onerror="this.onerror=null;this.src='/img/norva-media-placeholder.png'">
+                         onerror="this.onerror=null;this.srcset='';this.src='/img/norva-media-placeholder.png'">
                     ${variantCount > 1 ? `<div class="home-card-badge">${variantCount} versions</div>` : ''}
                     ${languageBadge ? `<div class="home-card-language-badge">${this.escapeHtml(languageBadge)}</div>` : ''}
                     <div class="play-icon-overlay">
@@ -1661,7 +1661,7 @@ class HomePage {
         return `
             <div class="dashboard-card" tabindex="0" role="button" aria-label="${this.escapeAttr(item._upNext ? `Play next episode of ${title}` : `Resume ${title}`)}" data-id="${this.escapeAttr(itemId)}" data-type="${this.escapeAttr(type)}" data-history-index="${index}">
                 <div class="card-image">
-                    <img src="${this.escapeAttr(posterUrl)}" alt="${this.escapeAttr(title)}" loading="lazy" decoding="async" onerror="this.onerror=null;this.src='/img/norva-media-placeholder.png'">
+                    <img src="${this.escapeAttr(posterUrl)}" alt="${this.escapeAttr(title)}" loading="lazy" decoding="async" onerror="this.onerror=null;this.srcset='';this.src='/img/norva-media-placeholder.png'">
                     <button class="ch-remove" type="button" data-history-index="${index}" aria-label="Remove from Continue Watching">✕</button>
                     ${timeLeft ? `<div class="card-timeleft">${timeLeft}</div>` : ''}
                     ${showBar ? `<div class="progress-bar-container">
@@ -1750,7 +1750,7 @@ class HomePage {
                     <div class="card-image">
                         <img src="${this.escapeAttr(this.resolveImageUrl(r.poster, '/img/norva-media-placeholder.png'))}"
                              alt="${this.escapeAttr(r.title)}" loading="lazy" decoding="async"
-                             onerror="this.onerror=null;this.src='/img/norva-media-placeholder.png'">
+                             onerror="this.onerror=null;this.srcset='';this.src='/img/norva-media-placeholder.png'">
                         <div class="play-icon-overlay"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></div>
                     </div>
                     <div class="card-info">
