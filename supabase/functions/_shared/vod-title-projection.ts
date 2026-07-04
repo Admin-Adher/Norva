@@ -698,6 +698,39 @@ export async function validateTmdbCandidate(
 // title (+ year) on TMDB, then confirm it with the same full validation used for
 // provider ids. The confidence bar is higher than provider validation because
 // search is fuzzier. Returns a validated match (with i18n) + its id, or null.
+// A 4-digit year embedded in a provider title ("12 (2007)", "Barbie ... 2017 HD").
+// Most unmatched rows have release_year = null but the year sits right in the name;
+// recovering it disambiguates short/ambiguous searches ("12") and boosts confidence.
+function extractTitleYear(title: string): string | null {
+  const m = String(title || "").match(/\b(19\d{2}|20\d{2})\b/);
+  return m ? m[1] : null;
+}
+
+// Search language for MATCHING. The catalogue is French-dominant, so we search in
+// French: TMDB then returns each result's title localized to French, which is what
+// the provider titles actually are ("Le Prince de Sicile", not the English original
+// "Jane Austen's Mafia!"). We still score against original_title too, so English- or
+// native-titled entries match via that field. (Stored metadata language stays
+// NORVA_TMDB_LANGUAGE — search language only affects candidate selection here.)
+function tmdbSearchLanguage(): string {
+  return stringOr(Deno.env.get("NORVA_TMDB_SEARCH_LANGUAGE"), "fr-FR");
+}
+
+async function tmdbSearchResults(
+  apiKey: string, endpoint: "movie" | "tv", query: string, language: string, year: string | null,
+): Promise<JsonRecord[]> {
+  const url = new URL(`https://api.themoviedb.org/3/search/${endpoint}`);
+  url.searchParams.set("query", query);
+  if (year) url.searchParams.set(endpoint === "tv" ? "first_air_date_year" : "year", year);
+  if (language) url.searchParams.set("language", language);
+  url.searchParams.set("include_adult", "false");
+  const headers: Record<string, string> = {};
+  if (apiKey.startsWith("eyJ")) headers.Authorization = `Bearer ${apiKey}`;
+  else url.searchParams.set("api_key", apiKey);
+  const payload = recordOrEmpty(await fetchJsonWithHeaders(url.toString(), 8000, headers).catch(() => null));
+  return Array.isArray(payload.results) ? payload.results as JsonRecord[] : [];
+}
+
 export async function searchTmdbMatch(
   apiKey: string,
   itemType: "movie" | "series",
@@ -707,34 +740,40 @@ export async function searchTmdbMatch(
   const query = cleanSearchQuery(rawTitle);
   if (query.length < 2) return null;
   const endpoint = itemType === "series" ? "tv" : "movie";
-  const url = new URL(`https://api.themoviedb.org/3/search/${endpoint}`);
-  url.searchParams.set("query", query);
-  if (year) url.searchParams.set(itemType === "series" ? "first_air_date_year" : "year", year);
-  const language = stringOr(Deno.env.get("NORVA_TMDB_LANGUAGE"), "en-US");
-  if (language) url.searchParams.set("language", language);
-  url.searchParams.set("include_adult", "false");
-  const headers: Record<string, string> = {};
-  if (apiKey.startsWith("eyJ")) headers.Authorization = `Bearer ${apiKey}`;
-  else url.searchParams.set("api_key", apiKey);
+  const language = tmdbSearchLanguage();
+  // Recover a year from the title when the row has none — most unmatched rows do.
+  const effYear = year ?? extractTitleYear(rawTitle);
 
-  const payload = recordOrEmpty(await fetchJsonWithHeaders(url.toString(), 8000, headers).catch(() => null));
-  const results = Array.isArray(payload.results) ? payload.results as JsonRecord[] : [];
-  if (!results.length) return null;
+  const pickBest = (results: JsonRecord[]): { id: string; score: number } | null => {
+    let best: { id: string; score: number } | null = null;
+    for (const result of results.slice(0, 8)) {
+      const rec = recordOrEmpty(result);
+      const id = stringOr(rec.id, "");
+      if (!id) continue;
+      const locTitle = stringOr(rec.title ?? rec.name, "");           // localized (French)
+      const origTitle = stringOr(rec.original_title ?? rec.original_name, ""); // native
+      const candidateYear = stringOr(rec.release_date ?? rec.first_air_date, "").match(/(19|20)\d{2}/)?.[0] ?? null;
+      const score = Math.max(
+        locTitle ? titleConfidence(rawTitle, locTitle, effYear, candidateYear) : 0,
+        origTitle ? titleConfidence(rawTitle, origTitle, effYear, candidateYear) : 0,
+      );
+      if (!best || score > best.score) best = { id, score };
+    }
+    return best;
+  };
 
-  let best: { id: string; score: number } | null = null;
-  for (const result of results.slice(0, 6)) {
-    const rec = recordOrEmpty(result);
-    const candidateTitle = stringOr(rec.title ?? rec.name ?? rec.original_title ?? rec.original_name, "");
-    const candidateYear = stringOr(rec.release_date ?? rec.first_air_date, "").match(/(19|20)\d{2}/)?.[0] ?? null;
-    const id = stringOr(rec.id, "");
-    if (!id || !candidateTitle) continue;
-    const score = titleConfidence(rawTitle, candidateTitle, year, candidateYear);
-    if (!best || score > best.score) best = { id, score };
+  // Pass 1: French search with the year when known.
+  let best = pickBest(await tmdbSearchResults(apiKey, endpoint, query, language, effYear));
+  // Pass 2: drop the year if it filtered the right result out (provider year off by 1+).
+  if ((!best || best.score < 0.72) && effYear) {
+    best = pickBest(await tmdbSearchResults(apiKey, endpoint, query, language, null));
   }
   // Demand a strong title match (search is fuzzier than a provider-supplied id).
   if (!best || best.score < 0.72) return null;
 
-  const validation = await validateTmdbCandidate(apiKey, { itemType, tmdbId: best.id, title: rawTitle, year });
+  // validateTmdbCandidate re-checks across ALL languages (translations + alt titles),
+  // so it confirms the pick regardless of which title field the search matched on.
+  const validation = await validateTmdbCandidate(apiKey, { itemType, tmdbId: best.id, title: rawTitle, year: effYear });
   return validation.valid ? { ...validation, tmdbId: best.id } : null;
 }
 
