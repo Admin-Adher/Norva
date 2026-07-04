@@ -1783,10 +1783,13 @@ class SeriesPage {
     // Persist watched=true as a completed history row (progress≈duration), or delete the
     // row for watched=false, then mirror it into this.historyItems so the UI reflects it
     // without a full reload. Uses the same POST /history shape as the player's saveProgress.
-    async setEpisodeWatched(episodeId, seasonNum, episodeNum, watched) {
-        const series = this.currentSeries;
+    async setEpisodeWatched(episodeId, seasonNum, episodeNum, watched, series = this.currentSeries) {
         if (!series || episodeId == null) return;
         const eid = String(episodeId);
+        const sid = String(series.series_id);
+        // Scope every lookup by (episode item_id + this series) so a movie or another
+        // series that happens to share the numeric id is never touched.
+        const sameEp = (h) => h.item_type === 'episode' && String(h.item_id) === eid && String(h.data?.seriesId) === sid;
         if (watched) {
             const ep = this.findEpisodeById(eid) || {};
             const duration = MediaUtils.parseDurationToSeconds(ep.duration)
@@ -1800,17 +1803,20 @@ class SeriesPage {
                 currentSeason: seasonNum,
                 currentEpisode: episodeNum,
             };
-            await API.history.save({
+            const saved = await API.history.save({
                 id: eid, type: 'episode', sourceId: series.sourceId,
                 progress: duration, duration, data,
             });
-            this.historyItems = (this.historyItems || [])
-                .filter(h => !(h.item_type === 'episode' && String(h.item_id) === eid));
-            this.historyItems.push({ item_type: 'episode', item_id: eid, progress: duration, duration, completed: true, data });
+            this.historyItems = (this.historyItems || []).filter(h => !sameEp(h));
+            // Keep the server's DB id so a later unwatch deletes THIS exact row.
+            this.historyItems.push({ id: saved?.id ?? saved?.item?.id ?? null, item_type: 'episode', item_id: eid, progress: duration, duration, completed: true, data });
+            this.startedSeriesIds?.add?.(series.series_id); // grid "started" state matches at once
         } else {
-            await API.history.remove(eid);
-            this.historyItems = (this.historyItems || [])
-                .filter(h => !(h.item_type === 'episode' && String(h.item_id) === eid));
+            // Delete the exact row by its DB id when known — item_id alone is ambiguous
+            // (shared VOD/episode namespace) and the server only scans the newest 500 rows.
+            const existing = (this.historyItems || []).find(sameEp);
+            await API.history.remove(existing?.id != null ? existing.id : eid);
+            this.historyItems = (this.historyItems || []).filter(h => !sameEp(h));
         }
     }
 
@@ -1832,28 +1838,38 @@ class SeriesPage {
 
     async toggleSeasonWatched(seasonNum) {
         if (seasonNum == null || !this.currentSeriesInfo) return;
+        const series = this.currentSeries;                       // pin the target series
+        if (!series) return;
         const eps = Array.isArray(this.currentSeriesInfo.episodes?.[seasonNum])
             ? this.currentSeriesInfo.episodes[seasonNum] : [];
         if (!eps.length) return;
-        const map = this.getSeriesHistoryMap();
+        const map = this.getSeriesHistoryMap(series);
         // If every episode is already watched → the button un-watches the whole season.
         const allWatched = eps.every(ep => (map.get(String(ep.id))?.ratio || 0) >= 0.95);
         const target = !allWatched;
-        const btn = this.seasonsContainer?.querySelector(`.season-mark-all[data-season="${CSS.escape(String(seasonNum))}"]`);
+        // Guard CSS.escape like the sibling downloadSeason (some WebViews lack it).
+        const esc = (window.CSS && CSS.escape) ? CSS.escape(String(seasonNum)) : String(seasonNum);
+        const btn = this.seasonsContainer?.querySelector(`.season-mark-all[data-season="${esc}"]`);
         if (btn) { btn.disabled = true; btn.textContent = target ? 'Marking…' : 'Updating…'; }
+        let failed = false;
         try {
             // Sequential to keep the history writes gentle and deterministic.
             for (const ep of eps) {
+                // Bail if the user switched version / left mid-loop, so we never write
+                // watch rows for these episodes onto a DIFFERENT series.
+                if (this.currentSeries !== series) break;
                 const already = (map.get(String(ep.id))?.ratio || 0) >= 0.95;
                 if (already === target) continue;
-                await this.setEpisodeWatched(ep.id, seasonNum, ep.episode_num || '', target);
+                try {
+                    await this.setEpisodeWatched(ep.id, seasonNum, ep.episode_num || '', target, series);
+                } catch (_) { failed = true; }
             }
-            this.repaintEpisodeWatchState();
-        } catch (_) {
-            this.app?.showToast?.('Could not update the season', { type: 'error' });
         } finally {
+            // Repaint whatever DID change (even on a partial failure), only if still on this fiche.
+            if (this.currentSeries === series) this.repaintEpisodeWatchState();
             if (btn) btn.disabled = false;
             this.refreshSeasonMarkButtons();
+            if (failed) this.app?.showToast?.('Some episodes could not be updated', { type: 'error' });
         }
     }
 
@@ -1887,17 +1903,18 @@ class SeriesPage {
             const pct = Math.max(0, Math.min(100, Math.round(ratio * 100)));
             const titleRow = row.querySelector('.episode-title-row');
 
-            // watched/in-progress marker (kept right after the title)
+            // In-progress marker (◐) only. A WATCHED episode is shown by the filled mark
+            // button, so we don't also stamp a ✓ in the title (avoids a double checkmark).
             let marker = row.querySelector('.episode-watched');
-            if (watched || inProgress) {
+            if (inProgress && !watched) {
                 if (!marker) {
                     marker = document.createElement('span');
-                    marker.className = 'episode-watched';
+                    marker.className = 'episode-watched inprogress';
                     row.querySelector('.episode-title')?.insertAdjacentElement('afterend', marker);
                 }
-                marker.classList.toggle('inprogress', inProgress && !watched);
-                marker.textContent = watched ? '✓' : '◐';
-                marker.title = watched ? 'Watched' : 'In progress';
+                marker.classList.add('inprogress');
+                marker.textContent = '◐';
+                marker.title = 'In progress';
             } else if (marker) {
                 marker.remove();
             }
@@ -1929,12 +1946,14 @@ class SeriesPage {
                 flag.remove();
             }
 
-            // mark button
+            // mark button — ✓ only when watched, empty circle otherwise (so an unwatched
+            // row's button doesn't read as "already watched", esp. on touch).
             const btn = row.querySelector('.episode-mark');
             if (btn) {
                 btn.classList.toggle('is-watched', watched);
                 btn.setAttribute('aria-pressed', watched ? 'true' : 'false');
                 btn.title = watched ? 'Mark as unwatched' : 'Mark as watched';
+                btn.textContent = watched ? '✓' : '';
             }
         });
 
@@ -2352,8 +2371,8 @@ class SeriesPage {
                             const ratio = history?.ratio || 0;
                             const ratioPercent = Math.max(0, Math.min(100, Math.round(ratio * 100)));
                             const watched = ratio >= 0.95;
-                            const marker = ratio >= 0.95 ? '<span class="episode-watched" title="Watched">✓</span>'
-                                : (ratio > 0.02 ? '<span class="episode-watched inprogress" title="In progress">◐</span>' : '');
+                            const marker = (ratio > 0.02 && ratio < 0.95)
+                                ? '<span class="episode-watched inprogress" title="In progress">◐</span>' : '';
                             const cleanTitle = this.cleanEpisodeTitle(ep, seasonNum);
                             const duration = this.formatEpisodeDuration(ep.duration);
                             const description = ep.plot || ep.info?.plot || ep.overview || '';
@@ -2377,7 +2396,7 @@ class SeriesPage {
                                 </div>
                                 <div class="episode-actions">
                                     <span class="episode-duration">${MediaUtils.escapeHtml(duration)}</span>
-                                    <button class="episode-mark ${watched ? 'is-watched' : ''}" type="button" aria-pressed="${watched ? 'true' : 'false'}" title="${watched ? 'Mark as unwatched' : 'Mark as watched'}">✓</button>
+                                    <button class="episode-mark ${watched ? 'is-watched' : ''}" type="button" aria-pressed="${watched ? 'true' : 'false'}" title="${watched ? 'Mark as unwatched' : 'Mark as watched'}">${watched ? '✓' : ''}</button>
                                     <button class="episode-download" type="button" title="Download for offline" style="display:none">
                                         <span class="episode-download-icon">&#x2193;</span>
                                     </button>
