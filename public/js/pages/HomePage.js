@@ -32,6 +32,11 @@ class HomePage {
         // Hover preview (desktop): rails render via innerHTML + delegation, so the
         // preview data is resolved from the card's rail/history indices on demand.
         window.NorvaHoverPreview?.register('.dashboard-card', (card) => {
+            // Only resolve for Home's own cards. Movies/Series rails render the same
+            // `.dashboard-card` class but index into their own data — resolving those
+            // against Home's rails would surface an unrelated title. Those pages pin
+            // each card's `__norvaHover` (used before any resolver), but guard here too.
+            if (this.app && this.app.currentPage && this.app.currentPage !== 'home') return null;
             let item = null;
             if (card.dataset.historyIndex !== undefined) {
                 item = this.historyItems?.[Number(card.dataset.historyIndex)] || null;

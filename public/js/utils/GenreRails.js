@@ -50,6 +50,39 @@
         return parts.filter(Boolean).join(' · ');
     }
 
+    function backdropOf(item) {
+        const data = item.data || {};
+        let url = item.backdrop_url || item.backdropUrl || data.backdrop || data.backdropUrl || data.backdrop_url || '';
+        if (!url) return '';
+        if (!/^https?:\/\//i.test(url) && url.charAt(0) === '/' && url.indexOf('/img') !== 0) {
+            url = `https://image.tmdb.org/t/p/w780${url}`;
+        }
+        if (window.MediaUtils && typeof window.MediaUtils.safeImageUrl === 'function') {
+            return window.MediaUtils.safeImageUrl(url, '');
+        }
+        return url;
+    }
+
+    // Attach the card's OWN hover-preview data. Rails render as `.dashboard-card`,
+    // the same class the Home page registers a hover resolver for — without this,
+    // the global preview would resolve a rail card against Home's rail data and show
+    // a completely unrelated title. `__norvaHover` is checked before any resolver, so
+    // pinning it here keeps every rail/grid card showing its own series.
+    function attachHover(card, item, rail, onItemClick) {
+        if (!card || !item) return;
+        card.__norvaHover = () => {
+            const open = () => onItemClick(item, rail);
+            return {
+                title: titleOf(item),
+                meta: metaOf(item),
+                poster: posterOf(item),
+                backdrop: backdropOf(item) || null,
+                onPlay: open,
+                onDetails: open
+            };
+        };
+    }
+
     function cardHtml(item, railIndex, itemIndex) {
         const variantCount = Number(item.variantCount || item.variant_count || (item.data && item.data.variantCount) || 0);
         const t = titleOf(item);
@@ -124,9 +157,10 @@
         container.classList.add('rail-host');
         container.innerHTML = usable.map((rail, i) => railHtml(rail, i)).join('');
         container.querySelectorAll('.dashboard-card').forEach((card) => {
+            const rail = usable[Number(card.dataset.railIndex)];
+            const item = rail && rail.items[Number(card.dataset.itemIndex)];
+            attachHover(card, item, rail, onItemClick);
             card.addEventListener('click', () => {
-                const rail = usable[Number(card.dataset.railIndex)];
-                const item = rail && rail.items[Number(card.dataset.itemIndex)];
                 if (item) onItemClick(item, rail);
             });
         });
@@ -153,6 +187,7 @@
         holder.innerHTML = (items || []).map((it, i) => cardHtml(it, 0, start + i)).join('');
         Array.prototype.slice.call(holder.children).forEach((card, i) => {
             const item = items[i];
+            attachHover(card, item, null, onItemClick);
             card.addEventListener('click', () => onItemClick(item));
             gridEl.appendChild(card);
         });
