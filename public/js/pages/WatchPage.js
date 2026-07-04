@@ -3734,12 +3734,22 @@ class WatchPage {
                 }
                 if (Date.now() - this._stallSince < 45000) {
                     this.showLoading();
-                    try {
-                        this.hls.recoverMediaError();
-                        // recoverMediaError re-attaches the media element and
-                        // leaves it paused — resume playback explicitly
-                        setTimeout(() => { this.video?.play().catch(() => { }); this._reattachAiTrackIfActive(); }, 500);
-                    } catch (e) { /* destroyed */ }
+                    // THROTTLED: a starving realtime transcode emits fatal stalls every few
+                    // seconds, and each recoverMediaError() is a full media detach/attach —
+                    // the browser drops text-track rendering during the swap, so back-to-back
+                    // recoveries made the CURRENT SUBTITLE LINE strobe unreadably (04/07).
+                    // One recovery per 8 s is just as effective at unsticking the buffer;
+                    // between attempts the spinner shows and hls.js's own nudges keep working.
+                    const sinceRecover = Date.now() - (this._lastSoftRecoverTs || 0);
+                    if (sinceRecover >= 8000) {
+                        this._lastSoftRecoverTs = Date.now();
+                        try {
+                            this.hls.recoverMediaError();
+                            // recoverMediaError re-attaches the media element and
+                            // leaves it paused — resume playback explicitly
+                            setTimeout(() => { this.video?.play().catch(() => { }); this._reattachAiTrackIfActive(); }, 500);
+                        } catch (e) { /* destroyed */ }
+                    }
                     return;
                 }
                 // 45s without progress: fall through to terminal handling
