@@ -319,7 +319,14 @@ publiés du marché. Les 5 découvertes ont été traitées ainsi :
    - le cron de facturation applique la remise sur LA prochaine charge (min 50 ¢), la consomme
      **au succès seulement** (un échec la conserve pour le retry), reçu « (50 % off applied) » ;
    - `past_due`/`grace` gardent le confirm direct (pas d'offre quand un paiement est dû) ;
-   - `subscription.html` affiche « Next payment — 50 % off applied » quand la remise est posée.
+   - `subscription.html` affiche « Next payment — 50 % off applied » quand la remise est posée ;
+   - **anti-abus (audit 2026-07-04)** : `/change-plan` vers un plan/période PLUS CHER efface la
+     remise en attente (`discount_next_pct=null`, réponse `discount_cleared:true`) — sinon
+     « 50 % off mensuel » se convertissait en 50 % off l'annuel Family (valeur ×24). Un
+     downgrade la conserve (la valeur ne peut que baisser). `save_offer_used_at` reste posé à
+     vie dans tous les cas (offre one-shot par client, jamais re-proposée) ; double-POST
+     `/save-offer` inoffensif (même valeur, colonne unique, non cumulable) ; l'offre ne crée
+     jamais d'entitlement et ne prolonge pas l'essai.
 2. **Apple Pay / Google Pay** (+7,4 %/méthode, Apple Pay +22,3 % — Stripe) : **owner a écrit à
    Stancer** (2026-07-03) pour activer les autorisations USD **et** Apple/Google Pay. Côté code
    tout est prêt : l'iframe checkout porte déjà `allow="payment"`, les wallets apparaîtront
