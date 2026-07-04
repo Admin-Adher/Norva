@@ -3327,6 +3327,14 @@ class WatchPage {
         this._aiNotifyOptedIn = false;
         this._aiEtaTargetMs = 0;
         this._resetTranslations();
+        // A lane restart (engine→transcode failover, seek re-open, quality switch) reloads the
+        // SAME <video> with a new src, and the browser then DISABLES every existing text track
+        // (mode='disabled', cues=null — observed live 04/07 11:01). A failover must not turn the
+        // viewer's subtitles off: stash the showing generated track (same title only) and
+        // re-attach it once the new lane renders its first frame.
+        this._aiRestoreOnStart = (aiSameTitle && this._aiActiveVtt)
+            ? { vtt: this._aiActiveVtt, lang: this._aiActiveLang || 'und', key: this._aiSubtitleKey() }
+            : null;
         this.clearExternalSubtitleTracks();
         this.updateAudioTracks();
         this.updateCaptionsTracks();
@@ -5379,6 +5387,24 @@ class WatchPage {
             this.reportPlaybackStatus('ok').catch(() => { });
         }
         this.reportObservedAudioLanguages();
+        // Restore the viewer's generated subtitles across the lane restart (see the stash in the
+        // loadVideo reset). Same-title guarded at stash time; key re-checked for a late frame.
+        if (this._aiRestoreOnStart) {
+            const r = this._aiRestoreOnStart;
+            this._aiRestoreOnStart = null;
+            if (r.key === this._aiSubtitleKey() && this.attachGeneratedSubtitleTrack(r.vtt, r.lang)) {
+                this.updateCaptionsTracks();
+            }
+        } else if (this._aiActiveVtt) {
+            // Self-heal for restarts that SKIP the loadVideo reset (in-place failover on the same
+            // element): the browser disabled our track on the new src — rebuild it. A viewer-hidden
+            // track (mode 'hidden', cues intact via the C toggle) is deliberate and left alone.
+            const el = this.video?.querySelector('track[data-norva-ai-subtitle="true"]');
+            const dead = !el || !el.track || el.track.mode === 'disabled' || !el.track.cues || !el.track.cues.length;
+            if (dead && this.attachGeneratedSubtitleTrack(this._aiActiveVtt, this._aiActiveLang || 'und')) {
+                this.updateCaptionsTracks();
+            }
+        }
     }
 
     getPlaybackHealthTarget() {

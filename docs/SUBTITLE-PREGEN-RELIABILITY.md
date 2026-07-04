@@ -118,3 +118,15 @@ jamais (`renderTextTracksNatively:false` ne gate pas `_cleanTracks`). Correctifs
 Suivi (non bloquant) : re-attache IA après seek/audio-switch (aujourd'hui la piste est droppée,
 `restorePendingSubtitlePreference` n'a pas de source 'ai') ; brancher les pistes probe/native sur
 la même règle « viewer gagne » si un futur hls change son filtre.
+
+### 5. Gateway v64 : crash-loop /raw + restauration des sous-titres après bascule de lane (PR #111, #112)
+Incident prod (04/07 ~11h UTC, diagnostiqué en direct avec l'owner) : `nodeStream.pipe(res)` du
+`/raw` sans handler `'error'` — un reset provider en plein flux ou un abort client (seek engine)
+levait une `uncaughtException` qui TUAIT le process (aucun filet global) → 502 Railway edge sans
+CORS pour tous les viewers → crash-loop. Fix : erreurs gérées des deux côtés du pipe + filet
+`process.on(uncaughtException/unhandledRejection)` (log redacted, on continue) + v64.
+Dans la foulée, cause finale des sous-titres qui « disparaissent » : toute bascule de lane
+recharge le même `<video>` avec un nouveau src et le NAVIGATEUR désactive alors chaque piste
+(mode='disabled', cues=null, élément intact — observé au watcher 11:01:13). Fix player : stash
+au reset de loadVideo + self-heal au first-frame (piste régénérée si 'disabled'/vidée ; un
+masquage volontaire au clavier — mode 'hidden', cues intacts — n'est jamais écrasé).
