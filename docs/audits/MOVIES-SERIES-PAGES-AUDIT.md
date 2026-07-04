@@ -125,6 +125,17 @@ simplement jamais été atteints, le cron tournant à 300/run × 24/j = ~7,2k/j 
   le backlog de ~459k se vide en **~3-4 jours** (budget TMDB ~5 req/s moyen, sous les 50 req/s).
   Le `searchTmdbMatch` nettoie déjà les suffixes (`cleanSearchQuery`), donc ces titres
   matchent dès qu'ils sont atteints. Kick manuel au déploiement pour démarrer tout de suite.
+- **Matcher TMDB réparé pour les titres français** (`_shared/vod-title-projection.ts`,
+  PR #127) : `searchTmdbMatch` cherchait en anglais → le candidat renvoyé portait le titre EN
+  (« Gang Related »), scoré 0 % contre le titre FR du provider (« Flics sans scrupules ») →
+  rejeté AVANT la validation (pourtant déjà multilingue). Fix : recherche en `fr-FR`, année
+  extraite du titre quand `release_year` est null, scoring contre le titre localisé ET
+  `original_title` (max), 2 passes (avec/sans année). **Prouvé en prod sur les 5 exemples
+  utilisateur, tous matchés aux ids TMDB exacts** : 12→20714, Narnia Prince Caspian→2454,
+  Le Prince de Sicile→9835, Hooligans 2→15809, Flics sans scrupules→14398. (Les échecs
+  observés en test étaient des rate-limits TMDB transitoires dus au bombardement manuel,
+  avalés par le `catch` du cron — pas un défaut du matcher.) 458k titres réarmés
+  (`search_match_attempted_at=null`) pour repasser sous le matcher amélioré.
 - **Affichage posters-first (non destructif)** dans `norva-catalog` : la grille « See all »
   ordonne les titres AVEC poster d'abord (`poster_url` non-null), la longue traîne
   non-enrichie passe en fin (rien n'est masqué, le compte reste le total navigable) ; les
