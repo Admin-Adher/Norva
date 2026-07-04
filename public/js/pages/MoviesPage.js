@@ -923,7 +923,9 @@ class MoviesPage {
                 }
             });
 
-            this.cloudOffset = (page.offset || this.cloudOffset) + (page.items?.length || 0);
+            // The grid is paginated by FILM server-side (each film ships all its version
+            // rows), so advance the cursor by the film count, not the row count.
+            this.cloudOffset = (page.offset || this.cloudOffset) + (page.films ?? page.items?.length ?? 0);
             this.cloudHasMore = Boolean(page.hasMore);
             this.cloudTotal = page.count ?? this.cloudTotal;
             this.populateGenres();

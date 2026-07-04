@@ -414,10 +414,14 @@ async function listMediaItems(url: URL, userId: string) {
   const limit = boundedInt(url.searchParams.get("limit"), 1000, 1, 1000);
   const offset = boundedInt(url.searchParams.get("offset"), 0, 0, 1_000_000);
 
-  let query = db
-    .from("cloud_media_items")
-    .select("*", { count: "exact" })
-    .eq("user_id", userId);
+  // Year / rating / recently-added filters run in SQL over denormalized columns so
+  // they span the WHOLE catalogue (not just the loaded page).
+  const yearRange = decadeRange(url.searchParams.get("year"));
+  const minRating = paramNumber(url.searchParams.get("minRating"));
+  const addedDays = boundedInt(url.searchParams.get("addedDays"), 0, 0, 3650);
+  const addedAfterEpoch = addedDays > 0
+    ? Math.floor((Date.now() - addedDays * 86_400_000) / 1000)
+    : null;
 
   // Fuzzy search: a typed title query routes through the trigram-ranked RPC (typo
   // tolerance + substring-first ordering) instead of a plain ILIKE, when it's a
@@ -429,7 +433,18 @@ async function listMediaItems(url: URL, userId: string) {
         p_user: userId, p_item_type: itemType, p_q: q, p_limit: Math.min(limit, 50),
       });
       if (!rpcErr && Array.isArray(hits)) {
-        const items = (hits as Array<Record<string, unknown>>).map((row) => {
+        // Collapse duplicate provider entries of the same film (same resolved
+        // identity), mirroring the grid's server-side dedup.
+        const seen = new Set<string>();
+        const items = (hits as Array<Record<string, any>>).filter((row) => {
+          const md = isRecord(row.metadata) ? row.metadata : {};
+          const key = stringOrNull(row.dedup_key)
+            || (stringOrNull(md.providerTmdbId) ? `tmdb:${stringOrNull(md.providerTmdbId)}` : null)
+            || `id:${row.id}`;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        }).map((row) => {
           row.year = row.release_year ?? null;
           return row;
         });
@@ -437,47 +452,45 @@ async function listMediaItems(url: URL, userId: string) {
         await attachMediaLanguages(items, userId);
         return { items, count: items.length, limit, offset: 0, hasMore: false };
       }
-      // RPC unavailable (pre-migration / error) → fall through to ILIKE below.
+      // RPC unavailable (pre-migration / error) → fall through to the deduped grid.
     }
   }
 
-  if (sourceId) query = query.eq("source_id", sourceId);
-  if (itemType) query = query.eq("item_type", itemType);
-  if (categoryId) query = query.eq("parent_external_id", categoryId);
-  if (search) query = query.ilike("title", `%${search}%`);
-
-  // Year / rating / recently-added filters run in SQL over the denormalized
-  // columns so they span the WHOLE catalogue. Before, the client filtered its
-  // loaded 120-row pages only — at catalog scale (100k+ rows) e.g. "Rating 8+"
-  // trickled in near-empty pages and looked broken.
-  const yearRange = decadeRange(url.searchParams.get("year"));
-  if (yearRange) query = query.gte("release_year", yearRange.min).lte("release_year", yearRange.max);
-  const minRating = paramNumber(url.searchParams.get("minRating"));
-  if (minRating !== null) query = query.gte("rating_num", minRating);
-  const addedDays = boundedInt(url.searchParams.get("addedDays"), 0, 0, 3650);
-  if (addedDays > 0) query = query.gte("added_at", new Date(Date.now() - addedDays * 86_400_000).toISOString());
-
-  // Sort server-side so the order spans the WHOLE catalogue, not just the loaded
-  // page. Sort fields are denormalized columns (added_at / rating_num /
-  // release_year — migration 20260623230000); external_id is the stable
-  // tiebreaker that keeps offset pagination consistent across pages.
-  query = applyMediaSort(query, sort).range(offset, offset + limit - 1);
-
-  const { data, count, error } = await query;
+  // Main grid: server-side dedup so a film the provider lists more than once (or
+  // that arrived from several sources) shows as ONE card, spanning the whole
+  // catalogue so duplicates collapse even across pages. The representative row is
+  // the richest (poster + resolved tmdb + rating); `total` is the distinct film
+  // count. See migration list_media_items_deduped.
+  const { data: rpcData, error } = await db.rpc("list_media_items_deduped", {
+    p_user: userId,
+    p_item_type: itemType,
+    p_source: sourceId,
+    p_category: categoryId,
+    p_search: search,
+    p_year_min: yearRange ? yearRange.min : null,
+    p_year_max: yearRange ? yearRange.max : null,
+    p_min_rating: minRating,
+    p_added_after_epoch: addedAfterEpoch,
+    p_sort: sort,
+    p_limit: limit,
+    p_offset: offset,
+  });
   if (error) throwDb(error, "Unable to list media items");
 
+  const payload = (rpcData ?? {}) as { items?: Array<Record<string, any>>; films?: number; total?: number };
   // release_year is a first-class column now — expose it as item.year for the card.
-  const items = (data ?? []).map((row) => {
-    (row as Record<string, unknown>).year = (row as Record<string, unknown>).release_year ?? null;
+  const items = (payload.items ?? []).map((row) => {
+    row.year = row.release_year ?? null;
     return row;
   });
+  const count = typeof payload.total === "number" ? payload.total : null;
+  // `items` are version rows; the page is paginated by FILM, so the client advances
+  // its cursor by `films`, not by row count (a film can contribute several rows).
+  const films = typeof payload.films === "number" ? payload.films : items.length;
 
   // Phase 2 dedup: when the read flag is on, overlay display + playback fields from
   // the provider-global catalog_media_items so the grid serves them from the shared
   // catalogue (letting the per-user copy later be thinned of those heavy fields).
-  // Only fills where global has a value, so a global miss / flag-off / empty global
-  // shows per-user data unchanged; mirror-verify proves these match today. The
-  // per-user query still drives membership, filtering, sort and pagination.
   if (mediaReadFromCatalog() && sourceId) {
     await applyMediaCatalogOverlay(items, sourceId, userId);
   }
@@ -487,10 +500,11 @@ async function listMediaItems(url: URL, userId: string) {
 
   return {
     items,
-    count: count ?? null,
+    count,
+    films,
     limit,
     offset,
-    hasMore: typeof count === "number" ? offset + limit < count : (data?.length ?? 0) === limit,
+    hasMore: typeof count === "number" ? offset + films < count : films >= limit,
   };
 }
 
@@ -645,24 +659,6 @@ async function attachMediaLanguages(items: Array<Record<string, any>>, userId: s
       if (cat.backdrop && !stringOrNull(row.backdrop_url)) { row.backdrop_url = cat.backdrop; row.backdropUrl = cat.backdrop; }
     }
   } catch (_) { /* best-effort; never fail the grid over enrichment overlay */ }
-}
-
-function applyMediaSort<T>(query: T, sort: string): T {
-  const q = query as unknown as {
-    order: (col: string, opts?: { ascending?: boolean; nullsFirst?: boolean }) => T;
-  };
-  let next: T;
-  switch (sort) {
-    case "added":    next = q.order("added_at",     { ascending: false, nullsFirst: false }); break;
-    case "rating":   next = q.order("rating_num",   { ascending: false, nullsFirst: false }); break;
-    case "year":     next = q.order("release_year", { ascending: false, nullsFirst: false }); break;
-    case "year-asc": next = q.order("release_year", { ascending: true,  nullsFirst: false }); break;
-    case "name":
-    case "default":
-    default:         next = q.order("title", { ascending: true }); break;
-  }
-  // Stable secondary key so a given offset always maps to the same row.
-  return (next as unknown as typeof q).order("external_id", { ascending: true });
 }
 
 async function listMediaCategories(url: URL, userId: string) {
