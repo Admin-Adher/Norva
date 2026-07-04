@@ -5,7 +5,7 @@
 // unbundled and the function fails to boot (WORKER_ERROR). Deploy via CI only.
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { buildLiveCatalog, findLiveChannel, type LiveCatalogItem } from "../_shared/live-catalog.ts";
-import { BUCKET_ORDER, bucketLabel, classifyTitleBuckets } from "../_shared/genre-taxonomy.ts";
+import { BUCKET_ORDER, bucketLabel } from "../_shared/genre-taxonomy.ts";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -765,34 +765,28 @@ async function listGenreSummary(req: Request, url: URL, userId: string) {
       ? sourceParam
       : null;
 
-  // Aggregate in SQL: distinct (categoryName, tmdb genres) combos + counts. The RPC
-  // groups over denormalised genre_category / genre_payload columns (kept in sync by a
-  // trigger) so it never detoasts the large metadata JSONB — see migration
-  // 20260624060000. The curated bucket mapping stays in TS, multiplying each combo by
-  // its count.
-  let rows: Array<{ category_name?: unknown; genres?: unknown; n?: unknown }>;
+  // Per-bucket BROWSABLE counts (variant_count > 0) straight from the denormalised
+  // genre_buckets column via cloud_genre_bucket_counts — so the genre-picker numbers
+  // equal exactly what the "See all" grid shows (both read genre_buckets over the whole
+  // catalogue). The old path counted variant-less rows and classified in the edge, so
+  // its numbers ran far ahead of the grid (e.g. 819 in the picker, 4 in the grid).
+  const counts = new Map<string, number>();
   try {
     const rpcArgs: Record<string, unknown> = { p_user_id: userId, p_item_type: itemType };
     if (sourceId) rpcArgs.p_source_id = sourceId;
-    const { data, error } = await db.rpc("cloud_genre_summary", rpcArgs);
+    const { data, error } = await db.rpc("cloud_genre_bucket_counts", rpcArgs);
     if (error) {
       if (isMissingMaterialization(error)) return { type: itemType, genres: [], hidden: [] };
       throwDb(error, "Unable to summarise genres");
     }
-    rows = (data ?? []) as Array<{ category_name?: unknown; genres?: unknown; n?: unknown }>;
+    for (const row of (data ?? []) as Array<{ bucket?: unknown; n?: unknown }>) {
+      const bucketId = String(row.bucket ?? "");
+      const n = Number(row.n) || 0;
+      if (bucketId && bucketId !== "autres" && n) counts.set(bucketId, n);
+    }
   } catch (error) {
     if (isMissingMaterialization(error)) return { type: itemType, genres: [], hidden: [] };
     throw error;
-  }
-
-  const counts = new Map<string, number>();
-  for (const row of rows) {
-    const n = Number(row.n) || 0;
-    if (!n) continue;
-    for (const bucketId of classifyTitleBuckets(row.category_name, row.genres)) {
-      if (bucketId === "autres") continue;
-      counts.set(bucketId, (counts.get(bucketId) ?? 0) + n);
-    }
   }
 
   const hidden = await getHiddenGenres(req, userId);
@@ -821,118 +815,121 @@ async function listGenreRails(req: Request, url: URL, userId: string) {
   const itemType = url.searchParams.get("type") === "series" ? "series" : "movie";
   const lang = railLang(url);
   const perRail = boundedInt(url.searchParams.get("limit"), 18, 1, 50);
-  const scanCap = boundedInt(url.searchParams.get("candidates"), 8000, 100, 12000);
 
   // Per-profile hidden genres: a title with ANY hidden bucket is dropped from
   // the whole catalog (so e.g. a Kids profile sees no Horror anywhere).
   const hidden = await getHiddenGenres(req, userId);
+  const candidateBuckets = BUCKET_ORDER.filter((b) => b !== "autres" && !hidden.has(b));
 
-  // Paged scan with early exit. The old single query capped at the 2000 most
-  // recently synced titles, so any bucket rare in that window rendered as a 1-2
-  // card rail even with hundreds of matches deeper in the catalog. We keep
-  // paging (recency order) until every bucket seen so far has enough candidates
-  // to fill its rail, the catalog is exhausted, or the scan cap is reached.
-  const pageSize = 2000;
-  const titles: JsonRecord[] = [];
-  const bucketsOf = new Map<string, string[]>();
-  const bucketCounts = new Map<string, number>();
-  let scanned = 0;
-  while (scanned < scanCap) {
-    let rows: JsonRecord[];
-    try {
-      const { data, error } = await db
+  // Per-bucket, index-backed candidate fetch (genre_buckets @> {bucket}) over the
+  // WHOLE catalogue — not a recency window. The old scan only saw the newest ~few-k
+  // synced titles, so a bucket whose members were older/less-recently-enriched
+  // rendered near-empty. genre_buckets is the denormalised curated-bucket set
+  // (migration 20260704160000); the GIN index makes each of these cheap. We pull a
+  // buffer (perRail * 3) newest-by-created_at per bucket so the cross-rail dedup
+  // below still has enough to fill each row. Narrow select (id + buckets), so the
+  // heavy metadata is detoasted only for the final chosen ids.
+  const buffer = perRail * 3;
+  let candidateSets: Array<{ bucket: string; rows: JsonRecord[] }>;
+  try {
+    candidateSets = await Promise.all(candidateBuckets.map(async (bucket) => {
+      let q = db
         .from("cloud_titles")
-        .select("*")
+        .select("id, genre_buckets, created_at")
         .eq("user_id", userId)
         .eq("item_type", itemType)
         .gt("variant_count", 0)
-        .order("synced_at", { ascending: false })
-        .order("updated_at", { ascending: false })
-        .order("id", { ascending: true })
-        .range(scanned, Math.min(scanned + pageSize, scanCap) - 1);
+        .contains("genre_buckets", [bucket]);
+      if (hidden.size) q = q.not("genre_buckets", "ov", `{${[...hidden].join(",")}}`);
+      const { data, error } = await q
+        .order("created_at", { ascending: false })
+        .limit(buffer);
       if (error) {
-        if (isMissingMaterialization(error)) return { contract: "norva.genre.rails.v1", type: itemType, rails: [] };
+        if (isMissingMaterialization(error)) return { bucket, rows: [] as JsonRecord[] };
         throwDb(error, "Unable to list genre rail candidates");
       }
-      rows = (data ?? []) as JsonRecord[];
-    } catch (error) {
-      if (isMissingMaterialization(error)) return { contract: "norva.genre.rails.v1", type: itemType, rails: [] };
-      throw error;
-    }
-    for (const title of rows) {
-      // genre_category COLUMN survives metadata thinning; metadata.categoryName is '{}' at rest.
-      const categoryName = title.genre_category ?? recordOrEmpty(title.metadata).categoryName;
-      const buckets = classifyTitleBuckets(categoryName, titleGenres(title))
-        .filter((b) => b !== "autres"); // never surface an "Autres" rail
-      if (!buckets.length || buckets.some((b) => hidden.has(b))) continue;
-      bucketsOf.set(String(title.id), buckets);
-      titles.push(title);
-      for (const b of buckets) bucketCounts.set(b, (bucketCounts.get(b) ?? 0) + 1);
-    }
-    scanned += rows.length;
-    if (rows.length < pageSize) break; // catalog exhausted
-    // Every bucket discovered so far can fill its rail with room for the
-    // dedup budget below → deeper scanning can't improve the rows.
-    if ([...bucketCounts.values()].every((n) => n >= perRail * 2)) break;
+      return { bucket, rows: (data ?? []) as JsonRecord[] };
+    }));
+  } catch (error) {
+    if (isMissingMaterialization(error)) return { contract: "norva.genre.rails.v1", type: itemType, rails: [] };
+    throw error;
   }
 
+  // A row's genre_buckets are already display-ordered and hidden-filtered by the
+  // query; keep the same buckets each candidate belongs to for the dedup budget.
+  const rowById = new Map<string, JsonRecord>();
+  const bucketsOf = new Map<string, string[]>();
+  const orderIndex = new Map<string, number>(); // recency rank within its bucket fetch
+  for (const { rows } of candidateSets) {
+    rows.forEach((row, i) => {
+      const id = String(row.id);
+      if (!rowById.has(id)) {
+        rowById.set(id, row);
+        const bs = Array.isArray(row.genre_buckets)
+          ? (row.genre_buckets as unknown[]).map(String).filter((b) => b !== "autres" && !hidden.has(b))
+          : [];
+        bucketsOf.set(id, bs);
+        orderIndex.set(id, i);
+      }
+    });
+  }
+  // Iterate candidates newest-first (created_at desc) for stable, resync-proof rows.
+  const orderedIds = [...rowById.keys()].sort((a, b) =>
+    String(rowById.get(b)!.created_at ?? "").localeCompare(String(rowById.get(a)!.created_at ?? "")));
+
   // Two-pass assignment with a cross-rail duplicate budget.
-  // Pass 1 — each title fills ONE rail (its first bucket with a free slot), so
-  // rows are made of distinct titles as long as the catalog allows it.
-  const byBucket = new Map<string, JsonRecord[]>();
+  // Pass 1 — each title fills ONE rail (its first bucket with a free slot).
+  const byBucket = new Map<string, string[]>();
   const appearances = new Map<string, number>();
-  for (const title of titles) {
-    const id = String(title.id);
+  for (const id of orderedIds) {
     for (const bucketId of bucketsOf.get(id) ?? []) {
       const list = byBucket.get(bucketId) ?? [];
       if (list.length >= perRail) continue;
-      list.push(title);
+      list.push(id);
       byBucket.set(bucketId, list);
       appearances.set(id, 1);
       break;
     }
   }
-  // Pass 2 — top up still-short rails with second appearances (bounded).
-  for (const bucketId of BUCKET_ORDER) {
+  // Pass 2 — top up still-short rails with bounded second appearances.
+  for (const bucketId of candidateBuckets) {
     const list = byBucket.get(bucketId);
     if (!list || list.length >= perRail) continue;
-    const present = new Set(list.map((t) => String(t.id)));
-    for (const title of titles) {
+    const present = new Set(list);
+    for (const id of orderedIds) {
       if (list.length >= perRail) break;
-      const id = String(title.id);
       if (present.has(id)) continue;
       if ((appearances.get(id) ?? 0) >= GENRE_RAIL_MAX_APPEARANCES) continue;
       if (!(bucketsOf.get(id) ?? []).includes(bucketId)) continue;
-      list.push(title);
+      list.push(id);
       present.add(id);
       appearances.set(id, (appearances.get(id) ?? 0) + 1);
     }
   }
-  // Stable, resync-proof row order: newest-in-YOUR-catalog first (created_at is
-  // immutable; synced_at reshuffles on every provider resync).
-  for (const list of byBucket.values()) {
-    list.sort((a, b) => String(b.created_at ?? "").localeCompare(String(a.created_at ?? "")));
-  }
 
-  // One batched variant fetch for the union of selected titles.
-  const selectedIds = new Set<string>();
-  for (const list of byBucket.values()) {
-    for (const title of list) selectedIds.add(String(title.id));
+  // Batch-fetch the FULL rows only for the chosen ids (metadata detoast bounded).
+  const selectedIds = [...new Set([...byBucket.values()].flat())];
+  const fullById = new Map<string, JsonRecord>();
+  if (selectedIds.length) {
+    const { data } = await db.from("cloud_titles").select("*").eq("user_id", userId).in("id", selectedIds);
+    for (const row of (data ?? []) as JsonRecord[]) fullById.set(String(row.id), row);
   }
-  const variantsByTitle = await listVariantsByTitleIds([...selectedIds], userId);
-  await applyCatalogOverlay([...byBucket.values()].flat(), itemType); // read-cutover flag (genre rails)
+  const selectedRows = selectedIds.map((id) => fullById.get(id)).filter((r): r is JsonRecord => !!r);
+  const variantsByTitle = await listVariantsByTitleIds(selectedIds, userId);
+  await applyCatalogOverlay(selectedRows, itemType); // read-cutover flag (genre rails)
 
-  const rails = BUCKET_ORDER
-    .filter((bucketId) => bucketId !== "autres" && (byBucket.get(bucketId)?.length ?? 0) >= GENRE_RAIL_MIN_ITEMS)
+  const rails = candidateBuckets
+    .filter((bucketId) => (byBucket.get(bucketId)?.length ?? 0) >= GENRE_RAIL_MIN_ITEMS)
     .map((bucketId) => ({
       id: `genre-${bucketId}`,
       title: bucketLabel(bucketId),
       itemType,
       source: "titles",
       curation: { kind: "genre_bucket", bucket: bucketId },
-      items: (byBucket.get(bucketId) ?? []).map((row) =>
-        titleRailItem(row, variantsByTitle.get(String(row.id)) ?? [], lang)
-      ),
+      items: (byBucket.get(bucketId) ?? [])
+        .map((id) => fullById.get(id))
+        .filter((row): row is JsonRecord => !!row)
+        .map((row) => titleRailItem(row, variantsByTitle.get(String(row.id)) ?? [], lang)),
     }));
 
   return { contract: "norva.genre.rails.v1", type: itemType, rails };
@@ -1046,20 +1043,6 @@ function titleAudioTracks(title: JsonRecord): Array<{ index: number; lang: strin
     })
     .filter((t) => Number.isInteger(t.index));
 }
-// Each requested dimension is required (logical AND across audio + subtitles); an
-// empty dimension imposes no constraint. Audio matches a version tag OR a real
-// captured audio-track language (audioIso); subtitles match version tags only
-// (burned-in subs can't be probed, so the tag is the only signal).
-function titleMatchesLanguage(title: JsonRecord, audioTags: string[], audioIso: string | null, subTags: string[]): boolean {
-  const langs = titleVersionLanguages(title);
-  if (audioTags.length || audioIso) {
-    const audioOk = (audioTags.length > 0 && audioTags.some((tag) => langs.includes(tag))) ||
-      (audioIso !== null && titleAudioLanguages(title).includes(audioIso));
-    if (!audioOk) return false;
-  }
-  if (subTags.length && !subTags.some((tag) => langs.includes(tag))) return false;
-  return true;
-}
 // "Best for my languages": a preferred-audio match outweighs a preferred-subtitle
 // match; ties keep the incoming (recency) order via the stable index tiebreaker.
 function languageMatchRank(langs: string[], prefAudioTags: string[], prefSubTags: string[]): number {
@@ -1090,7 +1073,6 @@ async function listGenreItems(req: Request, url: URL, userId: string) {
   const langSort = (url.searchParams.get("sort") || "").trim() === "lang-match";
   const prefAudioTags = langSort ? audioFacetTags(normalizeFacet(url.searchParams.get("prefAudio"))) : [];
   const prefSubTags = langSort ? subtitleFacetTags(normalizeFacet(url.searchParams.get("prefSubs"))) : [];
-  const filterTags = [...new Set([...audioTags, ...subTags])];
   // Decade / minimum-rating filters so the whole filter bar works inside a genre
   // ("See all") or language grid — before, Year/Rating were silently ignored there.
   const yearRange = decadeRange(url.searchParams.get("year"));
@@ -1102,85 +1084,81 @@ async function listGenreItems(req: Request, url: URL, userId: string) {
   // The bucket itself is hidden → nothing to show.
   if (bucket && hidden.has(bucket)) return { items: [], count: 0, limit, offset, hasMore: false };
 
-  let titles: JsonRecord[];
-  try {
-    let query = db
-      .from("cloud_titles")
-      .select("*")
-      .eq("user_id", userId)
-      .eq("item_type", itemType)
-      .gt("variant_count", 0);
-    // GIN-indexed pre-filter (a superset OR across requested tags + the real
-    // audio-language column) so the candidate cap covers the whole matched set;
-    // exact AND semantics are refined in memory below.
-    if (audioIso) {
+  // Build the shared SQL filter. genre_buckets is the denormalised curated-bucket
+  // set (migration 20260704160000), GIN-indexed — so a bucket's grid is filtered
+  // over the WHOLE catalogue by index, not classified in a recency-capped window.
+  // Every dimension is now a real SQL predicate: language (version tags OR the
+  // captured audio-language column), year (release_year), rating (rating_num),
+  // hidden genres (drop a title tagged with ANY hidden bucket — the "Kids profile
+  // sees no Horror anywhere" rule).
+  const applyFilters = (q: any) => {
+    let out = q.eq("user_id", userId).eq("item_type", itemType).gt("variant_count", 0);
+    if (bucket) out = out.contains("genre_buckets", [bucket]);
+    if (hidden.size) out = out.not("genre_buckets", "ov", `{${[...hidden].join(",")}}`);
+    if (search) out = out.ilike("title", `%${search}%`);
+    if (yearRange) out = out.gte("release_year", yearRange.min).lte("release_year", yearRange.max);
+    if (minRating !== null) out = out.gte("rating_num", minRating);
+    // Subtitles: burned-in tag only. Audio: version tag OR captured audio language.
+    if (subTags.length) out = out.overlaps("version_languages", subTags);
+    if (audioTags.length || audioIso) {
       // Per-tag contains() so the or() never holds a comma INSIDE an array literal
-      // (PostgREST splits or-conditions on top-level commas). OR of contains == overlap.
-      const orParts = filterTags.map((tag) => `version_languages.cs.{${tag}}`);
-      orParts.push(`audio_languages.cs.{${audioIso}}`);
-      query = query.or(orParts.join(","));
-    } else if (filterTags.length) {
-      query = query.overlaps("version_languages", filterTags);
+      // (PostgREST splits or-conditions on top-level commas).
+      const orParts = audioTags.map((tag) => `version_languages.cs.{${tag}}`);
+      if (audioIso) orParts.push(`audio_languages.cs.{${audioIso}}`);
+      if (orParts.length) out = out.or(orParts.join(","));
     }
-    if (search) query = query.ilike("title", `%${search}%`);
-    // release_year is a first-class column: pre-filter in SQL so the candidate
-    // window is spent on rows that can actually match.
-    if (yearRange) query = query.gte("release_year", yearRange.min).lte("release_year", yearRange.max);
-    const { data, error } = await query
-      .order("synced_at", { ascending: false })
-      .order("updated_at", { ascending: false })
-      .limit(candidateLimit);
+    return out;
+  };
+
+  try {
+    // "Best for my languages" sort needs an in-memory rank over the filtered set;
+    // it's bounded by the (usually language/genre-narrowed) filter. Every other
+    // view uses exact SQL count + range pagination over the whole catalogue.
+    if (langSort && (prefAudioTags.length || prefSubTags.length)) {
+      const { data, error } = await applyFilters(db.from("cloud_titles").select("*"))
+        .order("created_at", { ascending: false })
+        .limit(candidateLimit);
+      if (error) {
+        if (isMissingMaterialization(error)) return { items: [], count: 0, limit, offset, hasMore: false };
+        throwDb(error, "Unable to list genre items");
+      }
+      const ranked = ((data ?? []) as JsonRecord[])
+        .map((title, index) => ({ title, index, rank: languageMatchRank(titleVersionLanguages(title), prefAudioTags, prefSubTags) }))
+        .sort((a, b) => b.rank - a.rank || a.index - b.index)
+        .map((entry) => entry.title);
+      const pageRows = ranked.slice(offset, offset + limit);
+      const variantsByTitle = await listVariantsByTitleIds(pageRows.map((row) => String(row.id)), userId);
+      await applyCatalogOverlay(pageRows, itemType);
+      return {
+        items: pageRows.map((row) => titleRailItem(row, variantsByTitle.get(String(row.id)) ?? [], lang)),
+        count: ranked.length,
+        limit, offset,
+        hasMore: offset + limit < ranked.length,
+      };
+    }
+
+    const { data, count, error } = await applyFilters(db.from("cloud_titles").select("*", { count: "exact" }))
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: true })
+      .range(offset, offset + limit - 1);
     if (error) {
       if (isMissingMaterialization(error)) return { items: [], count: 0, limit, offset, hasMore: false };
       throwDb(error, "Unable to list genre items");
     }
-    titles = (data ?? []) as JsonRecord[];
+    const pageRows = (data ?? []) as JsonRecord[];
+    const total = count ?? null;
+    const variantsByTitle = await listVariantsByTitleIds(pageRows.map((row) => String(row.id)), userId);
+    await applyCatalogOverlay(pageRows, itemType);
+    return {
+      items: pageRows.map((row) => titleRailItem(row, variantsByTitle.get(String(row.id)) ?? [], lang)),
+      count: total,
+      limit, offset,
+      hasMore: total !== null ? offset + limit < total : pageRows.length === limit,
+    };
   } catch (error) {
     if (isMissingMaterialization(error)) return { items: [], count: 0, limit, offset, hasMore: false };
     throw error;
   }
-
-  let matched = titles.filter((title) => {
-    if (bucket || hidden.size) {
-      const buckets = classifyTitleBuckets(title.genre_category ?? recordOrEmpty(title.metadata).categoryName, titleGenres(title));
-      if (bucket) {
-        if (!buckets.includes(bucket) || buckets.some((b) => hidden.has(b))) return false;
-      } else if (buckets.length && buckets.every((b) => hidden.has(b))) {
-        return false;
-      }
-    }
-    if ((audioTags.length || audioIso || subTags.length) &&
-        !titleMatchesLanguage(title, audioTags, audioIso, subTags)) return false;
-    if (yearRange) {
-      const y = numberOrNull(title.release_year);
-      if (y === null || y < yearRange.min || y > yearRange.max) return false;
-    }
-    if (minRating !== null) {
-      const tmdb = titleTmdb(title);
-      const rating = numberOrNull(tmdb.vote_average ?? recordOrEmpty(title.metadata).vote_average);
-      if (rating === null || rating < minRating) return false;
-    }
-    return true;
-  });
-
-  if (langSort && (prefAudioTags.length || prefSubTags.length)) {
-    matched = matched
-      .map((title, index) => ({ title, index, rank: languageMatchRank(titleVersionLanguages(title), prefAudioTags, prefSubTags) }))
-      .sort((a, b) => b.rank - a.rank || a.index - b.index)
-      .map((entry) => entry.title);
-  }
-
-  const pageRows = matched.slice(offset, offset + limit);
-  const variantsByTitle = await listVariantsByTitleIds(pageRows.map((row) => String(row.id)), userId);
-  await applyCatalogOverlay(pageRows, itemType); // read-cutover flag (language grid)
-
-  return {
-    items: pageRows.map((row) => titleRailItem(row, variantsByTitle.get(String(row.id)) ?? [], lang)),
-    count: matched.length,
-    limit,
-    offset,
-    hasMore: offset + limit < matched.length,
-  };
 }
 
 // Dynamic menu options: which audio / burned-in-subtitle facets actually exist in
