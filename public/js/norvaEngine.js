@@ -901,6 +901,8 @@
       this.copyAudio = !!(this.aS && AUDIO_COPY.has(this.aName));
       this.V_IDX = 0; this.A_IDX = this.vS ? 1 : 0;
       this.log(`vidéo=${this.vName}${this.aS ? `, audio=${this.aName} (${this.copyAudio ? 'copie' : 'transcodage AAC'})` : ''}`);
+      // Subtitle enumeration + in-band capture arming, for EVERY container (mkv/mp4/ts).
+      await this._enumerateSubtitleStreams();
     }
 
     // MPEG-TS carries the H.264 SPS/PPS IN-BAND (annexb), not in the container header — so the video
@@ -983,9 +985,16 @@
       // AVCC (length-prefixed) to match the avcC we just injected — else MSE rejects the mdat.
       this._convertAnnexb = true;
       this.log('TS: injected H.264 avcC (' + avcc.length + ' B) from in-band SPS/PPS');
-      // Enumerate subtitle streams (index + codec) for the player's CC menu. libav
-      // here can't read the per-stream LANGUAGE, so the language is filled by the
-      // gateway probe (same split as audio). Also logs the full stream list.
+    }
+
+    // Enumerate subtitle streams (index + codec) for the player's CC menu + in-band cue
+    // capture. Called from _detectStreams so it runs for EVERY container. It used to live
+    // at the tail of _ensureVideoExtradata, whose early returns (mkv/mp4 already carry
+    // extradata) skipped it for anything but MPEG-TS — so in-band subtitles NEVER armed
+    // on MKV/MP4 and every selection fell back to the slow gateway extraction. libav here
+    // can't read the per-stream LANGUAGE; the gateway probe fills it (same split as audio).
+    async _enumerateSubtitleStreams() {
+      const lib = this.lib;
       this._subStreams = [];
       this._subMeta = new Map();
       try {
