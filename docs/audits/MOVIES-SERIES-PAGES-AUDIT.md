@@ -172,3 +172,106 @@ persistance/restauration des filtres par page.
    colonne dénormalisée → reste client-only.
 6. `watched`/`favorites` restent client-only (nécessitent l'historique / la liste de favoris
    côté requête serveur).
+
+---
+
+## Lot 4 — doublons de fiches (même film ×N) + posters périmés + versions manquantes (2026-07-04)
+
+Écran utilisateur : un même film en **plusieurs cartes** (souvent une pleine matchée TMDB +
+une « fantôme » vide avec un badge brut « PREFIX »), un **poster placeholder** alors que le
+film a bien un poster, et **pas de sélecteur de versions** dans la fiche.
+
+### Cause racine (tracée sur « Le Monde de Narnia : Le Prince Caspian », tmdb 2454)
+Le provider FR liste réellement certains films **plusieurs fois** (ex. stream `32764` +
+`13378`). Deux mécanismes empilés créaient les doublons :
+
+1. **Identité dédoublée dans `cloud_titles`** — le cron search-match résout un `provider_tmdb_id`
+   **sans re-clé** : il laisse coexister une ligne `identity_key = tmdb:<id>` (le provider a
+   donné l'id) et une ligne `identity_key = norm:<titre>` (matchée après coup). Deux titres pour
+   un film → deux cartes dans les rails de genre. Et le cron en **recrée en continu** (mesuré :
+   ~770 nouveaux en 20 min pendant le drainage).
+2. **Grille plate non dédupliquée** — elle lit `cloud_media_items` (une ligne par entrée
+   provider) et ne groupait côté client que par `sourceId:stream_id`. Le jumeau **sans tmdb**
+   n'héritait ni du poster ni du synopsis (le search-match n'écrit QUE dans `cloud_titles`,
+   jamais dans `cloud_media_items`) → fiche « fantôme » + badge « PREFIX » (un tag de piste
+   audio de `parseVersionInfo`, rendu brut faute de langue résolue).
+
+Échelle (compte de vérif) : `cloud_titles` ~1 557 lignes-titres redondantes ; grille plate
+**47 644 films → 35 333 après dédup** (~12 000 doublons) ; 7 122 fiches fantômes.
+
+### Correctifs (PR #133, #134, #135)
+**A. Canonisation de l'identité** — `norva_canonicalize_titles_for_user(uuid|null)`
+(migration `20260704200000`). Fusionne chaque groupe `(user, item_type, provider_tmdb_id)` en
+**un seul titre canonique `tmdb:<id>`** : variantes repointées (`cloud_title_variants.title_id`,
+seule FK entrante), champs comblés par coalesce, lignes redondantes supprimées, re-clé APRÈS
+delete (jamais de collision `(user_id, identity_key)`). Note : ne comble PAS les colonnes
+tableau/probe (`audio_languages` text[]…) — re-dérivées par les crons de probe.
+
+**B. Dédup serveur de la grille plate** — colonne **`cloud_media_items.dedup_key`** = identité
+du titre lié (lien 1:1 vérifié : 47 644/47 644), index `(user_id, item_type, dedup_key)`
+(migration `20260704200500`) + **propagation du tmdb** du titre vers `metadata.providerTmdbId`
+(→ enrichit le jumeau fantôme). RPC **`list_media_items_deduped`** (migration `20260704201000`) :
+**pagine par film distinct** (`distinct on (dedup_key)` → doublons collapsés même entre pages)
+mais renvoie **toutes les lignes-versions** de chaque film de la page (`{items, films, total}`) ;
+le client avance son curseur par `page.films` (MoviesPage/SeriesPage), regroupe par
+`dedup_key`/tmdb → une carte, sélecteur de versions intact.
+
+**C. Posters périmés** — le poster stocké (`cloud_titles` + `cloud_media_items`) pouvait être
+**périmé** : TMDB fait tourner l'image, l'ancien chemin **404** (placeholder). `catalog_titles`
+(source enrichie globale) a le bon. Prouvé : `yrVwGlmTrMk0WpDGLIyGDKQ6n6d.jpg` → **404** vs
+`qxz3WIyjZiSKUhaTIEJ3c1GcC9z.jpg` → **200** pour tmdb 2454. (La canonisation avait aggravé en
+gardant le poster périmé de la ligne canonique.) Fix (migration `20260704203000`, PR #135) :
+- `norva_refresh_posters_from_catalog` synchronise `cloud_titles` ← `catalog_titles` (corrige
+  aussi **les rails de genre** qui lisent `cloud_titles` en direct, hors overlay) ;
+- `norva_backfill_media_identity` propage le poster frais vers `cloud_media_items` ;
+- overlay edge (`attachMediaLanguages`) : le poster de `catalog_titles` fait désormais
+  **autorité** (remplace), au lieu d'être un fallback derrière le poster périmé de `cloud_titles`.
+- Impact compte de vérif : **2 828 posters rafraîchis** ; 3 Narnia matchés → HTTP 200.
+
+**D. Versions absentes de la fiche** — la recherche floue (`search_media_items`, chemin fuzzy)
+**dédupliquait en mémoire**, écrasant les versions ; or une fiche ouverte depuis la recherche
+**re-fetch ses versions par ce même chemin** (`openByItem`). Fix (PR #135) : le chemin fuzzy
+renvoie de nouveau **toutes les lignes**, le client regroupe. Vérifié : Prince Caspian = 2
+versions, Passeur d'Aurore = 3, Lion = 2.
+
+**E. Durabilité** — `norva_reconcile_catalog(uuid|null)` = canonicalize → refresh_posters →
+backfill_media_identity (tous idempotents, quasi gratuits à vide). Cron pg_cron
+**`norva-catalog-reconcile` (`*/10 * * * *`)** répare en continu ce que le search-match recrée,
+**sans toucher au chemin critique** du matching. Index partiel `cloud_titles(user_id, item_type,
+provider_tmdb_id) where provider_tmdb_id is not null` pour garder le group-by peu coûteux.
+
+### État opérationnel (à généraliser)
+Rollout **sûr et progressif** : le dedup serveur est live pour tous, mais n'**agit** que là où
+`dedup_key` est rempli → seul le compte de vérif (`jeremy`, `0b971271-…`) est dédupliqué/rafraîchi ;
+les autres comptes voient la grille **inchangée** (pas de `dedup_key` → RPC = comportement d'avant,
+zéro régression). Crons temporairement **focalisés sur jeremy** : (1) `norva-enrich-search-match`
+(job 12, auto-bascule global via le garde-fou job 84 quand le backlog est vidé) ; (2)
+`norva-catalog-reconcile` (job 85). **À généraliser** = `norva_reconcile_catalog(null)` en one-shot
++ passage des deux crons en global (retirer `&user=` / le paramètre uuid).
+
+### Doublons restants en recherche = non-matchés (attendu)
+Les entrées encore en double portent des clés `norm:` **distinctes** car pas encore matchées
+TMDB (ex. « The Chronicles Of Narnia — The Voyage… » vs « Le Monde de Narnia : L'Odyssée… » =
+le même film). Elles **fusionnent automatiquement** dès que le search-match les résout (backlog
+en cours de drainage + reconcile /10 min).
+
+## Lot 4b — erreur de lecture `RANGE_UNSUPPORTED` sur une version (diagnostic, PAS un bug catalogue)
+Symptôme : une version d'un film échoue à la lecture avec `{stage:'load', message:'RANGE_UNSUPPORTED'}`,
+snapshot `size:0 / mime:null`, puis le fallback transcode gateway échoue :
+`FFmpeg exited with code 1 … http://<host-provider>/… : Input/output error`.
+
+**Diagnostic** : ce n'est PAS un bug Norva ni un problème de dédup/poster. C'est un **flux
+provider mort/injoignable** : (1) le chemin moteur WASM a besoin du support **HTTP Range**
+(byte-range pour seek-demux) — la source ne le supporte pas / renvoie 0 octet ; (2) le fallback
+transcode échoue parce que **FFmpeg ne peut même pas OUVRIR l'URL source** (I/O error =
+connexion refusée / 404 / upstream HS). L'autre version du même film (autre flux) lit très bien.
+La chaîne de fallback moteur→transcode a fonctionné comme prévu ; les deux échouent quand la
+source est réellement injoignable.
+
+**Améliorations UX possibles (domaine lecture/WatchPage — séparé, non fait) :**
+1. **Auto-bascule sur la version suivante** quand une version échoue au démarrage (au lieu
+   d'afficher une erreur) — plus haute valeur.
+2. **Marquage « broken »** de la version échouée (I/O) → dépriorisée / masquée par « Hide broken »,
+   jamais choisie par défaut.
+3. Étiquetage de langue des versions parfois faux (deux versions « English » alors qu'une est FR)
+   — `parseVersionInfo`/version-language à affiner.
