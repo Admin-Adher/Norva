@@ -154,8 +154,10 @@ test('hls.js is vendored locally and parses', () => {
   assert.doesNotThrow(() => new Function(src), 'vendored hls.js does not parse');
 });
 
-test('both app entries define the promise-based ensureHls loader (local first)', () => {
-  for (const entry of ['public/app/index.html', 'public/app.html']) {
+// public/app/index.html was a stale duplicate shell served at /app/ — deleted
+// (redirected to /app in _redirects); the single entry is public/app.html.
+test('the app entry defines the promise-based ensureHls loader (local first)', () => {
+  for (const entry of ['public/app.html']) {
     const src = read(entry);
     assert.ok(src.includes('window.ensureHls = function'), `${entry}: ensureHls missing`);
     assert.ok(src.includes('/js/vendor/hls-1.5.7.min.js'), `${entry}: local-first load missing`);
