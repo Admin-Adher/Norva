@@ -316,7 +316,19 @@ const RAW_PROVIDER_RETRY_DELAYS_MS = [1500, 5000, 9000, 9000, 9000, 9000, 9000, 
 const FFMPEG_USER_AGENT = process.env.FFMPEG_USER_AGENT ||
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36 Norva/1.0';
 const MAX_LOG_TAIL = 12000;
-const GATEWAY_VERSION = 63;
+const GATEWAY_VERSION = 64;
+
+// Last-resort safety net: a streaming proxy MUST NOT die on one bad socket. An unhandled
+// 'error' on a pumped stream (provider reset mid-flow, client abort) otherwise bubbles to
+// uncaughtException and kills the process — every in-flight viewer gets a Railway edge 502
+// (no CORS header) and the service crash-loops while a flaky panel keeps resetting. Proven
+// live 2026-07-04 on /raw (engine lane seeks). Log, redacted, and keep serving.
+process.on('uncaughtException', (err) => {
+    console.error('[media-gateway] uncaughtException (kept alive):', redactCreds(String((err && err.stack) || err)));
+});
+process.on('unhandledRejection', (err) => {
+    console.error('[media-gateway] unhandledRejection (kept alive):', redactCreds(String((err && (err.stack || err.message)) || err)));
+});
 // Browser playback fetches HLS playlists/segments cross-origin, so these must
 // list every Norva web origin or the browser blocks the response (CORS). Keep
 // in sync with the relay's ALLOWED_ORIGINS (services/norva-relay/wrangler.jsonc).
@@ -614,6 +626,17 @@ app.get('/raw/:token', async (req, res) => {
     if (INBAND_HEADER_PARSE) {
         try { maybeCaptureHeaderBytes(claims.url, upstream, nodeStream); } catch (_) { /* never break the byte pipe */ }
     }
+    // pipe() does NOT forward errors: an unhandled 'error' on either side (provider reset
+    // mid-stream, engine aborting a range read on seek, client socket reset) is an
+    // uncaughtException that kills the whole process — the 2026-07-04 crash-loop. Tear the
+    // response down quietly instead; the engine's own retry ladder handles the rest.
+    nodeStream.on('error', (err) => {
+        if (!ac.signal.aborted) {
+            console.warn('[media-gateway] /raw upstream stream error:', redactCreds(String((err && err.message) || err)));
+        }
+        try { res.destroy(); } catch (_) { /* already gone */ }
+    });
+    res.on('error', () => { try { nodeStream.destroy(); } catch (_) { /* already gone */ } });
     nodeStream.pipe(res);
 });
 
