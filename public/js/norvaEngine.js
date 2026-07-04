@@ -1012,20 +1012,11 @@
             this._subMeta.set(s.index, { codec: nm, tbNum: s.time_base_num, tbDen: s.time_base_den, text });
           }
         }
-        this.log('streams: ' + parts.join('  '));
-        // Explicit subtitle-detection diagnostic: why a text sub might fall to the slow
-        // gateway path. Shows the RAW codec_type per stream (if a subtitle isn't reported
-        // as type 3, the `codec_type === 3` filter above silently skips it), plus what the
-        // engine actually detected and whether hasInbandSubtitles() is true.
-        try {
-          const rawDump = (this._streams || [])
-            .map((s) => `#${s.index}:type=${s.codec_type}/cid=${s.codec_id}`)
-            .join('  ');
-          console.warn('[NorvaEngine] SUBS-DIAG | streams=' + (this._streams || []).length
-            + ' | ' + rawDump
-            + ' || detectedSubs=' + JSON.stringify(this._subStreams)
-            + ' || hasInband=' + this.hasInbandSubtitles());
-        } catch (_) { /* noop */ }
+        // One concise line: the stream list + which subtitle tracks are usable in-band.
+        // `inband=true` means a text-subtitle selection displays instantly (cues captured
+        // from playback start); `false` means the (rarer) gateway-extraction fallback.
+        this.log('streams: ' + parts.join('  ')
+          + '  || subs=' + JSON.stringify(this._subStreams) + ' inband=' + this.hasInbandSubtitles());
       } catch (_) { /* best-effort */ }
       // Arm subtitle capture BEFORE the pump starts so no early text-subtitle packet is
       // missed (the demuxer runs ahead of playback; arming late would leave a gap that the
