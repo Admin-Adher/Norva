@@ -6791,6 +6791,104 @@ kbd {
   height: 20px;
 }
 
+/* In-fiche version switcher — parity with the movie fiche, language-first labels. */
+.series-versions-section {
+  width: min(1120px, calc(100% - 36px));
+  margin: 0 auto;
+  padding: clamp(18px, 3vw, 30px) 0 0;
+}
+
+.series-versions-section.single-version {
+  display: none;
+}
+
+.series-versions-toolbar {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: var(--space-md);
+  margin-bottom: var(--space-sm);
+}
+
+.series-versions-toolbar h3 {
+  margin: 0;
+  font-size: clamp(1.2rem, 1.8vw, 1.6rem);
+}
+
+.series-versions-toolbar .hint {
+  margin: 0;
+}
+
+.series-versions-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: var(--space-sm);
+}
+
+.series-version-item {
+  position: relative;
+  min-width: 0;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--color-text-primary);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+
+.series-version-item:hover {
+  border-color: rgba(98, 135, 255, 0.5);
+  background: rgba(98, 135, 255, 0.12);
+}
+
+.series-version-item.active {
+  border-color: rgba(98, 135, 255, 0.7);
+  background: rgba(98, 135, 255, 0.18);
+  box-shadow: inset 0 0 0 1px rgba(98, 135, 255, 0.45);
+}
+
+.series-version-item:focus-visible {
+  outline: 2px solid rgba(98, 135, 255, 0.9);
+  outline-offset: 2px;
+}
+
+.series-version-item.is-broken {
+  opacity: 0.6;
+}
+
+.series-version-main {
+  font-weight: 800;
+}
+
+.series-version-sub {
+  max-width: 100%;
+  color: var(--color-text-secondary);
+  font-size: 0.82rem;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.series-version-flag {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: #ffb4b4;
+  background: rgba(255, 80, 80, 0.16);
+  border: 1px solid rgba(255, 120, 120, 0.4);
+  border-radius: 6px;
+  padding: 1px 6px;
+}
+
 .series-episodes-section {
   width: min(1120px, calc(100% - 36px));
   margin: 0 auto;
@@ -6798,11 +6896,17 @@ kbd {
 }
 
 .series-episodes-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 3;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-md);
   margin-bottom: var(--space-md);
+  padding: 10px 0;
+  background: rgba(7, 9, 17, 0.88);
+  backdrop-filter: blur(8px);
 }
 
 .series-episodes-toolbar h3 {
@@ -6844,6 +6948,35 @@ kbd {
 
 .series-details .episode-item:hover {
   background: rgba(255, 255, 255, 0.04);
+}
+
+/* Keyboard / TV-remote focus + "Up next" episode highlight. */
+.series-details .episode-item {
+  cursor: pointer;
+}
+
+.series-details .episode-item:focus-visible {
+  outline: 2px solid rgba(98, 135, 255, 0.9);
+  outline-offset: -2px;
+  border-radius: 6px;
+  background: rgba(98, 135, 255, 0.08);
+}
+
+.series-details .episode-item.episode-up-next {
+  background: linear-gradient(90deg, rgba(98, 135, 255, 0.14), transparent 65%);
+}
+
+.episode-upnext-flag {
+  flex: none;
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #aec2ff;
+  border: 1px solid rgba(98, 135, 255, 0.6);
+  border-radius: 999px;
+  padding: 2px 7px;
+  white-space: nowrap;
 }
 
 .series-details .episode-number {
