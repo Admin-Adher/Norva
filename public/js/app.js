@@ -818,7 +818,9 @@ class App {
             span.textContent = daysLeft === 1 ? 'Last day of your Norva trial' : daysLeft + ' days left in your Norva trial';
 
             const link = document.createElement('a');
-            link.href = '/subscribe.html?returnTo=' + encodeURIComponent(here);
+            // A trialing user HAS a subscription: "Manage plan" opens the management surface
+            // (status, cancel, change, payment method) — not the plan-picker they came from.
+            link.href = '/subscription.html?returnTo=' + encodeURIComponent(here);
             link.textContent = 'Manage plan';
             link.style.cssText = 'color:#b579ff;text-decoration:none;font-weight:700';
 

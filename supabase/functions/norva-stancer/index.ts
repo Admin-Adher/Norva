@@ -459,9 +459,16 @@ Deno.serve(async (req) => {
     const nowIso = new Date().toISOString();
     const currentAmount = cust.amount_cents ?? 0;
     const upgrade = amount >= currentAmount;
+    // Anti-abuse: the save-offer discount (50% off the NEXT charge) was priced against the
+    // CURRENT plan. Moving to a MORE expensive plan/period before that charge would multiply
+    // the discount's value (50% off monthly Plus → 50% off annual Family = ~×24) — clear it on
+    // a price increase. A downgrade keeps it (the value can only shrink). save_offer_used_at
+    // stays either way: the one-shot offer was consumed when accepted.
+    const clearDiscount = amount > currentAmount;
     // The mapping row always carries what the NEXT charge should be.
     await db.from("cloud_stancer_customers").upsert({
       user_id: user.id, plan, period, amount_cents: amount, updated_at: nowIso,
+      ...(clearDiscount ? { discount_next_pct: null } : {}),
     });
     const patch: Record<string, unknown> = { last_event_at: nowIso };
     if (upgrade) patch.plan_code = plan; // limits unlock immediately
@@ -470,7 +477,7 @@ Deno.serve(async (req) => {
       patch.status = trialEndMs > nowMs ? "trialing" : "active";
     }
     await db.from("cloud_entitlement_projection").update(patch).eq("user_id", user.id);
-    return json({ ok: true, status: upgrade ? "plan_changed" : "plan_scheduled", plan, period });
+    return json({ ok: true, status: upgrade ? "plan_changed" : "plan_scheduled", plan, period, ...(clearDiscount ? { discount_cleared: true } : {}) });
   }
 
   // ── /cancel — user-authed: stop auto-renewal; access runs to the period end ──
