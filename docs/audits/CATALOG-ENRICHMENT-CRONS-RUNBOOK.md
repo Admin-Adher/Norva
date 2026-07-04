@@ -45,20 +45,38 @@ Note : jobs 12/85 focalisés sur le compte de vérif (`jeremy`) — le dedup ser
 est rempli. Les autres comptes voient donc la grille **inchangée** (zéro régression) tant que
 la généralisation n'est pas lancée.
 
-## Procédure de généralisation (au feu vert utilisateur)
+## Généralisation — LANCÉE (2026-07-04, batché)
 
-Portée : **3 comptes** au total ; **515** doublons de titres globaux (petit).
+⚠️ **La volumétrie réelle est bien plus grande que prévu** : 2 comptes énormes
+(**570k** + **273k** media items ; ~419k + ~93k titres). Total **~925k media items** à
+backfiller (`dedup_key`), impossible en une seule requête (timeout + transaction géante).
 
+`cloud_titles` a un trigger de mirror `AFTER UPDATE … FOR EACH STATEMENT` vers
+`catalog_titles`, et `cloud_media_items` un trigger `cmi_set_sort_cols` par-ligne → les
+UPDATE en masse coûtent ~1 ms/ligne. Un run de reconcile 10k ≈ 70-100 s **côté serveur**
+(pg_cron n'a pas la limite 60 s du client MCP).
+
+**Ce qui a été fait :**
+- RPC `norva_backfill_media_identity` / `norva_refresh_posters_from_catalog` rendus
+  **batchés** (param `p_limit`) — migration `20260704210000`. Les anciennes signatures
+  1-arg sont **DROP**ées (sinon un appel 1-arg est ambigu, « function is not unique »).
+- `norva_canonicalize_titles_for_user(null)` exécuté → **0 doublon de titre global**.
+- Cron **job 85 en global batché** : `norva_reconcile_catalog(null, 10000)` à `*/3` →
+  draine les ~825k media items en **~4 h** (background). Chaque run : canonicalize (0
+  maintenant) + refresh 10k + backfill 10k.
+- Le search-match (job 12) repasse en global via le garde-fou (job 84) < 300 éligibles.
+
+**Suivi du drain :**
 ```sql
--- 1. Reconcile one-shot pour TOUS les comptes (dédup + posters frais)
-select norva_reconcile_catalog(null);
-
--- 2. Reconcile cron en global (retirer le uuid focalisé)
-select cron.alter_job(85, command := $$select norva_reconcile_catalog(null);$$);
-
--- 3. (le search-match job 12 repasse en global tout seul via le garde-fou job 84
---     dès que l'éligible de jeremy < 300 — rien à faire manuellement)
+select count(*) filter (where dedup_key is null) as media_backlog,
+       count(*) as media_total
+from cloud_media_items;
+-- + runs récents : select status, start_time, end_time from cron.job_run_details
+--   where jobid=85 order by start_time desc limit 5;
 ```
+
+**Une fois drainé** (`media_backlog` ≈ 0) : le reconcile reste en global (maintien) ;
+optionnellement repasser à `*/5` pour alléger : `cron.alter_job(85, schedule:='*/5 * * * *')`.
 
 Vérification post-généralisation :
 ```sql
