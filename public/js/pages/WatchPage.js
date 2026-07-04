@@ -6737,7 +6737,11 @@ class WatchPage {
         if ((engine.failures || 0) >= 3) return; // provider keeps refusing, stop hammering
 
         engine.busy = true;
-        const WINDOW = 900; // 15 min, server-side maximum
+        // Gateway extraction time scales with the window length (it must demux that much of
+        // the file). A 15-min first window is why the initial subtitle took ~30s to appear.
+        // Fetch a SMALL window first (fast first cues), then extend with large windows — the
+        // next tick fires immediately because windowEndLocal lands just ahead of the playhead.
+        const WINDOW = (force || seekedBack) ? 90 : 900;
         // Absolute position in the source file = local time + session seek offset
         const windowStartLocal = (force || seekedBack) ? Math.max(0, localPos - 5) : (engine.windowEndLocal ?? 0);
         engine.coveredStartLocal = engine.coveredStartLocal === undefined
