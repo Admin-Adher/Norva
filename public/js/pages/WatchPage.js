@@ -3719,7 +3719,7 @@ class WatchPage {
                         this.hls.recoverMediaError();
                         // recoverMediaError re-attaches the media element and
                         // leaves it paused — resume playback explicitly
-                        setTimeout(() => this.video?.play().catch(() => { }), 500);
+                        setTimeout(() => { this.video?.play().catch(() => { }); this._reattachAiTrackIfActive(); }, 500);
                     } catch (e) { /* destroyed */ }
                     return;
                 }
@@ -3735,7 +3735,7 @@ class WatchPage {
                     console.warn(`[WatchPage] Recovering media error (attempt ${this._mediaRecoveries}/${maxMediaRecoveries})`);
                     if (this._mediaRecoveries === 2) this.hls.swapAudioCodec();
                     this.hls.recoverMediaError();
-                    setTimeout(() => this.video?.play().catch(() => { }), 500);
+                    setTimeout(() => { this.video?.play().catch(() => { }); this._reattachAiTrackIfActive(); }, 500);
                     return;
                 }
             } else if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
@@ -7101,7 +7101,14 @@ class WatchPage {
         // makes _aiActiveLang the target instead) — so source vs translation never both read active.
         const transcriptActive = this.aiSubtitleState === 'ready' && this._aiActiveLang && this._aiActiveLang === srcLang;
         if (this.aiSubtitleState === 'ready') {
-            let html = `<button class="captions-option ${transcriptActive ? 'active' : ''}" data-source="ai" data-index="-1">✨ ${this.escapeHtml(transcriptActive ? 'AI subtitles (original)' : 'AI subtitles — show original')}</button>`;
+            // Name the original's language explicitly ("show original (Français)") — without it,
+            // viewers can't tell what clicking the row will display, nor why their own language
+            // is missing from "Translate to" (it IS the original).
+            const srcName = (srcLang && srcLang !== 'und') ? this._langDisplayName(srcLang) : '';
+            const readyLabel = transcriptActive
+                ? (srcName ? `AI subtitles — ${srcName} (original)` : 'AI subtitles (original)')
+                : (srcName ? `AI subtitles — show original (${srcName})` : 'AI subtitles — show original');
+            let html = `<button class="captions-option ${transcriptActive ? 'active' : ''}" data-source="ai" data-index="-1">✨ ${this.escapeHtml(readyLabel)}</button>`;
             html += this._aiTranslateRowsHtml();
             return html;
         }
@@ -7655,6 +7662,19 @@ class WatchPage {
         }
     }
 
+    // Defense-in-depth after hls.recoverMediaError(): the media element is detached/re-attached
+    // and some hls versions wipe cues off generated tracks in the process. If our track lost its
+    // cues while a generated subtitle was active, rebuild it from the kept state. Cheap no-op
+    // when the track survived intact (the 1.5.7 fix is the unlabeled track — this covers upgrades).
+    _reattachAiTrackIfActive() {
+        try {
+            if (!this._aiActiveVtt) return;
+            const el = this.video?.querySelector('track[data-norva-ai-subtitle="true"]');
+            if (el && el.track && el.track.cues && el.track.cues.length) return; // survived
+            this.attachGeneratedSubtitleTrack(this._aiActiveVtt, this._aiActiveLang || 'und');
+        } catch (_) { /* best-effort */ }
+    }
+
     attachGeneratedSubtitleTrack(vtt, lang = 'und') {
         if (!this.video) return false;
         const cues = this.parseVttCues(vtt);
@@ -7665,7 +7685,11 @@ class WatchPage {
 
         const trackEl = document.createElement('track');
         trackEl.kind = 'subtitles';
-        trackEl.label = 'AI subtitles';
+        // Deliberately NO label: hls.js 1.5.7's filterSubtitleTracks only touches LABELED
+        // subtitle/caption tracks, and its onMediaDetaching (run by every recoverMediaError —
+        // routine on transcode stalls) wipes all cues from matching tracks while leaving
+        // mode='showing'. A labeled track = silently blank AI subs after the first recovery.
+        // Nothing reads this label: identification is data-norva-ai-subtitle everywhere.
         trackEl.srclang = this.normalizeTrackLanguage(lang) || 'und';
         trackEl.dataset.norvaAiSubtitle = 'true';
         this.video.appendChild(trackEl);
@@ -7673,8 +7697,13 @@ class WatchPage {
         const textTrack = trackEl.track;
         if (!textTrack) { trackEl.remove(); return false; }
         textTrack.mode = 'showing';
-        const offset = this.normalizeSubtitleOffset(this.subtitleOffsetSeconds) || 0;
+        // Cue times are film-absolute; the media timeline restarts at 0 when the gateway
+        // transcode starts at -ss N (resume/seek restart) — rebase by streamStartOffset so
+        // the lines match the speech (no-op for fresh plays and direct playback).
+        const offset = (this.normalizeSubtitleOffset(this.subtitleOffsetSeconds) || 0)
+            - (this.streamStartOffset || 0);
         for (const c of cues) {
+            if (c.end + offset <= 0) continue; // cue entirely before the session start
             const start = Math.max(0, c.start + offset);
             const end = Math.max(start + 0.05, c.end + offset);
             try { textTrack.addCue(new VTTCue(start, end, c.text)); } catch (_) { /* skip malformed cue */ }
