@@ -3000,7 +3000,14 @@ class WatchPage {
                 const providerErrorHead = !!(sourceHead && sourceHead.notMedia);
                 const realMediaDemuxFail = !providerErrorHead;
                 if (realMediaDemuxFail && await this.fallbackEngineToTranscode(playbackAttemptId)) return;
-                this.handleEngineUnplayable(e);
+                // This version can't play — the engine failed AND the transcode fallback
+                // couldn't start (dead/unreachable provider stream, e.g. RANGE_UNSUPPORTED +
+                // FFmpeg I/O error), or the source is a provider error page. Route through
+                // handlePlaybackFailure so it marks THIS version broken and fails over to the
+                // next version of the title before surfacing a dead-end error. (The 458
+                // slot-busy path above returns earlier and never reaches here — one stream at
+                // a time must NOT open another connection.)
+                await this.handlePlaybackFailure(String((e && (e.message || e)) || 'Playback failed.'));
                 return;
             }
         }
