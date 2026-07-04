@@ -64,3 +64,57 @@ ligne verbeuse — OCR — exposait username/password en clair dans le Cockpit).
 - Alerte « sync en erreur > N h avec relances en boucle » (le cas super8k 29/06→01/07) — idem.
 - Ninja : diagnostic via logs Railway, puis décision (retry vs média/panel définitivement fermé).
 - Après la prochaine nuit de crons : vérifier `emptySeries`/`noTarget` et le ratio ready/failed.
+
+---
+
+## Addendum 2026-07-04 — coordination viewer↔jobs prouvée en live + affichage player (PR #107 → #110)
+
+Constaté en production sur « Bagarre » (film 1840392, transcript 1 863 cues) : quatre bugs
+distincts, chacun prouvé avec données live avant correction.
+
+### 1. La gate pregen était aveugle en lecture stable (PR #107)
+La transcription a ouvert la 2ᵉ connexion provider à 08:11 alors que le visionnage était actif
+(watch-history bumpé à 08:13). Les deux signaux de `userHasLiveSession` s'éteignent ~4 min après
+le début d'une lecture continue : aucun événement entre `first_frame` et `pause`/`ended`, et les
+lignes `cloud_playback_sessions` sont expirées quelques secondes après le démarrage (observé :
+36 s – 2 min) alors que le ffmpeg de lecture tourne 1h30. Correctifs :
+- **Edge** : `userHasLiveSession` lit aussi `cloud_watch_history.updated_at` — la sauvegarde de
+  progression (toutes les 10 s en lecture active) est le heartbeat, zéro écriture ajoutée. Couvre
+  du même coup toutes les dimensions cron (même fonction).
+- **Gateway** : garde locale `accountSlotBusyLocally` (sessions transcode + rawPumps par proxyKey)
+  vérifiée AVANT la gate edge dans la file de jobs et la boucle detect-language — instantanée,
+  voit le viewer en pause dont le ffmpeg transcode encore.
+- **Gateway** : préemption viewer — un play (transcode ou /raw) tue les extractions de fond du
+  même compte (registre `accountExtractions` sur les 3 extracteurs) ; le job repasse `deferred`
+  et se re-file. Le viewer ne se bat plus contre un ffmpeg de fond (458 en boucle).
+
+### 2. Le menu re-proposait « Generate » sur un transcript prêt (PR #108)
+Au rechargement, l'état IA repartait à `idle` et le cache partagé n'était consulté qu'au clic.
+`_ensureAiCacheProbe()` : sonde one-shot par titre (chargement + ouverture menu) — ready → ligne
+« show original » + « Translate to » d'emblée ; job en cours → progression honnête + polling.
+Règle `_aiUserRequested` : la sonde (ou le job d'un autre user du panel) ne fait que changer le
+menu — l'attache du track (partiels inclus) reste réservée aux chemins cliqués.
+
+### 3. hls.js efface les cues des pistes labellisées (PR #109)
+`onMediaDetaching` (chaque `recoverMediaError()`, routinier sur les stalls du transcodage
+temps réel) vide les cues de toute piste sous-titres AVEC label (`filterSubtitleTracks`), en
+laissant `mode='showing'` → menu « actif », écran vide. Correctifs : piste IA sans label ;
+`_reattachAiTrackIfActive()` post-recovery ; rebasage `streamStartOffset` des cues film-absolus
+(reprises/seek) ; libellés explicites « show original (Français) ».
+
+### 4. …et un 2ᵉ mécanisme hls.js efface TOUTES les pistes (PR #110)
+Symptôme résiduel : le sous-titre flashe au clic puis disparaît. `TimelineController._cleanTracks`
+(vérifié à l'octet dans le bundle 1.5.7) vide les cues de CHAQUE textTrack — sans filtre de
+label — à chaque `MEDIA_ATTACHING`, y compris lors des recoveries INTERNES du error-controller
+hls.js (append error non-fatal « MediaSource readyState: ended ») que notre handler ERROR ne voit
+jamais (`renderTextTracksNatively:false` ne gate pas `_cleanTracks`). Correctifs :
+- Hook `MEDIA_ATTACHED` (post-wipe, toutes origines de recovery) : `_reattachAiTrackIfActive()` +
+  `seenCues.clear()` du subtitle-engine (les pistes probe, labellisées, subissent les DEUX wipes ;
+  sans purge du dédup, les ticks ne re-ajoutaient jamais les cues effacés).
+- `clearExternalSubtitleTracks({keepAiPolling})` : l'attache d'un partiel (qui tourne DANS le tick
+  de poll) ne tue plus son propre timer — avant, la livraison progressive s'arrêtait au premier
+  lot de cues, plus jamais de partiels ni de transcript final dans la session.
+
+Suivi (non bloquant) : re-attache IA après seek/audio-switch (aujourd'hui la piste est droppée,
+`restorePendingSubtitlePreference` n'a pas de source 'ai') ; brancher les pistes probe/native sur
+la même règle « viewer gagne » si un futur hls change son filtre.
