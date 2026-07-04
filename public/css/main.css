@@ -6583,10 +6583,13 @@ kbd {
 }
 
 /* Premium Series Detail */
+/* Detail view scroll model — mirror the Movies page (single, unambiguous scroller):
+   the page is clipped, .series-content is a bounded flex column, and the detail panel
+   itself scrolls internally. Previously #page-series AND .series-content were both
+   overflow-y:auto with the panel overflow-y:visible — nested scrollers where the mouse
+   wheel never landed on a real scroller, so the fiche didn't scroll. */
 #page-series.series-detail-open {
-  overflow-x: hidden;
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
+  overflow: hidden;
 }
 
 #page-series.series-detail-open .series-header,
@@ -6598,19 +6601,21 @@ kbd {
 #page-series.series-detail-open .series-content {
   flex: 1;
   min-height: 0;
-  overflow-x: hidden;
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 #page-series.series-detail-open .series-details {
   position: relative;
   inset: auto;
   width: 100%;
-  min-height: calc(100vh - var(--navbar-height));
+  flex: 1;
+  min-height: 0;
   padding: 0;
   overflow-x: hidden;
-  overflow-y: visible;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   background: #05070d;
 }
 
