@@ -127,6 +127,13 @@ Deno.serve(async (req) => {
       return jsonCached(req, await getTmdbMeta(url), 86400);
     }
 
+    // Per-episode TMDB data (stills, localized names, air dates) for the series fiche,
+    // one season at a time. Proxied here so the TMDB key stays server-side; long CDN cache.
+    if (req.method === "GET" && (segments[0] === "tmdb-episodes" || (segments[0] === "device" && segments[1] === "tmdb-episodes"))) {
+      await requireUserId(req);
+      return jsonCached(req, await getTmdbEpisodes(url), 86400);
+    }
+
     // Crowd-learned "skip intro" markers (tmdbId + season).
     if (req.method === "GET" && (segments[0] === "intro-markers" || (segments[0] === "device" && segments[1] === "intro-markers"))) {
       await requireUserId(req);
@@ -275,6 +282,57 @@ async function getTmdbMeta(url: URL): Promise<JsonRecord> {
   if (tmdbMetaCache.size > 1024) {
     const oldest = [...tmdbMetaCache.entries()].sort((a, b) => a[1].at - b[1].at)[0];
     if (oldest) tmdbMetaCache.delete(oldest[0]);
+  }
+  return value;
+}
+
+const tmdbEpisodesCache = new Map<string, { at: number; value: JsonRecord }>();
+
+// One TMDB season's episode metadata (still_path, localized name, air_date, runtime,
+// vote_average), keyed by (tmdbId, season, lang). The client merges it into the fiche's
+// provider episode rows as progressive enhancement — it degrades to provider data when
+// the key is unset or TMDB has no match.
+async function getTmdbEpisodes(url: URL): Promise<JsonRecord> {
+  const tmdbId = String(url.searchParams.get("tmdbId") || "").trim();
+  const season = String(url.searchParams.get("season") || "").trim();
+  if (!/^\d+$/.test(tmdbId) || /^0+$/.test(tmdbId)) throw new HttpError(400, "tmdbId must be a TMDB numeric id");
+  if (!/^\d+$/.test(season)) throw new HttpError(400, "season must be a numeric season number");
+  const key = tmdbApiKey();
+  if (!key) return { available: false };
+
+  const lang2 = (url.searchParams.get("lang") || "en").slice(0, 2).toLowerCase();
+  const cacheKey = `${tmdbId}:${season}:${lang2}`;
+  const cached = tmdbEpisodesCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < TMDB_META_TTL_MS) return cached.value;
+
+  const params = new URLSearchParams({ language: lang2 === "fr" ? "fr-FR" : "en-US" });
+  const headers: Record<string, string> = {};
+  if (key.startsWith("eyJ")) headers.Authorization = `Bearer ${key}`;
+  else params.set("api_key", key);
+
+  const res = await fetch(`https://api.themoviedb.org/3/tv/${tmdbId}/season/${season}?${params}`, { headers });
+  if (res.status === 404) return { available: false };
+  if (!res.ok) throw new HttpError(502, `TMDB responded ${res.status}`);
+  const data = await res.json() as JsonRecord;
+
+  type TmdbEp = { episode_number?: number; name?: string; still_path?: string | null; air_date?: string | null; overview?: string | null; runtime?: number | null; vote_average?: number | null };
+  const episodes = (Array.isArray(data.episodes) ? data.episodes as TmdbEp[] : [])
+    .map((e) => ({
+      episode_number: typeof e.episode_number === "number" ? e.episode_number : null,
+      name: e.name ?? null,
+      still_path: e.still_path ?? null,
+      air_date: e.air_date ?? null,
+      overview: e.overview ?? null,
+      runtime: typeof e.runtime === "number" ? e.runtime : null,
+      vote_average: typeof e.vote_average === "number" ? e.vote_average : null,
+    }))
+    .filter((e) => e.episode_number != null);
+
+  const value: JsonRecord = { available: true, episodes };
+  tmdbEpisodesCache.set(cacheKey, { at: Date.now(), value });
+  if (tmdbEpisodesCache.size > 2048) {
+    const oldest = [...tmdbEpisodesCache.entries()].sort((a, b) => a[1].at - b[1].at)[0];
+    if (oldest) tmdbEpisodesCache.delete(oldest[0]);
   }
   return value;
 }

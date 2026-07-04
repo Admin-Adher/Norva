@@ -1900,6 +1900,66 @@ class SeriesPage {
     setActiveSeason(seasonNum) {
         this._activeSeason = seasonNum == null ? null : String(seasonNum);
         this.applySelectedSeason();
+        this.enrichSeasonWithTmdb(this._activeSeason);
+    }
+
+    // Progressive enhancement: overlay TMDB per-episode data onto the shown season's
+    // provider rows. Stills always win (kills the repeated series-poster look); a
+    // generic "Episode N"/empty title is upgraded to the localized TMDB name, but a real
+    // provider title is never overwritten (avoids swapping a clean FR title for an EN one).
+    // Lazy per active season + memoized; token-guarded so it never patches a newer fiche.
+    async enrichSeasonWithTmdb(seasonNum) {
+        if (seasonNum == null || !this.seasonsContainer) return;
+        const series = this.currentSeries;
+        const tmdbId = series?.provider_tmdb_id || series?.providerTmdbId
+            || series?.tmdb?.id || series?.tmdb_id || series?.metadata?.providerTmdbId;
+        if (!tmdbId || /^(tt)?0+$/i.test(String(tmdbId)) || !window.NorvaCloud?.media?.tmdbEpisodes) return;
+        this._tmdbEnriched = this._tmdbEnriched || new Set();
+        const memo = `${tmdbId}:${seasonNum}`;
+        if (this._tmdbEnriched.has(memo)) return;
+        this._tmdbEnriched.add(memo);
+        const token = this._detailToken;
+        const lang = String(this.getPreferences()?.preferredLanguage || navigator.language || 'fr')
+            .slice(0, 2).toLowerCase();
+        try {
+            const res = await NorvaCloud.media.tmdbEpisodes({
+                type: 'series', tmdbId: String(tmdbId), season: String(seasonNum), lang });
+            if (token !== this._detailToken || !res?.available || !Array.isArray(res.episodes)) return;
+            const byNum = new Map(res.episodes
+                .filter(e => e.episode_number != null)
+                .map(e => [String(e.episode_number), e]));
+            const group = [...this.seasonsContainer.querySelectorAll('.season-group')]
+                .find(g => String(g.dataset.season) === String(seasonNum));
+            if (!group) return;
+            group.querySelectorAll('.episode-item').forEach(row => {
+                const te = byNum.get(String(row.dataset.episodeNum));
+                if (!te) return;
+                if (te.still_path) {
+                    const img = row.querySelector('.episode-thumb img');
+                    if (img) { img.removeAttribute('srcset'); img.src = `https://image.tmdb.org/t/p/w300${te.still_path}`; }
+                }
+                if (te.name) {
+                    const titleEl = row.querySelector('.episode-title');
+                    const cur = (titleEl?.textContent || '').trim();
+                    if (titleEl && (/^Episode\s*\d*$/i.test(cur) || !cur)) {
+                        titleEl.textContent = te.name;
+                        row.setAttribute('aria-label', te.name);
+                    }
+                }
+                if (te.air_date && !row.querySelector('.episode-airdate')) {
+                    const year = String(te.air_date).match(/(19|20)\d{2}/)?.[0];
+                    const titleRow = row.querySelector('.episode-title-row');
+                    if (year && titleRow) {
+                        const span = document.createElement('span');
+                        span.className = 'episode-airdate';
+                        span.textContent = year;
+                        titleRow.appendChild(span);
+                    }
+                }
+            });
+        } catch (_) {
+            this._tmdbEnriched.delete(memo); // let a later season revisit retry
+        }
     }
 
     // Open a series' detail directly from a search result: best-effort fetch its
@@ -2004,6 +2064,7 @@ class SeriesPage {
             }
 
             this.currentSeriesInfo = info;
+            this._tmdbEnriched = new Set(); // per-season TMDB enrichment memo, reset per load
             // Persist the chosen version only now that its episodes actually loaded, so a
             // broken/empty pick never gets remembered (which would re-bounce every open).
             if (rememberOnSuccess) this.rememberVersionChoice(series);
@@ -2166,6 +2227,7 @@ class SeriesPage {
                 this.refreshEpisodeDownloadStates();
             }
             this.applySelectedSeason();
+            this.enrichSeasonWithTmdb(this._activeSeason);
         } catch (err) {
             if (detailToken !== this._detailToken) return; // superseded — don't stomp the newer fiche
             // A failed fetch on the auto-picked version → try a healthy sibling first
