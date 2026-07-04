@@ -1228,6 +1228,24 @@ function runWhisperDetect(wavPath) {
 // collapse repeated sentences inside one cue, drop a cue identical to the previous, and drop the
 // common end-of-video hallucinations. Never hurts genuine dialogue beyond rare exact-repeat lines.
 const VTT_HALLUCINATION = /^(sous[- ]?titr(es|age)|merci d.avoir regard|thanks? for watching|amara\.org|♪+|\[?\s*(musique|music|applause|applaudissements)\s*\]?)/i;
+
+// SDH (hearing-impaired) annotations: Norva's AI subtitles are DIALOGUE subtitles. Whisper wraps
+// sound descriptions — *musique du générique*, (Rires), [Bruit de porte], ♪…♪ — and sometimes
+// mixes them with real speech. Strip wrapped segments INLINE (speech is never wrapped) and drop
+// a cue whose residual is a bare sound keyword phrase. Mirrors WatchPage._stripSdhAnnotations so
+// cached transcripts (and the Argos translations derived from them) are clean at the source.
+const SDH_BARE_LINE = /^(musiques?|music|bruits?|rires?|cris?|applaudissements?|applause|laughter|g[ée]n[ée]riques?|silence|sonneries?|soupirs?|sifflements?|klaxons?)(\s+(de|du|des|d'|of|the)\s*[\p{L}' -]{0,40}|\s*[.…!]*)?$/iu;
+function stripSdhAnnotations(text) {
+    const t = String(text || '')
+        .replace(/\*[^*\n]{1,80}\*/g, ' ')
+        .replace(/\([^)\n]{1,80}\)/g, ' ')
+        .replace(/\[[^\]\n]{1,80}\]/g, ' ')
+        .replace(/♪[^♪\n]{0,120}♪/g, ' ')
+        .replace(/[♪🎵🎶]+/g, ' ')
+        .replace(/\s{2,}/g, ' ')
+        .trim();
+    return SDH_BARE_LINE.test(t) ? '' : t;
+}
 function collapseRepeats(text) {
     const parts = String(text).split(/(?<=[.!?。…])\s+|\s+-\s+/).map((s) => s.trim()).filter(Boolean);
     const kept = [];
@@ -1252,7 +1270,7 @@ function cleanVtt(vtt) {
         const tsIdx = lns.findIndex((l) => l.includes('-->'));
         if (tsIdx === -1) continue;
         const ts = lns[tsIdx].trim();
-        const text = collapseRepeats(lns.slice(tsIdx + 1).join(' ').trim());
+        const text = stripSdhAnnotations(collapseRepeats(lns.slice(tsIdx + 1).join(' ').trim()));
         const norm = text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
         if (!norm || norm === lastNorm || VTT_HALLUCINATION.test(text.trim())) continue;
         lastNorm = norm;
