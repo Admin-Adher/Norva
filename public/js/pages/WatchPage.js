@@ -7757,6 +7757,28 @@ class WatchPage {
         } catch (_) { /* best-effort */ }
     }
 
+    // SDH (hearing-impaired) annotation stripping — Norva's AI subtitles are DIALOGUE subtitles,
+    // not closed captions. Whisper emits sound annotations as *musique du générique*, (Rires),
+    // [Bruit de porte], ♪…♪, and sometimes mixes them with real speech (*Musique* "lyric").
+    // Wrapped segments are removed INLINE (speech is never wrapped by whisper), and a cue whose
+    // whole residual is a bare sound keyword ("Musique de générique") is dropped entirely.
+    // Returns the cleaned text, or '' when nothing speakable remains.
+    _stripSdhAnnotations(text) {
+        let t = String(text || '')
+            .replace(/\*[^*\n]{1,80}\*/g, ' ')
+            .replace(/\([^)\n]{1,80}\)/g, ' ')
+            .replace(/\[[^\]\n]{1,80}\]/g, ' ')
+            .replace(/♪[^♪\n]{0,120}♪/g, ' ')
+            .replace(/[♪🎵🎶]+/g, ' ')
+            .replace(/\s{2,}/g, ' ')
+            .trim();
+        // Bare annotation line (no wrapper): a short cue that IS a sound keyword phrase.
+        if (/^(musiques?|music|bruits?|rires?|cris?|applaudissements?|applause|laughter|g[ée]n[ée]riques?|silence|sonneries?|soupirs?|sifflements?|klaxons?)(\s+(de|du|des|d'|of|the)\s*[\p{L}' -]{0,40}|\s*[.…!]*)?$/iu.test(t)) {
+            return '';
+        }
+        return t;
+    }
+
     attachGeneratedSubtitleTrack(vtt, lang = 'und') {
         if (!this.video) return false;
         const cues = this.parseVttCues(vtt);
@@ -7797,7 +7819,9 @@ class WatchPage {
         let added = 0;
         for (const c of cues) {
             if (c.end + offset <= 0) continue; // cue entirely before the session start
-            const text = String(c.text || '').replace(/\r/g, '').split('\n').filter((l) => l.trim() !== '').join('\n');
+            const spoken = this._stripSdhAnnotations(c.text);
+            if (!spoken) continue; // pure sound annotation — dialogue subtitles skip it
+            const text = spoken.replace(/\r/g, '').split('\n').filter((l) => l.trim() !== '').join('\n');
             if (!text) continue; // an empty payload would terminate the VTT cue block early
             const start = Math.max(0, c.start + offset);
             const end = Math.max(start + 0.05, c.end + offset);

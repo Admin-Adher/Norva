@@ -130,3 +130,34 @@ recharge le même `<video>` avec un nouveau src et le NAVIGATEUR désactive alor
 (mode='disabled', cues=null, élément intact — observé au watcher 11:01:13). Fix player : stash
 au reset de loadVideo + self-heal au first-frame (piste régénérée si 'disabled'/vidée ; un
 masquage volontaire au clavier — mode 'hidden', cues intacts — n'est jamais écrasé).
+
+### 6. La traque du strobe/écran muet — 5 couches superposées (PR #113 → #119, 04/07 après-midi)
+Symptômes successifs côté owner : phrase qui clignote, puis sous-titres invisibles malgré une
+ligne de menu « active ». Diagnostic par rapports runtime successifs (watchers console : piles
+d'appel des suppressions, échantillonnage 250 ms, hooks addCue/removeCue). Chaque couche masquait
+la suivante :
+
+| # | Couche | Preuve | Fix |
+|---|---|---|---|
+| PR #113 | L'engine acceptait des plages HTTP **tronquées** (reset provider « propre ») → cache empoisonné → libav démuxe un trou → « bad box » → failover | snapshot moteur | `_fetchRange` valide la longueur (`BLOCK_SHORT_READ`) + retry fenêtre borné ; tests `engine-range-integrity` |
+| PR #115 | Un stall fatal toutes les 2-5 s appelait `recoverMediaError()` à chaque fois → swap média permanent | vidéo 49 frames | throttle : 1 recovery/8 s max sur le chemin soft |
+| PR #116 | `playWithEngine` ne détruisait jamais l'instance **hls orpheline** d'une tentative transcodage → son `_cleanTracks` vidait les pistes en boucle pendant la lecture engine ; + mon self-heal ancré sur `timeupdate` (4×/s) re-attachait en face = strobe | stack `markPlaybackUsable → attach → clear` ×3/s | destroy hls à la prise de contrôle engine ; self-heal one-shot par src ; attache honnête (0 cue = false) |
+| PR #117 | Le panel répond parfois **206 depuis le mauvais offset** après un churn de slot : octets corrects en taille, faux en position → « bad box » persistant | bad box après 18 Mo malgré #113 | `Content-Range.start` doit égaler l'offset demandé (`BLOCK_RANGE_MISMATCH`, retryable) ; test à contenu positionnel |
+| PR #118 | Le one-shot par src laissait l'écran muet après tout vidage ultérieur | rapport 45 s : piste figée 0 cue, aucun événement | self-heal périodique borné (1×/5 s, 12×/src, warn numéroté) |
+| PR #119 | **Le videur final : le navigateur lui-même.** Le track processing model de Chromium/Edge réinitialise les cues programmatiques d'une piste `<track>` SANS src (~200 ms après attache, sans `removeCue` — aucun hook ne le voyait). Les pistes probe n'exposent pas le bug (ré-ajout fenêtré continu) | `ATTACH cuesNow=1862` → 0 cue au sample suivant, zéro removeCue | les cues sont sérialisés en **VTT réel chargé par src blob** : parsing natif, readiness LOADED, incorruptible. Rebasage `streamStartOffset` intégré à la sérialisation |
+
+Résultat confirmé par l'owner : sous-titres stables, phrases complètes, seeks OK.
+Leçon d'architecture : pour des cues générés, TOUJOURS passer par un vrai src (blob VTT), jamais
+par `addCue` sur une piste sans source.
+
+### 7. Filtre SDH — sous-titres dialogue, pas closed captions (PR #120)
+Whisper émet des annotations sonores type malentendant : `*musique du générique*`, `(Rires)`,
+`[Bruit de porte]`, `♪…♪`, parfois mélangées à de la vraie parole (`*Musique* "paroles"`).
+Produit = sous-titres **dialogue** : ces annotations sont retirées.
+- Segments encapsulés `()`/`[]`/`*…*`/`♪` strippés INLINE (whisper n'encapsule jamais la parole) ;
+  lignes nues type « Musique de générique » (mots-clés sonores anchored ligne entière) droppées.
+- Double implémentation miroir : gateway `stripSdhAnnotations` dans `cleanVtt` (cache et
+  traductions Argos propres à la source) + player `_stripSdhAnnotations` à l'attache (nettoie
+  immédiatement tout le cache existant, transcript/traductions/OCR).
+- Tests `sdh-filter.test.js` : formes réelles du transcript « Bagarre » droppées, parole intacte
+  (mixte conservé, « Cristina »/« La musique de ce film est magnifique » jamais touchés).
