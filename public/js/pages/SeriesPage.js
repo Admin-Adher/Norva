@@ -2133,6 +2133,17 @@ class SeriesPage {
                         titleRow.appendChild(span);
                     }
                 }
+                // Fill a MISSING synopsis from TMDB (a real provider description is kept),
+                // so an episode reads the same across versions even when one provider ships
+                // no plot. Never overwrites an existing description.
+                if (te.overview && !row.querySelector('.episode-description')) {
+                    const desc = document.createElement('p');
+                    desc.className = 'episode-description';
+                    desc.textContent = te.overview;
+                    const titleRow = row.querySelector('.episode-title-row');
+                    if (titleRow) titleRow.insertAdjacentElement('afterend', desc);
+                    else row.querySelector('.episode-copy')?.appendChild(desc);
+                }
             });
         } catch (_) {
             this._tmdbEnriched.delete(memo); // let a later season revisit retry
