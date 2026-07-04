@@ -779,11 +779,15 @@ export async function searchTmdbMatch(
 
 // Strip bracketed segments, quality/language tags and a trailing year so the
 // title is a clean search query ("Le Roi Lion (1994) FHD MULTI" -> "Le Roi Lion").
+// Also flattens punctuation (":", ",", "'", "-"…) to spaces: TMDB's search is
+// token-based and a long punctuated title ("Le Monde de Narnia : Le Lion, la
+// Sorcière blanche et l'Armoire magique") matches far more reliably as plain words.
 function cleanSearchQuery(title: string): string {
   return String(title || "")
     .replace(/[\[({][^\])}]*[\])}]/g, " ")
     .replace(/\b(4k|uhd|2160p|1080p|720p|480p|fhd|hd|sd|multi|vostfr|vost|vff|vf|vo|truefrench|subt?\s*ar|sub|dub|dv)\b/gi, " ")
     .replace(/(?:^|\s)((?:19|20)\d{2})\s*$/, " ")
+    .replace(/[^\p{L}\p{N}\s]+/gu, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
