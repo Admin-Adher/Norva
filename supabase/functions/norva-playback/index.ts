@@ -3171,6 +3171,14 @@ async function userHasLiveSession(db: SupabaseClient, userId: string): Promise<b
   const { data: ev } = await db.from("cloud_playback_events")
     .select("id").eq("user_id", userId).gt("created_at", sinceIso).limit(1);
   if (ev && ev.length) return true;
+  // Steady playback emits NO event between first_frame and pause/ended, and the session rows are
+  // rotated/expired within seconds of start — both signals go dark ~4 min into every real viewing
+  // (proven 2026-07-04: a pregen ffmpeg opened the account's 2nd provider connection at 08:11
+  // while watch-history was still bumping at 08:13). The watch-progress save (every 10 s while
+  // actually playing) IS the live heartbeat, so read it here.
+  const { data: hist } = await db.from("cloud_watch_history")
+    .select("id").eq("user_id", userId).gt("updated_at", sinceIso).limit(1);
+  if (hist && hist.length) return true;
   const { data: sess } = await db.from("cloud_playback_sessions")
     .select("id").eq("user_id", userId).eq("status", "ready").gt("expires_at", new Date().toISOString()).limit(1);
   return Boolean(sess && sess.length);

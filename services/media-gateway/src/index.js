@@ -94,6 +94,47 @@ function abortRawPumps(filter, keepSid, reason) {
     return aborted;
 }
 
+// ── Background-extraction ledger (viewer preemption) ─────────────────────────
+// Every provider-connected background ffmpeg (whisper extraction, storyboard, LID clip) registers
+// here keyed by the provider ACCOUNT (proxyKeyFromUrl). A viewer pressing play on the same
+// account preempts them: the viewer outranks any background job, and on a single-slot panel the
+// two connections otherwise fight for minutes (the viewer eats 458s while the extraction reads
+// the whole film). Preempted jobs re-queue as 'deferred' — they resume once the viewer stops.
+const accountExtractions = new Map(); // proxyKey -> Set<{ child, preempted }>
+function registerAccountExtraction(proxyKey, child) {
+    const entry = { child, preempted: false };
+    if (!proxyKey) return entry;
+    let set = accountExtractions.get(proxyKey);
+    if (!set) { set = new Set(); accountExtractions.set(proxyKey, set); }
+    set.add(entry);
+    entry.release = () => { set.delete(entry); if (!set.size) accountExtractions.delete(proxyKey); };
+    return entry;
+}
+function preemptAccountExtractions(proxyKey, reason) {
+    const set = accountExtractions.get(proxyKey);
+    if (!set || !set.size) return 0;
+    let n = 0;
+    for (const entry of [...set]) {
+        entry.preempted = true;
+        try { entry.child.kill('SIGKILL'); } catch (_) { /* already gone */ }
+        n += 1;
+    }
+    if (n) console.log(`[media-gateway] preempted ${n} background extraction(s) — ${reason}`);
+    return n;
+}
+// True while THIS box holds the account's provider slot for a viewer: a live transcode session
+// or an engine /raw byte-pump. Checked before the edge pregen-gate — it is instant, and it sees
+// what the edge can't (a paused viewer whose ffmpeg is still transcoding, a mid-film raw pump).
+function accountSlotBusyLocally(url) {
+    const key = proxyKeyFromUrl(url || '');
+    if (!key) return false;
+    for (const s of sessions.values()) {
+        if (s && s.sourceUrl && proxyKeyFromUrl(s.sourceUrl) === key && isSessionBlockingProviderSlot(s)) return true;
+    }
+    for (const p of rawPumps) { if (p && p.proxyKey === key) return true; }
+    return false;
+}
+
 function pickProxyAgent(key) {
     return providerProxyAgents.length ? providerProxyAgents[poolIndexForKey(key)] : null;
 }
@@ -517,6 +558,9 @@ app.get('/raw/:token', async (req, res) => {
     });
     abortRawPumps((p) => p !== pump && p.proxyKey === pumpProxyKey, claims.sid || null,
         `superseded by playback ${String(claims.sid || 'unknown').slice(0, 8)}`);
+    // Same rule as the transcode lane: a viewer's byte-pump outranks any background extraction
+    // holding this account's slot (the job re-queues as deferred and resumes after the viewing).
+    preemptAccountExtractions(pumpProxyKey, `raw playback ${String(claims.sid || 'unknown').slice(0, 8)}`);
     res.on('close', () => { ac.abort(); releaseRawPump(pump); });
     const headers = { 'user-agent': claims.ua || FFMPEG_USER_AGENT };
     if (req.headers.range) headers.range = req.headers.range;
@@ -771,6 +815,9 @@ app.get('/detect-language/:token', async (req, res) => {
                 // Fast-fail rather than queue behind a long extraction: the edge caller has its own
                 // HTTP timeout — waiting minutes here would spend a provider hit after it hung up.
                 if (isAccountJobBusy(lockKey)) { lastExtractErr = 'account provider slot busy (background job in progress)'; break; }
+                // Same fast-fail when a VIEWER holds the slot on this box — the edge gate is checked
+                // at tick entry only, and a viewer can start mid-sweep.
+                if (accountSlotBusyLocally(claims.url)) { lastExtractErr = 'account provider slot busy (viewer playback)'; break; }
                 const ex = await withAccountJobLock(lockKey, () =>
                     extractAudioWav(claims.url, ua, trackIndex, off > 0 ? off : 0, dur, 30_000, claims.uid));
                 if (!ex.ok) { lastExtractErr = ex.error; continue; }   // failed or offset past the file's end → next offset
@@ -1011,14 +1058,20 @@ function extractAudioWav(url, ua, trackIndex, startOffset, dur, timeoutMs = 30_0
         let child;
         try { child = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'ignore', 'pipe'], env: proxyEnvFor(proxyKey || proxyKeyFromUrl(url)) }); }
         catch (e) { return resolve({ ok: false, error: 'spawn failed: ' + String((e && e.message) || e) }); }
+        const reg = registerAccountExtraction(proxyKeyFromUrl(url), child);
         let stderr = '';
         let timedOut = false;
         const timer = setTimeout(() => { timedOut = true; try { child.kill('SIGKILL'); } catch (_) {} }, timeoutMs);
         child.stderr.on('data', (d) => { stderr += d.toString(); });
-        child.on('error', (e) => { clearTimeout(timer); resolve({ ok: false, error: 'ffmpeg error: ' + String((e && e.message) || e) }); });
+        child.on('error', (e) => { clearTimeout(timer); reg.release?.(); resolve({ ok: false, error: 'ffmpeg error: ' + String((e && e.message) || e) }); });
         child.on('close', async (code) => {
             clearTimeout(timer);
+            reg.release?.();
             const tail = redactCreds(stderr.trim().split('\n').filter(Boolean).pop() || 'no stderr');
+            if (reg.preempted) {
+                fsp.unlink(outputPath).catch(() => {});
+                return resolve({ ok: false, preempted: true, error: 'preempted by viewer playback on this account' });
+            }
             if (code !== 0) {
                 console.warn(`[media-gateway] audio-extract ffmpeg exit ${code}: ${redactCreds(stderr.slice(-300))}`);
                 fsp.unlink(outputPath).catch(() => {});
@@ -1068,14 +1121,19 @@ function extractAudioWavChunks(url, ua, trackIndex, timeoutMs, proxyKey, chunkSe
         let child;
         try { child = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'ignore', 'pipe'], env: proxyEnvFor(proxyKey || proxyKeyFromUrl(url)) }); }
         catch (e) { return resolve({ ok: false, error: 'spawn failed: ' + String((e && e.message) || e) }); }
+        const reg = registerAccountExtraction(proxyKeyFromUrl(url), child);
         let stderr = '';
         let timedOut = false;
         const timer = setTimeout(() => { timedOut = true; try { child.kill('SIGKILL'); } catch (_) {} }, timeoutMs);
         child.stderr.on('data', (d) => { stderr += d.toString(); });
-        child.on('error', (e) => { clearTimeout(timer); resolve({ ok: false, error: 'ffmpeg error: ' + String((e && e.message) || e) }); });
+        child.on('error', (e) => { clearTimeout(timer); reg.release?.(); resolve({ ok: false, error: 'ffmpeg error: ' + String((e && e.message) || e) }); });
         child.on('close', (code) => {
             clearTimeout(timer);
+            reg.release?.();
             const tail = redactCreds(stderr.trim().split('\n').filter(Boolean).pop() || 'no stderr');
+            if (reg.preempted) {
+                return resolve({ ok: false, preempted: true, error: 'preempted by viewer playback on this account' });
+            }
             if (code !== 0) {
                 console.warn(`[media-gateway] chunked-extract ffmpeg exit ${code}: ${redactCreds(stderr.slice(-300))}`);
                 return resolve({ ok: false, error: timedOut ? `extract timeout after ${Math.round(timeoutMs / 1000)}s: ${tail}` : `ffmpeg exit ${code}: ${tail}` });
@@ -1324,7 +1382,11 @@ async function nextRunnableJob(queue, kind) {
     let picked = null;
     while (queue.length) {
         const job = queue.shift();
-        if (!(await shouldDeferJob(job))) { job.gateDeferrals = 0; picked = job; break; }
+        // Local slot check FIRST: this box knows instantly when a viewer session or raw pump
+        // holds the job's provider account — no round-trip, and it sees what the edge gate
+        // can't (a paused viewer whose transcode ffmpeg still runs). Then the edge gate for
+        // relay-side signals (live sessions on other lanes, enrichment ticks).
+        if (!accountSlotBusyLocally(job.url) && !(await shouldDeferJob(job))) { job.gateDeferrals = 0; picked = job; break; }
         job.gateDeferrals = (job.gateDeferrals || 0) + 1;
         if (job.gateDeferrals > JOB_GATE_MAX_DEFERRALS) {
             console.warn(`[media-gateway] ${kind} job ${job.jobId} deferred too long — failing back to the edge`);
@@ -1383,10 +1445,13 @@ async function runTranscribeJob(job) {
                 ex = await withAccountJobLock(accountJobKey(uid, url), () =>
                     extractAudioWav(url, ua, index, start, dur, AUDIO_EXTRACT_TIMEOUT_MS, uid));
                 if (ex.ok) break;
+                if (ex.preempted) break; // a viewer took the slot — re-queue, don't hammer beside them
                 if (/\b(401|403)\b|Unauthorized|Forbidden/i.test(ex.error || '')) break; // abuse/auth block — do not hammer
                 if (attempt < AUDIO_EXTRACT_RETRIES) await sleep(AUDIO_EXTRACT_BACKOFF_MS * (attempt + 1)); // 30s, 60s — spaced, not a burst
             }
-            if (!ex.ok) {
+            if (ex.preempted) {
+                payload = { requeue: true };
+            } else if (!ex.ok) {
                 payload = { jobId, ok: false, error: ('Audio extraction failed: ' + ex.error).slice(0, 300) };
             } else {
                 wavPath = ex.path;
@@ -1403,6 +1468,14 @@ async function runTranscribeJob(job) {
     } catch (e) {
         payload = { jobId, ok: false, error: redactCreds(String((e && e.message) || e)).slice(0, 300) };
     } finally { if (wavPath) fsp.unlink(wavPath).catch(() => {}); }
+    if (payload && payload.requeue) {
+        // Viewer preemption is a DEFERRAL, not a failure: keep the row alive/honest and put the
+        // job back in line — the queue's local slot check holds it until the viewing ends.
+        console.log(`[media-gateway] transcribe job ${jobId} preempted by viewer — re-queued`);
+        postJobHeartbeat(job, 'deferred');
+        insertByPriority(transcribeQueue, job);
+        return;
+    }
     try {
         await fetch(callbackUrl, {
             method: 'POST',
@@ -1443,13 +1516,19 @@ function extractStoryboardSprite(url, ua, intervalSec, cols, rows, outputPath, t
         let child;
         try { child = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'ignore', 'pipe'], env: proxyEnvFor(proxyKey || proxyKeyFromUrl(url)) }); }
         catch (e) { return resolve({ ok: false, error: 'spawn failed: ' + String((e && e.message) || e) }); }
+        const reg = registerAccountExtraction(proxyKeyFromUrl(url), child);
         let stderr = '';
         let timedOut = false;
         const timer = setTimeout(() => { timedOut = true; try { child.kill('SIGKILL'); } catch (_) {} }, timeoutMs);
         child.stderr.on('data', (d) => { stderr += d.toString(); });
-        child.on('error', (e) => { clearTimeout(timer); resolve({ ok: false, error: 'ffmpeg error: ' + String((e && e.message) || e) }); });
+        child.on('error', (e) => { clearTimeout(timer); reg.release?.(); resolve({ ok: false, error: 'ffmpeg error: ' + String((e && e.message) || e) }); });
         child.on('close', async (code) => {
             clearTimeout(timer);
+            reg.release?.();
+            if (reg.preempted) {
+                fsp.unlink(outputPath).catch(() => {});
+                return resolve({ ok: false, preempted: true, error: 'preempted by viewer playback on this account' });
+            }
             const tail = redactCreds(stderr.trim().split('\n').filter(Boolean).pop() || 'no stderr');
             // A truncated read can still have flushed a usable (partial) sprite — accept any
             // plausible JPEG; only a missing/tiny file is a failure.
@@ -1481,7 +1560,9 @@ async function runStoryboardJob(job) {
         const timeoutMs = Math.min(75 * 60_000, Math.max(15 * 60_000, Math.round(dur * 600)));
         const r = await withAccountJobLock(accountJobKey(uid, url), () =>
             extractStoryboardSprite(url, ua, intervalSec, STORYBOARD_COLS, rows, outputPath, timeoutMs, uid));
-        if (!r.ok) {
+        if (r.preempted) {
+            payload = { requeue: true };
+        } else if (!r.ok) {
             payload = { jobId, ok: false, error: ('Storyboard extraction failed: ' + r.error).slice(0, 300) };
         } else {
             // Upload OUTSIDE the account lock — pure HTTPS to Supabase Storage.
@@ -1500,6 +1581,12 @@ async function runStoryboardJob(job) {
         payload = { jobId, ok: false, error: redactCreds(String((e && e.message) || e)).slice(0, 300) };
     } finally {
         fsp.unlink(outputPath).catch(() => {});
+    }
+    if (payload && payload.requeue) {
+        console.log(`[media-gateway] storyboard job ${jobId} preempted by viewer — re-queued`);
+        postJobHeartbeat(job, 'deferred');
+        insertByPriority(transcribeQueue, job);
+        return;
     }
     try {
         await fetch(callbackUrl, {
@@ -1532,6 +1619,7 @@ async function runChunkedTranscription(job) {
             for (let attempt = 0; attempt <= AUDIO_EXTRACT_RETRIES; attempt++) {
                 ex = await extractAudioWavChunks(url, ua, index, AUDIO_EXTRACT_TIMEOUT_MS, uid, TRANSCRIBE_CHUNK_SEC, dir);
                 if (ex.ok) break;
+                if (ex.preempted) break; // a viewer took the slot — the whole job re-queues
                 if (/\b(401|403)\b|Unauthorized|Forbidden/i.test(ex.error || '')) break; // abuse/auth block
                 let produced = 0;
                 try { produced = (await fsp.readdir(dir)).filter((f) => chunkRe.test(f)).length; } catch (_) { produced = 0; }
@@ -1588,6 +1676,10 @@ async function runChunkedTranscription(job) {
 
         const ex = await extractionDone;
         const audioSec = Math.round(totalAudioSec);
+        if (ex.preempted) {
+            // Already-streamed partial cues stay served; the job restarts cleanly after the viewing.
+            return { jobId, requeue: true };
+        }
         if (!ex.ok && chunksDone === 0) {
             return { jobId, ok: false, error: ('Audio extraction failed: ' + ex.error).slice(0, 300) };
         }
@@ -1987,6 +2079,9 @@ app.post('/sessions', requireGatewayAuth, async (req, res) => {
         // like any other conflicting session so ffmpeg doesn't open against a 458.
         stoppedConflictingSessions += abortRawPumps(
             (p) => p.proxyKey === proxyKeyFromUrl(sourceUrl), null, 'transcode session start');
+        // A background extraction (whisper/storyboard) mid-film on this account would fight the
+        // viewer for the single slot for MINUTES — the viewer wins, the job re-queues as deferred.
+        stoppedConflictingSessions += preemptAccountExtractions(proxyKeyFromUrl(sourceUrl), 'transcode session start');
 
         if (stoppedConflictingSessions > 0 && PROVIDER_SLOT_RELEASE_DELAY_MS > 0) {
             console.log(`[media-gateway] waiting ${PROVIDER_SLOT_RELEASE_DELAY_MS}ms for provider slot release after stopping ${stoppedConflictingSessions} session(s)`);
