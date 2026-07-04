@@ -6227,6 +6227,10 @@ class WatchPage {
         this._aiActiveLang = null;
         this._aiActiveVtt = null;
         this._ocrActiveStreamIndex = null;
+        if (this._aiTrackBlobUrl) {
+            try { URL.revokeObjectURL(this._aiTrackBlobUrl); } catch (_) { /* best-effort */ }
+            this._aiTrackBlobUrl = null;
+        }
         this.video?.querySelectorAll('track[data-norva-probe-subtitle="true"], track[data-norva-ai-subtitle="true"]').forEach(track => {
             if (track.track) {
                 track.track.mode = 'disabled';
@@ -7774,30 +7778,43 @@ class WatchPage {
         trackEl.dataset.norvaAiSubtitle = 'true';
         this.video.appendChild(trackEl);
 
-        const textTrack = trackEl.track;
-        if (!textTrack) { trackEl.remove(); return false; }
-        textTrack.mode = 'showing';
         // Cue times are film-absolute; the media timeline restarts at 0 when the gateway
         // transcode starts at -ss N (resume/seek restart) — rebase by streamStartOffset so
         // the lines match the speech (no-op for fresh plays and direct playback).
         const offset = (this.normalizeSubtitleOffset(this.subtitleOffsetSeconds) || 0)
             - (this.streamStartOffset || 0);
+        // The cues ride a REAL src (blob VTT), not addCue on a src-less track: Chromium's track
+        // processing model resets the programmatic cue list of a never-loading track ~200 ms
+        // after insertion (proven 04/07: 1862 cues right after attach → 0 at the next sample,
+        // with ZERO removeCue calls — the wiper was the browser itself). A loaded blob track
+        // (readiness LOADED, native VTT parsing) keeps its cues for the element's lifetime.
+        const fmtTs = (t) => {
+            const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60);
+            const s = (t % 60).toFixed(3).padStart(6, '0');
+            return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${s}`;
+        };
+        let body = 'WEBVTT\n\n';
         let added = 0;
         for (const c of cues) {
             if (c.end + offset <= 0) continue; // cue entirely before the session start
+            const text = String(c.text || '').replace(/\r/g, '').split('\n').filter((l) => l.trim() !== '').join('\n');
+            if (!text) continue; // an empty payload would terminate the VTT cue block early
             const start = Math.max(0, c.start + offset);
             const end = Math.max(start + 0.05, c.end + offset);
-            try { textTrack.addCue(new VTTCue(start, end, c.text)); added += 1; } catch (_) { /* skip malformed cue */ }
+            body += `${fmtTs(start)} --> ${fmtTs(end)}\n${text}\n\n`;
+            added += 1;
         }
-        // Honest failure: a track that ended up EMPTY (offset pushed every cue out of the
-        // session, or addCue refused them all) must not linger as a ghost "active" track —
-        // callers would believe subtitles are on while nothing can ever render.
+        // Honest failure: a track that would be EMPTY (offset pushed every cue out of the
+        // session) must not linger as a ghost "active" track.
         if (!added) {
             console.warn(`[WatchPage] AI subtitle attach produced 0 cues (parsed=${cues.length}, offset=${offset}) — detaching`);
-            try { textTrack.mode = 'disabled'; } catch (_) { /* best-effort */ }
             trackEl.remove();
             return false;
         }
+        if (this._aiTrackBlobUrl) { try { URL.revokeObjectURL(this._aiTrackBlobUrl); } catch (_) { } }
+        this._aiTrackBlobUrl = URL.createObjectURL(new Blob([body], { type: 'text/vtt' }));
+        trackEl.src = this._aiTrackBlobUrl;
+        if (trackEl.track) trackEl.track.mode = 'showing';
         setTimeout(() => {
             if (trackEl.track) trackEl.track.mode = 'showing';
             this.updateCaptionsTracks();
