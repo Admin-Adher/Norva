@@ -45,14 +45,17 @@ function startRangeServer(behavior) {
     const srv = http.createServer((req, res) => {
         const m = /bytes=(\d+)-(\d+)/.exec(req.headers.range || '');
         if (!m) { res.writeHead(400); res.end(); return; }
-        const start = Number(m[1]); const end = Math.min(Number(m[2]), FILE_SIZE - 1);
+        let start = Number(m[1]); const end = Math.min(Number(m[2]), FILE_SIZE - 1);
         const mode = behavior(start, end);
         if (mode.status && mode.status !== 206) { res.writeHead(mode.status); res.end(); return; }
-        const full = FILE.subarray(start, end + 1);
+        // wrongOffset: a 206 that re-serves from another position (post-churn panel behavior) —
+        // length-correct bytes at the WRONG offset, the cache-poisoning shape.
+        if (typeof mode.serveFrom === 'number') start = mode.serveFrom;
+        const full = FILE.subarray(start, Math.min(start + (end - Number(m[1]) + 1), FILE_SIZE));
         const body = mode.truncateTo ? full.subarray(0, mode.truncateTo) : full;
         // No Content-Length: a truncated body ends "cleanly" (the incident shape — nothing
         // for the client to length-check at the transport level).
-        res.writeHead(206, { 'Content-Range': `bytes ${start}-${end}/${FILE_SIZE}`, 'Accept-Ranges': 'bytes' });
+        res.writeHead(206, { 'Content-Range': `bytes ${start}-${start + body.length - 1}/${FILE_SIZE}`, 'Accept-Ranges': 'bytes' });
         res.end(body);
     });
     return new Promise((resolve) => srv.listen(0, '127.0.0.1', () => resolve(srv)));
@@ -114,6 +117,23 @@ test('transient provider 458 recovers within the window retry ladder', async () 
         const out = await eng._readRange(1024, 4096);
         assert.strictEqual(out.length, 4096);
         assert.strictEqual(calls, 2, 'one 458 then success');
+    } finally { srv.close(); }
+});
+
+test('a 206 served from the WRONG offset is rejected and retried — never cached', async () => {
+    let calls = 0;
+    const srv = await startRangeServer(() => {
+        calls += 1;
+        return calls === 1 ? { serveFrom: 0 } : {}; // panel re-serves from 0 after churn, then heals
+    });
+    try {
+        const NorvaEngine = loadEngineClass();
+        const eng = bareEngine(NorvaEngine, `http://127.0.0.1:${srv.address().port}/f.mkv`);
+        const out = await eng._readRange(1024 * 1024, 4096);
+        assert.strictEqual(out.length, 4096);
+        // Position-stamped content: the bytes must belong to the REQUESTED offset, not offset 0.
+        assert.strictEqual(Buffer.from(out.buffer, out.byteOffset, 4).readUInt32LE(0), 1024 * 1024);
+        assert.ok(calls >= 2, 'the mis-ranged first attempt must have been retried');
     } finally { srv.close(); }
 });
 

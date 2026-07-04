@@ -699,7 +699,7 @@
           lastErr = e;
           if (this._ac.signal.aborted) throw e;
           const msg = String((e && e.message) || e);
-          if (!/BLOCK_SHORT_READ|Failed to fetch|NetworkError|load failed|BLOCK_HTTP_(429|458|502|503)/i.test(msg)) throw e;
+          if (!/BLOCK_SHORT_READ|BLOCK_RANGE_MISMATCH|Failed to fetch|NetworkError|load failed|BLOCK_HTTP_(429|458|502|503)/i.test(msg)) throw e;
           await new Promise((r) => setTimeout(r, 700 * (attempt + 1)));
         }
       }
@@ -847,6 +847,17 @@
         const cr = r.headers.get('content-range');
         if (r.status === 200 && !cr) { try { ac.abort(); } catch (_) {} throw new Error('RANGE_UNSUPPORTED'); }
         if (r.status !== 206 && r.status !== 200) throw new Error('BLOCK_HTTP_' + r.status);
+        // The declared range must MATCH the requested offset. After a slot churn some panels
+        // answer 206 but re-serve from the wrong position (often 0): length-correct bytes at the
+        // wrong offset poison the cache, libav demuxes shifted data and the muxer emits garbage
+        // ~MBs later ("bad box" → CHUNK_DEMUXER_ERROR_APPEND → lane failover). Retryable shape.
+        if (cr) {
+          const m = /bytes\s+(\d+)-/.exec(cr);
+          if (m && Number(m[1]) !== start) {
+            try { ac.abort(); } catch (_) {}
+            throw new Error('BLOCK_RANGE_MISMATCH:' + m[1] + '!=' + start);
+          }
+        }
         // Learn the total file size for free from Content-Range, so the first
         // window fetch doubles as the size probe (one request instead of two).
         if (!this.size && cr && cr.includes('/')) {
