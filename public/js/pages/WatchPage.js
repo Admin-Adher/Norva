@@ -2889,6 +2889,14 @@ class WatchPage {
     // than falling back to the gateway.
     async playWithEngine(url, { startTime = 0, playbackAttemptId, audioStreamIndex = null } = {}) {
         this.destroyEngine();
+        // An hls instance left over from a prior transcode attempt stays ATTACHED to this same
+        // <video> — its internal recovery machinery keeps churning against the replaced media and
+        // each cycle runs TimelineController._cleanTracks, which strips the cues off EVERY text
+        // track while the engine plays fine (the 04/07 subtitle strobe: wipe → self-heal → wipe).
+        if (this.hls) {
+            try { this.hls.destroy(); } catch (_) { /* already gone */ }
+            this.hls = null;
+        }
         this.currentPlaybackMode = 'engine';
         this.streamStartOffset = 0;
         try { this.updateTranscodeStatus('direct', 'Navigateur'); } catch (_) {}
@@ -5397,22 +5405,28 @@ class WatchPage {
             this.reportPlaybackStatus('ok').catch(() => { });
         }
         this.reportObservedAudioLanguages();
-        // Restore the viewer's generated subtitles across the lane restart (see the stash in the
-        // loadVideo reset). Same-title guarded at stash time; key re-checked for a late frame.
-        if (this._aiRestoreOnStart) {
-            const r = this._aiRestoreOnStart;
-            this._aiRestoreOnStart = null;
-            if (r.key === this._aiSubtitleKey() && this.attachGeneratedSubtitleTrack(r.vtt, r.lang)) {
-                this.updateCaptionsTracks();
-            }
-        } else if (this._aiActiveVtt) {
-            // Self-heal for restarts that SKIP the loadVideo reset (in-place failover on the same
-            // element): the browser disabled our track on the new src — rebuild it. A viewer-hidden
-            // track (mode 'hidden', cues intact via the C toggle) is deliberate and left alone.
-            const el = this.video?.querySelector('track[data-norva-ai-subtitle="true"]');
-            const dead = !el || !el.track || el.track.mode === 'disabled' || !el.track.cues || !el.track.cues.length;
-            if (dead && this.attachGeneratedSubtitleTrack(this._aiActiveVtt, this._aiActiveLang || 'und')) {
-                this.updateCaptionsTracks();
+        // Restore the viewer's generated subtitles across a lane restart. STRICTLY once per media
+        // load: markPlaybackUsable runs on every timeupdate (~4×/s), and an unguarded re-attach
+        // here turned any external cue-stripper into a subtitle STROBE (attach → wipe → attach…,
+        // 04/07). The browser disables tracks per NEW src, so once per src is exactly the need.
+        const mediaSrc = this.video?.currentSrc || this.video?.src || '';
+        if (mediaSrc && mediaSrc !== this._aiHealedForSrc) {
+            this._aiHealedForSrc = mediaSrc;
+            if (this._aiRestoreOnStart) {
+                const r = this._aiRestoreOnStart;
+                this._aiRestoreOnStart = null;
+                if (r.key === this._aiSubtitleKey() && this.attachGeneratedSubtitleTrack(r.vtt, r.lang)) {
+                    this.updateCaptionsTracks();
+                }
+            } else if (this._aiActiveVtt) {
+                // Self-heal for restarts that SKIP the loadVideo reset (in-place failover on the
+                // same element). A viewer-hidden track (mode 'hidden', cues intact via the C
+                // toggle) is deliberate and left alone.
+                const el = this.video?.querySelector('track[data-norva-ai-subtitle="true"]');
+                const dead = !el || !el.track || el.track.mode === 'disabled' || !el.track.cues || !el.track.cues.length;
+                if (dead && this.attachGeneratedSubtitleTrack(this._aiActiveVtt, this._aiActiveLang || 'und')) {
+                    this.updateCaptionsTracks();
+                }
             }
         }
     }
@@ -7754,11 +7768,21 @@ class WatchPage {
         // the lines match the speech (no-op for fresh plays and direct playback).
         const offset = (this.normalizeSubtitleOffset(this.subtitleOffsetSeconds) || 0)
             - (this.streamStartOffset || 0);
+        let added = 0;
         for (const c of cues) {
             if (c.end + offset <= 0) continue; // cue entirely before the session start
             const start = Math.max(0, c.start + offset);
             const end = Math.max(start + 0.05, c.end + offset);
-            try { textTrack.addCue(new VTTCue(start, end, c.text)); } catch (_) { /* skip malformed cue */ }
+            try { textTrack.addCue(new VTTCue(start, end, c.text)); added += 1; } catch (_) { /* skip malformed cue */ }
+        }
+        // Honest failure: a track that ended up EMPTY (offset pushed every cue out of the
+        // session, or addCue refused them all) must not linger as a ghost "active" track —
+        // callers would believe subtitles are on while nothing can ever render.
+        if (!added) {
+            console.warn(`[WatchPage] AI subtitle attach produced 0 cues (parsed=${cues.length}, offset=${offset}) — detaching`);
+            try { textTrack.mode = 'disabled'; } catch (_) { /* best-effort */ }
+            trackEl.remove();
+            return false;
         }
         setTimeout(() => {
             if (trackEl.track) trackEl.track.mode = 'showing';
