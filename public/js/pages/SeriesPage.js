@@ -904,7 +904,9 @@ class SeriesPage {
                 }
             });
 
-            this.cloudOffset = (page.offset || this.cloudOffset) + (page.items?.length || 0);
+            // The grid is paginated by title server-side (each ships all its version
+            // rows), so advance the cursor by the title count, not the row count.
+            this.cloudOffset = (page.offset || this.cloudOffset) + (page.films ?? page.items?.length ?? 0);
             this.cloudHasMore = Boolean(page.hasMore);
             this.cloudTotal = page.count ?? this.cloudTotal;
             this.populateGenres();
