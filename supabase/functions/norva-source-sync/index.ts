@@ -156,7 +156,10 @@ Deno.serve(async (req) => {
         const limit = boundedInt(url.searchParams.get("limit"), 100, 1, 1500);
         const reset = url.searchParams.get("reset") === "1";
         const concurrency = boundedInt(url.searchParams.get("conc"), 8, 1, 30);
-        return json(req, await cronSearchMatch(supabase, limit, reset, concurrency));
+        // Optional ?user=<uuid> — re-enrich one account's backlog first (no global cursor).
+        const userParam = (url.searchParams.get("user") || "").trim();
+        const userId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userParam) ? userParam : null;
+        return json(req, await cronSearchMatch(supabase, limit, reset, concurrency, userId));
       }
       return json(req, { error: "not_found" }, 404);
     }
@@ -747,14 +750,20 @@ async function cronRevalidate(db: SupabaseClient, limit: number, reset: boolean,
 // on TMDB by name+year and, when it confirms strongly, set the id + verify +
 // localize it. Cursor-resumable; drive it like the other backfills. New ids can
 // duplicate an existing tmdb: title — run the dedupe migration afterwards.
-async function cronSearchMatch(db: SupabaseClient, limit: number, reset: boolean, concurrency: number) {
+async function cronSearchMatch(db: SupabaseClient, limit: number, reset: boolean, concurrency: number, userId: string | null = null) {
   const apiKey = tmdbApiKey();
   if (!apiKey) return { error: "tmdb_key_missing", done: true };
+
+  // Focused mode (?user=<uuid>): re-enrich ONE account's backlog first, without
+  // touching the global cyclic cursor. No cursor needed — the 90d attempt marker
+  // makes repeated calls step through that user's unmatched set (each call marks
+  // its batch attempted, so the next call sees the following rows).
+  const focused = !!userId;
 
   // Cyclic cursor + latched done + 90d attempt marker — same audit fix as cronBackfillYears.
   let cursor: string | null = null;
   let priorDone = false;
-  if (!reset) {
+  if (!reset && !focused) {
     const { data } = await db.from("norva_search_match_state").select("last_id, done").eq("id", 1).maybeSingle();
     cursor = (data?.last_id as string | null) ?? null;
     priorDone = data?.done === true;
@@ -769,6 +778,7 @@ async function cronSearchMatch(db: SupabaseClient, limit: number, reset: boolean
     .or(`search_match_attempted_at.is.null,search_match_attempted_at.lt.${retryBefore}`)
     .order("id", { ascending: true })
     .limit(limit);
+  if (focused) q = q.eq("user_id", userId);
   if (cursor) q = q.gt("id", cursor);
 
   const { data: rows, error } = await q;
@@ -776,10 +786,12 @@ async function cronSearchMatch(db: SupabaseClient, limit: number, reset: boolean
 
   const scanned = rows?.length ?? 0;
   if (!scanned) {
-    await db.from("norva_search_match_state")
-      .update({ last_id: null, done: true, last_run: { scanned: 0, matched: 0, done: true, wrapped: true, at: new Date().toISOString() }, updated_at: new Date().toISOString() })
-      .eq("id", 1);
-    return { scanned: 0, matched: 0, done: true, wrapped: true };
+    if (!focused) {
+      await db.from("norva_search_match_state")
+        .update({ last_id: null, done: true, last_run: { scanned: 0, matched: 0, done: true, wrapped: true, at: new Date().toISOString() }, updated_at: new Date().toISOString() })
+        .eq("id", 1);
+    }
+    return { scanned: 0, matched: 0, done: true, wrapped: true, focused };
   }
 
   const maxId = String(rows![rows!.length - 1].id);
@@ -826,10 +838,13 @@ async function cronSearchMatch(db: SupabaseClient, limit: number, reset: boolean
   const passEnded = scanned < limit;
   const done = priorDone || passEnded;
   const summary = { scanned, matched, done };
-  await db.from("norva_search_match_state")
-    .update({ last_id: passEnded ? null : maxId, done, last_run: { ...summary, wrapped: passEnded, at: new Date().toISOString() }, updated_at: new Date().toISOString() })
-    .eq("id", 1);
-  return summary;
+  // Focused per-user passes never touch the global cursor/state.
+  if (!focused) {
+    await db.from("norva_search_match_state")
+      .update({ last_id: passEnded ? null : maxId, done, last_run: { ...summary, wrapped: passEnded, at: new Date().toISOString() }, updated_at: new Date().toISOString() })
+      .eq("id", 1);
+  }
+  return { ...summary, focused };
 }
 
 // Premium per-user background refresh — the step-5 state machine. Picks a small
