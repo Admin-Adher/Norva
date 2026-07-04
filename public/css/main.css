@@ -7038,6 +7038,15 @@ kbd {
   white-space: nowrap;
 }
 
+.episode-airdate {
+  flex: none;
+  margin-left: auto;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: rgba(224, 231, 255, 0.55);
+  font-variant-numeric: tabular-nums;
+}
+
 .series-details .episode-number {
   width: auto;
   justify-self: center;

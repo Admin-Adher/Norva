@@ -859,6 +859,8 @@
             // Live TMDB extras (videos/credits) for the fiches — proxied by the
             // edge so the TMDB key never reaches the browser; cached CDN-side.
             tmdbMeta: (params = {}) => catalogRequest('/tmdb-meta', params),
+            // Per-episode TMDB data (stills / localized names / air dates) for one season.
+            tmdbEpisodes: (params = {}) => catalogRequest('/tmdb-episodes', params),
             // Crowd-learned skip-intro markers, keyed on tmdbId+season.
             introMarkers: (params = {}) => catalogRequest('/intro-markers', params),
             introSignal: (body = {}) => catalogMutate('/intro-signal', body)
