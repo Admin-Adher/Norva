@@ -70,6 +70,53 @@ aux deux ; les correctifs serveur profitent aux deux automatiquement.
   subscribe/checkout selon la normalisation du navigateur) → supprimé + redirect
   `/app/ → /app` dans `_redirects`. Test `vod-playback-matrix` mis à jour (une seule entrée).
 
+## Lot 2 — cause racine des lignes vides + compteur « 819 mais 4 affichés »
+
+Un signalement utilisateur (« Adventure · 819 » au menu mais 4 films à l'écran) a
+révélé la **vraie cause de fond** des lignes quasi vides — plus profonde que la fenêtre
+de récence du lot 1. Prouvé en base (compte de 71 007 films) :
+
+- Le **compteur** du menu (`cloud_genre_summary`) agrège **tout** le catalogue. La
+  **grille** et les **rails** classaient en mémoire une fenêtre des ~6000 titres les plus
+  récemment synchronisés. Des 204 films « Adventure » réels, **181 sont hors de cette
+  fenêtre** ; et 96,5 % de la fenêtre récente a `genre_payload = NULL` (titres fraîchement
+  synchronisés, pas encore enrichis TMDB) — le signal genre y est donc quasi absent.
+  Résultat : ~4-30 affichés vs 351-819 réels. (Le lot 1 atténuait via un scan paginé mais
+  restait borné par la récence et détoastait `metadata`.)
+
+**Correctif de fond (migration `20260704160000` + réécriture edge) :**
+- Nouvelle colonne dénormalisée **`cloud_titles.genre_buckets text[]`** = l'ensemble des
+  buckets d'un titre, calculée par un **port SQL fidèle** du classifieur TS
+  (`norva_classify_buckets`, garde-fou exception → jamais de write cassé), **indexée GIN**.
+  Grille, rails et compteur filtrent désormais `genre_buckets @> {bucket}` sur **tout le
+  catalogue** via l'index (plan BitmapAnd, ~16 ms sur 71k).
+- Port **validé sur données réelles** : les comptes par bucket via `norva_classify_buckets`
+  égalent le résumé edge (Adventure = **351**, exactement) ; un bug d'append littéral plpgsql
+  (`|| 'arabe'` casté en tableau) qui faisait tomber toutes les catégories arabe / animation /
+  k-drama en `autres` a été trouvé et corrigé (arabe repassé de 0 à 9777).
+- `listGenreItems` : filtre 100 % SQL (`genre_buckets`, langue, année `release_year`, note
+  `rating_num`, genres masqués `NOT genre_buckets && hidden`) + **comptage exact** (`count:exact`)
+  + pagination réelle (`.range`). Le tri « Best for my languages » garde un rang en mémoire borné.
+- `listGenreRails` : une requête indexée **par bucket** (les N plus récents par `created_at`),
+  budget anti-doublon inter-lignes conservé, détoast `metadata` limité aux seuls ids retenus.
+- `listGenreSummary` : nouvelle RPC `cloud_genre_bucket_counts` (comptes **navigables**,
+  `variant_count>0`) → le compteur du menu = ce que la grille affiche réellement.
+- Colonne **`rating_num`** dénormalisée (backfillée depuis `catalog_titles`, la note TMDB
+  étant thinnée hors de `cloud_titles`) pour que le filtre Note soit un vrai prédicat SQL.
+- Trigger `cloud_titles_sync_genre_cols` étendu : recalcule `genre_buckets` + `rating_num`
+  à chaque écriture de `metadata` (nouvelles fiches classées à la synchro, sans latence).
+- Test de parité `tests/genre-taxonomy-parity.test.js` : verrou anti-drift entre les 3 copies
+  du classifieur (TS edge / JS navigateur / SQL). **Backfill : 576 k lignes, index GIN valide.**
+
+## Portée : web ET Android (TV + mobile)
+Les apps Android sont des **wrappers WebView natifs** (`clients/android-phone`,
+`clients/android-tv`) qui chargent le site live `norva.tv`. Donc : (1) les correctifs
+**backend/edge** (`norva-catalog`) touchent Android instantanément — même endpoint pour tous ;
+(2) les correctifs **frontend** (MoviesPage/SeriesPage/api.js/app.html) arrivent aussi
+instantanément dès le déploiement Cloudflare Pages, **sans nouvel APK**, pour le téléphone et
+la TV en mode cloud (défaut). Seule exception : le mode TV « standalone » (opt-in avancé) sert
+un snapshot de `public/` figé dans l'APK → n'a les correctifs front qu'après un nouveau build.
+
 ## Vérifié correct (aucun changement)
 Le clic sur une carte de rail réutilise le chemin fiche de la Home (versions groupées) ·
 « See all » par genre pagine bien tout le genre (fenêtre 6000) · les facettes serveur
