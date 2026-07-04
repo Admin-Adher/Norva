@@ -433,18 +433,11 @@ async function listMediaItems(url: URL, userId: string) {
         p_user: userId, p_item_type: itemType, p_q: q, p_limit: Math.min(limit, 50),
       });
       if (!rpcErr && Array.isArray(hits)) {
-        // Collapse duplicate provider entries of the same film (same resolved
-        // identity), mirroring the grid's server-side dedup.
-        const seen = new Set<string>();
-        const items = (hits as Array<Record<string, any>>).filter((row) => {
-          const md = isRecord(row.metadata) ? row.metadata : {};
-          const key = stringOrNull(row.dedup_key)
-            || (stringOrNull(md.providerTmdbId) ? `tmdb:${stringOrNull(md.providerTmdbId)}` : null)
-            || `id:${row.id}`;
-          if (seen.has(key)) return false;
-          seen.add(key);
-          return true;
-        }).map((row) => {
+        // Return ALL matching rows (every version of every film). The client groups
+        // them by dedup_key/tmdb into one card each — and, crucially, a tapped search
+        // result re-fetches its sibling versions through this same path to build the
+        // version picker, so collapsing here would strip a film's versions.
+        const items = (hits as Array<Record<string, any>>).map((row) => {
           row.year = row.release_year ?? null;
           return row;
         });
@@ -652,11 +645,14 @@ async function attachMediaLanguages(items: Array<Record<string, any>>, userId: s
         row.overview = cat.overview; row.description = cat.overview; row.plot = cat.overview;
         row.tmdb = { ...(isRecord(row.tmdb) ? row.tmdb : {}), overview: cat.overview };
       }
-      // Poster/backdrop fallback from the global catalog when nothing fresher was set above.
-      if (cat.poster && !stringOrNull(row.poster_url)) {
+      // Poster/backdrop: catalog_titles is the global enriched source and the freshest
+      // authority, so its art WINS over the per-user cloud_titles/provider poster (which
+      // can go stale when TMDB rotates an image → the stored path 404s → placeholder).
+      // This overrides the cloud_titles overlay applied above for matched titles.
+      if (cat.poster) {
         row.poster_url = cat.poster; row.posterUrl = cat.poster; row.stream_icon = cat.poster; row.cover = cat.poster;
       }
-      if (cat.backdrop && !stringOrNull(row.backdrop_url)) { row.backdrop_url = cat.backdrop; row.backdropUrl = cat.backdrop; }
+      if (cat.backdrop) { row.backdrop_url = cat.backdrop; row.backdropUrl = cat.backdrop; }
     }
   } catch (_) { /* best-effort; never fail the grid over enrichment overlay */ }
 }
