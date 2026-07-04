@@ -244,12 +244,16 @@ class MoviesPage {
         this.openBucket({ id: 'genre-all', title: 'All movies', curation: { bucket: 'all' } });
     }
 
-    // Audio-language / burned-in-subtitle filter params + "best for my languages"
-    // sort, forwarded to the server genre-items endpoint. Empty keys are omitted.
+    // Audio-language / burned-in-subtitle / year / rating filter params + "best
+    // for my languages" sort, forwarded to the server genre-items endpoint (the
+    // bucket grids). Empty keys are omitted. Also the bucket views' re-render
+    // key, so changing ANY of these refreshes an open genre grid.
     currentLanguageParams() {
         const params = {};
         if (this.audioSelect?.value) params.audio = this.audioSelect.value;
         if (this.subtitleSelect?.value) params.subs = this.subtitleSelect.value;
+        if (this.yearSelect?.value) params.year = this.yearSelect.value;
+        if (this.ratingSelect?.value) params.minRating = this.ratingSelect.value;
         if (this.sortSelect?.value === 'lang-match') {
             params.sort = 'lang-match';
             const prefs = this.getPreferences();
@@ -266,7 +270,12 @@ class MoviesPage {
     // Dynamic filter menus: only show audio/subtitle languages actually present in
     // the catalogue (server facets). Falls back to the static <option>s on failure.
     async populateLanguageFacets() {
-        if (!this.isCloudPagedMode()) return;
+        // Local (self-hosted) libraries carry no per-title language facets — the two
+        // selects would be dead filters there, so hide them instead of lying.
+        const cloud = this.isCloudPagedMode();
+        this.audioSelect?.classList.toggle('hidden', !cloud);
+        this.subtitleSelect?.classList.toggle('hidden', !cloud);
+        if (!cloud) return;
         // Re-fetch at most once per 60s so the menu tracks the background crawl (new
         // languages get detected over the first day) instead of freezing at first load.
         // applyFacetOptions preserves the current selection and skips the DOM rebuild
@@ -358,6 +367,8 @@ class MoviesPage {
         this.bucketOffset = 0;
         this.bucketHasMore = true;
         this.bucketLoading = false;
+        this.bucketSeen = new Set(); // title identities already in the grid
+        this.bucketRequestId = (this.bucketRequestId || 0) + 1;
         this.bucketObserver?.disconnect();
 
         // Block layout so the head / grid / loader stack vertically (see .rail-host).
@@ -385,15 +396,32 @@ class MoviesPage {
     async loadBucketPage() {
         if (this.bucketLoading || !this.bucketHasMore || !this.activeBucket) return;
         this.bucketLoading = true;
+        // Switching buckets/filters mid-flight must not append the old grid's page
+        // into the new grid (or corrupt its offset).
+        const requestId = this.bucketRequestId;
         try {
             const payload = await API.media.genreItems({ type: 'movie', bucket: this.activeBucket, limit: 36, offset: this.bucketOffset, ...this.currentLanguageParams() });
+            if (requestId !== this.bucketRequestId || !this.bucketGridEl?.isConnected) return;
             const items = (payload && payload.items) || [];
-            window.GenreRails.appendCards(this.bucketGridEl, items, {
+            // Offset pagination over a live catalog can re-serve a boundary row —
+            // never render the same title twice.
+            const fresh = items.filter((item) => {
+                const key = String(item.title_id || item.titleId || item.id || '');
+                if (!key || this.bucketSeen?.has(key)) return false;
+                this.bucketSeen?.add(key);
+                return true;
+            });
+            window.GenreRails.appendCards(this.bucketGridEl, fresh, {
                 startIndex: this.bucketOffset,
                 onItemClick: (item) => this.openRailItem(item)
             });
             this.bucketOffset += items.length;
             this.bucketHasMore = Boolean(payload && payload.hasMore) && items.length > 0;
+            // The endpoint returns the exact filtered count — show it (the grid view
+            // otherwise leaves the header count blank).
+            if (this.countEl && typeof payload?.count === 'number') {
+                this.countEl.textContent = `${payload.count} titles`;
+            }
         } catch (err) {
             console.warn('[Movies] Genre bucket page failed:', err);
             this.bucketHasMore = false;
@@ -403,17 +431,25 @@ class MoviesPage {
     }
 
     closeBucket() {
+        const wasLanguageBucket = this.activeBucket === 'all';
         this.activeBucket = null;
         this.activeBucketLangKey = null;
+        this.bucketRequestId = (this.bucketRequestId || 0) + 1;
         this.bucketObserver?.disconnect();
         this.bucketObserver = null;
-        // Drop the genre + language filter selection (set silently — rails below).
+        // Drop the genre selection (set silently — the next view renders below).
         if (this.categoryMulti?.getSelected().size) this.categoryMulti.setSelected([]);
-        if (this.audioSelect) this.audioSelect.value = '';
-        if (this.subtitleSelect) this.subtitleSelect.value = '';
-        if (this.sortSelect?.value === 'lang-match') this.sortSelect.value = 'default';
+        // Backing out of a GENRE keeps the user's language/year/rating filters
+        // (they weren't set by the bucket) — onFiltersChanged routes to the right
+        // view for whatever remains. Backing out of the catalogue-wide language
+        // grid clears its own language filters, else it would just reopen itself.
+        if (wasLanguageBucket) {
+            if (this.audioSelect) this.audioSelect.value = '';
+            if (this.subtitleSelect) this.subtitleSelect.value = '';
+            if (this.sortSelect?.value === 'lang-match') this.sortSelect.value = 'default';
+        }
         this.persistFilters();
-        this.renderGenreRails();
+        this.onFiltersChanged();
     }
 
     // Local-mode genre rails: group already-loaded movies by curated bucket and
@@ -506,7 +542,7 @@ class MoviesPage {
         // track the crawl in near-real-time. Gentle (server-memoized 60s, skips DOM work
         // when unchanged); cleared in hide().
         if (this._facetTimer) clearInterval(this._facetTimer);
-        this._facetTimer = setInterval(() => this.populateLanguageFacets(), 600000);
+        this._facetTimer = setInterval(() => this.populateLanguageFacets(), 60000);
 
         // Returning to a recently rendered view (grid or rails): keep the DOM as-is
         // and restore the scroll position instead of re-rendering back to the top.
@@ -810,6 +846,11 @@ class MoviesPage {
             categoryId,
             sort: this.sortSelect?.value || 'default',
             q: (this.searchInput?.value || '').trim(),
+            // Server-side over the denormalized columns, so the filter spans the
+            // WHOLE catalogue instead of the loaded pages only.
+            year: this.yearSelect?.value || '',
+            minRating: this.ratingSelect?.value || '',
+            addedDays: this.addedSelect?.value || '',
             limit: this.cloudPageSize,
             offset
         };
@@ -820,7 +861,8 @@ class MoviesPage {
         // sort) is cached — that's the cold-load view worth painting instantly.
         // Returns null otherwise so searches/sorted/filtered views never bloat storage.
         const p = this.cloudPageParams(0);
-        if (p.sourceId || p.categoryId || p.q || (p.sort && p.sort !== 'default')) return null;
+        if (p.sourceId || p.categoryId || p.q || (p.sort && p.sort !== 'default') ||
+            p.year || p.minRating || p.addedDays) return null;
         return 'movies:default';
     }
 
@@ -965,7 +1007,12 @@ class MoviesPage {
 
         // Cloud mode filters genre via the dedicated grid (openGenreBucket); the
         // self-hosted grid still filters by the selected provider category here.
-        if (!this.isCloudPagedMode()) {
+        // Year / rating / recently-added are ALSO server-side in cloud mode
+        // (cloudPageParams), so re-filtering here would only drop rows where the
+        // client's heuristic (name-derived year, provider rating string) disagrees
+        // with the server's denormalized column.
+        const cloud = this.isCloudPagedMode();
+        if (!cloud) {
             const selectedCats = this.categoryMulti?.getSelected();
             if (selectedCats && selectedCats.size > 0 &&
                 !selectedCats.has(`${item.sourceId}:${item.category_id}`)) {
@@ -974,7 +1021,7 @@ class MoviesPage {
         }
 
         // Year / decade
-        const yearFilter = this.yearSelect?.value;
+        const yearFilter = cloud ? '' : this.yearSelect?.value;
         if (yearFilter) {
             const y = this.getItemYear(item);
             if (yearFilter === 'old') {
@@ -986,7 +1033,7 @@ class MoviesPage {
         }
 
         // Minimum rating
-        const minRating = parseFloat(this.ratingSelect?.value);
+        const minRating = cloud ? NaN : parseFloat(this.ratingSelect?.value);
         if (minRating) {
             const r = parseFloat(item.rating) || (item.tmdb?.vote_average ?? 0);
             if (!r || r < minRating) return false;
@@ -1007,7 +1054,7 @@ class MoviesPage {
         }
 
         // Recently added
-        const addedDays = parseInt(this.addedSelect?.value);
+        const addedDays = cloud ? NaN : parseInt(this.addedSelect?.value);
         if (addedDays) {
             const addedMs = this.parseAddedMs(item);
             if (!addedMs || (Date.now() - addedMs) > addedDays * 86400000) return false;
@@ -1060,10 +1107,23 @@ class MoviesPage {
         return cards;
     }
 
+    // Filters the SERVER cannot see (they run over the loaded pages only), so the
+    // server's exact count can't be shown while any of them is active.
+    hasClientOnlyFilters() {
+        return Boolean(
+            this.genreSelect?.value || this.durationSelect?.value ||
+            this.watchedSelect?.value || this.showFavoritesOnly ||
+            this.hideBroken === false
+        );
+    }
+
     updateResultChrome(cards) {
         if (this.countEl) {
             let total = this.groupDuplicates ? `${cards.length} titles` : `${cards.length} movies`;
-            if (this.isCloudPagedMode() && this.cloudTotal !== null && !this.hasActiveFilters()) {
+            // The server count is exact for every server-side dimension (search,
+            // sort, year, rating, added) — only client-only filters force the
+            // open-ended "N+" fallback.
+            if (this.isCloudPagedMode() && this.cloudTotal !== null && !this.hasClientOnlyFilters()) {
                 total = `${this.cloudTotal} titles`;
             } else if (this.isCloudPagedMode() && this.cloudHasMore) {
                 total = `${cards.length}+ titles`;

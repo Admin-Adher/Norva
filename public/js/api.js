@@ -394,7 +394,7 @@ const CloudAdapter = (() => {
         return mapped;
     }
 
-    async function getMediaPage({ sourceId, type, q, categoryId, sort = 'default', limit = 50, offset = 0 } = {}) {
+    async function getMediaPage({ sourceId, type, q, categoryId, sort = 'default', limit = 50, offset = 0, year = '', minRating = '', addedDays = '' } = {}) {
         const cloudSourceId = sourceId ? await resolveSourceId(sourceId) : '';
         const normalizedLimit = Math.max(1, Math.min(1000, Number.parseInt(limit, 10) || 50));
         const normalizedOffset = Math.max(0, Number.parseInt(offset, 10) || 0);
@@ -404,6 +404,9 @@ const CloudAdapter = (() => {
             q: q || '',
             categoryId: categoryId || '',
             sort: sort || 'default',
+            year: year || '',
+            minRating: minRating || '',
+            addedDays: addedDays || '',
             limit: normalizedLimit,
             offset: normalizedOffset
         });
@@ -416,6 +419,10 @@ const CloudAdapter = (() => {
             q,
             categoryId,
             sort,
+            // Server-side year/rating/recently-added filters (denormalized columns).
+            year,
+            minRating,
+            addedDays,
             limit: normalizedLimit,
             offset: normalizedOffset
         });
@@ -533,7 +540,7 @@ const CloudAdapter = (() => {
         return payload;
     }
 
-    async function getGenreItems({ type = 'movie', bucket = '', limit = 36, offset = 0, audio = '', subs = '', sort = '', prefAudio = '', prefSubs = '', q = '' } = {}) {
+    async function getGenreItems({ type = 'movie', bucket = '', limit = 36, offset = 0, audio = '', subs = '', sort = '', prefAudio = '', prefSubs = '', q = '', year = '', minRating = '' } = {}) {
         const normalizedType = type ? cloudTypeFromLocal(type) : 'movie';
         const normalizedLimit = Math.max(1, Math.min(100, Number.parseInt(limit, 10) || 36));
         const normalizedOffset = Math.max(0, Number.parseInt(offset, 10) || 0);
@@ -542,9 +549,10 @@ const CloudAdapter = (() => {
             bucket,
             limit: normalizedLimit,
             offset: normalizedOffset,
-            // Audio-language / burned-in-subtitle filter + "best for my languages"
-            // sort + text search — forwarded to the catalog (empty values dropped).
-            audio, subs, sort, prefAudio, prefSubs, q
+            // Audio-language / burned-in-subtitle / year / rating filter + "best for
+            // my languages" sort + text search — forwarded to the catalog (empty
+            // values dropped).
+            audio, subs, sort, prefAudio, prefSubs, q, year, minRating
         });
     }
 
@@ -1181,6 +1189,9 @@ const CloudAdapter = (() => {
                 q: query.get('q') || '',
                 categoryId: query.get('categoryId') || '',
                 sort: query.get('sort') || 'default',
+                year: query.get('year') || '',
+                minRating: query.get('minRating') || '',
+                addedDays: query.get('addedDays') || '',
                 limit: query.get('limit') || 120,
                 offset: query.get('offset') || 0
             });
@@ -1723,7 +1734,8 @@ const CloudAdapter = (() => {
                 type: requestedType, bucket: query.get('bucket') || '', limit, offset,
                 audio: query.get('audio') || '', subs: query.get('subs') || '',
                 sort: query.get('sort') || '', prefAudio: query.get('prefAudio') || '',
-                prefSubs: query.get('prefSubs') || '', q: query.get('q') || ''
+                prefSubs: query.get('prefSubs') || '', q: query.get('q') || '',
+                year: query.get('year') || '', minRating: query.get('minRating') || ''
             });
             return {
                 ...payload,
@@ -2135,14 +2147,14 @@ const API = {
         },
         // Audio/subtitle languages actually present in the catalogue (cloud-only;
         // drives the dynamic filter menus). Empty on failure so menus fall back.
-        // Cached in localStorage for 10 min: the server computes this menu with a burst
-        // of count-queries, and it barely changes mid-session — so we serve the cached
-        // menu on every page open / periodic tick instead of re-hitting the endpoint.
-        // The grid filter itself stays exact, so a momentarily-stale option is harmless.
+        // Cached in localStorage for 60s — same as the server memo — so the menus
+        // track the background language crawl in near-real-time while page hops
+        // within the minute stay free. The grid filter itself stays exact, so a
+        // momentarily-stale option is harmless.
         languageFacets: (params = {}) => {
             const type = params && params.type === 'series' ? 'series' : 'movie';
             const key = `norva-facets-${type}`;
-            const TTL = 600000; // 10 min
+            const TTL = 60000; // 60s, aligned with the server-side facet memo
             try {
                 const raw = localStorage.getItem(key);
                 if (raw) {

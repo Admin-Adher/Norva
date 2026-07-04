@@ -446,6 +446,17 @@ async function listMediaItems(url: URL, userId: string) {
   if (categoryId) query = query.eq("parent_external_id", categoryId);
   if (search) query = query.ilike("title", `%${search}%`);
 
+  // Year / rating / recently-added filters run in SQL over the denormalized
+  // columns so they span the WHOLE catalogue. Before, the client filtered its
+  // loaded 120-row pages only — at catalog scale (100k+ rows) e.g. "Rating 8+"
+  // trickled in near-empty pages and looked broken.
+  const yearRange = decadeRange(url.searchParams.get("year"));
+  if (yearRange) query = query.gte("release_year", yearRange.min).lte("release_year", yearRange.max);
+  const minRating = paramNumber(url.searchParams.get("minRating"));
+  if (minRating !== null) query = query.gte("rating_num", minRating);
+  const addedDays = boundedInt(url.searchParams.get("addedDays"), 0, 0, 3650);
+  if (addedDays > 0) query = query.gte("added_at", new Date(Date.now() - addedDays * 86_400_000).toISOString());
+
   // Sort server-side so the order spans the WHOLE catalogue, not just the loaded
   // page. Sort fields are denormalized columns (added_at / rating_num /
   // release_year — migration 20260623230000); external_id is the stable
@@ -797,52 +808,110 @@ async function listGenreSummary(req: Request, url: URL, userId: string) {
   return { type: itemType, source: sourceId, genres, hidden: [...hidden] };
 }
 
+// A rail with fewer cards than this is dropped: a 1-2 card row reads as "that's
+// all there is" (usually false — the bucket is just rare in the scan window) and
+// wastes a whole viewport row. The bucket stays reachable via the genre picker.
+const GENRE_RAIL_MIN_ITEMS = 4;
+// A title may appear in at most this many rails. classifyTitleBuckets is
+// deliberately multi-membership (Comedy+Drama+SciFi), but unbounded reuse made
+// the same handful of recent titles repeat across 3+ visible rows.
+const GENRE_RAIL_MAX_APPEARANCES = 2;
+
 async function listGenreRails(req: Request, url: URL, userId: string) {
   const itemType = url.searchParams.get("type") === "series" ? "series" : "movie";
   const lang = railLang(url);
   const perRail = boundedInt(url.searchParams.get("limit"), 18, 1, 50);
-  const candidateLimit = boundedInt(url.searchParams.get("candidates"), 2000, 100, 5000);
-
-  let titles: JsonRecord[];
-  try {
-    const { data, error } = await db
-      .from("cloud_titles")
-      .select("*")
-      .eq("user_id", userId)
-      .eq("item_type", itemType)
-      .gt("variant_count", 0)
-      .order("synced_at", { ascending: false })
-      .order("updated_at", { ascending: false })
-      .limit(candidateLimit);
-    if (error) {
-      if (isMissingMaterialization(error)) return { contract: "norva.genre.rails.v1", type: itemType, rails: [] };
-      throwDb(error, "Unable to list genre rail candidates");
-    }
-    titles = (data ?? []) as JsonRecord[];
-  } catch (error) {
-    if (isMissingMaterialization(error)) return { contract: "norva.genre.rails.v1", type: itemType, rails: [] };
-    throw error;
-  }
+  const scanCap = boundedInt(url.searchParams.get("candidates"), 8000, 100, 12000);
 
   // Per-profile hidden genres: a title with ANY hidden bucket is dropped from
   // the whole catalog (so e.g. a Kids profile sees no Horror anywhere).
   const hidden = await getHiddenGenres(req, userId);
 
-  // Bucket -> titles (multi-membership), capped per rail, recency preserved.
-  const byBucket = new Map<string, JsonRecord[]>();
-  for (const title of titles) {
-    // genre_category COLUMN survives metadata thinning; metadata.categoryName is '{}' at rest.
-    const categoryName = title.genre_category ?? recordOrEmpty(title.metadata).categoryName;
-    const buckets = classifyTitleBuckets(categoryName, titleGenres(title));
-    if (buckets.some((b) => hidden.has(b))) continue;
-    for (const bucketId of buckets) {
-      if (bucketId === "autres") continue; // never surface an "Autres" rail
-      const list = byBucket.get(bucketId) ?? [];
-      if (list.length < perRail) {
-        list.push(title);
-        byBucket.set(bucketId, list);
+  // Paged scan with early exit. The old single query capped at the 2000 most
+  // recently synced titles, so any bucket rare in that window rendered as a 1-2
+  // card rail even with hundreds of matches deeper in the catalog. We keep
+  // paging (recency order) until every bucket seen so far has enough candidates
+  // to fill its rail, the catalog is exhausted, or the scan cap is reached.
+  const pageSize = 2000;
+  const titles: JsonRecord[] = [];
+  const bucketsOf = new Map<string, string[]>();
+  const bucketCounts = new Map<string, number>();
+  let scanned = 0;
+  while (scanned < scanCap) {
+    let rows: JsonRecord[];
+    try {
+      const { data, error } = await db
+        .from("cloud_titles")
+        .select("*")
+        .eq("user_id", userId)
+        .eq("item_type", itemType)
+        .gt("variant_count", 0)
+        .order("synced_at", { ascending: false })
+        .order("updated_at", { ascending: false })
+        .order("id", { ascending: true })
+        .range(scanned, Math.min(scanned + pageSize, scanCap) - 1);
+      if (error) {
+        if (isMissingMaterialization(error)) return { contract: "norva.genre.rails.v1", type: itemType, rails: [] };
+        throwDb(error, "Unable to list genre rail candidates");
       }
+      rows = (data ?? []) as JsonRecord[];
+    } catch (error) {
+      if (isMissingMaterialization(error)) return { contract: "norva.genre.rails.v1", type: itemType, rails: [] };
+      throw error;
     }
+    for (const title of rows) {
+      // genre_category COLUMN survives metadata thinning; metadata.categoryName is '{}' at rest.
+      const categoryName = title.genre_category ?? recordOrEmpty(title.metadata).categoryName;
+      const buckets = classifyTitleBuckets(categoryName, titleGenres(title))
+        .filter((b) => b !== "autres"); // never surface an "Autres" rail
+      if (!buckets.length || buckets.some((b) => hidden.has(b))) continue;
+      bucketsOf.set(String(title.id), buckets);
+      titles.push(title);
+      for (const b of buckets) bucketCounts.set(b, (bucketCounts.get(b) ?? 0) + 1);
+    }
+    scanned += rows.length;
+    if (rows.length < pageSize) break; // catalog exhausted
+    // Every bucket discovered so far can fill its rail with room for the
+    // dedup budget below → deeper scanning can't improve the rows.
+    if ([...bucketCounts.values()].every((n) => n >= perRail * 2)) break;
+  }
+
+  // Two-pass assignment with a cross-rail duplicate budget.
+  // Pass 1 — each title fills ONE rail (its first bucket with a free slot), so
+  // rows are made of distinct titles as long as the catalog allows it.
+  const byBucket = new Map<string, JsonRecord[]>();
+  const appearances = new Map<string, number>();
+  for (const title of titles) {
+    const id = String(title.id);
+    for (const bucketId of bucketsOf.get(id) ?? []) {
+      const list = byBucket.get(bucketId) ?? [];
+      if (list.length >= perRail) continue;
+      list.push(title);
+      byBucket.set(bucketId, list);
+      appearances.set(id, 1);
+      break;
+    }
+  }
+  // Pass 2 — top up still-short rails with second appearances (bounded).
+  for (const bucketId of BUCKET_ORDER) {
+    const list = byBucket.get(bucketId);
+    if (!list || list.length >= perRail) continue;
+    const present = new Set(list.map((t) => String(t.id)));
+    for (const title of titles) {
+      if (list.length >= perRail) break;
+      const id = String(title.id);
+      if (present.has(id)) continue;
+      if ((appearances.get(id) ?? 0) >= GENRE_RAIL_MAX_APPEARANCES) continue;
+      if (!(bucketsOf.get(id) ?? []).includes(bucketId)) continue;
+      list.push(title);
+      present.add(id);
+      appearances.set(id, (appearances.get(id) ?? 0) + 1);
+    }
+  }
+  // Stable, resync-proof row order: newest-in-YOUR-catalog first (created_at is
+  // immutable; synced_at reshuffles on every provider resync).
+  for (const list of byBucket.values()) {
+    list.sort((a, b) => String(b.created_at ?? "").localeCompare(String(a.created_at ?? "")));
   }
 
   // One batched variant fetch for the union of selected titles.
@@ -854,7 +923,7 @@ async function listGenreRails(req: Request, url: URL, userId: string) {
   await applyCatalogOverlay([...byBucket.values()].flat(), itemType); // read-cutover flag (genre rails)
 
   const rails = BUCKET_ORDER
-    .filter((bucketId) => bucketId !== "autres" && (byBucket.get(bucketId)?.length ?? 0) > 0)
+    .filter((bucketId) => bucketId !== "autres" && (byBucket.get(bucketId)?.length ?? 0) >= GENRE_RAIL_MIN_ITEMS)
     .map((bucketId) => ({
       id: `genre-${bucketId}`,
       title: bucketLabel(bucketId),
@@ -904,6 +973,24 @@ const SUBTITLE_FACET_TAGS: Record<string, string[]> = {
 function normalizeFacet(value: string | null): string | null {
   const v = (value || "").toLowerCase().trim();
   return /^[a-z]{2,10}$/.test(v) ? v : null;
+}
+// Filter-bar decade value -> inclusive release_year range. Mirrors the client's
+// Year dropdown: a decade start ("2020", "2010", …) or "old" (before 1990).
+function decadeRange(value: string | null): { min: number; max: number } | null {
+  const v = (value || "").toLowerCase().trim();
+  if (!v) return null;
+  if (v === "old") return { min: 1800, max: 1989 };
+  const start = Number.parseInt(v, 10);
+  if (!Number.isInteger(start) || start < 1900 || start > 2100 || start % 10 !== 0) return null;
+  return { min: start, max: start + 9 };
+}
+// Query-param float, null when absent/blank/garbage (Number(null) is 0 — never
+// let a missing minRating silently become "rating >= 0").
+function paramNumber(value: string | null): number | null {
+  const v = (value || "").trim();
+  if (!v) return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
 }
 function audioFacetTags(facet: string | null): string[] {
   return facet ? (AUDIO_FACET_TAGS[facet] ?? []) : [];
@@ -1004,6 +1091,10 @@ async function listGenreItems(req: Request, url: URL, userId: string) {
   const prefAudioTags = langSort ? audioFacetTags(normalizeFacet(url.searchParams.get("prefAudio"))) : [];
   const prefSubTags = langSort ? subtitleFacetTags(normalizeFacet(url.searchParams.get("prefSubs"))) : [];
   const filterTags = [...new Set([...audioTags, ...subTags])];
+  // Decade / minimum-rating filters so the whole filter bar works inside a genre
+  // ("See all") or language grid — before, Year/Rating were silently ignored there.
+  const yearRange = decadeRange(url.searchParams.get("year"));
+  const minRating = paramNumber(url.searchParams.get("minRating"));
   // Optional text search so it composes with the language grid (the "all" bucket).
   const search = (url.searchParams.get("q") || "").trim();
 
@@ -1032,6 +1123,9 @@ async function listGenreItems(req: Request, url: URL, userId: string) {
       query = query.overlaps("version_languages", filterTags);
     }
     if (search) query = query.ilike("title", `%${search}%`);
+    // release_year is a first-class column: pre-filter in SQL so the candidate
+    // window is spent on rows that can actually match.
+    if (yearRange) query = query.gte("release_year", yearRange.min).lte("release_year", yearRange.max);
     const { data, error } = await query
       .order("synced_at", { ascending: false })
       .order("updated_at", { ascending: false })
@@ -1057,6 +1151,15 @@ async function listGenreItems(req: Request, url: URL, userId: string) {
     }
     if ((audioTags.length || audioIso || subTags.length) &&
         !titleMatchesLanguage(title, audioTags, audioIso, subTags)) return false;
+    if (yearRange) {
+      const y = numberOrNull(title.release_year);
+      if (y === null || y < yearRange.min || y > yearRange.max) return false;
+    }
+    if (minRating !== null) {
+      const tmdb = titleTmdb(title);
+      const rating = numberOrNull(tmdb.vote_average ?? recordOrEmpty(title.metadata).vote_average);
+      if (rating === null || rating < minRating) return false;
+    }
     return true;
   });
 
