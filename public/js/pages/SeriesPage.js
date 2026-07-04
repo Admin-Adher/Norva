@@ -1810,13 +1810,20 @@ class SeriesPage {
             this.historyItems = (this.historyItems || []).filter(h => !sameEp(h));
             // Keep the server's DB id so a later unwatch deletes THIS exact row.
             this.historyItems.push({ id: saved?.id ?? saved?.item?.id ?? null, item_type: 'episode', item_id: eid, progress: duration, duration, completed: true, data });
-            this.startedSeriesIds?.add?.(series.series_id); // grid "started" state matches at once
         } else {
             // Delete the exact row by its DB id when known — item_id alone is ambiguous
             // (shared VOD/episode namespace) and the server only scans the newest 500 rows.
             const existing = (this.historyItems || []).find(sameEp);
             await API.history.remove(existing?.id != null ? existing.id : eid);
             this.historyItems = (this.historyItems || []).filter(h => !sameEp(h));
+        }
+        // Keep the grid's "started" set in sync for BOTH mark and unmark (mirrors how
+        // loadWatchState derives it), so the watched-filter isn't stale before a reload.
+        if (this.startedSeriesIds) {
+            const stillStarted = (this.historyItems || []).some(
+                h => h.item_type === 'episode' && String(h.data?.seriesId) === sid);
+            if (stillStarted) this.startedSeriesIds.add(series.series_id);
+            else this.startedSeriesIds.delete(series.series_id);
         }
     }
 
