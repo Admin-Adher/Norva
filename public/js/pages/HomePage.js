@@ -61,12 +61,28 @@ class HomePage {
      */
     openRailItemWithAutoplay(item) {
         this.openRailItem(item, false);
+        // Guarded autoclick (home audit 2026-07-04): the old blind poll could press Play on a
+        // DIFFERENT fiche if the user opened another title (or navigated away) inside its 3s
+        // window — starting the wrong content. Token = superseded-by-newer-open; page check =
+        // user left; title check = the visible fiche must be the one the click asked for.
+        const token = (this._autoplayToken = (this._autoplayToken || 0) + 1);
+        const wanted = String(this.displayTitle(item) || '').trim().toLowerCase();
         let tries = 0;
         const tick = () => {
+            if (token !== this._autoplayToken) return;
+            const page = String(this.app?.currentPage || '');
+            if (page && page !== 'home' && page !== 'movies' && page !== 'series') return;
             const btn = document.querySelector(
                 '#movie-details:not(.hidden) #movie-primary-action, '
                 + '#series-details:not(.hidden) #series-primary-action');
-            if (btn && !btn.disabled) { btn.click(); return; }
+            if (btn && !btn.disabled) {
+                const shownEl = document.querySelector(
+                    '#movie-details:not(.hidden) #movie-detail-title, '
+                    + '#series-details:not(.hidden) h3, #series-details:not(.hidden) h1');
+                const shown = String(shownEl?.textContent || '').trim().toLowerCase();
+                if (!wanted || !shown || shown.includes(wanted) || wanted.includes(shown)) btn.click();
+                return;
+            }
             if (++tries < 12) setTimeout(tick, 250);
         };
         setTimeout(tick, 200);
@@ -98,6 +114,7 @@ class HomePage {
 
         if (this.lastLoadedAt && Date.now() - this.lastLoadedAt < this.dashboardTtlMs) {
             this.updateScrollArrows();
+            this._startHeroRotation(); // hide() stops the rotation — resume it on the warm DOM
             if (_homeDone) _homeDone('served from warm in-memory DOM (no fetch)');
             _firstPaintSummary();
             return;
@@ -109,7 +126,11 @@ class HomePage {
     }
 
     hide() {
-        // Keep the dashboard DOM warm so returning to Home feels instant.
+        // Keep the dashboard DOM warm so returning to Home feels instant — but stop the
+        // background work: the 9s hero rotation and the setup-gate poll have no business
+        // ticking on Live TV, Settings or during playback (home audit 2026-07-04).
+        if (this._heroTimer) { clearInterval(this._heroTimer); this._heroTimer = null; }
+        if (this.setupRefreshTimer) { clearTimeout(this.setupRefreshTimer); this.setupRefreshTimer = null; }
     }
 
     renderLayout() {
@@ -129,6 +150,23 @@ class HomePage {
                     ${this.scrollSection('continue-watching-list', 'Loading history...')}
                 </section>
 
+                <!-- The viewer's OWN content (list + channels) sits right under Continue
+                     Watching, Netflix-style — it used to be buried below ~10 algorithmic
+                     rails, several screen-heights of scrolling away (home audit 2026-07-04). -->
+                <section class="dashboard-section hidden" id="my-list-section">
+                    <div class="section-header">
+                        <h2>My List</h2>
+                    </div>
+                    ${this.scrollSection('my-list-list', 'Loading your list...')}
+                </section>
+
+                <section class="dashboard-section hidden" id="favorite-channels-section">
+                    <div class="section-header">
+                        <h2>Favorite Channels</h2>
+                    </div>
+                    ${this.scrollSection('favorite-channels-list', 'Loading favorites...', 'channel-tiles')}
+                </section>
+
                 <div id="home-rails">
                     <section class="dashboard-section">
                         <div class="section-header">
@@ -137,25 +175,33 @@ class HomePage {
                         <div class="horizontal-scroll">${window.MediaUtils.skeletonCards(8)}</div>
                     </section>
                 </div>
-
-                <section class="dashboard-section hidden" id="my-list-section">
-                    <div class="section-header">
-                        <h2>My List</h2>
-                    </div>
-                    ${this.scrollSection('my-list-list', 'Loading your list...')}
-                </section>
-
-                <section class="dashboard-section" id="favorite-channels-section">
-                    <div class="section-header">
-                        <h2>Favorite Channels</h2>
-                    </div>
-                    ${this.scrollSection('favorite-channels-list', 'Loading favorites...', 'channel-tiles')}
-                </section>
             </div>
         `;
 
         this.container = document.getElementById('home-content');
         this.initScrollArrows();
+
+        // Delegated interactions on the persistent container (survives innerHTML swaps):
+        // — retry button of the "couldn't load" empty state;
+        // — keyboard access for every card (they are plain divs: without this, desktop
+        //   keyboard/screen-reader users could not activate anything on Home — the spatial
+        //   nav helper only runs in TV mode).
+        if (!this.container.dataset.homeDelegates) {
+            this.container.dataset.homeDelegates = '1';
+            this.container.addEventListener('click', (e) => {
+                if (e.target.closest('[data-home-retry]')) {
+                    this.lastLoadedAt = 0;
+                    this.loadDashboardData();
+                }
+            });
+            this.container.addEventListener('keydown', (e) => {
+                if (e.key !== 'Enter' && e.key !== ' ') return;
+                const card = e.target.closest('.dashboard-card, .channel-tile');
+                if (!card) return;
+                e.preventDefault();
+                card.click();
+            });
+        }
     }
 
     scrollSection(id, loadingText, extraClass = '', content = '') {
@@ -256,8 +302,12 @@ class HomePage {
     // profile because history/continue-watching and personalized rails differ per
     // profile; NorvaCatalogCache already namespaces by account.
     homeCacheKey() {
+        // The profiles API lives on NorvaCloud, not window.API — the old lookup silently
+        // returned '' for every profile, so all profiles shared 'home-dashboard:default' and
+        // a profile switch flashed the PREVIOUS profile's Continue Watching (home audit
+        // 2026-07-04, privacy-relevant inside a household).
         let pid = '';
-        try { pid = window.API?.profiles?.getActiveId?.() || ''; } catch (_) { /* default scope */ }
+        try { pid = window.NorvaCloud?.profiles?.getActiveId?.() || window.API?.profiles?.getActiveId?.() || ''; } catch (_) { /* default scope */ }
         return 'home-dashboard:' + (pid || 'default');
     }
 
@@ -271,13 +321,19 @@ class HomePage {
                 // profile, paint it immediately so a cold relaunch shows real content
                 // (not skeletons) while the fresh data loads below. contentPreferences
                 // is already applied (show() awaits settings first), so badges match.
+                this._paintedFromCache = false;
                 try {
-                    const cached = window.NorvaCatalogCache?.read?.(this.homeCacheKey());
+                    // Skip the paint when the LAST known health state was gating (expired
+                    // credentials, first-run): flashing yesterday's rails for the round-trip
+                    // and then replacing them with the repair gate reads as a glitch.
+                    const gatedBefore = this.sourceSummary && this.shouldShowSetupGate(this.sourceSummary);
+                    const cached = !gatedBefore ? window.NorvaCatalogCache?.read?.(this.homeCacheKey()) : null;
                     if (cached?.data?.rails) {
                         const ch = Array.isArray(cached.data.history) ? cached.data.history : [];
                         this.renderHistory(ch);
                         this.renderCloudRails(cached.data.rails);
                         this.renderHero(ch, this.railItems);
+                        this._paintedFromCache = true;
                     }
                 } catch (_) { /* cache paint is best-effort */ }
 
@@ -286,7 +342,10 @@ class HomePage {
                 // network round-trip. They're pure data fetches rendered only after
                 // the setup-gate check; if the gate shows, the results go unused.
                 const railFetchLimit = Math.max(this.homeRailDisplayLimit, this.homeRailFetchLimit);
-                const historyP = window.API.request('GET', '/history?limit=18');
+                // limit=60 (not 18): finished/too-short rows are filtered CLIENT-side, so a
+                // user who recently completed a dozen titles used to get an under-filled (or
+                // empty) Continue Watching while resumable older titles sat beyond the window.
+                const historyP = window.API.request('GET', '/history?limit=60');
                 const railsP = window.API.request('GET', `/home/rails?limit=${railFetchLimit}`);
 
                 const [healthResult, settingsResult] = await Promise.allSettled([
@@ -342,9 +401,16 @@ class HomePage {
                         });
                     } catch (_) { /* best-effort */ }
                 } else {
-                    console.warn('[Dashboard] Home rails unavailable, using recent content fallback:', railsResult.reason);
-                    await this.renderFallbackRails();
-                    this.renderHero(history, this.railItems);
+                    console.warn('[Dashboard] Home rails unavailable:', railsResult.reason);
+                    if (this._paintedFromCache) {
+                        // The SWR paint already shows real (cached) rails — keep them instead
+                        // of overwriting good content with a degraded fallback, and let the
+                        // service-health banner carry the "temporarily unavailable" message.
+                        this._railsErrorNotice();
+                    } else {
+                        await this.renderFallbackRails();
+                        this.renderHero(history, this.railItems);
+                    }
                 }
 
                 if (favoritesResult.status === 'rejected') {
@@ -381,6 +447,17 @@ class HomePage {
             const readyLine = ready.length
                 ? `${ready.join(' · ')} already available — open Movies, Live TV or Series while Home finishes building.`
                 : 'Your channels and movies will appear here shortly.';
+            // The syncing placeholder used to be STATIC: nothing refreshed it when the
+            // finalize completed, so the user stared at a frozen percent until a manual
+            // reload. Poll the same way the setup gate does (bounded, self-clearing).
+            if (!this.setupRefreshTimer) {
+                this.setupRefreshTimer = setTimeout(() => {
+                    this.setupRefreshTimer = null;
+                    if (this.app?.currentPage !== 'home') return;
+                    this.lastLoadedAt = 0;
+                    this.loadDashboardData();
+                }, 6000);
+            }
             return `
                 <section class="dashboard-section">
                     <div class="empty-state hint home-sync-hint">
@@ -390,16 +467,46 @@ class HomePage {
                 </section>
             `;
         }
+        // "Add a service" copy is ONLY honest for a genuinely unconfigured account. For a
+        // connected user whose rails fetch failed (or produced nothing), it was factually
+        // wrong and dead-ended them (home audit 2026-07-04) — offer a retry instead.
+        if (summary.state === 'not_configured' || !summary.state) {
+            return `
+                <section class="dashboard-section">
+                    <div class="empty-state hint">Add a TV service from Settings to build your Home.</div>
+                </section>
+            `;
+        }
         return `
             <section class="dashboard-section">
-                <div class="empty-state hint">Add a TV service from Settings to build your Home.</div>
+                <div class="empty-state hint">
+                    <strong>We couldn't load your Home right now</strong>
+                    <p>Your services are fine — this is a temporary hiccup.</p>
+                    <button class="btn btn-secondary" data-home-retry type="button">Retry</button>
+                </div>
             </section>
         `;
+    }
+
+    // Small non-destructive notice when a rails refresh fails while cached rails are showing.
+    _railsErrorNotice() {
+        const container = document.getElementById('home-rails');
+        if (!container || container.querySelector('[data-rails-stale-notice]')) return;
+        const note = document.createElement('div');
+        note.setAttribute('data-rails-stale-notice', '');
+        note.className = 'empty-state hint';
+        note.textContent = "Showing your last Home — we couldn't refresh it just now.";
+        container.prepend(note);
+        setTimeout(() => { try { note.remove(); } catch (_) { /* gone */ } }, 8000);
     }
 
     shouldShowSetupGate(summary = null) {
         if (!summary) return true;
         if (summary.state === 'ready') return false;
+        // API outage (state 'unknown'): we could not LIST the sources — that is not the same
+        // as having none. Never take over Home with the onboarding gate for a blip; the
+        // service-health banner carries the "can't reach" message over cached rails.
+        if (summary.state === 'unknown') return false;
         if ((summary.ready || []).length) return false;
         // Non-blocking onboarding: once a syncing source has finished its IMPORT, the
         // Movies/Series grids and Live channels are browsable, so don't take over Home
@@ -511,13 +618,8 @@ class HomePage {
             this.lastLoadedAt = 0;
             this.loadDashboardData();
         });
-
-        if (state === 'syncing') {
-            this.setupRefreshTimer = setTimeout(() => {
-                this.lastLoadedAt = 0;
-                if (this.app?.currentPage === 'home') this.loadDashboardData();
-            }, 8000);
-        }
+        // (No syncing timer here: state === 'syncing' returns early into
+        // renderSetupSyncingGate above, which schedules its own 4s poll.)
     }
 
     renderSetupSyncingGate(container, summary = {}) {
@@ -642,10 +744,20 @@ class HomePage {
         ]);
         const finalizing = finalizingStages.has(stage) || ['running', 'in_progress', 'pending'].includes(finalizeStatus);
 
+        // STALLED only: the client-driven finalize loop exists to rescue a server driver
+        // that stopped making progress — the SourceManager rule (its own path requires
+        // >60s without a progress update). Without this condition, this fallback launched
+        // a parallel finalize loop for EVERY healthy account in the normal finalize stage,
+        // racing the server's background driver (home audit 2026-07-04).
+        const updatedAtRaw = progress.updatedAt || progress.updated_at || progress.at || null;
+        const updatedAtMs = updatedAtRaw ? new Date(updatedAtRaw).getTime() : 0;
+        const stale = !updatedAtMs || (Date.now() - updatedAtMs > 60_000);
+
         return status === 'syncing'
             && importStatus === 'done'
             && total > 0
-            && finalizing;
+            && finalizing
+            && stale;
     }
 
     syncingSourceFromSummary(summary = {}) {
@@ -969,12 +1081,25 @@ class HomePage {
             window.API.request('GET', `/channels/recent?type=series&limit=${railFetchLimit}`)
         ]);
 
+        // The raw fallback feed is one row PER PROVIDER VARIANT: two providers carrying the
+        // same film used to render two adjacent identical cards. Collapse on identity
+        // (tmdb id, else normalized clean title) keeping the first (most recent) row.
+        const dedupByIdentity = (items = []) => {
+            const seen = new Set();
+            return items.filter((it) => {
+                const tmdb = it?.provider_tmdb_id || it?.providerTmdbId || it?.data?.tmdbId || '';
+                const key = tmdb ? `t:${tmdb}` : `n:${String(this.displayTitle(it) || '').toLowerCase()}`;
+                if (!key || key === 'n:' || seen.has(key)) return !key || key === 'n:';
+                seen.add(key);
+                return true;
+            });
+        };
         const rails = [];
         if (moviesResult.status === 'fulfilled' && moviesResult.value?.length) {
-            rails.push({ id: 'recently-added-movies', title: 'Recently Added Movies', items: moviesResult.value });
+            rails.push({ id: 'recently-added-movies', title: 'Recently Added Movies', items: dedupByIdentity(moviesResult.value) });
         }
         if (seriesResult.status === 'fulfilled' && seriesResult.value?.length) {
-            rails.push({ id: 'recently-added-series', title: 'Recently Added Series', items: seriesResult.value });
+            rails.push({ id: 'recently-added-series', title: 'Recently Added Series', items: dedupByIdentity(seriesResult.value) });
         }
 
         this.renderCloudRails({ rails });
@@ -991,10 +1116,25 @@ class HomePage {
         if (!hero) return;
 
         const usable = (item) => this.posterFromItem(item) && this.hasUsefulDisplayTitle(item);
-        const firstHistory = history.find(usable) || null;
+        // The resume slide must be genuinely RESUMABLE (a title watched to the end got a
+        // "Resume" button that restarted it from zero) and carry a real backdrop (history
+        // rows rarely do — a w342 portrait poster stretched across the billboard reads
+        // broken). Home audit 2026-07-04.
+        const firstHistory = history.find((item) => {
+            if (!usable(item) || !this.backdropFromItem(item)) return false;
+            const progress = Number(item.progress_seconds ?? item.progress ?? 0);
+            const duration = Number(item.duration_seconds ?? item.duration ?? 0);
+            return this.getResumeOffset(progress, duration) > 0;
+        }) || null;
         const seen = new Set();
         const railPicks = [];
-        for (const item of rails.flatMap(rail => rail.items || [])) {
+        // Billboard = promotional quality: draw from the POPULAR rails first (views+rating
+        // ranked), then the rest — not "whatever synced most recently".
+        const heroRails = [
+            ...rails.filter(r => /popular|because-you-watched/.test(String(r.id || ''))),
+            ...rails.filter(r => !/popular|because-you-watched/.test(String(r.id || ''))),
+        ];
+        for (const item of heroRails.flatMap(rail => rail.items || [])) {
             if (railPicks.length >= 6) break;
             if (!usable(item) || !this.backdropFromItem(item)) continue;
             const key = `${item.source_id || item.sourceId || ''}:${item.item_id || item.itemId || item.id || ''}`;
@@ -1056,18 +1196,32 @@ class HomePage {
         hero.querySelectorAll('.home-hero-dot').forEach((dot) => {
             dot.addEventListener('click', () => this.showHeroSlide(Number(dot.dataset.heroDot)));
         });
-        hero.addEventListener('mouseenter', () => { this._heroHovered = true; });
-        hero.addEventListener('mouseleave', () => { this._heroHovered = false; });
+        // #home-hero is a persistent node: renderHero runs several times per load (cache
+        // paint + fresh), so guard against stacking duplicate hover listeners. Keyboard
+        // focus pauses the rotation too (a11y — same rule as hover).
+        if (!hero.dataset.heroHoverBound) {
+            hero.dataset.heroHoverBound = '1';
+            hero.addEventListener('mouseenter', () => { this._heroHovered = true; });
+            hero.addEventListener('mouseleave', () => { this._heroHovered = false; });
+            hero.addEventListener('focusin', () => { this._heroHovered = true; });
+            hero.addEventListener('focusout', () => { this._heroHovered = false; });
+        }
 
         this.showHeroSlide(0, { instant: true });
+        this._startHeroRotation();
+    }
 
-        if (slides.length > 1) {
-            this._heroTimer = setInterval(() => {
-                if (document.hidden || this._heroHovered) return;
-                if (this.app?.currentPage !== 'home') return;
-                this.showHeroSlide((this._heroIndex + 1) % this._heroSlides.length);
-            }, 9000);
-        }
+    // (Re)arm the 9s billboard rotation. Split out so show() can resume it on the warm DOM
+    // after hide() cleared it — the interval must never tick while another page is active.
+    _startHeroRotation() {
+        clearInterval(this._heroTimer);
+        this._heroTimer = null;
+        if (!this._heroSlides || this._heroSlides.length < 2) return;
+        this._heroTimer = setInterval(() => {
+            if (document.hidden || this._heroHovered) return;
+            if (this.app?.currentPage !== 'home') return;
+            this.showHeroSlide((this._heroIndex + 1) % this._heroSlides.length);
+        }, 9000);
     }
 
     showHeroSlide(index, { instant = false } = {}) {
@@ -1079,8 +1233,11 @@ class HomePage {
 
         const item = slide.item;
         const type = item.item_type || item.itemType || item.type || 'movie';
+        // Full-bleed billboard: upgrade a TMDB w780 to w1280 (w780 is visibly soft on
+        // desktop; the smaller size stays right for cards and hover previews).
         const backdrop = this.resolveImageUrl(
-            this.backdropFromItem(item) || this.posterFromItem(item), '/img/norva-media-placeholder.png');
+            this.backdropFromItem(item) || this.posterFromItem(item), '/img/norva-media-placeholder.png')
+            .replace('image.tmdb.org/t/p/w780/', 'image.tmdb.org/t/p/w1280/');
 
         // Crossfade: paint the hidden layer, then swap opacities once the image
         // is decoded so the fade never shows a half-loaded backdrop.
@@ -1185,7 +1342,13 @@ class HomePage {
             }))
             .map(rail => ({
                 ...rail,
-                items: this.rankRailItemsByLanguagePreference(rail.items).slice(0, this.homeRailDisplayLimit)
+                // Language-preference re-ranking is for GENRE/suggestion rails only. On the
+                // popular rails it silently re-numbered the Top 10 by language match instead
+                // of the server's views+rating order; on recently-added it scattered the
+                // recency order (home audit 2026-07-04). Ordered rails pass through as-is.
+                items: (this.isRankedRail(rail) || /^recently-added/.test(String(rail.id || '')))
+                    ? (rail.items || []).slice(0, this.homeRailDisplayLimit)
+                    : this.rankRailItemsByLanguagePreference(rail.items).slice(0, this.homeRailDisplayLimit)
             }))
             .filter(rail => rail.items.length);
 
@@ -1254,7 +1417,11 @@ class HomePage {
         if (id === 'action-movies') return 'Action Movies';
         if (id === 'popular-movies') return 'Popular Movies';
         if (id === 'popular-series') return 'Popular Series';
-        if (id.startsWith('because-you-watched')) return 'Because You Watched';
+        if (id.startsWith('because-you-watched')) {
+            // Netflix names the anchor — "Because You Watched Inception" carries the WHY.
+            const anchor = String(rail.curation?.anchorTitle || '').trim();
+            return anchor ? `Because You Watched ${anchor}` : 'Because You Watched';
+        }
         return rail.title || rail.name || 'Norva Selection';
     }
 
@@ -1279,7 +1446,7 @@ class HomePage {
         const isNew = !ranked && MediaUtils.isRecentlyAdded?.(item);
 
         return `
-            <div class="dashboard-card" data-id="${this.escapeAttr(itemId)}" data-type="${this.escapeAttr(type)}" data-rail-index="${railIndex}" data-item-index="${itemIndex}">
+            <div class="dashboard-card" tabindex="0" role="button" aria-label="${this.escapeAttr(title)}" data-id="${this.escapeAttr(itemId)}" data-type="${this.escapeAttr(type)}" data-rail-index="${railIndex}" data-item-index="${itemIndex}">
                 <div class="card-image">
                     ${ranked ? `<div class="rank-numeral">${itemIndex + 1}</div>` : ''}
                     ${isNew ? '<span class="new-badge">NEW</span>' : ''}
@@ -1350,12 +1517,44 @@ class HomePage {
         const section = document.getElementById('continue-watching-section');
         if (!list || !section) return;
 
-        this.historyItems = (items || []).filter(item => {
+        // Netflix semantics (home audit 2026-07-04):
+        //  — ONE card per SERIES (history is one row per episode: two half-watched episodes
+        //    used to render two cards for the same show);
+        //  — a FINISHED episode advances the card to the NEXT episode (the player saves
+        //    data.nextEpisode on every progress write; it was never consumed — finishing an
+        //    episode simply made the show vanish from Continue Watching);
+        //  — one card per MOVIE identity (the same film from two providers showed twice).
+        const entries = [];
+        const seenSeries = new Set();
+        const seenMovies = new Set();
+        for (const item of (items || [])) {
             const data = item.data || {};
-            const progress = item.progress || item.progress_seconds || data.progress || 0;
-            const duration = item.duration || item.duration_seconds || data.duration || 0;
-            return this.getResumeOffset(progress, duration) > 0;
-        });
+            const progress = Number(item.progress || item.progress_seconds || data.progress || 0);
+            const duration = Number(item.duration || item.duration_seconds || data.duration || 0);
+            const type = item.item_type || item.itemType || item.type || 'movie';
+            const isEpisode = type === 'episode' || !!(data.seriesId || item.parent_item_id);
+            const finished = duration > 0 && progress >= duration * 0.95;
+            if (isEpisode) {
+                const sKey = `${item.source_id || item.sourceId || ''}:${data.seriesId || item.parent_item_id || item.item_id || ''}`;
+                if (seenSeries.has(sKey)) continue; // most recent episode wins (server sorts DESC)
+                const next = data.nextEpisode;
+                if (finished && next && next.id) {
+                    seenSeries.add(sKey);
+                    entries.push(this._nextEpisodeHistoryItem(item, next));
+                    continue;
+                }
+                if (this.getResumeOffset(progress, duration) <= 0) continue;
+                seenSeries.add(sKey);
+                entries.push(item);
+                continue;
+            }
+            if (this.getResumeOffset(progress, duration) <= 0) continue;
+            const mKey = data.titleId ? `t:${data.titleId}` : `n:${String(this.displayTitle(item) || '').toLowerCase()}`;
+            if (seenMovies.has(mKey)) continue;
+            seenMovies.add(mKey);
+            entries.push(item);
+        }
+        this.historyItems = entries.slice(0, 18);
 
         if (!this.historyItems.length) {
             section.classList.add('hidden');
@@ -1380,6 +1579,33 @@ class HomePage {
         });
 
         this.updateScrollArrows();
+    }
+
+    // Synthetic "up next" row: a finished episode's card becomes the NEXT episode at 0%,
+    // playable in one click. Everything else (source, series linkage, poster) rides along
+    // from the finished row, so playItem resolves the stream exactly like a resume would.
+    _nextEpisodeHistoryItem(prev, next) {
+        const data = prev.data || {};
+        const label = (next.season && next.episode) ? `S${next.season} E${next.episode}` : 'Next episode';
+        return {
+            ...prev,
+            item_id: String(next.id),
+            progress: 0,
+            progress_seconds: 0,
+            duration: Number(next.duration) || 0,
+            duration_seconds: Number(next.duration) || 0,
+            _upNext: true,
+            data: {
+                ...data,
+                subtitle: next.title ? `${label} · ${next.title}` : label,
+                containerExtension: next.containerExtension || data.containerExtension,
+                resumeTime: 0,
+                progress: 0,
+                currentEpisode: next.episode ?? data.currentEpisode,
+                currentSeason: next.season ?? data.currentSeason,
+                nextEpisode: null,
+            },
+        };
     }
 
     // Remove a title from Continue Watching: drop it from the row immediately, then
@@ -1408,8 +1634,12 @@ class HomePage {
                 this.renderHistory(this.historyItems);
             }
         });
-        // Persist the delete once the undo window closes (toast auto-dismiss ≈ 5s).
-        setTimeout(commit, 5200);
+        // Persist the delete once the undo window closes (toast auto-dismiss ≈ 5s) — and on
+        // pagehide too: closing the tab inside the undo window used to drop the DELETE
+        // entirely, resurrecting the card on the next visit.
+        const onPageHide = () => { commit(); };
+        window.addEventListener('pagehide', onPageHide, { once: true });
+        setTimeout(() => { window.removeEventListener('pagehide', onPageHide); commit(); }, 5200);
         if (!toast) commit(); // no toast host (edge case) → delete immediately
     }
 
@@ -1424,17 +1654,19 @@ class HomePage {
         const subtitle = data.subtitle || this.typeLabel(type);
         const posterUrl = this.resolveImageUrl(this.posterFromItem(item), '/img/norva-media-placeholder.png');
         const remainingMin = duration > progress ? Math.max(1, Math.round((duration - progress) / 60)) : 0;
-        const timeLeft = remainingMin > 0 ? `${remainingMin} min left` : '';
+        const timeLeft = item._upNext ? 'Next episode' : (remainingMin > 0 ? `${remainingMin} min left` : '');
+        // A zero-duration row can't compute progress — an empty bar reads broken, hide it.
+        const showBar = duration > 0 && !item._upNext;
 
         return `
-            <div class="dashboard-card" data-id="${this.escapeAttr(itemId)}" data-type="${this.escapeAttr(type)}" data-history-index="${index}">
+            <div class="dashboard-card" tabindex="0" role="button" aria-label="${this.escapeAttr(item._upNext ? `Play next episode of ${title}` : `Resume ${title}`)}" data-id="${this.escapeAttr(itemId)}" data-type="${this.escapeAttr(type)}" data-history-index="${index}">
                 <div class="card-image">
                     <img src="${this.escapeAttr(posterUrl)}" alt="${this.escapeAttr(title)}" loading="lazy" decoding="async" onerror="this.onerror=null;this.src='/img/norva-media-placeholder.png'">
                     <button class="ch-remove" type="button" data-history-index="${index}" aria-label="Remove from Continue Watching">✕</button>
                     ${timeLeft ? `<div class="card-timeleft">${timeLeft}</div>` : ''}
-                    <div class="progress-bar-container">
+                    ${showBar ? `<div class="progress-bar-container">
                         <div class="progress-bar" style="width: ${percent}%"></div>
-                    </div>
+                    </div>` : ''}
                     <div class="play-icon-overlay">
                         <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
                     </div>
@@ -1452,6 +1684,15 @@ class HomePage {
         if (type === 'series' && !isResume) {
             this.navigateToSeries(item);
             return;
+        }
+        // "Details" on an episode history card = the SERIES fiche. It used to fall through
+        // to playItem with resumeOffset 0 — neither details nor resume, just a restart.
+        if (type === 'episode' && !isResume) {
+            const data = item.data || {};
+            if (data.seriesId) {
+                this.navigateToSeries({ ...item, item_id: data.seriesId, item_type: 'series' });
+                return;
+            }
         }
         if (type === 'movie' && !isResume) {
             this.navigateToMovie(item);
@@ -1476,6 +1717,7 @@ class HomePage {
         if (!list || !section) return;
         try {
             const favs = await window.API.request('GET', '/favorites');
+            const seen = new Set();
             const rows = (Array.isArray(favs) ? favs : (favs?.favorites || []))
                 .filter(f => ['movie', 'series'].includes(f.item_type || f.itemType))
                 .map(f => {
@@ -1488,13 +1730,23 @@ class HomePage {
                         poster: meta.poster || '',
                     };
                 })
-                .filter(r => r.poster && r.title)
+                // A favorite saved before name/meta persistence has no poster — it used to be
+                // silently DROPPED (invisible forever, since the heart shows as already-active
+                // so "re-favorite to heal" never happens). A placeholder card beats a ghost.
+                .filter(r => r.title)
+                // One card per title: favorites of the same film added from two providers.
+                .filter(r => {
+                    const key = `${r.item_type}:${String(r.title).toLowerCase()}`;
+                    if (seen.has(key)) return false;
+                    seen.add(key);
+                    return true;
+                })
                 .slice(0, 20);
 
             if (!rows.length) { section.classList.add('hidden'); return; }
             section.classList.remove('hidden');
             list.innerHTML = rows.map((r, i) => `
-                <div class="dashboard-card" data-mylist-index="${i}" data-type="${this.escapeAttr(r.item_type)}">
+                <div class="dashboard-card" tabindex="0" role="button" aria-label="${this.escapeAttr(r.title)}" data-mylist-index="${i}" data-type="${this.escapeAttr(r.item_type)}">
                     <div class="card-image">
                         <img src="${this.escapeAttr(this.resolveImageUrl(r.poster, '/img/norva-media-placeholder.png'))}"
                              alt="${this.escapeAttr(r.title)}" loading="lazy" decoding="async"
@@ -1515,7 +1767,9 @@ class HomePage {
             });
             this.updateScrollArrows();
         } catch (_) {
-            section.classList.add('hidden');
+            // Transient /favorites failure: keep whatever is already rendered (an error must
+            // not read as "your list is empty"); only hide when nothing was ever shown.
+            if (!this._myListRows?.length) section.classList.add('hidden');
         }
     }
 
@@ -1574,7 +1828,7 @@ class HomePage {
         const name = channel.name || 'Unknown';
 
         return `
-            <div class="channel-tile" data-channel-id="${this.escapeAttr(channel.id)}" data-source-id="${this.escapeAttr(channel.sourceId)}">
+            <div class="channel-tile" tabindex="0" role="button" aria-label="${this.escapeAttr(`Play ${name}`)}" data-channel-id="${this.escapeAttr(channel.id)}" data-source-id="${this.escapeAttr(channel.sourceId)}">
                 <div class="tile-logo">
                     <img src="${this.escapeAttr(logoUrl)}" alt="${this.escapeAttr(name)}" loading="lazy" decoding="async" onerror="this.onerror=null;this.src='${this.escapeAttr(fallbackLogo)}'">
                 </div>
@@ -1631,22 +1885,25 @@ class HomePage {
     }
 
     playChannel(channelId, sourceId) {
+        // Resolve BEFORE navigating: a channel that vanished (source removed, list
+        // re-filtered) used to dump the user on an empty Live page with no explanation.
+        const channelList = this.app.channelList;
+        const channel = channelList?.channels?.find(ch =>
+            String(ch.id) === String(channelId) && String(ch.sourceId) === String(sourceId)
+        );
+        if (!channel) {
+            this.app?.showToast?.('This channel is no longer available');
+            return;
+        }
         this.app.navigateTo('live');
         setTimeout(() => {
-            const channelList = this.app.channelList;
-            if (!channelList) return;
-            const channel = channelList.channels.find(ch =>
-                String(ch.id) === String(channelId) && String(ch.sourceId) === String(sourceId)
-            );
-            if (channel) {
-                channelList.selectChannel({
-                    channelId: channel.id,
-                    sourceId: channel.sourceId,
-                    sourceType: channel.sourceType,
-                    streamId: channel.streamId || '',
-                    url: channel.url || ''
-                });
-            }
+            channelList.selectChannel({
+                channelId: channel.id,
+                sourceId: channel.sourceId,
+                sourceType: channel.sourceType,
+                streamId: channel.streamId || '',
+                url: channel.url || ''
+            });
         }, 100);
     }
 

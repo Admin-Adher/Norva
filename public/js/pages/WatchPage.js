@@ -9061,6 +9061,9 @@ class WatchPage {
                 duration,
                 data
             });
+            // Continue Watching just changed: bust Home's warm-DOM TTL so returning from
+            // playback within 60s shows the fresh position, not the stale card.
+            try { const hp = window.app?.pages?.home; if (hp) hp.lastLoadedAt = 0; } catch (_) { /* best-effort */ }
         } catch (err) {
             console.warn('[History] Failed to save progress:', err);
         }
