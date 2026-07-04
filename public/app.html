@@ -733,6 +733,8 @@
                   <p id="series-plot"></p>
                   <div class="series-detail-actions">
                     <button id="series-primary-action" class="series-primary-action" type="button">Play</button>
+                    <button id="series-play-start" class="series-secondary-action" type="button"
+                      title="Play from the beginning" style="display:none">Play from start</button>
                     <button id="series-detail-favorite" class="series-secondary-action" type="button"
                       title="Add to Favorites">
                       <span class="fav-icon">♡</span>
@@ -745,6 +747,13 @@
                   </div>
                 </div>
               </div>
+            </section>
+            <section class="series-versions-section single-version" id="series-versions-section">
+              <div class="series-versions-toolbar">
+                <h3>Versions</h3>
+                <p id="series-version-summary" class="hint"></p>
+              </div>
+              <div id="series-versions-list" class="series-versions-list"></div>
             </section>
             <section class="series-episodes-section">
               <div class="series-episodes-toolbar">

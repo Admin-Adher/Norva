@@ -18,7 +18,10 @@ class SeriesPage {
         this.seasonsContainer = document.getElementById('series-seasons');
         this.seasonSelect = document.getElementById('series-season-select');
         this.primaryActionBtn = document.getElementById('series-primary-action');
+        this.playStartBtn = document.getElementById('series-play-start');
         this.detailFavoriteBtn = document.getElementById('series-detail-favorite');
+        this.versionsList = document.getElementById('series-versions-list');
+        this.versionSummary = document.getElementById('series-version-summary');
 
         // Filter bar elements
         this.sortSelect = document.getElementById('series-sort');
@@ -116,6 +119,7 @@ class SeriesPage {
 
         this.seasonSelect?.addEventListener('change', () => this.applySelectedSeason());
         this.primaryActionBtn?.addEventListener('click', () => this.playPrimaryEpisode());
+        this.playStartBtn?.addEventListener('click', () => this.playPrimaryEpisode({ fromStart: true }));
         this.detailFavoriteBtn?.addEventListener('click', async (e) => {
             e.preventDefault();
             if (!this.currentSeriesGroup) return;
@@ -1357,7 +1361,7 @@ class SeriesPage {
                 this.toggleFavorite(group, e.target.closest('.favorite-btn'));
             } else if (e.target.closest('.version-badge')) {
                 e.stopPropagation();
-                this.showVersionPicker(group);
+                this.openGroup(group, { focusVersions: true });
             } else {
                 this.openGroup(group);
             }
@@ -1545,10 +1549,126 @@ class SeriesPage {
         };
     }
 
-    openGroup(group) {
+    openGroup(group, { focusVersions = false } = {}) {
         const ordered = MediaUtils.orderVersionsByPreference(group.items, this.getPreferences());
+        // Restore the version the user last chose for this title (across grid / search /
+        // rails / restore), falling back to the best auto-picked one.
+        const remembered = this.getRememberedVersion(group);
         this.currentSeriesGroup = group;
-        this.showSeriesDetailsV2(ordered[0], group);
+        this.showSeriesDetailsV2(remembered || ordered[0], group, { focusVersions });
+    }
+
+    // === In-fiche version switcher (parity with the movie fiche) ===
+
+    // Stable signature for a version within a group (source + provider series id).
+    _versionSig(item) { return `${item?.sourceId}:${item?.series_id}`; }
+
+    // A series "version" is a whole alternate series_id subtree. Match on series_id +
+    // sourceId, but tolerate a missing sourceId (search/openByItem fallback groups).
+    isSameSeriesVersion(a, b) {
+        if (!a || !b) return false;
+        const idMatch = String(a.series_id) === String(b.series_id);
+        if (a.sourceId != null && b.sourceId != null) {
+            return idMatch && String(a.sourceId) === String(b.sourceId);
+        }
+        return idMatch;
+    }
+
+    // Compact, language-first chip label ("VF", "VOSTFR", "EN"…) — the axis users
+    // actually decide on. Empty when the provider name carries no language tag.
+    seriesVersionLangTag(item) {
+        const v = MediaUtils.parseVersionInfo(item?.name);
+        return v.languageSummary || v.language || '';
+    }
+
+    // localStorage map: title identity (tmdb, else dedup_key) -> { sourceId, series_id }.
+    _versionChoiceKey(itemOrGroup) {
+        const rep = itemOrGroup?.representative || itemOrGroup || {};
+        const tmdb = rep.tmdb_id || rep.tmdb?.id || rep.provider_tmdb_id || rep.providerTmdbId;
+        if (tmdb && !/^(tt)?0+$/i.test(String(tmdb))) return `tmdb:${tmdb}`;
+        return rep.dedup_key ? `dk:${rep.dedup_key}` : null;
+    }
+
+    rememberVersionChoice(item) {
+        try {
+            const key = this._versionChoiceKey(item);
+            if (!key) return;
+            const map = JSON.parse(localStorage.getItem('norva.series.versionChoice') || '{}');
+            map[key] = { sourceId: item.sourceId, series_id: item.series_id };
+            localStorage.setItem('norva.series.versionChoice', JSON.stringify(map));
+        } catch (_) { /* best-effort */ }
+    }
+
+    getRememberedVersion(group) {
+        try {
+            const key = this._versionChoiceKey(group);
+            if (!key || !Array.isArray(group?.items)) return null;
+            const map = JSON.parse(localStorage.getItem('norva.series.versionChoice') || '{}');
+            const choice = map[key];
+            if (!choice) return null;
+            // Validate against the live group: a source re-sync can retire a series_id.
+            return group.items.find(i => String(i.series_id) === String(choice.series_id)
+                && (choice.sourceId == null || String(i.sourceId) === String(choice.sourceId))) || null;
+        } catch (_) { return null; }
+    }
+
+    // Render the in-fiche version list from the in-memory group (no network), so it
+    // survives even when the episode fetch fails — the recovery affordance.
+    renderSeriesVersions(selectedSeries = this.currentSeries) {
+        const section = document.getElementById('series-versions-section');
+        if (!this.versionsList || !this.versionSummary || !section) return;
+        const versions = MediaUtils.orderVersionsByPreference(
+            this.currentSeriesGroup?.items || [selectedSeries], this.getPreferences());
+        this._orderedVersions = versions;
+        if (versions.length <= 1) {
+            this.versionsList.innerHTML = '';
+            this.versionSummary.textContent = '';
+            section.classList.add('single-version');
+            return;
+        }
+        section.classList.remove('single-version');
+        this.versionSummary.textContent = `${versions.length} versions — choose language / source.`;
+        this.versionsList.innerHTML = versions.map((item, index) => {
+            const active = this.isSameSeriesVersion(item, selectedSeries);
+            const broken = this.isBrokenItem(item);
+            const lang = this.seriesVersionLangTag(item);
+            const quality = MediaUtils.parseVersionInfo(item.name).quality;
+            const detail = [quality, this.getSourceName(item.sourceId)].filter(Boolean).join(' · ');
+            const main = lang || quality || `Version ${index + 1}`;
+            return `
+                <button class="series-version-item ${active ? 'active' : ''} ${broken ? 'is-broken' : ''}" type="button" data-index="${index}" aria-pressed="${active ? 'true' : 'false'}">
+                    <span class="series-version-main">${MediaUtils.escapeHtml(main)}</span>
+                    <span class="series-version-sub">${MediaUtils.escapeHtml(detail || MediaUtils.cleanReleaseName(item.name) || '')}</span>
+                    ${broken ? '<span class="series-version-flag" title="Playback failed">HS</span>' : ''}
+                </button>`;
+        }).join('');
+        this.versionsList.querySelectorAll('.series-version-item').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const item = versions[parseInt(btn.dataset.index)];
+                if (!item || this.isSameSeriesVersion(item, this.currentSeries)) return;
+                // Switching a version reloads its own season/episode subtree. manualPick
+                // keeps an explicit choice from being auto-redirected to a sibling; the
+                // choice is remembered only once its episodes actually load (rememberOnSuccess).
+                this.showSeriesDetailsV2(item, this.currentSeriesGroup, { isVersionSwitch: true, manualPick: true, rememberOnSuccess: true });
+            });
+        });
+    }
+
+    // Auto-recover: the opened version has no/failed episodes — jump to the next
+    // untried (preferably healthy) sibling instead of dead-ending. `tried` guards
+    // against looping when every version is empty.
+    tryNextHealthyVersion(current, tried, focusVersions = false) {
+        const group = this.currentSeriesGroup;
+        if (!group || (group.items?.length || 0) <= 1) return false;
+        const triedSet = tried || new Set();
+        triedSet.add(this._versionSig(current));
+        const ordered = MediaUtils.orderVersionsByPreference(group.items, this.getPreferences());
+        const next = ordered.find(i => !triedSet.has(this._versionSig(i)) && !this.isBrokenItem(i))
+            || ordered.find(i => !triedSet.has(this._versionSig(i)));
+        if (!next) return false;
+        // Remember the sibling we land on so the next open goes straight to it (no re-bounce).
+        this.showSeriesDetailsV2(next, group, { isVersionSwitch: true, triedVersions: triedSet, focusVersions, rememberOnSuccess: true });
+        return true;
     }
 
     openRandom() {
@@ -1557,43 +1677,8 @@ class SeriesPage {
         this.openGroup(group);
     }
 
-    showVersionPicker(group) {
-        const modal = document.getElementById('modal');
-        const title = document.getElementById('modal-title');
-        const body = document.getElementById('modal-body');
-        const footer = document.getElementById('modal-footer');
-        if (!modal || !body) return;
-
-        const ordered = MediaUtils.orderVersionsByPreference(group.items, this.getPreferences());
-        title.textContent = group.representative.tmdb?.title || MediaUtils.cleanReleaseName(group.representative.name);
-
-        body.innerHTML = `
-            <p class="hint" style="margin-bottom: 8px;">Choose a version to open:</p>
-            <div class="version-list">
-                ${ordered.map((item, i) => `
-                    <button class="version-item" data-index="${i}">
-                        <span class="version-item-label">${MediaUtils.escapeHtml(MediaUtils.versionLabel(item, this.getSourceName(item.sourceId)))}</span>
-                        <span class="version-item-name">${MediaUtils.escapeHtml(item.name)}</span>
-                    </button>
-                `).join('')}
-            </div>
-        `;
-        footer.innerHTML = '';
-
-        const close = () => modal.classList.remove('active');
-        modal.querySelector('.modal-close').onclick = close;
-        modal.onclick = (e) => { if (e.target === modal) close(); };
-
-        body.querySelectorAll('.version-item').forEach(btn => {
-            btn.addEventListener('click', () => {
-                close();
-                this.currentSeriesGroup = group;
-                this.showSeriesDetailsV2(ordered[parseInt(btn.dataset.index)], group);
-            });
-        });
-
-        modal.classList.add('active');
-    }
+    // (Removed showVersionPicker: the pre-fiche modal is superseded by the in-fiche
+    //  version switcher — the grid badge now deep-links into the fiche instead.)
 
     getSeriesDisplayTitle(series = this.currentSeries) {
         return series?.tmdb?.title || series?.tmdb?.name || MediaUtils.cleanReleaseName(series?.name || '') || 'Series';
@@ -1790,12 +1875,12 @@ class SeriesPage {
         }
     }
 
-    playPrimaryEpisode() {
+    playPrimaryEpisode({ fromStart = false } = {}) {
         const episodeId = this.primaryActionBtn?.dataset?.episodeId;
         if (!episodeId) return;
         const episodeEl = [...this.seasonsContainer.querySelectorAll('.episode-item')]
             .find(el => String(el.dataset.episodeId) === String(episodeId));
-        if (episodeEl) this.playEpisode(episodeEl);
+        if (episodeEl) this.playEpisode(episodeEl, { fromStart });
     }
 
     applySelectedSeason() {
@@ -1835,9 +1920,11 @@ class SeriesPage {
         }
     }
 
-    async showSeriesDetailsV2(series, group = null) {
+    async showSeriesDetailsV2(series, group = null, { focusVersions = false, isVersionSwitch = false, triedVersions = null, manualPick = false, rememberOnSuccess = false } = {}) {
         this.currentSeries = series;
         this.currentSeriesGroup = group || this.currentSeriesGroup || { representative: series, items: [series] };
+        // Guard rapid version switches: a slow older seriesInfo must not paint over a newer one.
+        const detailToken = (this._detailToken = (this._detailToken || 0) + 1);
         // Remember the open fiche so a page refresh restores it (see app.restoreOpenFiche).
         try {
             window.app?.rememberOpenFiche?.({
@@ -1851,25 +1938,36 @@ class SeriesPage {
         this.pageEl?.classList.add('series-detail-open');
         this.container.classList.add('hidden');
         this.detailsPanel.classList.remove('hidden');
-        this.detailsPanel.scrollTop = 0;
+        if (!isVersionSwitch) this.detailsPanel.scrollTop = 0;
 
-        const poster = this.getSeriesPoster(series);
-        const backdrop = this.getSeriesBackdrop(series);
-        const hero = document.getElementById('series-detail-hero');
-        if (hero) hero.style.setProperty('--series-hero-bg', `url("${String(backdrop).replace(/"/g, '%22')}")`);
-        const seriesPosterEl = document.getElementById('series-poster');
-        if (seriesPosterEl) {
-            // Stale/404 poster → placeholder, not a broken-image icon (clear srcset first).
-            seriesPosterEl.onerror = () => { seriesPosterEl.onerror = null; seriesPosterEl.removeAttribute('srcset'); seriesPosterEl.src = '/img/norva-media-placeholder.png'; };
-            seriesPosterEl.removeAttribute('srcset');
-            seriesPosterEl.src = poster;
+        // Hero / poster / plot / related come from the group representative and are the
+        // same across versions, so a VERSION SWITCH skips them (and their TMDB fetches)
+        // and only reloads the episode subtree below — keeping the switch responsive.
+        if (!isVersionSwitch) {
+            const poster = this.getSeriesPoster(series);
+            const backdrop = this.getSeriesBackdrop(series);
+            const hero = document.getElementById('series-detail-hero');
+            if (hero) hero.style.setProperty('--series-hero-bg', `url("${String(backdrop).replace(/"/g, '%22')}")`);
+            const seriesPosterEl = document.getElementById('series-poster');
+            if (seriesPosterEl) {
+                // Stale/404 poster → placeholder, not a broken-image icon (clear srcset first).
+                seriesPosterEl.onerror = () => { seriesPosterEl.onerror = null; seriesPosterEl.removeAttribute('srcset'); seriesPosterEl.src = '/img/norva-media-placeholder.png'; };
+                seriesPosterEl.removeAttribute('srcset');
+                seriesPosterEl.src = poster;
+            }
+            document.getElementById('series-title').textContent = this.getSeriesDisplayTitle(series);
+            document.getElementById('series-plot').textContent = series.tmdb?.overview || series.overview || series.description || series.plot || 'No summary available yet.';
+            this.renderMoreLikeThis(series);
+            this.renderFicheExtras(series);
         }
-        document.getElementById('series-title').textContent = this.getSeriesDisplayTitle(series);
-        document.getElementById('series-plot').textContent = series.tmdb?.overview || series.overview || series.description || series.plot || 'No summary available yet.';
+        this.renderSeriesVersions(series);
         this.syncDetailFavoriteButton();
         this.loadRating();
-        this.renderMoreLikeThis(series);
-        this.renderFicheExtras(series);
+        // The switcher DOM is populated synchronously above, so honor the grid badge's
+        // deep-link now — independent of whether the episode fetch succeeds/recovers.
+        if (focusVersions && this.currentSeriesGroup?.items?.length > 1) {
+            document.getElementById('series-versions-section')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
 
         this.seasonsContainer.innerHTML = '<div class="loading"><div class="loading-spinner"></div></div>';
         if (this.primaryActionBtn) {
@@ -1877,16 +1975,27 @@ class SeriesPage {
             this.primaryActionBtn.textContent = 'Loading...';
             delete this.primaryActionBtn.dataset.episodeId;
         }
+        // Clear any stale "Play from start" state before the fetch — failure exits below
+        // return early, so without this it could leak a previous fiche's visible button.
+        if (this.playStartBtn) this.playStartBtn.style.display = 'none';
 
         try {
             const info = await API.proxy.xtream.seriesInfo(series.sourceId, series.series_id);
+            if (detailToken !== this._detailToken) return; // a newer switch superseded this one
             if (!info || !info.episodes) {
+                // Auto-pick landed on an empty version → jump to a healthy sibling. But an
+                // EXPLICIT pick (manualPick) is respected: show "No episodes" for that very
+                // version, with the switcher still visible so the user can choose another.
+                if (!manualPick && this.tryNextHealthyVersion(series, triedVersions, focusVersions)) return;
                 this.seasonsContainer.innerHTML = '<p class="hint">No episodes found</p>';
                 if (this.primaryActionBtn) this.primaryActionBtn.textContent = 'No episodes';
                 return;
             }
 
             this.currentSeriesInfo = info;
+            // Persist the chosen version only now that its episodes actually loaded, so a
+            // broken/empty pick never gets remembered (which would re-bounce every open).
+            if (rememberOnSuccess) this.rememberVersionChoice(series);
             const watchedEpisodes = this.getSeriesHistoryMap(series);
             const flatEpisodes = this.flattenEpisodes(info);
             const seasons = Object.keys(info.episodes).sort((a, b) => parseInt(a) - parseInt(b));
@@ -1903,6 +2012,7 @@ class SeriesPage {
                 seasonCount ? `${seasonCount} season${seasonCount > 1 ? 's' : ''}` : '',
                 episodeCount ? `${episodeCount} episodes` : '',
                 ratingLabel,
+                (this.currentSeriesGroup?.items?.length > 1) ? `${this.currentSeriesGroup.items.length} versions` : '',
                 ...genres,
                 version.quality,
                 MediaUtils.versionLanguageBadge(series, this.getPreferences())
@@ -1922,15 +2032,27 @@ class SeriesPage {
                 if (featured) this.seasonSelect.value = featured.seasonNum;
             }
 
+            // Resume context: how far into the featured episode we are, and minutes left.
+            const featuredHist = featured ? watchedEpisodes.get(String(featured.episode.id)) : null;
+            const featuredRatio = featuredHist?.ratio || 0;
+            const isResuming = featuredRatio > 0.02 && featuredRatio < 0.95;
+            const minsLeft = (isResuming && featuredHist?.duration > 0)
+                ? Math.max(0, Math.round((featuredHist.duration - featuredHist.progress) / 60)) : 0;
             if (this.primaryActionBtn) {
                 if (featured) {
+                    const label = `${featured.label}${minsLeft ? ` · ${minsLeft} min left` : ''}`;
                     this.primaryActionBtn.disabled = false;
                     this.primaryActionBtn.dataset.episodeId = featured.episode.id;
-                    this.primaryActionBtn.innerHTML = `<span class="play-icon">${Icons.play}</span><span>${MediaUtils.escapeHtml(featured.label)}</span>`;
+                    this.primaryActionBtn.innerHTML = `<span class="play-icon">${Icons.play}</span><span>${MediaUtils.escapeHtml(label)}</span>`;
                 } else {
                     this.primaryActionBtn.disabled = true;
                     this.primaryActionBtn.textContent = 'No episodes';
                 }
+            }
+            if (this.playStartBtn) {
+                // "Play from start" only matters when the primary button would resume mid-episode.
+                this.playStartBtn.style.display = (featured && isResuming) ? '' : 'none';
+                if (featured) this.playStartBtn.dataset.episodeId = featured.episode.id;
             }
 
             let html = '';
@@ -1956,8 +2078,9 @@ class SeriesPage {
                             const duration = this.formatEpisodeDuration(ep.duration);
                             const description = ep.plot || ep.info?.plot || ep.overview || '';
                             const thumb = this.getEpisodeImage(ep, series);
+                            const isUpNext = featured && String(ep.id) === String(featured.episode.id);
                             return `
-                            <div class="episode-item" data-episode-id="${MediaUtils.escapeHtml(ep.id)}" data-source-id="${series.sourceId}" data-container="${MediaUtils.escapeHtml(ep.container_extension || 'mp4')}" data-season="${MediaUtils.escapeHtml(seasonNum)}" data-episode-num="${MediaUtils.escapeHtml(ep.episode_num || '')}">
+                            <div class="episode-item ${isUpNext ? 'episode-up-next' : ''}" role="button" tabindex="0" aria-label="${MediaUtils.escapeHtml(cleanTitle)}" data-episode-id="${MediaUtils.escapeHtml(ep.id)}" data-source-id="${series.sourceId}" data-container="${MediaUtils.escapeHtml(ep.container_extension || 'mp4')}" data-season="${MediaUtils.escapeHtml(seasonNum)}" data-episode-num="${MediaUtils.escapeHtml(ep.episode_num || '')}">
                                 <span class="episode-number">${MediaUtils.escapeHtml(ep.episode_num || '')}</span>
                                 <div class="episode-thumb">
                                     <img src="${MediaUtils.escapeHtml(thumb)}" alt="" onerror="this.onerror=null;this.srcset='';this.src='/img/norva-media-placeholder.png'" loading="lazy" decoding="async">
@@ -1967,6 +2090,7 @@ class SeriesPage {
                                     <div class="episode-title-row">
                                         <span class="episode-title">${MediaUtils.escapeHtml(cleanTitle)}</span>
                                         ${marker}
+                                        ${isUpNext ? '<span class="episode-upnext-flag">Up next</span>' : ''}
                                     </div>
                                     ${description ? `<p class="episode-description">${MediaUtils.escapeHtml(description)}</p>` : ''}
                                     ${ratioPercent > 0 && ratioPercent < 95 ? `<div class="episode-progress"><div style="width:${ratioPercent}%"></div></div>` : ''}
@@ -1984,6 +2108,16 @@ class SeriesPage {
             this.seasonsContainer.innerHTML = html;
             this.seasonsContainer.querySelectorAll('.episode-item').forEach(ep => {
                 ep.addEventListener('click', () => this.playEpisode(ep));
+                // Keyboard / TV-remote: rows are role=button tabindex=0 → activate on Enter/Space.
+                // Ignore keys that bubbled up from a focused child (e.g. the native download
+                // button) so activating it doesn't also start playback.
+                ep.addEventListener('keydown', (e) => {
+                    if (e.target !== ep) return;
+                    if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
+                        e.preventDefault();
+                        this.playEpisode(ep);
+                    }
+                });
             });
             // Offline download per episode + per season (native phone/tablet app only).
             if (this.nativeDownloadBridge()) {
@@ -2006,6 +2140,10 @@ class SeriesPage {
             }
             this.applySelectedSeason();
         } catch (err) {
+            if (detailToken !== this._detailToken) return; // superseded — don't stomp the newer fiche
+            // A failed fetch on the auto-picked version → try a healthy sibling first
+            // (but respect an explicit manual pick: surface its error rather than redirect).
+            if (!manualPick && this.tryNextHealthyVersion(series, triedVersions, focusVersions)) return;
             const { friendly, detail } = this.getSeriesInfoError(err);
             console.error('Error loading series info:', err);
             this.seasonsContainer.innerHTML = `
@@ -2194,7 +2332,7 @@ class SeriesPage {
         if (this._upNextBanner) { this._upNextBanner.remove(); this._upNextBanner = null; }
     }
 
-    async playEpisode(episodeEl) {
+    async playEpisode(episodeEl, { fromStart = false } = {}) {
         const episodeId = episodeEl.dataset.episodeId;
         const sourceId = parseInt(episodeEl.dataset.sourceId);
         const container = episodeEl.dataset.container || 'mp4';
@@ -2215,7 +2353,8 @@ class SeriesPage {
         if (!watch) return;
         const h = (this.historyItems || []).find(x =>
             x.item_type === 'episode' && String(x.item_id) === String(episodeId));
-        const resumeOffset = h ? this.getResumeOffset(h.progress, h.duration) : 0;
+        // "Play from start" forces offset 0; otherwise resume where history left off.
+        const resumeOffset = (!fromStart && h) ? this.getResumeOffset(h.progress, h.duration) : 0;
         const resumePlan = this.getGatewayResumePlan(resumeOffset);
         const playbackPreferences = h?.data?.playbackPreferences || h?.data?.playback_preferences || null;
         const playbackHint = MediaUtils.playbackHintFromItem
