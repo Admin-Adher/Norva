@@ -286,3 +286,32 @@ TOUTES ses versions sont `broken`** (filtre `hideBroken` au niveau version, avan
 2. Étiquetage de langue des versions parfois faux (deux versions « English » alors qu'une est FR)
    — `parseVersionInfo`/version-language à affiner.
 3. « Hide broken » inerte en vues rails/bucket (le serveur ne connaît pas `PlaybackHealth`).
+
+## Lot 4c — sous-titres : ~30 s avant affichage au clic (moteur WASM / MKV)
+Symptôme : activer une piste de sous-titres met ~30 s à s'afficher. Objectif : **instantané**.
+
+Le lecteur « Navigateur » (moteur WASM) a **deux chemins** : (a) **in-band** — le moteur capture
+les cues **texte** dès le début de lecture (le demuxer court devant la tête de lecture) → une
+sélection en cours de lecture affiche les cues déjà bufferisées **instantanément, sans 2ᵉ
+connexion provider** ; (b) **gateway-window** — extraction ffmpeg côté serveur (lente).
+
+**Cause racine (PR #142)** : l'énumération des pistes de sous-titres + l'armement de la capture
+in-band vivaient à la **fin de `_ensureVideoExtradata()`**, une fonction **spécifique MPEG-TS**
+(injection avcC/esds) dont les early-returns sautaient tout le bloc pour **MKV/MP4** (extradata
+déjà présent → `return` en tête). Résultat : sur tout MKV/MP4, `_subMeta` restait vide →
+`hasInbandSubtitles()=false` → chaque sélection retombait sur le chemin gateway lent. L'in-band
+ne marchait QUE pour les MPEG-TS H.264 sans extradata — la niche où le code était rangé.
+→ Fix : bloc extrait dans `_enumerateSubtitleStreams()`, appelé depuis `_detectStreams()` (tous
+conteneurs, avant le pump). Prouvé sur MKV anime (Oshi no Ko, 2 pistes `ass` idx 3/4) :
+`hasInband=true`, `subtitle path: engine-inband (instant)`. Le pump capture les paquets sous-titre
+(`_captureSubtitlePacket`, branche pump `_subCapture && _subMeta.has(index)`).
+
+**Correctifs annexes de la même saga :**
+- **Latence du fallback gateway** (PR #141) : la 1ʳᵉ fenêtre extraite faisait **900 s (15 min)** en
+  une requête (temps d'extraction ∝ longueur) → ~30 s. Désormais **90 s** en 1ʳᵉ fenêtre puis
+  extension → 1ʳᵉ cue en quelques secondes même sur le chemin gateway.
+- **Classification texte/image** (PR #140) : allowlist stricte de codecs → **denylist d'images**
+  (pgs/dvdsub/dvbsub/teletext/xsub) ; tout autre codec de sous-titre = texte (robuste aux variantes
+  de noms). Sous-titres bitmap (OCR) restent exclus.
+- **Diag** : `this.log('streams: … subs=… inband=…')` au load + `console.log('[WatchPage] subtitle
+  path: …')` au clic (conservés en support, non-alarmants).
