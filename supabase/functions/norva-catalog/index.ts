@@ -839,6 +839,10 @@ async function listGenreRails(req: Request, url: URL, userId: string) {
         .eq("user_id", userId)
         .eq("item_type", itemType)
         .gt("variant_count", 0)
+        // A rail is a curated preview — only titles with artwork belong in it (a
+        // TMDB-matched title always has a poster; an un-enriched one shows a blank
+        // placeholder). The genre picker / "See all" grid still exposes everything.
+        .not("poster_url", "is", null)
         .contains("genre_buckets", [bucket]);
       if (hidden.size) q = q.not("genre_buckets", "ov", `{${[...hidden].join(",")}}`);
       const { data, error } = await q
@@ -1138,6 +1142,11 @@ async function listGenreItems(req: Request, url: URL, userId: string) {
     }
 
     const { data, count, error } = await applyFilters(db.from("cloud_titles").select("*", { count: "exact" }))
+      // Titles WITH artwork first (poster_url non-null), newest within each group —
+      // so the grid opens on rich cards while un-enriched titles (TMDB match still
+      // pending) sit in the tail rather than fronting a wall of placeholders. Nothing
+      // is hidden; the count stays the full browsable total.
+      .order("poster_url", { ascending: false, nullsFirst: false })
       .order("created_at", { ascending: false })
       .order("id", { ascending: true })
       .range(offset, offset + limit - 1);
