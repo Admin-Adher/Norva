@@ -608,24 +608,43 @@ async function attachMediaLanguages(items: Array<Record<string, any>>, userId: s
   // so it's read straight from catalog_titles. The player uses it to resolve a VOSTFR/VO
   // ("original") audio track to its real language ("Japanese"…) instead of a bare "Default".
   try {
-    const origByTmdb = new Map<string, string>();
+    const catByTmdb = new Map<string, { lang: string | null; overview: string | null; poster: string | null; backdrop: string | null }>();
     for (let i = 0; i < tmdbIds.length; i += 500) {
+      // Extract just the overview field (metadata->tmdb->>overview) instead of the whole
+      // metadata blob. catalog_titles is the GLOBAL enriched source — verified titles have
+      // their per-user metadata.tmdb thinned, so the overview only survives here.
       const { data } = await db
         .from("catalog_titles")
-        .select("provider_tmdb_id, original_language")
+        .select("provider_tmdb_id, original_language, poster_url, backdrop_url, ov:metadata->tmdb->>overview")
         .in("provider_tmdb_id", tmdbIds.slice(i, i + 500));
       for (const c of data ?? []) {
         const id = stringOrNull((c as JsonRecord).provider_tmdb_id);
-        const lang = stringOrNull((c as JsonRecord).original_language);
-        if (id && lang) origByTmdb.set(id, lang);
+        if (!id) continue;
+        catByTmdb.set(id, {
+          lang: stringOrNull((c as JsonRecord).original_language),
+          overview: stringOrNull((c as JsonRecord).ov),
+          poster: stringOrNull((c as JsonRecord).poster_url),
+          backdrop: stringOrNull((c as JsonRecord).backdrop_url),
+        });
       }
     }
     for (const row of items) {
       const id = stringOrNull(isRecord(row.metadata) ? row.metadata.providerTmdbId : null);
-      const lang = id ? origByTmdb.get(id) : null;
-      if (lang) { row.original_language = lang; row.originalLanguage = lang; }
+      const cat = id ? catByTmdb.get(id) : null;
+      if (!cat) continue;
+      if (cat.lang) { row.original_language = cat.lang; row.originalLanguage = cat.lang; }
+      // Overview: surface it on the fields the client detail page reads.
+      if (cat.overview) {
+        row.overview = cat.overview; row.description = cat.overview; row.plot = cat.overview;
+        row.tmdb = { ...(isRecord(row.tmdb) ? row.tmdb : {}), overview: cat.overview };
+      }
+      // Poster/backdrop fallback from the global catalog when nothing fresher was set above.
+      if (cat.poster && !stringOrNull(row.poster_url)) {
+        row.poster_url = cat.poster; row.posterUrl = cat.poster; row.stream_icon = cat.poster; row.cover = cat.poster;
+      }
+      if (cat.backdrop && !stringOrNull(row.backdrop_url)) { row.backdrop_url = cat.backdrop; row.backdropUrl = cat.backdrop; }
     }
-  } catch (_) { /* best-effort; never fail the grid over original_language */ }
+  } catch (_) { /* best-effort; never fail the grid over enrichment overlay */ }
 }
 
 function applyMediaSort<T>(query: T, sort: string): T {
