@@ -3664,6 +3664,17 @@ class WatchPage {
         this.hls.loadSource(url);
         this.hls.attachMedia(this.video);
 
+        // hls.js TimelineController._cleanTracks wipes the cues of EVERY textTrack — unlabeled
+        // included — on each MEDIA_ATTACHING, i.e. on every recoverMediaError() cycle. That
+        // includes hls-INTERNAL recoveries its error-controller performs on non-fatal
+        // "MediaSource readyState: ended" append errors, which our ERROR handler never sees
+        // (renderTextTracksNatively:false does NOT gate _cleanTracks). MEDIA_ATTACHED fires
+        // right after the wipe, for every recovery origin: repair there, always.
+        this.hls.on(Hls.Events.MEDIA_ATTACHED, () => {
+            this._reattachAiTrackIfActive();
+            this._subEngine?.seenCues?.clear(); // probe engine: let its ticks re-add wiped cues
+        });
+
         this.hls.on(Hls.Events.AUDIO_TRACKS_UPDATED, (event, data) => {
             console.log('[WatchPage] Audio tracks updated:', data.audioTracks);
             this.restorePendingAudioPreference();
@@ -6141,9 +6152,12 @@ class WatchPage {
         throw lastError || new Error('Failed to switch audio track.');
     }
 
-    clearExternalSubtitleTracks() {
+    clearExternalSubtitleTracks({ keepAiPolling = false } = {}) {
         this.stopSubtitleEngine();
-        this.stopAiSubtitlePolling();
+        // attachGeneratedSubtitleTrack clears the previous track as part of ATTACHING a new one —
+        // killing the AI poll there silently ended progressive delivery after the FIRST partial
+        // (the attach ran inside the poll tick, cleared the timer, nothing restarted it).
+        if (!keepAiPolling) this.stopAiSubtitlePolling();
         this.stopAllTranslatePolling();
         this._stopAllOcrPolling();
         this._aiActiveLang = null;
@@ -7680,7 +7694,9 @@ class WatchPage {
         const cues = this.parseVttCues(vtt);
         if (!cues.length) return false;
 
-        this.clearExternalSubtitleTracks();
+        // keepAiPolling: this clear is part of ATTACHING a track, not turning subtitles off —
+        // partial-delivery attaches run inside the poll tick and must not kill their own timer.
+        this.clearExternalSubtitleTracks({ keepAiPolling: true });
         this.selectedSubtitleStreamIndex = null;
 
         const trackEl = document.createElement('track');

@@ -7,6 +7,14 @@
 > §8), 3b (traduction Argos multi-cible, §10) et 3c (whitelist nocturne par provider + reaper, §11)
 > sont déployés et vérifiés bout-en-bout. Le reste du document garde la spec d'origine.
 
+> **Mise à jour 2026-07-04 — coordination viewer↔jobs + affichage player durci** (PR #107→#110) :
+> gate pregen branchée sur le heartbeat watch-history + garde slot locale gateway + préemption
+> viewer ; sonde du cache partagé à l'ouverture (plus de « Generate » sur un transcript prêt) ;
+> survie des cues aux deux mécanismes d'effacement de hls.js (pistes labellisées + `_cleanTracks`
+> sur recovery) ; libellés avec langue détectée (« show original (Français) ») ; la livraison
+> progressive ne s'arrête plus au premier partiel. Détails :
+> `SUBTITLE-PREGEN-RELIABILITY.md`, addendum 2026-07-04.
+
 ## 1. But
 
 Quand un titre n'a **aucun sous-titre texte dans la langue de l'user**, générer des sous-titres :
