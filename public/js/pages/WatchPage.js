@@ -121,6 +121,8 @@ class WatchPage {
         this.aiSubtitleLang = 'und';
         this._aiSubtitleTitleId = null;
         this._aiSubtitlePollTimer = null;
+        this._aiCacheProbeKey = null;   // one-shot shared-cache probe marker (per title key)
+        this._aiUserRequested = false;  // true after a click — gates every auto-attach
         // "Generating…" UX: a coarse ETA countdown (transcription runs at ~0.4× realtime) plus a
         // per-title "email me when it's ready" opt-in so the viewer needn't watch the spinner.
         this._aiNotifyOptedIn = false;
@@ -3316,8 +3318,12 @@ class WatchPage {
         // so a genuine replay of the same title keeps its 'ready' state; any other title starts idle.
         const aiSameTitle = this._aiSubtitleTitleId && this._aiSubtitleTitleId === this._aiSubtitleKey() && this.aiSubtitleVtt;
         this.aiSubtitleState = aiSameTitle ? 'ready' : 'idle';
-        if (!aiSameTitle) { this.aiSubtitleVtt = null; this._aiSubtitleTitleId = null; }
+        if (!aiSameTitle) { this.aiSubtitleVtt = null; this._aiSubtitleTitleId = null; this._aiUserRequested = false; }
         this.stopAiSubtitlePolling();
+        // Fire the shared-cache probe now so a transcript from a prior session (or another user of
+        // the same panel) reads "ready" by the time the captions menu first opens. Fire-and-forget;
+        // one-shot per title and a no-op when this title can't have AI subs.
+        this._ensureAiCacheProbe();
         this._aiNotifyOptedIn = false;
         this._aiEtaTargetMs = 0;
         this._resetTranslations();
@@ -7278,6 +7284,18 @@ class WatchPage {
             this.stopAiSubtitlePolling();
             const vtt = String(res.vtt || '');
             const lang = this.normalizeTrackLanguage(res.sourceLang || res.source_lang || 'und');
+            // Cache surfaced WITHOUT a click this session (menu probe / another user's run on the
+            // shared per-panel cache): show the ready row, but subtitles never turn themselves on.
+            // Same cue validation as the attach path, so a degenerate VTT still resolves to 'empty'.
+            if (vtt && !this._aiUserRequested && this.parseVttCues(vtt).length) {
+                this.aiSubtitleState = 'ready';
+                this.aiSubtitleVtt = vtt;
+                this.aiSubtitleLang = lang;
+                this._pendingTranslateTarget = null;
+                this._ensureTranslateTargets();
+                this.updateCaptionsTracks();
+                return true;
+            }
             // attachGeneratedSubtitleTrack returns false when the VTT has no usable cues.
             if (vtt && this.attachGeneratedSubtitleTrack(vtt, lang)) {
                 this.aiSubtitleState = 'ready';
@@ -7316,7 +7334,7 @@ class WatchPage {
             // Progressive delivery (V2): a partial VTT lands while transcription continues —
             // attach/refresh it so cues show minutes after the real start, not at the end.
             const pvtt = String(res.vtt || '');
-            if (res.partial && pvtt) {
+            if (res.partial && pvtt && this._aiUserRequested) {
                 const cueCount = Number(res.segments || 0) || pvtt.split('-->').length - 1;
                 if (cueCount > (this._aiPartialCues || 0)) {
                     const lang = this.normalizeTrackLanguage(res.sourceLang || res.source_lang || 'und');
@@ -7352,6 +7370,34 @@ class WatchPage {
         }, 20000);
     }
 
+    // One-shot cache probe per title. A transcript produced in a PRIOR session — or by another
+    // user of the same panel (the cache is shared per provider identity) — must surface as
+    // "AI subtitles — show original" when the menu opens, not as a misleading "Generate" chooser
+    // that suggests a long re-run. Read-only: ready → state flips but nothing attaches
+    // (_aiUserRequested stays false); in-flight → resume honest progress + polling; failed/none →
+    // keep the idle chooser ((re)generating stays a deliberate click).
+    async _ensureAiCacheProbe() {
+        const key = this._aiSubtitleKey();
+        if (!key || this._aiCacheProbeKey === key) return;
+        if (this.aiSubtitleState !== 'idle' || !this._canRequestAiSubtitles()) return;
+        this._aiCacheProbeKey = key; // marked only once we really probe — earlier bails may retry
+        const params = this._aiSubtitleParams();
+        try {
+            const cloudId = await window.API?.resolveCloudSourceId?.(params.sourceId);
+            if (cloudId) params.sourceId = String(cloudId);
+        } catch (_) { /* fall back to the raw id */ }
+        let got = null;
+        try { got = await window.NorvaCloud.playback.generatedSubtitle(params); } catch (_) { return; }
+        if (!got || this._aiSubtitleKey() !== key || this.aiSubtitleState !== 'idle') return;
+        const status = String(got.status || 'none');
+        if (status === 'ready') { this._applyAiSubtitleResponse(got, key); return; }
+        if (status === 'processing' || status === 'pending-transcript') {
+            this._aiSubtitleTitleId = key;
+            this._applyAiSubtitleResponse(got, key);
+            this.startAiSubtitlePolling(params, key);
+        }
+    }
+
     // Entry point for the "AI subtitles" menu rows. `targetLang` is the language picked at click
     // time (null = original): it is sent to the server so the transcript→translation chain runs
     // server-side (survives closing the tab), and mirrored locally for the tab-open fast path.
@@ -7363,6 +7409,7 @@ class WatchPage {
         // state check alone can NOT stop the second click of a double-click.
         if (this._aiRequestInFlight) return;
         this._aiRequestInFlight = true;
+        this._aiUserRequested = true; // a click — auto-attach is allowed from here on
         try {
             await this._requestAiSubtitlesInner(this.normalizeTrackLanguage(targetLang) || null);
         } finally {
@@ -7554,6 +7601,7 @@ class WatchPage {
     async requestAiTranslation(lang) {
         lang = this.normalizeTrackLanguage(lang);
         if (!lang || !this._canRequestAiSubtitles()) return;
+        this._aiUserRequested = true; // a click — auto-attach is allowed from here on
         const key = this._aiSubtitleKey();
         const api = window.NorvaCloud.playback;
 
@@ -7705,6 +7753,9 @@ class WatchPage {
         if (aiAvailable && (this.aiSubtitleState === 'ready' || this.aiSubtitleState === 'idle' || !this.aiSubtitleState) && this._aiTranslateTargets === null) {
             this._ensureTranslateTargets();
         }
+        // Safety net for menus opened before (or without) a playback start: surface a cached
+        // transcript instead of the misleading "Generate" chooser. One-shot per title.
+        if (aiAvailable && this.aiSubtitleState === 'idle') this._ensureAiCacheProbe();
 
         // No selectable subtitle TRACK, but the label/category says the picture carries
         // burned-in subtitles → show them as a locked, always-on entry instead of "Off".
