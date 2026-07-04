@@ -1646,9 +1646,10 @@ class SeriesPage {
             btn.addEventListener('click', () => {
                 const item = versions[parseInt(btn.dataset.index)];
                 if (!item || this.isSameSeriesVersion(item, this.currentSeries)) return;
-                this.rememberVersionChoice(item);
-                // Switching a version reloads its own season/episode subtree.
-                this.showSeriesDetailsV2(item, this.currentSeriesGroup, { isVersionSwitch: true });
+                // Switching a version reloads its own season/episode subtree. manualPick
+                // keeps an explicit choice from being auto-redirected to a sibling; the
+                // choice is remembered only once its episodes actually load (rememberOnSuccess).
+                this.showSeriesDetailsV2(item, this.currentSeriesGroup, { isVersionSwitch: true, manualPick: true, rememberOnSuccess: true });
             });
         });
     }
@@ -1656,7 +1657,7 @@ class SeriesPage {
     // Auto-recover: the opened version has no/failed episodes — jump to the next
     // untried (preferably healthy) sibling instead of dead-ending. `tried` guards
     // against looping when every version is empty.
-    tryNextHealthyVersion(current, tried) {
+    tryNextHealthyVersion(current, tried, focusVersions = false) {
         const group = this.currentSeriesGroup;
         if (!group || (group.items?.length || 0) <= 1) return false;
         const triedSet = tried || new Set();
@@ -1665,7 +1666,8 @@ class SeriesPage {
         const next = ordered.find(i => !triedSet.has(this._versionSig(i)) && !this.isBrokenItem(i))
             || ordered.find(i => !triedSet.has(this._versionSig(i)));
         if (!next) return false;
-        this.showSeriesDetailsV2(next, group, { isVersionSwitch: true, triedVersions: triedSet });
+        // Remember the sibling we land on so the next open goes straight to it (no re-bounce).
+        this.showSeriesDetailsV2(next, group, { isVersionSwitch: true, triedVersions: triedSet, focusVersions, rememberOnSuccess: true });
         return true;
     }
 
@@ -1675,43 +1677,8 @@ class SeriesPage {
         this.openGroup(group);
     }
 
-    showVersionPicker(group) {
-        const modal = document.getElementById('modal');
-        const title = document.getElementById('modal-title');
-        const body = document.getElementById('modal-body');
-        const footer = document.getElementById('modal-footer');
-        if (!modal || !body) return;
-
-        const ordered = MediaUtils.orderVersionsByPreference(group.items, this.getPreferences());
-        title.textContent = group.representative.tmdb?.title || MediaUtils.cleanReleaseName(group.representative.name);
-
-        body.innerHTML = `
-            <p class="hint" style="margin-bottom: 8px;">Choose a version to open:</p>
-            <div class="version-list">
-                ${ordered.map((item, i) => `
-                    <button class="version-item" data-index="${i}">
-                        <span class="version-item-label">${MediaUtils.escapeHtml(MediaUtils.versionLabel(item, this.getSourceName(item.sourceId)))}</span>
-                        <span class="version-item-name">${MediaUtils.escapeHtml(item.name)}</span>
-                    </button>
-                `).join('')}
-            </div>
-        `;
-        footer.innerHTML = '';
-
-        const close = () => modal.classList.remove('active');
-        modal.querySelector('.modal-close').onclick = close;
-        modal.onclick = (e) => { if (e.target === modal) close(); };
-
-        body.querySelectorAll('.version-item').forEach(btn => {
-            btn.addEventListener('click', () => {
-                close();
-                this.currentSeriesGroup = group;
-                this.showSeriesDetailsV2(ordered[parseInt(btn.dataset.index)], group);
-            });
-        });
-
-        modal.classList.add('active');
-    }
+    // (Removed showVersionPicker: the pre-fiche modal is superseded by the in-fiche
+    //  version switcher — the grid badge now deep-links into the fiche instead.)
 
     getSeriesDisplayTitle(series = this.currentSeries) {
         return series?.tmdb?.title || series?.tmdb?.name || MediaUtils.cleanReleaseName(series?.name || '') || 'Series';
@@ -1953,7 +1920,7 @@ class SeriesPage {
         }
     }
 
-    async showSeriesDetailsV2(series, group = null, { focusVersions = false, isVersionSwitch = false, triedVersions = null } = {}) {
+    async showSeriesDetailsV2(series, group = null, { focusVersions = false, isVersionSwitch = false, triedVersions = null, manualPick = false, rememberOnSuccess = false } = {}) {
         this.currentSeries = series;
         this.currentSeriesGroup = group || this.currentSeriesGroup || { representative: series, items: [series] };
         // Guard rapid version switches: a slow older seriesInfo must not paint over a newer one.
@@ -1996,6 +1963,11 @@ class SeriesPage {
         this.renderSeriesVersions(series);
         this.syncDetailFavoriteButton();
         this.loadRating();
+        // The switcher DOM is populated synchronously above, so honor the grid badge's
+        // deep-link now — independent of whether the episode fetch succeeds/recovers.
+        if (focusVersions && this.currentSeriesGroup?.items?.length > 1) {
+            document.getElementById('series-versions-section')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
 
         this.seasonsContainer.innerHTML = '<div class="loading"><div class="loading-spinner"></div></div>';
         if (this.primaryActionBtn) {
@@ -2003,19 +1975,27 @@ class SeriesPage {
             this.primaryActionBtn.textContent = 'Loading...';
             delete this.primaryActionBtn.dataset.episodeId;
         }
+        // Clear any stale "Play from start" state before the fetch — failure exits below
+        // return early, so without this it could leak a previous fiche's visible button.
+        if (this.playStartBtn) this.playStartBtn.style.display = 'none';
 
         try {
             const info = await API.proxy.xtream.seriesInfo(series.sourceId, series.series_id);
             if (detailToken !== this._detailToken) return; // a newer switch superseded this one
             if (!info || !info.episodes) {
-                // Auto-pick landed on an empty version → jump to a healthy sibling.
-                if (this.tryNextHealthyVersion(series, triedVersions)) return;
+                // Auto-pick landed on an empty version → jump to a healthy sibling. But an
+                // EXPLICIT pick (manualPick) is respected: show "No episodes" for that very
+                // version, with the switcher still visible so the user can choose another.
+                if (!manualPick && this.tryNextHealthyVersion(series, triedVersions, focusVersions)) return;
                 this.seasonsContainer.innerHTML = '<p class="hint">No episodes found</p>';
                 if (this.primaryActionBtn) this.primaryActionBtn.textContent = 'No episodes';
                 return;
             }
 
             this.currentSeriesInfo = info;
+            // Persist the chosen version only now that its episodes actually loaded, so a
+            // broken/empty pick never gets remembered (which would re-bounce every open).
+            if (rememberOnSuccess) this.rememberVersionChoice(series);
             const watchedEpisodes = this.getSeriesHistoryMap(series);
             const flatEpisodes = this.flattenEpisodes(info);
             const seasons = Object.keys(info.episodes).sort((a, b) => parseInt(a) - parseInt(b));
@@ -2129,7 +2109,10 @@ class SeriesPage {
             this.seasonsContainer.querySelectorAll('.episode-item').forEach(ep => {
                 ep.addEventListener('click', () => this.playEpisode(ep));
                 // Keyboard / TV-remote: rows are role=button tabindex=0 → activate on Enter/Space.
+                // Ignore keys that bubbled up from a focused child (e.g. the native download
+                // button) so activating it doesn't also start playback.
                 ep.addEventListener('keydown', (e) => {
+                    if (e.target !== ep) return;
                     if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
                         e.preventDefault();
                         this.playEpisode(ep);
@@ -2156,13 +2139,11 @@ class SeriesPage {
                 this.refreshEpisodeDownloadStates();
             }
             this.applySelectedSeason();
-            // Grid "N versions" badge deep-links here → reveal the version switcher.
-            if (focusVersions && this.currentSeriesGroup?.items?.length > 1) {
-                document.getElementById('series-versions-section')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            }
         } catch (err) {
-            // A failed fetch on the auto-picked version → try a healthy sibling first.
-            if (this.tryNextHealthyVersion(series, triedVersions)) return;
+            if (detailToken !== this._detailToken) return; // superseded — don't stomp the newer fiche
+            // A failed fetch on the auto-picked version → try a healthy sibling first
+            // (but respect an explicit manual pick: surface its error rather than redirect).
+            if (!manualPick && this.tryNextHealthyVersion(series, triedVersions, focusVersions)) return;
             const { friendly, detail } = this.getSeriesInfoError(err);
             console.error('Error loading series info:', err);
             this.seasonsContainer.innerHTML = `
