@@ -268,10 +268,21 @@ connexion refusée / 404 / upstream HS). L'autre version du même film (autre fl
 La chaîne de fallback moteur→transcode a fonctionné comme prévu ; les deux échouent quand la
 source est réellement injoignable.
 
-**Améliorations UX possibles (domaine lecture/WatchPage — séparé, non fait) :**
-1. **Auto-bascule sur la version suivante** quand une version échoue au démarrage (au lieu
-   d'afficher une erreur) — plus haute valeur.
-2. **Marquage « broken »** de la version échouée (I/O) → dépriorisée / masquée par « Hide broken »,
-   jamais choisie par défaut.
-3. Étiquetage de langue des versions parfois faux (deux versions « English » alors qu'une est FR)
+**Correctif (PR #137) — auto-bascule implémentée :** l'ossature existait déjà
+(`handlePlaybackFailure` → `tryNextVersion` + marquage `PlaybackHealth` `broken`), mais le
+chemin d'échec « moteur + transcode HS » appelait directement `handleEngineUnplayable` →
+`showPlaybackError` (cul-de-sac). On le route désormais via `handlePlaybackFailure` :
+(1) marque LA version morte `broken` (sauf erreur limite-de-connexion 401/403/429),
+(2) **bascule automatiquement sur la version suivante**, (3) n'affiche l'erreur que si toutes
+les versions sont épuisées. Le chemin 458 « un seul flux à la fois » retourne plus tôt (ne
+bascule pas — ne pas ouvrir une 2ᵉ connexion). La grille masque déjà un film **uniquement quand
+TOUTES ses versions sont `broken`** (filtre `hideBroken` au niveau version, avant regroupement)
+→ le film n'est jamais supprimé, seule la version morte l'est.
+
+**Reste à faire (backlog lecture) :**
+1. Latence : `handlePlaybackFailure` retente d'abord 3 stratégies transcode (gateway/relay/full)
+   sur la même source morte avant de basculer → la bascule peut prendre ~10-20 s. Optimisation
+   possible : basculer immédiatement quand `fallbackEngineToTranscode` a déjà échoué (I/O).
+2. Étiquetage de langue des versions parfois faux (deux versions « English » alors qu'une est FR)
    — `parseVersionInfo`/version-language à affiner.
+3. « Hide broken » inerte en vues rails/bucket (le serveur ne connaît pas `PlaybackHealth`).
