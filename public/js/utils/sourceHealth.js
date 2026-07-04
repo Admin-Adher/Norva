@@ -296,9 +296,22 @@
             window.API?.sources?.getAll?.() || [],
             window.API?.sources?.getStatus?.() || []
         ]);
-        const sources = sourcesResult.status === 'fulfilled' && Array.isArray(sourcesResult.value)
-            ? sourcesResult.value
-            : [];
+        // An API outage must never be mistaken for "no sources": a rejected /sources fetch
+        // used to classify as not_configured and threw a fully configured user back onto the
+        // first-run onboarding gate (home audit 2026-07-04, P0). Surface a distinct state the
+        // callers treat as non-gating (keep cached rails + show a "can't reach" banner).
+        if (sourcesResult.status === 'rejected') {
+            return {
+                state: 'unknown',
+                error: true,
+                sources: [],
+                issues: [],
+                ready: [],
+                title: "We can't reach Norva right now",
+                message: 'Your services are unaffected — this is a temporary connection problem. Retrying…'
+            };
+        }
+        const sources = Array.isArray(sourcesResult.value) ? sourcesResult.value : [];
         const statuses = statusResult.status === 'fulfilled' && Array.isArray(statusResult.value)
             ? statusResult.value
             : [];

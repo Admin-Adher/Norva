@@ -486,6 +486,10 @@ class App {
                     // Toast only on a real syncing -> ready transition (skip the baseline pass).
                     if (was && was !== status && status === 'ready' && SYNCING.has(was)) {
                         try { this.sourceManager?.toast?.(`🎉 ${s.name || s.display_name || 'Your catalog'} is ready to watch!`); } catch (_) { /* noop */ }
+                        // The Home page listens to this to bust its cache — without it, a user
+                        // staring at "Preparing your Home" kept the placeholder (or day-old
+                        // rails) until a manual reload even after the import finished.
+                        try { document.dispatchEvent(new CustomEvent('norva:source-health-changed')); } catch (_) { /* noop */ }
                     }
                 }
             } catch (_) { /* best-effort */ }

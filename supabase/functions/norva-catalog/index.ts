@@ -850,7 +850,7 @@ async function listGenreRails(req: Request, url: URL, userId: string) {
   for (const list of byBucket.values()) {
     for (const title of list) selectedIds.add(String(title.id));
   }
-  const variantsByTitle = await listVariantsByTitleIds([...selectedIds]);
+  const variantsByTitle = await listVariantsByTitleIds([...selectedIds], userId);
   await applyCatalogOverlay([...byBucket.values()].flat(), itemType); // read-cutover flag (genre rails)
 
   const rails = BUCKET_ORDER
@@ -1068,7 +1068,7 @@ async function listGenreItems(req: Request, url: URL, userId: string) {
   }
 
   const pageRows = matched.slice(offset, offset + limit);
-  const variantsByTitle = await listVariantsByTitleIds(pageRows.map((row) => String(row.id)));
+  const variantsByTitle = await listVariantsByTitleIds(pageRows.map((row) => String(row.id)), userId);
   await applyCatalogOverlay(pageRows, itemType); // read-cutover flag (language grid)
 
   return {
@@ -1232,14 +1232,17 @@ async function listTitleRail(userId: string, itemType: "movie" | "series", id: s
       .eq("user_id", userId)
       .eq("item_type", itemType)
       .gt("variant_count", 0)
+      // created_at = when the title FIRST appeared in this catalog (immutable) — the honest
+      // "recently added" signal. synced_at is stamped on every resync, which used to reshuffle
+      // this rail into arbitrary old titles after each full refresh (home audit 2026-07-04).
+      .order("created_at", { ascending: false })
       .order("synced_at", { ascending: false })
-      .order("updated_at", { ascending: false })
       .limit(limit);
     if (error) {
       if (isMissingMaterialization(error)) return listRawMediaRail(userId, itemType, id, title, limit);
       throwDb(error, "Unable to list title rail");
     }
-    const variantsByTitle = await listVariantsByTitleIds((titles ?? []).map((row) => String(row.id)));
+    const variantsByTitle = await listVariantsByTitleIds((titles ?? []).map((row) => String(row.id)), userId);
     await applyCatalogOverlay((titles ?? []) as JsonRecord[], itemType); // read-cutover flag (title rail)
     return {
       id,
@@ -1269,7 +1272,7 @@ async function listGenreRail(
       .filter((row) => titleGenres(row).some((value: string) => sameGenre(value, genre)))
       .sort((a, b) => String(b.synced_at ?? b.updated_at ?? "").localeCompare(String(a.synced_at ?? a.updated_at ?? "")))
       .slice(0, limit);
-    const variantsByTitle = await listVariantsByTitleIds(titles.map((row) => String(row.id)));
+    const variantsByTitle = await listVariantsByTitleIds(titles.map((row) => String(row.id)), userId);
     return {
       id,
       title,
@@ -1314,7 +1317,7 @@ async function listPopularTitleRail(
         String(b.synced_at ?? b.updated_at ?? "").localeCompare(String(a.synced_at ?? a.updated_at ?? ""))
       )
       .slice(0, limit);
-    const variantsByTitle = await listVariantsByTitleIds(titles.map((row) => String(row.id)));
+    const variantsByTitle = await listVariantsByTitleIds(titles.map((row) => String(row.id)), userId);
     return {
       id,
       title,
@@ -1350,6 +1353,14 @@ async function listBecauseYouWatchedRail(
       .limit(40);
     if (error) throwDb(error, "Unable to list watch history for home rail");
 
+    // The candidate pool is identical for every history entry of the same type — memoize it
+    // instead of re-fetching 300 rows per loop iteration (up to 40×) inside an endpoint that
+    // has already 504'd on big catalogs (home audit 2026-07-04).
+    const candidatePool = new Map<string, JsonRecord[]>();
+    const candidatesFor = async (t: "movie" | "series") => {
+      if (!candidatePool.has(t)) candidatePool.set(t, await listVerifiedTitleCandidates(userId, t));
+      return candidatePool.get(t) ?? [];
+    };
     for (const entry of history ?? []) {
       const watchedTitle = await resolveWatchedTitle(userId, entry);
       if (!watchedTitle) continue;
@@ -1357,7 +1368,7 @@ async function listBecauseYouWatchedRail(
       if (!genres.length) continue;
 
       const itemType = String(watchedTitle.item_type) === "series" ? "series" : "movie";
-      const candidates = await listVerifiedTitleCandidates(userId, itemType);
+      const candidates = await candidatesFor(itemType);
       const watchedId = String(watchedTitle.id);
       const titles = candidates
         .filter((row) => String(row.id) !== watchedId)
@@ -1371,7 +1382,7 @@ async function listBecauseYouWatchedRail(
         .slice(0, options.limit);
       if (!titles.length) continue;
 
-      const variantsByTitle = await listVariantsByTitleIds(titles.map((row) => String(row.id)));
+      const variantsByTitle = await listVariantsByTitleIds(titles.map((row) => String(row.id)), userId);
       return {
         id: `because-you-watched-${watchedId}`,
         title: "Because You Watched",
@@ -1454,9 +1465,31 @@ async function listVerifiedTitleCandidates(userId: string, itemType: "movie" | "
   return rows;
 }
 
-async function listVariantsByTitleIds(titleIds: string[]) {
+// Source-health awareness for playable cards (home audit 2026-07-04): a card whose
+// defaultVariant lives on a DISABLED source plays nothing, and one on an errored source
+// (dead credentials — the IPTV reality) should only be picked when no healthy variant
+// exists. Cached briefly: every rail of one /home/rails call shares the lookup.
+const sourceHealthCache = new Map<string, { at: number; disabled: Set<string>; errored: Set<string> }>();
+async function sourceHealthFor(userId: string): Promise<{ disabled: Set<string>; errored: Set<string> }> {
+  const hit = sourceHealthCache.get(userId);
+  if (hit && Date.now() - hit.at < 30_000) return hit;
+  const entry = { at: Date.now(), disabled: new Set<string>(), errored: new Set<string>() };
+  try {
+    const { data } = await db.from("cloud_sources").select("id,sync_status").eq("user_id", userId);
+    for (const s of (data ?? []) as JsonRecord[]) {
+      const st = String(s.sync_status ?? "");
+      if (st === "disabled") entry.disabled.add(String(s.id));
+      else if (st === "error") entry.errored.add(String(s.id));
+    }
+  } catch (_) { /* fail-open: no filtering beats an empty Home */ }
+  sourceHealthCache.set(userId, entry);
+  return entry;
+}
+
+async function listVariantsByTitleIds(titleIds: string[], userId?: string) {
   const variantsByTitle = new Map<string, JsonRecord[]>();
   if (!titleIds.length) return variantsByTitle;
+  const health = userId ? await sourceHealthFor(userId) : { disabled: new Set<string>(), errored: new Set<string>() };
   for (let index = 0; index < titleIds.length; index += 200) {
     const chunk = titleIds.slice(index, index + 200);
     const { data, error } = await db
@@ -1471,6 +1504,7 @@ async function listVariantsByTitleIds(titleIds: string[]) {
       throwDb(error, "Unable to list title variants");
     }
     for (const variant of data ?? []) {
+      if (health.disabled.has(String(variant.source_id))) continue; // a disabled source can never play
       const key = String(variant.title_id);
       const existing = variantsByTitle.get(key) ?? [];
       existing.push(variant);
@@ -1478,7 +1512,15 @@ async function listVariantsByTitleIds(titleIds: string[]) {
     }
   }
   for (const [key, variants] of variantsByTitle) {
-    variantsByTitle.set(key, variants.sort(compareTitleVariants).slice(0, HOME_RAIL_VARIANT_LIMIT));
+    const sorted = variants.sort(compareTitleVariants);
+    // Errored sources (dead credentials) rank LAST: defaultVariant = variants[0] must be a
+    // healthy pick whenever one exists, but a title whose ONLY copy sits on an errored source
+    // keeps its card (the repair banner covers the account-level message).
+    if (health.errored.size) {
+      sorted.sort((a, b) =>
+        Number(health.errored.has(String(a.source_id))) - Number(health.errored.has(String(b.source_id))));
+    }
+    variantsByTitle.set(key, sorted.slice(0, HOME_RAIL_VARIANT_LIMIT));
   }
   return variantsByTitle;
 }
@@ -1602,6 +1644,10 @@ function titleRailItem(title: JsonRecord, variants: JsonRecord[], lang?: string 
     playbackCostScore: defaultVariant.playback_cost_score ?? null,
     last_observed_ttff_ms: defaultVariant.last_observed_ttff_ms ?? title.last_observed_ttff_ms ?? null,
     lastObservedTtffMs: defaultVariant.last_observed_ttff_ms ?? title.last_observed_ttff_ms ?? null,
+    // "New in your catalog" timestamp (immutable first-seen) — powers the client's NEW badge,
+    // which was dead for cloud rails because no added/added_at field was ever emitted.
+    added: title.created_at ?? null,
+    added_at: title.created_at ?? null,
     // Real detected languages (crawl/capture) so the client card badge shows the actual
     // audio language instead of guessing from the title. Already on the cloud_titles row.
     audio_languages: titleAudioLanguages(title),
