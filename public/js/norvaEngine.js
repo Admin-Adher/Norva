@@ -682,13 +682,28 @@
       return w.buf.subarray(pos - w.start, Math.max(pos - w.start, sliceEnd - w.start));
     }
 
-    // Fetch [start, start+len) and insert it as a read-ahead window (LRU).
+    // Fetch [start, start+len) and insert it as a read-ahead window (LRU). Transient provider
+    // hiccups (mid-range reset → short read/network drop, single-slot 429/458/5xx) retry HERE,
+    // bounded — a retried window is a ~1s hiccup, a surfaced error is a full lane failover with
+    // the whole MSE/subtitle teardown that entails.
     async _cacheWindow(start, len) {
-      const buf = await this._fetchRange(start, start + len);
-      const w = { start, end: start + buf.length, buf };
-      this._raCache.push(w);
-      while (this._raCache.length > RA_WINDOWS) this._raCache.shift();
-      return w;
+      let lastErr = null;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          const buf = await this._fetchRange(start, start + len);
+          const w = { start, end: start + buf.length, buf };
+          this._raCache.push(w);
+          while (this._raCache.length > RA_WINDOWS) this._raCache.shift();
+          return w;
+        } catch (e) {
+          lastErr = e;
+          if (this._ac.signal.aborted) throw e;
+          const msg = String((e && e.message) || e);
+          if (!/BLOCK_SHORT_READ|Failed to fetch|NetworkError|load failed|BLOCK_HTTP_(429|458|502|503)/i.test(msg)) throw e;
+          await new Promise((r) => setTimeout(r, 700 * (attempt + 1)));
+        }
+      }
+      throw lastErr;
     }
 
     _raTouch(w) {
@@ -839,6 +854,14 @@
           if (Number.isFinite(total) && total > 0) this.size = total;
         }
         const out = new Uint8Array(await r.arrayBuffer());
+        // A truncated-but-"clean" body (provider reset mid-range that still ends the socket
+        // without a fetch error) must NEVER pass as complete: libav would demux around a hole
+        // and the muxer emits garbage ("bad box" → CHUNK_DEMUXER_ERROR_APPEND → lane failover).
+        // Short is only legal when the range genuinely reaches the end of the file.
+        const expected = end - start;
+        if (out.length < expected && (!this.size || start + out.length < this.size)) {
+          throw new Error('BLOCK_SHORT_READ:' + out.length + '/' + expected);
+        }
         this._fetchCount += 1; this._fetchBytes += out.length; this._fetchMs += performance.now() - ft0;
         return out;
       } finally {
