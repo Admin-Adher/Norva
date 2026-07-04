@@ -5405,28 +5405,42 @@ class WatchPage {
             this.reportPlaybackStatus('ok').catch(() => { });
         }
         this.reportObservedAudioLanguages();
-        // Restore the viewer's generated subtitles across a lane restart. STRICTLY once per media
-        // load: markPlaybackUsable runs on every timeupdate (~4×/s), and an unguarded re-attach
-        // here turned any external cue-stripper into a subtitle STROBE (attach → wipe → attach…,
-        // 04/07). The browser disables tracks per NEW src, so once per src is exactly the need.
+        // Restore the viewer's generated subtitles: instantly on a NEW media src (the browser
+        // disables tracks per new src / lane restart), then as a BOUNDED periodic self-heal.
+        // Something can still empty the track once, silently (04/07 runtime trace: track frozen
+        // at 0 cues, no hls instance, no app call in 45 s — actor unidentified), and a strict
+        // one-shot left the viewer subtitle-less for the rest of the film. Bounds make it
+        // strobe-proof: markPlaybackUsable runs per timeupdate (~4×/s), but a dead track
+        // re-attaches at most once per 5 s and 12 times per src — a one-time wipe becomes a
+        // ≤5 s gap, a persistent wiper can't flicker, and each heal warns with a counter so a
+        // runtime trace exposes the wiper's cadence.
         const mediaSrc = this.video?.currentSrc || this.video?.src || '';
         if (mediaSrc && mediaSrc !== this._aiHealedForSrc) {
             this._aiHealedForSrc = mediaSrc;
+            this._aiHealCount = 0;
+            this._aiHealLastTs = 0;
             if (this._aiRestoreOnStart) {
                 const r = this._aiRestoreOnStart;
                 this._aiRestoreOnStart = null;
                 if (r.key === this._aiSubtitleKey() && this.attachGeneratedSubtitleTrack(r.vtt, r.lang)) {
                     this.updateCaptionsTracks();
                 }
-            } else if (this._aiActiveVtt) {
-                // Self-heal for restarts that SKIP the loadVideo reset (in-place failover on the
-                // same element). A viewer-hidden track (mode 'hidden', cues intact via the C
-                // toggle) is deliberate and left alone.
-                const el = this.video?.querySelector('track[data-norva-ai-subtitle="true"]');
-                const dead = !el || !el.track || el.track.mode === 'disabled' || !el.track.cues || !el.track.cues.length;
-                if (dead && this.attachGeneratedSubtitleTrack(this._aiActiveVtt, this._aiActiveLang || 'und')) {
-                    this.updateCaptionsTracks();
-                }
+                return;
+            }
+        }
+        if (this._aiActiveVtt) {
+            const now = Date.now();
+            if (now - (this._aiHealLastTs || 0) < 5000 || (this._aiHealCount || 0) >= 12) return;
+            // A viewer-hidden track (mode 'hidden', cues intact via the C toggle) is deliberate
+            // and left alone — only disabled/emptied/missing tracks are rebuilt.
+            const el = this.video?.querySelector('track[data-norva-ai-subtitle="true"]');
+            const dead = !el || !el.track || el.track.mode === 'disabled' || !el.track.cues || !el.track.cues.length;
+            if (!dead) return;
+            this._aiHealLastTs = now;
+            this._aiHealCount = (this._aiHealCount || 0) + 1;
+            console.warn(`[WatchPage] AI subtitle track found empty — re-healing (#${this._aiHealCount})`);
+            if (this.attachGeneratedSubtitleTrack(this._aiActiveVtt, this._aiActiveLang || 'und')) {
+                this.updateCaptionsTracks();
             }
         }
     }
