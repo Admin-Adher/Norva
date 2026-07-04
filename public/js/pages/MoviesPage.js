@@ -1858,6 +1858,11 @@ class MoviesPage {
 
         const posterEl = document.getElementById('movie-detail-poster');
         if (posterEl) {
+            // A stale/404 poster (e.g. TMDB replaced the image) must fall back to the
+            // placeholder, not render a broken-image icon. Clear srcset (the browser
+            // prefers it over src) so the fallback actually shows.
+            posterEl.onerror = () => { posterEl.onerror = null; posterEl.removeAttribute('srcset'); posterEl.src = '/img/norva-media-placeholder.png'; };
+            posterEl.removeAttribute('srcset');
             posterEl.src = poster;
             posterEl.alt = this.getMovieDisplayTitle(displayMovie);
         }
@@ -1866,7 +1871,7 @@ class MoviesPage {
         if (titleEl) titleEl.textContent = this.getMovieDisplayTitle(displayMovie);
 
         const plotEl = document.getElementById('movie-detail-plot');
-        if (plotEl) plotEl.textContent = displayMovie.tmdb?.overview || displayMovie.plot || 'No summary available yet.';
+        if (plotEl) plotEl.textContent = displayMovie.tmdb?.overview || displayMovie.overview || displayMovie.description || displayMovie.plot || 'No summary available yet.';
 
         const version = MediaUtils.parseVersionInfo(movie.name);
         const rating = parseFloat(displayMovie.rating || displayMovie.tmdb?.vote_average);

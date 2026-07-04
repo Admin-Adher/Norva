@@ -544,10 +544,16 @@ async function attachMediaLanguages(items: Array<Record<string, any>>, userId: s
     .filter((id): id is string => Boolean(id) && id !== "0"))];
   if (!tmdbIds.length) return;
   const byTmdb = new Map<string, { audio: string[]; version: string[]; tracks: Array<{ index: number; lang: string | null }> }>();
+  // Freshest display art per TMDB id, from the identity table. The flat grid rows
+  // come from cloud_media_items, whose poster can go STALE (TMDB replaces an image →
+  // the stored path 404s) while the background enrichment refreshes the cloud_titles
+  // row. Overlaying the verified cloud_titles poster fixes matched titles that render
+  // a broken/placeholder image in the grid + detail even though they're enriched.
+  const artByTmdb = new Map<string, { poster: string | null; backdrop: string | null; verified: boolean }>();
   for (let i = 0; i < tmdbIds.length; i += 500) {
     const { data, error } = await db
       .from("cloud_titles")
-      .select("provider_tmdb_id, audio_languages, version_languages, audio_tracks")
+      .select("provider_tmdb_id, audio_languages, version_languages, audio_tracks, poster_url, backdrop_url, match_status")
       .eq("user_id", userId)
       .in("provider_tmdb_id", tmdbIds.slice(i, i + 500));
     if (error) return; // best-effort; never fail the grid over the badge
@@ -569,18 +575,33 @@ async function attachMediaLanguages(items: Array<Record<string, any>>, userId: s
         || (next.tracks.length === prev.tracks.length && next.audio.length > prev.audio.length)) {
         byTmdb.set(id, next);
       }
+      // Art: prefer a verified row's poster (freshest, TMDB-confirmed).
+      const poster = stringOrNull((row as JsonRecord).poster_url);
+      const verified = String((row as JsonRecord).match_status) === "provider_verified";
+      const prevArt = artByTmdb.get(id);
+      if (poster && (!prevArt || (verified && !prevArt.verified))) {
+        artByTmdb.set(id, { poster, backdrop: stringOrNull((row as JsonRecord).backdrop_url), verified });
+      }
     }
   }
   for (const row of items) {
     const id = stringOrNull(isRecord(row.metadata) ? row.metadata.providerTmdbId : null);
-    const hit = id ? byTmdb.get(id) : null;
-    if (!hit) continue;
-    row.audio_languages = hit.audio; row.audioLanguages = hit.audio;
-    row.version_languages = hit.version; row.versionLanguages = hit.version;
-    // Ordered map (absolute-stream order, null-lang entries kept for position) — the
-    // player maps engine streams -> languages from this, no probe. Only set when present
-    // so titles without a crawled map fall through to the live-probe path unchanged.
-    if (hit.tracks.length) { row.audio_tracks = hit.tracks; row.audioTracks = hit.tracks; }
+    if (!id) continue;
+    const hit = byTmdb.get(id);
+    if (hit) {
+      row.audio_languages = hit.audio; row.audioLanguages = hit.audio;
+      row.version_languages = hit.version; row.versionLanguages = hit.version;
+      // Ordered map (absolute-stream order, null-lang entries kept for position) — the
+      // player maps engine streams -> languages from this, no probe. Only set when present
+      // so titles without a crawled map fall through to the live-probe path unchanged.
+      if (hit.tracks.length) { row.audio_tracks = hit.tracks; row.audioTracks = hit.tracks; }
+    }
+    // Overlay the fresh identity-table poster over the (possibly stale) grid poster.
+    const art = artByTmdb.get(id);
+    if (art?.poster) {
+      row.poster_url = art.poster; row.posterUrl = art.poster; row.stream_icon = art.poster; row.cover = art.poster;
+      if (art.backdrop) { row.backdrop_url = art.backdrop; row.backdropUrl = art.backdrop; }
+    }
   }
 
   // original_language is a GLOBAL TMDB fact (not per-user, not gated by the read-cutover flag),

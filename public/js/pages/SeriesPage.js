@@ -1855,9 +1855,15 @@ class SeriesPage {
         const backdrop = this.getSeriesBackdrop(series);
         const hero = document.getElementById('series-detail-hero');
         if (hero) hero.style.setProperty('--series-hero-bg', `url("${String(backdrop).replace(/"/g, '%22')}")`);
-        document.getElementById('series-poster').src = poster;
+        const seriesPosterEl = document.getElementById('series-poster');
+        if (seriesPosterEl) {
+            // Stale/404 poster → placeholder, not a broken-image icon (clear srcset first).
+            seriesPosterEl.onerror = () => { seriesPosterEl.onerror = null; seriesPosterEl.removeAttribute('srcset'); seriesPosterEl.src = '/img/norva-media-placeholder.png'; };
+            seriesPosterEl.removeAttribute('srcset');
+            seriesPosterEl.src = poster;
+        }
         document.getElementById('series-title').textContent = this.getSeriesDisplayTitle(series);
-        document.getElementById('series-plot').textContent = series.tmdb?.overview || series.plot || 'No summary available yet.';
+        document.getElementById('series-plot').textContent = series.tmdb?.overview || series.overview || series.description || series.plot || 'No summary available yet.';
         this.syncDetailFavoriteButton();
         this.loadRating();
         this.renderMoreLikeThis(series);
