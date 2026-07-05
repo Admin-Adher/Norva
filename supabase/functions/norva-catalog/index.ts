@@ -1460,14 +1460,18 @@ async function listLanguageFacets(url: URL, userId: string) {
 
   async function present(orFilter: string | null, tagFilter: string[] | null): Promise<boolean> {
     try {
+      // Existence check (limit 1), NOT count(exact): the menu only needs "does at least one
+      // browsable title carry this language". A count materialised every matching row (~1.3s over
+      // a 335k catalogue × 25 facets → the endpoint failed to return and the dropdowns came back
+      // empty). limit(1) stops at the first match (or an empty GIN bitmap) → ~ms.
       // deno-lint-ignore no-explicit-any
-      let q: any = db.from("cloud_titles").select("id", { count: "exact", head: true })
+      let q: any = db.from("cloud_titles").select("id")
         .eq("user_id", userId).eq("item_type", itemType).gt("variant_count", 0);
       if (orFilter) q = q.or(orFilter);
       else if (tagFilter && tagFilter.length) q = q.overlaps("version_languages", tagFilter);
       else return false;
-      const { count, error } = await q;
-      return !error && (count ?? 0) > 0;
+      const { data, error } = await q.limit(1);
+      return !error && Array.isArray(data) && data.length > 0;
     } catch (_) {
       return false;
     }
