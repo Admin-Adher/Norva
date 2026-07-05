@@ -1636,15 +1636,12 @@ class SeriesPage {
                 index,
                 resolveSourceName: (id) => this.getSourceName(id)
             });
-            const tier = desc.tier
-                ? `<span class="version-tier ${desc.tier.cls}">${MediaUtils.escapeHtml(desc.tier.label)}</span>`
+            const dot = desc.tier
+                ? `<span class="version-tier-dot ${desc.tier.cls}" title="${MediaUtils.escapeHtml(desc.tier.label)}"></span>`
                 : '';
-            const chips = desc.chips.map(c => `<span class="version-chip">${MediaUtils.escapeHtml(c)}</span>`).join('');
-            const meta = (tier || chips) ? `<span class="version-meta">${tier}${chips}</span>` : '';
             return `
                 <button class="series-version-item ${active ? 'active' : ''} ${broken ? 'is-broken' : ''}" type="button" data-index="${index}" aria-pressed="${active ? 'true' : 'false'}">
-                    <span class="version-primary${desc.confirmed ? ' is-confirmed' : ''}">${MediaUtils.escapeHtml(desc.primary)}</span>
-                    ${meta}
+                    <span class="version-line">${dot}${MediaUtils.escapeHtml(desc.segments.join(' · '))}</span>
                     ${broken ? '<span class="series-version-flag" title="Playback failed">HS</span>' : ''}
                 </button>`;
         }).join('');
