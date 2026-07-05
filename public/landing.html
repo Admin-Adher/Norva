@@ -8,15 +8,8 @@
   <meta name="description"
     content="Norva is a multi-screen cloud media player that organizes your compatible media source and syncs playback across Web, Android phone, tablet and Android TV.">
   <link rel="icon" type="image/png" href="/favicon.png">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="preload" as="style"
-    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Outfit:wght@800&display=swap"
-    onload="this.onload=null;this.rel='stylesheet'">
-  <noscript>
-    <link rel="stylesheet"
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Outfit:wght@800&display=swap">
-  </noscript>
+  <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
   <script>
     // Flag constrained devices BEFORE the stylesheet applies (no flash), so the
     // landing drops expensive real-time blur there. Desktop keeps full glass.
@@ -28,7 +21,7 @@
       if (lite) document.documentElement.classList.add('norva-lite');
     } catch (e) {}
   </script>
-  <link rel="stylesheet" href="/css/landing.css?v=29">
+  <link rel="stylesheet" href="/css/landing.css?v=30">
 </head>
 
 <body>
