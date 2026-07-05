@@ -1214,14 +1214,17 @@ const MediaUtils = (() => {
     }
 
     // ---- Version buttons (Movie + Series fiches) ------------------------------------
-    // Providers don't populate the structured language/quality columns (they're mostly
-    // null) and leave garbage prefixes ("PREFIX", "Default"), so the old labels showed
-    // "PREFIX - mkv - Strng IPTV 8K" or a bare "Version 1". versionDescriptor builds a
-    // scannable label from the signals that ARE reliable: a garbage-filtered LANGUAGE
-    // (lead), Norva's computed playback FLUIDITY tier, and — only when they actually
-    // differ across the title's versions — the attributes that distinguish them
-    // (quality / container / provider). Everything constant across versions is hidden
-    // (it doesn't help choose).
+    // In practice a title's "versions" are the SAME film re-imported many times across a
+    // provider's regional catalogue sections (AR/EN/TR/ES/Nordic…) and across providers —
+    // the audio is usually identical (original), the prefixes are subtitle/market labels,
+    // and the structured language/quality columns are null. A language-first label was
+    // therefore both misleading ("French" on every button) and useless (all the same).
+    // versionDescriptor instead builds a COMPACT, everything-visible line from the axes
+    // that actually differ and matter when choosing a copy:
+    //     Provider · Quality · Container · Market
+    // and, when even that collides (or is too thin), appends the raw provider category —
+    // the one field that reliably differs on regional re-imports ("AR ▎NETFLIX", "|EN|
+    // DOCUMENTARY"). Fluidity (compatibility_tier) rides along as an optional colour dot.
     const VERSION_TIERS = {
         direct:          { key: 'direct',    label: 'Lecture directe', cls: 'tier-direct' },
         remux:           { key: 'remux',     label: 'Remux',           cls: 'tier-remux' },
@@ -1231,75 +1234,72 @@ const MediaUtils = (() => {
 
     function versionTierInfo(item = {}) {
         const raw = String(item.compatibilityTier || item.compatibility_tier || '').toLowerCase();
-        return VERSION_TIERS[raw] || null; // 'unknown'/absent -> no pill
+        return VERSION_TIERS[raw] || null; // 'unknown'/absent -> no dot
     }
 
     function versionQuality(item = {}) {
         return item.quality || parseVersionInfo(item.raw_title || item.rawTitle || item.name || item.title || '').quality || null;
     }
 
-    // The version's OWN language (not preference-relative): real probed audio first,
-    // then the provider's leading region prefix (strict — returns null for "PREFIX"),
-    // then an embedded language tag. Never invents a language from noise.
-    function versionPrimaryLanguage(item = {}) {
-        const detected = audioLanguageBadge(
-            item.audioLanguages || item.audio_languages,
-            item.versionLanguages || item.version_languages
-        );
-        if (detected) return { text: detected, confirmed: true };
+    // Non-market words that can precede a separator but aren't region/market tags.
+    const NON_MARKET_TOKENS = /^(THE|AND|NEW|TOP|HD|FHD|UHD|4K|8K|VOD|TV)$/;
 
-        // Providers separate the language prefix with various bar/block/dot glyphs
-        // ("IT ▎ The Return", "AR │ …"); normalise them to " - " so the strict
-        // leading-tag parser (whose separator class is -–—|:/) can read them.
-        const src = String(item.raw_title || item.rawTitle || item.name || item.title || '')
-            .replace(/[▎▏▍▌│┃┆┊｜•·・]/g, ' - ');
-        const tag = parseLeadingRegionTag(src);
-        if (tag && tag.audioLang) {
-            let text = languageDisplayFull(tag.audioLang);
-            if (tag.hasSub && !tag.hasDub) text += ' · sous-titré';
-            return { text, confirmed: false };
-        }
-        const parsed = parseVersionInfo(src);
-        if (parsed.language) {
-            const code = REGION_PREFIX_LANG[String(parsed.language).toLowerCase()]
-                || normalizeLanguagePreference(parsed.language);
-            if (code) return { text: languageDisplayFull(code), confirmed: false };
-        }
-        return null;
+    // The provider's leading market/region tag ("EN -", "AR ▎", "IN-EN -", "SCAN ▎") shown
+    // verbatim as a short chip — NOT resolved to an audio language (these are catalogue/
+    // subtitle markets, not dubs). Strict: needs a short alpha token immediately followed
+    // by a separator glyph, so title words and "PREFIX"/"Default" noise return ''.
+    function versionRegionToken(item = {}) {
+        const raw = String(item.raw_title || item.rawTitle || item.name || item.title || '');
+        const m = raw.match(/^\s*([A-Za-z]{2,4}(?:[-/][A-Za-z]{2,4})?)\s*[-–—|:/▎▏▍▌│┃┆┊｜•·・]/);
+        if (!m) return '';
+        const tok = m[1].toUpperCase();
+        return NON_MARKET_TOKENS.test(tok) ? '' : tok;
+    }
+
+    // The raw provider category, lightly de-decorated ("|EN| DOCUMENTARY" -> "EN
+    // DOCUMENTARY"), used as the last-resort differentiator.
+    function versionCategoryLabel(item = {}) {
+        const raw = item.category_name || item.subtitle
+            || (item.metadata && item.metadata.categoryName) || '';
+        const s = String(raw).replace(/[★|]/g, ' ').replace(/\s+/g, ' ').trim();
+        return s.length > 26 ? `${s.slice(0, 25).trim()}…` : s;
+    }
+
+    // Provider · Quality · Container · Market — present fields only, in that order.
+    function versionSegments(item = {}, resolveSourceName) {
+        const seg = [];
+        const src = item.sourceId != null ? item.sourceId : item.source_id;
+        const provider = (typeof resolveSourceName === 'function' && src != null) ? resolveSourceName(src) : '';
+        if (provider) seg.push(String(provider));
+        const q = versionQuality(item);
+        if (q) seg.push(q);
+        const cont = item.container_extension || item.containerExtension || '';
+        if (cont) seg.push(String(cont).toUpperCase());
+        const region = versionRegionToken(item);
+        if (region) seg.push(region);
+        return seg;
     }
 
     // opts: { siblings: item[], index: number, resolveSourceName: (sourceId)=>string }
+    // Returns { segments: string[], tier }. Render segments joined by " · ".
     function versionDescriptor(item = {}, opts = {}) {
         const index = opts.index || 0;
+        const resolve = opts.resolveSourceName;
         const siblings = (Array.isArray(opts.siblings) && opts.siblings.length) ? opts.siblings : [item];
-        const lang = versionPrimaryLanguage(item);
         const tier = versionTierInfo(item);
 
-        let primary = lang && lang.text;
-        if (!primary) primary = versionQuality(item) || `Version ${index + 1}`;
-
-        const distinct = (fn) => new Set(siblings.map(fn).map(v => (v == null ? '' : String(v))).filter(Boolean));
-        const chips = [];
-        // Quality: only when it varies between versions.
-        const qHere = versionQuality(item);
-        if (qHere && distinct(versionQuality).size > 1 && qHere !== primary) chips.push(qHere);
-        // Container: only when it varies (same-language versions often differ only here).
-        const contOf = (it) => (it.container_extension || it.containerExtension || '');
-        const contHere = contOf(item);
-        if (contHere && distinct(contOf).size > 1) chips.push(String(contHere).toUpperCase());
-        // Provider: only when the versions span more than one source.
-        const srcOf = (it) => (it.sourceId || it.source_id || '');
-        if (distinct(srcOf).size > 1 && typeof opts.resolveSourceName === 'function') {
-            const nm = opts.resolveSourceName(srcOf(item));
-            if (nm) chips.push(nm);
+        const segments = versionSegments(item, resolve);
+        // If this line isn't unique across the title's versions (or is too thin to stand
+        // on its own), append the raw provider category to disambiguate.
+        const lineOf = (it) => versionSegments(it, resolve).join(' · ');
+        const mine = segments.join(' · ');
+        const collides = siblings.length > 1 && siblings.filter(s => lineOf(s) === mine).length > 1;
+        if (segments.length < 2 || collides) {
+            const cat = versionCategoryLabel(item);
+            if (cat && !segments.includes(cat)) segments.push(cat);
         }
-        // Never render two identical buttons: if the lead + fluidity + shown chips are
-        // constant across every version, tag with the index so they can be told apart.
-        const primaryOf = (it) => { const l = versionPrimaryLanguage(it); return (l && l.text) || versionQuality(it) || ''; };
-        const tierKeyOf = (it) => (versionTierInfo(it) ? versionTierInfo(it).key : '');
-        const distinguished = chips.length > 0 || distinct(primaryOf).size > 1 || distinct(tierKeyOf).size > 1;
-        if (!distinguished && siblings.length > 1) chips.push(`Version ${index + 1}`);
-        return { primary, confirmed: !!(lang && lang.confirmed), tier, chips };
+        if (!segments.length) segments.push(`Version ${index + 1}`);
+        return { segments, tier };
     }
 
     return {

@@ -6112,61 +6112,32 @@ kbd {
   text-overflow: ellipsis;
 }
 
-/* Shared version-button label (Movie + Series fiches) — language lead + fluidity pill
-   + differentiator chips. Built by MediaUtils.versionDescriptor. */
-.version-primary {
+/* Shared version-button label (Movie + Series fiches) — one compact, dot-separated
+   line "Provider · Quality · Container · Market", with an optional leading fluidity
+   dot. Built by MediaUtils.versionDescriptor. */
+.version-line {
+  display: flex;
+  align-items: center;
+  gap: 7px;
   max-width: 100%;
-  font-weight: 800;
+  font-weight: 600;
+  font-size: 0.9rem;
+  line-height: 1.3;
+  color: var(--color-text-primary);
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
-.version-primary.is-confirmed::after {
-  content: '✓';
-  margin-left: 5px;
-  color: #46d17f;
-  font-size: 0.78em;
-  font-weight: 700;
-}
-.version-meta {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  margin-top: 2px;
-}
-.version-tier {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 0.76rem;
-  font-weight: 600;
-  color: var(--color-text-secondary);
-  white-space: nowrap;
-}
-.version-tier::before {
-  content: '';
-  width: 7px;
-  height: 7px;
+.version-tier-dot {
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   background: var(--tier-dot, #8a94a6);
   flex: none;
 }
-.version-tier.tier-direct { --tier-dot: #46d17f; }
-.version-tier.tier-remux { --tier-dot: #58b0ff; }
-.version-tier.tier-transcode { --tier-dot: #f0b429; }
-.version-chip {
-  display: inline-flex;
-  align-items: center;
-  padding: 1px 7px;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--color-text-secondary);
-  font-size: 0.72rem;
-  font-weight: 600;
-  white-space: nowrap;
-}
+.version-tier-dot.tier-direct { --tier-dot: #46d17f; }
+.version-tier-dot.tier-remux { --tier-dot: #58b0ff; }
+.version-tier-dot.tier-transcode { --tier-dot: #f0b429; }
 
 .movie-version-progress {
   margin-top: auto;
