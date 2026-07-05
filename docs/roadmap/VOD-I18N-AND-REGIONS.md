@@ -156,3 +156,65 @@ Replace the 6 hard-coded regions with a **normalised country model**:
 3. **Translation population** — lazy on-demand into the global cache (recommended) vs
    pre-enrich top-N languages; and whether to cache episode i18n or live-fetch in the
    resolved language.
+
+---
+
+## Part C — Resolved decisions & finalised architecture (2026-07-05)
+
+**Decisions:** (1) synopsis language = **subtitle → audio → region → device locale → EN**
+(best global default; a synopsis is read, and audio="Original" isn't a readable language);
+(2) country model = **curated ~40 ISO-3166 countries + kept market bundles**; (3) population
+= **hybrid** (lazy on-demand into the global cache + pre-warm of trending titles).
+
+### C.1 Resolved content language
+
+```
+resolveContentLang(prefs, title, deviceLocale):
+  1. prefs.preferredSubtitleLanguage        // concrete lang, not 'none'
+  2. prefs.preferredAudioLanguage            // concrete lang, not 'original'/'none'
+  3. region.defaultLanguage                  // FR→fr, US→en, MAGHREB→ar, LUSOPHONE→pt, INTERNATIONAL→en
+  4. deviceLocale                            // navigator.language, 2-letter
+  5. 'en'
+```
+Per-title availability fallback when serving (readability-first):
+```
+overview = i18n[resolvedLang] ?? i18n['en'] ?? i18n[originalLang] ?? tmdb.overview ?? providerPlot ?? null
+```
+
+### C.2 Country model — `public/js/data/regions.js`
+
+One data table drives the dropdown, the TMDB region, and the region→language link:
+```
+{ code:'FR', name:'France', flag:'🇫🇷', tmdbRegion:'FR', languages:['fr'], defaultLanguage:'fr', kind:'country' }
+{ code:'MAGHREB', name:'Maghreb', flag:'🌍', languages:['ar','fr'], defaultLanguage:'ar', kind:'bundle' }
+```
+~40 countries + the 4 bundles (Maghreb, Lusophone, Nordic, International). A normaliser
+accepts legacy stored values (`FR`, `INTERNATIONAL`) so no saved preference breaks. Dropdown:
+searchable, countries first, bundles grouped at the bottom.
+
+### C.3 Population — hybrid
+
+- **On-demand**: `norva-catalog`, when `i18n[resolvedLang]` is missing for a served title,
+  lazily fetches the TMDB overview in that language and writes it to the **global**
+  `catalog_titles.metadata.i18n[lang]` (deduped by an `i18n_attempted` guard, rate-limited).
+- **Pre-warm**: a cron enriches the top ~500 trending titles × `{fr,en,es,ar,pt}` so popular
+  fiches are already translated.
+
+### C.4 Series ↔ episode coherence
+
+Series and episode overviews both resolve through the **same** `resolvedContentLang`.
+`getSeasonEpisodes` fetches in `resolvedLang` (not the hard-coded fr/en). v1 keeps the live
+episode fetch (coherent with the series); an episode-i18n cache is a later optimisation.
+
+### C.5 Phased implementation
+
+| Phase | Scope | Surface | Risk |
+|-------|-------|---------|------|
+| **1** | `regions.js` (curated + bundles) + normaliser + searchable dropdown + region→defaultLanguage | Frontend | Low |
+| **2** | `resolveContentLang` chain; pass `?lang=` to all catalog/episode calls | Frontend | Low |
+| **3** | `norva-catalog`: generalise enrichment locale (any lang, not fr/en) + lazy on-demand i18n → global cache | Edge | Med |
+| **4** | Pre-warm cron (trending × top langs) + `i18n_attempted` guard | Edge + cron | Med |
+| **5** | Episode coherence in `resolvedLang` + optional episode-i18n cache | Edge | Low |
+
+No titles schema change (`metadata.i18n` is already language-flexible); Phase 4 may add a
+lightweight `i18n_attempted` guard.
