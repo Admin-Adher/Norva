@@ -214,7 +214,7 @@ episode fetch (coherent with the series); an episode-i18n cache is a later optim
 | **2** | `resolveContentLang` chain; propagate `?lang=` to all catalog fetches | Frontend | Low | ✅ **shipped (#168)** |
 | **3** | `norva-catalog`: generalise serving locale (any lang, not fr/en) + lazy on-demand i18n → global cache | Edge | Med | ✅ **shipped (#169)** |
 | **4** | On-demand full-map i18n + `i18n_attempted_at` guard + gap-fill cron | Edge + cron | Med | ✅ **shipped** |
-| **5** | Episode-i18n cache (coherence itself landed in #169) | Edge | Low | — |
+| **5** | Persistent episode-i18n L2 cache (coherence itself landed in #169) | Edge | Low | ✅ **shipped** |
 
 No titles schema change (`metadata.i18n` is already language-flexible); Phase 4 may add a
 lightweight `i18n_attempted` guard.
@@ -373,3 +373,32 @@ synopsis only *appears* in rails once `NORVA_CATALOG_READ_SOURCE=catalog_titles`
 **Honest scope**: this does not (and cannot) exceed TMDB's own translation coverage (fr 67 %,
 es 60 %, pt 55 %, ar 25 % of matched titles) — it fills what TMDB has, on demand and for the
 residual gaps, and stops asking for what TMDB lacks.
+
+### C.9 Phase 5 — as shipped
+
+Episode **coherence** already landed in #169 (C.4). Phase 5 adds the deferred piece: a
+**persistent L2 cache** for episode metadata, so a season's TMDB stills / localized names /
+overviews / air dates aren't re-fetched from TMDB on every isolate recycle or cold CDN PoP.
+
+- Before: `getTmdbEpisodes` had two **volatile** tiers — an in-isolate `Map` (6 h) and the 1-day
+  CDN cache. Both evaporate on isolate recycle / PoP miss / age-out, and **Phase 3 multiplied the
+  distinct `(season, lang)` keys** by generalizing the locale beyond fr/en, so the TMDB re-fetch
+  churn grew.
+- After: a new **`catalog_episode_i18n(provider_tmdb_id, season, lang, episodes, fetched_at, …)`**
+  table (PK `(provider_tmdb_id, season, lang)`, RLS on, service-role only — mirrors
+  `cloud_series_info_cache`). `getTmdbEpisodes` is now **in-isolate → Postgres L2 → live TMDB**:
+  a read-through single-PK probe (fresh within `EPISODE_I18N_TTL_MS` = 14 days) and a bounded,
+  best-effort write-through upsert. A season fetched **once** — by any user, in any language, at
+  any PoP — then serves everyone with no further TMDB call and survives eviction.
+- **Progressive-enhancement only**: the client still merges this onto the provider's own episode
+  rows and degrades to them when a key is absent, so the cache is a resilience / TMDB-cost tier,
+  never the source of which episodes exist. It's only read/written for a **valid 2-letter lang**
+  and only written for a **non-empty** season (an empty result is never cached as authoritative).
+- **Scale**: the addressable universe is small (~7.9 k TMDB-matched series / ~15 k seasons × the
+  languages actually browsed); an optional `norva-episode-i18n-prune` pure-SQL cron evicts rows
+  untouched for 90 days (see `ENRICHMENT_CRON_SETUP.md`).
+
+**Migration** `20260705030000_catalog_episode_i18n.sql` (table + RLS + `lang` CHECK). No RPC —
+the write is a plain full-row upsert from the service-role client. **Rollout**: apply the
+migration before/with the edge deploy; the read/write are best-effort, so a deploy landing first
+just misses the L2 until the table exists.

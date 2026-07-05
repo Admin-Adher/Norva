@@ -215,6 +215,11 @@ async function getEnrichmentProgress(userId: string): Promise<EnrichmentProgress
 // ==================== TMDB extras (fiches: trailer + credits) ====================
 
 const TMDB_META_TTL_MS = 6 * 3_600_000;
+// L2 (Postgres) freshness for the persistent episode cache (Phase 5). Longer than the 6h
+// in-isolate tier since episode metadata is stable; short enough that a still-airing season
+// picks up TMDB's new episodes within a couple weeks (the client shows provider episodes
+// meanwhile — this cache is progressive enhancement, never the source of which episodes exist).
+const EPISODE_I18N_TTL_MS = 14 * 24 * 3_600_000;
 const tmdbMetaCache = new Map<string, { at: number; value: JsonRecord }>();
 
 function tmdbApiKey(): string {
@@ -391,10 +396,44 @@ async function getTmdbMeta(url: URL): Promise<JsonRecord> {
 
 const tmdbEpisodesCache = new Map<string, { at: number; value: JsonRecord }>();
 
+// L2 (Postgres) read for a season's episode metadata (Phase 5). One PK probe on
+// catalog_episode_i18n; returns the cached value when present and fresh, else null so the
+// caller falls through to TMDB. Best-effort — a DB error never blocks the fiche.
+async function readEpisodeI18n(tmdbId: string, season: number, lang2: string): Promise<JsonRecord | null> {
+  try {
+    const { data, error } = await db.from("catalog_episode_i18n")
+      .select("episodes, fetched_at")
+      .eq("provider_tmdb_id", tmdbId).eq("season", season).eq("lang", lang2)
+      .maybeSingle();
+    if (error || !data) return null;
+    if (Date.now() - new Date(String(data.fetched_at)).getTime() >= EPISODE_I18N_TTL_MS) return null;
+    return { available: true, episodes: (data.episodes as unknown[]) ?? [] };
+  } catch (_) {
+    return null;
+  }
+}
+
+// L2 (Postgres) write-through for a season's episodes (Phase 5): a bounded, best-effort
+// full-row upsert so a season fetched once serves every future viewer/PoP with no TMDB call.
+async function writeEpisodeI18n(tmdbId: string, season: number, lang2: string, episodes: unknown[]): Promise<void> {
+  try {
+    const nowIso = new Date().toISOString();
+    await Promise.race([
+      db.from("catalog_episode_i18n").upsert(
+        { provider_tmdb_id: tmdbId, season, lang: lang2, episodes, fetched_at: nowIso, updated_at: nowIso },
+        { onConflict: "provider_tmdb_id,season,lang" }),
+      new Promise((resolve) => setTimeout(resolve, 1500)),
+    ]);
+  } catch (_) {
+    // Best-effort L2 population; a missed write just re-fetches TMDB next cold miss.
+  }
+}
+
 // One TMDB season's episode metadata (still_path, localized name, air_date, runtime,
-// vote_average), keyed by (tmdbId, season, lang). The client merges it into the fiche's
-// provider episode rows as progressive enhancement — it degrades to provider data when
-// the key is unset or TMDB has no match.
+// vote_average), keyed by (tmdbId, season, lang). Served through three tiers — in-isolate
+// Map (6h) → persistent catalog_episode_i18n (Phase 5, EPISODE_I18N_TTL_MS) → live TMDB — then
+// the client merges it into the fiche's provider episode rows as progressive enhancement,
+// degrading to provider data when the key is unset or TMDB has no match.
 async function getTmdbEpisodes(url: URL): Promise<JsonRecord> {
   const tmdbId = String(url.searchParams.get("tmdbId") || "").trim();
   const season = String(url.searchParams.get("season") || "").trim();
@@ -407,6 +446,19 @@ async function getTmdbEpisodes(url: URL): Promise<JsonRecord> {
   const cacheKey = `${tmdbId}:${season}:${lang2}`;
   const cached = tmdbEpisodesCache.get(cacheKey);
   if (cached && Date.now() - cached.at < TMDB_META_TTL_MS) return cached.value;
+
+  // L2: persistent per-(season, lang) cache under the in-memory tier (Phase 5). Serves every
+  // user/PoP without a TMDB hit and survives isolate/CDN eviction. Only for a valid 2-letter
+  // lang (the table key/CHECK); any other input falls straight through to TMDB.
+  const seasonNum = Number(season);
+  const validLang = /^[a-z]{2}$/.test(lang2);
+  if (validLang) {
+    const persisted = await readEpisodeI18n(tmdbId, seasonNum, lang2);
+    if (persisted) {
+      tmdbEpisodesCache.set(cacheKey, { at: Date.now(), value: persisted });
+      return persisted;
+    }
+  }
 
   const params = new URLSearchParams({ language: tmdbLocale(lang2) });
   const headers: Record<string, string> = {};
@@ -433,6 +485,11 @@ async function getTmdbEpisodes(url: URL): Promise<JsonRecord> {
 
   const value: JsonRecord = { available: true, episodes };
   tmdbEpisodesCache.set(cacheKey, { at: Date.now(), value });
+  // Populate the persistent L2 (Phase 5) — only for a valid lang and a non-empty season (never
+  // cache an empty result as authoritative; a genuinely empty season re-checks TMDB next miss).
+  if (validLang && episodes.length > 0) {
+    await writeEpisodeI18n(tmdbId, seasonNum, lang2, episodes);
+  }
   if (tmdbEpisodesCache.size > 2048) {
     const oldest = [...tmdbEpisodesCache.entries()].sort((a, b) => a[1].at - b[1].at)[0];
     if (oldest) tmdbEpisodesCache.delete(oldest[0]);

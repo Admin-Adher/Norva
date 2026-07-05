@@ -580,6 +580,13 @@ $cron$);
 select cron.schedule('norva-series-info-cache-prune', '15 2 * * *', $cron$
   delete from public.cloud_series_info_cache where fetched_at < now() - interval '30 days'
 $cron$);
+
+-- Episode-i18n L2 eviction (Phase 5, pure SQL). Bounds catalog_episode_i18n to seasons whose
+-- TMDB metadata was fetched in the last 90 days; a re-view repopulates on demand. Table is
+-- small (~15k seasons × browsed langs), so this is housekeeping, not a hot path.
+select cron.schedule('norva-episode-i18n-prune', '18 2 * * *', $cron$
+  delete from public.catalog_episode_i18n where fetched_at < now() - interval '90 days'
+$cron$);
 ```
 
 ## Inspect / pause / remove
