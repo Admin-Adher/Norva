@@ -402,3 +402,9 @@ overviews / air dates aren't re-fetched from TMDB on every isolate recycle or co
 the write is a plain full-row upsert from the service-role client. **Rollout**: apply the
 migration before/with the edge deploy; the read/write are best-effort, so a deploy landing first
 just misses the L2 until the table exists.
+
+**Adversarial review (3 lenses) — 2 confirmed timing findings fixed**: (1) 🟠 the L2 **read** was
+unbounded (unlike the write's 1.5 s race and `tmdbFetch`'s 8 s) — a slow PostgREST probe could
+block the fiche; now `Promise.race`-bounded to 1.5 s → falls through to TMDB. (2) 🟡 the L2 write
+was `await`ed on the response path (up to 1.5 s on a cold miss); now dispatched via
+`EdgeRuntime.waitUntil` when available (await fallback), so it completes after the response.

@@ -401,10 +401,17 @@ const tmdbEpisodesCache = new Map<string, { at: number; value: JsonRecord }>();
 // caller falls through to TMDB. Best-effort — a DB error never blocks the fiche.
 async function readEpisodeI18n(tmdbId: string, season: number, lang2: string): Promise<JsonRecord | null> {
   try {
-    const { data, error } = await db.from("catalog_episode_i18n")
-      .select("episodes, fetched_at")
-      .eq("provider_tmdb_id", tmdbId).eq("season", season).eq("lang", lang2)
-      .maybeSingle();
+    // Bounded like every other cross-tier hop (write, tmdbFetch): a slow/hung PostgREST probe
+    // must fall through to the 8s-bounded TMDB fetch within 1.5s, never block the fiche.
+    const result = await Promise.race([
+      db.from("catalog_episode_i18n")
+        .select("episodes, fetched_at")
+        .eq("provider_tmdb_id", tmdbId).eq("season", season).eq("lang", lang2)
+        .maybeSingle(),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 1500)),
+    ]);
+    if (!result) return null;
+    const { data, error } = result;
     if (error || !data) return null;
     if (Date.now() - new Date(String(data.fetched_at)).getTime() >= EPISODE_I18N_TTL_MS) return null;
     return { available: true, episodes: (data.episodes as unknown[]) ?? [] };
@@ -487,8 +494,13 @@ async function getTmdbEpisodes(url: URL): Promise<JsonRecord> {
   tmdbEpisodesCache.set(cacheKey, { at: Date.now(), value });
   // Populate the persistent L2 (Phase 5) — only for a valid lang and a non-empty season (never
   // cache an empty result as authoritative; a genuinely empty season re-checks TMDB next miss).
+  // Prefer EdgeRuntime.waitUntil so the (bounded, best-effort) write completes AFTER the response
+  // instead of adding up to 1.5s to this cold-miss request; await as a fallback where absent.
   if (validLang && episodes.length > 0) {
-    await writeEpisodeI18n(tmdbId, seasonNum, lang2, episodes);
+    const write = writeEpisodeI18n(tmdbId, seasonNum, lang2, episodes);
+    const er = (globalThis as unknown as { EdgeRuntime?: { waitUntil?: (p: Promise<unknown>) => void } }).EdgeRuntime;
+    if (er && typeof er.waitUntil === "function") er.waitUntil(write);
+    else await write;
   }
   if (tmdbEpisodesCache.size > 2048) {
     const oldest = [...tmdbEpisodesCache.entries()].sort((a, b) => a[1].at - b[1].at)[0];
