@@ -10,8 +10,13 @@
   <link rel="icon" type="image/png" href="/favicon.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Outfit:wght@800&display=swap"
-    rel="stylesheet">
+  <link rel="preload" as="style"
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Outfit:wght@800&display=swap"
+    onload="this.onload=null;this.rel='stylesheet'">
+  <noscript>
+    <link rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Outfit:wght@800&display=swap">
+  </noscript>
   <script>
     // Flag constrained devices BEFORE the stylesheet applies (no flash), so the
     // landing drops expensive real-time blur there. Desktop keeps full glass.
@@ -71,7 +76,10 @@
 <body>
   <header class="landing-nav">
     <a class="brand" href="/" data-norva-home-link aria-label="Norva home">
-      <img src="/img/norva-app-icon.png" alt="">
+      <picture>
+        <source type="image/webp" srcset="/img/norva-app-icon-96.webp">
+        <img src="/img/norva-app-icon-96.png" width="38" height="38" alt="" decoding="async">
+      </picture>
       <span>Norva</span>
     </a>
     <button class="nav-toggle" type="button" aria-label="Open navigation" aria-expanded="false">
@@ -115,7 +123,7 @@
       </div>
 
       <div class="hero-visual hero-visual-image" aria-label="Norva multi-screen interface preview">
-        <img src="/assets/landing/norva-ecosystem-4-devices.svg?v=10" alt="Norva synchronized playback preview across Web, Android TV, Android phone and Android tablet">
+        <img src="/assets/landing/norva-ecosystem-4-devices.svg?v=10" alt="Norva synchronized playback preview across Web, Android TV, Android phone and Android tablet" width="1600" height="884" fetchpriority="high" decoding="async">
       </div>
     </section>
 
@@ -166,8 +174,8 @@
       </div>
       <div class="sync-panel sync-panel-art" aria-label="One playback synchronized across Web, Android TV, Android phone and Android tablet">
         <picture class="sync-art-picture">
-          <source media="(max-width: 640px)" srcset="/assets/landing/norva-one-playback-four-screens-mobile.svg?v=1">
-          <img src="/assets/landing/norva-one-playback-four-screens.svg?v=1" alt="One playback synchronized across Web, Android TV, Android phone and Android tablet">
+          <source media="(max-width: 640px)" srcset="/assets/landing/norva-one-playback-four-screens-mobile.svg?v=1" width="480" height="2180">
+          <img src="/assets/landing/norva-one-playback-four-screens.svg?v=1" alt="One playback synchronized across Web, Android TV, Android phone and Android tablet" width="1600" height="700" loading="lazy" decoding="async">
         </picture>
       </div>
     </section>
@@ -388,7 +396,7 @@
 
   <footer class="landing-footer">
     <div>
-      <a class="brand" href="/" data-norva-home-link><img src="/img/norva-app-icon.png" alt=""><span>Norva</span></a>
+      <a class="brand" href="/" data-norva-home-link><picture><source type="image/webp" srcset="/img/norva-app-icon-96.webp"><img src="/img/norva-app-icon-96.png" width="38" height="38" alt="" decoding="async"></picture><span>Norva</span></a>
       <p>The cloud media player that organizes your compatible source and syncs your experience across screens.</p>
     </div>
     <nav>

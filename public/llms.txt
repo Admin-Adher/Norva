@@ -1,0 +1,25 @@
+# Norva
+
+> Norva is a multi-screen cloud media player that organizes your own compatible media source and syncs playback across the Web, Android phone, tablet and Android TV. Norva is a player, not a content provider: it includes no channels, movies, series, sports or IPTV subscriptions, and it does not sell third-party credentials.
+
+## What Norva does
+- Organizes the catalog from a compatible media source you are authorized to use
+- Synchronizes playback progress, history, favorites and preferences across your screens
+- Offers profiles, audio/subtitle preferences and personalized recommendations from your own catalog
+- Provides offline mode on compatible devices, when the source and rights allow it
+
+## What Norva does not do
+- It does not provide or sell channels, movies, series, sports streams, M3U lists or IPTV subscriptions
+- It does not supply third-party credentials or a parallel content catalog
+
+## Pages
+- [Home](https://norva.tv/)
+- [Terms](https://norva.tv/terms.html)
+- [Privacy](https://norva.tv/privacy.html)
+- [Legal notice](https://norva.tv/mentions-legales.html)
+- [Support](https://norva.tv/support.html)
+
+## Trust
+- Account data hosted in the European Union, with GDPR access/export/delete rights
+- Encrypted downloads on device where hardware-backed keys are available
+- Operated by a registered French business, with a public legal notice

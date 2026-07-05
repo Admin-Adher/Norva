@@ -1,0 +1,19 @@
+User-agent: *
+Allow: /
+# Internal / authenticated app surfaces — no SEO value, keep out of the index.
+Disallow: /app
+Disallow: /app.html
+Disallow: /account.html
+Disallow: /subscribe.html
+Disallow: /paywall.html
+Disallow: /pair.html
+Disallow: /pair-approve.html
+Disallow: /cloud.html
+Disallow: /cloud-pair.html
+Disallow: /cloud-link.html
+Disallow: /hub-connect.html
+Disallow: /delete-account.html
+Disallow: /probe.html
+Disallow: /webengine/
+
+Sitemap: https://norva.tv/sitemap.xml
