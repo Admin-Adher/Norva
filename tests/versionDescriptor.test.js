@@ -2,9 +2,10 @@
 
 // Version-button label builder for the Movie/Series fiches (MediaUtils.versionDescriptor).
 // A title's "versions" are usually the SAME film re-imported across a provider's regional
-// catalogue sections and across providers, so the label is a compact, everything-visible
-// line "Provider · Quality · Container · Market", falling back to the raw provider
-// category when that collides. mediaUtils.js is a browser IIFE; load it with a shim.
+// catalogue sections and across providers. The label is two-tier — { headline, meta,
+// badge, tier } — leading with whatever DIFFERS (market by default, provider when the
+// market is constant), the constants demoted to the muted meta line. mediaUtils.js is a
+// browser IIFE; load it with a shim.
 
 const test = require('node:test');
 const assert = require('node:assert');
@@ -17,64 +18,98 @@ const win = {};
 new Function('window', src)(win);
 const M = win.MediaUtils;
 
-const names = { s1: 'AtlasPro', s2: 'KING365', s3: 'FlixHD' };
+const names = { s1: 'Strng IPTV 8K', s2: 'AtlasPro', s3: 'KING365' };
 const resolve = (id) => names[id] || '';
+const mk = (raw, extra) => Object.assign({ raw_title: raw, container_extension: 'mkv', sourceId: 's1' }, extra || {});
+const desc = (item, siblings) => M.versionDescriptor(item, { siblings: siblings || [item], resolveSourceName: resolve });
 
-test('compact line = Provider · Quality · Container · Market, present fields only', () => {
-    const it = { raw_title: 'EN - One Last Adventure 4K (2026)', container_extension: 'mkv', sourceId: 's1' };
-    const d = M.versionDescriptor(it, { siblings: [it], index: 0, resolveSourceName: resolve });
-    assert.deepStrictEqual(d.segments, ['AtlasPro', '4K', 'MKV', 'EN']);
+test('headline = humanised MARKET; provider·container demoted to meta', () => {
+    const d = desc(mk('GR - One Last Adventure'));
+    assert.strictEqual(d.headline, 'Greek');
+    assert.strictEqual(d.meta, 'Strng IPTV 8K · MKV');
 });
 
-test('market token read from the prefix incl. the "▎" bar; "PREFIX"/title words rejected', () => {
-    const ar = M.versionDescriptor({ raw_title: 'AR ▎ The Return', container_extension: 'mkv', sourceId: 's2' },
-        { resolveSourceName: resolve });
-    assert.ok(ar.segments.includes('AR'), `expected AR market, got ${JSON.stringify(ar.segments)}`);
-
-    // "PREFIX" is >4 chars with no valid following separator match -> no bogus market token.
-    const junk = M.versionDescriptor({ raw_title: 'PREFIX - Oscar Shaw', container_extension: 'mkv', sourceId: 's1' },
-        { resolveSourceName: resolve });
-    assert.ok(!junk.segments.includes('PREFIX'), `PREFIX leaked: ${JSON.stringify(junk.segments)}`);
-
-    // A clean title (no prefix) yields no market token.
-    const clean = M.versionDescriptor({ raw_title: 'One Last Adventure 2026', container_extension: 'mp4', sourceId: 's3' },
-        { resolveSourceName: resolve });
-    assert.deepStrictEqual(clean.segments, ['FlixHD', 'MP4']);
+test('ISO tokens resolve via the language map incl. the "▎" bar separator', () => {
+    assert.strictEqual(desc(mk('ES ▎ X')).headline, 'Spanish');
+    assert.strictEqual(desc(mk('AR ▎ X')).headline, 'Arabic');
+    assert.strictEqual(desc(mk('FR - X')).headline, 'French');
 });
 
-test('container varies -> visible on every button (no smart-hide)', () => {
-    const a = { raw_title: 'EN - X', container_extension: 'mkv', sourceId: 's1' };
-    const b = { raw_title: 'EN - X', container_extension: 'mp4', sourceId: 's1' };
-    const da = M.versionDescriptor(a, { siblings: [a, b], index: 0, resolveSourceName: resolve });
-    assert.ok(da.segments.includes('MKV'), `container should always show, got ${JSON.stringify(da.segments)}`);
+test('non-ISO IPTV tokens get a human label (Nordic / Netflix / Multi / Latino)', () => {
+    assert.strictEqual(desc(mk('SCAN ▎ X')).headline, 'Nordic');
+    assert.strictEqual(desc(mk('NF - X')).headline, 'Netflix');
+    assert.strictEqual(desc(mk('LAT - X')).headline, 'Latino');
+    // No leading token, but the category names the platform.
+    assert.strictEqual(desc(mk('One Last Adventure - 2026', { category_name: 'Multi-Sub★ TOP NEW' })).headline, 'Multi');
 });
 
-test('when the line would collide, the raw provider category disambiguates', () => {
-    // Same provider, same container, same market -> identical line -> append category.
-    const a = { raw_title: 'EN - X', container_extension: 'mkv', sourceId: 's1', category_name: '|EN| DOCUMENTARY' };
-    const b = { raw_title: 'EN - X', container_extension: 'mkv', sourceId: 's1', category_name: 'EN ▎CINEMA MOVIES' };
-    const da = M.versionDescriptor(a, { siblings: [a, b], index: 0, resolveSourceName: resolve });
-    const db = M.versionDescriptor(b, { siblings: [a, b], index: 1, resolveSourceName: resolve });
-    assert.ok(da.segments.includes('EN DOCUMENTARY'), `A needs category, got ${JSON.stringify(da.segments)}`);
-    assert.ok(db.segments.includes('EN ▎CINEMA MOVIES'), `B needs category, got ${JSON.stringify(db.segments)}`);
-    assert.notDeepStrictEqual(da.segments, db.segments); // the two buttons are now distinct
+test('subtitle-only markets carry a "· ST" nuance', () => {
+    assert.strictEqual(desc(mk('AR-SUBS - Something')).headline, 'Arabic · ST');
 });
 
-test('distinct providers/markets do NOT trigger the category fallback', () => {
-    const a = { raw_title: 'EN - X', container_extension: 'mkv', sourceId: 's1', category_name: '|EN| DOCUMENTARY' };
-    const b = { raw_title: 'TR ▎ X', container_extension: 'mkv', sourceId: 's2', category_name: 'TR ▎NETFLIX' };
-    const da = M.versionDescriptor(a, { siblings: [a, b], index: 0, resolveSourceName: resolve });
-    assert.deepStrictEqual(da.segments, ['AtlasPro', 'MKV', 'EN']); // no category appended
+test('quality rides as a badge (4K flagged), never duplicated in the headline', () => {
+    const d = desc(mk('EN - One Last Adventure 4K (2026)'));
+    assert.strictEqual(d.headline, 'English');
+    assert.strictEqual(d.badge, '4K');
+    assert.ok(!/4K/i.test(d.meta), 'quality should not repeat in meta');
 });
 
-test('nothing distinctive at all -> a numeric tag so buttons are never identical', () => {
-    const a = { raw_title: 'X', container_extension: '', sourceId: null };
-    const d = M.versionDescriptor(a, { siblings: [a, { ...a }], index: 2, resolveSourceName: resolve });
-    assert.deepStrictEqual(d.segments, ['Version 3']);
+test('garbage / noise prefixes never become the headline', () => {
+    // "PREFIX" and "TOP" are not markets -> fall through to the provider lead, no market shown.
+    for (const raw of ['PREFIX - Oscar Shaw', 'TOP - Some Title']) {
+        const d = desc(mk(raw));
+        assert.strictEqual(d.headline, 'Strng IPTV 8K');
+        assert.ok(!/PREFIX|TOP/i.test(d.headline + d.meta), `noise leaked for "${raw}"`);
+    }
 });
 
-test('fluidity tier still maps (rendered as a leading colour dot)', () => {
-    assert.strictEqual(M.versionDescriptor({ compatibility_tier: 'direct' }).tier.key, 'direct');
+test('ADAPTIVE: market constant but provider varies -> provider leads', () => {
+    const set = [mk('EN - X', { sourceId: 's1' }), mk('EN - X', { sourceId: 's2' }), mk('EN - X', { sourceId: 's3' })];
+    const d0 = M.versionDescriptor(set[0], { siblings: set, resolveSourceName: resolve });
+    const d1 = M.versionDescriptor(set[1], { siblings: set, resolveSourceName: resolve });
+    assert.strictEqual(d0.headline, 'Strng IPTV 8K');       // provider leads
+    assert.strictEqual(d1.headline, 'AtlasPro');
+    assert.ok(d0.meta.includes('English'), 'the constant market demotes to meta');
+});
+
+test('market varies -> market leads even across multiple providers', () => {
+    const set = [mk('EN - X', { sourceId: 's1' }), mk('FR - X', { sourceId: 's2' })];
+    const d0 = M.versionDescriptor(set[0], { siblings: set, resolveSourceName: resolve });
+    assert.strictEqual(d0.headline, 'English');
+    assert.ok(d0.meta.includes('Strng IPTV 8K'));
+});
+
+test('true duplicates (same market+provider+container+quality) split by raw category', () => {
+    const a = mk('EN - X', { sourceId: 's1', category_name: '|EN| DOCUMENTARY' });
+    const b = mk('EN - X', { sourceId: 's1', category_name: 'EN ▎CINEMA MOVIES' });
+    const da = M.versionDescriptor(a, { siblings: [a, b], resolveSourceName: resolve });
+    const db = M.versionDescriptor(b, { siblings: [a, b], resolveSourceName: resolve });
+    assert.ok(da.meta.includes('EN DOCUMENTARY'), `A needs category: ${da.meta}`);
+    assert.ok(db.meta.includes('EN ▎CINEMA MOVIES'), `B needs category: ${db.meta}`);
+    assert.notStrictEqual(da.meta, db.meta);
+});
+
+test('headline is never repeated in meta (market label == provider name)', () => {
+    // Provider literally named "Netflix"; NF market also resolves to "Netflix".
+    const nf = (id) => ({ x: 'Netflix' }[id] || '');
+    const d = M.versionDescriptor(mk('NF - The Film', { sourceId: 'x' }), { resolveSourceName: nf });
+    assert.strictEqual(d.headline, 'Netflix');
+    assert.ok(!d.meta.split(' · ').includes('Netflix'), `Netflix duplicated in meta: ${d.meta}`);
+    assert.strictEqual(d.meta, 'MKV');
+});
+
+test('SCAND (5-char Nordic prefix) resolves; no literal token leaks', () => {
+    assert.strictEqual(desc(mk('SCAND - The Movie')).headline, 'Nordic');
+    assert.strictEqual(desc(mk('SCAN ▎ X')).headline, 'Nordic');
+});
+
+test('a null hole in siblings does not throw', () => {
+    const a = mk('EN - X');
+    assert.doesNotThrow(() => M.versionDescriptor(a, { siblings: [a, null, undefined], resolveSourceName: resolve }));
+});
+
+test('fluidity tier maps to a dot descriptor (or null when unknown)', () => {
+    assert.strictEqual(M.versionDescriptor({ compatibility_tier: 'direct' }).tier.cls, 'tier-direct');
     assert.strictEqual(M.versionDescriptor({ compatibility_tier: 'video_transcode' }).tier.cls, 'tier-transcode');
     assert.strictEqual(M.versionDescriptor({ compatibility_tier: 'unknown' }).tier, null);
 });

@@ -1214,23 +1214,54 @@ const MediaUtils = (() => {
     }
 
     // ---- Version buttons (Movie + Series fiches) ------------------------------------
-    // In practice a title's "versions" are the SAME film re-imported many times across a
-    // provider's regional catalogue sections (AR/EN/TR/ES/Nordic…) and across providers —
-    // the audio is usually identical (original), the prefixes are subtitle/market labels,
-    // and the structured language/quality columns are null. A language-first label was
-    // therefore both misleading ("French" on every button) and useless (all the same).
-    // versionDescriptor instead builds a COMPACT, everything-visible line from the axes
-    // that actually differ and matter when choosing a copy:
-    //     Provider · Quality · Container · Market
-    // and, when even that collides (or is too thin), appends the raw provider category —
-    // the one field that reliably differs on regional re-imports ("AR ▎NETFLIX", "|EN|
-    // DOCUMENTARY"). Fluidity (compatibility_tier) rides along as an optional colour dot.
+    // A title's "versions" are usually the SAME film re-imported across a provider's
+    // regional catalogue sections (EN/AR/FR/Nordic/Netflix…) and across providers. The
+    // useful axes when choosing a copy are the MARKET (language/edition) and the PROVIDER;
+    // container/quality are secondary. versionDescriptor returns a two-tier label —
+    //   { headline, meta, badge, tier }
+    // headline leads with the axis that actually DIFFERS across the title's versions
+    // (market by default; the provider when the market is constant but the provider isn't),
+    // meta carries the quiet constants (provider · container), quality rides as a badge,
+    // fluidity as a colour dot. Market names reuse the app's languageDisplayFull (English,
+    // consistent with the rest of the UI) plus a small map for the non-ISO IPTV tokens.
     const VERSION_TIERS = {
         direct:          { key: 'direct',    label: 'Lecture directe', cls: 'tier-direct' },
         remux:           { key: 'remux',     label: 'Remux',           cls: 'tier-remux' },
         video_transcode: { key: 'transcode', label: 'Transcode',       cls: 'tier-transcode' },
         transcode:       { key: 'transcode', label: 'Transcode',       cls: 'tier-transcode' }
     };
+
+    // Non-ISO market/platform tokens seen in the live catalogue that languageDisplayFull /
+    // REGION_PREFIX_LANG don't cover. English labels, to match the rest of the UI.
+    const MARKET_LABELS = {
+        // Nordic / Scandinavian bundles + individual Nordic languages
+        // (keys must be <=5 chars — the leading-token parser caps there; NORDIC/SCANDI as
+        //  a leading prefix are covered by the category-keyword path below.)
+        SC: 'Nordic', SCA: 'Nordic', SCAN: 'Nordic', SCAND: 'Nordic',
+        SE: 'Swedish', DK: 'Danish', NO: 'Norwegian', FI: 'Finnish', IS: 'Icelandic',
+        // Streaming platforms used as catalogue sections
+        NF: 'Netflix', NFLX: 'Netflix', AMZ: 'Prime Video', DSNP: 'Disney+', DSN: 'Disney+',
+        HBO: 'HBO Max', ATV: 'Apple TV+', PRMT: 'Paramount+', PCK: 'Peacock', MULTI: 'Multi',
+        // French / Latin-American variants
+        QFR: 'French (QC)', FRQ: 'French (QC)', QC: 'French (QC)', LAT: 'Latino', LA: 'Latino',
+        // Balkans / Central & Eastern Europe
+        EXYU: 'Ex-YU', HR: 'Croatian', SR: 'Serbian', BG: 'Bulgarian', RO: 'Romanian',
+        HU: 'Hungarian', CZ: 'Czech', SK: 'Slovak', UA: 'Ukrainian',
+        // Middle East / Mediterranean
+        IL: 'Hebrew', KU: 'Kurdish', KD: 'Kurdish', MT: 'Maltese', MA: 'Moroccan', EG: 'Egyptian',
+        // South Asian (Indian regionals + neighbours)
+        UR: 'Urdu', PK: 'Urdu', TA: 'Tamil', TL: 'Telugu', ML: 'Malayalam', KN: 'Kannada',
+        MR: 'Marathi', BN: 'Bengali', PB: 'Punjabi', GU: 'Gujarati',
+        // South-East Asia / Africa
+        PH: 'Filipino', TH: 'Thai', VN: 'Vietnamese', ID: 'Indonesian',
+        SO: 'Somali', SOM: 'Somali', SW: 'Swahili', AF: 'Afghan'
+    };
+    // Tokens that precede a separator but are noise (category/quality/title words), never a market.
+    const MARKET_REJECT = new Set([
+        'THE', 'AND', 'NEW', 'TOP', 'VOD', 'TV', 'PPV', 'LIVE', 'HD', 'FHD', 'UHD', 'SD',
+        '4K', '8K', 'DOC', 'DOCU', 'EX', 'SOC', 'SPT', 'STH', 'UNV', 'PJ', 'TM', 'TG', 'AS', 'KA'
+    ]);
+    const BAR_SEPARATORS = /[▎▏▍▌│┃┆┊｜•·・]/g;
 
     function versionTierInfo(item = {}) {
         const raw = String(item.compatibilityTier || item.compatibility_tier || '').toLowerCase();
@@ -1241,65 +1272,134 @@ const MediaUtils = (() => {
         return item.quality || parseVersionInfo(item.raw_title || item.rawTitle || item.name || item.title || '').quality || null;
     }
 
-    // Non-market words that can precede a separator but aren't region/market tags.
-    const NON_MARKET_TOKENS = /^(THE|AND|NEW|TOP|HD|FHD|UHD|4K|8K|VOD|TV)$/;
+    function versionRawTitle(item = {}) {
+        return String(item.raw_title || item.rawTitle || item.name || item.title || '');
+    }
 
-    // The provider's leading market/region tag ("EN -", "AR ▎", "IN-EN -", "SCAN ▎") shown
-    // verbatim as a short chip — NOT resolved to an audio language (these are catalogue/
-    // subtitle markets, not dubs). Strict: needs a short alpha token immediately followed
-    // by a separator glyph, so title words and "PREFIX"/"Default" noise return ''.
-    function versionRegionToken(item = {}) {
-        const raw = String(item.raw_title || item.rawTitle || item.name || item.title || '');
-        const m = raw.match(/^\s*([A-Za-z]{2,4}(?:[-/][A-Za-z]{2,4})?)\s*[-–—|:/▎▏▍▌│┃┆┊｜•·・]/);
-        if (!m) return '';
-        const tok = m[1].toUpperCase();
-        return NON_MARKET_TOKENS.test(tok) ? '' : tok;
+    function leadingMarketToken(src) {
+        const m = String(src).match(/^\s*([A-Za-z]{2,5}(?:[-/][A-Za-z]{2,4})?)\s*[-–—|:/]/);
+        return m ? m[1].toUpperCase() : '';
+    }
+
+    // Human market label from the category text — platform/bundle keywords only.
+    function versionCategoryMarket(item = {}) {
+        const cat = String(item.category_name || item.subtitle
+            || (item.metadata && item.metadata.categoryName) || '').toLowerCase();
+        if (!cat) return '';
+        if (/multi.?sub|(^|[^a-z])multi([^a-z]|$)/.test(cat)) return 'Multi';
+        if (/netflix|nflx/.test(cat)) return 'Netflix';
+        if (/prime|amazon/.test(cat)) return 'Prime Video';
+        if (/disney/.test(cat)) return 'Disney+';
+        if (/paramount/.test(cat)) return 'Paramount+';
+        if (/apple\s?tv/.test(cat)) return 'Apple TV+';
+        if (/hbo|hbomax/.test(cat)) return 'HBO Max'; // 'hbo' only — bare 'max' is too generic
+        if (/nordic|scandinav/.test(cat)) return 'Nordic';
+        return '';
+    }
+
+    // The version's MARKET (language / regional edition), humanised. Priority: non-ISO
+    // market map -> language via the existing region parser (+ sub/dub nuance) -> compound
+    // primary segment -> category platform -> the raw token if plausible. Null when nothing.
+    // Memoised per item object (pure w.r.t. the item; called ~2n times per rendered version).
+    const _marketMemo = typeof WeakMap === 'function' ? new WeakMap() : null;
+    function versionMarket(item) {
+        if (!item || typeof item !== 'object') return null;
+        if (_marketMemo && _marketMemo.has(item)) return _marketMemo.get(item);
+        const result = computeVersionMarket(item);
+        if (_marketMemo) _marketMemo.set(item, result);
+        return result;
+    }
+    function computeVersionMarket(item = {}) {
+        const src = versionRawTitle(item).replace(BAR_SEPARATORS, ' - ');
+        const tok = leadingMarketToken(src);
+        if (tok && MARKET_LABELS[tok]) return { label: MARKET_LABELS[tok] };
+        const tag = parseLeadingRegionTag(src);
+        if (tag && tag.audioLang) {
+            let label = languageDisplayFull(tag.audioLang);
+            if (tag.hasSub && !tag.hasDub) label += ' · ST';
+            return { label };
+        }
+        if (tok && tok.includes('-')) {
+            const prim = tok.split('-')[0];
+            if (MARKET_LABELS[prim] && !MARKET_REJECT.has(prim)) return { label: MARKET_LABELS[prim] };
+        }
+        const catMarket = versionCategoryMarket(item);
+        if (catMarket) return { label: catMarket };
+        if (tok && !MARKET_REJECT.has(tok)) return { label: tok };
+        return null;
+    }
+
+    function resolveVersionProvider(item, resolve) {
+        const src = item.sourceId != null ? item.sourceId : item.source_id;
+        return (typeof resolve === 'function' && src != null) ? String(resolve(src) || '') : '';
     }
 
     // The raw provider category, lightly de-decorated ("|EN| DOCUMENTARY" -> "EN
-    // DOCUMENTARY"), used as the last-resort differentiator.
+    // DOCUMENTARY"), used as the last-resort differentiator for true duplicates.
     function versionCategoryLabel(item = {}) {
         const raw = item.category_name || item.subtitle
             || (item.metadata && item.metadata.categoryName) || '';
         const s = String(raw).replace(/[★|]/g, ' ').replace(/\s+/g, ' ').trim();
-        return s.length > 26 ? `${s.slice(0, 25).trim()}…` : s;
-    }
-
-    // Provider · Quality · Container · Market — present fields only, in that order.
-    function versionSegments(item = {}, resolveSourceName) {
-        const seg = [];
-        const src = item.sourceId != null ? item.sourceId : item.source_id;
-        const provider = (typeof resolveSourceName === 'function' && src != null) ? resolveSourceName(src) : '';
-        if (provider) seg.push(String(provider));
-        const q = versionQuality(item);
-        if (q) seg.push(q);
-        const cont = item.container_extension || item.containerExtension || '';
-        if (cont) seg.push(String(cont).toUpperCase());
-        const region = versionRegionToken(item);
-        if (region) seg.push(region);
-        return seg;
+        return s.length > 24 ? `${s.slice(0, 23).trim()}…` : s;
     }
 
     // opts: { siblings: item[], index: number, resolveSourceName: (sourceId)=>string }
-    // Returns { segments: string[], tier }. Render segments joined by " · ".
+    // Returns { headline, meta, badge, tier }.
     function versionDescriptor(item = {}, opts = {}) {
+        item = item || {};
         const index = opts.index || 0;
         const resolve = opts.resolveSourceName;
-        const siblings = (Array.isArray(opts.siblings) && opts.siblings.length) ? opts.siblings : [item];
+        const rawSiblings = (Array.isArray(opts.siblings) && opts.siblings.length) ? opts.siblings : [item];
+        const siblings = rawSiblings.filter(s => s && typeof s === 'object');
         const tier = versionTierInfo(item);
 
-        const segments = versionSegments(item, resolve);
-        // If this line isn't unique across the title's versions (or is too thin to stand
-        // on its own), append the raw provider category to disambiguate.
-        const lineOf = (it) => versionSegments(it, resolve).join(' · ');
-        const mine = segments.join(' · ');
-        const collides = siblings.length > 1 && siblings.filter(s => lineOf(s) === mine).length > 1;
-        if (segments.length < 2 || collides) {
-            const cat = versionCategoryLabel(item);
-            if (cat && !segments.includes(cat)) segments.push(cat);
+        const market = versionMarket(item);
+        const marketLabel = market ? market.label : '';
+        const provider = resolveVersionProvider(item, resolve);
+        const container = String(item.container_extension || item.containerExtension || '').toUpperCase();
+        const quality = versionQuality(item);
+
+        const distinct = (fn) => new Set(siblings.map(fn).map(v => String(v || '')).filter(Boolean));
+        const marketVaries = distinct(it => { const m = versionMarket(it); return m ? m.label : ''; }).size > 1;
+        const providerVaries = distinct(it => resolveVersionProvider(it, resolve)).size > 1;
+
+        // Lead with whichever axis actually distinguishes the versions.
+        let headline;
+        let metaParts;
+        if (marketLabel && (marketVaries || !providerVaries)) {
+            headline = marketLabel;
+            metaParts = [provider, container];
+        } else if (provider) {
+            headline = provider;
+            metaParts = [marketLabel, container];
+        } else {
+            headline = marketLabel || quality || `Version ${index + 1}`;
+            metaParts = [container];
         }
-        if (!segments.length) segments.push(`Version ${index + 1}`);
-        return { segments, tier };
+        const badge = (quality && quality !== headline) ? quality : '';
+        // Demote constants, but never repeat the headline in the meta line (e.g. an "NF"
+        // market whose provider is also literally named "Netflix").
+        let meta = metaParts.filter(p => p && p !== headline).join(' · ');
+
+        // Never two identical buttons: if market+provider+container+quality all match a
+        // sibling, disambiguate with the raw provider category.
+        const sigOf = (it) => {
+            const m = versionMarket(it);
+            return [
+                m ? m.label : '',
+                resolveVersionProvider(it, resolve),
+                String(it.container_extension || it.containerExtension || '').toUpperCase(),
+                versionQuality(it) || ''
+            ].join('|');
+        };
+        const mySig = sigOf(item);
+        const collides = siblings.length > 1 && siblings.filter(s => sigOf(s) === mySig).length > 1;
+        if (collides) {
+            const cat = versionCategoryLabel(item);
+            if (cat && cat !== headline) meta = meta ? `${meta} · ${cat}` : cat;
+        }
+
+        return { headline, meta, badge, tier };
     }
 
     return {
