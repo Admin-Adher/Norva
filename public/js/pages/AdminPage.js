@@ -154,6 +154,9 @@ class AdminPage {
 #page-admin .kpi.ok .kpi-ic{background:rgba(52,211,153,.10);border-color:rgba(52,211,153,.18);}
 #page-admin .kpi-spark{margin-top:11px;height:38px;}
 #page-admin .kpi-spark svg{width:100%;height:38px;display:block;}
+#page-admin .kpi .v{white-space:nowrap;}
+/* Compact (two-column) cards: slightly smaller value so money never wraps */
+#page-admin .admin-cards.fin-mini .kpi:not(.fin-status) .v{font-size:21px;}
 /* Section block = framed panel */
 #page-admin .admin-block{margin-bottom:18px;background:var(--adm-panel);border:1px solid var(--adm-line);border-radius:16px;padding:17px 20px 18px;}
 #page-admin .admin-block h2{font-size:14px;font-weight:650;margin:0 0 13px;color:var(--adm-tx);letter-spacing:-.1px;}
@@ -194,6 +197,11 @@ class AdminPage {
 #page-admin .chart-legend b{color:var(--adm-tx);font-variant-numeric:tabular-nums;}
 #page-admin .chart-legend .pct{color:var(--adm-tx3);margin-left:auto;font-variant-numeric:tabular-nums;}
 @media(max-width:820px){#page-admin .chart-row{grid-template-columns:1fr;}}
+/* Finance two-column rows (blocks paired side by side, like the mockup) */
+#page-admin .fin-cols{display:grid;grid-template-columns:1fr 1.08fr;gap:16px;margin-bottom:18px;align-items:stretch;}
+#page-admin .fin-cols > *{margin-bottom:0;}
+#page-admin .admin-cards.fin-mini{grid-template-columns:repeat(auto-fit,minmax(96px,1fr));gap:10px;}
+@media(max-width:900px){#page-admin .fin-cols{grid-template-columns:1fr;}}
 #page-admin .users-controls{display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap;}
 #page-admin .users-controls input,#page-admin .users-controls select{background:var(--color-bg-secondary,#16161c);border:1px solid var(--color-border,#2a2a38);color:var(--color-text-primary,#fff);border-radius:8px;padding:8px 12px;font-size:13px;}
 #page-admin .users-controls input{min-width:240px;flex:1;max-width:380px;}
@@ -702,36 +710,42 @@ class AdminPage {
                 ${card(n(f.conversions_7d), 'Conversions 7 j', '', 'conversions_7d', '📊')}
                 ${Number(f.mrr_unknown_n) > 0 ? card(n(f.mrr_unknown_n), 'Abos sans montant connu (manuel/store)', '', null, '🗄️') : ''}
             </div></div>
-            <div class="kpi-group"><div class="kpi-gtitle">👥 Abonnés par statut — cliquer pour ouvrir la liste</div><div class="admin-cards">
-                ${statusCard(n(counts.trialing), 'En essai', 'trialing', 'ok', '⏳')}
-                ${statusCard(n(counts.active), 'Actifs payants', 'active', 'ok', '👤')}
-                ${statusCard(n(counts.past_due), 'Échec paiement', 'past_due', Number(counts.past_due) > 0 ? 'alert' : '', '💳')}
-                ${statusCard(n(counts.cancel_pending), 'Annulation prévue', 'cancel_pending', Number(counts.cancel_pending) > 0 ? 'alert' : '', '📅')}
-                ${statusCard(n(counts.expired), 'Expirés', 'expired', '', '⛔')}
-            </div></div>
-            <div class="admin-block"><h2>💳 Revenu par rail — web (Stancer) vs mobile (stores)</h2><div class="scroll">
-                ${railRows ? `<table><thead><tr><th>Rail</th><th class="num">Abonnés</th><th class="num">MRR</th><th class="num">Encaissé 30 j</th></tr></thead><tbody>${railRows}</tbody></table>` : '<div class="ssub">Aucun abonnement — la répartition Stancer / Play s\'affichera ici dès les premiers paiements.</div>'}
-            </div></div>
-            <div class="admin-block"><h2>📅 Échéances</h2><div class="admin-cards">
-                ${card(n(up.trial_charges_48h_n), 'Essais → prélèvement < 48 h', '', null, '⏰')}
-                ${card(money(up.trial_charges_48h_cents), 'Montant essais < 48 h', '', null, '💵')}
-                ${card(n(up.renewals_7d_n), 'Renouvellements < 7 j', '', null, '🔁')}
-                ${card(money(up.renewals_7d_cents), 'Montant renouv. < 7 j', '', null, '💰')}
-                ${Number(f.discounts_pending) > 0 ? card(n(f.discounts_pending), 'Remises 50% en attente', '', null, '🎟️') : ''}
-            </div></div>
-            <div class="admin-block"><h2>📊 MRR par plan, période & rail</h2><div class="scroll">
-                ${planRows ? `<table><thead><tr><th>Plan</th><th>Période</th><th>Rail</th><th class="num">Abonnés</th><th class="num">MRR</th></tr></thead><tbody>${planRows}</tbody></table>` : '<div class="ssub">Aucun abonnement payant.</div>'}
-            </div></div>
-            <div class="admin-block"><h2>🔀 Funnel de conversion (30 j)</h2><div class="scroll">
-                ${funnelRows ? `<table><thead><tr><th>Étape</th><th class="num">Utilisateurs uniques</th></tr></thead><tbody>${funnelRows}</tbody></table>` : '<div class="ssub">Aucune donnée funnel sur 30 j.</div>'}
-            </div></div>
-            <div class="admin-block"><h2>🛑 Annulations & rétention</h2>
-                <div class="admin-cards" style="margin-bottom:14px">
-                    ${card(n(cancelsTotal), 'Annulations (total)', '', null, '🛑')}
-                    ${card(n(savesTotal), 'Saves contre-offre', savesTotal > 0 ? 'ok' : '', null, '💚')}
-                    ${saveRate != null ? card(saveRate + ' %', 'Taux de save', saveRate >= 20 ? 'ok' : '', null, '🎯') : ''}
+            <div class="fin-cols">
+                <div class="kpi-group"><div class="kpi-gtitle">👥 Abonnés par statut — cliquer pour ouvrir la liste</div><div class="admin-cards fin-mini">
+                    ${statusCard(n(counts.trialing), 'En essai', 'trialing', 'ok', '⏳')}
+                    ${statusCard(n(counts.active), 'Actifs payants', 'active', 'ok', '👤')}
+                    ${statusCard(n(counts.past_due), 'Échec paiement', 'past_due', Number(counts.past_due) > 0 ? 'alert' : '', '💳')}
+                    ${statusCard(n(counts.cancel_pending), 'Annulation prévue', 'cancel_pending', Number(counts.cancel_pending) > 0 ? 'alert' : '', '📅')}
+                    ${statusCard(n(counts.expired), 'Expirés', 'expired', '', '⛔')}
+                </div></div>
+                <div class="admin-block"><h2>💳 Revenu par rail — web (Stancer) vs mobile (stores)</h2><div class="scroll">
+                    ${railRows ? `<table><thead><tr><th>Rail</th><th class="num">Abonnés</th><th class="num">MRR</th><th class="num">Encaissé 30 j</th></tr></thead><tbody>${railRows}</tbody></table>` : '<div class="ssub">Aucun abonnement — la répartition Stancer / Play s\'affichera ici dès les premiers paiements.</div>'}
+                </div></div>
+            </div>
+            <div class="fin-cols">
+                <div class="admin-block"><h2>📅 Échéances</h2><div class="admin-cards fin-mini">
+                    ${card(n(up.trial_charges_48h_n), 'Essais → prélèvement < 48 h', '', null, '⏰')}
+                    ${card(money(up.trial_charges_48h_cents), 'Montant essais < 48 h', '', null, '💵')}
+                    ${card(n(up.renewals_7d_n), 'Renouvellements < 7 j', '', null, '🔁')}
+                    ${card(money(up.renewals_7d_cents), 'Montant renouv. < 7 j', '', null, '💰')}
+                    ${Number(f.discounts_pending) > 0 ? card(n(f.discounts_pending), 'Remises 50% en attente', '', null, '🎟️') : ''}
+                </div></div>
+                <div class="admin-block"><h2>📊 MRR par plan, période & rail</h2><div class="scroll">
+                    ${planRows ? `<table><thead><tr><th>Plan</th><th>Période</th><th>Rail</th><th class="num">Abonnés</th><th class="num">MRR</th></tr></thead><tbody>${planRows}</tbody></table>` : '<div class="ssub">Aucun abonnement payant.</div>'}
+                </div></div>
+            </div>
+            <div class="fin-cols">
+                <div class="admin-block"><h2>🔀 Funnel de conversion (30 j)</h2><div class="scroll">
+                    ${funnelRows ? `<table><thead><tr><th>Étape</th><th class="num">Utilisateurs uniques</th></tr></thead><tbody>${funnelRows}</tbody></table>` : '<div class="ssub">Aucune donnée funnel sur 30 j.</div>'}
+                </div></div>
+                <div class="admin-block"><h2>🛑 Annulations & rétention</h2>
+                    <div class="admin-cards fin-mini" style="margin-bottom:14px">
+                        ${card(n(cancelsTotal), 'Annulations (total)', '', null, '🛑')}
+                        ${card(n(savesTotal), 'Saves contre-offre', savesTotal > 0 ? 'ok' : '', null, '💚')}
+                        ${saveRate != null ? card(saveRate + ' %', 'Taux de save', saveRate >= 20 ? 'ok' : '', null, '🎯') : ''}
+                    </div>
+                    ${reasonRows ? `<div class="scroll"><table><thead><tr><th>Raison d'annulation</th><th class="num">Clients</th></tr></thead><tbody>${reasonRows}</tbody></table></div>` : '<div class="ssub">Aucune annulation enregistrée — les raisons s\'accumuleront ici.</div>'}
                 </div>
-                ${reasonRows ? `<div class="scroll"><table><thead><tr><th>Raison d'annulation</th><th class="num">Clients</th></tr></thead><tbody>${reasonRows}</tbody></table></div>` : '<div class="ssub">Aucune annulation enregistrée — les raisons s\'accumuleront ici.</div>'}
             </div>
             <div class="admin-block"><h2>🧾 Derniers paiements (50) <button id="fin-csv" class="mini-btn" title="Exporter en CSV">⬇ CSV</button></h2><div class="scroll">
                 ${payRows ? `<table><thead><tr><th>Date</th><th>Client</th><th>Rail</th><th>Type</th><th>Statut</th><th class="num">Montant</th></tr></thead><tbody>${payRows}</tbody></table>` : '<div class="ssub">Aucun paiement.</div>'}
