@@ -1637,11 +1637,16 @@ class SeriesPage {
                 resolveSourceName: (id) => this.getSourceName(id)
             });
             const dot = desc.tier
-                ? `<span class="version-tier-dot ${desc.tier.cls}" title="${MediaUtils.escapeHtml(desc.tier.label)}"></span>`
+                ? `<span class="version-tier-dot ${MediaUtils.escapeHtml(desc.tier.cls)}" title="${MediaUtils.escapeHtml(desc.tier.label)}"></span>`
                 : '';
+            const badge = desc.badge
+                ? `<span class="version-quality-badge ${/(4k|2160|uhd)/i.test(desc.badge) ? 'hi' : ''}">${MediaUtils.escapeHtml(desc.badge)}</span>`
+                : '';
+            const meta = desc.meta ? `<span class="version-meta">${MediaUtils.escapeHtml(desc.meta)}</span>` : '';
             return `
                 <button class="series-version-item ${active ? 'active' : ''} ${broken ? 'is-broken' : ''}" type="button" data-index="${index}" aria-pressed="${active ? 'true' : 'false'}">
-                    <span class="version-line">${dot}${MediaUtils.escapeHtml(desc.segments.join(' · '))}</span>
+                    <span class="version-head">${dot}<span class="version-headline">${MediaUtils.escapeHtml(desc.headline)}</span>${badge}</span>
+                    ${meta}
                     ${broken ? '<span class="series-version-flag" title="Playback failed">HS</span>' : ''}
                 </button>`;
         }).join('');

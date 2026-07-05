@@ -6112,20 +6112,52 @@ kbd {
   text-overflow: ellipsis;
 }
 
-/* Shared version-button label (Movie + Series fiches) — one compact, dot-separated
-   line "Provider · Quality · Container · Market", with an optional leading fluidity
-   dot. Built by MediaUtils.versionDescriptor. */
-.version-line {
+/* Shared version-button label (Movie + Series fiches) — two tiers: a bold headline
+   carrying whatever differs (market / provider) with an optional fluidity dot and a
+   quality badge, over a muted meta line of the constants. Built by
+   MediaUtils.versionDescriptor. */
+.version-head {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
+  min-width: 0;
   max-width: 100%;
-  font-weight: 600;
-  font-size: 0.9rem;
-  line-height: 1.3;
+}
+.version-headline {
+  flex: 1;
+  min-width: 0;
+  font-weight: 700;
+  font-size: 0.98rem;
+  letter-spacing: -0.01em;
   color: var(--color-text-primary);
-  overflow: hidden;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.version-quality-badge {
+  flex: none;
+  font-size: 0.66rem;
+  font-weight: 750;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 6px;
+  color: var(--color-text-secondary);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+.version-quality-badge.hi {
+  color: #9db4ff;
+  background: rgba(98, 135, 255, 0.16);
+  border-color: rgba(98, 135, 255, 0.5);
+}
+.version-meta {
+  max-width: 100%;
+  font-size: 0.8rem;
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
   text-overflow: ellipsis;
 }
 .version-tier-dot {
