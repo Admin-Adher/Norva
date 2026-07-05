@@ -226,15 +226,35 @@ Deno.serve(async (req) => {
           : { ok: true, ms: Math.round(performance.now() - dbStart) };
       } catch (e) { db = { ok: false, ms: Math.round(performance.now() - dbStart), error: String((e as Error)?.message ?? e).slice(0, 80) }; }
       const { gateway, relay } = await resolveInfraUrls();
-      const [gw, rl] = await Promise.all([
+      // Billing / go-live gate state — Supabase edge secrets are project-wide, so this function reads
+      // the same NORVA_*/STANCER_* env every payment function sees. Plus live PSP + email reachability.
+      const stancerKey = Deno.env.get("STANCER_SECRET_KEY") ?? "";
+      const stancerMode = (Deno.env.get("NORVA_STANCER_MODE") ?? "test").toLowerCase();
+      const [gw, rl, stancerPing, resendPing] = await Promise.all([
         gateway ? ping(gateway) : Promise.resolve({ configured: false } as JsonRecord),
         relay ? ping(relay) : Promise.resolve({ configured: false } as JsonRecord),
+        ping("https://api.stancer.com"),
+        ping("https://api.resend.com"),
       ]);
+      const billing = {
+        stancer_mode: stancerMode,
+        stancer_configured: Boolean(stancerKey),
+        stancer_test_key: stancerMode === "test" || stancerKey.startsWith("stest"),
+        footprint_currency: (Deno.env.get("STANCER_FOOTPRINT_CURRENCY") ?? "eur").toLowerCase(),
+        billing_mode: (Deno.env.get("NORVA_BILLING_MODE") ?? "legacy").toLowerCase(),
+        entitlements_mode: (Deno.env.get("NORVA_ENTITLEMENTS_MODE") ?? "enforce").toLowerCase(),
+        lifecycle_billing_live: (Deno.env.get("NORVA_LIFECYCLE_BILLING_LIVE") ?? "").toLowerCase() === "true",
+        webhook_token_set: Boolean(Deno.env.get("STANCER_WEBHOOK_TOKEN")),
+        resend_configured: Boolean(Deno.env.get("RESEND_API_KEY")),
+        stancer: stancerPing,
+        resend: resendPing,
+      };
       return json(req, {
         edge: { ok: true },
         db,
         gateway: { configured: Boolean(gateway), ...gw },
         relay: { configured: Boolean(relay), ...rl },
+        billing,
       });
     }
 

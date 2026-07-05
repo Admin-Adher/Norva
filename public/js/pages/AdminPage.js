@@ -310,7 +310,7 @@ class AdminPage {
             if (nDel) { this._confirm('Supprimer cette note interne ?', { danger: true, okLabel: 'Supprimer' }).then(ok => { if (ok) this._crmMutate('admin_note_delete', { p_note_id: nDel.dataset.noteId }); }); return; }
             const actBtn = e.target.closest('.act-btn');
             if (actBtn) { this._userAction(actBtn); return; }
-            if (e.target.closest('#sys-infra-refresh')) { this._loadInfra(); return; }
+            if (e.target.closest('#sys-infra-refresh') || e.target.closest('#sys-billing-refresh')) { this._loadInfra(); return; }
             if (e.target.closest('#sys-audit-more')) { this._loadAudit(false); return; }
             if (e.target.closest('#bulk-apply-btn')) { this._bulkTag('apply'); return; }
             if (e.target.closest('#bulk-remove-btn')) { this._bulkTag('remove'); return; }
@@ -1501,6 +1501,7 @@ class AdminPage {
             <div class="kpi-gtitle">📸 Snapshot</div>
             <section id="sys-health" class="admin-cards"><div class="ssub">Chargement…</div></section>
             <div class="admin-block"><h2>🌐 Infra temps réel <button id="sys-infra-refresh" class="mini-btn" aria-label="Re-pinger l'infra" title="Re-ping">↻</button></h2><div id="sys-infra" class="admin-cards"><div class="ssub">Ping…</div></div></div>
+            <div class="admin-block"><h2>💳 État billing / go-live <button id="sys-billing-refresh" class="mini-btn" aria-label="Re-vérifier l'état billing" title="Re-check">↻</button></h2><div id="sys-billing" class="admin-cards"><div class="ssub">Vérification…</div></div><p class="ssub" style="margin-top:8px">Bascule prod = poser les secrets Supabase (clé <code>sprod_</code>, <code>NORVA_STANCER_MODE=live</code>, <code>NORVA_BILLING_MODE=revenuecat</code>, <code>NORVA_ENTITLEMENTS_MODE=enforce</code>). Ce panneau doit alors passer tout au vert.</p></div>
             <div class="admin-block"><h2>🚩 Feature flags</h2><div id="sys-flags"><div class="ssub">Chargement…</div></div></div>
             <div class="admin-block"><h2>📜 Journal d'audit</h2><div id="sys-audit"><div class="ssub">Chargement…</div></div></div>
         </div>`;
@@ -1574,6 +1575,37 @@ class AdminPage {
             return `<div class="kpi ${up ? 'ok' : 'alert'}"><div class="v" style="font-size:17px">${up ? `🟢 ${AdminPage.n(s.ms)} ms` : '🔴 down'}</div><div class="l">${AdminPage.esc(label)}${status}${errDetail}</div></div>`;
         };
         el.innerHTML = [svc('Edge', d.edge), svc('Base de données', d.db), svc('Gateway', d.gateway), svc('Relay', d.relay)].join('');
+        this._renderBillingState(d.billing);
+    }
+
+    // Go-live cockpit: the billing gate flags (read from edge secrets server-side) + Stancer/Resend
+    // reachability. Before the prod flip everything reads TEST/legacy/observe; after the owner sets the
+    // sprod_ key + live/enforce secrets, this panel turns green — the one place to verify the switch.
+    _renderBillingState(b) {
+        const el = document.getElementById('sys-billing');
+        if (!el) return;
+        b = b || {};
+        const pill = (value, label, cls) => `<div class="kpi ${cls || ''}"><div class="v" style="font-size:17px">${value}</div><div class="l">${AdminPage.esc(label)}</div></div>`;
+        const svc = (label, s) => {
+            s = s || {};
+            const up = s.ok === true;
+            const err = !up && s.error ? ` <span class="al-err">${AdminPage.esc(String(s.error).slice(0, 90))}</span>` : '';
+            return `<div class="kpi ${up ? 'ok' : 'alert'}"><div class="v" style="font-size:17px">${up ? `🟢 ${AdminPage.n(s.ms)} ms` : '🔴 down'}</div><div class="l">${AdminPage.esc(label)}${err}</div></div>`;
+        };
+        const live = b.stancer_mode === 'live' && b.stancer_test_key === false && b.stancer_configured === true;
+        const keyState = !b.stancer_configured ? '⚪ absente' : (b.stancer_test_key ? '🧪 stest_' : '🟢 sprod_');
+        const resendOk = b.resend_configured && b.resend && b.resend.ok;
+        el.innerHTML = [
+            pill(live ? '🟢 LIVE' : '🧪 TEST', 'Mode Stancer', live ? 'ok' : ''),
+            pill(keyState, 'Clé API', !b.stancer_configured ? 'alert' : (b.stancer_test_key ? '' : 'ok')),
+            pill((b.footprint_currency || 'eur').toUpperCase(), 'Empreinte carte'),
+            pill(b.billing_mode === 'legacy' ? 'legacy' : AdminPage.esc(b.billing_mode || '—'), 'Billing mode', b.billing_mode && b.billing_mode !== 'legacy' ? 'ok' : ''),
+            pill(b.entitlements_mode === 'enforce' ? '🔒 enforce' : '👁 observe', 'Enforcement', b.entitlements_mode === 'enforce' ? 'ok' : ''),
+            pill(b.lifecycle_billing_live ? 'on' : 'off', 'Relances / reçus', b.lifecycle_billing_live ? 'ok' : ''),
+            pill(b.webhook_token_set ? 'posé' : '—', 'Webhook token'),
+            svc('API Stancer', b.stancer),
+            pill(resendOk ? '🟢 configuré' : (b.resend_configured ? '🔴 injoignable' : '🔴 absent'), 'Resend (emails)', resendOk ? 'ok' : 'alert'),
+        ].join('');
     }
 
     async _loadFlags() {

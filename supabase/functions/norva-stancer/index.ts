@@ -30,6 +30,11 @@ const STANCER_SECRET_KEY = Deno.env.get("STANCER_SECRET_KEY") ?? "";
 const STANCER_MODE = (Deno.env.get("NORVA_STANCER_MODE") ?? "test").toLowerCase();
 const STANCER_API = "https://api.stancer.com";
 const RETURN_BASE = "https://norva.tv";
+// Currency of the €0.50 card-validation hold (capture:false). EUR because USD
+// auth-only is not yet enabled on the account; the day Stancer enables it, set
+// the secret STANCER_FOOTPRINT_CURRENCY=usd — no code deploy needed. Plan charges
+// are always USD (norva-stancer-billing), independent of this.
+const FOOTPRINT_CURRENCY = (Deno.env.get("STANCER_FOOTPRINT_CURRENCY") ?? "eur").toLowerCase();
 
 // Server-side price table (cents). The client only sends {plan, period}.
 const PRICES: Record<string, Record<string, number>> = {
@@ -124,7 +129,7 @@ Deno.serve(async (req) => {
   const path = url.pathname.replace(/^.*\/norva-stancer/, "") || "/";
 
   if (req.method === "GET" && (path === "/health" || path === "/")) {
-    return json({ ok: true, service: "norva-stancer", configured: Boolean(STANCER_SECRET_KEY), mode: STANCER_MODE, test_key: isTestKey() });
+    return json({ ok: true, service: "norva-stancer", configured: Boolean(STANCER_SECRET_KEY), mode: STANCER_MODE, test_key: isTestKey(), footprint_currency: FOOTPRINT_CURRENCY });
   }
 
   if (!STANCER_SECRET_KEY || !SUPABASE_URL || !SERVICE_KEY) return json({ ok: false, inert: true, reason: "not_configured" });
@@ -255,14 +260,14 @@ Deno.serve(async (req) => {
     // real plan amount (from plan_code) is charged at trial end by norva-stancer-billing. `amount`
     // above is only used by the cron's price table via plan_code, not here.
     const VALIDATION_CENTS = 50;
-    // Validation hold in EUR: authorization-only (capture:false) is enabled on this Stancer account
-    // for EUR but NOT USD — a USD auth-only card payment comes back "not ready for authorization" on
-    // the hosted page, while USD captures work fine (matrix selftest + manual test, 2026-07-03).
-    // Plan charges stay in USD (norva-stancer-billing). Owner asked Stancer support (2026-07-03) to
-    // enable USD authorizations AND Apple Pay / Google Pay on the account. Once confirmed:
-    //   • flip currency below to "usd" (hold becomes $0.50);
-    //   • wallets appear on the hosted page automatically — the checkout iframe already carries
-    //     allow="payment", nothing else to change client-side.
+    // Validation hold currency = FOOTPRINT_CURRENCY (secret STANCER_FOOTPRINT_CURRENCY, default eur).
+    // Authorization-only (capture:false) is enabled on this Stancer account for EUR but NOT USD — a
+    // USD auth-only card payment comes back "not ready for authorization" on the hosted page, while
+    // USD captures work fine (matrix selftest + manual test, 2026-07-03). Plan charges stay in USD
+    // (norva-stancer-billing). Owner asked Stancer support (2026-07-03) to enable USD authorizations
+    // AND Apple Pay / Google Pay on the account. Once confirmed: set STANCER_FOOTPRINT_CURRENCY=usd
+    // (hold becomes $0.50) — wallets then appear on the hosted page automatically (the checkout iframe
+    // already carries allow="payment", nothing else to change).
     const DESCRIPTIONS: Record<string, string> = {
       trial_setup: `Norva ${plan} ${period} — card validation for 7-day free trial`,
       plan_change: `Norva ${plan} ${period} — plan change (card check, not charged)`,
@@ -270,7 +275,7 @@ Deno.serve(async (req) => {
       card_update: `Norva — payment method update (card check, not charged)`,
     };
     const pi = await stancerPost("/v2/payment_intents/", {
-      amount: VALIDATION_CENTS, currency: "eur", capture: false, methods_allowed: ["card"],
+      amount: VALIDATION_CENTS, currency: FOOTPRINT_CURRENCY, capture: false, methods_allowed: ["card"],
       return_url: returnUrl, order_id: ref(user.id), customer: custId,
       description: DESCRIPTIONS[kind],
       metadata: { user_id: user.id, kind, plan, period },
