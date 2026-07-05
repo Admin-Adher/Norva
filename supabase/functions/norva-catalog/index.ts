@@ -1033,22 +1033,44 @@ async function listGenreSummary(req: Request, url: URL, userId: string) {
   // catalogue). The old path counted variant-less rows and classified in the edge, so
   // its numbers ran far ahead of the grid (e.g. 819 in the picker, 4 in the grid).
   const counts = new Map<string, number>();
-  try {
-    const rpcArgs: Record<string, unknown> = { p_user_id: userId, p_item_type: itemType };
-    if (sourceId) rpcArgs.p_source_id = sourceId;
-    const { data, error } = await db.rpc("cloud_genre_bucket_counts", rpcArgs);
-    if (error) {
+
+  // Fast path: precomputed per-user summary (all sources), refreshed by cron at sync cadence — an
+  // instant single-row read instead of the ~4.6s live group-by over a 335k catalogue. The optional
+  // per-source view (Manage Content) isn't summarised, so it falls back to the live RPC below.
+  let usedSummary = false;
+  if (!sourceId) {
+    try {
+      const { data } = await db.from("cloud_catalog_facet_summary")
+        .select("genre_bucket_counts").eq("user_id", userId).eq("item_type", itemType).maybeSingle();
+      const gbc = (data?.genre_bucket_counts ?? null) as Record<string, unknown> | null;
+      if (gbc && typeof gbc === "object") {
+        for (const [bucketId, rawN] of Object.entries(gbc)) {
+          const n = Number(rawN) || 0;
+          if (bucketId && bucketId !== "autres" && n > 0) counts.set(bucketId, n);
+        }
+        usedSummary = true;
+      }
+    } catch (_) { /* fall through to the live RPC */ }
+  }
+
+  if (!usedSummary) {
+    try {
+      const rpcArgs: Record<string, unknown> = { p_user_id: userId, p_item_type: itemType };
+      if (sourceId) rpcArgs.p_source_id = sourceId;
+      const { data, error } = await db.rpc("cloud_genre_bucket_counts", rpcArgs);
+      if (error) {
+        if (isMissingMaterialization(error)) return { type: itemType, genres: [], hidden: [] };
+        throwDb(error, "Unable to summarise genres");
+      }
+      for (const row of (data ?? []) as Array<{ bucket?: unknown; n?: unknown }>) {
+        const bucketId = String(row.bucket ?? "");
+        const n = Number(row.n) || 0;
+        if (bucketId && bucketId !== "autres" && n) counts.set(bucketId, n);
+      }
+    } catch (error) {
       if (isMissingMaterialization(error)) return { type: itemType, genres: [], hidden: [] };
-      throwDb(error, "Unable to summarise genres");
+      throw error;
     }
-    for (const row of (data ?? []) as Array<{ bucket?: unknown; n?: unknown }>) {
-      const bucketId = String(row.bucket ?? "");
-      const n = Number(row.n) || 0;
-      if (bucketId && bucketId !== "autres" && n) counts.set(bucketId, n);
-    }
-  } catch (error) {
-    if (isMissingMaterialization(error)) return { type: itemType, genres: [], hidden: [] };
-    throw error;
   }
 
   const hidden = await getHiddenGenres(req, userId);
@@ -1457,6 +1479,29 @@ async function listLanguageFacets(url: URL, userId: string) {
     FACET_CACHE.set(cacheKey, hit);
     return hit.value;
   }
+
+  // Fast path: precomputed per-user summary (cloud_catalog_facet_summary, refreshed by cron at
+  // sync cadence). Facet presence is pure set math over the stored distinct tags — one row read,
+  // no per-facet scan. Falls through to the live computation below when the summary is missing
+  // (new user, not yet backfilled), so a filter is never wrongly empty.
+  try {
+    const { data } = await db.from("cloud_catalog_facet_summary")
+      .select("audio_langs, version_tags").eq("user_id", userId).eq("item_type", itemType).maybeSingle();
+    if (data && (Array.isArray(data.audio_langs) || Array.isArray(data.version_tags))) {
+      const audioSet = new Set((data.audio_langs ?? []).map((x: unknown) => String(x).toLowerCase()));
+      const versionSet = new Set((data.version_tags ?? []).map((x: unknown) => String(x).toLowerCase()));
+      const audio = Object.keys(AUDIO_FACET_LABELS).filter((f) => {
+        const iso = AUDIO_FACET_ISO[f];
+        return (iso && audioSet.has(iso)) || (AUDIO_FACET_TAGS[f] ?? []).some((t) => versionSet.has(t));
+      }).map((f) => ({ value: f, label: AUDIO_FACET_LABELS[f] }));
+      const subtitles = Object.keys(SUBTITLE_FACET_LABELS).filter((f) =>
+        (SUBTITLE_FACET_TAGS[f] ?? []).some((t) => versionSet.has(t))
+      ).map((f) => ({ value: f, label: SUBTITLE_FACET_LABELS[f] }));
+      const value = { audio, subtitles };
+      FACET_CACHE.set(cacheKey, { value, exp: nowMs + FACET_CACHE_TTL_MS });
+      return value;
+    }
+  } catch (_) { /* fall through to the live computation below */ }
 
   async function present(orFilter: string | null, tagFilter: string[] | null): Promise<boolean> {
     try {
