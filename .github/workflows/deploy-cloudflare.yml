@@ -27,7 +27,7 @@ jobs:
           node --check public/js/pages/WatchPage.js
           node --check public/js/norvaEngine.js
 
-      - name: Minify landing CSS (safe: strips comments + whitespace only)
+      - name: Minify landing CSS (strips comments and whitespace only)
         run: npm run minify:css
 
       - name: Cache-bust assets by content hash (rewrites ?v= to each file's hash)
