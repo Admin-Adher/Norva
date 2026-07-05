@@ -582,8 +582,31 @@ class AdminPage {
             : (s === 'authorized' || s === 'to_capture') ? `<span class="badge blue">${esc(s)}</span>`
             : (s === 'require_payment_method') ? '<span class="badge amber">non finalisé</span>'
             : `<span class="badge gray">${esc(s)}</span>`;
+
+        // Payment rail (web vs mobile store) — the KPI dimension that separates Stancer-web
+        // revenue from Google Play / App Store mobile revenue.
+        const railBadge = AdminPage.railBadge;
+
+        // Merge per-rail MRR/subscribers (by_rail) with per-rail cash collected (collected_by_rail).
+        const railMap = {};
+        const railBucket = (k) => (railMap[k] || (railMap[k] = { provider: k, n: 0, mrr_cents: 0, unknown_n: 0, collected_cents: 0, collected_n: 0 }));
+        (Array.isArray(f.by_rail) ? f.by_rail : []).forEach(r => {
+            const b = railBucket(r.provider); b.n = Number(r.n) || 0; b.mrr_cents = Number(r.mrr_cents) || 0; b.unknown_n = Number(r.unknown_n) || 0;
+        });
+        (Array.isArray(f.collected_by_rail) ? f.collected_by_rail : []).forEach(r => {
+            const b = railBucket(r.provider); b.collected_cents = Number(r.cents) || 0; b.collected_n = Number(r.n) || 0;
+        });
+        const railList = Object.values(railMap).sort((a, b) => (b.mrr_cents - a.mrr_cents) || (b.collected_cents - a.collected_cents));
+        const railRows = railList.map(r => `<tr>
+            <td>${railBadge(r.provider)}</td>
+            <td class="num">${n(r.n)}</td>
+            <td class="num">${money(r.mrr_cents)}${r.unknown_n > 0 ? ` <span class="pacct" title="Abonnés sans montant connu">+${n(r.unknown_n)} ?</span>` : ''}</td>
+            <td class="num">${money(r.collected_cents)}</td>
+        </tr>`).join('');
+
         const payRows = (Array.isArray(f.recent_payments) ? f.recent_payments : []).map(p => `<tr class="user-row" data-user-id="${esc(p.user_id)}" tabindex="0" aria-label="Voir la fiche de ${esc(p.email || p.user_id)}" title="Voir la fiche">
             <td>${esc(day(p.at))}</td><td>${esc(p.email || p.user_id)}</td>
+            <td>${railBadge(p.provider)}</td>
             <td>${KIND_LABELS[p.kind] || esc(p.kind)}</td><td>${payBadge(p.status)}</td>
             <td class="num">${money(p.amount)}${p.currency && String(p.currency).toLowerCase() !== 'usd' ? ` <span class="pacct">${esc(String(p.currency).toUpperCase())}</span>` : ''}</td>
         </tr>`).join('');
@@ -603,6 +626,9 @@ class AdminPage {
                 ${statusCard(n(counts.past_due), 'Échec paiement', 'past_due', Number(counts.past_due) > 0 ? 'alert' : '')}
                 ${statusCard(n(counts.cancel_pending), 'Annulation prévue', 'cancel_pending', Number(counts.cancel_pending) > 0 ? 'alert' : '')}
                 ${statusCard(n(counts.expired), 'Expirés', 'expired')}
+            </div></div>
+            <div class="admin-block"><h2>💳 Revenu par rail — web (Stancer) vs mobile (stores)</h2><div class="scroll">
+                ${railRows ? `<table><thead><tr><th>Rail</th><th class="num">Abonnés</th><th class="num">MRR</th><th class="num">Encaissé 30 j</th></tr></thead><tbody>${railRows}</tbody></table>` : '<div class="ssub">Aucun abonnement — la répartition Stancer / Play s\'affichera ici dès les premiers paiements.</div>'}
             </div></div>
             <div class="admin-block"><h2>📅 Échéances</h2><div class="admin-cards">
                 ${card(n(up.trial_charges_48h_n), 'Essais → prélèvement < 48 h')}
@@ -626,7 +652,7 @@ class AdminPage {
                 ${reasonRows ? `<div class="scroll"><table><thead><tr><th>Raison d'annulation</th><th class="num">Clients</th></tr></thead><tbody>${reasonRows}</tbody></table></div>` : '<div class="ssub">Aucune annulation enregistrée — les raisons s\'accumuleront ici.</div>'}
             </div>
             <div class="admin-block"><h2>🧾 Derniers paiements (50) <button id="fin-csv" class="mini-btn" title="Exporter en CSV">⬇ CSV</button></h2><div class="scroll">
-                ${payRows ? `<table><thead><tr><th>Date</th><th>Client</th><th>Type</th><th>Statut</th><th class="num">Montant</th></tr></thead><tbody>${payRows}</tbody></table>` : '<div class="ssub">Aucun paiement.</div>'}
+                ${payRows ? `<table><thead><tr><th>Date</th><th>Client</th><th>Rail</th><th>Type</th><th>Statut</th><th class="num">Montant</th></tr></thead><tbody>${payRows}</tbody></table>` : '<div class="ssub">Aucun paiement.</div>'}
             </div></div>`;
 
         // Status cards → Clients pre-filtered; CSV of the recent payments table.
@@ -649,8 +675,8 @@ class AdminPage {
                 if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
                 return `"${s.replace(/"/g, '""')}"`;
             };
-            const lines = [['date', 'email', 'type', 'statut', 'montant_cents', 'devise', 'pi_id', 'user_id'].map(q).join(',')]
-                .concat(rows.map(p => [p.at, p.email, p.kind, p.status, p.amount, p.currency, p.pi_id, p.user_id].map(q).join(',')));
+            const lines = [['date', 'email', 'rail', 'type', 'statut', 'montant_cents', 'devise', 'pi_id', 'user_id'].map(q).join(',')]
+                .concat(rows.map(p => [p.at, p.email, p.provider, p.kind, p.status, p.amount, p.currency, p.pi_id, p.user_id].map(q).join(',')));
             const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
             const a = document.createElement('a');
             a.href = URL.createObjectURL(blob);
@@ -1124,8 +1150,11 @@ class AdminPage {
 
         let details = internalRow;
         if (p) {
-            details += row('Statut', AdminPage.billingBadge(p.status, p.plan_code) + (p.provider ? ` <span class="badge gray">${esc(p.provider)}</span>` : ''));
+            details += row('Statut', AdminPage.billingBadge(p.status, p.plan_code) + (p.provider ? ` ${AdminPage.railBadge(p.provider)}` : ''));
             if (m && m.plan) details += row('Plan facturé', `${esc(m.plan)} · ${esc(m.period || '—')} · ${money(m.amount_cents)}`);
+            // Mobile rails (Play/Apple) have no Stancer mapping — the recurring price/cadence lives
+            // on the projection (stamped by the RevenueCat webhook).
+            else if (p.mrr_cents != null) details += row('Plan facturé', `${esc(p.plan_code || 'plus')} · ${esc(p.bill_period || '—')} · ${money(p.mrr_cents)} <span class="pacct">(store)</span>`);
             if (p.trial_ends_at) details += row(new Date(p.trial_ends_at) > new Date() ? 'Essai jusqu\'au' : 'Essai terminé le', esc(dt(p.trial_ends_at)));
             if (p.current_period_end) details += row('Fin de période', esc(dt(p.current_period_end)));
             if (m && m.card_last4) details += row('Carte', `•••• ${esc(m.card_last4)}${m.card_exp ? ' · exp ' + esc(m.card_exp) : ''}`);
@@ -1144,8 +1173,13 @@ class AdminPage {
             : (s === 'authorized' || s === 'to_capture') ? `<span class="badge blue">${esc(s)}</span>`
             : (s === 'require_payment_method') ? '<span class="badge amber">non finalisé</span>'
             : `<span class="badge gray">${esc(s)}</span>`;
+        // Show a rail column only when it adds signal: a mixed-rail history, or a single
+        // non-Stancer rail (a pure Stancer history would just repeat "Stancer · web" on every row).
+        const payProviders = new Set(pays.map(x => x.provider || 'stancer'));
+        const showRailCol = payProviders.size > 1 || (payProviders.size === 1 && !payProviders.has('stancer'));
         const payRows = pays.map(x => `<tr>
             <td>${esc(dt(x.updated_at || x.created_at))}</td>
+            ${showRailCol ? `<td>${AdminPage.railBadge(x.provider)}</td>` : ''}
             <td>${KIND_LABELS[x.kind] || esc(x.kind)}</td>
             <td>${payBadge(x.status)}</td>
             <td class="num">${money(x.amount)}</td>
@@ -1155,7 +1189,7 @@ class AdminPage {
         const fbRows = feedback.map(x => `<div class="ssub" style="margin-top:6px">${x.action === 'saved' ? '💚 Contre-offre acceptée' : '🛑 Annulation'} — raison : <b style="color:#e8e8ee">${REASONS[x.reason] || esc(x.reason)}</b> · ${esc(AdminPage.timeAgo(x.created_at))}</div>`).join('');
 
         el.innerHTML = `${details}
-            ${payRows ? `<div style="margin-top:14px"><div class="kpi-gtitle">Historique des paiements</div><div class="scroll"><table><thead><tr><th>Date</th><th>Type</th><th>Statut</th><th class="num">Montant</th></tr></thead><tbody>${payRows}</tbody></table></div></div>` : ''}
+            ${payRows ? `<div style="margin-top:14px"><div class="kpi-gtitle">Historique des paiements</div><div class="scroll"><table><thead><tr><th>Date</th>${showRailCol ? '<th>Rail</th>' : ''}<th>Type</th><th>Statut</th><th class="num">Montant</th></tr></thead><tbody>${payRows}</tbody></table></div></div>` : ''}
             ${fbRows}`;
         wireInternalToggle(this);
     }
@@ -1870,6 +1904,15 @@ class AdminPage {
         };
         const m = map[String(status || '').toLowerCase()];
         return m ? `<span class="badge ${m[0]}">${AdminPage.esc(m[1])}</span>` : '<span class="ssub">—</span>';
+    }
+    // Payment rail (provider) → human label + badge. Separates web (Stancer) from mobile stores.
+    static railLabel(p) {
+        const map = { stancer: 'Stancer · web', google_play: 'Google Play · mobile', apple_app_store: 'App Store · mobile', system: 'Comp / système', manual: 'Manuel', revenuecat: 'RevenueCat', web: 'Web', stripe: 'Stripe' };
+        return map[p] || (p ? AdminPage.esc(p) : '—');
+    }
+    static railBadge(p) {
+        const cls = p === 'stancer' ? 'blue' : (p === 'google_play' || p === 'apple_app_store') ? 'green' : 'gray';
+        return `<span class="badge ${cls}">${AdminPage.railLabel(p)}</span>`;
     }
     // Stored tag colour → badge class (fall back to gray for anything unexpected).
     static tagColor(c) { return ['gray', 'green', 'red', 'amber', 'blue'].includes(c) ? c : 'gray'; }

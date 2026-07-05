@@ -111,6 +111,11 @@ Deno.serve(async (req) => {
       if (error) throw new Error(`projection upsert failed: ${error.message}`);
     }
 
+    // Journal the mobile charge into the shared payments ledger (cloud_stancer_payments,
+    // rail-tagged) so collected / conversions / recent-payments / by-rail KPIs see
+    // Play & Apple revenue — Stancer already journals its own charges.
+    await journalRcPayment(admin, userId, eventType, event);
+
     await recordProcessedEvent(admin, userId, eventId, eventType, event);
     return json({ ok: true, type: eventType, plan: patch?.plan_code ?? null });
   } catch (error) {
@@ -159,6 +164,16 @@ function projectionPatch(userId: string, type: string, event: JsonRecord): JsonR
   // off immediately (matches the fail-open behaviour in entitlements.ts).
   if (type === "BILLING_ISSUE") {
     patch.fail_open_until = new Date(Date.now() + FAIL_OPEN_HOURS * 60 * 60 * 1000).toISOString();
+  }
+
+  // Recurring price + cadence for the cross-rail finance rollup. Stancer keeps its
+  // own in cloud_stancer_customers.amount_cents/period; this gives the mobile rails
+  // (Play/Apple) the equivalent so admin_finance can compute their MRR. Only stamp
+  // when a price is present, so price-less events (cancel/expire) never null it.
+  const baseCents = basePriceCents(event);
+  if (baseCents != null) {
+    patch.mrr_cents = baseCents;
+    patch.bill_period = billPeriodForEvent(event);
   }
 
   // TODO(transfer): handle the TRANSFER event by moving the entitlement from
@@ -232,6 +247,73 @@ function providerForStore(store: string | null): string {
       return "web";
     default:
       return "revenuecat";
+  }
+}
+
+// Base (store) price in cents — the recurring price of record for MRR. RC sends
+// `price` as a decimal in the product's currency; assume the product is USD-based
+// like the Stancer plans. Null when absent (e.g. cancellation/expiration events).
+function basePriceCents(event: JsonRecord): number | null {
+  const p = Number(event.price);
+  return Number.isFinite(p) && p > 0 ? Math.round(p * 100) : null;
+}
+
+// Cash actually collected for this transaction (buyer's currency). NOTE: this is
+// GROSS of the 15–30% store commission; net proceeds = amount × takehome_percentage.
+function paidCents(event: JsonRecord): number | null {
+  const raw = event.price_in_purchased_currency ?? event.price;
+  const p = Number(raw);
+  return Number.isFinite(p) && p > 0 ? Math.round(p * 100) : null;
+}
+
+function currencyOf(event: JsonRecord): string {
+  const c = stringOrNull(event.currency);
+  return c ? c.toLowerCase() : "usd";
+}
+
+// monthly | annual, from the product id, else the purchased→expiration span.
+function billPeriodForEvent(event: JsonRecord): string {
+  const pid = (stringOrNull(event.product_id) ?? "").toLowerCase();
+  if (/(annual|yearly|year|_1y|p1y|yr)/.test(pid)) return "annual";
+  if (/(month|_1m|p1m|mo)/.test(pid)) return "monthly";
+  const start = Number(event.purchased_at_ms);
+  const end = Number(event.expiration_at_ms);
+  if (Number.isFinite(start) && Number.isFinite(end) && end > start) {
+    return (end - start) / 86_400_000 > 300 ? "annual" : "monthly";
+  }
+  return "monthly";
+}
+
+// Insert a rail-tagged payment row for a real (non-trial) mobile charge, mirroring
+// the Stancer journal. Idempotent on pi_id (`rc_<transaction_id>`), so RC retries
+// and the whole-event idempotency guard both no-op safely.
+async function journalRcPayment(
+  db: SupabaseClient,
+  userId: string,
+  type: string,
+  event: JsonRecord,
+): Promise<void> {
+  const MONEY = new Set(["INITIAL_PURCHASE", "RENEWAL", "NON_RENEWING_PURCHASE", "PRODUCT_CHANGE"]);
+  if (!MONEY.has(type)) return;
+  const periodType = String(event.period_type ?? "").toUpperCase();
+  if (periodType === "TRIAL" || periodType === "INTRO") return; // no cash during a trial/intro
+  const cents = paidCents(event);
+  if (cents == null) return;
+  const txId = stringOrNull(event.transaction_id) ?? stringOrNull(event.id);
+  if (!txId) return;
+
+  const { error } = await db.from("cloud_stancer_payments").upsert({
+    pi_id: `rc_${txId}`,
+    user_id: userId,
+    kind: type === "RENEWAL" ? "renewal" : "first_charge",
+    amount: cents,
+    currency: currencyOf(event),
+    status: "captured",
+    provider: providerForStore(stringOrNull(event.store)),
+    order_id: txId,
+  }, { onConflict: "pi_id", ignoreDuplicates: true });
+  if (error && (error as { code?: string }).code !== "23505") {
+    throw new Error(`rc payment journal failed: ${error.message}`);
   }
 }
 
