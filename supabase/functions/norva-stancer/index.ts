@@ -188,6 +188,50 @@ Deno.serve(async (req) => {
     return json({ ok: true, mode: STANCER_MODE, customer: cust.ok ? cust.body.id : cust, results });
   }
 
+  // ── /selftest-refund — cron-authed, TEST ONLY: validate the /v1/refunds contract ──
+  // Creates a captured test payment via the server-to-server /v1/payments endpoint (raw
+  // TEST card, no hosted page), then refunds it, returning EVERY raw response so the exact
+  // endpoint/fields/response shape can be read. Never runs on a live key. Optional body:
+  // { amount?, currency?, card?, payment? } — pass `payment` to refund an existing id only.
+  if (req.method === "POST" && path === "/selftest-refund") {
+    const token = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
+    const { data: ok } = await db.rpc("norva_verify_cron_secret", { presented: token });
+    if (ok !== true) return json({ error: "Unauthorized" }, 403);
+    if (!isTestKey()) return json({ error: "selftest-refund refuses to run on a non-test key" }, 400);
+
+    let payload: {
+      amount?: number; currency?: string; card?: Record<string, unknown>; payment?: string;
+      pay_path?: string; refund_path?: string; refund_field?: string;
+    } = {};
+    try { payload = await req.json(); } catch (_) { /* defaults */ }
+    const amount = payload.amount ?? 50;
+    const currency = (payload.currency ?? "usd").toLowerCase();
+    const payPath = payload.pay_path ?? "/v1/payments";
+    const refundPath = payload.refund_path ?? "/v1/refunds";
+    const refundField = payload.refund_field ?? "payment"; // field naming the refunded payment id
+    const out: Record<string, unknown> = { mode: STANCER_MODE, amount, currency, pay_path: payPath, refund_path: refundPath };
+
+    let paymentId = String(payload.payment ?? "");
+    if (!paymentId) {
+      const cust = await stancerPost("/v2/customers/", { name: "Norva Refund Probe", email: "refund-probe@norva.tv" });
+      out.customer = { http: cust.status, id: cust.body?.id, error: cust.ok ? undefined : cust.body };
+      const card = payload.card ?? { number: "4111111111111111", exp_month: 12, exp_year: 2030, cvc: "123" };
+      // Direct server-to-server capture (no hosted page): raw TEST card → captured paym_…
+      const pay = await stancerPost(payPath, {
+        amount, currency, card, customer: cust.ok ? cust.body?.id : undefined,
+        description: "Norva refund-contract probe (test)",
+      });
+      out.payment = { http: pay.status, id: pay.body?.id, status: pay.body?.status, body: pay.body };
+      paymentId = pay.ok && pay.body?.id ? String(pay.body.id) : "";
+    }
+    if (!paymentId) return json({ ok: false, reason: "no_payment_to_refund", ...out });
+
+    // Contract under test: POST <refundPath> { <refundField>: paymentId, amount }.
+    const refund = await stancerPost(refundPath, { [refundField]: paymentId, amount });
+    out.refund = { http: refund.status, id: refund.body?.id, status: refund.body?.status, body: refund.body };
+    return json({ ok: refund.ok, payment_id: paymentId, ...out });
+  }
+
   // ── /checkout — user-authed: open a trial-setup hosted payment ─────────────
   if (req.method === "POST" && path === "/checkout") {
     const jwt = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
