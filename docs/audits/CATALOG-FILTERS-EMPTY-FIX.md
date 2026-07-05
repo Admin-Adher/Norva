@@ -51,3 +51,55 @@ select item_type, cardinality(audio_langs), cardinality(version_tags),
        (select count(*) from jsonb_object_keys(genre_bucket_counts))
 from cloud_catalog_facet_summary where user_id='<uuid>';
 ```
+
+## Addendum (2026-07-05, later) — why Audio/Subtitles were STILL empty after PR #175
+
+PR #175 fixed `api.js languageFacets` (never cache an empty result; bump the localStorage key
+to `norva-facets2`) — but the menus **stayed empty and the edge logs showed the
+`media-language-facets` endpoint was still never called.**
+
+**Root cause: a dead-on-arrival deploy.** The app shell versions every script with a query
+string (`<script src="/js/api.js?v=67">`) — that query string is the browser/CDN cache key.
+PR #175 changed `api.js`'s **content** but **did not bump `?v=67`**, so every browser (and
+Cloudflare's edge) kept serving the **old** `api.js?v=67` with the empty-caching bug. The fix
+shipped to the repo but never reached a single browser.
+
+**Fix:** bump the cache-buster so the corrected file actually loads.
+- `public/app.html`: `api.js?v=67 → ?v=68`
+- `public/cloud-link.html`: `api.js?v=26 → ?v=27`
+
+The backend was already correct — verified live: the reference account's
+`cloud_catalog_facet_summary` holds 70 audio ISO codes (all 15 whitelisted facets present)
+and `version_tags = {multi, vostfr}`, and `listLanguageFacets` derives **15 audio languages +
+French subtitles** from it. This is purely making the client load the code that consumes them.
+
+> **Rule going forward:** editing any `public/js/**` file that the shell loads with `?v=N`
+> is only half the change — the matching `?v=` in `app.html` (and any other shell) MUST be
+> bumped in the same commit, or the deploy is a no-op for returning users.
+
+## Addendum (2026-07-05) — anime → Adult Animation (classifier)
+
+The **Adult Animation** rail was permanently empty (0 titles) while **Kids Animation** held
+everything (reference account: 802 movies), because the classifier lumped Japanese anime in
+with Western kids cartoons. Product intent: anime is a distinct audience and belongs in the
+Adult Animation rail.
+
+**Change:** a new `ANIME_MARKERS = [anime, manga, انمي, مانجا]` signal. Anime/manga wording
+(`anime`; `animé/animée/animés` all normalise to contain `anime`; `manga`) → `animation_adult`;
+general/Western animation that only shares the `anim…` stem (`animation`, `animación`,
+`animação`, `animazione`, `cartoon`, `dessin`, `DreamWorks`…) stays `animation_kids`. An explicit
+kids marker still wins (kids anime → Kids). Applied to **all three** classifier ports that must
+agree — `_shared/genre-taxonomy.ts`, `public/js/utils/GenreTaxonomy.js`, and the SQL
+`norva_classify_buckets` (migration `20260705100000`) — with new parity fixtures in
+`tests/genre-taxonomy-parity`.
+
+Existing rows were re-classified in place (scoped to anime-category rows, ~5,618 updated across
+all users) and the facet summaries refreshed. Verified live (reference account):
+
+| bucket | movies before | movies after |
+|---|---|---|
+| animation_kids | 802 | 289 |
+| animation_adult | 0 | 513 |
+
+Series similarly: adult 989 / kids 208. `GenreTaxonomy.js` cache-buster bumped `?v=3 → ?v=4`
+so browsers pick up the mirrored change.

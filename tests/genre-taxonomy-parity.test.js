@@ -64,6 +64,19 @@ test('classifyTitle fixtures match the SQL port (norva_classify_buckets)', () =>
   eq('DESSINS ANIMES ENFANTS', null, ['animation_kids'], 'kids animation');
   eq(null, ['Animation'], ['animation_kids'], 'animation payload defaults to kids');
 
+  // Anime (Japanese animation) → Adult Animation rail; general/Western animation → Kids.
+  eq('FR - ANIMEE', null, ['animation_adult'], 'french anime → adult');
+  eq('DE - ANIME FILME', null, ['animation_adult'], 'anime films → adult');
+  eq('FR - MANGA', null, ['animation_adult'], 'manga → adult');
+  eq('EN - MANGA/ANIME', null, ['animation_adult'], 'manga/anime → adult');
+  eq('IT - ANIMAZIONE', null, ['animation_kids'], 'generic animation stays kids');
+  eq('DREAMWORKS ANIMATION', null, ['animation_kids'], 'western studio animation → kids');
+  eq('KU - CARTOON SORANI', null, ['animation_kids'], 'cartoon → kids');
+  // Anime category moves a TMDB "Animation" title from kids to adult (no double-membership).
+  eq('FR - MANGA', ['Animation'], ['animation_adult'], 'anime category promotes TMDB animation to adult');
+  // Explicit kids marker still wins over the anime marker.
+  eq('ANIME ENFANTS', null, ['animation_kids'], 'kids marker overrides anime');
+
   // K-Drama picks up both the drama keyword and the kdrama marker
   eq('K-DRAMA', null, ['drame', 'kdrama'], 'k-drama');
 
