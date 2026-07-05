@@ -202,6 +202,15 @@ class AdminPage {
 #page-admin .fin-cols > *{margin-bottom:0;}
 #page-admin .admin-cards.fin-mini{grid-template-columns:repeat(auto-fit,minmax(96px,1fr));gap:10px;}
 @media(max-width:900px){#page-admin .fin-cols{grid-template-columns:1fr;}}
+/* Moteur: Matching TMDB (left) ‖ Crons (right) */
+#page-admin .mot-cols{display:grid;grid-template-columns:0.9fr 2.2fr;gap:16px;margin-bottom:18px;align-items:stretch;}
+#page-admin .mot-cols > *{margin-bottom:0;min-width:0;}
+@media(max-width:1000px){#page-admin .mot-cols{grid-template-columns:1fr;}}
+#page-admin .mot-tmdb{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:12px;}
+#page-admin .mot-tmdb .kpi{text-align:center;padding:16px 8px 14px;display:flex;flex-direction:column;align-items:center;}
+#page-admin .mot-tmdb .kpi .v{font-size:19px;}
+#page-admin .mot-tmdb .kpi .l{margin-top:6px;}
+#page-admin .mot-tmdb .mot-ic{margin-top:13px;font-size:19px;opacity:.75;}
 #page-admin .users-controls{display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap;}
 #page-admin .users-controls input,#page-admin .users-controls select{background:var(--color-bg-secondary,#16161c);border:1px solid var(--color-border,#2a2a38);color:var(--color-text-primary,#fff);border-radius:8px;padding:8px 12px;font-size:13px;}
 #page-admin .users-controls input{min-width:240px;flex:1;max-width:380px;}
@@ -1657,9 +1666,11 @@ class AdminPage {
         v.innerHTML = `<div class="crm-page">
             <h1 class="crm-h1">⚙️ Moteur d'enrichissement</h1>
             <p class="crm-sub">Couverture par panel (comptes pilotes) + matching TMDB + crons jour/nuit.</p>
-            <div class="admin-block"><h2>Enrichissement par panel</h2><div class="scroll"><div id="admin-enrich"><div class="ssub">Chargement…</div></div></div></div>
-            <div class="admin-block"><h2>🎯 Matching TMDB</h2><div class="ssub">Backlogs drainés par les crons nocturnes (backfill-years 1000/j · search-match 3 600/j · revalidate 2 000/j) — ces compteurs doivent baisser de jour en jour.</div><section id="admin-tmdb" class="admin-cards"><div class="ssub">Chargement…</div></section></div>
-            <div class="admin-block"><h2>⏱️ Crons</h2><div class="scroll"><div id="admin-cron"><div class="ssub">Chargement…</div></div></div></div>
+            <div class="admin-block"><h2>📊 Enrichissement par panel</h2><div class="scroll"><div id="admin-enrich"><div class="ssub">Chargement…</div></div></div></div>
+            <div class="mot-cols">
+                <div class="admin-block"><h2>🎯 Matching TMDB</h2><div class="ssub" style="margin-bottom:0">Backlogs drainés par les crons nocturnes (backfill-years 1000/j · search-match 3 600/j · revalidate 2 000/j) — ces compteurs doivent baisser de jour en jour.</div><section id="admin-tmdb" class="mot-tmdb"><div class="ssub">Chargement…</div></section></div>
+                <div class="admin-block"><h2>⏱️ Crons</h2><div class="scroll"><div id="admin-cron"><div class="ssub">Chargement…</div></div></div></div>
+            </div>
         </div>`;
         try {
             const [enrich, cron, ov] = await Promise.all([
@@ -1684,12 +1695,12 @@ class AdminPage {
     _renderTmdb(o) {
         const el = document.getElementById('admin-tmdb');
         if (!el) return;
-        const card = (v, l, cls) => `<div class="kpi ${cls || ''}"><div class="v">${AdminPage.n(v)}</div><div class="l">${l}</div></div>`;
+        const card = (v, l, cls, icon) => `<div class="kpi ${cls || ''}"><div class="v">${AdminPage.n(v)}</div><div class="l">${l}</div><div class="mot-ic">${icon}</div></div>`;
         // These fields appear after the post-audit snapshot refresh; '—' until then.
         el.innerHTML = [
-            card(o.tmdb_year_backlog, 'Années manquantes', Number(o.tmdb_year_backlog) === 0 ? 'ok' : ''),
-            card(o.tmdb_unmatched, 'Non matchés TMDB'),
-            card(o.tmdb_unverified, 'À revalider')
+            card(o.tmdb_year_backlog, 'Années manquantes', Number(o.tmdb_year_backlog) === 0 ? 'ok' : '', '📅'),
+            card(o.tmdb_unmatched, 'Non matchés TMDB', '', '🗄️'),
+            card(o.tmdb_unverified, 'À revalider', '', '🔄')
         ].join('');
     }
 
@@ -2055,8 +2066,11 @@ class AdminPage {
         if (!el) return;
         if (!rows.length) { el.innerHTML = '<div class="ssub">Aucun cron déclaré.</div>'; return; }
         const winBadge = (w) => w === 'jour' ? '<span class="badge amber">☀️ jour</span>'
-            : (w === 'nuit' ? '<span class="badge blue">🌙 nuit</span>'
-            : (w === 'continu' ? '<span class="badge green">♾️ continu</span>' : '<span class="badge gray">—</span>'));
+            : w === 'nuit' ? '<span class="badge blue">🌙 nuit</span>'
+            : w === 'continu' ? '<span class="badge green">♾️ continu</span>'
+            : w === 'maintenance' ? '<span class="badge red">maintenance</span>'
+            : (w && w !== '—') ? `<span class="badge red">${AdminPage.esc(w)}</span>`
+            : '<span class="badge gray">—</span>';
         // Group by window client-side (stable sort keeps the SQL's billing/lifecycle-first order
         // within each window) — the snapshot ORDER BY no longer guarantees window contiguity.
         const winRank = (w) => (w === 'jour' ? 0 : w === 'nuit' ? 1 : w === 'continu' ? 2 : 3);
@@ -2072,7 +2086,7 @@ class AdminPage {
                 : (failing ? `<span class="badge red">échecs</span>` : `<span class="badge green">actif</span>`);
             const last = r.last_run ? new Date(r.last_run).toLocaleString('fr-FR') : '—';
             return `<tr class="${newGroup ? 'group-start' : ''} ${failing ? 'bad' : ''}">
-                <td>${newGroup ? winBadge(r.window) : ''}</td>
+                <td>${winBadge(r.window)}</td>
                 <td>${AdminPage.esc(r.kind)}</td>
                 <td>${AdminPage.esc(r.jobname)}</td>
                 <td><span title="${AdminPage.esc(r.schedule)}">${AdminPage.esc(AdminPage.cronHuman(r.schedule))}</span></td>
