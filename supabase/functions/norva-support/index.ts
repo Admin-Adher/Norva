@@ -24,6 +24,11 @@ const FROM = Deno.env.get("AUTH_EMAIL_FROM") ?? "Norva <noreply@norva.tv>";
 const SUPPORT_INBOX = "support@norva.tv";
 const SITE_URL = "https://norva.tv";
 
+// Anti-abuse: every user message emails support@ (Resend cost + inbox flood). Cap concurrent open
+// tickets and hourly message volume per user, and drop identical consecutive bodies.
+const MAX_OPEN_TICKETS = 8;
+const MAX_MSGS_PER_HOUR = 20;
+
 const db = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false } });
 
 const CORS = {
@@ -85,6 +90,16 @@ async function getUser(req: Request) {
   return data?.user ?? null;
 }
 
+// Count a user's own (non-admin) messages in the last hour — author_email is set server-side.
+async function userMsgCountLastHour(email: string): Promise<number> {
+  if (!email) return 0;
+  const since = new Date(Date.now() - 3600_000).toISOString();
+  const { count } = await db.from("cloud_support_messages")
+    .select("ticket_id", { count: "exact", head: true })
+    .eq("from_admin", false).eq("author_email", email).gte("created_at", since);
+  return count ?? 0;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (!SUPABASE_URL || !SERVICE_KEY) return json({ error: "not configured" }, 500);
@@ -102,6 +117,15 @@ Deno.serve(async (req) => {
     const subject = String(payload.subject ?? "").trim().slice(0, 180);
     const body = String(payload.body ?? "").trim().slice(0, 8000);
     if (subject.length < 3 || body.length < 5) return json({ error: "Please describe your issue (subject and message)." }, 400);
+
+    // Rate limit: too many concurrent tickets, or too many messages in the last hour.
+    const { count: openCount } = await db.from("cloud_support_tickets")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", user.id).in("status", ["open", "pending"]);
+    if ((openCount ?? 0) >= MAX_OPEN_TICKETS)
+      return json({ error: "You already have several open tickets — please continue in an existing one." }, 429);
+    if (await userMsgCountLastHour(user.email ?? "") >= MAX_MSGS_PER_HOUR)
+      return json({ error: "Too many messages in a short time. Please wait a little and try again." }, 429);
 
     const { data: t, error } = await db.from("cloud_support_tickets")
       .insert({ user_id: user.id, subject }).select("id").single();
@@ -122,6 +146,14 @@ Deno.serve(async (req) => {
     const { data: t } = await db.from("cloud_support_tickets")
       .select("id,user_id,subject").eq("id", ticketId).maybeSingle();
     if (!t || String(t.user_id) !== user.id) return json({ error: "Ticket not found" }, 404);
+
+    if (await userMsgCountLastHour(user.email ?? "") >= MAX_MSGS_PER_HOUR)
+      return json({ error: "Too many messages in a short time. Please wait a little and try again." }, 429);
+
+    // Dedupe: an identical consecutive user body (double-submit / retry) is a no-op — no re-email.
+    const { data: lastMsg } = await db.from("cloud_support_messages")
+      .select("body,from_admin").eq("ticket_id", t.id).order("created_at", { ascending: false }).limit(1).maybeSingle();
+    if (lastMsg && lastMsg.from_admin === false && String(lastMsg.body) === body) return json({ ok: true, deduped: true });
 
     await db.from("cloud_support_messages").insert({ ticket_id: t.id, from_admin: false, author_email: user.email, body });
     await db.from("cloud_support_tickets").update({

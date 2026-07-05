@@ -57,6 +57,13 @@ films/séries/variants sur des centaines de milliers de titres, par source) dép
 **Users** est l'exception : la liste est **live** (recherche / tri / pagination), donc `admin_users_page`
 requête `auth.users` en direct — mais bornée à une page (voir §5), donc pas de timeout.
 
+**Finance** (`admin_finance`) est la **2ᵉ exception live** (~15 agrégats calculés à l'ouverture de la
+page, admin only). Volume actuel minuscule → microsecondes. Indexes posés pour les scans les plus
+lourds (`cloud_stancer_payments` : tri `coalesce(updated_at,created_at)` + partiel `status='captured'`).
+**Suivi d'échelle** : si la page Finance approche le `statement_timeout` de 8 s (croissance des
+paiements / `norva_funnel_daily` qui scanne `cloud_watch_history`), replier les agrégats dans un blob
+`finance` de `admin_dashboard_cache` rafraîchi par le cron snapshot (comme overview/sources).
+
 ---
 
 ## 3. Scalabilité (des milliers d'users)

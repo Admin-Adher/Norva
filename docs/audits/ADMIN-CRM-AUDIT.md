@@ -455,3 +455,39 @@ casse la sémantique de table » — le bon correctif est un élément focusable
 
 **Note doublons** : les findings #2/#15 (lignes Clients) et #4/#30 (`_pageSupport` course) sont chacun
 la même cause vue par deux lentilles.
+
+---
+
+## Addendum 5 — Remédiation complète du re-audit (2026-07-05)
+
+Les **30 findings** de l'Addendum 4 corrigés en 4 lots + le critique #1 fermé en amont. Vérifié :
+`node --check` OK, `node --test tests/*.test.js` 65/65, `anon_secdef_leaks = 0` en live après chaque
+migration.
+
+**Sécurité (déjà appliquée live)** — #1 : 18 fonctions SECURITY DEFINER catalogue/sync retirées de
+`anon`/`authenticated` (migration `20260705050000`, allowlist `app_public_flags`).
+
+**Lot A — Frontend (`AdminPage.js`)** :
+- #2/#9/#15 : lignes cliquables → `tabindex` + `aria-label`, **`role="button"` retiré des `<tr>`**
+  (préserve la sémantique de table) ; la liste Clients (oubliée) est maintenant atteignable au clavier.
+- #4/#30 : garde de course `_supportSeq` sur `_pageSupport`. #12 : focus restauré + `tabindex` roving +
+  flèches/Home/End + `role="tabpanel"`. #17 : garde `_nav` sur `_pageSysteme`. #8 : le reload ticket
+  ne s'exécute que si on est encore sur le ticket. #7 : bouton retour fiche contextuel (mémorise le
+  point d'entrée). #10/#11/#18/#25 : modale focus-trap + `inert` + `aria-labelledby`/`aria-describedby`
+  + label input prompt + Enter ne confirme plus quand Annuler a le focus. #13 : `role="alert"` sur les
+  boîtes d'erreur. #19 : `timeAgo` pluriel. #20 : placeholder crons. #21 : point rouge tickets sur le
+  rail mobile. #22 : cadre amber pour les alertes amber. #23 : contraste des ✕/supprimer relevé.
+  #24 : `aria-label` sur les boutons-icônes. #26 : `_renderCron` groupe par fenêtre côté client.
+
+**Lot B — Migration `20260705060000`** : #5 curseur composite `(created_at, id)` pour `admin_audit_feed`
+(+ `p_before_id` côté client) ; #6 `admin_users_page` exclut les comptes internes sous filtre de statut
+(match des cartes Finance) ; #16 acteur tracé dans `admin_internal_toggle`/`admin_support_set_status` ;
+#29 index `admin_client_tags(tag_id)`. **Chaque `CREATE`/`REPLACE` re-révoque `anon` explicitement**
+(gotcha default-privileges).
+
+**Lot C — Edge `norva-support`** : #3 rate-limiting (≤8 tickets ouverts, ≤20 messages/h par user) +
+dédup des corps identiques → anti-amplification email/Resend.
+
+**Lot D — Migration `20260705070000`** : #27 « Actifs payants » exclut `provider='system'` (cohérent
+cockpit↔finance) ; #28 bornes basses `> now()` sur les échéances ; #14 indexes `cloud_stancer_payments`
++ suivi d'échelle documenté (repli en cache si le volume grandit — inutile à 3 users/6 paiements).
