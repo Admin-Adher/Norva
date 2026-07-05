@@ -114,9 +114,11 @@ comment on function public.catalog_i18n_prewarm_candidates(int, timestamptz) is
   'Phase 4 VOD i18n: bounded gap-fill candidates for the pre-warm cron — validated matches '
   '(metadata.tmdb present) still missing i18n, not attempted within the retry window.';
 
--- Lock both to the edge's service_role (new functions default to PUBLIC EXECUTE, which would
--- let anon/authenticated poison the SHARED cache or scan it via PostgREST).
-revoke all on function public.catalog_upsert_i18n_map(text, text, jsonb) from public;
+-- Lock both to the edge's service_role. Besides the PUBLIC default grant, Supabase's default
+-- privileges hand anon + authenticated an EXPLICIT EXECUTE on new public functions (a plain
+-- `revoke from public` does NOT remove it) — either would let a browser client poison the SHARED
+-- cache or scan it via PostgREST. Revoke all three, grant only service_role.
+revoke all on function public.catalog_upsert_i18n_map(text, text, jsonb) from public, anon, authenticated;
 grant execute on function public.catalog_upsert_i18n_map(text, text, jsonb) to service_role;
-revoke all on function public.catalog_i18n_prewarm_candidates(int, timestamptz) from public;
+revoke all on function public.catalog_i18n_prewarm_candidates(int, timestamptz) from public, anon, authenticated;
 grant execute on function public.catalog_i18n_prewarm_candidates(int, timestamptz) to service_role;

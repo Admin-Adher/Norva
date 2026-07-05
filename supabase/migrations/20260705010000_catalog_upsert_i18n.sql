@@ -69,10 +69,11 @@ comment on function public.catalog_upsert_i18n(text, text, text, text, text) is
   'Phase 3 VOD i18n: idempotently fill catalog_titles.metadata.i18n[lang] on demand '
   'from the edge (norva-catalog getTmdbMeta). Fills gaps only; never overwrites.';
 
--- Lock the write path to the edge only. New functions grant EXECUTE to PUBLIC by
--- default, which would let any authenticated (or anon) client call this via PostgREST
--- and inject text into the SHARED synopsis cache — so revoke PUBLIC and grant solely to
+-- Lock the write path to the edge only. Besides the PUBLIC default grant, Supabase's default
+-- privileges hand anon + authenticated an EXPLICIT EXECUTE on new public functions (which a
+-- plain `revoke from public` does NOT remove) — either would let a browser client call this via
+-- PostgREST and inject text into the SHARED synopsis cache. Revoke all three, grant only
 -- service_role (the key norva-catalog's db client uses).
-revoke all on function public.catalog_upsert_i18n(text, text, text, text, text) from public;
+revoke all on function public.catalog_upsert_i18n(text, text, text, text, text) from public, anon, authenticated;
 grant execute on function public.catalog_upsert_i18n(text, text, text, text, text)
   to service_role;
