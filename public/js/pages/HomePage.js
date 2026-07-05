@@ -313,7 +313,10 @@ class HomePage {
         // 2026-07-04, privacy-relevant inside a household).
         let pid = '';
         try { pid = window.NorvaCloud?.profiles?.getActiveId?.() || window.API?.profiles?.getActiveId?.() || ''; } catch (_) { /* default scope */ }
-        return 'home-dashboard:' + (pid || 'default');
+        // Lang-scoped: rails carry localized titles/overviews, so a synopsis-language change
+        // must not paint the previous language on cold load.
+        const lang = window.NorvaCloud?.contentLanguage?.() || 'en';
+        return 'home-dashboard:' + (pid || 'default') + ':' + lang;
     }
 
     async loadDashboardData() {

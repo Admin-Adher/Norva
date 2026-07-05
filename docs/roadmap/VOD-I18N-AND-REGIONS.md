@@ -1,7 +1,7 @@
 # VOD synopsis i18n + region/country catalogue — audit & redesign
 
-_Last updated: 2026-07-05. Status: **architecture verified against live code + DB**; redesign
-is an open brainstorm (decisions pending)._
+_Last updated: 2026-07-05. Status: **Phases 1–2 shipped** (#167 region model + picker, #168
+resolved synopsis language + cache lang-keying); Phases 3–5 (edge i18n population) next._
 
 Goal: make the three "Your taste & recommendations" options — **Your region**, **Preferred
 audio language**, **Preferred subtitle language** — drive the language of VOD **synopses**
@@ -208,13 +208,45 @@ episode fetch (coherent with the series); an episode-i18n cache is a later optim
 
 ### C.5 Phased implementation
 
-| Phase | Scope | Surface | Risk |
-|-------|-------|---------|------|
-| **1** | `regions.js` (curated + bundles) + normaliser + searchable dropdown + region→defaultLanguage | Frontend | Low |
-| **2** | `resolveContentLang` chain; pass `?lang=` to all catalog/episode calls | Frontend | Low |
-| **3** | `norva-catalog`: generalise enrichment locale (any lang, not fr/en) + lazy on-demand i18n → global cache | Edge | Med |
-| **4** | Pre-warm cron (trending × top langs) + `i18n_attempted` guard | Edge + cron | Med |
-| **5** | Episode coherence in `resolvedLang` + optional episode-i18n cache | Edge | Low |
+| Phase | Scope | Surface | Risk | Status |
+|-------|-------|---------|------|--------|
+| **1** | `regions.js` (curated + bundles) + normaliser + searchable dropdown + region→defaultLanguage | Frontend | Low | ✅ **shipped (#167)** |
+| **2** | `resolveContentLang` chain; propagate `?lang=` to all catalog fetches | Frontend | Low | ✅ **shipped (#168)** |
+| **3** | `norva-catalog`: generalise enrichment locale (any lang, not fr/en) + lazy on-demand i18n → global cache | Edge | Med | next |
+| **4** | Pre-warm cron (trending × top langs) + `i18n_attempted` guard | Edge + cron | Med | — |
+| **5** | Episode coherence in `resolvedLang` + optional episode-i18n cache | Edge | Low | — |
 
 No titles schema change (`metadata.i18n` is already language-flexible); Phase 4 may add a
 lightweight `i18n_attempted` guard.
+
+### C.6 Phase 2 — as shipped (#168)
+
+The resolution is a single pure helper, so the whole chain is one testable function and every
+catalog fetch inherits it through the existing `?lang=` param.
+
+- **`MediaUtils.resolveContentLanguage({ subtitle, audio, regionLang, locale })`** — pure,
+  6 unit tests. `subtitle → audio → regionLang → locale → 'en'`, coercing each to a 2-letter
+  ISO code and skipping the sentinels (`''`, `'none'`, `'original'` — the latter is not a
+  readable language).
+- **`cloudApi.resolveLang()`** now gathers the inputs and calls it: subtitle/audio prefs from
+  the `localStorage['norva-cloud-settings']` mirror (kept fresh by `API.settings.get()` and
+  the PUT handler), `regionLang` from `NorvaRegions.defaultLanguage(resolvedRegion)`, `locale`
+  from `navigator.language`. It's exposed as `NorvaCloud.contentLanguage()`. Both catalog
+  routes (`catalogRequest` / `catalogMutate`) already send `lang: resolveLang()`, so nothing
+  else had to change to propagate it.
+- **Cache correctness** — the resolved `lang` is folded into **both** cache layers:
+  - the four in-memory maps (`mediaCache`, `pageCache`, `liveCatalogCache`, `homeRailCache`);
+  - the persistent localStorage stale-while-revalidate cache (`NorvaCatalogCache`), whose
+    per-page keys (`movies:default`, `series:default`, `home-dashboard:<pid>`) are now
+    lang-scoped — otherwise a cold launch would first-paint the previous language.
+  Changing the audio/subtitle preference also calls `API.media.clearCatalogCaches()`. The
+  adversarial review caught two real bugs here: that persistent cache was **not** lang-keyed,
+  and the exposed `clearCatalogCaches`/`clearRailCache` were **dead no-ops** (their bodies
+  referenced IIFE-internal caches from file scope → swallowed `ReferenceError`) — both fixed.
+- **Legacy prefs** — `resolveLang` routes the stored settings through
+  `normalizeContentPreferences`, so a user who only set the old single `preferredLanguage`
+  (before the audio/subtitle split) is still honoured.
+- **Not yet visible end-to-end**: the catalogue only holds `i18n[fr]`/`i18n[en]` today, so a
+  resolved language outside {fr,en} still falls back to the catalogue default until **Phase 3**
+  populates `i18n[lang]` on demand. Phase 2 makes the request ask for the right language; Phase
+  3 makes the answer exist.

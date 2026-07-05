@@ -271,6 +271,17 @@ const CloudAdapter = (() => {
         homeRailCache.clear();
     }
 
+    // Resolved synopsis language — folded into the catalog cache keys so a language change
+    // (subtitle / audio / region preference) yields a cache miss and a re-fetch of the
+    // localized overviews, instead of serving stale text. See cloudApi.resolveLang().
+    function contentLang() {
+        try {
+            return (window.NorvaCloud && window.NorvaCloud.contentLanguage && window.NorvaCloud.contentLanguage()) || 'en';
+        } catch (_) {
+            return 'en';
+        }
+    }
+
     function normalizeCategory(value) {
         const raw = value === null || value === undefined || value === '' ? 'uncategorized' : String(value);
         return {
@@ -358,7 +369,7 @@ const CloudAdapter = (() => {
 
     async function listAllMedia({ sourceId, type, q } = {}) {
         const cloudSourceId = sourceId ? await resolveSourceId(sourceId) : '';
-        const cacheKey = JSON.stringify({ cloudSourceId, type, q: q || '' });
+        const cacheKey = JSON.stringify({ cloudSourceId, type, q: q || '', lang: contentLang() });
         if (mediaCache.has(cacheKey)) return mediaCache.get(cacheKey);
 
         const pageSize = 1000;
@@ -407,6 +418,7 @@ const CloudAdapter = (() => {
             year: year || '',
             minRating: minRating || '',
             addedDays: addedDays || '',
+            lang: contentLang(),
             limit: normalizedLimit,
             offset: normalizedOffset
         });
@@ -463,6 +475,7 @@ const CloudAdapter = (() => {
             cloudSourceId,
             categoryId: categoryId || '',
             country,
+            lang: contentLang(),
             q: q || '',
             limit: limit || '',
             offset: offset || '',
@@ -507,7 +520,7 @@ const CloudAdapter = (() => {
     async function getHomeRails({ type = '', limit = 12 } = {}) {
         const normalizedType = type ? cloudTypeFromLocal(type) : '';
         const normalizedLimit = Math.max(1, Math.min(50, Number.parseInt(limit, 10) || 12));
-        const cacheKey = JSON.stringify({ type: normalizedType, limit: normalizedLimit });
+        const cacheKey = JSON.stringify({ type: normalizedType, limit: normalizedLimit, lang: contentLang() });
         const cached = homeRailCache.get(cacheKey);
         if (cached && cached.expiresAt > Date.now()) return cached.payload;
 
@@ -525,7 +538,7 @@ const CloudAdapter = (() => {
     async function getGenreRails({ type = '', limit = 18 } = {}) {
         const normalizedType = type ? cloudTypeFromLocal(type) : 'movie';
         const normalizedLimit = Math.max(1, Math.min(50, Number.parseInt(limit, 10) || 18));
-        const cacheKey = JSON.stringify({ genre: true, type: normalizedType, limit: normalizedLimit });
+        const cacheKey = JSON.stringify({ genre: true, type: normalizedType, limit: normalizedLimit, lang: contentLang() });
         const cached = homeRailCache.get(cacheKey);
         if (cached && cached.expiresAt > Date.now()) return cached.payload;
 
@@ -1984,7 +1997,11 @@ const CloudAdapter = (() => {
         cloudMediaApi,
         cloudLiveApi,
         cloudHomeApi,
-        cloudPlaybackApi
+        cloudPlaybackApi,
+        // Cache invalidators — exposed so the file-scope API.media wrappers can reach the
+        // IIFE-internal caches (otherwise they'd throw a swallowed ReferenceError).
+        clearMediaCaches,
+        clearRailCache: () => { try { homeRailCache.clear(); } catch (_) { /* noop */ } }
     };
 })();
 
@@ -2183,7 +2200,10 @@ const API = {
         },
         // Drop the cached home/genre rails so a hidden-genre change shows on the
         // browse pages immediately instead of after the 2-min TTL.
-        clearRailCache: () => { try { homeRailCache.clear(); } catch (_) { /* noop */ } }
+        clearRailCache: () => CloudAdapter.clearRailCache(),
+        // Drop all catalog caches (rails, pages, media, live) — used when the resolved
+        // synopsis language changes so localized overviews refresh on the next view.
+        clearCatalogCaches: () => CloudAdapter.clearMediaCaches()
     },
 
     // Playback health (auto-detected broken/working streams)

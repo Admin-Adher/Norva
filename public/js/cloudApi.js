@@ -303,11 +303,41 @@
         return resolveContentRegion().region;
     }
 
-    // User's display language (2-letter) for localized titles/overviews — derived
-    // from the browser locale, defaulting to en (Norva's UI is English). The catalog
-    // serves i18n[lang] when available, else the catalogue default.
+    // Active region code WITHOUT the rememberRegionState() localStorage write — safe to call
+    // from hot paths (resolveLang / cache-key building) where the persisted state side effect
+    // of resolveContentRegion() is unwanted.
+    function activeRegionCode() {
+        const preferred = getStoredPreferredContentRegion();
+        if (preferred) return preferred.region;
+        const legacy = getLegacyContentRegion();
+        if (legacy) return legacy;
+        return inferContentRegionFromLocale();
+    }
+
+    // Resolved SYNOPSIS language (2-letter) for localized titles/overviews — the axis the
+    // three "taste" preferences now drive (VOD i18n Phase 2). A synopsis is read, so the
+    // chain is subtitle → audio → region default → device locale → en. The catalog serves
+    // metadata.i18n[lang] when available, else the catalogue default. Prefs are read from
+    // the localStorage mirror of the server settings (kept fresh by API.settings.get()).
     function resolveLang() {
-        const code = String(navigator.language || 'en').toLowerCase().split('-')[0];
+        const M = (typeof window !== 'undefined' && window.MediaUtils) || null;
+        let subtitle = '';
+        let audio = '';
+        try {
+            const s = JSON.parse(localStorage.getItem('norva-cloud-settings') || '{}') || {};
+            // normalizeContentPreferences migrates the legacy single `preferredLanguage`
+            // field into audio/subtitle, so a user who only set the old pref is honoured.
+            const norm = (M && typeof M.normalizeContentPreferences === 'function') ? M.normalizeContentPreferences(s) : s;
+            subtitle = norm.preferredSubtitleLanguage || '';
+            audio = norm.preferredAudioLanguage || '';
+        } catch (_) { /* fall through to region/locale */ }
+        const regionLang = REGIONS_DATA ? REGIONS_DATA.defaultLanguage(activeRegionCode()) : '';
+        const locale = (typeof navigator !== 'undefined' && navigator.language) || '';
+        if (M && typeof M.resolveContentLanguage === 'function') {
+            return M.resolveContentLanguage({ subtitle, audio, regionLang, locale });
+        }
+        // Fallback if MediaUtils isn't loaded yet (not expected at request time).
+        const code = String(locale || 'en').toLowerCase().split('-')[0];
         return /^[a-z]{2}$/.test(code) ? code : 'en';
     }
 
@@ -827,6 +857,10 @@
             setActiveId: setActiveProfileId,
             avatarUrl: (avatarId) => '/img/avatars/' + encodeURIComponent(String(avatarId || 'avatar-01')) + '.png',
         },
+
+        // Resolved synopsis language (subtitle → audio → region → locale → en). Used by the
+        // catalog fetches (?lang=) and by the frontend caches so a language change re-fetches.
+        contentLanguage: resolveLang,
 
         regions: {
             list: () => CONTENT_REGIONS.slice(),
