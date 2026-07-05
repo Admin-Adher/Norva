@@ -130,6 +130,21 @@ function _hasCloudUserSession() {
     }
 }
 
+// True when a signed-in USER session exists in storage, IGNORING token expiry. Used only to
+// choose the user vs. device edge endpoints: requestToBase refreshes an expired access token on
+// the first 401, so a logged-in user must always use the user endpoints. _hasCloudUserSession
+// (expiry-aware) still gates cloud-vs-local mode. Routing a logged-in user to the device endpoint
+// on a momentarily-lapsed token 401s (no device token) and silently empties dynamic menus such as
+// the Audio/Subtitle language facets — the bug this fixes.
+function _hasCloudUserAccount() {
+    try {
+        const session = JSON.parse(localStorage.getItem('norva-cloud-session') || 'null');
+        return Boolean(session?.access_token && session?.user?.id);
+    } catch (_) {
+        return false;
+    }
+}
+
 function _hasCloudDeviceSession() {
     return Boolean(window.NorvaCloud?.deviceToken || localStorage.getItem('norva-cloud-device-token'));
 }
@@ -1953,20 +1968,23 @@ const CloudAdapter = (() => {
         return _hasCloudUserSession();
     }
 
+    // Route by whether a USER account is signed in (expiry-agnostic), NOT by token freshness:
+    // a logged-in user whose access token just lapsed must still hit the user endpoints (which
+    // auto-refresh on 401), never the device endpoints (whose token is absent for that user).
     function cloudSourcesApi() {
-        return hasUserSession() ? NorvaCloud.sources : NorvaCloud.device.sources;
+        return _hasCloudUserAccount() ? NorvaCloud.sources : NorvaCloud.device.sources;
     }
 
     function cloudMediaApi() {
-        return hasUserSession() ? NorvaCloud.mediaItems : NorvaCloud.device.mediaItems;
+        return _hasCloudUserAccount() ? NorvaCloud.mediaItems : NorvaCloud.device.mediaItems;
     }
 
     function cloudLiveApi() {
-        return hasUserSession() ? NorvaCloud.live : NorvaCloud.device.live;
+        return _hasCloudUserAccount() ? NorvaCloud.live : NorvaCloud.device.live;
     }
 
     function cloudHomeApi() {
-        return hasUserSession() ? NorvaCloud.home : NorvaCloud.device.home;
+        return _hasCloudUserAccount() ? NorvaCloud.home : NorvaCloud.device.home;
     }
 
     function cloudPlaybackApi() {
