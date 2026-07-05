@@ -187,6 +187,28 @@
       window.cancelAnimationFrame(raf);
     }
 
+    // Hold the twinkle loop back until the page has loaded and gone idle. A
+    // background that changes every frame keeps Lighthouse's Speed Index from
+    // ever settling to "visually complete" (it diffs filmstrip frames), which
+    // inflates SI even while FCP/LCP stay fast. Keeping the first ~1.5s of the
+    // timeline static fixes that — the field is already painted once (static),
+    // so users still see the stars immediately; they just begin twinkling a
+    // beat later, which is imperceptible. Reduced motion never arms (stays
+    // static); real interaction (tab focus / motion toggle) still starts it via
+    // the visibilitychange / motion handlers.
+    var animationArmed = false;
+    function beginWhenIdle() {
+      if (animationArmed || motionQuery.matches) return;
+      animationArmed = true;
+      var kick = function () { if (!document.hidden) start(); };
+      var arm = function () {
+        if (window.requestIdleCallback) window.requestIdleCallback(kick, { timeout: 1800 });
+        else setTimeout(kick, 1500);
+      };
+      if (document.readyState === 'complete') arm();
+      else window.addEventListener('load', arm, { once: true });
+    }
+
     var scrollIdle;
     window.addEventListener('scroll', function () {
       if (coarse) {
@@ -229,8 +251,18 @@
     if (motionQuery.addEventListener) motionQuery.addEventListener('change', onMotionChange);
     else if (motionQuery.addListener) motionQuery.addListener(onMotionChange);
 
-    fit();
-    seed();
-    start();
+    // Defer the first geometry read to the next frame. fit() reads
+    // window.innerWidth/innerHeight; running it inline here — right after we
+    // appended the canvas to <body>, before the first paint — forces a
+    // synchronous full-page layout (~60ms on this page, flagged by Lighthouse).
+    // In a rAF the read rides along with the layout the browser already computes
+    // for its first frame, so it costs nothing extra. We then paint the field
+    // ONCE (static) and hold the twinkle loop until load+idle (see beginWhenIdle).
+    window.requestAnimationFrame(function () {
+      fit();
+      seed();
+      paint(false);
+      beginWhenIdle();
+    });
   }
 })();

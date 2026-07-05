@@ -33,6 +33,9 @@ jobs:
       - name: Cache-bust assets by content hash (rewrites ?v= to each file's hash)
         run: npm run hash:assets
 
+      - name: Inline landing CSS into entry HTML (removes render-blocking request)
+        run: npm run inline:css
+
       - name: Deploy public/ to Cloudflare Pages (norva-web)
         uses: cloudflare/wrangler-action@v3
         with:

@@ -10,6 +10,8 @@
   <link rel="icon" type="image/png" href="/favicon.png">
   <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <!-- Preload the LCP hero so its discovery doesn't wait on the inlined CSS byte offset. -->
+  <link rel="preload" as="image" href="/assets/landing/norva-ecosystem-4-devices.svg?v=10" fetchpriority="high">
   <script>
     // Flag constrained devices BEFORE the stylesheet applies (no flash), so the
     // landing drops expensive real-time blur there. Desktop keeps full glass.
