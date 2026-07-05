@@ -27,8 +27,10 @@ généralisation) mis en place pendant la session Movies/Series. Ces crons sont 
 | Fonction | Rôle | Migration |
 |----------|------|-----------|
 | `norva_canonicalize_titles_for_user(uuid\|null)` | fusionne les titres partageant un `provider_tmdb_id` sous des `identity_key` différents → 1 titre canonique `tmdb:<id>` | `20260704200000` |
-| `norva_backfill_media_identity(uuid\|null)` | `cloud_media_items.dedup_key` = identité du titre lié + propage tmdb & poster frais | `20260704200500` |
-| `list_media_items_deduped(...)` | grille plate : pagine par **film distinct** (dédup cross-page) en gardant toutes les versions | `20260704201000` |
+| `norva_backfill_media_identity(uuid\|null, p_limit)` | `cloud_media_items.dedup_key` = identité du titre lié + propage tmdb & poster ; **+ recompute `is_dedup_primary`** des groupes touchés (maintenance dédup) | `20260704200500` → `210000` → `270000` |
+| `list_media_items_deduped(...)` | grille plate : dédup **précalculé** (`is_dedup_primary`) → index scan borné à toute taille ; vues filtrées source/genre = routage par estimation | `20260704201000` → `250000` → `271000` |
+| `catalog_item_estimate(uuid, text)` | taille estimée d'un `(user,item_type)` via le **planner** (instantané) — routage gros/petit compte sans `count(*)` | `20260704250000` |
+| `norva_recompute_dedup_primary(uuid\|null, p_limit)` | marque **1 représentant** par groupe `dedup_key` (`is_dedup_primary`) — backfill idempotent borné | `20260704270000` |
 | `norva_refresh_posters_from_catalog(uuid\|null)` | `cloud_titles.poster_url` ← `catalog_titles` (source enrichie fraîche) | `20260704203000` |
 | `norva_reconcile_catalog(uuid\|null)` | = canonicalize → refresh_posters → backfill_media_identity (tout idempotent) | `20260704202000` + `…203000` |
 
@@ -36,14 +38,16 @@ généralisation) mis en place pendant la session Movies/Series. Ces crons sont 
 
 | jobid | jobname | schedule | rôle | portée actuelle |
 |-------|---------|----------|------|-----------------|
-| 12 | `norva-enrich-search-match` | `*/3 * * * *` | matching TMDB des titres non matchés (`/cron/search-match?limit=1000&conc=15`) | **focalisé jeremy** (`&user=0b971271-…`) |
-| 84 | `norva-enrich-guardian-revert` | `*/10 * * * *` | quand l'éligible de jeremy < 300 → **retire `&user=` du job 12** (repasse global) puis **se supprime** | garde-fou, actif |
-| 85 | `norva-catalog-reconcile` | `1-59/3 0-6 * * *` | `norva_reconcile_catalog(null, 3000)` — canonicalize + posters + `dedup_key` (résilient, advisory-lock, batché) | **global, nuit only** |
+| 12 | `norva-enrich-search-match` | `*/3 * * * *` | matching TMDB des titres non matchés (`/cron/search-match?limit=1000&conc=15`) | **global** — dé-épinglé le 2026-07-05 (cf. « Incident 2026-07-05 ») |
+| ~~84~~ | ~~`norva-enrich-guardian-revert`~~ | — | garde-fou de revert du job 12 | **SUPPRIMÉ** le 2026-07-05 (cassé — `permission denied`, cf. « Incident 2026-07-05 ») |
+| 85 | `norva-catalog-reconcile` | `1-59/3 0-6 * * *` | `norva_reconcile_catalog(null, 3000)` — canonicalize + posters + `dedup_key` + recompute `is_dedup_primary` des groupes touchés (résilient, advisory-lock, batché) | **global, nuit only** |
 
-Note : jobs 12/85 focalisés sur le compte de vérif (`jeremy`) — le dedup serveur
-(`list_media_items_deduped`) est live pour **tous**, mais n'**agit** que là où `dedup_key`
-est rempli. Les autres comptes voient donc la grille **inchangée** (zéro régression) tant que
-la généralisation n'est pas lancée.
+Note (obsolète depuis 2026-07-05) : le job 12 fut un temps **focalisé jeremy**
+(`&user=0b971271-…`) pour drainer son backlog en premier, avec le garde-fou job 84 censé le
+repasser en global une fois jeremy drainé. Le garde-fou était **cassé** → job 12 resté bloqué
+sur jeremy (voir l'incident du 2026-07-05). Depuis, job 12 est **global** et le dedup de la
+grille plate ne dépend plus du drain (il est **précalculé** via `is_dedup_primary` — cf.
+`CATALOG-SPEED-AUDIT-2026-07-04.md` §1).
 
 ## Généralisation — LANCÉE (2026-07-04, batché)
 
@@ -117,10 +121,59 @@ select coalesce(sum(n-1),0) from (
   group by user_id, item_type, provider_tmdb_id having count(*)>1) d;
 ```
 
+## Incident 2026-07-05 : enrichissement Ninja « bloqué » + échecs cron
+
+Constat admin : le compte `projethorizon2030` (mega, source **Ninja** — `976e7bbd…`,
+172k films) affichait un enrichissement à ~0,6 % / **~266 j** d'ETA, et le dashboard listait
+**~40 échecs / 24 h**. Diagnostic : **deux enrichissements distincts**, à ne pas confondre.
+
+### 1. Match TMDB (posters/métadonnées/dédup) — vrai bug, corrigé
+
+Le job 12 était resté **épinglé sur jeremy** (`&user=0b971271…`) alors que jeremy est
+**100 % matché (0 éligible)** → il tournait à vide pendant que **les ~395k titres du mega
+n'étaient jamais matchés** (0 tentative en 6 h). Le garde-fou (job 84) censé le repasser en
+global échouait **toutes les 10 min** : il faisait un `UPDATE cron.job …` direct → `ERROR:
+permission denied for table job` (Supabase interdit l'UPDATE direct de `cron.job`, il faut
+`cron.alter_job`). D'où ~25 échecs/jour à lui seul.
+
+**Correctif (live, via la voie autorisée) :**
+```sql
+-- repasser le search-match en GLOBAL (retire &user=…), la voie que le garde-fou ne pouvait pas prendre
+select cron.alter_job(12, command := ' select net.http_post( url := ''…/cron/search-match?limit=1000&conc=15'', … ); ');
+-- supprimer le garde-fou cassé (son rôle est accompli : jeremy drainé + job 12 global)
+select cron.unschedule('norva-enrich-guardian-revert');
+```
+Ceci **restaure l'état voulu par la migration `20260704180000`** (qui définit déjà job 12 en
+global) ; l'épinglage + le garde-fou étaient des ajouts live ad-hoc, non versionnés → rien ne
+les recrée au déploiement. **Vérifié** : le mega passe de 0 → **~949 tentatives / 20 min**
+(~68k/j), backlog en baisse → drain en **~6 j** au lieu de « jamais ». Même cadence qu'avant
+(pas de risque anti-ban supplémentaire).
+
+### 2. Enrichissement AUDIO (le « 266 j » du dashboard) — anti-ban, **volontaire**
+
+C'est un **autre** sous-système : les crons `norva-audio-airo-ninja` (job 79, films) /
+`-series` (job 80) appellent `norva-playback/audio-backfill` en **`concurrency=1, limit=12`,
+toutes les 12 min**. Chaque sonde **ouvre un vrai flux** chez le provider (ffprobe des pistes
+audio) → une à la fois, espacées, pour **ne pas faire bannir le compte Ninja**. Au rythme
+sûr : ~579 films/j → ~266 j pour 153k. **La lenteur est délibérée et correcte.** L'accélérer
+(monter `concurrency`/`limit`/fréquence) = **risque de ban provider** → décision produit, pas
+un bug. Le « 266 j » est l'ETA honnête (`never_probed / probed_24h`) affichée par le dashboard.
+
+### 3. Échecs cron restants (non fataux)
+
+Après suppression du garde-fou, les ~40 échecs/24 h tombent à ~15, tous des **timeouts
+auto-réparants** :
+- `admin-dashboard-refresh` (job 60) : timeout d'agrégation → **corrigé** par un index couvrant
+  (`idx_ctv_id_source`), fonction ~120 s → **~40 s**. Détail : `CATALOG-SPEED-AUDIT-2026-07-04.md`.
+- `norva-catalog-reconcile` (job 85) : timeout du backfill média la nuit → **résilient** (chaque
+  étape isolée en exception, reprend au tick suivant). Non bloquant.
+
 ## Remise en état / arrêt (si besoin)
 
 ```sql
 select cron.unschedule('norva-catalog-reconcile');      -- stop reconcile
-select cron.unschedule('norva-enrich-guardian-revert'); -- stop le garde-fou
--- job 12 : cron.alter_job(12, schedule := '*/5 * * * *') pour revenir au rythme d'origine
+-- job 84 (garde-fou) déjà supprimé le 2026-07-05 — ne plus le recréer (utiliser cron.alter_job).
+-- job 12 : cron.alter_job(12, schedule := '*/5 * * * *') pour revenir au rythme d'origine ;
+--          pour re-focaliser un compte : cron.alter_job(12, command := '…?…&user=<uuid>…')
+--          (JAMAIS d'UPDATE cron.job direct → permission denied).
 ```
