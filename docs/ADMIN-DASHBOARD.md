@@ -86,7 +86,9 @@ milliers d'users. Redesign (migration `…scale_driving_accounts`) :
 **Nouveaux 7 j / 30 j**, Sources, Sync incomplète, Sources en erreur, Films, Séries, Identités, Crons
 actifs / pause / échecs 24 h, Sous-titres IA prêts / échoués. **Bloc Alertes** : dérive côté client les
 sources en problème (erreur / sync incomplète) depuis `admin_sources` et les rend **cliquables → fiche
-du client** (le blob `sources` porte désormais `user_id`). « Aucune alerte » si tout est sain.
+du client** (le blob `sources` porte désormais `user_id`) ; **plus** les signaux rouges système que le
+Cockpit affiche déjà en KPI (paiements en échec → Finance, échecs cron 24 h → Système, ST IA échoués →
+Système), chaque carte cliquable/au clavier route vers la page concernée. « Aucune alerte » si tout est sain.
 
 ### 👥 Users (live, paginé) — voir §5.
 
@@ -198,6 +200,15 @@ Perf : scopée à un `user_id` indexé — ~3,5 s sur le plus gros pilote (airo,
 Toutes les tables sont **RLS-on sans policy** → accessibles uniquement via les RPCs SECURITY DEFINER
 `is_admin()`-gatées ci-dessus. Auteur d'une action = l'email du JWT admin.
 
+**Durcissement grants (défense en profondeur, migration `20260705040000_admin_grants_hardening.sql`).**
+La RLS-sans-policy suffit à nier les lignes, mais les grants `EXECUTE`/`SELECT` dormants
+(explicitement posés à `anon`/`authenticated` par le default-privileges Supabase — un `revoke from
+public` ne les retire **pas**) restaient. Révoqués : `refresh_admin_dashboard()` (SECURITY DEFINER
+sans gate, agrégat full-DB, était **anon-callable** → retiré de `anon`+`authenticated`), les 4 RPCs
+de lecture cache (→ `authenticated` uniquement) et les **11 tables** `admin_*`/`cloud_support_*`
+(→ ni `anon` ni `authenticated` ; les RPCs owned-by-postgres gardent l'accès). La sécurité ne
+repose donc plus sur un seul contrôle.
+
 ---
 
 ## 6. Actions
@@ -222,7 +233,10 @@ Fonction edge dédiée **`norva-admin`** (service-role, `verify_jwt=false`, mais
   ou `none`). La fiche badge « suspendu » (`admin_user_detail.user.banned` = `banned_until > now()`).
 
 **Anti auto-verrouillage** : `norva-admin` refuse à un admin de **se rétrograder** (`role→user`) ou de
-**se suspendre** lui-même (`userId === actorId`) — évite de se verrouiller hors du panneau.
+**se suspendre** lui-même (`userId === actorId`) — évite de se verrouiller hors du panneau. **En plus**
+(audit 2026-07-05), refuse une rétrogradation/suspension d'un **autre** admin si ce serait le **dernier
+admin actif** (deux admins ne peuvent plus se démolir mutuellement) : garde via
+`admin_count_active()` (service-role only, compte les admins non-bannis).
 
 ### 🛡️ Page Système — santé, infra, flags, audit
 - **Snapshot** : bandeau santé dérivé de `admin_overview` (fraîcheur du snapshot, crons

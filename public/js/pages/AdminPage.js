@@ -93,7 +93,7 @@ class AdminPage {
         }
         if (this.built) return;
         const nav = AdminPage.NAV().map(n =>
-            `<button class="crm-nav-item" data-route="${n.key}"><span class="ic">${n.icon}</span><span class="lb">${n.label}</span></button>`).join('');
+            `<button class="crm-nav-item" data-route="${n.key}" title="${n.label}" aria-label="${n.label}"><span class="ic" aria-hidden="true">${n.icon}</span><span class="lb">${n.label}</span></button>`).join('');
         root.innerHTML = `
 <style>
 #page-admin{height:100%;overflow:hidden;}
@@ -106,13 +106,13 @@ class AdminPage {
 #page-admin .crm-nav-item .ic{font-size:16px;width:20px;text-align:center;}
 #page-admin .crm-nav-item:hover{background:#ffffff0a;color:var(--color-text-primary,#fff);}
 #page-admin .crm-nav-item.active{background:#5b7cfa1f;color:#a9bcff;font-weight:600;}
-#page-admin .crm-side-foot{margin-top:auto;padding:12px 10px 4px;font-size:11px;color:#66707e;line-height:1.5;}
+#page-admin .crm-side-foot{margin-top:auto;padding:12px 10px 4px;font-size:11px;color:#828ea1;line-height:1.5;}
 #page-admin .crm-main{flex:1;min-width:0;overflow-y:auto;-webkit-overflow-scrolling:touch;}
 #page-admin .crm-topbar{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:14px;padding:14px 26px;background:rgba(13,13,15,.86);backdrop-filter:blur(8px);border-bottom:1px solid var(--color-border,#242430);}
 #page-admin .crm-crumb{font-size:15px;font-weight:700;color:var(--color-text-primary,#fff);}
 #page-admin .crm-spacer{flex:1;}
 #page-admin #crm-refresh{background:#5b7cfa;color:#fff;border:0;border-radius:8px;padding:7px 13px;cursor:pointer;font-weight:600;font-size:13px;}
-#page-admin #crm-ts{color:#66707e;font-size:12px;}
+#page-admin #crm-ts{color:#828ea1;font-size:12px;}
 #page-admin .crm-page{max-width:1240px;margin:0 auto;padding:24px 26px 90px;}
 #page-admin .crm-h1{font-size:22px;font-weight:700;margin:0 0 4px;color:var(--color-text-primary,#fff);}
 #page-admin .crm-sub{color:var(--color-text-secondary,#9aa);font-size:13px;margin:0 0 22px;}
@@ -138,7 +138,7 @@ class AdminPage {
 #page-admin .badge{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;}
 #page-admin .badge.red{background:#e5091422;color:#ff6b6b;}
 #page-admin .badge.green{background:#3ecf8e22;color:#3ecf8e;}
-#page-admin .badge.gray{background:#8884;color:#bbb;}
+#page-admin .badge.gray{background:#8a94a726;color:#aab4c6;}
 #page-admin .badge.amber{background:#f5a62322;color:#f5c15a;}
 #page-admin .badge.blue{background:#4a9eff22;color:#7ab8ff;}
 #page-admin tr.group-start td{border-top:2px solid var(--color-border,#2a2a38);}
@@ -176,7 +176,7 @@ class AdminPage {
 #page-admin .fiche-title{font-size:20px;font-weight:700;color:#fff;word-break:break-all;}
 #page-admin .umeta{color:var(--color-text-secondary,#9aa);font-size:12px;margin:6px 0 20px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
 #page-admin .fiche-grid{display:grid;grid-template-columns:1fr;gap:18px;}
-#page-admin .soon{color:#66707e;font-size:13px;font-style:italic;}
+#page-admin .soon{color:#828ea1;font-size:13px;font-style:italic;}
 #page-admin .tag-row{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;}
 #page-admin .tag-chip .crm-tag-remove{background:none;border:0;color:inherit;cursor:pointer;font-size:12px;padding:0 0 0 3px;opacity:.7;}
 #page-admin .tag-chip .crm-tag-remove:hover{opacity:1;}
@@ -188,14 +188,14 @@ class AdminPage {
 #page-admin .note-add button{align-self:flex-start;background:#5b7cfa;color:#fff;border:0;border-radius:8px;padding:8px 14px;cursor:pointer;font-weight:600;font-size:13px;}
 #page-admin .note-item{border-top:1px solid var(--color-border,#20202a);padding:9px 0;}
 #page-admin .note-body{color:var(--color-text-primary,#e8e8ee);font-size:13px;white-space:pre-wrap;word-break:break-word;}
-#page-admin .note-meta{color:#66707e;font-size:11px;margin-top:3px;}
+#page-admin .note-meta{color:#828ea1;font-size:11px;margin-top:3px;}
 #page-admin .note-meta .crm-note-del{background:none;border:0;color:#ff6b6b88;cursor:pointer;font-size:11px;margin-left:8px;}
 #page-admin .note-meta .crm-note-del:hover{color:#ff6b6b;}
 #page-admin .tl{display:flex;flex-direction:column;}
 #page-admin .tl-item{display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--color-border,#1b1b24);}
 #page-admin .tl-ic{width:22px;text-align:center;}
 #page-admin .tl-sum{flex:1;font-size:13px;color:var(--color-text-primary,#e8e8ee);}
-#page-admin .tl-at{color:#66707e;font-size:11px;white-space:nowrap;}
+#page-admin .tl-at{color:#828ea1;font-size:11px;white-space:nowrap;}
 #page-admin .audit-row[data-user-id]{cursor:pointer;}
 #page-admin .audit-row[data-user-id]:hover{background:#ffffff0a;}
 #page-admin .alert-card{display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:var(--color-bg-secondary,#16161c);border:1px solid #e5091433;border-left:3px solid #e50914;border-radius:9px;padding:11px 14px;margin-bottom:8px;}
@@ -227,10 +227,36 @@ class AdminPage {
 #page-admin .switch .slider:before{content:"";position:absolute;height:16px;width:16px;left:3px;bottom:3px;background:#fff;border-radius:50%;transition:.2s;}
 #page-admin .switch input:checked+.slider{background:#3ecf8e;}
 #page-admin .switch input:checked+.slider:before{transform:translateX(18px);}
+/* Breadcrumb can be a long email — keep it on one line with ellipsis so it never pushes the topbar controls off-screen. */
+#page-admin .crm-crumb{max-width:min(52vw,560px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+/* Timeline/audit summaries: flex child needs min-width:0 to actually ellipsis/wrap instead of overflowing. */
+#page-admin .tl-sum{min-width:0;overflow-wrap:anywhere;}
+/* Visible keyboard focus for the interactive rows/cards/tabs/nav. */
+#page-admin .user-row:focus-visible,#page-admin .alert-card:focus-visible,#page-admin .audit-row:focus-visible,#page-admin .tl-item[data-ticket-id]:focus-visible,#page-admin .fin-status:focus-visible,#page-admin .sup-tab:focus-visible,#page-admin .crm-nav-item:focus-visible,#page-admin .crm-back:focus-visible{outline:2px solid #7c96ff;outline-offset:-2px;border-radius:6px;}
+/* Toasts + modal confirm/prompt (replace native alert/confirm/prompt). Scoped under #page-admin so the tokens apply. */
+#page-admin .crm-toasts{position:fixed;right:18px;bottom:18px;z-index:60;display:flex;flex-direction:column;gap:8px;max-width:min(92vw,380px);}
+#page-admin .crm-toast{background:var(--color-bg-secondary,#16161c);border:1px solid var(--color-border,#2a2a38);border-left:3px solid #5b7cfa;border-radius:9px;padding:11px 14px;font-size:13px;color:var(--color-text-primary,#e8e8ee);box-shadow:0 10px 30px #0009;animation:crmtoast .2s ease both;}
+#page-admin .crm-toast.ok{border-left-color:#3ecf8e;}
+#page-admin .crm-toast.err{border-left-color:#ff6b6b;}
+@keyframes crmtoast{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:none;}}
+@media(prefers-reduced-motion:reduce){#page-admin .crm-toast,#page-admin .crm-modal-back{animation:none;}}
+#page-admin .crm-modal-back{position:fixed;inset:0;z-index:70;background:#000b;display:flex;align-items:center;justify-content:center;padding:20px;animation:crmtoast .15s ease both;}
+#page-admin .crm-modal{background:var(--color-bg-secondary,#16161c);border:1px solid var(--color-border,#2a2a38);border-radius:14px;padding:20px 22px;max-width:440px;width:100%;box-shadow:0 24px 70px #000b;}
+#page-admin .crm-modal h3{margin:0 0 8px;font-size:16px;color:var(--color-text-primary,#fff);}
+#page-admin .crm-modal p{margin:0 0 16px;font-size:13.5px;color:var(--color-text-secondary,#9aa);line-height:1.55;white-space:pre-wrap;word-break:break-word;}
+#page-admin .crm-modal-input{width:100%;background:var(--color-bg-primary,#0d0d0f);border:1px solid var(--color-border,#2a2a38);color:#fff;border-radius:8px;padding:9px 12px;font-size:14px;margin-bottom:16px;}
+#page-admin .crm-modal .mrow{display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap;}
+#page-admin .crm-modal button{border-radius:8px;padding:8px 15px;font-size:13px;font-weight:600;cursor:pointer;border:1px solid var(--color-border,#2a2a38);background:var(--color-bg-primary,#0d0d0f);color:var(--color-text-primary,#fff);}
+#page-admin .crm-modal button.primary{background:#5b7cfa;border-color:#5b7cfa;color:#fff;}
+#page-admin .crm-modal button.danger{background:#e50914;border-color:#e50914;color:#fff;}
 @media(max-width:900px){
   #page-admin .crm-sidebar{width:60px;padding:14px 8px;}
   #page-admin .crm-nav-item .lb,#page-admin .crm-brand span:last-child,#page-admin .crm-side-foot{display:none;}
+  #page-admin .crm-nav-item{justify-content:center;gap:0;}
   #page-admin .crm-page{padding:20px 16px 80px;}
+  #page-admin .crm-topbar{padding:12px 16px;}
+  #page-admin .crm-crumb{max-width:56vw;}
+  #page-admin .users-controls input{min-width:0;}
 }
 </style>
 <div class="crm-shell">
@@ -239,12 +265,12 @@ class AdminPage {
     <nav id="crm-nav">${nav}</nav>
     <div class="crm-side-foot">Admin · accès restreint<br>rôle app_metadata.role</div>
   </aside>
-  <main class="crm-main">
+  <main class="crm-main" tabindex="-1">
     <div class="crm-topbar">
-      <span class="crm-crumb" id="crm-crumb">Cockpit</span>
+      <span class="crm-crumb" id="crm-crumb" aria-live="polite">Cockpit</span>
       <span class="crm-spacer"></span>
       <span id="crm-ts"></span>
-      <button id="crm-refresh">↻ Rafraîchir</button>
+      <button id="crm-refresh" aria-label="Rafraîchir la page">↻ Rafraîchir</button>
     </div>
     <div id="crm-view"></div>
   </main>
@@ -253,13 +279,18 @@ class AdminPage {
         root.addEventListener('click', (e) => {
             const navItem = e.target.closest('.crm-nav-item');
             if (navItem) { this._navigate(navItem.dataset.route); return; }
-            if (e.target.closest('#crm-refresh')) { this._navigate(this._route); return; }
+            const rf = e.target.closest('#crm-refresh');
+            if (rf) { rf.disabled = true; rf.textContent = '↻ …'; this._navigate(this._route); setTimeout(() => { rf.disabled = false; rf.textContent = '↻ Rafraîchir'; }, 600); return; }
             const b = e.target.closest('.resync-btn');
             if (b) { e.preventDefault(); this._resync(b); return; }
-            const ur = e.target.closest('.user-row');
+            // Require data-user-id: support-ticket rows also carry .user-row but navigate to a
+            // ticket via their own listener — matching them here would fire client:undefined too.
+            const ur = e.target.closest('.user-row[data-user-id]');
             if (ur && !e.target.closest('button,a')) { this._navigate('client:' + ur.dataset.userId); return; }
             const ac = e.target.closest('.alert-card[data-user-id]');
             if (ac) { this._navigate('client:' + ac.dataset.userId); return; }
+            const ar = e.target.closest('.alert-card[data-route]');
+            if (ar) { this._navigate(ar.dataset.route); return; }
             const au = e.target.closest('.audit-row[data-user-id]');
             if (au) { this._navigate('client:' + au.dataset.userId); return; }
             if (e.target.closest('.crm-back')) { this._navigate('clients'); return; }
@@ -271,7 +302,7 @@ class AdminPage {
             if (e.target.closest('.crm-tag-create')) { this._crmCreateTag(); return; }
             if (e.target.closest('.crm-note-add')) { this._crmAddNote(); return; }
             const nDel = e.target.closest('.crm-note-del');
-            if (nDel) { this._crmMutate('admin_note_delete', { p_note_id: nDel.dataset.noteId }); return; }
+            if (nDel) { this._confirm('Supprimer cette note interne ?', { danger: true, okLabel: 'Supprimer' }).then(ok => { if (ok) this._crmMutate('admin_note_delete', { p_note_id: nDel.dataset.noteId }); }); return; }
             const actBtn = e.target.closest('.act-btn');
             if (actBtn) { this._userAction(actBtn); return; }
             if (e.target.closest('#sys-infra-refresh')) { this._loadInfra(); return; }
@@ -281,11 +312,19 @@ class AdminPage {
             if (e.target.closest('.flag-create')) { this._flagCreate(); return; }
             const fDel = e.target.closest('.flag-del');
             if (fDel) {
-                if (window.confirm(`Supprimer le flag « ${fDel.dataset.key} » ?`)) {
-                    this._rpc('admin_flag_delete', { p_key: fDel.dataset.key }).then(() => this._loadFlags()).catch(err => window.alert('Erreur : ' + err.message));
-                }
+                this._confirm(`Supprimer le flag « ${fDel.dataset.key} » ?`, { danger: true, okLabel: 'Supprimer' }).then(ok => {
+                    if (ok) this._rpc('admin_flag_delete', { p_key: fDel.dataset.key }).then(() => this._loadFlags()).catch(err => this._toast('Erreur : ' + err.message, 'err'));
+                });
                 return;
             }
+        });
+        // Keyboard activation for the click-only rows/cards (they carry role="button" tabindex="0"):
+        // Enter/Space on a focused row triggers the same click path. A child <button> keeps its own
+        // native handling (guarded by e.target === el).
+        root.addEventListener('keydown', (e) => {
+            if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') return;
+            const el = e.target.closest('.user-row,.alert-card[data-user-id],.alert-card[data-route],.audit-row[data-user-id],[data-ticket-id],.fin-status');
+            if (el && e.target === el) { e.preventDefault(); el.click(); }
         });
         // Feature-flag switches fire 'change', not 'click' — delegate separately.
         root.addEventListener('change', (e) => {
@@ -303,8 +342,11 @@ class AdminPage {
     }
     _setActiveNav(route) {
         const mapped = route.startsWith('client') ? 'clients' : (route.startsWith('ticket') ? 'support' : route);
-        document.querySelectorAll('#page-admin .crm-nav-item').forEach(el =>
-            el.classList.toggle('active', el.dataset.route === mapped));
+        document.querySelectorAll('#page-admin .crm-nav-item').forEach(el => {
+            const on = el.dataset.route === mapped;
+            el.classList.toggle('active', on);
+            if (on) el.setAttribute('aria-current', 'page'); else el.removeAttribute('aria-current');
+        });
     }
 
     // Sidebar badge: tickets awaiting an admin reply. Refreshed on shell build + support pages.
@@ -319,9 +361,52 @@ class AdminPage {
     }
     _view() { return document.getElementById('crm-view'); }
 
+    // ── Non-blocking UX primitives (replace native alert/confirm/prompt) ──
+    _toast(msg, kind) {
+        const root = document.getElementById('page-admin'); if (!root) return;
+        let host = root.querySelector('.crm-toasts');
+        if (!host) { host = document.createElement('div'); host.className = 'crm-toasts'; host.setAttribute('aria-live', 'polite'); root.appendChild(host); }
+        const t = document.createElement('div');
+        t.className = 'crm-toast' + (kind ? ' ' + kind : ''); t.setAttribute('role', 'status'); t.textContent = msg;
+        host.appendChild(t);
+        setTimeout(() => { t.style.transition = 'opacity .3s'; t.style.opacity = '0'; setTimeout(() => t.remove(), 320); }, kind === 'err' ? 5200 : 3200);
+    }
+    _confirm(message, opts) { const o = opts || {}; return this._modal({ message, danger: o.danger, okLabel: o.okLabel || 'Confirmer' }); }
+    _prompt(message, def) { return this._modal({ message, prompt: true, def: def || '', okLabel: 'OK' }); }
+    // Accessible modal: focus-trapped-enough (Escape/Enter/backdrop), returns a Promise —
+    // false/null on cancel, true on confirm, or the trimmed input string on prompt.
+    _modal(o) {
+        return new Promise((resolve) => {
+            const root = document.getElementById('page-admin') || document.body;
+            const prev = document.activeElement;
+            const back = document.createElement('div');
+            back.className = 'crm-modal-back'; back.setAttribute('role', 'dialog'); back.setAttribute('aria-modal', 'true');
+            const promptHtml = o.prompt ? `<input type="text" class="crm-modal-input" value="${AdminPage.esc(o.def || '')}" />` : '';
+            back.innerHTML = `<div class="crm-modal"><h3>${AdminPage.esc(o.title || 'Confirmation')}</h3><p>${AdminPage.esc(o.message)}</p>${promptHtml}
+                <div class="mrow"><button class="cancel" type="button">Annuler</button><button class="ok ${o.danger ? 'danger' : 'primary'}" type="button">${AdminPage.esc(o.okLabel || 'OK')}</button></div></div>`;
+            root.appendChild(back);
+            const input = back.querySelector('.crm-modal-input');
+            const cancelVal = o.prompt ? null : false;
+            const okVal = () => o.prompt ? (input ? input.value.trim() : '') : true;
+            const finish = (val) => { document.removeEventListener('keydown', onKey); back.remove(); if (prev && prev.focus) { try { prev.focus(); } catch (_) { /* gone */ } } resolve(val); };
+            const onKey = (e) => {
+                if (e.key === 'Escape') { e.preventDefault(); finish(cancelVal); }
+                else if (e.key === 'Enter' && (!input || document.activeElement === input)) { e.preventDefault(); finish(okVal()); }
+            };
+            back.querySelector('.ok').addEventListener('click', () => finish(okVal()));
+            back.querySelector('.cancel').addEventListener('click', () => finish(cancelVal));
+            back.addEventListener('mousedown', (e) => { if (e.target === back) finish(cancelVal); });
+            document.addEventListener('keydown', onKey);
+            (input || back.querySelector('.ok')).focus();
+        });
+    }
+
     _navigate(route) {
         this._route = route;
+        this._nav = (this._nav || 0) + 1; // monotonic token — stale async page/panel loads bail on mismatch
         this._setActiveNav(route);
+        const main = document.querySelector('#page-admin .crm-main');
+        if (main) { main.scrollTop = 0; main.focus({ preventScroll: true }); } // reset scroll + move focus into content (a11y)
         if (route === 'cockpit') this._pageCockpit();
         else if (route === 'finance') this._pageFinance();
         else if (route === 'clients') this._pageClients();
@@ -337,6 +422,7 @@ class AdminPage {
 
     // ── Page: Cockpit ──
     async _pageCockpit() {
+        const nav = this._nav;
         this._setCrumb('Cockpit', this._lastTs);
         const v = this._view();
         v.innerHTML = `<div class="crm-page">
@@ -347,24 +433,41 @@ class AdminPage {
         </div>`;
         try {
             const [o, sources] = await Promise.all([this._rpc('admin_overview'), this._rpc('admin_sources')]);
+            if (this._nav !== nav) return; // navigated away while loading
             this._lastTs = o && o.refreshed_at ? o.refreshed_at : this._lastTs;
             this._setCrumb('Cockpit', this._lastTs);
             this._renderOverview(o);
-            this._renderAlerts(Array.isArray(sources) ? sources : []);
+            this._renderAlerts(Array.isArray(sources) ? sources : [], o);
         } catch (e) {
-            const el = document.getElementById('admin-overview');
-            if (el) el.innerHTML = `<div class="admin-err">Erreur : ${AdminPage.esc(e.message)}</div>`;
+            if (this._nav !== nav) return;
+            const err = `<div class="admin-err">Erreur : ${AdminPage.esc(e.message)}</div>`;
+            const ov = document.getElementById('admin-overview'); if (ov) ov.innerHTML = err;
+            const al = document.getElementById('admin-alerts'); if (al) al.innerHTML = err; // both panels — don't strand Alertes on "Chargement…"
         }
     }
 
-    _renderAlerts(sources) {
+    // Alerts = source problems PLUS the system-level red signals the overview already surfaces
+    // (failed payments, cron failures, failed AI subs) so the Cockpit's alert panel is coherent
+    // with its own KPI colours.
+    _renderAlerts(sources, o) {
         const el = document.getElementById('admin-alerts');
         if (!el) return;
+        o = o || {};
+        const sysAlerts = [];
+        const push = (n, kind, label, route) => { if (Number(n) > 0) sysAlerts.push({ n: Number(n), kind, label, route }); };
+        push(o.billing_past_due, 'red', 'client(s) en échec de paiement', 'finance');
+        push(o.cron_fails_24h, 'red', 'échec(s) cron sur 24 h', 'systeme');
+        push(o.gensubs_failed, 'amber', 'sous-titre(s) IA en échec', 'systeme');
         const problems = sources.filter(s => s.incomplete === true || s.sync_error || s.sync_status === 'sync_error');
-        if (!problems.length) { el.innerHTML = '<div class="card"><span class="badge green">✓</span> Aucune alerte — tout est sain.</div>'; return; }
-        el.innerHTML = problems.map(s => {
+        if (!problems.length && !sysAlerts.length) { el.innerHTML = '<div class="card"><span class="badge green">✓</span> Aucune alerte — tout est sain.</div>'; return; }
+        const sysHtml = sysAlerts.map(a =>
+            `<div class="alert-card" data-route="${a.route}" role="button" tabindex="0" title="Ouvrir">
+                <span class="badge ${a.kind}">${AdminPage.n(a.n)}</span>
+                <span class="al-name">${AdminPage.esc(a.label)}</span>
+            </div>`).join('');
+        el.innerHTML = sysHtml + problems.map(s => {
             const kind = s.incomplete === true ? 'sync incomplète' : (s.sync_status || 'erreur');
-            const uidAttr = s.user_id ? ` data-user-id="${AdminPage.esc(s.user_id)}" title="Ouvrir la fiche client"` : '';
+            const uidAttr = s.user_id ? ` data-user-id="${AdminPage.esc(s.user_id)}" role="button" tabindex="0" title="Ouvrir la fiche client"` : '';
             return `<div class="alert-card"${uidAttr}>
                 <span class="badge red">${AdminPage.esc(kind)}</span>
                 <span class="al-name">${AdminPage.esc(s.display_name)}</span>
@@ -403,7 +506,7 @@ class AdminPage {
 
         // Status cards are the daily working views: each one opens Clients pre-filtered.
         const statusCard = (v2, l, filter, cls) =>
-            `<div class="kpi fin-status ${cls || ''}" data-billing="${filter}" style="cursor:pointer" title="Voir ces clients"><div class="v">${v2}</div><div class="l">${l}</div></div>`;
+            `<div class="kpi fin-status ${cls || ''}" data-billing="${filter}" role="button" tabindex="0" style="cursor:pointer" title="Voir ces clients"><div class="v">${v2}</div><div class="l">${l}</div></div>`;
 
         const byPlan = Array.isArray(f.by_plan) ? f.by_plan : [];
         const planRows = byPlan.map(r => `<tr>
@@ -430,10 +533,10 @@ class AdminPage {
             : (s === 'authorized' || s === 'to_capture') ? `<span class="badge blue">${esc(s)}</span>`
             : (s === 'require_payment_method') ? '<span class="badge amber">non finalisé</span>'
             : `<span class="badge gray">${esc(s)}</span>`;
-        const payRows = (Array.isArray(f.recent_payments) ? f.recent_payments : []).map(p => `<tr class="user-row" data-user-id="${esc(p.user_id)}" title="Voir la fiche">
+        const payRows = (Array.isArray(f.recent_payments) ? f.recent_payments : []).map(p => `<tr class="user-row" data-user-id="${esc(p.user_id)}" role="button" tabindex="0" title="Voir la fiche">
             <td>${esc(day(p.at))}</td><td>${esc(p.email || p.user_id)}</td>
             <td>${KIND_LABELS[p.kind] || esc(p.kind)}</td><td>${payBadge(p.status)}</td>
-            <td class="num">${money(p.amount)} <span class="pacct">${esc(String(p.currency || '').toUpperCase())}</span></td>
+            <td class="num">${money(p.amount)}${p.currency && String(p.currency).toLowerCase() !== 'usd' ? ` <span class="pacct">${esc(String(p.currency).toUpperCase())}</span>` : ''}</td>
         </tr>`).join('');
 
         el.innerHTML = `
@@ -479,14 +582,24 @@ class AdminPage {
 
         // Status cards → Clients pre-filtered; CSV of the recent payments table.
         el.querySelectorAll('.fin-status').forEach(c => c.addEventListener('click', () => {
+            // Opening a status view is a fresh filter: clear any leftover search/tag so the count
+            // shown on the card matches the list the user lands on.
             this._users.billing = c.dataset.billing || '';
+            this._users.search = '';
+            this._users.tagId = '';
             this._users.page = 0;
             this._navigate('clients');
         }));
         const csv = document.getElementById('fin-csv');
         if (csv) csv.addEventListener('click', () => {
             const rows = Array.isArray(f.recent_payments) ? f.recent_payments : [];
-            const q = (x) => `"${String(x == null ? '' : x).replace(/"/g, '""')}"`;
+            // CSV export: quote + neutralize spreadsheet formula injection (a leading =/+/-/@ makes
+            // Excel/Sheets evaluate the cell). Prefix such values with a single quote.
+            const q = (x) => {
+                let s = String(x == null ? '' : x);
+                if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
+                return `"${s.replace(/"/g, '""')}"`;
+            };
             const lines = [['date', 'email', 'type', 'statut', 'montant_cents', 'devise', 'pi_id', 'user_id'].map(q).join(',')]
                 .concat(rows.map(p => [p.at, p.email, p.kind, p.status, p.amount, p.currency, p.pi_id, p.user_id].map(q).join(',')));
             const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
@@ -507,8 +620,8 @@ class AdminPage {
         v.innerHTML = `<div class="crm-page">
             <h1 class="crm-h1">🎫 Support</h1>
             <p class="crm-sub">Tickets clients — chaque message client envoie un email à support@norva.tv ; répondre ici trace le fil ET email le client.</p>
-            <div class="users-controls">${tabs.map(t =>
-                `<button class="sup-tab" data-filter="${t[0]}" style="${t[0] === this._supportFilter ? 'border-color:#5b7cfa;color:#fff' : ''}">${t[1]}</button>`).join('')}
+            <div class="users-controls" role="tablist" aria-label="Filtrer les tickets">${tabs.map(t =>
+                `<button class="sup-tab" role="tab" aria-selected="${t[0] === this._supportFilter ? 'true' : 'false'}" data-filter="${t[0]}" style="${t[0] === this._supportFilter ? 'border-color:#5b7cfa;color:#fff' : ''}">${t[1]}</button>`).join('')}
             </div>
             <div class="scroll"><div id="sup-list"><div class="ssub">Chargement…</div></div></div>
         </div>`;
@@ -530,7 +643,7 @@ class AdminPage {
         const chip = (t) => t.status === 'closed' ? '<span class="badge gray">fermé</span>'
             : (t.last_from === 'user' ? '<span class="badge red">à répondre</span>' : '<span class="badge green">répondu</span>');
         el.innerHTML = `<table><thead><tr><th></th><th>Client</th><th>Sujet</th><th>Dernier message</th><th class="num">Messages</th><th>Ouvert</th></tr></thead><tbody>` +
-            rows.map(t => `<tr class="user-row" data-ticket-id="${AdminPage.esc(t.id)}" title="Ouvrir le ticket">
+            rows.map(t => `<tr class="user-row" data-ticket-id="${AdminPage.esc(t.id)}" role="button" tabindex="0" title="Ouvrir le ticket">
                 <td>${chip(t)}</td>
                 <td>${AdminPage.esc(t.email || t.user_id)}</td>
                 <td><b>${AdminPage.esc(t.subject)}</b><div class="pacct" style="max-width:340px;overflow:hidden;text-overflow:ellipsis">${AdminPage.esc(t.last_body || '')}</div></td>
@@ -545,6 +658,7 @@ class AdminPage {
     // ── Page: single ticket (thread + reply + status) ──
     async _pageTicket(ticketId) {
         this._setCrumb('Support › ticket');
+        const nav = this._nav;
         const v = this._view();
         v.innerHTML = `<div class="crm-page">
             <button class="crm-back" data-back="support">← Retour aux tickets</button>
@@ -554,8 +668,10 @@ class AdminPage {
         if (back) back.addEventListener('click', (e) => { e.stopPropagation(); this._navigate('support'); });
         try {
             const d = await this._rpc('admin_support_ticket', { p_id: ticketId });
+            if (this._nav !== nav) return; // navigated away while the ticket loaded — don't paint stale
             this._renderTicket(d || {});
         } catch (e) {
+            if (this._nav !== nav) return;
             const b = document.getElementById('ticket-body');
             if (b) b.innerHTML = `<div class="admin-err">Erreur : ${AdminPage.esc(e.message)}</div>`;
         }
@@ -572,7 +688,7 @@ class AdminPage {
         const thread = msgs.map(m => `
             <div style="max-width:86%;margin:10px 0;padding:11px 14px;border-radius:12px;font-size:13.5px;line-height:1.55;white-space:pre-wrap;word-break:break-word;
                         ${m.from_admin ? 'background:#14261f;border:1px solid #1f4436;' : 'background:#1c2433;margin-left:auto;'}">
-                <div style="font-size:11px;color:#66707e;font-weight:700;margin-bottom:4px">
+                <div style="font-size:11px;color:#828ea1;font-weight:700;margin-bottom:4px">
                     ${m.from_admin ? '🛟 ' + AdminPage.esc(m.author_email || 'support') : '👤 ' + AdminPage.esc(m.author_email || 'client')} · ${AdminPage.esc(AdminPage.timeAgo(m.created_at))}</div>
                 ${AdminPage.esc(m.body)}
             </div>`).join('');
@@ -601,20 +717,22 @@ class AdminPage {
         if (send) send.addEventListener('click', async () => {
             const ta = document.getElementById('tk-reply');
             const text = ta ? ta.value.trim() : '';
-            if (!text) return;
+            if (text.length < 2) { this._toast('Écris une réponse avant d\'envoyer.', 'err'); if (ta) ta.focus(); return; }
             send.disabled = true; send.textContent = 'Envoi…';
             try { await this._supportEdge('/admin/reply', { ticket_id: t.id, body: text }); this._pageTicket(t.id); this._refreshSupportBadge(); }
-            catch (e) { send.disabled = false; send.textContent = '✗ ' + AdminPage.esc(e.message); }
+            catch (e) { send.disabled = false; send.textContent = '📤 Envoyer la réponse'; this._toast('Échec de l\'envoi : ' + e.message, 'err'); }
         });
         const closeBtn = document.getElementById('tk-close');
         if (closeBtn) closeBtn.addEventListener('click', async () => {
+            closeBtn.disabled = true; closeBtn.textContent = '…';
             try { await this._supportEdge('/admin/status', { ticket_id: t.id, status: 'closed' }); this._pageTicket(t.id); this._refreshSupportBadge(); }
-            catch (e) { window.alert('Erreur : ' + e.message); }
+            catch (e) { closeBtn.disabled = false; closeBtn.textContent = '✔ Fermer le ticket'; this._toast('Erreur : ' + e.message, 'err'); }
         });
         const reopen = document.getElementById('tk-reopen');
         if (reopen) reopen.addEventListener('click', async () => {
+            reopen.disabled = true; reopen.textContent = '…';
             try { await this._supportEdge('/admin/status', { ticket_id: t.id, status: 'open' }); this._pageTicket(t.id); this._refreshSupportBadge(); }
-            catch (e) { window.alert('Erreur : ' + e.message); }
+            catch (e) { reopen.disabled = false; reopen.textContent = '↺ Rouvrir'; this._toast('Erreur : ' + e.message, 'err'); }
         });
     }
 
@@ -703,12 +821,21 @@ class AdminPage {
         const range = document.getElementById('admin-users-range');
         if (!el) return;
         const s = this._users;
+        // Stale-response guard: fast typing / pager clicks fire overlapping fetches; only the
+        // newest may paint. Also freeze the pager while a page is in flight.
+        const seq = (this._usersSeq = (this._usersSeq || 0) + 1);
+        const prev = document.getElementById('admin-users-prev');
+        const next = document.getElementById('admin-users-next');
+        if (prev) prev.disabled = true;
+        if (next) next.disabled = true;
         if (range) range.textContent = '…';
+        if (!el.children.length || el.querySelector('.admin-err')) el.innerHTML = '<div class="ssub">Chargement…</div>';
         try {
             const res = await this._rpc('admin_users_page', {
                 p_limit: s.limit, p_offset: s.page * s.limit, p_search: s.search || null,
                 p_sort: s.sort, p_tag_id: s.tagId || null, p_billing_status: s.billing || null
             });
+            if (seq !== this._usersSeq) return; // superseded by a newer load
             const rows = (res && Array.isArray(res.rows)) ? res.rows : [];
             s.total = Number(res && res.total) || 0;
             if (res && Array.isArray(res.all_tags)) { this._allTags = res.all_tags; this._fillTagOptions(document.getElementById('admin-users-tag')); }
@@ -717,11 +844,12 @@ class AdminPage {
             const from = s.total === 0 ? 0 : s.page * s.limit + 1;
             const to = Math.min(s.total, (s.page + 1) * s.limit);
             if (range) range.textContent = `${AdminPage.n(from)}–${AdminPage.n(to)} sur ${AdminPage.n(s.total)}`;
-            const prev = document.getElementById('admin-users-prev');
-            const next = document.getElementById('admin-users-next');
-            if (prev) prev.disabled = s.page <= 0;
-            if (next) next.disabled = to >= s.total;
+            const prev2 = document.getElementById('admin-users-prev');
+            const next2 = document.getElementById('admin-users-next');
+            if (prev2) prev2.disabled = s.page <= 0;
+            if (next2) next2.disabled = to >= s.total;
         } catch (e) {
+            if (seq !== this._usersSeq) return;
             if (range) range.textContent = '';
             el.innerHTML = `<div class="admin-err">Erreur : ${AdminPage.esc(e.message)}</div>`;
         }
@@ -776,8 +904,11 @@ class AdminPage {
         const tag = this._allTags.find(t => t.id === tagId);
         const others = this._allTags.filter(t => t.id !== tagId);
         const opts = others.map(t => `<option value="${AdminPage.esc(t.id)}">${AdminPage.esc(t.label)}</option>`).join('');
+        // Note: no count here on purpose. The bulk RPC acts on EVERY client bearing the tag,
+        // whereas _users.total reflects the tag ∩ search ∩ billing filter — showing it would
+        // understate the blast radius. The RPC reports the real count once it runs.
         el.innerHTML = `<div class="bulk-bar">
-            <span>Actions sur le segment <span class="badge ${AdminPage.tagColor(tag && tag.color)}">${AdminPage.esc(tag ? tag.label : '?')}</span> — ${AdminPage.n(this._users.total)} client${this._users.total > 1 ? 's' : ''} :</span>
+            <span>Actions sur <b>tous les clients</b> portant le segment <span class="badge ${AdminPage.tagColor(tag && tag.color)}">${AdminPage.esc(tag ? tag.label : '?')}</span> :</span>
             ${others.length ? `<select id="bulk-tag-select">${opts}</select><button id="bulk-apply-btn">＋ appliquer à tous</button>` : ''}
             <button id="bulk-remove-btn" class="danger">− retirer ce tag de tous</button>
         </div>`;
@@ -794,17 +925,17 @@ class AdminPage {
             other = sel ? sel.value : null;
             if (!other) return;
             const otherLabel = (this._allTags.find(t => t.id === other) || {}).label || '?';
-            if (!window.confirm(`Appliquer le tag « ${otherLabel} » aux ${this._users.total} client(s) du segment « ${label} » ?`)) return;
+            if (!await this._confirm(`Appliquer le tag « ${otherLabel} » à TOUS les clients portant le segment « ${label} » ?`)) return;
         } else {
-            if (!window.confirm(`Retirer le tag « ${label} » de TOUS les clients qui le portent ? (le tag lui-même est conservé)`)) return;
+            if (!await this._confirm(`Retirer le tag « ${label} » de TOUS les clients qui le portent ? (le tag lui-même est conservé)`, { danger: true, okLabel: 'Retirer' })) return;
         }
         try {
             const r = await this._rpc('admin_tag_bulk', { p_tag: tagId, p_action: action, p_other: other });
-            window.alert(`✓ ${AdminPage.n(r && r.count)} client(s) ${action === 'apply' ? 'tagué(s)' : 'détagué(s)'}.`);
+            this._toast(`✓ ${AdminPage.n(r && r.count)} client(s) ${action === 'apply' ? 'tagué(s)' : 'détagué(s)'}.`, 'ok');
             if (action === 'remove') { this._users.tagId = ''; const sel = document.getElementById('admin-users-tag'); if (sel) sel.value = ''; }
             this._users.page = 0;
             this._loadUsers();
-        } catch (e) { window.alert('Erreur : ' + e.message); }
+        } catch (e) { this._toast('Erreur : ' + e.message, 'err'); }
     }
 
     // CSV export of the CURRENT filter (search + segment), up to 10k rows in one RPC call.
@@ -820,7 +951,13 @@ class AdminPage {
             });
             const list = Array.isArray(rows) ? rows : [];
             // Strict CSV: every field quoted, internal quotes doubled, CRLF lines, BOM for Excel.
-            const q = (v) => `"${String(v == null ? '' : v).replace(/"/g, '""')}"`;
+            // A leading =/+/-/@ is neutralized with a single quote so Excel/Sheets can't evaluate
+            // an attacker-controlled email/tag as a formula.
+            const q = (v) => {
+                let s = String(v == null ? '' : v);
+                if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
+                return `"${s.replace(/"/g, '""')}"`;
+            };
             const header = ['email', 'statut_abo', 'plan', 'periode', 'montant_cents', 'role', 'suspendu', 'email_verifie', 'inscrit', 'derniere_activite', 'sources', 'segments', 'user_id'];
             const lines = [header.map(q).join(',')].concat(list.map(r => [
                 r.email, r.billing_status || 'free', r.plan_code || '', r.billing_period || '', r.amount_cents == null ? '' : r.amount_cents,
@@ -838,7 +975,7 @@ class AdminPage {
             setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 2500);
         } catch (e) {
             btn.textContent = '✗ erreur';
-            window.alert('Export impossible : ' + e.message);
+            this._toast('Export impossible : ' + e.message, 'err');
             setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 2500);
         }
     }
@@ -854,11 +991,13 @@ class AdminPage {
         </div>`;
         try {
             const d = await this._rpc('admin_user_detail', { p_user_id: userId });
+            if (this._crmUser !== userId) return; // navigated to another client mid-fetch
             this._renderFiche(d);
             this._loadCrm(userId);         // relational panels (tags/notes/timeline), non-blocking
             this._loadBilling(userId);     // subscription & payments panel, non-blocking
             this._loadUserTickets(userId); // support tickets panel, non-blocking
         } catch (e) {
+            if (this._crmUser !== userId) return;
             const b = document.getElementById('fiche-body');
             if (b) b.innerHTML = `<div class="admin-err">Erreur : ${AdminPage.esc(e.message)}</div>`;
         }
@@ -870,13 +1009,16 @@ class AdminPage {
         if (!el) return;
         try {
             const b = await this._rpc('admin_user_billing', { p_user_id: userId }) || {};
-            this._renderBillingPanel(el, b);
+            if (this._crmUser !== userId) return; // stale response for a client we've navigated away from
+            this._renderBillingPanel(el, b, userId);
         } catch (e) {
+            if (this._crmUser !== userId) return;
             el.innerHTML = `<div class="admin-err">Erreur : ${AdminPage.esc(e.message)}</div>`;
         }
     }
 
-    _renderBillingPanel(el, b) {
+    _renderBillingPanel(el, b, userId) {
+        userId = userId || this._crmUser;
         const p = b.projection || null;
         const m = b.mapping || null;
         const pays = Array.isArray(b.payments) ? b.payments : [];
@@ -895,8 +1037,8 @@ class AdminPage {
             if (!btn) return;
             btn.addEventListener('click', async () => {
                 btn.disabled = true;
-                try { await self._rpc('admin_internal_toggle', { p_user_id: self._crmUser, p_on: btn.dataset.on === 'true' }); self._loadBilling(self._crmUser); }
-                catch (e) { btn.disabled = false; window.alert('Erreur : ' + e.message); }
+                try { await self._rpc('admin_internal_toggle', { p_user_id: userId, p_on: btn.dataset.on === 'true' }); self._loadBilling(userId); }
+                catch (e) { btn.disabled = false; self._toast('Erreur : ' + e.message, 'err'); }
             });
         }
 
@@ -950,12 +1092,13 @@ class AdminPage {
         if (!el) return;
         try {
             const res = await this._rpc('admin_support_list', { p_user_id: userId, p_limit: 10, p_offset: 0 });
+            if (this._crmUser !== userId) return; // navigated away mid-fetch
             const rows = (res && res.rows) || [];
             if (!rows.length) { el.innerHTML = '<div class="ssub">Aucun ticket.</div>'; return; }
             const chip = (t) => t.status === 'closed' ? '<span class="badge gray">fermé</span>'
                 : (t.last_from === 'user' ? '<span class="badge red">à répondre</span>' : '<span class="badge green">répondu</span>');
             el.innerHTML = rows.map(t => `
-                <div class="tl-item" data-ticket-id="${AdminPage.esc(t.id)}" style="cursor:pointer" title="Ouvrir le ticket">
+                <div class="tl-item" data-ticket-id="${AdminPage.esc(t.id)}" role="button" tabindex="0" style="cursor:pointer" title="Ouvrir le ticket">
                     ${chip(t)}
                     <span class="tl-sum" style="margin-left:8px"><b>${AdminPage.esc(t.subject)}</b>
                       <span class="pacct">· ${AdminPage.n(t.msg_count)} msg</span></span>
@@ -965,6 +1108,7 @@ class AdminPage {
             el.querySelectorAll('[data-ticket-id]').forEach(r =>
                 r.addEventListener('click', () => this._navigate('ticket:' + r.dataset.ticketId)));
         } catch (e) {
+            if (this._crmUser !== userId) return;
             el.innerHTML = `<div class="admin-err">Erreur : ${AdminPage.esc(e.message)}</div>`;
         }
     }
@@ -972,9 +1116,12 @@ class AdminPage {
     // ── CRM relational panels (tags / notes / timeline) ──
     async _loadCrm(userId) {
         try {
-            this._crm = await this._rpc('admin_client_crm', { p_user_id: userId }) || {};
+            const crm = await this._rpc('admin_client_crm', { p_user_id: userId }) || {};
+            if (this._crmUser !== userId) return; // stale response for a client we've left
+            this._crm = crm;
             this._renderCrm();
         } catch (e) {
+            if (this._crmUser !== userId) return;
             ['fiche-tags', 'fiche-notes', 'fiche-timeline'].forEach(id => {
                 const el = document.getElementById(id);
                 if (el) el.innerHTML = `<div class="admin-err">Erreur : ${AdminPage.esc(e.message)}</div>`;
@@ -1027,11 +1174,11 @@ class AdminPage {
         if (btn.classList.contains('act-resend')) { path = `user/${uid}/resend-confirmation`; }
         else if (btn.classList.contains('act-role')) {
             const role = btn.dataset.role;
-            if (!window.confirm(`Changer le rôle de cet utilisateur en « ${role} » ?`)) return;
+            if (!await this._confirm(`Changer le rôle de cet utilisateur en « ${role} » ?`, { danger: role === 'admin', okLabel: 'Changer le rôle' })) return;
             path = `user/${uid}/role`; body = { role };
         } else if (btn.classList.contains('act-suspend')) {
             const suspend = btn.dataset.suspend === 'true';
-            if (!window.confirm(suspend ? 'Suspendre ce compte ? Il ne pourra plus se connecter.' : 'Réactiver ce compte ?')) return;
+            if (!await this._confirm(suspend ? 'Suspendre ce compte ? Il ne pourra plus se connecter.' : 'Réactiver ce compte ?', { danger: suspend, okLabel: suspend ? 'Suspendre' : 'Réactiver' })) return;
             path = `user/${uid}/suspend`; body = { suspend };
         } else return;
         const orig = btn.textContent;
@@ -1044,33 +1191,36 @@ class AdminPage {
             });
             const data = await res.json().catch(() => ({}));
             if (!res.ok) throw new Error(data.error || String(res.status));
-            if (data.message) window.alert(data.message);
+            if (data.message) this._toast(data.message, 'ok');
             this._navigate('client:' + uid);   // reload fiche to reflect the new state
         } catch (e) {
             btn.textContent = '✗ ' + AdminPage.esc(e.message);
+            this._toast('Erreur : ' + e.message, 'err');
             setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 3000);
         }
     }
 
     async _crmMutate(fn, params) {
         try { await this._rpc(fn, params); await this._loadCrm(this._crmUser); }
-        catch (e) { window.alert('Erreur : ' + e.message); }
+        catch (e) { this._toast('Erreur : ' + e.message, 'err'); }
     }
     async _crmAddNote() {
         const ta = document.getElementById('crm-note-input');
         const body = ta ? ta.value.trim() : '';
-        if (!body) return;
+        if (!body) { this._toast('La note est vide.', 'err'); if (ta) ta.focus(); return; }
         await this._crmMutate('admin_note_add', { p_user_id: this._crmUser, p_body: body });
     }
     async _crmCreateTag() {
-        const label = (window.prompt('Nom du tag / segment :') || '').trim();
+        const userId = this._crmUser; // pin: the prompts are async, the fiche could change under us
+        const label = ((await this._prompt('Nom du tag / segment :')) || '').trim();
         if (!label) return;
-        const color = (window.prompt('Couleur : gray, green, red, amber ou blue', 'blue') || 'blue').trim();
+        const raw = ((await this._prompt('Couleur : gray, green, red, amber ou blue', 'blue')) || 'blue').trim().toLowerCase();
+        const color = ['gray', 'green', 'red', 'amber', 'blue'].includes(raw) ? raw : 'blue';
         try {
             const t = await this._rpc('admin_tag_create', { p_label: label, p_color: color });
-            if (t && t.id) await this._rpc('admin_tag_toggle', { p_user_id: this._crmUser, p_tag_id: t.id, p_on: true });
-            await this._loadCrm(this._crmUser);
-        } catch (e) { window.alert('Erreur : ' + e.message); }
+            if (t && t.id) await this._rpc('admin_tag_toggle', { p_user_id: userId, p_tag_id: t.id, p_on: true });
+            if (this._crmUser === userId) await this._loadCrm(userId);
+        } catch (e) { this._toast('Erreur : ' + e.message, 'err'); }
     }
 
     _renderFiche(d) {
@@ -1125,7 +1275,7 @@ class AdminPage {
                 <td>${AdminPage.esc(r.panel)}</td>
                 <td>${r.item_type === 'series' ? 'séries' : 'films'}</td>
                 <td class="num">${AdminPage.n(r.total)}</td>
-                <td class="num"><span class="bar"><i style="width:${Math.min(100, Number(r.resolved_pct) || 0)}%"></i></span>${AdminPage.n(r.resolved)} (${r.resolved_pct == null ? 0 : r.resolved_pct}%)</td>
+                <td class="num"><span class="bar"><i style="width:${Math.min(100, Number(r.resolved_pct) || 0)}%"></i></span>${AdminPage.n(r.resolved)} (${Number(r.resolved_pct) || 0}%)</td>
                 <td class="num">${AdminPage.n(r.never_probed)}</td>
                 <td class="num">${AdminPage.n(r.probed_24h)}</td>
                 <td class="num">${AdminPage.n(r.subtitle_found)}</td>
@@ -1203,7 +1353,7 @@ class AdminPage {
                 ? ' <span class="badge amber" title="Plusieurs marques revendues pointent vers le même panel amont">miroir multi-marques</span>' : '';
             const brandChips = brands.map(b => `<span class="badge blue">${AdminPage.esc(b)}</span>`).join(' ');
             const rows = sources.map(s => {
-                const clickable = s.user_id ? ` class="user-row" data-user-id="${AdminPage.esc(s.user_id)}" title="Voir la fiche client"` : '';
+                const clickable = s.user_id ? ` class="user-row" data-user-id="${AdminPage.esc(s.user_id)}" role="button" tabindex="0" title="Voir la fiche client"` : '';
                 return `<tr${clickable}>
                     <td>${AdminPage.esc(s.display_name)}</td>
                     <td><span class="pacct">${AdminPage.esc(s.owner_email || '—')}</span>${s.is_driver ? ' <span class="badge blue">pilote</span>' : ''}</td>
@@ -1231,7 +1381,7 @@ class AdminPage {
             <h1 class="crm-h1">⚙️ Moteur d'enrichissement</h1>
             <p class="crm-sub">Couverture par panel (comptes pilotes) + matching TMDB + crons jour/nuit.</p>
             <div class="admin-block"><h2>Enrichissement par panel</h2><div class="scroll"><div id="admin-enrich"><div class="ssub">Chargement…</div></div></div></div>
-            <div class="admin-block"><h2>🎯 Matching TMDB</h2><div class="ssub">Backlogs drainés par les crons nocturnes (backfill-years 1000/j · search-match 3 600/j · revalidate 2 000/j) — ces compteurs doivent baisser de jour en jour.</div><section id="admin-tmdb" class="admin-cards"></section></div>
+            <div class="admin-block"><h2>🎯 Matching TMDB</h2><div class="ssub">Backlogs drainés par les crons nocturnes (backfill-years 1000/j · search-match 3 600/j · revalidate 2 000/j) — ces compteurs doivent baisser de jour en jour.</div><section id="admin-tmdb" class="admin-cards"><div class="ssub">Chargement…</div></section></div>
             <div class="admin-block"><h2>⏱️ Crons</h2><div class="scroll"><div id="admin-cron"></div></div></div>
         </div>`;
         try {
@@ -1247,8 +1397,10 @@ class AdminPage {
             const msg = `<div class="admin-err">Erreur : ${AdminPage.esc(e.message)}</div>`;
             const en = document.getElementById('admin-enrich');
             const cr = document.getElementById('admin-cron');
+            const tm = document.getElementById('admin-tmdb');
             if (en) en.innerHTML = msg;
-            if (cr) cr.innerHTML = msg;   // both sections share the fetch — show the failure in both
+            if (cr) cr.innerHTML = msg;   // all three sections share the fetch — show the failure in each
+            if (tm) tm.innerHTML = msg;
         }
     }
 
@@ -1331,9 +1483,12 @@ class AdminPage {
         if (!el) return;
         const svc = (label, s) => {
             s = s || {};
-            if (s.configured === false) return `<div class="kpi"><div class="v" style="font-size:15px;color:#9aa">non configuré</div><div class="l">${label}</div></div>`;
+            if (s.configured === false) return `<div class="kpi"><div class="v" style="font-size:15px;color:#9aa">non configuré</div><div class="l">${AdminPage.esc(label)}</div></div>`;
             const up = s.ok === true;
-            return `<div class="kpi ${up ? 'ok' : 'alert'}"><div class="v" style="font-size:17px">${up ? `🟢 ${AdminPage.n(s.ms)} ms` : '🔴 down'}</div><div class="l">${label}${s.status ? ` · ${s.status}` : ''}</div></div>`;
+            const status = s.status != null ? ` · ${AdminPage.esc(String(s.status))}` : '';
+            // On a down service, surface the captured error (redacted server-side) so the admin can act.
+            const errDetail = !up && s.error ? ` <span class="al-err">${AdminPage.esc(String(s.error).slice(0, 90))}</span>` : '';
+            return `<div class="kpi ${up ? 'ok' : 'alert'}"><div class="v" style="font-size:17px">${up ? `🟢 ${AdminPage.n(s.ms)} ms` : '🔴 down'}</div><div class="l">${AdminPage.esc(label)}${status}${errDetail}</div></div>`;
         };
         el.innerHTML = [svc('Edge', d.edge), svc('Base de données', d.db), svc('Gateway', d.gateway), svc('Relay', d.relay)].join('');
     }
@@ -1351,23 +1506,24 @@ class AdminPage {
         const el = document.getElementById('sys-flags');
         if (!el) return;
         const rows = flags.map(f => `<div class="flag-row">
-            <label class="switch"><input type="checkbox" class="flag-toggle" data-key="${AdminPage.esc(f.key)}" ${f.enabled ? 'checked' : ''}><span class="slider"></span></label>
+            <label class="switch"><input type="checkbox" class="flag-toggle" data-key="${AdminPage.esc(f.key)}" aria-label="Activer le flag ${AdminPage.esc(f.key)}" ${f.enabled ? 'checked' : ''}><span class="slider"></span></label>
             <div class="flag-meta"><div class="flag-key">${AdminPage.esc(f.key)}</div><div class="flag-desc">${AdminPage.esc(f.description || '')}${f.updated_by ? ` · ${AdminPage.esc(f.updated_by)}` : ''}</div></div>
-            <button class="flag-del" data-key="${AdminPage.esc(f.key)}" title="Supprimer le flag">×</button>
+            <button class="flag-del" data-key="${AdminPage.esc(f.key)}" aria-label="Supprimer le flag ${AdminPage.esc(f.key)}" title="Supprimer le flag">×</button>
         </div>`).join('');
         el.innerHTML = `${rows || '<div class="ssub">Aucun flag.</div>'}<div class="flag-add"><button class="flag-create tag-add-chip">＋ créer un flag</button></div>`;
     }
 
     async _flagToggle(input) {
-        try { await this._rpc('admin_flag_set', { p_key: input.dataset.key, p_enabled: input.checked }); }
-        catch (e) { input.checked = !input.checked; window.alert('Erreur : ' + e.message); }
+        try { await this._rpc('admin_flag_set', { p_key: input.dataset.key, p_enabled: input.checked }); this._toast(`Flag « ${input.dataset.key} » ${input.checked ? 'activé' : 'désactivé'}.`, 'ok'); }
+        catch (e) { input.checked = !input.checked; this._toast('Erreur : ' + e.message, 'err'); }
     }
     async _flagCreate() {
-        const key = (window.prompt('Clé du flag (a-z, 0-9, _) :') || '').trim();
+        const key = ((await this._prompt('Clé du flag (a-z, 0-9, _) :')) || '').trim().toLowerCase();
         if (!key) return;
-        const desc = (window.prompt('Description :') || '').trim();
-        try { await this._rpc('admin_flag_create', { p_key: key, p_description: desc || null }); this._loadFlags(); }
-        catch (e) { window.alert('Erreur : ' + e.message); }
+        if (!/^[a-z0-9_]+$/.test(key)) { this._toast('Clé invalide : uniquement a-z, 0-9 et _.', 'err'); return; }
+        const desc = ((await this._prompt('Description :')) || '').trim();
+        try { await this._rpc('admin_flag_create', { p_key: key, p_description: desc || null }); this._loadFlags(); this._toast('Flag créé.', 'ok'); }
+        catch (e) { this._toast('Erreur : ' + e.message, 'err'); }
     }
 
     _renderSysHealth(o) {
@@ -1379,7 +1535,7 @@ class AdminPage {
         const fresh = o.refreshed_at && (Date.now() - new Date(o.refreshed_at).getTime()) < 12 * 60000;
         el.innerHTML = [
             card(AdminPage.esc(o.refreshed_at ? AdminPage.timeAgo(o.refreshed_at) : '—'), 'Dernier snapshot', fresh ? 'ok' : 'alert'),
-            card(n(o.cron_active), 'Crons actifs', 'ok'),
+            card(n(o.cron_active), 'Crons actifs', Number(o.cron_active) > 0 ? 'ok' : 'alert'),
             card(n(o.cron_paused), 'Crons en pause'),
             card(n(o.cron_fails_24h), 'Échecs cron 24h', Number(o.cron_fails_24h) > 0 ? 'alert' : 'ok'),
             card(n(o.sources_error), 'Sources en erreur', Number(o.sources_error) > 0 ? 'alert' : 'ok'),
@@ -1395,7 +1551,7 @@ class AdminPage {
         const icon = (k) => ({ note_added: '📝', tag_added: '🏷️', tag_removed: '🏷️', admin_action: '⚡', resync: '↻', signup: '🎉', sync_started: '▶️', sync_done: '✅', sync_failed: '⚠️' }[k] || '•');
         const more = (this._audit && !this._audit.done)
             ? '<div style="margin-top:12px"><button id="sys-audit-more" class="tag-add-chip">⌄ Charger plus</button></div>' : '';
-        el.innerHTML = '<div class="tl">' + rows.map(e => `<div class="tl-item audit-row"${e.user_id ? ` data-user-id="${AdminPage.esc(e.user_id)}"` : ''}>
+        el.innerHTML = '<div class="tl">' + rows.map(e => `<div class="tl-item audit-row"${e.user_id ? ` data-user-id="${AdminPage.esc(e.user_id)}" role="button" tabindex="0"` : ''}>
             <span class="tl-ic">${icon(e.kind)}</span>
             <span class="tl-sum">${AdminPage.esc(e.summary)}${e.client_email ? ` <span class="al-owner">· ${AdminPage.esc(e.client_email)}</span>` : ''}${e.actor ? ` <span class="ssub">par ${AdminPage.esc(e.actor)}</span>` : ''}</span>
             <span class="tl-at" title="${e.created_at ? AdminPage.esc(new Date(e.created_at).toLocaleString('fr-FR')) : ''}">${e.created_at ? AdminPage.esc(AdminPage.timeAgo(e.created_at)) : ''}</span>
@@ -1496,6 +1652,9 @@ class AdminPage {
             });
             if (!res.ok) throw new Error(String(res.status));
             btn.textContent = '✓ lancé';
+            this._toast('Re-sync lancé.', 'ok');
+            // Reset so the admin can re-trigger later (the sync itself runs server-side).
+            setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 3500);
         } catch (e) {
             btn.textContent = '✗ ' + AdminPage.esc(e.message || 'err');
             setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 3500);
@@ -1506,7 +1665,7 @@ class AdminPage {
         const el = document.getElementById('admin-enrich');
         if (!el) return;
         if (!rows.length) { el.innerHTML = '<div class="ssub">Aucune donnée.</div>'; return; }
-        const barCell = (a, p) => `<td class="num"><span class="bar"><i style="width:${Math.min(100, Number(p) || 0)}%"></i></span>${AdminPage.n(a)} (${p == null ? 0 : p}%)</td>`;
+        const barCell = (a, p) => `<td class="num"><span class="bar"><i style="width:${Math.min(100, Number(p) || 0)}%"></i></span>${AdminPage.n(a)} (${Number(p) || 0}%)</td>`;
         const eta = (r) => {
             if (Number(r.never_probed) === 0) {
                 const undPct = Math.max(0, Math.round((100 - (Number(r.resolved_pct) || 0)) * 10) / 10);
@@ -1546,6 +1705,7 @@ class AdminPage {
     _renderCron(rows) {
         const el = document.getElementById('admin-cron');
         if (!el) return;
+        if (!rows.length) { el.innerHTML = '<div class="ssub">Aucun cron déclaré.</div>'; return; }
         const winBadge = (w) => w === 'jour' ? '<span class="badge amber">☀️ jour</span>'
             : (w === 'nuit' ? '<span class="badge blue">🌙 nuit</span>'
             : (w === 'continu' ? '<span class="badge green">♾️ continu</span>' : '<span class="badge gray">—</span>'));

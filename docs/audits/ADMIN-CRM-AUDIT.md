@@ -303,3 +303,91 @@ Migration `20260704010000_internal_accounts_support.sql` (appliquée live en 3 p
      tickets à répondre.
    - **Alerting** : ops-alert emaile si un ticket attend une réponse depuis **> 24 h**
      (`support_stale`), compteurs support dans le snapshot.
+
+---
+
+## Addendum 3 — Remédiation complète de l'audit design/UX/fonctionnalités (2026-07-05)
+
+> Passe de correction **une par une** des 65 findings de l'audit design + UX + fonctionnalités
+> (3 haute, 20 moyenne, 42 basse ; 17 bugs/sécurité). Répartie en 5 lots. Vérifiée live contre
+> l'architecture réelle (RPCs `admin_*`, edge `norva-admin`, tables `admin_*`/`cloud_support_*`),
+> aucune approximation.
+
+### Lot 1 — Sécurité / backend (migration `20260705040000_admin_grants_hardening.sql` + edge `norva-admin`)
+Défense en profondeur : aucun de ces points n'était exploitable seul (RPCs gated `is_admin()`,
+tables RLS-sans-policy → 0 ligne), mais on retire les grants dormants pour que la sécurité ne
+repose plus sur un seul contrôle.
+- **`refresh_admin_dashboard()` (HAUTE)** : SECURITY DEFINER, sans gate `is_admin()`, agrégat
+  full-DB 180 s/64 Mo, était **anon-callable → DoS scriptable non authentifié**. `revoke execute
+  from anon, authenticated` (déjà révoqué live pendant l'audit, gravé ici pour survivre à toute
+  recréation). Seuls pg_cron (postgres) + service_role en ont besoin.
+- **4 RPCs de lecture cache** (`admin_overview/sources/cron_health/enrichment_coverage`) :
+  `revoke from public, anon` + `grant to authenticated` (grant anon = grant mort, aligné sur le
+  reste des `admin_*`).
+- **11 tables** (`admin_dashboard_cache`, `admin_notes`, `admin_feature_flags`, `admin_tags`,
+  `admin_client_tags`, `admin_internal_accounts`, `admin_events`, `admin_alert_state`,
+  `admin_enrichment_accounts`, `cloud_support_tickets`, `cloud_support_messages`) :
+  `revoke all from anon, authenticated` (les RPCs SECURITY DEFINER owned-by-postgres gardent
+  l'accès ; rien d'autre ne doit toucher ces tables en direct).
+- **Anti-lockout dernier admin** : `admin_count_active()` (service_role only) + garde côté edge
+  `norva-admin` — refuse une action rôle→user / suspend qui ferait tomber le compte d'admins
+  actifs à 0 (l'edge bloquait déjà l'auto-démotion ; deux admins pouvaient se démolir mutuellement).
+- **`norva-admin` durci** : `timingSafeEqual` sur le token ops-alert (au lieu de `===`, fuite de
+  timing) ; le probe santé DB capture désormais l'erreur (`{ error }`) au lieu de l'avaler.
+
+### Lot 2 — Bugs frontend (races, escaping, health)
+- **Race fiche client 360° (HAUTE)** : `_pageClientDetail` + ses 3 panneaux async
+  (`_loadBilling`/`_loadCrm`/`_loadUserTickets`) écrivaient dans des IDs de panneaux identiques —
+  ouvrir client A puis vite client B pouvait peindre les données de A dans la fiche de B. Garde
+  `if (this._crmUser !== userId) return;` après **chaque** await ; `_renderBillingPanel` reçoit
+  désormais `userId` explicitement (au lieu de lire le `_crmUser` mutable au moment du clic toggle).
+- **Race navigation de page** : token monotone `this._nav` incrémenté à chaque `_navigate` ;
+  `_pageCockpit` et `_pageTicket` bail si le token a changé pendant le fetch.
+- **Race liste clients** : `_loadUsers` a un `seq` de garde (frappe rapide / clics pager
+  enchaînés → seule la réponse la plus récente peint) + pager gelé pendant le fetch + placeholder
+  « Chargement… » au 1ᵉʳ chargement.
+- **Bug `client:undefined`** : les lignes de tickets Support portaient `.user-row` **et**
+  `data-ticket-id` (sans `data-user-id`) — le handler délégué `.user-row` naviguait vers
+  `client:undefined` en parallèle du listener de ticket. Scellé : le handler exige désormais
+  `.user-row[data-user-id]`.
+- **Escaping/HTML** : `resolved_pct` (fiche + moteur) coercé en `Number(x)||0` ; `s.status` de
+  l'infra santé échappé ; label des services santé échappé.
+- **Santé infra** : détail d'erreur (redigé côté serveur) affiché sur un service `down`.
+
+### Lot 3 — UX (feedback non bloquant, états, CSV)
+- **Primitives UX non bloquantes** : `_toast(msg,kind)`, `_confirm(message,opts)`,
+  `_prompt(message,def)` (modale accessible, focus-piégé, Escape/Enter/backdrop, `role=dialog`
+  `aria-modal`) remplacent **tous** les `window.alert/confirm/prompt` natifs (0 restant vérifié).
+- **Boutons d'action** : close/reopen ticket, envoi réponse, toggle interne, resync → désactivés
+  pendant la requête, label restauré + toast d'erreur en cas d'échec (avant : label figé sur
+  l'erreur). Reply support exige ≥ 2 caractères. Resync auto-réarme après succès.
+- **États vides** : crons, matching TMDB (placeholder + peint l'erreur si le fetch échoue),
+  note/réponse vides → toast au lieu d'un retour silencieux.
+- **Blast-radius bulk-tag** : la barre d'action segment n'affiche **plus** `_users.total`
+  (trompeur : c'était le compte tag ∩ recherche ∩ billing, alors que le RPC agit sur TOUS les
+  porteurs du tag) — libellé « tous les clients portant ce segment », le RPC rapporte le vrai
+  compte après coup.
+- **Filtre finance→clients** : cliquer une status-card réinitialise recherche + tag (le compte
+  affiché correspond à la liste d'arrivée).
+- **CSV (2 exports)** : garde anti-injection de formule — une valeur commençant par `= + - @`
+  (email/tag hostile) est préfixée d'une apostrophe pour qu'Excel/Sheets ne l'évalue pas.
+
+### Lot 4 — Design (tokens, contraste)
+- Gris `#66707e` (sous le ratio WCAG AA sur fond sombre) → `#828ea1` partout (foot sidebar,
+  entêtes de fil support).
+- Badge `.gray` : contraste texte/fond relevé.
+- Ellipsis fil d'ariane (email long ne pousse plus les contrôles topbar hors écran) ;
+  `tl-sum` `min-width:0` pour ellipsis réelle ; correctifs mobile (nav centrée, inputs `min-width:0`).
+
+### Lot 5 — Accessibilité (rôles, ARIA, clavier)
+- **Nav clavier** : toutes les lignes/cartes cliquables (`.user-row`, `.alert-card`, `.audit-row`,
+  `.tl-item[data-ticket-id]`, `.fin-status`, lignes identités/paiements/tickets) portent
+  `role="button" tabindex="0"` + activation Enter/Espace (handler `keydown` délégué → `el.click()`).
+- **Focus visible** : `:focus-visible` (outline) sur toutes ces cibles + nav + onglets + retour.
+- **ARIA** : onglets Support `role="tab"`/`aria-selected` sous `role="tablist"` ; `aria-current`
+  sur l'item de nav actif ; `aria-live=polite` sur le fil d'ariane ; `aria-label` sur nav (icône
+  `aria-hidden`), refresh, switches de flags, boutons supprimer-flag ; `<main tabindex="-1">`
+  reçoit le focus à la navigation (+ scroll reset).
+
+**Validation** : `node --check` OK, suite `node --test tests/*.test.js` → 65/65 pass. AdminPage.js
+n'est pas importé par les tests (classe navigateur) ; revue adversariale indépendante du diff en plus.
