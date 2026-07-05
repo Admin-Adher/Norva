@@ -242,6 +242,21 @@ function tmdbLocale(lang2: string): string {
   return TMDB_REGIONAL_LOCALE[code] ?? code;
 }
 
+// Bounded TMDB fetch: an 8s abort so a slow or unreachable TMDB degrades to "unavailable"
+// instead of stalling the fiche — matters more now that the translations append (Phase 4)
+// enlarges the response. Returns null on timeout/network error; callers treat null like 404.
+async function tmdbFetch(url: string, headers: Record<string, string>): Promise<Response | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8000);
+  try {
+    return await fetch(url, { headers, signal: controller.signal });
+  } catch (_) {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // Best-effort on-demand population of the GLOBAL title cache. getTmdbMeta already fetches
 // the title from TMDB in the user's language, so when TMDB returns a genuinely localized
 // overview (empty ⇒ that translation is absent — TMDB never English-fills the overview
@@ -320,8 +335,8 @@ async function getTmdbMeta(url: URL): Promise<JsonRecord> {
   if (key.startsWith("eyJ")) headers.Authorization = `Bearer ${key}`;
   else params.set("api_key", key);
 
-  const res = await fetch(`https://api.themoviedb.org/3/${type}/${tmdbId}?${params}`, { headers });
-  if (res.status === 404) return { available: false };
+  const res = await tmdbFetch(`https://api.themoviedb.org/3/${type}/${tmdbId}?${params}`, headers);
+  if (!res || res.status === 404) return { available: false };
   if (!res.ok) throw new HttpError(502, `TMDB responded ${res.status}`);
   const data = await res.json() as JsonRecord;
 
@@ -398,8 +413,8 @@ async function getTmdbEpisodes(url: URL): Promise<JsonRecord> {
   if (key.startsWith("eyJ")) headers.Authorization = `Bearer ${key}`;
   else params.set("api_key", key);
 
-  const res = await fetch(`https://api.themoviedb.org/3/tv/${tmdbId}/season/${season}?${params}`, { headers });
-  if (res.status === 404) return { available: false };
+  const res = await tmdbFetch(`https://api.themoviedb.org/3/tv/${tmdbId}/season/${season}?${params}`, headers);
+  if (!res || res.status === 404) return { available: false };
   if (!res.ok) throw new HttpError(502, `TMDB responded ${res.status}`);
   const data = await res.json() as JsonRecord;
 

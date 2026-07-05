@@ -25,12 +25,17 @@ comment on column public.catalog_titles.i18n_attempted_at is
   'Set by catalog_upsert_i18n_map and the pre-warm cron; lets both skip a title re-pulled '
   'within the retry window. A real translation always wins the read via metadata.i18n[lang].';
 
--- Gap set for the cron: validated matches (have metadata.tmdb) that still lack any i18n.
--- Tiny (~89 rows) and self-draining — a title exits the index the moment i18n is written.
--- The partial predicate keeps the cron candidate scan off the 90k-row TOAST heap.
-create index if not exists catalog_titles_i18n_gap_idx
-  on public.catalog_titles (item_type, provider_tmdb_id)
-  where (metadata ? 'tmdb') and not (metadata ? 'i18n');
+-- Gap set for the cron: validated matches (metadata.tmdb) that still lack any i18n. The
+-- partial index catalog_titles_i18n_gap_idx keeps the cron candidate scan AND the cron's
+-- WHERE EXISTS guard off the 90k-row TOAST heap.
+--
+-- ⚠ The index is built OUT-OF-BAND (CREATE INDEX CONCURRENTLY via execute_sql — see
+-- supabase/functions/ENRICHMENT_CRON_SETUP.md), NOT here. A plain in-migration build would
+-- evaluate `metadata ? …` on every heap tuple → detoast all ~90k rows (~1-2 min) under a
+-- write-blocking ShareLock that stalls the enrichment fleet + on-demand i18n writes, and can
+-- exceed the 2-min statement_timeout and roll the migration back. Build it CONCURRENTLY,
+-- off-peak, BEFORE enabling the norva-prewarm-i18n cron (until it exists the candidate RPC
+-- and the guard fall back to a seq-scan detoast — correct but slow, so the cron stays off).
 
 -- ── Whole-map gap-fill writer ────────────────────────────────────────────────────────
 -- Merges a full {lang:{title,overview}} map into metadata.i18n GAP-FILL style: existing
@@ -56,15 +61,26 @@ begin
     return;
   end if;
 
+  -- Gap-fill merge: `p_i18n || existing` → existing lang keys override incoming ones. When
+  -- that equals the stored i18n (the common case — the title is already fully localized and
+  -- getTmdbMeta re-sends the same translations on a cold open), skip the metadata rewrite:
+  -- `else c.metadata` passes the stored value through unchanged so heap_update REUSES its TOAST
+  -- pointer (no multi-KB re-TOAST / dead-tuple churn on the hottest titles). i18n_attempted_at
+  -- is a tiny scalar → always stamped so the negative cache still advances.
   update public.catalog_titles c
-     set metadata = jsonb_set(
-           coalesce(c.metadata, '{}'::jsonb),
-           array['i18n'],
-           -- `p_i18n || existing` → existing lang keys override incoming ones (gap-fill).
-           p_i18n || coalesce(c.metadata->'i18n', '{}'::jsonb),
-           true),
+     set metadata = case
+           when (p_i18n || coalesce(c.metadata->'i18n', '{}'::jsonb))
+                is distinct from coalesce(c.metadata->'i18n', '{}'::jsonb)
+           then jsonb_set(coalesce(c.metadata, '{}'::jsonb), array['i18n'],
+                          p_i18n || coalesce(c.metadata->'i18n', '{}'::jsonb), true)
+           else c.metadata
+         end,
          i18n_attempted_at = now(),
-         updated_at = now()
+         updated_at = case
+           when (p_i18n || coalesce(c.metadata->'i18n', '{}'::jsonb))
+                is distinct from coalesce(c.metadata->'i18n', '{}'::jsonb)
+           then now() else c.updated_at
+         end
    where c.item_type = p_item_type and c.provider_tmdb_id = p_provider_tmdb_id;
 end;
 $$;
@@ -98,8 +114,8 @@ comment on function public.catalog_i18n_prewarm_candidates(int, timestamptz) is
   'Phase 4 VOD i18n: bounded gap-fill candidates for the pre-warm cron — validated matches '
   '(metadata.tmdb present) still missing i18n, not attempted within the retry window.';
 
--- Lock all three to the edge's service_role (new functions default to PUBLIC EXECUTE, which
--- would let anon/authenticated poison the SHARED cache or scan it via PostgREST).
+-- Lock both to the edge's service_role (new functions default to PUBLIC EXECUTE, which would
+-- let anon/authenticated poison the SHARED cache or scan it via PostgREST).
 revoke all on function public.catalog_upsert_i18n_map(text, text, jsonb) from public;
 grant execute on function public.catalog_upsert_i18n_map(text, text, jsonb) to service_role;
 revoke all on function public.catalog_i18n_prewarm_candidates(int, timestamptz) from public;

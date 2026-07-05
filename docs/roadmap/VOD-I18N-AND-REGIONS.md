@@ -349,15 +349,26 @@ So Phase 4 became three grounded pieces instead of a brute pre-warm:
    map, and **attempt-stamps every scanned row** so an unmatchable/absent title isn't re-pulled
    tightly. Daily 02:35 UTC, `WHERE EXISTS`-guarded so an idle tick makes **zero** POSTs.
 
-**Migration** `20260705020000_i18n_prewarm.sql`: `i18n_attempted_at` column + gap partial index +
+**Migration** `20260705020000_i18n_prewarm.sql`: `i18n_attempted_at` column +
 `catalog_upsert_i18n_map` (gap-fill merge, existing langs win, never clobbers) +
-`catalog_i18n_prewarm_candidates`; all three RPCs revoked from PUBLIC, granted to `service_role`.
+`catalog_i18n_prewarm_candidates`; all RPCs revoked from PUBLIC, granted to `service_role`. The
+gap **partial index** is built **out-of-band** (`CREATE INDEX CONCURRENTLY`), not in the
+migration — an in-transaction build would detoast all ~90k rows under a write-blocking lock.
 
-**Rollout**: apply this migration **before/with** the edge deploy (the RPC calls are best-effort
-→ a deploy landing first degrades to a no-op). Then apply the `norva-prewarm-i18n` pg_cron job
-via `execute_sql` (see `supabase/functions/ENRICHMENT_CRON_SETUP.md`). Like every other write to
-the global cache, the localized synopsis only *appears* in rails once
-`NORVA_CATALOG_READ_SOURCE=catalog_titles` is on.
+**Adversarial review (5 lenses) — 4 confirmed findings fixed**: (1) 🔴 the partial index was
+moved out of the transactional migration to a `CONCURRENTLY` build (no ~2 min write-lock / no
+`statement_timeout` rollback); (2) 🟠 `catalog_upsert_i18n_map` now guards the metadata rewrite
+with `IS DISTINCT FROM` so an already-localized popular title isn't re-TOASTed on every cold
+fiche open (the stamp still advances); (3) 🟠 the TMDB fetches (`getTmdbMeta`/`getTmdbEpisodes`)
+are now 8 s `AbortController`-bounded so the larger translations response can't stall the fiche;
+(4) 🟡 the cron leaves a row **unstamped** on a transient upsert error (retries next run) instead
+of marking it done.
+
+**Rollout order** (see `supabase/functions/ENRICHMENT_CRON_SETUP.md`): apply the migration →
+build the index `CONCURRENTLY` off-peak → deploy the edge → **then** schedule the
+`norva-prewarm-i18n` pg_cron. The edge RPC calls are best-effort, so a deploy landing before the
+migration degrades to a no-op, not an error. Like every write to the global cache, the localized
+synopsis only *appears* in rails once `NORVA_CATALOG_READ_SOURCE=catalog_titles` is on.
 
 **Honest scope**: this does not (and cannot) exceed TMDB's own translation coverage (fr 67 %,
 es 60 %, pt 55 %, ar 25 % of matched titles) — it fills what TMDB has, on demand and for the

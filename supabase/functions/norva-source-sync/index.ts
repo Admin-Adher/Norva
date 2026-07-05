@@ -803,7 +803,9 @@ async function cronPrewarmI18n(db: SupabaseClient, limit: number, concurrency: n
             p_provider_tmdb_id: tmdbId,
             p_i18n: validation.i18n,
           });
-          if (!upErr) { localized += 1; continue; } // the RPC already stamped i18n_attempted_at
+          if (upErr) continue;             // transient DB error → leave unstamped, retry next run
+          localized += 1;                  // success — the RPC already stamped i18n_attempted_at
+          continue;
         }
         // No usable localization (unconfident id, or TMDB has no translations) → stamp so the
         // 90-day window keeps the cron from re-pulling it every run.

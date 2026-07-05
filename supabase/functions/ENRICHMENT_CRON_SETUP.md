@@ -551,7 +551,18 @@ $cron$);
 -- pas encore d'i18n) — 1 pull translations = toutes les langues. Gardé par WHERE EXISTS (index
 -- partiel catalog_titles_i18n_gap_idx) : le tick ne POST que s'il reste des trous à combler et pas
 -- attaqués depuis 90 j. Self-draining (un titre sort du set dès l'i18n écrit). 02:35, avant 03-04.
--- ⚠ Nécessite la migration 20260705020000_i18n_prewarm.sql (colonne + RPCs). Appliquer AVANT.
+--
+-- ⚠ ORDRE DE ROLLOUT (obligatoire) :
+--   1. Appliquer la migration 20260705020000_i18n_prewarm.sql (colonne i18n_attempted_at + RPCs).
+--   2. Construire l'index partiel HORS transaction (CONCURRENTLY → pas de lock d'écriture ; un
+--      CREATE INDEX simple détoasterait les ~90k lignes ~1-2 min sous ShareLock et risquerait le
+--      statement_timeout 2 min). À lancer une fois, off-peak :
+--        SET statement_timeout = '10min';
+--        CREATE INDEX CONCURRENTLY IF NOT EXISTS catalog_titles_i18n_gap_idx
+--          ON public.catalog_titles (item_type, provider_tmdb_id)
+--          WHERE (metadata ? 'tmdb') AND NOT (metadata ? 'i18n');
+--   3. PUIS seulement planifier le cron ci-dessous (sinon le garde WHERE EXISTS et la RPC
+--      candidate font un seq-scan détoast lent à chaque tick).
 select cron.schedule('norva-prewarm-i18n', '35 2 * * *', $cron$
   select net.http_post(
     url := 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-source-sync/cron/prewarm-i18n?limit=200&conc=8',
