@@ -2206,7 +2206,11 @@ const API = {
                 }
             } catch (_) { /* ignore parse/quota */ }
             let p;
-            try { p = cloudHomeApi().languageFacets(params); }
+            // NOTE: cloudHomeApi lives INSIDE the CloudAdapter IIFE — a bareword call here (file
+            // scope) throws a ReferenceError that this try/catch silently swallows, which is exactly
+            // why the Audio/Subtitle menus were always empty (the endpoint was never even reached).
+            // Reach it through the exposed handle, like clearRailCache below.
+            try { p = CloudAdapter.cloudHomeApi().languageFacets(params); }
             catch (_) { return Promise.resolve({ audio: [], subtitles: [] }); }
             return Promise.resolve(p).then((value) => {
                 try {
@@ -2221,7 +2225,7 @@ const API = {
         },
         // Best-effort capture of real audio-track languages observed at playback.
         reportObservedLanguages: (body) => {
-            try { return cloudHomeApi().reportObservedLanguages(body); }
+            try { return CloudAdapter.cloudHomeApi().reportObservedLanguages(body); }
             catch (_) { return Promise.resolve({ ok: false }); }
         },
         // Drop the cached home/genre rails so a hidden-genre change shows on the

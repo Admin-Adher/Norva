@@ -52,7 +52,39 @@ select item_type, cardinality(audio_langs), cardinality(version_tags),
 from cloud_catalog_facet_summary where user_id='<uuid>';
 ```
 
-## Addendum (2026-07-05, TRULY FINAL) — the client-side other half
+## Addendum (2026-07-05, THE ACTUAL FIX) — a swallowed ReferenceError in the wrapper
+
+The expiry-routing theory below was *also* a wrong turn. A full A→Z browser probe nailed it:
+
+```
+CODE api.js : NOUVEAU ✓        _hasCloudUserAccount()=true   user.id present   token valid (45 min)
+USER endpoint direct : audio=15        ← NorvaCloud.home.languageFacets works
+WRAPPER (app)        : audio=0         ← API.media.languageFacets returns empty
+WRAPPER's error signature == DEVICE endpoint's == "Missing bearer token"
+```
+
+Everything pointed to `cloudHomeApi()` returning the device API — yet `_hasCloudUserAccount()` was
+`true`. The resolution: **`cloudHomeApi` is defined *inside* the `CloudAdapter` IIFE**
+(`const CloudAdapter = (() => { … function cloudHomeApi(){…} … return { cloudHomeApi, … } })()`) and is
+only reachable as `CloudAdapter.cloudHomeApi`. But the **file-scope** wrappers
+`API.media.languageFacets` / `reportObservedLanguages` called **bareword `cloudHomeApi()`**, which is
+out of scope at file level → **`ReferenceError` → caught by the wrapper's own `try/catch` → returns
+`{audio:[],subtitles:[]}`**. The endpoint was therefore *never even reached* (no request in the edge
+logs, no visible error) — which is exactly what every earlier trace showed. The in-IIFE callers
+(rails/genre) worked because they're inside the closure. The IIFE's own return block even documents the
+trap: *"exposed so the file-scope API.media wrappers can reach the IIFE-internal caches (otherwise
+they'd throw a swallowed ReferenceError)."*
+
+**Fix:** call `CloudAdapter.cloudHomeApi()` (the exposed handle) from the two file-scope wrappers,
+exactly like the neighbouring `clearRailCache: () => CloudAdapter.clearRailCache()`.
+
+> **Lesson:** a `try/catch` that maps *all* failures to a benign empty value will hide a
+> `ReferenceError` (a scope/typo bug) as if it were a data-empty state. Scope the catch to the awaited
+> call, not the synchronous lookup — or at least don't swallow synchronous throws silently.
+
+---
+
+## Addendum (2026-07-05, TRULY FINAL) — the client-side other half (a wrong turn: routing was fine)
 
 Even after the SQL/edge fix below, the menus were STILL empty. A two-layer browser probe split it cleanly:
 
