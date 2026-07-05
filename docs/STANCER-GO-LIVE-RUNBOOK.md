@@ -107,22 +107,53 @@ Aucune perte de données ; rien ne débite sans clé.
    `norva-stancer/index.ts:273`).
 2. **KYC / validation compte live Stancer** : aucune doc ne confirme que c'est
    finalisé. À valider avant de poser la clé `sprod_`.
-3. **Angle mort opérationnel (audit CRM)** : aucune alerte si un débit échoue, si
-   le cron plante, ou si des `past_due` s'accumulent ; le CRM ne voit pas l'état
-   billing ; `norva-admin/health` ne ping ni Stancer ni Resend. **Recommandé de
-   durcir l'observabilité billing AVANT le go-live.**
+3. **Angle mort opérationnel (audit CRM)** — ✅ **RÉSOLU**. `norva-admin/health`
+   ping désormais Stancer + Resend ; alertes ops sur échecs de débit / cron KO /
+   `past_due` (via `norva-lifecycle`) ; le CRM affiche les flags billing + l'état
+   go-live (panneau « État billing / go-live », page Système). Plus rien à durcir
+   côté observabilité.
 4. `STANCER_WEBHOOK_TOKEN` non posé — **non bloquant** (rail auto-suffisant via
    `/confirm` + cron). Config webhook pas dans « Développeurs » du dashboard
    Stancer → « Mon Compte » ou support.
-5. Remboursements non câblés (« à câbler quand clé live »).
+5. **Remboursements — partiellement câblés, reste 1 étape en clé live.** L'id de
+   paiement Stancer (`paym_…`) est désormais **persisté** sur chaque débit
+   (`cloud_stancer_payments.provider_payment_id`) → tout débit passé sera
+   remboursable. Reste à faire quand la clé `sprod_` (ou même le test) est active
+   pour valider le contrat `/v1/refunds` :
+   a. **Valider le contrat** `POST /v1/refunds { payment, amount }` contre le
+      sandbox test (un débit test → un remboursement) — le schéma `/v1/checkout`
+      est confirmé, `/v1/refunds` ne l'est pas encore.
+   b. **Route** `POST /admin/refund` dans `norva-stancer` (auth admin =
+      `app_metadata.role==='admin'`, cf. `norva-admin`) : lit la ligne par
+      `pi_id`, POST refund sur `provider_payment_id` (ou `pi_id` pour un
+      trial-setup), passe la ligne `status='refunded'`, écrit un `admin_events`,
+      et — si remboursement total — bascule la projection en `refunded`
+      (hard-block, cf. `entitlements.ts:HARD_BLOCK_STATUSES`).
+   c. **Bouton fiche** « Rembourser » dans `_renderBillingPanel` (AdminPage.js) sur
+      les lignes `captured`.
+   d. **Inbound refund→revoke** : gérer les événements de remboursement/litige
+      Stancer (`norva-stancer-webhook`) et RC (`norva-billing-webhook`) → statut
+      dur `refunded`/`fraud` (aujourd'hui un refund arrive en `CANCELLATION`, accès
+      maintenu jusqu'à fin de période — cf. `ONBOARDING-CONVERSION-AUDIT.md` P2.4).
+
+## Différenciation des revenus par rail (web Stancer vs mobile stores) — ✅ LIVRÉ
+
+Les KPIs finance distinguent désormais le rail **Stancer (web)** du rail **mobile
+(Google Play / App Store via RevenueCat)** : bloc « Revenu par rail », colonne Rail
+sur les derniers paiements + CSV, et la fiche client affiche un abonné mobile.
+`cloud_stancer_payments` est devenu un journal cross-rail (`provider`), la
+projection porte `mrr_cents`/`bill_period` pour les rails mobiles, et
+`admin_finance()` agrège `by_rail` + `collected_by_rail`. Le webhook RC journalise
+les débits Play/Apple. Migrations `20260705100000` / `20260705110000`.
 
 ## Ce qui peut être fait en repo pour dé-risquer (côté Claude)
 
-- **A.** Durcir la visibilité billing : `norva-admin/health` qui ping Stancer +
-  Resend ; alertes sur échecs de débit / cron KO / `past_due` ; afficher les 4
-  flags billing dans le CRM. → couvre le blocage n°3.
-- **B.** Flip empreinte **EUR→USD** (prêt dès que Stancer active l'USD).
-- **C.** Câbler `STANCER_WEBHOOK_TOKEN` + remboursements.
+- **A.** ✅ FAIT — visibilité billing durcie (health pings + alertes ops + cockpit
+  CRM). Couvre le blocage n°3.
+- **B.** ✅ PRÊT — flip empreinte **EUR→USD** piloté par le secret
+  `STANCER_FOOTPRINT_CURRENCY` (aucun deploy ; défaut `eur`).
+- **C.** Remboursements — id de paiement persisté (fait) ; reste la route + bouton
+  + validation `/v1/refunds` en clé active (voir blocage n°5).
 
 ## Références fichiers
 

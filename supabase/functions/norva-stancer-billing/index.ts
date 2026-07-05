@@ -73,16 +73,20 @@ function addPeriod(fromIso: string | null, period: string): string {
 
 interface Row { user_id: string; plan_code: string | null; trial_ends_at: string | null; current_period_end: string | null }
 
-// Charge the saved token. Returns 'captured' | 'failed'.
-async function chargeToken(cardToken: string, customerId: string | null, amount: number, uniqueId: string, desc: string): Promise<"captured" | "failed"> {
+// Charge the saved token. Returns the outcome plus the authoritative Stancer payment
+// id from the response (persisted for refunds; null if the response omits it).
+async function chargeToken(cardToken: string, customerId: string | null, amount: number, uniqueId: string, desc: string): Promise<{ outcome: "captured" | "failed"; paymentId: string | null }> {
   const res = await fetch(`${STANCER_API}/v1/checkout/`, {
     method: "POST",
     headers: { Authorization: basicAuth(), "Content-Type": "application/json" },
     body: JSON.stringify({ amount, currency: "usd", card: cardToken, customer: customerId ?? undefined, unique_id: uniqueId.slice(0, 36), description: desc }),
   });
-  const body = await res.json().catch(() => ({}));
+  const body = await res.json().catch(() => ({})) as Record<string, unknown>;
   const ok = res.ok && (String(body.status) === "captured" || String(body.status) === "to_capture" || String(body.response) === "00");
-  return ok ? "captured" : "failed";
+  // The refundable payment id (Stancer returns it as `id`, e.g. "paym_…"). Best-effort.
+  const rawId = body.id ?? body.payment ?? null;
+  const paymentId = typeof rawId === "string" && rawId ? rawId : null;
+  return { outcome: ok ? "captured" : "failed", paymentId };
 }
 
 // Process one due user (trial-first-charge or renewal). `cycleAnchor` keys the idempotent unique_id.
@@ -115,7 +119,7 @@ async function chargeUser(db: SupabaseClient, row: Row, kind: "first_charge" | "
   const uniqueId = (row.user_id.replace(/-/g, "") + cycleDay).slice(0, 36);
   const chargeAmount = discountPct ? Math.max(50, Math.round(amount * (100 - discountPct) / 100)) : amount;
   const desc = `${planLabel} ${period} — ${kind}${discountPct ? ` (${discountPct}% off)` : ""}`;
-  const outcome = await chargeToken(cardToken, customerId, chargeAmount, uniqueId, desc);
+  const { outcome, paymentId } = await chargeToken(cardToken, customerId, chargeAmount, uniqueId, desc);
 
   const nowIso = new Date().toISOString();
   if (outcome === "captured") {
@@ -132,7 +136,7 @@ async function chargeUser(db: SupabaseClient, row: Row, kind: "first_charge" | "
       // The save-offer discount is one-shot: consumed by this successful charge.
       try { await db.from("cloud_stancer_customers").update({ discount_next_pct: null, updated_at: nowIso }).eq("user_id", row.user_id); } catch (_) { /* noop */ }
     }
-    try { await db.from("cloud_stancer_payments").upsert({ pi_id: `charge_${uniqueId}`, user_id: row.user_id, kind, amount: chargeAmount, currency: "usd", status: "captured", order_id: uniqueId, updated_at: nowIso }); } catch (_) { /* noop */ }
+    try { await db.from("cloud_stancer_payments").upsert({ pi_id: `charge_${uniqueId}`, user_id: row.user_id, kind, amount: chargeAmount, currency: "usd", status: "captured", provider_payment_id: paymentId, order_id: uniqueId, updated_at: nowIso }); } catch (_) { /* noop */ }
     await sendReceipt(db, row.user_id, discountPct ? `${planLabel} (${discountPct}% off applied)` : planLabel, chargeAmount, nextEnd);
     return "charged";
   }
