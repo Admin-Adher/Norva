@@ -614,6 +614,31 @@ async function validateProviderTmdbIds(rows: ProjectionRow[], idsByExternalId: M
   return validations;
 }
 
+// TMDB `translations` → per-language {title, overview} map. One TMDB call (with
+// append_to_response=translations) returns every language TMDB has; an entry is kept only
+// when it carries a real localized title or overview, so a language TMDB lacks never poisons
+// the map with the original text. Shared by enrichment (validateTmdbCandidate) and the
+// norva-catalog on-demand / pre-warm paths so both build i18n identically.
+export function buildI18nFromTmdbTranslations(
+  details: JsonRecord,
+): Record<string, { title?: string; overview?: string }> {
+  const translations = Array.isArray(recordOrEmpty(details.translations).translations)
+    ? recordOrEmpty(details.translations).translations as JsonRecord[]
+    : [];
+  const i18n: Record<string, { title?: string; overview?: string }> = {};
+  for (const entry of translations) {
+    const rec = recordOrEmpty(entry);
+    const lang = stringOr(rec.iso_639_1, "").toLowerCase();
+    if (!/^[a-z]{2}$/.test(lang)) continue;
+    const data = recordOrEmpty(rec.data);
+    const locTitle = stringOr(data.title ?? data.name, "");
+    const locOverview = stringOr(data.overview, "");
+    if (!locTitle && !locOverview) continue;
+    i18n[lang] = compactRecord({ title: locTitle || undefined, overview: locOverview || undefined });
+  }
+  return i18n;
+}
+
 export async function validateTmdbCandidate(
   apiKey: string,
   candidate: { itemType: "movie" | "series"; tmdbId: string; title: string; year: string | null },
@@ -627,16 +652,7 @@ export async function validateTmdbCandidate(
   const translations = Array.isArray(recordOrEmpty(details.translations).translations)
     ? recordOrEmpty(details.translations).translations as JsonRecord[]
     : [];
-  const i18n: Record<string, { title?: string; overview?: string }> = {};
-  for (const entry of translations) {
-    const rec = recordOrEmpty(entry);
-    const lang = stringOr(rec.iso_639_1, "").toLowerCase();
-    const data = recordOrEmpty(rec.data);
-    const locTitle = stringOr(data.title ?? data.name, "");
-    const locOverview = stringOr(data.overview, "");
-    if (!lang || (!locTitle && !locOverview)) continue;
-    i18n[lang] = compactRecord({ title: locTitle || undefined, overview: locOverview || undefined });
-  }
+  const i18n = buildI18nFromTmdbTranslations(details);
   const altTitles = (Array.isArray(recordOrEmpty(details.alternative_titles).titles)
     ? recordOrEmpty(details.alternative_titles).titles as JsonRecord[]
     : []).map((t) => stringOr(recordOrEmpty(t).title, "")).filter(Boolean);

@@ -6,6 +6,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { buildLiveCatalog, findLiveChannel, type LiveCatalogItem } from "../_shared/live-catalog.ts";
 import { BUCKET_ORDER, bucketLabel } from "../_shared/genre-taxonomy.ts";
+import { buildI18nFromTmdbTranslations } from "../_shared/vod-title-projection.ts";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -214,6 +215,11 @@ async function getEnrichmentProgress(userId: string): Promise<EnrichmentProgress
 // ==================== TMDB extras (fiches: trailer + credits) ====================
 
 const TMDB_META_TTL_MS = 6 * 3_600_000;
+// L2 (Postgres) freshness for the persistent episode cache (Phase 5). Longer than the 6h
+// in-isolate tier since episode metadata is stable; short enough that a still-airing season
+// picks up TMDB's new episodes within a couple weeks (the client shows provider episodes
+// meanwhile — this cache is progressive enhancement, never the source of which episodes exist).
+const EPISODE_I18N_TTL_MS = 14 * 24 * 3_600_000;
 const tmdbMetaCache = new Map<string, { at: number; value: JsonRecord }>();
 
 function tmdbApiKey(): string {
@@ -223,6 +229,91 @@ function tmdbApiKey(): string {
     Deno.env.get("TMDB_READ_TOKEN") ??
     ""
   ).trim();
+}
+
+// TMDB `language` param for a validated 2-letter code. Bare ISO-639-1 is accepted by
+// TMDB and covers the long tail (ar, es, de, ru, ja, hi, tr, nl…); a few languages have
+// materially better coverage under a specific region, so map those explicitly. fr/en
+// keep their prior fr-FR/en-US values → byte-identical for existing users.
+const TMDB_REGIONAL_LOCALE: Record<string, string> = {
+  en: "en-US",
+  fr: "fr-FR",
+  pt: "pt-BR", // Brazilian Portuguese dominates TMDB's pt catalogue
+  zh: "zh-CN",
+};
+function tmdbLocale(lang2: string): string {
+  const code = String(lang2 || "").slice(0, 2).toLowerCase();
+  if (!/^[a-z]{2}$/.test(code)) return "en-US";
+  return TMDB_REGIONAL_LOCALE[code] ?? code;
+}
+
+// Bounded TMDB fetch: an 8s abort so a slow or unreachable TMDB degrades to "unavailable"
+// instead of stalling the fiche — matters more now that the translations append (Phase 4)
+// enlarges the response. Returns null on timeout/network error; callers treat null like 404.
+async function tmdbFetch(url: string, headers: Record<string, string>): Promise<Response | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8000);
+  try {
+    return await fetch(url, { headers, signal: controller.signal });
+  } catch (_) {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Best-effort on-demand population of the GLOBAL title cache. getTmdbMeta already fetches
+// the title from TMDB in the user's language, so when TMDB returns a genuinely localized
+// overview (empty ⇒ that translation is absent — TMDB never English-fills the overview
+// field), persist it into catalog_titles.metadata.i18n[lang] so every future viewer at
+// that language is served the synopsis with no further TMDB call. Idempotent via the RPC
+// (fills gaps only, never overwrites); bounded so a slow write never blocks the fiche.
+async function persistCatalogI18n(
+  itemType: "movie" | "series", tmdbId: string, lang2: string, overview: string,
+): Promise<void> {
+  if (!/^[a-z]{2}$/.test(lang2) || !overview) return;
+  try {
+    await Promise.race([
+      db.rpc("catalog_upsert_i18n", {
+        p_item_type: itemType,
+        p_provider_tmdb_id: tmdbId,
+        p_lang: lang2,
+        // Overview only: TMDB's `title` silently falls back to the original when a
+        // localized title is absent (overview comes back empty instead), so persisting
+        // it risks storing an English title under i18n[lang]. displayTitle already
+        // falls back to the base title, and enrichment's translations pull stays the
+        // authoritative source for genuinely localized titles.
+        p_title: null,
+        p_overview: overview,
+      }),
+      new Promise((resolve) => setTimeout(resolve, 1500)),
+    ]);
+  } catch (_) {
+    // Never let cache population break the trailer/cast response; a missed write is
+    // retried on the next cache miss for this (title, lang).
+  }
+}
+
+// Phase 4 whole-map variant: persist the FULL translations map (every language TMDB has,
+// title + overview) that getTmdbMeta already fetched, gap-fill style, in one RPC call — and
+// stamp i18n_attempted_at so the pre-warm cron skips a title just pulled. An empty map still
+// stamps the marker (records "TMDB has no translations") without touching metadata. Bounded
+// and best-effort, exactly like persistCatalogI18n.
+async function persistCatalogI18nMap(
+  itemType: "movie" | "series", tmdbId: string, i18n: Record<string, { title?: string; overview?: string }>,
+): Promise<void> {
+  try {
+    await Promise.race([
+      db.rpc("catalog_upsert_i18n_map", {
+        p_item_type: itemType,
+        p_provider_tmdb_id: tmdbId,
+        p_i18n: i18n,
+      }),
+      new Promise((resolve) => setTimeout(resolve, 1500)),
+    ]);
+  } catch (_) {
+    // Best-effort: a missed write is retried on the next cache miss.
+  }
 }
 
 async function getTmdbMeta(url: URL): Promise<JsonRecord> {
@@ -238,8 +329,10 @@ async function getTmdbMeta(url: URL): Promise<JsonRecord> {
   if (cached && Date.now() - cached.at < TMDB_META_TTL_MS) return cached.value;
 
   const params = new URLSearchParams({
-    append_to_response: "videos,credits",
-    language: lang2 === "fr" ? "fr-FR" : "en-US",
+    // translations carries EVERY language TMDB has in this one call, so a single fiche open
+    // localises the title for all languages (Phase 4), not just the viewer's.
+    append_to_response: "videos,credits,translations",
+    language: tmdbLocale(lang2),
     // Trailers are often only tagged in en (or untagged) — widen the video pull.
     include_video_language: `${lang2},en,null`,
   });
@@ -247,8 +340,8 @@ async function getTmdbMeta(url: URL): Promise<JsonRecord> {
   if (key.startsWith("eyJ")) headers.Authorization = `Bearer ${key}`;
   else params.set("api_key", key);
 
-  const res = await fetch(`https://api.themoviedb.org/3/${type}/${tmdbId}?${params}`, { headers });
-  if (res.status === 404) return { available: false };
+  const res = await tmdbFetch(`https://api.themoviedb.org/3/${type}/${tmdbId}?${params}`, headers);
+  if (!res || res.status === 404) return { available: false };
   if (!res.ok) throw new HttpError(502, `TMDB responded ${res.status}`);
   const data = await res.json() as JsonRecord;
 
@@ -278,6 +371,21 @@ async function getTmdbMeta(url: URL): Promise<JsonRecord> {
     directors,
     creators,
   };
+
+  // Piggyback the localized details into the global i18n cache (Phase 4): the translations
+  // append carries every language TMDB has, so one fiche open localises the title for all
+  // viewers/languages at once. Fall back to the single-overview write when translations are
+  // absent, and stamp the attempt either way so the pre-warm cron skips a just-pulled title.
+  const itemType = type === "tv" ? "series" : "movie";
+  const i18nMap = buildI18nFromTmdbTranslations(data);
+  if (Object.keys(i18nMap).length > 0) {
+    await persistCatalogI18nMap(itemType, tmdbId, i18nMap);
+  } else {
+    const locOverview = String(data.overview ?? "").trim();
+    if (locOverview) await persistCatalogI18n(itemType, tmdbId, lang2, locOverview);
+    else await persistCatalogI18nMap(itemType, tmdbId, {});
+  }
+
   tmdbMetaCache.set(cacheKey, { at: Date.now(), value });
   if (tmdbMetaCache.size > 1024) {
     const oldest = [...tmdbMetaCache.entries()].sort((a, b) => a[1].at - b[1].at)[0];
@@ -288,10 +396,51 @@ async function getTmdbMeta(url: URL): Promise<JsonRecord> {
 
 const tmdbEpisodesCache = new Map<string, { at: number; value: JsonRecord }>();
 
+// L2 (Postgres) read for a season's episode metadata (Phase 5). One PK probe on
+// catalog_episode_i18n; returns the cached value when present and fresh, else null so the
+// caller falls through to TMDB. Best-effort — a DB error never blocks the fiche.
+async function readEpisodeI18n(tmdbId: string, season: number, lang2: string): Promise<JsonRecord | null> {
+  try {
+    // Bounded like every other cross-tier hop (write, tmdbFetch): a slow/hung PostgREST probe
+    // must fall through to the 8s-bounded TMDB fetch within 1.5s, never block the fiche.
+    const result = await Promise.race([
+      db.from("catalog_episode_i18n")
+        .select("episodes, fetched_at")
+        .eq("provider_tmdb_id", tmdbId).eq("season", season).eq("lang", lang2)
+        .maybeSingle(),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 1500)),
+    ]);
+    if (!result) return null;
+    const { data, error } = result;
+    if (error || !data) return null;
+    if (Date.now() - new Date(String(data.fetched_at)).getTime() >= EPISODE_I18N_TTL_MS) return null;
+    return { available: true, episodes: (data.episodes as unknown[]) ?? [] };
+  } catch (_) {
+    return null;
+  }
+}
+
+// L2 (Postgres) write-through for a season's episodes (Phase 5): a bounded, best-effort
+// full-row upsert so a season fetched once serves every future viewer/PoP with no TMDB call.
+async function writeEpisodeI18n(tmdbId: string, season: number, lang2: string, episodes: unknown[]): Promise<void> {
+  try {
+    const nowIso = new Date().toISOString();
+    await Promise.race([
+      db.from("catalog_episode_i18n").upsert(
+        { provider_tmdb_id: tmdbId, season, lang: lang2, episodes, fetched_at: nowIso, updated_at: nowIso },
+        { onConflict: "provider_tmdb_id,season,lang" }),
+      new Promise((resolve) => setTimeout(resolve, 1500)),
+    ]);
+  } catch (_) {
+    // Best-effort L2 population; a missed write just re-fetches TMDB next cold miss.
+  }
+}
+
 // One TMDB season's episode metadata (still_path, localized name, air_date, runtime,
-// vote_average), keyed by (tmdbId, season, lang). The client merges it into the fiche's
-// provider episode rows as progressive enhancement — it degrades to provider data when
-// the key is unset or TMDB has no match.
+// vote_average), keyed by (tmdbId, season, lang). Served through three tiers — in-isolate
+// Map (6h) → persistent catalog_episode_i18n (Phase 5, EPISODE_I18N_TTL_MS) → live TMDB — then
+// the client merges it into the fiche's provider episode rows as progressive enhancement,
+// degrading to provider data when the key is unset or TMDB has no match.
 async function getTmdbEpisodes(url: URL): Promise<JsonRecord> {
   const tmdbId = String(url.searchParams.get("tmdbId") || "").trim();
   const season = String(url.searchParams.get("season") || "").trim();
@@ -305,13 +454,26 @@ async function getTmdbEpisodes(url: URL): Promise<JsonRecord> {
   const cached = tmdbEpisodesCache.get(cacheKey);
   if (cached && Date.now() - cached.at < TMDB_META_TTL_MS) return cached.value;
 
-  const params = new URLSearchParams({ language: lang2 === "fr" ? "fr-FR" : "en-US" });
+  // L2: persistent per-(season, lang) cache under the in-memory tier (Phase 5). Serves every
+  // user/PoP without a TMDB hit and survives isolate/CDN eviction. Only for a valid 2-letter
+  // lang (the table key/CHECK); any other input falls straight through to TMDB.
+  const seasonNum = Number(season);
+  const validLang = /^[a-z]{2}$/.test(lang2);
+  if (validLang) {
+    const persisted = await readEpisodeI18n(tmdbId, seasonNum, lang2);
+    if (persisted) {
+      tmdbEpisodesCache.set(cacheKey, { at: Date.now(), value: persisted });
+      return persisted;
+    }
+  }
+
+  const params = new URLSearchParams({ language: tmdbLocale(lang2) });
   const headers: Record<string, string> = {};
   if (key.startsWith("eyJ")) headers.Authorization = `Bearer ${key}`;
   else params.set("api_key", key);
 
-  const res = await fetch(`https://api.themoviedb.org/3/tv/${tmdbId}/season/${season}?${params}`, { headers });
-  if (res.status === 404) return { available: false };
+  const res = await tmdbFetch(`https://api.themoviedb.org/3/tv/${tmdbId}/season/${season}?${params}`, headers);
+  if (!res || res.status === 404) return { available: false };
   if (!res.ok) throw new HttpError(502, `TMDB responded ${res.status}`);
   const data = await res.json() as JsonRecord;
 
@@ -330,6 +492,16 @@ async function getTmdbEpisodes(url: URL): Promise<JsonRecord> {
 
   const value: JsonRecord = { available: true, episodes };
   tmdbEpisodesCache.set(cacheKey, { at: Date.now(), value });
+  // Populate the persistent L2 (Phase 5) — only for a valid lang and a non-empty season (never
+  // cache an empty result as authoritative; a genuinely empty season re-checks TMDB next miss).
+  // Prefer EdgeRuntime.waitUntil so the (bounded, best-effort) write completes AFTER the response
+  // instead of adding up to 1.5s to this cold-miss request; await as a fallback where absent.
+  if (validLang && episodes.length > 0) {
+    const write = writeEpisodeI18n(tmdbId, seasonNum, lang2, episodes);
+    const er = (globalThis as unknown as { EdgeRuntime?: { waitUntil?: (p: Promise<unknown>) => void } }).EdgeRuntime;
+    if (er && typeof er.waitUntil === "function") er.waitUntil(write);
+    else await write;
+  }
   if (tmdbEpisodesCache.size > 2048) {
     const oldest = [...tmdbEpisodesCache.entries()].sort((a, b) => a[1].at - b[1].at)[0];
     if (oldest) tmdbEpisodesCache.delete(oldest[0]);

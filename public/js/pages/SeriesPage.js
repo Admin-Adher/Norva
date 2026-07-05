@@ -2131,11 +2131,12 @@ class SeriesPage {
         if (this._tmdbEnriched.has(memo)) return;
         this._tmdbEnriched.add(memo);
         const token = this._detailToken;
-        const lang = String(this.getPreferences()?.preferredLanguage || navigator.language || 'fr')
-            .slice(0, 2).toLowerCase();
         try {
+            // Language is resolved by cloudApi (subtitle → audio → region → locale → en)
+            // and auto-injected as ?lang= — the SAME chain the series overview resolves
+            // through, so episode synopses stay coherent with the fiche (VOD i18n C.4).
             const res = await NorvaCloud.media.tmdbEpisodes({
-                type: 'series', tmdbId: String(tmdbId), season: String(seasonNum), lang });
+                type: 'series', tmdbId: String(tmdbId), season: String(seasonNum) });
             if (token !== this._detailToken || !res?.available || !Array.isArray(res.episodes)) return;
             const byNum = new Map(res.episodes
                 .filter(e => e.episode_number != null)
