@@ -52,6 +52,34 @@ select item_type, cardinality(audio_langs), cardinality(version_tags),
 from cloud_catalog_facet_summary where user_id='<uuid>';
 ```
 
+## Addendum (2026-07-05, TRULY FINAL) — the client-side other half
+
+Even after the SQL/edge fix below, the menus were STILL empty. A two-layer browser probe split it cleanly:
+
+```
+WRAPPER api.js      : audio=0  | subs=0        ← API.media.languageFacets()
+DIRECT endpoint     : audio=15 | subs=1        ← NorvaCloud.home.languageFacets()
+```
+
+So the **edge was fixed** (direct call = 15) but the **`api.js` wrapper** returned empty. Cause:
+`API.media.languageFacets` routes through `cloudHomeApi()` = `hasUserSession() ? NorvaCloud.home :
+NorvaCloud.device.home`, and `hasUserSession()` (→ `_hasCloudUserSession`) returns **false when the
+access token is within 30 s of / past expiry** (`expires_at > now + 30`). So the facets call fell back
+to the **device** endpoint (`/device/media-language-facets`) — which has no device token for a
+logged-in user → **401 → swallowed → empty**. The working sibling calls (genre rails/summary) go
+through `API.request` (user token + auto-refresh on 401), so they never hit this.
+
+**Fix:** route the `cloud{Sources,Media,Live,Home}Api()` helpers by whether a user *account* session
+exists (`_hasCloudUserAccount()`, **expiry-agnostic**) instead of by token freshness. `requestToBase`
+already refreshes an expired token on the first 401, so a logged-in user must always use the user
+endpoints; the device endpoints are only for pure browse-tier clients. `_hasCloudUserSession`
+(expiry-aware) still gates cloud-vs-local mode.
+
+> **Lesson:** don't pick user-vs-device edge endpoints from an expiry-aware session check — a
+> momentarily-lapsed token then silently downgrades a logged-in user to the tokenless device path.
+
+---
+
 ## Addendum (2026-07-05, FINAL) — the actual root cause of the empty Audio/Subtitles menus
 
 The two addenda below (cache-buster, PWA) were **wrong turns** — kept here honestly. The build
