@@ -40,7 +40,7 @@ généralisation) mis en place pendant la session Movies/Series. Ces crons sont 
 |-------|---------|----------|------|-----------------|
 | 12 | `norva-enrich-search-match` | `*/3 * * * *` | matching TMDB des titres non matchés (`/cron/search-match?limit=1000&conc=15`) | **global** — dé-épinglé le 2026-07-05 (cf. « Incident 2026-07-05 ») |
 | ~~84~~ | ~~`norva-enrich-guardian-revert`~~ | — | garde-fou de revert du job 12 | **SUPPRIMÉ** le 2026-07-05 (cassé — `permission denied`, cf. « Incident 2026-07-05 ») |
-| 85 | `norva-catalog-reconcile` | `1-59/3 0-6 * * *` | `norva_reconcile_catalog(null, 3000)` — canonicalize + posters + `dedup_key` + recompute `is_dedup_primary` des groupes touchés (résilient, advisory-lock, batché) | **global, nuit only** |
+| 85 | `norva-catalog-reconcile` | `3-59/20 0-6 * * *` | `set statement_timeout='600s'; norva_reconcile_catalog(null, 3000)` — canonicalize + posters + `dedup_key` + recompute `is_dedup_primary` des groupes touchés (résilient, advisory-lock, batché) | **global, nuit only** — timeout 600s + cadence /20 depuis 2026-07-05 (cf. « Incident 2026-07-05 ») |
 
 Note (obsolète depuis 2026-07-05) : le job 12 fut un temps **focalisé jeremy**
 (`&user=0b971271-…`) pour drainer son backlog en premier, avec le garde-fou job 84 censé le
@@ -112,6 +112,45 @@ deux correctifs durables :
 
 **Leçon** : tout drain de masse global doit être **advisory-locked, batché petit, et
 fenêtré la nuit** ; et aucun rail Home ne doit exécuter d'agrégat non-indexé en live.
+
+## Incident 2026-07-05 : timeouts intermittents reconcile + dashboard (corrigé)
+
+**Symptôme** : dashboard admin « 163 échecs 24 h » — `norva-catalog-reconcile` (jobid 85, 121
+échecs) et `admin-dashboard-refresh` (jobid 60, 16 échecs), tous `ERROR: canceling statement
+due to statement timeout`. **Sans lien avec les Phases i18n 3-5** (aucun échec ne référence les
+nouveaux objets ; 0 échec après leur déploiement 15:25 UTC ; les 2 jobs échouaient déjà la veille).
+
+**Cause racine** : le `statement_timeout` **par défaut de la base est 120 s**, et un job pg_cron
+`select fn()` hérite de cette valeur. Les deux requêtes ont grossi avec le catalogue et tournent
+désormais **~116 s** — juste sous la limite — donc elles **échouent par intermittence** dès que la
+contention diurne les pousse au-delà de 120 s (mesuré : reconcile 115,8 s, dashboard 115,8 s).
+
+- **Reconcile** : `norva_backfill_media_identity` construit un `temp table` en joignant
+  `cloud_media_items` (948k) × `cloud_title_variants` (720k) × `cloud_titles` (584k) avec un
+  filtre **non-sargable** (`mi.dedup_key is distinct from ct.identity_key OR …`) puis `LIMIT 3000`.
+  Le backlog étant quasi drainé, trouver 3000 candidats **scanne la quasi-totalité** du join.
+  (Ni bloat — dead < 6 % — ni index manquant : coût inhérent d'un scan à candidats rares.)
+- **Dashboard** : `refresh_admin_dashboard()` agrège `cloud_titles`/variants sur les comptes
+  enrichisseurs (catalogues énormes). Son `set local statement_timeout to '180s'` **interne est un
+  no-op** : un `SET LOCAL` dans une fonction **ne ré-arme pas** le timer de l'instruction externe
+  déjà lancée → elle mourait quand même à 120 s.
+
+**Correctif** (runtime, `cron.alter_job` — non dans les migrations, comme le reste de ce doc) :
+le seul endroit fiable pour lever le timeout est **la commande cron, AVANT** l'appel de fonction.
+```sql
+-- reconcile (85) : 600s + cadence /20 (advisory-locké de toute façon → /3 empilait des skips)
+select cron.alter_job(85, schedule => '3-59/20 0-6 * * *',
+  command => $j$set statement_timeout='600s'; select norva_reconcile_catalog(null, 3000);$j$);
+-- dashboard (60) : 300s avant l'appel (le SET LOCAL interne ne suffit pas)
+select cron.alter_job(60,
+  command => $j$set statement_timeout='300s'; select public.refresh_admin_dashboard();$j$);
+```
+**Vérifié en prod** (one-shots) : les deux **réussissent** en ~116 s, avec 2,6×–5× de marge.
+
+**Suivi / si ça revient** : ces requêtes sont désormais bornées, pas optimisées — elles
+grossissent avec le catalogue. Si un run repasse près de son plafond, le vrai fix est de rendre
+la recherche de candidats **sargable** (marqueur « dirty » à la `*_attempted_at`, pour ne plus
+re-scanner les lignes déjà réconciliées) plutôt que de relever encore le timeout.
 
 Vérification post-généralisation :
 ```sql
