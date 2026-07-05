@@ -211,6 +211,18 @@ class AdminPage {
 #page-admin .mot-tmdb .kpi .v{font-size:19px;}
 #page-admin .mot-tmdb .kpi .l{margin-top:6px;}
 #page-admin .mot-tmdb .mot-ic{margin-top:13px;font-size:19px;opacity:.75;}
+/* Support header KPI cards (big icon on the left, like the mockup) */
+#page-admin .sup-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(176px,1fr));gap:14px;margin-bottom:20px;}
+#page-admin .sup-card{display:flex;align-items:center;gap:14px;background:linear-gradient(158deg,var(--adm-card1),var(--adm-card2));border:1px solid var(--adm-line);border-radius:14px;padding:16px 18px;box-shadow:0 2px 10px rgba(0,0,0,.22);}
+#page-admin .sup-card .ic{width:46px;height:46px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0;background:rgba(120,150,255,.12);border:1px solid rgba(120,150,255,.18);}
+#page-admin .sup-card.ok .ic{background:rgba(52,211,153,.12);border-color:rgba(52,211,153,.2);}
+#page-admin .sup-card.alert .ic{background:rgba(248,113,113,.12);border-color:rgba(248,113,113,.2);}
+#page-admin .sup-card .v{font-size:26px;font-weight:750;line-height:1;color:var(--adm-tx);}
+#page-admin .sup-card.ok .v{color:var(--adm-green);}
+#page-admin .sup-card.alert .v{color:var(--adm-red);}
+#page-admin .sup-card .l{font-size:11px;color:var(--adm-tx2);text-transform:uppercase;letter-spacing:.4px;margin-top:5px;}
+/* Identités: leading gradient icon on each identity card */
+#page-admin .id-ic{width:42px;height:42px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0;background:linear-gradient(135deg,rgba(91,124,250,.22),rgba(168,85,247,.18));border:1px solid rgba(120,150,255,.2);}
 #page-admin .users-controls{display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap;}
 #page-admin .users-controls input,#page-admin .users-controls select{background:var(--color-bg-secondary,#16161c);border:1px solid var(--color-border,#2a2a38);color:var(--color-text-primary,#fff);border-radius:8px;padding:8px 12px;font-size:13px;}
 #page-admin .users-controls input{min-width:240px;flex:1;max-width:380px;}
@@ -425,6 +437,25 @@ class AdminPage {
             // .has-alerts drives a red dot on the collapsed (mobile) icon rail, where .lb is hidden.
             btn.classList.toggle('has-alerts', n > 0);
         } catch (_) { /* cosmetic */ }
+    }
+
+    // Support header KPI cards (icon-left) — real counts from admin_support_counts.
+    async _loadSupportKpis() {
+        const el = document.getElementById('sup-kpis');
+        if (!el) return;
+        try {
+            const c = await this._rpc('admin_support_counts') || {};
+            if (this._route !== 'support') return;
+            const n = AdminPage.n;
+            const card = (v, l, cls, icon) => `<div class="sup-card ${cls || ''}"><div class="ic">${icon}</div><div><div class="v">${v}</div><div class="l">${l}</div></div></div>`;
+            el.innerHTML = [
+                card(n(c.open), 'Tickets ouverts', '', '🎫'),
+                card(n(c.needs_reply), 'En attente', Number(c.needs_reply) > 0 ? 'alert' : 'ok', '⏳'),
+                card(n(c.in_progress), 'En cours', '', '🔄'),
+                card(n(c.resolved_7d), 'Résolus 7 j', 'ok', '✅'),
+                card(n(c.resolved_30d), 'Résolus 30 j', '', '📅')
+            ].join('');
+        } catch (_) { el.innerHTML = ''; }
     }
     _view() { return document.getElementById('crm-view'); }
 
@@ -804,6 +835,7 @@ class AdminPage {
         v.innerHTML = `<div class="crm-page">
             <h1 class="crm-h1">🎫 Support</h1>
             <p class="crm-sub">Tickets clients — chaque message client envoie un email à support@norva.tv ; répondre ici trace le fil ET email le client.</p>
+            <section id="sup-kpis" class="sup-kpis"><div class="ssub">Chargement…</div></section>
             <div class="users-controls" role="tablist" aria-label="Filtrer les tickets">${tabs.map(t => {
                 const sel = t[0] === this._supportFilter;
                 return `<button class="sup-tab" role="tab" aria-selected="${sel ? 'true' : 'false'}" tabindex="${sel ? '0' : '-1'}" data-filter="${t[0]}" style="${sel ? 'border-color:#5b7cfa;color:#fff' : ''}">${t[1]}</button>`;
@@ -830,6 +862,7 @@ class AdminPage {
         // The innerHTML rebuild destroys the focused tab button — put focus back on the active tab.
         if (tabHadFocus) { const act = v.querySelector('.sup-tab[aria-selected="true"]'); if (act) act.focus(); }
         this._refreshSupportBadge();
+        this._loadSupportKpis();
         try {
             const res = await this._rpc('admin_support_list', { p_status: this._supportFilter || null, p_limit: 100, p_offset: 0 });
             if (seq !== this._supportSeq) return; // a newer tab switch superseded this fetch
@@ -959,6 +992,7 @@ class AdminPage {
         v.innerHTML = `<div class="crm-page">
             <h1 class="crm-h1">👥 Clients</h1>
             <p class="crm-sub">Liste paginée — recherche, tri, clic pour la fiche 360°. Agrégation bornée par page (scalable).</p>
+            <section id="admin-clients-kpis" class="admin-cards"><div class="ssub">Chargement…</div></section>
             <div id="admin-clients-charts" class="chart-row"></div>
             <div class="users-controls">
               <input id="admin-users-search" type="search" placeholder="Rechercher un email ou un ID…" autocomplete="off" value="${AdminPage.esc(this._users.search)}" />
@@ -1023,15 +1057,33 @@ class AdminPage {
         this._loadClientCharts();
     }
 
-    // Clients insights: real daily-active area + connected/inactive donut (admin_activity_series).
+    // Clients insights: KPI cards + real daily-active area + connected/inactive donut.
     async _loadClientCharts() {
         const el = document.getElementById('admin-clients-charts');
         if (!el) return;
         const seq = (this._nav || 0);
         try {
-            const a = await this._rpc('admin_activity_series', { p_days: 14 }) || {};
+            const [a, ov, sparksR] = await Promise.all([
+                this._rpc('admin_activity_series', { p_days: 14 }),
+                this._rpc('admin_overview').catch(() => null),
+                this._rpc('admin_metric_sparks', { p_days: 14 }).catch(() => null)
+            ]);
             if ((this._nav || 0) !== seq || this._route !== 'clients') return;
             const n = AdminPage.n;
+            // KPI cards (icon + sparkline) — same treatment as the Cockpit.
+            const kel = document.getElementById('admin-clients-kpis');
+            if (kel && ov) {
+                const S = (sparksR && sparksR.series) || {};
+                const kc = (v, l, cls, key, icon) => AdminPage.kpiCard(v, l, cls, icon, key && Array.isArray(S[key]) ? AdminPage.spark(S[key], cls) : '');
+                kel.innerHTML = [
+                    kc(n(ov.users_total), 'Utilisateurs', ov.users_active_7d ? 'ok' : '', 'users_total', '👥'),
+                    kc(n(ov.users_active_24h), 'Connectés 24 h', '', 'users_active_24h', '🕐'),
+                    kc(n(ov.users_active_7d), 'Connectés 7 j', '', 'users_active_7d', '🗓️'),
+                    kc(n(ov.users_watching_7d), 'Regardent 7 j', Number(ov.users_watching_7d) > 0 ? 'ok' : '', 'users_watching_7d', '👁️'),
+                    kc(n(ov.users_new_7d), 'Nouveaux 7 j', Number(ov.users_new_7d) > 0 ? 'ok' : '', 'users_new_7d', '➕'),
+                    kc(n(ov.users_new_30d), 'Nouveaux 30 j', '', 'users_new_30d', '📅')
+                ].join('');
+            } else if (kel) { kel.innerHTML = ''; }
             const ud = Array.isArray(a.users_daily) ? a.users_daily : [];
             const ld = Array.isArray(a.logins_daily) ? a.logins_daily : [];
             // Primary line = real login events (connexions); dashed overlay = watch activity.
@@ -1597,15 +1649,36 @@ class AdminPage {
         v.innerHTML = `<div class="crm-page">
             <h1 class="crm-h1">📡 Providers / Sources</h1>
             <p class="crm-sub">Panels pilotes + sources en problème (sync incomplète / erreur) — borné à l'échelle.</p>
-            <div class="scroll"><div id="admin-sources"><div class="ssub">Chargement…</div></div></div>
+            <section id="prov-kpis" class="admin-cards"><div class="ssub">Chargement…</div></section>
+            <div class="admin-block"><h2>🗂️ Sources</h2><div class="scroll"><div id="admin-sources"><div class="ssub">Chargement…</div></div></div></div>
         </div>`;
         try {
-            const sources = await this._rpc('admin_sources');
+            const [sources, ov, sparks] = await Promise.all([
+                this._rpc('admin_sources'),
+                this._rpc('admin_overview'),
+                this._rpc('admin_metric_sparks', { p_days: 14 }).catch(() => null) // sparklines non-critical
+            ]);
+            this._renderProvKpis(ov || {}, sparks && sparks.series);
             this._renderSources(Array.isArray(sources) ? sources : []);
         } catch (e) {
             const el = document.getElementById('admin-sources');
             if (el) el.innerHTML = `<div class="admin-err" role="alert">Erreur : ${AdminPage.esc(e.message)}</div>`;
         }
+    }
+
+    _renderProvKpis(o, sparks) {
+        const el = document.getElementById('prov-kpis');
+        if (!el) return;
+        const S = sparks || {}, n = AdminPage.n;
+        const card = (v, l, cls, key, icon) => AdminPage.kpiCard(v, l, cls, icon, key && Array.isArray(S[key]) ? AdminPage.spark(S[key], cls) : '');
+        el.innerHTML = [
+            card(n(o.sources_total), 'Sources', '', 'sources_total', '🗂️'),
+            card(n(o.sources_incomplete), 'Sync incomplète', Number(o.sources_incomplete) > 0 ? 'alert' : 'ok', 'sources_incomplete', '🔄'),
+            card(n(o.sources_error), 'Sources en erreur', Number(o.sources_error) > 0 ? 'alert' : 'ok', 'sources_error', '⚠️'),
+            card(n(o.identities_active), 'Identités', '', 'identities_active', '🧬'),
+            card(n(o.titles_movie), 'Films', '', 'titles_movie', '🎬'),
+            card(n(o.titles_series), 'Séries', '', 'titles_series', '📺')
+        ].join('');
     }
 
     // ── Page: Identités (canonical provider identities) ──
@@ -1651,9 +1724,14 @@ class AdminPage {
                 ? `<div class="scroll"><table><thead><tr><th>Source</th><th>Compte</th><th>Statut</th><th>Dernier sync</th></tr></thead><tbody>${rows}</tbody></table></div>`
                 : '<div class="ssub">Aucune source ne porte cette identité.</div>';
             return `<div class="card" style="margin-bottom:16px">
-                <div style="margin-bottom:10px"><div class="pname" style="font-size:16px">${AdminPage.esc(it.display_name)} ${status}${mirror}</div>
-                <div class="pacct">${AdminPage.n(it.key_count)} clé${Number(it.key_count) > 1 ? 's' : ''} provider · vue ${it.first_seen ? AdminPage.esc(AdminPage.timeAgo(it.first_seen)) : '—'} · dernière activité ${it.last_seen ? AdminPage.esc(AdminPage.timeAgo(it.last_seen)) : '—'}</div></div>
-                <div class="tag-row">${brandChips}</div>
+                <div style="display:flex;gap:13px;align-items:flex-start;margin-bottom:12px">
+                    <div class="id-ic">${AdminPage.provIcon(it.display_name)}</div>
+                    <div style="min-width:0;flex:1">
+                        <div class="pname" style="font-size:16px">${AdminPage.esc(it.display_name)} ${status}${mirror}</div>
+                        <div class="pacct">${AdminPage.n(it.key_count)} clé${Number(it.key_count) > 1 ? 's' : ''} provider · vue ${it.first_seen ? AdminPage.esc(AdminPage.timeAgo(it.first_seen)) : '—'} · dernière activité ${it.last_seen ? AdminPage.esc(AdminPage.timeAgo(it.last_seen)) : '—'}</div>
+                        ${brandChips ? `<div class="tag-row" style="margin-top:8px">${brandChips}</div>` : ''}
+                    </div>
+                </div>
                 ${srcTable}
             </div>`;
         }).join('');
@@ -2127,6 +2205,13 @@ class AdminPage {
         const cls = p === 'stancer' ? 'blue' : (p === 'google_play' || p === 'apple_app_store') ? 'green' : 'gray';
         return `<span class="badge ${cls}">${AdminPage.railLabel(p)}</span>`;
     }
+    // Deterministic decorative provider icon (varies by name, like the mockup).
+    static provIcon(name) {
+        const ic = ['📡', '🛰️', '🌐', '📺', '⭐', '👑', '🚀', '⚡', '🎬', '🔻'];
+        const s = String(name || ''); let h = 0;
+        for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+        return ic[h % ic.length];
+    }
 
     // ── Inline-SVG charts (self-contained, no external deps) ──
     // Donut from [{value,color}] segments; center shows top/bottom text.
@@ -2192,6 +2277,12 @@ class AdminPage {
             <defs><linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#8b7cff"/><stop offset="1" stop-color="#5b7cfa"/></linearGradient></defs>
             ${rects}
         </svg>`;
+    }
+
+    // Shared KPI card (icon top-right + optional sparkline). `sparkSvg` is a pre-built
+    // spark string (or ''). Used by Providers/Clients; Cockpit/Finance keep local closures.
+    static kpiCard(value, label, cls, icon, sparkSvg) {
+        return `<div class="kpi ${cls || ''}"><div class="kpi-hd"><div class="v">${value}</div>${icon ? `<span class="kpi-ic">${icon}</span>` : ''}</div><div class="l">${label}</div>${sparkSvg ? `<div class="kpi-spark">${sparkSvg}</div>` : ''}</div>`;
     }
 
     // Mini sparkline for a KPI card. Forward/back-fills nulls (missing readings) so a
