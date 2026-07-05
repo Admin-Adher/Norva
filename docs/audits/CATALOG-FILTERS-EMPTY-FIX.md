@@ -52,7 +52,42 @@ select item_type, cardinality(audio_langs), cardinality(version_tags),
 from cloud_catalog_facet_summary where user_id='<uuid>';
 ```
 
-## Addendum (2026-07-05, later) — why Audio/Subtitles were STILL empty after PR #175
+## Addendum (2026-07-05, FINAL) — the actual root cause of the empty Audio/Subtitles menus
+
+The two addenda below (cache-buster, PWA) were **wrong turns** — kept here honestly. The build
+content-hashes every asset and the service worker is network-first, so the client always had the
+current code. A live diagnostic run from the user's own browser cracked it:
+
+```
+cloud=true | compte=adrien.hernandez@outlook.com | audio=0 | sous-titres=0
+{"audio":[],"subtitles":[]}
+```
+
+A clean `200` with empty arrays — for an account whose `cloud_catalog_facet_summary` row holds **70
+audio ISO codes** and `version_tags {multi,vostfr}`. Not auth, not user-id, not RLS (Categories,
+same user, worked).
+
+**Root cause:** `listLanguageFacets` read the summary's `audio_langs` / `version_tags` (Postgres
+`text[]`) through supabase-js and gated the whole block on `Array.isArray(audio_langs) ||
+Array.isArray(version_tags)`. Those `text[]` columns were **not surfaced as JS arrays**, so the guard
+was false → the summary block was skipped → the live `.or()` fallback also returned nothing → both
+menus empty. **Genres never hit this** because `listGenreSummary` reads a **jsonb** column
+(`genre_bucket_counts`) *and* has an RPC fallback (`cloud_genre_bucket_counts`). That's the exact
+"Categories work, Audio/Subtitles don't" split the user saw.
+
+**Fix (migration `20260705110000`):** compute the facets in SQL and return **JSONB** —
+`cloud_language_facets(user, item_type)` reads the summary (live distinct-tag scan as fallback) and
+applies the same audio/subtitle taxonomy in Postgres. The edge now just calls the RPC and returns its
+`{audio, subtitles}`. jsonb deserialises reliably (like `genre_bucket_counts`), so the menus can't
+silently empty again. Verified live: adrien → **15 audio + French**; jeremy → 15 + Arabic & French;
+horizon → 15 + French.
+
+> **Lesson:** never gate logic on `Array.isArray()` of a Postgres `text[]` read through PostgREST/
+> supabase-js — do the set math in SQL and return jsonb, or the read silently no-ops.
+
+---
+
+## Addendum (2026-07-05, later) — why Audio/Subtitles were STILL empty after PR #175 (a wrong turn)
 
 PR #175 fixed `api.js languageFacets` (never cache an empty result; bump the localStorage key
 to `norva-facets2`) — but the menus **stayed empty and the edge logs showed the

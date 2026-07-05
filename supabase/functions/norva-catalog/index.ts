@@ -1480,69 +1480,27 @@ async function listLanguageFacets(url: URL, userId: string) {
     return hit.value;
   }
 
-  // Fast path: precomputed per-user summary (cloud_catalog_facet_summary, refreshed by cron at
-  // sync cadence). Facet presence is pure set math over the stored distinct tags — one row read,
-  // no per-facet scan. Falls through to the live computation below when the summary is missing
-  // (new user, not yet backfilled), so a filter is never wrongly empty.
+  // The facet set math runs in Postgres (cloud_language_facets → jsonb, ready to render). Reading
+  // it as jsonb is the whole point: the previous edge path read cloud_catalog_facet_summary's
+  // audio_langs / version_tags (text[]) through supabase-js and guarded on Array.isArray(...) —
+  // which was NOT true for those columns, so the summary block was silently skipped and the live
+  // fallback returned nothing → both menus came back empty for accounts that plainly had data
+  // (genres worked because they read a jsonb column + had an RPC fallback). The RPC reads the
+  // summary, falls back to a live distinct-tag scan when it's missing, and applies the exact same
+  // audio/subtitle facet taxonomy in SQL. jsonb deserialises reliably, so the menus can't silently
+  // empty again. The AUDIO_/SUBTITLE_FACET_* maps above are the reference the SQL mirrors.
+  let value: { audio: unknown[]; subtitles: unknown[] } = { audio: [], subtitles: [] };
   try {
-    const { data } = await db.from("cloud_catalog_facet_summary")
-      .select("audio_langs, version_tags").eq("user_id", userId).eq("item_type", itemType).maybeSingle();
-    if (data && (Array.isArray(data.audio_langs) || Array.isArray(data.version_tags))) {
-      const audioSet = new Set((data.audio_langs ?? []).map((x: unknown) => String(x).toLowerCase()));
-      const versionSet = new Set((data.version_tags ?? []).map((x: unknown) => String(x).toLowerCase()));
-      const audio = Object.keys(AUDIO_FACET_LABELS).filter((f) => {
-        const iso = AUDIO_FACET_ISO[f];
-        return (iso && audioSet.has(iso)) || (AUDIO_FACET_TAGS[f] ?? []).some((t) => versionSet.has(t));
-      }).map((f) => ({ value: f, label: AUDIO_FACET_LABELS[f] }));
-      const subtitles = Object.keys(SUBTITLE_FACET_LABELS).filter((f) =>
-        (SUBTITLE_FACET_TAGS[f] ?? []).some((t) => versionSet.has(t))
-      ).map((f) => ({ value: f, label: SUBTITLE_FACET_LABELS[f] }));
-      const value = { audio, subtitles };
-      FACET_CACHE.set(cacheKey, { value, exp: nowMs + FACET_CACHE_TTL_MS });
-      return value;
+    const { data, error } = await db.rpc("cloud_language_facets", { p_user_id: userId, p_item_type: itemType });
+    if (!error && data && typeof data === "object") {
+      const d = data as { audio?: unknown; subtitles?: unknown };
+      value = {
+        audio: Array.isArray(d.audio) ? d.audio : [],
+        subtitles: Array.isArray(d.subtitles) ? d.subtitles : [],
+      };
     }
-  } catch (_) { /* fall through to the live computation below */ }
+  } catch (_) { /* leave the menus empty (falls back to the static <option>s) on any failure */ }
 
-  async function present(orFilter: string | null, tagFilter: string[] | null): Promise<boolean> {
-    try {
-      // Existence check (limit 1), NOT count(exact): the menu only needs "does at least one
-      // browsable title carry this language". A count materialised every matching row (~1.3s over
-      // a 335k catalogue × 25 facets → the endpoint failed to return and the dropdowns came back
-      // empty). limit(1) stops at the first match (or an empty GIN bitmap) → ~ms.
-      // deno-lint-ignore no-explicit-any
-      let q: any = db.from("cloud_titles").select("id")
-        .eq("user_id", userId).eq("item_type", itemType).gt("variant_count", 0);
-      if (orFilter) q = q.or(orFilter);
-      else if (tagFilter && tagFilter.length) q = q.overlaps("version_languages", tagFilter);
-      else return false;
-      const { data, error } = await q.limit(1);
-      return !error && Array.isArray(data) && data.length > 0;
-    } catch (_) {
-      return false;
-    }
-  }
-
-  const audio = (await Promise.all(Object.keys(AUDIO_FACET_LABELS).map(async (facet) => {
-    const tags = audioFacetTags(facet);
-    const iso = audioFacetIso(facet);
-    let ok: boolean;
-    if (iso) {
-      // Per-tag contains() (no comma inside an array literal — see listGenreItems).
-      const parts = tags.map((tag) => `version_languages.cs.{${tag}}`);
-      parts.push(`audio_languages.cs.{${iso}}`);
-      ok = await present(parts.join(","), null);
-    } else {
-      ok = await present(null, tags);
-    }
-    return ok ? { value: facet, label: AUDIO_FACET_LABELS[facet] } : null;
-  }))).filter(Boolean);
-
-  const subtitles = (await Promise.all(Object.keys(SUBTITLE_FACET_LABELS).map(async (facet) => {
-    const ok = await present(null, subtitleFacetTags(facet));
-    return ok ? { value: facet, label: SUBTITLE_FACET_LABELS[facet] } : null;
-  }))).filter(Boolean);
-
-  const value = { audio, subtitles };
   FACET_CACHE.set(cacheKey, { value, exp: nowMs + FACET_CACHE_TTL_MS });
   if (FACET_CACHE.size > FACET_CACHE_MAX) {
     const oldest = FACET_CACHE.keys().next().value; // oldest insertion = least-recently used
