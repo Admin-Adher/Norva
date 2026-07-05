@@ -11,7 +11,7 @@
   <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
   <!-- Preload the LCP hero so its discovery doesn't wait on the inlined CSS byte offset. -->
-  <link rel="preload" as="image" href="/assets/landing/norva-ecosystem-4-devices.svg?v=10" fetchpriority="high">
+  <link rel="preload" as="image" href="/img/devices/norva-device-tv.webp?v=1" fetchpriority="high">
   <script>
     // Flag constrained devices BEFORE the stylesheet applies (no flash), so the
     // landing drops expensive real-time blur there. Desktop keeps full glass.
@@ -117,8 +117,11 @@
         </ul>
       </div>
 
-      <div class="hero-visual hero-visual-image" aria-label="Norva multi-screen interface preview">
-        <img src="/assets/landing/norva-ecosystem-4-devices.svg?v=10" alt="Norva synchronized playback preview across Web, Android TV, Android phone and Android tablet" width="1600" height="884" fetchpriority="high" decoding="async">
+      <div class="hero-visual" aria-label="Norva running on Android TV and an Android phone">
+        <div class="hero-stage">
+          <img class="dev dev-tv" src="/img/devices/norva-device-tv.webp?v=1" alt="Norva home screen on Android TV" width="1280" height="767" fetchpriority="high" decoding="async">
+          <img class="dev dev-phone" src="/img/devices/norva-device-phone.webp?v=1" alt="Norva on an Android phone" width="520" height="1066" decoding="async">
+        </div>
       </div>
     </section>
 
@@ -179,11 +182,9 @@
           <li><strong>Instant resume</strong><span>Norva surfaces the next useful action, resume, restart or next episode.</span></li>
         </ul>
       </div>
-      <div class="sync-panel sync-panel-art" aria-label="One playback synchronized across Web, Android TV, Android phone and Android tablet">
-        <picture class="sync-art-picture">
-          <source media="(max-width: 640px)" srcset="/assets/landing/norva-one-playback-four-screens-mobile.svg?v=1" width="480" height="2180">
-          <img src="/assets/landing/norva-one-playback-four-screens.svg?v=1" alt="One playback synchronized across Web, Android TV, Android phone and Android tablet" width="1600" height="700" loading="lazy" decoding="async">
-        </picture>
+      <div class="sync-stage" aria-label="Norva showing the same title on a laptop and a tablet, in sync">
+        <img class="dev dev-laptop" src="/img/devices/norva-device-laptop.webp?v=1" alt="Norva on a laptop" width="1000" height="1006" loading="lazy" decoding="async">
+        <img class="dev dev-tablet" src="/img/devices/norva-device-tablet.webp?v=1" alt="Norva on a tablet, showing the same title resumed in sync" width="1100" height="793" loading="lazy" decoding="async">
       </div>
     </section>
 
