@@ -232,6 +232,88 @@ Deno.serve(async (req) => {
     return json({ ok: refund.ok, payment_id: paymentId, ...out });
   }
 
+  // ── /admin/refund — admin-authed: refund a Stancer charge (partial or full) ──
+  // Contract validated against the sandbox: POST /v1/refunds { payment, amount } → { id: refd_… }.
+  // Refunds by our ledger pi_id → the authoritative Stancer paym_ id (provider_payment_id, captured
+  // by norva-stancer-billing). A full refund hard-revokes access (projection → 'refunded') unless
+  // told otherwise. Every refund writes an admin_events row for the client timeline. Stancer web
+  // rail only — mobile-store refunds happen in the store console, not here.
+  if (req.method === "POST" && path === "/admin/refund") {
+    const jwt = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
+    if (!jwt) return json({ error: "Not signed in" }, 401);
+    const { data: u } = await db.auth.getUser(jwt);
+    const actor = u?.user;
+    if ((actor?.app_metadata as Record<string, unknown> | undefined)?.role !== "admin") {
+      return json({ error: "not authorized" }, 403);
+    }
+
+    let payload: { pi_id?: string; amount?: number; revoke?: boolean } = {};
+    try { payload = await req.json(); } catch (_) { /* validated below */ }
+    const piId = String(payload.pi_id ?? "");
+    if (!piId) return json({ error: "pi_id required" }, 400);
+
+    const { data: payRow } = await db.from("cloud_stancer_payments")
+      .select("pi_id,user_id,amount,currency,status,kind,provider,provider_payment_id")
+      .eq("pi_id", piId).maybeSingle();
+    const pay = payRow as {
+      user_id: string; amount: number | null; currency: string | null; status: string | null;
+      provider: string | null; provider_payment_id: string | null;
+    } | null;
+    if (!pay) return json({ error: "payment not found" }, 404);
+    if (pay.provider && pay.provider !== "stancer") {
+      return json({ error: `rail ${pay.provider} — rembourser via la console du store, pas ici` }, 400);
+    }
+    if (pay.status !== "captured") return json({ error: `paiement non remboursable (statut ${pay.status ?? "?"})` }, 400);
+    const refundId = pay.provider_payment_id;
+    if (!refundId) {
+      return json({ error: "aucun identifiant de paiement Stancer sur cette ligne — rembourser via le dashboard Stancer" }, 400);
+    }
+
+    const rowAmount = Number(pay.amount ?? 0);
+    const amount = payload.amount == null ? rowAmount : Math.round(Number(payload.amount));
+    if (!Number.isFinite(amount) || amount <= 0 || amount > rowAmount) {
+      return json({ error: "montant de remboursement invalide" }, 400);
+    }
+    const isFull = amount >= rowAmount;
+
+    const refund = await stancerPost("/v1/refunds", { payment: refundId, amount });
+    if (!refund.ok || typeof refund.body?.id !== "string") {
+      return json({ error: "refus Stancer", http: refund.status, stancer: refund.body }, 502);
+    }
+    const refdId = String(refund.body.id);
+    const nowIso = new Date().toISOString();
+
+    // A refunded charge is no longer cash kept → drop it from the collected KPI.
+    try {
+      await db.from("cloud_stancer_payments")
+        .update({ status: isFull ? "refunded" : "partially_refunded", updated_at: nowIso })
+        .eq("pi_id", piId);
+    } catch (_) { /* noop */ }
+
+    // Full refund → hard-block access immediately (entitlements.ts HARD_BLOCK_STATUSES),
+    // unless the caller explicitly opts out (e.g. goodwill partial that keeps access).
+    const revoke = payload.revoke ?? isFull;
+    if (revoke) {
+      try {
+        await db.from("cloud_entitlement_projection")
+          .update({ status: "refunded", last_event_at: nowIso })
+          .eq("user_id", pay.user_id);
+      } catch (_) { /* noop */ }
+    }
+
+    const cur = (pay.currency ?? "usd").toUpperCase();
+    try {
+      await db.from("admin_events").insert({
+        user_id: pay.user_id, kind: "admin_action",
+        summary: `Remboursement ${(amount / 100).toFixed(2)} ${cur}${isFull ? "" : " (partiel)"}${revoke ? " — accès révoqué" : ""}`,
+        actor: actor?.email ?? "admin",
+        meta: { pi_id: piId, refund_id: refdId, amount, currency: pay.currency ?? "usd", full: isFull, revoked: revoke },
+      });
+    } catch (_) { /* best-effort audit */ }
+
+    return json({ ok: true, refund_id: refdId, amount, full: isFull, revoked: revoke, status: refund.body?.status ?? null });
+  }
+
   // ── /checkout — user-authed: open a trial-setup hosted payment ─────────────
   if (req.method === "POST" && path === "/checkout") {
     const jwt = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");

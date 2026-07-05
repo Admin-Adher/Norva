@@ -70,7 +70,8 @@ function projectionStatusFor(stancerStatus: string, kind: string): string | null
   }
   if (s === "failed" || s === "refused") return "past_due";
   if (s === "expired" || s === "cancelled") return "expired";
-  return null; // disputed / unknown → leave to manual / cron
+  if (s === "disputed") return "fraud"; // chargeback/dispute → hard-block access now (entitlements.ts HARD_BLOCK)
+  return null; // unknown → leave to manual / cron
 }
 
 // Resolve which user a payment belongs to. Prefers the checkout-populated journal; falls back to the

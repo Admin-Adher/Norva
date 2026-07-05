@@ -1177,21 +1177,54 @@ class AdminPage {
         // non-Stancer rail (a pure Stancer history would just repeat "Stancer · web" on every row).
         const payProviders = new Set(pays.map(x => x.provider || 'stancer'));
         const showRailCol = payProviders.size > 1 || (payProviders.size === 1 && !payProviders.has('stancer'));
+        // A row is refundable when it's a captured Stancer charge carrying an authoritative
+        // paym_ id (refundable flag). The action column only appears if at least one qualifies.
+        const canRefund = (x) => x.status === 'captured' && x.refundable && (!x.provider || x.provider === 'stancer');
+        const showRefundCol = pays.some(canRefund);
         const payRows = pays.map(x => `<tr>
             <td>${esc(dt(x.updated_at || x.created_at))}</td>
             ${showRailCol ? `<td>${AdminPage.railBadge(x.provider)}</td>` : ''}
             <td>${KIND_LABELS[x.kind] || esc(x.kind)}</td>
             <td>${payBadge(x.status)}</td>
             <td class="num">${money(x.amount)}</td>
+            ${showRefundCol ? `<td class="num">${canRefund(x) ? `<button class="mini-btn refund-btn" data-pi="${esc(x.pi_id)}" data-amount="${Number(x.amount) || 0}" title="Rembourser ce paiement">↩︎ Rembourser</button>` : ''}</td>` : ''}
         </tr>`).join('');
 
         const REASONS = { too_expensive: 'trop cher', not_using: 'utilise pas assez', technical: 'problème technique', other: 'autre', skipped: 'non précisé' };
         const fbRows = feedback.map(x => `<div class="ssub" style="margin-top:6px">${x.action === 'saved' ? '💚 Contre-offre acceptée' : '🛑 Annulation'} — raison : <b style="color:#e8e8ee">${REASONS[x.reason] || esc(x.reason)}</b> · ${esc(AdminPage.timeAgo(x.created_at))}</div>`).join('');
 
         el.innerHTML = `${details}
-            ${payRows ? `<div style="margin-top:14px"><div class="kpi-gtitle">Historique des paiements</div><div class="scroll"><table><thead><tr><th>Date</th>${showRailCol ? '<th>Rail</th>' : ''}<th>Type</th><th>Statut</th><th class="num">Montant</th></tr></thead><tbody>${payRows}</tbody></table></div></div>` : ''}
+            ${payRows ? `<div style="margin-top:14px"><div class="kpi-gtitle">Historique des paiements</div><div class="scroll"><table><thead><tr><th>Date</th>${showRailCol ? '<th>Rail</th>' : ''}<th>Type</th><th>Statut</th><th class="num">Montant</th>${showRefundCol ? '<th></th>' : ''}</tr></thead><tbody>${payRows}</tbody></table></div></div>` : ''}
             ${fbRows}`;
         wireInternalToggle(this);
+        el.querySelectorAll('.refund-btn').forEach(b => b.addEventListener('click', () => this._refundPayment(b, userId)));
+    }
+
+    // Refund a Stancer charge from the fiche → norva-stancer /admin/refund (admin-JWT-gated).
+    // Full refund by default; the edge route sends the refund to Stancer, marks the ledger,
+    // revokes access, and journals an admin_events row. Reloads the panel on success.
+    async _refundPayment(btn, userId) {
+        const pi = btn.dataset.pi;
+        if (!pi || btn.disabled) return;
+        const cents = Number(btn.dataset.amount) || 0;
+        const amt = (cents / 100).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        if (!await this._confirm(`Rembourser ${amt} $ à ce client ?\n\nLe remboursement est envoyé à Stancer et l'accès du client sera révoqué immédiatement.`, { danger: true, okLabel: 'Rembourser' })) return;
+        const orig = btn.textContent;
+        btn.disabled = true; btn.textContent = '…';
+        try {
+            const res = await fetch(`${this._sbUrl()}/functions/v1/norva-stancer/admin/refund`, {
+                method: 'POST',
+                headers: { apikey: this._sbKey(), Authorization: `Bearer ${this._token()}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ pi_id: pi })
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok || !data.ok) throw new Error(data.error || String(res.status));
+            this._toast(`Remboursé ${amt} $${data.revoked ? ' · accès révoqué' : ''} (${AdminPage.esc(data.refund_id || '')})`, 'ok');
+            this._loadBilling(userId);
+        } catch (e) {
+            btn.disabled = false; btn.textContent = orig;
+            this._toast('Erreur remboursement : ' + e.message, 'err');
+        }
     }
 
     // ── Fiche: support tickets panel (open first, newest first, click → thread) ──
