@@ -608,26 +608,36 @@ class AdminPage {
             <div id="fin-body"><div class="ssub">Chargement…</div></div>
         </div>`;
         try {
-            const f = await this._rpc('admin_finance');
-            this._renderFinance(f || {});
+            const [f, sparks] = await Promise.all([
+                this._rpc('admin_finance'),
+                this._rpc('admin_metric_sparks', { p_days: 14 }).catch(() => null) // sparklines are non-critical
+            ]);
+            this._renderFinance(f || {}, sparks && sparks.series);
         } catch (e) {
             const el = document.getElementById('fin-body');
             if (el) el.innerHTML = `<div class="admin-err" role="alert">Erreur : ${AdminPage.esc(e.message)}</div>`;
         }
     }
 
-    _renderFinance(f) {
+    _renderFinance(f, sparks) {
         const el = document.getElementById('fin-body');
         if (!el) return;
         const n = AdminPage.n, money = AdminPage.money, esc = AdminPage.esc;
-        const card = (v2, l, cls) => `<div class="kpi ${cls || ''}"><div class="v">${v2}</div><div class="l">${l}</div></div>`;
+        const S = sparks || {};
+        if (Array.isArray(S.mrr_cents)) S.arr = S.mrr_cents.map(v => v == null ? null : v * 12); // ARR = MRR×12
+        // card(value, label, cls, metricKey, icon) — icon top-right + sparkline where a series exists.
+        const card = (v2, l, cls, key, icon) => {
+            const spark = key && Array.isArray(S[key]) ? AdminPage.spark(S[key], cls) : '';
+            return `<div class="kpi ${cls || ''}"><div class="kpi-hd"><div class="v">${v2}</div>${icon ? `<span class="kpi-ic">${icon}</span>` : ''}</div><div class="l">${l}</div>${spark ? `<div class="kpi-spark">${spark}</div>` : ''}</div>`;
+        };
         const counts = f.counts || {};
         const up = f.upcoming || {};
         const day = (d) => d ? new Date(d).toLocaleString('fr-FR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—';
 
-        // Status cards are the daily working views: each one opens Clients pre-filtered.
-        const statusCard = (v2, l, filter, cls) =>
-            `<div class="kpi fin-status ${cls || ''}" data-billing="${filter}" role="button" tabindex="0" style="cursor:pointer" title="Voir ces clients"><div class="v">${v2}</div><div class="l">${l}</div></div>`;
+        // Status cards are the daily working views: each one opens Clients pre-filtered. Icon top-right,
+        // sparkline where the status has a recorded series (compact — kept short like the mockup).
+        const statusCard = (v2, l, filter, cls, icon) =>
+            `<div class="kpi fin-status ${cls || ''}" data-billing="${filter}" role="button" tabindex="0" style="cursor:pointer" title="Voir ces clients"><div class="kpi-hd"><div class="v">${v2}</div>${icon ? `<span class="kpi-ic">${icon}</span>` : ''}</div><div class="l">${l}</div></div>`;
 
         const byPlan = Array.isArray(f.by_plan) ? f.by_plan : [];
         const planRows = byPlan.map(r => `<tr>
@@ -685,29 +695,29 @@ class AdminPage {
 
         el.innerHTML = `
             <div class="kpi-group"><div class="kpi-gtitle">💶 Revenus récurrents</div><div class="admin-cards">
-                ${card(money(f.mrr_cents), 'MRR', Number(f.mrr_cents) > 0 ? 'ok' : '')}
-                ${card(money(f.arr_cents), 'ARR')}
-                ${card(money(f.mrr_trial_cents), 'MRR en essai (à venir)')}
-                ${card(money(f.collected_30d_cents), 'Encaissé 30 j', Number(f.collected_30d_cents) > 0 ? 'ok' : '')}
-                ${card(n(f.conversions_7d), 'Conversions 7 j')}
-                ${Number(f.mrr_unknown_n) > 0 ? card(n(f.mrr_unknown_n), 'Abos sans montant connu (manuel/store)') : ''}
+                ${card(money(f.mrr_cents), 'MRR', Number(f.mrr_cents) > 0 ? 'ok' : '', 'mrr_cents', '💲')}
+                ${card(money(f.arr_cents), 'ARR', '', 'arr', '📈')}
+                ${card(money(f.mrr_trial_cents), 'MRR en essai (à venir)', '', null, '⏳')}
+                ${card(money(f.collected_30d_cents), 'Encaissé 30 j', Number(f.collected_30d_cents) > 0 ? 'ok' : '', 'collected_30d_cents', '💰')}
+                ${card(n(f.conversions_7d), 'Conversions 7 j', '', 'conversions_7d', '📊')}
+                ${Number(f.mrr_unknown_n) > 0 ? card(n(f.mrr_unknown_n), 'Abos sans montant connu (manuel/store)', '', null, '🗄️') : ''}
             </div></div>
             <div class="kpi-group"><div class="kpi-gtitle">👥 Abonnés par statut — cliquer pour ouvrir la liste</div><div class="admin-cards">
-                ${statusCard(n(counts.trialing), 'En essai', 'trialing', 'ok')}
-                ${statusCard(n(counts.active), 'Actifs payants', 'active', 'ok')}
-                ${statusCard(n(counts.past_due), 'Échec paiement', 'past_due', Number(counts.past_due) > 0 ? 'alert' : '')}
-                ${statusCard(n(counts.cancel_pending), 'Annulation prévue', 'cancel_pending', Number(counts.cancel_pending) > 0 ? 'alert' : '')}
-                ${statusCard(n(counts.expired), 'Expirés', 'expired')}
+                ${statusCard(n(counts.trialing), 'En essai', 'trialing', 'ok', '⏳')}
+                ${statusCard(n(counts.active), 'Actifs payants', 'active', 'ok', '👤')}
+                ${statusCard(n(counts.past_due), 'Échec paiement', 'past_due', Number(counts.past_due) > 0 ? 'alert' : '', '💳')}
+                ${statusCard(n(counts.cancel_pending), 'Annulation prévue', 'cancel_pending', Number(counts.cancel_pending) > 0 ? 'alert' : '', '📅')}
+                ${statusCard(n(counts.expired), 'Expirés', 'expired', '', '⛔')}
             </div></div>
             <div class="admin-block"><h2>💳 Revenu par rail — web (Stancer) vs mobile (stores)</h2><div class="scroll">
                 ${railRows ? `<table><thead><tr><th>Rail</th><th class="num">Abonnés</th><th class="num">MRR</th><th class="num">Encaissé 30 j</th></tr></thead><tbody>${railRows}</tbody></table>` : '<div class="ssub">Aucun abonnement — la répartition Stancer / Play s\'affichera ici dès les premiers paiements.</div>'}
             </div></div>
             <div class="admin-block"><h2>📅 Échéances</h2><div class="admin-cards">
-                ${card(n(up.trial_charges_48h_n), 'Essais → prélèvement < 48 h')}
-                ${card(money(up.trial_charges_48h_cents), 'Montant essais < 48 h')}
-                ${card(n(up.renewals_7d_n), 'Renouvellements < 7 j')}
-                ${card(money(up.renewals_7d_cents), 'Montant renouv. < 7 j')}
-                ${Number(f.discounts_pending) > 0 ? card(n(f.discounts_pending), 'Remises 50% en attente') : ''}
+                ${card(n(up.trial_charges_48h_n), 'Essais → prélèvement < 48 h', '', null, '⏰')}
+                ${card(money(up.trial_charges_48h_cents), 'Montant essais < 48 h', '', null, '💵')}
+                ${card(n(up.renewals_7d_n), 'Renouvellements < 7 j', '', null, '🔁')}
+                ${card(money(up.renewals_7d_cents), 'Montant renouv. < 7 j', '', null, '💰')}
+                ${Number(f.discounts_pending) > 0 ? card(n(f.discounts_pending), 'Remises 50% en attente', '', null, '🎟️') : ''}
             </div></div>
             <div class="admin-block"><h2>📊 MRR par plan, période & rail</h2><div class="scroll">
                 ${planRows ? `<table><thead><tr><th>Plan</th><th>Période</th><th>Rail</th><th class="num">Abonnés</th><th class="num">MRR</th></tr></thead><tbody>${planRows}</tbody></table>` : '<div class="ssub">Aucun abonnement payant.</div>'}
@@ -717,9 +727,9 @@ class AdminPage {
             </div></div>
             <div class="admin-block"><h2>🛑 Annulations & rétention</h2>
                 <div class="admin-cards" style="margin-bottom:14px">
-                    ${card(n(cancelsTotal), 'Annulations (total)')}
-                    ${card(n(savesTotal), 'Saves contre-offre', savesTotal > 0 ? 'ok' : '')}
-                    ${saveRate != null ? card(saveRate + ' %', 'Taux de save', saveRate >= 20 ? 'ok' : '') : ''}
+                    ${card(n(cancelsTotal), 'Annulations (total)', '', null, '🛑')}
+                    ${card(n(savesTotal), 'Saves contre-offre', savesTotal > 0 ? 'ok' : '', null, '💚')}
+                    ${saveRate != null ? card(saveRate + ' %', 'Taux de save', saveRate >= 20 ? 'ok' : '', null, '🎯') : ''}
                 </div>
                 ${reasonRows ? `<div class="scroll"><table><thead><tr><th>Raison d'annulation</th><th class="num">Clients</th></tr></thead><tbody>${reasonRows}</tbody></table></div>` : '<div class="ssub">Aucune annulation enregistrée — les raisons s\'accumuleront ici.</div>'}
             </div>
