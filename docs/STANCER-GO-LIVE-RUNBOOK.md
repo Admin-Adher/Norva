@@ -115,26 +115,28 @@ Aucune perte de données ; rien ne débite sans clé.
 4. `STANCER_WEBHOOK_TOKEN` non posé — **non bloquant** (rail auto-suffisant via
    `/confirm` + cron). Config webhook pas dans « Développeurs » du dashboard
    Stancer → « Mon Compte » ou support.
-5. **Remboursements — partiellement câblés, reste 1 étape en clé live.** L'id de
-   paiement Stancer (`paym_…`) est désormais **persisté** sur chaque débit
-   (`cloud_stancer_payments.provider_payment_id`) → tout débit passé sera
-   remboursable. Reste à faire quand la clé `sprod_` (ou même le test) est active
-   pour valider le contrat `/v1/refunds` :
-   a. **Valider le contrat** `POST /v1/refunds { payment, amount }` contre le
-      sandbox test (un débit test → un remboursement) — le schéma `/v1/checkout`
-      est confirmé, `/v1/refunds` ne l'est pas encore.
-   b. **Route** `POST /admin/refund` dans `norva-stancer` (auth admin =
-      `app_metadata.role==='admin'`, cf. `norva-admin`) : lit la ligne par
-      `pi_id`, POST refund sur `provider_payment_id` (ou `pi_id` pour un
-      trial-setup), passe la ligne `status='refunded'`, écrit un `admin_events`,
-      et — si remboursement total — bascule la projection en `refunded`
-      (hard-block, cf. `entitlements.ts:HARD_BLOCK_STATUSES`).
-   c. **Bouton fiche** « Rembourser » dans `_renderBillingPanel` (AdminPage.js) sur
-      les lignes `captured`.
-   d. **Inbound refund→revoke** : gérer les événements de remboursement/litige
-      Stancer (`norva-stancer-webhook`) et RC (`norva-billing-webhook`) → statut
-      dur `refunded`/`fraud` (aujourd'hui un refund arrive en `CANCELLATION`, accès
-      maintenu jusqu'à fin de période — cf. `ONBOARDING-CONVERSION-AUDIT.md` P2.4).
+5. **Remboursements — ✅ LIVRÉS ET VALIDÉS (rien à faire au go-live).** Contrat
+   `/v1/refunds` **validé bout-en-bout contre le sandbox test** (probe
+   `norva-stancer POST /selftest-refund` : `/v1/checkout/` → `paym_…` → `/v1/refunds
+   { payment, amount }` → 200 `{ id: refd_… }`). Flux câblé :
+   - **Id de paiement** `paym_…` persisté sur chaque débit
+     (`cloud_stancer_payments.provider_payment_id`) → tout débit est remboursable.
+   - **Route** `norva-stancer POST /admin/refund` (auth admin
+     `app_metadata.role==='admin'`) : rembourse par `pi_id` → `provider_payment_id`,
+     passe la ligne `refunded`/`partially_refunded` (sort du KPI encaissé), révoque
+     l'accès sur remboursement total (projection → `refunded`, hard-block), journalise
+     un `admin_events`. Rail Stancer web uniquement (les stores mobiles se remboursent
+     dans leur console).
+   - **Bouton fiche** « ↩︎ Rembourser » sur les lignes Stancer `captured` remboursables
+     (flag `refundable` = `paym_` présent ; l'id brut reste côté serveur).
+   - **Inbound** : un litige/chargeback Stancer (`disputed`) passe l'accès en `fraud`
+     (hard-block) via `norva-stancer-webhook`.
+   - Le flux tourne **dès aujourd'hui sur la clé test** et tournera à l'identique en
+     `sprod_`. Test live possible : faire un vrai achat test (checkout → capture →
+     renouvellement) puis cliquer « Rembourser » sur la fiche.
+   - *Reste hors-scope* (non bloquant) : mapper un remboursement RC/Play (`CANCELLATION`)
+     en hard-block côté `norva-billing-webhook` — les stores gèrent déjà l'expiration
+     d'accès ; à affiner si besoin (cf. `ONBOARDING-CONVERSION-AUDIT.md` P2.4).
 
 ## Différenciation des revenus par rail (web Stancer vs mobile stores) — ✅ LIVRÉ
 
@@ -152,8 +154,8 @@ les débits Play/Apple. Migrations `20260705100000` / `20260705110000`.
   CRM). Couvre le blocage n°3.
 - **B.** ✅ PRÊT — flip empreinte **EUR→USD** piloté par le secret
   `STANCER_FOOTPRINT_CURRENCY` (aucun deploy ; défaut `eur`).
-- **C.** Remboursements — id de paiement persisté (fait) ; reste la route + bouton
-  + validation `/v1/refunds` en clé active (voir blocage n°5).
+- **C.** ✅ FAIT — remboursements livrés & validés (contrat `/v1/refunds` prouvé sur
+  sandbox, route `/admin/refund` + bouton fiche + revoke + dispute→hard-block). Voir n°5.
 
 ## Références fichiers
 
