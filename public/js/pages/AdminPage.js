@@ -147,6 +147,13 @@ class AdminPage {
 #page-admin .kpi.alert{border-color:rgba(248,113,113,.42);background:linear-gradient(158deg,rgba(248,113,113,.10),var(--adm-card2));}
 #page-admin .kpi.alert .v{color:var(--adm-red);}
 #page-admin .kpi.ok .v{color:var(--adm-green);}
+/* KPI card with icon + sparkline (Cockpit) */
+#page-admin .kpi-hd{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;}
+#page-admin .kpi-ic{flex-shrink:0;width:30px;height:30px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:15px;background:rgba(120,150,255,.09);border:1px solid rgba(120,150,255,.14);}
+#page-admin .kpi.alert .kpi-ic{background:rgba(248,113,113,.10);border-color:rgba(248,113,113,.20);}
+#page-admin .kpi.ok .kpi-ic{background:rgba(52,211,153,.10);border-color:rgba(52,211,153,.18);}
+#page-admin .kpi-spark{margin-top:11px;height:38px;}
+#page-admin .kpi-spark svg{width:100%;height:38px;display:block;}
 /* Section block = framed panel */
 #page-admin .admin-block{margin-bottom:18px;background:var(--adm-panel);border:1px solid var(--adm-line);border-radius:16px;padding:17px 20px 18px;}
 #page-admin .admin-block h2{font-size:14px;font-weight:650;margin:0 0 13px;color:var(--adm-tx);letter-spacing:-.1px;}
@@ -542,11 +549,15 @@ class AdminPage {
             <div class="admin-block"><h2>🚨 Alertes</h2><div id="admin-alerts"><div class="ssub">Chargement…</div></div></div>
         </div>`;
         try {
-            const [o, sources] = await Promise.all([this._rpc('admin_overview'), this._rpc('admin_sources')]);
+            const [o, sources, sparks] = await Promise.all([
+                this._rpc('admin_overview'),
+                this._rpc('admin_sources'),
+                this._rpc('admin_metric_sparks', { p_days: 14 }).catch(() => null) // sparklines are non-critical
+            ]);
             if (this._nav !== nav) return; // navigated away while loading
             this._lastTs = o && o.refreshed_at ? o.refreshed_at : this._lastTs;
             this._setCrumb('Cockpit', this._lastTs);
-            this._renderOverview(o);
+            this._renderOverview(o, sparks && sparks.series);
             this._renderAlerts(Array.isArray(sources) ? sources : [], o);
         } catch (e) {
             if (this._nav !== nav) return;
@@ -987,16 +998,20 @@ class AdminPage {
         try {
             const a = await this._rpc('admin_activity_series', { p_days: 14 }) || {};
             if ((this._nav || 0) !== seq || this._route !== 'clients') return;
-            const esc = AdminPage.esc, n = AdminPage.n;
+            const n = AdminPage.n;
             const ud = Array.isArray(a.users_daily) ? a.users_daily : [];
-            const pts = ud.map(d => ({ label: (d.day || '').slice(5).replace('-', '/'), value: d.active }));
+            const ld = Array.isArray(a.logins_daily) ? a.logins_daily : [];
+            // Primary line = real login events (connexions); dashed overlay = watch activity.
+            const pts = (ld.length ? ld : ud).map((d, i) => ({ label: (d.day || '').slice(5).replace('-', '/'), value: ld.length ? d.logins : d.active }));
+            const overlay = ud.map(d => Number(d.active) || 0);
             const sp = a.users_split || { total: 0, connected: 0, inactive: 0 };
             const total = Number(sp.total) || 0, conn = Number(sp.connected) || 0, inact = Number(sp.inactive) || 0;
             const pct = v => total > 0 ? Math.round(100 * v / total) + ' %' : '—';
             el.innerHTML = `
                 <div class="chart-panel">
-                    <h2>Activité clients</h2><p class="chsub">Utilisateurs actifs distincts / jour — 14 derniers jours</p>
-                    ${AdminPage.area(pts, 'cli')}
+                    <h2>Connexions & activité</h2><p class="chsub">Connexions (events de login) vs activité visionnage — 14 derniers jours</p>
+                    ${AdminPage.area(pts, 'cli', overlay)}
+                    <div class="ssub" style="margin-top:6px"><span style="display:inline-block;width:14px;height:3px;border-radius:2px;background:#8098ff;vertical-align:middle"></span> connexions&nbsp;&nbsp;<span style="display:inline-block;width:14px;height:0;border-top:2px dashed #8a93a6;vertical-align:middle"></span> visionnage</div>
                 </div>
                 <div class="chart-panel">
                     <h2>Répartition des utilisateurs</h2><p class="chsub">Statut des comptes (connexion ≤ 7 j)</p>
@@ -1859,50 +1874,59 @@ class AdminPage {
     }
 
     // ── shared renderers ──
-    _renderOverview(o) {
+    _renderOverview(o, sparks) {
         o = o || {};
         const el = document.getElementById('admin-overview');
         if (!el) return;
-        const card = (v, l, cls) => `<div class="kpi ${cls || ''}"><div class="v">${v}</div><div class="l">${l}</div></div>`;
+        const S = sparks || {};
+        // card(value, label, cls, metricKey, icon) — icon top-right + real sparkline (if series present).
+        const card = (v, l, cls, key, icon) => {
+            const spark = key && Array.isArray(S[key]) ? AdminPage.spark(S[key], cls) : '';
+            return `<div class="kpi ${cls || ''}">
+                <div class="kpi-hd"><div class="v">${v}</div>${icon ? `<span class="kpi-ic">${icon}</span>` : ''}</div>
+                <div class="l">${l}</div>
+                ${spark ? `<div class="kpi-spark">${spark}</div>` : ''}
+            </div>`;
+        };
         const n = (x) => (x == null ? '—' : Number(x).toLocaleString('fr-FR'));
         const group = (title, cards) => `<div class="kpi-group"><div class="kpi-gtitle">${title}</div><div class="admin-cards">${cards.join('')}</div></div>`;
         const money = AdminPage.money;
         el.innerHTML = [
             group('💶 Revenus', [
-                card(money(o.billing_mrr_cents), 'MRR', Number(o.billing_mrr_cents) > 0 ? 'ok' : ''),
-                card(n(o.billing_trialing), 'En essai'),
-                card(n(o.billing_active), 'Actifs payants', Number(o.billing_active) > 0 ? 'ok' : ''),
-                card(n(o.billing_past_due), 'Échecs paiement', Number(o.billing_past_due) > 0 ? 'alert' : 'ok'),
-                card(n(o.billing_conversions_7d), 'Conversions 7 j'),
-                card(money(o.billing_collected_30d_cents), 'Encaissé 30 j')
+                card(money(o.billing_mrr_cents), 'MRR', Number(o.billing_mrr_cents) > 0 ? 'ok' : '', 'mrr_cents', '💲'),
+                card(n(o.billing_trialing), 'En essai', '', 'trialing', '⏳'),
+                card(n(o.billing_active), 'Actifs payants', Number(o.billing_active) > 0 ? 'ok' : '', 'active_paying', '👤'),
+                card(n(o.billing_past_due), 'Échecs paiement', Number(o.billing_past_due) > 0 ? 'alert' : 'ok', 'past_due', '🛡️'),
+                card(n(o.billing_conversions_7d), 'Conversions 7 j', '', 'conversions_7d', '📈'),
+                card(money(o.billing_collected_30d_cents), 'Encaissé 30 j', '', 'collected_30d_cents', '💰')
             ]),
             group('👥 Clients & croissance', [
-                card(n(o.users_total), 'Users', o.users_active_7d ? 'ok' : ''),
+                card(n(o.users_total), 'Users', o.users_active_7d ? 'ok' : '', 'users_total', '👥'),
                 // "Connectés" = last_sign_in_at (sessions persist — undercounts real activity);
                 // "Regardent" = distinct watch-history users, the truthful activity signal.
-                card(n(o.users_active_24h), 'Connectés 24 h'),
-                card(n(o.users_active_7d), 'Connectés 7 j'),
-                card(n(o.users_watching_7d), 'Regardent 7 j', Number(o.users_watching_7d) > 0 ? 'ok' : ''),
-                card(n(o.users_new_7d), 'Nouveaux 7 j', Number(o.users_new_7d) > 0 ? 'ok' : ''),
-                card(n(o.users_new_30d), 'Nouveaux 30 j')
+                card(n(o.users_active_24h), 'Connectés 24 h', '', 'users_active_24h', '🕐'),
+                card(n(o.users_active_7d), 'Connectés 7 j', '', 'users_active_7d', '🗓️'),
+                card(n(o.users_watching_7d), 'Regardent 7 j', Number(o.users_watching_7d) > 0 ? 'ok' : '', 'users_watching_7d', '👁️'),
+                card(n(o.users_new_7d), 'Nouveaux 7 j', Number(o.users_new_7d) > 0 ? 'ok' : '', 'users_new_7d', '➕'),
+                card(n(o.users_new_30d), 'Nouveaux 30 j', '', 'users_new_30d', '📅')
             ]),
             group('📡 Providers & catalogue', [
-                card(n(o.sources_total), 'Sources'),
-                card(n(o.sources_incomplete), 'Sync incomplète', Number(o.sources_incomplete) > 0 ? 'alert' : 'ok'),
-                card(n(o.sources_error), 'Sources en erreur', Number(o.sources_error) > 0 ? 'alert' : 'ok'),
-                card(n(o.identities_active), 'Identités'),
-                card(n(o.titles_movie), 'Films'),
-                card(n(o.titles_series), 'Séries')
+                card(n(o.sources_total), 'Sources', '', 'sources_total', '🗂️'),
+                card(n(o.sources_incomplete), 'Sync incomplète', Number(o.sources_incomplete) > 0 ? 'alert' : 'ok', 'sources_incomplete', '🔄'),
+                card(n(o.sources_error), 'Sources en erreur', Number(o.sources_error) > 0 ? 'alert' : 'ok', 'sources_error', '⚠️'),
+                card(n(o.identities_active), 'Identités', '', 'identities_active', '🧬'),
+                card(n(o.titles_movie), 'Films', '', 'titles_movie', '🎬'),
+                card(n(o.titles_series), 'Séries', '', 'titles_series', '📺')
             ]),
             group('🎬 Sous-titres IA', [
-                card(n(o.gensubs_ready), 'Prêts', 'ok'),
-                card(n(o.gensubs_processing), 'En cours'),
-                card(n(o.gensubs_failed), 'Échoués', Number(o.gensubs_failed) > 0 ? 'alert' : '')
+                card(n(o.gensubs_ready), 'Prêts', 'ok', 'gensubs_ready', '✅'),
+                card(n(o.gensubs_processing), 'En cours', '', 'gensubs_processing', '⏳'),
+                card(n(o.gensubs_failed), 'Échoués', Number(o.gensubs_failed) > 0 ? 'alert' : '', 'gensubs_failed', '✖️')
             ]),
             group('⏱️ Crons', [
-                card(n(o.cron_active), 'Actifs', 'ok'),
-                card(n(o.cron_paused), 'En pause'),
-                card(n(o.cron_fails_24h), 'Échecs 24 h', Number(o.cron_fails_24h) > 0 ? 'alert' : 'ok')
+                card(n(o.cron_active), 'Actifs', 'ok', 'cron_active', '▶️'),
+                card(n(o.cron_paused), 'En pause', '', 'cron_paused', '⏸️'),
+                card(n(o.cron_fails_24h), 'Échecs 24 h', Number(o.cron_fails_24h) > 0 ? 'alert' : 'ok', 'cron_fails_24h', '⚠️')
             ])
         ].join('');
     }
@@ -2087,20 +2111,24 @@ class AdminPage {
     }
 
     // Area chart from [{label,value}] — gradient fill + line + last-point dot + 3 x-labels.
-    static area(points, id) {
+    // Optional `overlay` (array of numbers, same length) draws a faint secondary line.
+    static area(points, id, overlay) {
         const w = 720, h = 200, pl = 10, pr = 10, pt = 16, pb = 26;
         const vals = points.map(p => Number(p.value) || 0);
-        const max = Math.max(1, ...vals), n = points.length;
+        const ov = Array.isArray(overlay) ? overlay.map(x => Number(x) || 0) : null;
+        const max = Math.max(1, ...vals, ...(ov || [])), n = points.length;
         const X = i => n <= 1 ? pl : pl + (w - pl - pr) * i / (n - 1);
         const Y = v => pt + (h - pt - pb) * (1 - v / max);
         const line = points.map((p, i) => `${i ? 'L' : 'M'}${X(i).toFixed(1)},${Y(vals[i]).toFixed(1)}`).join(' ');
         const gid = 'ag' + (id || '');
         const areaP = n ? `${line} L${X(n - 1).toFixed(1)},${h - pb} L${X(0).toFixed(1)},${h - pb} Z` : '';
+        const ovLine = (ov && n) ? ov.map((v, i) => `${i ? 'L' : 'M'}${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join(' ') : '';
         const lbl = n ? [0, Math.floor((n - 1) / 2), n - 1].map(i =>
             `<text x="${X(i).toFixed(1)}" y="${h - 8}" font-size="11" fill="#6b7488" text-anchor="${i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle'}">${AdminPage.esc(points[i] ? points[i].label : '')}</text>`).join('') : '';
         return `<svg class="chart-svg" viewBox="0 0 ${w} ${h}" role="img" aria-hidden="true">
             <defs><linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5b7cfa" stop-opacity=".40"/><stop offset="1" stop-color="#5b7cfa" stop-opacity="0"/></linearGradient></defs>
             <path d="${areaP}" fill="url(#${gid})"/>
+            ${ovLine ? `<path d="${ovLine}" fill="none" stroke="#8a93a6" stroke-width="1.8" stroke-opacity=".55" stroke-dasharray="4 3" stroke-linejoin="round"/>` : ''}
             <path d="${line}" fill="none" stroke="#8098ff" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round"/>
             ${n ? `<circle cx="${X(n - 1).toFixed(1)}" cy="${Y(vals[n - 1]).toFixed(1)}" r="3.6" fill="#b9c6ff"/>` : ''}
             ${lbl}
@@ -2125,6 +2153,29 @@ class AdminPage {
         return `<svg class="chart-svg" viewBox="0 0 ${w} ${h}" role="img" aria-hidden="true">
             <defs><linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#8b7cff"/><stop offset="1" stop-color="#5b7cfa"/></linearGradient></defs>
             ${rects}
+        </svg>`;
+    }
+
+    // Mini sparkline for a KPI card. Forward/back-fills nulls (missing readings) so a
+    // metric with one point draws a flat line rather than a fake dip. Colour by state.
+    static spark(values, cls) {
+        let vals = (Array.isArray(values) ? values : []).map(v => v == null ? null : Number(v));
+        let last = null; vals = vals.map(v => { if (v != null) { last = v; return v; } return last; });
+        let next = null; for (let i = vals.length - 1; i >= 0; i--) { if (vals[i] != null) next = vals[i]; else vals[i] = next; }
+        vals = vals.map(v => (v == null || !Number.isFinite(v)) ? 0 : v);
+        if (vals.length < 2) return '';
+        const w = 180, h = 40, pt = 5, pb = 5, pl = 2, pr = 2, n = vals.length;
+        const max = Math.max(...vals), min = Math.min(...vals), rng = (max - min) || 1;
+        const X = i => pl + (w - pl - pr) * i / (n - 1);
+        const Y = v => pt + (h - pt - pb) * (1 - (v - min) / rng);
+        const color = cls === 'alert' ? '#f87171' : cls === 'ok' ? '#34d399' : '#7c93ff';
+        const line = vals.map((v, i) => `${i ? 'L' : 'M'}${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join(' ');
+        const areaP = `${line} L${X(n - 1).toFixed(1)},${h - pb} L${X(0).toFixed(1)},${h - pb} Z`;
+        const gid = 'sp' + Math.random().toString(36).slice(2, 8);
+        return `<svg class="chart-svg" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true">
+            <defs><linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${color}" stop-opacity=".30"/><stop offset="1" stop-color="${color}" stop-opacity="0"/></linearGradient></defs>
+            <path d="${areaP}" fill="url(#${gid})"/>
+            <path d="${line}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>
         </svg>`;
     }
     // Stored tag colour → badge class (fall back to gray for anything unexpected).
