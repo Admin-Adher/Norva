@@ -174,6 +174,19 @@ class AdminPage {
 #page-admin .admin-err{color:var(--adm-red);padding:10px;}
 #page-admin .scroll{overflow-x:auto;}
 #page-admin .card{background:var(--adm-panel);border:1px solid var(--adm-line);border-radius:16px;padding:18px 20px;}
+/* Charts (self-contained inline SVG) */
+#page-admin .chart-row{display:grid;grid-template-columns:1.7fr 1fr;gap:16px;margin-bottom:18px;}
+#page-admin .chart-panel{background:var(--adm-panel);border:1px solid var(--adm-line);border-radius:16px;padding:16px 18px 14px;min-width:0;margin-bottom:18px;}
+#page-admin .chart-panel h2{font-size:14px;font-weight:650;margin:0 0 2px;color:var(--adm-tx);}
+#page-admin .chart-panel .chsub{font-size:11.5px;color:var(--adm-tx3);margin:0 0 12px;}
+#page-admin .chart-svg{width:100%;display:block;}
+#page-admin .donut-wrap{display:flex;align-items:center;gap:20px;flex-wrap:wrap;justify-content:center;}
+#page-admin .chart-legend{display:flex;flex-direction:column;gap:11px;font-size:13px;min-width:150px;flex:1;}
+#page-admin .chart-legend .lg{display:flex;align-items:center;gap:9px;color:var(--adm-tx2);}
+#page-admin .chart-legend .dotc{width:11px;height:11px;border-radius:3px;flex-shrink:0;}
+#page-admin .chart-legend b{color:var(--adm-tx);font-variant-numeric:tabular-nums;}
+#page-admin .chart-legend .pct{color:var(--adm-tx3);margin-left:auto;font-variant-numeric:tabular-nums;}
+@media(max-width:820px){#page-admin .chart-row{grid-template-columns:1fr;}}
 #page-admin .users-controls{display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap;}
 #page-admin .users-controls input,#page-admin .users-controls select{background:var(--color-bg-secondary,#16161c);border:1px solid var(--color-border,#2a2a38);color:var(--color-text-primary,#fff);border-radius:8px;padding:8px 12px;font-size:13px;}
 #page-admin .users-controls input{min-width:240px;flex:1;max-width:380px;}
@@ -902,6 +915,7 @@ class AdminPage {
         v.innerHTML = `<div class="crm-page">
             <h1 class="crm-h1">👥 Clients</h1>
             <p class="crm-sub">Liste paginée — recherche, tri, clic pour la fiche 360°. Agrégation bornée par page (scalable).</p>
+            <div id="admin-clients-charts" class="chart-row"></div>
             <div class="users-controls">
               <input id="admin-users-search" type="search" placeholder="Rechercher un email ou un ID…" autocomplete="off" value="${AdminPage.esc(this._users.search)}" />
               <select id="admin-users-sort">
@@ -962,6 +976,41 @@ class AdminPage {
             const s = this._users; if ((s.page + 1) * s.limit < s.total) { s.page += 1; this._loadUsers(); }
         });
         this._loadUsers();
+        this._loadClientCharts();
+    }
+
+    // Clients insights: real daily-active area + connected/inactive donut (admin_activity_series).
+    async _loadClientCharts() {
+        const el = document.getElementById('admin-clients-charts');
+        if (!el) return;
+        const seq = (this._nav || 0);
+        try {
+            const a = await this._rpc('admin_activity_series', { p_days: 14 }) || {};
+            if ((this._nav || 0) !== seq || this._route !== 'clients') return;
+            const esc = AdminPage.esc, n = AdminPage.n;
+            const ud = Array.isArray(a.users_daily) ? a.users_daily : [];
+            const pts = ud.map(d => ({ label: (d.day || '').slice(5).replace('-', '/'), value: d.active }));
+            const sp = a.users_split || { total: 0, connected: 0, inactive: 0 };
+            const total = Number(sp.total) || 0, conn = Number(sp.connected) || 0, inact = Number(sp.inactive) || 0;
+            const pct = v => total > 0 ? Math.round(100 * v / total) + ' %' : '—';
+            el.innerHTML = `
+                <div class="chart-panel">
+                    <h2>Activité clients</h2><p class="chsub">Utilisateurs actifs distincts / jour — 14 derniers jours</p>
+                    ${AdminPage.area(pts, 'cli')}
+                </div>
+                <div class="chart-panel">
+                    <h2>Répartition des utilisateurs</h2><p class="chsub">Statut des comptes (connexion ≤ 7 j)</p>
+                    <div class="donut-wrap">
+                        ${AdminPage.donut([{ value: conn, color: '#34d399' }, { value: inact, color: '#3a4356' }], total, 'Total')}
+                        <div class="chart-legend">
+                            <div class="lg"><span class="dotc" style="background:#34d399"></span>Connectés <b>${n(conn)}</b><span class="pct">${pct(conn)}</span></div>
+                            <div class="lg"><span class="dotc" style="background:#3a4356"></span>Inactifs <b>${n(inact)}</b><span class="pct">${pct(inact)}</span></div>
+                        </div>
+                    </div>
+                </div>`;
+        } catch (_) {
+            el.innerHTML = ''; // charts are a non-critical enhancement — never block the list
+        }
     }
 
     async _loadUsers() {
@@ -1616,6 +1665,7 @@ class AdminPage {
             <div class="kpi-gtitle">📸 Snapshot</div>
             <section id="sys-health" class="admin-cards"><div class="ssub">Chargement…</div></section>
             <div class="admin-block"><h2>🌐 Infra temps réel <button id="sys-infra-refresh" class="mini-btn" aria-label="Re-pinger l'infra" title="Re-ping">↻</button></h2><div id="sys-infra" class="admin-cards"><div class="ssub">Ping…</div></div></div>
+            <div class="chart-panel"><h2>📊 Activité système — exécutions cron / jour</h2><p class="chsub">14 derniers jours · barres = exécutions, rouge = échecs</p><div id="sys-activity"><div class="ssub">Chargement…</div></div></div>
             <div class="admin-block"><h2>💳 État billing / go-live <button id="sys-billing-refresh" class="mini-btn" aria-label="Re-vérifier l'état billing" title="Re-check">↻</button></h2><div id="sys-billing" class="admin-cards"><div class="ssub">Vérification…</div></div><p class="ssub" style="margin-top:8px">Bascule prod = poser les secrets Supabase (clé <code>sprod_</code>, <code>NORVA_STANCER_MODE=live</code>, <code>NORVA_BILLING_MODE=revenuecat</code>, <code>NORVA_ENTITLEMENTS_MODE=enforce</code>). Ce panneau doit alors passer tout au vert.</p></div>
             <div class="admin-block"><h2>🚩 Feature flags</h2><div id="sys-flags"><div class="ssub">Chargement…</div></div></div>
             <div class="admin-block"><h2>📜 Journal d'audit</h2><div id="sys-audit"><div class="ssub">Chargement…</div></div></div>
@@ -1635,6 +1685,26 @@ class AdminPage {
         this._loadAudit(true);
         this._loadInfra();
         this._loadFlags();
+        this._loadSysActivity();
+    }
+
+    // Système: real cron-activity bar chart (admin_activity_series.system_daily).
+    async _loadSysActivity() {
+        const el = document.getElementById('sys-activity');
+        if (!el) return;
+        const seq = this._nav;
+        try {
+            const a = await this._rpc('admin_activity_series', { p_days: 14 }) || {};
+            if (this._nav !== seq || this._route !== 'systeme') return;
+            const sd = Array.isArray(a.system_daily) ? a.system_daily : [];
+            const items = sd.map(d => ({ label: (d.day || '').slice(5).replace('-', '/'), value: d.runs, failed: d.failed }));
+            const totFail = sd.reduce((s, d) => s + (Number(d.failed) || 0), 0);
+            const chip = c => `<span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:${c};vertical-align:middle"></span>`;
+            el.innerHTML = AdminPage.bars(items, 'sys') +
+                `<div class="ssub" style="margin-top:8px">${chip('#6d7bf5')} exécutions&nbsp;&nbsp;${chip('#f87171')} échecs (${AdminPage.n(totFail)} sur 14 j)</div>`;
+        } catch (_) {
+            el.innerHTML = '<div class="ssub">Activité indisponible.</div>';
+        }
     }
 
     // Keyset-paginated audit feed: each "Charger plus" fetches the batch strictly OLDER than the
@@ -1994,6 +2064,68 @@ class AdminPage {
     static railBadge(p) {
         const cls = p === 'stancer' ? 'blue' : (p === 'google_play' || p === 'apple_app_store') ? 'green' : 'gray';
         return `<span class="badge ${cls}">${AdminPage.railLabel(p)}</span>`;
+    }
+
+    // ── Inline-SVG charts (self-contained, no external deps) ──
+    // Donut from [{value,color}] segments; center shows top/bottom text.
+    static donut(segments, centerTop, centerBottom) {
+        const total = segments.reduce((s, x) => s + (Number(x.value) || 0), 0);
+        const R = 52, C = 2 * Math.PI * R, cx = 64, cy = 64, sw = 15;
+        let off = 0;
+        const arcs = (total > 0 ? segments : []).map(s => {
+            const len = C * ((Number(s.value) || 0) / total);
+            if (len <= 0) return '';
+            const el = `<circle cx="${cx}" cy="${cy}" r="${R}" fill="none" stroke="${s.color}" stroke-width="${sw}" stroke-dasharray="${len.toFixed(2)} ${(C - len).toFixed(2)}" stroke-dashoffset="${(-off).toFixed(2)}" transform="rotate(-90 ${cx} ${cy})"/>`;
+            off += len; return el;
+        }).join('');
+        return `<svg viewBox="0 0 128 128" width="128" height="128" role="img" aria-hidden="true">
+            <circle cx="${cx}" cy="${cy}" r="${R}" fill="none" stroke="rgba(255,255,255,.06)" stroke-width="${sw}"/>
+            ${arcs}
+            <text x="${cx}" y="${cy - 1}" text-anchor="middle" font-size="27" font-weight="750" fill="#eef1f8">${AdminPage.esc(String(centerTop))}</text>
+            <text x="${cx}" y="${cy + 16}" text-anchor="middle" font-size="10" fill="#98a2b8">${AdminPage.esc(String(centerBottom || ''))}</text>
+        </svg>`;
+    }
+
+    // Area chart from [{label,value}] — gradient fill + line + last-point dot + 3 x-labels.
+    static area(points, id) {
+        const w = 720, h = 200, pl = 10, pr = 10, pt = 16, pb = 26;
+        const vals = points.map(p => Number(p.value) || 0);
+        const max = Math.max(1, ...vals), n = points.length;
+        const X = i => n <= 1 ? pl : pl + (w - pl - pr) * i / (n - 1);
+        const Y = v => pt + (h - pt - pb) * (1 - v / max);
+        const line = points.map((p, i) => `${i ? 'L' : 'M'}${X(i).toFixed(1)},${Y(vals[i]).toFixed(1)}`).join(' ');
+        const gid = 'ag' + (id || '');
+        const areaP = n ? `${line} L${X(n - 1).toFixed(1)},${h - pb} L${X(0).toFixed(1)},${h - pb} Z` : '';
+        const lbl = n ? [0, Math.floor((n - 1) / 2), n - 1].map(i =>
+            `<text x="${X(i).toFixed(1)}" y="${h - 8}" font-size="11" fill="#6b7488" text-anchor="${i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle'}">${AdminPage.esc(points[i] ? points[i].label : '')}</text>`).join('') : '';
+        return `<svg class="chart-svg" viewBox="0 0 ${w} ${h}" role="img" aria-hidden="true">
+            <defs><linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5b7cfa" stop-opacity=".40"/><stop offset="1" stop-color="#5b7cfa" stop-opacity="0"/></linearGradient></defs>
+            <path d="${areaP}" fill="url(#${gid})"/>
+            <path d="${line}" fill="none" stroke="#8098ff" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round"/>
+            ${n ? `<circle cx="${X(n - 1).toFixed(1)}" cy="${Y(vals[n - 1]).toFixed(1)}" r="3.6" fill="#b9c6ff"/>` : ''}
+            ${lbl}
+        </svg>`;
+    }
+
+    // Vertical bars from [{label,value,failed}] — gradient bars with a red failed overlay.
+    static bars(items, id) {
+        const w = 720, h = 210, pl = 10, pr = 10, pt = 16, pb = 28;
+        const vals = items.map(b => Number(b.value) || 0);
+        const max = Math.max(1, ...vals), n = items.length || 1;
+        const slot = (w - pl - pr) / n, barW = Math.min(48, slot * 0.6);
+        const gid = 'bg' + (id || '');
+        const rects = items.map((b, i) => {
+            const x = pl + slot * i + (slot - barW) / 2;
+            const bh = (h - pt - pb) * ((Number(b.value) || 0) / max), y = h - pb - bh;
+            const fh = b.failed ? (h - pt - pb) * ((Number(b.failed) || 0) / max) : 0;
+            const fail = fh > 0 ? `<rect x="${x.toFixed(1)}" y="${(h - pb - fh).toFixed(1)}" width="${barW.toFixed(1)}" height="${fh.toFixed(1)}" fill="#f87171" rx="3"/>` : '';
+            return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${Math.max(0, bh).toFixed(1)}" fill="url(#${gid})" rx="4"/>${fail}
+                <text x="${(x + barW / 2).toFixed(1)}" y="${h - 9}" font-size="11" fill="#6b7488" text-anchor="middle">${AdminPage.esc(b.label || '')}</text>`;
+        }).join('');
+        return `<svg class="chart-svg" viewBox="0 0 ${w} ${h}" role="img" aria-hidden="true">
+            <defs><linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#8b7cff"/><stop offset="1" stop-color="#5b7cfa"/></linearGradient></defs>
+            ${rects}
+        </svg>`;
     }
     // Stored tag colour → badge class (fall back to gray for anything unexpected).
     static tagColor(c) { return ['gray', 'green', 'red', 'amber', 'blue'].includes(c) ? c : 'gray'; }
