@@ -66,7 +66,7 @@
     if (!nav) return;
     let compact = false;
     let ticking = false;
-    let lastY = window.pageYOffset || document.documentElement.scrollTop || 0;
+    let lastY = 0; // avoid reading pageYOffset before first paint (forced reflow)
     const TOP = 40;    // always expanded at/near the top
     const DELTA = 8;   // ignore scroll jitter / tiny moves
     const setCompact = (v) => {
@@ -90,7 +90,8 @@
         window.requestAnimationFrame(update);
       }
     }, { passive: true });
-    update();
+    // Defer the first read to after paint so it doesn't force a synchronous layout.
+    window.requestAnimationFrame(update);
   }
   setupCompactNav();
 

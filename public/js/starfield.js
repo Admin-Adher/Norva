@@ -75,7 +75,11 @@
     var spriteBlue = makeSprite('150,200,255');
 
     var dpr = 1, W = 0, H = 0, stars = [], glints = [], raf = 0, lastPaint = 0;
-    var scrollY = window.pageYOffset || document.documentElement.scrollTop || 0;
+    // Start at 0 instead of reading window.pageYOffset here: this script runs at
+    // end-of-body, before the first paint, so reading scroll position now would
+    // force a synchronous full-page layout (~30ms). The real value is picked up
+    // in the scroll handler, after paint. Pages load at the top in practice.
+    var scrollY = 0;
     var running = false, paused = false;
 
     function rand(a, b) { return a + Math.random() * (b - a); }
@@ -185,20 +189,26 @@
 
     var scrollIdle;
     window.addEventListener('scroll', function () {
-      scrollY = window.pageYOffset || document.documentElement.scrollTop || 0;
-      // On constrained devices, freeze the canvas while scrolling so the main
-      // thread is free. Parallax is off there, so nothing visible is lost.
-      if (coarse && running && !motionQuery.matches) {
-        if (!paused) { paused = true; window.cancelAnimationFrame(raf); }
-        clearTimeout(scrollIdle);
-        scrollIdle = setTimeout(function () {
-          paused = false;
-          if (running && !document.hidden) {
-            lastPaint = 0;
-            raf = window.requestAnimationFrame(loop);
-          }
-        }, 220);
+      if (coarse) {
+        // Touch: parallax is off, so the scroll position isn't used for
+        // rendering — skip the layout-reading pageYOffset read entirely and just
+        // freeze the field while scrolling so the main thread stays free.
+        if (running && !motionQuery.matches) {
+          if (!paused) { paused = true; window.cancelAnimationFrame(raf); }
+          clearTimeout(scrollIdle);
+          scrollIdle = setTimeout(function () {
+            paused = false;
+            if (running && !document.hidden) {
+              lastPaint = 0;
+              raf = window.requestAnimationFrame(loop);
+            }
+          }, 220);
+        }
+        return;
       }
+      // Desktop: parallax needs the scroll position (cheap here — reads happen
+      // after first paint, during interaction, not before it).
+      scrollY = window.pageYOffset || document.documentElement.scrollTop || 0;
     }, { passive: true });
 
     var resizeTimer;
