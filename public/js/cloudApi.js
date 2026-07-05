@@ -74,14 +74,20 @@
     const KEY_REGION_PROMPT_DISMISSED = 'norva-content-region-prompt-dismissed';
     const KEY_LEGACY_COUNTRY = 'norva-country';
     const CONTENT_REGION_PATTERN = /^[A-Z][A-Z0-9_]{1,31}$/;
-    const CONTENT_REGIONS = [
-        { key: 'FR', label: 'France' },
-        { key: 'US', label: 'United States' },
-        { key: 'IN', label: 'India' },
-        { key: 'MAGHREB', label: 'Maghreb' },
-        { key: 'LUSOPHONE', label: 'Lusophone' },
-        { key: 'INTERNATIONAL', label: 'International' }
-    ];
+    // The region catalogue lives in js/data/regions.js (window.NorvaRegions), loaded
+    // before this file. Fall back to the legacy six if it's somehow absent so nothing
+    // hard-crashes.
+    const REGIONS_DATA = (typeof window !== 'undefined' && window.NorvaRegions) || null;
+    const CONTENT_REGIONS = REGIONS_DATA
+        ? REGIONS_DATA.list().map((r) => ({ key: r.code, label: r.name, flag: r.flag, kind: r.kind }))
+        : [
+            { key: 'FR', label: 'France' },
+            { key: 'US', label: 'United States' },
+            { key: 'IN', label: 'India' },
+            { key: 'MAGHREB', label: 'Maghreb' },
+            { key: 'LUSOPHONE', label: 'Lusophone' },
+            { key: 'INTERNATIONAL', label: 'International' }
+        ];
     const CONTENT_REGION_LABELS = CONTENT_REGIONS.reduce((labels, region) => {
         labels[region.key] = region.label;
         return labels;
@@ -194,6 +200,13 @@
     }
 
     function normalizeContentRegion(value) {
+        // Alias-aware canonicalisation (USA→US, UK→GB, scandinavia→NORDIC…) so a legacy or
+        // profile-stored value maps to a curated code — keeping the picker option, the
+        // button label and the country= param consistent.
+        if (REGIONS_DATA) {
+            const canonical = REGIONS_DATA.normalize(value);
+            return CONTENT_REGION_PATTERN.test(canonical) ? canonical : '';
+        }
         const normalized = String(value || '').trim().toUpperCase().replace(/[\s-]+/g, '_');
         return CONTENT_REGION_PATTERN.test(normalized) ? normalized : '';
     }
@@ -207,6 +220,10 @@
         const locales = Array.isArray(navigator.languages) && navigator.languages.length
             ? navigator.languages
             : [navigator.language || ''];
+        // Full region catalogue: prefer an explicit country subtag, else map the primary
+        // language to a representative region (js/data/regions.js).
+        if (REGIONS_DATA) return REGIONS_DATA.inferFromLocale(locales);
+        // Legacy fallback (regions.js absent): the original FR/US/IN heuristic.
         for (const locale of locales) {
             const parts = String(locale || '').split(/[-_]/).filter(Boolean);
             const region = normalizeContentRegion(parts.length > 1 ? parts[parts.length - 1] : '');
@@ -814,8 +831,13 @@
         regions: {
             list: () => CONTENT_REGIONS.slice(),
             label: contentRegionLabel,
+            flag: (code) => (REGIONS_DATA ? REGIONS_DATA.flag(code) : '🌐'),
             resolve: resolveContentRegion,
             active: () => resolveContentRegion().region,
+            // Region → best synopsis language (feeds resolveContentLang, Phase 2) and the
+            // TMDB region= param (Phase 3). Safe defaults when regions.js is absent.
+            defaultLanguage: (code) => (REGIONS_DATA ? REGIONS_DATA.defaultLanguage(code) : 'en'),
+            tmdbRegion: (code) => (REGIONS_DATA ? REGIONS_DATA.tmdbRegion(code) : String(code || '').toUpperCase()),
             setPreferred: setPreferredContentRegion,
             clearPreferred: clearPreferredContentRegion,
             rememberProfile: rememberProfileRegion,
