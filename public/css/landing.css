@@ -1201,33 +1201,76 @@ main,
   font-size: 22px;
 }
 
-.feature-grid .mini-icon {
-  font-size: 15px;
+/* Feature + device icons: consistent SVG line-icons centered in the glass box. */
+.feature-grid .mini-icon,
+.device-grid .mini-icon {
+  margin: 0 auto 16px;
 }
 
-.wave,
-.bars,
-.ring {
-  margin-top: 28px;
-  min-height: 90px;
+.feature-grid .mini-icon svg,
+.device-grid .mini-icon svg {
+  width: 22px;
+  height: 22px;
+  color: #bcd0ff;
+}
+
+/* Shared mini-illustration box under each feature. */
+.viz {
+  margin-top: 26px;
+  min-height: 92px;
+  padding: 16px;
   border: 1px solid var(--glass-line-soft);
   border-radius: 14px;
   background: rgba(6, 12, 24, 0.55);
 }
 
-.wave {
-  background:
-    repeating-linear-gradient(90deg, transparent 0 14px, rgba(124, 107, 255, 0.9) 14px 18px, transparent 18px 28px),
-    rgba(6, 12, 24, 0.55);
-  -webkit-mask-image: linear-gradient(90deg, transparent, #000 14%, #000 86%, transparent);
-  mask-image: linear-gradient(90deg, transparent, #000 14%, #000 86%, transparent);
+/* Optimized playback — a real player scrubber. */
+.scrubber {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 12px;
 }
 
+.scrubber .track {
+  position: relative;
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(120, 140, 190, 0.22);
+}
+
+.scrubber .track i {
+  position: absolute;
+  inset: 0 38% 0 0;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #5b9bff, #7c6bff);
+}
+
+.scrubber .track b {
+  position: absolute;
+  top: 50%;
+  left: 62%;
+  width: 14px;
+  height: 14px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 0 4px rgba(91, 155, 255, 0.28), 0 2px 6px rgba(0, 0, 0, 0.5);
+}
+
+.scrubber .times {
+  display: flex;
+  justify-content: space-between;
+  color: #8f9ab3;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Audio and subtitles — subtitle track lines. */
 .bars {
   display: grid;
   align-content: center;
   gap: 10px;
-  padding: 18px;
 }
 
 .bars span {
@@ -1241,15 +1284,57 @@ main,
 .bars span:nth-child(3) { width: 70%; }
 .bars span:nth-child(4) { width: 52%; }
 
-.ring {
+/* Offline mode — a download list: two done, one in progress. */
+.dl-viz {
   display: grid;
-  place-items: center;
-  color: #fff;
-  font-weight: 900;
-  font-size: 22px;
-  background:
-    radial-gradient(circle at center, rgba(6, 12, 24, 0.9) 0 43%, transparent 44%),
-    conic-gradient(var(--green) 0 72%, rgba(36, 48, 68, 0.8) 72% 100%);
+  align-content: center;
+  gap: 12px;
+}
+
+.dl-viz .dl-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.dl-viz .dl-row i {
+  flex: 1;
+  height: 7px;
+  border-radius: 999px;
+  background: rgba(120, 140, 190, 0.2);
+}
+
+.dl-viz .dl-row:nth-child(1) i,
+.dl-viz .dl-row:nth-child(2) i {
+  background: linear-gradient(90deg, rgba(79, 224, 168, 0.5), rgba(79, 224, 168, 0.26));
+}
+
+.dl-viz .dl-row i.prog {
+  position: relative;
+  overflow: hidden;
+}
+
+.dl-viz .dl-row i.prog::after {
+  content: "";
+  position: absolute;
+  inset: 0 32% 0 0;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #5b9bff, #7c6bff);
+}
+
+.dl-viz .dl-row svg {
+  width: 15px;
+  height: 15px;
+  color: #4fe0a8;
+  flex: 0 0 auto;
+}
+
+.dl-viz .dl-row em {
+  flex: 0 0 auto;
+  color: #9fb0d6;
+  font-size: 12px;
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
 }
 
 /* =====================================================================
@@ -2528,4 +2613,190 @@ html.norva-lite .scroll-reveal { filter: none !important; }
   .get-app-cta {
     display: inline-flex;
   }
+}
+
+/* =====================================================================
+   Recommendations — premium static preference fields (no native select).
+   ===================================================================== */
+.pref-field {
+  margin-bottom: 12px;
+}
+
+.pref-field small {
+  display: block;
+  margin-bottom: 7px;
+  color: #8f9ab3;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+}
+
+.pref-field > span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--glass-line);
+  border-radius: 12px;
+  background: rgba(6, 12, 24, 0.7);
+  color: #eef2ff;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.pref-field > span svg {
+  width: 16px;
+  height: 16px;
+  color: #7c87a0;
+  flex: 0 0 auto;
+}
+
+/* =====================================================================
+   Recommendations — premium "stylized jacket" posters (content-neutral):
+   layered gradient + soft-light grain + top sheen, no real artwork.
+   ===================================================================== */
+.poster-row article {
+  background:
+    radial-gradient(120% 75% at 22% 0%, rgba(255, 255, 255, 0.16), transparent 55%),
+    linear-gradient(155deg, #3a52d6, #211a52);
+  transition: transform 260ms ease, box-shadow 260ms ease;
+}
+
+.poster-row article:nth-child(2) {
+  background:
+    radial-gradient(120% 75% at 22% 0%, rgba(255, 255, 255, 0.16), transparent 55%),
+    linear-gradient(155deg, #1b8f8d, #133b55);
+}
+
+.poster-row article:nth-child(3) {
+  background:
+    radial-gradient(120% 75% at 22% 0%, rgba(255, 255, 255, 0.16), transparent 55%),
+    linear-gradient(155deg, #7a3fbf, #2c2050);
+}
+
+.poster-row article:nth-child(4) {
+  background:
+    radial-gradient(120% 75% at 22% 0%, rgba(255, 255, 255, 0.16), transparent 55%),
+    linear-gradient(155deg, #2f74c8, #1c2444);
+}
+
+.poster-row article::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.14), transparent 24%),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.55'/%3E%3C/svg%3E");
+  background-size: auto, 130px 130px;
+  mix-blend-mode: soft-light;
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.poster-row .tall {
+  border-color: rgba(79, 224, 168, 0.45);
+  box-shadow: 0 22px 50px -24px rgba(0, 0, 0, 0.9), 0 0 44px -14px rgba(79, 224, 168, 0.4);
+}
+
+.poster-row span {
+  border: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+.poster-row .tall > span {
+  background: rgba(79, 224, 168, 0.18);
+  color: #d8fff0;
+  border-color: rgba(79, 224, 168, 0.4);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .poster-row article:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 30px 60px -24px rgba(0, 0, 0, 0.95);
+  }
+
+  .poster-row .tall:hover {
+    box-shadow: 0 30px 60px -24px rgba(0, 0, 0, 0.95), 0 0 50px -12px rgba(79, 224, 168, 0.5);
+  }
+}
+
+/* =====================================================================
+   Simpler-promo — premium abstract Norva UI inside the browser frame
+   (hero banner + poster rows), content-neutral, replaces the wireframe.
+   ===================================================================== */
+.browser-body {
+  padding: 14px;
+  display: grid;
+  gap: 10px;
+}
+
+.bm-hero {
+  position: relative;
+  height: 96px;
+  border-radius: 10px;
+  overflow: hidden;
+  background:
+    radial-gradient(120% 90% at 80% 10%, rgba(91, 155, 255, 0.5), transparent 60%),
+    linear-gradient(150deg, #3b82ff, #7c6bff);
+}
+
+.bm-hero::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.12), transparent 40%, rgba(4, 8, 16, 0.5));
+}
+
+.bm-play {
+  position: absolute;
+  left: 16px;
+  bottom: 14px;
+  z-index: 1;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.92);
+  color: #1a2030;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4);
+}
+
+.bm-play svg {
+  width: 16px;
+  height: 16px;
+  margin-left: 1px;
+}
+
+.bm-rowlabel {
+  width: 40%;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(160, 176, 214, 0.35);
+  margin-top: 4px;
+}
+
+.bm-rowlabel.short {
+  width: 28%;
+}
+
+.bm-row {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+}
+
+.bm-row i {
+  aspect-ratio: 2 / 3;
+  border-radius: 7px;
+  background: linear-gradient(160deg, rgba(120, 140, 200, 0.4), rgba(30, 40, 70, 0.7));
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.bm-row i:nth-child(2) {
+  background: linear-gradient(160deg, rgba(91, 155, 255, 0.5), rgba(20, 40, 80, 0.7));
+}
+
+.bm-row i:nth-child(4) {
+  background: linear-gradient(160deg, rgba(124, 107, 255, 0.5), rgba(40, 30, 70, 0.7));
 }

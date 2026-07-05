@@ -167,9 +167,9 @@
         </p>
         <div class="preference-card">
           <div class="preference-head"><strong>Profile preferences</strong><span>Active</span></div>
-          <label>Preferred audio language <select><option>English</option><option>French</option></select></label>
-          <label>Preferred subtitles <select><option>No preference</option><option>French subtitles</option></select></label>
-          <label>Favorite genres <select><option>Science fiction - Thriller</option><option>Drama - Mystery</option></select></label>
+          <div class="pref-field"><small>Preferred audio language</small><span>English <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg></span></div>
+          <div class="pref-field"><small>Preferred subtitles</small><span>No preference <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg></span></div>
+          <div class="pref-field"><small>Favorite genres</small><span>Science fiction · Thriller <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg></span></div>
           <p>Norva boosts matching titles without hiding unknown metadata.</p>
         </div>
       </div>
@@ -186,9 +186,24 @@
       <h2>Everything you need to watch. Nothing that slows you down.</h2>
       <p class="section-copy">A consistent interface, simple controls and features adapted to real devices and real sources.</p>
       <div class="feature-grid">
-        <article><span class="mini-icon">~</span><strong>Optimized playback</strong><p>Fast startup, automatic resume, adaptive quality and remote-friendly navigation.</p><div class="wave"></div></article>
-        <article><span class="mini-icon">CC</span><strong>Audio and subtitles</strong><p>Norva prefers versions that match your language choices when data is available.</p><div class="bars"><span></span><span></span><span></span><span></span></div></article>
-        <article><span class="mini-icon">DL</span><strong>Offline mode</strong><p>On compatible devices, selected media can be made available when your source and rights allow it.</p><div class="ring">72%</div></article>
+        <article>
+          <span class="mini-icon feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 19 22 12 13 5 13 19"/><polygon points="2 19 11 12 2 5 2 19"/></svg></span>
+          <strong>Optimized playback</strong>
+          <p>Fast startup, automatic resume, adaptive quality and remote-friendly navigation.</p>
+          <div class="viz scrubber" aria-hidden="true"><span class="track"><i></i><b></b></span><span class="times"><em>12:04</em><em>1:52:30</em></span></div>
+        </article>
+        <article>
+          <span class="mini-icon feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="3"/><path d="M6 10.5h7"/><path d="M16 10.5h2"/><path d="M6 14h4"/><path d="M13 14h5"/></svg></span>
+          <strong>Audio and subtitles</strong>
+          <p>Norva prefers versions that match your language choices when data is available.</p>
+          <div class="viz bars" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
+        </article>
+        <article>
+          <span class="mini-icon feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></span>
+          <strong>Offline mode</strong>
+          <p>On compatible devices, selected media can be made available when your source and rights allow it.</p>
+          <div class="viz dl-viz" aria-hidden="true"><span class="dl-row"><i></i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span><span class="dl-row"><i></i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span><span class="dl-row"><i class="prog"></i><em>68%</em></span></div>
+        </article>
       </div>
     </section>
 
@@ -197,10 +212,10 @@
       <h2>Norva follows you across devices.</h2>
       <p class="section-copy">One account to find your catalog, favorites and progress on compatible screens.</p>
       <div class="device-grid">
-        <article><span>Web</span><strong>Web</strong><p>Access your space from a compatible browser.</p></article>
-        <article><span>Phone</span><strong>Android phone</strong><p>Find your progress wherever you are.</p></article>
-        <article><span>Tab</span><strong>Android tablet</strong><p>A comfortable interface to watch and explore.</p></article>
-        <article><span>TV</span><strong>Android TV</strong><p>Remote-friendly navigation and big-screen playback.</p></article>
+        <article><span class="mini-icon feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg></span><strong>Web</strong><p>Access your space from a compatible browser.</p></article>
+        <article><span class="mini-icon feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg></span><strong>Android phone</strong><p>Find your progress wherever you are.</p></article>
+        <article><span class="mini-icon feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg></span><strong>Android tablet</strong><p>A comfortable interface to watch and explore.</p></article>
+        <article><span class="mini-icon feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="13" rx="2"/><polyline points="17 2 12 7 7 2"/></svg></span><strong>Android TV</strong><p>Remote-friendly navigation and big-screen playback.</p></article>
       </div>
     </section>
 
@@ -360,11 +375,13 @@
         </div>
         <div class="promo-visual" aria-hidden="true">
           <div class="browser-mock">
-            <div class="browser-bar"><i></i><i></i><i></i><span class="url"></span></div>
+            <div class="browser-bar"><i></i><i></i><i></i><span class="url">norva.tv/app</span></div>
             <div class="browser-body">
-              <div class="poster"></div>
-              <div class="line"></div>
-              <div class="line short"></div>
+              <div class="bm-hero"><span class="bm-play" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor"><polygon points="9 7 18 12 9 17 9 7"/></svg></span></div>
+              <div class="bm-rowlabel"></div>
+              <div class="bm-row"><i></i><i></i><i></i><i></i><i></i></div>
+              <div class="bm-rowlabel short"></div>
+              <div class="bm-row"><i></i><i></i><i></i><i></i><i></i></div>
             </div>
           </div>
         </div>
