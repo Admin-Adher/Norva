@@ -2409,10 +2409,26 @@ html.norva-lite .scroll-reveal { filter: none !important; }
 }
 
 .get-app-qr span {
+  max-width: 200px;
+  text-align: center;
   color: #cbd5f0;
   font-weight: 700;
   font-size: 14px;
   letter-spacing: 0.02em;
+  line-height: 1.4;
+}
+
+/* Direct CTA shown in place of the QR on phones (a QR you'd scan with the same
+   phone is pointless). Hidden on desktop, where the QR does the handoff. */
+.get-app-cta {
+  display: none;
+  margin-top: 24px;
+}
+
+/* Reassurance row echoed at the decision point (near the plans). */
+.pricing-section .hero-badges {
+  justify-content: center;
+  margin: 30px auto 4px;
 }
 
 @media (max-width: 720px) {
@@ -2425,5 +2441,13 @@ html.norva-lite .scroll-reveal { filter: none !important; }
   .get-app-copy p {
     margin-left: auto;
     margin-right: auto;
+  }
+
+  .get-app-qr {
+    display: none;
+  }
+
+  .get-app-cta {
+    display: inline-flex;
   }
 }
