@@ -212,9 +212,9 @@ episode fetch (coherent with the series); an episode-i18n cache is a later optim
 |-------|-------|---------|------|--------|
 | **1** | `regions.js` (curated + bundles) + normaliser + searchable dropdown + region→defaultLanguage | Frontend | Low | ✅ **shipped (#167)** |
 | **2** | `resolveContentLang` chain; propagate `?lang=` to all catalog fetches | Frontend | Low | ✅ **shipped (#168)** |
-| **3** | `norva-catalog`: generalise enrichment locale (any lang, not fr/en) + lazy on-demand i18n → global cache | Edge | Med | next |
+| **3** | `norva-catalog`: generalise serving locale (any lang, not fr/en) + lazy on-demand i18n → global cache | Edge | Med | ✅ **shipped (#169)** |
 | **4** | Pre-warm cron (trending × top langs) + `i18n_attempted` guard | Edge + cron | Med | — |
-| **5** | Episode coherence in `resolvedLang` + optional episode-i18n cache | Edge | Low | — |
+| **5** | Episode-i18n cache (coherence itself landed in #169) | Edge | Low | — |
 
 No titles schema change (`metadata.i18n` is already language-flexible); Phase 4 may add a
 lightweight `i18n_attempted` guard.
@@ -246,7 +246,66 @@ catalog fetch inherits it through the existing `?lang=` param.
 - **Legacy prefs** — `resolveLang` routes the stored settings through
   `normalizeContentPreferences`, so a user who only set the old single `preferredLanguage`
   (before the audio/subtitle split) is still honoured.
-- **Not yet visible end-to-end**: the catalogue only holds `i18n[fr]`/`i18n[en]` today, so a
-  resolved language outside {fr,en} still falls back to the catalogue default until **Phase 3**
-  populates `i18n[lang]` on demand. Phase 2 makes the request ask for the right language; Phase
-  3 makes the answer exist.
+- **Phase 2 makes the request ask for the right language; Phase 3 makes the answer exist and
+  serves it.** (See C.7 for the reality check that reshaped Phase 3.)
+
+### C.7 Phase 3 — as shipped (#169)
+
+**Reality check first (grounded in the live DB, per the no-approximation rule).** The naive
+plan was "generalise enrichment to fetch each language." The database says otherwise:
+
+- `catalog_titles` = **90,539** rows; **39,017** already carry a **multi-language** `i18n`
+  map — not fr/en, but **40+ languages** (`ar` 10,967 · `es` 24,663 · `pt` 23,255 · `zh`
+  25,295 · `ko`, `ja`, `hi`, `fa`, `th`, `vi`…). The enrichment's `validateTmdbCandidate`
+  already pulls **all** TMDB `translations` in one call, so the write side was *never*
+  fr/en-limited. Median enriched title ≈ 15–20 languages.
+- `cloud_titles` (the per-user default read source) holds **zero** i18n across all 574,998
+  rows. Every localized synopsis lives **only** in `catalog_titles`. So the feature is dark
+  unless `NORVA_CATALOG_READ_SOURCE=catalog_titles` overlays it (`applyCatalogOverlay`).
+
+So Phase 3's real gaps were **(a)** the *serving* path still hard-coded `fr-FR : en-US`, and
+**(b)** ~57% of titles (and specific missing langs on enriched ones) have no `i18n` yet.
+
+**What shipped:**
+
+1. **Generalised serving locale.** `tmdbLocale(lang2)` maps any validated 2-letter code to
+   TMDB's best locale (bare ISO-639-1 for the long tail; `en-US`/`fr-FR`/`pt-BR`/`zh-CN`
+   explicit). It replaces the `fr-FR : en-US` ternary in **`getTmdbMeta`** (movie/series live
+   extras) and **`getTmdbEpisodes`** (per-season episode data). fr/en users are byte-identical;
+   every other language now gets its own localized episode names/overviews, air dates and
+   video-language trailers instead of English. This is the **immediate** win — it's a live
+   TMDB proxy, *not* gated on the read-source flag.
+2. **On-demand i18n population into the global cache.** `getTmdbMeta` already fetches the title
+   from TMDB in the user's language; `persistCatalogI18n` piggybacks that response and, when
+   TMDB returned a genuinely localized overview, writes the **overview** into
+   `catalog_titles.metadata.i18n[lang]` via the new **`catalog_upsert_i18n`** RPC. So the
+   titles users actually open get translated on real demand, once, for **everyone**.
+   - **No poisoning**: TMDB returns an *empty* overview when a translation is absent (it never
+     English-fills the `overview` field), so population is gated on a **non-empty overview** —
+     a reliable "this translation genuinely exists" signal. Only the overview is stored: TMDB's
+     `title` *silently* falls back to the original when a localized title is missing, so
+     persisting it could file an English title under `i18n[lang]`. `displayTitle` already falls
+     back to the base title, and the enrichment's full `translations` pull stays the
+     authoritative source for genuinely localized titles.
+   - **Idempotent + cheap**: the RPC matches the `(item_type, provider_tmdb_id)` **primary
+     key** (single index probe) and fills `i18n[lang]` **only when absent** — never clobbers
+     the authoritative translations. Naturally rate-limited by the 1-day CDN cache + the
+     in-memory `tmdbMetaCache`; the write is bounded (≤1.5 s) so it never blocks the fiche.
+3. **Series ↔ episode coherence (C.4).** `SeriesPage.enrichSeasonWithTmdb` used to compute its
+   own legacy `preferredLanguage`, which *overrode* the resolved `?lang=`. Removed — episodes
+   now inherit `cloudApi.resolveLang()`, the **same** chain the series overview uses, so a
+   fiche and its episodes are always in one language.
+
+**Visibility / rollout notes:**
+
+- **#1 (serving locale)** takes effect the moment the edge deploys — no flag, no backfill.
+- **#2 (on-demand i18n)** writes to the global cache immediately, but the localized synopsis
+  only *appears* in rails/detail once `NORVA_CATALOG_READ_SOURCE=catalog_titles` is on (the
+  read cutover is separately gated on `/catalog-mirror-verify` staying clean). Until then it
+  silently warms the cache on real-demand titles so the flip lands already-populated.
+- **Rollout order**: apply the `catalog_upsert_i18n` migration **before/with** the edge deploy.
+  DDL isn't auto-applied (deliberate, reviewed step); the edge RPC call is best-effort, so a
+  deploy that lands ahead of the migration degrades to a silent no-op, not an error.
+- **Deferred to Phase 4/5**: a persistent `i18n_attempted` negative-cache guard (today the CDN
+  + in-memory caches suffice) and an optional per-(title, season, lang) **episode** i18n store
+  (episodes are live-fetched coherently for now).

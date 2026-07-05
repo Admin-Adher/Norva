@@ -225,6 +225,54 @@ function tmdbApiKey(): string {
   ).trim();
 }
 
+// TMDB `language` param for a validated 2-letter code. Bare ISO-639-1 is accepted by
+// TMDB and covers the long tail (ar, es, de, ru, ja, hi, tr, nl…); a few languages have
+// materially better coverage under a specific region, so map those explicitly. fr/en
+// keep their prior fr-FR/en-US values → byte-identical for existing users.
+const TMDB_REGIONAL_LOCALE: Record<string, string> = {
+  en: "en-US",
+  fr: "fr-FR",
+  pt: "pt-BR", // Brazilian Portuguese dominates TMDB's pt catalogue
+  zh: "zh-CN",
+};
+function tmdbLocale(lang2: string): string {
+  const code = String(lang2 || "").slice(0, 2).toLowerCase();
+  if (!/^[a-z]{2}$/.test(code)) return "en-US";
+  return TMDB_REGIONAL_LOCALE[code] ?? code;
+}
+
+// Best-effort on-demand population of the GLOBAL title cache. getTmdbMeta already fetches
+// the title from TMDB in the user's language, so when TMDB returns a genuinely localized
+// overview (empty ⇒ that translation is absent — TMDB never English-fills the overview
+// field), persist it into catalog_titles.metadata.i18n[lang] so every future viewer at
+// that language is served the synopsis with no further TMDB call. Idempotent via the RPC
+// (fills gaps only, never overwrites); bounded so a slow write never blocks the fiche.
+async function persistCatalogI18n(
+  itemType: "movie" | "series", tmdbId: string, lang2: string, overview: string,
+): Promise<void> {
+  if (!/^[a-z]{2}$/.test(lang2) || !overview) return;
+  try {
+    await Promise.race([
+      db.rpc("catalog_upsert_i18n", {
+        p_item_type: itemType,
+        p_provider_tmdb_id: tmdbId,
+        p_lang: lang2,
+        // Overview only: TMDB's `title` silently falls back to the original when a
+        // localized title is absent (overview comes back empty instead), so persisting
+        // it risks storing an English title under i18n[lang]. displayTitle already
+        // falls back to the base title, and enrichment's translations pull stays the
+        // authoritative source for genuinely localized titles.
+        p_title: null,
+        p_overview: overview,
+      }),
+      new Promise((resolve) => setTimeout(resolve, 1500)),
+    ]);
+  } catch (_) {
+    // Never let cache population break the trailer/cast response; a missed write is
+    // retried on the next cache miss for this (title, lang).
+  }
+}
+
 async function getTmdbMeta(url: URL): Promise<JsonRecord> {
   const type = url.searchParams.get("type") === "series" ? "tv" : "movie";
   const tmdbId = String(url.searchParams.get("tmdbId") || "").trim();
@@ -239,7 +287,7 @@ async function getTmdbMeta(url: URL): Promise<JsonRecord> {
 
   const params = new URLSearchParams({
     append_to_response: "videos,credits",
-    language: lang2 === "fr" ? "fr-FR" : "en-US",
+    language: tmdbLocale(lang2),
     // Trailers are often only tagged in en (or untagged) — widen the video pull.
     include_video_language: `${lang2},en,null`,
   });
@@ -278,6 +326,14 @@ async function getTmdbMeta(url: URL): Promise<JsonRecord> {
     directors,
     creators,
   };
+
+  // Piggyback the localized overview we just fetched into the global i18n cache so the
+  // synopsis appears in this language for every future viewer (see persistCatalogI18n).
+  const locOverview = String(data.overview ?? "").trim();
+  if (locOverview) {
+    await persistCatalogI18n(type === "tv" ? "series" : "movie", tmdbId, lang2, locOverview);
+  }
+
   tmdbMetaCache.set(cacheKey, { at: Date.now(), value });
   if (tmdbMetaCache.size > 1024) {
     const oldest = [...tmdbMetaCache.entries()].sort((a, b) => a[1].at - b[1].at)[0];
@@ -305,7 +361,7 @@ async function getTmdbEpisodes(url: URL): Promise<JsonRecord> {
   const cached = tmdbEpisodesCache.get(cacheKey);
   if (cached && Date.now() - cached.at < TMDB_META_TTL_MS) return cached.value;
 
-  const params = new URLSearchParams({ language: lang2 === "fr" ? "fr-FR" : "en-US" });
+  const params = new URLSearchParams({ language: tmdbLocale(lang2) });
   const headers: Record<string, string> = {};
   if (key.startsWith("eyJ")) headers.Authorization = `Bearer ${key}`;
   else params.set("api_key", key);
