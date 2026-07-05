@@ -2170,13 +2170,19 @@ const API = {
         // momentarily-stale option is harmless.
         languageFacets: (params = {}) => {
             const type = params && params.type === 'series' ? 'series' : 'movie';
-            const key = `norva-facets-${type}`;
+            // v2 key: the v1 cache could persist an EMPTY {audio:[],subtitles:[]} for 60s and serve
+            // it before ever hitting the endpoint — so a one-time empty (e.g. while the catalogue
+            // was still enriching) stuck the menus on "Any …" indefinitely. Bumping the key drops
+            // every stale v1 entry on first load.
+            const key = `norva-facets2-${type}`;
             const TTL = 60000; // 60s, aligned with the server-side facet memo
+            const nonEmpty = (v) => v && ((Array.isArray(v.audio) && v.audio.length) || (Array.isArray(v.subtitles) && v.subtitles.length));
             try {
                 const raw = localStorage.getItem(key);
                 if (raw) {
                     const cached = JSON.parse(raw);
-                    if (cached && cached.exp > Date.now() && cached.value) {
+                    // Only trust a cached result that actually has options — never an empty one.
+                    if (cached && cached.exp > Date.now() && nonEmpty(cached.value)) {
                         return Promise.resolve(cached.value);
                     }
                 }
@@ -2186,7 +2192,9 @@ const API = {
             catch (_) { return Promise.resolve({ audio: [], subtitles: [] }); }
             return Promise.resolve(p).then((value) => {
                 try {
-                    if (value && (Array.isArray(value.audio) || Array.isArray(value.subtitles))) {
+                    // Cache ONLY a non-empty result. An empty set is treated as "not ready" so the
+                    // next call re-fetches instead of serving a stale blank menu.
+                    if (nonEmpty(value)) {
                         localStorage.setItem(key, JSON.stringify({ exp: Date.now() + TTL, value }));
                     }
                 } catch (_) { /* ignore quota */ }
