@@ -20,6 +20,17 @@ if (!SUPABASE_URL || !SERVICE_KEY) throw new Error("Missing SUPABASE_URL or SUPA
 
 const admin = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { autoRefreshToken: false, persistSession: false } });
 
+// Constant-time string compare for shared-secret checks (avoids a timing side-channel on the
+// backfill token). Length difference short-circuits (length is not itself secret here).
+function timingSafeEqual(a: string, b: string): boolean {
+  const ea = new TextEncoder().encode(a);
+  const eb = new TextEncoder().encode(b);
+  if (ea.length !== eb.length) return false;
+  let diff = 0;
+  for (let i = 0; i < ea.length; i++) diff |= ea[i] ^ eb[i];
+  return diff === 0;
+}
+
 const DEFAULT_ALLOWED_ORIGINS = [
   "https://norva.tv", "https://www.norva.tv", "https://app.norva.tv",
   "https://norva-web.pages.dev", "http://localhost:3000", "http://localhost:5173", "http://localhost:4173",
@@ -185,7 +196,7 @@ Deno.serve(async (req) => {
     // service backfill token (cron) OR an admin JWT (manual test from the dashboard). ──
     if (segments[segments.length - 1] === "ops-alert") {
       const expected = Deno.env.get("NORVA_BACKFILL_TOKEN") ?? "";
-      let authed = Boolean(expected) && token === expected;
+      let authed = Boolean(expected) && timingSafeEqual(token, expected);
       if (!authed) {
         const { data: sa } = await admin.auth.getUser(token);
         authed = ((sa?.user?.app_metadata as JsonRecord | undefined)?.role) === "admin";
@@ -205,8 +216,15 @@ Deno.serve(async (req) => {
     if (segments[segments.length - 1] === "health") {
       const dbStart = performance.now();
       let db: JsonRecord;
-      try { await admin.from("admin_dashboard_cache").select("id").limit(1); db = { ok: true, ms: Math.round(performance.now() - dbStart) }; }
-      catch (e) { db = { ok: false, ms: Math.round(performance.now() - dbStart), error: String((e as Error)?.message ?? e).slice(0, 80) }; }
+      // supabase-js resolves (does NOT reject) on a query-level error — capture { error } so an
+      // RLS denial / permission / timeout / missing relation reads as "down", not a false "ok".
+      // The try/catch stays for a total network/fetch throw.
+      try {
+        const { error: dbErr } = await admin.from("admin_dashboard_cache").select("id").limit(1);
+        db = dbErr
+          ? { ok: false, ms: Math.round(performance.now() - dbStart), error: String(dbErr.message ?? dbErr).slice(0, 80) }
+          : { ok: true, ms: Math.round(performance.now() - dbStart) };
+      } catch (e) { db = { ok: false, ms: Math.round(performance.now() - dbStart), error: String((e as Error)?.message ?? e).slice(0, 80) }; }
       const { gateway, relay } = await resolveInfraUrls();
       const [gw, rl] = await Promise.all([
         gateway ? ping(gateway) : Promise.resolve({ configured: false } as JsonRecord),
@@ -249,6 +267,20 @@ Deno.serve(async (req) => {
     }
     if (userId === actorId && action === "suspend" && (body.suspend === true || body.suspend === "true")) {
       return json(req, { error: "Vous ne pouvez pas suspendre votre propre compte." }, 400);
+    }
+
+    // Last-admin protection: the self-guard above stops an admin locking THEMSELVES out, but two
+    // admins could demote/suspend each other. Refuse an action that removes the LAST active admin.
+    const targetRole = ((target.user.app_metadata ?? {}) as JsonRecord).role;
+    const removesAdmin = targetRole === "admin" && (
+      (action === "role" && String(body.role) === "user") ||
+      (action === "suspend" && (body.suspend === true || body.suspend === "true"))
+    );
+    if (removesAdmin) {
+      const { data: activeAdmins } = await admin.rpc("admin_count_active");
+      if (Number(activeAdmins) <= 1) {
+        return json(req, { error: "Action refusée : ce serait le dernier administrateur actif." }, 400);
+      }
     }
 
     if (action === "role") {
