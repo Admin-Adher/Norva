@@ -567,12 +567,16 @@ class SettingsPage {
         }
 
         audioLangSelect?.addEventListener('change', () => {
+            // Language preferences drive the resolved synopsis language, so drop the catalog
+            // caches to refetch localized overviews on the next browse view.
+            API.media?.clearCatalogCaches?.();
             API.settings.update({
                 preferredAudioLanguage: audioLangSelect.value,
                 preferredLanguage: ''
             }).catch(console.error);
         });
         subtitleLangSelect?.addEventListener('change', () => {
+            API.media?.clearCatalogCaches?.();
             API.settings.update({
                 preferredSubtitleLanguage: subtitleLangSelect.value,
                 preferredLanguage: ''

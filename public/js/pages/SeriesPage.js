@@ -848,7 +848,8 @@ class SeriesPage {
         const p = this.cloudPageParams(0);
         if (p.sourceId || p.categoryId || p.q || (p.sort && p.sort !== 'default') ||
             p.year || p.minRating || p.addedDays) return null;
-        return 'series:default';
+        // Lang-scoped (see MoviesPage): the persisted first screen carries localized text.
+        return 'series:default:' + (window.NorvaCloud?.contentLanguage?.() || 'en');
     }
 
     async loadCloudSeries({ reset = false } = {}) {

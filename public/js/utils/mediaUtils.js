@@ -547,6 +547,28 @@ const MediaUtils = (() => {
         };
     }
 
+    // Coerce a value to a plain 2-letter ISO-639-1 code, or '' for the special/empty
+    // sentinels ('', 'none', 'original') and anything unusable.
+    function twoLetterLang(value) {
+        const v = String(value || '').toLowerCase().trim();
+        if (!v || v === 'none' || v === 'original') return '';
+        const code = v.split(/[-_]/)[0];
+        return /^[a-z]{2}$/.test(code) ? code : '';
+    }
+
+    // The resolved SYNOPSIS language (VOD i18n Phase 2). A synopsis is *read*, so the
+    // subtitle preference leads; then the audio preference (skipping "original", which is
+    // not a readable language); then the region's default language; then the device
+    // locale; then English as the universal floor. Returns a 2-letter ISO code.
+    // opts: { subtitle, audio, regionLang, locale }.
+    function resolveContentLanguage(opts = {}) {
+        return twoLetterLang(opts.subtitle)
+            || twoLetterLang(opts.audio)
+            || twoLetterLang(opts.regionLang)
+            || twoLetterLang(opts.locale)
+            || 'en';
+    }
+
     function normalizeGenrePreference(value) {
         const normalized = stripDiacritics(String(value || '').toLowerCase())
             .replace(/&/g, 'and')
@@ -1407,6 +1429,7 @@ const MediaUtils = (() => {
         stripDiacritics, extractYear, normalizeTitle, computeDedupKey, cleanReleaseName,
         parseVersionInfo, deriveTrackIntel, scanLanguageMarkers, parseLeadingRegionTag, searchableText, groupItems, pickRepresentative,
         normalizeLanguagePreference, normalizeContentPreferences, migrateLegacyLanguagePreference,
+        resolveContentLanguage,
         normalizeGenrePreference, normalizeGenrePreferences, scoreGenrePreferences,
         analyzeLanguageCompatibility, scoreVersionLanguage, scoreTitleForPreferences,
         orderVersionsByPreference, versionLabel, versionLanguageBadge, audioLanguageBadge,

@@ -863,7 +863,9 @@ class MoviesPage {
         const p = this.cloudPageParams(0);
         if (p.sourceId || p.categoryId || p.q || (p.sort && p.sort !== 'default') ||
             p.year || p.minRating || p.addedDays) return null;
-        return 'movies:default';
+        // Lang-scoped: the persisted first screen carries localized titles/overviews, so a
+        // synopsis-language change must not paint the previous language on cold load.
+        return 'movies:default:' + (window.NorvaCloud?.contentLanguage?.() || 'en');
     }
 
     async loadCloudMovies({ reset = false } = {}) {
