@@ -90,8 +90,18 @@
         window.requestAnimationFrame(update);
       }
     }, { passive: true });
-    // Defer the first read to after paint so it doesn't force a synchronous layout.
-    window.requestAnimationFrame(update);
+    // Defer the very first scroll-position read until the page is loaded and
+    // idle. pageYOffset/scrollTop are layout-flushing reads; running one during
+    // load — while layout is still dirty from first render — is a forced reflow
+    // (Lighthouse flags it). By load+idle the layout is clean and the page is at
+    // its resting scroll position, so the initial compact state is still set
+    // correctly, just without blocking first paint.
+    const primeInitialState = () => {
+      if (window.requestIdleCallback) window.requestIdleCallback(update, { timeout: 1200 });
+      else setTimeout(update, 400);
+    };
+    if (document.readyState === 'complete') primeInitialState();
+    else window.addEventListener('load', primeInitialState, { once: true });
   }
   setupCompactNav();
 
