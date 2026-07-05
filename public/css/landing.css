@@ -2263,3 +2263,167 @@ html.norva-lite :is(.trust-grid article, .feature-grid article, .device-grid art
 }
 
 html.norva-lite .scroll-reveal { filter: none !important; }
+
+/* =====================================================================
+   Hero guarantee badges — front-loaded, honest reassurance (7-day trial,
+   cancel anytime, GDPR, no content included). Bordered pills, no
+   backdrop-filter, so they stay cheap on constrained devices.
+   ===================================================================== */
+.hero-badges {
+  list-style: none;
+  margin: 24px 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 12px;
+}
+
+.hero-badges li {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border: 1px solid var(--glass-line);
+  border-radius: 999px;
+  background: var(--glass-2);
+  color: #d7deee;
+  font-size: 13.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.hero-badges svg {
+  width: 15px;
+  height: 15px;
+  color: #4fe0a8;
+  flex: 0 0 auto;
+}
+
+/* =====================================================================
+   "Bring your own source" — compatible source formats. Answers the
+   "will my source work?" objection and reinforces the BYO-source framing.
+   ===================================================================== */
+.compat-strip {
+  text-align: center;
+  padding: 0 0 88px;
+}
+
+.compat-chips {
+  margin: 28px 0 20px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px;
+}
+
+.compat-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 12px 20px;
+  border: 1px solid var(--glass-line);
+  border-radius: 999px;
+  background: var(--glass-2);
+  color: #dfe6f6;
+  font-weight: 700;
+  font-size: 14px;
+  transition: transform 220ms ease, border-color 220ms ease, color 220ms ease;
+}
+
+.compat-chip svg {
+  width: 17px;
+  height: 17px;
+  color: var(--blue-bright);
+  flex: 0 0 auto;
+}
+
+.compat-note {
+  max-width: 620px;
+  margin: 0 auto;
+  color: var(--soft);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .compat-chip:hover {
+    transform: translateY(-2px);
+    border-color: rgba(120, 156, 255, 0.4);
+    color: #fff;
+  }
+}
+
+/* =====================================================================
+   Cross-device QR — scan to open the web app on a phone. Native store
+   apps are on the way; no store badge until the listing is live.
+   ===================================================================== */
+.get-app {
+  padding: 104px 0;
+  border-top: 1px solid var(--glass-line-soft);
+}
+
+.get-app-inner {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: clamp(24px, 5vw, 56px);
+  padding: clamp(24px, 4vw, 40px);
+  border: 1px solid var(--glass-line);
+  border-radius: var(--radius-xl);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.012)),
+    var(--glass-2);
+  text-align: left;
+}
+
+.get-app-copy h2 {
+  margin: 12px 0 0;
+}
+
+.get-app-copy p {
+  margin: 14px 0 0;
+  color: var(--muted);
+  max-width: 520px;
+}
+
+.get-app-copy .get-app-soon {
+  margin-top: 10px;
+  font-size: 13px;
+  color: var(--soft);
+}
+
+.get-app-qr {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.get-app-qr img {
+  width: 176px;
+  height: 176px;
+  padding: 12px;
+  border-radius: 18px;
+  background: #fff;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.42);
+}
+
+.get-app-qr span {
+  color: #cbd5f0;
+  font-weight: 700;
+  font-size: 14px;
+  letter-spacing: 0.02em;
+}
+
+@media (max-width: 720px) {
+  .get-app-inner {
+    grid-template-columns: 1fr;
+    justify-items: center;
+    text-align: center;
+  }
+
+  .get-app-copy p {
+    margin-left: auto;
+    margin-right: auto;
+  }
+}
