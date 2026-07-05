@@ -189,8 +189,8 @@ class AdminPage {
 #page-admin .note-item{border-top:1px solid var(--color-border,#20202a);padding:9px 0;}
 #page-admin .note-body{color:var(--color-text-primary,#e8e8ee);font-size:13px;white-space:pre-wrap;word-break:break-word;}
 #page-admin .note-meta{color:#828ea1;font-size:11px;margin-top:3px;}
-#page-admin .note-meta .crm-note-del{background:none;border:0;color:#ff6b6b88;cursor:pointer;font-size:11px;margin-left:8px;}
-#page-admin .note-meta .crm-note-del:hover{color:#ff6b6b;}
+#page-admin .note-meta .crm-note-del{background:none;border:0;color:#ff6b6b;cursor:pointer;font-size:11px;margin-left:8px;}
+#page-admin .note-meta .crm-note-del:hover{color:#ff9b9b;text-decoration:underline;}
 #page-admin .tl{display:flex;flex-direction:column;}
 #page-admin .tl-item{display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--color-border,#1b1b24);}
 #page-admin .tl-ic{width:22px;text-align:center;}
@@ -201,6 +201,9 @@ class AdminPage {
 #page-admin .alert-card{display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:var(--color-bg-secondary,#16161c);border:1px solid #e5091433;border-left:3px solid #e50914;border-radius:9px;padding:11px 14px;margin-bottom:8px;}
 #page-admin .alert-card[data-user-id]{cursor:pointer;}
 #page-admin .alert-card[data-user-id]:hover{background:#e5091412;}
+/* Amber-severity system alerts get amber chrome so the card frame matches its badge (triage). */
+#page-admin .alert-card.amber{border-color:#f5a62333;border-left-color:#f5a623;}
+#page-admin .alert-card.amber[data-route]:hover{background:#f5a62312;}
 #page-admin .alert-card .al-name{font-weight:600;color:var(--color-text-primary,#fff);}
 #page-admin .alert-card .al-owner{color:var(--color-text-secondary,#9aa);font-size:12px;}
 #page-admin .alert-card .al-err{color:#ff9b9b;font-size:11px;font-family:monospace;}
@@ -218,8 +221,8 @@ class AdminPage {
 #page-admin .flag-meta{flex:1;min-width:0;}
 #page-admin .flag-key{font-weight:600;font-family:monospace;font-size:13px;color:#e8e8ee;}
 #page-admin .flag-desc{font-size:12px;color:#9aa;}
-#page-admin .flag-del{background:none;border:0;color:#ff6b6b88;cursor:pointer;font-size:19px;line-height:1;}
-#page-admin .flag-del:hover{color:#ff6b6b;}
+#page-admin .flag-del{background:none;border:0;color:#ff6b6b;cursor:pointer;font-size:19px;line-height:1;}
+#page-admin .flag-del:hover{color:#ff9b9b;}
 #page-admin .flag-add{margin-top:12px;}
 #page-admin .switch{position:relative;display:inline-block;width:40px;height:22px;flex-shrink:0;}
 #page-admin .switch input{opacity:0;width:0;height:0;}
@@ -252,7 +255,9 @@ class AdminPage {
 @media(max-width:900px){
   #page-admin .crm-sidebar{width:60px;padding:14px 8px;}
   #page-admin .crm-nav-item .lb,#page-admin .crm-brand span:last-child,#page-admin .crm-side-foot{display:none;}
-  #page-admin .crm-nav-item{justify-content:center;gap:0;}
+  #page-admin .crm-nav-item{justify-content:center;gap:0;position:relative;}
+  /* .lb (with its ticket count) is hidden on the rail — surface a red dot on the icon instead. */
+  #page-admin .crm-nav-item.has-alerts::after{content:"";position:absolute;top:8px;right:12px;width:8px;height:8px;border-radius:50%;background:#e50914;box-shadow:0 0 0 2px var(--color-bg-primary,#0d0d0f);}
   #page-admin .crm-page{padding:20px 16px 80px;}
   #page-admin .crm-topbar{padding:12px 16px;}
   #page-admin .crm-crumb{max-width:56vw;}
@@ -293,7 +298,7 @@ class AdminPage {
             if (ar) { this._navigate(ar.dataset.route); return; }
             const au = e.target.closest('.audit-row[data-user-id]');
             if (au) { this._navigate('client:' + au.dataset.userId); return; }
-            if (e.target.closest('.crm-back')) { this._navigate('clients'); return; }
+            if (e.target.closest('.crm-back')) { this._navigate(this._ficheReturn || 'clients'); return; }
             // Fiche relational actions
             const tRem = e.target.closest('.crm-tag-remove');
             if (tRem) { this._crmMutate('admin_tag_toggle', { p_user_id: this._crmUser, p_tag_id: tRem.dataset.tagId, p_on: false }); return; }
@@ -353,10 +358,13 @@ class AdminPage {
     async _refreshSupportBadge() {
         try {
             const c = await this._rpc('admin_support_counts') || {};
-            const item = document.querySelector('#page-admin .crm-nav-item[data-route="support"] .lb');
+            const btn = document.querySelector('#page-admin .crm-nav-item[data-route="support"]');
+            const item = btn && btn.querySelector('.lb');
             if (!item) return;
             const n = Number(c.needs_reply) || 0;
             item.innerHTML = 'Support' + (n > 0 ? ` <span class="badge red" style="margin-left:6px">${n}</span>` : '');
+            // .has-alerts drives a red dot on the collapsed (mobile) icon rail, where .lb is hidden.
+            btn.classList.toggle('has-alerts', n > 0);
         } catch (_) { /* cosmetic */ }
     }
     _view() { return document.getElementById('crm-view'); }
@@ -373,35 +381,76 @@ class AdminPage {
     }
     _confirm(message, opts) { const o = opts || {}; return this._modal({ message, danger: o.danger, okLabel: o.okLabel || 'Confirmer' }); }
     _prompt(message, def) { return this._modal({ message, prompt: true, def: def || '', okLabel: 'OK' }); }
-    // Accessible modal: focus-trapped-enough (Escape/Enter/backdrop), returns a Promise —
+    // Accessible modal: focus-trapped (Tab cycles inside, background made inert), Escape/Enter/
+    // backdrop, labelled by its title + described by its message. Returns a Promise —
     // false/null on cancel, true on confirm, or the trimmed input string on prompt.
     _modal(o) {
         return new Promise((resolve) => {
             const root = document.getElementById('page-admin') || document.body;
+            const shell = root.querySelector('.crm-shell');
             const prev = document.activeElement;
+            const uid = 'crmmodal' + (this._modalSeq = (this._modalSeq || 0) + 1);
             const back = document.createElement('div');
-            back.className = 'crm-modal-back'; back.setAttribute('role', 'dialog'); back.setAttribute('aria-modal', 'true');
-            const promptHtml = o.prompt ? `<input type="text" class="crm-modal-input" value="${AdminPage.esc(o.def || '')}" />` : '';
-            back.innerHTML = `<div class="crm-modal"><h3>${AdminPage.esc(o.title || 'Confirmation')}</h3><p>${AdminPage.esc(o.message)}</p>${promptHtml}
+            back.className = 'crm-modal-back';
+            back.setAttribute('role', 'dialog');
+            back.setAttribute('aria-modal', 'true');
+            back.setAttribute('aria-labelledby', uid + 't');
+            back.setAttribute('aria-describedby', uid + 'd');
+            const promptHtml = o.prompt ? `<input type="text" class="crm-modal-input" aria-labelledby="${uid}d" value="${AdminPage.esc(o.def || '')}" />` : '';
+            back.innerHTML = `<div class="crm-modal"><h3 id="${uid}t">${AdminPage.esc(o.title || 'Confirmation')}</h3><p id="${uid}d">${AdminPage.esc(o.message)}</p>${promptHtml}
                 <div class="mrow"><button class="cancel" type="button">Annuler</button><button class="ok ${o.danger ? 'danger' : 'primary'}" type="button">${AdminPage.esc(o.okLabel || 'OK')}</button></div></div>`;
             root.appendChild(back);
+            if (shell) shell.setAttribute('inert', ''); // background can't be reached by pointer/tab/AT
             const input = back.querySelector('.crm-modal-input');
+            const okBtn = back.querySelector('.ok');
+            const cancelBtn = back.querySelector('.cancel');
             const cancelVal = o.prompt ? null : false;
             const okVal = () => o.prompt ? (input ? input.value.trim() : '') : true;
-            const finish = (val) => { document.removeEventListener('keydown', onKey); back.remove(); if (prev && prev.focus) { try { prev.focus(); } catch (_) { /* gone */ } } resolve(val); };
-            const onKey = (e) => {
-                if (e.key === 'Escape') { e.preventDefault(); finish(cancelVal); }
-                else if (e.key === 'Enter' && (!input || document.activeElement === input)) { e.preventDefault(); finish(okVal()); }
+            const focusables = () => Array.from(back.querySelectorAll('input,button')).filter(el => !el.disabled);
+            const finish = (val) => {
+                document.removeEventListener('keydown', onKey, true);
+                if (shell) shell.removeAttribute('inert');
+                back.remove();
+                if (prev && prev.focus) { try { prev.focus(); } catch (_) { /* gone */ } }
+                resolve(val);
             };
-            back.querySelector('.ok').addEventListener('click', () => finish(okVal()));
-            back.querySelector('.cancel').addEventListener('click', () => finish(cancelVal));
+            const onKey = (e) => {
+                if (e.key === 'Escape') { e.preventDefault(); finish(cancelVal); return; }
+                if (e.key === 'Tab') {
+                    const f = focusables(); if (!f.length) return;
+                    const first = f[0], last = f[f.length - 1], a = document.activeElement;
+                    if (e.shiftKey && (a === first || !back.contains(a))) { e.preventDefault(); last.focus(); }
+                    else if (!e.shiftKey && (a === last || !back.contains(a))) { e.preventDefault(); first.focus(); }
+                    return;
+                }
+                if (e.key === 'Enter') {
+                    if (document.activeElement === cancelBtn) return; // let Enter cancel when Cancel is focused
+                    e.preventDefault(); finish(okVal());
+                }
+            };
+            okBtn.addEventListener('click', () => finish(okVal()));
+            cancelBtn.addEventListener('click', () => finish(cancelVal));
             back.addEventListener('mousedown', (e) => { if (e.target === back) finish(cancelVal); });
-            document.addEventListener('keydown', onKey);
-            (input || back.querySelector('.ok')).focus();
+            document.addEventListener('keydown', onKey, true); // capture: intercept Tab before it leaves
+            (input || okBtn).focus();
         });
     }
 
+    // Human label for a route, used by the context-aware fiche back button.
+    static routeLabel(route) {
+        if (!route) return 'Retour';
+        if (route.startsWith('ticket:')) return 'Retour au ticket';
+        if (route.startsWith('client:')) return 'Retour à la fiche';
+        return ({ clients: 'Retour aux clients', finance: 'Retour à la finance', cockpit: 'Retour au cockpit',
+            systeme: 'Retour au système', identites: 'Retour aux identités', providers: 'Retour aux providers',
+            moteur: 'Retour au moteur', support: 'Retour au support' })[route] || 'Retour';
+    }
+
     _navigate(route) {
+        const from = this._route;
+        // Remember where a fiche was opened from so its back button returns there (not always Clients).
+        // Keep the original entry across chained fiche→fiche hops (source row → another fiche).
+        if (route.startsWith('client:') && from && !from.startsWith('client:')) this._ficheReturn = from;
         this._route = route;
         this._nav = (this._nav || 0) + 1; // monotonic token — stale async page/panel loads bail on mismatch
         this._setActiveNav(route);
@@ -440,7 +489,7 @@ class AdminPage {
             this._renderAlerts(Array.isArray(sources) ? sources : [], o);
         } catch (e) {
             if (this._nav !== nav) return;
-            const err = `<div class="admin-err">Erreur : ${AdminPage.esc(e.message)}</div>`;
+            const err = `<div class="admin-err" role="alert">Erreur : ${AdminPage.esc(e.message)}</div>`;
             const ov = document.getElementById('admin-overview'); if (ov) ov.innerHTML = err;
             const al = document.getElementById('admin-alerts'); if (al) al.innerHTML = err; // both panels — don't strand Alertes on "Chargement…"
         }
@@ -461,7 +510,7 @@ class AdminPage {
         const problems = sources.filter(s => s.incomplete === true || s.sync_error || s.sync_status === 'sync_error');
         if (!problems.length && !sysAlerts.length) { el.innerHTML = '<div class="card"><span class="badge green">✓</span> Aucune alerte — tout est sain.</div>'; return; }
         const sysHtml = sysAlerts.map(a =>
-            `<div class="alert-card" data-route="${a.route}" role="button" tabindex="0" title="Ouvrir">
+            `<div class="alert-card ${a.kind === 'amber' ? 'amber' : ''}" data-route="${a.route}" role="button" tabindex="0" title="Ouvrir">
                 <span class="badge ${a.kind}">${AdminPage.n(a.n)}</span>
                 <span class="al-name">${AdminPage.esc(a.label)}</span>
             </div>`).join('');
@@ -491,7 +540,7 @@ class AdminPage {
             this._renderFinance(f || {});
         } catch (e) {
             const el = document.getElementById('fin-body');
-            if (el) el.innerHTML = `<div class="admin-err">Erreur : ${AdminPage.esc(e.message)}</div>`;
+            if (el) el.innerHTML = `<div class="admin-err" role="alert">Erreur : ${AdminPage.esc(e.message)}</div>`;
         }
     }
 
@@ -533,7 +582,7 @@ class AdminPage {
             : (s === 'authorized' || s === 'to_capture') ? `<span class="badge blue">${esc(s)}</span>`
             : (s === 'require_payment_method') ? '<span class="badge amber">non finalisé</span>'
             : `<span class="badge gray">${esc(s)}</span>`;
-        const payRows = (Array.isArray(f.recent_payments) ? f.recent_payments : []).map(p => `<tr class="user-row" data-user-id="${esc(p.user_id)}" role="button" tabindex="0" title="Voir la fiche">
+        const payRows = (Array.isArray(f.recent_payments) ? f.recent_payments : []).map(p => `<tr class="user-row" data-user-id="${esc(p.user_id)}" tabindex="0" aria-label="Voir la fiche de ${esc(p.email || p.user_id)}" title="Voir la fiche">
             <td>${esc(day(p.at))}</td><td>${esc(p.email || p.user_id)}</td>
             <td>${KIND_LABELS[p.kind] || esc(p.kind)}</td><td>${payBadge(p.status)}</td>
             <td class="num">${money(p.amount)}${p.currency && String(p.currency).toLowerCase() !== 'usd' ? ` <span class="pacct">${esc(String(p.currency).toUpperCase())}</span>` : ''}</td>
@@ -615,24 +664,49 @@ class AdminPage {
     async _pageSupport(filter) {
         this._setCrumb('Support');
         this._supportFilter = filter !== undefined ? filter : (this._supportFilter || 'needs_reply');
+        // Tabs call this directly (not via _navigate), so _nav never bumps — use a dedicated token.
+        const seq = (this._supportSeq = (this._supportSeq || 0) + 1);
+        const ae = document.activeElement;
+        const tabHadFocus = !!(ae && ae.classList && ae.classList.contains('sup-tab'));
         const v = this._view();
         const tabs = [['needs_reply', 'À répondre'], ['open', 'Ouverts'], ['pending', 'En attente'], ['closed', 'Fermés'], ['', 'Tous']];
         v.innerHTML = `<div class="crm-page">
             <h1 class="crm-h1">🎫 Support</h1>
             <p class="crm-sub">Tickets clients — chaque message client envoie un email à support@norva.tv ; répondre ici trace le fil ET email le client.</p>
-            <div class="users-controls" role="tablist" aria-label="Filtrer les tickets">${tabs.map(t =>
-                `<button class="sup-tab" role="tab" aria-selected="${t[0] === this._supportFilter ? 'true' : 'false'}" data-filter="${t[0]}" style="${t[0] === this._supportFilter ? 'border-color:#5b7cfa;color:#fff' : ''}">${t[1]}</button>`).join('')}
+            <div class="users-controls" role="tablist" aria-label="Filtrer les tickets">${tabs.map(t => {
+                const sel = t[0] === this._supportFilter;
+                return `<button class="sup-tab" role="tab" aria-selected="${sel ? 'true' : 'false'}" tabindex="${sel ? '0' : '-1'}" data-filter="${t[0]}" style="${sel ? 'border-color:#5b7cfa;color:#fff' : ''}">${t[1]}</button>`;
+            }).join('')}
             </div>
-            <div class="scroll"><div id="sup-list"><div class="ssub">Chargement…</div></div></div>
+            <div class="scroll"><div id="sup-list" role="tabpanel" aria-label="Tickets — ${AdminPage.esc(this._supportFilter || 'tous')}"><div class="ssub">Chargement…</div></div></div>
         </div>`;
-        v.querySelectorAll('.sup-tab').forEach(b => b.addEventListener('click', () => this._pageSupport(b.dataset.filter)));
+        const tabEls = Array.from(v.querySelectorAll('.sup-tab'));
+        tabEls.forEach(b => b.addEventListener('click', () => this._pageSupport(b.dataset.filter)));
+        // Roving focus + Arrow/Home/End on the tablist (activation follows focus).
+        const tablist = v.querySelector('[role="tablist"]');
+        if (tablist) tablist.addEventListener('keydown', (e) => {
+            const cur = tabEls.indexOf(document.activeElement);
+            if (cur < 0) return;
+            let next = null;
+            if (e.key === 'ArrowRight' || e.key === 'ArrowDown') next = (cur + 1) % tabEls.length;
+            else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') next = (cur - 1 + tabEls.length) % tabEls.length;
+            else if (e.key === 'Home') next = 0;
+            else if (e.key === 'End') next = tabEls.length - 1;
+            if (next === null) return;
+            e.preventDefault();
+            this._pageSupport(tabEls[next].dataset.filter);
+        });
+        // The innerHTML rebuild destroys the focused tab button — put focus back on the active tab.
+        if (tabHadFocus) { const act = v.querySelector('.sup-tab[aria-selected="true"]'); if (act) act.focus(); }
         this._refreshSupportBadge();
         try {
             const res = await this._rpc('admin_support_list', { p_status: this._supportFilter || null, p_limit: 100, p_offset: 0 });
+            if (seq !== this._supportSeq) return; // a newer tab switch superseded this fetch
             this._renderSupportList((res && res.rows) || []);
         } catch (e) {
+            if (seq !== this._supportSeq) return;
             const el = document.getElementById('sup-list');
-            if (el) el.innerHTML = `<div class="admin-err">Erreur : ${AdminPage.esc(e.message)}</div>`;
+            if (el) el.innerHTML = `<div class="admin-err" role="alert">Erreur : ${AdminPage.esc(e.message)}</div>`;
         }
     }
 
@@ -643,7 +717,7 @@ class AdminPage {
         const chip = (t) => t.status === 'closed' ? '<span class="badge gray">fermé</span>'
             : (t.last_from === 'user' ? '<span class="badge red">à répondre</span>' : '<span class="badge green">répondu</span>');
         el.innerHTML = `<table><thead><tr><th></th><th>Client</th><th>Sujet</th><th>Dernier message</th><th class="num">Messages</th><th>Ouvert</th></tr></thead><tbody>` +
-            rows.map(t => `<tr class="user-row" data-ticket-id="${AdminPage.esc(t.id)}" role="button" tabindex="0" title="Ouvrir le ticket">
+            rows.map(t => `<tr class="user-row" data-ticket-id="${AdminPage.esc(t.id)}" tabindex="0" aria-label="Ouvrir le ticket : ${AdminPage.esc(t.subject)}" title="Ouvrir le ticket">
                 <td>${chip(t)}</td>
                 <td>${AdminPage.esc(t.email || t.user_id)}</td>
                 <td><b>${AdminPage.esc(t.subject)}</b><div class="pacct" style="max-width:340px;overflow:hidden;text-overflow:ellipsis">${AdminPage.esc(t.last_body || '')}</div></td>
@@ -673,7 +747,7 @@ class AdminPage {
         } catch (e) {
             if (this._nav !== nav) return;
             const b = document.getElementById('ticket-body');
-            if (b) b.innerHTML = `<div class="admin-err">Erreur : ${AdminPage.esc(e.message)}</div>`;
+            if (b) b.innerHTML = `<div class="admin-err" role="alert">Erreur : ${AdminPage.esc(e.message)}</div>`;
         }
     }
 
@@ -719,19 +793,19 @@ class AdminPage {
             const text = ta ? ta.value.trim() : '';
             if (text.length < 2) { this._toast('Écris une réponse avant d\'envoyer.', 'err'); if (ta) ta.focus(); return; }
             send.disabled = true; send.textContent = 'Envoi…';
-            try { await this._supportEdge('/admin/reply', { ticket_id: t.id, body: text }); this._pageTicket(t.id); this._refreshSupportBadge(); }
+            try { await this._supportEdge('/admin/reply', { ticket_id: t.id, body: text }); if (this._route === 'ticket:' + t.id) this._pageTicket(t.id); this._refreshSupportBadge(); }
             catch (e) { send.disabled = false; send.textContent = '📤 Envoyer la réponse'; this._toast('Échec de l\'envoi : ' + e.message, 'err'); }
         });
         const closeBtn = document.getElementById('tk-close');
         if (closeBtn) closeBtn.addEventListener('click', async () => {
             closeBtn.disabled = true; closeBtn.textContent = '…';
-            try { await this._supportEdge('/admin/status', { ticket_id: t.id, status: 'closed' }); this._pageTicket(t.id); this._refreshSupportBadge(); }
+            try { await this._supportEdge('/admin/status', { ticket_id: t.id, status: 'closed' }); if (this._route === 'ticket:' + t.id) this._pageTicket(t.id); this._refreshSupportBadge(); }
             catch (e) { closeBtn.disabled = false; closeBtn.textContent = '✔ Fermer le ticket'; this._toast('Erreur : ' + e.message, 'err'); }
         });
         const reopen = document.getElementById('tk-reopen');
         if (reopen) reopen.addEventListener('click', async () => {
             reopen.disabled = true; reopen.textContent = '…';
-            try { await this._supportEdge('/admin/status', { ticket_id: t.id, status: 'open' }); this._pageTicket(t.id); this._refreshSupportBadge(); }
+            try { await this._supportEdge('/admin/status', { ticket_id: t.id, status: 'open' }); if (this._route === 'ticket:' + t.id) this._pageTicket(t.id); this._refreshSupportBadge(); }
             catch (e) { reopen.disabled = false; reopen.textContent = '↺ Rouvrir'; this._toast('Erreur : ' + e.message, 'err'); }
         });
     }
@@ -851,7 +925,7 @@ class AdminPage {
         } catch (e) {
             if (seq !== this._usersSeq) return;
             if (range) range.textContent = '';
-            el.innerHTML = `<div class="admin-err">Erreur : ${AdminPage.esc(e.message)}</div>`;
+            el.innerHTML = `<div class="admin-err" role="alert">Erreur : ${AdminPage.esc(e.message)}</div>`;
         }
     }
 
@@ -880,7 +954,7 @@ class AdminPage {
             const last = r.last_sign_in_at
                 ? `<span title="${AdminPage.esc(new Date(r.last_sign_in_at).toLocaleString('fr-FR'))}">${AdminPage.esc(AdminPage.timeAgo(r.last_sign_in_at))}</span>`
                 : '<span class="badge gray">jamais</span>';
-            return `<tr class="user-row" data-user-id="${AdminPage.esc(r.user_id)}" data-email="${AdminPage.esc(r.email || '')}" title="Voir la fiche">
+            return `<tr class="user-row" data-user-id="${AdminPage.esc(r.user_id)}" data-email="${AdminPage.esc(r.email || '')}" tabindex="0" aria-label="Voir la fiche de ${AdminPage.esc(r.email || r.user_id)}" title="Voir la fiche">
                 <td>${AdminPage.esc(r.email || '—')}${driver}${internal}${banned}</td>
                 <td>${AdminPage.billingBadge(r.billing_status, r.plan_code)}</td>
                 <td>${role}</td>
@@ -986,7 +1060,7 @@ class AdminPage {
         this._setCrumb('Clients › fiche');
         const v = this._view();
         v.innerHTML = `<div class="crm-page">
-            <button class="crm-back">← Retour aux clients</button>
+            <button class="crm-back">← ${AdminPage.routeLabel(this._ficheReturn || 'clients')}</button>
             <div id="fiche-body"><div class="ssub">Chargement…</div></div>
         </div>`;
         try {
@@ -999,7 +1073,7 @@ class AdminPage {
         } catch (e) {
             if (this._crmUser !== userId) return;
             const b = document.getElementById('fiche-body');
-            if (b) b.innerHTML = `<div class="admin-err">Erreur : ${AdminPage.esc(e.message)}</div>`;
+            if (b) b.innerHTML = `<div class="admin-err" role="alert">Erreur : ${AdminPage.esc(e.message)}</div>`;
         }
     }
 
@@ -1013,7 +1087,7 @@ class AdminPage {
             this._renderBillingPanel(el, b, userId);
         } catch (e) {
             if (this._crmUser !== userId) return;
-            el.innerHTML = `<div class="admin-err">Erreur : ${AdminPage.esc(e.message)}</div>`;
+            el.innerHTML = `<div class="admin-err" role="alert">Erreur : ${AdminPage.esc(e.message)}</div>`;
         }
     }
 
@@ -1109,7 +1183,7 @@ class AdminPage {
                 r.addEventListener('click', () => this._navigate('ticket:' + r.dataset.ticketId)));
         } catch (e) {
             if (this._crmUser !== userId) return;
-            el.innerHTML = `<div class="admin-err">Erreur : ${AdminPage.esc(e.message)}</div>`;
+            el.innerHTML = `<div class="admin-err" role="alert">Erreur : ${AdminPage.esc(e.message)}</div>`;
         }
     }
 
@@ -1124,7 +1198,7 @@ class AdminPage {
             if (this._crmUser !== userId) return;
             ['fiche-tags', 'fiche-notes', 'fiche-timeline'].forEach(id => {
                 const el = document.getElementById(id);
-                if (el) el.innerHTML = `<div class="admin-err">Erreur : ${AdminPage.esc(e.message)}</div>`;
+                if (el) el.innerHTML = `<div class="admin-err" role="alert">Erreur : ${AdminPage.esc(e.message)}</div>`;
             });
         }
     }
@@ -1140,7 +1214,7 @@ class AdminPage {
         const tagsEl = document.getElementById('fiche-tags');
         if (tagsEl) {
             const cur = tags.length
-                ? tags.map(t => `<span class="badge ${AdminPage.tagColor(t.color)} tag-chip">${AdminPage.esc(t.label)} <button class="crm-tag-remove" data-tag-id="${AdminPage.esc(t.id)}" title="Retirer">×</button></span>`).join('')
+                ? tags.map(t => `<span class="badge ${AdminPage.tagColor(t.color)} tag-chip">${AdminPage.esc(t.label)} <button class="crm-tag-remove" data-tag-id="${AdminPage.esc(t.id)}" aria-label="Retirer le tag ${AdminPage.esc(t.label)}" title="Retirer">×</button></span>`).join('')
                 : '<span class="ssub">Aucun tag.</span>';
             const avail = all.filter(t => !applied.has(t.id))
                 .map(t => `<button class="crm-tag-add tag-add-chip" data-tag-id="${AdminPage.esc(t.id)}">+ ${AdminPage.esc(t.label)}</button>`).join('');
@@ -1318,7 +1392,7 @@ class AdminPage {
             this._renderSources(Array.isArray(sources) ? sources : []);
         } catch (e) {
             const el = document.getElementById('admin-sources');
-            if (el) el.innerHTML = `<div class="admin-err">Erreur : ${AdminPage.esc(e.message)}</div>`;
+            if (el) el.innerHTML = `<div class="admin-err" role="alert">Erreur : ${AdminPage.esc(e.message)}</div>`;
         }
     }
 
@@ -1336,7 +1410,7 @@ class AdminPage {
             this._renderIdentities(Array.isArray(ids) ? ids : []);
         } catch (e) {
             const el = document.getElementById('admin-identities');
-            if (el) el.innerHTML = `<div class="admin-err">Erreur : ${AdminPage.esc(e.message)}</div>`;
+            if (el) el.innerHTML = `<div class="admin-err" role="alert">Erreur : ${AdminPage.esc(e.message)}</div>`;
         }
     }
 
@@ -1353,7 +1427,7 @@ class AdminPage {
                 ? ' <span class="badge amber" title="Plusieurs marques revendues pointent vers le même panel amont">miroir multi-marques</span>' : '';
             const brandChips = brands.map(b => `<span class="badge blue">${AdminPage.esc(b)}</span>`).join(' ');
             const rows = sources.map(s => {
-                const clickable = s.user_id ? ` class="user-row" data-user-id="${AdminPage.esc(s.user_id)}" role="button" tabindex="0" title="Voir la fiche client"` : '';
+                const clickable = s.user_id ? ` class="user-row" data-user-id="${AdminPage.esc(s.user_id)}" tabindex="0" aria-label="Voir la fiche de ${AdminPage.esc(s.owner_email || s.display_name || '')}" title="Voir la fiche client"` : '';
                 return `<tr${clickable}>
                     <td>${AdminPage.esc(s.display_name)}</td>
                     <td><span class="pacct">${AdminPage.esc(s.owner_email || '—')}</span>${s.is_driver ? ' <span class="badge blue">pilote</span>' : ''}</td>
@@ -1382,7 +1456,7 @@ class AdminPage {
             <p class="crm-sub">Couverture par panel (comptes pilotes) + matching TMDB + crons jour/nuit.</p>
             <div class="admin-block"><h2>Enrichissement par panel</h2><div class="scroll"><div id="admin-enrich"><div class="ssub">Chargement…</div></div></div></div>
             <div class="admin-block"><h2>🎯 Matching TMDB</h2><div class="ssub">Backlogs drainés par les crons nocturnes (backfill-years 1000/j · search-match 3 600/j · revalidate 2 000/j) — ces compteurs doivent baisser de jour en jour.</div><section id="admin-tmdb" class="admin-cards"><div class="ssub">Chargement…</div></section></div>
-            <div class="admin-block"><h2>⏱️ Crons</h2><div class="scroll"><div id="admin-cron"></div></div></div>
+            <div class="admin-block"><h2>⏱️ Crons</h2><div class="scroll"><div id="admin-cron"><div class="ssub">Chargement…</div></div></div></div>
         </div>`;
         try {
             const [enrich, cron, ov] = await Promise.all([
@@ -1394,7 +1468,7 @@ class AdminPage {
             this._renderCron(Array.isArray(cron) ? cron : []);
             this._renderTmdb(ov || {});
         } catch (e) {
-            const msg = `<div class="admin-err">Erreur : ${AdminPage.esc(e.message)}</div>`;
+            const msg = `<div class="admin-err" role="alert">Erreur : ${AdminPage.esc(e.message)}</div>`;
             const en = document.getElementById('admin-enrich');
             const cr = document.getElementById('admin-cron');
             const tm = document.getElementById('admin-tmdb');
@@ -1419,46 +1493,55 @@ class AdminPage {
     // ── Page: Système (snapshot health + admin audit feed) ──
     async _pageSysteme() {
         this._setCrumb('Système', this._lastTs);
+        const nav = this._nav;
         const v = this._view();
         v.innerHTML = `<div class="crm-page">
             <h1 class="crm-h1">🛡️ Système & Audit</h1>
             <p class="crm-sub">Santé du snapshot & infra temps réel · feature flags · journal d'audit.</p>
             <div class="kpi-gtitle">📸 Snapshot</div>
             <section id="sys-health" class="admin-cards"><div class="ssub">Chargement…</div></section>
-            <div class="admin-block"><h2>🌐 Infra temps réel <button id="sys-infra-refresh" class="mini-btn" title="Re-ping">↻</button></h2><div id="sys-infra" class="admin-cards"><div class="ssub">Ping…</div></div></div>
+            <div class="admin-block"><h2>🌐 Infra temps réel <button id="sys-infra-refresh" class="mini-btn" aria-label="Re-pinger l'infra" title="Re-ping">↻</button></h2><div id="sys-infra" class="admin-cards"><div class="ssub">Ping…</div></div></div>
             <div class="admin-block"><h2>🚩 Feature flags</h2><div id="sys-flags"><div class="ssub">Chargement…</div></div></div>
             <div class="admin-block"><h2>📜 Journal d'audit</h2><div id="sys-audit"><div class="ssub">Chargement…</div></div></div>
         </div>`;
         try {
             const o = await this._rpc('admin_overview');
+            if (this._nav !== nav) return; // navigated away — don't overwrite the new page's crumb
             this._lastTs = o && o.refreshed_at ? o.refreshed_at : this._lastTs;
             this._setCrumb('Système', this._lastTs);
             this._renderSysHealth(o);
         } catch (e) {
+            if (this._nav !== nav) return;
             const el = document.getElementById('sys-health');
-            if (el) el.innerHTML = `<div class="admin-err">Erreur : ${AdminPage.esc(e.message)}</div>`;
+            if (el) el.innerHTML = `<div class="admin-err" role="alert">Erreur : ${AdminPage.esc(e.message)}</div>`;
         }
+        if (this._nav !== nav) return;
         this._loadAudit(true);
         this._loadInfra();
         this._loadFlags();
     }
 
     // Keyset-paginated audit feed: each "Charger plus" fetches the batch strictly OLDER than the
-    // last loaded row (created_at cursor) — no OFFSET, constant cost at any depth.
+    // last loaded row. Composite (created_at, id) cursor so events sharing an identical timestamp
+    // (admin_tag_bulk writes one row per client at the same now()) aren't skipped at a boundary.
     async _loadAudit(reset) {
         const el = document.getElementById('sys-audit');
         if (!el) return;
         if (reset || !this._audit) this._audit = { rows: [], done: false };
         const a = this._audit;
         try {
-            const last = a.rows.length ? a.rows[a.rows.length - 1].created_at : null;
-            const batch = await this._rpc('admin_audit_feed', { p_limit: 80, p_before: last });
+            const lastRow = a.rows.length ? a.rows[a.rows.length - 1] : null;
+            const batch = await this._rpc('admin_audit_feed', {
+                p_limit: 80,
+                p_before: lastRow ? lastRow.created_at : null,
+                p_before_id: lastRow ? lastRow.id : null
+            });
             const list = Array.isArray(batch) ? batch : [];
             a.rows = a.rows.concat(list);
             a.done = list.length < 80;
             this._renderAudit(a.rows);
         } catch (e) {
-            el.innerHTML = `<div class="admin-err">Erreur : ${AdminPage.esc(e.message)}</div>`;
+            el.innerHTML = `<div class="admin-err" role="alert">Erreur : ${AdminPage.esc(e.message)}</div>`;
         }
     }
 
@@ -1475,7 +1558,7 @@ class AdminPage {
             const d = await res.json().catch(() => ({}));
             if (!res.ok) throw new Error(d.error || String(res.status));
             this._renderInfra(d);
-        } catch (e) { el.innerHTML = `<div class="admin-err">Erreur : ${AdminPage.esc(e.message)}</div>`; }
+        } catch (e) { el.innerHTML = `<div class="admin-err" role="alert">Erreur : ${AdminPage.esc(e.message)}</div>`; }
     }
 
     _renderInfra(d) {
@@ -1499,7 +1582,7 @@ class AdminPage {
         try {
             const flags = await this._rpc('admin_flags_list');
             this._renderFlags(Array.isArray(flags) ? flags : []);
-        } catch (e) { el.innerHTML = `<div class="admin-err">Erreur : ${AdminPage.esc(e.message)}</div>`; }
+        } catch (e) { el.innerHTML = `<div class="admin-err" role="alert">Erreur : ${AdminPage.esc(e.message)}</div>`; }
     }
 
     _renderFlags(flags) {
@@ -1709,9 +1792,13 @@ class AdminPage {
         const winBadge = (w) => w === 'jour' ? '<span class="badge amber">☀️ jour</span>'
             : (w === 'nuit' ? '<span class="badge blue">🌙 nuit</span>'
             : (w === 'continu' ? '<span class="badge green">♾️ continu</span>' : '<span class="badge gray">—</span>'));
+        // Group by window client-side (stable sort keeps the SQL's billing/lifecycle-first order
+        // within each window) — the snapshot ORDER BY no longer guarantees window contiguity.
+        const winRank = (w) => (w === 'jour' ? 0 : w === 'nuit' ? 1 : w === 'continu' ? 2 : 3);
+        const sorted = rows.slice().sort((a, b) => winRank(a.window) - winRank(b.window));
         const head = `<tr><th>Fenêtre</th><th>Dimension</th><th>Job</th><th>Cadence</th><th>État</th><th>Dernier run</th><th class="num">Échecs 24h</th></tr>`;
         let prevWin = null;
-        const body = rows.map(r => {
+        const body = sorted.map(r => {
             const paused = r.active === false;
             const failing = Number(r.fails_24h) > 0;
             const newGroup = r.window !== prevWin;
@@ -1764,7 +1851,8 @@ class AdminPage {
         const h = Math.round(m / 60); if (h < 24) return `il y a ${h} h`;
         const j = Math.round(h / 24); if (j < 31) return `il y a ${j} j`;
         const mo = Math.round(j / 30); if (mo < 12) return `il y a ${mo} mois`;
-        return `il y a ${Math.round(mo / 12)} an${mo >= 24 ? 's' : ''}`;
+        const y = Math.round(mo / 12);
+        return `il y a ${y} an${y > 1 ? 's' : ''}`;
     }
     // cron expression → concise French label (raw kept as tooltip). Falls back to raw on anything odd.
     static cronHuman(expr) {
