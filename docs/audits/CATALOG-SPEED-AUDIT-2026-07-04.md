@@ -28,6 +28,7 @@ classée par coût. Chaque requête a ensuite été mesurée en `EXPLAIN (ANALYZ
 | #156 | rail « Ajouts récents » (`listTitleRail`, tri `created_at`) | Home ×2 | tri complet **188k** | **19 ms** | `idx_cloud_titles_recent` (partiel `variant_count>0`, ordonné `created_at desc`) |
 | #156 | garde `cloud_genre_bucket_counts` | Movies/Series ×2 | `count(*)` **~3,8 s** | **47 ms** | garde par `catalog_item_estimate()` |
 | #158 | grille plate dédup — comptes moyens (~20–60k) | Movies/Series (tri/filtre) | **~31 s** (jeremy 53k) | **47 ms** | `is_dedup_primary` précalculé (voir §1) |
+| #160 | `refresh_admin_dashboard()` (dashboard admin) | cron ×1/10 min | timeout **120 s** (~9 échecs/24 h) | **~40 s** | `idx_ctv_id_source` (`(id) INCLUDE source_id`) → couverture + rollup en index-only (voir §3) |
 
 ### La technique clé : `catalog_item_estimate()`
 
@@ -78,6 +79,35 @@ Mesures : jeremy 31 s → **47 ms** (default), 10,8 s → **111 ms** (rating) ; 
 Le sélecteur de genres ne montre pas de compteurs pour les gros comptes (garde qui renvoie
 0). Les **rails** de genre et la grille par genre fonctionnent (GIN). Restaurer les compteurs
 demanderait un cache de comptages (même stratégie que B ci-dessus).
+
+## §3. Dashboard admin — timeouts éliminés (#160, 2026-07-05)
+
+`refresh_admin_dashboard()` (cron `admin-dashboard-refresh`, toutes les 10 min) échouait
+~9×/24 h en `statement timeout`. Sa requête de **couverture** et son **rollup par source**
+résolvent chacun le « panel » d'un titre via `default_variant_id → cloud_title_variants.source_id`.
+Sans index couvrant, le planner construisait son hash à partir d'un **seq scan complet du heap
+des ~755k variantes** (larges) — l'I/O dominante — et sous la contention des imports la fonction
+dépassait son budget.
+
+**Détail piégeux** : le `set local statement_timeout='180s'` **interne à la fonction est
+inopérant** — `statement_timeout` est armé au *début* de l'instruction cron, avant l'exécution
+de la fonction → le vrai budget est celui du rôle cron (**~120 s**, les échecs tombent pile à
+120,1 s). Pour le rendre effectif, il faudrait le poser **côté commande cron**
+(`set statement_timeout='300s'; select …`) ; un `set local` interne ne le pourra jamais.
+
+**Correctif** : `idx_ctv_id_source = (id) INCLUDE (source_id)` → la couverture **et** les CTE
+`tc`/`vc` du rollup passent en **Index Only Scan** (~25 Mo vs heap). Mesuré live, imports en
+cours : couverture **100 s+ → ~10 s**, rollup **~21 s**, **fonction complète ~40 s** (2× sous le
+budget). `source_id` est insert-only sur les variantes → maintenance d'index négligeable.
+`idx_cmi_sort_rating`-style : construit en `CONCURRENTLY`, migration `IF NOT EXISTS`.
+
+## Enrichissement / crons (contexte connexe)
+
+Pendant cet audit, deux causes du dashboard « CRONS : 40 échecs / 24 h » ont aussi été traitées
+(match TMDB Ninja épinglé sur un compte drainé + garde-fou cron cassé). C'est du **runtime
+pg_cron**, documenté séparément dans `CATALOG-ENRICHMENT-CRONS-RUNBOOK.md` § « Incident
+2026-07-05 » (dont : pourquoi l'enrichissement **audio** à « 266 j » est de l'**anti-ban
+volontaire**, pas un bug).
 
 ## Portée Android
 
