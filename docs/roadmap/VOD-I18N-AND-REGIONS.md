@@ -213,7 +213,7 @@ episode fetch (coherent with the series); an episode-i18n cache is a later optim
 | **1** | `regions.js` (curated + bundles) + normaliser + searchable dropdown + region→defaultLanguage | Frontend | Low | ✅ **shipped (#167)** |
 | **2** | `resolveContentLang` chain; propagate `?lang=` to all catalog fetches | Frontend | Low | ✅ **shipped (#168)** |
 | **3** | `norva-catalog`: generalise serving locale (any lang, not fr/en) + lazy on-demand i18n → global cache | Edge | Med | ✅ **shipped (#169)** |
-| **4** | Pre-warm cron (trending × top langs) + `i18n_attempted` guard | Edge + cron | Med | — |
+| **4** | On-demand full-map i18n + `i18n_attempted_at` guard + gap-fill cron | Edge + cron | Med | ✅ **shipped** |
 | **5** | Episode-i18n cache (coherence itself landed in #169) | Edge | Low | — |
 
 No titles schema change (`metadata.i18n` is already language-flexible); Phase 4 may add a
@@ -309,3 +309,56 @@ So Phase 3's real gaps were **(a)** the *serving* path still hard-coded `fr-FR :
 - **Deferred to Phase 4/5**: a persistent `i18n_attempted` negative-cache guard (today the CDN
   + in-memory caches suffice) and an optional per-(title, season, lang) **episode** i18n store
   (episodes are live-fetched coherently for now).
+
+### C.8 Phase 4 — as shipped
+
+**Reality check that reshaped Phase 4 (verified on the live DB).** The roadmap named this
+"pre-warm cron (trending × top langs)", but the data says a big pre-warm is unnecessary and a
+trending rank is unusable:
+
+- Enrichment already writes a **full multi-language i18n map** (from TMDB `translations`), so
+  **39,390 of 39,479 validated matches are already localized — only ~89 gaps.** New matches
+  arrive already-translated, so the gap does not grow.
+- The other **51,250** rows have a numeric id but **no `metadata.tmdb`** — they are *unvalidated*
+  (a matching problem, handled by `search-match`/`revalidate`), and their provider-supplied ids
+  can't be blindly trusted for synopses. Out of scope for i18n.
+- There is **no usable trending signal** (`top_viewed_titles` returns ~34 titles; `metadata`
+  carries no popularity/vote_count), and the whole-table is heavily TOASTed so **any `ORDER BY`
+  over a jsonb-extracted field times out** — ranking by popularity is off the table.
+
+So Phase 4 became three grounded pieces instead of a brute pre-warm:
+
+1. **Demand-driven full-map on-demand (the real lever).** `getTmdbMeta` already calls TMDB on
+   every fiche open; it now appends **`translations`** and writes the **whole** i18n map (every
+   language TMDB has, title + overview) via the new **`catalog_upsert_i18n_map`** RPC —
+   superseding Phase 3's single-overview write. One viewer of *any* language localizes the title
+   for *everyone*, in every language, at zero extra TMDB calls. The translations→i18n builder is
+   now a shared helper (`buildI18nFromTmdbTranslations`) reused by enrichment and the edge, so
+   both build i18n identically (empty entries skipped → no original-language poisoning; localized
+   titles are trustworthy here because they come from `translations`, not a silent fallback).
+2. **`i18n_attempted_at` guard.** A dedicated `timestamptz` column (the codebase's
+   `whisper_attempted_at`/`revalidate_attempted_at` convention — **not** a `metadata` jsonb key,
+   which would re-TOAST multi-KB rows and ride along on every rail read). Per-title (not per-lang)
+   is correct because one `translations` pull returns every language at once. Set by
+   `catalog_upsert_i18n_map` and the cron; an empty map only stamps the marker (never re-TOASTs
+   `metadata`). Lets both paths skip a title re-pulled within a 90-day window.
+3. **Lean gap-fill cron.** `norva-source-sync /cron/prewarm-i18n` → `cronPrewarmI18n`: pulls the
+   bounded gap set from `catalog_i18n_prewarm_candidates` (validated matches missing i18n, driven
+   by the partial index `catalog_titles_i18n_gap_idx` — never a full-table scan), runs
+   `validateTmdbCandidate` (require `valid` to write, since the id is re-checked), writes the full
+   map, and **attempt-stamps every scanned row** so an unmatchable/absent title isn't re-pulled
+   tightly. Daily 02:35 UTC, `WHERE EXISTS`-guarded so an idle tick makes **zero** POSTs.
+
+**Migration** `20260705020000_i18n_prewarm.sql`: `i18n_attempted_at` column + gap partial index +
+`catalog_upsert_i18n_map` (gap-fill merge, existing langs win, never clobbers) +
+`catalog_i18n_prewarm_candidates`; all three RPCs revoked from PUBLIC, granted to `service_role`.
+
+**Rollout**: apply this migration **before/with** the edge deploy (the RPC calls are best-effort
+→ a deploy landing first degrades to a no-op). Then apply the `norva-prewarm-i18n` pg_cron job
+via `execute_sql` (see `supabase/functions/ENRICHMENT_CRON_SETUP.md`). Like every other write to
+the global cache, the localized synopsis only *appears* in rails once
+`NORVA_CATALOG_READ_SOURCE=catalog_titles` is on.
+
+**Honest scope**: this does not (and cannot) exceed TMDB's own translation coverage (fr 67 %,
+es 60 %, pt 55 %, ar 25 % of matched titles) — it fills what TMDB has, on demand and for the
+residual gaps, and stops asking for what TMDB lacks.

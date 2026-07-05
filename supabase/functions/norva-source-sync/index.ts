@@ -161,6 +161,15 @@ Deno.serve(async (req) => {
         const userId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userParam) ? userParam : null;
         return json(req, await cronSearchMatch(supabase, limit, reset, concurrency, userId));
       }
+      // Pre-warm the GLOBAL catalog_titles i18n: fill validated matches (metadata.tmdb) that
+      // still lack any localized synopsis — one full-translations pull per title covers every
+      // language TMDB has. Cheap + self-draining (a title leaves the gap set the moment i18n
+      // is written); attempt-stamped so unmatchable/absent titles aren't re-pulled tightly.
+      if (segments[1] === "prewarm-i18n") {
+        const limit = boundedInt(url.searchParams.get("limit"), 100, 1, 500);
+        const concurrency = boundedInt(url.searchParams.get("conc"), 8, 1, 20);
+        return json(req, await cronPrewarmI18n(supabase, limit, concurrency));
+      }
       return json(req, { error: "not_found" }, 404);
     }
     if (req.method === "POST" && segments[0] === "sources" && segments[2] === "sync") {
@@ -744,6 +753,70 @@ async function cronRevalidate(db: SupabaseClient, limit: number, reset: boolean,
     .update({ last_id: passEnded ? null : maxId, done, last_run: { ...summary, wrapped: passEnded, at: new Date().toISOString() }, updated_at: new Date().toISOString() })
     .eq("id", 1);
   return summary;
+}
+
+// Pre-warm the GLOBAL catalog_titles.i18n for validated matches that still lack any
+// localized synopsis (Phase 4). Enrichment already localises matched titles from TMDB
+// translations, so this only fills the residual gaps; the on-demand path (norva-catalog
+// getTmdbMeta) covers the long tail as it's browsed. ONE full-translations pull per title
+// covers every language TMDB has — far cheaper and broader than per-language fetches, and
+// it stores the localized title too (from translations, trustworthy). Bounded + attempt-
+// stamped so an unmatchable id or a title TMDB has no translations for isn't re-pulled tightly.
+async function cronPrewarmI18n(db: SupabaseClient, limit: number, concurrency: number) {
+  const apiKey = tmdbApiKey();
+  if (!apiKey) return { error: "tmdb_key_missing", done: true };
+
+  const retryBefore = new Date(Date.now() - 90 * 24 * 3600 * 1000).toISOString();
+  const { data: rows, error } = await db.rpc("catalog_i18n_prewarm_candidates", {
+    p_limit: limit,
+    p_retry_before: retryBefore,
+  });
+  if (error) throw new HttpError(500, "prewarm candidate select failed", error.message);
+
+  const candidates = Array.isArray(rows) ? rows as JsonRecord[] : [];
+  const scanned = candidates.length;
+  if (!scanned) return { scanned: 0, localized: 0, done: true };
+
+  const stampAttempted = async (itemType: string, tmdbId: string) => {
+    await db.from("catalog_titles").update({ i18n_attempted_at: new Date().toISOString() })
+      .eq("item_type", itemType).eq("provider_tmdb_id", tmdbId);
+  };
+
+  let next = 0;
+  let localized = 0;
+  const worker = async () => {
+    while (next < candidates.length) {
+      const row = candidates[next++];
+      const itemType: "movie" | "series" = row.item_type === "series" ? "series" : "movie";
+      const tmdbId = stringOr(row.provider_tmdb_id, "");
+      if (!/^\d+$/.test(tmdbId)) continue;
+      try {
+        const validation = await validateTmdbCandidate(apiKey, {
+          itemType,
+          tmdbId,
+          title: stringOr(row.title, ""),
+          year: row.release_year != null ? String(row.release_year) : null,
+        });
+        if (validation.valid && validation.i18n && Object.keys(validation.i18n).length) {
+          const { error: upErr } = await db.rpc("catalog_upsert_i18n_map", {
+            p_item_type: itemType,
+            p_provider_tmdb_id: tmdbId,
+            p_i18n: validation.i18n,
+          });
+          if (!upErr) { localized += 1; continue; } // the RPC already stamped i18n_attempted_at
+        }
+        // No usable localization (unconfident id, or TMDB has no translations) → stamp so the
+        // 90-day window keeps the cron from re-pulling it every run.
+        await stampAttempted(itemType, tmdbId);
+      } catch (_) {
+        // A TMDB hiccup must not abort the batch; stamp to avoid a tight retry loop.
+        await stampAttempted(itemType, tmdbId).catch(() => {});
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(Math.max(1, concurrency), candidates.length) }, worker));
+
+  return { scanned, localized, done: scanned < limit };
 }
 
 // Search-based matching for UNMATCHED titles (no provider TMDB id): find the title

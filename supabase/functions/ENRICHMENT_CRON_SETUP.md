@@ -255,7 +255,18 @@ qu'ils soient déjà prêts avant qu'un user les demande. Détail produit : `doc
 | `norva-origlang-backfill` | `norva-tmdb-origlang` (limit 300, gardé `where exists …`) | `1,11,21,31,41,51 3,4 * * *` — off-peak |
 | `norva-enrich-revalidate` | `norva-source-sync/cron/revalidate` (limit 80, conc 8) | `5 */6 * * *` — toutes les 6 h |
 | `norva-enrich-backfill-years` | `norva-source-sync/cron/backfill-years` (limit 200, conc 12) | `30 3 * * *` — quotidien 03:30 |
+| `norva-prewarm-i18n` | `norva-source-sync/cron/prewarm-i18n` (limit 200, conc 8, gardé `where exists …`) | `35 2 * * *` — quotidien 02:35, avant la rafale 03-04 |
 | `norva-series-info-cache-prune` | pure SQL `delete from cloud_series_info_cache` | `15 2 * * *` — quotidien 02:15 |
+
+> **`norva-prewarm-i18n`** comble les synopsis multi-langues manquants du cache global
+> `catalog_titles` (Phase 4 VOD i18n, `docs/roadmap/VOD-I18N-AND-REGIONS.md` C.8). L'enrichissement
+> localise déjà chaque titre matché via les `translations` TMDB (39 390/39 479 matchs validés déjà
+> traduits — ~89 trous résiduels), donc ce cron ne comble QUE ces trous : un pull `translations` par
+> titre couvre TOUTES les langues d'un coup, marque `catalog_titles.i18n_attempted_at` (fenêtre de
+> retry 90 j) et sort le titre du set-cible dès que l'i18n est écrit. Les ~51 k lignes à id numérique
+> mais **sans** `metadata.tmdb` sont hors-scope (problème de *matching*, pas d'i18n — géré par
+> `search-match`/`revalidate`). La longue traîne réellement consultée est peuplée par le chemin
+> **on-demand** (`norva-catalog` getTmdbMeta écrit la carte complète à chaque ouverture de fiche).
 
 > Each `audio-backfill` job carries an explicit `userId` — **one driving account per
 > provider** (`c5be5ac4…` super8k, `0b971271…` apdxes, `7bdab1df…` AÎRO). Enrichment writes
@@ -533,6 +544,24 @@ select cron.schedule('norva-enrich-backfill-years', '30 3 * * *', $cron$
     url := 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-source-sync/cron/backfill-years?limit=200&conc=12',
     headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'norva_cron_shared_secret')),
     body := '{}'::jsonb, timeout_milliseconds := 120000);
+$cron$);
+
+-- i18n pre-warm → norva-source-sync/cron/prewarm-i18n  (Vault: norva_cron_shared_secret)
+-- Phase 4 : comble les synopsis multi-langues manquants des matchs validés (metadata.tmdb présent,
+-- pas encore d'i18n) — 1 pull translations = toutes les langues. Gardé par WHERE EXISTS (index
+-- partiel catalog_titles_i18n_gap_idx) : le tick ne POST que s'il reste des trous à combler et pas
+-- attaqués depuis 90 j. Self-draining (un titre sort du set dès l'i18n écrit). 02:35, avant 03-04.
+-- ⚠ Nécessite la migration 20260705020000_i18n_prewarm.sql (colonne + RPCs). Appliquer AVANT.
+select cron.schedule('norva-prewarm-i18n', '35 2 * * *', $cron$
+  select net.http_post(
+    url := 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-source-sync/cron/prewarm-i18n?limit=200&conc=8',
+    headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'norva_cron_shared_secret')),
+    body := '{}'::jsonb, timeout_milliseconds := 120000)
+  where exists (
+    select 1 from public.catalog_titles c
+    where (c.metadata ? 'tmdb') and not (c.metadata ? 'i18n')
+      and (c.i18n_attempted_at is null or c.i18n_attempted_at < now() - interval '90 days')
+  );
 $cron$);
 
 -- Series-info cache eviction (pure SQL, no edge/provider call). Bounds the cross-user

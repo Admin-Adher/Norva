@@ -6,6 +6,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { buildLiveCatalog, findLiveChannel, type LiveCatalogItem } from "../_shared/live-catalog.ts";
 import { BUCKET_ORDER, bucketLabel } from "../_shared/genre-taxonomy.ts";
+import { buildI18nFromTmdbTranslations } from "../_shared/vod-title-projection.ts";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -273,6 +274,28 @@ async function persistCatalogI18n(
   }
 }
 
+// Phase 4 whole-map variant: persist the FULL translations map (every language TMDB has,
+// title + overview) that getTmdbMeta already fetched, gap-fill style, in one RPC call — and
+// stamp i18n_attempted_at so the pre-warm cron skips a title just pulled. An empty map still
+// stamps the marker (records "TMDB has no translations") without touching metadata. Bounded
+// and best-effort, exactly like persistCatalogI18n.
+async function persistCatalogI18nMap(
+  itemType: "movie" | "series", tmdbId: string, i18n: Record<string, { title?: string; overview?: string }>,
+): Promise<void> {
+  try {
+    await Promise.race([
+      db.rpc("catalog_upsert_i18n_map", {
+        p_item_type: itemType,
+        p_provider_tmdb_id: tmdbId,
+        p_i18n: i18n,
+      }),
+      new Promise((resolve) => setTimeout(resolve, 1500)),
+    ]);
+  } catch (_) {
+    // Best-effort: a missed write is retried on the next cache miss.
+  }
+}
+
 async function getTmdbMeta(url: URL): Promise<JsonRecord> {
   const type = url.searchParams.get("type") === "series" ? "tv" : "movie";
   const tmdbId = String(url.searchParams.get("tmdbId") || "").trim();
@@ -286,7 +309,9 @@ async function getTmdbMeta(url: URL): Promise<JsonRecord> {
   if (cached && Date.now() - cached.at < TMDB_META_TTL_MS) return cached.value;
 
   const params = new URLSearchParams({
-    append_to_response: "videos,credits",
+    // translations carries EVERY language TMDB has in this one call, so a single fiche open
+    // localises the title for all languages (Phase 4), not just the viewer's.
+    append_to_response: "videos,credits,translations",
     language: tmdbLocale(lang2),
     // Trailers are often only tagged in en (or untagged) — widen the video pull.
     include_video_language: `${lang2},en,null`,
@@ -327,11 +352,18 @@ async function getTmdbMeta(url: URL): Promise<JsonRecord> {
     creators,
   };
 
-  // Piggyback the localized overview we just fetched into the global i18n cache so the
-  // synopsis appears in this language for every future viewer (see persistCatalogI18n).
-  const locOverview = String(data.overview ?? "").trim();
-  if (locOverview) {
-    await persistCatalogI18n(type === "tv" ? "series" : "movie", tmdbId, lang2, locOverview);
+  // Piggyback the localized details into the global i18n cache (Phase 4): the translations
+  // append carries every language TMDB has, so one fiche open localises the title for all
+  // viewers/languages at once. Fall back to the single-overview write when translations are
+  // absent, and stamp the attempt either way so the pre-warm cron skips a just-pulled title.
+  const itemType = type === "tv" ? "series" : "movie";
+  const i18nMap = buildI18nFromTmdbTranslations(data);
+  if (Object.keys(i18nMap).length > 0) {
+    await persistCatalogI18nMap(itemType, tmdbId, i18nMap);
+  } else {
+    const locOverview = String(data.overview ?? "").trim();
+    if (locOverview) await persistCatalogI18n(itemType, tmdbId, lang2, locOverview);
+    else await persistCatalogI18nMap(itemType, tmdbId, {});
   }
 
   tmdbMetaCache.set(cacheKey, { at: Date.now(), value });
