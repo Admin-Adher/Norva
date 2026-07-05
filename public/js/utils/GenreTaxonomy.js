@@ -63,6 +63,11 @@
 
     const ADULT_MARKERS = ['adulte', 'adult', 'mature', '18', 'ecchi', 'hentai', 'seinen', 'بالغين'];
     const ANIM_MARKERS = ['animation', 'anime', 'anim', 'dessin', 'cartoon', 'manga', 'رسوم', 'انمي', 'كرتون'];
+    // Anime (Japanese animation) → "Adult Animation" rail, not "Kids Animation". Catches
+    // anime/manga wording specifically ("anime"/"animé/animée/animés" all normalise to
+    // contain "anime"; "manga") without catching general Western animation words that only
+    // share the "anim…" stem (animation, animacion, animacao, animazione, cartoon, dessin).
+    const ANIME_MARKERS = ['anime', 'manga', 'انمي', 'مانجا'];
     const KIDS_MARKERS = ['enfant', 'kids', 'kid', 'jeunesse', 'junior', 'disney', 'pixar', 'اطفال', 'طفال'];
     const KDRAMA_MARKERS = ['k drama', 'kdrama', 'korean', 'coreen', 'coreenne', 'coree', 'كوري'];
     const REALITY_MARKERS = ['reality', 'tele realite', 'telerealite', 'emission', 'real tv', 'الواقع'];
@@ -75,6 +80,7 @@
         return false;
     }
     const isAnimation = (catN) => hasAny(catN, ANIM_MARKERS);
+    const isAnime = (catN) => hasAny(catN, ANIME_MARKERS);
     const isAdult = (catN) => hasAny(catN, ADULT_MARKERS);
     const isKids = (catN) => hasAny(catN, KIDS_MARKERS);
     const isKDrama = (catN) => hasAny(catN, KDRAMA_MARKERS);
@@ -118,12 +124,12 @@
             if (b) add(b);
         });
 
-        if (buckets.animation_kids && isAdult(catN)) {
+        if (buckets.animation_kids && (isAnime(catN) || isAdult(catN)) && !isKids(catN)) {
             delete buckets.animation_kids;
             add('animation_adult');
         }
 
-        if (isAnimation(catN)) add(isAdult(catN) && !isKids(catN) ? 'animation_adult' : 'animation_kids');
+        if (isAnimation(catN)) add((isAnime(catN) || isAdult(catN)) && !isKids(catN) ? 'animation_adult' : 'animation_kids');
         if (isKDrama(catN)) add('kdrama');
         if (isReality(catN)) add('telerealite');
         if (isArabicCategory(catN)) add('arabe');
@@ -138,7 +144,7 @@
     // classifyCategoryBucket — prefers a real genre over a language grouping.
     function classifyCategory(categoryName) {
         const catN = norm(categoryName);
-        if (isAnimation(catN)) return isAdult(catN) && !isKids(catN) ? 'animation_adult' : 'animation_kids';
+        if (isAnimation(catN)) return (isAnime(catN) || isAdult(catN)) && !isKids(catN) ? 'animation_adult' : 'animation_kids';
         if (isKDrama(catN)) return 'kdrama';
         if (isReality(catN)) return 'telerealite';
         const kw = categoryGenreKeyword(catN);
@@ -196,9 +202,9 @@
         const p = detectPlatform(catN);
         if (p) return node('platforms', 'platform_' + p.id, p.label, p.order);
 
-        // 2) Animation → kids vs adult.
+        // 2) Animation → kids vs adult (anime lands with adult).
         if (isAnimation(catN)) {
-            const adult = isAdult(catN) && !isKids(catN);
+            const adult = (isAnime(catN) || isAdult(catN)) && !isKids(catN);
             return node('animation', adult ? 'adult' : 'kids', adult ? 'Adult Animation' : 'Kids Animation', adult ? 1 : 0);
         }
 

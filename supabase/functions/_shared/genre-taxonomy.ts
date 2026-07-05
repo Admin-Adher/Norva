@@ -100,6 +100,13 @@ function hasAny(haystack: string, needles: string[]): boolean {
 
 const ADULT_MARKERS = ["adulte", "adult", "mature", "18", "ecchi", "hentai", "seinen", "بالغين"];
 const ANIM_MARKERS = ["animation", "anime", "anim", "dessin", "cartoon", "manga", "رسوم", "انمي", "كرتون"];
+// Anime (Japanese animation) is a distinct audience from Western kids cartoons — it
+// belongs in the "Adult Animation" rail, not "Kids Animation". These markers catch the
+// anime/manga wording specifically ("anime", "animé/animée/animés" all normalise to
+// contain "anime"; "manga") WITHOUT catching general Western animation words that only
+// share the "anim…" stem (animation, animación→animacion, animação→animacao, animazione,
+// cartoon, dessin). An explicit kids marker still overrides (see classifyTitleBuckets).
+const ANIME_MARKERS = ["anime", "manga", "انمي", "مانجا"];
 const KIDS_MARKERS = ["enfant", "kids", "kid", "jeunesse", "junior", "disney", "pixar", "اطفال", "طفال"];
 const KDRAMA_MARKERS = ["k drama", "kdrama", "korean", "coreen", "coreenne", "coree", "كوري"];
 const REALITY_MARKERS = ["reality", "tele realite", "telerealite", "emission", "real tv", "الواقع"];
@@ -114,6 +121,7 @@ function isArabicCategory(catN: string): boolean {
   return false;
 }
 const isAnimation = (catN: string) => hasAny(catN, ANIM_MARKERS);
+const isAnime = (catN: string) => hasAny(catN, ANIME_MARKERS);
 const isAdult = (catN: string) => hasAny(catN, ADULT_MARKERS);
 const isKids = (catN: string) => hasAny(catN, KIDS_MARKERS);
 const isKDrama = (catN: string) => hasAny(catN, KDRAMA_MARKERS);
@@ -168,15 +176,17 @@ export function classifyTitleBuckets(categoryName: unknown, tmdbGenres: unknown)
     if (b) buckets.add(b);
   }
 
-  // Animation refinement: TMDB "Animation" defaults to kids; if the provider
-  // wording says it's for adults, move it to the adult bucket.
-  if (buckets.has("animation_kids") && isAdult(catN)) {
+  // Animation refinement: TMDB "Animation" defaults to kids; if the provider wording
+  // says it's anime (Japanese animation) or explicitly adult, move it to the adult
+  // bucket — unless it's flagged kids, which always wins.
+  if (buckets.has("animation_kids") && (isAnime(catN) || isAdult(catN)) && !isKids(catN)) {
     buckets.delete("animation_kids");
     buckets.add("animation_adult");
   }
 
-  // Category-derived buckets (added on top — multi-membership).
-  if (isAnimation(catN)) buckets.add(isAdult(catN) && !isKids(catN) ? "animation_adult" : "animation_kids");
+  // Category-derived buckets (added on top — multi-membership). Anime/adult wording →
+  // Adult Animation; generic/Western animation (cartoon, dessin, Disney…) → Kids.
+  if (isAnimation(catN)) buckets.add((isAnime(catN) || isAdult(catN)) && !isKids(catN) ? "animation_adult" : "animation_kids");
   if (isKDrama(catN)) buckets.add("kdrama");
   if (isReality(catN)) buckets.add("telerealite");
   if (isArabicCategory(catN)) buckets.add("arabe");
@@ -195,7 +205,7 @@ export function classifyTitleBuckets(categoryName: unknown, tmdbGenres: unknown)
  */
 export function classifyCategoryBucket(categoryName: unknown): string {
   const catN = norm(categoryName);
-  if (isAnimation(catN)) return isAdult(catN) && !isKids(catN) ? "animation_adult" : "animation_kids";
+  if (isAnimation(catN)) return (isAnime(catN) || isAdult(catN)) && !isKids(catN) ? "animation_adult" : "animation_kids";
   if (isKDrama(catN)) return "kdrama";
   if (isReality(catN)) return "telerealite";
   const kw = categoryGenreKeyword(catN);
