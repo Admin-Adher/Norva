@@ -1631,14 +1631,20 @@ class SeriesPage {
         this.versionsList.innerHTML = versions.map((item, index) => {
             const active = this.isSameSeriesVersion(item, selectedSeries);
             const broken = this.isBrokenItem(item);
-            const lang = this.seriesVersionLangTag(item);
-            const quality = MediaUtils.parseVersionInfo(item.name).quality;
-            const detail = [quality, this.getSourceName(item.sourceId)].filter(Boolean).join(' · ');
-            const main = lang || quality || `Version ${index + 1}`;
+            const desc = MediaUtils.versionDescriptor(item, {
+                siblings: versions,
+                index,
+                resolveSourceName: (id) => this.getSourceName(id)
+            });
+            const tier = desc.tier
+                ? `<span class="version-tier ${desc.tier.cls}">${MediaUtils.escapeHtml(desc.tier.label)}</span>`
+                : '';
+            const chips = desc.chips.map(c => `<span class="version-chip">${MediaUtils.escapeHtml(c)}</span>`).join('');
+            const meta = (tier || chips) ? `<span class="version-meta">${tier}${chips}</span>` : '';
             return `
                 <button class="series-version-item ${active ? 'active' : ''} ${broken ? 'is-broken' : ''}" type="button" data-index="${index}" aria-pressed="${active ? 'true' : 'false'}">
-                    <span class="series-version-main">${MediaUtils.escapeHtml(main)}</span>
-                    <span class="series-version-sub">${MediaUtils.escapeHtml(detail || MediaUtils.cleanReleaseName(item.name) || '')}</span>
+                    <span class="version-primary${desc.confirmed ? ' is-confirmed' : ''}">${MediaUtils.escapeHtml(desc.primary)}</span>
+                    ${meta}
                     ${broken ? '<span class="series-version-flag" title="Playback failed">HS</span>' : ''}
                 </button>`;
         }).join('');

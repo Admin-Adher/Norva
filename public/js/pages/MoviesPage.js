@@ -1799,21 +1799,23 @@ class MoviesPage {
         this.versionsList.closest('.movie-versions-section')?.classList.remove('single-version');
         this.versionSummary.textContent = `${versions.length} versions available. Play uses the selected version.`;
         this.versionsList.innerHTML = versions.map((item, index) => {
-            const version = MediaUtils.parseVersionInfo(item.name);
+            const desc = MediaUtils.versionDescriptor(item, {
+                siblings: versions,
+                index,
+                resolveSourceName: (id) => this.getSourceName(id)
+            });
             const state = this.getMovieWatchState(item);
             const active = String(item.stream_id) === String(selectedMovie?.stream_id) &&
                 String(item.sourceId) === String(selectedMovie?.sourceId);
-            const languageBadge = MediaUtils.versionLanguageBadge(item, this.getPreferences());
-            const bits = [
-                version.quality,
-                languageBadge,
-                item.container_extension,
-                this.getSourceName(item.sourceId)
-            ].filter(Boolean);
+            const tier = desc.tier
+                ? `<span class="version-tier ${desc.tier.cls}">${MediaUtils.escapeHtml(desc.tier.label)}</span>`
+                : '';
+            const chips = desc.chips.map(c => `<span class="version-chip">${MediaUtils.escapeHtml(c)}</span>`).join('');
+            const meta = (tier || chips) ? `<span class="version-meta">${tier}${chips}</span>` : '';
             return `
                 <button class="movie-version-item ${active ? 'active' : ''}" type="button" data-index="${index}">
-                    <span class="movie-version-main">${MediaUtils.escapeHtml(bits.join(' - ') || `Version ${index + 1}`)}</span>
-                    <span class="movie-version-sub">${MediaUtils.escapeHtml(MediaUtils.cleanReleaseName(item.name) || this.getMovieDisplayTitle(item))}</span>
+                    <span class="version-primary${desc.confirmed ? ' is-confirmed' : ''}">${MediaUtils.escapeHtml(desc.primary)}</span>
+                    ${meta}
                     ${state.status === 'inprogress' ? '<span class="movie-version-progress">In progress</span>' : ''}
                     ${state.status === 'watched' ? '<span class="movie-version-progress">Vu</span>' : ''}
                 </button>`;

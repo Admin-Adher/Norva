@@ -1213,6 +1213,95 @@ const MediaUtils = (() => {
         return card.repeat(Math.max(1, count));
     }
 
+    // ---- Version buttons (Movie + Series fiches) ------------------------------------
+    // Providers don't populate the structured language/quality columns (they're mostly
+    // null) and leave garbage prefixes ("PREFIX", "Default"), so the old labels showed
+    // "PREFIX - mkv - Strng IPTV 8K" or a bare "Version 1". versionDescriptor builds a
+    // scannable label from the signals that ARE reliable: a garbage-filtered LANGUAGE
+    // (lead), Norva's computed playback FLUIDITY tier, and — only when they actually
+    // differ across the title's versions — the attributes that distinguish them
+    // (quality / container / provider). Everything constant across versions is hidden
+    // (it doesn't help choose).
+    const VERSION_TIERS = {
+        direct:          { key: 'direct',    label: 'Lecture directe', cls: 'tier-direct' },
+        remux:           { key: 'remux',     label: 'Remux',           cls: 'tier-remux' },
+        video_transcode: { key: 'transcode', label: 'Transcode',       cls: 'tier-transcode' },
+        transcode:       { key: 'transcode', label: 'Transcode',       cls: 'tier-transcode' }
+    };
+
+    function versionTierInfo(item = {}) {
+        const raw = String(item.compatibilityTier || item.compatibility_tier || '').toLowerCase();
+        return VERSION_TIERS[raw] || null; // 'unknown'/absent -> no pill
+    }
+
+    function versionQuality(item = {}) {
+        return item.quality || parseVersionInfo(item.raw_title || item.rawTitle || item.name || item.title || '').quality || null;
+    }
+
+    // The version's OWN language (not preference-relative): real probed audio first,
+    // then the provider's leading region prefix (strict — returns null for "PREFIX"),
+    // then an embedded language tag. Never invents a language from noise.
+    function versionPrimaryLanguage(item = {}) {
+        const detected = audioLanguageBadge(
+            item.audioLanguages || item.audio_languages,
+            item.versionLanguages || item.version_languages
+        );
+        if (detected) return { text: detected, confirmed: true };
+
+        // Providers separate the language prefix with various bar/block/dot glyphs
+        // ("IT ▎ The Return", "AR │ …"); normalise them to " - " so the strict
+        // leading-tag parser (whose separator class is -–—|:/) can read them.
+        const src = String(item.raw_title || item.rawTitle || item.name || item.title || '')
+            .replace(/[▎▏▍▌│┃┆┊｜•·・]/g, ' - ');
+        const tag = parseLeadingRegionTag(src);
+        if (tag && tag.audioLang) {
+            let text = languageDisplayFull(tag.audioLang);
+            if (tag.hasSub && !tag.hasDub) text += ' · sous-titré';
+            return { text, confirmed: false };
+        }
+        const parsed = parseVersionInfo(src);
+        if (parsed.language) {
+            const code = REGION_PREFIX_LANG[String(parsed.language).toLowerCase()]
+                || normalizeLanguagePreference(parsed.language);
+            if (code) return { text: languageDisplayFull(code), confirmed: false };
+        }
+        return null;
+    }
+
+    // opts: { siblings: item[], index: number, resolveSourceName: (sourceId)=>string }
+    function versionDescriptor(item = {}, opts = {}) {
+        const index = opts.index || 0;
+        const siblings = (Array.isArray(opts.siblings) && opts.siblings.length) ? opts.siblings : [item];
+        const lang = versionPrimaryLanguage(item);
+        const tier = versionTierInfo(item);
+
+        let primary = lang && lang.text;
+        if (!primary) primary = versionQuality(item) || `Version ${index + 1}`;
+
+        const distinct = (fn) => new Set(siblings.map(fn).map(v => (v == null ? '' : String(v))).filter(Boolean));
+        const chips = [];
+        // Quality: only when it varies between versions.
+        const qHere = versionQuality(item);
+        if (qHere && distinct(versionQuality).size > 1 && qHere !== primary) chips.push(qHere);
+        // Container: only when it varies (same-language versions often differ only here).
+        const contOf = (it) => (it.container_extension || it.containerExtension || '');
+        const contHere = contOf(item);
+        if (contHere && distinct(contOf).size > 1) chips.push(String(contHere).toUpperCase());
+        // Provider: only when the versions span more than one source.
+        const srcOf = (it) => (it.sourceId || it.source_id || '');
+        if (distinct(srcOf).size > 1 && typeof opts.resolveSourceName === 'function') {
+            const nm = opts.resolveSourceName(srcOf(item));
+            if (nm) chips.push(nm);
+        }
+        // Never render two identical buttons: if the lead + fluidity + shown chips are
+        // constant across every version, tag with the index so they can be told apart.
+        const primaryOf = (it) => { const l = versionPrimaryLanguage(it); return (l && l.text) || versionQuality(it) || ''; };
+        const tierKeyOf = (it) => (versionTierInfo(it) ? versionTierInfo(it).key : '');
+        const distinguished = chips.length > 0 || distinct(primaryOf).size > 1 || distinct(tierKeyOf).size > 1;
+        if (!distinguished && siblings.length > 1) chips.push(`Version ${index + 1}`);
+        return { primary, confirmed: !!(lang && lang.confirmed), tier, chips };
+    }
+
     return {
         skeletonCards,
         stripDiacritics, extractYear, normalizeTitle, computeDedupKey, cleanReleaseName,
@@ -1221,6 +1310,7 @@ const MediaUtils = (() => {
         normalizeGenrePreference, normalizeGenrePreferences, scoreGenrePreferences,
         analyzeLanguageCompatibility, scoreVersionLanguage, scoreTitleForPreferences,
         orderVersionsByPreference, versionLabel, versionLanguageBadge, audioLanguageBadge,
+        versionDescriptor,
         saveFilters, loadFilters, escapeHtml, tmdbPosterUrl, parseDurationToSeconds,
         playbackHintFromItem, liveGatewayMode, safeImageUrl, downloadablePosterUrl,
         enhanceRailScroll, openTrailerLightbox, tmdbSrcset, isRecentlyAdded
