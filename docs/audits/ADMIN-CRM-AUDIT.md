@@ -391,3 +391,67 @@ repose plus sur un seul contrôle.
 
 **Validation** : `node --check` OK, suite `node --test tests/*.test.js` → 65/65 pass. AdminPage.js
 n'est pas importé par les tests (classe navigateur) ; revue adversariale indépendante du diff en plus.
+
+---
+
+## Addendum 4 — Re-audit de contrôle post-déploiement (2026-07-05, PR #171 mergée)
+
+> Vérification à froid **après** la remédiation des 65 findings. Workflow orchestré
+> `admin-crm-reaudit` : 42 agents, 7 lentilles (security / correctness / ux / design / a11y /
+> backend-data / regression), **chaque finding vérifié adversarialement** contre le code réel ET
+> la base live (advisors Supabase + `has_function_privilege`). **30 findings confirmés** : 2 haute,
+> 13 moyenne, 15 basse. Rapport visuel : Artifact `reaudit-v1`.
+
+### 🔴 HAUTE #1 — CORRIGÉE EN PROD pendant l'audit — dérive de grants SECURITY DEFINER (anon)
+Le vrai trou. **19 fonctions SECURITY DEFINER du schéma `public` étaient exécutables par `anon`**
+(non authentifié) sur la base **live**. Cause racine : elles avaient un `revoke from public ;
+grant to service_role` dans leur migration d'origine, mais un `CREATE OR REPLACE FUNCTION`
+ultérieur a réémis le corps **sans re-révoquer** — or `CREATE OR REPLACE` **remet l'ACL au défaut
+PostgREST** (EXECUTE à PUBLIC → anon+authenticated). Comme elles sont SECURITY DEFINER (owned by
+postgres), elles **bypassent la RLS**. La clé publishable anon est livrée dans le client → un
+attaquant non authentifié pouvait atteindre : `delete_source_items_batch` (suppression jusqu'à 10k
+lignes catalogue de n'importe quel user), `fanout_file_tracks_to_users`/`upsert_catalog_file_*`
+(empoisonnement des métadonnées catalogue cross-user), `backfill_catalog_from_cloud` (op lourde
+zéro-arg → DoS), etc. **⚠️ Ce n'est PAS la surface `admin_*`** (le verrouillage de PR #171 a tenu —
+vérifié : `refresh_admin_dashboard`/`admin_finance`/`admin_users_page` = anon false) — c'est la
+surface **catalogue/sync adjacente** que l'audit initial n'avait pas couverte.
+
+**Correctif appliqué live** (migration `20260705050000_secdef_grant_drift_hardening.sql`) : boucle
+qui `revoke all from public, anon, authenticated` + `grant execute to service_role` sur **toute**
+fonction SECURITY DEFINER de `public` actuellement anon-exécutable, **sauf** l'allowlist
+`app_public_flags` (bannière de maintenance pré-login, seule légitimement anon — vérifié : seul
+appel navigateur dans `public/js`). Vérifié après coup : `anon_secdef_remaining = 1` (uniquement
+`app_public_flags`), `delete_source_items_batch` anon=false / service_role=true, advisor
+`anon_security_definer_function_executable` = 0. Pipeline sync intact (edge = service_role, cron =
+postgres). **Reste à faire (systémique)** : ajouter le `revoke/grant` à la fin de CHAQUE migration
+de ces fonctions pour qu'un futur `CREATE OR REPLACE` ne réintroduise pas la dérive + une assertion
+CI qui échoue si une fonction SECURITY DEFINER de `public` est anon-exécutable hors allowlist.
+
+### 🔴 HAUTE #2 — Lignes de la liste Clients non atteignables au clavier (régression de ma passe a11y)
+La remédiation a ajouté `role="button" tabindex="0"` à TOUTES les tables cliquables **sauf la
+principale** — la liste Clients (`_renderUsers`, AdminPage.js:883). Le handler `keydown` exige
+`e.target === el`, impossible sur un `<tr>` non focusable → **aucun accès clavier à la fiche
+client**, le cœur de navigation du CRM. Corrélé : finding moyen a11y « `role=button` sur `<tr>`
+casse la sémantique de table » — le bon correctif est un élément focusable **interne** plutôt que
+`role=button` sur la ligne. **Non encore corrigé — à traiter dans la prochaine passe.**
+
+### Reste (28 findings) — non corrigés, à arbitrer
+- **Moyenne (13)** : rate-limiting absent sur `norva-support /create|/reply` (DoS email/Resend) ·
+  `_pageSupport` sans garde de course (régression, comme `_loadUsers`) · pagination keyset du
+  journal d'audit qui saute des lignes au `created_at` identique · compteurs status-card Finance qui
+  excluent les comptes internes mais pas la liste Clients ouverte (mismatch) · bouton retour fiche
+  toujours → Clients (perd le contexte des 5 autres points d'entrée) · reload ticket qui détourne la
+  vue si on a navigué ailleurs · `role=button` sur `<tr>` (sémantique) · modale non focus-trap
+  (Tab s'échappe) · input prompt sans nom accessible · onglets Support qui perdent le focus ·
+  régions async non annoncées (aria-live) · `admin_finance()` agrégat live non borné (risque de
+  re-toucher le timeout 8s que le cache évite).
+- **Basse (15)** : actor null dans `admin_internal_toggle` (audit non attribuable) · `_pageSysteme`
+  sans garde nav · modale Enter=confirmer même focus sur Annuler · `timeAgo` « 2 an » (pluriel
+  18-23 mois) · placeholder crons manquant · badge tickets caché en mobile · alerte amber dans carte
+  rouge · contraste des affordances de suppression · boutons-icônes sans aria-label · dialogue sans
+  nom accessible · tri fenêtre crons cassé · divergence compteur « Actifs payants » cockpit vs
+  finance · compteurs échéances sans borne basse (comptent le passé) · index manquant sur
+  `admin_client_tags.tag_id`.
+
+**Note doublons** : les findings #2/#15 (lignes Clients) et #4/#30 (`_pageSupport` course) sont chacun
+la même cause vue par deux lentilles.
