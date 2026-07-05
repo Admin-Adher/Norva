@@ -606,6 +606,7 @@ class SettingsPage {
                     countrySelect.add(new Option(regionApi?.label?.(value) || value, value));
                 }
                 countrySelect.value = value;
+                window.RegionPicker?.syncButton?.(countrySelect);
                 if (hint) {
                     const englishState = resolution.status === 'confirmed'
                         ? `Confirmed preference (${regionApi?.label?.(value) || value}).`
@@ -613,11 +614,16 @@ class SettingsPage {
                     hint.textContent = `${baseHint} ${englishState}`;
                 }
             };
+            window.RegionPicker?.initAll?.(); // populate the <select> + wire the combobox first
             applyResolution();
 
             countrySelect.addEventListener('change', async () => {
                 const value = countrySelect.value;
+                // The visible control is the picker button (the native <select> is hidden),
+                // so disable it too to keep the in-flight resync from being re-entered.
+                const pickerBtn = countrySelect.closest('[data-region-picker]')?.querySelector('[data-region-btn]');
                 countrySelect.disabled = true;
+                if (pickerBtn) pickerBtn.disabled = true;
                 const originalHint = hint?.textContent;
                 if (hint) hint.textContent = `Syncing catalog for ${regionApi?.label?.(value) || value}...`;
                 try {
@@ -642,6 +648,7 @@ class SettingsPage {
                     try { await window.app?.channelList?.loadChannels?.(); } catch (e) { }
                 } finally {
                     countrySelect.disabled = false;
+                    if (pickerBtn) pickerBtn.disabled = false;
                     if (hint && originalHint) hint.textContent = originalHint;
                     applyResolution();
                 }
