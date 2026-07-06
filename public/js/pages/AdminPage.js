@@ -236,6 +236,21 @@ class AdminPage {
 #page-admin .mot-tmdb .kpi .v{font-size:19px;}
 #page-admin .mot-tmdb .kpi .l{margin-top:6px;}
 #page-admin .mot-tmdb .mot-ic{margin-top:13px;font-size:19px;opacity:.75;}
+#page-admin .mot-tmdb .mot-drain{font-size:10px;color:var(--adm-tx3);margin-top:5px;line-height:1.3;}
+/* Moteur: incidents block, threshold audio bars, cron summary, legend */
+#page-admin .mot-inc{display:flex;flex-direction:column;gap:8px;margin-bottom:22px;}
+#page-admin .mot-inc-row{display:flex;align-items:center;gap:10px;background:var(--adm-panel);border:1px solid var(--adm-line);border-left:3px solid var(--adm-red);border-radius:10px;padding:10px 14px;font-size:13px;}
+#page-admin .mot-inc-row.warn{border-left-color:var(--adm-amber);}
+#page-admin .mot-inc-row.gray{border-left-color:var(--adm-tx3);}
+#page-admin .mot-inc-row .mi-t{color:var(--adm-tx);font-weight:650;}
+#page-admin .mot-inc-row .mi-d{color:var(--adm-tx2);}
+#page-admin .mot-inc-ok{background:rgba(52,211,153,.08);border:1px solid rgba(52,211,153,.24);color:#6ee7bf;border-radius:12px;padding:11px 15px;font-size:13px;font-weight:600;margin-bottom:22px;}
+#page-admin .bar.b-warn>i{background:linear-gradient(90deg,#f59e0b,#fbbf24);}
+#page-admin .bar.b-bad>i{background:linear-gradient(90deg,#f87171,#ef4444);}
+#page-admin .cron-sum{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;}
+#page-admin .mot-legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:11.5px;color:var(--adm-tx3);margin-top:10px;}
+#page-admin .mot-legend b{color:var(--adm-tx2);}
+#page-admin tr.mot-bad{background:rgba(248,113,113,.05);}
 /* Support header KPI cards (big icon on the left, like the mockup) */
 #page-admin .sup-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(176px,1fr));gap:14px;margin-bottom:20px;}
 #page-admin .sup-card{display:flex;align-items:center;gap:14px;background:linear-gradient(158deg,var(--adm-card1),var(--adm-card2));border:1px solid var(--adm-line);border-radius:14px;padding:16px 18px;box-shadow:0 2px 10px rgba(0,0,0,.22);}
@@ -2388,47 +2403,136 @@ class AdminPage {
     }
 
     // ── Page: Moteur (enrichment + crons) ──
+    // Per enrichment row → single incident class (precedence: done > muet > arrêt > slow > active).
+    _enrichKind(r) {
+        if (Number(r.never_probed) === 0) return 'done';
+        if (Number(r.probed_24h) >= 20 && Number(r.resolved_24h) === 0) return 'muet';
+        if (Number(r.probed_24h) === 0) return 'arret';
+        if (Number.isFinite(Number(r.eta_days)) && Number(r.eta_days) > 365) return 'slow';
+        return 'active';
+    }
+
     async _pageMoteur() {
         this._setCrumb('Moteur', this._lastTs);
         const v = this._view();
+        const filters = [['', 'Tout'], ['problem', 'À traiter'], ['muet', 'Muets'], ['arret', 'À l\'arrêt'], ['low', 'Couverture < 60 %']];
         v.innerHTML = `<div class="crm-page">
             <h1 class="crm-h1">⚙️ Moteur d'enrichissement</h1>
-            <p class="crm-sub">Couverture par panel (comptes pilotes) + matching TMDB + crons jour/nuit.</p>
-            <div class="admin-block"><h2>📊 Enrichissement par panel</h2><div class="scroll"><div id="admin-enrich"><div class="ssub">Chargement…</div></div></div></div>
+            <p class="crm-sub">Couverture / sondage audio par panel · matching catalogue TMDB · orchestration des crons jour/nuit.</p>
+            <section id="mot-health" class="kpi-groups"><div class="ssub">Chargement…</div></section>
+            <div id="mot-incidents"></div>
+            <div class="admin-block"><h2>📊 Enrichissement par panel</h2>
+                <div class="qv-row" id="mot-filters" role="tablist" aria-label="Filtres enrichissement">
+                  ${filters.map(([val, lbl]) => `<button class="qv-chip" data-filter="${val}" role="tab">${lbl}</button>`).join('')}
+                </div>
+                <div class="scroll"><div id="admin-enrich"><div class="ssub">Chargement…</div></div></div>
+                <div class="mot-legend">
+                  <span><b>Jamais sondé</b> = titres jamais analysés</span>
+                  <span><b>Sondé 24h</b> = analysés sur 24 h</span>
+                  <span><b>ETA 1ᵉʳ passage</b> = temps estimé pour la 1ᵉʳ analyse complète</span>
+                  <span><b>⚠ muet</b> = sonde mais 0 langue résolue</span>
+                </div>
+            </div>
             <div class="mot-cols">
                 <div class="admin-block"><h2>🎯 Matching TMDB</h2><div class="ssub" style="margin-bottom:0">Backlogs drainés par les crons nocturnes (backfill-years 1000/j · search-match 3 600/j · revalidate 2 000/j) — ces compteurs doivent baisser de jour en jour.</div><section id="admin-tmdb" class="mot-tmdb"><div class="ssub">Chargement…</div></section></div>
-                <div class="admin-block"><h2>⏱️ Crons</h2><div class="scroll"><div id="admin-cron"><div class="ssub">Chargement…</div></div></div></div>
+                <div class="admin-block"><h2>⏱️ Crons</h2><div id="mot-cron-sum"></div><div class="scroll"><div id="admin-cron"><div class="ssub">Chargement…</div></div></div></div>
             </div>
         </div>`;
-        try {
-            const [enrich, cron, ov] = await Promise.all([
-                this._rpc('admin_enrichment_coverage'),
-                this._rpc('admin_cron_health'),
-                this._rpc('admin_overview')
-            ]);
-            this._renderEnrich(Array.isArray(enrich) ? enrich : []);
-            this._renderCron(Array.isArray(cron) ? cron : []);
-            this._renderTmdb(ov || {});
-        } catch (e) {
-            const msg = `<div class="admin-err" role="alert">Erreur : ${AdminPage.esc(e.message)}</div>`;
-            const en = document.getElementById('admin-enrich');
-            const cr = document.getElementById('admin-cron');
-            const tm = document.getElementById('admin-tmdb');
-            if (en) en.innerHTML = msg;
-            if (cr) cr.innerHTML = msg;   // all three sections share the fetch — show the failure in each
-            if (tm) tm.innerHTML = msg;
+        document.querySelectorAll('#mot-filters .qv-chip').forEach(chip => chip.addEventListener('click', () => {
+            this._motFilter = chip.dataset.filter || ''; this._syncMotFilters(); this._renderEnrich(this._enrich || []);
+        }));
+        this._syncMotFilters();
+        // Independent section loads: a failure in one section must not blank the others.
+        const [enrichR, cronR, ovR] = await Promise.allSettled([
+            this._rpc('admin_enrichment_coverage'),
+            this._rpc('admin_cron_health'),
+            this._rpc('admin_overview')
+        ]);
+        const enrich = enrichR.status === 'fulfilled' && Array.isArray(enrichR.value) ? enrichR.value : [];
+        const cron = cronR.status === 'fulfilled' && Array.isArray(cronR.value) ? cronR.value : [];
+        const ov = ovR.status === 'fulfilled' ? (ovR.value || {}) : {};
+        this._enrich = enrich;
+        this._dressHeader();
+        const secErr = (id, r) => { const e = document.getElementById(id); if (e && r.status === 'rejected') { e.innerHTML = `<div class="admin-err" role="alert">Erreur : ${AdminPage.esc((r.reason && r.reason.message) || 'chargement')}</div>`; return true; } return false; };
+        this._renderEngineHealth(enrich, cron, ov);
+        this._renderIncidents(enrich, cron);
+        if (!secErr('admin-enrich', enrichR)) this._renderEnrich(enrich);
+        if (!secErr('admin-cron', cronR)) this._renderCron(cron);
+        if (!secErr('admin-tmdb', ovR)) this._renderTmdb(ov);
+    }
+
+    _syncMotFilters() {
+        const cur = this._motFilter || '';
+        document.querySelectorAll('#mot-filters .qv-chip').forEach(c => c.classList.toggle('active', (c.dataset.filter || '') === cur));
+    }
+
+    // "Santé moteur" band (audio coverage / muets / arrêt / jamais sondés / ST / crons KO) + header pills.
+    _renderEngineHealth(enrich, cron, ov) {
+        const el = document.getElementById('mot-health');
+        if (!el) return;
+        const n = AdminPage.n;
+        const totalTitles = enrich.reduce((a, r) => a + (Number(r.total) || 0), 0);
+        const resolvedTitles = enrich.reduce((a, r) => a + (Number(r.resolved) || 0), 0);
+        const coverage = totalTitles ? Math.round(100 * resolvedTitles / totalTitles) : 100;
+        const neverProbed = enrich.reduce((a, r) => a + (Number(r.never_probed) || 0), 0);
+        const stFound = enrich.reduce((a, r) => a + (Number(r.subtitle_found) || 0), 0);
+        const muet = new Set(enrich.filter(r => this._enrichKind(r) === 'muet').map(r => r.panel)).size;
+        const arret = new Set(enrich.filter(r => this._enrichKind(r) === 'arret').map(r => r.panel)).size;
+        const cronKo = cron.filter(c => Number(c.fails_24h) > 0).length;
+        const covCls = coverage >= 90 ? 'ok' : coverage >= 60 ? 'warn' : 'alert';
+        const tmdbBacklog = (Number(ov.tmdb_year_backlog) || 0) + (Number(ov.tmdb_unmatched) || 0) + (Number(ov.tmdb_unverified) || 0);
+        const card = (v, l, cls, icon) => `<div class="kpi ${cls || ''}"><div class="kpi-hd"><div class="v">${v}</div><span class="kpi-ic">${icon}</span></div><div class="l">${l}</div></div>`;
+        el.innerHTML = `<div class="kpi-group kpi-group--priority"><div class="kpi-gtitle">🩺 Santé moteur</div><div class="admin-cards">
+            ${card(coverage + ' %', 'Couverture audio', covCls, '🔊')}
+            ${card(n(muet), 'Providers muets', muet > 0 ? 'alert' : 'ok', '⚠️')}
+            ${card(n(arret), 'Sondage à l\'arrêt', arret > 0 ? 'warn' : 'ok', '⏸️')}
+            ${card(n(neverProbed), 'Titres jamais sondés', '', '🗄️')}
+            ${card(n(stFound), 'Sous-titres trouvés', '', '💬')}
+            ${card(n(cronKo), 'Crons KO 24 h', cronKo > 0 ? 'alert' : 'ok', '⏱️')}
+        </div></div>`;
+        const tx = document.querySelector('#page-admin .crm-head-tx');
+        if (tx) {
+            let meta = tx.querySelector('.crm-head-meta');
+            if (!meta) { meta = document.createElement('div'); meta.className = 'crm-head-meta'; tx.appendChild(meta); }
+            meta.innerHTML =
+                `<span class="crm-hpill ${covCls === 'alert' ? 'bad' : ''}"><b>${coverage} %</b> audio</span>` +
+                `<span class="crm-hpill ${(muet + arret) > 0 ? 'bad' : ''}"><b>${n(muet + arret)}</b> à traiter</span>` +
+                `<span class="crm-hpill ${cronKo > 0 ? 'bad' : ''}"><b>${n(cronKo)}</b> crons KO</span>` +
+                `<span class="crm-hpill"><b>${n(tmdbBacklog)}</b> backlog TMDB</span>`;
         }
+    }
+
+    // Consolidated engine incidents (muet / arrêt / ETA>1 an / cron KO), prioritized above the tables.
+    _renderIncidents(enrich, cron) {
+        const el = document.getElementById('mot-incidents');
+        if (!el) return;
+        const esc = AdminPage.esc, n = AdminPage.n;
+        const typeLbl = (r) => r.item_type === 'series' ? 'séries' : 'films';
+        const inc = [];
+        enrich.forEach(r => {
+            const k = this._enrichKind(r);
+            if (k === 'muet') inc.push({ p: 0, cls: '', t: `⚠ Provider muet · ${esc(r.panel)} (${typeLbl(r)})`, d: `sondé ${n(r.probed_24h)} en 24 h, 0 langue résolue — identifiants morts / banni ?` });
+            else if (k === 'arret') inc.push({ p: 1, cls: 'warn', t: `⏸ Sondage à l'arrêt · ${esc(r.panel)} (${typeLbl(r)})`, d: `${n(r.never_probed)} titre(s) jamais sondé(s), 0 sondage en 24 h` });
+            else if (k === 'slow') inc.push({ p: 2, cls: 'gray', t: `🐌 ETA > 1 an · ${esc(r.panel)} (${typeLbl(r)})`, d: `débit quasi nul — ${n(r.never_probed)} titre(s) en attente` });
+        });
+        cron.filter(c => Number(c.fails_24h) > 0).forEach(c => inc.push({ p: 0, cls: '', t: `⏱ Cron en échec · ${esc(c.jobname)}`, d: `${n(c.fails_24h)} échec(s) sur 24 h` }));
+        if (!inc.length) { el.innerHTML = '<div class="mot-inc-ok">✓ Aucun incident moteur — providers actifs, crons OK.</div>'; return; }
+        inc.sort((a, b) => a.p - b.p);
+        el.innerHTML = `<div class="kpi-gtitle" style="margin-bottom:10px">🚨 Incidents moteur (${n(inc.length)})</div><div class="mot-inc">` +
+            inc.map(i => `<div class="mot-inc-row ${i.cls}"><span class="mi-t">${i.t}</span> <span class="mi-d">— ${i.d}</span></div>`).join('') + `</div>`;
     }
 
     _renderTmdb(o) {
         const el = document.getElementById('admin-tmdb');
         if (!el) return;
-        const card = (v, l, cls, icon) => `<div class="kpi ${cls || ''}"><div class="v">${AdminPage.n(v)}</div><div class="l">${l}</div><div class="mot-ic">${icon}</div></div>`;
+        // Real drainage estimate from the nightly cron cadences (titles/day).
+        const drain = (count, perDay) => { const c = Number(count) || 0; if (c === 0) return ''; const d = Math.ceil(c / perDay); return `<div class="mot-drain">~${AdminPage.n(d)} j au rythme actuel</div>`; };
+        const card = (v, l, cls, icon, drainHtml) => `<div class="kpi ${cls || ''}"><div class="v">${AdminPage.n(v)}</div><div class="l">${l}</div>${drainHtml}<div class="mot-ic">${icon}</div></div>`;
         // These fields appear after the post-audit snapshot refresh; '—' until then.
         el.innerHTML = [
-            card(o.tmdb_year_backlog, 'Années manquantes', Number(o.tmdb_year_backlog) === 0 ? 'ok' : '', '📅'),
-            card(o.tmdb_unmatched, 'Non matchés TMDB', '', '🗄️'),
-            card(o.tmdb_unverified, 'À revalider', '', '🔄')
+            card(o.tmdb_year_backlog, 'Années manquantes', Number(o.tmdb_year_backlog) === 0 ? 'ok' : '', '📅', drain(o.tmdb_year_backlog, 1000)),
+            card(o.tmdb_unmatched, 'Non matchés TMDB', '', '🗄️', drain(o.tmdb_unmatched, 3600)),
+            card(o.tmdb_unverified, 'À revalider', '', '🔄', drain(o.tmdb_unverified, 2000))
         ].join('');
     }
 
@@ -2820,8 +2924,12 @@ class AdminPage {
     _renderEnrich(rows) {
         const el = document.getElementById('admin-enrich');
         if (!el) return;
-        if (!rows.length) { el.innerHTML = '<div class="ssub">Aucune donnée.</div>'; return; }
-        const barCell = (a, p) => `<td class="num"><span class="bar"><i style="width:${Math.min(100, Number(p) || 0)}%"></i></span>${AdminPage.n(a)} (${Number(p) || 0}%)</td>`;
+        rows = Array.isArray(rows) ? rows : [];
+        // Threshold-coloured coverage bar (green > 90 %, amber 60–90 %, red < 60 %).
+        const barCell = (a, p) => {
+            const pct = Number(p) || 0, bcls = pct >= 90 ? '' : pct >= 60 ? 'b-warn' : 'b-bad';
+            return `<td class="num"><span class="bar ${bcls}"><i style="width:${Math.min(100, pct)}%"></i></span>${AdminPage.n(a)} (${pct}%)</td>`;
+        };
         const eta = (r) => {
             if (Number(r.never_probed) === 0) {
                 const undPct = Math.max(0, Math.round((100 - (Number(r.resolved_pct) || 0)) * 10) / 10);
@@ -2832,19 +2940,36 @@ class AdminPage {
             if (Number.isFinite(Number(r.eta_days)) && Number(r.eta_days) > 365) return `<span class="badge gray" title="~${AdminPage.n(r.eta_days)} j au rythme actuel — débit quasi nul, chiffre non actionnable.">≫ 1 an</span>`;
             return `~${AdminPage.n(r.eta_days)} j`;
         };
-        const sorted = rows.slice().sort((a, b) =>
+        // Quick filter (À traiter / muets / à l'arrêt / faible couverture).
+        const f = this._motFilter || '';
+        let view = rows.filter(r => {
+            const k = this._enrichKind(r);
+            if (f === 'problem') return k === 'muet' || k === 'arret' || k === 'slow';
+            if (f === 'muet') return k === 'muet';
+            if (f === 'arret') return k === 'arret';
+            if (f === 'low') return (Number(r.resolved_pct) || 0) < 60;
+            return true;
+        });
+        if (!view.length) {
+            el.innerHTML = `<div class="card"><span class="badge ${f ? 'gray' : 'green'}">${f ? '∅' : '✓'}</span> ${f ? 'Aucun panel ne correspond à ce filtre.' : 'Aucune donnée.'}</div>`;
+            return;
+        }
+        // Priority sort: muet → arrêt → slow → active → done, then account/panel/type.
+        const rank = { muet: 0, arret: 1, slow: 2, active: 3, done: 4 };
+        view = view.slice().sort((a, b) => (rank[this._enrichKind(a)] - rank[this._enrichKind(b)]) ||
             String(a.owner_email).localeCompare(String(b.owner_email)) ||
             String(a.panel).localeCompare(String(b.panel)) ||
             ((a.item_type === 'series') ? 1 : 0) - ((b.item_type === 'series') ? 1 : 0));
-        const head = `<tr><th>Provider</th><th>Type</th><th class="num">Total</th><th class="num">Audio résolu</th><th class="num">Jamais sondé</th><th class="num">Sondé 24h</th><th>ETA 1er passage</th><th class="num">ST trouvés</th></tr>`;
+        const head = `<tr><th>Provider</th><th>Type</th><th class="num">Total</th><th class="num">Audio résolu</th><th class="num" title="Titres jamais analysés">Jamais sondé</th><th class="num" title="Titres analysés sur 24 h">Sondé 24h</th><th title="Temps estimé pour la 1ᵉʳ analyse complète">ETA 1er passage</th><th class="num">ST trouvés</th></tr>`;
         let prevPanel = null;
-        const body = sorted.map(r => {
+        const body = view.map(r => {
             const newGroup = r.panel !== prevPanel;
             prevPanel = r.panel;
+            const bad = ['muet', 'arret'].includes(this._enrichKind(r));
             const panelCell = newGroup
                 ? `<td><div class="pname">${AdminPage.esc(r.panel)}</div><div class="pacct">${AdminPage.esc(r.owner_email || '')}</div></td>`
                 : `<td></td>`;
-            return `<tr class="${newGroup ? 'group-start' : ''}">
+            return `<tr class="${newGroup ? 'group-start' : ''} ${bad ? 'mot-bad' : ''}">
             ${panelCell}
             <td>${r.item_type === 'series' ? 'séries' : 'films'}</td>
             <td class="num">${AdminPage.n(r.total)}</td>
@@ -2861,6 +2986,18 @@ class AdminPage {
     _renderCron(rows) {
         const el = document.getElementById('admin-cron');
         if (!el) return;
+        // Summary above the table: active / paused / failing.
+        const sum = document.getElementById('mot-cron-sum');
+        if (sum) {
+            const active = rows.filter(r => r.active !== false && Number(r.fails_24h) === 0).length;
+            const paused = rows.filter(r => r.active === false).length;
+            const failing = rows.filter(r => Number(r.fails_24h) > 0).length;
+            sum.innerHTML = `<div class="cron-sum">
+                <span class="badge green">${AdminPage.n(active)} actifs</span>
+                <span class="badge gray">${AdminPage.n(paused)} en pause</span>
+                <span class="badge ${failing > 0 ? 'red' : 'gray'}">${AdminPage.n(failing)} en échec 24 h</span>
+            </div>`;
+        }
         if (!rows.length) { el.innerHTML = '<div class="ssub">Aucun cron déclaré.</div>'; return; }
         const winBadge = (w) => w === 'jour' ? '<span class="badge amber">☀️ jour</span>'
             : w === 'nuit' ? '<span class="badge blue">🌙 nuit</span>'
