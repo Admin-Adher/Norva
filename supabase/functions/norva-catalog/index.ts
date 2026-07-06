@@ -1254,9 +1254,9 @@ function paramNumber(value: string | null): number | null {
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
 }
-// Audio facets are now real ISO-639 codes coming from cloud_titles.audio_languages.
-// Keep only syntactically-safe codes; the SQL filter below is strict on the captured
-// audio track language, not on lossy release-name version tags.
+// Audio/subtitle facet values are real ISO-639 codes from the user's detected tracks
+// (audio_tracks / subtitle_tracks). Keep only syntactically-safe codes; the SQL filter
+// below is strict on the detected track, not on the inherited audio_languages aggregate.
 function audioFacetIso(facet: string | null): string | null {
   return facet && /^[a-z]{2,3}$/.test(facet) ? facet : null;
 }
@@ -1273,6 +1273,22 @@ function titleAudioLanguages(title: JsonRecord): string[] {
 // languages" sort. Empty when subtitles haven't been probed yet.
 function titleSubtitleLanguages(title: JsonRecord): string[] {
   const raw = (title as { subtitle_tracks?: unknown }).subtitle_tracks;
+  if (!Array.isArray(raw)) return [];
+  const out: string[] = [];
+  for (const track of raw) {
+    const lang = (track as { lang?: unknown } | null)?.lang;
+    if (typeof lang === "string") {
+      const code = lang.toLowerCase();
+      if (/^[a-z]{2,3}$/.test(code) && !out.includes(code)) out.push(code);
+    }
+  }
+  return out;
+}
+// Distinct ISO-639 audio languages from the real detected streams (audio_tracks[].lang) — the
+// user's OWN ffprobe probe, NOT the inherited audio_languages aggregate (which over-claims via the
+// global catalog cache, keyed by TMDB id). Drives the audio menu, the strict grid filter, and sort.
+function titleAudioTrackLanguages(title: JsonRecord): string[] {
+  const raw = (title as { audio_tracks?: unknown }).audio_tracks;
   if (!Array.isArray(raw)) return [];
   const out: string[] = [];
   for (const track of raw) {
@@ -1353,11 +1369,12 @@ async function listGenreItems(req: Request, url: URL, userId: string) {
     if (search) out = out.ilike("title", `%${search}%`);
     if (yearRange) out = out.gte("release_year", yearRange.min).lte("release_year", yearRange.max);
     if (minRating !== null) out = out.gte("rating_num", minRating);
-    // Audio + subtitles: both strict on the real ffprobe-detected track language, so the count
-    // shown next to a language equals the number of results and a loose release-name tag
-    // (multi/vf/vostfr) can never produce a false match. Audio = audio_languages (text[]);
-    // subs = subtitle_tracks (jsonb array of {lang,…}), matched by @> containment.
-    if (audioIso) out = out.contains("audio_languages", [audioIso]);
+    // Audio + subtitles: both strict on the user's OWN ffprobe-detected streams, so the count
+    // shown next to a language equals the number of results with zero false positives. Audio =
+    // audio_tracks (NOT audio_languages, which is inherited from the global catalog cache by TMDB
+    // id and over-claims languages the user's file doesn't have); subs = subtitle_tracks. Both are
+    // jsonb arrays of {lang,…} matched by @> containment.
+    if (audioIso) out = out.contains("audio_tracks", [{ lang: audioIso }]);
     if (subIso) out = out.contains("subtitle_tracks", [{ lang: subIso }]);
     return out;
   };
@@ -1375,7 +1392,7 @@ async function listGenreItems(req: Request, url: URL, userId: string) {
         throwDb(error, "Unable to list genre items");
       }
       const ranked = ((data ?? []) as JsonRecord[])
-        .map((title, index) => ({ title, index, rank: languageMatchRank(titleSubtitleLanguages(title), titleAudioLanguages(title), prefAudioIso, prefSubIso) }))
+        .map((title, index) => ({ title, index, rank: languageMatchRank(titleSubtitleLanguages(title), titleAudioTrackLanguages(title), prefAudioIso, prefSubIso) }))
         .sort((a, b) => b.rank - a.rank || a.index - b.index)
         .map((entry) => entry.title);
       const pageRows = ranked.slice(offset, offset + limit);
