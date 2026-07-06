@@ -242,6 +242,32 @@
     requestAnimationFrame(() => {
       revealItems.forEach(element => observer.observe(element));
     });
+
+    // The -8% bottom rootMargin holds each reveal until the element is clearly on
+    // screen — but it also means anything sitting entirely within the last 8% of
+    // the page (e.g. the footer copyright line) can never cross the trigger, since
+    // the page won't scroll any further, and would stay hidden forever. Once the
+    // viewport reaches the very bottom, flush whatever is still hidden: everything
+    // above it has already been scrolled through, so only the trapped tail remains.
+    let flushed = false;
+    const flushTail = () => {
+      if (flushed) return;
+      if (window.innerHeight + window.pageYOffset < document.documentElement.scrollHeight - 2) return;
+      flushed = true;
+      window.removeEventListener('scroll', onScroll);
+      revealItems.forEach(element => {
+        element.classList.add('is-visible');
+        observer.unobserve(element);
+      });
+    };
+    let tailTicking = false;
+    const onScroll = () => {
+      if (tailTicking) return;
+      tailTicking = true;
+      window.requestAnimationFrame(() => { tailTicking = false; flushTail(); });
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    flushTail(); // covers a page that already fits in the viewport (no scroll to come)
   }
 
   setupBillingToggle();
