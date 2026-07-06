@@ -246,6 +246,59 @@ class AdminPage {
 #page-admin .sup-card.ok .v{color:var(--adm-green);}
 #page-admin .sup-card.alert .v{color:var(--adm-red);}
 #page-admin .sup-card .l{font-size:11px;color:var(--adm-tx2);text-transform:uppercase;letter-spacing:.4px;margin-top:5px;}
+/* Support KPI cards → clickable filters (active state mirrors the open tab) */
+#page-admin .sup-card[role="button"]{cursor:pointer;transition:border-color .14s,transform .14s,box-shadow .14s;}
+#page-admin .sup-card[role="button"]:hover{border-color:#5b7cfa;transform:translateY(-1px);}
+#page-admin .sup-card.is-active{border-color:rgba(120,150,255,.5);box-shadow:0 0 0 1px rgba(120,150,255,.3),0 4px 18px rgba(91,124,250,.14);}
+/* Support: dedicated pill tabs with counts (an inbox, not a back-office table) */
+#page-admin .support-tabs{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px;}
+#page-admin .sup-tab{background:var(--adm-panel);border:1px solid var(--adm-line);color:var(--adm-tx2);border-radius:20px;padding:7px 14px;font-size:12.5px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:7px;transition:border-color .14s,color .14s,background .14s;}
+#page-admin .sup-tab:hover{border-color:#5b7cfa;color:var(--adm-tx);}
+#page-admin .sup-tab[aria-selected="true"]{background:linear-gradient(135deg,rgba(91,124,250,.2),rgba(168,85,247,.16));border-color:rgba(120,150,255,.4);color:#fff;}
+#page-admin .sup-tab .tab-n{font-size:11px;font-weight:700;background:rgba(255,255,255,.08);border-radius:9px;padding:1px 7px;min-width:18px;text-align:center;}
+#page-admin .sup-tab.urgent .tab-n{background:rgba(248,113,113,.24);color:#fca5a5;}
+#page-admin .sup-search{background:var(--adm-panel);border:1px solid var(--adm-line);color:var(--adm-tx);border-radius:10px;padding:9px 13px;font-size:13px;width:100%;max-width:360px;margin-bottom:14px;}
+/* Support inbox rows: status left · subject+preview center · client+age right */
+#page-admin .inbox{display:flex;flex-direction:column;gap:9px;}
+#page-admin .inbox-row{display:grid;grid-template-columns:112px 1fr auto;gap:14px;align-items:center;background:var(--adm-panel);border:1px solid var(--adm-line);border-left:3px solid transparent;border-radius:12px;padding:12px 15px;cursor:pointer;transition:border-color .14s,background .14s;}
+#page-admin .inbox-row:hover{border-color:#5b7cfa;background:rgba(91,124,250,.05);}
+#page-admin .inbox-row.urgent{border-left-color:var(--adm-red);}
+#page-admin .inbox-row.warn{border-left-color:var(--adm-amber);}
+#page-admin .inbox-st{display:flex;flex-direction:column;gap:5px;align-items:flex-start;}
+#page-admin .inbox-main{min-width:0;}
+#page-admin .inbox-subj{font-size:14px;font-weight:650;color:var(--adm-tx);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+#page-admin .inbox-prev{font-size:12px;color:var(--adm-tx2);margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;line-height:1.4;}
+#page-admin .inbox-cli{font-size:11.5px;color:var(--adm-tx3);margin-top:5px;}
+#page-admin .inbox-meta{text-align:right;white-space:nowrap;display:flex;flex-direction:column;align-items:flex-end;gap:5px;}
+#page-admin .inbox-age{font-size:12px;color:var(--adm-tx2);font-weight:600;}
+#page-admin .inbox-msgs{font-size:11px;color:var(--adm-tx3);}
+#page-admin .sla-chip{font-size:9.5px;font-weight:700;letter-spacing:.3px;padding:2px 7px;border-radius:5px;text-transform:uppercase;}
+#page-admin .sla-chip.red{background:rgba(248,113,113,.18);color:#fca5a5;}
+#page-admin .sla-chip.amber{background:rgba(251,191,36,.18);color:#fcd34d;}
+@media(max-width:640px){#page-admin .inbox-row{grid-template-columns:1fr auto;}#page-admin .inbox-st{flex-direction:row;grid-column:1/-1;}}
+/* Ticket view: sticky back bar, state banner, class-based thread, context sidebar, templates */
+#page-admin .tk-back-bar{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:10px 0;margin-bottom:6px;background:linear-gradient(180deg,var(--adm-bg) 70%,transparent);}
+#page-admin .tk-cols{display:grid;grid-template-columns:1fr 300px;gap:18px;align-items:start;}
+@media(max-width:960px){#page-admin .tk-cols{grid-template-columns:1fr;}}
+#page-admin .tk-banner{display:flex;align-items:center;gap:9px;padding:11px 15px;border-radius:12px;font-size:13px;font-weight:600;margin-bottom:14px;}
+#page-admin .tk-banner.red{background:rgba(248,113,113,.1);border:1px solid rgba(248,113,113,.3);color:#fca5a5;}
+#page-admin .tk-banner.blue{background:rgba(91,124,250,.1);border:1px solid rgba(91,124,250,.3);color:#a9bcff;}
+#page-admin .tk-banner.gray{background:rgba(255,255,255,.04);border:1px solid var(--adm-line);color:var(--adm-tx2);}
+#page-admin .ticket-thread{display:flex;flex-direction:column;gap:12px;}
+#page-admin .ticket-msg{max-width:82%;padding:11px 14px;border-radius:14px;font-size:13.5px;line-height:1.55;}
+#page-admin .ticket-msg-b{white-space:pre-wrap;word-break:break-word;}
+#page-admin .ticket-msg--client{background:#1c2433;border:1px solid #263048;align-self:flex-start;border-bottom-left-radius:4px;}
+#page-admin .ticket-msg--admin{background:#14261f;border:1px solid #1f4436;align-self:flex-end;border-bottom-right-radius:4px;}
+#page-admin .ticket-msg-h{display:flex;align-items:center;gap:7px;font-size:11px;color:var(--adm-tx3);font-weight:700;margin-bottom:5px;}
+#page-admin .tk-av{width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;flex-shrink:0;}
+#page-admin .ticket-msg--admin .tk-av{background:linear-gradient(135deg,#34d399,#22c1a6);color:#04120c;}
+#page-admin .ticket-msg--client .tk-av{background:linear-gradient(135deg,#5b7cfa,#a855f7);color:#fff;}
+#page-admin .ticket-reply{width:100%;background:var(--color-bg-primary,#0d0d0f);border:1px solid var(--adm-line);color:#fff;border-radius:10px;padding:11px 13px;font:inherit;font-size:13px;resize:vertical;}
+#page-admin .tk-templates{display:flex;flex-wrap:wrap;gap:7px;margin:10px 0 2px;}
+#page-admin .tk-tpl{background:var(--adm-panel);border:1px solid var(--adm-line);color:var(--adm-tx2);border-radius:16px;padding:5px 11px;font-size:11.5px;cursor:pointer;transition:border-color .14s,color .14s;}
+#page-admin .tk-tpl:hover{border-color:#5b7cfa;color:var(--adm-tx);}
+#page-admin .tk-ctx .kv-row{padding:6px 0;}
+#page-admin .tk-ctx h2{font-size:13px;}
 /* Identités: leading gradient icon on each identity card */
 #page-admin .id-ic{width:42px;height:42px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0;background:linear-gradient(135deg,rgba(91,124,250,.22),rgba(168,85,247,.18));border:1px solid rgba(120,150,255,.2);}
 /* Système: health gauge bar + Services ‖ Activité two-column */
@@ -544,14 +597,32 @@ class AdminPage {
             const c = await this._rpc('admin_support_counts') || {};
             if (this._route !== 'support') return;
             const n = AdminPage.n;
-            const card = (v, l, cls, icon) => `<div class="sup-card ${cls || ''}"><div class="ic">${icon}</div><div><div class="v">${v}</div><div class="l">${l}</div></div></div>`;
+            const cur = this._supportFilter || '';
+            // Clickable KPI cards → switch to the matching tab; active state mirrors the open tab.
+            const card = (v, l, cls, icon, filter) => `<div class="sup-card ${cls || ''} ${filter !== undefined && filter === cur ? 'is-active' : ''}"${filter !== undefined ? ` role="button" tabindex="0" data-filter="${filter}" title="Voir ces tickets"` : ''}><div class="ic">${icon}</div><div><div class="v">${v}</div><div class="l">${l}</div></div></div>`;
             el.innerHTML = [
-                card(n(c.open), 'Tickets ouverts', '', '🎫'),
-                card(n(c.needs_reply), 'En attente', Number(c.needs_reply) > 0 ? 'alert' : 'ok', '⏳'),
-                card(n(c.in_progress), 'En cours', '', '🔄'),
-                card(n(c.resolved_7d), 'Résolus 7 j', 'ok', '✅'),
+                card(n(c.open), 'Tickets ouverts', '', '🎫', 'open'),
+                card(n(c.needs_reply), 'À répondre', Number(c.needs_reply) > 0 ? 'alert' : 'ok', '⏳', 'needs_reply'),
+                card(n(c.in_progress), 'En cours', '', '🔄', 'pending'),
+                card(n(c.resolved_7d), 'Résolus 7 j', 'ok', '✅', 'closed'),
                 card(n(c.resolved_30d), 'Résolus 30 j', '', '📅')
             ].join('');
+            el.querySelectorAll('.sup-card[data-filter]').forEach(cd => cd.addEventListener('click', () => this._pageSupport(cd.dataset.filter)));
+            // Tab counts + urgency dot on "À répondre".
+            const setCount = (k, val) => { const s = document.getElementById('sup-count-' + k); if (s) s.textContent = AdminPage.n(val); };
+            setCount('needs_reply', c.needs_reply); setCount('open', c.open); setCount('in_progress', c.in_progress);
+            const nrTab = document.querySelector('.sup-tab[data-filter="needs_reply"]');
+            if (nrTab) nrTab.classList.toggle('urgent', Number(c.needs_reply) > 0);
+            // Header status line: à répondre · ouverts · résolus 7 j.
+            const tx = document.querySelector('#page-admin .crm-head-tx');
+            if (tx) {
+                let meta = tx.querySelector('.crm-head-meta');
+                if (!meta) { meta = document.createElement('div'); meta.className = 'crm-head-meta'; tx.appendChild(meta); }
+                meta.innerHTML =
+                    `<span class="crm-hpill ${Number(c.needs_reply) > 0 ? 'bad' : ''}"><b>${n(c.needs_reply)}</b> à répondre</span>` +
+                    `<span class="crm-hpill"><b>${n(c.open)}</b> ouverts</span>` +
+                    `<span class="crm-hpill"><b>${n(c.resolved_7d)}</b> résolus 7 j</span>`;
+            }
         } catch (_) { el.innerHTML = ''; }
     }
     _view() { return document.getElementById('crm-view'); }
@@ -1011,17 +1082,25 @@ class AdminPage {
         const tabHadFocus = !!(ae && ae.classList && ae.classList.contains('sup-tab'));
         const v = this._view();
         const tabs = [['needs_reply', 'À répondre'], ['open', 'Ouverts'], ['pending', 'En attente'], ['closed', 'Fermés'], ['', 'Tous']];
+        const countKey = { needs_reply: 'needs_reply', open: 'open', pending: 'in_progress' }; // tab → admin_support_counts key
         v.innerHTML = `<div class="crm-page">
             <h1 class="crm-h1">🎫 Support</h1>
             <p class="crm-sub">Tickets clients — chaque message client envoie un email à support@norva.tv ; répondre ici trace le fil ET email le client.</p>
             <section id="sup-kpis" class="sup-kpis"><div class="ssub">Chargement…</div></section>
-            <div class="users-controls" role="tablist" aria-label="Filtrer les tickets">${tabs.map(t => {
+            <div class="support-tabs" role="tablist" aria-label="Filtrer les tickets">${tabs.map(t => {
                 const sel = t[0] === this._supportFilter;
-                return `<button class="sup-tab" role="tab" aria-selected="${sel ? 'true' : 'false'}" tabindex="${sel ? '0' : '-1'}" data-filter="${t[0]}" style="${sel ? 'border-color:#5b7cfa;color:#fff' : ''}">${t[1]}</button>`;
+                const ck = countKey[t[0]];
+                return `<button class="sup-tab" role="tab" aria-selected="${sel ? 'true' : 'false'}" tabindex="${sel ? '0' : '-1'}" data-filter="${t[0]}">${t[1]}${ck ? `<span class="tab-n" id="sup-count-${ck}">·</span>` : ''}</button>`;
             }).join('')}
             </div>
-            <div class="scroll"><div id="sup-list" role="tabpanel" aria-label="Tickets — ${AdminPage.esc(this._supportFilter || 'tous')}"><div class="ssub">Chargement…</div></div></div>
+            <input class="sup-search" id="sup-search" type="search" placeholder="Rechercher : client, sujet, message…" autocomplete="off" value="${AdminPage.esc(this._supportSearch || '')}" aria-label="Rechercher un ticket" />
+            <div id="sup-list" role="tabpanel" aria-label="Tickets — ${AdminPage.esc(this._supportFilter || 'tous')}"><div class="ssub">Chargement…</div></div>
         </div>`;
+        const searchEl = document.getElementById('sup-search');
+        if (searchEl) searchEl.addEventListener('input', () => {
+            clearTimeout(this._supSearchDeb);
+            this._supSearchDeb = setTimeout(() => { this._supportSearch = searchEl.value.trim(); this._renderSupportList(this._supportRows || []); }, 200);
+        });
         const tabEls = Array.from(v.querySelectorAll('.sup-tab'));
         tabEls.forEach(b => b.addEventListener('click', () => this._pageSupport(b.dataset.filter)));
         // Roving focus + Arrow/Home/End on the tablist (activation follows focus).
@@ -1040,12 +1119,14 @@ class AdminPage {
         });
         // The innerHTML rebuild destroys the focused tab button — put focus back on the active tab.
         if (tabHadFocus) { const act = v.querySelector('.sup-tab[aria-selected="true"]'); if (act) act.focus(); }
+        this._dressHeader();   // tabs call this method directly (not via _navigate) — re-dress the header
         this._refreshSupportBadge();
         this._loadSupportKpis();
         try {
             const res = await this._rpc('admin_support_list', { p_status: this._supportFilter || null, p_limit: 100, p_offset: 0 });
             if (seq !== this._supportSeq) return; // a newer tab switch superseded this fetch
-            this._renderSupportList((res && res.rows) || []);
+            this._supportRows = (res && res.rows) || [];
+            this._renderSupportList(this._supportRows);
         } catch (e) {
             if (seq !== this._supportSeq) return;
             const el = document.getElementById('sup-list');
@@ -1056,20 +1137,40 @@ class AdminPage {
     _renderSupportList(rows) {
         const el = document.getElementById('sup-list');
         if (!el) return;
-        if (!rows.length) { el.innerHTML = '<div class="card"><span class="badge green">✓</span> Aucun ticket dans cette vue.</div>'; return; }
+        rows = Array.isArray(rows) ? rows : [];
+        // Client-side search across client email, subject and last message body.
+        const q = (this._supportSearch || '').toLowerCase();
+        if (q) rows = rows.filter(t => [t.email, t.user_id, t.subject, t.last_body].some(x => String(x || '').toLowerCase().includes(q)));
+        if (!rows.length) {
+            el.innerHTML = q
+                ? `<div class="card"><span class="badge gray">∅</span> Aucun ticket ne correspond à « ${AdminPage.esc(this._supportSearch)} ».</div>`
+                : '<div class="card"><span class="badge green">✓</span> Aucun ticket dans cette vue.</div>';
+            return;
+        }
+        const now = Date.now(), H = 3600e3;
+        const ageH = (t) => (now - new Date(t.last_message_at).getTime()) / H;
+        const awaiting = (t) => t.status !== 'closed' && t.last_from === 'user';
+        const sla = (t) => { if (!awaiting(t)) return ''; const a = ageH(t); return a >= 48 ? '<span class="sla-chip red">&gt; 48 h</span>' : a >= 24 ? '<span class="sla-chip amber">&gt; 24 h</span>' : ''; };
+        const rowCls = (t) => { if (!awaiting(t)) return ''; const a = ageH(t); return a >= 48 ? 'urgent' : a >= 24 ? 'warn' : ''; };
         const chip = (t) => t.status === 'closed' ? '<span class="badge gray">fermé</span>'
             : (t.last_from === 'user' ? '<span class="badge red">à répondre</span>' : '<span class="badge green">répondu</span>');
-        el.innerHTML = `<table><thead><tr><th></th><th>Client</th><th>Sujet</th><th>Dernier message</th><th class="num">Messages</th><th>Ouvert</th></tr></thead><tbody>` +
-            rows.map(t => `<tr class="user-row" data-ticket-id="${AdminPage.esc(t.id)}" tabindex="0" aria-label="Ouvrir le ticket : ${AdminPage.esc(t.subject)}" title="Ouvrir le ticket">
-                <td>${chip(t)}</td>
-                <td>${AdminPage.esc(t.email || t.user_id)}</td>
-                <td><b>${AdminPage.esc(t.subject)}</b><div class="pacct" style="max-width:340px;overflow:hidden;text-overflow:ellipsis">${AdminPage.esc(t.last_body || '')}</div></td>
-                <td>${AdminPage.esc(AdminPage.timeAgo(t.last_message_at))} <span class="pacct">(${t.last_from === 'user' ? 'client' : 'nous'})</span></td>
-                <td class="num">${AdminPage.n(t.msg_count)}</td>
-                <td>${AdminPage.esc(AdminPage.timeAgo(t.created_at))}</td>
-            </tr>`).join('') + '</tbody></table>';
-        el.querySelectorAll('tr[data-ticket-id]').forEach(r =>
-            r.addEventListener('click', () => this._navigate('ticket:' + r.dataset.ticketId)));
+        el.innerHTML = `<div class="inbox">` + rows.map(t => `
+            <div class="inbox-row ${rowCls(t)}" data-ticket-id="${AdminPage.esc(t.id)}" role="button" tabindex="0" aria-label="Ouvrir le ticket : ${AdminPage.esc(t.subject)}" title="Ouvrir le ticket">
+                <div class="inbox-st">${chip(t)}${sla(t)}</div>
+                <div class="inbox-main">
+                    <div class="inbox-subj">${AdminPage.esc(t.subject || '(sans sujet)')}</div>
+                    <div class="inbox-prev">${AdminPage.esc(t.last_body || '')}</div>
+                    <div class="inbox-cli">👤 ${AdminPage.esc(t.email || t.user_id || '—')}</div>
+                </div>
+                <div class="inbox-meta">
+                    <div class="inbox-age">${AdminPage.esc(AdminPage.timeAgo(t.last_message_at))}</div>
+                    <div class="inbox-msgs">${AdminPage.n(t.msg_count)} msg · ${t.last_from === 'user' ? 'client' : 'nous'}</div>
+                </div>
+            </div>`).join('') + `</div>`;
+        el.querySelectorAll('.inbox-row[data-ticket-id]').forEach(r => {
+            r.addEventListener('click', () => this._navigate('ticket:' + r.dataset.ticketId));
+            r.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); this._navigate('ticket:' + r.dataset.ticketId); } });
+        });
     }
 
     // ── Page: single ticket (thread + reply + status) ──
@@ -1077,10 +1178,10 @@ class AdminPage {
         this._setCrumb('Support › ticket');
         const nav = this._nav;
         const v = this._view();
-        v.innerHTML = `<div class="crm-page">
+        v.innerHTML = `<div class="crm-page"><div id="ticket-body">
             <button class="crm-back" data-back="support">← Retour aux tickets</button>
-            <div id="ticket-body"><div class="ssub">Chargement…</div></div>
-        </div>`;
+            <div class="ssub" style="margin-top:10px">Chargement…</div>
+        </div></div>`;
         const back = v.querySelector('[data-back]');
         if (back) back.addEventListener('click', (e) => { e.stopPropagation(); this._navigate('support'); });
         try {
@@ -1100,34 +1201,79 @@ class AdminPage {
         const t = d.ticket || {};
         const msgs = Array.isArray(d.messages) ? d.messages : [];
         this._setCrumb('Support › ' + (t.subject || 'ticket'));
-        const chip = t.status === 'closed' ? '<span class="badge gray">fermé</span>'
-            : (t.last_from === 'user' ? '<span class="badge red">à répondre</span>' : '<span class="badge green">répondu — en attente client</span>');
-        const thread = msgs.map(m => `
-            <div style="max-width:86%;margin:10px 0;padding:11px 14px;border-radius:12px;font-size:13.5px;line-height:1.55;white-space:pre-wrap;word-break:break-word;
-                        ${m.from_admin ? 'background:#14261f;border:1px solid #1f4436;' : 'background:#1c2433;margin-left:auto;'}">
-                <div style="font-size:11px;color:#828ea1;font-weight:700;margin-bottom:4px">
-                    ${m.from_admin ? '🛟 ' + AdminPage.esc(m.author_email || 'support') : '👤 ' + AdminPage.esc(m.author_email || 'client')} · ${AdminPage.esc(AdminPage.timeAgo(m.created_at))}</div>
-                ${AdminPage.esc(m.body)}
-            </div>`).join('');
+        const closed = t.status === 'closed';
+        const awaitingUs = !closed && t.last_from === 'user';
+        const statusChip = closed ? '<span class="badge gray">fermé</span>'
+            : (awaitingUs ? '<span class="badge red">à répondre</span>' : '<span class="badge green">répondu — en attente client</span>');
+        const lastAgo = AdminPage.timeAgo(t.last_message_at || t.created_at);
+        // Next-action banner: what does THIS ticket need now?
+        const banner = closed
+            ? `<div class="tk-banner gray">🔒 Ticket fermé.</div>`
+            : (awaitingUs
+                ? `<div class="tk-banner red">⏰ Réponse attendue de vous — le client attend depuis ${AdminPage.esc(lastAgo)}.</div>`
+                : `<div class="tk-banner blue">✓ En attente du client — dernière réponse envoyée ${AdminPage.esc(lastAgo)}.</div>`);
+        const initial = (e) => (String(e || '?').trim()[0] || '?').toUpperCase();
+        // Class-based thread: client left, support/admin right, initials avatars.
+        const thread = msgs.map(m => {
+            const admin = !!m.from_admin;
+            const who = admin ? (m.author_email || 'support') : (m.author_email || 'client');
+            // Body sits in its own pre-wrap element with NO surrounding template whitespace,
+            // otherwise the source indentation would leak into the rendered message.
+            return `<div class="ticket-msg ticket-msg--${admin ? 'admin' : 'client'}"><div class="ticket-msg-h"><span class="tk-av">${admin ? '🛟' : AdminPage.esc(initial(who))}</span>${AdminPage.esc(who)} · ${AdminPage.esc(AdminPage.timeAgo(m.created_at))}</div><div class="ticket-msg-b">${AdminPage.esc(m.body)}</div></div>`;
+        }).join('');
+        // Quick-reply templates (replies email the client in English).
+        const TEMPLATES = [
+            ['💳 Paiement', "Hi,\n\nWe've looked into the payment issue on your account. "],
+            ['✉️ Confirmation', "Hi,\n\nWe've just re-sent your confirmation email — please check your inbox (and spam). "],
+            ['📡 Source', "Hi,\n\nAbout your source/playlist: "],
+            ['↩︎ Remboursement', "Hi,\n\nWe've processed your refund; it should appear on your statement within a few business days. "],
+            ['❓ Infos', "Hi,\n\nCould you share a bit more detail (device, and a screenshot if possible) so we can help faster? "]
+        ];
+        this._ticketTemplates = TEMPLATES.map(x => x[1]);
+        const filterLabel = { needs_reply: 'À répondre', open: 'Ouverts', pending: 'En attente', closed: 'Fermés', '': 'Tous' }[this._supportFilter || ''] || 'Support';
         body.innerHTML = `
-            <div class="fiche-head" style="margin-bottom:10px">
+            <div class="tk-back-bar">
+              <button class="crm-back" data-back="support">← Retour · ${AdminPage.esc(filterLabel)}</button>
+              ${statusChip}
+            </div>
+            <div class="fiche-head" style="margin-bottom:6px">
               <div><div class="fiche-title" style="font-size:18px">${AdminPage.esc(t.subject || '—')}</div>
-              <div class="umeta">${chip}
-                <span>· <a href="#" id="tk-client" style="color:#a9bcff">${AdminPage.esc(t.email || t.user_id || '')}</a></span>
+              <div class="umeta"><a href="#" id="tk-client" style="color:#a9bcff">${AdminPage.esc(t.email || t.user_id || '')}</a>
                 <span>· ouvert ${t.created_at ? AdminPage.esc(AdminPage.timeAgo(t.created_at)) : '—'}</span></div></div>
             </div>
-            <div class="card" style="margin-bottom:14px">${thread || '<div class="ssub">Aucun message.</div>'}</div>
-            <div class="card">
-              <textarea id="tk-reply" rows="3" placeholder="Répondre au client (le message part par email en anglais côté client — écris en anglais)…"
-                style="width:100%;background:var(--color-bg-primary,#0d0d0f);border:1px solid var(--color-border,#2a2a38);color:#fff;border-radius:8px;padding:10px 12px;font:inherit;font-size:13px;resize:vertical"></textarea>
-              <div class="act-row" style="margin-top:10px">
-                <button class="act-btn" id="tk-send" style="background:#5b7cfa;border-color:#5b7cfa">📤 Envoyer la réponse</button>
-                ${t.status !== 'closed'
-                    ? '<button class="act-btn act-danger" id="tk-close">✔ Fermer le ticket</button>'
-                    : '<button class="act-btn act-unsuspend" id="tk-reopen">↺ Rouvrir</button>'}
+            ${banner}
+            <div class="tk-cols">
+              <div>
+                <div class="card" style="margin-bottom:14px"><div class="ticket-thread">${thread || '<div class="ssub">Aucun message.</div>'}</div></div>
+                <div class="card">
+                  <textarea id="tk-reply" class="ticket-reply" rows="3" placeholder="Répondre au client (le message part par email en anglais côté client — écris en anglais)…"></textarea>
+                  <div class="tk-templates">${TEMPLATES.map((tp, i) => `<button class="tk-tpl" data-tpl="${i}" title="Insérer un modèle">${AdminPage.esc(tp[0])}</button>`).join('')}</div>
+                  <div class="act-row" style="margin-top:8px">
+                    <button class="act-btn" id="tk-send" style="background:#5b7cfa;border-color:#5b7cfa">📤 Envoyer la réponse</button>
+                    ${!closed ? '<button class="act-btn act-danger" id="tk-close">✔ Fermer le ticket</button>' : '<button class="act-btn act-unsuspend" id="tk-reopen">↺ Rouvrir</button>'}
+                  </div>
+                  <div class="ssub" style="margin-top:8px">Envoyer une réponse passe le ticket « en attente client » et lui envoie un email.</div>
+                </div>
               </div>
-              <div class="ssub" style="margin-top:8px">Envoyer une réponse passe le ticket « en attente client » et lui envoie un email.</div>
+              <div class="card tk-ctx" id="tk-ctx">
+                <h2 style="margin:0 0 12px">👤 Contexte client</h2>
+                <div class="kv-row"><span class="kv-l">Email</span><span class="kv-v">${AdminPage.esc(t.email || '—')}</span></div>
+                <div id="tk-ctx-billing"><div class="ssub" style="margin-top:8px">Chargement du contexte…</div></div>
+                ${t.user_id ? `<button class="act-btn" id="tk-open-fiche" style="margin-top:14px;width:100%">Ouvrir la fiche 360° →</button>` : ''}
+              </div>
             </div>`;
+        const back = body.querySelector('[data-back]');
+        if (back) back.addEventListener('click', (e) => { e.stopPropagation(); this._navigate('support'); });
+        const openFiche = document.getElementById('tk-open-fiche');
+        if (openFiche && t.user_id) openFiche.addEventListener('click', () => this._navigate('client:' + t.user_id));
+        // Templates: insert into the reply box (append, don't clobber a draft).
+        body.querySelectorAll('.tk-tpl').forEach(b => b.addEventListener('click', () => {
+            const ta = document.getElementById('tk-reply'); if (!ta) return;
+            const tpl = this._ticketTemplates[Number(b.dataset.tpl)] || '';
+            ta.value = ta.value ? (ta.value.replace(/\s*$/, '') + '\n\n' + tpl) : tpl;
+            ta.focus(); ta.selectionStart = ta.selectionEnd = ta.value.length;
+        }));
+        if (t.user_id) this._loadTicketContext(t.user_id);
         const client = document.getElementById('tk-client');
         if (client && t.user_id) client.addEventListener('click', (e) => { e.preventDefault(); this._navigate('client:' + t.user_id); });
         const send = document.getElementById('tk-send');
@@ -1141,8 +1287,9 @@ class AdminPage {
         });
         const closeBtn = document.getElementById('tk-close');
         if (closeBtn) closeBtn.addEventListener('click', async () => {
+            if (!await this._confirm('Fermer ce ticket ? Le client peut le rouvrir en répondant.', { okLabel: 'Fermer le ticket' })) return;
             closeBtn.disabled = true; closeBtn.textContent = '…';
-            try { await this._supportEdge('/admin/status', { ticket_id: t.id, status: 'closed' }); if (this._route === 'ticket:' + t.id) this._pageTicket(t.id); this._refreshSupportBadge(); }
+            try { await this._supportEdge('/admin/status', { ticket_id: t.id, status: 'closed' }); if (this._route === 'ticket:' + t.id) this._pageTicket(t.id); this._refreshSupportBadge(); this._toast('Ticket fermé.', 'ok'); }
             catch (e) { closeBtn.disabled = false; closeBtn.textContent = '✔ Fermer le ticket'; this._toast('Erreur : ' + e.message, 'err'); }
         });
         const reopen = document.getElementById('tk-reopen');
@@ -1151,6 +1298,28 @@ class AdminPage {
             try { await this._supportEdge('/admin/status', { ticket_id: t.id, status: 'open' }); if (this._route === 'ticket:' + t.id) this._pageTicket(t.id); this._refreshSupportBadge(); }
             catch (e) { reopen.disabled = false; reopen.textContent = '↺ Rouvrir'; this._toast('Erreur : ' + e.message, 'err'); }
         });
+    }
+
+    // Ticket client-context sidebar: the payment state support needs without leaving the thread.
+    async _loadTicketContext(userId) {
+        const el = document.getElementById('tk-ctx-billing');
+        if (!el) return;
+        try {
+            const b = await this._rpc('admin_user_billing', { p_user_id: userId }) || {};
+            if (!el.isConnected) return; // ticket re-rendered / navigated away
+            const p = b.projection || null, m = b.mapping || null;
+            const subMap = { active: ['Actif payant', 'green'], trialing: ['En essai', 'blue'], past_due: ['Échec paiement', 'red'], grace: ['Échec paiement', 'red'], cancelled_at_period_end: ['Annulation prévue', 'amber'], expired: ['Expiré', 'gray'] };
+            const sm = p ? (subMap[p.status] || [p.status || '—', 'gray']) : ['Gratuit', 'gray'];
+            const row = (l, v) => `<div class="kv-row"><span class="kv-l">${l}</span><span class="kv-v">${v}</span></div>`;
+            let html = row('Abonnement', `<span class="badge ${sm[1]}">${AdminPage.esc(sm[0])}</span>`);
+            if (b.is_internal) html += row('Compte', '<span class="badge amber">interne</span>');
+            if (m && m.plan) html += row('Plan', `${AdminPage.esc(m.plan)} · ${AdminPage.esc(m.period || '—')}`);
+            if (m && m.card_last4) html += row('Carte', `•••• ${AdminPage.esc(m.card_last4)}`);
+            if (p && Number(p.dunning_stage) > 0) html += row('Dunning', `<span class="badge red">relance ${AdminPage.esc(String(p.dunning_stage))}/3</span>`);
+            el.innerHTML = html;
+        } catch (_) {
+            if (el.isConnected) el.innerHTML = '<div class="ssub" style="margin-top:8px">Contexte client indisponible.</div>';
+        }
     }
 
     async _supportEdge(path, bodyObj) {
