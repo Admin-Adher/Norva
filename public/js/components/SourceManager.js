@@ -997,7 +997,7 @@ class SourceManager {
             form = this.readSourceForm(type);
         } catch (err) {
             if (type === 'xtream') this.openAdvancedSourceLogin();
-            alert(err.message);
+            NorvaModal.toast(err.message, 'error');
             return;
         }
         const { name, url, username, password } = form;
@@ -1039,7 +1039,7 @@ class SourceManager {
                     .catch(err => console.warn('[SourceManager] Background channel refresh failed:', err));
             }
         } catch (err) {
-            alert('Error adding source: ' + err.message);
+            NorvaModal.toast('Error adding source: ' + err.message, 'error');
         }
     }
 
@@ -1052,7 +1052,7 @@ class SourceManager {
             form = this.readSourceForm(type, { existing: true });
         } catch (err) {
             if (type === 'xtream') this.openAdvancedSourceLogin();
-            alert(err.message);
+            NorvaModal.toast(err.message, 'error');
             return;
         }
         const { name, url, username, password } = form;
@@ -1069,7 +1069,7 @@ class SourceManager {
             await this.loadSources();
             this.notifySourceHealthChanged();
         } catch (err) {
-            alert('Error updating source: ' + err.message);
+            NorvaModal.toast('Error updating source: ' + err.message, 'error');
         }
     }
 
@@ -1090,7 +1090,11 @@ class SourceManager {
      * Delete source
      */
     async deleteSource(id) {
-        if (!confirm('Are you sure you want to delete this source?')) return;
+        const ok = await NorvaModal.confirm(
+            'This source and the channels, movies and series it added will be removed from Norva. You can add it again later.',
+            { title: 'Remove source?', confirmLabel: 'Remove', danger: true }
+        );
+        if (!ok) return;
 
         try {
             await API.sources.delete(id);
@@ -1102,7 +1106,7 @@ class SourceManager {
                 await window.app.channelList.loadChannels();
             }
         } catch (err) {
-            alert('Error deleting source: ' + err.message);
+            NorvaModal.toast('Error deleting source: ' + err.message, 'error');
         }
     }
 
@@ -1115,7 +1119,7 @@ class SourceManager {
             await this.loadSources();
             this.notifySourceHealthChanged();
         } catch (err) {
-            alert('Error toggling source: ' + err.message);
+            NorvaModal.toast('Error toggling source: ' + err.message, 'error');
         }
     }
 
@@ -1126,12 +1130,12 @@ class SourceManager {
         try {
             const result = await API.sources.test(id);
             if (result.success) {
-                alert('Connection successful!');
+                NorvaModal.toast('Connection successful!', 'success');
             } else {
-                alert('Connection failed: ' + (result.error || result.message));
+                NorvaModal.toast('Connection failed: ' + (result.error || result.message), 'error');
             }
         } catch (err) {
-            alert('Connection failed: ' + err.message);
+            NorvaModal.toast('Connection failed: ' + err.message, 'error');
         }
     }
 
@@ -1243,19 +1247,19 @@ class SourceManager {
                 if (window.app?.epgGuide) {
                     await window.app.epgGuide.loadEpg(true);
                 }
-                alert(isHardRefresh ? 'EPG data hard refreshed!' : 'EPG data synced & refreshed!');
+                NorvaModal.toast(isHardRefresh ? 'EPG data hard refreshed!' : 'EPG data synced & refreshed!', 'success');
             } else if (type === 'xtream') {
                 // Re-fetch xtream data by reloading channels
                 if (window.app?.channelList) {
                     await window.app.channelList.loadChannels();
                 }
-                alert(isHardRefresh ? 'Xtream data hard refreshed!' : 'Xtream data synced & refreshed!');
+                NorvaModal.toast(isHardRefresh ? 'Xtream data hard refreshed!' : 'Xtream data synced & refreshed!', 'success');
             } else if (type === 'm3u') {
                 // Re-fetch M3U data by reloading channels
                 if (window.app?.channelList) {
                     await window.app.channelList.loadChannels();
                 }
-                alert(isHardRefresh ? 'M3U playlist hard refreshed!' : 'M3U playlist synced & refreshed!');
+                NorvaModal.toast(isHardRefresh ? 'M3U playlist hard refreshed!' : 'M3U playlist synced & refreshed!', 'success');
             }
 
             if (this.contentSourceSelect?.value === String(id)) {
@@ -1268,7 +1272,7 @@ class SourceManager {
             this.notifySourceHealthChanged();
         } catch (err) {
             console.error('Error refreshing source:', err);
-            alert(`${isHardRefresh ? 'Hard refresh' : 'Refresh'} failed: ${err.message}`);
+            NorvaModal.toast(`${isHardRefresh ? 'Hard refresh' : 'Refresh'} failed: ${err.message}`, 'error');
         } finally {
             refreshButtons.forEach(button => { button.disabled = false; });
             if (btn) btn.querySelector('.icon')?.classList.remove('spin');
@@ -2150,7 +2154,7 @@ class SourceManager {
 
         } catch (err) {
             console.error('Error setting all visibility:', err);
-            alert('Failed: ' + err.message);
+            NorvaModal.toast('Failed: ' + err.message, 'error');
             if (saveBtn) {
                 saveBtn.textContent = '💾 Save changes';
                 saveBtn.disabled = false;
@@ -2167,7 +2171,7 @@ class SourceManager {
     async saveContentChanges() {
         if (this.treeData?.genreView) return; // genre view auto-saves on toggle
         if (!this.treeData) {
-            alert('No content loaded to save');
+            NorvaModal.toast('No content loaded to save', 'info');
             return;
         }
 
@@ -2317,7 +2321,7 @@ class SourceManager {
 
         } catch (err) {
             console.error('Error saving content changes:', err);
-            alert('Failed to save changes: ' + err.message);
+            NorvaModal.toast('Failed to save changes: ' + err.message, 'error');
             if (saveBtn) {
                 saveBtn.textContent = '💾 Save changes';
                 saveBtn.disabled = false;

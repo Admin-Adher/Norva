@@ -974,11 +974,11 @@ class SettingsPage {
 
                 try {
                     await API.users.create({ username, password, role });
-                    alert('User created successfully!');
+                    NorvaModal.toast('User created successfully!', 'success');
                     addUserForm.reset();
                     this.loadUsers();
                 } catch (err) {
-                    alert('Error creating user: ' + err.message);
+                    NorvaModal.toast('Error creating user: ' + err.message, 'error');
                 }
             });
         }
@@ -1047,7 +1047,7 @@ class SettingsPage {
         console.log('Modal element:', modal);
         if (!modal) {
             console.error('CRITICAL: Modal element #edit-user-modal not found in DOM!');
-            alert('Error: Modal not found. Please refresh the page.');
+            NorvaModal.toast('Error: could not open the editor. Please refresh the page.', 'error');
             return;
         }
 
@@ -1102,7 +1102,7 @@ class SettingsPage {
             console.log('Modal should now be visible!');
         } catch (err) {
             console.error('Error populating modal:', err);
-            alert('Error opening edit modal: ' + err.message);
+            NorvaModal.toast('Error opening edit modal: ' + err.message, 'error');
         }
     }
 
@@ -1138,11 +1138,11 @@ class SettingsPage {
 
             try {
                 await API.users.update(userId, updates);
-                // alert('User updated successfully!'); // Optional: Replace with toast?
+                NorvaModal.toast('User updated.', 'success');
                 closeModal();
                 this.loadUsers();
             } catch (err) {
-                alert('Error updating user: ' + err.message);
+                NorvaModal.toast('Error updating user: ' + err.message, 'error');
             }
         };
 
@@ -1151,15 +1151,17 @@ class SettingsPage {
 
 
     async deleteUser(userId, username) {
-        if (!confirm(`Are you sure you want to delete user "${username}"?`)) {
-            return;
-        }
+        const ok = await NorvaModal.confirm(
+            `"${username}" will lose access to this Norva server. This cannot be undone.`,
+            { title: 'Delete user?', confirmLabel: 'Delete', danger: true }
+        );
+        if (!ok) return;
 
         try {
             await API.users.delete(userId);
             this.loadUsers();
         } catch (err) {
-            alert('Error deleting user: ' + err.message);
+            NorvaModal.toast('Error deleting user: ' + err.message, 'error');
         }
     }
 
@@ -1244,7 +1246,11 @@ class SettingsPage {
                 : '<div class="screens-empty">No screens linked yet.<br>Pair a TV, phone or browser above to see it here.</div>';
             listEl.querySelectorAll('[data-revoke-device]').forEach((btn) => {
                 btn.addEventListener('click', async () => {
-                    if (!confirm('Remove this screen from your account? It will need to be paired again to reconnect.')) return;
+                    const ok = await NorvaModal.confirm(
+                        'This screen will need to be paired again to reconnect to your account.',
+                        { title: 'Remove screen?', confirmLabel: 'Remove screen', danger: true }
+                    );
+                    if (!ok) return;
                     const id = btn.dataset.revokeDevice;
                     btn.disabled = true;
                     try {

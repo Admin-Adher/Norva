@@ -12037,6 +12037,144 @@ body.is-watching .norva-mini { display: none !important; }
   white-space: nowrap;
 }
 
+/* Success toast (base + .norva-toast-error already defined above). */
+.norva-toast-success { background: #16351f; }
+
+/* ============================================================
+   NorvaModal — unified confirm/alert dialog (replaces native alert/confirm)
+   ============================================================ */
+.norva-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10050;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(4, 6, 12, 0.66);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+  animation: norva-modal-in 0.14s ease;
+}
+
+@keyframes norva-modal-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.norva-modal {
+  width: min(440px, 100%);
+  background: #171922;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 16px;
+  padding: 24px;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.6);
+}
+
+.norva-modal.is-danger {
+  border-color: rgba(239, 68, 68, 0.35);
+}
+
+.norva-modal-title {
+  font-size: 1.15rem;
+  font-weight: 800;
+  color: #fff;
+  margin-bottom: 8px;
+}
+
+.norva-modal-message {
+  color: var(--color-text-secondary);
+  font-size: 0.95rem;
+  line-height: 1.5;
+}
+
+.norva-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 22px;
+}
+
+.norva-modal-btn {
+  min-height: 44px;
+  padding: 10px 20px;
+  border-radius: 10px;
+  font-size: 0.92rem;
+  font-weight: 700;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+
+.norva-modal-cancel {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.16);
+  color: #e9eeff;
+}
+
+.norva-modal-cancel:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.norva-modal-confirm {
+  background: var(--color-accent);
+  color: #fff;
+}
+
+.norva-modal-confirm:hover {
+  background: #2f6df0;
+}
+
+.norva-modal-confirm.is-danger {
+  background: #ef4444;
+}
+
+.norva-modal-confirm.is-danger:hover {
+  background: #dc2626;
+}
+
+/* Mobile: dock the dialog to the bottom for thumb reach, full-width stacked buttons. */
+@media (max-width: 560px) {
+  .norva-modal-overlay {
+    align-items: flex-end;
+    padding: 0;
+  }
+
+  .norva-modal {
+    width: 100%;
+    border-radius: 18px 18px 0 0;
+    padding: 22px 20px calc(22px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .norva-modal-actions {
+    flex-direction: column-reverse;
+  }
+
+  .norva-modal-btn {
+    width: 100%;
+  }
+}
+
+/* Android TV — large, legible dialog + buttons for the couch / D-pad. */
+.tv-mode .norva-modal {
+  width: min(560px, 90%);
+  padding: 32px;
+}
+
+.tv-mode .norva-modal-title {
+  font-size: 1.5rem;
+}
+
+.tv-mode .norva-modal-message {
+  font-size: 1.15rem;
+}
+
+.tv-mode .norva-modal-btn {
+  min-height: 56px;
+  font-size: 1.1rem;
+  padding: 14px 28px;
+}
+
 /* Offline banner (top, full width) */
 .norva-offline-banner {
   position: fixed;
