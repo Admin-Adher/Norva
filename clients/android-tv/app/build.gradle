@@ -86,7 +86,9 @@ dependencies {
     implementation "androidx.media3:media3-session:1.5.1"
     // Watch Next ("Play Next") row on the Android TV home screen.
     implementation "androidx.tvprovider:tvprovider:1.0.0"
-    // In-app subscriptions (Google Play Billing) through RevenueCat. Pin a
-    // tested version before release; "8.+" resolves the latest v8 line.
-    implementation "com.revenuecat.purchases:purchases:8.+"
+    // In-app subscriptions (Google Play Billing) through RevenueCat. Pinned to the
+    // latest v8 release (8.25.0) for reproducible release builds — this is what the
+    // old "8.+" range already resolved to, now frozen so a future v9/v10 with API
+    // changes can't slip into a release unnoticed. Bump deliberately when testing a newer v8.
+    implementation "com.revenuecat.purchases:purchases:8.25.0"
 }

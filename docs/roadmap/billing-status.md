@@ -352,7 +352,7 @@ Ces morceaux sont en place mais ne s'activent qu'une fois les clés fournies
 - [ ] **Gestion d'abo** (`subscription.html`) : états essai / actif / annulé / paiement
       échoué / expiré ; bouton Manage ouvre Play (natif) ou le portail (web) ; bannière
       « paiement échoué » s'affiche en `past_due`
-- [ ] **Épingler la version du SDK RevenueCat** Android (`8.+` → version testée) dans les 2 `build.gradle`
+- [x] **Version du SDK RevenueCat Android épinglée** → `8.25.0` (dernière v8) dans les 2 `build.gradle` (2026-07-06)
 - [ ] Vérifier les signatures SDK natif (v8) + web `purchases-js` au 1er vrai build (cf. caveats)
 
 ### Phase 5 — Passage en production
@@ -417,7 +417,9 @@ autres). La migration s'applique via `supabase-go db push` ou l'intégration.
 - **SDK natif RevenueCat (v8)** et **web `purchases-js`** : écrits au plus près de
   la doc mais **non compilés/testés** ici. Isolés dans `NorvaBilling.java` (par app)
   et `public/js/billing.js`. À vérifier au 1er build réel avec la clé.
-- **Version SDK Android en `8.+`** → épingler une version testée avant release.
+- ~~**Version SDK Android en `8.+`** → épingler une version testée avant release.~~
+  ✅ Fait (2026-07-06) : épinglé à `8.25.0` (dernière v8 sur Maven Central, = ce que `8.+`
+  résolvait) dans les 2 `build.gradle`. POM + AAR vérifiés publiés.
 - **Arbitrage produit non confirmé** : profils 5 / trusted devices 10 / sources 5
   (parité). Triviaux à changer dans `PLAN_LIMITS` si tu veux différencier.
 - **`norva-cloud`/`norva-playback`** : déployés en legacy (v38/v36). À redéployer

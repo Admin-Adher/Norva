@@ -286,8 +286,9 @@ Suivre `billing-setup.md` §3 **avec la correction du haut** (pas de Web Billing
 - Poser la clé publique Android (`goog_…`) : soit `clients/android-phone/gradle.properties`
   + `clients/android-tv/gradle.properties` (`REVENUECAT_API_KEY=goog_…`), soit un
   secret CI `REVENUECAT_API_KEY` passé au build (`-PREVENUECAT_API_KEY=…`).
-- **Épingler la version du SDK** (`com.revenuecat.purchases:purchases:8.+` → une
-  version 8.x testée) dans les 2 `app/build.gradle` avant le build de release.
+- ✅ **Version du SDK épinglée** : `com.revenuecat.purchases:purchases:8.25.0` (dernière
+  v8, = ce que `8.+` résolvait) dans les 2 `app/build.gradle` — reproductible, pas de
+  saut v9/v10 involontaire. À bumper volontairement pour tester une v8 plus récente.
 - **Rebuild** les AAB (bump `versionCode`) → réuploader en Test interne.
 
 > Sans clé, l'app compile et tourne (SDK non initialisé, paywall natif =
