@@ -81,6 +81,57 @@ d'entitlements est prête pour n'importe quelle source**.
 
 ---
 
+## 🔒 DÉCISION 2026-07-06 — RevenueCat au lancement, in-house en option future
+
+**Décision : on garde RevenueCat pour le rail MOBILE au lancement.** Pas de
+réécriture maintenant — l'APK (SDK RevenueCat) + le webhook serveur
+(`norva-billing-webhook`) sont déjà **100 % câblés**. Internaliser aujourd'hui
+coûterait de l'ingénierie pour économiser **0 $** (RevenueCat est gratuit
+jusqu'à ~2 500 $/mois de CA suivi — vérifier leur grille à jour).
+
+### Pourquoi garder la porte ouverte (vision owner)
+Le « tout en interne » a une vraie valeur long terme : marge (pas de % prélevé),
+contrôle total des données de revenu, valorisation plus élevée (moins de
+dépendance tierce en due diligence). Vision **légitime** → la migration reste un
+objectif futur, pas un tabou.
+
+### Nuances actées (pour trancher juste le jour venu)
+- Le gros de la « taxe » mobile, c'est **Google (~15 % < 1 M$/an, 30 % au-delà)**,
+  **pas RevenueCat (~1 %)**. Retirer RevenueCat économise ~1 %, pas 15-30 %.
+- Le **cerveau** du billing est **déjà interne** (`_shared/entitlements.ts`,
+  `cloud_entitlement_projection`, trial/limites). RevenueCat n'est qu'une couche
+  de validation reçus + webhook → **pas de lock-in profond**, la projection est
+  agnostique de la source.
+- Le « tout maison » n'est **pas** un one-time : maintenance perpétuelle
+  (changements d'API Google/Apple, RTDN, grâce, proration, retries, fraude,
+  remboursements) — exactement ce que RevenueCat absorbe.
+- Cohérence : le rail **WEB est déjà hors RevenueCat** (Stancer / cf. pivot
+  Gumroad ci-dessus) → internaliser le mobile plus tard est cohérent avec la
+  vision, pas un virage.
+
+### 🎯 Déclencheur de bascule (quand ré-ouvrir le sujet)
+Ré-évaluer l'internalisation **mobile** quand **les deux** sont vrais :
+1. **Économique** — le coût annuel RevenueCat dépasse durablement le coût
+   (build + maintenance/an) du rail interne. Proxy : CA mobile suivi
+   **> ~25-50 k$/mois de façon stable** (→ RevenueCat ~250-500 $/mo ; à ce
+   niveau le ~1 % commence à justifier l'effort).
+2. **Capacité** — bande passante d'ingénierie réelle pour porter la maintenance
+   perpétuelle (pas seulement le build).
+
+Tant qu'**un** des deux manque → **on reste sur RevenueCat**.
+
+### Portée de l'internalisation (pour chiffrage au moment du déclencheur)
+- **Android** : remplacer le SDK RevenueCat dans `NorvaBilling.java` (×2 apps) par
+  **Google Play Billing Library** brute ; remplacer `norva-billing-webhook` par un
+  **consommateur RTDN (Google Cloud Pub/Sub)** + **validation Play Developer API**
+  (Service Account). La projection ne change pas.
+- **iOS (plus tard)** : App Store Server API + App Store Server Notifications v2.
+- **Web** : déjà interne (Stancer).
+
+_Chiffrage détaillé (fichiers, effort, risques) à produire le jour du déclencheur._
+
+---
+
 ## Modèle d'abonnement (décidé 2026-06-22)
 
 - **Essai 7 j avec carte** (Play : moyen de paiement du compte Google ; Web : carte via RC Web Billing/Stripe). Conversion auto sauf annulation. **Pas de palier gratuit permanent payant** — mais un palier `free` de navigation (voir ci-dessous).
