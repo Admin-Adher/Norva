@@ -1226,22 +1226,11 @@ async function listGenreRails(req: Request, url: URL, userId: string) {
 // Full, paged list of one curated genre bucket (the rail's "Tout voir" / See
 // all). Same shape as listMediaItems so the client grid consumes it unchanged.
 // --- Audio language + burned-in subtitle filtering ----------------------------
-// cloud_titles.version_languages stores the raw lowercased provider tags
-// (vf, vff, vfq, multi, vo, vostfr, subt_ar, ...) aggregated from the title's
-// variants. A user-facing facet ("French audio", "Arabic subtitles") expands to
-// the set of tags that imply it. The taxonomy lives here (single source of truth),
-// so the stored column never needs a re-backfill when the mapping evolves.
-const AUDIO_FACET_TAGS: Record<string, string[]> = {
-  fr: ["vf", "vff", "vfq", "truefrench", "french"],
-  original: ["vo", "vost", "vostfr", "vosten", "vostes", "vostar", "vostde", "vostit", "vostpt", "vosttr", "vostnl", "vostru", "vostpl", "vosthi", "vostjpn", "vostkor", "vostzh"],
-  multi: ["multi"],
-  en: ["en", "eng", "english"],
-  es: ["es", "spa", "spanish"],
-  ar: ["ar", "ara", "arabic"],
-  de: ["de", "deu", "ger", "german"],
-  it: ["it", "ita", "italian"],
-  pt: ["pt", "por", "portuguese"],
-};
+// Audio filters are strict: the value is a real ISO-639 code captured into
+// cloud_titles.audio_languages by ffprobe/playback. Release-name tags such as
+// vf/multi are intentionally NOT used for audio filtering because they can be
+// ambiguous. Subtitle filters remain best-effort because burned-in subtitles are
+// only visible through release/version tags.
 const SUBTITLE_FACET_TAGS: Record<string, string[]> = {
   ar: ["subt_ar", "sub_ar", "subar", "arsub", "vostar"],
   fr: ["vostfr", "subfr", "frsub", "subt_fr", "sub_fr"],
@@ -1253,6 +1242,11 @@ const SUBTITLE_FACET_TAGS: Record<string, string[]> = {
   tr: ["vosttr", "subtr", "sub_tr"],
   nl: ["vostnl", "subnl", "sub_nl"],
   ru: ["vostru", "subru", "sub_ru"],
+  pl: ["vostpl", "subpl", "sub_pl"],
+  hi: ["vosthi", "subhi", "sub_hi"],
+  ja: ["vostjpn", "vostja", "subjpn", "subja", "sub_jp", "sub_ja"],
+  ko: ["vostkor", "vostko", "subkor", "subko", "sub_ko"],
+  zh: ["vostzh", "subzh", "sub_zh", "subcn", "sub_cn"],
 };
 
 function normalizeFacet(value: string | null): string | null {
@@ -1277,9 +1271,6 @@ function paramNumber(value: string | null): number | null {
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
 }
-function audioFacetTags(facet: string | null): string[] {
-  return facet ? (AUDIO_FACET_TAGS[facet] ?? []) : [];
-}
 function subtitleFacetTags(facet: string | null): string[] {
   return facet ? (SUBTITLE_FACET_TAGS[facet] ?? []) : [];
 }
@@ -1289,21 +1280,6 @@ function subtitleFacetTags(facet: string | null): string[] {
 function audioFacetIso(facet: string | null): string | null {
   return facet && /^[a-z]{2,3}$/.test(facet) ? facet : null;
 }
-// Human labels for the facet values the dynamic menus expose (English UI). Real
-// languages only — the opaque 'original'/'multi' version tags are deliberately
-// NOT here, so the Audio menu lists languages (English, Arabic, Korean…) rather
-// than version types. The audio_languages backfill is what makes vo/multi titles
-// surface under their real language. (AUDIO_FACET_TAGS still maps original/multi
-// for any old saved filter, it's just not offered in the menu.)
-const AUDIO_FACET_LABELS: Record<string, string> = {
-  fr: "French", en: "English", es: "Spanish", ar: "Arabic", de: "German",
-  it: "Italian", pt: "Portuguese", nl: "Dutch", ru: "Russian", tr: "Turkish",
-  pl: "Polish", hi: "Hindi", ja: "Japanese", ko: "Korean", zh: "Chinese",
-};
-const SUBTITLE_FACET_LABELS: Record<string, string> = {
-  ar: "Arabic", fr: "French", en: "English", es: "Spanish", de: "German",
-  it: "Italian", pt: "Portuguese", tr: "Turkish", nl: "Dutch", ru: "Russian",
-};
 function titleVersionLanguages(title: JsonRecord): string[] {
   const raw = (title as { version_languages?: unknown }).version_languages;
   return Array.isArray(raw) ? raw.map((tag) => String(tag).toLowerCase()) : [];

@@ -53,7 +53,12 @@ begin
       ('pt', array['vostpt','subpt','sub_pt']),
       ('tr', array['vosttr','subtr','sub_tr']),
       ('nl', array['vostnl','subnl','sub_nl']),
-      ('ru', array['vostru','subru','sub_ru'])
+      ('ru', array['vostru','subru','sub_ru']),
+      ('pl', array['vostpl','subpl','sub_pl']),
+      ('hi', array['vosthi','subhi','sub_hi']),
+      ('ja', array['vostjpn','vostja','subjpn','subja','sub_jp','sub_ja']),
+      ('ko', array['vostkor','vostko','subkor','subko','sub_ko']),
+      ('zh', array['vostzh','subzh','sub_zh','subcn','sub_cn'])
   )
   select coalesce(jsonb_object_agg(id, n), '{}'::jsonb) into v_sub_counts
   from (
@@ -142,7 +147,12 @@ begin
         ('pt', array['vostpt','subpt','sub_pt']),
         ('tr', array['vosttr','subtr','sub_tr']),
         ('nl', array['vostnl','subnl','sub_nl']),
-        ('ru', array['vostru','subru','sub_ru'])
+        ('ru', array['vostru','subru','sub_ru']),
+        ('pl', array['vostpl','subpl','sub_pl']),
+        ('hi', array['vosthi','subhi','sub_hi']),
+        ('ja', array['vostjpn','vostja','subjpn','subja','sub_jp','sub_ja']),
+        ('ko', array['vostkor','vostko','subkor','subko','sub_ko']),
+        ('zh', array['vostzh','subzh','sub_zh','subcn','sub_cn'])
     )
     select coalesce(jsonb_object_agg(id, n), '{}'::jsonb) into v_sub_counts
     from (
