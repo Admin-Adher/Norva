@@ -101,7 +101,7 @@ class AdminPage {
   --adm-card1:#171c2b;--adm-card2:#111624;
   --adm-panel:rgba(255,255,255,.022);
   --adm-line:rgba(255,255,255,.07);--adm-line2:rgba(255,255,255,.045);
-  --adm-tx:#eef1f8;--adm-tx2:#98a2b8;--adm-tx3:#6b7488;
+  --adm-tx:#eef1f8;--adm-tx2:#a2adc2;--adm-tx3:#828da3;
   --adm-blue:#5b7cfa;--adm-purple:#a855f7;--adm-green:#34d399;--adm-red:#f87171;--adm-amber:#fbbf24;
   color:var(--adm-tx);}
 #page-admin *{box-sizing:border-box;}
@@ -309,6 +309,20 @@ class AdminPage {
 #page-admin .cs-cta:hover{filter:brightness(1.07);}
 #page-admin .cs-ok{margin-left:auto;color:var(--adm-green);font-weight:600;font-size:13px;padding-right:4px;}
 @media(max-width:820px){#page-admin .cs-item{border-right:0;padding-right:10px;}#page-admin .cs-cta,#page-admin .cs-ok{margin-left:0;}}
+/* Priority ("Top signals") group — visually dominant over the secondary groups */
+#page-admin .kpi-group--priority{border-color:rgba(120,150,255,.22);background:linear-gradient(158deg,rgba(91,124,250,.07),var(--adm-panel));box-shadow:0 4px 20px rgba(91,124,250,.08);}
+#page-admin .kpi-group--priority .kpi{padding:18px 18px 15px;}
+#page-admin .kpi-group--priority .kpi .v{font-size:30px;}
+/* Non-colour state chip on priority KPI cards */
+#page-admin .kpi-state{display:inline-block;margin-left:8px;font-size:9px;font-weight:700;letter-spacing:.4px;padding:2px 6px;border-radius:5px;vertical-align:middle;}
+#page-admin .kpi-state.ok{background:rgba(52,211,153,.16);color:#6ee7bf;}
+#page-admin .kpi-state.warn{background:rgba(251,191,36,.18);color:#fcd34d;}
+#page-admin .kpi-state.crit{background:rgba(248,113,113,.2);color:#fca5a5;}
+/* Alerts grouped by family */
+#page-admin .alert-fam{margin-bottom:15px;}
+#page-admin .alert-fam:last-child{margin-bottom:0;}
+#page-admin .alert-fam-h{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--adm-tx2);margin:0 0 9px 2px;}
+#page-admin .alert-fam-h .pacct{color:var(--adm-tx3);margin-left:2px;}
 #page-admin .alert-card .al-owner{color:var(--color-text-secondary,#9aa);font-size:12px;}
 #page-admin .alert-card .al-err{color:#ff9b9b;font-size:11px;font-family:monospace;}
 #page-admin .act-row{display:flex;flex-wrap:wrap;gap:10px;}
@@ -685,26 +699,22 @@ class AdminPage {
         const el = document.getElementById('admin-alerts');
         if (!el) return;
         o = o || {};
-        const sysAlerts = [];
-        const push = (n, kind, label, route, sev) => { if (Number(n) > 0) sysAlerts.push({ n: Number(n), kind, label, route, sev }); };
-        push(o.billing_past_due, 'red', 'client(s) en échec de paiement', 'finance', 'Critique');
-        push(o.cron_fails_24h, 'red', 'échec(s) cron sur 24 h', 'systeme', 'À traiter');
-        push(o.gensubs_failed, 'amber', 'sous-titre(s) IA en échec', 'systeme', 'Mineur');
-        const problems = sources.filter(s => s.incomplete === true || s.sync_error || s.sync_status === 'sync_error');
-        if (!problems.length && !sysAlerts.length) { el.innerHTML = '<div class="card"><span class="badge green">✓</span> Aucune alerte — tout est sain.</div>'; return; }
-        // Non-colour-only severity: each card carries a text severity chip in addition to its colour.
         const sevChip = (t, cls) => `<span class="sev-chip ${cls}">${t}</span>`;
-        const cards = [];
-        sysAlerts.forEach(a => cards.push(
-            `<div class="alert-card ${a.kind === 'amber' ? 'amber' : ''}" data-route="${a.route}" role="button" tabindex="0" title="Ouvrir">
-                ${sevChip(a.sev, a.kind === 'amber' ? 'amber' : 'red')}
-                <span class="badge ${a.kind}">${AdminPage.n(a.n)}</span>
-                <span class="al-name">${AdminPage.esc(a.label)}</span>
-            </div>`));
-        problems.forEach(s => {
+        const sysCard = (kind, sev, count, label, route) =>
+            `<div class="alert-card ${kind === 'amber' ? 'amber' : ''}" data-route="${route}" role="button" tabindex="0" title="Ouvrir">
+                ${sevChip(sev, kind === 'amber' ? 'amber' : 'red')}
+                <span class="badge ${kind}">${AdminPage.n(count)}</span>
+                <span class="al-name">${AdminPage.esc(label)}</span>
+            </div>`;
+        // Group alerts by family so a high volume stays scannable (paiement / crons / sources / sous-titres).
+        const fam = { paiement: [], crons: [], sources: [], soustitres: [] };
+        if (Number(o.billing_past_due) > 0) fam.paiement.push(sysCard('red', 'Critique', o.billing_past_due, 'client(s) en échec de paiement', 'finance'));
+        if (Number(o.cron_fails_24h) > 0) fam.crons.push(sysCard('red', 'À traiter', o.cron_fails_24h, 'échec(s) cron sur 24 h', 'systeme'));
+        if (Number(o.gensubs_failed) > 0) fam.soustitres.push(sysCard('amber', 'Mineur', o.gensubs_failed, 'sous-titre(s) IA en échec', 'systeme'));
+        (sources || []).filter(s => s.incomplete === true || s.sync_error || s.sync_status === 'sync_error').forEach(s => {
             const kind = s.incomplete === true ? 'sync incomplète' : (s.sync_status || 'erreur');
             const uidAttr = s.user_id ? ` data-user-id="${AdminPage.esc(s.user_id)}" role="button" tabindex="0" title="Ouvrir la fiche client"` : '';
-            cards.push(`<div class="alert-card"${uidAttr}>
+            fam.sources.push(`<div class="alert-card"${uidAttr}>
                 ${sevChip('Critique', 'red')}
                 <span class="badge red">${AdminPage.esc(kind)}</span>
                 <span class="al-name">${AdminPage.esc(s.display_name)}</span>
@@ -712,12 +722,22 @@ class AdminPage {
                 ${s.sync_error ? `<span class="al-err">${AdminPage.esc(String(s.sync_error).slice(0, 80))}</span>` : ''}
             </div>`);
         });
-        // Cap long lists so the block never becomes an endless red wall; "voir toutes" expands.
+        const total = fam.paiement.length + fam.crons.length + fam.sources.length + fam.soustitres.length;
+        if (!total) { el.innerHTML = '<div class="card"><span class="badge green">✓</span> Aucune alerte — tout est sain.</div>'; return; }
+        // Only the sources family can grow long → cap it at 8 with an in-place expander.
         const CAP = 8;
-        el.innerHTML = cards.slice(0, CAP).join('') +
-            (cards.length > CAP ? `<button class="tag-add-chip" id="alerts-more" style="margin-top:10px">⌄ Voir toutes les alertes (${cards.length})</button>` : '');
-        const more = document.getElementById('alerts-more');
-        if (more) more.addEventListener('click', () => { el.innerHTML = cards.join(''); }); // clicks stay delegated on root
+        const famDefs = [['paiement', '💳', 'Paiement'], ['crons', '⏱️', 'Crons'], ['sources', '📡', 'Sources'], ['soustitres', '🎬', 'Sous-titres IA']];
+        el.innerHTML = famDefs.map(([k, ic, lbl]) => {
+            const cards = fam[k];
+            if (!cards.length) return '';
+            const cap = k === 'sources' ? CAP : cards.length;
+            const shown = cards.slice(0, cap), hidden = cards.slice(cap);
+            return `<div class="alert-fam"><div class="alert-fam-h">${ic} ${lbl} <span class="pacct">${cards.length}</span></div>${shown.join('')}${hidden.length ? `<div class="alert-fam-hidden" hidden>${hidden.join('')}</div><button class="tag-add-chip alerts-more" style="margin-top:8px">⌄ Voir les ${hidden.length} autres</button>` : ''}</div>`;
+        }).join('');
+        el.querySelectorAll('.alerts-more').forEach(btn => btn.addEventListener('click', () => {
+            const hid = btn.previousElementSibling;
+            if (hid && hid.classList.contains('alert-fam-hidden')) { hid.hidden = false; btn.remove(); } // clicks stay delegated
+        }));
     }
 
     // ── Page: Finance (MRR / statuts / encaissé / funnel / churn / paiements) ──
@@ -2098,7 +2118,24 @@ class AdminPage {
         const n = (x) => (x == null ? '—' : Number(x).toLocaleString('fr-FR'));
         const group = (title, cards) => `<div class="kpi-group"><div class="kpi-gtitle">${title}</div><div class="admin-cards">${cards.join('')}</div></div>`;
         const money = AdminPage.money;
+        // Non-colour-only state chip for the priority health cards.
+        const stateChip = (bad, crit) => `<span class="kpi-state ${bad ? (crit ? 'crit' : 'warn') : 'ok'}">${bad ? (crit ? 'Critique' : 'À traiter') : 'OK'}</span>`;
+        // Priority card: like card() but can carry a state chip after the label.
+        const pcard = (v, l, cls, key, icon, chip) => {
+            const spark = key && Array.isArray(S[key]) ? AdminPage.spark(S[key], cls) : '';
+            return `<div class="kpi ${cls || ''}"><div class="kpi-hd"><div class="v">${v}</div>${icon ? `<span class="kpi-ic">${icon}</span>` : ''}</div><div class="l">${l}${chip || ''}</div>${spark ? `<div class="kpi-spark">${spark}</div>` : ''}</div>`;
+        };
+        const pastDueBad = Number(o.billing_past_due) > 0, srcErrBad = Number(o.sources_error) > 0, cronBad = Number(o.cron_fails_24h) > 0;
         el.innerHTML = [
+            // ── Signaux prioritaires — the 6 decision-critical KPIs, given visual dominance ──
+            `<div class="kpi-group kpi-group--priority"><div class="kpi-gtitle">🚦 Signaux prioritaires</div><div class="admin-cards">${[
+                pcard(money(o.billing_mrr_cents), 'MRR', Number(o.billing_mrr_cents) > 0 ? 'ok' : '', 'mrr_cents', '💲', ''),
+                pcard(n(o.billing_active), 'Actifs payants', Number(o.billing_active) > 0 ? 'ok' : '', 'active_paying', '👤', ''),
+                pcard(n(o.billing_past_due), 'Échecs paiement', pastDueBad ? 'alert' : 'ok', 'past_due', '🛡️', stateChip(pastDueBad, true)),
+                pcard(n(o.billing_conversions_7d), 'Conversions 7 j', '', 'conversions_7d', '📈', ''),
+                pcard(n(o.sources_error), 'Sources en erreur', srcErrBad ? 'alert' : 'ok', 'sources_error', '⚠️', stateChip(srcErrBad, false)),
+                pcard(n(o.cron_fails_24h), 'Échecs cron 24 h', cronBad ? 'alert' : 'ok', 'cron_fails_24h', '⏱️', stateChip(cronBad, false))
+            ].join('')}</div></div>`,
             group('💶 Revenus', [
                 card(money(o.billing_mrr_cents), 'MRR', Number(o.billing_mrr_cents) > 0 ? 'ok' : '', 'mrr_cents', '💲'),
                 card(n(o.billing_trialing), 'En essai', '', 'trialing', '⏳'),
