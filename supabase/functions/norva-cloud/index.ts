@@ -385,7 +385,7 @@ async function route(
   if (scope === "sources") {
     if (req.method === "GET" && !id) return { body: await listSources(user.id, db) };
     if (req.method === "POST" && !id) {
-      await requirePlanCapacity(user.id, db, "sources", "cloud_sources");
+      await requirePlanCapacity(user.id, db, "sources", "cloud_sources", { notDeleted: true });
       return { status: 201, body: await createSource(req, user.id, db) };
     }
     if (req.method === "GET" && id && action === "series-info") {
@@ -534,7 +534,7 @@ async function requirePlanCapacity(
   db: SupabaseClient,
   limitKey: string,
   table: string,
-  filters: { revoked?: boolean; activeSession?: boolean } = {},
+  filters: { revoked?: boolean; activeSession?: boolean; notDeleted?: boolean } = {},
 ) {
   const decision = await requireCloudAccess(userId, db, limitKey);
   const limit = limitNumber(decision.limits, limitKey, 0);
@@ -552,7 +552,7 @@ async function countEntitlementUsage(
   userId: string,
   db: SupabaseClient,
   table: string,
-  filters: { revoked?: boolean; activeSession?: boolean } = {},
+  filters: { revoked?: boolean; activeSession?: boolean; notDeleted?: boolean } = {},
 ) {
   let query = db
     .from(table)
@@ -564,6 +564,9 @@ async function countEntitlementUsage(
   }
   if (filters.activeSession) {
     query = query.in("status", ["pending", "ready"]).gt("expires_at", new Date().toISOString());
+  }
+  if (filters.notDeleted) {
+    query = query.is("deleted_at", null); // a soft-deleted source no longer counts against the plan
   }
 
   const { count, error } = await query;
@@ -898,6 +901,7 @@ async function listSources(userId: string, db: SupabaseClient) {
     .from("cloud_sources")
     .select("*")
     .eq("user_id", userId)
+    .is("deleted_at", null) // hide soft-deleted sources awaiting the reaper
     .order("created_at", { ascending: false });
   if (error) throwDb(error, "Unable to list sources");
   return { sources: (data ?? []).map(sanitizeSource) };
@@ -3682,28 +3686,20 @@ async function assertOwnedSource(sourceId: string, userId: string, db: SupabaseC
 
 async function deleteSource(sourceId: string, userId: string, db: SupabaseClient) {
   await assertOwnedSource(sourceId, userId, db);
-  const affectedTitleIds = await listSourceTitleIds(sourceId, userId, db);
-
-  await deleteRowsBySource(db, "cloud_live_variants", sourceId, userId);
-  await deleteRowsBySource(db, "cloud_live_logical_channels", sourceId, userId);
-  await deleteRowsBySource(db, "cloud_title_variants", sourceId, userId);
-  await deleteRowsBySource(db, "cloud_title_overrides", sourceId, userId);
-  await deleteRowsBySource(db, "cloud_favorites", sourceId, userId);
-  await deleteRowsBySource(db, "cloud_media_items", sourceId, userId);
-  await deleteRowsBySource(db, "cloud_watch_history", sourceId, userId);
-  await clearSourceReference(db, "cloud_playback_sessions", sourceId, userId);
-  await clearSourceReference(db, "cloud_playback_events", sourceId, userId);
-
+  // Soft-delete: mark the source removed (instant, one row) so it leaves the user's list right away
+  // and stops re-syncing. The heavy per-user child cascade — hundreds of thousands of rows for a big
+  // panel, with a per-row rollup trigger on cloud_title_variants — is drained by the
+  // reap_deleted_sources cron in committed batches. Doing that cascade inline here is exactly what
+  // exceeded the request timeout and left the account un-removable. The GLOBAL scan cache
+  // (catalog_titles / catalog_file_tracks, keyed by tmdb id / host, no user_id) is never touched:
+  // only this user's per-user copy is removed, and a re-added same-host source reuses the cache.
   const { error } = await db
     .from("cloud_sources")
-    .delete()
+    .update({ deleted_at: new Date().toISOString(), auto_refresh_next_at: null })
     .eq("id", sourceId)
-    .eq("user_id", userId);
+    .eq("user_id", userId)
+    .is("deleted_at", null);
   if (error) throwDb(error, "Unable to delete provider account");
-
-  if (affectedTitleIds.length) {
-    waitUntil(deleteOrphanTitles(affectedTitleIds, userId, db));
-  }
 
   return { success: true, sourceId };
 }
