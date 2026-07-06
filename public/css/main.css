@@ -6408,6 +6408,26 @@ kbd {
   font-weight: 600;
 }
 
+.series-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.series-subtitle {
+  margin: 0;
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--color-text-muted);
+}
+
+@media (max-width: 640px) {
+  .series-subtitle {
+    display: none;
+  }
+}
+
 .series-controls {
   display: flex;
   gap: var(--space-md);
@@ -7211,8 +7231,22 @@ kbd {
   background: rgba(98, 135, 255, 0.08);
 }
 
+/* Up-next is THE episode most viewers came back for — make it read as the primary
+   action: a stronger tint, a left accent rail, and a play overlay that's on by
+   default (not hover-gated) so resuming is a single obvious tap. */
 .series-details .episode-item.episode-up-next {
-  background: linear-gradient(90deg, rgba(98, 135, 255, 0.14), transparent 65%);
+  background: linear-gradient(90deg, rgba(98, 135, 255, 0.22), rgba(98, 135, 255, 0.04) 70%);
+  box-shadow: inset 3px 0 0 var(--color-accent);
+}
+
+.series-details .episode-item.episode-up-next .episode-play {
+  opacity: 1;
+}
+
+.series-details .episode-item.episode-up-next .episode-upnext-flag {
+  color: #fff;
+  background: var(--color-accent);
+  border-color: transparent;
 }
 
 .episode-upnext-flag {
@@ -11347,6 +11381,21 @@ mark.search-highlight {
   min-height: 74px;
 }
 .tv-mode .live-guide-row { min-height: 68px; }
+
+/* Series at 10-foot distance: bigger season tabs and episode rows so they're
+   comfortable D-pad targets and readable across the room. Size/legibility only —
+   the full spatial-nav flow (focus-restore after playback, tab arrowing) still
+   needs on-device validation before we lean on it. */
+.tv-mode .season-tab {
+  padding: 12px 22px;
+  font-size: 1.05rem;
+}
+.tv-mode .episode-item {
+  padding: var(--space-md) var(--space-lg);
+}
+.tv-mode .episode-upnext-flag {
+  font-size: 0.72rem;
+}
 
 /* Dim the siblings of the focused card so the ring pops even harder. Scoped to
    rows/grids that hold a focused card (:focus-within), never the whole page. */

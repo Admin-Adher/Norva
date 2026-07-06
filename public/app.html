@@ -18,7 +18,7 @@
   <link rel="preconnect" href="https://oupsceccxsonaalhueff.supabase.co" crossorigin>
   <link rel="dns-prefetch" href="https://image.tmdb.org">
   <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
-  <link rel="stylesheet" href="/css/main.css?v=55">
+  <link rel="stylesheet" href="/css/main.css?v=56">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@800&display=swap"
@@ -626,7 +626,10 @@
       <!-- Series Page -->
       <div id="page-series" class="page">
         <div class="series-header">
-          <h2>Series</h2>
+          <div class="series-heading">
+            <h2>Series</h2>
+            <p class="series-subtitle">Pick up where you left off — every series from your sources, in one place.</p>
+          </div>
           <div class="series-controls">
             <select id="series-source-select" class="source-select">
               <option value="">All Sources</option>
@@ -661,7 +664,7 @@
             <option value="year">Newest</option>
             <option value="year-asc">Oldest</option>
             <option value="name">A → Z</option>
-            <option value="lang-match">Best for my languages</option>
+            <option value="lang-match">Best language match</option>
           </select>
           <select id="series-genre" class="source-select filter-select hidden" title="Genre">
             <option value="">All Genres</option>
@@ -707,14 +710,15 @@
             <option value="ongoing">Ongoing</option>
           </select>
           <button id="series-group-toggle" class="btn btn-sm btn-ghost filter-toggle active"
-            title="Group duplicate versions into a single card">Group duplicates</button>
+            title="Group versions of the same series into a single card">Group versions</button>
           <button id="series-hide-broken-btn" class="btn btn-sm btn-ghost filter-toggle playback-filter-toggle active"
-            title="Hide series that failed to play">Hide broken</button>
+            title="Hide series that failed the health scan (unreachable / broken streams)">Hide unavailable</button>
           <button id="series-random" class="btn btn-sm btn-ghost filter-toggle" title="Open a random series">Random</button>
           <span id="series-count" class="filter-count"></span>
           <button id="series-reset" class="btn btn-sm btn-ghost filter-reset hidden" title="Reset filters">✕
             Reset</button>
         </div>
+        <div id="series-active-filters" class="active-filters hidden" aria-label="Active filters"></div>
         <div id="series-continue" class="continue-row hidden">
           <h3>Continue Watching</h3>
           <div class="continue-scroller" id="series-continue-list"></div>
@@ -1976,7 +1980,7 @@
   <script defer src="/js/pages/LivePage.js?v=5"></script>
   <script defer src="/js/pages/Guide.js?v=2"></script>
   <script defer src="/js/pages/MoviesPage.js?v=43"></script>
-  <script defer src="/js/pages/SeriesPage.js?v=43"></script>
+  <script defer src="/js/pages/SeriesPage.js?v=44"></script>
   <script defer src="/js/pages/Settings.js?v=36"></script>
   <script defer src="/js/pages/WatchPage.js?v=116"></script>
   <script defer src="/js/profiles.js?v=7"></script>

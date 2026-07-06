@@ -39,6 +39,7 @@ class SeriesPage {
         this.randomBtn = document.getElementById('series-random');
         this.countEl = document.getElementById('series-count');
         this.resetBtn = document.getElementById('series-reset');
+        this.activeFiltersEl = document.getElementById('series-active-filters');
         this.continueRow = document.getElementById('series-continue');
         this.continueList = document.getElementById('series-continue-list');
 
@@ -207,6 +208,7 @@ class SeriesPage {
 
     onFiltersChanged() {
         this.persistFilters();
+        this.renderActiveFilterChips();
         // Cloud: picking a genre opens that genre's full grid — the same dense,
         // server-side view as a rail's "See all" — so the dropdown behaves like
         // Manage Content's genres.
@@ -514,6 +516,58 @@ class SeriesPage {
             this.searchInput?.value || this.showFavoritesOnly || this.hideBroken === false ||
             (this.categoryMulti?.getSelected().size > 0)
         );
+    }
+
+    // Active-filter chips: a removable summary of what's narrowing the grid, mirroring
+    // Movies. Labels read straight from the live controls so they never drift; each chip
+    // clears just its filter and re-applies.
+    renderActiveFilterChips() {
+        const host = this.activeFiltersEl;
+        if (!host) return;
+        const optText = (sel) => (sel && sel.selectedIndex >= 0)
+            ? (sel.options[sel.selectedIndex]?.text || '').trim() : '';
+        const chips = [];
+
+        const q = this.searchInput?.value?.trim();
+        if (q) chips.push({ label: `Search: “${q}”`, clear: () => { if (this.searchInput) this.searchInput.value = ''; } });
+
+        const catCount = this.categoryMulti?.getSelected().size || 0;
+        if (catCount > 0) chips.push({ label: catCount === 1 ? '1 category' : `${catCount} categories`,
+            clear: () => this.categoryMulti?.setSelected([]) });
+
+        if (this.sortSelect?.value && this.sortSelect.value !== 'default')
+            chips.push({ label: optText(this.sortSelect), clear: () => { this.sortSelect.value = 'default'; } });
+        if (this.genreSelect?.value) chips.push({ label: optText(this.genreSelect), clear: () => { this.genreSelect.value = ''; } });
+        if (this.yearSelect?.value) chips.push({ label: optText(this.yearSelect), clear: () => { this.yearSelect.value = ''; } });
+        if (this.ratingSelect?.value) chips.push({ label: optText(this.ratingSelect), clear: () => { this.ratingSelect.value = ''; } });
+        if (this.watchedSelect?.value) chips.push({ label: optText(this.watchedSelect), clear: () => { this.watchedSelect.value = ''; } });
+        if (this.addedSelect?.value) chips.push({ label: optText(this.addedSelect), clear: () => { this.addedSelect.value = ''; } });
+        if (this.statusSelect?.value) chips.push({ label: optText(this.statusSelect), clear: () => { this.statusSelect.value = ''; } });
+        if (this.audioSelect?.value) chips.push({ label: `Audio: ${optText(this.audioSelect)}`, clear: () => { this.audioSelect.value = ''; } });
+        if (this.subtitleSelect?.value) chips.push({ label: `Subtitles: ${optText(this.subtitleSelect)}`, clear: () => { this.subtitleSelect.value = ''; } });
+        if (this.showFavoritesOnly) chips.push({ label: 'Favorites', clear: () => {
+            this.showFavoritesOnly = false;
+            document.getElementById('series-favorites-btn')?.classList.remove('active');
+        } });
+        if (this.hideBroken === false) chips.push({ label: 'Showing unavailable', clear: () => {
+            this.hideBroken = true;
+            this.hideBrokenBtn?.classList.toggle('active', true);
+        } });
+
+        if (!chips.length) { host.classList.add('hidden'); host.innerHTML = ''; return; }
+
+        host.classList.remove('hidden');
+        host.innerHTML = chips.map((c, i) =>
+            `<button type="button" class="filter-chip" data-chip="${i}">${MediaUtils.escapeHtml(c.label)}<span class="filter-chip-x" aria-hidden="true">×</span></button>`
+        ).join('') + '<button type="button" class="filter-chip filter-chip-clear" data-chip="clear">Clear all</button>';
+
+        host.querySelectorAll('.filter-chip').forEach(btn => {
+            btn.addEventListener('click', () => {
+                if (btn.dataset.chip === 'clear') { this.resetFilters(); return; }
+                const chip = chips[parseInt(btn.dataset.chip, 10)];
+                if (chip) { chip.clear(); this.onFiltersChanged(); }
+            });
+        });
     }
 
     // === Page lifecycle ===
@@ -1110,6 +1164,7 @@ class SeriesPage {
             this.countEl.textContent = total;
         }
         this.resetBtn?.classList.toggle('hidden', !this.hasActiveFilters());
+        this.renderActiveFilterChips();
     }
 
     filterAndRender() {
@@ -1338,7 +1393,7 @@ class SeriesPage {
                 <div class="series-play-overlay">
                     <span class="play-icon">${Icons.play}</span>
                 </div>
-                ${groupBroken ? '<span class="playback-badge" title="Playback failed">HS</span>' : ''}
+                ${groupBroken ? '<span class="playback-badge" title="Unavailable — failed the health scan">⚠</span>' : ''}
                 ${versionCount > 1 ? `<button class="version-badge" title="Choose version">${versionCount} versions</button>` : ''}
                 ${languageBadge ? `<span class="version-language-badge ${versionCount > 1 ? 'with-version-badge' : ''}">${MediaUtils.escapeHtml(languageBadge)}</span>` : ''}
                 ${started ? '<span class="watched-badge inprogress-badge" title="Watching">▶</span>' : ''}
@@ -1648,7 +1703,7 @@ class SeriesPage {
                 <button class="series-version-item ${active ? 'active' : ''} ${broken ? 'is-broken' : ''}" type="button" data-index="${index}" aria-pressed="${active ? 'true' : 'false'}">
                     <span class="version-head">${dot}<span class="version-headline">${MediaUtils.escapeHtml(desc.headline)}</span>${badge}</span>
                     ${meta}
-                    ${broken ? '<span class="series-version-flag" title="Playback failed">HS</span>' : ''}
+                    ${broken ? '<span class="series-version-flag" title="Unavailable — failed the health scan">Unavailable</span>' : ''}
                 </button>`;
         }).join('');
         this.versionsList.querySelectorAll('.series-version-item').forEach(btn => {
@@ -2234,6 +2289,15 @@ class SeriesPage {
         this.container.classList.add('hidden');
         this.detailsPanel.classList.remove('hidden');
         if (!isVersionSwitch) this.detailsPanel.scrollTop = 0;
+
+        // Context-aware back label — return to the search results, the open genre, or Series.
+        const backBtn = this.detailsPanel.querySelector('.series-back-btn');
+        if (backBtn) {
+            const ctx = this.searchInput?.value?.trim()
+                ? 'Search results'
+                : (this.activeBucket && this.bucketLabel ? this.bucketLabel : 'Series');
+            backBtn.textContent = `← ${ctx}`;
+        }
 
         // Hero / poster / plot / related come from the group representative and are the
         // same across versions, so a VERSION SWITCH skips them (and their TMDB fetches)
