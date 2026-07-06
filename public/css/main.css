@@ -4346,16 +4346,16 @@ kbd {
 /* Top 10: a large rank numeral over the poster on the numbered "Popular" rail. */
 .rank-numeral {
   position: absolute;
-  left: 4px;
-  bottom: 0;
+  left: 2px;
+  bottom: -4px;
   z-index: 2;
   font-family: var(--font-display, 'Inter', sans-serif);
-  font-size: 3.4rem;
-  font-weight: 800;
-  line-height: 0.78;
+  font-size: clamp(3.6rem, 6vw, 4.8rem);
+  font-weight: 900;
+  line-height: 0.72;
   color: #fff;
-  -webkit-text-stroke: 2px rgba(0, 0, 0, 0.6);
-  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.55);
+  -webkit-text-stroke: 2.5px rgba(0, 0, 0, 0.62);
+  text-shadow: 0 3px 14px rgba(0, 0, 0, 0.6);
   pointer-events: none;
 }
 
@@ -9095,6 +9095,31 @@ kbd {
   margin-bottom: 12px;
 }
 
+/* Editorial reason pill — WHY this title is on the billboard */
+.home-hero-reason {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 5px 12px;
+  border-radius: 999px;
+  margin-bottom: 12px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: #fff;
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+}
+.home-hero-reason.hidden { display: none; }
+.home-hero-reason.is-resume { background: rgba(52, 211, 153, 0.18); border-color: rgba(52, 211, 153, 0.42); color: #6ee7bf; }
+.home-hero-reason.is-popular { background: rgba(248, 113, 113, 0.18); border-color: rgba(248, 113, 113, 0.42); color: #fca5a5; }
+.home-hero-reason.is-foryou { background: rgba(91, 124, 250, 0.2); border-color: rgba(120, 150, 255, 0.44); color: #bcc8ff; }
+.home-hero-reason.is-new { background: rgba(251, 191, 36, 0.18); border-color: rgba(251, 191, 36, 0.42); color: #fcd34d; }
+
 .home-hero-content h1 {
   font-family: 'Outfit', sans-serif;
   font-size: clamp(2rem, 4.8vw, 4.6rem);
@@ -9138,6 +9163,25 @@ kbd {
   font-size: 0.9rem;
   margin-top: 4px;
 }
+
+/* Rail "See all" affordance (opens the matching catalog page) */
+.home-rail-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.home-rail-seeall {
+  flex-shrink: 0;
+  background: none;
+  border: 0;
+  color: var(--color-text-muted);
+  font-size: 0.86rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 6px 8px;
+  border-radius: 8px;
+  white-space: nowrap;
+  transition: color 0.14s, background 0.14s;
+}
+.home-rail-seeall:hover { color: var(--color-text-bright); background: rgba(255, 255, 255, 0.06); }
+.home-rail-seeall span { display: inline-block; transition: transform 0.14s; }
+.home-rail-seeall:hover span { transform: translateX(3px); }
 
 .section-header {
   display: flex;
@@ -9286,6 +9330,20 @@ kbd {
   border-color: var(--color-accent-dim);
 }
 
+/* Visible keyboard focus outside TV mode (previously only .tv-mode had a focus ring) */
+.dashboard-card:focus-visible,
+.channel-tile:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-color: var(--color-accent);
+}
+.home-hero-dot:focus-visible,
+.home-rail-seeall:focus-visible,
+.ch-remove:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
 .card-image {
   position: relative;
   aspect-ratio: 2/3;
@@ -9308,14 +9366,15 @@ kbd {
   bottom: 0;
   left: 0;
   width: 100%;
-  height: 4px;
-  background: rgba(0, 0, 0, 0.5);
+  height: 5px;
+  background: rgba(0, 0, 0, 0.55);
 }
 
 .progress-bar {
   height: 100%;
-  background: var(--color-accent);
+  background: linear-gradient(90deg, var(--color-accent), var(--color-accent-hover));
   box-shadow: 0 0 10px var(--color-accent);
+  border-radius: 0 3px 3px 0;
 }
 
 .play-icon-overlay {

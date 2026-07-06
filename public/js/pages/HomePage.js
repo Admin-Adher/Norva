@@ -1142,17 +1142,30 @@ class HomePage {
             ...rails.filter(r => /popular|because-you-watched/.test(String(r.id || ''))),
             ...rails.filter(r => !/popular|because-you-watched/.test(String(r.id || ''))),
         ];
-        for (const item of heroRails.flatMap(rail => rail.items || [])) {
+        // Editorial reason per hero slide, derived from the rail it was drawn from —
+        // so the billboard can say WHY a title is featured (Popular / For You / New).
+        const reasonOf = (rail) => {
+            const rid = String(rail.id || '').toLowerCase();
+            if (/popular/.test(rid)) return 'popular';
+            if (/because-you-watched/.test(rid)) return 'foryou';
+            if (/recently-added/.test(rid)) return 'new';
+            return 'featured';
+        };
+        for (const rail of heroRails) {
             if (railPicks.length >= 6) break;
-            if (!usable(item) || !this.backdropFromItem(item)) continue;
-            const key = `${item.source_id || item.sourceId || ''}:${item.item_id || item.itemId || item.id || ''}`;
-            if (seen.has(key)) continue;
-            seen.add(key);
-            railPicks.push(item);
+            const reason = reasonOf(rail);
+            for (const item of (rail.items || [])) {
+                if (railPicks.length >= 6) break;
+                if (!usable(item) || !this.backdropFromItem(item)) continue;
+                const key = `${item.source_id || item.sourceId || ''}:${item.item_id || item.itemId || item.id || ''}`;
+                if (seen.has(key)) continue;
+                seen.add(key);
+                railPicks.push({ item, reason });
+            }
         }
         const slides = [
-            ...(firstHistory ? [{ item: firstHistory, isResume: true }] : []),
-            ...railPicks.map(item => ({ item, isResume: false }))
+            ...(firstHistory ? [{ item: firstHistory, isResume: true, reason: 'resume' }] : []),
+            ...railPicks.map(p => ({ item: p.item, isResume: false, reason: p.reason }))
         ];
 
         clearInterval(this._heroTimer);
@@ -1173,6 +1186,7 @@ class HomePage {
             <div class="home-hero-bg" data-hero-layer="a"></div>
             <div class="home-hero-bg" data-hero-layer="b" style="opacity:0"></div>
             <div class="home-hero-content">
+                <div class="home-hero-reason hidden"></div>
                 <div class="home-hero-kicker"></div>
                 <h1></h1>
                 <p class="home-hero-desc"></p>
@@ -1268,6 +1282,18 @@ class HomePage {
         img.onerror = paint;
         img.src = backdrop;
 
+        // Editorial reason pill (WHY this title is on the billboard).
+        const reasonEl = hero.querySelector('.home-hero-reason');
+        if (reasonEl) {
+            const R = {
+                resume: ['▶ Resume', 'is-resume'],
+                popular: ['🔥 Popular', 'is-popular'],
+                foryou: ['💡 For You', 'is-foryou'],
+                new: ['✨ New', 'is-new'],
+            }[slide.reason];
+            reasonEl.className = 'home-hero-reason' + (R ? ' ' + R[1] : ' hidden');
+            reasonEl.textContent = R ? R[0] : '';
+        }
         const kicker = hero.querySelector('.home-hero-kicker');
         if (kicker) kicker.textContent = this.heroSubtitle(item);
         const titleEl = hero.querySelector('h1');
@@ -1376,6 +1402,9 @@ class HomePage {
                 if (item) this.openRailItem(item, false);
             });
         });
+        container.querySelectorAll('.home-rail-seeall').forEach(btn => {
+            btn.addEventListener('click', (e) => { e.stopPropagation(); this.app?.navigateTo?.(btn.dataset.seeallPage); });
+        });
 
         this.initScrollArrows();
         this.updateScrollArrows();
@@ -1397,6 +1426,7 @@ class HomePage {
         const subtitle = ranked ? '' : this.railSubtitle(rail);
         const id = `home-rail-${this.slug(String(rail.id || railIndex))}`;
         const items = ranked ? (rail.items || []).slice(0, 10) : rail.items;
+        const seeAllPage = this.railSeeAllPage(rail);
 
         return `
             <section class="dashboard-section home-rail-section${ranked ? ' is-ranked-rail' : ''}" data-rail-id="${this.escapeAttr(rail.id || id)}">
@@ -1405,10 +1435,25 @@ class HomePage {
                         <h2>${this.escapeHtml(title)}</h2>
                         ${subtitle ? `<p class="home-rail-subtitle">${this.escapeHtml(subtitle)}</p>` : ''}
                     </div>
+                    ${seeAllPage ? `<button type="button" class="home-rail-seeall" data-seeall-page="${this.escapeAttr(seeAllPage)}">See all <span aria-hidden="true">→</span></button>` : ''}
                 </div>
                 ${this.scrollSection(id, 'Loading...', '', items.map((item, itemIndex) => this.createRailCard(item, railIndex, itemIndex, ranked)).join(''))}
             </section>
         `;
+    }
+
+    // "See all" target for a rail — the catalog page that matches its content type
+    // (null when a rail has no clean single-type destination, e.g. mixed suggestions).
+    railSeeAllPage(rail = {}) {
+        const t = String(rail.itemType || rail.item_type || '').toLowerCase();
+        if (t === 'series') return 'series';
+        if (t === 'movie' || t === 'movies') return 'movies';
+        if (t === 'channel' || t === 'live') return 'live';
+        if (this.isRankedRail(rail)) return rail.itemType === 'series' ? 'series' : 'movies';
+        const id = String(rail.id || '').toLowerCase();
+        if (/series/.test(id)) return 'series';
+        if (/movie/.test(id)) return 'movies';
+        return null;
     }
 
     // The server's "popular" rail (ranked by TMDB rating + provider ubiquity) is
