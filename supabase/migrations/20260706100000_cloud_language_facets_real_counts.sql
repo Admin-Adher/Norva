@@ -34,6 +34,7 @@ begin
          cross join lateral unnest(coalesce(t.audio_languages, '{}')) as a(lang)
     where t.user_id = p_user_id and t.item_type = p_item_type and t.variant_count > 0
       and lower(a.lang) ~ '^[a-z]{2,3}$'
+      and lower(a.lang) not in ('un','und','mul','zxx','mis','nar')  -- drop non-language ISO codes
     group by lower(a.lang)
   ) a;
 
@@ -116,14 +117,19 @@ declare
     "sa":"Sanskrit","sc":"Sardinian","sd":"Sindhi","se":"Northern Sami","sg":"Sango","si":"Sinhala","sk":"Slovak","sl":"Slovenian","sm":"Samoan","sn":"Shona","so":"Somali","sq":"Albanian","sr":"Serbian","ss":"Swati","st":"Southern Sotho","su":"Sundanese","sv":"Swedish","sw":"Swahili",
     "ta":"Tamil","te":"Telugu","tg":"Tajik","th":"Thai","ti":"Tigrinya","tk":"Turkmen","tl":"Tagalog","tn":"Tswana","to":"Tongan","tr":"Turkish","ts":"Tsonga","tt":"Tatar","tw":"Twi","ty":"Tahitian",
     "ug":"Uyghur","uk":"Ukrainian","ur":"Urdu","uz":"Uzbek","ve":"Venda","vi":"Vietnamese","vo":"Volapuk","wa":"Walloon","wo":"Wolof","xh":"Xhosa","yi":"Yiddish","yo":"Yoruba","za":"Zhuang","zh":"Chinese","zu":"Zulu",
+    "iw":"Hebrew","in":"Indonesian","ji":"Yiddish","jw":"Javanese","mo":"Moldavian","sh":"Serbo-Croatian",
     "alb":"Albanian","ara":"Arabic","arm":"Armenian","baq":"Basque","ben":"Bengali","bos":"Bosnian","bul":"Bulgarian","cat":"Catalan","chi":"Chinese","cze":"Czech","dan":"Danish","dut":"Dutch","eng":"English","est":"Estonian","fas":"Persian","fin":"Finnish","fre":"French","ger":"German","gre":"Greek","heb":"Hebrew","hin":"Hindi","hrv":"Croatian","hun":"Hungarian","ice":"Icelandic","ind":"Indonesian","ita":"Italian","jpn":"Japanese","kor":"Korean","mac":"Macedonian","mal":"Malayalam","may":"Malay","nor":"Norwegian","per":"Persian","pol":"Polish","por":"Portuguese","rum":"Romanian","rus":"Russian","slk":"Slovak","spa":"Spanish","srp":"Serbian","swe":"Swedish","tam":"Tamil","tel":"Telugu","tha":"Thai","tur":"Turkish","ukr":"Ukrainian","urd":"Urdu","vie":"Vietnamese"
   }'::jsonb;
 begin
+  -- Prefer the precomputed summary. Live-compute ONLY when the row is ABSENT (a user whose
+  -- summary hasn't materialised yet) — NOT when it's present-but-empty, so a user who simply
+  -- has no subtitles (the common case) doesn't re-run the scan on every uncached call. The
+  -- deploy backfill + the 15-min cron keep every existing row populated.
   select s.audio_lang_counts, s.subtitle_lang_counts into v_audio_counts, v_sub_counts
   from public.cloud_catalog_facet_summary s
   where s.user_id = p_user_id and s.item_type = p_item_type;
 
-  if v_audio_counts is null or v_audio_counts = '{}'::jsonb then
+  if not found then
     select coalesce(jsonb_object_agg(lang, n), '{}'::jsonb) into v_audio_counts
     from (
       select lower(a.lang) as lang, count(distinct t.id)::bigint as n
@@ -131,11 +137,10 @@ begin
            cross join lateral unnest(coalesce(t.audio_languages, '{}')) as a(lang)
       where t.user_id = p_user_id and t.item_type = p_item_type and t.variant_count > 0
         and lower(a.lang) ~ '^[a-z]{2,3}$'
+        and lower(a.lang) not in ('un','und','mul','zxx','mis','nar')  -- drop non-language ISO codes
       group by lower(a.lang)
     ) live_audio;
-  end if;
 
-  if v_sub_counts is null or v_sub_counts = '{}'::jsonb then
     with defs(id, tags) as (
       values
         ('ar', array['subt_ar','sub_ar','subar','arsub','vostar']),
@@ -173,7 +178,7 @@ begin
   from (
     select key as code, greatest(0, value::text::bigint) as n
     from jsonb_each(coalesce(v_audio_counts, '{}'::jsonb))
-    where key ~ '^[a-z]{2,3}$' and value::text::bigint > 0
+    where key ~ '^[a-z]{2,3}$' and key not in ('un','und','mul','zxx','mis','nar') and value::text::bigint > 0
   ) a;
 
   select coalesce(jsonb_agg(jsonb_build_object(
@@ -195,12 +200,14 @@ $function$;
 revoke all on function public.cloud_language_facets(uuid, text) from public, anon, authenticated;
 grant execute on function public.cloud_language_facets(uuid, text) to service_role;
 
--- Backfill existing summaries so the first request after deploy already has exact counts.
+-- Backfill the new count columns for existing summaries so the first request after deploy is
+-- already exact. Bounded + scale-safe: mark every summary stale, then let the existing bounded
+-- refresher recompute the first batch inline instead of an unbounded synchronous per-user loop
+-- (which could time out a deploy at thousands of users). The 15-min cron drains any remainder,
+-- and cloud_language_facets live-computes for a still-absent user meanwhile — so menus never empty.
 do $function$
-declare r record;
 begin
-  for r in select distinct user_id, item_type from public.cloud_titles where variant_count > 0 loop
-    perform public.cloud_refresh_facet_summary(r.user_id, r.item_type);
-  end loop;
+  update public.cloud_catalog_facet_summary set refreshed_at = 'epoch';
+  perform public.cloud_refresh_all_facet_summaries(1000);
 end
 $function$;
