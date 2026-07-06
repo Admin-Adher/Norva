@@ -2084,10 +2084,156 @@ main,
   transform: translate3d(30px, 18px, 0) scale(0.985);
 }
 
+/* Softer drift for section headers (eyebrow / title / copy): they lead with a
+   short, lightly-blurred move while cards and visuals travel the full distance —
+   a hierarchy of motion rather than one amount applied to everything. */
+.reveal-ready .scroll-reveal.reveal-soft {
+  filter: blur(6px);
+  transform: translate3d(0, 16px, 0);
+}
+
 .reveal-ready .scroll-reveal.is-visible {
   opacity: 1;
   filter: blur(0);
   transform: translate3d(0, 0, 0) scale(1);
+}
+
+/* Pre-paint hero hide (html.reveal-armed, set inline in <head>). Mirrors the
+   .scroll-reveal.reveal-left/right start state EXACTLY so that when landing.js
+   marks the hero and drops this class, the swap is invisible — then the observer
+   animates it in. Guarantees the hero can only ever animate in, never flash. */
+html.reveal-armed .hero-content,
+html.reveal-armed .hero-visual {
+  opacity: 0;
+  filter: blur(10px);
+}
+
+html.reveal-armed .hero-content {
+  transform: translate3d(-30px, 18px, 0) scale(0.985);
+}
+
+html.reveal-armed .hero-visual {
+  transform: translate3d(30px, 18px, 0) scale(0.985);
+}
+
+/* =====================================================================
+   Section-triggered micro-motion
+   The decorative "viz" mocks (player scrubber, audio bars, download list,
+   infra window, browser mock) used to be fully static. They now come to life
+   the moment their card/section is revealed (ancestor .is-visible) — never
+   while off-screen — so arriving on a section feels alive, with no always-on
+   animation running before you get there.
+   ===================================================================== */
+
+/* Optimized playback — the scrubber fills, then the playhead settles in. */
+@keyframes viz-scrub-fill { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@keyframes viz-scrub-head {
+  from { opacity: 0; transform: translate(-50%, -50%) scale(0.3); }
+  to   { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+
+.feature-grid article.is-visible .scrubber .track i {
+  transform-origin: left center;
+  animation: viz-scrub-fill 1.3s cubic-bezier(0.22, 1, 0.36, 1) 260ms both;
+}
+
+.feature-grid article.is-visible .scrubber .track b {
+  animation: viz-scrub-head 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) 1.24s both;
+}
+
+/* Audio & subtitles — the track lines breathe like a soft equalizer. The one
+   continuously-living element; delays desync the bars so it reads as motion. */
+@keyframes viz-eq {
+  0%, 100% { transform: scaleX(var(--eq-lo, 0.6)); }
+  50%      { transform: scaleX(1); }
+}
+
+.feature-grid article.is-visible .bars span {
+  transform-origin: left center;
+  animation: viz-eq 2.4s ease-in-out infinite both;
+}
+.feature-grid article.is-visible .bars span:nth-child(1) { --eq-lo: 0.72; animation-delay: 0ms; }
+.feature-grid article.is-visible .bars span:nth-child(2) { --eq-lo: 0.5; animation-delay: 180ms; }
+.feature-grid article.is-visible .bars span:nth-child(3) { --eq-lo: 0.64; animation-delay: 360ms; }
+.feature-grid article.is-visible .bars span:nth-child(4) { --eq-lo: 0.44; animation-delay: 540ms; }
+
+/* Offline mode — the in-progress bar fills to its 68%, the two done checks pop. */
+@keyframes viz-dl-fill { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@keyframes viz-check-pop { from { opacity: 0; transform: scale(0.2); } to { opacity: 1; transform: scale(1); } }
+
+.feature-grid article.is-visible .dl-viz .dl-row i.prog::after {
+  transform-origin: left center;
+  animation: viz-dl-fill 1.6s cubic-bezier(0.22, 1, 0.36, 1) 320ms both;
+}
+.feature-grid article.is-visible .dl-viz .dl-row svg {
+  animation: viz-check-pop 0.42s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+.feature-grid article.is-visible .dl-viz .dl-row:nth-child(1) svg { animation-delay: 160ms; }
+.feature-grid article.is-visible .dl-viz .dl-row:nth-child(2) svg { animation-delay: 320ms; }
+
+/* Always in sync — the window's content bars sweep in like a live load. */
+@keyframes viz-row-fill { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+
+.infra-banner.is-visible .infra-window-body .row {
+  transform-origin: left center;
+  animation: viz-row-fill 0.9s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.infra-banner.is-visible .infra-window-body .row:nth-child(1) { animation-delay: 220ms; }
+.infra-banner.is-visible .infra-window-body .row:nth-child(2) { animation-delay: 360ms; }
+.infra-banner.is-visible .infra-window-body .row:nth-child(3) { animation-delay: 500ms; }
+
+/* Simpler promo — the browser mock's poster tiles pop in staggered, and a slow
+   sheen sweeps the hero panel (continuous). */
+@keyframes viz-poster-pop {
+  from { opacity: 0; transform: translateY(8px) scale(0.9); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes viz-sheen { 0% { transform: translateX(-120%); } 60%, 100% { transform: translateX(240%); } }
+
+.simpler-promo .promo-card.is-visible .bm-row i {
+  animation: viz-poster-pop 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.simpler-promo .promo-card.is-visible .bm-row i:nth-child(1) { animation-delay: 240ms; }
+.simpler-promo .promo-card.is-visible .bm-row i:nth-child(2) { animation-delay: 300ms; }
+.simpler-promo .promo-card.is-visible .bm-row i:nth-child(3) { animation-delay: 360ms; }
+.simpler-promo .promo-card.is-visible .bm-row i:nth-child(4) { animation-delay: 420ms; }
+.simpler-promo .promo-card.is-visible .bm-row i:nth-child(5) { animation-delay: 480ms; }
+
+.bm-hero::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 45%;
+  background: linear-gradient(100deg, transparent, rgba(255, 255, 255, 0.26), transparent);
+  transform: translateX(-120%);
+  pointer-events: none;
+}
+.simpler-promo .promo-card.is-visible .bm-hero::before {
+  animation: viz-sheen 3.8s ease-in-out 900ms infinite both;
+}
+
+/* Constrained devices keep the cheap one-shot reveals but drop the two
+   continuously-looping effects (equalizer, sheen) to save battery/GPU. */
+html.norva-lite .feature-grid article.is-visible .bars span,
+html.norva-lite .simpler-promo .promo-card.is-visible .bm-hero::before {
+  animation: none !important;
+}
+
+/* Reduced motion: no viz animation at all — each element sits at its designed
+   static resting state (full scrubber, full bars, 68% download, filled rows). */
+@media (prefers-reduced-motion: reduce) {
+  .scrubber .track i,
+  .scrubber .track b,
+  .bars span,
+  .dl-viz .dl-row i.prog::after,
+  .dl-viz .dl-row svg,
+  .infra-window-body .row,
+  .bm-row i,
+  .bm-hero::before {
+    animation: none !important;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -2098,7 +2244,8 @@ main,
   .scroll-reveal,
   .reveal-ready .scroll-reveal,
   .reveal-ready .scroll-reveal.reveal-left,
-  .reveal-ready .scroll-reveal.reveal-right {
+  .reveal-ready .scroll-reveal.reveal-right,
+  .reveal-ready .scroll-reveal.reveal-soft {
     opacity: 1;
     filter: none;
     transform: none;

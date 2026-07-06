@@ -147,34 +147,52 @@
   }
 
   function setupScrollReveal() {
+    const html = document.documentElement;
+    // The hero is pre-hidden before first paint by the inline <head> script
+    // (html.reveal-armed) so it can never flash in then re-hide when this deferred
+    // script runs. Whichever branch we take below, we release that pre-hide: its
+    // job is either handed off to `.reveal-ready .scroll-reveal` (an identical
+    // hidden state → zero visual jump) or simply dropped so nothing stays hidden.
+    const disarm = () => html.classList.remove('reveal-armed');
     const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     if (reduceMotion || !('IntersectionObserver' in window)) {
-      document.documentElement.classList.add('reveal-ready');
+      disarm();
+      html.classList.add('reveal-ready');
       return;
     }
 
+    // [selector, direction, soft?]. `soft` = a shorter, blur-lighter drift for
+    // section headers (eyebrow/title/copy) so text leads with a subtle move while
+    // cards and visuals travel further — a hierarchy of motion, not one setting
+    // applied to everything. Every animatable section is listed here; keep this in
+    // sync with landing.html (missing entries = a section that pops with no reveal).
     const groups = [
       ['.hero-content', 'left'],
       ['.hero-visual', 'right'],
-      ['.logo-wall .logo-wall-label', 'up'],
+      ['.logo-wall .logo-wall-label', 'up', true],
       ['.logo-chip', 'up'],
+      ['.compat-strip > .eyebrow, .compat-strip > h2, .compat-strip > .section-copy', 'up', true],
+      ['.compat-chip', 'up'],
+      ['.compat-note', 'up', true],
       ['.trust-grid article', 'up'],
       ['.split-section > div:first-child', 'left'],
-      ['.split-section .sync-panel', 'right'],
-      ['.steps-section > .eyebrow, .steps-section > h2, .steps-section > .section-copy', 'up'],
+      ['.split-section .sync-stage', 'right'],
+      ['.steps-section > .eyebrow, .steps-section > h2, .steps-section > .section-copy', 'up', true],
       ['.step-grid article', 'up'],
       ['.recommendation-section > div:first-child', 'left'],
       ['.recommendation-section .poster-row article', 'up'],
-      ['.features-section > .eyebrow, .features-section > h2, .features-section > .section-copy', 'up'],
+      ['.features-section > .eyebrow, .features-section > h2, .features-section > .section-copy', 'up', true],
       ['.feature-grid article', 'up'],
-      ['.devices-section > .eyebrow, .devices-section > h2, .devices-section > .section-copy', 'up'],
+      ['.devices-section > .eyebrow, .devices-section > h2, .devices-section > .section-copy', 'up', true],
       ['.device-grid article', 'up'],
+      ['.get-app-copy > *', 'left'],
+      ['.get-app-qr', 'right'],
       ['.infra-banner', 'up'],
-      ['.clarity-section > .eyebrow, .clarity-section > h2, .clarity-section > .section-copy', 'up'],
+      ['.clarity-section > .eyebrow, .clarity-section > h2, .clarity-section > .section-copy', 'up', true],
       ['.clarity-grid article, .warning-note', 'up'],
-      ['.pricing-section > .eyebrow, .pricing-section > h2, .pricing-section > .section-copy', 'up'],
+      ['.pricing-section > .eyebrow, .pricing-section > h2, .pricing-section > .section-copy', 'up', true],
       ['.pricing-grid article, .pricing-section > small', 'up'],
-      ['.faq-section > .eyebrow, .faq-section > h2', 'up'],
+      ['.faq-section > .eyebrow, .faq-section > h2', 'up', true],
       ['.faq-item', 'up'],
       ['.simpler-promo .promo-card', 'up'],
       ['.final-cta', 'up'],
@@ -182,18 +200,33 @@
     ];
 
     const revealItems = [];
-    groups.forEach(([selector, direction]) => {
-      document.querySelectorAll(selector).forEach((element, index) => {
+    groups.forEach(([selector, direction, soft]) => {
+      // Stagger restarts at 0 whenever the parent changes, so a selector that
+      // spans several containers (e.g. the two `.trust-grid`s) staggers each grid
+      // from its own first card instead of inheriting a global running offset.
+      let lastParent = null;
+      let order = 0;
+      document.querySelectorAll(selector).forEach(element => {
         if (element.classList.contains('scroll-reveal')) return;
+        if (element.parentElement !== lastParent) {
+          lastParent = element.parentElement;
+          order = 0;
+        }
         element.classList.add('scroll-reveal', `reveal-${direction}`);
-        element.style.setProperty('--reveal-delay', `${Math.min(index, 5) * 70}ms`);
+        if (soft) element.classList.add('reveal-soft');
+        element.style.setProperty('--reveal-delay', `${Math.min(order, 5) * 70}ms`);
         revealItems.push(element);
+        order += 1;
       });
     });
 
-    if (!revealItems.length) return;
+    if (!revealItems.length) {
+      disarm();
+      return;
+    }
 
-    document.documentElement.classList.add('reveal-ready');
+    html.classList.add('reveal-ready');
+    disarm(); // hidden state now comes from `.reveal-ready .scroll-reveal` — identical, no jump
 
     const observer = new IntersectionObserver(entries => {
       entries.forEach(entry => {

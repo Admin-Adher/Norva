@@ -22,8 +22,27 @@
         || (n.deviceMemory && n.deviceMemory <= 6);
       if (lite) document.documentElement.classList.add('norva-lite');
     } catch (e) {}
+    // Pre-hide the above-the-fold hero BEFORE first paint. The scroll-reveal
+    // script is deferred, so without this the hero can paint fully then snap to
+    // its hidden start state and re-animate (a visible flash). Arming here means
+    // it can only ever animate IN. landing.js drops this class once it takes over
+    // (handing off to an identical .scroll-reveal hidden state), and a load-time
+    // safety net below un-arms it if that script never runs, so the hero is never
+    // left stuck hidden. Only meaningful when JS + reveal are both active.
+    try {
+      var de = document.documentElement;
+      if ('IntersectionObserver' in window
+          && !(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches)) {
+        de.classList.add('reveal-armed');
+        addEventListener('load', function () {
+          requestAnimationFrame(function () {
+            if (!de.classList.contains('reveal-ready')) de.classList.remove('reveal-armed');
+          });
+        });
+      }
+    } catch (e) {}
   </script>
-  <link rel="stylesheet" href="/css/landing.css?v=30">
+  <link rel="stylesheet" href="/css/landing.css?v=31">
 </head>
 
 <body>
@@ -432,7 +451,7 @@
   </footer>
 
   <script src="/js/starfield.js?v=5" defer></script>
-  <script src="/js/landing.js?v=9" defer></script>
+  <script src="/js/landing.js?v=10" defer></script>
 </body>
 
 </html>
