@@ -172,6 +172,9 @@ Deno.serve(async (req) => {
     if (req.method === "POST" && segments[0] === "catalog-mirror-verify") {
       return json(req, await runCatalogMirrorVerify(req, supabase));
     }
+    if (req.method === "POST" && segments[0] === "catalog-media-mirror-verify") {
+      return json(req, await runCatalogMediaMirrorVerify(req, supabase));
+    }
     if (req.method === "POST" && segments[0] === "provider-playback-check") {
       return json(req, await runProviderPlaybackCheck(req, supabase));
     }
@@ -4079,6 +4082,31 @@ async function runCatalogMirrorVerify(req: Request, db: SupabaseClient) {
     n("release_year_mismatch") === 0 && n("poster_url_mismatch") === 0 &&
     n("backdrop_url_mismatch") === 0 && n("i18n_mismatch") === 0 &&
     n("tmdb_mismatch") === 0 && n("cloud_only") === 0;
+  return { ok: true, clean, diff: row };
+}
+
+// Read-cutover trust artifact for the RAW catalogue (docs/roadmap/phase2-dedup-execution.md):
+// prove the provider-global catalog_media_items is a faithful mirror of ONE source's per-user
+// cloud_media_items BEFORE flipping NORVA_CATALOG_MEDIA_READ_SOURCE onto the global store. Same
+// role runCatalogMirrorVerify plays for catalog_titles, but per-source (the RPC is source-scoped).
+// `clean` is the flip gate: every per-user item mirrored (cloud_only=0), playback resolves
+// identically from global (mismatch_playback_hint=0), and global is never blanker than per-user
+// (global_weaker_*=0). A non-zero mismatch_metadata is tolerated — at multi-user scale keep-best
+// can legitimately hold the richer of two users' rows. Read-only; service-role gated like backfill.
+async function runCatalogMediaMirrorVerify(req: Request, db: SupabaseClient) {
+  const expected = Deno.env.get("NORVA_BACKFILL_TOKEN") ?? "";
+  const provided = req.headers.get("Authorization")?.match(/^Bearer\s+(.+)$/i)?.[1] ?? "";
+  if (!expected || provided !== expected) throw new HttpError(401, "Unauthorized");
+  const body = recordOrEmpty(await req.json().catch(() => ({})));
+  const sourceId = stringOr(body.source_id ?? body.sourceId, "");
+  if (!sourceId) throw new HttpError(400, "Missing source_id");
+  const { data, error } = await db.rpc("catalog_media_mirror_diff", { p_source_id: sourceId });
+  if (error) throw new HttpError(500, `catalog_media_mirror_diff failed: ${error.message}`);
+  const row = (Array.isArray(data) ? data[0] : data) as JsonRecord | null;
+  const n = (k: string) => Number((row?.[k] as number | undefined) ?? -1);
+  const clean = !!row &&
+    n("cloud_only") === 0 && n("mismatch_playback_hint") === 0 &&
+    n("global_weaker_title") === 0 && n("global_weaker_poster") === 0;
   return { ok: true, clean, diff: row };
 }
 
