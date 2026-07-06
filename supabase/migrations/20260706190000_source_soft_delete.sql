@@ -29,9 +29,14 @@ declare
   sid uuid;
   n   int;
 begin
+  -- One drainer at a time: a big source can take several minutes, longer than the 1-minute cron
+  -- interval, and we don't want overlapping runs thrashing the same rows. Session-level lock is
+  -- auto-released when the pg_cron worker backend ends, so it can't leak even on error.
+  if not pg_try_advisory_lock(hashtext('reap_deleted_sources')) then return; end if;
+
   select array_agg(id) into ids
   from (select id from public.cloud_sources where deleted_at is not null order by deleted_at limit 10) x;
-  if ids is null then return; end if;
+  if ids is null then perform pg_advisory_unlock(hashtext('reap_deleted_sources')); return; end if;
 
   foreach sid in array ids loop
     loop
@@ -62,6 +67,8 @@ begin
     delete from public.cloud_favorites where source_id = sid; commit;
     delete from public.cloud_sources where id = sid; commit;  -- cascade clears any stragglers
   end loop;
+
+  perform pg_advisory_unlock(hashtext('reap_deleted_sources'));
 end
 $proc$;
 
