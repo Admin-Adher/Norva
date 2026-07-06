@@ -328,6 +328,22 @@ class AdminPage {
 @media(max-width:820px){#page-admin .src-row{grid-template-columns:1fr;}#page-admin .src-meta{text-align:left;align-items:flex-start;}}
 /* Identités: leading gradient icon on each identity card */
 #page-admin .id-ic{width:42px;height:42px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0;background:linear-gradient(135deg,rgba(91,124,250,.22),rgba(168,85,247,.18));border:1px solid rgba(120,150,255,.2);}
+/* Identity cards — class-based (replaces inline styles) */
+#page-admin .identity-card{background:var(--adm-panel);border:1px solid var(--adm-line);border-radius:16px;padding:18px 20px;margin-bottom:14px;}
+#page-admin .identity-card.mirror{border-color:rgba(251,191,36,.28);background:linear-gradient(158deg,rgba(251,191,36,.035),var(--adm-panel));}
+#page-admin .identity-card.dormant{opacity:.72;}
+#page-admin .identity-head{display:flex;gap:13px;align-items:flex-start;margin-bottom:12px;}
+#page-admin .identity-main{min-width:0;flex:1;}
+#page-admin .identity-name{font-size:16px;font-weight:700;color:var(--adm-tx);display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+#page-admin .identity-stats{font-size:12px;color:var(--adm-tx2);margin-top:5px;}
+#page-admin .identity-stats b{color:var(--adm-tx);font-weight:700;}
+#page-admin .identity-brands{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px;}
+#page-admin .identity-acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;}
+#page-admin .id-actbtn{background:var(--color-bg-secondary,#181820);color:#a9bcff;border:1px solid var(--adm-line);border-radius:7px;padding:4px 11px;cursor:pointer;font-size:11.5px;white-space:nowrap;}
+#page-admin .id-actbtn:hover{border-color:#5b7cfa;}
+#page-admin .id-legend{display:flex;flex-wrap:wrap;gap:7px 18px;background:var(--adm-panel);border:1px solid var(--adm-line);border-radius:12px;padding:11px 15px;margin-bottom:16px;font-size:12px;color:var(--adm-tx2);}
+#page-admin .id-legend b{color:var(--adm-tx);}
+#page-admin .id-legend .lgd{white-space:nowrap;}
 /* Système: health gauge bar + Services ‖ Activité two-column */
 #page-admin .kpi-bar{height:7px;border-radius:4px;background:rgba(255,255,255,.08);overflow:hidden;margin-top:11px;}
 #page-admin .kpi-bar>i{display:block;height:100%;border-radius:4px;background:linear-gradient(90deg,#5b7cfa,#8b7cff);}
@@ -2204,56 +2220,171 @@ class AdminPage {
     async _pageIdentites() {
         this._setCrumb('Identités');
         const v = this._view();
+        const filters = [['', 'Toutes'], ['mirror', 'Miroirs'], ['active', 'Actives'], ['multi', 'Multi-sources'], ['driver', 'Pilotes'], ['dormant', 'Dormantes 30 j']];
         v.innerHTML = `<div class="crm-page">
             <h1 class="crm-h1">🧬 Identités fournisseurs</h1>
             <p class="crm-sub">Une identité = un panel amont réel (dédup par empreinte de stream IDs). Plusieurs marques sur une même identité = revente miroir — le cache cross-user les fusionne.</p>
+            <section id="id-kpis" class="kpi-groups"><div class="ssub">Chargement…</div></section>
+            <div class="id-legend">
+              <span class="lgd">🧬 <b>Identité</b> = panel amont réel</span>
+              <span class="lgd">🏷️ <b>Marque</b> = revendeur détecté</span>
+              <span class="lgd">📡 <b>Source</b> = playlist d'un client</span>
+              <span class="lgd">🔁 <b>Miroir</b> = plusieurs marques → même panel</span>
+            </div>
+            <div class="qv-row" id="id-filters" role="tablist" aria-label="Filtres identités">
+              ${filters.map(([val, lbl]) => `<button class="qv-chip" data-filter="${val}" role="tab">${lbl}</button>`).join('')}
+            </div>
+            <div class="src-toolbar">
+              <input class="sup-search" id="id-search" type="search" placeholder="Rechercher : identité, marque, compte, source…" autocomplete="off" value="${AdminPage.esc(this._idSearch || '')}" aria-label="Rechercher une identité" />
+            </div>
             <div id="admin-identities"><div class="ssub">Chargement…</div></div>
         </div>`;
+        const search = document.getElementById('id-search');
+        if (search) search.addEventListener('input', () => { clearTimeout(this._idSearchDeb); this._idSearchDeb = setTimeout(() => { this._idSearch = search.value.trim(); this._renderIdentities(this._identities || []); }, 200); });
+        document.querySelectorAll('#id-filters .qv-chip').forEach(chip => chip.addEventListener('click', () => {
+            this._idFilter = chip.dataset.filter || ''; this._syncIdFilters(); this._renderIdentities(this._identities || []);
+        }));
+        this._syncIdFilters();
         try {
             const ids = await this._rpc('admin_identities');
-            this._renderIdentities(Array.isArray(ids) ? ids : []);
+            this._identities = Array.isArray(ids) ? ids : [];
+            this._dressHeader();
+            this._renderIdentities(this._identities);
         } catch (e) {
             const el = document.getElementById('admin-identities');
             if (el) el.innerHTML = `<div class="admin-err" role="alert">Erreur : ${AdminPage.esc(e.message)}</div>`;
         }
     }
 
+    _syncIdFilters() {
+        const cur = this._idFilter || '';
+        document.querySelectorAll('#id-filters .qv-chip').forEach(c => c.classList.toggle('active', (c.dataset.filter || '') === cur));
+    }
+
     _renderIdentities(list) {
         const el = document.getElementById('admin-identities');
         if (!el) return;
-        if (!list.length) { el.innerHTML = '<div class="ssub">Aucune identité résolue.</div>'; return; }
-        el.innerHTML = list.map(it => {
-            const brands = Array.isArray(it.brands) ? it.brands : [];
-            const sources = Array.isArray(it.sources) ? it.sources : [];
-            const status = it.status === 'active' ? '<span class="badge green">active</span>'
-                : `<span class="badge gray">${AdminPage.esc(it.status || '—')}</span>`;
-            const mirror = brands.length > 1
-                ? ' <span class="badge amber" title="Plusieurs marques revendues pointent vers le même panel amont">miroir multi-marques</span>' : '';
-            const brandChips = brands.map(b => `<span class="badge blue">${AdminPage.esc(b)}</span>`).join(' ');
-            const rows = sources.map(s => {
-                const clickable = s.user_id ? ` class="user-row" data-user-id="${AdminPage.esc(s.user_id)}" tabindex="0" aria-label="Voir la fiche de ${AdminPage.esc(s.owner_email || s.display_name || '')}" title="Voir la fiche client"` : '';
-                return `<tr${clickable}>
-                    <td>${AdminPage.esc(s.display_name)}</td>
-                    <td><span class="pacct">${AdminPage.esc(s.owner_email || '—')}</span>${s.is_driver ? ' <span class="badge blue">pilote</span>' : ''}</td>
-                    <td>${s.sync_status === 'ready' ? '<span class="badge green">ready</span>' : `<span class="badge gray">${AdminPage.esc(s.sync_status || '—')}</span>`}</td>
-                    <td>${s.last_synced_at ? AdminPage.esc(AdminPage.timeAgo(s.last_synced_at)) : '—'}</td>
+        list = Array.isArray(list) ? list : [];
+        const n = AdminPage.n, esc = AdminPage.esc;
+        const now = Date.now(), D30 = 30 * 864e5;
+        const brandsOf = (it) => Array.isArray(it.brands) ? it.brands : [];
+        const sourcesOf = (it) => Array.isArray(it.sources) ? it.sources : [];
+        const isMirror = (it) => brandsOf(it).length > 1;
+        const isDormant = (it) => !it.last_seen || (now - new Date(it.last_seen).getTime()) > D30;
+        const acctsOf = (it) => new Set(sourcesOf(it).map(s => s.user_id).filter(Boolean)).size;
+
+        // ── Synthesis KPIs (computed from the live list) + header status line ──
+        const kel = document.getElementById('id-kpis');
+        if (kel) {
+            const total = list.length;
+            const active = list.filter(it => it.status === 'active').length;
+            const mirrors = list.filter(isMirror).length;
+            const srcTotal = list.reduce((a, it) => a + sourcesOf(it).length, 0);
+            const brandTotal = list.reduce((a, it) => a + brandsOf(it).length, 0);
+            const dormant = list.filter(isDormant).length;
+            const card = (v, l, cls, icon) => `<div class="kpi ${cls || ''}"><div class="kpi-hd"><div class="v">${v}</div><span class="kpi-ic">${icon}</span></div><div class="l">${l}</div></div>`;
+            kel.innerHTML = `<div class="kpi-group kpi-group--priority"><div class="kpi-gtitle">🧬 Graphe providers</div><div class="admin-cards">
+                ${card(n(active), 'Identités actives', active > 0 ? 'ok' : '', '🧬')}
+                ${card(n(mirrors), 'Miroirs multi-marques', mirrors > 0 ? 'warn' : 'ok', '🔁')}
+                ${card(n(srcTotal), 'Sources rattachées', '', '📡')}
+                ${card(n(brandTotal), 'Marques détectées', '', '🏷️')}
+                ${card(n(dormant), 'Dormantes 30 j', dormant > 0 ? 'warn' : 'ok', '💤')}
+                ${card(n(total), 'Identités', '', '🗂️')}
+            </div></div>`;
+            const tx = document.querySelector('#page-admin .crm-head-tx');
+            if (tx) {
+                let meta = tx.querySelector('.crm-head-meta');
+                if (!meta) { meta = document.createElement('div'); meta.className = 'crm-head-meta'; tx.appendChild(meta); }
+                meta.innerHTML =
+                    `<span class="crm-hpill"><b>${n(active)}</b> actives</span>` +
+                    `<span class="crm-hpill ${mirrors > 0 ? 'bad' : ''}"><b>${n(mirrors)}</b> miroirs</span>` +
+                    `<span class="crm-hpill"><b>${n(srcTotal)}</b> sources</span>` +
+                    `<span class="crm-hpill"><b>${n(brandTotal)}</b> marques</span>`;
+            }
+        }
+
+        // ── Filter + search + mirror-first priority sort ──
+        const f = this._idFilter || '';
+        let view = list.filter(it => {
+            if (f === 'mirror') return isMirror(it);
+            if (f === 'active') return it.status === 'active';
+            if (f === 'multi') return sourcesOf(it).length > 1;
+            if (f === 'driver') return sourcesOf(it).some(s => s.is_driver);
+            if (f === 'dormant') return isDormant(it);
+            return true;
+        });
+        const q = (this._idSearch || '').toLowerCase();
+        if (q) view = view.filter(it => {
+            if (String(it.display_name || '').toLowerCase().includes(q)) return true;
+            if (brandsOf(it).some(b => String(b || '').toLowerCase().includes(q))) return true;
+            return sourcesOf(it).some(s => String(s.owner_email || '').toLowerCase().includes(q) || String(s.display_name || '').toLowerCase().includes(q));
+        });
+        // Priority: mirrors first, then most recent activity, then most sources.
+        view = view.slice().sort((a, b) =>
+            (isMirror(b) - isMirror(a)) ||
+            (new Date(b.last_seen || 0).getTime() - new Date(a.last_seen || 0).getTime()) ||
+            (sourcesOf(b).length - sourcesOf(a).length));
+
+        if (!view.length) {
+            el.innerHTML = `<div class="card"><span class="badge ${q || f ? 'gray' : 'green'}">${q || f ? '∅' : '✓'}</span> ${q || f ? 'Aucune identité ne correspond à ce filtre.' : 'Aucune identité résolue.'}</div>`;
+            return;
+        }
+
+        el.innerHTML = view.map((it, idx) => {
+            const brands = brandsOf(it), sources = sourcesOf(it);
+            const dormant = isDormant(it);
+            const status = it.status === 'active' ? '<span class="badge green">active</span>' : `<span class="badge gray">${esc(it.status || '—')}</span>`;
+            const mirror = isMirror(it) ? ' <span class="badge amber" title="Plusieurs marques revendues pointent vers le même panel amont">🔁 miroir multi-marques</span>' : '';
+            const brandChips = brands.map(b => `<span class="badge blue">${esc(b)}</span>`).join(' ');
+            // Sources: compact rows; collapse beyond 5.
+            const srcRow = (s) => {
+                const cl = s.user_id ? ` class="user-row" data-user-id="${esc(s.user_id)}" tabindex="0" aria-label="Voir la fiche de ${esc(s.owner_email || s.display_name || '')}" title="Voir la fiche client"` : '';
+                return `<tr${cl}>
+                    <td>${esc(s.display_name)}</td>
+                    <td><span class="pacct">${esc(s.owner_email || '—')}</span>${s.is_driver ? ' <span class="badge blue">pilote</span>' : ''}</td>
+                    <td>${s.sync_status === 'ready' ? '<span class="badge green">ready</span>' : `<span class="badge gray">${esc(s.sync_status || '—')}</span>`}</td>
+                    <td>${s.last_synced_at ? esc(AdminPage.timeAgo(s.last_synced_at)) : '—'}</td>
                 </tr>`;
-            }).join('');
-            const srcTable = sources.length
-                ? `<div class="scroll"><table><thead><tr><th>Source</th><th>Compte</th><th>Statut</th><th>Dernier sync</th></tr></thead><tbody>${rows}</tbody></table></div>`
-                : '<div class="ssub">Aucune source ne porte cette identité.</div>';
-            return `<div class="card" style="margin-bottom:16px">
-                <div style="display:flex;gap:13px;align-items:flex-start;margin-bottom:12px">
+            };
+            let srcTable;
+            if (!sources.length) srcTable = '<div class="ssub">Aucune source ne porte cette identité.</div>';
+            else {
+                const head = '<thead><tr><th>Source</th><th>Compte</th><th>Statut</th><th>Dernier sync</th></tr></thead>';
+                const shown = sources.slice(0, 5).map(srcRow).join('');
+                const hidden = sources.slice(5).map(srcRow).join('');
+                srcTable = `<div class="scroll"><table>${head}<tbody>${shown}${hidden ? `<tbody class="id-more" hidden data-idx="${idx}">${hidden}</tbody>` : ''}</table></div>` +
+                    (hidden ? `<button class="id-actbtn id-more-btn" data-idx="${idx}" style="margin-top:8px">▾ Voir les ${n(sources.length - 5)} autres sources</button>` : '');
+            }
+            return `<div class="identity-card ${isMirror(it) ? 'mirror' : ''} ${dormant ? 'dormant' : ''}">
+                <div class="identity-head">
                     <div class="id-ic">${AdminPage.provIcon(it.display_name)}</div>
-                    <div style="min-width:0;flex:1">
-                        <div class="pname" style="font-size:16px">${AdminPage.esc(it.display_name)} ${status}${mirror}</div>
-                        <div class="pacct">${AdminPage.n(it.key_count)} clé${Number(it.key_count) > 1 ? 's' : ''} provider · vue ${it.first_seen ? AdminPage.esc(AdminPage.timeAgo(it.first_seen)) : '—'} · dernière activité ${it.last_seen ? AdminPage.esc(AdminPage.timeAgo(it.last_seen)) : '—'}</div>
-                        ${brandChips ? `<div class="tag-row" style="margin-top:8px">${brandChips}</div>` : ''}
+                    <div class="identity-main">
+                        <div class="identity-name">${esc(it.display_name)} ${status}${mirror}${dormant ? ' <span class="badge gray" title="Aucune activité depuis 30 j+">💤 dormante</span>' : ''}</div>
+                        <div class="identity-stats"><b>${n(brands.length)}</b> marque(s) · <b>${n(sources.length)}</b> source(s) · <b>${n(acctsOf(it))}</b> compte(s) · <b>${n(it.key_count)}</b> clé(s) · actif ${it.last_seen ? esc(AdminPage.timeAgo(it.last_seen)) : '—'}</div>
+                        ${brandChips ? `<div class="identity-brands">${brandChips}</div>` : ''}
+                        <div class="identity-acts">
+                            ${sources.length ? `<button class="id-actbtn id-filter-src" data-name="${esc(it.display_name)}">📡 Voir les sources</button>` : ''}
+                            ${it.id ? `<button class="id-actbtn id-copy" data-id="${esc(it.id)}">⧉ Copier l'ID</button>` : ''}
+                        </div>
                     </div>
                 </div>
                 ${srcTable}
             </div>`;
         }).join('');
+
+        // Wire: expand sources, filter Sources on this identity, copy identity id.
+        el.querySelectorAll('.id-more-btn').forEach(b => b.addEventListener('click', () => {
+            const tb = el.querySelector(`tbody.id-more[data-idx="${b.dataset.idx}"]`);
+            if (tb) { tb.hidden = false; b.remove(); }
+        }));
+        el.querySelectorAll('.id-filter-src').forEach(b => b.addEventListener('click', () => {
+            this._provSearch = b.dataset.name || ''; this._provFilter = '';
+            this._navigate('providers');
+        }));
+        el.querySelectorAll('.id-copy').forEach(b => b.addEventListener('click', async () => {
+            try { await navigator.clipboard.writeText(b.dataset.id); this._toast('ID identité copié.', 'ok'); }
+            catch (_) { this._toast('Copie impossible.', 'err'); }
+        }));
     }
 
     // ── Page: Moteur (enrichment + crons) ──
