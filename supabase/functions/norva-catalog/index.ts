@@ -1283,15 +1283,11 @@ function audioFacetTags(facet: string | null): string[] {
 function subtitleFacetTags(facet: string | null): string[] {
   return facet ? (SUBTITLE_FACET_TAGS[facet] ?? []) : [];
 }
-// An audio facet -> ISO code, for matching the real observed audio_languages
-// column. The opaque 'original'/'multi' facets have no single ISO (they stay
-// tag-only); a specific language like 'fr' also matches a captured 'fr' track.
-const AUDIO_FACET_ISO: Record<string, string> = {
-  fr: "fr", en: "en", es: "es", ar: "ar", de: "de", it: "it", pt: "pt",
-  nl: "nl", ru: "ru", tr: "tr", pl: "pl", hi: "hi", ja: "ja", ko: "ko", zh: "zh",
-};
+// Audio facets are now real ISO-639 codes coming from cloud_titles.audio_languages.
+// Keep only syntactically-safe codes; the SQL filter below is strict on the captured
+// audio track language, not on lossy release-name version tags.
 function audioFacetIso(facet: string | null): string | null {
-  return facet ? (AUDIO_FACET_ISO[facet] ?? null) : null;
+  return facet && /^[a-z]{2,3}$/.test(facet) ? facet : null;
 }
 // Human labels for the facet values the dynamic menus expose (English UI). Real
 // languages only — the opaque 'original'/'multi' version tags are deliberately
@@ -1333,10 +1329,10 @@ function titleAudioTracks(title: JsonRecord): Array<{ index: number; lang: strin
 }
 // "Best for my languages": a preferred-audio match outweighs a preferred-subtitle
 // match; ties keep the incoming (recency) order via the stable index tiebreaker.
-function languageMatchRank(langs: string[], prefAudioTags: string[], prefSubTags: string[]): number {
+function languageMatchRank(versionLangs: string[], audioLangs: string[], prefAudioIso: string | null, prefSubTags: string[]): number {
   let rank = 0;
-  if (prefAudioTags.length && prefAudioTags.some((tag) => langs.includes(tag))) rank += 2;
-  if (prefSubTags.length && prefSubTags.some((tag) => langs.includes(tag))) rank += 1;
+  if (prefAudioIso && audioLangs.includes(prefAudioIso)) rank += 2;
+  if (prefSubTags.length && prefSubTags.some((tag) => versionLangs.includes(tag))) rank += 1;
   return rank;
 }
 
@@ -1355,11 +1351,10 @@ async function listGenreItems(req: Request, url: URL, userId: string) {
   // Optional audio-language / burned-in-subtitle filters + "best for my languages"
   // sort. All additive: absent → the query and result are identical to before.
   const audioFacet = normalizeFacet(url.searchParams.get("audio"));
-  const audioTags = audioFacetTags(audioFacet);
   const audioIso = audioFacetIso(audioFacet);
   const subTags = subtitleFacetTags(normalizeFacet(url.searchParams.get("subs")));
   const langSort = (url.searchParams.get("sort") || "").trim() === "lang-match";
-  const prefAudioTags = langSort ? audioFacetTags(normalizeFacet(url.searchParams.get("prefAudio"))) : [];
+  const prefAudioIso = langSort ? audioFacetIso(normalizeFacet(url.searchParams.get("prefAudio"))) : null;
   const prefSubTags = langSort ? subtitleFacetTags(normalizeFacet(url.searchParams.get("prefSubs"))) : [];
   // Decade / minimum-rating filters so the whole filter bar works inside a genre
   // ("See all") or language grid — before, Year/Rating were silently ignored there.
@@ -1375,8 +1370,8 @@ async function listGenreItems(req: Request, url: URL, userId: string) {
   // Build the shared SQL filter. genre_buckets is the denormalised curated-bucket
   // set (migration 20260704160000), GIN-indexed — so a bucket's grid is filtered
   // over the WHOLE catalogue by index, not classified in a recency-capped window.
-  // Every dimension is now a real SQL predicate: language (version tags OR the
-  // captured audio-language column), year (release_year), rating (rating_num),
+  // Every dimension is now a real SQL predicate: strict audio languages, best-effort
+  // subtitle version tags, year (release_year), rating (rating_num),
   // hidden genres (drop a title tagged with ANY hidden bucket — the "Kids profile
   // sees no Horror anywhere" rule).
   const applyFilters = (q: any) => {
@@ -1386,15 +1381,11 @@ async function listGenreItems(req: Request, url: URL, userId: string) {
     if (search) out = out.ilike("title", `%${search}%`);
     if (yearRange) out = out.gte("release_year", yearRange.min).lte("release_year", yearRange.max);
     if (minRating !== null) out = out.gte("rating_num", minRating);
-    // Subtitles: burned-in tag only. Audio: version tag OR captured audio language.
+    // Subtitles: burned-in/release tag only (best-effort). Audio: strict real track
+    // language captured from ffprobe/playback, so selecting a language cannot match a
+    // title that merely has a loose release-name tag such as multi/vf.
     if (subTags.length) out = out.overlaps("version_languages", subTags);
-    if (audioTags.length || audioIso) {
-      // Per-tag contains() so the or() never holds a comma INSIDE an array literal
-      // (PostgREST splits or-conditions on top-level commas).
-      const orParts = audioTags.map((tag) => `version_languages.cs.{${tag}}`);
-      if (audioIso) orParts.push(`audio_languages.cs.{${audioIso}}`);
-      if (orParts.length) out = out.or(orParts.join(","));
-    }
+    if (audioIso) out = out.contains("audio_languages", [audioIso]);
     return out;
   };
 
@@ -1402,7 +1393,7 @@ async function listGenreItems(req: Request, url: URL, userId: string) {
     // "Best for my languages" sort needs an in-memory rank over the filtered set;
     // it's bounded by the (usually language/genre-narrowed) filter. Every other
     // view uses exact SQL count + range pagination over the whole catalogue.
-    if (langSort && (prefAudioTags.length || prefSubTags.length)) {
+    if (langSort && (prefAudioIso || prefSubTags.length)) {
       const { data, error } = await applyFilters(db.from("cloud_titles").select("*"))
         .order("created_at", { ascending: false })
         .limit(candidateLimit);
@@ -1411,7 +1402,7 @@ async function listGenreItems(req: Request, url: URL, userId: string) {
         throwDb(error, "Unable to list genre items");
       }
       const ranked = ((data ?? []) as JsonRecord[])
-        .map((title, index) => ({ title, index, rank: languageMatchRank(titleVersionLanguages(title), prefAudioTags, prefSubTags) }))
+        .map((title, index) => ({ title, index, rank: languageMatchRank(titleVersionLanguages(title), titleAudioLanguages(title), prefAudioIso, prefSubTags) }))
         .sort((a, b) => b.rank - a.rank || a.index - b.index)
         .map((entry) => entry.title);
       const pageRows = ranked.slice(offset, offset + limit);
@@ -1456,8 +1447,8 @@ async function listGenreItems(req: Request, url: URL, userId: string) {
 
 // Dynamic menu options: which audio / burned-in-subtitle facets actually exist in
 // this user's catalogue, so the dropdowns only show real choices (no dead options).
-// Audio counts a facet present if any title carries one of its version tags OR a
-// real captured audio-track language; subtitles use the version tags only.
+// Audio facets come from real captured audio-track languages; subtitles still use
+// burned-in/release tags because embedded subtitles cannot be reliably probed.
 // In-isolate memo for the language-facets endpoint. listLanguageFacets fires ~25
 // count-queries per call, all per-user + per-item_type. Caching the result briefly
 // stops repeated page loads (and many concurrent users at scale) from re-running the
@@ -1480,15 +1471,10 @@ async function listLanguageFacets(url: URL, userId: string) {
     return hit.value;
   }
 
-  // The facet set math runs in Postgres (cloud_language_facets → jsonb, ready to render). Reading
-  // it as jsonb is the whole point: the previous edge path read cloud_catalog_facet_summary's
-  // audio_langs / version_tags (text[]) through supabase-js and guarded on Array.isArray(...) —
-  // which was NOT true for those columns, so the summary block was silently skipped and the live
-  // fallback returned nothing → both menus came back empty for accounts that plainly had data
-  // (genres worked because they read a jsonb column + had an RPC fallback). The RPC reads the
-  // summary, falls back to a live distinct-tag scan when it's missing, and applies the exact same
-  // audio/subtitle facet taxonomy in SQL. jsonb deserialises reliably, so the menus can't silently
-  // empty again. The AUDIO_/SUBTITLE_FACET_* maps above are the reference the SQL mirrors.
+  // The facet set math runs in Postgres (cloud_language_facets → jsonb, ready to render).
+  // The RPC returns every real audio language observed in cloud_titles.audio_languages, sorted
+  // by exact title count, plus best-effort subtitle tags. jsonb deserialises reliably, so the
+  // menus cannot silently empty because of Postgres text[] client parsing.
   let value: { audio: unknown[]; subtitles: unknown[] } = { audio: [], subtitles: [] };
   try {
     const { data, error } = await db.rpc("cloud_language_facets", { p_user_id: userId, p_item_type: itemType });
