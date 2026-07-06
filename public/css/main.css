@@ -10689,6 +10689,38 @@ kbd {
   }
 }
 
+/* ── Tablet portrait (8–11") ─────────────────────────────────────────────────
+   Keep the billboard present but not full-height (cap it against viewport HEIGHT,
+   not width, so it never eats a portrait screen), and show 3 posters per rail —
+   2 are oversized and 4 cramped at this width. Placed after the base 768/1200
+   card rules so it wins in this range. */
+@media (min-width: 600px) and (max-width: 899px) and (orientation: portrait) {
+  .home-hero-section {
+    min-height: clamp(300px, 40vh, 400px);
+  }
+
+  .home-hero-content {
+    width: min(600px, 82%);
+  }
+
+  .home-hero-content h1 {
+    font-size: clamp(2rem, 5.4vw, 3rem);
+  }
+
+  .dashboard-card {
+    flex: 0 0 calc(33.333% - 14px);
+    max-width: none;
+  }
+}
+
+/* ── Tablet landscape (900–1024px) — back to 4 posters per rail. ────────────── */
+@media (min-width: 900px) and (max-width: 1024px) {
+  .dashboard-card {
+    flex: 0 0 calc(25% - 15px);
+    max-width: none;
+  }
+}
+
 /* Playback error banner (shown when all stream versions fail) */
 .watch-error {
   position: absolute;
@@ -11432,6 +11464,48 @@ mark.search-highlight {
 .tv-mode .main-content #page-watch {
   margin-left: -48px;
   margin-right: -48px;
+}
+
+/* Android TV — Home billboard reads from the couch: taller hero, larger copy and
+   CTAs so the title, reason and buttons are legible at 10-foot distance. */
+.tv-mode .home-hero-section {
+  min-height: clamp(440px, 46vw, 640px);
+}
+
+.tv-mode .home-hero-content {
+  width: min(780px, 76%);
+}
+
+.tv-mode .home-hero-content h1 {
+  font-size: clamp(2.8rem, 5vw, 5rem);
+}
+
+.tv-mode .home-hero-content p {
+  font-size: 1.3rem;
+  -webkit-line-clamp: 3;
+  max-width: 60ch;
+}
+
+.tv-mode .home-hero-kicker {
+  font-size: 1.02rem;
+}
+
+.tv-mode .home-hero-play,
+.tv-mode .home-hero-more,
+.tv-mode .home-hero-trailer {
+  min-height: 54px;
+  min-width: 150px;
+  padding: 14px 30px;
+  font-size: 1.08rem;
+}
+
+/* Overscan-safe rails: a D-pad-focused card scales 1.09 with a white ring, and the
+   rail's own overflow clips vertically. Pad the rail (room for the scaled ring top
+   and bottom) and set scroll-padding so a focused EDGE card scrolls fully into view
+   with room to breathe instead of sitting flush against the screen edge. */
+.tv-mode .horizontal-scroll {
+  padding: 16px 6px 22px;
+  scroll-padding-inline: 60px;
 }
 
 /* TV replacement for the native <select> spinner (remote-friendly rows). */
