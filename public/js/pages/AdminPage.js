@@ -280,6 +280,29 @@ class AdminPage {
 #page-admin .fiche-title{font-size:20px;font-weight:700;color:#fff;word-break:break-all;}
 #page-admin .umeta{color:var(--color-text-secondary,#9aa);font-size:12px;margin:6px 0 20px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
 #page-admin .fiche-grid{display:grid;grid-template-columns:1fr;gap:18px;}
+/* Fiche: two-column desktop (relation client ‖ technique/ops); single column mobile */
+#page-admin .fiche-cols{display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:start;}
+#page-admin .fiche-col{display:flex;flex-direction:column;gap:18px;min-width:0;}
+@media(max-width:1000px){#page-admin .fiche-cols{grid-template-columns:1fr;}}
+#page-admin .fiche-summary{margin:2px 0 20px;flex-wrap:wrap;gap:10px 6px;}
+#page-admin .fiche-summary .cs-item:last-child{border-right:0;}
+/* Sensitive-actions zone (role / suspend), visually isolated from common actions */
+#page-admin .act-zone{margin-top:14px;padding:12px 14px;border:1px dashed rgba(248,113,113,.3);border-radius:12px;background:rgba(248,113,113,.04);}
+#page-admin .act-zone-h{font-size:11px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:#fca5a5;margin-bottom:10px;display:flex;align-items:center;gap:6px;}
+#page-admin .act-lbl{font-size:11px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:var(--adm-tx3);margin-bottom:9px;}
+/* Key/value rows (billing / support panels) — shared classes replace per-line inline styles */
+#page-admin .kv-row{display:flex;justify-content:space-between;gap:12px;padding:7px 0;border-bottom:1px solid var(--adm-line);font-size:13px;}
+#page-admin .kv-row:last-child{border-bottom:0;}
+#page-admin .kv-l{color:var(--adm-tx2);}
+#page-admin .kv-v{color:var(--adm-tx);font-weight:600;text-align:right;}
+/* Clients: quick-view chips + stronger filter bar */
+#page-admin .qv-row{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;}
+#page-admin .qv-chip{background:var(--adm-panel);border:1px solid var(--adm-line);color:var(--adm-tx2);border-radius:20px;padding:6px 13px;font-size:12.5px;font-weight:600;cursor:pointer;transition:border-color .14s,color .14s,background .14s;}
+#page-admin .qv-chip:hover{border-color:#5b7cfa;color:var(--adm-tx);}
+#page-admin .qv-chip.active{background:linear-gradient(135deg,rgba(91,124,250,.2),rgba(168,85,247,.16));border-color:rgba(120,150,255,.4);color:#fff;}
+#page-admin .filter-bar{background:var(--adm-panel);border:1px solid var(--adm-line);border-radius:14px;padding:12px 14px;margin-bottom:14px;}
+#page-admin .filter-bar .fb-h{font-size:10.5px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--adm-tx3);margin-bottom:10px;display:flex;align-items:center;gap:6px;}
+#page-admin .filter-bar .users-controls{margin-bottom:0;}
 #page-admin .soon{color:#828ea1;font-size:13px;font-style:italic;}
 #page-admin .tag-row{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;}
 #page-admin .tag-chip .crm-tag-remove{background:none;border:0;color:inherit;cursor:pointer;font-size:12px;padding:0 0 0 3px;opacity:.7;}
@@ -1150,25 +1173,32 @@ class AdminPage {
             <p class="crm-sub">Liste paginée — recherche, tri, clic pour la fiche 360°. Agrégation bornée par page (scalable).</p>
             <section id="admin-clients-kpis" class="admin-cards"><div class="ssub">Chargement…</div></section>
             <div id="admin-clients-charts" class="chart-row"></div>
-            <div class="users-controls">
-              <input id="admin-users-search" type="search" placeholder="Rechercher un email ou un ID…" autocomplete="off" value="${AdminPage.esc(this._users.search)}" />
-              <select id="admin-users-sort">
-                <option value="created_desc">Plus récents</option>
-                <option value="created_asc">Plus anciens</option>
-                <option value="active_desc">Dernière activité</option>
-                <option value="email_asc">Email A→Z</option>
-              </select>
-              <select id="admin-users-billing">
-                <option value="">Tous les abonnements</option>
-                <option value="trialing">En essai</option>
-                <option value="active">Actifs payants</option>
-                <option value="past_due">Échec paiement</option>
-                <option value="cancel_pending">Annulation prévue</option>
-                <option value="expired">Expirés</option>
-                <option value="free">Sans abonnement</option>
-              </select>
-              <select id="admin-users-tag"><option value="">Tous les segments</option></select>
-              <button id="admin-users-csv" title="Exporter la liste filtrée en CSV (max 10 000 lignes)">⬇ CSV</button>
+            <div class="qv-row" id="admin-users-qv" role="tablist" aria-label="Vues rapides">
+              ${[['', 'Tous'], ['active', 'Actifs payants'], ['trialing', 'Nouveaux essais'], ['past_due', 'Échec paiement'], ['cancel_pending', 'Annulation prévue'], ['expired', 'Expirés']]
+                .map(([val, lbl]) => `<button class="qv-chip" data-billing="${val}" role="tab">${lbl}</button>`).join('')}
+            </div>
+            <div class="filter-bar">
+              <div class="fb-h">🔎 Filtres & recherche</div>
+              <div class="users-controls">
+                <input id="admin-users-search" type="search" placeholder="Rechercher un email ou un ID…" autocomplete="off" value="${AdminPage.esc(this._users.search)}" />
+                <select id="admin-users-sort">
+                  <option value="created_desc">Plus récents</option>
+                  <option value="created_asc">Plus anciens</option>
+                  <option value="active_desc">Dernière activité</option>
+                  <option value="email_asc">Email A→Z</option>
+                </select>
+                <select id="admin-users-billing">
+                  <option value="">Tous les abonnements</option>
+                  <option value="trialing">En essai</option>
+                  <option value="active">Actifs payants</option>
+                  <option value="past_due">Échec paiement</option>
+                  <option value="cancel_pending">Annulation prévue</option>
+                  <option value="expired">Expirés</option>
+                  <option value="free">Sans abonnement</option>
+                </select>
+                <select id="admin-users-tag"><option value="">Tous les segments</option></select>
+                <button id="admin-users-csv" title="Exporter la liste filtrée en CSV (max 10 000 lignes)">⬇ Exporter CSV</button>
+              </div>
             </div>
             <div id="admin-users-bulk"></div>
             <div class="scroll"><div id="admin-users"></div></div>
@@ -1194,8 +1224,16 @@ class AdminPage {
         const billSel = document.getElementById('admin-users-billing');
         if (billSel) {
             billSel.value = this._users.billing || '';
-            billSel.addEventListener('change', () => { this._users.billing = billSel.value; this._users.page = 0; this._loadUsers(); });
+            billSel.addEventListener('change', () => { this._users.billing = billSel.value; this._users.page = 0; this._loadUsers(); this._syncQuickViews(); });
         }
+        // Quick-view chips: one click = a business filter (mirrors the billing dropdown).
+        document.querySelectorAll('#admin-users-qv .qv-chip').forEach(chip => chip.addEventListener('click', () => {
+            this._users.billing = chip.dataset.billing || '';
+            this._users.page = 0;
+            const bs = document.getElementById('admin-users-billing'); if (bs) bs.value = this._users.billing;
+            this._loadUsers(); this._syncQuickViews();
+        }));
+        this._syncQuickViews();
         const tagSel = document.getElementById('admin-users-tag');
         if (tagSel) {
             this._fillTagOptions(tagSel);
@@ -1240,6 +1278,18 @@ class AdminPage {
                     kc(n(ov.users_new_30d), 'Nouveaux 30 j', '', 'users_new_30d', '📅')
                 ].join('');
             } else if (kel) { kel.innerHTML = ''; }
+            // Header status line: total · actifs 7 j · essais · échec paiement (real overview data).
+            const tx = document.querySelector('#page-admin .crm-head-tx');
+            if (tx && ov) {
+                let meta = tx.querySelector('.crm-head-meta');
+                if (!meta) { meta = document.createElement('div'); meta.className = 'crm-head-meta'; tx.appendChild(meta); }
+                const pastDue = Number(ov.billing_past_due) || 0;
+                meta.innerHTML =
+                    `<span class="crm-hpill"><b>${n(ov.users_total)}</b> clients</span>` +
+                    `<span class="crm-hpill"><b>${n(ov.users_active_7d)}</b> actifs 7 j</span>` +
+                    `<span class="crm-hpill"><b>${n(ov.billing_trialing)}</b> en essai</span>` +
+                    `<span class="crm-hpill ${pastDue > 0 ? 'bad' : ''}"><b>${n(pastDue)}</b> échec(s) paiement</span>`;
+            }
             const ud = Array.isArray(a.users_daily) ? a.users_daily : [];
             const ld = Array.isArray(a.logins_daily) ? a.logins_daily : [];
             // Primary line = real login events (connexions); dashed overlay = watch activity.
@@ -1314,6 +1364,13 @@ class AdminPage {
         sel.innerHTML = '<option value="">Tous les segments</option>' +
             this._allTags.map(t => `<option value="${AdminPage.esc(t.id)}">${AdminPage.esc(t.label)}</option>`).join('');
         sel.value = cur;
+    }
+
+    // Highlight the quick-view chip matching the active billing filter.
+    _syncQuickViews() {
+        const cur = this._users.billing || '';
+        document.querySelectorAll('#admin-users-qv .qv-chip').forEach(c =>
+            c.classList.toggle('active', (c.dataset.billing || '') === cur));
     }
 
     _renderUsers(rows) {
@@ -1477,9 +1534,13 @@ class AdminPage {
         const pays = Array.isArray(b.payments) ? b.payments : [];
         const feedback = Array.isArray(b.cancel_feedback) ? b.cancel_feedback : [];
         const money = AdminPage.money, esc = AdminPage.esc;
+        // Résumé-client "Abonnement" chip (payment risk surfaces red).
+        const subMap = { active: ['Actif payant', 'ok'], trialing: ['En essai', 'ok'], past_due: ['Échec paiement', 'alert'], grace: ['Échec paiement', 'alert'], cancelled_at_period_end: ['Annulation prévue', 'warn'], expired: ['Expiré', 'alert'] };
+        const sm = p ? (subMap[p.status] || [esc(p.status || '—'), '']) : ['Gratuit', ''];
+        this._setFicheChip('fs-sub', '💳', sm[0], 'Abonnement', sm[1]);
         const dt = (d) => d ? new Date(d).toLocaleString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
 
-        const row = (label, val) => `<div style="display:flex;justify-content:space-between;gap:12px;padding:7px 0;border-bottom:1px solid var(--color-border,#20202a);font-size:13px"><span style="color:#9aa">${label}</span><span style="color:#fff;font-weight:600;text-align:right">${val}</span></div>`;
+        const row = (label, val) => `<div class="kv-row"><span class="kv-l">${label}</span><span class="kv-v">${val}</span></div>`;
         // Internal-account state + toggle: internal accounts (owner/family/tests) are EXCLUDED from
         // every finance metric and get permanent VIP access.
         const internalRow = row('Compte interne',
@@ -1592,6 +1653,8 @@ class AdminPage {
             const res = await this._rpc('admin_support_list', { p_user_id: userId, p_limit: 10, p_offset: 0 });
             if (this._crmUser !== userId) return; // navigated away mid-fetch
             const rows = (res && res.rows) || [];
+            const openCount = rows.filter(t => t.status !== 'closed').length;
+            this._setFicheChip('fs-tickets', '🎫', AdminPage.n(openCount), 'Tickets ouverts', openCount > 0 ? 'warn' : 'ok');
             if (!rows.length) { el.innerHTML = '<div class="ssub">Aucun ticket.</div>'; return; }
             const chip = (t) => t.status === 'closed' ? '<span class="badge gray">fermé</span>'
                 : (t.last_from === 'user' ? '<span class="badge red">à répondre</span>' : '<span class="badge green">répondu</span>');
@@ -1634,6 +1697,7 @@ class AdminPage {
         const notes = Array.isArray(c.notes) ? c.notes : [];
         const timeline = Array.isArray(c.timeline) ? c.timeline : [];
         const applied = new Set(tags.map(t => t.id));
+        this._setFicheChip('fs-tags', '🏷️', AdminPage.n(tags.length), 'Segments', tags.length ? 'ok' : '');
 
         const tagsEl = document.getElementById('fiche-tags');
         if (tagsEl) {
@@ -1652,7 +1716,7 @@ class AdminPage {
                     <div class="note-meta">${AdminPage.esc(n.author_email || 'admin')} · ${AdminPage.esc(AdminPage.timeAgo(n.created_at))}
                     <button class="crm-note-del" data-note-id="${AdminPage.esc(n.id)}" title="Supprimer">supprimer</button></div></div>`).join('')
                 : '<div class="ssub">Aucune note.</div>';
-            notesEl.innerHTML = `<div class="note-add"><textarea id="crm-note-input" rows="2" placeholder="Ajouter une note interne…"></textarea><button class="crm-note-add">Ajouter</button></div>${list}`;
+            notesEl.innerHTML = `<div class="note-add"><textarea id="crm-note-input" rows="2" placeholder="Ex : client VIP, problème de paiement, demande support en cours…"></textarea><button class="crm-note-add">Ajouter</button></div>${list}`;
         }
 
         const tlEl = document.getElementById('fiche-timeline');
@@ -1721,6 +1785,14 @@ class AdminPage {
         } catch (e) { this._toast('Erreur : ' + e.message, 'err'); }
     }
 
+    // Update one résumé-client chip once its async panel has loaded.
+    _setFicheChip(id, ic, val, l, cls) {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.className = 'cs-item ' + (cls || '');
+        el.innerHTML = `<div class="cs-ic">${ic}</div><div class="cs-tx"><div class="cs-v">${val}</div><div class="cs-l">${l}</div></div>`;
+    }
+
     _renderFiche(d) {
         const body = document.getElementById('fiche-body');
         if (!body) return;
@@ -1737,10 +1809,33 @@ class AdminPage {
         const initial = (email[0] || '?').toUpperCase();
         const uid = AdminPage.esc(u.user_id);
         const roleTarget = u.role === 'admin' ? 'user' : 'admin';
-        const actions = `<div class="act-row">
-            ${!u.email_confirmed ? `<button class="act-btn act-resend" data-user-id="${uid}">✉️ Renvoyer la confirmation</button>` : ''}
-            <button class="act-btn act-role" data-user-id="${uid}" data-role="${roleTarget}">🔑 Passer ${roleTarget}</button>
-            <button class="act-btn ${u.banned ? 'act-unsuspend' : 'act-danger'} act-suspend" data-user-id="${uid}" data-suspend="${u.banned ? 'false' : 'true'}">${u.banned ? '✅ Réactiver' : '⛔ Suspendre'}</button>
+        // Common (non-destructive) vs sensitive (role change / suspension) actions, visually isolated.
+        const commonActions = !u.email_confirmed
+            ? `<div class="act-row"><button class="act-btn act-resend" data-user-id="${uid}">✉️ Renvoyer la confirmation</button></div>`
+            : '<div class="ssub">Aucune action courante en attente.</div>';
+        const sensitiveActions = `<div class="act-zone">
+            <div class="act-zone-h">⚠️ Zone sensible</div>
+            <div class="act-row">
+              <button class="act-btn act-role" data-user-id="${uid}" data-role="${roleTarget}">🔑 Passer ${roleTarget}</button>
+              <button class="act-btn ${u.banned ? 'act-unsuspend' : 'act-danger'} act-suspend" data-user-id="${uid}" data-suspend="${u.banned ? 'false' : 'true'}">${u.banned ? '✅ Réactiver' : '⛔ Suspendre'}</button>
+            </div>
+        </div>`;
+
+        // ── Résumé client (executive read) — sync chips now, async chips (💳/🎫/🏷️) filled on load ──
+        const srcTotal = sources.length;
+        const srcBad = sources.filter(s => s.incomplete === true || s.sync_error || s.sync_status === 'sync_error').length;
+        const srcCls = srcBad > 0 ? 'alert' : (srcTotal ? 'ok' : '');
+        const actAgo = u.last_sign_in_at ? AdminPage.timeAgo(u.last_sign_in_at) : 'jamais';
+        const acctTxt = u.banned ? 'Suspendu' : (u.role === 'admin' ? 'Admin' : 'Actif');
+        const acctCls = u.banned ? 'alert' : 'ok';
+        const chip = (id, ic, val, l, cls) => `<div class="cs-item ${cls || ''}"${id ? ` id="${id}"` : ''}><div class="cs-ic">${ic}</div><div class="cs-tx"><div class="cs-v">${val}</div><div class="cs-l">${l}</div></div></div>`;
+        const summary = `<div class="cockpit-summary fiche-summary">
+            ${chip('fs-sub', '💳', '<span class="ssub">…</span>', 'Abonnement', '')}
+            ${chip('', '🕐', AdminPage.esc(actAgo), 'Dernière activité', u.last_sign_in_at ? '' : 'warn')}
+            ${chip('', '📡', AdminPage.n(srcTotal) + (srcBad ? ` <span class="pacct">· ${AdminPage.n(srcBad)} ⚠</span>` : ''), 'Sources', srcCls)}
+            ${chip('fs-tickets', '🎫', '<span class="ssub">…</span>', 'Tickets ouverts', '')}
+            ${chip('fs-tags', '🏷️', '<span class="ssub">…</span>', 'Segments', '')}
+            ${chip('', '👤', acctTxt, 'Compte', acctCls)}
         </div>`;
 
         let srcHtml;
@@ -1790,15 +1885,20 @@ class AdminPage {
                 <span>· dernière activité ${u.last_sign_in_at ? AdminPage.esc(AdminPage.timeAgo(u.last_sign_in_at)) : 'jamais'}</span>
                 ${u.auth_provider ? `<span>· via ${AdminPage.esc(u.auth_provider)}</span>` : ''}</div></div>
             </div>
-            <div class="fiche-grid">
-              <div class="admin-block"><h2>⚡ Actions</h2><div class="card">${actions}</div></div>
-              <div class="admin-block"><h2>💳 Abonnement & paiements</h2><div id="fiche-billing" class="card"><div class="ssub">Chargement…</div></div></div>
-              <div class="admin-block"><h2>🎫 Tickets support</h2><div id="fiche-tickets" class="card"><div class="ssub">Chargement…</div></div></div>
-              <div class="admin-block"><h2>📡 Sources (${sources.length})</h2><div class="scroll">${srcHtml}</div></div>
-              <div class="admin-block"><h2>⚙️ Enrichissement audio par panel</h2><div class="scroll">${enrHtml}</div></div>
-              <div class="admin-block"><h2>🏷️ Tags & segments</h2><div id="fiche-tags" class="card"><div class="ssub">Chargement…</div></div></div>
-              <div class="admin-block"><h2>📝 Notes internes</h2><div id="fiche-notes" class="card"><div class="ssub">Chargement…</div></div></div>
-              <div class="admin-block"><h2>🕑 Timeline d'activité</h2><div id="fiche-timeline" class="card"><div class="ssub">Chargement…</div></div></div>
+            ${summary}
+            <div class="fiche-cols">
+              <div class="fiche-col">
+                <div class="admin-block"><h2>💳 Abonnement & paiements</h2><div id="fiche-billing" class="card"><div class="ssub">Chargement…</div></div></div>
+                <div class="admin-block"><h2>🎫 Tickets support</h2><div id="fiche-tickets" class="card"><div class="ssub">Chargement…</div></div></div>
+                <div class="admin-block"><h2>🏷️ Tags & segments</h2><div id="fiche-tags" class="card"><div class="ssub">Chargement…</div></div></div>
+                <div class="admin-block"><h2>📝 Notes internes</h2><div id="fiche-notes" class="card"><div class="ssub">Chargement…</div></div></div>
+              </div>
+              <div class="fiche-col">
+                <div class="admin-block"><h2>📡 Sources (${sources.length})</h2><div class="scroll">${srcHtml}</div></div>
+                <div class="admin-block"><h2>⚙️ Enrichissement audio par panel</h2><div class="scroll">${enrHtml}</div></div>
+                <div class="admin-block"><h2>🕑 Timeline d'activité</h2><div id="fiche-timeline" class="card"><div class="ssub">Chargement…</div></div></div>
+                <div class="admin-block"><h2>⚡ Actions</h2><div class="card"><div class="act-lbl">Actions courantes</div>${commonActions}${sensitiveActions}</div></div>
+              </div>
             </div>`;
     }
 
