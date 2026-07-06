@@ -223,22 +223,59 @@
         }
       }
 
-      // Cancel flow: reason → contextual counter-offer (50% off next payment / support)
-      // → confirm. Cancelling stays honest and short: a "cancel now" path is reachable
-      // from every step, and the offer is one-shot per customer (server-guarded).
-      function openCancelFlow(decision) {
-        const trialing = String(decision.status || '') === 'trialing';
+      // Accessible modal scaffolding shared by the cancel flow and the past-due
+      // confirm: focus trap, restore focus on close, Escape / backdrop close (with
+      // the keydown listener always removed), and a re-focus after a step re-renders
+      // the body. Returns { back, modal, close, focusFirst }.
+      function buildModal() {
+        const prevFocus = document.activeElement;
         const back = el('div', 'modal-back');
         const modal = el('div', 'modal');
         modal.setAttribute('role', 'dialog');
         modal.setAttribute('aria-modal', 'true');
         back.appendChild(modal);
         document.body.appendChild(back);
-        function close() { back.remove(); }
-        back.addEventListener('click', function (e) { if (e.target === back) close(); });
-        document.addEventListener('keydown', function esc(e) {
-          if (e.key === 'Escape') { close(); document.removeEventListener('keydown', esc); }
+        function focusables() {
+          return Array.prototype.slice.call(
+            modal.querySelectorAll('button, a[href], input, select, textarea, [tabindex]')
+          ).filter(function (n) { return !n.disabled && n.offsetParent !== null; });
+        }
+        function focusFirst() { const f = focusables()[0]; if (f) f.focus(); }
+        let closed = false;
+        function close() {
+          if (closed) return; closed = true;
+          mo.disconnect();
+          document.removeEventListener('keydown', onKey, true);
+          back.remove();
+          try { if (prevFocus && prevFocus.focus) prevFocus.focus(); } catch (_) { /* noop */ }
+        }
+        function onKey(e) {
+          if (e.key === 'Escape') { e.preventDefault(); close(); return; }
+          if (e.key === 'Tab') {
+            const f = focusables(); if (!f.length) return;
+            const first = f[0], last = f[f.length - 1];
+            if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+            else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+          }
+        }
+        // A step replaces modal.innerHTML wholesale → focus falls to <body>; pull it
+        // back into the dialog so the trap and screen-reader context hold.
+        const mo = new MutationObserver(function () {
+          if (!modal.contains(document.activeElement)) focusFirst();
         });
+        back.addEventListener('click', function (e) { if (e.target === back) close(); });
+        document.addEventListener('keydown', onKey, true);
+        mo.observe(modal, { childList: true });
+        return { back: back, modal: modal, close: close, focusFirst: focusFirst };
+      }
+
+      // Cancel flow: reason → contextual counter-offer (50% off next payment / support)
+      // → confirm. Cancelling stays honest and short: a "cancel now" path is reachable
+      // from every step, and the offer is one-shot per customer (server-guarded).
+      function openCancelFlow(decision) {
+        const trialing = String(decision.status || '') === 'trialing';
+        const m = buildModal();
+        const back = m.back, modal = m.modal, close = m.close;
 
         let reason = 'skipped';
         const keepNote = trialing
@@ -287,6 +324,7 @@
           const skip = el('button', 'linkish', 'Skip and cancel now');
           skip.addEventListener('click', function () { reason = 'skipped'; stepConfirm(); });
           modal.appendChild(skip);
+          m.focusFirst();
         }
 
         async function stepNext() {
@@ -376,9 +414,24 @@
         b.addEventListener('click', function () {
           const st = String(decision.status || '');
           if (st === 'past_due' || st === 'grace') {
-            if (!window.confirm('Cancel your Norva plan now? Your access ends immediately and nothing further is charged.')) return;
-            b.disabled = true; b.textContent = 'Cancelling…';
-            doCancel('skipped');
+            // Past-due plans skip the counter-offer (a payment is owed) — a short,
+            // accessible confirm instead of a native window.confirm().
+            const cm = buildModal();
+            cm.modal.appendChild(el('h2', null, 'Cancel your plan now?'));
+            cm.modal.appendChild(el('p', null, 'Your access ends immediately and nothing further is charged.'));
+            const row = el('div', 'actions');
+            const cancelNow = el('button', 'btn danger', 'Cancel plan');
+            cancelNow.addEventListener('click', function () {
+              cancelNow.disabled = true; cancelNow.textContent = 'Cancelling…';
+              b.disabled = true; b.textContent = 'Cancelling…';
+              doCancel('skipped');
+            });
+            const keep = el('button', 'btn ghost', 'Keep my plan');
+            keep.addEventListener('click', cm.close);
+            row.appendChild(cancelNow);
+            row.appendChild(keep);
+            cm.modal.appendChild(row);
+            cm.focusFirst();
             return;
           }
           openCancelFlow(decision);

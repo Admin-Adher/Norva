@@ -154,8 +154,8 @@
       <span class="assurance-ico" aria-hidden="true">🔒</span>
       <div>
         <strong>No charge today — we only verify your card.</strong>
-        To open your free trial we place a temporary <b>€0.50</b> authorization to confirm the card is valid.
-        It is <b>released back to you right away and never debited.</b> Your first real payment happens only
+        To open your free trial we place a small temporary <b>$0.50</b> authorization to confirm the card is valid.
+        It may appear in your local currency, and is <b>released back to you right away and never debited.</b> Your first real payment happens only
         after the 7‑day trial ends — and only if you don't cancel before then.
         <b>We'll email you a reminder 2 days before your trial ends.</b>
       </div>
@@ -399,6 +399,20 @@
         } catch (_) { /* ignore */ }
       }
 
+      // "Restore purchases" only means something where restore() has a real path:
+      // native Play Billing or RevenueCat Web. On the Stancer web checkout it would
+      // hit an unconfigured RevenueCat path, so hide it there.
+      function maybeGateRestore() {
+        try {
+          const b = window.NorvaBilling;
+          const restoreWorks = b && (
+            (b.hasNativeBilling && b.hasNativeBilling()) ||
+            (b.isWebBillingConfigured && b.isWebBillingConfigured())
+          );
+          if (!restoreWorks && restoreBtn) restoreBtn.hidden = true;
+        } catch (_) { if (restoreBtn) restoreBtn.hidden = true; }
+      }
+
       // Landing deep-link: honor the plan/period the visitor picked on the
       // pricing section (?plan=family&period=annual) — intent is never lost.
       const wantedPeriod = params.get('period') === 'annual' ? 'annual' : 'monthly';
@@ -415,6 +429,7 @@
       loadTrialEligibility();
       checkExisting();
       maybeShowAssurance();
+      maybeGateRestore();
     })();
   </script>
 </body>
