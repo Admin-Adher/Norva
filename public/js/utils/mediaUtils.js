@@ -738,6 +738,22 @@ const MediaUtils = (() => {
         return Array.isArray(tracks) ? tracks : null;
     }
 
+    // Distinct ISO audio languages from the title's REAL ffprobe probe (audio_tracks[].lang) — the
+    // SAME per-stream signal the catalogue's audio filter matches on. Returns null when the title
+    // was never probed (no audio_tracks), [] when probed but empty — so "absent" is only ever
+    // claimed from a real probe, never from the inherited audio_languages aggregate (which
+    // over-claims languages the user's own file may not have).
+    function probedAudioLanguages(item = {}) {
+        const raw = item.audio_tracks || item.audioTracks;
+        if (!Array.isArray(raw)) return null;
+        const langs = [];
+        for (const track of raw) {
+            const lang = String((track && (track.lang || track.language)) || '').toLowerCase().trim();
+            if (/^[a-z]{2,3}$/.test(lang)) langs.push(lang);
+        }
+        return langs;
+    }
+
     function evaluateRequestedLanguage(item, requested, kind = 'audio') {
         const language = normalizeLanguagePreference(requested, kind);
         if (!language) return { requested: '', state: 'unknown', confidence: 'none', source: 'none', tag: null };
@@ -745,14 +761,15 @@ const MediaUtils = (() => {
             return { requested: 'none', state: 'confirmed', confidence: 'confirmed', source: 'user', tag: null };
         }
 
-        const structuredKeys = kind === 'audio'
-            ? ['audioLanguages', 'audio_languages', 'audioLangs', 'audio_langs', 'spokenLanguages', 'spoken_languages']
-            : ['subtitleLanguages', 'subtitle_languages', 'subtitlesLanguages', 'subtitles_languages'];
-        const structured = collectStructuredLanguages(item, structuredKeys);
-        if (structured.length) {
-            return structured.includes(language)
-                ? { requested: language, state: 'confirmed', confidence: 'confirmed', source: 'provider', tag: null }
-                : { requested: language, state: 'confirmed_absent', confidence: 'absent', source: 'provider', tag: null };
+        // Real ffprobe probe wins (it mirrors the catalogue filter exactly): the title-level
+        // audio_tracks first, then the per-variant codec-profile tracks. Only these can CONFIRM.
+        if (kind === 'audio') {
+            const probe = probedAudioLanguages(item);
+            if (Array.isArray(probe)) {
+                return probe.includes(language)
+                    ? { requested: language, state: 'confirmed', confidence: 'confirmed', source: 'probe', tag: null }
+                    : { requested: language, state: 'confirmed_absent', confidence: 'absent', source: 'probe', tag: null };
+            }
         }
 
         const tracks = tracksFromCodecProfile(item, kind);
@@ -761,6 +778,24 @@ const MediaUtils = (() => {
             return trackLanguages.includes(language)
                 ? { requested: language, state: 'confirmed', confidence: 'confirmed', source: 'probe', tag: null }
                 : { requested: language, state: 'confirmed_absent', confidence: 'absent', source: 'probe', tag: null };
+        }
+
+        // Structured language lists. For AUDIO these are cloud_titles.audio_languages — inherited
+        // from the global catalog cache by TMDB id, so it over-claims and can only ever be a soft
+        // "likely" hint, NEVER a hard confirmation. (Subtitles keep confirm semantics — not inherited.)
+        const structuredKeys = kind === 'audio'
+            ? ['audioLanguages', 'audio_languages', 'audioLangs', 'audio_langs', 'spokenLanguages', 'spoken_languages']
+            : ['subtitleLanguages', 'subtitle_languages', 'subtitlesLanguages', 'subtitles_languages'];
+        const structured = collectStructuredLanguages(item, structuredKeys);
+        if (structured.length) {
+            if (kind === 'audio') {
+                return structured.includes(language)
+                    ? { requested: language, state: 'unknown', confidence: 'probable', source: 'provider_aggregate', tag: null }
+                    : { requested: language, state: 'unknown', confidence: 'unknown', source: 'provider_aggregate', tag: null };
+            }
+            return structured.includes(language)
+                ? { requested: language, state: 'confirmed', confidence: 'confirmed', source: 'provider', tag: null }
+                : { requested: language, state: 'confirmed_absent', confidence: 'absent', source: 'provider', tag: null };
         }
 
         const signals = parseTitleLanguageSignals(item.name || item.title || item.raw_title || item.rawTitle || '');
