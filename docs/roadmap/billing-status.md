@@ -171,6 +171,36 @@ _Chiffrage détaillé (fichiers, effort, risques) à produire le jour du déclen
 ### Reste pour plus tard
 - Au moment de la bascule billing : pass de copy soft-wall sur le setup gate (« browse libre / essai pour regarder ») + test e2e du compteur/confirmation avec RevenueCat branché.
 
+### Phase 5 (UI billing — audit P1/P2/P3 tablette + Android TV) — 2026-07-06 — FAIT & DÉPLOYÉ (web)
+> 4 pages billing publiques (`subscribe.html`, `checkout.html`, `subscription.html`,
+> `paywall.html`). Tout vérifié en headless (Chromium — CSS calculée + vrais IIFE des
+> pages avec billing stubé + vrai encodeur QR) puis live-confirmé sur `norva.tv`.
+
+- **P1** — modale d'annulation accessible (focus-trap / restore focus / Escape / backdrop,
+  re-focus après re-render) **remplaçant `window.confirm()`** ; clarté devise ($ affiché
+  vs hold « $0.50 » qui « peut apparaître dans ta devise locale ») ; **« Restore purchases »
+  masqué** sur le rail Stancer web (restore n'a de sens que natif Play / RC Web).
+- **P2 mobile** — annulation en **bottom-sheet** sur téléphone (dock bas, coins arrondis,
+  barre d'actions sticky, `sheet-up`) ; **timeline de facturation** au checkout (Today $0.00
+  card check only / After 7-day trial <prix> / Cancel anytime — nothing charged) + **bouton
+  fallback** pleine page proéminent.
+- **P2 tablette** — checkout : breakpoint relevé 760→900px (formulaire carte pleine largeur
+  sur tablette portrait) + **logos Visa/Mastercard** honnêtes ; subscription : **carte statut
+  + rail d'actions côte à côte** à ≥760px (wrap 560→860px) ; subscribe : bandeau **« Why
+  Family? »** (2 vs 5 flux) + logos paiement (Stancer web only).
+- **P3 Android TV** — checkout : **iframe carte → QR « finir sur ton téléphone »** (réutilise
+  `js/vendor/qrcode.js`, SVG inline CSP-safe) + **polling `/confirm`** (l'essai démarre sur la
+  TV dès que le paiement téléphone aboutit) + échappatoire « payer sur cette TV » ; Play
+  Billing reste **prioritaire** (subscribe route déjà le natif vers Google) ; subscription :
+  **annulation simplifiée** (confirm unique, plus de radios multi-étapes / contre-offre au
+  D-pad — flux complet préservé sur web/mobile, past-due préservé) ; styles TV explicites
+  (paywall + checkout + modale) + détection TV ajoutée à checkout/paywall.
+- **Commits** (branche `main`) : `f0bb53f` (P2 mobile), `4608f46` (P2 tablette + P3 TV) ;
+  P1 + P2 checkout breakdown poussés plus tôt dans la même session.
+- ⏳ **Reste dépendant du matériel** (ne se confirme pas en headless) : scan-to-pay réel du QR
+  sur un téléphone → essai qui démarre sur la vraie Android TV ; Play Billing de bout en bout.
+  → à valider avec une **vraie Android TV + compte Stancer/Play réel** (cf. `play-console-setup.md`).
+
 ---
 
 ## 🎬 Plan d'activation (jour J — allumer le billing)
@@ -410,4 +440,5 @@ autres). La migration s'applique via `supabase-go db push` ou l'intégration.
 | Écran de gestion d'abo | `public/subscription.html` |
 | Bridge natif | `clients/android-{phone,tv}/app/src/main/java/tv/norva/*/NorvaBilling.java` |
 | Pricing landing | `public/landing.html` + `public/index.html` + `public/css/landing.css` |
-| Runbook complet | `docs/roadmap/billing-setup.md` |
+| Runbook complet (RevenueCat + produits) | `docs/roadmap/billing-setup.md` |
+| **Walkthrough Play Console (créer les apps + tout config)** | **`docs/roadmap/play-console-setup.md`** |
