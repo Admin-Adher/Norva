@@ -976,6 +976,7 @@ async function cronRefreshDue(db: SupabaseClient) {
     .select("id,user_id,source_type,auto_refresh_state,auto_refresh_next_at")
     .in("source_type", ["xtream", "m3u"])
     .is("deleted_at", null) // never auto-refresh a removed (soft-deleted) source (null next_at reads as "due")
+    .eq("enabled", true)    // a disabled source is paused — no auto-refresh
     .or(`auto_refresh_next_at.is.null,auto_refresh_next_at.lte.${nowIso}`)
     .order("auto_refresh_next_at", { ascending: true, nullsFirst: true })
     .limit(BATCH);
@@ -1073,6 +1074,7 @@ async function cronResumeStuck(db: SupabaseClient) {
     .in("sync_status", ["syncing", "error"])
     .eq("source_type", "xtream")
     .is("deleted_at", null) // never resurrect a source the user removed (soft-deleted, being reaped)
+    .eq("enabled", true)    // a disabled source is paused — don't resume it
     // Oldest-first so the highest-priority queued import (the one admitHeavyImport will
     // admit next) is among the ≤5 we re-kick — slots free up to the front of the queue.
     .order("created_at", { ascending: true })

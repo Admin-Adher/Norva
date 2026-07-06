@@ -384,6 +384,8 @@ async function route(
 
   if (scope === "sources") {
     if (req.method === "GET" && !id) return { body: await listSources(user.id, db) };
+    if (req.method === "GET" && id === "status" && !action) return { body: await listSourceStatuses(user.id, db) };
+    if (req.method === "POST" && id === "estimate" && !action) return { body: await estimateSourceByUrl(req) };
     if (req.method === "POST" && !id) {
       await requirePlanCapacity(user.id, db, "sources", "cloud_sources", { notDeleted: true });
       return { status: 201, body: await createSource(req, user.id, db) };
@@ -400,6 +402,19 @@ async function route(
     if (req.method === "POST" && id && action === "sync") {
       await requireCloudAccess(user.id, db, "source_sync");
       return { body: await syncExistingSource(id, user.id, db) };
+    }
+    if (req.method === "POST" && id && action === "hard-sync") {
+      await requireCloudAccess(user.id, db, "source_sync");
+      return { body: await hardSyncSource(id, user.id, db) };
+    }
+    if (req.method === "POST" && id && action === "toggle") {
+      return { body: await toggleSourceEnabled(id, user.id, db) };
+    }
+    if (req.method === "POST" && id && action === "test") {
+      return { body: await testSourceConnection(id, user.id, db) };
+    }
+    if (req.method === "GET" && id && action === "estimate") {
+      return { body: await estimateSource(id, user.id, db) };
     }
     if (req.method === "POST" && id && action === "finalize") {
       await requireCloudAccess(user.id, db, "source_sync");
@@ -1022,6 +1037,96 @@ async function syncExistingSource(id: string, userId: string, db: SupabaseClient
   if (error) throwDb(error, "Unable to start source sync");
   waitUntil(syncCloudSource(id, userId, db));
   return { source: sanitizeSource(data), syncStarted: true };
+}
+
+// Disable/Enable a source. Disabled = paused: excluded from auto-refresh/resume and hidden from the
+// catalog UI (the client filters `sources.filter(s => s.enabled)`), but its data is kept.
+async function toggleSourceEnabled(id: string, userId: string, db: SupabaseClient) {
+  await assertOwnedSource(id, userId, db);
+  const { data: cur, error: readErr } = await db
+    .from("cloud_sources").select("enabled").eq("id", id).eq("user_id", userId).maybeSingle();
+  if (readErr) throwDb(readErr, "Unable to read source");
+  const next = !((cur as JsonRecord | null)?.enabled ?? true);
+  const { data, error } = await db
+    .from("cloud_sources").update({ enabled: next }).eq("id", id).eq("user_id", userId).select("*").single();
+  if (error) throwDb(error, "Unable to toggle source");
+  return { success: true, enabled: next, source: sanitizeSource(data) };
+}
+
+// Check a source's connection on demand (the "Check service" button). Reuses the same validation
+// the create/edit flow runs (gateway-first for Xtream, so it doesn't trip the provider's IP block).
+async function testSourceConnection(id: string, userId: string, db: SupabaseClient) {
+  await assertOwnedSource(id, userId, db);
+  const { data: src } = await db
+    .from("cloud_sources").select("source_type").eq("id", id).eq("user_id", userId).maybeSingle();
+  const type = stringOr((src as JsonRecord | null)?.source_type, "");
+  try {
+    const config = await loadSourceConfig(id, userId, db);
+    await validateCloudSource(type, config, await getRuntimeConfig(db));
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : "Connection failed" };
+  }
+}
+
+// Per-source sync status for the client's post-"Sync now" poll. Shape matches what refreshSource
+// looks for: an entry with { source_id, type: 'all', status } where status is success|error|syncing.
+async function listSourceStatuses(userId: string, db: SupabaseClient) {
+  const { data, error } = await db
+    .from("cloud_sources").select("id, sync_status, sync_error").eq("user_id", userId).is("deleted_at", null);
+  if (error) throwDb(error, "Unable to list source statuses");
+  return (data ?? []).map((s) => {
+    const raw = stringOr((s as JsonRecord).sync_status, "");
+    return {
+      source_id: String((s as JsonRecord).id),
+      type: "all",
+      status: raw === "ready" ? "success" : raw === "error" ? "error" : "syncing",
+      error: stringOrNull((s as JsonRecord).sync_error),
+    };
+  });
+}
+
+// Count the items a playlist would import — the M3U "large playlist" pre-sync warning.
+function estimatePlaylist(text: string) {
+  const count = Math.max(0, text.split("#EXTINF").length - 1);
+  return { count, needsWarning: count > 10000 };
+}
+
+async function estimateSource(id: string, userId: string, db: SupabaseClient) {
+  await assertOwnedSource(id, userId, db);
+  const config = await loadSourceConfig(id, userId, db);
+  const url = stringOr(config.playlistUrl, "");
+  if (!url) return { count: 0, needsWarning: false };
+  assertHttpUrl(url);
+  return estimatePlaylist(await fetchText(url, 15000, 20_000_000));
+}
+
+async function estimateSourceByUrl(req: Request) {
+  const body = await readJson(req);
+  const url = stringOr(body.url, "");
+  if (stringOr(body.type, "m3u") !== "m3u") return { count: 0, needsWarning: false };
+  if (!url) throw new HttpError(400, "A playlist URL is required");
+  assertHttpUrl(url);
+  return estimatePlaylist(await fetchText(url, 15000, 20_000_000));
+}
+
+// Rebuild the catalogue (the "Rebuild catalog" button): clear the incremental sync signature/cursors
+// so the next sync re-discovers the whole catalogue from the provider and re-upserts it, then start
+// it. We deliberately do NOT delete the existing rows inline — for a large panel that would exceed
+// the request timeout (the bug the Remove button had); the full re-sync overwrites items in place.
+async function hardSyncSource(id: string, userId: string, db: SupabaseClient) {
+  await assertOwnedSource(id, userId, db);
+  const { data: cur } = await db
+    .from("cloud_sources").select("config_hint").eq("id", id).eq("user_id", userId).maybeSingle();
+  const hint = recordOrEmpty((cur as JsonRecord | null)?.config_hint);
+  for (const k of ["contentSignature", "syncCursor", "finalizeCursor", "finalizeLease", "syncProgress"]) delete hint[k];
+  const { data, error } = await db
+    .from("cloud_sources")
+    .update({ sync_status: "syncing", sync_error: null, config_hint: compactRecord(hint) })
+    .eq("id", id).eq("user_id", userId).select("*").single();
+  if (error) throwDb(error, "Unable to start rebuild");
+  waitUntil(syncCloudSource(id, userId, db));
+  return { source: sanitizeSource(data), syncStarted: true, hard: true };
 }
 
 function sanitizeSource(source: JsonRecord) {
