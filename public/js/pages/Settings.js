@@ -1,5 +1,6 @@
 /**
  * Settings Page Controller
+ * (asset-rev: settings-def-2 — content-hash bump to bypass a poisoned edge cache)
  */
 
 // Native shell = Android phone/TV APK WebView. Mirrors the detection used in

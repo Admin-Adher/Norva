@@ -12754,3 +12754,5 @@ body.is-watching .norva-mini { display: none !important; }
   content: '✓'; margin-left: auto; color: #6287ff; font-weight: 800;
 }
 .region-picker-empty { padding: 14px 10px; text-align: center; color: var(--color-text-secondary); font-size: 0.9rem; }
+
+/* asset-rev: main-def-2 — content-hash bump to bypass a poisoned edge cache */
