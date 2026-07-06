@@ -554,6 +554,9 @@ class SettingsPage {
             [...preferredGenresSelect.options].forEach(option => {
                 option.selected = selectedGenres.includes(option.value);
             });
+            // Layer touch/TV-friendly chips over the (now hidden) native multi-select,
+            // which stays the model so the existing load + save paths are untouched.
+            this.renderGenreChips(preferredGenresSelect, document.getElementById('setting-genre-chips'));
         }
         if (qualitySelect) qualitySelect.value = s.preferredQuality || 'highest';
         if (tmdbKeyInput) tmdbKeyInput.value = s.tmdbApiKey || '';
@@ -1149,6 +1152,31 @@ class SettingsPage {
         this.modalHandlersSetup = true;
     }
 
+
+    /**
+     * Render selectable genre chips backed by the hidden native <select multiple>.
+     * The select stays the model (load + save read/write it); a chip click toggles
+     * the matching option and fires the select's existing change → save listener.
+     */
+    renderGenreChips(selectEl, host) {
+        if (!selectEl || !host) return;
+        host.innerHTML = [...selectEl.options].map(o =>
+            `<button type="button" class="genre-chip ${o.selected ? 'is-active' : ''}" data-value="${this.escapeAttr(o.value)}" aria-pressed="${o.selected ? 'true' : 'false'}">${this.escapeHtml(o.textContent)}</button>`
+        ).join('');
+        selectEl.classList.add('is-chip-backed');
+        if (host.dataset.wired) return;
+        host.dataset.wired = '1';
+        host.addEventListener('click', (e) => {
+            const chip = e.target.closest('.genre-chip');
+            if (!chip) return;
+            const opt = [...selectEl.options].find(o => o.value === chip.dataset.value);
+            if (!opt) return;
+            opt.selected = !opt.selected;
+            chip.classList.toggle('is-active', opt.selected);
+            chip.setAttribute('aria-pressed', opt.selected ? 'true' : 'false');
+            selectEl.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+    }
 
     async deleteUser(userId, username) {
         const ok = await NorvaModal.confirm(

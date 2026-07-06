@@ -199,6 +199,13 @@ class SourceManager {
             // remaining VOD long-tail is still materialising in the background. Surface it as
             // a quiet line here in Settings only — never as a blocking onboarding bar.
             const backgrounding = this.sourceSyncState(sourceView).backgrounding === true;
+            // One clear primary action (Repair when the service needs attention, else
+            // Sync); everything else lives in a labelled ⋯ menu instead of a row of
+            // tooltip-only icons that are illegible on touch and TV.
+            const needsRepair = !!health.needsAttention;
+            const primary = needsRepair
+                ? { action: 'edit', label: 'Repair', cls: 'btn-repair' }
+                : { action: 'refresh', label: 'Sync', cls: '' };
             return `
       <div class="source-item ${source.enabled ? '' : 'disabled'} ${health.needsAttention ? 'needs-attention' : ''}" data-id="${this.escapeHtml(source.id)}">
         <span class="source-icon">${icons[type]}</span>
@@ -213,31 +220,71 @@ class SourceManager {
         </div>
         <div class="source-actions">
           ${progressButton}
-          <button class="btn btn-sm btn-secondary" data-action="refresh" title="Sync TV service">${Icons.refresh}</button>
-          <button class="btn btn-sm btn-secondary btn-warning-outline" data-action="hard-refresh" title="Rebuild catalog from this service">${Icons.refresh}</button>
-          <button class="btn btn-sm btn-secondary" data-action="test" title="Check service">${Icons.link}</button>
-          <button class="btn btn-sm btn-secondary" data-action="toggle" title="${source.enabled ? 'Disable' : 'Enable'}">
-            ${source.enabled ? Icons.check : Icons.circle}
-          </button>
-          <button class="btn btn-sm btn-secondary ${health.needsAttention ? 'btn-repair' : ''}" data-action="edit" title="${health.needsAttention ? 'Repair service' : 'Edit service'}">${Icons.settings}</button>
-          <button class="btn btn-sm btn-danger" data-action="delete" title="Delete">${Icons.close}</button>
+          <button class="btn btn-sm btn-secondary source-primary-action ${primary.cls}" data-action="${primary.action}">${primary.label}</button>
+          <button class="btn btn-sm btn-secondary source-menu-btn" data-action="menu" aria-haspopup="true" aria-expanded="false" aria-label="More actions" title="More actions">⋯</button>
+          <div class="source-menu" role="menu" hidden>
+            <button class="source-menu-item" data-action="test" role="menuitem" type="button">Check service</button>
+            <button class="source-menu-item" data-action="refresh" role="menuitem" type="button">Sync now</button>
+            <button class="source-menu-item" data-action="hard-refresh" role="menuitem" type="button">Rebuild catalog</button>
+            <button class="source-menu-item" data-action="edit" role="menuitem" type="button">${needsRepair ? 'Repair login' : 'Edit login'}</button>
+            <button class="source-menu-item" data-action="toggle" role="menuitem" type="button">${source.enabled ? 'Disable service' : 'Enable service'}</button>
+            <button class="source-menu-item source-menu-danger" data-action="delete" role="menuitem" type="button">Remove</button>
+          </div>
         </div>
       </div>
     `;
         }).join('');
 
-        // Attach event listeners
+        // Delegated action handling — one listener per card copes with the primary
+        // button and the menu sharing data-action values (querySelector would only
+        // wire the first). Choosing a menu item runs the action and closes the menu.
         container.querySelectorAll('.source-item').forEach(item => {
             const id = item.dataset.id;
-
-            item.querySelector('[data-action="progress"]')?.addEventListener('click', () => this.showCatalogPreparationById(id, type));
-            item.querySelector('[data-action="refresh"]').addEventListener('click', () => this.refreshSource(id, type));
-            item.querySelector('[data-action="hard-refresh"]').addEventListener('click', () => this.refreshSource(id, type, { hard: true }));
-            item.querySelector('[data-action="test"]').addEventListener('click', () => this.testSource(id));
-            item.querySelector('[data-action="toggle"]').addEventListener('click', () => this.toggleSource(id));
-            item.querySelector('[data-action="edit"]').addEventListener('click', () => this.showEditModal(id, type));
-            item.querySelector('[data-action="delete"]').addEventListener('click', () => this.deleteSource(id));
+            item.addEventListener('click', (e) => {
+                const actionEl = e.target.closest('[data-action]');
+                if (!actionEl || !item.contains(actionEl)) return;
+                const action = actionEl.dataset.action;
+                if (action === 'menu') { this.toggleSourceMenu(item); return; }
+                this.closeAllSourceMenus();
+                switch (action) {
+                    case 'progress': this.showCatalogPreparationById(id, type); break;
+                    case 'refresh': this.refreshSource(id, type); break;
+                    case 'hard-refresh': this.refreshSource(id, type, { hard: true }); break;
+                    case 'test': this.testSource(id); break;
+                    case 'toggle': this.toggleSource(id); break;
+                    case 'edit': this.showEditModal(id, type); break;
+                    case 'delete': this.deleteSource(id); break;
+                }
+            });
         });
+    }
+
+    /** Open/close a source card's ⋯ menu (only one open at a time). */
+    toggleSourceMenu(item) {
+        const menu = item.querySelector('.source-menu');
+        if (!menu) return;
+        const willOpen = menu.hasAttribute('hidden');
+        this.closeAllSourceMenus();
+        if (!willOpen) return;
+        menu.removeAttribute('hidden');
+        item.querySelector('.source-menu-btn')?.setAttribute('aria-expanded', 'true');
+        // Close on outside click / Escape. Deferred so the opening click doesn't
+        // immediately re-close it.
+        this._srcMenuOutside = (e) => { if (!item.contains(e.target)) this.closeAllSourceMenus(); };
+        this._srcMenuKey = (e) => { if (e.key === 'Escape' || e.key === 'GoBack') this.closeAllSourceMenus(); };
+        setTimeout(() => {
+            document.addEventListener('click', this._srcMenuOutside, true);
+            document.addEventListener('keydown', this._srcMenuKey, true);
+        }, 0);
+    }
+
+    closeAllSourceMenus() {
+        document.querySelectorAll('.source-menu:not([hidden])').forEach((m) => {
+            m.setAttribute('hidden', '');
+            m.closest('.source-item')?.querySelector('.source-menu-btn')?.setAttribute('aria-expanded', 'false');
+        });
+        if (this._srcMenuOutside) { document.removeEventListener('click', this._srcMenuOutside, true); this._srcMenuOutside = null; }
+        if (this._srcMenuKey) { document.removeEventListener('keydown', this._srcMenuKey, true); this._srcMenuKey = null; }
     }
 
     /**
@@ -1304,6 +1351,15 @@ class SourceManager {
         // Save Changes button
         document.getElementById('content-save')?.addEventListener('click', () => this.saveContentChanges());
 
+        // Warn before losing unsaved Manage Content edits by closing/refreshing the tab.
+        // (Switching source already auto-saves via flushThenReload; this covers full unload.)
+        if (!this._contentUnloadBound) {
+            this._contentUnloadBound = true;
+            window.addEventListener('beforeunload', (e) => {
+                if (this.hasUnsavedContentChanges()) { e.preventDefault(); e.returnValue = ''; }
+            });
+        }
+
         // Search input
         const searchInput = document.getElementById('content-search');
         const searchClear = searchInput?.parentElement?.querySelector('.search-clear');
@@ -1703,12 +1759,25 @@ class SourceManager {
     /**
      * Render the full tree based on current state
      */
+    /**
+     * Reflect whether Manage Content has edits not yet written to the server:
+     * a visible "Unsaved changes" pill + an emphasised Save button. hasUnsaved-
+     * ContentChanges() already diffs hiddenSet vs the last-saved originalHiddenSet.
+     */
+    updateContentDirtyState() {
+        const dirty = this.hasUnsavedContentChanges();
+        document.getElementById('content-unsaved')?.classList.toggle('hidden', !dirty);
+        const saveBtn = document.getElementById('content-save');
+        if (saveBtn && !saveBtn.disabled) saveBtn.classList.toggle('is-dirty', dirty);
+    }
+
     renderTree() {
         const groups = this.getFilteredGroups();
 
         if (!groups.length) {
             const msg = this.searchQuery ? 'No matches found' : 'No content found';
             this.contentTree.innerHTML = `<p class="hint">${msg}</p>`;
+            this.updateContentDirtyState();
             return;
         }
 
@@ -1727,6 +1796,7 @@ class SourceManager {
 
         // Attach event listeners
         this.attachTreeListeners(this.contentTree);
+        this.updateContentDirtyState();
     }
 
     /**
@@ -1998,6 +2068,7 @@ class SourceManager {
                 }
             }
         }
+        this.updateContentDirtyState();
     }
 
     /**
@@ -2045,6 +2116,7 @@ class SourceManager {
             const newEl = this.contentTree.querySelector(`.content-group[data-group-id="${CSS.escape(group.id)}"]`);
             if (newEl) this.attachTreeListeners(newEl);
         }
+        this.updateContentDirtyState();
     }
 
     /**
@@ -2091,8 +2163,8 @@ class SourceManager {
         }
 
         const saveBtn = document.getElementById('content-save');
-        const showAllBtn = document.querySelector('.content-actions button:first-child');
-        const hideAllBtn = document.querySelector('.content-actions button:nth-child(2)');
+        const showAllBtn = document.getElementById('content-show-all');
+        const hideAllBtn = document.getElementById('content-hide-all');
 
         // Disable buttons during operation
         if (showAllBtn) showAllBtn.disabled = true;
@@ -2287,6 +2359,7 @@ class SourceManager {
 
             // Update originalHiddenSet to reflect saved state
             this.originalHiddenSet = new Set(this.hiddenSet);
+            this.updateContentDirtyState();
 
             // Sync Channel List (don't block on this)
             try {

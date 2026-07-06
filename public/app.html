@@ -18,7 +18,7 @@
   <link rel="preconnect" href="https://oupsceccxsonaalhueff.supabase.co" crossorigin>
   <link rel="dns-prefetch" href="https://image.tmdb.org">
   <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
-  <link rel="stylesheet" href="/css/main.css?v=58">
+  <link rel="stylesheet" href="/css/main.css?v=59">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@800&display=swap"
@@ -1171,9 +1171,10 @@
               <div class="setting-item">
                 <div class="setting-info">
                   <span class="setting-label">Favourite genres</span>
-                  <span class="setting-hint">Norva highlights more of what you like on Home, Movies and Series. Hold
-                    Ctrl / Cmd to pick several.</span>
+                  <span class="setting-hint">Tap the genres you enjoy — Norva highlights more of them on Home, Movies and
+                    Series. Pick as many as you like.</span>
                 </div>
+                <div id="setting-genre-chips" class="genre-chips" role="group" aria-label="Favourite genres"></div>
                 <select id="setting-preferred-genres" class="source-select" multiple size="6" style="width: auto; min-width: 240px;">
                   <option value="action">Action</option>
                   <option value="adventure">Adventure</option>
@@ -1529,6 +1530,7 @@
                 <div class="content-actions">
                   <button class="btn btn-sm btn-secondary" id="content-show-all">Show all</button>
                   <button class="btn btn-sm btn-secondary" id="content-hide-all">Hide all</button>
+                  <span id="content-unsaved" class="content-unsaved hidden" role="status">● Unsaved changes</span>
                   <button class="btn btn-sm btn-primary" id="content-save"><svg xmlns="http://www.w3.org/2000/svg"
                       viewBox="0 0 24 24" fill="currentColor" class="icon">
                       <path
@@ -1974,7 +1976,7 @@
   <script defer src="/js/components/RegionPicker.js?v=1"></script>
   <script defer src="/js/components/VideoPlayer.js?v=40"></script>
   <script defer src="/js/components/ChannelList.js?v=38"></script>
-  <script defer src="/js/components/SourceManager.js?v=33"></script>
+  <script defer src="/js/components/SourceManager.js?v=34"></script>
   <script defer src="/js/components/EpgGuide.js?v=11"></script>
   <script defer src="/js/components/LiveGuideFusion.js?v=17"></script>
   <script defer src="/js/pages/HomePage.js?v=45"></script>
@@ -1982,7 +1984,7 @@
   <script defer src="/js/pages/Guide.js?v=2"></script>
   <script defer src="/js/pages/MoviesPage.js?v=43"></script>
   <script defer src="/js/pages/SeriesPage.js?v=44"></script>
-  <script defer src="/js/pages/Settings.js?v=37"></script>
+  <script defer src="/js/pages/Settings.js?v=38"></script>
   <script defer src="/js/pages/WatchPage.js?v=116"></script>
   <script defer src="/js/profiles.js?v=7"></script>
   <!-- AdminPage.js (76 KB, admin-only) is lazy-loaded by app.ensureAdminPage(). -->
