@@ -734,6 +734,30 @@ async function cronRevalidate(db: SupabaseClient, limit: number, reset: boolean,
           },
         }).eq("id", row.id);
         if (!upErr) revalidated += 1;
+        // Dual-write the validation into the GLOBAL catalog_titles cache so it is shared
+        // cross-user and durable against re-sync: cloud_enrich_titles_from_catalog then fans it
+        // out to every other user's copy of this title, and the projection reuses it on re-sync
+        // instead of reverting to the raw provider title. audio_languages is intentionally omitted
+        // so PostgREST preserves the crawled value (never clobber it — same rule as the projection).
+        try {
+          const nowIso = new Date().toISOString();
+          await db.from("catalog_titles").upsert({
+            item_type: itemType,
+            provider_tmdb_id: tmdbId,
+            title: validation.title,
+            original_title: stringOr(row.original_title, "") || null,
+            release_year: validation.year ? Number(validation.year) : (row.release_year ?? null),
+            poster_url: validation.posterUrl,
+            backdrop_url: validation.backdropUrl,
+            metadata: {
+              tmdb: validation.details,
+              i18n: validation.i18n,
+              tmdbValidation: { valid: true, title: validation.title, year: validation.year, confidence: validation.confidence, reason: validation.reason },
+            },
+            enriched_at: nowIso,
+            updated_at: nowIso,
+          }, { onConflict: "item_type,provider_tmdb_id" });
+        } catch (_) { /* global cache write is best-effort */ }
       } catch (_) { /* a TMDB hiccup must not abort the batch */ }
     }
   };
