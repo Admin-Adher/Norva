@@ -12,6 +12,9 @@ class LiveGuideFusion {
         this._pendingFamilySelection = null;
         this.searchQuery = '';            // inline channel filter (phone/tablet APK)
         this._searchTimer = null;
+        this.BASE_ROW_LIMIT = 150;        // rows rendered up-front; "Show more" grows it
+        this._rowLimit = this.BASE_ROW_LIMIT;
+        this._cinema = false;             // cinema mode: player enlarged, guide compacted
         this.shortEpgCache = new Map();
         this.shortEpgLoadedAt = new Map();
         this.shortEpgInflight = new Set();
@@ -28,6 +31,7 @@ class LiveGuideFusion {
             if (groupBtn) {
                 this.activeGroup = groupBtn.dataset.group || '';
                 localStorage.setItem('norva_live_guide_group', this.activeGroup);
+                this._rowLimit = this.BASE_ROW_LIMIT;   // new group starts at the base cap
                 this.render();
                 this.refreshBrokenChannelsInActiveGroup();
                 return;
@@ -42,6 +46,8 @@ class LiveGuideFusion {
             if (action === 'watch') { this.playCurrent(); return; }
             if (action === 'fullscreen') { this.app.player?.toggleFullscreen?.(); return; }
             if (action === 'favorite') { this.toggleSelectedFavorite(); return; }
+            if (action === 'cinema') { this.toggleCinema(); return; }
+            if (action === 'show-more') { this.showMoreRows(); return; }
 
             // The ▶ button plays immediately; tapping the row body only previews.
             const playBtn = event.target.closest('.live-guide-play');
@@ -54,13 +60,29 @@ class LiveGuideFusion {
             if (row) this.previewFamilyRow(row);
         });
 
-        // Keyboard: Enter/Space on a row previews it (the ▶ button is a real
-        // <button> and handles its own activation).
+        // Keyboard/remote OK on a row:
+        //  • Android TV — OK plays immediately (the 10-foot intent is to watch; focus
+        //    already previews as you navigate, see focusin below).
+        //  • Web/desktop — Enter previews (matches a mouse tap; the ▶ button watches).
+        // The ▶ button is a real <button> and handles its own activation.
         this.container.addEventListener('keydown', (event) => {
             if (event.key !== 'Enter' && event.key !== ' ') return;
             if (event.target.closest('.live-guide-play, .live-guide-group, [data-action]')) return;
             const row = event.target.closest('.live-guide-row');
-            if (row) { event.preventDefault(); this.previewFamilyRow(row); }
+            if (row) {
+                event.preventDefault();
+                if (this._isTvMode()) this.playFamilyRow(row);
+                else this.previewFamilyRow(row);
+            }
+        });
+
+        // Android TV: moving D-pad focus across rows updates the preview panel (no
+        // stream) so the viewer sees what's on before pressing OK. Scoped to TV — on
+        // web, focusing a row via Tab should not hijack the preview.
+        this.container.addEventListener('focusin', (event) => {
+            if (!this._isTvMode()) return;
+            const row = event.target.closest('.live-guide-row');
+            if (row) this.previewFamilyRow(row);
         });
 
         // Inline channel filter (phone/tablet APK): filter rows as you type without
@@ -69,6 +91,7 @@ class LiveGuideFusion {
         this.container.addEventListener('input', (event) => {
             if (!event.target.classList.contains('live-guide-search')) return;
             this.searchQuery = event.target.value || '';
+            this._rowLimit = this.BASE_ROW_LIMIT;   // a new query starts at the base cap
             clearTimeout(this._searchTimer);
             this._searchTimer = setTimeout(() => this.refreshRows(), 100);
         });
@@ -90,6 +113,11 @@ class LiveGuideFusion {
             this.render();
         });
         window.addEventListener('playbackStatusChanged', (event) => this.refreshPlaybackStatus(event.detail));
+    }
+
+    _isTvMode() {
+        return document.documentElement.classList.contains('tv-mode')
+            || document.body.classList.contains('tv-mode');
     }
 
     shouldShowGroupRail() {
@@ -814,9 +842,41 @@ class LiveGuideFusion {
 
     clearSearch() {
         this.searchQuery = '';
+        this._rowLimit = this.BASE_ROW_LIMIT;
         clearTimeout(this._searchTimer);
         this.render();
         this.container?.querySelector('.live-guide-search')?.focus();
+    }
+
+    /** "Show more" — grow the render window by one chunk, keeping scroll position. */
+    showMoreRows() {
+        const rows = this.container?.querySelector('.live-guide-rows');
+        const prev = rows ? rows.scrollTop : 0;
+        this._rowLimit = (this._rowLimit || this.BASE_ROW_LIMIT) + this.BASE_ROW_LIMIT;
+        this.refreshRows();
+        const grown = this.container?.querySelector('.live-guide-rows');
+        if (grown) grown.scrollTop = prev;
+    }
+
+    /** Cinema mode — enlarge the player, compact the guide to a zapping strip. */
+    toggleCinema() {
+        this._cinema = !this._cinema;
+        this._applyCinema();
+    }
+
+    _applyCinema() {
+        const section = this.container?.closest('.player-section')
+            || document.querySelector('.player-section');
+        if (section) section.classList.toggle('guide-collapsed', !!this._cinema);
+        const btn = this.container?.querySelector('.live-guide-preview [data-action="cinema"]');
+        if (btn) {
+            btn.classList.toggle('is-active', !!this._cinema);
+            btn.setAttribute('aria-pressed', this._cinema ? 'true' : 'false');
+            btn.textContent = this._cinema ? 'Exit cinema' : 'Cinema';
+            btn.title = this._cinema
+                ? 'Restore the split view'
+                : 'Cinema mode — enlarge the player, compact the guide';
+        }
     }
 
     renderPreview(channel) {
@@ -869,6 +929,7 @@ class LiveGuideFusion {
                     <button type="button" class="lg-btn lg-btn-primary ${isPlaying ? 'is-playing' : ''}" data-action="watch">
                         ${isPlaying ? 'Playing' : 'Watch'}
                     </button>
+                    ${document.body.classList.contains('norva-phone-apk') ? '' : `<button type="button" class="lg-btn lg-btn-cinema ${this._cinema ? 'is-active' : ''}" data-action="cinema" aria-pressed="${this._cinema ? 'true' : 'false'}" title="${this._cinema ? 'Restore the split view' : 'Cinema mode — enlarge the player, compact the guide'}">${this._cinema ? 'Exit cinema' : 'Cinema'}</button>`}
                     ${document.body.classList.contains('norva-phone-apk') ? '' : `<button type="button" class="lg-btn" data-action="fullscreen" title="Fullscreen" aria-label="Fullscreen">Fullscreen</button>`}
                     <button type="button" class="lg-btn lg-btn-icon ${isFav ? 'is-fav' : ''}" data-action="favorite" title="Favorite" aria-label="Favorite">${isFav ? '♥' : '♡'}</button>
                 </div>
@@ -896,11 +957,15 @@ class LiveGuideFusion {
                 : 'No channels in this group';
             return `<div class="live-guide-rows"><div class="live-guide-empty">${msg}</div></div>`;
         }
-        const CAP = 150;
-        const shown = families.slice(0, CAP);
-        // When a group holds more than the render cap, say so instead of silently dropping rows.
-        const overflow = families.length > CAP
-            ? `<div class="live-guide-overflow">Showing ${CAP} of ${families.length} channels — search to narrow.</div>`
+        // Render up to _rowLimit rows and let the viewer pull in the rest in chunks.
+        // Keeps the DOM bounded on huge lineups (thousands of channels) without ever
+        // silently hiding channels the way the old hard 150 cap did.
+        const limit = this._rowLimit || this.BASE_ROW_LIMIT;
+        const shown = families.slice(0, limit);
+        const remaining = families.length - shown.length;
+        const nextChunk = Math.min(this.BASE_ROW_LIMIT, remaining);
+        const overflow = remaining > 0
+            ? `<button type="button" class="live-guide-more" data-action="show-more">Show ${nextChunk} more <span>· ${remaining} of ${families.length} left</span></button>`
             : '';
         return `
             <div class="live-guide-rows">
@@ -1034,6 +1099,7 @@ class LiveGuideFusion {
             }, { passive: true });
         }
         this.syncNavigationState();
+        this._applyCinema();   // keep the player/guide split in sync with cinema state
     }
 }
 

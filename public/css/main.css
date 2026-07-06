@@ -1415,6 +1415,100 @@ h4 {
   }
 }
 
+/* "Show more" — progressive reveal of a large lineup (replaces the old hard 150 cap).
+   Full-width tap target at the bottom of the rows; grows the render window by a chunk. */
+.live-guide-more {
+  display: block;
+  width: 100%;
+  padding: 13px 14px;
+  border: 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(91, 116, 255, 0.10);
+  color: #cdd8ff;
+  font-size: 0.84rem;
+  font-weight: 700;
+  cursor: pointer;
+  text-align: center;
+  transition: background var(--transition-fast);
+}
+
+.live-guide-more:hover,
+.live-guide-more:focus-visible {
+  outline: none;
+  background: rgba(91, 116, 255, 0.2);
+}
+
+.live-guide-more span {
+  color: var(--color-text-muted);
+  font-weight: 600;
+}
+
+/* Cinema mode (≥769px) — the "Cinema" toggle enlarges the player and compacts the
+   guide to a zapping strip: groups hidden, up-next trimmed, preview kept so the
+   viewer can exit. Scoped above the phone breakpoint so portrait phones keep their
+   dedicated stacked layout untouched. */
+@media (min-width: 769px) {
+  .player-section.guide-collapsed .video-container {
+    flex: 1 1 72%;
+  }
+
+  .player-section.guide-collapsed .live-guide-fusion {
+    flex: 0 0 28%;
+    min-height: 150px;
+    max-height: 34%;
+  }
+
+  .player-section.guide-collapsed .live-guide-shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .player-section.guide-collapsed .live-guide-groups {
+    display: none;
+  }
+
+  .player-section.guide-collapsed .live-guide-upnext {
+    display: none;
+  }
+}
+
+/* The cinema split only exists ≥769px, so hide its toggle on phones (where the
+   layout is stacked and the button would be a no-op). */
+@media (max-width: 768px) {
+  .live-guide-preview .lg-btn-cinema {
+    display: none;
+  }
+}
+
+/* Dedicated tablet range (768–1180px): denser than desktop, roomier touch targets
+   than a phone. Placed after the 1100/768 blocks so it wins inside its own range —
+   a trimmed group rail hands width back to the channel list, and taps get bigger. */
+@media (min-width: 769px) and (max-width: 1180px) {
+  .live-guide-shell {
+    grid-template-columns: 190px minmax(0, 1fr);
+  }
+
+  .live-guide-row {
+    min-height: 64px;
+  }
+
+  .live-guide-group {
+    min-height: 42px;
+  }
+
+  .lg-btn {
+    padding: 9px 16px;
+    font-size: 0.9rem;
+  }
+
+  .live-guide-preview-actions {
+    gap: 8px;
+  }
+
+  .live-guide-more {
+    padding: 15px 14px;
+  }
+}
+
 /* Live TV player controls overlay - iOS Safari safe positioning */
 #player-controls-overlay {
   position: absolute;
