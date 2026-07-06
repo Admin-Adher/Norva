@@ -731,6 +731,92 @@ main,
 }
 
 /* =====================================================================
+   Device clusters — idle float, pointer tilt (JS), cross-screen sync
+   handoff. The mockups are flat screenshots, so we animate the devices,
+   the light and the depth instead. Everything is gated on the section
+   being revealed (no off-screen playback); the pointer tilt is wired by
+   landing.js on desktop only. The travelling light + receiver bloom make
+   Norva's "same title, in sync across your screens" ambient and literal.
+   ===================================================================== */
+
+/* Idle float — the nearer device (phone / tablet) floats more, reading as
+   depth. Lives on the device children, so the cluster's pointer tilt (set on
+   the parent) composes with it instead of overwriting it. */
+@keyframes dev-float-back  { 0%, 100% { transform: translateY(0); }               50% { transform: translateY(-6px); } }
+@keyframes dev-float-front { 0%, 100% { transform: translateY(0) rotate(0deg); }  50% { transform: translateY(-12px) rotate(-0.6deg); } }
+
+.hero-visual.is-visible .dev-tv     { animation: dev-float-back 8s ease-in-out infinite; }
+.hero-visual.is-visible .dev-phone  { animation: dev-float-front 6.5s ease-in-out infinite, recv-glow-phone 5.5s ease-in-out infinite; }
+.sync-stage.is-visible .dev-laptop  { animation: dev-float-back 8.5s ease-in-out infinite; }
+.sync-stage.is-visible .dev-tablet  { animation: dev-float-front 7s ease-in-out infinite, recv-glow-tablet 6s ease-in-out infinite; }
+
+/* Receiver bloom — the screen edge lights up exactly as the sync packet lands
+   (glow keyframe shares its duration/phase with the packet below). */
+@keyframes recv-glow-phone {
+  0%, 34%, 56%, 100% { filter: drop-shadow(0 30px 50px rgba(0, 0, 0, 0.65)); }
+  44% { filter: drop-shadow(0 30px 50px rgba(0, 0, 0, 0.65)) drop-shadow(0 0 16px rgba(91, 155, 255, 0.9)); }
+}
+@keyframes recv-glow-tablet {
+  0%, 34%, 56%, 100% { filter: drop-shadow(0 26px 50px rgba(0, 0, 0, 0.5)); }
+  44% { filter: drop-shadow(0 26px 50px rgba(0, 0, 0, 0.5)) drop-shadow(0 0 16px rgba(124, 107, 255, 0.9)); }
+}
+
+/* Sync packet — a light that travels from one screen to the other and lands
+   just as the receiver blooms. Rides inside the tilt target, so it leans with
+   the scene. */
+.hero-stage::after,
+.sync-stage .stage-cluster::after {
+  content: "";
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(200, 222, 255, 0.95), rgba(91, 155, 255, 0.55) 45%, transparent 72%);
+  filter: blur(1.5px);
+  opacity: 0;
+  z-index: 5;
+  pointer-events: none;
+}
+.hero-visual.is-visible .hero-stage::after     { animation: sync-packet-hero 5.5s ease-in-out infinite; }
+.sync-stage.is-visible .stage-cluster::after   { animation: sync-packet-sync 6s ease-in-out infinite; }
+
+@keyframes sync-packet-hero {
+  0%   { left: 60%; top: 33%; opacity: 0; transform: translate(-50%, -50%) scale(0.5); }
+  10%  { opacity: 1; }
+  38%  { left: 18%; top: 66%; opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  46%  { left: 18%; top: 66%; opacity: 0; transform: translate(-50%, -50%) scale(1.7); }
+  100% { left: 18%; top: 66%; opacity: 0; transform: translate(-50%, -50%) scale(0.5); }
+}
+@keyframes sync-packet-sync {
+  0%   { left: 34%; top: 58%; opacity: 0; transform: translate(-50%, -50%) scale(0.5); }
+  10%  { opacity: 1; }
+  40%  { left: 66%; top: 34%; opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  48%  { left: 66%; top: 34%; opacity: 0; transform: translate(-50%, -50%) scale(1.7); }
+  100% { left: 66%; top: 34%; opacity: 0; transform: translate(-50%, -50%) scale(0.5); }
+}
+
+/* Tilt wrapper fills the stage, so the devices' %-based positions are unchanged. */
+.sync-stage .stage-cluster { position: absolute; inset: 0; }
+
+/* Constrained devices keep the cheap GPU float but drop the filter-heavy
+   receiver bloom and the travelling packet (and the pointer tilt never runs —
+   see landing.js). */
+html.norva-lite .hero-visual.is-visible .dev-phone  { animation: dev-float-front 6.5s ease-in-out infinite; }
+html.norva-lite .sync-stage.is-visible .dev-tablet  { animation: dev-float-front 7s ease-in-out infinite; }
+html.norva-lite .hero-stage::after,
+html.norva-lite .sync-stage .stage-cluster::after   { display: none; }
+
+/* Reduced motion: the devices sit perfectly still. */
+@media (prefers-reduced-motion: reduce) {
+  .hero-visual.is-visible .dev-tv,
+  .hero-visual.is-visible .dev-phone,
+  .sync-stage.is-visible .dev-laptop,
+  .sync-stage.is-visible .dev-tablet { animation: none; }
+  .hero-stage::after,
+  .sync-stage .stage-cluster::after { display: none; }
+}
+
+/* =====================================================================
    Glass card — shared surface
    ===================================================================== */
 

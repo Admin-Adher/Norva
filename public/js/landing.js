@@ -270,6 +270,57 @@
     flushTail(); // covers a page that already fits in the viewport (no scroll to come)
   }
 
+  // Pointer-reactive 3D tilt for the device clusters (desktop only). The whole
+  // cluster leans toward the cursor in perspective; the idle float lives on the
+  // device children, so the two transforms compose instead of fighting. The hero
+  // tilt target (.hero-stage) is a child of the reveal target (.hero-visual) and
+  // the sync tilt target (.stage-cluster) is a child of the reveal target
+  // (.sync-stage), so this never clobbers the reveal transform either. Skipped on
+  // touch, constrained (norva-lite) devices and reduced-motion.
+  function setupDeviceTilt() {
+    const html = document.documentElement;
+    if (html.classList.contains('norva-lite')) return;
+    if (!window.matchMedia('(pointer: fine)').matches) return;
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+
+    const targets = [
+      { el: document.querySelector('.hero-stage'), host: document.querySelector('.hero-visual'), max: 6 },
+      { el: document.querySelector('.sync-stage .stage-cluster'), host: document.querySelector('.sync-stage'), max: 7 }
+    ].filter(t => t.el && t.host);
+
+    targets.forEach(({ el, host, max }) => {
+      let rect = null;
+      let raf = 0;
+      let rx = 0;
+      let ry = 0;
+      const render = () => {
+        raf = 0;
+        el.style.transform = `perspective(1400px) rotateX(${rx}deg) rotateY(${ry}deg)`;
+      };
+      const onMove = event => {
+        if (!rect) rect = host.getBoundingClientRect();
+        const nx = (event.clientX - (rect.left + rect.width / 2)) / (rect.width / 2);
+        const ny = (event.clientY - (rect.top + rect.height / 2)) / (rect.height / 2);
+        ry = Math.max(-1, Math.min(1, nx)) * max;
+        rx = -Math.max(-1, Math.min(1, ny)) * max;
+        el.style.transition = 'transform 120ms linear';
+        if (!raf) raf = window.requestAnimationFrame(render);
+      };
+      const onLeave = () => {
+        rx = 0;
+        ry = 0;
+        rect = null;
+        el.style.transition = 'transform 600ms cubic-bezier(0.22, 1, 0.36, 1)';
+        if (!raf) raf = window.requestAnimationFrame(render);
+      };
+      host.addEventListener('mousemove', onMove);
+      host.addEventListener('mouseleave', onLeave);
+      // A scroll shifts the host, so the cached centre is stale — recompute next move.
+      window.addEventListener('scroll', () => { rect = null; }, { passive: true });
+    });
+  }
+
   setupBillingToggle();
   setupScrollReveal();
+  setupDeviceTilt();
 })();
