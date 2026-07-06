@@ -1373,9 +1373,11 @@ async function listGenreItems(req: Request, url: URL, userId: string) {
     // shown next to a language equals the number of results with zero false positives. Audio =
     // audio_tracks (NOT audio_languages, which is inherited from the global catalog cache by TMDB
     // id and over-claims languages the user's file doesn't have); subs = subtitle_tracks. Both are
-    // jsonb arrays of {lang,…} matched by @> containment.
-    if (audioIso) out = out.contains("audio_tracks", [{ lang: audioIso }]);
-    if (subIso) out = out.contains("subtitle_tracks", [{ lang: subIso }]);
+    // jsonb arrays of {lang,…} matched by @> containment. Pass the containment value as a JSON
+    // STRING (not a JS array) — postgrest-js serialises a JS array as a Postgres array literal
+    // ({...}) which is invalid JSON for a jsonb column; the string form yields cs.[{"lang":"xx"}].
+    if (audioIso) out = out.contains("audio_tracks", JSON.stringify([{ lang: audioIso }]));
+    if (subIso) out = out.contains("subtitle_tracks", JSON.stringify([{ lang: subIso }]));
     return out;
   };
 
