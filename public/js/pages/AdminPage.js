@@ -384,8 +384,16 @@ class AdminPage {
 #page-admin .svc-card{background:var(--adm-card2);border:1px solid var(--adm-line);border-left:3px solid var(--adm-green);border-radius:12px;padding:13px 15px;}
 #page-admin .svc-card.down{border-left-color:var(--adm-red);}
 #page-admin .svc-card.off{border-left-color:var(--adm-tx3);}
-#page-admin .svc-h{display:flex;align-items:center;justify-content:space-between;gap:8px;}
-#page-admin .svc-name{font-size:12.5px;font-weight:650;color:var(--adm-tx);}
+#page-admin .svc-h{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;}
+#page-admin .svc-name{font-size:12.5px;font-weight:650;color:var(--adm-tx);min-width:0;}
+#page-admin .svc-badge{display:inline-flex;align-items:center;gap:6px;white-space:nowrap;flex-shrink:0;font-size:11px;font-weight:700;letter-spacing:.2px;padding:3px 9px;border-radius:20px;line-height:1.4;}
+#page-admin .svc-badge .dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
+#page-admin .svc-badge.up{background:rgba(52,211,153,.14);color:#6ee7bf;}
+#page-admin .svc-badge.up .dot{background:#34d399;box-shadow:0 0 0 3px rgba(52,211,153,.16);}
+#page-admin .svc-badge.down{background:rgba(248,113,113,.16);color:#fca5a5;}
+#page-admin .svc-badge.down .dot{background:#f87171;box-shadow:0 0 0 3px rgba(248,113,113,.15);}
+#page-admin .svc-badge.off{background:rgba(255,255,255,.05);color:var(--adm-tx3);}
+#page-admin .svc-badge.off .dot{background:var(--adm-tx3);}
 #page-admin .svc-lat{font-size:20px;font-weight:750;color:var(--adm-tx);margin-top:8px;font-variant-numeric:tabular-nums;}
 #page-admin .svc-card.down .svc-lat{color:var(--adm-red);font-size:16px;}
 #page-admin .svc-err{font-size:11px;color:#fca5a5;margin-top:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
@@ -2712,14 +2720,16 @@ class AdminPage {
         if (!el) return;
         this._sysInfra = d;
         // Services as status cards (Edge / DB / Gateway / Relay) — the mockup's SERVICES panel, on real pings.
+        // Status pill: CSS dot + label in an inline-flex, nowrap chip — the dot always stays
+        // aligned with the text even when the service name wraps to two lines.
+        const statusPill = (cls, txt) => `<span class="svc-badge ${cls}"><span class="dot"></span>${txt}</span>`;
         const svc = (label, s) => {
             s = s || {};
-            if (s.configured === false) return `<div class="svc-card off"><div class="svc-h"><span class="svc-name">${AdminPage.esc(label)}</span><span class="badge gray">non configuré</span></div><div class="svc-lat">—</div></div>`;
+            if (s.configured === false) return `<div class="svc-card off"><div class="svc-h"><span class="svc-name">${AdminPage.esc(label)}</span>${statusPill('off', 'non configuré')}</div><div class="svc-lat">—</div></div>`;
             const up = s.ok === true;
-            const badge = up ? '<span class="badge green">🟢 sain</span>' : '<span class="badge red">🔴 down</span>';
             const err = !up && s.error ? `<div class="svc-err" title="${AdminPage.esc(String(s.error))}">${AdminPage.esc(String(s.error).slice(0, 60))}</div>` : '';
             const lat = up && s.ms != null ? AdminPage.n(s.ms) + ' ms' : (up ? 'sain' : 'down');
-            return `<div class="svc-card ${up ? '' : 'down'}"><div class="svc-h"><span class="svc-name">${AdminPage.esc(label)}</span>${badge}</div><div class="svc-lat">${lat}</div>${err}</div>`;
+            return `<div class="svc-card ${up ? '' : 'down'}"><div class="svc-h"><span class="svc-name">${AdminPage.esc(label)}</span>${statusPill(up ? 'up' : 'down', up ? 'sain' : 'down')}</div><div class="svc-lat">${lat}</div>${err}</div>`;
         };
         const list = [['Edge (API)', d.edge], ['Base de données', d.db], ['Gateway', d.gateway], ['Relay', d.relay]];
         el.innerHTML = `<div class="svc-cards">${list.map(([l, s]) => svc(l, s)).join('')}</div>`;
