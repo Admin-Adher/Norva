@@ -285,6 +285,30 @@ class AdminPage {
 #page-admin .alert-card.amber{background:linear-gradient(90deg,rgba(251,191,36,.13),rgba(251,191,36,.03));border-color:rgba(251,191,36,.30);border-left-color:#f59e0b;box-shadow:0 4px 16px rgba(245,158,11,.10);}
 #page-admin .alert-card.amber[data-route]:hover{background:linear-gradient(90deg,rgba(251,191,36,.19),rgba(251,191,36,.05));}
 #page-admin .alert-card .al-name{font-weight:600;color:var(--adm-tx);}
+/* Non-colour-only severity chip on alert cards */
+#page-admin .sev-chip{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;padding:2px 7px;border-radius:6px;flex-shrink:0;}
+#page-admin .sev-chip.red{background:rgba(248,113,113,.2);color:#fca5a5;box-shadow:inset 0 0 0 1px rgba(248,113,113,.35);}
+#page-admin .sev-chip.amber{background:rgba(251,191,36,.18);color:#fcd34d;box-shadow:inset 0 0 0 1px rgba(251,191,36,.3);}
+/* Cockpit executive-read summary band */
+#page-admin .cockpit-summary{display:flex;align-items:center;gap:6px;flex-wrap:wrap;background:linear-gradient(158deg,var(--adm-card1),var(--adm-card2));border:1px solid var(--adm-line);border-radius:16px;padding:13px 18px;margin-bottom:22px;box-shadow:0 2px 12px rgba(0,0,0,.24);}
+#page-admin .cockpit-summary.is-loading{min-height:64px;}
+#page-admin .cockpit-summary.ok{border-color:rgba(52,211,153,.24);}
+#page-admin .cockpit-summary.warn{border-color:rgba(251,191,36,.3);}
+#page-admin .cockpit-summary.alert{border-color:rgba(248,113,113,.34);}
+#page-admin .cs-item{display:flex;align-items:center;gap:11px;padding:3px 22px 3px 0;margin-right:2px;border-right:1px solid var(--adm-line);}
+#page-admin .cs-ic{width:38px;height:38px;border-radius:11px;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0;background:rgba(120,150,255,.1);border:1px solid rgba(120,150,255,.16);}
+#page-admin .cs-item.ok .cs-ic{background:rgba(52,211,153,.12);border-color:rgba(52,211,153,.2);}
+#page-admin .cs-item.warn .cs-ic{background:rgba(251,191,36,.12);border-color:rgba(251,191,36,.2);}
+#page-admin .cs-item.alert .cs-ic{background:rgba(248,113,113,.12);border-color:rgba(248,113,113,.2);}
+#page-admin .cs-v{font-size:19px;font-weight:750;color:var(--adm-tx);line-height:1.1;white-space:nowrap;}
+#page-admin .cs-item.ok .cs-v{color:var(--adm-green);}
+#page-admin .cs-item.warn .cs-v{color:var(--adm-amber);}
+#page-admin .cs-item.alert .cs-v{color:var(--adm-red);}
+#page-admin .cs-l{font-size:10.5px;color:var(--adm-tx2);margin-top:3px;text-transform:uppercase;letter-spacing:.4px;}
+#page-admin .cs-cta{margin-left:auto;background:linear-gradient(135deg,#5b7cfa,#7c6cf5);color:#fff;border:0;border-radius:10px;padding:9px 15px;font-weight:600;font-size:13px;cursor:pointer;box-shadow:0 5px 16px rgba(91,124,250,.3);transition:filter .12s;}
+#page-admin .cs-cta:hover{filter:brightness(1.07);}
+#page-admin .cs-ok{margin-left:auto;color:var(--adm-green);font-weight:600;font-size:13px;padding-right:4px;}
+@media(max-width:820px){#page-admin .cs-item{border-right:0;padding-right:10px;}#page-admin .cs-cta,#page-admin .cs-ok{margin-left:0;}}
 #page-admin .alert-card .al-owner{color:var(--color-text-secondary,#9aa);font-size:12px;}
 #page-admin .alert-card .al-err{color:#ff9b9b;font-size:11px;font-family:monospace;}
 #page-admin .act-row{display:flex;flex-wrap:wrap;gap:10px;}
@@ -602,6 +626,7 @@ class AdminPage {
         v.innerHTML = `<div class="crm-page">
             <h1 class="crm-h1">🎯 Cockpit</h1>
             <p class="crm-sub">Santé de l'écosystème Norva en un coup d'œil.</p>
+            <div id="cockpit-summary" class="cockpit-summary is-loading"></div>
             <section id="admin-overview" class="kpi-groups"><div class="ssub">Chargement…</div></section>
             <div class="admin-block"><h2>🚨 Alertes</h2><div id="admin-alerts"><div class="ssub">Chargement…</div></div></div>
         </div>`;
@@ -614,6 +639,7 @@ class AdminPage {
             if (this._nav !== nav) return; // navigated away while loading
             this._lastTs = o && o.refreshed_at ? o.refreshed_at : this._lastTs;
             this._setCrumb('Cockpit', this._lastTs);
+            this._renderCockpitSummary(o, Array.isArray(sources) ? sources : []);
             this._renderOverview(o, sparks && sparks.series);
             this._renderAlerts(Array.isArray(sources) ? sources : [], o);
         } catch (e) {
@@ -627,32 +653,71 @@ class AdminPage {
     // Alerts = source problems PLUS the system-level red signals the overview already surfaces
     // (failed payments, cron failures, failed AI subs) so the Cockpit's alert panel is coherent
     // with its own KPI colours.
+    // Executive-read band: one glance = global health + alert count + MRR + freshness + CTA.
+    _renderCockpitSummary(o, sources) {
+        const el = document.getElementById('cockpit-summary');
+        if (!el) return;
+        o = o || {};
+        const problems = (Array.isArray(sources) ? sources : []).filter(s => s.incomplete === true || s.sync_error || s.sync_status === 'sync_error');
+        const criticals = (Number(o.billing_past_due) > 0 ? 1 : 0) + problems.length; // actionable, high-severity
+        const warnings = (Number(o.cron_fails_24h) > 0 ? 1 : 0) + (Number(o.gensubs_failed) > 50 ? 1 : 0);
+        const total = criticals + warnings;
+        let statusTxt = 'Sain', statusCls = 'ok';
+        if (criticals > 0) { statusTxt = 'Dégradé'; statusCls = 'alert'; }
+        else if (warnings > 0) { statusTxt = 'Attention'; statusCls = 'warn'; }
+        const money = AdminPage.money, n = AdminPage.n;
+        const item = (ic, v, l, cls) => `<div class="cs-item ${cls || ''}"><div class="cs-ic">${ic}</div><div class="cs-tx"><div class="cs-v">${v}</div><div class="cs-l">${l}</div></div></div>`;
+        el.className = 'cockpit-summary ' + statusCls;
+        el.innerHTML =
+            item('🩺', statusTxt, 'État global', statusCls) +
+            item('🚨', n(total), total > 0 ? (criticals > 0 ? 'alerte(s) critique(s)' : 'à traiter') : 'aucune alerte', total > 0 ? (criticals > 0 ? 'alert' : 'warn') : 'ok') +
+            item('💶', money(o.billing_mrr_cents), 'MRR', Number(o.billing_mrr_cents) > 0 ? 'ok' : '') +
+            item('🕐', o.refreshed_at ? AdminPage.timeAgo(o.refreshed_at) : '—', 'Dernier refresh') +
+            (total > 0 ? `<button class="cs-cta" id="cs-cta">Traiter les alertes →</button>` : `<div class="cs-ok">✓ Tout est sain</div>`);
+        const cta = document.getElementById('cs-cta');
+        if (cta) cta.addEventListener('click', () => {
+            const al = document.getElementById('admin-alerts');
+            if (al) al.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        });
+    }
+
     _renderAlerts(sources, o) {
         const el = document.getElementById('admin-alerts');
         if (!el) return;
         o = o || {};
         const sysAlerts = [];
-        const push = (n, kind, label, route) => { if (Number(n) > 0) sysAlerts.push({ n: Number(n), kind, label, route }); };
-        push(o.billing_past_due, 'red', 'client(s) en échec de paiement', 'finance');
-        push(o.cron_fails_24h, 'red', 'échec(s) cron sur 24 h', 'systeme');
-        push(o.gensubs_failed, 'amber', 'sous-titre(s) IA en échec', 'systeme');
+        const push = (n, kind, label, route, sev) => { if (Number(n) > 0) sysAlerts.push({ n: Number(n), kind, label, route, sev }); };
+        push(o.billing_past_due, 'red', 'client(s) en échec de paiement', 'finance', 'Critique');
+        push(o.cron_fails_24h, 'red', 'échec(s) cron sur 24 h', 'systeme', 'À traiter');
+        push(o.gensubs_failed, 'amber', 'sous-titre(s) IA en échec', 'systeme', 'Mineur');
         const problems = sources.filter(s => s.incomplete === true || s.sync_error || s.sync_status === 'sync_error');
         if (!problems.length && !sysAlerts.length) { el.innerHTML = '<div class="card"><span class="badge green">✓</span> Aucune alerte — tout est sain.</div>'; return; }
-        const sysHtml = sysAlerts.map(a =>
+        // Non-colour-only severity: each card carries a text severity chip in addition to its colour.
+        const sevChip = (t, cls) => `<span class="sev-chip ${cls}">${t}</span>`;
+        const cards = [];
+        sysAlerts.forEach(a => cards.push(
             `<div class="alert-card ${a.kind === 'amber' ? 'amber' : ''}" data-route="${a.route}" role="button" tabindex="0" title="Ouvrir">
+                ${sevChip(a.sev, a.kind === 'amber' ? 'amber' : 'red')}
                 <span class="badge ${a.kind}">${AdminPage.n(a.n)}</span>
                 <span class="al-name">${AdminPage.esc(a.label)}</span>
-            </div>`).join('');
-        el.innerHTML = sysHtml + problems.map(s => {
+            </div>`));
+        problems.forEach(s => {
             const kind = s.incomplete === true ? 'sync incomplète' : (s.sync_status || 'erreur');
             const uidAttr = s.user_id ? ` data-user-id="${AdminPage.esc(s.user_id)}" role="button" tabindex="0" title="Ouvrir la fiche client"` : '';
-            return `<div class="alert-card"${uidAttr}>
+            cards.push(`<div class="alert-card"${uidAttr}>
+                ${sevChip('Critique', 'red')}
                 <span class="badge red">${AdminPage.esc(kind)}</span>
                 <span class="al-name">${AdminPage.esc(s.display_name)}</span>
                 <span class="al-owner">${AdminPage.esc(s.owner_email || '')}</span>
                 ${s.sync_error ? `<span class="al-err">${AdminPage.esc(String(s.sync_error).slice(0, 80))}</span>` : ''}
-            </div>`;
-        }).join('');
+            </div>`);
+        });
+        // Cap long lists so the block never becomes an endless red wall; "voir toutes" expands.
+        const CAP = 8;
+        el.innerHTML = cards.slice(0, CAP).join('') +
+            (cards.length > CAP ? `<button class="tag-add-chip" id="alerts-more" style="margin-top:10px">⌄ Voir toutes les alertes (${cards.length})</button>` : '');
+        const more = document.getElementById('alerts-more');
+        if (more) more.addEventListener('click', () => { el.innerHTML = cards.join(''); }); // clicks stay delegated on root
     }
 
     // ── Page: Finance (MRR / statuts / encaissé / funnel / churn / paiements) ──
@@ -2043,7 +2108,7 @@ class AdminPage {
                 card(money(o.billing_collected_30d_cents), 'Encaissé 30 j', '', 'collected_30d_cents', '💰')
             ]),
             group('👥 Clients & croissance', [
-                card(n(o.users_total), 'Users', o.users_active_7d ? 'ok' : '', 'users_total', '👥'),
+                card(n(o.users_total), 'Utilisateurs', o.users_active_7d ? 'ok' : '', 'users_total', '👥'),
                 // "Connectés" = last_sign_in_at (sessions persist — undercounts real activity);
                 // "Regardent" = distinct watch-history users, the truthful activity signal.
                 card(n(o.users_active_24h), 'Connectés 24 h', '', 'users_active_24h', '🕐'),
