@@ -110,6 +110,7 @@ class AdminPage {
 #page-admin .crm-sidebar{width:238px;flex-shrink:0;background:linear-gradient(180deg,#0e1220,#0a0d17);border-right:1px solid var(--adm-line);display:flex;flex-direction:column;overflow-y:auto;padding:18px 13px;}
 #page-admin .crm-brand{display:flex;align-items:center;gap:11px;padding:6px 8px 20px;font-weight:800;font-size:16px;color:var(--adm-tx);letter-spacing:.2px;}
 #page-admin .crm-brand .dot{width:27px;height:27px;border-radius:9px;background:linear-gradient(135deg,#5b7cfa,#a855f7);display:inline-block;box-shadow:0 5px 16px rgba(91,124,250,.42);}
+#page-admin .crm-brand .crm-logo{width:30px;height:30px;flex-shrink:0;filter:drop-shadow(0 2px 9px rgba(120,150,255,.4));}
 #page-admin .crm-nav-item{position:relative;display:flex;align-items:center;gap:12px;width:100%;background:none;border:0;color:var(--adm-tx2);padding:10px 12px;border-radius:10px;cursor:pointer;font-size:13.5px;font-weight:500;text-align:left;margin-bottom:3px;transition:background .15s,color .15s,box-shadow .15s;}
 #page-admin .crm-nav-item .ic{font-size:16px;width:20px;text-align:center;opacity:.9;}
 #page-admin .crm-nav-item:hover{background:rgba(255,255,255,.05);color:var(--adm-tx);}
@@ -345,7 +346,7 @@ class AdminPage {
 </style>
 <div class="crm-shell">
   <aside class="crm-sidebar">
-    <div class="crm-brand"><span class="dot"></span><span>Norva CRM</span></div>
+    <div class="crm-brand"><svg class="crm-logo" viewBox="0 0 48 48" width="30" height="30" fill="none" aria-hidden="true"><defs><linearGradient id="ncg" x1="7" y1="5" x2="41" y2="43" gradientUnits="userSpaceOnUse"><stop stop-color="#5b8cff"/><stop offset="1" stop-color="#a855f7"/></linearGradient></defs><rect x="1.6" y="1.6" width="44.8" height="44.8" rx="13" fill="#0b1022" stroke="url(#ncg)" stroke-width="1.7"/><circle cx="24" cy="25.5" r="11.5" fill="none" stroke="url(#ncg)" stroke-width="2.2" opacity=".8"/><circle cx="24" cy="21" r="4.4" fill="url(#ncg)"/><path d="M16 33.4c0-4.4 3.6-7.2 8-7.2s8 2.8 8 7.2z" fill="url(#ncg)"/><circle cx="24" cy="14" r="3.2" fill="#8fb0ff"/><circle cx="14" cy="31" r="3.2" fill="#6f8dff"/><circle cx="34" cy="31" r="3.2" fill="#c084fc"/></svg><span>Norva CRM</span></div>
     <nav id="crm-nav">${nav}</nav>
     <div class="crm-side-foot">Admin · accès restreint<br>rôle app_metadata.role</div>
   </aside>
@@ -1970,10 +1971,7 @@ class AdminPage {
         const el = document.getElementById('sys-health');
         if (!el) return;
         const n = AdminPage.n;
-        const fails = Number(o.cron_fails_24h) || 0, srcErr = Number(o.sources_error) || 0, subFail = Number(o.gensubs_failed) || 0;
-        let statusTxt = 'Sain', statusCls = 'ok';
-        if (srcErr > 0 || subFail > 0 || fails > 200) { statusTxt = 'Dégradé'; statusCls = 'alert'; }
-        else if (fails > 0) { statusTxt = 'Attention'; statusCls = ''; }
+        const srcErr = Number(o.sources_error) || 0, subFail = Number(o.gensubs_failed) || 0;
         const srcTot = Number(o.sources_total) || 0;
         const srcPct = srcTot > 0 ? Math.round(100 * (srcTot - srcErr) / srcTot) : 100;
         const sd = (act && Array.isArray(act.system_daily)) ? act.system_daily : [];
@@ -1982,7 +1980,16 @@ class AdminPage {
         const cronPct = runs > 0 ? Math.round(100 * (runs - tfail) / runs) : 100;
         const fresh = o.refreshed_at && (Date.now() - new Date(o.refreshed_at).getTime()) < 12 * 60000;
 
-        const statusCard = `<div class="kpi ${statusCls}"><div class="kpi-hd"><div class="v" style="font-size:22px">${statusTxt}</div><span class="kpi-ic">🛡️</span></div><div class="l">Statut global</div></div>`;
+        // Global status from ACTIONABLE signals only: a broken source or crons actively
+        // failing = degraded; slightly-failing crons or a big subtitle backlog = attention.
+        // (A handful of failed AI subtitles is normal — some videos can't be transcribed —
+        // so it never degrades the whole system.)
+        let statusTxt = 'Sain', statusCls = 'ok';
+        if (srcErr > 0 || cronPct < 80) { statusTxt = 'Dégradé'; statusCls = 'alert'; }
+        else if (cronPct < 96 || subFail > 50 || !fresh) { statusTxt = 'Attention'; statusCls = ''; }
+        const statusTip = `Sources en erreur : ${n(srcErr)} · Crons OK 24 h : ${cronPct} % · ST IA échoués : ${n(subFail)} · Snapshot ${fresh ? 'à jour' : 'ancien'}`;
+
+        const statusCard = `<div class="kpi ${statusCls}" title="${AdminPage.esc(statusTip)}"><div class="kpi-hd"><div class="v" style="font-size:22px">${statusTxt}</div><span class="kpi-ic">🛡️</span></div><div class="l">Statut global</div></div>`;
         const gauge = (pct, label, cls, icon) => `<div class="kpi ${cls}"><div class="kpi-hd"><div class="v">${pct} %</div><span class="kpi-ic">${icon}</span></div><div class="l">${label}</div><div class="kpi-bar"><i style="width:${Math.max(0, Math.min(100, pct))}%"></i></div></div>`;
         const card = (v, l, cls, icon) => `<div class="kpi ${cls || ''}"><div class="kpi-hd"><div class="v">${v}</div><span class="kpi-ic">${icon}</span></div><div class="l">${l}</div></div>`;
         el.innerHTML = [
