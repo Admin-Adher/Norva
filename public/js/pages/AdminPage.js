@@ -367,6 +367,22 @@ class AdminPage {
 #page-admin .sys-cols{display:grid;grid-template-columns:0.95fr 1.6fr;gap:16px;margin-bottom:18px;align-items:stretch;}
 #page-admin .sys-cols > *{margin-bottom:0;min-width:0;}
 @media(max-width:1000px){#page-admin .sys-cols{grid-template-columns:1fr;}}
+/* Système: services as status cards, audit day headers, collapsible go-live checklist */
+#page-admin .svc-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;}
+#page-admin .svc-card{background:var(--adm-card2);border:1px solid var(--adm-line);border-left:3px solid var(--adm-green);border-radius:12px;padding:13px 15px;}
+#page-admin .svc-card.down{border-left-color:var(--adm-red);}
+#page-admin .svc-card.off{border-left-color:var(--adm-tx3);}
+#page-admin .svc-h{display:flex;align-items:center;justify-content:space-between;gap:8px;}
+#page-admin .svc-name{font-size:12.5px;font-weight:650;color:var(--adm-tx);}
+#page-admin .svc-lat{font-size:20px;font-weight:750;color:var(--adm-tx);margin-top:8px;font-variant-numeric:tabular-nums;}
+#page-admin .svc-card.down .svc-lat{color:var(--adm-red);font-size:16px;}
+#page-admin .svc-err{font-size:11px;color:#fca5a5;margin-top:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+#page-admin .audit-day{font-size:11px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:var(--adm-tx3);margin:16px 0 6px;}
+#page-admin .audit-day:first-child{margin-top:2px;}
+#page-admin .sys-gl-details{margin-top:12px;}
+#page-admin .sys-gl-details summary{cursor:pointer;color:#a9bcff;font-size:12.5px;font-weight:600;list-style:none;}
+#page-admin .sys-gl-details summary::-webkit-details-marker{display:none;}
+#page-admin .sys-gl-details[open] summary{margin-bottom:9px;}
 #page-admin .users-controls{display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap;}
 #page-admin .users-controls input,#page-admin .users-controls select{background:var(--color-bg-secondary,#16161c);border:1px solid var(--color-border,#2a2a38);color:var(--color-text-primary,#fff);border-radius:8px;padding:8px 12px;font-size:13px;}
 #page-admin .users-controls input{min-width:240px;flex:1;max-width:380px;}
@@ -2546,14 +2562,33 @@ class AdminPage {
             <p class="crm-sub">Santé de l'écosystème & infra temps réel · services · activité · logs · flags.</p>
             <div class="kpi-gtitle">🩺 Santé système</div>
             <section id="sys-health" class="admin-cards"><div class="ssub">Chargement…</div></section>
+            <div id="sys-incidents"></div>
             <div class="sys-cols">
-                <div class="admin-block"><h2>🧩 Services temps réel <button id="sys-infra-refresh" class="mini-btn" aria-label="Re-pinger l'infra" title="Re-ping">↻</button></h2><div class="scroll"><div id="sys-infra"><div class="ssub">Ping…</div></div></div></div>
+                <div class="admin-block"><h2>🧩 Services temps réel <button id="sys-infra-refresh" class="mini-btn" aria-label="Re-pinger l'infra" title="Re-ping">↻</button></h2><div id="sys-infra"><div class="ssub">Ping…</div></div></div>
                 <div class="chart-panel"><h2>📊 Activité système — exécutions cron / jour</h2><p class="chsub">14 derniers jours · barres = exécutions, rouge = échecs</p><div id="sys-activity"><div class="ssub">Chargement…</div></div></div>
             </div>
-            <div class="admin-block"><h2>📜 Logs récents — journal d'audit</h2><div id="sys-audit"><div class="ssub">Chargement…</div></div></div>
-            <div class="admin-block"><h2>💳 État billing / go-live <button id="sys-billing-refresh" class="mini-btn" aria-label="Re-vérifier l'état billing" title="Re-check">↻</button></h2><div id="sys-billing" class="admin-cards"><div class="ssub">Vérification…</div></div><p class="ssub" style="margin-top:8px">Bascule prod = poser les secrets Supabase (clé <code>sprod_</code>, <code>NORVA_STANCER_MODE=live</code>, <code>NORVA_BILLING_MODE=revenuecat</code>, <code>NORVA_ENTITLEMENTS_MODE=enforce</code>). Ce panneau doit alors passer tout au vert.</p></div>
+            <div class="admin-block"><h2>📜 Logs récents — journal d'audit</h2>
+                <div class="qv-row" id="sys-audit-filters" role="tablist" aria-label="Filtres audit">
+                  ${[['', 'Tout'], ['admin', 'Admin'], ['sources', 'Sources'], ['billing', 'Billing'], ['support', 'Support']].map(([val, lbl]) => `<button class="qv-chip" data-filter="${val}" role="tab">${lbl}</button>`).join('')}
+                </div>
+                <input class="sup-search" id="sys-audit-search" type="search" placeholder="Rechercher : action, client, acteur…" autocomplete="off" aria-label="Rechercher dans l'audit" />
+                <div id="sys-audit"><div class="ssub">Chargement…</div></div>
+            </div>
+            <div class="admin-block"><h2>💳 État billing / go-live <button id="sys-billing-refresh" class="mini-btn" aria-label="Re-vérifier l'état billing" title="Re-check">↻</button></h2><div id="sys-billing" class="admin-cards"><div class="ssub">Vérification…</div></div>
+                <details class="sys-gl-details"><summary>📋 Voir la checklist go-live prod</summary><p class="ssub" style="margin:0">Bascule prod = poser les secrets Supabase (clé <code>sprod_</code>, <code>NORVA_STANCER_MODE=live</code>, <code>NORVA_BILLING_MODE=revenuecat</code>, <code>NORVA_ENTITLEMENTS_MODE=enforce</code>). Ce panneau doit alors passer tout au vert.</p></details>
+            </div>
             <div class="admin-block"><h2>🚩 Feature flags</h2><div id="sys-flags"><div class="ssub">Chargement…</div></div></div>
         </div>`;
+        // Audit filters (client-side over the loaded feed).
+        document.querySelectorAll('#sys-audit-filters .qv-chip').forEach(chip => chip.addEventListener('click', () => {
+            this._auditFilter = chip.dataset.filter || '';
+            document.querySelectorAll('#sys-audit-filters .qv-chip').forEach(c => c.classList.toggle('active', c === chip));
+            this._renderAudit((this._audit && this._audit.rows) || []);
+        }));
+        const asearch = document.getElementById('sys-audit-search');
+        if (asearch) asearch.addEventListener('input', () => { clearTimeout(this._auditSearchDeb); this._auditSearchDeb = setTimeout(() => { this._auditSearch = asearch.value.trim(); this._renderAudit((this._audit && this._audit.rows) || []); }, 200); });
+        const at = document.querySelector('#sys-audit-filters .qv-chip[data-filter="' + (this._auditFilter || '') + '"]');
+        if (at) at.classList.add('active');
         try {
             const [o, act] = await Promise.all([
                 this._rpc('admin_overview'),
@@ -2562,8 +2597,10 @@ class AdminPage {
             if (this._nav !== nav) return; // navigated away — don't overwrite the new page's crumb
             this._lastTs = o && o.refreshed_at ? o.refreshed_at : this._lastTs;
             this._setCrumb('Système', this._lastTs);
+            this._sysOv = o; this._sysAct = act;
             this._renderSysHealth(o, act);
             this._renderSysActivity(act);
+            this._renderSysIncidents();
         } catch (e) {
             if (this._nav !== nav) return;
             const el = document.getElementById('sys-health');
@@ -2573,6 +2610,34 @@ class AdminPage {
         this._loadAudit(true);
         this._loadInfra();
         this._loadFlags();
+    }
+
+    // Consolidated system incidents (service down / cron KO / source en erreur / snapshot ancien /
+    // billing en test) — rebuilt as each async source (overview, infra+billing) lands.
+    _renderSysIncidents() {
+        const el = document.getElementById('sys-incidents');
+        if (!el) return;
+        const n = AdminPage.n, o = this._sysOv || {}, d = this._sysInfra || null;
+        const inc = [];
+        const srcErr = Number(o.sources_error) || 0;
+        const sd = (this._sysAct && Array.isArray(this._sysAct.system_daily)) ? this._sysAct.system_daily : [];
+        const today = sd.length ? sd[sd.length - 1] : null;
+        const tfail = today ? Number(today.failed) || 0 : 0;
+        const fresh = o.refreshed_at && (Date.now() - new Date(o.refreshed_at).getTime()) < 12 * 60000;
+        if (srcErr > 0) inc.push({ p: 0, cls: '', t: `📡 ${n(srcErr)} source(s) en erreur`, d: 'sync amont en échec', route: 'providers' });
+        if (tfail > 0) inc.push({ p: 0, cls: '', t: `⏱ ${n(tfail)} cron(s) en échec aujourd'hui`, d: 'voir Moteur / activité', route: 'moteur' });
+        if (o.refreshed_at && !fresh) inc.push({ p: 1, cls: 'warn', t: '📸 Snapshot ancien', d: `dernier refresh ${AdminPage.timeAgo(o.refreshed_at)}` });
+        if (d) {
+            const svc = [['Edge (API)', d.edge], ['Base de données', d.db], ['Gateway', d.gateway], ['Relay', d.relay]];
+            svc.forEach(([label, s]) => { if (s && s.configured !== false && s.ok !== true) inc.push({ p: 0, cls: '', t: `🔴 Service down · ${label}`, d: String((s && s.error) || 'injoignable').slice(0, 80) }); });
+            const b = d.billing || {};
+            if (b.stancer_configured && b.stancer_mode !== 'live') inc.push({ p: 2, cls: 'gray', t: '🧪 Billing en mode TEST', d: 'go-live non basculé — normal avant lancement' });
+        }
+        if (!inc.length) { el.innerHTML = this._sysInfra ? '<div class="mot-inc-ok" style="margin:6px 0 22px">✓ Aucun incident système — services sains, crons OK.</div>' : ''; return; }
+        inc.sort((a, b) => a.p - b.p);
+        el.innerHTML = `<div class="kpi-gtitle" style="margin:6px 0 10px">🚨 Incidents système (${n(inc.length)})</div><div class="mot-inc" style="margin-bottom:22px">` +
+            inc.map((i, k) => `<div class="mot-inc-row ${i.cls}"${i.route ? ` role="button" tabindex="0" data-inc-route="${i.route}" style="cursor:pointer"` : ''}><span class="mi-t">${i.t}</span> <span class="mi-d">— ${AdminPage.esc(i.d)}</span></div>`).join('') + `</div>`;
+        el.querySelectorAll('[data-inc-route]').forEach(r => r.addEventListener('click', () => this._navigate(r.dataset.incRoute)));
     }
 
     // Système: real cron-activity bar chart (admin_activity_series.system_daily).
@@ -2632,18 +2697,25 @@ class AdminPage {
     _renderInfra(d) {
         const el = document.getElementById('sys-infra');
         if (!el) return;
-        // Services table (Service | Statut | Latence) — the mockup's SERVICES panel, on real pings.
-        const row = (label, s) => {
+        this._sysInfra = d;
+        // Services as status cards (Edge / DB / Gateway / Relay) — the mockup's SERVICES panel, on real pings.
+        const svc = (label, s) => {
             s = s || {};
-            if (s.configured === false) return `<tr><td>${AdminPage.esc(label)}</td><td><span class="badge gray">non configuré</span></td><td class="num">—</td></tr>`;
+            if (s.configured === false) return `<div class="svc-card off"><div class="svc-h"><span class="svc-name">${AdminPage.esc(label)}</span><span class="badge gray">non configuré</span></div><div class="svc-lat">—</div></div>`;
             const up = s.ok === true;
             const badge = up ? '<span class="badge green">🟢 sain</span>' : '<span class="badge red">🔴 down</span>';
-            const err = !up && s.error ? `<div class="al-err">${AdminPage.esc(String(s.error).slice(0, 80))}</div>` : '';
-            const status = up && s.status != null ? ` <span class="pacct">${AdminPage.esc(String(s.status))}</span>` : '';
-            return `<tr class="${up ? '' : 'bad'}"><td>${AdminPage.esc(label)}${err}</td><td>${badge}${status}</td><td class="num">${up && s.ms != null ? AdminPage.n(s.ms) + ' ms' : '—'}</td></tr>`;
+            const err = !up && s.error ? `<div class="svc-err" title="${AdminPage.esc(String(s.error))}">${AdminPage.esc(String(s.error).slice(0, 60))}</div>` : '';
+            const lat = up && s.ms != null ? AdminPage.n(s.ms) + ' ms' : (up ? 'sain' : 'down');
+            return `<div class="svc-card ${up ? '' : 'down'}"><div class="svc-h"><span class="svc-name">${AdminPage.esc(label)}</span>${badge}</div><div class="svc-lat">${lat}</div>${err}</div>`;
         };
-        el.innerHTML = `<table><thead><tr><th>Service</th><th>Statut</th><th class="num">Latence</th></tr></thead><tbody>${[row('Edge (API)', d.edge), row('Base de données', d.db), row('Gateway', d.gateway), row('Relay', d.relay)].join('')}</tbody></table>`;
+        const list = [['Edge (API)', d.edge], ['Base de données', d.db], ['Gateway', d.gateway], ['Relay', d.relay]];
+        el.innerHTML = `<div class="svc-cards">${list.map(([l, s]) => svc(l, s)).join('')}</div>`;
         this._renderBillingState(d.billing);
+        // Update the "services" header pill + rebuild the incidents zone with infra + billing signals.
+        const down = list.filter(([, s]) => s && s.configured !== false && s.ok !== true).length;
+        const pill = document.getElementById('sys-pill-svc');
+        if (pill) { pill.classList.toggle('bad', down > 0); pill.innerHTML = down > 0 ? `<b>${AdminPage.n(down)}</b> service(s) down` : 'services <b>OK</b>'; }
+        this._renderSysIncidents();
     }
 
     // Go-live cockpit: the billing gate flags (read from edge secrets server-side) + Stancer/Resend
@@ -2744,20 +2816,48 @@ class AdminPage {
             card(n(o.users_active_24h), 'Actifs 24 h', Number(o.users_active_24h) > 0 ? 'ok' : '', '👤'),
             card(AdminPage.esc(o.refreshed_at ? AdminPage.timeAgo(o.refreshed_at) : '—'), 'Dernier snapshot', fresh ? 'ok' : 'alert', '📸')
         ].join('');
+        // Header status pills (services filled once the infra ping lands).
+        const tx = document.querySelector('#page-admin .crm-head-tx');
+        if (tx) {
+            let meta = tx.querySelector('.crm-head-meta');
+            if (!meta) { meta = document.createElement('div'); meta.className = 'crm-head-meta'; tx.appendChild(meta); }
+            meta.innerHTML =
+                `<span class="crm-hpill ${statusCls === 'alert' ? 'bad' : ''}"><b>${statusTxt}</b></span>` +
+                `<span class="crm-hpill" id="sys-pill-svc">services <b>…</b></span>` +
+                `<span class="crm-hpill ${cronPct < 80 ? 'bad' : ''}"><b>${cronPct} %</b> crons OK</span>` +
+                `<span class="crm-hpill ${srcPct < 70 ? 'bad' : ''}"><b>${srcPct} %</b> sources</span>` +
+                `<span class="crm-hpill ${o.refreshed_at && !fresh ? 'bad' : ''}">snapshot ${o.refreshed_at ? AdminPage.esc(AdminPage.timeAgo(o.refreshed_at)) : '—'}</span>`;
+        }
     }
 
     _renderAudit(rows) {
         const el = document.getElementById('sys-audit');
         if (!el) return;
-        if (!rows.length) { el.innerHTML = '<div class="ssub">Aucune action enregistrée pour l\'instant.</div>'; return; }
-        const icon = (k) => ({ note_added: '📝', tag_added: '🏷️', tag_removed: '🏷️', admin_action: '⚡', resync: '↻', signup: '🎉', sync_started: '▶️', sync_done: '✅', sync_failed: '⚠️' }[k] || '•');
+        rows = Array.isArray(rows) ? rows : [];
+        const icon = (k) => ({ note_added: '📝', tag_added: '🏷️', tag_removed: '🏷️', admin_action: '⚡', resync: '↻', signup: '🎉', sync_started: '▶️', sync_done: '✅', sync_failed: '⚠️', billing: '💳', refund: '↩︎', trial_started: '🚀', cancelled: '🛑', saved: '💚' }[k] || '•');
+        const cat = (k) => ['sync_started', 'sync_done', 'sync_failed', 'resync', 'provider_added'].includes(k) ? 'sources'
+            : ['billing', 'refund', 'trial_started', 'cancelled', 'saved'].includes(k) ? 'billing'
+            : /ticket|support|reply/.test(String(k)) ? 'support' : 'admin';
         const more = (this._audit && !this._audit.done)
-            ? '<div style="margin-top:12px"><button id="sys-audit-more" class="tag-add-chip">⌄ Charger plus</button></div>' : '';
-        el.innerHTML = '<div class="tl">' + rows.map(e => `<div class="tl-item audit-row"${e.user_id ? ` data-user-id="${AdminPage.esc(e.user_id)}" role="button" tabindex="0"` : ''}>
+            ? '<div style="margin-top:14px"><button id="sys-audit-more" class="tag-add-chip">⌄ Charger 80 de plus</button></div>' : '';
+        // Filter by category + free-text search.
+        const f = this._auditFilter || '';
+        let view = f ? rows.filter(r => cat(r.kind) === f) : rows;
+        const q = (this._auditSearch || '').toLowerCase();
+        if (q) view = view.filter(r => [r.summary, r.client_email, r.actor].some(x => String(x || '').toLowerCase().includes(q)));
+        if (!view.length) { el.innerHTML = `<div class="ssub">${(f || q) ? 'Aucun événement pour ce filtre.' : 'Aucune action enregistrée pour l\'instant.'}</div>` + more; return; }
+        // Group by day.
+        const dayKey = (d) => d ? new Date(d).toLocaleDateString('fr-FR', { weekday: 'long', day: '2-digit', month: 'long' }) : '—';
+        const item = (e) => `<div class="tl-item audit-row"${e.user_id ? ` data-user-id="${AdminPage.esc(e.user_id)}" role="button" tabindex="0"` : ''}>
             <span class="tl-ic">${icon(e.kind)}</span>
             <span class="tl-sum">${AdminPage.esc(e.summary)}${e.client_email ? ` <span class="al-owner">· ${AdminPage.esc(e.client_email)}</span>` : ''}${e.actor ? ` <span class="ssub">par ${AdminPage.esc(e.actor)}</span>` : ''}</span>
             <span class="tl-at" title="${e.created_at ? AdminPage.esc(new Date(e.created_at).toLocaleString('fr-FR')) : ''}">${e.created_at ? AdminPage.esc(AdminPage.timeAgo(e.created_at)) : ''}</span>
-        </div>`).join('') + '</div>' + more;
+        </div>`;
+        let html = '', prevDay = null, buf = '';
+        const flush = () => { if (buf) html += `<div class="tl">${buf}</div>`; buf = ''; };
+        view.forEach(e => { const dk = dayKey(e.created_at); if (dk !== prevDay) { flush(); html += `<div class="audit-day">${AdminPage.esc(dk)}</div>`; prevDay = dk; } buf += item(e); });
+        flush();
+        el.innerHTML = html + more;
     }
 
     // ── shared renderers ──
