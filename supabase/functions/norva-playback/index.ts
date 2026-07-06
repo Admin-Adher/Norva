@@ -3279,6 +3279,13 @@ async function recordExhaustion(db: SupabaseClient, key: string, processed: numb
   } catch (_) { /* best-effort */ }
 }
 
+// A probe response status that reads as "the provider is refusing us" (auth / rate-limit / gateway
+// or upstream error) rather than "this one item is gone" (404/410). Only these advance the probe
+// circuit breaker, so a catalog full of dead items can't trip it, but a ban-in-progress does.
+function isBanishStatus(status: number): boolean {
+  return status === 401 || status === 403 || status === 408 || status === 429 || (status >= 500 && status <= 599);
+}
+
 // Service-gated maintenance backfill of cloud_titles.audio_languages via the
 // relay's get_vod_info (the only path that reaches the provider — Deno egress is
 // IP-blocked). Resolves the DEFAULT audio-track language per title: a VO file's
@@ -3751,6 +3758,25 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
   }
   await bumpEnrichmentHeartbeat(db, userId); // /pregen-gate defers gateway jobs while ticks run
 
+  // Circuit breaker (anti-ban): if this provider identity has been returning nothing but
+  // auth/rate/5xx rejections, its breaker is OPEN — skip the whole tick so we stop hammering a
+  // provider that's actively refusing us (persistent failed auth only deepens an IPTV ban). The
+  // `skipped` return stops the fallthrough chain (every dimension is the same identity) and does
+  // not mark the panel exhausted. Fail-open: a breaker read error must never halt probing.
+  let probeIdentityKey = "";
+  if (sourceId && mode === "probe") {
+    try {
+      probeIdentityKey = (await resolveSourceIdentity(sourceId, userId, db)).key || "";
+      if (probeIdentityKey) {
+        const { data: cbState } = await db.rpc("provider_probe_circuit_state", { p_identity_key: probeIdentityKey });
+        const cb = (Array.isArray(cbState) ? cbState[0] : cbState) as JsonRecord | null;
+        if (cb?.open === true) {
+          return { mode, updated: 0, processed: 0, skipped: "circuit_open", identityKey: probeIdentityKey, openUntil: cb.open_until ?? null };
+        }
+      }
+    } catch (_) { /* fail-open: never let the breaker read stop the crawl */ }
+  }
+
   // untaggedOnly = titles with NO version tag (e.g. plain French films). These carry no
   // language signal in the title, so they MUST be probed; ~60% expose a real default-track
   // language via the cheap get_vod_info (mode=vod). Excluded from the tag-targeted crons.
@@ -3814,6 +3840,10 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
   let updated = 0;
   const debug = stringOr(body.debug, "") === "1";
   const diag = { noVariant: 0, noTarget: 0, emptySeries: 0, relayNotOk: 0, relayEmpty: 0, noLang: 0, exception: 0, footprintCapped: 0 };
+  // Circuit-breaker tallies for this tick: cbOk = provider served us at least once; cbBanish =
+  // auth/rate/5xx rejections. Recorded once at the end of the tick (see below).
+  let cbOk = 0;
+  let cbBanish = 0;
   let sample: JsonRecord | null = null;
   const lastId = String(titles[titles.length - 1].id);
 
@@ -3895,11 +3925,13 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
           });
           if (!gw.ok) {
             diag.relayNotOk++;
+            if (isBanishStatus(gw.status)) cbBanish++;
             if (debug && !sample) sample = { stage: "gatewayProbeNotOk", status: gw.status, host: new URL(targetUrl).host };
             return;
           }
           info = await gw.json().catch(() => null);
-        } catch (_) { diag.relayNotOk++; return; }
+          cbOk++;
+        } catch (_) { diag.relayNotOk++; cbBanish++; return; }
         // Count the provider hit against the identity's hourly budget (observability + cap).
         try { await db.rpc("provider_footprint_record_hit", { p_identity_key: footprint.identityKey }); } catch (_) { /* best-effort */ }
       } else {
@@ -3911,10 +3943,12 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
         const res = await fetch(`${runtimeConfig.relayBaseUrl}/${endpoint}/${token}`, { headers: { accept: "application/json" } });
         if (!res.ok) {
           diag.relayNotOk++;
+          if (isBanishStatus(res.status)) cbBanish++;
           if (debug && !sample) sample = { stage: "relayNotOk", status: res.status, host: new URL(targetUrl).host, body: (await res.text().catch(() => "")).slice(0, 200) };
           return;
         }
         info = await res.json().catch(() => null);
+        cbOk++;
       }
       if (debug && !sample) {
         let relayHead: JsonRecord = {};
@@ -4010,7 +4044,16 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
     await Promise.all(titles.slice(i, i + effConcurrency).map((t) => processOne(t as JsonRecord)));
   }
 
-  return { processed: titles.length, updated, diag, ...(debug ? { sample } : {}), lastId, hasMore: titles.length === limit };
+  // Feed the circuit breaker ONE tick outcome (one write, no per-item row contention): a healthy
+  // response anywhere in the tick clears it; a tick that's nothing but auth/rate/5xx rejections
+  // advances it toward opening + back-off. Best-effort — never fail the crawl on a bookkeeping error.
+  if (probeIdentityKey && mode === "probe" && (cbOk > 0 || cbBanish > 0)) {
+    try {
+      await db.rpc("provider_probe_circuit_record_tick", { p_identity_key: probeIdentityKey, p_ok_count: cbOk, p_fail_count: cbBanish });
+    } catch (_) { /* best-effort */ }
+  }
+
+  return { processed: titles.length, updated, diag, ...(debug ? { sample } : {}), lastId, hasMore: titles.length === limit, ...(cbBanish || cbOk ? { probeHealth: { ok: cbOk, banish: cbBanish } } : {}) };
 }
 
 // Read-cutover trust artifact (docs/roadmap/global-title-cache-design.md): prove
