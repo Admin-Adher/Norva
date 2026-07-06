@@ -26,6 +26,7 @@ class MoviesPage {
         this.randomBtn = document.getElementById('movies-random');
         this.countEl = document.getElementById('movies-count');
         this.resetBtn = document.getElementById('movies-reset');
+        this.activeFiltersEl = document.getElementById('movies-active-filters');
         this.continueRow = document.getElementById('movies-continue');
         this.continueList = document.getElementById('movies-continue-list');
         this.pageEl = document.getElementById('page-movies');
@@ -207,6 +208,7 @@ class MoviesPage {
 
     onFiltersChanged() {
         this.persistFilters();
+        this.renderActiveFilterChips();
         // Cloud: picking a genre opens that genre's full grid — the same dense,
         // server-side view as a rail's "See all" — so the dropdown behaves like
         // Manage Content's genres.
@@ -514,6 +516,59 @@ class MoviesPage {
             this.searchInput?.value || this.showFavoritesOnly || this.hideBroken === false ||
             (this.categoryMulti?.getSelected().size > 0)
         );
+    }
+
+    // Active-filter chips: mirror what's currently narrowing the grid as removable
+    // pills below the filter bar. Each chip reads the real control value (labels come
+    // straight from the selected <option>), so nothing here can drift from the actual
+    // filters. Clearing a chip resets just that control and re-applies.
+    renderActiveFilterChips() {
+        const host = this.activeFiltersEl;
+        if (!host) return;
+        const optText = (sel) => (sel && sel.selectedIndex >= 0)
+            ? (sel.options[sel.selectedIndex]?.text || '').trim() : '';
+        const chips = [];
+
+        const q = this.searchInput?.value?.trim();
+        if (q) chips.push({ label: `Search: “${q}”`, clear: () => { if (this.searchInput) this.searchInput.value = ''; } });
+
+        const catCount = this.categoryMulti?.getSelected().size || 0;
+        if (catCount > 0) chips.push({ label: catCount === 1 ? '1 category' : `${catCount} categories`,
+            clear: () => this.categoryMulti?.setSelected([]) });
+
+        if (this.sortSelect?.value && this.sortSelect.value !== 'default')
+            chips.push({ label: optText(this.sortSelect), clear: () => { this.sortSelect.value = 'default'; } });
+        if (this.genreSelect?.value) chips.push({ label: optText(this.genreSelect), clear: () => { this.genreSelect.value = ''; } });
+        if (this.yearSelect?.value) chips.push({ label: optText(this.yearSelect), clear: () => { this.yearSelect.value = ''; } });
+        if (this.ratingSelect?.value) chips.push({ label: optText(this.ratingSelect), clear: () => { this.ratingSelect.value = ''; } });
+        if (this.watchedSelect?.value) chips.push({ label: optText(this.watchedSelect), clear: () => { this.watchedSelect.value = ''; } });
+        if (this.addedSelect?.value) chips.push({ label: optText(this.addedSelect), clear: () => { this.addedSelect.value = ''; } });
+        if (this.durationSelect?.value) chips.push({ label: optText(this.durationSelect), clear: () => { this.durationSelect.value = ''; } });
+        if (this.audioSelect?.value) chips.push({ label: `Audio: ${optText(this.audioSelect)}`, clear: () => { this.audioSelect.value = ''; } });
+        if (this.subtitleSelect?.value) chips.push({ label: `Subtitles: ${optText(this.subtitleSelect)}`, clear: () => { this.subtitleSelect.value = ''; } });
+        if (this.showFavoritesOnly) chips.push({ label: 'Favorites', clear: () => {
+            this.showFavoritesOnly = false;
+            document.getElementById('movies-favorites-btn')?.classList.remove('active');
+        } });
+        if (this.hideBroken === false) chips.push({ label: 'Showing unavailable', clear: () => {
+            this.hideBroken = true;
+            this.hideBrokenBtn?.classList.toggle('active', true);
+        } });
+
+        if (!chips.length) { host.classList.add('hidden'); host.innerHTML = ''; return; }
+
+        host.classList.remove('hidden');
+        host.innerHTML = chips.map((c, i) =>
+            `<button type="button" class="filter-chip" data-chip="${i}">${MediaUtils.escapeHtml(c.label)}<span class="filter-chip-x" aria-hidden="true">×</span></button>`
+        ).join('') + '<button type="button" class="filter-chip filter-chip-clear" data-chip="clear">Clear all</button>';
+
+        host.querySelectorAll('.filter-chip').forEach(btn => {
+            btn.addEventListener('click', () => {
+                if (btn.dataset.chip === 'clear') { this.resetFilters(); return; }
+                const chip = chips[parseInt(btn.dataset.chip, 10)];
+                if (chip) { chip.clear(); this.onFiltersChanged(); }
+            });
+        });
     }
 
     // === Page lifecycle ===
@@ -1135,6 +1190,7 @@ class MoviesPage {
             this.countEl.textContent = total;
         }
         this.resetBtn?.classList.toggle('hidden', !this.hasActiveFilters());
+        this.renderActiveFilterChips();
     }
 
     filterAndRender() {
@@ -1821,7 +1877,7 @@ class MoviesPage {
                     <span class="version-head">${dot}<span class="version-headline">${MediaUtils.escapeHtml(desc.headline)}</span>${badge}</span>
                     ${meta}
                     ${state.status === 'inprogress' ? '<span class="movie-version-progress">In progress</span>' : ''}
-                    ${state.status === 'watched' ? '<span class="movie-version-progress">Vu</span>' : ''}
+                    ${state.status === 'watched' ? '<span class="movie-version-progress">Watched</span>' : ''}
                 </button>`;
         }).join('');
 
@@ -1858,6 +1914,16 @@ class MoviesPage {
         this.container.classList.add('hidden');
         this.detailsPanel.classList.remove('hidden');
         this.detailsPanel.scrollTop = 0;
+
+        // Context-aware back label — return to the search results, the open genre,
+        // or the Movies home, whichever the fiche was opened from.
+        const backBtn = this.detailsPanel.querySelector('.movie-back-btn');
+        if (backBtn) {
+            const ctx = this.searchInput?.value?.trim()
+                ? 'Search results'
+                : (this.activeBucket && this.bucketLabel ? this.bucketLabel : 'Movies');
+            backBtn.textContent = `← ${ctx}`;
+        }
 
         const hero = document.getElementById('movie-detail-hero');
         const poster = this.getMoviePoster(displayMovie);

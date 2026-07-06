@@ -5734,6 +5734,26 @@ kbd {
   font-weight: 600;
 }
 
+.movies-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.movies-subtitle {
+  margin: 0;
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--color-text-muted);
+}
+
+@media (max-width: 640px) {
+  .movies-subtitle {
+    display: none;
+  }
+}
+
 .movies-controls {
   display: flex;
   gap: var(--space-md);
@@ -9717,6 +9737,60 @@ kbd {
   white-space: nowrap;
 }
 
+/* Active-filter chips — a removable summary of what's narrowing the grid, so the
+   dense filter bar stays scannable without hiding any control. */
+.active-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px var(--space-md) 4px;
+  background: var(--color-bg-secondary);
+}
+
+.active-filters.hidden {
+  display: none;
+}
+
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px 5px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(120, 140, 255, 0.35);
+  background: rgba(91, 116, 255, 0.14);
+  color: #dfe6ff;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  max-width: 100%;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+
+.filter-chip:hover,
+.filter-chip:focus-visible {
+  outline: none;
+  background: rgba(91, 116, 255, 0.26);
+}
+
+.filter-chip-x {
+  font-size: 1.05rem;
+  line-height: 1;
+  opacity: 0.7;
+}
+
+.filter-chip-clear {
+  border-color: rgba(255, 255, 255, 0.14);
+  background: transparent;
+  color: var(--color-text-muted);
+}
+
+.filter-chip-clear:hover {
+  color: var(--color-text-primary);
+  background: rgba(255, 255, 255, 0.06);
+}
+
 /* ============================================================
    Multi-select dropdown (categories)
    ============================================================ */
@@ -9840,6 +9914,16 @@ kbd {
 
 .version-language-badge.with-version-badge {
   bottom: 34px;
+}
+
+/* Mobile badge priority — a poster in a phone grid is small, so drop the two
+   lowest-priority badges (NEW, language) and keep what signals status:
+   playback issue, watched/progress, and the version count. */
+@media (max-width: 640px) {
+  .movie-card .new-badge,
+  .movie-card .version-language-badge {
+    display: none;
+  }
 }
 
 .watched-badge {
