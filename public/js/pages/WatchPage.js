@@ -4806,11 +4806,20 @@ class WatchPage {
             // before the engine has attached its MediaSource. Not a real failure.
             if (!err || !err.code || /Empty src/i.test(err.message || '')) return;
             this.reportEngineFailure({ stage: 'mediaerror', message: 'code=' + err.code + ' ' + (err.message || '') });
-            // A TS the engine demuxed but the browser can't DECODE (MPEG-2 video, or HEVC on a browser
-            // without HEVC) errors here, after a clean load. The gateway transcode is the known-good
-            // path for those, so fall back to it instead of a dead-end banner (worst case = today).
+            // The engine loaded cleanly but the browser can't DECODE/parse the codec (MPEG-2 in TS,
+            // or HEVC / 10-bit / E-AC3 in MKV/MP4 — CHUNK_DEMUXER_ERROR_APPEND_FAILED, code 4). The
+            // gateway transcode is the known-good path for these, so fall back to it instead of a
+            // dead-end banner + retry-in-place loop (worst case = today).
             let wasTs = false;
-            try { wasTs = Boolean(this.norvaEngine?.engineSnapshot?.()?.looksLikeMpegTs); } catch (_) {}
+            let providerErrorHead = false;
+            try {
+                const snap = this.norvaEngine?.engineSnapshot?.();
+                wasTs = Boolean(snap?.looksLikeMpegTs);
+                // A non-media head = provider error page (HTML/JSON), NOT a codec failure: transcoding
+                // would just refetch the same error, so don't. Anything else is real media the browser
+                // choked on. Missing head info defaults to false → prefer transcode over a dead loop.
+                providerErrorHead = Boolean(snap?.sourceHead && snap.sourceHead.notMedia);
+            } catch (_) {}
             // Capture where playback stopped BEFORE teardown, so a retry resumes there.
             const resumeAt = Math.max(0, Math.floor(Number(this.video?.currentTime) || Number(this.resumeTime) || 0));
             const engineUrl = this.baseStreamUrl || this.currentUrl;
@@ -4830,7 +4839,13 @@ class WatchPage {
                     .catch(() => { /* playWithEngine owns its own fallback chain */ });
                 return;
             }
-            if (wasTs) {
+            // Real media the browser can't decode/parse — MPEG-2 in TS, OR HEVC / 10-bit / E-AC3 in
+            // MKV/MP4. Previously only TS fell back here, so a non-TS codec failure looped on
+            // retry-in-place forever; fall back to the gateway transcode for ANY real-media codec
+            // failure. fallbackEngineToTranscode re-resolves in transcode mode (currentPlaybackMode
+            // leaves 'engine'), so a subsequent failure can't re-enter this branch — no loop.
+            // A provider error page (notMedia head) is skipped: refetching would hit the same error.
+            if (!providerErrorHead) {
                 this.fallbackEngineToTranscode(videoAttemptId)
                     .then((ok) => { if (!ok) this.handleEngineUnplayable(new Error('MEDIA_ERR_' + err.code)); })
                     .catch(() => this.handleEngineUnplayable(new Error('MEDIA_ERR_' + err.code)));
