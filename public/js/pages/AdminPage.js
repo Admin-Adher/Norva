@@ -299,6 +299,33 @@ class AdminPage {
 #page-admin .tk-tpl:hover{border-color:#5b7cfa;color:var(--adm-tx);}
 #page-admin .tk-ctx .kv-row{padding:6px 0;}
 #page-admin .tk-ctx h2{font-size:13px;}
+/* Sources triage console: toolbar + ops rows (status left · account/identity/error center · catalogue/sync/actions right) */
+#page-admin .src-toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:14px;}
+#page-admin .src-toolbar .sup-search{margin-bottom:0;flex:1;min-width:220px;}
+#page-admin .src-bulk{background:rgba(248,113,113,.1);border:1px solid rgba(248,113,113,.32);color:#fca5a5;border-radius:10px;padding:9px 13px;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap;}
+#page-admin .src-bulk:hover{background:rgba(248,113,113,.16);}
+#page-admin .src-bulk:disabled{opacity:.55;cursor:default;}
+#page-admin .src-rows{display:flex;flex-direction:column;gap:9px;}
+#page-admin .src-row{display:grid;grid-template-columns:158px 1fr auto;gap:14px;align-items:center;background:var(--adm-panel);border:1px solid var(--adm-line);border-left:3px solid transparent;border-radius:12px;padding:12px 15px;}
+#page-admin .src-row.err{border-left-color:var(--adm-red);}
+#page-admin .src-row.inc{border-left-color:var(--adm-amber);}
+#page-admin .src-row.unres{border-left-color:#8b7cff;}
+#page-admin .src-st{display:flex;flex-direction:column;gap:6px;align-items:flex-start;min-width:0;}
+#page-admin .src-prov{font-size:13.5px;font-weight:650;color:var(--adm-tx);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;}
+#page-admin .src-main{min-width:0;font-size:12.5px;color:var(--adm-tx2);}
+#page-admin .src-acct{color:#a9bcff;cursor:pointer;font-weight:600;}
+#page-admin .src-acct:hover{text-decoration:underline;}
+#page-admin .src-id{color:var(--adm-tx3);}
+#page-admin .src-err{color:#fca5a5;margin-top:4px;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:560px;}
+#page-admin .src-cat{font-size:11.5px;color:var(--adm-tx3);margin-top:4px;}
+#page-admin .src-meta{text-align:right;white-space:nowrap;display:flex;flex-direction:column;align-items:flex-end;gap:7px;}
+#page-admin .src-sync{font-size:11.5px;color:var(--adm-tx2);}
+#page-admin .src-acts{display:flex;gap:6px;}
+#page-admin .src-mini{background:var(--color-bg-secondary,#181820);color:#a9bcff;border:1px solid var(--adm-line);border-radius:6px;padding:2px 9px;cursor:pointer;font-size:12px;white-space:nowrap;}
+#page-admin .src-mini:hover{border-color:#5b7cfa;}
+#page-admin .src-row.ok .resync-btn{opacity:.5;}
+#page-admin .src-row.ok .resync-btn:hover{opacity:1;}
+@media(max-width:820px){#page-admin .src-row{grid-template-columns:1fr;}#page-admin .src-meta{text-align:left;align-items:flex-start;}}
 /* Identités: leading gradient icon on each identity card */
 #page-admin .id-ic{width:42px;height:42px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0;background:linear-gradient(135deg,rgba(91,124,250,.22),rgba(168,85,247,.18));border:1px solid rgba(120,150,255,.2);}
 /* Système: health gauge bar + Services ‖ Activité two-column */
@@ -2073,41 +2100,104 @@ class AdminPage {
 
     // ── Page: Providers ──
     async _pageProviders() {
-        this._setCrumb('Providers', this._lastTs);
+        this._setCrumb('Sources', this._lastTs);
         const v = this._view();
+        const filters = [['', 'Toutes'], ['problem', 'À traiter'], ['error', 'En erreur'], ['incomplete', 'Sync incomplète'], ['unresolved', 'Identité non résolue'], ['driver', 'Pilotes']];
         v.innerHTML = `<div class="crm-page">
-            <h1 class="crm-h1">📡 Providers / Sources</h1>
-            <p class="crm-sub">Panels pilotes + sources en problème (sync incomplète / erreur) — borné à l'échelle.</p>
-            <section id="prov-kpis" class="admin-cards"><div class="ssub">Chargement…</div></section>
-            <div class="admin-block"><h2>🗂️ Sources</h2><div class="scroll"><div id="admin-sources"><div class="ssub">Chargement…</div></div></div></div>
+            <h1 class="crm-h1">📡 Sources providers</h1>
+            <p class="crm-sub">Source = playlist/compte client · identité = panel amont résolu (<a href="#" id="prov-goto-id" style="color:#a9bcff">voir Identités →</a>). Triage des sources en problème + volumétrie catalogue.</p>
+            <section id="prov-kpis" class="kpi-groups"><div class="ssub">Chargement…</div></section>
+            <div class="qv-row" id="prov-filters" role="tablist" aria-label="Filtres sources">
+              ${filters.map(([val, lbl]) => `<button class="qv-chip" data-filter="${val}" role="tab">${lbl}</button>`).join('')}
+            </div>
+            <div class="src-toolbar">
+              <input class="sup-search" id="prov-search" type="search" placeholder="Rechercher : provider, compte, identité, erreur…" autocomplete="off" value="${AdminPage.esc(this._provSearch || '')}" aria-label="Rechercher une source" />
+              <button class="src-bulk" id="prov-bulk-resync" hidden>↻ Re-sync des erreurs</button>
+            </div>
+            <div id="admin-sources"><div class="ssub">Chargement…</div></div>
         </div>`;
+        const goto = document.getElementById('prov-goto-id');
+        if (goto) goto.addEventListener('click', (e) => { e.preventDefault(); this._navigate('identites'); });
+        const search = document.getElementById('prov-search');
+        if (search) search.addEventListener('input', () => { clearTimeout(this._provSearchDeb); this._provSearchDeb = setTimeout(() => { this._provSearch = search.value.trim(); this._renderSources(this._sources || []); }, 200); });
+        document.querySelectorAll('#prov-filters .qv-chip').forEach(chip => chip.addEventListener('click', () => {
+            this._provFilter = chip.dataset.filter || ''; this._syncProvFilters(); this._renderSources(this._sources || []);
+        }));
+        this._syncProvFilters();
+        const bulk = document.getElementById('prov-bulk-resync');
+        if (bulk) bulk.addEventListener('click', () => this._resyncAllErrors(bulk));
         try {
             const [sources, ov, sparks] = await Promise.all([
                 this._rpc('admin_sources'),
                 this._rpc('admin_overview'),
                 this._rpc('admin_metric_sparks', { p_days: 14 }).catch(() => null) // sparklines non-critical
             ]);
-            this._renderProvKpis(ov || {}, sparks && sparks.series);
-            this._renderSources(Array.isArray(sources) ? sources : []);
+            this._sources = Array.isArray(sources) ? sources : [];
+            this._dressHeader();
+            this._renderProvKpis(ov || {}, this._sources, sparks && sparks.series);
+            this._renderSources(this._sources);
         } catch (e) {
             const el = document.getElementById('admin-sources');
             if (el) el.innerHTML = `<div class="admin-err" role="alert">Erreur : ${AdminPage.esc(e.message)}</div>`;
         }
     }
 
-    _renderProvKpis(o, sparks) {
+    _syncProvFilters() {
+        const cur = this._provFilter || '';
+        document.querySelectorAll('#prov-filters .qv-chip').forEach(c => c.classList.toggle('active', (c.dataset.filter || '') === cur));
+    }
+
+    async _resyncAllErrors(btn) {
+        const errs = (this._sources || []).filter(s => s.sync_error || s.sync_status === 'sync_error');
+        if (!errs.length) return;
+        if (!await this._confirm(`Relancer un re-sync complet sur ${errs.length} source(s) en erreur ?`, { okLabel: 'Tout re-sync' })) return;
+        const orig = btn.textContent; btn.disabled = true; btn.textContent = '…';
+        let ok = 0;
+        for (const s of errs) {
+            try {
+                const res = await fetch(`${this._sbUrl()}/functions/v1/norva-source-sync/admin/resync/${s.source_id}`, { method: 'POST', headers: { apikey: this._sbKey(), Authorization: `Bearer ${this._token()}`, 'Content-Type': 'application/json' }, body: '{}' });
+                if (res.ok) ok++;
+            } catch (_) { /* keep going — partial success is fine */ }
+        }
+        btn.textContent = `✓ ${ok}/${errs.length}`;
+        this._toast(`Re-sync lancé sur ${ok}/${errs.length} source(s).`, ok === errs.length ? 'ok' : 'err');
+        setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 4000);
+    }
+
+    _renderProvKpis(o, sources, sparks) {
         const el = document.getElementById('prov-kpis');
         if (!el) return;
         const S = sparks || {}, n = AdminPage.n;
-        const card = (v, l, cls, key, icon) => AdminPage.kpiCard(v, l, cls, icon, key && Array.isArray(S[key]) ? AdminPage.spark(S[key], cls) : '');
-        el.innerHTML = [
-            card(n(o.sources_total), 'Sources', '', 'sources_total', '🗂️'),
-            card(n(o.sources_incomplete), 'Sync incomplète', Number(o.sources_incomplete) > 0 ? 'alert' : 'ok', 'sources_incomplete', '🔄'),
-            card(n(o.sources_error), 'Sources en erreur', Number(o.sources_error) > 0 ? 'alert' : 'ok', 'sources_error', '⚠️'),
-            card(n(o.identities_active), 'Identités', '', 'identities_active', '🧬'),
-            card(n(o.titles_movie), 'Films', '', 'titles_movie', '🎬'),
-            card(n(o.titles_series), 'Séries', '', 'titles_series', '📺')
-        ].join('');
+        sources = Array.isArray(sources) ? sources : [];
+        const total = sources.length;
+        const err = sources.filter(s => s.sync_error || s.sync_status === 'sync_error').length;
+        const inc = sources.filter(s => s.incomplete === true).length;
+        const unres = sources.filter(s => !s.identity_name).length;
+        const pct = total ? Math.round(100 * Math.max(0, total - err - inc) / total) : 100;
+        const healthCls = err > 0 ? 'alert' : inc > 0 ? 'warn' : 'ok';
+        const catalog = (Number(o.titles_movie) || 0) + (Number(o.titles_series) || 0);
+        const card = (v, l, cls, key, icon) => {
+            const spark = key && Array.isArray(S[key]) ? AdminPage.spark(S[key], cls === 'warn' ? '' : cls) : '';
+            return `<div class="kpi ${cls || ''}"><div class="kpi-hd"><div class="v">${v}</div><span class="kpi-ic">${icon}</span></div><div class="l">${l}</div>${spark ? `<div class="kpi-spark">${spark}</div>` : ''}</div>`;
+        };
+        el.innerHTML = `<div class="kpi-group kpi-group--priority"><div class="kpi-gtitle">🩺 Santé des sources</div><div class="admin-cards">
+            ${card(pct + ' %', 'Sources saines', healthCls, null, '🩺')}
+            ${card(n(err), 'En erreur', err > 0 ? 'alert' : 'ok', 'sources_error', '⚠️')}
+            ${card(n(inc), 'Sync incomplète', inc > 0 ? 'warn' : 'ok', 'sources_incomplete', '🔄')}
+            ${card(n(unres), 'Identité non résolue', unres > 0 ? 'warn' : 'ok', null, '🧬')}
+            ${card(n(total), 'Sources', '', 'sources_total', '🗂️')}
+            ${card(n(catalog), 'Catalogue (titres)', '', null, '🎬')}
+        </div></div>`;
+        const tx = document.querySelector('#page-admin .crm-head-tx');
+        if (tx) {
+            let meta = tx.querySelector('.crm-head-meta');
+            if (!meta) { meta = document.createElement('div'); meta.className = 'crm-head-meta'; tx.appendChild(meta); }
+            meta.innerHTML =
+                `<span class="crm-hpill"><b>${n(total)}</b> sources</span>` +
+                `<span class="crm-hpill ${err > 0 ? 'bad' : ''}"><b>${n(err)}</b> en erreur</span>` +
+                `<span class="crm-hpill"><b>${n(inc)}</b> sync incomplète(s)</span>` +
+                `<span class="crm-hpill"><b>${n(o.identities_active)}</b> identités</span>`;
+        }
     }
 
     // ── Page: Identités (canonical provider identities) ──
@@ -2513,33 +2603,65 @@ class AdminPage {
     _renderSources(rows) {
         const el = document.getElementById('admin-sources');
         if (!el) return;
-        if (!rows.length) { el.innerHTML = '<div class="ssub">Aucune source.</div>'; return; }
-        const sorted = rows.slice().sort((a, b) =>
-            String(a.owner_email).localeCompare(String(b.owner_email)) ||
-            String(a.display_name).localeCompare(String(b.display_name)));
-        const head = `<tr><th>Compte</th><th>Provider</th><th>Statut</th><th class="num">Items</th><th class="num">Variants</th><th class="num">Films</th><th class="num">Séries</th><th>Identité</th><th>Action</th></tr>`;
-        let prevOwner = null;
-        const body = sorted.map(r => {
-            const bad = r.incomplete === true;
-            const newGroup = r.owner_email !== prevOwner;
-            prevOwner = r.owner_email;
-            const status = bad
-                ? `<span class="badge red">sync incomplète</span>`
-                : (r.sync_error ? `<span class="badge red">${AdminPage.esc(r.sync_status || 'error')}</span>`
-                    : `<span class="badge green">${AdminPage.esc(r.sync_status || 'ready')}</span>`);
-            return `<tr class="${newGroup ? 'group-start' : ''} ${bad ? 'bad' : ''}">
-                <td>${newGroup ? `<span class="pacct">${AdminPage.esc(r.owner_email || '—')}</span>` : ''}</td>
-                <td>${AdminPage.esc(r.display_name)}</td>
-                <td>${status}</td>
-                <td class="num">${AdminPage.n(r.media_items)}</td>
-                <td class="num">${AdminPage.n(r.variants)}</td>
-                <td class="num">${AdminPage.n(r.movie_titles)}</td>
-                <td class="num">${AdminPage.n(r.series_titles)}</td>
-                <td>${r.identity_name ? AdminPage.esc(r.identity_name) : '<span class="badge gray">non résolue</span>'}</td>
-                <td><button class="resync-btn" data-source="${AdminPage.esc(r.source_id)}" title="Forcer un re-sync complet de cette source">↻ re-sync</button></td>
-            </tr>`;
-        }).join('');
-        el.innerHTML = `<table><thead>${head}</thead><tbody>${body}</tbody></table>`;
+        rows = Array.isArray(rows) ? rows : [];
+        const kind = (s) => (s.sync_error || s.sync_status === 'sync_error') ? 'err' : s.incomplete === true ? 'inc' : !s.identity_name ? 'unres' : 'ok';
+        // Bulk re-sync button reflects the FULL set (independent of the current filter/search).
+        const errCount = rows.filter(s => kind(s) === 'err').length;
+        const bulk = document.getElementById('prov-bulk-resync');
+        if (bulk) { bulk.hidden = errCount === 0; if (errCount) bulk.textContent = `↻ Re-sync ${errCount} erreur(s)`; }
+        // Quick filter.
+        const f = this._provFilter || '';
+        let view = rows.filter(s => {
+            const k = kind(s);
+            if (f === 'problem') return k !== 'ok';
+            if (f === 'error') return k === 'err';
+            if (f === 'incomplete') return s.incomplete === true;
+            if (f === 'unresolved') return !s.identity_name;
+            if (f === 'driver') return s.is_driver === true;
+            return true;
+        });
+        // Search across provider / account / identity / error.
+        const q = (this._provSearch || '').toLowerCase();
+        if (q) view = view.filter(s => [s.display_name, s.owner_email, s.identity_name, s.sync_error].some(x => String(x || '').toLowerCase().includes(q)));
+        // Priority sort: errors → incomplete → unresolved → healthy, then account/name.
+        const rank = { err: 0, inc: 1, unres: 2, ok: 3 };
+        view = view.slice().sort((a, b) => (rank[kind(a)] - rank[kind(b)]) ||
+            String(a.owner_email).localeCompare(String(b.owner_email)) || String(a.display_name).localeCompare(String(b.display_name)));
+        if (!view.length) {
+            el.innerHTML = `<div class="card"><span class="badge ${q || f ? 'gray' : 'green'}">${q || f ? '∅' : '✓'}</span> ${q || f ? 'Aucune source ne correspond à ce filtre.' : 'Aucune source.'}</div>`;
+            return;
+        }
+        const n = AdminPage.n, esc = AdminPage.esc;
+        const statusBadge = (s, k) => k === 'err' ? '<span class="badge red">erreur</span>'
+            : k === 'inc' ? '<span class="badge amber">sync incomplète</span>'
+            : `<span class="badge green">${esc(s.sync_status || 'ready')}</span>`;
+        el.innerHTML = `<div class="src-rows">` + view.map(s => {
+            const k = kind(s);
+            const cat = `${n(s.movie_titles)} films · ${n(s.series_titles)} séries · ${n(s.media_items)} items`;
+            const sync = s.last_synced_at ? AdminPage.timeAgo(s.last_synced_at) : 'jamais';
+            const idHtml = s.identity_name ? `identité <b style="color:var(--adm-tx2)">${esc(s.identity_name)}</b>` : '<span class="badge gray">identité non résolue</span>';
+            const acct = s.user_id
+                ? `<span class="src-acct" data-user-id="${esc(s.user_id)}" title="Ouvrir la fiche client">👤 ${esc(s.owner_email || '—')}</span>`
+                : `<span>👤 ${esc(s.owner_email || '—')}</span>`;
+            return `<div class="src-row ${k}">
+                <div class="src-st">${statusBadge(s, k)}${s.is_driver ? '<span class="badge blue">pilote</span>' : ''}<div class="src-prov" title="${esc(s.display_name)}">${esc(s.display_name)}</div></div>
+                <div class="src-main">
+                    ${acct} · <span class="src-id">${idHtml}</span>
+                    ${s.sync_error ? `<div class="src-err" title="${esc(s.sync_error)}">⚠ ${esc(s.sync_error)}</div>` : ''}
+                    <div class="src-cat">${cat}</div>
+                </div>
+                <div class="src-meta">
+                    <div class="src-sync">sync ${esc(sync)}</div>
+                    <div class="src-acts">
+                        ${s.user_id ? `<button class="src-mini src-open" data-user-id="${esc(s.user_id)}" title="Ouvrir la fiche client">client →</button>` : ''}
+                        <button class="resync-btn" data-source="${esc(s.source_id)}" title="Forcer un re-sync complet de cette source">↻ re-sync</button>
+                    </div>
+                </div>
+            </div>`;
+        }).join('') + `</div>`;
+        // Account / open-client navigation (re-sync uses the delegated .resync-btn handler).
+        el.querySelectorAll('.src-acct[data-user-id], .src-open[data-user-id]').forEach(a =>
+            a.addEventListener('click', (e) => { e.stopPropagation(); this._navigate('client:' + a.dataset.userId); }));
     }
 
     async _resync(btn) {
