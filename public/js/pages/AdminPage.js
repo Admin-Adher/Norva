@@ -148,6 +148,9 @@ class AdminPage {
 #page-admin .kpi.alert{border-color:rgba(248,113,113,.42);background:linear-gradient(158deg,rgba(248,113,113,.10),var(--adm-card2));}
 #page-admin .kpi.alert .v{color:var(--adm-red);}
 #page-admin .kpi.ok .v{color:var(--adm-green);}
+#page-admin .kpi.muted{background:linear-gradient(158deg,rgba(251,191,36,.05),var(--adm-card2));}
+#page-admin .kpi.muted .v{color:var(--adm-amber);}
+#page-admin .kpi.muted .kpi-ic{background:rgba(251,191,36,.10);border-color:rgba(251,191,36,.18);}
 /* KPI card with icon + sparkline (Cockpit) */
 #page-admin .kpi-hd{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;}
 #page-admin .kpi-ic{flex-shrink:0;width:30px;height:30px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:15px;background:rgba(120,150,255,.09);border:1px solid rgba(120,150,255,.14);}
@@ -203,6 +206,27 @@ class AdminPage {
 #page-admin .fin-cols > *{margin-bottom:0;}
 #page-admin .admin-cards.fin-mini{grid-template-columns:repeat(auto-fit,minmax(96px,1fr));gap:10px;}
 @media(max-width:900px){#page-admin .fin-cols{grid-template-columns:1fr;}}
+/* Header status line (executive read at the top of a page) */
+#page-admin .crm-head-meta{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:11px;}
+#page-admin .crm-hpill{font-size:11.5px;color:var(--adm-tx2);background:rgba(255,255,255,.04);border:1px solid var(--adm-line);border-radius:20px;padding:3px 11px;line-height:1.5;}
+#page-admin .crm-hpill b{color:var(--adm-tx);font-weight:700;}
+#page-admin .crm-hpill.bad{background:rgba(248,113,113,.12);border-color:rgba(248,113,113,.3);}
+#page-admin .crm-hpill.bad b{color:#fca5a5;}
+#page-admin .crm-hlive{display:inline-flex;align-items:center;gap:6px;font-size:11px;color:var(--adm-tx3);margin-left:2px;}
+#page-admin .live-dot{width:7px;height:7px;border-radius:50%;background:var(--adm-green);box-shadow:0 0 0 3px rgba(52,211,153,.16);animation:livepulse 2.4s ease-in-out infinite;}
+@keyframes livepulse{0%,100%{box-shadow:0 0 0 3px rgba(52,211,153,.16);}50%{box-shadow:0 0 0 5px rgba(52,211,153,.05);}}
+/* Revenue-risk group: calm when clean, flags amber→red when any risk is present */
+#page-admin .kpi-group--risk{border-color:rgba(251,191,36,.16);background:linear-gradient(158deg,rgba(251,191,36,.035),var(--adm-panel));}
+#page-admin .kpi-group--risk.has-risk{border-color:rgba(248,113,113,.28);background:linear-gradient(158deg,rgba(248,113,113,.06),var(--adm-panel));}
+/* Compact horizontal-bar list (funnel, cancellation reasons) — pure CSS, responsive */
+#page-admin .hbars{display:flex;flex-direction:column;gap:9px;padding:4px 2px 2px;}
+#page-admin .hbar{display:grid;grid-template-columns:132px 1fr 50px;align-items:center;gap:11px;}
+#page-admin .hbar-l{font-size:12px;color:var(--adm-tx2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+#page-admin .hbar-track{height:9px;border-radius:5px;background:rgba(255,255,255,.05);overflow:hidden;}
+#page-admin .hbar-fill{height:100%;border-radius:5px;background:linear-gradient(90deg,#5b7cfa,#8b7cff);min-width:2px;}
+#page-admin .hbar-fill.warn{background:linear-gradient(90deg,#f59e0b,#fbbf24);}
+#page-admin .hbar-v{font-size:13px;font-weight:700;color:var(--adm-tx);text-align:right;font-variant-numeric:tabular-nums;}
+@media(max-width:560px){#page-admin .hbar{grid-template-columns:100px 1fr 42px;gap:8px;}}
 /* Moteur: Matching TMDB (left) ‖ Crons (right) */
 #page-admin .mot-cols{display:grid;grid-template-columns:0.9fr 2.2fr;gap:16px;margin-bottom:18px;align-items:stretch;}
 #page-admin .mot-cols > *{margin-bottom:0;min-width:0;}
@@ -311,8 +335,11 @@ class AdminPage {
 @media(max-width:820px){#page-admin .cs-item{border-right:0;padding-right:10px;}#page-admin .cs-cta,#page-admin .cs-ok{margin-left:0;}}
 /* Priority ("Top signals") group — visually dominant over the secondary groups */
 #page-admin .kpi-group--priority{border-color:rgba(120,150,255,.22);background:linear-gradient(158deg,rgba(91,124,250,.07),var(--adm-panel));box-shadow:0 4px 20px rgba(91,124,250,.08);}
-#page-admin .kpi-group--priority .kpi{padding:18px 18px 15px;}
-#page-admin .kpi-group--priority .kpi .v{font-size:30px;}
+#page-admin .kpi-group--priority .kpi{padding:17px 18px 15px;}
+/* Vertical stat-card: icon on its own top row, big value on a full-width line below.
+   Gives wide currency values the whole card width (no clipping / no icon overlap). */
+#page-admin .kpi-group--priority .kpi-hd{flex-direction:column-reverse;align-items:flex-start;gap:11px;}
+#page-admin .kpi-group--priority .kpi .v{font-size:27px;white-space:nowrap;letter-spacing:-.6px;font-variant-numeric:tabular-nums;}
 /* Non-colour state chip on priority KPI cards */
 #page-admin .kpi-state{display:inline-block;margin-left:8px;font-size:9px;font-weight:700;letter-spacing:.4px;padding:2px 6px;border-radius:5px;vertical-align:middle;}
 #page-admin .kpi-state.ok{background:rgba(52,211,153,.16);color:#6ee7bf;}
@@ -767,19 +794,22 @@ class AdminPage {
         const n = AdminPage.n, money = AdminPage.money, esc = AdminPage.esc;
         const S = sparks || {};
         if (Array.isArray(S.mrr_cents)) S.arr = S.mrr_cents.map(v => v == null ? null : v * 12); // ARR = MRR×12
-        // card(value, label, cls, metricKey, icon) — icon top-right + sparkline where a series exists.
-        const card = (v2, l, cls, key, icon) => {
+        // card(value, label, cls, metricKey, icon, tip) — icon top-right + sparkline where a series
+        // exists; optional tooltip for metrics that need a one-line explanation.
+        const card = (v2, l, cls, key, icon, tip) => {
             const spark = key && Array.isArray(S[key]) ? AdminPage.spark(S[key], cls) : '';
-            return `<div class="kpi ${cls || ''}"><div class="kpi-hd"><div class="v">${v2}</div>${icon ? `<span class="kpi-ic">${icon}</span>` : ''}</div><div class="l">${l}</div>${spark ? `<div class="kpi-spark">${spark}</div>` : ''}</div>`;
+            return `<div class="kpi ${cls || ''}"${tip ? ` title="${esc(tip)}"` : ''}><div class="kpi-hd"><div class="v">${v2}</div>${icon ? `<span class="kpi-ic">${icon}</span>` : ''}</div><div class="l">${l}</div>${spark ? `<div class="kpi-spark">${spark}</div>` : ''}</div>`;
         };
+        // Non-colour-only state chip (same language as the Cockpit priority cards).
+        const stateChip = (bad, crit) => `<span class="kpi-state ${bad ? (crit ? 'crit' : 'warn') : 'ok'}">${bad ? (crit ? 'Critique' : 'À traiter') : 'OK'}</span>`;
         const counts = f.counts || {};
         const up = f.upcoming || {};
         const day = (d) => d ? new Date(d).toLocaleString('fr-FR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—';
 
         // Status cards are the daily working views: each one opens Clients pre-filtered. Icon top-right,
-        // sparkline where the status has a recorded series (compact — kept short like the mockup).
-        const statusCard = (v2, l, filter, cls, icon) =>
-            `<div class="kpi fin-status ${cls || ''}" data-billing="${filter}" role="button" tabindex="0" style="cursor:pointer" title="Voir ces clients"><div class="kpi-hd"><div class="v">${v2}</div>${icon ? `<span class="kpi-ic">${icon}</span>` : ''}</div><div class="l">${l}</div></div>`;
+        // optional state chip (à traiter / critique) on the label.
+        const statusCard = (v2, l, filter, cls, icon, chip) =>
+            `<div class="kpi fin-status ${cls || ''}" data-billing="${filter}" role="button" tabindex="0" style="cursor:pointer" title="Voir ces clients"><div class="kpi-hd"><div class="v">${v2}</div>${icon ? `<span class="kpi-ic">${icon}</span>` : ''}</div><div class="l">${l}${chip || ''}</div></div>`;
 
         const byPlan = Array.isArray(f.by_plan) ? f.by_plan : [];
         const planRows = byPlan.map(r => `<tr>
@@ -787,25 +817,39 @@ class AdminPage {
             <td class="num">${n(r.n)}</td><td class="num">${money(r.mrr_cents)}</td>
         </tr>`).join('');
 
+        // Compact horizontal-bar list (label · bar · value) — replaces dense mini-tables for
+        // the funnel and cancellation reasons so the shape is readable at a glance.
+        const hbars = (rows, cls) => {
+            const max = Math.max(1, ...rows.map(r => Number(r.v) || 0));
+            return `<div class="hbars">${rows.map(r => {
+                const val = Number(r.v) || 0, pct = Math.max(2, Math.round(100 * val / max));
+                return `<div class="hbar"><div class="hbar-l" title="${esc(r.label)}">${esc(r.label)}</div>` +
+                    `<div class="hbar-track"><div class="hbar-fill ${cls || ''}" style="width:${pct}%"></div></div>` +
+                    `<div class="hbar-v">${n(val)}</div></div>`;
+            }).join('')}</div>`;
+        };
+
         const FUNNEL_ORDER = ['signup', 'source_added', 'first_play', 'checkout_open', 'trial_start', 'trial_convert', 'renewal', 'cancel', 'save', 'winback_return'];
-        const FUNNEL_LABELS = { signup: 'Inscriptions', source_added: '1ʳᵉ source ajoutée', first_play: '1ʳᵉ lecture', checkout_open: 'Checkout ouvert', trial_start: 'Essai démarré', trial_convert: 'Essai → payant', renewal: 'Renouvellements', cancel: 'Annulations', save: 'Saves (contre-offre)', winback_return: 'Retours win-back' };
+        const FUNNEL_LABELS = { signup: 'Inscriptions', source_added: '1ʳᵉ source ajoutée', first_play: '1ʳᵉ lecture', checkout_open: 'Checkout ouvert', trial_start: 'Essai démarré', trial_convert: 'Essai → payant', renewal: 'Renouvellements', cancel: 'Annulations', save: 'Clients sauvés', winback_return: 'Retours win-back' };
         const funnelMap = {};
         (Array.isArray(f.funnel_30d) ? f.funnel_30d : []).forEach(r => { funnelMap[r.stage] = r.users; });
-        const funnelRows = FUNNEL_ORDER.filter(s => funnelMap[s] != null).map(s =>
-            `<tr><td>${FUNNEL_LABELS[s] || esc(s)}</td><td class="num">${n(funnelMap[s])}</td></tr>`).join('');
+        const funnelData = FUNNEL_ORDER.filter(s => funnelMap[s] != null).map(s => ({ label: FUNNEL_LABELS[s] || s, v: funnelMap[s] }));
 
         const REASONS = { too_expensive: 'Trop cher', not_using: 'Utilise pas assez', technical: 'Problème technique', other: 'Autre', skipped: 'Non précisé' };
-        const reasonRows = (Array.isArray(f.cancel_reasons) ? f.cancel_reasons : []).map(r =>
-            `<tr><td>${REASONS[r.reason] || esc(r.reason)}</td><td class="num">${n(r.n)}</td></tr>`).join('');
+        const reasonData = (Array.isArray(f.cancel_reasons) ? f.cancel_reasons : []).map(r => ({ label: REASONS[r.reason] || r.reason, v: r.n }));
         const savesTotal = Number(f.saves_total) || 0;
         const cancelsTotal = Number(f.cancels_total) || 0;
         const saveRate = (savesTotal + cancelsTotal) > 0 ? Math.round(100 * savesTotal / (savesTotal + cancelsTotal)) : null;
 
         const KIND_LABELS = { trial_setup: 'essai (carte)', first_charge: '1ᵉʳ prélèvement', renewal: 'renouvellement', plan_change: 'changement plan', resubscribe: 'réabonnement', card_update: 'MAJ carte' };
-        const payBadge = (s) => s === 'captured' ? '<span class="badge green">captured</span>'
-            : (s === 'authorized' || s === 'to_capture') ? `<span class="badge blue">${esc(s)}</span>`
-            : (s === 'require_payment_method') ? '<span class="badge amber">non finalisé</span>'
-            : `<span class="badge gray">${esc(s)}</span>`;
+        // Payment status → business-readable FR label; raw provider status kept in a tooltip.
+        const PAY_STATUS = { captured: 'Encaissé', authorized: 'Autorisé', to_capture: 'À encaisser', require_payment_method: 'Non finalisé', canceled: 'Annulé', refused: 'Refusé', expired: 'Expiré', disputed: 'Litige' };
+        const payBadge = (s) => {
+            const lbl = PAY_STATUS[s] || esc(s);
+            const cls = s === 'captured' ? 'green' : (s === 'authorized' || s === 'to_capture') ? 'blue'
+                : (s === 'require_payment_method') ? 'amber' : (s === 'refused' || s === 'disputed') ? 'red' : 'gray';
+            return `<span class="badge ${cls}" title="Statut technique : ${esc(s)}">${lbl}</span>`;
+        };
 
         // Payment rail (web vs mobile store) — the KPI dimension that separates Stancer-web
         // revenue from Google Play / App Store mobile revenue.
@@ -835,55 +879,73 @@ class AdminPage {
             <td class="num">${money(p.amount)}${p.currency && String(p.currency).toLowerCase() !== 'usd' ? ` <span class="pacct">${esc(String(p.currency).toUpperCase())}</span>` : ''}</td>
         </tr>`).join('');
 
+        // Revenue-risk signals (drives the risk-zone accent + header pill).
+        const pastDue = Number(counts.past_due) || 0, cancelPending = Number(counts.cancel_pending) || 0, expired = Number(counts.expired) || 0;
+        const anyRisk = pastDue > 0 || cancelPending > 0;
+        // Total amount shown as a label note (a bare "4 199,60 $" would read as one number in fr-FR).
+        const amtNote = (c) => ` <span class="pacct">· ${money(c)}</span>`;
+
         el.innerHTML = `
-            <div class="kpi-group"><div class="kpi-gtitle">💶 Revenus récurrents</div><div class="admin-cards">
+            <!-- 1 ── Résumé financier : les 5 métriques dominantes, en tête ── -->
+            <div class="kpi-group kpi-group--priority"><div class="kpi-gtitle">💶 Résumé financier</div><div class="admin-cards">
                 ${card(money(f.mrr_cents), 'MRR', Number(f.mrr_cents) > 0 ? 'ok' : '', 'mrr_cents', '💲')}
                 ${card(money(f.arr_cents), 'ARR', '', 'arr', '📈')}
-                ${card(money(f.mrr_trial_cents), 'MRR en essai (à venir)', '', null, '⏳')}
                 ${card(money(f.collected_30d_cents), 'Encaissé 30 j', Number(f.collected_30d_cents) > 0 ? 'ok' : '', 'collected_30d_cents', '💰')}
                 ${card(n(f.conversions_7d), 'Conversions 7 j', '', 'conversions_7d', '📊')}
-                ${Number(f.mrr_unknown_n) > 0 ? card(n(f.mrr_unknown_n), 'Abos sans montant connu (manuel/store)', '', null, '🗄️') : ''}
+                ${card(money(f.mrr_trial_cents), 'MRR potentiel essais', 'muted', null, '⏳', 'Revenu mensuel projeté si tous les essais en cours se convertissent — non encore encaissé.')}
             </div></div>
+            <!-- 2 ── Risque revenu : tout ce qui menace le revenu, regroupé ── -->
+            <div class="kpi-group kpi-group--risk ${anyRisk ? 'has-risk' : ''}"><div class="kpi-gtitle">⚠️ Risque revenu — cliquer un statut pour ouvrir la liste</div><div class="admin-cards">
+                ${statusCard(n(pastDue), 'Échecs paiement', 'past_due', pastDue > 0 ? 'alert' : 'ok', '💳', stateChip(pastDue > 0, true))}
+                ${statusCard(n(cancelPending), 'Annulations prévues', 'cancel_pending', cancelPending > 0 ? 'alert' : 'ok', '📅', stateChip(cancelPending > 0, false))}
+                ${statusCard(n(expired), 'Expirés', 'expired', '', '⛔')}
+                ${card(n(up.trial_charges_48h_n), 'Essais à prélever < 48 h' + amtNote(up.trial_charges_48h_cents), '', null, '⏰')}
+                ${card(n(up.renewals_7d_n), 'Renouvellements < 7 j' + amtNote(up.renewals_7d_cents), '', null, '🔁')}
+                ${Number(f.discounts_pending) > 0 ? card(n(f.discounts_pending), 'Remises 50% en attente', '', null, '🎟️') : ''}
+            </div></div>
+            <!-- 3 ── Analyse ── -->
             <div class="fin-cols">
-                <div class="kpi-group"><div class="kpi-gtitle">👥 Abonnés par statut — cliquer pour ouvrir la liste</div><div class="admin-cards fin-mini">
+                <div class="kpi-group"><div class="kpi-gtitle">👥 Abonnés — cliquer pour ouvrir la liste</div><div class="admin-cards fin-mini">
                     ${statusCard(n(counts.trialing), 'En essai', 'trialing', 'ok', '⏳')}
                     ${statusCard(n(counts.active), 'Actifs payants', 'active', 'ok', '👤')}
-                    ${statusCard(n(counts.past_due), 'Échec paiement', 'past_due', Number(counts.past_due) > 0 ? 'alert' : '', '💳')}
-                    ${statusCard(n(counts.cancel_pending), 'Annulation prévue', 'cancel_pending', Number(counts.cancel_pending) > 0 ? 'alert' : '', '📅')}
-                    ${statusCard(n(counts.expired), 'Expirés', 'expired', '', '⛔')}
+                    ${Number(f.mrr_unknown_n) > 0 ? card(n(f.mrr_unknown_n), 'Sans montant connu (manuel/store)', 'muted', null, '🗄️', 'Abonnés actifs dont le montant n\'est pas connu côté Norva (paiement manuel ou store mobile).') : ''}
                 </div></div>
-                <div class="admin-block"><h2>💳 Revenu par rail — web (Stancer) vs mobile (stores)</h2><div class="scroll">
-                    ${railRows ? `<table><thead><tr><th>Rail</th><th class="num">Abonnés</th><th class="num">MRR</th><th class="num">Encaissé 30 j</th></tr></thead><tbody>${railRows}</tbody></table>` : '<div class="ssub">Aucun abonnement — la répartition Stancer / Play s\'affichera ici dès les premiers paiements.</div>'}
+                <div class="admin-block"><h2>💳 Revenu par rail — web (Stancer) vs mobile (stores mobiles)</h2><div class="scroll">
+                    ${railRows ? `<table><thead><tr><th>Rail</th><th class="num">Abonnés</th><th class="num">MRR</th><th class="num">Encaissé 30 j</th></tr></thead><tbody>${railRows}</tbody></table>` : '<div class="ssub">Aucun abonnement — la répartition Stancer / Google Play / App Store s\'affichera ici dès les premiers paiements.</div>'}
                 </div></div>
             </div>
             <div class="fin-cols">
-                <div class="admin-block"><h2>📅 Échéances</h2><div class="admin-cards fin-mini">
-                    ${card(n(up.trial_charges_48h_n), 'Essais → prélèvement < 48 h', '', null, '⏰')}
-                    ${card(money(up.trial_charges_48h_cents), 'Montant essais < 48 h', '', null, '💵')}
-                    ${card(n(up.renewals_7d_n), 'Renouvellements < 7 j', '', null, '🔁')}
-                    ${card(money(up.renewals_7d_cents), 'Montant renouv. < 7 j', '', null, '💰')}
-                    ${Number(f.discounts_pending) > 0 ? card(n(f.discounts_pending), 'Remises 50% en attente', '', null, '🎟️') : ''}
-                </div></div>
                 <div class="admin-block"><h2>📊 MRR par plan, période & rail</h2><div class="scroll">
                     ${planRows ? `<table><thead><tr><th>Plan</th><th>Période</th><th>Rail</th><th class="num">Abonnés</th><th class="num">MRR</th></tr></thead><tbody>${planRows}</tbody></table>` : '<div class="ssub">Aucun abonnement payant.</div>'}
                 </div></div>
-            </div>
-            <div class="fin-cols">
-                <div class="admin-block"><h2>🔀 Funnel de conversion (30 j)</h2><div class="scroll">
-                    ${funnelRows ? `<table><thead><tr><th>Étape</th><th class="num">Utilisateurs uniques</th></tr></thead><tbody>${funnelRows}</tbody></table>` : '<div class="ssub">Aucune donnée funnel sur 30 j.</div>'}
-                </div></div>
-                <div class="admin-block"><h2>🛑 Annulations & rétention</h2>
-                    <div class="admin-cards fin-mini" style="margin-bottom:14px">
-                        ${card(n(cancelsTotal), 'Annulations (total)', '', null, '🛑')}
-                        ${card(n(savesTotal), 'Saves contre-offre', savesTotal > 0 ? 'ok' : '', null, '💚')}
-                        ${saveRate != null ? card(saveRate + ' %', 'Taux de save', saveRate >= 20 ? 'ok' : '', null, '🎯') : ''}
-                    </div>
-                    ${reasonRows ? `<div class="scroll"><table><thead><tr><th>Raison d'annulation</th><th class="num">Clients</th></tr></thead><tbody>${reasonRows}</tbody></table></div>` : '<div class="ssub">Aucune annulation enregistrée — les raisons s\'accumuleront ici.</div>'}
+                <div class="admin-block"><h2>🔀 Funnel de conversion (30 j)</h2>
+                    ${funnelData.length ? hbars(funnelData, '') : '<div class="ssub">Aucune donnée funnel sur 30 j.</div>'}
                 </div>
             </div>
-            <div class="admin-block"><h2>🧾 Derniers paiements (50) <button id="fin-csv" class="mini-btn" title="Exporter en CSV">⬇ CSV</button></h2><div class="scroll">
+            <div class="admin-block"><h2>🛑 Annulations & rétention</h2>
+                <div class="admin-cards fin-mini" style="margin-bottom:16px">
+                    ${card(n(cancelsTotal), 'Annulations (total)', '', null, '🛑')}
+                    ${card(n(savesTotal), 'Clients sauvés', savesTotal > 0 ? 'ok' : '', null, '💚', 'Clients ayant renoncé à annuler après une contre-offre.')}
+                    ${saveRate != null ? card(saveRate + ' %', 'Taux de sauvetage', saveRate >= 20 ? 'ok' : '', null, '🎯') : ''}
+                </div>
+                ${reasonData.length ? `<div class="kpi-gtitle" style="margin:0 0 8px">Raisons d'annulation</div>${hbars(reasonData, 'warn')}` : '<div class="ssub">Aucune annulation enregistrée — les raisons s\'accumuleront ici.</div>'}
+            </div>
+            <!-- 4 ── Ops : log opérationnel + export ── -->
+            <div class="admin-block"><h2>🧾 Derniers paiements (50) <button id="fin-csv" class="mini-btn" title="Télécharger les 50 derniers paiements au format CSV">⬇ Exporter CSV</button></h2><div class="scroll">
                 ${payRows ? `<table><thead><tr><th>Date</th><th>Client</th><th>Rail</th><th>Type</th><th>Statut</th><th class="num">Montant</th></tr></thead><tbody>${payRows}</tbody></table>` : '<div class="ssub">Aucun paiement.</div>'}
             </div></div>`;
+
+        // Header status line: MRR · échecs · conversions + a "live" freshness badge.
+        const tx = document.querySelector('#page-admin .crm-head-tx');
+        if (tx) {
+            let meta = tx.querySelector('.crm-head-meta');
+            if (!meta) { meta = document.createElement('div'); meta.className = 'crm-head-meta'; tx.appendChild(meta); }
+            meta.innerHTML =
+                `<span class="crm-hpill"><b>${money(f.mrr_cents)}</b> MRR</span>` +
+                `<span class="crm-hpill ${pastDue > 0 ? 'bad' : ''}"><b>${n(pastDue)}</b> paiement(s) en échec</span>` +
+                `<span class="crm-hpill"><b>${n(f.conversions_7d)}</b> conversions 7 j</span>` +
+                `<span class="crm-hlive"><span class="live-dot"></span>Données live${f.refreshed_at ? ' · maj ' + AdminPage.timeAgo(f.refreshed_at) : ''}</span>`;
+        }
 
         // Status cards → Clients pre-filtered; CSV of the recent payments table.
         el.querySelectorAll('.fin-status').forEach(c => c.addEventListener('click', () => {
@@ -1460,10 +1522,14 @@ class AdminPage {
         }
 
         const KIND_LABELS = { trial_setup: 'essai (carte)', first_charge: '1ᵉʳ prélèvement', renewal: 'renouvellement', plan_change: 'changement plan', resubscribe: 'réabonnement', card_update: 'MAJ carte' };
-        const payBadge = (s) => s === 'captured' ? '<span class="badge green">captured</span>'
-            : (s === 'authorized' || s === 'to_capture') ? `<span class="badge blue">${esc(s)}</span>`
-            : (s === 'require_payment_method') ? '<span class="badge amber">non finalisé</span>'
-            : `<span class="badge gray">${esc(s)}</span>`;
+        // Payment status → business-readable FR label; raw provider status kept in a tooltip.
+        const PAY_STATUS = { captured: 'Encaissé', authorized: 'Autorisé', to_capture: 'À encaisser', require_payment_method: 'Non finalisé', canceled: 'Annulé', refused: 'Refusé', expired: 'Expiré', disputed: 'Litige' };
+        const payBadge = (s) => {
+            const lbl = PAY_STATUS[s] || esc(s);
+            const cls = s === 'captured' ? 'green' : (s === 'authorized' || s === 'to_capture') ? 'blue'
+                : (s === 'require_payment_method') ? 'amber' : (s === 'refused' || s === 'disputed') ? 'red' : 'gray';
+            return `<span class="badge ${cls}" title="Statut technique : ${esc(s)}">${lbl}</span>`;
+        };
         // Show a rail column only when it adds signal: a mixed-rail history, or a single
         // non-Stancer rail (a pure Stancer history would just repeat "Stancer · web" on every row).
         const payProviders = new Set(pays.map(x => x.provider || 'stancer'));
