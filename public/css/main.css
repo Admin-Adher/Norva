@@ -1131,6 +1131,16 @@ h4 {
   background: rgba(11, 15, 27, 0.72);
 }
 
+/* Notice when a group is capped at the render limit (rows dropped otherwise). */
+.live-guide-overflow {
+  padding: 10px 14px;
+  font-size: 0.82rem;
+  color: var(--color-text-muted);
+  text-align: center;
+  background: rgba(16, 20, 34, 0.66);
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
 .live-guide-row:hover,
 .live-guide-row:focus-visible {
   outline: none;
@@ -1322,6 +1332,13 @@ h4 {
 
   .live-guide-shell {
     grid-template-columns: 1fr;
+  }
+
+  /* Portrait phones: a 44vh player leaves too little guide once browser chrome is
+     subtracted — hand ~4vh back to the channel list (landscape keeps the bigger player). */
+  @media (orientation: portrait) {
+    .video-container { flex-basis: 40vh; }
+    .live-guide-fusion { flex-basis: 60vh; }
   }
 
   .live-guide-shell.groups-hidden .live-guide-groups,
@@ -11142,6 +11159,16 @@ mark.search-highlight {
   transition: transform 0.12s ease;
   z-index: 3;
 }
+
+/* Live guide rows are full-width, so a smaller lift + taller row reads better at
+   10-foot distance than the card scale (they only got the *:focus outline before). */
+.tv-mode .live-guide-row:focus {
+  transform: scale(1.02);
+  transition: transform 0.12s ease;
+  z-index: 3;
+  min-height: 74px;
+}
+.tv-mode .live-guide-row { min-height: 68px; }
 
 /* Dim the siblings of the focused card so the ring pops even harder. Scoped to
    rows/grids that hold a focused card (:focus-within), never the whole page. */

@@ -780,7 +780,8 @@ class LiveGuideFusion {
                 </span>
                 ${this.renderSourcePicker()}
                 <button type="button" class="live-guide-hidebroken ${hideBroken ? 'is-active' : ''}"
-                        aria-pressed="${hideBroken ? 'true' : 'false'}">Hide broken</button>
+                        aria-pressed="${hideBroken ? 'true' : 'false'}"
+                        title="Hide channels that failed the health scan (unreachable / broken streams)">Hide unavailable</button>
             </div>
         `;
     }
@@ -831,7 +832,7 @@ class LiveGuideFusion {
 
         const program = this.getProgramAt(channel, new Date());
         const progress = this.getProgress(program);
-        const title = program?.title || 'No info';
+        const title = program?.title || 'No guide info';
         const start = program?.start ? this.formatTime(program.start) : '--:--';
         const stop = program?.stop ? this.formatTime(program.stop) : '--:--';
         const logo = this.getChannelLogoSrc(channel);
@@ -895,9 +896,16 @@ class LiveGuideFusion {
                 : 'No channels in this group';
             return `<div class="live-guide-rows"><div class="live-guide-empty">${msg}</div></div>`;
         }
+        const CAP = 150;
+        const shown = families.slice(0, CAP);
+        // When a group holds more than the render cap, say so instead of silently dropping rows.
+        const overflow = families.length > CAP
+            ? `<div class="live-guide-overflow">Showing ${CAP} of ${families.length} channels — search to narrow.</div>`
+            : '';
         return `
             <div class="live-guide-rows">
-                ${families.slice(0, 150).map((family, index) => this.renderRow(family, index)).join('')}
+                ${shown.map((family, index) => this.renderRow(family, index)).join('')}
+                ${overflow}
             </div>
         `;
     }
@@ -928,7 +936,7 @@ class LiveGuideFusion {
                         ${isPlaying ? '<span class="live-guide-live-tag">LIVE</span>' : ''}
                     </span>
                     <span class="live-guide-now">
-                        <span class="live-guide-now-title">${this.escapeHtml(now?.title || 'No info')}</span>
+                        <span class="live-guide-now-title">${this.escapeHtml(now?.title || 'No guide info')}</span>
                         ${now ? `<span class="live-guide-progress"><span style="width:${progress}%"></span></span>` : ''}
                     </span>
                     ${next ? `<span class="live-guide-next"><span class="live-guide-next-time">${this.escapeHtml(this.formatTime(next.start))}</span> ${this.escapeHtml(next.title || 'Programme')}</span>` : ''}
