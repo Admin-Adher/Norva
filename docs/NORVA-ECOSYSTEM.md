@@ -7,10 +7,10 @@
 > séries : Norva est le logiciel, pas le contenu.**
 
 Ce document décrit Norva de bout en bout : la vision, la percée technique qui le
-distingue, l'ensemble des applications qui composent l'écosystème (Web,
-téléphone/tablette, Android TV, Samsung, ordinateur), les fonctionnalités
-exclusives au mobile (mode hors ligne), la synchronisation multi‑appareil,
-l'intelligence de catalogue, l'infrastructure et le cadre de confiance.
+distingue, les applications qui composent l'écosystème (Web,
+Android téléphone/tablette, Android TV), les fonctionnalités exclusives au mobile
+(mode hors ligne), la synchronisation multi‑appareil, l'intelligence de
+catalogue, l'infrastructure et le cadre de confiance.
 
 ---
 
@@ -33,8 +33,8 @@ Toute l'architecture de Norva repose sur une distinction simple et rigoureuse :
   fait **voyager l'état** d'un écran à l'autre.
 - **Le plan de données (la vidéo elle‑même)** — le flux vidéo **ne transite
   jamais par un datacenter par défaut**. Il sort du **réseau domestique de
-  l'utilisateur** (adresse IP résidentielle), via un lecteur natif, un
-  transcodeur local ou une passerelle à IP résidentielle.
+  l'utilisateur** (adresse IP résidentielle), via le moteur de lecture du
+  navigateur, un lecteur natif ou une passerelle à IP résidentielle.
 
 Cette séparation est la clé de la fiabilité de Norva : la partie « intelligente »
 (état partagé, catalogue, recommandations) vit dans le cloud, tandis que la
@@ -103,8 +103,6 @@ la reprise sont partout les mêmes**.
 | **Web (navigateur)** | L'expérience Norva canonique, installable en PWA | Moteur WASM du navigateur (§3) ou chemin résidentiel/passerelle | Ouverte partout, sans rien installer |
 | **Android téléphone / tablette** | Application **native** (lecteur ExoPlayer/media3) | **Décodeurs matériels** du téléphone (HEVC/MKV/AC‑3…), depuis le **réseau domestique** | Mobilité + **mode hors ligne exclusif** (§5) |
 | **Android TV / Google TV** | Application salon, navigation à la télécommande | Lecteur **natif ExoPlayer**, ligne « Watch Next », depuis l'IP résidentielle | Le grand écran, appairage par QR code |
-| **Samsung Smart TV (Tizen)** | Enveloppe web Tizen (`.wgt`) plein écran | Selon le serveur/cloud connecté | Ouvre Norva sur les TV Samsung |
-| **Ordinateur (Electron)** | Application de bureau qui **embarque le serveur Norva** | **Transcodeur local** exécuté depuis l'IP résidentielle | Écran d'ordinateur + rôle de « hub » domestique |
 
 **Points communs :**
 
@@ -128,8 +126,7 @@ la reprise sont partout les mêmes**.
 
 Le **téléchargement pour lecture hors ligne** est une fonctionnalité **exclusive
 à l'application native Android (téléphone/tablette)**. Elle n'existe ni sur la TV,
-ni sur Samsung, ni sur l'ordinateur, ni dans le navigateur web — et c'est
-volontaire.
+ni dans le navigateur web — et c'est volontaire.
 
 ### Ce que fait le mode hors ligne
 
@@ -156,7 +153,7 @@ volontaire.
    déplacement — c'est le cas d'usage du téléphone et de la tablette.
 2. **Chaîne technique native** : téléchargement résidentiel direct, chiffrement
    lié au coffre matériel et lecteur qui déchiffre à la volée sont du code natif
-   Android que les enveloppes TV/Samsung/ordinateur/web ne portent pas.
+   Android que la TV et le navigateur web ne portent pas.
 3. **Sécurité par conception** : les téléchargements sont **liés au matériel** de
    l'appareil ; ils ne peuvent pas, par construction, en sortir.
 
@@ -185,10 +182,10 @@ Norva porte l'**état partagé** entre tous vos écrans :
 ### Appairer un nouvel écran
 
 - **Connexion par QR code sur la TV** : la TV affiche un code, vous vous connectez
-  (ou créez le compte) sur votre téléphone/ordinateur, vous approuvez — la TV
-  ouvre Norva. Aucune saisie d'e‑mail/mot de passe à la télécommande.
-- **Liens profonds** `norva://pair` depuis un scan de QR, et **connexion à un
-  « hub » domestique** pour les configurations avancées.
+  (ou créez le compte) sur votre téléphone, vous approuvez — la TV ouvre Norva.
+  Aucune saisie d'e‑mail/mot de passe à la télécommande.
+- **Liens profonds** `norva://pair` depuis un scan de QR pour un appairage
+  immédiat du téléphone à la TV.
 
 ---
 
@@ -231,14 +228,8 @@ seulement lorsqu'elle est fiable.
 
 ## 8. L'infrastructure
 
-Norva combine un backend auto‑hébergeable et une plateforme cloud, plus deux
-services spécialisés.
+Norva s'appuie sur une plateforme cloud et deux services spécialisés.
 
-- **Serveur Node auto‑hébergeable** (`server/`) : sert l'interface, détecte
-  `ffmpeg`/`ffprobe`, gère l'authentification, l'import et l'organisation du
-  catalogue, le transcodage/remux local, l'EPG. Il peut tourner sur un PC, un NAS,
-  un mini‑PC ou en Docker, et servir de **hub domestique** auquel les TV se
-  connectent. C'est aussi le cœur embarqué dans l'application de bureau Electron.
 - **Plateforme cloud (edge functions + base de données + tâches planifiées)** :
   comptes/profils, appairage, gestion des sources, favoris/historique/notes,
   sessions de lecture, moteur de synchronisation du catalogue (avec
@@ -320,9 +311,8 @@ Norva, c'est **une seule expérience média sur tous vos écrans** :
 - **Une première technique** — le premier à rendre lisibles, **dans un simple
   navigateur**, les formats de médias que les navigateurs refusent nativement
   (MKV, HEVC/H.265, audio Dolby, MPEG‑TS), **sans serveur de transcodage**.
-- **Un écosystème complet** — Web/PWA, application native Android
-  téléphone/tablette, Android TV / Google TV, Samsung Tizen et application de
-  bureau, toutes autour du même compte.
+- **Un écosystème multi‑écran** — Web/PWA, application native Android
+  téléphone/tablette et Android TV / Google TV, toutes autour du même compte.
 - **Le mobile en plus** — un **mode hors ligne** exclusif, chiffré et lié au
   matériel de l'appareil.
 - **La continuité** — une **synchronisation multi‑appareil** qui vous fait
