@@ -223,6 +223,14 @@ class AdminPage {
 #page-admin .sup-card .l{font-size:11px;color:var(--adm-tx2);text-transform:uppercase;letter-spacing:.4px;margin-top:5px;}
 /* Identités: leading gradient icon on each identity card */
 #page-admin .id-ic{width:42px;height:42px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0;background:linear-gradient(135deg,rgba(91,124,250,.22),rgba(168,85,247,.18));border:1px solid rgba(120,150,255,.2);}
+/* Système: health gauge bar + Services ‖ Activité two-column */
+#page-admin .kpi-bar{height:7px;border-radius:4px;background:rgba(255,255,255,.08);overflow:hidden;margin-top:11px;}
+#page-admin .kpi-bar>i{display:block;height:100%;border-radius:4px;background:linear-gradient(90deg,#5b7cfa,#8b7cff);}
+#page-admin .kpi.ok .kpi-bar>i{background:linear-gradient(90deg,#34d399,#22c1a6);}
+#page-admin .kpi.alert .kpi-bar>i{background:linear-gradient(90deg,#f87171,#ef4444);}
+#page-admin .sys-cols{display:grid;grid-template-columns:0.95fr 1.6fr;gap:16px;margin-bottom:18px;align-items:stretch;}
+#page-admin .sys-cols > *{margin-bottom:0;min-width:0;}
+@media(max-width:1000px){#page-admin .sys-cols{grid-template-columns:1fr;}}
 #page-admin .users-controls{display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap;}
 #page-admin .users-controls input,#page-admin .users-controls select{background:var(--color-bg-secondary,#16161c);border:1px solid var(--color-border,#2a2a38);color:var(--color-text-primary,#fff);border-radius:8px;padding:8px 12px;font-size:13px;}
 #page-admin .users-controls input{min-width:240px;flex:1;max-width:380px;}
@@ -1789,21 +1797,27 @@ class AdminPage {
         const v = this._view();
         v.innerHTML = `<div class="crm-page">
             <h1 class="crm-h1">🛡️ Système & Audit</h1>
-            <p class="crm-sub">Santé du snapshot & infra temps réel · feature flags · journal d'audit.</p>
-            <div class="kpi-gtitle">📸 Snapshot</div>
+            <p class="crm-sub">Santé de l'écosystème & infra temps réel · services · activité · logs · flags.</p>
+            <div class="kpi-gtitle">🩺 Santé système</div>
             <section id="sys-health" class="admin-cards"><div class="ssub">Chargement…</div></section>
-            <div class="admin-block"><h2>🌐 Infra temps réel <button id="sys-infra-refresh" class="mini-btn" aria-label="Re-pinger l'infra" title="Re-ping">↻</button></h2><div id="sys-infra" class="admin-cards"><div class="ssub">Ping…</div></div></div>
-            <div class="chart-panel"><h2>📊 Activité système — exécutions cron / jour</h2><p class="chsub">14 derniers jours · barres = exécutions, rouge = échecs</p><div id="sys-activity"><div class="ssub">Chargement…</div></div></div>
+            <div class="sys-cols">
+                <div class="admin-block"><h2>🧩 Services temps réel <button id="sys-infra-refresh" class="mini-btn" aria-label="Re-pinger l'infra" title="Re-ping">↻</button></h2><div class="scroll"><div id="sys-infra"><div class="ssub">Ping…</div></div></div></div>
+                <div class="chart-panel"><h2>📊 Activité système — exécutions cron / jour</h2><p class="chsub">14 derniers jours · barres = exécutions, rouge = échecs</p><div id="sys-activity"><div class="ssub">Chargement…</div></div></div>
+            </div>
+            <div class="admin-block"><h2>📜 Logs récents — journal d'audit</h2><div id="sys-audit"><div class="ssub">Chargement…</div></div></div>
             <div class="admin-block"><h2>💳 État billing / go-live <button id="sys-billing-refresh" class="mini-btn" aria-label="Re-vérifier l'état billing" title="Re-check">↻</button></h2><div id="sys-billing" class="admin-cards"><div class="ssub">Vérification…</div></div><p class="ssub" style="margin-top:8px">Bascule prod = poser les secrets Supabase (clé <code>sprod_</code>, <code>NORVA_STANCER_MODE=live</code>, <code>NORVA_BILLING_MODE=revenuecat</code>, <code>NORVA_ENTITLEMENTS_MODE=enforce</code>). Ce panneau doit alors passer tout au vert.</p></div>
             <div class="admin-block"><h2>🚩 Feature flags</h2><div id="sys-flags"><div class="ssub">Chargement…</div></div></div>
-            <div class="admin-block"><h2>📜 Journal d'audit</h2><div id="sys-audit"><div class="ssub">Chargement…</div></div></div>
         </div>`;
         try {
-            const o = await this._rpc('admin_overview');
+            const [o, act] = await Promise.all([
+                this._rpc('admin_overview'),
+                this._rpc('admin_activity_series', { p_days: 14 }).catch(() => null)
+            ]);
             if (this._nav !== nav) return; // navigated away — don't overwrite the new page's crumb
             this._lastTs = o && o.refreshed_at ? o.refreshed_at : this._lastTs;
             this._setCrumb('Système', this._lastTs);
-            this._renderSysHealth(o);
+            this._renderSysHealth(o, act);
+            this._renderSysActivity(act);
         } catch (e) {
             if (this._nav !== nav) return;
             const el = document.getElementById('sys-health');
@@ -1813,26 +1827,20 @@ class AdminPage {
         this._loadAudit(true);
         this._loadInfra();
         this._loadFlags();
-        this._loadSysActivity();
     }
 
     // Système: real cron-activity bar chart (admin_activity_series.system_daily).
-    async _loadSysActivity() {
+    _renderSysActivity(a) {
         const el = document.getElementById('sys-activity');
         if (!el) return;
-        const seq = this._nav;
-        try {
-            const a = await this._rpc('admin_activity_series', { p_days: 14 }) || {};
-            if (this._nav !== seq || this._route !== 'systeme') return;
-            const sd = Array.isArray(a.system_daily) ? a.system_daily : [];
-            const items = sd.map(d => ({ label: (d.day || '').slice(5).replace('-', '/'), value: d.runs, failed: d.failed }));
-            const totFail = sd.reduce((s, d) => s + (Number(d.failed) || 0), 0);
-            const chip = c => `<span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:${c};vertical-align:middle"></span>`;
-            el.innerHTML = AdminPage.bars(items, 'sys') +
-                `<div class="ssub" style="margin-top:8px">${chip('#6d7bf5')} exécutions&nbsp;&nbsp;${chip('#f87171')} échecs (${AdminPage.n(totFail)} sur 14 j)</div>`;
-        } catch (_) {
-            el.innerHTML = '<div class="ssub">Activité indisponible.</div>';
-        }
+        a = a || {};
+        const sd = Array.isArray(a.system_daily) ? a.system_daily : [];
+        if (!sd.length) { el.innerHTML = '<div class="ssub">Activité indisponible.</div>'; return; }
+        const items = sd.map(d => ({ label: (d.day || '').slice(5).replace('-', '/'), value: d.runs, failed: d.failed }));
+        const totFail = sd.reduce((s, d) => s + (Number(d.failed) || 0), 0);
+        const chip = c => `<span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:${c};vertical-align:middle"></span>`;
+        el.innerHTML = AdminPage.bars(items, 'sys') +
+            `<div class="ssub" style="margin-top:8px">${chip('#6d7bf5')} exécutions&nbsp;&nbsp;${chip('#f87171')} échecs (${AdminPage.n(totFail)} sur 14 j)</div>`;
     }
 
     // Keyset-paginated audit feed: each "Charger plus" fetches the batch strictly OLDER than the
@@ -1878,16 +1886,17 @@ class AdminPage {
     _renderInfra(d) {
         const el = document.getElementById('sys-infra');
         if (!el) return;
-        const svc = (label, s) => {
+        // Services table (Service | Statut | Latence) — the mockup's SERVICES panel, on real pings.
+        const row = (label, s) => {
             s = s || {};
-            if (s.configured === false) return `<div class="kpi"><div class="v" style="font-size:15px;color:#9aa">non configuré</div><div class="l">${AdminPage.esc(label)}</div></div>`;
+            if (s.configured === false) return `<tr><td>${AdminPage.esc(label)}</td><td><span class="badge gray">non configuré</span></td><td class="num">—</td></tr>`;
             const up = s.ok === true;
-            const status = s.status != null ? ` · ${AdminPage.esc(String(s.status))}` : '';
-            // On a down service, surface the captured error (redacted server-side) so the admin can act.
-            const errDetail = !up && s.error ? ` <span class="al-err">${AdminPage.esc(String(s.error).slice(0, 90))}</span>` : '';
-            return `<div class="kpi ${up ? 'ok' : 'alert'}"><div class="v" style="font-size:17px">${up ? `🟢 ${AdminPage.n(s.ms)} ms` : '🔴 down'}</div><div class="l">${AdminPage.esc(label)}${status}${errDetail}</div></div>`;
+            const badge = up ? '<span class="badge green">🟢 sain</span>' : '<span class="badge red">🔴 down</span>';
+            const err = !up && s.error ? `<div class="al-err">${AdminPage.esc(String(s.error).slice(0, 80))}</div>` : '';
+            const status = up && s.status != null ? ` <span class="pacct">${AdminPage.esc(String(s.status))}</span>` : '';
+            return `<tr class="${up ? '' : 'bad'}"><td>${AdminPage.esc(label)}${err}</td><td>${badge}${status}</td><td class="num">${up && s.ms != null ? AdminPage.n(s.ms) + ' ms' : '—'}</td></tr>`;
         };
-        el.innerHTML = [svc('Edge', d.edge), svc('Base de données', d.db), svc('Gateway', d.gateway), svc('Relay', d.relay)].join('');
+        el.innerHTML = `<table><thead><tr><th>Service</th><th>Statut</th><th class="num">Latence</th></tr></thead><tbody>${[row('Edge (API)', d.edge), row('Base de données', d.db), row('Gateway', d.gateway), row('Relay', d.relay)].join('')}</tbody></table>`;
         this._renderBillingState(d.billing);
     }
 
@@ -1954,21 +1963,34 @@ class AdminPage {
         catch (e) { this._toast('Erreur : ' + e.message, 'err'); }
     }
 
-    _renderSysHealth(o) {
+    // Real "santé système" gauge cards (no fake CPU/RAM — Norva has no machine metrics).
+    // Global status from real alert signals; two real % gauges (crons OK, sources saines).
+    _renderSysHealth(o, act) {
         o = o || {};
         const el = document.getElementById('sys-health');
         if (!el) return;
-        const card = (val, l, cls) => `<div class="kpi ${cls || ''}"><div class="v">${val}</div><div class="l">${l}</div></div>`;
         const n = AdminPage.n;
+        const fails = Number(o.cron_fails_24h) || 0, srcErr = Number(o.sources_error) || 0, subFail = Number(o.gensubs_failed) || 0;
+        let statusTxt = 'Sain', statusCls = 'ok';
+        if (srcErr > 0 || subFail > 0 || fails > 200) { statusTxt = 'Dégradé'; statusCls = 'alert'; }
+        else if (fails > 0) { statusTxt = 'Attention'; statusCls = ''; }
+        const srcTot = Number(o.sources_total) || 0;
+        const srcPct = srcTot > 0 ? Math.round(100 * (srcTot - srcErr) / srcTot) : 100;
+        const sd = (act && Array.isArray(act.system_daily)) ? act.system_daily : [];
+        const today = sd.length ? sd[sd.length - 1] : null;
+        const runs = today ? Number(today.runs) || 0 : 0, tfail = today ? Number(today.failed) || 0 : 0;
+        const cronPct = runs > 0 ? Math.round(100 * (runs - tfail) / runs) : 100;
         const fresh = o.refreshed_at && (Date.now() - new Date(o.refreshed_at).getTime()) < 12 * 60000;
+
+        const statusCard = `<div class="kpi ${statusCls}"><div class="kpi-hd"><div class="v" style="font-size:22px">${statusTxt}</div><span class="kpi-ic">🛡️</span></div><div class="l">Statut global</div></div>`;
+        const gauge = (pct, label, cls, icon) => `<div class="kpi ${cls}"><div class="kpi-hd"><div class="v">${pct} %</div><span class="kpi-ic">${icon}</span></div><div class="l">${label}</div><div class="kpi-bar"><i style="width:${Math.max(0, Math.min(100, pct))}%"></i></div></div>`;
+        const card = (v, l, cls, icon) => `<div class="kpi ${cls || ''}"><div class="kpi-hd"><div class="v">${v}</div><span class="kpi-ic">${icon}</span></div><div class="l">${l}</div></div>`;
         el.innerHTML = [
-            card(AdminPage.esc(o.refreshed_at ? AdminPage.timeAgo(o.refreshed_at) : '—'), 'Dernier snapshot', fresh ? 'ok' : 'alert'),
-            card(n(o.cron_active), 'Crons actifs', Number(o.cron_active) > 0 ? 'ok' : 'alert'),
-            card(n(o.cron_paused), 'Crons en pause'),
-            card(n(o.cron_fails_24h), 'Échecs cron 24h', Number(o.cron_fails_24h) > 0 ? 'alert' : 'ok'),
-            card(n(o.sources_error), 'Sources en erreur', Number(o.sources_error) > 0 ? 'alert' : 'ok'),
-            card(n(o.gensubs_processing), 'ST IA en cours'),
-            card(n(o.gensubs_failed), 'ST IA échoués', Number(o.gensubs_failed) > 0 ? 'alert' : '')
+            statusCard,
+            gauge(cronPct, 'Crons OK 24 h', cronPct >= 95 ? 'ok' : (cronPct >= 80 ? '' : 'alert'), '⏱️'),
+            gauge(srcPct, 'Sources saines', srcPct >= 90 ? 'ok' : (srcPct >= 70 ? '' : 'alert'), '🗂️'),
+            card(n(o.users_active_24h), 'Actifs 24 h', Number(o.users_active_24h) > 0 ? 'ok' : '', '👤'),
+            card(AdminPage.esc(o.refreshed_at ? AdminPage.timeAgo(o.refreshed_at) : '—'), 'Dernier snapshot', fresh ? 'ok' : 'alert', '📸')
         ].join('');
     }
 
