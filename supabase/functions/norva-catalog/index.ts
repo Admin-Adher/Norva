@@ -1226,28 +1226,11 @@ async function listGenreRails(req: Request, url: URL, userId: string) {
 // Full, paged list of one curated genre bucket (the rail's "Tout voir" / See
 // all). Same shape as listMediaItems so the client grid consumes it unchanged.
 // --- Audio language + burned-in subtitle filtering ----------------------------
-// Audio filters are strict: the value is a real ISO-639 code captured into
-// cloud_titles.audio_languages by ffprobe/playback. Release-name tags such as
-// vf/multi are intentionally NOT used for audio filtering because they can be
-// ambiguous. Subtitle filters remain best-effort because burned-in subtitles are
-// only visible through release/version tags.
-const SUBTITLE_FACET_TAGS: Record<string, string[]> = {
-  ar: ["subt_ar", "sub_ar", "subar", "arsub", "vostar"],
-  fr: ["vostfr", "subfr", "frsub", "subt_fr", "sub_fr"],
-  en: ["vosten", "suben", "ensub", "sub_en"],
-  es: ["vostes", "subes", "sub_es"],
-  de: ["vostde", "subde", "sub_de"],
-  it: ["vostit", "subit", "sub_it"],
-  pt: ["vostpt", "subpt", "sub_pt"],
-  tr: ["vosttr", "subtr", "sub_tr"],
-  nl: ["vostnl", "subnl", "sub_nl"],
-  ru: ["vostru", "subru", "sub_ru"],
-  pl: ["vostpl", "subpl", "sub_pl"],
-  hi: ["vosthi", "subhi", "sub_hi"],
-  ja: ["vostjpn", "vostja", "subjpn", "subja", "sub_jp", "sub_ja"],
-  ko: ["vostkor", "vostko", "subkor", "subko", "sub_ko"],
-  zh: ["vostzh", "subzh", "sub_zh", "subcn", "sub_cn"],
-};
+// Audio AND subtitle filters are both strict: the value is a real ISO-639 code captured by
+// ffprobe into cloud_titles.audio_languages (audio) / subtitle_tracks[].lang (soft subtitles).
+// Release-name tags such as vf/multi/vostfr are intentionally NOT used — they're ambiguous and
+// far poorer coverage. (Burned-in subtitles aren't a stream, so they can't be probed — an
+// honest, accepted limit; the soft-subtitle streams that ffprobe sees drive the menu instead.)
 
 function normalizeFacet(value: string | null): string | null {
   const v = (value || "").toLowerCase().trim();
@@ -1271,9 +1254,6 @@ function paramNumber(value: string | null): number | null {
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
 }
-function subtitleFacetTags(facet: string | null): string[] {
-  return facet ? (SUBTITLE_FACET_TAGS[facet] ?? []) : [];
-}
 // Audio facets are now real ISO-639 codes coming from cloud_titles.audio_languages.
 // Keep only syntactically-safe codes; the SQL filter below is strict on the captured
 // audio track language, not on lossy release-name version tags.
@@ -1287,6 +1267,22 @@ function titleVersionLanguages(title: JsonRecord): string[] {
 function titleAudioLanguages(title: JsonRecord): string[] {
   const raw = (title as { audio_languages?: unknown }).audio_languages;
   return Array.isArray(raw) ? raw.map((tag) => String(tag).toLowerCase()) : [];
+}
+// Distinct ISO-639 subtitle languages from the real detected soft-sub streams
+// (subtitle_tracks[].lang). Mirrors titleAudioLanguages for the "best for my
+// languages" sort. Empty when subtitles haven't been probed yet.
+function titleSubtitleLanguages(title: JsonRecord): string[] {
+  const raw = (title as { subtitle_tracks?: unknown }).subtitle_tracks;
+  if (!Array.isArray(raw)) return [];
+  const out: string[] = [];
+  for (const track of raw) {
+    const lang = (track as { lang?: unknown } | null)?.lang;
+    if (typeof lang === "string") {
+      const code = lang.toLowerCase();
+      if (/^[a-z]{2,3}$/.test(code) && !out.includes(code)) out.push(code);
+    }
+  }
+  return out;
 }
 // Ordered per-track audio map (absolute ffmpeg stream index -> ISO-639-1 or null), in
 // stream order. Lets the in-browser engine label each demuxed audio stream by index
@@ -1305,10 +1301,10 @@ function titleAudioTracks(title: JsonRecord): Array<{ index: number; lang: strin
 }
 // "Best for my languages": a preferred-audio match outweighs a preferred-subtitle
 // match; ties keep the incoming (recency) order via the stable index tiebreaker.
-function languageMatchRank(versionLangs: string[], audioLangs: string[], prefAudioIso: string | null, prefSubTags: string[]): number {
+function languageMatchRank(subtitleLangs: string[], audioLangs: string[], prefAudioIso: string | null, prefSubIso: string | null): number {
   let rank = 0;
   if (prefAudioIso && audioLangs.includes(prefAudioIso)) rank += 2;
-  if (prefSubTags.length && prefSubTags.some((tag) => versionLangs.includes(tag))) rank += 1;
+  if (prefSubIso && subtitleLangs.includes(prefSubIso)) rank += 1;
   return rank;
 }
 
@@ -1328,10 +1324,10 @@ async function listGenreItems(req: Request, url: URL, userId: string) {
   // sort. All additive: absent → the query and result are identical to before.
   const audioFacet = normalizeFacet(url.searchParams.get("audio"));
   const audioIso = audioFacetIso(audioFacet);
-  const subTags = subtitleFacetTags(normalizeFacet(url.searchParams.get("subs")));
+  const subIso = audioFacetIso(normalizeFacet(url.searchParams.get("subs")));
   const langSort = (url.searchParams.get("sort") || "").trim() === "lang-match";
   const prefAudioIso = langSort ? audioFacetIso(normalizeFacet(url.searchParams.get("prefAudio"))) : null;
-  const prefSubTags = langSort ? subtitleFacetTags(normalizeFacet(url.searchParams.get("prefSubs"))) : [];
+  const prefSubIso = langSort ? audioFacetIso(normalizeFacet(url.searchParams.get("prefSubs"))) : null;
   // Decade / minimum-rating filters so the whole filter bar works inside a genre
   // ("See all") or language grid — before, Year/Rating were silently ignored there.
   const yearRange = decadeRange(url.searchParams.get("year"));
@@ -1357,11 +1353,12 @@ async function listGenreItems(req: Request, url: URL, userId: string) {
     if (search) out = out.ilike("title", `%${search}%`);
     if (yearRange) out = out.gte("release_year", yearRange.min).lte("release_year", yearRange.max);
     if (minRating !== null) out = out.gte("rating_num", minRating);
-    // Subtitles: burned-in/release tag only (best-effort). Audio: strict real track
-    // language captured from ffprobe/playback, so selecting a language cannot match a
-    // title that merely has a loose release-name tag such as multi/vf.
-    if (subTags.length) out = out.overlaps("version_languages", subTags);
+    // Audio + subtitles: both strict on the real ffprobe-detected track language, so the count
+    // shown next to a language equals the number of results and a loose release-name tag
+    // (multi/vf/vostfr) can never produce a false match. Audio = audio_languages (text[]);
+    // subs = subtitle_tracks (jsonb array of {lang,…}), matched by @> containment.
     if (audioIso) out = out.contains("audio_languages", [audioIso]);
+    if (subIso) out = out.contains("subtitle_tracks", [{ lang: subIso }]);
     return out;
   };
 
@@ -1369,7 +1366,7 @@ async function listGenreItems(req: Request, url: URL, userId: string) {
     // "Best for my languages" sort needs an in-memory rank over the filtered set;
     // it's bounded by the (usually language/genre-narrowed) filter. Every other
     // view uses exact SQL count + range pagination over the whole catalogue.
-    if (langSort && (prefAudioIso || prefSubTags.length)) {
+    if (langSort && (prefAudioIso || prefSubIso)) {
       const { data, error } = await applyFilters(db.from("cloud_titles").select("*"))
         .order("created_at", { ascending: false })
         .limit(candidateLimit);
@@ -1378,7 +1375,7 @@ async function listGenreItems(req: Request, url: URL, userId: string) {
         throwDb(error, "Unable to list genre items");
       }
       const ranked = ((data ?? []) as JsonRecord[])
-        .map((title, index) => ({ title, index, rank: languageMatchRank(titleVersionLanguages(title), titleAudioLanguages(title), prefAudioIso, prefSubTags) }))
+        .map((title, index) => ({ title, index, rank: languageMatchRank(titleSubtitleLanguages(title), titleAudioLanguages(title), prefAudioIso, prefSubIso) }))
         .sort((a, b) => b.rank - a.rank || a.index - b.index)
         .map((entry) => entry.title);
       const pageRows = ranked.slice(offset, offset + limit);

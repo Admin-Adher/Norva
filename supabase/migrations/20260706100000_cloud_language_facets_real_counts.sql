@@ -1,9 +1,17 @@
--- Real language facets: expose every observed audio language with exact counts and
--- keep subtitle facets best-effort from release/burned-in tags.
+-- Real language facets: expose every observed AUDIO language (audio_languages) AND SUBTITLE
+-- language (subtitle_tracks[].lang) — both ffprobe-detected — with exact per-language title
+-- counts. Both filters are strict on the detected track (menu count == grid results). Burned-in
+-- subtitles aren't a stream so they can't appear (honest limit); soft-sub streams drive the menu.
 
 alter table public.cloud_catalog_facet_summary
   add column if not exists audio_lang_counts jsonb not null default '{}'::jsonb,
   add column if not exists subtitle_lang_counts jsonb not null default '{}'::jsonb;
+
+-- Subtitle filters query subtitle_tracks by language (jsonb @> containment), so index it — the
+-- grid filter becomes a GIN lookup instead of a seq scan. jsonb_path_ops is compact and supports @>.
+-- (Non-concurrent: builds during deploy, a one-time cost; mirrors cloud_titles_audio_languages_gin.)
+create index if not exists cloud_titles_subtitle_tracks_gin
+  on public.cloud_titles using gin (subtitle_tracks jsonb_path_ops);
 
 create or replace function public.cloud_refresh_facet_summary(p_user_id uuid, p_item_type text)
 returns void
@@ -43,31 +51,17 @@ begin
        cross join lateral unnest(coalesce(t.version_languages, '{}')) as v(val)
   where t.user_id = p_user_id and t.item_type = p_item_type and t.variant_count > 0 and v.val is not null;
 
-  with defs(id, tags) as (
-    values
-      ('ar', array['subt_ar','sub_ar','subar','arsub','vostar']),
-      ('fr', array['vostfr','subfr','frsub','subt_fr','sub_fr']),
-      ('en', array['vosten','suben','ensub','sub_en']),
-      ('es', array['vostes','subes','sub_es']),
-      ('de', array['vostde','subde','sub_de']),
-      ('it', array['vostit','subit','sub_it']),
-      ('pt', array['vostpt','subpt','sub_pt']),
-      ('tr', array['vosttr','subtr','sub_tr']),
-      ('nl', array['vostnl','subnl','sub_nl']),
-      ('ru', array['vostru','subru','sub_ru']),
-      ('pl', array['vostpl','subpl','sub_pl']),
-      ('hi', array['vosthi','subhi','sub_hi']),
-      ('ja', array['vostjpn','vostja','subjpn','subja','sub_jp','sub_ja']),
-      ('ko', array['vostkor','vostko','subkor','subko','sub_ko']),
-      ('zh', array['vostzh','subzh','sub_zh','subcn','sub_cn'])
-  )
-  select coalesce(jsonb_object_agg(id, n), '{}'::jsonb) into v_sub_counts
+  -- Subtitles: real detected soft-sub streams from ffprobe (subtitle_tracks[].lang), the same
+  -- model as audio. Burned-in subs aren't a stream so they can't appear here — an honest limit.
+  select coalesce(jsonb_object_agg(lang, n), '{}'::jsonb) into v_sub_counts
   from (
-    select d.id, count(distinct t.id)::bigint as n
-    from defs d
-         join public.cloud_titles t on t.user_id = p_user_id and t.item_type = p_item_type and t.variant_count > 0
-          and coalesce(t.version_languages, '{}') && d.tags
-    group by d.id
+    select lower(st->>'lang') as lang, count(distinct t.id)::bigint as n
+    from public.cloud_titles t
+         cross join lateral jsonb_array_elements(case when jsonb_typeof(t.subtitle_tracks) = 'array' then t.subtitle_tracks else '[]'::jsonb end) as st
+    where t.user_id = p_user_id and t.item_type = p_item_type and t.variant_count > 0
+      and lower(st->>'lang') ~ '^[a-z]{2,3}$'
+      and lower(st->>'lang') not in ('un','und','mul','zxx','mis','nar')
+    group by lower(st->>'lang')
   ) s;
 
   insert into public.cloud_catalog_facet_summary (
@@ -141,31 +135,15 @@ begin
       group by lower(a.lang)
     ) live_audio;
 
-    with defs(id, tags) as (
-      values
-        ('ar', array['subt_ar','sub_ar','subar','arsub','vostar']),
-        ('fr', array['vostfr','subfr','frsub','subt_fr','sub_fr']),
-        ('en', array['vosten','suben','ensub','sub_en']),
-        ('es', array['vostes','subes','sub_es']),
-        ('de', array['vostde','subde','sub_de']),
-        ('it', array['vostit','subit','sub_it']),
-        ('pt', array['vostpt','subpt','sub_pt']),
-        ('tr', array['vosttr','subtr','sub_tr']),
-        ('nl', array['vostnl','subnl','sub_nl']),
-        ('ru', array['vostru','subru','sub_ru']),
-        ('pl', array['vostpl','subpl','sub_pl']),
-        ('hi', array['vosthi','subhi','sub_hi']),
-        ('ja', array['vostjpn','vostja','subjpn','subja','sub_jp','sub_ja']),
-        ('ko', array['vostkor','vostko','subkor','subko','sub_ko']),
-        ('zh', array['vostzh','subzh','sub_zh','subcn','sub_cn'])
-    )
-    select coalesce(jsonb_object_agg(id, n), '{}'::jsonb) into v_sub_counts
+    select coalesce(jsonb_object_agg(lang, n), '{}'::jsonb) into v_sub_counts
     from (
-      select d.id, count(distinct t.id)::bigint as n
-      from defs d
-           join public.cloud_titles t on t.user_id = p_user_id and t.item_type = p_item_type and t.variant_count > 0
-            and coalesce(t.version_languages, '{}') && d.tags
-      group by d.id
+      select lower(st->>'lang') as lang, count(distinct t.id)::bigint as n
+      from public.cloud_titles t
+           cross join lateral jsonb_array_elements(case when jsonb_typeof(t.subtitle_tracks) = 'array' then t.subtitle_tracks else '[]'::jsonb end) as st
+      where t.user_id = p_user_id and t.item_type = p_item_type and t.variant_count > 0
+        and lower(st->>'lang') ~ '^[a-z]{2,3}$'
+        and lower(st->>'lang') not in ('un','und','mul','zxx','mis','nar')
+      group by lower(st->>'lang')
     ) live_sub;
   end if;
 
@@ -190,7 +168,7 @@ begin
   from (
     select key as code, greatest(0, value::text::bigint) as n
     from jsonb_each(coalesce(v_sub_counts, '{}'::jsonb))
-    where key ~ '^[a-z]{2,3}$' and value::text::bigint > 0
+    where key ~ '^[a-z]{2,3}$' and key not in ('un','und','mul','zxx','mis','nar') and value::text::bigint > 0
   ) s;
 
   return jsonb_build_object('audio', v_audio_out, 'subtitles', v_sub_out);
