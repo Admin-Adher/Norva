@@ -18,7 +18,7 @@
   <link rel="preconnect" href="https://oupsceccxsonaalhueff.supabase.co" crossorigin>
   <link rel="dns-prefetch" href="https://image.tmdb.org">
   <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
-  <link rel="stylesheet" href="/css/main.css?v=59">
+  <link rel="stylesheet" href="/css/main.css?v=60">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@800&display=swap"
@@ -1235,7 +1235,7 @@
                   </div>
                 </div>
 
-                <div class="setting-item pd-needs-server">
+                <div class="setting-item pd-needs-server tv-hidden">
                   <div class="setting-info" style="flex: 1;">
                     <span class="setting-label">TMDB API key</span>
                     <span class="setting-hint">Optional, for self-hosted setups — adds richer posters, real genres and
@@ -1365,8 +1365,19 @@
             <!-- Troubleshooting --------------------------------------------->
             <div class="settings-section">
               <h3>Having trouble with a channel?</h3>
-              <p class="tc-section-sub">Only switch these on if you're actually seeing the problem described — leave
-                them off otherwise.</p>
+              <p class="tc-section-sub">Tell Norva what you're seeing and it'll switch on the right fix — or set the
+                toggles below yourself.</p>
+
+              <div class="tc-wizard" id="tc-wizard">
+                <div class="tc-wizard-q">What happens when you try to watch?</div>
+                <div class="tc-wizard-options">
+                  <button type="button" class="tc-wizard-opt" data-fix="sound">🔇 Picture but no sound</button>
+                  <button type="button" class="tc-wizard-opt" data-fix="black">⬛ Black screen / won't start</button>
+                  <button type="button" class="tc-wizard-opt" data-fix="buffer">⏳ Keeps buffering</button>
+                  <button type="button" class="tc-wizard-opt" data-fix="blocked">🚫 Provider blocks it</button>
+                </div>
+                <p class="tc-wizard-result hidden" id="tc-wizard-result" role="status"></p>
+              </div>
 
               <div class="setting-item tc-needs-transcoder">
                 <label class="setting-toggle">
@@ -1984,7 +1995,7 @@
   <script defer src="/js/pages/Guide.js?v=2"></script>
   <script defer src="/js/pages/MoviesPage.js?v=43"></script>
   <script defer src="/js/pages/SeriesPage.js?v=44"></script>
-  <script defer src="/js/pages/Settings.js?v=38"></script>
+  <script defer src="/js/pages/Settings.js?v=39"></script>
   <script defer src="/js/pages/WatchPage.js?v=116"></script>
   <script defer src="/js/profiles.js?v=7"></script>
   <!-- AdminPage.js (76 KB, admin-only) is lazy-loaded by app.ensureAdminPage(). -->

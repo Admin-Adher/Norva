@@ -3081,6 +3081,192 @@ video::cue {
   50% { box-shadow: 0 0 0 4px rgba(251, 191, 36, 0.28); }
 }
 
+/* ============================================================
+   Settings on Android TV — hide setup surfaces a remote can't sensibly drive.
+   These are done from the phone/web app; on TV we keep status + the few remote-
+   friendly toggles. Covers: TMDB key, the add-source forms (Add provider/playlist/
+   guide), the whole Transcoding "Advanced" block (encoder, remux, custom
+   user-agent, connection identity…), and the Manage Content + Local Users tabs.
+   ============================================================ */
+.tv-mode .tv-hidden,
+.tv-mode #tab-transcode .settings-advanced,
+.tv-mode #add-xtream,
+.tv-mode #add-m3u,
+.tv-mode #add-epg,
+.tv-mode .tab[data-tab="content"],
+.tv-mode .tab[data-tab="users"] {
+  display: none !important;
+}
+
+/* ============================================================
+   Settings responsive layout — mobile category list + tablet master/detail.
+   Only the .active panel is display:block, so all panels can share the same
+   content cell without overlap.
+   ============================================================ */
+
+/* Mobile: tabs become a vertical list of full-width rows — a native-settings feel
+   rather than a cramped horizontal strip. */
+@media (max-width: 640px) {
+  .settings-container .tabs {
+    flex-direction: column;
+    gap: 4px;
+    border-bottom: none;
+    margin-bottom: var(--space-md);
+  }
+
+  .settings-container .tab {
+    width: 100%;
+    text-align: left;
+    padding: 13px 14px;
+    border-bottom: none;
+    border-radius: 10px;
+    background: var(--color-bg-secondary);
+    font-size: 0.95rem;
+  }
+
+  .settings-container .tab.active {
+    border-bottom: none;
+    background: var(--color-accent-dim);
+    color: var(--color-accent-hover);
+  }
+}
+
+/* Tablet: master/detail — categories to the left, the active panel fills the
+   column beside them. */
+@media (min-width: 900px) and (max-width: 1180px) {
+  .settings-container {
+    max-width: 1120px;
+    display: grid;
+    grid-template-columns: 224px minmax(0, 1fr);
+    column-gap: var(--space-xl);
+    align-content: start;
+  }
+
+  .settings-container > h2 {
+    grid-column: 1 / -1;
+    grid-row: 1;
+  }
+
+  .settings-container > .tabs {
+    grid-column: 1;
+    grid-row: 2;
+    flex-direction: column;
+    gap: 4px;
+    align-self: start;
+    margin-bottom: 0;
+    border-bottom: none;
+    border-right: 1px solid var(--color-border);
+    padding-right: var(--space-md);
+  }
+
+  .settings-container > .tabs .tab {
+    width: 100%;
+    text-align: left;
+    padding: 10px 12px;
+    border-bottom: none;
+    border-left: 2px solid transparent;
+    border-radius: 8px;
+  }
+
+  .settings-container > .tabs .tab.active {
+    border-bottom: none;
+    border-left-color: var(--color-accent);
+    background: var(--color-accent-dim);
+  }
+
+  .settings-container > .tab-content {
+    grid-column: 2;
+    grid-row: 2;
+  }
+}
+
+/* ============================================================
+   Transcoding troubleshooting wizard — pick the symptom, Norva flips the fix.
+   ============================================================ */
+.tc-wizard {
+  margin: 0 0 var(--space-md);
+  padding: 16px;
+  border-radius: 14px;
+  border: 1px solid var(--color-border);
+  background: rgba(91, 116, 255, 0.06);
+}
+
+.tc-wizard-q {
+  font-weight: 700;
+  color: var(--color-text-primary);
+  margin-bottom: 12px;
+}
+
+.tc-wizard-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.tc-wizard-opt {
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--color-text-primary);
+  font-size: 0.9rem;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+
+.tc-wizard-opt:hover,
+.tc-wizard-opt:focus-visible {
+  outline: none;
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.28);
+}
+
+.tc-wizard-opt.is-active {
+  background: var(--color-accent-dim);
+  border-color: var(--color-accent);
+  color: var(--color-accent-hover);
+}
+
+.tc-wizard-result {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(34, 197, 94, 0.12);
+  border: 1px solid rgba(34, 197, 94, 0.32);
+  color: #86efac;
+  font-size: 0.86rem;
+  font-weight: 600;
+}
+
+.tc-wizard-result.hidden {
+  display: none;
+}
+
+/* Briefly highlight the underlying toggle/select the wizard just changed, so the
+   viewer sees exactly which control it flipped (and can undo it). */
+.setting-item.tc-flash {
+  border-radius: 10px;
+  animation: tc-flash 2.2s ease;
+}
+
+@keyframes tc-flash {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); }
+  15%, 55% { box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.6); }
+}
+
+@media (max-width: 560px) {
+  .tc-wizard-options {
+    grid-template-columns: 1fr;
+  }
+}
+
+.tv-mode .tc-wizard-opt {
+  padding: 16px 18px;
+  font-size: 1rem;
+}
+
 .source-form-intro {
   margin: 0 0 var(--space-md);
   color: var(--color-text-secondary);

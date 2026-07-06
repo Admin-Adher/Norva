@@ -901,6 +901,56 @@ class SettingsPage {
             this.app.player.settings.userAgentCustom = userAgentCustomInput.value;
             this.app.player.saveSettings();
         });
+
+        this.initTranscodeWizard();
+    }
+
+    /**
+     * Troubleshooting wizard: the viewer picks the symptom they're seeing and Norva
+     * flips on the matching fix (which are the same toggles/selects below, so the
+     * existing change→saveSettings listeners persist it). Friendlier than asking a
+     * non-technical user to know that "no sound" means "force audio transcode".
+     */
+    initTranscodeWizard() {
+        const wiz = document.getElementById('tc-wizard');
+        if (!wiz || wiz.dataset.wired) return;
+        wiz.dataset.wired = '1';
+        const resultEl = document.getElementById('tc-wizard-result');
+
+        const FIXES = {
+            sound:   { toggle: 'setting-force-transcode-tc', msg: 'Turned on the audio fix (Dolby/AC3 → browser-friendly sound). Play the channel again.' },
+            black:   { toggle: 'setting-force-proxy-tc', msg: "Now fetching the stream through Norva's servers to get past what stopped it loading. Try again." },
+            blocked: { toggle: 'setting-force-proxy-tc', msg: "Now streaming through Norva's servers to bypass provider blocks. Try again." },
+            buffer:  { selects: [['setting-quality', 'low'], ['setting-max-resolution', '720p']], msg: 'Lowered quality to reduce buffering. Raise it again once it plays smoothly.' }
+        };
+
+        const flash = (el) => el?.closest('.setting-item')?.classList.add('tc-flash');
+        const setToggle = (id) => {
+            const el = document.getElementById(id);
+            if (el && !el.checked) { el.checked = true; el.dispatchEvent(new Event('change', { bubbles: true })); }
+            flash(el);
+        };
+        const setSelect = (id, val) => {
+            const el = document.getElementById(id);
+            if (el && el.value !== val) { el.value = val; el.dispatchEvent(new Event('change', { bubbles: true })); }
+            flash(el);
+        };
+
+        wiz.addEventListener('click', (e) => {
+            const btn = e.target.closest('.tc-wizard-opt');
+            if (!btn) return;
+            const fix = FIXES[btn.dataset.fix];
+            if (!fix) return;
+            if (fix.toggle) setToggle(fix.toggle);
+            (fix.selects || []).forEach(([id, val]) => setSelect(id, val));
+            wiz.querySelectorAll('.tc-wizard-opt').forEach(o => o.classList.toggle('is-active', o === btn));
+            if (resultEl) { resultEl.textContent = '✓ ' + fix.msg; resultEl.classList.remove('hidden'); }
+            window.NorvaModal?.toast('Applied a fix — try the channel again.', 'success');
+            setTimeout(() => {
+                document.getElementById('tab-transcode')?.querySelectorAll('.tc-flash')
+                    .forEach(el => el.classList.remove('tc-flash'));
+            }, 2400);
+        });
     }
 
     /**
