@@ -34,6 +34,13 @@ begin
   -- auto-released when the pg_cron worker backend ends, so it can't leak even on error.
   if not pg_try_advisory_lock(hashtext('reap_deleted_sources')) then return; end if;
 
+  -- Defer while any live import is running: the drain's per-row rollup-trigger deletes contend with
+  -- an import's title-building (and its admission slot). A removed source is already hidden from the
+  -- user, so its drain can wait for an idle window instead of fighting a fresh import.
+  if exists (select 1 from public.cloud_sources where sync_status = 'syncing' and deleted_at is null) then
+    perform pg_advisory_unlock(hashtext('reap_deleted_sources')); return;
+  end if;
+
   select array_agg(id) into ids
   from (select id from public.cloud_sources where deleted_at is not null order by deleted_at limit 10) x;
   if ids is null then perform pg_advisory_unlock(hashtext('reap_deleted_sources')); return; end if;
