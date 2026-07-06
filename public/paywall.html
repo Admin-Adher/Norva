@@ -107,6 +107,13 @@
       font-size: 13px;
       line-height: 1.55;
     }
+    /* D-pad focus ring — matters most on Android TV (10-foot view). */
+    .btn:focus-visible { outline: 3px solid #b579ff; outline-offset: 3px; }
+    /* Bigger targets and copy for the couch. */
+    html.tv h1 { font-size: clamp(40px, 6vw, 56px); }
+    html.tv .lead { font-size: 20px; }
+    html.tv .status { font-size: 18px; }
+    html.tv .btn { min-height: 64px; font-size: 18px; padding: 0 28px; }
     @media (max-width: 560px) {
       .actions { display: grid; }
       .btn { width: 100%; }
@@ -114,6 +121,10 @@
   </style>
 </head>
 <body>
+  <script>
+    // Bigger targets + focus tuning on Android TV (D-pad navigation).
+    if (/NorvaTV-AndroidTV/i.test(navigator.userAgent || '')) { document.documentElement.classList.add('tv'); }
+  </script>
   <main class="panel">
     <div class="brand">
       <img src="/favicon.png" alt="">

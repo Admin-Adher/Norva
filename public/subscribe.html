@@ -69,6 +69,21 @@
     .assurance b { color: #eafff5; font-weight: 700; }
     .assurance-ico { font-size: 20px; line-height: 1.2; }
     html.tv .assurance { font-size: 16px; }
+    /* "Why Family?" — the two plans are identical except for simultaneous streams,
+       so state that plainly under the side-by-side cards instead of leaving it implicit. */
+    .compare { margin: 16px auto 0; max-width: 620px; padding: 12px 16px; border: 1px solid var(--line);
+      border-radius: 12px; background: rgba(255,255,255,0.03); color: var(--muted);
+      font-size: 13.5px; line-height: 1.55; text-align: center; }
+    .compare b { color: var(--text); font-weight: 700; }
+    html.tv .compare { font-size: 16px; }
+    /* Accepted-card marks — shown only on the Stancer web checkout (native Play
+       Billing pays through Google, so card logos would be misleading there). */
+    .pay-marks { display: none; align-items: center; gap: 8px; margin-top: 14px; flex-wrap: wrap;
+      color: var(--quiet); font-size: 12px; }
+    .pay-marks.show { display: flex; }
+    .pay-marks .pm-lbl { font-weight: 700; }
+    .pay-marks .pm { width: 34px; height: 21px; border: 1px solid rgba(255,255,255,.14);
+      border-radius: 4px; display: block; }
     /* Confirmation panel shown after a successful trial / subscription start. */
     .confirm { text-align: center; padding: 28px 22px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); max-width: 520px; margin: 8px auto 0; }
     .confirm .badge-ok { display: inline-grid; place-items: center; width: 46px; height: 46px; border-radius: 50%; background: rgba(52,211,153,.15); color: var(--green); font-size: 24px; margin-bottom: 12px; }
@@ -147,6 +162,23 @@
         </ul>
         <button class="btn buy" type="button">Start 7-day free trial</button>
       </article>
+    </div>
+
+    <p class="compare">Both plans include <b>every Norva feature</b>. The only difference is how many
+      screens can stream at the same time — <b>Norva</b> covers 2, <b>Norva Family</b> covers 5,
+      ideal when several people watch at once.</p>
+
+    <div class="pay-marks" id="pay-marks" aria-label="Accepted payment methods">
+      <span class="pm-lbl">Secure card payment</span>
+      <svg class="pm" viewBox="0 0 48 30" role="img" aria-label="Visa">
+        <rect width="48" height="30" rx="4" fill="#fff"/>
+        <text x="24" y="20" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-style="italic" font-weight="700" font-size="13" letter-spacing="0.5" fill="#1a1f71">VISA</text>
+      </svg>
+      <svg class="pm" viewBox="0 0 48 30" role="img" aria-label="Mastercard">
+        <rect width="48" height="30" rx="4" fill="#fff"/>
+        <circle cx="20" cy="15" r="7.5" fill="#eb001b"/>
+        <circle cx="28" cy="15" r="7.5" fill="#f79e1b" fill-opacity="0.9"/>
+      </svg>
     </div>
 
     <!-- Shown only on the Stancer web checkout (native Play Billing has no such hold). -->
@@ -395,6 +427,8 @@
           if (b && b.isStancerEnabled && b.isStancerEnabled() && !b.hasNativeBilling()) {
             const el = document.getElementById('trial-assurance');
             if (el) el.classList.add('show');
+            const pm = document.getElementById('pay-marks');
+            if (pm) pm.classList.add('show');
           }
         } catch (_) { /* ignore */ }
       }

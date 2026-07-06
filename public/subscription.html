@@ -60,6 +60,22 @@
     .linkish { background: none; border: 0; color: var(--quiet); font: inherit; font-size: 13px;
       cursor: pointer; text-decoration: underline; margin-top: 14px; display: inline-block; padding: 0; }
     html.tv .btn { min-height: 64px; font-size: 18px; }
+    /* Android TV: enlarge the cancel/confirm modal for the 10-foot view and give
+       D-pad focus a clear ring (the flow itself is simplified to a single confirm). */
+    html.tv .modal { width: min(620px, 100%); padding: 30px; }
+    html.tv .modal h2 { font-size: 24px; }
+    html.tv .modal p { font-size: 17px; }
+    html.tv .reasons label { padding: 16px 18px; font-size: 17px; }
+    html.tv .modal .btn:focus-visible { outline: 3px solid var(--pink); outline-offset: 3px; }
+    /* Tablet+: use the extra width — put the status/details card and its controls
+       side-by-side (details on the left, a vertical action rail on the right)
+       instead of a single narrow 560px column with the buttons stacked beneath. */
+    @media (min-width: 760px) {
+      .wrap { width: min(860px, 100%); }
+      #content { display: grid; grid-template-columns: minmax(0, 1fr) 240px; gap: 20px; align-items: start; }
+      #content .actions { flex-direction: column; flex-wrap: nowrap; margin-top: 0; }
+      #content .actions .btn { width: 100%; }
+    }
     /* Mobile: the cancel modal becomes a bottom sheet — larger reason rows and a
        sticky action bar so "Keep / Cancel" is always reachable without scrolling. */
     @media (max-width: 560px) {
@@ -424,29 +440,38 @@
       function cancelButton(decision) {
         if (!isStancerWeb(decision) || !(window.NorvaBilling && window.NorvaBilling.stancerCancel)) return null;
         const b = el('button', 'btn ghost', 'Cancel plan');
+        // A short, accessible confirm with no reason step or counter-offer. Used when
+        // a payment is owed (past due / grace) and on Android TV, where a multi-step
+        // radio flow is painful with a D-pad. `immediate` picks the "when access ends"
+        // copy: now (past due) vs at the end of the current period (normal cancel).
+        function simpleConfirm(immediate) {
+          const trialing = String(decision.status || '') === 'trialing';
+          const cm = buildModal();
+          cm.modal.appendChild(el('h2', null, immediate ? 'Cancel your plan now?' : 'Cancel your plan?'));
+          cm.modal.appendChild(el('p', null, immediate
+            ? 'Your access ends immediately and nothing further is charged.'
+            : (trialing
+                ? "You keep full access until your trial ends, and you won't be charged."
+                : 'You keep full access until the end of the current period, and nothing further will be charged.')));
+          const row = el('div', 'actions');
+          const cancelNow = el('button', 'btn danger', 'Cancel plan');
+          cancelNow.addEventListener('click', function () {
+            cancelNow.disabled = true; cancelNow.textContent = 'Cancelling…';
+            b.disabled = true; b.textContent = 'Cancelling…';
+            doCancel('skipped');
+          });
+          const keep = el('button', 'btn ghost', 'Keep my plan');
+          keep.addEventListener('click', cm.close);
+          row.appendChild(cancelNow);
+          row.appendChild(keep);
+          cm.modal.appendChild(row);
+          cm.focusFirst();
+        }
         b.addEventListener('click', function () {
           const st = String(decision.status || '');
-          if (st === 'past_due' || st === 'grace') {
-            // Past-due plans skip the counter-offer (a payment is owed) — a short,
-            // accessible confirm instead of a native window.confirm().
-            const cm = buildModal();
-            cm.modal.appendChild(el('h2', null, 'Cancel your plan now?'));
-            cm.modal.appendChild(el('p', null, 'Your access ends immediately and nothing further is charged.'));
-            const row = el('div', 'actions');
-            const cancelNow = el('button', 'btn danger', 'Cancel plan');
-            cancelNow.addEventListener('click', function () {
-              cancelNow.disabled = true; cancelNow.textContent = 'Cancelling…';
-              b.disabled = true; b.textContent = 'Cancelling…';
-              doCancel('skipped');
-            });
-            const keep = el('button', 'btn ghost', 'Keep my plan');
-            keep.addEventListener('click', cm.close);
-            row.appendChild(cancelNow);
-            row.appendChild(keep);
-            cm.modal.appendChild(row);
-            cm.focusFirst();
-            return;
-          }
+          const immediate = (st === 'past_due' || st === 'grace');
+          const isTv = document.documentElement.classList.contains('tv');
+          if (immediate || isTv) { simpleConfirm(immediate); return; }
           openCancelFlow(decision);
         });
         return b;

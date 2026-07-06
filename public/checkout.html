@@ -26,7 +26,10 @@
     h1 { font-size: clamp(24px, 5vw, 34px); line-height: 1.1; margin-bottom: 6px; }
     .sub { color: var(--muted); font-size: 15px; margin-bottom: 22px; }
     .grid { display: grid; grid-template-columns: 380px 1fr; gap: 18px; align-items: start; }
-    @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
+    /* Stack summary + card form on portrait tablets and phones — a 380px column
+       leaves the Stancer card iframe too cramped below ~900px. Landscape tablets
+       (≥901px) and desktop keep the side-by-side summary | form layout. */
+    @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
     .card { border: 1px solid var(--line); border-radius: 14px; padding: 22px; background: var(--panel); }
 
     /* ── Order summary ──────────────────────────────────────────────────── */
@@ -77,7 +80,15 @@
       background: #151b26; color: #dbe7ff; font-size: 13px; font-weight: 700; text-decoration: none; }
     .pay-fallback[hidden] { display: none; }
     .pay-fallback:hover, .pay-fallback:focus-visible { border-color: var(--accent); outline: none; }
-    @media (max-width: 760px) { .pay-fallback { width: 100%; } }
+    @media (max-width: 900px) { .pay-fallback { width: 100%; } }
+    /* Accepted-card marks — a small trust cue that a real, secure card payment is
+       what happens here. Honest to the Stancer rail (Visa / Mastercard). */
+    .pay-marks { display: flex; align-items: center; gap: 8px; margin-top: 14px; flex-wrap: wrap;
+      color: var(--quiet); font-size: 12px; }
+    .pay-marks .pm-lbl { font-weight: 700; }
+    .pay-marks .pm { width: 34px; height: 21px; border: 1px solid rgba(255,255,255,.14);
+      border-radius: 4px; display: block; }
+    .pay-marks .pm-more { font-size: 11.5px; }
     .status { margin-top: 14px; padding: 13px; border-radius: 10px; border: 1px solid var(--line);
       background: #151b26; color: #dbe7ff; line-height: 1.5; font-size: 14px; display: none; }
     .status.show { display: block; }
@@ -87,6 +98,27 @@
       display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
     .btn.ghost { background: #242c3d; color: #dbe7ff; border: 1px solid #344158; }
     .btn:focus-visible { outline: 3px solid var(--pink); outline-offset: 3px; }
+
+    /* ── Android TV (10-foot view) ───────────────────────────────────────
+       Filling an embedded card iframe with a D-pad is painful, so the boot
+       logic swaps it for a "finish on your phone" QR. These rules size that
+       panel and enlarge the surrounding chrome for the couch. */
+    html.tv h1 { font-size: 40px; }
+    html.tv .sub { font-size: 18px; }
+    html.tv .btn { min-height: 64px; font-size: 18px; }
+    html.tv .pay-head h2 { font-size: 20px; }
+    .tv-continue { display: grid; justify-items: center; text-align: center; gap: 14px; padding: 8px 6px 4px; }
+    .tv-continue[hidden] { display: none; }
+    .tv-continue h3 { font-size: 22px; }
+    html.tv .tv-continue h3 { font-size: 26px; }
+    .tv-continue p { color: var(--muted); font-size: 14px; line-height: 1.55; max-width: 440px; }
+    html.tv .tv-continue p { font-size: 17px; max-width: 580px; }
+    .tv-qr { width: clamp(200px, 30vw, 260px); aspect-ratio: 1 / 1; background: #fff;
+      padding: 12px; border-radius: 14px; box-shadow: 0 12px 34px rgba(0,0,0,.32); }
+    .tv-qr:empty { display: none; }
+    .tv-qr svg { width: 100%; height: 100%; display: block; }
+    .tv-url { font-size: 12px; color: var(--quiet); word-break: break-all; max-width: 440px; }
+    html.tv .tv-url { font-size: 14px; }
 
     /* ── Success state ──────────────────────────────────────────────────── */
     .success { text-align: center; padding: 34px 22px; border: 1px solid var(--line);
@@ -100,6 +132,10 @@
   </style>
 </head>
 <body>
+  <script>
+    // Bigger targets + a phone-handoff checkout on Android TV (D-pad navigation).
+    if (/NorvaTV-AndroidTV/i.test(navigator.userAgent || '')) { document.documentElement.classList.add('tv'); }
+  </script>
   <main class="wrap">
     <div class="brand"><img src="/favicon.png" alt=""><span>Norva</span></div>
 
@@ -150,6 +186,27 @@
               <div><div class="spinner"></div>Preparing your secure card form…</div>
             </div>
           </div>
+          <div class="tv-continue" id="tv-continue" hidden>
+            <h3>Finish securely on your phone</h3>
+            <div class="tv-qr" id="tv-qr"></div>
+            <p>Scan this code with your phone camera to enter your card on Stancer's secure page.
+              Keep this screen open — your trial starts here automatically once payment is confirmed.</p>
+            <p class="tv-url" id="tv-url"></p>
+            <button class="btn ghost" id="tv-pay-here" type="button">Enter card on this TV instead</button>
+          </div>
+          <div class="pay-marks" aria-label="Accepted payment methods">
+            <span class="pm-lbl">We accept</span>
+            <svg class="pm" viewBox="0 0 48 30" role="img" aria-label="Visa">
+              <rect width="48" height="30" rx="4" fill="#fff"/>
+              <text x="24" y="20" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-style="italic" font-weight="700" font-size="13" letter-spacing="0.5" fill="#1a1f71">VISA</text>
+            </svg>
+            <svg class="pm" viewBox="0 0 48 30" role="img" aria-label="Mastercard">
+              <rect width="48" height="30" rx="4" fill="#fff"/>
+              <circle cx="20" cy="15" r="7.5" fill="#eb001b"/>
+              <circle cx="28" cy="15" r="7.5" fill="#f79e1b" fill-opacity="0.9"/>
+            </svg>
+            <span class="pm-more">and more</span>
+          </div>
           <div class="pay-foot">
             <span>Card processing by Stancer (EU) — Norva never sees your card number.</span>
             <a id="fallback-link" class="pay-fallback" href="#" target="_blank" rel="noopener" hidden>Prefer a full page? Open the secure payment page ↗</a>
@@ -173,6 +230,7 @@
 
   <script src="/js/cloudApi.js"></script>
   <script src="/js/authApi.js"></script>
+  <script src="/js/vendor/qrcode.js?v=1"></script>
   <script src="/js/billing-config.js?v=4"></script>
   <script src="/js/billing.js?v=9"></script>
   <script>
@@ -188,6 +246,13 @@
       const frame = document.getElementById('pay-frame');
       const loading = document.getElementById('frame-loading');
       const fallback = document.getElementById('fallback-link');
+      const isTv = document.documentElement.classList.contains('tv');
+      const frameShell = document.querySelector('.frame-shell');
+      const tvContinue = document.getElementById('tv-continue');
+      const tvQr = document.getElementById('tv-qr');
+      const tvUrl = document.getElementById('tv-url');
+      const tvPayHere = document.getElementById('tv-pay-here');
+      let tvPollHandle = 0;
 
       function setStatus(msg, isError) {
         statusEl.textContent = msg;
@@ -258,6 +323,49 @@
       }
       if (intent === 'update_card') applyKindCopy('card_update');
 
+      // ── Android TV: phone-handoff instead of an iframe you fill with a D-pad ─
+      // Render a scannable QR of Stancer's hosted page (CSP-safe inline SVG via the
+      // vendored encoder), then poll /confirm so the trial starts on the TV the
+      // moment the phone payment settles. Falls back to the on-TV iframe on demand.
+      function renderQr(url) {
+        if (!tvQr) return;
+        if (typeof qrcode !== 'function') { tvQr.innerHTML = ''; return; }
+        try {
+          const qr = qrcode(0, 'M');
+          qr.addData(url);
+          qr.make();
+          tvQr.innerHTML = qr.createSvgTag({ cellSize: 6, margin: 1, scalable: true });
+        } catch (_) { tvQr.innerHTML = ''; }
+      }
+      function startTvPolling() {
+        clearInterval(tvPollHandle);
+        tvPollHandle = setInterval(async function () {
+          if (finishing) { clearInterval(tvPollHandle); return; }
+          try {
+            const r = await window.NorvaBilling.confirmStancer();
+            if (r && DONE_STATUSES.indexOf(String(r.status)) !== -1) { clearInterval(tvPollHandle); finish(); }
+          } catch (_) { /* transient — keep polling */ }
+        }, 4000);
+      }
+      function showTvContinue(url) {
+        renderQr(url);
+        if (tvUrl) tvUrl.textContent = url;
+        if (frameShell) frameShell.style.display = 'none';
+        loading.classList.add('hide');
+        if (tvContinue) tvContinue.hidden = false;
+        startTvPolling();
+      }
+      if (tvPayHere) {
+        tvPayHere.addEventListener('click', function () {
+          // Escape hatch: no phone handy → reveal the iframe already loaded behind the QR.
+          if (tvContinue) tvContinue.hidden = true;
+          if (frameShell) frameShell.style.display = '';
+          loading.classList.remove('hide');
+          setTimeout(function () { loading.classList.add('hide'); }, 4000);
+          try { frame.focus(); } catch (_) {}
+        });
+      }
+
       // ── Create the payment intent and embed the Stancer card form ─────────
       function boot() {
         statusEl.classList.remove('show');
@@ -271,6 +379,9 @@
             frame.addEventListener('load', function () { loading.classList.add('hide'); }, { once: true });
             // Belt & braces: hide the skeleton even if the load event is swallowed.
             setTimeout(function () { loading.classList.add('hide'); }, 6000);
+            // Android TV: swap the iframe for the phone-handoff QR (native Play
+            // Billing never reaches this page — subscribe.html routes it to Google).
+            if (isTv) showTvContinue(data.url);
           })
           .catch(function (e) {
             loading.classList.add('hide');
