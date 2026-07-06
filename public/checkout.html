@@ -38,6 +38,14 @@
     .price-row .cur { font-size: 19px; font-weight: 700; vertical-align: super; }
     .price-row .per { color: var(--muted); font-size: 14px; font-weight: 600; }
     .after-trial { color: var(--quiet); font-size: 12.5px; margin: -6px 0 12px; }
+    /* Plain-language billing timeline: exactly what happens today, after the trial,
+       and if you cancel — the single biggest trust lever on a checkout. */
+    .bill-breakdown { display: grid; gap: 8px; margin: 2px 0 14px; }
+    .bill-breakdown.hidden { display: none; }
+    .bd-row { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; font-size: 13px; }
+    .bd-row .bd-k { color: var(--muted); }
+    .bd-row .bd-v { font-weight: 700; text-align: right; color: #eaf0ff; }
+    .bd-row .bd-v em { font-style: normal; color: var(--quiet); font-weight: 500; font-size: 12px; }
     ul.features { list-style: none; display: grid; gap: 8px; color: #cbd3e8; font-size: 13.5px; }
     ul.features li::before { content: "✓"; color: var(--green); margin-right: 8px; font-weight: 800; }
     .assurance { display: flex; gap: 10px; align-items: flex-start; margin-top: 16px;
@@ -62,6 +70,14 @@
     .pay-foot { display: flex; justify-content: space-between; align-items: center; gap: 10px;
       margin-top: 12px; color: var(--quiet); font-size: 12px; flex-wrap: wrap; }
     .pay-foot a { color: var(--accent); }
+    /* Full-page fallback if the embedded card form struggles (mobile keyboard, 3-D
+       Secure, blocked iframe) — a clear button, not a tiny "trouble?" link. */
+    .pay-fallback { display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+      margin-top: 12px; padding: 12px 16px; border-radius: 10px; border: 1px solid var(--line);
+      background: #151b26; color: #dbe7ff; font-size: 13px; font-weight: 700; text-decoration: none; }
+    .pay-fallback[hidden] { display: none; }
+    .pay-fallback:hover, .pay-fallback:focus-visible { border-color: var(--accent); outline: none; }
+    @media (max-width: 760px) { .pay-fallback { width: 100%; } }
     .status { margin-top: 14px; padding: 13px; border-radius: 10px; border: 1px solid var(--line);
       background: #151b26; color: #dbe7ff; line-height: 1.5; font-size: 14px; display: none; }
     .status.show { display: block; }
@@ -101,6 +117,11 @@
             <span class="per" id="sum-per">/mo after your 7-day free trial</span>
           </div>
           <p class="after-trial" id="sum-after">Today: $0.00 — your plan starts only after the trial.</p>
+          <div class="bill-breakdown" id="bill-breakdown">
+            <div class="bd-row"><span class="bd-k">Today</span><span class="bd-v">$0.00 <em>card check only</em></span></div>
+            <div class="bd-row"><span class="bd-k">After your 7-day trial</span><span class="bd-v" id="bd-then">—</span></div>
+            <div class="bd-row"><span class="bd-k">Cancel anytime before then</span><span class="bd-v">Nothing charged</span></div>
+          </div>
           <ul class="features" id="sum-features">
             <li>2 simultaneous streams</li>
             <li>Up to 5 profiles</li>
@@ -131,7 +152,7 @@
           </div>
           <div class="pay-foot">
             <span>Card processing by Stancer (EU) — Norva never sees your card number.</span>
-            <a id="fallback-link" href="#" target="_blank" rel="noopener" hidden>Trouble? Open the payment page in a new tab</a>
+            <a id="fallback-link" class="pay-fallback" href="#" target="_blank" rel="noopener" hidden>Prefer a full page? Open the secure payment page ↗</a>
           </div>
           <div class="status" id="status"></div>
         </section>
@@ -186,6 +207,15 @@
       if (displayPrice) document.getElementById('sum-amount').textContent = displayPrice;
       document.getElementById('sum-per').textContent =
         (period === 'annual' ? '/yr' : '/mo') + ' after your 7-day free trial';
+      // Billing timeline: "After your 7-day trial" = the plan price. The trial is the
+      // default view, so show the breakdown and fold away the one-line summary (it
+      // comes back for the special checkout kinds below).
+      (function () {
+        const bdThen = document.getElementById('bd-then');
+        if (bdThen) bdThen.textContent = '$' + (displayPrice || '—') + (period === 'annual' ? '/yr' : '/mo');
+        const sumAfter0 = document.getElementById('sum-after');
+        if (sumAfter0) sumAfter0.hidden = true;
+      })();
       document.getElementById('cancel-btn').setAttribute('href', '/subscribe.html?returnTo=' + encodeURIComponent(returnTo));
       document.getElementById('continue-btn').setAttribute('href', returnTo);
 
@@ -206,6 +236,12 @@
         const h1 = document.querySelector('#checkout-view h1');
         const sub = document.querySelector('#checkout-view .sub');
         const after = document.getElementById('sum-after');
+        // The 3-line trial timeline only fits a trial; the other kinds use the
+        // one-line summary instead.
+        const special = (checkoutKind === 'card_update' || checkoutKind === 'plan_change' || checkoutKind === 'resubscribe');
+        const breakdown = document.getElementById('bill-breakdown');
+        if (breakdown) breakdown.classList.toggle('hidden', special);
+        if (after) after.hidden = !special;
         if (checkoutKind === 'card_update') {
           h1.textContent = 'Update your payment method';
           sub.textContent = 'Enter your new card — it becomes the card used for your Norva plan.';
