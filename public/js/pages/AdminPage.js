@@ -194,6 +194,18 @@ class AdminPage {
 #page-admin .chart-panel h2{font-size:14px;font-weight:650;margin:0 0 2px;color:var(--adm-tx);}
 #page-admin .chart-panel .chsub{font-size:11.5px;color:var(--adm-tx3);margin:0 0 12px;}
 #page-admin .chart-svg{width:100%;display:block;}
+/* Interactive bar chart: focus-dim on hover + cursor-following tooltip */
+#page-admin .chart-wrap{position:relative;}
+#page-admin .chart-svg .bar-main{transition:opacity .12s;}
+#page-admin .chart-svg.dim .bar-col:not(.hl) .bar-main{opacity:.32;}
+#page-admin .chart-svg.dim .bar-col:not(.hl) .bar-fail{opacity:.32;}
+#page-admin .chart-svg .barbox{fill:transparent;cursor:pointer;}
+#page-admin .chart-tip{position:absolute;left:0;top:0;pointer-events:none;z-index:20;background:rgba(12,16,26,.97);border:1px solid var(--adm-line);border-radius:10px;padding:8px 11px;font-size:12px;color:var(--adm-tx);box-shadow:0 10px 28px rgba(0,0,0,.45);opacity:0;transform:translate(-50%,-100%);transition:opacity .1s;white-space:nowrap;}
+#page-admin .chart-tip.on{opacity:1;}
+#page-admin .chart-tip .tt-d{font-weight:700;margin-bottom:4px;font-size:11.5px;}
+#page-admin .chart-tip .tt-r{color:var(--adm-tx2);display:flex;align-items:center;gap:7px;line-height:1.7;}
+#page-admin .chart-tip .tt-r b{color:var(--adm-tx);font-weight:700;}
+#page-admin .chart-tip .tt-dot{width:8px;height:8px;border-radius:2px;display:inline-block;flex-shrink:0;}
 #page-admin .donut-wrap{display:flex;align-items:center;gap:20px;flex-wrap:wrap;justify-content:center;}
 #page-admin .chart-legend{display:flex;flex-direction:column;gap:11px;font-size:13px;min-width:150px;flex:1;}
 #page-admin .chart-legend .lg{display:flex;align-items:center;gap:9px;color:var(--adm-tx2);}
@@ -2650,8 +2662,9 @@ class AdminPage {
         const items = sd.map(d => ({ label: (d.day || '').slice(5).replace('-', '/'), value: d.runs, failed: d.failed }));
         const totFail = sd.reduce((s, d) => s + (Number(d.failed) || 0), 0);
         const chip = c => `<span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:${c};vertical-align:middle"></span>`;
-        el.innerHTML = AdminPage.bars(items, 'sys') +
-            `<div class="ssub" style="margin-top:8px">${chip('#6d7bf5')} exécutions&nbsp;&nbsp;${chip('#f87171')} échecs (${AdminPage.n(totFail)} sur 14 j)</div>`;
+        el.innerHTML = AdminPage.bars(items, 'sys', { unit: 'exécutions' }) +
+            `<div class="ssub" style="margin-top:8px">${chip('#6d7bf5')} exécutions&nbsp;&nbsp;${chip('#f87171')} échecs (${AdminPage.n(totFail)} sur 14 j) · survolez une barre pour le détail</div>`;
+        AdminPage.wireBars(el);
     }
 
     // Keyset-paginated audit feed: each "Charger plus" fetches the batch strictly OLDER than the
@@ -3215,24 +3228,88 @@ class AdminPage {
     }
 
     // Vertical bars from [{label,value,failed}] — gradient bars with a red failed overlay.
-    static bars(items, id) {
-        const w = 720, h = 210, pl = 10, pr = 10, pt = 16, pb = 28;
+    // Interactive grouped bar chart (value + optional failed overlay). Gridlines, a y-axis, a
+    // dashed average line, and per-column hover hitboxes carrying data for the JS tooltip
+    // (wired by wireBars). `opts.unit` labels the value in the tooltip.
+    static bars(items, id, opts) {
+        opts = opts || {};
+        const unit = opts.unit || 'exécutions';
+        const w = 720, h = 220, pl = 34, pr = 12, pt = 14, pb = 30;
+        const plotH = h - pt - pb, plotW = w - pl - pr;
         const vals = items.map(b => Number(b.value) || 0);
-        const max = Math.max(1, ...vals), n = items.length || 1;
-        const slot = (w - pl - pr) / n, barW = Math.min(48, slot * 0.6);
+        const rawMax = Math.max(1, ...vals), n = items.length || 1;
+        // "Nice" axis max (~3 ticks) so gridlines land on round numbers.
+        const rough = rawMax / 3, pow = Math.pow(10, Math.floor(Math.log10(rough) || 0));
+        const nn = rough / pow, step = (nn < 1.5 ? 1 : nn < 3 ? 2 : nn < 7 ? 5 : 10) * pow;
+        const niceMax = Math.max(step, Math.ceil(rawMax / step) * step);
+        const avg = vals.length ? vals.reduce((a, v) => a + v, 0) / vals.length : 0;
+        const Y = v => (h - pb) - plotH * (v / niceMax);
+        const slot = plotW / n, barW = Math.min(46, slot * 0.62);
         const gid = 'bg' + (id || '');
-        const rects = items.map((b, i) => {
+        // Gridlines + y labels.
+        let grid = '';
+        for (let t = 0; t <= niceMax + 0.001; t += step) {
+            const gy = Y(t).toFixed(1);
+            grid += `<line x1="${pl}" y1="${gy}" x2="${w - pr}" y2="${gy}" stroke="rgba(255,255,255,.06)" stroke-width="1"/>` +
+                `<text x="${pl - 7}" y="${(Number(gy) + 3.5).toFixed(1)}" font-size="10" fill="#6b7488" text-anchor="end">${AdminPage.n(t)}</text>`;
+        }
+        // Average line (dashed).
+        const avgY = Y(avg).toFixed(1);
+        const avgLine = avg > 0 ? `<line x1="${pl}" y1="${avgY}" x2="${w - pr}" y2="${avgY}" stroke="#7c8cf8" stroke-width="1" stroke-dasharray="4 4" opacity=".5"/>` +
+            `<text x="${w - pr}" y="${(Number(avgY) - 5).toFixed(1)}" font-size="9.5" fill="#8f9bc4" text-anchor="end">moy. ${AdminPage.n(Math.round(avg))}</text>` : '';
+        const cols = items.map((b, i) => {
+            const val = Number(b.value) || 0, failed = Number(b.failed) || 0;
             const x = pl + slot * i + (slot - barW) / 2;
-            const bh = (h - pt - pb) * ((Number(b.value) || 0) / max), y = h - pb - bh;
-            const fh = b.failed ? (h - pt - pb) * ((Number(b.failed) || 0) / max) : 0;
-            const fail = fh > 0 ? `<rect x="${x.toFixed(1)}" y="${(h - pb - fh).toFixed(1)}" width="${barW.toFixed(1)}" height="${fh.toFixed(1)}" fill="#f87171" rx="3"/>` : '';
-            return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${Math.max(0, bh).toFixed(1)}" fill="url(#${gid})" rx="4"/>${fail}
-                <text x="${(x + barW / 2).toFixed(1)}" y="${h - 9}" font-size="11" fill="#6b7488" text-anchor="middle">${AdminPage.esc(b.label || '')}</text>`;
+            const bh = plotH * (val / niceMax), y = (h - pb) - bh;
+            const fh = failed > 0 ? Math.min(bh, Math.max(3, plotH * (failed / niceMax))) : 0;
+            const rate = val > 0 ? Math.round(100 * failed / val) : 0;
+            const main = val > 0 ? `<rect class="bar-main" x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${Math.max(0, bh).toFixed(1)}" fill="url(#${gid})" rx="4"/>` : '';
+            const fail = fh > 0 ? `<rect class="bar-fail" x="${x.toFixed(1)}" y="${(h - pb - fh).toFixed(1)}" width="${barW.toFixed(1)}" height="${fh.toFixed(1)}" fill="#f87171" rx="3"/>` : '';
+            // Full-height transparent hitbox so hovering anywhere in the column triggers the tooltip.
+            const box = `<rect class="barbox" x="${(pl + slot * i).toFixed(1)}" y="${pt}" width="${slot.toFixed(1)}" height="${plotH}"/>`;
+            const label = `<text x="${(x + barW / 2).toFixed(1)}" y="${h - 10}" font-size="11" fill="#6b7488" text-anchor="middle">${AdminPage.esc(b.label || '')}</text>`;
+            return `<g class="bar-col" data-label="${AdminPage.esc(b.label || '')}" data-value="${val}" data-failed="${failed}" data-rate="${rate}">${main}${fail}${box}${label}</g>`;
         }).join('');
-        return `<svg class="chart-svg" viewBox="0 0 ${w} ${h}" role="img" aria-hidden="true">
+        return `<div class="chart-wrap"><svg class="chart-svg" viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Graphique : ${unit} par jour">
             <defs><linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#8b7cff"/><stop offset="1" stop-color="#5b7cfa"/></linearGradient></defs>
-            ${rects}
-        </svg>`;
+            ${grid}${avgLine}
+            <line x1="${pl}" y1="${h - pb}" x2="${w - pr}" y2="${h - pb}" stroke="rgba(255,255,255,.14)" stroke-width="1"/>
+            ${cols}
+        </svg><div class="chart-tip" data-unit="${AdminPage.esc(unit)}"></div></div>`;
+    }
+
+    // Wire hover tooltips + focus-dim for a bars() chart inside `root`.
+    static wireBars(root) {
+        const wrap = root && root.querySelector('.chart-wrap');
+        if (!wrap) return;
+        const svg = wrap.querySelector('svg'), tip = wrap.querySelector('.chart-tip');
+        const unit = (tip && tip.dataset.unit) || 'exécutions';
+        const cols = Array.from(wrap.querySelectorAll('.bar-col'));
+        const show = (col, e) => {
+            svg.classList.add('dim');
+            cols.forEach(c => c.classList.toggle('hl', c === col));
+            const d = col.dataset, r = wrap.getBoundingClientRect();
+            const failed = Number(d.failed) || 0;
+            tip.innerHTML = `<div class="tt-d">${AdminPage.esc(d.label)}</div>` +
+                `<div class="tt-r"><span class="tt-dot" style="background:#7c8cf8"></span><b>${AdminPage.n(d.value)}</b> ${AdminPage.esc(unit)}</div>` +
+                (failed > 0
+                    ? `<div class="tt-r"><span class="tt-dot" style="background:#f87171"></span><b>${AdminPage.n(failed)}</b> échec(s) · ${d.rate}% KO</div>`
+                    : `<div class="tt-r" style="color:#6ee7bf"><span class="tt-dot" style="background:#34d399"></span>aucun échec</div>`);
+            let left = e.clientX - r.left; const top = e.clientY - r.top - 14;
+            left = Math.max(58, Math.min(r.width - 58, left));
+            tip.style.left = left + 'px'; tip.style.top = Math.max(30, top) + 'px';
+            tip.classList.add('on');
+        };
+        cols.forEach(col => {
+            const box = col.querySelector('.barbox');
+            if (!box) return;
+            box.addEventListener('mousemove', (e) => show(col, e));
+            box.addEventListener('mouseenter', (e) => show(col, e));
+        });
+        wrap.addEventListener('mouseleave', () => {
+            tip.classList.remove('on'); svg.classList.remove('dim');
+            cols.forEach(c => c.classList.remove('hl'));
+        });
     }
 
     // Shared KPI card (icon top-right + optional sparkline). `sparkSvg` is a pre-built
