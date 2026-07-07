@@ -7,17 +7,24 @@
 
 ## ⚠️ ÉTAT OPÉRATIONNEL COURANT (à connaître avant tout)
 
+> _MàJ 2026-07-07 (fin de session) : le tableau ci-dessous reflète l'état réel courant._
+
 | Élément | État | Action attendue |
 |---|---|---|
-| **cron 92 `norva-facet-summary-refresh`** | ⏸️ **EN PAUSE** (`active=false`, schedule `7-59/15 * * * *`) | Réactiver quand le gros Ninja finit : `select cron.alter_job(job_id:=92, active:=true);` — un **watchdog** (send_later, ~02:51Z puis /40min) le fait automatiquement quand `346a7f5b` passe `ready`. |
-| **rôle `postgres` `statement_timeout`** | ✅ Normal (défaut 120s) | Rien — avait été levé à 1800s pour le build d'index puis **remis**. |
-| **Index `idx_cmi_dedup_primary_title`** | ✅ **valid** en prod | Désormais dans une migration (`20260707000000_…`). |
-| **Ancienne source Ninja `976e7bbd`** (operator1.barfik.org) | 🕓 **soft-deleted, pas encore drainée** | Le reaper (`reap_deleted_sources`, cron `norva-reap-deleted-sources`) attend que les syncs finissent (il se défère tant qu'un `sync_status='syncing'`). Se draine seul ensuite → ÷2 des données de l'user. |
-| **Nouveau Ninja `346a7f5b`** | 🕓 `syncing`, finalize titres lent (~35,7k/235k) | Laisser finir (choix user). C'est le goulot qui garde le reaper en attente + sature l'IO. |
-| **Crons probe Ninja 79/80** | ❌ Pointent encore l'ancienne source `976e7bbd` | **À repointer** vers `346a7f5b` (noté « quand tu veux »). |
-| **Miroir catalogue couche B** | 💤 Construit mais **dormant** (flags OFF) | Runbook : `docs/roadmap/phase2-dedup-activation-runbook.md`. Ne PAS activer sans recoupement multi-user. |
+| **Import Ninja `346a7f5b`** | ✅ **FINI** (`ready`) | — |
+| **super8k `1aaeb703`** (272 774 items, autre user) | 🕓 `syncing` `building_titles` (~8-10% du finalize) | **Dernier gros import.** Le watchdog débloque tout quand il passe `ready`. ⚠️ Réapparu après purge — surveiller le quota free tier. |
+| **cron 92 `norva-facet-summary-refresh`** | ⏸️ **EN PAUSE** (`active=false`) | Réactivé **auto par le watchdog** quand `still_syncing=0` (super8k fini). Manuel : `select cron.alter_job(job_id:=92, active:=true);` |
+| **Ancien Ninja `976e7bbd`** | 🕓 soft-deleted, **attend le reap** | Se draine quand super8k finit (le reaper se défère tant qu'un sync tourne) → ÷2 données. |
+| **Re-enrichissement TMDB (préfixes barre)** | 🕓 **gaté sur le drain de l'ancien Ninja** | Watchdog lance le reset des markers (`search_match_attempted_at=null` + `norva_search_match_state`) quand `soft_deleted_pending=0`. |
+| **Regroupement admin par identité** | ✅ modif **appliquée** à `refresh_admin_dashboard()` (`coverage_change_applied=true`) | S'affiche au 1er refresh réussi (quand DB calme). ⚠️ **Appliquée en SQL direct, PAS dans une migration** → repro gap (à formaliser). |
+| **Crawl audio deux-phases** (matchés d'abord) | 📋 **planifié, pas fait** | À implémenter quand la DB est calme (edge `norva-source-sync` + champ `phase` dans l'état du crawl). Voir §Crawl ci-dessous. |
+| **Watchdog consolidé** | 🐕 armé (send_later ~06:30Z, /30min) | Réactive facet + reset TMDB + refresh admin quand super8k fini + ancien Ninja drainé. |
+| **rôle `postgres` `statement_timeout`** | ✅ Normal (défaut 120s) | — (avait été levé à 1800s pour l'index, remis). |
+| **Index `idx_cmi_dedup_primary_title`** | ✅ **valid** | migration `20260707000000`. |
+| **Crons probe Ninja 79/80** | ❌ pointent l'ancienne source `976e7bbd` | **À repointer** vers `346a7f5b`. |
+| **Miroir catalogue couche B** | 💤 dormant (flags OFF) | Runbook `docs/roadmap/phase2-dedup-activation-runbook.md`. |
 
-**User concerné (celui des logs)** : `7bdab1df-80e6-46f9-bcdf-84b6595819a8` (adrienhernandez20). Il stresse la DB en important un provider massif (barfik, 285k items) deux fois (ancien + nouveau) → timeouts sur requêtes lourdes le temps que ça se draine.
+**Users concernés** : `7bdab1df` (adrienhernandez20, le Ninja/barfik). super8k = un **autre** user de test (`c5be5ac4`). **Fil rouge de la session** : presque tous les frictions (dashboards qui timeout, canal MCP qui flappe, listes vides, sous-agents qui rament) = **la DB free-tier saturée par des imports lourds successifs** (Ninja 285k puis super8k 272k), PAS une accumulation de bugs. Confirmé chiffré : échecs crons **~250/24h pendant l'import → 5 sur les dernières 30 min** une fois Ninja fini.
 
 ---
 
@@ -103,3 +110,49 @@ Trois causes **distinctes**, pas un seul bug :
 - [ ] Tester une vraie lecture **HEVC** (film + épisode) post-déploiement Cloudflare pour valider le fallback transcode en réel.
 - [ ] (Optionnel) Router `/api/probe` vers la gateway, ou supprimer l'appel si non déployé (retire le bruit « <!DOCTYPE »).
 - [ ] (Optionnel) Formaliser les migrations circuit/soft-delete/enabled/index dans un apply prod reviewé si pas déjà fait.
+
+---
+
+# Suite de session (2026-07-07) — titres premium, dedup provider, crons, admin
+
+## Commits additionnels (`main`)
+| Commit | Quoi | Deploy |
+|---|---|---|
+| `189dc42` | **Préfixes titres barre** (`DK ▎ `, `ALB ▎ `) strippés à l'affichage (`cleanReleaseName` client + `cleanDisplayTitle` edge) — le regex ne gérait que le tiret `FR - ` ; ajout de la famille barre `▎▏▍▌│┃┆┊｜|`. **+ fix cache vide** (`loadCloudSeries/Movies` ne cache plus une page vide → plus de « No series here yet » figé au retour). | CI Cloudflare + Supabase |
+| `f4b780a` | **Match TMDB** : `cleanSearchQuery` strippe le préfixe barre AVANT la recherche (avant, il cherchait « DK A Hijacking » → jamais matché). Recherche-only, pas de re-keying. | CI Supabase |
+
+## HEVC playback — 3 fixes (rappel + suite)
+- `3336a14` (moteur), `55b8608` (natif code 3/4 message vide → tag pour `isFormatPlaybackError`), `7638806` (**cause racine épisodes** : `norva-series-info` n'enrichit pas le `codec_profile` → `videoCodec` vide → `browserSafeVod=true` → natif → HEVC échoue ; fix = preuve positive de codec browser-safe → sinon moteur ; + `mode:'transcode'` forcé sur le fallback). **Confirmé par l'user : les épisodes HEVC jouent (badge « Navigateur »).**
+- **Suivi de fond** : enrichir `norva-series-info` avec le `codec_profile` (miroir `norva-catalog`) pour que les épisodes se comportent comme les films sans dépendre de l'heuristique client.
+
+## Dedup provider-identity — VÉRIFIÉ, ça marche (pas un bug)
+Le user pensait que le nouveau compte Ninja re-scannait tout. **Faux** : les **4 comptes Ninja** (provider_keys `x:d5bae7ea`/`x:5d1db4c9`/`x:93955a3b`/`x:045daa57`) pointent **tous vers la même identité `d8453dc1`**. `resolveSourceIdentity` (norva-playback:1086) upgrade la clé vers l'identité → cache audio `catalog_file_tracks` **partagé** entre comptes. Le nouveau compte **hérite** des probes de l'ancien.
+- **Pourquoi 2,7% audio alors ?** Pas le dedup : l'**anti-ban**. L'identité Ninja est `low_footprint` à **40 probes/h** (posé car Ninja bannissait). Seulement **1 341 fichiers sondés au total** sur ~174k → ~6 mois à ce rythme (ETA « ≫1an »). Circuit-breaker fermé/sain en ce moment.
+- **« Ninja doublé » dans l'admin** : le user a 2 sources Ninja (ancien un-reaped + nouveau) ; l'admin **listait par source** → 2 lignes. Le scan est mutualisé (même cache). D'où le regroupement admin par identité (ci-dessous).
+
+## Crons en échec — c'était la charge, pas des bugs
+`admin-dashboard-refresh` + `norva-catalog-reconcile` = `statement timeout` sous saturation d'import. `norva-facet-summary-refresh` = ma pause (pas un vrai échec). Chiffres : **~250 échecs/24h pendant l'import → 5 sur 30 min** une fois Ninja fini (**~98% de baisse**). Les 2 stragglers restants (`enrich-titles-from-catalog`, `admin-dashboard-refresh`) timeout encore un peu tant que **super8k** finalise.
+
+## Regroupement admin par identité — APPLIQUÉ (⚠️ hors migration)
+`refresh_admin_dashboard()` : le bloc coverage groupait par `s.id` (source) → 2 lignes Ninja. Modif **appliquée en SQL direct** (via un sous-agent) : join `catalog_provider_identities cpi on cpi.provider_key = s.config_hint->>'providerKey'` + `provider_identities pi` + `group by u.email, coalesce(pi.id::text, s.id::text), ...` → fusionne les abonnements d'un même user+identité. `coverage_change_applied=true` vérifié.
+- ⚠️ **Repro gap** : appliquée en direct, **pas dans un fichier de migration** → à formaliser (comme l'index l'a été).
+- ⚠️ Le sous-agent avait créé un cron temporaire `tmp-verify-admin-dash` (`* * * * *`, 300s) → **désinscrit** (nettoyé). Leçon : le verify d'une fonction lourde sous charge d'import timeout → ne pas re-run `refresh_admin_dashboard()` tant qu'un gros import tourne.
+
+## Re-enrichissement TMDB des préfixes — préparé, gaté
+Le fix `f4b780a` aide les titres **pas encore tentés**. Les **≥5000 déjà tentés-et-ratés** portent un marqueur `search_match_attempted_at` (retry 90j) → il faut le reset pour re-chercher avec la requête propre. **Le watchdog le lance automatiquement** quand l'ancien Ninja est drainé (`soft_deleted_pending=0`) :
+```sql
+update cloud_titles set search_match_attempted_at = null
+where match_status = 'unmatched'
+  and title ~ '^[A-Z]{2}[A-Z0-9]{0,3}(-[A-Z0-9]{1,6})* [-–—▎▏▍▌│┃┆┊｜|] ';
+update norva_search_match_state set last_id = null, done = false where id = 1;
+```
+→ le cron `norva-enrich-search-match` (*/3, actif) draine sur quelques heures → titres préfixés deviennent verified + poster + canonique.
+
+## Crawl audio par pertinence — l'idée « mp4-only » + le plan sûr (PAS ENCORE FAIT)
+- **Verdict sur « probe seulement les mp4 »** : le probe fetch l'entête depuis le provider pour TOUS les conteneurs → mp4 n'évite pas la connexion. MAIS l'audio est déjà récupéré **gratuitement à la lecture** (le moteur fait 1 header-parse relay → `shareFileTracks`, zéro hit en plus). Le ban vient du **crawl de fond** (40/h).
+- **⚠️ « juste trier le select » est DANGEREUX** : le crawl avance par **curseur `id`** (`order by id, id > afterId`) pour 2 raisons — progression garantie + **anti-blocage** (un titre qui échoue toujours ne pose jamais `audio_probed_at` ; le curseur passe au-delà). Trier par pertinence sans curseur → un titre populaire mais mort bloquerait le budget en tête à chaque tick.
+- **Plan sûr (à faire quand DB calme)** : **curseur à deux phases** — Phase 1 = titres matchés TMDB/browsables (`provider_tmdb_id is not null`) parcourus par le même curseur id ; Phase 2 = la longue traîne. Champ `phase` dans l'état du crawl. Edge `norva-source-sync` (select du backfill ~ligne 3800 de norva-playback pour le probe on-play, et le per-source `audio_backfill_candidates`). **Ban-sensible → à faire délibérément hors charge.**
+
+## Incidents d'infra de la session (pour mémoire)
+- **Canal de permission MCP `execute_sql`** a flappé plusieurs fois (« Tool permission stream closed ») + le serveur Supabase s'est déconnecté/reconnecté → retries + reload via ToolSearch. Pattern : se rétablit après quelques minutes.
+- **Outage `norva-playback`** (début de session) : deploy MCP inline d'un fichier 228KB délégué à un sous-agent → placeholder poussé (v112 PENDING) → récupéré via le CI (deploy depuis le disque). **Leçon clé : jamais de deploy MCP inline d'un gros fichier ; passer par le CI.**
