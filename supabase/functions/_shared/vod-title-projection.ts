@@ -800,6 +800,13 @@ export async function searchTmdbMatch(
 // Sorcière blanche et l'Armoire magique") matches far more reliably as plain words.
 function cleanSearchQuery(title: string): string {
   return String(title || "")
+    // Drop a leading provider market/language prefix ("DK ▎ A Hijacking", "FR - Title", "AR-SUBS - …")
+    // FIRST — before the punctuation-flatten below turns the "▎"/"-" separator into a space and hides
+    // the boundary. Otherwise "DK ▎ A Hijacking" is searched on TMDB as "DK A Hijacking" and never
+    // matches (this is why box-bar panels sit at ~50% verified). Search-query only: identity_key comes
+    // from normalizeTitle(raw), so nothing is re-keyed. Two leading uppercase letters required, so a
+    // digit-led title ("007 - …") or a hyphenated word ("X-Men") is never mistaken for a prefix.
+    .replace(/^[A-Z]{2}[A-Z0-9]{0,3}(?:-[A-Z0-9]{1,6})* [-–—▎▏▍▌│┃┆┊｜|] /, "")
     .replace(/[\[({][^\])}]*[\])}]/g, " ")
     .replace(/\b(4k|uhd|2160p|1080p|720p|480p|fhd|hd|sd|multi|vostfr|vost|vff|vf|vo|truefrench|subt?\s*ar|sub|dub|dv)\b/gi, " ")
     .replace(/(?:^|\s)((?:19|20)\d{2})\s*$/, " ")
