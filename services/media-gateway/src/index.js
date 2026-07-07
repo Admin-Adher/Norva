@@ -160,6 +160,14 @@ const PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL || '').replace(/\/+$/, '');
 const OUTPUT_DIR = path.resolve(process.env.OUTPUT_DIR || path.join(os.tmpdir(), 'norva-media-gateway'));
 const FFMPEG_PATH = process.env.FFMPEG_PATH || 'ffmpeg';
 const FFPROBE_PATH = process.env.FFPROBE_PATH || 'ffprobe';
+// NVENC hardware H.264 encode (GEX44 / any NVIDIA box). OFF (default) => software
+// libx264, byte-identical to the previous behavior. Only swaps the ENCODE step;
+// HW decode (-hwaccel cuda / NVDEC) is deliberately NOT enabled here because it
+// interacts with pix_fmt and the linear-read seek path — add it at pre-flight with
+// a live test. See ops/hetzner/media/CODE-PATCHES.md (patch #4).
+const MEDIA_GATEWAY_NVENC = /^(1|true|yes|on)$/i.test(String(process.env.MEDIA_GATEWAY_NVENC || ''));
+const NVENC_PRESET = process.env.NVENC_PRESET || 'p4';   // p1(fastest)..p7(slowest/best)
+const NVENC_TUNE = process.env.NVENC_TUNE || 'll';       // ll = low-latency (live-friendly)
 const DEFAULT_TTL_SECONDS = clampInt(process.env.SESSION_TTL_SECONDS, 30 * 60, 60, 12 * 60 * 60);
 // Linear-read VOD resume (-seekable 0) reaches the resume point by reading from
 // byte 0, so far resumes need a longer startup budget than a normal stream.
@@ -2420,14 +2428,31 @@ function startFfmpeg(session) {
     // full transcode by channel name).
     if (encodeVideo) {
         args.push(
-            '-c:v', 'libx264',
-            '-preset', 'ultrafast',
-            '-tune', 'zerolatency',
-            '-profile:v', 'high',
-            '-pix_fmt', 'yuv420p',
-            '-crf', '23',
-            '-g', '48',
-            '-sc_threshold', '0',
+            ...(MEDIA_GATEWAY_NVENC
+                // Hardware H.264 encode (NVENC). Frees the CPU (~20-40 concurrent
+                // 1080p/GPU on an RTX 4000 Ada). -rc vbr + -cq 23 mirrors the
+                // software -crf 23; nvenc has no -sc_threshold/zerolatency (its
+                // -tune ll covers low latency).
+                ? [
+                    '-c:v', 'h264_nvenc',
+                    '-preset', NVENC_PRESET,
+                    '-tune', NVENC_TUNE,
+                    '-profile:v', 'high',
+                    '-pix_fmt', 'yuv420p',
+                    '-rc', 'vbr',
+                    '-cq', '23',
+                    '-g', '48',
+                  ]
+                : [
+                    '-c:v', 'libx264',
+                    '-preset', 'ultrafast',
+                    '-tune', 'zerolatency',
+                    '-profile:v', 'high',
+                    '-pix_fmt', 'yuv420p',
+                    '-crf', '23',
+                    '-g', '48',
+                    '-sc_threshold', '0',
+                  ]),
             ...audioArgs
         );
     } else {
