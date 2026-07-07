@@ -1,0 +1,219 @@
+# =============================================================================
+# Norva self-host — Supabase OSS stack (Hetzner)
+# =============================================================================
+# Derived from the official supabase/docker compose
+# (https://github.com/supabase/supabase/tree/master/docker). This is a TRIMMED,
+# annotated version with the services Norva actually uses. Before production:
+#   1. `git clone --depth 1 https://github.com/supabase/supabase` and diff this
+#      against docker/docker-compose.yml to pick up upstream fixes + image digests.
+#   2. Pin every image to a digest (the :tags below are a starting point).
+#   3. Put Kong behind your own TLS reverse proxy (Caddy/nginx) — do NOT expose
+#      Postgres (5432) publicly.
+#
+# Env comes from ops/hetzner/.env (see .env.hetzner.example). Start:
+#   docker compose --env-file .env -f docker-compose.supabase.yml up -d
+# =============================================================================
+
+name: norva
+
+services:
+  # --- Postgres (the DB) ------------------------------------------------------
+  # supabase/postgres bundles the extensions Norva needs: pg_cron, pg_net,
+  # supabase_vault, pg_trgm, pgcrypto, http, unaccent, uuid-ossp, pgstattuple,
+  # pg_stat_statements. Verify with scripts/05-verify-parity.sh after migration.
+  db:
+    image: supabase/postgres:15.8.1.060
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-h", "localhost"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    command:
+      # Load the tuning file (mounted below). Pick the RAM tier inside it.
+      - postgres
+      - -c
+      - config_file=/etc/postgresql/postgresql.conf
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+    volumes:
+      # Postgres data — MUST be on the NVMe/SSD RAID1 mount (random-read workload).
+      - /var/lib/postgresql/data:/var/lib/postgresql/data
+      # Tuning file (choose a tier — see postgres/postgresql.tuning.conf header).
+      - ./postgres/postgresql.tuning.conf:/etc/postgresql/postgresql.conf:ro
+    ports:
+      # Bind to localhost ONLY. The pooler / reverse proxy reach it internally.
+      - "127.0.0.1:5432:5432"
+
+  # --- Kong (API gateway) -----------------------------------------------------
+  kong:
+    image: kong:2.8.1
+    restart: unless-stopped
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /home/kong/kong.yml
+      KONG_DNS_ORDER: LAST,A,CNAME
+      KONG_PLUGINS: request-transformer,cors,key-auth,acl,basic-auth
+    volumes:
+      # kong.yml declares routes to auth/rest/realtime/storage/functions +
+      # anon/service keys. Generate from the upstream template with your keys.
+      - ./kong/kong.yml:/home/kong/kong.yml:ro
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      # Front this with Caddy/nginx + Let's Encrypt for TLS. Localhost-bind here.
+      - "127.0.0.1:8000:8000"
+
+  # --- GoTrue (auth) ----------------------------------------------------------
+  auth:
+    image: supabase/gotrue:v2.170.0
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      GOTRUE_API_HOST: 0.0.0.0
+      GOTRUE_API_PORT: 9999
+      API_EXTERNAL_URL: ${SUPABASE_PUBLIC_URL}
+      GOTRUE_DB_DRIVER: postgres
+      GOTRUE_DB_DATABASE_URL: postgresql://supabase_auth_admin:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      GOTRUE_SITE_URL: ${SITE_URL}
+      GOTRUE_JWT_SECRET: ${JWT_SECRET}
+      GOTRUE_JWT_EXP: 3600
+      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
+      GOTRUE_SMTP_HOST: ${SMTP_HOST}
+      GOTRUE_SMTP_PORT: ${SMTP_PORT}
+      GOTRUE_SMTP_USER: ${SMTP_USER}
+      GOTRUE_SMTP_PASS: ${SMTP_PASS}
+      GOTRUE_SMTP_ADMIN_EMAIL: ${SMTP_ADMIN_EMAIL}
+      GOTRUE_SMTP_SENDER_NAME: ${SMTP_SENDER_NAME}
+      GOTRUE_MAILER_AUTOCONFIRM: "false"
+
+  # --- PostgREST (the REST API the app + edge functions use) ------------------
+  rest:
+    image: postgrest/postgrest:v12.2.8
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGRST_DB_URI: postgresql://authenticator:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      PGRST_DB_SCHEMAS: public,storage,graphql_public
+      PGRST_DB_ANON_ROLE: anon
+      PGRST_JWT_SECRET: ${JWT_SECRET}
+      PGRST_DB_USE_LEGACY_GUCS: "false"
+      # Keep this MODEST — real backends are capped; the pooler multiplexes clients.
+      PGRST_DB_POOL: "20"
+
+  # --- Realtime ---------------------------------------------------------------
+  realtime:
+    image: supabase/realtime:v2.34.47
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USER: supabase_admin
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      DB_NAME: ${POSTGRES_DB}
+      DB_ENC_KEY: supabaserealtime
+      API_JWT_SECRET: ${JWT_SECRET}
+      SECRET_KEY_BASE: ${JWT_SECRET}
+      ERL_AFLAGS: -proto_dist inet_tcp
+
+  # --- Storage (buckets: storyboards, generated subtitles) --------------------
+  storage:
+    image: supabase/storage-api:v1.19.3
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      rest:
+        condition: service_started
+    environment:
+      ANON_KEY: ${ANON_KEY}
+      SERVICE_KEY: ${SERVICE_ROLE_KEY}
+      POSTGREST_URL: http://rest:3000
+      PGRST_JWT_SECRET: ${JWT_SECRET}
+      DATABASE_URL: postgresql://supabase_storage_admin:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      STORAGE_BACKEND: ${STORAGE_BACKEND}
+      FILE_STORAGE_BACKEND_PATH: /var/lib/storage
+    volumes:
+      - ${STORAGE_BACKEND_PATH}:/var/lib/storage
+
+  # --- Edge runtime (Deno) — hosts the 19 norva-* functions -------------------
+  functions:
+    image: supabase/edge-runtime:v1.67.4
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      JWT_SECRET: ${JWT_SECRET}
+      SUPABASE_URL: http://kong:8000
+      SUPABASE_ANON_KEY: ${ANON_KEY}
+      SUPABASE_SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}
+      SUPABASE_DB_URL: postgresql://postgres:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      # App-level function secrets (see .env). Add the rest from the managed project.
+      NORVA_BACKFILL_TOKEN: ${NORVA_BACKFILL_TOKEN}
+      NORVA_CRON_SHARED_SECRET: ${NORVA_CRON_SHARED_SECRET}
+      RESEND_API_KEY: ${RESEND_API_KEY}
+      TMDB_API_KEY: ${TMDB_API_KEY}
+      NORVA_MEDIA_GATEWAY_URL: ${NORVA_MEDIA_GATEWAY_URL}
+      NORVA_MEDIA_GATEWAY_TOKEN: ${NORVA_MEDIA_GATEWAY_TOKEN}
+      NORVA_RELAY_BASE_URL: ${NORVA_RELAY_BASE_URL}
+      RELAY_TOKEN_SECRET: ${RELAY_TOKEN_SECRET}
+    volumes:
+      # Mount the repo's functions dir so edge-runtime serves them.
+      - ../../supabase/functions:/home/deno/functions:ro
+    command:
+      - start
+      - --main-service
+      - /home/deno/functions
+
+  # --- pg-meta + Studio (admin UI; optional but handy) ------------------------
+  meta:
+    image: supabase/postgres-meta:v0.87.1
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PG_META_PORT: 8080
+      PG_META_DB_HOST: db
+      PG_META_DB_PORT: 5432
+      PG_META_DB_NAME: ${POSTGRES_DB}
+      PG_META_DB_USER: supabase_admin
+      PG_META_DB_PASSWORD: ${POSTGRES_PASSWORD}
+
+  studio:
+    image: supabase/studio:2025.06.30
+    restart: unless-stopped
+    depends_on:
+      meta:
+        condition: service_started
+    environment:
+      STUDIO_PG_META_URL: http://meta:8080
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      SUPABASE_URL: http://kong:8000
+      SUPABASE_PUBLIC_URL: ${SUPABASE_PUBLIC_URL}
+      SUPABASE_ANON_KEY: ${ANON_KEY}
+      SUPABASE_SERVICE_KEY: ${SERVICE_ROLE_KEY}
+      AUTH_USERNAME: ${DASHBOARD_USERNAME}
+      AUTH_PASSWORD: ${DASHBOARD_PASSWORD}
+    ports:
+      - "127.0.0.1:3001:3000"
+
+# Notes:
+# - pg_cron + pg_net run INSIDE the db container (supabase/postgres image); no
+#   separate service. The 47 cron jobs are recreated by scripts/03-recreate-cron-guc.sql.
+# - Vault (supabase_vault) also lives in the db image; secrets are re-injected, not dumped.
+# - For scale (§7): put PgBouncer/Supavisor (transaction mode) in FRONT of `db`
+#   and point rest/auth/realtime/functions/meta at the pooler, not the db, once
+#   you pass a few hundred concurrent users. See postgres/pgbouncer.ini.example.

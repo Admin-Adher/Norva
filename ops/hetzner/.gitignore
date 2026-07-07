@@ -1,0 +1,5 @@
+# Never commit filled secrets or DB dumps
+.env
+dump/
+kong/kong.yml
+postgres/userlist.txt

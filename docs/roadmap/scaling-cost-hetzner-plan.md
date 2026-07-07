@@ -143,3 +143,121 @@ Aujourd'hui `admitHeavyImport` = max 3 imports xtream lourds concurrents (les au
 - **Toi (infra, hors repo)** : provisionner Hetzner, DNS/TLS, secrets, ops (backups/monitoring/HA), le slider compute Supabase, activer le read-replica.
 
 Dis-moi l'ordre dans lequel tu veux attaquer.
+
+---
+
+## 7. Scaler jusqu'à des **milliers d'users** — quel CPU / quelle box Hetzner ?
+
+> Réponse à : « quel est le top du CPU et les autres stats Hetzner pour scaler sans problème
+> jusqu'à des milliers d'user ? ». Chiffré à partir de la baseline mesurée + recherche du
+> catalogue Hetzner 2026 + analyse d'archi, avec **contre-vérification adverse** (les 3 analyses
+> se sont mutuellement corrigées ; les corrections sont dans §7.4, à lire).
+
+### 7.1 Réponse directe — le CPU « top »
+
+- **Le CPU le plus haut du catalogue Hetzner robot pour un Postgres self-host = AMD EPYC 9454P (48c/96t, Zen4, 12 canaux DDR5)**, sur la box **AX162-S**. C'est le plafond à *nommer*.
+- **MAIS pour le problème réel de Norva (timeouts `DataFileRead`), l'EPYC est sur-dimensionné pour la DB seule.** Le bottleneck est **bande passante mémoire / cache RAM**, PAS le cache L3. Donc :
+  - Le **7950X3D** (AX102) et son gros V-cache 128 Mo est **overstated** : il ne cache que ~0,1 % d'un hot set de 15-115 Go. Ses **2 canaux DDR5** sont le vrai plafond.
+  - **EPYC 9454P (12 canaux)** ou **Xeon Gold 6731P / EX131 (8 canaux, ECC registered)** donnent la **bande passante mémoire** qui sert réellement le working set chaud. → pour ce workload *read-bound*, EPYC/Xeon > desktop 7950X3D.
+
+### 7.2 La box à viser (DB primary)
+
+| Choix | Box | CPU | RAM | Disque | ~€/mois net (2026) | Couvre |
+|---|---|---|---|---|---|---|
+| **Recommandé scale** | **AX162-S** | EPYC 9454P 48c/96t, 12 canaux | **256 Go** DDR5 ECC reg | 2×3,84 To NVMe DC **RAID1** | ~702 + upgrade RAM | milliers d'users dédupés |
+| **Alt ECC registered** | **EX131** | Xeon Gold 6731P 32c, 8 canaux | 128→**256 Go** ECC reg | 2×1,92→4×7,68 To NVMe | ~639 | 1k-3k |
+| **Pragmatique (suffit vraiment)** | **AX102** | 7950X3D 16c/32t | 128 Go ECC | 2×1,92 To NVMe RAID1 | ~519 | **1k-10k users dédupés** pour le pb timeout |
+| **Guérir les timeouts aujourd'hui** | AX42 / Serverbörse | Ryzen 7 / Xeon 64 Go | 64 Go | 2×NVMe | ~67-216 | échelle actuelle |
+
+**⚠️ Ne PAS acheter 512 Go de RAM.** Le hot set **dédupé** ne fait que **~15-115 Go** → 128 Go est le *sweet spot*, 256 Go la marge. 512 Go ne serait jamais utilisé (et le DRAM 2026 est cher). *Cette correction annule la reco « 256-512 Go » de la première passe.*
+
+**Stats non-négociables** (c'est pour ça que « la box » n'est pas *une* box) :
+- **NVMe DC-Edition** (endurance, imports write-heavy) — jamais SATA/HDD (workload random-read).
+- **ECC** (AX102+ / EX63+), **mdadm RAID1** (ou RAID10 à 4 disques) — jamais RAID0.
+- Vérifier **Serverbörse / Server Radar** : une box 128-256 Go ECC NVMe reconditionnée = **-30 à -50 %** vs liste.
+
+### 7.3 Sizing corrigé 1k / 5k / 10k users (dedup **activé**)
+
+| Métrique | 1 000 | 5 000 | 10 000 |
+|---|---|---|---|
+| DB **sans** dedup | ~500 Go *(voie sans issue)* | ~2,5 To *(non-starter)* | ~5 To *(à ne pas faire)* |
+| DB **avec** dedup (+ overlay live/EPG corrigé) | ~35-60 Go | ~90-160 Go | ~150-320 Go |
+| Hot working set (catalogue partagé + index chauds) | ~15-25 Go | ~20-35 Go | ~25-45 Go |
+| **RAM à viser** | **64 Go** | **128 Go** | **128 Go** (256 si live élevé) |
+| Cores/threads | 8c/16t (AX52) | 16c/32t (AX102) | 32-48t (AX102 ou EPYC/Xeon pour burst imports) |
+| Postgres **real backends** (`max_connections`) | ~100-150 | ~200 | ~300 (**jamais 10k**) |
+| Pooler (Supavisor/PgBouncer txn) | pool ~25, max_client ~2k | pool ~40, max_client ~10k | pool ~50-64, max_client 10k+ |
+| Heavy imports concurrents (`admitHeavyImport`) | 3-4 | 6-8 | 8-12 (~1 / 3-4 cores) |
+
+→ **La RAM n'a besoin de monter à 512 Go nulle part.** Le hot set dédupé est borné par ~10-25 panels. **Le stockage est un problème résolu** dès que le dedup est ON à chaque palier.
+
+### 7.4 Corrections honnêtes (le premier chiffrage était trop optimiste)
+
+1. **« Une box » est la mauvaise unité à des milliers d'users.** Un seul gros box (AX102/EX131/AX162 + pooler) est un **primary viable** pour les *low-thousands* et **guérit bien les timeouts `DataFileRead`** (une fois le dedup ON, le hot set devient O(panels) et rentre en RAM). Mais **« milliers d'users sans timeout » est intrinsèquement multi-nœuds.**
+2. **Pooler (Supavisor/PgBouncer, transaction mode) = prérequis, pas option.** Sans lui, le box **meurt à 300-500 connexions directes**, quel que soit le CPU. Des milliers d'users applicatifs **ne doivent jamais** devenir des milliers de backends Postgres.
+3. **Le dedup couche B est DORMANT — c'est LA dépendance critique.** Le ÷3 est **mesuré** ; le ÷20-45 est une **extrapolation** qui ne tient QUE si (a) couche B est activée, (b) les users se regroupent vraiment sur 10-20 panels, (c) l'overlay/user reste petit. **À valider sur données réelles AVANT d'acheter du matériel.**
+4. **Le vrai mur à des milliers de viewers = le gateway média/transcode, PAS Postgres.** ~5 Gbps d'egress par 1 000 viewers concurrents ; transcode HEVC→h264 CPU/GPU-lourd. → **flotte GPU/NVENC séparée**, autoscalée, **hors du box DB**, derrière le relay Cloudflare. Préférer relay/remux au transcode dès que browser-safe. **C'est là que va l'argent**, pas dans le CPU DB. Budgéter **5-25+ Gbps** d'egress explicitement (Railway pas rentable à ce niveau).
+5. **Read replica** : router les SELECT (grids/rails/dashboards) → replica, écritures/imports → primary, pour qu'un gros `building_titles`/TMDB-match **ne timeoute jamais** un viewer.
+6. **Live/EPG sous-estimé** : `cloud_live_*` = 0,81 Go à 3 users (~270 Mo/user aujourd'hui) et l'unité mesurée **exclut** le live. → mes tailles DB corrigées sont **1,5-3×** le premier chiffrage. **À instrumenter** avant de croire l'overlay 10 Mo/user.
+7. **HA** : un seul box = **zéro failover** = inacceptable pour des milliers d'users payants. Requiert primary + streaming replica + auto-promotion (Patroni/etcd ou repmgr) + IP flottante + poolers redondants + **WAL archiving offsite (pgBackRest/WAL-G) avec un PITR restore RÉGULIÈREMENT TESTÉ**.
+8. **Blocker HA — le gap de reproductibilité** : plusieurs fixes prod (index, circuit-breaker, soft-delete, admin grouping) ont été **appliqués à la main, jamais captés en migration**. Un failover vers une replica qui ne les a pas **reproduit l'outage**. → **À fermer avant toute HA** (voir §7.5 et `2026-07-07-playback-scaling-session.md`).
+
+### 7.5 Architecture cible « milliers d'users » (multi-nœuds)
+
+```
+                    ┌─────────────────────────────────────────┐
+   users (10k+) ──▶ │  LB / Kong / Caddy  (TLS, N+1)           │
+                    └───────────────┬─────────────────────────┘
+                        ┌───────────┼───────────────┐
+                        ▼           ▼               ▼
+                  app/edge     Realtime WS     GPU transcode fleet
+                  (PostgREST,   (nœuds          (NVENC, autoscale,
+                   GoTrue,       dédiés)          egress 5-25 Gbps)
+                   edge-runtime)     │                 │  ← LE vrai mur
+                        │            │            relay Cloudflare (externe)
+                        ▼            ▼
+               ┌─────────────────────────────┐
+               │ Supavisor / PgBouncer (txn)  │  ← prérequis, 2+ derrière VIP
+               │  ~50-200 real backends       │
+               └──────┬───────────────┬───────┘
+             writes/  │               │  reads (grids, rails, dashboards)
+             imports  ▼               ▼
+              ┌─────────────┐   ┌──────────────┐
+              │  PRIMARY DB  │──▶│ READ REPLICA │   streaming + auto-failover
+              │ EPYC/Xeon    │   │ (2ᵉ box)     │   (Patroni/etcd), IP flottante
+              │ 128-256 Go   │   └──────────────┘
+              └──────┬───────┘
+                     ▼  WAL archiving continu (pgBackRest/WAL-G) → R2/S3 offsite
+                  PITR testé régulièrement
+```
+
+**À budgéter réellement** : primary + replica (2 gros box) + paire de poolers + nœuds app/edge + **flotte GPU transcode** dimensionnée au **pic de viewers concurrents**, pas au nb d'users. Le CPU de la DB n'est PAS ce que « scaler à des milliers » coûte vraiment.
+
+### 7.6 Ordre d'exécution recommandé pour cette cible
+
+1. **Fermer le gap de reproductibilité** (formaliser en migrations les fixes prod appliqués à la main) — bloque toute HA.
+2. **Activer + valider le dedup couche B** sur données réelles (mesurer clustering panel + overlay incluant live/EPG) — bloque tout le sizing sublinéaire.
+3. **Mettre un pooler** (Supavisor/PgBouncer txn) devant tout — prérequis connexions.
+4. **Migrer le primary sur Hetzner** (scripts §8 / `ops/hetzner/`), box AX102 d'abord (couvre 1k-10k dédupés), passer EPYC/Xeon EX131/AX162 pour burst-imports + 256 Go + ECC registered.
+5. **Ajouter la read replica** (séparer lecture/import).
+6. **Sortir la flotte transcode** (GPU/NVENC autoscale) — le vrai mur des viewers concurrents.
+7. **HA** (auto-failover primary→replica, poolers redondants, PITR testé).
+
+---
+
+## 8. Scripts de migration Hetzner (le code)
+
+Les scripts de migration self-host sont dans **[`ops/hetzner/`](../../ops/hetzner/)** (préparés, pas exécutés — l'infra reste ton domaine). Voir [`ops/hetzner/README.md`](../../ops/hetzner/README.md) pour le runbook pas-à-pas. Contenu :
+
+- `README.md` — runbook complet (partitionnement disque SSD=DB / HDD=backups+storage, ordre d'exécution, parité post-migration).
+- `.env.hetzner.example` — template des secrets de la stack self-host.
+- `docker-compose.supabase.yml` — stack Supabase OSS (Postgres + GoTrue + PostgREST + Realtime + Storage + Kong + edge-runtime + Studio + pg_meta).
+- `postgres/postgresql.tuning.conf` — tuning Postgres par palier (grounded sur la baseline mesurée + le sizing §7).
+- `postgres/pgbouncer.ini.example` — pooler transaction-mode (prérequis §7.4).
+- `scripts/01-dump-prod.sh` — dump depuis Supabase managé (rôles + schéma + data ; note vault/cron).
+- `scripts/02-restore-hetzner.sh` — restore dans la stack self-host.
+- `scripts/03-recreate-cron-guc.sql` — recréer les GUC (`app.norva_*`), vérifier les 47 crons, ré-injecter les 3 secrets vault.
+- `scripts/04-deploy-edge-functions.sh` — déployer les 19 fonctions `norva-*` sur l'edge-runtime self-host.
+- `scripts/05-verify-parity.sh` — parité post-migration (counts, extensions, crons, RLS).
+
+> État prod au moment de la rédaction (2026-07-07, `oupsceccxsonaalhueff`) : DB **5,15 Go**, extensions `pg_cron 1.6.4 / pg_net 0.20.3 / supabase_vault 0.3.1 / pg_trgm / pgcrypto / http / unaccent / uuid-ossp / pgstattuple / pg_stat_statements`, **47 crons (46 actifs)**, **3 secrets vault**. Les scripts sont grounded sur cet inventaire.

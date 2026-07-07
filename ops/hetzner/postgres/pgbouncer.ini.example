@@ -1,0 +1,55 @@
+; =============================================================================
+; Norva self-host — PgBouncer (transaction-mode pooler)
+; =============================================================================
+; MANDATORY prerequisite past a few hundred concurrent users (docs §7.4.2):
+; without it, Postgres exhausts backends at ~300-500 direct connections no matter
+; the CPU. Put PgBouncer (or Supabase's Supavisor) IN FRONT of Postgres and point
+; rest/auth/realtime/functions/meta at it instead of the db directly.
+;
+; For real scale run 2+ PgBouncer instances behind a VIP (keepalived/HAProxy) so
+; the pooler itself isn't a single point of failure.
+;
+; auth: use auth_query against Postgres, or an auth_file (userlist.txt) with
+; SCRAM/MD5 hashes. Do NOT commit real credentials.
+; =============================================================================
+
+[databases]
+; Route the app to the primary. For read replicas, add a second entry
+; (e.g. postgres_ro) pointing at the replica host and send SELECTs there.
+postgres = host=db port=5432 dbname=postgres
+
+[pgbouncer]
+listen_addr = 0.0.0.0
+listen_port = 6432
+
+; transaction mode = a server connection is returned to the pool at COMMIT, so
+; thousands of short client transactions share a small backend pool.
+pool_mode = transaction
+
+; Client side: allow thousands of app connections...
+max_client_conn = 10000
+; ...multiplexed onto a SMALL number of real Postgres backends (keep well under
+; postgresql.conf max_connections=200). Tune per tier: ~25 (1k users) .. 50-64 (10k).
+default_pool_size = 50
+min_pool_size = 10
+reserve_pool_size = 10
+reserve_pool_timeout = 3
+
+; Statement/query timeouts are enforced per-role in Postgres, not here.
+server_reset_query = DISCARD ALL
+server_idle_timeout = 300
+
+; --- auth (choose ONE) -------------------------------------------------------
+; Option A: auth_query (recommended; no userlist to maintain)
+auth_type = scram-sha-256
+auth_user = pgbouncer
+auth_query = SELECT rolname, rolpassword FROM pg_shadow WHERE rolname = $1
+; Option B: static userlist
+; auth_file = /etc/pgbouncer/userlist.txt
+
+admin_users = postgres
+ignore_startup_parameters = extra_float_digits,search_path
+
+; NOTE for transaction mode: PREPARE/DEALLOCATE and session-level SET do not
+; persist across transactions. PostgREST/GoTrue are compatible; if a norva-*
+; edge function relies on session state, route it to a session-mode pool instead.
