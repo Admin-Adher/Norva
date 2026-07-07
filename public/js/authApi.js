@@ -154,6 +154,16 @@
         });
     }
 
+    // Call a Postgres RPC (PostgREST /rest/v1/rpc/<fn>) as the signed-in user, so
+    // SECURITY DEFINER functions can read the caller's own auth state (e.g.
+    // auth_methods_self → has_password/providers). apikey stays the publishable
+    // key; Authorization is swapped to the user's access token by request().
+    async function rpc(fn, args) {
+        const token = await getAccessToken();
+        if (!token) throw new Error('Not signed in');
+        return request(`/rest/v1/rpc/${fn}`, { method: 'POST', token, body: args || {} });
+    }
+
     async function refreshSession() {
         const current = getSession();
         if (!current?.refresh_token) return null;
@@ -284,6 +294,7 @@
         verifyOtp,
         signInWithOAuth,
         signInWithIdToken,
-        signInWithOtp
+        signInWithOtp,
+        rpc
     };
 })();

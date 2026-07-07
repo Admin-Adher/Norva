@@ -230,14 +230,32 @@ class SettingsPage {
     async populateSignInMethods() {
         const methodsEl = document.getElementById('ss-methods');
         if (!methodsEl) return;
-        let identities = [];
-        try {
-            const user = await window.NorvaAuth?.getUser?.();
-            identities = (user && Array.isArray(user.identities)) ? user.identities : [];
-        } catch (_) { /* fall through with empty list */ }
 
-        const hasPassword = identities.some((i) => i.provider === 'email');
-        const google = identities.find((i) => i.provider === 'google');
+        // Authoritative auth state. Whether a USABLE password exists lives only in
+        // auth.users.encrypted_password — not in the client user object and not on
+        // auth.identities (a magic-link/OTP user has an 'email' identity but no
+        // password). The auth_methods_self RPC reads it server-side so the panel
+        // adapts correctly to google-only / magic-link / password / linked.
+        let meta = null;
+        try { meta = await window.NorvaAuth?.rpc?.('auth_methods_self'); } catch (_) { /* fall through */ }
+        if (!meta) {
+            // RPC unavailable → best-effort from identities (may mislabel passwordless).
+            try {
+                const user = await window.NorvaAuth?.getUser?.();
+                const ids = (user && Array.isArray(user.identities)) ? user.identities : [];
+                meta = {
+                    has_password: ids.some((i) => i.provider === 'email'),
+                    providers: ids.map((i) => i.provider),
+                    google_email: (ids.find((i) => i.provider === 'google')?.identity_data?.email) || null,
+                    email_confirmed: true
+                };
+            } catch (_) { meta = { has_password: false, providers: [], google_email: null, email_confirmed: false }; }
+        }
+
+        const providers = Array.isArray(meta.providers) ? meta.providers : [];
+        const hasPassword = !!meta.has_password;
+        const hasGoogle = providers.includes('google');
+        const emailConfirmed = !!meta.email_confirmed;
         const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
         const row = (label, connected, detail) => `
             <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;border:1px solid #273142;border-radius:10px;background:#0b0f16">
@@ -246,17 +264,18 @@ class SettingsPage {
             </div>`;
 
         methodsEl.innerHTML =
-            row('Email &amp; password', hasPassword, hasPassword ? 'Connected' : 'Add one below') +
-            row('Google', !!google, google ? (google.identity_data?.email || 'Connected')
+            row('Email &amp; password', hasPassword, hasPassword ? 'Connected' : 'Not set — add one below') +
+            row('Magic link (email)', emailConfirmed, emailConfirmed ? 'Enabled' : 'Confirm your email to enable') +
+            row('Google', hasGoogle, hasGoogle ? (meta.google_email || 'Connected')
                 : 'Sign in with Google (same email) to connect');
 
-        // Reframe the password fields for an account that has no password yet.
-        if (!hasPassword) {
-            const heading = document.getElementById('ss-pwd-heading');
-            const updateBtn = document.getElementById('ss-update');
-            if (heading) heading.textContent = 'Add a password';
-            if (updateBtn) updateBtn.textContent = 'Add password';
-        }
+        // Adapt the password section in BOTH directions so re-calling after an
+        // add/change flips it live: no password yet → "Add a password"; has one →
+        // "Change password".
+        const heading = document.getElementById('ss-pwd-heading');
+        const updateBtn = document.getElementById('ss-update');
+        if (heading) heading.textContent = hasPassword ? 'Change password' : 'Add a password';
+        if (updateBtn) updateBtn.textContent = hasPassword ? 'Update password' : 'Add password';
     }
 
     async signOut() {
