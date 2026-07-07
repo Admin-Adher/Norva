@@ -41,7 +41,13 @@
     // The currently open modal, if any. While one is open, navigation is
     // confined to it so the D-pad can't escape to the dimmed page behind.
     function openModal() {
-        return document.querySelector('#modal.active, .modal-overlay.active, .np-overlay');
+        // Return the TOPMOST open modal (last in DOM), so a modal opened on top of
+        // another — e.g. the TV <select> list (openTvSelect) raised from inside the
+        // region prompt — correctly captures navigation instead of the one beneath.
+        // #norva-region-prompt is the first-run region dialog (cloudApi.js): listing
+        // it here traps the D-pad inside it and lets Back/Escape dismiss it.
+        const modals = document.querySelectorAll('#modal.active, .modal-overlay.active, .np-overlay, #norva-region-prompt');
+        return modals[modals.length - 1] || null;
     }
 
     function getCandidates() {

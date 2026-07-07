@@ -228,7 +228,9 @@
             overflow: hidden; clip: rect(0 0 0 0);
             white-space: nowrap; border: 0;
         }
-        @media (max-width: 780px) {
+        /* Collapse to a single column up to ~900px so portrait tablets (768-834px)
+           get the stacked layout instead of a cramped two-column desktop grid. */
+        @media (max-width: 900px) {
             body { padding: 18px; place-items: start center; }
             .shell { grid-template-columns: 1fr; gap: 18px; }
             .brand { padding-top: 18px; }
@@ -383,6 +385,7 @@
                 .social-auth .divider::before, .social-auth .divider::after { content:""; flex:1; height:1px; background:var(--line,#283246); }
                 .social-btn { display:flex; align-items:center; justify-content:center; gap:10px; width:100%; padding:12px 14px; margin-top:8px; border-radius:10px; border:1px solid var(--line,#283246); background:#ffffff; color:#1f2430; font-weight:600; font-size:14px; cursor:pointer; }
                 .social-btn:hover { filter:brightness(.97); }
+                .social-btn:focus-visible { outline:none; box-shadow:0 0 0 3px rgba(91,124,250,.45); }
                 .social-btn.apple { background:#000; color:#fff; border-color:#000; }
                 .social-btn svg { width:18px; height:18px; }
             </style>
@@ -469,6 +472,16 @@
         const OAUTH_PROVIDERS = ['google']; // add 'apple' once its provider is configured in Supabase
         (function initSocial() {
             if (!socialEl) return;
+            // Social sign-in is web-only for now: Google/Apple OAuth is rejected
+            // inside the Android app WebView (disallowed_useragent), and a full-page
+            // provider redirect is unusable on a TV remote. Native apps sign in with
+            // email/password (TV also pairs); native Google Sign-In will re-enable
+            // this later via the app's ID-token bridge.
+            if (document.documentElement.classList.contains('native-app')) {
+                socialEl.dataset.enabled = '';
+                socialEl.style.display = 'none';
+                return;
+            }
             const enabled = new Set(OAUTH_PROVIDERS);
             socialEl.querySelectorAll('.social-btn').forEach(btn => {
                 if (!enabled.has(btn.dataset.provider)) { btn.remove(); return; }

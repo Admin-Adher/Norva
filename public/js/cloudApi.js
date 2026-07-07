@@ -405,67 +405,106 @@
         if (/\/(login|cloud|account|cloud-pair|hub-connect)(\.html)?\/?$/i.test(pathname)) return;
 
         const suggestion = resolveContentRegion();
+        // TV gets a centered, larger-type card (corner cards get overscan-cropped and
+        // 14px is unreadable at 10 feet); web/mobile keep the safe-area bottom card.
+        const isTv = /NorvaTV-AndroidTV/.test(navigator.userAgent || '')
+            || new URLSearchParams(location.search).has('tv');
+        const prevFocus = document.activeElement;
+        const label = contentRegionLabel(suggestion.region);
+
         const prompt = document.createElement('div');
         prompt.id = 'norva-region-prompt';
+        // A real dialog: named for screen readers, and recognized by tvNavigation's
+        // openModal() so the D-pad is trapped inside and Back/Escape dismisses it.
+        prompt.setAttribute('role', 'dialog');
+        prompt.setAttribute('aria-modal', 'true');
+        prompt.setAttribute('aria-label', `Organize Norva for ${label}`);
+        const position = isTv
+            ? ['left:50%', 'top:50%', 'transform:translate(-50%,-50%)', 'max-width:min(560px,90vw)']
+            : [
+                // Offset by the device safe-area so the card is never cropped behind
+                // the Android/iOS system navigation bar in the native APK WebView.
+                'left:calc(16px + env(safe-area-inset-left, 0px))',
+                'right:calc(16px + env(safe-area-inset-right, 0px))',
+                'bottom:calc(16px + env(safe-area-inset-bottom, 0px))',
+                'max-width:420px',
+                'width:auto'
+            ];
         prompt.style.cssText = [
             'position:fixed',
-            // Offset by the device safe-area so the card is never cropped behind
-            // the Android/iOS system navigation bar in the native APK WebView.
-            'left:calc(16px + env(safe-area-inset-left, 0px))',
-            'right:calc(16px + env(safe-area-inset-right, 0px))',
-            'bottom:calc(16px + env(safe-area-inset-bottom, 0px))',
+            ...position,
             // Never taller than the viewport (scroll if it somehow is).
             'max-height:calc(100vh - 32px - env(safe-area-inset-bottom, 0px) - env(safe-area-inset-top, 0px))',
             'overflow:auto',
             'z-index:9999',
-            'max-width:420px',
-            'width:auto',
             'box-sizing:border-box',
-            'background:#121722',
-            'border:1px solid #2b3448',
+            // Map to the app's design tokens (dark theme) with the previous hex as a
+            // fallback for surfaces that don't define them.
+            'background:var(--color-bg-secondary, #121722)',
+            'border:1px solid var(--color-border, #2b3448)',
             'border-radius:16px',
             'box-shadow:0 18px 55px rgba(0,0,0,.45)',
-            'color:#f8fafc',
+            'color:var(--color-text-primary, #f8fafc)',
             'padding:18px',
-            'font:14px/1.45 system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif'
+            `font:${isTv ? '18px' : '14px'}/1.45 system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif`
         ].join(';');
+        // 44px minimum touch/remote targets throughout.
+        const btnBase = 'min-height:44px;border-radius:10px;padding:10px 14px;font-weight:800;cursor:pointer';
         prompt.innerHTML = `
-            <button type="button" aria-label="Close" data-region-close style="float:right;background:transparent;border:0;color:#94a3b8;font-size:22px;line-height:1;cursor:pointer">&times;</button>
-            <strong style="display:block;font-size:16px;margin:0 26px 8px 0">Organize Norva for ${escapeHtml(contentRegionLabel(suggestion.region))}?</strong>
-            <span style="display:block;color:#aeb8cc;margin-bottom:14px">Norva uses this region to organize channels, logos and categories. You can change it at any time.</span>
+            <button type="button" aria-label="Close" data-region-close class="modal-close" style="float:right;width:44px;height:44px;display:flex;align-items:center;justify-content:center;background:transparent;border:0;color:var(--color-text-secondary,#94a3b8);font-size:24px;line-height:1;cursor:pointer;margin:-8px -8px 0 0">&times;</button>
+            <strong style="display:block;font-size:${isTv ? 20 : 16}px;margin:0 40px 8px 0">Organize Norva for ${escapeHtml(label)}?</strong>
+            <span style="display:block;color:var(--color-text-secondary,#aeb8cc);margin-bottom:14px">Norva uses this region to organize channels, logos and categories. You can change it at any time.</span>
             <div data-region-actions style="display:flex;gap:10px;flex-wrap:wrap">
-                <button type="button" data-region-confirm style="flex:1 1 82px;border:0;border-radius:10px;background:#5b7cfa;color:white;padding:10px 14px;font-weight:800;cursor:pointer">Yes</button>
-                <button type="button" data-region-settings style="flex:2 1 180px;min-width:0;border:1px solid #334155;border-radius:10px;background:#1b2230;color:#dbe7ff;padding:10px 14px;font-weight:800;cursor:pointer">Choose another region</button>
+                <button type="button" data-region-confirm style="flex:1 1 82px;border:0;background:var(--color-accent,#5b7cfa);color:white;${btnBase}">Yes</button>
+                <button type="button" data-region-settings style="flex:2 1 180px;min-width:0;border:1px solid var(--color-border,#334155);background:var(--color-bg-tertiary,#1b2230);color:var(--color-text-primary,#dbe7ff);${btnBase}">Choose another region</button>
             </div>
             <div data-region-picker style="display:none;gap:10px;flex-wrap:wrap;margin-top:2px">
-                <select data-region-select aria-label="Content region" style="flex:1 1 180px;min-width:0;border:1px solid #334155;border-radius:10px;background:#1b2230;color:#f8fafc;padding:10px 12px;font-weight:700;cursor:pointer">
+                <select data-region-select aria-label="Content region" style="flex:1 1 180px;min-width:0;min-height:44px;border:1px solid var(--color-border,#334155);border-radius:10px;background:var(--color-bg-tertiary,#1b2230);color:var(--color-text-primary,#f8fafc);padding:10px 12px;font-weight:700;cursor:pointer">
                     ${CONTENT_REGIONS.map((r) => `<option value="${escapeHtml(r.key)}">${r.flag ? escapeHtml(r.flag) + ' ' : ''}${escapeHtml(r.label)}</option>`).join('')}
                 </select>
-                <button type="button" data-region-apply style="flex:0 0 auto;border:0;border-radius:10px;background:#5b7cfa;color:white;padding:10px 16px;font-weight:800;cursor:pointer">Confirm</button>
+                <button type="button" data-region-apply style="flex:0 0 auto;border:0;background:var(--color-accent,#5b7cfa);color:white;${btnBase};padding:10px 16px">Confirm</button>
             </div>
         `;
-        const regionTitle = prompt.querySelector('strong');
-        const regionMessage = prompt.querySelector('span[style*="margin-bottom"]');
-        const confirmButton = prompt.querySelector('[data-region-confirm]');
-        const settingsButton = prompt.querySelector('[data-region-settings]');
-        if (regionTitle) regionTitle.textContent = `Organize Norva for ${contentRegionLabel(suggestion.region)}?`;
-        if (regionMessage) regionMessage.textContent = 'Norva uses this region to order channels, logos and categories. You can change it at any time.';
-        if (confirmButton) confirmButton.textContent = 'Yes';
-        if (settingsButton) settingsButton.textContent = 'Choose another region';
 
-        const close = () => {
-            dismissRegionPrompt();
+        // Teardown removes the dialog and its key handler, and returns focus to
+        // whatever opened it (keyboard/remote continuity). `dismiss` also records the
+        // "not now" so the prompt doesn't nag again; confirming a region doesn't need
+        // that flag (the region is already set).
+        function onKey(e) {
+            if (e.key === 'Escape' || e.key === 'GoBack' || e.key === 'BrowserBack') {
+                e.preventDefault();
+                dismiss();
+                return;
+            }
+            if (e.key === 'Tab') {
+                const f = Array.from(prompt.querySelectorAll('button, select, [href], input, [tabindex]:not([tabindex="-1"])'))
+                    .filter((el) => !el.disabled && el.offsetParent !== null);
+                if (!f.length) return;
+                const first = f[0];
+                const last = f[f.length - 1];
+                if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+                else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+            }
+        }
+        const teardown = () => {
+            document.removeEventListener('keydown', onKey, true);
             prompt.remove();
+            try { if (prevFocus && typeof prevFocus.focus === 'function') prevFocus.focus(); } catch (_) { /* noop */ }
         };
-        prompt.querySelector('[data-region-close]')?.addEventListener('click', close);
+        const dismiss = () => { dismissRegionPrompt(); teardown(); };
+
+        const closeBtn = prompt.querySelector('[data-region-close]');
+        // .onclick (not addEventListener) so tvNavigation.closeTopModal() — which the
+        // TV hardware Back button routes through — invokes it.
+        if (closeBtn) closeBtn.onclick = dismiss;
         prompt.querySelector('[data-region-confirm]')?.addEventListener('click', async () => {
             await setPreferredContentRegion(suggestion.region);
-            prompt.remove();
+            teardown();
         });
-        // "Choose another region" now reveals an inline picker inside the card and
-        // writes the chosen region straight to the user's settings — no detour to
-        // the Settings page (the old behaviour, which felt like the prompt bailed
-        // out on you).
+        // "Choose another region" reveals an inline picker inside the card and writes
+        // the chosen region straight to the user's settings — no detour to Settings.
+        // On TV, focusing the <select> + D-pad center opens tvNavigation's big
+        // remote-friendly option list (openTvSelect).
         const actionsRow = prompt.querySelector('[data-region-actions]');
         const pickerRow = prompt.querySelector('[data-region-picker]');
         const regionSelect = prompt.querySelector('[data-region-select]');
@@ -478,9 +517,18 @@
         prompt.querySelector('[data-region-apply]')?.addEventListener('click', async () => {
             const chosen = regionSelect?.value || suggestion.region;
             await setPreferredContentRegion(chosen);
-            prompt.remove();
+            teardown();
         });
+
         document.body.appendChild(prompt);
+        // Escape/Back + Tab focus-trap for keyboard users (tvNavigation owns these on
+        // TV; this covers web/desktop where tvNavigation is inactive).
+        document.addEventListener('keydown', onKey, true);
+        // Move focus into the dialog so a ring is visible and the trap has an anchor.
+        // setTimeout(0) so it lands even in WebViews that throttle animation frames.
+        setTimeout(() => {
+            try { (prompt.querySelector('[data-region-confirm]') || closeBtn)?.focus(); } catch (_) { /* noop */ }
+        }, 0);
     }
 
     function escapeHtml(value) {

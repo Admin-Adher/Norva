@@ -54,6 +54,18 @@ Couvre **web (norva.tv)**, **PWA mobile** et **desktop (Electron)**.
 
 Après ça, « Continue with Google » est live sur web + PWA + desktop.
 
+### Cas particulier — desktop Electron
+Par défaut, l'app desktop sert l'UI depuis un serveur local sur un **port
+aléatoire** (`http://127.0.0.1:3002-3999`, voir `electron-main.js`), donc le
+`redirect_to` OAuth n'est pas stable. Deux options pour faire marcher Google
+dans l'app desktop :
+- **(recommandé)** lancer le build cloud : `NORVA_DESKTOP_URL=https://norva.tv/app.html`
+  → l'origine est `https://norva.tv`, déjà allow-listée ci-dessus ;
+- **sinon** allow-lister le wildcard port `http://127.0.0.1:*` dans les Redirect
+  URLs Supabase **et** dans les origines JavaScript du client OAuth Web (Google
+  Cloud). `electron-main.js` autorise déjà les hôtes d'identité à naviguer
+  in-window pour que la session revienne à la fenêtre.
+
 ---
 
 ## Étape 2 — App Android phone : Google Sign-In **natif** (choisi)
