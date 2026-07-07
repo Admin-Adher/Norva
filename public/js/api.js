@@ -1465,9 +1465,19 @@ const CloudAdapter = (() => {
                 // client-side for an instant Resume, and nothing depends on a
                 // transcode gateway. Anything that needs decoding help (mkv/HEVC/AC3
                 // or live) still takes the gateway/transcode path.
+                // "Not proven unsafe" is NOT "safe": an mp4/mov/m4v with an UNKNOWN video codec
+                // (series episodes arrive from norva-series-info without the codec_profile that
+                // norva-catalog attaches to movies) defaults through here and DEAD-ENDS on the
+                // native <video> element when it's actually HEVC. When the codec is unknown and the
+                // container is engine-demuxable, prefer the in-browser engine (plays H.264 AND HEVC,
+                // and fails over to the gateway transcode on error) over gambling on native.
+                // Known-H.264 keeps the fast native/relay path; nativePlayer (hardware HEVC) is
+                // handled earlier in the mode ternary and is unaffected.
+                const videoCodecKnown = Boolean(normalizeCodecToken(playbackHint.videoCodec));
                 const browserSafeVod = isVodPlayback
                     && !needsGateway
-                    && !shouldVodUseGatewayTranscode(container, playbackHint);
+                    && !shouldVodUseGatewayTranscode(container, playbackHint)
+                    && (videoCodecKnown || !engineCanPlayContainer(container));
                 // Browser VOD that needs container/codec help (mkv/avi, HEVC,
                 // AC-3/DTS/TrueHD audio, …): play it with the in-browser engine
                 // (NorvaEngine remuxes the container + transcodes the audio to

@@ -5076,6 +5076,12 @@ class WatchPage {
             const itemType = this.content.type === 'series' ? 'series' : 'movie';
             const container = this.containerExtension || 'mp4';
             const playbackHint = {
+                // Force the resolver onto the transcode path. gatewayMode alone does NOT set the
+                // resolver's `mode` (getStreamUrl reads query `mode` → forcedMode), so without this
+                // the retry re-evaluated browserSafeVod on the still-metadata-less hint and silently
+                // degraded back to a native relay attempt — no transcode session was ever created.
+                // (Mirrors fallbackEngineToTranscode, which already passes mode:'transcode'.)
+                mode: 'transcode',
                 gatewayMode: 'transcode',
                 audioMode: 'transcode',
                 ...this.getSelectedAudioPlaybackOptions(),
