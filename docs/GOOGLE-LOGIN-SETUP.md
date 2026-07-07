@@ -68,31 +68,36 @@ dans l'app desktop :
 
 ---
 
-## Étape 2 — App Android phone : Google Sign-In **natif** (choisi)
+## Étape 2 — App Android phone : Google Sign-In **natif** — **CODÉ [repo]**
 
-L'app phone (`tv.norva.phone`) est un **WebView** natif qui charge
-`norva.tv/account.html`. Google **bloque l'OAuth dans un WebView brut**
-(`disallowed_useragent` / 403), donc on ne passe **pas** par le bouton web dans
-l'app : on utilise le **sélecteur de compte natif** (UX « 1 tap »).
+L'app phone (`tv.norva.phone`) est un **WebView** qui charge `norva.tv/account.html`.
+Google **bloque l'OAuth dans un WebView brut** (`disallowed_useragent`), donc le
+bouton « Continue with Google » en contexte natif appelle un **bridge natif**
+(Credential Manager, sélecteur de compte Google) au lieu d'un redirect web.
 
-Flux cible :
-1. `MainActivity` expose un bridge JS (ex. `window.__norvaNative.googleSignIn()`).
-2. Le bouton Google, en contexte natif, appelle le bridge au lieu du redirect web.
-3. Côté Java : **Credential Manager** (`androidx.credentials` +
-   `com.google.android.libraries.identity.googleid`) ouvre le sélecteur de compte
-   Google et renvoie un **ID token**.
-4. Le token est réinjecté dans le WebView → `NorvaAuth.signInWithIdToken({
-   provider: 'google', token })` (déjà implémenté) → session Norva posée.
+Flux implémenté :
+1. Web (`account.html`) : en natif, si le bridge `NorvaTVCloud.googleSignIn` existe,
+   le bouton Google l'appelle. Rétrocompatible : sans bridge (ancien APK), le bouton
+   reste masqué comme avant.
+2. Java (`MainActivity`) : `googleSignIn()` → **Credential Manager**
+   (`GetGoogleIdOption.setServerClientId(<WEB client id>)`) → **ID token** → renvoyé
+   au web via `window.onNorvaGoogleIdToken(idToken, error)`.
+3. Web : `NorvaAuth.signInWithIdToken({ provider:'google', token })` → session Norva.
 
-Dépendances à ajouter dans `clients/android-phone/app/build.gradle` :
-```gradle
-implementation "androidx.credentials:credentials:1.3.0"
-implementation "androidx.credentials:credentials-play-services-auth:1.3.0"
-implementation "com.google.android.libraries.identity.googleid:googleid:1.1.1"
-```
+Ce qui est déjà en place **[repo]** : deps `androidx.credentials` + `googleid` dans
+`build.gradle` ; le bridge + `startGoogleSignIn()` dans `MainActivity.java` ; le
+wiring web + callback dans `account.html`.
 
-Pré-requis : client OAuth **Android** créé (étape 0.2) + `client_id` **Web**
-(le `serverClientId` passé au Credential Manager est celui du client **Web**).
+Ce qu'il reste à toi **[console + secret]** pour l'activer :
+1. **Google Cloud** → OAuth client **« Android »** : package `tv.norva.phone` +
+   **SHA-256 de la clé de signature Play** (disponible seulement **après** le 1ᵉʳ
+   upload d'AAB — voir `clients/PLAY_STORE_RELEASE_STATUS.md` §4).
+2. **Supabase** → Auth → Providers → Google → **Authorized Client IDs** : ajouter
+   le client_id **Android** (en plus du **Web**).
+3. Renseigner le **Web** client id dans `clients/android-phone/app/src/main/res/values/strings.xml`
+   → `<string name="norva_google_web_client_id">…apps.googleusercontent.com</string>`
+   (laissé vide = Google natif dormant, le bouton renvoie une erreur propre).
+4. Rebuild + upload d'un nouvel AAB (bumper `versionCode`).
 
 ---
 

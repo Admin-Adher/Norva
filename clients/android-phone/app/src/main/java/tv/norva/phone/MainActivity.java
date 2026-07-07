@@ -39,6 +39,17 @@ import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.core.content.ContextCompat;
+import androidx.credentials.Credential;
+import androidx.credentials.CredentialManager;
+import androidx.credentials.CredentialManagerCallback;
+import androidx.credentials.CustomCredential;
+import androidx.credentials.GetCredentialRequest;
+import androidx.credentials.GetCredentialResponse;
+import androidx.credentials.exceptions.GetCredentialException;
+
+import com.google.android.libraries.identity.googleid.GetGoogleIdOption;
+import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential;
 import com.google.firebase.messaging.FirebaseMessaging;
 
 import org.json.JSONArray;
@@ -49,6 +60,7 @@ import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -476,6 +488,20 @@ public class MainActivity extends Activity {
             openPlayer(url, title, sourceId, itemType, itemId, resumeSeconds, fallbackUrl);
         }
 
+        // ---- Native Google Sign-In ----
+
+        /**
+         * Google Sign-In without leaving the app. Google blocks OAuth inside a raw
+         * WebView, so the web "Continue with Google" button on native calls this
+         * bridge instead of a redirect: we fetch a Google ID token natively and hand
+         * it back to the page via window.onNorvaGoogleIdToken(idToken, error), which
+         * exchanges it for a Norva session (Supabase signInWithIdToken).
+         */
+        @android.webkit.JavascriptInterface
+        public void googleSignIn() {
+            runOnUiThread(() -> startGoogleSignIn());
+        }
+
         // ---- Offline downloads ----
 
         /** Queue a movie for offline download. {@code json} carries url + metadata. */
@@ -807,6 +833,68 @@ public class MainActivity extends Activity {
     private static String jsStr(String value) {
         if (value == null) return "''";
         return "'" + value.replace("\\", "\\\\").replace("'", "\\'").replace("\n", " ") + "'";
+    }
+
+    /**
+     * Native Google Sign-In via Credential Manager. Reads the WEB OAuth client id
+     * from R.string.norva_google_web_client_id (dormant until the owner sets it and
+     * creates an Android OAuth client for tv.norva.phone + the Play signing SHA-256
+     * in Google Cloud). On success/failure it calls back into the page via
+     * window.onNorvaGoogleIdToken(idToken, error).
+     */
+    private void startGoogleSignIn() {
+        final String webClientId = getString(R.string.norva_google_web_client_id);
+        if (webClientId == null || webClientId.trim().isEmpty()) {
+            sendGoogleIdTokenToWeb(null, "google_not_configured");
+            return;
+        }
+        try {
+            GetGoogleIdOption option = new GetGoogleIdOption.Builder()
+                    .setServerClientId(webClientId)
+                    .setFilterByAuthorizedAccounts(false) // allow any Google account (also first-time sign-up)
+                    .setAutoSelectEnabled(false)
+                    .build();
+            GetCredentialRequest request = new GetCredentialRequest.Builder()
+                    .addCredentialOption(option)
+                    .build();
+            CredentialManager credentialManager = CredentialManager.create(this);
+            Executor executor = ContextCompat.getMainExecutor(this);
+            credentialManager.getCredentialAsync(this, request, null, executor,
+                    new CredentialManagerCallback<GetCredentialResponse, GetCredentialException>() {
+                        @Override
+                        public void onResult(GetCredentialResponse response) {
+                            try {
+                                Credential credential = response.getCredential();
+                                if (credential instanceof CustomCredential
+                                        && GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL.equals(credential.getType())) {
+                                    GoogleIdTokenCredential googleCred =
+                                            GoogleIdTokenCredential.createFrom(((CustomCredential) credential).getData());
+                                    sendGoogleIdTokenToWeb(googleCred.getIdToken(), null);
+                                } else {
+                                    sendGoogleIdTokenToWeb(null, "unexpected_credential_type");
+                                }
+                            } catch (Exception e) {
+                                sendGoogleIdTokenToWeb(null, e.getMessage());
+                            }
+                        }
+
+                        @Override
+                        public void onError(GetCredentialException e) {
+                            sendGoogleIdTokenToWeb(null, e.getMessage());
+                        }
+                    });
+        } catch (Exception e) {
+            sendGoogleIdTokenToWeb(null, e.getMessage());
+        }
+    }
+
+    /** Hand the Google ID token (or an error) back to the web account page. */
+    private void sendGoogleIdTokenToWeb(final String idToken, final String error) {
+        final String js = "window.onNorvaGoogleIdToken && window.onNorvaGoogleIdToken("
+                + jsStr(idToken) + "," + jsStr(error) + ")";
+        runOnUiThread(() -> {
+            try { if (webView != null) webView.evaluateJavascript(js, null); } catch (Exception ignored) { }
+        });
     }
 
     private void showSetup(String error) {

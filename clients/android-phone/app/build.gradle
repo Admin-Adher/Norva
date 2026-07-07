@@ -87,6 +87,13 @@ dependencies {
     // The SDK compiles without google-services.json; only the plugin (below) needs the config file.
     implementation platform("com.google.firebase:firebase-bom:33.7.0")
     implementation "com.google.firebase:firebase-messaging"
+
+    // Native Google Sign-In (Credential Manager) — the WebView's "Continue with
+    // Google" on native calls a bridge that uses these instead of a web redirect,
+    // since Google blocks OAuth inside a raw WebView.
+    implementation "androidx.credentials:credentials:1.3.0"
+    implementation "androidx.credentials:credentials-play-services-auth:1.3.0"
+    implementation "com.google.android.libraries.identity.googleid:googleid:1.1.1"
 }
 
 // Apply the Firebase google-services plugin ONLY when the config file is present. CI debug builds

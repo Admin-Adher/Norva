@@ -538,22 +538,34 @@
         // app, (2) allow-lists the norva.tv redirect URLs, and (3) lists the provider(s)
         // below. Return is handled automatically by captureSessionFromUrl() in boot().
         const OAUTH_PROVIDERS = ['google']; // add 'apple' once its provider is configured in Supabase
+        // Native Google Sign-In bridge (Android app): NorvaTVCloud.googleSignIn()
+        // fetches a Google ID token natively and calls window.onNorvaGoogleIdToken.
+        const nativeGoogle = isNativeApp
+            && window.NorvaTVCloud && typeof window.NorvaTVCloud.googleSignIn === 'function';
         (function initSocial() {
             if (!socialEl) return;
-            // Social sign-in is web-only for now: Google/Apple OAuth is rejected
-            // inside the Android app WebView (disallowed_useragent), and a full-page
-            // provider redirect is unusable on a TV remote. Native apps sign in with
-            // email/password (TV also pairs); native Google Sign-In will re-enable
-            // this later via the app's ID-token bridge.
-            if (document.documentElement.classList.contains('native-app')) {
+            // On native WITHOUT the native Google bridge (older app build), social
+            // sign-in stays web-only and hidden — a web OAuth redirect can't complete
+            // inside the WebView. With the bridge, Google is wired to the native flow.
+            if (isNativeApp && !nativeGoogle) {
                 socialEl.dataset.enabled = '';
                 socialEl.style.display = 'none';
                 return;
             }
             const enabled = new Set(OAUTH_PROVIDERS);
             socialEl.querySelectorAll('.social-btn').forEach(btn => {
-                if (!enabled.has(btn.dataset.provider)) { btn.remove(); return; }
+                // On native only Google is available (via the bridge); drop the rest.
+                if (!enabled.has(btn.dataset.provider) || (nativeGoogle && btn.dataset.provider !== 'google')) {
+                    btn.remove();
+                    return;
+                }
                 btn.addEventListener('click', () => {
+                    if (nativeGoogle && btn.dataset.provider === 'google') {
+                        setStatus('info', 'Opening Google…');
+                        try { window.NorvaTVCloud.googleSignIn(); }
+                        catch (_) { setStatus('error', 'Google sign-in is unavailable.'); }
+                        return;
+                    }
                     setStatus('info', 'Redirecting…');
                     NorvaAuth.signInWithOAuth(
                         btn.dataset.provider,
@@ -564,6 +576,26 @@
             socialEl.dataset.enabled = socialEl.querySelector('.social-btn') ? '1' : '';
             if (socialEl.dataset.enabled) socialEl.style.display = 'block'; // default form is signin
         })();
+
+        // Callback for the native Google Sign-In bridge: exchange the Google ID token
+        // for a Norva session (Supabase signInWithIdToken), then open the app.
+        window.onNorvaGoogleIdToken = async function (idToken, error) {
+            if (!idToken) {
+                setStatus('error', error === 'google_not_configured'
+                    ? 'Google sign-in isn’t available yet.'
+                    : 'Google sign-in was cancelled.');
+                return;
+            }
+            try {
+                setStatus('info', 'Signing in…');
+                await NorvaAuth.signInWithIdToken({ provider: 'google', token: idToken });
+                await ensureProfile();
+                setStatus('success', 'Signed in. Opening Norva…');
+                location.replace(returnTo);
+            } catch (e) {
+                setStatus('error', (e && e.message) || 'Google sign-in failed.');
+            }
+        };
 
         forms.signin.addEventListener('submit', async event => {
             event.preventDefault();

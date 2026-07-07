@@ -2,6 +2,12 @@
 <resources>
     <string name="app_name">Norva</string>
 
+    <!-- Native Google Sign-In: the WEB OAuth client id (…apps.googleusercontent.com)
+         from Google Cloud, used as the Credential Manager serverClientId. Leave empty
+         to keep native Google sign-in dormant. Requires an Android OAuth client for
+         tv.norva.phone + the Play signing SHA-256 registered in the same project. -->
+    <string name="norva_google_web_client_id" translatable="false"></string>
+
     <!-- Native player -->
     <string name="player_error_title">Couldn\'t play this title</string>
     <string name="player_retry">Retry</string>
