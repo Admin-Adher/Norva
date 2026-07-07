@@ -49,7 +49,7 @@ Indépendant de l'achat serveur. **[GATE]** ceux marqués « hors charge » atte
 ## PHASE 3 — Migrer la DB (fenêtre de maintenance, imports gelés)
 
 - [ ] **[TOI]** **Geler les imports** (pause des sources / désactiver les crons sync côté managé).
-- [ ] **[TOI]** `ops/hetzner/scripts/01-dump-prod.sh` — dump globals + schéma + data depuis Supabase.
+- [ ] **[TOI]** `ops/hetzner/scripts/01-dump-prod.sh` — dump globals + schéma + data depuis Supabase. **(Pré-construit : `ops/backup/backup-to-r2.sh` produit déjà ce dump exact chaque nuit → R2. Le jour J, prends le dernier archive R2 ou relance le script pour un snapshot frais gelé.)**
 - [ ] **[TOI]** `ops/hetzner/scripts/02-restore-hetzner.sh` — restore dans la stack (extensions → globals → schéma → data).
 - [ ] **[TOI]** `psql -f ops/hetzner/scripts/03-recreate-cron-guc.sql` (avec `-v FUNCTIONS_BASE_URL=... -v NORVA_BACKFILL_TOKEN=... -v NORVA_CRON_SHARED_SECRET=... -v RESEND_API_KEY=...`) — GUC (`app.norva_*`, statement_timeout anon/authenticated), **ré-injecter les 3 secrets vault**, **réécrire+recréer les 47 crons** vers l'endpoint self-host.
 
@@ -77,7 +77,7 @@ Indépendant de l'achat serveur. **[GATE]** ceux marqués « hors charge » atte
 
 ## PHASE 6 — Ops continue (indispensable dès la bascule)
 
-- [ ] **[TOI]** **Backups** : pgBackRest ou WAL-G → **R2 offsite** (egress gratuit), **PITR TESTÉ régulièrement** (un backup non testé = pas de backup).
+- [ ] **[TOI]** **Backups** : pgBackRest ou WAL-G → **R2 offsite** (egress gratuit), **PITR TESTÉ régulièrement** (un backup non testé = pas de backup). *(Déjà en place en amont : `ops/backup/` fait un dump logique nocturne → R2 dès aujourd'hui, avant même le box. pgBackRest/WAL-G = le complément PITR **physique** une fois sur le serveur.)*
 - [ ] **[TOI]** **Monitoring** : Netdata ou Prometheus+Grafana (disque, RAM, connexions, egress). Alertes.
 - [ ] **[TOI]** Rotation des secrets, patchs OS/Postgres/stack.
 
