@@ -144,11 +144,13 @@
     // create_user:false so the login form never silently provisions a new account;
     // GoTrue stays quiet for unknown emails (anti-enumeration), so callers should
     // show a neutral "if that email exists, we sent a link" message.
-    async function signInWithOtp(email, redirectTo) {
+    async function signInWithOtp(email, redirectTo, options = {}) {
         const rt = redirectTo || `${location.origin}/account.html`;
+        // create_user:true for passwordless SIGN-UP (provision the account from the
+        // link); false for LOGIN (never silently create an account from the form).
         return request(`/auth/v1/otp?redirect_to=${encodeURIComponent(rt)}`, {
             method: 'POST',
-            body: { email, create_user: false }
+            body: { email, create_user: options.createUser === true, data: options.data || undefined }
         });
     }
 
