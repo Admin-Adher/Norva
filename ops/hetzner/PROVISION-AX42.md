@@ -22,17 +22,25 @@
 
 ## 2. Récupérer l'accès (après livraison — quelques min à quelques heures)
 
-1. Tu reçois un **email** + le serveur apparaît dans **Hetzner Robot** → https://robot.hetzner.com.
-2. Note l'**IP** du serveur (Robot → ton serveur → onglet principal).
+⚠️ **Deux consoles Hetzner, ne pas confondre** :
+- **Hetzner Robot** → **robot.hetzner.com** → gère les **serveurs DÉDIÉS** (ton AX42). **C'est ici.**
+- Hetzner Cloud → console.hetzner.cloud → gère les VPS cloud (CX/CCX). **PAS pour l'AX42.**
 
-## 3. Activer + démarrer le Rescue System
+Le serveur **n'apparaît dans Robot qu'APRÈS l'achat + le provisioning** (pas avant). Donc :
+1. Tu **commandes** l'AX42 (boutique/configurateur).
+2. Tu reçois un **email de provisioning** (IP + identifiants).
+3. Le serveur apparaît alors dans **robot.hetzner.com** → clique dessus → onglets Overview/IPs/Rescue/Reset.
+4. Note l'**IP** du serveur.
 
-1. Robot → ton serveur → onglet **Rescue**.
-2. Operating System = **Linux**, architecture **64 bit**. Ajoute ta **clé SSH** ici si tu en as une
-   (sinon un **mot de passe root** te sera affiché — copie-le).
-3. Clique **Activate rescue system**.
-4. Onglet **Reset** → **Execute an automatic hardware reset** (redémarre la machine dans le Rescue).
-   Attends ~2-3 min.
+## 3. Rescue System — déjà activé si tu as commandé avec « Rescue »
+
+**Si tu as coché « Rescue System » dans le configurateur** (ton cas) : le serveur est **livré déjà
+démarré en Rescue**. L'email / Robot te donne directement l'**IP** + le **mot de passe root du
+Rescue** (ou ta clé SSH). → **Va directement à l'étape 4.**
+
+**Sinon** (ou pour RE-rentrer en Rescue plus tard) : Robot → ton serveur → onglet **Rescue** →
+Linux **64 bit** → (ajoute ta clé SSH ou copie le mot de passe affiché) → **Activate rescue system**
+→ onglet **Reset** → **Execute an automatic hardware reset** → attends ~2-3 min.
 
 ## 4. Se connecter au Rescue (SSH)
 
