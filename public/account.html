@@ -577,6 +577,17 @@
                 return;
             }
             if (recovered) {
+                // Social/OAuth return: the URL fragment carries only tokens — no
+                // user object — but app.html's session gate requires
+                // session.user.id, so a captured-but-unhydrated session bounces
+                // straight back to the marketing landing. Hydrate the user here,
+                // and create the profile for first-time social sign-ups (the
+                // password path already does this via ensureProfile), before
+                // handing off to the app.
+                setStatus('info', 'Signing in...');
+                await NorvaAuth.getUser().catch(() => null);
+                await ensureProfile();
+                setStatus('success', 'Signed in. Opening Norva...');
                 location.replace(returnTo);
                 return;
             }

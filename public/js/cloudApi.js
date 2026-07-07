@@ -433,9 +433,15 @@
             <button type="button" aria-label="Close" data-region-close style="float:right;background:transparent;border:0;color:#94a3b8;font-size:22px;line-height:1;cursor:pointer">&times;</button>
             <strong style="display:block;font-size:16px;margin:0 26px 8px 0">Organize Norva for ${escapeHtml(contentRegionLabel(suggestion.region))}?</strong>
             <span style="display:block;color:#aeb8cc;margin-bottom:14px">Norva uses this region to organize channels, logos and categories. You can change it at any time.</span>
-            <div style="display:flex;gap:10px;flex-wrap:wrap">
+            <div data-region-actions style="display:flex;gap:10px;flex-wrap:wrap">
                 <button type="button" data-region-confirm style="flex:1 1 82px;border:0;border-radius:10px;background:#5b7cfa;color:white;padding:10px 14px;font-weight:800;cursor:pointer">Yes</button>
                 <button type="button" data-region-settings style="flex:2 1 180px;min-width:0;border:1px solid #334155;border-radius:10px;background:#1b2230;color:#dbe7ff;padding:10px 14px;font-weight:800;cursor:pointer">Choose another region</button>
+            </div>
+            <div data-region-picker style="display:none;gap:10px;flex-wrap:wrap;margin-top:2px">
+                <select data-region-select aria-label="Content region" style="flex:1 1 180px;min-width:0;border:1px solid #334155;border-radius:10px;background:#1b2230;color:#f8fafc;padding:10px 12px;font-weight:700;cursor:pointer">
+                    ${CONTENT_REGIONS.map((r) => `<option value="${escapeHtml(r.key)}">${r.flag ? escapeHtml(r.flag) + ' ' : ''}${escapeHtml(r.label)}</option>`).join('')}
+                </select>
+                <button type="button" data-region-apply style="flex:0 0 auto;border:0;border-radius:10px;background:#5b7cfa;color:white;padding:10px 16px;font-weight:800;cursor:pointer">Confirm</button>
             </div>
         `;
         const regionTitle = prompt.querySelector('strong');
@@ -456,12 +462,23 @@
             await setPreferredContentRegion(suggestion.region);
             prompt.remove();
         });
+        // "Choose another region" now reveals an inline picker inside the card and
+        // writes the chosen region straight to the user's settings — no detour to
+        // the Settings page (the old behaviour, which felt like the prompt bailed
+        // out on you).
+        const actionsRow = prompt.querySelector('[data-region-actions]');
+        const pickerRow = prompt.querySelector('[data-region-picker]');
+        const regionSelect = prompt.querySelector('[data-region-select]');
+        if (regionSelect) regionSelect.value = suggestion.region; // preselect the suggestion
         prompt.querySelector('[data-region-settings]')?.addEventListener('click', () => {
-            dismissRegionPrompt();
+            if (actionsRow) actionsRow.style.display = 'none';
+            if (pickerRow) pickerRow.style.display = 'flex';
+            regionSelect?.focus();
+        });
+        prompt.querySelector('[data-region-apply]')?.addEventListener('click', async () => {
+            const chosen = regionSelect?.value || suggestion.region;
+            await setPreferredContentRegion(chosen);
             prompt.remove();
-            const settingsNav = document.querySelector('[data-page="settings"], [data-view="settings"], a[href="#settings"]');
-            if (settingsNav instanceof HTMLElement) settingsNav.click();
-            else window.location.hash = '#settings';
         });
         document.body.appendChild(prompt);
     }
