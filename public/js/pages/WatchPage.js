@@ -4870,7 +4870,14 @@ class WatchPage {
             // MEDIA_ERR_NETWORK / MEDIA_ERR_DECODE / MEDIA_ERR_SRC_NOT_SUPPORTED:
             // fail over to another version of the same title if available
             if ([2, 3, 4].includes(error.code)) {
-                const message = error.message || 'Media error';
+                // code 3 (DECODE) / 4 (SRC_NOT_SUPPORTED) are codec/format failures by definition, but
+                // Chrome routinely leaves error.message EMPTY on HEVC — and a bare 'Media error' doesn't
+                // match isFormatPlaybackError(), so handlePlaybackFailure's gateway-transcode fallback was
+                // skipped and playback dead-looped on retry-in-place. Tag codec codes so the transcode
+                // chain runs. Network (code 2) stays untagged (not a codec issue → no format transcode).
+                const isCodecError = error.code === 3 || error.code === 4;
+                const message = (isCodecError ? 'MEDIA_ELEMENT_ERROR: Format error — ' : '')
+                    + (error.message || `code ${error.code}`);
                 this.logRelayUpstreamDiagnostic(currentSrc);
                 if (this.retryGatewaySeekAfterFatalPlayback(message, videoAttemptId)) return;
                 this.sendPlaybackEvent('playback_error', {
