@@ -60,6 +60,30 @@ function waitForServer(url, timeoutMs = 20000) {
     });
 }
 
+// OAuth (Google/Apple sign-in via Supabase) is a full-page redirect chain:
+// norva.tv → <project>.supabase.co/auth/v1/authorize → accounts.google.com →
+// back to norva.tv/account.html#access_token=… . Those hops leave the app's own
+// origin, so without this allow-list the navigation handlers below would bounce
+// them to the system browser and the returning session would never reach the
+// desktop window. Keep it to identity providers only — everything else still
+// opens externally.
+const AUTH_NAV_HOSTS = [
+    'supabase.co',
+    'supabase.in',
+    'accounts.google.com',
+    'accounts.youtube.com',
+    'appleid.apple.com'
+];
+
+function isAuthNavigation(targetUrl) {
+    try {
+        const host = new URL(targetUrl).hostname;
+        return AUTH_NAV_HOSTS.some((h) => host === h || host.endsWith('.' + h));
+    } catch (_) {
+        return false;
+    }
+}
+
 function createWindow(url, transcoderUrl) {
     const window = new BrowserWindow({
         width: 1280,
@@ -82,7 +106,7 @@ function createWindow(url, transcoderUrl) {
     });
 
     window.webContents.setWindowOpenHandler(({ url: targetUrl }) => {
-        if (targetUrl.startsWith(url)) {
+        if (targetUrl.startsWith(url) || isAuthNavigation(targetUrl)) {
             return { action: 'allow' };
         }
 
@@ -91,7 +115,7 @@ function createWindow(url, transcoderUrl) {
     });
 
     window.webContents.on('will-navigate', (event, targetUrl) => {
-        if (targetUrl.startsWith(url)) {
+        if (targetUrl.startsWith(url) || isAuthNavigation(targetUrl)) {
             return;
         }
 

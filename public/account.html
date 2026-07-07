@@ -437,7 +437,7 @@
     </main>
 
     <script src="/js/cloudApi.js?v=23"></script>
-    <script src="/js/authApi.js?v=4"></script>
+    <script src="/js/authApi.js?v=5"></script>
     <script>
         const params = new URLSearchParams(location.search);
       const returnTo = sanitizeReturnTo(params.get('returnTo')) || '/app#home';
@@ -466,7 +466,7 @@
         // provider in the Supabase dashboard (Auth → Providers) with a Google/Apple OAuth
         // app, (2) allow-lists the norva.tv redirect URLs, and (3) lists the provider(s)
         // below. Return is handled automatically by captureSessionFromUrl() in boot().
-        const OAUTH_PROVIDERS = []; // e.g. ['google', 'apple'] once configured in Supabase
+        const OAUTH_PROVIDERS = ['google']; // add 'apple' once its provider is configured in Supabase
         (function initSocial() {
             if (!socialEl) return;
             const enabled = new Set(OAUTH_PROVIDERS);

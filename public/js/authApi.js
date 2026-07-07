@@ -117,6 +117,26 @@
         location.assign(url.toString());
     }
 
+    // Native social sign-in: exchange a provider ID token (obtained by a native
+    // SDK — e.g. Android Credential Manager / Google Sign-In) for a Norva
+    // session, without any browser redirect. The native shell fetches the ID
+    // token, then hands it to the web layer, which calls this. Requires the
+    // provider to be enabled in Supabase and the native OAuth client ID(s) to be
+    // allow-listed under Auth → Providers → (provider) → Authorized Client IDs.
+    async function signInWithIdToken({ provider, token, accessToken, nonce } = {}) {
+        if (!provider || !token) throw new Error('signInWithIdToken requires { provider, token }');
+        const payload = await request('/auth/v1/token?grant_type=id_token', {
+            method: 'POST',
+            body: {
+                provider,
+                id_token: token,
+                access_token: accessToken || undefined,
+                nonce: nonce || undefined
+            }
+        });
+        return setSession(payload);
+    }
+
     async function refreshSession() {
         const current = getSession();
         if (!current?.refresh_token) return null;
@@ -244,6 +264,8 @@
         getAccessToken,
         getUser,
         captureSessionFromUrl,
-        verifyOtp
+        verifyOtp,
+        signInWithOAuth,
+        signInWithIdToken
     };
 })();
