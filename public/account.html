@@ -360,6 +360,7 @@
                     <input id="signin-password" type="password" autocomplete="current-password" minlength="6" required>
                 </div>
                 <button class="primary" type="submit">Sign in</button>
+                <button class="ghost" type="button" id="magic-link-button">Email me a sign-in link</button>
                 <button class="ghost" type="button" id="forgot-button">Forgot password</button>
             </form>
 
@@ -447,6 +448,11 @@
         const statusEl = document.getElementById('status');
         const socialEl = document.getElementById('social-auth');
         const tabs = document.getElementById('tabs');
+        // Native app (Android WebView): magic-link and social sign-in return via the
+        // system browser / a blocked WebView, so the session wouldn't land back in
+        // the app. Both are web/PWA-only; native uses email+password (and, from
+        // step 2, native Google Sign-In).
+        const isNativeApp = document.documentElement.classList.contains('native-app');
         const forms = {
             signin: document.getElementById('signin-form'),
             signup: document.getElementById('signup-form'),
@@ -463,6 +469,8 @@
             document.getElementById('recover-email').value = document.getElementById('signin-email').value.trim();
             showForm('recover');
         });
+        document.getElementById('magic-link-button').addEventListener('click', () => requestMagicLink());
+        if (isNativeApp) document.getElementById('magic-link-button').style.display = 'none';
         document.getElementById('back-to-signin').addEventListener('click', () => showForm('signin'));
 
         // Social sign-in (OAuth via Supabase). Dormant until the owner (1) enables the
@@ -511,7 +519,7 @@
                     // Handled here (not rethrown) so we show an actionable state
                     // rather than the raw obfuscated "Invalid login credentials".
                     setStatus('error', 'We couldn’t sign you in with that password.');
-                    showAuthHelp('If you created your account with Google, use Continue with Google — or reset your password to set one.');
+                    showAuthHelp('If you created your account with Google, use Continue with Google — or get a sign-in link by email, or reset your password.');
                     return;
                 }
                 await ensureProfile();
@@ -772,6 +780,14 @@
                 });
                 wrap.appendChild(g);
             }
+            if (opts.magic !== false && !isNativeApp) {
+                const ml = document.createElement('button');
+                ml.type = 'button';
+                ml.className = 'secondary';
+                ml.textContent = 'Email me a sign-in link';
+                ml.addEventListener('click', () => requestMagicLink());
+                wrap.appendChild(ml);
+            }
             if (opts.reset !== false) {
                 const r = document.createElement('button');
                 r.type = 'button';
@@ -786,6 +802,24 @@
                 wrap.appendChild(r);
             }
             statusEl.insertAdjacentElement('afterend', wrap);
+        }
+
+        // Passwordless sign-in: email a one-time magic link. Works for ANY account
+        // (Google-first users included) without a password. Neutral confirmation
+        // regardless of whether the email exists (anti-enumeration).
+        async function requestMagicLink(emailArg) {
+            const email = (emailArg
+                || document.getElementById('signin-email').value.trim()
+                || document.getElementById('signup-email').value.trim());
+            if (!email) {
+                setStatus('error', 'Enter your email first, then request a link.');
+                document.getElementById('signin-email').focus();
+                return;
+            }
+            clearAuthHelp();
+            setStatus('info', 'Sending your sign-in link…');
+            try { await NorvaAuth.signInWithOtp(email); } catch (_) { /* stay neutral */ }
+            setStatus('success', 'If that email has a Norva account, we sent a sign-in link. Check your inbox.');
         }
 
         function sanitizeReturnTo(value) {

@@ -137,6 +137,21 @@
         return setSession(payload);
     }
 
+    // Passwordless sign-in: emails a one-time magic link (branded "Sign in to
+    // Norva" via the norva-auth-email hook). The link returns to account.html with
+    // a token_hash that boot()/verifyOtp() exchanges for a session — so a
+    // Google-first user (who has no password) can still "sign in with email".
+    // create_user:false so the login form never silently provisions a new account;
+    // GoTrue stays quiet for unknown emails (anti-enumeration), so callers should
+    // show a neutral "if that email exists, we sent a link" message.
+    async function signInWithOtp(email, redirectTo) {
+        const rt = redirectTo || `${location.origin}/account.html`;
+        return request(`/auth/v1/otp?redirect_to=${encodeURIComponent(rt)}`, {
+            method: 'POST',
+            body: { email, create_user: false }
+        });
+    }
+
     async function refreshSession() {
         const current = getSession();
         if (!current?.refresh_token) return null;
@@ -266,6 +281,7 @@
         captureSessionFromUrl,
         verifyOtp,
         signInWithOAuth,
-        signInWithIdToken
+        signInWithIdToken,
+        signInWithOtp
     };
 })();
