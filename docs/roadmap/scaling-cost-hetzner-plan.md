@@ -335,3 +335,17 @@ Les prix capture **AX41 €59 / AX42 €99 / AX102 €259 collent** au configura
 4. **Ne bump PAS Railway** (ne corrige pas l'egress) — interim seulement.
 5. **Backups pgBackRest PITR testé + monitoring**, puis **replica/HA** aux milliers.
 6. **Table sur ~€612 pour l'AX162** (le €319 est le LTD promo).
+
+### 9.8 Précisions de la synthèse (cross-check adverse des 3 analyses)
+
+- **Points de bascule Railway précis** (par *viewers navigateur concurrents sur le chemin métré* transcode/raw-pipe) :
+  - **< ~50** (ou < ~2-5 To/mois egress métré) → **garde Railway tel quel** (pratique, pas cher).
+  - **~50-200** (ou dès que la facture egress Railway dépasse le prix d'un GEX44 ~€184) → **provisionne la flotte Hetzner (GEX44) + fan-out Cloudflare**. **C'est ta fenêtre « avant le push ».**
+  - **> ~200** → **Railway hors du chemin critique** (tout l'egress viewer via Cloudflare, origine Hetzner ; Railway en fallback/overflow seulement).
+  - Tu scales vite → tu franchis ces seuils vite : **construis la flotte média AVANT le marketing, ne l'attends pas.**
+- **Le CDN dissout le mur 1 Gbit/s.** « 1 box = ~200 viewers » n'est vrai qu'en *direct-serve*. Avec **Cloudflare devant**, l'origine ne sert que le **cache-fill + les flux uniques** → **petite flotte origine (1-2 AX41) + CDN sert des milliers**, pas 20-25 box.
+- **Dimensionne le transcode aux FLUX UNIQUES concurrents, pas aux viewers.** Avec **single-flight/dedup** (1 transcode par flux identique → fan-out CDN), un GEX44 (~20-40 flux 1080p) couvre bien plus que 20-40 viewers. Sans dedup, le coût GPU explose.
+- **Les chiffres Railway ($10,8k/$54k) sont des BORNES SUPÉRIEURES pire-cas** (= 100 % transcodé-via-Norva). Le code montre que la réalité = beaucoup de **Cloudflare relay (cheap) / natif direct (gratuit) / raw-pipe (egress sans CPU)** → la tranche métrée réelle est plus proche de **$5-20k/mo à des milliers concurrents** — ce qui **justifie quand même** de sortir de Railway (+ throttle fair-use Railway > ~100 Go/mois).
+- **Caveat Cloudflare** : Workers n'a pas de frais/Go, mais streamer des **Po** de vidéo peut heurter les **TOS Cloudflare §2.8** (restriction vidéo/gros fichiers) → possible conversation fair-use ou passage à **Cloudflare Stream (métré)**. Reste radicalement moins cher que Railway, mais pas littéralement gratuit-infini.
+- **Télémétrie manquante (à instrumenter) :** part **browser-vs-natif**, **mix codec**, **% qui touche le FFmpeg Railway**, **taille live/EPG**. Sans ça on **vole à l'aveugle** sur le « monde egress » exact — mesure-le pour dimensionner la flotte média juste. (Décision de planification : provisionne l'egress-flat Hetzner+CDN **maintenant** au lieu de parier sur le monde favorable.)
+- **Convergence des 3 analyses + repo** : le vrai mur = **média/transcode+egress**, pas Postgres (coût DB quasi-plat €259-900 à tous les paliers). **N'oublie pas les 2 prérequis repo-spécifiques** : **dedup couche B (dormant → active+valide avant d'acheter)** et **gap de reproductibilité (fixes prod à la main → formaliser en migration avant toute HA)**.
