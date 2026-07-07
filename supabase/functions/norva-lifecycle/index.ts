@@ -91,8 +91,13 @@ async function runWelcome(db: SupabaseClient): Promise<number> {
     .is("welcome_email_at", null)
     .gt("created_at", since)
     .limit(BATCH);
+  // Never welcome internal/test accounts (owner, family, Stancer test) — mirrors
+  // the admin_internal_accounts exclusion the finance/funnel views already apply.
+  const { data: internal } = await db.from("admin_internal_accounts").select("user_id");
+  const internalIds = new Set((internal ?? []).map((r: { user_id: string }) => r.user_id));
   let sent = 0;
   for (const row of (data ?? []) as { user_id: string }[]) {
+    if (internalIds.has(row.user_id)) continue;
     try {
       if (await emailUser(db, row.user_id, (fn) => renderWelcome(fn))) {
         await db.from("cloud_entitlement_projection").update({ welcome_email_at: new Date().toISOString() }).eq("user_id", row.user_id);
