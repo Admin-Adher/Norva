@@ -261,3 +261,77 @@ Les scripts de migration self-host sont dans **[`ops/hetzner/`](../../ops/hetzne
 - `scripts/05-verify-parity.sh` — parité post-migration (counts, extensions, crons, RLS).
 
 > État prod au moment de la rédaction (2026-07-07, `oupsceccxsonaalhueff`) : DB **5,15 Go**, extensions `pg_cron 1.6.4 / pg_net 0.20.3 / supabase_vault 0.3.1 / pg_trgm / pgcrypto / http / unaccent / uuid-ossp / pgstattuple / pg_stat_statements`, **47 crons (46 actifs)**, **3 secrets vault**. Les scripts sont grounded sur cet inventaire.
+
+---
+
+## 9. Railway (gateway média) : garder / upgrader / remplacer ? + path box réel
+
+> Réponse à : « AX42→AX102→AX162 ? Railway ça remplace ou pas ? j'upgrade Railway ou je remplace
+> par Hetzner ? » — basé sur l'**analyse du flux média dans le code** (citations file:function) + prix
+> **réels** Railway/Hetzner 2026.
+
+### 9.1 La découverte qui change tout : où passent réellement les octets vidéo
+
+**Deux étages distincts** : `ops/hetzner` remplace **Supabase (la DB)**, **PAS Railway (le gateway média/transcode)**. Et surtout, l'egress n'est le coût de Norva **que pour les viewers navigateur** :
+
+| Mode (`api.js:1494-1501`) | Octets via infra Norva ? | Quand | Qui paie l'egress |
+|---|---|---|---|
+| **direct** | **NON** — l'edge renvoie l'URL provider brute (`norva-playback:319-334`) | Apps natives (Android TV / NorvaTVCloud / desktop) | **Provider — 0 € pour Norva** |
+| **relay** | OUI, **full** via Cloudflare (`norva-relay:565-597`) | VOD browser-safe mp4/H.264/AAC (défaut web VOD propre) | **Norva via Cloudflare — bande passante quasi non-facturée (cheap)** |
+| **engine** | OUI, full via **Railway `/raw`** mais **0 CPU** (`media-gateway:556-641`) | VOD HEVC/MKV/AC3, transcode WASM côté client | **Norva via Railway — egress mesuré ~$0.05-0.10/Go, pas de CPU** |
+| **transcode** | OUI, full via **Railway FFmpeg** + CPU (`media-gateway:2281-2379`) | **LIVE browser (défaut)** + VOD exotique (avi/wmv/flv/vob) | **Norva via Railway — egress mesuré + CPU (le plus cher)** |
+
+- **Apps natives = direct = 0 € d'egress** (comportement type TiviMate). Le browser **jamais direct** (UA-gate + CORS + block datacenter).
+- **VOD propre browser → Cloudflare relay = quasi gratuit.** **HEVC/MKV VOD → Railway raw (egress mesuré, pas de CPU).** **LIVE browser → Railway FFmpeg (egress + CPU = le vrai centre de coût).**
+- → **L'exposition egress dépend de : part-navigateur × mix-codec, et dans le navigateur, surtout du LIVE.** Beaucoup de natif/VOD → facture Railway faible. Beaucoup de live-navigateur → facture Railway qui explose.
+
+### 9.2 Le coût Railway à l'échelle (et pourquoi upgrader le plan ne sert à rien)
+
+Railway 2026 : egress **$0.05/Go** (Metal) à **$0.10/Go**, **aucun quota gratuit**, **pas de GPU** (transcode software = vCPU cher). Modèle (1 viewer HD 4 Mbps = 1,8 Go/h, 4h/j) **pour la part transcodée** :
+
+| Concurrent (transcodé) | TB/mois | **Railway egress $/mois** | Sur Hetzner (flat) |
+|---|---|---|---|
+| 500 | 108 | **~$5 400** | ~2-3 box AX flat + 1 GEX44 |
+| 2 000 | 432 | **~$21 600** | ~8-10 box AX + fleet GEX44 |
+| 5 000 | 1 080 | **~$54 000** | ~20-25 box AX / CDN + GEX44 |
+
+⚠️ **Ne PAS upgrader le plan Railway** (Hobby $5 → Pro $20/siège) : ça change les plafonds et le crédit inclus, **pas le tarif $/Go d'egress**. Ça ne fait que repousser la douleur.
+
+### 9.3 Hetzner pour le média : flat, ~100-200× moins cher, mais capé à 1 Gbit/s par box
+
+- **Trafic AX = illimité/flat à 1 Gbit/s, 0 €/Go.** Une box saturée = ~**324 To/mois pour 0 €** de trafic.
+- **MAIS 1 Gbit/s cape UNE box à ~200-250 viewers HD.** → fleet horizontale : 500 → 2-3 box · 2 000 → 8-10 · 5 000 → 20-25 (ou **CDN devant** un origin Hetzner).
+- **Transcode = GEX44** (RTX 4000 SFF Ada, **NVENC/NVDEC HW HEVC→h264**, ~€184/mo, **~20-40 transcodes 1080p temps-réel/GPU**, pas de cap de sessions). Scaler le transcode = ajouter des GEX44 ; scaler l'egress = ajouter des AX flat / CDN.
+- Egress : Railway 500 To ≈ **$25 000/mo** vs Hetzner **~€120-200 flat** + GEX44. **~100-200× d'écart.**
+
+### 9.4 ⚠️ Correction prix AX162 (capture)
+
+Les prix capture **AX41 €59 / AX42 €99 / AX102 €259 collent** au configurateur (juin 2026). **MAIS `AX162 €319` = le SKU LIMITÉ (`AX162-1-LTD`)** ; le **standard AX162-1 = ~€612/mo** (+€304 setup). La ligne mélange le mensuel LTD et le setup standard. → si tu prévois l'AX162, **table sur ~€612/mo** (ou attrape le LTD tant qu'il est dispo).
+
+### 9.5 Recommandations (décisives)
+
+**Q1 — Path box DB** : `AX42→AX102→AX162` est *directionnellement* juste mais **front-loaded**. Pour un Postgres 5 Go IO-bound, **même AX42 (64 Go) est déjà énorme**. Le saut qui compte = **AX102** (ECC 128 Go + NVMe DC — l'ECC compte pour une DB ; l'AX42 non-ECC est le maillon faible).
+→ **Puisque tu scales vite et veux éviter une re-migration : DÉMARRE direct en AX102** (€259/mo). AX42 = interim budget seulement. **Saute l'AX162 pour la DB** (48 cœurs EPYC = overkill DB, et le vrai prix ≈ €612). Le 1 Gbit/s de la box DB est large pour du SQL.
+
+**Q2 — Railway** :
+1. **Hetzner-DB ≠ remplacer Railway** (étages différents). **N'upgrade pas** le plan Railway.
+2. **Garde Railway maintenant** (concurrence triviale = cheap/pratique).
+3. **AVANT la poussée marketing : sors le transcode de Railway → GEX44 (GPU/NVENC) + fais transiter TOUT l'egress viewer par le CDN/relay Cloudflare** que tu as déjà, pour que l'origin mesuré ne serve que le cache-fill, pas chaque viewer.
+4. **Le levier gratuit issu du code** : pousse un max de lecture vers **Cloudflare relay (non-mesuré)** et **apps natives (direct = 0 €)** ; active l'opt-in `norva-live-hls-relay` là où les providers l'autorisent ; réserve Railway/GEX44 FFmpeg au minorité **HEVC-live** inévitable.
+
+### 9.6 Coût infra mensuel indicatif
+
+| Users | DB | Média | Total infra |
+|---|---|---|---|
+| ~100 | AX102 €259 (ou reste Supabase Medium interim) | Railway (cheap) + Cloudflare | **~€260-350** |
+| ~1 000 | AX102 €259 + pooler | GEX44 €184 + Cloudflare relay (+1-2 AX egress) | **~€500-750** |
+| ~5 000 | AX102/AX162 + replica | fleet GEX44 (dimensionné au live concurrent) + CDN Cloudflare | **~€1-2k** (vs Railway seul $54k/mo d'egress) |
+
+### 9.7 Checklist « prêt pour scaler vite sans re-migration »
+
+1. **DB : démarre AX102** (ECC, NVMe DC) — buy-once, pas de re-migration précoce. **PgBouncer/Supavisor dès J1.**
+2. **Active + valide le dedup couche B** avant la poussée (÷3 stockage, borne le hot set).
+3. **Média : bascule le transcode sur GEX44 + route l'egress via Cloudflare** avant le marketing ; active relay-hls où possible ; pousse l'usage apps natives (direct = gratuit).
+4. **Ne bump PAS Railway** (ne corrige pas l'egress) — interim seulement.
+5. **Backups pgBackRest PITR testé + monitoring**, puis **replica/HA** aux milliers.
+6. **Table sur ~€612 pour l'AX162** (le €319 est le LTD promo).
