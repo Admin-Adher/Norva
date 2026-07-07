@@ -992,7 +992,11 @@ class MoviesPage {
                 // Cache the fresh first page for an instant next cold entry.
                 try {
                     const ck = this.catalogCacheKey();
-                    if (ck) window.NorvaCatalogCache?.write?.(ck, {
+                    // Only cache a NON-EMPTY page. Caching an empty result (e.g. the enrichment
+                    // queries timed out under import load) poisons the cold-entry paint: the next
+                    // visit paints the stale empty "No movies here yet" and, if the network refresh
+                    // also fails, it never gets replaced. A miss instead shows the skeleton → retry.
+                    if (ck && this.movies.length) window.NorvaCatalogCache?.write?.(ck, {
                         items: this.movies.slice(0, this.cloudPageSize),
                         hasMore: this.cloudHasMore,
                         count: this.cloudTotal

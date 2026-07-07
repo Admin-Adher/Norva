@@ -974,7 +974,11 @@ class SeriesPage {
                 this.filterAndRender();
                 try {
                     const ck = this.catalogCacheKey();
-                    if (ck) window.NorvaCatalogCache?.write?.(ck, {
+                    // Only cache a NON-EMPTY page. Caching an empty result (e.g. the enrichment
+                    // queries timed out under import load) poisons the cold-entry paint: the next
+                    // visit paints the stale empty "No series here yet" and, if the network refresh
+                    // also fails, it never gets replaced. A miss instead shows the skeleton → retry.
+                    if (ck && this.seriesList.length) window.NorvaCatalogCache?.write?.(ck, {
                         items: this.seriesList.slice(0, this.cloudPageSize),
                         hasMore: this.cloudHasMore,
                         count: this.cloudTotal

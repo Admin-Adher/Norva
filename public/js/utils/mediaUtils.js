@@ -382,10 +382,11 @@ const MediaUtils = (() => {
         const raw = String(value || '').trim();
         if (!raw) return raw;
         let text = raw.replace(/^\s*(?:[\[(][^\])]{0,60}[\])]\s*)+/, '').trim();
-        // Strip a leading provider region/language/category prefix ("FR - ", "AR-SUBS - ", "SOC - ").
-        // Two leading UPPERCASE letters required so a digit-leading title ("007 - …", "1917 - …") is
-        // never mistaken for a prefix. Mirrors the server cleanDisplayTitle — keep the two in sync.
-        const deprefixed = text.replace(/^[A-Z]{2}[A-Z0-9]{0,3}(?:-[A-Z0-9]{1,6})* - /, '').trim();
+        // Strip a leading provider region/language/category prefix ("FR - ", "AR-SUBS - ", "SOC - ",
+        // and the box-bar variants some panels use: "DK ▎ A Hijacking", "ALB ▎ Source Code"). Two
+        // leading UPPERCASE letters required so a digit-leading title ("007 - …", "1917 - …") is never
+        // mistaken for a prefix. Mirrors the server cleanDisplayTitle — keep the two in sync.
+        const deprefixed = text.replace(/^[A-Z]{2}[A-Z0-9]{0,3}(?:-[A-Z0-9]{1,6})* [-–—▎▏▍▌│┃┆┊｜|] /, '').trim();
         if (deprefixed.length >= 2) text = deprefixed;
         if (!/\s/.test(text) && /^\S+(?:\.\S+){3,}$/.test(text)) text = text.replace(/\./g, ' ');
         const tokens = text.split(/\s+/).filter(Boolean);

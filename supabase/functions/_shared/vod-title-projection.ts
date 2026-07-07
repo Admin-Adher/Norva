@@ -903,11 +903,13 @@ const SOFT_RELEASE_TOKENS = /^(french|truefrench|vostfr|vost|vff|vfq|vf|vo|multi
 function cleanDisplayTitle(value: string) {
   const raw = String(value || "Norva").replace(/\s+/g, " ").trim();
   let text = raw.replace(/^\s*(?:[\[(][^\])]{0,60}[\])]\s*)+/, "").trim();
-  // Strip a leading provider region/language/category prefix ("FR - ", "AR-SUBS - ", "SOC - ").
-  // Two leading UPPERCASE letters are required so a digit-leading real title ("007 - Die Another
-  // Day", "1917 - La Révolution Russe") is never mistaken for a prefix. Display only — original_title
-  // keeps the raw provider name, and identity_key comes from normalizeTitle(raw), so no re-keying.
-  const deprefixed = text.replace(/^[A-Z]{2}[A-Z0-9]{0,3}(?:-[A-Z0-9]{1,6})* - /, "").trim();
+  // Strip a leading provider region/language/category prefix ("FR - ", "AR-SUBS - ", "SOC - ", and
+  // the box-bar variants some panels use: "DK ▎ A Hijacking", "ALB ▎ Source Code"). Two leading
+  // UPPERCASE letters are required so a digit-leading real title ("007 - Die Another Day", "1917 - La
+  // Révolution Russe") is never mistaken for a prefix. Display only — original_title keeps the raw
+  // provider name, and identity_key comes from normalizeTitle(raw), so no re-keying. Mirrors the
+  // frontend MediaUtils.cleanReleaseName — keep the two in sync.
+  const deprefixed = text.replace(/^[A-Z]{2}[A-Z0-9]{0,3}(?:-[A-Z0-9]{1,6})* [-–—▎▏▍▌│┃┆┊｜|] /, "").trim();
   if (deprefixed.length >= 2) text = deprefixed;
   if (!/\s/.test(text) && /^\S+(?:\.\S+){3,}$/.test(text)) text = text.replace(/\./g, " ");
   const tokens = text.split(/\s+/).filter(Boolean);
