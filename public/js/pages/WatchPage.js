@@ -2099,6 +2099,12 @@ class WatchPage {
                 titleId: this.content?.titleId || this.content?.title_id || this.content?.data?.titleId || null,
                 readyState: this.video?.readyState ?? null,
                 currentSrcType: this.video?.currentSrc ? (this.isGatewayPlaybackUrl(this.video.currentSrc) ? 'gateway' : 'direct') : null,
+                // Codec-mix telemetry (the 3rd sizing unknown, docs §9.8/§10): the
+                // container extension is a reliable codec-path proxy (mp4->relay,
+                // mkv/ts->engine, avi/...->transcode); videoCodec when the profile is known.
+                container: this.containerExtension || this.content?.containerExtension || null,
+                videoCodec: (this.content?.codecProfile || this.content?.defaultVariant?.codecProfile || this.content?.data?.codecProfile)?.videoCodec
+                    || this.content?.videoCodec || null,
                 ...extra.metadata
             }
         };

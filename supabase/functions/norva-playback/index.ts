@@ -796,6 +796,12 @@ async function getPlaybackTelemetrySummary(url: URL, userId: string, db: Supabas
   const rows = (data ?? []) as JsonRecord[];
   const byContentType: Record<string, JsonRecord> = {};
   const byClientSurface: Record<string, JsonRecord> = {};
+  // The 3 sizing unknowns (see docs/roadmap/scaling-cost-hetzner-plan.md §9.8/§10):
+  // playback_mode (= the cost tier: transcode/engine = metered, relay = cheap,
+  // direct = free) and the video codec mix. Surface (browser vs native) already
+  // rides byClientSurface.
+  const byPlaybackMode: Record<string, JsonRecord> = {};
+  const byCodec: Record<string, JsonRecord> = {};
   const ttffOverall: number[] = [];
   const ttffByContentType: Record<string, number[]> = {};
   let providerConcurrencyRefusals = 0;
@@ -811,14 +817,26 @@ async function getPlaybackTelemetrySummary(url: URL, userId: string, db: Supabas
       "unknown",
     );
 
+    const mode = normalizeTelemetryKey(row.playback_mode, "unknown");
+    const codec = normalizeTelemetryKey(
+      metadata.videoCodec ?? metadata.video_codec ?? metadata.codec ?? metadata.container,
+      "unknown",
+    );
+
     const typeBucket = telemetryBucket(byContentType, itemType);
     const surfaceBucket = telemetryBucket(byClientSurface, surface);
+    const modeBucket = telemetryBucket(byPlaybackMode, mode);
+    const codecBucket = telemetryBucket(byCodec, codec);
     typeBucket.events = numberValue(typeBucket.events) + 1;
     surfaceBucket.events = numberValue(surfaceBucket.events) + 1;
+    modeBucket.events = numberValue(modeBucket.events) + 1;
+    codecBucket.events = numberValue(codecBucket.events) + 1;
 
     if (eventType === "play_requested") {
       typeBucket.requests = numberValue(typeBucket.requests) + 1;
       surfaceBucket.requests = numberValue(surfaceBucket.requests) + 1;
+      modeBucket.requests = numberValue(modeBucket.requests) + 1;
+      codecBucket.requests = numberValue(codecBucket.requests) + 1;
     }
     if (eventType === "first_frame") {
       typeBucket.firstFrames = numberValue(typeBucket.firstFrames) + 1;
@@ -862,11 +880,19 @@ async function getPlaybackTelemetrySummary(url: URL, userId: string, db: Supabas
   const totalRequests = Math.max(1, liveRequests + vodRequests);
   const androidTvRequests = numberValue(byClientSurface["android-tv"]?.requests);
 
+  // Cost-tier shares (the media-cost signal, docs §9.8): transcode = Railway/GEX44
+  // FFmpeg (metered egress + CPU, most expensive), engine = raw byte-pipe (metered
+  // egress, no CPU), relay = Cloudflare (cheap), direct = native (free to Norva).
+  const modeRequests = (m: string) => numberValue(byPlaybackMode[m]?.requests);
+  const modeTotal = Math.max(1, modeRequests("transcode") + modeRequests("engine") + modeRequests("relay") + modeRequests("direct") + modeRequests("unknown"));
+
   return {
     window: { since, until, days, sampleSize: rows.length, limit },
     playback: {
       byContentType,
       byClientSurface,
+      byPlaybackMode,
+      byCodec,
       errors: {
         gatewayErrors,
         playbackErrors,
@@ -883,6 +909,14 @@ async function getPlaybackTelemetrySummary(url: URL, userId: string, db: Supabas
       liveRequestShare: roundRatio(liveRequests / totalRequests),
       vodRequestShare: roundRatio(vodRequests / totalRequests),
       androidTvRequestShare: roundRatio(androidTvRequests / totalRequests),
+      // Media-cost tiers: transcode+engine are Norva-metered (Railway/GEX44 egress),
+      // relay is cheap (Cloudflare), direct is free. Drives the AX42+Railway vs GEX44
+      // capacity/cost sizing (docs §9-§10).
+      transcodeRequestShare: roundRatio(modeRequests("transcode") / modeTotal),
+      engineRequestShare: roundRatio(modeRequests("engine") / modeTotal),
+      relayRequestShare: roundRatio(modeRequests("relay") / modeTotal),
+      directRequestShare: roundRatio(modeRequests("direct") / modeTotal),
+      meteredRequestShare: roundRatio((modeRequests("transcode") + modeRequests("engine")) / modeTotal),
       providerConcurrencyRefusals,
     },
   };
