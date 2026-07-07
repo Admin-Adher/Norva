@@ -71,15 +71,17 @@ class AdminPage {
 
     // ── CRM shell ──
     static NAV() {
+        // Grouped into sections (rendered as sidebar headers) for fast comprehension.
         return [
-            { key: 'cockpit', label: 'Cockpit', icon: '🎯' },
-            { key: 'finance', label: 'Finance', icon: '💶' },
-            { key: 'clients', label: 'Clients', icon: '👥' },
-            { key: 'support', label: 'Support', icon: '🎫' },
-            { key: 'providers', label: 'Providers', icon: '📡' },
-            { key: 'identites', label: 'Identités', icon: '🧬' },
-            { key: 'moteur', label: 'Moteur', icon: '⚙️' },
-            { key: 'systeme', label: 'Système', icon: '🛡️' }
+            { key: 'cockpit', label: 'Cockpit', icon: '🎯', section: 'Business' },
+            { key: 'finance', label: 'Finance', icon: '💶', section: 'Business' },
+            { key: 'clients', label: 'Clients', icon: '👥', section: 'Business' },
+            { key: 'support', label: 'Support', icon: '🎫', section: 'Business' },
+            { key: 'providers', label: 'Providers', icon: '📡', section: 'Catalogue' },
+            { key: 'identites', label: 'Identités', icon: '🧬', section: 'Catalogue' },
+            { key: 'moteur', label: 'Moteur', icon: '⚙️', section: 'Catalogue' },
+            { key: 'systeme', label: 'Système', icon: '🛡️', section: 'Infra' },
+            { key: 'telemetrie', label: 'Télémétrie', icon: '📊', section: 'Infra' }
         ];
     }
 
@@ -92,8 +94,18 @@ class AdminPage {
             (document.querySelector('.main-content') || document.getElementById('main-content') || document.body).appendChild(root);
         }
         if (this.built) return;
-        const nav = AdminPage.NAV().map(n =>
-            `<button class="crm-nav-item" data-route="${n.key}" title="${n.label}" aria-label="${n.label}"><span class="ic" aria-hidden="true">${n.icon}</span><span class="lb">${n.label}</span></button>`).join('');
+        const navSecOrder = [];
+        const navBySec = {};
+        AdminPage.NAV().forEach(n => {
+            const s = n.section || 'Autre';
+            if (!navBySec[s]) { navBySec[s] = []; navSecOrder.push(s); }
+            navBySec[s].push(n);
+        });
+        const nav = navSecOrder.map(s =>
+            `<div class="crm-nav-sec" aria-hidden="true">${s}</div>` +
+            navBySec[s].map(n =>
+                `<button class="crm-nav-item" data-route="${n.key}" title="${n.label}" aria-label="${n.label}"><span class="ic" aria-hidden="true">${n.icon}</span><span class="lb">${n.label}</span></button>`).join('')
+        ).join('');
         root.innerHTML = `
 <style>
 #page-admin{height:100%;overflow:hidden;
@@ -111,6 +123,8 @@ class AdminPage {
 #page-admin .crm-brand{display:flex;align-items:center;gap:11px;padding:6px 8px 20px;font-weight:800;font-size:16px;color:var(--adm-tx);letter-spacing:.2px;}
 #page-admin .crm-brand .dot{width:27px;height:27px;border-radius:9px;background:linear-gradient(135deg,#5b7cfa,#a855f7);display:inline-block;box-shadow:0 5px 16px rgba(91,124,250,.42);}
 #page-admin .crm-brand .crm-logo{width:30px;height:30px;flex-shrink:0;filter:drop-shadow(0 2px 9px rgba(120,150,255,.4));}
+#page-admin .crm-nav-sec{padding:15px 12px 5px;font-size:10.5px;font-weight:700;letter-spacing:.9px;text-transform:uppercase;color:var(--adm-tx3);opacity:.7;user-select:none;}
+#page-admin .crm-nav-sec:first-child{padding-top:2px;}
 #page-admin .crm-nav-item{position:relative;display:flex;align-items:center;gap:12px;width:100%;background:none;border:0;color:var(--adm-tx2);padding:10px 12px;border-radius:10px;cursor:pointer;font-size:13.5px;font-weight:500;text-align:left;margin-bottom:3px;transition:background .15s,color .15s,box-shadow .15s;}
 #page-admin .crm-nav-item .ic{font-size:16px;width:20px;text-align:center;opacity:.9;}
 #page-admin .crm-nav-item:hover{background:rgba(255,255,255,.05);color:var(--adm-tx);}
@@ -569,7 +583,7 @@ class AdminPage {
 #page-admin .crm-modal button.danger{background:#e50914;border-color:#e50914;color:#fff;}
 @media(max-width:900px){
   #page-admin .crm-sidebar{width:60px;padding:14px 8px;}
-  #page-admin .crm-nav-item .lb,#page-admin .crm-brand span:last-child,#page-admin .crm-side-foot{display:none;}
+  #page-admin .crm-nav-item .lb,#page-admin .crm-brand span:last-child,#page-admin .crm-side-foot,#page-admin .crm-nav-sec{display:none;}
   #page-admin .crm-nav-item{justify-content:center;gap:0;position:relative;}
   /* .lb (with its ticket count) is hidden on the rail — surface a red dot on the icon instead. */
   #page-admin .crm-nav-item.has-alerts::after{content:"";position:absolute;top:8px;right:12px;width:8px;height:8px;border-radius:50%;background:#e50914;box-shadow:0 0 0 2px var(--color-bg-primary,#0d0d0f);}
@@ -818,6 +832,7 @@ class AdminPage {
         else if (route === 'identites') this._pageIdentites();
         else if (route === 'moteur') this._pageMoteur();
         else if (route === 'systeme') this._pageSysteme();
+        else if (route === 'telemetrie') this._pageTelemetrie();
         else this._pageCockpit();
         // Every page renders its header synchronously (before its first await), so the
         // markup is already in the DOM here — upgrade "🎯 Cockpit" into the gradient
@@ -2570,6 +2585,85 @@ class AdminPage {
             card(o.tmdb_unmatched, 'Non matchés TMDB', '', '🗄️', drain(o.tmdb_unmatched, 3600)),
             card(o.tmdb_unverified, 'À revalider', '', '🔄', drain(o.tmdb_unverified, 2000))
         ].join('');
+    }
+
+    // ── Page: Télémétrie (playback mode/surface/codec + media-cost shares) ──
+    // Feeds the AX42+Railway vs GEX44 sizing with real numbers (docs §9.8/§10).
+    async _pageTelemetrie() {
+        this._setCrumb('Télémétrie', this._lastTs);
+        const nav = this._nav;
+        const v = this._view();
+        v.innerHTML = `<div class="crm-page">
+            <h1 class="crm-h1">📊 Télémétrie lecture</h1>
+            <p class="crm-sub">Mode de lecture, surface & codec (30 j, tous users) — pour dimensionner l'étage média.</p>
+            <div id="tlm-body"><div class="ssub">Chargement…</div></div>
+        </div>`;
+        try {
+            const d = await this._rpc('admin_playback_telemetry', { p_days: 30 });
+            if (this._nav !== nav) return;
+            const body = document.getElementById('tlm-body');
+            if (body) body.innerHTML = this._renderTelemetrie(d || {});
+        } catch (e) {
+            if (this._nav !== nav) return;
+            const body = document.getElementById('tlm-body');
+            if (body) body.innerHTML = `<div class="admin-err" role="alert">Erreur : ${AdminPage.esc(e.message)}</div>`;
+        }
+    }
+
+    _renderTelemetrie(d) {
+        const esc = AdminPage.esc;
+        const pct = (x) => (x == null ? '—' : (Math.round(Number(x) * 1000) / 10).toFixed(1) + ' %');
+        const cs = d.cost_shares || {};
+        const ss = d.surface_shares || {};
+        const win = d.window || {};
+        const bar = (label, val, color, note) => {
+            const w = Math.max(0, Math.min(100, Number(val || 0) * 100));
+            return `<div class="tlm-row"><div class="tlm-lab">${esc(label)}</div>`
+                + `<div class="tlm-track"><div class="tlm-fill" style="width:${w.toFixed(1)}%;background:${color}"></div></div>`
+                + `<div class="tlm-val">${pct(val)}</div><div class="tlm-note">${esc(note || '')}</div></div>`;
+        };
+        const table = (obj) => {
+            const entries = Object.entries(obj || {}).sort((a, b) => Number(b[1]) - Number(a[1]));
+            if (!entries.length) return `<div class="ssub">Aucune donnée.</div>`;
+            const tot = entries.reduce((s, kv) => s + Number(kv[1]), 0) || 1;
+            return `<table class="tlm-tbl">` + entries.map((kv) =>
+                `<tr><td>${esc(kv[0])}</td><td class="tlm-n">${Number(kv[1]).toLocaleString('fr-FR')}</td><td class="tlm-p">${pct(Number(kv[1]) / tot)}</td></tr>`).join('') + `</table>`;
+        };
+        return `<style>
+        #page-admin .tlm-row{display:grid;grid-template-columns:118px 1fr 58px 1.1fr;gap:12px;align-items:center;margin:9px 0;font-size:13px;}
+        #page-admin .tlm-lab{font-weight:600;color:var(--adm-tx);}
+        #page-admin .tlm-track{height:11px;border-radius:6px;background:rgba(255,255,255,.06);overflow:hidden;}
+        #page-admin .tlm-fill{height:100%;border-radius:6px;transition:width .4s;}
+        #page-admin .tlm-val{text-align:right;font-variant-numeric:tabular-nums;color:var(--adm-tx);}
+        #page-admin .tlm-note{color:var(--adm-tx3);font-size:11.5px;}
+        #page-admin .tlm-tbl{width:100%;border-collapse:collapse;font-size:13px;}
+        #page-admin .tlm-tbl td{padding:5px 8px;border-bottom:1px solid var(--adm-line2);}
+        #page-admin .tlm-tbl .tlm-n,#page-admin .tlm-tbl .tlm-p{text-align:right;font-variant-numeric:tabular-nums;color:var(--adm-tx2);}
+        #page-admin .tlm-2col{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+        @media(max-width:760px){#page-admin .tlm-row{grid-template-columns:88px 1fr 50px;}#page-admin .tlm-note{display:none;}#page-admin .tlm-2col{grid-template-columns:1fr;}}
+        </style>
+        <div class="admin-block">
+          <h2>💸 Coût média par tier (${esc(String(win.days || 30))} j · ${Number(cs.sample || 0).toLocaleString('fr-FR')} lectures)</h2>
+          ${bar('Transcode', cs.transcode, 'linear-gradient(90deg,#f87171,#ef4444)', 'Railway/GEX44 FFmpeg — egress + CPU (le + cher)')}
+          ${bar('Engine', cs.engine, 'linear-gradient(90deg,#fbbf24,#f59e0b)', 'raw-pipe — egress métré, sans CPU')}
+          ${bar('Relay', cs.relay, 'linear-gradient(90deg,#34d399,#10b981)', 'Cloudflare — quasi-gratuit')}
+          ${bar('Direct', cs.direct, 'linear-gradient(90deg,#5b7cfa,#3b82f6)', 'natif — gratuit')}
+          <div style="height:1px;background:var(--adm-line);margin:12px 0;"></div>
+          ${bar('▶ Métré total', cs.metered, 'linear-gradient(90deg,#f87171,#fbbf24)', 'part qui coûte de l’egress (transcode + engine)')}
+          <p class="ssub" style="margin-top:10px;">Baisser le métré = single-flight + fan-out Cloudflare + apps natives (direct). Voir STACK-AND-ROADMAP.md.</p>
+        </div>
+        <div class="tlm-2col">
+          <div class="admin-block"><h2>🖥️ Surface</h2>
+            ${bar('Navigateur', ss.browser, 'linear-gradient(90deg,#a855f7,#8b5cf6)', 'egress payé par Norva')}
+            ${bar('App native', ss.native, 'linear-gradient(90deg,#5b7cfa,#3b82f6)', 'direct — 0 € egress')}
+          </div>
+          <div class="admin-block"><h2>🎞️ Codec / container</h2>${table(d.by_codec)}</div>
+        </div>
+        <div class="tlm-2col">
+          <div class="admin-block"><h2>⚙️ Par mode</h2>${table(d.by_mode)}</div>
+          <div class="admin-block"><h2>📱 Par surface</h2>${table(d.by_surface)}</div>
+        </div>
+        <p class="ssub">⚠️ Pré-lancement : surtout du testing dev (≈100 % navigateur, lourd en transcode). Devient représentatif avec de vrais users ; le codec se remplit sur les nouveaux events.</p>`;
     }
 
     // ── Page: Système (snapshot health + admin audit feed) ──
