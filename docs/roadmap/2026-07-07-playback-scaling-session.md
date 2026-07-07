@@ -30,6 +30,16 @@
 | `1b9b2a9` | Route `POST /catalog-media-mirror-verify` (norva-playback) + runbook activation couche B | CI Supabase + doc |
 | `3336a14` | **Fix HEVC chemin MOTEUR** : media-error moteur non-TS → `fallbackEngineToTranscode` (avant : boucle) | CI Cloudflare |
 | `55b8608` | **Fix HEVC chemin NATIF** : media-error code 3/4 à message vide → tag pour que `isFormatPlaybackError` matche → chaîne transcode s'exécute (avant : boucle) | CI Cloudflare |
+| `7638806` | **Fix HEVC ÉPISODES (cause racine)** : codec inconnu → moteur (pas natif) + `mode:'transcode'` forcé sur le fallback | CI Cloudflare |
+
+### Cause racine HEVC épisodes (trace approfondie via `VOD-PLAYBACK-AUDIT.md` + git)
+- Les **épisodes de série n'ont pas de `videoCodec`** : `norva-series-info` sert le payload provider brut **sans** attacher le `codec_profile` (que `norva-catalog` attache aux films). → `playbackHint.videoCodec=''`.
+- `shouldVodUseGatewayTranscode` ne flagge que ce qu'il **prouve** unsafe (`unsafeVideo = videoCodec && !(h264…)`) → codec vide = falsy → `browserSafeVod=true` → mode `relay` (**natif**) → HEVC injouable en `<video>` → `MediaError 4`. **Le moteur (qui lit le HEVC) n'est jamais sélectionné.** Les films marchent car enrichis.
+- **Bug secondaire** : `retryWithCloudGatewayTranscode` passait `gatewayMode:'transcode'` mais **pas `mode:'transcode'`** ; `getStreamUrl` ne force le mode que via query `mode` → le retry re-tombait en natif → **aucune session transcode créée** (confirmé en base : sessions récentes toutes en `remux`, aucune `transcode`).
+- **Pas une régression de code** (historique git aplati au 2026-07-05 ; les 2 commits post-audit ne touchent que l'error-handler). C'est **data-side** (épisodes non enrichis) + le bug de fallback.
+- **Fix `7638806` (client, 2 volets)** : (1) `browserSafeVod` exige une **preuve positive** de codec browser-safe → codec inconnu + conteneur démuxable moteur → **moteur** ; (2) `mode:'transcode'` forcé sur le fallback → vraie session transcode.
+- **Suivi « propre » (edge, optionnel)** : enrichir `norva-series-info` avec le `codec_profile` du variant (miroir de `norva-catalog:2120-2123`) → les épisodes se comportent **exactement** comme les films, sans dépendre de l'heuristique client. C'est le fix de fond le plus robuste (à faire côté edge quand tu veux).
+- ⚠️ Un 4K HEVC **Main10 (10-bit)** ne joue via le moteur que si le navigateur/OS a un décodeur HEVC 10-bit ; sinon même le moteur échoue → transcode gateway (lourd pour 18 Go). Le routage est corrigé ; la jouabilité finale d'un fichier monstre dépend du support HEVC de l'appareil.
 
 ### Migrations ajoutées cette session
 - `20260706180000_provider_probe_circuit.sql` — circuit-breaker probe (table + `provider_probe_circuit_state` + `_record_tick`). Ouvre après 2 ticks all-fail, back-off 30m→24h. Câblé dans `norva-playback` `runOneDimension`.
