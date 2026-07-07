@@ -83,19 +83,35 @@ Indépendant de l'achat serveur. **[GATE]** ceux marqués « hors charge » atte
 
 ---
 
-## PHASE 7 — Étage média : sortir de Railway (AVANT le push marketing)
+## PHASE 7 — Étage média : optimiser RAILWAY (garder Railway, PAS de GEX44 encore)
 
-**[GATE]** dès que tu approches ~50-200 viewers *browser-live* concurrents (ou que la facture egress Railway dépasse le prix d'un GEX44).
+> **La stack média near-term = Railway Pro + Cloudflare fan-out.** On NE passe PAS au GEX44 ici —
+> Railway optimisé porte ~500-1000 users. Le GEX44 = Phase 7bis, **bien plus tard** (voir ci-dessous).
 
-- [ ] **[MOI]** (fait en Phase 0) single-flight + relay fan-out **déployés et validés**.
-- [ ] **[TOI]** Commander **GEX44** (RTX 4000 SFF Ada, NVENC/NVDEC HW). **Box séparée de la DB.**
-- [ ] **[MOI]** **Dockerfile GEX44** : FFmpeg **NVENC** (`hevc_cuda`→`h264_nvenc`) + single-flight, remplace le FFmpeg software de Railway.
-- [ ] **[TOI/MOI]** Mettre l'**origine HLS (GEX44)** derrière un **domaine Cloudflare proxifié** (orange-cloud) → le CDN cache les segments `.ts` (fan-out), l'origine ne sert que le cache-fill.
-- [ ] **[MOI/TOI]** **Activer l'opt-in `norva-live-hls-relay`** par-provider (aujourd'hui OFF) → pousse le LIVE éligible sur le relay Cloudflare quasi-gratuit au lieu du FFmpeg métré.
-- [ ] **[TOI]** **R2** pour les segments VOD réutilisables + les backups (zéro egress).
-- [ ] **[TOI]** Garder **Railway en fallback** pendant la bascule, puis le réduire au minimum / le couper.
+**[GATE]** quand le live-navigateur commence à monter (avant le push marketing).
 
-**→ À ce stade : étage média migré. ✅ Coût egress passe de « métré Railway » à « flat Hetzner + CDN Cloudflare ».**
+- [ ] **[MOI]** Single-flight déployé + validé (fait au pré-vol, spec `ops/hetzner/media/CODE-PATCHES.md` #1).
+- [ ] **[TOI/MOI]** **Cloudflare fan-out DEVANT Railway** : origine HLS Railway derrière un domaine Cloudflare proxifié + **Cache Rule sur les `.ts`** → le CDN cache les segments (dépend du single-flight = session-id partagé), l'origine Railway ne sert que le cache-fill. (`media/cloudflare-cdn.md` Option B.)
+- [ ] **[MOI/TOI]** **Activer `norva-live-hls-relay`** par-provider (défaut OFF) → live éligible sur le relay Cloudflare quasi-gratuit au lieu du transcode Railway métré.
+- [ ] **[TOI]** **R2** pour backups + segments VOD réutilisables (zéro egress).
+
+**→ À ce stade : Railway reste, mais l'egress est servi par Cloudflare (cheap) + le transcode est partagé (single-flight). Coût maîtrisé jusqu'à ~500-1000 users.**
+
+---
+
+## PHASE 7bis — Passer Railway → GEX44 (⏳ BIEN PLUS TARD dans l'aventure)
+
+> **NE PAS faire tôt.** Déclencheur : quand **Railway + fan-out devient le mur** — c.-à-d. quand le
+> **vCPU transcode software** de Railway ou sa **facture egress** dépasse durablement le prix d'un
+> **GEX44 (~€184/mo net)**, OU un throttle fair-use Railway. En pratique : **low hundreds de viewers
+> live-navigateur concurrents.** Avant ça, Railway+fan-out suffit — n'achète pas de GPU inutilisé.
+
+- [ ] **[TOI]** Commander **GEX44** (RTX 4000 SFF Ada, NVENC/NVDEC HW). **Box séparée de la DB** (jamais co-localisée — contention port 1 Gbit/s).
+- [ ] **[MOI]** Image `ops/hetzner/media/Dockerfile.gex44` : FFmpeg **NVENC** (flag `MEDIA_GATEWAY_NVENC` déjà implémenté, OFF → à flipper + tester) — remplace le FFmpeg software de Railway.
+- [ ] **[TOI/MOI]** Repointer `NORVA_MEDIA_GATEWAY_URL` → GEX44 ; le même fan-out Cloudflare passe devant l'origine GEX44.
+- [ ] **[TOI]** Garder **Railway en fallback** pendant la bascule, puis réduire/couper.
+
+**→ À ce stade : egress flat Hetzner + transcode NVENC (CPU ~0). Nécessaire seulement à l'échelle où Railway pique.**
 
 ---
 
@@ -121,7 +137,16 @@ Indépendant de l'achat serveur. **[GATE]** ceux marqués « hors charge » atte
 
 ## Ordre de dépendance (le chemin critique)
 ```
-Phase 0 (code prêt) ─┬─► Phase 1-6 (DB sur AX42, 100% migrée)
-                     └─► Phase 7 (média: GEX44+Cloudflare) ──► Phase 8 (scale: dedup, AX102, replica, HA)
+Phase 0 (code prêt) ─┬─► Phase 1-6 : DB sur AX42 (100% migrée) + pooler + backups
+                     └─► Phase 7 : média RAILWAY optimisé (single-flight + Cloudflare fan-out)
+                                        │
+                          (bien plus tard, quand Railway pique)
+                                        ▼
+                                   Phase 7bis : Railway → GEX44 (NVENC)
+                                        │
+                                        ▼
+                          Phase 8 : échelle (dedup, AX102, read replica, HA)
 ```
-La DB (Phases 1-6) et le média (Phase 7) sont **indépendants** — tu peux migrer la DB d'abord, garder Railway, puis faire le média avant le push. **Le seul vrai « avant le marketing » non-négociable = Phase 7 (média) + dedup (début Phase 8).**
+La DB (Phases 1-6) et le média (Phase 7) sont **indépendants**. **Stack near-term = AX42 + Railway
+Pro + Cloudflare fan-out.** Le **GEX44 (Phase 7bis) = bien plus tard**, seulement quand Railway+fan-out
+devient le mur. → Source de vérité de la stack + de l'ordre : **`STACK-AND-ROADMAP.md`**.

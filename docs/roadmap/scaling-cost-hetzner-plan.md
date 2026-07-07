@@ -1,8 +1,14 @@
 # Norva — Scaling, coût & migration Hetzner (plan détaillé)
 
+> 🧭 **Stack + ordre de travail = voir [`STACK-AND-ROADMAP.md`](./STACK-AND-ROADMAP.md)** (source de
+> vérité). Ce fichier-ci = le **détail chiffré** derrière ces décisions.
+>
 > Réponse chiffrée à : « 10/50/100 users qui importent, ça casse ? quelle compute ? peut-on
 > externaliser (Hetzner) pour casser le coût Supabase ? » — basé sur la **conso réelle mesurée**
 > en prod le 2026-07-07 (projet `oupsceccxsonaalhueff`), pas de la théorie.
+>
+> **Stack near-term figée** : **AX42 (DB) + Railway Pro + Cloudflare fan-out**. Le **GEX44 = bien plus
+> tard** (quand Railway+fan-out devient le mur). Détail : §9-§10 + STACK-AND-ROADMAP.md.
 
 ---
 
