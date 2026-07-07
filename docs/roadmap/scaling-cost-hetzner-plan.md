@@ -349,3 +349,52 @@ Les prix capture **AX41 €59 / AX42 €99 / AX102 €259 collent** au configura
 - **Caveat Cloudflare** : Workers n'a pas de frais/Go, mais streamer des **Po** de vidéo peut heurter les **TOS Cloudflare §2.8** (restriction vidéo/gros fichiers) → possible conversation fair-use ou passage à **Cloudflare Stream (métré)**. Reste radicalement moins cher que Railway, mais pas littéralement gratuit-infini.
 - **Télémétrie manquante (à instrumenter) :** part **browser-vs-natif**, **mix codec**, **% qui touche le FFmpeg Railway**, **taille live/EPG**. Sans ça on **vole à l'aveugle** sur le « monde egress » exact — mesure-le pour dimensionner la flotte média juste. (Décision de planification : provisionne l'egress-flat Hetzner+CDN **maintenant** au lieu de parier sur le monde favorable.)
 - **Convergence des 3 analyses + repo** : le vrai mur = **média/transcode+egress**, pas Postgres (coût DB quasi-plat €259-900 à tous les paliers). **N'oublie pas les 2 prérequis repo-spécifiques** : **dedup couche B (dormant → active+valide avant d'acheter)** et **gap de reproductibilité (fixes prod à la main → formaliser en migration avant toute HA)**.
+
+---
+
+## 10. Économie unitaire & capacité par palier (« ça tient jusqu'à combien d'users ? »)
+
+> Réponse à : « AX42 + GEX44 ≈ €350/mo, avec ~$4 net/user, ça tient jusqu'à combien d'users, il y a
+> un problème ? ». **Prix confirmés (net HT)** : AX42 **€99** + GEX44 **€184** (+€79 setup, inchangé au
+> 15 juin 2026) + Cloudflare ~$20-50 ≈ **~€350/mo tout compris**.
+
+### 10.1 Le point clé : le coût est FIXE, pas linéaire
+
+Le €350/mo ne monte **pas** avec le nb d'users (jusqu'à saturation d'un tier). Donc la **marge explose** avec l'échelle. Corollaire : **c'est une config de SCALE, pas de démarrage.**
+
+### 10.2 ⚠️ À 100 users, NE PAS prendre le box dédié
+
+| | Revenus (~$4 net/user) | Coût | Marge |
+|---|---|---|---|
+| 100 users sur **managé** (Supabase Medium + Railway) | ~$400 | **~$100-150** | correcte, **0 ops** |
+| 100 users sur **AX42+GEX44** (€350) | ~$400 | ~$380 | **quasi break-even ❌** |
+
+→ Le box dédié devient rentable **à partir de ~300 users**. En dessous, **reste managé** (moins cher + zéro ops).
+
+### 10.3 Capacité de AX42 + GEX44 — dépend du single-flight
+
+Le mur n'est **pas la DB** (AX42/64 Go tient large avec dedup+pooler) mais le **GEX44 (~20-40 transcodes 1080p)**. Sa capacité en *users inscrits* dépend entièrement du **patch single-flight** :
+
+| | Sans single-flight (code actuel) | Avec single-flight + fan-out CDN |
+|---|---|---|
+| GEX44 = | ~20-40 viewers **browser-live** concurrents | ~20-40 **chaînes uniques** → milliers de viewers |
+| **→ tient jusqu'à** | **~300-500 users inscrits** | **~1000-1500 users inscrits** |
+
+**Hypothèses** (à confirmer par télémétrie) : ~15-20 % de concurrence au pic, ~50 % du viewing sur navigateur, seul le **live-browser** touche le GPU (VOD → Cloudflare relay / engine raw-pipe = 0 GPU ; apps natives → direct = 0 GPU). C'est **le** rôle du single-flight (§9.8) : sans lui le GEX44 sature vers ~300-500 ; avec, le même box tient ~1000-1500.
+
+### 10.4 Marge par palier (le coût fixe amortit)
+
+| Users | Revenus (~$4 net) | Coût infra | Marge | % |
+|---|---|---|---|---|
+| 100 | $400 | ~$150 (**managé**, pas le box) | ~$250 | 62 % |
+| 500 | $2 000 | €350 (~$380) | ~$1 620 | **81 %** |
+| **1 000** | **$4 000** | **€350 (~$380)** | **~$3 620** | **90 %** |
+| 2 000 | $8 000 | ~€510 (AX102 + 2× GEX44) | ~$7 450 | 93 % |
+
+### 10.5 Réponse en une phrase + le « problème »
+
+**AX42 + GEX44 (~€350/mo) tient ~1 000-1 500 users inscrits** — **à condition** d'avoir activé **single-flight + fan-out Cloudflare + dedup couche B + pooler** (prérequis Phase 0 de la checklist maître). Sans single-flight → plafond **~300-500**. **Ne provisionne le box qu'à partir de ~300 users** (avant = le managé est plus rentable). À 1 000 users la marge est ~90 % → **l'économie est excellente, pas problématique.**
+
+### 10.6 ⚠️ 3 inconnues qui déplacent tout — à instrumenter
+
+Les chiffres reposent sur : **(a) % de concurrence au pic**, **(b) % navigateur-vs-natif**, **(c) % live-vs-VOD**. Elles ne sont **pas mesurées** aujourd'hui (aucun compteur télémétrie lisible). → **Dès les premiers vrais users, instrumenter** ces 3 ratios pour recalculer la capacité réelle au lieu d'estimer. C'est le même « télémétrie manquante » que §9.8.
