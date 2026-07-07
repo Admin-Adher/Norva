@@ -122,6 +122,55 @@ _plus_ qu'une ligne per-user pleine). Un-thin (refill depuis le global) en §Ré
 Projection (mesurée sur apdxes, cf. tracker) : à **10 owners, 190 → 78 MB (−59%)** ; asymptote
 **~−68% (÷3,1)**. Doctrine : **on construit maintenant** (calme, réversible), **on bascule plus tard**.
 
+**Pourquoi surtout PAS l'allumer « pour prendre de l'avance » à 1 owner** (piège tentant — la couche
+paraît premium) :
+1. **Gain de stockage ≈ 0** — rien à mutualiser tant qu'il n'y a pas de recoupement cross-user.
+2. Le seul pas qui économise vraiment (le **thin**, étape 5) est **irréversible** et **coûte _plus_
+   cher à 1 owner** : copie globale + copie per-user amincie > une seule ligne per-user pleine.
+3. Le **dual-write** (étape 2) pose un trigger de mirror **à chaque sync** → charge en plus (backfill,
+   trigger), pour zéro bénéfice tant que l'overlap n'est pas matériel — à éviter d'autant plus quand la
+   base est déjà sous tension.
+
+Le bon signal n'est pas une intuition, c'est un **verdict chiffré** : `catalog_flip_readiness(3.0)`
+passe **GO** (≥ plusieurs owners du même provider). → Idéalement **câbler une alerte** sur ce verdict
+pour activer le jour exact où ça devient rentable, ni avant ni après.
+
+---
+
+## Suppression d'une source : ce qui est perdu vs conservé (⚠️ question fréquente)
+
+> « Si je supprime un provider et qu'aucun autre user ne l'a en actif, on perd tout, ou on garde des
+> données mutualisées pour les futurs users ? » → **On ne perd pas l'essentiel. L'enrichissement
+> (couche A) survit ; seule la projection per-user brute est purgée. Et le « premium instantané » que
+> tu attends de la couche B est, pour la partie enrichissement, _déjà actif_ via la couche A.**
+
+Trois familles de données se croisent à la suppression :
+
+| | Couche A — enrichissement | Couche B — catalogue brut | Per-user (`cloud_*`) |
+|---|---|---|---|
+| Tables | `catalog_titles`, `catalog_file_tracks`, `catalog_generated_subtitles` | `catalog_media_items` & jumelles | `cloud_media_items`, `cloud_*_variants`, … |
+| Clé | identité de contenu (TMDB / pistes) | `server_host`+`external_id` — **credential-free** (aucun `user_id`/`source_id`/identifiant) | `user_id`+`source_id` |
+| État aujourd'hui | ✅ ON — peuplé (~92k / ~111k) | ⏸️ dormant (0 ligne) | source de vérité actuelle |
+| **Le reaper y touche ?** | **NON** | **NON** | **OUI** — et uniquement `deleted_at IS NOT NULL` |
+
+`reap_deleted_sources()` ne supprime QUE des lignes `cloud_*` d'une source **soft-deleted**. Il ne
+touche **aucune** table `catalog_*` (garantie structurelle, par sa clause `where deleted_at is not
+null`). Donc :
+
+- **Ce qui SURVIT** à la suppression d'un provider : tout l'enrichissement mutualisé (titres
+  canoniques TMDB, posters, pistes audio/sous-titres, sous-titres générés). C'est le travail coûteux —
+  il reste, partagé, permanent.
+- **Ce qui est PURGÉ** : la projection per-user du **listing de flux** de cette source (lignes
+  `cloud_*`). C'est la partie légère, ré-obtenue en **un import** depuis l'API du provider.
+- **Pour un futur owner du même provider** : il ré-importe le listing (rapide) et le système le
+  **re-matche** contre les titres canoniques déjà enrichis → catalogue premium quasi-instant, **sans
+  refaire TMDB**. Il ne repart pas de zéro.
+
+> **À retenir** : le « premium » de la couche B dormante est un gain de **COÛT de stockage à
+> l'échelle**, pas une fonctionnalité manquante. La fonctionnalité (réutiliser l'enrichissement pour un
+> futur owner) **tourne déjà** via la couche A. La couche B ne fait qu'éviter de **stocker N fois** les
+> ~600k lignes brutes quand N owners partagent un provider — d'où son gate `overlap ≥ 3.0`.
+
 ---
 
 ## Réversibilité (résumé)

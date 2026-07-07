@@ -35,7 +35,7 @@
 4. **Monitoring** 🟦 (Netdata/Grafana).
 
 ### 🥈 DÉCOUPLER le coût du nombre d'users
-5. **Activer + valider le dedup couche B** 🟩 — prérequis au sizing sublinéaire (÷2-3 stockage). Inutile à 10 users, **vital à 50-100**. À valider **sur vraies données** quand plusieurs users partagent des panels. (`phase2-dedup-activation-runbook.md`.)
+5. **Activer + valider le dedup couche B** 🟩 — prérequis au sizing sublinéaire (÷2-3 **stockage**). Inutile à 10 users, **vital à 50-100**. **NE PAS l'allumer avant le gate chiffré `catalog_flip_readiness(3.0)` = GO** (≈ plusieurs owners d'un même provider) : à 1 owner le gain ≈ 0 et le pas « thin » irréversible coûte _plus_ cher. ⚠️ Ne pas confondre avec la **couche A (enrichissement TMDB/pistes) qui est DÉJÀ ON** — c'est elle qui donne « le catalogue premium instantané réutilisé par un futur owner » ; la couche B n'ajoute que l'économie de **stockage** à l'échelle, et le reaper de suppression ne touche jamais les tables `catalog_*`. Cycle de vie à la suppression + « pourquoi pas maintenant » détaillés dans (`phase2-dedup-activation-runbook.md`.)
 6. **Fermer le gap de reproductibilité** 🟩 — formaliser en **migration** les fixes appliqués à la main (admin coverage…). Propreté + débloque tout futur HA.
 
 ### 🥉 ÉTAGE MÉDIA (Railway) — le garder pas cher + repousser le mur
