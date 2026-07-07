@@ -74,6 +74,17 @@ Ce qui vient alors, dans l'ordre (Phase 7bis → 8 de la checklist) :
 5. **HA** (auto-promotion Patroni + poolers redondants) — avant d'avoir des milliers de payants.
 6. Éventuellement **EX131/AX162** (EPYC/Xeon 256 Go ECC reg) si memory-bandwidth-bound à de vrais milliers (AX162 standard ≈ €612/mo, pas €319 = SKU LTD).
 
+### Polish post-migration (à ne pas oublier, reporté depuis le petit box)
+- **TMDB re-enrichment des titres à préfixe** (~138k titres `unmatched` matchant le regex de préfixe) :
+  reporté depuis le 2026-07-07 car trop lourd pour le box 2-workers (UPDATE 138k + re-match via un
+  cron search-match qui timeoutait + gaspillage sur les doublons de l'ancien Ninja). **À lancer APRÈS
+  la migration AX42 ET après le reap complet de l'ancien Ninja** :
+  `update cloud_titles set search_match_attempted_at=null where match_status='unmatched' and title ~ '^[A-Z]{2}[A-Z0-9]{0,3}(-[A-Z0-9]{1,6})* [-–—▎▏▍▌│┃┆┊｜|] ';` puis `update norva_search_match_state set last_id=null, done=false where id=1;`
+- **Avant le dump de migration** : laisser le reaper finir de drainer les sources soft-deleted (l'ancien
+  Ninja = ~285k media_items + 234k variants au 2026-07-07) pour NE PAS transporter le doublon sur l'AX42.
+- **Instrumenter** est FAIT (télémétrie mode/codec/surface live depuis 2026-07-07) → lire
+  `/telemetry/summary` (`decisionSignals.meteredRequestShare` etc.) pour sizer la flotte média sur du réel.
+
 ---
 
 ## 4. Capacité & coût par palier (rappel §10)
