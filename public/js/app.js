@@ -1811,7 +1811,10 @@ class App {
             this._adminPageLoading = new Promise((resolve, reject) => {
                 if (window.AdminPage) { resolve(); return; }
                 const s = document.createElement('script');
-                s.src = '/js/pages/AdminPage.js?v=48';
+                // Bump this ?v= whenever AdminPage.js changes — it's lazy-loaded (not an
+                // HTML <script>), so hash:assets can't rewrite it, and /js/* is cached
+                // immutable for a year. Forgetting to bump = users keep the old admin code.
+                s.src = '/js/pages/AdminPage.js?v=49';
                 s.onload = () => resolve();
                 s.onerror = () => { this._adminPageLoading = null; reject(new Error('AdminPage.js failed to load')); };
                 document.head.appendChild(s);
