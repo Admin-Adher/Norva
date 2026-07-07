@@ -553,7 +553,14 @@
                 }
 
                 if (payload.user || payload.id) {
-                    setStatus('success', 'Account created. Check your email to confirm it, then sign in.');
+                    // If Google is available, warn to confirm the email BEFORE using
+                    // "Continue with Google": linking keys off a verified email, so a
+                    // still-unconfirmed account + immediate Google can land in an
+                    // ambiguous state. Confirming first guarantees a clean single account.
+                    const googleAvailable = socialEl && socialEl.dataset.enabled;
+                    setStatus('success', googleAvailable
+                        ? 'Account created. Check your email to confirm it, then sign in. Please confirm your email before using “Continue with Google”.'
+                        : 'Account created. Check your email to confirm it, then sign in.');
                     showForm('signin');
                     return;
                 }
@@ -621,9 +628,16 @@
                 // password path already does this via ensureProfile), before
                 // handing off to the app.
                 setStatus('info', 'Signing in...');
-                await NorvaAuth.getUser().catch(() => null);
+                const user = await NorvaAuth.getUser().catch(() => null);
                 await ensureProfile();
-                setStatus('success', 'Signed in. Opening Norva...');
+                // If the account now carries both a Google and an email identity,
+                // Google was just linked onto a pre-existing account — reassure the
+                // user rather than showing a generic "Signed in".
+                const providers = (user && Array.isArray(user.identities)) ? user.identities.map(i => i.provider) : [];
+                const merged = providers.includes('google') && providers.includes('email');
+                setStatus('success', merged
+                    ? 'Google connected to your existing Norva account. Opening…'
+                    : 'Signed in. Opening Norva...');
                 location.replace(returnTo);
                 return;
             }

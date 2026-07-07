@@ -149,7 +149,13 @@ class SettingsPage {
                 <strong id="ss-email" style="color:#f8fafc"></strong>
               </div>
               <div>
-                <label class="setting-label" for="ss-new" style="display:block;margin-bottom:6px">New password</label>
+                <div class="setting-label" style="margin-bottom:6px">Sign-in methods</div>
+                <div id="ss-methods" style="display:flex;flex-direction:column;gap:8px">
+                  <p class="setting-hint" style="margin:0">Loading…</p>
+                </div>
+              </div>
+              <div>
+                <label class="setting-label" for="ss-new" id="ss-pwd-heading" style="display:block;margin-bottom:6px">New password</label>
                 <input id="ss-new" type="password" autocomplete="new-password" minlength="6" placeholder="At least 6 characters" style="${inputStyle}">
               </div>
               <div>
@@ -195,6 +201,7 @@ class SettingsPage {
                 setStatus('Password updated.', false);
                 if (newInput) newInput.value = '';
                 if (confirmInput) confirmInput.value = '';
+                this.populateSignInMethods(); // reflect that email+password is now a method
                 setTimeout(close, 900);
             } catch (e) {
                 setStatus((e && e.message) || 'Could not update the password.', true);
@@ -213,7 +220,43 @@ class SettingsPage {
         });
 
         modal.classList.add('active');
+        this.populateSignInMethods();
         setTimeout(() => { try { newInput?.focus(); } catch (_) { } }, 50);
+    }
+
+    // Populate the "Sign-in methods" list from the account's linked identities and
+    // adapt the password section: a Google-only account (no email/password identity)
+    // sees "Add a password" so it can gain email+password sign-in on the SAME account.
+    async populateSignInMethods() {
+        const methodsEl = document.getElementById('ss-methods');
+        if (!methodsEl) return;
+        let identities = [];
+        try {
+            const user = await window.NorvaAuth?.getUser?.();
+            identities = (user && Array.isArray(user.identities)) ? user.identities : [];
+        } catch (_) { /* fall through with empty list */ }
+
+        const hasPassword = identities.some((i) => i.provider === 'email');
+        const google = identities.find((i) => i.provider === 'google');
+        const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+        const row = (label, connected, detail) => `
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;border:1px solid #273142;border-radius:10px;background:#0b0f16">
+              <span style="color:#f8fafc;font-weight:600">${label}</span>
+              <span style="font-size:12px;color:${connected ? '#34d399' : '#8a94a7'}">${connected ? '✓ ' : ''}${esc(detail)}</span>
+            </div>`;
+
+        methodsEl.innerHTML =
+            row('Email &amp; password', hasPassword, hasPassword ? 'Connected' : 'Add one below') +
+            row('Google', !!google, google ? (google.identity_data?.email || 'Connected')
+                : 'Sign in with Google (same email) to connect');
+
+        // Reframe the password fields for an account that has no password yet.
+        if (!hasPassword) {
+            const heading = document.getElementById('ss-pwd-heading');
+            const updateBtn = document.getElementById('ss-update');
+            if (heading) heading.textContent = 'Add a password';
+            if (updateBtn) updateBtn.textContent = 'Add password';
+        }
     }
 
     async signOut() {
