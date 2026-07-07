@@ -1,0 +1,60 @@
+# =============================================================================
+# Norva media-gateway on the GEX44 (NVENC) — separate box from the DB.
+# =============================================================================
+# Prereqs on the host: NVIDIA driver + nvidia-container-toolkit installed and
+# Docker restarted. Test the GPU is visible:
+#   docker run --rm --gpus all nvidia/cuda:12.4.1-base-ubuntu22.04 nvidia-smi
+#
+# Start:  docker compose --env-file .env.media -f docker-compose.media.yml up -d --build
+# =============================================================================
+
+name: norva-media
+
+services:
+  gateway:
+    build:
+      # context = repo root so services/media-gateway/ is reachable
+      context: ../../..
+      dockerfile: ops/hetzner/media/Dockerfile.gex44
+    image: norva-media-gateway:nvenc
+    restart: unless-stopped
+    ports:
+      # Front this with your TLS reverse proxy / Cloudflare (see cloudflare-cdn.md).
+      - "127.0.0.1:8080:8080"
+    environment:
+      PORT: 8080
+      OUTPUT_DIR: /tmp/norva-media-gateway
+      FFMPEG_PATH: /usr/local/bin/ffmpeg
+      FFPROBE_PATH: /usr/local/bin/ffprobe
+      # The scaling flags (default ON in this image; flip to 0 to fall back to
+      # Railway-identical software/per-viewer behavior for a controlled rollout).
+      MEDIA_GATEWAY_NVENC: "1"
+      MEDIA_GATEWAY_SINGLE_FLIGHT: "1"
+      NVENC_PRESET: p4
+      NVENC_TUNE: ll
+      # Shared secret the edge signs playback tokens with — MUST match the value
+      # the norva-playback edge function uses (GATEWAY_TOKEN). Keep out of git.
+      GATEWAY_TOKEN: ${GATEWAY_TOKEN}
+      # Residential egress proxy (anti-ban), same as Railway config if used.
+      PROXY_URL: ${PROXY_URL:-}
+    volumes:
+      # HLS segment scratch. Put on fast local NVMe; it is ephemeral (cache-fill).
+      - gateway-tmp:/tmp/norva-media-gateway
+    # --- GPU access (nvidia-container-toolkit) ---
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu, video]   # 'video' = NVENC/NVDEC access
+    # Compose v2 shorthand equivalent (uncomment if not using deploy.resources):
+    # gpus: all
+
+volumes:
+  gateway-tmp:
+
+# NOTE: the transcode ORIGIN (this service) is capped by the box's 1 Gbit/s port
+# (~200-250 concurrent HD if it served viewers directly). It MUST sit behind the
+# Cloudflare CDN (cloudflare-cdn.md) so the edge fans out segments and the origin
+# only serves cache-fill. Do NOT expose 8080 publicly without the CDN in front.

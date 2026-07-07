@@ -1,0 +1,70 @@
+# =============================================================================
+# Norva media-gateway — GEX44 (NVIDIA RTX 4000 SFF Ada) NVENC build
+# =============================================================================
+# Transcode-focused image: HW HEVC decode (NVDEC) + h264 encode (NVENC) via a
+# static ffmpeg-gpl build that has the nvenc/cuvid encoders baked in.
+#
+# The auxiliary CPU features of the Railway image (whisper LID, Argos translation,
+# tesseract OCR) are LEFT OUT here on purpose — keep the GPU box lean and dedicated
+# to transcode. Those endpoints self-disable when their env vars are unset (see the
+# app: WHISPER_BIN / ARGOS_MODELS_DIR / OCR_PYTHON_BIN). Run them on a cheap CPU box
+# (or keep on Railway) if you still need them.
+#
+# HOST PREREQS (not in the image):
+#   - NVIDIA driver installed on the GEX44 host.
+#   - nvidia-container-toolkit installed + Docker configured for the nvidia runtime.
+#   - Run with GPU access (see docker-compose.media.yml: deploy.resources / --gpus all).
+#
+# BUILD:   docker build -f Dockerfile.gex44 -t norva-media-gateway:nvenc ../../..  \
+#            (build context = repo root so `services/media-gateway` is reachable)
+# VERIFY:  docker run --rm --gpus all norva-media-gateway:nvenc \
+#            /usr/local/bin/ffmpeg -hide_banner -encoders | grep -E 'h264_nvenc|hevc'
+# =============================================================================
+
+# CUDA *runtime* base (drivers come from the host via nvidia-container-toolkit).
+FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04
+
+ARG NODE_MAJOR=20
+# Pinned BtbN static ffmpeg (GPL) — includes h264_nvenc, hevc_nvenc, *_cuvid, npp.
+# Re-pin to a current release at build time; 'latest' link kept as a comment.
+ARG FFMPEG_URL=https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl xz-utils gnupg \
+    # Node.js
+    && curl -fsSL https://deb.nodesource.com/setup_${NODE_MAJOR}.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    # static ffmpeg with NVENC
+    && curl -fsSL "$FFMPEG_URL" -o /tmp/ffmpeg.tar.xz \
+    && mkdir -p /tmp/ffmpeg && tar -xJf /tmp/ffmpeg.tar.xz -C /tmp/ffmpeg --strip-components=1 \
+    && cp /tmp/ffmpeg/bin/ffmpeg /usr/local/bin/ffmpeg \
+    && cp /tmp/ffmpeg/bin/ffprobe /usr/local/bin/ffprobe \
+    && chmod +x /usr/local/bin/ffmpeg /usr/local/bin/ffprobe \
+    && rm -rf /tmp/ffmpeg /tmp/ffmpeg.tar.xz /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY services/media-gateway/package*.json ./
+RUN npm install --omit=dev
+COPY services/media-gateway/src ./src
+
+ENV NODE_ENV=production
+ENV PORT=8080
+ENV OUTPUT_DIR=/tmp/norva-media-gateway
+# Point the app at the NVENC-capable static ffmpeg (app reads FFMPEG_PATH, index.js:161).
+ENV FFMPEG_PATH=/usr/local/bin/ffmpeg
+ENV FFPROBE_PATH=/usr/local/bin/ffprobe
+# --- the two flags that make the GPU box actually scale (see CODE-PATCHES.md) ---
+# NVENC transcode args (HW decode+encode). OFF => software libx264 (identical to Railway).
+ENV MEDIA_GATEWAY_NVENC=1
+# One ffmpeg per unique source, fanned out to N viewers. OFF => one ffmpeg per viewer.
+ENV MEDIA_GATEWAY_SINGLE_FLIGHT=1
+# NVENC encoder tuning (override as needed).
+ENV NVENC_PRESET=p4
+ENV NVENC_TUNE=ll
+# Auxiliary CPU features disabled on the GPU box (run them elsewhere if needed):
+ENV WHISPER_BIN=
+ENV ARGOS_MODELS_DIR=
+ENV OCR_PYTHON_BIN=
+
+EXPOSE 8080
+CMD ["npm", "start"]
