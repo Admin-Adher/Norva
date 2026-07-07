@@ -126,7 +126,7 @@ jobs:
 
       - name: Build Android Phone debug APK
         working-directory: clients/android-phone
-        run: gradle :app:assembleDebug --no-daemon
+        run: gradle :app:assembleDebug --no-daemon --stacktrace
 
       - name: Upload Android Phone APK artifact
         uses: actions/upload-artifact@v4
