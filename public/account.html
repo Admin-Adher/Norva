@@ -499,12 +499,21 @@
 
         forms.signin.addEventListener('submit', async event => {
             event.preventDefault();
+            clearAuthHelp();
             await withBusy(forms.signin, async () => {
                 setStatus('info', 'Signing in...');
-                await NorvaAuth.signIn({
-                    email: document.getElementById('signin-email').value.trim(),
-                    password: document.getElementById('signin-password').value
-                });
+                try {
+                    await NorvaAuth.signIn({
+                        email: document.getElementById('signin-email').value.trim(),
+                        password: document.getElementById('signin-password').value
+                    });
+                } catch (_) {
+                    // Handled here (not rethrown) so we show an actionable state
+                    // rather than the raw obfuscated "Invalid login credentials".
+                    setStatus('error', 'We couldn’t sign you in with that password.');
+                    showAuthHelp('If you created your account with Google, use Continue with Google — or reset your password to set one.');
+                    return;
+                }
                 await ensureProfile();
                 setStatus('success', 'Signed in. Opening Norva...');
                 location.replace(returnTo);
@@ -513,6 +522,7 @@
 
         forms.signup.addEventListener('submit', async event => {
             event.preventDefault();
+            clearAuthHelp();
             await withBusy(forms.signup, async () => {
                 const displayName = document.getElementById('signup-name').value.trim();
                 setStatus('info', 'Creating your account...');
@@ -526,6 +536,19 @@
                     await ensureProfile(displayName);
                     setStatus('success', 'Account created. Opening Norva...');
                     location.replace(returnTo);
+                    return;
+                }
+
+                // Anti-enumeration: when the email already has an account (e.g. it
+                // was created with Google), Supabase returns an obfuscated user with
+                // an EMPTY identities array and sends NO confirmation email. Showing
+                // "check your email" here is a dead-end — steer them to the method
+                // that actually works instead.
+                const user = payload.user;
+                if (user && Array.isArray(user.identities) && user.identities.length === 0) {
+                    showForm('signin');
+                    setStatus('info', 'This email already has a Norva account.');
+                    showAuthHelp('Sign in with Google, or reset your password to sign in with email.');
                     return;
                 }
 
@@ -663,6 +686,7 @@
         }
 
         function showForm(name) {
+            clearAuthHelp();
             Object.entries(forms).forEach(([key, form]) => form.classList.toggle('active', key === name));
             document.querySelectorAll('.tab').forEach(button => {
                 button.classList.toggle('active', button.dataset.tab === name);
@@ -699,6 +723,55 @@
         function setStatus(type, message) {
             statusEl.className = 'status ' + type;
             statusEl.textContent = message;
+        }
+
+        // Actionable failure state. Because Supabase deliberately returns an
+        // obfuscated "Invalid login credentials" (anti-enumeration), the client
+        // cannot tell a wrong password from a Google-only account — so on failure
+        // we offer BOTH next steps instead of a dead-end error: continue with
+        // Google (where enabled) and reset/set a password.
+        function clearAuthHelp() {
+            const existing = document.getElementById('auth-help');
+            if (existing) existing.remove();
+        }
+        function showAuthHelp(message, opts = {}) {
+            clearAuthHelp();
+            const wrap = document.createElement('div');
+            wrap.id = 'auth-help';
+            wrap.style.cssText = 'margin-top:12px;display:flex;flex-direction:column;gap:8px';
+            if (message) {
+                const p = document.createElement('p');
+                p.textContent = message;
+                p.style.cssText = 'margin:0 0 2px;color:var(--muted,#9ca3af);font-size:13px;line-height:1.4';
+                wrap.appendChild(p);
+            }
+            // Google button only where OAuth is actually available (web; hidden on
+            // native-app where social sign-in is disabled).
+            if (opts.google !== false && socialEl && socialEl.dataset.enabled) {
+                const g = document.createElement('button');
+                g.type = 'button';
+                g.className = 'secondary';
+                g.textContent = 'Continue with Google';
+                g.addEventListener('click', () => {
+                    setStatus('info', 'Redirecting…');
+                    NorvaAuth.signInWithOAuth('google', `${location.origin}/account.html?returnTo=${encodeURIComponent(returnTo)}`);
+                });
+                wrap.appendChild(g);
+            }
+            if (opts.reset !== false) {
+                const r = document.createElement('button');
+                r.type = 'button';
+                r.className = 'ghost';
+                r.textContent = 'Reset or set a password';
+                r.addEventListener('click', () => {
+                    const email = document.getElementById('signin-email').value.trim()
+                        || document.getElementById('signup-email').value.trim();
+                    document.getElementById('recover-email').value = email;
+                    showForm('recover');
+                });
+                wrap.appendChild(r);
+            }
+            statusEl.insertAdjacentElement('afterend', wrap);
         }
 
         function sanitizeReturnTo(value) {
