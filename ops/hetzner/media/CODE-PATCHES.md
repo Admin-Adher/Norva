@@ -48,24 +48,31 @@ ffmpeg s'arrête après le grace TTL.
 
 ---
 
-## Patch #2 — RELAY FAN-OUT (cache des segments au edge) — trivial
+## Patch #2 — FAN-OUT : ⚠️ PAS via le cache du Worker relay — via single-flight + Cache Rule CDN
 
-**Fichier** : `services/norva-relay/src/index.js` (~L567 : `Cache-Control: private, max-age=30` sur le
-chemin playback).
-**Flag** : conditionner sur le **type de ressource** (segment vs manifest vs plage partielle), pas sur
-un env (le Worker n'a pas d'env simple ici) — c'est intrinsèquement sûr car ça ne touche que les
-segments cacheables.
+> **Correction importante après lecture du code relay.** L'idée naïve « cacher les segments dans le
+> Worker (`caches.default`) » **NE fan-out PAS** : `rewriteHlsPlaylist` (`norva-relay/src/index.js`
+> ~L588-597) **re-signe chaque URI de segment avec le token PAR VIEWER**, donc 2 viewers d'une même
+> chaîne ont des **URLs de segment différentes** → clés de cache différentes → **aucun partage**.
+> Cacher par URL tokenisée ne sert à rien ; cacher par URL cible (custom cache key) est du
+> cache-key surgery risqué sur le chemin critique. → **Ne PAS faire ça.**
 
-**Spec** :
-- Pour un **segment complet** HLS (`.ts` / `.m4s`, réponse **200** complète, pas une plage `206`) :
-  → `Cache-Control: public, s-maxage=6, max-age=0` (live) ; VOD peut monter `s-maxage`.
-  → et `ctx.waitUntil(caches.default.put(request, response.clone()))` si pas déjà en cache.
-- **Manifest** `.m3u8` live : garder très court / `no-store` (change chaque segment).
-- **Plages partielles** (`206`, seek/range) : **rester** `private, max-age=30` (non cacheable).
-- ⚠️ Ne PAS cacher les réponses qui portent un token à usage unique dans le corps ; ici les segments
-  sont des octets média → OK.
+**Le VRAI fan-out** (config, pas de code Worker) :
+1. **Single-flight (patch #1)** fait que tous les viewers d'une chaîne partagent **le même
+   `session.id`** → l'origine (GEX44) sert les **mêmes** URLs `/sessions/<id-partagé>/seg_N.ts`
+   pour tous.
+2. Ces URLs d'origine étant **identiques** entre viewers, une **Cloudflare Cache Rule sur le domaine
+   d'origine** (`.ts` → Edge TTL ~durée de segment) les cache au edge → le 2ᵉ viewer prend le
+   segment au CDN, l'origine ne sert que le cache-fill. **C'est là qu'est le fan-out.**
+   → Voir `cloudflare-cdn.md` **Option B** (domaine média proxifié + Cache Rule). **Config, pas code.**
 
-**Test** : 2 viewers même chaîne → 2ᵉ segment = `cf-cache-status: HIT`.
+**Donc** : pas de patch Worker relay pour le fan-out. Le fan-out = **#1 (single-flight) + Cache Rule
+CDN sur l'origine**. Le chemin relay Cloudflare reste utile pour la **VOD propre** (egress
+non-métré) et pour le **live-hls relayable** (#3), mais ce n'est pas le mécanisme de fan-out du
+transcode.
+
+**Test** : avec single-flight ON + Cache Rule, 2 viewers même chaîne → 2ᵉ segment
+`cf-cache-status: HIT` **et** un seul `session.id` (donc un seul ffmpeg).
 
 ---
 
@@ -109,12 +116,21 @@ transcode). Commence par 1 provider, mesure, étends.
 
 ## Récap flags (tout OFF par défaut = déploiement neutre)
 
-| Flag | Où | Effet quand ON |
-|---|---|---|
-| `MEDIA_GATEWAY_SINGLE_FLIGHT` | gateway env | 1 transcode/flux unique partagé (capacité ×N) |
-| `MEDIA_GATEWAY_NVENC` | gateway env | transcode HW (GEX44), CPU ~0 |
-| relay segment-cache (patch #2) | relay code | fan-out CDN des segments |
-| `norva-live-hls-relay` | config par-provider | live éligible → relay Cloudflare (pas de transcode) |
+| Levier | Où | Type | Effet quand ON | État |
+|---|---|---|---|---|
+| `MEDIA_GATEWAY_NVENC` | gateway env | **code** | transcode HW (GEX44), CPU ~0 | ✅ **implémenté** (flag OFF) |
+| `MEDIA_GATEWAY_SINGLE_FLIGHT` | gateway env | **code** | 1 transcode/flux unique partagé (capacité ×N) | ⏳ à implémenter **avec test** (pré-vol) |
+| Cache Rule `.ts` sur l'origine | Cloudflare | **config** | fan-out CDN (dépend du single-flight) | ⏳ config au pré-vol (`cloudflare-cdn.md` Option B) |
+| `norva-live-hls-relay` | par-provider | **config** | live éligible → relay Cloudflare (pas de transcode) | ⏳ config au pré-vol, provider par provider |
 
-→ On peut **committer + déployer** avec tout OFF (aucun changement), puis **activer** progressivement
-le jour du push, provider par provider, en mesurant. C'est ce qui rend la bascule *réversible et sûre*.
+**Pourquoi single-flight n'est PAS implémenté à l'aveugle ici** : c'est de la **logique de cycle de
+vie distribuée** (refcount viewers à travers create `/sessions` + `DELETE /sessions/:id` + le sweep
+d'expiration + `stopSession`), sur le **chemin critique de lecture live**, **non testable** dans cet
+environnement. Un bug subtil (session coupée sous un viewer, fuite qui garde un slot provider → ban,
+mauvaise `fanKey` qui mélange les pistes audio de 2 viewers) est **grave et plausible**. → On
+l'implémente **pendant le pré-vol avec un test de charge réel** (spec précise dans le patch #1
+ci-dessus). Le NVENC, lui, est un **simple échange d'args localisé** (OFF = `libx264` à l'identique),
+donc sûr à livrer maintenant, flag OFF.
+
+→ Le NVENC est **committé/déployé neutre** (flag OFF). Les 3 autres leviers s'**activent au pré-vol**
+avec test, provider par provider, en mesurant. C'est ce qui rend la bascule *réversible et sûre*.

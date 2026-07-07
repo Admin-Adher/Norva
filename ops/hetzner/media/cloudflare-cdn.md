@@ -9,10 +9,11 @@
 Norva a **déjà** un Worker relay (`services/norva-relay`) qui fait transiter les octets par
 Cloudflare (egress Workers non-facturé au Go). Deux options complémentaires :
 
-### Option A — le Worker relay existant (déjà en place) + cache des segments
-C'est le chemin actuel du web. Il suffit de **cacher les segments** (voir `CODE-PATCHES.md`
-patch #2 : passer les `.ts` de `private,max-age=30` → `public, s-maxage=<durée segment>`), puis le
-Worker sert les segments depuis `caches.default`. Aucune config DNS nouvelle.
+### Option A — ❌ cache dans le Worker relay : NE fan-out PAS (ne pas faire)
+Intuitif mais faux : `rewriteHlsPlaylist` re-signe chaque segment avec le **token par viewer**, donc
+2 viewers d'une même chaîne ont des **URLs différentes** → clés de cache différentes → aucun partage.
+Voir `CODE-PATCHES.md` patch #2. → Utiliser **Option B**. (Le Worker relay reste utile pour la VOD
+propre et le live-hls relayable, mais pas comme mécanisme de fan-out du transcode.)
 
 ### Option B — un domaine média proxifié (orange-cloud) devant le GEX44
 Pour servir directement l'origine HLS du GEX44 via le CDN Cloudflare :
