@@ -886,7 +886,16 @@ function identityForTitle(itemType: string, title: string, year: string | null, 
 }
 
 function normalizeTitle(value: string, year: string | null = null) {
-  let text = stripDiacritics(value)
+  // Strip a leading provider region/language/category prefix ("EN - ", "AR-SUBS - ", "DK ▎ ") on the
+  // RAW-CASED string FIRST. The guard requires two leading UPPERCASE letters so a digit-led ("007 - ")
+  // or one-word real title ("IT", "US") is never mistaken for a prefix — so it MUST run before
+  // toLowerCase() below (lowercasing destroys the guard). This makes identity_key prefix-free so
+  // cross-region copies of one film collapse instead of showing 8+ cards (EN-/AR-/FR- The Hunger
+  // Games -> one norm: key). Fall back to the raw value if stripping would empty it. Regex is kept
+  // identical to cleanDisplayTitle (:919) and cleanSearchQuery (:809) — keep the three in sync.
+  const rawValue = String(value || "");
+  const deprefixed = rawValue.replace(/^[A-Z]{2}[A-Z0-9]{0,3}(?:-[A-Z0-9]{1,6})* [-–—▎▏▍▌│┃┆┊｜|] /, "");
+  let text = stripDiacritics(deprefixed.length >= 2 ? deprefixed : rawValue)
     .toLowerCase()
     .replace(/[\[({][^\])}]*[\])}]/g, " ")
     .replace(/\b(4k|uhd|2160p|1080p|720p|fhd|hd|sd|multi|vostfr|vost|vf|vff|truefrench|subt?\s*ar|sub|dub)\b/gi, " ");

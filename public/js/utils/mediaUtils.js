@@ -343,7 +343,14 @@ const MediaUtils = (() => {
 
     function normalizeTitle(name, knownYear = null) {
         if (!name) return '';
-        let s = stripDiacritics(name).toLowerCase();
+        // Strip a leading provider region/language/category prefix ("EN - ", "AR-SUBS - ", "DK ▎ ")
+        // on the RAW-CASED string FIRST — the two-uppercase guard (which spares "IT"/"US"/"007 - "…)
+        // is destroyed by toLowerCase(). Mirrors the server vod-title-projection.normalizeTitle so the
+        // client-computed dedup key agrees with the server's, collapsing cross-region copies of one
+        // film. Falls back to the raw name if stripping would empty it.
+        const raw = String(name);
+        const deprefixed = raw.replace(/^[A-Z]{2}[A-Z0-9]{0,3}(?:-[A-Z0-9]{1,6})* [-–—▎▏▍▌│┃┆┊｜|] /, '');
+        let s = stripDiacritics(deprefixed.length >= 2 ? deprefixed : raw).toLowerCase();
         s = s.replace(/[[{(][^\])}]*[\])}]/g, ' ');
         let changed = true;
         while (changed) {
