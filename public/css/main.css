@@ -12312,6 +12312,9 @@ body.is-watching .norva-mini { display: none !important; }
 .gsearch-text { display: flex; flex-direction: column; min-width: 0; }
 .gsearch-title { font-size: 15px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .gsearch-sub { color: #8b95a9; font-size: 12.5px; }
+.gsearch-seeall { display: block; width: 100%; margin: 2px 0 10px; padding: 10px 12px; border: none; background: transparent; color: var(--color-accent, #4f8cff); font: inherit; font-size: 13.5px; font-weight: 600; text-align: left; cursor: pointer; border-radius: 10px; }
+.gsearch-seeall:active { background: rgba(255, 255, 255, 0.06); }
+@media (hover: hover) { .gsearch-seeall:hover { background: rgba(255, 255, 255, 0.05); } }
 @media (min-width: 641px) {
   .gsearch-overlay { align-items: center; }
   .gsearch-panel { height: auto; max-height: 80vh; border: 1px solid var(--color-border, #1f2733); border-radius: 16px; overflow: hidden; }

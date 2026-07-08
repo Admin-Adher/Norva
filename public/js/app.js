@@ -1497,16 +1497,35 @@ class App {
             window.API.media.page({ type: 'series', q, limit: 48 }).catch(() => empty),
         ]);
         if (reqId !== this._searchReq) return; // a newer keystroke superseded this
-        // Collapse provider duplicates the SAME way the Movies/Series grids do, so the
-        // global search shows one row per film — not one row per language/quality variant
-        // (the "Hunger Games : Le film ×6" the flat list used to show). openSearchResult()
-        // indexes into these arrays, so store the representatives in the rendered order.
+        // Collapse provider duplicates the SAME way the Movies/Series grids do, so the global
+        // search shows one row per film — not one row per language/quality variant ("Hunger
+        // Games : Le film ×7"). Unlike the browse grid (server-deduped to ~1 row/film), the search
+        // RPC returns RAW cloud_media_items rows with NO top-level tmdb_id (it lives at
+        // metadata.providerTmdbId), no tmdb.title/date, a region-tainted dedup_key, and a year
+        // that is often NULL — so groupItems has nothing reliable to key on. prep() hoists the
+        // provider tmdb id onto tmdb_id (so the deterministic `t:` collapse fires and every
+        // version sharing a tmdb id folds to one row) and backfills the year from release_year,
+        // else the trailing :YYYY of the dedup_key, so the title+year fold can rescue rows the
+        // server hasn't tmdb-resolved yet. openSearchResult() indexes into the representative
+        // arrays, so store them in rendered order.
         const M = window.MediaUtils;
-        const grp = (arr) => (M?.groupItems
-            ? M.groupItems(arr || [], { idField: 'stream_id' })
-            : (arr || []).map((it) => ({ representative: it, items: [it] })));
-        const gMovies = grp(mv.items);
-        const gSeries = grp(sr.items);
+        const prep = (arr) => (arr || []).map((it) => {
+            const tmdbId = it.tmdb_id || it.metadata?.providerTmdbId || it.providerTmdbId || undefined;
+            let year = it.year ?? it.release_year ?? null;
+            if (!year) {
+                const m = /(?:^|[:|])((?:19|20)\d{2})$/.exec(String(it.dedup_key || ''));
+                if (m) year = Number(m[1]);
+            }
+            return (tmdbId || year) ? { ...it, tmdb_id: tmdbId, year: year ?? it.year } : it;
+        });
+        const grp = (arr, idField) => {
+            const prepped = prep(arr);
+            return M?.groupItems
+                ? M.groupItems(prepped, { idField })
+                : prepped.map((it) => ({ representative: it, items: [it] }));
+        };
+        const gMovies = grp(mv.items, 'stream_id');
+        const gSeries = grp(sr.items, 'series_id'); // series dedup by series_id, mirroring SeriesPage
         this._gsMovies = gMovies.map((g) => g.representative);
         this._gsSeries = gSeries.map((g) => g.representative);
         this.renderSearchResults(box, q, gMovies, gSeries);
@@ -1521,7 +1540,7 @@ class App {
             const poster = M.safeImageUrl(
                 item.stream_icon || item.cover || M.tmdbPosterUrl(item.tmdb),
                 '/img/norva-media-placeholder.png');
-            const year = String(item.tmdb?.release_date || item.tmdb?.first_air_date || '').slice(0, 4);
+            const year = String(item.tmdb?.release_date || item.tmdb?.first_air_date || item.year || '').slice(0, 4);
             const versions = count > 1 ? ` · ${count} versions` : '';
             return `
                 <button type="button" class="gsearch-result" data-type="${type}" data-idx="${idx}">
@@ -1533,9 +1552,15 @@ class App {
                     </span>
                 </button>`;
         };
+        // Reachable-count on the section header ("Movies · 6") + a "See all" escape hatch to the
+        // fully-paged in-page grid, since the overlay caps at 48 raw rows/type before grouping.
+        const seeAll = (type, label) =>
+            `<button type="button" class="gsearch-seeall" data-seeall="${type}">See all in ${label} →</button>`;
         let html = '';
-        if (movies.length) html += '<div class="gsearch-section">Movies</div>' + movies.map((m, i) => row(m, 'movie', i)).join('');
-        if (series.length) html += '<div class="gsearch-section">Series</div>' + series.map((s, i) => row(s, 'series', i)).join('');
+        if (movies.length) html += `<div class="gsearch-section">Movies · ${movies.length}</div>`
+            + movies.map((m, i) => row(m, 'movie', i)).join('') + seeAll('movie', 'Movies');
+        if (series.length) html += `<div class="gsearch-section">Series · ${series.length}</div>`
+            + series.map((s, i) => row(s, 'series', i)).join('') + seeAll('series', 'Series');
         if (!html) {
             box.innerHTML = `<div class="gsearch-hint">No results for “${M.escapeHtml(q)}”.</div>`;
             return;
@@ -1544,6 +1569,22 @@ class App {
         box.querySelectorAll('.gsearch-result').forEach((el) => {
             el.addEventListener('click', () => this.openSearchResult(el.dataset.type, parseInt(el.dataset.idx, 10)));
         });
+        box.querySelectorAll('.gsearch-seeall').forEach((el) => {
+            el.addEventListener('click', () => this.seeAllInPage(el.dataset.seeall, q));
+        });
+    }
+
+    // "See all in Movies/Series": land on the fully-paged in-page grid, pre-searched to the same
+    // query — the same navigate+prefill path openSearchResult() falls back to (race-safe via the
+    // page's cloudRequestId guard). Removes the overlay's 48-row ceiling as the limiting factor.
+    seeAllInPage(type, q) {
+        this.closeSearch();
+        const page = type === 'series' ? 'series' : 'movies';
+        this.navigateTo(page);
+        setTimeout(() => {
+            const input = document.getElementById(page === 'series' ? 'series-search' : 'movies-search');
+            if (input) { input.value = q; input.dispatchEvent(new Event('input', { bubbles: true })); }
+        }, 140);
     }
 
     // Open the tapped result's detail directly via the page's openByItem(). If
