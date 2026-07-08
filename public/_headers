@@ -8,6 +8,22 @@
 /*
   Cache-Control: public, max-age=0, must-revalidate
 
+# App SPA shell — served to the Android phone/TV WebViews, which DELIBERATELY skip the
+# service worker (app.html: `if (/NorvaTV-Android/i.test(navigator.userAgent)) return;`)
+# and therefore rely 100% on the WebView HTTP cache. `must-revalidate` above was not
+# enough: a shell copy pinned "fresh" (a past long-TTL response, or a WebView that skips
+# revalidation) strands mobile on an OLD hashed JS bundle even after a clean deploy — web
+# (SW + a normal browser cache) updated fine, mobile did not (the "nothing changed on
+# mobile" dedup divergence). no-store forces the tiny shell to be refetched every launch so
+# its versioned (immutable) /js/ + /css/ references are always current; those assets still
+# cache forever by content hash, so repeat loads stay fast. The web SW still precaches
+# app.html via the Cache API (independent of Cache-Control) so offline is unaffected, and
+# the native shells have their own offline path.
+/app
+  Cache-Control: no-store
+/app.html
+  Cache-Control: no-store
+
 # Versioned JS/CSS (every reference carries ?v=<hash>, rewritten on each deploy by
 # scripts/hash-asset-versions.js). A changed file gets a new URL, so we can cache the
 # old URL forever — repeat visits re-use the bytes with zero network.

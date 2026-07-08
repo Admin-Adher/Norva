@@ -928,9 +928,40 @@ const MediaUtils = (() => {
             group.items.push(item);
         }
 
-        const result = [...groups.values()];
+        let result = [...groups.values()];
         for (const group of result) {
             group.representative = pickRepresentative(group.items);
+        }
+
+        // Second reconciliation pass: a provider sometimes stamps the SAME film with two
+        // different tmdb ids (seen live: two "Hunger Games: Mockingjay - Part 2 (2015)"
+        // records, ratings 6.898 vs 6.9). Those hash to two different `t:` keys above and
+        // never merge, so one film shows as two cards. Fold groups whose representative
+        // resolves to the SAME normalized title + year (the strict computeDedupKey). The year
+        // is REQUIRED and must be equal and the normalized title must match exactly, so films
+        // that differ in slug or year are never collapsed; cross-language titles ("La Ballade…"
+        // vs "The Ballad…") differ in slug too and stay matched only by tmdb id, as before.
+        const byTitleYear = new Map();
+        let folded = false;
+        for (const group of result) {
+            const rep = group.representative || group.items[0];
+            const tkey = computeDedupKey(rep.tmdb?.title || rep.name, rep.year);
+            // Require a real 4-digit year so a yearless title never becomes a merge magnet.
+            if (!tkey || !/\|(19|20)\d{2}$/.test(tkey)) continue;
+            const primary = byTitleYear.get(tkey);
+            if (primary) {
+                primary.items.push(...group.items);
+                group._folded = true;
+                folded = true;
+            } else {
+                byTitleYear.set(tkey, group);
+            }
+        }
+        if (folded) {
+            result = result.filter(g => !g._folded);
+            for (const group of result) {
+                if (group.items.length > 1) group.representative = pickRepresentative(group.items);
+            }
         }
         return result;
     }
