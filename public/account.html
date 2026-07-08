@@ -589,9 +589,10 @@
         window.onNorvaGoogleIdToken = async function (idToken, error) {
             clearTimeout(nativeGoogleTimer);
             if (!idToken) {
-                setStatus('error', error === 'google_not_configured'
-                    ? 'Google sign-in isn’t available yet.'
-                    : 'Google sign-in was cancelled.');
+                if (error === 'google_not_configured') setStatus('error', 'Google sign-in isn’t available yet.');
+                else if (!error || /cancel/i.test(error)) setStatus('error', 'Google sign-in was cancelled.');
+                // Surface the real reason (config/propagation) so it can be acted on.
+                else setStatus('error', 'Google sign-in failed: ' + error);
                 return;
             }
             try {

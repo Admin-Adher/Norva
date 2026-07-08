@@ -48,7 +48,7 @@ import androidx.credentials.GetCredentialRequest;
 import androidx.credentials.GetCredentialResponse;
 import androidx.credentials.exceptions.GetCredentialException;
 
-import com.google.android.libraries.identity.googleid.GetGoogleIdOption;
+import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption;
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential;
 import com.google.firebase.messaging.FirebaseMessaging;
 
@@ -849,11 +849,11 @@ public class MainActivity extends Activity {
             return;
         }
         try {
-            GetGoogleIdOption option = new GetGoogleIdOption.Builder()
-                    .setServerClientId(webClientId)
-                    .setFilterByAuthorizedAccounts(false) // allow any Google account (also first-time sign-up)
-                    .setAutoSelectEnabled(false)
-                    .build();
+            // GetSignInWithGoogleOption = the button-triggered flow (always shows the
+            // account chooser). More reliable than GetGoogleIdOption here, which can
+            // stall/return no-credential when there is no previously-authorized account.
+            GetSignInWithGoogleOption option =
+                    new GetSignInWithGoogleOption.Builder(webClientId).build();
             GetCredentialRequest request = new GetCredentialRequest.Builder()
                     .addCredentialOption(option)
                     .build();
