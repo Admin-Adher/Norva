@@ -3197,6 +3197,16 @@ async function resolvePendingTranslations(db: SupabaseClient, runtimeConfig: Run
   }
 }
 
+// Crawl-yield governance (flag, default OFF — neutral/byte-identical when OFF). When ON, the
+// autonomous crawl yields the provider's single connection slot to a live human more aggressively:
+// (1) the "recently active" window below widens to CRAWL_VIEWER_GRACE_MS (covers the grace tail
+// after a viewer stops — the ~8s the provider is slow to free the slot + reconnect churn), and
+// (2) the crawl re-checks MID-TICK (see runOneDimension loop) so a viewer who starts DURING a
+// ~100s tick isn't collided with. Load-test at enable: grace length vs real slot-release, and the
+// extra indexed read per batch at crawl volume. See ops/hetzner/media/CODE-PATCHES.md patch #5.
+const CRAWL_YIELD_TO_VIEWERS = (Deno.env.get("NORVA_CRAWL_YIELD_TO_VIEWERS") || "") === "true";
+const CRAWL_VIEWER_GRACE_MS = boundedInt(Deno.env.get("NORVA_CRAWL_VIEWER_GRACE_MS"), 300_000, 60_000, 900_000);
+
 // True when the user is actively watching right now: a fresh playback event (the player emits
 // heartbeats during playback) or a still-valid 'ready' session (covers the gap before the first
 // event). Autonomous provider probes defer while this holds — a live stream egresses from the
@@ -3204,7 +3214,9 @@ async function resolvePendingTranslations(db: SupabaseClient, runtimeConfig: Run
 // ("user_multi_ip") then 429s one of them. Enrichment resumes a few minutes after playback stops.
 async function userHasLiveSession(db: SupabaseClient, userId: string): Promise<boolean> {
   if (!userId) return false;
-  const sinceIso = new Date(Date.now() - 4 * 60 * 1000).toISOString();
+  // OFF => original 4-min window (byte-identical). ON => widened grace tail.
+  const windowMs = CRAWL_YIELD_TO_VIEWERS ? Math.max(4 * 60 * 1000, CRAWL_VIEWER_GRACE_MS) : 4 * 60 * 1000;
+  const sinceIso = new Date(Date.now() - windowMs).toISOString();
   const { data: ev } = await db.from("cloud_playback_events")
     .select("id").eq("user_id", userId).gt("created_at", sinceIso).limit(1);
   if (ev && ev.length) return true;
@@ -4077,7 +4089,16 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
     }
   };
 
-  for (let i = 0; i < titles.length; i += effConcurrency) {
+  for (let i = 0, batch = 0; i < titles.length; i += effConcurrency, batch++) {
+    // Crawl-yield mid-tick (flag ON): a viewer/download can begin AFTER the entry check at the top
+    // of this dimension already passed, during this ~100s tick. Re-check every ~8 batches and abort
+    // the rest so the crawl stops racing the human for the provider's single slot. Cheap + bounded
+    // (one indexed read every few batches) and only when the flag is ON — OFF keeps the original
+    // loop with zero extra reads. Resumes from the cursor next tick (hasMore + lastId of processed).
+    if (CRAWL_YIELD_TO_VIEWERS && body.ignoreLiveSession !== true && i > 0 && batch % 8 === 0
+        && await userHasLiveSession(db, userId)) {
+      return { mode, processed: i, updated, diag, skipped: "viewer-midtick", lastId: String(titles[i - 1].id), hasMore: true, ...(debug ? { sample } : {}) };
+    }
     await Promise.all(titles.slice(i, i + effConcurrency).map((t) => processOne(t as JsonRecord)));
   }
 

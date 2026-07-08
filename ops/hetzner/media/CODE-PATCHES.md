@@ -114,6 +114,60 @@ transcode). Commence par 1 provider, mesure, étends.
 
 ---
 
+## Patch #5 — CRAWL CÈDE AUX VIEWERS (anti-458 slot provider)
+
+> **Problème** : le compte IPTV a peu de connexions simultanées (souvent 1). Le **crawl audio de
+> fond** sonde le provider via le **relay Cloudflare** (`norva-playback/index.ts:~3980` →
+> `norva-relay/src/index.js:992`) — une couche qui **ne partage aucun état** ni avec la préemption
+> du media-gateway (`preemptAccountExtractions`, `media-gateway/src/index.js:113`, qui ne tue que des
+> ffmpeg d'**extraction** enregistrés — le crawl n'en est PAS un) ni avec les tables viewer de l'edge.
+> Donc quand le crawl tient le slot et qu'un humain lit/télécharge → **HTTP 458**. Le seul garde
+> actuel = `userHasLiveSession` **par-user, une fois en entrée de tick** (`index.ts:3788`) → rate les
+> viewers qui démarrent en cours de tick ET les téléchargements (invisibles côté serveur).
+
+### (A) — ✅ IMPLÉMENTÉ (flag OFF) — le crawl cède aux VIEWERS
+**Fichier** : `supabase/functions/norva-playback/index.ts` (`userHasLiveSession` + boucle de
+`runOneDimension` `~:4080`). **Flags** : `NORVA_CRAWL_YIELD_TO_VIEWERS` (défaut OFF) +
+`NORVA_CRAWL_VIEWER_GRACE_MS` (`boundedInt`, défaut 300000, min 60000, max 900000).
+Effet ON : (1) fenêtre « actif récemment » élargie à la grâce (couvre les ~8s de libération lente du
+slot + le churn de reconnexion) ; (2) **re-check mi-tick** (~toutes les 8 batches) → si un viewer
+démarre pendant un tick de ~100s, le crawl **abandonne le reste du tick** et reprend au curseur. OFF
+= byte-identique. **À activer + tester** : longueur de grâce vs libération réelle du slot ; coût des
+lectures indexées supplémentaires au volume du crawl. Neutre en prod tant que OFF.
+
+### (B) — ⏳ SPEC — le TÉLÉCHARGEMENT préempte le crawl
+Le download résout l'URL provider directe et **l'appareil télécharge en direct** (bridge natif APK,
+IP résidentielle) — **aucune trace serveur** (`MoviesPage.js:~1811-1840` `startMovieDownload` →
+`api.proxy.xtream.getStreamUrl` qui ne fait que **construire l'URL**, `server/routes/proxy.js:565`).
+Donc rien à quoi le crawl puisse céder. **Fix** (flag `NORVA_DOWNLOAD_YIELD`) :
+1. **Client** (`MoviesPage.js` + `SeriesPage.js`) : avant `bridge.downloadMedia(...)`, POST
+   `playback/download-begin { sourceId, itemId, itemType, ttlSeconds }`.
+2. **Edge** (`norva-playback/index.ts`, nouvelle route près de `:112-141`) : écrire une **balise
+   d'activité courte** que le check (A) lit (option simple : table dédiée `provider_activity_beacon
+   (identity_key, expires_at)` via migration + RPC `provider_identity_active(identity_key, grace_ms)`,
+   pour ne PAS consommer un slot de stream d'entitlement) ; résoudre l'identité via
+   `resolveSourceIdentity` (`:1120`) et **POSTer le gateway** pour préempter ses extractions de fond.
+3. **Gateway** (`media-gateway/src/index.js`, route `POST /account-preempt` près de `/probe-audio`
+   `:778`) : `preemptAccountExtractions(proxyKeyFromUrl(url), 'download start')` + si qqch stoppé et
+   `PROVIDER_SLOT_RELEASE_DELAY_MS>0`, `await sleep(...)` avant 200 pour que le client attende la
+   libération du slot avant le fetch natif.
+**Non-testable ici** : le bridge de download natif APK n'est pas exécutable → beacon client + attente
+native à **tester sur appareil** ; TTL/nettoyage de la balise (un download raté ne doit pas bloquer
+le crawl → TTL court + `download-end`).
+
+### (C) — ⏳ SPEC — budget de connexion (comptes 1-connexion) — RISQUE LE PLUS HAUT
+`max_connections`/`active_cons` viennent du `user_info` Xtream, aujourd'hui lus **seulement en
+diagnostic** (`norva-series-prewarm/index.ts:108-142`), **non persistés**. **Fix** (flag
+`NORVA_CRAWL_CONNECTION_BUDGET`, à livrer EN DERNIER) : (1) capturer `max_connections` dans
+`cloud_sources.config_hint` à la validation du compte (`norva-cloud/index.ts:~1196`) ; (2) étendre
+`provider_footprint_policy` (`migrations/20260703140000`) + RPC budget ; (3) dans `runOneDimension`
+(près du gate footprint `:3890`), si identité 1-connexion → exiger le signal viewer (A)+(B) clair et
+traiter le crawl comme budget-0 dès qu'une activité humaine est fraîche. **Non-testable ici** :
+fiabilité du `max_connections` rapporté (échantillonné, pas connu en continu) → tester sur l'identité
+Ninja/`barfik` déjà seedée low_footprint.
+
+---
+
 ## Récap flags (tout OFF par défaut = déploiement neutre)
 
 | Levier | Où | Type | Effet quand ON | État |
@@ -122,6 +176,9 @@ transcode). Commence par 1 provider, mesure, étends.
 | `MEDIA_GATEWAY_SINGLE_FLIGHT` | gateway env | **code** | 1 transcode/flux unique partagé (capacité ×N) | ⏳ à implémenter **avec test** (pré-vol) |
 | Cache Rule `.ts` sur l'origine | Cloudflare | **config** | fan-out CDN (dépend du single-flight) | ⏳ config au pré-vol (`cloudflare-cdn.md` Option B) |
 | `norva-live-hls-relay` | par-provider | **config** | live éligible → relay Cloudflare (pas de transcode) | ⏳ config au pré-vol, provider par provider |
+| `NORVA_CRAWL_YIELD_TO_VIEWERS` (+`_GRACE_MS`) | edge env | **code** | crawl cède le slot aux viewers (grâce + re-check mi-tick) → anti-458 | ✅ **implémenté** (flag OFF), patch #5(A) |
+| `NORVA_DOWNLOAD_YIELD` | edge+client | **code** | le téléchargement préempte le crawl (balise + préemption gateway) | ⏳ spec patch #5(B), test **device** |
+| `NORVA_CRAWL_CONNECTION_BUDGET` | edge env | **code** | budget réservé aux humains sur comptes 1-connexion | ⏳ spec patch #5(C), en dernier |
 
 **Pourquoi single-flight n'est PAS implémenté à l'aveugle ici** : c'est de la **logique de cycle de
 vie distribuée** (refcount viewers à travers create `/sessions` + `DELETE /sessions/:id` + le sweep
