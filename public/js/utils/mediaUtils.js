@@ -945,7 +945,14 @@ const MediaUtils = (() => {
         let folded = false;
         for (const group of result) {
             const rep = group.representative || group.items[0];
-            const tkey = computeDedupKey(rep.tmdb?.title || rep.name, rep.year);
+            // The year gates the fold (below), so source it from wherever it lives: the item's
+            // own `year`, else the matched tmdb release/air date. Global-search rows carry the
+            // year ONLY on tmdb.release_date (no `.year`, no year in the display name), so
+            // without this fallback the fold could never fire for them and provider-tmdb-split
+            // films ("L'embrasement" ×2, "La révolte" ×3) stayed as separate rows.
+            const tmdbYr = String(rep.tmdb?.release_date || rep.tmdb?.first_air_date || '').slice(0, 4);
+            const repYear = rep.year || (/^(19|20)\d{2}$/.test(tmdbYr) ? Number(tmdbYr) : null);
+            const tkey = computeDedupKey(rep.tmdb?.title || rep.name, repYear);
             // Require a real 4-digit year so a yearless title never becomes a merge magnet.
             if (!tkey || !/\|(19|20)\d{2}$/.test(tkey)) continue;
             const primary = byTitleYear.get(tkey);
