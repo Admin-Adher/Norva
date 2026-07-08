@@ -542,6 +542,7 @@
         // fetches a Google ID token natively and calls window.onNorvaGoogleIdToken.
         const nativeGoogle = isNativeApp
             && window.NorvaTVCloud && typeof window.NorvaTVCloud.googleSignIn === 'function';
+        let nativeGoogleTimer = null;
         (function initSocial() {
             if (!socialEl) return;
             // On native WITHOUT the native Google bridge (older app build), social
@@ -562,8 +563,14 @@
                 btn.addEventListener('click', () => {
                     if (nativeGoogle && btn.dataset.provider === 'google') {
                         setStatus('info', 'Opening Google…');
+                        // Never hang on "Opening Google…": if the native bridge doesn't
+                        // call back (misconfigured client / cancelled picker), recover.
+                        clearTimeout(nativeGoogleTimer);
+                        nativeGoogleTimer = setTimeout(() => {
+                            setStatus('error', 'Google sign-in didn’t complete. Try again, or sign in with your email.');
+                        }, 30000);
                         try { window.NorvaTVCloud.googleSignIn(); }
-                        catch (_) { setStatus('error', 'Google sign-in is unavailable.'); }
+                        catch (_) { clearTimeout(nativeGoogleTimer); setStatus('error', 'Google sign-in is unavailable.'); }
                         return;
                     }
                     setStatus('info', 'Redirecting…');
@@ -580,6 +587,7 @@
         // Callback for the native Google Sign-In bridge: exchange the Google ID token
         // for a Norva session (Supabase signInWithIdToken), then open the app.
         window.onNorvaGoogleIdToken = async function (idToken, error) {
+            clearTimeout(nativeGoogleTimer);
             if (!idToken) {
                 setStatus('error', error === 'google_not_configured'
                     ? 'Google sign-in isn’t available yet.'
