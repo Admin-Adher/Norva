@@ -63,6 +63,7 @@ import java.net.URL;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Norva Mobile — Android phone client.
@@ -848,6 +849,20 @@ public class MainActivity extends Activity {
             sendGoogleIdTokenToWeb(null, "google_not_configured");
             return;
         }
+        // Single-shot guard: the GMS Credential Manager Task has been observed to
+        // stall without ever invoking onResult/onError (no account, Play Services
+        // mid-update, transient GMS bug). A native watchdog guarantees the web page
+        // always gets exactly one callback so it can never hang on "Opening Google…".
+        // AtomicBoolean dedups between the real callback and the watchdog; whichever
+        // fires first wins.
+        final AtomicBoolean answered = new AtomicBoolean(false);
+        final Handler watchdog = new Handler(Looper.getMainLooper());
+        final Runnable onTimeout = () -> {
+            if (answered.compareAndSet(false, true)) {
+                sendGoogleIdTokenToWeb(null, "timeout: Google Sign-In did not respond. "
+                        + "Check the account chooser or try again.");
+            }
+        };
         try {
             // GetSignInWithGoogleOption = the button-triggered flow (always shows the
             // account chooser). More reliable than GetGoogleIdOption here, which can
@@ -859,10 +874,15 @@ public class MainActivity extends Activity {
                     .build();
             CredentialManager credentialManager = CredentialManager.create(this);
             Executor executor = ContextCompat.getMainExecutor(this);
+            // 20s native watchdog — shorter than the web-side 30s guard so a native
+            // timeout message reaches the page first with a concrete reason.
+            watchdog.postDelayed(onTimeout, 20_000);
             credentialManager.getCredentialAsync(this, request, null, executor,
                     new CredentialManagerCallback<GetCredentialResponse, GetCredentialException>() {
                         @Override
                         public void onResult(GetCredentialResponse response) {
+                            watchdog.removeCallbacks(onTimeout);
+                            if (!answered.compareAndSet(false, true)) return;
                             try {
                                 Credential credential = response.getCredential();
                                 if (credential instanceof CustomCredential
@@ -880,11 +900,21 @@ public class MainActivity extends Activity {
 
                         @Override
                         public void onError(GetCredentialException e) {
-                            sendGoogleIdTokenToWeb(null, e.getMessage());
+                            watchdog.removeCallbacks(onTimeout);
+                            if (!answered.compareAndSet(false, true)) return;
+                            // Surface the exception class too — e.g. NoCredentialException
+                            // (no Google account on device) vs GetCredentialProviderConfigurationException
+                            // (SHA-1 / OAuth client misconfigured) read very differently.
+                            String msg = e.getClass().getSimpleName()
+                                    + (e.getMessage() != null ? ": " + e.getMessage() : "");
+                            sendGoogleIdTokenToWeb(null, msg);
                         }
                     });
         } catch (Exception e) {
-            sendGoogleIdTokenToWeb(null, e.getMessage());
+            watchdog.removeCallbacks(onTimeout);
+            if (answered.compareAndSet(false, true)) {
+                sendGoogleIdTokenToWeb(null, e.getMessage());
+            }
         }
     }
 
