@@ -205,6 +205,18 @@ class App {
             if (document.visibilityState === 'visible') this.refreshDownloadsNav();
         });
 
+        // In-session freshness: when the app returns to the foreground after being hidden
+        // (tab switch, phone unlock, resumed from background), let the VISIBLE page revalidate
+        // its catalog so background title corrections/merges and newly-synced content surface
+        // without a manual reload — answering "does a title change show mid-session, or only at
+        // startup?" with: on the next foreground too, not just cold launch. Each page throttles
+        // itself (no-ops while its data is still within its warm window), and only the active
+        // page is touched, so this is a foreground-triggered SWR refresh, not a background poll.
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState !== 'visible') return;
+            try { this.pages?.[this.currentPage]?.maybeRevalidate?.('foreground'); } catch (_) { /* best-effort */ }
+        });
+
         const navbarBrandHome = document.getElementById('navbar-brand-home');
         const goHomeFromBrand = (event) => {
             event.preventDefault();

@@ -97,6 +97,18 @@ class HomePage {
         // Initialization if needed.
     }
 
+    // Foreground SWR (called when the app returns to the foreground while Home is the
+    // active page): refetch history + rails so a title corrected/merged in the background
+    // shows without a manual reload. Throttled by the same warm-DOM TTL used by show(), so
+    // a brief tab-blur → focus is a no-op; only a real "was away a while" return refetches.
+    // Reuses the exact path the source-health-changed handler already uses.
+    maybeRevalidate() {
+        if (this.isLoading) return;
+        if (this.lastLoadedAt && Date.now() - this.lastLoadedAt < this.dashboardTtlMs) return;
+        this.lastLoadedAt = 0;
+        this.loadDashboardData();
+    }
+
     async show() {
         const _homeDone = window.NorvaTrace?.time?.('HomePage.show() — home rails');
         const _firstPaintSummary = () => {
@@ -335,7 +347,7 @@ class HomePage {
                     // credentials, first-run): flashing yesterday's rails for the round-trip
                     // and then replacing them with the repair gate reads as a glitch.
                     const gatedBefore = this.sourceSummary && this.shouldShowSetupGate(this.sourceSummary);
-                    const cached = !gatedBefore ? window.NorvaCatalogCache?.read?.(this.homeCacheKey()) : null;
+                    const cached = !gatedBefore ? window.NorvaCatalogCache?.read?.(this.homeCacheKey(), { version: window.API?.catalogSignature?.() }) : null;
                     if (cached?.data?.rails) {
                         const ch = Array.isArray(cached.data.history) ? cached.data.history : [];
                         this.renderHistory(ch);
@@ -406,7 +418,7 @@ class HomePage {
                         window.NorvaCatalogCache?.write?.(this.homeCacheKey(), {
                             history,
                             rails: railsResult.value
-                        });
+                        }, { version: window.API?.catalogSignature?.() });
                     } catch (_) { /* best-effort */ }
                 } else {
                     console.warn('[Dashboard] Home rails unavailable:', railsResult.reason);

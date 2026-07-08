@@ -573,6 +573,23 @@ class MoviesPage {
 
     // === Page lifecycle ===
 
+    // Foreground SWR (called when the app returns to the foreground while Movies is the
+    // active page). Throttled by the same warm-view window show() uses, so a brief blur is a
+    // no-op; only a real "was away past the warm window" return revalidates. When it does, it
+    // invalidates the warm marker so the next entry rebuilds fresh, and — only when it won't
+    // disrupt the user (at the top of the default, unfiltered paged grid) — refreshes page 1
+    // in place via the SWR path. A scrolled, filtered or searched view is left untouched and
+    // simply refreshes on its next entry.
+    maybeRevalidate() {
+        if (this.isLoading || this.cloudLoadingMore) return;
+        if (this._viewRenderedAt && Date.now() - this._viewRenderedAt < 300000) return;
+        this._viewRenderedAt = 0;
+        const atTop = (this.container?.scrollTop || 0) < 40;
+        if (atTop && this.movies.length && this.catalogCacheKey()) {
+            this.loadCloudMovies({ reset: true });
+        }
+    }
+
     async show() {
         const summary = await this.app?.refreshSourceHealth?.();
         // Show the grid as soon as MOVIES are available (even mid-sync), not only when
@@ -939,7 +956,7 @@ class MoviesPage {
             // Stale-while-revalidate: paint the cached first page instantly, then
             // refresh from the network below and replace it.
             const cacheKey = this.catalogCacheKey();
-            const cached = cacheKey && window.NorvaCatalogCache?.read?.(cacheKey);
+            const cached = cacheKey && window.NorvaCatalogCache?.read?.(cacheKey, { version: window.API?.catalogSignature?.() });
             if (cached?.data?.items?.length) {
                 this.movies = cached.data.items.slice();
                 this.cloudHasMore = Boolean(cached.data.hasMore);
@@ -1000,7 +1017,7 @@ class MoviesPage {
                         items: this.movies.slice(0, this.cloudPageSize),
                         hasMore: this.cloudHasMore,
                         count: this.cloudTotal
-                    });
+                    }, { version: window.API?.catalogSignature?.() });
                 } catch (_) { /* best-effort */ }
             } else {
                 this.filteredCards = this.buildFilteredCards();

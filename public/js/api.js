@@ -2040,7 +2040,24 @@ const CloudAdapter = (() => {
         // Cache invalidators — exposed so the file-scope API.media wrappers can reach the
         // IIFE-internal caches (otherwise they'd throw a swallowed ReferenceError).
         clearMediaCaches,
-        clearRailCache: () => { try { homeRailCache.clear(); } catch (_) { /* noop */ } }
+        clearRailCache: () => { try { homeRailCache.clear(); } catch (_) { /* noop */ } },
+        // A cheap, synchronous signature of the account's catalog state, used to version
+        // the persistent first-screen cache: the max catalog_version across the loaded
+        // sources (bumped server-side on each completed sync). A cache snapshot stamped
+        // with an older signature is dropped rather than painted, so a re-synced catalog
+        // never flashes pre-sync content on a cold load. Returns null when sources aren't
+        // loaded yet (cache then falls back to its time-only TTL — no invalidation).
+        catalogSignature: () => {
+            try {
+                if (!Array.isArray(sourcesCache) || !sourcesCache.length) return null;
+                let max = 0;
+                for (const s of sourcesCache) {
+                    const v = Number(s?.catalog_version ?? s?.catalogVersion ?? 0);
+                    if (Number.isFinite(v) && v > max) max = v;
+                }
+                return max || null;
+            } catch (_) { return null; }
+        }
     };
 })();
 
@@ -2068,6 +2085,10 @@ const API = {
     // cloud edge route keys off. Mirrors what getStreamUrl does internally. Returns the input
     // unchanged when not in cloud mode or already a UUID.
     resolveCloudSourceId: (id) => (_shouldUseCloud() ? CloudAdapter.resolveSourceId(id) : Promise.resolve(id)),
+
+    // Synchronous catalog signature (max catalog_version across loaded sources) used to
+    // version the persistent first-screen cache; null outside cloud mode / before load.
+    catalogSignature: () => (_shouldUseCloud() ? CloudAdapter.catalogSignature() : null),
 
     /**
      * Make API request

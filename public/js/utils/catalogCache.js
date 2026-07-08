@@ -26,19 +26,35 @@
     function fullKey(k) { return PREFIX + userScope() + ':' + k; }
 
     const NorvaCatalogCache = {
-        // Returns { at, data } or null.
-        read(k) {
+        // Returns { at, v, data } or null.
+        //
+        // opts.version: the catalog version the CALLER expects (e.g. the max
+        // catalog_version across the account's sources). When both the caller and
+        // the stored entry carry a version and they differ, the entry is treated as
+        // a miss (and evicted) — so a completed re-sync or a background title
+        // correction never paints pre-change content on a cold load. Omitting the
+        // version keeps the old time-only behaviour, so existing callers are unaffected.
+        read(k, opts) {
             try {
                 const raw = localStorage.getItem(fullKey(k));
                 if (!raw) return null;
                 const rec = JSON.parse(raw);
                 if (!rec || typeof rec.at !== 'number') return null;
                 if (Date.now() - rec.at > MAX_AGE_MS) { localStorage.removeItem(fullKey(k)); return null; }
+                const wantV = opts && opts.version != null ? String(opts.version) : null;
+                if (wantV !== null && rec.v != null && String(rec.v) !== wantV) {
+                    localStorage.removeItem(fullKey(k));
+                    return null;
+                }
                 return rec;
             } catch (_) { return null; }
         },
-        write(k, data) {
-            const payload = JSON.stringify({ at: Date.now(), data });
+        // opts.version stamps the catalog version this snapshot was built at, so a
+        // later read with a newer expected version evicts it (see read()).
+        write(k, data, opts) {
+            const rec = { at: Date.now(), data };
+            if (opts && opts.version != null) rec.v = String(opts.version);
+            const payload = JSON.stringify(rec);
             try {
                 localStorage.setItem(fullKey(k), payload);
             } catch (_) {
