@@ -266,10 +266,20 @@
         html.native-app .brand .lead,
         html.native-app .brand .signals { display: none; }
         html.native-app .logo-row { justify-content: center; margin-bottom: 10px; }
+        /* Native uses the Google-first header inside the panel, so the in-form
+           passwordless leads are redundant — hide them on native. */
+        html.native-app #signin-form .auth-lead,
+        html.native-app #signup-form .auth-lead { display: none !important; }
+        /* Native "Sign up with email" reveal button (Create-account fallback). */
+        .native-email-reveal { width: 100%; min-height: 46px; border-radius: 10px;
+            border: 1px solid var(--line, #283246); background: transparent;
+            color: var(--text, #dbe7ff); font-weight: 700; font-size: 15px; cursor: pointer; }
 
-        /* Sign-up advantages carousel — native only. */
+        /* Sign-up advantages carousel — native only, and only on the Create-account
+           tab (JS toggles it in showForm). Kept out of the default Sign-in screen so
+           returning users get a compact, no-scroll login. */
         .native-onboarding { display: none; }
-        html.native-app .native-onboarding { display: block; width: 100%; max-width: 420px; }
+        html.native-app .native-onboarding { width: 100%; max-width: 420px; }
         .onb-track {
             display: flex; overflow-x: auto; scroll-snap-type: x mandatory;
             scroll-behavior: smooth; -webkit-overflow-scrolling: touch;
@@ -301,6 +311,28 @@
             transition: width .25s ease, background .25s ease; cursor: pointer;
         }
         .onb-dots span.active { width: 22px; background: linear-gradient(135deg, var(--accent), #c75cff); }
+
+        /* Native compaction: trim vertical space so the default views fit a phone
+           without scrolling (Sign in, and Create-account with the carousel + Google
+           hero while the email fields are collapsed). */
+        html.native-app body { gap: 10px; padding: 14px 16px;
+            padding-top: calc(14px + env(safe-area-inset-top, 0px));
+            padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px)); }
+        html.native-app .panel { padding: 16px; }
+        html.native-app .tabs { margin-bottom: 14px; }
+        html.native-app .native-google-lead { margin: 2px 0 12px; }
+        html.native-app .native-google-lead h2 { font-size: 20px; }
+        html.native-app .field { margin-bottom: 10px; }
+        html.native-app input { min-height: 44px; }
+        html.native-app .social-btn.google { min-height: 48px; }
+        html.native-app .status { margin-top: 10px; }
+        html.native-app .fine { margin-top: 8px; font-size: 11px; line-height: 1.4; }
+        html.native-app .fine-collapse { display: none; }
+        html.native-app .onb-icon { width: 52px; height: 52px; margin-bottom: 10px; }
+        html.native-app .onb-icon svg { width: 26px; height: 26px; }
+        html.native-app .onb-slide h2 { font-size: 19px; margin-bottom: 6px; }
+        html.native-app .onb-slide p { font-size: 13px; line-height: 1.45; }
+        html.native-app .onb-dots { margin-top: 10px; }
     </style>
 </head>
 <body>
@@ -308,23 +340,32 @@
     <section class="native-onboarding" aria-label="Why Norva">
         <div class="onb-track" id="onb-track">
             <article class="onb-slide">
-                <div class="onb-icon"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/></svg></div>
-                <h2>Synced across every screen</h2>
-                <p>Your favorites, history and resume point follow your account on web, mobile and TV — a first on the market.</p>
+                <div class="onb-icon"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 3h8v8H3zm10 0h8v8h-8zM3 13h8v8H3zm10 0h8v8h-8z"/></svg></div>
+                <h2>Your whole library, instantly</h2>
+                <p>Paste your provider link and Norva builds your entire library — movies, series and live TV, with posters, logos and categories.</p>
             </article>
             <article class="onb-slide">
                 <div class="onb-icon"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93C7.05 19.44 4 16.08 4 12c0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41C19.92 5.77 22 8.65 22 12c0 2.08-.8 3.97-2.1 5.39z"/></svg></div>
                 <h2>Your IPTV in the browser</h2>
-                <p>Watch your channels right in a web browser, nothing to install — the first to make it truly work for everyone.</p>
+                <p>Stream your live channels and full movie &amp; series library right in your browser — nothing to install.</p>
             </article>
             <article class="onb-slide">
-                <span class="onb-badge">Soon</span>
                 <div class="onb-icon"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg></div>
-                <h2>Offline mode</h2>
-                <p>Download your content and keep watching with no connection, anywhere. Coming soon on mobile.</p>
+                <h2>Download. Watch offline.</h2>
+                <p>Download movies and shows on the Norva Android app and watch anywhere offline — encrypted on your device.</p>
+            </article>
+            <article class="onb-slide">
+                <div class="onb-icon"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5s-3 1.34-3 3 1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg></div>
+                <h2>A profile for everyone</h2>
+                <p>Everyone gets their own profile — separate favorites, history and Continue Watching, on every screen.</p>
+            </article>
+            <article class="onb-slide">
+                <div class="onb-icon"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm-9 7H9.5v-.5h-2v3h2V13H11v1c0 .55-.45 1-1 1H7c-.55 0-1-.45-1-1v-4c0-.55.45-1 1-1h3c.55 0 1 .45 1 1v1zm7 0h-1.5v-.5h-2v3h2V13H18v1c0 .55-.45 1-1 1h-3c-.55 0-1-.45-1-1v-4c0-.55.45-1 1-1h3c.55 0 1 .45 1 1v1z"/></svg></div>
+                <h2>Subtitles, generated by AI</h2>
+                <p>No subtitles on a film? Norva generates them from the audio — and everyone watching it gets them next.</p>
             </article>
         </div>
-        <div class="onb-dots" id="onb-dots" aria-hidden="true"><span class="active"></span><span></span><span></span></div>
+        <div class="onb-dots" id="onb-dots" aria-hidden="true"><span class="active"></span><span></span><span></span><span></span><span></span></div>
     </section>
 
     <main class="shell">
@@ -476,7 +517,7 @@
             </form>
 
             <div class="status" id="status"></div>
-            <p class="fine">Norva keeps your account session attached to your trusted screens.</p>
+            <p class="fine fine-collapse">Norva keeps your account session attached to your trusted screens.</p>
             <p class="fine">Norva is a media player and includes no content. You connect a compatible
               source you own and are authorized to use.</p>
             <p class="fine">
@@ -493,6 +534,7 @@
       const returnTo = sanitizeReturnTo(params.get('returnTo')) || '/app#home';
         const statusEl = document.getElementById('status');
         const socialEl = document.getElementById('social-auth');
+        const nativeOnboardingEl = document.querySelector('.native-onboarding');
         const tabs = document.getElementById('tabs');
         // Native app (Android WebView): magic-link and social sign-in return via the
         // system browser / a blocked WebView, so the session wouldn't land back in
@@ -538,7 +580,35 @@
             if (lead) lead.hidden = on;
         }
         document.getElementById('use-password-toggle').addEventListener('click', () => setSigninPasswordMode(true));
-        if (isNativeApp) { setSigninPasswordMode(true); setSignupPasswordMode(true); }
+        if (isNativeApp) {
+            // Sign in: email/password visible below the Google hero (Google-first).
+            setSigninPasswordMode(true);
+            // Create account: collapse the email fields behind a "Sign up with email"
+            // reveal so the 5-slide carousel + Google hero fit without scrolling.
+            // Native can't complete a magic link (WebView), so hide it and let the
+            // reveal expose the password fields instead.
+            setSignupPasswordMode(false);
+            const sp = document.getElementById('signup-passwordless');
+            const signupEmailField = document.getElementById('signup-email')?.closest('.field');
+            // Fully collapse: hide the always-visible email field too, so Create
+            // shows just Google + "Sign up with email" until the user opts in.
+            if (signupEmailField) signupEmailField.hidden = true;
+            if (sp) {
+                const magic = document.getElementById('signup-magic-primary');
+                if (magic) magic.style.display = 'none';
+                const hint = sp.querySelector('.auth-hint');
+                if (hint) hint.style.display = 'none';
+                const reveal = document.createElement('button');
+                reveal.type = 'button';
+                reveal.className = 'native-email-reveal';
+                reveal.textContent = 'Sign up with email';
+                reveal.addEventListener('click', () => {
+                    if (signupEmailField) signupEmailField.hidden = false;
+                    setSignupPasswordMode(true);
+                });
+                sp.appendChild(reveal);
+            }
+        }
         document.getElementById('back-to-signin').addEventListener('click', () => showForm('signin'));
 
         // Social sign-in (OAuth via Supabase). Dormant until the owner (1) enables the
@@ -852,6 +922,15 @@
             tabs.style.display = name === 'recover' || name === 'password' ? 'none' : 'grid';
             if (socialEl) {
                 socialEl.style.display = socialEl.dataset.enabled && (name === 'signin' || name === 'signup') ? 'block' : 'none';
+            }
+            // Native: the marketing carousel appears only on Create account (new
+            // users); Sign in stays compact/no-scroll. The Google divider reads
+            // "or continue with email" when the fields are visible (Sign in) and a
+            // plain "or" when they're behind the "Sign up with email" reveal (Create).
+            if (isNativeApp) {
+                if (nativeOnboardingEl) nativeOnboardingEl.style.display = (name === 'signup') ? 'block' : 'none';
+                const div = socialEl && socialEl.querySelector('.divider');
+                if (div) div.textContent = (name === 'signup') ? 'or' : 'or continue with email';
             }
             if (name !== 'password') statusEl.className = 'status';
             if (name === 'password') {
