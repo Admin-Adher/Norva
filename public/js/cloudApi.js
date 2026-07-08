@@ -403,6 +403,15 @@
         // Suppress on auth/pairing surfaces — match both the .html paths and the
         // clean URLs Cloudflare Pages serves (e.g. "/account", "/login").
         if (/\/(login|cloud|account|cloud-pair|hub-connect)(\.html)?\/?$/i.test(pathname)) return;
+        // On the app page, defer until a catalog actually exists: organizing regions
+        // for an empty catalog is premature and stacks on top of the "connect your TV
+        // service" onboarding. The App drives this from its catalog-ready flow
+        // (App.maybeShowRegionPrompt), so bail here for both the DOMContentLoaded
+        // auto-trigger and any early call until the catalog is ready. Detect the app
+        // by path (window.app may not exist yet at DOMContentLoaded). Other pages
+        // (no catalog concept) show as before.
+        const onAppPage = /\/app(\.html)?\/?$/i.test(pathname);
+        if (onAppPage && !(window.app && typeof window.app.isCatalogReady === 'function' && window.app.isCatalogReady())) return;
 
         const suggestion = resolveContentRegion();
         // TV gets a centered, larger-type card (corner cards get overscan-cropped and
@@ -419,38 +428,51 @@
         prompt.setAttribute('role', 'dialog');
         prompt.setAttribute('aria-modal', 'true');
         prompt.setAttribute('aria-label', `Organize Norva for ${label}`);
-        const position = isTv
-            ? ['left:50%', 'top:50%', 'transform:translate(-50%,-50%)', 'max-width:min(560px,90vw)']
-            : [
-                // Offset by the device safe-area so the card is never cropped behind
-                // the Android/iOS system navigation bar in the native APK WebView.
-                'left:calc(16px + env(safe-area-inset-left, 0px))',
-                'right:calc(16px + env(safe-area-inset-right, 0px))',
-                'bottom:calc(16px + env(safe-area-inset-bottom, 0px))',
-                'max-width:420px',
-                'width:auto'
-            ];
-        prompt.style.cssText = [
-            'position:fixed',
-            ...position,
-            // Never taller than the viewport (scroll if it somehow is).
-            'max-height:calc(100vh - 32px - env(safe-area-inset-bottom, 0px) - env(safe-area-inset-top, 0px))',
-            'overflow:auto',
-            'z-index:9999',
+        // A dimmed full-screen backdrop makes this "one thing at a time": it covers
+        // the onboarding form, the trial pill and everything else, so nothing can
+        // visually collide with the prompt. Mobile gets a bottom sheet (thumb-reachable,
+        // native gesture affordance); TV keeps a centered card (corner cards get
+        // overscan-cropped and 14px is unreadable at 10 feet).
+        const backdrop = document.createElement('div');
+        backdrop.id = 'norva-region-backdrop';
+        backdrop.style.cssText = [
+            'position:fixed', 'inset:0', 'z-index:9998',
+            'background:rgba(2,6,15,.62)',
+            '-webkit-backdrop-filter:blur(2px)', 'backdrop-filter:blur(2px)',
+            'display:flex', 'justify-content:center',
+            isTv ? 'align-items:center' : 'align-items:flex-end',
+            'padding:' + (isTv ? '24px' : '0'),
             'box-sizing:border-box',
-            // Map to the app's design tokens (dark theme) with the previous hex as a
-            // fallback for surfaces that don't define them.
+            'opacity:0', 'transition:opacity .18s ease'
+        ].join(';');
+
+        prompt.style.cssText = [
+            'position:relative',
+            'box-sizing:border-box',
+            'width:100%',
+            isTv ? 'max-width:min(560px,90vw)' : 'max-width:560px',
+            // Bottom sheet on mobile: rounded top only, flush to the bottom edge.
+            isTv ? 'border-radius:16px' : 'border-radius:22px 22px 0 0',
+            // Never taller than the viewport (scroll inside if it somehow is).
+            'max-height:calc(100vh - env(safe-area-inset-top, 0px) - 24px)',
+            'overflow:auto',
+            // Map to the app's design tokens (dark theme) with a hex fallback for
+            // surfaces that don't define them.
             'background:var(--color-bg-secondary, #121722)',
             'border:1px solid var(--color-border, #2b3448)',
-            'border-radius:16px',
-            'box-shadow:0 18px 55px rgba(0,0,0,.45)',
+            'box-shadow:0 -14px 60px rgba(0,0,0,.5)',
             'color:var(--color-text-primary, #f8fafc)',
-            'padding:18px',
-            `font:${isTv ? '18px' : '14px'}/1.45 system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif`
+            // Extra bottom padding on mobile clears the system nav bar (safe-area).
+            isTv ? 'padding:22px' : 'padding:20px 18px calc(20px + env(safe-area-inset-bottom, 0px))',
+            `font:${isTv ? '18px' : '15px'}/1.5 system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif`,
+            // Entrance: sheet slides up / card scales in (reset after mount).
+            isTv ? 'transform:scale(.98)' : 'transform:translateY(14px)',
+            'transition:transform .2s ease'
         ].join(';');
         // 44px minimum touch/remote targets throughout.
         const btnBase = 'min-height:44px;border-radius:10px;padding:10px 14px;font-weight:800;cursor:pointer';
         prompt.innerHTML = `
+            ${isTv ? '' : '<div aria-hidden="true" style="width:40px;height:4px;border-radius:999px;background:var(--color-border,#334155);margin:-6px auto 14px"></div>'}
             <button type="button" aria-label="Close" data-region-close class="modal-close" style="float:right;width:44px;height:44px;display:flex;align-items:center;justify-content:center;background:transparent;border:0;color:var(--color-text-secondary,#94a3b8);font-size:24px;line-height:1;cursor:pointer;margin:-8px -8px 0 0">&times;</button>
             <strong style="display:block;font-size:${isTv ? 20 : 16}px;margin:0 40px 8px 0">Organize Norva for ${escapeHtml(label)}?</strong>
             <span style="display:block;color:var(--color-text-secondary,#aeb8cc);margin-bottom:14px">Norva uses this region to organize channels, logos and categories. You can change it at any time.</span>
@@ -488,7 +510,7 @@
         }
         const teardown = () => {
             document.removeEventListener('keydown', onKey, true);
-            prompt.remove();
+            backdrop.remove();
             try { if (prevFocus && typeof prevFocus.focus === 'function') prevFocus.focus(); } catch (_) { /* noop */ }
         };
         const dismiss = () => { dismissRegionPrompt(); teardown(); };
@@ -520,13 +542,19 @@
             teardown();
         });
 
-        document.body.appendChild(prompt);
+        backdrop.appendChild(prompt);
+        document.body.appendChild(backdrop);
+        // Tapping the dimmed backdrop (outside the sheet) dismisses — the standard
+        // bottom-sheet affordance. Clicks inside the sheet don't bubble to here.
+        backdrop.addEventListener('click', (e) => { if (e.target === backdrop) dismiss(); });
         // Escape/Back + Tab focus-trap for keyboard users (tvNavigation owns these on
         // TV; this covers web/desktop where tvNavigation is inactive).
         document.addEventListener('keydown', onKey, true);
-        // Move focus into the dialog so a ring is visible and the trap has an anchor.
-        // setTimeout(0) so it lands even in WebViews that throttle animation frames.
+        // Run the entrance animation and move focus into the dialog on the next tick
+        // (setTimeout(0) so it lands even in WebViews that throttle animation frames).
         setTimeout(() => {
+            backdrop.style.opacity = '1';
+            prompt.style.transform = isTv ? 'scale(1)' : 'translateY(0)';
             try { (prompt.querySelector('[data-region-confirm]') || closeBtn)?.focus(); } catch (_) { /* noop */ }
         }, 0);
     }

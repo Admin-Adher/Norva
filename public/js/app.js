@@ -222,6 +222,15 @@ class App {
             this.refreshSourceHealth({ redirectIfBlocked: true });
         });
 
+        // When a catalog first becomes ready (e.g. the first import finishes while
+        // the app is open), surface the deferred onboarding nudges — but only then,
+        // so they never appear on the empty "connect your service" screen.
+        window.addEventListener('norva:catalog-availability-changed', (e) => {
+            if (!e.detail?.ready) return;
+            this.maybeShowRegionPrompt();
+            this.maybeShowTrialBanner();
+        });
+
         // Now Playing indicator
         const nowPlayingBtn = document.getElementById('now-playing-indicator');
         if (nowPlayingBtn) {
@@ -294,8 +303,16 @@ class App {
         this.navigateTo(initialPage, true); // true = replace history (don't add)
         this.restoreOpenFiche(initialPage, pendingFiche);
 
-        this.maybeShowTrialBanner();
-        this.maybeShowBillingIssueBanner();
+        // Defer the trial / billing nudges AND the region prompt until source
+        // health is known. None of them belong on the pre-catalog onboarding
+        // screen ("Connect your TV service"), where they collide with each other
+        // in the bottom-of-screen zone and bury the single action that matters.
+        // Once health resolves we show them only when a source is connected.
+        healthReady.then(() => {
+            this.maybeShowTrialBanner();
+            this.maybeShowBillingIssueBanner();
+            this.maybeShowRegionPrompt();
+        });
 
         // Keep the catalogue fresh: a few seconds after launch, silently re-sync
         // any provider that's gone stale. Non-blocking, and cheap when nothing
@@ -805,8 +822,22 @@ class App {
     // is a running trial — the decision carries it even while billing is only
     // observed, and the countdown is true information either way. Dismissible,
     // re-appears as the day count changes so it never nags twice in the same day.
+    // The region prompt organizes a catalog, so it only makes sense once one
+    // exists. Delegated to NorvaCloud; called from the catalog-ready flow so it
+    // never fires on the empty onboarding screen.
+    maybeShowRegionPrompt() {
+        try {
+            if (!this.isCatalogReady()) return;
+            window.NorvaCloud?.regions?.maybeShowPrompt?.();
+        } catch (_) { /* never break the app over a prompt */ }
+    }
+
     maybeShowTrialBanner() {
         try {
+            // Only on a working Home — never on the pre-catalog onboarding screen,
+            // where a "manage plan" nudge is premature and collides with the region
+            // prompt in the same bottom-of-screen zone.
+            if (!this.isCatalogReady()) return;
             const ent = this.entitlement || window.NorvaEntitlement;
             if (!ent || ent.status !== 'trialing') return;
             const endIso = ent.projection?.trial_ends_at || ent.projection?.current_period_end;
@@ -820,7 +851,9 @@ class App {
             const here = location.pathname + location.search + location.hash;
             const bar = document.createElement('div');
             bar.id = 'norva-trial-banner';
-            bar.style.cssText = 'position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:9999;display:flex;align-items:center;gap:14px;max-width:calc(100% - 24px);padding:10px 16px;border-radius:999px;background:#11151d;border:1px solid #283246;color:#f8fafc;font:600 14px/1 Inter,system-ui,sans-serif;box-shadow:0 12px 40px rgba(0,0,0,.45)';
+            // Offset by the device safe-area so the pill clears the Android/iOS
+            // system navigation bar in the native WebView (it used to overlap it).
+            bar.style.cssText = 'position:fixed;left:50%;bottom:calc(16px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:9999;display:flex;align-items:center;gap:14px;max-width:calc(100% - 24px);padding:10px 16px;border-radius:999px;background:#11151d;border:1px solid #283246;color:#f8fafc;font:600 14px/1 Inter,system-ui,sans-serif;box-shadow:0 12px 40px rgba(0,0,0,.45)';
 
             const span = document.createElement('span');
             span.textContent = daysLeft === 1 ? 'Last day of your Norva trial' : daysLeft + ' days left in your Norva trial';
@@ -854,6 +887,9 @@ class App {
     // subscription manager. Keyed on the REAL status (true even in observe mode).
     maybeShowBillingIssueBanner() {
         try {
+            // Not on the empty onboarding screen: a source-less brand-new account has
+            // nothing to fix yet, and the banner would collide with the region prompt.
+            if (this.sourceHealthSummary && ['not_configured', 'unknown'].includes(this.sourceHealthSummary.state)) return;
             const ent = this.entitlement || window.NorvaEntitlement;
             if (!ent) return;
             const status = ent.status || (ent.projection && ent.projection.status) || '';
@@ -864,7 +900,7 @@ class App {
             const here = location.pathname + location.search + location.hash;
             const bar = document.createElement('div');
             bar.id = 'norva-billing-banner';
-            bar.style.cssText = 'position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:9999;display:flex;align-items:center;gap:14px;max-width:calc(100% - 24px);padding:10px 16px;border-radius:999px;background:#2a1d12;border:1px solid #7a5326;color:#fde8b0;font:600 14px/1 Inter,system-ui,sans-serif;box-shadow:0 12px 40px rgba(0,0,0,.45)';
+            bar.style.cssText = 'position:fixed;left:50%;bottom:calc(16px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:9999;display:flex;align-items:center;gap:14px;max-width:calc(100% - 24px);padding:10px 16px;border-radius:999px;background:#2a1d12;border:1px solid #7a5326;color:#fde8b0;font:600 14px/1 Inter,system-ui,sans-serif;box-shadow:0 12px 40px rgba(0,0,0,.45)';
 
             const span = document.createElement('span');
             span.textContent = 'Payment issue — update your payment method to keep watching';
