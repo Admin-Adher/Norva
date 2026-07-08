@@ -1489,31 +1489,47 @@ class App {
         const reqId = (this._searchReq = (this._searchReq || 0) + 1);
         box.innerHTML = '<div class="gsearch-hint"><div class="loading-spinner"></div></div>';
         const empty = { items: [] };
+        // Fetch a wider slice than we display: results are grouped client-side (below), so a
+        // film with many language/quality variants collapses to one row — 24 raw rows could be
+        // just 2-3 films. 48 raw keeps a good spread of distinct titles after grouping.
         const [mv, sr] = await Promise.all([
-            window.API.media.page({ type: 'movie', q, limit: 24 }).catch(() => empty),
-            window.API.media.page({ type: 'series', q, limit: 24 }).catch(() => empty),
+            window.API.media.page({ type: 'movie', q, limit: 48 }).catch(() => empty),
+            window.API.media.page({ type: 'series', q, limit: 48 }).catch(() => empty),
         ]);
         if (reqId !== this._searchReq) return; // a newer keystroke superseded this
-        this._gsMovies = mv.items || [];
-        this._gsSeries = sr.items || [];
-        this.renderSearchResults(box, q, this._gsMovies, this._gsSeries);
+        // Collapse provider duplicates the SAME way the Movies/Series grids do, so the
+        // global search shows one row per film — not one row per language/quality variant
+        // (the "Hunger Games : Le film ×6" the flat list used to show). openSearchResult()
+        // indexes into these arrays, so store the representatives in the rendered order.
+        const M = window.MediaUtils;
+        const grp = (arr) => (M?.groupItems
+            ? M.groupItems(arr || [], { idField: 'stream_id' })
+            : (arr || []).map((it) => ({ representative: it, items: [it] })));
+        const gMovies = grp(mv.items);
+        const gSeries = grp(sr.items);
+        this._gsMovies = gMovies.map((g) => g.representative);
+        this._gsSeries = gSeries.map((g) => g.representative);
+        this.renderSearchResults(box, q, gMovies, gSeries);
     }
 
     renderSearchResults(box, q, movies, series) {
         const M = window.MediaUtils;
-        const row = (item, type, idx) => {
+        const row = (group, type, idx) => {
+            const item = group.representative || group;
+            const count = Array.isArray(group.items) ? group.items.length : 1;
             const title = item.tmdb?.title || item.tmdb?.name || item.name || 'Untitled';
             const poster = M.safeImageUrl(
                 item.stream_icon || item.cover || M.tmdbPosterUrl(item.tmdb),
                 '/img/norva-media-placeholder.png');
             const year = String(item.tmdb?.release_date || item.tmdb?.first_air_date || '').slice(0, 4);
+            const versions = count > 1 ? ` · ${count} versions` : '';
             return `
                 <button type="button" class="gsearch-result" data-type="${type}" data-idx="${idx}">
                     <img class="gsearch-poster" src="${M.escapeHtml(poster)}" alt="" loading="lazy"
                          onerror="this.onerror=null;this.srcset='';this.src='/img/norva-media-placeholder.png'">
                     <span class="gsearch-text">
                         <span class="gsearch-title">${M.escapeHtml(title)}</span>
-                        <span class="gsearch-sub">${type === 'series' ? 'Series' : 'Movie'}${year ? ' · ' + year : ''}</span>
+                        <span class="gsearch-sub">${type === 'series' ? 'Series' : 'Movie'}${year ? ' · ' + year : ''}${versions}</span>
                     </span>
                 </button>`;
         };
