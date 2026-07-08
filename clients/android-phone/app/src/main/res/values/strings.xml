@@ -6,7 +6,7 @@
          from Google Cloud, used as the Credential Manager serverClientId. Leave empty
          to keep native Google sign-in dormant. Requires an Android OAuth client for
          tv.norva.phone + the Play signing SHA-256 registered in the same project. -->
-    <string name="norva_google_web_client_id" translatable="false"></string>
+    <string name="norva_google_web_client_id" translatable="false">973428500788-deum57fe7eh659tuce15n0beg1t6fq71.apps.googleusercontent.com</string>
 
     <!-- Native player -->
     <string name="player_error_title">Couldn\'t play this title</string>
