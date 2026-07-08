@@ -5,7 +5,8 @@
       "namespace": "android_app",
       "package_name": "tv.norva.phone",
       "sha256_cert_fingerprints": [
-        "REPLACE_WITH_RELEASE_SIGNING_SHA256_FROM_PLAY_CONSOLE"
+        "30:D3:3F:CA:53:A9:14:76:4E:89:EE:BE:F6:B8:B2:37:E0:AD:A2:C1:3A:57:7A:A0:22:E7:30:F5:10:DF:F8:73",
+        "00:82:F3:1A:9F:05:D6:E6:CE:07:FC:9D:4D:8B:30:E8:1F:FD:C1:CC:EB:A6:A9:85:C2:DA:FE:E0:21:40:96:21"
       ]
     }
   }
