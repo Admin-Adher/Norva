@@ -590,7 +590,36 @@ class MoviesPage {
         }
     }
 
+    // Instant cold-load paint (perf): a returning user's default first screen is already cached,
+    // but the normal paint happens only AFTER the awaited health/sources/settings round-trips in
+    // show() below — several seconds on a busy backend, during which the grid is blank. Paint the
+    // cached first page NOW, synchronously, then let show() revalidate and replace it (SWR).
+    // Guarded to the default paged-grid view with a real cache and a non-gating last-known health,
+    // and skipped when the DOM is already warm — so it never fights the rails view or the gate.
+    _coldPaintFromCache() {
+        try {
+            if (!this.container) return;
+            if (this.movies && this.movies.length) return;                        // real data already in memory
+            if (this._viewRenderedAt && Date.now() - this._viewRenderedAt < 300000) return; // warm in-session return
+            const s = this.app?.sourceSummary;
+            if (s && this.app?.isCatalogReady && !this.app.isCatalogReady(s)) return; // last known state was gating
+            if (typeof this.shouldShowRails === 'function' && this.shouldShowRails()) return; // rails owns the grid
+            const ck = this.catalogCacheKey();
+            if (!ck) return;
+            const cached = window.NorvaCatalogCache?.read?.(ck); // time-only; loadCloudMovies re-reads WITH the version
+            if (!cached?.data?.items?.length) return;
+            this.movies = cached.data.items.slice();
+            this.cloudHasMore = Boolean(cached.data.hasMore);
+            this.cloudTotal = cached.data.count ?? null;
+            this._coldPaintPending = true;   // force show() to still revalidate despite movies.length > 0
+            this.populateGenres();
+            this.filterAndRender();
+            this._viewRenderedAt = 0;         // keep show()'s warm-view guard from short-circuiting the revalidate
+        } catch (_) { /* best-effort instant paint */ }
+    }
+
     async show() {
+        this._coldPaintFromCache();
         const summary = await this.app?.refreshSourceHealth?.();
         // Show the grid as soon as MOVIES are available (even mid-sync), not only when
         // the whole catalogue is "ready" — Live TV already does this. Falls back to the
@@ -644,9 +673,12 @@ class MoviesPage {
             return;
         }
 
-        if (this.movies.length === 0) {
+        if (this.movies.length === 0 || this._coldPaintPending) {
             // Categories only feed the filter dropdown — load them alongside the
-            // movie page instead of gating the grid's first paint on them.
+            // movie page instead of gating the grid's first paint on them. The
+            // _coldPaintPending clause forces a revalidate even though the cold paint
+            // above left movies.length > 0, so the cached first screen is refreshed.
+            this._coldPaintPending = false;
             await Promise.all([this.loadCategories(), this.loadMovies()]);
         } else {
             this.filterAndRender();
