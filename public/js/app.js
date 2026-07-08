@@ -845,10 +845,49 @@ class App {
             const msLeft = new Date(endIso).getTime() - Date.now();
             if (!(msLeft > 0)) return;
             const daysLeft = Math.max(1, Math.ceil(msLeft / 86400000));
+            const here = location.pathname + location.search + location.hash;
+            const manageHref = '/subscription.html?returnTo=' + encodeURIComponent(here);
+            const lastDay = daysLeft === 1;
+
+            // Mobile (phones): a compact, ambient chip in the header — it never
+            // covers content and never collides with the bottom tab bar (where the
+            // old floating pill overlapped and wrapped). Tapping it opens plan
+            // management. Small enough to stay put, so no per-day dismissal nag.
+            const isMobile = window.matchMedia && window.matchMedia('(max-width: 768px)').matches;
+            if (isMobile) {
+                const navbar = document.querySelector('.navbar');
+                if (!navbar) return; // header not mounted yet — re-runs on catalog-ready
+                const labelText = lastDay ? 'Last day' : daysLeft + 'd left';
+                const title = (lastDay ? 'Last day of your Norva trial' : daysLeft + ' days left in your Norva trial') + ' — manage plan';
+                // Urgency palette: purple normally, amber on the last day.
+                const accent = lastDay ? '#f6b64b' : '#b579ff';
+                const bg = lastDay ? 'rgba(246,182,75,.13)' : 'rgba(181,121,255,.12)';
+                const border = lastDay ? 'rgba(246,182,75,.5)' : 'rgba(181,121,255,.42)';
+                let chip = document.getElementById('norva-trial-chip');
+                if (!chip) {
+                    chip = document.createElement('a');
+                    chip.id = 'norva-trial-chip';
+                    chip.style.cssText = 'display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 12px;border-radius:999px;font:800 13px/1 Inter,system-ui,sans-serif;text-decoration:none;white-space:nowrap;flex:0 0 auto';
+                    chip.innerHTML = '<span aria-hidden="true" style="width:6px;height:6px;border-radius:50%;background:currentColor"></span><span data-chip-label></span>';
+                    // Sit in the right-hand header cluster, before the search button.
+                    const anchor = navbar.querySelector('#nav-search');
+                    if (anchor) navbar.insertBefore(chip, anchor); else navbar.appendChild(chip);
+                }
+                // (Re)apply text + palette so a day rollover updates in place.
+                chip.href = manageHref;
+                chip.title = title;
+                chip.setAttribute('aria-label', title);
+                chip.style.background = bg;
+                chip.style.border = '1px solid ' + border;
+                chip.style.color = accent;
+                chip.querySelector('[data-chip-label]').textContent = labelText;
+                return;
+            }
+
+            // Desktop / tablet: the existing bottom pill, dismissible per day.
             if (sessionStorage.getItem('norva-trial-banner-dismissed') === String(daysLeft)) return;
             if (document.getElementById('norva-trial-banner')) return;
 
-            const here = location.pathname + location.search + location.hash;
             const bar = document.createElement('div');
             bar.id = 'norva-trial-banner';
             // Offset by the device safe-area so the pill clears the Android/iOS
