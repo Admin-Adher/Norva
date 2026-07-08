@@ -570,6 +570,11 @@ class App {
     }
 
     applyCatalogAvailability(summary = this.sourceHealthSummary) {
+        // A transient/unknown summary (a temporary /sources hiccup that loadSummary maps to
+        // state='unknown') must NEVER hide already-visible catalog tabs — otherwise a network blip
+        // makes Live/Movies/Series vanish under an onboarded user. Keep the last-known-good tab
+        // visibility until a real summary (ready / syncing / not_configured) arrives.
+        if (summary && (summary.state === 'unknown' || summary.error)) return;
         const ready = this.isCatalogReady(summary);
         let anyShown = false;
         document.querySelectorAll('.nav-link[data-page="live"], .nav-link[data-page="movies"], .nav-link[data-page="series"]').forEach(link => {

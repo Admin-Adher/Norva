@@ -275,7 +275,18 @@ const CloudAdapter = (() => {
 
     async function listSources() {
         const payload = await cloudSourcesApi().list();
-        sourcesCache = (payload.sources || []).map(normalizeSource);
+        // A transient 2xx with a MALFORMED body — e.g. a carrier/CDN proxy returning an HTML
+        // interstitial with status 200 — arrives here as {} or {error:'…'} (cloudApi requestToBase
+        // resolves, not rejects, a 2xx whose body isn't the expected JSON). Coercing that to [] used
+        // to classify a fully-onboarded user as first-run: it blanked their sources, showed the
+        // "add your first account" gate AND hid the Live/Movies/Series tabs (phantom "no account"
+        // incident, 2026-07-08). THROW on a bad shape instead — loadSummary already maps a rejected
+        // /sources fetch to the safe, non-gating 'unknown' state (keeps the last-known-good cache +
+        // a retry banner). Onboarding now renders ONLY on a genuine, well-formed {sources: []}.
+        if (!payload || !Array.isArray(payload.sources)) {
+            throw new Error('Unexpected /sources response shape');
+        }
+        sourcesCache = payload.sources.map(normalizeSource);
         return sourcesCache;
     }
 
