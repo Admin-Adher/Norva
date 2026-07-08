@@ -427,6 +427,14 @@
                 .social-btn:focus-visible { outline:none; box-shadow:0 0 0 3px rgba(91,124,250,.45); }
                 .social-btn.apple { background:#000; color:#fff; border-color:#000; }
                 .social-btn svg { width:18px; height:18px; }
+                /* Native (Android app) is Google-first: the Google button is the hero
+                   at the top of the panel, and the email/password form is the quiet
+                   fallback below an "or continue with email" divider. */
+                .native-app .social-auth { margin-top:0; }
+                .native-app .social-btn.google { min-height:52px; font-size:15px; box-shadow:0 8px 24px rgba(0,0,0,.28); }
+                .native-google-lead { text-align:center; margin:4px 0 16px; }
+                .native-google-lead h2 { margin:0 0 4px; font-size:22px; font-weight:800; color:var(--text,#f8fafc); letter-spacing:-.01em; }
+                .native-google-lead p { margin:0; color:var(--muted,#9ca3af); font-size:14px; }
             </style>
             <div class="social-auth" id="social-auth" style="display:none">
                 <div class="divider">or</div>
@@ -583,6 +591,25 @@
             socialEl.dataset.enabled = socialEl.querySelector('.social-btn') ? '1' : '';
             if (socialEl.dataset.enabled) socialEl.style.display = 'block'; // default form is signin
         })();
+
+        // Native Google-first layout: with the native Google bridge available, make
+        // "Continue with Google" the hero at the TOP of the panel and demote the
+        // email/password form to a quiet fallback below an "or continue with email"
+        // divider. Web is untouched (it stays passwordless-first, social below).
+        if (nativeGoogle && socialEl && socialEl.dataset.enabled) {
+            const panel = socialEl.parentElement;
+            const lead = document.createElement('div');
+            lead.className = 'native-google-lead';
+            lead.innerHTML = '<h2>Welcome to Norva</h2><p>Sign in or create your account in seconds.</p>';
+            // Move the social block above the forms. The header goes INSIDE it (at the
+            // top) so showForm's show/hide of socialEl also hides the header on the
+            // recover/password forms — no orphan "Welcome" above a reset-password form.
+            panel.insertBefore(socialEl, forms.signin);
+            socialEl.insertBefore(lead, socialEl.firstChild);
+            // Put the divider BELOW the Google button and relabel it as the email lead-in.
+            const divider = socialEl.querySelector('.divider');
+            if (divider) { divider.textContent = 'or continue with email'; socialEl.appendChild(divider); }
+        }
 
         // Callback for the native Google Sign-In bridge: exchange the Google ID token
         // for a Norva session (Supabase signInWithIdToken), then open the app.
