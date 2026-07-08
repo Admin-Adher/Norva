@@ -845,80 +845,108 @@ class App {
             const msLeft = new Date(endIso).getTime() - Date.now();
             if (!(msLeft > 0)) return;
             const daysLeft = Math.max(1, Math.ceil(msLeft / 86400000));
-            const here = location.pathname + location.search + location.hash;
-            const manageHref = '/subscription.html?returnTo=' + encodeURIComponent(here);
             const lastDay = daysLeft === 1;
 
-            // Mobile (phones): a compact, ambient chip in the header — it never
-            // covers content and never collides with the bottom tab bar (where the
-            // old floating pill overlapped and wrapped). Tapping it opens plan
-            // management. Small enough to stay put, so no per-day dismissal nag.
-            const isMobile = window.matchMedia && window.matchMedia('(max-width: 768px)').matches;
-            if (isMobile) {
-                const navbar = document.querySelector('.navbar');
-                if (!navbar) return; // header not mounted yet — re-runs on catalog-ready
-                const labelText = lastDay ? 'Last day' : daysLeft + 'd left';
-                const title = (lastDay ? 'Last day of your Norva trial' : daysLeft + ' days left in your Norva trial') + ' — manage plan';
-                // Urgency palette: purple normally, amber on the last day.
-                const accent = lastDay ? '#f6b64b' : '#b579ff';
-                const bg = lastDay ? 'rgba(246,182,75,.13)' : 'rgba(181,121,255,.12)';
-                const border = lastDay ? 'rgba(246,182,75,.5)' : 'rgba(181,121,255,.42)';
-                let chip = document.getElementById('norva-trial-chip');
-                if (!chip) {
-                    chip = document.createElement('a');
-                    chip.id = 'norva-trial-chip';
-                    chip.style.cssText = 'display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 12px;border-radius:999px;font:800 13px/1 Inter,system-ui,sans-serif;text-decoration:none;white-space:nowrap;flex:0 0 auto';
-                    chip.innerHTML = '<span aria-hidden="true" style="width:6px;height:6px;border-radius:50%;background:currentColor"></span><span data-chip-label></span>';
-                    // Sit in the right-hand header cluster, before the search button.
-                    const anchor = navbar.querySelector('#nav-search');
-                    if (anchor) navbar.insertBefore(chip, anchor); else navbar.appendChild(chip);
-                }
-                // (Re)apply text + palette so a day rollover updates in place.
-                chip.href = manageHref;
-                chip.title = title;
-                chip.setAttribute('aria-label', title);
-                chip.style.background = bg;
-                chip.style.border = '1px solid ' + border;
-                chip.style.color = accent;
-                chip.querySelector('[data-chip-label]').textContent = labelText;
-                return;
+            // A single, ambient trial indicator on ALL platforms: a compact chip in
+            // the header. It replaces the old floating bottom pill, whose prominent
+            // "Manage plan" CTA put a cancel doorway in front of trialing users every
+            // session (a churn accelerant, and out of step with how premium streaming
+            // apps handle trials — the real reminder belongs in email). The chip is
+            // transparent (days left are visible) but not pushy; tapping it opens an
+            // informative recap where converting is the positive action.
+            const navbar = document.querySelector('.navbar');
+            if (!navbar) return; // header not mounted yet — re-runs on catalog-ready
+            const labelText = lastDay ? 'Last day' : daysLeft + 'd left';
+            const title = lastDay ? 'Last day of your Norva free trial' : daysLeft + ' days left in your Norva free trial';
+            // Urgency palette: purple normally, amber on the last day.
+            const accent = lastDay ? '#f6b64b' : '#b579ff';
+            const bg = lastDay ? 'rgba(246,182,75,.13)' : 'rgba(181,121,255,.12)';
+            const border = lastDay ? 'rgba(246,182,75,.5)' : 'rgba(181,121,255,.42)';
+            this._trialEndIso = endIso; // read by showTrialRecap()
+            let chip = document.getElementById('norva-trial-chip');
+            if (!chip) {
+                chip = document.createElement('button');
+                chip.type = 'button';
+                chip.id = 'norva-trial-chip';
+                chip.setAttribute('aria-haspopup', 'dialog');
+                chip.style.cssText = 'display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 12px;border-radius:999px;font:800 13px/1 Inter,system-ui,sans-serif;cursor:pointer;white-space:nowrap;flex:0 0 auto';
+                chip.innerHTML = '<span aria-hidden="true" style="width:6px;height:6px;border-radius:50%;background:currentColor"></span><span data-chip-label></span>';
+                // Sit in the right-hand header cluster, before the search button.
+                const anchor = navbar.querySelector('#nav-search');
+                if (anchor) navbar.insertBefore(chip, anchor); else navbar.appendChild(chip);
+                chip.addEventListener('click', () => this.showTrialRecap());
             }
-
-            // Desktop / tablet: the existing bottom pill, dismissible per day.
-            if (sessionStorage.getItem('norva-trial-banner-dismissed') === String(daysLeft)) return;
-            if (document.getElementById('norva-trial-banner')) return;
-
-            const bar = document.createElement('div');
-            bar.id = 'norva-trial-banner';
-            // Offset by the device safe-area so the pill clears the Android/iOS
-            // system navigation bar in the native WebView (it used to overlap it).
-            bar.style.cssText = 'position:fixed;left:50%;bottom:calc(16px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:9999;display:flex;align-items:center;gap:14px;max-width:calc(100% - 24px);padding:10px 16px;border-radius:999px;background:#11151d;border:1px solid #283246;color:#f8fafc;font:600 14px/1 Inter,system-ui,sans-serif;box-shadow:0 12px 40px rgba(0,0,0,.45)';
-
-            const span = document.createElement('span');
-            span.textContent = daysLeft === 1 ? 'Last day of your Norva trial' : daysLeft + ' days left in your Norva trial';
-
-            const link = document.createElement('a');
-            // A trialing user HAS a subscription: "Manage plan" opens the management surface
-            // (status, cancel, change, payment method) — not the plan-picker they came from.
-            link.href = '/subscription.html?returnTo=' + encodeURIComponent(here);
-            link.textContent = 'Manage plan';
-            link.style.cssText = 'color:#b579ff;text-decoration:none;font-weight:700';
-
-            const close = document.createElement('button');
-            close.type = 'button';
-            close.setAttribute('aria-label', 'Dismiss');
-            close.textContent = '✕';
-            close.style.cssText = 'background:transparent;border:0;color:#a8b3c7;font-size:16px;cursor:pointer;line-height:1';
-            close.addEventListener('click', () => {
-                try { sessionStorage.setItem('norva-trial-banner-dismissed', String(daysLeft)); } catch (_) { }
-                bar.remove();
-            });
-
-            bar.appendChild(span);
-            bar.appendChild(link);
-            bar.appendChild(close);
-            document.body.appendChild(bar);
+            // (Re)apply text + palette so a day rollover updates in place.
+            chip.title = title;
+            chip.setAttribute('aria-label', title + ' — view details');
+            chip.style.background = bg;
+            chip.style.border = '1px solid ' + border;
+            chip.style.color = accent;
+            chip.querySelector('[data-chip-label]').textContent = labelText;
         } catch (_) { /* never break the app over a banner */ }
+    }
+
+    // Informative recap opened from the trial chip. Transparent about the end date
+    // and the no-auto-charge model; the positive action is converting ("See plans"),
+    // not a prominent cancel path. A dimmed backdrop keeps it the only thing on
+    // screen; Escape/backdrop-tap dismiss.
+    showTrialRecap() {
+        try {
+            const endIso = this._trialEndIso;
+            if (!endIso) return;
+            if (document.getElementById('norva-trial-recap')) return;
+            const end = new Date(endIso);
+            const msLeft = end.getTime() - Date.now();
+            if (!(msLeft > 0)) return;
+            const daysLeft = Math.max(1, Math.ceil(msLeft / 86400000));
+            const lastDay = daysLeft === 1;
+            const accent = lastDay ? '#f6b64b' : '#b579ff';
+            let dateStr;
+            try { dateStr = end.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' }); }
+            catch (_) { dateStr = end.toISOString().slice(0, 10); }
+            const here = location.pathname + location.search + location.hash;
+            const seePlansHref = '/subscribe.html?returnTo=' + encodeURIComponent(here);
+            const prevFocus = document.activeElement;
+
+            const backdrop = document.createElement('div');
+            backdrop.id = 'norva-trial-recap';
+            backdrop.setAttribute('role', 'dialog');
+            backdrop.setAttribute('aria-modal', 'true');
+            backdrop.setAttribute('aria-label', 'Your free trial');
+            backdrop.style.cssText = 'position:fixed;inset:0;z-index:10000;background:rgba(2,6,15,.62);-webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px);display:flex;align-items:center;justify-content:center;padding:20px;box-sizing:border-box;opacity:0;transition:opacity .16s ease';
+
+            const card = document.createElement('div');
+            card.style.cssText = 'position:relative;box-sizing:border-box;width:100%;max-width:400px;background:#121722;border:1px solid #2b3448;border-radius:18px;box-shadow:0 20px 60px rgba(0,0,0,.5);color:#f8fafc;padding:22px;font:15px/1.5 Inter,system-ui,sans-serif;transform:translateY(10px);transition:transform .18s ease';
+            card.innerHTML =
+                '<div style="display:flex;align-items:center;gap:8px;font-weight:800;font-size:12px;letter-spacing:.4px;text-transform:uppercase;color:' + accent + ';margin-bottom:10px">' +
+                    '<span aria-hidden="true" style="width:7px;height:7px;border-radius:50%;background:currentColor"></span> Free trial' +
+                '</div>' +
+                '<div style="font-size:22px;font-weight:800;margin-bottom:6px">' + (lastDay ? 'Last day' : daysLeft + ' days left') + '</div>' +
+                '<p style="color:#aeb8cc;margin:0 0 6px">Your free trial ends <strong style="color:#f8fafc">' + dateStr + '</strong>.</p>' +
+                '<p style="color:#aeb8cc;margin:0 0 20px">You\'re never charged automatically — subscribe before then to keep your catalogue, offline downloads and cross-device sync.</p>' +
+                '<div style="display:flex;flex-direction:column;gap:10px">' +
+                    '<a href="' + seePlansHref + '" data-recap-primary style="display:block;text-align:center;width:100%;box-sizing:border-box;min-height:46px;line-height:46px;border-radius:12px;background:#5b7cfa;color:#fff;font-weight:800;font-size:15px;text-decoration:none">See plans</a>' +
+                    '<button type="button" data-recap-dismiss style="width:100%;min-height:44px;border:0;border-radius:12px;background:transparent;color:#aeb8cc;font-weight:700;font-size:14px;cursor:pointer">Not now</button>' +
+                '</div>';
+
+            const teardown = () => {
+                document.removeEventListener('keydown', onKey, true);
+                backdrop.remove();
+                try { prevFocus && prevFocus.focus && prevFocus.focus(); } catch (_) { /* noop */ }
+            };
+            const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); teardown(); } };
+
+            backdrop.appendChild(card);
+            document.body.appendChild(backdrop);
+            backdrop.addEventListener('click', (e) => { if (e.target === backdrop) teardown(); });
+            card.querySelector('[data-recap-dismiss]')?.addEventListener('click', teardown);
+            document.addEventListener('keydown', onKey, true);
+            setTimeout(() => {
+                backdrop.style.opacity = '1';
+                card.style.transform = 'translateY(0)';
+                try { card.querySelector('[data-recap-primary]')?.focus(); } catch (_) { /* noop */ }
+            }, 0);
+        } catch (_) { /* never break the app over a recap */ }
     }
 
     // Payment-issue banner: a failed renewal puts the account in a short grace
