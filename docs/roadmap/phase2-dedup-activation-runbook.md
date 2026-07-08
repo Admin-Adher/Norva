@@ -30,6 +30,11 @@ verify et thin sont tous présents et dormants.** Activer = 5 leviers d'ops/conf
 C'est la couche B qui porte le vrai gain de stockage à l'échelle (chaque nouvel owner d'un même
 provider ne réécrit plus ~600k lignes). La couche A évite juste de refaire l'enrichissement TMDB.
 
+> **Vue complète des couches partagées (déjà actives) : [`shared-cache-layers.md`](./shared-cache-layers.md)**
+> — pistes audio/sous-titres (`catalog_file_tracks`, 117k, prouvé), titres TMDB (`catalog_titles`, ~92k),
+> sous-titres IA (`catalog_generated_subtitles`, 49, latent), + le **mécanisme on-play** (immédiat, sans
+> seuil, indépendant des crons) et le **caveat mode-dépendant** (scan on-play seulement sur le chemin engine).
+
 ---
 
 ## Les leviers exacts (référence code)

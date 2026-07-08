@@ -14,6 +14,7 @@ différés**. Chaque fichier dit **quoi faire**, **quand** (le déclencheur) et
 | ⚡ **Performance & charge DB** | En continu (le boot est fait ; le goulot restant = charge DB de fond) | [`performance-status.md`](./performance-status.md) (**optim démarrage faite + backlog honnête + 🚑 runbook anti-saturation DB**) |
 | 📓 **Journal d'incident** | Référence ponctuelle | [`2026-06-28-session-log.md`](./2026-06-28-session-log.md) (panne login 504 + refresh lent 616 s→1,71 s + onboarding « utilisable » + upgrade SMALL — le fil complet) |
 | 🛡️ **Durcissement multi-users** | Avant commercialisation | [`2026-06-28-scale-hardening.md`](./2026-06-28-scale-hardening.md) (admission control « 10 imports simultanés » + amplification d'écriture + dédup prête/auto-gatée + `catalog_flip_readiness()`) |
+| 🔁 **Couches partagées (mutualisées)** | Référence (déjà actif) — pas différé | [`shared-cache-layers.md`](./shared-cache-layers.md) (pistes/titres/sous-titres IA partagés par tous les users d'un provider + caveat mode-dépendant, audit code 2026-07-08) · [`phase2-dedup-activation-runbook.md`](./phase2-dedup-activation-runbook.md) (couche B dormante) |
 
 **Convention :** `*-status.md` = où on en est + comment reprendre (à lire en
 premier) ; l'autre fichier du sujet = le design/runbook détaillé.

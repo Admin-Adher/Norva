@@ -117,3 +117,4 @@ Ce qui vient alors, dans l'ordre (Phase 7bis → 8 de la checklist) :
 | `ops/hetzner/README.md` + `GO-LIVE.md` | runbook migration DB + jour-J |
 | `ops/hetzner/media/` | kit média (single-flight, Cloudflare, Dockerfile GEX44) |
 | `phase2-dedup-activation-runbook.md` | activation dedup couche B |
+| `shared-cache-layers.md` | **couches partagées (mutualisées)** : pistes/titres/sous-titres IA — ce qui profite à tous les users du même provider + caveat mode-dépendant (audit code 2026-07-08) |
