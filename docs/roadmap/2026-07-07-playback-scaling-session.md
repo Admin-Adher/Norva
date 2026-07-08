@@ -138,8 +138,13 @@ Le user pensait que le nouveau compte Ninja re-scannait tout. **Faux** : les **4
 - ⚠️ **Repro gap** : appliquée en direct, **pas dans un fichier de migration** → à formaliser (comme l'index l'a été).
 - ⚠️ Le sous-agent avait créé un cron temporaire `tmp-verify-admin-dash` (`* * * * *`, 300s) → **désinscrit** (nettoyé). Leçon : le verify d'une fonction lourde sous charge d'import timeout → ne pas re-run `refresh_admin_dashboard()` tant qu'un gros import tourne.
 
-## Re-enrichissement TMDB des préfixes — préparé, gaté
-Le fix `f4b780a` aide les titres **pas encore tentés**. Les **≥5000 déjà tentés-et-ratés** portent un marqueur `search_match_attempted_at` (retry 90j) → il faut le reset pour re-chercher avec la requête propre. **Le watchdog le lance automatiquement** quand l'ancien Ninja est drainé (`soft_deleted_pending=0`) :
+## Re-enrichissement TMDB des préfixes — ✅ LANCÉ le 2026-07-08
+> **Exécuté** : l'ancien Ninja `976e7bbd` totalement drainé (0 source soft-deleted) + box calme →
+> lancé manuellement. **138 331** marqueurs reset **par batches de 30k** (éviter le timeout MCP 60s),
+> puis `norva_search_match_state` → `done=false, last_id=null`. Le cron `norva-enrich-search-match`
+> (*/3) draine : **~74% de match dès le 1er batch** (748/1000). Requête ci-dessous conservée pour ref.
+
+Le fix `f4b780a` aide les titres **pas encore tentés**. Les **≥5000 déjà tentés-et-ratés** portent un marqueur `search_match_attempted_at` (retry 90j) → il faut le reset pour re-chercher avec la requête propre :
 ```sql
 update cloud_titles set search_match_attempted_at = null
 where match_status = 'unmatched'

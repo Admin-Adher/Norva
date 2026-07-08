@@ -74,14 +74,17 @@ Ce qui vient alors, dans l'ordre (Phase 7bis → 8 de la checklist) :
 5. **HA** (auto-promotion Patroni + poolers redondants) — avant d'avoir des milliers de payants.
 6. Éventuellement **EX131/AX162** (EPYC/Xeon 256 Go ECC reg) si memory-bandwidth-bound à de vrais milliers (AX162 standard ≈ €612/mo, pas €319 = SKU LTD).
 
-### Polish post-migration (à ne pas oublier, reporté depuis le petit box)
+### Polish post-migration (historique — fait le 2026-07-08)
 - **TMDB re-enrichment des titres à préfixe** (~138k titres `unmatched` matchant le regex de préfixe) :
-  reporté depuis le 2026-07-07 car trop lourd pour le box 2-workers (UPDATE 138k + re-match via un
-  cron search-match qui timeoutait + gaspillage sur les doublons de l'ancien Ninja). **À lancer APRÈS
-  la migration AX42 ET après le reap complet de l'ancien Ninja** :
+  ✅ **LANCÉ le 2026-07-08** (plus tôt que prévu : inutile d'attendre AX42, il suffisait que le reap de
+  l'ancien Ninja soit fini et la box calme). Reset des 138 331 marqueurs `search_match_attempted_at`
+  **par batches de 30k** (pour éviter le timeout MCP 60s), puis `norva_search_match_state` remis à
+  `done=false, last_id=null`. Le cron `norva-enrich-search-match` (*/3) draine sur quelques heures
+  (~74% de match dès le 1er batch). Requête de référence si à refaire :
   `update cloud_titles set search_match_attempted_at=null where match_status='unmatched' and title ~ '^[A-Z]{2}[A-Z0-9]{0,3}(-[A-Z0-9]{1,6})* [-–—▎▏▍▌│┃┆┊｜|] ';` puis `update norva_search_match_state set last_id=null, done=false where id=1;`
-- **Avant le dump de migration** : laisser le reaper finir de drainer les sources soft-deleted (l'ancien
-  Ninja = ~285k media_items + 234k variants au 2026-07-07) pour NE PAS transporter le doublon sur l'AX42.
+- **Avant le dump de migration** : ✅ **le reap est complet** (0 source soft-deleted au 2026-07-08 —
+  l'ancien Ninja `976e7bbd` entièrement drainé, ~763k lignes de doublon supprimées). Le dump AX42 ne
+  transportera pas le doublon. Reaper repassé de `* * * * *` à `*/10` (drain fini → no-op fréquent inutile).
 - **Instrumenter** est FAIT (télémétrie mode/codec/surface live depuis 2026-07-07) → lire
   `/telemetry/summary` (`decisionSignals.meteredRequestShare` etc.) pour sizer la flotte média sur du réel.
 
