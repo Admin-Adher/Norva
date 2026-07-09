@@ -10907,6 +10907,39 @@ kbd {
     height: 78px;
   }
 
+  /* Compact-on-scroll parity for phones/tablets. The shared .continue-row.is-compact rules
+     (specificity 0,3,x) are outranked here by the ID-scoped mobile sizing above (1,1,x), so on
+     mobile the JS toggled is-compact but the cards never actually shrank. Re-assert the compact
+     sizes with matching ID specificity so the row shrinks on scroll exactly like desktop — tuned a
+     touch smaller than desktop compact (img 38x56 vs 40x60) since vertical space is scarcer here. */
+  #page-movies .continue-row.is-compact,
+  #page-series .continue-row.is-compact {
+    padding: 6px 10px 0;
+  }
+  #page-movies .continue-row.is-compact h3,
+  #page-series .continue-row.is-compact h3 {
+    font-size: 0.74rem;
+    margin-bottom: 3px;
+    opacity: 0.7;
+  }
+  #page-movies .continue-row.is-compact .continue-card,
+  #page-series .continue-row.is-compact .continue-card {
+    flex-basis: 150px;
+  }
+  #page-movies .continue-row.is-compact .continue-card img,
+  #page-series .continue-row.is-compact .continue-card img {
+    width: 38px;
+    height: 56px;
+  }
+  #page-movies .continue-row.is-compact .continue-card-title,
+  #page-series .continue-row.is-compact .continue-card-title {
+    font-size: 0.72rem;
+  }
+  #page-movies .continue-row.is-compact .continue-card-subtitle,
+  #page-series .continue-row.is-compact .continue-card-subtitle {
+    display: none;
+  }
+
   #page-movies .movies-grid,
   #page-series .series-grid {
     padding: 10px;
