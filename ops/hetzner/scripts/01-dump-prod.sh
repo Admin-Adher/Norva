@@ -11,8 +11,11 @@
 #   - vault secrets (encrypted at rest; re-injected from your secret store)
 #   - pg_cron jobs (URLs point at the managed project; rewritten + recreated)
 #
-# Requires: pg_dump / pg_dumpall v15+ matching the server. Uses `supabase db dump`
-# semantics via plain pg_dump for portability.
+# Requires: pg_dump / pg_dumpall v17 (managed prod is PostgreSQL 17). A pg_dump
+# OLDER than the server refuses to dump; if the box's client is < 17, run this
+# through the same image instead, e.g.:
+#   docker run --rm -e MANAGED_DB_URL --network host -v "$PWD/dump:/dump" \
+#     supabase/postgres:17.6.1.136 bash -c 'pg_dumpall --dbname="$MANAGED_DB_URL" ...'
 # =============================================================================
 set -euo pipefail
 
@@ -22,6 +25,16 @@ OUT="${OUT:-$HERE/dump}"
 
 if [[ ! -f "$ENV_FILE" ]]; then
   echo "ERROR: $ENV_FILE not found. Copy .env.hetzner.example to .env and fill it." >&2
+  exit 1
+fi
+
+# Fail loudly if the local pg_dump is older than the PG17 server — an older
+# client silently omits objects / errors mid-dump.
+DUMP_MAJOR="$(pg_dump --version 2>/dev/null | grep -oE '[0-9]+' | head -1 || echo 0)"
+if [[ "${DUMP_MAJOR:-0}" -lt 17 ]]; then
+  echo "ERROR: pg_dump major is ${DUMP_MAJOR:-unknown}, but managed prod is PG17." >&2
+  echo "       Install postgresql-client-17 or run the dump via the" >&2
+  echo "       supabase/postgres:17.6.1.136 image (see header)." >&2
   exit 1
 fi
 # shellcheck disable=SC1090

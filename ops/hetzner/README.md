@@ -69,12 +69,20 @@ Sur un box type 2×NVMe (SSD) + éventuellement 2×HDD (ex. le box i7-7700 / 64 
    les fixes appliqués à la main en prod (index dedup, circuit-breaker, admin grouping…). Le dump
    les capture puisqu'ils sont *dans* la DB — mais vérifie via `05-verify-parity.sh`.
 
-### Phase 1 — Stack self-host
-5. `cp .env.hetzner.example .env` et remplir **tous** les secrets (générer JWT secret, DB password,
-   anon/service keys — voir commentaires du fichier).
-6. `docker compose -f docker-compose.supabase.yml up -d` puis attendre que Postgres soit healthy.
-7. Appliquer le tuning : monter `postgres/postgresql.tuning.conf` (choisir le palier RAM) — cf.
-   fichier. Redémarrer le conteneur `db`.
+### Phase 1 — Stack self-host (PostgreSQL 17)
+5. `cp .env.hetzner.example .env` et remplir **tous** les secrets. Réutiliser le `JWT_SECRET` +
+   `ANON_KEY`/`SERVICE_ROLE_KEY` du projet managé ; générer les **deux nouveaux** secrets PG17 :
+   `PG_META_CRYPTO_KEY` (`openssl rand -hex 16`) et `SECRET_KEY_BASE` (`openssl rand -base64 64 | tr -d '\n'`).
+6. Créer les dossiers d'état hors repo : `sudo mkdir -p /var/lib/norva/db /var/lib/norva/storage`.
+7. Bring-up **db d'abord**, vérifier qu'il devient healthy (le bootstrap crée `supabase_admin`,
+   les rôles, `pg_cron`/`pg_net`/`pgsodium`), puis le reste :
+   ```
+   docker compose --env-file .env -f docker-compose.supabase.yml up -d db
+   docker compose --env-file .env -f docker-compose.supabase.yml ps   # db = healthy
+   docker compose --env-file .env -f docker-compose.supabase.yml up -d
+   ```
+   Le tuning 64 Go est déjà appliqué (overrides `-c` dans le compose ; `config_file` reste celui
+   de l'image supabase/postgres, qui préchargent les extensions). Pas de montage de conf séparé.
 
 ### Phase 2 — Migrer la DB (fenêtre de maintenance)
 8. **Freeze les imports** (désactiver les crons de sync côté managé, ou mettre les sources en pause).

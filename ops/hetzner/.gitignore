@@ -1,5 +1,7 @@
-# Never commit filled secrets or DB dumps
+# Never commit filled secrets, DB dumps, or runtime state
 .env
 dump/
-kong/kong.yml
 postgres/userlist.txt
+# Runtime data dirs (if ever created under the repo instead of /var/lib/norva)
+volumes/db/data/
+volumes/storage/
