@@ -30,20 +30,52 @@ services:
       timeout: 5s
       retries: 20
     command:
-      # Load the tuning file (mounted below). Pick the RAM tier inside it.
+      # Keep the image's OWN base config (it creates the supabase_* roles/schemas and
+      # preloads pgsodium/pg_cron/pg_net/pg_stat_statements) and LAYER the 64GB tuning
+      # as `-c` overrides. Do NOT replace config_file with the tuning file — that broke
+      # the role init (`role "supabase_admin" does not exist`). Values mirror the 64GB
+      # tier in postgres/postgresql.tuning.conf (kept as reference).
       - postgres
       - -c
-      - config_file=/etc/postgresql/postgresql.conf
+      - shared_buffers=16GB
+      - -c
+      - effective_cache_size=48GB
+      - -c
+      - work_mem=64MB
+      - -c
+      - maintenance_work_mem=2GB
+      - -c
+      - max_connections=200
+      - -c
+      - random_page_cost=1.1
+      - -c
+      - effective_io_concurrency=300
+      - -c
+      - max_worker_processes=16
+      - -c
+      - max_parallel_workers=16
+      - -c
+      - max_parallel_workers_per_gather=4
+      - -c
+      - checkpoint_completion_target=0.9
+      - -c
+      - max_wal_size=16GB
+      - -c
+      - min_wal_size=2GB
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       JWT_SECRET: ${JWT_SECRET}
+      JWT_EXP: 3600
     volumes:
       # Postgres data — MUST be on the NVMe/SSD RAID1 mount (random-read workload).
       - /var/lib/postgresql/data:/var/lib/postgresql/data
-      # Tuning file (choose a tier — see postgres/postgresql.tuning.conf header).
-      - ./postgres/postgresql.tuning.conf:/etc/postgresql/postgresql.conf:ro
+      # Role passwords + JWT settings — run ONCE on fresh init (official self-host
+      # docker/volumes/db/{roles,jwt}.sql). Sets the supabase_* role passwords to
+      # POSTGRES_PASSWORD so auth/rest/storage/functions can connect.
+      - ./db-init/roles.sql:/docker-entrypoint-initdb.d/init-scripts/99-roles.sql:ro
+      - ./db-init/jwt.sql:/docker-entrypoint-initdb.d/init-scripts/99-jwt.sql:ro
     ports:
       # Bind to localhost ONLY. The pooler / reverse proxy reach it internally.
       - "127.0.0.1:5432:5432"
