@@ -19,7 +19,8 @@
 | GUCs (timeouts rôles) + dual-write dormant | ✅ appliqués |
 | 3 secrets vault (backfill/cron/resend) | ✅ transférés (vault + `.env`) |
 | 47 crons (URLs réécrites → `api.norva.tv`) | ✅ stagés, **désactivés** |
-| **Secrets fonctions (~13 restants)** | ⛔ à collecter (write-only côté Supabase) |
+| Secrets fonctions (cœur) | 🟢 **OK** — TMDB posé, média/relay via DB, emails/cron faits |
+| Secrets fonctions (optionnels) | 🟡 Stancer (paiements) + FCM (push) + `NORVA_ENTITLEMENTS_MODE` à poser |
 | **Caddy/TLS `api.norva.tv`** | ⛔ à installer |
 | **Repoint app (`cloudApi.js`) + redeploy** | ⛔ à faire |
 
@@ -134,13 +135,19 @@ donc **aucun** import entre le dump et la vérif).
 
 ## 5. Ce qui RESTE — phase cutover fonctionnel
 
-1. **Secrets fonctions** dans `ops/hetzner/.env` (mêmes noms que le managé). Non récupérables
-   depuis le dashboard (write-only) → sources d'origine / gestionnaire de mots de passe / régénérer :
-   `TMDB_API_KEY`, `TMDB_READ_TOKEN`, `NORVA_TMDB_API_KEY`, `NORVA_TMDB_VALIDATE_LIMIT`,
-   `NORVA_ENTITLEMENTS_MODE`, `NORVA_CATALOG_READ_SOURCE`, `ALLOWED_ORIGINS`, `AUTH_EMAIL_FROM`,
-   `NORVA_RELAY_BASE_URL`, `RELAY_TOKEN_SECRET`, `STANCER_SECRET_KEY`, `STANCER_WEBHOOK_TOKEN`,
-   `NORVA_STANCER_MODE`, `SEND_EMAIL_HOOK_SECRET`, `FCM_SERVICE_ACCOUNT`.
-   (déjà remplis : `NORVA_BACKFILL_TOKEN`, `NORVA_CRON_SHARED_SECRET`, `RESEND_API_KEY`.)
+1. **Secrets fonctions** — ✅ **cœur résolu** (analyse du code + `cloud_runtime_config`) :
+   - **Via DB `cloud_runtime_config`** (déjà migrée) — les fonctions lisent l'env PUIS la DB en
+     fallback → **laisser VIDES** dans `.env` (sinon un placeholder écrase la DB) :
+     `NORVA_MEDIA_GATEWAY_URL` (→ Railway), `NORVA_MEDIA_GATEWAY_TOKEN`, `NORVA_RELAY_BASE_URL`
+     (→ Cloudflare Worker), `RELAY_TOKEN_SECRET`, `NORVA_SOURCE_CONFIG_KEY`.
+   - **Défauts code sûrs → laisser vides** : `ALLOWED_ORIGINS` (norva.tv/www/app),
+     `AUTH_EMAIL_FROM` (`Norva <noreply@norva.tv>`), `NORVA_TMDB_VALIDATE_LIMIT` (120),
+     `NORVA_CATALOG_READ_SOURCE` (`cloud_titles`).
+   - **Posés** : `NORVA_BACKFILL_TOKEN`, `NORVA_CRON_SHARED_SECRET`, `RESEND_API_KEY` (vault),
+     `SEND_EMAIL_HOOK_SECRET` (retrouvé), **`TMDB_API_KEY`** (v3, 32 car.).
+   - **Restent (optionnels, non-bloquants pour catalogue/lecture)** : `STANCER_SECRET_KEY`,
+     `STANCER_WEBHOOK_TOKEN`, `NORVA_STANCER_MODE` (dashboard Stancer, paiements),
+     `FCM_SERVICE_ACCOUNT` (Firebase, push), `NORVA_ENTITLEMENTS_MODE` (config, défaut `enforce`).
 2. `docker compose --env-file .env -f docker-compose.supabase.yml up -d functions` (recharge l'env).
 3. Vérifier la config playback : tables `media_gateways` / `cloud_runtime_config` (le média-gateway
    n'est PAS un secret fonction → probablement piloté par la DB, déjà migrée).
