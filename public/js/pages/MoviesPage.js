@@ -327,7 +327,6 @@ class MoviesPage {
 
     async renderGenreRails() {
         this.railsView = true;
-        this._viewRenderedAt = Date.now();
         if (this.countEl) this.countEl.textContent = '';
         this.resetBtn?.classList.add('hidden');
         if (this.randomBtn) this.randomBtn.disabled = true; // "Random" needs the flat grid.
@@ -345,6 +344,10 @@ class MoviesPage {
                 onItemClick: (item) => this.openRailItem(item),
                 onSeeAll: (rail) => this.openBucket(rail)
             });
+            // Stamp the warm view only AFTER a successful rails render: stamping
+            // up-front left the marker set when the fallback path errored without
+            // reaching filterAndRender, freezing an empty/error view on back-nav.
+            this._viewRenderedAt = Date.now();
         } catch (err) {
             console.warn('[Movies] Genre rails unavailable, falling back to grid:', err);
             this.railsView = false;

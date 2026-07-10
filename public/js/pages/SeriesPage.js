@@ -327,7 +327,6 @@ class SeriesPage {
 
     async renderGenreRails() {
         this.railsView = true;
-        this._viewRenderedAt = Date.now();
         this.activeBucket = null;
         this.bucketObserver?.disconnect();
         if (this.countEl) this.countEl.textContent = '';
@@ -345,6 +344,10 @@ class SeriesPage {
                 onItemClick: (item) => this.openRailItem(item),
                 onSeeAll: (rail) => this.openBucket(rail)
             });
+            // Stamp the warm view only AFTER a successful rails render: stamping
+            // up-front left the marker set when the fallback path errored without
+            // reaching filterAndRender, freezing an empty/error view on back-nav.
+            this._viewRenderedAt = Date.now();
         } catch (err) {
             console.warn('[Series] Genre rails unavailable, falling back to grid:', err);
             this.railsView = false;
@@ -1239,7 +1242,13 @@ class SeriesPage {
         // Flat card grid → drop the rail-host modifier so the grid centers/wraps.
         this.container.classList.remove('rail-host');
         this.container.innerHTML = '';
-        this._viewRenderedAt = Date.now();
+        // Only a populated grid counts as a "warm view" (parity with MoviesPage —
+        // same bug, fixed there in 9a55879): an empty render (zero cards, e.g. a
+        // transient empty catalogue fetch) must stay UN-stamped, or show()'s warm
+        // early-return (childElementCount sees the empty-state div as content)
+        // freezes "No series here yet · 0 titles" for 5 minutes on back-nav from
+        // playback. Un-stamped, the next entry reloads instead.
+        this._viewRenderedAt = cards.length ? Date.now() : 0;
         // Re-rendering resets scrollTop to 0 without firing a scroll event, so
         // re-sync the compact strip to avoid it sticking shrunk at the top.
         this.updateContinueCompact();
