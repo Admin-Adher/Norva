@@ -49,6 +49,17 @@ cd "$WORK"
 echo ">> [1/4] Cloning androidx/media @ ${MEDIA3_TAG}"
 git clone --depth 1 --branch "${MEDIA3_TAG}" https://github.com/androidx/media.git media
 
+# ── Fix: build the extension at minSdk 23 ────────────────────────────────────
+# 'stderr'/'stdout'/'stdin' only became real libc symbols at Android API 23. The
+# vanilla media3 decoder_ffmpeg module links its JNI at minSdk 21, which leaves
+# av_log_default_callback's reference to 'stderr' undefined:
+#   ld: error: undefined symbol: stderr  (referenced by libavutil/log.c)
+# Norva's app is minSdk 23 anyway, so raise the extension build to match (23).
+# Fail loudly if the media3 constants format ever changes (no silent no-op).
+sed -i 's/minSdkVersion = 21/minSdkVersion = 23/' media/constants.gradle
+grep -q 'minSdkVersion = 23' media/constants.gradle \
+  || { echo "::error:: minSdk 21->23 patch did not apply — check media/constants.gradle"; exit 1; }
+
 FFMPEG_MODULE_PATH="${WORK}/media/libraries/decoder_ffmpeg/src/main"
 
 echo ">> [2/4] Cloning FFmpeg @ ${FFMPEG_REF} (LGPL build — audio only)"
