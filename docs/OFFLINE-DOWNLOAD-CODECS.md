@@ -4,6 +4,33 @@
 > downloads don't play, and the staged plan to reach "download = it always plays."
 > _Created 2026-07-10._
 
+## Audio & subtitle tracks in a download (verified via workflow, 2026-07-10)
+
+A download is a **byte-exact copy of the ONE provider container file** — no demux,
+no transcode, no track filtering (`DownloadService.downloadOne()` GETs `item.url`
+and pipes it straight through AES/CTR into `{id}.enc`). Consequences:
+
+- **ALL audio tracks and ALL subtitle tracks physically muxed into that file come
+  along** (MKV/MP4/TS), byte-for-byte — nothing embedded is dropped.
+- **Nothing that lived outside the file is included**: no sidecar `.srt`/`.vtt`, no
+  provider subtitle API, and none of Norva's **web-only** subtitles (gateway
+  FFmpeg extraction, Whisper transcripts, Argos translations, PGS OCR — all
+  `norva-playback`/`WatchPage` features that never reach the device). Other
+  language **"versions"** are separate provider `stream_id`s (separate files); only
+  the version you clicked to download is fetched.
+- **Offline track switching works** through the stock media3 controls: audio via
+  the settings gear, subtitles via the CC button (`setShowSubtitleButton(true)`).
+  The subtitle choice is **persisted per title** (SharedPreferences); audio choice
+  is not (each play starts from media3's default until reselected).
+- **No track metadata is stored** (`DownloadStore.Item` has no audio-language or
+  subtitle-track fields) — the offline track list is whatever the extractor finds
+  in the container at play time.
+- The bundled **FFmpeg audio extension** matters exactly here: it makes embedded
+  **AC-3 / E-AC-3 / DTS / TrueHD** audio tracks in a downloaded MKV decodable
+  offline on devices whose hardware lacks those decoders (hardware first, FFmpeg
+  fallback). A subtitle codec media3 can't decode (rare) would be present in the
+  file but unselectable.
+
 ## How it works today (verified in code)
 
 - **Download** (`clients/android-phone/app/.../DownloadService.java`): a single

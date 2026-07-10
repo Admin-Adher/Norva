@@ -45,6 +45,11 @@ class ChannelList {
         this.currentChannel = null;
         this.sources = [];
         this.isLoading = false;
+        // Live load outcome, read by LiveGuideFusion to show the right empty panel:
+        // a failed load (busy provider / network) offers "Try again", a clean-but-empty
+        // catalogue says "No channels yet" — instead of both looking identically broken.
+        this.loadError = null;
+        this.hasLoadedOnce = false;
         this.renderedChannels = [];
         this._lastPlaybackRefreshAt = new Map();
         this._playbackScanRunId = 0;
@@ -1861,6 +1866,7 @@ class ChannelList {
     async loadChannels() {
         if (this.isLoading) return;
         this.isLoading = true;
+        this.loadError = null;
         const loadRunId = ++this.liveHydrationRunId;
         this.currentRenderId = null; // Reset render tracking
 
@@ -1889,9 +1895,14 @@ class ChannelList {
             this.loadLiveDecorationsAndRefresh(loadRunId);
         } catch (err) {
             console.error('Error loading channels:', err);
+            this.loadError = err?.message || 'Channels failed to load';
             this.container.innerHTML = `<div class="empty-state"><p>Error loading channels</p><p class="hint">${err.message}</p></div>`;
+            // Surface the failure in the inline guide too (its render is gated on
+            // channels, which stay empty here) so the phone/tablet shows Try again.
+            window.app?.liveGuideFusion?.render();
         } finally {
             this.isLoading = false;
+            this.hasLoadedOnce = true;
         }
     }
 
@@ -1902,6 +1913,7 @@ class ChannelList {
         const loadRunId = ++this.liveHydrationRunId;
         this.channels = [];
         this.groups = [];
+        this.loadError = null;
 
         try {
             this.container.innerHTML = '<div class="loading"></div>';
@@ -1919,10 +1931,26 @@ class ChannelList {
             }
 
             this.render();
+            this.hasLoadedOnce = true;
             this.loadLiveDecorationsAndRefresh(loadRunId);
         } catch (err) {
             console.error('Error loading all channels:', err);
+            this.loadError = err?.message || 'Channels failed to load';
+            this.hasLoadedOnce = true;
+            // The inline guide's render is gated on loaded channels (still empty on a
+            // failed load), so trigger it here to show the Try again panel.
+            window.app?.liveGuideFusion?.render();
         }
+    }
+
+    /**
+     * Re-attempt the Live channel load. Backs the guide's "Try again" / "Refresh"
+     * button; routes to the single-source or all-sources path exactly like the
+     * initial load (which one depends on the current source selection).
+     */
+    reloadLive() {
+        this.loadError = null;
+        return this.loadChannels();
     }
 
     loadLiveDecorationsAndRefresh(loadRunId) {

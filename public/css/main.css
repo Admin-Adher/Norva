@@ -1305,6 +1305,34 @@ h4 {
   color: var(--color-text-muted);
 }
 
+/* Full-panel Live state (loading / load-failed+retry / genuinely empty). Centred
+   card so a failed channel load reads as recoverable, not as a broken screen. */
+.live-guide-status {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  height: 100%;
+  min-height: 220px;
+  padding: 32px 22px;
+  text-align: center;
+}
+.live-guide-status .loading { margin-bottom: 4px; }
+.live-guide-status-title {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--color-text-primary, #fff);
+}
+.live-guide-status-msg {
+  max-width: 42ch;
+  color: var(--color-text-muted);
+  font-size: 0.92rem;
+  line-height: 1.5;
+}
+.live-guide-status .lg-btn { margin-top: 4px; }
+.live-guide-status.is-error .live-guide-status-title { color: #ffb4b4; }
+
 @media (max-width: 1100px) {
   .live-guide-shell {
     grid-template-columns: 170px minmax(0, 1fr);
@@ -12091,6 +12119,33 @@ html.tv .nav-search-btn { display: none; }
   flex: 1 1 auto;
   max-height: none;
   overflow: visible; /* page-scroll model: .player-section owns the scroll */
+}
+
+/* Phone app: the inline video is hidden (playback opens the native fullscreen
+   player), so the guide must be a plain vertical list — a channel strip on top,
+   the preview bar, then the rows. NEVER the desktop/tablet two-pane split, which
+   the width-based breakpoints would otherwise trigger on a landscape phone
+   (>768px) and leave a cramped 190px rail beside the list. Pin it here so the
+   phone layout is independent of the reported WebView width/orientation. */
+.norva-phone-apk .live-guide-shell {
+  grid-template-columns: 1fr;
+}
+.norva-phone-apk .live-guide-groups {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 10px 12px;
+  border-right: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.norva-phone-apk .live-guide-group {
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 124px;
+  margin-bottom: 0;
+  justify-content: center;
+  text-align: center;
 }
 
 /* Phone/tablet APK: the Channels drawer/sidebar is redundant with the inline

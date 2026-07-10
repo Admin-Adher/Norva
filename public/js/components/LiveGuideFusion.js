@@ -48,6 +48,12 @@ class LiveGuideFusion {
             if (action === 'favorite') { this.toggleSelectedFavorite(); return; }
             if (action === 'cinema') { this.toggleCinema(); return; }
             if (action === 'show-more') { this.showMoreRows(); return; }
+            if (action === 'reload-live') {
+                const btn = event.target.closest('[data-action="reload-live"]');
+                if (btn) { btn.disabled = true; btn.textContent = 'Loading…'; }
+                this.app.channelList?.reloadLive?.();
+                return;
+            }
 
             // The ▶ button plays immediately; tapping the row body only previews.
             const playBtn = event.target.closest('.live-guide-play');
@@ -1013,8 +1019,51 @@ class LiveGuideFusion {
         `;
     }
 
+    /**
+     * Full-panel state shown when no channels are loaded — a load failure gets a
+     * "Try again" (the common case: a busy provider connection / transient network),
+     * a still-running first load gets a spinner, and a clean-but-empty catalogue gets
+     * "No channels yet". Replaces the old behaviour where every one of these rendered
+     * an empty split guide that read as "the app is broken".
+     */
+    renderStatusPanel() {
+        const cl = this.app.channelList || {};
+        if (cl.isLoading && !cl.hasLoadedOnce) {
+            return `<div class="live-guide-status"><div class="loading"></div>
+                <div class="live-guide-status-msg">Loading your channels…</div></div>`;
+        }
+        if (cl.loadError) {
+            return `<div class="live-guide-status is-error">
+                <div class="live-guide-status-title">Couldn't load your channels</div>
+                <div class="live-guide-status-msg">The channel list didn't come back. This is usually a busy provider connection — give it a moment and try again.</div>
+                <button type="button" class="lg-btn lg-btn-primary" data-action="reload-live">Try again</button>
+            </div>`;
+        }
+        return `<div class="live-guide-status">
+            <div class="live-guide-status-title">No channels yet</div>
+            <div class="live-guide-status-msg">We didn't find any live channels on your sources. If you just added one, its catalogue may still be syncing.</div>
+            <button type="button" class="lg-btn" data-action="reload-live">Refresh</button>
+        </div>`;
+    }
+
     render() {
         if (!this.container) return;
+        const cl = this.app.channelList;
+        // Nothing loaded at all → dedicated loading / error+retry / empty panel, so a
+        // failed load is recoverable and a bare empty guide never looks broken. Based
+        // on the raw loaded list (not the group/broken-filtered view) so an all-hidden
+        // group still falls through to the normal shell's "No channels in this group".
+        if (!cl || !cl.channels || cl.channels.length === 0) {
+            this.container.innerHTML = `
+                ${this.isPhoneApk() ? this.renderToolbar() : ''}
+                ${this.renderStatusPanel()}
+            `;
+            const srcProxy = this.container.querySelector('.live-guide-source');
+            const realSel = document.getElementById('source-select');
+            if (srcProxy && realSel) srcProxy.value = realSel.value;
+            this.syncNavigationState();
+            return;
+        }
         const channels = this.getPlayableChannels();
         const groups = this.getGroups(channels);
         this.ensureActiveGroup(groups);
