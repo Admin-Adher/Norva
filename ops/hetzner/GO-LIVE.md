@@ -1,5 +1,11 @@
 # Norva — GO-LIVE : runbook de bascule (jour J)
 
+> 🟢 **ÉTAT AU 2026-07-11** : la stack PG17 self-host est **UP + validée**, et la **migration
+> data est faite et vérifiée à 100 %** (dry-run managé→self-host, 71 tables en parité). Il reste
+> la *phase cutover fonctionnel* (secrets fonctions + Caddy/TLS + repoint app). Détail complet +
+> commandes de reprise → [`CUTOVER-LOG-2026-07-11.md`](./CUTOVER-LOG-2026-07-11.md). Le managé
+> reste intact (rollback dispo).
+
 > **But** : le jour du push, la migration est *exécuter-des-étapes-dans-l'ordre*, pas réfléchir.
 > Tout le reste (scripts, images, docs) est déjà prêt. Ce fichier = la séquence.
 > DB → `ops/hetzner/` · Média → `ops/hetzner/media/` · Chiffrage → `docs/roadmap/scaling-cost-hetzner-plan.md`.
