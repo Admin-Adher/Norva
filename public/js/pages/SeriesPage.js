@@ -380,7 +380,10 @@ class SeriesPage {
         this.container.classList.add('rail-host');
         this.container.innerHTML = `
             <div class="genre-bucket-head" style="display:flex;align-items:center;gap:14px;margin:4px 0 18px">
-                <button class="btn btn-secondary btn-sm" id="genre-bucket-back" type="button">‹ All genres</button>
+                <button class="norva-back" id="genre-bucket-back" type="button" aria-label="Back to all genres">
+                    <svg class="back-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
+                    <span class="back-label">All genres</span>
+                </button>
                 <h2 style="margin:0;font-size:21px">${MediaUtils.escapeHtml(this.bucketLabel)}</h2>
             </div>
             <div class="genre-bucket-grid" style="display:flex;flex-wrap:wrap;gap:16px"></div>

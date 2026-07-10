@@ -6398,11 +6398,38 @@ kbd {
   transition: background var(--transition-fast), border-color var(--transition-fast), transform var(--transition-fast);
 }
 
-/* Shared arrow icon + interaction states for the fiche back pills (Movies +
-   Series — ONE design, the two used to diverge into a pill vs a broken circle
-   whose injected label spilled below it). */
+/* ── Canonical back control (.norva-back) ────────────────────────────────────
+   ONE design for every in-app "go back" affordance. The fiche heroes above
+   (.movie-back-btn / .series-detail-hero .series-back-btn) already match these
+   values with overlay positioning; .norva-back is the reusable version for the
+   catalog genre bucket. The fullscreen player keeps its own round .watch-back-btn
+   (a label there is noise) but shares the chevron glyph + hover/active/focus
+   states below. Glass pill + chevron icon + label; hover nudges the arrow left. */
+.norva-back {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 44px;
+  padding: 0 18px 0 12px;
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-radius: 999px;
+  background: rgba(12, 15, 23, 0.72);
+  color: var(--color-text-primary);
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  backdrop-filter: blur(14px);
+  transition: background var(--transition-fast), border-color var(--transition-fast), transform var(--transition-fast);
+}
+/* Shared chevron icon + interaction states across ALL back controls (fiche
+   pills, the .norva-back catalog control, and the round .watch-back-btn player
+   control). The two fiche buttons used to diverge into a pill vs a broken
+   circle whose injected label spilled below it. */
 .movie-back-btn .back-ico,
-.series-back-btn .back-ico {
+.series-back-btn .back-ico,
+.norva-back .back-ico {
   width: 18px;
   height: 18px;
   flex: 0 0 auto;
@@ -6410,23 +6437,30 @@ kbd {
 }
 
 .movie-back-btn:hover,
-.series-detail-hero .series-back-btn:hover {
+.series-detail-hero .series-back-btn:hover,
+.norva-back:hover {
   background: rgba(24, 29, 42, 0.85);
   border-color: rgba(255, 255, 255, 0.22);
 }
 
 .movie-back-btn:hover .back-ico,
-.series-back-btn:hover .back-ico {
+.series-back-btn:hover .back-ico,
+.norva-back:hover .back-ico,
+.watch-back-btn:hover .icon {
   transform: translateX(-2px);
 }
 
 .movie-back-btn:active,
-.series-detail-hero .series-back-btn:active {
+.series-detail-hero .series-back-btn:active,
+.norva-back:active,
+.watch-back-btn:active {
   transform: scale(0.97);
 }
 
 .movie-back-btn:focus-visible,
-.series-back-btn:focus-visible {
+.series-back-btn:focus-visible,
+.norva-back:focus-visible,
+.watch-back-btn:focus-visible {
   outline: 2px solid rgba(122, 148, 255, 0.9);
   outline-offset: 2px;
 }
@@ -8247,7 +8281,7 @@ kbd {
   border-radius: var(--radius-full);
   color: #fff;
   cursor: pointer;
-  transition: background var(--transition-fast);
+  transition: background var(--transition-fast), transform var(--transition-fast);
   flex-shrink: 0;
 }
 
@@ -8258,6 +8292,7 @@ kbd {
 .watch-back-btn .icon {
   width: 24px;
   height: 24px;
+  transition: transform var(--transition-fast);   /* hover-nudge, shared with the pills */
 }
 
 .watch-title-info {

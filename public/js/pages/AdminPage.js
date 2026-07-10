@@ -435,7 +435,10 @@ class AdminPage {
 #page-admin .users-pager span{color:var(--color-text-secondary,#9aa);font-size:13px;font-variant-numeric:tabular-nums;}
 #page-admin tr.user-row{cursor:pointer;}
 #page-admin tr.user-row:hover{background:#ffffff0d;}
-#page-admin .crm-back{background:none;border:0;color:#a9bcff;cursor:pointer;font-size:13px;padding:0;margin-bottom:12px;}
+#page-admin .crm-back{display:inline-flex;align-items:center;gap:7px;background:none;border:0;color:#a9bcff;cursor:pointer;font-size:13px;padding:0;margin-bottom:12px;transition:color .12s ease;}
+#page-admin .crm-back::before{content:"";width:9px;height:9px;border-left:2px solid currentColor;border-bottom:2px solid currentColor;transform:rotate(45deg);transition:transform .12s ease;}
+#page-admin .crm-back:hover{color:#cfd9ff;}
+#page-admin .crm-back:hover::before{transform:rotate(45deg) translate(1px,-1px);}
 #page-admin .fiche-head{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:4px;}
 #page-admin .fiche-avatar{width:46px;height:46px;border-radius:50%;background:linear-gradient(135deg,#5b7cfa,#a855f7);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:18px;color:#fff;flex-shrink:0;}
 #page-admin .fiche-title{font-size:20px;font-weight:700;color:#fff;word-break:break-all;}
@@ -1288,7 +1291,7 @@ class AdminPage {
         const nav = this._nav;
         const v = this._view();
         v.innerHTML = `<div class="crm-page"><div id="ticket-body">
-            <button class="crm-back" data-back="support">← Retour aux tickets</button>
+            <button class="crm-back" data-back="support">Retour aux tickets</button>
             <div class="ssub" style="margin-top:10px">Chargement…</div>
         </div></div>`;
         const back = v.querySelector('[data-back]');
@@ -1342,7 +1345,7 @@ class AdminPage {
         const filterLabel = { needs_reply: 'À répondre', open: 'Ouverts', pending: 'En attente', closed: 'Fermés', '': 'Tous' }[this._supportFilter || ''] || 'Support';
         body.innerHTML = `
             <div class="tk-back-bar">
-              <button class="crm-back" data-back="support">← Retour · ${AdminPage.esc(filterLabel)}</button>
+              <button class="crm-back" data-back="support">Retour · ${AdminPage.esc(filterLabel)}</button>
               ${statusChip}
             </div>
             <div class="fiche-head" style="margin-bottom:6px">
@@ -1774,7 +1777,7 @@ class AdminPage {
         this._setCrumb('Clients › fiche');
         const v = this._view();
         v.innerHTML = `<div class="crm-page">
-            <button class="crm-back">← ${AdminPage.routeLabel(this._ficheReturn || 'clients')}</button>
+            <button class="crm-back">${AdminPage.routeLabel(this._ficheReturn || 'clients')}</button>
             <div id="fiche-body"><div class="ssub">Chargement…</div></div>
         </div>`;
         try {
