@@ -205,11 +205,50 @@ citations clés ont été re-vérifiées à la main ensuite).
   d'emplois du temps, pas une garantie — chaque nouvel utilisateur ou source
   recrée le conflit ; tous les précédents techniques existent déjà.
 
-## 6. Suivi
+## 7. Implémentation des 2 points (fait — 2026-07-10, commits 3e48f05 + aff38c5)
 
-- [x] Verdict du workflow intégré (§5) — commit de cette version.
-- [ ] **Immédiat** : scoper/reprogrammer jobs 10 & 36 ; activer
-      `NORVA_CRAWL_YIELD_TO_VIEWERS` (décision propriétaire).
-- [ ] **Court terme** : verrou « compte occupé » (lecteur + écrivain gateway)
-      + classificateur Live 458-aware.
-- [ ] Fin du prêt : réactiver crons 79/80 (SQL §3).
+Les deux volets recommandés au §5.5 sont **implémentés, revus (workflow
+adversarial 22 agents → 15 findings corrigés), et déployés sur `main`**.
+
+### Point 1 (ops)
+- Crons **10, 36, 62-65, 79-80** reprogrammés en **fenêtre nuit `1-4 UTC`**
+  (03-07 h locale) — plus aucune sonde diurne. 79/80 (ninja) restent en pause.
+- `NORVA_CRAWL_YIELD_TO_VIEWERS` : défaut **OFF → ON** (`index.ts`), re-check
+  mi-tick actif.
+
+### Point 2 (verrou compte occupé)
+- Migration `20260710170000_provider_account_activity.sql` (appliquée) : table
+  + RPCs `provider_account_touch_many` / `provider_account_touch_by_source` /
+  `provider_account_busy` (fenêtre **5 min**, service_role only, fail-open).
+  Clé = `lower(host)/username` **décodé** (les 3 producteurs alignés — vérifié
+  y compris usernames `@`/espace/`+`).
+- **Écrivains** : rapporteur gateway→edge (`POST /account-activity`, ~60 s) +
+  touches dans `createPlaybackSession`, `recordPlaybackEvent`, `saveHistory`
+  (+ jumeaux `norva-cloud`).
+- **Lecteur** : check en tête de tick (crons par-source, **avant** la
+  résolution série qui touche le panel) + par-titre (ticks account-wide) +
+  branche whisper ; tick tout-occupé → `skipped` (n'efface pas l'épuisement).
+- **Web** : `_looksProviderSlotBusy` (458/PROVIDER_BUSY) — une chaîne 458
+  s'affiche « momentanément saturée, réessayer », plus « morte » ; **pas** de
+  boucle de retry client (évite le storm sur la boucle interne du gateway).
+
+### ⚠️ Étape ops manuelle requise (propriétaire)
+Le **rapporteur gateway** est **inerte** tant que la variable d'env
+**`NORVA_EDGE_CALLBACK_BASE`** n'est pas posée dans le service **Railway**
+(media-gateway) :
+```
+NORVA_EDGE_CALLBACK_BASE=https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-playback
+```
+Sans elle, le verrou fonctionne quand même (touches session/événement/
+historique + crons de nuit + lecteur), mais le cas « spectateur live web
+au-delà de 5 min » n'est pas couvert par le rapporteur. Log de démarrage
+gateway : `account-activity reporter IDLE — set NORVA_EDGE_CALLBACK_BASE…`.
+
+## 8. Suivi restant
+
+- [x] Point 1 + Point 2 implémentés, revus, déployés.
+- [ ] **Poser `NORVA_EDGE_CALLBACK_BASE` dans Railway** (couverture complète).
+- [ ] Différable : keepalive session lecture native ; signalement des
+      téléchargements (slot tenu des heures, zéro télémétrie).
+- [ ] Fin du prêt : réactiver crons 79/80 (`cron.alter_job(job_id:=79/80,
+      active:=true)`).
