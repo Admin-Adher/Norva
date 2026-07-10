@@ -65,6 +65,20 @@ function _looksProviderBlocked(err) {
         + (detail && typeof detail === 'object' ? JSON.stringify(detail) : String(detail || ''))).toLowerCase();
     return /\b401\b|\b403\b|\b429\b|unauthor|forbidden|too many/.test(text);
 }
+// Single-slot provider "busy" — DISTINCT from blocked/dead. HTTP 458 "max connections"
+// (relayed verbatim by the relay) or the gateway's resynthesized 503 PROVIDER_BUSY mean
+// the account's ONE connection is momentarily held (by a just-closed playback, another
+// device, or a background job); the slot frees ~8s after the prior connection drops.
+// Busy must NEVER mark a channel dead or back-off the source — it's recoverable by
+// waiting one slot-release period and retrying (2026-07-10 458 incident).
+function _looksProviderSlotBusy(err) {
+    if (!err) return false;
+    if (err.status === 458) return true;
+    const detail = err.payload && err.payload.details;
+    const text = (String(err.message || '') + ' '
+        + (detail && typeof detail === 'object' ? JSON.stringify(detail) : String(detail || ''))).toLowerCase();
+    return /\b458\b|max.{0,2}connection|provider_busy|provider busy|connection slot|slot busy/.test(text);
+}
 
 // LIVE back-off — distinct from the VOD cloud-block. Single-slot providers
 // 403-block under a connection storm (rapid zapping + retries). A SHORT back-off
@@ -1582,14 +1596,20 @@ const CloudAdapter = (() => {
                 // so this never reopens the old ~30s "Media error" storm.
                 const PROVIDER_SLOT_RETRY_DELAYS_MS = [2500, 5000];
                 const isProviderSlotBusy = (err) => {
-                    if (!err || (err.status !== 502 && err.status !== 503 && err.status !== 504)) return false;
+                    if (!err) return false;
+                    // Verbatim 458 "max connections" (relay pass-through) is the clearest busy signal.
+                    if (err.status === 458) return true;
+                    if (err.status !== 502 && err.status !== 503 && err.status !== 504) return false;
                     const detail = err.payload?.details;
                     const reason = String(
                         detail && typeof detail === 'object' ? (detail.details ?? detail.error ?? '') : (detail ?? '')
                     ).toLowerCase();
                     // Reason not forwarded by the gateway: treat the 5xx as possibly transient.
                     if (!reason) return true;
-                    return /\b401\b|\b403\b|unauthor|forbidden|timed out|connection reset|-1005[34]|concurren|\bslot\b/.test(reason);
+                    // provider_busy / max connections / 458: the gateway's resynthesized 503
+                    // carries an explicit reason — it must match too, not fall through as dead
+                    // (it previously did: the regex had 401/403/slot but not these).
+                    return /\b401\b|\b403\b|\b458\b|unauthor|forbidden|timed out|connection reset|-1005[34]|concurren|\bslot\b|provider_busy|provider busy|max.{0,2}connection/.test(reason);
                 };
                 const attemptCreateGatewaySession = async () => {
                     let payload;
@@ -1663,20 +1683,47 @@ const CloudAdapter = (() => {
                     // attempt; on a provider block, back off briefly so the cooldown
                     // lifts instead of being prolonged. (relay/direct can't play live
                     // in-browser anyway, so the cascades were dead weight.)
-                    try {
-                        payload = await cloudPlaybackApi().createSession({
-                            ...baseSession,
-                            mode,
-                            requiresTranscode: mode === 'transcode'
-                        });
-                    } catch (sessionError) {
-                        if (!hasNativeOrLocal && _looksProviderBlocked(sessionError)) {
-                            // One dead channel's 403 must not block the source — only
-                            // a real cooldown (several distinct channels failing in a
-                            // short window) trips the back-off.
-                            _noteLiveFailureMaybeBlock(sourceId, streamId);
+                    //
+                    // EXCEPTION — slot BUSY (458/PROVIDER_BUSY) is not a block: the
+                    // account's one connection is momentarily held and frees ~8s after
+                    // the previous one drops. Wait a full slot-release period and retry
+                    // (twice max). This is one connection attempt per 8s — the opposite
+                    // of the storm the one-attempt rule exists to prevent — and it's
+                    // what turns "chaîne morte" into a successful zap when the previous
+                    // channel's connection is still draining (2026-07-10 incident).
+                    const LIVE_SLOT_BUSY_RETRY_DELAYS_MS = [8000, 8000];
+                    for (let liveSlotAttempt = 0; ; liveSlotAttempt++) {
+                        try {
+                            payload = await cloudPlaybackApi().createSession({
+                                ...baseSession,
+                                mode,
+                                requiresTranscode: mode === 'transcode'
+                            });
+                            break;
+                        } catch (sessionError) {
+                            if (_looksProviderSlotBusy(sessionError)
+                                && liveSlotAttempt < LIVE_SLOT_BUSY_RETRY_DELAYS_MS.length) {
+                                console.warn(`[api] live slot busy (458), retry ${liveSlotAttempt + 1}/${LIVE_SLOT_BUSY_RETRY_DELAYS_MS.length} in ${LIVE_SLOT_BUSY_RETRY_DELAYS_MS[liveSlotAttempt]}ms`);
+                                await new Promise((resolve) => setTimeout(resolve, LIVE_SLOT_BUSY_RETRY_DELAYS_MS[liveSlotAttempt]));
+                                continue;
+                            }
+                            if (_looksProviderSlotBusy(sessionError)) {
+                                // Still busy after the retries: surface as the recoverable
+                                // "provider busy" message (ChannelList shows "momentarily
+                                // saturated — try again"), NOT as a dead channel, and do
+                                // NOT count it toward the source back-off tally.
+                                const busyErr = new Error('Channel temporarily unavailable (provider busy) — try again in a few seconds.');
+                                busyErr.liveProviderBackoff = true;
+                                throw busyErr;
+                            }
+                            if (!hasNativeOrLocal && _looksProviderBlocked(sessionError)) {
+                                // One dead channel's 403 must not block the source — only
+                                // a real cooldown (several distinct channels failing in a
+                                // short window) trips the back-off.
+                                _noteLiveFailureMaybeBlock(sourceId, streamId);
+                            }
+                            throw sessionError;
                         }
-                        throw sessionError;
                     }
                     // A success clears both the back-off and the recent-failure tally
                     // so an earlier dead-channel click can't accrue toward a block.

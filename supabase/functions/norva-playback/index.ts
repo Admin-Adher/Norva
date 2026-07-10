@@ -145,6 +145,9 @@ Deno.serve(async (req) => {
     if (req.method === "POST" && segments[0] === "pregen-gate") {
       return json(req, await runPregenGate(req, supabase));
     }
+    if (req.method === "POST" && segments[0] === "account-activity") {
+      return json(req, await runAccountActivity(req, supabase));
+    }
     if (req.method === "GET" && segments[0] === "generated-subtitle") {
       const identity = await requireIdentity(req, supabase);
       return json(req, await getGeneratedSubtitle(req, identity.userId, supabase));
@@ -315,6 +318,10 @@ async function createPlaybackSession(
     .select("*")
     .single();
   if (error) throwDb(error, "Unable to create playback session");
+
+  // Account busy-lock writer: every playback session start means this provider account's
+  // single connection slot is (about to be) held — direct native plays included. Best-effort.
+  await touchProviderAccountByUrl(db, targetUrl, "session");
 
   if (mode === "direct") {
     // Direct plays straight from the device's residential IP. Some providers
@@ -710,6 +717,10 @@ async function recordPlaybackEvent(
     .select("*")
     .single();
   if (error) throwDb(error, "Unable to record playback event");
+
+  // Account busy-lock writer: any playback event (zap, first frame, error, ended) means the
+  // provider account was just being used — refresh its activity signal. Best-effort.
+  await touchProviderAccountBySource(db, sourceId, "event");
 
   if (sourceId && ttff && (eventType === "first_frame" || eventType === "play_started")) {
     await recordPlaybackStartupObservation(db, { userId, sourceId, itemType, itemId, startupMs: ttff });
@@ -3197,14 +3208,14 @@ async function resolvePendingTranslations(db: SupabaseClient, runtimeConfig: Run
   }
 }
 
-// Crawl-yield governance (flag, default OFF — neutral/byte-identical when OFF). When ON, the
-// autonomous crawl yields the provider's single connection slot to a live human more aggressively:
-// (1) the "recently active" window below widens to CRAWL_VIEWER_GRACE_MS (covers the grace tail
-// after a viewer stops — the ~8s the provider is slow to free the slot + reconnect churn), and
-// (2) the crawl re-checks MID-TICK (see runOneDimension loop) so a viewer who starts DURING a
-// ~100s tick isn't collided with. Load-test at enable: grace length vs real slot-release, and the
-// extra indexed read per batch at crawl volume. See ops/hetzner/media/CODE-PATCHES.md patch #5.
-const CRAWL_YIELD_TO_VIEWERS = (Deno.env.get("NORVA_CRAWL_YIELD_TO_VIEWERS") || "") === "true";
+// Crawl-yield governance. Default ON since 2026-07-10 (458 incident, docs/LIVE-TV-458-SLOT-
+// CONTENTION.md): the autonomous crawl yields the provider's single connection slot to a live
+// human aggressively — (1) the "recently active" window below widens to CRAWL_VIEWER_GRACE_MS
+// (covers the grace tail after a viewer stops — the ~8s the provider is slow to free the slot +
+// reconnect churn), and (2) the crawl re-checks MID-TICK (see runOneDimension loop) so a viewer
+// who starts DURING a ~100s tick isn't collided with. Cost: one indexed read every few batches.
+// Set NORVA_CRAWL_YIELD_TO_VIEWERS=false to restore the pre-incident behaviour.
+const CRAWL_YIELD_TO_VIEWERS = (Deno.env.get("NORVA_CRAWL_YIELD_TO_VIEWERS") || "true") === "true";
 const CRAWL_VIEWER_GRACE_MS = boundedInt(Deno.env.get("NORVA_CRAWL_VIEWER_GRACE_MS"), 300_000, 60_000, 900_000);
 
 // True when the user is actively watching right now: a fresh playback event (the player emits
@@ -3263,6 +3274,57 @@ async function bumpEnrichmentHeartbeat(db: SupabaseClient, userId: string) {
       { user_id: userId, ticked_at: new Date().toISOString() },
       { onConflict: "user_id" },
     );
+  } catch (_) { /* best-effort */ }
+}
+
+// ── Provider ACCOUNT busy-lock (2026-07-10 458 incident) ────────────────────────────────────────
+// max_connections is per provider ACCOUNT (host+username), not per user or panel identity. The
+// canonical key mirrors the gateway's proxyKeyFromUrl: URL host (port kept when non-default; the
+// URL parser already lowercases hostnames) + '/' + the username path segment of an Xtream stream
+// URL (/movie|series|live/USER/PASS/...). Same form as provider_account_touch_by_source builds
+// from config_hint (serverHost + username). See docs/LIVE-TV-458-SLOT-CONTENTION.md §5.4.
+function providerAccountKeyFromUrl(url: string): string {
+  try {
+    const u = new URL(url);
+    const segs = u.pathname.split("/").filter(Boolean);
+    return u.host + (segs.length >= 2 ? "/" + segs[1] : "");
+  } catch {
+    return "";
+  }
+}
+
+// POST /account-activity (gateway-token auth, like /pregen-gate): { keys: string[] } → { ok }.
+// The media gateway reports the provider accounts it is CURRENTLY holding a connection for
+// (viewer transcode sessions, engine raw pumps, background ffmpeg extractions) every ~60s.
+// This is the missing WRITER that makes provider_account_busy() see web Live TV — the viewing
+// path whose per-user signals go dark ~4 min in (see userHasLiveSession's comment).
+async function runAccountActivity(req: Request, db: SupabaseClient) {
+  const runtimeConfig = await getRuntimeConfig(db);
+  const provided = req.headers.get("Authorization")?.match(/^Bearer\s+(.+)$/i)?.[1] ?? "";
+  if (!runtimeConfig.mediaGatewayToken || provided !== runtimeConfig.mediaGatewayToken) throw new HttpError(401, "Unauthorized");
+  const body = recordOrEmpty(await req.json().catch(() => ({})));
+  const keys = (Array.isArray(body.keys) ? body.keys : [])
+    .filter((k): k is string => typeof k === "string" && k.length > 0 && k.length <= 300)
+    .slice(0, 64);
+  if (!keys.length) return { ok: true, touched: 0 };
+  const kind = stringOr(body.kind, "gateway").slice(0, 32);
+  const { error } = await db.rpc("provider_account_touch_many", { p_keys: keys, p_kind: kind });
+  if (error) throwDb(error, "Unable to record account activity");
+  return { ok: true, touched: keys.length };
+}
+
+// Best-effort account-activity touches from the edge's own playback paths (fail-open — a
+// bookkeeping error must never break playback). URL variant for paths that hold the raw
+// provider URL; source variant for paths that only carry a source_id.
+async function touchProviderAccountByUrl(db: SupabaseClient, url: string, kind: string) {
+  try {
+    const key = providerAccountKeyFromUrl(url);
+    if (key) await db.rpc("provider_account_touch_many", { p_keys: [key], p_kind: kind });
+  } catch (_) { /* best-effort */ }
+}
+async function touchProviderAccountBySource(db: SupabaseClient, sourceId: string | null, kind: string) {
+  try {
+    if (sourceId) await db.rpc("provider_account_touch_by_source", { p_source_id: sourceId, p_kind: kind });
   } catch (_) { /* best-effort */ }
 }
 
@@ -3888,7 +3950,7 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
 
   let updated = 0;
   const debug = stringOr(body.debug, "") === "1";
-  const diag = { noVariant: 0, noTarget: 0, emptySeries: 0, relayNotOk: 0, relayEmpty: 0, noLang: 0, exception: 0, footprintCapped: 0 };
+  const diag = { noVariant: 0, noTarget: 0, emptySeries: 0, relayNotOk: 0, relayEmpty: 0, noLang: 0, exception: 0, footprintCapped: 0, accountBusy: 0 };
   // Circuit-breaker tallies for this tick: cbOk = provider served us at least once; cbBanish =
   // auth/rate/5xx rejections. Recorded once at the end of the tick (see below).
   let cbOk = 0;
@@ -3909,6 +3971,28 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
   // and jitter each provider hit so the crawl doesn't look like a metronome.
   const effConcurrency = footprint?.lowFootprint ? 1 : concurrency;
   let lowFpProbed = 0;
+
+  // Account busy-lock READER (2026-07-10 458 incident): before ANY provider hit (relay header
+  // probe, gateway residential probe, or vod-info panel call — all are the user_multi_ip signal
+  // when a human is watching the same account), consult provider_account_activity. Keyed per
+  // TITLE's target URL so account-wide ticks (no sourceId — e.g. cron 36) are covered per panel,
+  // not per user. Cached in-tick for 20s per key: fresh enough to catch a viewer who starts
+  // mid-tick, cheap enough to add ~1 read per 20s per account. Fail-open: an RPC error must
+  // never halt the crawl (busy=false). Skipped titles are NOT stamped → retried next tick.
+  const accountBusyCache = new Map<string, { busy: boolean; at: number }>();
+  const ACCOUNT_BUSY_CACHE_MS = 20_000;
+  const accountBusyCached = async (accountKey: string): Promise<boolean> => {
+    const now = Date.now();
+    const hit = accountBusyCache.get(accountKey);
+    if (hit && (now - hit.at) < ACCOUNT_BUSY_CACHE_MS) return hit.busy;
+    let busy = false;
+    try {
+      const { data } = await db.rpc("provider_account_busy", { p_key: accountKey });
+      busy = data === true;
+    } catch (_) { /* fail-open */ }
+    accountBusyCache.set(accountKey, { busy, at: now });
+    return busy;
+  };
 
   const processOne = async (title: JsonRecord) => {
     // Mark a title as probed (resolved or genuinely-empty) so the progression filter
@@ -3951,6 +4035,18 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
           diag.noTarget++;
         }
         return;
+      }
+
+      // Account busy-lock: someone (any user, any device, the gateway, a viewer mid-film whose
+      // per-user signals went dark) currently holds this provider ACCOUNT — skip WITHOUT
+      // stamping so the title retries next tick. Honors the manual-backfill bypass
+      // (ignoreLiveSession), which crons never send.
+      if (body.ignoreLiveSession !== true) {
+        const accountKey = providerAccountKeyFromUrl(targetUrl);
+        if (accountKey && await accountBusyCached(accountKey)) {
+          diag.accountBusy++;
+          return;
+        }
       }
 
       let info: JsonRecord | null = null;

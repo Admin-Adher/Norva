@@ -2553,6 +2553,15 @@ async function saveHistory(req: Request, userId: string, db: SupabaseClient) {
     .select("*")
     .single();
   if (error) throwDb(error, "Unable to save history");
+
+  // Account busy-lock writer (2026-07-10 458 incident, docs/LIVE-TV-458-SLOT-CONTENTION.md):
+  // the ~10s watch-progress save IS the live heartbeat — refresh the provider ACCOUNT's
+  // activity signal so autonomous probes yield the single connection slot to this viewer.
+  // Best-effort: bookkeeping must never fail the save.
+  try {
+    if (sourceId) await db.rpc("provider_account_touch_by_source", { p_source_id: sourceId, p_kind: "history" });
+  } catch (_) { /* best-effort */ }
+
   return { item: data };
 }
 

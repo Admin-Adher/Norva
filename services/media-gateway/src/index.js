@@ -940,6 +940,7 @@ app.post('/transcribe-async/:token', (req, res) => {
     if (!jobId || !/^https:\/\/[^/]+\.supabase\.co\//.test(callbackUrl)) {
         return res.status(400).json({ error: 'jobId and a valid supabase callback are required' });
     }
+    noteEdgeCallbackBase(callbackUrl);
     const start = Math.max(0, Number.parseFloat(req.query.start) || 0);
     const dur = Math.max(0, Number.parseFloat(req.query.dur) || 0); // 0 = whole track (production); >0 = clip (test)
     const ua = claims.ua || FFMPEG_USER_AGENT;
@@ -969,6 +970,7 @@ app.post('/ocr-async/:token', (req, res) => {
     if (!jobId || !/^https:\/\/[^/]+\.supabase\.co\//.test(callbackUrl)) {
         return res.status(400).json({ error: 'jobId and a valid supabase callback are required' });
     }
+    noteEdgeCallbackBase(callbackUrl);
     const lang = /^[a-z+]{3,40}$/.test(String(req.query.lang || '')) ? String(req.query.lang) : OCR_LANGS;
     // fmt selects the pipeline: 'pgs' (.sup parser) vs 'vobsub'/'dvb' (ffmpeg sub2video → frames).
     const fmt = ['pgs', 'vobsub', 'dvb'].includes(String(req.query.fmt || '')) ? String(req.query.fmt) : 'pgs';
@@ -994,6 +996,7 @@ app.post('/storyboard-async/:token', (req, res) => {
     if (!jobId || !/^https:\/\/[^/]+\.supabase\.co\//.test(callbackUrl)) {
         return res.status(400).json({ error: 'jobId and a valid supabase callback are required' });
     }
+    noteEdgeCallbackBase(callbackUrl);
     const uploadUrl = String(req.query.uploadUrl || '');
     if (!/^https:\/\/[^/]+\.supabase\.co\/storage\//.test(uploadUrl)) {
         return res.status(400).json({ error: 'a supabase storage uploadUrl is required' });
@@ -1024,6 +1027,7 @@ app.post('/translate-async', requireGatewayAuth, (req, res) => {
     if (!jobId || !/^https:\/\/[^/]+\.supabase\.co\//.test(callbackUrl)) {
         return res.status(400).json({ error: 'jobId and a valid supabase callback are required' });
     }
+    noteEdgeCallbackBase(callbackUrl);
     if (!/^[a-z]{2,3}$/.test(source) || !/^[a-z]{2,3}$/.test(target)) return res.status(400).json({ error: 'invalid source/target' });
     if (!vtt.trim()) return res.status(400).json({ error: 'vtt is required' });
     if (!argosCanServe(source, target)) return res.status(422).json({ error: `unsupported pair ${source}->${target}` });
@@ -3560,6 +3564,64 @@ function isLocalOrigin(origin) {
     } catch (_) {
         return false;
     }
+}
+
+// ── Provider account-activity reporter (2026-07-10 458 incident) ────────────────────────────────
+// Every ~60s, report to the edge (norva-playback POST /account-activity) the provider ACCOUNTS
+// this box is currently holding a connection for: viewer transcode sessions, engine raw pumps,
+// and background ffmpeg extractions. The edge's autonomous probe crawl reads that table
+// (provider_account_busy) and yields the account's single connection slot — this reporter is the
+// signal WRITER for web Live TV, whose per-user session signals go dark ~4 min into viewing.
+// Additive + fail-open: nothing in the media path depends on it; a failed POST is just logged
+// once per hour. Disable with ACCOUNT_ACTIVITY_REPORT_MS=0.
+// The edge base URL comes from NORVA_EDGE_CALLBACK_BASE (e.g.
+// https://<ref>.supabase.co/functions/v1/norva-playback) or is learned from the first valid
+// job callbackUrl this box receives (whisper/OCR/storyboard/translate all carry one).
+const ACCOUNT_ACTIVITY_REPORT_MS = clampInt(process.env.ACCOUNT_ACTIVITY_REPORT_MS, 60_000, 0, 300_000);
+let edgeCallbackBase = (process.env.NORVA_EDGE_CALLBACK_BASE || '').replace(/\/+$/, '');
+function noteEdgeCallbackBase(callbackUrl) {
+    if (edgeCallbackBase) return;
+    const m = String(callbackUrl || '').match(/^(https:\/\/[^/]+\.supabase\.co\/functions\/v1\/[^/?#]+)/);
+    if (m) {
+        edgeCallbackBase = m[1];
+        console.log(`[media-gateway] account-activity: learned edge base ${edgeCallbackBase}`);
+    }
+}
+function activeProviderAccountKeys() {
+    const keys = new Set();
+    for (const s of sessions.values()) {
+        if (s && s.sourceUrl && isSessionBlockingProviderSlot(s)) keys.add(proxyKeyFromUrl(s.sourceUrl));
+    }
+    for (const p of rawPumps) { if (p && p.proxyKey) keys.add(p.proxyKey); }
+    for (const key of accountExtractions.keys()) keys.add(key);
+    keys.delete('');
+    return [...keys].slice(0, 64);
+}
+let _accountActivityLastErrorAt = 0;
+async function reportAccountActivity() {
+    if (!ACCOUNT_ACTIVITY_REPORT_MS || !GATEWAY_TOKEN || !edgeCallbackBase) return;
+    const keys = activeProviderAccountKeys();
+    if (!keys.length) return;
+    try {
+        const res = await fetch(`${edgeCallbackBase}/account-activity`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${GATEWAY_TOKEN}` },
+            body: JSON.stringify({ keys, kind: 'gateway' }),
+            signal: AbortSignal.timeout(10_000),
+        });
+        if (!res.ok && Date.now() - _accountActivityLastErrorAt > 60 * 60 * 1000) {
+            _accountActivityLastErrorAt = Date.now();
+            console.warn(`[media-gateway] account-activity report failed: HTTP ${res.status}`);
+        }
+    } catch (err) {
+        if (Date.now() - _accountActivityLastErrorAt > 60 * 60 * 1000) {
+            _accountActivityLastErrorAt = Date.now();
+            console.warn('[media-gateway] account-activity report failed:', (err && err.message) || err);
+        }
+    }
+}
+if (ACCOUNT_ACTIVITY_REPORT_MS > 0) {
+    setInterval(() => { reportAccountActivity(); }, ACCOUNT_ACTIVITY_REPORT_MS).unref();
 }
 
 setInterval(() => {
