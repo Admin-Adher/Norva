@@ -953,7 +953,24 @@
                 return;
             }
 
-            const user = await NorvaAuth.getUser().catch(() => null);
+            let user = null;
+            try {
+                user = await NorvaAuth.getUser();
+            } catch (err) {
+                // TRANSIENT failure (network not up at wake, Supabase 5xx) with a
+                // session still in storage: the account is NOT signed out — don't
+                // show the login form. Bounce back with the cached user; the app
+                // boots offline-tolerant and the session heals on the next call.
+                // Only a DEFINITIVE failure (token revoked — authApi cleared the
+                // session) falls through to the form.
+                const cached = NorvaAuth.getSession && NorvaAuth.getSession();
+                if (!err?.definitive && cached?.user?.id && cached?.refresh_token) {
+                    if (params.get('manage') === '1') { showManage(cached.user); return; }
+                    setStatus('success', 'Signed in. Opening Norva...');
+                    location.replace(returnTo);
+                    return;
+                }
+            }
             if (user) {
                 // Logged-in users reaching account.html with ?manage=1 (the Settings
                 // "Sign-in settings" entry) get an account-management view instead of

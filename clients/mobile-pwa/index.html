@@ -21,14 +21,14 @@
     (function () {
       try {
         var session = JSON.parse(localStorage.getItem('norva-cloud-session') || 'null');
-        var now = Math.floor(Date.now() / 1000);
+        // No expiry condition: an expired access token + refresh_token is still a
+        // signed-in user (refreshed at boot) — see public/app.html.
         var isUsable = Boolean(
           session &&
           session.access_token &&
           session.refresh_token &&
           session.user &&
-          session.user.id &&
-          (!session.expires_at || Number(session.expires_at) > now + 30)
+          session.user.id
         ) || Boolean(localStorage.getItem('norva-cloud-device-token'));
         if (!isUsable) {
           var returnTo = window.location.pathname + window.location.search + window.location.hash;
@@ -633,12 +633,11 @@
         return true;
       }
       const session = JSON.parse(localStorage.getItem('norva-cloud-session') || 'null');
-      const now = Math.floor(Date.now() / 1000);
+      // No expiry condition — expired + refresh_token = still signed in (see above).
       return Boolean(
         session?.access_token &&
         session?.refresh_token &&
-        session?.user?.id &&
-        (!session.expires_at || Number(session.expires_at) > now + 30)
+        session?.user?.id
       );
     } catch (_) {
       return false;

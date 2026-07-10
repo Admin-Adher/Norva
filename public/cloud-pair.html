@@ -237,7 +237,30 @@
         const returnTo = sanitizeReturnTo(params.get('returnTo')) || '/?paired=1#home';
 
         document.getElementById('restart-button').addEventListener('click', startPairing);
-        startPairing();
+        resumeOrStartPairing();
+
+        // Already-paired screen relaunching this page: re-use the stored device
+        // token instead of forcing a brand-new pairing every time (the TV symptom
+        // of "logged out after inactivity"). Validate it with a cheap authorized
+        // call; only a definitive rejection (401/403 — token revoked/unpaired)
+        // falls back to a fresh pairing. A network hiccup keeps the token and
+        // proceeds — the app's device-token gate accepts it and heals later.
+        async function resumeOrStartPairing() {
+            let token = '';
+            try { token = localStorage.getItem('norva-cloud-device-token') || ''; } catch (_) { /* noop */ }
+            if (token) {
+                try {
+                    await NorvaCloud.entitlements.device();
+                    location.replace(returnTo);
+                    return;
+                } catch (err) {
+                    const s = Number(err?.status || 0);
+                    if (s !== 401 && s !== 403) { location.replace(returnTo); return; }
+                    // Revoked/unpaired: fall through to a fresh pairing.
+                }
+            }
+            startPairing();
+        }
 
         async function startPairing() {
             clearInterval(pollHandle);

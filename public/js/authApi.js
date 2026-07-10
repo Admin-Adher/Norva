@@ -164,14 +164,107 @@
         return request(`/rest/v1/rpc/${fn}`, { method: 'POST', token, body: args || {} });
     }
 
-    async function refreshSession() {
+    // ── Session refresh: single-flight, cross-tab-locked, rotation-safe ────────
+    // Supabase refresh tokens are SINGLE-USE: two concurrent refreshes with the
+    // same token (e.g. two tabs waking after an idle hour) trip GoTrue's reuse
+    // detection, which revokes the WHOLE session family — a very real "logged out
+    // for no reason". And a swallowed transient failure (network not up yet at
+    // laptop wake, Supabase 5xx) must NOT read as "signed out": the refresh_token
+    // in storage is still valid. So:
+    //  • one in-flight refresh per tab (shared promise),
+    //  • one refresher across tabs (navigator.locks; localStorage-lease fallback),
+    //  • under the lock, re-read the session — if another tab already rotated it,
+    //    adopt that result instead of POSTing the now-burned token,
+    //  • classify failures: ONLY a 400/401 from POST /token — for the token that
+    //    is STILL the stored one — is definitive (err.definitive=true; the session
+    //    is cleared). Everything else (network TypeError, 5xx, 429) is transient
+    //    (err.transient=true): the session is KEPT and one quick retry runs inside
+    //    GoTrue's ~10s reuse interval, which also recovers a "burned" token whose
+    //    rotation response was lost mid-flight.
+    let refreshInFlight = null;
+    const KEY_REFRESH_LOCK = 'norva-session-refresh-lock';
+
+    function classifyRefreshError(error, failedToken) {
+        const status = Number(error?.status || 0);
+        if (status === 400 || status === 401) {
+            const stored = getSession()?.refresh_token || '';
+            if (stored && failedToken && stored !== failedToken) {
+                // Another tab rotated while our POST was failing — our token was just
+                // stale, the session itself is fine.
+                error.transient = true;
+            } else {
+                error.definitive = true;
+            }
+        } else {
+            error.transient = true;
+        }
+        return error;
+    }
+
+    async function refreshSessionOnce() {
         const current = getSession();
         if (!current?.refresh_token) return null;
-        const payload = await request('/auth/v1/token?grant_type=refresh_token', {
-            method: 'POST',
-            body: { refresh_token: current.refresh_token }
-        });
-        return setSession(payload);
+        const attemptedToken = current.refresh_token;
+        try {
+            const payload = await request('/auth/v1/token?grant_type=refresh_token', {
+                method: 'POST',
+                body: { refresh_token: attemptedToken }
+            });
+            return setSession(payload);
+        } catch (error) {
+            throw classifyRefreshError(error, attemptedToken);
+        }
+    }
+
+    async function lockedRefresh() {
+        // Re-read under the lock: another tab may have refreshed while we waited.
+        const now = Math.floor(Date.now() / 1000);
+        const fresh = getSession();
+        if (!fresh?.refresh_token) return null;
+        if (fresh.expires_at && Number(fresh.expires_at) > now + 60) return fresh;
+        try {
+            return await refreshSessionOnce();
+        } catch (error) {
+            if (error.definitive) { clearSession(); throw error; }
+            // Transient: one quick retry (still inside GoTrue's reuse interval).
+            await new Promise((r) => setTimeout(r, 1500));
+            try {
+                return await refreshSessionOnce();
+            } catch (again) {
+                if (again.definitive) clearSession();
+                throw again;
+            }
+        }
+    }
+
+    function withCrossTabLock(fn) {
+        try {
+            if (navigator.locks?.request) {
+                return navigator.locks.request('norva-session-refresh', fn);
+            }
+        } catch (_) { /* fall through to the lease fallback */ }
+        // Fallback (old WebViews): best-effort localStorage lease. If another tab
+        // holds it, wait a beat and adopt whatever it wrote instead of racing.
+        try {
+            const now = Date.now();
+            const held = Number(localStorage.getItem(KEY_REFRESH_LOCK) || 0);
+            if (held && now - held < 10_000) {
+                return new Promise((r) => setTimeout(r, 1500)).then(() => getSession());
+            }
+            localStorage.setItem(KEY_REFRESH_LOCK, String(now));
+            return Promise.resolve().then(fn).finally(() => {
+                try { localStorage.removeItem(KEY_REFRESH_LOCK); } catch (_) { /* noop */ }
+            });
+        } catch (_) {
+            return Promise.resolve().then(fn);
+        }
+    }
+
+    function refreshSession() {
+        if (refreshInFlight) return refreshInFlight;
+        refreshInFlight = Promise.resolve(withCrossTabLock(lockedRefresh))
+            .finally(() => { refreshInFlight = null; });
+        return refreshInFlight;
     }
 
     async function getAccessToken() {
@@ -179,7 +272,15 @@
         if (!session) return '';
         if (session.expires_at && session.expires_at - 60 <= Math.floor(Date.now() / 1000)) {
             window.NorvaTrace?.log?.('auth token near expiry → refreshSession (network POST /token)');
-            session = await refreshSession().catch(() => null);
+            try {
+                session = await refreshSession();
+            } catch (error) {
+                if (error?.definitive) return '';   // session cleared — really signed out
+                // TRANSIENT failure: keep the stored session and hand back the stale
+                // token. A downstream 401 re-enters the (single-flighted) refresh, so
+                // the session heals instead of the app looking logged out.
+                session = getSession();
+            }
         }
         if (session?.access_token && window.NorvaCloud) window.NorvaCloud.setToken(session.access_token);
         return session?.access_token || '';
@@ -191,8 +292,16 @@
         if (!token) { if (_done) _done('no session token'); return null; }
         const user = await request('/auth/v1/user', { token }).catch(async (error) => {
             if (error.status === 401) {
-                const refreshed = await refreshSession().catch(() => null);
+                // refreshSession throws with .definitive/.transient set — let that
+                // propagate so callers can tell "really signed out" from "network blip".
+                const refreshed = await refreshSession();
                 if (refreshed?.access_token) return request('/auth/v1/user', { token: refreshed.access_token });
+            }
+            // /user itself failed with a non-auth error (network TypeError has no
+            // status; 5xx/429 are server-side trouble): mark transient so callers
+            // keep the session instead of treating it as a logout.
+            if (!error.definitive && (!error.status || error.status >= 500 || error.status === 429)) {
+                error.transient = true;
             }
             throw error;
         });
@@ -206,7 +315,12 @@
     async function signOut() {
         const token = await getAccessToken();
         if (token) {
-            await request('/auth/v1/logout', { method: 'POST', token }).catch(() => {});
+            // scope=local: sign out THIS device only. GoTrue's default scope is
+            // "global", which revokes every session of the account — i.e. pressing
+            // Log out on one household device silently logged out all the OTHER
+            // devices too, which then looked like "logged out after inactivity" at
+            // their next wake. Only the logout button, only this device.
+            await request('/auth/v1/logout?scope=local', { method: 'POST', token }).catch(() => {});
         }
         clearSession();
     }

@@ -99,21 +99,90 @@
     return setSession(payload);
   }
 
-  async function refreshSession() {
+  // Single-flight + cross-tab-locked refresh (mirror of public/js/authApi.js —
+  // see the full rationale there): Supabase refresh tokens are single-use, and a
+  // transient failure must not read as "signed out".
+  let refreshInFlight = null;
+  const KEY_REFRESH_LOCK = 'norva-session-refresh-lock';
+
+  async function refreshSessionOnce() {
     const current = getSession();
     if (!current?.refresh_token) return null;
-    const payload = await request('/auth/v1/token?grant_type=refresh_token', {
-      method: 'POST',
-      body: { refresh_token: current.refresh_token }
-    });
-    return setSession(payload);
+    const attemptedToken = current.refresh_token;
+    try {
+      const payload = await request('/auth/v1/token?grant_type=refresh_token', {
+        method: 'POST',
+        body: { refresh_token: attemptedToken }
+      });
+      return setSession(payload);
+    } catch (error) {
+      const status = Number(error?.status || 0);
+      if (status === 400 || status === 401) {
+        const stored = getSession()?.refresh_token || '';
+        if (stored && stored !== attemptedToken) error.transient = true;
+        else error.definitive = true;
+      } else {
+        error.transient = true;
+      }
+      throw error;
+    }
+  }
+
+  async function lockedRefresh() {
+    const now = Math.floor(Date.now() / 1000);
+    const fresh = getSession();
+    if (!fresh?.refresh_token) return null;
+    if (fresh.expires_at && Number(fresh.expires_at) > now + 60) return fresh;
+    try {
+      return await refreshSessionOnce();
+    } catch (error) {
+      if (error.definitive) { clearSession(); throw error; }
+      await new Promise((r) => setTimeout(r, 1500));
+      try {
+        return await refreshSessionOnce();
+      } catch (again) {
+        if (again.definitive) clearSession();
+        throw again;
+      }
+    }
+  }
+
+  function withCrossTabLock(fn) {
+    try {
+      if (navigator.locks?.request) return navigator.locks.request('norva-session-refresh', fn);
+    } catch (_) { /* fall through */ }
+    try {
+      const now = Date.now();
+      const held = Number(localStorage.getItem(KEY_REFRESH_LOCK) || 0);
+      if (held && now - held < 10_000) {
+        return new Promise((r) => setTimeout(r, 1500)).then(() => getSession());
+      }
+      localStorage.setItem(KEY_REFRESH_LOCK, String(now));
+      return Promise.resolve().then(fn).finally(() => {
+        try { localStorage.removeItem(KEY_REFRESH_LOCK); } catch (_) { /* noop */ }
+      });
+    } catch (_) {
+      return Promise.resolve().then(fn);
+    }
+  }
+
+  function refreshSession() {
+    if (refreshInFlight) return refreshInFlight;
+    refreshInFlight = Promise.resolve(withCrossTabLock(lockedRefresh))
+      .finally(() => { refreshInFlight = null; });
+    return refreshInFlight;
   }
 
   async function getAccessToken() {
     let session = getSession();
     if (!session) return '';
     if (session.expires_at && session.expires_at - 60 <= Math.floor(Date.now() / 1000)) {
-      session = await refreshSession().catch(() => null);
+      try {
+        session = await refreshSession();
+      } catch (error) {
+        if (error?.definitive) return '';
+        session = getSession();   // transient: keep the session, hand back stale token
+      }
     }
     if (session?.access_token && window.NorvaCloud) window.NorvaCloud.setToken(session.access_token);
     return session?.access_token || '';
@@ -124,8 +193,11 @@
     if (!token) return null;
     const user = await request('/auth/v1/user', { token }).catch(async (error) => {
       if (error.status === 401) {
-        const refreshed = await refreshSession().catch(() => null);
+        const refreshed = await refreshSession();   // throws .definitive/.transient
         if (refreshed?.access_token) return request('/auth/v1/user', { token: refreshed.access_token });
+      }
+      if (!error.definitive && (!error.status || error.status >= 500 || error.status === 429)) {
+        error.transient = true;
       }
       throw error;
     });
@@ -138,7 +210,9 @@
   async function signOut() {
     const token = await getAccessToken();
     if (token) {
-      await request('/auth/v1/logout', { method: 'POST', token }).catch(() => {});
+      // scope=local: only THIS device signs out (GoTrue's default revokes every
+      // session of the account — see public/js/authApi.js).
+      await request('/auth/v1/logout?scope=local', { method: 'POST', token }).catch(() => {});
     }
     clearSession();
   }

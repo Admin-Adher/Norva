@@ -59,14 +59,16 @@
 
       try {
         var session = JSON.parse(localStorage.getItem('norva-cloud-session') || 'null');
-        var now = Math.floor(Date.now() / 1000);
+        // No expires_at condition: an EXPIRED access token with a refresh_token is a
+        // signed-in user (the boot refresh rotates it silently). Gating on expiry here
+        // was the dominant "logged out after inactivity" bug — every cold load >1h
+        // after the last one bounced a still-valid session to the landing/login.
         var isUsable = Boolean(
           session &&
           session.access_token &&
           session.refresh_token &&
           session.user &&
-          session.user.id &&
-          (!session.expires_at || Number(session.expires_at) > now + 30)
+          session.user.id
         ) || Boolean(localStorage.getItem('norva-cloud-device-token'));
         if (!isUsable) {
           try {

@@ -2,14 +2,14 @@
   function hasUsableNorvaSession() {
     try {
       const session = JSON.parse(localStorage.getItem('norva-cloud-session') || 'null');
-      const now = Math.floor(Date.now() / 1000);
+      // No expiry condition: an expired access token + refresh_token is still a
+      // signed-in user (the app refreshes at boot) — don't show them "Sign in".
       return Boolean(
         session &&
         session.access_token &&
         session.refresh_token &&
         session.user &&
-        session.user.id &&
-        (!session.expires_at || Number(session.expires_at) > now + 30)
+        session.user.id
       ) || Boolean(localStorage.getItem('norva-cloud-device-token'));
     } catch (_) {
       return false;

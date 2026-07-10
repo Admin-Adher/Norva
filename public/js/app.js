@@ -74,6 +74,7 @@ class App {
         window.NorvaTrace?.log?.('app shell ready — profile picked, router/page renders next. NorvaTrace.summary() for the full table.');
         this.applyCatalogAvailability(null);
         this.startCloudWarmKeep();
+        this.startSessionKeepFresh();
         this.startEnrichmentProgressPoll();
         if (this.currentUser && !this.currentUser.device) this.registerPushToken(); // native FCM token (Android wrapper only; no-op in browser)
 
@@ -610,16 +611,48 @@ class App {
             }
 
             const session = JSON.parse(localStorage.getItem('norva-cloud-session') || 'null');
-            const now = Math.floor(Date.now() / 1000);
+            // No expiry condition: an expired access token + refresh_token is still a
+            // signed-in user — checkAuth()/getAccessToken() rotates it at boot.
+            // Expiry-gating here bounced still-valid sessions to login after >1h idle.
             return Boolean(
                 session?.access_token &&
                 session?.refresh_token &&
-                session?.user?.id &&
-                (!session.expires_at || Number(session.expires_at) > now + 30)
+                session?.user?.id
             );
         } catch (_) {
             return false;
         }
+    }
+
+    // Keep the Supabase session fresh while the app is open: rotate the access
+    // token shortly BEFORE it expires (and on tab wake) instead of on the first
+    // failing call after it — so an idle-but-open tab never carries an expired
+    // token into a burst of requests. Runs only for real USER sessions (paired
+    // device-token screens have nothing to refresh). Safe with many tabs:
+    // NorvaAuth.refreshSession is single-flighted + cross-tab locked.
+    startSessionKeepFresh() {
+        if (!window.NorvaAuth?.refreshSession) return;
+        const tick = () => {
+            if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+            let session = null;
+            try { session = JSON.parse(localStorage.getItem('norva-cloud-session') || 'null'); } catch (_) { /* noop */ }
+            if (!session?.refresh_token || !session?.user?.id) return;   // device-token TV: skip
+            const now = Math.floor(Date.now() / 1000);
+            if (session.expires_at && Number(session.expires_at) - now < 120) {
+                // Transient failures keep the session (next tick retries); a definitive
+                // failure clears it and the next navigation lands on the login page —
+                // which at that point is a real, unavoidable logout (token revoked).
+                window.NorvaAuth.refreshSession().catch(() => { /* handled above */ });
+            }
+        };
+        if (typeof document !== 'undefined') {
+            document.addEventListener('visibilitychange', () => {
+                if (document.visibilityState === 'visible') tick();
+            });
+        }
+        if (this._sessionFreshTimer) clearInterval(this._sessionFreshTimer);
+        this._sessionFreshTimer = setInterval(tick, 60 * 1000);
+        tick();
     }
 
     // Keep the Supabase edge functions warm so the first catalog call after a
@@ -742,6 +775,27 @@ class App {
                 }).catch(() => {});
                 return;
             } catch (err) {
+                // TRANSIENT failure (network not up at wake, Supabase 5xx/429): the
+                // session in storage is still valid — boot with the cached user
+                // instead of bouncing to the login page (that bounce WAS the
+                // "logged out after inactivity" bug). Only a DEFINITIVE auth failure
+                // (refresh token revoked/invalid → err.definitive, session already
+                // cleared by authApi) falls through to the redirect.
+                let cachedUser = null;
+                try { cachedUser = JSON.parse(localStorage.getItem('norva-cloud-session') || 'null')?.user || null; } catch (_) { /* noop */ }
+                if (!err?.definitive && (cachedUser?.id || window.NorvaCloud?.deviceToken)) {
+                    console.warn('Cloud auth check failed transiently — continuing with the cached session:', err);
+                    this.currentUser = {
+                        id: cachedUser?.id || localStorage.getItem('norva-cloud-device-id') || 'paired-device',
+                        username: cachedUser?.email || 'Paired Norva screen',
+                        email: cachedUser?.email || '',
+                        role: 'admin',
+                        cloud: true,
+                        device: !cachedUser
+                    };
+                    this.addLogoutButton();
+                    return;
+                }
                 console.error('Cloud authentication error:', err);
                 const returnTo = window.location.pathname + window.location.search + window.location.hash;
                 window.location.replace('/account.html?returnTo=' + encodeURIComponent(returnTo || '/'));
@@ -807,9 +861,26 @@ class App {
             }
         } catch (err) {
             if (err?.status === 401) {
-                const returnTo = window.location.pathname + window.location.search + window.location.hash;
-                window.location.replace('/account.html?returnTo=' + encodeURIComponent(returnTo || '/'));
-                return false;
+                // A 401 here can be a momentarily-stale token, not a dead session.
+                // Redirect to login ONLY when a refresh attempt fails definitively
+                // (revoked/invalid token — authApi clears the session); a transient
+                // refresh failure falls through to the fail-open branch below.
+                let refreshedOk = false;
+                try {
+                    const refreshed = await window.NorvaAuth?.refreshSession?.();
+                    refreshedOk = Boolean(refreshed?.access_token);
+                } catch (refreshErr) {
+                    if (refreshErr?.definitive || !window.NorvaAuth) {
+                        const returnTo = window.location.pathname + window.location.search + window.location.hash;
+                        window.location.replace('/account.html?returnTo=' + encodeURIComponent(returnTo || '/'));
+                        return false;
+                    }
+                }
+                if (!refreshedOk && !window.NorvaAuth?.getSession?.()?.refresh_token && !this.currentUser?.device) {
+                    const returnTo = window.location.pathname + window.location.search + window.location.hash;
+                    window.location.replace('/account.html?returnTo=' + encodeURIComponent(returnTo || '/'));
+                    return false;
+                }
             }
             // Billing uncertainty must fail open: a temporary entitlement outage
             // should not lock a household out of their own TV service.

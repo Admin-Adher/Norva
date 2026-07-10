@@ -137,11 +137,15 @@ function _isHostedApp() {
 function _hasCloudUserSession() {
     try {
         const session = JSON.parse(localStorage.getItem('norva-cloud-session') || 'null');
-        const now = Math.floor(Date.now() / 1000);
+        // Expiry-agnostic, like _hasCloudUserAccount below: a signed-in user whose
+        // access token just lapsed is STILL signed in — requestToBase refreshes on
+        // the first 401. The old expiry clause silently flipped an idle-but-open tab
+        // to "no user": favorites returned [], playback routed to the device
+        // endpoints, and _cloudAvailable() dropped to the legacy '/api' — all of
+        // which read as "logged out after inactivity".
         return Boolean(
             session?.access_token &&
-            session?.user?.id &&
-            (!session.expires_at || Number(session.expires_at) > now + 30)
+            session?.user?.id
         );
     } catch (_) {
         return false;
