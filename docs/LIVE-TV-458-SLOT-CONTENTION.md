@@ -102,15 +102,114 @@ distinguait pas « échec de chargement » de « catalogue vide » :
    norva.tv après le déploiement Cloudflare. L'app téléphone charge norva.tv
    à distance → correctifs actifs **sans rebuild APK**.
 
-## 5. Cause racine — analyse vérifiée (workflow adversarial, 14 agents)
+## 5. Cause racine — analyse vérifiée (workflow adversarial `wf_21b929da-f47`)
 
-<!-- SECTION COMPLÉTÉE APRÈS LE VERDICT DU WORKFLOW wf_21b929da-f47 -->
+Affirmation initiale de l'ingénieur : *« la cause racine reste
+max_connections:1 — n'importe quelle sonde pendant n'importe quel visionnage
+sur la même identité entre en conflit ; le fix blindé = verrou « provider
+occupé » au niveau de l'identité dans le chemin de sonde ; nuit + Retry
+couvrent 99 % du vécu »*.
 
-_(en cours de vérification au moment de la rédaction — voir §6)_
+**Verdict : PARTIELLEMENT VRAI** (10 agents, 329 appels outillés ; les
+citations clés ont été re-vérifiées à la main ensuite).
+
+### 5.1 Confirmé
+
+- Les sondes ouvrent de **vraies connexions provider** avec les identifiants
+  de la source ; toute lecture simultanée sur le même **compte** se fait
+  refuser (le 458 est relayé tel quel ; la gateway le resynthétise en
+  `503 PROVIDER_BUSY`). Un incident identique est documenté dans le repo
+  (migration `20260702150000`).
+- **Le trou de garde-fou est réel** : toutes les vérifications « en train de
+  regarder » du chemin de sonde standard sont scoppées **par `user_id`**
+  (`userHasLiveSession` — `norva-playback/index.ts:3215-3234`,
+  `accountPregenActive` `:3248-3257`), donc aveugles à : un 2ᵉ compte Norva
+  sur les mêmes identifiants, la lecture native directe au-delà de ~15 min,
+  les téléchargements, et — point clé — **la Live TV web elle-même** : la
+  session reste `pending` à jamais, la télémétrie ne s'émet qu'au zapping →
+  le signal s'éteint **~4 min après le début de tout visionnage réel** (le
+  commentaire du code l'admet, `index.ts:3223-3227`).
+
+### 5.2 Les 4 corrections découvertes (l'affirmation était imprécise)
+
+1. **« Identité » est la mauvaise granularité.** `max_connections` est par
+   **COMPTE** (host+username), pas par identité de panel. La gateway calcule
+   déjà la bonne clé (`proxyKeyFromUrl`, `media-gateway/src/index.js:56-62`) ;
+   un verrou par identité sur-sérialiserait des comptes distincts d'un même
+   panel (cf. `PROVIDER-IDENTITY-DEDUP.md`).
+2. **Un verrou « compte occupé » existe DÉJÀ** dans une voie de sonde : la
+   gateway `/probe-audio` renvoie `409 account_busy`
+   (`media-gateway:778-793`) — mais uniquement pour les identités
+   `low_footprint` et **in-process** (une seule box). La voie relay par
+   défaut n'a **aucun** verrou.
+3. **Un verrou seul serait aveugle** : la table qu'il lirait est vide
+   exactement là où l'incident s'est produit (la Live TV web n'écrit aucun
+   heartbeat). Il faut aussi un **ÉCRIVAIN** du signal — le rapporteur
+   naturel est la gateway, qui voit déjà l'occupation du slot.
+4. **Le « 99 % » était surestimé.** Vérifié en prod le 10-07 : les jobs
+   **10** (compte adrien.outlook/super8k, `*/3 6-23`) et **36** (jeremy,
+   `*/5 6-23`, **sans sourceId** → draine sur 2 panels distincts = le
+   scénario `user_multi_ip` que le code dénonce) sondaient **encore en
+   journée** à 15h45 UTC. Le bouton « Try again » du guide recharge la
+   **liste**, pas le flux — et le classificateur Live
+   (`api.js:61-67`, re-vérifié) matche `401/403/429` mais **pas
+   458/max connections** → une chaîne 458 s'affiche « morte ». Et la fenêtre
+   nuit chevauche la TV du matin (02-05 UTC = 04-08 h locale l'été).
+   **Couverture honnête : ~60-70 % de l'exposition totale ; ~99 % seulement
+   pour « le foyer du propriétaire en soirée ».**
+
+### 5.3 Chemins de visionnage NON protégés par les gardes actuelles
+
+| Chemin | Pourquoi invisible |
+|---|---|
+| Live TV web (l'incident) | session jamais `ready`, événements au zap only → aveugle après ~4 min |
+| Lecture native directe | session `ready` TTL 900 s **sans keepalive** ; historique écrit à la fermeture → un film de 2 h est collidable ~1 h 45 |
+| Téléchargements | copie d'octets depuis l'IP domicile, **zéro appel cloud** pendant des heures |
+| 2ᵉ compte Norva, mêmes identifiants provider | tous les reads sont `.eq user_id` |
+| APK standalone (serveur local) | aucun appel cloud |
+| Divers | bypass `ignoreLiveSession` ; TOCTOU ~110 s (re-check mi-tick **implémenté mais éteint** : `NORVA_CRAWL_YIELD_TO_VIEWERS`, défaut OFF, `index.ts:3207`) ; jobs whisper/pregen déjà lancés (~45 min) ; appareils non-Norva ; traîne de libération ~8 s au zap |
+
+### 5.4 Le fix blindé, version corrigée (design validé contre le code)
+
+1. **Clé = COMPTE** (host+username via `proxyKeyFromUrl`), pas l'identité.
+2. Table `provider_account_activity(account_key PK, last_seen_at, kind)` —
+   clone du pattern `provider_probe_circuit` (RLS sans policy, service_role).
+3. RPCs SECURITY DEFINER : `provider_account_touch(key, kind)` /
+   `provider_account_busy(key)` → `last_seen_at > now() − 5 min`.
+4. **Écrivains (la pièce manquante)** : (a) rapporteur gateway→edge upsert
+   ~60 s piloté par `accountExtractions/rawPumps` (canal `mediaGatewayToken`
+   déjà en place) — couvre Live web + VOD transcode + pregen ; (b) `touch`
+   dans `createPlaybackSession`, `recordPlaybackEvent`, `saveHistory`.
+5. **Lecteur** dans le chemin de sonde (relay inclus), re-check mi-tick
+   inconditionnel, famine bornée (pattern `JOB_GATE_MAX_DEFERRALS`), les
+   crons ne bypassent pas via `ignoreLiveSession`.
+6. Ticks **sans sourceId** (ex. job 36) : résoudre la clé par titre ou exiger
+   `sourceId` partout.
+7. **Limites assumées** : ne protégera jamais la lecture native > 15 min sans
+   keepalive client, les téléchargements, l'APK standalone, les appareils
+   non-Norva, l'auto-collision au zap (traîne 8 s).
+
+### 5.5 Recommandation (du workflow, contresignée)
+
+- **Immédiat (quasi zéro code)** : reprogrammer/scoper les jobs **10 et 36**
+  (dernières sondes diurnes ; le 36 reproduit la collision cross-panel) ;
+  **activer `NORVA_CRAWL_YIELD_TO_VIEWERS`** (le re-check existe, il est
+  juste éteint).
+- **Court terme (1-2 j, le vrai fix)** : verrou « compte occupé » ci-dessus —
+  lecteur **et** écrivain gateway→edge, clé host+username. En parallèle,
+  **classificateur Live 458-aware** (`api.js:61-67` + retry ≥ 8 s) : le fix
+  UX le moins cher au meilleur rendement, car il couvre aussi les 458
+  qu'aucun verrou ne peut empêcher.
+- **Différable** : keepalive natif, signalement des téléchargements.
+- Pourquoi pas « jamais » : la reprogrammation nocturne est une coïncidence
+  d'emplois du temps, pas une garantie — chaque nouvel utilisateur ou source
+  recrée le conflit ; tous les précédents techniques existent déjà.
 
 ## 6. Suivi
 
-- [ ] Intégrer le verdict du workflow `verify-provider-slot-root-cause` (§5).
-- [ ] Décider : verrou « identité occupée » dans le chemin de sonde (fix
-      blindé) — maintenant / plus tard / jamais, selon le verdict.
-- [ ] Fin du prêt : réactiver crons 79/80 (SQL ci-dessus, §3).
+- [x] Verdict du workflow intégré (§5) — commit de cette version.
+- [ ] **Immédiat** : scoper/reprogrammer jobs 10 & 36 ; activer
+      `NORVA_CRAWL_YIELD_TO_VIEWERS` (décision propriétaire).
+- [ ] **Court terme** : verrou « compte occupé » (lecteur + écrivain gateway)
+      + classificateur Live 458-aware.
+- [ ] Fin du prêt : réactiver crons 79/80 (SQL §3).
