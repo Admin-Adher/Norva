@@ -1,9 +1,14 @@
 # Journal de bascule DB → self-host Hetzner — 2026-07-11
 
-> État figé au **11/07/2026 ~01h CEST**. Migration **data terminée et vérifiée à 100 %** ;
-> il reste la **phase cutover fonctionnel** (secrets fonctions + Caddy/TLS + repoint app).
+> État figé au **11/07/2026 ~01h30 CEST**. Migration **data terminée et vérifiée à 100 %**,
+> **secrets fonctions résolus** (`.env` complet, hors Stancer volontaire) → il ne reste que
+> **Caddy/TLS + repoint app** pour la bascule.
 > **Le managé reste intact en lecture** → rollback total dispo à tout moment.
 > Rien n'est exposé publiquement (Kong écoute uniquement en `127.0.0.1`).
+>
+> ⚠️ **TODO sécurité** : la clé privée FCM (service account `firebase-adminsdk-fbsvc@norva-ecosystem`,
+> key id `2ec8956985f298a9397ed1530682efd471578d93`) a transité **en clair** → **à régénérer**
+> (Firebase → Service accounts → Keys : supprimer cette clé, en créer une neuve, re-poser dans `.env`).
 
 ---
 
@@ -20,7 +25,7 @@
 | 3 secrets vault (backfill/cron/resend) | ✅ transférés (vault + `.env`) |
 | 47 crons (URLs réécrites → `api.norva.tv`) | ✅ stagés, **désactivés** |
 | Secrets fonctions (cœur) | 🟢 **OK** — TMDB posé, média/relay via DB, emails/cron faits |
-| Secrets fonctions (optionnels) | 🟡 Stancer (paiements) + FCM (push) + `NORVA_ENTITLEMENTS_MODE` à poser |
+| Secrets fonctions (optionnels) | 🟢 FCM posé (⚠️ **clé à re-générer**) · `NORVA_ENTITLEMENTS_MODE`=`observe` · Stancer zappé (refonte paiement post-migration) |
 | **Caddy/TLS `api.norva.tv`** | ⛔ à installer |
 | **Repoint app (`cloudApi.js`) + redeploy** | ⛔ à faire |
 
@@ -144,10 +149,14 @@ donc **aucun** import entre le dump et la vérif).
      `AUTH_EMAIL_FROM` (`Norva <noreply@norva.tv>`), `NORVA_TMDB_VALIDATE_LIMIT` (120),
      `NORVA_CATALOG_READ_SOURCE` (`cloud_titles`).
    - **Posés** : `NORVA_BACKFILL_TOKEN`, `NORVA_CRON_SHARED_SECRET`, `RESEND_API_KEY` (vault),
-     `SEND_EMAIL_HOOK_SECRET` (retrouvé), **`TMDB_API_KEY`** (v3, 32 car.).
-   - **Restent (optionnels, non-bloquants pour catalogue/lecture)** : `STANCER_SECRET_KEY`,
-     `STANCER_WEBHOOK_TOKEN`, `NORVA_STANCER_MODE` (dashboard Stancer, paiements),
-     `FCM_SERVICE_ACCOUNT` (Firebase, push), `NORVA_ENTITLEMENTS_MODE` (config, défaut `enforce`).
+     `SEND_EMAIL_HOOK_SECRET` (retrouvé), **`TMDB_API_KEY`** (v3, 32 car.),
+     **`FCM_SERVICE_ACCOUNT`** (JSON `norva-ecosystem` — ⚠️ **clé à re-générer**, cf. TODO en tête),
+     **`NORVA_ENTITLEMENTS_MODE=observe`** (accès ouvert pendant la transition ; `normalizeEntitlementsMode`
+     reconnaît `observe`/`gate0`/`off`, tout le reste → `enforce`).
+   - **Volontairement vides** : `STANCER_SECRET_KEY`, `STANCER_WEBHOOK_TOKEN`, `NORVA_STANCER_MODE`
+     — Stancer sera **remplacé** par une autre passerelle après la migration ; le billing tourne en
+     no-op sans casser le reste.
+   - → **`.env` complet pour le cœur.** Reste juste Caddy/TLS + repoint (points 4-6 ci-dessous).
 2. `docker compose --env-file .env -f docker-compose.supabase.yml up -d functions` (recharge l'env).
 3. Vérifier la config playback : tables `media_gateways` / `cloud_runtime_config` (le média-gateway
    n'est PAS un secret fonction → probablement piloté par la DB, déjà migrée).
