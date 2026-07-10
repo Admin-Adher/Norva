@@ -44,6 +44,7 @@ import androidx.media3.common.util.UnstableApi;
 import androidx.media3.datasource.DataSource;
 import androidx.media3.datasource.DefaultHttpDataSource;
 import androidx.media3.datasource.HttpDataSource;
+import androidx.media3.exoplayer.DefaultRenderersFactory;
 import androidx.media3.exoplayer.ExoPlayer;
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory;
 import androidx.media3.session.MediaSession;
@@ -267,6 +268,16 @@ public class PlayerActivity extends Activity {
         }
 
         player = new ExoPlayer.Builder(this)
+                // Use the bundled FFmpeg software audio decoder (AC-3/E-AC-3/DTS/
+                // TrueHD) as a FALLBACK after the device's MediaCodec, so offline
+                // downloads with Dolby/DTS audio still play on phones whose hardware
+                // lacks those decoders. EXTENSION_RENDERER_MODE_ON keeps hardware
+                // decoders first and only falls back to FFmpeg when needed. This is
+                // a no-op until the decoder .aar is dropped in app/libs/:
+                // DefaultRenderersFactory loads FfmpegAudioRenderer by reflection and
+                // silently skips it when absent. (See clients/android-ffmpeg-decoder.)
+                .setRenderersFactory(new DefaultRenderersFactory(this)
+                        .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON))
                 .setMediaSourceFactory(new DefaultMediaSourceFactory(dataSourceFactory))
                 // Symmetric ±10s so the controller's rewind/fast-forward and the
                 // double-tap gesture both jump a predictable, equal amount.

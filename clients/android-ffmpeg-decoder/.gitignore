@@ -1,0 +1,4 @@
+# Native build workspace + produced artifacts (built in CI, committed into
+# app/libs/ deliberately — not from here).
+.build/
+out/
