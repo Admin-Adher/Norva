@@ -1239,6 +1239,7 @@ class HomePage {
             hero.addEventListener('mouseleave', () => { this._heroHovered = false; });
             hero.addEventListener('focusin', () => { this._heroHovered = true; });
             hero.addEventListener('focusout', () => { this._heroHovered = false; });
+            this._bindHeroSwipe(hero);
         }
 
         this.showHeroSlide(0, { instant: true });
@@ -1252,10 +1253,70 @@ class HomePage {
         this._heroTimer = null;
         if (!this._heroSlides || this._heroSlides.length < 2) return;
         this._heroTimer = setInterval(() => {
-            if (document.hidden || this._heroHovered) return;
+            if (document.hidden || this._heroHovered || this._heroInteracting) return;
             if (this.app?.currentPage !== 'home') return;
             this.showHeroSlide((this._heroIndex + 1) % this._heroSlides.length);
         }, 9000);
+    }
+
+    // Touch/drag swipe on the billboard: a horizontal swipe changes the featured
+    // title (left → next, right → previous) so recommendations aren't reachable
+    // only via the dots or the 9s auto-rotation — the phone gesture users expect.
+    // touch-action: pan-y lets vertical drags fall through to the page scroll, and
+    // the click a swipe synthesizes is swallowed so it never fires Play/Details.
+    // Bound once on the persistent #home-hero node; reads live slide state at
+    // gesture time, so it stays correct across renderHero's cache-paint + fresh runs.
+    _bindHeroSwipe(hero) {
+        hero.style.touchAction = 'pan-y';
+        const H_COMMIT = 45;    // horizontal travel (px) that commits a slide change
+        const LOCK_SLOP = 10;   // travel (px) before we lock horizontal vs vertical intent
+        let startX = 0, startY = 0, pid = null, tracking = false, horizontal = false, decided = false;
+
+        const reset = () => {
+            tracking = false; horizontal = false; decided = false;
+            this._heroInteracting = false;
+            if (pid != null) { try { hero.releasePointerCapture(pid); } catch (_) { /* ignore */ } }
+            pid = null;
+        };
+
+        hero.addEventListener('pointerdown', (e) => {
+            if (e.button != null && e.button > 0) return;   // primary button / touch only
+            pid = e.pointerId; startX = e.clientX; startY = e.clientY;
+            tracking = true; horizontal = false; decided = false;
+        });
+        hero.addEventListener('pointermove', (e) => {
+            if (!tracking || e.pointerId !== pid) return;
+            const dx = e.clientX - startX, dy = e.clientY - startY;
+            if (decided) return;
+            if (Math.abs(dx) < LOCK_SLOP && Math.abs(dy) < LOCK_SLOP) return;
+            decided = true;
+            horizontal = Math.abs(dx) > Math.abs(dy);
+            if (horizontal) {
+                this._heroInteracting = true;               // pause auto-rotation during the drag
+                try { hero.setPointerCapture(pid); } catch (_) { /* not critical */ }
+            } else {
+                tracking = false;                           // vertical → let the page scroll
+            }
+        });
+        const onUp = (e) => {
+            if (!tracking || e.pointerId !== pid) { reset(); return; }
+            const dx = e.clientX - startX;
+            const wasHorizontal = horizontal;
+            reset();
+            if (!wasHorizontal) return;                     // vertical / tap → leave the click alone
+            // A real horizontal drag happened → swallow the click it synthesizes so it
+            // can't land on Play/Details/a dot.
+            const swallow = (ev) => { ev.stopPropagation(); ev.preventDefault(); };
+            hero.addEventListener('click', swallow, true);
+            setTimeout(() => hero.removeEventListener('click', swallow, true), 60);
+            const n = this._heroSlides?.length || 0;
+            if (n < 2 || Math.abs(dx) < H_COMMIT) return;   // too short to commit a change
+            const dir = dx < 0 ? 1 : -1;                    // swipe left → next, right → previous
+            this.showHeroSlide((this._heroIndex + dir + n) % n);
+            this._startHeroRotation();                      // restart the 9s timer from this slide
+        };
+        hero.addEventListener('pointerup', onUp);
+        hero.addEventListener('pointercancel', reset);
     }
 
     showHeroSlide(index, { instant = false } = {}) {
