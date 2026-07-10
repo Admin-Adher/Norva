@@ -34,12 +34,26 @@ jobs:
       - name: Install FFmpeg build deps (nasm/make)
         run: sudo apt-get update && sudo apt-get install -y nasm make pkg-config
 
+      # NOTE: no local-cache — setup-ndk's cache restore loses the execute bits on
+      # the toolchain binaries, so a cache-hit run fails FFmpeg's C-compiler test
+      # ("clang is unable to create an executable file"). Downloading the NDK fresh
+      # costs ~1 min and is reliable (run #1, pre-cache, passed this step; run #2,
+      # cache-hit, failed it).
       - name: Set up Android NDK r26b
         id: ndk
         uses: nttld/setup-ndk@v1
         with:
           ndk-version: r26b
-          local-cache: true
+
+      - name: Sanity-check the NDK toolchain
+        env:
+          ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
+        run: |
+          CLANG="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/clang"
+          if ! "$CLANG" --version; then
+            echo "::error:: NDK clang is not executable — toolchain install is broken."
+            exit 1
+          fi
 
       - name: Build decoder AAR (LGPL, audio-only)
         env:
