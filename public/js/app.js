@@ -2086,7 +2086,7 @@ class App {
             if (/NorvaTV-Android/i.test(navigator.userAgent || '')) { this._isAdminCached = false; return false; }
             if (!window.API?.isCloudMode?.()) { this._isAdminCached = false; return false; }
             const sbUrl = (localStorage.getItem('norva-supabase-url') || window.NORVA_SUPABASE_URL
-                || 'https://oupsceccxsonaalhueff.supabase.co').replace(/\/+$/, '');
+                || 'https://api.norva.tv').replace(/\/+$/, '');
             const sbKey = localStorage.getItem('norva-supabase-key') || window.NORVA_SUPABASE_PUBLISHABLE_KEY
                 || 'sb_publishable_LJwYVgPGHYNYTDk7s3eOew_6TU73Fcw';
             let token = '';

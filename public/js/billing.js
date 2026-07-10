@@ -79,7 +79,7 @@
   // WITHOUT redirecting (embed:true → the return leg goes through checkout-done.html).
   async function stancerCheckoutUrl(opts) {
     const cfg = CONFIG.stancer || {};
-    const base = ((window.NorvaAuth && NorvaAuth.supabaseUrl) || 'https://oupsceccxsonaalhueff.supabase.co').replace(/\/+$/, '');
+    const base = ((window.NorvaAuth && NorvaAuth.supabaseUrl) || 'https://api.norva.tv').replace(/\/+$/, '');
     const apikey = (window.NorvaAuth && NorvaAuth.publishableKey) || '';
     const token = await sessionToken();
     if (!token) throw err('Please sign in first', 'not_signed_in');
@@ -101,7 +101,7 @@
 
   // POST an account-scoped Stancer action (cancel / resume / save-offer) and return the response.
   async function stancerAction(action, body) {
-    const base = ((window.NorvaAuth && NorvaAuth.supabaseUrl) || 'https://oupsceccxsonaalhueff.supabase.co').replace(/\/+$/, '');
+    const base = ((window.NorvaAuth && NorvaAuth.supabaseUrl) || 'https://api.norva.tv').replace(/\/+$/, '');
     const apikey = (window.NorvaAuth && NorvaAuth.publishableKey) || '';
     const token = await sessionToken();
     if (!token) throw err('Please sign in first', 'not_signed_in');
@@ -131,7 +131,7 @@
   // 'plan_changed'|'plan_scheduled'|'unchanged'} or {ok:false, reason:'no_live_sub'
   // |'requires_card'} → caller falls back to the checkout flow.
   async function stancerChangePlan(plan, period) {
-    const base = ((window.NorvaAuth && NorvaAuth.supabaseUrl) || 'https://oupsceccxsonaalhueff.supabase.co').replace(/\/+$/, '');
+    const base = ((window.NorvaAuth && NorvaAuth.supabaseUrl) || 'https://api.norva.tv').replace(/\/+$/, '');
     const apikey = (window.NorvaAuth && NorvaAuth.publishableKey) || '';
     const token = await sessionToken();
     if (!token) throw err('Please sign in first', 'not_signed_in');
@@ -148,7 +148,7 @@
   async function confirmStancer() {
     if (!isStancerEnabled()) return { skipped: true };
     const cfg = CONFIG.stancer || {};
-    const base = ((window.NorvaAuth && NorvaAuth.supabaseUrl) || 'https://oupsceccxsonaalhueff.supabase.co').replace(/\/+$/, '');
+    const base = ((window.NorvaAuth && NorvaAuth.supabaseUrl) || 'https://api.norva.tv').replace(/\/+$/, '');
     const apikey = (window.NorvaAuth && NorvaAuth.publishableKey) || '';
     const token = await sessionToken();
     if (!token) return { skipped: true };
@@ -167,7 +167,7 @@
   async function stancerProfile() {
     if (!isStancerEnabled()) return null;
     const cfg = CONFIG.stancer || {};
-    const base = ((window.NorvaAuth && NorvaAuth.supabaseUrl) || 'https://oupsceccxsonaalhueff.supabase.co').replace(/\/+$/, '');
+    const base = ((window.NorvaAuth && NorvaAuth.supabaseUrl) || 'https://api.norva.tv').replace(/\/+$/, '');
     const apikey = (window.NorvaAuth && NorvaAuth.publishableKey) || '';
     const token = await sessionToken();
     if (!token) return null;

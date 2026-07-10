@@ -6,7 +6,7 @@
 (function () {
   function sbUrl() {
     return (localStorage.getItem('norva-supabase-url') || window.NORVA_SUPABASE_URL
-      || 'https://oupsceccxsonaalhueff.supabase.co').replace(/\/+$/, '');
+      || 'https://api.norva.tv').replace(/\/+$/, '');
   }
   function sbKey() {
     return localStorage.getItem('norva-supabase-key') || window.NORVA_SUPABASE_PUBLISHABLE_KEY

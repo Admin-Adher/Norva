@@ -7,7 +7,7 @@
 (function () {
     'use strict';
 
-    const DEFAULT_SUPABASE_URL = 'https://oupsceccxsonaalhueff.supabase.co';
+    const DEFAULT_SUPABASE_URL = 'https://api.norva.tv';
     const DEFAULT_PUBLISHABLE_KEY = 'sb_publishable_LJwYVgPGHYNYTDk7s3eOew_6TU73Fcw';
     const KEY_SESSION = 'norva-cloud-session';
 

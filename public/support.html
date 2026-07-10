@@ -142,7 +142,7 @@
   <script src="/js/authApi.js"></script>
   <script>
     (function () {
-      const BASE = ((window.NorvaAuth && NorvaAuth.supabaseUrl) || 'https://oupsceccxsonaalhueff.supabase.co').replace(/\/+$/, '') + '/functions/v1/norva-support';
+      const BASE = ((window.NorvaAuth && NorvaAuth.supabaseUrl) || 'https://api.norva.tv').replace(/\/+$/, '') + '/functions/v1/norva-support';
       const APIKEY = (window.NorvaAuth && NorvaAuth.publishableKey) || '';
 
       // Same-site guard: only a path starting with a single "/" is trusted, so returnTo can never

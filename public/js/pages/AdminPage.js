@@ -26,7 +26,7 @@ class AdminPage {
     // ── direct PostgREST RPC client (mirrors authApi.js config resolution) ──
     _sbUrl() {
         return (localStorage.getItem('norva-supabase-url') || window.NORVA_SUPABASE_URL
-            || 'https://oupsceccxsonaalhueff.supabase.co').replace(/\/+$/, '');
+            || 'https://api.norva.tv').replace(/\/+$/, '');
     }
     _sbKey() {
         return localStorage.getItem('norva-supabase-key') || window.NORVA_SUPABASE_PUBLISHABLE_KEY
