@@ -2631,6 +2631,11 @@ async function recordPlaybackEvent(
     .single();
   if (error) throwDb(error, "Unable to record playback event");
 
+  // Account busy-lock writer (twin of norva-playback recordPlaybackEvent) — device-fallback path.
+  try {
+    if (sourceId) await db.rpc("provider_account_touch_by_source", { p_source_id: sourceId, p_kind: "event" });
+  } catch (_) { /* best-effort */ }
+
   if (sourceId && ttff && (eventType === "first_frame" || eventType === "play_started")) {
     await recordPlaybackStartupObservation(db, { userId, sourceId, itemType, itemId, startupMs: ttff });
   }
@@ -2932,6 +2937,12 @@ async function createPlaybackSession(req: Request, userId: string, db: SupabaseC
     .select("*")
     .single();
   if (error) throwDb(error, "Unable to create playback session");
+
+  // Account busy-lock writer (twin of norva-playback createPlaybackSession) — covers the older
+  // native/device fallback that routes playback through norva-cloud. Best-effort.
+  try {
+    if (sourceId) await db.rpc("provider_account_touch_by_source", { p_source_id: sourceId, p_kind: "session" });
+  } catch (_) { /* best-effort */ }
 
   if (mode === "direct") {
     return {

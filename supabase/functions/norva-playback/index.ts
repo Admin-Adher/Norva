@@ -3287,7 +3287,14 @@ function providerAccountKeyFromUrl(url: string): string {
   try {
     const u = new URL(url);
     const segs = u.pathname.split("/").filter(Boolean);
-    return u.host + (segs.length >= 2 ? "/" + segs[1] : "");
+    if (segs.length < 2) return u.host;
+    // DECODE the username segment: stream URLs are built with encodeURIComponent(username)
+    // (xtreamStreamUrl), but provider_account_touch_by_source writes the RAW username from
+    // config_hint. All producers must converge on the DECODED form or a username with a
+    // URL-special char (@, +, space…) writes/reads mismatched keys and the lock goes blind.
+    let user = segs[1];
+    try { user = decodeURIComponent(user); } catch { /* keep raw on malformed % */ }
+    return u.host + "/" + user;
   } catch {
     return "";
   }
@@ -3308,8 +3315,12 @@ async function runAccountActivity(req: Request, db: SupabaseClient) {
     .slice(0, 64);
   if (!keys.length) return { ok: true, touched: 0 };
   const kind = stringOr(body.kind, "gateway").slice(0, 32);
-  const { error } = await db.rpc("provider_account_touch_many", { p_keys: keys, p_kind: kind });
-  if (error) throwDb(error, "Unable to record account activity");
+  // Fail-open like every other writer/reader in this feature: a bookkeeping error (RPC/table
+  // absent on a lagged env, transient DB) must never 500 the gateway reporter.
+  try {
+    const { error } = await db.rpc("provider_account_touch_many", { p_keys: keys, p_kind: kind });
+    if (error) return { ok: true, touched: 0, warn: "rpc-error" };
+  } catch (_) { return { ok: true, touched: 0, warn: "rpc-exception" }; }
   return { ok: true, touched: keys.length };
 }
 
@@ -3773,6 +3784,14 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
             ? await resolveSeriesEpisodeUrl(vSourceId, externalId, userId, db).catch(() => null)
             : ((await resolvePlaybackTarget(vSourceId, vit, externalId, userId, db).catch(() => null))?.targetUrl ?? null);
           if (!targetUrl) continue;
+          // Account busy-lock: a whisper extraction pulls the stream for minutes and DOES hold the
+          // single connection slot (unlike a panel call). The branch's top-level userHasLiveSession
+          // guard is per-user + goes dark ~4min in; re-check the account here so we yield to any
+          // viewer/device on this account before starting the extraction. Skip (not fail) when busy.
+          if (body.ignoreLiveSession !== true) {
+            const ak = providerAccountKeyFromUrl(targetUrl);
+            if (ak) { try { const { data: b } = await db.rpc("provider_account_busy", { p_key: ak }); if (b === true) continue; } catch (_) { /* fail-open */ } }
+          }
           const tracks = ((t.audio_tracks as JsonRecord[]) || [])
             .map((x) => ({ index: Number(x?.index), lang: stringOrNull(x?.lang) }))
             .filter((x) => Number.isInteger(x.index));
@@ -3972,6 +3991,26 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
   const effConcurrency = footprint?.lowFootprint ? 1 : concurrency;
   let lowFpProbed = 0;
 
+  // Account busy-lock, TICK LEVEL (per-source crons: 62-65, 79-80 — the ones that caused the
+  // incident). If a human is watching THIS source's provider account right now, skip the whole
+  // tick before ANY resolution — series target-resolution itself hits the panel (resolveSeriesEpisode
+  // → get_series_info), so a per-title gate placed after resolution can't protect series. Derived
+  // from the source config (DB-only, no provider hit); key mirrors provider_account_touch_by_source
+  // (lower host + '/' + raw username). Skipped (not stamped, not counted as work) so the exhausted
+  // mark and the fallthrough chain treat it as a no-op. Account-wide ticks (no sourceId — crons
+  // 10/36, movie-type, DB-only resolution) fall through to the per-title gate below. Fail-open.
+  if (sourceId && body.ignoreLiveSession !== true) {
+    try {
+      const sc = await loadSourceConfig(sourceId, userId, db);
+      const host = sc?.serverUrl ? new URL(normalizeBaseUrl(String(sc.serverUrl))).host : "";
+      const key = host && sc?.username ? host + "/" + String(sc.username) : "";
+      if (key) {
+        const { data } = await db.rpc("provider_account_busy", { p_key: key });
+        if (data === true) return { mode, processed: 0, updated: 0, skipped: "account-busy", sourceId, lastId: afterId, hasMore: true };
+      }
+    } catch (_) { /* fail-open: never let the lock read halt the crawl */ }
+  }
+
   // Account busy-lock READER (2026-07-10 458 incident): before ANY provider hit (relay header
   // probe, gateway residential probe, or vod-info panel call — all are the user_multi_ip signal
   // when a human is watching the same account), consult provider_account_activity. Keyed per
@@ -3980,7 +4019,10 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
   // mid-tick, cheap enough to add ~1 read per 20s per account. Fail-open: an RPC error must
   // never halt the crawl (busy=false). Skipped titles are NOT stamped → retried next tick.
   const accountBusyCache = new Map<string, { busy: boolean; at: number }>();
-  const ACCOUNT_BUSY_CACHE_MS = 20_000;
+  // 10s: short enough that a probe stops STARTING within ~10s of a viewer's first touch (keeps
+  // the worst-case slot-contention window under the web VOD retry budget), cheap enough to add
+  // at most ~1 indexed RPC read per account per 10s of a tick.
+  const ACCOUNT_BUSY_CACHE_MS = 10_000;
   const accountBusyCached = async (accountKey: string): Promise<boolean> => {
     const now = Date.now();
     const hit = accountBusyCache.get(accountKey);
@@ -4205,6 +4247,14 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
     try {
       await db.rpc("provider_probe_circuit_record_tick", { p_identity_key: probeIdentityKey, p_ok_count: cbOk, p_fail_count: cbBanish });
     } catch (_) { /* best-effort */ }
+  }
+
+  // If the whole tick did no provider work because the account(s) were busy (account-wide path,
+  // where the per-title gate — not the tick-level one — did the skipping), report it as skipped
+  // so the exhausted-dimension mark isn't cleared and the fallthrough chain doesn't count it as
+  // progress. hasMore keeps the cursor so the same titles are retried once the viewer stops.
+  if (diag.accountBusy > 0 && updated === 0 && cbOk === 0 && cbBanish === 0) {
+    return { mode, processed: 0, updated: 0, diag, skipped: "account-busy", lastId: afterId, hasMore: true };
   }
 
   return { processed: titles.length, updated, diag, ...(debug ? { sample } : {}), lastId, hasMore: titles.length === limit, ...(cbBanish || cbOk ? { probeHealth: { ok: cbOk, banish: cbBanish } } : {}) };

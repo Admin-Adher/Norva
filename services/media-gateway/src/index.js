@@ -940,7 +940,6 @@ app.post('/transcribe-async/:token', (req, res) => {
     if (!jobId || !/^https:\/\/[^/]+\.supabase\.co\//.test(callbackUrl)) {
         return res.status(400).json({ error: 'jobId and a valid supabase callback are required' });
     }
-    noteEdgeCallbackBase(callbackUrl);
     const start = Math.max(0, Number.parseFloat(req.query.start) || 0);
     const dur = Math.max(0, Number.parseFloat(req.query.dur) || 0); // 0 = whole track (production); >0 = clip (test)
     const ua = claims.ua || FFMPEG_USER_AGENT;
@@ -970,7 +969,6 @@ app.post('/ocr-async/:token', (req, res) => {
     if (!jobId || !/^https:\/\/[^/]+\.supabase\.co\//.test(callbackUrl)) {
         return res.status(400).json({ error: 'jobId and a valid supabase callback are required' });
     }
-    noteEdgeCallbackBase(callbackUrl);
     const lang = /^[a-z+]{3,40}$/.test(String(req.query.lang || '')) ? String(req.query.lang) : OCR_LANGS;
     // fmt selects the pipeline: 'pgs' (.sup parser) vs 'vobsub'/'dvb' (ffmpeg sub2video → frames).
     const fmt = ['pgs', 'vobsub', 'dvb'].includes(String(req.query.fmt || '')) ? String(req.query.fmt) : 'pgs';
@@ -996,7 +994,6 @@ app.post('/storyboard-async/:token', (req, res) => {
     if (!jobId || !/^https:\/\/[^/]+\.supabase\.co\//.test(callbackUrl)) {
         return res.status(400).json({ error: 'jobId and a valid supabase callback are required' });
     }
-    noteEdgeCallbackBase(callbackUrl);
     const uploadUrl = String(req.query.uploadUrl || '');
     if (!/^https:\/\/[^/]+\.supabase\.co\/storage\//.test(uploadUrl)) {
         return res.status(400).json({ error: 'a supabase storage uploadUrl is required' });
@@ -1027,7 +1024,6 @@ app.post('/translate-async', requireGatewayAuth, (req, res) => {
     if (!jobId || !/^https:\/\/[^/]+\.supabase\.co\//.test(callbackUrl)) {
         return res.status(400).json({ error: 'jobId and a valid supabase callback are required' });
     }
-    noteEdgeCallbackBase(callbackUrl);
     if (!/^[a-z]{2,3}$/.test(source) || !/^[a-z]{2,3}$/.test(target)) return res.status(400).json({ error: 'invalid source/target' });
     if (!vtt.trim()) return res.status(400).json({ error: 'vtt is required' });
     if (!argosCanServe(source, target)) return res.status(422).json({ error: `unsupported pair ${source}->${target}` });
@@ -3574,18 +3570,25 @@ function isLocalOrigin(origin) {
 // signal WRITER for web Live TV, whose per-user session signals go dark ~4 min into viewing.
 // Additive + fail-open: nothing in the media path depends on it; a failed POST is just logged
 // once per hour. Disable with ACCOUNT_ACTIVITY_REPORT_MS=0.
-// The edge base URL comes from NORVA_EDGE_CALLBACK_BASE (e.g.
-// https://<ref>.supabase.co/functions/v1/norva-playback) or is learned from the first valid
-// job callbackUrl this box receives (whisper/OCR/storyboard/translate all carry one).
+// The edge base URL is PINNED to NORVA_EDGE_CALLBACK_BASE (e.g.
+// https://<ref>.supabase.co/functions/v1/norva-playback). It is NOT learned from job callbackUrls:
+// that would (a) leave the reporter inert after every redeploy until an unrelated job happens to
+// run, and (b) let a callbackUrl steer where the GATEWAY_TOKEN-bearing POST goes. Env-only removes
+// both. If unset, the reporter stays idle (logged at startup) and the lock degrades gracefully to
+// the edge-side session/event/history writers.
 const ACCOUNT_ACTIVITY_REPORT_MS = clampInt(process.env.ACCOUNT_ACTIVITY_REPORT_MS, 60_000, 0, 300_000);
-let edgeCallbackBase = (process.env.NORVA_EDGE_CALLBACK_BASE || '').replace(/\/+$/, '');
-function noteEdgeCallbackBase(callbackUrl) {
-    if (edgeCallbackBase) return;
-    const m = String(callbackUrl || '').match(/^(https:\/\/[^/]+\.supabase\.co\/functions\/v1\/[^/?#]+)/);
-    if (m) {
-        edgeCallbackBase = m[1];
-        console.log(`[media-gateway] account-activity: learned edge base ${edgeCallbackBase}`);
-    }
+const edgeCallbackBase = (process.env.NORVA_EDGE_CALLBACK_BASE || '').replace(/\/+$/, '');
+// The account activity key is host + '/' + username. proxyKeyFromUrl keeps the username
+// percent-ENCODED (it is the raw path segment) so the sticky proxy pool key is stable; but the
+// edge stores the DECODED username (provider_account_touch_by_source writes config_hint.username
+// raw). Decode the username part before reporting so all producers converge on the decoded form.
+function decodeAccountKey(key) {
+    const s = String(key || '');
+    const i = s.indexOf('/');
+    if (i < 0) return s;
+    let user = s.slice(i + 1);
+    try { user = decodeURIComponent(user); } catch { /* keep raw on malformed % */ }
+    return s.slice(0, i) + '/' + user;
 }
 function activeProviderAccountKeys() {
     const keys = new Set();
@@ -3595,7 +3598,7 @@ function activeProviderAccountKeys() {
     for (const p of rawPumps) { if (p && p.proxyKey) keys.add(p.proxyKey); }
     for (const key of accountExtractions.keys()) keys.add(key);
     keys.delete('');
-    return [...keys].slice(0, 64);
+    return [...keys].map(decodeAccountKey).slice(0, 64);
 }
 let _accountActivityLastErrorAt = 0;
 async function reportAccountActivity() {
@@ -3621,6 +3624,11 @@ async function reportAccountActivity() {
     }
 }
 if (ACCOUNT_ACTIVITY_REPORT_MS > 0) {
+    if (edgeCallbackBase) {
+        console.log(`[media-gateway] account-activity reporter ON (every ${ACCOUNT_ACTIVITY_REPORT_MS}ms → ${edgeCallbackBase}/account-activity)`);
+    } else {
+        console.warn('[media-gateway] account-activity reporter IDLE — set NORVA_EDGE_CALLBACK_BASE to enable (busy-lock falls back to edge-side session/event/history writers)');
+    }
     setInterval(() => { reportAccountActivity(); }, ACCOUNT_ACTIVITY_REPORT_MS).unref();
 }
 
