@@ -1268,7 +1268,11 @@ class MoviesPage {
         // Flat card grid → drop the rail-host modifier so the grid centers/wraps.
         this.container.classList.remove('rail-host');
         this.container.innerHTML = '';
-        this._viewRenderedAt = Date.now();
+        // Only a populated grid counts as a "warm view". Leave an empty render
+        // (zero cards — e.g. a transient empty catalogue fetch mid-sync) UN-stamped
+        // so show()'s warm early-return (~line 650) does not freeze the empty
+        // "No movies here yet" grid on back-nav; the next entry reloads instead.
+        this._viewRenderedAt = cards.length ? Date.now() : 0;
         // Re-rendering resets scrollTop to 0 without firing a scroll event, so
         // re-sync the compact strip to avoid it sticking shrunk at the top.
         this.updateContinueCompact();

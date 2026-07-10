@@ -1095,6 +1095,10 @@ class WatchPage {
             const content = {
                 ...snapshot.content,
                 type: snapshot.content.type,
+                // Carry the origin persisted at save time (saveResumeSnapshot) so a
+                // playback restored after a page refresh — where currentPage is
+                // already 'watch' — still knows where Back should return to.
+                returnPage: snapshot.returnPage || null,
                 resumeTime: snapshotResumePosition,
                 playbackPreferences: snapshot.playback?.playbackPreferences || snapshot.playbackPreferences || snapshot.content.playbackPreferences || null,
                 durationHint: this.normalizeDuration(snapshot.content.durationHint) || this.normalizeDuration(snapshot.duration),
@@ -1300,7 +1304,26 @@ class WatchPage {
             ? Math.floor(sessionStartOffset)
             : (this.resumeTime || 0);
         this.containerExtension = content.containerExtension || 'mp4';
-        this.returnPage = content.type === 'movie' ? 'movies' : 'series';
+        // Remember where playback was actually launched from so the Back arrow
+        // returns THERE, not a page hardcoded from the content type. app.currentPage
+        // still holds the launching page at this point (navigateTo('watch') runs
+        // further down, at line ~1362). Order of preference:
+        //   1) content.returnPage — an explicit origin (e.g. restore-after-refresh).
+        //   2) the live origin page — the real fix: a VOD opened from Home's
+        //      "Continue Watching" now returns to Home instead of dumping the user
+        //      on the Movies catalogue they never came from.
+        //   3) the content-type default — only when neither is available.
+        // Internal re-plays (next episode, failover, seek re-open) run with
+        // currentPage === 'watch'; they fall through to the existing returnPage,
+        // preserving the origin captured on the first, user-initiated play().
+        const launchOrigin = this.app?.currentPage;
+        if (content.returnPage) {
+            this.returnPage = content.returnPage;
+        } else if (launchOrigin && launchOrigin !== 'watch') {
+            this.returnPage = launchOrigin;
+        } else if (!this.returnPage) {
+            this.returnPage = content.type === 'movie' ? 'movies' : 'series';
+        }
         // Known total duration (TMDB runtime / episode duration) used as a
         // timeline fallback when ffprobe can't determine the duration
         const codecProfile = playbackMetadata.codecProfile || playbackMetadata.codec_profile || null;
