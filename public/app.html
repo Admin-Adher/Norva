@@ -585,7 +585,10 @@
         </div>
         <div id="movie-details" class="movie-details hidden">
           <section class="movie-detail-hero" id="movie-detail-hero">
-            <button class="movie-back-btn" type="button">&larr; Movies</button>
+            <button class="movie-back-btn" type="button" aria-label="Back">
+              <svg class="back-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
+              <span class="back-label">Movies</span>
+            </button>
             <div class="movie-detail-hero-content">
               <img id="movie-detail-poster" src="" alt="" class="movie-detail-poster">
               <div class="movie-detail-info">
@@ -734,7 +737,10 @@
           </div>
           <div id="series-details" class="series-details hidden">
             <section class="series-detail-hero" id="series-detail-hero">
-              <button class="series-back-btn" type="button">← Series</button>
+              <button class="series-back-btn" type="button" aria-label="Back">
+                <svg class="back-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
+                <span class="back-label">Series</span>
+              </button>
               <div class="series-detail-hero-content">
                 <img id="series-poster" src="" alt="" class="series-detail-poster">
                 <div class="series-info">

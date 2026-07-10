@@ -1982,7 +1982,11 @@ class MoviesPage {
             const ctx = this.searchInput?.value?.trim()
                 ? 'Search results'
                 : (this.activeBucket && this.bucketLabel ? this.bucketLabel : 'Movies');
-            backBtn.textContent = `← ${ctx}`;
+            // Update only the label span — the button holds an SVG arrow icon that a
+            // raw textContent write would destroy.
+            const label = backBtn.querySelector('.back-label');
+            if (label) label.textContent = ctx;
+            else backBtn.textContent = `← ${ctx}`;
         }
 
         const hero = document.getElementById('movie-detail-hero');

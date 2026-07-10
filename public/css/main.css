@@ -6380,18 +6380,55 @@ kbd {
   left: clamp(14px, 4vw, 42px);
   z-index: 2;
   margin: 0;
-  padding: 0 18px;
-  height: 48px;
+  padding: 0 18px 0 12px;
+  height: 44px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 8px;
   border-radius: 999px;
   background: rgba(12, 15, 23, 0.72);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.10);
   color: var(--color-text-primary);
-  font-weight: 800;
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
   backdrop-filter: blur(14px);
   cursor: pointer;
+  transition: background var(--transition-fast), border-color var(--transition-fast), transform var(--transition-fast);
+}
+
+/* Shared arrow icon + interaction states for the fiche back pills (Movies +
+   Series — ONE design, the two used to diverge into a pill vs a broken circle
+   whose injected label spilled below it). */
+.movie-back-btn .back-ico,
+.series-back-btn .back-ico {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  transition: transform var(--transition-fast);
+}
+
+.movie-back-btn:hover,
+.series-detail-hero .series-back-btn:hover {
+  background: rgba(24, 29, 42, 0.85);
+  border-color: rgba(255, 255, 255, 0.22);
+}
+
+.movie-back-btn:hover .back-ico,
+.series-back-btn:hover .back-ico {
+  transform: translateX(-2px);
+}
+
+.movie-back-btn:active,
+.series-detail-hero .series-back-btn:active {
+  transform: scale(0.97);
+}
+
+.movie-back-btn:focus-visible,
+.series-back-btn:focus-visible {
+  outline: 2px solid rgba(122, 148, 255, 0.9);
+  outline-offset: 2px;
 }
 
 .movie-detail-hero-content {
@@ -6697,8 +6734,9 @@ kbd {
   }
 
   .movie-back-btn {
-    height: 42px;
-    padding: 0 14px;
+    height: 40px;
+    padding: 0 14px 0 10px;
+    font-size: 0.9rem;
   }
 
   .movie-detail-hero-content {
@@ -6943,6 +6981,9 @@ kbd {
 }
 
 .series-back-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   background: var(--color-bg-tertiary);
   border: none;
   color: var(--color-text-primary);
@@ -7238,24 +7279,31 @@ kbd {
     linear-gradient(180deg, rgba(5, 7, 13, 0.2) 0%, rgba(5, 7, 13, 0.92) 100%);
 }
 
+/* Same pill as .movie-back-btn — this used to be a 56px CIRCLE sized for a bare
+   icon, while the JS injected "← Series" as text: the label spilled out under
+   the circle (the broken back button). One shared design now. */
 .series-detail-hero .series-back-btn {
   position: absolute;
   top: clamp(14px, 2vw, 26px);
   left: clamp(14px, 4vw, 42px);
   z-index: 2;
   margin: 0;
-  padding: 0;
-  width: 56px;
-  height: 56px;
+  padding: 0 18px 0 12px;
+  width: auto;
+  height: 44px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 50%;
+  gap: 8px;
+  border-radius: 999px;
   background: rgba(12, 15, 23, 0.72);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.10);
   color: var(--color-text-primary);
-  font-size: 1.45rem;
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
   backdrop-filter: blur(14px);
+  transition: background var(--transition-fast), border-color var(--transition-fast), transform var(--transition-fast);
 }
 
 .series-detail-hero-content {
@@ -7874,9 +7922,10 @@ kbd {
   }
 
   .series-detail-hero .series-back-btn {
-    width: 46px;
-    height: 46px;
-    font-size: 1.25rem;
+    width: auto;
+    height: 40px;
+    padding: 0 14px 0 10px;
+    font-size: 0.9rem;
   }
 
   .series-detail-hero-content {

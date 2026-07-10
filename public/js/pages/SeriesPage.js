@@ -2358,7 +2358,11 @@ class SeriesPage {
             const ctx = this.searchInput?.value?.trim()
                 ? 'Search results'
                 : (this.activeBucket && this.bucketLabel ? this.bucketLabel : 'Series');
-            backBtn.textContent = `← ${ctx}`;
+            // Update only the label span — the button holds an SVG arrow icon that a
+            // raw textContent write would destroy (the old circle-with-spilled-text bug).
+            const label = backBtn.querySelector('.back-label');
+            if (label) label.textContent = ctx;
+            else backBtn.textContent = `← ${ctx}`;
         }
 
         // Hero / poster / plot / related come from the group representative and are the
