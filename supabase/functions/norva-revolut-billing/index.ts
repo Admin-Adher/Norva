@@ -120,13 +120,17 @@ async function chargeSavedCard(
     { saved_payment_method: { type: "card", id: pmId, initiator: "merchant" } },
     { "Revolut-Api-Version": "2024-09-01" },
   );
+  // The card auth passing IS the charge succeeding — with capture_mode:AUTOMATIC the
+  // capture follows automatically (confirmed sandbox state: "authorisation_passed").
+  const SUCCESS = new Set(["COMPLETED", "CAPTURED", "AUTHORISED", "AUTHORISATION_PASSED"]);
+  const FAIL = new Set(["FAILED", "DECLINED", "CANCELLED", "AUTHORISATION_FAILED"]);
   let state = String(pay.body.state ?? "").toUpperCase();
-  // If the charge is still settling, re-fetch the order once for the authoritative state.
-  if (pay.ok && !["COMPLETED", "FAILED", "DECLINED", "CANCELLED"].includes(state)) {
+  // Only re-fetch for a genuinely in-between state (e.g. processing/pending).
+  if (pay.ok && !SUCCESS.has(state) && !FAIL.has(state)) {
     const refetch = await revolut("GET", `/api/1.0/orders/${encodeURIComponent(orderId)}`);
     state = String(refetch.body.state ?? state).toUpperCase();
   }
-  const captured = pay.ok && state === "COMPLETED";
+  const captured = pay.ok && SUCCESS.has(state);
   if (!captured) console.warn("[norva-revolut-billing] charge not captured", pay.status, state, JSON.stringify(pay.body).slice(0, 300));
   return {
     outcome: captured ? "captured" : "failed",
