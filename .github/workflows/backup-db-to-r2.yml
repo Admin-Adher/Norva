@@ -1,8 +1,19 @@
 name: Offsite DB backup to R2
 
-# Offsite logical backup of the managed Supabase DB into Cloudflare R2.
+# Offsite logical backup of the *managed* Supabase DB into Cloudflare R2.
 # Read-only (pg_dump only). Doubles as the pre-built, proven Hetzner migration dump.
-# Inert until the repo/environment secrets below are set — see ops/backup/README.md.
+#
+# ⚠️ SCHEDULE DISABLED (2026-07-11) — managed Supabase decommission (#41).
+# This job targets the managed project (oupsceccxsonaalhueff), which is being
+# retired now that Norva runs self-hosted (api.norva.tv). It had also NEVER run
+# successfully: its repo secrets (SUPABASE_DB_URL, R2_*) were never set, so every
+# nightly run exited 1 ("Set SUPABASE_DB_URL"). It was inert, not a safety net.
+#
+# The self-host DB has its own proven offsite backups (nightly dump + WAL PITR to
+# R2 via systemd timers on the box, restore-tested — see ops/hetzner/backup/), so
+# this GitHub pipeline is superseded. The `schedule` trigger is removed; kept as
+# workflow_dispatch only. Delete this file once the managed project is deleted —
+# see docs/DECOMMISSION-MANAGED-SUPABASE.md.
 
 on:
   workflow_dispatch:
@@ -11,9 +22,6 @@ on:
         description: 'R2 key prefix (default: db)'
         required: false
         default: 'db'
-  schedule:
-    # 03:15 UTC daily — a quiet window (imports are throttled overnight).
-    - cron: '15 3 * * *'
 
 concurrency:
   group: db-backup-r2

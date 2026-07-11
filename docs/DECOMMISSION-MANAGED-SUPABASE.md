@@ -56,17 +56,21 @@ Ce qui écrivait encore vers le managé après la bascule :
       **Auto-déploiement coupé** (ce lot) : le trigger `push` est retiré, il
       reste `workflow_dispatch` **uniquement** (bouton *Run workflow* conservé
       comme escape hatch de rollback pendant la fenêtre dormante).
-- [ ] **`.github/workflows/backup-db-to-r2.yml`** — dump logique **nightly de la
-      DB managée** vers R2 (03:15 UTC). **À GARDER pendant la fenêtre dormante**
-      (c'est la sauvegarde de rollback), puis **désactiver à la Phase C**
-      (retirer le bloc `schedule:`, garder `workflow_dispatch`). Le self-host a
-      déjà ses propres backups (dump nightly + PITR, cf.
-      `ops/hetzner/backup/BACKUPS.md`), donc ce job devient redondant une fois le
-      managé retiré.
+- [x] **`.github/workflows/backup-db-to-r2.yml`** — `schedule` **retiré**
+      (workflow_dispatch conservé). ⚠️ Découverte du 2026-07-11 : ce workflow
+      était **inerte depuis toujours** — ses secrets repo (`SUPABASE_DB_URL`,
+      `R2_*`) n'ont **jamais** été configurés, donc **chaque** run nightly
+      échouait (`exit 1 : Set SUPABASE_DB_URL`). Il n'a jamais produit une seule
+      sauvegarde ; ce n'était **pas** un filet de rollback. Superseded par les
+      backups **self-host** (dump nightly + WAL PITR via timers systemd sur la
+      box, restore-testés — `ops/hetzner/backup/`), qui eux tournent avec une
+      config rendue sur la box (pas des secrets GitHub) → c'est pour ça qu'ils
+      marchent alors que ce workflow échouait.
 
-> Ne PAS confondre : `backup-db-to-r2.yml` réutilise les **secrets R2 partagés**
-> avec les backups self-host. À la Phase C on désactive le *workflow*, on ne
-> touche **pas** aux secrets `R2_*`.
+> Note secrets : ce workflow *déclarait* des secrets `R2_*` / `SUPABASE_DB_URL`
+> mais ils n'ont jamais été posés côté repo — il n'y a donc rien à retirer pour
+> lui. Les backups self-host utilisent une config **locale à la box**, pas ces
+> secrets GitHub.
 
 ## 4. Phase C — Décommission (irréversible-ish — après la fenêtre)
 
@@ -117,6 +121,14 @@ Tant qu'on est en Phase A/B, le retour au managé est rapide :
 ---
 
 ### Journal
-- **2026-07-11** — Phase B entamée : auto-déploiement des edge functions vers le
-  managé coupé (workflow en `workflow_dispatch` seul) ; derniers défauts runtime
-  `server/` re-pointés sur le self-host. Fenêtre d'observation ouverte.
+- **2026-07-11** — Phase B : auto-déploiement des edge functions vers le managé
+  coupé (`workflow_dispatch` seul) ; derniers défauts runtime `server/`
+  re-pointés sur le self-host.
+- **2026-07-11** — Phase C lancée à la demande explicite (fenêtre dormante
+  écourtée, décision assumée). Constat : `backup-db-to-r2.yml` inerte depuis
+  toujours (secrets jamais posés) → `schedule` retiré. Données managées
+  préservées par ailleurs (dump de cutover + backups self-host prouvés + backups
+  natifs Supabase + la Pause conserve les données). **Pause du projet managé**
+  effectuée via l'API Supabase (réversible via `restore`). Restent des actions
+  dashboard côté utilisateur : retirer les secrets GitHub devenus inutiles et,
+  après ~1 mois de Pause sans incident, décider du `Delete` définitif.
