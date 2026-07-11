@@ -94,12 +94,11 @@ natifs Supabase).
       sur le self-host (restore-testé) + dump de cutover + backups natifs.
 - [x] Supprimer les workflows morts (leur cible n'existe plus) :
       `deploy-supabase-functions.yml` et `backup-db-to-r2.yml` — `git rm`.
-- [ ] **⚠️ Downgrader l'ORG à Free pour arrêter la facturation.** Supprimer le
-      *projet* ne downgrade **pas** l'abonnement de l'**organisation** : l'org
-      « Norva » est encore en **PRO**. Tant qu'elle l'est, la souscription Pro
-      continue de facturer même sans projet. → Dashboard → **Organization →
-      Billing → Change subscription plan → Free**. C'est la dernière action pour
-      couper le coût.
+- [x] **Downgrader l'ORG à Free** — fait le 2026-07-11. L'org « Norva » est
+      passée **PRO → Free** (Organization → Billing → Change subscription plan).
+      Facturation coupée : Free Plan, spend cap actif, dernière facture 0,00 $.
+      (Rappel : supprimer le *projet* seul ne downgrade pas l'abonnement de
+      l'org — c'est cette étape qui arrête réellement le coût.)
 - [ ] Retirer le secret GitHub `SUPABASE_ACCESS_TOKEN` (settings du repo) — il
       servait au deploy workflow supprimé. `SUPABASE_DB_URL` / `R2_*` de
       `backup-db-to-r2.yml` n'avaient jamais été posés → rien à retirer là.
@@ -146,6 +145,8 @@ ses propres backups (dump nightly + WAL PITR, restore-testés — voir
 - **2026-07-11** — **Projet managé SUPPRIMÉ** par l'utilisateur (dashboard,
   définitif). `list_projects` → `[]`. Workflows morts retirés (`git rm` de
   `deploy-supabase-functions.yml` + `backup-db-to-r2.yml`). Le self-host devient
-  le seul backend. **Restent 2 actions dashboard** : downgrader l'**org** de PRO
-  à Free (sinon la souscription continue de facturer sans projet) et retirer le
-  secret GitHub `SUPABASE_ACCESS_TOKEN`. Le rollback-vers-managé n'existe plus.
+  le seul backend. Le rollback-vers-managé n'existe plus.
+- **2026-07-11** — **Org downgradée PRO → Free** → facturation coupée (Free Plan,
+  spend cap actif, dernière facture 0,00 $). **#41 clôturée.** Seul reliquat
+  d'hygiène : retirer le secret GitHub `SUPABASE_ACCESS_TOKEN` (aucun impact
+  facturation).
