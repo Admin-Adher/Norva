@@ -88,40 +88,33 @@ ont été désactivés ; dernier run 09:05 UTC, plus rien depuis) → **vraiment
 idle**. Données préservées (dump de cutover + backups self-host prouvés + backups
 natifs Supabase).
 
-- [ ] **Décider : garder dormant (payant) vs Delete maintenant.** La Pause
-      gratuite n'existant pas ici, la seule alternative au Delete est de laisser
-      le projet sur son plan payant, idle, comme filet de rollback (~1 mois de
-      plan Pro ≈ assurance). Reco : garder dormant ~1 mois puis Delete une fois
-      la confiance acquise (aligné sur la prudence initiale).
-- [ ] **Delete** (quand décidé) : Dashboard → projet Norva managé → Settings →
-      General → **Delete project** (tape le nom pour confirmer). **Définitif** —
-      efface la DB managée. Sûr car les données vivent sur le self-host
-      (restore-testé) + le dump de cutover + les backups natifs.
-- [ ] Avant Delete, si tu veux une archive portable dédiée : dump manuel via la
-      **session-pooler URI** managée (`pg_dump "$MANAGED_DB_URL" -Fc -f
-      managed-final-YYYYMMDD.dump`) → pousser sur R2. Optionnel (le self-host a
-      déjà les données).
-- [ ] Retirer les secrets GitHub devenus inutiles : `SUPABASE_ACCESS_TOKEN`
-      (utilisé par le deploy workflow). `SUPABASE_DB_URL` + `R2_*` de
-      `backup-db-to-r2.yml` **n'ont jamais été posés** → rien à retirer là.
-      **Garder** les `R2_*` réels s'ils existent pour d'autres usages.
-- [ ] Supprimer les workflows morts une fois le projet retiré :
-      `deploy-supabase-functions.yml` et `backup-db-to-r2.yml`.
+- [x] **Delete du projet managé** — fait le 2026-07-11 via le dashboard
+      (l'utilisateur a choisi le Delete immédiat plutôt que garder dormant).
+      `list_projects` renvoie désormais `[]`. **Définitif**, données préservées
+      sur le self-host (restore-testé) + dump de cutover + backups natifs.
+- [x] Supprimer les workflows morts (leur cible n'existe plus) :
+      `deploy-supabase-functions.yml` et `backup-db-to-r2.yml` — `git rm`.
+- [ ] **⚠️ Downgrader l'ORG à Free pour arrêter la facturation.** Supprimer le
+      *projet* ne downgrade **pas** l'abonnement de l'**organisation** : l'org
+      « Norva » est encore en **PRO**. Tant qu'elle l'est, la souscription Pro
+      continue de facturer même sans projet. → Dashboard → **Organization →
+      Billing → Change subscription plan → Free**. C'est la dernière action pour
+      couper le coût.
+- [ ] Retirer le secret GitHub `SUPABASE_ACCESS_TOKEN` (settings du repo) — il
+      servait au deploy workflow supprimé. `SUPABASE_DB_URL` / `R2_*` de
+      `backup-db-to-r2.yml` n'avaient jamais été posés → rien à retirer là.
 
-## 5. Rollback (si un problème surgit pendant la fenêtre)
+## 5. Rollback — **n'existe plus** (projet managé supprimé)
 
-Tant qu'on est en Phase A/B, le retour au managé est rapide :
+Le projet managé ayant été **Delete** le 2026-07-11, le rollback-vers-managé
+n'est plus possible : le self-host (`api.norva.tv`) est **le seul backend**, avec
+ses propres backups (dump nightly + WAL PITR, restore-testés — voir
+`ops/hetzner/backup/`). La résilience repose désormais entièrement dessus.
 
-1. **Functions** : Actions → `Deploy Supabase Edge Functions` → *Run workflow*
-   (redéploie l'état courant sur le managé).
-2. **DB** : tant que le projet managé n'est pas Delete, **il est lui-même** la
-   source de vérité managée (toujours up, idle, données intactes). Le workflow
-   `backup-db-to-r2.yml` **n'a jamais produit d'archive** (inerte, cf. §3) — ne
-   pas compter dessus.
-3. **Clients** : re-pointer les défauts front vers le managé — inverse des
-   commits `9390ec8` (mobile-pwa) et de ce lot (`server/`), plus le
-   cache-buster `?v=` du web. En pratique on ne rollback que si le self-host
-   tombe durablement ; sinon on corrige sur le self-host.
+> Si un jour il fallait reconstruire un backend managé de zéro : recréer un
+> projet Supabase, restaurer depuis un backup self-host, redéployer les edge
+> functions (le workflow supprimé est récupérable dans l'historique git), et
+> re-pointer les clients. Ce n'est plus un « rollback » mais une reconstruction.
 
 ## 6. Hors périmètre de cette tâche (à traiter séparément)
 
@@ -150,3 +143,9 @@ Tant qu'on est en Phase A/B, le retour au managé est rapide :
   Managé confirmé **idle** (0 trafic client, 0 cron actif, dernier run 09:05
   UTC). Données préservées (dump cutover + backups self-host + backups natifs).
   Décision Delete-now-vs-garder-dormant laissée à l'utilisateur (cf. §4).
+- **2026-07-11** — **Projet managé SUPPRIMÉ** par l'utilisateur (dashboard,
+  définitif). `list_projects` → `[]`. Workflows morts retirés (`git rm` de
+  `deploy-supabase-functions.yml` + `backup-db-to-r2.yml`). Le self-host devient
+  le seul backend. **Restent 2 actions dashboard** : downgrader l'**org** de PRO
+  à Free (sinon la souscription continue de facturer sans projet) et retirer le
+  secret GitHub `SUPABASE_ACCESS_TOKEN`. Le rollback-vers-managé n'existe plus.
