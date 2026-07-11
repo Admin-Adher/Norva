@@ -2169,8 +2169,16 @@ class WatchPage {
         const send = api?.event || cloud?.playback?.event;
         if (typeof send !== 'function') return;
 
-        const payload = this.buildPlaybackEventPayload(eventType, extra);
+        let payload = this.buildPlaybackEventPayload(eventType, extra);
         if (!payload.itemType || !payload.itemId) return;
+        // Strings from binary parsing (fMP4 box names, source-head bytes) can carry NUL
+        // and other control characters. Postgres rejects U+0000 in text/jsonb, so ONE
+        // dirty byte silently lost the whole failure event ("\\u0000 cannot be converted
+        // to text"). Deep-scrub every string exactly at the send boundary.
+        try {
+            payload = JSON.parse(JSON.stringify(payload, (_, v) =>
+                typeof v === 'string' ? v.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '\u00B7') : v));
+        } catch (_) { /* send the raw payload rather than dropping the event */ }
         Promise.resolve(send(payload)).catch((error) => {
             console.warn('[WatchPage] Playback telemetry failed:', error?.message || error);
         });

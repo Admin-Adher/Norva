@@ -702,6 +702,16 @@ async function recordPlaybackEvent(
     0,
     10 * 60 * 1000,
   );
+  // Error payloads quote strings parsed from BINARY data (fMP4 box names, source-head
+  // bytes) which can carry NUL/control chars. Postgres rejects U+0000 in text/jsonb,
+  // and one dirty byte used to lose the whole failure event. Scrub server-side too
+  // (the client scrubs at its send boundary, but old clients keep posting raw).
+  const scrub = (v: unknown): unknown => {
+    if (typeof v === "string") return v.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "\u00B7");
+    if (Array.isArray(v)) return v.map(scrub);
+    if (isRecord(v)) return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, scrub(x)]));
+    return v;
+  };
   const { data, error } = await db
     .from("cloud_playback_events")
     .insert({
@@ -716,9 +726,9 @@ async function recordPlaybackEvent(
       duration_seconds: boundedInt(body.durationSeconds ?? body.duration_seconds ?? body.duration, 0, 0, 10_000_000),
       time_to_first_frame_ms: ttff,
       playback_mode: playbackMode,
-      error_code: stringOrNull(body.errorCode ?? body.error_code),
-      error_message: stringOrNull(body.errorMessage ?? body.error_message),
-      metadata: compactRecord(recordOrEmpty(body.metadata)),
+      error_code: scrub(stringOrNull(body.errorCode ?? body.error_code)),
+      error_message: scrub(stringOrNull(body.errorMessage ?? body.error_message)),
+      metadata: scrub(compactRecord(recordOrEmpty(body.metadata))),
     })
     .select("*")
     .single();
