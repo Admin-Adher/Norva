@@ -60,7 +60,7 @@
     .status.show { display: block; }
     .status.error { border-color: rgba(251,113,133,0.5); color: #fecdd3; background: rgba(80,24,36,0.3); }
     .note { color: var(--quiet); font-size: 12px; line-height: 1.5; margin-top: 18px; }
-    /* $0.50 card-check reassurance — hidden until the Stancer web path is confirmed active. */
+    /* Card-check reassurance — shown only on the web checkout (Revolut), hidden on native. */
     .assurance { display: none; gap: 12px; align-items: flex-start; margin-top: 16px;
       padding: 14px 16px; border: 1px solid rgba(52,211,153,0.35); border-radius: 12px;
       background: rgba(52,211,153,0.08); color: #dbe7ff; font-size: 13.5px; line-height: 1.55; }
@@ -181,13 +181,13 @@
       </svg>
     </div>
 
-    <!-- Shown only on the Stancer web checkout (native Play Billing has no such hold). -->
+    <!-- Shown only on the web checkout (Revolut/Stancer); native Play Billing has no such hold. -->
     <div class="assurance" id="trial-assurance" role="note">
       <span class="assurance-ico" aria-hidden="true">🔒</span>
       <div>
         <strong>No charge today — we only verify your card.</strong>
-        To open your free trial we place a small temporary <b>$0.50</b> authorization to confirm the card is valid.
-        It may appear in your local currency, and is <b>released back to you right away and never debited.</b> Your first real payment happens only
+        To open your free trial we place a tiny temporary authorization to confirm the card is valid.
+        It may appear briefly in your local currency, and is <b>released back to you right away and never debited.</b> Your first real payment happens only
         after the 7‑day trial ends — and only if you don't cancel before then.
         <b>We'll email you a reminder 2 days before your trial ends.</b>
       </div>
@@ -419,12 +419,13 @@
         } catch (_) { /* ignore */ }
       }
 
-      // The $0.50 card-check hold only applies to the Stancer web checkout. Reveal the reassurance
-      // only there — native Play Billing (TV/mobile) takes no such hold, so the copy would be wrong.
+      // The card-check hold only applies to the web checkout (Revolut/Stancer). Reveal the
+      // reassurance only there — native Play Billing (TV/mobile) takes no such hold, so it'd be wrong.
       function maybeShowAssurance() {
         try {
           const b = window.NorvaBilling;
-          if (b && b.isStancerEnabled && b.isStancerEnabled() && !b.hasNativeBilling()) {
+          const webCheckout = b && ((b.isRevolutEnabled && b.isRevolutEnabled()) || (b.isStancerEnabled && b.isStancerEnabled()));
+          if (webCheckout && !b.hasNativeBilling()) {
             const el = document.getElementById('trial-assurance');
             if (el) el.classList.add('show');
             const pm = document.getElementById('pay-marks');
