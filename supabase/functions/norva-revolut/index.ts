@@ -115,6 +115,24 @@ async function savedCard(customerId: string): Promise<{ id?: string; last4?: str
   };
 }
 
+// Create-or-reuse the Revolut customer for a user. REQUIRED for saving a card:
+// savePaymentMethodFor:"merchant" only attaches the token when the order carries a
+// customer_id — customer_email alone leaves the order customer-less (no saved card).
+// Returns the id (rev_… ) or null on failure.
+async function ensureRevolutCustomer(db: SupabaseClient, userId: string, email: string, name: string): Promise<string | null> {
+  const { data: existing } = await db.from("cloud_revolut_customers")
+    .select("revolut_customer_id").eq("user_id", userId).maybeSingle();
+  const existingId = (existing as { revolut_customer_id?: string } | null)?.revolut_customer_id;
+  if (existingId) return existingId;
+  const created = await revolut("POST", "/api/1.0/customers", { full_name: name || "Norva member", email });
+  const custId = created.ok ? String(created.body.id ?? "") : "";
+  if (!custId) {
+    console.error("[norva-revolut] create customer failed", created.status, JSON.stringify(created.body).slice(0, 300));
+    return null;
+  }
+  return custId;
+}
+
 async function logCancelFeedback(db: SupabaseClient, userId: string, reason: string, action: "cancelled" | "saved", statusAt: string, offer?: string): Promise<void> {
   try {
     await db.from("cloud_cancel_feedback").insert({
@@ -177,14 +195,20 @@ Deno.serve(async (req) => {
     if (payload.intent === "update_card") kind = "card_update";
     else if (proj?.trial_consumed_at) kind = liveEntitlement ? "plan_change" : "resubscribe";
 
-    // Record the recurring plan on the mapping row — the renewal engine reads
-    // amount/period from here (projection.plan_code can't carry the period).
-    // card_update must NOT touch it (would corrupt a family/annual mapping).
-    if (kind !== "card_update") {
-      await db.from("cloud_revolut_customers").upsert({
-        user_id: user.id, plan, period, amount_cents: amount, updated_at: new Date().toISOString(),
-      });
-    }
+    // A Revolut customer is needed for the card to be saved (see helper). Create it
+    // up front so the order can carry customer_id. Degrade gracefully: if creation
+    // fails the trial still starts on customer_email (the card just won't be saved).
+    const name = String(user.user_metadata?.display_name ?? user.user_metadata?.name ?? "").trim();
+    const custId = await ensureRevolutCustomer(db, user.id, user.email, name);
+
+    // Record the customer id + recurring plan on the mapping row — the renewal engine
+    // reads amount/period from here (projection.plan_code can't carry the period).
+    // card_update must NOT touch plan/period (would corrupt a family/annual mapping).
+    const nowIso = new Date().toISOString();
+    const custRow: JsonRecord = { user_id: user.id, updated_at: nowIso };
+    if (custId) custRow.revolut_customer_id = custId;
+    if (kind !== "card_update") { custRow.plan = plan; custRow.period = period; custRow.amount_cents = amount; }
+    await db.from("cloud_revolut_customers").upsert(custRow);
 
     const DESCRIPTIONS: Record<string, string> = {
       trial_setup: `Norva ${plan} ${period} — card check for 7-day free trial`,
@@ -195,15 +219,18 @@ Deno.serve(async (req) => {
     // capture_mode:MANUAL → authorise a small validation amount (card check), never
     // captured; the saved token (savePaymentMethodFor:"merchant" on the widget) drives
     // renewals. The plan price applies at trial end via a merchant-initiated charge.
-    const created = await revolut("POST", "/api/1.0/orders", {
+    const orderBody: JsonRecord = {
       amount: VALIDATION_CENTS,
       currency: "USD",
       capture_mode: "MANUAL",
       merchant_order_ext_ref: extRef(user.id),
       description: DESCRIPTIONS[kind],
-      customer_email: user.email,
       metadata: { user_id: user.id, plan, period, kind },
-    });
+    };
+    // customer_id links the order → customer so savePaymentMethodFor:merchant attaches
+    // the card; fall back to customer_email if the customer couldn't be created.
+    if (custId) orderBody.customer_id = custId; else orderBody.customer_email = user.email;
+    const created = await revolut("POST", "/api/1.0/orders", orderBody);
     const orderId = String(created.body.id ?? "");
     const token = widgetToken(created.body);
     if (!created.ok || !orderId || !token) {
@@ -257,7 +284,14 @@ Deno.serve(async (req) => {
     const nowIso = new Date().toISOString();
     const plan = String(meta.plan ?? "plus") === "family" ? "family" : "plus";
     const kind = String(meta.kind ?? "trial_setup");
-    const customerId = orderCustomerId(order);
+    // Prefer the order's customer_id; fall back to the one /checkout stored (the
+    // legacy order object doesn't always echo customer_id back).
+    let customerId = orderCustomerId(order);
+    if (!customerId) {
+      const { data: cr } = await db.from("cloud_revolut_customers")
+        .select("revolut_customer_id").eq("user_id", user.id).maybeSingle();
+      customerId = (cr as { revolut_customer_id?: string } | null)?.revolut_customer_id ?? null;
+    }
 
     // Capture the saved card (display + renewal enrichment). Best-effort.
     let pmId: string | undefined, last4: string | undefined, brand: string | undefined, cardExp: string | undefined;
