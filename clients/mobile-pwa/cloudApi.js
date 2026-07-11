@@ -8,11 +8,11 @@
 (function () {
     'use strict';
 
-    const DEFAULT_API_URL = 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-cloud';
-    const DEFAULT_SOURCE_SYNC_URL = 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-source-sync';
-    const DEFAULT_CATALOG_URL = 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-catalog';
-    const DEFAULT_SERIES_INFO_URL = 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-series-info';
-    const DEFAULT_PLAYBACK_URL = 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-playback';
+    const DEFAULT_API_URL = 'https://api.norva.tv/functions/v1/norva-cloud';
+    const DEFAULT_SOURCE_SYNC_URL = 'https://api.norva.tv/functions/v1/norva-source-sync';
+    const DEFAULT_CATALOG_URL = 'https://api.norva.tv/functions/v1/norva-catalog';
+    const DEFAULT_SERIES_INFO_URL = 'https://api.norva.tv/functions/v1/norva-series-info';
+    const DEFAULT_PLAYBACK_URL = 'https://api.norva.tv/functions/v1/norva-playback';
     const DEFAULT_EDGE_URL = 'https://edge.norva.tv';
     const KEY_API_URL = 'norva-cloud-api-url';
     const KEY_SOURCE_SYNC_URL = 'norva-source-sync-url';
