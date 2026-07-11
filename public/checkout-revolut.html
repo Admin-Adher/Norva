@@ -493,7 +493,15 @@
         statusEl.appendChild(retry);
       }
 
-      boot();
+      // Returning from the HOSTED checkout page (the fallback link)? Revolut redirected
+      // back here with ?revolut_return=1 after the payment. Finalize instead of opening a
+      // new order — finish() → /confirm resolves the user's latest order server-side, so
+      // no order_id is needed. The embedded card field path calls finish() from onSuccess.
+      if (params.get('revolut_return') === '1') {
+        finish();
+      } else {
+        boot();
+      }
     })();
   </script>
 </body>

@@ -226,6 +226,13 @@ Deno.serve(async (req) => {
     // capture_mode:MANUAL → authorise a small validation amount (card check), never
     // captured; the saved token (savePaymentMethodFor:"merchant" on the widget) drives
     // renewals. The plan price applies at trial end via a merchant-initiated charge.
+    // After a payment on the HOSTED checkout page (the widget's fallback link), Revolut
+    // must send the customer back here to finalize (capture card, void hold, start the
+    // trial) — else they land on Revolut's own "payment complete" page and never return.
+    // The embedded card field returns inline via onSuccess and doesn't use this.
+    const returnTo = (typeof payload.returnTo === "string" && payload.returnTo.startsWith("/")) ? payload.returnTo : "";
+    const frontOrigin = (req.headers.get("origin") || "https://norva.tv").replace(/\/+$/, "");
+    const redirectUrl = `${frontOrigin}/checkout-revolut.html?revolut_return=1${returnTo ? `&returnTo=${encodeURIComponent(returnTo)}` : ""}`;
     const orderBody: JsonRecord = {
       amount: VALIDATION_CENTS,
       currency: "USD",
@@ -236,6 +243,7 @@ Deno.serve(async (req) => {
       // Apple/Google/Revolut Pay). Without this, a payment on the fallback page would
       // leave no saved card and the renewal cron could not charge.
       save_payment_method_for: "merchant",
+      redirect_url: redirectUrl,
       merchant_order_ext_ref: extRef(user.id),
       description: DESCRIPTIONS[kind],
       metadata: { user_id: user.id, plan, period, kind },
