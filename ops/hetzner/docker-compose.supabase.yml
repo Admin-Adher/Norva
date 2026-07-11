@@ -224,7 +224,8 @@ services:
       RUN_JANITOR: "true"
       DISABLE_HEALTHCHECK_LOGGING: "true"
 
-  # --- Storage (buckets: storyboards, generated subtitles) --------------------
+  # --- Storage (single bucket: norva-storyboards. Generated subtitles are NOT
+  #     stored here — the VTT lives inline in public.catalog_generated_subtitles) ---
   storage:
     container_name: norva-storage
     image: supabase/storage-api:v1.60.4

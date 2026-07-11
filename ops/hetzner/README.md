@@ -27,7 +27,9 @@
 - **pg_cron jobs** — leurs commandes contiennent l'**URL du projet managé** (`https://oupsceccxsonaalhueff.supabase.co/functions/v1/...`). À **réécrire** vers l'endpoint self-host. `pg_dump` ne dumpe pas fiablement `cron.job` de manière rejouable → on recrée via `cron.schedule`.
 - **Role-level GUCs** (`ALTER ROLE anon SET statement_timeout='3s'`, etc.) — inclus dans `pg_dumpall --globals` mais on les remet explicitement pour être sûr.
 - **Edge functions** — code applicatif, déployé séparément (`scripts/04-deploy-edge-functions.sh`).
-- **Storage buckets** — objets dans le bucket (storyboards/sous-titres) à re-syncer si non recréables.
+- **Storage buckets** — un seul bucket `norva-storyboards` (sprites de scrubbing), objets à
+  re-syncer si non recréables. Les **sous-titres NE sont PAS** dans un bucket : le VTT est stocké
+  en colonne (`public.catalog_generated_subtitles.vtt`), donc migré avec le schéma `public`.
 
 ---
 
@@ -46,7 +48,7 @@ Sur un box type 2×NVMe (SSD) + éventuellement 2×HDD (ex. le box i7-7700 / 64 
 | Montage | Support | Rôle |
 |---|---|---|
 | `/` + `/var/lib/postgresql` | **SSD/NVMe RAID1** | OS + **données Postgres** (random-read → NVMe obligatoire) |
-| `/var/lib/norva/storage` | **SSD** ou HDD | buckets Storage (storyboards, sous-titres) — séquentiel, HDD OK |
+| `/var/lib/norva/storage` | **SSD** ou HDD | bucket Storage `norva-storyboards` (sprites) — séquentiel, HDD OK |
 | `/var/backups/norva` | **HDD RAID1** | dumps + **WAL archiving** (pgBackRest/WAL-G) — séquentiel, gros volume |
 | `/var/lib/norva/pg_wal` (option) | SSD séparé | WAL sur disque dédié = moins de contention checkpoint sous imports |
 

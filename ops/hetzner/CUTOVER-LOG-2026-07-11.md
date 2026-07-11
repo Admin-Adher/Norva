@@ -273,8 +273,13 @@ un simple changement de filtre (re-fetch) a tout rétabli ; aucun item n'était 
    Prochaine action récurrente : refaire le drill `RESTORE.md` chaque trimestre.
 4. ✅ **Monitoring** — Netdata FAIT (voir « Fait et validé »). Reste optionnel : brancher
    un canal de notification (Discord/Telegram) pour être *alerté*, pas seulement voir.
-5. **Storage** : re-synchroniser/régénérer les fichiers storyboards + sous-titres (metadonnées
-   migrées, objets non copiés — régénérables).
+5. ✅ **Storage** — RIEN à régénérer (audit 11/07). Sous-titres = VTT **en colonne**
+   (`catalog_generated_subtitles.vtt`, 49 lignes migrées, pas un bucket). Storyboards = seul
+   bucket `norva-storyboards`, **table `catalog_storyboards` vide** (0 objet, 0 fichier) →
+   aucune ligne `ready` orpheline ; ils se génèrent à la demande au visionnage. NB : le skip
+   de `getStoryboard()` teste `catalog_storyboards.status`, pas le fichier — donc si un jour
+   des lignes `ready` pointent vers des sprites absents, réinitialiser CES lignes (pas
+   `storage.objects`).
 6. **Managé** : garder dormant 1-2 semaines (rollback), puis downgrade/résiliation du plan Pro.
 7. **Billing** : refonte passerelle de paiement (remplacement Stancer) puis
    `NORVA_ENTITLEMENTS_MODE=enforce`.
