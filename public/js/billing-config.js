@@ -21,28 +21,6 @@ window.NORVA_BILLING_CONFIG = {
   // button until configured. Native uses the Google Play subscriptions page.
   webCustomerPortalUrl: '',
 
-  // ── Stancer (web payment rail — see docs/STANCER-BILLING.md) ──────────────
-  // Inert until `enabled:true` AND the STANCER_SECRET_KEY edge secret is set.
-  // The web checkout (subscribe.html) calls the norva-stancer/checkout function,
-  // which returns a Stancer hosted-payment-page URL to redirect to (PCI-safe,
-  // 3DS automatic). Card charging + recurring is orchestrated server-side.
-  stancer: {
-    // Stancer → Revolut migration DONE (Revolut validated live in production
-    // 2026-07-11). Disabled — the web checkout now routes to Revolut. Code kept for
-    // a rollback window; remove the norva-stancer* functions once Revolut is proven
-    // over a full billing cycle.
-    enabled: false,
-    mode: 'test',                                   // informational only (real mode = edge secret)
-    checkoutUrl: '/functions/v1/norva-stancer/checkout',
-    // Called by the return page to finalize the checkout without a webhook.
-    confirmUrl: '/functions/v1/norva-stancer/confirm',
-    // Display prices per plan/period (amounts are charged server-side in cents).
-    plans: {
-      plus:   { monthly: '4.99', annual: '41.99' },
-      family: { monthly: '8.99', annual: '75.99' },
-    },
-  },
-
   // ── Revolut Merchant (new web rail — see docs/BILLING-REVOLUT-MIGRATION.md) ──
   // Inert until `enabled:true` AND the REVOLUT_SECRET_KEY edge secret is set. When
   // enabled, the web checkout routes to /checkout-revolut.html, which mounts the

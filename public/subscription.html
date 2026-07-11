@@ -104,23 +104,8 @@
 
   <script src="/js/cloudApi.js?v=45"></script>
   <script src="/js/authApi.js?v=6"></script>
-  <script src="/js/billing-config.js?v=6"></script>
-  <script src="/js/billing.js?v=10"></script>
-  <script>
-    // Return from a Stancer hosted checkout: finalize it (capture the tokenized card + start the
-    // trial) with no webhook needed, then reload cleanly so the page renders the new trial state.
-    (function () {
-      var params = new URLSearchParams(location.search);
-      if (params.get('stancer') !== 'done') return;
-      (async function () {
-        try { if (window.NorvaBilling && NorvaBilling.confirmStancer) await NorvaBilling.confirmStancer(); }
-        catch (_) { /* the billing cron / a later visit will still reconcile */ }
-        params.delete('stancer');
-        var qs = params.toString();
-        location.replace('/subscription.html' + (qs ? '?' + qs : ''));
-      })();
-    })();
-  </script>
+  <script src="/js/billing-config.js?v=7"></script>
+  <script src="/js/billing.js?v=11"></script>
   <script>
     (function () {
       const params = new URLSearchParams(location.search);
@@ -212,14 +197,14 @@
         return b;
       }
 
-      // Async, cosmetic: once the Stancer billing profile loads, slot a
+      // Async, cosmetic: once the Revolut billing profile loads, slot a
       // "Payment method — •••• 1234" row into the card's details (web rail only).
       function appendPaymentMethod(card, decision) {
         try {
           const provider = String((decision.projection || {}).provider || '');
-          if (provider !== 'stancer' || isNative()) return;
-          if (!(window.NorvaBilling && window.NorvaBilling.stancerProfile)) return;
-          window.NorvaBilling.stancerProfile().then(function (p) {
+          if (provider !== 'revolut' || isNative()) return;
+          if (!(window.NorvaBilling && window.NorvaBilling.revolutProfile)) return;
+          window.NorvaBilling.revolutProfile().then(function (p) {
             if (!p) return;
             const msg = card.querySelector('.msg');
             function slot(node) { if (msg) card.insertBefore(node, msg); else card.appendChild(node); }
@@ -240,13 +225,13 @@
         } catch (_) { /* cosmetic only */ }
       }
 
-      // Self-serve controls for the web (Stancer) rail — native manages via Google Play.
-      function isStancerWeb(decision) {
-        return String((decision.projection || {}).provider || '') === 'stancer' && !isNative();
+      // Self-serve controls for the web (Revolut) rail — native manages via Google Play.
+      function isRevolutWeb(decision) {
+        return String((decision.projection || {}).provider || '') === 'revolut' && !isNative();
       }
-      // Cancel via the API, with the reason from the cancel flow (analytics only).
+      // Cancel via the API (cancels at period end; the reason is analytics only).
       async function doCancel(reason) {
-        try { await window.NorvaBilling.stancerCancel(reason || 'skipped'); location.reload(); }
+        try { await window.NorvaBilling.revolutCancel(reason || 'skipped'); location.reload(); }
         catch (e) {
           if (storeNote) storeNote.textContent = 'Could not cancel' + (e && e.message ? ': ' + e.message : '') + ' — please retry or contact support@norva.tv.';
         }
@@ -298,147 +283,9 @@
         return { back: back, modal: modal, close: close, focusFirst: focusFirst };
       }
 
-      // Cancel flow: reason → contextual counter-offer (50% off next payment / support)
-      // → confirm. Cancelling stays honest and short: a "cancel now" path is reachable
-      // from every step, and the offer is one-shot per customer (server-guarded).
-      function openCancelFlow(decision) {
-        const trialing = String(decision.status || '') === 'trialing';
-        const m = buildModal();
-        const back = m.back, modal = m.modal, close = m.close;
-
-        let reason = 'skipped';
-        const keepNote = trialing
-          ? "You keep full access until your trial ends, and you won't be charged."
-          : 'You keep full access until the end of the current period, and nothing further will be charged.';
-
-        function actionsRow() { return el('div', 'actions'); }
-        function keepButton() {
-          const k = el('button', 'btn ghost', 'Keep my plan');
-          k.addEventListener('click', close);
-          return k;
-        }
-        function cancelNowButton(label) {
-          const c = el('button', 'btn danger', label || 'Cancel my plan');
-          c.addEventListener('click', function () { c.disabled = true; c.textContent = 'Cancelling…'; doCancel(reason); });
-          return c;
-        }
-
-        function stepReason() {
-          modal.innerHTML = '';
-          modal.appendChild(el('h2', null, 'Before you go…'));
-          modal.appendChild(el('p', null, 'Mind telling us the main reason? One tap — it really helps us improve Norva.'));
-          const list = el('div', 'reasons');
-          [['too_expensive', 'It costs too much'],
-           ['not_using', "I'm not using it enough"],
-           ['technical', "Something isn't working"],
-           ['other', 'Another reason']].forEach(function (r) {
-            const lab = el('label');
-            const input = document.createElement('input');
-            input.type = 'radio'; input.name = 'cancel-reason'; input.value = r[0];
-            lab.appendChild(input);
-            lab.appendChild(el('span', null, r[1]));
-            list.appendChild(lab);
-          });
-          modal.appendChild(list);
-          const row = actionsRow();
-          const cont = el('button', 'btn', 'Continue');
-          cont.addEventListener('click', function () {
-            const sel = modal.querySelector('input[name="cancel-reason"]:checked');
-            reason = sel ? sel.value : 'skipped';
-            stepNext();
-          });
-          row.appendChild(cont);
-          row.appendChild(keepButton());
-          modal.appendChild(row);
-          const skip = el('button', 'linkish', 'Skip and cancel now');
-          skip.addEventListener('click', function () { reason = 'skipped'; stepConfirm(); });
-          modal.appendChild(skip);
-          m.focusFirst();
-        }
-
-        async function stepNext() {
-          if (reason === 'technical') return stepSupport();
-          if (reason !== 'too_expensive' && reason !== 'not_using') return stepConfirm();
-          // Price/usage objections → the one-shot 50% counter-offer, if still available.
-          let used = false;
-          try {
-            const p = window.NorvaBilling.stancerProfile ? await window.NorvaBilling.stancerProfile() : null;
-            used = !!(p && (p.save_offer_used_at || p.discount_next_pct));
-          } catch (_) { /* offer check is best-effort */ }
-          if (used) return stepConfirm();
-          stepOffer();
-        }
-
-        function stepOffer() {
-          modal.innerHTML = '';
-          modal.appendChild(el('h2', null, 'How about half price instead?'));
-          const offer = el('div', 'offer');
-          offer.appendChild(el('div', null, ''));
-          offer.firstChild.innerHTML = 'Stay with Norva and get <b>50% off your ' + (trialing ? 'first' : 'next') +
-            ' payment</b> — applied automatically, no code needed.';
-          modal.appendChild(offer);
-          modal.appendChild(el('p', null, 'One-time offer. Your plan and everything you set up stay exactly as they are.'));
-          const row = actionsRow();
-          const take = el('button', 'btn', 'Get 50% off and stay');
-          take.addEventListener('click', async function () {
-            take.disabled = true; take.textContent = 'Applying…';
-            const r = await window.NorvaBilling.stancerSaveOffer(reason);
-            if (r && r.ok) return stepSaved();
-            stepConfirm("The offer isn't available on this account.");
-          });
-          row.appendChild(take);
-          row.appendChild(cancelNowButton());
-          modal.appendChild(row);
-          const keep = el('button', 'linkish', 'Keep my plan as it is');
-          keep.addEventListener('click', close);
-          modal.appendChild(keep);
-        }
-
-        function stepSaved() {
-          modal.innerHTML = '';
-          modal.appendChild(el('h2', null, 'Done — 50% off your ' + (trialing ? 'first' : 'next') + ' payment 🎉'));
-          modal.appendChild(el('p', null, "It's applied automatically. Thanks for staying with Norva."));
-          const row = actionsRow();
-          const ok = el('button', 'btn', 'Close');
-          ok.addEventListener('click', function () { location.reload(); });
-          row.appendChild(ok);
-          modal.appendChild(row);
-        }
-
-        function stepSupport() {
-          modal.innerHTML = '';
-          modal.appendChild(el('h2', null, "Sorry about that — let's fix it"));
-          modal.appendChild(el('p', null, 'Tell us what went wrong and we’ll help — most issues are sorted within a day. ' + keepNote));
-          const row = actionsRow();
-          const mail = el('a', 'btn', 'Contact support');
-          mail.setAttribute('href', '/support.html?subject=' + encodeURIComponent('Issue before cancelling') +
-            '&returnTo=' + encodeURIComponent('/subscription.html'));
-          row.appendChild(mail);
-          row.appendChild(cancelNowButton());
-          modal.appendChild(row);
-          const keep = el('button', 'linkish', 'Keep my plan');
-          keep.addEventListener('click', close);
-          modal.appendChild(keep);
-        }
-
-        function stepConfirm(note) {
-          modal.innerHTML = '';
-          modal.appendChild(el('h2', null, 'Cancel your plan?'));
-          if (note) modal.appendChild(el('p', null, note));
-          modal.appendChild(el('p', null, keepNote));
-          const row = actionsRow();
-          row.appendChild(cancelNowButton());
-          row.appendChild(keepButton());
-          modal.appendChild(row);
-        }
-
-        stepReason();
-      }
-
-      // "Cancel plan" — opens the cancel flow (past-due plans keep the direct
-      // confirm: the offer doesn't apply while a payment is owed).
+      // "Cancel plan" — a short, accessible confirm wired to the Revolut cancel API.
       function cancelButton(decision) {
-        if (!isStancerWeb(decision) || !(window.NorvaBilling && window.NorvaBilling.stancerCancel)) return null;
+        if (!isRevolutWeb(decision) || !(window.NorvaBilling && window.NorvaBilling.revolutCancel)) return null;
         const b = el('button', 'btn ghost', 'Cancel plan');
         // A short, accessible confirm with no reason step or counter-offer. Used when
         // a payment is owed (past due / grace) and on Android TV, where a multi-step
@@ -470,27 +317,25 @@
         b.addEventListener('click', function () {
           const st = String(decision.status || '');
           const immediate = (st === 'past_due' || st === 'grace');
-          const isTv = document.documentElement.classList.contains('tv');
-          if (immediate || isTv) { simpleConfirm(immediate); return; }
-          openCancelFlow(decision);
+          simpleConfirm(immediate);
         });
         return b;
       }
-      // "Update payment method" — labeled re-checkout that swaps the card token only.
+      // "Update payment method" — labeled re-checkout (Revolut) that swaps the card token only.
       function updateCardLink(decision, primary) {
-        if (!isStancerWeb(decision)) return null;
+        if (!isRevolutWeb(decision)) return null;
         const a = el('a', primary ? 'btn warn' : 'btn ghost', 'Update payment method');
-        a.setAttribute('href', '/checkout.html?intent=update_card&returnTo=' + encodeURIComponent('/subscription.html'));
+        a.setAttribute('href', '/checkout-revolut.html?intent=update_card&returnTo=' + encodeURIComponent('/subscription.html'));
         return a;
       }
-      // "Resume plan" — undoes a pending cancellation via the API (web/Stancer);
+      // "Resume plan" — undoes a pending cancellation via the API (web/Revolut);
       // other rails keep the classic link to the plan picker.
       function resumeControl(decision) {
-        if (isStancerWeb(decision) && window.NorvaBilling && window.NorvaBilling.stancerResume) {
+        if (isRevolutWeb(decision) && window.NorvaBilling && window.NorvaBilling.revolutResume) {
           const b = el('button', 'btn', 'Resume plan');
           b.addEventListener('click', async function () {
             b.disabled = true; b.textContent = 'Resuming…';
-            try { await window.NorvaBilling.stancerResume(); location.reload(); }
+            try { await window.NorvaBilling.revolutResume(); location.reload(); }
             catch (e) {
               b.disabled = false; b.textContent = 'Resume plan';
               if (storeNote) storeNote.textContent = 'Could not resume' + (e && e.message ? ': ' + e.message : '') + '.';
@@ -574,7 +419,7 @@
           content.appendChild(card);
           appendPaymentMethod(card, decision);
           const row = el('div', 'actions');
-          // Web/Stancer → our own card-update flow; native → Google Play.
+          // Web/Revolut → our own card-update flow; native → Google Play.
           const uc = updateCardLink(decision, true);
           if (uc) row.appendChild(uc);
           const mb = manageButton(isNative() ? 'Update on Google Play' : 'Update payment', true);

@@ -38,13 +38,7 @@
     return Boolean(CONFIG.webBillingEnabled && CONFIG.revenueCatWebPublicKey);
   }
 
-  // Web payment via Stancer (French gateway, hosted payment page). Enabled per config.
-  function isStancerEnabled() {
-    return Boolean(CONFIG.stancer && CONFIG.stancer.enabled);
-  }
-
-  // Web payment via Revolut Merchant (embedded RevolutCheckout card field). Enabled
-  // per config. Takes precedence over Stancer when both are on (migration cutover).
+  // Web payment via Revolut Merchant (embedded RevolutCheckout card field). Enabled per config.
   function isRevolutEnabled() {
     return Boolean(CONFIG.revolut && CONFIG.revolut.enabled);
   }
@@ -59,137 +53,9 @@
     } catch (_) { return Promise.resolve(''); }
   }
 
-  // Open a Stancer checkout. The web flow now stays on norva.tv: we navigate to the
-  // branded checkout page (checkout.html), which embeds the Stancer card form in an
-  // iframe. Plan/period are derived from the same opts subscribe.html already sends.
-  async function stancerCheckout(opts) {
-    const token = await sessionToken();
-    if (!token) throw err('Please sign in first', 'not_signed_in');
-    const plan = opts.planCode === 'family' ? 'family' : 'plus';
-    const period = /annual/i.test(String(opts.packageId || '')) ? 'annual' : 'monthly';
-    // Existing subscriber with a card on file → change the plan in ONE CLICK,
-    // no card re-entry. Server decides; anything else falls through to checkout.
-    try {
-      const change = await stancerChangePlan(plan, period);
-      if (change && change.ok && change.status) {
-        return { status: change.status, plan: plan, period: period };
-      }
-    } catch (_) { /* fall through to the checkout flow */ }
-    const qs = new URLSearchParams({ plan: plan, period: period });
-    if (opts.returnTo) qs.set('returnTo', String(opts.returnTo));
-    window.location.assign('/checkout.html?' + qs.toString());
-    return { status: 'redirect' };
-  }
-
-  // Used by checkout.html: create the payment intent and return the hosted-page URL
-  // WITHOUT redirecting (embed:true → the return leg goes through checkout-done.html).
-  async function stancerCheckoutUrl(opts) {
-    const cfg = CONFIG.stancer || {};
-    const base = ((window.NorvaAuth && NorvaAuth.supabaseUrl) || 'https://api.norva.tv').replace(/\/+$/, '');
-    const apikey = (window.NorvaAuth && NorvaAuth.publishableKey) || '';
-    const token = await sessionToken();
-    if (!token) throw err('Please sign in first', 'not_signed_in');
-    const res = await fetch(base + (cfg.checkoutUrl || '/functions/v1/norva-stancer/checkout'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'apikey': apikey, 'Authorization': 'Bearer ' + token },
-      body: JSON.stringify({
-        plan: opts.plan === 'family' ? 'family' : 'plus',
-        period: opts.period === 'annual' ? 'annual' : 'monthly',
-        returnTo: opts.returnTo || '',
-        embed: true,
-        intent: opts.intent || undefined, // 'update_card' → token swap flow
-      }),
-    });
-    const data = await res.json().catch(function () { return {}; });
-    if (!res.ok || !data.url) throw err(data.error || 'Could not start checkout', 'stancer_error', data);
-    return data; // { url, pi_id, kind }
-  }
-
-  // POST an account-scoped Stancer action (cancel / resume / save-offer) and return the response.
-  async function stancerAction(action, body) {
-    const base = ((window.NorvaAuth && NorvaAuth.supabaseUrl) || 'https://api.norva.tv').replace(/\/+$/, '');
-    const apikey = (window.NorvaAuth && NorvaAuth.publishableKey) || '';
-    const token = await sessionToken();
-    if (!token) throw err('Please sign in first', 'not_signed_in');
-    const res = await fetch(base + '/functions/v1/norva-stancer/' + action, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'apikey': apikey, 'Authorization': 'Bearer ' + token },
-      body: JSON.stringify(body || {}),
-    });
-    const data = await res.json().catch(function () { return {}; });
-    if (!res.ok) throw err(data.error || 'Request failed', 'stancer_error', data);
-    return data;
-  }
-  // Cancel at period end (access continues until then, nothing further is charged).
-  // The optional reason comes from the cancel flow — analytics only, never a condition.
-  function stancerCancel(reason) { return stancerAction('cancel', reason ? { reason: reason } : null); }
-  // Undo a pending cancellation before the period ends.
-  function stancerResume() { return stancerAction('resume'); }
-  // Accept the cancel-flow counter-offer (50% off the next payment, one-shot).
-  // Returns {ok:true, discount_pct} or {ok:false, reason:'already_used'|'not_eligible'}.
-  async function stancerSaveOffer(reason) {
-    try { return await stancerAction('save-offer', reason ? { reason: reason } : null); }
-    catch (e) { return { ok: false, reason: (e && e.code) || 'error' }; }
-  }
-
-  // ONE-CLICK plan change for existing subscribers — the card token is already on
-  // file, so no card re-entry (upsell without friction). Returns {ok:true, status:
-  // 'plan_changed'|'plan_scheduled'|'unchanged'} or {ok:false, reason:'no_live_sub'
-  // |'requires_card'} → caller falls back to the checkout flow.
-  async function stancerChangePlan(plan, period) {
-    const base = ((window.NorvaAuth && NorvaAuth.supabaseUrl) || 'https://api.norva.tv').replace(/\/+$/, '');
-    const apikey = (window.NorvaAuth && NorvaAuth.publishableKey) || '';
-    const token = await sessionToken();
-    if (!token) throw err('Please sign in first', 'not_signed_in');
-    const res = await fetch(base + '/functions/v1/norva-stancer/change-plan', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'apikey': apikey, 'Authorization': 'Bearer ' + token },
-      body: JSON.stringify({ plan: plan, period: period }),
-    });
-    return await res.json().catch(function () { return { ok: false, reason: 'error' }; });
-  }
-
-  // Finalize a Stancer checkout on the return page (no webhook needed): the edge function re-fetches
-  // the payment, captures the tokenized card and starts the trial. Returns {status:'trialing'|'pending'|…}.
-  async function confirmStancer() {
-    if (!isStancerEnabled()) return { skipped: true };
-    const cfg = CONFIG.stancer || {};
-    const base = ((window.NorvaAuth && NorvaAuth.supabaseUrl) || 'https://api.norva.tv').replace(/\/+$/, '');
-    const apikey = (window.NorvaAuth && NorvaAuth.publishableKey) || '';
-    const token = await sessionToken();
-    if (!token) return { skipped: true };
-    try {
-      const res = await fetch(base + (cfg.confirmUrl || '/functions/v1/norva-stancer/confirm'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'apikey': apikey, 'Authorization': 'Bearer ' + token },
-        body: '{}',
-      });
-      return await res.json().catch(function () { return {}; });
-    } catch (_) { return {}; }
-  }
-
-  // Read-only billing profile for display (plan/period/amount + card last4/exp).
-  // Returns null when not signed in, not enabled, or nothing on file.
-  async function stancerProfile() {
-    if (!isStancerEnabled()) return null;
-    const cfg = CONFIG.stancer || {};
-    const base = ((window.NorvaAuth && NorvaAuth.supabaseUrl) || 'https://api.norva.tv').replace(/\/+$/, '');
-    const apikey = (window.NorvaAuth && NorvaAuth.publishableKey) || '';
-    const token = await sessionToken();
-    if (!token) return null;
-    try {
-      const res = await fetch(base + (cfg.profileUrl || '/functions/v1/norva-stancer/profile'), {
-        headers: { 'apikey': apikey, 'Authorization': 'Bearer ' + token },
-      });
-      const data = await res.json().catch(function () { return {}; });
-      return (data && data.profile) || null;
-    } catch (_) { return null; }
-  }
-
   // ── Revolut Merchant (embedded RevolutCheckout card field) ─────────────────
-  // Mirrors the Stancer helpers but for the Revolut rail. The checkout stays on
-  // norva.tv: subscribe.html routes here, which navigates to the branded
-  // checkout-revolut.html page (the widget mounts a PCI-safe card iframe).
+  // The web checkout stays on norva.tv: subscribe.html routes here, which navigates
+  // to the branded checkout-revolut.html page (the widget mounts a PCI-safe card iframe).
   async function revolutCheckout(opts) {
     const token = await sessionToken();
     if (!token) throw err('Please sign in first', 'not_signed_in');
@@ -368,9 +234,6 @@
     if (isRevolutEnabled()) {
       return revolutCheckout(opts); // web → Revolut embedded checkout (norva.tv)
     }
-    if (isStancerEnabled()) {
-      return stancerCheckout(opts); // web → Stancer hosted page (redirects away)
-    }
     const purchases = await ensureWeb(opts.appUserId);
     const pkg = await webPackage(purchases, opts.packageId, opts.productId);
     if (!pkg) throw err('Plan not available', 'no_package');
@@ -412,14 +275,6 @@
     isNative: isNative,
     hasNativeBilling: hasNativeBilling,
     isWebBillingConfigured: isWebBillingConfigured,
-    isStancerEnabled: isStancerEnabled,
-    confirmStancer: confirmStancer,
-    stancerProfile: stancerProfile,
-    stancerCheckoutUrl: stancerCheckoutUrl,
-    stancerCancel: stancerCancel,
-    stancerResume: stancerResume,
-    stancerSaveOffer: stancerSaveOffer,
-    stancerChangePlan: stancerChangePlan,
     isRevolutEnabled: isRevolutEnabled,
     revolutCreateOrder: revolutCreateOrder,
     confirmRevolut: confirmRevolut,
