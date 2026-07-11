@@ -1,0 +1,62 @@
+# =============================================================================
+# Norva self-host — Monitoring sidecar (Netdata)  [separate project, box = prod]
+# =============================================================================
+# Kept OUT of docker-compose.supabase.yml on purpose: monitoring must restart,
+# upgrade and fail independently of the data plane. Own compose project
+# (`norva-monitoring`) so it never touches the stack's containers/network.
+#
+# Netdata runs with network_mode: host + pid: host — the official recommended
+# setup for a monitoring agent: real host CPU/RAM/disk/network, per-process
+# metrics, and it reaches Postgres exactly like psql on the box does
+# (127.0.0.1:5432, published loopback). The dashboard binds to 127.0.0.1 only
+# (see monitoring/netdata.conf) — reach it through an SSH tunnel, never a public
+# port. ufw (22/80/443) is the outer backstop.
+#
+# Bring up (from ops/hetzner, .env holds NETDATA_PG_PASSWORD):
+#   docker compose --env-file .env -f docker-compose.monitoring.yml up -d
+# =============================================================================
+
+name: norva-monitoring
+
+services:
+  netdata:
+    container_name: norva-netdata
+    image: netdata/netdata:stable
+    restart: unless-stopped
+    # NOTE: no `hostname:` here — Docker rejects it together with
+    # network_mode: host. The display name is set in netdata.conf ([global]).
+    pid: host
+    network_mode: host
+    cap_add:
+      - SYS_PTRACE   # apps.plugin: read other processes' details
+      - SYS_ADMIN    # some cgroup/ebpf metrics
+    security_opt:
+      - apparmor:unconfined
+    environment:
+      # No phone-home / anonymous statistics.
+      DO_NOT_TRACK: "1"
+      # Injected into the go.d postgres DSN (monitoring/go.d/postgres.conf).
+      # Fail fast if the operator forgot to set it in .env.
+      NETDATA_PG_PASSWORD: ${NETDATA_PG_PASSWORD:?set NETDATA_PG_PASSWORD in ops/hetzner/.env (see monitoring/setup-netdata-pg-role.sql)}
+    volumes:
+      # --- config as code (read-only) -----------------------------------------
+      - ./monitoring/netdata.conf:/etc/netdata/netdata.conf:ro
+      - ./monitoring/go.d/postgres.conf:/etc/netdata/go.d/postgres.conf:ro
+      # --- persistent metrics db + registry -----------------------------------
+      - netdata-lib:/var/lib/netdata
+      - netdata-cache:/var/cache/netdata
+      # --- host introspection (read-only) -------------------------------------
+      - /:/host/root:ro,rslave
+      - /etc/passwd:/host/etc/passwd:ro
+      - /etc/group:/host/etc/group:ro
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/os-release:/host/etc/os-release:ro
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /var/log:/host/var/log:ro
+      # container names/limits for the cgroups collector (read-only socket)
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+volumes:
+  netdata-lib:
+  netdata-cache:
