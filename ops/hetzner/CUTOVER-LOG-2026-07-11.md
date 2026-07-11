@@ -258,6 +258,12 @@ un simple changement de filtre (re-fetch) a tout rétabli ; aucun item n'était 
   (dump 637 M, base 987 M). **Drill de restauration RÉUSSI** : base backup R2 → conteneur
   jetable → `consistent recovery state reached`, `cloud_media_items=906087`, `auth_users=6`
   (= parité prod). Doc : `backup/BACKUPS.md`, `backup/RESTORE.md`.
+- **Monitoring Netdata opérationnel** (11/07) : projet compose séparé (`norva-monitoring`),
+  réseau host + pid host → host (CPU/RAM/**disque `/var/lib/norva`**/réseau) + tous les
+  conteneurs (cgroups) + **PostgreSQL** (collector go.d, `check success job=norva-db`, rôle
+  read-only `pg_monitor`). Dashboard bindé `127.0.0.1:19999` (tunnel SSH, zéro port public),
+  docker service-discovery désactivé (évitait un job PG à mot de passe deviné). Doc :
+  `monitoring/MONITORING.md`.
 
 ### Reste à faire (post-bascule, aucun bloquant)
 1. **Valider la lecture** (film + live) si pas déjà fait — dernier maillon
@@ -265,7 +271,8 @@ un simple changement de filtre (re-fetch) a tout rétabli ; aucun item n'était 
 2. **Sécurité** : régénérer la clé FCM (voir TODO en tête) ; changer le mot de passe exposé.
 3. ✅ **Backups du self-host** — FAIT et validé (voir « Fait et validé » ci-dessus).
    Prochaine action récurrente : refaire le drill `RESTORE.md` chaque trimestre.
-4. **Monitoring** : Netdata/Prometheus (disque, RAM, connexions, réplication future).
+4. ✅ **Monitoring** — Netdata FAIT (voir « Fait et validé »). Reste optionnel : brancher
+   un canal de notification (Discord/Telegram) pour être *alerté*, pas seulement voir.
 5. **Storage** : re-synchroniser/régénérer les fichiers storyboards + sous-titres (metadonnées
    migrées, objets non copiés — régénérables).
 6. **Managé** : garder dormant 1-2 semaines (rollback), puis downgrade/résiliation du plan Pro.
