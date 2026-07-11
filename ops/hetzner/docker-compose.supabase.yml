@@ -360,6 +360,10 @@ services:
       # Revolut API base — sandbox during dev; set to https://merchant.revolut.com
       # (+ production keys) at cutover. Used to re-fetch the order (metadata/state).
       REVOLUT_API_BASE: ${REVOLUT_API_BASE:-https://sandbox-merchant.revolut.com}
+      # Card-validation hold amount (cents, MANUAL capture → never captured, auto-
+      # released at /confirm). Lower = smaller transient hold; keep it high enough that
+      # issuers reliably authorise it. Tunable without a code deploy.
+      NORVA_REVOLUT_VALIDATION_CENTS: ${NORVA_REVOLUT_VALIDATION_CENTS:-50}
     command:
       - start
       - --main-service
