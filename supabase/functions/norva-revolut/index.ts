@@ -230,7 +230,15 @@ Deno.serve(async (req) => {
     // customer_id links the order → customer so savePaymentMethodFor:merchant attaches
     // the card; fall back to customer_email if the customer couldn't be created.
     if (custId) orderBody.customer_id = custId; else orderBody.customer_email = user.email;
-    const created = await revolut("POST", "/api/1.0/orders", orderBody);
+    let created = await revolut("POST", "/api/1.0/orders", orderBody);
+    // Safety net: if this API rejects customer_id on the order, retry with
+    // customer_email so the trial still starts (card just won't attach here).
+    if (!created.ok && orderBody.customer_id) {
+      console.warn("[norva-revolut] order w/ customer_id failed, retrying w/ email", created.status);
+      delete orderBody.customer_id;
+      orderBody.customer_email = user.email;
+      created = await revolut("POST", "/api/1.0/orders", orderBody);
+    }
     const orderId = String(created.body.id ?? "");
     const token = widgetToken(created.body);
     if (!created.ok || !orderId || !token) {
