@@ -1943,12 +1943,28 @@ class WatchPage {
                 const cloudId = await window.API?.resolveCloudSourceId?.(sourceId);
                 if (cloudId) sourceId = String(cloudId);
             } catch (_) { /* fall back to the raw id */ }
+            // The sprite's TIME AXIS is built from this duration: with 0 the gateway
+            // assumes a 2h grid, so any film longer than 2h clamps every hover past
+            // the 2h mark onto the last tile (same image for the whole tail). At
+            // playback start the duration is often not yet known (durationHint null,
+            // metadata still loading) — wait briefly for a real one before enqueueing.
+            const contentKey = `${this.content.sourceId}:${this.content.id}`;
+            const liveDuration = () => {
+                const d = this.getDisplayDuration?.() || this.video?.duration || this.durationHint || 0;
+                return Number.isFinite(d) && d > 0 ? Math.round(d) : 0;
+            };
+            let duration = liveDuration();
+            for (let i = 0; !duration && i < 40; i++) {           // up to ~20s
+                await new Promise((r) => setTimeout(r, 500));
+                if (!this._storyboardFetched || `${this.content?.sourceId}:${this.content?.id}` !== contentKey) return;
+                duration = liveDuration();
+            }
             const params = {
                 sourceId,
                 externalId: this.content.id,
                 itemType: this.content.type === 'series' ? 'series' : 'movie',
                 enqueue: 1,
-                duration: Math.round(this.durationHint || 0)
+                duration
             };
             // For series the id above is the EPISODE being watched; its real container
             // keeps the server-built episode URL honest (panels 404 a wrong extension).

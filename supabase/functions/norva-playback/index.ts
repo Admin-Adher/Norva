@@ -2835,12 +2835,24 @@ async function getStoryboard(req: Request, userId: string, db: SupabaseClient): 
     .eq("provider_key", pkey).eq("item_type", itemType).eq("external_id", externalId).maybeSingle();
   const rec = row as JsonRecord | null;
   if (rec?.status === "ready") {
-    const spriteUrl = `${PUBLIC_ORIGIN}/storage/v1/object/public/${STORYBOARD_BUCKET}/${stringOr(rec.sprite_path, "")}`;
-    return {
-      status: "ready", spriteUrl,
-      cols: rec.tile_cols ?? 10, rows: rec.tile_rows ?? 1,
-      count: rec.tile_count ?? 0, intervalSec: rec.interval_sec ?? 0,
-    };
+    // Time-axis self-heal: a sprite enqueued before the film's duration was known
+    // was built on an ASSUMED grid (the gateway defaults to 2h), so for a longer
+    // film every hover past the covered range clamps onto the last tile — the
+    // "same preview image for the whole second half" bug. When the player now
+    // reports a real duration materially beyond the sprite's coverage, fall
+    // through and regenerate (the upsert reuses the same sprite_path; storage
+    // overwrites in place). Non-enqueue readers keep the old sprite meanwhile.
+    const covered = (Number(rec.tile_count) || 0) * (Number(rec.interval_sec) || 0);
+    const reqDuration = Math.max(0, Number(url.searchParams.get("duration")) || 0);
+    const axisStale = covered > 0 && reqDuration > covered * 1.2 && url.searchParams.get("enqueue") === "1";
+    if (!axisStale) {
+      const spriteUrl = `${PUBLIC_ORIGIN}/storage/v1/object/public/${STORYBOARD_BUCKET}/${stringOr(rec.sprite_path, "")}`;
+      return {
+        status: "ready", spriteUrl,
+        cols: rec.tile_cols ?? 10, rows: rec.tile_rows ?? 1,
+        count: rec.tile_count ?? 0, intervalSec: rec.interval_sec ?? 0,
+      };
+    }
   }
   const ageMs = rec ? Date.now() - Date.parse(stringOr(rec.updated_at, "")) : Infinity;
   // A live processing row (heartbeat-fresh) blocks re-enqueue; stale/failed rows may retry.
