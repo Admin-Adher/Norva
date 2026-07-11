@@ -1934,8 +1934,17 @@ class WatchPage {
         if (this._storyboardFetched || !this.content?.sourceId || !this.content?.id) return;
         this._storyboardFetched = true;
         try {
+            // The edge keys storyboards off the CLOUD source UUID, but content.sourceId is the
+            // browser-local alias (e.g. "900001"). Resolve it like the AI-subtitle path does
+            // (see _requestAiSubtitlesInner) — with the raw alias the edge can't find the
+            // source and answers status:none forever, so no thumbnails ever generate.
+            let sourceId = this.content.sourceId;
+            try {
+                const cloudId = await window.API?.resolveCloudSourceId?.(sourceId);
+                if (cloudId) sourceId = String(cloudId);
+            } catch (_) { /* fall back to the raw id */ }
             const res = await window.NorvaCloud?.playback?.storyboard?.({
-                sourceId: this.content.sourceId,
+                sourceId,
                 externalId: this.content.id,
                 itemType: this.content.type === 'series' ? 'series' : 'movie',
                 enqueue: 1,
