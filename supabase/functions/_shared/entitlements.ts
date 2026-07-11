@@ -120,10 +120,65 @@ export function getEntitlementRuntime() {
   };
 }
 
+export type EntitlementOptions = { autoStartTrial?: boolean; isAdmin?: boolean };
+
 export async function getEntitlementDecision(
   db: SupabaseClient,
   userId: string,
-  options: { autoStartTrial?: boolean } = {},
+  options: EntitlementOptions = {},
+): Promise<EntitlementDecision> {
+  const decision = await computeDecision(db, userId, options);
+  // Admin safety net: an account with app_metadata.role='admin' (the owner/staff) is
+  // never soft-walled — full access, no subscription required. Hard blocks
+  // (revoked/refunded/fraud) still apply. Only meaningful under enforce; in observe
+  // the decision is already allowed, so this never triggers. Checked ONLY on the deny
+  // path, and — unless the caller passed options.isAdmin — with a single getUserById
+  // there, so the allowed hot path costs nothing extra.
+  if (!decision.allowed && !HARD_BLOCK_STATUSES.has(decision.reason)) {
+    const admin = options.isAdmin === true ||
+      (options.isAdmin === undefined && await isUserAdmin(db, userId));
+    if (admin) return adminDecision(decision.projection);
+  }
+  return decision;
+}
+
+// Full-access decision for an admin. planCode 'manual' carries the highest limits.
+function adminDecision(projection: JsonRecord | null): EntitlementDecision {
+  return {
+    allowed: true,
+    reason: "admin_bypass",
+    status: "active",
+    planCode: "manual",
+    mode: ENTITLEMENTS_MODE,
+    enforced: ENTITLEMENTS_MODE === "enforce",
+    failOpen: false,
+    limits: PLAN_LIMITS.manual,
+    projection,
+    message: "Norva admin access.",
+  };
+}
+
+// Sync admin check from an already-resolved auth user (JWT app_metadata.role).
+// Callers holding the user pass isAdmin: isAdminUser(user) so an enforce-mode deny
+// never costs a getUserById round-trip.
+export function isAdminUser(user: { app_metadata?: JsonRecord | null } | null | undefined): boolean {
+  return String((user?.app_metadata as JsonRecord | undefined)?.role ?? "") === "admin";
+}
+
+async function isUserAdmin(db: SupabaseClient, userId: string): Promise<boolean> {
+  try {
+    const { data } = await db.auth.admin.getUserById(userId);
+    const meta = data?.user?.app_metadata as JsonRecord | undefined;
+    return String(meta?.role ?? "") === "admin";
+  } catch (_) {
+    return false;
+  }
+}
+
+async function computeDecision(
+  db: SupabaseClient,
+  userId: string,
+  options: EntitlementOptions = {},
 ): Promise<EntitlementDecision> {
   const { data, error } = await db
     .from("cloud_entitlement_projection")

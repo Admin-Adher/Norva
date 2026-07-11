@@ -11,7 +11,7 @@ import {
 } from "../_shared/live-materialization.ts";
 import { refreshVodTitleProjection } from "../_shared/vod-title-projection.ts";
 import type { LiveCatalogItem } from "../_shared/live-catalog.ts";
-import { featuresForDecision, getBillingMode, getEntitlementDecision, getEntitlementRuntime, hasConsumedTrial, limitNumber, realPlanCode, recordEntitlementSignal } from "../_shared/entitlements.ts";
+import { featuresForDecision, getBillingMode, getEntitlementDecision, getEntitlementRuntime, hasConsumedTrial, isAdminUser, limitNumber, realPlanCode, recordEntitlementSignal } from "../_shared/entitlements.ts";
 import { driveXtreamSyncToReady, freshSyncCursor } from "../_shared/xtream-sync.ts";
 
 type JsonRecord = Record<string, unknown>;
@@ -255,7 +255,7 @@ async function route(
       getProfile(user.id, db),
       listProfiles(user.id, db),
       (async () => {
-        const decision = await getEntitlementDecision(db, user.id);
+        const decision = await getEntitlementDecision(db, user.id, { isAdmin: isAdminUser(user) });
         return { ...decision, features: featuresForDecision(decision) };
       })(),
       listSources(user.id, db),
@@ -277,7 +277,7 @@ async function route(
   }
 
   if (scope === "entitlements" && req.method === "GET") {
-    const decision = await getEntitlementDecision(db, user.id);
+    const decision = await getEntitlementDecision(db, user.id, { isAdmin: isAdminUser(user) });
     return { body: { ...decision, features: featuresForDecision(decision) } };
   }
 
@@ -288,7 +288,7 @@ async function route(
     const body = await req.json().catch(() => ({})) as JsonRecord;
     const feature = typeof body.feature === "string" ? body.feature : "";
     if (feature) {
-      const decision = await getEntitlementDecision(db, user.id, { autoStartTrial: false });
+      const decision = await getEntitlementDecision(db, user.id, { autoStartTrial: false, isAdmin: isAdminUser(user) });
       const context = body.context && typeof body.context === "object" && !Array.isArray(body.context)
         ? body.context as JsonRecord
         : {};

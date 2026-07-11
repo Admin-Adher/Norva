@@ -84,8 +84,12 @@ auto-trial système). Revolut = **un 4ᵉ écrivain**, rien de plus côté lectu
    `/api/orders/…` (pas `/api/1.0/…` → 404) ; le succès = `authorisation_passed` (pas seulement
    `completed`). Cron à enregistrer : `ops/hetzner/scripts/register-revolut-billing-cron.sql`.
    **Reste** : généraliser les fuites Stancer (lifecycle/admin/refund) — cf. liste ci-dessous.
-5. **Bypass admin** dans `getEntitlementDecision` (exemption `role='admin'`, seulement utile
-   en `enforce`). **⏳ à faire.**
+5. **Bypass admin** dans `getEntitlementDecision` (exemption `app_metadata.role='admin'`). ✅ **codé.**
+   Filet de sécurité owner/staff : un admin n'est jamais soft-wallé (accès complet sans abonnement) ;
+   les hard-blocks (revoked/refunded/fraud) restent bloqués. Vérifié **uniquement sur le chemin de
+   refus** (rare) — et hors chemin chaud grâce à l'option `isAdmin` que les appelants portant le
+   JWT passent (`norva-cloud` /boot + /entitlements) ; les autres appelants retombent sur un
+   `getUserById` unique au refus. Sans effet en `observe` (déjà ouvert) → à valider en `enforce` (phase 6).
 6. **Retrait Stancer** (fonctions + tables si inutilisées), validation sandbox de bout en
    bout, puis **`NORVA_ENTITLEMENTS_MODE=enforce`** + `NORVA_BILLING_MODE=revenuecat`
    (soft-wall) ou un nouveau mode `revolut` — à décider en phase 6.
