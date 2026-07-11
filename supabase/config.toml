@@ -60,6 +60,12 @@ verify_jwt = false
 [functions.norva-stancer-webhook]
 verify_jwt = false
 
+# Revolut Merchant webhook — reconciles subscription/order events into the
+# entitlement projection. No Supabase JWT (Revolut calls it); auth is the HMAC
+# signature it verifies itself. INERT until REVOLUT_WEBHOOK_SIGNING_SECRET is set.
+[functions.norva-revolut-webhook]
+verify_jwt = false
+
 # Stancer checkout + diagnostics. INERT until STANCER_SECRET_KEY is set. /health is open; /selftest is
 # cron-authed and test-mode only; /checkout is user-authed (verifies the JWT itself).
 [functions.norva-stancer]

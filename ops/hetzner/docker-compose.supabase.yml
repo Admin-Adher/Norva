@@ -353,6 +353,10 @@ services:
       NORVA_BILLING_MODE: ${NORVA_BILLING_MODE:-legacy}
       # FCM push — Firebase service-account JSON on ONE line (read by _shared/fcm.ts).
       FCM_SERVICE_ACCOUNT: ${FCM_SERVICE_ACCOUNT:-}
+      # Revolut Merchant billing (sandbox during dev, production at cutover). The
+      # webhook verifies the signing secret; the checkout initiator uses the API key.
+      REVOLUT_SECRET_KEY: ${REVOLUT_SECRET_KEY:-}
+      REVOLUT_WEBHOOK_SIGNING_SECRET: ${REVOLUT_WEBHOOK_SIGNING_SECRET:-}
     command:
       - start
       - --main-service
