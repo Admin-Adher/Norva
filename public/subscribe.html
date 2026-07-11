@@ -250,6 +250,11 @@
       // `result` (from NorvaBilling.purchase) tailors the copy for the one-click
       // plan-change path — existing subscribers change plans with no card re-entry.
       function showTrialConfirmation(result) {
+        const rs = result && result.status;
+        // A 'redirect' result means purchase() is navigating us to the embedded checkout
+        // widget (Revolut) — the card hasn't been entered and the trial hasn't started yet.
+        // Do NOT flash a false "trial started" confirmation before the page moves on.
+        if (rs === 'redirect') return;
         ['.grid', '.toggle', '.row'].forEach(function (sel) {
           const el = document.querySelector(sel);
           if (el) el.style.display = 'none';
@@ -259,7 +264,6 @@
         const title = document.getElementById('confirm-title');
         const msg = document.getElementById('confirm-msg');
         const cont = document.getElementById('confirm-continue');
-        const rs = result && result.status;
         if (rs === 'plan_changed') {
           title.textContent = 'Plan updated';
           msg.textContent = 'Your new plan is active right away. The new price applies from your next billing cycle — nothing extra is charged today.';
