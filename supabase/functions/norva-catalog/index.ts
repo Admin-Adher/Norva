@@ -659,14 +659,16 @@ async function listMediaItems(url: URL, userId: string) {
   if (search && itemType && !sourceId && !categoryId) {
     const q = search.trim();
     if (q.length >= 2) {
+      // dedup=1 (global-search overlay) collapses to one representative row per
+      // film SERVER-SIDE (grid parity). Default returns ALL matching rows —
+      // load-bearing: openByItem() re-fetches a tapped result's sibling versions
+      // through this same path to build the version picker.
+      const dedupSearch = url.searchParams.get("dedup") === "1";
       const { data: hits, error: rpcErr } = await db.rpc("search_media_items", {
         p_user: userId, p_item_type: itemType, p_q: q, p_limit: Math.min(limit, 50),
+        p_dedup: dedupSearch,
       });
       if (!rpcErr && Array.isArray(hits)) {
-        // Return ALL matching rows (every version of every film). The client groups
-        // them by dedup_key/tmdb into one card each — and, crucially, a tapped search
-        // result re-fetches its sibling versions through this same path to build the
-        // version picker, so collapsing here would strip a film's versions.
         const items = (hits as Array<Record<string, any>>).map((row) => {
           row.year = row.release_year ?? null;
           return row;

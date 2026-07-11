@@ -1560,25 +1560,22 @@ class App {
         const reqId = (this._searchReq = (this._searchReq || 0) + 1);
         box.innerHTML = '<div class="gsearch-hint"><div class="loading-spinner"></div></div>';
         const empty = { items: [] };
-        // Fetch a wider slice than we display: results are grouped client-side (below), so a
-        // film with many language/quality variants collapses to one row — 24 raw rows could be
-        // just 2-3 films. 48 raw keeps a good spread of distinct titles after grouping.
+        // dedup=1 → the search RPC collapses to one representative row per film SERVER-SIDE
+        // (grid parity, durable across clients), so 48 rows ≈ 48 distinct films. openByItem's
+        // sibling re-fetch deliberately OMITS the flag — the version picker needs raw rows.
         const [mv, sr] = await Promise.all([
-            window.API.media.page({ type: 'movie', q, limit: 48 }).catch(() => empty),
-            window.API.media.page({ type: 'series', q, limit: 48 }).catch(() => empty),
+            window.API.media.page({ type: 'movie', q, limit: 48, dedup: 1 }).catch(() => empty),
+            window.API.media.page({ type: 'series', q, limit: 48, dedup: 1 }).catch(() => empty),
         ]);
         if (reqId !== this._searchReq) return; // a newer keystroke superseded this
-        // Collapse provider duplicates the SAME way the Movies/Series grids do, so the global
-        // search shows one row per film — not one row per language/quality variant ("Hunger
-        // Games : Le film ×7"). Unlike the browse grid (server-deduped to ~1 row/film), the search
-        // RPC returns RAW cloud_media_items rows with NO top-level tmdb_id (it lives at
-        // metadata.providerTmdbId), no tmdb.title/date, a region-tainted dedup_key, and a year
-        // that is often NULL — so groupItems has nothing reliable to key on. prep() hoists the
-        // provider tmdb id onto tmdb_id (so the deterministic `t:` collapse fires and every
-        // version sharing a tmdb id folds to one row) and backfills the year from release_year,
-        // else the trailing :YYYY of the dedup_key, so the title+year fold can rescue rows the
-        // server hasn't tmdb-resolved yet. openSearchResult() indexes into the representative
-        // arrays, so store them in rendered order.
+        // Re-group client-side on top of the server dedup. Still load-bearing for two cases:
+        // (1) tmdb-split duplicates — same film under different dedup_keys (one tmdb-keyed, one
+        // norm-keyed) survive the server's DISTINCT ON exactly like on the grid, and the
+        // title+year fold below merges them; (2) the edge's fallback to the un-deduped RPC path
+        // (pre-migration edge, RPC error). prep() hoists metadata.providerTmdbId onto tmdb_id and
+        // backfills the year from release_year / the dedup_key's :YYYY suffix so groupItems has
+        // reliable keys. openSearchResult() indexes into the representative arrays, so store them
+        // in rendered order.
         const M = window.MediaUtils;
         const prep = (arr) => (arr || []).map((it) => {
             const tmdbId = it.tmdb_id || it.metadata?.providerTmdbId || it.providerTmdbId || undefined;
