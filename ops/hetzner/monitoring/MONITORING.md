@@ -115,11 +115,13 @@ cd ~/norva/ops/hetzner
 docker exec norva-netdata cat /usr/lib/netdata/conf.d/health_alarm_notify.conf \
   | sudo tee /etc/norva-netdata/health_alarm_notify.conf >/dev/null
 
-# 2) activer Telegram (remplace TOKEN et CHATID par tes valeurs)
+# 2) activer Telegram (remplace TOKEN et CHATID) + couper l'email (pas de MTA
+#    dans le conteneur → sendmail échoue à chaque alerte, bruit inutile)
 sudo sed -i \
   -e 's|^SEND_TELEGRAM=.*|SEND_TELEGRAM="YES"|' \
   -e 's|^TELEGRAM_BOT_TOKEN=.*|TELEGRAM_BOT_TOKEN="TOKEN"|' \
   -e 's|^DEFAULT_RECIPIENT_TELEGRAM=.*|DEFAULT_RECIPIENT_TELEGRAM="CHATID"|' \
+  -e 's|^SEND_EMAIL=.*|SEND_EMAIL="NO"|' \
   /etc/norva-netdata/health_alarm_notify.conf
 sudo chmod 600 /etc/norva-netdata/health_alarm_notify.conf
 
