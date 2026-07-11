@@ -2801,8 +2801,10 @@ async function getStoryboard(req: Request, userId: string, db: SupabaseClient): 
     externalId: stringOr(url.searchParams.get("externalId"), ""),
     itemType: stringOr(url.searchParams.get("itemType"), ""),
   });
+  // `why` on every early exit: the player ignores it (only reads status), but it
+  // makes a silent "none" diagnosable straight from the browser's Network tab.
   const pkey = (await resolveSourceIdentity(sourceId, userId, db)).key;
-  if (!pkey) return { status: "none" };
+  if (!pkey) return { status: "none", why: "no-provider-key" };
 
   const { data: row } = await db.from("catalog_storyboards")
     .select("status, sprite_path, tile_cols, tile_rows, tile_count, interval_sec, job_id, updated_at, error")
@@ -2820,12 +2822,12 @@ async function getStoryboard(req: Request, userId: string, db: SupabaseClient): 
   // A live processing row (heartbeat-fresh) blocks re-enqueue; stale/failed rows may retry.
   if (rec?.status === "processing" && ageMs < 2 * 3600 * 1000) return { status: "processing" };
   if (rec?.status === "failed" && ageMs < 24 * 3600 * 1000) return { status: "failed", error: stringOrNull(rec.error) };
-  if (url.searchParams.get("enqueue") !== "1") return { status: rec ? stringOr(rec.status, "none") : "none" };
+  if (url.searchParams.get("enqueue") !== "1") return { status: rec ? stringOr(rec.status, "none") : "none", why: "not-enqueued" };
 
   const runtimeConfig = await getRuntimeConfig(db);
-  if (!runtimeConfig.mediaGatewayUrl || !runtimeConfig.mediaGatewayToken) return { status: "none" };
+  if (!runtimeConfig.mediaGatewayUrl || !runtimeConfig.mediaGatewayToken) return { status: "none", why: "gateway-not-configured" };
   const tUrl = await resolveVariantUrl(db, userId, sourceId, externalId, itemType);
-  if (!tUrl) return { status: "none" };
+  if (!tUrl) return { status: "none", why: "no-playback-target" };
 
   const jobId = crypto.randomUUID();
   const spritePath = storyboardPath(pkey, itemType, externalId);
