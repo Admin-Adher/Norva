@@ -130,7 +130,13 @@ Deno.serve(async (req) => {
   const path = url.pathname.replace(/^.*\/norva-revolut/, "") || "/";
 
   if (req.method === "GET" && (path === "/health" || path === "/")) {
-    return json({ ok: true, service: "norva-revolut", configured: Boolean(REVOLUT_SECRET_KEY), sandbox: isTestKey(), api_base: REVOLUT_API_BASE });
+    // `env` mirrors exactly what the inert guard below checks, as SEEN by this
+    // isolate — so /health tells us whether /checkout would fall inert (no values).
+    return json({
+      ok: true, service: "norva-revolut", configured: Boolean(REVOLUT_SECRET_KEY),
+      sandbox: isTestKey(), api_base: REVOLUT_API_BASE,
+      env: { url: Boolean(SUPABASE_URL), service_key: Boolean(SERVICE_KEY), revolut_key: Boolean(REVOLUT_SECRET_KEY) },
+    });
   }
 
   if (!REVOLUT_SECRET_KEY || !SUPABASE_URL || !SERVICE_KEY) return json({ ok: false, inert: true, reason: "not_configured" });
