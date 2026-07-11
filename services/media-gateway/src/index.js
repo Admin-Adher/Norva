@@ -1401,6 +1401,22 @@ function insertByPriority(queue, job) {
     queue.splice(i, 0, job);
 }
 
+// Per-provider storyboard cooldown. A storyboard job is a FULL-FILM provider read;
+// several back-to-back on the same provider can trip its anti-abuse (a burst got
+// super8k to refuse the gateway's IP on 2026-07-11). After each storyboard pass we
+// hold off further storyboard passes on that SAME provider for a cooldown, so the
+// lane never bursts a provider even when a user watches-then-closes many of its
+// films in a row. Provider-scoped (the storyboard cache is provider-keyed too), and
+// it gates ONLY the storyboard lane — live playback and transcribe are untouched.
+const STORYBOARD_PROVIDER_COOLDOWN_MS = clampInt(process.env.STORYBOARD_PROVIDER_COOLDOWN_MS, 10 * 60_000, 0, 6 * 60 * 60_000);
+const lastStoryboardAt = new Map(); // providerKey → epoch ms of the last storyboard extraction
+function markStoryboardRun(url) { if (STORYBOARD_PROVIDER_COOLDOWN_MS > 0) lastStoryboardAt.set(proxyKeyFromUrl(url), Date.now()); }
+function storyboardCoolingDown(job) {
+    if (job?.kind !== 'storyboard' || STORYBOARD_PROVIDER_COOLDOWN_MS <= 0) return false;
+    const last = lastStoryboardAt.get(proxyKeyFromUrl(job.url));
+    return Boolean(last && (Date.now() - last) < STORYBOARD_PROVIDER_COOLDOWN_MS);
+}
+
 // Non-terminal job heartbeat: stamps the row's stage (queued/deferred/extracting/transcribing)
 // AND bumps updated_at — so a job legitimately deferred for hours (viewer watching on a
 // single-slot account) is no longer reaped at 2h or re-claimed at 90min mid-flight, and the
@@ -1441,7 +1457,7 @@ async function nextRunnableJob(queue, kind) {
         // holds the job's provider account — no round-trip, and it sees what the edge gate
         // can't (a paused viewer whose transcode ffmpeg still runs). Then the edge gate for
         // relay-side signals (live sessions on other lanes, enrichment ticks).
-        if (!accountSlotBusyLocally(job.url) && !(await shouldDeferJob(job))) { job.gateDeferrals = 0; picked = job; break; }
+        if (!accountSlotBusyLocally(job.url) && !storyboardCoolingDown(job) && !(await shouldDeferJob(job))) { job.gateDeferrals = 0; picked = job; break; }
         job.gateDeferrals = (job.gateDeferrals || 0) + 1;
         if (job.gateDeferrals > JOB_GATE_MAX_DEFERRALS) {
             console.warn(`[media-gateway] ${kind} job ${job.jobId} deferred too long — failing back to the edge`);
@@ -1615,6 +1631,7 @@ async function runStoryboardJob(job) {
         const timeoutMs = Math.min(75 * 60_000, Math.max(15 * 60_000, Math.round(dur * 600)));
         const r = await withAccountJobLock(accountJobKey(uid, url), () =>
             extractStoryboardSprite(url, ua, intervalSec, STORYBOARD_COLS, rows, outputPath, timeoutMs, uid));
+        markStoryboardRun(url); // start the per-provider cooldown (this provider was just read)
         if (r.preempted) {
             payload = { requeue: true };
         } else if (!r.ok) {
