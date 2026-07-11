@@ -27,10 +27,11 @@ window.NORVA_BILLING_CONFIG = {
   // which returns a Stancer hosted-payment-page URL to redirect to (PCI-safe,
   // 3DS automatic). Card charging + recurring is orchestrated server-side.
   stancer: {
-    // Stancer → Revolut migration: keep Stancer wired for rollback, but Revolut takes
-    // precedence when BOTH are enabled (billing.js checks revolut first). Flip this to
-    // false once Revolut is validated live (Phase 6).
-    enabled: true,
+    // Stancer → Revolut migration DONE (Revolut validated live in production
+    // 2026-07-11). Disabled — the web checkout now routes to Revolut. Code kept for
+    // a rollback window; remove the norva-stancer* functions once Revolut is proven
+    // over a full billing cycle.
+    enabled: false,
     mode: 'test',                                   // informational only (real mode = edge secret)
     checkoutUrl: '/functions/v1/norva-stancer/checkout',
     // Called by the return page to finalize the checkout without a webhook.
@@ -50,8 +51,8 @@ window.NORVA_BILLING_CONFIG = {
   // edge key (sk_… on sandbox-merchant.revolut.com → sandbox); real cards only work
   // once the prod key + REVOLUT_API_BASE=https://merchant.revolut.com are set.
   revolut: {
-    enabled: false,                                 // flip on once the sandbox key is on the box
-    mode: 'sandbox',                                // 'sandbox' | 'prod' — passed to RevolutCheckout(token, mode)
+    enabled: true,                                  // LIVE — web checkout routes to Revolut (2026-07-11)
+    mode: 'prod',                                   // widget also auto-follows the server's sandbox flag
     checkoutUrl: '/functions/v1/norva-revolut/checkout',
     confirmUrl: '/functions/v1/norva-revolut/confirm',
     profileUrl: '/functions/v1/norva-revolut/profile',
