@@ -259,6 +259,12 @@ services:
       REGION: ${REGION:-stub}
       ENABLE_IMAGE_TRANSFORMATION: "true"
       IMGPROXY_URL: http://imgproxy:5001
+      # Signed UPLOAD URL validity. Storage's default is 60s (managed uses 2h) —
+      # far too short for the storyboard pipeline, where the gateway PUTs the
+      # sprite AFTER a queue wait + a full provider-speed ffmpeg pass (up to
+      # ~75 min budgeted). 24h covers any backlog; the token only allows PUT of
+      # one exact object path in a public-content bucket.
+      UPLOAD_SIGNED_URL_EXPIRATION_TIME: ${UPLOAD_SIGNED_URL_EXPIRATION_TIME:-86400}
       S3_PROTOCOL_ACCESS_KEY_ID: ${S3_PROTOCOL_ACCESS_KEY_ID:-}
       S3_PROTOCOL_ACCESS_KEY_SECRET: ${S3_PROTOCOL_ACCESS_KEY_SECRET:-}
     volumes:
