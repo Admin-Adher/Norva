@@ -338,6 +338,15 @@ services:
       NORVA_REVENUECAT_WEBHOOK_AUTH: ${NORVA_REVENUECAT_WEBHOOK_AUTH:-}
       STANCER_SECRET_KEY: ${STANCER_SECRET_KEY:-}
       SEND_EMAIL_HOOK_SECRET: ${SEND_EMAIL_HOOK_SECRET:-}
+      # Billing / entitlements runtime gate (read by _shared/entitlements.ts).
+      # WITHOUT these the edge silently falls back to enforce+legacy — a migrated
+      # non-active subscription then hard-blocks the user to the paywall. Keep
+      # `observe` during the billing transition; flip to `enforce` after the
+      # payment refonte.
+      NORVA_ENTITLEMENTS_MODE: ${NORVA_ENTITLEMENTS_MODE:-enforce}
+      NORVA_BILLING_MODE: ${NORVA_BILLING_MODE:-legacy}
+      # FCM push — Firebase service-account JSON on ONE line (read by _shared/fcm.ts).
+      FCM_SERVICE_ACCOUNT: ${FCM_SERVICE_ACCOUNT:-}
     command:
       - start
       - --main-service
