@@ -72,27 +72,41 @@ Ce qui écrivait encore vers le managé après la bascule :
 > lui. Les backups self-host utilisent une config **locale à la box**, pas ces
 > secrets GitHub.
 
-## 4. Phase C — Décommission (irréversible-ish — après la fenêtre)
+## 4. Phase C — Décommission (dashboard-only — action utilisateur)
 
-À lancer seulement quand la Phase A confirme le zéro sur 7 j **et** que la
-refonte Revolut a passé au moins un cycle de facturation complet.
+> ⚠️ **La Pause n'est PAS possible ici.** Supabase ne met en Pause que les
+> projets **Free**, et le downgrade-vers-Free exige de rentrer sous 500 Mo. La
+> DB managée fait **5,3 Go** (906k `cloud_media_items`) → downgrade refusé /
+> projet restreint. La seule vraie façon d'arrêter le compute **et la
+> facturation** est donc le **Delete** (définitif). Aucun outil MCP n'expose ni
+> le downgrade ni le delete → **tout se fait dans le dashboard** par
+> l'utilisateur.
 
-- [ ] Désactiver le `schedule:` de `backup-db-to-r2.yml` (cf. §3).
-- [ ] Prendre un **dernier dump managé** manuel et le vérifier (Actions → Run
-      workflow sur `backup-db-to-r2.yml`, ou dump local) → archive R2 étiquetée
-      `final-managed-YYYYMMDD`. C'est le snapshot d'archive définitif.
-- [ ] **Downgrader** le projet managé au plan **Free** (ou le **Pause** via
-      Dashboard → Settings → General → Pause project). Pause = arrêt compute,
-      données conservées, réveil possible → **préférer Pause** à une suppression
-      tant qu'on garde un doute.
-- [ ] **Ne PAS supprimer** le projet (`Delete project`) avant ~1 mois de
-      Pause sans incident. La suppression est définitive et efface la DB managée.
-- [ ] Révoquer / retirer les secrets GitHub devenus inutiles :
-      `SUPABASE_ACCESS_TOKEN`, `SUPABASE_DB_URL`. **Garder** les `R2_*` (utilisés
-      par les backups self-host).
+État managé confirmé le 2026-07-11 21:20 UTC : **0 trafic client**
+(`authenticated`/`anon`/`service_role` = 0), **0 job cron actif** (les 49 jobs
+ont été désactivés ; dernier run 09:05 UTC, plus rien depuis) → **vraiment
+idle**. Données préservées (dump de cutover + backups self-host prouvés + backups
+natifs Supabase).
+
+- [ ] **Décider : garder dormant (payant) vs Delete maintenant.** La Pause
+      gratuite n'existant pas ici, la seule alternative au Delete est de laisser
+      le projet sur son plan payant, idle, comme filet de rollback (~1 mois de
+      plan Pro ≈ assurance). Reco : garder dormant ~1 mois puis Delete une fois
+      la confiance acquise (aligné sur la prudence initiale).
+- [ ] **Delete** (quand décidé) : Dashboard → projet Norva managé → Settings →
+      General → **Delete project** (tape le nom pour confirmer). **Définitif** —
+      efface la DB managée. Sûr car les données vivent sur le self-host
+      (restore-testé) + le dump de cutover + les backups natifs.
+- [ ] Avant Delete, si tu veux une archive portable dédiée : dump manuel via la
+      **session-pooler URI** managée (`pg_dump "$MANAGED_DB_URL" -Fc -f
+      managed-final-YYYYMMDD.dump`) → pousser sur R2. Optionnel (le self-host a
+      déjà les données).
+- [ ] Retirer les secrets GitHub devenus inutiles : `SUPABASE_ACCESS_TOKEN`
+      (utilisé par le deploy workflow). `SUPABASE_DB_URL` + `R2_*` de
+      `backup-db-to-r2.yml` **n'ont jamais été posés** → rien à retirer là.
+      **Garder** les `R2_*` réels s'ils existent pour d'autres usages.
 - [ ] Supprimer les workflows morts une fois le projet retiré :
-      `deploy-supabase-functions.yml` (et, si plus aucun rôle,
-      `backup-db-to-r2.yml`).
+      `deploy-supabase-functions.yml` et `backup-db-to-r2.yml`.
 
 ## 5. Rollback (si un problème surgit pendant la fenêtre)
 
@@ -100,8 +114,10 @@ Tant qu'on est en Phase A/B, le retour au managé est rapide :
 
 1. **Functions** : Actions → `Deploy Supabase Edge Functions` → *Run workflow*
    (redéploie l'état courant sur le managé).
-2. **DB** : la dernière archive `backup-db-to-r2.yml` (nightly) est la source de
-   vérité managée ; le managé lui-même n'a jamais été éteint en Phase A.
+2. **DB** : tant que le projet managé n'est pas Delete, **il est lui-même** la
+   source de vérité managée (toujours up, idle, données intactes). Le workflow
+   `backup-db-to-r2.yml` **n'a jamais produit d'archive** (inerte, cf. §3) — ne
+   pas compter dessus.
 3. **Clients** : re-pointer les défauts front vers le managé — inverse des
    commits `9390ec8` (mobile-pwa) et de ce lot (`server/`), plus le
    cache-buster `?v=` du web. En pratique on ne rollback que si le self-host
@@ -126,9 +142,11 @@ Tant qu'on est en Phase A/B, le retour au managé est rapide :
   re-pointés sur le self-host.
 - **2026-07-11** — Phase C lancée à la demande explicite (fenêtre dormante
   écourtée, décision assumée). Constat : `backup-db-to-r2.yml` inerte depuis
-  toujours (secrets jamais posés) → `schedule` retiré. Données managées
-  préservées par ailleurs (dump de cutover + backups self-host prouvés + backups
-  natifs Supabase + la Pause conserve les données). **Pause du projet managé**
-  effectuée via l'API Supabase (réversible via `restore`). Restent des actions
-  dashboard côté utilisateur : retirer les secrets GitHub devenus inutiles et,
-  après ~1 mois de Pause sans incident, décider du `Delete` définitif.
+  toujours (secrets jamais posés) → `schedule` retiré. **Pause tentée via l'API
+  Supabase → REFUSÉE** : « Project is not free-tier », et la DB (5,3 Go) est
+  10× au-dessus de la limite Free → downgrade-vers-Free non viable, donc **Pause
+  impossible**. Il n'existe pas d'outil MCP de downgrade/delete → l'arrêt du
+  projet (= Delete, définitif) est une **action dashboard** côté utilisateur.
+  Managé confirmé **idle** (0 trafic client, 0 cron actif, dernier run 09:05
+  UTC). Données préservées (dump cutover + backups self-host + backups natifs).
+  Décision Delete-now-vs-garder-dormant laissée à l'utilisateur (cf. §4).
