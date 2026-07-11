@@ -12,19 +12,19 @@
 //   compare (timing-safe) against Revolut-Signature (may hold multiple, space-
 //   separated, during key rotation); reject a timestamp older than 5 min (replay).
 //   Ref: developer.revolut.com/docs/guides/.../verify-the-payload-signature
+//   (confirmed working against a real sandbox delivery on 2026-07-11.)
 //
-// IDENTITY — Revolut has no notion of our user. The checkout (norva-revolut)
-// stamps the order/subscription `metadata` with { user_id, plan, period, kind };
-// this webhook reads them back. Events without a resolvable user are ack'd (200)
-// and skipped so Revolut doesn't retry forever.
+// MINIMAL BODY — Revolut delivers only { event, order_id }. The metadata, amount
+// and authoritative state are NOT in the body, so we GET the order from Revolut
+// ({REVOLUT_API_BASE}/api/1.0/orders/{id}) and trust the API — the same pattern
+// the Stancer webhook uses (re-fetch the payment intent). The checkout stamps the
+// order metadata with { user_id, plan, period, kind }, which we read back here.
+// Events whose order has no resolvable user are ack'd (200) and skipped.
 //
-// ⚠️ BRING-UP: the exact JSON paths of the Revolut order/subscription payload are
-// still being confirmed against real sandbox deliveries — this function LOGS the
-// full payload and reads fields from several candidate locations. Once the first
-// real event is captured, tighten `pickOrder`/`projectionPatch` (search TODO).
-//
-// Required env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, REVOLUT_WEBHOOK_SIGNING_SECRET.
-// Optional: NORVA_TRIAL_DAYS (7), NORVA_BILLING_FAIL_OPEN_HOURS (72).
+// Required env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
+//   REVOLUT_WEBHOOK_SIGNING_SECRET, REVOLUT_SECRET_KEY.
+// Optional: REVOLUT_API_BASE (default sandbox), NORVA_TRIAL_DAYS (7),
+//   NORVA_BILLING_FAIL_OPEN_HOURS (72).
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
@@ -37,6 +37,9 @@ const SUPABASE_SERVICE_KEY =
   Deno.env.get("SUPABASE_SECRET_KEY") ??
   "";
 const SIGNING_SECRET = Deno.env.get("REVOLUT_WEBHOOK_SIGNING_SECRET") ?? "";
+const REVOLUT_SECRET_KEY = Deno.env.get("REVOLUT_SECRET_KEY") ?? "";
+// Sandbox during dev; set to https://merchant.revolut.com at production cutover.
+const REVOLUT_API_BASE = (Deno.env.get("REVOLUT_API_BASE") ?? "https://sandbox-merchant.revolut.com").replace(/\/+$/, "");
 const TRIAL_DAYS = boundedInt(Deno.env.get("NORVA_TRIAL_DAYS"), 7, 0, 90);
 const FAIL_OPEN_HOURS = boundedInt(Deno.env.get("NORVA_BILLING_FAIL_OPEN_HOURS"), 72, 1, 24 * 14);
 const TOLERANCE_MS = 5 * 60 * 1000;
@@ -56,8 +59,7 @@ const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
 Deno.serve(async (req) => {
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
 
-  // Raw body FIRST — the HMAC is over the exact bytes; parsing then re-serializing
-  // would change them and break verification.
+  // Raw body FIRST — the HMAC is over the exact bytes.
   const raw = await req.text();
   if (!(await verifySignature(req, raw))) return json({ error: "Invalid signature" }, 401);
 
@@ -65,24 +67,26 @@ Deno.serve(async (req) => {
   try { body = JSON.parse(raw) as JsonRecord; } catch (_) { return json({ error: "Invalid JSON" }, 400); }
 
   const eventType = String(body.event ?? body.type ?? "").toUpperCase();
-  // Bring-up observability: log the full payload so the first real delivery pins
-  // the exact shape. Bounded so a huge payload can't blow the log line.
-  console.log("[norva-revolut-webhook]", eventType, JSON.stringify(body).slice(0, 4000));
-
-  const order = pickOrder(body);
-  const meta = recordOrEmpty(order.metadata ?? body.metadata);
-  const userId = resolveUserId(meta);
-  const eventId =
-    stringOrNull(body.id) ?? stringOrNull(order.id) ??
-    `${eventType}:${stringOrNull(order.order_id) ?? stringOrNull(order.subscription_id) ?? "?"}`;
-
-  if (!userId) {
-    console.warn("[norva-revolut-webhook] no user_id in metadata — needs mapping", { eventType, eventId });
-    return json({ ok: true, skipped: "no_user_metadata" });
-  }
+  const data = recordOrEmpty(body.data);
+  const orderId = stringOrNull(body.order_id) ?? stringOrNull(data.order_id) ?? stringOrNull(data.id);
+  const subscriptionId = stringOrNull(body.subscription_id) ?? stringOrNull(data.subscription_id);
+  const eventId = `${eventType}:${orderId ?? subscriptionId ?? "?"}`;
+  console.log("[norva-revolut-webhook]", eventType, eventId);
 
   try {
-    if (eventId && (await alreadyProcessed(admin, eventId))) return json({ ok: true, duplicate: true });
+    // Idempotency before the API round-trip: Revolut retries, so a duplicate id
+    // is ack'd and skipped without re-fetching.
+    if (await alreadyProcessed(admin, eventId)) return json({ ok: true, duplicate: true });
+
+    // Authoritative order from Revolut — the body carries no metadata/state.
+    // TODO(subscriptions): fetch the subscription object for SUBSCRIPTION_* events.
+    const order = orderId ? await fetchOrder(orderId) : {};
+    const meta = recordOrEmpty(order.metadata);
+    const userId = resolveUserId(meta);
+    if (!userId) {
+      console.warn("[norva-revolut-webhook] no user_id in order metadata — skipped", { eventType, orderId });
+      return json({ ok: true, skipped: "no_user_metadata" });
+    }
 
     const patch = projectionPatch(userId, eventType, order, meta);
     if (patch) {
@@ -92,7 +96,7 @@ Deno.serve(async (req) => {
       if (error) throw new Error(`projection upsert failed: ${error.message}`);
     }
 
-    await recordProcessedEvent(admin, userId, eventId, eventType, body);
+    await recordProcessedEvent(admin, userId, eventId, eventType, { event: body, order });
     return json({ ok: true, type: eventType, plan: patch?.plan_code ?? null });
   } catch (error) {
     // 5xx → Revolut retries with backoff (3× / 10 min).
@@ -102,11 +106,34 @@ Deno.serve(async (req) => {
   }
 });
 
+// --- Revolut API ------------------------------------------------------------
+
+async function fetchOrder(orderId: string): Promise<JsonRecord> {
+  if (!REVOLUT_SECRET_KEY) {
+    console.error("[norva-revolut-webhook] REVOLUT_SECRET_KEY not set — cannot fetch order");
+    return {};
+  }
+  try {
+    const resp = await fetch(`${REVOLUT_API_BASE}/api/1.0/orders/${encodeURIComponent(orderId)}`, {
+      headers: { "Authorization": `Bearer ${REVOLUT_SECRET_KEY}`, "Accept": "application/json" },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!resp.ok) {
+      console.warn(`[norva-revolut-webhook] fetchOrder ${orderId} → ${resp.status}`);
+      return {};
+    }
+    return recordOrEmpty(await resp.json());
+  } catch (e) {
+    console.warn("[norva-revolut-webhook] fetchOrder failed", orderId, String((e as Error)?.message || e));
+    return {};
+  }
+}
+
 // --- event -> projection mapping --------------------------------------------
 
 function projectionPatch(userId: string, type: string, order: JsonRecord, meta: JsonRecord): JsonRecord | null {
   const status = statusForEvent(type, meta);
-  if (!status) return null; // event we don't reconcile (e.g. an intermediate ORDER_AUTHORISED)
+  if (!status) return null;
 
   const planCode = planForMeta(meta);
   const period = String(meta.period ?? "").toLowerCase() === "annual" ? "annual" : "monthly";
@@ -127,20 +154,21 @@ function projectionPatch(userId: string, type: string, order: JsonRecord, meta: 
   };
 
   if (status === "trialing") {
-    // TODO(payload): prefer the subscription's real trial-phase end from the
-    // Revolut payload once confirmed; TRIAL_DAYS is the interim source of truth.
+    // TODO(subscriptions): prefer the subscription's real trial-phase end once we
+    // fetch it; TRIAL_DAYS is the interim source of truth.
     patch.trial_ends_at = new Date(Date.now() + TRIAL_DAYS * 86_400_000).toISOString();
     patch.trial_consumed_at = nowIso;
     patch.current_period_end = patch.trial_ends_at;
   } else if (status === "active") {
-    // TODO(payload): prefer the subscription's real next_billing/current_period_end.
+    // TODO(subscriptions): prefer the subscription's real next_billing/period end.
     const days = period === "annual" ? 365 : 30;
     patch.current_period_end = new Date(Date.now() + days * 86_400_000).toISOString();
+    const cents = Number(recordOrEmpty(order.order_amount).value);
+    if (Number.isFinite(cents) && cents > 0) patch.mrr_cents = Math.round(cents);
   }
 
   if (status === "past_due") {
-    // Keep access open for a grace window instead of cutting immediately (matches
-    // entitlements.ts fail-open behaviour).
+    // Keep access open for a grace window (matches entitlements.ts fail-open).
     patch.fail_open_until = new Date(Date.now() + FAIL_OPEN_HOURS * 60 * 60 * 1000).toISOString();
   }
 
@@ -153,8 +181,7 @@ function statusForEvent(type: string, meta: JsonRecord): string | null {
     case "SUBSCRIPTION_INITIATED":
       return "trialing"; // trial phase starts
     case "ORDER_COMPLETED":
-      // trial-setup order (card saved, tiny/zero auth) keeps us trialing; a real
-      // charge (first bill after trial, or a renewal) means active.
+      // trial-setup order (card saved) keeps us trialing; a real charge → active.
       return kind === "trial_setup" ? "trialing" : "active";
     case "ORDER_PAYMENT_DECLINED":
     case "ORDER_PAYMENT_FAILED":
@@ -172,20 +199,9 @@ function statusForEvent(type: string, meta: JsonRecord): string | null {
 function planForMeta(meta: JsonRecord): string {
   const plan = String(meta.plan ?? "").toLowerCase();
   if (VALID_PLAN_CODES.has(plan)) return plan;
-  if (plan === "norva" || plan === "plus") return "plus";
+  if (plan === "norva") return "plus";
   if (plan.includes("family")) return "family";
   return "plus";
-}
-
-// Best-effort locate the order/subscription object in the payload. Revolut delivers
-// either the object at the top level or nested under `data`/`order`. TODO(payload):
-// collapse to the single confirmed path once a real sandbox delivery is captured.
-function pickOrder(body: JsonRecord): JsonRecord {
-  for (const c of [body.order, body.data, (recordOrEmpty(body.data)).order, body]) {
-    const r = recordOrEmpty(c);
-    if (r.metadata || r.id || r.order_id || r.subscription_id || r.customer_id) return r;
-  }
-  return body;
 }
 
 // --- signature verification -------------------------------------------------

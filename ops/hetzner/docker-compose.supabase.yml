@@ -357,6 +357,9 @@ services:
       # webhook verifies the signing secret; the checkout initiator uses the API key.
       REVOLUT_SECRET_KEY: ${REVOLUT_SECRET_KEY:-}
       REVOLUT_WEBHOOK_SIGNING_SECRET: ${REVOLUT_WEBHOOK_SIGNING_SECRET:-}
+      # Revolut API base — sandbox during dev; set to https://merchant.revolut.com
+      # (+ production keys) at cutover. Used to re-fetch the order (metadata/state).
+      REVOLUT_API_BASE: ${REVOLUT_API_BASE:-https://sandbox-merchant.revolut.com}
     command:
       - start
       - --main-service
