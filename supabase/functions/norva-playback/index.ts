@@ -66,6 +66,12 @@ const SUPABASE_SERVICE_KEY =
   Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ??
   Deno.env.get("SUPABASE_SECRET_KEY") ??
   "";
+// Public origin for URLs handed to EXTERNAL callers — the browser (storyboard
+// sprite) and the Railway media gateway (transcribe/storyboard callbacks + the
+// signed upload URL). On self-host SUPABASE_URL is the internal http://kong:8000,
+// unreachable from outside the box, so anything that leaves the edge must use the
+// public origin. On managed SUPABASE_PUBLIC_URL == SUPABASE_URL, so this is inert.
+const PUBLIC_ORIGIN = trimTrailingSlash(Deno.env.get("SUPABASE_PUBLIC_URL") ?? "") || SUPABASE_URL;
 const ENV_RELAY_BASE_URL = trimTrailingSlash(Deno.env.get("NORVA_RELAY_BASE_URL") ?? "");
 const ENV_RELAY_TOKEN_SECRET = Deno.env.get("RELAY_TOKEN_SECRET") ?? "";
 const ENV_MEDIA_GATEWAY_URL = trimTrailingSlash(Deno.env.get("NORVA_MEDIA_GATEWAY_URL") ?? "");
@@ -2535,7 +2541,7 @@ async function transcribeEnqueue(
   const bDur = Math.max(0, Number(opts.dur) || 0); // 0 = whole film (prod); >0 = clip (pipeline test)
   const exp = new Date(Date.now() + 2 * 3600 * 1000).toISOString();
   const pipe = await createBytePipeAccess("transcribe-job", userId, tUrl, exp, db, null);
-  const cbUrl = `${Deno.env.get("SUPABASE_URL") ?? ""}/functions/v1/norva-playback/transcribe-callback`;
+  const cbUrl = `${PUBLIC_ORIGIN}/functions/v1/norva-playback/transcribe-callback`;
   // origin drives the gateway's priority classes: a viewer waiting in front of the player jumps
   // ahead of the nightly pregen batch (viewer > service > pregen).
   const origin = ["viewer", "service", "pregen"].includes(stringOr(opts.origin, "")) ? stringOr(opts.origin, "") : "service";
@@ -2604,7 +2610,7 @@ async function ocrEnqueue(
   }
   const exp = new Date(Date.now() + 2 * 3600 * 1000).toISOString();
   const pipe = await createBytePipeAccess("ocr-job", userId, tUrl, exp, db, null);
-  const cbUrl = `${Deno.env.get("SUPABASE_URL") ?? ""}/functions/v1/norva-playback/transcribe-callback`;
+  const cbUrl = `${PUBLIC_ORIGIN}/functions/v1/norva-playback/transcribe-callback`;
   const tessLang = TESS_LANG_MAP[lang] || "";
   const fmt = ["pgs", "vobsub", "dvb"].includes(stringOr(opts.fmt, "")) ? stringOr(opts.fmt, "") : "pgs";
   const asyncUrl = `${pipe.url.replace("/raw/", "/ocr-async/")}?index=${idx}&jobId=${jobId}&callback=${encodeURIComponent(cbUrl)}&fmt=${fmt}${tessLang ? `&lang=${tessLang}` : ""}`;
@@ -2678,7 +2684,7 @@ async function translateEnqueue(
     return { status: stringOr(claimRow?.status, "processing"), cached: true, jobId: claimRow?.job_id ?? null, providerKey: pkey, kind: "translation", lang: target };
   }
 
-  const cbUrl = `${Deno.env.get("SUPABASE_URL") ?? ""}/functions/v1/norva-playback/transcribe-callback`;
+  const cbUrl = `${PUBLIC_ORIGIN}/functions/v1/norva-playback/transcribe-callback`;
   let gwStatus = 0, gwBody: JsonRecord | null = null;
   try {
     const gw = await fetch(`${runtimeConfig.mediaGatewayUrl}/translate-async`, {
@@ -2803,7 +2809,7 @@ async function getStoryboard(req: Request, userId: string, db: SupabaseClient): 
     .eq("provider_key", pkey).eq("item_type", itemType).eq("external_id", externalId).maybeSingle();
   const rec = row as JsonRecord | null;
   if (rec?.status === "ready") {
-    const spriteUrl = `${Deno.env.get("SUPABASE_URL") ?? ""}/storage/v1/object/public/${STORYBOARD_BUCKET}/${stringOr(rec.sprite_path, "")}`;
+    const spriteUrl = `${PUBLIC_ORIGIN}/storage/v1/object/public/${STORYBOARD_BUCKET}/${stringOr(rec.sprite_path, "")}`;
     return {
       status: "ready", spriteUrl,
       cols: rec.tile_cols ?? 10, rows: rec.tile_rows ?? 1,
@@ -2841,8 +2847,11 @@ async function getStoryboard(req: Request, userId: string, db: SupabaseClient): 
   const duration = Math.max(0, Number(url.searchParams.get("duration")) || 0);
   const exp = new Date(Date.now() + 2 * 3600 * 1000).toISOString();
   const pipe = await createBytePipeAccess("storyboard-job", userId, tUrl, exp, db, null);
-  const cbUrl = `${Deno.env.get("SUPABASE_URL") ?? ""}/functions/v1/norva-playback/storyboard-callback`;
-  const asyncUrl = `${pipe.url.replace("/raw/", "/storyboard-async/")}?jobId=${jobId}&callback=${encodeURIComponent(cbUrl)}&uploadUrl=${encodeURIComponent(signed.signedUrl)}&duration=${duration}&origin=service`;
+  const cbUrl = `${PUBLIC_ORIGIN}/functions/v1/norva-playback/storyboard-callback`;
+  // The signed upload URL is minted against the internal SUPABASE_URL; rewrite its
+  // origin to the public one so the external gateway can PUT to it (token stays valid).
+  const uploadUrl = signed.signedUrl.replace(SUPABASE_URL, PUBLIC_ORIGIN);
+  const asyncUrl = `${pipe.url.replace("/raw/", "/storyboard-async/")}?jobId=${jobId}&callback=${encodeURIComponent(cbUrl)}&uploadUrl=${encodeURIComponent(uploadUrl)}&duration=${duration}&origin=service`;
   let gwStatus = 0;
   try { gwStatus = (await fetch(asyncUrl, { method: "POST", signal: AbortSignal.timeout(20000) })).status; } catch (_) { gwStatus = 0; }
   if (gwStatus !== 202) {
@@ -3156,7 +3165,7 @@ async function resolvePendingTranslations(db: SupabaseClient, runtimeConfig: Run
   const vtt = stringOr(tr.vtt, "");
   const segments = Number(tr.segments ?? 0);
   const sourceLang = (stringOr(tr.source_lang, "") || "en").toLowerCase();
-  const cbUrl = `${Deno.env.get("SUPABASE_URL") ?? ""}/functions/v1/norva-playback/transcribe-callback`;
+  const cbUrl = `${PUBLIC_ORIGIN}/functions/v1/norva-playback/transcribe-callback`;
   for (const p of rows) {
     const target = stringOr(p.lang, "");
     if (!target) continue;
