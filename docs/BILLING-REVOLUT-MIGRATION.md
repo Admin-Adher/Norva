@@ -101,13 +101,14 @@ auto-trial système). Revolut = **un 4ᵉ écrivain**, rien de plus côté lectu
    **Reste (nettoyage, non bloquant)** : retrait définitif des fonctions `norva-stancer*` après
    un cycle de facturation complet ; #41 (résilier le managé quand son trafic est à zéro).
 
-## Sujet connexe découvert (hors facturation) — Google OAuth self-host
-Le service `auth` (GoTrue) du self-host **n'a pas** le provider Google configuré
-(`GOTRUE_EXTERNAL_GOOGLE_*` absent du compose). « Continue with Google » → 400
-`provider is not enabled`. Sans effet sur les sessions déjà ouvertes (même secret JWT),
-mais casse les **nouvelles** connexions Google à mesure que les clients basculent sur le
-self-host (via `?v=6`). À corriger séparément : activer le provider Google sur GoTrue +
-identifiants OAuth (réutiliser ceux du projet managé).
+## Sujet connexe (hors facturation) — Google OAuth self-host ✅ réglé le 2026-07-11
+Le service `auth` (GoTrue) du self-host n'avait pas le provider Google → « Continue with
+Google » renvoyait 400 `provider is not enabled`. Réglé : `GOTRUE_EXTERNAL_GOOGLE_*`
+ajouté au compose (client **Norva Web** réutilisé), redirect `https://api.norva.tv/auth/v1/callback`
+ajouté aux *Authorized redirect URIs* côté Google Cloud, `GOOGLE_CLIENT_ID`/`GOOGLE_SECRET`
++ `GOTRUE_EXTERNAL_GOOGLE_ENABLED=true` dans `.env`. Vérifié : connexion Google complète OK.
+(À noter aussi ce jour : une clé de service Firebase `FCM_SERVICE_ACCOUNT` a été exposée puis
+**révoquée + régénérée**.)
 
 ## Décision d'archi — ordre + carte sauvegardée (MIT), pas d'abonnement natif (encore)
 
