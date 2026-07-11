@@ -33,15 +33,19 @@ services:
     security_opt:
       - apparmor:unconfined
     environment:
-      # No phone-home / anonymous statistics.
+      # No phone-home / anonymous statistics. (The DB password is NOT here — it
+      # lives only in the rendered /etc/norva-netdata/postgres.conf, chmod 600.)
       DO_NOT_TRACK: "1"
-      # Injected into the go.d postgres DSN (monitoring/go.d/postgres.conf).
-      # Fail fast if the operator forgot to set it in .env.
-      NETDATA_PG_PASSWORD: ${NETDATA_PG_PASSWORD:?set NETDATA_PG_PASSWORD in ops/hetzner/.env (see monitoring/setup-netdata-pg-role.sql)}
     volumes:
       # --- config as code (read-only) -----------------------------------------
       - ./monitoring/netdata.conf:/etc/netdata/netdata.conf:ro
-      - ./monitoring/go.d/postgres.conf:/etc/netdata/go.d/postgres.conf:ro
+      # Rendered from monitoring/go.d/postgres.conf.template on the box (real
+      # password substituted). go.d does NOT expand ${ENV} in the DSN, so the
+      # secret is baked into this file OUTSIDE the repo. See MONITORING.md.
+      - /etc/norva-netdata/postgres.conf:/etc/netdata/go.d/postgres.conf:ro
+      # Turn off the docker service-discovery pipeline (would auto-create a
+      # postgres job with a guessed password → failed-login spam).
+      - ./monitoring/go.d/sd/docker.conf:/etc/netdata/go.d/sd/docker.conf:ro
       # --- persistent metrics db + registry -----------------------------------
       - netdata-lib:/var/lib/netdata
       - netdata-cache:/var/cache/netdata

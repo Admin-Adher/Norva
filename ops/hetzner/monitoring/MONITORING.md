@@ -29,9 +29,15 @@ sur le dashboard sans configuration. Le branchement d'un **canal de notification
   Métriques host et par-processus fidèles, et il joint Postgres exactement comme
   `psql` sur la box (`127.0.0.1:5432`, port publié en loopback).
 - **Rôle DB dédié `netdata`** (`pg_monitor`, read-only) : aucune écriture, aucune
-  donnée applicative lue — que des stats/settings. Mot de passe injecté par
-  l'environnement (`NETDATA_PG_PASSWORD`), **jamais** commité (`go.d` interpole
-  `${VAR}` au chargement).
+  donnée applicative lue — que des stats/settings. `go.d` **n'interpole pas**
+  `${VAR}` dans la DSN → le mot de passe est *rendu* une fois dans
+  `/etc/norva-netdata/postgres.conf` (chmod 600, **hors repo**, même schéma que
+  `/etc/norva-backup.env`) depuis `postgres.conf.template`. Le secret ne touche
+  ni git ni l'environnement du conteneur.
+- **Docker service-discovery désactivé** (`go.d/sd/docker.conf` → `disabled: yes`)
+  : sinon `go.d` auto-crée un job postgres avec un mot de passe *deviné* qui
+  échoue en boucle et spamme les logs PG. Les conteneurs restent surveillés via
+  cgroups ; la découverte `net_listeners` (métriques Caddy) reste active.
 - **`bind to = 127.0.0.1:19999`** (`netdata.conf`) : dashboard inaccessible hors
   de la box.
 
@@ -46,15 +52,20 @@ echo "NETDATA_PG_PASSWORD=$NETDATA_PG_PASSWORD" >> .env
 dpsql -v pw="$NETDATA_PG_PASSWORD" -f - < monitoring/setup-netdata-pg-role.sql
 #   → doit afficher: netdata | f | t | f   (login, pas superuser)
 
-# 2) démarrer Netdata (projet compose séparé)
+# 2) rendre la config du collector avec le vrai mot de passe (hors repo, 600)
+sudo mkdir -p /etc/norva-netdata
+sed "s|__NETDATA_PG_PASSWORD__|$NETDATA_PG_PASSWORD|" monitoring/go.d/postgres.conf.template \
+  | sudo tee /etc/norva-netdata/postgres.conf >/dev/null
+sudo chmod 600 /etc/norva-netdata/postgres.conf
+
+# 3) démarrer Netdata (projet compose séparé)
 docker compose --env-file .env -f docker-compose.monitoring.yml up -d
 docker compose --env-file .env -f docker-compose.monitoring.yml ps   # → running
 
-# 3) vérifs locales (sur la box)
-curl -s http://127.0.0.1:19999/api/v1/info | head -c 400 ; echo
-# collector postgres bien chargé + sans erreur d'auth :
-docker exec norva-netdata \
-  bash -c 'grep -i postgres /var/log/netdata/collectors/*.log 2>/dev/null | tail -5' || true
+# 4) vérifs locales (sur la box) — le job postgres doit être "check success"
+docker logs --tail 40 norva-netdata 2>&1 | grep -i -E 'collector=postgres' | tail -5
+#   → attendu:  level=info msg="check success" ... collector=postgres job=norva-db
+#   → PLUS d'erreur "job=docker_norva-db" (docker SD désactivé)
 ```
 
 > `dpsql` = le helper psql-en-conteneur (défini dans `CUTOVER-LOG-2026-07-11.md`
@@ -117,10 +128,12 @@ docker logs --tail 50 norva-netdata
 docker compose --env-file .env -f docker-compose.monitoring.yml pull
 docker compose --env-file .env -f docker-compose.monitoring.yml up -d
 
-# rotation du mot de passe du rôle netdata
+# rotation du mot de passe du rôle netdata (role + .env + config rendue)
 NEW=$(openssl rand -hex 24)
 sed -i "s/^NETDATA_PG_PASSWORD=.*/NETDATA_PG_PASSWORD=$NEW/" .env
 dpsql -v pw="$NEW" -f - < monitoring/setup-netdata-pg-role.sql
+sed "s|__NETDATA_PG_PASSWORD__|$NEW|" monitoring/go.d/postgres.conf.template \
+  | sudo tee /etc/norva-netdata/postgres.conf >/dev/null
 docker compose --env-file .env -f docker-compose.monitoring.yml up -d --force-recreate netdata
 ```
 

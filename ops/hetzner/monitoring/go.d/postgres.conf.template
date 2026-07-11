@@ -1,0 +1,29 @@
+# =============================================================================
+# Netdata go.d PostgreSQL collector — Norva self-host DB   [TEMPLATE]
+# =============================================================================
+# go.d does NOT expand ${ENV} inside the DSN, so the password can't be injected
+# at runtime. Instead this TEMPLATE is rendered once on the box into
+# /etc/norva-netdata/postgres.conf (chmod 600, OUTSIDE the repo — same pattern
+# as /etc/norva-backup.env) with the real password substituted for the
+# __NETDATA_PG_PASSWORD__ placeholder, and the compose file mounts THAT rendered
+# file. The secret never lands in git nor in the container environment.
+#
+#   sudo mkdir -p /etc/norva-netdata
+#   sed "s|__NETDATA_PG_PASSWORD__|$NETDATA_PG_PASSWORD|" \
+#       monitoring/go.d/postgres.conf.template \
+#     | sudo tee /etc/norva-netdata/postgres.conf >/dev/null
+#   sudo chmod 600 /etc/norva-netdata/postgres.conf
+#
+# Netdata runs with network_mode: host, so it reaches the db container the same
+# way psql on the box does: the port published to 127.0.0.1:5432. It connects as
+# the read-only `netdata` role (pg_monitor) from setup-netdata-pg-role.sql.
+# =============================================================================
+
+update_every: 5
+
+jobs:
+  - name: norva-db
+    dsn: 'postgres://netdata:__NETDATA_PG_PASSWORD__@127.0.0.1:5432/postgres?sslmode=disable'
+    # Cluster-wide + per-database stats come from this one connection.
+    # Per-table/index bloat would require connecting into each database; left at
+    # the default (off) to keep the collector light on a 900k-row catalog.
