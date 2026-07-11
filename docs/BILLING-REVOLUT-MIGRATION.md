@@ -75,9 +75,15 @@ auto-trial système). Revolut = **un 4ᵉ écrivain**, rien de plus côté lectu
    un `authApi.js` en cache → cache-buster `?v=` (commit 70cc91c) ; (b) Revolut attache la
    carte **juste après** l'autorisation, donc la capturer dans `/confirm` dépassait la limite
    wall-clock de l'edge → **capture lazy sur `/profile`** (hors chemin critique).
-4. **Moteur de renouvellement** `norva-revolut-billing` (cron) : à l'issue de l'essai, débit
-   MIT via la carte sauvegardée (`GET /customers/{id}/payment-methods` → charge). + généraliser
-   les fuites Stancer. **⏳ à faire.**
+4. **Moteur de renouvellement** `norva-revolut-billing` (cron) : à l'issue de l'essai/période,
+   débit MIT via la carte sauvegardée. ✅ **validé en sandbox le 2026-07-11** — essai échu →
+   `POST /api/1.0/orders` (create) puis `POST /api/orders/{id}/payments` (**nouvelle API**,
+   header `Revolut-Api-Version`) avec `saved_payment_method{type:card,id,initiator:merchant}`
+   → état `authorisation_passed` (= succès, capture AUTOMATIC) → projection `active` +
+   `current_period_end += 1 période` + `mrr_cents`. Deux pièges réglés : le paiement est sur
+   `/api/orders/…` (pas `/api/1.0/…` → 404) ; le succès = `authorisation_passed` (pas seulement
+   `completed`). Cron à enregistrer : `ops/hetzner/scripts/register-revolut-billing-cron.sql`.
+   **Reste** : généraliser les fuites Stancer (lifecycle/admin/refund) — cf. liste ci-dessous.
 5. **Bypass admin** dans `getEntitlementDecision` (exemption `role='admin'`, seulement utile
    en `enforce`). **⏳ à faire.**
 6. **Retrait Stancer** (fonctions + tables si inutilisées), validation sandbox de bout en
