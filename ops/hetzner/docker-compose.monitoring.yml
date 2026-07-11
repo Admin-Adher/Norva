@@ -46,6 +46,13 @@ services:
       # Turn off the docker service-discovery pipeline (would auto-create a
       # postgres job with a guessed password → failed-login spam).
       - ./monitoring/go.d/sd/docker.conf:/etc/netdata/go.d/sd/docker.conf:ro
+      # Alert notifications (Telegram): full stock config rendered on the box
+      # with the bot token/chat_id filled in (chmod 600, OUTSIDE the repo — the
+      # token is a secret). /etc/netdata is NOT a persistent volume here, so the
+      # notify config MUST be bind-mounted to survive container recreation.
+      # Generate it before `up` (see MONITORING.md § Notifications), else Docker
+      # would create an empty dir at the source path.
+      - /etc/norva-netdata/health_alarm_notify.conf:/etc/netdata/health_alarm_notify.conf:ro
       # --- persistent metrics db + registry -----------------------------------
       - netdata-lib:/var/lib/netdata
       - netdata-cache:/var/cache/netdata

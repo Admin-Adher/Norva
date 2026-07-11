@@ -97,25 +97,42 @@ filets déjà en place se complètent :
 
 Pour être *prévenu* (et pas seulement le voir) → configurer une notification.
 
-## Notifications (optionnel, recommandé) — à brancher quand tu veux
+## Notifications (Telegram) — être *alerté*, pas seulement voir
 
-Netdata pousse les alarmes vers un canal via
-`/etc/netdata/health_alarm_notify.conf`. Le plus simple sans infra e-mail :
-un webhook **Discord** ou **Telegram**.
+Netdata lit **un seul** fichier de notifs, `health_alarm_notify.conf`. Dans ce
+setup `/etc/netdata` **n'est pas** un volume persistant (on n'y bind-monte que
+des fichiers précis) → on **rend le fichier complet sur la box** (à partir du
+stock, pour garder tous les défauts) avec le token/chat_id remplis, chmod 600,
+et on le **bind-monte** (le compose le fait déjà). Persistant, hors git.
+
+Prérequis (côté Telegram) : créer un bot via **@BotFather** (→ `TOKEN`), lui
+envoyer un message, puis récupérer son `chat_id` via **@userinfobot**.
 
 ```bash
-docker exec -it norva-netdata bash
-./edit-config health_alarm_notify.conf
-#   Discord : SEND_DISCORD="YES" + DISCORD_WEBHOOK_URL="https://discord.com/api/webhooks/…"
-#   Telegram: SEND_TELEGRAM="YES" + TELEGRAM_BOT_TOKEN + DEFAULT_RECIPIENT_TELEGRAM
-exit
-docker exec norva-netdata bash -c '/usr/libexec/netdata/plugins.d/alarm-notify.sh test'
-docker compose --env-file .env -f docker-compose.monitoring.yml restart netdata
+cd ~/norva/ops/hetzner
+
+# 1) partir du fichier stock COMPLET (garde tous les défauts) → box, 600
+docker exec norva-netdata cat /usr/lib/netdata/conf.d/health_alarm_notify.conf \
+  | sudo tee /etc/norva-netdata/health_alarm_notify.conf >/dev/null
+
+# 2) activer Telegram (remplace TOKEN et CHATID par tes valeurs)
+sudo sed -i \
+  -e 's|^SEND_TELEGRAM=.*|SEND_TELEGRAM="YES"|' \
+  -e 's|^TELEGRAM_BOT_TOKEN=.*|TELEGRAM_BOT_TOKEN="TOKEN"|' \
+  -e 's|^DEFAULT_RECIPIENT_TELEGRAM=.*|DEFAULT_RECIPIENT_TELEGRAM="CHATID"|' \
+  /etc/norva-netdata/health_alarm_notify.conf
+sudo chmod 600 /etc/norva-netdata/health_alarm_notify.conf
+
+# 3) recréer (monte le fichier) puis tester l'envoi
+docker compose --env-file .env -f docker-compose.monitoring.yml up -d
+docker exec -it norva-netdata /usr/libexec/netdata/plugins.d/alarm-notify.sh test
+#   → 3 messages (WARNING/CRITICAL/CLEAR) doivent arriver dans ton Telegram
 ```
 
-> `edit-config` copie le stock dans `/etc/netdata` (volume `netdata-lib`) →
-> **persistant** entre redémarrages, mais **hors git**. Dis-moi le canal
-> souhaité et je te donne les 2 lignes exactes.
+> Rotation/màj du canal : ré-éditer `/etc/norva-netdata/health_alarm_notify.conf`
+> puis `... up -d --force-recreate netdata`. Le fichier n'est **jamais** commité
+> (token). Autres canaux (Discord/Slack/email) : mêmes `SEND_*`/recipient vars
+> dans ce même fichier.
 
 ## Opérations
 
