@@ -73,6 +73,12 @@ verify_jwt = false
 [functions.norva-revolut]
 verify_jwt = false
 
+# Revolut recurring-billing cron — the only place that charges a saved Revolut card
+# (MIT). INERT until REVOLUT_SECRET_KEY is set. Cron-authenticated via
+# norva_verify_cron_secret. Register the pg_cron job (see the file header).
+[functions.norva-revolut-billing]
+verify_jwt = false
+
 # Stancer checkout + diagnostics. INERT until STANCER_SECRET_KEY is set. /health is open; /selftest is
 # cron-authed and test-mode only; /checkout is user-authed (verifies the JWT itself).
 [functions.norva-stancer]
