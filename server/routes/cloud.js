@@ -4,7 +4,7 @@ const db = require('../db');
 const auth = require('../auth');
 
 const router = express.Router();
-const DEFAULT_CLOUD_API_URL = 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-cloud';
+const DEFAULT_CLOUD_API_URL = 'https://api.norva.tv/functions/v1/norva-cloud';
 
 function cloudApiUrl() {
     return (process.env.NORVA_CLOUD_API_URL || DEFAULT_CLOUD_API_URL).replace(/\/+$/, '');

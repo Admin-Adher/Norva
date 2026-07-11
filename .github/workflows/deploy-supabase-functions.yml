@@ -1,8 +1,20 @@
 name: Deploy Supabase Edge Functions
 
-# Deploys the Supabase edge functions whenever they change on main (mirrors the
-# Cloudflare web deploy). Per-function settings such as verify_jwt come from
-# supabase/config.toml, so a blanket deploy keeps each function's auth config intact.
+# ⚠️ AUTO-DEPLOY DISABLED (2026-07-11) — managed Supabase decommission (#41).
+# Norva now runs self-hosted Supabase (api.norva.tv); the managed project
+# `oupsceccxsonaalhueff` no longer serves any client. This workflow used to
+# redeploy every function to the managed project on each push to main, which
+# kept "feeding" a project we're retiring and muddied the zero-traffic audit.
+# The `push` trigger is removed so nothing auto-deploys there anymore.
+#
+# Kept as `workflow_dispatch` ONLY: during the 1-2 week rollback window we can
+# still click Actions → Run workflow to redeploy the managed functions on
+# demand (emergency rollback). Delete this file once the managed project is
+# downgraded/paused — see docs/DECOMMISSION-MANAGED-SUPABASE.md.
+#
+# Deploys the Supabase edge functions (mirrors the Cloudflare web deploy).
+# Per-function settings such as verify_jwt come from supabase/config.toml, so a
+# blanket deploy keeps each function's auth config intact.
 #
 # One-time setup: add a repository secret SUPABASE_ACCESS_TOKEN
 #   (GitHub → Settings → Secrets and variables → Actions → New repository secret).
@@ -23,13 +35,10 @@ name: Deploy Supabase Edge Functions
 # to keep re-running until a run lands (no code change needed).
 
 on:
+  # Manual-only. The `push` trigger was removed at the managed decommission
+  # (see the header). Re-add it here if the managed project is ever restored
+  # as the primary backend.
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - 'supabase/functions/**'
-      - 'supabase/config.toml'
-      - '.github/workflows/deploy-supabase-functions.yml'
 
 jobs:
   deploy:

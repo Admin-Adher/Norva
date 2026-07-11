@@ -1,7 +1,7 @@
 const db = require('../db');
 
 let timer = null;
-const DEFAULT_CLOUD_API_URL = 'https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-cloud';
+const DEFAULT_CLOUD_API_URL = 'https://api.norva.tv/functions/v1/norva-cloud';
 
 function start() {
     if (timer) return;
