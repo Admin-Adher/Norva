@@ -1,5 +1,11 @@
 # Norva × Stancer — rail de paiement web (design & intégration)
 
+> ⛔ **RETIRÉ (2026-07-11).** Stancer n'a **jamais encaissé de vrai paiement en
+> prod** et a été **remplacé par Revolut** (voir `BILLING-REVOLUT-MIGRATION.md`).
+> Tout le code Stancer (functions, cron, front, config) a été supprimé ; les
+> tables historiques `cloud_stancer_*` sont conservées (inertes). Ce document
+> reste comme archive de conception.
+
 > Rail de paiement **web** (navigateur) via **Stancer** (prestataire français, CB/SEPA, conforme UE,
 > **0 taxe store**). Complète l'architecture multi-rail : **web = Stancer**, **Android mobile/TV =
 > Google Play Billing**, **consolidation = `cloud_entitlement_projection`** (source de vérité unique,

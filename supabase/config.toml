@@ -55,11 +55,6 @@ verify_jwt = false
 [functions.norva-lifecycle]
 verify_jwt = false
 
-# Stancer (web payment rail) webhook. INERT until STANCER_SECRET_KEY is set. Verifies by re-fetching
-# the payment_intent from Stancer (no trust in the raw body); optional ?t= URL token filter.
-[functions.norva-stancer-webhook]
-verify_jwt = false
-
 # Revolut Merchant webhook — reconciles subscription/order events into the
 # entitlement projection. No Supabase JWT (Revolut calls it); auth is the HMAC
 # signature it verifies itself. INERT until REVOLUT_WEBHOOK_SIGNING_SECRET is set.
@@ -77,14 +72,4 @@ verify_jwt = false
 # (MIT). INERT until REVOLUT_SECRET_KEY is set. Cron-authenticated via
 # norva_verify_cron_secret. Register the pg_cron job (see the file header).
 [functions.norva-revolut-billing]
-verify_jwt = false
-
-# Stancer checkout + diagnostics. INERT until STANCER_SECRET_KEY is set. /health is open; /selftest is
-# cron-authed and test-mode only; /checkout is user-authed (verifies the JWT itself).
-[functions.norva-stancer]
-verify_jwt = false
-
-# Stancer recurring-billing cron — the only place that charges a saved card. INERT until
-# STANCER_SECRET_KEY is set. Cron-authenticated via norva_verify_cron_secret.
-[functions.norva-stancer-billing]
 verify_jwt = false

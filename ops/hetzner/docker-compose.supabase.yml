@@ -351,7 +351,6 @@ services:
       NORVA_RELAY_BASE_URL: ${NORVA_RELAY_BASE_URL:-}
       RELAY_TOKEN_SECRET: ${RELAY_TOKEN_SECRET:-}
       NORVA_REVENUECAT_WEBHOOK_AUTH: ${NORVA_REVENUECAT_WEBHOOK_AUTH:-}
-      STANCER_SECRET_KEY: ${STANCER_SECRET_KEY:-}
       SEND_EMAIL_HOOK_SECRET: ${SEND_EMAIL_HOOK_SECRET:-}
       # Billing / entitlements runtime gate (read by _shared/entitlements.ts).
       # WITHOUT these the edge silently falls back to enforce+legacy — a migrated

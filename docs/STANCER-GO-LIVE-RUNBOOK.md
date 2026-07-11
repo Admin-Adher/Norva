@@ -1,5 +1,9 @@
 # Stancer — Go-live runbook & situation (consolidée)
 
+> ⛔ **RETIRÉ (2026-07-11).** Rail jamais passé à l'argent réel — remplacé par
+> Revolut (`BILLING-REVOLUT-MIGRATION.md`). Code Stancer supprimé ; runbook
+> conservé comme archive.
+
 > **Snapshot : 2026-07-05.** Le rail de paiement web **Stancer** est **codé,
 > testé E2E, déployé en prod, et INERTE côté argent** (clé `stest_`, mode `test`).
 > Vérifié en direct : `GET …/norva-stancer/health` → `{"configured":true,"mode":"test","test_key":true}`.
