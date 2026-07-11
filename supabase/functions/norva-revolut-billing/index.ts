@@ -49,13 +49,14 @@ const PRICES: Record<string, Record<string, number>> = {
 const CORS = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, content-type" };
 const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { ...CORS, "Content-Type": "application/json" } });
 
-async function revolut(method: "GET" | "POST", path: string, body?: JsonRecord) {
+async function revolut(method: "GET" | "POST", path: string, body?: JsonRecord, extraHeaders?: Record<string, string>) {
   const res = await fetch(`${REVOLUT_API_BASE}${path}`, {
     method,
     headers: {
       Authorization: `Bearer ${REVOLUT_SECRET_KEY}`,
       "Content-Type": "application/json",
       "Accept": "application/json",
+      ...(extraHeaders ?? {}),
     },
     body: body ? JSON.stringify(body) : undefined,
     signal: AbortSignal.timeout(12_000),
@@ -111,9 +112,14 @@ async function chargeSavedCard(
     console.error("[norva-revolut-billing] create order failed", order.status, JSON.stringify(order.body).slice(0, 300));
     return { outcome: "failed", orderId: null, paymentId: null, detail: order.body };
   }
-  const pay = await revolut("POST", `/api/1.0/orders/${encodeURIComponent(orderId)}/payments`, {
-    saved_payment_method: { type: "card", id: pmId, initiator: "merchant" },
-  });
+  // The MIT payment endpoint lives on the NEW Merchant API (/api/orders/…), NOT the
+  // legacy /api/1.0 path (which 404s). The order id is shared across versions.
+  const pay = await revolut(
+    "POST",
+    `/api/orders/${encodeURIComponent(orderId)}/payments`,
+    { saved_payment_method: { type: "card", id: pmId, initiator: "merchant" } },
+    { "Revolut-Api-Version": "2024-09-01" },
+  );
   let state = String(pay.body.state ?? "").toUpperCase();
   // If the charge is still settling, re-fetch the order once for the authoritative state.
   if (pay.ok && !["COMPLETED", "FAILED", "DECLINED", "CANCELLED"].includes(state)) {
