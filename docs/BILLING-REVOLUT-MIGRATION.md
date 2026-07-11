@@ -90,9 +90,24 @@ auto-trial système). Revolut = **un 4ᵉ écrivain**, rien de plus côté lectu
    refus** (rare) — et hors chemin chaud grâce à l'option `isAdmin` que les appelants portant le
    JWT passent (`norva-cloud` /boot + /entitlements) ; les autres appelants retombent sur un
    `getUserById` unique au refus. Sans effet en `observe` (déjà ouvert) → à valider en `enforce` (phase 6).
-6. **Retrait Stancer** (fonctions + tables si inutilisées), validation sandbox de bout en
-   bout, puis **`NORVA_ENTITLEMENTS_MODE=enforce`** + `NORVA_BILLING_MODE=revenuecat`
-   (soft-wall) ou un nouveau mode `revolut` — à décider en phase 6.
+6. **Bascule production.** ✅ **effectuée le 2026-07-11.** Clés **prod** Revolut + webhook
+   prod dans `.env` (`REVOLUT_API_BASE=https://merchant.revolut.com`) ; front basculé
+   (`revolut.enabled:true` / `mode:prod`, `stancer.enabled:false`) ; **vrai paiement validé**
+   (carte Mastercard réelle → ordre autorisé → client prod + carte tokenisée) ;
+   **`NORVA_ENTITLEMENTS_MODE=enforce` + `NORVA_BILLING_MODE=revenuecat`** (soft-wall) actifs.
+   Vérifié : **admin** `family/active` passe (`mode:enforce`), **non-abonné** → `free`
+   (`concurrent_streams:0`, parcourt sans lire). Cron de renouvellement enregistré
+   (`register-revolut-billing-cron.sql`).
+   **Reste (nettoyage, non bloquant)** : retrait définitif des fonctions `norva-stancer*` après
+   un cycle de facturation complet ; #41 (résilier le managé quand son trafic est à zéro).
+
+## Sujet connexe découvert (hors facturation) — Google OAuth self-host
+Le service `auth` (GoTrue) du self-host **n'a pas** le provider Google configuré
+(`GOTRUE_EXTERNAL_GOOGLE_*` absent du compose). « Continue with Google » → 400
+`provider is not enabled`. Sans effet sur les sessions déjà ouvertes (même secret JWT),
+mais casse les **nouvelles** connexions Google à mesure que les clients basculent sur le
+self-host (via `?v=6`). À corriger séparément : activer le provider Google sur GoTrue +
+identifiants OAuth (réutiliser ceux du projet managé).
 
 ## Décision d'archi — ordre + carte sauvegardée (MIT), pas d'abonnement natif (encore)
 
