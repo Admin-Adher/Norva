@@ -120,6 +120,7 @@ par le **message MediaError** puis par le **delta du snapshot** (ex. `currentTim
 | 14 | `SOURCEOPEN_TIMEOUT`, `appends=0`, spinner | le navigateur **diffère** l'ouverture du MediaSource | `video.load()` forcé + **retry** de l'attache (2×) ; repli gateway élargi | ENGINE 32 |
 | 15 | Console noyée de centaines de lignes `Invalid timestamps` | MPEG-TS émet ce log libav au niveau **ERROR** par paquet (bénin, clampé) | `av_log_set_level(FATAL)` hors mode verbose | ENGINE 32 |
 | 16 | Snapshots d'échec **absents** de Supabase (diag aveugle) | (a) retry ferme la session → edge **404** « session not found » ; (b) snapshot trop gros → payload rejeté | (a) event d'échec **sans `playbackSessionId`** (client) + edge enregistre **non-lié** (norva-playback 21) ; (b) snapshot **compact** (sans gros tableaux) | ENGINE 34 / EDGE 21 |
+| 17 | Seek MKV : le film « se termine » au point de seek, ou stall (`pumpExitReason=eof`, `vBase=null`, 0 paquet) | MKV **sans Cues** (remux provider) : `avformat_seek_file` n'a pas d'index — son **code d'erreur était ignoré**, ou il « réussit » en laissant le demuxer à EOF | vérifier le retour du seek ts → repli **seek par octets** (`AVSEEK_FLAG_BYTE`, cue index maison sinon prorata durée) ; dans `_pump`, EOF sans keyframe ancrée post-seek → **un** retry byte-seek avant de finir le flux | ENGINE 39 |
 
 **Garde-fous transverses** : (a) tout échec moteur sur média réel **bascule sur le gateway transcode** (jamais
 de spinner mort) ; (b) sur `SOURCEOPEN`/mediaerror le moteur **auto-retry** (les retries manuels marchaient) ;

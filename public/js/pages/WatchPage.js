@@ -2952,15 +2952,20 @@ class WatchPage {
         const SLOT_BUSY_RETRIES = 3;
         const isSlotBusy = (m) => this.isProviderBusyError(m);
         for (let attempt = 0; ; attempt++) {
+            // Engine info logs are DEV-ONLY: they fire on every load AND every seek
+            // (seek demuxer / init seg / nudge / pump exit…), which floods the prod
+            // console during normal MKV playback. Opt back in with the established
+            // trace switch: localStorage.norva_trace = '1' (see NorvaTrace, cloudApi.js).
+            const engineTrace = Boolean(window.NorvaTrace?.enabled);
             const engine = this.norvaEngine = new window.NorvaEngine(this.video, {
                 // Arm in-band subtitle capture before the demux pump starts (flag-gated) so cues
                 // are buffered from the first packet — eliminates the gap-before-visible delay.
                 inbandSubtitles: this._inbandSubsEnabled(),
                 report: (info) => this.reportEngineFailure(info),
-                log: (m) => console.log('[NorvaEngine] ' + m),
-                onReady: (timings) => { console.log('[NorvaEngine] ready', timings); },
+                log: engineTrace ? (m) => console.log('[NorvaEngine] ' + m) : undefined,
+                onReady: (timings) => { if (engineTrace) console.log('[NorvaEngine] ready', timings); },
                 onSeek: (timings) => {
-                    console.log('[NorvaEngine] seek', timings);
+                    if (engineTrace) console.log('[NorvaEngine] seek', timings);
                     // Dedicated seek telemetry (backend accepts the 'seek' event type).
                     try { this.sendPlaybackEvent('seek', { metadata: { seekTimings: timings } }); } catch (_) {}
                 }
@@ -3214,15 +3219,17 @@ class WatchPage {
     }
 
     reportEngineFailure(info = {}) {
-        console.warn('[NorvaEngine] failed', info);
+        console.warn('[NorvaEngine] failed', info?.stage || '?', info?.message || '');
         // Deep snapshot of the engine state at the moment of failure — the codec/mime
         // decisions, the exact fMP4 boxes that were appended, the first-video-packet
         // keyframe flag, append errors, and the live SourceBuffer/MediaSource/video
         // status. This is what turns a bare CHUNK_DEMUXER_ERROR_APPEND_FAILED into a
-        // diagnosable cause. Logged in full to the console; key fields go to telemetry.
+        // diagnosable cause. The ~20-line console dump is DEV-ONLY (localStorage
+        // norva_trace = '1'): playback recovers via fallback, so in prod one warn line
+        // suffices — the full digest still reaches telemetry below either way.
         let snap = null;
         try { snap = this.norvaEngine?.engineSnapshot?.() || null; } catch (_) {}
-        if (snap) {
+        if (snap && window.NorvaTrace?.enabled) {
             try {
                 console.group('[NorvaEngine] failure snapshot');
                 console.warn('mime        :', snap.mime, '| video', snap.vName, '| audio', snap.aName, '| copyAudio', snap.copyAudio);

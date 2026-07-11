@@ -450,6 +450,11 @@
       // Within the buffered range → let the native element seek, no rework.
       if (this._isBuffered(t)) return;
       this._seeking = true;
+      // Armed for _pump's "no packets after seek" detection: a timestamp seek can
+      // RESOLVE yet leave the demuxer at EOF (cue-less MKV) — the pump then retries
+      // once via _seekDemuxerByBytes instead of ending the stream at the seek point.
+      this._lastSeekT = t;
+      this._byteSeekRetried = false;
       const st0 = performance.now();
       const f0 = this._fetchCount, b0 = this._fetchBytes;
       const off = this._offsetForTime(t);
@@ -1305,8 +1310,37 @@
       const epoch = (s === this.vS) ? (this._ptsEpoch || 0) : 0;
       const ts = Math.max(0, Math.round(t * tb) + epoch);
       const [lo, hi] = from64(ts);
-      await lib.avformat_seek_file_approx(this.fmtCtx, s.index, lo, hi, 0);
+      const ret = await lib.avformat_seek_file_approx(this.fmtCtx, s.index, lo, hi, 0);
+      if (typeof ret === 'number' && ret < 0) {
+        // Timestamp seek REJECTED — libav bindings return negative AVERROR codes, they
+        // don't throw, and this one was historically discarded: on an MKV without usable
+        // Cues (common in provider remuxes) the demuxer has no index to resolve against,
+        // so the pump then read nothing (instant EOF) and the seek silently stalled.
+        // Fall back to a byte seek — matroska resyncs to the next cluster boundary from
+        // any offset, and _pump's keyframe gate drops mid-GOP packets until a keyframe.
+        this.log(`seek demuxer: ts seek failed (${ret}) → byte fallback`);
+        await this._seekDemuxerByBytes(t);
+        return;
+      }
       this.log(`seek demuxer → ${t.toFixed(1)}s (abs ts ${ts}${epoch ? ', epoch ' + epoch : ''})`);
+    }
+
+    // Byte-offset seek: exact cluster start when the MKV cue index was parsed, else a
+    // proportional guess (duration-scaled), backed off by one read-ahead window so the
+    // demuxer resyncs BEFORE the target and the keyframe gate lands us on/after it.
+    async _seekDemuxerByBytes(t) {
+      const lib = this.lib;
+      let off = this._offsetForTime(t);
+      if (off == null && this.size > 0 && this.durationSec > 0) {
+        off = Math.max(0, Math.floor((t / this.durationSec) * this.size) - RA_FIRST_WINDOW);
+      }
+      if (off == null || !(off >= 0) || (this.size && off >= this.size)) {
+        throw new Error('no byte index available for fallback seek');
+      }
+      const [lo, hi] = from64(off);
+      const ret = await lib.avformat_seek_file_approx(this.fmtCtx, -1, lo, hi, lib.AVSEEK_FLAG_BYTE);
+      if (typeof ret === 'number' && ret < 0) throw new Error(`byte seek failed (${ret})`);
+      this.log(`seek demuxer (byte fallback) → ${t.toFixed(1)}s off=${off}`);
     }
 
     // ---- teardown for re-seek ---------------------------------------------
@@ -1412,6 +1446,20 @@
       // else means the byte source stopped early (single-slot 458 / dropped provider
       // connection), which is the real cause when a title "ends" after a few seconds.
       const isEof = (typeof lib.AVERROR_EOF === 'number') ? res === lib.AVERROR_EOF : res < 0;
+      // "No packets after seek": the timestamp seek resolved but mispositioned the
+      // demuxer at EOF (cue-less MKV) — no video keyframe was ever anchored, so ending
+      // the stream here would make the film "finish" at the seek point. Retry ONCE via
+      // byte offset, then keep pumping; a second EOF falls through to the normal end.
+      if (isEof && this.vS && this.vBase === null && this._lastSeekT != null && !this._byteSeekRetried) {
+        this._byteSeekRetried = true;
+        this.log(`pump: no packets after seek → byte-seek retry at t=${this._lastSeekT.toFixed(1)}`);
+        try {
+          await this._seekDemuxerByBytes(this._lastSeekT);
+          return await this._pump();
+        } catch (e) {
+          this.report({ stage: 'seek:no-packets', message: errStr(e) });
+        }
+      }
       this._diag.pumpExitReason = this._stopRequested ? 'stop' : (isEof ? 'eof' : 'readerr');
       this._diag.pumpExitRes = res;
       this._diag.lastReadError = this._lastReadError ? errStr(this._lastReadError).slice(0, 200) : null;
