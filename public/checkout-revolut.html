@@ -462,6 +462,12 @@
         e.preventDefault();
         if (submitting || !cardField) return;
         if (!nameInput.value.trim()) { setStatus('Please enter the cardholder name.', true); nameInput.focus(); return; }
+        // Revolut requires the cardholder's full name (first + last), else the
+        // card submit is rejected — validate here for a clear message up front.
+        if (nameInput.value.trim().split(/\s+/).length < 2) {
+          setStatus('Please enter your full name (first and last), as printed on the card.', true);
+          nameInput.focus(); return;
+        }
         if (!emailInput.value.trim()) { setStatus('Please enter an email for your receipt.', true); emailInput.focus(); return; }
         submitting = true;
         payBtn.disabled = true;
