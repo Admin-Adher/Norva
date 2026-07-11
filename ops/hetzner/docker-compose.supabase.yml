@@ -362,6 +362,9 @@ services:
       - ./volumes/db/pooler.sql:/docker-entrypoint-initdb.d/migrations/99-pooler.sql:ro
       # PGDATA on the NVMe RAID1 (outside the repo tree, survives git clean).
       - /var/lib/norva/db:/var/lib/postgresql/data
+      # WAL archive landing dir (PITR) — synced to R2 by norva-wal-sync.timer,
+      # pruned locally after upload. See backup/BACKUPS.md.
+      - /var/lib/norva/wal-archive:/wal-archive
       # Named volume persists the pgsodium decryption key between restarts.
       - db-config:/etc/postgresql-custom
     healthcheck:
@@ -417,6 +420,16 @@ services:
       - max_wal_size=16GB
       - -c
       - min_wal_size=2GB
+      # --- PITR: WAL archiving (see backup/BACKUPS.md) --------------------------
+      # archive_command is atomic-ish and idempotent (skip if already archived).
+      # archive_timeout bounds the RPO: a WAL segment is shipped at least every
+      # 5 minutes even under low write load.
+      - -c
+      - archive_mode=on
+      - -c
+      - archive_command=test ! -f /wal-archive/%f && cp %p /wal-archive/%f
+      - -c
+      - archive_timeout=300
 
 volumes:
   db-config:
