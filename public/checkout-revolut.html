@@ -435,6 +435,11 @@
           const instance = await RevolutCheckout(data.public_id, mode);
           cardField = instance.createCardField({
             target: document.getElementById('card-field'),
+            // Hide the postcode/AVS field — smoother for an international audience and a
+            // no-charge trial signup (the card is only tokenised for later MIT renewals).
+            // Trade-off: slightly lower auth / less AVS fraud signal. Remove this line to
+            // bring the field back if decline or fraud rates rise.
+            hidePostcodeField: true,
             onSuccess: function () { finish(currentOrderId); },
             onError: function (err) {
               submitting = false;
