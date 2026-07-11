@@ -230,20 +230,34 @@ Deno.serve(async (req) => {
       amount: VALIDATION_CENTS,
       currency: "USD",
       capture_mode: "MANUAL",
+      // Save the card for merchant-initiated renewals at the ORDER level (not only via
+      // the widget submit), so the card is tokenised whichever path the customer takes —
+      // the embedded card field OR the hosted checkout_url fallback (which also offers
+      // Apple/Google/Revolut Pay). Without this, a payment on the fallback page would
+      // leave no saved card and the renewal cron could not charge.
+      save_payment_method_for: "merchant",
       merchant_order_ext_ref: extRef(user.id),
       description: DESCRIPTIONS[kind],
       metadata: { user_id: user.id, plan, period, kind },
     };
-    // customer_id links the order → customer so savePaymentMethodFor:merchant attaches
-    // the card; fall back to customer_email if the customer couldn't be created.
+    // customer_id links the order → customer so the saved card attaches; fall back to
+    // customer_email if the customer couldn't be created.
     if (custId) orderBody.customer_id = custId; else orderBody.customer_email = user.email;
     let created = await revolut("POST", "/api/1.0/orders", orderBody);
-    // Safety net: if this API rejects customer_id on the order, retry with
+    // Safety net 1: if this API rejects customer_id on the order, retry with
     // customer_email so the trial still starts (card just won't attach here).
     if (!created.ok && orderBody.customer_id) {
       console.warn("[norva-revolut] order w/ customer_id failed, retrying w/ email", created.status);
       delete orderBody.customer_id;
       orderBody.customer_email = user.email;
+      created = await revolut("POST", "/api/1.0/orders", orderBody);
+    }
+    // Safety net 2: if the order-level save_payment_method_for is rejected, drop it and
+    // retry — the widget submit still requests the save, so the card-field path keeps
+    // working (only the hosted fallback loses the save). Checkout must never break here.
+    if (!created.ok && orderBody.save_payment_method_for) {
+      console.warn("[norva-revolut] order w/ save_payment_method_for failed, retrying without", created.status);
+      delete orderBody.save_payment_method_for;
       created = await revolut("POST", "/api/1.0/orders", orderBody);
     }
     const orderId = String(created.body.id ?? "");
