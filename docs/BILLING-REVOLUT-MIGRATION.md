@@ -67,8 +67,14 @@ auto-trial système). Revolut = **un 4ᵉ écrivain**, rien de plus côté lectu
    projection écrite).
 3. **`norva-revolut`** (checkout) : ouvre l'ordre trial-setup, renvoie le token du widget
    RevolutCheckout ; `/confirm` finalise sans webhook ; `/profile /cancel /resume` pour la
-   page de gestion. Front : `checkout-revolut.html` (nouveau) + méthodes `billing.js`. ✅ **codée
-   — à tester en sandbox sur la box** (voir « Activer + tester » ci-dessous).
+   page de gestion. Front : `checkout-revolut.html` (nouveau) + méthodes `billing.js`.
+   ✅ **validée bout en bout en sandbox le 2026-07-11** — front self-host → client Revolut →
+   ordre + `customer_id` → widget carte → paiement autorisé → carte sauvegardée `MERCHANT`
+   → `/confirm` (projection) → carte capturée (`payment_method_id` + last4/brand/exp).
+   Deux pièges rencontrés + réglés : (a) le front tapait encore l'ancien Supabase managé via
+   un `authApi.js` en cache → cache-buster `?v=` (commit 70cc91c) ; (b) Revolut attache la
+   carte **juste après** l'autorisation, donc la capturer dans `/confirm` dépassait la limite
+   wall-clock de l'edge → **capture lazy sur `/profile`** (hors chemin critique).
 4. **Moteur de renouvellement** `norva-revolut-billing` (cron) : à l'issue de l'essai, débit
    MIT via la carte sauvegardée (`GET /customers/{id}/payment-methods` → charge). + généraliser
    les fuites Stancer. **⏳ à faire.**
