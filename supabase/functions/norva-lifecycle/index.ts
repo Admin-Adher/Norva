@@ -91,7 +91,7 @@ async function runWelcome(db: SupabaseClient): Promise<number> {
     .is("welcome_email_at", null)
     .gt("created_at", since)
     .limit(BATCH);
-  // Never welcome internal/test accounts (owner, family, Stancer test) — mirrors
+  // Never welcome internal/test accounts (owner, family, internal test) — mirrors
   // the admin_internal_accounts exclusion the finance/funnel views already apply.
   const { data: internal } = await db.from("admin_internal_accounts").select("user_id");
   const internalIds = new Set((internal ?? []).map((r: { user_id: string }) => r.user_id));
@@ -227,7 +227,7 @@ async function runAbandoned(db: SupabaseClient): Promise<number> {
   return sent;
 }
 
-// Close the dunning loop: a Stancer past_due that exhausted its 3 reminders (7+ days
+// Close the dunning loop: a Revolut past_due that exhausted its 3 reminders (7+ days
 // ago), or that has been stuck for 21+ days, becomes `expired` — access ends cleanly
 // and the win-back email can eventually re-engage. RevenueCat rows are untouched
 // (the store webhook owns their expiration).
@@ -237,10 +237,10 @@ async function runExpirePastDue(db: SupabaseClient): Promise<number> {
   const staleAny = new Date(Date.now() - 21 * 86400_000).toISOString();
   let expired = 0;
   const { data: exhausted } = await db.from("cloud_entitlement_projection")
-    .select("user_id").eq("provider", "stancer").eq("status", "past_due")
+    .select("user_id").eq("provider", "revolut").eq("status", "past_due")
     .gte("dunning_stage", 3).lte("dunning_last_at", staleDunning).limit(BATCH);
   const { data: stuck } = await db.from("cloud_entitlement_projection")
-    .select("user_id").eq("provider", "stancer").eq("status", "past_due")
+    .select("user_id").eq("provider", "revolut").eq("status", "past_due")
     .lte("last_event_at", staleAny).limit(BATCH);
   const ids = new Set<string>([
     ...((exhausted ?? []) as { user_id: string }[]).map((r) => r.user_id),

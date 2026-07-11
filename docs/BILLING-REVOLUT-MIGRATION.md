@@ -173,3 +173,42 @@ Revolut : [Subscriptions](https://developer.revolut.com/docs/merchant/subscripti
 [Gestion d'abonnement (guide)](https://developer.revolut.com/docs/guides/merchant/optimise-checkout/save-payment-methods/subscription-management/) ·
 [Webhooks](https://developer.revolut.com/docs/merchant/webhooks) ·
 [Vérifier la signature](https://developer.revolut.com/docs/guides/merchant/monitor-and-observe/webhooks/verify-the-payload-signature).
+
+## Retrait de Stancer — effectué le 2026-07-11 (tâche #48)
+
+Stancer **n'a jamais encaissé de vrai paiement en prod** (confirmé) → retrait
+**complet** du code. Commits en 3 lots.
+
+**Retiré** :
+- Les 3 edge functions `norva-stancer`, `norva-stancer-billing`,
+  `norva-stancer-webhook` (+ leurs blocs `config.toml`, l'env `STANCER_SECRET_KEY`
+  dans le compose + `.env.example`).
+- Le cron self-host : migration `20260711200000_retire_stancer_billing_cron.sql`
+  (`cron.unschedule` gardé de tout job `norva-stancer%`).
+- Front : méthodes `stancer*` de `billing.js`, bloc `stancer` de
+  `billing-config.js`, pages `checkout.html` + `checkout-done.html` (Stancer-only),
+  et le gating `isStancerEnabled`/`isStancerWeb` de `subscribe.html`/`subscription.html`.
+- Fuites entremêlées **retargetées vers Revolut** (pas juste supprimées) :
+  `norva-lifecycle` dunning-expiry (`provider='stancer'`→`'revolut'` — corrige au
+  passage un past_due Revolut qui n'expirait jamais) ; `norva-admin` health-ping
+  (`api.stancer.com`→`REVOLUT_API_BASE`), alerte `stancer_down`→`revolut_down`,
+  cockpit `/health` (`stancer_*`→`revolut_*`) ; `AdminPage.js` cockpit go-live +
+  labels de rail.
+
+**Conservé** (intentionnel) : migrations historiques et les tables
+`cloud_stancer_*` — c'est le **ledger cross-rail partagé** (colonne `provider`),
+écrit par `norva-billing-webhook` (charges store) et lu par les RPC finance admin.
+Renommer = migration risquée hors périmètre.
+
+**Gaps révélés (à traiter séparément — la migration Revolut ne les avait pas
+finis)** :
+1. **Page de gestion web** (`subscription.html`) : rebranchée sur Revolut
+   (cancel/resume/update-card/affichage carte) mais **jamais testée en direct** —
+   à valider par un clic réel. La contre-offre « -50 % » (rétention) était
+   Stancer-only et a été retirée (pas de backend Revolut).
+2. **Relance de panier abandonné** (`norva-lifecycle runAbandoned`) : scanne le
+   ledger `cloud_stancer_payments`, où le checkout Revolut **n'écrit pas** (il
+   écrit `cloud_revolut_orders`) → inactive pour Revolut. À rebrancher.
+3. **Remboursement admin** : la route `/admin/refund` vivait dans `norva-stancer`
+   (supprimée) ; le bouton admin est désactivé. Pas de route de remboursement
+   Revolut → à construire (`norva-revolut /admin/refund`).

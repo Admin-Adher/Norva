@@ -1057,7 +1057,7 @@ class AdminPage {
             return `<span class="badge ${cls}" title="Statut technique : ${esc(s)}">${lbl}</span>`;
         };
 
-        // Payment rail (web vs mobile store) — the KPI dimension that separates Stancer-web
+        // Payment rail (web vs mobile store) — the KPI dimension that separates web
         // revenue from Google Play / App Store mobile revenue.
         const railBadge = AdminPage.railBadge;
 
@@ -1116,8 +1116,8 @@ class AdminPage {
                     ${statusCard(n(counts.active), 'Actifs payants', 'active', 'ok', '👤')}
                     ${Number(f.mrr_unknown_n) > 0 ? card(n(f.mrr_unknown_n), 'Sans montant connu (manuel/store)', 'muted', null, '🗄️', 'Abonnés actifs dont le montant n\'est pas connu côté Norva (paiement manuel ou store mobile).') : ''}
                 </div></div>
-                <div class="admin-block"><h2>💳 Revenu par rail — web (Stancer) vs mobile (stores mobiles)</h2><div class="scroll">
-                    ${railRows ? `<table><thead><tr><th>Rail</th><th class="num">Abonnés</th><th class="num">MRR</th><th class="num">Encaissé 30 j</th></tr></thead><tbody>${railRows}</tbody></table>` : '<div class="ssub">Aucun abonnement — la répartition Stancer / Google Play / App Store s\'affichera ici dès les premiers paiements.</div>'}
+                <div class="admin-block"><h2>💳 Revenu par rail — web (Revolut) vs mobile (stores mobiles)</h2><div class="scroll">
+                    ${railRows ? `<table><thead><tr><th>Rail</th><th class="num">Abonnés</th><th class="num">MRR</th><th class="num">Encaissé 30 j</th></tr></thead><tbody>${railRows}</tbody></table>` : '<div class="ssub">Aucun abonnement — la répartition Revolut / Google Play / App Store s\'affichera ici dès les premiers paiements.</div>'}
                 </div></div>
             </div>
             <div class="fin-cols">
@@ -1847,7 +1847,7 @@ class AdminPage {
         if (p) {
             details += row('Statut', AdminPage.billingBadge(p.status, p.plan_code) + (p.provider ? ` ${AdminPage.railBadge(p.provider)}` : ''));
             if (m && m.plan) details += row('Plan facturé', `${esc(m.plan)} · ${esc(m.period || '—')} · ${money(m.amount_cents)}`);
-            // Mobile rails (Play/Apple) have no Stancer mapping — the recurring price/cadence lives
+            // Mobile rails (Play/Apple) have no web-rail mapping — the recurring price/cadence lives
             // on the projection (stamped by the RevenueCat webhook).
             else if (p.mrr_cents != null) details += row('Plan facturé', `${esc(p.plan_code || 'plus')} · ${esc(p.bill_period || '—')} · ${money(p.mrr_cents)} <span class="pacct">(store)</span>`);
             if (p.trial_ends_at) details += row(new Date(p.trial_ends_at) > new Date() ? 'Essai jusqu\'au' : 'Essai terminé le', esc(dt(p.trial_ends_at)));
@@ -1873,12 +1873,12 @@ class AdminPage {
             return `<span class="badge ${cls}" title="Statut technique : ${esc(s)}">${lbl}</span>`;
         };
         // Show a rail column only when it adds signal: a mixed-rail history, or a single
-        // non-Stancer rail (a pure Stancer history would just repeat "Stancer · web" on every row).
-        const payProviders = new Set(pays.map(x => x.provider || 'stancer'));
-        const showRailCol = payProviders.size > 1 || (payProviders.size === 1 && !payProviders.has('stancer'));
-        // A row is refundable when it's a captured Stancer charge carrying an authoritative
-        // paym_ id (refundable flag). The action column only appears if at least one qualifies.
-        const canRefund = (x) => x.status === 'captured' && x.refundable && (!x.provider || x.provider === 'stancer');
+        // non-Revolut rail (a pure Revolut history would just repeat "Revolut · web" on every row).
+        const payProviders = new Set(pays.map(x => x.provider || 'revolut'));
+        const showRailCol = payProviders.size > 1 || (payProviders.size === 1 && !payProviders.has('revolut'));
+        // Refunds are disabled: the Stancer rail (the only one with an admin-refund route) was
+        // retired and Revolut has no /admin/refund route yet. No refund column renders.
+        const canRefund = () => false;
         const showRefundCol = pays.some(canRefund);
         const payRows = pays.map(x => `<tr>
             <td>${esc(dt(x.updated_at || x.created_at))}</td>
@@ -1896,34 +1896,6 @@ class AdminPage {
             ${payRows ? `<div style="margin-top:14px"><div class="kpi-gtitle">Historique des paiements</div><div class="scroll"><table><thead><tr><th>Date</th>${showRailCol ? '<th>Rail</th>' : ''}<th>Type</th><th>Statut</th><th class="num">Montant</th>${showRefundCol ? '<th></th>' : ''}</tr></thead><tbody>${payRows}</tbody></table></div></div>` : ''}
             ${fbRows}`;
         wireInternalToggle(this);
-        el.querySelectorAll('.refund-btn').forEach(b => b.addEventListener('click', () => this._refundPayment(b, userId)));
-    }
-
-    // Refund a Stancer charge from the fiche → norva-stancer /admin/refund (admin-JWT-gated).
-    // Full refund by default; the edge route sends the refund to Stancer, marks the ledger,
-    // revokes access, and journals an admin_events row. Reloads the panel on success.
-    async _refundPayment(btn, userId) {
-        const pi = btn.dataset.pi;
-        if (!pi || btn.disabled) return;
-        const cents = Number(btn.dataset.amount) || 0;
-        const amt = (cents / 100).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-        if (!await this._confirm(`Rembourser ${amt} $ à ce client ?\n\nLe remboursement est envoyé à Stancer et l'accès du client sera révoqué immédiatement.`, { danger: true, okLabel: 'Rembourser' })) return;
-        const orig = btn.textContent;
-        btn.disabled = true; btn.textContent = '…';
-        try {
-            const res = await fetch(`${this._sbUrl()}/functions/v1/norva-stancer/admin/refund`, {
-                method: 'POST',
-                headers: { apikey: this._sbKey(), Authorization: `Bearer ${this._token()}`, 'Content-Type': 'application/json' },
-                body: JSON.stringify({ pi_id: pi })
-            });
-            const data = await res.json().catch(() => ({}));
-            if (!res.ok || !data.ok) throw new Error(data.error || String(res.status));
-            this._toast(`Remboursé ${amt} $${data.revoked ? ' · accès révoqué' : ''} (${AdminPage.esc(data.refund_id || '')})`, 'ok');
-            this._loadBilling(userId);
-        } catch (e) {
-            btn.disabled = false; btn.textContent = orig;
-            this._toast('Erreur remboursement : ' + e.message, 'err');
-        }
     }
 
     // ── Fiche: support tickets panel (open first, newest first, click → thread) ──
@@ -2692,7 +2664,7 @@ class AdminPage {
                 <div id="sys-audit"><div class="ssub">Chargement…</div></div>
             </div>
             <div class="admin-block"><h2>💳 État billing / go-live <button id="sys-billing-refresh" class="mini-btn" aria-label="Re-vérifier l'état billing" title="Re-check">↻</button></h2><div id="sys-billing" class="admin-cards"><div class="ssub">Vérification…</div></div>
-                <details class="sys-gl-details"><summary>📋 Voir la checklist go-live prod</summary><p class="ssub" style="margin:0">Bascule prod = poser les secrets Supabase (clé <code>sprod_</code>, <code>NORVA_STANCER_MODE=live</code>, <code>NORVA_BILLING_MODE=revenuecat</code>, <code>NORVA_ENTITLEMENTS_MODE=enforce</code>). Ce panneau doit alors passer tout au vert.</p></details>
+                <details class="sys-gl-details"><summary>📋 Voir la checklist go-live prod</summary><p class="ssub" style="margin:0">Bascule prod = poser les secrets Supabase (clé Revolut <code>sk_</code> prod, <code>REVOLUT_API_BASE=https://merchant.revolut.com</code>, <code>NORVA_BILLING_MODE=revenuecat</code>, <code>NORVA_ENTITLEMENTS_MODE=enforce</code>). Ce panneau doit alors passer tout au vert.</p></details>
             </div>
             <div class="admin-block"><h2>🚩 Feature flags</h2><div id="sys-flags"><div class="ssub">Chargement…</div></div></div>
         </div>`;
@@ -2748,7 +2720,7 @@ class AdminPage {
             const svc = [['Edge (API)', d.edge], ['Base de données', d.db], ['Gateway', d.gateway], ['Relay', d.relay]];
             svc.forEach(([label, s]) => { if (s && s.configured !== false && s.ok !== true) inc.push({ p: 0, cls: '', t: `🔴 Service down · ${label}`, d: String((s && s.error) || 'injoignable').slice(0, 80) }); });
             const b = d.billing || {};
-            if (b.stancer_configured && b.stancer_mode !== 'live') inc.push({ p: 2, cls: 'gray', t: '🧪 Billing en mode TEST', d: 'go-live non basculé — normal avant lancement' });
+            if (b.revolut_configured && b.revolut_sandbox) inc.push({ p: 2, cls: 'gray', t: '🧪 Billing en mode SANDBOX', d: 'go-live non basculé — normal avant lancement' });
         }
         if (!inc.length) { el.innerHTML = this._sysInfra ? '<div class="mot-inc-ok" style="margin:6px 0 22px">✓ Aucun incident système — services sains, crons OK.</div>' : ''; return; }
         inc.sort((a, b) => a.p - b.p);
@@ -2838,9 +2810,9 @@ class AdminPage {
         this._renderSysIncidents();
     }
 
-    // Go-live cockpit: the billing gate flags (read from edge secrets server-side) + Stancer/Resend
-    // reachability. Before the prod flip everything reads TEST/legacy/observe; after the owner sets the
-    // sprod_ key + live/enforce secrets, this panel turns green — the one place to verify the switch.
+    // Go-live cockpit: the billing gate flags (read from edge secrets server-side) + Revolut/Resend
+    // reachability. Before the prod flip everything reads sandbox/legacy/observe; after the owner sets the
+    // prod Revolut key + prod API base + enforce secrets, this panel turns green — the one place to verify the switch.
     _renderBillingState(b) {
         const el = document.getElementById('sys-billing');
         if (!el) return;
@@ -2852,18 +2824,17 @@ class AdminPage {
             const err = !up && s.error ? ` <span class="al-err">${AdminPage.esc(String(s.error).slice(0, 90))}</span>` : '';
             return `<div class="kpi ${up ? 'ok' : 'alert'}"><div class="v" style="font-size:17px">${up ? `🟢 ${AdminPage.n(s.ms)} ms` : '🔴 down'}</div><div class="l">${AdminPage.esc(label)}${err}</div></div>`;
         };
-        const live = b.stancer_mode === 'live' && b.stancer_test_key === false && b.stancer_configured === true;
-        const keyState = !b.stancer_configured ? '⚪ absente' : (b.stancer_test_key ? '🧪 stest_' : '🟢 sprod_');
+        const live = b.revolut_mode === 'prod' && b.revolut_sandbox === false && b.revolut_configured === true;
+        const keyState = !b.revolut_configured ? '⚪ absente' : (b.revolut_sandbox ? '🧪 sandbox' : '🟢 prod');
         const resendOk = b.resend_configured && b.resend && b.resend.ok;
         el.innerHTML = [
-            pill(live ? '🟢 LIVE' : '🧪 TEST', 'Mode Stancer', live ? 'ok' : ''),
-            pill(keyState, 'Clé API', !b.stancer_configured ? 'alert' : (b.stancer_test_key ? '' : 'ok')),
-            pill((b.footprint_currency || 'eur').toUpperCase(), 'Empreinte carte'),
+            pill(live ? '🟢 LIVE' : '🧪 SANDBOX', 'Mode Revolut', live ? 'ok' : ''),
+            pill(keyState, 'Clé API', !b.revolut_configured ? 'alert' : (b.revolut_sandbox ? '' : 'ok')),
             pill(b.billing_mode === 'legacy' ? 'legacy' : AdminPage.esc(b.billing_mode || '—'), 'Billing mode', b.billing_mode && b.billing_mode !== 'legacy' ? 'ok' : ''),
             pill(b.entitlements_mode === 'enforce' ? '🔒 enforce' : '👁 observe', 'Enforcement', b.entitlements_mode === 'enforce' ? 'ok' : ''),
             pill(b.lifecycle_billing_live ? 'on' : 'off', 'Relances / reçus', b.lifecycle_billing_live ? 'ok' : ''),
-            pill(b.webhook_token_set ? 'posé' : '—', 'Webhook token'),
-            svc('API Stancer', b.stancer),
+            pill(b.webhook_secret_set ? 'posé' : '—', 'Webhook secret'),
+            svc('API Revolut', b.revolut),
             pill(resendOk ? '🟢 configuré' : (b.resend_configured ? '🔴 injoignable' : '🔴 absent'), 'Resend (emails)', resendOk ? 'ok' : 'alert'),
         ].join('');
     }
@@ -3272,13 +3243,13 @@ class AdminPage {
         const m = map[String(status || '').toLowerCase()];
         return m ? `<span class="badge ${m[0]}">${AdminPage.esc(m[1])}</span>` : '<span class="ssub">—</span>';
     }
-    // Payment rail (provider) → human label + badge. Separates web (Stancer) from mobile stores.
+    // Payment rail (provider) → human label + badge. Separates web (Revolut) from mobile stores.
     static railLabel(p) {
-        const map = { stancer: 'Stancer · web', google_play: 'Google Play · mobile', apple_app_store: 'App Store · mobile', system: 'Comp / système', manual: 'Manuel', revenuecat: 'RevenueCat', web: 'Web', stripe: 'Stripe' };
+        const map = { revolut: 'Revolut · web', google_play: 'Google Play · mobile', apple_app_store: 'App Store · mobile', system: 'Comp / système', manual: 'Manuel', revenuecat: 'RevenueCat', web: 'Web', stripe: 'Stripe' };
         return map[p] || (p ? AdminPage.esc(p) : '—');
     }
     static railBadge(p) {
-        const cls = p === 'stancer' ? 'blue' : (p === 'google_play' || p === 'apple_app_store') ? 'green' : 'gray';
+        const cls = p === 'revolut' ? 'blue' : (p === 'google_play' || p === 'apple_app_store') ? 'green' : 'gray';
         return `<span class="badge ${cls}">${AdminPage.railLabel(p)}</span>`;
     }
     // Deterministic decorative provider icon (varies by name, like the mockup).

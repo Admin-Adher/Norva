@@ -113,7 +113,7 @@ Deno.serve(async (req) => {
 
     // Journal the mobile charge into the shared payments ledger (cloud_stancer_payments,
     // rail-tagged) so collected / conversions / recent-payments / by-rail KPIs see
-    // Play & Apple revenue — Stancer already journals its own charges.
+    // Play & Apple revenue alongside the web rail's own order journal.
     await journalRcPayment(admin, userId, eventType, event);
 
     await recordProcessedEvent(admin, userId, eventId, eventType, event);
@@ -166,8 +166,8 @@ function projectionPatch(userId: string, type: string, event: JsonRecord): JsonR
     patch.fail_open_until = new Date(Date.now() + FAIL_OPEN_HOURS * 60 * 60 * 1000).toISOString();
   }
 
-  // Recurring price + cadence for the cross-rail finance rollup. Stancer keeps its
-  // own in cloud_stancer_customers.amount_cents/period; this gives the mobile rails
+  // Recurring price + cadence for the cross-rail finance rollup. The web rail keeps its
+  // own price/cadence separately; this gives the mobile rails
   // (Play/Apple) the equivalent so admin_finance can compute their MRR. Only stamp
   // when a price is present, so price-less events (cancel/expire) never null it.
   const baseCents = basePriceCents(event);
@@ -252,7 +252,7 @@ function providerForStore(store: string | null): string {
 
 // Base (store) price in cents — the recurring price of record for MRR. RC sends
 // `price` as a decimal in the product's currency; assume the product is USD-based
-// like the Stancer plans. Null when absent (e.g. cancellation/expiration events).
+// like the web plans. Null when absent (e.g. cancellation/expiration events).
 function basePriceCents(event: JsonRecord): number | null {
   const p = Number(event.price);
   return Number.isFinite(p) && p > 0 ? Math.round(p * 100) : null;
@@ -285,7 +285,7 @@ function billPeriodForEvent(event: JsonRecord): string {
 }
 
 // Insert a rail-tagged payment row for a real (non-trial) mobile charge, mirroring
-// the Stancer journal. Idempotent on pi_id (`rc_<transaction_id>`), so RC retries
+// the web-rail journal. Idempotent on pi_id (`rc_<transaction_id>`), so RC retries
 // and the whole-event idempotency guard both no-op safely.
 async function journalRcPayment(
   db: SupabaseClient,

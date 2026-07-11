@@ -108,12 +108,13 @@ async function runOpsAlertSweep(): Promise<JsonRecord> {
   const refreshedAt = cache?.refreshed_at ? new Date(String(cache.refreshed_at)).getTime() : 0;
   const snapshotAgeMin = refreshedAt ? Math.round((Date.now() - refreshedAt) / 60000) : Infinity;
 
-  // 2) Live infra pings — including Stancer (the payment API: any HTTP response = reachable).
+  // 2) Live infra pings — including Revolut (the payment API: any HTTP response = reachable).
   const { gateway, relay } = await resolveInfraUrls();
+  const revolutApiBase = (Deno.env.get("REVOLUT_API_BASE") ?? "https://sandbox-merchant.revolut.com").replace(/\/+$/, "");
   const [gw, rl, st] = await Promise.all([
     gateway ? ping(gateway) : Promise.resolve(null),
     relay ? ping(relay) : Promise.resolve(null),
-    ping("https://api.stancer.com"),
+    ping(revolutApiBase),
   ]);
 
   // 3) Conditions → stable keys. `detail` goes into the email body.
@@ -125,9 +126,9 @@ async function runOpsAlertSweep(): Promise<JsonRecord> {
   if (gw && gw.ok !== true) problems.push({ key: "gateway_down", detail: `Gateway injoignable (${String(gw.error ?? "timeout")})` });
   if (rl && rl.ok !== true) problems.push({ key: "relay_down", detail: `Relay injoignable (${String(rl.error ?? "timeout")})` });
   // Billing conditions (counters come from the snapshot — see refresh_admin_dashboard).
-  if (Number(ov.billing_cron_fails_24h) > 0) problems.push({ key: "billing_cron_fails", detail: `${ov.billing_cron_fails_24h} échec(s) sur les crons BILLING (norva-stancer-billing / norva-lifecycle) en 24 h — le moteur de revenu est peut-être en panne` });
+  if (Number(ov.billing_cron_fails_24h) > 0) problems.push({ key: "billing_cron_fails", detail: `${ov.billing_cron_fails_24h} échec(s) sur les crons BILLING (norva-revolut-billing / norva-lifecycle) en 24 h — le moteur de revenu est peut-être en panne` });
   if (Number(ov.billing_past_due) >= 3) problems.push({ key: "billing_past_due", detail: `${ov.billing_past_due} abonnement(s) en échec de paiement (past_due/grace) simultanés` });
-  if (st && st.ok !== true) problems.push({ key: "stancer_down", detail: `API Stancer injoignable (${String(st.error ?? "timeout")}) — les paiements ne passent plus` });
+  if (st && st.ok !== true) problems.push({ key: "revolut_down", detail: `API Revolut injoignable (${String(st.error ?? "timeout")}) — les paiements ne passent plus` });
   if (Number(ov.support_stale_24h) > 0) problems.push({ key: "support_stale", detail: `${ov.support_stale_24h} ticket(s) support sans réponse depuis plus de 24 h` });
 
   // 4) Cooldown state: alert only keys not alerted within the window; heal (delete) resolved keys.
@@ -177,7 +178,7 @@ async function runOpsAlertSweep(): Promise<JsonRecord> {
   }
 
   return {
-    checked: ["snapshot_stale", "sources_error", "sources_incomplete", "cron_fails", "gateway_down", "relay_down", "billing_cron_fails", "billing_past_due", "stancer_down", "support_stale"],
+    checked: ["snapshot_stale", "sources_error", "sources_incomplete", "cron_fails", "gateway_down", "relay_down", "billing_cron_fails", "billing_past_due", "revolut_down", "support_stale"],
     problems, alerted: toAlert.map((p) => p.key), healed, emailed,
     snapshotAgeMin: Number.isFinite(snapshotAgeMin) ? snapshotAgeMin : null,
   };
@@ -227,26 +228,26 @@ Deno.serve(async (req) => {
       } catch (e) { db = { ok: false, ms: Math.round(performance.now() - dbStart), error: String((e as Error)?.message ?? e).slice(0, 80) }; }
       const { gateway, relay } = await resolveInfraUrls();
       // Billing / go-live gate state — Supabase edge secrets are project-wide, so this function reads
-      // the same NORVA_*/STANCER_* env every payment function sees. Plus live PSP + email reachability.
-      const stancerKey = Deno.env.get("STANCER_SECRET_KEY") ?? "";
-      const stancerMode = (Deno.env.get("NORVA_STANCER_MODE") ?? "test").toLowerCase();
-      const [gw, rl, stancerPing, resendPing] = await Promise.all([
+      // the same NORVA_*/REVOLUT_* env every payment function sees. Plus live PSP + email reachability.
+      const revolutKey = Deno.env.get("REVOLUT_SECRET_KEY") ?? "";
+      const revolutApiBase = (Deno.env.get("REVOLUT_API_BASE") ?? "https://sandbox-merchant.revolut.com").replace(/\/+$/, "");
+      const revolutSandbox = /sandbox/i.test(revolutApiBase);
+      const [gw, rl, revolutPing, resendPing] = await Promise.all([
         gateway ? ping(gateway) : Promise.resolve({ configured: false } as JsonRecord),
         relay ? ping(relay) : Promise.resolve({ configured: false } as JsonRecord),
-        ping("https://api.stancer.com"),
+        ping(revolutApiBase),
         ping("https://api.resend.com"),
       ]);
       const billing = {
-        stancer_mode: stancerMode,
-        stancer_configured: Boolean(stancerKey),
-        stancer_test_key: stancerMode === "test" || stancerKey.startsWith("stest"),
-        footprint_currency: (Deno.env.get("STANCER_FOOTPRINT_CURRENCY") ?? "eur").toLowerCase(),
+        revolut_mode: revolutSandbox ? "sandbox" : "prod",
+        revolut_configured: Boolean(revolutKey),
+        revolut_sandbox: revolutSandbox,
         billing_mode: (Deno.env.get("NORVA_BILLING_MODE") ?? "legacy").toLowerCase(),
         entitlements_mode: (Deno.env.get("NORVA_ENTITLEMENTS_MODE") ?? "enforce").toLowerCase(),
         lifecycle_billing_live: (Deno.env.get("NORVA_LIFECYCLE_BILLING_LIVE") ?? "").toLowerCase() === "true",
-        webhook_token_set: Boolean(Deno.env.get("STANCER_WEBHOOK_TOKEN")),
+        webhook_secret_set: Boolean(Deno.env.get("REVOLUT_WEBHOOK_SIGNING_SECRET")),
         resend_configured: Boolean(Deno.env.get("RESEND_API_KEY")),
-        stancer: stancerPing,
+        revolut: revolutPing,
         resend: resendPing,
       };
       return json(req, {

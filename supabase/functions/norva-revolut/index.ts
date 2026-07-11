@@ -2,7 +2,7 @@
 // REVOLUT_SECRET_KEY is set AND the web is wired (billing-config.revolut.enabled +
 // checkout-revolut.html). Companion to norva-revolut-webhook (which reconciles the
 // authoritative lifecycle); this side OPENS the checkout and can finalize a return
-// without waiting for the webhook (belt & braces), exactly like norva-stancer.
+// without waiting for the webhook (belt & braces).
 //
 // Model — card-upfront 7-day trial (product decision 2026-07-11):
 //   /checkout opens a Revolut ORDER with capture_mode:MANUAL and a small validation
@@ -35,7 +35,7 @@ const REVOLUT_SECRET_KEY = Deno.env.get("REVOLUT_SECRET_KEY") ?? "";
 const REVOLUT_API_BASE = (Deno.env.get("REVOLUT_API_BASE") ?? "https://sandbox-merchant.revolut.com").replace(/\/+$/, "");
 const TRIAL_DAYS = 7;
 // Card-validation hold (capture_mode:MANUAL → authorised, never captured, voided on
-// confirm). $0.50 mirrors the Stancer footprint; bump via env if the sandbox rejects it.
+// confirm). $0.50 keeps the card-validation footprint tiny; bump via env if the sandbox rejects it.
 const VALIDATION_CENTS = boundedInt(Deno.env.get("NORVA_REVOLUT_VALIDATION_CENTS"), 50, 1, 5000);
 // One-shot cancel-flow counter-offer: % off the NEXT charge (applied once, then cleared).
 const SAVE_OFFER_PCT = 50;
@@ -183,7 +183,7 @@ Deno.serve(async (req) => {
     if (!amount) return json({ error: "Unknown plan" }, 400);
 
     // ── Checkout KIND, decided SERVER-SIDE from the account's real state ───────
-    // (identical semantics to norva-stancer): trial_setup grants trial days ONCE;
+    // (kind decided server-side): trial_setup grants trial days ONCE;
     // plan_change swaps plan without a new trial; resubscribe reactivates; card_update
     // only swaps the card.
     const { data: projRow } = await db.from("cloud_entitlement_projection")

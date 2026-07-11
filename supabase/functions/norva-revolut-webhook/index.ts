@@ -17,7 +17,7 @@
 // MINIMAL BODY — Revolut delivers only { event, order_id }. The metadata, amount
 // and authoritative state are NOT in the body, so we GET the order from Revolut
 // ({REVOLUT_API_BASE}/api/1.0/orders/{id}) and trust the API — the same pattern
-// the Stancer webhook uses (re-fetch the payment intent). The checkout stamps the
+// (re-fetch the order and trust the API, not the raw body). The checkout stamps the
 // order metadata with { user_id, plan, period, kind }, which we read back here.
 // Events whose order has no resolvable user are ack'd (200) and skipped.
 //
