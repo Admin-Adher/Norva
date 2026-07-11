@@ -66,6 +66,13 @@ verify_jwt = false
 [functions.norva-revolut-webhook]
 verify_jwt = false
 
+# Revolut checkout — opens a trial-setup order, returns the RevolutCheckout widget
+# token; /confirm finalizes without a webhook; /profile /cancel /resume for the
+# manage UI. No Supabase JWT here (the function verifies the user JWT itself).
+# INERT until REVOLUT_SECRET_KEY is set.
+[functions.norva-revolut]
+verify_jwt = false
+
 # Stancer checkout + diagnostics. INERT until STANCER_SECRET_KEY is set. /health is open; /selftest is
 # cron-authed and test-mode only; /checkout is user-authed (verifies the JWT itself).
 [functions.norva-stancer]

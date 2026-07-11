@@ -58,20 +58,60 @@ auto-trial système). Revolut = **un 4ᵉ écrivain**, rien de plus côté lectu
 
 0. **Prérequis (toi)** : compte **Revolut Business/Merchant** + clés **sandbox** (API key
    secrète + **webhook signing secret**). Me les fournir comme secrets de fonction
-   (jamais en clair dans le repo).
-1. **Plans Revolut** (sandbox) : créer Norva (2 flux) + Norva Family (5 flux), variations
-   mensuel/annuel, phase d'essai 7 j, en USD. Noter les `plan_id`/`variation_id`.
-2. **`norva-revolut-webhook`** : vérif signature HMAC-SHA256 + mapping ci-dessus →
-   `cloud_entitlement_projection` (`provider:"revolut"`), idempotence via
-   `cloud_entitlement_events`. Testable en sandbox sans toucher la prod.
-3. **`norva-revolut`** (checkout) : initie l'ordre/abonnement Revolut, renvoie le contexte
-   du widget RevolutCheckout ; brancher `billing.js` / `checkout.html`.
-4. **Généraliser les fuites Stancer** (voir liste) + ajouter `'revolut'` au CHECK `provider`.
+   (jamais en clair dans le repo). ✅ *fait — clés sandbox posées dans `.env` sur la box.*
+1. ~~**Plans Revolut** natifs (Plan→Variation→Phase)~~ → **abandonné pour l'instant** au
+   profit du modèle **ordre + carte sauvegardée (MIT)** — voir « Décision d'archi » plus bas.
+2. **`norva-revolut-webhook`** : vérif signature HMAC-SHA256 + mapping → projection
+   (`provider:"revolut"`), idempotence via `cloud_entitlement_events`. ✅ **validée bout en
+   bout en sandbox le 2026-07-11** (paiement réel → signature vérifiée → re-fetch de l'ordre →
+   projection écrite).
+3. **`norva-revolut`** (checkout) : ouvre l'ordre trial-setup, renvoie le token du widget
+   RevolutCheckout ; `/confirm` finalise sans webhook ; `/profile /cancel /resume` pour la
+   page de gestion. Front : `checkout-revolut.html` (nouveau) + méthodes `billing.js`. ✅ **codée
+   — à tester en sandbox sur la box** (voir « Activer + tester » ci-dessous).
+4. **Moteur de renouvellement** `norva-revolut-billing` (cron) : à l'issue de l'essai, débit
+   MIT via la carte sauvegardée (`GET /customers/{id}/payment-methods` → charge). + généraliser
+   les fuites Stancer. **⏳ à faire.**
 5. **Bypass admin** dans `getEntitlementDecision` (exemption `role='admin'`, seulement utile
-   en `enforce`).
+   en `enforce`). **⏳ à faire.**
 6. **Retrait Stancer** (fonctions + tables si inutilisées), validation sandbox de bout en
    bout, puis **`NORVA_ENTITLEMENTS_MODE=enforce`** + `NORVA_BILLING_MODE=revenuecat`
    (soft-wall) ou un nouveau mode `revolut` — à décider en phase 6.
+
+## Décision d'archi — ordre + carte sauvegardée (MIT), pas d'abonnement natif (encore)
+
+Le plan initial (§1) visait les **abonnements natifs Revolut** (Revolut possède le cycle de
+vie → on supprime tout cron). En pratique ça exige de créer/valider des **Plans** côté Revolut
+(dashboard + `plan_id`/`variation_id`), non faisable/testable de façon autonome cette session.
+Le chemin **prouvé** en Phase 2 est l'**ordre** (`POST /api/1.0/orders`) + webhook. On construit
+donc Phase 3 sur ce socle :
+
+- **`/checkout`** ouvre un ordre `capture_mode:MANUAL` d'un petit montant de validation (0,50 $,
+  jamais capturé, annulé au `/confirm`). Le widget **RevolutCheckout** (champ carte embarqué)
+  autorise la carte et, avec `savePaymentMethodFor:"merchant"`, la **tokenise** contre un client
+  Revolut → réutilisable en **MIT** (renouvellements). `metadata = {user_id, plan, period, kind}`.
+- **`/confirm`** re-fetch l'ordre ; si `AUTHORISED/COMPLETED` → capture la carte sauvegardée,
+  **annule le hold**, écrit la projection (`trialing` + `trial_ends_at = +7 j`). Garde-fou de
+  rejeu sur `trial_consumed_at`, exactement comme Stancer.
+- **Renouvellement** = un cron `norva-revolut-billing` (Phase 4) qui débite la carte sauvegardée à
+  l'échéance. On **rebranchera** les abonnements natifs en Phase 6 si on veut supprimer ce cron.
+
+Tables : `cloud_revolut_customers` (client + carte + plan/période/montant) et
+`cloud_revolut_orders` (journal d'ordres, sert au `/confirm`). Migration
+`20260711180000_revolut_billing.sql`.
+
+## Activer + tester (sandbox, sur la box)
+
+1. `git pull` sur la box, appliquer la migration `20260711180000_revolut_billing.sql`, recréer
+   le conteneur `norva-edge-functions` (la nouvelle fonction `norva-revolut` est auto-dispatchée).
+2. Vérifier `curl -s https://api.norva.tv/functions/v1/norva-revolut/health` →
+   `{configured:true, sandbox:true, …}`.
+3. Front : passer `revolut.enabled:true` dans `public/js/billing-config.js` (déjà `sandbox`), puis
+   `subscribe.html` route le web vers `/checkout-revolut.html`. Payer avec une **carte test
+   Revolut** (4929 4200 0000 0169, exp future, CVV quelconque). Le champ carte est embarqué.
+4. Attendu : projection `revolut/…/trialing`, `trial_ends_at = +7 j`, carte sauvegardée dans
+   `cloud_revolut_customers`. Les logs `[norva-revolut]` tracent tout échec API (champ inconnu →
+   on ajuste, comme en Phase 2).
 
 ## Fuites Stancer à généraliser/retirer (au-delà de `norva-stancer*`)
 

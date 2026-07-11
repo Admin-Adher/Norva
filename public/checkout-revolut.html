@@ -26,9 +26,6 @@
     h1 { font-size: clamp(24px, 5vw, 34px); line-height: 1.1; margin-bottom: 6px; }
     .sub { color: var(--muted); font-size: 15px; margin-bottom: 22px; }
     .grid { display: grid; grid-template-columns: 380px 1fr; gap: 18px; align-items: start; }
-    /* Stack summary + card form on portrait tablets and phones — a 380px column
-       leaves the Stancer card iframe too cramped below ~900px. Landscape tablets
-       (≥901px) and desktop keep the side-by-side summary | form layout. */
     @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
     .card { border: 1px solid var(--line); border-radius: 14px; padding: 22px; background: var(--panel); }
 
@@ -41,8 +38,6 @@
     .price-row .cur { font-size: 19px; font-weight: 700; vertical-align: super; }
     .price-row .per { color: var(--muted); font-size: 14px; font-weight: 600; }
     .after-trial { color: var(--quiet); font-size: 12.5px; margin: -6px 0 12px; }
-    /* Plain-language billing timeline: exactly what happens today, after the trial,
-       and if you cancel — the single biggest trust lever on a checkout. */
     .bill-breakdown { display: grid; gap: 8px; margin: 2px 0 14px; }
     .bill-breakdown.hidden { display: none; }
     .bd-row { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; font-size: 13px; }
@@ -61,28 +56,35 @@
     .pay-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
     .pay-head h2 { font-size: 16px; }
     .secure { display: inline-flex; align-items: center; gap: 6px; color: var(--quiet); font-size: 12px; }
-    .frame-shell { position: relative; border: 1px solid var(--line); border-radius: 12px;
-      overflow: hidden; background: #0d1118; min-height: 460px; }
-    .frame-shell iframe { display: block; width: 100%; height: 520px; border: 0; background: transparent; }
+    .fld { display: grid; gap: 6px; margin-bottom: 12px; }
+    .fld > span { font-size: 12.5px; color: var(--muted); font-weight: 600; }
+    .fld input { min-height: 46px; border-radius: 10px; border: 1px solid var(--line);
+      background: #0d1118; color: var(--text); font: inherit; padding: 0 13px; }
+    .fld input:focus-visible { outline: none; border-color: var(--accent); }
+    .fld input[readonly] { color: var(--muted); }
+    /* Revolut renders its PCI card iframe inside this container. A light field makes
+       the widget's default (dark-on-light) text render cleanly on the dark checkout. */
+    .frame-shell { position: relative; }
+    .card-field { background: #fff; border-radius: 10px; padding: 6px 12px; min-height: 52px;
+      border: 1px solid var(--line); display: flex; align-items: center; }
+    .card-field > * { width: 100%; }
     .frame-loading { position: absolute; inset: 0; display: grid; place-items: center;
-      color: var(--muted); font-size: 14px; background: #0d1118; transition: opacity .25s; }
+      color: #6b7690; font-size: 14px; background: #fff; border-radius: 10px; transition: opacity .25s; }
     .frame-loading.hide { opacity: 0; pointer-events: none; }
-    .spinner { width: 26px; height: 26px; border: 3px solid var(--line); border-top-color: var(--pink);
+    .spinner { width: 26px; height: 26px; border: 3px solid #e2e8f0; border-top-color: var(--pink);
       border-radius: 50%; animation: spin 0.9s linear infinite; margin: 0 auto 12px; }
     @keyframes spin { to { transform: rotate(360deg); } }
+    .pay-btn { width: 100%; margin-top: 14px; }
+    .pay-btn[disabled] { opacity: .55; cursor: not-allowed; }
     .pay-foot { display: flex; justify-content: space-between; align-items: center; gap: 10px;
       margin-top: 12px; color: var(--quiet); font-size: 12px; flex-wrap: wrap; }
     .pay-foot a { color: var(--accent); }
-    /* Full-page fallback if the embedded card form struggles (mobile keyboard, 3-D
-       Secure, blocked iframe) — a clear button, not a tiny "trouble?" link. */
     .pay-fallback { display: inline-flex; align-items: center; justify-content: center; gap: 6px;
       margin-top: 12px; padding: 12px 16px; border-radius: 10px; border: 1px solid var(--line);
       background: #151b26; color: #dbe7ff; font-size: 13px; font-weight: 700; text-decoration: none; }
     .pay-fallback[hidden] { display: none; }
     .pay-fallback:hover, .pay-fallback:focus-visible { border-color: var(--accent); outline: none; }
     @media (max-width: 900px) { .pay-fallback { width: 100%; } }
-    /* Accepted-card marks — a small trust cue that a real, secure card payment is
-       what happens here. Honest to the Stancer rail (Visa / Mastercard). */
     .pay-marks { display: flex; align-items: center; gap: 8px; margin-top: 14px; flex-wrap: wrap;
       color: var(--quiet); font-size: 12px; }
     .pay-marks .pm-lbl { font-weight: 700; }
@@ -99,10 +101,7 @@
     .btn.ghost { background: #242c3d; color: #dbe7ff; border: 1px solid #344158; }
     .btn:focus-visible { outline: 3px solid var(--pink); outline-offset: 3px; }
 
-    /* ── Android TV (10-foot view) ───────────────────────────────────────
-       Filling an embedded card iframe with a D-pad is painful, so the boot
-       logic swaps it for a "finish on your phone" QR. These rules size that
-       panel and enlarge the surrounding chrome for the couch. */
+    /* ── Android TV (10-foot view) — finish on your phone via QR ─────────── */
     html.tv h1 { font-size: 40px; }
     html.tv .sub { font-size: 18px; }
     html.tv .btn { min-height: 64px; font-size: 18px; }
@@ -133,7 +132,6 @@
 </head>
 <body>
   <script>
-    // Bigger targets + a phone-handoff checkout on Android TV (D-pad navigation).
     if (/NorvaTV-AndroidTV/i.test(navigator.userAgent || '')) { document.documentElement.classList.add('tv'); }
   </script>
   <main class="wrap">
@@ -152,7 +150,7 @@
             <span class="cur">$</span><span class="amount" id="sum-amount">4.99</span>
             <span class="per" id="sum-per">/mo after your 7-day free trial</span>
           </div>
-          <p class="after-trial" id="sum-after">Today: $0.00 — your plan starts only after the trial.</p>
+          <p class="after-trial" id="sum-after" hidden>Today: $0.00 — your plan starts only after the trial.</p>
           <div class="bill-breakdown" id="bill-breakdown">
             <div class="bd-row"><span class="bd-k">Today</span><span class="bd-v">$0.00 <em>card check only</em></span></div>
             <div class="bd-row"><span class="bd-k">After your 7-day trial</span><span class="bd-v" id="bd-then">—</span></div>
@@ -168,9 +166,9 @@
           <div class="assurance">
             <span class="assurance-ico" aria-hidden="true">🔒</span>
             <div><b>No charge today.</b> We place a small temporary <b>$0.50</b> authorization to verify your
-              card — it may appear in your local currency and is <b>released right away and never debited</b>. Your first payment happens only
+              card — it's <b>released right away and never debited</b>. Your first payment happens only
               after the 7-day trial, and only if you don't cancel.
-              <b>We'll email you a reminder 2 days before your trial ends.</b></div>
+              <b>We'll email you a reminder before your trial ends.</b></div>
           </div>
         </section>
 
@@ -180,17 +178,24 @@
             <h2>Payment details</h2>
             <span class="secure" title="PCI-DSS — card data never touches Norva servers">🛡️ Secured &amp; encrypted</span>
           </div>
-          <div class="frame-shell">
-            <iframe id="pay-frame" title="Secure card form" allow="payment"></iframe>
-            <div class="frame-loading" id="frame-loading">
-              <div><div class="spinner"></div>Preparing your secure card form…</div>
+          <form id="pay-form" autocomplete="on">
+            <label class="fld"><span>Cardholder name</span>
+              <input id="cc-name" name="name" type="text" autocomplete="cc-name" required placeholder="Name on card">
+            </label>
+            <label class="fld"><span>Email for your receipt</span>
+              <input id="cc-email" name="email" type="email" autocomplete="email" required placeholder="you@example.com">
+            </label>
+            <div class="frame-shell">
+              <div id="card-field" class="card-field"></div>
+              <div class="frame-loading" id="frame-loading"><div><div class="spinner"></div>Preparing your secure card form…</div></div>
             </div>
-          </div>
+            <button class="btn pay-btn" id="pay-btn" type="submit" disabled>Start free trial</button>
+          </form>
           <div class="tv-continue" id="tv-continue" hidden>
             <h3>Finish securely on your phone</h3>
             <div class="tv-qr" id="tv-qr"></div>
-            <p>Scan this code with your phone camera to enter your card on Stancer's secure page.
-              Keep this screen open — your trial starts here automatically once payment is confirmed.</p>
+            <p>Scan this code with your phone camera to enter your card on Revolut's secure page.
+              Keep this screen open — your trial starts here automatically once the card is confirmed.</p>
             <p class="tv-url" id="tv-url"></p>
             <button class="btn ghost" id="tv-pay-here" type="button">Enter card on this TV instead</button>
           </div>
@@ -208,7 +213,7 @@
             <span class="pm-more">and more</span>
           </div>
           <div class="pay-foot">
-            <span>Card processing by Stancer (EU) — Norva never sees your card number.</span>
+            <span>Card processing by Revolut — Norva never sees your card number.</span>
             <a id="fallback-link" class="pay-fallback" href="#" target="_blank" rel="noopener" hidden>Prefer a full page? Open the secure payment page ↗</a>
           </div>
           <div class="status" id="status"></div>
@@ -233,8 +238,8 @@
   <script src="/js/vendor/qrcode.js?v=1"></script>
   <script src="/js/billing-config.js?v=5"></script>
   <script src="/js/billing.js?v=10"></script>
-  <script>
-    (function () {
+  <script type="module">
+    (async function () {
       const params = new URLSearchParams(location.search);
       function safeLocalPath(v) { return (typeof v === 'string' && /^\/(?!\/)/.test(v)) ? v : '/app#home'; }
       const plan = params.get('plan') === 'family' ? 'family' : 'plus';
@@ -243,9 +248,12 @@
       const returnTo = safeLocalPath(params.get('returnTo'));
 
       const statusEl = document.getElementById('status');
-      const frame = document.getElementById('pay-frame');
       const loading = document.getElementById('frame-loading');
       const fallback = document.getElementById('fallback-link');
+      const payBtn = document.getElementById('pay-btn');
+      const form = document.getElementById('pay-form');
+      const nameInput = document.getElementById('cc-name');
+      const emailInput = document.getElementById('cc-email');
       const isTv = document.documentElement.classList.contains('tv');
       const frameShell = document.querySelector('.frame-shell');
       const tvContinue = document.getElementById('tv-continue');
@@ -261,7 +269,7 @@
       }
 
       // ── Order summary from config (display only — amounts are server-side) ──
-      const cfg = (window.NORVA_BILLING_CONFIG && NORVA_BILLING_CONFIG.stancer) || {};
+      const cfg = (window.NORVA_BILLING_CONFIG && NORVA_BILLING_CONFIG.revolut) || {};
       const prices = (cfg.plans || {})[plan] || {};
       const displayPrice = period === 'annual' ? (prices.annual || '') : (prices.monthly || '');
       if (plan === 'family') {
@@ -272,14 +280,9 @@
       if (displayPrice) document.getElementById('sum-amount').textContent = displayPrice;
       document.getElementById('sum-per').textContent =
         (period === 'annual' ? '/yr' : '/mo') + ' after your 7-day free trial';
-      // Billing timeline: "After your 7-day trial" = the plan price. The trial is the
-      // default view, so show the breakdown and fold away the one-line summary (it
-      // comes back for the special checkout kinds below).
       (function () {
         const bdThen = document.getElementById('bd-then');
         if (bdThen) bdThen.textContent = '$' + (displayPrice || '—') + (period === 'annual' ? '/yr' : '/mo');
-        const sumAfter0 = document.getElementById('sum-after');
-        if (sumAfter0) sumAfter0.hidden = true;
       })();
       document.getElementById('cancel-btn').setAttribute('href', '/subscribe.html?returnTo=' + encodeURIComponent(returnTo));
       document.getElementById('continue-btn').setAttribute('href', returnTo);
@@ -291,18 +294,17 @@
         location.replace('/account.html?returnTo=' + encodeURIComponent(location.pathname + location.search));
         return;
       }
+      if (session.user.email) { emailInput.value = session.user.email; emailInput.readOnly = true; }
+      const dn = (session.user.user_metadata && (session.user.user_metadata.display_name || session.user.user_metadata.name)) || '';
+      if (dn) nameInput.value = dn;
 
-      // ── Adapt the page copy to what this checkout actually does ───────────
-      // The KIND is decided server-side (/checkout) from the account's real state:
-      // trial_setup | plan_change | resubscribe | card_update.
+      // ── Adapt copy to the checkout KIND (decided server-side) ─────────────
       let checkoutKind = 'trial_setup';
       function applyKindCopy(kind) {
         checkoutKind = kind || 'trial_setup';
         const h1 = document.querySelector('#checkout-view h1');
         const sub = document.querySelector('#checkout-view .sub');
         const after = document.getElementById('sum-after');
-        // The 3-line trial timeline only fits a trial; the other kinds use the
-        // one-line summary instead.
         const special = (checkoutKind === 'card_update' || checkoutKind === 'plan_change' || checkoutKind === 'resubscribe');
         const breakdown = document.getElementById('bill-breakdown');
         if (breakdown) breakdown.classList.toggle('hidden', special);
@@ -310,98 +312,55 @@
         if (checkoutKind === 'card_update') {
           h1.textContent = 'Update your payment method';
           sub.textContent = 'Enter your new card — it becomes the card used for your Norva plan.';
-          after.textContent = 'Today: $0.00 — card check only ($0.50 hold in your local currency, released right away).';
+          after.textContent = 'Today: $0.00 — card check only ($0.50 hold, released right away).';
+          payBtn.textContent = 'Save card';
         } else if (checkoutKind === 'plan_change') {
           h1.textContent = 'Change your plan';
           sub.textContent = 'Your new plan applies right away — no extra charge today, the new price starts next cycle.';
           after.textContent = 'Today: $0.00 — card check only, your current period is already paid.';
+          payBtn.textContent = 'Confirm plan change';
         } else if (checkoutKind === 'resubscribe') {
           h1.textContent = 'Reactivate your plan';
           sub.textContent = 'Welcome back — your plan starts as soon as your card is checked.';
           after.textContent = 'Billed today — your first payment is processed right after the card check.';
+          payBtn.textContent = 'Reactivate';
         }
       }
       if (intent === 'update_card') applyKindCopy('card_update');
 
-      // ── Android TV: phone-handoff instead of an iframe you fill with a D-pad ─
-      // Render a scannable QR of Stancer's hosted page (CSP-safe inline SVG via the
-      // vendored encoder), then poll /confirm so the trial starts on the TV the
-      // moment the phone payment settles. Falls back to the on-TV iframe on demand.
+      // ── Android TV: phone-handoff QR of Revolut's hosted page ─────────────
       function renderQr(url) {
-        if (!tvQr) return;
-        if (typeof qrcode !== 'function') { tvQr.innerHTML = ''; return; }
-        try {
-          const qr = qrcode(0, 'M');
-          qr.addData(url);
-          qr.make();
-          tvQr.innerHTML = qr.createSvgTag({ cellSize: 6, margin: 1, scalable: true });
-        } catch (_) { tvQr.innerHTML = ''; }
+        if (!tvQr || typeof qrcode !== 'function') { if (tvQr) tvQr.innerHTML = ''; return; }
+        try { const qr = qrcode(0, 'M'); qr.addData(url); qr.make();
+          tvQr.innerHTML = qr.createSvgTag({ cellSize: 6, margin: 1, scalable: true }); }
+        catch (_) { tvQr.innerHTML = ''; }
       }
-      function startTvPolling() {
+      function startTvPolling(orderId) {
         clearInterval(tvPollHandle);
         tvPollHandle = setInterval(async function () {
           if (finishing) { clearInterval(tvPollHandle); return; }
           try {
-            const r = await window.NorvaBilling.confirmStancer();
+            const r = await window.NorvaBilling.confirmRevolut(orderId);
             if (r && DONE_STATUSES.indexOf(String(r.status)) !== -1) { clearInterval(tvPollHandle); finish(); }
           } catch (_) { /* transient — keep polling */ }
         }, 4000);
       }
-      function showTvContinue(url) {
+      function showTvContinue(url, orderId) {
+        if (!url) return;
         renderQr(url);
         if (tvUrl) tvUrl.textContent = url;
         if (frameShell) frameShell.style.display = 'none';
-        loading.classList.add('hide');
         if (tvContinue) tvContinue.hidden = false;
-        startTvPolling();
+        startTvPolling(orderId);
       }
       if (tvPayHere) {
         tvPayHere.addEventListener('click', function () {
-          // Escape hatch: no phone handy → reveal the iframe already loaded behind the QR.
           if (tvContinue) tvContinue.hidden = true;
           if (frameShell) frameShell.style.display = '';
-          loading.classList.remove('hide');
-          setTimeout(function () { loading.classList.add('hide'); }, 4000);
-          try { frame.focus(); } catch (_) {}
         });
       }
 
-      // ── Create the payment intent and embed the Stancer card form ─────────
-      function boot() {
-        statusEl.classList.remove('show');
-        loading.classList.remove('hide');
-        window.NorvaBilling.stancerCheckoutUrl({ plan: plan, period: period, returnTo: returnTo, intent: intent })
-          .then(function (data) {
-            applyKindCopy(data.kind);
-            frame.src = data.url;
-            fallback.setAttribute('href', data.url);
-            fallback.hidden = false;
-            frame.addEventListener('load', function () { loading.classList.add('hide'); }, { once: true });
-            // Belt & braces: hide the skeleton even if the load event is swallowed.
-            setTimeout(function () { loading.classList.add('hide'); }, 6000);
-            // Android TV: swap the iframe for the phone-handoff QR (native Play
-            // Billing never reaches this page — subscribe.html routes it to Google).
-            if (isTv) showTvContinue(data.url);
-          })
-          .catch(function (e) {
-            loading.classList.add('hide');
-            if (e && e.code === 'not_signed_in') {
-              location.replace('/account.html?returnTo=' + encodeURIComponent(location.pathname + location.search));
-              return;
-            }
-            setStatus('Could not start the secure checkout' + (e && e.message ? ': ' + e.message : '') + ' — please retry.', true);
-            const retry = document.createElement('button');
-            retry.className = 'btn ghost';
-            retry.style.marginTop = '10px';
-            retry.textContent = 'Retry';
-            retry.addEventListener('click', function () { retry.remove(); boot(); });
-            statusEl.appendChild(document.createElement('br'));
-            statusEl.appendChild(retry);
-          });
-      }
-      boot();
-
-      // ── Completion: the bridge page (same-origin) posts back when paid ────
+      // ── Completion ────────────────────────────────────────────────────────
       const DONE_STATUSES = ['trialing', 'active', 'plan_changed', 'updated', 'retrying'];
       const SUCCESS_COPY = {
         trial_setup: ['Your free trial has started',
@@ -414,19 +373,20 @@
           'Your new card is saved and will be used for your Norva payments from now on.'],
       };
       let finishing = false;
-      async function finish() {
+      async function finish(orderId) {
         if (finishing) return;
         finishing = true;
         loading.classList.remove('hide');
+        loading.style.display = 'grid';
         loading.firstElementChild.innerHTML = '<div class="spinner"></div>Finalizing…';
-        // /confirm re-fetches the payment server-side; retry briefly while Stancer settles.
+        // /confirm re-fetches the order server-side; retry briefly while Revolut settles.
         let done = false;
-        for (let i = 0; i < 5; i++) {
+        for (let i = 0; i < 6; i++) {
           try {
-            const r = await window.NorvaBilling.confirmStancer();
+            const r = await window.NorvaBilling.confirmRevolut(orderId || currentOrderId);
             if (r && DONE_STATUSES.indexOf(String(r.status)) !== -1) { done = true; break; }
           } catch (_) { /* retry */ }
-          await new Promise(function (res) { setTimeout(res, 1300); });
+          await new Promise(function (res) { setTimeout(res, 1400); });
         }
         document.getElementById('checkout-view').style.display = 'none';
         const success = document.getElementById('success-view');
@@ -434,17 +394,97 @@
         success.querySelector('h2').textContent = copy[0];
         success.querySelector('p').textContent = copy[1];
         if (!done) {
-          // Very unlikely: payment done but confirm still pending — reassure, don't alarm.
           success.querySelector('p').textContent =
             "Payment received — we're finalizing your account. It will be reflected within a minute.";
         }
         success.classList.add('show');
         try { document.getElementById('continue-btn').focus(); } catch (_) {}
       }
-      window.addEventListener('message', function (ev) {
-        if (ev.origin !== location.origin) return;
-        if (ev.data && ev.data.type === 'norva:stancer:done') finish();
+
+      // ── Open the order + mount the RevolutCheckout card field ─────────────
+      let currentOrderId = '';
+      let cardField = null;
+      async function boot() {
+        statusEl.classList.remove('show');
+        loading.classList.remove('hide');
+        let data;
+        try {
+          data = await window.NorvaBilling.revolutCreateOrder({ plan, period, returnTo, intent });
+        } catch (e) {
+          loading.classList.add('hide');
+          if (e && e.code === 'not_signed_in') {
+            location.replace('/account.html?returnTo=' + encodeURIComponent(location.pathname + location.search));
+            return;
+          }
+          setStatus('Could not start the secure checkout' + (e && e.message ? ': ' + e.message : '') + ' — please retry.', true);
+          addRetry();
+          return;
+        }
+        currentOrderId = data.order_id || '';
+        applyKindCopy(data.kind);
+        if (data.checkout_url) { fallback.setAttribute('href', data.checkout_url); fallback.hidden = false; }
+        // Android TV: hand off to the phone (D-pad can't fill a card iframe).
+        if (isTv) { showTvContinue(data.checkout_url, currentOrderId); return; }
+
+        // Load the widget module on demand and mount the embedded card field.
+        const mode = data.sandbox === true ? 'sandbox' : (data.sandbox === false ? 'prod' : (cfg.mode || 'sandbox'));
+        let RevolutCheckout;
+        try {
+          const mod = await import(cfg.sdkUrl || 'https://unpkg.com/@revolut/checkout/esm');
+          RevolutCheckout = mod.default || mod.RevolutCheckout || mod;
+          const instance = await RevolutCheckout(data.public_id, mode);
+          cardField = instance.createCardField({
+            target: document.getElementById('card-field'),
+            onSuccess: function () { finish(currentOrderId); },
+            onError: function (err) {
+              submitting = false;
+              payBtn.disabled = false;
+              setStatus('Payment could not be completed' + (err && err.message ? ': ' + err.message : '') + '. Please check your card and try again.', true);
+            },
+            onValidation: function (errors) {
+              if (errors && errors.length) {
+                setStatus(errors.map(function (x) { return x && x.message; }).filter(Boolean).join(' — '), true);
+              } else { statusEl.classList.remove('show'); }
+            },
+          });
+          loading.classList.add('hide');
+          payBtn.disabled = false;
+        } catch (e) {
+          loading.classList.add('hide');
+          // Widget failed to load → fall back to Revolut's hosted page.
+          setStatus('Secure card form could not load. Use the full secure payment page below.', true);
+          if (data.checkout_url) { fallback.hidden = false; }
+        }
+      }
+
+      let submitting = false;
+      form.addEventListener('submit', function (e) {
+        e.preventDefault();
+        if (submitting || !cardField) return;
+        if (!nameInput.value.trim()) { setStatus('Please enter the cardholder name.', true); nameInput.focus(); return; }
+        if (!emailInput.value.trim()) { setStatus('Please enter an email for your receipt.', true); emailInput.focus(); return; }
+        submitting = true;
+        payBtn.disabled = true;
+        statusEl.classList.remove('show');
+        // savePaymentMethodFor:'merchant' tokenises the card for renewals (MIT).
+        cardField.submit({
+          name: nameInput.value.trim(),
+          email: emailInput.value.trim(),
+          savePaymentMethodFor: 'merchant',
+        });
       });
+
+      function addRetry() {
+        const retry = document.createElement('button');
+        retry.className = 'btn ghost';
+        retry.style.marginTop = '10px';
+        retry.textContent = 'Retry';
+        retry.addEventListener('click', function () { retry.remove(); boot(); });
+        statusEl.appendChild(document.createElement('br'));
+        statusEl.appendChild(retry);
+      }
+
+      boot();
     })();
   </script>
 </body>
