@@ -163,5 +163,8 @@ docker compose --env-file .env -f docker-compose.monitoring.yml up -d --force-re
   Rien n'est écrit dans l'arbo du repo.
 - **Pin de version** : on suit le tag `stable` (correctifs de sécurité au
   `pull`). Épingler une version précise si tu veux une repro stricte.
-- **Pas de claim Netdata Cloud** : aucun token → l'agent ne téléphone nulle part
-  (`DO_NOT_TRACK=1` en plus). 100 % self-host.
+- **Netdata Cloud désactivé** : `monitoring/cloud.conf` (`[global] enabled = no`,
+  bind-monté sur `/var/lib/netdata/cloud.d/cloud.conf`) coupe l'ACLK → plus de
+  prompt « connect your agent / Claim » dans le dashboard, et l'agent ne contacte
+  jamais `app.netdata.cloud`. Avec `DO_NOT_TRACK=1` = 100 % self-host, zéro
+  phone-home.

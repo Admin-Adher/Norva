@@ -46,6 +46,9 @@ services:
       # Turn off the docker service-discovery pipeline (would auto-create a
       # postgres job with a guessed password → failed-login spam).
       - ./monitoring/go.d/sd/docker.conf:/etc/netdata/go.d/sd/docker.conf:ro
+      # Disable Netdata Cloud (ACLK) — no claim prompt, no phone-home. Lives
+      # under the persistent /var/lib/netdata volume; bind-mount keeps it in git.
+      - ./monitoring/cloud.conf:/var/lib/netdata/cloud.d/cloud.conf:ro
       # Alert notifications (Telegram): full stock config rendered on the box
       # with the bot token/chat_id filled in (chmod 600, OUTSIDE the repo — the
       # token is a secret). /etc/netdata is NOT a persistent volume here, so the
