@@ -12,6 +12,7 @@ set -a; source "$ENV_FILE"; set +a
 
 : "${R2_ACCOUNT_ID:?}"; : "${R2_ACCESS_KEY_ID:?}"; : "${R2_SECRET_ACCESS_KEY:?}"; : "${R2_BUCKET:?}"
 : "${NORVA_OPS_DIR:?}"; : "${PG_IMAGE:?}"
+DB_CONTAINER="${DB_CONTAINER:-norva-db}"
 
 # Postgres superuser password from the stack .env (root can read it).
 POSTGRES_PASSWORD="$(grep -E '^POSTGRES_PASSWORD=' "$NORVA_OPS_DIR/.env" | head -1 | cut -d= -f2-)"

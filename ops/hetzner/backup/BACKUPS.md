@@ -68,6 +68,15 @@ sudo journalctl -u norva-basebackup.service -n 20 --no-pager
 | Base backup → R2 | dim. 04:10 UTC | `norva-basebackup` |
 
 - État : `systemctl list-timers 'norva-*'` · logs : `journalctl -u <unité> -n 30`.
+- **Réplication pg_hba** : `pg_basebackup` a besoin d'une règle `host replication …` dans le
+  `pg_hba.conf` de l'image (`/etc/postgresql/pg_hba.conf`, *dans* le conteneur → réinitialisé
+  à chaque recréation du conteneur `db`). `basebackup-weekly.sh` **la ré-ajoute tout seul**
+  (étape `[0/3]`) avant chaque run — rien à faire à la main, même sur une box neuve.
+- **rclone ↔ R2** : les uploads logguent parfois `NotImplemented (501)` au 1ᵉʳ essai puis
+  `Attempt 2 succeeded` — quirk connu (R2 refuse un en-tête de checksum que rclone tente),
+  auto-réparé par le retry, données intègres. Pour le supprimer : `rclone` ≥ 1.66
+  (`curl https://rclone.org/install.sh | sudo bash`) détecte le provider Cloudflare et n'envoie
+  plus ce checksum.
 - `wal-sync` **échoue exprès** (unit failed) si >500 segments s'accumulent en local
   → archivage/upload en panne → vérifier réseau/R2 AVANT que `pg_wal` remplisse
   le disque.

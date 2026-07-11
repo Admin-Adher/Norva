@@ -20,6 +20,16 @@ OUTDIR="$STAGE/base-$STAMP"
 mkdir -p "$OUTDIR"
 trap 'rm -rf "$OUTDIR"' EXIT
 
+# Self-heal the replication pg_hba rule. The supabase image keeps pg_hba at
+# /etc/postgresql/pg_hba.conf (inside the container, NOT PGDATA), so it is reset
+# whenever the db container is recreated (a compose config change, an image bump).
+# Ensure the rule exists + reload before every base backup — idempotent.
+log "[0/3] ensure replication pg_hba rule (self-heal after container recreation)"
+HBA="$(pgtool psql -h 127.0.0.1 -U supabase_admin -d postgres -Atc 'show hba_file;')"
+docker exec -u root "$DB_CONTAINER" bash -lc \
+  "grep -q norva-basebackup '$HBA' 2>/dev/null || printf 'host\treplication\tall\t172.16.0.0/12\tscram-sha-256\t# norva-basebackup\n' >> '$HBA'"
+pgtool psql -h 127.0.0.1 -U supabase_admin -d postgres -Atc 'select pg_reload_conf();' >/dev/null
+
 log "[1/3] pg_basebackup (tar+gzip, WAL fetched → standalone-restorable)"
 # -Ft: tar per tablespace (base.tar.gz [+ pg_wal.tar.gz with -X fetch is folded in])
 # -X fetch: include the WAL needed to make THIS backup consistent on its own;
