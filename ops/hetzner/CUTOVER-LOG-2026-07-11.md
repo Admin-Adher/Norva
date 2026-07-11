@@ -1,14 +1,17 @@
 # Journal de bascule DB → self-host Hetzner — 2026-07-11
 
-> État figé au **11/07/2026 ~01h30 CEST**. Migration **data terminée et vérifiée à 100 %**,
-> **secrets fonctions résolus** (`.env` complet, hors Stancer volontaire) → il ne reste que
-> **Caddy/TLS + repoint app** pour la bascule.
-> **Le managé reste intact en lecture** → rollback total dispo à tout moment.
-> Rien n'est exposé publiquement (Kong écoute uniquement en `127.0.0.1`).
+> 🏁 **BASCULE EFFECTUÉE le 11/07/2026** : l'app (norva.tv) tourne sur le self-host
+> (`api.norva.tv` → Caddy/TLS → Kong), login + catalogue + grilles **validés en prod**,
+> **crons : 47 actifs self-host / 0 actif managé** (runs `succeeded` vérifiés).
+> Le **managé reste en place, endormi** (données intactes, crons désactivés via
+> `cron.alter_job`) = rollback complet possible. Voir §9 pour l'état final + le reste à faire.
 >
-> ⚠️ **TODO sécurité** : la clé privée FCM (service account `firebase-adminsdk-fbsvc@norva-ecosystem`,
-> key id `2ec8956985f298a9397ed1530682efd471578d93`) a transité **en clair** → **à régénérer**
-> (Firebase → Service accounts → Keys : supprimer cette clé, en créer une neuve, re-poser dans `.env`).
+> ⚠️ **TODO sécurité** (post-bascule, non bloquants) :
+> 1. Clé privée FCM (`firebase-adminsdk-fbsvc@norva-ecosystem`, key id
+>    `2ec8956985f298a9397ed1530682efd471578d93`) a transité **en clair** → régénérer
+>    (Firebase → Service accounts → Keys) et re-poser dans `.env`.
+> 2. Un mot de passe personnel a été tapé en clair dans le terminal/chat pendant la nuit →
+>    le changer partout où il sert.
 
 ---
 
@@ -23,11 +26,12 @@
 | `storage` (1 bucket ; fichiers déférés) | ✅ métadonnées |
 | GUCs (timeouts rôles) + dual-write dormant | ✅ appliqués |
 | 3 secrets vault (backfill/cron/resend) | ✅ transférés (vault + `.env`) |
-| 47 crons (URLs réécrites → `api.norva.tv`) | ✅ stagés, **désactivés** |
+| Crons | ✅ **49 recréés, 47 actifs self-host / 0 actif managé**, runs `succeeded` |
 | Secrets fonctions (cœur) | 🟢 **OK** — TMDB posé, média/relay via DB, emails/cron faits |
 | Secrets fonctions (optionnels) | 🟢 FCM posé (⚠️ **clé à re-générer**) · `NORVA_ENTITLEMENTS_MODE`=`observe` · Stancer zappé (refonte paiement post-migration) |
-| **Caddy/TLS `api.norva.tv`** | ⛔ à installer |
-| **Repoint app (`cloudApi.js`) + redeploy** | ⛔ à faire |
+| Caddy/TLS `api.norva.tv` | ✅ Caddy 2.11 + Let's Encrypt → `127.0.0.1:8000` (Kong) |
+| Repoint app + deploy Pages | ✅ commit `448878d`, déployé, **validé en prod** |
+| Kong ↔ clé frontend | ✅ `SUPABASE_PUBLISHABLE_KEY` ajoutée au `.env` (voir §8bis) |
 
 ---
 
@@ -206,10 +210,60 @@ Reprendre la requête `jsonb_object_agg(tablename, count)` sur `public` des deux
 
 ---
 
-## 8. Rollback
+## 8. Rollback (mis à jour post-bascule)
 
-- **DB** : ne pas repointer l'app (ou re-pointer sur le managé resté en lecture). Le managé
-  n'a **jamais** été modifié en écriture par cette session (dump lecture seule + reset du mot de
-  passe DB, sans effet sur l'app qui s'authentifie via JWT).
-- **Crons self-host** : restent désactivés tant qu'on n'a pas basculé.
-- **Aucune exposition publique** : Kong en `127.0.0.1` uniquement tant que Caddy n'est pas posé.
+Rollback complet = 2 gestes, tous réversibles :
+1. **App** : revert du commit `448878d` (repoint) + push → Pages redéploie vers le managé.
+2. **Crons** : côté managé `select cron.alter_job(jobid, active => true) from cron.job;`
+   (via MCP ou pooler) ; côté self-host `update cron.job set active=false;`.
+Le managé n'a jamais été modifié en écriture (dump lecture seule) — ses données datent du
+freeze de fait (trafic nul pendant la nuit de bascule) et divergeront à mesure que le
+self-host vit : un rollback tardif perdra les écritures post-bascule.
+
+---
+
+## 8bis. Incident post-repoint : Kong rejetait la clé frontend (RÉSOLU)
+
+Symptôme : login impossible sur norva.tv (« We couldn't sign you in with that password »)
+alors que GoTrue acceptait le même login en direct (curl → `access_token`).
+Cause : le frontend (authApi.js, app.js, AdminPage, maintenance-banner) envoie comme `apikey`
+la **clé opaque `sb_publishable_…`** (nouvelle norme Supabase), pas le JWT anon legacy. Kong
+self-host ne connaissait que le JWT anon → **401 avant GoTrue** ; le `catch (_)` d'account.html
+maquillait ce 401 en « mauvais mot de passe ».
+Fix : `SUPABASE_PUBLISHABLE_KEY=sb_publishable_…` ajouté au `.env` (clé PUBLIQUE par design) +
+`docker compose up -d --force-recreate kong` — le kong.yml officiel la déclare comme 2ᵉ
+credential du consumer `anon`. `SUPABASE_SECRET_KEY` reste VIDE (garde le mode legacy passthrough).
+Séquelle UX observée : pages Movies/Series restées sur un état vide chargé pendant la panne —
+un simple changement de filtre (re-fetch) a tout rétabli ; aucun item n'était réellement
+« unavailable » (diagnostic : 0 broken via champ serveur, 0 via PlaybackHealth).
+
+---
+
+## 9. État final (11/07/2026) + reste à faire
+
+### Fait et validé en prod
+- Caddy 2.11.4 (`/etc/caddy/Caddyfile`) : `api.norva.tv` → `127.0.0.1:8000`, cert Let's Encrypt.
+- App repointée (`448878d`) : `authApi/cloudApi/billing/admin/support/banner` → `api.norva.tv`.
+- Login (compte email/password migré), catalogue Home, grilles Movies/Series, provider visible.
+- `/boot` 98 ms · `/media-items` 107 ms · `/sources` 98 ms (depuis l'extérieur, TLS).
+- Crons : managé **0 actif** (49 dormants, désactivés via `cron.alter_job` par l'API) ;
+  self-host **47 actifs / 49** (recréés par pipe `format('select cron.schedule(…)')`
+  managé→box avec réécriture d'URL ; les 2 `norva-audio-airo-ninja*` inactifs comme en prod).
+  `cron.job_run_details` → runs `succeeded`.
+- ⚠️ Découverte : `dump/ref-cron-jobs.tsv` (export `-At`) est **inexploitable** (commandes
+  multi-lignes → 286 lignes pour 49 jobs). `01-dump-prod.sh` corrigé pour exporter aussi
+  `ref-cron-jobs.sql` (statements `cron.schedule` quotés `%L`, rejouables).
+
+### Reste à faire (post-bascule, aucun bloquant)
+1. **Valider la lecture** (film + live) si pas déjà fait — dernier maillon
+   (`norva-playback` → gateway Railway → relay), config lue depuis la DB migrée.
+2. **Sécurité** : régénérer la clé FCM (voir TODO en tête) ; changer le mot de passe exposé.
+3. **Backups du self-host** : pgBackRest/WAL-G → R2 + PITR testé (le backup R2 existant
+   visait le managé). C'est LA priorité ops maintenant que la box est la prod.
+4. **Monitoring** : Netdata/Prometheus (disque, RAM, connexions, réplication future).
+5. **Storage** : re-synchroniser/régénérer les fichiers storyboards + sous-titres (metadonnées
+   migrées, objets non copiés — régénérables).
+6. **Managé** : garder dormant 1-2 semaines (rollback), puis downgrade/résiliation du plan Pro.
+7. **Billing** : refonte passerelle de paiement (remplacement Stancer) puis
+   `NORVA_ENTITLEMENTS_MODE=enforce`.
+8. Durcir Studio (3001) : accessible uniquement en local — passer par un tunnel SSH pour l'admin.

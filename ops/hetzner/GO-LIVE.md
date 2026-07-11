@@ -1,10 +1,12 @@
 # Norva — GO-LIVE : runbook de bascule (jour J)
 
-> 🟢 **ÉTAT AU 2026-07-11** : la stack PG17 self-host est **UP + validée**, et la **migration
-> data est faite et vérifiée à 100 %** (dry-run managé→self-host, 71 tables en parité). Il reste
-> la *phase cutover fonctionnel* (secrets fonctions + Caddy/TLS + repoint app). Détail complet +
-> commandes de reprise → [`CUTOVER-LOG-2026-07-11.md`](./CUTOVER-LOG-2026-07-11.md). Le managé
-> reste intact (rollback dispo).
+> 🏁 **BASCULE DB EFFECTUÉE le 2026-07-11** : l'app tourne sur le self-host Hetzner
+> (`api.norva.tv` → Caddy/TLS → Kong → stack PG17), data/auth/crons migrés et **validés en
+> prod** (login, catalogue, grilles ; crons 47 actifs self-host / 0 managé, runs `succeeded`).
+> Le managé reste **dormant** (rollback). Journal complet, incident Kong/publishable-key,
+> état final et reste-à-faire (backups self-host ! monitoring, storage, FCM) →
+> [`CUTOVER-LOG-2026-07-11.md`](./CUTOVER-LOG-2026-07-11.md). L'étage MÉDIA (GEX44), lui,
+> n'est PAS encore migré — la section « Jour J média » ci-dessous reste d'actualité.
 
 > **But** : le jour du push, la migration est *exécuter-des-étapes-dans-l'ordre*, pas réfléchir.
 > Tout le reste (scripts, images, docs) est déjà prêt. Ce fichier = la séquence.

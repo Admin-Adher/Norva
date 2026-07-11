@@ -42,36 +42,22 @@ select vault.create_secret(:'NORVA_CRON_SHARED_SECRET', 'norva_cron_shared_secre
 select vault.create_secret(:'RESEND_API_KEY',           'resend_api_key',           'Resend transactional email API key');
 
 -- ---------------------------------------------------------------------------
--- 4. Recreate the 47 pg_cron jobs, rewriting the managed functions URL
---    to the self-host endpoint.
---    Source: dump/ref-cron-jobs.tsv produced by 01-dump-prod.sh
---    (jobid \t schedule \t jobname \t command).
+-- 4. Recreate the pg_cron jobs, rewriting the managed functions URL to the
+--    self-host endpoint. NOT done here: cron commands are MULTI-LINE, so the
+--    old `\copy from ref-cron-jobs.tsv` import was corrupt (286 lines for 49
+--    jobs at the 2026-07-11 cutover). Use dump/ref-cron-jobs.sql from
+--    01-dump-prod.sh instead — replayable `cron.schedule(%L,…)` statements:
+--
+--      sed 's#https://oupsceccxsonaalhueff.supabase.co/functions/v1#https://api.norva.tv/functions/v1#g' \
+--        dump/ref-cron-jobs.sql | psql "$TARGET" -v ON_ERROR_STOP=0 -f -
+--
+--    (Or regenerate live from the managed DB — see CUTOVER-LOG-2026-07-11.md §9.)
+--    Jobs come back ACTIVE; stage them if the flip isn't now:
+--      update cron.job set active = false;
+--    At the flip, mirror prod's inactive set:
+--      update cron.job set active =
+--        (jobname not in ('norva-audio-airo-ninja','norva-audio-airo-ninja-series'));
 -- ---------------------------------------------------------------------------
-set norva.functions_base_url = :'FUNCTIONS_BASE_URL';
-
-create temp table _cron_import(jobid bigint, schedule text, jobname text, command text);
-\copy _cron_import from 'dump/ref-cron-jobs.tsv' with (format text, delimiter E'\t')
-
-do $$
-declare
-  r record;
-  new_cmd text;
-  base text := current_setting('norva.functions_base_url');
-  n int := 0;
-begin
-  for r in select * from _cron_import where jobname is not null and jobname <> '' loop
-    -- Rewrite the managed project's functions host to the self-host base URL.
-    new_cmd := replace(
-      r.command,
-      'https://oupsceccxsonaalhueff.supabase.co/functions/v1',
-      base
-    );
-    -- cron.schedule(name, schedule, command) upserts by name.
-    perform cron.schedule(r.jobname, r.schedule, new_cmd);
-    n := n + 1;
-  end loop;
-  raise notice 'Recreated % cron jobs (rewrote functions URL -> %)', n, base;
-end $$;
 
 -- ---------------------------------------------------------------------------
 -- 5. Sanity: expected 47 jobs (46 active) as of 2026-07-07.

@@ -67,13 +67,19 @@ pg_dump --dbname="$MANAGED_DB_URL" --data-only --no-owner --no-privileges \
   --schema='public' --disable-triggers \
   --file="$OUT/02-data.sql"
 
-# 4) Reference exports (NOT rej: for review only) — current cron jobs + extensions.
-#    We recreate crons via cron.schedule (03-...sql); this is the source list to
-#    transcribe URLs from.
-echo "   [ref] exporting current cron.job + extension list for transcription"
-psql "$MANAGED_DB_URL" -At -F $'\t' \
-  -c "select jobid, schedule, jobname, command from cron.job order by jobid" \
-  > "$OUT/ref-cron-jobs.tsv" || echo "   (warn: could not read cron.job — export manually)"
+# 4) Reference exports — current cron jobs + extensions.
+#    ref-cron-jobs.sql is REPLAYABLE: `format('%L')` quoting survives multi-line
+#    commands (the naive -At TSV export does NOT — cron commands span lines, which
+#    produced a corrupt 286-line file for 49 jobs during the 2026-07-11 cutover).
+#    Rewrite the functions host before replaying, e.g.:
+#      sed 's#https://<ref>.supabase.co/functions/v1#https://api.norva.tv/functions/v1#g'
+#    then pipe into psql on the target. Jobs are created ACTIVE by cron.schedule —
+#    stage them with `update cron.job set active=false;` if the flip isn't now.
+echo "   [ref] exporting cron jobs (replayable SQL) + extension list"
+psql "$MANAGED_DB_URL" -At \
+  -c "select format('select cron.schedule(%L,%L,%L);', jobname, schedule, command)
+      from cron.job where jobname is not null and jobname<>'' order by jobid" \
+  > "$OUT/ref-cron-jobs.sql" || echo "   (warn: could not read cron.job — export manually)"
 psql "$MANAGED_DB_URL" -At \
   -c "select extname||' '||extversion from pg_extension order by extname" \
   > "$OUT/ref-extensions.txt" || true
