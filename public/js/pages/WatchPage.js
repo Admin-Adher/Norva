@@ -1929,46 +1929,30 @@ class WatchPage {
         this.hideSeekThumb();
     }
 
+    // At playback start: DISPLAY an existing sprite only — never generate. Generating
+    // here opens a SECOND provider connection and, on a single-slot provider (most
+    // IPTV panels), starves the very playback that triggered it → RANGE_UNSUPPORTED /
+    // stuck spinner. Generation is deferred to stop() (enqueueStoryboardForCache),
+    // when the viewer releases the slot. First watch = no thumbs; they populate for
+    // the next watch (and, via the provider-shared cache, for everyone on that panel).
     async loadStoryboard() {
         if (this.contentType !== 'movie' && this.contentType !== 'series') return;
         if (this._storyboardFetched || !this.content?.sourceId || !this.content?.id) return;
         this._storyboardFetched = true;
         try {
             // The edge keys storyboards off the CLOUD source UUID, but content.sourceId is the
-            // browser-local alias (e.g. "900001"). Resolve it like the AI-subtitle path does
-            // (see _requestAiSubtitlesInner) — with the raw alias the edge can't find the
-            // source and answers status:none forever, so no thumbnails ever generate.
+            // browser-local alias (e.g. "900001"). Resolve it like the AI-subtitle path does.
             let sourceId = this.content.sourceId;
             try {
                 const cloudId = await window.API?.resolveCloudSourceId?.(sourceId);
                 if (cloudId) sourceId = String(cloudId);
             } catch (_) { /* fall back to the raw id */ }
-            // The sprite's TIME AXIS is built from this duration: with 0 the gateway
-            // assumes a 2h grid, so any film longer than 2h clamps every hover past
-            // the 2h mark onto the last tile (same image for the whole tail). At
-            // playback start the duration is often not yet known (durationHint null,
-            // metadata still loading) — wait briefly for a real one before enqueueing.
-            const contentKey = `${this.content.sourceId}:${this.content.id}`;
-            const liveDuration = () => {
-                const d = this.getDisplayDuration?.() || this.video?.duration || this.durationHint || 0;
-                return Number.isFinite(d) && d > 0 ? Math.round(d) : 0;
-            };
-            let duration = liveDuration();
-            for (let i = 0; !duration && i < 40; i++) {           // up to ~20s
-                await new Promise((r) => setTimeout(r, 500));
-                if (!this._storyboardFetched || `${this.content?.sourceId}:${this.content?.id}` !== contentKey) return;
-                duration = liveDuration();
-            }
             const params = {
                 sourceId,
                 externalId: this.content.id,
                 itemType: this.content.type === 'series' ? 'series' : 'movie',
-                enqueue: 1,
-                duration
+                enqueue: 0, // READ-ONLY — see method comment
             };
-            // For series the id above is the EPISODE being watched; its real container
-            // keeps the server-built episode URL honest (panels 404 a wrong extension).
-            if (this.content.containerExtension) params.container = this.content.containerExtension;
             const res = await window.NorvaCloud?.playback?.storyboard?.(params);
             if (res?.status === 'ready' && res.spriteUrl && Number(res.intervalSec) > 0) {
                 const img = new Image();
@@ -1979,6 +1963,34 @@ class WatchPage {
                 img.src = res.spriteUrl;
             }
         } catch (_) { /* thumbnails are progressive enhancement */ }
+    }
+
+    // Warm the storyboard cache as the viewer LEAVES: the provider slot is being
+    // released here, so the gateway's ffmpeg pass no longer competes with live
+    // playback. Fire-and-forget, once per content per session, and only with a real
+    // duration (it drives the sprite's time axis — a wrong one clamps hover previews).
+    enqueueStoryboardForCache() {
+        try {
+            const c = this.content;
+            if (!c || !c.sourceId || c.id == null) return;
+            const itemType = (c.type === 'series' || this.contentType === 'series') ? 'series'
+                : ((c.type === 'movie' || this.contentType === 'movie') ? 'movie' : '');
+            if (!itemType) return;
+            const key = `${c.sourceId}:${c.id}`;
+            if (this._storyboardEnqueuedKey === key) return;
+            const d = this.getDisplayDuration?.() || this.video?.duration || this.durationHint || 0;
+            const duration = Number.isFinite(d) && d > 0 ? Math.round(d) : 0;
+            if (!duration) return; // no reliable duration → skip rather than build a wrong axis
+            this._storyboardEnqueuedKey = key;
+            const container = c.containerExtension;
+            Promise.resolve(window.API?.resolveCloudSourceId?.(c.sourceId)).then((cloudId) => {
+                const params = { sourceId: String(cloudId || c.sourceId), externalId: c.id, itemType, enqueue: 1, duration };
+                // For series the id is the EPISODE; its real container keeps the
+                // server-built episode URL honest (panels 404 a wrong extension).
+                if (container) params.container = container;
+                return window.NorvaCloud?.playback?.storyboard?.(params);
+            }).catch(() => { /* best-effort cache warming */ });
+        } catch (_) { /* never break teardown over a cache warm */ }
     }
 
     ensureSeekThumb() {
@@ -3941,6 +3953,9 @@ class WatchPage {
     }
 
     stop() {
+        // Warm the storyboard cache now, BEFORE teardown clears content/duration — the
+        // viewer is releasing the provider slot, so generation won't fight playback.
+        this.enqueueStoryboardForCache();
         this.destroyEngine();
         this._gatewaySeekRequestId += 1;
         clearTimeout(this._seekDebounceTimer);
