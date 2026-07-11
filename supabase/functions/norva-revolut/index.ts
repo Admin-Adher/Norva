@@ -94,35 +94,31 @@ function orderCustomerId(order: JsonRecord): string | null {
 // Retrieve the card the customer just saved (for merchant-initiated renewals) — the
 // order carries the customer, the saved token lives on the customer. Best-effort:
 // display + renewal enrichment, never blocks starting the trial.
+// Confirmed sandbox shape: GET → [{ id, type:"CARD", saved_for:"MERCHANT",
+// method_details:{ last4, brand, expiry_month, expiry_year, ... } }]. SINGLE quick
+// call — no retry: Revolut attaches the method a moment AFTER the order authorizes,
+// so /confirm often misses it; /profile captures it lazily once it's there (off the
+// user's critical path, so the edge wall-clock limit is never a factor).
 async function savedCard(customerId: string): Promise<{ id?: string; last4?: string; brand?: string; exp?: string } | null> {
   if (!customerId) return null;
-  // Confirmed sandbox shape: GET → [{ id, type:"CARD", saved_for:"MERCHANT",
-  // method_details:{ last4, brand, expiry_month, expiry_year, ... } }]. Revolut
-  // attaches the method just AFTER authorization, so retry briefly for the lag.
-  for (let attempt = 0; attempt < 4; attempt++) {
-    const res = await revolut("GET", `/api/1.0/customers/${encodeURIComponent(customerId)}/payment-methods`);
-    if (res.ok) {
-      const list = Array.isArray(res.body)
-        ? res.body as JsonRecord[]
-        : (Array.isArray(res.body.payment_methods) ? res.body.payment_methods as JsonRecord[] : []);
-      const cards = list.filter((m) => String(m.type ?? m.method_type ?? "").toUpperCase() === "CARD");
-      // Prefer a MERCHANT-saved card (reusable for MIT); newest wins.
-      const card = cards.reverse().find((m) => String(m.saved_for ?? "").toUpperCase() === "MERCHANT") ?? cards[0];
-      if (card) {
-        const md = (card.method_details && typeof card.method_details === "object") ? card.method_details as JsonRecord : card;
-        const em = md.expiry_month ?? md.exp_month;
-        const ey = md.expiry_year ?? md.exp_year;
-        return {
-          id: card.id ? String(card.id) : undefined,
-          last4: md.last4 ? String(md.last4) : undefined,
-          brand: md.brand ? String(md.brand).toUpperCase() : undefined,
-          exp: (em && ey) ? `${String(em).padStart(2, "0")}/${String(ey).slice(-2)}` : undefined,
-        };
-      }
-    }
-    if (attempt < 3) await new Promise((r) => setTimeout(r, 700));
-  }
-  return null;
+  const res = await revolut("GET", `/api/1.0/customers/${encodeURIComponent(customerId)}/payment-methods`);
+  if (!res.ok) return null;
+  const list = Array.isArray(res.body)
+    ? res.body as JsonRecord[]
+    : (Array.isArray(res.body.payment_methods) ? res.body.payment_methods as JsonRecord[] : []);
+  const cards = list.filter((m) => String(m.type ?? m.method_type ?? "").toUpperCase() === "CARD");
+  // Prefer a MERCHANT-saved card (reusable for MIT); newest wins.
+  const card = cards.reverse().find((m) => String(m.saved_for ?? "").toUpperCase() === "MERCHANT") ?? cards[0];
+  if (!card) return null;
+  const md = (card.method_details && typeof card.method_details === "object") ? card.method_details as JsonRecord : card;
+  const em = md.expiry_month ?? md.exp_month;
+  const ey = md.expiry_year ?? md.exp_year;
+  return {
+    id: card.id ? String(card.id) : undefined,
+    last4: md.last4 ? String(md.last4) : undefined,
+    brand: md.brand ? String(md.brand).toUpperCase() : undefined,
+    exp: (em && ey) ? `${String(em).padStart(2, "0")}/${String(ey).slice(-2)}` : undefined,
+  };
 }
 
 // Create-or-reuse the Revolut customer for a user. REQUIRED for saving a card:
@@ -386,9 +382,27 @@ Deno.serve(async (req) => {
     const user = u?.user;
     if (!user?.id) return json({ error: "Not signed in" }, 401);
     const { data: row } = await db.from("cloud_revolut_customers")
-      .select("plan,period,amount_cents,card_last4,card_brand,card_exp,save_offer_used_at,discount_next_pct")
+      .select("revolut_customer_id,payment_method_id,plan,period,amount_cents,card_last4,card_brand,card_exp,save_offer_used_at,discount_next_pct")
       .eq("user_id", user.id).maybeSingle();
-    return json({ ok: true, profile: row ?? null });
+    let profile = row as JsonRecord | null;
+    // Lazy card capture: /confirm may have run before Revolut attached the saved
+    // method; by the time the user views their billing, it's there. Fetch + persist
+    // it once (off the checkout critical path). Best-effort.
+    if (profile && profile.revolut_customer_id && !profile.payment_method_id) {
+      const card = await savedCard(String(profile.revolut_customer_id));
+      if (card?.id) {
+        const patch = {
+          payment_method_id: card.id, card_last4: card.last4 ?? null,
+          card_brand: card.brand ?? null, card_exp: card.exp ?? null,
+          updated_at: new Date().toISOString(),
+        };
+        await db.from("cloud_revolut_customers").update(patch).eq("user_id", user.id);
+        profile = { ...profile, ...patch };
+      }
+    }
+    // Don't leak internal ids to the client.
+    if (profile) { delete profile.revolut_customer_id; delete profile.payment_method_id; }
+    return json({ ok: true, profile });
   }
 
   // ── /cancel — user-authed: stop auto-renewal; access runs to the period end ──
