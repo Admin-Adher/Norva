@@ -2472,16 +2472,40 @@ async function resolveSubtitleTarget(
 }
 
 // Resolve a variant's current playback URL (series episode vs movie target). null if unreachable.
+// For series, `externalId` is historically AMBIGUOUS: service callers (title variants, the
+// whitelist cron) carry the SERIES id, while the player carries the EPISODE id it is watching.
+// Only series ids exist as catalog items — episodes never do — so the catalog row decides:
+// series id → fiche path (first episode, unchanged for crons); no row → treat it as an episode
+// and build its URL directly (resolvePlaybackTarget's series fallback), so per-episode artifacts
+// (storyboards, player-triggered transcriptions) read the frames actually on screen.
 async function resolveVariantUrl(
   db: SupabaseClient,
   userId: string,
   sourceId: string,
   externalId: string,
   itemType: string,
+  opts: { container?: string } = {},
 ): Promise<string | null> {
-  return itemType === "series"
-    ? await resolveSeriesEpisodeUrl(sourceId, externalId, userId, db).catch(() => null)
-    : ((await resolvePlaybackTarget(sourceId, itemType, externalId, userId, db).catch(() => null))?.targetUrl ?? null);
+  const hint = opts.container ? { container: opts.container } : {};
+  if (itemType !== "series") {
+    return ((await resolvePlaybackTarget(sourceId, itemType, externalId, userId, db, hint).catch(() => null))?.targetUrl ?? null);
+  }
+  let isSeriesId = false;
+  if (mediaReadFromCatalog()) {
+    const host = await resolveSourceHost(sourceId, userId, db).catch(() => "");
+    if (host) {
+      const { data } = await db.from("catalog_media_items").select("external_id")
+        .eq("server_host", host).eq("item_type", "series").eq("external_id", externalId).maybeSingle();
+      isSeriesId = Boolean(data);
+    }
+  }
+  if (!isSeriesId) {
+    const { data } = await db.from("cloud_media_items").select("external_id")
+      .eq("source_id", sourceId).eq("user_id", userId).eq("item_type", "series").eq("external_id", externalId).maybeSingle();
+    isSeriesId = Boolean(data);
+  }
+  if (isSeriesId) return await resolveSeriesEpisodeUrl(sourceId, externalId, userId, db).catch(() => null);
+  return ((await resolvePlaybackTarget(sourceId, "series", externalId, userId, db, hint).catch(() => null))?.targetUrl ?? null);
 }
 
 // Phase 3 (3a) ASYNC enqueue: kick off a background full-film transcription on the gateway and
@@ -2826,7 +2850,10 @@ async function getStoryboard(req: Request, userId: string, db: SupabaseClient): 
 
   const runtimeConfig = await getRuntimeConfig(db);
   if (!runtimeConfig.mediaGatewayUrl || !runtimeConfig.mediaGatewayToken) return { status: "none", why: "gateway-not-configured" };
-  const tUrl = await resolveVariantUrl(db, userId, sourceId, externalId, itemType);
+  // Container of the episode being watched (player-provided) — keeps the direct
+  // episode URL honest for non-mp4 files on panels that 404 a wrong extension.
+  const container = stringOr(url.searchParams.get("container"), "").toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 8);
+  const tUrl = await resolveVariantUrl(db, userId, sourceId, externalId, itemType, container ? { container } : {});
   if (!tUrl) return { status: "none", why: "no-playback-target" };
 
   const jobId = crypto.randomUUID();

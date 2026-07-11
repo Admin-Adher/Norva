@@ -1943,13 +1943,17 @@ class WatchPage {
                 const cloudId = await window.API?.resolveCloudSourceId?.(sourceId);
                 if (cloudId) sourceId = String(cloudId);
             } catch (_) { /* fall back to the raw id */ }
-            const res = await window.NorvaCloud?.playback?.storyboard?.({
+            const params = {
                 sourceId,
                 externalId: this.content.id,
                 itemType: this.content.type === 'series' ? 'series' : 'movie',
                 enqueue: 1,
                 duration: Math.round(this.durationHint || 0)
-            });
+            };
+            // For series the id above is the EPISODE being watched; its real container
+            // keeps the server-built episode URL honest (panels 404 a wrong extension).
+            if (this.content.containerExtension) params.container = this.content.containerExtension;
+            const res = await window.NorvaCloud?.playback?.storyboard?.(params);
             if (res?.status === 'ready' && res.spriteUrl && Number(res.intervalSec) > 0) {
                 const img = new Image();
                 img.onload = () => {
