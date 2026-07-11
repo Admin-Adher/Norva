@@ -253,13 +253,18 @@ un simple changement de filtre (re-fetch) a tout rétabli ; aucun item n'était 
 - ⚠️ Découverte : `dump/ref-cron-jobs.tsv` (export `-At`) est **inexploitable** (commandes
   multi-lignes → 286 lignes pour 49 jobs). `01-dump-prod.sh` corrigé pour exporter aussi
   `ref-cron-jobs.sql` (statements `cron.schedule` quotés `%L`, rejouables).
+- **Backups self-host → R2 opérationnels + PITR prouvé** (11/07) : 3 timers systemd armés
+  (dump logique nightly, WAL toutes les 5 min, base backup hebdo), premiers backups sur R2
+  (dump 637 M, base 987 M). **Drill de restauration RÉUSSI** : base backup R2 → conteneur
+  jetable → `consistent recovery state reached`, `cloud_media_items=906087`, `auth_users=6`
+  (= parité prod). Doc : `backup/BACKUPS.md`, `backup/RESTORE.md`.
 
 ### Reste à faire (post-bascule, aucun bloquant)
 1. **Valider la lecture** (film + live) si pas déjà fait — dernier maillon
    (`norva-playback` → gateway Railway → relay), config lue depuis la DB migrée.
 2. **Sécurité** : régénérer la clé FCM (voir TODO en tête) ; changer le mot de passe exposé.
-3. **Backups du self-host** : pgBackRest/WAL-G → R2 + PITR testé (le backup R2 existant
-   visait le managé). C'est LA priorité ops maintenant que la box est la prod.
+3. ✅ **Backups du self-host** — FAIT et validé (voir « Fait et validé » ci-dessus).
+   Prochaine action récurrente : refaire le drill `RESTORE.md` chaque trimestre.
 4. **Monitoring** : Netdata/Prometheus (disque, RAM, connexions, réplication future).
 5. **Storage** : re-synchroniser/régénérer les fichiers storyboards + sous-titres (metadonnées
    migrées, objets non copiés — régénérables).
