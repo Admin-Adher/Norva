@@ -132,7 +132,7 @@ async function chargeSavedCard(
 
 interface Row { user_id: string; plan_code: string | null; trial_ends_at: string | null; current_period_end: string | null }
 
-async function chargeUser(db: SupabaseClient, row: Row, kind: "first_charge" | "renewal", cycleAnchor: string | null): Promise<string> {
+async function chargeUser(db: SupabaseClient, row: Row, kind: "first_charge" | "renewal", cycleAnchor: string | null, errors: unknown[]): Promise<string> {
   const { data: cust } = await db.from("cloud_revolut_customers")
     .select("revolut_customer_id,payment_method_id,plan,period,amount_cents,discount_next_pct").eq("user_id", row.user_id).maybeSingle();
   const c = cust as {
@@ -160,7 +160,10 @@ async function chargeUser(db: SupabaseClient, row: Row, kind: "first_charge" | "
   const chargeAmount = discountPct ? Math.max(50, Math.round(amount * (100 - discountPct) / 100)) : amount;
   const desc = `${planLabel} ${period} — ${kind}${discountPct ? ` (${discountPct}% off)` : ""}`;
 
-  const { outcome, orderId, paymentId } = await chargeSavedCard(customerId, pmId, chargeAmount, extRef, desc);
+  const { outcome, orderId, paymentId, detail } = await chargeSavedCard(customerId, pmId, chargeAmount, extRef, desc);
+  if (outcome === "failed" && detail && errors.length < 5) {
+    errors.push({ user_id: row.user_id, detail: JSON.stringify(detail).slice(0, 400) });
+  }
 
   if (outcome === "captured") {
     const base = kind === "first_charge" ? row.trial_ends_at : row.current_period_end;
@@ -195,16 +198,17 @@ function addHours(fromIso: string, hours: number): string {
   return new Date(new Date(fromIso).getTime() + hours * 3600_000).toISOString();
 }
 
-async function run(db: SupabaseClient): Promise<Record<string, number>> {
+async function run(db: SupabaseClient): Promise<Record<string, unknown>> {
   const nowIso = new Date().toISOString();
   const out = { trial_charged: 0, renew_charged: 0, failed: 0, no_card: 0, ended: 0 };
+  const errors: unknown[] = [];
 
   // 1) Trials whose free days are up → first charge.
   const { data: trials } = await db.from("cloud_entitlement_projection")
     .select("user_id,plan_code,trial_ends_at,current_period_end")
     .eq("provider", "revolut").eq("status", "trialing").lte("trial_ends_at", nowIso).limit(BATCH);
   for (const row of (trials ?? []) as Row[]) {
-    const r = await chargeUser(db, row, "first_charge", row.trial_ends_at);
+    const r = await chargeUser(db, row, "first_charge", row.trial_ends_at, errors);
     if (r === "charged") out.trial_charged++; else if (r === "no_card") out.no_card++; else if (r === "failed") out.failed++;
   }
 
@@ -213,7 +217,7 @@ async function run(db: SupabaseClient): Promise<Record<string, number>> {
     .select("user_id,plan_code,trial_ends_at,current_period_end")
     .eq("provider", "revolut").eq("status", "active").lte("current_period_end", nowIso).limit(BATCH);
   for (const row of (renewals ?? []) as Row[]) {
-    const r = await chargeUser(db, row, "renewal", row.current_period_end);
+    const r = await chargeUser(db, row, "renewal", row.current_period_end, errors);
     if (r === "charged") out.renew_charged++; else if (r === "no_card") out.no_card++; else if (r === "failed") out.failed++;
   }
 
@@ -226,7 +230,7 @@ async function run(db: SupabaseClient): Promise<Record<string, number>> {
     out.ended++;
   }
 
-  return out;
+  return errors.length ? { ...out, errors } : out;
 }
 
 Deno.serve(async (req) => {
