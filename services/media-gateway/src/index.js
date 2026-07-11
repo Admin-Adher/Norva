@@ -157,6 +157,19 @@ function redactCreds(s) {
 const PORT = Number.parseInt(process.env.PORT || '8080', 10);
 const GATEWAY_TOKEN = process.env.GATEWAY_TOKEN || process.env.NORVA_MEDIA_GATEWAY_TOKEN || '';
 const PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL || '').replace(/\/+$/, '');
+// Backend origins the async jobs may call back / upload to. Historically only the
+// managed *.supabase.co project was accepted; the self-host cutover moved the API
+// to its own origin, so the allowlist is env-extensible (comma-separated) with
+// api.norva.tv as the default and supabase.co kept for the rollback window. The
+// check is what stops a forged enqueue from pointing callbacks at an attacker host.
+const BACKEND_ORIGINS = String(process.env.NORVA_BACKEND_ORIGINS || 'https://api.norva.tv')
+    .split(',').map((s) => s.trim().replace(/\/+$/, '')).filter(Boolean);
+function isBackendUrl(url, pathPrefix = '/') {
+    const s = String(url || '');
+    const managed = s.match(/^https:\/\/[^/]+\.supabase\.co(\/.*)$/);
+    if (managed) return managed[1].startsWith(pathPrefix);
+    return BACKEND_ORIGINS.some((origin) => s.startsWith(origin + pathPrefix));
+}
 const OUTPUT_DIR = path.resolve(process.env.OUTPUT_DIR || path.join(os.tmpdir(), 'norva-media-gateway'));
 const FFMPEG_PATH = process.env.FFMPEG_PATH || 'ffmpeg';
 const FFPROBE_PATH = process.env.FFPROBE_PATH || 'ffprobe';
@@ -926,8 +939,9 @@ app.get('/transcribe/:token', async (req, res) => {
 });
 
 // Phase 3 async transcription: accept a job (202) and run it in the background, then POST the VTT
-// to the edge callback. Params in the query (no body parser needed). callback must be a supabase.co
-// URL (the byte-pipe token already gates the caller to whoever holds the gateway token = the edge).
+// to the edge callback. Params in the query (no body parser needed). callback must target one of
+// our backend origins — isBackendUrl — (the byte-pipe token already gates the caller to whoever
+// holds the gateway token = the edge).
 app.post('/transcribe-async/:token', (req, res) => {
     const claims = verifyRawToken(req.params.token, GATEWAY_TOKEN);
     if (!claims) return res.status(401).json({ error: 'Invalid byte-pipe token' });
@@ -937,8 +951,8 @@ app.post('/transcribe-async/:token', (req, res) => {
     if (!Number.isInteger(index) || index < 0) return res.status(400).json({ error: 'Invalid audio index' });
     const jobId = String(req.query.jobId || '');
     const callbackUrl = String(req.query.callback || '');
-    if (!jobId || !/^https:\/\/[^/]+\.supabase\.co\//.test(callbackUrl)) {
-        return res.status(400).json({ error: 'jobId and a valid supabase callback are required' });
+    if (!jobId || !isBackendUrl(callbackUrl)) {
+        return res.status(400).json({ error: 'jobId and a valid backend callback are required' });
     }
     const start = Math.max(0, Number.parseFloat(req.query.start) || 0);
     const dur = Math.max(0, Number.parseFloat(req.query.dur) || 0); // 0 = whole track (production); >0 = clip (test)
@@ -966,8 +980,8 @@ app.post('/ocr-async/:token', (req, res) => {
     if (!Number.isInteger(index) || index < 0) return res.status(400).json({ error: 'Invalid subtitle index' });
     const jobId = String(req.query.jobId || '');
     const callbackUrl = String(req.query.callback || '');
-    if (!jobId || !/^https:\/\/[^/]+\.supabase\.co\//.test(callbackUrl)) {
-        return res.status(400).json({ error: 'jobId and a valid supabase callback are required' });
+    if (!jobId || !isBackendUrl(callbackUrl)) {
+        return res.status(400).json({ error: 'jobId and a valid backend callback are required' });
     }
     const lang = /^[a-z+]{3,40}$/.test(String(req.query.lang || '')) ? String(req.query.lang) : OCR_LANGS;
     // fmt selects the pipeline: 'pgs' (.sup parser) vs 'vobsub'/'dvb' (ffmpeg sub2video → frames).
@@ -991,12 +1005,12 @@ app.post('/storyboard-async/:token', (req, res) => {
     if (Number(claims.exp) * 1000 < Date.now()) return res.status(401).json({ error: 'Byte-pipe token expired' });
     const jobId = String(req.query.jobId || '');
     const callbackUrl = String(req.query.callback || '');
-    if (!jobId || !/^https:\/\/[^/]+\.supabase\.co\//.test(callbackUrl)) {
-        return res.status(400).json({ error: 'jobId and a valid supabase callback are required' });
+    if (!jobId || !isBackendUrl(callbackUrl)) {
+        return res.status(400).json({ error: 'jobId and a valid backend callback are required' });
     }
     const uploadUrl = String(req.query.uploadUrl || '');
-    if (!/^https:\/\/[^/]+\.supabase\.co\/storage\//.test(uploadUrl)) {
-        return res.status(400).json({ error: 'a supabase storage uploadUrl is required' });
+    if (!isBackendUrl(uploadUrl, '/storage/')) {
+        return res.status(400).json({ error: 'a backend storage uploadUrl is required' });
     }
     const duration = Math.max(0, Number.parseFloat(req.query.duration) || 0);
     const prio = JOB_PRIORITY[String(req.query.origin || '')] ?? 1;
@@ -1021,8 +1035,8 @@ app.post('/translate-async', requireGatewayAuth, (req, res) => {
     const source = String(body.source || '').toLowerCase();
     const target = String(body.target || '').toLowerCase();
     const vtt = String(body.vtt || '');
-    if (!jobId || !/^https:\/\/[^/]+\.supabase\.co\//.test(callbackUrl)) {
-        return res.status(400).json({ error: 'jobId and a valid supabase callback are required' });
+    if (!jobId || !isBackendUrl(callbackUrl)) {
+        return res.status(400).json({ error: 'jobId and a valid backend callback are required' });
     }
     if (!/^[a-z]{2,3}$/.test(source) || !/^[a-z]{2,3}$/.test(target)) return res.status(400).json({ error: 'invalid source/target' });
     if (!vtt.trim()) return res.status(400).json({ error: 'vtt is required' });
@@ -1362,7 +1376,7 @@ const JOB_GATE_MAX_DEFERRALS = clampInt(process.env.JOB_GATE_MAX_DEFERRALS, 240,
 async function shouldDeferJob(job) {
     try {
         const gateUrl = String(job.callbackUrl || '').replace(/\/[^/]*$/, '/pregen-gate');
-        if (!/^https:\/\/[^/]+\.supabase\.co\//.test(gateUrl)) return false;
+        if (!isBackendUrl(gateUrl)) return false;
         const resp = await fetch(gateUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${GATEWAY_TOKEN}` },
