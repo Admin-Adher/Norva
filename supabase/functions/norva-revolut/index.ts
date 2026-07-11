@@ -62,13 +62,14 @@ function extRef(userId: string): string { return `${userId.replace(/-/g, "").sli
 
 type JsonRecord = Record<string, unknown>;
 
-async function revolut(method: "GET" | "POST", path: string, body?: JsonRecord) {
+async function revolut(method: "GET" | "POST", path: string, body?: JsonRecord, extraHeaders?: Record<string, string>) {
   const res = await fetch(`${REVOLUT_API_BASE}${path}`, {
     method,
     headers: {
       Authorization: `Bearer ${REVOLUT_SECRET_KEY}`,
       "Content-Type": "application/json",
       "Accept": "application/json",
+      ...(extraHeaders ?? {}),
     },
     body: body ? JSON.stringify(body) : undefined,
     signal: AbortSignal.timeout(12_000),
@@ -321,9 +322,10 @@ Deno.serve(async (req) => {
     try { await db.from("cloud_revolut_orders").update({ state: order.state }).eq("order_id", orderId); } catch (_) { /* noop */ }
 
     // Void the validation hold now that the card is saved — nothing should stay held.
-    // Best-effort: a lingering MANUAL auth auto-expires anyway.
+    // The cancel endpoint is on the NEW Merchant API (/api/orders/…), like payments;
+    // the legacy /api/1.0 path 404s. Best-effort: a lingering auth auto-expires anyway.
     if (state === "AUTHORISED") {
-      try { await revolut("POST", `/api/1.0/orders/${encodeURIComponent(orderId)}/cancel`); } catch (_) { /* noop */ }
+      try { await revolut("POST", `/api/orders/${encodeURIComponent(orderId)}/cancel`, undefined, { "Revolut-Api-Version": "2024-09-01" }); } catch (_) { /* noop */ }
     }
 
     const { data: curRow } = await db.from("cloud_entitlement_projection")
