@@ -96,23 +96,33 @@ function orderCustomerId(order: JsonRecord): string | null {
 // display + renewal enrichment, never blocks starting the trial.
 async function savedCard(customerId: string): Promise<{ id?: string; last4?: string; brand?: string; exp?: string } | null> {
   if (!customerId) return null;
-  const res = await revolut("GET", `/api/1.0/customers/${encodeURIComponent(customerId)}/payment-methods`);
-  if (!res.ok) return null;
-  const list = Array.isArray(res.body) ? res.body as JsonRecord[] : (Array.isArray(res.body.payment_methods) ? res.body.payment_methods as JsonRecord[] : []);
-  // Newest saved card first.
-  const card = list.reverse().find((m) => String(m.method_type ?? m.type ?? "card").toLowerCase() === "card") ?? list[0];
-  if (!card) return null;
-  const c = card as JsonRecord;
-  const last4 = c.last4 ?? c.card_last_four ?? (c.card as JsonRecord | undefined)?.last4;
-  const brand = c.brand ?? c.card_brand ?? (c.card as JsonRecord | undefined)?.brand;
-  const em = c.expiry_month ?? c.exp_month ?? (c.card as JsonRecord | undefined)?.expiry_month;
-  const ey = c.expiry_year ?? c.exp_year ?? (c.card as JsonRecord | undefined)?.expiry_year;
-  return {
-    id: c.id ? String(c.id) : undefined,
-    last4: last4 ? String(last4) : undefined,
-    brand: brand ? String(brand).toUpperCase() : undefined,
-    exp: (em && ey) ? `${String(em).padStart(2, "0")}/${String(ey).slice(-2)}` : undefined,
-  };
+  // Confirmed sandbox shape: GET → [{ id, type:"CARD", saved_for:"MERCHANT",
+  // method_details:{ last4, brand, expiry_month, expiry_year, ... } }]. Revolut
+  // attaches the method just AFTER authorization, so retry briefly for the lag.
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const res = await revolut("GET", `/api/1.0/customers/${encodeURIComponent(customerId)}/payment-methods`);
+    if (res.ok) {
+      const list = Array.isArray(res.body)
+        ? res.body as JsonRecord[]
+        : (Array.isArray(res.body.payment_methods) ? res.body.payment_methods as JsonRecord[] : []);
+      const cards = list.filter((m) => String(m.type ?? m.method_type ?? "").toUpperCase() === "CARD");
+      // Prefer a MERCHANT-saved card (reusable for MIT); newest wins.
+      const card = cards.reverse().find((m) => String(m.saved_for ?? "").toUpperCase() === "MERCHANT") ?? cards[0];
+      if (card) {
+        const md = (card.method_details && typeof card.method_details === "object") ? card.method_details as JsonRecord : card;
+        const em = md.expiry_month ?? md.exp_month;
+        const ey = md.expiry_year ?? md.exp_year;
+        return {
+          id: card.id ? String(card.id) : undefined,
+          last4: md.last4 ? String(md.last4) : undefined,
+          brand: md.brand ? String(md.brand).toUpperCase() : undefined,
+          exp: (em && ey) ? `${String(em).padStart(2, "0")}/${String(ey).slice(-2)}` : undefined,
+        };
+      }
+    }
+    if (attempt < 3) await new Promise((r) => setTimeout(r, 700));
+  }
+  return null;
 }
 
 // Create-or-reuse the Revolut customer for a user. REQUIRED for saving a card:
