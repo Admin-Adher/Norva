@@ -245,6 +245,34 @@ async function route(
       if (req.method === "GET" && !action) return { body: await listDeviceCommands(url, device, db) };
       if (req.method === "PATCH" && action) return { body: await updateDeviceCommand(req, action, device, db) };
     }
+
+    // Cross-device sync for QR-paired screens (e.g. a TV): favorites, watch history,
+    // and ratings. Same tables + handlers as the user (JWT) scope below, keyed to the
+    // paired account (device.user_id) and the active profile (x-norva-profile-id
+    // header). This is what lets a paired TV read AND write the same favorites,
+    // Continue Watching, and watched state as the phone/web — no separate store.
+    if (id === "favorites") {
+      if (req.method === "GET" && !action) return { body: await listFavorites(req, url, device.user_id, db) };
+      if (req.method === "POST" && !action) return { status: 201, body: await addFavorite(req, device.user_id, db) };
+      if (req.method === "DELETE" && !action && (url.searchParams.get("itemId") || url.searchParams.get("item_id"))) {
+        return { body: await deleteFavoriteByKeys(req, url, device.user_id, db) };
+      }
+      if (req.method === "DELETE" && action) return { body: await deleteOwned("cloud_favorites", action, device.user_id, db) };
+    }
+    if (id === "ratings") {
+      if (req.method === "GET" && !action) return { body: await getRating(req, url, device.user_id, db) };
+      if (req.method === "POST" && !action) return { body: await setRating(req, device.user_id, db) };
+    }
+    if (id === "history") {
+      if (req.method === "GET" && !action) {
+        if (url.searchParams.get("itemId") || url.searchParams.get("item_id")) {
+          return { body: await getHistoryItem(req, url, device.user_id, db) };
+        }
+        return { body: await listHistory(req, url, device.user_id, db) };
+      }
+      if (req.method === "POST" && !action) return { status: 201, body: await saveHistory(req, device.user_id, db) };
+      if (req.method === "DELETE" && action) return { body: await deleteOwned("cloud_watch_history", action, device.user_id, db) };
+    }
   }
 
   const user = await requireUser(req, db);
@@ -448,6 +476,11 @@ async function route(
   if (scope === "favorites") {
     if (req.method === "GET" && !id) return { body: await listFavorites(req, url, user.id, db) };
     if (req.method === "POST" && !id) return { status: 201, body: await addFavorite(req, user.id, db) };
+    // DELETE /favorites?sourceId&itemId&itemType — un-favorite by keys (one round-trip);
+    // DELETE /favorites/:id — legacy delete by row UUID.
+    if (req.method === "DELETE" && !id && (url.searchParams.get("itemId") || url.searchParams.get("item_id"))) {
+      return { body: await deleteFavoriteByKeys(req, url, user.id, db) };
+    }
     if (req.method === "DELETE" && id) return { body: await deleteOwned("cloud_favorites", id, user.id, db) };
   }
 
@@ -2346,6 +2379,28 @@ async function addFavorite(req: Request, userId: string, db: SupabaseClient) {
     .single();
   if (error) throwDb(error, "Unable to save favorite");
   return { favorite: data };
+}
+
+// Delete a favorite by its logical KEYS (source_id, item_type, item_id) for the
+// active profile — so the client can un-favorite in one round-trip instead of
+// listing the whole set to resolve the row UUID first. Idempotent: deleting a
+// row that isn't there still returns success.
+async function deleteFavoriteByKeys(req: Request, url: URL, userId: string, db: SupabaseClient) {
+  const profileId = await resolveProfileId(req, userId, db);
+  const sourceId = stringOr(url.searchParams.get("sourceId") ?? url.searchParams.get("source_id"), "");
+  const itemType = stringOr(url.searchParams.get("itemType") ?? url.searchParams.get("item_type"), "live");
+  const itemId = stringOr(url.searchParams.get("itemId") ?? url.searchParams.get("item_id"), "");
+  if (!sourceId || !itemId) throw new HttpError(400, "sourceId and itemId are required");
+  const { error } = await db
+    .from("cloud_favorites")
+    .delete()
+    .eq("user_id", userId)
+    .eq("profile_id", profileId)
+    .eq("source_id", sourceId)
+    .eq("item_type", itemType)
+    .eq("item_id", itemId);
+  if (error) throwDb(error, "Unable to delete favorite");
+  return { success: true };
 }
 
 async function getRating(req: Request, url: URL, userId: string, db: SupabaseClient) {
