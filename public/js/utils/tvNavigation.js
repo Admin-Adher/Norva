@@ -339,6 +339,27 @@
             }
         }
 
+        // Left rail (TV): opening the menu must always be ONE press away. From
+        // content, ArrowLeft walks left within the row; at the left edge (nothing
+        // more to the left, or the only thing left is the rail itself) it lands on
+        // the rail's CURRENT section. Pure spatial findNext could miss the rail
+        // when a partially-scrolled card still sits to the left — this guarantees it.
+        if (e.key === 'ArrowLeft' && !focused.closest('.navbar')) {
+            const leftNext = findNext(focused, 'ArrowLeft');
+            if (!leftNext || leftNext.closest('.navbar')) {
+                const railTarget = document.querySelector('.navbar .nav-link.active')
+                    || [...document.querySelectorAll('.navbar .nav-link')].find(isVisible);
+                if (railTarget && isVisible(railTarget)) {
+                    focusElement(railTarget);
+                    return;
+                }
+            }
+            if (leftNext) {
+                focusElement(leftNext);
+                return;
+            }
+        }
+
         const next = findNext(focused, e.key);
         if (next) {
             focusElement(next);

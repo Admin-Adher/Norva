@@ -12167,8 +12167,10 @@ mark.search-highlight {
    block above.) */
 .tv-mode .main-content {
   margin-left: 88px;
-  padding-left: 32px;
-  padding-right: 40px;
+  padding-left: 20px;               /* the rail + each rail's own padding give the
+                                       left gutter; keep content padding small so
+                                       the narrow panel isn't over-indented */
+  padding-right: 32px;
   padding-bottom: 27px;
 }
 
@@ -12225,8 +12227,11 @@ mark.search-highlight {
    and bottom) and set scroll-padding so a focused EDGE card scrolls fully into view
    with room to breathe instead of sitting flush against the screen edge. */
 .tv-mode .horizontal-scroll {
-  padding: 16px 6px 22px;
-  scroll-padding-inline: 60px;
+  /* overflow-x:auto also clips the Y axis, so the focus ring (~10px) + scale(1.09)
+     lift (~12px) were cut at the TOP and LEFT of each rail. Pad generously on all
+     sides so a focused edge card's ring is never clipped. */
+  padding: 26px 22px 26px;
+  scroll-padding-inline: 70px;
 }
 
 /* TV replacement for the native <select> spinner (remote-friendly rows). */
