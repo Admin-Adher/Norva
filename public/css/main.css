@@ -11111,6 +11111,44 @@ kbd {
   }
 }
 
+/* ── Android TV: inline filter bar, never the touch bottom-sheet ──────────────
+   TV WebViews render at ~960px CSS, which the ≤1024px media queries above turn
+   into a hidden bottom-sheet reachable only via a "Filters" button the D-pad
+   cannot focus. In tv-mode, undo that and keep the filter bar inline (its
+   controls are then real, focusable elements the remote walks through). Pairs
+   with createMobileCatalogSetup()'s TV early-return, which leaves the controls
+   in their original inline slots. Higher specificity + later source than the
+   media rules, so it wins at any width. */
+html.tv-mode #page-movies #movies-filter-bar,
+html.tv-mode #page-series #series-filter-bar,
+html.tv-mode #page-movies .filter-bar,
+html.tv-mode #page-series .filter-bar {
+  position: static;
+  left: auto;
+  right: auto;
+  bottom: auto;
+  transform: none;
+  visibility: visible;
+  max-height: none;
+  overflow: visible;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+  border: 0;
+  border-bottom: 1px solid var(--color-border);
+  border-radius: 0;
+  background: var(--color-bg-secondary);
+  box-shadow: none;
+}
+html.tv-mode .mobile-filter-button,
+html.tv-mode .mobile-filter-backdrop,
+html.tv-mode .mobile-filter-sheet-header,
+html.tv-mode .mobile-filter-body {
+  display: none !important;
+}
+
 @media (max-width: 480px) {
   .dashboard-content {
     padding: 16px 12px 20px;

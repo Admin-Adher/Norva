@@ -1221,6 +1221,16 @@ class App {
     }
 
     createMobileCatalogSetup(config) {
+        // Android TV navigates with a D-pad, not a finger. The touch bottom-sheet
+        // collapses every filter into a hidden drawer behind a single "Filters"
+        // button — which the remote cannot reach, leaving TV users unable to
+        // filter at all. On TV, keep the INLINE filter bar (every select/toggle is
+        // a real focusable element the D-pad walks through). CSS keeps that bar
+        // laid out inline at TV widths (see the html.tv-mode filter-bar override).
+        const isTv = navigator.userAgent.includes('NorvaTV-AndroidTV')
+            || new URLSearchParams(location.search).has('tv');
+        if (isTv) return null;
+
         const page = document.getElementById(`page-${config.key}`);
         const controls = page?.querySelector(`.${config.key}-controls`);
         const filterBar = document.getElementById(`${config.key}-filter-bar`);
