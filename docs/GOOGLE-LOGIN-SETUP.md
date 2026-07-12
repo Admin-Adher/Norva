@@ -34,6 +34,13 @@ Couvre **web (norva.tv)**, **PWA mobile** et **desktop (Electron)**.
 ## Étape 0 — Config à faire une fois **[console]**
 
 ### Google Cloud Console → APIs & Services → Credentials
+
+> ⚠️ **Projet : `norva-501719`** (n° `973428500788`) — PAS `norva-ecosystem`.
+> Norva a **deux** projets GCP : `norva-501719` = login Google (clients OAuth
+> Web+Android), `norva-ecosystem` = Firebase/RevenueCat. Le n° `973428500788`
+> préfixe les client IDs (`973428500788-…`). Détail complet + tableau :
+> `docs/roadmap/android-go-live-progress.md` § « DEUX projets Google Cloud ».
+
 1. **OAuth client « Web application »** → récupérer `client_id` + `client_secret`.
    - Authorized redirect URI :
      `https://api.norva.tv/auth/v1/callback`

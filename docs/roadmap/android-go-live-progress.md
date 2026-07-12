@@ -44,6 +44,29 @@
 
 ---
 
+## ⚠️ RÉFÉRENCE — DEUX projets Google Cloud (piège récurrent)
+
+Norva utilise **deux** projets Google Cloud **distincts**. C'est **normal / voulu**,
+mais ça piège : ne pas chercher le login Google dans le projet Firebase, ni l'inverse.
+
+| Projet GCP | N° projet | Sert à | Ce qu'on y trouve |
+|---|---|---|---|
+| **`norva-501719`** | `973428500788` | **Connexion Google (OAuth)** | Client OAuth **Web** `973428500788-deum…` + Client OAuth **Android** `973428500788-eut6…` (package `tv.norva.phone`, SHA-1 = signature Play). Écran de consentement OAuth. |
+| **`norva-ecosystem`** | *(≠ 973428500788)* | **Firebase/FCM + RevenueCat + RTDN** | Firebase (push, `google-services.json`), clés API Firebase, **Service Account RevenueCat** `revenuecat-play@norva-ecosystem.iam.gserviceaccount.com`, **topic Pub/Sub RTDN** (`norva-rtdn`). |
+
+**Règles à retenir :**
+- Le **n° de projet = préfixe des client IDs OAuth** → `973428500788-…` ⇒ projet
+  **norva-501719** (login). Si un client OAuth n'apparaît pas dans un projet,
+  c'est qu'il est dans l'**autre**.
+- **Login Google** (Web + Android OAuth) → **norva-501719** UNIQUEMENT. Web + Android
+  doivent être dans **le même** projet (sinon Google n'émet pas le token).
+- **RevenueCat / Play / Firebase / RTDN** → **norva-ecosystem**. Le Service Account,
+  l'API Play Android Developer, le topic Pub/Sub y vivent.
+- Les deux projets sont **indépendants** : le login et les paiements n'ont PAS besoin
+  d'être dans le même projet.
+
+---
+
 ## Les 9 points — tableau d'avancement (2026-07-12)
 
 | # | Point | État |
