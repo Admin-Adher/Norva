@@ -94,11 +94,31 @@ Objectif : arriver au jour J avec **zéro inconnue**. Rien ici n'impacte la prod
 
 ---
 
+## Durcissement ops — disque / WAL / backups (audité 2026-07-12)
+
+État post-cutover audité + corrigé. Détail : [`docs/roadmap/2026-07-12-session-log.md`](../../docs/roadmap/2026-07-12-session-log.md) §5. Diagnostic reproductible en un run : `sudo ops/hetzner/scripts/06-check-disk.sh`.
+
+**Déjà fait ✅** (le 89 GB de WAL local et les 98 GB sur R2 étaient un pic d'import ponctuel mal purgé, pas une fuite ; DB réelle = 4,4 GB)
+- [x] WAL local purgé (89 GB → 65 Mo, `pg_archivecleanup`) ; **`KEEP_LOCAL_WAL_DAYS=1`** (local = simple cache, R2 garde le PITR).
+- [x] **`wal_compression=on`** (pglz) via `supabase_admin` — persiste dans `postgresql.auto.conf`.
+- [x] **Storage R2 : 98 GB → 6 GB** (purge du WAL de test ; base-backups `-X fetch` = standalone, gardés).
+- [x] **Rotation logs Docker** (`/etc/docker/daemon.json` `max-size:50m/max-file:3`) + `up -d --force-recreate` ; ~3 GB d'images inutiles purgées ; `VACUUM (ANALYZE)` sur les tables live.
+
+**Au lancement public 🚦**
+- [ ] **`KEEP_WAL_DAYS=35`** (déjà remis) + une **base-backup fraîche** post-launch (`sudo backup/basebackup-weekly.sh`).
+- [ ] Vérifier `norva-wal-sync.service` en `exit 0` (archive locale purgée → plus de « falling behind »).
+- [ ] Mesurer le **débit WAL au repos** (`06-check-disk.sh`) — doit rester bas hors rafales de crons ; sinon traquer le cron.
+- [ ] **1 restore PITR de test** depuis R2 (`backup/RESTORE.md`) — la seule vraie preuve que les backups sauvent.
+- [ ] (optionnel) régler les `501 NotImplemented` R2 dans `backup/lib.sh` ; envisager `wal_compression=zstd` ; monter `checkpoint_timeout` (15-30 min) si l'enrichissement pèse.
+
+---
+
 ## Récap : où est quoi
 
 | Besoin | Fichier |
 |---|---|
 | Scripts DB (dump/restore/cron/parity) | `ops/hetzner/scripts/` |
+| Santé disque / WAL + backups | `ops/hetzner/scripts/06-check-disk.sh`, `docs/roadmap/2026-07-12-session-log.md` §5 |
 | Stack DB + tuning + pooler | `ops/hetzner/docker-compose.supabase.yml`, `ops/hetzner/postgres/` |
 | Image + compose média NVENC | `ops/hetzner/media/Dockerfile.gex44`, `media/docker-compose.media.yml` |
 | Fan-out CDN | `ops/hetzner/media/cloudflare-cdn.md` |
