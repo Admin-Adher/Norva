@@ -247,7 +247,8 @@
             || 'Choose an option';
         const rows = [...select.options].map((opt, i) =>
             `<button type="button" class="tv-select-option${opt.selected ? ' selected' : ''}" data-index="${i}">
-                ${opt.selected ? '✓ ' : ''}${opt.textContent}
+                <span class="tv-select-option-label">${opt.textContent}</span>
+                ${opt.selected ? '<span class="tv-select-check" aria-hidden="true">✓</span>' : ''}
             </button>`).join('');
         ov.innerHTML = `
             <div class="tv-select-panel" role="listbox" aria-label="${label.replace(/"/g, '&quot;')}">

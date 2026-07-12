@@ -12624,59 +12624,123 @@ html.tv-mode #page-live .search-clear {
   scroll-padding-inline: 70px;
 }
 
-/* TV replacement for the native <select> spinner (remote-friendly rows). */
+/* TV replacement for the native <select> spinner — premium remote-friendly picker. */
 .tv-select-overlay {
-  z-index: 1300;
+  z-index: 10050;
+  background: rgba(4, 8, 16, 0.74);
+  -webkit-backdrop-filter: blur(12px) saturate(1.1);
+  backdrop-filter: blur(12px) saturate(1.1);
 }
 
 .tv-select-panel {
-  background: #16161e;
-  border-radius: 12px;
-  padding: 24px 20px;
-  min-width: 420px;
-  max-width: 640px;
-  max-height: 80vh;
+  position: relative;
+  min-width: 460px;
+  max-width: 620px;
+  width: min(620px, 62vw);
+  max-height: 82vh;
+  margin: auto;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  margin: auto;
+  padding: 26px 22px 20px;
+  border-radius: 20px;
+  background:
+    radial-gradient(130% 90% at 50% -10%, rgba(59, 130, 246, 0.16), transparent 62%),
+    linear-gradient(180deg, #151c2c 0%, #0c111e 100%);
+  border: 1px solid rgba(120, 160, 255, 0.18);
+  box-shadow: 0 32px 90px rgba(0, 0, 0, 0.62), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  animation: tvSelectIn 0.22s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+@keyframes tvSelectIn {
+  from { opacity: 0; transform: translateY(12px) scale(0.96); }
+  to   { opacity: 1; transform: translateY(0)    scale(1); }
 }
 
 .tv-select-title {
-  font-size: 1.1rem;
+  font-size: 1.15rem;
   font-weight: 700;
+  letter-spacing: 0.01em;
   color: #fff;
-  padding: 0 8px 10px;
+  padding: 0 6px 4px;
+}
+.tv-select-title::after {
+  content: "";
+  display: block;
+  width: 40px;
+  height: 3px;
+  margin: 12px 0 4px;
+  border-radius: 3px;
+  background: linear-gradient(90deg, var(--color-accent, #3B82F6), var(--color-accent-hover, #60A5FA));
 }
 
 .tv-select-list {
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
+  padding: 14px 2px 2px;   /* top gap + room for the focus ring */
 }
 
-.tv-select-option,
-.tv-select-cancel {
+.tv-select-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
   text-align: left;
-  padding: 14px 16px;
-  border: none;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.06);
-  color: #e4e4f2;
-  font-size: 1rem;
+  padding: 16px 18px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 13px;
+  background: rgba(255, 255, 255, 0.045);
+  color: #e8edf7;
+  font-size: 1.05rem;
+  font-weight: 500;
   cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.12s ease, box-shadow 0.15s ease;
+}
+
+.tv-select-option-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tv-select-check {
+  flex: none;
+  color: var(--color-accent-hover, #60A5FA);
+  font-weight: 800;
+  font-size: 1.1rem;
 }
 
 .tv-select-option.selected {
-  background: rgba(255, 255, 255, 0.14);
+  background: linear-gradient(180deg, rgba(59, 130, 246, 0.2), rgba(59, 130, 246, 0.1));
+  border-color: rgba(96, 165, 250, 0.45);
+  color: #fff;
   font-weight: 600;
 }
 
+/* D-pad focus — the whole point of the 10-foot picker: an unmistakable ring. */
+.tv-select-option:focus,
+.tv-select-cancel:focus {
+  outline: none;
+  border-color: var(--color-accent-hover, #60A5FA);
+  background: linear-gradient(180deg, rgba(96, 165, 250, 0.3), rgba(59, 130, 246, 0.16));
+  box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.75), 0 10px 28px rgba(59, 130, 246, 0.34);
+  transform: translateY(-1px);
+  color: #fff;
+}
+
 .tv-select-cancel {
-  margin-top: 8px;
+  margin-top: 12px;
+  padding: 14px 18px;
   text-align: center;
-  color: var(--color-text-secondary, #a1a1aa);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 13px;
+  background: transparent;
+  color: var(--color-text-secondary, #94A3B8);
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease, transform 0.12s ease;
 }
 
 /* ============================================================
