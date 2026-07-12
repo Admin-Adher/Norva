@@ -284,7 +284,16 @@
         const bdThen = document.getElementById('bd-then');
         if (bdThen) bdThen.textContent = '$' + (displayPrice || '—') + (period === 'annual' ? '/yr' : '/mo');
       })();
-      document.getElementById('cancel-btn').setAttribute('href', '/subscribe.html?returnTo=' + encodeURIComponent(returnTo));
+      // Back control: a normal checkout goes to the plan picker; but when we arrived from
+      // the subscription-management page (Update payment method), the user didn't come from
+      // the plans list — send them back THERE (returnTo = /subscription.html) and relabel.
+      const cancelBtn = document.getElementById('cancel-btn');
+      if (intent === 'update_card') {
+        cancelBtn.setAttribute('href', returnTo);
+        if (cancelBtn.lastChild) cancelBtn.lastChild.textContent = 'Back';
+      } else {
+        cancelBtn.setAttribute('href', '/subscribe.html?returnTo=' + encodeURIComponent(returnTo));
+      }
       document.getElementById('continue-btn').setAttribute('href', returnTo);
 
       // ── Auth gate: checkout needs a signed-in account ─────────────────────
