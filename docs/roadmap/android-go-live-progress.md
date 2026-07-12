@@ -237,8 +237,21 @@ que phone, avec les spécificités TV appliquées — Data Safety → « ne perm
 créer un compte » (appairage) + comptes créés hors-app = « Autre » + 3 types
 seulement (interactions/plantages/ID) ; App access → instructions d'appairage TV (EN,
 ≤500 car.).
-- ⬜ **Reste TV** : opt-in form factor Android TV + **assets fiche TV**
-  (bannière **1280×720** + ≥1 capture **1920×1080**) — le point visuel encore ouvert.
+- ✅ **TV terminée** : form factor Android TV + assets fiche TV (bannière 1280×720
+  + capture 1920×1080) — l'owner les avait déjà.
+
+> **Config Play Console = TERMINÉE pour les 2 apps** (déclarations + fiches + assets).
+
+### 🟡 Rollout — DÉCISION 2026-07-12 : beta fermée d'abord
+- **Maintenant** : **test fermé (beta)** sur les 2 apps (piste fermée + liste
+  testeurs + promotion AAB phone vc11 / TV vc14 + lien opt-in). Compte **org** →
+  exempt de la règle « 20 testeurs / 14 j ».
+- **Ouverture PUBLIQUE (production) conditionnée à 2 gates** :
+  1. **Revolut** change le nom commercial / descriptor en **« Norva »** (sinon
+     nom+prénom de l'owner sur les relevés bancaires du rail **web** ; n'affecte PAS
+     le rail Play). L'owner attend Revolut.
+  2. **Appel D-U-N-S validé** par Google (ticket `5-1384000041027`) — précédent
+     avertissement D-U-N-S réglé en ~48 h, donc optimiste.
 
 ### 🔴 En DERNIER (rail validé — quand la publication est prête)
 - **Bascule prod** : `NORVA_BILLING_MODE=revenuecat` → `NORVA_ENTITLEMENTS_MODE=enforce`
