@@ -321,7 +321,64 @@ class ChannelList {
         }
     }
 
+    /** Android TV: true when the D-pad shell is active. */
+    _isTvMode() {
+        return document.documentElement.classList.contains('tv-mode');
+    }
+
+    /** Resolve the channel object behind a .channel-item row (by its data-* ids). */
+    _channelFromItem(item) {
+        if (!item) return null;
+        return this.channels.find(c =>
+            String(c.id) === String(item.dataset.channelId) &&
+            String(c.sourceId) === String(item.dataset.sourceId)
+        ) || null;
+    }
+
+    /**
+     * Android TV: activating a channel in the LEFT sidebar list doesn't zap
+     * straight to fullscreen — it loads the channel into the RIGHT preview card
+     * and parks focus on its Watch button, so the viewer confirms with one more
+     * OK (the same preview → Watch flow as the guide, and it keeps the left list
+     * a calm "browser"). Off TV (mouse/touch/phone) it plays as before. Returns
+     * true when it handled the activation so the caller skips selectChannel().
+     */
+    _tvActivateChannelItem(item) {
+        if (!this._isTvMode()) return false;
+        const channel = this._channelFromItem(item);
+        if (!channel) return false;
+        // Cancel any pending focus-preview so it can't fire after we've moved
+        // focus to Watch and needlessly rebuild the preview under it.
+        clearTimeout(this._tvPreviewTimer);
+        this._tvPreviewPending = null;
+        window.app?.liveGuideFusion?.setActiveChannel?.(channel);
+        const watch = document.querySelector('.player-section .live-guide-preview [data-action="watch"]');
+        if (watch) watch.focus({ preventScroll: true });
+        return true;
+    }
+
     init() {
+        // Android TV: focusing a channel in the LEFT sidebar list previews it in
+        // the guide's preview card (mirrors the right-hand list), so browsing
+        // categories keeps the preview live. Delegated + debounced so flying
+        // through channels with the D-pad costs nothing.
+        this.container.addEventListener('focusin', (e) => {
+            if (!this._isTvMode()) return;
+            const item = e.target.closest('.channel-item');
+            if (!item) return;
+            this._tvPreviewPending = item;
+            clearTimeout(this._tvPreviewTimer);
+            this._tvPreviewTimer = setTimeout(() => {
+                const it = this._tvPreviewPending;
+                // Only preview if the row is STILL the focused element — if the
+                // viewer moved on (to the guide, or pressed OK onto Watch) skip it,
+                // so we never rebuild the preview out from under another focus.
+                if (!it || !it.isConnected || document.activeElement !== it) return;
+                const channel = this._channelFromItem(it);
+                if (channel) window.app?.liveGuideFusion?.setActiveChannel?.(channel);
+            }, 140);
+        });
+
         // Search: flat ranked results mode (never mutates group collapse state)
         let searchTimeout;
         this.searchInput.addEventListener('input', () => {
@@ -1085,6 +1142,7 @@ class ChannelList {
         groupEl.querySelectorAll('.channel-item').forEach(item => {
             item.addEventListener('click', (e) => {
                 if (e.target.closest('.favorite-btn')) return;
+                if (this._tvActivateChannelItem(item)) return;
                 this.selectChannel(item.dataset);
             });
             item.addEventListener('contextmenu', (e) => this.showContextMenu(e, 'channel', item.dataset));
@@ -1126,6 +1184,7 @@ class ChannelList {
         container.querySelectorAll('.channel-item').forEach(item => {
             item.addEventListener('click', (e) => {
                 if (e.target.closest('.favorite-btn')) return;
+                if (this._tvActivateChannelItem(item)) return;
                 this.selectChannel(item.dataset);
             });
             item.addEventListener('contextmenu', (e) => this.showContextMenu(e, 'channel', item.dataset));
@@ -1714,6 +1773,7 @@ class ChannelList {
         this.container.querySelectorAll('.channel-item.search-result').forEach(item => {
             item.addEventListener('click', (e) => {
                 if (e.target.closest('.favorite-btn')) return;
+                if (this._tvActivateChannelItem(item)) return;
                 this.selectChannel(item.dataset);
             });
             item.addEventListener('contextmenu', (e) => this.showContextMenu(e, 'channel', item.dataset));
