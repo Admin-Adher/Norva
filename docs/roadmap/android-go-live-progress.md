@@ -77,8 +77,8 @@ mais ça piège : ne pas chercher le login Google dans le projet Firebase, ni l'
 | 4 | Service Account Play → RevenueCat (JSON + droits Play + API activée) | 🟡 **En attente de propagation Google (24-36 h)** |
 | 5 | RevenueCat : entitlement `pro` + offering `default` + 4 packages | ✅ **Fait** — entitlement `pro` ✅, 4 produits créés + attachés ✅, offering `default` + 4 packages mappés ✅ (validation produits « Could not check » → verte quand #4 propage) |
 | 6 | RTDN (Real-time Developer Notifications) → topic Pub/Sub | ✅ **Fait** — topic `norva-rtdn` (projet `norva-ecosystem`) + SA rôle **Pub/Sub Admin** (⚠️ pas « Lite ») → RevenueCat « Connected to Google » |
-| 7 | App TV : créer dans Play Console + upload AAB + répliquer abonnements + produits RevenueCat TV + même JSON SA | 🟡 **En cours** — app `tv.norva.tv` créée ✅, **AAB vc14 keyé uploadé en test interne** ✅. **Reste** : testeurs, répliquer les abonnements sur l'app TV, produits RevenueCat TV (gaté par #4), JSON SA sur app Norva TV |
-| 8 | Testeurs de licence + **achat sandbox** (phone + TV) → projection `provider=google_play` | ⏳ à faire (gaté par #4 vert) |
+| 7 | App TV (app **GRATUITE**, pas d'IAP — modèle Netflix) | 🟢 **Validé fonctionnellement** — app `tv.norva.tv` créée + AAB vc14 keyé en test interne ✅ ; **la TV appairée HÉRITE de l'abo `google_play`** du compte (essai 19 juil vérifié à l'écran) ✅ ; read-only (pas de vente sur TV). **Pas besoin** de produits RevenueCat TV ni d'abonnements Play TV. **Reste (publication)** : testeurs, form factor Android TV, fiche magasin. |
+| 8 | Testeurs de licence + **achat sandbox** → projection `provider=google_play` | ✅ **Fait (phone)** — achat sandbox → `google_play/plus/trialing/19 juil` écrit + lu. TV = pas d'achat (hérite). |
 | 9 | Connexion Google (phone) : provider GoTrue + client OAuth Android + test device | ✅ **FAIT & validé sur device** — login natif → compte connecté dans Norva (« Signed in as … — Norva Cloud account ») |
 
 **Bloqueurs transverses**
