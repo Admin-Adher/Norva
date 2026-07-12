@@ -846,7 +846,7 @@ function cleanSearchQuery(title: string): string {
     // OR a digit-led quality token (4K/8K/2160P… — the "Strng IPTV 8K" panel tags titles "4K-AR - ",
     // "4K-D+ - ", "8K-FR - "); "8 Mile"/"4Kids"/"2160 -" stay safe (no K/P + separator). Keep the head
     // set identical across cleanDisplayTitle (:928) and normalizeTitle (:897) — the three stay in sync.
-    .replace(/^(?:[A-Z]{2}[A-Z0-9]{0,3}|4K|8K|2160P|1440P|1080P|720P|480P|360P)(?:-[A-Z0-9+]{1,6})* [-–—▎▏▍▌│┃┆┊｜|] /, "")
+    .replace(/^(?:[A-Z]{2}[A-Z0-9]{0,3}|4K|8K|3D|2160P|1440P|1080P|720P|480P|360P|007)(?:-[A-Z0-9+]{1,6})* [-–—▎▏▍▌│┃┆┊｜|] /, "")
     .replace(/[\[({][^\])}]*[\])}]/g, " ")
     .replace(/\b(4k|uhd|2160p|1080p|720p|480p|fhd|hd|sd|multi|vostfr|vost|vff|vf|vo|truefrench|subt?\s*ar|sub|dub|dv)\b/gi, " ")
     .replace(/(?:^|\s)((?:19|20)\d{2})\s*$/, " ")
@@ -935,7 +935,7 @@ function normalizeTitle(value: string, year: string | null = null) {
   // showing 8+ cards (EN-/AR-/FR-/4K-AR- The Hunger Games -> one norm: key). Fall back to the raw value if
   // stripping would empty it. Regex kept identical to cleanDisplayTitle and cleanSearchQuery — keep the three in sync.
   const rawValue = String(value || "");
-  const deprefixed = rawValue.replace(/^(?:[A-Z]{2}[A-Z0-9]{0,3}|4K|8K|2160P|1440P|1080P|720P|480P|360P)(?:-[A-Z0-9+]{1,6})* [-–—▎▏▍▌│┃┆┊｜|] /, "");
+  const deprefixed = rawValue.replace(/^(?:[A-Z]{2}[A-Z0-9]{0,3}|4K|8K|3D|2160P|1440P|1080P|720P|480P|360P|007)(?:-[A-Z0-9+]{1,6})* [-–—▎▏▍▌│┃┆┊｜|] /, "");
   let text = stripDiacritics(deprefixed.length >= 2 ? deprefixed : rawValue)
     .toLowerCase()
     .replace(/[\[({][^\])}]*[\])}]/g, " ")
@@ -968,7 +968,7 @@ function cleanDisplayTitle(value: string) {
   // for a prefix) OR a quality token (4K/8K/2160P… — "8 Mile"/"4Kids"/"2160 -" stay safe). Display only —
   // original_title keeps the raw provider name, and identity_key comes from normalizeTitle(raw), so no
   // re-keying. Mirrors the frontend MediaUtils.cleanReleaseName — keep the two in sync.
-  const deprefixed = text.replace(/^(?:[A-Z]{2}[A-Z0-9]{0,3}|4K|8K|2160P|1440P|1080P|720P|480P|360P)(?:-[A-Z0-9+]{1,6})* [-–—▎▏▍▌│┃┆┊｜|] /, "").trim();
+  const deprefixed = text.replace(/^(?:[A-Z]{2}[A-Z0-9]{0,3}|4K|8K|3D|2160P|1440P|1080P|720P|480P|360P|007)(?:-[A-Z0-9+]{1,6})* [-–—▎▏▍▌│┃┆┊｜|] /, "").trim();
   if (deprefixed.length >= 2) text = deprefixed;
   if (!/\s/.test(text) && /^\S+(?:\.\S+){3,}$/.test(text)) text = text.replace(/\./g, " ");
   const tokens = text.split(/\s+/).filter(Boolean);
@@ -979,6 +979,10 @@ function cleanDisplayTitle(value: string) {
   const kept = tokens.slice(0, cut);
   while (kept.length > 1 && SOFT_RELEASE_TOKENS.test(kept[kept.length - 1])) kept.pop();
   const out = kept.join(" ")
+    // Drop a trailing "(2012)" / "[2012]" — release_year is stored separately and shown on the card,
+    // so it's redundant here. BRACKETED only (never a bare trailing number) so "1917"/"2012"/"Blade
+    // Runner 2049" keep their number.
+    .replace(/\s*[[(](?:19|20)\d{2}[)\]]\s*$/, "")
     .replace(/\s+\b(4K|UHD|2160p|1080p|720p|FHD|HD|SD|MULTI|VOSTFR|VOST|VF|SUBT AR|SUB AR)\b\s*$/i, "")
     .replace(/[\s\-–—:|.]+$/g, "")
     .replace(/\s+/g, " ")

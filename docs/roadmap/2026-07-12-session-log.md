@@ -88,6 +88,12 @@ Récupère les titres renommés/préfixés que la recherche textuelle ratait, sa
 - Titres restés `unmatched` : re-matchés par le cron `norva-enrich-search-match` **après** reset des marqueurs (cf. runbook §4).
 - Test ajouté : `tests/title-deprefix.test.js` (garde les copies de-préfixe contre la dérive).
 
+### 3.5 v2 (2026-07-12, après capture user) — 3D/007, année, badge « PREFIX »
+Vu en prod chez Strng 8K, 3 corrections complémentaires :
+- **Préfixes `3D` + `007`** ajoutés au token-set (5 sites + 2 SQL) : nettoie la **grosse collection `3D-DE - `** (300, Ant-Man, Piranha 2, Pacific Rim, Guardians, Jumanji…) et la **collection `007 - `** (James Bond). Sûrs : aucun film ne s'appelle « 3D » ni « 007 » (zéros en tête = code). `1917`/`300`/`2012` restent intacts (pas dans le set).
+- **Suffixe `(ANNÉE)`** retiré des titres d'affichage (`cleanReleaseName` + `cleanDisplayTitle`) — l'année est déjà affichée à part. Bracketé uniquement → « 1917 », « 2012 », « Blade Runner 2049 » gardent leur nombre.
+- **Badge « PREFIX »** corrigé (`mediaUtils.js` `parseTitleLanguageSignals`) : le tag interne `PREFIX`/`PREFIXSUB` (marqueur de source, pas un label) fuitait dans le badge langue de la carte. Il affiche désormais la **langue détectée** (`3D-DE - Ant-Man` → « German »), ou rien, jamais « PREFIX ».
+
 ---
 
 ## 4. Runbook — suivre & pousser l'enrichissement (self-host)

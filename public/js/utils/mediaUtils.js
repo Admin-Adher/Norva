@@ -350,7 +350,7 @@ const MediaUtils = (() => {
         // vod-title-projection.normalizeTitle so the client-computed dedup key agrees with the server's,
         // collapsing cross-region/quality copies of one film. Falls back to the raw name if stripping empties it.
         const raw = String(name);
-        const deprefixed = raw.replace(/^(?:[A-Z]{2}[A-Z0-9]{0,3}|4K|8K|2160P|1440P|1080P|720P|480P|360P)(?:-[A-Z0-9+]{1,6})* [-–—▎▏▍▌│┃┆┊｜|] /, '');
+        const deprefixed = raw.replace(/^(?:[A-Z]{2}[A-Z0-9]{0,3}|4K|8K|3D|2160P|1440P|1080P|720P|480P|360P|007)(?:-[A-Z0-9+]{1,6})* [-–—▎▏▍▌│┃┆┊｜|] /, '');
         let s = stripDiacritics(deprefixed.length >= 2 ? deprefixed : raw).toLowerCase();
         s = s.replace(/[[{(][^\])}]*[\])}]/g, ' ');
         let changed = true;
@@ -396,7 +396,7 @@ const MediaUtils = (() => {
         // Muppet Show", "8K - …"). Head = two uppercase letters (so "007 - …"/"1917 - …" are never
         // mistaken for a prefix) OR a quality token 4K/8K/2160P… ("8 Mile"/"4Kids"/"2160 -" stay safe).
         // Mirrors the server cleanDisplayTitle — keep the two in sync.
-        const deprefixed = text.replace(/^(?:[A-Z]{2}[A-Z0-9]{0,3}|4K|8K|2160P|1440P|1080P|720P|480P|360P)(?:-[A-Z0-9+]{1,6})* [-–—▎▏▍▌│┃┆┊｜|] /, '').trim();
+        const deprefixed = text.replace(/^(?:[A-Z]{2}[A-Z0-9]{0,3}|4K|8K|3D|2160P|1440P|1080P|720P|480P|360P|007)(?:-[A-Z0-9+]{1,6})* [-–—▎▏▍▌│┃┆┊｜|] /, '').trim();
         if (deprefixed.length >= 2) text = deprefixed;
         if (!/\s/.test(text) && /^\S+(?:\.\S+){3,}$/.test(text)) text = text.replace(/\./g, ' ');
         const tokens = text.split(/\s+/).filter(Boolean);
@@ -406,7 +406,12 @@ const MediaUtils = (() => {
         }
         const kept = tokens.slice(0, cut);
         while (kept.length > 1 && SOFT_RELEASE_TOKENS.test(kept[kept.length - 1])) kept.pop();
-        const out = kept.join(' ').replace(/[\s\-–—:|.]+$/g, '').trim();
+        const out = kept.join(' ')
+            // Drop a trailing "(2012)" / "[2012]" — the year is shown separately on the card, so it's
+            // redundant noise here. Only a BRACKETED year (never a bare trailing number) so real titles
+            // like "1917", "2012", "Blade Runner 2049" keep their number.
+            .replace(/\s*[[(](?:19|20)\d{2}[)\]]\s*$/, '')
+            .replace(/[\s\-–—:|.]+$/g, '').trim();
         return out || raw;
     }
 
@@ -654,15 +659,15 @@ const MediaUtils = (() => {
             }
         }
         const hasMulti = /\bmulti\b/i.test(raw);
-        const primaryTag = subtitles.find(item => item.tag === 'VOSTFR')?.tag
-            || audio.find(item => item.language === 'fr')?.tag
-            || audio[0]?.tag
-            || (hasMulti ? 'MULTI' : null);
-        const summary = subtitles.find(item => item.tag === 'VOSTFR')
-            ? 'VOSTFR'
-            : audio.find(item => item.language === 'fr')?.tag
-                || audio[0]?.tag
-                || (hasMulti ? 'MULTI (unverified)' : '');
+        // A prefix-derived signal carries the internal tag 'PREFIX'/'PREFIXSUB' (a SOURCE marker,
+        // not a user label) — surface the detected language name instead, so a card whose only
+        // language signal is the leading prefix ("3D-DE - …") reads "German", never "PREFIX".
+        const tagOf = (entry) => entry
+            && (entry.tag === 'PREFIX' || entry.tag === 'PREFIXSUB' ? languageDisplayFull(entry.language) : entry.tag);
+        const vostfr = subtitles.find(item => item.tag === 'VOSTFR');
+        const frAudio = audio.find(item => item.language === 'fr');
+        const primaryTag = (vostfr && 'VOSTFR') || tagOf(frAudio) || tagOf(audio[0]) || (hasMulti ? 'MULTI' : null);
+        const summary = vostfr ? 'VOSTFR' : (tagOf(frAudio) || tagOf(audio[0]) || (hasMulti ? 'MULTI (unverified)' : ''));
         return { audio, subtitles, hasMulti, primaryTag, summary };
     }
 
