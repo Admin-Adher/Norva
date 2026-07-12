@@ -31,6 +31,9 @@ test('cleanReleaseName strips digit-led quality/collection prefixes (Strng IPTV 
     ['3D-DE - Pacific Rim', 'Pacific Rim'],
     ['007 - Skyfall', 'Skyfall'],                   // James Bond collection
     ['007 - Thunderball', 'Thunderball'],
+    ['4K -SC- Dune: Part Two', 'Dune: Part Two'],   // dash-wrapped code " -SC- "
+    ['4K -SC- Lilo & Stitch', 'Lilo & Stitch'],
+    ['4K -SC- The Abyss', 'The Abyss'],
   ];
   for (const [input, expected] of cases) {
     assert.strictEqual(M.cleanReleaseName(input), expected, input);
@@ -55,6 +58,7 @@ test('cleanReleaseName still strips alpha-led provider prefixes', () => {
 test('cleanReleaseName never mangles a real title', () => {
   const keep = [
     '1917 - La Révolution Russe',                   // leading "1917 -" is a real title, not a prefix
+    'MAD MAX - FURY ROAD',                          // all-caps word + " - " must NOT strip to "FURY ROAD"
     'X-Men',
     '8 Mile',
     '4Kids - Show',

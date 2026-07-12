@@ -350,7 +350,7 @@ const MediaUtils = (() => {
         // vod-title-projection.normalizeTitle so the client-computed dedup key agrees with the server's,
         // collapsing cross-region/quality copies of one film. Falls back to the raw name if stripping empties it.
         const raw = String(name);
-        const deprefixed = raw.replace(/^(?:[A-Z]{2}[A-Z0-9]{0,3}|4K|8K|3D|2160P|1440P|1080P|720P|480P|360P|007)(?:-[A-Z0-9+]{1,6})* [-–—▎▏▍▌│┃┆┊｜|] /, '');
+        const deprefixed = raw.replace(/^(?:[A-Z]{2}[A-Z0-9]{0,3}|4K|8K|3D|2160P|1440P|1080P|720P|480P|360P|007)(?:-[A-Z0-9+]{1,6})*(?: [-–—▎▏▍▌│┃┆┊｜|] | -[A-Z0-9+]{1,6}- )/, '');
         let s = stripDiacritics(deprefixed.length >= 2 ? deprefixed : raw).toLowerCase();
         s = s.replace(/[[{(][^\])}]*[\])}]/g, ' ');
         let changed = true;
@@ -396,7 +396,7 @@ const MediaUtils = (() => {
         // Muppet Show", "8K - …"). Head = two uppercase letters (so "007 - …"/"1917 - …" are never
         // mistaken for a prefix) OR a quality token 4K/8K/2160P… ("8 Mile"/"4Kids"/"2160 -" stay safe).
         // Mirrors the server cleanDisplayTitle — keep the two in sync.
-        const deprefixed = text.replace(/^(?:[A-Z]{2}[A-Z0-9]{0,3}|4K|8K|3D|2160P|1440P|1080P|720P|480P|360P|007)(?:-[A-Z0-9+]{1,6})* [-–—▎▏▍▌│┃┆┊｜|] /, '').trim();
+        const deprefixed = text.replace(/^(?:[A-Z]{2}[A-Z0-9]{0,3}|4K|8K|3D|2160P|1440P|1080P|720P|480P|360P|007)(?:-[A-Z0-9+]{1,6})*(?: [-–—▎▏▍▌│┃┆┊｜|] | -[A-Z0-9+]{1,6}- )/, '').trim();
         if (deprefixed.length >= 2) text = deprefixed;
         if (!/\s/.test(text) && /^\S+(?:\.\S+){3,}$/.test(text)) text = text.replace(/\./g, ' ');
         const tokens = text.split(/\s+/).filter(Boolean);
