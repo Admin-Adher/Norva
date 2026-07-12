@@ -164,13 +164,24 @@
         a.setAttribute('href', returnTo);
         return a;
       }
-      // Platform-aware management link: Google Play on native, a billing portal on
-      // web (inert until NORVA_BILLING_CONFIG.webCustomerPortalUrl is set).
-      function manageButton(label, primary) {
+      // Provider-aware management link: a store-management link ONLY when the
+      // subscription actually lives on THIS platform's store. A web (Revolut) sub
+      // opened on Android — or a Play sub opened on the web — can't be managed from
+      // here, so this returns null and the caller shows managedElsewhereNote()
+      // instead. This is what stops a web subscriber being told "Manage on Google Play".
+      function manageButton(decision, label, primary) {
+        if (isNative()) {
+          if (entProvider(decision) !== 'google_play') return null;
+          const a = el('a', primary ? 'btn warn' : 'btn ghost', label || 'Manage on Google Play');
+          a.setAttribute('href', 'https://play.google.com/store/account/subscriptions');
+          a.setAttribute('target', '_blank');
+          a.setAttribute('rel', 'noopener');
+          return a;
+        }
         const url = manageUrl();
-        if (!isNative() && !url) return null;
-        const a = el('a', primary ? 'btn warn' : 'btn ghost', label || (isNative() ? 'Manage on Google Play' : 'Manage / cancel'));
-        a.setAttribute('href', url || 'https://play.google.com/store/account/subscriptions');
+        if (!url) return null;
+        const a = el('a', primary ? 'btn warn' : 'btn ghost', label || 'Manage / cancel');
+        a.setAttribute('href', url);
         a.setAttribute('target', '_blank');
         a.setAttribute('rel', 'noopener');
         return a;
@@ -228,6 +239,36 @@
       // Self-serve controls for the web (Revolut) rail — native manages via Google Play.
       function isRevolutWeb(decision) {
         return String((decision.projection || {}).provider || '') === 'revolut' && !isNative();
+      }
+      // The store the subscription actually lives on (revolut / google_play /
+      // apple_app_store / system / manual …). Drives every manage/cancel control.
+      function entProvider(decision) {
+        return String((((decision || {}).projection) || {}).provider || '').toLowerCase();
+      }
+      // TRUE when the sub lives on a store that ISN'T manageable from here: on
+      // Android, a web (Revolut) or Apple sub; on the web, a Play or Apple sub.
+      // Play policy forbids managing/paying for non-Play subs inside the Android
+      // app, and a web sub isn't in Google Play at all — so we must not tell a web
+      // subscriber to "Manage on Google Play".
+      function managedElsewhere(decision) {
+        const p = entProvider(decision);
+        return isNative() ? (p === 'revolut' || p === 'apple_app_store')
+                          : (p === 'google_play' || p === 'apple_app_store');
+      }
+      // Where a cross-platform sub is actually managed (empty = manageable here).
+      function managedElsewhereNote(decision) {
+        const p = entProvider(decision);
+        if (p === 'revolut') return 'This subscription is managed on the web at norva.tv.';
+        if (p === 'google_play') return 'This subscription is managed through Google Play — use the Play Store app to change or cancel it.';
+        if (p === 'apple_app_store') return 'This subscription is managed on the App Store on your Apple device.';
+        return '';
+      }
+      function storeNoteText(decision) {
+        if (managedElsewhere(decision)) return managedElsewhereNote(decision);
+        if (entProvider(decision) === 'google_play' && isNative()) {
+          return 'Subscriptions are billed through Google Play — manage or cancel anytime in the Play Store.';
+        }
+        return 'You can manage or cancel your subscription anytime.';
       }
       // Cancel via the API (cancels at period end; the reason is analytics only).
       async function doCancel(reason) {
@@ -371,9 +412,7 @@
 
       function render(decision) {
         content.innerHTML = '';
-        storeNote.textContent = isNative()
-          ? 'Subscriptions are billed through Google Play — manage or cancel anytime in the Play Store.'
-          : 'You can manage or cancel your subscription anytime.';
+        storeNote.textContent = storeNoteText(decision);
 
         // Not signed in.
         if (!decision) {
@@ -422,7 +461,7 @@
           // Web/Revolut → our own card-update flow; native → Google Play.
           const uc = updateCardLink(decision, true);
           if (uc) row.appendChild(uc);
-          const mb = manageButton(isNative() ? 'Update on Google Play' : 'Update payment', true);
+          const mb = manageButton(decision, isNative() ? 'Update on Google Play' : 'Update payment', true);
           if (mb) row.appendChild(mb);
           const cx = cancelButton(decision);
           if (cx) row.appendChild(cx);
@@ -477,14 +516,17 @@
         const row = el('div', 'actions');
         if (status === 'cancelled_at_period_end') {
           row.appendChild(resumeControl(decision));
-        } else {
+        } else if (!managedElsewhere(decision)) {
+          // "Change plan" re-enters checkout on THIS platform. Suppress it for a sub
+          // managed elsewhere (e.g. a web/Revolut sub opened on Android) so we never
+          // start a second, conflicting subscription — the note says where to manage.
           const change = el('a', 'btn ghost', 'Change plan');
           change.setAttribute('href', subscribeHref());
           row.appendChild(change);
           const uc = updateCardLink(decision, false);
           if (uc) row.appendChild(uc);
         }
-        const mb = manageButton();
+        const mb = manageButton(decision);
         if (mb) row.appendChild(mb);
         if (status !== 'cancelled_at_period_end') {
           const cx = cancelButton(decision);

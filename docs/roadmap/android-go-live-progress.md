@@ -285,6 +285,17 @@
        serveur `DELETE /device/me` (auto-unpair, `revoked=true`, authentifié par
        device-token) + le device-token/id local est effacé et l'unpair appelé au
        logout. **⚠️ nécessite un déploiement edge sur la box.**
+    4. **Boutons manage/subscribe rendus provider-aware** (`subscription.html`) :
+       avant, natif = « Manage on Google Play » / web = Revolut, **sans regarder le
+       vrai provider**. Un abo **Revolut (web)** ouvert sur Android affichait à tort
+       « Manage on Google Play ». Désormais le bouton suit le **provider de
+       l'entitlement** (`revolut`/`google_play`/`apple`) ; les subs « gérés
+       ailleurs » affichent une **note info** (pas de bouton de gestion trompeur, ni
+       lien paiement web sur Android = conforme Play) et « Change plan » est masqué
+       pour éviter un double abonnement.
+    5. **Essai « fantôme » expliqué** (pas un bug) : en `NORVA_BILLING_MODE=legacy`,
+       le serveur auto-crée un essai 7 j **sans carte** (`provider=system`,
+       `startTrialProjection`). Disparaît à la bascule prod (`=revenuecat`).
        ⚠️ **Piège** : il y a **2 boutons logout** — `Settings.js signOut()` ET le
        **« Logout » de la barre du haut** (`app.js addLogoutButton()`, le chemin
        réellement utilisé sur la TV). Le même correctif TV a été appliqué **aux
