@@ -11149,6 +11149,21 @@ html.tv-mode .mobile-filter-body {
   display: none !important;
 }
 
+/* TV: the tablet rules squash each filter <select> to min-width:0 / flex:1, so
+   their labels truncate ("Sort: D", "Any Ye"). Size each to its own content and
+   let the bar wrap to a second row — nothing is clipped in its block. */
+html.tv-mode #page-movies .filter-bar .filter-select,
+html.tv-mode #page-series .filter-bar .filter-select,
+html.tv-mode #page-movies .filter-bar .source-select,
+html.tv-mode #page-series .filter-bar .source-select,
+html.tv-mode #page-movies .filter-bar .filter-toggle,
+html.tv-mode #page-series .filter-bar .filter-toggle {
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 92px;
+  max-width: 220px;
+}
+
 @media (max-width: 480px) {
   .dashboard-content {
     padding: 16px 12px 20px;
@@ -12040,6 +12055,19 @@ mark.search-highlight {
   background: rgba(8, 9, 13, 0.98);
 }
 .tv-mode .mobile-menu-toggle { display: none; }
+
+/* When the rail expands (focus enters it), SLIDE the content right to clear the
+   264px drawer instead of letting the drawer overlay it — otherwise the expanded
+   rail sits on top of whatever is at the content's left edge (the Movies/Series
+   filter bar, card edges…), which read as "the menu covering the filters". A GPU
+   transform (not margin) avoids re-wrapping the grid, so it's smooth. Content
+   slides back the instant focus returns to the content and the rail collapses. */
+.tv-mode .main-content {
+  transition: transform 0.18s ease-out;
+}
+.tv-mode .navbar:focus-within ~ .main-content {
+  transform: translateX(176px);   /* 264 expanded − 88 collapsed */
+}
 
 /* Brand pinned to the top; logo centred in the 88px icon column (centre x=44),
    the "Norva" wordmark revealed only when the rail is expanded. */
