@@ -196,7 +196,10 @@
         // Restore/purchase run on the phone/web, never on the paired TV (Play
         // Billing crashes on some TV boxes — this is what closed the TV app).
         if (!isNative() || isTvShell() || !(window.NorvaBilling && window.NorvaBilling.restore)) return null;
-        const b = el('button', 'btn ghost', 'Restore purchases');
+        // Deliberately a subtle secondary link (`.linkish`), not a primary button:
+        // Norva is account-centric (signing in already restores access), so restore
+        // is only a recovery affordance for an out-of-sync store purchase.
+        const b = el('button', 'linkish', 'Restore purchases');
         b.addEventListener('click', async function () {
           b.disabled = true;
           const original = b.textContent;
@@ -520,9 +523,9 @@
             see.setAttribute('href', subscribeHref());
             row.appendChild(see);
           }
-          const rb0 = restoreButton();
-          if (rb0) row.appendChild(rb0);
           row.appendChild(backBtn('Back'));
+          const rb0 = restoreButton(); // subtle link, kept last
+          if (rb0) row.appendChild(rb0);
           content.appendChild(row);
           return;
         }
@@ -550,9 +553,9 @@
           const cx = cancelButton(decision);
           if (cx) row.appendChild(cx);
         }
-        const rb = restoreButton();
-        if (rb) row.appendChild(rb);
         row.appendChild(backBtn('Back'));
+        const rb = restoreButton(); // subtle link, kept last
+        if (rb) row.appendChild(rb);
         content.appendChild(row);
       }
 
