@@ -91,6 +91,43 @@ conteneur `db` du compose, remplacer `/var/lib/norva/db` par le data restauré,
 `docker compose up -d db`, puis relancer la stack. **Refaire immédiatement un
 base backup** (la timeline a changé).
 
+## 2bis. Restore STANDALONE (base seul, SANS WAL archivé) — ✅ validé 2026-07-12
+
+Le plus simple + le plus robuste, et le test pertinent quand le WAL archivé a été purgé
+(cf. session-log 2026-07-12 §5) : restaurer le dernier base-backup dans un conteneur
+jetable, vérifier les compteurs, jeter. Les base-backups sont `pg_basebackup -X fetch`
+→ **auto-suffisants** : le WAL de consistance est embarqué dans `base.tar.gz` (pas de
+`pg_wal.tar.gz` séparé), donc **aucun WAL archivé requis** — c'est ce qui autorise sa
+purge sur R2. Tout en **UN** `sudo bash` (évite les pièges de perms `/etc/norva-backup.env`
+600-root et de `sudo -s` qui avale le collage) :
+
+```bash
+sudo bash <<'EOF'
+set -a; . /etc/norva-backup.env; . "$NORVA_OPS_DIR/backup/lib.sh"; set +a
+set +e
+docker rm -f norva-pitr 2>/dev/null
+LAST_BASE=$(rclone lsf "r2:$R2_BUCKET/selfhost/base/" --dirs-only | sort | tail -1); echo "base: $LAST_BASE"
+rm -rf /tmp/pitr && mkdir -p /tmp/pitr/data
+rclone copy "r2:$R2_BUCKET/selfhost/base/${LAST_BASE%/}" /tmp/pitr/base/
+tar -xzf /tmp/pitr/base/base.tar.gz -C /tmp/pitr/data        # WAL de consistance inclus dedans
+mkdir -p /tmp/pitr/data/pg_wal
+[ -f /tmp/pitr/base/pg_wal.tar.gz ] && tar -xzf /tmp/pitr/base/pg_wal.tar.gz -C /tmp/pitr/data/pg_wal
+PGUID=$(docker exec norva-db id -u postgres); PGGID=$(docker exec norva-db id -g postgres)
+chown -R "$PGUID:$PGGID" /tmp/pitr/data
+docker run -d --name norva-pitr --network host -v /tmp/pitr/data:/var/lib/postgresql/data \
+  -e POSTGRES_PASSWORD=throwaway "$PG_IMAGE" postgres -p 5433 -c archive_mode=off
+sleep 8; docker logs norva-pitr 2>&1 | tail -20   # attendu: "consistent recovery state reached" + "ready to accept connections"
+Q="select (select count(*) from public.cloud_media_items) media, (select count(*) from public.cloud_titles) titles, (select count(*) from auth.users) users;"
+docker exec -e PGPASSWORD="$POSTGRES_PASSWORD" norva-pitr psql -h 127.0.0.1 -p 5433 -U supabase_admin -d postgres -c "$Q"
+docker exec -e PGPASSWORD="$POSTGRES_PASSWORD" norva-db  psql -h 127.0.0.1 -p 5432 -U supabase_admin -d postgres -c "$Q"
+docker rm -f norva-pitr; rm -rf /tmp/pitr        # nettoyage
+EOF
+```
+
+> **Résultat 2026-07-12** : clone `healthy`, `consistent recovery state reached`, `database
+> system is ready` ; 935 666 media / 719 944 titles / 7 users (≈ prod à 95 lignes près =
+> snapshot au point du base-backup). **Preuve que les base-backups restaurent sans le WAL archivé.**
+
 ## Signes que les backups sont sains (à regarder de temps en temps)
 
 ```bash

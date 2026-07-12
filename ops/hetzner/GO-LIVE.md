@@ -108,7 +108,7 @@ Objectif : arriver au jour J avec **zéro inconnue**. Rien ici n'impacte la prod
 - [ ] **`KEEP_WAL_DAYS=35`** (déjà remis) + une **base-backup fraîche** post-launch (`sudo backup/basebackup-weekly.sh`).
 - [ ] Vérifier `norva-wal-sync.service` en `exit 0` (archive locale purgée → plus de « falling behind »).
 - [ ] Mesurer le **débit WAL au repos** (`06-check-disk.sh`) — doit rester bas hors rafales de crons ; sinon traquer le cron.
-- [ ] **1 restore PITR de test** depuis R2 (`backup/RESTORE.md`) — la seule vraie preuve que les backups sauvent.
+- [x] **Restore de test** depuis R2 — ✅ **validé 2026-07-12** : base-backup restauré *standalone* dans un conteneur jetable (5433), `healthy`, `consistent recovery state reached`, 935 666 media / 719 944 titles / 7 users ≈ prod (écart 95 lignes = snapshot au point du backup). Procédure : `backup/RESTORE.md` §2bis. **Après le launch** : re-tester le PITR-vers-une-heure (nécessite le WAL retenu).
 - [ ] (optionnel) régler les `501 NotImplemented` R2 dans `backup/lib.sh` ; envisager `wal_compression=zstd` ; monter `checkpoint_timeout` (15-30 min) si l'enrichissement pèse.
 
 ---
