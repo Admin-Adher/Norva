@@ -141,3 +141,37 @@ done
 - 69/69 tests (`npm test`), dont `tests/title-deprefix.test.js` (4 nouveaux).
 - Parse `esbuild` OK sur les 2 edge functions éditées ; `node --check` OK sur les fichiers front.
 - Fonctions réelles testées end-to-end (`cleanReleaseName`/`normalizeTitle` chargées depuis `mediaUtils.js`) ; logique poster (`tmdbPosterPath`) et machines à états (returnPage, swipe) validées par harnais dédiés.
+
+---
+
+## 5. Incident disque / WAL — self-host (2026-07-12 soir)
+
+**Symptôme.** `/` à 25,6 % (≈113 GB) alors que la DB ne contient que des comptes de test.
+
+**Diagnostic.** `sudo du -xhd1 /` → **`/var/lib/norva/wal-archive` = 89 GB (5 646 segments × 16 Mo)**. La DB elle-même : **6,6 GB** (saine) ; `pg_wal` interne 2,1 GB (normal). **Ce n'était pas un problème de données.**
+
+**Cause.** Le pipeline R2 fonctionnait (`rclone lsf` → **5 620 segments déjà sur R2**, bucket `norva-db-backups` = 97,96 GB / 5,63k objets). Le pile-up local venait de la **rétention** : `wal-sync.sh` ne purge un segment local que s'il est **> `KEEP_LOCAL_WAL_DAYS` (=3)** jours *et* confirmé sur R2. Cutover le 11/07 → tout a < 1,5 jour → **le prune ne matchait rien**. Le `norva-wal-sync.service` marqué `FAILURE` = juste son garde-fou `WARNING: N files … falling behind` qui `exit 1` (alerte, pas panne d'upload). Les `501 NotImplemented` de R2 sont **transitoires** (« Attempt 2 succeeded »), non bloquants.
+
+**Facteur aggravant — churn.** ~**60 GB de WAL/jour** pour une DB de 6,6 GB : import catalogue post-cutover + crons d'enrichissement + le drive search-match « plein régime ». Amplifié par les *full-page images* (chaque 1ʳᵉ écriture d'une page après un checkpoint). Pic ponctuel qui retombe une fois l'enrichissement fini.
+
+**Fixes appliqués.**
+- **Récupération immédiate (sûr, copies sur R2)** — `pg_archivecleanup` sur l'archive locale → `/` repassé à **6 %** (25 GB). Ne touche pas `pg_wal` interne, l'archivage continue :
+  ```bash
+  CUR=$(docker exec -i norva-db psql -tA -U postgres -d postgres -c "select pg_walfile_name(pg_current_wal_lsn());")
+  sudo docker run --rm -v /var/lib/norva/wal-archive:/wal supabase/postgres:17.6.1.136 pg_archivecleanup /wal "$CUR"
+  ```
+- **`wal_compression=on` (pglz)** — réduit fortement le WAL (full-page images). Le rôle `postgres` de l'image Supabase n'est **pas** superuser → passer par **`supabase_admin`** (paramètre *reload*, sans restart ; persiste dans `postgresql.auto.conf`) :
+  ```bash
+  docker exec -i norva-db psql -U supabase_admin -d postgres -c "alter system set wal_compression = on;"
+  docker exec -i norva-db psql -U supabase_admin -d postgres -c "select pg_reload_conf();"
+  ```
+  (Option meilleur ratio : `wal_compression = zstd` si l'image le supporte. Pour survivre à une ré-init : ajouter `-c wal_compression=on` au `command:` du service `db` dans `docker-compose.supabase.yml`.)
+- **`KEEP_LOCAL_WAL_DAYS` 3 → 1** (`/etc/norva-backup.env` sur la box + défaut mis à jour dans `norva-backup.env.example`). R2 garde `KEEP_WAL_DAYS` (35 j) pour le PITR ; le local n'est qu'un cache.
+
+**Coût R2.** Egress **gratuit** ; opérations **dans le free tier** (Classe A 8,4k / 1M, Classe B 1,51M / 10M). Storage 97,74 GB → ~**1,3 $/mois** à cette taille (free tier 10 GB-mois). Le vrai driver = churn × `KEEP_WAL_DAYS` → `wal_compression` + baisse de churn le maîtrisent ; en phase de test on peut aussi baisser `KEEP_WAL_DAYS`.
+
+**Tuning DB déjà en place** (compose `command:`, tier 64 GB) : `max_wal_size=16GB`, `checkpoint_completion_target=0.9`, `shared_buffers=16GB`… `checkpoint_timeout` non fixé → défaut 5 min ; le monter (15-30 min) réduirait encore les full-page writes (tradeoff : reprise-sur-crash plus longue).
+
+**Diagnostic réutilisable.** `ops/hetzner/scripts/06-check-disk.sh` (read-only) : disque, WAL local vs R2, **débit WAL live (échantillon 30 s)**, `wal_compression`, bloat, logs Docker, taille DB — en un run (`sudo` pour la visibilité complète).
+
+**À finaliser avant public** : confirmer que `norva-wal-sync` tourne en `exit 0` (local purgé) ; mesurer que la churn retombe après l'enrichissement ; optionnellement purger le WAL/base-backups de test sur R2 pour repartir propre.
