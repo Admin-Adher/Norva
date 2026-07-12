@@ -422,7 +422,13 @@
         }
         currentOrderId = data.order_id || '';
         applyKindCopy(data.kind);
-        if (data.checkout_url) { fallback.setAttribute('href', data.checkout_url); fallback.hidden = false; }
+        // Keep the hosted-page link HIDDEN on the happy path — the embedded card field is
+        // the only normal flow (our Norva branding + clear "card check" copy + inline
+        // return). Set its href so the catch block below can reveal it ONLY if the widget
+        // fails to load (rare emergency fallback). We no longer push people to Revolut's
+        // hosted page, which shows its own "Paiement effectué" wording and whose redirect
+        // back doesn't fire for our MANUAL-capture holds.
+        if (data.checkout_url) { fallback.setAttribute('href', data.checkout_url); }
         // Android TV: hand off to the phone (D-pad can't fill a card iframe).
         if (isTv) { showTvContinue(data.checkout_url, currentOrderId); return; }
 
