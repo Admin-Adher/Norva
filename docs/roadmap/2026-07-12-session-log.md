@@ -95,6 +95,28 @@ Vu en prod chez Strng 8K, 3 corrections complémentaires :
 - **Suffixe `(ANNÉE)`** retiré des titres d'affichage (`cleanReleaseName` + `cleanDisplayTitle`) — l'année est déjà affichée à part. Bracketé uniquement → « 1917 », « 2012 », « Blade Runner 2049 » gardent leur nombre.
 - **Badge « PREFIX »** corrigé (`mediaUtils.js` `parseTitleLanguageSignals`) : le tag interne `PREFIX`/`PREFIXSUB` (marqueur de source, pas un label) fuitait dans le badge langue de la carte. Il affiche désormais la **langue détectée** (`3D-DE - Ant-Man` → « German »), ou rien, jamais « PREFIX ».
 
+### 3.6 v3 (2026-07-12 nuit) — la tête alpha resserrée à **exactement 2 lettres** (anti sur-strip)
+**Symptôme découvert en inspectant les titres restés `unmatched`.** La tête alpha du regex était `[A-Z]{2}[A-Z0-9]{0,3}` (2 **à 5** caractères). Elle prenait donc le **premier mot de vrais titres** en majuscules pour un préfixe :
+
+| Titre réel (provider polonais `PL - <TITRE> - <SOUS-TITRE>`) | Affichage AVANT (faux) | APRÈS |
+|---|---|---|
+| `THOR - MIŁOŚĆ I GROM` (Thor : Love and Thunder) | ❌ `MIŁOŚĆ I GROM` | ✅ `THOR - MIŁOŚĆ I GROM` |
+| `SAYEN - ŁOWCZYNI` | ❌ `ŁOWCZYNI` | ✅ `SAYEN - ŁOWCZYNI` |
+| `NOE - WYBRANY PRZEZ BOGA` (Noé) | ❌ `WYBRANY PRZEZ BOGA` | ✅ intact |
+| `SAS - ZAMACH W EUROTUNELU` (SAS: Red Notice) | ❌ `ZAMACH W EUROTUNELU` | ✅ intact |
+
+**Fix.** Tête alpha `[A-Z]{2}[A-Z0-9]{0,3}` → **`[A-Z]{2}`** (exactement deux lettres) sur les 5 sites code + 2 SQL. Le commentaire de chaque site disait déjà « two uppercase letters » — le regex était l'intrus ; il colle désormais à sa doc. Distinction clé : un **vrai préfixe** marché/langue est un code **2 lettres** (`FR`/`AR`/`PL`/`DE`/`ES`) éventuellement suivi d'un code **joint par tiret** (`AR-SUBS`, `4K-AR`) ; un **mot de titre** court (THOR/SAS/NOE, 3-5 lettres, **sans** tiret) n'est plus mangé. Les tokens qualité digit-led (`4K`/`8K`/`3D`/`007`…) sont une alternative séparée, inchangés.
+
+**Compromis assumé.** Les codes **3 lettres** de contenu **non-film** ne sont plus strippés à l'affichage (`PSG - Monaco`, `WRC - Rallye…`, `SNAP - Rhythm Is A Dancer`, sport/clips/pubs) — inoffensif, voire informatif, et ce contenu ne matche de toute façon jamais TMDB. Priorité donnée à ne **jamais** massacrer un vrai film.
+
+**Note matching.** Ce lot résiduel (`matched: 0` sur 330 après reset) est **normal** : après les passages précédents, ce qui reste `unmatched`-avec-motif-préfixe est dominé par du **non-film** (sport live, concerts, pubs, titres arabes/polonais obscurs, coquilles provider `Dunhelons & Dragons`). TMDB n'a rien à matcher → 0 correct, **pas** un bug de matching. Les vrais films Hollywood (Skyfall, Pacific Rim, Dune…) ne sont plus dans ce lot car déjà `provider_verified`. Le sur-strip ne touchait que **l'affichage** (le cron cherche sur `original_title` « PL - … » qui ne strippe que le « PL - » de tête, donc la requête TMDB était déjà correcte).
+
+**Régex finale (byte-identique, 5 sites + 2 SQL) :**
+```
+/^(?:[A-Z]{2}|4K|8K|3D|2160P|1440P|1080P|720P|480P|360P|007)(?:-[A-Z0-9+]{1,6})*(?: [-–—▎▏▍▌│┃┆┊｜|] | -[A-Z0-9+]{1,6}- )/
+```
+Tests : `tests/title-deprefix.test.js` — nouveau bloc « keeps a 3-5 letter ALL-CAPS first word » (THOR/SAYEN/NOE/SAS/BOON/KRZYK/LOKIS). 6/6 blocs verts, `node --check` + `esbuild` OK.
+
 ---
 
 ## 4. Runbook — suivre & pousser l'enrichissement (self-host)
@@ -194,3 +216,28 @@ sudo /home/adrien/norva/ops/hetzner/backup/basebackup-weekly.sh
 sudo bash -c 'set -a; . /etc/norva-backup.env; . "$NORVA_OPS_DIR/backup/lib.sh"; rclone purge "r2:${R2_BUCKET}/${R2_PREFIX_WAL%/}/"'
 ```
 → R2 retombe à ~8-10 GB (base-backups + dumps). `KEEP_WAL_DAYS=35` reste OK : le pic de 89 GB était **ponctuel** (import post-cutover) ; en régime normal (WAL ~1 Mo/jour + rafales de crons, compressé pglz), 35 jours de rétention ne pèsent que quelques Go. Les base-backups `-X fetch` restaurent sans WAL, donc `KEEP_WAL_DAYS` ne borne que la fenêtre de PITR-avant depuis le dernier base.
+
+### Vérification R2 post-purge (2026-07-12 nuit) — le dashboard ment, `rclone size` dit vrai
+
+**Contexte.** Après le purge, le **dashboard Cloudflare R2 affichait encore 98,01 GB / 5,63k objets** (panneau « Utilisation » + colonne « Taille »), 30 min+ plus tard — inquiétude « c'est toujours 98 GB ? ».
+
+**La métrique du dashboard R2 n'est PAS temps-réel.** Elle est échantillonnée/agrégée et met **plusieurs heures (jusqu'à ~24 h)** à refléter une suppression. Le seul chiffre fiable = **`rclone size`** (liste les objets réels). Commande (creds dans `/etc/norva-backup.env`, remote `r2` via env, **pas** de `rclone.conf`) :
+```bash
+sudo bash -c '
+  set -a; source /etc/norva-backup.env; set +a
+  export RCLONE_CONFIG_R2_TYPE=s3 RCLONE_CONFIG_R2_PROVIDER=Cloudflare
+  export RCLONE_CONFIG_R2_ACCESS_KEY_ID="$R2_ACCESS_KEY_ID"
+  export RCLONE_CONFIG_R2_SECRET_ACCESS_KEY="$R2_SECRET_ACCESS_KEY"
+  export RCLONE_CONFIG_R2_ENDPOINT="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+  rclone size "r2:$R2_BUCKET"                       # taille réelle (versions courantes)
+  rclone size "r2:$R2_BUCKET/selfhost/dumps"
+  rclone size "r2:$R2_BUCKET/selfhost/wal"
+  rclone size "r2:$R2_BUCKET/selfhost/base"
+'
+```
+**Résultat réel (2026-07-12 ~01:11 UTC) : 11,6 GiB / 371 objets** — `dumps` 1,24 Go (2) · `wal` 5,58 Go (361) · `base` 4,76 Go (8). Le « 98 GB » du dashboard n'était que le retard de métrique ; facturation `$0.00`. **Le purge a bien tenu.**
+
+**R2 ne gère PAS le versioning.** `rclone size --s3-versions` → `501 NotImplemented: ListObjectVersions not implemented`. Donc **aucune « vieille version » cachée** ne peut gonfler le stockage (théorie écartée définitivement) : un `rclone delete`/`purge` libère bien l'espace, point. Le `403 versioning status` vu au purge précédent était le même symptôme bénin (R2 sans versioning → rclone assume « unversioned » et continue).
+
+**Note rétention WAL (à garder pour le futur — demandé explicitement).**
+> Pour rendre le R2 **encore plus petit**, on pourrait baisser **`KEEP_WAL_DAYS`** (35 j actuellement, `/etc/norva-backup.env`) : ça réduit le poste `wal` (le plus gros, ~5,6 Go). **MAIS ça rétrécit la fenêtre de PITR** (recovery à un instant précis *après* le dernier base-backup). **Non recommandé à 12 Go** — le gain est marginal et on sacrifie de la capacité de restauration. À ne considérer que si le stockage redevient un vrai problème de coût. Les base-backups `-X fetch` restant autonomes, baisser `KEEP_WAL_DAYS` ne casse pas la restauration « au dernier base », seulement le point-dans-le-temps entre deux bases.

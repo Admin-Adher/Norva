@@ -148,7 +148,7 @@ Le fix `f4b780a` aide les titres **pas encore tentés**. Les **≥5000 déjà te
 ```sql
 update cloud_titles set search_match_attempted_at = null
 where match_status = 'unmatched'
-  and title ~ '^([A-Z]{2}[A-Z0-9]{0,3}|4K|8K|3D|2160P|1440P|1080P|720P|480P|360P|007)(-[A-Z0-9+]{1,6})*( [-–—▎▏▍▌│┃┆┊｜|] | -[A-Z0-9+]{1,6}- )';
+  and title ~ '^([A-Z]{2}|4K|8K|3D|2160P|1440P|1080P|720P|480P|360P|007)(-[A-Z0-9+]{1,6})*( [-–—▎▏▍▌│┃┆┊｜|] | -[A-Z0-9+]{1,6}- )';
 update norva_search_match_state set last_id = null, done = false where id = 1;
 ```
 → le cron `norva-enrich-search-match` (*/3, actif) draine sur quelques heures → titres préfixés deviennent verified + poster + canonique.

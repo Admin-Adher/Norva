@@ -71,6 +71,24 @@ test('cleanReleaseName never mangles a real title', () => {
   }
 });
 
+test('cleanReleaseName keeps a 3-5 letter ALL-CAPS first word — it is the title, not a prefix', () => {
+  // The head is EXACTLY two uppercase letters (a market/language code: FR/AR/PL/DE…), never 3-5,
+  // so a real title whose first word is a short all-caps word + " - " subtitle is left intact.
+  // Real cases seen in the catalogue (Polish provider "PL - <TITLE> - <SUBTITLE>"):
+  const keep = [
+    'THOR - MIŁOŚĆ I GROM',        // Thor: Love and Thunder (must NOT strip to "MIŁOŚĆ I GROM")
+    'SAYEN - ŁOWCZYNI',            // Sayen: The Huntress
+    'NOE - WYBRANY PRZEZ BOGA',    // Noah
+    'SAS - ZAMACH W EUROTUNELU',   // SAS: Red Notice
+    'BOON - OCHRONIĆ NIEWINNYCH',
+    'KRZYK - HISTORIA PRAWDZIWA',
+    'LOKIS - RĘKOPIS PROFESORA',
+  ];
+  for (const input of keep) {
+    assert.strictEqual(M.cleanReleaseName(input), input, input);
+  }
+});
+
 test('normalizeTitle collapses quality/region/collection variants onto one dedup key', () => {
   const key = M.normalizeTitle('Skyfall');
   assert.strictEqual(M.normalizeTitle('007 - Skyfall'), key);
