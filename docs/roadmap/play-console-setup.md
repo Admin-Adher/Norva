@@ -18,19 +18,22 @@
 ## ⚠️ Correction importante vs les anciens docs — le rail WEB a changé
 
 `billing-setup.md` §5 et §8 parlent de **Stripe / RevenueCat Web Billing** pour le
-web. **Ce n'est plus le cas** : le rail web de Norva est désormais **Stancer**
-(hosted checkout, orchestré côté serveur — `docs/STANCER-BILLING.md`). Conséquences
-pour cette config :
+web, et d'anciennes versions de ce doc parlaient de **Stancer**. **Ce n'est plus le
+cas** : Stancer a été **entièrement retiré** (code + config), et le rail web de
+Norva est désormais **Revolut** (widget de carte intégré, orchestré côté serveur —
+`docs/BILLING-REVOLUT-MIGRATION.md`). Conséquences pour cette config :
 
 - Dans **RevenueCat**, tu n'ajoutes **QUE les 2 apps Google Play**. **Pas** d'app
-  « Web Billing », **pas** de connexion Stripe.
+  « Web Billing », **pas** de connexion Stripe/Revolut dans RevenueCat.
 - La clé « Web Billing » (`revenueCatWebPublicKey`) n'est **pas** nécessaire.
-  `billing-config.js` a déjà `stancer.enabled: true`.
-- RevenueCat sert **uniquement le rail mobile** (Play). Le web (Stancer) écrit dans
+- RevenueCat sert **uniquement le rail mobile** (Play). Le web (Revolut) écrit dans
   **la même** `cloud_entitlement_projection` → l'accès reste unifié par compte.
 
 Le reste de `billing-setup.md` (entitlement `pro`, produits `norva_plus` /
 `norva_family`, webhook, Service Account) **reste valable tel quel**.
+
+> **État live de cette mise en prod** → [`android-go-live-progress.md`](./android-go-live-progress.md)
+> (journal de progression daté, avec le tableau des 9 points).
 
 ---
 
@@ -223,7 +226,7 @@ Réponses complètes dans `clients/PLAY_STORE_RELEASE_STATUS.md` §5. Résumé :
 - Types : e-mail + nom (compte) ; identifiants de source média saisis
   (fonctionnalité) ; historique/progression/favoris/préférences (fonctionnalité,
   perso) ; logs de crash/diagnostics (fonctionnalité) ; statut d'abonnement
-  (compte, **aucun n° de carte stocké** — les cartes vivent chez Stancer / Google).
+  (compte, **aucun n° de carte stocké** — les cartes vivent chez Revolut / Google).
 
 ## 7. Contenu de l'app — déclarations qui font rejeter si oubliées
 
@@ -349,5 +352,6 @@ Ne **jamais** flipper avant que l'achat sandbox marche de bout en bout
 | Readiness policy (data safety, permissions, IP positioning) | `clients/PLAY_STORE.md` §3-11 |
 | RevenueCat + produits + webhook | `docs/roadmap/billing-setup.md` §3-4, §6-7 |
 | Bascule des flags + rollout | `docs/roadmap/billing-status.md` |
-| Rail web Stancer (séparé) | `docs/STANCER-BILLING.md` · `docs/STANCER-GO-LIVE-RUNBOOK.md` |
+| Rail web Revolut (séparé) | `docs/BILLING-REVOLUT-MIGRATION.md` |
+| Journal de mise en prod Android (live) | `docs/roadmap/android-go-live-progress.md` |
 | Écrans d'achat/gestion (UI, déjà en prod) | `public/subscribe.html` · `public/checkout.html` · `public/subscription.html` · `public/paywall.html` |
