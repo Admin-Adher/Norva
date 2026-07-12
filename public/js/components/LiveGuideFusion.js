@@ -94,7 +94,18 @@ class LiveGuideFusion {
         this.container.addEventListener('focusin', (event) => {
             if (!this._isTvMode()) return;
             const row = event.target.closest('.live-guide-row');
-            if (!row) return;
+            if (!row) {
+                // Focus moved OFF the channel rows (e.g. D-pad up onto the Watch /
+                // Favorite buttons in the preview). Kill any armed row-preview timer
+                // so it can't fire ~140ms later and replace the preview — which would
+                // destroy the button that just took focus, drop D-pad focus to <body>,
+                // and make navigation "block" until you press again. (refreshPreview /
+                // render also restore preview-button focus as a backstop.)
+                clearTimeout(this._previewDebounce);
+                this._previewDebounce = null;
+                this._pendingPreviewRow = null;
+                return;
+            }
             // DEBOUNCE: previewing runs renderPreview (an EPG scan) synchronously, so
             // doing it on every focus made D-pad navigation lag 1-10s (each move, and
             // moves stack). Only preview the row the viewer actually lands on: reset a
@@ -388,7 +399,19 @@ class LiveGuideFusion {
     refreshPreview(channel) {
         if (!this.container) return;
         const preview = this.container.querySelector('.live-guide-preview');
-        if (preview) preview.outerHTML = this.renderPreview(channel);
+        if (!preview) return;
+        // TV: if a preview action button (Watch / Favorite) currently holds D-pad
+        // focus, replacing the preview's outerHTML destroys it and focus falls to
+        // <body>, which blocks the D-pad until you press again. Remember which action
+        // was focused and put focus back on the equivalent new button after the swap.
+        const focusedAction = (this._isTvMode() && preview.contains(document.activeElement))
+            ? document.activeElement.closest('[data-action]')?.getAttribute('data-action')
+            : null;
+        preview.outerHTML = this.renderPreview(channel);
+        if (focusedAction) {
+            const fresh = this.container.querySelector(`.live-guide-preview [data-action="${focusedAction}"]`);
+            if (fresh) fresh.focus({ preventScroll: true });
+        }
         if (this._isTvMode()) this._updateTvLiveArt(channel);
     }
 
@@ -1194,14 +1217,23 @@ class LiveGuideFusion {
         // same channel after the new DOM lands (below). Only when a row actually has
         // focus — never steal it from the search box, card actions, or the sidebar.
         let tvFocusedRowKey = null;
+        let tvFocusedAction = null;
         if (tv) {
-            const activeRow = document.activeElement;
-            if (activeRow && activeRow.classList?.contains('live-guide-row') &&
-                this.container.contains(activeRow)) {
-                tvFocusedRowKey = {
-                    channelId: activeRow.getAttribute('data-channel-id'),
-                    sourceId: activeRow.getAttribute('data-source-id')
-                };
+            const active = document.activeElement;
+            if (active && this.container.contains(active)) {
+                if (active.classList?.contains('live-guide-row')) {
+                    tvFocusedRowKey = {
+                        channelId: active.getAttribute('data-channel-id'),
+                        sourceId: active.getAttribute('data-source-id')
+                    };
+                } else {
+                    // Focus on a preview action button (Watch / Favorite): a full
+                    // re-render wipes it too, so remember it and restore below.
+                    const actionBtn = active.closest?.('[data-action]');
+                    if (actionBtn && actionBtn.closest('.live-guide-preview')) {
+                        tvFocusedAction = actionBtn.getAttribute('data-action');
+                    }
+                }
             }
         }
         const rowsChannels = this.getRowsChannels();
@@ -1244,6 +1276,9 @@ class LiveGuideFusion {
                 );
             } catch (_) { restoreRow = null; }
             if (restoreRow) restoreRow.focus({ preventScroll: true });
+        } else if (tvFocusedAction) {
+            const btn = this.container.querySelector(`.live-guide-preview [data-action="${tvFocusedAction}"]`);
+            if (btn) btn.focus({ preventScroll: true });
         }
         this.updateHighlights();
 
