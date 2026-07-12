@@ -76,7 +76,7 @@ mais ça piège : ne pas chercher le login Google dans le projet Firebase, ni l'
 | 3 | Play Console (phone) : abonnements `norva_plus` + `norva_family` (base plans + offre essai 7 j) | ✅ **Fait (phone)** |
 | 4 | Service Account Play → RevenueCat (JSON + droits Play + API activée) | 🟡 **En attente de propagation Google (24-36 h)** |
 | 5 | RevenueCat : entitlement `pro` + offering `default` + 4 packages | ✅ **Fait** — entitlement `pro` ✅, 4 produits créés + attachés ✅, offering `default` + 4 packages mappés ✅ (validation produits « Could not check » → verte quand #4 propage) |
-| 6 | RTDN (Real-time Developer Notifications) → topic Pub/Sub | ⏳ à faire (dépend du #4 vert) |
+| 6 | RTDN (Real-time Developer Notifications) → topic Pub/Sub | ✅ **Fait** — topic `norva-rtdn` (projet `norva-ecosystem`) + SA rôle **Pub/Sub Admin** (⚠️ pas « Lite ») → RevenueCat « Connected to Google » |
 | 7 | App TV : créer dans Play Console + upload AAB + répliquer abonnements + produits RevenueCat TV + même JSON SA | 🟡 **En cours** — app `tv.norva.tv` créée ✅, **AAB vc14 keyé uploadé en test interne** ✅. **Reste** : testeurs, répliquer les abonnements sur l'app TV, produits RevenueCat TV (gaté par #4), JSON SA sur app Norva TV |
 | 8 | Testeurs de licence + **achat sandbox** (phone + TV) → projection `provider=google_play` | ⏳ à faire (gaté par #4 vert) |
 | 9 | Connexion Google (phone) : provider GoTrue + client OAuth Android + test device | ✅ **FAIT & validé sur device** — login natif → compte connecté dans Norva (« Signed in as … — Norva Cloud account ») |
