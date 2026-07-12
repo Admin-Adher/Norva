@@ -181,10 +181,9 @@ done
 Le bucket `norva-db-backups` = ~97,7 GB dont **~89 GB de WAL de test** (5 620 objets) ; base-backups + dumps ≈ 8 GB. **Sûr à purger** car `basebackup-weekly.sh` utilise `pg_basebackup -X fetch` → **chaque base-backup est autonome** (restaurable sans le WAL archivé) ; le WAL ne sert qu'au PITR vers un instant précis, inutile en test. Ordre sûr (base fraîche AVANT de purger) :
 ```bash
 # 1) base-backup frais maintenant (standalone, restaurable sans WAL)
-sudo ~/norva/ops/hetzner/backup/basebackup-weekly.sh
-# 2) purge le WAL de test sur R2 (~89 GB)
-sudo bash -c 'set -a; . /etc/norva-backup.env; . ~/norva/ops/hetzner/backup/lib.sh; rclone purge "r2:${R2_BUCKET}/${R2_PREFIX_WAL%/}/"'
-# 3) rétention WAL R2 courte pendant le test (remonter à 35 au launch pour un vrai PITR)
-sudo sed -i 's/^KEEP_WAL_DAYS=.*/KEEP_WAL_DAYS=7/' /etc/norva-backup.env
+sudo /home/adrien/norva/ops/hetzner/backup/basebackup-weekly.sh
+# 2) purge le WAL de test sur R2 (~89 GB).
+#    ⚠️ Sous `sudo`, `~` s'étend vers /root — sourcer lib.sh via $NORVA_OPS_DIR (défini dans l'env), PAS `~`.
+sudo bash -c 'set -a; . /etc/norva-backup.env; . "$NORVA_OPS_DIR/backup/lib.sh"; rclone purge "r2:${R2_BUCKET}/${R2_PREFIX_WAL%/}/"'
 ```
-→ R2 retombe à ~8-10 GB. La règle « KEEP_WAL_DAYS doit couvrir le plus vieux base-backup » se relâche ici justement parce que les base-backups `-X fetch` restaurent sans WAL ; `KEEP_WAL_DAYS` ne borne alors que la fenêtre de PITR-avant depuis le dernier base. **Au lancement**, remonter `KEEP_WAL_DAYS=35` et refaire une base propre.
+→ R2 retombe à ~8-10 GB (base-backups + dumps). `KEEP_WAL_DAYS=35` reste OK : le pic de 89 GB était **ponctuel** (import post-cutover) ; en régime normal (WAL ~1 Mo/jour + rafales de crons, compressé pglz), 35 jours de rétention ne pèsent que quelques Go. Les base-backups `-X fetch` restaurent sans WAL, donc `KEEP_WAL_DAYS` ne borne que la fenêtre de PITR-avant depuis le dernier base.
