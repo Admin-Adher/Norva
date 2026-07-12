@@ -12221,6 +12221,14 @@ mark.search-highlight {
    so Watch → native fullscreen still plays); the card shows the channel
    logo as art instead of an inline stream.
    ================================================================== */
+/* TV: the sidebar collapse chevron, the desktop expand button, and the search
+   clear-× are not 10-foot gestures and are otherwise phantom D-pad focus targets
+   (opacity:0 / redundant). Remove them from the remote's candidate set entirely. */
+html.tv-mode #page-live #sidebar-collapse-btn,
+html.tv-mode #page-live .sidebar-expand-btn,
+html.tv-mode #page-live .search-clear {
+  display: none !important;
+}
 .tv-mode #page-live .video-container {
   position: absolute;
   width: 1px;

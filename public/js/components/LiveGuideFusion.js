@@ -949,6 +949,19 @@ class LiveGuideFusion {
         this.refreshRows();
         const grown = this.container?.querySelector('.live-guide-rows');
         if (grown) grown.scrollTop = prev;
+        // TV: refreshRows() swapped .live-guide-rows via outerHTML, destroying the
+        // focused "Show more" button — focus falls to <body> and the next D-pad press is
+        // wasted re-anchoring. Put focus on the new button (more rows remain) or the last
+        // row (all shown) so navigation continues cleanly.
+        if (this._isTvMode()) {
+            const moreBtn = this.container?.querySelector('.live-guide-more');
+            if (moreBtn) {
+                moreBtn.focus({ preventScroll: true });
+            } else {
+                const allRows = this.container?.querySelectorAll('.live-guide-row');
+                if (allRows && allRows.length) allRows[allRows.length - 1].focus({ preventScroll: true });
+            }
+        }
     }
 
     /** Cinema mode — enlarge the player, compact the guide to a zapping strip. */

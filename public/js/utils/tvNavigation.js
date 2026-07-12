@@ -68,7 +68,16 @@
         for (const el of all) {
             if (el.disabled) continue;
             if (el.closest('.hidden, [hidden]')) continue;
+            // The channel row's ▶ play button is redundant on TV (OK on the row body
+            // already plays) and, being a right-edge child, it out-scores the next
+            // column on a Right press — drop it so the row is the sole per-channel stop.
+            if (el.classList.contains('live-guide-play')) continue;
             if (!el.offsetParent && el.offsetWidth === 0 && el.offsetHeight === 0) continue;
+            // Skip elements painted invisible (opacity:0 / visibility:hidden) — e.g. the
+            // per-row favourite heart and the search clear-×. isVisibleRect only tests
+            // size/viewport, so without this the D-pad ring can land on nothing.
+            const cs = getComputedStyle(el);
+            if (cs.opacity === '0' || cs.visibility === 'hidden') continue;
             const rect = el.getBoundingClientRect();
             if (!isVisibleRect(rect)) continue;
             els.push(el);
@@ -90,6 +99,18 @@
         const page = activePage();
         if (!page) return [];
         return getCandidates().filter(el => page.contains(el));
+    }
+
+    // Live TV's first candidate in DOM order is the #channel-search text input, a poor
+    // D-pad landing (raises the IME, and Left becomes a caret move so the menu is no
+    // longer one press away). Prefer an actionable, directional target on that page.
+    function pageDefaultTarget(page) {
+        if (page && page.id === 'page-live') {
+            return page.querySelector('#channel-list .group-header, #channel-list .channel-item')
+                || page.querySelector('.player-section .live-guide-preview [data-action="watch"]')
+                || page.querySelector('.player-section .live-guide-row');
+        }
+        return null;
     }
 
     function findVerticalScroller(start, direction) {
@@ -286,7 +307,14 @@
                 !window.app?.channelList?.zeroState) {
                 e.preventDefault();
                 e.stopPropagation();
-                if (window.app?.channelList?.focusFirstVisibleChannel?.()) return;
+                // Down from the (empty) search box: step to the next control on the
+                // natural search → controls → list path. Do NOT call
+                // focusFirstVisibleChannel here — on TV its fallback force-expands and
+                // PERSISTS group #1, a stored state change from a pure nav keypress.
+                const t = document.getElementById('source-select')
+                    || document.querySelector('#channel-list .group-header')
+                    || document.querySelector('#channel-list .channel-item');
+                if (t) { focusElement(t); return; }
             }
             const ownsVerticalKeys = focused.id === 'channel-search' &&
                 (window.app?.channelList?.searchMode || window.app?.channelList?.zeroState);
@@ -355,10 +383,36 @@
                 focusElement(belowInNav);
                 return;
             }
-            const firstPageCandidate = getPageCandidates()[0];
+            const firstPageCandidate = pageDefaultTarget(activePage()) || getPageCandidates()[0];
             if (firstPageCandidate) {
                 focusElement(firstPageCandidate);
                 return;
+            }
+        }
+
+        // Live TV (TV) is 3 columns: rail | .channel-sidebar | .player-section.
+        // ArrowLeft from the player column (a channel row or a preview action button)
+        // should return to a MEANINGFUL sidebar target — the active channel, else the
+        // category header nearest the focused row's screen-y, else the search box — not
+        // the arbitrary same-screen-y node (often an invisible heart) that pure findNext
+        // would pick. Runs BEFORE the rail guard so the sidebar wins; the rail stays one
+        // further Left press away (column-hop).
+        if (e.key === 'ArrowLeft' && focused.closest('.player-section')) {
+            const sb = document.querySelector('.channel-sidebar');
+            if (sb) {
+                let target = sb.querySelector('.channel-item.active, .channel-item.nav-active, .channel-item.playing');
+                if (!target) {
+                    const y = centerOf(focused).y;
+                    const heads = [...sb.querySelectorAll('.group-header')].filter(isVisible);
+                    if (heads.length) {
+                        target = heads.reduce((b, h) => {
+                            const d = Math.abs(centerOf(h).y - y);
+                            return d < b.d ? { el: h, d } : b;
+                        }, { el: heads[0], d: Infinity }).el;
+                    }
+                }
+                if (!target) target = sb.querySelector('#channel-search');
+                if (target) { focusElement(target); return; }
             }
         }
 
@@ -369,7 +423,12 @@
         // when a partially-scrolled card still sits to the left — this guarantees it.
         if (e.key === 'ArrowLeft' && !focused.closest('.navbar')) {
             const leftNext = findNext(focused, 'ArrowLeft');
-            if (!leftNext || leftNext.closest('.navbar')) {
+            // Full-width sidebar list rows (a category header or a channel) have no
+            // in-row neighbour to their left — only the header controls sit up-and-left.
+            // For them, Left must open the menu, not jump diagonally to Hide-unavailable.
+            // The header controls themselves keep walking left within their own row.
+            const isSidebarListRow = focused.matches?.('.channel-sidebar .group-header, .channel-sidebar .channel-item');
+            if (!leftNext || leftNext.closest('.navbar') || isSidebarListRow) {
                 const railTarget = document.querySelector('.navbar .nav-link.active')
                     || [...document.querySelectorAll('.navbar .nav-link')].find(isVisible);
                 if (railTarget && isVisible(railTarget)) {
@@ -380,6 +439,43 @@
             if (leftNext) {
                 focusElement(leftNext);
                 return;
+            }
+        }
+
+        // Live TV (TV): ArrowRight from anywhere in .channel-sidebar must cross into the
+        // player column in ONE press. The sidebar's own right-edge buttons (collapse ‹,
+        // sort ⇅, Hide unavailable) sit closer than the far channel rows and would
+        // otherwise win findNext's forward+lateral score. Prefer the playing/selected
+        // row, else the channel row nearest the focused row's screen-y, else Watch.
+        // (Inside #channel-search the text-field branch above already returned, so Right
+        // stays a caret move there.)
+        if (e.key === 'ArrowRight' && focused.closest('.channel-sidebar')) {
+            const player = document.querySelector('.player-section');
+            if (player) {
+                let target = player.querySelector('.live-guide-row.playing, .live-guide-row.selected, .live-guide-row.active');
+                if (!target) {
+                    const rows = [...player.querySelectorAll('.live-guide-row')].filter(isVisible);
+                    if (rows.length) {
+                        const y = centerOf(focused).y;
+                        target = rows.reduce((b, r) => {
+                            const d = Math.abs(centerOf(r).y - y);
+                            return d < b.d ? { el: r, d } : b;
+                        }, { el: rows[0], d: Infinity }).el;
+                    }
+                }
+                if (!target) target = player.querySelector('.live-guide-preview [data-action="watch"]');
+                if (target) { focusElement(target); return; }
+            }
+        }
+
+        // Live TV (TV): from the TOP channel row, ArrowUp should land on the primary
+        // preview action (Watch), not the Favorite button that sits lower and would win
+        // on pure distance. Only fires at the top of the list (no row above).
+        if (e.key === 'ArrowUp' && focused.matches?.('.live-guide-row')) {
+            const firstRow = focused.closest('.live-guide-rows')?.querySelector('.live-guide-row');
+            if (focused === firstRow) {
+                const watch = document.querySelector('.player-section .live-guide-preview [data-action="watch"]');
+                if (watch && isVisible(watch)) { focusElement(watch); return; }
             }
         }
 
@@ -472,7 +568,9 @@
             return;
         }
         const candidates = getPageCandidates();
-        const target = lastFocusedPageId === page.id ? nearestToLastRect(candidates) : candidates[0];
+        const target = lastFocusedPageId === page.id
+            ? nearestToLastRect(candidates)
+            : (pageDefaultTarget(page) || candidates[0]);
         if (target) focusElement(target);
     }
 
