@@ -56,7 +56,7 @@
 | 6 | RTDN (Real-time Developer Notifications) → topic Pub/Sub | ⏳ à faire (dépend du #4 vert) |
 | 7 | App TV : créer dans Play Console + upload AAB + répliquer produits + même JSON SA | ⏳ à faire |
 | 8 | Testeurs de licence + **achat sandbox** (phone + TV) → projection `provider=google_play` | ⏳ à faire |
-| 9 | Connexion Google (phone) : provider GoTrue + client OAuth Android + test device + redirect web | ⏳ à faire |
+| 9 | Connexion Google (phone) : provider GoTrue + client OAuth Android + test device | 🟡 **Config FAITE** — clients OAuth Web+Android OK (projet `norva-501719`), SHA-1 Android = signature Play ✅, GoTrue accepte déjà l'audience. **Reste : test sur device** (après build vc11) |
 
 **Bloqueurs transverses**
 - ⚠️ **D-U-N-S / suppression du compte Play le 9 août 2026** (bandeau rouge).
@@ -147,15 +147,25 @@
 
 ## Point #9 — connexion Google (à faire, résumé)
 
-1. **Vérifier le provider Google de GoTrue sur la box** : accepte-t-il l'audience
-   du client Android (`973428500788-deum…apps.googleusercontent.com`) ? GoTrue doit
-   accepter l'`id_token` émis côté natif.
-2. **Créer un client OAuth Android** dans Google Cloud pour `tv.norva.phone` +
-   l'empreinte **SHA-256 de la clé de signature Play** (celle générée par Google,
-   pas l'upload).
-3. **Tester « Continue with Google »** sur un device réel (le flux natif).
-4. **Repointer le client OAuth WEB** : redirect → `https://api.norva.tv/auth/v1/callback`
-   (déjà corrigé dans `docs/GOOGLE-LOGIN-SETUP.md`).
+**⚠️ Deux projets Google Cloud (par design, pas un bug) :**
+- **`norva-501719`** (n° `973428500788`) = **login Google** : clients OAuth **Web**
+  (`973428500788-deum…`) + **Android** (`973428500788-eut6…`). C'est le projet dont
+  le n° préfixe les client IDs.
+- **`norva-ecosystem`** = **Firebase/FCM** (google-services.json) + **Service Account
+  RevenueCat** (`revenuecat-play@…`). Indépendant du login — normal.
+
+**Config login Google — FAITE ✅ :**
+1. Client OAuth **Android** `973428500788-eut6…` (projet `norva-501719`) : package
+   `tv.norva.phone` ✅, **SHA-1 = signature Play** ✅ (vérifié identique :
+   `C4:C7:69:6C:AB:17:16:88:51:70:C4:A8:D3:6F:49:FE:32:9B:CF:C7`).
+2. Client **Web** `973428500788-deum…` présent, **déjà accepté par GoTrue** (le login
+   web fonctionne → l'audience du token natif = ce client web, donc rien à ajouter).
+3. Code natif prêt (`GetSignInWithGoogleOption.Builder(webClientId)`, `strings.xml`
+   renseigné).
+
+**Reste :**
+- **Tester « Continue with Google »** sur un device réel (build vc11 installé depuis
+  le test interne).
 
 ---
 
@@ -195,7 +205,11 @@
 | Webhook RevenueCat | `https://api.norva.tv/functions/v1/norva-billing-webhook` |
 | Secret webhook (box) | `NORVA_REVENUECAT_WEBHOOK_AUTH` (valeur en `.env` uniquement) |
 | Clés SDK (CI) | `REVENUECAT_API_KEY_PHONE` · `REVENUECAT_API_KEY_TV` (secrets GitHub) |
-| Client OAuth Google (audience) | `973428500788-deum…apps.googleusercontent.com` |
+| Projet GCP — login Google | `norva-501719` (n° `973428500788`) — clients OAuth Web+Android |
+| Client OAuth **Web** (audience token) | `973428500788-deum…apps.googleusercontent.com` |
+| Client OAuth **Android** | `973428500788-eut6…apps.googleusercontent.com` (package `tv.norva.phone`) |
+| SHA-1 signature Play (phone) | `C4:C7:69:6C:AB:17:16:88:51:70:C4:A8:D3:6F:49:FE:32:9B:CF:C7` |
+| SHA-256 signature Play (phone) | `30:D3:3F:CA:53:A9:14:76:4E:89:EE:BE:F6:B8:B2:37:E0:AD:A2:C1:3A:57:7A:A0:22:E7:30:F5:10:DF:F8:73` |
 | D-U-N-S | `268494859` (org *Hernandez*, 270 rue de Vaugirard 75015 Paris) |
 
 ---
@@ -223,3 +237,9 @@
   - **Aparté Revolut Business (KYB)** : demande de preuve de propriété de `norva.tv`.
     Registrar identifié = **Cloudflare** (RDAP, enregistré 2026-06-18, exp. 2027-06-18)
     → reçu d'achat + capture dashboard Cloudflare à fournir.
+  - #9 **config login Google terminée** : découverte de 2 projets GCP (`norva-501719`
+    = login, `norva-ecosystem` = Firebase/RevenueCat). Client OAuth Android déjà créé
+    (`973428500788-eut6…`), SHA-1 vérifié = **signature Play** (match exact). Reste le
+    test device après build vc11.
+  - #7 **Piste B lancée** : bump versionCodes (phone vc11 / TV vc14, commit `19d7dc5`),
+    rebuild CI à déclencher manuellement (dispatch refusé à l'intégration).
