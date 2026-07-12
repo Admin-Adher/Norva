@@ -12005,6 +12005,40 @@ mark.search-highlight {
   transition: transform 0.15s cubic-bezier(0.2, 0, 0, 1);
 }
 
+/* ------------------------------------------------------------------
+   The TV navbar must FIT the panel width. Android TV WebViews commonly
+   render CSS at ~853px (1920 / 2.25 DPR), not 1920 — at that width the
+   .tv-mode body:17px labels + card-sized paddings made the right cluster
+   too wide, so it collided leftward into the "Norva" brand ("Home" landed
+   on the logo) and pushed the profile avatar off the right edge (the page
+   "se décalait"). Compact the whole bar so it fits comfortably from ~769px
+   up while the labels stay readable at 10 feet. All .tv-mode-scoped. */
+.tv-mode .navbar-menu {
+  gap: 2px;
+}
+.tv-mode .navbar-menu .nav-link {
+  font-size: 14px;          /* down from the inherited body 17px */
+  padding: 6px 10px;        /* down from var(--space-sm) var(--space-md) */
+  gap: 6px;
+}
+.tv-mode .navbar-menu .nav-link .norva-ui-icon {
+  width: 1.35em;            /* down from 1.65em; em tracks the 14px label */
+  height: 1.35em;
+}
+.tv-mode .brand-text {
+  font-size: 1.15rem;       /* down from 1.5rem so the brand cluster is slimmer */
+}
+.tv-mode .logo {
+  width: 36px;
+  height: 36px;
+  flex-basis: 36px;
+}
+/* Belt-and-suspenders: never let a stray 1-2px of shell width turn into a
+   horizontal pan on the TV (rails keep their own internal scroll). */
+.tv-mode body {
+  overflow-x: hidden;
+}
+
 .tv-mode .movie-card:focus,
 .tv-mode .series-card:focus,
 .tv-mode .continue-card:focus,
