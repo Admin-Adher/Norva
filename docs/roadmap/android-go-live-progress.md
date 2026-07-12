@@ -296,6 +296,13 @@
     5. **Essai « fantôme » expliqué** (pas un bug) : en `NORVA_BILLING_MODE=legacy`,
        le serveur auto-crée un essai 7 j **sans carte** (`provider=system`,
        `startTrialProjection`). Disparaît à la bascule prod (`=revenuecat`).
+    6. **« Restore purchases » fermait l'app TV.** Play Billing crashe (niveau natif,
+       non rattrapable par le try/catch Java) sur les box TV sans Play Services
+       fiable. Design correct : **la TV appairée ne fait PAS de billing en propre**
+       (l'abo du compte web/phone s'applique déjà). Fix (web) : `billing.js`
+       `hasNativeBilling()` = **false sur TV** (plus aucun appel natif) + `isTvShell`
+       exposé ; `subscription.html` **read-only sur TV** (pas de Restore / Change
+       plan / Subscribe, note « gérer sur norva.tv ou l'app téléphone »).
        ⚠️ **Piège** : il y a **2 boutons logout** — `Settings.js signOut()` ET le
        **« Logout » de la barre du haut** (`app.js addLogoutButton()`, le chemin
        réellement utilisé sur la TV). Le même correctif TV a été appliqué **aux

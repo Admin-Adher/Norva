@@ -141,6 +141,10 @@
         return 'Norva ' + p.charAt(0).toUpperCase() + p.slice(1);
       }
       function isNative() { try { return !!(window.NorvaBilling && window.NorvaBilling.isNative()); } catch (_) { return false; } }
+      // The Android TV APK is a paired screen: it does no in-app billing (the
+      // account's plan bought on web/phone already applies, and Play Billing
+      // crashes on some TV boxes). So the TV subscription screen is read-only.
+      function isTvShell() { try { return !!(window.NorvaBilling && window.NorvaBilling.isTvShell && window.NorvaBilling.isTvShell()); } catch (_) { return /NorvaTV-AndroidTV/i.test(navigator.userAgent || ''); } }
       function manageUrl() { try { return (window.NorvaBilling && window.NorvaBilling.manageUrl && window.NorvaBilling.manageUrl()) || ''; } catch (_) { return ''; } }
       function hasUserSession() {
         try { const s = JSON.parse(localStorage.getItem('norva-cloud-session') || 'null'); return !!(s && s.user && s.user.id); }
@@ -189,7 +193,9 @@
       // Restore purchases (native/Play): re-link an existing entitlement after a
       // reinstall without re-paying. Only shown in a native shell where it applies.
       function restoreButton() {
-        if (!isNative() || !(window.NorvaBilling && window.NorvaBilling.restore)) return null;
+        // Restore/purchase run on the phone/web, never on the paired TV (Play
+        // Billing crashes on some TV boxes — this is what closed the TV app).
+        if (!isNative() || isTvShell() || !(window.NorvaBilling && window.NorvaBilling.restore)) return null;
         const b = el('button', 'btn ghost', 'Restore purchases');
         b.addEventListener('click', async function () {
           b.disabled = true;
@@ -264,6 +270,7 @@
         return '';
       }
       function storeNoteText(decision) {
+        if (isTvShell()) return 'Subscribe or manage your plan on the web at norva.tv, or in the Norva phone app — it unlocks here automatically.';
         if (managedElsewhere(decision)) return managedElsewhereNote(decision);
         if (entProvider(decision) === 'google_play' && isNative()) {
           return 'Subscriptions are billed through Google Play — manage or cancel anytime in the Play Store.';
@@ -500,9 +507,12 @@
             : "You don't have an active Norva plan yet."));
           content.appendChild(card);
           const row = el('div', 'actions');
-          const see = el('a', 'btn', status === 'expired' ? 'Resubscribe' : 'See plans');
-          see.setAttribute('href', subscribeHref());
-          row.appendChild(see);
+          // No checkout on the TV — subscribing happens on web/phone (see storeNote).
+          if (!isTvShell()) {
+            const see = el('a', 'btn', status === 'expired' ? 'Resubscribe' : 'See plans');
+            see.setAttribute('href', subscribeHref());
+            row.appendChild(see);
+          }
           const rb0 = restoreButton();
           if (rb0) row.appendChild(rb0);
           row.appendChild(backBtn('Back'));
@@ -516,10 +526,11 @@
         const row = el('div', 'actions');
         if (status === 'cancelled_at_period_end') {
           row.appendChild(resumeControl(decision));
-        } else if (!managedElsewhere(decision)) {
+        } else if (!managedElsewhere(decision) && !isTvShell()) {
           // "Change plan" re-enters checkout on THIS platform. Suppress it for a sub
-          // managed elsewhere (e.g. a web/Revolut sub opened on Android) so we never
-          // start a second, conflicting subscription — the note says where to manage.
+          // managed elsewhere (e.g. a web/Revolut sub opened on Android) or on the TV
+          // (no in-app billing) so we never start a second, conflicting subscription —
+          // the note says where to manage.
           const change = el('a', 'btn ghost', 'Change plan');
           change.setAttribute('href', subscribeHref());
           row.appendChild(change);

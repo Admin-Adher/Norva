@@ -30,7 +30,16 @@
       || /[?&]mobile=1\b/.test(window.location.search || '');
   }
 
+  // TRUE only inside the Android TV APK. A device-paired TV inherits the account's
+  // subscription (bought on web/phone) — it never purchases on its own, and Play
+  // Billing crashes on some TV boxes that lack proper Play Services, so we keep
+  // native billing OFF on TV entirely.
+  function isTvShell() {
+    return /NorvaTV-AndroidTV/i.test(navigator.userAgent || '');
+  }
+
   function hasNativeBilling() {
+    if (isTvShell()) return false;
     const bridge = nativeBridge();
     return !!(bridge && typeof bridge.purchase === 'function');
   }
@@ -274,6 +283,7 @@
 
   window.NorvaBilling = {
     isNative: isNative,
+    isTvShell: isTvShell,
     hasNativeBilling: hasNativeBilling,
     isWebBillingConfigured: isWebBillingConfigured,
     isRevolutEnabled: isRevolutEnabled,
