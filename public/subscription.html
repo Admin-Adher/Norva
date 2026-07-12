@@ -537,11 +537,13 @@
         if (status === 'cancelled_at_period_end') {
           row.appendChild(resumeControl(decision));
         } else if (!managedElsewhere(decision) && !isTvShell()) {
-          // "Change plan" re-enters checkout on THIS platform. Suppress it for a sub
-          // managed elsewhere (e.g. a web/Revolut sub opened on Android) or on the TV
-          // (no in-app billing) so we never start a second, conflicting subscription —
-          // the note says where to manage.
-          const change = el('a', 'btn ghost', 'Change plan');
+          // Suppress this CTA for a sub managed elsewhere (web/Revolut opened on
+          // Android) or on the TV (no in-app billing) so we never start a second,
+          // conflicting subscription — the note says where to manage.
+          // Label by state: a real store sub can switch tier ("Change plan"); an
+          // auto/system trial has no chosen plan yet, so the CTA is to pick one.
+          const hasStorePlan = ['revolut', 'google_play', 'apple_app_store'].indexOf(entProvider(decision)) !== -1;
+          const change = el('a', hasStorePlan ? 'btn ghost' : 'btn', hasStorePlan ? 'Change plan' : 'Choose your plan');
           change.setAttribute('href', subscribeHref());
           row.appendChild(change);
           const uc = updateCardLink(decision, false);
