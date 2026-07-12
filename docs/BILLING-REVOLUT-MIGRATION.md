@@ -202,10 +202,12 @@ Renommer = migration risquée hors périmètre.
 
 **Gaps révélés (à traiter séparément — la migration Revolut ne les avait pas
 finis)** :
-1. **Page de gestion web** (`subscription.html`) : rebranchée sur Revolut
-   (cancel/resume/update-card/affichage carte) mais **jamais testée en direct** —
-   à valider par un clic réel. La contre-offre « -50 % » (rétention) était
-   Stancer-only et a été retirée (pas de backend Revolut).
+1. ~~**Page de gestion web** (`subscription.html`) : rebranchée sur Revolut~~
+   ✅ **validée en prod le 2026-07-12** — checkout embarqué → carte sauvegardée
+   (`payment_method_id` rempli, essai `trialing` +7 j), puis cancel → `Ending`,
+   resume → `trialing`, update-card → `checkout-revolut.html?intent=update_card`.
+   La contre-offre « -50 % » (rétention) était Stancer-only et a été retirée
+   (pas de backend Revolut).
 2. **Relance de panier abandonné** (`norva-lifecycle runAbandoned`) : scanne le
    ledger `cloud_stancer_payments`, où le checkout Revolut **n'écrit pas** (il
    écrit `cloud_revolut_orders`) → inactive pour Revolut. À rebrancher.
