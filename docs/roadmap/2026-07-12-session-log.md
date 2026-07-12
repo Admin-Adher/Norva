@@ -175,3 +175,16 @@ done
 **Diagnostic réutilisable.** `ops/hetzner/scripts/06-check-disk.sh` (read-only) : disque, WAL local vs R2, **débit WAL live (échantillon 30 s)**, `wal_compression`, bloat, logs Docker, taille DB — en un run (`sudo` pour la visibilité complète).
 
 **À finaliser avant public** : confirmer que `norva-wal-sync` tourne en `exit 0` (local purgé) ; mesurer que la churn retombe après l'enrichissement ; optionnellement purger le WAL/base-backups de test sur R2 pour repartir propre.
+
+### Réduire le storage R2 (phase de test)
+
+Le bucket `norva-db-backups` = ~97,7 GB dont **~89 GB de WAL de test** (5 620 objets) ; base-backups + dumps ≈ 8 GB. **Sûr à purger** car `basebackup-weekly.sh` utilise `pg_basebackup -X fetch` → **chaque base-backup est autonome** (restaurable sans le WAL archivé) ; le WAL ne sert qu'au PITR vers un instant précis, inutile en test. Ordre sûr (base fraîche AVANT de purger) :
+```bash
+# 1) base-backup frais maintenant (standalone, restaurable sans WAL)
+sudo ~/norva/ops/hetzner/backup/basebackup-weekly.sh
+# 2) purge le WAL de test sur R2 (~89 GB)
+sudo bash -c 'set -a; . /etc/norva-backup.env; . ~/norva/ops/hetzner/backup/lib.sh; rclone purge "r2:${R2_BUCKET}/${R2_PREFIX_WAL%/}/"'
+# 3) rétention WAL R2 courte pendant le test (remonter à 35 au launch pour un vrai PITR)
+sudo sed -i 's/^KEEP_WAL_DAYS=.*/KEEP_WAL_DAYS=7/' /etc/norva-backup.env
+```
+→ R2 retombe à ~8-10 GB. La règle « KEEP_WAL_DAYS doit couvrir le plus vieux base-backup » se relâche ici justement parce que les base-backups `-X fetch` restaurent sans WAL ; `KEEP_WAL_DAYS` ne borne alors que la fenêtre de PITR-avant depuis le dernier base. **Au lancement**, remonter `KEEP_WAL_DAYS=35` et refaire une base propre.
