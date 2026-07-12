@@ -52,7 +52,7 @@
 | 2 | RevenueCat : webhook → backend + `NORVA_REVENUECAT_WEBHOOK_AUTH` (test 200) | ✅ **Fait** |
 | 3 | Play Console (phone) : abonnements `norva_plus` + `norva_family` (base plans + offre essai 7 j) | ✅ **Fait (phone)** |
 | 4 | Service Account Play → RevenueCat (JSON + droits Play + API activée) | 🟡 **En attente de propagation Google (24-36 h)** |
-| 5 | RevenueCat : entitlement `pro` + offering `default` + 4 packages + import produits | ⏳ **En cours** — entitlement `pro` ✅, 4 produits créés + attachés ✅, offering + packages à faire |
+| 5 | RevenueCat : entitlement `pro` + offering `default` + 4 packages | ✅ **Fait** — entitlement `pro` ✅, 4 produits créés + attachés ✅, offering `default` + 4 packages mappés ✅ (validation produits « Could not check » → verte quand #4 propage) |
 | 6 | RTDN (Real-time Developer Notifications) → topic Pub/Sub | ⏳ à faire (dépend du #4 vert) |
 | 7 | App TV : créer dans Play Console + upload AAB + répliquer produits + même JSON SA | ⏳ à faire |
 | 8 | Testeurs de licence + **achat sandbox** (phone + TV) → projection `provider=google_play` | ⏳ à faire |
@@ -81,7 +81,7 @@
 | Service Account (app Norva Phone) | JSON uploadé ✅ ; **validation « Credentials need attention »** = attente de propagation Google (message exact : *« Your Google Service Account credentials do not have permissions to access the needed Google resources »* → propagation, pas d'erreur de config) |
 | Entitlement `pro` | ✅ **Créé** (REST API id `entl9f680380c4`, display « Norva Pro access ») |
 | Produits (Norva Phone) | ✅ **4 créés + attachés à `pro`** : `norva_plus:monthly`, `norva_plus:annual`, `norva_family:monthly`, `norva_family:annual` (« Backwards compatible » décoché → identifiers `sub:baseplan`). Statut « Could not check » = attente SA vert (normal). Créés manuellement car l'import auto exige le SA vert. |
-| Offering `default` + 4 packages | ⏳ à faire (prochaine étape) |
+| Offering `default` + 4 packages | ✅ **Fait** (REST id `ofrngedec7b8faa`). Mapping (produit Norva Phone) : `$rc_monthly`→`norva_plus:monthly`, `$rc_annual`→`norva_plus:annual`, `family_monthly`→`norva_family:monthly`, `family_annual`→`norva_family:annual`. Produits TV à ajouter aux mêmes packages au #7. |
 | Import produits (depuis Play) | ⏳ à faire (nécessite #4 vert) |
 
 **Structure catalogue cible** (à créer aux #5) :
@@ -214,5 +214,12 @@
     `pro`** ; statut « Could not check » (attente SA). **Reste** : offering `default`
     + 4 packages.
   - **Repéré** : offres d'essai `norva_plus` en `Brouillon` → à activer.
+  - #5 **terminé** : offering `default` (`ofrngedec7b8faa`) + 4 packages mappés
+    (`$rc_monthly`/`$rc_annual` → Plus, `family_monthly`/`family_annual` → Family).
+    Piège corrigé en cours de route : `$rc_annual` pointait par erreur sur
+    `norva_family:annual` → remis sur `norva_plus:annual`.
   - Docs : création de ce journal + correction rail web Stancer→Revolut dans
     `play-console-setup.md`.
+  - **Aparté Revolut Business (KYB)** : demande de preuve de propriété de `norva.tv`.
+    Registrar identifié = **Cloudflare** (RDAP, enregistré 2026-06-18, exp. 2027-06-18)
+    → reçu d'achat + capture dashboard Cloudflare à fournir.
