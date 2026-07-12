@@ -17,6 +17,25 @@
           document.documentElement.classList.add('native-app');
         }
       })();
+
+      // TV safety net: the Android TV APK (UA `NorvaTV-AndroidTV`) authenticates
+      // ONLY by device pairing (QR) — the email/password form is unusable on a
+      // remote and Google OAuth is blocked in the TV WebView. Any path that lands
+      // the TV here unauthenticated (logout, session expiry, a 401 redirect) must
+      // bounce to the pairing screen instead of showing this form. Runs before
+      // first paint so the form never flashes. Exempts account-management and
+      // auth-return flows (tokens carried in the URL). Phone/web are untouched.
+      (function () {
+        try {
+          if (!/NorvaTV-AndroidTV/i.test(navigator.userAgent || '')) return;
+          var p = new URLSearchParams(location.search);
+          var h = location.hash || '';
+          var authLink = p.get('token_hash') || p.get('mode') === 'recovery' || p.get('manage') === '1'
+            || /(access_token|refresh_token)=/.test(h) || /type=(recovery|invite|magiclink|signup)/.test(h);
+          if (authLink) return;
+          location.replace('/cloud-pair.html?device=tv&returnTo=%2Fapp.html%3Fpaired%3D1%23home');
+        } catch (_) { /* fail open: fall through to the normal page */ }
+      })();
     </script>
     <script>
       // ── Pre-launch gate ──────────────────────────────────────────────────

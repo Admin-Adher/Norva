@@ -14,6 +14,18 @@ function isNativeShell() {
         || /[?&]mobile=1\b/.test(window.location.search || '');
 }
 
+// TRUE only inside the Android TV APK (UA tag `NorvaTV-AndroidTV`). Must NOT
+// match the phone (`NorvaTV-AndroidPhone`) or the standalone APK — the TV is the
+// one shell that authenticates by device pairing (QR), never by email/password,
+// so logging out on TV returns to the pairing screen, not the login form.
+function isTvShell() {
+    return /NorvaTV-AndroidTV/i.test(navigator.userAgent || '');
+}
+
+// The pairing entry the TV APK boots into (mirrors CLOUD_PAIR_URL in the TV
+// MainActivity): re-pair via QR, then land back on the app once approved.
+const TV_PAIR_URL = '/cloud-pair.html?device=tv&returnTo=%2Fapp.html%3Fpaired%3D1%23home';
+
 // True once the native APK exposes the Play Billing purchase bridge. In-app
 // purchase is allowed by stores (only external web payment links are not), so
 // when this bridge is present we can surface an in-app "Subscribe" action.
@@ -283,7 +295,10 @@ class SettingsPage {
 
         if (this.app.currentUser?.cloud && window.NorvaAuth) {
             await window.NorvaAuth.signOut();
-            window.location.replace('/account.html');
+            // TV shell re-pairs by QR (no keyboard, OAuth blocked in the TV
+            // WebView), so it must return to the pairing screen — never the
+            // email/password form. Phone/web keep the normal login page.
+            window.location.replace(isTvShell() ? TV_PAIR_URL : '/account.html');
             return;
         }
 
