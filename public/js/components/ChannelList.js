@@ -343,18 +343,23 @@ class ChannelList {
      * a calm "browser"). Off TV (mouse/touch/phone) it plays as before. Returns
      * true when it handled the activation so the caller skips selectChannel().
      */
-    _tvActivateChannelItem(item) {
+    _tvActivateChannel(channel) {
         if (!this._isTvMode()) return false;
-        const channel = this._channelFromItem(item);
         if (!channel) return false;
-        // Cancel any pending focus-preview so it can't fire after we've moved
-        // focus to Watch and needlessly rebuild the preview under it.
+        // Cancel any pending focus-preview (browse) AND highlight-preview (search)
+        // so neither fires after we've moved focus to Watch and rebuilds the card
+        // out from under it.
         clearTimeout(this._tvPreviewTimer);
+        clearTimeout(this._tvSearchPreviewTimer);
         this._tvPreviewPending = null;
         window.app?.liveGuideFusion?.setActiveChannel?.(channel);
         const watch = document.querySelector('.player-section .live-guide-preview [data-action="watch"]');
         if (watch) watch.focus({ preventScroll: true });
         return true;
+    }
+
+    _tvActivateChannelItem(item) {
+        return this._tvActivateChannel(this._channelFromItem(item));
     }
 
     init() {
@@ -1362,6 +1367,9 @@ class ChannelList {
 
     exitSearchMode({ restoreScroll = true } = {}) {
         if (!this.searchMode && !this.zeroState) return;
+        // Drop any queued search-highlight preview so it can't fire ~140ms after we
+        // leave search and re-preview a result over the browse selection.
+        clearTimeout(this._tvSearchPreviewTimer);
         this.searchMode = false;
         this.zeroState = false;
         this.selectedResultIndex = -1;
@@ -1855,6 +1863,11 @@ class ChannelList {
             e.preventDefault();
             const target = this.renderedChannels[Math.max(0, this.selectedResultIndex)] || this.renderedChannels[0];
             if (target) {
+                // Android TV: OK previews the highlighted result + parks focus on the
+                // Watch button (one more OK plays) — the same calm two-press flow as
+                // browse mode. Pass the renderedChannels object straight in so it works
+                // even for remote results not yet in this.channels.
+                if (this._tvActivateChannel(target)) return;
                 this.selectChannel({
                     channelId: target.id,
                     sourceId: String(target.sourceId),
@@ -1877,6 +1890,19 @@ class ChannelList {
         if (el) {
             el.classList.add('kb-selected');
             if (scroll) el.scrollIntoView({ block: 'nearest' });
+        }
+        // Android TV: mirror browse mode — the HIGHLIGHTED result drives the preview
+        // card. In search, D-pad focus stays on the search input (this list moves a
+        // 'kb-selected' class, not DOM focus), so the browse focusin listener never
+        // fires; preview the highlighted object directly instead. Works for remote
+        // results not in this.channels. Debounced via a field distinct from the
+        // browse focus-preview timer so the two paths never race.
+        if (this._isTvMode()) {
+            clearTimeout(this._tvSearchPreviewTimer);
+            const previewCh = target;
+            this._tvSearchPreviewTimer = setTimeout(() => {
+                window.app?.liveGuideFusion?.setActiveChannel?.(previewCh);
+            }, 140);
         }
     }
 
