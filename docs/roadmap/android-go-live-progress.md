@@ -273,5 +273,15 @@
     aux testeurs, sortie 14:35). Reste : testeurs, form factor TV, abonnements TV,
     produits RevenueCat TV (gaté #4).
   - #9 **test device** : le **sélecteur de compte Google natif s'affiche** dans l'app
-    phone (vc11) → toute la config OAuth Android + SHA-1 Play est validée. Reste à
-    confirmer le login complet (échange id_token ↔ GoTrue).
+    phone (vc11) → toute la config OAuth Android + SHA-1 Play est validée. Login
+    complet **confirmé** (compte connecté dans Norva).
+  - **Bugs TV corrigés (testing)** :
+    1. **Logout TV → formulaire e-mail/mdp** au lieu du QR. Fix web (déploie via
+       Pages) : `Settings.js` redirige le shell TV vers `cloud-pair.html` ; garde
+       défensive dans `account.html` (tout shell TV non-authentifié → appairage).
+       Détection stricte par UA `NorvaTV-AndroidTV` (zéro impact phone/web).
+    2. **Logout TV → QR flashe puis reconnecte** le même compte (le device-token
+       local persistait → `cloud-pair` reprenait la session). Fix : nouvel endpoint
+       serveur `DELETE /device/me` (auto-unpair, `revoked=true`, authentifié par
+       device-token) + `Settings.js` efface le device-token/id local et appelle
+       l'unpair au logout. **⚠️ nécessite un déploiement edge sur la box.**

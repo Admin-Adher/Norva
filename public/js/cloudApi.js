@@ -1088,6 +1088,9 @@
 
         device: {
             me: () => request('GET', '/device/me', null, { token: getDeviceToken() }),
+            // Self-unpair on logout: revoke this screen's own device token so the
+            // account drops it and the pairing screen can't silently resume.
+            unpairSelf: () => request('DELETE', '/device/me', null, { token: getDeviceToken() }),
             heartbeat: () => request('POST', '/device/heartbeat', {}, { token: getDeviceToken() }),
             commands: () => request('GET', '/device/commands', null, { token: getDeviceToken() }),
             acknowledgeCommand: (id) => request('PATCH', `/device/commands/${encodeURIComponent(id)}`, { status: 'acknowledged' }, { token: getDeviceToken() }),

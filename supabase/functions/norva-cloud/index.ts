@@ -205,6 +205,11 @@ async function route(
   if (scope === "device") {
     const device = await requireDevice(req, db);
     if (req.method === "GET" && id === "me") return { body: { device } };
+    // Self-unpair: the paired screen (e.g. a TV) revokes ITS OWN device token on
+    // logout, so the account drops this screen and the token can't silently
+    // resume the session. Authenticated by the device token (requireDevice), so
+    // no user session is needed on the screen.
+    if (req.method === "DELETE" && id === "me") return { body: await revokeSelfDevice(device, db) };
     if ((req.method === "POST" || req.method === "PATCH") && id === "heartbeat") {
       return { body: await heartbeatDeviceToken(device, db) };
     }
@@ -909,6 +914,19 @@ async function revokeDevice(id: string, userId: string, db: SupabaseClient) {
     .eq("user_id", userId);
   if (error) throwDb(error, "Unable to revoke device");
   return { success: true };
+}
+
+// Device-token-authenticated self-revoke (the screen unpairing itself on
+// logout). Same effect as an owner-initiated revoke, but scoped to the caller's
+// own device row — requireDevice already proved ownership of the token.
+async function revokeSelfDevice(device: CloudDevice, db: SupabaseClient) {
+  const { error } = await db
+    .from("cloud_devices")
+    .update({ revoked: true })
+    .eq("id", device.id)
+    .eq("user_id", device.user_id);
+  if (error) throwDb(error, "Unable to unpair device");
+  return { success: true, unpaired: true };
 }
 
 async function listSources(userId: string, db: SupabaseClient) {

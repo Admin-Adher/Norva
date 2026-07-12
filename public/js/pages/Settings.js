@@ -291,14 +291,25 @@ class SettingsPage {
     }
 
     async signOut() {
+        // TV = a device-paired screen. A plain session sign-out leaves the device
+        // token in place, so the pairing screen silently resumes the SAME account
+        // (the "QR flashes then reconnects" bug). Unpair server-side (the account
+        // drops this screen) AND clear the local device token/id, then return to a
+        // fresh QR pairing. Order matters: unpair while the token still exists.
+        if (isTvShell()) {
+            try { await window.NorvaCloud?.device?.unpairSelf?.(); } catch (_) { /* best-effort; still clear locally */ }
+            try { window.NorvaCloud?.setDeviceToken?.(''); } catch (_) { /* noop */ }
+            try { localStorage.removeItem('norva-cloud-device-id'); } catch (_) { /* noop */ }
+            try { if (window.NorvaAuth) await window.NorvaAuth.signOut(); } catch (_) { /* noop */ }
+            window.location.replace(TV_PAIR_URL);
+            return;
+        }
+
         const token = localStorage.getItem('authToken');
 
         if (this.app.currentUser?.cloud && window.NorvaAuth) {
             await window.NorvaAuth.signOut();
-            // TV shell re-pairs by QR (no keyboard, OAuth blocked in the TV
-            // WebView), so it must return to the pairing screen — never the
-            // email/password form. Phone/web keep the normal login page.
-            window.location.replace(isTvShell() ? TV_PAIR_URL : '/account.html');
+            window.location.replace('/account.html');
             return;
         }
 
