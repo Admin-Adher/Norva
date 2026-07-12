@@ -61,6 +61,17 @@ class LiveGuideFusion {
                 return;
             }
 
+            // Row ⋮ button → toggle that channel's favourite (mockup row menu).
+            const rowMenu = event.target.closest('.live-guide-row-menu');
+            if (rowMenu) {
+                const r = rowMenu.closest('.live-guide-row');
+                if (r) {
+                    Promise.resolve(this.app.channelList?.toggleFavorite?.(r.dataset.sourceId, r.dataset.channelId))
+                        .then(() => this.render()).catch(() => {});
+                }
+                return;
+            }
+
             // The ▶ button plays immediately; tapping the row body only previews.
             const playBtn = event.target.closest('.live-guide-play');
             if (playBtn) {
@@ -1078,6 +1089,9 @@ class LiveGuideFusion {
                 <button type="button" class="live-guide-play" title="Watch" aria-label="Watch">
                     <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
                 </button>
+                ${this._isTvMode() ? `<button type="button" class="live-guide-row-menu" data-row-fav title="Favorite" aria-label="Favorite">
+                    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
+                </button>` : ''}
             </div>
         `;
     }
