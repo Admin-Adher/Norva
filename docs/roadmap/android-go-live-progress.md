@@ -56,7 +56,7 @@
 | 6 | RTDN (Real-time Developer Notifications) → topic Pub/Sub | ⏳ à faire (dépend du #4 vert) |
 | 7 | App TV : créer dans Play Console + upload AAB + répliquer abonnements + produits RevenueCat TV + même JSON SA | 🟡 **En cours** — app `tv.norva.tv` créée ✅, **AAB vc14 keyé uploadé en test interne** ✅. **Reste** : testeurs, répliquer les abonnements sur l'app TV, produits RevenueCat TV (gaté par #4), JSON SA sur app Norva TV |
 | 8 | Testeurs de licence + **achat sandbox** (phone + TV) → projection `provider=google_play` | ⏳ à faire (gaté par #4 vert) |
-| 9 | Connexion Google (phone) : provider GoTrue + client OAuth Android + test device | 🟢 **Quasi validé** — sélecteur de compte Google **natif s'affiche sur device** (build vc11) → config OAuth/SHA prouvée bonne. **Reste** : confirmer que la sélection connecte bien dans Norva |
+| 9 | Connexion Google (phone) : provider GoTrue + client OAuth Android + test device | ✅ **FAIT & validé sur device** — login natif → compte connecté dans Norva (« Signed in as … — Norva Cloud account ») |
 
 **Bloqueurs transverses**
 - ⚠️ **D-U-N-S / suppression du compte Play le 9 août 2026** (bandeau rouge).
@@ -176,31 +176,38 @@
 - **#4** : Service Account créé + droits Play + API activée + JSON uploadé →
   **en attente de propagation Google** (validation passera verte seule).
 - **#7 (partiel)** : app TV `tv.norva.tv` créée + **AAB vc14 keyé** en test interne.
-- **#9 (quasi)** : connexion Google native — **sélecteur de compte s'affiche sur
-  device** (config OAuth/SHA prouvée bonne) ; reste à confirmer le login complet.
+- **#9 ✅ FAIT** : connexion Google native validée sur device — login → compte
+  connecté dans Norva (« Signed in as … — Norva Cloud account »).
 - **Build #15** (commit `19d7dc5`) : AABs phone **vc11** + TV **vc14** avec la clé
   RevenueCat, réussi.
 - **Play (phone)** : offres d'essai `norva_plus` activées (Brouillon→Actif).
 
 ## Ce qui RESTE à faire
 
-1. **#9 (finir)** : confirmer que la sélection de compte connecte bien dans Norva
-   (test device en cours).
-2. **Phone vc11** : uploader `Norva-AndroidPhone-release-aab` (build #15) en test
+### 🟢 Actionnable MAINTENANT (non gaté par le SA)
+1. **Phone vc11** : uploader `Norva-AndroidPhone-release-aab` (build #15) en test
    interne (remplace vc10) → réinstaller.
-3. **#4 → vert** : laisser Google propager (24-36 h), **ne pas recréer de clé**.
-   Revérifier RevenueCat (Apps→Norva Phone, ↻).
-4. **#6 RTDN** : dès #4 vert, « Connect to Google » dans RevenueCat crée le topic.
-5. **#7 (finir)** : app TV → ajouter testeurs, activer form factor Android TV,
-   **répliquer les abonnements** `norva_plus`/`norva_family` sur l'app TV, créer +
-   attacher les **produits RevenueCat TV** aux 4 packages, uploader le **même** JSON
-   SA sur l'app Norva TV (gaté par #4 vert).
-6. **#8 achat sandbox** : ajouter testeurs de licence, achat sandbox phone + TV →
-   vérifier projection `provider=google_play`, `status=trialing/active`.
-7. **Bascule prod** : `NORVA_BILLING_MODE=revenuecat` → `NORVA_ENTITLEMENTS_MODE=enforce`
+2. **#7a — TV Play Console** : ajouter testeurs, activer le **form factor Android TV**,
+   **répliquer les abonnements** `norva_plus`/`norva_family` sur l'app TV (côté Play
+   = indépendant du SA).
+3. **#8a — testeurs de licence** : Play Console → Setup → License testing → ajouter
+   les comptes de test (prépare l'achat sandbox).
+
+### 🟡 EN ATTENTE du Service Account vert (#4, propagation Google 24-36 h)
+4. **#4** : revérifier RevenueCat (Apps→Norva Phone, ↻) jusqu'au vert. **Ne pas
+   recréer de clé.**
+5. **#6 RTDN** : « Connect to Google » dans RevenueCat (crée le topic Pub/Sub).
+6. **#7b — RevenueCat TV** : créer + attacher les **produits TV** aux 4 packages,
+   uploader le **même** JSON SA sur l'app Norva TV.
+7. **#8b — achat sandbox** : achat sandbox phone + TV → vérifier projection
+   `provider=google_play`, `status=trialing/active`.
+
+### 🔴 En DERNIER (après #8 vert de bout en bout)
+8. **Bascule prod** : `NORVA_BILLING_MODE=revenuecat` → `NORVA_ENTITLEMENTS_MODE=enforce`
    → redeploy (voir §13 de `play-console-setup.md`).
-8. **Transverse** : résoudre l'**appel D-U-N-S** (deadline 9 août) ; répliquer la
-   connexion Google check-list si besoin.
+
+### ⚠️ Transverse (en parallèle, deadline 9 août)
+9. Résoudre l'**appel D-U-N-S** (sinon suppression du compte Play le 9 août).
 
 > **Règle d'or** : ne **jamais** flipper `NORVA_BILLING_MODE=revenuecat` /
 > `NORVA_ENTITLEMENTS_MODE=enforce` avant qu'un **achat sandbox** Play marche de bout
