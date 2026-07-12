@@ -105,7 +105,17 @@ class LiveGuideFusion {
         this.container.addEventListener('focusin', (event) => {
             if (!this._isTvMode()) return;
             const row = event.target.closest('.live-guide-row');
-            if (row) this.previewFamilyRow(row);
+            if (!row) return;
+            // DEBOUNCE: previewing runs renderPreview (an EPG scan) synchronously, so
+            // doing it on every focus made D-pad navigation lag 1-10s (each move, and
+            // moves stack). Only preview the row the viewer actually lands on: reset a
+            // short timer on each focus so flying through rows costs nothing.
+            this._pendingPreviewRow = row;
+            clearTimeout(this._previewDebounce);
+            this._previewDebounce = setTimeout(() => {
+                const target = this._pendingPreviewRow;
+                if (target && target.isConnected) this.previewFamilyRow(target);
+            }, 140);
         });
 
         // Inline channel filter (phone/tablet APK): filter rows as you type without
