@@ -206,7 +206,14 @@
             b.textContent = 'Restored — refreshing…';
             setTimeout(function () { location.reload(); }, 900);
           } catch (e) {
-            if (storeNote) storeNote.textContent = 'Could not restore purchases' + (e && e.message ? ': ' + e.message : '') + '.';
+            // Don't surface raw SDK codes (e.g. "billing_not_configured" on a build
+            // without the store key) — map the "not ready" family to plain language.
+            const code = String((e && (e.code || e.message)) || '');
+            if (storeNote) {
+              storeNote.textContent = /not_configured|unavailable|not_ready/i.test(code)
+                ? "In-app purchases aren't available on this device yet."
+                : 'Could not restore purchases' + (e && e.message ? ': ' + e.message : '') + '.';
+            }
             b.disabled = false;
             b.textContent = original;
           }
