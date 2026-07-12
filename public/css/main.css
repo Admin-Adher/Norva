@@ -11951,30 +11951,25 @@ mark.search-highlight {
 
 /* Persistent "you are here" indicator, distinct from the transient focus.
    The web active tint (mid-blue text on a faint fill) is couch-invisible;
-   add a solid bottom accent bar (the top-bar equivalent of a leading rail
-   bar) plus a brighter label so the current section reads across the room.
-   Suppressed while focused so the focus pill fully takes over. */
+   on the left rail add a LEADING accent bar + tint so the current section
+   reads across the room. Suppressed while focused so the focus fill wins. */
 .tv-mode .navbar-menu .nav-link.active:not(:focus) {
   background: var(--color-accent-dim);
-  box-shadow: inset 0 -3px 0 0 var(--color-accent);
+  box-shadow: inset 3px 0 0 0 var(--color-accent);
   color: #ffffff;
 }
 
-/* Focus on a text menu item → tvOS-style light capsule: a filled white
-   pill with an inverted (dark) icon + label and a small settle-scale, no
-   ring. It reads instantly from the couch and can never look "too big" —
-   it is exactly the size of the button. Higher specificity than the
-   blanket *:focus (even with !important), so it wins. */
+/* Focus on a rail item → full-width high-luminance fill with an inverted
+   (dark) icon + label. Crisp from the couch, exempt from the blanket white
+   *:focus ring. No scale — the rail clips overflow, so the fill IS the row. */
 .tv-mode .navbar-menu .nav-link:focus,
 .tv-mode .now-playing-indicator:focus {
   outline: none !important;
   box-shadow: none !important;
   background: #ffffff;
   color: #0b0e14;
-  border-radius: var(--radius-md);
-  transform: scale(1.05);
-  transition: background 0.15s cubic-bezier(0.2, 0, 0, 1),
-              transform 0.15s cubic-bezier(0.2, 0, 0, 1);
+  border-radius: 0;
+  transition: background 0.15s cubic-bezier(0.2, 0, 0, 1);
 }
 /* Flip the gradient <img> icons to a solid dark glyph on the white pill
    (they would otherwise blend blue-on-white). Inline stroke SVGs use
@@ -12005,36 +12000,111 @@ mark.search-highlight {
   transition: transform 0.15s cubic-bezier(0.2, 0, 0, 1);
 }
 
-/* ------------------------------------------------------------------
-   The TV navbar must FIT the panel width. Android TV WebViews commonly
-   render CSS at ~853px (1920 / 2.25 DPR), not 1920 — at that width the
-   .tv-mode body:17px labels + card-sized paddings made the right cluster
-   too wide, so it collided leftward into the "Norva" brand ("Home" landed
-   on the logo) and pushed the profile avatar off the right edge (the page
-   "se décalait"). Compact the whole bar so it fits comfortably from ~769px
-   up while the labels stay readable at 10 feet. All .tv-mode-scoped. */
-.tv-mode .navbar-menu {
+/* ==================================================================
+   LEFT RAIL — Android TV primary navigation.
+   The SAME markup the phone shows as a bottom bar and the web shows as a
+   top bar is projected here as a vertical LEFT RAIL (Netflix / Prime /
+   Google TV model). This is the correct 10-foot shape AND it removes the
+   horizontal-fit problem for good: items stack vertically, so no panel
+   width (853px, 720px, 1280px…) can make the brand / menu / avatar collide
+   or overflow. Same tokens, brand, icons and 5 sections — a pure re-flow,
+   all gated html.tv-mode so phone / tablet / web are untouched.
+   Collapsed to an icon column at rest; expands to reveal labels when the
+   D-pad enters it (:focus-within). The spatial D-pad engine already walks
+   it: Down/Up between rail items, Right into content, Left back to the rail
+   (the ArrowDown-into-content guard lives in tvNavigation.js).
+   ================================================================== */
+.tv-mode .navbar {
+  position: fixed;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  height: 100vh;
+  width: 88px;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
   gap: 2px;
+  padding: 26px 0 18px;             /* fits brand + 5 items + utilities in 480px */
+  background: rgba(10, 10, 15, 0.92);
+  -webkit-backdrop-filter: blur(18px);
+  backdrop-filter: blur(18px);
+  border-bottom: none;
+  border-right: 1px solid var(--glass-border);
+  overflow: hidden;                 /* clip labels while collapsed */
+  z-index: 150;
+  transition: width 0.18s ease-out, background 0.18s ease-out;
 }
-.tv-mode .navbar-menu .nav-link {
-  font-size: 14px;          /* down from the inherited body 17px */
-  padding: 6px 10px;        /* down from var(--space-sm) var(--space-md) */
-  gap: 6px;
+.tv-mode .navbar:focus-within {
+  width: 264px;
+  background: rgba(8, 9, 13, 0.98);
 }
-.tv-mode .navbar-menu .nav-link .norva-ui-icon {
-  width: 1.35em;            /* down from 1.65em; em tracks the 14px label */
-  height: 1.35em;
-}
-.tv-mode .brand-text {
-  font-size: 1.15rem;       /* down from 1.5rem so the brand cluster is slimmer */
+.tv-mode .mobile-menu-toggle { display: none; }
+
+/* Brand pinned to the top; logo centred in the 88px icon column (centre x=44),
+   the "Norva" wordmark revealed only when the rail is expanded. */
+.tv-mode .navbar-brand {
+  margin: 0 0 8px 0;
+  padding-left: 29px;
+  justify-content: flex-start;
+  flex: 0 0 auto;
 }
 .tv-mode .logo {
-  width: 36px;
-  height: 36px;
-  flex-basis: 36px;
+  width: 30px;
+  height: 30px;
+  flex-basis: 30px;
 }
-/* Belt-and-suspenders: never let a stray 1-2px of shell width turn into a
-   horizontal pan on the TV (rails keep their own internal scroll). */
+.tv-mode .brand-text {
+  font-size: 1.25rem;
+}
+
+/* The 5 sections take the middle and push the utility cluster to the bottom. */
+.tv-mode .navbar-menu {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  width: 100%;
+  flex: 1 1 auto;
+}
+.tv-mode .navbar-menu .nav-link {
+  justify-content: flex-start;
+  padding: 9px 16px 9px 31px;       /* 26px icon centred at x=44 in the column */
+  gap: 18px;
+  border-radius: 0;
+  font-size: 16px;
+  width: 100%;
+}
+.tv-mode .navbar-menu .nav-link .nav-icon,
+.tv-mode .navbar-menu .nav-link .norva-ui-icon {
+  width: 26px;
+  height: 26px;
+  flex: 0 0 26px;
+}
+
+/* Labels + wordmark fade in only when the rail is expanded (icon-only rest). */
+.tv-mode .navbar-menu .nav-link span:not(.nav-icon),
+.tv-mode .navbar-brand .brand-text {
+  opacity: 0;
+  transition: opacity 0.12s ease-out;
+}
+.tv-mode .navbar:focus-within .navbar-menu .nav-link span:not(.nav-icon),
+.tv-mode .navbar:focus-within .navbar-brand .brand-text {
+  opacity: 1;
+}
+
+/* Utility cluster (search / bell / profile) at the bottom, centred in the
+   icon column (centre x=44) and kept compact so all three fit at 480px. */
+.tv-mode .nav-search-btn,
+.tv-mode .nav-bell-btn,
+.tv-mode .nav-profile {
+  align-self: flex-start;
+  margin-left: 22px;
+  width: 40px;
+  height: 40px;
+  flex: 0 0 40px;
+}
+
+/* Never let a stray 1-2px of shell width pan the TV (rails scroll internally). */
 .tv-mode body {
   overflow-x: hidden;
 }
@@ -12091,24 +12161,30 @@ mark.search-highlight {
 }
 
 /* Overscan/title-safe margins: env(safe-area-inset-*) is 0 on Android TV, and
-   many panels crop ~2-5% at the edges. Pad the shell so the navbar and edge
-   cards are never clipped (≈5% horizontal / 3% vertical at 1080p). */
-.tv-mode .navbar {
-  padding-left: 48px;
-  padding-right: 48px;
-  padding-top: 20px;
-}
-
+   many panels crop ~2-5% at the edges. The left rail now provides the left
+   margin (content clears the collapsed 88px rail); keep a right/bottom
+   overscan so edge cards aren't clipped. (Navbar padding is set by the rail
+   block above.) */
 .tv-mode .main-content {
-  padding-left: 48px;
-  padding-right: 48px;
+  margin-left: 88px;
+  padding-left: 32px;
+  padding-right: 40px;
   padding-bottom: 27px;
 }
 
-/* The watch page is edge-to-edge video by design — no overscan padding. */
+/* Fullscreen watch page: hide the rail entirely and let the video go
+   edge-to-edge (is-watching is toggled only for the #page-watch route). */
+.tv-mode body.is-watching .navbar {
+  display: none;
+}
+.tv-mode body.is-watching .main-content {
+  margin-left: 0;
+  padding-left: 0;
+  padding-right: 0;
+}
 .tv-mode .main-content #page-watch {
-  margin-left: -48px;
-  margin-right: -48px;
+  margin-left: 0;
+  margin-right: 0;
 }
 
 /* Android TV — Home billboard reads from the couch: taller hero, larger copy and

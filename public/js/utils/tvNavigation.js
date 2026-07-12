@@ -323,6 +323,15 @@
         }
 
         if (e.key === 'ArrowDown' && focused.closest('.navbar')) {
+            // Left rail (TV): a nav item directly BELOW the focused one should win,
+            // so Down walks the rail top-to-bottom. Only dive into the content grid
+            // when there's nothing below in the rail (last item / a horizontal top
+            // bar, where findNext finds no lower nav sibling — backward-compatible).
+            const belowInNav = findNext(focused, 'ArrowDown');
+            if (belowInNav && belowInNav.closest('.navbar')) {
+                focusElement(belowInNav);
+                return;
+            }
             const firstPageCandidate = getPageCandidates()[0];
             if (firstPageCandidate) {
                 focusElement(firstPageCandidate);
