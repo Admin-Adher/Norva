@@ -290,3 +290,9 @@
        réellement utilisé sur la TV). Le même correctif TV a été appliqué **aux
        deux**. Déploiement web via Pages ; **penser à vider le cache WebView TV**
        (fermer/rouvrir l'app) pour charger le nouveau `app.js`.
+    3. **Révocation à distance → TV bloquée sur écran vide.** Quand on révoque le
+       device depuis le compte (téléphone), le device-token de la TV devient
+       invalide mais l'app restait sur sa coquille. Fix (web) : `cloudApi.js`
+       `markInvalidDeviceToken` redirige le shell TV vers `cloud-pair.html` dès
+       qu'un token invalide est détecté (garde anti-boucle, UA `NorvaTV-AndroidTV`).
+       → révoquer une session = la TV repart sur le QR automatiquement.

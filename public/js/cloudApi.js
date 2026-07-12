@@ -150,10 +150,22 @@
         return /invalid\s+(bearer\s+)?(device\s+)?token|device\s+token|expired\s+(device\s+)?token/i.test(text);
     }
 
+    let deviceTokenInvalidRedirecting = false;
     function markInvalidDeviceToken(error, tokenUsed) {
         if (!tokenUsed || tokenUsed !== getDeviceToken()) return;
         setDeviceToken('');
         error.deviceTokenInvalid = true;
+        // TV shell: a revoked/expired device token means this screen is no longer
+        // linked to the account (e.g. the owner tapped "Revoke" on their phone).
+        // Instead of leaving the TV stuck on a broken/empty app shell, send it
+        // straight back to QR pairing. Once-guard prevents redirect storms from
+        // concurrent failing calls. Gated on the TV user agent so phone/web keep
+        // their existing in-place handling.
+        if (!deviceTokenInvalidRedirecting && /NorvaTV-AndroidTV/i.test(navigator.userAgent || '')) {
+            deviceTokenInvalidRedirecting = true;
+            try { localStorage.removeItem('norva-cloud-device-id'); } catch (_) { /* noop */ }
+            try { window.location.replace('/cloud-pair.html?device=tv&returnTo=%2Fapp.html%3Fpaired%3D1%23home'); } catch (_) { /* noop */ }
+        }
     }
 
     // Public image CDNs that carry no provider identity — safe to serve straight
