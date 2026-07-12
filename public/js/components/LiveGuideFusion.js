@@ -1187,6 +1187,23 @@ class LiveGuideFusion {
         const searchCaret = searchEl ? searchEl.selectionStart : null;
 
         const tv = this._isTvMode();
+        // Android TV: a full re-render (EPG arrivals via scheduleRender, scan-complete)
+        // wipes innerHTML and destroys the focused .live-guide-row, so the global
+        // tvNavigation re-anchors to a DIFFERENT row and the list appears to "skip"
+        // channels. Capture the focused row's identity now and restore focus to the
+        // same channel after the new DOM lands (below). Only when a row actually has
+        // focus — never steal it from the search box, card actions, or the sidebar.
+        let tvFocusedRowKey = null;
+        if (tv) {
+            const activeRow = document.activeElement;
+            if (activeRow && activeRow.classList?.contains('live-guide-row') &&
+                this.container.contains(activeRow)) {
+                tvFocusedRowKey = {
+                    channelId: activeRow.getAttribute('data-channel-id'),
+                    sourceId: activeRow.getAttribute('data-source-id')
+                };
+            }
+        }
         const rowsChannels = this.getRowsChannels();
         this.container.innerHTML = `
             ${this.isPhoneApk() ? this.renderToolbar() : ''}
@@ -1214,6 +1231,19 @@ class LiveGuideFusion {
                     try { el.setSelectionRange(searchCaret, searchCaret); } catch (_) { /* noop */ }
                 }
             }
+        }
+        // Android TV: put D-pad focus back on the same channel row we captured before
+        // the re-render, so navigation stays put instead of jumping to another channel.
+        // Only when a row had focus before; guard the lookup + existence so an unusual
+        // id can never throw and break render (falls back to the old lose-focus path).
+        if (tvFocusedRowKey && tvFocusedRowKey.channelId != null) {
+            let restoreRow = null;
+            try {
+                restoreRow = this.container.querySelector(
+                    `.live-guide-row[data-channel-id="${tvFocusedRowKey.channelId}"][data-source-id="${tvFocusedRowKey.sourceId}"]`
+                );
+            } catch (_) { restoreRow = null; }
+            if (restoreRow) restoreRow.focus({ preventScroll: true });
         }
         this.updateHighlights();
 

@@ -29,13 +29,19 @@
         '.channel-tile', '.dashboard-card'
     ].join(',');
 
-    function isVisible(el) {
-        if (!el.offsetParent && el.offsetWidth === 0 && el.offsetHeight === 0) return false;
-        const rect = el.getBoundingClientRect();
+    // Visibility test on an already-measured rect — same truthiness as isVisible's
+    // rect checks, split out so getCandidatesWithRects can reuse the one rect it
+    // already read instead of forcing a second getBoundingClientRect() per element.
+    function isVisibleRect(rect) {
         if (rect.width === 0 || rect.height === 0) return false;
         // Keep candidates near the viewport so huge lists stay fast
         return rect.bottom > -400 && rect.top < window.innerHeight + 400 &&
             rect.right > -200 && rect.left < window.innerWidth + 200;
+    }
+
+    function isVisible(el) {
+        if (!el.offsetParent && el.offsetWidth === 0 && el.offsetHeight === 0) return false;
+        return isVisibleRect(el.getBoundingClientRect());
     }
 
     // The currently open modal, if any. While one is open, navigation is
@@ -50,18 +56,30 @@
         return modals[modals.length - 1] || null;
     }
 
-    function getCandidates() {
+    // Single layout pass: measure each candidate's rect ONCE and keep it alongside
+    // the element, so findNext can score without a second getBoundingClientRect().
+    // rects[i] corresponds to els[i]. Filtering/order/400-cap are identical to the
+    // old getCandidates (the inlined offset + rect checks equal isVisible(el)).
+    function getCandidatesWithRects() {
         const scope = openModal() || document;
         const all = scope.querySelectorAll(INTERACTIVE_SELECTOR);
-        const result = [];
+        const els = [];
+        const rects = [];
         for (const el of all) {
             if (el.disabled) continue;
             if (el.closest('.hidden, [hidden]')) continue;
-            if (!isVisible(el)) continue;
-            result.push(el);
-            if (result.length >= 400) break;
+            if (!el.offsetParent && el.offsetWidth === 0 && el.offsetHeight === 0) continue;
+            const rect = el.getBoundingClientRect();
+            if (!isVisibleRect(rect)) continue;
+            els.push(el);
+            rects.push(rect);
+            if (els.length >= 400) break;
         }
-        return result;
+        return { els, rects };
+    }
+
+    function getCandidates() {
+        return getCandidatesWithRects().els;
     }
 
     function activePage() {
@@ -139,11 +157,16 @@
         let best = null;
         let bestScore = Infinity;
 
-        for (const el of getCandidates()) {
+        // Reuse the rect measured in getCandidatesWithRects (one read per element)
+        // and inline centerOf here so we don't force a second layout read. Same
+        // candidate set, same arithmetic, same iteration order → same result.
+        const { els, rects } = getCandidatesWithRects();
+        for (let i = 0; i < els.length; i++) {
+            const el = els[i];
             if (el === current) continue;
-            const to = centerOf(el);
-            const dx = to.x - from.x;
-            const dy = to.y - from.y;
+            const r = rects[i];
+            const dx = (r.left + r.width / 2) - from.x;
+            const dy = (r.top + r.height / 2) - from.y;
 
             let forward, lateral;
             if (direction === 'ArrowRight') { forward = dx; lateral = Math.abs(dy); }
