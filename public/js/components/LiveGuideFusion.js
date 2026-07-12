@@ -998,11 +998,8 @@ class LiveGuideFusion {
                         <svg class="lg-btn-ico" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
                         <span>${isPlaying ? 'Playing' : 'Watch'}</span>
                     </button>
-                    ${tv ? `<button type="button" class="lg-btn" data-action="epg"><svg class="lg-btn-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg><span>TV Guide</span></button>` : ''}
-                    ${document.body.classList.contains('norva-phone-apk') ? '' : (this._isTvMode()
-                        ? `<button type="button" class="lg-btn" data-action="fullscreen"><svg class="lg-btn-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3m13-5v3a2 2 0 0 1-2 2h-3"/></svg><span>Fullscreen</span></button>`
-                        : `<button type="button" class="lg-btn lg-btn-cinema ${this._cinema ? 'is-active' : ''}" data-action="cinema" aria-pressed="${this._cinema ? 'true' : 'false'}" title="${this._cinema ? 'Restore the split view' : 'Cinema mode — enlarge the player, compact the guide'}">${this._cinema ? 'Exit cinema' : 'Cinema'}</button>
-                           <button type="button" class="lg-btn" data-action="fullscreen" title="Fullscreen" aria-label="Fullscreen">Fullscreen</button>`)}
+                    ${(tv || document.body.classList.contains('norva-phone-apk')) ? '' : `<button type="button" class="lg-btn lg-btn-cinema ${this._cinema ? 'is-active' : ''}" data-action="cinema" aria-pressed="${this._cinema ? 'true' : 'false'}" title="${this._cinema ? 'Restore the split view' : 'Cinema mode — enlarge the player, compact the guide'}">${this._cinema ? 'Exit cinema' : 'Cinema'}</button>
+                           <button type="button" class="lg-btn" data-action="fullscreen" title="Fullscreen" aria-label="Fullscreen">Fullscreen</button>`}
                     <button type="button" class="lg-btn ${this._isTvMode() ? 'lg-btn-fav' : 'lg-btn-icon'} ${isFav ? 'is-fav' : ''}" data-action="favorite" title="Favorite" aria-label="${isFav ? 'In favorites' : 'Add to favorites'}">
                         <span class="lg-btn-heart" aria-hidden="true">${isFav ? '♥' : '♡'}</span>${this._isTvMode() ? `<span>${isFav ? 'In favorites' : 'Add to favorites'}</span>` : ''}
                     </button>

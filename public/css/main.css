@@ -12300,11 +12300,15 @@ mark.search-highlight {
   margin-bottom: 2px;
 }
 .tv-mode #page-live .live-guide-preview-title {
-  font-size: 1.15rem;
+  font-size: 1.1rem;
   font-weight: 700;
   color: #eef3ff;
-  margin-bottom: 8px;
+  margin-bottom: 5px;
 }
+.tv-mode #page-live .live-guide-preview-channel { margin-bottom: 3px; }
+.tv-mode #page-live .live-guide-preview-badges { margin: 1px 0 3px; }
+.tv-mode #page-live .live-guide-preview-onair { margin-bottom: 1px; }
+.tv-mode #page-live .live-guide-preview { padding: 13px; }
 .tv-mode #page-live .live-guide-preview .live-guide-progress {
   display: block;
   max-width: 420px;
