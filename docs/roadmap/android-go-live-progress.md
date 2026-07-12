@@ -83,8 +83,17 @@ mais ça piège : ne pas chercher le login Google dans le projet Firebase, ni l'
 
 **Bloqueurs transverses**
 - ⚠️ **D-U-N-S / suppression du compte Play le 9 août 2026** (bandeau rouge).
-  Faux positif probable (D-U-N-S `268494859`, org *Hernandez*, adresse *270 rue de
-  Vaugirard 75015 Paris* — tout **correspond** entre D&B et Play). **Appel déposé.**
+  **Faux positif confirmé par preuve externe** (2026-07-12) : le D-U-N-S `268494859`
+  n'a **PAS** changé — vérifié sur **D&B UPIK** (`Hernandez, 270 RUE DE VAUGIRARD
+  PARIS 75015`) **et** sur **Verif** (`Hernandez`, EI, SIRET `82485208100036`,
+  statut **Active**). Nom + adresse **identiques** à ceux du profil de paiement Play
+  (validé le 9 juil.). Cause probable : le matcher auto Google s'est emmêlé entre
+  les **multiples enregistrements « Hernandez »** de D&B (268494859, 275154083,
+  287170261, 264513034…) lors d'une re-vérification.
+  **Appel déposé** : ticket `5-1384000041027` (envoyé le 12 juil. 11:18 par
+  adrienhernandez20@gmail.com ; e-mail supplémentaire adrien.hernandez@outlook.com ;
+  langue EN ; décision sous 7 j). Ne **PAS** modifier le D-U-N-S dans le profil (il
+  est correct). Preuves (captures D&B UPIK + Verif) à conserver pour l'appel.
   **À résoudre avant le 9 août** sous peine de suppression du profil + apps. Non
   bloquant pour la config en parallèle, mais **bloquant pour la prod finale**.
 
@@ -207,34 +216,40 @@ mais ça piège : ne pas chercher le login Google dans le projet Firebase, ni l'
 
 ## Ce qui RESTE à faire
 
-### 🟢 Actionnable MAINTENANT (non gaté par le SA)
-1. **Phone vc11** : uploader `Norva-AndroidPhone-release-aab` (build #15) en test
-   interne (remplace vc10) → réinstaller.
-2. **#7a — TV Play Console** : ajouter testeurs, activer le **form factor Android TV**,
-   **répliquer les abonnements** `norva_plus`/`norva_family` sur l'app TV (côté Play
-   = indépendant du SA).
-3. **#8a — testeurs de licence** : Play Console → Setup → License testing → ajouter
-   les comptes de test (prépare l'achat sandbox).
+> **Le rail technique est 100 % validé** : #1-#9 faits. SA vert, RTDN connecté,
+> achat sandbox → projection `google_play | plus | trialing | 2026-07-19` lue par
+> l'app + héritée par la TV. Il ne reste que la **config de publication Play Console**
+> (déclarations « Contenu de l'app » + fiches), le **flip prod**, et l'**appel D-U-N-S**.
 
-### 🟡 EN ATTENTE du Service Account vert (#4, propagation Google 24-36 h)
-4. **#4** : revérifier RevenueCat (Apps→Norva Phone, ↻) jusqu'au vert. **Ne pas
-   recréer de clé.**
-5. **#6 RTDN** : « Connect to Google » dans RevenueCat (crée le topic Pub/Sub).
-6. **#7b — RevenueCat TV** : créer + attacher les **produits TV** aux 4 packages,
-   uploader le **même** JSON SA sur l'app Norva TV.
-7. **#8b — achat sandbox** : achat sandbox phone + TV → vérifier projection
-   `provider=google_play`, `status=trialing/active`.
+### 🟢 Config publication Play Console — EN COURS (phase A)
+**App PHONE — déclarations FAITES (2026-07-12)** :
+- ✅ Règles de confidentialité (`norva.tv/privacy.html`)
+- ✅ Informations de connexion / App access (Oui restreint + compte démo
+  `adrienhernandez20@gmail.com`, accès Pro durable — l'owner laisse l'abonnement se
+  convertir en paiement réel sur ce compte)
+- ✅ Annonces (Non) · ✅ Classification IARC (contenu-non-filtré=Oui, achats-num=Oui,
+  loot=Non) · ✅ Public cible (13+/16+/18+) · ✅ Sécurité des données · ✅ Financières
+  (aucune) · ✅ Catégorie (Lecteurs vidéo) + coordonnées · ✅ Fiche Play Store
+- ⬜ Reste phone : Service au premier plan (téléchargements) si demandé.
 
-### 🔴 En DERNIER (après #8 vert de bout en bout)
-8. **Bascule prod** : `NORVA_BILLING_MODE=revenuecat` → `NORVA_ENTITLEMENTS_MODE=enforce`
-   → redeploy (voir §13 de `play-console-setup.md`).
+**App TV `tv.norva.tv` — À FAIRE (checklist complète dans le chat 2026-07-12)** :
+opt-in form factor Android TV ; mêmes 9 déclarations que phone **sauf** : Data Safety
+→ « ne permet pas de créer un compte » (appairage) + 3 types seulement
+(interactions/plantages/ID) ; App access → instructions d'appairage TV (EN) ; fiche →
+**bannière 1280×720 + capture 1920×1080** (assets TV spécifiques) + description
+variante TV (voir `play-console-setup.md` §4).
+
+### 🔴 En DERNIER (rail validé — quand la publication est prête)
+- **Bascule prod** : `NORVA_BILLING_MODE=revenuecat` → `NORVA_ENTITLEMENTS_MODE=enforce`
+  → redeploy (voir §13 de `play-console-setup.md`). Non urgent.
 
 ### ⚠️ Transverse (en parallèle, deadline 9 août)
-9. Résoudre l'**appel D-U-N-S** (sinon suppression du compte Play le 9 août).
+- Résoudre l'**appel D-U-N-S** (ticket `5-1384000041027`) — faux positif prouvé
+  (voir « Bloqueurs transverses »). Sinon suppression du compte Play le 9 août.
 
 > **Règle d'or** : ne **jamais** flipper `NORVA_BILLING_MODE=revenuecat` /
 > `NORVA_ENTITLEMENTS_MODE=enforce` avant qu'un **achat sandbox** Play marche de bout
-> en bout et écrive une projection `trialing`/`active` (`provider=google_play`).
+> en bout et écrive une projection `trialing`/`active` (`provider=google_play`). ✅ fait.
 
 ---
 
