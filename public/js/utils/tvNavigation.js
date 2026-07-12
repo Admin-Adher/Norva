@@ -301,25 +301,27 @@
         // ↑/↓ leave the field via spatial navigation — except in the channel
         // search, whose own ↑/↓ result navigation must keep working.
         if (isTextField(focused)) {
-            if (focused.id === 'channel-search' &&
-                e.key === 'ArrowDown' &&
-                !focused.value.trim() &&
-                !window.app?.channelList?.searchMode &&
-                !window.app?.channelList?.zeroState) {
+            // This module is TV-only. Down from the channel search box always steps to
+            // the controls row (All Sources first, else Hide unavailable, else the
+            // list / results) — so search bar → controls → results is one top-to-bottom
+            // path with real focus, and the controls stay reachable whether or not a
+            // query is typed. (Do NOT call focusFirstVisibleChannel — on TV its
+            // fallback force-expands & persists group #1, a stored change from a pure
+            // nav keypress.) The search box no longer traps ↓/↑ for a result highlight.
+            if (focused.id === 'channel-search' && e.key === 'ArrowDown') {
                 e.preventDefault();
                 e.stopPropagation();
-                // Down from the (empty) search box: step to the next control on the
-                // natural search → controls → list path. Do NOT call
-                // focusFirstVisibleChannel here — on TV its fallback force-expands and
-                // PERSISTS group #1, a stored state change from a pure nav keypress.
-                const t = document.getElementById('source-select')
-                    || document.querySelector('#channel-list .group-header')
-                    || document.querySelector('#channel-list .channel-item');
+                const t = [
+                    document.getElementById('source-select'),
+                    document.getElementById('live-hide-broken-btn'),
+                    document.querySelector('#channel-list .group-header, #channel-list .channel-item, .search-result')
+                ].find(el => el && isVisible(el));
                 if (t) { focusElement(t); return; }
             }
-            const ownsVerticalKeys = focused.id === 'channel-search' &&
-                (window.app?.channelList?.searchMode || window.app?.channelList?.zeroState);
-            if (isEnter || e.key === 'ArrowLeft' || e.key === 'ArrowRight' || ownsVerticalKeys) return;
+            // Only ←/→ (caret) and Enter stay with the input; ↑ leaves via spatial nav.
+            // (On phone the input keeps ↑/↓ for its own highlight nav — but this module
+            // never runs there.)
+            if (isEnter || e.key === 'ArrowLeft' || e.key === 'ArrowRight') return;
         }
         // <select>: arrows navigate away (never trapped); Enter opens a custom
         // full-screen option list instead of the WebView's tiny native spinner.

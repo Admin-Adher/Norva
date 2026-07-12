@@ -329,10 +329,14 @@ class ChannelList {
     /** Resolve the channel object behind a .channel-item row (by its data-* ids). */
     _channelFromItem(item) {
         if (!item) return null;
-        return this.channels.find(c =>
-            String(c.id) === String(item.dataset.channelId) &&
-            String(c.sourceId) === String(item.dataset.sourceId)
-        ) || null;
+        const cid = String(item.dataset.channelId);
+        const sid = String(item.dataset.sourceId);
+        const match = (c) => String(c.id) === cid && String(c.sourceId) === sid;
+        // Search results (including remote-only ones) live in renderedChannels and may
+        // not be in this.channels yet — check both so preview + OK→Watch still resolve.
+        return (this.channels || []).find(match)
+            || (this.renderedChannels || []).find(match)
+            || null;
     }
 
     /**
@@ -2810,7 +2814,11 @@ class ChannelList {
 
         const groupHeader = this.listContainer?.querySelector(`.group-header[data-group="${groupName}"]`);
         if (!groupHeader) {
-            if (isAdded && favArray.length > 0) this.render();
+            // A full render() here rebuilds the ENTIRE channel list synchronously — on
+            // TV (10-foot, huge lineups, and the Favorites group often absent, e.g. in
+            // search mode) that freezes the page when you favorite from the preview.
+            // Skip it on TV; the Favorites group refreshes on the next natural render.
+            if (isAdded && favArray.length > 0 && !this._isTvMode()) this.render();
             return;
         }
 
