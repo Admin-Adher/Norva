@@ -450,7 +450,14 @@
         // row, else the channel row nearest the focused row's screen-y, else Watch.
         // (Inside #channel-search the text-field branch above already returned, so Right
         // stays a caret move there.)
-        if (e.key === 'ArrowRight' && focused.closest('.channel-sidebar')) {
+        // Only a full-width sidebar LIST ROW (category / channel / search result)
+        // force-crosses to the player on Right — those rows have nothing to their
+        // right in the sidebar, and the sidebar's edge buttons would otherwise win
+        // findNext's score. The header controls row (source · sort · Hide unavailable)
+        // is NOT force-crossed: normal findNext walks it rightward and only reaches
+        // the player at the row's right edge — otherwise those controls are stranded.
+        if (e.key === 'ArrowRight' && focused.closest('.channel-sidebar') &&
+            focused.matches?.('.group-header, .channel-item, .search-result')) {
             const player = document.querySelector('.player-section');
             if (player) {
                 let target = player.querySelector('.live-guide-row.playing, .live-guide-row.selected, .live-guide-row.active');
