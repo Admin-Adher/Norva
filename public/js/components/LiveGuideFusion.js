@@ -47,6 +47,12 @@ class LiveGuideFusion {
             if (action === 'fullscreen') { this.app.player?.toggleFullscreen?.(); return; }
             if (action === 'favorite') { this.toggleSelectedFavorite(); return; }
             if (action === 'cinema') { this.toggleCinema(); return; }
+            if (action === 'epg') {
+                // TV "TV Guide" button → jump into the channel/EPG list below the card.
+                const firstRow = this.container.querySelector('.live-guide-rows .live-guide-row');
+                if (firstRow) { firstRow.scrollIntoView({ block: 'center', behavior: 'smooth' }); firstRow.focus?.(); }
+                return;
+            }
             if (action === 'show-more') { this.showMoreRows(); return; }
             if (action === 'reload-live') {
                 const btn = event.target.closest('[data-action="reload-live"]');
@@ -938,21 +944,39 @@ class LiveGuideFusion {
             && String(playing.id) === String(channel.id)
             && String(playing.sourceId) === String(channel.sourceId);
         const upNext = this.getUpcoming(channel, 2);
+        const tv = this._isTvMode();
+        // Quality pills (8K/UHD/4K/FHD/HD) parsed from the channel name, + the group,
+        // and "N min remaining" from the current programme's end — mockup card meta.
+        const qualityTags = tv
+            ? [...new Set((channel.name || '').toUpperCase().match(/\b(8K|UHD|4K|FHD|HD)\b/g) || [])].slice(0, 2)
+            : [];
+        let minsLeft = null;
+        if (tv && program?.stop) {
+            const ms = new Date(program.stop).getTime() - Date.now();
+            if (ms > 0) minsLeft = Math.round(ms / 60000);
+        }
 
         return `
             <div class="live-guide-preview">
                 <div class="live-guide-preview-art">
+                    ${tv && qualityTags[0] ? `<span class="lg-art-badge">${qualityTags[0]}</span>` : ''}
                     <img src="${logo}" alt="" onerror="this.onerror=null;this.src='${fallbackLogo}'">
                 </div>
                 <div class="live-guide-preview-copy">
                     <div class="live-guide-preview-channel">
                         ${this.escapeHtml(channel.name || 'No channel')}
-                        ${group ? `<span>${this.escapeHtml(group)}</span>` : ''}
+                        ${!tv && group ? `<span>${this.escapeHtml(group)}</span>` : ''}
                     </div>
+                    ${tv ? `<div class="live-guide-preview-badges">
+                        ${qualityTags.map(t => `<span class="lg-badge">${t}</span>`).join('')}
+                        ${group ? `<span class="lg-badge lg-badge-group">· ${this.escapeHtml(group)}</span>` : ''}
+                    </div>` : ''}
+                    ${tv ? `<div class="live-guide-preview-onair">On air · ${this.escapeHtml(start)} - ${this.escapeHtml(stop)}</div>` : ''}
                     <div class="live-guide-preview-title">${this.escapeHtml(title)}</div>
                     <div class="live-guide-preview-meta">
-                        <span>${this.escapeHtml(start)} - ${this.escapeHtml(stop)}</span>
+                        ${tv ? '' : `<span>${this.escapeHtml(start)} - ${this.escapeHtml(stop)}</span>`}
                         <span class="live-guide-progress"><span style="width:${progress}%"></span></span>
+                        ${tv && minsLeft != null ? `<span class="lg-remaining">${minsLeft} min remaining</span>` : ''}
                     </div>
                     ${upNext.length ? `<ul class="live-guide-upnext">
                         ${upNext.map(p => `<li><span class="t">${this.escapeHtml(this.formatTime(p.start))}</span> ${this.escapeHtml(p.title || 'Programme')}</li>`).join('')}
@@ -960,11 +984,17 @@ class LiveGuideFusion {
                 </div>
                 <div class="live-guide-preview-actions">
                     <button type="button" class="lg-btn lg-btn-primary ${isPlaying ? 'is-playing' : ''}" data-action="watch">
-                        ${isPlaying ? 'Playing' : 'Watch'}
+                        <svg class="lg-btn-ico" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
+                        <span>${isPlaying ? 'Playing' : 'Watch'}</span>
                     </button>
-                    ${document.body.classList.contains('norva-phone-apk') ? '' : `<button type="button" class="lg-btn lg-btn-cinema ${this._cinema ? 'is-active' : ''}" data-action="cinema" aria-pressed="${this._cinema ? 'true' : 'false'}" title="${this._cinema ? 'Restore the split view' : 'Cinema mode — enlarge the player, compact the guide'}">${this._cinema ? 'Exit cinema' : 'Cinema'}</button>`}
-                    ${document.body.classList.contains('norva-phone-apk') ? '' : `<button type="button" class="lg-btn" data-action="fullscreen" title="Fullscreen" aria-label="Fullscreen">Fullscreen</button>`}
-                    <button type="button" class="lg-btn lg-btn-icon ${isFav ? 'is-fav' : ''}" data-action="favorite" title="Favorite" aria-label="Favorite">${isFav ? '♥' : '♡'}</button>
+                    ${tv ? `<button type="button" class="lg-btn" data-action="epg"><svg class="lg-btn-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg><span>TV Guide</span></button>` : ''}
+                    ${document.body.classList.contains('norva-phone-apk') ? '' : (this._isTvMode()
+                        ? `<button type="button" class="lg-btn" data-action="fullscreen"><svg class="lg-btn-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3m13-5v3a2 2 0 0 1-2 2h-3"/></svg><span>Fullscreen</span></button>`
+                        : `<button type="button" class="lg-btn lg-btn-cinema ${this._cinema ? 'is-active' : ''}" data-action="cinema" aria-pressed="${this._cinema ? 'true' : 'false'}" title="${this._cinema ? 'Restore the split view' : 'Cinema mode — enlarge the player, compact the guide'}">${this._cinema ? 'Exit cinema' : 'Cinema'}</button>
+                           <button type="button" class="lg-btn" data-action="fullscreen" title="Fullscreen" aria-label="Fullscreen">Fullscreen</button>`)}
+                    <button type="button" class="lg-btn ${this._isTvMode() ? 'lg-btn-fav' : 'lg-btn-icon'} ${isFav ? 'is-fav' : ''}" data-action="favorite" title="Favorite" aria-label="${isFav ? 'In favorites' : 'Add to favorites'}">
+                        <span class="lg-btn-heart" aria-hidden="true">${isFav ? '♥' : '♡'}</span>${this._isTvMode() ? `<span>${isFav ? 'In favorites' : 'Add to favorites'}</span>` : ''}
+                    </button>
                 </div>
             </div>
         `;
@@ -1020,6 +1050,11 @@ class LiveGuideFusion {
         const now = this.getProgramAt(channel, new Date());
         const next = this.getUpcoming(channel, 1)[0] || null;
         const progress = this.getProgress(now);
+        // TV (10-foot list, mockup): show the current programme's time range on the
+        // right, like an EPG grid row. Off TV the compact now/next layout is kept.
+        const timeRange = this._isTvMode() && now?.start
+            ? `<span class="live-guide-time">${this.escapeHtml(this.formatTime(now.start))} - ${this.escapeHtml(now.stop ? this.formatTime(now.stop) : '')}</span>`
+            : '';
         return `
             <div class="live-guide-row ${isPlaying ? 'playing' : ''} ${isSelected ? 'selected' : ''} ${isPending ? 'pending-refresh' : ''}"
                  role="button" tabindex="0"
@@ -1039,6 +1074,7 @@ class LiveGuideFusion {
                     </span>
                     ${next ? `<span class="live-guide-next"><span class="live-guide-next-time">${this.escapeHtml(this.formatTime(next.start))}</span> ${this.escapeHtml(next.title || 'Programme')}</span>` : ''}
                 </span>
+                ${timeRange}
                 <button type="button" class="live-guide-play" title="Watch" aria-label="Watch">
                     <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
                 </button>
@@ -1117,13 +1153,16 @@ class LiveGuideFusion {
         const searchHadFocus = !!searchEl && document.activeElement === searchEl;
         const searchCaret = searchEl ? searchEl.selectionStart : null;
 
+        const tv = this._isTvMode();
+        const rowsChannels = this.getRowsChannels();
         this.container.innerHTML = `
             ${this.isPhoneApk() ? this.renderToolbar() : ''}
-            <div class="live-guide-shell ${this.shouldShowGroupRail() ? '' : 'groups-hidden'}">
-                ${this.renderGroups(groups)}
+            <div class="live-guide-shell ${this.shouldShowGroupRail() ? '' : 'groups-hidden'} ${tv ? 'lg-tv-shell' : ''}">
+                ${tv ? '' : this.renderGroups(groups)}
                 <div class="live-guide-main">
                     ${this.renderPreview(selectedChannel)}
-                    ${this.renderRows(this.getRowsChannels())}
+                    ${tv ? `<div class="lg-tv-listhead"><span class="lg-tv-listtitle">All channels</span><span class="lg-tv-count">${rowsChannels.length}</span></div>` : ''}
+                    ${this.renderRows(rowsChannels)}
                 </div>
             </div>
         `;
