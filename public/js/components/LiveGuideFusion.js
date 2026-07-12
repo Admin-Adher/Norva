@@ -773,13 +773,23 @@ class LiveGuideFusion {
         const epgChannel = this.getEpgChannel(channel);
         if (epgChannel && guide?.programmes?.length) {
             const time = date.getTime();
-            const fullGuideProgram = guide.programmes.find(program => {
-                if (program.channelId !== epgChannel.id) return false;
-                const start = new Date(program.start).getTime();
-                const stop = new Date(program.stop).getTime();
-                return time >= start && time < stop;
-            }) || null;
-            if (fullGuideProgram) return fullGuideProgram;
+            if (guide.programmesByChannel && typeof guide.getChannelProgrammes === 'function') {
+                // Fast path: read the pre-built per-channel index with cached
+                // numeric timestamps instead of scanning the whole flat list.
+                const fullGuideProgram = guide.getChannelProgrammes(epgChannel.id).find(program =>
+                    time >= program._startMs && time < program._stopMs
+                ) || null;
+                if (fullGuideProgram) return fullGuideProgram;
+            } else {
+                // Fallback: index not built yet — keep the old full scan.
+                const fullGuideProgram = guide.programmes.find(program => {
+                    if (program.channelId !== epgChannel.id) return false;
+                    const start = new Date(program.start).getTime();
+                    const stop = new Date(program.stop).getTime();
+                    return time >= start && time < stop;
+                }) || null;
+                if (fullGuideProgram) return fullGuideProgram;
+            }
         }
         return this.getShortProgramAt(channel, date);
     }
@@ -791,10 +801,21 @@ class LiveGuideFusion {
         const guide = this.app.epgGuide;
         const epgChannel = this.getEpgChannel(channel);
         if (epgChannel && guide?.programmes?.length) {
-            for (const program of guide.programmes) {
-                if (program.channelId !== epgChannel.id) continue;
-                if (new Date(program.start).getTime() >= now) {
-                    collected.push({ title: program.title, start: program.start, stop: program.stop });
+            if (guide.programmesByChannel && typeof guide.getChannelProgrammes === 'function') {
+                // Fast path: iterate only this channel's programmes via the
+                // index, using the cached _startMs instead of re-parsing.
+                for (const program of guide.getChannelProgrammes(epgChannel.id)) {
+                    if (program._startMs >= now) {
+                        collected.push({ title: program.title, start: program.start, stop: program.stop });
+                    }
+                }
+            } else {
+                // Fallback: index not built yet — keep the old full scan.
+                for (const program of guide.programmes) {
+                    if (program.channelId !== epgChannel.id) continue;
+                    if (new Date(program.start).getTime() >= now) {
+                        collected.push({ title: program.title, start: program.start, stop: program.stop });
+                    }
                 }
             }
         }

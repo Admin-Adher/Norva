@@ -15,6 +15,7 @@ class EpgGuide {
 
         this.channels = [];
         this.programmes = [];
+        this.programmesByChannel = new Map(); // Map<channelId, programme[]> with cached numeric timestamps
         this.currentDate = new Date();
         this.timeOffset = 0; // Hours offset from now
         this.pixelsPerMinute = 6.67; // Width scaling (30min = 200px)
@@ -319,9 +320,55 @@ class EpgGuide {
             if (normalizedName) this.channelMap.set(normalizedName, ch);
         });
 
+        // Build per-channel programme index with cached numeric timestamps so
+        // hot-path lookups (preview) read a small sorted array instead of
+        // linear-scanning the whole flat programmes list.
+        this._rebuildProgrammeIndex();
+
         // Load favorites
         const favs = await API.favorites.getAll();
         this.favorites = new Set(favs.map(f => `${f.source_id}:${f.item_id}`));
+    }
+
+    /**
+     * Rebuild the per-channel programme index. Precomputes numeric start/stop
+     * timestamps ONCE per programme (p._startMs / p._stopMs) and groups
+     * programmes by channelId into a Map, each channel's array sorted by
+     * _startMs ascending. Call this whenever this.programmes is (re)assigned.
+     */
+    _rebuildProgrammeIndex() {
+        const byChannel = new Map();
+        const list = Array.isArray(this.programmes) ? this.programmes : [];
+        for (const p of list) {
+            if (!p) continue;
+            // Cache numeric timestamps once (NaN for missing/invalid dates).
+            p._startMs = p.start != null ? new Date(p.start).getTime() : NaN;
+            p._stopMs = p.stop != null ? new Date(p.stop).getTime() : NaN;
+            const channelId = p.channelId;
+            if (channelId == null) continue;
+            let arr = byChannel.get(channelId);
+            if (!arr) {
+                arr = [];
+                byChannel.set(channelId, arr);
+            }
+            arr.push(p);
+        }
+        // Sort each channel's programmes by start time ascending (stable sort
+        // preserves source order for ties, matching the old scan semantics).
+        for (const arr of byChannel.values()) {
+            arr.sort((a, b) => a._startMs - b._startMs);
+        }
+        this.programmesByChannel = byChannel;
+    }
+
+    /**
+     * Get the programmes for a single EPG channel (sorted by start time, with
+     * cached _startMs/_stopMs). Returns [] when unknown.
+     * @param {string} channelId - The EPG channel ID
+     * @returns {Array} programmes for that channel (do not mutate)
+     */
+    getChannelProgrammes(channelId) {
+        return (this.programmesByChannel && this.programmesByChannel.get(channelId)) || [];
     }
 
     /**
