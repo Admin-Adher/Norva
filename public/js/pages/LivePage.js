@@ -13,10 +13,15 @@ class LivePage {
         await this.app.channelList.loadSources();
         await this.app.channelList.loadChannels();
         this.app.liveGuideFusion?.render();
-        // Phone/tablet APK: don't auto-launch the native fullscreen player on open —
-        // land on the guide and let the viewer choose (Android TV + web still resume).
-        if (document.getElementById('page-live')?.classList.contains('active')
-            && !document.body.classList.contains('norva-phone-apk')) {
+        // Phone/tablet APK AND Android TV: don't auto-launch playback on open. On the
+        // TV WebView, playing the <video> pops the NATIVE fullscreen player, so opening
+        // Live would jump straight to fullscreen — and backing out leaves the inline
+        // player unable to re-acquire the stream (it just spins). Land on the browse
+        // view instead and let the viewer press OK to watch (web still auto-resumes).
+        const autoResumeOk = document.getElementById('page-live')?.classList.contains('active')
+            && !document.body.classList.contains('norva-phone-apk')
+            && !document.documentElement.classList.contains('tv-mode');
+        if (autoResumeOk) {
             this.app.channelList.resumeLivePlayback();
         }
 
@@ -110,8 +115,9 @@ class LivePage {
             await this.app.channelList.loadChannels();
         }
         this.app.liveGuideFusion?.render();
-        // Phone/tablet APK: no auto-launch on open (see init()).
-        if (!document.body.classList.contains('norva-phone-apk')) {
+        // Phone/tablet APK + Android TV: no auto-launch on open (see init()).
+        if (!document.body.classList.contains('norva-phone-apk')
+            && !document.documentElement.classList.contains('tv-mode')) {
             this.app.channelList.resumeLivePlayback();
         }
     }

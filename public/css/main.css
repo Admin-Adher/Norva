@@ -12158,6 +12158,22 @@ mark.search-highlight {
   display: none !important;
 }
 
+/* TV: denser poster grids. Best-in-class 10-foot UIs (Netflix, Prime, Plex, Google
+   TV) show ~5-7 posters per row; Norva showed ~4 at 160px, which read as oversized
+   from the couch. ~124px → ~5-6 per row, still clearly recognisable. Grid cards
+   (Movies / Series) only; Home-rail cards keep their size. */
+.tv-mode .movies-grid .movie-card,
+.tv-mode .series-grid .series-card {
+  flex: 0 0 124px;
+  width: 124px;
+}
+.tv-mode .movies-grid .movie-poster,
+.tv-mode .series-grid .series-poster,
+.tv-mode .series-grid .series-card .series-poster {
+  width: 124px;
+  height: 186px;                    /* keep the 2:3 poster ratio */
+}
+
 /* Live guide rows are full-width, so a smaller lift + taller row reads better at
    10-foot distance than the card scale (they only got the *:focus outline before). */
 .tv-mode .live-guide-row:focus {
