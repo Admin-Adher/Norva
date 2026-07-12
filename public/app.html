@@ -18,7 +18,7 @@
   <link rel="preconnect" href="https://api.norva.tv" crossorigin>
   <link rel="dns-prefetch" href="https://image.tmdb.org">
   <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
-  <link rel="stylesheet" href="/css/main.css?v=68">
+  <link rel="stylesheet" href="/css/main.css?v=69">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@800&display=swap"
@@ -303,6 +303,16 @@
               <div class="channel-switch-splash hidden" id="channel-switch-splash" aria-hidden="true">
                 <img class="css-logo" id="channel-switch-logo" src="" alt="">
                 <div class="css-name" id="channel-switch-name"></div>
+              </div>
+
+              <!-- Android TV browse preview: the 16:9 box shows the focused channel's
+                   logo + name as static art (the WebView can't reliably preview inline
+                   video — it pops native fullscreen). OK on a channel plays fullscreen.
+                   Shown only in .tv-mode; populated by LiveGuideFusion on preview. -->
+              <div class="tv-live-art hidden" id="tv-live-art" aria-hidden="true">
+                <img class="tv-live-art-logo" id="tv-live-art-logo" src="" alt="">
+                <div class="tv-live-art-name" id="tv-live-art-name"></div>
+                <div class="tv-live-art-hint"><span class="tv-live-art-ok">OK</span>Watch fullscreen</div>
               </div>
 
               <!-- Custom Controls Overlay -->
@@ -1997,7 +2007,7 @@
   <script defer src="/js/components/ChannelList.js?v=38"></script>
   <script defer src="/js/components/SourceManager.js?v=34"></script>
   <script defer src="/js/components/EpgGuide.js?v=11"></script>
-  <script defer src="/js/components/LiveGuideFusion.js?v=17"></script>
+  <script defer src="/js/components/LiveGuideFusion.js?v=18"></script>
   <script defer src="/js/pages/HomePage.js?v=45"></script>
   <script defer src="/js/pages/LivePage.js?v=6"></script>
   <script defer src="/js/pages/Guide.js?v=2"></script>

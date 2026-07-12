@@ -373,6 +373,33 @@ class LiveGuideFusion {
         if (!this.container) return;
         const preview = this.container.querySelector('.live-guide-preview');
         if (preview) preview.outerHTML = this.renderPreview(channel);
+        if (this._isTvMode()) this._updateTvLiveArt(channel);
+    }
+
+    /**
+     * Android TV: paint the focused channel's logo + name into the 16:9 preview box
+     * as STATIC art. The WebView pops native fullscreen when the inline <video> plays,
+     * so an inline preview just spins — instead we show the channel art and OK plays
+     * fullscreen. No-op off TV (the overlay stays display:none there).
+     */
+    _updateTvLiveArt(channel) {
+        const art = document.getElementById('tv-live-art');
+        if (!art) return;
+        if (!channel) { art.classList.add('hidden'); return; }
+        const img = document.getElementById('tv-live-art-logo');
+        const name = document.getElementById('tv-live-art-name');
+        if (img) {
+            const fallback = this.getChannelLogoErrorSrc(channel);
+            const logo = this.getChannelLogoSrc(channel);
+            img.onerror = () => {
+                img.onerror = null;
+                if (fallback) { img.src = fallback; } else { img.style.display = 'none'; }
+            };
+            if (logo) { img.style.display = ''; img.src = logo; }
+            else { img.style.display = 'none'; }
+        }
+        if (name) name.textContent = channel.name || channel.title || '';
+        art.classList.remove('hidden');
     }
 
     /** Playback changed (channelChanged event): follow it in the preview + highlights. */
@@ -1149,6 +1176,9 @@ class LiveGuideFusion {
         }
         this.syncNavigationState();
         this._applyCinema();   // keep the player/guide split in sync with cinema state
+        // Android TV: seed the 16:9 preview box with the selected channel's art so the
+        // browse view is never a blank/spinning box before the first D-pad move.
+        if (this._isTvMode()) this._updateTvLiveArt(selectedChannel);
     }
 }
 

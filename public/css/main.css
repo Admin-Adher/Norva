@@ -12208,6 +12208,51 @@ mark.search-highlight {
   max-height: none;
 }
 
+/* Android TV Live browse-art overlay (Option 1): fill the 16:9 preview box with the
+   focused channel's logo + name + a watch hint, hiding the inline video (which the
+   WebView can't preview — it just spins). Only rendered on TV; on web it stays
+   display:none so nothing changes there. */
+.tv-live-art { display: none; }
+.tv-mode #page-live .tv-live-art:not(.hidden) {
+  display: flex;
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 18px;
+  text-align: center;
+  background: radial-gradient(ellipse at 50% 42%, #1a2742 0%, #0a0f1c 78%);
+}
+.tv-mode #page-live .tv-live-art-logo {
+  max-width: 58%;
+  max-height: 50%;
+  object-fit: contain;
+  filter: drop-shadow(0 6px 20px rgba(0, 0, 0, 0.6));
+}
+.tv-mode #page-live .tv-live-art-name {
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: #ffffff;
+}
+.tv-mode #page-live .tv-live-art-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9rem;
+  color: #9fb2d6;
+}
+.tv-mode #page-live .tv-live-art-ok {
+  padding: 2px 9px;
+  border-radius: 6px;
+  background: var(--color-accent);
+  color: #ffffff;
+  font-weight: 800;
+  font-size: 0.82rem;
+}
+
 /* Series at 10-foot distance: bigger season tabs and episode rows so they're
    comfortable D-pad targets and readable across the room. Size/legibility only —
    the full spatial-nav flow (focus-restore after playback, tab arrowing) still
