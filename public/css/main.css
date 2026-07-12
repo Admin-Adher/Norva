@@ -12168,6 +12168,30 @@ mark.search-highlight {
 }
 .tv-mode .live-guide-row { min-height: 68px; }
 
+/* Live TV on TV: the inline player is a PREVIEW, not "grand écran". Constrain it
+   to a compact, centred 16:9 preview so the channel list + guide dominate the
+   screen (TiviMate-style browse-first). #video-player is object-fit:contain, so a
+   16:9 container shows the stream edge-to-edge with no letterbox. Fullscreen stays
+   one press away via the player's Fullscreen button. Scoped to #page-live only —
+   the fullscreen watch page (#page-watch) is untouched. The ID beats the tablet
+   breakpoint rules that also apply at ~853px. */
+.tv-mode #page-live .video-container {
+  flex: 0 0 auto;
+  aspect-ratio: 16 / 9;
+  height: clamp(150px, 33vh, 210px);
+  width: auto;
+  max-width: 100%;
+  min-height: 0;
+  align-self: flex-start;           /* top-left corner preview, predictable */
+  margin: 0 0 12px 0;
+  border-radius: 14px;
+}
+.tv-mode #page-live .live-guide-fusion {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+}
+
 /* Series at 10-foot distance: bigger season tabs and episode rows so they're
    comfortable D-pad targets and readable across the room. Size/legibility only —
    the full spatial-nav flow (focus-restore after playback, tab arrowing) still
@@ -12210,6 +12234,9 @@ mark.search-highlight {
                                        left gutter; keep content padding small so
                                        the narrow panel isn't over-indented */
   padding-right: 32px;
+  padding-top: 24px;                /* top overscan — the rail replaced the old top
+                                       bar, so content would otherwise sit flush to
+                                       the top edge and be cropped by TV overscan */
   padding-bottom: 27px;
 }
 
