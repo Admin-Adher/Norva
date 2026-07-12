@@ -174,6 +174,9 @@
       // here, so this returns null and the caller shows managedElsewhereNote()
       // instead. This is what stops a web subscriber being told "Manage on Google Play".
       function manageButton(decision, label, primary) {
+        // The TV is read-only — it points management to web/phone via the storeNote,
+        // never a store-management button (keeps button and note consistent).
+        if (isTvShell()) return null;
         if (isNative()) {
           if (entProvider(decision) !== 'google_play') return null;
           const a = el('a', primary ? 'btn warn' : 'btn ghost', label || 'Manage on Google Play');
