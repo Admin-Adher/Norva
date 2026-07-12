@@ -232,12 +232,13 @@ mais ça piège : ne pas chercher le login Google dans le projet Firebase, ni l'
   (aucune) · ✅ Catégorie (Lecteurs vidéo) + coordonnées · ✅ Fiche Play Store
 - ⬜ Reste phone : Service au premier plan (téléchargements) si demandé.
 
-**App TV `tv.norva.tv` — À FAIRE (checklist complète dans le chat 2026-07-12)** :
-opt-in form factor Android TV ; mêmes 9 déclarations que phone **sauf** : Data Safety
-→ « ne permet pas de créer un compte » (appairage) + 3 types seulement
-(interactions/plantages/ID) ; App access → instructions d'appairage TV (EN) ; fiche →
-**bannière 1280×720 + capture 1920×1080** (assets TV spécifiques) + description
-variante TV (voir `play-console-setup.md` §4).
+**App TV `tv.norva.tv` — déclarations FAITES (2026-07-12)** : mêmes 9 déclarations
+que phone, avec les spécificités TV appliquées — Data Safety → « ne permet pas de
+créer un compte » (appairage) + comptes créés hors-app = « Autre » + 3 types
+seulement (interactions/plantages/ID) ; App access → instructions d'appairage TV (EN,
+≤500 car.).
+- ⬜ **Reste TV** : opt-in form factor Android TV + **assets fiche TV**
+  (bannière **1280×720** + ≥1 capture **1920×1080**) — le point visuel encore ouvert.
 
 ### 🔴 En DERNIER (rail validé — quand la publication est prête)
 - **Bascule prod** : `NORVA_BILLING_MODE=revenuecat` → `NORVA_ENTITLEMENTS_MODE=enforce`
