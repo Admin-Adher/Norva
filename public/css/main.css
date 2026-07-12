@@ -12119,6 +12119,45 @@ mark.search-highlight {
   z-index: 3;
 }
 
+/* Card focus ring must be INSET on TV. The blanket *:focus above draws an OUTSET
+   white ring + black halo, but every rail sits inside overflow:hidden ancestors
+   (.page, .main-content, each .horizontal-scroll) — on-device those clip the
+   outset ring, so it looked "cut" on the top/left of edge cards (headless doesn't
+   reproduce the clip; the real WebView does). Draw the ring INSIDE the card so it
+   can NEVER be clipped, keep the scale for the lift, and add a soft outer glow
+   (a glow clipping is invisible, unlike a hard ring line). Preserve each card's
+   own radius so the ring hugs the corners instead of the blanket's radius-sm. */
+.tv-mode .movie-card:focus,
+.tv-mode .series-card:focus,
+.tv-mode .continue-card:focus,
+.tv-mode .dashboard-card:focus,
+.tv-mode .channel-tile:focus,
+.tv-mode .search-result:focus,
+.tv-mode .watch-recommended-card:focus {
+  outline: none !important;
+  box-shadow:
+    inset 0 0 0 3px #ffffff,
+    inset 0 0 0 6px rgba(0, 0, 0, 0.55),
+    0 10px 28px rgba(0, 0, 0, 0.55) !important;
+}
+.tv-mode .dashboard-card:focus,
+.tv-mode .continue-card:focus {
+  border-radius: var(--radius-lg) !important;
+}
+.tv-mode .movie-card:focus,
+.tv-mode .series-card:focus,
+.tv-mode .channel-tile:focus,
+.tv-mode .search-result:focus,
+.tv-mode .watch-recommended-card:focus {
+  border-radius: var(--radius-md) !important;
+}
+
+/* Rail scroll-arrows are for mouse users; on TV the D-pad scrolls, and on WebViews
+   that report hover:hover they'd sit on top of the first/last card. Hide them. */
+.tv-mode .scroll-arrow {
+  display: none !important;
+}
+
 /* Live guide rows are full-width, so a smaller lift + taller row reads better at
    10-foot distance than the card scale (they only got the *:focus outline before). */
 .tv-mode .live-guide-row:focus {
@@ -12227,10 +12266,10 @@ mark.search-highlight {
    and bottom) and set scroll-padding so a focused EDGE card scrolls fully into view
    with room to breathe instead of sitting flush against the screen edge. */
 .tv-mode .horizontal-scroll {
-  /* overflow-x:auto also clips the Y axis, so the focus ring (~10px) + scale(1.09)
-     lift (~12px) were cut at the TOP and LEFT of each rail. Pad generously on all
-     sides so a focused edge card's ring is never clipped. */
-  padding: 26px 22px 26px;
+  /* overflow-x:auto also clips the Y axis. The focus ring is now drawn INSET
+     (see the card :focus rule) so it can't clip, but the scale(1.09) still lifts
+     the card body ~13px — pad enough that the scaled body isn't clipped. */
+  padding: 18px 14px 20px;
   scroll-padding-inline: 70px;
 }
 
