@@ -283,5 +283,10 @@
     2. **Logout TV → QR flashe puis reconnecte** le même compte (le device-token
        local persistait → `cloud-pair` reprenait la session). Fix : nouvel endpoint
        serveur `DELETE /device/me` (auto-unpair, `revoked=true`, authentifié par
-       device-token) + `Settings.js` efface le device-token/id local et appelle
-       l'unpair au logout. **⚠️ nécessite un déploiement edge sur la box.**
+       device-token) + le device-token/id local est effacé et l'unpair appelé au
+       logout. **⚠️ nécessite un déploiement edge sur la box.**
+       ⚠️ **Piège** : il y a **2 boutons logout** — `Settings.js signOut()` ET le
+       **« Logout » de la barre du haut** (`app.js addLogoutButton()`, le chemin
+       réellement utilisé sur la TV). Le même correctif TV a été appliqué **aux
+       deux**. Déploiement web via Pages ; **penser à vider le cache WebView TV**
+       (fermer/rouvrir l'app) pour charger le nouveau `app.js`.

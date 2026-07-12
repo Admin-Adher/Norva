@@ -1098,6 +1098,20 @@ class App {
         logoutLink.addEventListener('click', async (e) => {
             e.preventDefault();
 
+            // TV = a device-paired screen. It must unpair (server-side revoke +
+            // clear the local device token) so the pairing screen starts fresh
+            // instead of silently resuming the SAME account. Detected strictly by
+            // the TV user agent so phone/web are untouched. Mirrors Settings.js
+            // signOut(); this is the top-nav Logout button, the one used on TV.
+            if (/NorvaTV-AndroidTV/i.test(navigator.userAgent || '')) {
+                try { await window.NorvaCloud?.device?.unpairSelf?.(); } catch (_) { /* best-effort */ }
+                try { window.NorvaCloud?.setDeviceToken?.(''); } catch (_) { /* noop */ }
+                try { localStorage.removeItem('norva-cloud-device-id'); } catch (_) { /* noop */ }
+                try { if (window.NorvaAuth) await window.NorvaAuth.signOut(); } catch (_) { /* noop */ }
+                window.location.replace('/cloud-pair.html?device=tv&returnTo=%2Fapp.html%3Fpaired%3D1%23home');
+                return;
+            }
+
             const token = localStorage.getItem('authToken');
             if (this.currentUser?.cloud && window.NorvaAuth) {
                 await window.NorvaAuth.signOut();
