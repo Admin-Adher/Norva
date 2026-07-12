@@ -296,6 +296,16 @@
     5. **Essai « fantôme » expliqué** (pas un bug) : en `NORVA_BILLING_MODE=legacy`,
        le serveur auto-crée un essai 7 j **sans carte** (`provider=system`,
        `startTrialProjection`). Disparaît à la bascule prod (`=revenuecat`).
+    7. **Achat Play → pas de projection `google_play`.** Le login RevenueCat
+       (App User ID = id GoTrue) n'était appelé que dans `subscribe.html`, en
+       **fire-and-forget juste avant `purchase()`** (race : `logIn` async pas
+       attendu) et **jamais au boot** → l'achat partait sous un App User ID
+       **anonyme** → le webhook ne pouvait pas le rattacher à l'utilisateur → pas
+       de projection. Fix (web) : `app.html` charge `billing.js` et `app.js`
+       appelle `NorvaBilling.login(user.id)` **au boot** (dès la session prête) →
+       identité correcte avant tout achat + **ré-association** de l'achat anonyme
+       à la réouverture. (S'ajoute : achat resté « à confirmer » car acheté pendant
+       la propagation du SA → réouvrir l'app pour l'acquitter.)
     6. **« Restore purchases » fermait l'app TV.** Play Billing crashe (niveau natif,
        non rattrapable par le try/catch Java) sur les box TV sans Play Services
        fiable. Design correct : **la TV appairée ne fait PAS de billing en propre**

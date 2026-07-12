@@ -760,6 +760,12 @@ class App {
                     device: !user
                 };
                 this.addLogoutButton();
+                // Identify the RevenueCat App User ID as the Supabase user id at boot,
+                // so a store purchase is attributed to THIS account. Doing it here
+                // (not lazily right before purchase) avoids the async logIn/purchase
+                // race, and re-aliases any purchase made before identity was set on
+                // the next launch. Guarded no-op on web / without the native bridge.
+                if (user?.id) { try { window.NorvaBilling?.login?.(user.id); } catch (_) { /* noop */ } }
                 // Reveal the Admin nav ONLY for real admins. In cloud mode currentUser.role is
                 // always 'admin' (hardcoded above), so it can't gate — the authoritative check is
                 // the server-side is_admin() RPC (app_metadata.role in the JWT). Non-admins never
@@ -794,6 +800,7 @@ class App {
                         device: !cachedUser
                     };
                     this.addLogoutButton();
+                    if (cachedUser?.id) { try { window.NorvaBilling?.login?.(cachedUser.id); } catch (_) { /* noop */ } }
                     return;
                 }
                 console.error('Cloud authentication error:', err);
