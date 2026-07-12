@@ -362,6 +362,17 @@ class ChannelList {
         return this._tvActivateChannel(this._channelFromItem(item));
     }
 
+    /**
+     * Android TV search: track whether the viewer is navigating the RESULT LIST
+     * (vs sitting on the search bar). Toggling .tv-listnav on the sidebar lets CSS
+     * show a single selection — the search bar's big focus ring is suppressed while
+     * a result is highlighted, so the two never look selected at once.
+     */
+    _setTvResultNav(active) {
+        this._tvResultNav = !!active;
+        document.getElementById('channel-sidebar')?.classList.toggle('tv-listnav', !!active);
+    }
+
     init() {
         // Android TV: focusing a channel in the LEFT sidebar list previews it in
         // the guide's preview card (mirrors the right-hand list), so browsing
@@ -1370,6 +1381,7 @@ class ChannelList {
         // Drop any queued search-highlight preview so it can't fire ~140ms after we
         // leave search and re-preview a result over the browse selection.
         clearTimeout(this._tvSearchPreviewTimer);
+        this._setTvResultNav(false);
         this.searchMode = false;
         this.zeroState = false;
         this.selectedResultIndex = -1;
@@ -1712,7 +1724,11 @@ class ChannelList {
 
         this.container.innerHTML = `<div class="search-results">${html}</div>`;
         this.container.scrollTop = 0;
-        this.selectedResultIndex = this.renderedChannels.length ? 0 : -1;
+        // TV: keep the search bar as the sole selection until the viewer presses Down
+        // (see handleSearchKeydown) — no pre-highlighted result competing with the
+        // focused search bar. Off TV, highlight the top result as before.
+        this.selectedResultIndex = (!this.renderedChannels.length || this._isTvMode()) ? -1 : 0;
+        this._setTvResultNav(false);
         this.updateSelectedResult(false);
         this.attachSearchResultListeners();
     }
@@ -1772,7 +1788,11 @@ class ChannelList {
 
         this.container.innerHTML = `<div class="search-results">${html}</div>`;
         this.container.scrollTop = 0;
-        this.selectedResultIndex = this.renderedChannels.length ? 0 : -1;
+        // TV: keep the search bar as the sole selection until the viewer presses Down
+        // (see handleSearchKeydown) — no pre-highlighted result competing with the
+        // focused search bar. Off TV, highlight the top result as before.
+        this.selectedResultIndex = (!this.renderedChannels.length || this._isTvMode()) ? -1 : 0;
+        this._setTvResultNav(false);
         this.updateSelectedResult(false);
         this.attachSearchResultListeners();
     }
@@ -1855,6 +1875,24 @@ class ChannelList {
         if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
             e.preventDefault();
             if (!this.renderedChannels.length) return;
+            const tv = this._isTvMode();
+            if (tv && !this._tvResultNav) {
+                // Still "on" the search bar. First Down hands the visible selection to
+                // the list (lands on the top result); Up has nowhere higher to go.
+                if (e.key === 'ArrowDown') {
+                    this.selectedResultIndex = 0;
+                    this.updateSelectedResult(true);
+                    this._setTvResultNav(true);
+                }
+                return;
+            }
+            if (tv && e.key === 'ArrowUp' && this.selectedResultIndex <= 0) {
+                // Up from the top result returns the selection to the search bar.
+                this.selectedResultIndex = -1;
+                this.updateSelectedResult(false);
+                this._setTvResultNav(false);
+                return;
+            }
             const dir = e.key === 'ArrowDown' ? 1 : -1;
             this.selectedResultIndex =
                 (this.selectedResultIndex + dir + this.renderedChannels.length) % this.renderedChannels.length;

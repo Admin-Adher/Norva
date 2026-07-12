@@ -11376,6 +11376,21 @@ html.tv-mode #page-series .filter-bar .filter-toggle {
   outline-offset: -1px;
 }
 
+/* Android TV: while navigating the RESULT LIST, the list is the single selection.
+   Suppress the search bar's big white focus ring (it keeps keyboard focus for the
+   nav model, but must not look selected too) and promote the highlighted result to
+   a real 10-foot focus ring — so the search bar and a result are never both lit. */
+html.tv-mode #channel-sidebar.tv-listnav #channel-search:focus {
+  outline: none !important;
+  box-shadow: none !important;
+}
+html.tv-mode #channel-sidebar.tv-listnav .search-result.kb-selected {
+  outline: 4px solid #ffffff;
+  outline-offset: -3px;
+  background: var(--color-bg-active, #2a2a3a);
+  box-shadow: 0 0 0 6px rgba(0, 0, 0, 0.5);
+}
+
 mark.search-highlight {
   background: transparent;
   color: var(--color-accent-hover);
