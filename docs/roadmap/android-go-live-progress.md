@@ -52,7 +52,7 @@
 | 2 | RevenueCat : webhook → backend + `NORVA_REVENUECAT_WEBHOOK_AUTH` (test 200) | ✅ **Fait** |
 | 3 | Play Console (phone) : abonnements `norva_plus` + `norva_family` (base plans + offre essai 7 j) | ✅ **Fait (phone)** |
 | 4 | Service Account Play → RevenueCat (JSON + droits Play + API activée) | 🟡 **En attente de propagation Google (24-36 h)** |
-| 5 | RevenueCat : entitlement `pro` + offering `default` + 4 packages + import produits | ⏳ **En cours** |
+| 5 | RevenueCat : entitlement `pro` + offering `default` + 4 packages + import produits | ⏳ **En cours** — entitlement `pro` ✅, 4 produits créés + attachés ✅, offering + packages à faire |
 | 6 | RTDN (Real-time Developer Notifications) → topic Pub/Sub | ⏳ à faire (dépend du #4 vert) |
 | 7 | App TV : créer dans Play Console + upload AAB + répliquer produits + même JSON SA | ⏳ à faire |
 | 8 | Testeurs de licence + **achat sandbox** (phone + TV) → projection `provider=google_play` | ⏳ à faire |
@@ -78,9 +78,10 @@
 | App TV | **Norva TV** créée ✅ |
 | Clés SDK publiques Android (`goog_…`) | 2 obtenues ✅ → posées en secrets CI `REVENUECAT_API_KEY_PHONE` / `REVENUECAT_API_KEY_TV` |
 | Webhook | URL `https://api.norva.tv/functions/v1/norva-billing-webhook` ; header `Authorization` = secret long → recopié dans `.env` box (`NORVA_REVENUECAT_WEBHOOK_AUTH`). **Test webhook → 200** ✅ |
-| Service Account (app Norva Phone) | JSON uploadé ✅ ; **validation « Credentials need attention »** = attente de propagation Google (pas d'erreur de config) |
-| Entitlement `pro` | ⏳ en cours de création |
-| Offering `default` + 4 packages | ⏳ à faire |
+| Service Account (app Norva Phone) | JSON uploadé ✅ ; **validation « Credentials need attention »** = attente de propagation Google (message exact : *« Your Google Service Account credentials do not have permissions to access the needed Google resources »* → propagation, pas d'erreur de config) |
+| Entitlement `pro` | ✅ **Créé** (REST API id `entl9f680380c4`, display « Norva Pro access ») |
+| Produits (Norva Phone) | ✅ **4 créés + attachés à `pro`** : `norva_plus:monthly`, `norva_plus:annual`, `norva_family:monthly`, `norva_family:annual` (« Backwards compatible » décoché → identifiers `sub:baseplan`). Statut « Could not check » = attente SA vert (normal). Créés manuellement car l'import auto exige le SA vert. |
+| Offering `default` + 4 packages | ⏳ à faire (prochaine étape) |
 | Import produits (depuis Play) | ⏳ à faire (nécessite #4 vert) |
 
 **Structure catalogue cible** (à créer aux #5) :
@@ -116,7 +117,8 @@
 | Compte developer | ✅ obtenu (2026-07-03) |
 | App phone `tv.norva.phone` | ✅ créée, **test interne** en place |
 | App TV `tv.norva.tv` | ⏳ **rien fait encore** (à créer au #7) |
-| Abonnements (phone) | ✅ `norva_plus` (mensuel 4,99 / annuel 41,99) + `norva_family` (mensuel 8,99 / annuel 75,99), base plans `monthly` (P1M) / `annual` (P1Y), **offre essai 7 j** (P7D, *new customers*) |
+| Abonnements (phone) | ✅ `norva_plus` (mensuel 4,99 / annuel 41,99) + `norva_family` (mensuel 8,99 / annuel 75,99), base plans **`monthly`** / **`annual`** (IDs confirmés dans Play, identiques pour les 2 subs), **offre essai 7 j** (`freetrial-monthly` / `freetrial-annual`) |
+| ⚠️ Offres d'essai `norva_plus` | 🟡 **En `Brouillon` (Draft) — à ACTIVER** (`freetrial-monthly` + `freetrial-annual`). Sur `norva_family` elles sont déjà `Actif`. Sinon les abonnés **Plus n'auront pas les 7 j gratuits**. Action : Play → `norva_plus` → chaque offre → ⋮ → Activer. |
 | Abonnements (TV) | ⏳ à répliquer au #7 |
 | Droits Service Account (Users & permissions) | ✅ invité + « Afficher les données financières… » + « Gérer les commandes et les abonnements » **enregistrés** |
 | D-U-N-S / suppression 9 août | ⚠️ **appel en cours** (voir bloqueurs) |
@@ -195,3 +197,22 @@
 | Clés SDK (CI) | `REVENUECAT_API_KEY_PHONE` · `REVENUECAT_API_KEY_TV` (secrets GitHub) |
 | Client OAuth Google (audience) | `973428500788-deum…apps.googleusercontent.com` |
 | D-U-N-S | `268494859` (org *Hernandez*, 270 rue de Vaugirard 75015 Paris) |
+
+---
+
+## Journal chronologique
+
+- **2026-07-12** — Session de config go-live (pas-à-pas) :
+  - #1 clés SDK phone/TV → secrets CI ; #2 webhook + secret box (test 200).
+  - #3 abonnements phone `norva_plus` + `norva_family` créés (base plans `monthly`/`annual`).
+  - #4 Service Account créé (`revenuecat-play@norva-ecosystem`), API androidpublisher
+    activée, droits Play accordés/enregistrés, JSON uploadé → **en attente de
+    propagation Google** (import produits refusé : *credentials do not have
+    permissions* = propagation).
+  - #5 entitlement `pro` créé (`entl9f680380c4`) ; **4 produits créés manuellement**
+    (`norva_plus:{monthly,annual}`, `norva_family:{monthly,annual}`) + **attachés à
+    `pro`** ; statut « Could not check » (attente SA). **Reste** : offering `default`
+    + 4 packages.
+  - **Repéré** : offres d'essai `norva_plus` en `Brouillon` → à activer.
+  - Docs : création de ce journal + correction rail web Stancer→Revolut dans
+    `play-console-setup.md`.
