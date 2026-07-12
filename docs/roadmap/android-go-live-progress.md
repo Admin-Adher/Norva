@@ -54,9 +54,9 @@
 | 4 | Service Account Play → RevenueCat (JSON + droits Play + API activée) | 🟡 **En attente de propagation Google (24-36 h)** |
 | 5 | RevenueCat : entitlement `pro` + offering `default` + 4 packages | ✅ **Fait** — entitlement `pro` ✅, 4 produits créés + attachés ✅, offering `default` + 4 packages mappés ✅ (validation produits « Could not check » → verte quand #4 propage) |
 | 6 | RTDN (Real-time Developer Notifications) → topic Pub/Sub | ⏳ à faire (dépend du #4 vert) |
-| 7 | App TV : créer dans Play Console + upload AAB + répliquer produits + même JSON SA | ⏳ à faire |
-| 8 | Testeurs de licence + **achat sandbox** (phone + TV) → projection `provider=google_play` | ⏳ à faire |
-| 9 | Connexion Google (phone) : provider GoTrue + client OAuth Android + test device | 🟡 **Config FAITE** — clients OAuth Web+Android OK (projet `norva-501719`), SHA-1 Android = signature Play ✅, GoTrue accepte déjà l'audience. **Reste : test sur device** (après build vc11) |
+| 7 | App TV : créer dans Play Console + upload AAB + répliquer abonnements + produits RevenueCat TV + même JSON SA | 🟡 **En cours** — app `tv.norva.tv` créée ✅, **AAB vc14 keyé uploadé en test interne** ✅. **Reste** : testeurs, répliquer les abonnements sur l'app TV, produits RevenueCat TV (gaté par #4), JSON SA sur app Norva TV |
+| 8 | Testeurs de licence + **achat sandbox** (phone + TV) → projection `provider=google_play` | ⏳ à faire (gaté par #4 vert) |
+| 9 | Connexion Google (phone) : provider GoTrue + client OAuth Android + test device | 🟢 **Quasi validé** — sélecteur de compte Google **natif s'affiche sur device** (build vc11) → config OAuth/SHA prouvée bonne. **Reste** : confirmer que la sélection connecte bien dans Norva |
 
 **Bloqueurs transverses**
 - ⚠️ **D-U-N-S / suppression du compte Play le 9 août 2026** (bandeau rouge).
@@ -115,8 +115,8 @@
 | Élément | État |
 |---|---|
 | Compte developer | ✅ obtenu (2026-07-03) |
-| App phone `tv.norva.phone` | ✅ créée, **test interne** en place |
-| App TV `tv.norva.tv` | ⏳ **rien fait encore** (à créer au #7) |
+| App phone `tv.norva.phone` | ✅ créée, **test interne** en place (vc10 → à remplacer par **vc11 keyé**, build #15) |
+| App TV `tv.norva.tv` | ✅ **créée**, AAB **vc14 keyé** uploadé en **test interne** (build #15). Reste : testeurs + abonnements TV + form factor Android TV |
 | Abonnements (phone) | ✅ `norva_plus` (mensuel 4,99 / annuel 41,99) + `norva_family` (mensuel 8,99 / annuel 75,99), base plans **`monthly`** / **`annual`** (IDs confirmés dans Play, identiques pour les 2 subs), **offre essai 7 j** (`freetrial-monthly` / `freetrial-annual`) |
 | ⚠️ Offres d'essai `norva_plus` | 🟡 **En `Brouillon` (Draft) — à ACTIVER** (`freetrial-monthly` + `freetrial-annual`). Sur `norva_family` elles sont déjà `Actif`. Sinon les abonnés **Plus n'auront pas les 7 j gratuits**. Action : Play → `norva_plus` → chaque offre → ⋮ → Activer. |
 | Abonnements (TV) | ⏳ à répliquer au #7 |
@@ -169,19 +169,38 @@
 
 ---
 
-## Prochaines actions (immédiat)
+## Ce qui est FAIT (récap)
 
-1. **#5 RevenueCat — Product catalog** :
-   - Créer l'**entitlement** `pro` (Identifier `pro`, minuscules).
-   - Créer l'**offering** `default`.
-   - Ajouter les **4 packages** (mapping ci-dessus).
-2. **#4** : laisser Google propager (24-36 h), **ne pas recréer de clé** ; revérifier
-   le vert dans RevenueCat avant le test d'achat (#8).
-3. **#6 RTDN** dès que #4 est vert (bouton « Connect to Google » dans RevenueCat crée
-   le topic).
-4. **#7** : créer l'app TV, uploader l'AAB, répliquer les abonnements, ré-uploader le
-   **même** JSON SA.
-5. **En parallèle** : suivre l'**appel D-U-N-S** (deadline 9 août).
+- **#1 #2 #3 #5** : RevenueCat entièrement configuré (2 apps, 2 clés SDK→CI, webhook
+  testé 200, entitlement `pro`, 4 produits, offering `default` + 4 packages mappés).
+- **#4** : Service Account créé + droits Play + API activée + JSON uploadé →
+  **en attente de propagation Google** (validation passera verte seule).
+- **#7 (partiel)** : app TV `tv.norva.tv` créée + **AAB vc14 keyé** en test interne.
+- **#9 (quasi)** : connexion Google native — **sélecteur de compte s'affiche sur
+  device** (config OAuth/SHA prouvée bonne) ; reste à confirmer le login complet.
+- **Build #15** (commit `19d7dc5`) : AABs phone **vc11** + TV **vc14** avec la clé
+  RevenueCat, réussi.
+- **Play (phone)** : offres d'essai `norva_plus` activées (Brouillon→Actif).
+
+## Ce qui RESTE à faire
+
+1. **#9 (finir)** : confirmer que la sélection de compte connecte bien dans Norva
+   (test device en cours).
+2. **Phone vc11** : uploader `Norva-AndroidPhone-release-aab` (build #15) en test
+   interne (remplace vc10) → réinstaller.
+3. **#4 → vert** : laisser Google propager (24-36 h), **ne pas recréer de clé**.
+   Revérifier RevenueCat (Apps→Norva Phone, ↻).
+4. **#6 RTDN** : dès #4 vert, « Connect to Google » dans RevenueCat crée le topic.
+5. **#7 (finir)** : app TV → ajouter testeurs, activer form factor Android TV,
+   **répliquer les abonnements** `norva_plus`/`norva_family` sur l'app TV, créer +
+   attacher les **produits RevenueCat TV** aux 4 packages, uploader le **même** JSON
+   SA sur l'app Norva TV (gaté par #4 vert).
+6. **#8 achat sandbox** : ajouter testeurs de licence, achat sandbox phone + TV →
+   vérifier projection `provider=google_play`, `status=trialing/active`.
+7. **Bascule prod** : `NORVA_BILLING_MODE=revenuecat` → `NORVA_ENTITLEMENTS_MODE=enforce`
+   → redeploy (voir §13 de `play-console-setup.md`).
+8. **Transverse** : résoudre l'**appel D-U-N-S** (deadline 9 août) ; répliquer la
+   connexion Google check-list si besoin.
 
 > **Règle d'or** : ne **jamais** flipper `NORVA_BILLING_MODE=revenuecat` /
 > `NORVA_ENTITLEMENTS_MODE=enforce` avant qu'un **achat sandbox** Play marche de bout
@@ -242,4 +261,10 @@
     (`973428500788-eut6…`), SHA-1 vérifié = **signature Play** (match exact). Reste le
     test device après build vc11.
   - #7 **Piste B lancée** : bump versionCodes (phone vc11 / TV vc14, commit `19d7dc5`),
-    rebuild CI à déclencher manuellement (dispatch refusé à l'intégration).
+    rebuild CI **run #15 réussi** (AABs phone vc11 + TV vc14 keyés).
+  - #7 **app TV créée** (`tv.norva.tv`) + **AAB vc14 uploadé en test interne** (accessible
+    aux testeurs, sortie 14:35). Reste : testeurs, form factor TV, abonnements TV,
+    produits RevenueCat TV (gaté #4).
+  - #9 **test device** : le **sélecteur de compte Google natif s'affiche** dans l'app
+    phone (vc11) → toute la config OAuth Android + SHA-1 Play est validée. Reste à
+    confirmer le login complet (échange id_token ↔ GoTrue).
