@@ -266,7 +266,7 @@ immédiatement) + redeploy. Le code soft-wall redevient dormant sans rien casser
 - [x] **`norva-billing-webhook`** v1 — `verify_jwt=false`, idempotent, mappe les
   events RevenueCat → projection. Renvoie **401 tant que le secret n'est pas mis**
   (c'est voulu). URL :
-  `https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-billing-webhook`
+  `https://api.norva.tv/functions/v1/norva-billing-webhook`
 - [x] **`norva-cloud`** v38 — endpoint `GET /billing/trial-eligibility`, flag
   `NORVA_BILLING_MODE` (défaut `legacy`), `billingMode` dans `/health`.
 - [x] **`norva-playback`** v36 — redéployé (partage `_shared/entitlements.ts`).
@@ -368,7 +368,7 @@ Ces morceaux sont en place mais ne s'activent qu'une fois les clés fournies
 |---|---|
 | Branche dev | `claude/eager-carson-2zlqwy` |
 | Projet Supabase (ref) | `oupsceccxsonaalhueff` (région eu-central-1) |
-| URL webhook | `https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-billing-webhook` |
+| URL webhook | `https://api.norva.tv/functions/v1/norva-billing-webhook` |
 | Packages Android | `tv.norva.phone` (phone/tablette) · `tv.norva.tv` (TV) |
 | Plan codes serveur | `plus` (2 streams) · `family` (5 streams) — parité sinon |
 | Prix | Plus 4,99/mo · 41,99/an — Family 8,99/mo · 75,99/an |

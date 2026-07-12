@@ -42,7 +42,7 @@
 | Élément | Valeur |
 |---|---|
 | Ref projet Supabase | `oupsceccxsonaalhueff` |
-| URL du webhook | `https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-billing-webhook` |
+| URL du webhook | `https://api.norva.tv/functions/v1/norva-billing-webhook` |
 | Package APK téléphone/tablette | `tv.norva.phone` |
 | Package APK Android TV | `tv.norva.tv` |
 | Plan codes serveur | `plus`, `family` |
@@ -105,7 +105,7 @@ RevenueCat : **Products → +New**, et attache **chaque produit à l'entitlement
 
 ### 3.6 Configurer le webhook
 - **Integrations → Webhooks → + Add**
-- **URL** : `https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-billing-webhook`
+- **URL** : `https://api.norva.tv/functions/v1/norva-billing-webhook`
 - **Authorization header** : invente un secret long et aléatoire.
   → recopie-le dans le secret Supabase `NORVA_REVENUECAT_WEBHOOK_AUTH` (§6).
 - **App version / environment** : laisse Production + Sandbox.

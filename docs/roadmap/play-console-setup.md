@@ -276,7 +276,7 @@ Suivre `billing-setup.md` §3 **avec la correction du haut** (pas de Web Billing
 - **Offering** par défaut, 4 packages (mêmes IDs que lit l'app) :
   `$rc_monthly → norva_plus:monthly`, `$rc_annual → norva_plus:annual`,
   `family_monthly → norva_family:monthly`, `family_annual → norva_family:annual`.
-- **Webhook** → `https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-billing-webhook`,
+- **Webhook** → `https://api.norva.tv/functions/v1/norva-billing-webhook`,
   header `Authorization` = un secret long → recopier dans Supabase
   `NORVA_REVENUECAT_WEBHOOK_AUTH`.
 - **Clé publique Android** (Project settings → API keys) → §11.

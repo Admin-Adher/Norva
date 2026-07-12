@@ -36,7 +36,7 @@ Couvre **web (norva.tv)**, **PWA mobile** et **desktop (Electron)**.
 ### Google Cloud Console → APIs & Services → Credentials
 1. **OAuth client « Web application »** → récupérer `client_id` + `client_secret`.
    - Authorized redirect URI :
-     `https://oupsceccxsonaalhueff.supabase.co/auth/v1/callback`
+     `https://api.norva.tv/auth/v1/callback`
 2. (Étape 2 / Android natif) **OAuth client « Android »** :
    - Package name : `tv.norva.phone`
    - SHA-256 : **la clé de signature de l'application Play** (la *même* empreinte

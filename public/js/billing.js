@@ -3,8 +3,9 @@
  *   - Native (Android phone / tablet / TV APK): Google Play Billing, driven by
  *     the RevenueCat SDK on the native side and reached through the WebView
  *     bridge (window.NorvaTVCloud / window.NodeCastNative).
- *   - Web (browser): RevenueCat Web Billing (Stripe under the hood), loaded on
- *     demand from window.NORVA_BILLING_CONFIG.
+ *   - Web (browser): Revolut Merchant (embedded card checkout) is the live rail,
+ *     configured via window.NORVA_BILLING_CONFIG; a RevenueCat Web Billing path
+ *     remains as an inert fallback (only if webBillingEnabled is turned on).
  *
  * Purchases are correlated to the account because the app logs the RevenueCat
  * App User ID in as the Supabase user id (NorvaBilling.login(userId)).
