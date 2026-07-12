@@ -11924,6 +11924,87 @@ mark.search-highlight {
   box-shadow: 0 0 0 7px rgba(0, 0, 0, 0.55);
 }
 
+/* ------------------------------------------------------------------
+   TV menu (top navbar) — make it 10-foot / lean-back grade.
+   The generic .tv-mode *:focus above is tuned for content CARDS on a
+   busy grid: a 4px detached white ring + a 7px black halo + a forced
+   radius. On a small text button in the top bar that reads as an
+   oversized selection rectangle spilling past the item — the exact
+   "rectangle de sélection trop grand" the menu suffered from. Menu
+   controls instead get a SNUG, filled treatment that hugs the button.
+   Everything here is .tv-mode-scoped and keyed to nav selectors, so
+   phone / tablet / web are untouched. (Based on the TV UX audit: exempt
+   nav-links from the blanket ring, replace with a filled focus pill,
+   and add a persistent "you are here" indicator distinct from focus.) */
+
+/* Keep every label on ONE line — kills the "Live / TV" 2-line wrap that
+   doubled that item's height and made its focus box look huge. */
+.tv-mode .navbar-menu .nav-link,
+.tv-mode .navbar-brand,
+.tv-mode .nav-search-btn,
+.tv-mode .nav-bell-btn,
+.tv-mode .nav-profile,
+.tv-mode .now-playing-indicator,
+.tv-mode .navbar-menu .nav-link span:not(.nav-icon) {
+  white-space: nowrap;
+}
+
+/* Persistent "you are here" indicator, distinct from the transient focus.
+   The web active tint (mid-blue text on a faint fill) is couch-invisible;
+   add a solid bottom accent bar (the top-bar equivalent of a leading rail
+   bar) plus a brighter label so the current section reads across the room.
+   Suppressed while focused so the focus pill fully takes over. */
+.tv-mode .navbar-menu .nav-link.active:not(:focus) {
+  background: var(--color-accent-dim);
+  box-shadow: inset 0 -3px 0 0 var(--color-accent);
+  color: #ffffff;
+}
+
+/* Focus on a text menu item → tvOS-style light capsule: a filled white
+   pill with an inverted (dark) icon + label and a small settle-scale, no
+   ring. It reads instantly from the couch and can never look "too big" —
+   it is exactly the size of the button. Higher specificity than the
+   blanket *:focus (even with !important), so it wins. */
+.tv-mode .navbar-menu .nav-link:focus,
+.tv-mode .now-playing-indicator:focus {
+  outline: none !important;
+  box-shadow: none !important;
+  background: #ffffff;
+  color: #0b0e14;
+  border-radius: var(--radius-md);
+  transform: scale(1.05);
+  transition: background 0.15s cubic-bezier(0.2, 0, 0, 1),
+              transform 0.15s cubic-bezier(0.2, 0, 0, 1);
+}
+/* Flip the gradient <img> icons to a solid dark glyph on the white pill
+   (they would otherwise blend blue-on-white). Inline stroke SVGs use
+   currentColor, so the dark `color` above already recolours those. */
+.tv-mode .navbar-menu .nav-link:focus .norva-ui-icon {
+  filter: brightness(0);
+  opacity: 1;
+  transform: none;
+}
+.tv-mode .navbar-menu .nav-link:focus .now-playing-icon,
+.tv-mode .now-playing-indicator:focus .now-playing-icon {
+  color: #0b0e14;
+}
+
+/* Icon-only utility buttons (search / bell / profile) and the brand are
+   square-ish, so a snug high-luminance ring that hugs them reads cleaner
+   than a filled pill — and keeps the avatar image intact. Drop the big
+   black halo and the detached 3px offset. */
+.tv-mode .nav-search-btn:focus,
+.tv-mode .nav-bell-btn:focus,
+.tv-mode .nav-profile:focus,
+.tv-mode .navbar-brand:focus {
+  outline: 3px solid #ffffff !important;
+  outline-offset: 2px;
+  box-shadow: none !important;
+  border-radius: var(--radius-md);
+  transform: scale(1.04);
+  transition: transform 0.15s cubic-bezier(0.2, 0, 0, 1);
+}
+
 .tv-mode .movie-card:focus,
 .tv-mode .series-card:focus,
 .tv-mode .continue-card:focus,
