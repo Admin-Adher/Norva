@@ -903,7 +903,7 @@ async function cronSearchMatch(db: SupabaseClient, limit: number, reset: boolean
       const title = stringOr(row.original_title ?? row.title, "");
       if (!title) continue;
       try {
-        const match = await searchTmdbMatch(apiKey, itemType, title, row.release_year != null ? String(row.release_year) : null);
+        const match = await searchTmdbMatch(apiKey, itemType, title, row.release_year != null ? String(row.release_year) : null, stringOr(row.poster_url, "") || null);
         if (!match) continue;
         const metadata = isRecord(row.metadata) ? row.metadata : {};
         const { error: upErr } = await db.from("cloud_titles").update({

@@ -81,7 +81,7 @@ Ce qui vient alors, dans l'ordre (Phase 7bis → 8 de la checklist) :
   **par batches de 30k** (pour éviter le timeout MCP 60s), puis `norva_search_match_state` remis à
   `done=false, last_id=null`. Le cron `norva-enrich-search-match` (*/3) draine sur quelques heures
   (~74% de match dès le 1er batch). Requête de référence si à refaire :
-  `update cloud_titles set search_match_attempted_at=null where match_status='unmatched' and title ~ '^[A-Z]{2}[A-Z0-9]{0,3}(-[A-Z0-9]{1,6})* [-–—▎▏▍▌│┃┆┊｜|] ';` puis `update norva_search_match_state set last_id=null, done=false where id=1;`
+  `update cloud_titles set search_match_attempted_at=null where match_status='unmatched' and title ~ '^([A-Z]{2}[A-Z0-9]{0,3}|4K|8K|2160P|1440P|1080P|720P|480P|360P)(-[A-Z0-9+]{1,6})* [-–—▎▏▍▌│┃┆┊｜|] ';` puis `update norva_search_match_state set last_id=null, done=false where id=1;` (le head admet aussi les préfixes qualité digit-led "4K-AR - "/"8K - " du panel Strng IPTV 8K)
 - **Avant le dump de migration** : ✅ **le reap est complet** (0 source soft-deleted au 2026-07-08 —
   l'ancien Ninja `976e7bbd` entièrement drainé, ~763k lignes de doublon supprimées). Le dump AX42 ne
   transportera pas le doublon. Reaper repassé de `* * * * *` à `*/10` (drain fini → no-op fréquent inutile).

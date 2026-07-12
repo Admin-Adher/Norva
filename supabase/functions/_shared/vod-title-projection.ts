@@ -642,6 +642,9 @@ export function buildI18nFromTmdbTranslations(
 export async function validateTmdbCandidate(
   apiKey: string,
   candidate: { itemType: "movie" | "series"; tmdbId: string; title: string; year: string | null },
+  // When true (a poster_path-confirmed search match), accept the candidate even if the fuzzy
+  // title score is below the gate — poster equality is stronger evidence than the title text.
+  confirmed = false,
 ): Promise<TmdbValidation> {
   const details = await fetchTmdbDetails(apiKey, candidate.itemType, candidate.tmdbId);
 
@@ -681,7 +684,7 @@ export async function validateTmdbCandidate(
   const best = ranked[0];
   const title = best?.cand || stringOr(details.title ?? details.name ?? details.original_title ?? details.original_name, "");
   const confidence = best?.score ?? 0;
-  const valid = confidence >= 0.58;
+  const valid = confirmed || confidence >= 0.58;
   return {
     valid,
     title: title || null,
@@ -690,7 +693,9 @@ export async function validateTmdbCandidate(
     backdropUrl: tmdbImageUrl(details.backdrop_path, "w780"),
     confidence,
     i18n: Object.keys(i18n).length ? i18n : undefined,
-    reason: valid ? "title_year_sanity_check_passed" : "title_year_sanity_check_failed",
+    reason: valid
+      ? (confirmed && confidence < 0.58 ? "poster_path_confirmed" : "title_year_sanity_check_passed")
+      : "title_year_sanity_check_failed",
     details: compactRecord({
       id: details.id,
       title,
@@ -747,11 +752,29 @@ async function tmdbSearchResults(
   return Array.isArray(payload.results) ? payload.results as JsonRecord[] : [];
 }
 
+// A provider poster is often TMDB's own artwork (image.tmdb.org/t/p/<size>/<hash>.jpg).
+// Reduce any TMDB image URL — or an already-bare "/<hash>.jpg" path as returned by search
+// results — to that "/<hash>.jpg" segment so a provider poster and a TMDB candidate poster
+// can be compared. Returns null for a non-TMDB (provider-CDN) poster, so it never yields a
+// false confirmation. TMDB does NOT offer a reverse poster→film lookup; equality of the path
+// is instead used as a high-confidence CONFIRMATION signal on a title-search candidate.
+function tmdbPosterPath(value: unknown): string | null {
+  const s = stringOr(value, "");
+  if (!s) return null;
+  const fromUrl = s.match(/\/t\/p\/[^/]+(\/[A-Za-z0-9._-]+\.(?:jpg|jpeg|png|webp))/i);
+  if (fromUrl) return fromUrl[1].toLowerCase();
+  return /^\/[A-Za-z0-9._-]+\.(?:jpg|jpeg|png|webp)$/i.test(s) ? s.toLowerCase() : null;
+}
+
 export async function searchTmdbMatch(
   apiKey: string,
   itemType: "movie" | "series",
   rawTitle: string,
   year: string | null,
+  // The provider's poster for this title. When it is TMDB-hosted, matching its poster_path to a
+  // candidate's is near-proof of identity: it outranks the fuzzy title score and bypasses the
+  // gate, rescuing renamed/prefixed titles ("4K-AR - La Bête") the text search would miss.
+  posterHint: string | null = null,
 ): Promise<(TmdbValidation & { tmdbId: string }) | null> {
   const query = cleanSearchQuery(rawTitle);
   if (query.length < 2) return null;
@@ -759,9 +782,11 @@ export async function searchTmdbMatch(
   const language = tmdbSearchLanguage();
   // Recover a year from the title when the row has none — most unmatched rows do.
   const effYear = year ?? extractTitleYear(rawTitle);
+  const providerPosterPath = tmdbPosterPath(posterHint);
 
-  const pickBest = (results: JsonRecord[]): { id: string; score: number } | null => {
-    let best: { id: string; score: number } | null = null;
+  type Pick = { id: string; score: number; posterConfirmed: boolean };
+  const pickBest = (results: JsonRecord[]): Pick | null => {
+    let best: Pick | null = null;
     for (const result of results.slice(0, 8)) {
       const rec = recordOrEmpty(result);
       const id = stringOr(rec.id, "");
@@ -769,11 +794,17 @@ export async function searchTmdbMatch(
       const locTitle = stringOr(rec.title ?? rec.name, "");           // localized (French)
       const origTitle = stringOr(rec.original_title ?? rec.original_name, ""); // native
       const candidateYear = stringOr(rec.release_date ?? rec.first_air_date, "").match(/(19|20)\d{2}/)?.[0] ?? null;
-      const score = Math.max(
+      const titleScore = Math.max(
         locTitle ? titleConfidence(rawTitle, locTitle, effYear, candidateYear) : 0,
         origTitle ? titleConfidence(rawTitle, origTitle, effYear, candidateYear) : 0,
       );
-      if (!best || score > best.score) best = { id, score };
+      const posterConfirmed = Boolean(providerPosterPath) && tmdbPosterPath(rec.poster_path) === providerPosterPath;
+      const score = posterConfirmed ? Math.max(titleScore, 1) : titleScore;
+      // A poster-confirmed candidate always outranks a merely title-scored one.
+      if (!best || (posterConfirmed && !best.posterConfirmed) ||
+          (posterConfirmed === best.posterConfirmed && score > best.score)) {
+        best = { id, score, posterConfirmed };
+      }
     }
     return best;
   };
@@ -781,15 +812,21 @@ export async function searchTmdbMatch(
   // Pass 1: French search with the year when known.
   let best = pickBest(await tmdbSearchResults(apiKey, endpoint, query, language, effYear));
   // Pass 2: drop the year if it filtered the right result out (provider year off by 1+).
-  if ((!best || best.score < 0.72) && effYear) {
+  if ((!best || (!best.posterConfirmed && best.score < 0.72)) && effYear) {
     best = pickBest(await tmdbSearchResults(apiKey, endpoint, query, language, null));
   }
-  // Demand a strong title match (search is fuzzier than a provider-supplied id).
-  if (!best || best.score < 0.72) return null;
+  // Demand a strong title match (search is fuzzier than a provider-supplied id) — UNLESS the
+  // poster confirms identity, which is stronger than any title heuristic.
+  if (!best || (!best.posterConfirmed && best.score < 0.72)) return null;
 
-  // validateTmdbCandidate re-checks across ALL languages (translations + alt titles),
-  // so it confirms the pick regardless of which title field the search matched on.
-  const validation = await validateTmdbCandidate(apiKey, { itemType, tmdbId: best.id, title: rawTitle, year: effYear });
+  // validateTmdbCandidate re-checks across ALL languages (translations + alt titles), so it
+  // confirms the pick regardless of which title field the search matched on. A poster-confirmed
+  // pick passes its title gate too (the artwork already proves identity).
+  const validation = await validateTmdbCandidate(
+    apiKey,
+    { itemType, tmdbId: best.id, title: rawTitle, year: effYear },
+    best.posterConfirmed,
+  );
   return validation.valid ? { ...validation, tmdbId: best.id } : null;
 }
 
@@ -804,9 +841,12 @@ function cleanSearchQuery(title: string): string {
     // FIRST — before the punctuation-flatten below turns the "▎"/"-" separator into a space and hides
     // the boundary. Otherwise "DK ▎ A Hijacking" is searched on TMDB as "DK A Hijacking" and never
     // matches (this is why box-bar panels sit at ~50% verified). Search-query only: identity_key comes
-    // from normalizeTitle(raw), so nothing is re-keyed. Two leading uppercase letters required, so a
-    // digit-led title ("007 - …") or a hyphenated word ("X-Men") is never mistaken for a prefix.
-    .replace(/^[A-Z]{2}[A-Z0-9]{0,3}(?:-[A-Z0-9]{1,6})* [-–—▎▏▍▌│┃┆┊｜|] /, "")
+    // from normalizeTitle(raw), so nothing is re-keyed. The head is EITHER two leading uppercase letters
+    // (so a plain digit-led title "007 - …" or a hyphenated word "X-Men" is never mistaken for a prefix)
+    // OR a digit-led quality token (4K/8K/2160P… — the "Strng IPTV 8K" panel tags titles "4K-AR - ",
+    // "4K-D+ - ", "8K-FR - "); "8 Mile"/"4Kids"/"2160 -" stay safe (no K/P + separator). Keep the head
+    // set identical across cleanDisplayTitle (:928) and normalizeTitle (:897) — the three stay in sync.
+    .replace(/^(?:[A-Z]{2}[A-Z0-9]{0,3}|4K|8K|2160P|1440P|1080P|720P|480P|360P)(?:-[A-Z0-9+]{1,6})* [-–—▎▏▍▌│┃┆┊｜|] /, "")
     .replace(/[\[({][^\])}]*[\])}]/g, " ")
     .replace(/\b(4k|uhd|2160p|1080p|720p|480p|fhd|hd|sd|multi|vostfr|vost|vff|vf|vo|truefrench|subt?\s*ar|sub|dub|dv)\b/gi, " ")
     .replace(/(?:^|\s)((?:19|20)\d{2})\s*$/, " ")
@@ -886,15 +926,16 @@ function identityForTitle(itemType: string, title: string, year: string | null, 
 }
 
 function normalizeTitle(value: string, year: string | null = null) {
-  // Strip a leading provider region/language/category prefix ("EN - ", "AR-SUBS - ", "DK ▎ ") on the
-  // RAW-CASED string FIRST. The guard requires two leading UPPERCASE letters so a digit-led ("007 - ")
-  // or one-word real title ("IT", "US") is never mistaken for a prefix — so it MUST run before
-  // toLowerCase() below (lowercasing destroys the guard). This makes identity_key prefix-free so
-  // cross-region copies of one film collapse instead of showing 8+ cards (EN-/AR-/FR- The Hunger
-  // Games -> one norm: key). Fall back to the raw value if stripping would empty it. Regex is kept
-  // identical to cleanDisplayTitle (:919) and cleanSearchQuery (:809) — keep the three in sync.
+  // Strip a leading provider region/language/category prefix ("EN - ", "AR-SUBS - ", "DK ▎ ", plus the
+  // digit-led quality prefixes "4K-AR - " / "8K-FR - " the "Strng IPTV 8K" panel emits) on the RAW-CASED
+  // string FIRST. The head guard is two leading UPPERCASE letters (so a plain digit-led "007 - " or
+  // one-word real title "IT"/"US" is never mistaken for a prefix) OR a quality token (4K/8K/2160P…, which
+  // "8 Mile"/"2160 -" can't be). It MUST run before toLowerCase() below (lowercasing destroys the guard).
+  // This makes identity_key prefix-free so cross-region/quality copies of one film collapse instead of
+  // showing 8+ cards (EN-/AR-/FR-/4K-AR- The Hunger Games -> one norm: key). Fall back to the raw value if
+  // stripping would empty it. Regex kept identical to cleanDisplayTitle and cleanSearchQuery — keep the three in sync.
   const rawValue = String(value || "");
-  const deprefixed = rawValue.replace(/^[A-Z]{2}[A-Z0-9]{0,3}(?:-[A-Z0-9]{1,6})* [-–—▎▏▍▌│┃┆┊｜|] /, "");
+  const deprefixed = rawValue.replace(/^(?:[A-Z]{2}[A-Z0-9]{0,3}|4K|8K|2160P|1440P|1080P|720P|480P|360P)(?:-[A-Z0-9+]{1,6})* [-–—▎▏▍▌│┃┆┊｜|] /, "");
   let text = stripDiacritics(deprefixed.length >= 2 ? deprefixed : rawValue)
     .toLowerCase()
     .replace(/[\[({][^\])}]*[\])}]/g, " ")
@@ -919,13 +960,15 @@ const SOFT_RELEASE_TOKENS = /^(french|truefrench|vostfr|vost|vff|vfq|vf|vo|multi
 function cleanDisplayTitle(value: string) {
   const raw = String(value || "Norva").replace(/\s+/g, " ").trim();
   let text = raw.replace(/^\s*(?:[\[(][^\])]{0,60}[\])]\s*)+/, "").trim();
-  // Strip a leading provider region/language/category prefix ("FR - ", "AR-SUBS - ", "SOC - ", and
-  // the box-bar variants some panels use: "DK ▎ A Hijacking", "ALB ▎ Source Code"). Two leading
-  // UPPERCASE letters are required so a digit-leading real title ("007 - Die Another Day", "1917 - La
-  // Révolution Russe") is never mistaken for a prefix. Display only — original_title keeps the raw
-  // provider name, and identity_key comes from normalizeTitle(raw), so no re-keying. Mirrors the
-  // frontend MediaUtils.cleanReleaseName — keep the two in sync.
-  const deprefixed = text.replace(/^[A-Z]{2}[A-Z0-9]{0,3}(?:-[A-Z0-9]{1,6})* [-–—▎▏▍▌│┃┆┊｜|] /, "").trim();
+  // Strip a leading provider region/language/category prefix ("FR - ", "AR-SUBS - ", "SOC - ", the
+  // box-bar variants some panels use ("DK ▎ A Hijacking", "ALB ▎ Source Code"), and the digit-led
+  // quality prefixes the "Strng IPTV 8K" panel emits: "4K-AR - La Bête", "4K-D+ - The Muppet Show",
+  // "8K - Transformers One", "8K-FR - Inception"). The head is two leading UPPERCASE letters (so a plain
+  // digit-leading real title "007 - Die Another Day" / "1917 - La Révolution Russe" is never mistaken
+  // for a prefix) OR a quality token (4K/8K/2160P… — "8 Mile"/"4Kids"/"2160 -" stay safe). Display only —
+  // original_title keeps the raw provider name, and identity_key comes from normalizeTitle(raw), so no
+  // re-keying. Mirrors the frontend MediaUtils.cleanReleaseName — keep the two in sync.
+  const deprefixed = text.replace(/^(?:[A-Z]{2}[A-Z0-9]{0,3}|4K|8K|2160P|1440P|1080P|720P|480P|360P)(?:-[A-Z0-9+]{1,6})* [-–—▎▏▍▌│┃┆┊｜|] /, "").trim();
   if (deprefixed.length >= 2) text = deprefixed;
   if (!/\s/.test(text) && /^\S+(?:\.\S+){3,}$/.test(text)) text = text.replace(/\./g, " ");
   const tokens = text.split(/\s+/).filter(Boolean);
