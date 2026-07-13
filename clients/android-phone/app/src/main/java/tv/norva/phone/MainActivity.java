@@ -259,6 +259,9 @@ public class MainActivity extends Activity {
         webView = new WebView(this);
         webView.setBackgroundColor(Color.parseColor("#0a0a0f"));
         webView.setVisibility(View.GONE);
+        // Debug builds only: expose the WebView to chrome://inspect for on-device debugging
+        // (e.g. the [Native] variant-switch logs). Never enabled in release for security.
+        if (BuildConfig.DEBUG) WebView.setWebContentsDebuggingEnabled(true);
 
         WebSettings s = webView.getSettings();
         s.setJavaScriptEnabled(true);
