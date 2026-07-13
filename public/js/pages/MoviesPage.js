@@ -1,14794 +1,2715 @@
-/* =====================================================
-  * Norva - Dark Theme Design System
-   ===================================================== */
-
-/* CSS Variables */
-:root {
-  /* iOS Safari toolbar compensation (set dynamically by JS) */
-  --ios-ui-bottom: 0px;
-
-
-  /* Colors */
-  --color-bg-primary: #080B12;
-  --color-bg-secondary: #12121a;
-  --color-bg-tertiary: #1a1a25;
-  --color-bg-hover: #22222f;
-  --color-bg-active: #2a2a3a;
-
-  --color-accent: #3B82F6;
-  --color-accent-hover: #60A5FA;
-  --color-accent-dim: rgba(59, 130, 246, 0.2);
-  --color-accent-secondary: #8B5CF6;
-
-  --color-success: #10b981;
-  --color-warning: #f59e0b;
-  --color-error: #ef4444;
-
-  --color-text-primary: #F8FAFC;
-  --color-text-secondary: #94A3B8;
-  --color-text-muted: #71717a;
-
-  /* Compatibility aliases — some mobile-nav and focus rules reference these
-     legacy names. Point them at the canonical tokens so the active bottom tab
-     and focus rings render in the brand colour instead of falling back to grey
-     (the active tab was inheriting the inactive grey) or a non-brand violet. */
-  --primary-blue: var(--color-accent);
-  --text-secondary: var(--color-text-secondary);
-
-  --color-border: #27272a;
-  --color-border-light: #3f3f46;
-
-  /* Glass effect */
-  --glass-bg: rgba(18, 18, 26, 0.8);
-  --glass-border: rgba(255, 255, 255, 0.1);
-
-  /* Spacing */
-  --space-xs: 4px;
-  --space-sm: 8px;
-  --space-md: 16px;
-  --space-lg: 24px;
-  --space-xl: 32px;
-  --space-2xl: 48px;
-
-  /* Border Radius */
-  --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 16px;
-  --radius-full: 9999px;
-
-  /* Shadows */
-  --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.3);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
-  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
-  --shadow-glow: 0 0 20px rgba(59, 130, 246, 0.3);
-
-  /* Transitions */
-  --transition-fast: 150ms ease;
-  --transition-normal: 250ms ease;
-  --transition-slow: 350ms ease;
-
-  /* Layout */
-  --navbar-height: 60px;
-  --sidebar-width: 320px;
-  --epg-sidebar-width: 250px;
-
-  /* Safe area insets for notched devices */
-  --safe-area-inset-top: env(safe-area-inset-top, 0px);
-  --safe-area-inset-right: env(safe-area-inset-right, 0px);
-  --safe-area-inset-bottom: env(safe-area-inset-bottom, 0px);
-  --safe-area-inset-left: env(safe-area-inset-left, 0px);
-}
-
-/* Reset & Base */
-*,
-*::before,
-*::after {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
-}
-
-/* Accessibility: a visible keyboard-focus indicator for any interactive element
-   that doesn't already define its own. :where() keeps specificity at zero, so
-   bespoke focus styles (border-highlight inputs, branded nav chips) still win,
-   and it never shows on plain mouse/touch interaction (focus-visible only). */
-:where(a, button, input, select, textarea, summary, [role="button"], [tabindex]:not([tabindex="-1"])):focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
-}
-
-/* Touch polish: remove the default grey tap-flash and give a subtle, transient
-   pressed state on touch. scale() is GPU-composited (no reflow); :active ≠ the
-   .active selected-tab class, so this never fights selected styling. */
-html {
-  -webkit-tap-highlight-color: transparent;
-}
-
-@media (hover: none) {
-  button:active,
-  .btn:active,
-  .nav-link:active,
-  [role="button"]:active {
-    transform: scale(0.97);
-    opacity: 0.85;
-  }
-}
-
-html,
-body {
-  height: 100%;
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  font-size: 14px;
-  line-height: 1.5;
-  color: var(--color-text-primary);
-  background: var(--color-bg-primary);
-  overflow: hidden;
-  /* Prevent pull-to-refresh and overscroll bounce on mobile */
-  overscroll-behavior: none;
-  -webkit-overflow-scrolling: touch;
-}
-
-/* Prevent text selection on touch devices (improves UX) */
-@media (hover: none) {
-  * {
-    -webkit-user-select: none;
-    user-select: none;
-  }
-
-  /* Allow text selection in inputs and content areas */
-  input,
-  textarea,
-  .modal-body,
-  .series-info,
-  .movie-info,
-  .epg-program-desc {
-    -webkit-user-select: text;
-    user-select: text;
-  }
-}
-
-#app {
-  display: flex;
-  flex-direction: column;
-  height: 100vh;
-  /* fallback */
-  height: 100dvh;
-  /* dynamic viewport height for modern browsers */
-  height: -webkit-fill-available;
-  /* iOS Safari fallback */
-}
-
-/* Typography */
-h1,
-h2,
-h3,
-h4,
-h5,
-h6 {
-  font-weight: 600;
-  line-height: 1.3;
-}
-
-h2 {
-  font-size: 1.5rem;
-}
-
-h3 {
-  font-size: 1.25rem;
-}
-
-h4 {
-  font-size: 1rem;
-}
-
-.hint {
-  color: var(--color-text-muted);
-  font-size: 0.875rem;
-}
-
-.hidden {
-  display: none !important;
-}
-
-.catalog-nav-hidden {
-  display: none !important;
-}
-
-.catalog-locked .nav-link[data-page="live"],
-.catalog-locked .nav-link[data-page="movies"],
-.catalog-locked .nav-link[data-page="series"] {
-  display: none !important;
-}
-
-.catalog-locked #page-live,
-.catalog-locked #page-movies,
-.catalog-locked #page-series {
-  display: none !important;
-}
-
-.catalog-locked-empty {
-  display: grid;
-  place-items: center;
-  min-height: min(560px, 60vh);
-  padding: var(--space-xl);
-  text-align: center;
-  border: 1px dashed var(--color-border);
-  border-radius: var(--radius-lg);
-  color: var(--color-text-secondary);
-}
-
-.catalog-locked-empty h2 {
-  margin: 0 0 var(--space-sm);
-  color: var(--color-text-primary);
-}
-
-.catalog-locked-empty p {
-  max-width: 440px;
-  margin: 0 0 var(--space-lg);
-  line-height: 1.5;
-}
-
-/* =====================================================
-   Navbar
-   ===================================================== */
-.navbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  /* Grow by the status-bar inset and pad content down so the bar sits BELOW the
-     phone's status bar (clock/battery/notifs) while its background fills behind
-     it. safe-area-inset-top is 0 when there's no overlap, so this is a no-op on
-     desktop and on non-edge-to-edge devices. */
-  height: calc(var(--navbar-height) + var(--safe-area-inset-top));
-  padding: 0 var(--space-lg);
-  padding-top: var(--safe-area-inset-top);
-  padding-left: max(var(--space-lg), var(--safe-area-inset-left));
-  padding-right: max(var(--space-lg), var(--safe-area-inset-right));
-  background: var(--glass-bg);
-  backdrop-filter: blur(12px);
-  border-bottom: 1px solid var(--glass-border);
-  z-index: 100;
-}
-
-.navbar-brand {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-  color: inherit;
-  cursor: pointer;
-  text-decoration: none;
-  user-select: none;
-}
-
-.navbar-brand:focus-visible {
-  outline: 2px solid var(--primary-blue);
-  outline-offset: 6px;
-  border-radius: 12px;
-}
-
-.logo {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 42px;
-  height: 42px;
-  flex: 0 0 42px;
-}
-
-.logo img {
-  width: 100%;
-  height: 100%;
-  display: block;
-  object-fit: contain;
-  border-radius: 10px;
-}
-
-.brand-text {
-  font-family: 'Century Gothic', sans-serif;
-  font-size: 1.5rem;
-  font-weight: 500;
-  letter-spacing: -0.03em;
-  color: #fff;
-  /* Visual correction: shift text slightly down to align optically with icon center */
-  padding-top: 2px;
-}
-
-.brand-accent {
-  color: var(--color-accent);
-}
-
-.navbar-menu {
-  display: flex;
-  gap: var(--space-xs);
-}
-
-/* Profile avatar in the navbar — always-visible, discoverable entry to the
-   "Who's watching?" switcher (no more digging into Settings to change profile).
-   margin-right:auto on the brand clusters the menu + avatar to the right and
-   keeps the avatar OUTSIDE .navbar-menu so it stays visible on mobile (where
-   .navbar-menu collapses behind the hamburger). */
-.navbar-brand { margin-right: auto; }
-.nav-profile {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex: 0 0 auto;
-  width: 38px;
-  height: 38px;
-  padding: 0;
-  margin-left: var(--space-sm);
-  border: 2px solid transparent;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.06);
-  cursor: pointer;
-  overflow: hidden;
-  transition: border-color .18s ease, transform .18s ease;
-}
-.nav-profile:hover,
-.nav-profile:focus-visible {
-  border-color: var(--primary-blue);
-  transform: scale(1.06);
-  outline: none;
-}
-.nav-profile-img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  border-radius: 50%;
-  display: block;
-}
-/* .nav-profile sets display:flex, which would override the [hidden] attribute —
-   restore it so JS can toggle visibility. */
-.nav-profile[hidden] { display: none; }
-
-/* Mobile Menu Toggle Button */
-.mobile-menu-toggle {
-  display: none;
-  flex-direction: column;
-  justify-content: space-around;
-  width: 28px;
-  height: 28px;
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  padding: 0;
-  z-index: 110;
-}
-
-.mobile-menu-toggle span {
-  width: 100%;
-  height: 2px;
-  background: var(--color-text-primary);
-  border-radius: 2px;
-  transition: all 0.3s ease;
-}
-
-.mobile-menu-toggle.active span:nth-child(1) {
-  transform: rotate(45deg) translate(7px, 7px);
-}
-
-.mobile-menu-toggle.active span:nth-child(2) {
-  opacity: 0;
-}
-
-.mobile-menu-toggle.active span:nth-child(3) {
-  transform: rotate(-45deg) translate(7px, -7px);
-}
-
-.nav-link {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-  padding: var(--space-sm) var(--space-md);
-  color: var(--color-text-secondary);
-  text-decoration: none;
-  border-radius: var(--radius-md);
-  transition: all var(--transition-fast);
-}
-
-.nav-link:hover {
-  color: var(--color-text-primary);
-  background: var(--color-bg-hover);
-}
-
-.nav-link.active {
-  color: var(--color-accent);
-  background: var(--color-accent-dim);
-}
-
-.nav-icon {
-  font-size: 1.1rem;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-/* =====================================================
-   Main Content & Pages
-   ===================================================== */
-.main-content {
-  flex: 1;
-  overflow: hidden;
-}
-
-.page {
-  display: none;
-  height: 100%;
-  overflow: hidden;
-}
-
-.page.active {
-  display: block;
-  animation: page-fade-in 160ms ease;
-}
-
-/* Soft page-enter fade (opacity only — no transform, so it never creates a
-   containing block that would break position:fixed children like the live
-   channel sidebar or the series filter bar). Neutralised under reduced-motion. */
-@keyframes page-fade-in {
-  from { opacity: 0; }
-  to   { opacity: 1; }
-}
-
-/* Empty State */
-.empty-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  height: 100%;
-  padding: var(--space-xl);
-  text-align: center;
-  color: var(--color-text-muted);
-}
-
-/* =====================================================
-   Home Page Layout
-   ===================================================== */
-.home-layout {
-  display: flex;
-  height: 100%;
-  position: relative;
-}
-
-/* Fix scroll sidebar on desktop (Safari / flex bug) */
-.main-content,
-.page,
-.home-layout,
-.channel-sidebar,
-.channel-list {
-  min-height: 0;
-}
-
-/* Floating Channel Toggle Button (Mobile) */
-.channel-toggle-btn {
-  display: none;
-  position: absolute;
-  top: var(--space-md);
-  left: var(--space-md);
-  z-index: 60;
-  padding: var(--space-sm) var(--space-md);
-  background: var(--glass-bg);
-  backdrop-filter: blur(12px);
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius-lg);
-  color: var(--color-text-primary);
-  font-weight: 500;
-  cursor: pointer;
-  box-shadow: var(--shadow-lg);
-  transition: all var(--transition-fast);
-  align-items: center;
-  gap: var(--space-sm);
-}
-
-.channel-toggle-btn:hover {
-  background: var(--color-accent);
-  border-color: var(--color-accent);
-  box-shadow: var(--shadow-glow);
-}
-
-.channel-toggle-btn .icon {
-  width: 1.25em;
-  height: 1.25em;
-}
-
-/* Channel Sidebar Overlay */
-.channel-sidebar-overlay {
-  display: none;
-}
-
-/* Sidebar */
-.channel-sidebar {
-  width: var(--sidebar-width);
-  display: flex;
-  flex-direction: column;
-  background: var(--color-bg-secondary);
-  border-right: 1px solid var(--color-border);
-}
-
-.sidebar-header {
-  padding: var(--space-md);
-  border-bottom: 1px solid var(--color-border);
-}
-
-.sidebar-header-row {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-}
-
-.sidebar-header-row .search-wrapper {
-  flex: 1;
-}
-
-.sidebar-collapse-btn {
-  display: none;
-  /* Hidden on mobile */
-  flex-shrink: 0;
-  padding: var(--space-xs);
-}
-
-.sidebar-collapse-btn .icon {
-  transition: transform 0.2s ease;
-}
-
-/* Desktop collapse button visibility */
-@media (min-width: 769px) {
-  .sidebar-collapse-btn {
-    display: flex;
-  }
-}
-
-/* Collapsed sidebar state (desktop only) */
-.channel-sidebar.collapsed {
-  width: 0;
-  min-width: 0;
-  overflow: hidden;
-  border-right: none;
-}
-
-.channel-sidebar.collapsed .sidebar-header,
-.channel-sidebar.collapsed .channel-list {
-  opacity: 0;
-  visibility: hidden;
-}
-
-/* Expand button when sidebar is collapsed */
-.sidebar-expand-btn {
-  display: none;
-  position: fixed;
-  left: 0;
-  top: calc(var(--navbar-height) + var(--space-md));
-  z-index: 95;
-  background: var(--glass-bg);
-  backdrop-filter: blur(12px);
-  border: 1px solid var(--glass-border);
-  border-left: none;
-  border-radius: 0 var(--radius-md) var(--radius-md) 0;
-  padding: var(--space-sm);
-  cursor: pointer;
-  color: var(--color-text-primary);
-  transition: opacity 0.3s ease, background var(--transition-fast);
-  opacity: 0;
-  pointer-events: none;
-}
-
-.sidebar-expand-btn:hover {
-  background: var(--color-bg-hover);
-}
-
-.sidebar-expand-btn .icon {
-  width: 20px;
-  height: 20px;
-}
-
-/* Show expand button when sidebar is collapsed */
-.home-layout.sidebar-collapsed .sidebar-expand-btn {
-  display: flex;
-  opacity: 1;
-  pointer-events: auto;
-}
-
-/* Fade in expand button with player controls */
-.home-layout.sidebar-collapsed .sidebar-expand-btn.visible {
-  opacity: 1;
-  pointer-events: auto;
-}
-
-/* Hide expand button on mobile - mobile uses the floating toggle instead */
-@media (max-width: 768px) {
-  .sidebar-expand-btn {
-    display: none !important;
-  }
-}
-
-/* Smooth transitions */
-.channel-sidebar {
-  transition: width 0.2s ease, min-width 0.2s ease;
-}
-
-.search-input {
-  width: 100%;
-  padding: var(--space-sm) var(--space-md);
-  background: var(--color-bg-tertiary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  color: var(--color-text-primary);
-  font-size: 0.875rem;
-  transition: border-color var(--transition-fast);
-}
-
-.search-input:focus {
-  outline: none;
-  border-color: var(--color-accent);
-}
-
-.search-input::placeholder {
-  color: var(--color-text-muted);
-}
-
-/* Search wrapper for clear button */
-.search-wrapper {
-  position: relative;
-  width: 100%;
-  min-width: 150px;
-}
-
-.search-wrapper .search-input {
-  padding-right: 30px;
-  /* Room for clear button */
-}
-
-.search-clear {
-  position: absolute;
-  right: 6px;
-  top: 50%;
-  transform: translateY(-50%);
-  background: none;
-  border: none;
-  color: var(--color-text-muted);
-  font-size: 1.2rem;
-  line-height: 1;
-  cursor: pointer;
-  padding: 4px;
-  opacity: 0;
-  transition: opacity var(--transition-fast), color var(--transition-fast);
-}
-
-.search-wrapper:hover .search-clear,
-.search-input:focus~.search-clear {
-  opacity: 0.6;
-}
-
-.search-clear:hover {
-  opacity: 1;
-  color: var(--color-text-primary);
-}
-
-.sidebar-controls {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-  margin-top: var(--space-sm);
-  flex-wrap: wrap;
-}
-
-.source-select {
-  flex: 1;
-  min-width: 140px;
-  padding: var(--space-xs) var(--space-sm);
-  background: var(--color-bg-tertiary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  color: var(--color-text-primary);
-  font-size: 0.75rem;
-}
-
-.toggle-hidden {
-  display: flex;
-  align-items: center;
-  gap: var(--space-xs);
-  font-size: 0.75rem;
-  color: var(--color-text-muted);
-  cursor: pointer;
-}
-
-.toggle-hidden input {
-  accent-color: var(--color-accent);
-}
-
-/* Channel List */
-.channel-list {
-  flex: 1;
-  overflow-y: auto;
-  padding: var(--space-sm);
-  -webkit-overflow-scrolling: touch;
-  overscroll-behavior: contain;
-}
-
-.channel-group {
-  margin-bottom: var(--space-sm);
-}
-
-.group-header {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-  padding: var(--space-sm) var(--space-md);
-  background: var(--color-bg-tertiary);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  user-select: none;
-  transition: background var(--transition-fast);
-}
-
-.group-header:hover {
-  background: var(--color-bg-hover);
-}
-
-.group-toggle {
-  transition: transform var(--transition-fast);
-}
-
-.group-header.collapsed .group-toggle {
-  transform: rotate(-90deg);
-}
-
-.group-name {
-  flex: 1;
-  font-weight: 500;
-  font-size: 0.875rem;
-}
-
-.group-count {
-  font-size: 0.75rem;
-  color: var(--color-text-muted);
-}
-
-.group-channels {
-  margin-top: var(--space-xs);
-}
-
-.group-header.collapsed+.group-channels {
-  display: none;
-}
-
-.channel-item {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-  padding: var(--space-sm) var(--space-md);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  transition: background var(--transition-fast);
-}
-
-.channel-item.logical-channel {
-  min-height: 58px;
-}
-
-.channel-lcn {
-  flex: 0 0 24px;
-  color: #9fb1ff;
-  font-size: 0.78rem;
-  font-weight: 800;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
-
-.channel-item.logical-primary .channel-name {
-  font-weight: 700;
-}
-
-.channel-item.logical-multiplex {
-  opacity: 0.92;
-}
-
-.channel-item:hover {
-  background: var(--color-bg-hover);
-}
-
-.channel-item.active {
-  background: var(--color-accent-dim);
-  border-left: 3px solid var(--color-accent);
-}
-
-.channel-item.hidden {
-  opacity: 0.5;
-}
-
-.channel-item.playback-broken .channel-name::after,
-.channel-item.playback-direct-hls .channel-name::after {
-  content: "HS";
-  display: inline-flex;
-  align-items: center;
-  margin-left: 8px;
-  padding: 1px 6px;
-  border-radius: var(--radius-full);
-  background: rgba(239, 68, 68, 0.18);
-  color: var(--color-error);
-  border: 1px solid rgba(239, 68, 68, 0.35);
-  font-size: 0.62rem;
-  font-weight: 700;
-  vertical-align: middle;
-}
-
-.channel-item.playback-ok:not(.playback-broken):not(.playback-direct-hls) .channel-name::after {
-  content: "OK";
-  display: inline-flex;
-  align-items: center;
-  margin-left: 8px;
-  padding: 1px 6px;
-  border-radius: var(--radius-full);
-  background: rgba(34, 197, 94, 0.2);
-  color: #86efac;
-  border: 1px solid rgba(34, 197, 94, 0.35);
-  font-size: 0.62rem;
-  font-weight: 700;
-  vertical-align: middle;
-}
-
-.channel-logo {
-  width: 40px;
-  height: 40px;
-  border-radius: var(--radius-sm);
-  background: var(--color-bg-tertiary);
-  object-fit: contain;
-}
-
-.channel-info {
-  flex: 1;
-  min-width: 0;
-}
-
-.channel-name {
-  font-weight: 500;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.channel-program {
-  font-size: 0.75rem;
-  color: var(--color-text-muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* =====================================================
-   Video Player Section
-   ===================================================== */
-.player-section {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  background: var(--color-bg-primary);
-  min-width: 0;
-}
-
-.video-container {
-  flex: 1 1 48%;
-  position: relative;
-  background: #000;
-  overflow: hidden;
-  min-height: 240px;
-  /* Allow flex child to shrink */
-}
-
-.live-guide-fusion {
-  flex: 0 0 52%;
-  min-height: 260px;
-  max-height: 56%;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
-  background:
-    linear-gradient(180deg, rgba(18, 24, 38, 0.92), rgba(7, 10, 18, 0.98)),
-    var(--color-bg-primary);
-  overflow: hidden;
-}
-
-.live-guide-shell {
-  display: grid;
-  grid-template-columns: 220px minmax(0, 1fr);
-  height: 100%;
-  min-height: 0;
-}
-
-.live-guide-shell.groups-hidden {
-  grid-template-columns: minmax(0, 1fr);
-}
-
-.live-guide-shell.groups-hidden .live-guide-groups {
-  display: none;
-}
-
-.live-guide-fusion.live-guide-groups-hidden .live-guide-shell {
-  grid-template-columns: minmax(0, 1fr);
-}
-
-.live-guide-fusion.live-guide-groups-hidden .live-guide-groups {
-  display: none;
-}
-
-.live-guide-groups {
-  overflow-y: auto;
-  padding: 18px 10px 18px 18px;
-  border-right: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.live-guide-group {
-  display: flex;
-  width: 100%;
-  min-height: 36px;
-  align-items: center;
-  margin-bottom: 6px;
-  padding: 0 12px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--color-text-secondary);
-  font-weight: 700;
-  text-align: left;
-  cursor: pointer;
-}
-
-.live-guide-group:hover,
-.live-guide-group:focus-visible,
-.live-guide-group.active {
-  outline: none;
-  color: #fff;
-  background: rgba(83, 118, 255, 0.78);
-}
-
-.live-guide-main {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  min-width: 0;
-  min-height: 0;
-}
-
-.live-guide-preview {
-  display: grid;
-  grid-template-columns: 80px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 14px;
-  padding: 9px 18px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  background: linear-gradient(180deg, rgba(91, 116, 255, 0.10), rgba(91, 116, 255, 0));
-}
-
-.live-guide-preview.is-empty {
-  grid-template-columns: 1fr;
-  color: var(--color-text-muted);
-}
-
-.live-guide-preview-art {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 48px;
-  border-radius: 10px;
-  background: rgba(0, 0, 0, 0.34);
-}
-
-.live-guide-preview-art img {
-  max-width: 80%;
-  max-height: 40px;
-  object-fit: contain;
-}
-
-.live-guide-preview-copy {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  min-width: 0;
-}
-
-.live-guide-preview-title {
-  margin-top: 1px;
-  color: #eaf0ff;
-  font-size: 1rem;
-  font-weight: 800;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.live-guide-preview-meta {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-top: 4px;
-  color: #aeb9ff;
-  font-size: 0.85rem;
-}
-
-.live-guide-progress {
-  width: 74px;
-  height: 4px;
-  overflow: hidden;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.22);
-}
-
-.live-guide-progress span {
-  display: block;
-  height: 100%;
-  background: #7d8cff;
-}
-
-.live-guide-preview-channel {
-  color: #fff;
-  font-weight: 800;
-}
-
-.live-guide-preview-channel span {
-  margin-left: 10px;
-  color: #a6b1d6;
-  font-size: 0.78rem;
-}
-
-.live-guide-upnext {
-  margin: 4px 0 0;
-  padding: 0;
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.live-guide-upnext li {
-  color: #aeb9ff;
-  font-size: 0.8rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.live-guide-upnext .t {
-  color: #7d8cff;
-  font-weight: 700;
-  margin-right: 6px;
-}
-
-.live-guide-preview-actions {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  align-items: stretch;
-}
-
-.lg-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 7px 14px;
-  border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  background: rgba(255, 255, 255, 0.06);
-  color: #e9eeff;
-  font-size: 0.85rem;
-  font-weight: 700;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: background var(--transition-fast), border-color var(--transition-fast);
-}
-
-.lg-btn:hover {
-  background: rgba(255, 255, 255, 0.12);
-}
-
-.lg-btn-primary {
-  border-color: transparent;
-  background: var(--color-accent);
-  color: #fff;
-}
-
-.lg-btn-primary:hover {
-  background: #2f6df0;
-}
-
-.lg-btn-primary.is-playing {
-  background: rgba(34, 197, 94, 0.85);
-}
-
-.lg-btn-icon {
-  font-size: 1rem;
-  padding: 7px 11px;
-}
-
-.lg-btn-icon.is-fav {
-  color: #ff6b81;
-  border-color: rgba(255, 107, 129, 0.5);
-  background: rgba(255, 107, 129, 0.14);
-}
-
-.live-guide-rows {
-  min-height: 0;
-  height: 100%;
-  overflow-y: auto;
-  padding-right: 6px;
-}
-
-.live-guide-row {
-  display: grid;
-  grid-template-columns: 28px 38px minmax(0, 1fr) 44px;
-  align-items: center;
-  gap: 12px;
-  width: 100%;
-  min-height: 58px;
-  padding: 8px 12px;
-  border: 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.055);
-  background: rgba(16, 20, 34, 0.66);
-  color: var(--color-text-primary);
-  cursor: pointer;
-  text-align: left;
-}
-
-.live-guide-row:nth-child(even) {
-  background: rgba(11, 15, 27, 0.72);
-}
-
-/* Notice when a group is capped at the render limit (rows dropped otherwise). */
-.live-guide-overflow {
-  padding: 10px 14px;
-  font-size: 0.82rem;
-  color: var(--color-text-muted);
-  text-align: center;
-  background: rgba(16, 20, 34, 0.66);
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.live-guide-row:hover,
-.live-guide-row:focus-visible {
-  outline: none;
-  background: rgba(91, 116, 255, 0.22);
-}
-
-.live-guide-row.selected {
-  background: rgba(91, 116, 255, 0.5);
-}
-
-.live-guide-row.playing {
-  box-shadow: inset 3px 0 0 #22c55e;
-}
-
-.live-guide-row.pending-refresh {
-  background: rgba(91, 116, 255, 0.3);
-}
-
-.live-guide-num {
-  color: #9fb1ff;
-  font-weight: 800;
-  text-align: right;
-  font-size: 0.85rem;
-}
-
-.live-guide-logo {
-  width: 38px;
-  height: 38px;
-  object-fit: contain;
-}
-
-.live-guide-info {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.live-guide-name-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.live-guide-channel-name {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: #f8fbff;
-  font-weight: 800;
-}
-
-.live-guide-variant-count {
-  flex-shrink: 0;
-  color: #99a7d4;
-  font-size: 0.66rem;
-  font-weight: 700;
-}
-
-.live-guide-live-tag {
-  flex-shrink: 0;
-  padding: 1px 6px;
-  border-radius: 5px;
-  background: rgba(34, 197, 94, 0.2);
-  color: #86efac;
-  font-size: 0.58rem;
-  font-weight: 800;
-  letter-spacing: 0.04em;
-}
-
-.live-guide-mode {
-  flex-shrink: 0;
-  padding: 1px 5px;
-  border-radius: 5px;
-  font-size: 0.58rem;
-  font-weight: 800;
-}
-
-.live-guide-mode.ok {
-  background: rgba(34, 197, 94, 0.2);
-  color: #86efac;
-}
-
-.live-guide-mode.problem {
-  background: rgba(239, 68, 68, 0.18);
-  color: #fca5a5;
-}
-
-.live-guide-mode.pending {
-  background: rgba(148, 163, 184, 0.16);
-  color: #cbd5e1;
-}
-
-.live-guide-now {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-}
-
-.live-guide-now-title {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: #c5cff8;
-  font-size: 0.85rem;
-}
-
-.live-guide-row.selected .live-guide-now-title,
-.live-guide-row:hover .live-guide-now-title {
-  color: #fff;
-}
-
-.live-guide-next {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: #8b97c4;
-  font-size: 0.76rem;
-}
-
-.live-guide-next-time {
-  color: #7d8cff;
-  font-weight: 700;
-  margin-right: 5px;
-}
-
-.live-guide-play {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  background: rgba(255, 255, 255, 0.06);
-  color: #cdd9ff;
-  cursor: pointer;
-  transition: background var(--transition-fast), border-color var(--transition-fast);
-}
-
-.live-guide-play:hover {
-  background: var(--color-accent);
-  border-color: transparent;
-  color: #fff;
-}
-
-.live-guide-play svg {
-  width: 18px;
-  height: 18px;
-}
-
-.live-guide-empty {
-  display: flex;
-  height: 100%;
-  align-items: center;
-  justify-content: center;
-  color: var(--color-text-muted);
-}
-
-/* Full-panel Live state (loading / load-failed+retry / genuinely empty). Centred
-   card so a failed channel load reads as recoverable, not as a broken screen. */
-.live-guide-status {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  height: 100%;
-  min-height: 220px;
-  padding: 32px 22px;
-  text-align: center;
-}
-.live-guide-status .loading { margin-bottom: 4px; }
-.live-guide-status-title {
-  font-size: 1.05rem;
-  font-weight: 700;
-  color: var(--color-text-primary, #fff);
-}
-.live-guide-status-msg {
-  max-width: 42ch;
-  color: var(--color-text-muted);
-  font-size: 0.92rem;
-  line-height: 1.5;
-}
-.live-guide-status .lg-btn { margin-top: 4px; }
-.live-guide-status.is-error .live-guide-status-title { color: #ffb4b4; }
-
-@media (max-width: 1100px) {
-  .live-guide-shell {
-    grid-template-columns: 170px minmax(0, 1fr);
-  }
-
-  .live-guide-preview {
-    grid-template-columns: 84px minmax(0, 1fr) auto;
-    padding: 12px 14px;
-  }
-}
-
-@media (max-width: 768px) {
-  .player-section {
-    overflow-y: auto;
-  }
-
-  .video-container {
-    flex: 0 0 44vh;
-  }
-
-  .live-guide-fusion {
-    flex: 0 0 56vh;
-    max-height: none;
-  }
-
-  .live-guide-shell {
-    grid-template-columns: 1fr;
-    /* A short (e.g. search-filtered) list leaves the height:100% grid taller than its
-       content; the default align-content:stretch then inflates the auto rows, blowing
-       the group-tab row up and — via the tabs' default align-items:stretch — turning the
-       active tab into a giant blue block. Pack rows to the top so they stay content-sized. */
-    align-content: start;
-  }
-
-  /* Portrait phones: a 44vh player leaves too little guide once browser chrome is
-     subtracted — hand ~4vh back to the channel list (landscape keeps the bigger player). */
-  @media (orientation: portrait) {
-    .video-container { flex-basis: 40vh; }
-    .live-guide-fusion { flex-basis: 60vh; }
-  }
-
-  .live-guide-shell.groups-hidden .live-guide-groups,
-  .live-guide-fusion.live-guide-groups-hidden .live-guide-groups {
-    display: none;
-  }
-
-  .live-guide-groups {
-    display: flex;
-    gap: 8px;
-    align-items: center; /* keep tabs pill-height; never let one stretch to the row height */
-    overflow-x: auto;
-    overflow-y: hidden;
-    padding: 10px;
-    border-right: 0;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  }
-
-  .live-guide-group {
-    width: auto;
-    min-width: 130px;
-    margin-bottom: 0;
-    justify-content: center;
-    text-align: center;
-  }
-
-  /* Compact preview: art + copy on the first row, actions full width below. */
-  .live-guide-preview {
-    grid-template-columns: 64px minmax(0, 1fr);
-    grid-template-areas: "art copy" "actions actions";
-    gap: 10px 12px;
-    padding: 12px 14px;
-  }
-
-  .live-guide-preview-art {
-    grid-area: art;
-    height: 52px;
-  }
-
-  .live-guide-preview-copy {
-    grid-area: copy;
-  }
-
-  .live-guide-preview-actions {
-    grid-area: actions;
-    flex-direction: row;
-    align-items: center; /* stop align-stretch from inflating the Favorite pill to the Watch button's height */
-  }
-
-  .live-guide-preview-actions .lg-btn-primary {
-    flex: 1;
-  }
-
-  /* The Watch play-arrow is an inline <svg class="lg-btn-ico" viewBox="0 0 24 24"> with NO
-     width/height attribute (LiveGuideFusion.js), and .lg-btn-ico is only sized under tv-mode
-     (line ~12432) and the .norva-phone-apk block (line ~13090). On ANY mobile viewport the
-     rule above makes the Watch button flex:1 (full width); an unsized SVG then balloons to a
-     ~square (~150px), blowing the whole action row into a giant blue block. The earlier APK-
-     only fix never reached a plain mobile browser / installed PWA / non-APK WebView (they lack
-     the norva-phone-apk body class), so pin the icon here, viewport-scoped, to cover every
-     mobile surface. TV keeps its 20px via the higher-specificity `.tv-mode #page-live .lg-btn-ico`;
-     desktop (>768px) is outside this media query and unaffected. */
-  .live-guide-preview .lg-btn-ico {
-    width: 18px;
-    height: 18px;
-    flex: 0 0 18px;
-  }
-
-  .live-guide-preview.is-empty {
-    grid-template-columns: 1fr;
-    grid-template-areas: "copy";
-  }
-
-  .live-guide-preview-title {
-    font-size: 1rem;
-  }
-
-  .live-guide-upnext {
-    display: none;
-  }
-
-  /* Tighter rows — no horizontal scroll anymore. */
-  .live-guide-row {
-    grid-template-columns: 24px 34px minmax(0, 1fr) 40px;
-    gap: 10px;
-  }
-
-  .live-guide-logo {
-    width: 34px;
-    height: 34px;
-  }
-}
-
-/* "Show more" — progressive reveal of a large lineup (replaces the old hard 150 cap).
-   Full-width tap target at the bottom of the rows; grows the render window by a chunk. */
-.live-guide-more {
-  display: block;
-  width: 100%;
-  padding: 13px 14px;
-  border: 0;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
-  background: rgba(91, 116, 255, 0.10);
-  color: #cdd8ff;
-  font-size: 0.84rem;
-  font-weight: 700;
-  cursor: pointer;
-  text-align: center;
-  transition: background var(--transition-fast);
-}
-
-.live-guide-more:hover,
-.live-guide-more:focus-visible {
-  outline: none;
-  background: rgba(91, 116, 255, 0.2);
-}
-
-.live-guide-more span {
-  color: var(--color-text-muted);
-  font-weight: 600;
-}
-
-/* Cinema mode (≥769px) — the "Cinema" toggle enlarges the player and compacts the
-   guide to a zapping strip: groups hidden, up-next trimmed, preview kept so the
-   viewer can exit. Scoped above the phone breakpoint so portrait phones keep their
-   dedicated stacked layout untouched. */
-@media (min-width: 769px) {
-  .player-section.guide-collapsed .video-container {
-    flex: 1 1 72%;
-  }
-
-  .player-section.guide-collapsed .live-guide-fusion {
-    flex: 0 0 28%;
-    min-height: 150px;
-    max-height: 34%;
-  }
-
-  .player-section.guide-collapsed .live-guide-shell {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .player-section.guide-collapsed .live-guide-groups {
-    display: none;
-  }
-
-  .player-section.guide-collapsed .live-guide-upnext {
-    display: none;
-  }
-}
-
-/* The cinema split only exists ≥769px, so hide its toggle on phones (where the
-   layout is stacked and the button would be a no-op). */
-@media (max-width: 768px) {
-  .live-guide-preview .lg-btn-cinema {
-    display: none;
-  }
-}
-
-/* Dedicated tablet range (768–1180px): denser than desktop, roomier touch targets
-   than a phone. Placed after the 1100/768 blocks so it wins inside its own range —
-   a trimmed group rail hands width back to the channel list, and taps get bigger. */
-@media (min-width: 769px) and (max-width: 1180px) {
-  .live-guide-shell {
-    grid-template-columns: 190px minmax(0, 1fr);
-  }
-
-  .live-guide-row {
-    min-height: 64px;
-  }
-
-  .live-guide-group {
-    min-height: 42px;
-  }
-
-  .lg-btn {
-    padding: 9px 16px;
-    font-size: 0.9rem;
-  }
-
-  .live-guide-preview-actions {
-    gap: 8px;
-  }
-
-  .live-guide-more {
-    padding: 15px 14px;
-  }
-}
-
-/* Live TV player controls overlay - iOS Safari safe positioning */
-#player-controls-overlay {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: calc(env(safe-area-inset-bottom, 0px) + var(--ios-ui-bottom, 0px));
-  box-sizing: border-box;
-}
-
-/* Favorites */
-.group-header.favorites-group {
-  background: linear-gradient(to right, rgba(239, 68, 68, 0.1), transparent);
-  border-left: 3px solid var(--color-error);
-}
-
-.group-header.favorites-group .group-name {
-  color: var(--color-error);
-  font-weight: 600;
-}
-
-.favorite-btn {
-  background: none;
-  border: none;
-  color: var(--color-text-muted);
-  font-size: 1.25rem;
-  padding: 0 var(--space-xs);
-  cursor: pointer;
-  opacity: 0;
-  transition: all var(--transition-fast);
-}
-
-.channel-item:hover .favorite-btn,
-.epg-channel-row:hover .favorite-btn,
-.favorite-btn.active {
-  opacity: 1;
-}
-
-.favorite-btn:hover,
-.favorite-btn.active {
-  color: var(--color-error);
-  transform: scale(1.1);
-}
-
-#video-player {
-  width: 100%;
-  height: 100%;
-  max-height: 100%;
-  background: #000;
-  object-fit: contain;
-  /* Maintain aspect ratio without overflow */
-}
-
-/* Make video controls more touch-friendly on mobile */
-@media (max-width: 768px) {
-  #video-player::-webkit-media-controls-panel {
-    padding: 8px;
-  }
-
-  #video-player::-webkit-media-controls-play-button,
-  #video-player::-webkit-media-controls-fullscreen-button,
-  #video-player::-webkit-media-controls-volume-slider {
-    transform: scale(1.2);
-  }
-}
-
-/* Custom Video Controls */
-.video-controls {
-  position: absolute;
-  top: var(--space-md);
-  right: var(--space-md);
-  display: none;
-  flex-direction: column;
-  gap: var(--space-sm);
-  z-index: 50;
-  opacity: 0;
-  transition: opacity 0.3s ease;
-  pointer-events: none;
-}
-
-.video-controls.show {
-  pointer-events: auto;
-}
-
-.video-container:hover .video-controls,
-.video-controls.show {
-  opacity: 1;
-}
-
-.video-control-btn {
-  width: 48px;
-  height: 48px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--glass-bg);
-  backdrop-filter: blur(12px);
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius-lg);
-  color: var(--color-text-primary);
-  cursor: pointer;
-  transition: all var(--transition-fast);
-  box-shadow: var(--shadow-md);
-}
-
-.video-control-btn:hover {
-  background: var(--color-accent);
-  border-color: var(--color-accent);
-  transform: scale(1.05);
-}
-
-.video-control-btn:active {
-  transform: scale(0.95);
-}
-
-.video-control-btn .icon {
-  width: 24px;
-  height: 24px;
-}
-
-.video-control-btn.muted .icon {
-  color: var(--color-error);
-}
-
-/* Show custom controls on mobile as supplementary */
-@media (max-width: 768px) {
-  .video-controls {
-    display: flex;
-  }
-
-  /* Make control buttons larger on mobile */
-  .video-control-btn {
-    width: 56px;
-    height: 56px;
-  }
-
-  .video-control-btn .icon {
-    width: 28px;
-    height: 28px;
-  }
-}
-
-/* Touch devices */
-@media (hover: none) and (pointer: coarse) {
-  .video-controls {
-    display: flex;
-  }
-}
-
-/* Closed Caption styling — user-tunable via the captions menu's Appearance
-   panel (WatchPage sets the --norva-sub-* custom properties on :root). */
-video::cue {
-  background-color: var(--norva-sub-bg, rgba(0, 0, 0, 0.8));
-  color: var(--norva-sub-color, #fff);
-  font-size: calc(1.2em * var(--norva-sub-scale, 1));
-  font-family: inherit;
-  padding: 0.2em 0.5em;
-}
-
-.player-overlay {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(0, 0, 0, 0.7);
-  backdrop-filter: blur(4px);
-}
-
-.player-overlay.hidden {
-  display: none;
-}
-
-.overlay-content {
-  text-align: center;
-  color: var(--color-text-muted);
-}
-
-/* Now Playing Overlay */
-.now-playing-overlay {
-  position: absolute;
-  bottom: 60px;
-  left: var(--space-lg);
-  right: var(--space-lg);
-  display: flex;
-  align-items: center;
-  gap: var(--space-lg);
-  padding: var(--space-md) var(--space-lg);
-  background: var(--glass-bg);
-  backdrop-filter: blur(16px);
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-lg);
-  z-index: 50;
-  opacity: 1;
-  transform: translateY(0);
-  transition: opacity 0.3s ease, transform 0.3s ease;
-}
-
-.now-playing-overlay.hidden {
-  opacity: 0;
-  transform: translateY(20px);
-  pointer-events: none;
-}
-
-/* iOS safe area for now playing overlay */
-@supports (bottom: env(safe-area-inset-bottom)) {
-  .now-playing-overlay {
-    bottom: calc(60px + env(safe-area-inset-bottom, 0px));
-  }
-}
-
-/* Fullscreen mode for video container */
-.video-container:fullscreen {
-  width: 100%;
-  height: 100%;
-  background: #000;
-}
-
-.video-container:fullscreen #video-player {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-}
-
-.video-container:fullscreen .now-playing-overlay {
-  bottom: 80px;
-}
-
-/* Safari fullscreen support (required for iOS) */
-.video-container:-webkit-full-screen {
-  width: 100%;
-  height: 100%;
-  background: #000;
-}
-
-.video-container:-webkit-full-screen #video-player {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-}
-
-.video-container:-webkit-full-screen .now-playing-overlay {
-  bottom: 80px;
-}
-
-/* Fullscreen safe area for controls - especially for iOS */
-.video-container:fullscreen .watch-bottom-bar,
-.video-container:-webkit-full-screen .watch-bottom-bar {
-  padding-bottom: calc(var(--space-lg) + env(safe-area-inset-bottom, 0px));
-}
-
-.video-container:fullscreen .watch-top-bar,
-.video-container:-webkit-full-screen .watch-top-bar {
-  padding-top: calc(var(--space-lg) + env(safe-area-inset-top, 0px));
-}
-
-.channel-nav {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-xs);
-}
-
-.channel-nav .btn-icon {
-  width: 36px;
-  height: 28px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 0.875rem;
-  background: var(--color-bg-tertiary);
-  border: 1px solid var(--color-border);
-}
-
-.now-playing-info {
-  flex: 1;
-}
-
-.now-playing-info .channel-name {
-  font-size: 1.5rem;
-  font-weight: 600;
-  margin-bottom: var(--space-xs);
-}
-
-.program-title {
-  font-size: 1.25rem;
-  color: var(--color-text-secondary);
-  margin-bottom: var(--space-xs);
-}
-
-.program-time {
-  font-size: 1rem;
-  color: var(--color-text-muted);
-}
-
-.up-next {
-  width: 250px;
-}
-
-.up-next h4 {
-  font-size: 0.75rem;
-  color: var(--color-text-muted);
-  text-transform: uppercase;
-  margin-bottom: var(--space-sm);
-}
-
-#up-next-list {
-  list-style: none;
-}
-
-#up-next-list li {
-  font-size: 0.875rem;
-  padding: var(--space-xs) 0;
-  color: var(--color-text-secondary);
-  border-bottom: 1px solid var(--color-border);
-}
-
-/* =====================================================
-   EPG Guide
-   ===================================================== */
-
-.epg-limit-warning {
-  background: var(--color-warning);
-  color: var(--color-bg);
-  padding: var(--space-sm) var(--space-md);
-  text-align: center;
-  font-weight: 500;
-  margin-bottom: var(--space-sm);
-  border-radius: var(--radius-sm);
-}
-
-.guide-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: var(--space-md) var(--space-lg);
-  background: var(--color-bg-secondary);
-  border-bottom: 1px solid var(--color-border);
-}
-
-.guide-controls {
-  display: flex;
-  align-items: center;
-  gap: var(--space-md);
-}
-
-.guide-controls {
-  display: flex;
-  align-items: center;
-  gap: var(--space-md);
-}
-
-.guide-date {
-  font-weight: 600;
-}
-
-.epg-grid {
-  height: calc(100vh - var(--navbar-height) - 60px);
-  overflow: hidden;
-  overflow-y: auto;
-  padding: var(--space-md);
-  -webkit-overflow-scrolling: touch;
-  overscroll-behavior: contain;
-}
-
-.epg-time-header {
-  display: flex;
-  position: sticky;
-  top: 0;
-  background: var(--color-bg-secondary);
-  z-index: 10;
-}
-
-.epg-header-corner {
-  width: var(--epg-sidebar-width);
-  flex-shrink: 0;
-  background: var(--color-bg-secondary);
-  border-right: 1px solid var(--color-border);
-}
-
-.epg-time-slots {
-  display: flex;
-  flex: 1;
-}
-
-.epg-time-slot {
-  padding: var(--space-sm) var(--space-md);
-  text-align: center;
-  font-size: 0.875rem;
-  color: var(--color-text-muted);
-  border-right: 1px solid var(--color-border);
-  flex-shrink: 0;
-}
-
-.epg-channel-row {
-  display: flex;
-  border-bottom: 1px solid var(--color-border);
-}
-
-.epg-channel-info {
-  width: var(--epg-sidebar-width);
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-  padding: var(--space-sm);
-  background: var(--color-bg-secondary);
-  position: sticky;
-  left: 0;
-  z-index: 5;
-  border-right: 1px solid var(--color-border);
-  cursor: pointer;
-  transition: background var(--transition-fast);
-}
-
-.epg-channel-info:hover {
-  background: var(--color-bg-hover);
-}
-
-.resize-handle {
-  position: absolute;
-  right: -8px;
-  top: 0;
-  bottom: 0;
-  width: 16px;
-  cursor: col-resize;
-  background: transparent;
-  z-index: 10;
-  transition: background var(--transition-fast);
-}
-
-.resize-handle:hover,
-.resize-handle.active {
-  background: var(--color-accent);
-}
-
-.epg-channel-logo {
-  width: 32px;
-  height: 32px;
-  border-radius: var(--radius-sm);
-  object-fit: contain;
-}
-
-.epg-channel-name {
-  font-size: 0.875rem;
-  font-weight: 500;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.epg-programs {
-  display: flex;
-  flex: 1;
-}
-
-.epg-program {
-  padding: var(--space-sm);
-  background: var(--color-bg-tertiary);
-  border-right: 1px solid var(--color-border);
-  cursor: pointer;
-  overflow: hidden;
-  transition: background var(--transition-fast);
-}
-
-.epg-program:hover {
-  background: var(--color-bg-hover);
-}
-
-.epg-program.current {
-  background: var(--color-accent-dim);
-  border-left: 3px solid var(--color-accent);
-}
-
-.epg-program-title {
-  font-weight: 500;
-  font-size: 0.875rem;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.epg-program-time {
-  font-size: 0.75rem;
-  color: var(--color-text-muted);
-}
-
-/* Current time indicator */
-.epg-now-line {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 2px;
-  background: var(--color-error);
-  z-index: 2;
-}
-
-/* =====================================================
-   Settings Page
-   ===================================================== */
-.settings-container {
-  max-width: 900px;
-  margin: 0 auto;
-  padding: var(--space-lg);
-  height: calc(100vh - var(--navbar-height));
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
-  overscroll-behavior: contain;
-}
-
-.settings-container h2 {
-  margin-bottom: var(--space-lg);
-}
-
-/* Tabs */
-.tabs {
-  display: flex;
-  gap: var(--space-xs);
-  margin-bottom: var(--space-lg);
-  border-bottom: 1px solid var(--color-border);
-}
-
-.tab {
-  padding: var(--space-sm) var(--space-md);
-  background: none;
-  border: none;
-  color: var(--color-text-secondary);
-  font-size: 0.875rem;
-  cursor: pointer;
-  border-bottom: 2px solid transparent;
-  transition: all var(--transition-fast);
-}
-
-.tab:hover {
-  color: var(--color-text-primary);
-}
-
-.tab.active {
-  color: var(--color-accent);
-  border-bottom-color: var(--color-accent);
-}
-
-.tab-content {
-  display: none;
-}
-
-.tab-content.active {
-  display: block;
-}
-
-.account-settings-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: var(--space-md);
-  align-items: stretch;
-}
-
-.account-summary-card,
-.account-actions-card {
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  padding: var(--space-md);
-}
-
-.account-summary-card strong {
-  display: block;
-  margin-top: var(--space-xs);
-  word-break: break-word;
-}
-
-.account-actions-card {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-sm);
-  align-items: center;
-  justify-content: flex-end;
-}
-
-.service-health-card {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-lg);
-  margin-bottom: var(--space-lg);
-  padding: var(--space-lg);
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
-}
-
-.service-health-card.service-health-prominent {
-  min-height: 220px;
-  align-items: flex-end;
-  padding: clamp(24px, 4vw, 48px);
-  background:
-    linear-gradient(120deg, rgba(59, 130, 246, 0.22), rgba(139, 92, 246, 0.14)),
-    var(--color-bg-secondary);
-}
-
-.service-health-prominent .service-health-copy h3 {
-  max-width: 760px;
-  font-size: clamp(2rem, 4vw, 4rem);
-  line-height: 1;
-}
-
-.service-health-prominent .service-health-copy p {
-  max-width: 680px;
-  font-size: 1.05rem;
-}
-
-.service-health-prominent .service-health-actions .btn {
-  min-width: 220px;
-}
-
-.service-health-card.hidden {
-  display: none;
-}
-
-.service-health-card.setup-suppressed,
-#home-service-health.setup-suppressed,
-.setup-suppressed .service-health-card {
-  display: none;
-}
-
-.service-health-not_configured,
-.service-health-auth_failed,
-.service-health-expired {
-  border-color: rgba(239, 68, 68, 0.45);
-  background: rgba(127, 29, 29, 0.16);
-}
-
-.service-health-unreachable,
-.service-health-degraded {
-  border-color: rgba(245, 158, 11, 0.45);
-  background: rgba(120, 53, 15, 0.14);
-}
-
-.service-health-syncing {
-  border-color: rgba(96, 165, 250, 0.35);
-  background: rgba(30, 64, 175, 0.14);
-}
-
-.service-health-copy h3 {
-  margin: var(--space-xs) 0;
-}
-
-.service-health-copy p {
-  margin: 0;
-  color: var(--color-text-secondary);
-}
-
-.service-health-copy small,
-.service-health-label {
-  color: var(--color-text-muted);
-  font-size: 0.8125rem;
-}
-
-.service-health-label {
-  text-transform: uppercase;
-  letter-spacing: 0;
-  font-weight: 700;
-}
-
-.service-health-actions {
-  flex: 0 0 auto;
-}
-
-.norva-setup-gate {
-  min-height: calc(100dvh - 180px);
-  display: grid;
-  grid-template-columns: minmax(0, 1.25fr) minmax(320px, 0.75fr);
-  gap: clamp(24px, 4vw, 56px);
-  align-items: center;
-  padding: clamp(28px, 6vw, 76px) clamp(18px, 5vw, 64px);
-  background:
-    linear-gradient(120deg, rgba(79, 123, 255, 0.18), rgba(169, 78, 255, 0.1)),
-    var(--color-bg-primary);
-}
-
-#page-home.home-setup-active .norva-setup-gate {
-  width: 100%;
-  min-height: 100%;
-  height: 100%;
-}
-
-.norva-setup-card {
-  max-width: 820px;
-}
-
-.norva-setup-kicker {
-  color: var(--color-primary);
-  font-size: 0.84rem;
-  font-weight: 800;
-  letter-spacing: 0;
-  margin-bottom: var(--space-md);
-  text-transform: uppercase;
-}
-
-.norva-setup-card h1 {
-  max-width: 860px;
-  margin: 0 0 var(--space-md);
-  font-family: var(--font-display, inherit);
-  font-size: clamp(2.4rem, 6vw, 5.5rem);
-  line-height: 0.95;
-}
-
-.norva-setup-card p {
-  max-width: 680px;
-  color: var(--color-text-secondary);
-  font-size: clamp(1rem, 1.6vw, 1.25rem);
-  line-height: 1.55;
-  margin: 0 0 var(--space-xl);
-}
-
-.norva-setup-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-md);
-}
-
-.norva-setup-actions .btn {
-  min-width: 180px;
-}
-
-.norva-setup-steps {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-md);
-}
-
-.norva-setup-step {
-  display: grid;
-  grid-template-columns: 44px minmax(0, 1fr);
-  gap: var(--space-md);
-  align-items: center;
-  padding: var(--space-md);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: rgba(18, 24, 38, 0.72);
-}
-
-.norva-setup-step-index {
-  width: 44px;
-  height: 44px;
-  display: grid;
-  place-items: center;
-  border-radius: 50%;
-  background: rgba(148, 163, 184, 0.12);
-  color: var(--color-text-muted);
-  font-weight: 800;
-}
-
-.norva-setup-step strong {
-  display: block;
-  margin-bottom: 2px;
-}
-
-.norva-setup-step span:not(.norva-setup-step-index) {
-  color: var(--color-text-muted);
-  font-size: 0.92rem;
-}
-
-.norva-setup-step.active {
-  border-color: rgba(96, 165, 250, 0.62);
-  background: rgba(37, 99, 235, 0.18);
-}
-
-.norva-setup-step.complete {
-  border-color: rgba(52, 211, 153, 0.5);
-  background: rgba(6, 95, 70, 0.16);
-}
-
-.norva-setup-step.attention {
-  border-color: rgba(248, 113, 113, 0.52);
-  background: rgba(127, 29, 29, 0.18);
-}
-
-.norva-setup-step.active .norva-setup-step-index {
-  background: var(--color-primary);
-  color: #fff;
-}
-
-.norva-setup-step.complete .norva-setup-step-index {
-  background: rgba(16, 185, 129, 0.22);
-  color: #86efac;
-}
-
-.norva-setup-step.attention .norva-setup-step-index {
-  background: rgba(239, 68, 68, 0.18);
-  color: #fca5a5;
-}
-
-.norva-setup-connect {
-  position: relative;
-  min-height: calc(100dvh - 92px);
-  grid-template-columns: minmax(360px, 0.95fr) minmax(320px, 0.72fr);
-  align-items: center;
-  background:
-    linear-gradient(135deg, rgba(20, 52, 112, 0.88), rgba(11, 16, 31, 0.96)),
-    var(--color-bg-primary);
-  border-top: 1px solid rgba(96, 165, 250, 0.16);
-  overflow: hidden;
-}
-
-#page-home.home-setup-connect-active .norva-setup-connect {
-  min-height: 100%;
-  height: 100%;
-  padding: clamp(18px, 3.4vh, 44px) clamp(24px, 4.6vw, 72px);
-}
-
-.norva-setup-connect::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background:
-    linear-gradient(115deg, transparent 0 38%, rgba(125, 165, 255, 0.08) 38.2% 38.5%, transparent 38.7%),
-    linear-gradient(28deg, transparent 0 62%, rgba(125, 165, 255, 0.07) 62.2% 62.45%, transparent 62.7%);
-  opacity: 0.9;
-}
-
-.norva-setup-connect-card,
-.norva-setup-progress-panel {
-  position: relative;
-  z-index: 1;
-}
-
-.norva-setup-connect-card {
-  width: 100%;
-  max-width: 760px;
-  padding: clamp(22px, 3.8vw, 36px);
-  border: 1px solid rgba(96, 165, 250, 0.46);
-  border-radius: var(--radius-lg);
-  background: rgba(8, 19, 43, 0.72);
-  box-shadow: 0 28px 80px rgba(3, 8, 23, 0.34);
-}
-
-.norva-setup-connect-card h1 {
-  margin: 0 0 10px;
-  max-width: 680px;
-  color: var(--color-text-primary);
-  font-size: 2rem;
-  line-height: 1.05;
-  text-transform: uppercase;
-}
-
-.norva-setup-connect-card > p {
-  max-width: 650px;
-  margin: 0 0 18px;
-  color: var(--color-text-secondary);
-  line-height: 1.4;
-}
-
-.norva-setup-inline-form {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.setup-form-input {
-  min-height: 52px;
-  border-color: rgba(96, 165, 250, 0.42);
-  background: rgba(7, 15, 32, 0.78);
-}
-
-.setup-form-hint {
-  margin: 7px 0 0;
-  color: var(--color-text-muted);
-  font-size: 0.86rem;
-  line-height: 1.35;
-}
-
-.setup-manual-login {
-  padding: 0;
-  border: 1px solid rgba(96, 165, 250, 0.3);
-  border-radius: var(--radius-md);
-  background: rgba(9, 18, 38, 0.58);
-  overflow: hidden;
-}
-
-.setup-manual-login summary {
-  min-height: 48px;
-  padding: 13px 18px;
-  color: var(--color-text-primary);
-  font-weight: 800;
-  cursor: pointer;
-}
-
-.setup-manual-login > .setup-form-hint {
-  margin: -6px 18px 12px;
-}
-
-.setup-manual-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
-  padding: 0 18px 18px;
-  align-items: end;
-}
-
-.setup-manual-grid .form-group {
-  min-width: 0;
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
-  height: 100%;
-}
-
-.setup-manual-grid .form-group label {
-  min-height: 1.35em;
-  margin-bottom: 8px;
-  line-height: 1.35;
-}
-
-.setup-manual-grid .setup-form-input,
-.setup-manual-grid .setup-password-field {
-  min-height: 52px;
-  height: 52px;
-}
-
-.setup-password-field {
-  position: relative;
-  display: flex;
-  align-items: center;
-  width: 100%;
-}
-
-.setup-password-field .form-input {
-  height: 100%;
-  width: 100%;
-  padding-right: 66px;
-}
-
-.setup-password-toggle {
-  position: absolute;
-  top: 50%;
-  right: 12px;
-  transform: translateY(-50%);
-  width: 42px;
-  height: 42px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--color-text-muted);
-  cursor: pointer;
-  line-height: 0;
-  z-index: 1;
-}
-
-.setup-password-toggle .icon,
-.setup-password-toggle svg {
-  display: block;
-  width: 22px;
-  height: 22px;
-  flex: 0 0 auto;
-  pointer-events: none;
-}
-
-.setup-password-toggle:hover,
-.setup-password-toggle:focus-visible {
-  color: var(--color-text-primary);
-  background: rgba(148, 163, 184, 0.14);
-}
-
-.norva-setup-error {
-  padding: 12px 14px;
-  border: 1px solid rgba(239, 68, 68, 0.46);
-  border-radius: var(--radius-md);
-  color: #fecaca;
-  background: rgba(127, 29, 29, 0.24);
-}
-
-.norva-setup-error.hidden {
-  display: none;
-}
-
-.norva-setup-submit {
-  min-height: 56px;
-  width: 100%;
-  font-size: 1rem;
-  font-weight: 900;
-}
-
-.norva-setup-progress-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-  padding-left: clamp(20px, 4vw, 56px);
-  border-left: 1px solid rgba(148, 163, 184, 0.24);
-}
-
-.norva-setup-progress-kicker {
-  color: var(--color-text-secondary);
-  font-size: 0.88rem;
-  font-weight: 900;
-  text-transform: uppercase;
-  letter-spacing: 0;
-}
-
-.norva-setup-progress-step {
-  position: relative;
-  grid-template-columns: 58px minmax(0, 1fr) 24px;
-  min-height: 98px;
-  padding: 18px;
-  background: rgba(18, 28, 54, 0.76);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
-}
-
-.norva-setup-progress-step.active {
-  border-color: rgba(125, 178, 255, 0.72);
-  background: rgba(54, 92, 156, 0.42);
-}
-
-.norva-setup-progress-step .norva-setup-step-index {
-  width: 58px;
-  height: 58px;
-  box-shadow: 0 0 0 8px rgba(96, 165, 250, 0.12);
-}
-
-.norva-setup-progress-step .norva-setup-step-index .icon {
-  width: 26px;
-  height: 26px;
-}
-
-.norva-setup-progress-step strong {
-  margin-bottom: 5px;
-  font-size: 1.02rem;
-}
-
-.norva-setup-lock {
-  color: var(--color-text-muted);
-  opacity: 0.7;
-}
-
-.norva-setup-lock .icon {
-  width: 18px;
-  height: 18px;
-}
-
-.norva-setup-sync-embedded {
-  position: relative;
-  display: grid;
-  min-height: calc(100dvh - 92px);
-  width: 100%;
-  max-width: 100%;
-  inline-size: 100%;
-  max-inline-size: 100%;
-  box-sizing: border-box;
-  grid-template-columns: minmax(260px, 0.48fr) minmax(0, 1fr);
-  gap: clamp(20px, 3vw, 48px);
-  align-items: center;
-  padding: clamp(26px, 4vh, 54px) clamp(18px, 3vw, 44px);
-  background:
-    linear-gradient(135deg, rgba(20, 52, 112, 0.88), rgba(11, 16, 31, 0.96)),
-    var(--color-bg-primary);
-  border-top: 1px solid rgba(96, 165, 250, 0.16);
-  overflow-x: hidden;
-}
-
-.norva-setup-sync-embedded::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background:
-    linear-gradient(115deg, transparent 0 38%, rgba(125, 165, 255, 0.08) 38.2% 38.5%, transparent 38.7%),
-    linear-gradient(28deg, transparent 0 62%, rgba(125, 165, 255, 0.07) 62.2% 62.45%, transparent 62.7%);
-  opacity: 0.9;
-}
-
-.norva-setup-sync-copy,
-.norva-setup-sync-panel {
-  position: relative;
-  z-index: 1;
-  min-width: 0;
-  max-width: 100%;
-}
-
-.norva-setup-sync-copy {
-  align-self: center;
-  min-width: 0;
-  max-width: 520px;
-}
-
-.norva-setup-sync-panel,
-.norva-setup-sync-panel * {
-  box-sizing: border-box;
-  min-width: 0;
-}
-
-.norva-setup-sync-copy h1 {
-  margin: 0 0 14px;
-  max-width: 640px;
-  color: var(--color-text-primary);
-  font-family: var(--font-display, inherit);
-  font-size: clamp(2.05rem, 4.4vw, 4.7rem);
-  line-height: 0.98;
-  letter-spacing: 0;
-}
-
-.norva-setup-sync-copy p {
-  max-width: 520px;
-  margin: 0 0 var(--space-lg);
-  color: var(--color-text-secondary);
-  font-size: clamp(1rem, 1.35vw, 1.24rem);
-  line-height: 1.5;
-}
-
-.norva-setup-sync-panel {
-  width: 100%;
-  min-width: 0;
-  max-width: min(700px, 100%);
-  align-self: center;
-  justify-self: stretch;
-  overflow: hidden;
-}
-
-.norva-setup-sync-panel .source-sync-step,
-.norva-setup-sync-panel .source-sync-hero,
-.norva-setup-sync-panel .source-sync-grid,
-.norva-setup-sync-panel .source-sync-progress-wrap,
-.norva-setup-sync-panel .source-sync-timeline {
-  min-width: 0;
-  max-width: 100%;
-}
-
-.norva-setup-sync-panel .source-sync-hero,
-.norva-setup-sync-panel .source-sync-card,
-.norva-setup-sync-panel .source-sync-step {
-  overflow: hidden;
-}
-
-.norva-setup-sync-panel .source-sync-hero p {
-  max-width: 100%;
-  overflow-wrap: anywhere;
-}
-
-.norva-setup-sync-panel .source-sync-hero p,
-.norva-setup-sync-panel .source-sync-step span,
-.norva-setup-sync-panel .source-sync-card span {
-  overflow-wrap: anywhere;
-}
-
-.norva-setup-sync-panel .source-sync-step {
-  gap: clamp(12px, 1.7vh, 18px);
-}
-
-.norva-setup-sync-panel .source-sync-hero {
-  padding: clamp(18px, 2.6vw, 28px);
-}
-
-.norva-setup-sync-panel .source-sync-hero h3 {
-  font-size: clamp(1.45rem, 2.4vw, 2rem);
-}
-
-.norva-setup-sync-panel .source-sync-grid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: clamp(10px, 1.5vw, 14px);
-}
-
-.norva-setup-sync-panel .source-sync-card {
-  min-height: 104px;
-  padding: clamp(14px, 2vw, 18px);
-}
-
-.norva-setup-sync-panel .source-sync-card strong {
-  white-space: nowrap;
-  overflow-wrap: normal;
-  word-break: normal;
-  font-variant-numeric: tabular-nums;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-size: clamp(1.7rem, 2.8vw, 2.35rem);
-  line-height: 1;
-  font-variant-numeric: tabular-nums;
-}
-
-.norva-setup-sync-panel .source-sync-timeline {
-  max-height: min(34vh, 310px);
-  overflow: auto;
-  padding-right: 4px;
-}
-
-/* Source Sections */
-.source-section {
-  margin-bottom: var(--space-xl);
-}
-
-.section-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: var(--space-md);
-}
-
-.source-list {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-sm);
-}
-
-.source-advanced-login {
-  margin-top: var(--space-md);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: rgba(15, 23, 42, 0.48);
-  overflow: hidden;
-}
-
-.source-advanced-login summary {
-  min-height: 48px;
-  display: flex;
-  align-items: center;
-  padding: 0 var(--space-md);
-  cursor: pointer;
-  color: var(--color-text-secondary);
-  font-weight: 700;
-  list-style: none;
-}
-
-.source-advanced-login summary::-webkit-details-marker {
-  display: none;
-}
-
-.source-advanced-login summary::after {
-  content: '+';
-  margin-left: auto;
-  color: var(--color-primary);
-  font-size: 1.2rem;
-}
-
-.source-advanced-login[open] summary {
-  border-bottom: 1px solid var(--color-border);
-}
-
-.source-advanced-login[open] summary::after {
-  content: '-';
-}
-
-.source-advanced-login .form-group {
-  padding: var(--space-md);
-  margin: 0;
-}
-
-.source-advanced-login .form-group + .form-group {
-  padding-top: 0;
-}
-
-.setup-manual-login .setup-manual-grid .form-group,
-.setup-manual-login .setup-manual-grid .form-group + .form-group {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  margin: 0;
-  padding: 0;
-}
-
-.source-item {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: var(--space-md);
-  padding: var(--space-md);
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-}
-
-.source-item.disabled {
-  opacity: 0.5;
-}
-
-.source-icon {
-  font-size: 1.5rem;
-}
-
-.source-info {
-  flex: 1;
-  min-width: 0;
-}
-
-.source-name {
-  font-weight: 500;
-}
-
-.source-name-row {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-  flex-wrap: wrap;
-}
-
-.source-url {
-  font-size: 0.75rem;
-  color: var(--color-text-muted);
-  word-break: break-all;
-}
-
-.source-health-message {
-  margin-top: var(--space-xs);
-  font-size: 0.75rem;
-  color: var(--color-text-secondary);
-}
-
-/* Quiet "still adding the rest of your library" note: the catalogue is already
-   usable; the long-tail materialises in the background. Deliberately understated. */
-.source-backgrounding {
-  margin-top: var(--space-xs);
-  font-size: 0.72rem;
-  color: var(--color-text-muted);
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.source-backgrounding-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 999px;
-  background: var(--color-accent, #4f7df3);
-  flex: 0 0 auto;
-  animation: source-backgrounding-pulse 1.6s ease-in-out infinite;
-}
-@keyframes source-backgrounding-pulse {
-  0%, 100% { opacity: 0.35; }
-  50% { opacity: 1; }
-}
-@media (prefers-reduced-motion: reduce) {
-  .source-backgrounding-dot { animation: none; }
-}
-
-.source-health-badge {
-  display: inline-flex;
-  align-items: center;
-  min-height: 22px;
-  padding: 2px 8px;
-  border-radius: 999px;
-  border: 1px solid var(--color-border);
-  color: var(--color-text-secondary);
-  font-size: 0.6875rem;
-  font-weight: 800;
-}
-
-.source-health-ready {
-  color: #86efac;
-  border-color: rgba(34, 197, 94, 0.35);
-  background: rgba(22, 101, 52, 0.22);
-}
-
-.source-health-syncing {
-  color: #93c5fd;
-  border-color: rgba(96, 165, 250, 0.35);
-  background: rgba(30, 64, 175, 0.2);
-}
-
-.source-health-auth_failed,
-.source-health-expired,
-.source-health-not_configured {
-  color: #fecaca;
-  border-color: rgba(239, 68, 68, 0.45);
-  background: rgba(127, 29, 29, 0.24);
-}
-
-.source-health-unreachable,
-.source-health-degraded {
-  color: #fcd34d;
-  border-color: rgba(245, 158, 11, 0.45);
-  background: rgba(120, 53, 15, 0.22);
-}
-
-.source-item.needs-attention {
-  border-color: rgba(245, 158, 11, 0.45);
-}
-
-.source-actions {
-  display: flex;
-  gap: var(--space-xs);
-  flex-wrap: wrap;
-  justify-content: flex-end;
-}
-
-.source-actions .btn-warning-outline {
-  color: var(--color-warning, #f59e0b);
-  border-color: rgba(245, 158, 11, 0.45);
-}
-
-.source-actions .btn-warning-outline:hover {
-  background: rgba(245, 158, 11, 0.12);
-  border-color: var(--color-warning, #f59e0b);
-}
-
-.source-actions .btn-repair {
-  color: #fcd34d;
-  border-color: rgba(245, 158, 11, 0.55);
-}
-
-.source-actions .source-progress-btn {
-  color: #bfdbfe;
-  border-color: rgba(96, 165, 250, 0.5);
-  background: rgba(30, 64, 175, 0.18);
-  font-weight: 800;
-}
-
-.source-actions .source-progress-btn:hover {
-  background: rgba(59, 130, 246, 0.24);
-  border-color: rgba(147, 197, 253, 0.72);
-}
-
-/* One clear primary action + a labelled ⋯ menu (replaces the row of icon-only
-   buttons that were unreadable on touch/TV). */
-.source-primary-action {
-  min-width: 74px;
-  font-weight: 700;
-}
-
-.source-menu-btn {
-  font-size: 1.1rem;
-  line-height: 1;
-  font-weight: 800;
-  padding-left: 12px;
-  padding-right: 12px;
-}
-
-.source-menu {
-  position: absolute;
-  top: calc(100% - 6px);
-  right: var(--space-md);
-  z-index: 40;
-  min-width: 190px;
-  padding: 6px;
-  display: flex;
-  flex-direction: column;
-  background: #1b1e28;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 12px;
-  box-shadow: 0 18px 46px rgba(0, 0, 0, 0.55);
-}
-
-.source-menu[hidden] {
-  display: none;
-}
-
-.source-menu-item {
-  text-align: left;
-  padding: 10px 12px;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--color-text-primary);
-  font-size: 0.9rem;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.source-menu-item:hover,
-.source-menu-item:focus-visible {
-  outline: none;
-  background: rgba(255, 255, 255, 0.08);
-}
-
-.source-menu-danger {
-  color: #fca5a5;
-}
-
-.source-menu-danger:hover,
-.source-menu-danger:focus-visible {
-  background: rgba(239, 68, 68, 0.16);
-}
-
-/* The primary Sync/Repair button dims while a sync is in flight. */
-.source-primary-action.syncing,
-.source-primary-action[disabled] {
-  opacity: 0.55;
-}
-
-/* Mobile: the ⋯ menu docks to the card's full width for easy thumb targets. */
-@media (max-width: 560px) {
-  .source-menu {
-    left: var(--space-md);
-    right: var(--space-md);
-    min-width: 0;
-  }
-  .source-menu-item {
-    padding: 13px 12px;
-  }
-}
-
-/* Android TV: larger menu + rows for D-pad reach. */
-.tv-mode .source-menu {
-  min-width: 260px;
-}
-.tv-mode .source-menu-item {
-  padding: 14px 16px;
-  font-size: 1.05rem;
-}
-
-/* Favourite-genre chips — replaces the native <select multiple> (dated on desktop,
-   awkward on mobile, unusable on TV). The select stays in the DOM as the model. */
-.is-chip-backed {
-  display: none !important;
-}
-
-.genre-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  max-width: 520px;
-}
-
-.genre-chip {
-  padding: 7px 14px;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  background: rgba(255, 255, 255, 0.05);
-  color: var(--color-text-secondary);
-  font-size: 0.86rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
-}
-
-.genre-chip:hover {
-  background: rgba(255, 255, 255, 0.1);
-  color: var(--color-text-primary);
-}
-
-.genre-chip.is-active {
-  background: var(--color-accent-dim, rgba(91, 116, 255, 0.2));
-  border-color: var(--color-accent);
-  color: var(--color-accent-hover, #cdd8ff);
-}
-
-.genre-chip:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
-}
-
-.tv-mode .genre-chip {
-  padding: 11px 20px;
-  font-size: 1rem;
-}
-
-/* Manage Content — visible "unsaved changes" state so a pending edit is never
-   silently lost, plus an emphasised Save button while dirty. */
-.content-unsaved {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 0.8rem;
-  font-weight: 700;
-  color: #fcd34d;
-  white-space: nowrap;
-}
-
-.content-unsaved.hidden {
-  display: none;
-}
-
-#content-save.is-dirty {
-  box-shadow: 0 0 0 2px rgba(251, 191, 36, 0.55);
-  animation: content-save-pulse 1.6s ease-in-out infinite;
-}
-
-@keyframes content-save-pulse {
-  0%, 100% { box-shadow: 0 0 0 2px rgba(251, 191, 36, 0.5); }
-  50% { box-shadow: 0 0 0 4px rgba(251, 191, 36, 0.28); }
-}
-
-/* ============================================================
-   Settings on Android TV — hide setup surfaces a remote can't sensibly drive.
-   These are done from the phone/web app; on TV we keep status + the few remote-
-   friendly toggles. Covers: TMDB key, the add-source forms (Add provider/playlist/
-   guide), the whole Transcoding "Advanced" block (encoder, remux, custom
-   user-agent, connection identity…), and the Manage Content + Local Users tabs.
-   ============================================================ */
-.tv-mode .tv-hidden,
-.tv-mode #tab-transcode .settings-advanced,
-.tv-mode #add-xtream,
-.tv-mode #add-m3u,
-.tv-mode #add-epg,
-.tv-mode .tab[data-tab="content"],
-.tv-mode .tab[data-tab="users"] {
-  display: none !important;
-}
-
-/* ============================================================
-   Settings responsive layout — mobile category list + tablet master/detail.
-   Only the .active panel is display:block, so all panels can share the same
-   content cell without overlap.
-   ============================================================ */
-
-/* Mobile: tabs become a vertical list of full-width rows — a native-settings feel
-   rather than a cramped horizontal strip. */
-@media (max-width: 640px) {
-  .settings-container .tabs {
-    flex-direction: column;
-    gap: 4px;
-    border-bottom: none;
-    margin-bottom: var(--space-md);
-  }
-
-  .settings-container .tab {
-    width: 100%;
-    text-align: left;
-    padding: 13px 14px;
-    border-bottom: none;
-    border-radius: 10px;
-    background: var(--color-bg-secondary);
-    font-size: 0.95rem;
-  }
-
-  .settings-container .tab.active {
-    border-bottom: none;
-    background: var(--color-accent-dim);
-    color: var(--color-accent-hover);
-  }
-}
-
-/* Tablet: master/detail — categories to the left, the active panel fills the
-   column beside them. */
-@media (min-width: 900px) and (max-width: 1180px) {
-  .settings-container {
-    max-width: 1120px;
-    display: grid;
-    grid-template-columns: 224px minmax(0, 1fr);
-    column-gap: var(--space-xl);
-    align-content: start;
-  }
-
-  .settings-container > h2 {
-    grid-column: 1 / -1;
-    grid-row: 1;
-  }
-
-  .settings-container > .tabs {
-    grid-column: 1;
-    grid-row: 2;
-    flex-direction: column;
-    gap: 4px;
-    align-self: start;
-    margin-bottom: 0;
-    border-bottom: none;
-    border-right: 1px solid var(--color-border);
-    padding-right: var(--space-md);
-  }
-
-  .settings-container > .tabs .tab {
-    width: 100%;
-    text-align: left;
-    padding: 10px 12px;
-    border-bottom: none;
-    border-left: 2px solid transparent;
-    border-radius: 8px;
-  }
-
-  .settings-container > .tabs .tab.active {
-    border-bottom: none;
-    border-left-color: var(--color-accent);
-    background: var(--color-accent-dim);
-  }
-
-  .settings-container > .tab-content {
-    grid-column: 2;
-    grid-row: 2;
-  }
-}
-
-/* ============================================================
-   Transcoding troubleshooting wizard — pick the symptom, Norva flips the fix.
-   ============================================================ */
-.tc-wizard {
-  margin: 0 0 var(--space-md);
-  padding: 16px;
-  border-radius: 14px;
-  border: 1px solid var(--color-border);
-  background: rgba(91, 116, 255, 0.06);
-}
-
-.tc-wizard-q {
-  font-weight: 700;
-  color: var(--color-text-primary);
-  margin-bottom: 12px;
-}
-
-.tc-wizard-options {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.tc-wizard-opt {
-  padding: 12px 14px;
-  border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  background: rgba(255, 255, 255, 0.05);
-  color: var(--color-text-primary);
-  font-size: 0.9rem;
-  font-weight: 600;
-  text-align: left;
-  cursor: pointer;
-  transition: background var(--transition-fast), border-color var(--transition-fast);
-}
-
-.tc-wizard-opt:hover,
-.tc-wizard-opt:focus-visible {
-  outline: none;
-  background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 255, 255, 0.28);
-}
-
-.tc-wizard-opt.is-active {
-  background: var(--color-accent-dim);
-  border-color: var(--color-accent);
-  color: var(--color-accent-hover);
-}
-
-.tc-wizard-result {
-  margin: 12px 0 0;
-  padding: 10px 12px;
-  border-radius: 8px;
-  background: rgba(34, 197, 94, 0.12);
-  border: 1px solid rgba(34, 197, 94, 0.32);
-  color: #86efac;
-  font-size: 0.86rem;
-  font-weight: 600;
-}
-
-.tc-wizard-result.hidden {
-  display: none;
-}
-
-/* Briefly highlight the underlying toggle/select the wizard just changed, so the
-   viewer sees exactly which control it flipped (and can undo it). */
-.setting-item.tc-flash {
-  border-radius: 10px;
-  animation: tc-flash 2.2s ease;
-}
-
-@keyframes tc-flash {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); }
-  15%, 55% { box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.6); }
-}
-
-@media (max-width: 560px) {
-  .tc-wizard-options {
-    grid-template-columns: 1fr;
-  }
-}
-
-.tv-mode .tc-wizard-opt {
-  padding: 16px 18px;
-  font-size: 1rem;
-}
-
-.source-form-intro {
-  margin: 0 0 var(--space-md);
-  color: var(--color-text-secondary);
-  line-height: 1.5;
-}
-
-.source-saved-connection {
-  margin-bottom: var(--space-md);
-  padding: var(--space-md);
-  border: 1px solid rgba(96, 165, 250, 0.28);
-  border-radius: var(--radius-md);
-  background: rgba(30, 64, 175, 0.12);
-}
-
-.source-saved-title {
-  margin-bottom: var(--space-sm);
-  color: var(--color-text-primary);
-  font-weight: 800;
-}
-
-.source-saved-grid {
-  display: grid;
-  grid-template-columns: minmax(80px, 0.4fr) minmax(0, 1fr);
-  gap: var(--space-xs) var(--space-md);
-  align-items: center;
-  color: var(--color-text-muted);
-  font-size: 0.875rem;
-}
-
-.source-saved-grid strong {
-  min-width: 0;
-  color: var(--color-text-primary);
-  overflow-wrap: anywhere;
-}
-
-.source-secret-mask {
-  letter-spacing: 0.08em;
-}
-
-.source-sync-step {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-lg);
-}
-
-.source-sync-hero {
-  padding: var(--space-lg);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
-  background: linear-gradient(135deg, rgba(37, 99, 235, 0.16), rgba(15, 23, 42, 0.42));
-}
-
-.source-sync-hero h3 {
-  margin: var(--space-sm) 0 var(--space-xs);
-  color: var(--color-text-primary);
-}
-
-.source-sync-hero p {
-  margin: 0;
-  color: var(--color-text-secondary);
-  line-height: 1.5;
-}
-
-.source-sync-pill {
-  display: inline-flex;
-  align-items: center;
-  min-height: 24px;
-  padding: 2px 10px;
-  border-radius: 999px;
-  border: 1px solid rgba(96, 165, 250, 0.35);
-  color: #bfdbfe;
-  background: rgba(30, 64, 175, 0.24);
-  font-size: 0.75rem;
-  font-weight: 800;
-}
-
-.source-sync-ready .source-sync-pill {
-  border-color: rgba(34, 197, 94, 0.38);
-  color: #bbf7d0;
-  background: rgba(22, 101, 52, 0.24);
-}
-
-.source-sync-error .source-sync-pill {
-  border-color: rgba(239, 68, 68, 0.45);
-  color: #fecaca;
-  background: rgba(127, 29, 29, 0.28);
-}
-
-.source-sync-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: var(--space-sm);
-}
-
-.source-sync-card {
-  min-width: 0;
-  padding: var(--space-md);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-bg-secondary);
-}
-
-.source-sync-card span,
-.source-sync-card small {
-  display: block;
-  color: var(--color-text-muted);
-}
-
-.source-sync-card strong {
-  display: block;
-  margin: var(--space-xs) 0;
-  color: var(--color-text-primary);
-  font-size: 1.45rem;
-  line-height: 1.15;
-  white-space: nowrap;
-  overflow-wrap: normal;
-  word-break: normal;
-  font-variant-numeric: tabular-nums;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.source-sync-progress-wrap {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: var(--space-sm);
-  align-items: center;
-}
-
-.source-sync-progress-wrap small {
-  color: var(--color-text-secondary);
-  font-weight: 800;
-  font-variant-numeric: tabular-nums;
-}
-
-.source-sync-progress {
-  position: relative;
-  height: 6px;
-  overflow: hidden;
-  border-radius: 999px;
-  background: rgba(148, 163, 184, 0.18);
-}
-
-.source-sync-progress span {
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: 38%;
-  border-radius: inherit;
-  background: linear-gradient(90deg, var(--color-primary), #a855f7);
-  animation: sourceSyncProgress 1.3s ease-in-out infinite;
-}
-
-.source-sync-progress.is-determinate span {
-  width: var(--source-sync-percent, 0%);
-  transform: none;
-  animation: none;
-}
-
-.source-sync-timeline {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-sm);
-  padding: 0;
-  margin: 0;
-  list-style: none;
-}
-
-.source-sync-milestone {
-  display: grid;
-  grid-template-columns: 24px minmax(0, 1fr);
-  gap: var(--space-sm);
-  align-items: start;
-  padding: var(--space-sm) var(--space-md);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: rgba(15, 23, 42, 0.24);
-}
-
-.source-sync-dot {
-  width: 12px;
-  height: 12px;
-  margin-top: 5px;
-  border-radius: 999px;
-  background: rgba(148, 163, 184, 0.42);
-  box-shadow: 0 0 0 5px rgba(148, 163, 184, 0.08);
-}
-
-.source-sync-milestone-running .source-sync-dot {
-  background: var(--color-primary);
-  box-shadow: 0 0 0 5px rgba(59, 130, 246, 0.14);
-}
-
-.source-sync-milestone-done .source-sync-dot {
-  background: #22c55e;
-  box-shadow: 0 0 0 5px rgba(34, 197, 94, 0.14);
-}
-
-.source-sync-milestone-error .source-sync-dot {
-  background: #ef4444;
-  box-shadow: 0 0 0 5px rgba(239, 68, 68, 0.14);
-}
-
-.source-sync-milestone-skipped {
-  opacity: 0.72;
-}
-
-.source-sync-copy {
-  min-width: 0;
-}
-
-.source-sync-line {
-  display: flex;
-  gap: var(--space-sm);
-  align-items: baseline;
-  justify-content: space-between;
-  color: var(--color-text-primary);
-  font-weight: 800;
-}
-
-.source-sync-line strong {
-  color: #bfdbfe;
-  font-size: 0.95rem;
-  font-variant-numeric: tabular-nums;
-}
-
-.source-sync-copy small {
-  display: block;
-  margin-top: 2px;
-  color: var(--color-text-muted);
-  line-height: 1.35;
-}
-
-.source-sync-error {
-  padding: var(--space-md);
-  border: 1px solid rgba(239, 68, 68, 0.45);
-  border-radius: var(--radius-md);
-  color: #fecaca;
-  background: rgba(127, 29, 29, 0.22);
-}
-
-@keyframes sourceSyncProgress {
-  0% {
-    transform: translateX(-105%);
-  }
-  100% {
-    transform: translateX(265%);
-  }
-}
-
-@media (max-width: 640px) {
-  .source-saved-grid {
-    grid-template-columns: 1fr;
-    gap: var(--space-xs);
-  }
-
-  .source-saved-grid span:not(:first-child) {
-    margin-top: var(--space-xs);
-  }
-
-  .source-sync-step {
-    gap: var(--space-sm);
-  }
-
-  .source-sync-hero {
-    padding: var(--space-md);
-  }
-
-  .source-sync-hero h3 {
-    margin: 6px 0 4px;
-    font-size: 1.35rem;
-  }
-
-  .source-sync-hero p {
-    font-size: 0.95rem;
-    line-height: 1.4;
-  }
-
-  .source-sync-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px;
-  }
-
-  .source-sync-card {
-    padding: 10px 12px;
-  }
-
-  .source-sync-card strong {
-    margin: 2px 0;
-    font-size: 1.18rem;
-  }
-
-  .source-sync-card span,
-  .source-sync-card small {
-    font-size: 0.82rem;
-  }
-
-  .source-sync-progress-wrap {
-    gap: 8px;
-  }
-
-  .source-sync-milestone {
-    grid-template-columns: 18px minmax(0, 1fr);
-    gap: 8px;
-    padding: 10px 12px;
-  }
-
-  .source-sync-dot {
-    width: 10px;
-    height: 10px;
-    margin-top: 4px;
-  }
-
-  .source-sync-line {
-    gap: 8px;
-  }
-}
-
-@media (max-width: 380px) {
-  .source-sync-grid {
-    grid-template-columns: 1fr;
-  }
-}
-
-.label-optional {
-  color: var(--color-text-muted);
-  font-weight: 500;
-}
-
-/* Hidden Items */
-.hidden-list {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-sm);
-}
-
-.hidden-item {
-  display: flex;
-  align-items: center;
-  gap: var(--space-md);
-  padding: var(--space-md);
-  background: var(--color-bg-secondary);
-  border-radius: var(--radius-md);
-}
-
-.hidden-item-info {
-  flex: 1;
-}
-
-.hidden-item-type {
-  font-size: 0.75rem;
-  color: var(--color-text-muted);
-  text-transform: uppercase;
-}
-
-/* Settings Sections */
-.settings-section {
-  margin-bottom: var(--space-xl);
-}
-
-.settings-section h3 {
-  margin-bottom: var(--space-md);
-  padding-bottom: var(--space-sm);
-  border-bottom: 1px solid var(--color-border);
-}
-
-.setting-item {
-  display: flex;
-  align-items: center;
-  gap: var(--space-md);
-  padding: var(--space-md);
-  background: var(--color-bg-secondary);
-  border-radius: var(--radius-md);
-  margin-bottom: var(--space-sm);
-}
-
-.setting-info {
-  flex: 1;
-}
-
-.setting-label {
-  display: block;
-  font-weight: 500;
-}
-
-.setting-hint {
-  display: block;
-  font-size: 0.75rem;
-  color: var(--color-text-muted);
-  margin-top: var(--space-xs);
-}
-
-.setting-number {
-  width: 80px;
-  text-align: center;
-}
-
-/* Toggle Switch */
-.setting-toggle {
-  position: relative;
-  width: 48px;
-  height: 26px;
-}
-
-.setting-toggle input {
-  opacity: 0;
-  width: 0;
-  height: 0;
-}
-
-.toggle-slider {
-  position: absolute;
-  cursor: pointer;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: var(--color-bg-tertiary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-full);
-  transition: background var(--transition-fast);
-}
-
-.toggle-slider::before {
-  content: '';
-  position: absolute;
-  height: 20px;
-  width: 20px;
-  left: 2px;
-  bottom: 2px;
-  background: white;
-  border-radius: 50%;
-  transition: transform var(--transition-fast);
-}
-
-.setting-toggle input:checked+.toggle-slider {
-  background: var(--color-accent);
-  border-color: var(--color-accent);
-}
-
-.setting-toggle input:checked+.toggle-slider::before {
-  transform: translateX(22px);
-}
-
-/* =====================================================
-   Transcoding tab — mass-market layout
-   ===================================================== */
-.tc-intro {
-  display: flex;
-  gap: 14px;
-  align-items: flex-start;
-  padding: 16px 18px;
-  margin-bottom: var(--space-lg);
-  background:
-    radial-gradient(120% 120% at 0% 0%, rgba(59, 130, 246, 0.10), transparent 60%),
-    var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
-}
-.tc-intro-icon { font-size: 22px; line-height: 1.4; flex: none; }
-.tc-intro-title { margin: 0 0 4px; font-weight: 700; font-size: 1rem; color: var(--color-text-primary); }
-.tc-intro-text { margin: 0; font-size: 0.86rem; line-height: 1.55; color: var(--color-text-secondary); }
-
-/* Short caption under a section heading. */
-.tc-section-sub {
-  margin: -6px 0 14px;
-  font-size: 0.82rem;
-  line-height: 1.5;
-  color: var(--color-text-secondary);
-}
-
-/* Dependent sub-options (e.g. upscaling method) sit indented under their parent. */
-.setting-item.tc-sub-setting {
-  margin-left: 22px;
-  border-left: 2px solid var(--color-accent-dim);
-  background: var(--color-bg-primary);
-}
-
-.tc-hw-item { display: block; }
-.tc-hw-item .hw-info-container { margin-top: 10px; }
-
-/* Progressive disclosure for expert options. */
-.settings-advanced {
-  margin-bottom: var(--space-xl);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
-  background: var(--color-bg-secondary);
-  overflow: hidden;
-}
-.settings-advanced-summary {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 15px 18px;
-  cursor: pointer;
-  list-style: none;
-  user-select: none;
-  transition: background 0.14s ease;
-}
-.settings-advanced-summary::-webkit-details-marker { display: none; }
-.settings-advanced-summary:hover { background: rgba(255, 255, 255, 0.03); }
-.settings-advanced-chevron {
-  flex: none;
-  font-size: 0.85rem;
-  color: var(--color-text-secondary);
-  transition: transform 0.18s ease;
-}
-.settings-advanced[open] .settings-advanced-chevron { transform: rotate(90deg); }
-.settings-advanced-title { display: block; font-weight: 650; font-size: 0.95rem; color: var(--color-text-primary); }
-.settings-advanced-sub { display: block; margin-top: 2px; font-size: 0.78rem; color: var(--color-text-secondary); }
-.settings-advanced-body {
-  padding: 4px 16px 16px;
-  border-top: 1px solid var(--color-border);
-}
-.settings-advanced-body .setting-item { background: var(--color-bg-primary); }
-
-/* Volume Slider */
-.volume-slider-container {
-  display: flex;
-  align-items: center;
-  gap: var(--space-md);
-  flex: 1;
-}
-
-.volume-slider {
-  flex: 1;
-  height: 8px;
-  border-radius: 4px;
-  background: var(--color-bg-tertiary);
-  appearance: none;
-  outline: none;
-  cursor: pointer;
-}
-
-.volume-slider::-webkit-slider-thumb {
-  appearance: none;
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: var(--color-accent);
-  cursor: pointer;
-  transition: transform 0.1s ease;
-}
-
-.volume-slider::-webkit-slider-thumb:hover {
-  transform: scale(1.15);
-}
-
-.volume-slider::-moz-range-thumb {
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: var(--color-accent);
-  cursor: pointer;
-  border: none;
-}
-
-#volume-value {
-  min-width: 40px;
-  text-align: right;
-  font-weight: 500;
-  color: var(--color-text-secondary);
-}
-
-/* Keyboard Shortcuts */
-.shortcuts-grid {
-  display: grid;
-  gap: var(--space-sm);
-}
-
-.shortcut {
-  padding: var(--space-sm) var(--space-md);
-  background: var(--color-bg-secondary);
-  border-radius: var(--radius-sm);
-  font-size: 0.875rem;
-}
-
-kbd {
-  display: inline-block;
-  padding: 2px 6px;
-  background: var(--color-bg-tertiary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  font-family: inherit;
-  font-size: 0.75rem;
-}
-
-/* =====================================================
-   Buttons
-   ===================================================== */
-.btn {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-sm);
-  padding: var(--space-sm) var(--space-md);
-  font-size: 0.875rem;
-  font-weight: 500;
-  border: none;
-  border-radius: var(--radius-md);
-  cursor: pointer;
-  transition: all var(--transition-fast);
-}
-
-.btn-primary {
-  background: var(--color-accent);
-  color: white;
-}
-
-.btn-primary:hover {
-  background: var(--color-accent-hover);
-  box-shadow: var(--shadow-glow);
-}
-
-.btn-secondary {
-  background: var(--color-bg-tertiary);
-  color: var(--color-text-primary);
-  border: 1px solid var(--color-border);
-}
-
-.btn-secondary:hover {
-  background: var(--color-bg-hover);
-}
-
-.btn-ghost {
-  background: transparent;
-  color: var(--color-text-secondary);
-}
-
-.btn-ghost:hover {
-  background: var(--color-bg-hover);
-  color: var(--color-text-primary);
-}
-
-.btn-danger {
-  background: var(--color-error);
-  color: white;
-}
-
-.btn-danger:hover {
-  background: #dc2626;
-}
-
-.btn-icon {
-  padding: var(--space-sm);
-  border-radius: var(--radius-sm);
-}
-
-.btn-sm {
-  padding: var(--space-xs) var(--space-sm);
-  font-size: 0.75rem;
-}
-
-/* =====================================================
-   Modal
-   ===================================================== */
-.modal {
-  display: none;
-  position: fixed;
-  inset: 0;
-  z-index: 1000;
-  align-items: center;
-  justify-content: center;
-  padding: var(--space-md);
-  overflow: hidden;
-  background: rgba(0, 0, 0, 0.7);
-  backdrop-filter: blur(4px);
-}
-
-.modal.active {
-  display: flex;
-}
-
-.modal-content {
-  display: flex;
-  flex-direction: column;
-  width: 100%;
-  max-width: 500px;
-  max-height: 90vh;
-  max-height: min(90dvh, 760px);
-  min-height: 0;
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-lg);
-  overflow: hidden;
-}
-
-.modal-header {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: var(--space-md) var(--space-lg);
-  border-bottom: 1px solid var(--color-border);
-}
-
-.modal-close {
-  background: none;
-  border: none;
-  color: var(--color-text-muted);
-  font-size: 1.5rem;
-  cursor: pointer;
-  transition: color var(--transition-fast);
-}
-
-.modal-close:hover {
-  color: var(--color-text-primary);
-}
-
-.modal-body {
-  flex: 1 1 auto;
-  min-height: 0;
-  padding: var(--space-lg);
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
-  overscroll-behavior: contain;
-}
-
-.modal-footer {
-  flex: 0 0 auto;
-  display: flex;
-  justify-content: flex-end;
-  gap: var(--space-sm);
-  padding: var(--space-md) var(--space-lg);
-  border-top: 1px solid var(--color-border);
-}
-
-/* EPG Info Modal */
-.epg-info-modal .channel-details {
-  display: flex;
-  gap: var(--space-md);
-  margin-bottom: var(--space-md);
-  padding-bottom: var(--space-md);
-  border-bottom: 1px solid var(--color-border);
-}
-
-.epg-info-modal .channel-logo {
-  width: 64px;
-  height: 64px;
-  object-fit: contain;
-  background: var(--color-bg-tertiary);
-  border-radius: var(--radius-md);
-}
-
-.epg-info-modal .channel-meta p {
-  margin: var(--space-xs) 0;
-  font-size: 0.875rem;
-  color: var(--color-text-secondary);
-}
-
-.epg-info-modal h4 {
-  margin: var(--space-md) 0 var(--space-sm);
-  font-size: 1rem;
-  color: var(--color-text-primary);
-}
-
-.epg-program-list {
-  max-height: 300px;
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
-  overscroll-behavior: contain;
-}
-
-.epg-program {
-  padding: var(--space-sm);
-  margin-bottom: var(--space-xs);
-  background: var(--color-bg-tertiary);
-  border-radius: var(--radius-sm);
-}
-
-.epg-program.current {
-  background: var(--color-accent-dim);
-  border-left: 3px solid var(--color-accent);
-}
-
-.epg-program-time {
-  font-size: 0.75rem;
-  color: var(--color-text-muted);
-}
-
-.epg-program-title {
-  font-weight: 500;
-  color: var(--color-text-primary);
-}
-
-.epg-program-desc {
-  font-size: 0.8rem;
-  color: var(--color-text-secondary);
-  margin-top: var(--space-xs);
-}
-
-.no-programs {
-  color: var(--color-text-muted);
-  text-align: center;
-  padding: var(--space-lg);
-}
-
-/* Form Elements */
-.form-group {
-  margin-bottom: var(--space-md);
-}
-
-.form-group label {
-  display: block;
-  margin-bottom: var(--space-xs);
-  font-size: 0.875rem;
-  color: var(--color-text-secondary);
-}
-
-.form-input {
-  width: 100%;
-  padding: var(--space-sm) var(--space-md);
-  background: var(--color-bg-tertiary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  color: var(--color-text-primary);
-  font-size: 0.875rem;
-}
-
-.form-input:focus {
-  outline: none;
-  border-color: var(--color-accent);
-}
-
-/* =====================================================
-   Context Menu
-   ===================================================== */
-.context-menu {
-  display: none;
-  position: fixed;
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-lg);
-  z-index: 1000;
-  min-width: 150px;
-  overflow: hidden;
-}
-
-.context-menu.active {
-  display: block;
-}
-
-.context-item {
-  display: block;
-  width: 100%;
-  padding: var(--space-sm) var(--space-md);
-  background: none;
-  border: none;
-  color: var(--color-text-primary);
-  font-size: 0.875rem;
-  text-align: left;
-  cursor: pointer;
-  transition: background var(--transition-fast);
-}
-
-.context-item:hover {
-  background: var(--color-bg-hover);
-}
-
-/* =====================================================
-   Content Browser (Manage Content Tab)
-   ===================================================== */
-.content-browser {
-  display: flex;
-  flex-direction: column;
-  height: calc(100vh - var(--navbar-height) - 200px);
-}
-
-.content-browser-header {
-  display: flex;
-  align-items: center;
-  gap: var(--space-md);
-  padding: var(--space-md);
-  background: var(--color-bg-secondary);
-  border-radius: var(--radius-md);
-  margin-bottom: var(--space-md);
-  flex-wrap: wrap;
-}
-
-.content-type-toggle {
-  display: flex;
-  gap: var(--space-xs);
-}
-
-.content-type-toggle .btn {
-  background: var(--color-bg-tertiary);
-  color: var(--color-text-secondary);
-}
-
-.content-type-toggle .btn.active {
-  background: var(--color-accent);
-  color: white;
-}
-
-.content-browser-header .source-select {
-  flex: 1;
-  max-width: 300px;
-}
-
-.content-actions {
-  display: flex;
-  gap: var(--space-sm);
-  margin-left: auto;
-}
-
-.content-tree {
-  flex: 1;
-  overflow-y: auto;
-  background: var(--color-bg-secondary);
-  border-radius: var(--radius-md);
-  padding: var(--space-md);
-  -webkit-overflow-scrolling: touch;
-  overscroll-behavior: contain;
-}
-
-.content-group {
-  margin-bottom: var(--space-xs);
-}
-
-.content-group-header {
-  display: flex;
-  align-items: center;
-  padding: var(--space-xs);
-  background: var(--color-surface-hover);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  user-select: none;
-}
-
-.content-group-header:hover {
-  background: var(--color-surface-active);
-}
-
-.group-expander {
-  margin-right: var(--space-sm);
-  font-size: 0.8em;
-  width: 20px;
-  text-align: center;
-  transition: transform 0.2s;
-}
-
-.content-group.collapsed .group-expander {
-  transform: rotate(-90deg);
-}
-
-.content-channels {
-  margin-left: 28px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.content-group.collapsed .content-channels {
-  display: none;
-}
-
-.checkbox-label.channel-item {
-  display: flex;
-  align-items: center;
-  gap: var(--space-xs);
-  padding: var(--space-xs) var(--space-sm);
-  background: var(--color-bg-primary);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  font-size: 0.875rem;
-  transition: background var(--transition-fast);
-}
-
-.checkbox-label.channel-item:hover {
-  background: var(--color-bg-hover);
-}
-
-.content-categories {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-xs);
-}
-
-.checkbox-label.category-item {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-  padding: var(--space-sm) var(--space-md);
-  background: var(--color-bg-tertiary);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  font-size: 0.9rem;
-  transition: background var(--transition-fast);
-}
-
-.checkbox-label.category-item:hover {
-  background: var(--color-bg-hover);
-}
-
-.checkbox-label.channel-item.is-hidden {
-  opacity: 0.6;
-  text-decoration: line-through;
-  background: rgba(251, 191, 36, 0.1);
-}
-
-.checkbox-label.channel-item .channel-name {
-  max-width: 200px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* Checkbox styling */
-.content-tree input[type="checkbox"] {
-  accent-color: var(--color-accent);
-  width: 16px;
-  height: 16px;
-  cursor: pointer;
-}
-
-/* =====================================================
-   Manage Content — polished scroll container + genre grid
-   ===================================================== */
-/* Lift the scroll container out of "flat grey box" territory: subtle border,
-   inner depth and a slim, self-contained scrollbar that doesn't look default. */
-.content-tree {
-  background:
-    radial-gradient(120% 80% at 50% -10%, rgba(59, 130, 246, 0.06), transparent 60%),
-    var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
-  padding: var(--space-lg, 20px);
-  scrollbar-width: thin;
-  scrollbar-color: var(--color-border-light) transparent;
-}
-.content-tree::-webkit-scrollbar { width: 10px; }
-.content-tree::-webkit-scrollbar-track { background: transparent; }
-.content-tree::-webkit-scrollbar-thumb {
-  background: var(--color-border-light);
-  border-radius: 999px;
-  border: 3px solid transparent;
-  background-clip: padding-box;
-}
-.content-tree::-webkit-scrollbar-thumb:hover {
-  background: #52525b;
-  background-clip: padding-box;
-}
-
-/* Loading + summary line */
-.genre-loading {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  color: var(--color-text-secondary);
-  font-size: 0.9rem;
-  padding: 8px 2px;
-}
-.genre-spinner {
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  border: 2px solid var(--color-border-light);
-  border-top-color: var(--color-accent);
-  animation: genre-spin 0.7s linear infinite;
-}
-@keyframes genre-spin { to { transform: rotate(360deg); } }
-
-.genre-view-summary {
-  font-size: 0.82rem;
-  color: var(--color-text-secondary);
-  margin: 0 2px 16px;
-  letter-spacing: 0.01em;
-}
-.genre-view-summary strong { color: var(--color-text-primary); font-variant-numeric: tabular-nums; }
-
-/* The grid of genre toggles — the part the user called "too ugly". Now a clean,
-   responsive set of cards, each an iOS-style on/off switch. */
-.genre-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(232px, 1fr));
-  gap: 12px;
-}
-
-.genre-card {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  width: 100%;
-  text-align: left;
-  margin: 0;
-  padding: 14px 16px;
-  font-family: inherit;
-  color: var(--color-text-primary);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.012));
-  border: 1px solid var(--color-border);
-  border-radius: 14px;
-  cursor: pointer;
-  transition: transform 0.14s ease, border-color 0.14s ease,
-    box-shadow 0.14s ease, background 0.14s ease, opacity 0.14s ease;
-}
-.genre-card:hover {
-  transform: translateY(-2px);
-  border-color: var(--color-border-light);
-  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.28);
-}
-.genre-card:active { transform: translateY(0); }
-.genre-card:focus-visible {
-  outline: none;
-  border-color: var(--color-accent);
-  box-shadow: 0 0 0 3px var(--color-accent-dim);
-}
-
-.genre-card-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-.genre-card-name {
-  font-weight: 650;
-  font-size: 0.94rem;
-  letter-spacing: -0.01em;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.genre-card-count {
-  font-size: 0.76rem;
-  color: var(--color-text-secondary);
-  font-variant-numeric: tabular-nums;
-}
-
-/* iOS-style switch */
-.genre-switch {
-  flex: none;
-  position: relative;
-  width: 42px;
-  height: 24px;
-  border-radius: 999px;
-  background: var(--color-bg-hover);
-  border: 1px solid var(--color-border-light);
-  transition: background 0.16s ease, border-color 0.16s ease;
-}
-.genre-switch-knob {
-  position: absolute;
-  top: 50%;
-  left: 3px;
-  transform: translateY(-50%);
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: #6b7280;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
-  transition: left 0.16s ease, background 0.16s ease;
-}
-.genre-card.is-on .genre-switch {
-  background: var(--color-accent);
-  border-color: var(--color-accent);
-}
-.genre-card.is-on .genre-switch-knob { left: 21px; background: #fff; }
-
-.genre-card.is-off { opacity: 0.6; }
-.genre-card.is-off .genre-card-name { color: var(--color-text-secondary); }
-.genre-card.is-off:hover { opacity: 0.85; }
-
-@media (max-width: 560px) {
-  .genre-grid { grid-template-columns: 1fr; }
-}
-
-/* -----------------------------------------------------
-   Channels (Live TV) tree — same visual language as the
-   genre grid: card sections, name-left / iOS-switch-right.
-   Scoped to #content-tree so it never touches the live
-   player's channel list (which reuses .channel-item).
-   ----------------------------------------------------- */
-#content-tree .content-group {
-  margin-bottom: 10px;
-  border: 1px solid var(--color-border);
-  border-radius: 14px;
-  overflow: hidden;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.022), rgba(255, 255, 255, 0.006));
-}
-#content-tree .content-group-header {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 13px 16px;
-  background: transparent;
-  border-radius: 0;
-  cursor: pointer;
-  transition: background 0.14s ease;
-}
-#content-tree .content-group-header:hover { background: rgba(255, 255, 255, 0.03); }
-#content-tree .group-expander {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 18px;
-  height: 18px;
-  margin: 0;
-  color: var(--color-text-secondary);
-  transition: transform 0.2s ease;
-}
-#content-tree .group-expander svg { width: 15px; height: 15px; display: block; }
-#content-tree .content-group.collapsed .group-expander { transform: rotate(-90deg); }
-#content-tree .group-name {
-  flex: 1;
-  min-width: 0;
-  font-weight: 650;
-  font-size: 0.92rem;
-  letter-spacing: -0.01em;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-#content-tree .group-count {
-  flex: none;
-  font-size: 0.74rem;
-  color: var(--color-text-secondary);
-  font-variant-numeric: tabular-nums;
-  background: var(--color-bg-tertiary);
-  border: 1px solid var(--color-border);
-  border-radius: 999px;
-  padding: 2px 9px;
-}
-#content-tree .group-provider {
-  flex: none;
-  font-size: 0.7rem;
-  font-weight: 600;
-  color: var(--color-accent);
-  background: var(--color-accent-dim);
-  border-radius: 999px;
-  padding: 2px 9px;
-  white-space: nowrap;
-  max-width: 160px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-#content-tree .cg-switch { display: inline-flex; margin: 0; cursor: pointer; }
-
-#content-tree .content-channels {
-  margin: 0;
-  padding: 4px 12px 12px 42px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  background: rgba(0, 0, 0, 0.16);
-  border-top: 1px solid var(--color-border);
-}
-#content-tree .checkbox-label.channel-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin: 0;
-  padding: 9px 12px;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 10px;
-  font-size: 0.88rem;
-  cursor: pointer;
-  transition: background 0.12s ease, border-color 0.12s ease;
-}
-#content-tree .checkbox-label.channel-item:hover {
-  background: rgba(255, 255, 255, 0.035);
-  border-color: var(--color-border);
-}
-#content-tree .checkbox-label.channel-item .channel-name {
-  flex: 1;
-  min-width: 0;
-  max-width: none;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* Native checkboxes rendered as iOS switches (Manage Content only). */
-#content-tree input[type="checkbox"].group-checkbox,
-#content-tree input[type="checkbox"].channel-checkbox {
-  appearance: none;
-  -webkit-appearance: none;
-  position: relative;
-  flex: none;
-  margin: 0;
-  width: 40px;
-  height: 23px;
-  border-radius: 999px;
-  background: var(--color-bg-hover);
-  border: 1px solid var(--color-border-light);
-  cursor: pointer;
-  transition: background 0.16s ease, border-color 0.16s ease;
-}
-#content-tree input[type="checkbox"].group-checkbox::after,
-#content-tree input[type="checkbox"].channel-checkbox::after {
-  content: "";
-  position: absolute;
-  top: 50%;
-  left: 2px;
-  transform: translateY(-50%);
-  width: 17px;
-  height: 17px;
-  border-radius: 50%;
-  background: #6b7280;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
-  transition: left 0.16s ease, background 0.16s ease;
-}
-#content-tree input[type="checkbox"].group-checkbox:checked,
-#content-tree input[type="checkbox"].channel-checkbox:checked {
-  background: var(--color-accent);
-  border-color: var(--color-accent);
-}
-#content-tree input[type="checkbox"].group-checkbox:checked::after,
-#content-tree input[type="checkbox"].channel-checkbox:checked::after {
-  left: 19px;
-  background: #fff;
-}
-/* Channel-row switch a touch smaller than the category master switch. */
-#content-tree input[type="checkbox"].channel-checkbox { width: 36px; height: 21px; }
-#content-tree input[type="checkbox"].channel-checkbox::after { width: 15px; height: 15px; }
-#content-tree input[type="checkbox"].channel-checkbox:checked::after { left: 17px; }
-
-/* =====================================================
-   Scrollbar
-   ===================================================== */
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-
-::-webkit-scrollbar-track {
-  background: var(--color-bg-secondary);
-}
-
-::-webkit-scrollbar-thumb {
-  background: var(--color-border-light);
-  border-radius: var(--radius-full);
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: var(--color-text-muted);
-}
-
-/* =====================================================
-   Loading States
-   ===================================================== */
-.loading {
-  display: inline-block;
-  width: 20px;
-  height: 20px;
-  border: 2px solid var(--color-border);
-  border-top-color: var(--color-accent);
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-}
-
-/* Skeleton placeholders — a laid-out shimmer that previews the content shape,
-   so loading reads as "almost there" instead of a blank spinner. Used in the
-   Movies/Series grids and Home rails. */
-.skeleton {
-  position: relative;
-  overflow: hidden;
-  background: var(--color-bg-tertiary);
-  border-radius: var(--radius-sm);
-}
-
-.skeleton::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  transform: translateX(-100%);
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.07), transparent);
-  animation: skeleton-shimmer 1.4s ease-in-out infinite;
-}
-
-@keyframes skeleton-shimmer {
-  100% { transform: translateX(100%); }
-}
-
-.skeleton-card {
-  flex: 0 0 160px;
-  width: 160px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.skeleton-poster {
-  width: 100%;
-  aspect-ratio: 2 / 3;
-  border-radius: var(--radius-md);
-}
-
-.skeleton-line {
-  height: 10px;
-  width: 90%;
-  border-radius: 4px;
-}
-
-.skeleton-line.short {
-  width: 55%;
-}
-
-/* "More like this" — a genre-matched rail at the bottom of a movie/series fiche. */
-.more-like-this {
-  padding: 0 var(--space-lg) var(--space-lg);
-  margin-top: var(--space-md);
-}
-
-.more-like-title {
-  font-size: 1.1rem;
-  margin-bottom: var(--space-sm);
-  color: var(--color-text-primary);
-}
-
-.more-like-this .horizontal-scroll {
-  display: flex;
-  gap: var(--space-md);
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-
-.more-like-this .horizontal-scroll::-webkit-scrollbar {
-  display: none;
-}
-
-@media (max-width: 720px) {
-  .more-like-this {
-    padding: 0 14px 18px;
-  }
-}
-
-/* Continue Watching editability: a remove (✕) control + a "X min left" badge on
-   each history card. The ✕ shows on hover (desktop) and is always visible on
-   touch (no hover state to rely on). */
-.ch-remove {
-  position: absolute;
-  top: 6px;
-  right: 6px;
-  z-index: 3;
-  width: 26px;
-  height: 26px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: none;
-  border-radius: 50%;
-  background: rgba(10, 12, 18, 0.72);
-  color: #fff;
-  font-size: 12px;
-  line-height: 1;
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.15s ease, background 0.15s ease;
-}
-
-.dashboard-card:hover .ch-remove {
-  opacity: 1;
-}
-
-.ch-remove:hover {
-  background: var(--color-error);
-}
-
-@media (hover: none) {
-  .ch-remove { opacity: 1; }
-}
-
-.card-timeleft {
-  position: absolute;
-  left: 6px;
-  bottom: 10px;
-  z-index: 2;
-  padding: 2px 6px;
-  border-radius: 4px;
-  background: rgba(10, 12, 18, 0.78);
-  color: #fff;
-  font-size: 0.66rem;
-  font-weight: 600;
-}
-
-/* Channel-switch splash: target channel logo + name over the black video until
-   the first usable frame. Sits above the video but below the controls/error
-   overlays (DOM order), and never intercepts taps. */
-.channel-switch-splash {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 16px;
-  background: #05070d;
-  pointer-events: none;
-}
-
-.channel-switch-splash.hidden {
-  display: none;
-}
-
-.channel-switch-splash .css-logo {
-  max-width: 180px;
-  max-height: 120px;
-  object-fit: contain;
-}
-
-.channel-switch-splash .css-name {
-  padding: 0 24px;
-  font-size: 1.1rem;
-  font-weight: 600;
-  color: #fff;
-  text-align: center;
-}
-
-/* Mobile Settings IA: lead with Account + Playback, and collapse the IPTV-technical
-   tabs behind an "Advanced" toggle so the phone Settings isn't the desktop tab wall.
-   On desktop the toggle is hidden and every tab shows as before. */
-.settings-advanced-toggle {
-  display: none;
-}
-
-@media (max-width: 768px) {
-  .settings-container .tab[data-tab="account"] { order: 0; }
-  .settings-container .tab[data-tab="player"] { order: 1; }
-
-  .settings-advanced-toggle {
-    order: 2;
-    display: inline-flex;
-    align-items: center;
-    padding: var(--space-xs) var(--space-sm);
-    background: none;
-    border: none;
-    border-bottom: 2px solid transparent;
-    color: var(--color-text-secondary);
-    font-size: 0.8rem;
-    white-space: nowrap;
-    cursor: pointer;
-  }
-
-  .settings-container .tabs .tab.tab-advanced { order: 3; display: none; }
-  .settings-container .tabs.show-advanced .tab.tab-advanced { display: inline-flex; }
-  .settings-container .tabs.show-advanced .settings-advanced-toggle { color: var(--color-accent); }
-}
-
-/* Top 10: a large rank numeral over the poster on the numbered "Popular" rail. */
-.rank-numeral {
-  position: absolute;
-  left: 2px;
-  bottom: -4px;
-  z-index: 2;
-  font-family: var(--font-display, 'Inter', sans-serif);
-  font-size: clamp(3.6rem, 6vw, 4.8rem);
-  font-weight: 900;
-  line-height: 0.72;
-  color: #fff;
-  -webkit-text-stroke: 2.5px rgba(0, 0, 0, 0.62);
-  text-shadow: 0 3px 14px rgba(0, 0, 0, 0.6);
-  pointer-events: none;
-}
-
-/* "Up next" autoplay prompt shown after a native episode ends (cancellable). */
-.up-next-banner {
-  position: fixed;
-  left: 50%;
-  bottom: calc(var(--navbar-height, 60px) + env(safe-area-inset-bottom, 0px) + 16px);
-  transform: translateX(-50%);
-  z-index: 1200;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  max-width: calc(100vw - 32px);
-  padding: 10px 12px 10px 16px;
-  border-radius: var(--radius-full);
-  background: rgba(10, 12, 18, 0.95);
-  border: 1px solid var(--color-border);
-  box-shadow: var(--shadow-lg);
-}
-
-.up-next-label {
-  font-size: 0.72rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--color-text-muted);
-}
-
-.up-next-title {
-  max-width: 40vw;
-  font-size: 0.86rem;
-  font-weight: 600;
-  color: var(--color-text-primary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.up-next-play {
-  flex: 0 0 auto;
-  padding: 6px 14px;
-  border: none;
-  border-radius: var(--radius-full);
-  background: var(--color-accent);
-  color: #fff;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.up-next-cancel {
-  flex: 0 0 auto;
-  width: 28px;
-  height: 28px;
-  border: none;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.08);
-  color: #fff;
-  cursor: pointer;
-}
-
-.loading-state {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-sm);
-  padding: var(--space-xl);
-  color: var(--color-text-muted);
-  width: 100%;
-}
-
-.horizontal-scroll .empty-state {
-  padding: var(--space-xl);
-  min-height: 150px;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-/* =====================================================
-   Responsive
-   ===================================================== */
-
-/* Mobile-first responsive breakpoints */
-@media (max-width: 1024px) {
-
-  /* Tablet adjustments */
-  :root {
-    --sidebar-width: 280px;
-    --epg-sidebar-width: 200px;
-  }
-
-  .movies-grid,
-  .series-grid {
-    gap: var(--space-sm);
-    padding: var(--space-md);
-  }
-}
-
-@media (max-width: 768px) {
-
-  /* Tablet/Mobile landscape */
-  :root {
-    --navbar-height: 56px;
-    --sidebar-width: 320px;
-    --space-lg: 16px;
-    --space-xl: 24px;
-    --epg-sidebar-width: 180px;
-  }
-
-  /* Navigation - Hide text labels, show only icons */
-  .navbar {
-    padding: 0 var(--space-md);
-    padding-top: var(--safe-area-inset-top);
-  }
-
-  .navbar-menu {
-    flex: 1;
-    justify-content: space-around;
-    gap: 0;
-  }
-
-  /* Hide nav link text on mobile, but keep Now Playing visible */
-  .navbar-menu .nav-link span:not(.nav-icon) {
-    display: none;
-  }
-
-  .nav-link {
-    padding: var(--space-sm);
-    flex-direction: column;
-    gap: 2px;
-  }
-
-  .nav-icon {
-    font-size: 1.4rem;
-  }
-
-  /* Brand - Simplify on tablet */
-  .brand-text {
-    font-size: 1.25rem;
-  }
-
-  /* Home Layout - Full screen video with drawer */
-  .home-layout {
-    flex-direction: row;
-  }
-
-  /* Show floating channel toggle button */
-  .channel-toggle-btn {
-    display: flex;
-  }
-
-  /* Channel sidebar becomes a slide-out drawer */
-  .channel-sidebar {
-    position: fixed;
-    top: var(--navbar-height);
-    left: 0;
-    bottom: 0;
-    width: var(--sidebar-width);
-    height: auto;
-    border-right: 1px solid var(--color-border);
-    border-bottom: none;
-    transform: translateX(-100%);
-    transition: transform 0.3s ease;
-    z-index: 90;
-    box-shadow: var(--shadow-lg);
-    visibility: hidden;
-  }
-
-  .channel-sidebar.active {
-    transform: translateX(0);
-    visibility: visible;
-  }
-
-  /* Overlay behind drawer */
-  .channel-sidebar-overlay {
-    display: none;
-    position: fixed;
-    top: var(--navbar-height);
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgba(0, 0, 0, 0.5);
-    z-index: 80;
-    opacity: 0;
-    transition: opacity 0.3s ease;
-  }
-
-  .channel-sidebar-overlay.active {
-    display: block;
-    opacity: 1;
-  }
-
-  /* Video player takes full width */
-  .player-section {
-    width: 100%;
-  }
-
-  .sidebar-header {
-    padding: var(--space-sm) var(--space-md);
-  }
-
-  .sidebar-controls {
-    flex-wrap: wrap;
-  }
-
-  /* Video Player */
-  .player-section {
-    flex: 1;
-    min-height: 0;
-  }
-
-  /* Now Playing Overlay - Stack vertically */
-  .now-playing-overlay {
-    flex-direction: column;
-    bottom: 40px;
-    left: var(--space-md);
-    right: var(--space-md);
-    padding: var(--space-md);
-    gap: var(--space-md);
-  }
-
-  .now-playing-info .channel-name {
-    font-size: 1.25rem;
-  }
-
-  .program-title {
-    font-size: 1rem;
-  }
-
-  .up-next {
-    width: 100%;
-  }
-
-  .channel-nav {
-    flex-direction: row;
-    justify-content: center;
-    width: 100%;
-  }
-
-  .channel-nav .btn-icon {
-    width: 48px;
-    height: 36px;
-  }
-
-  /* EPG Guide */
-  .guide-header {
-    flex-direction: column;
-    gap: var(--space-md);
-    align-items: stretch;
-  }
-
-  .guide-controls {
-    flex-wrap: wrap;
-    justify-content: center;
-  }
-
-  .epg-grid {
-    height: calc(100vh - var(--navbar-height) - 120px);
-  }
-
-  .epg-channel-info {
-    width: var(--epg-sidebar-width);
-  }
-
-  /* Movies & Series */
-  .movies-header,
-  .series-header {
-    flex-direction: column;
-    gap: var(--space-md);
-    align-items: stretch;
-    padding: var(--space-md);
-  }
-
-  .movies-controls,
-  .series-controls {
-    flex-wrap: wrap;
-    gap: var(--space-sm);
-  }
-
-  .movies-controls .source-select,
-  .series-controls .source-select,
-  .movies-controls .search-wrapper,
-  .series-controls .search-wrapper {
-    flex: 1;
-    min-width: 140px;
-  }
-
-  .movies-grid,
-  .series-grid {
-    padding: var(--space-md);
-    gap: var(--space-md);
-    height: calc(100vh - var(--navbar-height) - 140px);
-  }
-
-  .movie-card,
-  .series-card {
-    flex: 0 0 140px;
-    width: 140px;
-  }
-
-  .movie-poster,
-  .series-poster,
-  .series-card .series-poster {
-    width: 140px;
-    height: 210px;
-  }
-
-  /* Settings */
-  .settings-container {
-    padding: var(--space-md);
-  }
-
-  .tabs {
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-  }
-
-  .account-settings-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .account-actions-card {
-    justify-content: stretch;
-  }
-
-  .account-actions-card .btn,
-  #settings-manage-service-btn {
-    flex: 1 1 160px;
-  }
-
-  .service-health-card {
-    flex-direction: column;
-    align-items: stretch;
-    gap: var(--space-md);
-  }
-
-  .service-health-card.service-health-prominent {
-    min-height: 260px;
-    justify-content: flex-end;
-  }
-
-  .service-health-actions .btn {
-    width: 100%;
-  }
-
-  .norva-setup-gate {
-    min-height: calc(100dvh - 96px);
-    grid-template-columns: 1fr;
-    align-items: start;
-    padding: 28px 16px 40px;
-  }
-
-  .norva-setup-connect {
-    min-height: calc(100dvh - 72px);
-    gap: 22px;
-  }
-
-  .norva-setup-connect-card {
-    max-width: none;
-    padding: 22px;
-  }
-
-  .norva-setup-connect-card h1 {
-    font-size: 1.85rem;
-  }
-
-  .norva-setup-progress-panel {
-    padding-left: 0;
-    border-left: 0;
-  }
-
-  .norva-setup-card h1 {
-    font-size: clamp(2.2rem, 12vw, 3.6rem);
-  }
-
-  .norva-setup-actions {
-    display: grid;
-    grid-template-columns: 1fr;
-  }
-
-  .norva-setup-actions .btn {
-    width: 100%;
-  }
-
-  .norva-setup-step {
-    grid-template-columns: 38px minmax(0, 1fr);
-    padding: 14px;
-  }
-
-  .norva-setup-step-index {
-    width: 38px;
-    height: 38px;
-  }
-
-  .norva-setup-progress-step {
-    grid-template-columns: 46px minmax(0, 1fr) 20px;
-    min-height: 82px;
-    padding: 14px;
-  }
-
-  .norva-setup-progress-step .norva-setup-step-index {
-    width: 46px;
-    height: 46px;
-  }
-
-  .setup-manual-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .source-item {
-    flex-direction: column;
-    align-items: stretch;
-    gap: var(--space-sm);
-  }
-
-  .source-actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-xs);
-    justify-content: stretch;
-  }
-
-  .source-actions .btn {
-    flex: 1;
-    min-width: 44px;
-    justify-content: center;
-  }
-
-  /* Modal */
-  .modal-content {
-    max-width: 90%;
-    margin: 0;
-  }
-
-  /* Series Details */
-  .series-details-header {
-    flex-direction: column;
-    align-items: center;
-  }
-
-  .series-details-header .series-poster {
-    width: 180px;
-    height: 270px;
-  }
-}
-
-@media (max-width: 640px) {
-
-  /* Mobile portrait - phones */
-  :root {
-    --navbar-height: 52px;
-    --space-md: 12px;
-    --space-lg: 16px;
-    --space-xl: 20px;
-  }
-
-  body {
-    font-size: 13px;
-  }
-
-  /* Navigation - Compact with hamburger menu */
-  .navbar {
-    padding: 0 var(--space-sm);
-    padding-top: var(--safe-area-inset-top);
-    height: calc(52px + var(--safe-area-inset-top));
-  }
-
-  .logo {
-    width: 36px;
-    height: 36px;
-    flex-basis: 36px;
-  }
-
-  .brand-text {
-    font-size: 1.1rem;
-  }
-
-  /* Show mobile menu toggle */
-  .mobile-menu-toggle {
-    display: flex;
-  }
-
-  /* Mobile dropdown menu */
-  .navbar-menu {
-    position: fixed;
-    top: 52px;
-    left: 0;
-    right: 0;
-    flex-direction: column;
-    background: var(--glass-bg);
-    backdrop-filter: blur(12px);
-    border-bottom: 1px solid var(--glass-border);
-    padding: 0;
-    gap: 0;
-    max-height: 0;
-    overflow: hidden;
-    transition: max-height 0.3s ease, padding 0.3s ease;
-    z-index: 100;
-    visibility: hidden;
-  }
-
-  .navbar-menu.active {
-    max-height: 400px;
-    padding: var(--space-sm) 0;
-    box-shadow: var(--shadow-lg);
-    visibility: visible;
-  }
-
-  .nav-link {
-    padding: var(--space-md) var(--space-lg);
-    width: 100%;
-    flex-direction: row;
-    justify-content: flex-start;
-    gap: var(--space-md);
-    border-radius: 0;
-  }
-
-  .nav-link span:not(.nav-icon) {
-    display: inline !important;
-  }
-
-  .nav-icon {
-    font-size: 1.3rem;
-  }
-
-  /* Hide "TV" from brand on very small screens */
-  .brand-accent {
-    display: none;
-  }
-
-  /* Channel Sidebar - Drawer on mobile */
-  .channel-sidebar {
-    width: 85%;
-    max-width: 320px;
-  }
-
-  .channel-toggle-btn {
-    top: var(--space-sm);
-    left: var(--space-sm);
-    padding: var(--space-xs) var(--space-sm);
-    font-size: 0.875rem;
-  }
-
-  .channel-toggle-btn .icon {
-    width: 1.1em;
-    height: 1.1em;
-  }
-
-  .sidebar-header {
-    padding: var(--space-sm);
-  }
-
-  .channel-item {
-    padding: var(--space-xs) var(--space-sm);
-  }
-
-  .channel-logo {
-    width: 32px;
-    height: 32px;
-  }
-
-  .channel-name {
-    font-size: 0.875rem;
-  }
-
-  .group-header {
-    padding: var(--space-xs) var(--space-sm);
-  }
-
-  /* Now Playing Overlay - Compact */
-  .now-playing-overlay {
-    padding: var(--space-sm);
-    bottom: 20px;
-    left: var(--space-sm);
-    right: var(--space-sm);
-  }
-
-  .now-playing-info .channel-name {
-    font-size: 1.1rem;
-    margin-bottom: 4px;
-  }
-
-  .program-title {
-    font-size: 0.875rem;
-  }
-
-  .program-time {
-    font-size: 0.75rem;
-  }
-
-  .up-next {
-    display: none;
-    /* Hide "Up Next" on very small screens */
-  }
-
-  /* EPG Guide - Mobile optimized */
-  .guide-header {
-    padding: var(--space-sm);
-  }
-
-  .guide-header h2 {
-    font-size: 1.25rem;
-  }
-
-  .guide-controls {
-    gap: var(--space-xs);
-  }
-
-  .guide-controls .btn {
-    padding: var(--space-xs) var(--space-sm);
-    font-size: 0.75rem;
-  }
-
-  .epg-channel-info {
-    width: 140px;
-    padding: var(--space-xs);
-  }
-
-  .epg-channel-logo {
-    width: 24px;
-    height: 24px;
-  }
-
-  .epg-channel-name {
-    font-size: 0.75rem;
-  }
-
-  .epg-time-slot {
-    min-width: 140px;
-    padding: var(--space-xs) var(--space-sm);
-    font-size: 0.75rem;
-  }
-
-  .epg-program {
-    padding: var(--space-xs);
-  }
-
-  .epg-program-title {
-    font-size: 0.75rem;
-  }
-
-  .epg-program-time {
-    font-size: 0.65rem;
-  }
-
-  /* Movies & Series Grid - Smaller cards */
-  .movies-header h2,
-  .series-header h2 {
-    font-size: 1.25rem;
-  }
-
-  .movies-controls .btn,
-  .series-controls .btn {
-    font-size: 0.75rem;
-    padding: var(--space-xs) var(--space-sm);
-  }
-
-  .movies-grid,
-  .series-grid {
-    padding: var(--space-sm);
-    gap: var(--space-sm);
-    justify-content: space-around;
-  }
-
-  .movie-card,
-  .series-card {
-    flex: 0 0 calc(50% - 8px);
-    width: calc(50% - 8px);
-    max-width: 160px;
-  }
-
-  .movie-poster,
-  .series-poster,
-  .series-card .series-poster {
-    width: 100%;
-    height: auto;
-    aspect-ratio: 2/3;
-  }
-
-  .movie-title,
-  .series-title {
-    font-size: 0.8rem;
-  }
-
-  .movie-meta,
-  .series-meta {
-    font-size: 0.7rem;
-  }
-
-  /* Favorite button - always visible on mobile */
-  .movie-poster .favorite-btn,
-  .series-poster .favorite-btn {
-    width: 28px;
-    height: 28px;
-    top: 6px;
-    right: 6px;
-  }
-
-  .fav-icon {
-    font-size: 1rem;
-  }
-
-  /* Settings Page - Mobile optimized */
-  .settings-container {
-    padding: var(--space-sm);
-    height: calc(100vh - var(--navbar-height));
-  }
-
-  .settings-container h2 {
-    font-size: 1.25rem;
-    margin-bottom: var(--space-md);
-  }
-
-  .settings-section h3 {
-    font-size: 1rem;
-  }
-
-  .tabs {
-    gap: 2px;
-    margin-bottom: var(--space-md);
-  }
-
-  .tab {
-    padding: var(--space-xs) var(--space-sm);
-    font-size: 0.8rem;
-    white-space: nowrap;
-  }
-
-  .setting-item {
-    flex-direction: column;
-    align-items: stretch;
-    padding: var(--space-sm);
-    gap: var(--space-sm);
-  }
-
-  .setting-info {
-    order: -1;
-    /* Move label to top */
-  }
-
-  .setting-label {
-    font-size: 0.875rem;
-  }
-
-  .setting-hint {
-    font-size: 0.7rem;
-  }
-
-  .source-item {
-    padding: var(--space-sm);
-  }
-
-  .source-name {
-    font-size: 0.875rem;
-  }
-
-  .source-url {
-    font-size: 0.7rem;
-  }
-
-  .btn {
-    font-size: 0.8rem;
-    padding: var(--space-xs) var(--space-sm);
-  }
-
-  .btn-sm {
-    font-size: 0.7rem;
-    padding: 4px var(--space-xs);
-  }
-
-  /* Content Browser */
-  .content-browser-header {
-    flex-direction: column;
-    align-items: stretch;
-    gap: var(--space-sm);
-  }
-
-  .content-type-toggle {
-    justify-content: center;
-  }
-
-  .content-actions {
-    margin-left: 0;
-    justify-content: space-between;
-  }
-
-  /* Series Details */
-  .series-details {
-    padding: var(--space-sm);
-  }
-
-  .series-back-btn {
-    padding: var(--space-xs) var(--space-sm);
-    margin-bottom: var(--space-md);
-    font-size: 0.875rem;
-  }
-
-  .series-details-header .series-poster {
-    width: 160px;
-    height: 240px;
-  }
-
-  .series-info h3 {
-    font-size: 1.25rem;
-  }
-
-  .series-info p {
-    font-size: 0.875rem;
-  }
-
-  .season-header {
-    padding: var(--space-sm);
-  }
-
-  .season-name {
-    font-size: 0.875rem;
-  }
-
-  .episode-item {
-    padding: var(--space-xs) var(--space-sm);
-  }
-
-  .episode-number {
-    width: 32px;
-    font-size: 0.875rem;
-  }
-
-  .episode-title {
-    font-size: 0.875rem;
-  }
-
-  .episode-duration {
-    font-size: 0.75rem;
-  }
-
-  /* Modal - Full screen on mobile */
-  .modal {
-    align-items: stretch;
-    padding: max(8px, env(safe-area-inset-top)) 8px max(8px, env(safe-area-inset-bottom));
-  }
-
-  .modal-content {
-    width: 100%;
-    max-width: none;
-    max-height: calc(100vh - 16px);
-    max-height: calc(100dvh - 16px);
-  }
-
-  .modal-header {
-    padding: 12px 14px;
-  }
-
-  .modal-header h3 {
-    font-size: 1.1rem;
-  }
-
-  .modal-body {
-    padding: 12px;
-  }
-
-  .modal-footer {
-    padding: 12px 14px;
-    flex-wrap: wrap;
-  }
-
-  .modal-footer .btn {
-    flex: 1;
-    min-width: min(180px, 100%);
-  }
-
-  /* Forms */
-  .form-input {
-    font-size: 0.875rem;
-    padding: var(--space-xs) var(--space-sm);
-  }
-
-  /* Keyboard shortcuts - Hide on mobile since they're not relevant */
-  .shortcuts-grid {
-    display: none;
-  }
-}
-
-@media (max-width: 480px) {
-
-  /* Extra small phones */
-  :root {
-    --navbar-height: 48px;
-  }
-
-  .navbar {
-    height: calc(48px + var(--safe-area-inset-top));
-  }
-
-  .brand-text {
-    font-size: 1rem;
-  }
-
-  .channel-sidebar {
-    width: 90%;
-    max-width: 300px;
-  }
-
-  .norva-setup-connect {
-    padding: 18px 10px 28px;
-  }
-
-  .norva-setup-connect-card {
-    padding: 16px;
-  }
-
-  .norva-setup-connect-card h1 {
-    font-size: 1.45rem;
-  }
-
-  .setup-form-input,
-  .norva-setup-submit {
-    min-height: 48px;
-  }
-
-  .setup-manual-login summary {
-    padding: 12px 14px;
-  }
-
-  .setup-manual-login > .setup-form-hint {
-    margin: -4px 14px 10px;
-  }
-
-  .setup-manual-grid {
-    padding: 0 14px 14px;
-  }
-
-  .norva-setup-progress-step {
-    grid-template-columns: 38px minmax(0, 1fr);
-  }
-
-  .norva-setup-progress-step .norva-setup-step-index {
-    width: 38px;
-    height: 38px;
-  }
-
-  .norva-setup-lock {
-    display: none;
-  }
-
-  /* Single column for very small screens */
-  .movie-card,
-  .series-card {
-    flex: 0 0 calc(50% - 6px);
-    width: calc(50% - 6px);
-  }
-
-  .now-playing-overlay {
-    padding: var(--space-xs);
-  }
-
-  .now-playing-info .channel-name {
-    font-size: 1rem;
-  }
-
-  .epg-channel-info {
-    width: 120px;
-  }
-
-  .epg-time-slot {
-    min-width: 120px;
-  }
-}
-
-/* Landscape orientation adjustments for phones */
-@media (max-width: 896px) and (orientation: landscape) {
-  .channel-sidebar {
-    width: 280px;
-  }
-
-  .navbar-menu {
-    gap: 4px;
-  }
-
-  .now-playing-overlay {
-    bottom: 10px;
-    padding: var(--space-xs) var(--space-sm);
-  }
-
-  .now-playing-info .channel-name {
-    font-size: 1rem;
-    margin-bottom: 2px;
-  }
-
-  .program-title {
-    font-size: 0.8rem;
-  }
-
-  .channel-nav {
-    display: none;
-    /* Hide channel nav in landscape to save space */
-  }
-}
-
-@media (min-width: 641px) {
-  #page-home.home-setup-active {
-    overflow: hidden;
-    overflow-x: hidden;
-  }
-
-  #page-home.home-setup-connect-active .norva-setup-connect {
-    grid-template-columns: minmax(0, 1fr) minmax(280px, 0.78fr);
-    align-content: center;
-    gap: clamp(20px, 4vw, 70px);
-  }
-
-  #page-home.home-setup-connect-active .norva-setup-connect-card {
-    max-width: min(760px, 100%);
-    padding: clamp(18px, 3.1vh, 34px);
-  }
-
-  #page-home.home-setup-connect-active .norva-setup-kicker {
-    margin-bottom: clamp(8px, 1.3vh, 16px);
-  }
-
-  #page-home.home-setup-connect-active .norva-setup-connect-card h1 {
-    font-size: clamp(1.55rem, 2.5vw, 2.35rem);
-  }
-
-  #page-home.home-setup-connect-active .norva-setup-connect-card > p {
-    margin-bottom: clamp(12px, 2vh, 18px);
-  }
-
-  #page-home.home-setup-connect-active .norva-setup-inline-form {
-    gap: clamp(10px, 1.6vh, 14px);
-  }
-
-  #page-home.home-setup-connect-active .setup-form-input {
-    min-height: clamp(44px, 6.2vh, 52px);
-  }
-
-  #page-home.home-setup-connect-active .setup-manual-login summary {
-    min-height: clamp(40px, 5.8vh, 48px);
-    padding: clamp(10px, 1.6vh, 13px) clamp(14px, 2vw, 18px);
-  }
-
-  #page-home.home-setup-connect-active .setup-manual-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: clamp(10px, 1.6vh, 14px);
-    padding: 0 clamp(14px, 2vw, 18px) clamp(12px, 2vh, 18px);
-  }
-
-  #page-home.home-setup-connect-active .norva-setup-submit {
-    min-height: clamp(48px, 6.8vh, 56px);
-  }
-
-  #page-home.home-setup-connect-active .norva-setup-progress-panel {
-    gap: clamp(12px, 2.2vh, 18px);
-  }
-
-  #page-home.home-setup-connect-active .norva-setup-progress-step {
-    min-height: clamp(76px, 12.4vh, 98px);
-    padding: clamp(13px, 2.1vh, 18px);
-  }
-
-  #page-home.home-setup-active .norva-setup-sync-embedded {
-    min-height: 100%;
-    height: 100%;
-  }
-}
-
-@media (min-width: 641px) and (max-width: 900px) {
-  #page-home.home-setup-connect-active .norva-setup-connect {
-    grid-template-columns: minmax(0, 1fr) minmax(248px, 0.72fr);
-    padding: clamp(14px, 2.6vh, 28px) clamp(18px, 3vw, 34px);
-    gap: clamp(16px, 3vw, 28px);
-  }
-
-  #page-home.home-setup-connect-active .norva-setup-progress-panel {
-    padding-left: clamp(14px, 3vw, 26px);
-  }
-
-  #page-home.home-setup-connect-active .norva-setup-progress-step {
-    grid-template-columns: 44px minmax(0, 1fr);
-  }
-
-  #page-home.home-setup-connect-active .norva-setup-progress-step .norva-setup-step-index {
-    width: 44px;
-    height: 44px;
-  }
-
-  #page-home.home-setup-connect-active .norva-setup-lock {
-    display: none;
-  }
-
-  #page-home.home-setup-active .norva-setup-sync-embedded {
-    grid-template-columns: minmax(0, 1fr);
-    align-content: start;
-    overflow-y: auto;
-  }
-
-  #page-home.home-setup-active .norva-setup-sync-copy,
-  #page-home.home-setup-active .norva-setup-sync-panel {
-    max-width: none;
-  }
-
-  #page-home.home-setup-active .norva-setup-sync-copy h1 {
-    font-size: clamp(2rem, 6vw, 3.3rem);
-  }
-}
-
-@media (min-width: 641px) and (max-height: 760px) {
-  #page-home.home-setup-connect-active .norva-setup-connect {
-    padding-top: 14px;
-    padding-bottom: 14px;
-  }
-
-  #page-home.home-setup-connect-active .norva-setup-connect-card > p,
-  #page-home.home-setup-connect-active .setup-form-hint {
-    line-height: 1.28;
-  }
-
-  #page-home.home-setup-connect-active .setup-form-hint {
-    font-size: 0.8rem;
-    margin-top: 5px;
-  }
-
-  #page-home.home-setup-connect-active .norva-setup-progress-step strong {
-    margin-bottom: 2px;
-  }
-
-  #page-home.home-setup-active .norva-setup-sync-embedded {
-    grid-template-columns: minmax(240px, 0.46fr) minmax(0, 1fr);
-    gap: clamp(16px, 2.6vw, 36px);
-    padding-inline: clamp(14px, 2.4vw, 30px);
-    padding-top: 14px;
-    padding-bottom: 14px;
-  }
-
-  #page-home.home-setup-active .norva-setup-sync-copy h1 {
-    font-size: clamp(1.9rem, 3.7vw, 3.5rem);
-  }
-
-  #page-home.home-setup-active .norva-setup-sync-copy p {
-    line-height: 1.35;
-  }
-
-  #page-home.home-setup-active .norva-setup-sync-panel .source-sync-card {
-    min-height: 92px;
-  }
-
-  #page-home.home-setup-active .norva-setup-sync-panel .source-sync-timeline {
-    max-height: 24vh;
-  }
-}
-
-@media (min-width: 641px) and (max-width: 900px) {
-  #page-home.home-setup-active .norva-setup-sync-embedded {
-    grid-template-columns: minmax(0, 1fr);
-    align-items: start;
-    align-content: start;
-    gap: 24px;
-    padding-inline: clamp(18px, 4vw, 32px);
-    overflow-y: auto;
-  }
-
-  #page-home.home-setup-active .norva-setup-sync-copy,
-  #page-home.home-setup-active .norva-setup-sync-panel {
-    width: 100%;
-    max-width: 100%;
-  }
-
-  #page-home.home-setup-active .norva-setup-sync-panel .source-sync-timeline {
-    max-height: 40vh;
-  }
-}
-
-@media (max-width: 640px) {
-  #page-home.home-setup-active {
-    overflow-y: auto;
-  }
-
-  #page-home.home-setup-active .dashboard-content,
-  #page-home.home-setup-active #home-rails,
-  #page-home.home-setup-active .norva-setup-gate {
-    height: auto;
-  }
-
-  #page-home.home-setup-active .norva-setup-sync-embedded {
-    grid-template-columns: minmax(0, 1fr);
-    align-items: start;
-    gap: 22px;
-    padding: 22px 16px 32px;
-    overflow: visible;
-  }
-
-  #page-home.home-setup-active .norva-setup-sync-copy h1 {
-    font-size: clamp(2rem, 12vw, 3.2rem);
-  }
-
-  #page-home.home-setup-active .norva-setup-sync-panel .source-sync-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  #page-home.home-setup-active .norva-setup-sync-panel .source-sync-card strong {
-    font-size: clamp(1.55rem, 8vw, 2rem);
-  }
-
-  #page-home.home-setup-active .norva-setup-sync-panel .source-sync-timeline {
-    max-height: none;
-    overflow: visible;
-  }
-}
-
-/* Touch-friendly improvements */
-@media (hover: none) and (pointer: coarse) {
-
-  /* Increase touch target sizes */
-  .btn,
-  .nav-link,
-  .channel-item,
-  .movie-card,
-  .series-card,
-  .tab {
-    min-height: 44px;
-    /* iOS recommended touch target */
-  }
-
-  .channel-item {
-    padding: var(--space-sm);
-  }
-
-  /* Always show favorite buttons on touch devices */
-  .favorite-btn {
-    opacity: 1 !important;
-  }
-
-  /* Remove hover effects */
-  .channel-item:hover,
-  .movie-card:hover,
-  .series-card:hover {
-    transform: none;
-  }
-
-  /* Show play overlay by default on touch */
-  .movie-play-overlay,
-  .series-play-overlay {
-    opacity: 0.3;
-  }
-}
-
-/* =====================================================
-   Movies Page
-   ===================================================== */
-
-.movies-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: var(--space-md) var(--space-lg);
-  background: var(--color-bg-secondary);
-  border-bottom: 1px solid var(--color-border);
-}
-
-.movies-header h2 {
-  margin: 0;
-  font-size: 1.5rem;
-  font-weight: 600;
-}
-
-.movies-heading {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.movies-subtitle {
-  margin: 0;
-  font-size: 0.82rem;
-  font-weight: 500;
-  color: var(--color-text-muted);
-}
-
-@media (max-width: 640px) {
-  .movies-subtitle {
-    display: none;
-  }
-}
-
-.movies-controls {
-  display: flex;
-  gap: var(--space-md);
-  align-items: center;
-}
-
-
-
-/* Favorites Button */
-/* Favorites Button Base */
-.favorite-btn {
-  border: none;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.2s ease;
-  z-index: 5;
-  padding: 0;
-}
-
-/* Poster Favorites (Movies/Series) */
-.movie-poster .favorite-btn,
-.series-poster .favorite-btn {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  background: rgba(0, 0, 0, 0.4);
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  color: rgba(255, 255, 255, 0.9);
-  opacity: 1;
-}
-
-/* Channel List Favorites */
-.channel-item .favorite-btn {
-  position: relative;
-  width: 24px;
-  height: 24px;
-  background: transparent;
-  color: var(--color-text-muted);
-  font-size: 1.2rem;
-  opacity: 0;
-  /* Hide by default in list until hover or active */
-  margin-left: var(--space-xs);
-}
-
-.channel-item:hover .favorite-btn,
-.channel-item .favorite-btn.active {
-  opacity: 1;
-}
-
-.favorite-btn:hover {
-  transform: scale(1.1);
-}
-
-.movie-poster .favorite-btn:hover,
-.series-poster .favorite-btn:hover {
-  background: rgba(0, 0, 0, 0.8);
-  color: white;
-}
-
-.favorite-btn.active {
-  color: #ef4444;
-}
-
-.movie-poster .favorite-btn.active,
-.series-poster .favorite-btn.active {
-  background: rgba(255, 255, 255, 0.9);
-}
-
-.movie-poster .favorite-btn.active:hover,
-.series-poster .favorite-btn.active:hover {
-  background: white;
-}
-
-.fav-icon {
-  font-size: 1.2rem;
-  line-height: 1;
-}
-
-/* Filter Button Active State */
-.btn-ghost.active {
-  background: var(--color-accent);
-  color: white;
-  border-color: var(--color-accent);
-}
-
-.movies-controls .search-input {
-  min-width: 150px;
-}
-
-.movies-grid {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-md);
-  padding: var(--space-lg);
-  overflow-y: auto;
-  height: calc(100vh - 120px);
-  -webkit-overflow-scrolling: touch;
-  overscroll-behavior: contain;
-  justify-content: center;
-  align-content: flex-start;
-}
-
-.movie-card {
-  flex: 0 0 160px;
-  width: 160px;
-  background: var(--color-bg-tertiary);
-  border-radius: var(--radius-md);
-  overflow: hidden;
-  cursor: pointer;
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
-}
-
-.movie-card:hover {
-  transform: translateY(-4px);
-  box-shadow: var(--shadow-lg);
-}
-
-.movie-poster {
-  position: relative;
-  width: 160px;
-  height: 240px;
-  /* 2:3 ratio (160 * 1.5 = 240) */
-  background: var(--color-bg-primary);
-  overflow: hidden;
-}
-
-.movie-poster img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.movie-play-overlay {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(0, 0, 0, 0.6);
-  opacity: 0;
-  transition: opacity 0.2s ease;
-}
-
-.movie-card:hover .movie-play-overlay {
-  opacity: 1;
-}
-
-.play-icon {
-  font-size: 3rem;
-  color: white;
-  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
-}
-
-.movie-info {
-  padding: var(--space-sm);
-}
-
-.movie-title {
-  font-size: 0.875rem;
-  font-weight: 500;
-  color: var(--color-text-primary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.movie-meta {
-  display: flex;
-  gap: var(--space-sm);
-  font-size: 0.75rem;
-  color: var(--color-text-muted);
-  margin-top: var(--space-xs);
-}
-
-.movies-loader {
-  grid-column: 1 / -1;
-  display: flex;
-  justify-content: center;
-  padding: var(--space-lg);
-}
-
-#page-movies.active {
-  display: flex;
-  flex-direction: column;
-}
-
-#page-movies.movie-detail-open {
-  overflow: hidden;
-}
-
-#page-movies.movie-detail-open .movies-header,
-#page-movies.movie-detail-open #movies-filter-bar,
-#page-movies.movie-detail-open #movies-continue,
-#page-movies.movie-detail-open #movies-grid {
-  display: none;
-}
-
-.movie-details {
-  --movie-hero-bg: none;
-  flex: 1;
-  min-height: 0;
-  overflow-x: hidden;
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
-  background: #05070d;
-}
-
-.movie-detail-hero {
-  position: relative;
-  min-height: min(70vh, 680px);
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
-  padding: clamp(18px, 3vw, 36px) clamp(18px, 5vw, 72px) clamp(30px, 5vw, 64px);
-  isolation: isolate;
-  overflow: hidden;
-}
-
-.movie-detail-hero::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: -2;
-  background-image: var(--movie-hero-bg);
-  background-size: cover;
-  background-position: center;
-  opacity: 0.44;
-  transform: scale(1.04);
-}
-
-.movie-detail-hero::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  background:
-    linear-gradient(90deg, rgba(5, 7, 13, 0.98) 0%, rgba(5, 7, 13, 0.76) 34%, rgba(5, 7, 13, 0.22) 70%),
-    linear-gradient(180deg, rgba(5, 7, 13, 0.16) 0%, rgba(5, 7, 13, 0.92) 100%);
-}
-
-.movie-back-btn {
-  position: absolute;
-  top: clamp(14px, 2vw, 26px);
-  left: clamp(14px, 4vw, 42px);
-  z-index: 2;
-  margin: 0;
-  padding: 0 18px 0 12px;
-  height: 44px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  border-radius: 999px;
-  background: rgba(12, 15, 23, 0.72);
-  border: 1px solid rgba(255, 255, 255, 0.10);
-  color: var(--color-text-primary);
-  font-size: 0.95rem;
-  font-weight: 700;
-  letter-spacing: 0.01em;
-  backdrop-filter: blur(14px);
-  cursor: pointer;
-  transition: background var(--transition-fast), border-color var(--transition-fast), transform var(--transition-fast);
-}
-
-/* ── Canonical back control (.norva-back) ────────────────────────────────────
-   ONE design for every in-app "go back" affordance. The fiche heroes above
-   (.movie-back-btn / .series-detail-hero .series-back-btn) already match these
-   values with overlay positioning; .norva-back is the reusable version for the
-   catalog genre bucket. The fullscreen player keeps its own round .watch-back-btn
-   (a label there is noise) but shares the chevron glyph + hover/active/focus
-   states below. Glass pill + chevron icon + label; hover nudges the arrow left. */
-.norva-back {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  height: 44px;
-  padding: 0 18px 0 12px;
-  border: 1px solid rgba(255, 255, 255, 0.10);
-  border-radius: 999px;
-  background: rgba(12, 15, 23, 0.72);
-  color: var(--color-text-primary);
-  font-size: 0.95rem;
-  font-weight: 700;
-  letter-spacing: 0.01em;
-  cursor: pointer;
-  backdrop-filter: blur(14px);
-  transition: background var(--transition-fast), border-color var(--transition-fast), transform var(--transition-fast);
-}
-/* Shared chevron icon + interaction states across ALL back controls (fiche
-   pills, the .norva-back catalog control, and the round .watch-back-btn player
-   control). The two fiche buttons used to diverge into a pill vs a broken
-   circle whose injected label spilled below it. */
-.movie-back-btn .back-ico,
-.series-back-btn .back-ico,
-.norva-back .back-ico {
-  width: 18px;
-  height: 18px;
-  flex: 0 0 auto;
-  transition: transform var(--transition-fast);
-}
-
-.movie-back-btn:hover,
-.series-detail-hero .series-back-btn:hover,
-.norva-back:hover {
-  background: rgba(24, 29, 42, 0.85);
-  border-color: rgba(255, 255, 255, 0.22);
-}
-
-.movie-back-btn:hover .back-ico,
-.series-back-btn:hover .back-ico,
-.norva-back:hover .back-ico,
-.watch-back-btn:hover .icon {
-  transform: translateX(-2px);
-}
-
-.movie-back-btn:active,
-.series-detail-hero .series-back-btn:active,
-.norva-back:active,
-.watch-back-btn:active {
-  transform: scale(0.97);
-}
-
-.movie-back-btn:focus-visible,
-.series-back-btn:focus-visible,
-.norva-back:focus-visible,
-.watch-back-btn:focus-visible {
-  outline: 2px solid rgba(122, 148, 255, 0.9);
-  outline-offset: 2px;
-}
-
-.movie-detail-hero-content {
-  position: relative;
-  z-index: 1;
-  display: grid;
-  grid-template-columns: minmax(132px, 220px) minmax(0, 780px);
-  gap: clamp(18px, 4vw, 40px);
-  align-items: end;
-  width: min(1120px, 100%);
-}
-
-.movie-detail-poster {
-  width: 100%;
-  aspect-ratio: 2 / 3;
-  object-fit: cover;
-  border-radius: 8px;
-  background: var(--color-bg-secondary);
-  box-shadow: 0 22px 48px rgba(0, 0, 0, 0.42);
-}
-
-.movie-detail-info h3 {
-  margin: 0 0 var(--space-sm);
-  font-family: var(--font-display);
-  font-size: clamp(2.2rem, 6vw, 5rem);
-  line-height: 0.95;
-  letter-spacing: 0;
-}
-
-.movie-detail-info p {
-  max-width: 760px;
-  margin: 0;
-  color: rgba(236, 241, 255, 0.86);
-  font-size: clamp(0.98rem, 1.3vw, 1.12rem);
-  line-height: 1.58;
-}
-
-.movie-meta-pills {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: var(--space-sm);
-}
-
-.movie-meta-pills span {
-  min-height: 28px;
-  display: inline-flex;
-  align-items: center;
-  padding: 0 10px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.11);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  color: rgba(242, 245, 255, 0.92);
-  font-size: 0.82rem;
-  font-weight: 700;
-  backdrop-filter: blur(12px);
-}
-
-.movie-detail-progress {
-  width: min(420px, 100%);
-  height: 4px;
-  margin-top: var(--space-md);
-  overflow: hidden;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.2);
-}
-
-.movie-detail-progress > div {
-  height: 100%;
-  border-radius: inherit;
-  background: var(--color-accent);
-}
-
-.movie-detail-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-sm);
-  margin-top: var(--space-lg);
-}
-
-.movie-primary-action,
-.movie-secondary-action {
-  min-height: 48px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  padding: 0 20px;
-  border-radius: 8px;
-  border: 1px solid transparent;
-  font-weight: 800;
-  cursor: pointer;
-  transition: transform var(--transition-fast), background var(--transition-fast), border-color var(--transition-fast);
-}
-
-.movie-primary-action {
-  color: #070911;
-  background: #fff;
-}
-
-.movie-primary-action:hover {
-  transform: translateY(-1px);
-  background: rgba(255, 255, 255, 0.9);
-}
-
-.movie-primary-action .play-icon svg {
-  width: 18px;
-  height: 18px;
-}
-
-/* The shared .play-icon rule (color:white; font-size:3rem) is for the white
-   poster-overlay icon; inside the solid Play buttons it made the icon white
-   (invisible on the light button) and off-centre. Inherit the button's dark text
-   colour and collapse the oversized inline box so the 18px icon sits centred. */
-.movie-primary-action .play-icon,
-.series-primary-action .play-icon {
-  display: inline-flex;
-  align-items: center;
-  color: inherit;
-  font-size: 0;
-  text-shadow: none;
-}
-
-.movie-secondary-action {
-  color: var(--color-text-primary);
-  background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 255, 255, 0.14);
-}
-
-.movie-secondary-action:hover,
-.movie-secondary-action.active {
-  background: rgba(98, 135, 255, 0.18);
-  border-color: rgba(98, 135, 255, 0.48);
-}
-
-.movie-secondary-action .fav-icon svg {
-  width: 20px;
-  height: 20px;
-}
-
-/* Offline download action (native phone/tablet app only). */
-.movie-download-action .download-icon {
-  font-size: 18px;
-  font-weight: 900;
-  line-height: 1;
-}
-
-.movie-download-action.is-downloading {
-  background: rgba(98, 135, 255, 0.18);
-  border-color: rgba(98, 135, 255, 0.48);
-}
-
-.movie-download-action.is-done {
-  background: rgba(34, 197, 94, 0.18);
-  border-color: rgba(34, 197, 94, 0.5);
-  color: #d7f7e2;
-}
-
-.movie-versions-section {
-  width: min(1120px, calc(100% - 36px));
-  margin: 0 auto;
-  padding: clamp(22px, 4vw, 44px) 0 clamp(40px, 6vw, 80px);
-}
-
-.movie-versions-section.single-version {
-  display: none;
-}
-
-.movie-versions-toolbar {
-  display: flex;
-  align-items: end;
-  justify-content: space-between;
-  gap: var(--space-md);
-  margin-bottom: var(--space-md);
-}
-
-.movie-versions-toolbar h3 {
-  margin: 0;
-  font-size: clamp(1.4rem, 2vw, 2rem);
-}
-
-.movie-versions-toolbar .hint {
-  margin: 0;
-}
-
-.movie-versions-list {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: var(--space-sm);
-}
-
-.movie-version-item {
-  min-width: 0;
-  min-height: 86px;
-  padding: 14px 16px;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 5px;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.05);
-  color: var(--color-text-primary);
-  cursor: pointer;
-  text-align: left;
-}
-
-.movie-version-item:hover,
-.movie-version-item.active {
-  border-color: rgba(98, 135, 255, 0.58);
-  background: rgba(98, 135, 255, 0.16);
-}
-
-.movie-version-main {
-  font-weight: 900;
-}
-
-.movie-version-sub {
-  max-width: 100%;
-  color: var(--color-text-secondary);
-  font-size: 0.86rem;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-/* Shared version-button label (Movie + Series fiches) — two tiers: a bold headline
-   carrying whatever differs (market / provider) with an optional fluidity dot and a
-   quality badge, over a muted meta line of the constants. Built by
-   MediaUtils.versionDescriptor. */
-.version-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  max-width: 100%;
-}
-.version-headline {
-  flex: 1;
-  min-width: 0;
-  font-weight: 700;
-  font-size: 0.98rem;
-  letter-spacing: -0.01em;
-  color: var(--color-text-primary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.version-quality-badge {
-  flex: none;
-  font-size: 0.66rem;
-  font-weight: 750;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-  padding: 2px 7px;
-  border-radius: 6px;
-  color: var(--color-text-secondary);
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-}
-.version-quality-badge.hi {
-  color: #9db4ff;
-  background: rgba(98, 135, 255, 0.16);
-  border-color: rgba(98, 135, 255, 0.5);
-}
-.version-meta {
-  max-width: 100%;
-  font-size: 0.8rem;
-  color: var(--color-text-secondary);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.version-tier-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--tier-dot, #8a94a6);
-  flex: none;
-}
-.version-tier-dot.tier-direct { --tier-dot: #46d17f; }
-.version-tier-dot.tier-remux { --tier-dot: #58b0ff; }
-.version-tier-dot.tier-transcode { --tier-dot: #f0b429; }
-
-.movie-version-progress {
-  margin-top: auto;
-  color: var(--color-accent);
-  font-size: 0.78rem;
-  font-weight: 800;
-}
-
-@media (max-width: 720px) {
-  .movie-detail-hero {
-    min-height: auto;
-    padding: 74px 14px 26px;
-  }
-
-  .movie-detail-hero::after {
-    background:
-      linear-gradient(180deg, rgba(5, 7, 13, 0.4) 0%, rgba(5, 7, 13, 0.94) 72%),
-      linear-gradient(90deg, rgba(5, 7, 13, 0.96), rgba(5, 7, 13, 0.4));
-  }
-
-  .movie-back-btn {
-    height: 40px;
-    padding: 0 14px 0 10px;
-    font-size: 0.9rem;
-  }
-
-  .movie-detail-hero-content {
-    grid-template-columns: 1fr;
-    gap: 14px;
-    align-items: start;
-  }
-
-  .movie-detail-hero-content .movie-detail-poster {
-    width: 116px;
-    justify-self: start;
-  }
-
-  .movie-detail-info h3 {
-    font-size: clamp(1.55rem, 8vw, 2.35rem);
-  }
-
-  .movie-meta-pills {
-    gap: 6px;
-  }
-
-  .movie-meta-pills span {
-    min-height: 24px;
-    padding: 0 8px;
-    font-size: 0.72rem;
-  }
-
-  .movie-detail-info p {
-    display: -webkit-box;
-    margin-top: var(--space-xs);
-    font-size: 0.92rem;
-    -webkit-line-clamp: 4;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-  }
-
-  .movie-detail-actions {
-    margin-top: var(--space-md);
-  }
-
-  .movie-primary-action,
-  .movie-secondary-action {
-    flex: 1 1 150px;
-    min-height: 46px;
-  }
-
-  .movie-versions-section {
-    width: calc(100% - 28px);
-    padding-top: 18px;
-  }
-
-  .movie-versions-toolbar {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-
-  .movie-versions-list {
-    grid-template-columns: 1fr;
-  }
-}
-
-/* =====================================================
-   Series Page
-   ===================================================== */
-#page-series.active {
-  display: flex;
-  flex-direction: column;
-}
-
-.series-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: var(--space-md) var(--space-lg);
-  background: var(--color-bg-secondary);
-  border-bottom: 1px solid var(--color-border);
-}
-
-.series-header h2 {
-  margin: 0;
-  font-size: 1.5rem;
-  font-weight: 600;
-}
-
-.series-heading {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.series-subtitle {
-  margin: 0;
-  font-size: 0.82rem;
-  font-weight: 500;
-  color: var(--color-text-muted);
-}
-
-@media (max-width: 640px) {
-  .series-subtitle {
-    display: none;
-  }
-}
-
-.series-controls {
-  display: flex;
-  gap: var(--space-md);
-  align-items: center;
-}
-
-/* Unified Control Sizing */
-.guide-controls .source-select,
-.movies-controls .source-select,
-.series-controls .source-select {
-  min-width: 150px;
-}
-
-.guide-controls .search-wrapper,
-.movies-controls .search-wrapper,
-.series-controls .search-wrapper {
-  width: 220px;
-}
-
-.series-content {
-  flex: 1;
-  overflow: hidden;
-  position: relative;
-}
-
-.series-grid {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-md);
-  padding: var(--space-lg);
-  overflow-y: auto;
-  height: calc(100vh - 120px);
-  -webkit-overflow-scrolling: touch;
-  overscroll-behavior: contain;
-  justify-content: center;
-  align-content: flex-start;
-}
-
-/* Rail-host: when the Movies/Series grid hosts Netflix-style genre rails (or a
-   genre "see all" bucket) instead of a flat card grid, it must stack its rows
-   as a normal block. As a centered flex-wrap container, a rail whose cards
-   overflow gets centered — pushing its first card off the left edge — and grows
-   wider than the viewport, letting the WHOLE page scroll horizontally. display:
-   block stacks the rails full-width (first card flush to the grid padding) and
-   overflow-x:hidden guarantees only each rail's own .horizontal-scroll scrolls. */
-.movies-grid.rail-host,
-.series-grid.rail-host {
-  display: block;
-  overflow-x: hidden;
-}
-
-.series-card {
-  flex: 0 0 160px;
-  width: 160px;
-  background: var(--color-bg-tertiary);
-  border-radius: var(--radius-md);
-  overflow: hidden;
-  cursor: pointer;
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
-}
-
-.series-card:hover {
-  transform: translateY(-4px);
-  box-shadow: var(--shadow-lg);
-}
-
-.series-poster,
-.series-card .series-poster {
-  position: relative;
-  width: 160px;
-  height: 240px;
-  background: var(--color-bg-primary);
-  overflow: hidden;
-}
-
-.series-poster img,
-.series-card .series-poster img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.series-play-overlay {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(0, 0, 0, 0.6);
-  opacity: 0;
-  transition: opacity 0.2s ease;
-}
-
-.series-card:hover .series-play-overlay {
-  opacity: 1;
-}
-
-.series-card-info {
-  padding: var(--space-sm);
-}
-
-.series-title {
-  font-size: 0.9rem;
-  font-weight: 500;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.series-meta {
-  display: flex;
-  gap: var(--space-sm);
-  font-size: 0.75rem;
-  color: var(--color-text-muted);
-  margin-top: var(--space-xs);
-}
-
-.series-loader {
-  width: 100%;
-  display: flex;
-  justify-content: center;
-  padding: var(--space-lg);
-}
-
-/* Series Details Panel */
-.series-details {
-  position: absolute;
-  inset: 0;
-  background: var(--color-bg-primary);
-  -webkit-overflow-scrolling: touch;
-  overscroll-behavior: contain;
-  overflow-y: auto;
-  padding: var(--space-lg);
-}
-
-.series-details.hidden {
-  display: none;
-}
-
-.series-back-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  background: var(--color-bg-tertiary);
-  border: none;
-  color: var(--color-text-primary);
-  padding: var(--space-sm) var(--space-md);
-  border-radius: var(--radius-md);
-  cursor: pointer;
-  margin-bottom: var(--space-lg);
-  transition: background var(--transition-fast);
-}
-
-.series-back-btn:hover {
-  background: var(--color-bg-hover);
-}
-
-.series-details-header {
-  display: flex;
-  gap: var(--space-lg);
-  margin-bottom: var(--space-xl);
-}
-
-.series-details-header .series-poster {
-  flex-shrink: 0;
-  width: 200px;
-  height: 300px;
-  border-radius: var(--radius-md);
-  overflow: hidden;
-}
-
-.series-details-header .series-poster img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.series-info h3 {
-  font-size: 1.5rem;
-  margin: 0 0 var(--space-md) 0;
-}
-
-.series-info p {
-  color: var(--color-text-secondary);
-  line-height: 1.6;
-  max-height: 200px;
-  overflow-y: auto;
-}
-
-/* Seasons and Episodes */
-.series-seasons {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-md);
-}
-
-.season-group {
-  background: var(--color-bg-secondary);
-  border-radius: var(--radius-md);
-  overflow: hidden;
-}
-
-.season-header {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-  padding: var(--space-md);
-  cursor: pointer;
-  background: var(--color-bg-tertiary);
-  transition: background var(--transition-fast);
-}
-
-.season-header:hover {
-  background: var(--color-bg-hover);
-}
-
-.season-expander {
-  width: 20px;
-  text-align: center;
-  transition: transform 0.2s;
-}
-
-.season-group.collapsed .season-expander {
-  transform: rotate(-90deg);
-}
-
-.season-name {
-  font-weight: 500;
-}
-
-.episode-list {
-  display: flex;
-  flex-direction: column;
-}
-
-.season-group.collapsed .episode-list {
-  display: none;
-}
-
-.episode-item {
-  display: flex;
-  align-items: center;
-  gap: var(--space-md);
-  padding: var(--space-sm) var(--space-md);
-  cursor: pointer;
-  transition: background var(--transition-fast);
-  border-bottom: 1px solid var(--color-border);
-}
-
-.episode-item:last-child {
-  border-bottom: none;
-}
-
-.episode-item:hover {
-  background: var(--color-bg-hover);
-}
-
-.episode-number {
-  flex-shrink: 0;
-  width: 40px;
-  font-weight: 500;
-  color: var(--color-accent);
-}
-
-.episode-title {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.episode-duration {
-  flex-shrink: 0;
-  font-size: 0.875rem;
-  color: var(--color-text-muted);
-}
-
-/* Per-episode offline download button (native phone/tablet app only). */
-.episode-download {
-  flex-shrink: 0;
-  width: 36px;
-  height: 36px;
-  margin-left: 10px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  background: rgba(255, 255, 255, 0.08);
-  color: var(--color-text-primary);
-  font-size: 1rem;
-  font-weight: 800;
-  cursor: pointer;
-  transition: background var(--transition-fast), border-color var(--transition-fast), transform var(--transition-fast);
-}
-
-.episode-download:hover {
-  background: rgba(98, 135, 255, 0.18);
-  border-color: rgba(98, 135, 255, 0.48);
-}
-
-.episode-download.busy {
-  opacity: 0.6;
-  pointer-events: none;
-}
-
-.episode-download.is-active {
-  background: rgba(98, 135, 255, 0.2);
-  border-color: rgba(98, 135, 255, 0.55);
-  color: #cdd9ff;
-}
-
-.episode-download.is-done {
-  background: rgba(34, 197, 94, 0.18);
-  border-color: rgba(34, 197, 94, 0.5);
-  color: #9af3bd;
-}
-
-/* "Download season" bar (native phone/tablet app only; hidden in a browser). */
-.season-dl-bar {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-  padding: var(--space-sm) var(--space-md);
-}
-
-.season-dl-name {
-  font-weight: 600;
-}
-
-.season-dl-count {
-  margin-left: auto;
-  color: var(--color-text-secondary);
-  font-size: 0.8125rem;
-}
-
-.season-download-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 7px 14px;
-  border-radius: 999px;
-  border: 1px solid rgba(98, 135, 255, 0.48);
-  background: rgba(98, 135, 255, 0.16);
-  color: #cdd9ff;
-  font-size: 0.8125rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast);
-}
-
-.season-download-btn:hover {
-  background: rgba(98, 135, 255, 0.26);
-  border-color: rgba(98, 135, 255, 0.7);
-}
-
-.season-download-btn:disabled {
-  opacity: 0.65;
-  cursor: default;
-}
-
-.season-download-btn.is-done {
-  border-color: rgba(34, 197, 94, 0.5);
-  background: rgba(34, 197, 94, 0.16);
-  color: #9af3bd;
-}
-
-/* Premium Series Detail */
-/* Detail view scroll model — mirror the Movies page (single, unambiguous scroller):
-   the page is clipped, .series-content is a bounded flex column, and the detail panel
-   itself scrolls internally. Previously #page-series AND .series-content were both
-   overflow-y:auto with the panel overflow-y:visible — nested scrollers where the mouse
-   wheel never landed on a real scroller, so the fiche didn't scroll. */
-#page-series.series-detail-open {
-  overflow: hidden;
-}
-
-#page-series.series-detail-open .series-header,
-#page-series.series-detail-open #series-filter-bar,
-#page-series.series-detail-open #series-continue {
-  display: none;
-}
-
-#page-series.series-detail-open .series-content {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-#page-series.series-detail-open .series-details {
-  position: relative;
-  inset: auto;
-  width: 100%;
-  flex: 1;
-  min-height: 0;
-  padding: 0;
-  overflow-x: hidden;
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
-  background: #05070d;
-}
-
-.series-detail-hero {
-  --series-hero-bg: none;
-  position: relative;
-  min-height: min(68vh, 660px);
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
-  padding: clamp(18px, 3vw, 36px) clamp(18px, 5vw, 72px) clamp(30px, 5vw, 64px);
-  isolation: isolate;
-  overflow: hidden;
-}
-
-.series-detail-hero::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: -2;
-  background-image: var(--series-hero-bg);
-  background-size: cover;
-  background-position: center;
-  opacity: 0.42;
-  transform: scale(1.04);
-}
-
-.series-detail-hero::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  background:
-    linear-gradient(90deg, rgba(5, 7, 13, 0.98) 0%, rgba(5, 7, 13, 0.76) 34%, rgba(5, 7, 13, 0.22) 70%),
-    linear-gradient(180deg, rgba(5, 7, 13, 0.2) 0%, rgba(5, 7, 13, 0.92) 100%);
-}
-
-/* Same pill as .movie-back-btn — this used to be a 56px CIRCLE sized for a bare
-   icon, while the JS injected "← Series" as text: the label spilled out under
-   the circle (the broken back button). One shared design now. */
-.series-detail-hero .series-back-btn {
-  position: absolute;
-  top: clamp(14px, 2vw, 26px);
-  left: clamp(14px, 4vw, 42px);
-  z-index: 2;
-  margin: 0;
-  padding: 0 18px 0 12px;
-  width: auto;
-  height: 44px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  border-radius: 999px;
-  background: rgba(12, 15, 23, 0.72);
-  border: 1px solid rgba(255, 255, 255, 0.10);
-  color: var(--color-text-primary);
-  font-size: 0.95rem;
-  font-weight: 700;
-  letter-spacing: 0.01em;
-  backdrop-filter: blur(14px);
-  transition: background var(--transition-fast), border-color var(--transition-fast), transform var(--transition-fast);
-}
-
-.series-detail-hero-content {
-  position: relative;
-  z-index: 1;
-  display: grid;
-  grid-template-columns: minmax(132px, 220px) minmax(0, 780px);
-  gap: clamp(18px, 4vw, 40px);
-  align-items: end;
-  width: min(1120px, 100%);
-}
-
-.series-detail-poster {
-  width: 100%;
-  aspect-ratio: 2 / 3;
-  object-fit: cover;
-  border-radius: 8px;
-  background: var(--color-bg-secondary);
-  box-shadow: 0 22px 48px rgba(0, 0, 0, 0.42);
-}
-
-.series-detail-hero .series-info h3 {
-  margin: 0 0 var(--space-sm);
-  font-family: var(--font-display);
-  font-size: clamp(2.2rem, 6vw, 5rem);
-  line-height: 0.95;
-  letter-spacing: 0;
-}
-
-.series-detail-hero .series-info p {
-  max-width: 760px;
-  max-height: none;
-  margin: 0;
-  overflow: visible;
-  color: rgba(236, 241, 255, 0.86);
-  font-size: clamp(0.98rem, 1.3vw, 1.12rem);
-  line-height: 1.58;
-}
-
-.series-meta-pills {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: var(--space-sm);
-}
-
-.series-meta-pills span {
-  min-height: 28px;
-  display: inline-flex;
-  align-items: center;
-  padding: 0 10px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.11);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  color: rgba(242, 245, 255, 0.92);
-  font-size: 0.82rem;
-  font-weight: 700;
-  backdrop-filter: blur(12px);
-}
-
-.series-detail-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-sm);
-  margin-top: var(--space-lg);
-}
-
-.series-primary-action,
-.series-secondary-action {
-  min-height: 48px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  padding: 0 20px;
-  border-radius: 8px;
-  border: 1px solid transparent;
-  font-weight: 800;
-  cursor: pointer;
-  transition: transform var(--transition-fast), background var(--transition-fast), border-color var(--transition-fast);
-}
-
-.series-primary-action {
-  color: #070911;
-  background: #fff;
-}
-
-.series-primary-action:hover {
-  transform: translateY(-1px);
-  background: rgba(255, 255, 255, 0.9);
-}
-
-.series-primary-action:disabled {
-  cursor: default;
-  opacity: 0.55;
-  transform: none;
-}
-
-.series-primary-action .play-icon svg {
-  width: 18px;
-  height: 18px;
-}
-
-.series-secondary-action {
-  color: var(--color-text-primary);
-  background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 255, 255, 0.14);
-}
-
-.series-secondary-action:hover,
-.series-secondary-action.active {
-  background: rgba(98, 135, 255, 0.18);
-  border-color: rgba(98, 135, 255, 0.48);
-}
-
-.series-secondary-action .fav-icon svg {
-  width: 20px;
-  height: 20px;
-}
-
-/* In-fiche version switcher — parity with the movie fiche, language-first labels. */
-.series-versions-section {
-  width: min(1120px, calc(100% - 36px));
-  margin: 0 auto;
-  padding: clamp(18px, 3vw, 30px) 0 0;
-}
-
-.series-versions-section.single-version {
-  display: none;
-}
-
-.series-versions-toolbar {
-  display: flex;
-  align-items: end;
-  justify-content: space-between;
-  gap: var(--space-md);
-  margin-bottom: var(--space-sm);
-}
-
-.series-versions-toolbar h3 {
-  margin: 0;
-  font-size: clamp(1.2rem, 1.8vw, 1.6rem);
-}
-
-.series-versions-toolbar .hint {
-  margin: 0;
-}
-
-.series-versions-list {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
-  gap: var(--space-sm);
-}
-
-.series-version-item {
-  position: relative;
-  min-width: 0;
-  padding: 12px 14px;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 3px;
-  border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(255, 255, 255, 0.05);
-  color: var(--color-text-primary);
-  cursor: pointer;
-  text-align: left;
-  transition: border-color var(--transition-fast), background var(--transition-fast);
-}
-
-.series-version-item:hover {
-  border-color: rgba(98, 135, 255, 0.5);
-  background: rgba(98, 135, 255, 0.12);
-}
-
-.series-version-item.active {
-  border-color: rgba(98, 135, 255, 0.7);
-  background: rgba(98, 135, 255, 0.18);
-  box-shadow: inset 0 0 0 1px rgba(98, 135, 255, 0.45);
-}
-
-.series-version-item:focus-visible {
-  outline: 2px solid rgba(98, 135, 255, 0.9);
-  outline-offset: 2px;
-}
-
-.series-version-item.is-broken {
-  opacity: 0.6;
-}
-
-.series-version-main {
-  font-weight: 800;
-}
-
-.series-version-sub {
-  max-width: 100%;
-  color: var(--color-text-secondary);
-  font-size: 0.82rem;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-.series-version-flag {
-  position: absolute;
-  top: 10px;
-  right: 12px;
-  font-size: 0.66rem;
-  font-weight: 800;
-  letter-spacing: 0.04em;
-  color: #ffb4b4;
-  background: rgba(255, 80, 80, 0.16);
-  border: 1px solid rgba(255, 120, 120, 0.4);
-  border-radius: 6px;
-  padding: 1px 6px;
-}
-
-.series-episodes-section {
-  width: min(1120px, calc(100% - 36px));
-  margin: 0 auto;
-  padding: clamp(22px, 4vw, 44px) 0 clamp(40px, 6vw, 80px);
-}
-
-.series-episodes-toolbar {
-  position: sticky;
-  top: 0;
-  z-index: 3;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-md);
-  margin-bottom: var(--space-md);
-  padding: 10px 0;
-  background: rgba(7, 9, 17, 0.88);
-  backdrop-filter: blur(8px);
-}
-
-.series-episodes-toolbar h3 {
-  margin: 0;
-  font-size: clamp(1.4rem, 2vw, 2rem);
-}
-
-.series-season-tabs {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  gap: 8px;
-  overflow-x: auto;
-  scrollbar-width: none;
-  justify-content: flex-end;
-  padding-bottom: 2px;
-}
-
-.series-season-tabs::-webkit-scrollbar {
-  display: none;
-}
-
-.series-season-tabs.single-season {
-  display: none;
-}
-
-.season-tab {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  padding: 8px 14px;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.05);
-  color: var(--color-text-secondary);
-  font-weight: 700;
-  white-space: nowrap;
-  cursor: pointer;
-  transition: color var(--transition-fast), background var(--transition-fast), border-color var(--transition-fast);
-}
-
-.season-tab:hover {
-  color: var(--color-text-primary);
-  border-color: rgba(98, 135, 255, 0.4);
-}
-
-.season-tab.active {
-  color: #0b1020;
-  background: #9db4ff;
-  border-color: #9db4ff;
-}
-
-.season-tab:focus-visible {
-  outline: 2px solid rgba(98, 135, 255, 0.9);
-  outline-offset: 2px;
-}
-
-.season-tab-count {
-  font-size: 0.72rem;
-  font-weight: 800;
-  padding: 1px 7px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.14);
-  color: inherit;
-}
-
-.season-tab.active .season-tab-count {
-  background: rgba(11, 16, 32, 0.18);
-}
-
-.series-details .series-seasons {
-  gap: 0;
-}
-
-.series-details .season-group {
-  background: transparent;
-  border-radius: 0;
-  overflow: visible;
-}
-
-.season-group.hidden-by-select {
-  display: none;
-}
-
-.series-details .episode-list {
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.series-details .episode-item {
-  display: grid;
-  grid-template-columns: 42px minmax(120px, 190px) minmax(0, 1fr) auto;
-  gap: var(--space-md);
-  align-items: center;
-  padding: 14px 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.series-details .episode-item:hover {
-  background: rgba(255, 255, 255, 0.04);
-}
-
-/* Keyboard / TV-remote focus + "Up next" episode highlight. */
-.series-details .episode-item {
-  cursor: pointer;
-}
-
-.series-details .episode-item:focus-visible {
-  outline: 2px solid rgba(98, 135, 255, 0.9);
-  outline-offset: -2px;
-  border-radius: 6px;
-  background: rgba(98, 135, 255, 0.08);
-}
-
-/* Up-next is THE episode most viewers came back for — make it read as the primary
-   action: a stronger tint, a left accent rail, and a play overlay that's on by
-   default (not hover-gated) so resuming is a single obvious tap. */
-.series-details .episode-item.episode-up-next {
-  background: linear-gradient(90deg, rgba(98, 135, 255, 0.22), rgba(98, 135, 255, 0.04) 70%);
-  box-shadow: inset 3px 0 0 var(--color-accent);
-}
-
-.series-details .episode-item.episode-up-next .episode-play {
-  opacity: 1;
-}
-
-.series-details .episode-item.episode-up-next .episode-upnext-flag {
-  color: #fff;
-  background: var(--color-accent);
-  border-color: transparent;
-}
-
-.episode-upnext-flag {
-  flex: none;
-  font-size: 0.62rem;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: #aec2ff;
-  border: 1px solid rgba(98, 135, 255, 0.6);
-  border-radius: 999px;
-  padding: 2px 7px;
-  white-space: nowrap;
-}
-
-.episode-airdate {
-  flex: none;
-  margin-left: auto;
-  font-size: 0.72rem;
-  font-weight: 700;
-  color: rgba(224, 231, 255, 0.55);
-  font-variant-numeric: tabular-nums;
-}
-
-/* Manual "mark watched" — per episode + per season. */
-.episode-actions {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  justify-content: flex-end;
-}
-
-/* The native download button carries its own margin elsewhere; inside the flex
-   actions row the gap already spaces it, so cancel the double spacing. */
-.episode-actions .episode-download {
-  margin-left: 0;
-}
-
-.episode-mark {
-  flex: none;
-  width: 30px;
-  height: 30px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  border: 1.5px solid rgba(255, 255, 255, 0.25);
-  background: transparent;
-  color: rgba(224, 231, 255, 0.6);
-  font-size: 0.85rem;
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity var(--transition-fast), background var(--transition-fast),
-    border-color var(--transition-fast), color var(--transition-fast);
-}
-
-.episode-item:hover .episode-mark,
-.episode-item:focus-within .episode-mark,
-.episode-mark.is-watched {
-  opacity: 1;
-}
-
-.episode-mark:hover {
-  border-color: rgba(98, 135, 255, 0.6);
-  color: var(--color-text-primary);
-}
-
-.episode-mark.is-watched {
-  background: #9db4ff;
-  border-color: #9db4ff;
-  color: #0b1020;
-}
-
-.episode-mark:focus-visible {
-  opacity: 1;
-  outline: 2px solid rgba(98, 135, 255, 0.9);
-  outline-offset: 2px;
-}
-
-.episode-mark:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-/* Touch devices have no hover — always show the toggle so it stays reachable. */
-@media (hover: none) {
-  .episode-mark {
-    opacity: 0.85;
-  }
-}
-
-.season-actions {
-  display: flex;
-  justify-content: flex-end;
-  padding: 2px 0 10px;
-}
-
-.season-mark-all {
-  font-size: 0.8rem;
-  font-weight: 700;
-  color: var(--color-text-secondary);
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 999px;
-  padding: 6px 14px;
-  cursor: pointer;
-  transition: color var(--transition-fast), background var(--transition-fast), border-color var(--transition-fast);
-}
-
-.season-mark-all:hover {
-  color: var(--color-text-primary);
-  border-color: rgba(98, 135, 255, 0.5);
-}
-
-.season-mark-all.is-watched {
-  color: #cdd9ff;
-  border-color: rgba(98, 135, 255, 0.45);
-  background: rgba(98, 135, 255, 0.14);
-}
-
-.season-mark-all:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
-
-.series-details .episode-number {
-  width: auto;
-  justify-self: center;
-  color: rgba(224, 231, 255, 0.72);
-  font-weight: 800;
-}
-
-.episode-thumb {
-  position: relative;
-  aspect-ratio: 16 / 9;
-  overflow: hidden;
-  border-radius: 6px;
-  background: var(--color-bg-secondary);
-}
-
-.episode-thumb img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-}
-
-.episode-play {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  color: #fff;
-  background: rgba(0, 0, 0, 0.42);
-  opacity: 0;
-  transition: opacity var(--transition-fast);
-}
-
-.episode-item:hover .episode-play {
-  opacity: 1;
-}
-
-.episode-play svg {
-  width: 26px;
-  height: 26px;
-}
-
-.episode-copy {
-  min-width: 0;
-}
-
-.episode-title-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.series-details .episode-title {
-  flex: initial;
-  min-width: 0;
-  color: var(--color-text-primary);
-  font-weight: 800;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.episode-description {
-  margin: 5px 0 0;
-  color: var(--color-text-secondary);
-  font-size: 0.9rem;
-  line-height: 1.45;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.episode-progress {
-  width: min(280px, 100%);
-  height: 3px;
-  margin-top: 8px;
-  overflow: hidden;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.18);
-}
-
-.episode-progress > div {
-  height: 100%;
-  border-radius: inherit;
-  background: var(--color-accent);
-}
-
-.episode-watched {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 22px;
-  height: 22px;
-  padding: 0 6px;
-  border-radius: 999px;
-  color: #07100c;
-  background: var(--color-success);
-  font-size: 0.78rem;
-  font-weight: 900;
-}
-
-.episode-watched.inprogress {
-  color: var(--color-accent);
-  background: rgba(93, 126, 255, 0.18);
-}
-
-.series-details .episode-duration {
-  justify-self: end;
-  color: var(--color-text-secondary);
-}
-
-@media (max-width: 720px) {
-  .series-detail-hero {
-    min-height: auto;
-    padding: 74px 14px 26px;
-  }
-
-  .series-detail-hero::after {
-    background:
-      linear-gradient(180deg, rgba(5, 7, 13, 0.4) 0%, rgba(5, 7, 13, 0.94) 72%),
-      linear-gradient(90deg, rgba(5, 7, 13, 0.96), rgba(5, 7, 13, 0.4));
-  }
-
-  .series-detail-hero .series-back-btn {
-    width: auto;
-    height: 40px;
-    padding: 0 14px 0 10px;
-    font-size: 0.9rem;
-  }
-
-  .series-detail-hero-content {
-    grid-template-columns: 1fr;
-    gap: 14px;
-    align-items: start;
-  }
-
-  .series-detail-hero-content .series-detail-poster {
-    width: 116px;
-    justify-self: start;
-  }
-
-  .series-detail-hero .series-info h3 {
-    font-size: clamp(1.55rem, 8vw, 2.35rem);
-  }
-
-  .series-meta-pills {
-    gap: 6px;
-  }
-
-  .series-meta-pills span {
-    min-height: 24px;
-    padding: 0 8px;
-    font-size: 0.72rem;
-  }
-
-  .series-detail-hero .series-info p {
-    display: -webkit-box;
-    margin-top: var(--space-xs);
-    font-size: 0.92rem;
-    -webkit-line-clamp: 4;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-  }
-
-  .series-detail-actions {
-    margin-top: var(--space-md);
-  }
-
-  .series-primary-action,
-  .series-secondary-action {
-    flex: 1 1 150px;
-    min-height: 46px;
-  }
-
-  .series-episodes-section {
-    width: calc(100% - 28px);
-    padding-top: 18px;
-  }
-
-  .series-episodes-toolbar {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .series-season-tabs {
-    width: 100%;
-    justify-content: flex-start;
-  }
-
-  .series-details .episode-item {
-    grid-template-columns: 28px 92px minmax(0, 1fr) auto;
-    gap: 10px;
-    padding: 12px 0;
-  }
-
-  .episode-description {
-    display: none;
-  }
-
-  /* Actions get their own (4th) column and stack so a narrow phone stays tidy. */
-  .series-details .episode-actions {
-    flex-direction: column;
-    align-items: flex-end;
-    gap: 6px;
-  }
-
-  .series-details .episode-duration {
-    font-size: 0.78rem;
-  }
-}
-
-/* Icons */
-.icon {
-  width: 1.25em;
-  height: 1.25em;
-  display: inline-block;
-  vertical-align: middle;
-  fill: currentColor;
-  object-fit: contain;
-  flex-shrink: 0;
-}
-
-.nav-link .icon {
-  width: 1.5em;
-  height: 1.5em;
-}
-
-.norva-ui-icon {
-  filter: drop-shadow(0 0 8px rgba(94, 142, 255, 0.22));
-}
-
-.nav-link .norva-ui-icon {
-  width: 1.65em;
-  height: 1.65em;
-  opacity: 0.78;
-  transition: opacity var(--transition-fast), filter var(--transition-fast), transform var(--transition-fast);
-}
-
-.nav-link:hover .norva-ui-icon,
-.nav-link.active .norva-ui-icon {
-  opacity: 1;
-  filter: drop-shadow(0 0 12px rgba(91, 147, 255, 0.52)) drop-shadow(0 0 18px rgba(203, 91, 255, 0.28));
-  transform: translateY(-1px);
-}
-
-.btn .norva-ui-icon {
-  width: 1.35em;
-  height: 1.35em;
-}
-
-.favorite-btn .norva-ui-icon {
-  width: 1.45em;
-  height: 1.45em;
-}
-
-.icon.text-warning {
-  color: var(--color-warning);
-}
-
-/* Animation Utilities */
-@keyframes spin {
-  from {
-    transform: rotate(0deg);
-  }
-
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.spin {
-  animation: spin 1s linear infinite;
-}
-
-/* User Management Styles */
-.user-list-container {
-  margin: var(--space-lg) 0;
-  overflow-x: auto;
-}
-
-.user-table {
-  width: 100%;
-  border-collapse: collapse;
-  background: var(--color-bg-secondary);
-  border-radius: var(--radius-md);
-  overflow: hidden;
-}
-
-.user-table thead {
-  background: var(--color-bg-tertiary);
-}
-
-.user-table th {
-  padding: var(--space-md);
-  text-align: left;
-  font-weight: 600;
-  color: var(--color-text-primary);
-  border-bottom: 1px solid var(--color-border);
-}
-
-.user-table td {
-  padding: var(--space-md);
-  color: var(--color-text-secondary);
-  border-bottom: 1px solid var(--color-border);
-}
-
-.user-table tbody tr:last-child td {
-  border-bottom: none;
-}
-
-.user-table tbody tr:hover {
-  background: var(--color-bg-hover);
-}
-
-.user-table .btn {
-  padding: var(--space-xs) var(--space-sm);
-  margin: 0 var(--space-xs);
-  font-size: 14px;
-}
-
-.add-user-section {
-  margin-top: var(--space-2xl);
-  padding: var(--space-lg);
-  background: var(--color-bg-secondary);
-  border-radius: var(--radius-md);
-}
-
-.user-form {
-  display: grid;
-  gap: var(--space-md);
-  max-width: 500px;
-}
-
-.form-group {
-  display: flex;
-  flex-direction: column;
-}
-
-.form-group label {
-  margin-bottom: var(--space-xs);
-  color: var(--color-text-primary);
-  font-weight: 500;
-}
-
-/* =====================================================
-   Watch Page (VOD Player)
-   ===================================================== */
-
-/* Page Container - scrollable */
-.watch-page {
-  height: 100%;
-  overflow-y: auto;
-  overflow-x: hidden;
-  scroll-behavior: smooth;
-  background: var(--color-bg-primary);
-}
-
-.watch-page.active {
-  display: block;
-}
-
-/* Video Section - full viewport height minus navbar */
-.watch-video-section {
-  position: relative;
-  width: 100%;
-  height: calc(100vh - var(--navbar-height));
-  /* fallback */
-  height: calc(100dvh - var(--navbar-height));
-  /* dynamic viewport for modern browsers */
-  min-height: 400px;
-  background: #000;
-}
-
-#watch-video {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-  background: #000;
-}
-
-/* Player Overlay */
-.watch-overlay {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  background: linear-gradient(to bottom,
-      rgba(0, 0, 0, 0.7) 0%,
-      transparent 20%,
-      transparent 75%,
-      rgba(0, 0, 0, 0.8) 100%);
-  opacity: 1;
-  transition: opacity 0.3s ease;
-  pointer-events: auto;
-  z-index: 10;
-}
-
-.watch-overlay.hidden {
-  opacity: 0;
-  pointer-events: none;
-}
-
-/* iOS safe area support for landscape mode (notched devices) */
-@supports (padding: env(safe-area-inset-left)) {
-  .watch-overlay {
-    padding-left: env(safe-area-inset-left, 0px);
-    padding-right: env(safe-area-inset-right, 0px);
-  }
-}
-
-/* Top Bar */
-.watch-top-bar {
-  display: flex;
-  align-items: center;
-  gap: var(--space-md);
-  padding: var(--space-lg);
-  padding-top: calc(var(--space-lg) + var(--safe-area-inset-top));
-  pointer-events: none;
-  z-index: 20;
-  width: 100%;
-  box-sizing: border-box;
-}
-
-.watch-top-bar>* {
-  pointer-events: auto;
-}
-
-/* Live TV Header: Left Title & Right Status */
-.watch-top-bar.live-header {
-  justify-content: space-between;
-}
-
-/* VOD Header: Spaced (Back Btn - Title - Status) */
-.watch-top-bar.vod-header {
-  justify-content: space-between;
-}
-
-.watch-back-btn {
-  width: 48px;
-  height: 48px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(255, 255, 255, 0.1);
-  border: none;
-  border-radius: var(--radius-full);
-  color: #fff;
-  cursor: pointer;
-  transition: background var(--transition-fast), transform var(--transition-fast);
-  flex-shrink: 0;
-}
-
-.watch-back-btn:hover {
-  background: rgba(255, 255, 255, 0.2);
-}
-
-.watch-back-btn .icon {
-  width: 24px;
-  height: 24px;
-  transition: transform var(--transition-fast);   /* hover-nudge, shared with the pills */
-}
-
-.watch-title-info {
-  flex: 1;
-  min-width: 0;
-}
-
-.watch-title {
-  font-size: 1.25rem;
-  font-weight: 600;
-  color: #fff;
-  margin: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.watch-subtitle {
-  font-size: 0.875rem;
-  color: rgba(255, 255, 255, 0.7);
-  margin: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* Center Play Button */
-.watch-center-play {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  width: 80px;
-  height: 80px;
-  display: none;
-  align-items: center;
-  justify-content: center;
-  background: rgba(0, 0, 0, 0.6);
-  border: 2px solid rgba(255, 255, 255, 0.3);
-  border-radius: var(--radius-full);
-  color: #fff;
-  cursor: pointer;
-  transition: all var(--transition-fast);
-}
-
-.watch-center-play:hover {
-  background: rgba(0, 0, 0, 0.8);
-  border-color: rgba(255, 255, 255, 0.5);
-  transform: translate(-50%, -50%) scale(1.1);
-}
-
-.watch-center-play.show {
-  display: flex;
-}
-
-.watch-center-play .icon {
-  width: 40px;
-  height: 40px;
-}
-
-/* Loading Spinner */
-.watch-loading {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  display: none;
-  z-index: 15;
-}
-
-.watch-loading.show {
-  display: block;
-}
-
-.watch-loading .loading-spinner {
-  width: 48px;
-  height: 48px;
-  border: 3px solid rgba(255, 255, 255, 0.2);
-  border-top-color: var(--color-accent);
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-/* Bottom Bar */
-.watch-bottom-bar {
-  padding: var(--space-md) var(--space-lg);
-  padding-bottom: calc(var(--space-lg) + var(--safe-area-inset-bottom));
-}
-
-/* Progress Container */
-.watch-progress-container {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-  margin-bottom: var(--space-md);
-}
-
-.watch-time {
-  font-size: 0.875rem;
-  color: rgba(255, 255, 255, 0.8);
-  min-width: 50px;
-  font-variant-numeric: tabular-nums;
-}
-
-.watch-time:last-child {
-  text-align: right;
-}
-
-.watch-progress {
-  --progress: 0%;
-  flex: 1;
-  height: 6px;
-  -webkit-appearance: none;
-  appearance: none;
-  background: linear-gradient(to right,
-      var(--color-accent) 0%,
-      var(--color-accent) var(--progress),
-      rgba(255, 255, 255, 0.3) var(--progress),
-      rgba(255, 255, 255, 0.3) 100%);
-  border-radius: 3px;
-  cursor: pointer;
-}
-
-.watch-progress::-webkit-slider-runnable-track {
-  height: 6px;
-  border-radius: 3px;
-  background: transparent;
-}
-
-.watch-progress::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 16px;
-  height: 16px;
-  background: var(--color-accent);
-  border-radius: 50%;
-  cursor: pointer;
-  margin-top: -5px;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
-  transition: transform var(--transition-fast);
-}
-
-.watch-progress:hover::-webkit-slider-thumb {
-  transform: scale(1.2);
-}
-
-.watch-progress::-moz-range-track {
-  height: 6px;
-  border-radius: 3px;
-  background: rgba(255, 255, 255, 0.3);
-}
-
-.watch-progress::-moz-range-progress {
-  height: 6px;
-  border-radius: 3px;
-  background: var(--color-accent);
-}
-
-.watch-progress::-moz-range-thumb {
-  width: 16px;
-  height: 16px;
-  background: var(--color-accent);
-  border: none;
-  border-radius: 50%;
-  cursor: pointer;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
-}
-
-.watch-progress-container.duration-unknown .watch-progress,
-.watch-progress-container.duration-unknown .watch-time-total {
-  display: none;
-}
-
-.watch-progress-container.duration-readonly .watch-progress {
-  cursor: default;
-  opacity: 0.65;
-}
-
-.watch-progress-container.duration-readonly .watch-progress::-webkit-slider-thumb {
-  cursor: default;
-}
-
-.watch-progress-container.duration-readonly .watch-progress::-moz-range-thumb {
-  cursor: default;
-}
-
-/* Control Buttons */
-.watch-controls {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-sm);
-}
-
-.watch-btn {
-  position: relative;
-  width: 44px;
-  height: 44px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: transparent;
-  border: none;
-  color: #fff;
-  cursor: pointer;
-  border-radius: var(--radius-md);
-  transition: background var(--transition-fast);
-}
-
-.watch-btn:hover {
-  background: rgba(255, 255, 255, 0.1);
-}
-
-.watch-btn .icon {
-  width: 24px;
-  height: 24px;
-}
-
-/* Captions Menu */
-.watch-captions-wrapper,
-.watch-audio-wrapper {
-  position: relative;
-}
-
-.watch-captions-menu,
-.watch-audio-menu {
-  position: absolute;
-  bottom: 100%;
-  right: 0;
-  margin-bottom: var(--space-sm);
-  background: var(--glass-bg);
-  backdrop-filter: blur(16px);
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius-md);
-  min-width: 180px;
-  max-width: 280px;
-  overflow: hidden;
-  box-shadow: var(--shadow-lg);
-  z-index: 30;
-}
-
-.watch-captions-menu.hidden,
-.watch-audio-menu.hidden {
-  display: none;
-}
-
-.captions-menu-title {
-  padding: var(--space-sm) var(--space-md);
-  font-size: 0.75rem;
-  text-transform: uppercase;
-  color: var(--color-text-muted);
-  border-bottom: 1px solid var(--glass-border);
-}
-
-.captions-menu-list {
-  max-height: 200px;
-  overflow-y: auto;
-}
-
-.captions-option,
-.audio-option {
-  display: block;
-  width: 100%;
-  padding: var(--space-sm) var(--space-md);
-  background: none;
-  border: none;
-  color: var(--color-text-primary);
-  text-align: left;
-  font-size: 0.875rem;
-  line-height: 1.25;
-  overflow-wrap: anywhere;
-  cursor: pointer;
-  transition: background var(--transition-fast);
-}
-
-.captions-option:hover,
-.audio-option:hover {
-  background: rgba(255, 255, 255, 0.1);
-}
-
-.captions-option.active,
-.audio-option.active {
-  color: var(--color-accent);
-}
-
-.captions-option.active::before {
-  content: "\2713 ";
-}
-
-.audio-option.active::before {
-  content: "\2713 ";
-}
-
-/* ===== Watch player: restart / prev-next ep / speed / episodes selector ===== */
-.watch-btn[hidden],
-.watch-captions-wrapper[hidden] { display: none !important; }
-.watch-btn:disabled { opacity: 0.35; pointer-events: none; }
-
-.speed-option {
-  display: block;
-  width: 100%;
-  padding: var(--space-sm) var(--space-md);
-  background: none;
-  border: none;
-  color: var(--color-text-primary);
-  text-align: left;
-  font-size: 0.875rem;
-  line-height: 1.25;
-  cursor: pointer;
-}
-.speed-option:hover { background: rgba(255, 255, 255, 0.1); }
-.speed-option.active { color: var(--color-accent); }
-.speed-option.active::before { content: "\2713 "; }
-
-/* Episodes selector menu — wider + taller than the audio/captions menus. */
-.watch-episodes-menu { min-width: 300px; }
-.watch-episodes-menu .captions-menu-list { max-height: 340px; }
-.watch-ep-season {
-  padding: var(--space-sm) var(--space-md) 4px;
-  font-size: 0.72rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--color-text-muted);
-}
-.watch-ep-option {
-  display: grid;
-  grid-template-columns: 28px minmax(0, 1fr);
-  gap: 10px;
-  align-items: baseline;
-  width: 100%;
-  padding: var(--space-sm) var(--space-md);
-  background: none;
-  border: none;
-  color: var(--color-text-primary);
-  text-align: left;
-  font-size: 0.875rem;
-  cursor: pointer;
-}
-.watch-ep-option:hover { background: rgba(255, 255, 255, 0.1); }
-.watch-ep-option.active { color: var(--color-accent); }
-.watch-ep-num { color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
-.watch-ep-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.watch-ep-option.active .watch-ep-num { color: var(--color-accent); }
-.captions-menu-empty { padding: var(--space-md); color: var(--color-text-muted); font-size: 0.85rem; }
-
-.captions-empty {
-  padding: var(--space-sm) var(--space-md);
-  color: var(--color-text-muted);
-  font-size: 0.8rem;
-  line-height: 1.35;
-  border-top: 1px solid var(--glass-border);
-}
-
-.captions-offset {
-  padding: var(--space-sm) var(--space-md);
-  border-top: 1px solid var(--glass-border);
-}
-
-.captions-offset-label {
-  margin-bottom: var(--space-xs);
-  color: var(--color-text-muted);
-  font-size: 0.75rem;
-  text-transform: uppercase;
-}
-
-.captions-offset-controls {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: var(--space-xs);
-}
-
-.captions-offset-btn {
-  min-height: 32px;
-  padding: 0 var(--space-sm);
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius-sm);
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--color-text-primary);
-  font-size: 0.8rem;
-  cursor: pointer;
-}
-
-.captions-offset-btn:hover {
-  background: rgba(255, 255, 255, 0.12);
-}
-
-.watch-btn-lg {
-  width: 64px;
-  height: 64px;
-  background: rgba(255, 255, 255, 0.1);
-  border-radius: var(--radius-full);
-}
-
-.watch-btn-lg:hover {
-  background: rgba(255, 255, 255, 0.2);
-}
-
-.watch-btn-lg .icon {
-  width: 32px;
-  height: 32px;
-}
-
-.skip-label {
-  position: absolute;
-  bottom: 2px;
-  font-size: 0.625rem;
-  font-weight: 600;
-}
-
-.watch-spacer {
-  flex: 1;
-}
-
-/* Live status badge — "EN DIRECT" at the live edge, "En retard de Xs" when
-   the user paused/rewound and is now behind. Behind state is a button that
-   jumps back to live. Live TV only (hidden otherwise). */
-.watch-live-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  margin-left: 8px;
-  padding: 5px 11px;
-  border: none;
-  border-radius: 999px;
-  font-size: 0.72rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: #fff;
-  background: rgba(255, 255, 255, 0.12);
-  cursor: default;
-  white-space: nowrap;
-  transition: background 0.2s ease, opacity 0.2s ease;
-}
-
-.watch-live-badge.hidden {
-  display: none;
-}
-
-.watch-live-badge .live-badge-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #9e9e9e;
-  flex: 0 0 auto;
-}
-
-/* Skip-to-live icon — only shown in the behind (button) state. */
-.watch-live-badge .live-badge-icon {
-  display: none;
-  width: 14px;
-  height: 14px;
-  flex: 0 0 auto;
-}
-
-.watch-live-badge.behind .live-badge-icon {
-  display: inline-flex;
-}
-
-.watch-live-badge.behind .live-badge-dot {
-  display: none;
-}
-
-/* At the live edge: broadcast-red pulsing dot, not actionable */
-.watch-live-badge.is-live .live-badge-dot {
-  background: #ff3b30;
-  box-shadow: 0 0 0 0 rgba(255, 59, 48, 0.55);
-  animation: live-dot-pulse 2s infinite;
-}
-
-/* Behind live: amber, clickable -> back to live */
-.watch-live-badge.behind {
-  background: rgba(255, 153, 0, 0.9);
-  cursor: pointer;
-  text-transform: none;
-  letter-spacing: 0;
-}
-
-.watch-live-badge.behind:hover {
-  background: rgba(255, 153, 0, 1);
-}
-
-.watch-live-badge.behind .live-badge-dot {
-  background: #fff;
-  animation: none;
-  box-shadow: none;
-}
-
-@keyframes live-dot-pulse {
-  0% { box-shadow: 0 0 0 0 rgba(255, 59, 48, 0.55); }
-  70% { box-shadow: 0 0 0 6px rgba(255, 59, 48, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(255, 59, 48, 0); }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .watch-live-badge.is-live .live-badge-dot { animation: none; }
-  .page.active { animation: none; }
-  .skeleton { animation: none; }
-}
-
-/* Floating "go fullscreen" button on the inline live player (top-right) —
-   shown while a channel plays and the controls bar is auto-hidden. */
-.live-fullscreen-cta {
-  position: absolute;
-  top: calc(12px + env(safe-area-inset-top, 0px));
-  right: calc(12px + env(safe-area-inset-right, 0px));
-  z-index: 30;
-  width: 44px;
-  height: 44px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: none;
-  border-radius: 10px;
-  background: rgba(10, 12, 18, 0.62);
-  color: #fff;
-  cursor: pointer;
-  -webkit-backdrop-filter: blur(6px);
-  backdrop-filter: blur(6px);
-  opacity: 0.9;
-  transition: opacity 0.2s ease, background 0.2s ease, transform 0.1s ease;
-}
-
-.live-fullscreen-cta:hover { opacity: 1; background: rgba(10, 12, 18, 0.85); }
-.live-fullscreen-cta:active { transform: scale(0.94); }
-.live-fullscreen-cta .icon { width: 24px; height: 24px; }
-.live-fullscreen-cta.hidden { display: none; }
-
-/* Volume Slider */
-.watch-volume {
-  width: 80px;
-  height: 4px;
-  -webkit-appearance: none;
-  appearance: none;
-  background: rgba(255, 255, 255, 0.3);
-  border-radius: 2px;
-  cursor: pointer;
-}
-
-.watch-volume::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 12px;
-  height: 12px;
-  background: #fff;
-  border-radius: 50%;
-  cursor: pointer;
-}
-
-/* Scroll Hint */
-.watch-scroll-hint {
-  position: absolute;
-  bottom: 20px;
-  left: 50%;
-  transform: translateX(-50%);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--space-xs);
-  color: rgba(255, 255, 255, 0.5);
-  font-size: 0.75rem;
-  animation: bounce 2s infinite ease-in-out;
-  pointer-events: none;
-}
-
-.watch-scroll-hint .icon {
-  width: 20px;
-  height: 20px;
-}
-
-@keyframes bounce {
-
-  0%,
-  100% {
-    transform: translateX(-50%) translateY(0);
-  }
-
-  50% {
-    transform: translateX(-50%) translateY(8px);
-  }
-}
-
-/* Next Episode Panel */
-.watch-next-episode {
-  position: absolute;
-  bottom: 160px;
-  right: var(--space-lg);
-  display: flex;
-  align-items: center;
-  gap: var(--space-md);
-  padding: var(--space-md) var(--space-lg);
-  background: rgba(0, 0, 0, 0.85);
-  backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: var(--radius-lg);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
-  animation: slideInRight 0.3s ease;
-  z-index: 50;
-  pointer-events: auto;
-}
-
-.watch-next-episode.hidden {
-  display: none;
-}
-
-@keyframes slideInRight {
-  from {
-    transform: translateX(100px);
-    opacity: 0;
-  }
-
-  to {
-    transform: translateX(0);
-    opacity: 1;
-  }
-}
-
-.next-info {
-  min-width: 0;
-}
-
-.next-label {
-  font-size: 0.75rem;
-  text-transform: uppercase;
-  color: var(--color-text-muted);
-  margin: 0 0 var(--space-xs) 0;
-}
-
-.next-info h4 {
-  color: #fff;
-  margin: 0;
-  font-size: 0.875rem;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 200px;
-}
-
-.next-countdown {
-  font-size: 1.5rem;
-  font-weight: 700;
-  color: var(--color-accent);
-  min-width: 30px;
-  text-align: center;
-}
-
-/* ===== Details Section ===== */
-.watch-details-section {
-  padding: var(--space-xl) var(--space-lg);
-  padding-bottom: var(--space-2xl);
-  max-width: 1200px;
-  margin: 0 auto;
-}
-
-.watch-content-info {
-  display: flex;
-  gap: var(--space-xl);
-  margin-bottom: var(--space-2xl);
-}
-
-.watch-poster {
-  width: 200px;
-  height: 300px;
-  object-fit: cover;
-  border-radius: var(--radius-md);
-  flex-shrink: 0;
-  background: var(--color-bg-tertiary);
-}
-
-.watch-meta {
-  flex: 1;
-  min-width: 0;
-}
-
-.watch-meta h2 {
-  font-size: 2rem;
-  margin-bottom: var(--space-sm);
-  color: var(--color-text-primary);
-}
-
-.watch-meta-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-md);
-  color: var(--color-text-secondary);
-  margin-bottom: var(--space-md);
-  font-size: 0.875rem;
-}
-
-.watch-rating {
-  display: flex;
-  align-items: center;
-  gap: var(--space-xs);
-  color: var(--color-warning);
-}
-
-.watch-description {
-  color: var(--color-text-secondary);
-  line-height: 1.7;
-  margin-bottom: var(--space-lg);
-  max-width: 700px;
-}
-
-.watch-actions {
-  display: flex;
-  gap: var(--space-md);
-  flex-wrap: wrap;
-}
-
-.watch-actions .btn {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-}
-
-.watch-actions .btn .icon {
-  width: 18px;
-  height: 18px;
-}
-
-.watch-actions .btn .icon-fav-filled {
-  color: var(--color-error);
-}
-
-/* Recommended Movies Grid */
-.watch-recommended h3,
-.watch-episodes h3 {
-  margin-bottom: var(--space-lg);
-  font-size: 1.25rem;
-  color: var(--color-text-primary);
-}
-
-.watch-recommended-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-  gap: var(--space-md);
-}
-
-.watch-recommended-card {
-  cursor: pointer;
-  transition: transform var(--transition-fast);
-}
-
-.watch-recommended-card:hover {
-  transform: scale(1.05);
-}
-
-.watch-recommended-card img {
-  width: 100%;
-  aspect-ratio: 2/3;
-  object-fit: cover;
-  border-radius: var(--radius-sm);
-  background: var(--color-bg-tertiary);
-}
-
-.watch-recommended-card p {
-  margin-top: var(--space-xs);
-  font-size: 0.813rem;
-  color: var(--color-text-primary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* Series Episodes */
-.watch-season-group {
-  margin-bottom: var(--space-sm);
-}
-
-.watch-season-header {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-  padding: var(--space-sm) var(--space-md);
-  background: var(--color-bg-tertiary);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  user-select: none;
-  transition: background var(--transition-fast);
-}
-
-.watch-season-header:hover {
-  background: var(--color-bg-hover);
-}
-
-.watch-season-header .icon {
-  width: 20px;
-  height: 20px;
-  color: var(--color-text-muted);
-  transition: transform var(--transition-fast);
-}
-
-.watch-season-header.collapsed .icon {
-  transform: rotate(-90deg);
-}
-
-.watch-season-header.collapsed+.watch-episode-list {
-  display: none;
-}
-
-.watch-season-name {
-  flex: 1;
-  font-weight: 500;
-}
-
-.watch-season-count {
-  font-size: 0.75rem;
-  color: var(--color-text-muted);
-}
-
-.watch-episode-list {
-  padding: var(--space-xs) 0 var(--space-xs) var(--space-lg);
-}
-
-.watch-episode-item {
-  display: flex;
-  align-items: center;
-  gap: var(--space-md);
-  padding: var(--space-sm) var(--space-md);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  transition: background var(--transition-fast);
-}
-
-.watch-episode-item:hover {
-  background: var(--color-bg-hover);
-}
-
-.watch-episode-item.active {
-  background: var(--color-accent-dim);
-  border-left: 3px solid var(--color-accent);
-}
-
-.watch-episode-num {
-  width: 32px;
-  color: var(--color-text-muted);
-  font-weight: 600;
-  font-size: 0.875rem;
-  flex-shrink: 0;
-}
-
-.watch-episode-title {
-  flex: 1;
-  min-width: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.watch-episode-duration {
-  color: var(--color-text-muted);
-  font-size: 0.813rem;
-  flex-shrink: 0;
-}
-
-/* Mobile Responsive */
-@media (max-width: 768px) {
-  .watch-content-info {
-    flex-direction: column;
-    align-items: center;
-    text-align: center;
-  }
-
-  .watch-poster {
-    width: 150px;
-    height: 225px;
-  }
-
-  .watch-meta h2 {
-    font-size: 1.5rem;
-  }
-
-  .watch-meta-row {
-    justify-content: center;
-  }
-
-  .watch-description {
-    text-align: left;
-  }
-
-  .watch-actions {
-    justify-content: center;
-  }
-
-  .watch-scroll-hint {
-    display: none;
-  }
-
-  .watch-volume {
-    display: none;
-  }
-
-  .watch-next-episode {
-    left: var(--space-md);
-    right: var(--space-md);
-    bottom: calc(120px + env(safe-area-inset-bottom, 0px));
-    flex-wrap: wrap;
-  }
-
-  .next-info {
-    flex: 1;
-  }
-
-  .next-info h4 {
-    max-width: none;
-  }
-
-  .watch-bottom-bar {
-    padding-bottom: calc(var(--space-lg) + env(safe-area-inset-bottom, 0px));
-  }
-}
-
-/* Player Overflow Menu */
-.player-overflow-wrapper {
-  position: relative;
-}
-
-.player-overflow-menu {
-  position: absolute;
-  bottom: 100%;
-  right: 0;
-  margin-bottom: var(--space-sm);
-  background: var(--glass-bg);
-  backdrop-filter: blur(12px);
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius-md);
-  min-width: 180px;
-  overflow: hidden;
-  z-index: 100;
-}
-
-.overflow-menu-item {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-  width: 100%;
-  padding: var(--space-sm) var(--space-md);
-  background: transparent;
-  border: none;
-  color: var(--color-text-primary);
-  font-size: 0.875rem;
-  cursor: pointer;
-  transition: background var(--transition-fast);
-}
-
-.overflow-menu-item:hover {
-  background: var(--color-bg-hover);
-}
-
-.overflow-menu-item .icon {
-  width: 18px;
-  height: 18px;
-  flex-shrink: 0;
-}
-
-/* Hardware Info Grid (Transcoding Tab) */
-.hw-info-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: var(--space-sm);
-}
-
-.hw-info-item {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-xs);
-  padding: var(--space-sm) var(--space-md);
-  border-radius: var(--radius-sm);
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
-}
-
-.hw-info-item.hw-available {
-  border-color: var(--color-success);
-  background: rgba(16, 185, 129, 0.1);
-}
-
-.hw-info-item.hw-unavailable {
-  opacity: 0.6;
-}
-
-.hw-badge {
-  font-weight: 600;
-  font-size: 0.875rem;
-}
-
-.hw-info-item.hw-available .hw-badge {
-  color: var(--color-success);
-}
-
-.hw-info-item.hw-unavailable .hw-badge {
-  color: var(--color-text-muted);
-}
-
-.hw-name {
-  font-size: 0.75rem;
-  color: var(--color-text-secondary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* Transcode Status Indicator */
-.transcode-status {
-  padding: 4px 8px;
-  border-radius: 4px;
-  font-size: 0.8rem;
-  font-weight: 600;
-  background: rgba(0, 0, 0, 0.5);
-  color: white;
-  display: inline-flex;
-  align-items: center;
-  backdrop-filter: blur(4px);
-  transition: opacity 0.3s ease;
-}
-
-.transcode-status.transcoding {
-  background: rgba(255, 68, 68, 0.8);
-  /* Red for Transcoding */
-  box-shadow: 0 0 10px rgba(255, 68, 68, 0.3);
-}
-
-.transcode-status.remuxing {
-  background: rgba(255, 153, 0, 0.8);
-  /* Orange for Remux */
-}
-
-.transcode-status.direct {
-  background: rgba(76, 175, 80, 0.8);
-  /* Green for Direct */
-}
-
-.transcode-status.upscaling {
-  background: rgba(156, 39, 176, 0.8);
-  /* Purple for Upscaling */
-  box-shadow: 0 0 10px rgba(156, 39, 176, 0.4);
-}
-
-.transcode-status.hidden {
-  opacity: 0;
-  pointer-events: none;
-}
-
-/* Badge Container for right alignment */
-.player-badges {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-left: auto;
-  /* Fallback for cases without flex-grow middle element */
-}
-
-/* Quality Badge */
-.quality-badge {
-  display: inline-block;
-  background: rgba(158, 158, 158, 0.8);
-  color: white;
-  padding: 4px 10px;
-  border-radius: 4px;
-  font-size: 0.75rem;
-  font-weight: 600;
-}
-
-.quality-badge.hidden {
-  display: none;
-}
-
-/* Watch Header Bar (Title + Transcode Status) */
-/* Moved to original definition around line 3311 */
-
-.watch-title-overlay {
-  margin: 0;
-  font-size: 1.25rem;
-  font-weight: 600;
-  color: white;
-  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 60%;
-}
-
-/* =====================================================
-   Edit User Modal
-   ===================================================== */
-.modal-overlay {
-  display: none;
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background: rgba(0, 0, 0, 0.7);
-  backdrop-filter: blur(4px);
-  z-index: 10000;
-  align-items: center;
-  justify-content: center;
-}
-
-.modal-overlay.active {
-  display: flex;
-}
-
-.modal-overlay .modal {
-  display: block;
-  position: relative;
-  inset: auto;
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
-  width: 90%;
-  max-width: 500px;
-  max-height: 90vh;
-  overflow: hidden;
-  box-shadow: var(--shadow-lg);
-  animation: modalFadeIn 0.2s ease;
-}
-
-@keyframes modalFadeIn {
-  from {
-    opacity: 0;
-    transform: scale(0.95);
-  }
-
-  to {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
-
-.modal-overlay .modal-header {
-  padding: var(--space-md);
-  border-bottom: 1px solid var(--color-border);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.modal-overlay .modal-title {
-  font-size: 1.25rem;
-  font-weight: 600;
-  color: var(--color-text-primary);
-  margin: 0;
-}
-
-.modal-overlay .modal-close {
-  background: none;
-  border: none;
-  color: var(--color-text-muted);
-  font-size: 1.5rem;
-  line-height: 1;
-  cursor: pointer;
-  padding: 0;
-  transition: color 0.2s;
-}
-
-.modal-overlay .modal-close:hover {
-  color: var(--color-text-primary);
-}
-
-.modal-overlay .modal-body {
-  padding: var(--space-lg);
-}
-
-.modal-overlay .modal-footer {
-  padding: var(--space-md);
-  border-top: 1px solid var(--color-border);
-  display: flex;
-  justify-content: flex-end;
-  gap: var(--space-sm);
-  background: var(--color-bg-tertiary);
-}
-
-/* Modal Form Styles */
-.modal-overlay .modal-form-group {
-  margin-bottom: var(--space-md);
-}
-
-.modal-overlay .modal-form-group label {
-  display: block;
-  margin-bottom: var(--space-xs);
-  color: var(--color-text-secondary);
-  font-size: 0.875rem;
-}
-
-.modal-overlay .modal-form-group .form-input {
-  width: 100%;
-  padding: var(--space-sm);
-  background: var(--color-bg-primary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  color: var(--color-text-primary);
-}
-
-.modal-overlay .modal-form-group .form-input:focus {
-  outline: none;
-  border-color: var(--color-accent);
-}
-
-.modal-overlay .modal-form-group .form-input:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-  background: var(--color-bg-tertiary);
-}
-
-/* =====================================================
-   User Management Badges
-   ===================================================== */
-.user-badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px 10px;
-  font-size: 0.7rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  border-radius: 12px;
-  white-space: nowrap;
-}
-
-.user-badge-sso {
-  background: linear-gradient(135deg, #3B82F6 0%, #8b5cf6 100%);
-  color: #fff;
-  box-shadow: 0 2px 4px rgba(59, 130, 246, 0.3);
-}
-
-.user-badge-local {
-  background: rgba(255, 255, 255, 0.08);
-  color: var(--color-text-secondary);
-  border: 1px solid var(--color-border);
-}
-
-.user-badge-admin {
-  background: linear-gradient(135deg, #f59e0b 0%, #f97316 100%);
-  color: #000;
-  box-shadow: 0 2px 4px rgba(245, 158, 11, 0.3);
-}
-
-.user-badge-viewer {
-  background: rgba(255, 255, 255, 0.05);
-  color: var(--color-text-muted);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-/* =====================================================
-   Now Playing Indicator (Header)
-   ===================================================== */
-
-.now-playing-indicator {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 14px;
-  margin-right: var(--space-md);
-  background: linear-gradient(135deg, var(--color-accent) 0%, #8b5cf6 100%);
-  border-radius: var(--radius-full);
-  color: white;
-  text-decoration: none;
-  font-size: 13px;
-  font-weight: 500;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 200px;
-  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.4);
-  transition: transform var(--transition-fast), box-shadow var(--transition-fast);
-  animation: now-playing-pulse 2s ease-in-out infinite;
-}
-
-.now-playing-indicator:hover {
-  transform: scale(1.05);
-  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.5);
-}
-
-.now-playing-indicator.hidden {
-  display: none;
-}
-
-.now-playing-icon {
-  font-size: 10px;
-}
-
-.now-playing-text {
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-@keyframes now-playing-pulse {
-
-  0%,
-  100% {
-    opacity: 1;
-  }
-
-  50% {
-    opacity: 0.85;
-  }
-}
-
-/* Mobile responsive - show in dropdown menu */
-@media (max-width: 768px) {
-  .now-playing-indicator {
-    width: calc(100% - 32px);
-    max-width: none;
-    margin: 0 16px var(--space-sm) 16px;
-    padding: 10px 16px;
-    font-size: 13px;
-    border-radius: var(--radius-md);
-    justify-content: center;
-  }
-}
-
-/* =====================================================
-   Home Dashboard Styles
-   ===================================================== */
-
-#page-home {
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
-}
-
-#page-home.home-setup-active {
-  overflow: hidden;
-  overflow-x: hidden;
-}
-
-#page-home.home-setup-active .dashboard-content {
-  width: 100%;
-  max-width: none;
-  height: 100%;
-  margin: 0;
-  padding: 0;
-}
-
-#page-home.home-setup-active #home-rails {
-  height: 100%;
-  min-height: 0;
-}
-
-@media (max-width: 640px) {
-  #page-home.home-setup-active {
-    overflow-x: hidden;
-    overflow-y: auto;
-  }
-
-  #page-home.home-setup-active .dashboard-content,
-  #page-home.home-setup-active #home-rails,
-  #page-home.home-setup-active .norva-setup-gate {
-    height: auto;
-  }
-}
-
-.dashboard-content {
-  padding: 24px;
-  max-width: 1400px;
-  margin: 0 auto;
-}
-
-.dashboard-section {
-  margin-bottom: 40px;
-}
-
-.dashboard-section.hidden {
-  display: none;
-}
-
-.home-hero-section {
-  position: relative;
-  min-height: clamp(320px, 42vw, 520px);
-  border-radius: var(--radius-lg);
-  overflow: hidden;
-  margin-bottom: 36px;
-  background: #080b12;
-  isolation: isolate;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.home-hero-section.hidden {
-  display: none;
-}
-
-.home-hero-bg {
-  position: absolute;
-  inset: 0;
-  background-size: cover;
-  background-position: center;
-  filter: saturate(1.08);
-  transform: scale(1.02);
-}
-
-.home-hero-section::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-  background:
-    linear-gradient(90deg, rgba(5, 7, 12, 0.96) 0%, rgba(5, 7, 12, 0.72) 42%, rgba(5, 7, 12, 0.14) 100%),
-    linear-gradient(0deg, rgba(5, 7, 12, 0.78) 0%, rgba(5, 7, 12, 0.02) 46%);
-}
-
-.home-hero-content {
-  position: relative;
-  z-index: 2;
-  width: min(620px, 68%);
-  min-height: inherit;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  padding: clamp(28px, 5vw, 64px);
-}
-
-.home-hero-kicker {
-  font-size: 0.84rem;
-  font-weight: 700;
-  color: var(--color-accent-hover);
-  text-transform: uppercase;
-  letter-spacing: 0;
-  margin-bottom: 12px;
-}
-
-/* Editorial reason pill — WHY this title is on the billboard */
-.home-hero-reason {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  align-self: flex-start;
-  font-size: 0.72rem;
-  font-weight: 800;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  padding: 5px 12px;
-  border-radius: 999px;
-  margin-bottom: 12px;
-  background: rgba(255, 255, 255, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  color: #fff;
-  -webkit-backdrop-filter: blur(6px);
-  backdrop-filter: blur(6px);
-}
-.home-hero-reason.hidden { display: none; }
-.home-hero-reason.is-resume { background: rgba(52, 211, 153, 0.18); border-color: rgba(52, 211, 153, 0.42); color: #6ee7bf; }
-.home-hero-reason.is-popular { background: rgba(248, 113, 113, 0.18); border-color: rgba(248, 113, 113, 0.42); color: #fca5a5; }
-.home-hero-reason.is-foryou { background: rgba(91, 124, 250, 0.2); border-color: rgba(120, 150, 255, 0.44); color: #bcc8ff; }
-.home-hero-reason.is-new { background: rgba(251, 191, 36, 0.18); border-color: rgba(251, 191, 36, 0.42); color: #fcd34d; }
-
-.home-hero-content h1 {
-  font-family: 'Outfit', sans-serif;
-  font-size: clamp(2rem, 4.8vw, 4.6rem);
-  line-height: 0.96;
-  color: var(--color-text-bright);
-  margin-bottom: 18px;
-  max-width: 11ch;
-}
-
-.home-hero-content p {
-  color: var(--color-text-secondary);
-  font-size: clamp(0.96rem, 1.3vw, 1.1rem);
-  line-height: 1.55;
-  max-width: 56ch;
-  margin-bottom: 24px;
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.home-hero-actions {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-.home-hero-play,
-.home-hero-more {
-  min-width: 120px;
-  justify-content: center;
-}
-
-.home-rail-header {
-  margin-bottom: 16px;
-}
-
-.home-rail-subtitle {
-  color: var(--color-text-muted);
-  font-size: 0.9rem;
-  margin-top: 4px;
-}
-
-/* Rail "See all" affordance (opens the matching catalog page) */
-.home-rail-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.home-rail-seeall {
-  flex-shrink: 0;
-  background: none;
-  border: 0;
-  color: var(--color-text-muted);
-  font-size: 0.86rem;
-  font-weight: 600;
-  cursor: pointer;
-  padding: 6px 8px;
-  border-radius: 8px;
-  white-space: nowrap;
-  transition: color 0.14s, background 0.14s;
-}
-.home-rail-seeall:hover { color: var(--color-text-bright); background: rgba(255, 255, 255, 0.06); }
-.home-rail-seeall span { display: inline-block; transition: transform 0.14s; }
-.home-rail-seeall:hover span { transform: translateX(3px); }
-
-.section-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 20px;
-}
-
-.section-header h2 {
-  font-family: 'Outfit', sans-serif;
-  font-size: 1.5rem;
-  color: var(--color-text-bright);
-}
-
-/* Scroll Wrapper with Navigation Arrows */
-.scroll-wrapper {
-  position: relative;
-}
-
-.scroll-arrow {
-  position: absolute;
-  top: 50%;
-  transform: translateY(-50%);
-  z-index: 10;
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  background: rgba(0, 0, 0, 0.7);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  color: white;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all var(--transition-fast);
-  backdrop-filter: blur(8px);
-}
-
-.scroll-arrow:hover {
-  background: rgba(0, 0, 0, 0.9);
-  border-color: var(--color-accent);
-  transform: translateY(-50%) scale(1.1);
-}
-
-.scroll-arrow svg {
-  width: 24px;
-  height: 24px;
-}
-
-.scroll-arrow.scroll-left {
-  left: -8px;
-}
-
-.scroll-arrow.scroll-right {
-  right: -8px;
-}
-
-.scroll-arrow.hidden {
-  opacity: 0;
-  pointer-events: none;
-}
-
-/* Hide arrows on touch devices (they can swipe) */
-@media (hover: none) {
-  .scroll-arrow {
-    display: none;
-  }
-}
-
-.horizontal-scroll {
-
-  display: flex;
-  gap: 20px;
-  overflow-x: auto;
-  padding-bottom: 12px;
-  /* Gentle (not mandatory) snap so a touch swipe glides instead of fighting the
-     finger, and a horizontal flick stays in the rail instead of leaking to the
-     page / browser back-gesture. */
-  scroll-snap-type: x proximity;
-  overscroll-behavior-x: contain;
-  -webkit-overflow-scrolling: touch;
-}
-
-/* Desktop: the rail is grab-and-drag (wired in MediaUtils.enhanceRailScroll). */
-@media (hover: hover) {
-  .horizontal-scroll {
-    cursor: grab;
-  }
-}
-
-.horizontal-scroll.rail-dragging {
-  scroll-snap-type: none;
-  scroll-behavior: auto;
-  user-select: none;
-}
-
-.horizontal-scroll.rail-dragging,
-.horizontal-scroll.rail-dragging * {
-  cursor: grabbing !important;
-}
-
-/* Hide scrollbar by default, show on hover */
-.horizontal-scroll::-webkit-scrollbar {
-  height: 6px;
-}
-
-.horizontal-scroll::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.1);
-  border-radius: 3px;
-}
-
-.horizontal-scroll:hover::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.2);
-}
-
-.dashboard-card {
-  flex: 0 0 calc(50% - 10px);
-  /* 2 per view on small screens */
-  max-width: 240px;
-  background: var(--color-surface);
-  border-radius: var(--radius-lg);
-  overflow: hidden;
-  cursor: pointer;
-  transition: transform var(--transition-fast), box-shadow var(--transition-fast);
-  scroll-snap-align: start;
-  border: 1px solid rgba(255, 255, 255, 0.05);
-}
-
-/* 4 per view on medium screens */
-@media (min-width: 768px) {
-  .dashboard-card {
-    flex: 0 0 calc(25% - 15px);
-  }
-}
-
-/* 6 per view on large screens */
-@media (min-width: 1200px) {
-  .dashboard-card {
-    flex: 0 0 calc(16.66% - 17px);
-  }
-}
-
-.dashboard-card:hover {
-  transform: translateY(-5px);
-  box-shadow: var(--shadow-lg);
-  border-color: var(--color-accent-dim);
-}
-
-/* Visible keyboard focus outside TV mode (previously only .tv-mode had a focus ring) */
-.dashboard-card:focus-visible,
-.channel-tile:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
-  border-color: var(--color-accent);
-}
-.home-hero-dot:focus-visible,
-.home-rail-seeall:focus-visible,
-.ch-remove:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
-}
-
-.card-image {
-  position: relative;
-  aspect-ratio: 2/3;
-  overflow: hidden;
-}
-
-.card-image img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  transition: transform 0.5s ease;
-}
-
-.dashboard-card:hover .card-image img {
-  transform: scale(1.05);
-}
-
-.progress-bar-container {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  width: 100%;
-  height: 5px;
-  background: rgba(0, 0, 0, 0.55);
-}
-
-.progress-bar {
-  height: 100%;
-  background: linear-gradient(90deg, var(--color-accent), var(--color-accent-hover));
-  box-shadow: 0 0 10px var(--color-accent);
-  border-radius: 0 3px 3px 0;
-}
-
-.play-icon-overlay {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(0, 0, 0, 0.4);
-  opacity: 0;
-  transition: opacity var(--transition-fast);
-}
-
-.play-icon-overlay svg {
-  width: 48px;
-  height: 48px;
-  color: white;
-  filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.5));
-}
-
-.dashboard-card:hover .play-icon-overlay {
-  opacity: 1;
-}
-
-.card-info {
-  padding: 12px;
-}
-
-.card-title {
-  font-weight: 600;
-  font-size: 0.95rem;
-  color: var(--color-text-bright);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  margin-bottom: 4px;
-}
-
-.card-subtitle {
-  font-size: 0.8rem;
-  color: var(--color-text-muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.home-card-badge {
-  position: absolute;
-  left: 10px;
-  bottom: 10px;
-  z-index: 2;
-  padding: 4px 8px;
-  border-radius: var(--radius-full);
-  background: rgba(8, 12, 22, 0.82);
-  color: var(--color-text-bright);
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  font-size: 0.72rem;
-  font-weight: 700;
-  backdrop-filter: blur(10px);
-}
-
-.home-card-language-badge {
-  position: absolute;
-  right: 10px;
-  bottom: 10px;
-  z-index: 2;
-  max-width: calc(100% - 20px);
-  padding: 4px 8px;
-  border-radius: var(--radius-full);
-  background: rgba(20, 36, 73, 0.82);
-  color: #d8e6ff;
-  border: 1px solid rgba(95, 130, 255, 0.42);
-  font-size: 0.68rem;
-  font-weight: 700;
-  line-height: 1.1;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  backdrop-filter: blur(10px);
-}
-
-.home-card-badge + .home-card-language-badge {
-  bottom: 38px;
-}
-
-.loading-state,
-.empty-state {
-  padding: 40px;
-  text-align: center;
-  color: var(--color-text-muted);
-  width: 100%;
-  background: rgba(255, 255, 255, 0.02);
-  border-radius: var(--radius-lg);
-  border: 1px dashed rgba(255, 255, 255, 0.1);
-}
-
-/* =====================================================
-   Channel Tile Styles (Favorite Channels)
-   ===================================================== */
-
-.channel-tiles {
-  gap: 16px;
-}
-
-.channel-tile {
-  flex: 0 0 100px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  cursor: pointer;
-  padding: 12px 8px;
-  border-radius: var(--radius-md);
-  transition: transform var(--transition-fast), background var(--transition-fast);
-  scroll-snap-align: start;
-}
-
-.channel-tile:hover {
-  transform: translateY(-4px);
-  background: rgba(255, 255, 255, 0.05);
-}
-
-.tile-logo {
-  width: 64px;
-  height: 64px;
-  border-radius: 50%;
-  overflow: hidden;
-  background: var(--color-surface);
-  border: 2px solid rgba(255, 255, 255, 0.1);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-bottom: 8px;
-  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
-}
-
-.channel-tile:hover .tile-logo {
-  border-color: var(--color-accent);
-  box-shadow: 0 0 16px rgba(var(--color-accent-rgb), 0.3);
-}
-
-.tile-logo img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.tile-name {
-  font-size: 0.75rem;
-  font-weight: 500;
-  color: var(--color-text-secondary);
-  text-align: center;
-  max-width: 90px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.channel-tile:hover .tile-name {
-  color: var(--color-text-bright);
-}
-
-/* Responsive: smaller tiles on mobile */
-@media (max-width: 480px) {
-  .channel-tile {
-    flex: 0 0 80px;
-    padding: 8px 4px;
-  }
-
-  .tile-logo {
-    width: 52px;
-    height: 52px;
-  }
-
-  .tile-name {
-    font-size: 0.7rem;
-    max-width: 70px;
-  }
-}
-
-/* ============================================================
-   Filter bar (Movies / Series)
-   ============================================================ */
-
-.filter-bar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-sm);
-  padding: var(--space-sm) var(--space-md);
-  border-bottom: 1px solid var(--color-border);
-  background: var(--color-bg-secondary);
-}
-
-.filter-select {
-  max-width: 170px;
-  font-size: 0.85rem;
-}
-
-.filter-toggle {
-  white-space: nowrap;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-full);
-  padding: 4px 12px;
-  font-size: 0.82rem;
-  color: var(--color-text-secondary);
-}
-
-.filter-toggle.active {
-  background: var(--color-accent-dim);
-  border-color: var(--color-accent);
-  color: var(--color-accent-hover);
-}
-
-.playback-filter-toggle.active {
-  border-color: var(--color-success);
-  color: var(--color-success);
-  background: rgba(16, 185, 129, 0.12);
-}
-
-.filter-count {
-  margin-left: auto;
-  font-size: 0.82rem;
-  color: var(--color-text-muted);
-  white-space: nowrap;
-}
-
-.filter-reset {
-  color: var(--color-warning);
-  white-space: nowrap;
-}
-
-/* Active-filter chips — a removable summary of what's narrowing the grid, so the
-   dense filter bar stays scannable without hiding any control. */
-.active-filters {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  padding: 10px var(--space-md) 4px;
-  background: var(--color-bg-secondary);
-}
-
-.active-filters.hidden {
-  display: none;
-}
-
-.filter-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 5px 10px 5px 12px;
-  border-radius: 999px;
-  border: 1px solid rgba(120, 140, 255, 0.35);
-  background: rgba(91, 116, 255, 0.14);
-  color: #dfe6ff;
-  font-size: 0.8rem;
-  font-weight: 600;
-  cursor: pointer;
-  max-width: 100%;
-  transition: background var(--transition-fast), border-color var(--transition-fast);
-}
-
-.filter-chip:hover,
-.filter-chip:focus-visible {
-  outline: none;
-  background: rgba(91, 116, 255, 0.26);
-}
-
-.filter-chip-x {
-  font-size: 1.05rem;
-  line-height: 1;
-  opacity: 0.7;
-}
-
-.filter-chip-clear {
-  border-color: rgba(255, 255, 255, 0.14);
-  background: transparent;
-  color: var(--color-text-muted);
-}
-
-.filter-chip-clear:hover {
-  color: var(--color-text-primary);
-  background: rgba(255, 255, 255, 0.06);
-}
-
-/* ============================================================
-   Multi-select dropdown (categories)
-   ============================================================ */
-
-.multi-select {
-  position: relative;
-}
-
-.multi-select-btn {
-  cursor: pointer;
-  text-align: left;
-  max-width: 220px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.multi-select-btn.has-selection {
-  border-color: var(--color-accent);
-  color: var(--color-accent-hover);
-}
-
-.multi-select-panel {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
-  z-index: 300;
-  width: 300px;
-  max-width: 85vw;
-  background: var(--color-bg-tertiary);
-  border: 1px solid var(--color-border-light);
-  border-radius: var(--radius-md);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
-  padding: var(--space-sm);
-}
-
-.multi-select-search {
-  width: 100%;
-  margin-bottom: var(--space-xs);
-}
-
-.multi-select-actions {
-  display: flex;
-  gap: var(--space-xs);
-  margin-bottom: var(--space-xs);
-}
-
-.multi-select-list {
-  max-height: 280px;
-  overflow-y: auto;
-}
-
-.multi-select-item {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-  padding: 6px 8px;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  font-size: 0.85rem;
-  color: var(--color-text-secondary);
-}
-
-.multi-select-item:hover {
-  background: var(--color-bg-hover);
-  color: var(--color-text-primary);
-}
-
-.multi-select-item input {
-  accent-color: var(--color-accent);
-  flex-shrink: 0;
-}
-
-.multi-select-empty {
-  padding: var(--space-sm);
-}
-
-/* ============================================================
-   Card badges: versions, watched state, progress
-   ============================================================ */
-
-.version-badge {
-  position: absolute;
-  bottom: 8px;
-  left: 8px;
-  z-index: 2;
-  background: rgba(10, 10, 15, 0.85);
-  border: 1px solid var(--color-accent);
-  color: var(--color-accent-hover);
-  font-size: 0.7rem;
-  padding: 2px 8px;
-  border-radius: var(--radius-full);
-  cursor: pointer;
-  backdrop-filter: blur(4px);
-}
-
-.version-badge:hover {
-  background: var(--color-accent);
-  color: #fff;
-}
-
-.version-language-badge {
-  position: absolute;
-  right: 8px;
-  bottom: 8px;
-  z-index: 2;
-  max-width: calc(100% - 16px);
-  padding: 3px 8px;
-  border-radius: var(--radius-full);
-  background: rgba(20, 36, 73, 0.86);
-  color: #d8e6ff;
-  border: 1px solid rgba(95, 130, 255, 0.42);
-  font-size: 0.68rem;
-  font-weight: 700;
-  line-height: 1.1;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  backdrop-filter: blur(8px);
-}
-
-.version-language-badge.with-version-badge {
-  bottom: 34px;
-}
-
-/* Mobile badge priority — a poster in a phone grid is small, so drop the two
-   lowest-priority badges (NEW, language) and keep what signals status:
-   playback issue, watched/progress, and the version count. */
-@media (max-width: 640px) {
-  .movie-card .new-badge,
-  .movie-card .version-language-badge {
-    display: none;
-  }
-}
-
-.watched-badge {
-  position: absolute;
-  top: 8px;
-  left: 8px;
-  z-index: 2;
-  width: 22px;
-  height: 22px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--color-success);
-  color: #fff;
-  font-size: 0.75rem;
-  border-radius: var(--radius-full);
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
-}
-
-.watched-badge.inprogress-badge {
-  background: var(--color-accent);
-  font-size: 0.6rem;
-}
-
-.playback-badge {
-  position: absolute;
-  top: 8px;
-  left: 8px;
-  z-index: 3;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 28px;
-  height: 22px;
-  padding: 0 7px;
-  border-radius: var(--radius-full);
-  background: rgba(239, 68, 68, 0.9);
-  color: #fff;
-  font-size: 0.68rem;
-  font-weight: 700;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
-}
-
-.card-progress {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  height: 4px;
-  background: rgba(255, 255, 255, 0.15);
-  z-index: 2;
-}
-
-.card-progress-fill {
-  height: 100%;
-  background: var(--color-accent);
-}
-
-/* ============================================================
-   Version picker modal
-   ============================================================ */
-
-.version-list {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-xs);
-  max-height: 50vh;
-  overflow-y: auto;
-}
-
-.version-item {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  width: 100%;
-  text-align: left;
-  background: var(--color-bg-tertiary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  padding: var(--space-sm) var(--space-md);
-  cursor: pointer;
-  color: var(--color-text-primary);
-}
-
-.version-item:hover {
-  border-color: var(--color-accent);
-  background: var(--color-bg-hover);
-}
-
-.version-item-label {
-  font-weight: 600;
-  font-size: 0.9rem;
-  color: var(--color-accent-hover);
-}
-
-.version-item-name {
-  font-size: 0.78rem;
-  color: var(--color-text-muted);
-  word-break: break-word;
-}
-
-/* ============================================================
-   Continue Watching row
-   ============================================================ */
-
-.continue-row {
-  padding: var(--space-md) var(--space-md) 0;
-  transition: padding 0.18s ease;
-}
-
-.continue-row h3 {
-  font-size: 1rem;
-  margin-bottom: var(--space-sm);
-  color: var(--color-text-secondary);
-  transition: font-size 0.18s ease, margin-bottom 0.18s ease, opacity 0.18s ease;
-}
-
-.continue-scroller {
-  display: flex;
-  gap: var(--space-sm);
-  overflow-x: auto;
-  padding-bottom: var(--space-sm);
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-}
-
-.continue-scroller::-webkit-scrollbar {
-  display: none;
-}
-
-.continue-card {
-  position: relative;
-  flex: 0 0 220px;
-  display: flex;
-  gap: var(--space-sm);
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  overflow: hidden;
-  cursor: pointer;
-  transition: border-color 0.15s ease, transform 0.15s ease, flex-basis 0.18s ease;
-}
-
-.continue-card:hover {
-  border-color: var(--color-accent);
-  transform: translateY(-2px);
-}
-
-.continue-card img {
-  width: 60px;
-  height: 90px;
-  object-fit: cover;
-  flex-shrink: 0;
-  transition: width 0.18s ease, height 0.18s ease;
-}
-
-.continue-card-info {
-  position: relative;
-  flex: 1;
-  min-width: 0;
-  padding: var(--space-sm) var(--space-sm) var(--space-sm) 0;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 2px;
-}
-
-.continue-card-title {
-  font-size: 0.82rem;
-  font-weight: 600;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.continue-card-subtitle {
-  font-size: 0.72rem;
-  color: var(--color-text-muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.continue-card .card-progress {
-  position: static;
-  margin-top: 4px;
-  border-radius: var(--radius-full);
-  overflow: hidden;
-}
-
-/* Compact pinned strip: while the grid is scrolled, Continue Watching shrinks
-   to reclaim vertical space but stays visible/usable at the top. */
-.continue-row.is-compact {
-  padding-top: var(--space-xs);
-  padding-bottom: 0;
-}
-
-.continue-row.is-compact h3 {
-  font-size: 0.78rem;
-  margin-bottom: 4px;
-  opacity: 0.75;
-}
-
-.continue-row.is-compact .continue-scroller {
-  gap: var(--space-xs);
-  padding-bottom: var(--space-xs);
-}
-
-.continue-row.is-compact .continue-card {
-  flex: 0 0 168px;
-}
-
-.continue-row.is-compact .continue-card img {
-  width: 40px;
-  height: 60px;
-}
-
-.continue-row.is-compact .continue-card-info {
-  padding: var(--space-xs) var(--space-xs) var(--space-xs) 0;
-}
-
-.continue-row.is-compact .continue-card-title {
-  font-size: 0.74rem;
-}
-
-.continue-row.is-compact .continue-card-subtitle {
-  display: none;
-}
-
-.mobile-filter-button,
-.mobile-filter-sheet-header,
-.mobile-filter-body,
-.mobile-filter-backdrop {
-  display: none;
-}
-
-/* Episode watched markers in series details */
-.episode-watched {
-  color: var(--color-success);
-  font-size: 0.8rem;
-  margin-left: var(--space-xs);
-  flex-shrink: 0;
-}
-
-.episode-watched.inprogress {
-  color: var(--color-accent);
-}
-
-/* Responsive: filter bar on small screens */
-@media (max-width: 768px) {
-  .filter-bar {
-    gap: var(--space-xs);
-    padding: var(--space-xs) var(--space-sm);
-  }
-
-  .filter-select {
-    max-width: 130px;
-    font-size: 0.78rem;
-  }
-
-  .filter-count {
-    width: 100%;
-    margin-left: 0;
-    order: 99;
-  }
-
-  .continue-card {
-    flex: 0 0 180px;
-  }
-}
-
-/* Compact touch controls for dense catalog pages on phones and tablets. */
-@media (max-width: 1024px) {
-
-  body.catalog-filter-open {
-    overflow: hidden;
-  }
-
-  #page-movies .movies-header,
-  #page-series .series-header {
-    gap: 8px;
-    padding: 8px 10px;
-  }
-
-  #page-movies .movies-header h2,
-  #page-series .series-header h2 {
-    line-height: 1.1;
-  }
-
-  #page-movies .movies-controls,
-  #page-series .series-controls {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 44px;
-    align-items: center;
-    gap: 8px;
-    width: 100%;
-    overflow: visible;
-  }
-
-  #page-movies .filter-bar,
-  #page-series .filter-bar {
-    position: fixed;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    z-index: 450;
-    display: flex;
-    flex-direction: column;
-    flex-wrap: nowrap;
-    align-items: stretch;
-    max-height: min(82dvh, 680px);
-    overflow: hidden;
-    padding: 0;
-    border: 1px solid var(--color-border-light);
-    border-bottom: 0;
-    border-radius: 18px 18px 0 0;
-    background: var(--color-bg-secondary);
-    box-shadow: 0 -20px 60px rgba(0, 0, 0, 0.55);
-    transform: translateY(110%);
-    visibility: hidden;
-    transition: transform 0.22s ease, visibility 0.22s ease;
-  }
-
-  #page-movies .filter-bar.mobile-open,
-  #page-series .filter-bar.mobile-open {
-    transform: translateY(0);
-    visibility: visible;
-  }
-
-  .mobile-filter-backdrop {
-    position: fixed;
-    inset: 0;
-    z-index: 440;
-    display: block;
-    background: rgba(0, 0, 0, 0.55);
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity 0.18s ease;
-  }
-
-  .mobile-filter-backdrop.mobile-open {
-    opacity: 1;
-    pointer-events: auto;
-  }
-
-  .mobile-filter-sheet-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    width: 100%;
-    min-width: 0;
-    flex: 0 0 auto;
-    padding: 14px 16px 10px;
-    border-bottom: 1px solid var(--color-border);
-  }
-
-  .mobile-filter-sheet-title {
-    font-size: 1rem;
-    font-weight: 700;
-    color: var(--color-text-bright);
-  }
-
-  .mobile-filter-close {
-    width: 36px;
-    height: 36px;
-    padding: 0;
-    font-size: 1.25rem;
-    justify-content: center;
-  }
-
-  .mobile-filter-body {
-    display: grid;
-    gap: 14px;
-    width: 100%;
-    min-width: 0;
-    flex: 1 1 auto;
-    overflow-y: auto;
-    padding: 12px 16px calc(20px + env(safe-area-inset-bottom, 0px));
-    -webkit-overflow-scrolling: touch;
-  }
-
-  .mobile-filter-section {
-    display: grid;
-    gap: 10px;
-    width: 100%;
-    min-width: 0;
-  }
-
-  .mobile-filter-section-title {
-    font-size: 0.72rem;
-    font-weight: 800;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--color-text-muted);
-  }
-
-  .mobile-filter-field {
-    display: grid;
-    gap: 6px;
-    width: 100%;
-    min-width: 0;
-  }
-
-  .mobile-filter-field.hidden {
-    display: none;
-  }
-
-  .mobile-filter-label {
-    font-size: 0.78rem;
-    font-weight: 650;
-    color: var(--color-text-secondary);
-  }
-
-  .mobile-filter-field .source-select,
-  .mobile-filter-field .filter-select,
-  .mobile-filter-field select,
-  .mobile-filter-field .multi-select,
-  .mobile-filter-field .multi-select-btn,
-  .mobile-filter-field .btn {
-    width: 100%;
-    max-width: none;
-    justify-content: center;
-  }
-
-  #page-movies .movies-controls > *,
-  #page-series .series-controls > *,
-  #page-movies .filter-bar > *,
-  #page-series .filter-bar > * {
-    min-width: 0;
-  }
-
-  #page-movies .movies-controls .source-select,
-  #page-series .series-controls .source-select,
-  #page-movies .movies-controls .multi-select-btn,
-  #page-series .series-controls .multi-select-btn,
-  #page-movies .filter-select,
-  #page-series .filter-select {
-    width: 100%;
-    min-width: 0;
-    max-width: none;
-    height: 38px;
-    font-size: 0.82rem;
-  }
-
-  #page-movies .movies-controls .multi-select,
-  #page-series .series-controls .multi-select {
-    min-width: 0;
-  }
-
-  #page-movies .movies-controls .search-wrapper,
-  #page-series .series-controls .search-wrapper {
-    grid-column: 1 / -1;
-    grid-row: 1;
-    width: 100%;
-    min-width: 0;
-  }
-
-  #movies-mobile-filters-btn,
-  #series-mobile-filters-btn {
-    grid-column: 1;
-    grid-row: 2;
-  }
-
-  #movies-sort,
-  #series-sort {
-    grid-column: 2;
-    grid-row: 2;
-  }
-
-  #page-movies .movies-controls .search-input,
-  #page-series .series-controls .search-input {
-    min-width: 0;
-    height: 36px;
-    padding-top: 0;
-    padding-bottom: 0;
-  }
-
-  #page-movies .movies-controls .btn,
-  #page-series .series-controls .btn,
-  #page-movies .filter-toggle,
-  #page-series .filter-toggle,
-  #page-movies .filter-reset,
-  #page-series .filter-reset {
-    min-height: 38px;
-    height: 38px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    padding-left: 6px;
-    padding-right: 6px;
-    font-size: 0.82rem;
-  }
-
-  .mobile-filter-button {
-    display: inline-flex;
-    position: relative;
-    border: 1px solid var(--color-border);
-    background: var(--color-bg-tertiary);
-    color: var(--color-text-primary);
-    border-radius: var(--radius-md);
-  }
-
-  .mobile-filter-badge {
-    display: none;
-    align-items: center;
-    justify-content: center;
-    min-width: 18px;
-    height: 18px;
-    padding: 0 5px;
-    border-radius: var(--radius-full);
-    background: var(--color-accent);
-    color: #fff;
-    font-size: 0.68rem;
-    font-weight: 800;
-  }
-
-  .mobile-filter-badge.active {
-    display: inline-flex;
-  }
-
-  #movies-random,
-  #series-random {
-    grid-column: 3;
-    grid-row: 2;
-    width: 44px;
-    max-width: 44px;
-    min-width: 44px;
-    flex: 0 0 44px;
-    gap: 0;
-    padding: 0;
-    overflow: hidden;
-    color: transparent;
-    font-size: 0 !important;
-  }
-
-  #movies-random::before,
-  #series-random::before {
-    content: "\1F3B2";
-    color: var(--color-text-primary);
-    font-size: 1rem;
-    line-height: 1;
-  }
-
-  #movies-favorites-btn,
-  #series-favorites-btn {
-    width: 44px;
-    max-width: 44px;
-    min-width: 44px;
-    flex: 0 0 44px;
-    gap: 0;
-    padding: 0;
-    overflow: hidden;
-    color: transparent;
-    font-size: 0 !important;
-  }
-
-  #movies-favorites-btn .icon,
-  #series-favorites-btn .icon {
-    width: 22px;
-    height: 22px;
-    margin: 0;
-    flex: 0 0 22px;
-    color: var(--color-text-secondary);
-  }
-
-  #movies-favorites-btn.active .icon,
-  #series-favorites-btn.active .icon {
-    color: var(--color-accent);
-  }
-
-  #page-movies .filter-count,
-  #page-series .filter-count {
-    display: none;
-  }
-
-  #page-movies .continue-row,
-  #page-series .continue-row {
-    padding: 8px 10px 0;
-  }
-
-  #page-movies .continue-row h3,
-  #page-series .continue-row h3 {
-    margin-bottom: 6px;
-    font-size: 0.92rem;
-  }
-
-  #page-movies .continue-card,
-  #page-series .continue-card {
-    flex-basis: 160px;
-  }
-
-  #page-movies .continue-card img,
-  #page-series .continue-card img {
-    width: 52px;
-    height: 78px;
-  }
-
-  /* Compact-on-scroll parity for phones/tablets. The shared .continue-row.is-compact rules
-     (specificity 0,3,x) are outranked here by the ID-scoped mobile sizing above (1,1,x), so on
-     mobile the JS toggled is-compact but the cards never actually shrank. Re-assert the compact
-     sizes with matching ID specificity so the row shrinks on scroll exactly like desktop — tuned a
-     touch smaller than desktop compact (img 38x56 vs 40x60) since vertical space is scarcer here. */
-  #page-movies .continue-row.is-compact,
-  #page-series .continue-row.is-compact {
-    padding: 6px 10px 0;
-  }
-  #page-movies .continue-row.is-compact h3,
-  #page-series .continue-row.is-compact h3 {
-    font-size: 0.74rem;
-    margin-bottom: 3px;
-    opacity: 0.7;
-  }
-  #page-movies .continue-row.is-compact .continue-card,
-  #page-series .continue-row.is-compact .continue-card {
-    flex-basis: 150px;
-  }
-  #page-movies .continue-row.is-compact .continue-card img,
-  #page-series .continue-row.is-compact .continue-card img {
-    width: 38px;
-    height: 56px;
-  }
-  #page-movies .continue-row.is-compact .continue-card-title,
-  #page-series .continue-row.is-compact .continue-card-title {
-    font-size: 0.72rem;
-  }
-  #page-movies .continue-row.is-compact .continue-card-subtitle,
-  #page-series .continue-row.is-compact .continue-card-subtitle {
-    display: none;
-  }
-
-  #page-movies .movies-grid,
-  #page-series .series-grid {
-    padding: 10px;
-  }
-}
-
-@media (min-width: 641px) and (max-width: 1024px) {
-  #page-movies .movies-header,
-  #page-series .series-header {
-    gap: 10px;
-    padding: 12px 16px;
-  }
-
-  #page-movies .movies-controls,
-  #page-series .series-controls {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 52px;
-    max-width: 760px;
-    margin: 0 auto;
-  }
-
-  #movies-random,
-  #series-random {
-    width: 52px;
-    max-width: 52px;
-    min-width: 52px;
-    flex-basis: 52px;
-  }
-
-  #page-movies .filter-bar,
-  #page-series .filter-bar {
-    left: 24px;
-    right: 24px;
-    bottom: 16px;
-    max-height: min(76dvh, 720px);
-    border-bottom: 1px solid var(--color-border-light);
-    border-radius: 18px;
-  }
-
-  .mobile-filter-body {
-    padding: 14px 18px calc(18px + env(safe-area-inset-bottom, 0px));
-  }
-
-  .mobile-filter-section-body {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    align-items: start;
-  }
-}
-
-@media (min-width: 900px) and (max-width: 1024px) {
-  #page-movies .movies-controls,
-  #page-series .series-controls {
-    max-width: 880px;
-  }
-
-  .mobile-filter-section-body {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-}
-
-/* ── Android TV: inline filter bar, never the touch bottom-sheet ──────────────
-   TV WebViews render at ~960px CSS, which the ≤1024px media queries above turn
-   into a hidden bottom-sheet reachable only via a "Filters" button the D-pad
-   cannot focus. In tv-mode, undo that and keep the filter bar inline (its
-   controls are then real, focusable elements the remote walks through). Pairs
-   with createMobileCatalogSetup()'s TV early-return, which leaves the controls
-   in their original inline slots. Higher specificity + later source than the
-   media rules, so it wins at any width. */
-html.tv-mode #page-movies #movies-filter-bar,
-html.tv-mode #page-series #series-filter-bar,
-html.tv-mode #page-movies .filter-bar,
-html.tv-mode #page-series .filter-bar {
-  position: static;
-  left: auto;
-  right: auto;
-  bottom: auto;
-  transform: none;
-  visibility: visible;
-  max-height: none;
-  overflow: visible;
-  flex-direction: row;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-sm);
-  padding: var(--space-sm) var(--space-md);
-  border: 0;
-  border-bottom: 1px solid var(--color-border);
-  border-radius: 0;
-  background: var(--color-bg-secondary);
-  box-shadow: none;
-}
-html.tv-mode .mobile-filter-button,
-html.tv-mode .mobile-filter-backdrop,
-html.tv-mode .mobile-filter-sheet-header,
-html.tv-mode .mobile-filter-body {
-  display: none !important;
-}
-
-/* TV: the tablet rules squash each filter <select> to min-width:0 / flex:1, so
-   their labels truncate ("Sort: D", "Any Ye"). Size each to its own content and
-   let the bar wrap to a second row — nothing is clipped in its block. */
-html.tv-mode #page-movies .filter-bar .filter-select,
-html.tv-mode #page-series .filter-bar .filter-select,
-html.tv-mode #page-movies .filter-bar .source-select,
-html.tv-mode #page-series .filter-bar .source-select,
-html.tv-mode #page-movies .filter-bar .filter-toggle,
-html.tv-mode #page-series .filter-bar .filter-toggle {
-  flex: 0 0 auto;
-  width: auto;
-  min-width: 92px;
-  max-width: 220px;
-}
-
-/* TV: the ≤1024px rules also squash the CONTROLS row (source · categories · search ·
-   favourites) into a 1fr/1fr/44px grid — the search box collapses into the 44px slot
-   and Favourites wraps below. Keep it a simple inline flex row so every control is
-   full-size and D-pad-walkable, mirroring the filter-bar override above. */
-html.tv-mode #page-movies .movies-controls,
-html.tv-mode #page-series .series-controls {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-sm);
-  width: 100%;
-}
-html.tv-mode #page-movies .movies-controls .source-select,
-html.tv-mode #page-series .series-controls .source-select,
-html.tv-mode #page-movies .movies-controls .multi-select,
-html.tv-mode #page-series .series-controls .multi-select,
-html.tv-mode #page-movies .movies-controls .multi-select-btn,
-html.tv-mode #page-series .series-controls .multi-select-btn {
-  width: auto;
-  min-width: 120px;
-  max-width: 260px;
-  height: 38px;
-}
-html.tv-mode #page-movies .movies-controls .search-wrapper,
-html.tv-mode #page-series .series-controls .search-wrapper {
-  flex: 1 1 240px;
-  min-width: 200px;
-  max-width: none;
-}
-html.tv-mode #page-movies .movies-controls .search-wrapper .search-input,
-html.tv-mode #page-series .series-controls .search-wrapper .search-input {
-  width: 100%;
-}
-
-@media (max-width: 480px) {
-  .dashboard-content {
-    padding: 16px 12px 20px;
-  }
-
-  .home-hero-section {
-    min-height: 420px;
-    margin: -4px -12px 28px;
-    border-radius: 0;
-    border-left: none;
-    border-right: none;
-  }
-
-  .home-hero-section::before {
-    background:
-      linear-gradient(0deg, rgba(5, 7, 12, 0.98) 0%, rgba(5, 7, 12, 0.78) 44%, rgba(5, 7, 12, 0.08) 100%),
-      linear-gradient(90deg, rgba(5, 7, 12, 0.52) 0%, rgba(5, 7, 12, 0.08) 100%);
-  }
-
-  .home-hero-bg {
-    background-position: center top;
-  }
-
-  .home-hero-content {
-    width: 100%;
-    justify-content: flex-end;
-    padding: 28px 18px;
-  }
-
-  .home-hero-content h1 {
-    max-width: 13ch;
-    font-size: 2.25rem;
-  }
-
-  .home-hero-content p {
-    -webkit-line-clamp: 2;
-    margin-bottom: 18px;
-  }
-
-  .home-hero-actions .btn {
-    flex: 1 1 0;
-  }
-
-  .dashboard-section {
-    margin-bottom: 28px;
-  }
-
-  .section-header {
-    margin-bottom: 12px;
-  }
-
-  .section-header h2 {
-    font-size: 1.25rem;
-  }
-
-  .horizontal-scroll {
-    gap: 12px;
-    padding-bottom: 8px;
-  }
-
-  .dashboard-card {
-    flex-basis: calc(50% - 8px);
-    max-width: 170px;
-  }
-
-  .card-info {
-    padding: 10px;
-  }
-}
-
-/* ── Tablet portrait (8–11") ─────────────────────────────────────────────────
-   Keep the billboard present but not full-height (cap it against viewport HEIGHT,
-   not width, so it never eats a portrait screen), and show 3 posters per rail —
-   2 are oversized and 4 cramped at this width. Placed after the base 768/1200
-   card rules so it wins in this range. */
-@media (min-width: 600px) and (max-width: 899px) and (orientation: portrait) {
-  .home-hero-section {
-    min-height: clamp(300px, 40vh, 400px);
-  }
-
-  .home-hero-content {
-    width: min(600px, 82%);
-  }
-
-  .home-hero-content h1 {
-    font-size: clamp(2rem, 5.4vw, 3rem);
-  }
-
-  .dashboard-card {
-    flex: 0 0 calc(33.333% - 14px);
-    max-width: none;
-  }
-}
-
-/* ── Tablet landscape (900–1024px) — back to 4 posters per rail. ────────────── */
-@media (min-width: 900px) and (max-width: 1024px) {
-  .dashboard-card {
-    flex: 0 0 calc(25% - 15px);
-    max-width: none;
-  }
-}
-
-/* Playback error banner (shown when all stream versions fail) */
-.watch-error {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 15;
-  background: rgba(10, 10, 15, 0.85);
-  padding: var(--space-lg);
-}
-
-.watch-error.hidden {
-  display: none;
-}
-
-.watch-error-box {
-  max-width: 480px;
-  text-align: center;
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-error);
-  border-radius: var(--radius-lg);
-  padding: var(--space-lg);
-}
-
-.watch-error-title {
-  font-size: 1.1rem;
-  font-weight: 700;
-  color: var(--color-error);
-  margin-bottom: var(--space-sm);
-}
-
-.watch-error-msg {
-  color: var(--color-text-primary);
-  font-size: 0.92rem;
-  margin-bottom: var(--space-sm);
-}
-
-.watch-error-refresh {
-  color: var(--color-text-muted);
-  font-size: 0.82rem;
-  line-height: 1.4;
-  margin-bottom: var(--space-md);
-}
-
-.watch-error-refresh-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 36px;
-  padding: 0 var(--space-md);
-  margin-bottom: var(--space-sm);
-  border: 0;
-  border-radius: var(--radius-md);
-  background: var(--color-primary);
-  color: #fff;
-  font-size: 0.84rem;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.watch-error-refresh-btn:hover {
-  filter: brightness(1.12);
-}
-
-.watch-error-detail {
-  color: var(--color-text-muted);
-  font-size: 0.75rem;
-  font-family: monospace;
-  word-break: break-word;
-}
-
-/* ============================================================
-   Live TV — flat search results mode
-   ============================================================ */
-
-.search-results {
-  padding: 4px 8px 8px;
-}
-
-.search-results-header {
-  font-size: 0.78rem;
-  color: var(--color-text-muted);
-  padding: 6px 8px 2px;
-}
-
-.search-section-label {
-  font-size: 0.7rem;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--color-text-muted);
-  margin: 10px 8px 4px;
-}
-
-.channel-item.search-result {
-  border-radius: var(--radius-md);
-}
-
-.channel-item.search-result .search-subtitle {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.search-result.kb-selected {
-  background: var(--color-bg-hover);
-  outline: 1px solid var(--color-accent);
-  outline-offset: -1px;
-}
-
-/* Android TV: while navigating the RESULT LIST, the list is the single selection.
-   Suppress the search bar's big white focus ring (it keeps keyboard focus for the
-   nav model, but must not look selected too) and promote the highlighted result to
-   a real 10-foot focus ring — so the search bar and a result are never both lit. */
-html.tv-mode #channel-sidebar.tv-listnav #channel-search:focus {
-  outline: none !important;
-  box-shadow: none !important;
-}
-html.tv-mode #channel-sidebar.tv-listnav .search-result.kb-selected {
-  outline: 4px solid #ffffff;
-  outline-offset: -3px;
-  background: var(--color-bg-active, #2a2a3a);
-  box-shadow: 0 0 0 6px rgba(0, 0, 0, 0.5);
-}
-
-mark.search-highlight {
-  background: transparent;
-  color: var(--color-accent-hover);
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-
-.search-epg-tag {
-  font-size: 0.62rem;
-  color: var(--color-accent-hover);
-  border: 1px solid var(--color-accent);
-  border-radius: var(--radius-full);
-  padding: 0 6px;
-  margin-left: 4px;
-  vertical-align: 1px;
-}
-
-.search-group-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  padding: 2px 8px 6px;
-}
-
-.search-group-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 0.78rem;
-  color: var(--color-text-secondary);
-  background: var(--color-bg-tertiary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-full);
-  padding: 4px 12px;
-  cursor: pointer;
-  max-width: 100%;
-}
-
-.search-group-chip:hover {
-  border-color: var(--color-accent);
-  color: var(--color-text-primary);
-}
-
-.search-group-chip span {
-  color: var(--color-text-muted);
-  font-size: 0.7rem;
-}
-
-.search-kbd-footer {
-  display: flex;
-  gap: 14px;
-  font-size: 0.7rem;
-  color: var(--color-text-muted);
-  border-top: 1px solid var(--color-border);
-  margin-top: 10px;
-  padding: 8px 8px 0;
-}
-
-.search-empty {
-  padding: var(--space-md);
-}
-
-.search-empty .search-suggest {
-  margin-top: var(--space-xs);
-  color: var(--color-accent-hover);
-}
-
-/* ============================================================
-   Subtitle cue rendering (native <track> over the VOD player)
-   ============================================================ */
-
-#watch-video::cue {
-  background: var(--norva-sub-bg, rgba(0, 0, 0, 0.6));
-  color: var(--norva-sub-color, #fff);
-  font-size: calc(1.05em * var(--norva-sub-scale, 1));
-  line-height: 1.3;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
-  white-space: pre-line;
-}
-
-/* Captions menu — Appearance panel (size / background / color) */
-.captions-style {
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
-  margin-top: 8px;
-  padding: 10px 14px 6px;
-}
-
-.captions-style-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 4px 0;
-}
-
-.captions-style-name {
-  font-size: 0.85rem;
-  color: var(--color-text-secondary, #a1a1aa);
-}
-
-/* "Skip intro" — bottom-right of the video, above the control bar */
-.watch-skip-intro {
-  position: absolute;
-  right: 28px;
-  bottom: 118px;
-  z-index: 24;
-  padding: 12px 22px;
-  background: rgba(22, 22, 30, 0.92);
-  border: 1px solid rgba(255, 255, 255, 0.55);
-  border-radius: 6px;
-  color: #fff;
-  font-size: 0.95rem;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  cursor: pointer;
-  transition: background 0.15s ease, transform 0.15s ease;
-}
-
-.watch-skip-intro:hover,
-.watch-skip-intro:focus {
-  background: rgba(255, 255, 255, 0.95);
-  color: #0a0a0f;
-  transform: scale(1.03);
-}
-
-.watch-skip-intro.hidden {
-  display: none;
-}
-
-/* ============================================================
-   Fiche extras — TMDB credits + trailer lightbox
-   ============================================================ */
-
-.detail-credits {
-  margin-top: 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.detail-credits-row {
-  font-size: 0.9rem;
-  color: var(--color-text-secondary, #a1a1aa);
-  line-height: 1.45;
-}
-
-.detail-credits-label {
-  color: var(--color-text-muted, #71717a);
-  font-weight: 600;
-  margin-right: 6px;
-}
-
-.detail-credits-label::after {
-  content: ' ·';
-}
-
-.trailer-lightbox {
-  position: fixed;
-  inset: 0;
-  z-index: 1200;
-  background: rgba(5, 5, 10, 0.92);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 4vh 4vw;
-}
-
-.trailer-lightbox-inner {
-  position: relative;
-  width: min(1100px, 100%);
-  aspect-ratio: 16 / 9;
-  background: #000;
-  border-radius: 10px;
-  overflow: hidden;
-  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.7);
-}
-
-.trailer-lightbox-inner iframe {
-  width: 100%;
-  height: 100%;
-  border: 0;
-}
-
-.trailer-lightbox-close {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  z-index: 2;
-  width: 38px;
-  height: 38px;
-  border: none;
-  border-radius: 50%;
-  background: rgba(0, 0, 0, 0.65);
-  color: #fff;
-  font-size: 1rem;
-  cursor: pointer;
-}
-
-.trailer-lightbox-close:hover,
-.trailer-lightbox-close:focus {
-  background: rgba(255, 255, 255, 0.9);
-  color: #0a0a0f;
-}
-
-/* ============================================================
-   Hover preview — floating expanded card (desktop pointer only)
-   ============================================================ */
-
-.hover-preview {
-  position: fixed;
-  z-index: 900;
-  background: #16161e;
-  border-radius: 10px;
-  overflow: hidden;
-  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.72);
-  opacity: 0;
-  transform: scale(0.94);
-  transition: opacity 0.16s ease, transform 0.16s ease;
-  pointer-events: none;
-}
-
-.hover-preview.visible {
-  opacity: 1;
-  transform: scale(1);
-  pointer-events: auto;
-}
-
-.hover-preview.hidden {
-  display: none;
-}
-
-.hover-preview-art {
-  aspect-ratio: 16 / 9;
-  background: #0a0a0f;
-  overflow: hidden;
-}
-
-.hover-preview-art img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-}
-
-.hover-preview-body {
-  padding: 14px 16px 16px;
-}
-
-.hover-preview-title {
-  font-size: 1.02rem;
-  font-weight: 700;
-  color: #fff;
-  margin-bottom: 4px;
-}
-
-.hover-preview-meta {
-  font-size: 0.82rem;
-  color: var(--color-text-secondary, #a1a1aa);
-  margin-bottom: 12px;
-}
-
-.hover-preview-actions {
-  display: flex;
-  gap: 10px;
-}
-
-.hover-preview-actions button {
-  flex: 0 0 auto;
-  padding: 8px 16px;
-  border: none;
-  border-radius: 6px;
-  font-size: 0.88rem;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.hover-preview-play {
-  background: #fff;
-  color: #0a0a0f;
-}
-
-.hover-preview-play:hover {
-  background: #e4e4f2;
-}
-
-.hover-preview-info {
-  background: rgba(255, 255, 255, 0.14);
-  color: #fff;
-}
-
-.hover-preview-info:hover {
-  background: rgba(255, 255, 255, 0.24);
-}
-
-/* ============================================================
-   Home billboard — rotation dots + trailer button
-   ============================================================ */
-
-.home-hero-dots {
-  display: flex;
-  gap: 8px;
-  margin-top: 18px;
-}
-
-.home-hero-dot {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  border: none;
-  padding: 0;
-  background: rgba(255, 255, 255, 0.35);
-  cursor: pointer;
-  transition: background 0.2s ease, transform 0.2s ease;
-}
-
-.home-hero-dot.active {
-  background: #fff;
-  transform: scale(1.25);
-}
-
-.home-hero-desc.hidden {
-  display: none;
-}
-
-/* Grid virtualization: full-width height stand-in for recycled cards. */
-.movies-grid .grid-spacer,
-.series-grid .grid-spacer {
-  grid-column: 1 / -1;
-  width: 100%;
-  padding: 0;
-  margin: 0;
-}
-
-/* ============================================================
-   Chromecast (web sender) — cast button + active-session bar
-   ============================================================ */
-
-.watch-cast-bar {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  z-index: 27;
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 12px 18px;
-  background: rgba(10, 12, 18, 0.92);
-  -webkit-backdrop-filter: blur(6px);
-  backdrop-filter: blur(6px);
-  color: #fff;
-}
-
-.watch-cast-bar.hidden {
-  display: none;
-}
-
-.watch-cast-bar-poster {
-  width: 46px;
-  height: 68px;
-  object-fit: cover;
-  border-radius: 6px;
-  flex: 0 0 auto;
-  background: #1a1f2b;
-}
-
-.watch-cast-bar-main {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.watch-cast-bar-title {
-  font-weight: 700;
-  font-size: 0.98rem;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.watch-cast-bar-label {
-  font-size: 0.8rem;
-  color: #9fb0c9;
-}
-
-.watch-cast-bar-scrub {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.watch-cast-time {
-  font-size: 0.75rem;
-  color: #c7d2e0;
-  font-variant-numeric: tabular-nums;
-  flex: 0 0 auto;
-  min-width: 40px;
-}
-
-.watch-cast-time.dur {
-  text-align: right;
-}
-
-.watch-cast-seek {
-  flex: 1;
-  min-width: 80px;
-  height: 4px;
-  -webkit-appearance: none;
-  appearance: none;
-  background: rgba(255, 255, 255, 0.22);
-  border-radius: 3px;
-  cursor: pointer;
-}
-
-.watch-cast-seek::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 13px;
-  height: 13px;
-  border-radius: 50%;
-  background: #fff;
-  cursor: pointer;
-}
-
-.watch-cast-seek::-moz-range-thumb {
-  width: 13px;
-  height: 13px;
-  border: none;
-  border-radius: 50%;
-  background: #fff;
-  cursor: pointer;
-}
-
-.watch-cast-bar-controls {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex: 0 0 auto;
-}
-
-.watch-cast-ctl {
-  border: none;
-  background: rgba(255, 255, 255, 0.12);
-  color: #fff;
-  width: 38px;
-  height: 38px;
-  border-radius: 50%;
-  font-size: 1rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-}
-
-.watch-cast-ctl:hover,
-.watch-cast-ctl:focus-visible {
-  background: rgba(255, 255, 255, 0.24);
-}
-
-.watch-cast-ctl[hidden] {
-  display: none;
-}
-
-.watch-cast-stop {
-  border: none;
-  border-radius: 8px;
-  padding: 9px 15px;
-  font-size: 0.85rem;
-  font-weight: 700;
-  cursor: pointer;
-  background: #3b82f6;
-  color: #fff;
-}
-
-.watch-cast-stop:hover,
-.watch-cast-stop:focus-visible {
-  background: #2f6fe0;
-}
-
-/* Cast button in the control bar reads as "active" while a session is live */
-.watch-btn.is-casting {
-  color: #5b9dff;
-}
-
-@media (max-width: 560px) {
-  .watch-cast-bar {
-    gap: 10px;
-    padding: 10px 12px;
-  }
-
-  .watch-cast-bar-poster {
-    display: none;
-  }
-
-  .watch-cast-time {
-    min-width: 34px;
-  }
-
-  .watch-cast-ctl {
-    width: 34px;
-    height: 34px;
-  }
-}
-
-/* ============================================================
-   Seek thumbnails — storyboard preview above the timeline
-   ============================================================ */
-
-.watch-progress-container {
-  position: relative;
-}
-
-.watch-seek-thumb {
-  position: absolute;
-  bottom: 30px;
-  transform: translateX(-50%);
-  border: 2px solid rgba(255, 255, 255, 0.85);
-  border-radius: 6px;
-  overflow: hidden;
-  background: #000;
-  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.6);
-  pointer-events: none;
-  z-index: 30;
-}
-
-.watch-seek-thumb.hidden {
-  display: none;
-}
-
-.watch-seek-thumb-img {
-  width: 100%;
-  height: 100%;
-  background-repeat: no-repeat;
-}
-
-.watch-seek-thumb-time {
-  position: absolute;
-  bottom: 4px;
-  left: 0;
-  right: 0;
-  text-align: center;
-  font-size: 0.78rem;
-  font-weight: 600;
-  color: #fff;
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.95);
-}
-
-/* ============================================================
-   TV mode (Android TV WebView client) — D-pad focus ring
-   ============================================================ */
-
-/* 10-foot focus: a high-luminance white ring reads from the couch on a dark
-   grid where a medium-blue one disappears (Netflix uses the same trick). */
-.tv-mode *:focus {
-  outline: 4px solid #ffffff !important;
-  outline-offset: 3px;
-  border-radius: var(--radius-sm);
-  scroll-margin: 120px;
-  box-shadow: 0 0 0 7px rgba(0, 0, 0, 0.55);
-}
-
-/* ------------------------------------------------------------------
-   TV (D-pad) — Home page content-nav hardening (2026-07 audit).
-   Remove hover-only / decorative controls that become stray or dangerous
-   spatial focus stops for a remote (no 10-foot D-pad purpose):
-   • .ch-remove — the Continue-Watching ✕: `@media(hover:none)` forces it
-     visible on TV WebViews, so Up from a card lands on it and Enter DELETES
-     the title. Hidden on TV → Up from a CW card always reaches the hero.
-   • .home-hero-dots — 9px carousel dots wedged between the hero actions and
-     the first rail; the billboard auto-rotates and the D-pad has no gesture
-     to cycle slides, so they are pure stray stops.
-   • .home-rail-seeall — the per-rail "See all" header button intercepts the
-     vertical card path inconsistently; the left-rail menu already reaches
-     each category page, so it is redundant on TV.
-   ------------------------------------------------------------------ */
-.tv-mode .ch-remove,
-.tv-mode .home-hero-dots,
-.tv-mode .home-rail-seeall { display: none !important; }
-
-/* ------------------------------------------------------------------
-   TV menu (top navbar) — make it 10-foot / lean-back grade.
-   The generic .tv-mode *:focus above is tuned for content CARDS on a
-   busy grid: a 4px detached white ring + a 7px black halo + a forced
-   radius. On a small text button in the top bar that reads as an
-   oversized selection rectangle spilling past the item — the exact
-   "rectangle de sélection trop grand" the menu suffered from. Menu
-   controls instead get a SNUG, filled treatment that hugs the button.
-   Everything here is .tv-mode-scoped and keyed to nav selectors, so
-   phone / tablet / web are untouched. (Based on the TV UX audit: exempt
-   nav-links from the blanket ring, replace with a filled focus pill,
-   and add a persistent "you are here" indicator distinct from focus.) */
-
-/* Keep every label on ONE line — kills the "Live / TV" 2-line wrap that
-   doubled that item's height and made its focus box look huge. */
-.tv-mode .navbar-menu .nav-link,
-.tv-mode .navbar-brand,
-.tv-mode .nav-search-btn,
-.tv-mode .nav-bell-btn,
-.tv-mode .nav-profile,
-.tv-mode .now-playing-indicator,
-.tv-mode .navbar-menu .nav-link span:not(.nav-icon) {
-  white-space: nowrap;
-}
-
-/* Persistent "you are here" indicator, distinct from the transient focus.
-   The web active tint (mid-blue text on a faint fill) is couch-invisible;
-   on the left rail add a LEADING accent bar + tint so the current section
-   reads across the room. Suppressed while focused so the focus fill wins. */
-.tv-mode .navbar-menu .nav-link.active:not(:focus) {
-  background: var(--color-accent-dim);
-  box-shadow: inset 3px 0 0 0 var(--color-accent);
-  color: #ffffff;
-}
-
-/* Focus on a rail item → full-width high-luminance fill with an inverted
-   (dark) icon + label. Crisp from the couch, exempt from the blanket white
-   *:focus ring. No scale — the rail clips overflow, so the fill IS the row. */
-.tv-mode .navbar-menu .nav-link:focus,
-.tv-mode .now-playing-indicator:focus {
-  outline: none !important;
-  box-shadow: none !important;
-  background: #ffffff;
-  color: #0b0e14;
-  border-radius: 0;
-  transition: background 0.15s cubic-bezier(0.2, 0, 0, 1);
-}
-/* Flip the gradient <img> icons to a solid dark glyph on the white pill
-   (they would otherwise blend blue-on-white). Inline stroke SVGs use
-   currentColor, so the dark `color` above already recolours those. */
-.tv-mode .navbar-menu .nav-link:focus .norva-ui-icon {
-  filter: brightness(0);
-  opacity: 1;
-  transform: none;
-}
-.tv-mode .navbar-menu .nav-link:focus .now-playing-icon,
-.tv-mode .now-playing-indicator:focus .now-playing-icon {
-  color: #0b0e14;
-}
-
-/* Icon-only utility buttons (search / bell / profile) and the brand are
-   square-ish, so a snug high-luminance ring that hugs them reads cleaner
-   than a filled pill — and keeps the avatar image intact. Drop the big
-   black halo and the detached 3px offset. */
-.tv-mode .nav-search-btn:focus,
-.tv-mode .nav-bell-btn:focus,
-.tv-mode .nav-profile:focus,
-.tv-mode .navbar-brand:focus {
-  outline: 3px solid #ffffff !important;
-  outline-offset: 2px;
-  box-shadow: none !important;
-  border-radius: var(--radius-md);
-  transform: scale(1.04);
-  transition: transform 0.15s cubic-bezier(0.2, 0, 0, 1);
-}
-
-/* ==================================================================
-   LEFT RAIL — Android TV primary navigation.
-   The SAME markup the phone shows as a bottom bar and the web shows as a
-   top bar is projected here as a vertical LEFT RAIL (Netflix / Prime /
-   Google TV model). This is the correct 10-foot shape AND it removes the
-   horizontal-fit problem for good: items stack vertically, so no panel
-   width (853px, 720px, 1280px…) can make the brand / menu / avatar collide
-   or overflow. Same tokens, brand, icons and 5 sections — a pure re-flow,
-   all gated html.tv-mode so phone / tablet / web are untouched.
-   Collapsed to an icon column at rest; expands to reveal labels when the
-   D-pad enters it (:focus-within). The spatial D-pad engine already walks
-   it: Down/Up between rail items, Right into content, Left back to the rail
-   (the ArrowDown-into-content guard lives in tvNavigation.js).
-   ================================================================== */
-.tv-mode .navbar {
-  position: fixed;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  height: 100vh;
-  width: 88px;
-  flex-direction: column;
-  align-items: stretch;
-  justify-content: flex-start;
-  gap: 2px;
-  padding: 26px 0 18px;             /* fits brand + 5 items + utilities in 480px */
-  background: rgba(10, 10, 15, 0.92);
-  -webkit-backdrop-filter: blur(18px);
-  backdrop-filter: blur(18px);
-  border-bottom: none;
-  border-right: 1px solid var(--glass-border);
-  overflow: hidden;                 /* clip labels while collapsed */
-  z-index: 150;
-  transition: width 0.18s ease-out, background 0.18s ease-out;
-}
-.tv-mode .navbar:focus-within {
-  width: 264px;
-  background: rgba(8, 9, 13, 0.98);
-}
-.tv-mode .mobile-menu-toggle { display: none; }
-
-/* When the rail expands (focus enters it), SLIDE the content right to clear the
-   264px drawer instead of letting the drawer overlay it — otherwise the expanded
-   rail sits on top of whatever is at the content's left edge (the Movies/Series
-   filter bar, card edges…), which read as "the menu covering the filters". A GPU
-   transform (not margin) avoids re-wrapping the grid, so it's smooth. Content
-   slides back the instant focus returns to the content and the rail collapses. */
-.tv-mode .main-content {
-  transition: transform 0.18s ease-out;
-}
-.tv-mode .navbar:focus-within ~ .main-content {
-  transform: translateX(176px);   /* 264 expanded − 88 collapsed */
-}
-
-/* Brand pinned to the top; logo centred in the 88px icon column (centre x=44),
-   the "Norva" wordmark revealed only when the rail is expanded. */
-.tv-mode .navbar-brand {
-  margin: 0 0 8px 0;
-  padding-left: 29px;
-  justify-content: flex-start;
-  flex: 0 0 auto;
-}
-.tv-mode .logo {
-  width: 30px;
-  height: 30px;
-  flex-basis: 30px;
-}
-.tv-mode .brand-text {
-  font-size: 1.25rem;
-}
-
-/* The 5 sections take the middle and push the utility cluster to the bottom. */
-.tv-mode .navbar-menu {
-  flex-direction: column;
-  align-items: stretch;
-  gap: 2px;
-  width: 100%;
-  flex: 1 1 auto;
-  /* tv-mode ALWAYS uses the vertical rail as the D-pad menu (every tvNavigation
-     guard targets .navbar). Beat the <=640px phone breakpoint (.navbar-menu{display:
-     none!important}, main.css:12773) on specificity so a narrow tv-mode viewport
-     (e.g. ?tv=1 desktop testing) never swaps in the .bottom-nav the guards don't cover. */
-  display: flex !important;
-}
-/* Corollary: tv-mode never shows the phone bottom tab bar — the rail is the menu. */
-.tv-mode .bottom-nav { display: none !important; }
-.tv-mode .navbar-menu .nav-link {
-  justify-content: flex-start;
-  padding: 9px 16px 9px 31px;       /* 26px icon centred at x=44 in the column */
-  gap: 18px;
-  border-radius: 0;
-  font-size: 16px;
-  width: 100%;
-}
-.tv-mode .navbar-menu .nav-link .nav-icon,
-.tv-mode .navbar-menu .nav-link .norva-ui-icon {
-  width: 26px;
-  height: 26px;
-  flex: 0 0 26px;
-}
-
-/* Labels + wordmark fade in only when the rail is expanded (icon-only rest). */
-.tv-mode .navbar-menu .nav-link span:not(.nav-icon),
-.tv-mode .navbar-brand .brand-text {
-  opacity: 0;
-  transition: opacity 0.12s ease-out;
-}
-.tv-mode .navbar:focus-within .navbar-menu .nav-link span:not(.nav-icon),
-.tv-mode .navbar:focus-within .navbar-brand .brand-text {
-  opacity: 1;
-}
-
-/* Utility cluster (search / bell / profile) at the bottom, centred in the
-   icon column (centre x=44) and kept compact so all three fit at 480px. */
-.tv-mode .nav-search-btn,
-.tv-mode .nav-bell-btn,
-.tv-mode .nav-profile {
-  align-self: flex-start;
-  margin-left: 22px;
-  width: 40px;
-  height: 40px;
-  flex: 0 0 40px;
-}
-
-/* Never let a stray 1-2px of shell width pan the TV (rails scroll internally). */
-.tv-mode body {
-  overflow-x: hidden;
-}
-
-.tv-mode .movie-card:focus,
-.tv-mode .series-card:focus,
-.tv-mode .continue-card:focus,
-.tv-mode .dashboard-card:focus,
-.tv-mode .channel-tile:focus {
-  transform: scale(1.09);
-  transition: transform 0.12s ease;
-  z-index: 3;
-}
-
-/* Card focus ring must be INSET on TV. The blanket *:focus above draws an OUTSET
-   white ring + black halo, but every rail sits inside overflow:hidden ancestors
-   (.page, .main-content, each .horizontal-scroll) — on-device those clip the
-   outset ring, so it looked "cut" on the top/left of edge cards (headless doesn't
-   reproduce the clip; the real WebView does). Draw the ring INSIDE the card so it
-   can NEVER be clipped, keep the scale for the lift, and add a soft outer glow
-   (a glow clipping is invisible, unlike a hard ring line). Preserve each card's
-   own radius so the ring hugs the corners instead of the blanket's radius-sm. */
-.tv-mode .movie-card:focus,
-.tv-mode .series-card:focus,
-.tv-mode .continue-card:focus,
-.tv-mode .dashboard-card:focus,
-.tv-mode .channel-tile:focus,
-.tv-mode .search-result:focus,
-.tv-mode .watch-recommended-card:focus {
-  outline: none !important;
-  box-shadow:
-    inset 0 0 0 3px #ffffff,
-    inset 0 0 0 6px rgba(0, 0, 0, 0.55),
-    0 10px 28px rgba(0, 0, 0, 0.55) !important;
-}
-.tv-mode .dashboard-card:focus,
-.tv-mode .continue-card:focus {
-  border-radius: var(--radius-lg) !important;
-}
-.tv-mode .movie-card:focus,
-.tv-mode .series-card:focus,
-.tv-mode .channel-tile:focus,
-.tv-mode .search-result:focus,
-.tv-mode .watch-recommended-card:focus {
-  border-radius: var(--radius-md) !important;
-}
-
-/* Rail scroll-arrows are for mouse users; on TV the D-pad scrolls, and on WebViews
-   that report hover:hover they'd sit on top of the first/last card. Hide them. */
-.tv-mode .scroll-arrow {
-  display: none !important;
-}
-
-/* TV: denser poster grids. Best-in-class 10-foot UIs (Netflix, Prime, Plex, Google
-   TV) show ~5-7 posters per row; Norva showed ~4 at 160px, which read as oversized
-   from the couch. ~124px → ~5-6 per row, still clearly recognisable. Grid cards
-   (Movies / Series) only; Home-rail cards keep their size. */
-.tv-mode .movies-grid .movie-card,
-.tv-mode .series-grid .series-card {
-  flex: 0 0 124px;
-  width: 124px;
-}
-.tv-mode .movies-grid .movie-poster,
-.tv-mode .series-grid .series-poster,
-.tv-mode .series-grid .series-card .series-poster {
-  width: 124px;
-  height: 186px;                    /* keep the 2:3 poster ratio */
-}
-
-/* Live guide rows are full-width, so a smaller lift + taller row reads better at
-   10-foot distance than the card scale (they only got the *:focus outline before). */
-.tv-mode .live-guide-row:focus {
-  transform: scale(1.02);
-  transition: transform 0.12s ease;
-  z-index: 3;
-  min-height: 74px;
-}
-.tv-mode .live-guide-row { min-height: 68px; }
-
-/* ==================================================================
-   Movies on Android TV — split-view redesign (P1).
-   LEFT: compact poster grid + pill filters + Continue row.
-   RIGHT: the fiche (#movie-details) promoted to a PERSISTENT panel that
-   live-previews the D-pad-focused card and holds all depth (versions,
-   more-like-this) scrollably — "everything in the panel", no fullscreen
-   fiche takeover on TV. All html.tv-mode #page-movies scoped; phone/web
-   keep the fullscreen fiche opened on click.
-   ================================================================== */
-html.tv-mode #page-movies {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 33%;
-  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
-  grid-template-areas:
-    "header   panel"
-    "filters  panel"
-    "active   panel"
-    "grid     panel"
-    "continue panel";
-  column-gap: 16px;
-  row-gap: 6px;
-  height: 100%;
-  min-height: 0;
-  padding: 8px 14px 8px 12px;
-  overflow: hidden;
-}
-/* Header: ONE compact row — heading (left) + inline controls (right). Overrides
-   the earlier tv rule that stretched .movies-controls to width:100% (which shoved
-   the title under the controls). */
-html.tv-mode #page-movies .movies-header {
-  grid-area: header;
-  margin: 0;
-  padding: 0 0 2px;
-  flex-wrap: nowrap;
-  align-items: center;
-  gap: 12px;
-  border-bottom: 0;
-  background: transparent;
-}
-html.tv-mode #page-movies .movies-heading { flex: 0 0 auto; }
-html.tv-mode #page-movies .movies-controls {
-  width: auto;
-  flex: 1 1 auto;
-  flex-wrap: nowrap;
-  justify-content: flex-end;
-  gap: 8px;
-}
-html.tv-mode #page-movies .movies-controls .search-wrapper { flex: 1 1 200px; max-width: 480px; min-width: 0; }
-html.tv-mode #page-movies .movies-controls .source-select,
-html.tv-mode #page-movies .movies-controls .multi-select-btn { flex: 0 0 auto; height: 34px; }
-html.tv-mode #page-movies #movies-filter-bar { grid-area: filters; }
-html.tv-mode #page-movies #movies-active-filters { grid-area: active; }
-html.tv-mode #page-movies #movies-continue { grid-area: continue; }
-html.tv-mode #page-movies .movies-grid {
-  grid-area: grid;
-  height: auto;
-  min-height: 0;
-  overflow-y: auto;
-  justify-content: flex-start;
-  align-content: flex-start;
-  gap: 12px;
-  padding: 4px 2px;
-}
-html.tv-mode #page-movies #movie-details {
-  grid-area: panel;
-  min-height: 0;
-  max-height: none;
-  overflow-y: auto;
-  border-radius: 18px;
-  border: 1px solid rgba(120, 140, 255, 0.16);
-  background: linear-gradient(180deg, rgba(24, 34, 58, 0.92), rgba(12, 17, 28, 0.97));
-}
-/* The panel is persistent on TV; JS never toggles .hidden here, but keep it
-   visible even if some shared path adds the class. */
-html.tv-mode #page-movies #movie-details.hidden { display: block; }
-/* No "back" affordance — the panel never leaves. */
-html.tv-mode #page-movies .movie-back-btn { display: none !important; }
-
-/* --- Compaction: header + subtitle -------------------------------- */
-html.tv-mode #page-movies .movies-header h2 { font-size: 1.55rem; margin: 0; }
-html.tv-mode #page-movies .movies-subtitle { display: none; }
-
-/* --- Compaction: filters as pills --------------------------------- */
-html.tv-mode #page-movies #movies-filter-bar {
-  border-bottom: 0;
-  background: transparent;
-  padding: 2px 0;
-  gap: 6px;
-}
-html.tv-mode #page-movies #movies-filter-bar .filter-select,
-html.tv-mode #page-movies #movies-filter-bar .source-select,
-html.tv-mode #page-movies #movies-filter-bar .filter-toggle,
-html.tv-mode #page-movies .movies-controls .source-select,
-html.tv-mode #page-movies .movies-controls .multi-select-btn {
-  height: 32px;
-  width: auto;              /* size to content — never clip the label */
-  min-width: 0;
-  max-width: none;
-  white-space: nowrap;      /* keep each label on one line */
-  border-radius: 999px;
-  font-size: 0.78rem;
-  padding: 0 12px;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  color: #dbe4f7;
-}
-/* Active-filters + Continue Watching stay compact so the grid keeps the space. */
-html.tv-mode #page-movies #movies-active-filters { padding: 0; gap: 6px; }
-html.tv-mode #page-movies #movies-continue { margin: 0; }
-html.tv-mode #page-movies #movies-continue h3 { font-size: 0.95rem; margin: 2px 0 4px; }
-html.tv-mode #page-movies #movies-continue .continue-scroller { gap: 8px; }
-html.tv-mode #page-movies #movies-filter-bar .filter-toggle.active {
-  background: var(--color-accent);
-  border-color: var(--color-accent);
-  color: #fff;
-}
-html.tv-mode #page-movies #movies-filter-bar .filter-select:focus,
-html.tv-mode #page-movies #movies-filter-bar .filter-toggle:focus,
-html.tv-mode #page-movies #movies-filter-bar .source-select:focus,
-html.tv-mode #page-movies .movies-controls .source-select:focus,
-html.tv-mode #page-movies .movies-controls .multi-select-btn:focus {
-  outline: none !important;
-  box-shadow: 0 0 0 3px #fff !important;
-}
-
-/* --- Compaction: grid cards --------------------------------------- */
-html.tv-mode #page-movies .movies-grid .movie-card { flex: 0 0 118px; width: 118px; }
-html.tv-mode #page-movies .movies-grid .movie-poster { width: 118px; height: 177px; }
-html.tv-mode #page-movies .movies-grid .movie-card:focus {
-  outline: none !important;
-  box-shadow: 0 0 0 3px #fff !important;
-}
-
-/* --- Panel: hero (16:9 banner → stacked info) --------------------- */
-html.tv-mode #page-movies .movie-detail-hero {
-  min-height: 0 !important;
-  padding: 0;
-  display: block;
-}
-html.tv-mode #page-movies .movie-detail-hero::before { opacity: 0.28; }
-/* The base hero-content is a 2-column GRID (poster | info). On TV we collapse it
-   to a single stacked column — the earlier flex-direction had no effect on a grid. */
-html.tv-mode #page-movies .movie-detail-hero-content {
-  display: block !important;
-  width: 100% !important;
-  padding: 14px;
-}
-/* Poster → a contained 16:9 banner (base is a 2:3 portrait that overflowed). */
-html.tv-mode #page-movies .movie-detail-poster {
-  width: 100% !important;
-  height: auto !important;
-  aspect-ratio: 16 / 9 !important;
-  max-height: 190px;
-  object-fit: cover;
-  border-radius: 12px;
-  margin: 0 0 10px !important;
-  box-shadow: none;
-}
-html.tv-mode #page-movies .movie-detail-info { display: block; min-width: 0; }
-html.tv-mode #page-movies .movie-detail-info h3,
-html.tv-mode #page-movies #movie-detail-title {
-  font-size: 1.4rem !important;
-  line-height: 1.15 !important;
-  margin: 0 0 6px !important;
-}
-html.tv-mode #page-movies #movie-detail-meta.movie-meta-pills,
-html.tv-mode #page-movies .movie-detail-info .movie-meta-pills {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin: 0 0 8px;
-}
-html.tv-mode #page-movies #movie-detail-plot {
-  max-width: none;
-  font-size: 0.88rem !important;
-  line-height: 1.45;
-  margin: 0 0 10px !important;
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-/* --- Panel: actions as labelled buttons (Live .lg-btn language) ---- */
-html.tv-mode #page-movies .movie-detail-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-html.tv-mode #page-movies .movie-primary-action {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 18px;
-  border-radius: 12px;
-  background: var(--color-accent);
-  border: 0;
-  color: #fff;
-  font-weight: 800;
-  font-size: 0.92rem;
-}
-html.tv-mode #page-movies .movie-secondary-action {
-  padding: 10px 14px;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.07);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  color: #eef3ff;
-  font-weight: 700;
-}
-html.tv-mode #page-movies .movie-detail-actions button:focus {
-  outline: none !important;
-  box-shadow: none !important;
-  background: #fff;
-  color: #0b0e14;
-  transform: scale(1.03);
-}
-
-/* --- Panel: versions list = the "choose on multi" surface --------- */
-html.tv-mode #page-movies .movie-versions-section { padding: 0 16px 16px; }
-html.tv-mode #page-movies .movie-versions-toolbar h3 { font-size: 1.05rem; margin: 0 0 6px; }
-html.tv-mode #page-movies .movie-version-item {
-  display: block;
-  width: 100%;
-  text-align: left;
-  padding: 10px 12px;
-  margin-bottom: 6px;
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  color: #eef3ff;
-}
-html.tv-mode #page-movies .movie-version-item.active {
-  border-color: var(--color-accent);
-  background: color-mix(in srgb, var(--color-accent) 22%, transparent);
-}
-html.tv-mode #page-movies .movie-version-item:focus {
-  outline: none !important;
-  box-shadow: inset 0 0 0 3px #fff !important;
-}
-
-/* ==================================================================
-   Live TV on Android TV — mockup redesign. Two columns: the sidebar is
-   the categorised channel browser (LEFT); the player-section is a preview
-   CARD (channel art + info + labelled actions) over the full channel list
-   (RIGHT). All .tv-mode #page-live scoped — phone/web keep the original
-   split-player layout. The inline <video> is parked off-screen (kept alive
-   so Watch → native fullscreen still plays); the card shows the channel
-   logo as art instead of an inline stream.
-   ================================================================== */
-/* TV: the sidebar collapse chevron, the desktop expand button, and the search
-   clear-× are not 10-foot gestures and are otherwise phantom D-pad focus targets
-   (opacity:0 / redundant). Remove them from the remote's candidate set entirely. */
-html.tv-mode #page-live #sidebar-collapse-btn,
-html.tv-mode #page-live .sidebar-expand-btn,
-html.tv-mode #page-live .search-clear {
-  display: none !important;
-}
-.tv-mode #page-live .video-container {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  opacity: 0;
-  overflow: hidden;
-  pointer-events: none;
-  margin: 0;
-  min-height: 0;
-}
-.tv-mode #page-live .player-section {
-  position: relative;
-  padding: 4px 6px 4px 14px;
-}
-.tv-mode #page-live .live-guide-fusion {
-  flex: 1 1 auto;
-  min-height: 0;
-  max-height: none;
-  border-top: none;
-  background: transparent;
-}
-.tv-mode #page-live .lg-tv-shell,
-.tv-mode #page-live .lg-tv-shell .live-guide-main {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  min-height: 0;
-  gap: 14px;
-}
-
-/* --- Preview CARD: art | info | actions ----------------------------- */
-.tv-mode #page-live .live-guide-preview {
-  display: grid;
-  grid-template-columns: 156px minmax(0, 1fr) 162px;
-  grid-template-areas: "art copy actions";
-  align-items: center;
-  gap: 14px;
-  flex: 0 0 auto;
-  padding: 15px;
-  border-radius: 18px;
-  border: 1px solid rgba(120, 140, 255, 0.16);
-  background: linear-gradient(180deg, rgba(24, 34, 58, 0.92), rgba(12, 17, 28, 0.97));
-}
-.tv-mode #page-live .live-guide-preview-art {
-  grid-area: art;
-  position: relative;
-  width: 156px;
-  height: 88px;                     /* 16:9 */
-  border-radius: 10px;
-  background: #0b0f1a;
-}
-.tv-mode #page-live .live-guide-preview-copy { grid-area: copy; align-self: center; min-width: 0; }
-.tv-mode #page-live .live-guide-preview-art img {
-  max-width: 78%;
-  max-height: 66%;
-  object-fit: contain;
-}
-.tv-mode #page-live .live-guide-preview-channel {
-  display: block;
-  font-size: 1.25rem;
-  font-weight: 800;
-  color: #fff;
-  margin-bottom: 4px;
-  line-height: 1.2;
-}
-.tv-mode #page-live .live-guide-preview-channel span {
-  display: inline-block;
-  margin-left: 8px;
-  font-size: 0.8rem;
-  font-weight: 600;
-  color: #9fb2d6;
-  vertical-align: middle;
-}
-.tv-mode #page-live .live-guide-preview-onair {
-  font-size: 0.82rem;
-  color: #8ba0c8;
-  margin-bottom: 2px;
-}
-.tv-mode #page-live .live-guide-preview-title {
-  font-size: 1.1rem;
-  font-weight: 700;
-  color: #eef3ff;
-  margin-bottom: 5px;
-}
-.tv-mode #page-live .live-guide-preview-channel { margin-bottom: 3px; }
-.tv-mode #page-live .live-guide-preview-badges { margin: 1px 0 3px; }
-.tv-mode #page-live .live-guide-preview-onair { margin-bottom: 1px; }
-.tv-mode #page-live .live-guide-preview { padding: 13px; }
-.tv-mode #page-live .live-guide-preview .live-guide-progress {
-  display: block;
-  max-width: 420px;
-  height: 6px;
-  border-radius: 3px;
-  background: rgba(255, 255, 255, 0.14);
-  overflow: hidden;
-}
-.tv-mode #page-live .live-guide-upnext { display: none; }
-
-.tv-mode #page-live .live-guide-preview-actions {
-  grid-area: actions;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  align-self: center;
-  width: 162px;
-}
-.tv-mode #page-live .live-guide-preview-actions .lg-btn { width: 100%; }
-.tv-mode #page-live .live-guide-preview-actions .lg-btn {
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 8px;
-  padding: 9px 12px;
-  border-radius: 10px;
-  font-size: 0.78rem;
-  font-weight: 700;
-  white-space: nowrap;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.06);
-  color: #eef3ff;
-}
-.tv-mode #page-live .live-guide-preview-actions .lg-btn-primary {
-  background: var(--color-accent);
-  border-color: var(--color-accent);
-  color: #fff;
-}
-.tv-mode #page-live .lg-btn-ico { width: 20px; height: 20px; flex: 0 0 20px; }
-.tv-mode #page-live .lg-btn-fav.is-fav { color: #ff6b8b; border-color: rgba(255, 107, 139, 0.4); }
-.tv-mode #page-live .lg-btn-fav .lg-btn-heart { font-size: 1.15rem; }
-.tv-mode #page-live .live-guide-preview-actions .lg-btn:focus {
-  outline: none !important;
-  box-shadow: none !important;
-  background: #ffffff;
-  color: #0b0e14;
-  transform: scale(1.03);
-}
-
-/* --- List header + channel rows ------------------------------------- */
-.tv-mode #page-live .lg-tv-listhead {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex: 0 0 auto;
-  padding: 2px 4px;
-}
-.tv-mode #page-live .lg-tv-listtitle { font-size: 1.1rem; font-weight: 800; color: #fff; }
-.tv-mode #page-live .lg-tv-count { font-size: 0.85rem; font-weight: 700; color: #8ba0c8; }
-.tv-mode #page-live .live-guide-rows {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  padding-right: 4px;
-}
-.tv-mode #page-live .live-guide-row {
-  display: grid;
-  grid-template-columns: 30px 44px minmax(0, 1fr) auto 40px;
-  align-items: center;
-  gap: 12px;
-  min-height: 60px;
-  margin-bottom: 6px;
-  padding: 10px 14px;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.03);
-}
-.tv-mode #page-live .live-guide-row.selected,
-.tv-mode #page-live .live-guide-row.playing {
-  background: color-mix(in srgb, var(--color-accent) 26%, transparent);
-}
-.tv-mode #page-live .live-guide-num { font-size: 1rem; font-weight: 700; color: #8ba0c8; text-align: center; }
-.tv-mode #page-live .live-guide-row .live-guide-logo { width: 44px; height: 44px; object-fit: contain; }
-.tv-mode #page-live .live-guide-row .live-guide-info { min-width: 0; }
-.tv-mode #page-live .live-guide-row .live-guide-channel-name { font-size: 1rem; font-weight: 700; color: #fff; }
-.tv-mode #page-live .live-guide-row .live-guide-now-title { font-size: 0.85rem; color: #9fb2d6; }
-.tv-mode #page-live .live-guide-time { font-size: 0.9rem; font-weight: 600; color: #c7d3ea; white-space: nowrap; }
-.tv-mode #page-live .live-guide-row .live-guide-next { display: none; }
-.tv-mode #page-live .live-guide-play {
-  width: 40px; height: 40px;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.1);
-  color: #fff;
-  display: flex; align-items: center; justify-content: center;
-}
-.tv-mode #page-live .live-guide-row:focus {
-  outline: none !important;
-  transform: none !important;
-  box-shadow: inset 0 0 0 3px #ffffff !important;
-  background: color-mix(in srgb, var(--color-accent) 32%, transparent);
-}
-
-/* --- Sidebar (LEFT categorised browser) ----------------------------- */
-.tv-mode #page-live .channel-sidebar {
-  flex: 0 0 26%;
-  max-width: 26%;
-}
-
-/* Card quality/category badge pills + minutes-remaining, matching the mockup. */
-.tv-mode #page-live .live-guide-preview-badges {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-  margin: 2px 0 5px;
-}
-.tv-mode #page-live .lg-badge {
-  font-size: 0.62rem;
-  font-weight: 800;
-  letter-spacing: 0.03em;
-  padding: 2px 7px;
-  border-radius: 5px;
-  background: rgba(120, 140, 255, 0.2);
-  border: 1px solid rgba(120, 140, 255, 0.4);
-  color: #cdd8ff;
-}
-.tv-mode #page-live .lg-badge-group {
-  background: transparent;
-  border: 0;
-  color: #8ba0c8;
-  font-weight: 600;
-  letter-spacing: 0;
-}
-.tv-mode #page-live .lg-art-badge {
-  position: absolute;
-  top: 6px;
-  left: 6px;
-  font-size: 0.6rem;
-  font-weight: 800;
-  padding: 2px 6px;
-  border-radius: 4px;
-  background: #f2c200;
-  color: #1a1400;
-}
-.tv-mode #page-live .live-guide-preview-meta {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.tv-mode #page-live .lg-remaining {
-  font-size: 0.74rem;
-  color: #8ba0c8;
-  white-space: nowrap;
-}
-
-/* Android TV Live browse-art overlay (Option 1): fill the 16:9 preview box with the
-   focused channel's logo + name + a watch hint, hiding the inline video (which the
-   WebView can't preview — it just spins). Only rendered on TV; on web it stays
-   display:none so nothing changes there. */
-.tv-live-art { display: none; }
-.tv-mode #page-live .tv-live-art:not(.hidden) {
-  display: flex;
-  position: absolute;
-  inset: 0;
-  z-index: 6;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  padding: 18px;
-  text-align: center;
-  background: radial-gradient(ellipse at 50% 42%, #1a2742 0%, #0a0f1c 78%);
-}
-.tv-mode #page-live .tv-live-art-logo {
-  max-width: 58%;
-  max-height: 50%;
-  object-fit: contain;
-  filter: drop-shadow(0 6px 20px rgba(0, 0, 0, 0.6));
-}
-.tv-mode #page-live .tv-live-art-name {
-  font-size: 1.2rem;
-  font-weight: 700;
-  color: #ffffff;
-}
-.tv-mode #page-live .tv-live-art-hint {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 0.9rem;
-  color: #9fb2d6;
-}
-.tv-mode #page-live .tv-live-art-ok {
-  padding: 2px 9px;
-  border-radius: 6px;
-  background: var(--color-accent);
-  color: #ffffff;
-  font-weight: 800;
-  font-size: 0.82rem;
-}
-
-/* Series at 10-foot distance: bigger season tabs and episode rows so they're
-   comfortable D-pad targets and readable across the room. Size/legibility only —
-   the full spatial-nav flow (focus-restore after playback, tab arrowing) still
-   needs on-device validation before we lean on it. */
-.tv-mode .season-tab {
-  padding: 12px 22px;
-  font-size: 1.05rem;
-}
-.tv-mode .episode-item {
-  padding: var(--space-md) var(--space-lg);
-}
-.tv-mode .episode-upnext-flag {
-  font-size: 0.72rem;
-}
-
-/* Dim the siblings of the focused card so the ring pops even harder. Scoped to
-   rows/grids that hold a focused card (:focus-within), never the whole page. */
-.tv-mode .horizontal-scroll:focus-within .dashboard-card:not(:focus),
-.tv-mode .horizontal-scroll:focus-within .continue-card:not(:focus),
-.tv-mode .horizontal-scroll:focus-within .channel-tile:not(:focus),
-.tv-mode .movies-grid:focus-within .movie-card:not(:focus),
-.tv-mode .series-grid:focus-within .series-card:not(:focus) {
-  opacity: 0.62;
-  transition: opacity 0.15s ease;
-}
-
-/* TV viewports sit far away: slightly larger base text */
-.tv-mode body {
-  font-size: 17px;
-}
-
-/* Overscan/title-safe margins: env(safe-area-inset-*) is 0 on Android TV, and
-   many panels crop ~2-5% at the edges. The left rail now provides the left
-   margin (content clears the collapsed 88px rail); keep a right/bottom
-   overscan so edge cards aren't clipped. (Navbar padding is set by the rail
-   block above.) */
-.tv-mode .main-content {
-  margin-left: 88px;
-  padding-left: 20px;               /* the rail + each rail's own padding give the
-                                       left gutter; keep content padding small so
-                                       the narrow panel isn't over-indented */
-  padding-right: 32px;
-  padding-top: 24px;                /* top overscan — the rail replaced the old top
-                                       bar, so content would otherwise sit flush to
-                                       the top edge and be cropped by TV overscan */
-  padding-bottom: 27px;
-}
-
-/* Fullscreen watch page: hide the rail entirely and let the video go
-   edge-to-edge (is-watching is toggled only for the #page-watch route). */
-.tv-mode body.is-watching .navbar {
-  display: none;
-}
-.tv-mode body.is-watching .main-content {
-  margin-left: 0;
-  padding-left: 0;
-  padding-right: 0;
-}
-.tv-mode .main-content #page-watch {
-  margin-left: 0;
-  margin-right: 0;
-}
-
-/* Android TV — Home billboard reads from the couch: taller hero, larger copy and
-   CTAs so the title, reason and buttons are legible at 10-foot distance. */
-.tv-mode .home-hero-section {
-  min-height: clamp(440px, 46vw, 640px);
-}
-
-.tv-mode .home-hero-content {
-  width: min(780px, 76%);
-}
-
-.tv-mode .home-hero-content h1 {
-  font-size: clamp(2.8rem, 5vw, 5rem);
-}
-
-.tv-mode .home-hero-content p {
-  font-size: 1.3rem;
-  -webkit-line-clamp: 3;
-  max-width: 60ch;
-}
-
-.tv-mode .home-hero-kicker {
-  font-size: 1.02rem;
-}
-
-.tv-mode .home-hero-play,
-.tv-mode .home-hero-more,
-.tv-mode .home-hero-trailer {
-  min-height: 54px;
-  min-width: 150px;
-  padding: 14px 30px;
-  font-size: 1.08rem;
-}
-
-/* Overscan-safe rails: a D-pad-focused card scales 1.09 with a white ring, and the
-   rail's own overflow clips vertically. Pad the rail (room for the scaled ring top
-   and bottom) and set scroll-padding so a focused EDGE card scrolls fully into view
-   with room to breathe instead of sitting flush against the screen edge. */
-.tv-mode .horizontal-scroll {
-  /* overflow-x:auto also clips the Y axis. The focus ring is now drawn INSET
-     (see the card :focus rule) so it can't clip, but the scale(1.09) still lifts
-     the card body ~13px — pad enough that the scaled body isn't clipped. */
-  padding: 18px 14px 20px;
-  scroll-padding-inline: 70px;
-}
-
-/* TV replacement for the native <select> spinner — premium remote-friendly picker. */
-.tv-select-overlay {
-  z-index: 10050;
-  background: rgba(4, 8, 16, 0.74);
-  -webkit-backdrop-filter: blur(12px) saturate(1.1);
-  backdrop-filter: blur(12px) saturate(1.1);
-}
-
-.tv-select-panel {
-  position: relative;
-  min-width: 460px;
-  max-width: 620px;
-  width: min(620px, 62vw);
-  max-height: 82vh;
-  margin: auto;
-  display: flex;
-  flex-direction: column;
-  padding: 26px 22px 20px;
-  border-radius: 20px;
-  background:
-    radial-gradient(130% 90% at 50% -10%, rgba(59, 130, 246, 0.16), transparent 62%),
-    linear-gradient(180deg, #151c2c 0%, #0c111e 100%);
-  border: 1px solid rgba(120, 160, 255, 0.18);
-  box-shadow: 0 32px 90px rgba(0, 0, 0, 0.62), inset 0 1px 0 rgba(255, 255, 255, 0.06);
-  animation: tvSelectIn 0.22s cubic-bezier(0.2, 0.7, 0.2, 1);
-}
-
-@keyframes tvSelectIn {
-  from { opacity: 0; transform: translateY(12px) scale(0.96); }
-  to   { opacity: 1; transform: translateY(0)    scale(1); }
-}
-
-.tv-select-title {
-  font-size: 1.15rem;
-  font-weight: 700;
-  letter-spacing: 0.01em;
-  color: #fff;
-  padding: 0 6px 4px;
-}
-.tv-select-title::after {
-  content: "";
-  display: block;
-  width: 40px;
-  height: 3px;
-  margin: 12px 0 4px;
-  border-radius: 3px;
-  background: linear-gradient(90deg, var(--color-accent, #3B82F6), var(--color-accent-hover, #60A5FA));
-}
-
-.tv-select-list {
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 14px 2px 2px;   /* top gap + room for the focus ring */
-}
-
-.tv-select-option {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  text-align: left;
-  padding: 16px 18px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 13px;
-  background: rgba(255, 255, 255, 0.045);
-  color: #e8edf7;
-  font-size: 1.05rem;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease, transform 0.12s ease, box-shadow 0.15s ease;
-}
-
-.tv-select-option-label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.tv-select-check {
-  flex: none;
-  color: var(--color-accent-hover, #60A5FA);
-  font-weight: 800;
-  font-size: 1.1rem;
-}
-
-.tv-select-option.selected {
-  background: linear-gradient(180deg, rgba(59, 130, 246, 0.2), rgba(59, 130, 246, 0.1));
-  border-color: rgba(96, 165, 250, 0.45);
-  color: #fff;
-  font-weight: 600;
-}
-
-/* D-pad focus — the whole point of the 10-foot picker: an unmistakable ring. */
-.tv-select-option:focus,
-.tv-select-cancel:focus {
-  outline: none;
-  border-color: var(--color-accent-hover, #60A5FA);
-  background: linear-gradient(180deg, rgba(96, 165, 250, 0.3), rgba(59, 130, 246, 0.16));
-  box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.75), 0 10px 28px rgba(59, 130, 246, 0.34);
-  transform: translateY(-1px);
-  color: #fff;
-}
-
-.tv-select-cancel {
-  margin-top: 12px;
-  padding: 14px 18px;
-  text-align: center;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 13px;
-  background: transparent;
-  color: var(--color-text-secondary, #94A3B8);
-  font-size: 1rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease, transform 0.12s ease;
-}
-
-/* ============================================================
-   Mobile bottom tab bar — replaces the top hamburger on phones.
-   The .bottom-nav links reuse .nav-link + data-page, so the existing
-   navigateTo handler, active-state sync, and catalog gating all apply
-   with no extra JS. Desktop/tablet keep the top nav (this is hidden).
-   ============================================================ */
-.bottom-nav { display: none; }
-
-@media (max-width: 640px) {
-  /* Retire the top hamburger + dropdown — page nav now lives at the bottom.
-     The top bar shrinks to logo (left) + profile avatar (right). */
-  .mobile-menu-toggle { display: none !important; }
-  .navbar-menu { display: none !important; }
-
-  .bottom-nav {
-    display: flex;
-    position: fixed;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    z-index: 200;
-    justify-content: space-around;
-    align-items: stretch;
-    background: var(--glass-bg);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    border-top: 1px solid var(--glass-border);
-    padding-bottom: env(safe-area-inset-bottom, 0px);
-    box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.25);
-  }
-  .bottom-nav .nav-link {
-    flex: 1 1 0;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 3px;
-    height: 56px;
-    padding: 6px 2px;
-    color: var(--text-secondary, #9aa6bd);
-    text-decoration: none;
-    opacity: 0.7;
-    transition: opacity 0.15s ease, color 0.15s ease, transform 0.1s ease;
-  }
-  .bottom-nav .nav-link .nav-icon {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 24px;
-    height: 24px;
-  }
-  .bottom-nav .nav-link .nav-icon img,
-  .bottom-nav .nav-link .nav-icon svg { width: 22px; height: 22px; display: block; }
-  .bottom-nav .nav-link span:not(.nav-icon) {
-    font-size: 10px;
-    line-height: 1;
-    font-weight: 600;
-    white-space: nowrap;
-  }
-  .bottom-nav .nav-link.active { opacity: 1; color: var(--primary-blue); }
-  .bottom-nav .nav-link:active { transform: scale(0.92); }
-  /* .nav-link sets display:flex, which would override the [hidden] attribute —
-     restore it so catalog tabs stay hidden until the catalog is ready. */
-  .bottom-nav .nav-link[hidden] { display: none; }
-
-  /* Keep page content clear of the fixed bar. */
-  .main-content { padding-bottom: calc(56px + env(safe-area-inset-bottom, 0px)); }
-
-  /* Hide the bar while watching so the video + its controls aren't covered. */
-  body.is-watching .bottom-nav { display: none; }
-  body.is-watching .main-content { padding-bottom: 0; }
-
-  /* The bottom Profile tab replaces the top-right avatar on phones. */
-  #nav-profile { display: none !important; }
-  .bottom-nav .nav-link .nav-account-avatar { border-radius: 50%; object-fit: cover; }
-}
-
-/* ============================================================
-   Account bottom sheet — opened by the mobile Profile tab.
-   Reuses .modal-overlay (backdrop + hardware-back close) but docks
-   the panel to the bottom as a native-style sheet.
-   ============================================================ */
-.account-sheet { align-items: flex-end; }
-.account-panel {
-  width: 100%;
-  max-width: 520px;
-  margin: 0 auto;
-  background: var(--color-bg-secondary, #11151d);
-  border: 1px solid var(--color-border, #1f2733);
-  border-bottom: none;
-  border-radius: 18px 18px 0 0;
-  padding-bottom: env(safe-area-inset-bottom, 0px);
-  box-shadow: 0 -8px 30px rgba(0, 0, 0, 0.5);
-  animation: sheetUp 0.22s ease;
-  overflow: hidden;
-}
-@keyframes sheetUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
-.account-head { display: flex; align-items: center; gap: 12px; padding: 16px 16px 12px; }
-.account-avatar { width: 48px; height: 48px; border-radius: 50%; object-fit: cover; background: #0a0c11; flex: 0 0 auto; }
-.account-id { flex: 1 1 auto; min-width: 0; }
-.account-name { color: #f8fafc; font-weight: 700; font-size: 16px; line-height: 1.2; }
-.account-email { color: #8b95a9; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.account-close { width: 36px; height: 36px; flex: 0 0 auto; border-radius: 50%; border: 1px solid var(--color-border, #1f2733); background: transparent; color: #cbd5e1; font-size: 22px; line-height: 1; cursor: pointer; }
-.account-row { display: flex; align-items: center; gap: 14px; width: 100%; padding: 16px; background: transparent; border: none; border-top: 1px solid rgba(255, 255, 255, 0.06); color: #e7ecf5; font: inherit; font-size: 15px; font-weight: 600; text-align: left; cursor: pointer; }
-.account-row:active { background: rgba(255, 255, 255, 0.06); }
-.account-ic { width: 22px; height: 22px; flex: 0 0 auto; opacity: 0.9; }
-.account-row[data-act="switch"] .account-ic { border-radius: 50%; object-fit: cover; }
-.account-row-danger { color: #fda4af; }
-@media (hover: hover) { .account-row:hover { background: rgba(255, 255, 255, 0.05); } }
-/* On desktop/tablet (if ever opened there) center it as a normal modal. */
-@media (min-width: 641px) {
-  .account-sheet { align-items: center; }
-  .account-panel { border-radius: 18px; border-bottom: 1px solid var(--color-border, #1f2733); animation: modalFadeIn 0.2s ease; }
-}
-
-/* ============================================================
-   Global catalogue search — top-bar icon + full-screen overlay.
-   ============================================================ */
-.nav-search-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 40px;
-  height: 40px;
-  flex: 0 0 auto;
-  border: none;
-  border-radius: 50%;
-  background: transparent;
-  color: var(--text-secondary, #9aa6bd);
-  cursor: pointer;
-  transition: color 0.15s ease, background 0.15s ease;
-}
-.nav-search-btn:hover { color: #fff; background: rgba(255, 255, 255, 0.06); }
-.nav-search-btn:focus-visible { outline: 2px solid var(--primary-blue, #5b7cfa); outline-offset: 2px; }
-/* TV uses its own D-pad UI; a keyboard-driven search overlay there would be janky. */
-html.tv .nav-search-btn { display: none; }
-
-/* Phone/tablet APK: the inline Live preview never plays (playback is native
-   fullscreen), so drop only the video box — the channel guide stays and grows
-   into the freed height. NB: #live-guide-fusion is a sibling nested inside
-   .player-section, so we must hide #video-container specifically, never the
-   whole section. */
-.norva-phone-apk #video-container { display: none; }
-.norva-phone-apk .live-guide-fusion {
-  flex: 1 1 auto;
-  max-height: none;
-  overflow: visible; /* page-scroll model: .player-section owns the scroll */
-}
-
-/* Phone app: the inline video is hidden (playback opens the native fullscreen
-   player), so the guide must be a plain vertical list — a channel strip on top,
-   the preview bar, then the rows. NEVER the desktop/tablet two-pane split, which
-   the width-based breakpoints would otherwise trigger on a landscape phone
-   (>768px) and leave a cramped 190px rail beside the list. Pin it here so the
-   phone layout is independent of the reported WebView width/orientation. */
-.norva-phone-apk .live-guide-shell {
-  grid-template-columns: 1fr;
-  /* Same balloon guard as the <=768px block, but unconditional so it also holds when a
-     phone WebView reports a landscape width >768px (where that media query doesn't apply):
-     pack the grid rows to the top so a short/filtered list can't stretch the tab row. */
-  align-content: start;
-}
-.norva-phone-apk .live-guide-groups {
-  display: flex;
-  gap: 8px;
-  align-items: center; /* tabs stay pill-height; the active tab never stretches to the row */
-  overflow-x: auto;
-  overflow-y: hidden;
-  padding: 10px 12px;
-  border-right: 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-}
-.norva-phone-apk .live-guide-group {
-  flex: 0 0 auto;
-  width: auto;
-  min-width: 124px;
-  margin-bottom: 0;
-  justify-content: center;
-  text-align: center;
-}
-
-/* Phone/tablet APK: the Channels drawer/sidebar is redundant with the inline
-   guide — search + Hide-broken now live in the guide header (.live-guide-toolbar
-   below). Remove the whole drawer apparatus at ANY width (a wide tablet uses the
-   desktop layout where the sidebar is an inline column) and let .player-section,
-   which is flex:1, reclaim the full width. */
-.norva-phone-apk .channel-toggle-btn,
-.norva-phone-apk .channel-sidebar,
-.norva-phone-apk .channel-sidebar-overlay,
-.norva-phone-apk .sidebar-expand-btn { display: none !important; }
-
-/* Inline guide toolbar (rendered only on the phone/tablet APK). Sticky so the
-   search stays reachable while the guide scrolls inside .player-section. */
-.live-guide-toolbar {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  flex: 0 0 auto;
-  position: sticky;
-  top: 0;
-  z-index: 5;
-  padding: 10px 12px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  background: var(--color-bg-primary, #0a0e16);
-}
-.live-guide-search-wrap { position: relative; flex: 1 1 auto; min-width: 0; }
-.live-guide-search {
-  width: 100%;
-  height: 38px;
-  padding: 0 34px 0 12px;
-  border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--color-text-primary, #fff);
-  font-size: 14px;
-}
-.live-guide-search::placeholder { color: rgba(255, 255, 255, 0.45); }
-.live-guide-search-clear {
-  position: absolute;
-  right: 4px;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 26px;
-  height: 26px;
-  border: 0;
-  background: transparent;
-  color: rgba(255, 255, 255, 0.5);
-  font-size: 20px;
-  line-height: 1;
-  cursor: pointer;
-}
-.live-guide-search-clear:hover { color: rgba(255, 255, 255, 0.85); }
-.live-guide-hidebroken {
-  flex: 0 0 auto;
-  height: 38px;
-  padding: 0 12px;
-  border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.06);
-  color: rgba(255, 255, 255, 0.7);
-  font-size: 13px;
-  white-space: nowrap;
-  cursor: pointer;
-}
-.live-guide-hidebroken.is-active {
-  background: var(--color-accent, #6c5ce7);
-  border-color: transparent;
-  color: #fff;
-}
-.live-guide-source {
-  flex: 0 0 auto;
-  height: 38px;
-  max-width: 140px;
-  padding: 0 8px;
-  border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.06);
-  color: rgba(255, 255, 255, 0.8);
-  font-size: 13px;
-}
-
-/* Phone APK: the preview "Watch" button is stretched to flex:1 (full width) in the
-   compact actions row. Its play-arrow SVG (.lg-btn-ico) has no intrinsic size except
-   under tv-mode, so in a wide button it grows to a ~square and blows the button — and
-   the align-stretched Favorite pill beside it — up into a giant blue block. Pin the
-   icon to a fixed size so the Watch button keeps a normal button height, and keep the
-   actions on one compact row regardless of the WebView's reported width/orientation. */
-.norva-phone-apk .live-guide-preview-actions {
-  flex-direction: row;
-  align-items: center;
-}
-.norva-phone-apk .live-guide-preview-actions .lg-btn-primary {
-  flex: 1 1 auto;
-}
-.norva-phone-apk .live-guide-preview .lg-btn-ico {
-  width: 18px;
-  height: 18px;
-  flex: 0 0 18px;
-}
-
-/* ===== Live mini-player (web) =========================================
-   The inline live surface (#video-container) is re-parented into this floating
-   shell when you leave Live TV mid-channel, so it keeps playing while you browse.
-   z-index 500: above page content + navbar, below modals/overlays (1000/10000),
-   so an open dialog cleanly covers it. */
-.norva-mini {
-  position: fixed;
-  top: 18px;            /* fallback; JS positions at the saved corner via left/top */
-  left: 18px;
-  width: 340px;
-  max-width: 44vw;
-  aspect-ratio: 16 / 9;
-  z-index: 500;
-  border-radius: 14px;
-  overflow: hidden;
-  background: #000;
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  display: none;
-  touch-action: none;   /* drag with the finger without scrolling the page */
-  transition: left 0.22s ease, top 0.22s ease;
-  animation: norva-mini-in 0.18s ease both;
-}
-.norva-mini.active { display: block; }
-/* While dragging: follow the pointer 1:1 (no easing) and show the grabbing cursor. */
-.norva-mini.is-dragging { transition: none; cursor: grabbing; }
-@keyframes norva-mini-in {
-  from { opacity: 0; transform: translateY(12px) scale(0.96); }
-  to   { opacity: 1; transform: none; }
-}
-.norva-mini-stage { position: absolute; inset: 0; }
-.norva-mini-stage > #video-container,
-#video-container.in-mini {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  min-height: 0;
-  border-radius: 0;
-  pointer-events: none; /* the hit-layer owns taps inside the mini */
-}
-/* Transparent click/drag target over the video → tap expands, drag moves. */
-.norva-mini-hit {
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-  border: 0;
-  padding: 0;
-  background: transparent;
-  cursor: grab;
-}
-.norva-mini.is-dragging .norva-mini-hit { cursor: grabbing; }
-.norva-mini #video-player {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-  background: #000;
-}
-/* The mini-bar owns the chrome — suppress the heavy inline controls/overlays. */
-#video-container.in-mini .watch-overlay,
-#video-container.in-mini #player-controls-overlay,
-#video-container.in-mini .player-overlay,
-#video-container.in-mini .now-playing-overlay,
-#video-container.in-mini .live-fullscreen-cta { display: none !important; }
-.norva-mini-bar {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 8px 20px;
-  background: linear-gradient(180deg, rgba(0, 0, 0, 0.72), transparent);
-  opacity: 0;
-  transition: opacity 0.15s ease;
-  z-index: 2;
-}
-.norva-mini:hover .norva-mini-bar,
-.norva-mini:focus-within .norva-mini-bar { opacity: 1; }
-.norva-mini-title {
-  flex: 1 1 auto;
-  min-width: 0;
-  color: #fff;
-  font-size: 13px;
-  font-weight: 600;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
-}
-.norva-mini-btn {
-  flex: 0 0 auto;
-  width: 30px;
-  height: 30px;
-  display: grid;
-  place-items: center;
-  border: 0;
-  border-radius: 8px;
-  background: rgba(0, 0, 0, 0.5);
-  color: #fff;
-  font-size: 20px;
-  line-height: 1;
-  cursor: pointer;
-  transition: background 0.15s ease;
-}
-.norva-mini-btn:hover { background: rgba(255, 255, 255, 0.22); }
-/* While watching a movie/episode fullscreen, never show the live mini. */
-body.is-watching .norva-mini { display: none !important; }
-@media (max-width: 768px) {
-  /* Smaller on phones; position (incl. clearing the bottom nav) is JS-driven.
-     Touch has no hover, so keep the bar visible. */
-  .norva-mini { width: 210px; max-width: 56vw; }
-  .norva-mini-bar { opacity: 1; }
-}
-
-.gsearch-overlay { align-items: flex-start; }
-.gsearch-panel {
-  width: 100%;
-  height: 100%;
-  max-width: 720px;
-  margin: 0 auto;
-  display: flex;
-  flex-direction: column;
-  background: var(--color-bg-primary, #0a0c11);
-}
-.gsearch-bar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: calc(12px + env(safe-area-inset-top, 0px)) 12px 12px;
-  border-bottom: 1px solid var(--color-border, #1f2733);
-}
-.gsearch-ic { color: #8b95a9; display: inline-flex; flex: 0 0 auto; }
-#gsearch-input {
-  flex: 1 1 auto;
-  min-width: 0;
-  padding: 12px 14px;
-  border: 1px solid var(--color-border, #1f2733);
-  border-radius: 10px;
-  background: var(--color-bg-secondary, #11151d);
-  color: #f8fafc;
-  font: inherit;
-  font-size: 16px;
-}
-#gsearch-input:focus { outline: none; border-color: var(--primary-blue, #5b7cfa); }
-.gsearch-cancel { flex: 0 0 auto; padding: 8px; border: none; background: transparent; color: #9aa6bd; font: inherit; font-size: 15px; cursor: pointer; }
-.gsearch-cancel:hover { color: #fff; }
-.gsearch-results { flex: 1 1 auto; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 8px 8px calc(12px + env(safe-area-inset-bottom, 0px)); }
-.gsearch-section { padding: 14px 10px 6px; color: #8b95a9; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; }
-.gsearch-hint { padding: 44px 16px; color: #8b95a9; text-align: center; font-size: 14px; }
-.gsearch-hint .loading-spinner { margin: 0 auto; }
-.gsearch-result {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  width: 100%;
-  padding: 8px 10px;
-  border: none;
-  border-radius: 10px;
-  background: transparent;
-  color: #e7ecf5;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-.gsearch-result:active { background: rgba(255, 255, 255, 0.06); }
-@media (hover: hover) { .gsearch-result:hover { background: rgba(255, 255, 255, 0.05); } }
-.gsearch-poster { width: 46px; height: 64px; flex: 0 0 auto; border-radius: 6px; object-fit: cover; background: var(--color-bg-secondary, #11151d); }
-.gsearch-text { display: flex; flex-direction: column; min-width: 0; }
-.gsearch-title { font-size: 15px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.gsearch-sub { color: #8b95a9; font-size: 12.5px; }
-.gsearch-seeall { display: block; width: 100%; margin: 2px 0 10px; padding: 10px 12px; border: none; background: transparent; color: var(--color-accent, #4f8cff); font: inherit; font-size: 13.5px; font-weight: 600; text-align: left; cursor: pointer; border-radius: 10px; }
-.gsearch-seeall:active { background: rgba(255, 255, 255, 0.06); }
-@media (hover: hover) { .gsearch-seeall:hover { background: rgba(255, 255, 255, 0.05); } }
-@media (min-width: 641px) {
-  .gsearch-overlay { align-items: center; }
-  .gsearch-panel { height: auto; max-height: 80vh; border: 1px solid var(--color-border, #1f2733); border-radius: 16px; overflow: hidden; }
-}
-
-/* ============================================================
-   Touch targets — raise the sub-44px interactive rows on
-   coarse-pointer (finger) devices only; desktop keeps its density.
-   ============================================================ */
-@media (pointer: coarse) {
-  .live-guide-group,
-  .watch-error-refresh-btn,
-  #page-movies .movies-controls .btn,
-  #page-series .series-controls .btn,
-  #page-movies .filter-toggle,
-  #page-series .filter-toggle,
-  #page-movies .filter-reset,
-  #page-series .filter-reset {
-    min-height: 44px !important;
-    height: auto !important;
-  }
-}
-
-/* ============================================================
-   Web minors — toast, offline banner, NEW badge, still-watching,
-   richer next-episode panel, rich empty states.
-   ============================================================ */
-
-/* Toasts (undo, etc.) */
-.norva-toasts {
-  position: fixed;
-  left: 50%;
-  bottom: 24px;
-  transform: translateX(-50%);
-  z-index: 1400;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  align-items: center;
-  pointer-events: none;
-}
-
-.norva-toast {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 12px 16px;
-  border-radius: 10px;
-  background: #1c1c26;
-  color: #fff;
-  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.5);
-  font-size: 0.92rem;
-  opacity: 0;
-  transform: translateY(10px);
-  transition: opacity 0.2s ease, transform 0.2s ease;
-  pointer-events: auto;
-  max-width: min(92vw, 460px);
-}
-
-.norva-toast.show { opacity: 1; transform: translateY(0); }
-.norva-toast-error { background: #3a1d1d; }
-
-.norva-toast-action {
-  border: none;
-  background: transparent;
-  color: #8be9fd;
-  font-weight: 700;
-  cursor: pointer;
-  padding: 4px 6px;
-  white-space: nowrap;
-}
-
-/* Success toast (base + .norva-toast-error already defined above). */
-.norva-toast-success { background: #16351f; }
-
-/* ============================================================
-   NorvaModal — unified confirm/alert dialog (replaces native alert/confirm)
-   ============================================================ */
-.norva-modal-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 10050;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 20px;
-  background: rgba(4, 6, 12, 0.66);
-  -webkit-backdrop-filter: blur(4px);
-  backdrop-filter: blur(4px);
-  animation: norva-modal-in 0.14s ease;
-}
-
-@keyframes norva-modal-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
-.norva-modal {
-  width: min(440px, 100%);
-  background: #171922;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 16px;
-  padding: 24px;
-  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.6);
-}
-
-.norva-modal.is-danger {
-  border-color: rgba(239, 68, 68, 0.35);
-}
-
-.norva-modal-title {
-  font-size: 1.15rem;
-  font-weight: 800;
-  color: #fff;
-  margin-bottom: 8px;
-}
-
-.norva-modal-message {
-  color: var(--color-text-secondary);
-  font-size: 0.95rem;
-  line-height: 1.5;
-}
-
-.norva-modal-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-  margin-top: 22px;
-}
-
-.norva-modal-btn {
-  min-height: 44px;
-  padding: 10px 20px;
-  border-radius: 10px;
-  font-size: 0.92rem;
-  font-weight: 700;
-  cursor: pointer;
-  border: 1px solid transparent;
-  transition: background var(--transition-fast), border-color var(--transition-fast);
-}
-
-.norva-modal-cancel {
-  background: rgba(255, 255, 255, 0.06);
-  border-color: rgba(255, 255, 255, 0.16);
-  color: #e9eeff;
-}
-
-.norva-modal-cancel:hover {
-  background: rgba(255, 255, 255, 0.12);
-}
-
-.norva-modal-confirm {
-  background: var(--color-accent);
-  color: #fff;
-}
-
-.norva-modal-confirm:hover {
-  background: #2f6df0;
-}
-
-.norva-modal-confirm.is-danger {
-  background: #ef4444;
-}
-
-.norva-modal-confirm.is-danger:hover {
-  background: #dc2626;
-}
-
-/* Mobile: dock the dialog to the bottom for thumb reach, full-width stacked buttons. */
-@media (max-width: 560px) {
-  .norva-modal-overlay {
-    align-items: flex-end;
-    padding: 0;
-  }
-
-  .norva-modal {
-    width: 100%;
-    border-radius: 18px 18px 0 0;
-    padding: 22px 20px calc(22px + env(safe-area-inset-bottom, 0px));
-  }
-
-  .norva-modal-actions {
-    flex-direction: column-reverse;
-  }
-
-  .norva-modal-btn {
-    width: 100%;
-  }
-}
-
-/* Android TV — large, legible dialog + buttons for the couch / D-pad. */
-.tv-mode .norva-modal {
-  width: min(560px, 90%);
-  padding: 32px;
-}
-
-.tv-mode .norva-modal-title {
-  font-size: 1.5rem;
-}
-
-.tv-mode .norva-modal-message {
-  font-size: 1.15rem;
-}
-
-.tv-mode .norva-modal-btn {
-  min-height: 56px;
-  font-size: 1.1rem;
-  padding: 14px 28px;
-}
-
-/* Offline banner (top, full width) */
-.norva-offline-banner {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  z-index: 1350;
-  padding: 8px 16px;
-  text-align: center;
-  font-size: 0.86rem;
-  color: #0a0a0f;
-  background: #f4c95d;
-}
-
-/* "New" corner badge on cards */
-.new-badge {
-  position: absolute;
-  top: 8px;
-  left: 8px;
-  z-index: 3;
-  padding: 2px 7px;
-  border-radius: 4px;
-  background: #e50914;
-  color: #fff;
-  font-size: 0.66rem;
-  font-weight: 800;
-  letter-spacing: 0.06em;
-}
-
-/* "Are you still watching?" overlay */
-.watch-still-watching {
-  position: absolute;
-  inset: 0;
-  z-index: 40;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(5, 5, 10, 0.82);
-}
-
-.still-watching-box {
-  text-align: center;
-  padding: 32px 28px;
-  max-width: 420px;
-}
-
-.still-watching-box h3 { font-size: 1.4rem; margin-bottom: 8px; color: #fff; }
-.still-watching-box p { color: var(--color-text-secondary, #a1a1aa); margin-bottom: 20px; }
-
-/* Richer next-episode panel */
-.watch-next-episode .next-still {
-  width: 128px;
-  aspect-ratio: 16 / 9;
-  object-fit: cover;
-  border-radius: 6px;
-  flex: 0 0 auto;
-}
-
-.watch-next-episode .next-synopsis {
-  font-size: 0.82rem;
-  color: var(--color-text-secondary, #a1a1aa);
-  margin-top: 4px;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.watch-next-episode .next-actions {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-left: auto;
-}
-
-/* Rich empty states (grids) */
-.rich-empty {
-  text-align: center;
-  padding: 56px 20px;
-  max-width: 460px;
-  margin: 0 auto;
-}
-
-.rich-empty .empty-icon { font-size: 2.6rem; margin-bottom: 12px; }
-.rich-empty h3 { font-size: 1.2rem; color: #fff; margin-bottom: 6px; }
-.rich-empty p { color: var(--color-text-secondary, #a1a1aa); margin-bottom: 18px; }
-
-/* ============================================================
-   Transversal — thumbs, notifications bell/inbox, focus-visible.
-   ============================================================ */
-
-/* Thumbs up/down on the fiche */
-.thumb-btn {
-  font-size: 1.05rem;
-  line-height: 1;
-  opacity: 0.75;
-  transition: opacity 0.15s ease, transform 0.15s ease;
-}
-
-.thumb-btn:hover { opacity: 1; }
-
-.thumb-btn.active {
-  opacity: 1;
-  transform: scale(1.12);
-  background: rgba(255, 255, 255, 0.14);
-}
-
-/* Notifications bell + unread dot */
-.nav-bell-btn {
-  position: relative;
-  background: transparent;
-  border: none;
-  color: inherit;
-  cursor: pointer;
-  padding: 6px;
-  display: inline-flex;
-  align-items: center;
-}
-
-.nav-bell-dot {
-  position: absolute;
-  top: 4px;
-  right: 4px;
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background: #e50914;
-  border: 2px solid var(--color-bg, #0a0a0f);
-}
-
-.norva-notif-panel {
-  position: fixed;
-  top: 60px;
-  right: 16px;
-  z-index: 1300;
-  width: min(92vw, 360px);
-  max-height: 70vh;
-  overflow: hidden;
-  background: #16161e;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 12px;
-  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.6);
-  display: flex;
-  flex-direction: column;
-}
-
-.norva-notif-head {
-  padding: 14px 16px;
-  font-weight: 700;
-  color: #fff;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.norva-notif-list { overflow-y: auto; }
-
-.norva-notif-item {
-  padding: 12px 16px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-}
-
-.norva-notif-item.unread { background: rgba(109, 139, 255, 0.08); }
-.norva-notif-summary { font-size: 0.9rem; color: #e4e4f2; }
-.norva-notif-time { font-size: 0.75rem; color: var(--color-text-muted, #71717a); margin-top: 3px; }
-.norva-notif-empty { padding: 28px 16px; text-align: center; color: var(--color-text-secondary, #a1a1aa); }
-
-/* Accessibility: a clear keyboard focus ring everywhere, without adding an
-   outline for mouse users (:focus-visible only fires for keyboard/AT). Excludes
-   TV mode, which draws its own high-contrast 10-foot ring. */
-:root:not(.tv-mode) :focus-visible {
-  outline: 3px solid #6d8bff;
-  outline-offset: 2px;
-  border-radius: 4px;
-}
-
-/* ── Region picker (searchable combobox for "Your region") ───────────────────────── */
-.region-picker { position: relative; display: inline-block; }
-.region-picker-native {
-  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
-  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; opacity: 0;
-  pointer-events: none;
-}
-.region-picker-btn {
-  display: inline-flex; align-items: center; justify-content: space-between; gap: 10px;
-  cursor: pointer; text-align: left;
-}
-.region-picker-value { min-width: 0; flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.region-picker-caret { flex: none; opacity: 0.6; font-size: 0.8em; }
-.region-picker-btn[aria-expanded="true"] .region-picker-caret { transform: rotate(180deg); }
-
-.region-picker-pop {
-  /* position:fixed + JS-computed top/left so a scrollable/overflow-hidden settings
-     ancestor can't clip it. */
-  position: fixed; z-index: 200;
-  width: min(320px, 88vw);
-  background: #14161f; border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 12px; box-shadow: 0 12px 34px rgba(0, 0, 0, 0.45);
-  padding: 8px; display: flex; flex-direction: column; gap: 8px;
-}
-/* Author display:flex above overrides the UA [hidden]{display:none}; restore it so the
-   popover actually hides (same gotcha the repo handles for .nav-profile / .bottom-nav). */
-.region-picker-pop[hidden] { display: none; }
-.region-picker-search {
-  width: 100%; box-sizing: border-box; padding: 9px 12px; border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.14); background: rgba(255, 255, 255, 0.05);
-  color: var(--color-text-primary); font-size: 0.9rem;
-}
-.region-picker-search:focus { outline: none; border-color: rgba(98, 135, 255, 0.6); }
-.region-picker-list {
-  list-style: none; margin: 0; padding: 0; max-height: 320px; overflow-y: auto;
-}
-.region-picker-group {
-  padding: 8px 10px 4px; font-size: 0.68rem; font-weight: 700; letter-spacing: 0.08em;
-  text-transform: uppercase; color: var(--color-text-secondary); opacity: 0.7;
-}
-.region-picker-option {
-  display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px;
-  cursor: pointer; color: var(--color-text-primary); font-size: 0.92rem;
-}
-.region-picker-opt-flag { flex: none; font-size: 1.1em; line-height: 1; }
-.region-picker-opt-name { min-width: 0; flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.region-picker-option:hover { background: rgba(98, 135, 255, 0.12); }
-/* Keyboard cursor: distinct from hover (DOM focus stays in the search box, so options
-   can't use :focus-visible). */
-.region-picker-option.is-active {
-  background: rgba(98, 135, 255, 0.22);
-  box-shadow: inset 2px 0 0 #6d8bff;
-}
-.region-picker-option.is-current { font-weight: 700; }
-.region-picker-option.is-current::after {
-  content: '✓'; margin-left: auto; color: #6287ff; font-weight: 800;
-}
-.region-picker-empty { padding: 14px 10px; text-align: center; color: var(--color-text-secondary); font-size: 0.9rem; }
-
-/* asset-rev: main-def-2 — content-hash bump to bypass a poisoned edge cache */
-
-/* ============================================================
-   Android TV / Movies - mockup layout correction
-   ------------------------------------------------------------
-   Intentionally platform AND page scoped. The JS controller adds
-   .tv-movies-active only while Movies is shown, so web, mobile,
-   Series, Live TV and the other TV pages retain their existing UI.
-   Keep this block last: it resets tablet/coarse-pointer rules that
-   Android TV WebViews also match.
-   ============================================================ */
-
-html.tv-mode.tv-movies-active {
-  --tv-movies-nav-width: clamp(82px, 8vw, 104px);
-  --tv-movies-panel-width: clamp(250px, 28%, 350px);
-  --tv-movies-control-height: 32px;
-}
-
-/* Movies-only version of the mockup's labelled icon rail. */
-html.tv-mode.tv-movies-active .navbar,
-html.tv-mode.tv-movies-active .navbar:focus-within {
-  width: var(--tv-movies-nav-width);
-  padding: 20px 0 14px;
-}
-
-html.tv-mode.tv-movies-active .navbar:focus-within ~ .main-content {
-  transform: none;
-}
-
-html.tv-mode.tv-movies-active .navbar-brand {
-  justify-content: center;
-  margin: 0 0 8px;
-  padding: 0;
-}
-
-html.tv-mode.tv-movies-active .navbar-brand .brand-text {
-  display: none;
-}
-
-html.tv-mode.tv-movies-active .navbar-menu {
-  gap: 2px;
-}
-
-html.tv-mode.tv-movies-active .navbar-menu .nav-link {
-  width: 100%;
-  min-height: 58px;
-  flex-direction: column;
-  justify-content: center;
-  align-items: center;
-  gap: 4px;
-  padding: 7px 3px;
-  font-size: 0.67rem;
-  line-height: 1.05;
-  text-align: center;
-}
-
-html.tv-mode.tv-movies-active .navbar-menu .nav-link span:not(.nav-icon) {
-  max-width: 100%;
-  opacity: 1;
-}
-
-html.tv-mode.tv-movies-active .navbar-menu .nav-link .nav-icon,
-html.tv-mode.tv-movies-active .navbar-menu .nav-link .norva-ui-icon {
-  width: 23px;
-  height: 23px;
-  flex-basis: 23px;
-}
-
-html.tv-mode.tv-movies-active .nav-search-btn,
-html.tv-mode.tv-movies-active .nav-bell-btn,
-html.tv-mode.tv-movies-active .nav-profile {
-  align-self: center;
-  margin-left: 0;
-  width: 38px;
-  height: 38px;
-  flex-basis: 38px;
-}
-
-html.tv-mode.tv-movies-active .main-content {
-  margin-left: var(--tv-movies-nav-width);
-  padding: 14px 18px 14px 14px;
-}
-
-/* Do not let the TV selector defeat the normal page visibility contract. */
-html.tv-mode #page-movies:not(.active) {
-  display: none !important;
-}
-
-html.tv-mode #page-movies.active.tv-movies-layout-ready {
-  display: grid !important;
-  grid-template-columns: minmax(0, 1fr) var(--tv-movies-panel-width);
-  grid-template-rows: auto auto auto auto auto auto minmax(0, 1fr);
-  grid-template-areas:
-    "header       panel"
-    "primary      panel"
-    "secondary    panel"
-    "active       panel"
-    "continue     panel"
-    "catalog-head panel"
-    "grid         panel";
-  column-gap: 14px;
-  row-gap: 5px;
-  width: 100%;
-  height: 100%;
-  min-width: 0;
-  min-height: 0;
-  padding: 0;
-  overflow: hidden;
-}
-
-/* Header: copy at left, search at right. */
-html.tv-mode #page-movies.tv-movies-layout-ready .movies-header {
-  grid-area: header;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(220px, 42%);
-  align-items: center;
-  gap: 16px;
-  min-width: 0;
-  margin: 0;
-  padding: 0;
-  background: transparent;
-  border: 0;
-}
-
-html.tv-mode #page-movies.tv-movies-layout-ready .movies-heading {
-  min-width: 0;
-}
-
-html.tv-mode #page-movies.tv-movies-layout-ready .movies-header h2 {
-  margin: 0;
-  font-size: clamp(1.45rem, 2.25vw, 2rem);
-  font-weight: 750;
-  line-height: 1.05;
-}
-
-html.tv-mode #page-movies.tv-movies-layout-ready .movies-subtitle {
-  display: block;
-  margin-top: 5px;
-  color: #aebbd2;
-  font-size: 0.78rem;
-  line-height: 1.25;
-}
-
-html.tv-mode #page-movies.tv-movies-layout-ready .movies-controls {
-  display: block;
-  width: 100%;
-  min-width: 0;
-  margin: 0;
-}
-
-html.tv-mode #page-movies.tv-movies-layout-ready .movies-controls > :not(.search-wrapper) {
-  display: none !important;
-}
-
-html.tv-mode #page-movies.tv-movies-layout-ready .movies-controls .search-wrapper {
-  width: 100%;
-  min-width: 0;
-  max-width: none;
-  flex: none;
-}
-
-html.tv-mode #page-movies.tv-movies-layout-ready .movies-controls .search-input {
-  width: 100%;
-  min-width: 0;
-  height: 36px;
-  padding: 0 36px 0 15px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 9px;
-  background: rgba(255, 255, 255, 0.055);
-  font-size: 0.76rem;
-}
-
-/* Two compact control rows, assembled from the existing live controls by JS. */
-html.tv-mode #page-movies .tv-movies-primary-filters {
-  grid-area: primary;
-}
-
-html.tv-mode #page-movies .tv-movies-secondary-filters {
-  grid-area: secondary;
-}
-
-html.tv-mode #page-movies .tv-movies-filter-row {
-  display: grid;
-  align-items: center;
-  gap: 5px;
-  min-width: 0;
-}
-
-html.tv-mode #page-movies .tv-movies-primary-filters {
-  grid-template-columns: 1.05fr 1.28fr 0.82fr 0.92fr 0.9fr 1.14fr;
-}
-
-html.tv-mode #page-movies .tv-movies-secondary-filters {
-  grid-template-columns: 1.1fr 0.92fr 0.98fr 1.25fr 1.22fr minmax(72px, 0.84fr);
-}
-
-html.tv-mode #page-movies .tv-movies-filter-row > *,
-html.tv-mode #page-movies .tv-movies-filter-row .multi-select,
-html.tv-mode #page-movies .tv-movies-filter-row .multi-select-btn {
-  min-width: 0;
-  max-width: none;
-  width: 100%;
-}
-
-html.tv-mode #page-movies .tv-movies-filter-row .source-select,
-html.tv-mode #page-movies .tv-movies-filter-row .filter-select,
-html.tv-mode #page-movies .tv-movies-filter-row .multi-select-btn,
-html.tv-mode #page-movies .tv-movies-filter-row .filter-toggle,
-html.tv-mode #page-movies .tv-movies-filter-row .filter-reset,
-html.tv-mode #page-movies .tv-movies-filter-row .btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 4px;
-  width: 100%;
-  min-width: 0;
-  max-width: none;
-  height: var(--tv-movies-control-height) !important;
-  min-height: var(--tv-movies-control-height) !important;
-  padding: 0 7px;
-  overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.13);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.055);
-  color: #dbe4f7;
-  font-size: 0.74rem !important;
-  line-height: 1;
-  text-overflow: clip;
-  white-space: nowrap;
-}
-
-html.tv-mode #page-movies .tv-movies-filter-row .multi-select-btn,
-html.tv-mode #page-movies .tv-movies-filter-row .filter-toggle,
-html.tv-mode #page-movies .tv-movies-filter-row .filter-reset,
-html.tv-mode #page-movies .tv-movies-filter-row .btn {
-  white-space: normal;
-  line-height: 1.05;
-}
-
-html.tv-mode #page-movies .tv-movies-filter-row .filter-toggle.active,
-html.tv-mode #page-movies .tv-movies-filter-row .btn.active {
-  border-color: rgba(72, 132, 255, 0.88);
-  background: linear-gradient(180deg, #0878ff, #0c55e8);
-  color: #fff;
-}
-
-html.tv-mode #page-movies .tv-movies-filter-row > *:focus,
-html.tv-mode #page-movies .tv-movies-filter-row .multi-select-btn:focus {
-  outline: none !important;
-  box-shadow: inset 0 0 0 2px #fff, 0 0 0 2px rgba(47, 119, 255, 0.9) !important;
-  transform: none;
-}
-
-/* Restore the full Favorites label hidden by the tablet icon-only rule. */
-html.tv-mode #page-movies #movies-favorites-btn {
-  width: 100%;
-  min-width: 0;
-  max-width: none;
-  flex-basis: auto;
-  padding: 0 7px;
-  color: #dbe4f7;
-  font-size: 0.74rem !important;
-}
-
-html.tv-mode #page-movies #movies-favorites-btn .icon {
-  width: 17px;
-  height: 17px;
-  flex-basis: 17px;
-  color: currentColor;
-}
-
-/* The controls not present in the supplied TV mockup remain parked here. */
-html.tv-mode #page-movies.tv-movies-layout-ready #movies-filter-bar {
-  display: none !important;
-}
-
-html.tv-mode #page-movies #movies-active-filters {
-  grid-area: active;
-  gap: 6px;
-  min-width: 0;
-  padding: 0;
-  background: transparent;
-}
-
-html.tv-mode #page-movies #movies-active-filters .filter-chip {
-  padding: 3px 8px;
-  font-size: 0.69rem;
-}
-
-/* All Movies + live count + sort, without injecting content into the virtual grid. */
-html.tv-mode #page-movies .tv-movies-catalog-head {
-  grid-area: catalog-head;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-  padding: 1px 2px 0;
-}
-
-html.tv-mode #page-movies .tv-movies-catalog-title {
-  margin: 0;
-  color: #f5f8ff;
-  font-size: 1rem;
-  font-weight: 750;
-}
-
-html.tv-mode #page-movies .tv-movies-catalog-meta {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-  flex: 1;
-}
-
-html.tv-mode #page-movies #movies-count {
-  display: inline-flex !important;
-  width: auto;
-  margin: 0;
-  color: #9babc5;
-  font-size: 0.72rem;
-}
-
-html.tv-mode #page-movies #movies-sort {
-  grid-column: auto;
-  grid-row: auto;
-  width: auto;
-  min-width: 126px;
-  max-width: 170px;
-  height: 32px !important;
-  min-height: 32px !important;
-  margin-left: auto;
-  padding: 0 9px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.05);
-  color: #dbe4f7;
-  font-size: 0.72rem;
-}
-
-/* Five-column portrait catalogue. Rails are disabled by the TV JS path. */
-html.tv-mode #page-movies #movies-grid {
-  grid-area: grid;
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  grid-auto-rows: max-content;
-  gap: 9px;
-  width: 100%;
-  height: auto;
-  min-width: 0;
-  min-height: 0;
-  padding: 4px 3px 8px;
-  overflow-x: hidden;
-  overflow-y: auto;
-  align-content: start;
-  justify-content: stretch;
-  scroll-padding-block: 14px;
-  scrollbar-width: thin;
-}
-
-html.tv-mode #page-movies #movies-grid .grid-spacer,
-html.tv-mode #page-movies #movies-grid .movies-loader,
-html.tv-mode #page-movies #movies-grid .empty-state {
-  grid-column: 1 / -1;
-}
-
-html.tv-mode #page-movies #movies-grid .movie-card {
-  width: 100%;
-  min-width: 0;
-  max-width: none;
-  flex: none;
-  overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.075);
-  border-radius: 9px;
-  background: rgba(15, 25, 44, 0.9);
-  transform: none;
-}
-
-html.tv-mode #page-movies #movies-grid .movie-poster {
-  width: 100%;
-  height: auto;
-  aspect-ratio: 2 / 3;
-}
-
-html.tv-mode #page-movies #movies-grid .movie-info {
-  padding: 7px 7px 8px;
-}
-
-html.tv-mode #page-movies #movies-grid .movie-title {
-  font-size: 0.72rem;
-  font-weight: 650;
-}
-
-html.tv-mode #page-movies #movies-grid .movie-meta {
-  gap: 5px;
-  margin-top: 4px;
-  font-size: 0.62rem;
-}
-
-html.tv-mode #page-movies #movies-grid .movie-play-overlay {
-  inset: auto auto 8px 8px;
-  width: 27px;
-  height: 27px;
-  border: 1px solid rgba(255, 255, 255, 0.82);
-  border-radius: 50%;
-  background: rgba(4, 8, 15, 0.64);
-  opacity: 1;
-}
-
-html.tv-mode #page-movies #movies-grid .movie-play-overlay .play-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 0.9rem;
-  line-height: 1;
-}
-
-html.tv-mode #page-movies #movies-grid .movie-play-overlay .play-icon svg {
-  width: 13px;
-  height: 13px;
-}
-
-html.tv-mode #page-movies #movies-grid .movie-poster > .favorite-btn {
-  display: none !important;
-}
-
-html.tv-mode #page-movies .movies-grid:focus-within .movie-card:not(:focus):not(.tv-preview-active) {
-  opacity: 1;
-}
-
-html.tv-mode #page-movies #movies-grid .movie-card:focus,
-html.tv-mode #page-movies #movies-grid .movie-card.tv-preview-active {
-  z-index: 3;
-  outline: none !important;
-  border-color: rgba(113, 173, 255, 0.92);
-  border-radius: 9px !important;
-  transform: translateY(-1px);
-  box-shadow:
-    inset 0 0 0 2px #fff,
-    0 0 0 2px #2387ff,
-    0 8px 22px rgba(0, 80, 255, 0.34) !important;
-}
-
-/* Continue Watching stays directly below the filters. The controller toggles
-   .is-compact at 32px/8px of grid scroll; the TV sizes below preserve that UX. */
-html.tv-mode #page-movies #movies-continue {
-  grid-area: continue;
-  min-width: 0;
-  padding: 2px 2px 0;
-  overflow: visible;
-}
-
-html.tv-mode.tv-movies-active
-#page-movies.active.tv-movies-layout-ready
-#movies-continue:not(.hidden):not([hidden]) {
-  display: block !important;
-}
-
-html.tv-mode #page-movies #movies-continue h3 {
-  margin: 0 0 4px;
-  color: #f5f8ff;
-  font-size: 0.82rem;
-  font-weight: 700;
-}
-
-html.tv-mode #page-movies #movies-continue .continue-scroller {
-  gap: 7px;
-  padding: 1px 4px 4px;
-  scroll-padding-inline: 8px;
-}
-
-html.tv-mode #page-movies #movies-continue .continue-card {
-  flex: 0 0 clamp(145px, 30%, 205px);
-  min-height: 64px;
-  border-radius: 9px;
-}
-
-html.tv-mode #page-movies #movies-continue .continue-card img {
-  width: 43px;
-  height: 64px;
-}
-
-html.tv-mode.tv-movies-active #page-movies #movies-continue.is-compact h3 {
-  margin-bottom: 3px;
-  font-size: 0.7rem;
-  opacity: 0.72;
-}
-
-html.tv-mode.tv-movies-active #page-movies #movies-continue.is-compact .continue-scroller {
-  gap: 5px;
-  padding-block: 0 2px;
-}
-
-html.tv-mode.tv-movies-active #page-movies #movies-continue.is-compact .continue-card {
-  flex: 0 0 138px;
-  min-height: 52px;
-}
-
-html.tv-mode.tv-movies-active #page-movies #movies-continue.is-compact .continue-card img {
-  width: 35px;
-  height: 52px;
-}
-
-html.tv-mode.tv-movies-active #page-movies #movies-continue.is-compact .continue-card-info {
-  padding: 4px 5px 4px 0;
-}
-
-html.tv-mode.tv-movies-active #page-movies #movies-continue.is-compact .continue-card-title {
-  font-size: 0.68rem;
-}
-
-html.tv-mode.tv-movies-active #page-movies #movies-continue.is-compact .continue-card-subtitle {
-  display: none;
-}
-
-html.tv-mode.tv-movies-active #page-movies #movies-continue .continue-card:focus {
-  transform: translateY(-1px);
-}
-
-html.tv-mode.tv-movies-active #page-movies *:focus {
-  scroll-margin: 12px;
-}
-
-html.tv-mode.tv-movies-active #page-movies #movies-grid,
-html.tv-mode.tv-movies-active #page-movies #movie-details {
-  scroll-padding-block: 12px;
-}
-
-/* Persistent right-side movie preview. */
-html.tv-mode #page-movies #movie-details,
-html.tv-mode #page-movies #movie-details.hidden {
-  grid-area: panel;
-  display: block !important;
-  min-width: 0;
-  min-height: 0;
-  max-height: none;
-  overflow-x: hidden;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-width: none;
-  border: 1px solid rgba(86, 130, 217, 0.24);
-  border-radius: 16px;
-  background: linear-gradient(180deg, rgba(10, 31, 64, 0.98), rgba(7, 19, 39, 0.99));
-}
-
-html.tv-mode #page-movies #movie-details::-webkit-scrollbar {
-  display: none;
-}
-
-html.tv-mode #page-movies .movie-back-btn {
-  display: none !important;
-}
-
-html.tv-mode #page-movies .movie-detail-hero {
-  display: block;
-  min-height: 0;
-  padding: 0;
-  overflow: visible;
-}
-
-html.tv-mode #page-movies .movie-detail-hero::before,
-html.tv-mode #page-movies .movie-detail-hero::after {
-  display: none;
-}
-
-/* Critical repair: the previous TV rule changed flex-direction but forgot
-   display:flex, so the desktop two-column grid kept crushing the copy. */
-html.tv-mode #page-movies .movie-detail-hero-content {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 11px;
-  width: 100%;
-  max-width: none;
-  padding: 14px;
-}
-
-html.tv-mode #page-movies .movie-detail-poster {
-  display: block;
-  width: 100%;
-  height: auto !important;
-  aspect-ratio: 1.08 / 1;
-  object-fit: cover;
-  object-position: center;
-  border-radius: 11px;
-  box-shadow: none;
-}
-
-html.tv-mode #page-movies .movie-detail-info {
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-  min-width: 0;
-}
-
-html.tv-mode #page-movies #movie-detail-title {
-  margin: 0;
-  color: #fff;
-  font-size: clamp(1.18rem, 2vw, 1.5rem);
-  line-height: 1.12;
-  overflow-wrap: normal;
-  word-break: normal;
-}
-
-html.tv-mode #page-movies .movie-meta-pills {
-  gap: 5px;
-  margin: 0;
-}
-
-html.tv-mode #page-movies .movie-meta-pills span {
-  min-height: 21px;
-  padding: 0 7px;
-  border-radius: 5px;
-  font-size: 0.63rem;
-}
-
-html.tv-mode #page-movies #movie-detail-plot {
-  display: -webkit-box;
-  margin: 0;
-  overflow: hidden;
-  color: #d2dced;
-  font-size: 0.76rem;
-  line-height: 1.42;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
-}
-
-html.tv-mode #page-movies .movie-detail-progress {
-  margin-top: 4px;
-}
-
-html.tv-mode #page-movies .movie-detail-actions {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 7px;
-  margin-top: 6px;
-}
-
-html.tv-mode #page-movies .movie-primary-action {
-  grid-column: 1 / -1;
-  width: 100%;
-  min-height: 42px;
-  padding: 8px 10px;
-  border-radius: 8px;
-  background: linear-gradient(180deg, #0878ff, #0c55e8);
-  color: #fff;
-}
-
-html.tv-mode #page-movies .movie-secondary-action,
-html.tv-mode #page-movies .detail-trailer-btn {
-  width: 100%;
-  min-width: 0;
-  min-height: 39px;
-  padding: 7px 8px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.065);
-  color: #eef4ff;
-  font-size: 0.72rem;
-}
-
-html.tv-mode #page-movies #movie-detail-download,
-html.tv-mode #page-movies #movie-thumb-up,
-html.tv-mode #page-movies #movie-thumb-down {
-  display: none !important;
-}
-
-html.tv-mode #page-movies .movie-detail-actions button:focus {
-  outline: none !important;
-  color: #07101f;
-  background: #fff;
-  box-shadow: inset 0 0 0 2px #fff, 0 0 0 2px #2387ff !important;
-  transform: none;
-}
-
-html.tv-mode #page-movies .movie-versions-section {
-  width: 100%;
-  margin: 0;
-  padding: 0 14px 14px;
-}
-
-html.tv-mode #page-movies .movie-versions-toolbar {
-  margin-bottom: 8px;
-}
-
-html.tv-mode #page-movies .movie-versions-list {
-  grid-template-columns: 1fr;
-}
-
-/* The desktop recommendation cards use viewport percentages (16.66% at large
-   widths). Inside the narrow docked TV panel that collapses them to a few pixels.
-   Give this nested rail its own fixed 10-foot dimensions and scroll container. */
-html.tv-mode.tv-movies-active
-#page-movies.active.tv-movies-layout-ready
-#movie-details .more-like-this {
-  width: 100%;
-  min-width: 0;
-  max-width: 100%;
-  margin: 10px 0 0;
-  padding: 0 10px 14px;
-  overflow: hidden;
-}
-
-html.tv-mode.tv-movies-active
-#page-movies.active.tv-movies-layout-ready
-#movie-details .more-like-title {
-  margin: 0 0 7px;
-  font-size: 0.82rem;
-}
-
-html.tv-mode.tv-movies-active
-#page-movies.active.tv-movies-layout-ready
-#movie-details .more-like-grid {
-  display: flex !important;
-  flex-flow: row nowrap !important;
-  align-items: flex-start;
-  gap: 8px;
-  box-sizing: border-box;
-  width: 100%;
-  min-width: 0;
-  max-width: 100%;
-  padding: 4px 3px 10px;
-  overflow-x: auto !important;
-  overflow-y: hidden;
-  scroll-padding-inline: 3px;
-  scroll-snap-type: x proximity;
-  overscroll-behavior-x: contain;
-  scrollbar-width: none;
-}
-
-html.tv-mode.tv-movies-active
-#page-movies.active.tv-movies-layout-ready
-#movie-details .more-like-grid::-webkit-scrollbar {
-  display: none;
-}
-
-html.tv-mode.tv-movies-active
-#page-movies.active.tv-movies-layout-ready
-#movie-details .more-like-grid > .tv-more-like-card,
-html.tv-mode.tv-movies-active
-#page-movies.active.tv-movies-layout-ready
-#movie-details .more-like-grid > .dashboard-card,
-html.tv-mode.tv-movies-active
-#page-movies.active.tv-movies-layout-ready
-#movie-details .more-like-grid > .movie-card,
-html.tv-mode.tv-movies-active
-#page-movies.active.tv-movies-layout-ready
-#movie-details .more-like-grid > .series-card,
-html.tv-mode.tv-movies-active
-#page-movies.active.tv-movies-layout-ready
-#movie-details .more-like-grid > .watch-recommended-card {
-  position: relative;
-  flex: 0 0 clamp(96px, 38%, 112px) !important;
-  width: clamp(96px, 38%, 112px) !important;
-  min-width: 96px !important;
-  max-width: 112px !important;
-  scroll-snap-align: start;
-  transform: none;
-}
-
-html.tv-mode.tv-movies-active
-#page-movies.active.tv-movies-layout-ready
-#movie-details .more-like-grid .card-image,
-html.tv-mode.tv-movies-active
-#page-movies.active.tv-movies-layout-ready
-#movie-details .more-like-grid .movie-poster {
-  width: 100%;
-  height: auto;
-  aspect-ratio: 2 / 3;
-}
-
-html.tv-mode.tv-movies-active
-#page-movies.active.tv-movies-layout-ready
-#movie-details .more-like-grid .card-info,
-html.tv-mode.tv-movies-active
-#page-movies.active.tv-movies-layout-ready
-#movie-details .more-like-grid .movie-info {
-  padding: 5px;
-}
-
-html.tv-mode.tv-movies-active
-#page-movies.active.tv-movies-layout-ready
-#movie-details .more-like-grid .card-title,
-html.tv-mode.tv-movies-active
-#page-movies.active.tv-movies-layout-ready
-#movie-details .more-like-grid .movie-title {
-  font-size: 0.68rem;
-}
-
-html.tv-mode.tv-movies-active
-#page-movies.active.tv-movies-layout-ready
-#movie-details .more-like-grid .movie-meta {
-  display: none;
-}
-
-html.tv-mode.tv-movies-active
-#page-movies.active.tv-movies-layout-ready
-#movie-details .more-like-grid > :focus {
-  outline: none !important;
-  transform: translateY(-1px);
-  box-shadow: inset 0 0 0 2px #fff, 0 0 0 2px #2387ff !important;
-}
-
-/* Android TV reports a coarse pointer, so explicitly beat the late touch rule. */
-@media (pointer: coarse) {
-  html.tv-mode #page-movies .tv-movies-filter-row .btn,
-  html.tv-mode #page-movies .tv-movies-filter-row .filter-toggle,
-  html.tv-mode #page-movies .tv-movies-filter-row .filter-reset {
-    height: var(--tv-movies-control-height) !important;
-    min-height: var(--tv-movies-control-height) !important;
-  }
-}
-
-/* asset-rev: main-def-2 — content-hash bump to bypass a poisoned edge cache */
+/**
+ * Movies Page Controller
+ * Handles VOD movie browsing and playback with rich filtering,
+ * duplicate grouping (one card per title) and version selection.
+ */
+
+class MoviesPage {
+    constructor(app) {
+        this.app = app;
+        this.container = document.getElementById('movies-grid');
+        this.sourceSelect = document.getElementById('movies-source-select');
+        this.searchInput = document.getElementById('movies-search');
+
+        // Filter bar elements
+        this.sortSelect = document.getElementById('movies-sort');
+        this.genreSelect = document.getElementById('movies-genre');
+        this.yearSelect = document.getElementById('movies-year');
+        this.ratingSelect = document.getElementById('movies-rating');
+        this.watchedSelect = document.getElementById('movies-watched');
+        this.addedSelect = document.getElementById('movies-added');
+        this.durationSelect = document.getElementById('movies-duration');
+        this.audioSelect = document.getElementById('movies-audio');
+        this.subtitleSelect = document.getElementById('movies-subtitle');
+        this.groupToggleBtn = document.getElementById('movies-group-toggle');
+        this.hideBrokenBtn = document.getElementById('movies-hide-broken-btn');
+        this.randomBtn = document.getElementById('movies-random');
+        this.countEl = document.getElementById('movies-count');
+        this.resetBtn = document.getElementById('movies-reset');
+        this.activeFiltersEl = document.getElementById('movies-active-filters');
+        this.continueRow = document.getElementById('movies-continue');
+        this.continueList = document.getElementById('movies-continue-list');
+        this.pageEl = document.getElementById('page-movies');
+        this.detailsPanel = document.getElementById('movie-details');
+        this.primaryActionBtn = document.getElementById('movie-primary-action');
+        this.detailFavoriteBtn = document.getElementById('movie-detail-favorite');
+        this.detailDownloadBtn = document.getElementById('movie-detail-download');
+        this.versionsList = document.getElementById('movie-versions-list');
+        this.versionSummary = document.getElementById('movie-version-summary');
+
+        this.movies = [];
+        this.categories = [];
+        this.sources = [];
+        this.currentBatch = 0;
+        this.batchSize = 24;
+        this.filteredCards = []; // [{ items, representative }] — grouped or singletons
+        this.isLoading = false;
+        this.cloudLoadingMore = false;
+        this.cloudHasMore = false;
+        this.cloudOffset = 0;
+        this.cloudTotal = null;
+        this.cloudPageSize = 120;
+        this.cloudRequestId = 0;
+        this.observer = null;
+        this.favoriteIds = new Set();
+        this.showFavoritesOnly = false;
+        this.groupDuplicates = true;
+        this.hideBroken = true;
+        this.watchState = new Map(); // item_id -> { progress, duration, ratio }
+        this.serverSettings = {};
+        this.hiddenCategoryIds = new Set();
+        this.currentMovie = null;
+        this.currentMovieGroup = null;
+        this.currentMovieVersions = [];
+
+        this.restoreFilters();
+        this.init();
+    }
+
+    init() {
+        // Category multi-select
+        this.categoryMulti = new MultiSelect({
+            btnId: 'movies-category-btn',
+            panelId: 'movies-category-panel',
+            searchId: 'movies-category-search',
+            listId: 'movies-category-list',
+            allLabel: 'All Categories',
+            onChange: () => this.onFiltersChanged()
+        });
+
+        // Source change reloads everything
+        this.sourceSelect?.addEventListener('change', async () => {
+            await this.loadCategories();
+            await this.loadPlaybackStatuses();
+            await this.loadMovies();
+        });
+
+        // Search with debounce
+        let searchTimeout;
+        this.searchInput?.addEventListener('input', () => {
+            clearTimeout(searchTimeout);
+            searchTimeout = setTimeout(() => this.onFiltersChanged(), 300);
+        });
+
+        // Filter selects
+        [this.sortSelect, this.genreSelect, this.yearSelect, this.ratingSelect,
+         this.watchedSelect, this.addedSelect, this.durationSelect,
+         this.audioSelect, this.subtitleSelect].forEach(sel => {
+            sel?.addEventListener('change', () => this.onFiltersChanged());
+        });
+
+        // Group duplicates toggle
+        this.groupToggleBtn?.addEventListener('click', () => {
+            this.groupDuplicates = !this.groupDuplicates;
+            this.groupToggleBtn.classList.toggle('active', this.groupDuplicates);
+            this.onFiltersChanged();
+        });
+
+        this.hideBrokenBtn?.addEventListener('click', () => {
+            this.hideBroken = !this.hideBroken;
+            this.hideBrokenBtn.classList.toggle('active', this.hideBroken);
+            this.onFiltersChanged();
+        });
+
+        // Random movie
+        this.randomBtn?.addEventListener('click', () => this.playRandom());
+
+        // Reset filters
+        this.resetBtn?.addEventListener('click', () => this.resetFilters());
+
+        this.detailsPanel?.querySelector('.movie-back-btn')?.addEventListener('click', () => this.hideDetails());
+        this.primaryActionBtn?.addEventListener('click', () => this.playPrimaryMovie());
+        this.detailFavoriteBtn?.addEventListener('click', () => {
+            if (this.currentMovieGroup) this.toggleFavorite(this.currentMovieGroup, this.detailFavoriteBtn);
+        });
+        this.detailDownloadBtn?.addEventListener('click', () => this.onDownloadClick());
+        document.getElementById('movie-thumb-up')?.addEventListener('click', () => this.setRating(1));
+        document.getElementById('movie-thumb-down')?.addEventListener('click', () => this.setRating(-1));
+
+        // Android TV split-view: moving D-pad focus across grid cards live-previews
+        // the focused card synchronously in the docked panel. This avoids a delayed
+        // rebuild invalidating a panel button after ArrowRight. The lightweight preview
+        // never moves focus; heavy extras load only when the panel is entered.
+        this.container?.addEventListener('focusin', (event) => {
+            if (!this._isTvMode()) return;
+            const card = event.target.closest?.('.movie-card');
+            if (!card) return;
+            // Render immediately: a delayed panel rebuild could otherwise destroy
+            // the action button already reached with ArrowRight.
+            if (card.isConnected) this.previewCard(card);
+        });
+        // Stepping INTO the panel is the "commit" signal: only now do we pay for the
+        // heavy extras (more-like-this + cast credits), so browsing the grid stays cheap.
+        this.detailsPanel?.addEventListener('focusin', () => {
+            if (this._isTvMode()) this._loadPanelExtras();
+        });
+
+        // Lazy loading
+        this.observer = new IntersectionObserver((entries) => {
+            if (entries[0].isIntersecting && !this.isLoading) {
+                this.renderNextBatch();
+            }
+        }, { rootMargin: '200px' });
+
+        // Continue Watching shrinks to a compact pinned strip while the grid scrolls,
+        // reclaiming vertical space without disappearing. Hysteresis avoids flicker
+        // right at the threshold. The same listener drives the virtualization
+        // window (re-materialize recycled cards when scrolling back up).
+        this.container?.addEventListener('scroll', () => {
+            this.updateContinueCompact();
+            this.restoreRecycledCards();
+        }, { passive: true });
+
+        // Favorites filter toggle
+        const favBtn = document.getElementById('movies-favorites-btn');
+        favBtn?.addEventListener('click', () => {
+            this.showFavoritesOnly = !this.showFavoritesOnly;
+            favBtn.classList.toggle('active', this.showFavoritesOnly);
+            this.onFiltersChanged();
+        });
+
+        // When a previously-broken movie plays successfully, remove the HS mark
+        // immediately so it reappears if "hide broken" is active — no page reload needed.
+        window.addEventListener('playbackStatusChanged', (e) => {
+            const d = e.detail;
+            if (d && d.status === 'ok' && (d.item_type === 'movie' || d.itemType === 'movie')) {
+                if (this.hideBroken) this.filterAndRender();
+            }
+        });
+
+        // Build the mockup-oriented Movies chrome only in the Android TV client.
+        // Moving existing controls keeps every listener/reference intact while the
+        // web and mobile DOM remains exactly as authored.
+        if (this._isTvMode()) this._setupTvMoviesLayout();
+
+        this.applyFiltersToUI();
+    }
+
+    // === Filter persistence ===
+
+    restoreFilters() {
+        const saved = MediaUtils.loadFilters('movies') || {};
+        this.savedFilters = saved;
+        this.groupDuplicates = saved.group !== undefined ? saved.group : true;
+        this.showFavoritesOnly = !!saved.favoritesOnly;
+        this.hideBroken = saved.hideBroken !== undefined ? saved.hideBroken : true;
+    }
+
+    applyFiltersToUI() {
+        const s = this.savedFilters || {};
+        if (this.sortSelect && s.sort) this.sortSelect.value = s.sort;
+        if (this.yearSelect && s.year) this.yearSelect.value = s.year;
+        if (this.ratingSelect && s.rating) this.ratingSelect.value = s.rating;
+        if (this.watchedSelect && s.watched) this.watchedSelect.value = s.watched;
+        if (this.addedSelect && s.added) this.addedSelect.value = s.added;
+        if (this.audioSelect && s.audio) this.audioSelect.value = s.audio;
+        if (this.subtitleSelect && s.subtitle) this.subtitleSelect.value = s.subtitle;
+        if (this.searchInput && s.search) this.searchInput.value = s.search;
+        this.groupToggleBtn?.classList.toggle('active', this.groupDuplicates);
+        this.hideBrokenBtn?.classList.toggle('active', this.hideBroken);
+        document.getElementById('movies-favorites-btn')?.classList.toggle('active', this.showFavoritesOnly);
+    }
+
+    persistFilters() {
+        MediaUtils.saveFilters('movies', {
+            sort: this.sortSelect?.value || 'default',
+            genre: this.genreSelect?.value || '',
+            year: this.yearSelect?.value || '',
+            rating: this.ratingSelect?.value || '',
+            watched: this.watchedSelect?.value || '',
+            added: this.addedSelect?.value || '',
+            duration: this.durationSelect?.value || '',
+            audio: this.audioSelect?.value || '',
+            subtitle: this.subtitleSelect?.value || '',
+            search: this.searchInput?.value || '',
+            group: this.groupDuplicates,
+            hideBroken: this.hideBroken,
+            favoritesOnly: this.showFavoritesOnly,
+            categories: [...(this.categoryMulti?.getSelected() || [])]
+        });
+    }
+
+    onFiltersChanged() {
+        this.persistFilters();
+        this.renderActiveFilterChips();
+        // Cloud: picking a genre opens that genre's full grid — the same dense,
+        // server-side view as a rail's "See all" — so the dropdown behaves like
+        // Manage Content's genres.
+        if (this.isCloudPagedMode() && !this._isTvMode()) {
+            const buckets = [...(this.categoryMulti?.getSelected() || [])];
+            if (buckets.length) { this.openGenreBucket(buckets[0]); return; }
+            // Audio/subtitle/burned-in filter (or "best for my languages" sort) with
+            // no genre selected → a catalogue-wide grid filtered server-side by each
+            // title's available version languages.
+            if (this.isLanguageFilterActive()) { this.openLanguageBucket(); return; }
+        }
+        if (this.shouldShowRails()) {
+            this.renderGenreRails();
+            return;
+        }
+        if (this.isCloudPagedMode()) {
+            this.loadMovies();
+            return;
+        }
+        this.filterAndRender();
+    }
+
+    // True when an audio/subtitle filter or the language-match sort is set, so the
+    // grid must go through the language-aware (title-based) server path.
+    isLanguageFilterActive() {
+        return Boolean(this.audioSelect?.value || this.subtitleSelect?.value ||
+            this.sortSelect?.value === 'lang-match');
+    }
+
+    // Catalogue-wide "All" grid carrying the active language params — reuses the
+    // genre "See all" infinite-scroll grid with the synthetic 'all' bucket.
+    openLanguageBucket() {
+        const langKey = JSON.stringify(this.currentLanguageParams());
+        if (this.activeBucket === 'all' && this.activeBucketLangKey === langKey) return;
+        this.openBucket({ id: 'genre-all', title: 'All movies', curation: { bucket: 'all' } });
+    }
+
+    // Audio-language / burned-in-subtitle / year / rating filter params + "best
+    // for my languages" sort, forwarded to the server genre-items endpoint (the
+    // bucket grids). Empty keys are omitted. Also the bucket views' re-render
+    // key, so changing ANY of these refreshes an open genre grid.
+    currentLanguageParams() {
+        const params = {};
+        if (this.audioSelect?.value) params.audio = this.audioSelect.value;
+        if (this.subtitleSelect?.value) params.subs = this.subtitleSelect.value;
+        if (this.yearSelect?.value) params.year = this.yearSelect.value;
+        if (this.ratingSelect?.value) params.minRating = this.ratingSelect.value;
+        if (this.sortSelect?.value === 'lang-match') {
+            params.sort = 'lang-match';
+            const prefs = this.getPreferences();
+            if (prefs.preferredAudioLanguage) params.prefAudio = prefs.preferredAudioLanguage;
+            if (prefs.preferredSubtitleLanguage && prefs.preferredSubtitleLanguage !== 'none') {
+                params.prefSubs = prefs.preferredSubtitleLanguage;
+            }
+        }
+        const search = (this.searchInput?.value || '').trim();
+        if (search) params.q = search;
+        return params;
+    }
+
+    // Dynamic filter menus: only show audio/subtitle languages actually present in
+    // the catalogue (server facets). Falls back to the static <option>s on failure.
+    async populateLanguageFacets() {
+        // Local (self-hosted) libraries carry no per-title language facets — the two
+        // selects would be dead filters there, so hide them instead of lying.
+        const cloud = this.isCloudPagedMode();
+        this.audioSelect?.classList.toggle('hidden', !cloud);
+        this.subtitleSelect?.classList.toggle('hidden', !cloud);
+        if (!cloud) return;
+        // Re-fetch at most once per 60s so the menu tracks the background crawl (new
+        // languages get detected over the first day) instead of freezing at first load.
+        // applyFacetOptions preserves the current selection and skips the DOM rebuild
+        // when nothing changed, so refreshing never disturbs the user.
+        const now = Date.now();
+        if (this._facetsLoadedAt && (now - this._facetsLoadedAt) < 60000) return;
+        this._facetsLoadedAt = now;
+        try {
+            const facets = await API.media.languageFacets({ type: 'movie' });
+            this.applyFacetOptions(this.audioSelect, 'Any Audio', facets && facets.audio);
+            this.applyFacetOptions(this.subtitleSelect, 'Any Subtitles', facets && facets.subtitles);
+        } catch (_) {
+            this._facetsLoadedAt = 0; // allow a retry on the next show
+        }
+    }
+
+    applyFacetOptions(select, anyLabel, facets) {
+        if (!select || !Array.isArray(facets) || !facets.length) return;
+        const desired = [`<option value="">${anyLabel}</option>`]
+            .concat(facets.map(f => `<option value="${MediaUtils.escapeHtml(f.value)}">${MediaUtils.escapeHtml(f.label)}</option>`))
+            .join('');
+        if (select.innerHTML === desired) return; // unchanged → don't disturb an open dropdown
+        const current = select.value;
+        select.innerHTML = desired;
+        if (current && facets.some(f => f.value === current)) select.value = current;
+    }
+
+    // Open a genre bucket from the filter dropdown, reusing the rail "See all"
+    // grid (paged, server-side). No-op if that bucket is already showing.
+    openGenreBucket(bucket) {
+        if (!bucket) return;
+        // Re-open (re-render) when the same genre is active but the language params
+        // changed, so toggling an audio/subtitle filter refreshes the grid.
+        const langKey = JSON.stringify(this.currentLanguageParams());
+        if (this.activeBucket === bucket && this.activeBucketLangKey === langKey) return;
+        const T = window.GenreTaxonomy;
+        const label = (T && T.label) ? T.label(bucket) : bucket;
+        this.openBucket({ id: `genre-${bucket}`, title: label, curation: { bucket } });
+    }
+
+    // Netflix-style default: with no active filter/search, the cloud Movies page
+    // shows curated genre rails instead of a flat grid. Any filter or search
+    // flips back to the grid via the normal path.
+    shouldShowRails() {
+        // The TV mockup is a stable flat poster grid feeding the persistent preview
+        // panel. Web/mobile keep the curated genre rails.
+        return !this._isTvMode() && this.isCloudPagedMode() && !!window.GenreRails && !this.hasActiveFilters();
+    }
+
+    async renderGenreRails() {
+        this.railsView = true;
+        if (this.countEl) this.countEl.textContent = '';
+        this.resetBtn?.classList.add('hidden');
+        if (this.randomBtn) this.randomBtn.disabled = true; // "Random" needs the flat grid.
+        try {
+            const payload = await API.media.genreRails({ type: 'movie', limit: 18 });
+            const rails = (payload && payload.rails) || [];
+            if (!rails.length) {
+                // Nothing classifiable yet → fall back to the grid so the page is
+                // never empty.
+                this.railsView = false;
+                return this.loadMovies();
+            }
+            window.GenreRails.render(this.container, rails, {
+                emptyText: 'No movies to show yet.',
+                onItemClick: (item) => this.openRailItem(item),
+                onSeeAll: (rail) => this.openBucket(rail)
+            });
+            // Stamp the warm view only AFTER a successful rails render: stamping
+            // up-front left the marker set when the fallback path errored without
+            // reaching filterAndRender, freezing an empty/error view on back-nav.
+            this._viewRenderedAt = Date.now();
+        } catch (err) {
+            console.warn('[Movies] Genre rails unavailable, falling back to grid:', err);
+            this.railsView = false;
+            return this.loadMovies();
+        }
+    }
+
+    // Reuse the Home page's rail→detail path (builds the version group and opens
+    // the movie detail on this page), so clicks behave exactly like Home rails.
+    openRailItem(item) {
+        const home = this.app?.pages?.home;
+        if (home?.navigateToMovie) home.navigateToMovie(item);
+    }
+
+    // "See all" on a genre rail → a full, paged grid of that genre.
+    openBucket(rail) {
+        const bucket = (rail && rail.curation && rail.curation.bucket) || String((rail && rail.id) || '').replace(/^genre-/, '');
+        if (!bucket) return;
+        this.activeBucket = bucket;
+        this.activeBucketLangKey = JSON.stringify(this.currentLanguageParams());
+        this.bucketLabel = (rail && (rail.title || rail.name)) || '';
+        this.bucketOffset = 0;
+        this.bucketHasMore = true;
+        this.bucketLoading = false;
+        this.bucketSeen = new Set(); // title identities already in the grid
+        this.bucketRequestId = (this.bucketRequestId || 0) + 1;
+        this.bucketObserver?.disconnect();
+
+        // Block layout so the head / grid / loader stack vertically (see .rail-host).
+        this.container.classList.add('rail-host');
+        this.container.innerHTML = `
+            <div class="genre-bucket-head" style="display:flex;align-items:center;gap:14px;margin:4px 0 18px">
+                <button class="norva-back" id="genre-bucket-back" type="button" aria-label="Back to all genres">
+                    <svg class="back-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
+                    <span class="back-label">All genres</span>
+                </button>
+                <h2 style="margin:0;font-size:21px">${MediaUtils.escapeHtml(this.bucketLabel)}</h2>
+            </div>
+            <div class="genre-bucket-grid" style="display:flex;flex-wrap:wrap;gap:16px"></div>
+            <div class="genre-bucket-loader" style="height:1px"></div>`;
+        document.getElementById('genre-bucket-back')?.addEventListener('click', () => this.closeBucket());
+        this.bucketGridEl = this.container.querySelector('.genre-bucket-grid');
+        try { this.container.scrollIntoView({ block: 'start' }); } catch (_) { /* noop */ }
+
+        const loaderEl = this.container.querySelector('.genre-bucket-loader');
+        this.bucketObserver = new IntersectionObserver((entries) => {
+            if (entries.some((e) => e.isIntersecting)) this.loadBucketPage();
+        }, { rootMargin: '700px' });
+        this.loadBucketPage().then(() => {
+            if (loaderEl) this.bucketObserver.observe(loaderEl);
+        });
+    }
+
+    async loadBucketPage() {
+        if (this.bucketLoading || !this.bucketHasMore || !this.activeBucket) return;
+        this.bucketLoading = true;
+        // Switching buckets/filters mid-flight must not append the old grid's page
+        // into the new grid (or corrupt its offset).
+        const requestId = this.bucketRequestId;
+        try {
+            const payload = await API.media.genreItems({ type: 'movie', bucket: this.activeBucket, limit: 36, offset: this.bucketOffset, ...this.currentLanguageParams() });
+            if (requestId !== this.bucketRequestId || !this.bucketGridEl?.isConnected) return;
+            const items = (payload && payload.items) || [];
+            // Offset pagination over a live catalog can re-serve a boundary row —
+            // never render the same title twice.
+            const fresh = items.filter((item) => {
+                const key = String(item.title_id || item.titleId || item.id || '');
+                if (!key || this.bucketSeen?.has(key)) return false;
+                this.bucketSeen?.add(key);
+                return true;
+            });
+            window.GenreRails.appendCards(this.bucketGridEl, fresh, {
+                startIndex: this.bucketOffset,
+                onItemClick: (item) => this.openRailItem(item)
+            });
+            this.bucketOffset += items.length;
+            this.bucketHasMore = Boolean(payload && payload.hasMore) && items.length > 0;
+            // The endpoint returns the exact filtered count — show it (the grid view
+            // otherwise leaves the header count blank).
+            if (this.countEl && typeof payload?.count === 'number') {
+                this.countEl.textContent = `${payload.count} titles`;
+            }
+        } catch (err) {
+            console.warn('[Movies] Genre bucket page failed:', err);
+            this.bucketHasMore = false;
+        } finally {
+            this.bucketLoading = false;
+        }
+    }
+
+    closeBucket() {
+        const wasLanguageBucket = this.activeBucket === 'all';
+        this.activeBucket = null;
+        this.activeBucketLangKey = null;
+        this.bucketRequestId = (this.bucketRequestId || 0) + 1;
+        this.bucketObserver?.disconnect();
+        this.bucketObserver = null;
+        // Drop the genre selection (set silently — the next view renders below).
+        if (this.categoryMulti?.getSelected().size) this.categoryMulti.setSelected([]);
+        // Backing out of a GENRE keeps the user's language/year/rating filters
+        // (they weren't set by the bucket) — onFiltersChanged routes to the right
+        // view for whatever remains. Backing out of the catalogue-wide language
+        // grid clears its own language filters, else it would just reopen itself.
+        if (wasLanguageBucket) {
+            if (this.audioSelect) this.audioSelect.value = '';
+            if (this.subtitleSelect) this.subtitleSelect.value = '';
+            if (this.sortSelect?.value === 'lang-match') this.sortSelect.value = 'default';
+        }
+        this.persistFilters();
+        this.onFiltersChanged();
+    }
+
+    // Local-mode genre rails: group already-loaded movies by curated bucket and
+    // render them with the page's own cards (so clicks open details normally).
+    renderGenreRailsLocal() {
+        if (this._isTvMode()) return false;
+        const T = window.GenreTaxonomy;
+        if (!T || !window.GenreRails || !Array.isArray(this.movies) || !this.movies.length) return false;
+
+        const byBucket = new Map();
+        for (const m of this.movies) {
+            if (this.hideBroken && this.isBrokenItem(m)) continue;
+            const genres = (m.tmdb && m.tmdb.genres) || [];
+            for (const b of T.classifyTitle(m.category_name || m.category_id, genres)) {
+                if (b === 'autres') continue;
+                const arr = byBucket.get(b) || [];
+                if (arr.length < 30) arr.push(m);
+                byBucket.set(b, arr);
+            }
+        }
+
+        const sections = [];
+        for (const def of T.BUCKETS) {
+            if (def.id === 'autres') continue;
+            const movies = byBucket.get(def.id);
+            if (!movies || !movies.length) continue;
+            const groups = this.groupDuplicates
+                ? MediaUtils.groupItems(movies, { idField: 'stream_id' })
+                : movies.map((it) => ({ key: it.id, items: [it], representative: it }));
+            sections.push({ title: def.label, cards: groups.map((g) => this.buildCard(g)) });
+        }
+        if (!sections.length) return false;
+
+        if (this.countEl) this.countEl.textContent = '';
+        this.resetBtn?.classList.add('hidden');
+        if (this.randomBtn) this.randomBtn.disabled = true;
+        window.GenreRails.renderCustom(this.container, sections);
+        return true;
+    }
+
+    resetFilters() {
+        [this.sortSelect, this.genreSelect, this.yearSelect, this.ratingSelect,
+         this.watchedSelect, this.addedSelect, this.durationSelect,
+         this.audioSelect, this.subtitleSelect].forEach(sel => {
+            if (sel) sel.value = sel.querySelector('option')?.value ?? '';
+        });
+        if (this.sortSelect) this.sortSelect.value = 'default';
+        if (this.searchInput) this.searchInput.value = '';
+        this.showFavoritesOnly = false;
+        this.hideBroken = true;
+        this.hideBrokenBtn?.classList.toggle('active', this.hideBroken);
+        document.getElementById('movies-favorites-btn')?.classList.remove('active');
+        this.categoryMulti?.setSelected([]);
+        this.onFiltersChanged();
+    }
+
+    hasActiveFilters() {
+        return Boolean(
+            (this.sortSelect?.value && this.sortSelect.value !== 'default') ||
+            this.genreSelect?.value || this.yearSelect?.value || this.ratingSelect?.value ||
+            this.watchedSelect?.value || this.addedSelect?.value || this.durationSelect?.value ||
+            this.audioSelect?.value || this.subtitleSelect?.value ||
+            this.searchInput?.value || this.showFavoritesOnly || this.hideBroken === false ||
+            (this.categoryMulti?.getSelected().size > 0)
+        );
+    }
+
+    // Active-filter chips: mirror what's currently narrowing the grid as removable
+    // pills below the filter bar. Each chip reads the real control value (labels come
+    // straight from the selected <option>), so nothing here can drift from the actual
+    // filters. Clearing a chip resets just that control and re-applies.
+    renderActiveFilterChips() {
+        const host = this.activeFiltersEl;
+        if (!host) return;
+        const optText = (sel) => (sel && sel.selectedIndex >= 0)
+            ? (sel.options[sel.selectedIndex]?.text || '').trim() : '';
+        const chips = [];
+
+        const q = this.searchInput?.value?.trim();
+        if (q) chips.push({ label: `Search: “${q}”`, clear: () => { if (this.searchInput) this.searchInput.value = ''; } });
+
+        const catCount = this.categoryMulti?.getSelected().size || 0;
+        if (catCount > 0) chips.push({ label: catCount === 1 ? '1 category' : `${catCount} categories`,
+            clear: () => this.categoryMulti?.setSelected([]) });
+
+        if (this.sortSelect?.value && this.sortSelect.value !== 'default')
+            chips.push({ label: optText(this.sortSelect), clear: () => { this.sortSelect.value = 'default'; } });
+        if (this.genreSelect?.value) chips.push({ label: optText(this.genreSelect), clear: () => { this.genreSelect.value = ''; } });
+        if (this.yearSelect?.value) chips.push({ label: optText(this.yearSelect), clear: () => { this.yearSelect.value = ''; } });
+        if (this.ratingSelect?.value) chips.push({ label: optText(this.ratingSelect), clear: () => { this.ratingSelect.value = ''; } });
+        if (this.watchedSelect?.value) chips.push({ label: optText(this.watchedSelect), clear: () => { this.watchedSelect.value = ''; } });
+        if (this.addedSelect?.value) chips.push({ label: optText(this.addedSelect), clear: () => { this.addedSelect.value = ''; } });
+        if (this.durationSelect?.value) chips.push({ label: optText(this.durationSelect), clear: () => { this.durationSelect.value = ''; } });
+        if (this.audioSelect?.value) chips.push({ label: `Audio: ${optText(this.audioSelect)}`, clear: () => { this.audioSelect.value = ''; } });
+        if (this.subtitleSelect?.value) chips.push({ label: `Subtitles: ${optText(this.subtitleSelect)}`, clear: () => { this.subtitleSelect.value = ''; } });
+        if (this.showFavoritesOnly) chips.push({ label: 'Favorites', clear: () => {
+            this.showFavoritesOnly = false;
+            document.getElementById('movies-favorites-btn')?.classList.remove('active');
+        } });
+        if (this.hideBroken === false) chips.push({ label: 'Showing unavailable', clear: () => {
+            this.hideBroken = true;
+            this.hideBrokenBtn?.classList.toggle('active', true);
+        } });
+
+        if (!chips.length) { host.classList.add('hidden'); host.innerHTML = ''; return; }
+
+        host.classList.remove('hidden');
+        host.innerHTML = chips.map((c, i) =>
+            `<button type="button" class="filter-chip" data-chip="${i}">${MediaUtils.escapeHtml(c.label)}<span class="filter-chip-x" aria-hidden="true">×</span></button>`
+        ).join('') + '<button type="button" class="filter-chip filter-chip-clear" data-chip="clear">Clear all</button>';
+
+        host.querySelectorAll('.filter-chip').forEach(btn => {
+            btn.addEventListener('click', () => {
+                if (btn.dataset.chip === 'clear') { this.resetFilters(); return; }
+                const chip = chips[parseInt(btn.dataset.chip, 10)];
+                if (chip) { chip.clear(); this.onFiltersChanged(); }
+            });
+        });
+    }
+
+    // === Page lifecycle ===
+
+    // Foreground SWR (called when the app returns to the foreground while Movies is the
+    // active page). Throttled by the same warm-view window show() uses, so a brief blur is a
+    // no-op; only a real "was away past the warm window" return revalidates. When it does, it
+    // invalidates the warm marker so the next entry rebuilds fresh, and — only when it won't
+    // disrupt the user (at the top of the default, unfiltered paged grid) — refreshes page 1
+    // in place via the SWR path. A scrolled, filtered or searched view is left untouched and
+    // simply refreshes on its next entry.
+    maybeRevalidate() {
+        if (this.isLoading || this.cloudLoadingMore) return;
+        if (this._viewRenderedAt && Date.now() - this._viewRenderedAt < 300000) return;
+        this._viewRenderedAt = 0;
+        const atTop = (this.container?.scrollTop || 0) < 40;
+        if (atTop && this.movies.length && this.catalogCacheKey()) {
+            this.loadCloudMovies({ reset: true });
+        }
+    }
+
+    // Instant cold-load paint (perf): a returning user's default first screen is already cached,
+    // but the normal paint happens only AFTER the awaited health/sources/settings round-trips in
+    // show() below — several seconds on a busy backend, during which the grid is blank. Paint the
+    // cached first page NOW, synchronously, then let show() revalidate and replace it (SWR).
+    // Guarded to the default paged-grid view with a real cache and a non-gating last-known health,
+    // and skipped when the DOM is already warm — so it never fights the rails view or the gate.
+    _coldPaintFromCache() {
+        try {
+            if (!this.container) return;
+            if (this.movies && this.movies.length) return;                        // real data already in memory
+            if (this._viewRenderedAt && Date.now() - this._viewRenderedAt < 300000) return; // warm in-session return
+            const s = this.app?.sourceSummary;
+            if (s && this.app?.isCatalogReady && !this.app.isCatalogReady(s)) return; // last known state was gating
+            if (typeof this.shouldShowRails === 'function' && this.shouldShowRails()) return; // rails owns the grid
+            const ck = this.catalogCacheKey();
+            if (!ck) return;
+            const cached = window.NorvaCatalogCache?.read?.(ck); // time-only; loadCloudMovies re-reads WITH the version
+            if (!cached?.data?.items?.length) return;
+            this.movies = cached.data.items.slice();
+            this.cloudHasMore = Boolean(cached.data.hasMore);
+            this.cloudTotal = cached.data.count ?? null;
+            this._coldPaintPending = true;   // force show() to still revalidate despite movies.length > 0
+            this.populateGenres();
+            this.filterAndRender();
+            this._viewRenderedAt = 0;         // keep show()'s warm-view guard from short-circuiting the revalidate
+        } catch (_) { /* best-effort instant paint */ }
+    }
+
+    async show() {
+        document.documentElement.classList.toggle('tv-movies-active', this._isTvMode());
+        this._coldPaintFromCache();
+        const summary = await this.app?.refreshSourceHealth?.();
+        // Show the grid as soon as MOVIES are available (even mid-sync), not only when
+        // the whole catalogue is "ready" — Live TV already does this. Falls back to the
+        // ready check if the per-category helper isn't present.
+        const moviesLocked = this.app?.catalogCategoryAvailable
+            ? !this.app.catalogCategoryAvailable('movies', summary || undefined)
+            : (this.app?.isCatalogReady && !this.app.isCatalogReady(summary || undefined));
+        if (moviesLocked) {
+            this.renderCatalogLocked();
+            return;
+        }
+
+        if (this.sources.length === 0) {
+            await this.loadSources();
+        }
+
+        await Promise.all([this.loadFavorites(), this.loadWatchState(), this.loadServerSettings(), this.loadPlaybackStatuses()]);
+        this.renderContinueWatching();
+        this.populateLanguageFacets();
+        // While the page is visible, refresh the language menus periodically so they
+        // track the crawl in near-real-time. Gentle (server-memoized 60s, skips DOM work
+        // when unchanged); cleared in hide().
+        if (this._facetTimer) clearInterval(this._facetTimer);
+        this._facetTimer = setInterval(() => this.populateLanguageFacets(), 60000);
+
+        // Returning to a recently rendered view (grid or rails): keep the DOM as-is
+        // and restore the scroll position instead of re-rendering back to the top.
+        if (this._viewRenderedAt && Date.now() - this._viewRenderedAt < 300000
+            && this.container?.childElementCount > 0
+            && !this.container.querySelector('.catalog-locked-empty')) {
+            const saved = this._savedScrollTop || 0;
+            if (saved > 0) requestAnimationFrame(() => { this.container.scrollTop = saved; });
+            return;
+        }
+
+        // A genre is selected (e.g. returning to the page) → (re)open its grid.
+        if (this.isCloudPagedMode() && !this._isTvMode()) {
+            const selectedBuckets = [...(this.categoryMulti?.getSelected() || [])];
+            if (selectedBuckets.length) {
+                if (!this.categories.length) await this.loadCategories();
+                this.activeBucket = null;
+                this.openGenreBucket(selectedBuckets[0]);
+                return;
+            }
+        }
+
+        // Default cloud view with no active filters → Netflix-style genre rails.
+        if (this.shouldShowRails()) {
+            if (!this.categories.length) this.loadCategories(); // keep the filter dropdown ready
+            await this.renderGenreRails();
+            return;
+        }
+
+        if (this.movies.length === 0 || this._coldPaintPending) {
+            // Categories only feed the filter dropdown — load them alongside the
+            // movie page instead of gating the grid's first paint on them. The
+            // _coldPaintPending clause forces a revalidate even though the cold paint
+            // above left movies.length > 0, so the cached first screen is refreshed.
+            this._coldPaintPending = false;
+            await Promise.all([this.loadCategories(), this.loadMovies()]);
+        } else {
+            this.filterAndRender();
+        }
+    }
+
+    hide() {
+        document.documentElement.classList.remove('tv-movies-active');
+        if (this._facetTimer) { clearInterval(this._facetTimer); this._facetTimer = null; }
+        this._disarmCatalogRefreshWatch();
+        // Scroll restoration: the grid is its own scroller, remembered per visit.
+        this._savedScrollTop = this.container?.scrollTop || 0;
+    }
+
+    // Onboarding: while an empty/locked grid is shown during a first-run catalog
+    // sync, watch for the catalog coming online and reload automatically — the
+    // user should never have to leave the page and come back to see their movies
+    // appear. Self-cleans the moment content renders (filterAndRender) or the page
+    // is hidden. Armed only while an empty state is on screen, so it is idle for
+    // the normal populated case.
+    _armCatalogRefreshWatch() {
+        if (this._catalogWatch) return;
+        const reload = () => {
+            if (this._catalogWatchReloading) return; // guard re-entry: show() re-dispatches health events
+            this._catalogWatchReloading = true;
+            Promise.resolve(this.show()).catch(() => {}).finally(() => { this._catalogWatchReloading = false; });
+        };
+        const w = { reload, ticks: 0, timer: 0 };
+        this._catalogWatch = w;
+        document.addEventListener('norva:source-health-changed', reload);
+        window.addEventListener('norva:catalog-availability-changed', reload);
+        // Safety net for partial availability (movies can fill before the whole
+        // source flips to "ready", so the completion event never fires): gently
+        // re-check, bounded to ~10 min so a forgotten page never polls forever.
+        w.timer = setInterval(() => {
+            if (++w.ticks > 40) { this._disarmCatalogRefreshWatch(); return; }
+            reload();
+        }, 15000);
+    }
+
+    _disarmCatalogRefreshWatch() {
+        const w = this._catalogWatch;
+        if (!w) return;
+        this._catalogWatch = null;
+        document.removeEventListener('norva:source-health-changed', w.reload);
+        window.removeEventListener('norva:catalog-availability-changed', w.reload);
+        if (w.timer) clearInterval(w.timer);
+    }
+
+    renderCatalogLocked() {
+        this.hideDetails?.();
+        this.movies = [];
+        this.filteredCards = [];
+        this.historyItems = [];
+        this.watchState = new Map();
+        this.cloudHasMore = false;
+        this.cloudLoadingMore = false;
+        this.continueRow?.classList.add('hidden');
+        if (this.countEl) this.countEl.textContent = '';
+        if (this.container) {
+            this.container.classList.remove('rail-host');
+            this.container.innerHTML = `
+                <div class="catalog-locked-empty">
+                    <h2>Connect your TV service first</h2>
+                    <p>Movies unlock as soon as Norva finishes preparing your catalog.</p>
+                    <button class="btn btn-primary" id="movies-connect-service">Connect TV Service</button>
+                </div>
+            `;
+            this.container.querySelector('#movies-connect-service')?.addEventListener('click', () => {
+                this.app?.navigateTo?.('home');
+            });
+        }
+        this._armCatalogRefreshWatch();
+    }
+
+    async loadServerSettings() {
+        try {
+            this.serverSettings = await API.settings.get();
+        } catch (err) {
+            this.serverSettings = {};
+        }
+    }
+
+    async loadFavorites() {
+        try {
+            const favs = await API.favorites.getAll(null, 'movie');
+            this.favoriteIds = new Set(favs.map(f => `${f.source_id}:${f.item_id}`));
+        } catch (err) {
+            console.error('Error loading favorites:', err);
+        }
+    }
+
+    async loadWatchState() {
+        try {
+            const history = await API.history.getAll(500);
+            const activeSourceIds = new Set((this.sources || []).map(source => String(source.id)));
+            this.watchState = new Map();
+            this.historyItems = (history || []).filter(item => {
+                const sourceId = item.source_id || item.sourceId || item.data?.sourceId;
+                return sourceId && activeSourceIds.has(String(sourceId));
+            });
+            for (const h of this.historyItems) {
+                if (h.item_type !== 'movie') continue;
+                const ratio = h.duration > 0 ? h.progress / h.duration : 0;
+                this.watchState.set(String(h.item_id), {
+                    progress: h.progress,
+                    duration: h.duration,
+                    ratio,
+                    updatedAt: h.updated_at,
+                    sourceId: h.source_id || h.sourceId || h.data?.sourceId,
+                    data: h.data
+                });
+            }
+        } catch (err) {
+            console.warn('Error loading watch history:', err);
+            this.watchState = new Map();
+            this.historyItems = [];
+        }
+    }
+
+    async loadPlaybackStatuses() {
+        if (!window.PlaybackHealth) return;
+        const sourceId = this.sourceSelect?.value || null;
+        await PlaybackHealth.load({ sourceId, itemType: 'movie' });
+    }
+
+    getWatchStatus(items) {
+        // A group is "watched"/"in progress" if any version is
+        let best = null;
+        for (const item of items) {
+            const state = this._watchStateFor(item);
+            if (state && (!best || state.ratio > best.ratio)) best = state;
+        }
+        if (!best || best.ratio <= 0.01) return { status: 'unwatched', ratio: 0 };
+        if (best.ratio >= 0.9) return { status: 'watched', ratio: 1 };
+        return { status: 'inprogress', ratio: best.ratio };
+    }
+
+    async loadSources() {
+        try {
+            const allSources = await API.sources.getAll();
+            this.sources = allSources.filter(s => s.type === 'xtream' && s.enabled);
+
+            this.sourceSelect.innerHTML = '<option value="">All Sources</option>';
+            this.sources.forEach(s => {
+                const option = document.createElement('option');
+                option.value = s.id;
+                option.textContent = s.name;
+                this.sourceSelect.appendChild(option);
+            });
+        } catch (err) {
+            console.error('Error loading sources:', err);
+        }
+    }
+
+    getSourceName(sourceId) {
+        return this.sources.find(s => s.id === parseInt(sourceId))?.name || `Source ${sourceId}`;
+    }
+
+    async loadCategories() {
+        if (this.isCloudPagedMode()) {
+            return this.loadCloudCategories();
+        }
+
+        try {
+            this.categories = [];
+            this.hiddenCategoryIds = new Set();
+
+            const sourceId = this.sourceSelect.value;
+            const sourcesToLoad = sourceId
+                ? this.sources.filter(s => s.id === parseInt(sourceId))
+                : this.sources;
+
+            for (const source of sourcesToLoad) {
+                try {
+                    const hiddenItems = await API.channels.getHidden(source.id);
+                    hiddenItems.forEach(h => {
+                        if (h.item_type === 'vod_category') {
+                            this.hiddenCategoryIds.add(`${source.id}:${h.item_id}`);
+                        }
+                    });
+                } catch (err) {
+                    console.warn(`Failed to load hidden items from source ${source.id}`);
+                }
+            }
+
+            for (const source of sourcesToLoad) {
+                try {
+                    const cats = await API.proxy.xtream.vodCategories(source.id);
+                    if (cats && Array.isArray(cats)) {
+                        cats.forEach(c => {
+                            if (!this.hiddenCategoryIds.has(`${source.id}:${c.category_id}`)) {
+                                this.categories.push({ ...c, sourceId: source.id });
+                            }
+                        });
+                    }
+                } catch (err) {
+                    console.warn(`Failed to load categories from source ${source.id}:`, err.message);
+                }
+            }
+
+            const options = this.categories.map(c => ({
+                value: `${c.sourceId}:${c.category_id}`,
+                label: sourcesToLoad.length > 1
+                    ? `${c.category_name} (${this.getSourceName(c.sourceId)})`
+                    : c.category_name
+            }));
+            this.categoryMulti.setOptions(options);
+
+            // Restore saved category selection once
+            if (this.savedFilters?.categories?.length && !this._categoriesRestored) {
+                this.categoryMulti.setSelected(this.savedFilters.categories);
+                this._categoriesRestored = true;
+            }
+        } catch (err) {
+            console.error('Error loading categories:', err);
+        }
+    }
+
+    async loadCloudCategories() {
+        try {
+            this.hiddenCategoryIds = new Set();
+            // Mirror Manage Content: the dropdown lists the clean, curated genre
+            // buckets (with counts) instead of the raw provider category names.
+            // Picking a genre opens that genre's full grid (see onFiltersChanged).
+            const payload = await API.media.genreSummary({ type: 'movie' });
+            const genres = Array.isArray(payload) ? payload : (payload?.genres || []);
+            this.categories = genres;
+            const options = genres
+                .filter(g => Number(g.count) > 0)
+                .map(g => ({ value: g.bucket, label: `${g.label} · ${Number(g.count).toLocaleString('en-US')}` }));
+            this.categoryMulti.setOptions(options);
+        } catch (err) {
+            console.error('Error loading cloud movie genres:', err);
+        }
+    }
+
+    async loadMovies() {
+        if (this.isCloudPagedMode()) {
+            return this.loadCloudMovies({ reset: true });
+        }
+
+        this.isLoading = true;
+        this.container.classList.remove('rail-host');
+        this.container.innerHTML = MediaUtils.skeletonCards(12);
+
+        try {
+            this.movies = [];
+
+            const sourceId = this.sourceSelect.value;
+            const sourcesToLoad = sourceId
+                ? this.sources.filter(s => s.id === parseInt(sourceId))
+                : this.sources;
+
+            // Load everything once; category filtering happens client-side
+            for (const source of sourcesToLoad) {
+                try {
+                    const movies = await API.proxy.xtream.vodStreams(source.id, null);
+                    console.log(`[Movies] Source ${source.id}: Got ${movies?.length || 0} movies`);
+                    if (movies && Array.isArray(movies)) {
+                        movies.forEach(m => {
+                            if (this.hiddenCategoryIds.has(`${source.id}:${m.category_id}`)) return;
+                            this.movies.push({
+                                ...m,
+                                sourceId: source.id,
+                                id: `${source.id}:${m.stream_id}`
+                            });
+                        });
+                    }
+                } catch (err) {
+                    console.warn(`Failed to load movies from source ${source.id}:`, err.message);
+                }
+            }
+
+            console.log(`[Movies] Total loaded: ${this.movies.length} movies`);
+            this.populateGenres();
+            this.filterAndRender();
+        } catch (err) {
+            console.error('Error loading movies:', err);
+            this.container.innerHTML = '<div class="empty-state"><p>Error loading movies</p></div>';
+        } finally {
+            this.isLoading = false;
+        }
+    }
+
+    isCloudPagedMode() {
+        try {
+            return Boolean(window.API?.isCloudMode?.());
+        } catch (_) {
+            return false;
+        }
+    }
+
+    cloudPageParams(offset = 0) {
+        const selectedCats = [...(this.categoryMulti?.getSelected() || [])];
+        let sourceId = this.sourceSelect?.value || '';
+        let categoryId = '';
+
+        if (selectedCats.length === 1) {
+            const [selectedSourceId, selectedCategoryId] = selectedCats[0].split(':');
+            categoryId = selectedCategoryId || '';
+            if (!sourceId) sourceId = selectedSourceId || '';
+        }
+
+        return {
+            type: 'movie',
+            sourceId,
+            categoryId,
+            sort: this.sortSelect?.value || 'default',
+            q: (this.searchInput?.value || '').trim(),
+            // Server-side over the denormalized columns, so the filter spans the
+            // WHOLE catalogue instead of the loaded pages only.
+            year: this.yearSelect?.value || '',
+            minRating: this.ratingSelect?.value || '',
+            addedDays: this.addedSelect?.value || '',
+            limit: this.cloudPageSize,
+            offset
+        };
+    }
+
+    catalogCacheKey() {
+        // Only the DEFAULT first screen (no source/category/search filter, default
+        // sort) is cached — that's the cold-load view worth painting instantly.
+        // Returns null otherwise so searches/sorted/filtered views never bloat storage.
+        const p = this.cloudPageParams(0);
+        if (p.sourceId || p.categoryId || p.q || (p.sort && p.sort !== 'default') ||
+            p.year || p.minRating || p.addedDays) return null;
+        // Lang-scoped: the persisted first screen carries localized titles/overviews, so a
+        // synopsis-language change must not paint the previous language on cold load.
+        return 'movies:default:' + (window.NorvaCloud?.contentLanguage?.() || 'en');
+    }
+
+    async loadCloudMovies({ reset = false } = {}) {
+        if (this.cloudLoadingMore || (this.isLoading && !reset)) return;
+
+        let paintedFromCache = false;
+        if (reset) {
+            this.isLoading = true;
+            this.cloudRequestId += 1;
+            this.cloudOffset = 0;
+            this.cloudHasMore = false;
+            this.cloudTotal = null;
+            this.movies = [];
+            this.filteredCards = [];
+            this.currentBatch = 0;
+            // Stale-while-revalidate: paint the cached first page instantly, then
+            // refresh from the network below and replace it.
+            const cacheKey = this.catalogCacheKey();
+            const cached = cacheKey && window.NorvaCatalogCache?.read?.(cacheKey, { version: window.API?.catalogSignature?.() });
+            if (cached?.data?.items?.length) {
+                this.movies = cached.data.items.slice();
+                this.cloudHasMore = Boolean(cached.data.hasMore);
+                this.cloudTotal = cached.data.count ?? null;
+                this.populateGenres();
+                this.filterAndRender();
+                paintedFromCache = true;
+            } else {
+                this.container.classList.remove('rail-host');
+                this.container.innerHTML = MediaUtils.skeletonCards(12);
+            }
+        } else {
+            this.cloudLoadingMore = true;
+        }
+
+        try {
+            const requestId = this.cloudRequestId;
+            const renderedBefore = reset ? 0 : this.container.querySelectorAll('.movie-card').length;
+            // On reset always refetch page 1 (offset 0), even after a cache paint.
+            const page = await API.media.page(this.cloudPageParams(reset ? 0 : this.cloudOffset));
+            if (reset && requestId !== this.cloudRequestId) return;
+            const incoming = (page.items || [])
+                .filter(m => !this.hiddenCategoryIds.has(`${m.sourceId}:${m.category_id}`))
+                .map(m => ({
+                    ...m,
+                    sourceId: m.sourceId,
+                    id: `${m.sourceId}:${m.stream_id}`
+                }));
+
+            // Fresh page 1 replaces the cache paint; later pages append.
+            if (reset) { this.movies = []; this.cloudOffset = 0; }
+            const seen = new Set(this.movies.map(m => `${m.sourceId}:${m.stream_id}`));
+            incoming.forEach(movie => {
+                const key = `${movie.sourceId}:${movie.stream_id}`;
+                if (!seen.has(key)) {
+                    seen.add(key);
+                    this.movies.push(movie);
+                }
+            });
+
+            // The grid is paginated by FILM server-side (each film ships all its version
+            // rows), so advance the cursor by the film count, not the row count.
+            this.cloudOffset = (page.offset || this.cloudOffset) + (page.films ?? page.items?.length ?? 0);
+            this.cloudHasMore = Boolean(page.hasMore);
+            this.cloudTotal = page.count ?? this.cloudTotal;
+            this.populateGenres();
+
+            if (reset) {
+                this.filterAndRender();
+                // Cache the fresh first page for an instant next cold entry.
+                try {
+                    const ck = this.catalogCacheKey();
+                    // Only cache a NON-EMPTY page. Caching an empty result (e.g. the enrichment
+                    // queries timed out under import load) poisons the cold-entry paint: the next
+                    // visit paints the stale empty "No movies here yet" and, if the network refresh
+                    // also fails, it never gets replaced. A miss instead shows the skeleton → retry.
+                    if (ck && this.movies.length) window.NorvaCatalogCache?.write?.(ck, {
+                        items: this.movies.slice(0, this.cloudPageSize),
+                        hasMore: this.cloudHasMore,
+                        count: this.cloudTotal
+                    }, { version: window.API?.catalogSignature?.() });
+                } catch (_) { /* best-effort */ }
+            } else {
+                this.filteredCards = this.buildFilteredCards();
+                this.updateResultChrome(this.filteredCards);
+                this.currentBatch = Math.ceil(renderedBefore / this.batchSize);
+                this.renderNextBatch();
+            }
+        } catch (err) {
+            console.error('Error loading cloud movies:', err);
+            // Keep the cached paint on error; only show an error with nothing shown.
+            if (reset && !paintedFromCache) {
+                this.container.innerHTML = '<div class="empty-state"><p>Error loading movies</p></div>';
+            }
+        } finally {
+            if (reset) this.isLoading = false;
+            this.cloudLoadingMore = false;
+        }
+    }
+
+    populateGenres() {
+        if (!this.genreSelect) return;
+        const genres = new Set();
+        let hasRuntime = false;
+        for (const m of this.movies) {
+            if (m.tmdb?.genres) m.tmdb.genres.forEach(g => genres.add(g));
+            if (m.tmdb?.runtime) hasRuntime = true;
+        }
+
+        if (genres.size === 0) {
+            this.genreSelect.classList.add('hidden');
+        } else {
+            const current = this.savedFilters?.genre || this.genreSelect.value;
+            this.genreSelect.innerHTML = '<option value="">All Genres</option>' +
+                [...genres].sort().map(g =>
+                    `<option value="${MediaUtils.escapeHtml(g)}">${MediaUtils.escapeHtml(g)}</option>`).join('');
+            if (current && genres.has(current)) this.genreSelect.value = current;
+            this.genreSelect.classList.remove('hidden');
+        }
+
+        this.durationSelect?.classList.toggle('hidden', !hasRuntime);
+        if (hasRuntime && this.savedFilters?.duration) {
+            this.durationSelect.value = this.savedFilters.duration;
+        }
+    }
+
+    // === Filtering, grouping, sorting ===
+
+    parseAddedMs(item) {
+        const raw = item.added || item.added_at;
+        if (!raw) return 0;
+        const num = parseInt(raw);
+        if (!isNaN(num) && num > 0) {
+            // Xtream uses unix seconds
+            return num < 10000000000 ? num * 1000 : num;
+        }
+        const date = Date.parse(raw);
+        return isNaN(date) ? 0 : date;
+    }
+
+    getItemYear(item) {
+        const y = MediaUtils.extractYear(item.name, item.year || item.releaseDate);
+        return y ? parseInt(y) : null;
+    }
+
+    matchesFilters(item) {
+        if (this.hideBroken && this.isBrokenItem(item)) return false;
+
+        // Cloud mode filters genre via the dedicated grid (openGenreBucket); the
+        // self-hosted grid still filters by the selected provider category here.
+        // Year / rating / recently-added are ALSO server-side in cloud mode
+        // (cloudPageParams), so re-filtering here would only drop rows where the
+        // client's heuristic (name-derived year, provider rating string) disagrees
+        // with the server's denormalized column.
+        const cloud = this.isCloudPagedMode();
+        if (!cloud) {
+            const selectedCats = this.categoryMulti?.getSelected();
+            if (selectedCats && selectedCats.size > 0 &&
+                !selectedCats.has(`${item.sourceId}:${item.category_id}`)) {
+                return false;
+            }
+        }
+
+        // Year / decade
+        const yearFilter = cloud ? '' : this.yearSelect?.value;
+        if (yearFilter) {
+            const y = this.getItemYear(item);
+            if (yearFilter === 'old') {
+                if (!y || y >= 1990) return false;
+            } else {
+                const decade = parseInt(yearFilter);
+                if (!y || y < decade || y >= decade + 10) return false;
+            }
+        }
+
+        // Minimum rating
+        const minRating = cloud ? NaN : parseFloat(this.ratingSelect?.value);
+        if (minRating) {
+            const r = parseFloat(item.rating) || (item.tmdb?.vote_average ?? 0);
+            if (!r || r < minRating) return false;
+        }
+
+        // Genre (TMDB)
+        const genre = this.genreSelect?.value;
+        if (genre && !(item.tmdb?.genres || []).includes(genre)) return false;
+
+        // Duration (TMDB runtime)
+        const durationFilter = this.durationSelect?.value;
+        if (durationFilter) {
+            const runtime = item.tmdb?.runtime;
+            if (!runtime) return false;
+            if (durationFilter === '90' && runtime >= 90) return false;
+            if (durationFilter === '120' && runtime >= 120) return false;
+            if (durationFilter === '121' && runtime < 120) return false;
+        }
+
+        // Recently added
+        const addedDays = cloud ? NaN : parseInt(this.addedSelect?.value);
+        if (addedDays) {
+            const addedMs = this.parseAddedMs(item);
+            if (!addedMs || (Date.now() - addedMs) > addedDays * 86400000) return false;
+        }
+
+        return true;
+    }
+
+    isBrokenItem(item) {
+        return item?.playback_status === 'broken' ||
+            window.PlaybackHealth?.isBroken(item.sourceId, 'movie', item.stream_id);
+    }
+
+    buildFilteredCards() {
+        const searchTerm = MediaUtils.searchableText(this.searchInput?.value || '').trim();
+
+        let items = this.movies.filter(m => this.matchesFilters(m));
+
+        if (searchTerm && !this.isCloudPagedMode()) {
+            items = items.filter(m =>
+                MediaUtils.searchableText(m.name).includes(searchTerm) ||
+                (m.tmdb?.title && MediaUtils.searchableText(m.tmdb.title).includes(searchTerm)));
+        }
+
+        // Group duplicates (or wrap as singleton groups for a uniform render path)
+        let cards;
+        if (this.groupDuplicates) {
+            cards = MediaUtils.groupItems(items, { idField: 'stream_id' });
+        } else {
+            cards = items.map(item => ({ key: item.id, items: [item], representative: item }));
+        }
+        cards = this.applyLanguagePreferencesToCards(cards);
+        if (this.getPreferences().strictLanguageMatching) {
+            cards = cards.filter(c => !this.isStrictLanguageExcluded(c));
+        }
+
+        // Favorites: group qualifies if any version is favorite
+        if (this.showFavoritesOnly) {
+            cards = cards.filter(c => c.items.some(i => this.favoriteIds.has(`${i.sourceId}:${i.stream_id}`)));
+        }
+
+        // Watch status
+        const watchedFilter = this.watchedSelect?.value;
+        if (watchedFilter) {
+            cards = cards.filter(c => this.getWatchStatus(c.items).status === watchedFilter);
+        }
+
+        // Sort
+        this.sortCards(cards);
+        return cards;
+    }
+
+    // Filters the SERVER cannot see (they run over the loaded pages only), so the
+    // server's exact count can't be shown while any of them is active.
+    hasClientOnlyFilters() {
+        return Boolean(
+            this.genreSelect?.value || this.durationSelect?.value ||
+            this.watchedSelect?.value || this.showFavoritesOnly ||
+            this.hideBroken === false
+        );
+    }
+
+    updateResultChrome(cards) {
+        if (this.countEl) {
+            let total = this.groupDuplicates ? `${cards.length} titles` : `${cards.length} movies`;
+            // The server count is exact for every server-side dimension (search,
+            // sort, year, rating, added) — only client-only filters force the
+            // open-ended "N+" fallback.
+            if (this.isCloudPagedMode() && this.cloudTotal !== null && !this.hasClientOnlyFilters()) {
+                total = `${this.cloudTotal} titles`;
+            } else if (this.isCloudPagedMode() && this.cloudHasMore) {
+                total = `${cards.length}+ titles`;
+            }
+            this.countEl.textContent = total;
+        }
+        // Reset stays visible in the TV action row, matching the 10-foot mockup.
+        this.resetBtn?.classList.toggle('hidden', !this._isTvMode() && !this.hasActiveFilters());
+        this.renderActiveFilterChips();
+    }
+
+    filterAndRender() {
+        // Any real render supersedes a pending empty-state auto-refresh watch;
+        // re-armed below only if this render lands on an empty (non-filtered) grid.
+        this._disarmCatalogRefreshWatch();
+        // Local (self-hosted) mode default with no active filter → genre rails,
+        // built client-side from already-loaded titles. Cloud mode is untouched
+        // (it renders rails via the server in renderGenreRails).
+        if (!this.isCloudPagedMode() && !this.hasActiveFilters() && this.renderGenreRailsLocal()) {
+            return;
+        }
+
+        const cards = this.buildFilteredCards();
+
+        this.filteredCards = cards;
+
+        // Counter + reset visibility
+        this.updateResultChrome(cards);
+
+        console.log(`[Movies] Displaying ${cards.length} cards from ${this.movies.length} movies`);
+
+        this.currentBatch = 0;
+        this._winStart = 0; // virtualization: index of the first card still in the DOM
+        // Flat card grid → drop the rail-host modifier so the grid centers/wraps.
+        this.container.classList.remove('rail-host');
+        this.container.innerHTML = '';
+        // Only a populated grid counts as a "warm view". Leave an empty render
+        // (zero cards — e.g. a transient empty catalogue fetch mid-sync) UN-stamped
+        // so show()'s warm early-return (~line 650) does not freeze the empty
+        // "No movies here yet" grid on back-nav; the next entry reloads instead.
+        this._viewRenderedAt = cards.length ? Date.now() : 0;
+        // Re-rendering resets scrollTop to 0 without firing a scroll event, so
+        // re-sync the compact strip to avoid it sticking shrunk at the top.
+        this.updateContinueCompact();
+
+        // No results → disable "Random" so it isn't a silent no-op.
+        if (this.randomBtn) this.randomBtn.disabled = cards.length === 0;
+
+        if (cards.length === 0) {
+            const filtered = this.hasActiveFilters();
+            this.container.innerHTML = `
+                <div class="empty-state rich-empty">
+                    <div class="empty-icon">🎬</div>
+                    <h3>${filtered ? 'No movies match these filters' : 'No movies here yet'}</h3>
+                    <p>${filtered ? 'Try widening your search, genre or language filters.' : 'Movies appear as soon as Norva finishes preparing your catalog.'}</p>
+                    ${filtered ? '<button class="btn btn-primary" id="movies-empty-reset">Clear filters</button>' : ''}
+                </div>`;
+            this.container.querySelector('#movies-empty-reset')?.addEventListener('click', () => this.resetFilters?.());
+            // A non-filtered empty grid means the catalog is still filling — auto-reload
+            // when it comes online instead of stranding the user on an empty page.
+            if (!filtered) this._armCatalogRefreshWatch();
+            return;
+        }
+
+        // Virtualization spacer: stands in for the recycled cards above the
+        // window so the scrollbar geometry (and position) never jumps.
+        const spacer = document.createElement('div');
+        spacer.className = 'grid-spacer';
+        spacer.style.height = '0px';
+        this.container.appendChild(spacer);
+
+        const loader = document.createElement('div');
+        loader.className = 'movies-loader';
+        loader.innerHTML = '<div class="loading-spinner"></div>';
+        this.container.appendChild(loader);
+
+        for (let i = 0; i < 5; i++) {
+            this.renderNextBatch();
+        }
+
+        this.observer.observe(loader);
+
+        // TV split-view: seed the docked panel with the first card so it's never empty
+        // on entry (the grid keeps focus; this is a passive preview).
+        if (this._isTvMode()) this._previewFirstCard();
+    }
+
+    // === Grid virtualization =================================================
+    // The infinite scroll used to append 24-card batches FOREVER (a 500k-title
+    // catalog = unbounded DOM). The window keeps at most ~15 batches alive:
+    // scrolling down recycles the top cards into a height-preserving spacer;
+    // scrolling back up rebuilds them from `filteredCards` (cards are pure
+    // functions of their data, so nothing needs to be retained).
+
+    static get GRID_DOM_CARD_CAP() { return 360; }
+
+    recycleOffscreenCards() {
+        const spacer = this.container?.querySelector('.grid-spacer');
+        if (!spacer) return;
+        let rendered = this.currentBatch * this.batchSize - (this._winStart || 0);
+        while (rendered > MoviesPage.GRID_DOM_CARD_CAP) {
+            const before = this.container.scrollHeight;
+            let removed = 0;
+            let node = spacer.nextElementSibling;
+            while (node && removed < this.batchSize && node.classList.contains('movie-card')) {
+                const next = node.nextElementSibling;
+                node.remove();
+                removed++;
+                node = next;
+            }
+            if (!removed) break;
+            const delta = before - this.container.scrollHeight;
+            spacer.style.height = `${(parseFloat(spacer.style.height) || 0) + Math.max(0, delta)}px`;
+            this._winStart = (this._winStart || 0) + removed;
+            rendered -= removed;
+        }
+    }
+
+    restoreRecycledCards() {
+        const spacer = this.container?.querySelector('.grid-spacer');
+        if (!spacer || !(this._winStart > 0)) return;
+        const spacerHeight = parseFloat(spacer.style.height) || 0;
+        if (spacerHeight <= 0 || this.container.scrollTop > spacerHeight + 600) return;
+
+        const start = Math.max(0, this._winStart - this.batchSize);
+        const fragment = document.createDocumentFragment();
+        for (let i = start; i < this._winStart; i++) {
+            const data = this.filteredCards[i];
+            if (data) fragment.appendChild(this.buildCard(data));
+        }
+        const before = this.container.scrollHeight;
+        spacer.after(fragment);
+        const delta = this.container.scrollHeight - before;
+        spacer.style.height = `${Math.max(0, spacerHeight - delta)}px`;
+        this._winStart = start;
+    }
+
+    sortCards(cards) {
+        const sort = this.sortSelect?.value || 'default';
+        const rep = c => c.representative;
+        const pref = (a, b) => (b.preferenceScore || 0) - (a.preferenceScore || 0);
+        const sortWithPreference = (compare) => cards.sort((a, b) => compare(a, b) || pref(a, b));
+        switch (sort) {
+            case 'added':
+                sortWithPreference((a, b) => this.parseAddedMs(rep(b)) - this.parseAddedMs(rep(a)));
+                break;
+            case 'rating':
+                sortWithPreference((a, b) => (parseFloat(rep(b).rating) || 0) - (parseFloat(rep(a).rating) || 0));
+                break;
+            case 'year':
+                sortWithPreference((a, b) => (this.getItemYear(rep(b)) || 0) - (this.getItemYear(rep(a)) || 0));
+                break;
+            case 'year-asc':
+                sortWithPreference((a, b) => (this.getItemYear(rep(a)) || 9999) - (this.getItemYear(rep(b)) || 9999));
+                break;
+            case 'name':
+                sortWithPreference((a, b) => (rep(a).name || '').localeCompare(rep(b).name || ''));
+                break;
+            default:
+                cards.sort(pref); // language preference first, stable provider order for ties
+                break;
+        }
+    }
+
+    applyLanguagePreferencesToCards(cards) {
+        const prefs = this.getPreferences();
+        if (!window.MediaUtils?.orderVersionsByPreference) return cards;
+        return cards.map(card => {
+            const ordered = MediaUtils.orderVersionsByPreference(card.items || [], prefs);
+            const representative = ordered[0] || card.representative;
+            const preferenceScore = window.MediaUtils?.scoreTitleForPreferences
+                ? MediaUtils.scoreTitleForPreferences({ ...representative, variants: ordered }, prefs)
+                : 0;
+            return { ...card, items: ordered, representative, preferenceScore };
+        });
+    }
+
+    isStrictLanguageExcluded(card) {
+        const prefs = this.getPreferences();
+        if (!prefs.strictLanguageMatching || !window.MediaUtils?.analyzeLanguageCompatibility) return false;
+        const wantsAudio = Boolean(prefs.preferredAudioLanguage);
+        const wantsSubtitle = Boolean(prefs.preferredSubtitleLanguage && prefs.preferredSubtitleLanguage !== 'none');
+        if (!wantsAudio && !wantsSubtitle) return false;
+        return (card.items || []).every(item => {
+            const analysis = MediaUtils.analyzeLanguageCompatibility(item, prefs);
+            const audioAbsent = wantsAudio && analysis.audio?.state === 'confirmed_absent';
+            const subtitleAbsent = wantsSubtitle && analysis.subtitle?.state === 'confirmed_absent';
+            return audioAbsent || subtitleAbsent;
+        });
+    }
+
+    // === Rendering ===
+
+    renderNextBatch() {
+        const start = this.currentBatch * this.batchSize;
+        const end = start + this.batchSize;
+        const batch = this.filteredCards.slice(start, end);
+
+        if (batch.length === 0) {
+            const loader = this.container.querySelector('.movies-loader');
+            if (this.isCloudPagedMode() && this.cloudHasMore && !this.cloudLoadingMore) {
+                if (loader) loader.style.display = '';
+                this.loadCloudMovies({ reset: false });
+            } else if (loader) {
+                loader.style.display = 'none';
+            }
+            return;
+        }
+
+        const fragment = document.createDocumentFragment();
+
+        batch.forEach(card => fragment.appendChild(this.buildCard(card)));
+
+        const loader = this.container.querySelector('.movies-loader');
+        if (loader) {
+            this.container.insertBefore(fragment, loader);
+        } else {
+            this.container.appendChild(fragment);
+        }
+
+        this.currentBatch++;
+        this.recycleOffscreenCards();
+
+        if (end >= this.filteredCards.length && loader && !(this.isCloudPagedMode() && this.cloudHasMore)) {
+            loader.style.display = 'none';
+        }
+    }
+
+    buildCard(group) {
+        const movie = group.representative;
+        const card = document.createElement('div');
+        card.className = 'movie-card';
+        card.dataset.movieId = movie.stream_id;
+        card.dataset.sourceId = movie.sourceId;
+
+        const poster = MediaUtils.safeImageUrl(
+            movie.stream_icon || movie.cover || MediaUtils.tmdbPosterUrl(movie.tmdb),
+            '/img/norva-media-placeholder.png'
+        );
+        const year = this.getItemYear(movie) || '';
+        const rating = movie.rating ? `${Icons.star} ${movie.rating}` : '';
+        const isFav = group.items.some(i => this.favoriteIds.has(`${i.sourceId}:${i.stream_id}`));
+        const watch = this.getWatchStatus(group.items);
+        const versionCount = group.items.length;
+        // cleanReleaseName: grid cards render the provider's raw stream name ("[ Torrent911.cc ] …")
+        // straight from the client catalog cache — display-clean it (the raw value stays in the
+        // data for the version/quality parsers).
+        const displayName = (this.groupDuplicates && movie.tmdb?.title) ? movie.tmdb.title : MediaUtils.cleanReleaseName(movie.name);
+        if (this._isTvMode()) {
+            card.tabIndex = 0;
+            card.setAttribute('role', 'button');
+            card.setAttribute('aria-label', displayName || 'Movie');
+        }
+        const groupBroken = group.items.every(item => this.isBrokenItem(item));
+        const languageBadge = MediaUtils.versionLanguageBadge(movie, this.getPreferences());
+        // "New" corner badge for titles added in the last two weeks (unwatched).
+        const isNew = watch.status !== 'watched' && group.items.some(i => MediaUtils.isRecentlyAdded(i));
+
+        const srcset = MediaUtils.tmdbSrcset(poster);
+        card.innerHTML = `
+            <div class="movie-poster">
+                ${isNew ? '<span class="new-badge">NEW</span>' : ''}
+                <img src="${MediaUtils.escapeHtml(poster)}" alt="${MediaUtils.escapeHtml(displayName)}"
+                     ${srcset ? `srcset="${MediaUtils.escapeHtml(srcset)}" sizes="(max-width: 640px) 45vw, 190px"` : ''}
+                     onerror="this.onerror=null;this.srcset='';this.src='/img/norva-media-placeholder.png'" loading="lazy" decoding="async">
+                <div class="movie-play-overlay">
+                    <span class="play-icon">${Icons.play}</span>
+                </div>
+                ${groupBroken ? '<span class="playback-badge" title="Playback failed">⚠</span>' : ''}
+                ${versionCount > 1 ? `<button class="version-badge" title="Choose version">${versionCount} versions</button>` : ''}
+                ${languageBadge ? `<span class="version-language-badge ${versionCount > 1 ? 'with-version-badge' : ''}">${MediaUtils.escapeHtml(languageBadge)}</span>` : ''}
+                ${watch.status === 'watched' ? '<span class="watched-badge" title="Watched">✓</span>' : ''}
+                ${watch.status === 'inprogress' ? `<div class="card-progress"><div class="card-progress-fill" style="width:${Math.round(watch.ratio * 100)}%"></div></div>` : ''}
+                <button class="favorite-btn ${isFav ? 'active' : ''}" aria-label="${isFav ? 'Remove from Favorites' : 'Add to Favorites'}" title="${isFav ? 'Remove from Favorites' : 'Add to Favorites'}">
+                    <span class="fav-icon">${isFav ? Icons.favorite : Icons.favoriteOutline}</span>
+                </button>
+            </div>
+            <div class="movie-info">
+                <div class="movie-title">${MediaUtils.escapeHtml(displayName)}</div>
+                <div class="movie-meta">
+                    ${year ? `<span>${year}</span>` : ''}
+                    ${rating ? `<span>${rating}</span>` : ''}
+                    ${movie.tmdb?.runtime ? `<span>${movie.tmdb.runtime} min</span>` : ''}
+                </div>
+            </div>
+        `;
+
+        // A TV card is one composite D-pad stop. Its corner controls remain
+        // clickable with a pointer but must not become nested focus targets.
+        if (this._isTvMode()) {
+            card.querySelectorAll('.version-badge, .favorite-btn').forEach(button => {
+                button.tabIndex = -1;
+            });
+        }
+
+        // Stash the group so the TV panel can preview this card from the delegated
+        // grid focusin listener (which has no access to this closure).
+        card.__movieGroup = group;
+
+        card.addEventListener('click', (e) => {
+            if (e.target.closest('.favorite-btn')) {
+                e.stopPropagation();
+                this.toggleFavorite(group, e.target.closest('.favorite-btn'));
+                return;
+            }
+            // TV split-view: the panel already previews this card. Committing plays a
+            // single version, or (multi) sends focus to the labelled version list —
+            // never a fullscreen fiche takeover. The version badge lands there too.
+            if (this._isTvMode()) {
+                e.stopPropagation();
+                this._tvCommitCard(group);
+                return;
+            }
+            if (e.target.closest('.version-badge')) {
+                e.stopPropagation();
+                this.openGroup(group, { focusVersions: true });
+            } else {
+                this.openGroup(group);
+            }
+        });
+
+        // Hover preview (desktop): bigger art + instant Play / Details.
+        card.__norvaHover = () => ({
+            title: displayName,
+            meta: [year, movie.tmdb?.runtime ? `${movie.tmdb.runtime} min` : '', movie.rating ? `★ ${movie.rating}` : '']
+                .filter(Boolean).join(' · '),
+            poster,
+            backdrop: MediaUtils.safeImageUrl(this.getMovieBackdrop(movie), '') || null,
+            onPlay: () => {
+                this.openGroup(group);
+                let tries = 0;
+                const tick = () => {
+                    const btn = document.querySelector('#movie-details:not(.hidden) #movie-primary-action');
+                    if (btn && !btn.disabled) { btn.click(); return; }
+                    if (++tries < 12) setTimeout(tick, 250);
+                };
+                setTimeout(tick, 150);
+            },
+            onDetails: () => this.openGroup(group)
+        });
+
+        return card;
+    }
+
+    // === Continue Watching row ===
+
+    getResumeOffset(progress, duration = 0) {
+        const position = Math.max(0, Math.floor(Number(progress) || 0));
+        const total = Math.max(0, Math.floor(Number(duration) || 0));
+        if (position < 12) return 0;
+        if (total > 0 && position >= total * 0.95) return 0;
+        return Math.max(0, position - 3);
+    }
+
+    renderContinueWatching() {
+        if (!this.continueRow || !this.continueList) return;
+        const inProgress = (this.historyItems || [])
+            .filter(h => h.item_type === 'movie' && h.duration > 0 &&
+                this.getResumeOffset(h.progress, h.duration) > 0)
+            .slice(0, 12);
+
+        if (inProgress.length === 0) {
+            this.continueRow.classList.add('hidden');
+            return;
+        }
+
+        this.continueList.innerHTML = inProgress.map(h => {
+            const ratio = Math.round((h.progress / h.duration) * 100);
+            return `
+            <div class="continue-card" data-item-id="${MediaUtils.escapeHtml(h.item_id)}"
+                 data-source-id="${h.source_id || h.data?.sourceId || ''}">
+                <img src="${MediaUtils.escapeHtml(MediaUtils.safeImageUrl(h.data?.poster, '/img/norva-media-placeholder.png'))}"
+                     onerror="this.onerror=null;this.srcset='';this.src='/img/norva-media-placeholder.png'" loading="lazy" decoding="async" alt="">
+                <div class="continue-card-info">
+                    <p class="continue-card-title">${MediaUtils.escapeHtml(MediaUtils.cleanReleaseName(h.data?.title || '') || 'Unknown')}</p>
+                    <div class="card-progress"><div class="card-progress-fill" style="width:${ratio}%"></div></div>
+                </div>
+            </div>`;
+        }).join('');
+
+        this.continueList.querySelectorAll('.continue-card').forEach(card => {
+            if (this._isTvMode()) {
+                const h = inProgress.find(x => String(x.item_id) === card.dataset.itemId);
+                card.tabIndex = 0;
+                card.setAttribute('role', 'button');
+                card.setAttribute('aria-label', `Resume ${MediaUtils.cleanReleaseName(h?.data?.title || '') || 'movie'}`);
+            }
+            card.addEventListener('click', () => {
+                const h = inProgress.find(x => String(x.item_id) === card.dataset.itemId);
+                if (h) this.resumeFromHistory(h);
+            });
+        });
+
+        this.continueRow.classList.remove('hidden');
+        this.updateContinueCompact();
+    }
+
+    // Toggle the compact pinned strip based on how far the grid is scrolled.
+    // Hysteresis (compact at >32px, expand at <8px) prevents flicker at the edge.
+    updateContinueCompact() {
+        if (!this.continueRow || !this.container) return;
+        const y = this.container.scrollTop || 0;
+        const compact = this.continueRow.classList.contains('is-compact');
+        if (!compact && y > 32) this.continueRow.classList.add('is-compact');
+        else if (compact && y < 8) this.continueRow.classList.remove('is-compact');
+    }
+
+    async resumeFromHistory(h) {
+        const sourceId = h.source_id || h.data?.sourceId;
+        if (!sourceId) return;
+        const movie = this.movies.find(m =>
+            String(m.stream_id) === String(h.item_id) && m.sourceId === parseInt(sourceId))
+            || {
+                stream_id: h.item_id,
+                sourceId: parseInt(sourceId),
+                name: h.data?.title,
+                stream_icon: h.data?.poster,
+                container_extension: h.data?.containerExtension || 'mp4'
+            };
+        await this.playMovie(movie, {
+            resumeTime: this.getResumeOffset(h.progress, h.duration),
+            versions: [movie],
+            playbackPreferences: h.data?.playbackPreferences || h.data?.playback_preferences || null
+        });
+    }
+
+    // === Movie detail destination ===
+
+    openGroup(group, { focusVersions = false, selectedMovie = null } = {}) {
+        const ordered = MediaUtils.orderVersionsByPreference(group.items, this.getPreferences());
+        const resumeVersion = ordered.find(item => {
+            const state = this._watchStateFor(item);
+            return state && state.ratio > 0.01 && state.ratio < 0.9;
+        });
+        this.showMovieDetails(group, selectedMovie || resumeVersion || ordered[0], {
+            versions: ordered,
+            focusVersions
+        });
+    }
+
+    // Open a movie's detail directly from a search result: best-effort fetch its
+    // sibling versions, group them exactly like the grid, and open the matching
+    // group (so the version picker is complete). Falls back to a single-item group,
+    // and returns false on any failure so the caller can fall back to its own path.
+    async openByItem(item) {
+        try {
+            if (!item || item.stream_id == null) return false;
+            const title = item.tmdb?.title || item.name || '';
+            const tapped = { ...item, sourceId: item.sourceId, id: `${item.sourceId}:${item.stream_id}` };
+            const items = [tapped];
+            try {
+                const page = await API.media.page({ type: 'movie', q: title, limit: 60 });
+                const seen = new Set([`${tapped.sourceId}:${tapped.stream_id}`]);
+                for (const m of (page.items || [])) {
+                    const k = `${m.sourceId}:${m.stream_id}`;
+                    if (!seen.has(k)) { seen.add(k); items.push({ ...m, sourceId: m.sourceId, id: k }); }
+                }
+            } catch (_) { /* best-effort: keep just the tapped item */ }
+            const inGroup = (g) => g.items.some(i =>
+                String(i.stream_id) === String(item.stream_id) && String(i.sourceId) === String(item.sourceId));
+            const group = MediaUtils.groupItems(items, { idField: 'stream_id' }).find(inGroup)
+                || { key: 'search', items: [tapped], representative: tapped };
+            const selected = group.items.find(i => String(i.stream_id) === String(item.stream_id)) || null;
+            this.openGroup(group, { selectedMovie: selected });
+            return true;
+        } catch (_) {
+            return false;
+        }
+    }
+
+    getMovieDisplayTitle(movie = this.currentMovie) {
+        return movie?.tmdb?.title || MediaUtils.cleanReleaseName(movie?.title || movie?.name || '') || 'Movie';
+    }
+
+    getMoviePoster(movie = this.currentMovie) {
+        return MediaUtils.safeImageUrl(
+            movie?.stream_icon || movie?.cover || MediaUtils.tmdbPosterUrl(movie?.tmdb, 'w600_and_h900_bestv2'),
+            '/img/norva-media-placeholder.png'
+        );
+    }
+
+    getTmdbImageUrl(path, size = 'w1280') {
+        const raw = String(path || '').trim();
+        if (!raw) return null;
+        if (/^https?:\/\//i.test(raw)) return MediaUtils.safeImageUrl(raw);
+        if (raw.startsWith('/')) return MediaUtils.safeImageUrl(`https://image.tmdb.org/t/p/${size}${raw}`);
+        return null;
+    }
+
+    getMovieBackdrop(movie = this.currentMovie) {
+        return this.getTmdbImageUrl(
+            movie?.backdrop_path || movie?.tmdb?.backdrop_path || movie?.backdrop || movie?.tmdb?.backdrop,
+            'w1280'
+        ) || this.getMoviePoster(movie);
+    }
+
+    getMovieGenres(movie = this.currentMovie) {
+        const genres = movie?.tmdb?.genres || movie?.genres || [];
+        if (Array.isArray(genres)) {
+            return genres.map(g => typeof g === 'string' ? g : g?.name).filter(Boolean);
+        }
+        return String(genres || '').split(',').map(g => g.trim()).filter(Boolean);
+    }
+
+    getCategoryName(movie = this.currentMovie) {
+        return movie?.category_name
+            || movie?.metadata?.categoryName
+            || movie?.metadata?.category_name
+            || '';
+    }
+
+    getMovieDuration(movie = this.currentMovie) {
+        const runtime = Number(movie?.tmdb?.runtime || movie?.runtime || movie?.duration_minutes);
+        if (Number.isFinite(runtime) && runtime > 0) return `${Math.round(runtime)} min`;
+        const seconds = MediaUtils.parseDurationToSeconds(movie?.duration || movie?.duration_secs || movie?.duration_seconds);
+        if (!seconds) return '';
+        const minutes = Math.round(seconds / 60);
+        const h = Math.floor(minutes / 60);
+        const m = minutes % 60;
+        if (h <= 0) return `${minutes} min`;
+        return m ? `${h} h ${m} min` : `${h} h`;
+    }
+
+    // watchState is keyed by stream_id only, but Xtream stream_ids can collide across
+    // sources. Return the state only when it belongs to THIS item's source (when both are
+    // known), so a sibling version from another source can't borrow its progress/resume.
+    // Falls through when either source is unknown → identical to the old behaviour.
+    _watchStateFor(item) {
+        const state = this.watchState.get(String(item?.stream_id));
+        if (state && state.sourceId != null && item?.sourceId != null &&
+            String(state.sourceId) !== String(item.sourceId)) return null;
+        return state || null;
+    }
+
+    getMovieWatchState(movie = this.currentMovie) {
+        const state = this._watchStateFor(movie);
+        if (!state) return { status: 'unwatched', ratio: 0, progress: 0, duration: 0, resumeTime: 0 };
+        const resumeTime = this.getResumeOffset(state.progress, state.duration);
+        if (state.ratio >= 0.9) return { ...state, status: 'watched', resumeTime: 0 };
+        if (resumeTime > 0) return { ...state, status: 'inprogress', resumeTime };
+        return { ...state, status: 'unwatched', resumeTime: 0 };
+    }
+
+    getMovieActionLabel(movie = this.currentMovie) {
+        const state = this.getMovieWatchState(movie);
+        if (state.status === 'inprogress') return 'Resume';
+        if (state.status === 'watched') return 'Restart';
+        return 'Play';
+    }
+
+    syncDetailFavoriteButton() {
+        if (!this.detailFavoriteBtn || !this.currentMovieGroup) return;
+        const isFav = this.currentMovieGroup.items.some(i => this.favoriteIds.has(`${i.sourceId}:${i.stream_id}`));
+        this.detailFavoriteBtn.classList.toggle('active', isFav);
+        this.detailFavoriteBtn.title = isFav ? 'Remove from Favorites' : 'Add to Favorites';
+        const icon = this.detailFavoriteBtn.querySelector('.fav-icon');
+        const label = this.detailFavoriteBtn.querySelector('.fav-label');
+        if (icon) icon.innerHTML = isFav ? Icons.favorite : Icons.favoriteOutline;
+        if (label) label.textContent = 'Favorite';
+    }
+
+    // === Thumbs up/down (per-profile title rating) ===
+
+    paintThumbButtons(rating) {
+        document.getElementById('movie-thumb-up')?.classList.toggle('active', rating === 1);
+        document.getElementById('movie-thumb-down')?.classList.toggle('active', rating === -1);
+    }
+
+    async loadRating() {
+        this._currentRating = 0;
+        this.paintThumbButtons(0);
+        const movie = this.currentMovie;
+        if (!movie || !window.NorvaCloud?.ratings) return;
+        try {
+            const res = await NorvaCloud.ratings.get({ itemType: 'movie', itemId: movie.stream_id });
+            this._currentRating = Number(res?.rating) || 0;
+            this.paintThumbButtons(this._currentRating);
+        } catch (_) { /* ratings are cloud-only / best-effort */ }
+    }
+
+    async setRating(value) {
+        const movie = this.currentMovie;
+        if (!movie || !window.NorvaCloud?.ratings) return;
+        // Clicking the active thumb clears it (toggle-off), like Netflix.
+        const next = this._currentRating === value ? 0 : value;
+        this._currentRating = next;
+        this.paintThumbButtons(next);
+        try {
+            await NorvaCloud.ratings.set({ sourceId: movie.sourceId, itemId: movie.stream_id, itemType: 'movie', rating: next });
+        } catch (_) {
+            this.app?.showToast?.('Could not save your rating', { type: 'error' });
+        }
+    }
+
+    // === Offline downloads (native phone/tablet app only) ===
+
+    /** The native download bridge, present only inside the Norva mobile APK. */
+    nativeDownloadBridge() {
+        const b = window.NorvaTVCloud;
+        return (b && typeof b.downloadMedia === 'function') ? b : null;
+    }
+
+    /** Current download state for the open movie: none | queued | downloading | done | failed. */
+    downloadStateFor(movie) {
+        const bridge = this.nativeDownloadBridge();
+        if (!bridge || !movie) return 'none';
+        try {
+            const id = `${movie.sourceId}:${movie.stream_id}`;
+            if (typeof bridge.downloadState === 'function') return bridge.downloadState(id) || 'none';
+        } catch (_) { /* fall through */ }
+        return 'none';
+    }
+
+    /** Reflect the download bridge + state on the fiche button (hidden in the browser). */
+    syncDownloadButton() {
+        const btn = this.detailDownloadBtn;
+        if (!btn) return;
+        const bridge = this.nativeDownloadBridge();
+        if (!bridge || !this.currentMovie) {
+            btn.style.display = 'none';
+            this.stopDownloadPolling();
+            return;
+        }
+        btn.style.display = '';
+        const state = this.downloadStateFor(this.currentMovie);
+        const label = btn.querySelector('.download-label');
+        const icon = btn.querySelector('.download-icon');
+        btn.classList.remove('is-downloading', 'is-done');
+        btn.disabled = false;
+        let text = 'Download';
+        if (state === 'done') {
+            text = 'Downloaded';
+            btn.classList.add('is-done');
+            if (icon) icon.innerHTML = '&#x2713;'; // check
+        } else if (state === 'downloading' || state === 'queued') {
+            text = state === 'queued' ? 'Queued…' : 'Downloading…';
+            btn.classList.add('is-downloading');
+            if (icon) icon.innerHTML = '&#x2193;';
+        } else {
+            if (icon) icon.innerHTML = '&#x2193;';
+        }
+        if (label) label.textContent = text;
+        btn.title = state === 'done' ? 'Open downloads' : 'Download for offline';
+        // Reveal the Downloads menu entry as soon as something is downloading.
+        window.app?.refreshDownloadsNav?.();
+        // Poll while in flight so the label tracks progress and flips to Downloaded.
+        if (state === 'downloading' || state === 'queued') this.startDownloadPolling();
+        else this.stopDownloadPolling();
+    }
+
+    startDownloadPolling() {
+        if (this._downloadPollTimer) return;
+        this._downloadPollTimer = setInterval(() => {
+            if (!this.currentMovie || !this.detailDownloadBtn || this.detailsPanel?.classList.contains('hidden')) {
+                this.stopDownloadPolling();
+                return;
+            }
+            this.syncDownloadButton();
+        }, 1500);
+    }
+
+    stopDownloadPolling() {
+        if (this._downloadPollTimer) {
+            clearInterval(this._downloadPollTimer);
+            this._downloadPollTimer = null;
+        }
+    }
+
+    async onDownloadClick() {
+        const bridge = this.nativeDownloadBridge();
+        if (!bridge || !this.currentMovie) return;
+        const state = this.downloadStateFor(this.currentMovie);
+        // Already saved (or in flight) → open the native Downloads screen.
+        if (state === 'done' || state === 'downloading' || state === 'queued') {
+            try { bridge.openDownloads?.(); } catch (_) { /* no-op */ }
+            return;
+        }
+        await this.startMovieDownload(this.currentMovie);
+    }
+
+    /** Resolve the direct provider URL (residential IP, no gateway) and queue it natively. */
+    async startMovieDownload(movie) {
+        const bridge = this.nativeDownloadBridge();
+        if (!bridge || !movie) return;
+        const btn = this.detailDownloadBtn;
+        const label = btn?.querySelector('.download-label');
+        try {
+            if (btn) { btn.disabled = true; }
+            if (label) label.textContent = 'Preparing…';
+            const container = movie.container_extension || 'mp4';
+            const playbackHint = MediaUtils.playbackHintFromItem
+                ? MediaUtils.playbackHintFromItem(movie, { container })
+                : { container };
+            await this.prepareForPlaybackSession();
+            const result = await API.proxy.xtream.getStreamUrl(
+                movie.sourceId, movie.stream_id, 'movie', container, playbackHint
+            );
+            if (!result || !result.url) throw new Error('No stream URL');
+            const payload = {
+                url: result.url,
+                sourceId: String(movie.sourceId),
+                itemId: String(movie.stream_id),
+                itemType: 'movie',
+                title: movie.tmdb?.title || movie.name || 'Movie',
+                subtitle: '',
+                posterUrl: MediaUtils.downloadablePosterUrl(movie),
+                container,
+                durationSeconds: movie.tmdb?.runtime ? movie.tmdb.runtime * 60 : 0
+            };
+            bridge.downloadMedia(JSON.stringify(payload));
+        } catch (err) {
+            console.warn('[Download] Could not start:', err?.message || err);
+            if (label) label.textContent = 'Download failed';
+        } finally {
+            if (btn) btn.disabled = false;
+            // Give the native side a moment to register the entry, then refresh.
+            setTimeout(() => this.syncDownloadButton(), 600);
+        }
+    }
+
+    renderMovieVersions(selectedMovie = this.currentMovie) {
+        if (!this.versionsList || !this.versionSummary) return;
+        const versions = this.currentMovieVersions || [];
+        if (versions.length <= 1) {
+            this.versionsList.innerHTML = '';
+            this.versionSummary.textContent = 'Best version selected automatically.';
+            this.versionsList.closest('.movie-versions-section')?.classList.add('single-version');
+            return;
+        }
+
+        this.versionsList.closest('.movie-versions-section')?.classList.remove('single-version');
+        this.versionSummary.textContent = this._isTvMode()
+            ? `${versions.length} versions available. Press OK to play a version.`
+            : `${versions.length} versions available. Play uses the selected version.`;
+        this.versionsList.innerHTML = versions.map((item, index) => {
+            const desc = MediaUtils.versionDescriptor(item, {
+                siblings: versions,
+                index,
+                resolveSourceName: (id) => this.getSourceName(id)
+            });
+            const state = this.getMovieWatchState(item);
+            const active = String(item.stream_id) === String(selectedMovie?.stream_id) &&
+                String(item.sourceId) === String(selectedMovie?.sourceId);
+            const dot = desc.tier
+                ? `<span class="version-tier-dot ${MediaUtils.escapeHtml(desc.tier.cls)}" title="${MediaUtils.escapeHtml(desc.tier.label)}"></span>`
+                : '';
+            const badge = desc.badge
+                ? `<span class="version-quality-badge ${/(4k|2160|uhd)/i.test(desc.badge) ? 'hi' : ''}">${MediaUtils.escapeHtml(desc.badge)}</span>`
+                : '';
+            const meta = desc.meta ? `<span class="version-meta">${MediaUtils.escapeHtml(desc.meta)}</span>` : '';
+            return `
+                <button class="movie-version-item ${active ? 'active' : ''}" type="button" data-index="${index}">
+                    <span class="version-head">${dot}<span class="version-headline">${MediaUtils.escapeHtml(desc.headline)}</span>${badge}</span>
+                    ${meta}
+                    ${state.status === 'inprogress' ? '<span class="movie-version-progress">In progress</span>' : ''}
+                    ${state.status === 'watched' ? '<span class="movie-version-progress">Watched</span>' : ''}
+                </button>`;
+        }).join('');
+
+        this.versionsList.querySelectorAll('.movie-version-item').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const index = parseInt(btn.dataset.index);
+                const movie = versions[index];
+                if (!movie) return;
+
+                // On TV, OK on a labelled version is the commit action. Re-rendering
+                // this list used to destroy focus, while Play returned to the same list.
+                if (this._isTvMode()) {
+                    const state = this.getMovieWatchState(movie);
+                    const fallbacks = [
+                        movie,
+                        ...versions.filter(item => this._movieKey(item) !== this._movieKey(movie))
+                    ];
+                    await this.playMovie(movie, {
+                        versions: fallbacks,
+                        resumeTime: state.resumeTime || 0,
+                        playbackPreferences: state.data?.playbackPreferences ||
+                            state.data?.playback_preferences || null
+                    });
+                    return;
+                }
+
+                this.showMovieDetails(this.currentMovieGroup, movie, { versions, isVersionSwitch: true });
+            });
+        });
+    }
+
+    _isTvMode() {
+        return document.documentElement.classList.contains('tv-mode');
+    }
+
+    // Android TV only: arrange the existing controls into the same visual bands as
+    // the supplied mockup. Existing nodes are MOVED (never cloned), so their event
+    // listeners, values and controller references remain valid. This method never
+    // runs on web/mobile.
+    _setupTvMoviesLayout() {
+        const page = this.pageEl;
+        const header = page?.querySelector('.movies-header');
+        const controls = header?.querySelector('.movies-controls');
+        const legacyFilterBar = document.getElementById('movies-filter-bar');
+        if (!page || !header || !controls || !legacyFilterBar || !this.container) return;
+
+        // Explicit contract with tvNavigation.js: this visible panel is a docked
+        // split-view region, never a modal scope. Clear any stale web fiche state too.
+        if (this.detailsPanel) this.detailsPanel.dataset.tvSplitPreview = 'true';
+        page.classList.remove('movie-detail-open');
+        this.container.classList.remove('hidden');
+        if (page.classList.contains('tv-movies-layout-ready')) return;
+
+        const primary = document.createElement('div');
+        primary.id = 'movies-tv-primary-filters';
+        primary.className = 'tv-movies-filter-row tv-movies-primary-filters';
+        primary.setAttribute('aria-label', 'Movie filters');
+        primary.dataset.tvNavRegion = 'movies-filters';
+
+        const secondary = document.createElement('div');
+        secondary.id = 'movies-tv-secondary-filters';
+        secondary.className = 'tv-movies-filter-row tv-movies-secondary-filters';
+        secondary.setAttribute('aria-label', 'Availability and view options');
+        secondary.dataset.tvNavRegion = 'movies-filters';
+
+        const catalogHead = document.createElement('div');
+        catalogHead.id = 'movies-tv-catalog-head';
+        catalogHead.className = 'tv-movies-catalog-head';
+
+        const catalogTitle = document.createElement('h3');
+        catalogTitle.className = 'tv-movies-catalog-title';
+        catalogTitle.textContent = 'All Movies';
+        catalogHead.appendChild(catalogTitle);
+
+        const catalogMeta = document.createElement('div');
+        catalogMeta.className = 'tv-movies-catalog-meta';
+        catalogHead.appendChild(catalogMeta);
+
+        const categoryControl = document.getElementById('movies-category-btn')?.closest('.multi-select');
+        const searchWrapper = this.searchInput?.closest('.search-wrapper');
+        const favoriteBtn = document.getElementById('movies-favorites-btn');
+        const append = (host, element) => { if (host && element) host.appendChild(element); };
+
+        // Header: title/subtitle at left, search at right.
+        append(controls, searchWrapper);
+
+        // Row 1: source, categories, year, rating, audio and subtitles.
+        [this.sourceSelect, categoryControl, this.yearSelect, this.ratingSelect,
+         this.audioSelect, this.subtitleSelect].forEach(element => append(primary, element));
+
+        // Row 2: availability, recency and the main catalogue actions.
+        [this.watchedSelect, this.addedSelect, favoriteBtn, this.hideBrokenBtn,
+         this.groupToggleBtn, this.resetBtn].forEach(element => append(secondary, element));
+
+        // The catalogue heading owns the live count and sort control.
+        append(catalogMeta, this.countEl);
+        append(catalogMeta, this.sortSelect);
+        this.resetBtn?.classList.remove('hidden');
+        this.activeFiltersEl?.setAttribute('data-tv-nav-region', 'movies-filters');
+
+        // Nodes deliberately left in the hidden legacy bar are not TV D-pad stops.
+        legacyFilterBar.querySelectorAll('button, input, select, textarea, [tabindex]').forEach(element => {
+            element.tabIndex = -1;
+        });
+        const backButton = this.detailsPanel?.querySelector('.movie-back-btn');
+        if (backButton) backButton.tabIndex = -1;
+
+        const anchor = [this.activeFiltersEl, this.continueRow, this.container, this.detailsPanel]
+            .find(element => element?.parentElement === page) || null;
+        page.insertBefore(primary, anchor);
+        page.insertBefore(secondary, anchor);
+        page.insertBefore(catalogHead, anchor);
+        page.classList.add('tv-movies-layout-ready');
+    }
+
+    _movieKey(movie) {
+        return movie ? `${movie.sourceId}:${movie.stream_id}` : '';
+    }
+
+    // TV split-view: render the D-pad-focused card into the docked panel as a light
+    // preview (no grid takeover, no heavy extras, no focus steal). Extras load only
+    // when the user steps into the panel (_loadPanelExtras).
+    previewCard(card) {
+        const group = card?.__movieGroup;
+        if (!group?.items?.length) return;
+        this.container?.querySelectorAll('.movie-card.tv-preview-active').forEach(active => {
+            if (active !== card) active.classList.remove('tv-preview-active');
+        });
+        card.classList.add('tv-preview-active');
+        const ordered = MediaUtils.orderVersionsByPreference(group.items, this.getPreferences());
+        this.showMovieDetails(group, ordered[0], { versions: ordered, isTvPreview: true });
+    }
+
+    // On page entry, seed the panel with the first card so it's never empty.
+    _previewFirstCard() {
+        const first = this.container?.querySelector('.movie-card');
+        if (first) this.previewCard(first);
+    }
+
+    // Committing a card on TV (Enter/click): a single healthy version plays straight
+    // away; multiple versions ALWAYS send the user to the labelled version list to
+    // choose — never auto-play a guessed variant.
+    _tvCommitCard(group) {
+        if (!group?.items?.length) return;
+        const ordered = MediaUtils.orderVersionsByPreference(group.items, this.getPreferences());
+        // Make sure the panel reflects THIS card even if the preview debounce hasn't fired.
+        this.showMovieDetails(group, ordered[0], { versions: ordered, isTvPreview: true });
+        if (ordered.length > 1) {
+            this._focusVersionsList();
+        } else {
+            this.playPrimaryMovie();
+        }
+    }
+
+    // Move focus into the version list, pre-selecting the in-progress version if any
+    // (so a resume is one press away) else the recommended (top) one. Loads extras too.
+    _focusVersionsList() {
+        this._loadPanelExtras();
+        const list = this.versionsList;
+        if (!list) return;
+        requestAnimationFrame(() => {
+            const items = [...list.querySelectorAll('.movie-version-item')];
+            if (!items.length) return;
+            const target = items.find(b => b.querySelector('.movie-version-progress')) || items[0];
+            target.focus();
+            target.scrollIntoView({ block: 'nearest' });
+        });
+    }
+
+    // Heavy fiche extras (more-like-this rail + cast/trailer) — loaded once per movie,
+    // only when the panel is entered, so grid browsing never pays for them.
+    _loadPanelExtras() {
+        const movie = this.currentMovie;
+        if (!movie) return;
+        const key = this._movieKey(movie);
+        if (this._extrasLoadedFor === key) return;
+        this._extrasLoadedFor = key;
+        this.loadRating();
+        this.renderMoreLikeThis(movie);
+        this.renderFicheExtras(this.currentMovieGroup?.representative || movie);
+    }
+
+    showMovieDetails(group, selectedMovie = null, { versions = null, focusVersions = false, isVersionSwitch = false, isTvPreview = false } = {}) {
+        if (!group?.items?.length || !this.detailsPanel) return;
+        const isTv = this._isTvMode();
+        const ordered = versions || MediaUtils.orderVersionsByPreference(group.items, this.getPreferences());
+        const movie = selectedMovie || ordered[0] || group.representative;
+        const displayMovie = group.representative || movie;
+
+        this.currentMovieGroup = group;
+        this.currentMovieVersions = ordered;
+        this.currentMovie = movie;
+        // Remember the open fiche so a page refresh restores it (see app.restoreOpenFiche).
+        // Skipped on TV: the panel is derived live from grid focus, not a persisted "open" state.
+        if (!isTv) {
+            try {
+                window.app?.rememberOpenFiche?.({
+                    type: 'movie', sourceId: movie.sourceId, id: movie.stream_id,
+                    title: this.getMovieDisplayTitle(displayMovie),
+                    // Stash the whole version group so the restore rebuilds the EXACT fiche
+                    // (all versions + the selected one) without re-searching.
+                    group: this.currentMovieGroup,
+                });
+            } catch (_) { /* best-effort */ }
+        }
+
+        // TV keeps the grid AND the panel visible side-by-side (split-view). Only the
+        // phone/web fiche does the fullscreen takeover (hide grid, mark page open).
+        if (!isTv) {
+            this.pageEl?.classList.add('movie-detail-open');
+            this.container.classList.add('hidden');
+        } else {
+            this.pageEl?.classList.remove('movie-detail-open');
+            this.container.classList.remove('hidden');
+        }
+        this.detailsPanel.classList.remove('hidden');
+        // A version switch re-renders in place while the user is scrolled down at the
+        // versions list — don't yank them back to the hero. On a fresh TV preview,
+        // reset to the top and drop any stale extras from the previously-focused card.
+        if (!isVersionSwitch && !isTv) this.detailsPanel.scrollTop = 0;
+        if (isTvPreview) {
+            this.detailsPanel.scrollTop = 0;
+            this.detailsPanel.querySelector('.more-like-this')?.remove();
+            this.detailsPanel.querySelector('.detail-credits')?.remove();
+            this.detailsPanel.querySelector('.detail-trailer-btn')?.remove();
+            this._extrasLoadedFor = null;
+        }
+
+        // Context-aware back label — return to the search results, the open genre,
+        // or the Movies home, whichever the fiche was opened from.
+        const backBtn = this.detailsPanel.querySelector('.movie-back-btn');
+        if (backBtn) {
+            const ctx = this.searchInput?.value?.trim()
+                ? 'Search results'
+                : (this.activeBucket && this.bucketLabel ? this.bucketLabel : 'Movies');
+            // Update only the label span — the button holds an SVG arrow icon that a
+            // raw textContent write would destroy.
+            const label = backBtn.querySelector('.back-label');
+            if (label) label.textContent = ctx;
+            else backBtn.textContent = `← ${ctx}`;
+        }
+
+        const hero = document.getElementById('movie-detail-hero');
+        const poster = this.getMoviePoster(displayMovie);
+        const backdrop = this.getMovieBackdrop(displayMovie);
+        if (hero) hero.style.setProperty('--movie-hero-bg', `url("${String(backdrop).replace(/"/g, '%22')}")`);
+
+        const posterEl = document.getElementById('movie-detail-poster');
+        if (posterEl) {
+            // A stale/404 poster (e.g. TMDB replaced the image) must fall back to the
+            // placeholder, not render a broken-image icon. Clear srcset (the browser
+            // prefers it over src) so the fallback actually shows.
+            posterEl.onerror = () => { posterEl.onerror = null; posterEl.removeAttribute('srcset'); posterEl.src = '/img/norva-media-placeholder.png'; };
+            posterEl.removeAttribute('srcset');
+            // The TV panel uses the cinematic backdrop as its square/landscape hero.
+            // Web and mobile keep the canonical portrait poster.
+            posterEl.src = isTv && backdrop ? backdrop : poster;
+            posterEl.alt = this.getMovieDisplayTitle(displayMovie);
+        }
+
+        const titleEl = document.getElementById('movie-detail-title');
+        if (titleEl) titleEl.textContent = this.getMovieDisplayTitle(displayMovie);
+
+        const plotEl = document.getElementById('movie-detail-plot');
+        if (plotEl) plotEl.textContent = displayMovie.tmdb?.overview || displayMovie.overview || displayMovie.description || displayMovie.plot || 'No summary available yet.';
+
+        const version = MediaUtils.parseVersionInfo(movie.name);
+        const rating = parseFloat(displayMovie.rating || displayMovie.tmdb?.vote_average);
+        const ratingLabel = Number.isFinite(rating) && rating > 0 ? `★ ${rating.toFixed(1).replace('.0', '')}` : '';
+        const metaParts = [
+            this.getItemYear(displayMovie),
+            this.getMovieDuration(displayMovie),
+            ratingLabel,
+            ...this.getMovieGenres(displayMovie).slice(0, 3),
+            version.quality,
+            MediaUtils.versionLanguageBadge(movie, this.getPreferences()),
+            ordered.length > 1 ? `${ordered.length} versions` : '',
+            this.getCategoryName(displayMovie)
+        ].filter(Boolean);
+
+        const metaEl = document.getElementById('movie-detail-meta');
+        if (metaEl) metaEl.innerHTML = metaParts.map(part => `<span>${MediaUtils.escapeHtml(part)}</span>`).join('');
+
+        const state = this.getMovieWatchState(movie);
+        const progressEl = document.getElementById('movie-detail-progress');
+        if (progressEl) {
+            progressEl.classList.toggle('hidden', !(state.ratio > 0.01 && state.ratio < 0.9));
+            const fill = progressEl.querySelector('div');
+            if (fill) fill.style.width = `${Math.max(0, Math.min(100, Math.round((state.ratio || 0) * 100)))}%`;
+        }
+
+        if (this.primaryActionBtn) {
+            this.primaryActionBtn.disabled = false;
+            this.primaryActionBtn.dataset.streamId = movie.stream_id;
+            this.primaryActionBtn.dataset.sourceId = movie.sourceId;
+            this.primaryActionBtn.innerHTML = `<span class="play-icon">${Icons.play}</span><span>${MediaUtils.escapeHtml(this.getMovieActionLabel(movie))}</span>`;
+        }
+
+        this.syncDetailFavoriteButton();
+        // A TV grid preview can change several times per second. Defer the cloud
+        // rating request until the user actually enters the panel, preventing
+        // stale responses and network churn while navigating posters.
+        if (!isTvPreview) this.loadRating();
+        this.syncDownloadButton();
+        this.renderMovieVersions(movie);
+        // A version switch keeps the same title — re-highlighting the versions list above is
+        // enough; don't refetch/rebuild the "More like this" rail + extras on every tap
+        // (network churn + a visible flash of the recommendations). On TV, a preview also
+        // defers the extras — they load lazily when the user steps into the panel
+        // (_loadPanelExtras), so flying through the grid never triggers fetches.
+        if (!isVersionSwitch && !isTvPreview) {
+            this.renderMoreLikeThis(movie);
+            this.renderFicheExtras(displayMovie);
+        }
+
+        if (focusVersions) {
+            setTimeout(() => {
+                this.detailsPanel?.querySelector('.movie-versions-section')?.scrollIntoView({ block: 'start' });
+            }, 50);
+        }
+    }
+
+    // Live TMDB extras on the fiche: trailer button + cast/director credits.
+    // Fire-and-forget with a token so a stale fetch never paints a newer fiche.
+    async renderFicheExtras(displayMovie) {
+        const token = (this._ficheExtrasToken = (this._ficheExtrasToken || 0) + 1);
+        this.detailsPanel?.querySelector('.detail-credits')?.remove();
+        this.detailsPanel?.querySelector('.detail-trailer-btn')?.remove();
+        const tmdbId = displayMovie?.provider_tmdb_id || displayMovie?.providerTmdbId
+            || displayMovie?.tmdb_id || displayMovie?.tmdb?.id || displayMovie?.metadata?.providerTmdbId;
+        if (!tmdbId || /^(tt)?0+$/i.test(String(tmdbId)) || !window.NorvaCloud?.media?.tmdbMeta) return;
+        try {
+            const meta = await NorvaCloud.media.tmdbMeta({ type: 'movie', tmdbId: String(tmdbId) });
+            if (token !== this._ficheExtrasToken || !meta?.available) return;
+
+            const plotEl = document.getElementById('movie-detail-plot');
+            const people = [];
+            const castNames = (meta.cast || []).slice(0, 6).map(c => c.name).filter(Boolean);
+            if (castNames.length) people.push(`<span class="detail-credits-label">Cast</span> ${MediaUtils.escapeHtml(castNames.join(', '))}`);
+            if ((meta.directors || []).length) people.push(`<span class="detail-credits-label">Director</span> ${MediaUtils.escapeHtml(meta.directors.join(', '))}`);
+            if (people.length && plotEl) {
+                const credits = document.createElement('div');
+                credits.className = 'detail-credits';
+                credits.innerHTML = people.map(p => `<div class="detail-credits-row">${p}</div>`).join('');
+                plotEl.insertAdjacentElement('afterend', credits);
+            }
+
+            if (meta.trailerKey) {
+                const actions = this.detailsPanel?.querySelector('.movie-detail-actions');
+                if (actions && !actions.querySelector('.detail-trailer-btn')) {
+                    const btn = document.createElement('button');
+                    btn.type = 'button';
+                    btn.className = 'btn btn-ghost detail-trailer-btn';
+                    btn.innerHTML = '▶ Trailer';
+                    btn.addEventListener('click', () =>
+                        MediaUtils.openTrailerLightbox(meta.trailerKey, this.getMovieDisplayTitle(displayMovie)));
+                    actions.appendChild(btn);
+                }
+            }
+        } catch (_) { /* extras are progressive enhancement */ }
+    }
+
+    // "More like this": a genre-matched rail at the bottom of the fiche so the user
+    // keeps browsing instead of backing out. Fire-and-forget; a token guards against
+    // a stale fetch landing on a newer fiche.
+    async renderMoreLikeThis(movie) {
+        const host = this.detailsPanel;
+        if (!host || !window.GenreRails?.appendCards || !API.media?.genreItems) return;
+        const token = (this._mltToken = (this._mltToken || 0) + 1);
+        host.querySelector('.more-like-this')?.remove();
+        try {
+            const T = window.GenreTaxonomy;
+            const bucket = T ? T.classifyTitle(this.getCategoryName(movie), this.getMovieGenres(movie))[0] : null;
+            if (!bucket) return;
+            const payload = await API.media.genreItems({ type: 'movie', bucket, limit: 24, ...this.currentLanguageParams() });
+            if (token !== this._mltToken || host.classList.contains('hidden')) return;
+            const curKey = `${movie?.sourceId}:${movie?.stream_id}`;
+            const items = (payload?.items || [])
+                .filter(i => `${i.sourceId}:${i.stream_id}` !== curKey)
+                .slice(0, 18);
+            if (!items.length) return;
+            host.querySelector('.more-like-this')?.remove();
+            const section = document.createElement('section');
+            section.className = 'more-like-this';
+            section.innerHTML = '<h3 class="more-like-title">More like this</h3><div class="horizontal-scroll more-like-grid"></div>';
+            host.appendChild(section);
+            const rail = section.querySelector('.more-like-grid');
+            window.GenreRails.appendCards(rail, items, {
+                onItemClick: (item) => this.openRailItem(item)
+            });
+            // GenreRails may use different card classes across catalogue modes.
+            // Stamp a stable TV-only hook so sizing and D-pad focus never depend on
+            // whichever desktop percentage rule that card happens to inherit.
+            if (this._isTvMode()) {
+                [...rail.children].forEach(card => {
+                    if (card.matches('.scroll-arrow, .empty-state')) return;
+                    card.classList.add('tv-more-like-card');
+                    card.tabIndex = 0;
+                    if (!card.hasAttribute('role')) card.setAttribute('role', 'button');
+                });
+            }
+        } catch (_) { /* the fiche works fine without related titles */ }
+    }
+
+    hideDetails() {
+        // On TV the panel is persistent (split-view) — there is nothing to close.
+        if (this._isTvMode()) return;
+        try { window.app?.forgetOpenFiche?.(); } catch (_) { /* noop */ }
+        this.detailsPanel?.querySelector('.more-like-this')?.remove();
+        this.stopDownloadPolling();
+        this.detailsPanel?.classList.add('hidden');
+        this.container?.classList.remove('hidden');
+        this.pageEl?.classList.remove('movie-detail-open');
+        this.currentMovie = null;
+        this.currentMovieGroup = null;
+        this.currentMovieVersions = [];
+    }
+
+    async playPrimaryMovie() {
+        if (!this.currentMovie) return;
+        // TV: never auto-play a guessed variant. Multiple versions → send the user to
+        // the labelled version list to choose (pre-focused on the in-progress one).
+        // Single version → play straight through.
+        if (this._isTvMode() && (this.currentMovieVersions?.length || 0) > 1) {
+            this._focusVersionsList();
+            return;
+        }
+        const versions = this.currentMovieVersions?.length
+            ? [this.currentMovie, ...this.currentMovieVersions.filter(item =>
+                String(item.stream_id) !== String(this.currentMovie.stream_id) ||
+                String(item.sourceId) !== String(this.currentMovie.sourceId)
+            )]
+            : [this.currentMovie];
+        const state = this.getMovieWatchState(this.currentMovie);
+        await this.playMovie(this.currentMovie, {
+            versions,
+            resumeTime: state.resumeTime || 0,
+            playbackPreferences: state.data?.playbackPreferences || state.data?.playback_preferences || null
+        });
+    }
+
+    // === Playback ===
+
+    getPreferences() {
+        return {
+            preferredLanguage: this.serverSettings.preferredLanguage || '',
+            preferredAudioLanguage: this.serverSettings.preferredAudioLanguage || '',
+            preferredSubtitleLanguage: this.serverSettings.preferredSubtitleLanguage || '',
+            strictLanguageMatching: Boolean(this.serverSettings.strictLanguageMatching),
+            preferredGenres: this.serverSettings.preferredGenres || [],
+            preferredQuality: this.serverSettings.preferredQuality || 'highest'
+        };
+    }
+
+    async playGroup(group) {
+        const ordered = MediaUtils.orderVersionsByPreference(group.items, this.getPreferences());
+        const best = ordered[0];
+        const watch = this.watchState.get(String(best.stream_id));
+        const resumeTime = watch ? this.getResumeOffset(watch.progress, watch.duration) : 0;
+        await this.playMovie(best, {
+            versions: ordered,
+            resumeTime,
+            playbackPreferences: watch?.data?.playbackPreferences || watch?.data?.playback_preferences || null
+        });
+    }
+
+    async playRandom() {
+        if (this.filteredCards.length === 0) return;
+        const group = this.filteredCards[Math.floor(Math.random() * this.filteredCards.length)];
+        await this.playGroup(group);
+    }
+
+    showVersionPicker(group) {
+        const modal = document.getElementById('modal');
+        const title = document.getElementById('modal-title');
+        const body = document.getElementById('modal-body');
+        const footer = document.getElementById('modal-footer');
+        if (!modal || !body) return;
+
+        const ordered = MediaUtils.orderVersionsByPreference(group.items, this.getPreferences());
+        title.textContent = group.representative.tmdb?.title || group.representative.name;
+
+        body.innerHTML = `
+            <p class="hint" style="margin-bottom: 8px;">Choose a version to play:</p>
+            <div class="version-list">
+                ${ordered.map((item, i) => `
+                    <button class="version-item" data-index="${i}">
+                        <span class="version-item-label">${MediaUtils.escapeHtml(MediaUtils.versionLabel(item, this.getSourceName(item.sourceId)))}</span>
+                        <span class="version-item-name">${MediaUtils.escapeHtml(MediaUtils.cleanReleaseName(item.name))}</span>
+                    </button>
+                `).join('')}
+            </div>
+        `;
+        footer.innerHTML = '';
+
+        const close = () => modal.classList.remove('active');
+        modal.querySelector('.modal-close').onclick = close;
+        modal.onclick = (e) => { if (e.target === modal) close(); };
+
+        body.querySelectorAll('.version-item').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                close();
+                const index = parseInt(btn.dataset.index);
+                // Selected version first, others kept as failover
+                const versions = [ordered[index], ...ordered.filter((_, i) => i !== index)];
+                await this.playMovie(versions[0], { versions });
+            });
+        });
+
+        modal.classList.add('active');
+    }
+
+    async prepareForPlaybackSession() {
+        await Promise.allSettled([
+            this.app?.player?.stop?.(),
+            this.app?.pages?.watch?.releasePlaybackPipelineForRetry?.()
+        ]);
+    }
+
+    getGatewayResumePlan(resumeOffset, requestedPreRoll = 0) {
+        const target = Math.max(0, Math.floor(Number(resumeOffset) || 0));
+        const requested = Math.max(0, Math.floor(Number(requestedPreRoll) || 0));
+        // The gateway now seeks cleanly (linear read + accurate output seek), so
+        // no client pre-roll is needed — it only added a delay while the
+        // transcoder ground up to the resume point.
+        const preRoll = target > 5 ? Math.min(target, requested) : 0;
+        const sessionStart = Math.max(0, target - preRoll);
+        return {
+            target,
+            sessionStart,
+            localSeekTarget: Math.max(0, target - sessionStart)
+        };
+    }
+
+    async playMovie(movie, { versions = null, resumeTime = 0, playbackPreferences = null } = {}) {
+        const watch = this.app.pages.watch;
+        if (!watch) return;
+        const container = movie.container_extension || 'mp4';
+        const resumeOffset = Math.max(0, Math.floor(Number(resumeTime) || 0));
+        const resumePlan = this.getGatewayResumePlan(resumeOffset);
+        const playbackHint = MediaUtils.playbackHintFromItem
+            ? MediaUtils.playbackHintFromItem(movie, { container })
+            : { container };
+        if (resumePlan.sessionStart > 0) {
+            playbackHint.seekOffset = resumePlan.sessionStart;
+            playbackHint.startOffset = resumePlan.sessionStart;
+            playbackHint.resumeTime = resumePlan.sessionStart;
+        }
+        const audioStreamIndex = Number(playbackPreferences?.audio?.streamIndex ?? playbackPreferences?.audio?.stream_index);
+        if (Number.isInteger(audioStreamIndex)) {
+            playbackHint.audioStreamIndex = audioStreamIndex;
+        }
+        const versionList = (versions || [movie]).map(v => ({
+            sourceId: v.sourceId,
+            streamId: v.stream_id,
+            container: v.container_extension || 'mp4',
+            type: 'movie',
+            label: MediaUtils.versionLabel(v, this.getSourceName(v.sourceId))
+        }));
+        const content = {
+            type: 'movie',
+            id: movie.stream_id,
+            title: movie.tmdb?.title || movie.name,
+            poster: MediaUtils.safeImageUrl(movie.stream_icon || movie.cover || MediaUtils.tmdbPosterUrl(movie.tmdb)),
+            description: movie.plot || movie.tmdb?.overview || '',
+            year: this.getItemYear(movie),
+            rating: movie.rating || movie.tmdb?.vote_average,
+            sourceId: movie.sourceId,
+            categoryId: movie.category_id,
+            containerExtension: container,
+            resumeTime: resumePlan.target,
+            playbackPreferences,
+            durationHint: movie.tmdb?.runtime ? movie.tmdb.runtime * 60 : null,
+            versions: versionList,
+            versionIndex: 0,
+            audioLanguages: movie.audioLanguages || movie.audio_languages || null,
+            versionLanguages: movie.versionLanguages || movie.version_languages || null,
+            originalLanguage: movie.originalLanguage || movie.original_language || null,
+            // Precomputed ordered per-track language map (served on the grid item by
+            // norva-catalog attachMediaLanguages). Lets the player label every audio
+            // track with zero playback-time probe — see WatchPage.getContentAudioTracks.
+            audioTracks: movie.audioTracks || movie.audio_tracks || null
+        };
+
+        // Open the player immediately (poster + loading animation), then resolve
+        // the stream URL into the already-visible shell.
+        await watch.play(content, async () => {
+            await this.prepareForPlaybackSession();
+            const result = await API.proxy.xtream.getStreamUrl(
+                movie.sourceId,
+                movie.stream_id,
+                'movie',
+                container,
+                playbackHint
+            );
+            if (!result || !result.url) return null;
+            return {
+                ...result,
+                url: result.url,
+                seekOffset: resumePlan.sessionStart,
+                startOffset: resumePlan.sessionStart,
+                resumeTarget: resumePlan.target
+            };
+        }, {});
+    }
+
+    async toggleFavorite(group, btn) {
+        // Favorites apply to the representative version of the group
+        const movie = group.representative;
+        const favKey = `${movie.sourceId}:${movie.stream_id}`;
+        const isFav = group.items.some(i => this.favoriteIds.has(`${i.sourceId}:${i.stream_id}`));
+        const iconSpan = btn.querySelector('.fav-icon');
+
+        try {
+            if (isFav) {
+                // Remove all versions from favorites to fully unfavorite the group
+                for (const item of group.items) {
+                    const key = `${item.sourceId}:${item.stream_id}`;
+                    if (this.favoriteIds.has(key)) {
+                        this.favoriteIds.delete(key);
+                        await API.favorites.remove(item.sourceId, item.stream_id, 'movie');
+                    }
+                }
+                btn.classList.remove('active');
+                btn.title = 'Add to Favorites';
+                if (iconSpan) iconSpan.innerHTML = Icons.favoriteOutline;
+            } else {
+                this.favoriteIds.add(favKey);
+                btn.classList.add('active');
+                btn.title = 'Remove from Favorites';
+                if (iconSpan) iconSpan.innerHTML = Icons.favorite;
+                await API.favorites.add(movie.sourceId, movie.stream_id, 'movie', {
+                    name: this.getMovieDisplayTitle(movie),
+                    poster: this.getMoviePoster(movie),
+                    type: 'movie'
+                });
+            }
+        } catch (err) {
+            console.error('Error toggling favorite:', err);
+            await this.loadFavorites();
+            this.filterAndRender();
+            // The fiche (not the grid) is what's on screen — re-sync its favorite button
+            // off the reloaded truth, else it stays stuck on the wrong optimistic state.
+            this.syncDetailFavoriteButton?.();
+        }
+    }
+}
+
+window.MoviesPage = MoviesPage;
