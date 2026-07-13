@@ -4,6 +4,7 @@ import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.content.SharedPreferences;
 import android.graphics.Color;
+import android.net.Uri;
 import android.net.http.SslError;
 import android.os.Bundle;
 import android.view.KeyEvent;
@@ -361,8 +362,45 @@ public class MainActivity extends Activity {
         showSplash();
         webView.setVisibility(View.VISIBLE);
         webViewVisible = true;
-        webView.loadUrl(url);
+        webView.loadUrl(withShellCacheBust(url));
         webView.requestFocus();
+    }
+
+    /**
+     * Cache-bust the norva.tv app shell on every load.
+     *
+     * The shell (cloud-pair.html / app.html) is served no-store so its freshly
+     * hashed /css + /js references are always current — but that header is recent,
+     * and a WebView that cached the shell under the previous must-revalidate policy
+     * can cling to an OLD shell (and thus an OLD /css/main.css hash it holds
+     * `immutable` for a year), stranding the TV on stale UI even after a clean
+     * deploy. Appending a per-launch `_cb` param gives the shell a URL the WebView
+     * cache has never seen, forcing a real refetch of the shell and, through its new
+     * hashes, the current CSS/JS. Scoped to norva.tv *.html only: the LAN "server"
+     * mode URL, media/stream URLs and deep links to non-html paths are left
+     * untouched, and the immutable hashed assets still cache forever — only the tiny
+     * shell document is refetched. (Ported from the phone client, which fixed this
+     * exact staleness.) The cloud-pair.html shell also re-appends `_cb` to its
+     * returnTo app.html redirect, so the second hop is refetched too.
+     */
+    private static String withShellCacheBust(String url) {
+        if (url == null) return null;
+        try {
+            Uri u = Uri.parse(url);
+            if (!"norva.tv".equalsIgnoreCase(u.getHost())) return url;
+            String path = u.getPath();
+            if (path == null || !path.endsWith(".html")) return url;
+            String frag = u.getFragment();
+            String out = u.buildUpon()
+                    .fragment(null)
+                    .appendQueryParameter("_cb", Long.toString(System.currentTimeMillis()))
+                    .build()
+                    .toString();
+            if (frag != null && !frag.isEmpty()) out = out + "#" + frag;
+            return out;
+        } catch (Exception e) {
+            return url;
+        }
     }
 
     private void connectCloudPairing() {

@@ -14856,7 +14856,10 @@ html.tv-mode.tv-movies-active
    force it into the SAME compact poster grid as the flat view so the
    filtered results read correctly at 10 feet. TV + Movies scoped only.
    ============================================================ */
-html.tv-mode #page-movies.tv-movies-layout-ready .movies-grid.rail-host {
+/* NB: NOT gated on .tv-movies-layout-ready — the card rule below isn't either, so
+   gating the container half would let the two diverge (container reverts to the
+   5-col grid) if that class is ever absent when a bucket renders. */
+html.tv-mode #page-movies .movies-grid.rail-host {
   display: block !important;
   min-height: 0;
   overflow-y: auto;
@@ -14879,6 +14882,9 @@ html.tv-mode #page-movies .genre-bucket-grid .dashboard-card {
   scroll-snap-align: none;
 }
 html.tv-mode #page-movies .genre-bucket-grid .dashboard-card .card-image {
+  /* Explicit height (118 × 1.5), not aspect-ratio alone: aspect-ratio needs
+     Chromium 88+, and an old TV WebView would otherwise collapse the poster. */
+  height: 177px;
   aspect-ratio: 2 / 3;
 }
 html.tv-mode #page-movies .genre-bucket-grid .dashboard-card:focus {

@@ -237,7 +237,7 @@
         let pollFailStreak = 0;   // consecutive poll errors — don't flash red on a single blip
         let autoRegenCount = 0;   // codes auto-refreshed on expiry (capped, see handleExpiry)
         const MAX_AUTO_REGEN = 6; // ~1h at 10-min TTL, then require a deliberate "New code"
-        const returnTo = sanitizeReturnTo(params.get('returnTo')) || '/?paired=1#home';
+        const returnTo = withReturnCacheBust(sanitizeReturnTo(params.get('returnTo')) || '/?paired=1#home');
 
         // "New code" is a deliberate user action: reset the auto-refresh budget so a
         // fresh hour of hands-off refreshing starts from here.
@@ -473,6 +473,22 @@
             if (!value || typeof value !== 'string') return '';
             if (!value.startsWith('/') || value.startsWith('//')) return '';
             return value;
+        }
+
+        // The native TV shell (MainActivity.withShellCacheBust) refetches THIS page
+        // fresh, but the app.html we then redirect to is a second hop the WebView can
+        // still serve from a stale cache — stranding the box on old CSS/JS. Re-append a
+        // per-load _cb so that hop is refetched too. Scoped to the app shell (.html or
+        // the root), so media/deep-link returnTos are untouched.
+        function withReturnCacheBust(rt) {
+            try {
+                if (!rt) return rt;
+                const m = /^([^?#]*)(\?[^#]*)?(#.*)?$/.exec(rt);
+                const path = m[1] || '', query = m[2] || '', frag = m[3] || '';
+                if (!/\.html$/i.test(path) && path !== '/') return rt;
+                const q = query ? query + '&_cb=' + Date.now() : '?_cb=' + Date.now();
+                return path + q + frag;
+            } catch (_) { return rt; }
         }
     </script>
 </body>
