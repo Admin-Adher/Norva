@@ -139,6 +139,8 @@ public class PlayerActivity extends Activity {
     private TextView castBarLabel;
     private org.json.JSONArray variants;      // live quality variants, null for single-variant/movies
     private String activeStreamId;            // currently-playing variant's streamId
+    private String pendingVariantStreamId;    // set when the viewer picks a variant → attached to the result in finish()
+    private String pendingVariantSourceId;
     private String mediaTitle;
 
     private final Handler errHandler = new Handler(Looper.getMainLooper());
@@ -804,10 +806,10 @@ public class PlayerActivity extends Activity {
                             public void onClick(android.content.DialogInterface dialog, int which) {
                                 dialog.dismiss();
                                 if (streamIds.get(which).equals(activeStreamId)) return; // already playing
-                                android.content.Intent res = new android.content.Intent();
-                                res.putExtra("selectedVariantStreamId", streamIds.get(which));
-                                res.putExtra("selectedVariantSourceId", sourceIds.get(which));
-                                setResult(RESULT_OK, res);
+                                // Record the pick as fields; finish() attaches them to the SAME result Intent
+                                // it already builds (a direct setResult here would be clobbered by finish()).
+                                pendingVariantStreamId = streamIds.get(which);
+                                pendingVariantSourceId = sourceIds.get(which);
                                 finish(); // MainActivity → web re-resolves + relaunches this variant
                             }
                         })
@@ -935,6 +937,7 @@ public class PlayerActivity extends Activity {
     @Override
     public void finish() {
         try {
+            Intent data = null;
             if (player != null && itemId != null && !itemId.isEmpty()) {
                 long pos = Math.max(0, player.getCurrentPosition() / 1000);
                 long dur = player.getDuration() > 0 ? player.getDuration() / 1000 : 0;
@@ -948,15 +951,22 @@ public class PlayerActivity extends Activity {
                         if (it != null) { it.positionSeconds = (int) pos; DownloadStore.put(this, it); }
                     } catch (Exception ignored) { /* resume point is best-effort */ }
                 }
-                Intent data = new Intent();
+                data = new Intent();
                 data.putExtra("sourceId", sourceId);
                 data.putExtra("itemType", itemType);
                 data.putExtra("itemId", itemId);
                 data.putExtra("positionSeconds", pos);
                 data.putExtra("durationSeconds", dur);
                 data.putExtra("ended", endedNaturally);
-                setResult(RESULT_OK, data);
             }
+            // A variant pick must survive finish() (which would otherwise overwrite the result
+            // with the progress-only Intent above, dropping selectedVariantStreamId).
+            if (pendingVariantStreamId != null && !pendingVariantStreamId.isEmpty()) {
+                if (data == null) data = new Intent();
+                data.putExtra("selectedVariantStreamId", pendingVariantStreamId);
+                data.putExtra("selectedVariantSourceId", pendingVariantSourceId);
+            }
+            if (data != null) setResult(RESULT_OK, data);
         } catch (Exception ignored) { /* result is best-effort */ }
         super.finish();
     }
