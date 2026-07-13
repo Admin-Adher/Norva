@@ -14847,3 +14847,41 @@ html.tv-mode.tv-movies-active
 }
 
 /* asset-rev: main-def-2 — content-hash bump to bypass a poisoned edge cache */
+
+/* ============================================================
+   Android TV — language-filter bucket grid.
+   An active audio/subtitle filter routes through openLanguageBucket(),
+   which renders .genre-bucket-* (dashboard cards) into #movies-grid
+   (rail-host). Without this it collapses to tiny scattered slivers —
+   force it into the SAME compact poster grid as the flat view so the
+   filtered results read correctly at 10 feet. TV + Movies scoped only.
+   ============================================================ */
+html.tv-mode #page-movies.tv-movies-layout-ready .movies-grid.rail-host {
+  display: block !important;
+  min-height: 0;
+  overflow-y: auto;
+}
+/* The bucket's own "← All genres / All movies" header is redundant on TV — the
+   catalog head + the active-filter chips already convey the state, and the filter
+   dropdown / Reset clear it. Hide it so the grid sits cleanly under the head. */
+html.tv-mode #page-movies .genre-bucket-head { display: none !important; }
+html.tv-mode #page-movies .genre-bucket-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px !important;
+  justify-content: flex-start;
+  align-content: flex-start;
+}
+html.tv-mode #page-movies .genre-bucket-grid .dashboard-card {
+  flex: 0 0 118px !important;
+  width: 118px !important;
+  max-width: 118px !important;
+  scroll-snap-align: none;
+}
+html.tv-mode #page-movies .genre-bucket-grid .dashboard-card .card-image {
+  aspect-ratio: 2 / 3;
+}
+html.tv-mode #page-movies .genre-bucket-grid .dashboard-card:focus {
+  outline: none !important;
+  box-shadow: 0 0 0 3px #fff !important;
+}
