@@ -160,7 +160,6 @@ async function route(
         entitlements: true,
         entitlementsMode: entitlementRuntime.mode,
         entitlementsEnforced: entitlementRuntime.enforced,
-        entitlementsLimitsEnforced: entitlementRuntime.limitsEnforced,
         billingMode: getBillingMode(),
         liveMaterialization: true,
         relayConfigured: Boolean(runtimeConfig.relayBaseUrl && runtimeConfig.relayTokenSecret),

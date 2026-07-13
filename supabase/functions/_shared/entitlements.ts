@@ -120,10 +120,6 @@ export function getEntitlementRuntime() {
   return {
     mode: ENTITLEMENTS_MODE,
     enforced: ENTITLEMENTS_MODE === "enforce",
-    // Plan limits (profile/source/device/stream caps) bite in both "enforce" and
-    // "limits" mode; only access-walling differs. Health/admin surfaces read this
-    // so "limits" mode isn't misreported as "nothing enforced".
-    limitsEnforced: ENTITLEMENTS_MODE === "enforce" || ENTITLEMENTS_MODE === "limits",
   };
 }
 
@@ -377,33 +373,6 @@ function applyEntitlementMode(decision: EntitlementDecision): EntitlementDecisio
     return { ...decision, mode: ENTITLEMENTS_MODE, enforced: true };
   }
 
-  // "limits" mode (enforce-limits-only): apply the real plan's limits to ENTITLED
-  // accounts — so the Plus=2 / Family=5 profile cap (and sources/devices/streams)
-  // actually bites — while NEVER walling access on billing status. An allowed
-  // decision already carries the real plan's limits: a trialing/plus projection →
-  // Plus caps, trialing/family → Family caps, so the trial cap follows the plan the
-  // user chose at subscription. It is passed through untouched. A soft denial (trial
-  // or subscription expired, no subscription) is NOT walled: it degrades to open
-  // access with generous limits, exactly like observe, so no one is cut off while
-  // the payment rail isn't enforced. This is the middle ground between observe
-  // (everything open, limits neutralized) and enforce (limits AND access enforced).
-  if (ENTITLEMENTS_MODE === "limits") {
-    if (decision.allowed) {
-      return { ...decision, mode: ENTITLEMENTS_MODE, enforced: true };
-    }
-    return {
-      ...decision,
-      allowed: true,
-      reason: `limits_open_${decision.reason}`,
-      planCode: decision.planCode === "none" ? "manual" : decision.planCode,
-      mode: ENTITLEMENTS_MODE,
-      enforced: false,
-      failOpen: true,
-      limits: PLAN_LIMITS.manual,
-      message: "Norva access is open; plan limits are enforced but billing is not.",
-    };
-  }
-
   return {
     ...decision,
     allowed: true,
@@ -507,7 +476,7 @@ const DENIED_REASONS = new Set([
   "billing_unverified", "revoked", "refunded", "fraud", "none",
 ]);
 export function realPlanCode(decision: EntitlementDecision): string {
-  const reason = decision.reason.replace(/^(gate0_(observe|bypass)|limits_open)_/, "");
+  const reason = decision.reason.replace(/^gate0_(observe|bypass)_/, "");
   if (DENIED_REASONS.has(reason)) return "free";
   const projection = decision.projection as JsonRecord | null;
   return String(projection?.plan_code || "free");
@@ -557,12 +526,6 @@ function normalizeEntitlementsMode(value: string) {
   const mode = value.trim().toLowerCase().replace(/_/g, "-");
   if (mode === "observe" || mode === "gate0" || mode === "gate0-observe" || mode === "off") {
     return "observe";
-  }
-  // "limits" (a.k.a. enforce-limits-only): enforce plan LIMITS for entitled accounts
-  // but keep access open on billing status. Ships the Plus=2 / Family=5 profile
-  // differentiator without coupling it to the payment gate — see applyEntitlementMode.
-  if (mode === "limits" || mode === "enforce-limits" || mode === "limits-only" || mode === "enforce-limits-only") {
-    return "limits";
   }
   return "enforce";
 }

@@ -107,7 +107,6 @@ Deno.serve(async (req) => {
         entitlements: true,
         entitlementsMode: entitlementRuntime.mode,
         entitlementsEnforced: entitlementRuntime.enforced,
-        entitlementsLimitsEnforced: entitlementRuntime.limitsEnforced,
         relayConfigured: Boolean(config.relayBaseUrl && config.relayTokenSecret),
         gatewayConfigured: Boolean(config.mediaGatewayUrl && config.mediaGatewayToken),
       });
