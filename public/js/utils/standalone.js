@@ -248,7 +248,14 @@
                     itemId: String(meta.itemId || ''),
                     resumeSeconds: resume,
                     poster,
-                    nextTitle: extras?.nextTitle || ''
+                    nextTitle: extras?.nextTitle || '',
+                    // Live quality variants (label + streamId + sourceId) for the native
+                    // player's quality menu. Metadata only, never pre-resolved URLs: a live
+                    // gateway grants ONE slot, so resolving each variant up front would close
+                    // the playing session. The native player reports the pick back and the web
+                    // re-resolves + relaunches it (see __norvaPlayVariant).
+                    variants: Array.isArray(extras?.variants) ? extras.variants : [],
+                    activeStreamId: extras?.activeStreamId ? String(extras.activeStreamId) : ''
                 }));
                 return;
             }
@@ -322,6 +329,36 @@
             return { sourceId: channel.sourceId, itemType: 'channel', itemId };
         };
 
+        // Live variant list for the native player's quality menu. Metadata only (label +
+        // streamId + sourceId); see the playVideoJson payload note for why URLs aren't
+        // pre-resolved. Returns [] for single-variant channels (no menu).
+        const buildNativeVariants = (channel) => {
+            const list = channel?.qualityGroup?.variants;
+            if (!Array.isArray(list) || list.length < 2) return [];
+            return list.map(v => ({
+                label: String(v.label || v.raw || 'Variant'),
+                streamId: String(v.streamId != null ? v.streamId : (v.stream_id != null ? v.stream_id : '')),
+                sourceId: String(v.sourceId != null ? v.sourceId : (channel.sourceId || ''))
+            })).filter(v => v.streamId);
+        };
+
+        // Called by the native shell (MainActivity.onActivityResult) after the viewer picks a
+        // variant in the native player: find that variant's channel in the catalog and re-select
+        // it, which resolves a fresh stream (new gateway session) and relaunches native playback.
+        if (typeof window !== 'undefined') {
+            window.__norvaPlayVariant = function (streamId, sourceId) {
+                try {
+                    const cl = window.app?.channelList;
+                    if (!cl || streamId == null) return;
+                    const sid = String(streamId);
+                    const ch = (cl.channels || []).find(c =>
+                        String(c.streamId != null ? c.streamId : c.stream_id) === sid &&
+                        (!sourceId || String(c.sourceId) === String(sourceId)));
+                    if (ch) cl.selectChannel({ channelId: ch.id, sourceId: String(ch.sourceId), streamId: sid });
+                } catch (e) { console.warn('[Native] play variant failed:', e?.message || e); }
+            };
+        }
+
         const nativeTitle = (content) => {
             const parts = [content?.title, content?.subtitle].filter(Boolean);
             return parts.join(' — ') || 'Norva';
@@ -367,7 +404,10 @@
                 this.currentChannel = channel;
                 const resolved = await resolveStreamPayload(streamUrl);
                 if (!resolved.url) return;
-                nativePlay(resolved.url, channel?.name || 'Live TV', channelMeta(channel), 0, resolved.fallbackUrl);
+                nativePlay(resolved.url, channel?.name || 'Live TV', channelMeta(channel), 0, resolved.fallbackUrl, {
+                    variants: buildNativeVariants(channel),
+                    activeStreamId: channel?.streamId != null ? String(channel.streamId) : ''
+                });
             };
         }
 
