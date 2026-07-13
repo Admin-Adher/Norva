@@ -398,6 +398,16 @@ const MediaUtils = (() => {
         // Mirrors the server cleanDisplayTitle — keep the two in sync.
         const deprefixed = text.replace(/^(?:[A-Z]{2}|4K|8K|3D|2160P|1440P|1080P|720P|480P|360P|007)(?:-[A-Z0-9+]{1,6})*(?: [-–—▎▏▍▌│┃┆┊｜|] | -[A-Z0-9+]{1,6}- )/, '').trim();
         if (deprefixed.length >= 2) text = deprefixed;
+        // Strip a trailing second-script title providers append after the Latin name, e.g.
+        // "Checkered Ninja 3 (2026) نينجاى شطرنجى 3" → "Checkered Ninja 3 (2026)" (the year-strip
+        // below then drops the now-trailing "(2026)"). Cut at the first Arabic/Hebrew/Cyrillic/
+        // Greek/CJK/Kana/Hangul/Thai character, but only when a Latin title remains in front, so a
+        // natively non-Latin title is left untouched. Mirrors the server cleanDisplayTitle — keep in sync.
+        const nlAt = text.search(/[֐-׿؀-ۿݐ-ݿࢠ-ࣿיִ-﷿ﹰ-﻿Ѐ-ӿͰ-Ͽ぀-ヿ㐀-鿿가-힯฀-๿]/);
+        if (nlAt > 0) {
+            const head = text.slice(0, nlAt).replace(/[\s\-–—:|.،؛]+$/, '').trim();
+            if (head.length >= 2 && /[A-Za-z]/.test(head)) text = head;
+        }
         if (!/\s/.test(text) && /^\S+(?:\.\S+){3,}$/.test(text)) text = text.replace(/\./g, ' ');
         const tokens = text.split(/\s+/).filter(Boolean);
         let cut = tokens.length;
