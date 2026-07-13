@@ -13981,6 +13981,1004 @@ body.is-watching .norva-mini { display: none !important; }
 /* asset-rev: main-def-2 — content-hash bump to bypass a poisoned edge cache */
 
 /* ============================================================
+   Android TV — permanent compact navigation rail
+   ------------------------------------------------------------
+   Icon + label stay visible at all times. Focus no longer expands the
+   drawer or shifts the page, so every TV surface keeps a stable viewport.
+   ============================================================ */
+
+html.tv-mode {
+  --tv-nav-compact-width: clamp(82px, 8vw, 104px);
+}
+
+html.tv-mode .navbar,
+html.tv-mode .navbar:focus-within {
+  width: var(--tv-nav-compact-width);
+  padding: 20px 0 14px;
+  background: rgba(8, 10, 17, 0.97);
+  transition: background 0.15s ease;
+}
+
+html.tv-mode .navbar:focus-within ~ .main-content {
+  transform: none !important;
+}
+
+html.tv-mode .main-content {
+  margin-left: var(--tv-nav-compact-width);
+  transition: none;
+}
+
+html.tv-mode .navbar-brand {
+  justify-content: center;
+  margin: 0 0 8px;
+  padding: 0;
+}
+
+html.tv-mode .navbar-brand .brand-text {
+  display: none;
+}
+
+html.tv-mode .navbar-menu {
+  gap: 2px;
+}
+
+html.tv-mode .navbar-menu .nav-link {
+  width: 100%;
+  min-height: 58px;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 4px;
+  padding: 7px 3px;
+  font-size: 0.67rem;
+  line-height: 1.05;
+  text-align: center;
+}
+
+html.tv-mode .navbar-menu .nav-link span:not(.nav-icon) {
+  display: block;
+  max-width: 100%;
+  opacity: 1;
+}
+
+html.tv-mode .navbar-menu .nav-link .nav-icon,
+html.tv-mode .navbar-menu .nav-link .norva-ui-icon {
+  width: 23px;
+  height: 23px;
+  flex: 0 0 23px;
+}
+
+html.tv-mode .nav-search-btn,
+html.tv-mode .nav-bell-btn,
+html.tv-mode .nav-profile {
+  align-self: center;
+  width: 38px;
+  height: 38px;
+  flex: 0 0 38px;
+  margin-left: 0;
+}
+
+/* ============================================================
+   Android TV / Series — catalogue split view
+   ============================================================ */
+
+html.tv-mode.tv-series-active {
+  --tv-series-panel-width: clamp(250px, 28%, 350px);
+  --tv-series-control-height: 32px;
+}
+
+html.tv-mode #page-series:not(.active) {
+  display: none !important;
+}
+
+html.tv-mode #page-series.active.tv-series-layout-ready:not(.series-detail-open) {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) var(--tv-series-panel-width);
+  grid-template-rows: auto auto auto auto minmax(0, 1fr);
+  grid-template-areas:
+    "header       panel"
+    "primary      panel"
+    "secondary    panel"
+    "catalog-head panel"
+    "grid         panel";
+  column-gap: 14px;
+  row-gap: 5px;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+html.tv-mode #page-series.tv-series-layout-ready:not(.series-detail-open) .series-header {
+  grid-area: header;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 42%);
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+html.tv-mode #page-series.tv-series-layout-ready:not(.series-detail-open) .series-heading {
+  min-width: 0;
+}
+
+html.tv-mode #page-series.tv-series-layout-ready:not(.series-detail-open) .series-header h2 {
+  margin: 0;
+  font-size: clamp(1.45rem, 2.25vw, 2rem);
+  font-weight: 750;
+  line-height: 1.05;
+}
+
+html.tv-mode #page-series.tv-series-layout-ready:not(.series-detail-open) .series-subtitle {
+  display: block;
+  margin-top: 5px;
+  color: #aebbd2;
+  font-size: 0.78rem;
+  line-height: 1.25;
+}
+
+html.tv-mode #page-series.tv-series-layout-ready:not(.series-detail-open) .series-controls {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+}
+
+html.tv-mode #page-series.tv-series-layout-ready:not(.series-detail-open)
+.series-controls > :not(.search-wrapper) {
+  display: none !important;
+}
+
+html.tv-mode #page-series.tv-series-layout-ready:not(.series-detail-open)
+.series-controls .search-wrapper {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  flex: none;
+}
+
+html.tv-mode #page-series.tv-series-layout-ready:not(.series-detail-open)
+.series-controls .search-input {
+  width: 100%;
+  min-width: 0;
+  height: 36px;
+  padding: 0 36px 0 15px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.055);
+  font-size: 0.76rem;
+}
+
+html.tv-mode #page-series .tv-series-primary-filters { grid-area: primary; }
+html.tv-mode #page-series .tv-series-secondary-filters { grid-area: secondary; }
+
+html.tv-mode #page-series .tv-series-filter-row {
+  display: grid;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+html.tv-mode #page-series .tv-series-primary-filters {
+  grid-template-columns: 1.05fr 1.28fr 0.82fr 0.92fr 0.9fr 1.14fr;
+}
+
+html.tv-mode #page-series .tv-series-secondary-filters {
+  grid-template-columns: 1.1fr 0.92fr 0.98fr 1.25fr 1.22fr minmax(72px, 0.84fr);
+}
+
+html.tv-mode #page-series .tv-series-filter-row > *,
+html.tv-mode #page-series .tv-series-filter-row .multi-select,
+html.tv-mode #page-series .tv-series-filter-row .multi-select-btn {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+}
+
+html.tv-mode #page-series .tv-series-filter-row .source-select,
+html.tv-mode #page-series .tv-series-filter-row .filter-select,
+html.tv-mode #page-series .tv-series-filter-row .multi-select-btn,
+html.tv-mode #page-series .tv-series-filter-row .filter-toggle,
+html.tv-mode #page-series .tv-series-filter-row .filter-reset,
+html.tv-mode #page-series .tv-series-filter-row .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  height: var(--tv-series-control-height) !important;
+  min-height: var(--tv-series-control-height) !important;
+  padding: 0 7px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.055);
+  color: #dbe4f7;
+  font-size: 0.74rem !important;
+  line-height: 1.05;
+  white-space: normal;
+}
+
+html.tv-mode #page-series .tv-series-filter-row .filter-toggle.active,
+html.tv-mode #page-series .tv-series-filter-row .btn.active {
+  border-color: rgba(72, 132, 255, 0.88);
+  background: linear-gradient(180deg, #0878ff, #0c55e8);
+  color: #fff;
+}
+
+html.tv-mode #page-series .tv-series-filter-row > *:focus,
+html.tv-mode #page-series .tv-series-filter-row .multi-select-btn:focus {
+  outline: none !important;
+  box-shadow: inset 0 0 0 2px #fff, 0 0 0 2px rgba(47, 119, 255, 0.9) !important;
+  transform: none;
+}
+
+html.tv-mode #page-series #series-favorites-btn {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  flex-basis: auto;
+  padding: 0 7px;
+  color: #dbe4f7;
+  font-size: 0.74rem !important;
+}
+
+html.tv-mode #page-series #series-favorites-btn .icon {
+  width: 17px;
+  height: 17px;
+  flex-basis: 17px;
+}
+
+html.tv-mode #page-series.tv-series-layout-ready:not(.series-detail-open) #series-filter-bar,
+html.tv-mode #page-series.tv-series-layout-ready:not(.series-detail-open) #series-continue {
+  display: none !important;
+}
+
+html.tv-mode #page-series .tv-series-catalog-head {
+  grid-area: catalog-head;
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr) max-content;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 30px;
+  padding: 0 2px;
+}
+
+html.tv-mode #page-series .tv-series-catalog-title {
+  margin: 0;
+  color: #f5f8ff;
+  font-size: 0.86rem;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+html.tv-mode #page-series .tv-series-catalog-meta {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+html.tv-mode #page-series #series-count:not(.hidden):not([hidden]) {
+  display: inline-flex !important;
+  width: auto;
+  margin: 0;
+  color: #9babc5;
+  font-size: 0.68rem;
+  white-space: nowrap;
+}
+
+html.tv-mode #page-series #series-count.hidden,
+html.tv-mode #page-series #series-count[hidden] { display: none !important; }
+
+html.tv-mode #page-series #series-active-filters {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  background: transparent;
+  scrollbar-width: none;
+  scroll-padding-inline: 8px;
+}
+
+html.tv-mode #page-series #series-active-filters.hidden { display: none; }
+html.tv-mode #page-series #series-active-filters::-webkit-scrollbar { display: none; }
+
+html.tv-mode #page-series #series-active-filters .filter-chip {
+  flex: 0 0 auto;
+  max-width: 170px;
+  padding: 2px 7px;
+  font-size: 0.67rem;
+  white-space: nowrap;
+}
+
+html.tv-mode #page-series #series-active-filters .filter-chip:focus {
+  outline: none !important;
+  box-shadow: inset 0 0 0 2px #fff, inset 0 0 0 4px rgba(47, 119, 255, 0.9) !important;
+  scroll-margin-inline: 8px;
+}
+
+html.tv-mode #page-series #series-sort {
+  width: auto;
+  min-width: 126px;
+  max-width: 170px;
+  height: 30px !important;
+  min-height: 30px !important;
+  margin: 0;
+  padding: 0 9px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  color: #dbe4f7;
+  font-size: 0.72rem;
+}
+
+html.tv-mode #page-series.tv-series-layout-ready:not(.series-detail-open) .series-content {
+  grid-area: grid;
+  position: relative;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+html.tv-mode #page-series.tv-series-layout-ready:not(.series-detail-open) #series-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-auto-rows: max-content;
+  gap: 9px;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  padding: 4px 3px 8px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  align-content: start;
+  justify-content: stretch;
+  scroll-padding-block: 14px;
+  scrollbar-width: thin;
+}
+
+html.tv-mode #page-series #series-grid .grid-spacer,
+html.tv-mode #page-series #series-grid .series-loader,
+html.tv-mode #page-series #series-grid .empty-state {
+  grid-column: 1 / -1;
+}
+
+html.tv-mode #page-series #series-grid .series-card,
+html.tv-mode #page-series .genre-bucket-grid .series-card {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  flex: none;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.075);
+  border-radius: 9px;
+  background: rgba(15, 25, 44, 0.9);
+  transform: none;
+}
+
+html.tv-mode #page-series #series-grid .series-poster,
+html.tv-mode #page-series #series-grid .series-card .series-poster,
+html.tv-mode #page-series .genre-bucket-grid .series-poster {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 2 / 3;
+}
+
+html.tv-mode #page-series #series-grid .series-card-info,
+html.tv-mode #page-series .genre-bucket-grid .series-card-info {
+  padding: 7px 7px 8px;
+}
+
+html.tv-mode #page-series #series-grid .series-title,
+html.tv-mode #page-series .genre-bucket-grid .series-title {
+  font-size: 0.72rem;
+  font-weight: 650;
+}
+
+html.tv-mode #page-series #series-grid .series-meta,
+html.tv-mode #page-series .genre-bucket-grid .series-meta {
+  gap: 5px;
+  margin-top: 4px;
+  font-size: 0.62rem;
+}
+
+html.tv-mode #page-series #series-grid .series-play-overlay,
+html.tv-mode #page-series .genre-bucket-grid .series-play-overlay {
+  inset: auto auto 8px 8px;
+  width: 27px;
+  height: 27px;
+  border: 1px solid rgba(255, 255, 255, 0.82);
+  border-radius: 50%;
+  background: rgba(4, 8, 15, 0.64);
+  opacity: 1;
+}
+
+html.tv-mode #page-series #series-grid .series-play-overlay svg,
+html.tv-mode #page-series .genre-bucket-grid .series-play-overlay svg {
+  width: 13px;
+  height: 13px;
+}
+
+html.tv-mode #page-series #series-grid .series-poster > .favorite-btn,
+html.tv-mode #page-series .genre-bucket-grid .series-poster > .favorite-btn {
+  display: none !important;
+}
+
+html.tv-mode #page-series .series-grid:focus-within .series-card:not(:focus):not(.tv-preview-active) {
+  opacity: 1;
+}
+
+html.tv-mode #page-series #series-grid .series-card:focus,
+html.tv-mode #page-series #series-grid .series-card.tv-preview-active,
+html.tv-mode #page-series .genre-bucket-grid .series-card:focus,
+html.tv-mode #page-series .genre-bucket-grid .series-card.tv-preview-active {
+  z-index: 3;
+  outline: none !important;
+  border-color: rgba(113, 173, 255, 0.92);
+  border-radius: 9px !important;
+  transform: translateY(-1px);
+  box-shadow: inset 0 0 0 2px #fff, 0 0 0 2px #2387ff,
+    0 8px 22px rgba(0, 80, 255, 0.34) !important;
+}
+
+html.tv-mode #page-series .series-grid.rail-host {
+  display: block !important;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+html.tv-mode #page-series .genre-bucket-head { display: none !important; }
+
+html.tv-mode #page-series .genre-bucket-grid {
+  display: grid !important;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 9px !important;
+  width: 100%;
+  padding: 4px 3px 8px;
+  align-content: start;
+}
+
+html.tv-mode #page-series .genre-bucket-loader { grid-column: 1 / -1; }
+
+/* Lightweight catalogue preview — never contains seasons or episodes. */
+html.tv-mode #page-series #series-tv-preview {
+  grid-area: panel;
+  display: block;
+  min-width: 0;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  border: 1px solid rgba(86, 130, 217, 0.24);
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(10, 31, 64, 0.98), rgba(7, 19, 39, 0.99));
+}
+
+html.tv-mode #page-series #series-tv-preview::-webkit-scrollbar { display: none; }
+
+html.tv-mode #page-series #series-tv-preview.is-empty {
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+html.tv-mode #page-series .tv-series-preview-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  color: #f3f7ff;
+  text-align: center;
+}
+
+html.tv-mode #page-series .tv-series-preview-empty span {
+  color: #9dacC5;
+  font-size: 0.76rem;
+  line-height: 1.4;
+}
+
+html.tv-mode #page-series .tv-series-preview-art {
+  margin: 14px 14px 0;
+  overflow: hidden;
+  border-radius: 11px;
+  background: #071326;
+}
+
+html.tv-mode #page-series .tv-series-preview-art img {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1.08 / 1;
+  object-fit: cover;
+  object-position: center;
+}
+
+html.tv-mode #page-series .tv-series-preview-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 13px 14px 15px;
+}
+
+html.tv-mode #page-series .tv-series-preview-body h3 {
+  margin: 0;
+  color: #fff;
+  font-size: clamp(1.18rem, 2vw, 1.5rem);
+  line-height: 1.12;
+}
+
+html.tv-mode #page-series .tv-series-preview-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+html.tv-mode #page-series .tv-series-preview-meta span {
+  min-height: 21px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 7px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #dbe5f7;
+  font-size: 0.63rem;
+}
+
+html.tv-mode #page-series .tv-series-preview-body > p {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  color: #d2dced;
+  font-size: 0.76rem;
+  line-height: 1.42;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+html.tv-mode #page-series .tv-series-preview-progress-copy {
+  color: #aebbd2;
+  font-size: 0.67rem;
+  text-align: right;
+}
+
+html.tv-mode #page-series .tv-series-preview-progress {
+  height: 4px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+html.tv-mode #page-series .tv-series-preview-progress > div {
+  height: 100%;
+  border-radius: inherit;
+  background: #0878ff;
+}
+
+html.tv-mode #page-series .tv-series-preview-actions {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 7px;
+  margin-top: 3px;
+}
+
+html.tv-mode #page-series .tv-series-preview-primary,
+html.tv-mode #page-series .tv-series-preview-favorite {
+  width: 100%;
+  min-height: 42px;
+  justify-content: center;
+  border-radius: 8px;
+  font-size: 0.74rem;
+}
+
+html.tv-mode #page-series .tv-series-preview-primary {
+  background: linear-gradient(180deg, #0878ff, #0c55e8);
+  color: #fff;
+}
+
+html.tv-mode #page-series .tv-series-preview-favorite {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.065);
+  color: #eef4ff;
+}
+
+html.tv-mode #page-series .tv-series-preview-actions button:focus {
+  outline: none !important;
+  color: #07101f;
+  background: #fff;
+  box-shadow: inset 0 0 0 2px #fff, 0 0 0 2px #2387ff !important;
+  transform: none;
+}
+
+html.tv-mode #page-series .tv-series-preview-sources {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 3px;
+}
+
+html.tv-mode #page-series .tv-series-preview-sources-label {
+  color: #aebbd2;
+  font-size: 0.66rem;
+}
+
+html.tv-mode #page-series .tv-series-preview-source {
+  padding: 3px 7px;
+  border: 1px solid rgba(74, 133, 255, 0.35);
+  border-radius: 5px;
+  background: rgba(30, 82, 178, 0.18);
+  color: #d9e5ff;
+  font-size: 0.62rem;
+  font-weight: 700;
+}
+
+/* ============================================================
+   Android TV / Series — existing fiche restyled to the mockup
+   ============================================================ */
+
+html.tv-mode #page-series.active.tv-series-layout-ready.series-detail-open {
+  display: flex !important;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+html.tv-mode #page-series.series-detail-open > .tv-series-filter-row,
+html.tv-mode #page-series.series-detail-open > .tv-series-catalog-head,
+html.tv-mode #page-series.series-detail-open > #series-tv-preview,
+html.tv-mode #page-series.series-detail-open > #series-continue {
+  display: none !important;
+}
+
+html.tv-mode #page-series.series-detail-open .series-content {
+  width: 100%;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+
+html.tv-mode #page-series.series-detail-open #series-details {
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scroll-padding-block: 14px;
+  background: #031026;
+}
+
+html.tv-mode #page-series.series-detail-open .series-detail-hero {
+  min-height: clamp(350px, 44vh, 430px);
+  padding: 28px 36px 30px;
+  justify-content: flex-end;
+}
+
+html.tv-mode #page-series.series-detail-open .series-detail-hero::before {
+  opacity: 0.55;
+  background-position: center 28%;
+}
+
+html.tv-mode #page-series.series-detail-open .series-detail-hero::after {
+  background:
+    linear-gradient(90deg, rgba(3, 16, 38, 0.98) 0%, rgba(3, 16, 38, 0.82) 34%, rgba(3, 16, 38, 0.2) 76%),
+    linear-gradient(180deg, rgba(3, 16, 38, 0.12) 0%, rgba(3, 16, 38, 0.96) 100%);
+}
+
+html.tv-mode #page-series.series-detail-open .series-detail-hero-content {
+  grid-template-columns: minmax(190px, 235px) minmax(0, 1fr);
+  gap: 32px;
+  align-items: center;
+  width: 100%;
+  max-width: none;
+}
+
+html.tv-mode #page-series.series-detail-open .series-detail-poster {
+  width: 100%;
+  max-height: 330px;
+  object-fit: cover;
+  border: 1px solid rgba(74, 157, 255, 0.65);
+  border-radius: 12px;
+  box-shadow: 0 18px 46px rgba(0, 0, 0, 0.42);
+}
+
+html.tv-mode #page-series.series-detail-open .series-detail-hero .series-info h3 {
+  margin: 0 0 10px;
+  font-size: clamp(2.35rem, 4.3vw, 3.3rem);
+  line-height: 1;
+}
+
+html.tv-mode #page-series.series-detail-open .series-meta-pills {
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+html.tv-mode #page-series.series-detail-open .series-meta-pills span {
+  min-height: 23px;
+  padding: 0 8px;
+  border-radius: 5px;
+  font-size: 0.69rem;
+}
+
+html.tv-mode #page-series.series-detail-open .series-detail-hero .series-info p {
+  display: -webkit-box;
+  max-width: 710px;
+  margin: 0;
+  overflow: hidden;
+  color: #e2e9f6;
+  font-size: 0.9rem;
+  line-height: 1.48;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+html.tv-mode #page-series.series-detail-open .series-detail-actions {
+  gap: 8px;
+  margin-top: 18px;
+}
+
+html.tv-mode #page-series.series-detail-open .series-primary-action,
+html.tv-mode #page-series.series-detail-open .series-secondary-action,
+html.tv-mode #page-series.series-detail-open .detail-trailer-btn {
+  min-height: 44px;
+  padding: 0 17px;
+  border-radius: 8px;
+  font-size: 0.78rem;
+}
+
+html.tv-mode #page-series.series-detail-open .series-primary-action {
+  background: linear-gradient(180deg, #0878ff, #0c55e8);
+  color: #fff;
+}
+
+html.tv-mode #page-series.series-detail-open .series-detail-actions button:focus,
+html.tv-mode #page-series.series-detail-open .series-back-btn:focus {
+  outline: none !important;
+  color: #07101f;
+  background: #fff;
+  box-shadow: inset 0 0 0 2px #fff, 0 0 0 2px #2387ff !important;
+  transform: none;
+}
+
+html.tv-mode #page-series.series-detail-open .series-versions-section,
+html.tv-mode #page-series.series-detail-open .series-episodes-section,
+html.tv-mode #page-series.series-detail-open .more-like-this {
+  width: calc(100% - 64px);
+  max-width: none;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+html.tv-mode #page-series.series-detail-open .series-versions-section {
+  padding-top: 13px;
+}
+
+html.tv-mode #page-series.series-detail-open .series-versions-toolbar {
+  margin-bottom: 7px;
+}
+
+html.tv-mode #page-series.series-detail-open .series-versions-toolbar h3 {
+  font-size: 1rem;
+}
+
+html.tv-mode #page-series.series-detail-open .series-versions-list {
+  display: flex;
+  flex-flow: row nowrap;
+  gap: 8px;
+  padding: 3px 3px 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-padding-inline: 3px;
+  scrollbar-width: none;
+}
+
+html.tv-mode #page-series.series-detail-open .series-versions-list::-webkit-scrollbar {
+  display: none;
+}
+
+html.tv-mode #page-series.series-detail-open .series-version-item {
+  flex: 0 0 clamp(185px, 22vw, 250px);
+  min-height: 58px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 0.75rem;
+}
+
+html.tv-mode #page-series.series-detail-open .series-version-item:focus {
+  outline: none !important;
+  box-shadow: inset 0 0 0 2px #fff, 0 0 0 2px #2387ff !important;
+}
+
+html.tv-mode #page-series.series-detail-open .series-episodes-section {
+  padding: 18px 0 20px;
+}
+
+html.tv-mode #page-series.series-detail-open .series-episodes-toolbar {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr) max-content;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 8px;
+  padding: 7px 0;
+  background: rgba(3, 16, 38, 0.9);
+}
+
+html.tv-mode #page-series.series-detail-open .series-episodes-toolbar h3 {
+  font-size: 1.2rem;
+}
+
+html.tv-mode #page-series.series-detail-open .series-season-tabs {
+  justify-content: flex-start;
+  gap: 7px;
+  padding: 2px;
+}
+
+html.tv-mode #page-series.series-detail-open .season-tab {
+  padding: 7px 13px;
+  border-radius: 8px;
+  font-size: 0.76rem;
+}
+
+html.tv-mode #page-series.series-detail-open .series-tv-episode-count {
+  color: #9dacC5;
+  font-size: 0.7rem;
+  white-space: nowrap;
+}
+
+html.tv-mode #page-series.series-detail-open .season-actions {
+  display: none;
+}
+
+html.tv-mode #page-series.series-detail-open .series-details .episode-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-top: 0;
+}
+
+html.tv-mode #page-series.series-detail-open .series-details .episode-item {
+  grid-template-columns: 34px minmax(150px, 205px) minmax(0, 1fr) auto;
+  gap: 14px;
+  min-height: 86px;
+  padding: 7px 13px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.045);
+  border-radius: 8px;
+  background: rgba(13, 35, 70, 0.58);
+}
+
+html.tv-mode #page-series.series-detail-open .series-details .episode-item.episode-up-next {
+  border-color: rgba(50, 131, 255, 0.8);
+  background: linear-gradient(90deg, rgba(12, 74, 172, 0.38), rgba(13, 35, 70, 0.66));
+  box-shadow: inset 3px 0 0 #1888ff;
+}
+
+html.tv-mode #page-series.series-detail-open .series-details .episode-item:focus {
+  outline: none !important;
+  border-color: #278cff;
+  border-radius: 8px !important;
+  transform: none;
+  box-shadow: inset 0 0 0 2px #fff, 0 0 0 2px #2387ff !important;
+}
+
+html.tv-mode #page-series.series-detail-open .episode-thumb {
+  border-radius: 7px;
+}
+
+html.tv-mode #page-series.series-detail-open .episode-description {
+  margin-top: 3px;
+  font-size: 0.72rem;
+  line-height: 1.3;
+  -webkit-line-clamp: 2;
+}
+
+html.tv-mode #page-series.series-detail-open .episode-mark {
+  width: 29px;
+  height: 29px;
+  opacity: 1;
+}
+
+html.tv-mode #page-series.series-detail-open .more-like-this {
+  padding: 0 0 18px;
+  overflow: hidden;
+}
+
+html.tv-mode #page-series.series-detail-open .more-like-title {
+  margin: 0 0 8px;
+  font-size: 1.05rem;
+}
+
+html.tv-mode #page-series.series-detail-open .more-like-grid {
+  display: flex !important;
+  flex-flow: row nowrap !important;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  padding: 3px 3px 10px;
+  overflow-x: auto !important;
+  overflow-y: hidden;
+  scroll-padding-inline: 3px;
+  scroll-snap-type: x proximity;
+  scrollbar-width: none;
+}
+
+html.tv-mode #page-series.series-detail-open .more-like-grid::-webkit-scrollbar {
+  display: none;
+}
+
+html.tv-mode #page-series.series-detail-open .more-like-grid > .tv-more-like-card,
+html.tv-mode #page-series.series-detail-open .more-like-grid > .dashboard-card,
+html.tv-mode #page-series.series-detail-open .more-like-grid > .series-card,
+html.tv-mode #page-series.series-detail-open .more-like-grid > .watch-recommended-card {
+  flex: 0 0 clamp(190px, 20%, 245px) !important;
+  width: clamp(190px, 20%, 245px) !important;
+  min-width: 190px !important;
+  max-width: 245px !important;
+  scroll-snap-align: start;
+  transform: none;
+}
+
+html.tv-mode #page-series.series-detail-open .more-like-grid .card-image,
+html.tv-mode #page-series.series-detail-open .more-like-grid .series-poster {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 9;
+  border-radius: 8px;
+}
+
+html.tv-mode #page-series.series-detail-open .more-like-grid img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+html.tv-mode #page-series.series-detail-open .more-like-grid .card-info,
+html.tv-mode #page-series.series-detail-open .more-like-grid .series-card-info {
+  padding: 6px 4px;
+}
+
+html.tv-mode #page-series.series-detail-open .more-like-grid .card-title,
+html.tv-mode #page-series.series-detail-open .more-like-grid .series-title {
+  font-size: 0.72rem;
+}
+
+html.tv-mode #page-series.series-detail-open .more-like-grid > :focus {
+  outline: none !important;
+  border-radius: 8px !important;
+  transform: translateY(-1px);
+  box-shadow: inset 0 0 0 2px #fff, 0 0 0 2px #2387ff !important;
+}
+
+@media (pointer: coarse) {
+  html.tv-mode #page-series .tv-series-filter-row .btn,
+  html.tv-mode #page-series .tv-series-filter-row .filter-toggle,
+  html.tv-mode #page-series .tv-series-filter-row .filter-reset {
+    height: var(--tv-series-control-height) !important;
+    min-height: var(--tv-series-control-height) !important;
+  }
+}
+
+/* ============================================================
    Android TV / Movies - mockup layout correction
    ------------------------------------------------------------
    Intentionally platform AND page scoped. The JS controller adds
