@@ -15,6 +15,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.widget.FrameLayout;
+import android.widget.HorizontalScrollView;
 import android.widget.ImageButton;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -687,10 +688,12 @@ public class PlayerActivity extends Activity {
             @Override public void run() { seekBy(10000); }
         });
 
-        // Chevron toggles the second bar. Focusable so the options bar has a
-        // visible, Enter-able affordance (not just the undiscoverable D-pad Down).
+        // Chevron is a purely visual indicator of the second bar's state. On TV
+        // it is NOT focusable: D-pad Down from the transport already opens the
+        // options bar, and Up from the options closes it, so the chevron could
+        // never receive focus anyway. Kept as a touch affordance (phone/mouse).
         chevron = makePlainIconButton(R.drawable.ic_player_expand_more, "Player options", 44, 10, ACCENT);
-        chevron.setFocusable(true);
+        chevron.setFocusable(false);
         chevron.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { toggleSecondBar(); }
         });
@@ -706,12 +709,22 @@ public class PlayerActivity extends Activity {
     }
 
     private void buildSecondBar(LinearLayout parent) {
+        // Up to 8 items (Video/Audio/Subs/Aspect/Speed/Sleep/Version/Next/Episodes):
+        // on a small TV they would otherwise compress. A HorizontalScrollView keeps
+        // each item at full size and lets focus auto-scroll the row into view;
+        // fillViewport + child MATCH_PARENT still centers the row when it fits.
+        HorizontalScrollView scroller = new HorizontalScrollView(this);
+        scroller.setHorizontalScrollBarEnabled(false);
+        scroller.setFillViewport(true);
+        parent.addView(scroller, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
         secondBar = new LinearLayout(this);
         secondBar.setOrientation(LinearLayout.HORIZONTAL);
         secondBar.setGravity(Gravity.CENTER);
         secondBar.setPadding(0, dp(6), 0, dp(6));
         secondBar.setVisibility(View.GONE);
-        parent.addView(secondBar, new LinearLayout.LayoutParams(
+        scroller.addView(secondBar, new HorizontalScrollView.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         videoValue = addBarItem(R.drawable.ic_player_quality, "Video", "—", new Runnable() {
@@ -1354,8 +1367,11 @@ public class PlayerActivity extends Activity {
                     showControls(seekBar); return true;       // reveal, land on timeline
                 case KeyEvent.KEYCODE_DPAD_DOWN:
                     showControls(playPauseBtn); openSecondBar(); return true; // reveal + management bar
+                case KeyEvent.KEYCODE_DPAD_CENTER:
+                case KeyEvent.KEYCODE_ENTER:
+                    togglePlay(); showControls(playPauseBtn); return true;    // OK → pause + reveal
                 default:
-                    showControls(playPauseBtn); return true;  // center / anything → reveal transport
+                    showControls(playPauseBtn); return true;  // anything else → reveal transport
             }
         }
 
