@@ -127,18 +127,16 @@ class MoviesPage {
         document.getElementById('movie-thumb-down')?.addEventListener('click', () => this.setRating(-1));
 
         // Android TV split-view: moving D-pad focus across grid cards live-previews
-        // the focused card in the docked detail panel (right column). Debounced so
-        // flying through cards costs nothing and never lands a stale render — mirrors
-        // LiveGuideFusion. The preview NEVER moves focus (passive), so the D-pad stays
-        // on the grid until the user deliberately steps RIGHT into the panel.
+        // the focused card synchronously in the docked panel. This avoids a delayed
+        // rebuild invalidating a panel button after ArrowRight. The lightweight preview
+        // never moves focus; heavy extras load only when the panel is entered.
         this.container?.addEventListener('focusin', (event) => {
             if (!this._isTvMode()) return;
             const card = event.target.closest?.('.movie-card');
             if (!card) return;
-            clearTimeout(this._previewDebounce);
-            this._previewDebounce = setTimeout(() => {
-                if (card.isConnected) this.previewCard(card);
-            }, 140);
+            // Render immediately: a delayed panel rebuild could otherwise destroy
+            // the action button already reached with ArrowRight.
+            if (card.isConnected) this.previewCard(card);
         });
         // Stepping INTO the panel is the "commit" signal: only now do we pay for the
         // heavy extras (more-like-this + cast credits), so browsing the grid stays cheap.
@@ -1597,6 +1595,14 @@ class MoviesPage {
             </div>
         `;
 
+        // A TV card is one composite D-pad stop. Its corner controls remain
+        // clickable with a pointer but must not become nested focus targets.
+        if (this._isTvMode()) {
+            card.querySelectorAll('.version-badge, .favorite-btn').forEach(button => {
+                button.tabIndex = -1;
+            });
+        }
+
         // Stash the group so the TV panel can preview this card from the delegated
         // grid focusin listener (which has no access to this closure).
         card.__movieGroup = group;
@@ -1683,6 +1689,12 @@ class MoviesPage {
         }).join('');
 
         this.continueList.querySelectorAll('.continue-card').forEach(card => {
+            if (this._isTvMode()) {
+                const h = inProgress.find(x => String(x.item_id) === card.dataset.itemId);
+                card.tabIndex = 0;
+                card.setAttribute('role', 'button');
+                card.setAttribute('aria-label', `Resume ${MediaUtils.cleanReleaseName(h?.data?.title || '') || 'movie'}`);
+            }
             card.addEventListener('click', () => {
                 const h = inProgress.find(x => String(x.item_id) === card.dataset.itemId);
                 if (h) this.resumeFromHistory(h);
@@ -2027,7 +2039,9 @@ class MoviesPage {
         }
 
         this.versionsList.closest('.movie-versions-section')?.classList.remove('single-version');
-        this.versionSummary.textContent = `${versions.length} versions available. Play uses the selected version.`;
+        this.versionSummary.textContent = this._isTvMode()
+            ? `${versions.length} versions available. Press OK to play a version.`
+            : `${versions.length} versions available. Play uses the selected version.`;
         this.versionsList.innerHTML = versions.map((item, index) => {
             const desc = MediaUtils.versionDescriptor(item, {
                 siblings: versions,
@@ -2054,10 +2068,29 @@ class MoviesPage {
         }).join('');
 
         this.versionsList.querySelectorAll('.movie-version-item').forEach(btn => {
-            btn.addEventListener('click', () => {
+            btn.addEventListener('click', async () => {
                 const index = parseInt(btn.dataset.index);
                 const movie = versions[index];
-                if (movie) this.showMovieDetails(this.currentMovieGroup, movie, { versions, isVersionSwitch: true });
+                if (!movie) return;
+
+                // On TV, OK on a labelled version is the commit action. Re-rendering
+                // this list used to destroy focus, while Play returned to the same list.
+                if (this._isTvMode()) {
+                    const state = this.getMovieWatchState(movie);
+                    const fallbacks = [
+                        movie,
+                        ...versions.filter(item => this._movieKey(item) !== this._movieKey(movie))
+                    ];
+                    await this.playMovie(movie, {
+                        versions: fallbacks,
+                        resumeTime: state.resumeTime || 0,
+                        playbackPreferences: state.data?.playbackPreferences ||
+                            state.data?.playback_preferences || null
+                    });
+                    return;
+                }
+
+                this.showMovieDetails(this.currentMovieGroup, movie, { versions, isVersionSwitch: true });
             });
         });
     }
@@ -2075,7 +2108,14 @@ class MoviesPage {
         const header = page?.querySelector('.movies-header');
         const controls = header?.querySelector('.movies-controls');
         const legacyFilterBar = document.getElementById('movies-filter-bar');
-        if (!page || !header || !controls || !legacyFilterBar || !this.container || page.classList.contains('tv-movies-layout-ready')) return;
+        if (!page || !header || !controls || !legacyFilterBar || !this.container) return;
+
+        // Explicit contract with tvNavigation.js: this visible panel is a docked
+        // split-view region, never a modal scope. Clear any stale web fiche state too.
+        if (this.detailsPanel) this.detailsPanel.dataset.tvSplitPreview = 'true';
+        page.classList.remove('movie-detail-open');
+        this.container.classList.remove('hidden');
+        if (page.classList.contains('tv-movies-layout-ready')) return;
 
         const primary = document.createElement('div');
         primary.id = 'movies-tv-primary-filters';
@@ -2120,6 +2160,13 @@ class MoviesPage {
         append(catalogMeta, this.countEl);
         append(catalogMeta, this.sortSelect);
         this.resetBtn?.classList.remove('hidden');
+
+        // Nodes deliberately left in the hidden legacy bar are not TV D-pad stops.
+        legacyFilterBar.querySelectorAll('button, input, select, textarea, [tabindex]').forEach(element => {
+            element.tabIndex = -1;
+        });
+        const backButton = this.detailsPanel?.querySelector('.movie-back-btn');
+        if (backButton) backButton.tabIndex = -1;
 
         const anchor = [this.activeFiltersEl, this.continueRow, this.container, this.detailsPanel]
             .find(element => element?.parentElement === page) || null;
@@ -2191,6 +2238,7 @@ class MoviesPage {
         const key = this._movieKey(movie);
         if (this._extrasLoadedFor === key) return;
         this._extrasLoadedFor = key;
+        this.loadRating();
         this.renderMoreLikeThis(movie);
         this.renderFicheExtras(this.currentMovieGroup?.representative || movie);
     }
@@ -2224,6 +2272,9 @@ class MoviesPage {
         if (!isTv) {
             this.pageEl?.classList.add('movie-detail-open');
             this.container.classList.add('hidden');
+        } else {
+            this.pageEl?.classList.remove('movie-detail-open');
+            this.container.classList.remove('hidden');
         }
         this.detailsPanel.classList.remove('hidden');
         // A version switch re-renders in place while the user is scrolled down at the
@@ -2309,7 +2360,10 @@ class MoviesPage {
         }
 
         this.syncDetailFavoriteButton();
-        this.loadRating();
+        // A TV grid preview can change several times per second. Defer the cloud
+        // rating request until the user actually enters the panel, preventing
+        // stale responses and network churn while navigating posters.
+        if (!isTvPreview) this.loadRating();
         this.syncDownloadButton();
         this.renderMovieVersions(movie);
         // A version switch keeps the same title — re-highlighting the versions list above is
