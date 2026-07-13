@@ -26,7 +26,7 @@
         '.season-header', '.tab', '.watch-recommended-card', '.context-item',
         '.live-guide-group', '.live-guide-row',
         // Home page cards (dashboard)
-        '.channel-tile', '.dashboard-card'
+        '.channel-tile', '.dashboard-card', '.tv-more-like-card'
     ].join(',');
 
     // Visibility test on an already-measured rect — same truthiness as isVisible's
@@ -182,6 +182,36 @@
         if (page && (page.id === 'page-movies' || page.id === 'page-series')) {
             return [...page.querySelectorAll('.movies-grid .movie-card, .series-grid .series-card')]
                 .find(isVisible) || null;
+        }
+        return null;
+    }
+
+    // Stable entry point for the docked Movies fiche. Generic spatial scoring
+    // cannot reliably reach Play from the top filter rows because the poster makes
+    // the first panel action strongly diagonal. Only enter a live, current preview.
+    function tvMoviesPanelEntryTarget() {
+        const page = activePage();
+        if (page?.id !== 'page-movies' ||
+            !document.documentElement.classList.contains('tv-movies-active')) return null;
+
+        const panel = page.querySelector('#movie-details');
+        const previewCard = page.querySelector('#movies-grid .movie-card.tv-preview-active');
+        if (!panel || panel.classList.contains('hidden') ||
+            !isTvMoviesSplitPanel(panel) || !previewCard?.isConnected) return null;
+
+        // Entering from the header/filter area always lands on the primary CTA.
+        panel.scrollTop = 0;
+        const selectors = [
+            '#movie-primary-action',
+            '#movie-detail-favorite',
+            '.movie-version-item.active',
+            '.movie-version-item',
+            '.movie-detail-actions button:not(.movie-back-btn):not([disabled])'
+        ];
+        for (const selector of selectors) {
+            const target = [...panel.querySelectorAll(selector)]
+                .find((el) => !el.disabled && isVisible(el));
+            if (target) return target;
         }
         return null;
     }
@@ -480,6 +510,21 @@
                 }
             }
 
+            // Symmetric boundary: Right at the end of Movies search enters the
+            // docked fiche instead of remaining an inert caret press.
+            if (focused.id === 'movies-search' && e.key === 'ArrowRight' &&
+                activePage()?.id === 'page-movies' &&
+                (focused.selectionStart ?? 0) === focused.value.length &&
+                (focused.selectionEnd ?? 0) === focused.value.length) {
+                const panelTarget = tvMoviesPanelEntryTarget();
+                if (panelTarget) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    focusElement(panelTarget);
+                    return;
+                }
+            }
+
             // Only ←/→ (caret) and Enter stay with the input; ↑ leaves via spatial nav.
             // (On phone the input keeps ↑/↓ for its own highlight nav — but this module
             // never runs there.)
@@ -572,6 +617,45 @@
             if (target) {
                 focusElement(target);
                 return;
+            }
+        }
+
+        // Movies TV: walk each filter band internally, then bridge its right edge
+        // straight to Play in the docked fiche. Pure geometry cannot make this hop
+        // reliably because the large poster pushes the first panel button far below
+        // the filters, so cards underneath otherwise out-score it.
+        if (e.key === 'ArrowRight' && activePage()?.id === 'page-movies' &&
+            navScope() === document) {
+            const filterRegion = focused.closest?.(
+                '[data-tv-nav-region="movies-filters"], .tv-movies-filter-row'
+            );
+            if (filterRegion) {
+                const from = centerOf(focused);
+                let nextInRegion = null;
+                let bestScore = Infinity;
+                for (const candidate of getCandidates()) {
+                    if (candidate === focused || !filterRegion.contains(candidate) ||
+                        !hasMeaningfulVerticalOverlap(focused, candidate, 0.5)) continue;
+                    const point = centerOf(candidate);
+                    const forward = point.x - from.x;
+                    if (forward <= 4) continue;
+                    const score = forward + Math.abs(point.y - from.y) * 2.5;
+                    if (score < bestScore) {
+                        bestScore = score;
+                        nextInRegion = candidate;
+                    }
+                }
+
+                if (nextInRegion) {
+                    focusElement(nextInRegion);
+                    return;
+                }
+
+                const panelTarget = tvMoviesPanelEntryTarget();
+                if (panelTarget) {
+                    focusElement(panelTarget);
+                    return;
+                }
             }
         }
 
