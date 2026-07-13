@@ -724,18 +724,50 @@ async function getOrCreateDefaultProfileId(userId: string, db: SupabaseClient): 
   return data.id as string;
 }
 
-// Resolve the active profile from the request header, validating it belongs to
-// the account. Falls back to (and provisions) the default profile.
+// The plan's `profiles` limit is a HARD cap on how many profiles are USABLE — not
+// just creatable. After a downgrade (e.g. Family 5 → Plus 2) the extra profiles are
+// kept intact but LOCKED. The active set is deterministic and un-gameable: the
+// default profile first, then the OLDEST by created_at (immutable — deliberately NOT
+// the user-reorderable sort_order, which would be a bypass vector). Returns null when
+// nothing is locked (count within limit). Unlock = upgrade, or delete an active one.
+function activeProfileIdSet(
+  profiles: Array<{ id: string; is_default?: boolean | null; created_at?: string | null }>,
+  limit: number,
+): Set<string> | null {
+  const cap = Math.max(1, Number(limit) || 1);
+  if (profiles.length <= cap) return null;
+  const ordered = [...profiles].sort((a, b) =>
+    (b.is_default ? 1 : 0) - (a.is_default ? 1 : 0) ||
+    String(a.created_at || "").localeCompare(String(b.created_at || "")));
+  return new Set(ordered.slice(0, cap).map((p) => p.id));
+}
+
+// Resolve the active profile from the request header, validating it belongs to the
+// account AND is not LOCKED by the plan limit. A locked profile (over the cap after a
+// downgrade) is refused even if the client forces the header — it falls back to the
+// default profile, so a stale "active profile" can't keep reading locked data.
 async function resolveProfileId(req: Request, userId: string, db: SupabaseClient): Promise<string> {
   const headerId = stringOrNull(req.headers.get(PROFILE_HEADER));
   if (headerId) {
     const { data } = await db
       .from("cloud_account_profiles")
-      .select("id")
-      .eq("id", headerId)
-      .eq("user_id", userId)
-      .maybeSingle();
-    if (data?.id) return data.id as string;
+      .select("id, is_default, created_at")
+      .eq("user_id", userId);
+    const rows = data ?? [];
+    const target = rows.find((p) => p.id === headerId);
+    if (target) {
+      // Only multi-profile accounts can possibly be over the cap — skip the
+      // entitlement lookup entirely for the common single-profile case.
+      if (rows.length > 1) {
+        const decision = await getEntitlementDecision(db, userId, { autoStartTrial: false });
+        const limit = limitNumber(decision.limits, "profiles", 1);
+        const activeSet = activeProfileIdSet(rows, limit);
+        if (activeSet && !activeSet.has(headerId)) {
+          return await getOrCreateDefaultProfileId(userId, db);
+        }
+      }
+      return headerId;
+    }
   }
   return await getOrCreateDefaultProfileId(userId, db);
 }
@@ -752,8 +784,12 @@ async function listProfiles(userId: string, db: SupabaseClient) {
   if (error) throwDb(error, "Unable to list profiles");
   const decision = await getEntitlementDecision(db, userId, { autoStartTrial: false });
   const limit = limitNumber(decision.limits, "profiles", 1);
-  const profiles = data ?? [];
-  return { profiles, limit, canCreate: profiles.length < limit };
+  const rows = data ?? [];
+  // Mark each profile locked/usable so the client can grey out + upsell the extras
+  // after a downgrade. `locked` is false for every profile when within the cap.
+  const activeSet = activeProfileIdSet(rows, limit);
+  const profiles = rows.map((p) => ({ ...p, locked: activeSet ? !activeSet.has(p.id) : false }));
+  return { profiles, limit, canCreate: rows.length < limit };
 }
 
 async function createProfile(req: Request, userId: string, db: SupabaseClient) {

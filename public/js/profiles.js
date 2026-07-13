@@ -98,6 +98,13 @@
 .np-avatar-lg{width:128px;height:128px;margin:0 auto 20px}
 .np-edit-badge{position:absolute;inset:0;display:grid;place-items:center;background:rgba(0,0,0,.45);color:#fff;font-size:34px;opacity:0;transition:opacity .2s ease}
 .np-card:hover .np-edit-badge,.np-card:focus-visible .np-edit-badge{opacity:1}
+/* Locked profile (over the plan's profile cap after a downgrade) — kept, just not
+   usable. Greyed with a padlock; clicking it opens an upgrade upsell. */
+.np-locked{opacity:.6;filter:grayscale(.65)}
+.np-locked .np-avatar{border-color:#2a3446}
+.np-locked .np-name{color:#6b7688}
+.np-lock-badge{position:absolute;top:8px;right:8px;width:30px;height:30px;border-radius:50%;background:rgba(8,10,15,.85);border:1px solid #3a4560;display:grid;place-items:center;font-size:14px;line-height:1}
+.np-card:hover.np-locked,.np-card:focus-visible.np-locked,.np-card:focus.np-locked{opacity:.85}
 .np-actions{display:flex;gap:12px;justify-content:center;margin-top:48px;flex-wrap:wrap}
 .np-btn{min-height:48px;padding:0 26px;border-radius:8px;border:1px solid #344158;background:#1a2130;color:#dbe7ff;font:inherit;font-weight:700;cursor:pointer;transition:transform .15s ease,border-color .15s ease,background .15s ease}
 .np-btn:hover{transform:translateY(-1px)}
@@ -340,14 +347,25 @@ html.tv .np-avatar-choice:focus{outline:2px solid #b579ff;outline-offset:2px}
     const activeId = profilesApi().getActiveId();
     const grid = el('div', 'np-grid');
     state.profiles.forEach((p) => {
-      const card = el('button', 'np-card' + (manage ? ' np-card-manage' : '') + (!manage && p.id === activeId ? ' np-current' : ''));
+      // A locked profile stays editable/deletable in MANAGE (so the user can free a
+      // slot), but in the picker it can't be selected — clicking it upsells instead.
+      const showLock = !!p.locked;
+      const card = el('button', 'np-card'
+        + (manage ? ' np-card-manage' : '')
+        + (showLock ? ' np-locked' : '')
+        + (!manage && !showLock && p.id === activeId ? ' np-current' : ''));
       card.type = 'button';
       const av = el('div', 'np-avatar');
       av.appendChild(avatarImg(p.avatar_id, p.name));
       if (manage) av.appendChild(el('span', 'np-edit-badge', '✎'));
+      else if (showLock) av.appendChild(el('span', 'np-lock-badge', '🔒'));
       card.appendChild(av);
       card.appendChild(el('span', 'np-name', p.name));
-      card.addEventListener('click', () => { manage ? openEdit(p) : selectProfile(p); });
+      card.addEventListener('click', () => {
+        if (manage) { openEdit(p); return; }
+        if (p.locked) { handleLockedProfile(p); return; }
+        selectProfile(p);
+      });
       grid.appendChild(card);
     });
 
@@ -603,7 +621,24 @@ html.tv .np-avatar-choice:focus{outline:2px solid #b579ff;outline-offset:2px}
     else { close(); }
   }
 
+  // A locked profile is over the plan's profile cap (after a Family→Plus downgrade).
+  // It stays intact but isn't usable until the account upgrades — clicking it is an
+  // upsell moment. Purchases exist ONLY on mobile/web, never on Android TV, so on TV
+  // we can't open a checkout — point the user to their phone/web instead.
+  function handleLockedProfile(p) {
+    if (IS_TV) {
+      const msg = 'This profile is locked on your current plan. Upgrade to Norva Family from your phone or the web to unlock it — your profile is kept safe until then.';
+      if (window.NorvaModal && typeof window.NorvaModal.alert === 'function') {
+        window.NorvaModal.alert(msg, { title: 'Profile locked' });
+      }
+      return;
+    }
+    const back = encodeURIComponent(location.pathname + location.search);
+    window.location.href = '/subscribe.html?returnTo=' + back;
+  }
+
   function selectProfile(p) {
+    if (p && p.locked) { handleLockedProfile(p); return; }
     profilesApi().setActiveId(p.id);
     markPickedThisSession();
     if (resolveSelect) {
@@ -651,8 +686,11 @@ html.tv .np-avatar-choice:focus{outline:2px solid #b579ff;outline-offset:2px}
     // Netflix-style: with several profiles show "Who's watching?" once per browser
     // session/login. The stored active id only pre-highlights the last pick — an
     // in-session reload keeps it, a new session/login shows the picker again.
+    // Skip the picker only if the stored active profile is still valid AND NOT locked
+    // — a Family→Plus downgrade can turn the last-used profile into a locked one, in
+    // which case we must re-show "Who's watching?" so the user picks an active profile.
     const activeId = profilesApi().getActiveId();
-    if (pickedThisSession() && activeId && list.some((p) => p.id === activeId)) return true;
+    if (pickedThisSession() && activeId && list.some((p) => p.id === activeId && !p.locked)) return true;
 
     state.mode = 'select';
     return new Promise((resolve) => {
