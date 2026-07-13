@@ -135,6 +135,10 @@ class MoviesPage {
             if (!this._isTvMode()) return;
             const card = event.target.closest?.('.movie-card');
             if (!card) return;
+            // Mark the origin card so a D-pad LEFT out of the panel returns here
+            // (tvNavigation reads .tv-preview-origin).
+            this.container.querySelector('.movie-card.tv-preview-origin')?.classList.remove('tv-preview-origin');
+            card.classList.add('tv-preview-origin');
             clearTimeout(this._previewDebounce);
             this._previewDebounce = setTimeout(() => {
                 if (card.isConnected) this.previewCard(card);
@@ -2181,7 +2185,9 @@ class MoviesPage {
             // prefers it over src) so the fallback actually shows.
             posterEl.onerror = () => { posterEl.onerror = null; posterEl.removeAttribute('srcset'); posterEl.src = '/img/norva-media-placeholder.png'; };
             posterEl.removeAttribute('srcset');
-            posterEl.src = poster;
+            // The TV panel shows a 16:9 banner — prefer the landscape backdrop and fall
+            // back to the (cover-cropped) poster only when no backdrop exists.
+            posterEl.src = (isTv && backdrop) ? backdrop : poster;
             posterEl.alt = this.getMovieDisplayTitle(displayMovie);
         }
 

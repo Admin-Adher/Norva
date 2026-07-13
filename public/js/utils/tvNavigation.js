@@ -556,6 +556,32 @@
             }
         }
 
+        // Movies (TV split-view) is 3 columns: rail | grid | #movie-details (preview
+        // panel). ArrowLeft from INSIDE the panel returns to the grid — the card that
+        // opened the preview (marked .tv-preview-origin) if it's still on screen, else
+        // the grid card nearest the focused control's screen-y — instead of letting
+        // findNext strand focus in the tall scrolling panel or jump to the rail. A
+        // control that HAS a panel neighbour to its left (e.g. Favorite ← Play) falls
+        // through to the generic handler, which steps to that neighbour.
+        if (e.key === 'ArrowLeft' && focused.closest('#movie-details')) {
+            const panel = focused.closest('#movie-details');
+            const leftInPanel = findNext(focused, 'ArrowLeft');
+            if (!(leftInPanel && panel.contains(leftInPanel))) {
+                const grid = document.querySelector('#page-movies .movies-grid, #page-series .series-grid');
+                if (grid) {
+                    let target = grid.querySelector('.movie-card.tv-preview-origin, .series-card.tv-preview-origin');
+                    if (!target || !isVisible(target)) {
+                        const y = centerOf(focused).y;
+                        const cards = [...grid.querySelectorAll('.movie-card, .series-card')].filter(isVisible);
+                        target = cards.length
+                            ? cards.reduce((b, c) => { const d = Math.abs(centerOf(c).y - y); return d < b.d ? { el: c, d } : b; }, { el: cards[0], d: Infinity }).el
+                            : null;
+                    }
+                    if (target) { focusElement(target); return; }
+                }
+            }
+        }
+
         // Movies/Series grid + Continue rail (TV): ArrowLeft from a LEFT-EDGE tile (no
         // tile to its left on the same row) opens the rail — otherwise findNext drifts
         // diagonally up to a filter control (the first filter <select> sits above-and-

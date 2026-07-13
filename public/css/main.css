@@ -12320,21 +12320,44 @@ mark.search-highlight {
 html.tv-mode #page-movies {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 33%;
-  grid-template-rows: auto auto auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
   grid-template-areas:
     "header   panel"
     "filters  panel"
     "active   panel"
-    "continue panel"
-    "grid     panel";
+    "grid     panel"
+    "continue panel";
   column-gap: 16px;
-  row-gap: 8px;
+  row-gap: 6px;
   height: 100%;
   min-height: 0;
-  padding: 10px 14px 12px 12px;
+  padding: 8px 14px 8px 12px;
   overflow: hidden;
 }
-html.tv-mode #page-movies .movies-header { grid-area: header; margin: 0; padding: 0; }
+/* Header: ONE compact row — heading (left) + inline controls (right). Overrides
+   the earlier tv rule that stretched .movies-controls to width:100% (which shoved
+   the title under the controls). */
+html.tv-mode #page-movies .movies-header {
+  grid-area: header;
+  margin: 0;
+  padding: 0 0 2px;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 12px;
+  border-bottom: 0;
+  background: transparent;
+}
+html.tv-mode #page-movies .movies-heading { flex: 0 0 auto; }
+html.tv-mode #page-movies .movies-controls {
+  width: auto;
+  flex: 1 1 auto;
+  flex-wrap: nowrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+html.tv-mode #page-movies .movies-controls .search-wrapper { flex: 1 1 200px; max-width: 480px; min-width: 0; }
+html.tv-mode #page-movies .movies-controls .source-select,
+html.tv-mode #page-movies .movies-controls .multi-select-btn { flex: 0 0 auto; height: 34px; }
 html.tv-mode #page-movies #movies-filter-bar { grid-area: filters; }
 html.tv-mode #page-movies #movies-active-filters { grid-area: active; }
 html.tv-mode #page-movies #movies-continue { grid-area: continue; }
@@ -12379,16 +12402,23 @@ html.tv-mode #page-movies #movies-filter-bar .source-select,
 html.tv-mode #page-movies #movies-filter-bar .filter-toggle,
 html.tv-mode #page-movies .movies-controls .source-select,
 html.tv-mode #page-movies .movies-controls .multi-select-btn {
-  height: 34px;
+  height: 32px;
+  width: auto;              /* size to content — never clip the label */
   min-width: 0;
   max-width: none;
+  white-space: nowrap;      /* keep each label on one line */
   border-radius: 999px;
-  font-size: 0.8rem;
-  padding: 0 14px;
+  font-size: 0.78rem;
+  padding: 0 12px;
   background: rgba(255, 255, 255, 0.06);
   border: 1px solid rgba(255, 255, 255, 0.12);
   color: #dbe4f7;
 }
+/* Active-filters + Continue Watching stay compact so the grid keeps the space. */
+html.tv-mode #page-movies #movies-active-filters { padding: 0; gap: 6px; }
+html.tv-mode #page-movies #movies-continue { margin: 0; }
+html.tv-mode #page-movies #movies-continue h3 { font-size: 0.95rem; margin: 2px 0 4px; }
+html.tv-mode #page-movies #movies-continue .continue-scroller { gap: 8px; }
 html.tv-mode #page-movies #movies-filter-bar .filter-toggle.active {
   background: var(--color-accent);
   border-color: var(--color-accent);
@@ -12411,31 +12441,50 @@ html.tv-mode #page-movies .movies-grid .movie-card:focus {
   box-shadow: 0 0 0 3px #fff !important;
 }
 
-/* --- Panel: hero (backdrop banner → stacked info) ----------------- */
+/* --- Panel: hero (16:9 banner → stacked info) --------------------- */
 html.tv-mode #page-movies .movie-detail-hero {
-  min-height: 0;
+  min-height: 0 !important;
   padding: 0;
   display: block;
 }
-html.tv-mode #page-movies .movie-detail-hero::before { opacity: 0.34; }
+html.tv-mode #page-movies .movie-detail-hero::before { opacity: 0.28; }
+/* The base hero-content is a 2-column GRID (poster | info). On TV we collapse it
+   to a single stacked column — the earlier flex-direction had no effect on a grid. */
 html.tv-mode #page-movies .movie-detail-hero-content {
-  flex-direction: column;
-  align-items: stretch;
-  gap: 10px;
-  padding: 16px;
+  display: block !important;
+  width: 100% !important;
+  padding: 14px;
 }
+/* Poster → a contained 16:9 banner (base is a 2:3 portrait that overflowed). */
 html.tv-mode #page-movies .movie-detail-poster {
-  width: 100%;
-  height: auto;
-  aspect-ratio: 16 / 9;
+  width: 100% !important;
+  height: auto !important;
+  aspect-ratio: 16 / 9 !important;
+  max-height: 190px;
   object-fit: cover;
   border-radius: 12px;
+  margin: 0 0 10px !important;
+  box-shadow: none;
 }
-html.tv-mode #page-movies .movie-detail-info { gap: 8px; min-width: 0; }
-html.tv-mode #page-movies #movie-detail-title { font-size: 1.5rem; margin: 0; line-height: 1.15; }
+html.tv-mode #page-movies .movie-detail-info { display: block; min-width: 0; }
+html.tv-mode #page-movies .movie-detail-info h3,
+html.tv-mode #page-movies #movie-detail-title {
+  font-size: 1.4rem !important;
+  line-height: 1.15 !important;
+  margin: 0 0 6px !important;
+}
+html.tv-mode #page-movies #movie-detail-meta.movie-meta-pills,
+html.tv-mode #page-movies .movie-detail-info .movie-meta-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 8px;
+}
 html.tv-mode #page-movies #movie-detail-plot {
-  font-size: 0.9rem;
+  max-width: none;
+  font-size: 0.88rem !important;
   line-height: 1.45;
+  margin: 0 0 10px !important;
   display: -webkit-box;
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
