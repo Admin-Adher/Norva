@@ -876,6 +876,25 @@
         return payload;
     }
 
+    // True when running as a QR-paired screen (a device token but NO signed-in user):
+    // user-scope routes have no JWT and would 401, so the directly-called namespaces
+    // (ratings, profiles) must hit their /device/* equivalents with the device token.
+    function isDeviceOnly() {
+        let hasUser = false;
+        try {
+            const s = JSON.parse(localStorage.getItem('norva-cloud-session') || 'null');
+            hasUser = Boolean(s && s.access_token && s.user && s.user.id);
+        } catch (_) { hasUser = false; }
+        return !hasUser && Boolean(getDeviceToken());
+    }
+    // Pick (path, token) for a route that exists in both scopes, by session mode.
+    const dualGet = (userPath, params = {}) => isDeviceOnly()
+        ? request('GET', `/device${userPath}${query(params)}`, null, { token: getDeviceToken() })
+        : request('GET', `${userPath}${query(params)}`);
+    const dualMutate = (method, userPath, body) => isDeviceOnly()
+        ? request(method, `/device${userPath}`, body, { token: getDeviceToken() })
+        : request(method, userPath, body);
+
     const NorvaCloud = {
         get apiUrl() { return apiBase(); },
         get edgeUrl() { return edgeBase(); },
@@ -953,11 +972,17 @@
             trialEligibility: () => cachedGet('trialEligibility', PROFILES_TTL_MS, () => request('GET', '/billing/trial-eligibility'))
         },
 
+        // Device-aware so a paired TV can list + pick the SAME profile as the phone
+        // (favorites/history are per-profile, so the picker must reach the account's list).
         profiles: {
-            list: () => cachedGet('profiles', PROFILES_TTL_MS, () => request('GET', '/profiles')),
-            create: (profile) => request('POST', '/profiles', profile).then((r) => { invalidateCache('profiles'); return r; }),
-            update: (id, patch) => request('PATCH', `/profiles/${encodeURIComponent(id)}`, patch).then((r) => { invalidateCache('profiles'); return r; }),
-            remove: (id) => request('DELETE', `/profiles/${encodeURIComponent(id)}`).then((r) => { invalidateCache('profiles'); return r; }),
+            list: () => cachedGet('profiles', PROFILES_TTL_MS, () => dualGet('/profiles')),
+            create: (profile) => dualMutate('POST', '/profiles', profile).then((r) => { invalidateCache('profiles'); return r; }),
+            update: (id, patch) => (isDeviceOnly()
+                ? request('PATCH', `/device/profiles/${encodeURIComponent(id)}`, patch, { token: getDeviceToken() })
+                : request('PATCH', `/profiles/${encodeURIComponent(id)}`, patch)).then((r) => { invalidateCache('profiles'); return r; }),
+            remove: (id) => (isDeviceOnly()
+                ? request('DELETE', `/device/profiles/${encodeURIComponent(id)}`, null, { token: getDeviceToken() })
+                : request('DELETE', `/profiles/${encodeURIComponent(id)}`)).then((r) => { invalidateCache('profiles'); return r; }),
             getActiveId: getActiveProfileId,
             setActiveId: setActiveProfileId,
             avatarUrl: (avatarId) => '/img/avatars/' + encodeURIComponent(String(avatarId || 'avatar-01')) + '.png',
@@ -1051,9 +1076,10 @@
         },
 
         // Thumbs up/down on a title (per profile). rating 1=up, -1=down, 0=clear.
+        // Device-aware so a paired TV writes/reads its ratings too.
         ratings: {
-            get: (params = {}) => request('GET', `/ratings${query(params)}`),
-            set: (body) => request('POST', '/ratings', body)
+            get: (params = {}) => dualGet('/ratings', params),
+            set: (body) => dualMutate('POST', '/ratings', body)
         },
 
         history: {

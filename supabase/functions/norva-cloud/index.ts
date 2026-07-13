@@ -273,6 +273,64 @@ async function route(
       if (req.method === "POST" && !action) return { status: 201, body: await saveHistory(req, device.user_id, db) };
       if (req.method === "DELETE" && action) return { body: await deleteOwned("cloud_watch_history", action, device.user_id, db) };
     }
+    // Account profiles: a paired TV lists the account's profiles (to land on the
+    // SAME profile as the phone/web) and can read/update the active one. Same
+    // handlers as the user scope, keyed to the paired account.
+    if (id === "profile") {
+      if (req.method === "GET") return { body: await getProfile(device.user_id, db) };
+      if (req.method === "PUT" || req.method === "PATCH") return { body: await upsertProfile(req, device.user_id, db) };
+    }
+    if (id === "profiles") {
+      if (req.method === "GET" && !action) return { body: await listProfiles(device.user_id, db) };
+      if (req.method === "POST" && !action) return { status: 201, body: await createProfile(req, device.user_id, db) };
+      if ((req.method === "PATCH" || req.method === "PUT") && action) return { body: await updateProfile(req, action, device.user_id, db) };
+      if (req.method === "DELETE" && action) return { body: await deleteProfile(action, device.user_id, db) };
+    }
+    // Push-notification token registration for the paired screen.
+    if (id === "push-token" && req.method === "POST" && !action) {
+      return { status: 201, body: await registerPushToken(req, device.user_id, db) };
+    }
+    // Notification / new-content feed (same cloud_content_events table).
+    if (id === "content-events") {
+      if (req.method === "GET") {
+        const all = url.searchParams.get("all") === "1";
+        if (all) {
+          const [feedRes, unreadRes] = await Promise.all([
+            db.from("cloud_content_events")
+              .select("id,source_id,kind,summary,payload,created_at,seen_at")
+              .eq("user_id", device.user_id)
+              .order("created_at", { ascending: false })
+              .limit(40),
+            db.from("cloud_content_events")
+              .select("id", { count: "exact", head: true })
+              .eq("user_id", device.user_id)
+              .is("seen_at", null),
+          ]);
+          return { body: { events: feedRes.data ?? [], unread: unreadRes.count ?? 0 } };
+        }
+        const { data } = await db
+          .from("cloud_content_events")
+          .select("id,source_id,kind,summary,payload,created_at")
+          .eq("user_id", device.user_id)
+          .is("seen_at", null)
+          .order("created_at", { ascending: false })
+          .limit(20);
+        return { body: { events: data ?? [] } };
+      }
+      if (req.method === "POST" && action === "seen") {
+        const body = await req.json().catch(() => ({})) as JsonRecord;
+        const ids = Array.isArray(body.ids)
+          ? body.ids.filter((x) => typeof x === "string").slice(0, 100)
+          : null;
+        let q = db.from("cloud_content_events")
+          .update({ seen_at: new Date().toISOString() })
+          .eq("user_id", device.user_id)
+          .is("seen_at", null);
+        if (ids && ids.length) q = q.in("id", ids);
+        await q;
+        return { body: { ok: true } };
+      }
+    }
   }
 
   const user = await requireUser(req, db);
