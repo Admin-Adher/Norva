@@ -1045,7 +1045,9 @@
             list: (params = {}) => cachedGet('fav:' + JSON.stringify(params || {}), FAVORITES_TTL_MS,
                 () => request('GET', `/favorites${query(params)}`)),
             add: (favorite) => request('POST', '/favorites', favorite).then((r) => { invalidateCache('fav'); return r; }),
-            remove: (id) => request('DELETE', `/favorites/${encodeURIComponent(id)}`).then((r) => { invalidateCache('fav'); return r; })
+            remove: (id) => request('DELETE', `/favorites/${encodeURIComponent(id)}`).then((r) => { invalidateCache('fav'); return r; }),
+            // Un-favorite by keys (source,item,type) in one round-trip — no list-then-find.
+            removeByKeys: (params = {}) => request('DELETE', `/favorites${query(params)}`).then((r) => { invalidateCache('fav'); return r; })
         },
 
         // Thumbs up/down on a title (per profile). rating 1=up, -1=down, 0=clear.
@@ -1143,6 +1145,25 @@
                 createSession: (session) => playbackRequest(session, { token: getDeviceToken() }),
                 event: (event) => playbackSessionRequest('POST', '/playback/events', event, { token: getDeviceToken() }),
                 summary: (params = {}) => playbackSessionRequest('GET', `/telemetry/summary${query(params)}`, null, { token: getDeviceToken() })
+            },
+            // Cross-device sync for QR-paired screens (TV): same cloud tables as the
+            // account (JWT) scope, reached with the device token. Lets a paired TV read
+            // and write the same favorites / Continue Watching / ratings as web/phone.
+            favorites: {
+                list: (params = {}) => cachedGet('fav:' + JSON.stringify(params || {}), FAVORITES_TTL_MS,
+                    () => request('GET', `/device/favorites${query(params)}`, null, { token: getDeviceToken() })),
+                add: (favorite) => request('POST', '/device/favorites', favorite, { token: getDeviceToken() }).then((r) => { invalidateCache('fav'); return r; }),
+                removeByKeys: (params = {}) => request('DELETE', `/device/favorites${query(params)}`, null, { token: getDeviceToken() }).then((r) => { invalidateCache('fav'); return r; })
+            },
+            ratings: {
+                get: (params = {}) => request('GET', `/device/ratings${query(params)}`, null, { token: getDeviceToken() }),
+                set: (body) => request('POST', '/device/ratings', body, { token: getDeviceToken() })
+            },
+            history: {
+                list: (params = {}) => cachedGet('hist:' + JSON.stringify(params || {}), HISTORY_TTL_MS,
+                    () => request('GET', `/device/history${query(params)}`, null, { token: getDeviceToken() })),
+                save: (item) => request('POST', '/device/history', item, { token: getDeviceToken() }).then((r) => { invalidateCache('hist'); return r; }),
+                remove: (id) => request('DELETE', `/device/history/${encodeURIComponent(id)}`, null, { token: getDeviceToken() }).then((r) => { invalidateCache('hist'); return r; })
             }
         }
     };

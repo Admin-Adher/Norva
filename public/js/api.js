@@ -1883,26 +1883,37 @@ const CloudAdapter = (() => {
         throw new Error(`Cloud API route not mapped: ${method} ${endpoint}`);
     }
 
+    // Cross-device sync namespace: a signed-in USER (JWT) uses the account scope; a
+    // QR-paired screen (device token, no user session) uses NorvaCloud.device.*, which
+    // the edge maps to the SAME cloud tables for the paired account. null = neither
+    // (offline / not linked) → callers no-op, exactly as before.
+    function cloudSync(name) {
+        if (_hasCloudUserSession()) return NorvaCloud?.[name] || null;
+        if (_hasCloudDeviceSession()) return NorvaCloud?.device?.[name] || null;
+        return null;
+    }
+
     async function handleFavorites(method, path, query, data) {
-        if (!hasUserSession()) return method === 'GET' && path === '/favorites/check' ? { favorite: false, isFavorite: false } : (method === 'GET' ? [] : { success: true });
+        const fav = cloudSync('favorites');
+        if (!fav) return method === 'GET' && path === '/favorites/check' ? { favorite: false, isFavorite: false } : (method === 'GET' ? [] : { success: true });
         if (method === 'GET' && path === '/favorites/check') {
             const sourceId = await resolveSourceId(query.get('sourceId'));
             const itemId = String(query.get('itemId') || '');
             const itemType = itemTypeToLocal(query.get('itemType') || 'channel');
-            const payload = await NorvaCloud.favorites.list({ sourceId, itemType });
+            const payload = await fav.list({ sourceId, itemType });
             const favorite = (payload.favorites || []).find(item => String(item.item_id) === itemId);
             return { favorite: Boolean(favorite), isFavorite: Boolean(favorite), id: favorite?.id };
         }
         if (method === 'GET') {
             const sourceId = query.get('sourceId') ? await resolveSourceId(query.get('sourceId')) : '';
             const itemType = query.get('itemType') ? itemTypeToLocal(query.get('itemType')) : '';
-            const payload = await NorvaCloud.favorites.list({ sourceId, itemType });
+            const payload = await fav.list({ sourceId, itemType });
             return (payload.favorites || []).map(mapFavorite);
         }
         if (method === 'POST') {
             const cloudSourceId = await resolveSourceId(data.sourceId);
             const itemType = itemTypeToLocal(data.itemType || 'channel');
-            const payload = await NorvaCloud.favorites.add({
+            const payload = await fav.add({
                 sourceId: cloudSourceId,
                 itemId: String(data.itemId),
                 itemType,
@@ -1914,10 +1925,8 @@ const CloudAdapter = (() => {
         if (method === 'DELETE') {
             const cloudSourceId = await resolveSourceId(data.sourceId);
             const itemType = itemTypeToLocal(data.itemType || 'channel');
-            const payload = await NorvaCloud.favorites.list({ sourceId: cloudSourceId, itemType });
-            const favorite = (payload.favorites || []).find(item => String(item.item_id) === String(data.itemId));
-            if (favorite) return NorvaCloud.favorites.remove(favorite.id);
-            return { success: true };
+            // One keyed round-trip (no list-then-find). removeByKeys exists on both scopes.
+            return fav.removeByKeys({ sourceId: cloudSourceId, itemId: String(data.itemId), itemType });
         }
         return { success: true };
     }
@@ -1936,9 +1945,10 @@ const CloudAdapter = (() => {
     }
 
     async function handleHistory(method, path, query, data) {
-        if (!hasUserSession()) return method === 'GET' ? [] : { success: true };
+        const hist = cloudSync('history');
+        if (!hist) return method === 'GET' ? [] : { success: true };
         if (method === 'GET') {
-            const payload = await NorvaCloud.history.list({ limit: query.get('limit') || 200 });
+            const payload = await hist.list({ limit: query.get('limit') || 200 });
             return (payload.history || []).map(mapHistory);
         }
         if (method === 'POST') {
@@ -1954,14 +1964,14 @@ const CloudAdapter = (() => {
                 durationSeconds: data.durationSeconds ?? data.duration,
                 data: { ...(data.data || {}), sourceId: data.sourceId }
             };
-            const payload = await NorvaCloud.history.save(item);
+            const payload = await hist.save(item);
             return mapHistory(payload.item);
         }
         if (method === 'DELETE') {
             const itemId = decodeURIComponent(path.split('/').pop());
-            const payload = await NorvaCloud.history.list({ limit: 500 });
+            const payload = await hist.list({ limit: 500 });
             const item = (payload.history || []).find(entry => String(entry.id) === itemId || String(entry.item_id) === itemId);
-            if (item) return NorvaCloud.history.remove(item.id);
+            if (item) return hist.remove(item.id);
             return { success: true };
         }
         return { success: true };
