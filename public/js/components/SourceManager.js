@@ -311,7 +311,12 @@ class SourceManager {
         // Event listeners
         modal.querySelector('.modal-close').onclick = () => modal.classList.remove('active');
         document.getElementById('modal-cancel').onclick = () => modal.classList.remove('active');
-        document.getElementById('modal-save').onclick = () => this.saveNewSource(type);
+        document.getElementById('modal-save').onclick = (e) => {
+            const btn = e.currentTarget;
+            if (btn.disabled) return;               // guard against a double-press creating duplicate sources
+            btn.disabled = true;
+            Promise.resolve(this.saveNewSource(type)).finally(() => { btn.disabled = false; });
+        };
         this.bindSourceForm(type);
     }
 
@@ -321,6 +326,14 @@ class SourceManager {
     async showEditModal(id, type) {
         try {
             const source = await API.sources.getById(id);
+            // getById returns null (not a throw) when the source is gone/stale; the form
+            // builders deref source.* and would throw into a silent console.error, leaving
+            // the button looking dead. Surface it and refresh the list instead.
+            if (!source) {
+                NorvaModal.toast('Could not load this source — it may have been removed.', 'error');
+                try { await this.loadSources(); } catch (_) { /* noop */ }
+                return;
+            }
 
             const modal = document.getElementById('modal');
             const title = document.getElementById('modal-title');
@@ -340,10 +353,16 @@ class SourceManager {
 
             modal.querySelector('.modal-close').onclick = () => modal.classList.remove('active');
             document.getElementById('modal-cancel').onclick = () => modal.classList.remove('active');
-            document.getElementById('modal-save').onclick = () => this.updateSource(id, type);
+            document.getElementById('modal-save').onclick = (e) => {
+                const btn = e.currentTarget;
+                if (btn.disabled) return;           // guard against a double-press duplicating the PUT
+                btn.disabled = true;
+                Promise.resolve(this.updateSource(id, type)).finally(() => { btn.disabled = false; });
+            };
             this.bindSourceForm(type);
         } catch (err) {
             console.error('Error loading source:', err);
+            NorvaModal.toast('Could not open this source: ' + (err?.message || err), 'error');
         }
     }
 
@@ -1247,7 +1266,7 @@ class SourceManager {
             // 2. Poll for completion
             let retries = 0;
             let statusPollErrors = 0;
-            const maxRetries = 60; // 60 seconds timeout
+            const maxRetries = 180; // up to 3 min — catalog imports routinely exceed 60s
 
             while (retries < maxRetries) {
                 await new Promise(r => setTimeout(r, 1000)); // Wait 1s
@@ -1268,12 +1287,20 @@ class SourceManager {
                     throw new Error(`Failed to get sync status after ${statusPollErrors} retries: ${err.message}`);
                 }
 
-                const status = statuses.find(s => s.source_id === id && s.type === 'all');
+                // Match the status robustly across the id field names the API uses
+                // (source_id / sourceId / id / cloud_id) — same as sourceStatusFor().
+                // The old `s.type === 'all'` filter matched a field that /sources/status
+                // never returns, so `status` was ALWAYS undefined and every sync fell
+                // through to the "timed out" throw below even on success.
+                const status = (statuses || []).find(s =>
+                    [s.source_id, s.sourceId, s.id, s.cloudId, s.cloud_id]
+                        .filter(Boolean).map(String).includes(String(id)));
+                const st = status && String(status.status);
 
-                if (status && status.status === 'success') {
+                if (status && (st === 'success' || st === 'ready' || st === 'complete' || st === 'done')) {
                     console.log('[SourceManager] Sync completed successfully');
                     break;
-                } else if (status && status.status === 'error') {
+                } else if (status && st === 'error') {
                     throw new Error(`Sync failed: ${status.error}`);
                 }
 

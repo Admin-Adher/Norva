@@ -340,7 +340,10 @@ class SettingsPage {
 
         const accountOnly = document.getElementById('settings-open-account');
         const switchProfile = document.getElementById('settings-switch-profile');
-        if (accountOnly) accountOnly.style.display = user.cloud ? '' : 'none';
+        // Sign-in settings need a real Supabase user session; a device-paired screen has
+        // only a device token, so the whole panel throws "Not signed in". Same guard as
+        // the delete-account row below.
+        if (accountOnly) accountOnly.style.display = (user.cloud && !user.device) ? '' : 'none';
         if (switchProfile) switchProfile.style.display = user.cloud ? '' : 'none';
 
         // Account deletion is for real cloud accounts only (a device-paired
@@ -742,9 +745,18 @@ class SettingsPage {
                         try { await API.sources.sync(src.id); } catch (e) { console.warn('[country] resync failed for', src.id, e); }
                     }
                     try { await window.app?.channelList?.loadChannels?.(); } catch (e) { }
+                } catch (e) {
+                    // Previously there was no catch: a rejecting getAll() escaped as an
+                    // unhandled rejection while `finally` repainted the button as if the
+                    // switch had succeeded. Surface it instead of faking success.
+                    console.warn('[country] region switch failed', e);
+                    window.NorvaModal?.toast?.('Could not finish switching region — please retry.', 'error');
                 } finally {
                     countrySelect.disabled = false;
-                    if (pickerBtn) pickerBtn.disabled = false;
+                    // Restore focus to the region button: RegionPicker.choose() called
+                    // btn.focus() while the button was still disabled (no-op → focus fell to
+                    // <body>), stranding the D-pad on TV.
+                    if (pickerBtn) { pickerBtn.disabled = false; pickerBtn.focus(); }
                     if (hint && originalHint) hint.textContent = originalHint;
                     applyResolution();
                 }
@@ -868,6 +880,14 @@ class SettingsPage {
             console.warn('[Settings] Failed to load settings from API, using player defaults:', err);
             s = this.app.player?.settings || {};
         }
+
+        // Sync the freshly-fetched values into player.settings BEFORE wiring the change
+        // handlers: each one mutates player.settings.X and calls player.saveSettings(),
+        // which serializes the WHOLE object. Without this, opening the transcode tab before
+        // loadSettingsFromServer resolves and changing one control would persist default
+        // values over the server's real settings (forceProxy/maxResolution/…) the user never
+        // touched. The read path was already fixed to bypass player.settings; this fixes write.
+        if (s && this.app.player?.settings) Object.assign(this.app.player.settings, s);
 
         if (hwEncoderSelect) hwEncoderSelect.value = s.hwEncoder || 'auto';
         if (maxResolutionSelect) maxResolutionSelect.value = s.maxResolution || '1080p';
@@ -1110,6 +1130,10 @@ class SettingsPage {
             addUserForm.addEventListener('submit', async (e) => {
                 e.preventDefault();
 
+                const btn = e.submitter || addUserForm.querySelector('button[type="submit"], button:not([type])');
+                if (btn?.disabled) return;          // guard against a double-submit creating duplicate users
+                if (btn) btn.disabled = true;
+
                 const username = document.getElementById('new-username').value;
                 const password = document.getElementById('new-password').value;
                 const role = document.getElementById('new-role').value;
@@ -1121,6 +1145,8 @@ class SettingsPage {
                     this.loadUsers();
                 } catch (err) {
                     NorvaModal.toast('Error creating user: ' + err.message, 'error');
+                } finally {
+                    if (btn) btn.disabled = false;
                 }
             });
         }
@@ -1267,9 +1293,17 @@ class SettingsPage {
 
         // Save Handler
         saveBtn.onclick = async () => {
+            if (saveBtn.disabled) return;           // guard against a double-press
             const userId = document.getElementById('edit-user-id').value;
+            // #edit-user-save lives outside the <form>, so the input's `required` never
+            // fires — validate the name explicitly rather than PUT an empty username.
+            const username = document.getElementById('edit-username').value.trim();
+            if (!username) {
+                NorvaModal.toast('Username cannot be empty.', 'error');
+                return;
+            }
             const updates = {
-                username: document.getElementById('edit-username').value,
+                username,
                 role: document.getElementById('edit-role').value
             };
 
@@ -1278,6 +1312,7 @@ class SettingsPage {
                 updates.password = newPassword;
             }
 
+            saveBtn.disabled = true;
             try {
                 await API.users.update(userId, updates);
                 NorvaModal.toast('User updated.', 'success');
@@ -1285,6 +1320,8 @@ class SettingsPage {
                 this.loadUsers();
             } catch (err) {
                 NorvaModal.toast('Error updating user: ' + err.message, 'error');
+            } finally {
+                saveBtn.disabled = false;
             }
         };
 
@@ -1422,6 +1459,15 @@ class SettingsPage {
                     btn.disabled = true;
                     try {
                         await window.NorvaCloud.devices.revoke(id);
+                        // If we just revoked THIS browser/screen, drop the now-dead device
+                        // token so subsequent device-scoped calls don't keep using it until
+                        // a late 401 (matches cloud.html's revoke cleanup).
+                        try {
+                            if (localStorage.getItem('norva-cloud-device-id') === id) {
+                                window.NorvaCloud?.setDeviceToken?.('');
+                                localStorage.removeItem('norva-cloud-device-id');
+                            }
+                        } catch (_) { /* noop */ }
                         this.loadTrustedDevices();
                         this.setScreensStatus(status, 'success', 'Screen revoked.');
                     } catch (e) {
@@ -1606,6 +1652,20 @@ class SettingsPage {
             if (autoTranscodeToggle) autoTranscodeToggle.checked = s.autoTranscode || false;
             if (epgRefreshSelect) epgRefreshSelect.value = s.epgRefreshInterval || '24';
             if (streamFormatSelect) streamFormatSelect.value = s.streamFormat || 'm3u8';
+
+            // Auto-refresh toggle + interval were omitted from this re-sync, so they kept
+            // showing the boot-time defaults (ON / 24h) even after the user saved another
+            // value — initPlayerSettings() populates them once, before loadSettingsFromServer
+            // resolves. Re-sync them here like every other player control.
+            const autoRefreshToggleSync = document.getElementById('setting-auto-refresh');
+            const autoRefreshIntervalSync = document.getElementById('setting-auto-refresh-interval');
+            const autoRefreshRowSync = document.getElementById('auto-refresh-interval-row');
+            if (autoRefreshToggleSync) {
+                const arEnabled = s.autoRefreshEnabled !== false;
+                autoRefreshToggleSync.checked = arEnabled;
+                if (autoRefreshIntervalSync) autoRefreshIntervalSync.value = String(s.autoRefreshIntervalHours || 24);
+                if (autoRefreshRowSync) autoRefreshRowSync.style.display = arEnabled ? '' : 'none';
+            }
 
             // User-Agent settings
             const userAgentSelect = document.getElementById('setting-user-agent');

@@ -21,6 +21,7 @@
   const IS_TV = /NorvaTV-AndroidTV/i.test(navigator.userAgent || '');
   let stylesInjected = false;
   let overlayEl = null;
+  let previouslyFocused = null;   // element to restore focus to when the switcher closes
   let resolveSelect = null;
   let fitRO = null;          // ResizeObserver that re-fits the panel
   let fitOnResize = null;    // window resize/orientation handler (IME show/hide, etc.)
@@ -183,6 +184,11 @@ html.tv .np-avatar-choice:focus{outline:2px solid #b579ff;outline-offset:2px}
       window.removeEventListener('orientationchange', fitOnResize);
       fitOnResize = null;
     }
+    // Restore focus to whatever opened the switcher (nav avatar / "Switch profile"),
+    // so keyboard & Android TV D-pad users aren't dumped on <body>.
+    const toFocus = previouslyFocused;
+    previouslyFocused = null;
+    if (toFocus && typeof toFocus.focus === 'function') { try { toFocus.focus(); } catch (_) { /* noop */ } }
   }
 
   async function loadProfiles() {
@@ -196,6 +202,7 @@ html.tv .np-avatar-choice:focus{outline:2px solid #b579ff;outline-offset:2px}
   function buildOverlay() {
     injectStyles();
     close();
+    previouslyFocused = document.activeElement;   // capture the opener AFTER clearing any stale overlay
     overlayEl = el('div', 'np-overlay');
     overlayEl.setAttribute('role', 'dialog');
     overlayEl.setAttribute('aria-modal', 'true');
