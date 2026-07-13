@@ -255,6 +255,27 @@
         );
     }
 
+    // Movies/Series TV grid: the nearest VISIBLE card above `card` within its grid — lets UP
+    // walk up the grid (then scroll it) instead of escaping to the top filter rows. Prefers the
+    // same column, then the nearest row.
+    let lastGridUpTapAt = 0;
+    const GRID_UP_DOUBLE_TAP_MS = 350;
+    function gridCardAbove(card) {
+        const grid = card?.closest?.('.movies-grid, .series-grid');
+        if (!grid) return null;
+        const from = centerOf(card);
+        let best = null, bestScore = Infinity;
+        for (const c of grid.querySelectorAll('.movie-card, .series-card')) {
+            if (c === card || !isVisible(c)) continue;
+            const p = centerOf(c);
+            const dy = from.y - p.y;                            // > 0 when c is above
+            if (dy <= 4) continue;
+            const score = dy + Math.abs(p.x - from.x) * 3;      // same column first, nearest row
+            if (score < bestScore) { bestScore = score; best = c; }
+        }
+        return best;
+    }
+
     /** Close the topmost open modal, running the app's own close handler. */
     function closeTopModal() {
         const modal = openModal();
@@ -873,6 +894,29 @@
                 const watch = document.querySelector('.player-section .live-guide-preview [data-action="watch"]');
                 if (watch && isVisible(watch)) { focusElement(watch); return; }
             }
+        }
+
+        // Movies/Series grid (TV): UP walks up WITHIN the grid — to the card above, or scrolling
+        // the list up once the top visible row is reached (mirrors how DOWN scrolls it down) —
+        // instead of escaping to the filter rows that sit above and would otherwise win findNext on
+        // every UP. Reach the filters with a deliberate DOUBLE-tap Up (two discrete presses within
+        // 350ms). A HELD Up auto-repeats (e.repeat) and only ever scrolls, so fast-scrolling up
+        // never pops into the filters.
+        if (e.key === 'ArrowUp' &&
+            focused.matches?.('.movies-grid .movie-card, .series-grid .series-card')) {
+            if (!e.repeat) {
+                const now = Date.now();
+                if (lastGridUpTapAt && now - lastGridUpTapAt < GRID_UP_DOUBLE_TAP_MS) {
+                    lastGridUpTapAt = 0;
+                    const toFilters = findNext(focused, 'ArrowUp');   // the normal escape target (a filter)
+                    if (toFilters) { focusElement(toFilters); return; }
+                }
+                lastGridUpTapAt = now;
+            }
+            const above = gridCardAbove(focused);
+            if (above) { focusElement(above); return; }
+            if (scrollActivePage('ArrowUp', focused)) return;         // reveal cards above; focus stays
+            return;                                                   // at the very top: swallow (double-tap Up reaches the filters)
         }
 
         let next = findNext(focused, e.key);
