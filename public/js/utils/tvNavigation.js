@@ -56,7 +56,11 @@
         // shown by being in the DOM (no `.active` class) and removed on close, so its
         // mere presence means it is open — listing it confines the arrows to the dialog
         // AND lets closeTopModal()/hardware-Back dismiss it (see closeTopModal below).
-        const modals = document.querySelectorAll('#modal.active, .modal-overlay.active, .np-overlay, #norva-region-prompt, .norva-modal-overlay');
+        // .trailer-lightbox is the fullscreen YouTube trailer overlay (mediaUtils): it is
+        // shown by presence (no .active) and sits OVER an open fiche, so listing it here
+        // traps the D-pad inside it and lets closeTopModal()/Back dismiss the trailer
+        // instead of the fiche behind it.
+        const modals = document.querySelectorAll('#modal.active, .modal-overlay.active, .np-overlay, #norva-region-prompt, .norva-modal-overlay, .trailer-lightbox');
         return modals[modals.length - 1] || null;
     }
 
@@ -205,6 +209,12 @@
     function closeTopModal() {
         const modal = openModal();
         if (!modal) return false;
+        // The trailer lightbox dismisses via its own ✕ (removes the node + its key listener).
+        if (modal.classList.contains('trailer-lightbox')) {
+            const x = modal.querySelector('.trailer-lightbox-close');
+            if (x) { x.click(); } else { modal.remove(); }
+            return true;
+        }
         // NorvaModal dialogs (.norva-modal-overlay) are promise-based: their buttons are
         // wired with addEventListener and the dialog dismisses by REMOVING its node (there
         // is no `active` class to strip, and no `.onclick`). Click Cancel — else Confirm/OK
@@ -745,8 +755,12 @@
                 // Don't require isVisible here: the grid was hidden just before the panel
                 // opened, so the card is momentarily invisible. Visibility is re-checked
                 // at restore time (below), once the grid is shown again.
+                // Fiches open from grid cards (.movie-card/.series-card) AND rails / search /
+                // "More like this" / continue cards (.dashboard-card/.continue-card/
+                // .watch-recommended-card). Capture all of them, else closing a fiche opened
+                // from a rail can't return the ring to its origin card.
                 detailOriginCard = (lastFocusedCard &&
-                    lastFocusedCard.matches?.('.movie-card, .series-card') &&
+                    lastFocusedCard.matches?.('.movie-card, .series-card, .dashboard-card, .continue-card, .watch-recommended-card') &&
                     document.contains(lastFocusedCard)) ? lastFocusedCard : null;
                 setTimeout(() => {
                     if (!open.classList.contains('hidden')) anchorDetailFocus(open);

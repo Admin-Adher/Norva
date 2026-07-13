@@ -1279,13 +1279,23 @@ const MediaUtils = (() => {
                     title="${escapeHtml(title || 'Trailer')}"
                     allow="autoplay; encrypted-media; fullscreen" allowfullscreen></iframe>
             </div>`;
-        const close = () => ov.remove();
+        // Mutual refs: close() removes the key listener (fixes the leak where closing via
+        // ✕/backdrop previously left the Escape handler attached forever); onKey also
+        // handles the TV Back key.
+        function close() { document.removeEventListener('keydown', onKey); ov.remove(); }
+        function onKey(e) { if (e.key === 'Escape' || e.key === 'GoBack' || e.key === 'BrowserBack') { e.preventDefault(); close(); } }
         ov.addEventListener('click', (e) => { if (e.target === ov) close(); });
         ov.querySelector('.trailer-lightbox-close').addEventListener('click', close);
-        document.addEventListener('keydown', function esc(e) {
-            if (e.key === 'Escape') { close(); document.removeEventListener('keydown', esc); }
-        });
+        document.addEventListener('keydown', onKey);
         document.body.appendChild(ov);
+        // Android TV: land the D-pad on the close button so the lightbox is dismissible by
+        // remote (tvNavigation now scopes navigation to .trailer-lightbox and closes it on
+        // Back — see openModal/closeTopModal there).
+        if (document.documentElement.classList.contains('tv-mode')) {
+            const closeBtn = ov.querySelector('.trailer-lightbox-close');
+            if (closeBtn && !closeBtn.hasAttribute('tabindex')) closeBtn.setAttribute('tabindex', '-1');
+            setTimeout(() => { try { closeBtn?.focus(); } catch (_) { /* noop */ } }, 40);
+        }
     }
 
     /**
