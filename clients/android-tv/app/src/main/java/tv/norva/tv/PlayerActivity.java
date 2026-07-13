@@ -1338,8 +1338,10 @@ public class PlayerActivity extends Activity {
         }
 
         if (code == KeyEvent.KEYCODE_BACK) {
+            // One intermediate level only: an open options bar swallows the first
+            // BACK. Otherwise BACK leaves immediately — even with the OSD showing,
+            // which auto-hides on its own timer anyway (no more double/triple BACK).
             if (secondBarVisible) { closeSecondBar(); return true; }
-            if (controlsVisible) { hideOverlayNow(); return true; }
             finish();
             return true;
         }
