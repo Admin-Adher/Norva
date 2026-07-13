@@ -64,6 +64,22 @@
         return modals[modals.length - 1] || null;
     }
 
+    // Movies on Android TV keeps #movie-details permanently docked beside the
+    // catalogue. It is a navigation region, not a modal/focus trap. The Movies
+    // controller sets the marker while assembling the TV-only split layout.
+    function isTvMoviesSplitPanel(panel) {
+        const page = panel?.closest?.('#page-movies');
+        return Boolean(
+            panel?.id === 'movie-details' &&
+            panel.dataset.tvSplitPreview === 'true' &&
+            page?.classList.contains('tv-movies-layout-ready')
+        );
+    }
+
+    function lastVisible(selector) {
+        return [...document.querySelectorAll(selector)].reverse().find(isVisible) || null;
+    }
+
     // A transient popover or detail view confines D-pad navigation to itself, the
     // same way an open modal does — so arrows can't leak to the page behind it.
     // Priority: a real modal, then an open category multi-select panel, then an
@@ -71,10 +87,14 @@
     // These panels aren't modals (they toggle .hidden, not .active), so openModal()
     // alone wouldn't trap them — hence a dedicated scope resolver.
     function navScope() {
-        return openModal()
-            || document.querySelector('.multi-select-panel:not(.hidden)')
-            || document.querySelector('#movie-details:not(.hidden), #series-details:not(.hidden)')
-            || document;
+        const modal = openModal();
+        if (modal) return modal;
+
+        const multiSelect = lastVisible('.multi-select-panel:not(.hidden)');
+        if (multiSelect) return multiSelect;
+
+        const details = lastVisible('#movie-details:not(.hidden), #series-details:not(.hidden)');
+        return details && !isTvMoviesSplitPanel(details) ? details : document;
     }
 
     // Single layout pass: measure each candidate's rect ONCE and keep it alongside
@@ -238,15 +258,15 @@
      * button). Lets BACK/Escape unwind these the way it already unwinds modals.
      */
     function closeTransient() {
-        const panel = document.querySelector('.multi-select-panel:not(.hidden)');
+        const panel = lastVisible('.multi-select-panel:not(.hidden)');
         if (panel) {
             panel.classList.add('hidden');
             const btn = panel.closest('.multi-select')?.querySelector('.multi-select-btn');
             if (btn) focusElement(btn);
             return true;
         }
-        const details = document.querySelector('#movie-details:not(.hidden), #series-details:not(.hidden)');
-        if (details) {
+        const details = lastVisible('#movie-details:not(.hidden), #series-details:not(.hidden)');
+        if (details && !isTvMoviesSplitPanel(details)) {
             const back = details.querySelector('.movie-back-btn, .series-back-btn');
             if (back) { back.click(); return true; }
         }
@@ -256,6 +276,14 @@
     function centerOf(el) {
         const r = el.getBoundingClientRect();
         return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    }
+
+    function hasMeaningfulVerticalOverlap(a, b, ratio = 0.25) {
+        if (!a || !b) return false;
+        const ar = a.getBoundingClientRect();
+        const br = b.getBoundingClientRect();
+        const overlap = Math.max(0, Math.min(ar.bottom, br.bottom) - Math.max(ar.top, br.top));
+        return overlap >= Math.min(ar.height, br.height) * ratio;
     }
 
     /**
@@ -435,6 +463,23 @@
             const rpPop = focused.closest?.('[data-region-picker]')?.querySelector('[data-region-pop]');
             if (rpPop && !rpPop.hidden) return;
 
+            // At the beginning of the Movies search field, Left leaves the page
+            // for the rail instead of becoming an empty caret move.
+            if (focused.id === 'movies-search' && e.key === 'ArrowLeft' &&
+                activePage()?.id === 'page-movies' &&
+                (focused.selectionStart ?? 0) === 0 && (focused.selectionEnd ?? 0) === 0) {
+                const active = document.querySelector('.navbar .nav-link.active');
+                const railTarget = (active && isVisible(active))
+                    ? active
+                    : [...document.querySelectorAll('.navbar .nav-link')].find(isVisible);
+                if (railTarget) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    focusElement(railTarget);
+                    return;
+                }
+            }
+
             // Only ←/→ (caret) and Enter stay with the input; ↑ leaves via spatial nav.
             // (On phone the input keeps ↑/↓ for its own highlight nav — but this module
             // never runs there.)
@@ -563,18 +608,26 @@
         // findNext strand focus in the tall scrolling panel or jump to the rail. A
         // control that HAS a panel neighbour to its left (e.g. Favorite ← Play) falls
         // through to the generic handler, which steps to that neighbour.
-        if (e.key === 'ArrowLeft' && focused.closest('#movie-details')) {
+        if (e.key === 'ArrowLeft' &&
+            isTvMoviesSplitPanel(focused.closest('#movie-details'))) {
             const panel = focused.closest('#movie-details');
             const leftInPanel = findNext(focused, 'ArrowLeft');
-            if (!(leftInPanel && panel.contains(leftInPanel))) {
-                const grid = document.querySelector('#page-movies .movies-grid, #page-series .series-grid');
+            const realPanelNeighbour = leftInPanel && panel.contains(leftInPanel) &&
+                hasMeaningfulVerticalOverlap(focused, leftInPanel);
+            if (!realPanelNeighbour) {
+                const grid = panel.closest('#page-movies')?.querySelector('.movies-grid');
                 if (grid) {
                     let target = grid.querySelector('.movie-card.tv-preview-active, .series-card.tv-preview-active');
                     if (!target || !isVisible(target)) {
-                        const y = centerOf(focused).y;
+                        const origin = centerOf(focused);
+                        const y = origin.y;
                         const cards = [...grid.querySelectorAll('.movie-card, .series-card')].filter(isVisible);
                         target = cards.length
-                            ? cards.reduce((b, c) => { const d = Math.abs(centerOf(c).y - y); return d < b.d ? { el: c, d } : b; }, { el: cards[0], d: Infinity }).el
+                            ? cards.reduce((b, c) => {
+                                const cc = centerOf(c);
+                                const d = Math.abs(cc.y - y) * 3 + Math.abs(cc.x - origin.x);
+                                return d < b.d ? { el: c, d } : b;
+                            }, { el: cards[0], d: Infinity }).el
                             : null;
                     }
                     if (target) { focusElement(target); return; }
@@ -590,13 +643,14 @@
         const TILE = '.movie-card, .series-card, .continue-card';
         if (e.key === 'ArrowLeft' && focused.matches?.(TILE)) {
             const leftCard = findNext(focused, 'ArrowLeft');
-            const rowH = focused.getBoundingClientRect().height || 200;
             const sameRow = leftCard && leftCard.matches?.(TILE) &&
-                Math.abs(centerOf(leftCard).y - centerOf(focused).y) < rowH * 0.6;
+                hasMeaningfulVerticalOverlap(focused, leftCard, 0.5);
             if (!sameRow) {
-                const rail = document.querySelector('.navbar .nav-link.active')
-                    || [...document.querySelectorAll('.navbar .nav-link')].find(isVisible);
-                if (rail && isVisible(rail)) { focusElement(rail); return; }
+                const active = document.querySelector('.navbar .nav-link.active');
+                const rail = (active && isVisible(active))
+                    ? active
+                    : [...document.querySelectorAll('.navbar .nav-link')].find(isVisible);
+                if (rail) { focusElement(rail); return; }
             }
         }
 
@@ -742,7 +796,8 @@
             focusElement(primary);
             return;
         }
-        const fallback = panel.querySelector('button:not([disabled]), a[href], [tabindex]');
+        const fallback = [...panel.querySelectorAll('button:not([disabled]), a[href], [tabindex]')]
+            .find(isVisible) || null;
         if (fallback) focusElement(fallback);
         if (primary && primary.disabled) {
             const enableObs = new MutationObserver(() => {
@@ -772,7 +827,11 @@
     ].filter(Boolean);
     if (detailPanels.length) {
         const detailObserver = new MutationObserver(() => {
-            const open = detailPanels.find((p) => !p.classList.contains('hidden')) || null;
+            // The docked Movies TV preview is permanently visible and must never
+            // trigger fullscreen-fiche focus anchoring on each preview render.
+            const open = detailPanels.find((p) =>
+                !p.classList.contains('hidden') && isVisible(p) &&
+                !isTvMoviesSplitPanel(p)) || null;
             if (open && open !== lastOpenDetail) {
                 lastOpenDetail = open;
                 // Capture the launching card NOW — before the 60ms anchor moves focus
@@ -789,7 +848,10 @@
                     lastFocusedCard.matches?.('.movie-card, .series-card, .dashboard-card, .continue-card, .watch-recommended-card') &&
                     document.contains(lastFocusedCard)) ? lastFocusedCard : null;
                 setTimeout(() => {
-                    if (!open.classList.contains('hidden')) anchorDetailFocus(open);
+                    if (!open.classList.contains('hidden') && isVisible(open) &&
+                        !isTvMoviesSplitPanel(open)) {
+                        anchorDetailFocus(open);
+                    }
                 }, 60);
             } else if (!open && lastOpenDetail) {
                 lastOpenDetail = null;
