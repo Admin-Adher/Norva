@@ -226,6 +226,10 @@
         // beyond this window), so real playback is never blocked. This is the one
         // choke point for ALL native playback (channels, movies, episodes).
         let lastNativePlayAt = 0;
+        // A legitimate re-launch that must NOT be swallowed by the double-tap guard —
+        // notably a variant switch, which relaunches right after the player hands control
+        // back. Clears the guard so the very next nativePlay always fires.
+        window.__norvaResetPlayThrottle = () => { lastNativePlayAt = 0; };
         const nativePlay = (streamUrl, title, meta, resumeSeconds, fallbackUrl, extras) => {
             const nowTs = Date.now();
             if (nowTs - lastNativePlayAt < 1500) return;
@@ -349,13 +353,27 @@
             window.__norvaPlayVariant = function (streamId, sourceId) {
                 try {
                     const cl = window.app?.channelList;
-                    if (!cl || streamId == null) return;
+                    if (!cl || streamId == null) { console.warn('[Native] variant: no channelList'); return; }
                     const sid = String(streamId);
+                    const src = sourceId != null ? String(sourceId) : '';
                     const ch = (cl.channels || []).find(c =>
                         String(c.streamId != null ? c.streamId : c.stream_id) === sid &&
-                        (!sourceId || String(c.sourceId) === String(sourceId)));
-                    if (ch) cl.selectChannel({ channelId: ch.id, sourceId: String(ch.sourceId), streamId: sid });
-                } catch (e) { console.warn('[Native] play variant failed:', e?.message || e); }
+                        (!src || String(c.sourceId) === src));
+                    if (!ch) { console.warn('[Native] variant channel not found', sid, src); return; }
+                    // The native player closed to hand control back here; clear the double-tap
+                    // guard so the relaunch isn't swallowed, then drive the SAME path a normal
+                    // guide tap uses (resolves a fresh stream + relaunches native playback).
+                    // A tick lets the WebView finish resuming before we re-launch an Activity.
+                    if (window.__norvaResetPlayThrottle) window.__norvaResetPlayThrottle();
+                    setTimeout(() => {
+                        try {
+                            if (window.__norvaResetPlayThrottle) window.__norvaResetPlayThrottle();
+                            const lg = window.app?.liveGuideFusion;
+                            if (lg && typeof lg.playChannel === 'function') lg.playChannel(ch);
+                            else cl.selectChannel({ channelId: ch.id, sourceId: String(ch.sourceId), streamId: sid });
+                        } catch (e) { console.warn('[Native] variant re-select failed:', e && e.message); }
+                    }, 150);
+                } catch (e) { console.warn('[Native] play variant failed:', e && e.message); }
             };
         }
 
