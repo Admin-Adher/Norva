@@ -60,12 +60,25 @@
         return modals[modals.length - 1] || null;
     }
 
+    // A transient popover or detail view confines D-pad navigation to itself, the
+    // same way an open modal does — so arrows can't leak to the page behind it.
+    // Priority: a real modal, then an open category multi-select panel, then an
+    // open Movies/Series detail panel (its actions/seasons/episodes live inside it).
+    // These panels aren't modals (they toggle .hidden, not .active), so openModal()
+    // alone wouldn't trap them — hence a dedicated scope resolver.
+    function navScope() {
+        return openModal()
+            || document.querySelector('.multi-select-panel:not(.hidden)')
+            || document.querySelector('#movie-details:not(.hidden), #series-details:not(.hidden)')
+            || document;
+    }
+
     // Single layout pass: measure each candidate's rect ONCE and keep it alongside
     // the element, so findNext can score without a second getBoundingClientRect().
     // rects[i] corresponds to els[i]. Filtering/order/400-cap are identical to the
     // old getCandidates (the inlined offset + rect checks equal isVisible(el)).
     function getCandidatesWithRects() {
-        const scope = openModal() || document;
+        const scope = navScope();
         const all = scope.querySelectorAll(INTERACTIVE_SELECTOR);
         const els = [];
         const rects = [];
@@ -76,6 +89,14 @@
             // already plays) and, being a right-edge child, it out-scores the next
             // column on a Right press — drop it so the row is the sole per-channel stop.
             if (el.classList.contains('live-guide-play')) continue;
+            // Movies/Series cards pin an always-visible ♥ favourite button and a
+            // "N versions" badge inside the poster (opacity:1, so not caught by the
+            // invisibility test below). On TV both hijack the D-pad — Up/Down/Right
+            // off a card lands on the card's own corner instead of the neighbouring
+            // card. Favourite + version selection live in the detail panel, so these
+            // are never D-pad stops. (The detail-panel favourite is .movie-secondary-
+            // action / .series-secondary-action — a different class — and stays.)
+            if (el.classList.contains('favorite-btn') || el.classList.contains('version-badge')) continue;
             if (!el.offsetParent && el.offsetWidth === 0 && el.offsetHeight === 0) continue;
             // Skip elements painted invisible (opacity:0 / visibility:hidden) — e.g. the
             // per-row favourite heart and the search clear-×. isVisibleRect only tests
@@ -129,6 +150,14 @@
                 || [...page.querySelectorAll('#source-select, #toggle-groups, #live-hide-broken-btn')]
                     .find((el) => isVisible(el) && !el.disabled)
                 || null;
+        }
+        // Movies/Series: land on the first content card (Netflix-style), not the source
+        // <select> that happens to be first in DOM — the controls sit one ArrowUp away.
+        // Guarded to a VISIBLE card so an open detail panel (grid hidden) or empty grid
+        // falls back to the caller's default.
+        if (page && (page.id === 'page-movies' || page.id === 'page-series')) {
+            return [...page.querySelectorAll('.movies-grid .movie-card, .series-grid .series-card')]
+                .find(isVisible) || null;
         }
         return null;
     }
@@ -191,6 +220,27 @@
         }
         modal.classList.remove('active');
         return true;
+    }
+
+    /**
+     * Close the topmost open transient that isn't a modal: a category multi-select
+     * panel, else a Movies/Series detail view (returns to its grid via the back
+     * button). Lets BACK/Escape unwind these the way it already unwinds modals.
+     */
+    function closeTransient() {
+        const panel = document.querySelector('.multi-select-panel:not(.hidden)');
+        if (panel) {
+            panel.classList.add('hidden');
+            const btn = panel.closest('.multi-select')?.querySelector('.multi-select-btn');
+            if (btn) focusElement(btn);
+            return true;
+        }
+        const details = document.querySelector('#movie-details:not(.hidden), #series-details:not(.hidden)');
+        if (details) {
+            const back = details.querySelector('.movie-back-btn, .series-back-btn');
+            if (back) { back.click(); return true; }
+        }
+        return false;
     }
 
     function centerOf(el) {
@@ -331,7 +381,7 @@
     document.addEventListener('keydown', (e) => {
         // Escape (some remotes / keyboards): close an open modal first
         if (e.key === 'Escape' || e.key === 'GoBack' || e.key === 'BrowserBack') {
-            if (closeTopModal()) {
+            if (closeTopModal() || closeTransient()) {
                 e.preventDefault();
                 e.stopPropagation();
                 return;
@@ -419,7 +469,7 @@
             const anchored = lastFocusedPageId === page?.id ? nearestToLastRect(pageCandidates) : null;
             const first = anchored || (e.key === 'ArrowUp'
                 ? pageCandidates[pageCandidates.length - 1]
-                : firstNonTextCandidate(pageCandidates));
+                : (pageDefaultTarget(page) || firstNonTextCandidate(pageCandidates)));
             focusElement(first || firstNonTextCandidate(getCandidates()) || null);
             return;
         }
@@ -484,6 +534,24 @@
                 }
                 if (!target) target = sb.querySelector('#channel-search');
                 if (target) { focusElement(target); return; }
+            }
+        }
+
+        // Movies/Series grid + Continue rail (TV): ArrowLeft from a LEFT-EDGE tile (no
+        // tile to its left on the same row) opens the rail — otherwise findNext drifts
+        // diagonally up to a filter control (the first filter <select> sits above-and-
+        // left of the first card). A tile that DOES have a left neighbour on its row
+        // falls through to the generic handler below, which steps to that neighbour.
+        const TILE = '.movie-card, .series-card, .continue-card';
+        if (e.key === 'ArrowLeft' && focused.matches?.(TILE)) {
+            const leftCard = findNext(focused, 'ArrowLeft');
+            const rowH = focused.getBoundingClientRect().height || 200;
+            const sameRow = leftCard && leftCard.matches?.(TILE) &&
+                Math.abs(centerOf(leftCard).y - centerOf(focused).y) < rowH * 0.6;
+            if (!sameRow) {
+                const rail = document.querySelector('.navbar .nav-link.active')
+                    || [...document.querySelectorAll('.navbar .nav-link')].find(isVisible);
+                if (rail && isVisible(rail)) { focusElement(rail); return; }
             }
         }
 
@@ -608,6 +676,80 @@
         attributes: true, subtree: true, attributeFilter: ['class']
     });
 
+    // Land the ring on a just-opened fiche's primary action (Play/Resume). On the
+    // Series fiche, Play is rendered disabled ('Loading…') while seriesInfo fetches, so
+    // it's not focusable at open time — focus the first available control now, then hand
+    // the ring to Play the instant it enables (unless the user already moved it).
+    function anchorDetailFocus(panel) {
+        const primary = panel.querySelector('#movie-primary-action, #series-primary-action');
+        if (primary && !primary.disabled && isVisible(primary)) {
+            focusElement(primary);
+            return;
+        }
+        const fallback = panel.querySelector('button:not([disabled]), a[href], [tabindex]');
+        if (fallback) focusElement(fallback);
+        if (primary && primary.disabled) {
+            const enableObs = new MutationObserver(() => {
+                if (primary.disabled) return;
+                enableObs.disconnect();
+                if (panel.classList.contains('hidden') || !isVisible(primary)) return;
+                // Only claim focus if the user hasn't already navigated away from the
+                // stop-gap target — never yank the ring out from under them.
+                if (document.activeElement === fallback || document.activeElement === document.body) {
+                    focusElement(primary);
+                }
+            });
+            enableObs.observe(primary, { attributes: true, attributeFilter: ['disabled'] });
+            setTimeout(() => enableObs.disconnect(), 6000);
+        }
+    }
+
+    // Movies/Series detail panels are shown by the page toggling .hidden — not a modal,
+    // so modalObserver above won't fire. When one opens, anchor the ring on its primary
+    // action so the remote is immediately actionable instead of stranded on <body> (the
+    // launching card is now inside the hidden grid, so focus would otherwise be lost).
+    let lastOpenDetail = null;
+    let detailOriginCard = null;   // the grid card that opened the current fiche
+    const detailPanels = [
+        document.getElementById('movie-details'),
+        document.getElementById('series-details'),
+    ].filter(Boolean);
+    if (detailPanels.length) {
+        const detailObserver = new MutationObserver(() => {
+            const open = detailPanels.find((p) => !p.classList.contains('hidden')) || null;
+            if (open && open !== lastOpenDetail) {
+                lastOpenDetail = open;
+                // Capture the launching card NOW — before the 60ms anchor moves focus
+                // into the panel and focusin overwrites lastFocusedCard with a fiche
+                // button — so closing can return the ring to the user's exact place.
+                // Don't require isVisible here: the grid was hidden just before the panel
+                // opened, so the card is momentarily invisible. Visibility is re-checked
+                // at restore time (below), once the grid is shown again.
+                detailOriginCard = (lastFocusedCard &&
+                    lastFocusedCard.matches?.('.movie-card, .series-card') &&
+                    document.contains(lastFocusedCard)) ? lastFocusedCard : null;
+                setTimeout(() => {
+                    if (!open.classList.contains('hidden')) anchorDetailFocus(open);
+                }, 60);
+            } else if (!open && lastOpenDetail) {
+                lastOpenDetail = null;
+                // Fiche closed → return the ring to the card that opened it (Back
+                // leaves focus on the now-hidden back button, so no ring otherwise).
+                const origin = detailOriginCard;
+                detailOriginCard = null;
+                if (origin) {
+                    setTimeout(() => {
+                        if (!currentFocus() && document.contains(origin) && isVisible(origin)) {
+                            focusElement(origin);
+                        }
+                    }, 60);
+                }
+            }
+        });
+        detailPanels.forEach((p) =>
+            detailObserver.observe(p, { attributes: true, attributeFilter: ['class'] }));
+    }
+
     // ---- Initial focus & focus restoration -------------------------------
     // Netflix always lands focus somewhere visible. Two mechanisms:
     //  1. When the active page changes (or first paints its cards), focus its
@@ -699,12 +841,9 @@
     window.__norvaTV.handleBack = function () {
         if (closeTopModal()) return 'modal';
 
-        // Series details panel (seasons/episodes) open → go back to the grid
-        const details = document.getElementById('series-details');
-        if (details && !details.classList.contains('hidden')) {
-            document.querySelector('.series-back-btn')?.click();
-            return 'nav';
-        }
+        // A category panel or a Movies/Series detail view (seasons/episodes/actions)
+        // open → close it / go back to the grid instead of leaving the page.
+        if (closeTransient()) return 'nav';
 
         // An open captions/audio/overflow menu in the web watch page
         const openMenu = document.querySelector(

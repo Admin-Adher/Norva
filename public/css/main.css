@@ -11164,6 +11164,40 @@ html.tv-mode #page-series .filter-bar .filter-toggle {
   max-width: 220px;
 }
 
+/* TV: the ≤1024px rules also squash the CONTROLS row (source · categories · search ·
+   favourites) into a 1fr/1fr/44px grid — the search box collapses into the 44px slot
+   and Favourites wraps below. Keep it a simple inline flex row so every control is
+   full-size and D-pad-walkable, mirroring the filter-bar override above. */
+html.tv-mode #page-movies .movies-controls,
+html.tv-mode #page-series .series-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-sm);
+  width: 100%;
+}
+html.tv-mode #page-movies .movies-controls .source-select,
+html.tv-mode #page-series .series-controls .source-select,
+html.tv-mode #page-movies .movies-controls .multi-select,
+html.tv-mode #page-series .series-controls .multi-select,
+html.tv-mode #page-movies .movies-controls .multi-select-btn,
+html.tv-mode #page-series .series-controls .multi-select-btn {
+  width: auto;
+  min-width: 120px;
+  max-width: 260px;
+  height: 38px;
+}
+html.tv-mode #page-movies .movies-controls .search-wrapper,
+html.tv-mode #page-series .series-controls .search-wrapper {
+  flex: 1 1 240px;
+  min-width: 200px;
+  max-width: none;
+}
+html.tv-mode #page-movies .movies-controls .search-wrapper .search-input,
+html.tv-mode #page-series .series-controls .search-wrapper .search-input {
+  width: 100%;
+}
+
 @media (max-width: 480px) {
   .dashboard-content {
     padding: 16px 12px 20px;
