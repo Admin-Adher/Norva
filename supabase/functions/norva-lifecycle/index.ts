@@ -191,17 +191,34 @@ async function runDunning(db: SupabaseClient): Promise<number> {
   let sent = 0;
   for (const row of (data ?? []) as (Proj & { dunning_last_at: string | null })[]) {
     const stage = (row.dunning_stage ?? 0) + 1;
+    const nowIso = new Date().toISOString();
+    // CAS-claim dunning_last_at (its throttle marker) BEFORE sending, so two overlapping
+    // runs can't both send this stage: only the run whose observed last_at still matches
+    // flips it; the loser matches 0 rows and skips. Guarded on status past_due too.
+    let claim = db.from("cloud_entitlement_projection")
+      .update({ dunning_last_at: nowIso })
+      .eq("user_id", row.user_id).eq("status", "past_due");
+    claim = row.dunning_last_at == null
+      ? claim.is("dunning_last_at", null)
+      : claim.eq("dunning_last_at", row.dunning_last_at);
+    const { data: claimed } = await claim.select("user_id");
+    if (!Array.isArray(claimed) || !claimed.length) continue;   // another run claimed it (or user recovered)
     try {
       if (await emailUser(db, row.user_id, (fn) => renderPaymentFailed(fn, stage))) {
-        // Guard the stamp on status still past_due — don't advance a user who paid mid-run.
         await db.from("cloud_entitlement_projection")
-          .update({ dunning_stage: stage, dunning_last_at: new Date().toISOString() })
+          .update({ dunning_stage: stage })
           .eq("user_id", row.user_id).eq("status", "past_due");
         await pushUser(db, row.user_id, "Payment issue on your Norva plan",
           "We couldn't process your payment — update your card to keep watching.", "payment_failed");
         sent++;
+      } else {
+        // send failed → roll the throttle marker back so a later run retries this stage
+        await db.from("cloud_entitlement_projection").update({ dunning_last_at: row.dunning_last_at }).eq("user_id", row.user_id);
       }
-    } catch (e) { console.error("[norva-lifecycle] dunning failed", row.user_id, e instanceof Error ? e.message : e); }
+    } catch (e) {
+      try { await db.from("cloud_entitlement_projection").update({ dunning_last_at: row.dunning_last_at }).eq("user_id", row.user_id); } catch (_) { /* noop */ }
+      console.error("[norva-lifecycle] dunning failed", row.user_id, e instanceof Error ? e.message : e);
+    }
   }
   return sent;
 }
