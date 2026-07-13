@@ -2,7 +2,7 @@
 
 **Statut : commits livrés sur `main` (front auto-Cloudflare ; edge redéployé sur Hetzner). Le mode `limits` (#10) a été REVERTÉ le jour même — voir §10.**
 
-Suite du log `2026-07-13-session-log.md` (nav Live + synchro cloud). Cette session couvre : la nav D-pad des pages **Movies/Séries**, la refonte **plein écran des profils** sur TV, un **audit « pubs vs réel »** des abonnements, la bascule du **différenciateur de plan** (profils, plus flux), le **verrouillage des profils** au downgrade, et le **découpage du flag lifecycle** billing. ⚠️ Un 10ᵉ point (mode `limits`) a été ajouté **puis reverté** après avoir constaté que le paiement Revolut est déjà en prod (cf. §10).
+Suite du log `2026-07-13-session-log.md` (nav Live + synchro cloud). Cette session couvre : la nav D-pad des pages **Movies/Séries**, la refonte **plein écran des profils** sur TV, un **audit « pubs vs réel »** des abonnements, la bascule du **différenciateur de plan** (profils, plus flux), le **verrouillage des profils** au downgrade, et le **découpage du flag lifecycle** billing. ⚠️ Un 10ᵉ point (mode `limits`) a été ajouté **puis reverté** après avoir constaté que le paiement Revolut est déjà en prod (cf. §10). Enfin, un **diagnostic ops** (santé des 49 crons, complétude du catalogue, fix sous-titres IA) est consigné en §11 avec ses requêtes SQL réutilisables.
 
 | # | Sujet | Commit `main` | Fichiers clés |
 |---|---|---|---|
@@ -16,6 +16,7 @@ Suite du log `2026-07-13-session-log.md` (nav Live + synchro cloud). Cette sessi
 | 8 | Lifecycle : flags par-flux + correctifs des bloqueurs | `57fd2f3` | `norva-lifecycle/index.ts`, `lifecycle-email.ts` |
 | 9 | Lifecycle : claim atomique dunning + câblage des flags edge | `c90afbc` | `norva-lifecycle/index.ts`, `docker-compose.supabase.yml`, `.env.hetzner.example` |
 | 10 | ~~Mode entitlements `limits`~~ **REVERTÉ** (`72a541d`) — prémisse fausse, cf. §10 | `311a4e9` → `72a541d` | `entitlements.ts`, `norva-cloud/index.ts`, `norva-playback/index.ts`, `.env.hetzner.example` |
+| 11 | Fix sous-titres IA : jamais de traduction vers une cible « non-langue » (und/mul/zxx/mis) | `23cc117` | `norva-playback/index.ts` |
 
 Méthode : 4 workflows multi-agents (nav Movies/Séries, fit profils TV, audit features, flag-readiness lifecycle), chacun avec vérification adverse ; harnais headless Playwright pour la nav + le fit + le verrouillage.
 
@@ -101,6 +102,26 @@ Revue adverse (agent) du diff lifecycle : aucun bloqueur — CAS, gating, provid
 - `.env.hetzner.example` : commentaire corrigé (2 modes ; **prod = `enforce`+`revenuecat`, Revolut live** ; `observe` = rollback d'urgence uniquement).
 
 **Leçon** : lire `BILLING-REVOLUT-MIGRATION.md` **avant** de toucher à `NORVA_ENTITLEMENTS_MODE`/`NORVA_BILLING_MODE`. L'état de prod est `enforce`+`revenuecat` — pas à « décider », déjà validé.
+
+## 11. Diagnostic ops — crons, complétude catalogue & fix sous-titres (`23cc117`)
+
+Revue de santé du serveur (box `norva-db`, pg_cron) + audit de l'avancement du catalogue.
+
+**Santé des crons** : **49 crons, tous actifs, 0 échec sur 48 h.** Les crons « lourds » (whisper/sous-titres/audio/reconcile) sont **gatés sur la nuit** (`0-5 * * *` / `1-4 * * *`) → à l'arrêt en journée **par design** (fix post-incident Live 458, §67 du log précédent), pas un blocage. Facturation OK : `norva-revolut-billing` (renouvellements horaires), `norva-trial-ending-3d/-1d` (rappels essai 9h), `norva-lifecycle` (15 min, flags OFF).
+
+**Complétude catalogue** (≈395 K titres browsables, `cloud_titles` par-utilisateur) :
+- **Matching TMDB : ~99,5 % traité** — 57 % `provider_verified`, 42 % `unmatched` (résidu IPTV non-matchable, **pas** un backlog), 0,5 % non traités.
+- **Année de sortie : 84 %** · **Revalidation / Whisper LID : quasi finis** (2,1 K / 1,2 K restants).
+- **Backlogs lents (nuit)** : **langues audio 37 %** (~251 K restants), **sous-titres sondés 44 %** (~220 K), **langue originale 43 %** (~72 K, cache global `catalog_titles`, bridé API TMDB). Ils avancent, 0 échec.
+
+**Sous-titres IA : fonctionnels** (57 jobs `ready`). Les 12 `failed` étaient **100 % côté fournisseur** (extraction du flux) : `401/400` auth panel, `4XX` super8k, fichiers tronqués/timeout, codec exotique. **4 permanents purgés** (`DELETE … WHERE status='failed' AND error LIKE …`), 8 transitoires laissés (auto-retry après cooldown 24 h). Un job `failed` a un **cooldown 24 h** puis se ré-essaie à la demande.
+
+**Fix (`23cc117`)** : un des 12 était un `translate gateway 422` — la validation cible `/^[a-z]{2,3}$/` laissait passer les codes ISO « non-langue » (`und`/`mul`/`zxx`/`mis`) → job de traduction voué au 422. Garde-fou `NON_TRANSLATABLE_LANGS` sur **les 2 voies d'enfilage** (`translateEnqueue` direct → renvoie `unsupported-target` ; boucle callback `resolvePendingTranslations` → `failPending`). Vraies langues intactes, `deno check` propre, déployé.
+
+### Requêtes SQL réutilisables (box : `docker exec -i norva-db psql -U supabase_admin -d postgres`)
+- **État des crons** : `SELECT jobname, schedule, active, <dernière exéc via cron.job_run_details> …` (3 vues : inventaire+dernier run, santé 24 h, échecs 48 h — cf. historique de session).
+- **Complétude catalogue** : `count(*) FILTER (WHERE …)` sur `cloud_titles WHERE variant_count>0` — prédicats « restant » par pipeline : search-match `match_status='unmatched'` · année `release_year IS NULL AND provider_tmdb_id IS NOT NULL` · audio `audio_languages='{}'` · whisper `audio_tracks @> '[{"lang":null}]'` · sous-titres `subtitle_probed_at IS NULL` ; origlang sur `catalog_titles` (`original_language IS NULL`).
+- **Sous-titres failed** : `SELECT provider_key, kind, lang, error, updated_at, (updated_at < now()-interval '24h') AS retriable FROM catalog_generated_subtitles WHERE status='failed'`.
 
 ---
 
