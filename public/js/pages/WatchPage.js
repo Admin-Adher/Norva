@@ -9173,29 +9173,40 @@ class WatchPage {
         this.saveResumeSnapshot({ position: progress });
 
         try {
-            const data = {
-                title: this.content.title || 'Unknown Title',
-                subtitle: this.content.subtitle || (this.content.type === 'movie' ? 'Movie' : 'Series'),
-                poster: this.content.poster,
-                sourceId: this.content.sourceId,
-                containerExtension: this.containerExtension,
-                durationHint: duration,
-                playbackPreferences: this.getPlaybackPreferences(),
-                // Series-specific fields for next episode functionality
-                seriesId: this.content.seriesId || null,
-                currentSeason: this.currentSeason || null,
-                currentEpisode: this.currentEpisode || null,
-                nextEpisode: this.content.type === 'series' ? this.sanitizeNextEpisodeForHistory(this.getNextEpisode()) : null
-            };
-
-            await window.API.request('POST', '/history', {
+            // Byte win: the 10s heartbeat only needs {progress,duration}. The server
+            // MERGES history rows (saveHistory: existing.data + incoming.data, item_name
+            // falls back to existing), so title/poster/prefs/next-episode persist from an
+            // earlier save. Send the rich `data` blob only on the FIRST save of a
+            // title/episode and on force saves (pause/seek/close/episode change) — steady
+            // ticks drop from ~0.5-2 KB to ~100 bytes.
+            const metaKey = `${this.content.id}|${this.currentSeason || ''}|${this.currentEpisode || ''}`;
+            const sendMeta = options.force || this._historyMetaSentFor !== metaKey;
+            const payload = {
                 id: this.content.id,
                 type: this.content.type === 'movie' ? 'movie' : 'episode',
                 sourceId: this.content.sourceId,
                 progress,
-                duration,
-                data
-            });
+                duration
+            };
+            if (sendMeta) {
+                payload.data = {
+                    title: this.content.title || 'Unknown Title',
+                    subtitle: this.content.subtitle || (this.content.type === 'movie' ? 'Movie' : 'Series'),
+                    poster: this.content.poster,
+                    sourceId: this.content.sourceId,
+                    containerExtension: this.containerExtension,
+                    durationHint: duration,
+                    playbackPreferences: this.getPlaybackPreferences(),
+                    // Series-specific fields for next episode functionality
+                    seriesId: this.content.seriesId || null,
+                    currentSeason: this.currentSeason || null,
+                    currentEpisode: this.currentEpisode || null,
+                    nextEpisode: this.content.type === 'series' ? this.sanitizeNextEpisodeForHistory(this.getNextEpisode()) : null
+                };
+            }
+
+            await window.API.request('POST', '/history', payload);
+            if (sendMeta) this._historyMetaSentFor = metaKey;
             // Continue Watching just changed: bust Home's warm-DOM TTL so returning from
             // playback within 60s shows the fresh position, not the stale card.
             try { const hp = window.app?.pages?.home; if (hp) hp.lastLoadedAt = 0; } catch (_) { /* best-effort */ }
