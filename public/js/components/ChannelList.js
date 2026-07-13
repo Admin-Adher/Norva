@@ -1359,6 +1359,42 @@ class ChannelList {
             localStorage.setItem('norva-recent-channels', JSON.stringify(recents));
             this._recentKeys?.add(`${channel.sourceId}:${channel.id}`);
         } catch (e) { /* storage unavailable */ }
+        this._queueRecentCloudWrite(channel);
+    }
+
+    // Mirror the just-watched channel to the cloud (cloud_watch_history, item_type=live)
+    // so "recent channels" follow the account across devices. Debounced so surfing
+    // through channels only records the one you settle on, not every channel passed.
+    _queueRecentCloudWrite(channel) {
+        if (!window.API?.request || !(channel?.id) || channel.sourceId == null) return;
+        clearTimeout(this._recentCloudTimer);
+        this._recentCloudPending = channel;
+        this._recentCloudTimer = setTimeout(() => {
+            const ch = this._recentCloudPending;
+            this._recentCloudPending = null;
+            if (!ch) return;
+            // type 'channel' → item_type 'live' server-side; progress/duration 0 (not a resume).
+            window.API.request('POST', '/history', {
+                id: String(ch.id), type: 'channel', sourceId: ch.sourceId, name: ch.name || '',
+                progress: 0, duration: 0
+            }).catch(() => { /* best-effort; localStorage is the offline mirror */ });
+        }, 2500);
+    }
+
+    // On load, pull the account's cloud recent channels into the localStorage mirror so a
+    // fresh device shows the recents watched elsewhere. Best-effort; never blocks the UI.
+    async syncRecentChannelsFromCloud() {
+        if (!window.API?.request) return;
+        try {
+            const rows = await window.API.request('GET', '/history?itemType=channel&limit=8');
+            if (!Array.isArray(rows) || !rows.length) return;
+            const cloud = rows
+                .map(r => ({ id: String(r.itemId ?? r.item_id ?? ''), sourceId: r.sourceId ?? r.source_id, name: r.itemName ?? r.item_name ?? '' }))
+                .filter(r => r.id && r.sourceId != null);
+            if (!cloud.length) return;
+            localStorage.setItem('norva-recent-channels', JSON.stringify(cloud.slice(0, 8)));
+            this._recentKeys = new Set(cloud.map(r => `${r.sourceId}:${r.id}`));
+        } catch (_) { /* offline / not linked — keep localStorage */ }
     }
 
     // === Mode transitions ===
@@ -2031,6 +2067,9 @@ class ChannelList {
         } finally {
             this.isLoading = false;
             this.hasLoadedOnce = true;
+            // Once per session: pull cloud recent channels into the local mirror so a
+            // fresh device shows recents watched elsewhere. Fire-and-forget.
+            if (!this._recentsSyncedOnce) { this._recentsSyncedOnce = true; this.syncRecentChannelsFromCloud(); }
         }
     }
 

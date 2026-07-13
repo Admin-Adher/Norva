@@ -2530,16 +2530,23 @@ async function getHistoryItem(req: Request, url: URL, userId: string, db: Supaba
 async function listHistory(req: Request, url: URL, userId: string, db: SupabaseClient) {
   const profileId = await resolveProfileId(req, userId, db);
   const limit = boundedInt(url.searchParams.get("limit"), 100, 1, 500);
+  const itemType = stringOrNull(url.searchParams.get("itemType") ?? url.searchParams.get("item_type"));
   const sources = await listHistorySources(userId, db);
   if (!sources.length) return { history: [] };
   const readySourceIds = sources.map((s) => s.id);
 
-  const { data, error } = await db
+  let query = db
     .from("cloud_watch_history")
     .select("*")
     .eq("user_id", userId)
     .eq("profile_id", profileId)
-    .in("source_id", readySourceIds)
+    .in("source_id", readySourceIds);
+  // Cross-device "recent live channels" reuse this table with item_type='live'.
+  // A default history read (Continue Watching) must NOT surface those as resumable
+  // titles — so exclude 'live' unless it is explicitly requested (?itemType=live).
+  if (itemType) query = query.eq("item_type", itemType);
+  else query = query.neq("item_type", "live");
+  const { data, error } = await query
     .order("updated_at", { ascending: false })
     .limit(limit);
   if (error) throwDb(error, "Unable to list history");

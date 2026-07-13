@@ -1948,7 +1948,8 @@ const CloudAdapter = (() => {
         const hist = cloudSync('history');
         if (!hist) return method === 'GET' ? [] : { success: true };
         if (method === 'GET') {
-            const payload = await hist.list({ limit: query.get('limit') || 200 });
+            const itemType = query.get('itemType') ? cloudTypeFromLocal(query.get('itemType')) : '';
+            const payload = await hist.list({ limit: query.get('limit') || 200, ...(itemType ? { itemType } : {}) });
             return (payload.history || []).map(mapHistory);
         }
         if (method === 'POST') {
