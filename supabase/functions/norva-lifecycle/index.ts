@@ -31,9 +31,25 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? Deno.env.get("SUPABASE_SERVICE_KEY") ?? "";
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY") ?? "";
 const FROM = Deno.env.get("AUTH_EMAIL_FROM") ?? "Norva <noreply@norva.tv>";
-const BILLING_LIVE = (Deno.env.get("NORVA_LIFECYCLE_BILLING_LIVE") ?? "false").toLowerCase() === "true";
+const flag = (name: string) => (Deno.env.get(name) ?? "false").toLowerCase() === "true";
+// NORVA_LIFECYCLE_BILLING_LIVE is now a MASTER kill-switch: nothing billing-related
+// sends unless it is true AND the flow's own flag is true. This replaces the old
+// single flag that unleashed all five flows at once — so each can be enabled only
+// when it is actually ready (dunning provider-scoped, marketing consent + unsubscribe
+// in place, abandoned repointed off the retired Stancer table). Setting only the
+// master now does NOTHING, which is the safe default.
+const BILLING_LIVE = flag("NORVA_LIFECYCLE_BILLING_LIVE");
+const LC_TRIAL = flag("NORVA_LC_TRIAL");         // edge trial reminder (see runTrialReminder note — DB crons already do this)
+const LC_DUNNING = flag("NORVA_LC_DUNNING");     // failed-payment escalation (Revolut/web only)
+const LC_EXPIRE = flag("NORVA_LC_EXPIRE");       // past_due → expired state transition
+const LC_WINBACK = flag("NORVA_LC_WINBACK");     // MARKETING — needs consent + unsubscribe before enabling
+const LC_ABANDONED = flag("NORVA_LC_ABANDONED"); // MARKETING — retired-table dependency; needs repoint before enabling
 const WELCOME_WINDOW_H = 72;   // don't email the historical base — only recent signups
 const BATCH = 100;
+// CAN-SPAM / GDPR: every send carries a List-Unsubscribe header; the address below
+// receives opt-outs. (A one-click RFC-8058 https endpoint is a follow-up before the
+// marketing flows — winback/abandoned — may be enabled.)
+const UNSUB_MAILTO = "mailto:unsubscribe@norva.tv?subject=unsubscribe";
 
 const CORS = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, content-type" };
 const json = (body: unknown, status = 200) =>
@@ -65,7 +81,10 @@ async function emailUser(db: SupabaseClient, userId: string, make: (firstName: s
   const res = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: { Authorization: `Bearer ${RESEND_API_KEY}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ from: FROM, to: [email], subject: rendered.subject, html: rendered.html }),
+    body: JSON.stringify({
+      from: FROM, to: [email], subject: rendered.subject, html: rendered.html,
+      headers: { "List-Unsubscribe": `<${UNSUB_MAILTO}>` },
+    }),
   });
   if (!res.ok) { console.error("[norva-lifecycle] Resend failed", res.status, await res.text().catch(() => "")); return false; }
   return true;
@@ -84,6 +103,20 @@ async function pushUser(db: SupabaseClient, userId: string, title: string, body:
   } catch (_) { /* push is best-effort — never block the email path */ }
 }
 
+// Atomically CLAIM a per-user send marker before sending, so two overlapping cron
+// runs can't both send the same email. The UPDATE is a compare-and-swap: it only
+// flips the column when it is still NULL, and .select() returns the row only to the
+// run that won. Send AFTER claiming; on failure, release() so a later run retries.
+async function claimMarker(db: SupabaseClient, userId: string, column: string): Promise<boolean> {
+  const { data } = await db.from("cloud_entitlement_projection")
+    .update({ [column]: new Date().toISOString() })
+    .eq("user_id", userId).is(column, null).select("user_id");
+  return Array.isArray(data) && data.length > 0;
+}
+async function releaseMarker(db: SupabaseClient, userId: string, column: string): Promise<void> {
+  try { await db.from("cloud_entitlement_projection").update({ [column]: null }).eq("user_id", userId); } catch (_) { /* noop */ }
+}
+
 async function runWelcome(db: SupabaseClient): Promise<number> {
   const since = new Date(Date.now() - WELCOME_WINDOW_H * 3600_000).toISOString();
   const { data } = await db.from("cloud_entitlement_projection")
@@ -98,45 +131,59 @@ async function runWelcome(db: SupabaseClient): Promise<number> {
   let sent = 0;
   for (const row of (data ?? []) as { user_id: string }[]) {
     if (internalIds.has(row.user_id)) continue;
+    if (!await claimMarker(db, row.user_id, "welcome_email_at")) continue; // another run got it
     try {
-      if (await emailUser(db, row.user_id, (fn) => renderWelcome(fn))) {
-        await db.from("cloud_entitlement_projection").update({ welcome_email_at: new Date().toISOString() }).eq("user_id", row.user_id);
-        sent++;
-      }
-    } catch (e) { console.error("[norva-lifecycle] welcome failed", row.user_id, e instanceof Error ? e.message : e); }
+      if (await emailUser(db, row.user_id, (fn) => renderWelcome(fn))) sent++;
+      else await releaseMarker(db, row.user_id, "welcome_email_at");
+    } catch (e) {
+      await releaseMarker(db, row.user_id, "welcome_email_at");
+      console.error("[norva-lifecycle] welcome failed", row.user_id, e instanceof Error ? e.message : e);
+    }
   }
   return sent;
 }
 
+// NOTE: the LIVE trial-ending reminders are the DB pg_cron jobs norva-trial-ending-3d
+// / -1d (migration 20260708120000), which fire regardless of this flag. This edge flow
+// is an alternative and stays OFF (LC_TRIAL default false) to avoid DOUBLE-SENDING —
+// only enable NORVA_LC_TRIAL if you first unschedule those DB crons. It is also
+// provider-scoped to Revolut (web): Play/Apple trials are the store's to remind.
 async function runTrialReminder(db: SupabaseClient): Promise<number> {
   // Trials ending in ~36–60h (a "2 days out" window) not yet reminded.
   const lo = new Date(Date.now() + 36 * 3600_000).toISOString();
   const hi = new Date(Date.now() + 60 * 3600_000).toISOString();
   const { data } = await db.from("cloud_entitlement_projection")
     .select("user_id,trial_ends_at,plan_code")
+    .eq("provider", "revolut")
     .eq("status", "trialing")
     .is("trial_reminder_email_at", null)
     .gte("trial_ends_at", lo).lte("trial_ends_at", hi)
     .limit(BATCH);
   let sent = 0;
   for (const row of (data ?? []) as Proj[]) {
+    if (!await claimMarker(db, row.user_id, "trial_reminder_email_at")) continue;
     try {
       if (await emailUser(db, row.user_id, (fn) => renderTrialEnding(fn, { endsAt: row.trial_ends_at ?? "", planLabel: planLabel(row.plan_code) }))) {
-        await db.from("cloud_entitlement_projection").update({ trial_reminder_email_at: new Date().toISOString() }).eq("user_id", row.user_id);
-        await pushUser(db, row.user_id, "Your free trial ends in 2 days",
+        await pushUser(db, row.user_id, "Your free trial ends soon",
           "Your Norva plan starts then — cancel anytime before if you change your mind.", "trial_ending");
         sent++;
-      }
-    } catch (e) { console.error("[norva-lifecycle] trial reminder failed", row.user_id, e instanceof Error ? e.message : e); }
+      } else { await releaseMarker(db, row.user_id, "trial_reminder_email_at"); }
+    } catch (e) {
+      await releaseMarker(db, row.user_id, "trial_reminder_email_at");
+      console.error("[norva-lifecycle] trial reminder failed", row.user_id, e instanceof Error ? e.message : e);
+    }
   }
   return sent;
 }
 
 async function runDunning(db: SupabaseClient): Promise<number> {
-  // past_due, at most one email per ~24h, up to 3 stages.
+  // past_due, at most one email per ~24h, up to 3 stages. PROVIDER-SCOPED to Revolut:
+  // a Play/Apple past_due is the store's card to fix, so a Norva "update your card"
+  // email with a norva.tv CTA would be a wrong-cohort mis-fire (the store already duns).
   const cutoff = new Date(Date.now() - 24 * 3600_000).toISOString();
   const { data } = await db.from("cloud_entitlement_projection")
     .select("user_id,dunning_stage,dunning_last_at,status")
+    .eq("provider", "revolut")
     .eq("status", "past_due")
     .lt("dunning_stage", 3)
     .or(`dunning_last_at.is.null,dunning_last_at.lt.${cutoff}`)
@@ -146,9 +193,10 @@ async function runDunning(db: SupabaseClient): Promise<number> {
     const stage = (row.dunning_stage ?? 0) + 1;
     try {
       if (await emailUser(db, row.user_id, (fn) => renderPaymentFailed(fn, stage))) {
+        // Guard the stamp on status still past_due — don't advance a user who paid mid-run.
         await db.from("cloud_entitlement_projection")
           .update({ dunning_stage: stage, dunning_last_at: new Date().toISOString() })
-          .eq("user_id", row.user_id);
+          .eq("user_id", row.user_id).eq("status", "past_due");
         await pushUser(db, row.user_id, "Payment issue on your Norva plan",
           "We couldn't process your payment — update your card to keep watching.", "payment_failed");
         sent++;
@@ -158,6 +206,9 @@ async function runDunning(db: SupabaseClient): Promise<number> {
   return sent;
 }
 
+// MARKETING email (not transactional). Before enabling LC_WINBACK you MUST add a
+// marketing-consent gate + one-click unsubscribe (RFC 8058) — there is no opt-out
+// column yet, so this can currently send to users who never consented. Kept OFF.
 async function runWinback(db: SupabaseClient): Promise<number> {
   // Once, 3–30 days after the subscription lapsed.
   const lo = new Date(Date.now() - 30 * 86400_000).toISOString();
@@ -170,14 +221,17 @@ async function runWinback(db: SupabaseClient): Promise<number> {
     .limit(BATCH);
   let sent = 0;
   for (const row of (data ?? []) as (Proj & { updated_at: string })[]) {
+    if (!await claimMarker(db, row.user_id, "winback_email_at")) continue;
     try {
       if (await emailUser(db, row.user_id, (fn) => renderWinback(fn))) {
-        await db.from("cloud_entitlement_projection").update({ winback_email_at: new Date().toISOString() }).eq("user_id", row.user_id);
         await pushUser(db, row.user_id, "Your Norva catalog is waiting",
           "Pick up right where you left off — reactivate anytime.", "winback");
         sent++;
-      }
-    } catch (e) { console.error("[norva-lifecycle] winback failed", row.user_id, e instanceof Error ? e.message : e); }
+      } else { await releaseMarker(db, row.user_id, "winback_email_at"); }
+    } catch (e) {
+      await releaseMarker(db, row.user_id, "winback_email_at");
+      console.error("[norva-lifecycle] winback failed", row.user_id, e instanceof Error ? e.message : e);
+    }
   }
   return sent;
 }
@@ -187,6 +241,11 @@ async function runWinback(db: SupabaseClient): Promise<number> {
 // The low bound is ~1h ON PURPOSE: abandoned-checkout recovery peaks when the
 // reminder lands within the hour and roughly halves after 24h (Klaviyo/SaleCycle
 // 2024) — with the cron running every 15 min, the send lands at ≈1h-1h15.
+// BLOCKED — reads cloud_stancer_payments, the RETIRED Stancer table (the web rail is
+// now Revolut → cloud_revolut_orders, migration 20260711200000). On the live rail this
+// recovers NOTHING (empty/stale). Before enabling LC_ABANDONED: repoint to
+// cloud_revolut_orders (add a reminder_sent_at column + map the order state), AND add
+// the same marketing-consent + unsubscribe gate as win-back. Kept OFF.
 async function runAbandoned(db: SupabaseClient): Promise<number> {
   const lo = new Date(Date.now() - 48 * 3600_000).toISOString();
   const hi = new Date(Date.now() - 1 * 3600_000).toISOString();
@@ -247,8 +306,13 @@ async function runExpirePastDue(db: SupabaseClient): Promise<number> {
     ...((stuck ?? []) as { user_id: string }[]).map((r) => r.user_id),
   ]);
   for (const userId of ids) {
-    await db.from("cloud_entitlement_projection").update({ status: "expired", last_event_at: nowIso }).eq("user_id", userId);
-    expired++;
+    // Guard the transition on status STILL past_due — a webhook may have flipped the
+    // user back to active (they paid) between the SELECT above and this UPDATE; never
+    // expire a now-paying account.
+    const { data: upd } = await db.from("cloud_entitlement_projection")
+      .update({ status: "expired", last_event_at: nowIso })
+      .eq("user_id", userId).eq("status", "past_due").select("user_id");
+    if (Array.isArray(upd) && upd.length) expired++;
   }
   return expired;
 }
@@ -265,15 +329,19 @@ Deno.serve(async (req) => {
   if (authErr || ok !== true) return json({ error: "Unauthorized" }, 403);
 
   try {
-    const out: Record<string, number | boolean> = { billing_live: BILLING_LIVE };
-    out.welcome = await runWelcome(db);              // always active
-    if (BILLING_LIVE) {
-      out.trial_reminder = await runTrialReminder(db);
-      out.dunning = await runDunning(db);
-      out.expired_past_due = await runExpirePastDue(db);
-      out.winback = await runWinback(db);
-      out.abandoned = await runAbandoned(db);
-    }
+    // Each billing flow needs the MASTER switch AND its own per-flow flag. Setting only
+    // NORVA_LIFECYCLE_BILLING_LIVE now enables nothing — that's the safe default. Enable
+    // a flow only when it is ready (see each runX note for its preconditions).
+    const out: Record<string, unknown> = {
+      billing_live: BILLING_LIVE,
+      enabled: { trial: LC_TRIAL, dunning: LC_DUNNING, expire: LC_EXPIRE, winback: LC_WINBACK, abandoned: LC_ABANDONED },
+    };
+    out.welcome = await runWelcome(db);              // always active (transactional)
+    if (BILLING_LIVE && LC_TRIAL) out.trial_reminder = await runTrialReminder(db);
+    if (BILLING_LIVE && LC_DUNNING) out.dunning = await runDunning(db);
+    if (BILLING_LIVE && LC_EXPIRE) out.expired_past_due = await runExpirePastDue(db);
+    if (BILLING_LIVE && LC_WINBACK) out.winback = await runWinback(db);
+    if (BILLING_LIVE && LC_ABANDONED) out.abandoned = await runAbandoned(db);
     return json({ ok: true, ...out });
   } catch (e) {
     console.error("[norva-lifecycle] run failed", e instanceof Error ? e.message : e);

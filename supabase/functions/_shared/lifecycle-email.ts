@@ -13,6 +13,13 @@ const OPEN_URL = `${SITE_URL}/app.html`;
 const SUBSCRIBE_URL = `${SITE_URL}/subscribe.html`;
 const MANAGE_URL = `${SITE_URL}/subscription.html`;
 const SUPPORT_URL = "mailto:support@norva.tv";
+const UNSUBSCRIBE_URL = "mailto:unsubscribe@norva.tv?subject=unsubscribe";
+// CAN-SPAM requires a physical postal address in commercial mail. Set the env var to
+// your registered business address; the footer shows it only when present (never a
+// fabricated one). Required before the marketing flows (win-back / abandoned) send.
+const POSTAL_ADDRESS = (() => {
+  try { return Deno.env.get("NORVA_POSTAL_ADDRESS") ?? ""; } catch (_) { return ""; }
+})();
 
 export interface Rendered { subject: string; html: string }
 
@@ -52,7 +59,9 @@ function shell(opts: { heading: string; bodyHtml: string; cta?: { label: string;
           ${opts.note ?? `Questions? <a href="${SUPPORT_URL}" style="color:#7f8db0">support@norva.tv</a>. Norva is a media player and includes no content.`}
         </td></tr>
       </table>
-      <div style="color:#3b4254;font-family:Arial,sans-serif;font-size:11px;margin-top:16px">© Norva</div>
+      <div style="color:#3b4254;font-family:Arial,sans-serif;font-size:11px;margin-top:16px;line-height:1.7">
+        <a href="${UNSUBSCRIBE_URL}" style="color:#4a5470">Unsubscribe</a>${POSTAL_ADDRESS ? ` &middot; ${esc(POSTAL_ADDRESS)}` : ""}<br>© Norva
+      </div>
     </td></tr>
   </table>
 </body></html>`;
