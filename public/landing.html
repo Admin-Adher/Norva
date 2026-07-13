@@ -6,15 +6,35 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Norva | Your media catalog on every screen</title>
   <meta name="description"
-    content="Norva is a multi-screen cloud media player that organizes your compatible media source and syncs playback across Web, Android phone, tablet and Android TV.">
+    content="Organize your compatible media source with Norva and keep progress, favorites and preferences in sync across the Web, mobile and TV apps."><!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Norva | Your media catalog on every screen</title>
+  <meta name="description"
+    content="Organize your compatible media source with Norva and keep progress, favorites and preferences in sync across the Web, mobile and TV apps.">
+  <link rel="canonical" href="https://norva.tv/">
+  <meta name="theme-color" content="#070b17">
+
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Norva">
+  <meta property="og:title" content="Norva | Your media catalog on every screen">
+  <meta property="og:description" content="One organized media experience across the Web, mobile and TV apps.">
+  <meta property="og:url" content="https://norva.tv/">
+  <meta property="og:image" content="https://norva.tv/img/devices/norva-device-tv.webp?v=1">
+  <meta property="og:image:alt" content="Norva running on a TV">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Norva | Your media catalog on every screen">
+  <meta name="twitter:description" content="One organized media experience across the Web, mobile and TV apps.">
+  <meta name="twitter:image" content="https://norva.tv/img/devices/norva-device-tv.webp?v=1">
+
   <link rel="icon" type="image/png" href="/favicon.png">
   <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
-  <!-- Preload the LCP hero so its discovery doesn't wait on the inlined CSS byte offset. -->
   <link rel="preload" as="image" href="/img/devices/norva-device-tv.webp?v=1" fetchpriority="high">
   <script>
-    // Flag constrained devices BEFORE the stylesheet applies (no flash), so the
-    // landing drops expensive real-time blur there. Desktop keeps full glass.
     try {
       var n = navigator;
       var lite = (window.matchMedia && (matchMedia('(pointer: coarse)').matches || matchMedia('(max-width: 1024px)').matches))
@@ -22,30 +42,25 @@
         || (n.deviceMemory && n.deviceMemory <= 6);
       if (lite) document.documentElement.classList.add('norva-lite');
     } catch (e) {}
-    // Pre-hide the above-the-fold hero BEFORE first paint. The scroll-reveal
-    // script is deferred, so without this the hero can paint fully then snap to
-    // its hidden start state and re-animate (a visible flash). Arming here means
-    // it can only ever animate IN. landing.js drops this class once it takes over
-    // (handing off to an identical .scroll-reveal hidden state), and a load-time
-    // safety net below un-arms it if that script never runs, so the hero is never
-    // left stuck hidden. Only meaningful when JS + reveal are both active.
-    try {
-      var de = document.documentElement;
-      if ('IntersectionObserver' in window
-          && !(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches)) {
-        de.classList.add('reveal-armed');
-        addEventListener('load', function () {
-          requestAnimationFrame(function () {
-            if (!de.classList.contains('reveal-ready')) de.classList.remove('reveal-armed');
-          });
-        });
-      }
-    } catch (e) {}
   </script>
-  <link rel="stylesheet" href="/css/landing.css?v=32">
+  <link rel="stylesheet" href="/css/landing.css?v=36">
+
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "SoftwareApplication",
+      "name": "Norva",
+      "url": "https://norva.tv/",
+      "applicationCategory": "MultimediaApplication",
+      "operatingSystem": "Web, mobile and TV",
+      "description": "A cloud media player that organizes a compatible media source and synchronizes playback across screens."
+    }
+  </script>
 </head>
 
 <body>
+  <a class="skip-link" href="#main-content">Skip to content</a>
+
   <header class="landing-nav">
     <a class="brand" href="/" data-norva-home-link aria-label="Norva home">
       <picture>
@@ -54,416 +69,1096 @@
       </picture>
       <span>Norva</span>
     </a>
-    <button class="nav-toggle" type="button" aria-label="Open navigation" aria-expanded="false">
+
+    <button class="nav-toggle" type="button" aria-label="Open navigation" aria-expanded="false"
+      aria-controls="landing-navigation">
       <span></span>
       <span></span>
       <span></span>
     </button>
-    <nav class="nav-links" aria-label="Landing navigation">
-      <a href="#features">Features</a>
-      <a href="#devices">Devices</a>
+
+    <nav class="nav-links" id="landing-navigation" aria-label="Primary navigation">
+      <a href="#features">Benefits</a>
       <a href="#how-it-works">How it works</a>
       <a href="#pricing">Pricing</a>
       <a href="#faq">FAQ</a>
     </nav>
+
     <div class="nav-actions">
-      <a class="login-link" href="/account.html?returnTo=%2Fapp%23home">Sign in</a>
-      <a class="nav-cta" href="/account.html?returnTo=%2Fapp%23home">Create my space</a>
+      <a class="login-link" href="/account.html?returnTo=%2Fapp%23home" data-auth-action>Sign in</a>
+      <a class="nav-cta" href="/account.html?returnTo=%2Fsubscribe.html%3Fplan%3Dplus%26period%3Dmonthly" data-cta="nav" data-auth-action>
+        Start my 7-day free trial
+      </a>
     </div>
   </header>
 
-  <main id="top">
-    <section class="hero-section">
+  <main id="main-content" tabindex="-1">
+    <section class="hero-section" aria-labelledby="hero-title" data-guide-context="hero">
       <div class="hero-content">
-        <p class="eyebrow"><span></span> Multi-screen cloud media player</p>
-        <h1>Your catalog. Every screen. One experience.</h1>
+        <p class="eyebrow"><span></span> Available now on Web, mobile and TV</p>
+        <h1 id="hero-title">Your catalog. Every screen. One experience.</h1>
         <p class="hero-copy">
           Connect a compatible media source, organize your catalog and resume exactly where you left off
-          on the Web, Android phone, tablet and Android TV.
+          across the Web, mobile and TV apps.
         </p>
         <div class="hero-actions">
-        <a class="primary-btn" href="/account.html?returnTo=%2Fapp%23home">Create my space <span aria-hidden="true">-></span></a>
-          <a class="secondary-btn" href="#features">See how it works</a>
+          <a class="primary-btn" href="/account.html?returnTo=%2Fsubscribe.html%3Fplan%3Dplus%26period%3Dmonthly" data-cta="hero-primary" data-auth-action>
+            Start my 7-day free trial <span aria-hidden="true">-&gt;</span>
+          </a>
+          <a class="secondary-btn" href="#product-preview" data-cta="hero-secondary">See Norva in action</a>
         </div>
-        <p class="legal-note">Norva does not include content or TV subscriptions. A compatible source you are authorized to use is required.</p>
-        <ul class="hero-badges" aria-label="Norva guarantees">
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>7-day free trial</li>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Cancel anytime</li>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>EU-hosted · GDPR</li>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>No content included</li>
-        </ul>
+        <p class="trial-note">Payment method required &middot; 7 days free, then from US$4.99/month &middot; Reminder before renewal &middot; Cancel anytime</p>
+        <p class="legal-note">
+          Norva is the software layer that organizes and plays a compatible source you are authorized to use.
+          Media access remains with that source.
+        </p>
       </div>
 
-      <div class="hero-visual" aria-label="Norva running on Android TV and an Android phone">
+      <div class="hero-visual" aria-label="Norva running on a TV and a mobile phone">
         <div class="hero-stage">
-          <img class="dev dev-tv" src="/img/devices/norva-device-tv.webp?v=1" alt="Norva home screen on Android TV" width="1280" height="767" fetchpriority="high" decoding="async">
-          <img class="dev dev-phone" src="/img/devices/norva-device-phone.webp?v=1" alt="Norva on an Android phone" width="520" height="1066" decoding="async">
+          <img class="dev dev-tv" src="/img/devices/norva-device-tv.webp?v=1"
+            alt="Norva catalog displayed on a TV" width="1280" height="767" fetchpriority="high" decoding="async">
+          <img class="dev dev-phone" src="/img/devices/norva-device-phone.webp?v=1"
+            alt="Norva catalog displayed on a mobile phone" width="520" height="1066" decoding="async">
         </div>
       </div>
     </section>
 
-    <section class="logo-wall" aria-label="Norva platforms">
-      <p class="logo-wall-label">One account, every screen you already own</p>
-      <div class="logo-strip">
-        <span class="logo-chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg> Web browser</span>
-        <span class="logo-chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg> Android phone</span>
-        <span class="logo-chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg> Android tablet</span>
-        <span class="logo-chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="7" width="20" height="13" rx="2"/><polyline points="17 2 12 7 7 2"/></svg> Android TV</span>
-        <span class="logo-chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/></svg> Cloud sync</span>
+    <section class="availability-strip" id="availability" aria-labelledby="availability-title"
+      data-guide-context="availability">
+      <p class="eyebrow centered"><span></span> Ready on your screens</p>
+      <h2 id="availability-title">Use Norva now, wherever you watch.</h2>
+      <p class="section-copy">
+        The Web experience and the mobile and TV apps are available now. Your account keeps the same catalog,
+        progress and preferences across supported devices.
+      </p>
+      <div class="availability-grid">
+        <article>
+          <span class="mini-icon feature-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+              stroke-linecap="round" stroke-linejoin="round">
+              <rect x="2" y="3" width="20" height="14" rx="2"/>
+              <line x1="8" y1="21" x2="16" y2="21"/>
+              <line x1="12" y1="17" x2="12" y2="21"/>
+            </svg>
+          </span>
+          <h3>Web</h3>
+          <p>Open Norva in a compatible browser with no installation required.</p>
+        </article>
+        <article>
+          <span class="mini-icon feature-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+              stroke-linecap="round" stroke-linejoin="round">
+              <rect x="5" y="2" width="14" height="20" rx="2"/>
+              <line x1="12" y1="18" x2="12.01" y2="18"/>
+            </svg>
+          </span>
+          <h3>Mobile app</h3>
+          <p>Available now from its supported app store.</p>
+        </article>
+        <article>
+          <span class="mini-icon feature-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+              stroke-linecap="round" stroke-linejoin="round">
+              <rect x="2" y="7" width="20" height="13" rx="2"/>
+              <polyline points="17 2 12 7 7 2"/>
+            </svg>
+          </span>
+          <h3>TV app</h3>
+          <p>Available now from its supported app store, with remote-friendly navigation.</p>
+        </article>
+        <article>
+          <span class="mini-icon feature-icon" aria-hidden="true">
+            <img src="/assets/landing/norva-icon-cloud-sync.svg?v=1" alt="">
+          </span>
+          <h3>Cloud sync</h3>
+          <p>Progress, favorites and preferences stay attached to your account.</p>
+        </article>
       </div>
     </section>
 
-    <section class="compat-strip" aria-label="Compatible source formats">
-      <p class="eyebrow centered"><span></span> Bring your own source</p>
-      <h2>Works with the source you already have.</h2>
-      <p class="section-copy">Norva connects the standard media formats you are authorized to use — no extra subscription, no lock-in.</p>
-      <div class="compat-chips">
-        <span class="compat-chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>M3U / M3U8 playlists</span>
-        <span class="compat-chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Xtream API</span>
-        <span class="compat-chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>XMLTV EPG guide</span>
+    <section class="features-section" id="features" aria-labelledby="benefits-title"
+      data-guide-context="features">
+      <p class="eyebrow centered"><span></span> Built around your experience</p>
+      <h2 id="benefits-title">Less searching. More watching.</h2>
+      <p class="section-copy">Norva turns a compatible source into one clear, consistent experience across screens.</p>
+      <div class="benefit-grid">
+        <article class="benefit-card">
+          <span class="mini-icon feature-icon" aria-hidden="true">
+            <img src="/assets/landing/norva-icon-cloud-sync.svg?v=1" alt="">
+          </span>
+          <h3>Continue without losing your place</h3>
+          <p>Pause on one screen and resume from the same point on another, with your favorites and history in sync.</p>
+        </article>
+        <article class="benefit-card">
+          <span class="mini-icon feature-icon" aria-hidden="true">
+            <img src="/assets/landing/norva-icon-compatible-sources.svg?v=1" alt="">
+          </span>
+          <h3>Find what matters faster</h3>
+          <p>Browse an organized catalog, group versions and surface useful recommendations from your own source.</p>
+        </article>
+        <article class="benefit-card">
+          <span class="mini-icon feature-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+              stroke-linecap="round" stroke-linejoin="round">
+              <rect x="2" y="5" width="20" height="14" rx="3"/>
+              <path d="M6 10.5h7"/>
+              <path d="M16 10.5h2"/>
+              <path d="M6 14h4"/>
+              <path d="M13 14h5"/>
+            </svg>
+          </span>
+          <h3>Watch your way</h3>
+          <p>Keep language preferences, subtitles and device-friendly controls ready for every profile.</p>
+        </article>
       </div>
-      <p class="compat-note">Norva is the player, not the content — you supply a source you have the legitimate right to use.</p>
     </section>
 
-    <section class="trust-grid" aria-label="Norva foundations">
-      <article>
-        <span class="mini-icon feature-icon" aria-hidden="true"><img src="/assets/landing/norva-icon-no-content.svg?v=1" alt=""></span>
-        <div><strong>No content included</strong><p>Norva does not sell channels, movies or series.</p></div>
-      </article>
-      <article>
-        <span class="mini-icon feature-icon" aria-hidden="true"><img src="/assets/landing/norva-icon-compatible-sources.svg?v=1" alt=""></span>
-        <div><strong>Your compatible sources</strong><p>Connect access you already own and are authorized to use.</p></div>
-      </article>
-      <article>
-        <span class="mini-icon feature-icon" aria-hidden="true"><img src="/assets/landing/norva-icon-cloud-sync.svg?v=1" alt=""></span>
-        <div><strong>Cloud synchronization</strong><p>Progress, favorites and preferences stay attached to your account.</p></div>
-      </article>
-      <article>
-        <span class="mini-icon feature-icon" aria-hidden="true"><img src="/assets/landing/norva-icon-web-android.svg?v=1" alt=""></span>
-        <div><strong>Web and Android</strong><p>Phone, tablet, browser and Android TV experiences.</p></div>
-      </article>
+    <section class="steps-section" id="how-it-works" aria-labelledby="steps-title"
+      data-guide-context="steps">
+      <p class="eyebrow centered"><span></span> A clear path to your catalog</p>
+      <h2 id="steps-title">Your Norva space in three steps.</h2>
+      <p class="section-copy">You stay in control of your source. Norva handles the interface, organization and continuity.</p>
+      <div class="step-grid">
+        <article>
+          <span>01</span>
+          <h3>Create your space</h3>
+          <p>Start your Norva trial and set up the profiles your household needs.</p>
+          <small>Your account, your preferences</small>
+        </article>
+        <article>
+          <span>02</span>
+          <h3>Connect your source</h3>
+          <p>Add a compatible media source you already have legitimate access to.</p>
+          <small>You remain in control</small>
+        </article>
+        <article>
+          <span>03</span>
+          <h3>Watch across screens</h3>
+          <p>Explore your organized catalog and keep your progress synchronized.</p>
+          <small>Web, mobile and TV</small>
+        </article>
+      </div>
     </section>
 
-    <section class="split-section" id="features">
-      <div>
-        <p class="eyebrow"><span></span> Continuous experience</p>
-        <h2>Start here. Continue anywhere.</h2>
+    <section class="notification-section" id="product-preview" aria-labelledby="notification-title"
+      data-guide-context="preview">
+      <div class="notification-copy">
+        <p class="eyebrow"><span></span> Guided product tour</p>
+        <h2 id="notification-title">The right Norva benefit, at the right moment.</h2>
         <p>
-          Norva keeps your playback state consistent across devices. Pause an episode on your TV,
-          then resume from the same point on your phone, tablet or browser.
+          The floating Norva guide adapts as you move through the page. It highlights one useful feature
+          or next step at a time, without interrupting what you are doing.
         </p>
         <ul class="check-list">
-          <li><strong>Synced progress</strong><span>Your watch position updates automatically on connected devices.</span></li>
-          <li><strong>History and favorites</strong><span>Find what you started, saved or liked without rebuilding your library.</span></li>
-          <li><strong>Profiles and preferences</strong><span>Language, subtitles and genre preferences follow the account.</span></li>
-          <li><strong>Instant resume</strong><span>Norva surfaces the next useful action, resume, restart or next episode.</span></li>
+          <li><strong>Available now</strong><span>See where you can use Norva across the Web, mobile and TV.</span></li>
+          <li><strong>Useful in context</strong><span>Discover cross-screen continuity, setup and account controls as they become relevant.</span></li>
+          <li><strong>Always under your control</strong><span>Pause, minimize or reduce the guide to the Norva icon at any time.</span></li>
         </ul>
-      </div>
-      <div class="sync-stage" aria-label="Norva showing the same title on a laptop and a tablet, in sync">
-        <div class="stage-cluster">
-          <img class="dev dev-laptop" src="/img/devices/norva-device-laptop.webp?v=1" alt="Norva on a laptop" width="1000" height="1006" loading="lazy" decoding="async">
-          <img class="dev dev-tablet" src="/img/devices/norva-device-tablet.webp?v=1" alt="Norva on a tablet, showing the same title resumed in sync" width="1100" height="793" loading="lazy" decoding="async">
+        <div class="notification-demo-actions">
+          <button class="secondary-btn notification-demo-trigger" type="button" data-guide-preview
+            aria-controls="norva-guide-panel" aria-expanded="false">
+            Open the floating guide
+          </button>
+          <small>It remains available while you scroll and never takes over the page.</small>
         </div>
       </div>
-    </section>
 
-    <section class="steps-section" id="how-it-works">
-      <p class="eyebrow centered"><span></span> Simple setup</p>
-      <h2>Your media space in three steps.</h2>
-      <p class="section-copy">Norva handles the interface, organization and continuity. You keep control of your source.</p>
-      <div class="step-grid">
-        <article><span>01</span><strong>Create your space</strong><p>Set up your Norva account and the devices you use every day.</p><small>Under 2 minutes</small></article>
-        <article><span>02</span><strong>Connect your source</strong><p>Add a compatible media source you already have legitimate access to.</p><small>Protected credentials</small></article>
-        <article><span>03</span><strong>Watch on your screens</strong><p>Norva organizes the catalog and synchronizes your experience.</p><small>Multi-screen ready</small></article>
+      <div class="notification-guide-map" aria-label="How the floating Norva guide follows the page">
+        <ol>
+          <li><span>01</span><div><small>At the top</small><strong>Availability and supported screens</strong></div></li>
+          <li><span>02</span><div><small>While exploring</small><strong>Benefits and simple setup</strong></div></li>
+          <li><span>03</span><div><small>When deciding</small><strong>Trial terms and the clearest next step</strong></div></li>
+        </ol>
       </div>
     </section>
 
-    <section class="recommendation-section">
-      <div>
-        <p class="eyebrow"><span></span> Personalized discovery</p>
-        <h2>Recommendations from your own catalog.</h2>
-        <p>
-          Norva highlights content already present in your source according to your preferences,
-          profile and watch history, without selling a parallel catalog.
-        </p>
-        <div class="preference-card">
-          <div class="preference-head"><strong>Profile preferences</strong><span>Active</span></div>
-          <div class="pref-field"><small>Preferred audio language</small><span>English <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg></span></div>
-          <div class="pref-field"><small>Preferred subtitles</small><span>No preference <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg></span></div>
-          <div class="pref-field"><small>Favorite genres</small><span>Science fiction · Thriller <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg></span></div>
-          <p>Norva boosts matching titles without hiding unknown metadata.</p>
-        </div>
-      </div>
-      <div class="poster-row">
-        <article><span>Audio EN confirmed</span><strong>Silent Meridian</strong><small>Thriller - 1h 52</small></article>
-        <article class="tall"><span>For you - 96%</span><strong>Northlight</strong><small>Science fiction - Series</small></article>
-        <article><span>Subtitles likely</span><strong>Red Horizon</strong><small>Adventure - 2h 06</small></article>
-        <article><span>Needs verification</span><strong>Golden Signal</strong><small>Mystery - Series</small></article>
-      </div>
-    </section>
+    <section class="pricing-section" id="pricing" aria-labelledby="pricing-title"
+      data-guide-context="pricing">
+      <p class="eyebrow centered"><span></span> Clear software plans</p>
+      <h2 id="pricing-title">Choose the Norva space that fits your home.</h2>
+      <p class="section-copy">
+        Every plan includes the complete Norva software experience and starts with a 7-day free trial.
+        Media access remains with the compatible source you connect.
+      </p>
 
-    <section class="features-section">
-      <p class="eyebrow centered"><span></span> Built for watching</p>
-      <h2>Everything you need to watch. Nothing that slows you down.</h2>
-      <p class="section-copy">A consistent interface, simple controls and features adapted to real devices and real sources.</p>
-      <div class="feature-grid">
-        <article>
-          <span class="mini-icon feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 19 22 12 13 5 13 19"/><polygon points="2 19 11 12 2 5 2 19"/></svg></span>
-          <strong>Optimized playback</strong>
-          <p>Fast startup, automatic resume, adaptive quality and remote-friendly navigation.</p>
-          <div class="viz scrubber" aria-hidden="true"><span class="track"><i></i><b></b></span><span class="times"><em>12:04</em><em>1:52:30</em></span></div>
-        </article>
-        <article>
-          <span class="mini-icon feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="3"/><path d="M6 10.5h7"/><path d="M16 10.5h2"/><path d="M6 14h4"/><path d="M13 14h5"/></svg></span>
-          <strong>AI subtitles, in your language</strong>
-          <p>No subtitles on your source? Norva can generate them from the audio, translate them to your language, and even turn image-based subtitles into readable text.</p>
-          <div class="viz bars" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
-        </article>
-        <article>
-          <span class="mini-icon feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></span>
-          <strong>Offline mode</strong>
-          <p>On compatible devices, selected media can be made available when your source and rights allow it.</p>
-          <div class="viz dl-viz" aria-hidden="true"><span class="dl-row"><i></i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span><span class="dl-row"><i></i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span><span class="dl-row"><i class="prog"></i><em>68%</em></span></div>
-        </article>
-        <article>
-          <span class="mini-icon feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 16.1A5 5 0 0 1 5.9 20M2 12.05A9 9 0 0 1 9.95 20M2 8V6a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-6"/><line x1="2" y1="20" x2="2.01" y2="20"/></svg></span>
-          <strong>Cast to your TV</strong>
-          <p>Send what you're watching to a Chromecast or Google TV — subtitles, progress and the next episode come along.</p>
-        </article>
-        <article>
-          <span class="mini-icon feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></span>
-          <strong>Self-healing playback</strong>
-          <p>When a stream stalls or drops, Norva automatically tries other routes and copies to keep you watching — the messiest part of IPTV, handled for you.</p>
-        </article>
-      </div>
-    </section>
-
-    <section class="devices-section" id="devices">
-      <p class="eyebrow centered"><span></span> Multi-screen by nature</p>
-      <h2>Norva follows you across devices.</h2>
-      <p class="section-copy">One account to find your catalog, favorites and progress on compatible screens.</p>
-      <div class="device-grid">
-        <article><span class="mini-icon feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg></span><strong>Web</strong><p>Access your space from a compatible browser.</p></article>
-        <article><span class="mini-icon feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg></span><strong>Android phone</strong><p>Find your progress wherever you are.</p></article>
-        <article><span class="mini-icon feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg></span><strong>Android tablet</strong><p>A comfortable interface to watch and explore.</p></article>
-        <article><span class="mini-icon feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="13" rx="2"/><polyline points="17 2 12 7 7 2"/></svg></span><strong>Android TV</strong><p>Remote-friendly navigation and big-screen playback.</p></article>
-      </div>
-    </section>
-
-    <section class="get-app" aria-label="Take Norva with you">
-      <div class="get-app-inner">
-        <div class="get-app-copy">
-          <p class="eyebrow"><span></span> On every screen</p>
-          <h2>Take Norva with you.</h2>
-          <p>Your catalog, favorites and progress stay tied to your account — pick up on any screen in seconds.</p>
-          <p class="get-app-soon">Native Android phone &amp; TV apps are on the way to Google Play.</p>
-          <a class="primary-btn get-app-cta" href="/account.html?returnTo=%2Fapp%23home">Open Norva <span aria-hidden="true">-></span></a>
-        </div>
-        <div class="get-app-qr">
-          <img src="/assets/landing/norva-qr-web.svg?v=1" alt="Scan to open Norva at norva.tv" width="176" height="176" loading="lazy" decoding="async">
-          <span>Scan to open on your phone</span>
-        </div>
-      </div>
-    </section>
-
-    <section class="infra-banner" aria-label="Always in sync">
-      <div class="infra-inner">
-        <p class="eyebrow"><span></span> Always in sync</p>
-        <h2>Streamline your entire media experience.</h2>
-        <p>One Norva space connects your compatible source, organizes your catalog and keeps every screen in sync — automatically, in the background.</p>
-        <div class="infra-actions">
-          <a class="primary-btn" href="/account.html?returnTo=%2Fapp%23home">Create my space <span aria-hidden="true">-></span></a>
-          <a class="secondary-btn" href="#how-it-works">See how it works</a>
-        </div>
-        <div class="infra-window" aria-hidden="true">
-          <div class="infra-window-bar"><i></i><i></i><i></i></div>
-          <div class="infra-window-body"><div class="row"></div><div class="row"></div><div class="row"></div></div>
-        </div>
-      </div>
-    </section>
-
-    <section class="clarity-section">
-      <p class="eyebrow centered"><span></span> No ambiguity</p>
-      <h2>Norva is a player. Not a content provider.</h2>
-      <p class="section-copy">Your Norva subscription covers software and features. Your media remains tied to the source you choose and are authorized to use.</p>
-      <div class="clarity-grid">
-        <article>
-          <strong>Norva provides</strong>
-          <ul><li>Media interface</li><li>Catalog organization</li><li>Multi-screen playback</li><li>Cloud synchronization</li><li>Recommendations</li><li>Profiles and preferences</li></ul>
-        </article>
-        <article class="negative">
-          <strong>Norva does not provide</strong>
-          <ul><li>IPTV subscriptions</li><li>Channel packages</li><li>Movies or series</li><li>Sports streams</li><li>M3U lists</li><li>Third-party credentials</li></ul>
-        </article>
-      </div>
-      <p class="warning-note">To use Norva, you must connect a compatible source you can legitimately access. You remain responsible for that source and its terms.</p>
-    </section>
-
-    <section class="features-section" id="trust">
-      <p class="eyebrow centered"><span></span> Built on trust</p>
-      <h2>Private, cancellable, accountable.</h2>
-      <p class="section-copy">No lock-in and no surprises: your data stays in the EU, your downloads are encrypted, and a registered operator stands behind Norva.</p>
-      <div class="trust-grid">
-        <article>
-          <span class="mini-icon feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></span>
-          <div><strong>Cancel anytime</strong><p>No lock-in. Manage or cancel your plan in a click — and we email you before your free trial renews.</p></div>
-        </article>
-        <article>
-          <span class="mini-icon feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></span>
-          <div><strong>EU-hosted &amp; GDPR</strong><p>Your account data is hosted in the European Union. Access or delete it at any time.</p></div>
-        </article>
-        <article>
-          <span class="mini-icon feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></span>
-          <div><strong>Encrypted downloads</strong><p>Offline media is encrypted on your device with a hardware-backed key where available.</p></div>
-        </article>
-        <article>
-          <span class="mini-icon feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg></span>
-          <div><strong>Secure payment</strong><p>When you subscribe, card payments are handled by a certified payment provider. Norva never stores your card number.</p></div>
-        </article>
-        <article>
-          <span class="mini-icon feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"/><path d="M5 21V7l7-4 7 4v14"/><line x1="9" y1="9" x2="9" y2="9.01"/><line x1="9" y1="13" x2="9" y2="13.01"/><line x1="9" y1="17" x2="9" y2="17.01"/></svg></span>
-          <div><strong>Registered operator</strong><p>Operated by a registered French business (RCS Paris 824&nbsp;852&nbsp;081), with a full <a href="/mentions-legales.html">legal notice</a> and an approved consumer mediator.</p></div>
-        </article>
-        <article>
-          <span class="mini-icon feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></span>
-          <div><strong>Transparent by design</strong><p>A player, not a content seller. You always keep control of your own authorized source.</p></div>
-        </article>
-      </div>
-    </section>
-
-    <!--
-      TESTIMONIALS — ready to fill with REAL quotes only (never fabricate).
-      Once you have genuine user feedback (or store ratings), un-comment this block
-      and replace the placeholders. Keep it truthful for Play Store review + EU law.
-
-      <section class="features-section" id="testimonials">
-        <p class="eyebrow centered"><span></span> What early users say</p>
-        <h2>Loved by people who bring their own media.</h2>
-        <div class="trust-grid">
-          <article><div><p>"<REAL quote>"</p><strong><Real first name, City></strong></div></article>
-          <article><div><p>"<REAL quote>"</p><strong><Real first name, City></strong></div></article>
-          <article><div><p>"<REAL quote>"</p><strong><Real first name, City></strong></div></article>
-        </div>
-      </section>
-    -->
-
-    <section class="pricing-section" id="pricing">
-      <p class="eyebrow centered"><span></span> Simple offer</p>
-      <h2>Pay for the Norva experience. Never for content.</h2>
-      <p class="section-copy">Clear software features, no hidden catalog and no included channel package. Every plan starts with a 7-day free trial.</p>
       <div class="billing-toggle" role="group" aria-label="Billing period">
         <button type="button" class="billing-opt is-active" data-period="monthly" aria-pressed="true">Monthly</button>
-        <button type="button" class="billing-opt" data-period="annual" aria-pressed="false">Annual <span class="save-badge">Save 30%</span></button>
+        <button type="button" class="billing-opt" data-period="annual" aria-pressed="false">
+          Annual <span class="save-badge">Save 30%</span>
+        </button>
       </div>
+
+      <p class="pricing-status" role="status" aria-live="polite" aria-atomic="true"></p>
+
       <div class="pricing-grid">
         <article>
-          <strong>Norva</strong>
+          <h3>Norva</h3>
           <p>Everything Norva does, on your main screens.</p>
-          <div class="price" data-monthly="4.99" data-annual="41.99" data-annual-suffix="/yr"><span class="price-cur">$</span><span class="price-amount">4.99</span><span class="price-period">/mo</span></div>
-          <small class="price-note" data-annual-note="That's about 3.49/mo, billed yearly."></small>
-          <ul><li>Up to 2 profiles</li><li>Sync across Web, phone, tablet &amp; TV</li><li>Offline downloads (Android app)</li><li>Every Norva feature included</li></ul>
-            <a data-plan="plus" href="/account.html?returnTo=%2Fsubscribe.html%3Fplan%3Dplus%26period%3Dmonthly">Start 7-day free trial</a>
-        </article>
-        <article class="featured">
-          <em>Most popular</em>
-          <strong>Norva Family</strong>
-          <p>The full Norva experience for the whole home.</p>
-          <div class="price" data-monthly="8.99" data-annual="75.99" data-annual-suffix="/yr"><span class="price-cur">$</span><span class="price-amount">8.99</span><span class="price-period">/mo</span></div>
-          <small class="price-note" data-annual-note="That's about 6.29/mo, billed yearly."></small>
-          <ul><li>Up to 5 profiles</li><li>Sync across Web, phone, tablet &amp; TV</li><li>Offline downloads (Android app)</li><li>Every Norva feature included</li></ul>
-            <a data-plan="family" href="/account.html?returnTo=%2Fsubscribe.html%3Fplan%3Dfamily%26period%3Dmonthly">Start 7-day free trial</a>
-        </article>
-      </div>
-      <ul class="hero-badges" aria-label="Plan guarantees">
-        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>7-day free trial</li>
-        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Cancel anytime</li>
-        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>EU-hosted · GDPR</li>
-        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Reminder before renewal</li>
-      </ul>
-      <small>No content, TV package or IPTV subscription is included in these offers. The free trial needs a payment method and converts to a paid plan unless cancelled — we email you a reminder before it renews, and you can cancel anytime.</small>
-    </section>
-
-    <section class="faq-section" id="faq">
-      <p class="eyebrow centered"><span></span> Frequently asked questions</p>
-      <h2>Everything you need to know before you start.</h2>
-      <div class="faq-list">
-        <button type="button" class="faq-item">Does Norva provide channels, movies or series?<span>+</span><p>No. Norva provides the software experience only. You connect a compatible source you are authorized to use.</p></button>
-        <button type="button" class="faq-item">What do I need to use Norva?<span>+</span><p>A Norva account, a compatible device and a compatible media source with legitimate access.</p></button>
-        <button type="button" class="faq-item">Does Norva sell IPTV subscriptions?<span>+</span><p>No. Norva does not sell IPTV subscriptions, channel packages or third-party credentials.</p></button>
-        <button type="button" class="faq-item">Can I resume playback on another device?<span>+</span><p>Yes. Norva syncs playback progress, favorites and preferences across compatible devices.</p></button>
-        <button type="button" class="faq-item">Is offline mode available everywhere?<span>+</span><p>Offline availability depends on the device, source and rights associated with the media.</p></button>
-        <button type="button" class="faq-item">Does Norva control stream quality or availability?<span>+</span><p>Norva optimizes playback, but the source remains responsible for the availability and quality of the media it provides.</p></button>
-      </div>
-    </section>
-
-    <section class="simpler-promo" aria-label="Open Norva in your browser">
-      <div class="promo-card">
-        <div class="promo-copy">
-          <p class="eyebrow"><span></span> No install needed</p>
-          <h2>Want something even simpler?</h2>
-          <p>Skip the download. Open Norva right in your browser and pick up your catalog on this screen in seconds.</p>
-          <a class="primary-btn" href="/account.html?returnTo=%2Fapp%23home">Open Norva in your browser <span aria-hidden="true">-></span></a>
-        </div>
-        <div class="promo-visual" aria-hidden="true">
-          <div class="browser-mock">
-            <div class="browser-bar"><i></i><i></i><i></i><span class="url">norva.tv/app</span></div>
-            <div class="browser-body">
-              <div class="bm-hero"><span class="bm-play" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor"><polygon points="9 7 18 12 9 17 9 7"/></svg></span></div>
-              <div class="bm-rowlabel"></div>
-              <div class="bm-row"><i></i><i></i><i></i><i></i><i></i></div>
-              <div class="bm-rowlabel short"></div>
-              <div class="bm-row"><i></i><i></i><i></i><i></i><i></i></div>
-            </div>
+          <div class="price" data-monthly="4.99" data-annual="41.99" data-annual-suffix="/yr">
+            <span class="price-cur">US$</span><span class="price-amount">4.99</span><span class="price-period">/mo</span>
           </div>
-        </div>
+          <small class="price-note" data-annual-note="That's about US$3.50/mo, billed yearly."></small>
+          <a class="pricing-cta" data-plan="plus" data-cta="plan"
+            href="/account.html?returnTo=%2Fsubscribe.html%3Fplan%3Dplus%26period%3Dmonthly">
+            Start my 7-day free trial
+          </a>
+          <small class="pricing-terms"
+            data-monthly-terms="7 days free, then US$4.99/month until canceled. Payment method required; reminder before renewal; taxes may apply."
+            data-annual-terms="7 days free, then US$41.99/year until canceled. Payment method required; reminder before renewal; taxes may apply.">
+            7 days free, then US$4.99/month until canceled. Payment method required; reminder before renewal; taxes may apply.
+          </small>
+          <ul>
+            <li>Up to 2 profiles</li>
+            <li>Sync across Web, mobile and TV</li>
+            <li>Offline access where supported by your device and authorized source</li>
+            <li>Every Norva feature included</li>
+          </ul>
+        </article>
+
+        <article class="featured">
+          <h3>Norva Family</h3>
+          <p>The complete Norva experience for more profiles at home.</p>
+          <div class="price" data-monthly="8.99" data-annual="75.99" data-annual-suffix="/yr">
+            <span class="price-cur">US$</span><span class="price-amount">8.99</span><span class="price-period">/mo</span>
+          </div>
+          <small class="price-note" data-annual-note="That's about US$6.33/mo, billed yearly."></small>
+          <a class="pricing-cta" data-plan="family" data-cta="plan"
+            href="/account.html?returnTo=%2Fsubscribe.html%3Fplan%3Dfamily%26period%3Dmonthly">
+            Start my 7-day free trial
+          </a>
+          <small class="pricing-terms"
+            data-monthly-terms="7 days free, then US$8.99/month until canceled. Payment method required; reminder before renewal; taxes may apply."
+            data-annual-terms="7 days free, then US$75.99/year until canceled. Payment method required; reminder before renewal; taxes may apply.">
+            7 days free, then US$8.99/month until canceled. Payment method required; reminder before renewal; taxes may apply.
+          </small>
+          <ul>
+            <li>Up to 5 profiles</li>
+            <li>Sync across Web, mobile and TV</li>
+            <li>Offline access where supported by your device and authorized source</li>
+            <li>Every Norva feature included</li>
+          </ul>
+        </article>
       </div>
     </section>
 
-    <section class="final-cta">
-      <h2>Your media experience, finally connected.</h2>
-      <p>Create your Norva space, connect your compatible source and find your progress on every screen.</p>
-      <div>
-        <a class="primary-btn light" href="/account.html?returnTo=%2Fapp%23home">Create my space <span aria-hidden="true">-></span></a>
-        <a class="secondary-btn light" href="#devices">See compatible devices</a>
+    <section class="features-section scope-section" id="trust" aria-labelledby="trust-title"
+      data-guide-context="trust">
+      <p class="eyebrow centered"><span></span> A clear, accountable service</p>
+      <h2 id="trust-title">Know exactly what Norva does.</h2>
+      <p class="section-copy">One compact promise: useful software, transparent billing and control over your account.</p>
+      <div class="scope-grid">
+        <article>
+          <span class="mini-icon feature-icon" aria-hidden="true">
+            <img src="/assets/landing/norva-icon-no-content.svg?v=1" alt="">
+          </span>
+          <h3>The Norva software experience</h3>
+          <p>Your subscription covers the interface, organization, playback and synchronization features. Media access remains with your compatible source.</p>
+        </article>
+        <article>
+          <span class="mini-icon feature-icon" aria-hidden="true">
+            <img src="/assets/landing/norva-icon-compatible-sources.svg?v=1" alt="">
+          </span>
+          <h3>Your source stays yours</h3>
+          <p>You connect access you already own and are authorized to use, and remain responsible for its terms.</p>
+        </article>
+        <article>
+          <span class="mini-icon feature-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+            </svg>
+          </span>
+          <h3>Account privacy controls</h3>
+          <p>Access or delete your account data, with controls designed around GDPR requirements and documented in our Privacy Policy.</p>
+        </article>
+        <article>
+          <span class="mini-icon feature-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 21h18"/>
+              <path d="M5 21V7l7-4 7 4v14"/>
+            </svg>
+          </span>
+          <h3>Registered operator</h3>
+          <p>
+            Norva is operated by a registered French business (RCS Paris 824&nbsp;852&nbsp;081).
+            <a href="/mentions-legales.html">Read the legal notice</a>.
+          </p>
+        </article>
       </div>
-      <small>No content or IPTV subscription included.</small>
+    </section>
+
+    <section class="faq-section" id="faq" aria-labelledby="faq-title" data-guide-context="faq">
+      <p class="eyebrow centered"><span></span> Frequently asked questions</p>
+      <h2 id="faq-title">Everything you need to know before you start.</h2>
+      <div class="faq-list">
+        <article class="faq-item">
+          <h3>
+            <button class="faq-question" type="button" aria-expanded="false" aria-controls="faq-answer-content">
+              What does a Norva subscription include?
+              <span aria-hidden="true">+</span>
+            </button>
+          </h3>
+          <div class="faq-answer faq-panel" id="faq-answer-content" hidden>
+            <p>Your subscription includes Norva's interface, organization, playback and synchronization features. Media access remains with a compatible source you are authorized to use.</p>
+          </div>
+        </article>
+
+        <article class="faq-item">
+          <h3>
+            <button class="faq-question" type="button" aria-expanded="false" aria-controls="faq-answer-devices">
+              Where can I use Norva?
+              <span aria-hidden="true">+</span>
+            </button>
+          </h3>
+          <div class="faq-answer faq-panel" id="faq-answer-devices" hidden>
+            <p>Norva is available on the Web, and its mobile and TV apps are available now from their supported app stores.</p>
+          </div>
+        </article>
+
+        <article class="faq-item">
+          <h3>
+            <button class="faq-question" type="button" aria-expanded="false" aria-controls="faq-answer-requirements">
+              What do I need to use Norva?
+              <span aria-hidden="true">+</span>
+            </button>
+          </h3>
+          <div class="faq-answer faq-panel" id="faq-answer-requirements" hidden>
+            <p>A Norva account, a supported device and a compatible media source you have legitimate access to.</p>
+          </div>
+        </article>
+
+        <article class="faq-item">
+          <h3>
+            <button class="faq-question" type="button" aria-expanded="false" aria-controls="faq-answer-sync">
+              Can I resume playback on another device?
+              <span aria-hidden="true">+</span>
+            </button>
+          </h3>
+          <div class="faq-answer faq-panel" id="faq-answer-sync" hidden>
+            <p>Yes. Norva synchronizes playback progress, favorites and preferences across supported devices.</p>
+          </div>
+        </article>
+
+        <article class="faq-item">
+          <h3>
+            <button class="faq-question" type="button" aria-expanded="false" aria-controls="faq-answer-trial">
+              How does the 7-day free trial work?
+              <span aria-hidden="true">+</span>
+            </button>
+          </h3>
+          <div class="faq-answer faq-panel" id="faq-answer-trial" hidden>
+            <p>A payment method is required. The selected plan starts after the trial unless you cancel, and Norva sends a reminder before renewal.</p>
+          </div>
+        </article>
+
+        <article class="faq-item">
+          <h3>
+            <button class="faq-question" type="button" aria-expanded="false" aria-controls="faq-answer-offline">
+              Is offline access available everywhere?
+              <span aria-hidden="true">+</span>
+            </button>
+          </h3>
+          <div class="faq-answer faq-panel" id="faq-answer-offline" hidden>
+            <p>Offline availability depends on the device, source and rights associated with the media.</p>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section class="final-cta" aria-labelledby="final-cta-title" data-guide-context="final">
+      <h2 id="final-cta-title">Bring every screen into one Norva experience.</h2>
+      <p>Start your trial, connect a compatible source and keep your catalog, progress and preferences together.</p>
+      <div>
+        <a class="primary-btn light" href="/account.html?returnTo=%2Fsubscribe.html%3Fplan%3Dplus%26period%3Dmonthly" data-cta="final" data-auth-action>
+          Start my 7-day free trial <span aria-hidden="true">-&gt;</span>
+        </a>
+        <a class="secondary-btn light" href="#product-preview" data-cta="final-secondary">See Norva in action</a>
+      </div>
+      <small>Payment method required &middot; Reminder before renewal &middot; Cancel anytime</small>
     </section>
   </main>
 
+  <aside class="norva-guide" data-norva-guide data-state="compact" hidden
+    aria-label="Norva page guide">
+    <div class="norva-guide__card" id="norva-guide-panel">
+      <div class="norva-guide__header">
+        <picture class="norva-guide__brand" aria-hidden="true">
+          <source type="image/webp" srcset="/img/norva-app-icon-96.webp">
+          <img src="/img/norva-app-icon-96.png" width="40" height="40" alt="">
+        </picture>
+        <div class="norva-guide__heading">
+          <span>Norva guide</span>
+          <strong data-guide-title>Norva is available now</strong>
+        </div>
+        <button class="norva-guide__icon-button" type="button" data-guide-minimize
+          aria-label="Minimize the Norva guide" aria-controls="norva-guide-panel" aria-expanded="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" aria-hidden="true"><path d="M5 12h14"/></svg>
+        </button>
+        <button class="norva-guide__icon-button" type="button" data-guide-dismiss
+          aria-label="Reduce the Norva guide to its icon for this visit">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+      <p class="norva-guide__message" data-guide-message>
+        Use Norva on the Web, mobile and TV with one synchronized account.
+      </p>
+      <a class="norva-guide__cta" href="#availability" data-guide-cta>
+        <span data-guide-cta-label>See supported screens</span>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+          stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M5 12h14M13 6l6 6-6 6"/>
+        </svg>
+      </a>
+      <div class="norva-guide__footer">
+        <span data-guide-context-label>Available now</span>
+        <div>
+          <button type="button" data-guide-pause aria-pressed="false">Pause updates</button>
+          <button type="button" data-guide-next>Next tip</button>
+        </div>
+      </div>
+    </div>
+
+    <button class="norva-guide__compact" type="button" data-guide-compact hidden
+      aria-controls="norva-guide-panel" aria-expanded="false">
+      <picture aria-hidden="true">
+        <source type="image/webp" srcset="/img/norva-app-icon-96.webp">
+        <img src="/img/norva-app-icon-96.png" width="36" height="36" alt="">
+      </picture>
+      <span><small>Norva guide</small><strong data-guide-compact-title>Norva is available now</strong></span>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+        stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 10 4 4 4-4"/></svg>
+    </button>
+
+    <button class="norva-guide__launcher" type="button" data-guide-launcher hidden
+      aria-controls="norva-guide-panel" aria-expanded="false" aria-label="Open the Norva page guide">
+      <picture aria-hidden="true">
+        <source type="image/webp" srcset="/img/norva-app-icon-96.webp">
+        <img src="/img/norva-app-icon-96.png" width="34" height="34" alt="">
+      </picture>
+      <span aria-hidden="true"></span>
+    </button>
+    <span class="sr-only" role="status" aria-live="polite" aria-atomic="true" data-guide-status></span>
+  </aside>
+
   <footer class="landing-footer">
     <div>
-      <a class="brand" href="/" data-norva-home-link><picture><source type="image/webp" srcset="/img/norva-app-icon-96.webp"><img src="/img/norva-app-icon-96.png" width="38" height="38" alt="" decoding="async"></picture><span>Norva</span></a>
-      <p>The cloud media player that organizes your compatible source and syncs your experience across screens.</p>
+      <a class="brand" href="/" data-norva-home-link aria-label="Norva home">
+        <picture>
+          <source type="image/webp" srcset="/img/norva-app-icon-96.webp">
+          <img src="/img/norva-app-icon-96.png" width="38" height="38" alt="" decoding="async">
+        </picture>
+        <span>Norva</span>
+      </a>
+      <p>The cloud media player that organizes a compatible source and keeps your experience synchronized across screens.</p>
     </div>
-    <nav>
+
+    <nav aria-label="Product">
       <strong>Product</strong>
-      <a href="#features">Features</a>
-      <a href="#devices">Devices</a>
+      <a href="#features">Benefits</a>
+      <a href="#how-it-works">How it works</a>
       <a href="#pricing">Pricing</a>
     </nav>
-    <nav>
+    <nav aria-label="Resources">
       <strong>Resources</strong>
-      <a href="#faq">Help center</a>
-      <a href="#devices">Compatibility</a>
-          <a href="/account.html?returnTo=%2Fapp%23settings">Account</a>
+      <a href="#faq">FAQ</a>
+      <a href="#product-preview">Product preview</a>
+      <a href="/account.html?returnTo=%2Fapp%23settings">Account</a>
     </nav>
-    <nav>
+    <nav aria-label="Legal">
       <strong>Legal</strong>
       <a href="/terms.html">Terms</a>
       <a href="/privacy.html">Privacy</a>
       <a href="/terms.html">Acceptable use</a>
       <a href="/mentions-legales.html">Legal notice</a>
     </nav>
-    <nav>
+    <nav aria-label="Account">
       <strong>Account</strong>
-          <a href="/account.html?returnTo=%2Fapp%23home">Sign in</a>
-          <a href="/account.html?returnTo=%2Fapp%23home">Create my space</a>
+      <a href="/account.html?returnTo=%2Fapp%23home" data-auth-action>Sign in</a>
+      <a href="/account.html?returnTo=%2Fsubscribe.html%3Fplan%3Dplus%26period%3Dmonthly" data-cta="footer" data-auth-action>Start my 7-day free trial</a>
     </nav>
-    <p class="footer-bottom">&copy; 2026 Norva. Norva is a media player. No content is provided.</p>
+    <p class="footer-bottom">&copy; 2026 Norva. Norva is a media player. Use requires a compatible source you are authorized to access.</p>
   </footer>
 
   <script src="/js/starfield.js?v=5" defer></script>
-  <script src="/js/landing.js?v=11" defer></script>
+  <script src="/js/landing.js?v=15" defer></script>
+</body>
+
+</html>
+
+  <link rel="canonical" href="https://norva.tv/">
+  <meta name="theme-color" content="#070b17">
+
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Norva">
+  <meta property="og:title" content="Norva | Your media catalog on every screen">
+  <meta property="og:description" content="One organized media experience across the Web, mobile and TV apps.">
+  <meta property="og:url" content="https://norva.tv/">
+  <meta property="og:image" content="https://norva.tv/img/devices/norva-device-tv.webp?v=1">
+  <meta property="og:image:alt" content="Norva running on a TV">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Norva | Your media catalog on every screen">
+  <meta name="twitter:description" content="One organized media experience across the Web, mobile and TV apps.">
+  <meta name="twitter:image" content="https://norva.tv/img/devices/norva-device-tv.webp?v=1">
+
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" as="image" href="/img/devices/norva-device-tv.webp?v=1" fetchpriority="high">
+  <script>
+    try {
+      var n = navigator;
+      var lite = (window.matchMedia && (matchMedia('(pointer: coarse)').matches || matchMedia('(max-width: 1024px)').matches))
+        || (n.hardwareConcurrency && n.hardwareConcurrency <= 6)
+        || (n.deviceMemory && n.deviceMemory <= 6);
+      if (lite) document.documentElement.classList.add('norva-lite');
+    } catch (e) {}
+  </script>
+  <link rel="stylesheet" href="/css/landing.css?v=36">
+
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "SoftwareApplication",
+      "name": "Norva",
+      "url": "https://norva.tv/",
+      "applicationCategory": "MultimediaApplication",
+      "operatingSystem": "Web, mobile and TV",
+      "description": "A cloud media player that organizes a compatible media source and synchronizes playback across screens."
+    }
+  </script>
+</head>
+
+<body>
+  <a class="skip-link" href="#main-content">Skip to content</a>
+
+  <header class="landing-nav">
+    <a class="brand" href="/" data-norva-home-link aria-label="Norva home">
+      <picture>
+        <source type="image/webp" srcset="/img/norva-app-icon-96.webp">
+        <img src="/img/norva-app-icon-96.png" width="38" height="38" alt="" decoding="async">
+      </picture>
+      <span>Norva</span>
+    </a>
+
+    <button class="nav-toggle" type="button" aria-label="Open navigation" aria-expanded="false"
+      aria-controls="landing-navigation">
+      <span></span>
+      <span></span>
+      <span></span>
+    </button>
+
+    <nav class="nav-links" id="landing-navigation" aria-label="Primary navigation">
+      <a href="#features">Benefits</a>
+      <a href="#how-it-works">How it works</a>
+      <a href="#pricing">Pricing</a>
+      <a href="#faq">FAQ</a>
+    </nav>
+
+    <div class="nav-actions">
+      <a class="login-link" href="/account.html?returnTo=%2Fapp%23home" data-auth-action>Sign in</a>
+      <a class="nav-cta" href="/account.html?returnTo=%2Fsubscribe.html%3Fplan%3Dplus%26period%3Dmonthly" data-cta="nav" data-auth-action>
+        Start my 7-day free trial
+      </a>
+    </div>
+  </header>
+
+  <main id="main-content" tabindex="-1">
+    <section class="hero-section" aria-labelledby="hero-title" data-guide-context="hero">
+      <div class="hero-content">
+        <p class="eyebrow"><span></span> Available now on Web, mobile and TV</p>
+        <h1 id="hero-title">Your catalog. Every screen. One experience.</h1>
+        <p class="hero-copy">
+          Connect a compatible media source, organize your catalog and resume exactly where you left off
+          across the Web, mobile and TV apps.
+        </p>
+        <div class="hero-actions">
+          <a class="primary-btn" href="/account.html?returnTo=%2Fsubscribe.html%3Fplan%3Dplus%26period%3Dmonthly" data-cta="hero-primary" data-auth-action>
+            Start my 7-day free trial <span aria-hidden="true">-&gt;</span>
+          </a>
+          <a class="secondary-btn" href="#product-preview" data-cta="hero-secondary">See Norva in action</a>
+        </div>
+        <p class="trial-note">Payment method required &middot; 7 days free, then from US$4.99/month &middot; Reminder before renewal &middot; Cancel anytime</p>
+        <p class="legal-note">
+          Norva is the software layer that organizes and plays a compatible source you are authorized to use.
+          Media access remains with that source.
+        </p>
+      </div>
+
+      <div class="hero-visual" aria-label="Norva running on a TV and a mobile phone">
+        <div class="hero-stage">
+          <img class="dev dev-tv" src="/img/devices/norva-device-tv.webp?v=1"
+            alt="Norva catalog displayed on a TV" width="1280" height="767" fetchpriority="high" decoding="async">
+          <img class="dev dev-phone" src="/img/devices/norva-device-phone.webp?v=1"
+            alt="Norva catalog displayed on a mobile phone" width="520" height="1066" decoding="async">
+        </div>
+      </div>
+    </section>
+
+    <section class="availability-strip" id="availability" aria-labelledby="availability-title"
+      data-guide-context="availability">
+      <p class="eyebrow centered"><span></span> Ready on your screens</p>
+      <h2 id="availability-title">Use Norva now, wherever you watch.</h2>
+      <p class="section-copy">
+        The Web experience and the mobile and TV apps are available now. Your account keeps the same catalog,
+        progress and preferences across supported devices.
+      </p>
+      <div class="availability-grid">
+        <article>
+          <span class="mini-icon feature-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+              stroke-linecap="round" stroke-linejoin="round">
+              <rect x="2" y="3" width="20" height="14" rx="2"/>
+              <line x1="8" y1="21" x2="16" y2="21"/>
+              <line x1="12" y1="17" x2="12" y2="21"/>
+            </svg>
+          </span>
+          <h3>Web</h3>
+          <p>Open Norva in a compatible browser with no installation required.</p>
+        </article>
+        <article>
+          <span class="mini-icon feature-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+              stroke-linecap="round" stroke-linejoin="round">
+              <rect x="5" y="2" width="14" height="20" rx="2"/>
+              <line x1="12" y1="18" x2="12.01" y2="18"/>
+            </svg>
+          </span>
+          <h3>Mobile app</h3>
+          <p>Available now from its supported app store.</p>
+        </article>
+        <article>
+          <span class="mini-icon feature-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+              stroke-linecap="round" stroke-linejoin="round">
+              <rect x="2" y="7" width="20" height="13" rx="2"/>
+              <polyline points="17 2 12 7 7 2"/>
+            </svg>
+          </span>
+          <h3>TV app</h3>
+          <p>Available now from its supported app store, with remote-friendly navigation.</p>
+        </article>
+        <article>
+          <span class="mini-icon feature-icon" aria-hidden="true">
+            <img src="/assets/landing/norva-icon-cloud-sync.svg?v=1" alt="">
+          </span>
+          <h3>Cloud sync</h3>
+          <p>Progress, favorites and preferences stay attached to your account.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="features-section" id="features" aria-labelledby="benefits-title"
+      data-guide-context="features">
+      <p class="eyebrow centered"><span></span> Built around your experience</p>
+      <h2 id="benefits-title">Less searching. More watching.</h2>
+      <p class="section-copy">Norva turns a compatible source into one clear, consistent experience across screens.</p>
+      <div class="benefit-grid">
+        <article class="benefit-card">
+          <span class="mini-icon feature-icon" aria-hidden="true">
+            <img src="/assets/landing/norva-icon-cloud-sync.svg?v=1" alt="">
+          </span>
+          <h3>Continue without losing your place</h3>
+          <p>Pause on one screen and resume from the same point on another, with your favorites and history in sync.</p>
+        </article>
+        <article class="benefit-card">
+          <span class="mini-icon feature-icon" aria-hidden="true">
+            <img src="/assets/landing/norva-icon-compatible-sources.svg?v=1" alt="">
+          </span>
+          <h3>Find what matters faster</h3>
+          <p>Browse an organized catalog, group versions and surface useful recommendations from your own source.</p>
+        </article>
+        <article class="benefit-card">
+          <span class="mini-icon feature-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+              stroke-linecap="round" stroke-linejoin="round">
+              <rect x="2" y="5" width="20" height="14" rx="3"/>
+              <path d="M6 10.5h7"/>
+              <path d="M16 10.5h2"/>
+              <path d="M6 14h4"/>
+              <path d="M13 14h5"/>
+            </svg>
+          </span>
+          <h3>Watch your way</h3>
+          <p>Keep language preferences, subtitles and device-friendly controls ready for every profile.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="steps-section" id="how-it-works" aria-labelledby="steps-title"
+      data-guide-context="steps">
+      <p class="eyebrow centered"><span></span> A clear path to your catalog</p>
+      <h2 id="steps-title">Your Norva space in three steps.</h2>
+      <p class="section-copy">You stay in control of your source. Norva handles the interface, organization and continuity.</p>
+      <div class="step-grid">
+        <article>
+          <span>01</span>
+          <h3>Create your space</h3>
+          <p>Start your Norva trial and set up the profiles your household needs.</p>
+          <small>Your account, your preferences</small>
+        </article>
+        <article>
+          <span>02</span>
+          <h3>Connect your source</h3>
+          <p>Add a compatible media source you already have legitimate access to.</p>
+          <small>You remain in control</small>
+        </article>
+        <article>
+          <span>03</span>
+          <h3>Watch across screens</h3>
+          <p>Explore your organized catalog and keep your progress synchronized.</p>
+          <small>Web, mobile and TV</small>
+        </article>
+      </div>
+    </section>
+
+    <section class="notification-section" id="product-preview" aria-labelledby="notification-title"
+      data-guide-context="preview">
+      <div class="notification-copy">
+        <p class="eyebrow"><span></span> Guided product tour</p>
+        <h2 id="notification-title">The right Norva benefit, at the right moment.</h2>
+        <p>
+          The floating Norva guide adapts as you move through the page. It highlights one useful feature
+          or next step at a time, without interrupting what you are doing.
+        </p>
+        <ul class="check-list">
+          <li><strong>Available now</strong><span>See where you can use Norva across the Web, mobile and TV.</span></li>
+          <li><strong>Useful in context</strong><span>Discover cross-screen continuity, setup and account controls as they become relevant.</span></li>
+          <li><strong>Always under your control</strong><span>Pause, minimize or reduce the guide to the Norva icon at any time.</span></li>
+        </ul>
+        <div class="notification-demo-actions">
+          <button class="secondary-btn notification-demo-trigger" type="button" data-guide-preview
+            aria-controls="norva-guide-panel" aria-expanded="false">
+            Open the floating guide
+          </button>
+          <small>It remains available while you scroll and never takes over the page.</small>
+        </div>
+      </div>
+
+      <div class="notification-guide-map" aria-label="How the floating Norva guide follows the page">
+        <ol>
+          <li><span>01</span><div><small>At the top</small><strong>Availability and supported screens</strong></div></li>
+          <li><span>02</span><div><small>While exploring</small><strong>Benefits and simple setup</strong></div></li>
+          <li><span>03</span><div><small>When deciding</small><strong>Trial terms and the clearest next step</strong></div></li>
+        </ol>
+      </div>
+    </section>
+
+    <section class="pricing-section" id="pricing" aria-labelledby="pricing-title"
+      data-guide-context="pricing">
+      <p class="eyebrow centered"><span></span> Clear software plans</p>
+      <h2 id="pricing-title">Choose the Norva space that fits your home.</h2>
+      <p class="section-copy">
+        Every plan includes the complete Norva software experience and starts with a 7-day free trial.
+        Media access remains with the compatible source you connect.
+      </p>
+
+      <div class="billing-toggle" role="group" aria-label="Billing period">
+        <button type="button" class="billing-opt is-active" data-period="monthly" aria-pressed="true">Monthly</button>
+        <button type="button" class="billing-opt" data-period="annual" aria-pressed="false">
+          Annual <span class="save-badge">Save 30%</span>
+        </button>
+      </div>
+
+      <p class="pricing-status" role="status" aria-live="polite" aria-atomic="true"></p>
+
+      <div class="pricing-grid">
+        <article>
+          <h3>Norva</h3>
+          <p>Everything Norva does, on your main screens.</p>
+          <div class="price" data-monthly="4.99" data-annual="41.99" data-annual-suffix="/yr">
+            <span class="price-cur">US$</span><span class="price-amount">4.99</span><span class="price-period">/mo</span>
+          </div>
+          <small class="price-note" data-annual-note="That's about US$3.50/mo, billed yearly."></small>
+          <a class="pricing-cta" data-plan="plus" data-cta="plan"
+            href="/account.html?returnTo=%2Fsubscribe.html%3Fplan%3Dplus%26period%3Dmonthly">
+            Start my 7-day free trial
+          </a>
+          <small class="pricing-terms"
+            data-monthly-terms="7 days free, then US$4.99/month until canceled. Payment method required; reminder before renewal; taxes may apply."
+            data-annual-terms="7 days free, then US$41.99/year until canceled. Payment method required; reminder before renewal; taxes may apply.">
+            7 days free, then US$4.99/month until canceled. Payment method required; reminder before renewal; taxes may apply.
+          </small>
+          <ul>
+            <li>Up to 2 profiles</li>
+            <li>Sync across Web, mobile and TV</li>
+            <li>Offline access where supported by your device and authorized source</li>
+            <li>Every Norva feature included</li>
+          </ul>
+        </article>
+
+        <article class="featured">
+          <h3>Norva Family</h3>
+          <p>The complete Norva experience for more profiles at home.</p>
+          <div class="price" data-monthly="8.99" data-annual="75.99" data-annual-suffix="/yr">
+            <span class="price-cur">US$</span><span class="price-amount">8.99</span><span class="price-period">/mo</span>
+          </div>
+          <small class="price-note" data-annual-note="That's about US$6.33/mo, billed yearly."></small>
+          <a class="pricing-cta" data-plan="family" data-cta="plan"
+            href="/account.html?returnTo=%2Fsubscribe.html%3Fplan%3Dfamily%26period%3Dmonthly">
+            Start my 7-day free trial
+          </a>
+          <small class="pricing-terms"
+            data-monthly-terms="7 days free, then US$8.99/month until canceled. Payment method required; reminder before renewal; taxes may apply."
+            data-annual-terms="7 days free, then US$75.99/year until canceled. Payment method required; reminder before renewal; taxes may apply.">
+            7 days free, then US$8.99/month until canceled. Payment method required; reminder before renewal; taxes may apply.
+          </small>
+          <ul>
+            <li>Up to 5 profiles</li>
+            <li>Sync across Web, mobile and TV</li>
+            <li>Offline access where supported by your device and authorized source</li>
+            <li>Every Norva feature included</li>
+          </ul>
+        </article>
+      </div>
+    </section>
+
+    <section class="features-section scope-section" id="trust" aria-labelledby="trust-title"
+      data-guide-context="trust">
+      <p class="eyebrow centered"><span></span> A clear, accountable service</p>
+      <h2 id="trust-title">Know exactly what Norva does.</h2>
+      <p class="section-copy">One compact promise: useful software, transparent billing and control over your account.</p>
+      <div class="scope-grid">
+        <article>
+          <span class="mini-icon feature-icon" aria-hidden="true">
+            <img src="/assets/landing/norva-icon-no-content.svg?v=1" alt="">
+          </span>
+          <h3>The Norva software experience</h3>
+          <p>Your subscription covers the interface, organization, playback and synchronization features. Media access remains with your compatible source.</p>
+        </article>
+        <article>
+          <span class="mini-icon feature-icon" aria-hidden="true">
+            <img src="/assets/landing/norva-icon-compatible-sources.svg?v=1" alt="">
+          </span>
+          <h3>Your source stays yours</h3>
+          <p>You connect access you already own and are authorized to use, and remain responsible for its terms.</p>
+        </article>
+        <article>
+          <span class="mini-icon feature-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+            </svg>
+          </span>
+          <h3>Account privacy controls</h3>
+          <p>Access or delete your account data, with controls designed around GDPR requirements and documented in our Privacy Policy.</p>
+        </article>
+        <article>
+          <span class="mini-icon feature-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 21h18"/>
+              <path d="M5 21V7l7-4 7 4v14"/>
+            </svg>
+          </span>
+          <h3>Registered operator</h3>
+          <p>
+            Norva is operated by a registered French business (RCS Paris 824&nbsp;852&nbsp;081).
+            <a href="/mentions-legales.html">Read the legal notice</a>.
+          </p>
+        </article>
+      </div>
+    </section>
+
+    <section class="faq-section" id="faq" aria-labelledby="faq-title" data-guide-context="faq">
+      <p class="eyebrow centered"><span></span> Frequently asked questions</p>
+      <h2 id="faq-title">Everything you need to know before you start.</h2>
+      <div class="faq-list">
+        <article class="faq-item">
+          <h3>
+            <button class="faq-question" type="button" aria-expanded="false" aria-controls="faq-answer-content">
+              What does a Norva subscription include?
+              <span aria-hidden="true">+</span>
+            </button>
+          </h3>
+          <div class="faq-answer faq-panel" id="faq-answer-content" hidden>
+            <p>Your subscription includes Norva's interface, organization, playback and synchronization features. Media access remains with a compatible source you are authorized to use.</p>
+          </div>
+        </article>
+
+        <article class="faq-item">
+          <h3>
+            <button class="faq-question" type="button" aria-expanded="false" aria-controls="faq-answer-devices">
+              Where can I use Norva?
+              <span aria-hidden="true">+</span>
+            </button>
+          </h3>
+          <div class="faq-answer faq-panel" id="faq-answer-devices" hidden>
+            <p>Norva is available on the Web, and its mobile and TV apps are available now from their supported app stores.</p>
+          </div>
+        </article>
+
+        <article class="faq-item">
+          <h3>
+            <button class="faq-question" type="button" aria-expanded="false" aria-controls="faq-answer-requirements">
+              What do I need to use Norva?
+              <span aria-hidden="true">+</span>
+            </button>
+          </h3>
+          <div class="faq-answer faq-panel" id="faq-answer-requirements" hidden>
+            <p>A Norva account, a supported device and a compatible media source you have legitimate access to.</p>
+          </div>
+        </article>
+
+        <article class="faq-item">
+          <h3>
+            <button class="faq-question" type="button" aria-expanded="false" aria-controls="faq-answer-sync">
+              Can I resume playback on another device?
+              <span aria-hidden="true">+</span>
+            </button>
+          </h3>
+          <div class="faq-answer faq-panel" id="faq-answer-sync" hidden>
+            <p>Yes. Norva synchronizes playback progress, favorites and preferences across supported devices.</p>
+          </div>
+        </article>
+
+        <article class="faq-item">
+          <h3>
+            <button class="faq-question" type="button" aria-expanded="false" aria-controls="faq-answer-trial">
+              How does the 7-day free trial work?
+              <span aria-hidden="true">+</span>
+            </button>
+          </h3>
+          <div class="faq-answer faq-panel" id="faq-answer-trial" hidden>
+            <p>A payment method is required. The selected plan starts after the trial unless you cancel, and Norva sends a reminder before renewal.</p>
+          </div>
+        </article>
+
+        <article class="faq-item">
+          <h3>
+            <button class="faq-question" type="button" aria-expanded="false" aria-controls="faq-answer-offline">
+              Is offline access available everywhere?
+              <span aria-hidden="true">+</span>
+            </button>
+          </h3>
+          <div class="faq-answer faq-panel" id="faq-answer-offline" hidden>
+            <p>Offline availability depends on the device, source and rights associated with the media.</p>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section class="final-cta" aria-labelledby="final-cta-title" data-guide-context="final">
+      <h2 id="final-cta-title">Bring every screen into one Norva experience.</h2>
+      <p>Start your trial, connect a compatible source and keep your catalog, progress and preferences together.</p>
+      <div>
+        <a class="primary-btn light" href="/account.html?returnTo=%2Fsubscribe.html%3Fplan%3Dplus%26period%3Dmonthly" data-cta="final" data-auth-action>
+          Start my 7-day free trial <span aria-hidden="true">-&gt;</span>
+        </a>
+        <a class="secondary-btn light" href="#product-preview" data-cta="final-secondary">See Norva in action</a>
+      </div>
+      <small>Payment method required &middot; Reminder before renewal &middot; Cancel anytime</small>
+    </section>
+  </main>
+
+  <aside class="norva-guide" data-norva-guide data-state="compact" hidden
+    aria-label="Norva page guide">
+    <div class="norva-guide__card" id="norva-guide-panel">
+      <div class="norva-guide__header">
+        <picture class="norva-guide__brand" aria-hidden="true">
+          <source type="image/webp" srcset="/img/norva-app-icon-96.webp">
+          <img src="/img/norva-app-icon-96.png" width="40" height="40" alt="">
+        </picture>
+        <div class="norva-guide__heading">
+          <span>Norva guide</span>
+          <strong data-guide-title>Norva is available now</strong>
+        </div>
+        <button class="norva-guide__icon-button" type="button" data-guide-minimize
+          aria-label="Minimize the Norva guide" aria-controls="norva-guide-panel" aria-expanded="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" aria-hidden="true"><path d="M5 12h14"/></svg>
+        </button>
+        <button class="norva-guide__icon-button" type="button" data-guide-dismiss
+          aria-label="Reduce the Norva guide to its icon for this visit">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+      <p class="norva-guide__message" data-guide-message>
+        Use Norva on the Web, mobile and TV with one synchronized account.
+      </p>
+      <a class="norva-guide__cta" href="#availability" data-guide-cta>
+        <span data-guide-cta-label>See supported screens</span>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+          stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M5 12h14M13 6l6 6-6 6"/>
+        </svg>
+      </a>
+      <div class="norva-guide__footer">
+        <span data-guide-context-label>Available now</span>
+        <div>
+          <button type="button" data-guide-pause aria-pressed="false">Pause updates</button>
+          <button type="button" data-guide-next>Next tip</button>
+        </div>
+      </div>
+    </div>
+
+    <button class="norva-guide__compact" type="button" data-guide-compact hidden
+      aria-controls="norva-guide-panel" aria-expanded="false">
+      <picture aria-hidden="true">
+        <source type="image/webp" srcset="/img/norva-app-icon-96.webp">
+        <img src="/img/norva-app-icon-96.png" width="36" height="36" alt="">
+      </picture>
+      <span><small>Norva guide</small><strong data-guide-compact-title>Norva is available now</strong></span>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+        stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 10 4 4 4-4"/></svg>
+    </button>
+
+    <button class="norva-guide__launcher" type="button" data-guide-launcher hidden
+      aria-controls="norva-guide-panel" aria-expanded="false" aria-label="Open the Norva page guide">
+      <picture aria-hidden="true">
+        <source type="image/webp" srcset="/img/norva-app-icon-96.webp">
+        <img src="/img/norva-app-icon-96.png" width="34" height="34" alt="">
+      </picture>
+      <span aria-hidden="true"></span>
+    </button>
+    <span class="sr-only" role="status" aria-live="polite" aria-atomic="true" data-guide-status></span>
+  </aside>
+
+  <footer class="landing-footer">
+    <div>
+      <a class="brand" href="/" data-norva-home-link aria-label="Norva home">
+        <picture>
+          <source type="image/webp" srcset="/img/norva-app-icon-96.webp">
+          <img src="/img/norva-app-icon-96.png" width="38" height="38" alt="" decoding="async">
+        </picture>
+        <span>Norva</span>
+      </a>
+      <p>The cloud media player that organizes a compatible source and keeps your experience synchronized across screens.</p>
+    </div>
+
+    <nav aria-label="Product">
+      <strong>Product</strong>
+      <a href="#features">Benefits</a>
+      <a href="#how-it-works">How it works</a>
+      <a href="#pricing">Pricing</a>
+    </nav>
+    <nav aria-label="Resources">
+      <strong>Resources</strong>
+      <a href="#faq">FAQ</a>
+      <a href="#product-preview">Product preview</a>
+      <a href="/account.html?returnTo=%2Fapp%23settings">Account</a>
+    </nav>
+    <nav aria-label="Legal">
+      <strong>Legal</strong>
+      <a href="/terms.html">Terms</a>
+      <a href="/privacy.html">Privacy</a>
+      <a href="/terms.html">Acceptable use</a>
+      <a href="/mentions-legales.html">Legal notice</a>
+    </nav>
+    <nav aria-label="Account">
+      <strong>Account</strong>
+      <a href="/account.html?returnTo=%2Fapp%23home" data-auth-action>Sign in</a>
+      <a href="/account.html?returnTo=%2Fsubscribe.html%3Fplan%3Dplus%26period%3Dmonthly" data-cta="footer" data-auth-action>Start my 7-day free trial</a>
+    </nav>
+    <p class="footer-bottom">&copy; 2026 Norva. Norva is a media player. Use requires a compatible source you are authorized to access.</p>
+  </footer>
+
+  <script src="/js/starfield.js?v=5" defer></script>
+  <script src="/js/landing.js?v=15" defer></script>
 </body>
 
 </html>
