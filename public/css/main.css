@@ -12108,7 +12108,14 @@ mark.search-highlight {
   gap: 2px;
   width: 100%;
   flex: 1 1 auto;
+  /* tv-mode ALWAYS uses the vertical rail as the D-pad menu (every tvNavigation
+     guard targets .navbar). Beat the <=640px phone breakpoint (.navbar-menu{display:
+     none!important}, main.css:12773) on specificity so a narrow tv-mode viewport
+     (e.g. ?tv=1 desktop testing) never swaps in the .bottom-nav the guards don't cover. */
+  display: flex !important;
 }
+/* Corollary: tv-mode never shows the phone bottom tab bar — the rail is the menu. */
+.tv-mode .bottom-nav { display: none !important; }
 .tv-mode .navbar-menu .nav-link {
   justify-content: flex-start;
   padding: 9px 16px 9px 31px;       /* 26px icon centred at x=44 in the column */

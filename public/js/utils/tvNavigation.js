@@ -52,7 +52,11 @@
         // region prompt — correctly captures navigation instead of the one beneath.
         // #norva-region-prompt is the first-run region dialog (cloudApi.js): listing
         // it here traps the D-pad inside it and lets Back/Escape dismiss it.
-        const modals = document.querySelectorAll('#modal.active, .modal-overlay.active, .np-overlay, #norva-region-prompt');
+        // .norva-modal-overlay is the promise-based NorvaModal (confirm/alert): it is
+        // shown by being in the DOM (no `.active` class) and removed on close, so its
+        // mere presence means it is open — listing it confines the arrows to the dialog
+        // AND lets closeTopModal()/hardware-Back dismiss it (see closeTopModal below).
+        const modals = document.querySelectorAll('#modal.active, .modal-overlay.active, .np-overlay, #norva-region-prompt, .norva-modal-overlay');
         return modals[modals.length - 1] || null;
     }
 
@@ -101,6 +105,15 @@
         return getCandidates().filter(el => page.contains(el));
     }
 
+    // First candidate that is NOT a text input. Used wherever we fall back to "the
+    // page's first candidate" on page-entry / focus restoration, so a still-loading
+    // page never traps the D-pad in a search box (focusing one raises the IME and
+    // makes Left a caret move). Degrades to the raw first candidate if all are text.
+    function firstNonTextCandidate(list) {
+        if (!list || !list.length) return null;
+        return list.find((el) => !isTextField(el)) || list[0];
+    }
+
     // Live TV's first candidate in DOM order is the #channel-search text input, a poor
     // D-pad landing (raises the IME, and Left becomes a caret move so the menu is no
     // longer one press away). Prefer an actionable, directional target on that page.
@@ -108,7 +121,14 @@
         if (page && page.id === 'page-live') {
             return page.querySelector('#channel-list .group-header, #channel-list .channel-item')
                 || page.querySelector('.player-section .live-guide-preview [data-action="watch"]')
-                || page.querySelector('.player-section .live-guide-row');
+                || page.querySelector('.player-section .live-guide-row')
+                // Still loading (no channel rows yet): fall back to an actionable, NON-TEXT
+                // sidebar control so the dive/initial-focus never lands on #channel-search —
+                // focusing that text field raises the on-screen IME and turns Left into a
+                // caret move, breaking the "menu is one Left press away" guarantee.
+                || [...page.querySelectorAll('#source-select, #toggle-groups, #live-hide-broken-btn')]
+                    .find((el) => isVisible(el) && !el.disabled)
+                || null;
         }
         return null;
     }
@@ -156,6 +176,15 @@
     function closeTopModal() {
         const modal = openModal();
         if (!modal) return false;
+        // NorvaModal dialogs (.norva-modal-overlay) are promise-based: their buttons are
+        // wired with addEventListener and the dialog dismisses by REMOVING its node (there
+        // is no `active` class to strip, and no `.onclick`). Click Cancel — else Confirm/OK
+        // for a single-button alert — so the pending Promise resolves (false / true) and the
+        // overlay tears itself down. Stripping a class here would orphan a full-screen veil.
+        if (modal.classList.contains('norva-modal-overlay')) {
+            const btn = modal.querySelector('.norva-modal-cancel') || modal.querySelector('.norva-modal-confirm');
+            if (btn) { btn.click(); return true; }
+        }
         const closeBtn = modal.querySelector('.modal-close, #modal-cancel');
         if (closeBtn && typeof closeBtn.onclick === 'function') {
             try { closeBtn.onclick(); } catch (e) { /* fall through to class removal */ }
@@ -201,6 +230,25 @@
                 bestScore = score;
                 best = el;
             }
+        }
+        return best;
+    }
+
+    // Nearest candidate strictly BELOW `from` that lives in the rail (.navbar), chosen
+    // by vertical position only (ignoring findNext's lateral penalty). In tv-mode the
+    // rail packs nav-links at the top and the utility cluster (search / bell / profile)
+    // at the very bottom with a large flex gap between; findNext's forward+lateral*2.5
+    // score lets a nearby content card out-rank the distant utility button, so a plain
+    // Down would skip the cluster and dive into content. This walks the rail by geometry.
+    function navbarCandidateBelow(from) {
+        const fromBottom = from.getBoundingClientRect().bottom;
+        const { els, rects } = getCandidatesWithRects();
+        let best = null;
+        let bestTop = Infinity;
+        for (let i = 0; i < els.length; i++) {
+            if (els[i] === from || !els[i].closest('.navbar')) continue;
+            const top = rects[i].top;
+            if (top > fromBottom - 4 && top < bestTop) { bestTop = top; best = els[i]; }
         }
         return best;
     }
@@ -371,24 +419,44 @@
             const anchored = lastFocusedPageId === page?.id ? nearestToLastRect(pageCandidates) : null;
             const first = anchored || (e.key === 'ArrowUp'
                 ? pageCandidates[pageCandidates.length - 1]
-                : pageCandidates[0]);
-            focusElement(first || getCandidates()[0] || null);
+                : firstNonTextCandidate(pageCandidates));
+            focusElement(first || firstNonTextCandidate(getCandidates()) || null);
             return;
         }
 
         if (e.key === 'ArrowDown' && focused.closest('.navbar')) {
-            // Left rail (TV): a nav item directly BELOW the focused one should win,
-            // so Down walks the rail top-to-bottom. Only dive into the content grid
-            // when there's nothing below in the rail (last item / a horizontal top
-            // bar, where findNext finds no lower nav sibling — backward-compatible).
-            const belowInNav = findNext(focused, 'ArrowDown');
-            if (belowInNav && belowInNav.closest('.navbar')) {
+            // Left rail (TV): walk the vertical rail top-to-bottom by GEOMETRY, so the
+            // bottom utility cluster (Search / bell / profile) stays reachable across the
+            // flex gap that findNext's lateral-weighted score would otherwise skip (a
+            // nearby content card could out-rank the distant Search button). Only dive
+            // into the content grid when there is genuinely no rail item below (last item,
+            // or a horizontal top bar where nothing shares the column).
+            const belowInNav = navbarCandidateBelow(focused);
+            if (belowInNav) {
                 focusElement(belowInNav);
                 return;
             }
-            const firstPageCandidate = pageDefaultTarget(activePage()) || getPageCandidates()[0];
+            const firstPageCandidate = pageDefaultTarget(activePage()) || firstNonTextCandidate(getPageCandidates());
             if (firstPageCandidate) {
                 focusElement(firstPageCandidate);
+                return;
+            }
+        }
+
+        // Right from the rail crosses into the page content. findNext normally finds a
+        // card to the right; when the page is still empty/loading it returns null and
+        // Right would be a silent no-op (the scroll fallback at the end only handles
+        // Up/Down). Fall back to the page's default target so Right is never dead —
+        // mirroring the ArrowDown dive above.
+        if (e.key === 'ArrowRight' && focused.closest('.navbar')) {
+            const rightNext = findNext(focused, 'ArrowRight');
+            if (rightNext) {
+                focusElement(rightNext);
+                return;
+            }
+            const target = pageDefaultTarget(activePage()) || firstNonTextCandidate(getPageCandidates());
+            if (target) {
+                focusElement(target);
                 return;
             }
         }
@@ -431,9 +499,19 @@
             // For them, Left must open the menu, not jump diagonally to Hide-unavailable.
             // The header controls themselves keep walking left within their own row.
             const isSidebarListRow = focused.matches?.('.channel-sidebar .group-header, .channel-sidebar .channel-item');
-            if (!leftNext || leftNext.closest('.navbar') || isSidebarListRow) {
-                const railTarget = document.querySelector('.navbar .nav-link.active')
-                    || [...document.querySelectorAll('.navbar .nav-link')].find(isVisible);
+            // NEVER escape to the rail while a modal is open: a full-width modal element
+            // has no left neighbour (leftNext null), which would otherwise fall through
+            // here and land the ring on the active nav-link BEHIND the veil, breaking the
+            // focus trap. Inside a modal, keep focus put (findNext below is modal-scoped).
+            if (!openModal() && (!leftNext || leftNext.closest('.navbar') || isSidebarListRow)) {
+                // Only trust the active nav-link if it is actually VISIBLE. applyCatalogAvailability
+                // (app.js) can hide the current section's tab (display:none) while it stays .active,
+                // and a truthy-but-hidden active link would shadow the visible fallback via `||`,
+                // making the menu unreachable. Gate on visibility so the fallback still runs.
+                const active = document.querySelector('.navbar .nav-link.active');
+                const railTarget = (active && isVisible(active))
+                    ? active
+                    : [...document.querySelectorAll('.navbar .nav-link')].find(isVisible);
                 if (railTarget && isVisible(railTarget)) {
                     focusElement(railTarget);
                     return;
@@ -507,7 +585,10 @@
     let lastModal = null;
     const modalObserver = new MutationObserver(() => {
         const modal = openModal();
-        if (modal && modal !== lastModal) {
+        // NorvaModal dialogs (.norva-modal-overlay) manage their own initial focus
+        // (Cancel-first for destructive confirms) and are never revealed via a class
+        // mutation this observer watches — don't second-guess or steal their focus.
+        if (modal && modal !== lastModal && !modal.classList.contains('norva-modal-overlay')) {
             lastModal = modal;
             setTimeout(() => {
                 // Prefer the first form field (full-width, so vertical nav flows
@@ -580,7 +661,7 @@
         const candidates = getPageCandidates();
         const target = lastFocusedPageId === page.id
             ? nearestToLastRect(candidates)
-            : (pageDefaultTarget(page) || candidates[0]);
+            : (pageDefaultTarget(page) || firstNonTextCandidate(candidates));
         if (target) focusElement(target);
     }
 
