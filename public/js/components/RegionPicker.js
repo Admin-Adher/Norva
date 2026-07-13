@@ -210,7 +210,7 @@
             else if (e.key === 'Home') { e.preventDefault(); activeIdx = 0; highlight(); }
             else if (e.key === 'End') { e.preventDefault(); activeIdx = rendered.length - 1; highlight(); }
             else if (e.key === 'Enter') { e.preventDefault(); if (rendered[activeIdx]) choose(rendered[activeIdx].code); }
-            else if (e.key === 'Escape') { e.preventDefault(); close(); btn.focus(); }
+            else if (e.key === 'Escape' || e.key === 'GoBack' || e.key === 'BrowserBack') { e.preventDefault(); close(); btn.focus(); }
         });
 
         listEl.addEventListener('click', (e) => {
@@ -229,6 +229,10 @@
         selectEl.addEventListener('change', syncButton);
 
         container.__regionSync = syncButton;
+        // Exposed so the Android TV hardware-Back bridge (tvNavigation __norvaTV.handleBack)
+        // can close an open picker — the picker is a popover, not a modal, so closeTopModal
+        // doesn't see it. Returns true if it actually closed something.
+        container.__regionClose = () => { if (pop.hidden) return false; close(); btn.focus(); return true; };
         syncButton();
     }
 

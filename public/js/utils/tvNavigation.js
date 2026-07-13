@@ -416,6 +416,15 @@
                 ].find(el => el && isVisible(el));
                 if (t) { focusElement(t); return; }
             }
+            // An OPEN searchable combobox (RegionPicker) drives its own listbox with
+            // Up/Down/Enter/Home/End while the search input keeps focus (via
+            // aria-activedescendant). Spatial nav must not touch those keys —
+            // preventDefault/stopPropagation would kill the combobox's own keydown AND
+            // move focus out of the container, tripping its focusout-to-close. Hand the
+            // whole key back to the input's handler.
+            const rpPop = focused.closest?.('[data-region-picker]')?.querySelector('[data-region-pop]');
+            if (rpPop && !rpPop.hidden) return;
+
             // Only ←/→ (caret) and Enter stay with the input; ↑ leaves via spatial nav.
             // (On phone the input keeps ↑/↓ for its own highlight nav — but this module
             // never runs there.)
@@ -913,6 +922,14 @@
     window.__norvaTV = window.__norvaTV || {};
     window.__norvaTV.handleBack = function () {
         if (closeTopModal()) return 'modal';
+
+        // An open RegionPicker combobox is a popover, not a modal — close it on Back
+        // before falling through to page/exit handling.
+        const openPicker = document.querySelector('[data-region-picker] [data-region-pop]:not([hidden])');
+        if (openPicker) {
+            const container = openPicker.closest('[data-region-picker]');
+            if (container && typeof container.__regionClose === 'function' && container.__regionClose()) return 'nav';
+        }
 
         // A category panel or a Movies/Series detail view (seasons/episodes/actions)
         // open → close it / go back to the grid instead of leaving the page.
