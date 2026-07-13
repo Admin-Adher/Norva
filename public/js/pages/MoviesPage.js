@@ -756,6 +756,7 @@ class MoviesPage {
                     duration: h.duration,
                     ratio,
                     updatedAt: h.updated_at,
+                    sourceId: h.source_id || h.sourceId || h.data?.sourceId,
                     data: h.data
                 });
             }
@@ -776,7 +777,7 @@ class MoviesPage {
         // A group is "watched"/"in progress" if any version is
         let best = null;
         for (const item of items) {
-            const state = this.watchState.get(String(item.stream_id));
+            const state = this._watchStateFor(item);
             if (state && (!best || state.ratio > best.ratio)) best = state;
         }
         if (!best || best.ratio <= 0.01) return { status: 'unwatched', ratio: 0 };
@@ -1629,7 +1630,7 @@ class MoviesPage {
     openGroup(group, { focusVersions = false, selectedMovie = null } = {}) {
         const ordered = MediaUtils.orderVersionsByPreference(group.items, this.getPreferences());
         const resumeVersion = ordered.find(item => {
-            const state = this.watchState.get(String(item.stream_id));
+            const state = this._watchStateFor(item);
             return state && state.ratio > 0.01 && state.ratio < 0.9;
         });
         this.showMovieDetails(group, selectedMovie || resumeVersion || ordered[0], {
@@ -1721,8 +1722,19 @@ class MoviesPage {
         return m ? `${h} h ${m} min` : `${h} h`;
     }
 
+    // watchState is keyed by stream_id only, but Xtream stream_ids can collide across
+    // sources. Return the state only when it belongs to THIS item's source (when both are
+    // known), so a sibling version from another source can't borrow its progress/resume.
+    // Falls through when either source is unknown → identical to the old behaviour.
+    _watchStateFor(item) {
+        const state = this.watchState.get(String(item?.stream_id));
+        if (state && state.sourceId != null && item?.sourceId != null &&
+            String(state.sourceId) !== String(item.sourceId)) return null;
+        return state || null;
+    }
+
     getMovieWatchState(movie = this.currentMovie) {
-        const state = this.watchState.get(String(movie?.stream_id));
+        const state = this._watchStateFor(movie);
         if (!state) return { status: 'unwatched', ratio: 0, progress: 0, duration: 0, resumeTime: 0 };
         const resumeTime = this.getResumeOffset(state.progress, state.duration);
         if (state.ratio >= 0.9) return { ...state, status: 'watched', resumeTime: 0 };

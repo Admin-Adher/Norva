@@ -1786,7 +1786,11 @@ class SeriesPage {
     // Auto-recover: the opened version has no/failed episodes — jump to the next
     // untried (preferably healthy) sibling instead of dead-ending. `tried` guards
     // against looping when every version is empty.
-    tryNextHealthyVersion(current, tried, focusVersions = false) {
+    // `remember` = persist the sibling we land on as the group's version choice. Only
+    // safe when the preferred version is DEFINITIVELY unusable (no episodes) — a TRANSIENT
+    // fetch error must NOT durably degrade the choice, or every future open reopens the
+    // worse version even after the preferred one is healthy again.
+    tryNextHealthyVersion(current, tried, focusVersions = false, remember = true) {
         const group = this.currentSeriesGroup;
         if (!group || (group.items?.length || 0) <= 1) return false;
         const triedSet = tried || new Set();
@@ -1795,8 +1799,7 @@ class SeriesPage {
         const next = ordered.find(i => !triedSet.has(this._versionSig(i)) && !this.isBrokenItem(i))
             || ordered.find(i => !triedSet.has(this._versionSig(i)));
         if (!next) return false;
-        // Remember the sibling we land on so the next open goes straight to it (no re-bounce).
-        this.showSeriesDetailsV2(next, group, { isVersionSwitch: true, triedVersions: triedSet, focusVersions, rememberOnSuccess: true });
+        this.showSeriesDetailsV2(next, group, { isVersionSwitch: true, triedVersions: triedSet, focusVersions, rememberOnSuccess: remember });
         return true;
     }
 
@@ -2129,10 +2132,18 @@ class SeriesPage {
     getFeaturedEpisode(flatEpisodes, watchedEpisodes) {
         if (!flatEpisodes.length) return null;
 
-        const inProgress = flatEpisodes.find(row => {
-            const ratio = watchedEpisodes.get(String(row.episode.id))?.ratio || 0;
-            return ratio > 0.02 && ratio < 0.95;
-        });
+        // Among in-progress episodes prefer the MOST RECENTLY watched (by history
+        // updated_at), not the earliest by position — else, with two episodes mid-way,
+        // resume/Up-next targets the older one instead of the one you were just watching.
+        const tsOf = (v) => (v && v.updated_at) ? (Date.parse(v.updated_at) || 0) : 0;
+        let inProgress = null, inProgressTs = -1;
+        for (const row of flatEpisodes) {
+            const st = watchedEpisodes.get(String(row.episode.id));
+            const ratio = st?.ratio || 0;
+            if (ratio > 0.02 && ratio < 0.95 && tsOf(st) > inProgressTs) {
+                inProgressTs = tsOf(st); inProgress = row;
+            }
+        }
         if (inProgress) {
             return {
                 ...inProgress,
@@ -2479,8 +2490,13 @@ class SeriesPage {
             }
 
             const featured = this.getFeaturedEpisode(flatEpisodes, watchedEpisodes);
-            this._activeSeason = featured ? String(featured.seasonNum)
-                : (seasons.length ? String(seasons[0]) : null);
+            // On a version switch, keep the season the user was browsing if the new version
+            // still has it — otherwise the featured-episode recompute (history is filtered by
+            // the NEW version's id, so it finds nothing) would bounce them back to S1.
+            const prevSeason = this._activeSeason;
+            this._activeSeason = (isVersionSwitch && prevSeason != null && info.episodes[prevSeason])
+                ? String(prevSeason)
+                : (featured ? String(featured.seasonNum) : (seasons.length ? String(seasons[0]) : null));
             if (this.seasonTabs) {
                 const seasonLabel = (n) => String(n) === '0' ? 'Specials' : `Season ${n}`;
                 this.seasonTabs.innerHTML = seasons.map(seasonNum => {
@@ -2634,7 +2650,9 @@ class SeriesPage {
             if (detailToken !== this._detailToken) return; // superseded — don't stomp the newer fiche
             // A failed fetch on the auto-picked version → try a healthy sibling first
             // (but respect an explicit manual pick: surface its error rather than redirect).
-            if (!manualPick && this.tryNextHealthyVersion(series, triedVersions, focusVersions)) return;
+            // remember=false: a fetch error may be transient, so DON'T durably switch the
+            // remembered version — the next open should retry the preferred one.
+            if (!manualPick && this.tryNextHealthyVersion(series, triedVersions, focusVersions, false)) return;
             const { friendly, detail } = this.getSeriesInfoError(err);
             console.error('Error loading series info:', err);
             this.seasonsContainer.innerHTML = `
