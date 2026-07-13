@@ -13074,6 +13074,25 @@ html.tv .nav-search-btn { display: none; }
   font-size: 13px;
 }
 
+/* Phone APK: the preview "Watch" button is stretched to flex:1 (full width) in the
+   compact actions row. Its play-arrow SVG (.lg-btn-ico) has no intrinsic size except
+   under tv-mode, so in a wide button it grows to a ~square and blows the button — and
+   the align-stretched Favorite pill beside it — up into a giant blue block. Pin the
+   icon to a fixed size so the Watch button keeps a normal button height, and keep the
+   actions on one compact row regardless of the WebView's reported width/orientation. */
+.norva-phone-apk .live-guide-preview-actions {
+  flex-direction: row;
+  align-items: center;
+}
+.norva-phone-apk .live-guide-preview-actions .lg-btn-primary {
+  flex: 1 1 auto;
+}
+.norva-phone-apk .live-guide-preview .lg-btn-ico {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+}
+
 /* ===== Live mini-player (web) =========================================
    The inline live surface (#video-container) is re-parented into this floating
    shell when you leave Live TV mid-channel, so it keeps playing while you browse.
