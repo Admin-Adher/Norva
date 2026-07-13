@@ -1948,12 +1948,12 @@ class MoviesPage {
             btn.addEventListener('click', () => {
                 const index = parseInt(btn.dataset.index);
                 const movie = versions[index];
-                if (movie) this.showMovieDetails(this.currentMovieGroup, movie, { versions });
+                if (movie) this.showMovieDetails(this.currentMovieGroup, movie, { versions, isVersionSwitch: true });
             });
         });
     }
 
-    showMovieDetails(group, selectedMovie = null, { versions = null, focusVersions = false } = {}) {
+    showMovieDetails(group, selectedMovie = null, { versions = null, focusVersions = false, isVersionSwitch = false } = {}) {
         if (!group?.items?.length || !this.detailsPanel) return;
         const ordered = versions || MediaUtils.orderVersionsByPreference(group.items, this.getPreferences());
         const movie = selectedMovie || ordered[0] || group.representative;
@@ -1976,7 +1976,9 @@ class MoviesPage {
         this.pageEl?.classList.add('movie-detail-open');
         this.container.classList.add('hidden');
         this.detailsPanel.classList.remove('hidden');
-        this.detailsPanel.scrollTop = 0;
+        // A version switch re-renders in place while the user is scrolled down at the
+        // versions list — don't yank them back to the hero.
+        if (!isVersionSwitch) this.detailsPanel.scrollTop = 0;
 
         // Context-aware back label — return to the search results, the open genre,
         // or the Movies home, whichever the fiche was opened from.
@@ -2050,8 +2052,13 @@ class MoviesPage {
         this.loadRating();
         this.syncDownloadButton();
         this.renderMovieVersions(movie);
-        this.renderMoreLikeThis(movie);
-        this.renderFicheExtras(displayMovie);
+        // A version switch keeps the same title — re-highlighting the versions list above is
+        // enough; don't refetch/rebuild the "More like this" rail + extras on every tap
+        // (network churn + a visible flash of the recommendations).
+        if (!isVersionSwitch) {
+            this.renderMoreLikeThis(movie);
+            this.renderFicheExtras(displayMovie);
+        }
 
         if (focusVersions) {
             setTimeout(() => {
@@ -2358,6 +2365,9 @@ class MoviesPage {
             console.error('Error toggling favorite:', err);
             await this.loadFavorites();
             this.filterAndRender();
+            // The fiche (not the grid) is what's on screen — re-sync its favorite button
+            // off the reloaded truth, else it stays stuck on the wrong optimistic state.
+            this.syncDetailFavoriteButton?.();
         }
     }
 }

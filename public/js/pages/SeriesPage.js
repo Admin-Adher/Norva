@@ -2353,7 +2353,15 @@ class SeriesPage {
         this.pageEl?.classList.add('series-detail-open');
         this.container.classList.add('hidden');
         this.detailsPanel.classList.remove('hidden');
-        if (!isVersionSwitch) this.detailsPanel.scrollTop = 0;
+        if (!isVersionSwitch) {
+            this.detailsPanel.scrollTop = 0;
+            // Opening a DIFFERENT title (not a version switch): tear down any armed "Up next"
+            // auto-play banner + its countdown left over from the previous fiche, so it can't
+            // fire the previous series' next episode over this one (e.g. after picking a
+            // recommendation). hideDetails() does this too, but a fiche→fiche swap never hides.
+            try { this.cancelNextEpisodePrompt?.(); } catch (_) { /* noop */ }
+            if (this._epDlTimer) { clearInterval(this._epDlTimer); this._epDlTimer = null; }
+        }
 
         // Context-aware back label — return to the search results, the open genre, or Series.
         const backBtn = this.detailsPanel.querySelector('.series-back-btn');
@@ -2407,10 +2415,28 @@ class SeriesPage {
         // return early, so without this it could leak a previous fiche's visible button.
         if (this.playStartBtn) this.playStartBtn.style.display = 'none';
 
+        // Reset the meta line synchronously from `series` (year / versions / genres — none
+        // need seriesInfo) so an error/empty path never leaves the PREVIOUS fiche's meta
+        // pills. The success path below overwrites it with season/episode counts too.
+        const seriesMetaEarly = document.getElementById('series-meta');
+        if (seriesMetaEarly) {
+            const earlyMeta = [
+                this.getSeriesYear(series),
+                (this.currentSeriesGroup?.items?.length > 1) ? `${this.currentSeriesGroup.items.length} versions` : '',
+                ...this.getSeriesGenres(series).slice(0, 3),
+            ].filter(Boolean);
+            seriesMetaEarly.innerHTML = earlyMeta.map(p => `<span>${MediaUtils.escapeHtml(p)}</span>`).join('');
+        }
+
         try {
             const info = await API.proxy.xtream.seriesInfo(series.sourceId, series.series_id);
             if (detailToken !== this._detailToken) return; // a newer switch superseded this one
-            if (!info || !info.episodes) {
+            // A present-but-EMPTY episodes collection ({} / []) is truthy, so `!info.episodes`
+            // missed it — the fiche then rendered a blank episode area AND skipped the failover
+            // to a healthy sibling version. Treat "no season actually has episodes" as empty.
+            const hasEpisodes = info && info.episodes &&
+                Object.keys(info.episodes).some(k => Array.isArray(info.episodes[k]) && info.episodes[k].length);
+            if (!info || !hasEpisodes) {
                 // Auto-pick landed on an empty version → jump to a healthy sibling. But an
                 // EXPLICIT pick (manualPick) is respected: show "No episodes" for that very
                 // version, with the switcher still visible so the user can choose another.
@@ -2616,6 +2642,9 @@ class SeriesPage {
                     <p class="hint">${MediaUtils.escapeHtml(friendly)}</p>
                     ${detail ? `<p class="hint" style="opacity: .75;">${MediaUtils.escapeHtml(detail.slice(0, 240))}</p>` : ''}
                 </div>`;
+            // Put the primary button in a terminal state — it was left disabled on
+            // "Loading..." at the top, and the catch never reset it.
+            if (this.primaryActionBtn) { this.primaryActionBtn.disabled = true; this.primaryActionBtn.textContent = 'Unavailable'; }
         }
     }
 
