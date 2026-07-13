@@ -256,6 +256,9 @@ class SettingsPage {
 
         modal.classList.add('active');
         this.populateSignInMethods();
+        // Escape/Back close, Tab focus-trap, focus restore — unified with NorvaModal (also
+        // tears its own listeners down when tvNavigation closes the modal on TV).
+        if (window.NorvaModal?.installHygiene) NorvaModal.installHygiene(modal, { onClose: close, initialFocus: newInput });
         setTimeout(() => { try { newInput?.focus(); } catch (_) { } }, 50);
     }
 
@@ -1311,6 +1314,7 @@ class SettingsPage {
             // Show modal
             console.log('Adding active class to modal...');
             modal.classList.add('active');
+            if (window.NorvaModal?.installHygiene) NorvaModal.installHygiene(modal, { initialFocus: document.getElementById('edit-username') });
             console.log('Modal classes after add:', modal.classList.toString());
 
             // Setup Close/Cancel handlers (once)

@@ -120,7 +120,65 @@
         });
     }
 
+    /**
+     * Attach the same hygiene NorvaModal guarantees (Escape/Back close, Tab focus-trap,
+     * focus capture + restore) to a PRE-EXISTING app modal whose content is app-owned
+     * (the shared #modal, #edit-user-modal, …). These are shown by adding the `active`
+     * class and hidden by removing it.
+     *
+     * Call it right after the modal is shown. It is idempotent per open, and — crucially —
+     * a MutationObserver on the modal's class tears the listeners down as soon as ANY path
+     * removes `active` (a Cancel button, a backdrop click, OR tvNavigation.closeTopModal on
+     * TV), so nothing leaks or double-binds across re-opens.
+     *   opts.onClose     — invoked to close (default: remove `active`); wire your close fn.
+     *   opts.initialFocus— element to focus on open (default: first focusable).
+     *   opts.restoreFocus— set false to skip restoring focus to the opener on close.
+     */
+    function installModalHygiene(modalEl, opts = {}) {
+        if (!modalEl || modalEl.__hygieneOn) return;
+        modalEl.__hygieneOn = true;
+        const prevFocus = document.activeElement;
+        const requestClose = () => {
+            if (typeof opts.onClose === 'function') opts.onClose();
+            else modalEl.classList.remove('active');
+        };
+        function onKey(e) {
+            if (e.key === 'Escape' || e.key === 'GoBack' || e.key === 'BrowserBack') {
+                e.preventDefault(); e.stopPropagation(); requestClose(); return;
+            }
+            if (e.key === 'Tab') {
+                const f = focusablesIn(modalEl);
+                if (!f.length) return;
+                const first = f[0], last = f[f.length - 1];
+                if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+                else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+            }
+        }
+        const onBackdrop = (e) => { if (e.target === modalEl) requestClose(); };
+        const teardown = () => {
+            document.removeEventListener('keydown', onKey, true);
+            modalEl.removeEventListener('mousedown', onBackdrop);
+            classObserver.disconnect();
+            modalEl.__hygieneOn = false;
+            if (opts.restoreFocus !== false) {
+                try { if (prevFocus && typeof prevFocus.focus === 'function') prevFocus.focus(); } catch (_) { /* noop */ }
+            }
+        };
+        const classObserver = new MutationObserver(() => {
+            if (!modalEl.classList.contains('active')) teardown();
+        });
+        classObserver.observe(modalEl, { attributes: true, attributeFilter: ['class'] });
+        document.addEventListener('keydown', onKey, true);
+        modalEl.addEventListener('mousedown', onBackdrop);
+        setTimeout(() => {
+            const t = opts.initialFocus || focusablesIn(modalEl)[0];
+            try { t?.focus(); } catch (_) { /* noop */ }
+        }, 30);
+    }
+
     const NorvaModal = {
+        /** Attach Escape/Back close + Tab focus-trap + focus restore to an app-owned #modal. */
+        installHygiene: installModalHygiene,
         /** Yes/no decision. Resolves true on confirm, false on cancel/Escape/backdrop. */
         confirm(message, opts = {}) {
             return open({

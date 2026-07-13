@@ -60,7 +60,7 @@
         // shown by presence (no .active) and sits OVER an open fiche, so listing it here
         // traps the D-pad inside it and lets closeTopModal()/Back dismiss the trailer
         // instead of the fiche behind it.
-        const modals = document.querySelectorAll('#modal.active, .modal-overlay.active, .np-overlay, #norva-region-prompt, .norva-modal-overlay, .trailer-lightbox');
+        const modals = document.querySelectorAll('#modal.active, #edit-user-modal.active, .modal-overlay.active, .np-overlay, #norva-region-prompt, .norva-modal-overlay, .trailer-lightbox');
         return modals[modals.length - 1] || null;
     }
 

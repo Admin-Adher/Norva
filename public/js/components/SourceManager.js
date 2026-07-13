@@ -307,6 +307,7 @@ class SourceManager {
     `;
 
         modal.classList.add('active');
+        if (window.NorvaModal?.installHygiene) NorvaModal.installHygiene(modal);
 
         // Event listeners
         modal.querySelector('.modal-close').onclick = () => modal.classList.remove('active');
@@ -350,6 +351,7 @@ class SourceManager {
       `;
 
             modal.classList.add('active');
+            if (window.NorvaModal?.installHygiene) NorvaModal.installHygiene(modal);
 
             modal.querySelector('.modal-close').onclick = () => modal.classList.remove('active');
             document.getElementById('modal-cancel').onclick = () => modal.classList.remove('active');
