@@ -1360,6 +1360,11 @@ h4 {
 
   .live-guide-shell {
     grid-template-columns: 1fr;
+    /* A short (e.g. search-filtered) list leaves the height:100% grid taller than its
+       content; the default align-content:stretch then inflates the auto rows, blowing
+       the group-tab row up and — via the tabs' default align-items:stretch — turning the
+       active tab into a giant blue block. Pack rows to the top so they stay content-sized. */
+    align-content: start;
   }
 
   /* Portrait phones: a 44vh player leaves too little guide once browser chrome is
@@ -1377,6 +1382,7 @@ h4 {
   .live-guide-groups {
     display: flex;
     gap: 8px;
+    align-items: center; /* keep tabs pill-height; never let one stretch to the row height */
     overflow-x: auto;
     overflow-y: hidden;
     padding: 10px;
@@ -12991,10 +12997,15 @@ html.tv .nav-search-btn { display: none; }
    phone layout is independent of the reported WebView width/orientation. */
 .norva-phone-apk .live-guide-shell {
   grid-template-columns: 1fr;
+  /* Same balloon guard as the <=768px block, but unconditional so it also holds when a
+     phone WebView reports a landscape width >768px (where that media query doesn't apply):
+     pack the grid rows to the top so a short/filtered list can't stretch the tab row. */
+  align-content: start;
 }
 .norva-phone-apk .live-guide-groups {
   display: flex;
   gap: 8px;
+  align-items: center; /* tabs stay pill-height; the active tab never stretches to the row */
   overflow-x: auto;
   overflow-y: hidden;
   padding: 10px 12px;
