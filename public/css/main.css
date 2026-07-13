@@ -13979,3 +13979,640 @@ body.is-watching .norva-mini { display: none !important; }
 .region-picker-empty { padding: 14px 10px; text-align: center; color: var(--color-text-secondary); font-size: 0.9rem; }
 
 /* asset-rev: main-def-2 — content-hash bump to bypass a poisoned edge cache */
+
+/* ============================================================
+   Android TV / Movies - mockup layout correction
+   ------------------------------------------------------------
+   Intentionally platform AND page scoped. The JS controller adds
+   .tv-movies-active only while Movies is shown, so web, mobile,
+   Series, Live TV and the other TV pages retain their existing UI.
+   Keep this block last: it resets tablet/coarse-pointer rules that
+   Android TV WebViews also match.
+   ============================================================ */
+
+html.tv-mode.tv-movies-active {
+  --tv-movies-nav-width: clamp(82px, 8vw, 104px);
+  --tv-movies-panel-width: clamp(250px, 30%, 370px);
+  --tv-movies-control-height: 38px;
+}
+
+/* Movies-only version of the mockup's labelled icon rail. */
+html.tv-mode.tv-movies-active .navbar,
+html.tv-mode.tv-movies-active .navbar:focus-within {
+  width: var(--tv-movies-nav-width);
+  padding: 20px 0 14px;
+}
+
+html.tv-mode.tv-movies-active .navbar:focus-within ~ .main-content {
+  transform: none;
+}
+
+html.tv-mode.tv-movies-active .navbar-brand {
+  justify-content: center;
+  margin: 0 0 8px;
+  padding: 0;
+}
+
+html.tv-mode.tv-movies-active .navbar-brand .brand-text {
+  display: none;
+}
+
+html.tv-mode.tv-movies-active .navbar-menu {
+  gap: 2px;
+}
+
+html.tv-mode.tv-movies-active .navbar-menu .nav-link {
+  width: 100%;
+  min-height: 58px;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 4px;
+  padding: 7px 3px;
+  font-size: 0.67rem;
+  line-height: 1.05;
+  text-align: center;
+}
+
+html.tv-mode.tv-movies-active .navbar-menu .nav-link span:not(.nav-icon) {
+  max-width: 100%;
+  opacity: 1;
+}
+
+html.tv-mode.tv-movies-active .navbar-menu .nav-link .nav-icon,
+html.tv-mode.tv-movies-active .navbar-menu .nav-link .norva-ui-icon {
+  width: 23px;
+  height: 23px;
+  flex-basis: 23px;
+}
+
+html.tv-mode.tv-movies-active .nav-search-btn,
+html.tv-mode.tv-movies-active .nav-bell-btn,
+html.tv-mode.tv-movies-active .nav-profile {
+  align-self: center;
+  margin-left: 0;
+  width: 38px;
+  height: 38px;
+  flex-basis: 38px;
+}
+
+html.tv-mode.tv-movies-active .main-content {
+  margin-left: var(--tv-movies-nav-width);
+  padding: 14px 18px 14px 14px;
+}
+
+/* Do not let the TV selector defeat the normal page visibility contract. */
+html.tv-mode #page-movies:not(.active) {
+  display: none !important;
+}
+
+html.tv-mode #page-movies.active.tv-movies-layout-ready {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) var(--tv-movies-panel-width);
+  grid-template-rows: auto auto auto auto auto minmax(0, 1fr) auto;
+  grid-template-areas:
+    "header       panel"
+    "primary      panel"
+    "secondary    panel"
+    "active       panel"
+    "catalog-head panel"
+    "grid         panel"
+    "continue     panel";
+  column-gap: 14px;
+  row-gap: 7px;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+/* Header: copy at left, search at right. */
+html.tv-mode #page-movies.tv-movies-layout-ready .movies-header {
+  grid-area: header;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 42%);
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  border: 0;
+}
+
+html.tv-mode #page-movies.tv-movies-layout-ready .movies-heading {
+  min-width: 0;
+}
+
+html.tv-mode #page-movies.tv-movies-layout-ready .movies-header h2 {
+  margin: 0;
+  font-size: clamp(1.45rem, 2.25vw, 2rem);
+  font-weight: 750;
+  line-height: 1.05;
+}
+
+html.tv-mode #page-movies.tv-movies-layout-ready .movies-subtitle {
+  display: block;
+  margin-top: 5px;
+  color: #aebbd2;
+  font-size: 0.78rem;
+  line-height: 1.25;
+}
+
+html.tv-mode #page-movies.tv-movies-layout-ready .movies-controls {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+}
+
+html.tv-mode #page-movies.tv-movies-layout-ready .movies-controls > :not(.search-wrapper) {
+  display: none !important;
+}
+
+html.tv-mode #page-movies.tv-movies-layout-ready .movies-controls .search-wrapper {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  flex: none;
+}
+
+html.tv-mode #page-movies.tv-movies-layout-ready .movies-controls .search-input {
+  width: 100%;
+  min-width: 0;
+  height: 42px;
+  padding: 0 36px 0 15px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.055);
+  font-size: 0.82rem;
+}
+
+/* Two compact control rows, assembled from the existing live controls by JS. */
+html.tv-mode #page-movies .tv-movies-primary-filters {
+  grid-area: primary;
+}
+
+html.tv-mode #page-movies .tv-movies-secondary-filters {
+  grid-area: secondary;
+}
+
+html.tv-mode #page-movies .tv-movies-filter-row {
+  display: grid;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+html.tv-mode #page-movies .tv-movies-primary-filters {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+html.tv-mode #page-movies .tv-movies-secondary-filters {
+  grid-template-columns: 1.05fr 0.92fr 0.96fr 1.18fr 1.22fr minmax(74px, 0.82fr);
+}
+
+html.tv-mode #page-movies .tv-movies-filter-row > *,
+html.tv-mode #page-movies .tv-movies-filter-row .multi-select,
+html.tv-mode #page-movies .tv-movies-filter-row .multi-select-btn {
+  min-width: 0;
+  max-width: none;
+  width: 100%;
+}
+
+html.tv-mode #page-movies .tv-movies-filter-row .source-select,
+html.tv-mode #page-movies .tv-movies-filter-row .filter-select,
+html.tv-mode #page-movies .tv-movies-filter-row .multi-select-btn,
+html.tv-mode #page-movies .tv-movies-filter-row .filter-toggle,
+html.tv-mode #page-movies .tv-movies-filter-row .filter-reset,
+html.tv-mode #page-movies .tv-movies-filter-row .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  height: var(--tv-movies-control-height) !important;
+  min-height: var(--tv-movies-control-height) !important;
+  padding: 0 10px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.055);
+  color: #dbe4f7;
+  font-size: 0.74rem !important;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+html.tv-mode #page-movies .tv-movies-filter-row .filter-toggle.active,
+html.tv-mode #page-movies .tv-movies-filter-row .btn.active {
+  border-color: rgba(72, 132, 255, 0.88);
+  background: linear-gradient(180deg, #0878ff, #0c55e8);
+  color: #fff;
+}
+
+html.tv-mode #page-movies .tv-movies-filter-row > *:focus,
+html.tv-mode #page-movies .tv-movies-filter-row .multi-select-btn:focus {
+  outline: none !important;
+  box-shadow: inset 0 0 0 2px #fff, 0 0 0 2px rgba(47, 119, 255, 0.9) !important;
+  transform: none;
+}
+
+/* Restore the full Favorites label hidden by the tablet icon-only rule. */
+html.tv-mode #page-movies #movies-favorites-btn {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  flex-basis: auto;
+  padding: 0 9px;
+  color: #dbe4f7;
+  font-size: 0.74rem !important;
+}
+
+html.tv-mode #page-movies #movies-favorites-btn .icon {
+  width: 17px;
+  height: 17px;
+  flex-basis: 17px;
+  color: currentColor;
+}
+
+/* The controls not present in the supplied TV mockup remain parked here. */
+html.tv-mode #page-movies.tv-movies-layout-ready #movies-filter-bar {
+  display: none !important;
+}
+
+html.tv-mode #page-movies #movies-active-filters {
+  grid-area: active;
+  gap: 6px;
+  min-width: 0;
+  padding: 0;
+  background: transparent;
+}
+
+html.tv-mode #page-movies #movies-active-filters .filter-chip {
+  padding: 3px 8px;
+  font-size: 0.69rem;
+}
+
+/* All Movies + live count + sort, without injecting content into the virtual grid. */
+html.tv-mode #page-movies .tv-movies-catalog-head {
+  grid-area: catalog-head;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 4px 2px 1px;
+}
+
+html.tv-mode #page-movies .tv-movies-catalog-title {
+  margin: 0;
+  color: #f5f8ff;
+  font-size: 1rem;
+  font-weight: 750;
+}
+
+html.tv-mode #page-movies .tv-movies-catalog-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
+}
+
+html.tv-mode #page-movies #movies-count {
+  display: inline-flex !important;
+  width: auto;
+  margin: 0;
+  color: #9babc5;
+  font-size: 0.72rem;
+}
+
+html.tv-mode #page-movies #movies-sort {
+  grid-column: auto;
+  grid-row: auto;
+  width: auto;
+  min-width: 126px;
+  max-width: 170px;
+  height: 32px !important;
+  min-height: 32px !important;
+  margin-left: auto;
+  padding: 0 9px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  color: #dbe4f7;
+  font-size: 0.72rem;
+}
+
+/* Five-column portrait catalogue. Rails are disabled by the TV JS path. */
+html.tv-mode #page-movies #movies-grid {
+  grid-area: grid;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-auto-rows: max-content;
+  gap: 9px;
+  width: 100%;
+  height: auto;
+  min-width: 0;
+  min-height: 0;
+  padding: 4px 3px 8px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  align-content: start;
+  justify-content: stretch;
+  scroll-padding-block: 14px;
+  scrollbar-width: thin;
+}
+
+html.tv-mode #page-movies #movies-grid .grid-spacer,
+html.tv-mode #page-movies #movies-grid .movies-loader,
+html.tv-mode #page-movies #movies-grid .empty-state {
+  grid-column: 1 / -1;
+}
+
+html.tv-mode #page-movies #movies-grid .movie-card {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  flex: none;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.075);
+  border-radius: 9px;
+  background: rgba(15, 25, 44, 0.9);
+  transform: none;
+}
+
+html.tv-mode #page-movies #movies-grid .movie-poster {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 2 / 3;
+}
+
+html.tv-mode #page-movies #movies-grid .movie-info {
+  padding: 7px 7px 8px;
+}
+
+html.tv-mode #page-movies #movies-grid .movie-title {
+  font-size: 0.72rem;
+  font-weight: 650;
+}
+
+html.tv-mode #page-movies #movies-grid .movie-meta {
+  gap: 5px;
+  margin-top: 4px;
+  font-size: 0.62rem;
+}
+
+html.tv-mode #page-movies #movies-grid .movie-play-overlay {
+  inset: auto auto 8px 8px;
+  width: 27px;
+  height: 27px;
+  border: 1px solid rgba(255, 255, 255, 0.82);
+  border-radius: 50%;
+  background: rgba(4, 8, 15, 0.64);
+  opacity: 1;
+}
+
+html.tv-mode #page-movies #movies-grid .movie-play-overlay .play-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.9rem;
+  line-height: 1;
+}
+
+html.tv-mode #page-movies #movies-grid .movie-play-overlay .play-icon svg {
+  width: 13px;
+  height: 13px;
+}
+
+html.tv-mode #page-movies #movies-grid .movie-poster > .favorite-btn {
+  display: none !important;
+}
+
+html.tv-mode #page-movies .movies-grid:focus-within .movie-card:not(:focus):not(.tv-preview-active) {
+  opacity: 1;
+}
+
+html.tv-mode #page-movies #movies-grid .movie-card:focus,
+html.tv-mode #page-movies #movies-grid .movie-card.tv-preview-active {
+  z-index: 3;
+  outline: none !important;
+  border-color: rgba(113, 173, 255, 0.92);
+  border-radius: 9px !important;
+  transform: translateY(-1px);
+  box-shadow:
+    inset 0 0 0 2px #fff,
+    0 0 0 2px #2387ff,
+    0 8px 22px rgba(0, 80, 255, 0.34) !important;
+}
+
+/* Continue Watching follows the poster grid, as in the mockup. */
+html.tv-mode #page-movies #movies-continue {
+  grid-area: continue;
+  min-width: 0;
+  padding: 2px 2px 0;
+  overflow: hidden;
+}
+
+html.tv-mode #page-movies #movies-continue h3 {
+  margin: 0 0 6px;
+  color: #f5f8ff;
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+
+html.tv-mode #page-movies #movies-continue .continue-scroller {
+  gap: 8px;
+  padding: 0 0 3px;
+}
+
+html.tv-mode #page-movies #movies-continue .continue-card {
+  flex: 0 0 clamp(150px, 31%, 220px);
+  min-height: 72px;
+  border-radius: 9px;
+}
+
+html.tv-mode #page-movies #movies-continue .continue-card img {
+  width: 48px;
+  height: 72px;
+}
+
+/* Persistent right-side movie preview. */
+html.tv-mode #page-movies #movie-details,
+html.tv-mode #page-movies #movie-details.hidden {
+  grid-area: panel;
+  display: block !important;
+  min-width: 0;
+  min-height: 0;
+  max-height: none;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  border: 1px solid rgba(86, 130, 217, 0.24);
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(10, 31, 64, 0.98), rgba(7, 19, 39, 0.99));
+}
+
+html.tv-mode #page-movies #movie-details::-webkit-scrollbar {
+  display: none;
+}
+
+html.tv-mode #page-movies .movie-back-btn {
+  display: none !important;
+}
+
+html.tv-mode #page-movies .movie-detail-hero {
+  display: block;
+  min-height: 0;
+  padding: 0;
+  overflow: visible;
+}
+
+html.tv-mode #page-movies .movie-detail-hero::before,
+html.tv-mode #page-movies .movie-detail-hero::after {
+  display: none;
+}
+
+/* Critical repair: the previous TV rule changed flex-direction but forgot
+   display:flex, so the desktop two-column grid kept crushing the copy. */
+html.tv-mode #page-movies .movie-detail-hero-content {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 11px;
+  width: 100%;
+  max-width: none;
+  padding: 14px;
+}
+
+html.tv-mode #page-movies .movie-detail-poster {
+  display: block;
+  width: 100%;
+  height: auto !important;
+  aspect-ratio: 1.08 / 1;
+  object-fit: cover;
+  object-position: center;
+  border-radius: 11px;
+  box-shadow: none;
+}
+
+html.tv-mode #page-movies .movie-detail-info {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 0;
+}
+
+html.tv-mode #page-movies #movie-detail-title {
+  margin: 0;
+  color: #fff;
+  font-size: clamp(1.18rem, 2vw, 1.5rem);
+  line-height: 1.12;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+html.tv-mode #page-movies .movie-meta-pills {
+  gap: 5px;
+  margin: 0;
+}
+
+html.tv-mode #page-movies .movie-meta-pills span {
+  min-height: 21px;
+  padding: 0 7px;
+  border-radius: 5px;
+  font-size: 0.63rem;
+}
+
+html.tv-mode #page-movies #movie-detail-plot {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  color: #d2dced;
+  font-size: 0.76rem;
+  line-height: 1.42;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+html.tv-mode #page-movies .movie-detail-progress {
+  margin-top: 4px;
+}
+
+html.tv-mode #page-movies .movie-detail-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+  margin-top: 6px;
+}
+
+html.tv-mode #page-movies .movie-primary-action {
+  grid-column: 1 / -1;
+  width: 100%;
+  min-height: 42px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: linear-gradient(180deg, #0878ff, #0c55e8);
+  color: #fff;
+}
+
+html.tv-mode #page-movies .movie-secondary-action,
+html.tv-mode #page-movies .detail-trailer-btn {
+  width: 100%;
+  min-width: 0;
+  min-height: 39px;
+  padding: 7px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.065);
+  color: #eef4ff;
+  font-size: 0.72rem;
+}
+
+html.tv-mode #page-movies #movie-detail-download,
+html.tv-mode #page-movies #movie-thumb-up,
+html.tv-mode #page-movies #movie-thumb-down {
+  display: none !important;
+}
+
+html.tv-mode #page-movies .movie-detail-actions button:focus {
+  outline: none !important;
+  color: #07101f;
+  background: #fff;
+  box-shadow: inset 0 0 0 2px #fff, 0 0 0 2px #2387ff !important;
+  transform: none;
+}
+
+html.tv-mode #page-movies .movie-versions-section {
+  width: 100%;
+  margin: 0;
+  padding: 0 14px 14px;
+}
+
+html.tv-mode #page-movies .movie-versions-toolbar {
+  margin-bottom: 8px;
+}
+
+html.tv-mode #page-movies .movie-versions-list {
+  grid-template-columns: 1fr;
+}
+
+/* Android TV reports a coarse pointer, so explicitly beat the late touch rule. */
+@media (pointer: coarse) {
+  html.tv-mode #page-movies .tv-movies-filter-row .btn,
+  html.tv-mode #page-movies .tv-movies-filter-row .filter-toggle,
+  html.tv-mode #page-movies .tv-movies-filter-row .filter-reset {
+    height: var(--tv-movies-control-height) !important;
+    min-height: var(--tv-movies-control-height) !important;
+  }
+}
+
+/* asset-rev: main-def-2 — content-hash bump to bypass a poisoned edge cache */

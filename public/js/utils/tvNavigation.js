@@ -558,7 +558,7 @@
 
         // Movies (TV split-view) is 3 columns: rail | grid | #movie-details (preview
         // panel). ArrowLeft from INSIDE the panel returns to the grid — the card that
-        // opened the preview (marked .tv-preview-origin) if it's still on screen, else
+        // opened the preview (marked .tv-preview-active) if it's still on screen, else
         // the grid card nearest the focused control's screen-y — instead of letting
         // findNext strand focus in the tall scrolling panel or jump to the rail. A
         // control that HAS a panel neighbour to its left (e.g. Favorite ← Play) falls
@@ -569,7 +569,7 @@
             if (!(leftInPanel && panel.contains(leftInPanel))) {
                 const grid = document.querySelector('#page-movies .movies-grid, #page-series .series-grid');
                 if (grid) {
-                    let target = grid.querySelector('.movie-card.tv-preview-origin, .series-card.tv-preview-origin');
+                    let target = grid.querySelector('.movie-card.tv-preview-active, .series-card.tv-preview-active');
                     if (!target || !isVisible(target)) {
                         const y = centerOf(focused).y;
                         const cards = [...grid.querySelectorAll('.movie-card, .series-card')].filter(isVisible);

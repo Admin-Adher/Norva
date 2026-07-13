@@ -135,10 +135,6 @@ class MoviesPage {
             if (!this._isTvMode()) return;
             const card = event.target.closest?.('.movie-card');
             if (!card) return;
-            // Mark the origin card so a D-pad LEFT out of the panel returns here
-            // (tvNavigation reads .tv-preview-origin).
-            this.container.querySelector('.movie-card.tv-preview-origin')?.classList.remove('tv-preview-origin');
-            card.classList.add('tv-preview-origin');
             clearTimeout(this._previewDebounce);
             this._previewDebounce = setTimeout(() => {
                 if (card.isConnected) this.previewCard(card);
@@ -182,6 +178,11 @@ class MoviesPage {
                 if (this.hideBroken) this.filterAndRender();
             }
         });
+
+        // Build the mockup-oriented Movies chrome only in the Android TV client.
+        // Moving existing controls keeps every listener/reference intact while the
+        // web and mobile DOM remains exactly as authored.
+        if (this._isTvMode()) this._setupTvMoviesLayout();
 
         this.applyFiltersToUI();
     }
@@ -236,7 +237,7 @@ class MoviesPage {
         // Cloud: picking a genre opens that genre's full grid — the same dense,
         // server-side view as a rail's "See all" — so the dropdown behaves like
         // Manage Content's genres.
-        if (this.isCloudPagedMode()) {
+        if (this.isCloudPagedMode() && !this._isTvMode()) {
             const buckets = [...(this.categoryMulti?.getSelected() || [])];
             if (buckets.length) { this.openGenreBucket(buckets[0]); return; }
             // Audio/subtitle/burned-in filter (or "best for my languages" sort) with
@@ -346,7 +347,9 @@ class MoviesPage {
     // shows curated genre rails instead of a flat grid. Any filter or search
     // flips back to the grid via the normal path.
     shouldShowRails() {
-        return this.isCloudPagedMode() && !!window.GenreRails && !this.hasActiveFilters();
+        // The TV mockup is a stable flat poster grid feeding the persistent preview
+        // panel. Web/mobile keep the curated genre rails.
+        return !this._isTvMode() && this.isCloudPagedMode() && !!window.GenreRails && !this.hasActiveFilters();
     }
 
     async renderGenreRails() {
@@ -487,6 +490,7 @@ class MoviesPage {
     // Local-mode genre rails: group already-loaded movies by curated bucket and
     // render them with the page's own cards (so clicks open details normally).
     renderGenreRailsLocal() {
+        if (this._isTvMode()) return false;
         const T = window.GenreTaxonomy;
         if (!T || !window.GenreRails || !Array.isArray(this.movies) || !this.movies.length) return false;
 
@@ -649,6 +653,7 @@ class MoviesPage {
     }
 
     async show() {
+        document.documentElement.classList.toggle('tv-movies-active', this._isTvMode());
         this._coldPaintFromCache();
         const summary = await this.app?.refreshSourceHealth?.();
         // Show the grid as soon as MOVIES are available (even mid-sync), not only when
@@ -686,7 +691,7 @@ class MoviesPage {
         }
 
         // A genre is selected (e.g. returning to the page) → (re)open its grid.
-        if (this.isCloudPagedMode()) {
+        if (this.isCloudPagedMode() && !this._isTvMode()) {
             const selectedBuckets = [...(this.categoryMulti?.getSelected() || [])];
             if (selectedBuckets.length) {
                 if (!this.categories.length) await this.loadCategories();
@@ -716,6 +721,7 @@ class MoviesPage {
     }
 
     hide() {
+        document.documentElement.classList.remove('tv-movies-active');
         if (this._facetTimer) { clearInterval(this._facetTimer); this._facetTimer = null; }
         this._disarmCatalogRefreshWatch();
         // Scroll restoration: the grid is its own scroller, remembered per visit.
@@ -1310,7 +1316,8 @@ class MoviesPage {
             }
             this.countEl.textContent = total;
         }
-        this.resetBtn?.classList.toggle('hidden', !this.hasActiveFilters());
+        // Reset stays visible in the TV action row, matching the 10-foot mockup.
+        this.resetBtn?.classList.toggle('hidden', !this._isTvMode() && !this.hasActiveFilters());
         this.renderActiveFilterChips();
     }
 
@@ -1551,6 +1558,11 @@ class MoviesPage {
         // straight from the client catalog cache — display-clean it (the raw value stays in the
         // data for the version/quality parsers).
         const displayName = (this.groupDuplicates && movie.tmdb?.title) ? movie.tmdb.title : MediaUtils.cleanReleaseName(movie.name);
+        if (this._isTvMode()) {
+            card.tabIndex = 0;
+            card.setAttribute('role', 'button');
+            card.setAttribute('aria-label', displayName || 'Movie');
+        }
         const groupBroken = group.items.every(item => this.isBrokenItem(item));
         const languageBadge = MediaUtils.versionLanguageBadge(movie, this.getPreferences());
         // "New" corner badge for titles added in the last two weeks (unwatched).
@@ -2054,6 +2066,69 @@ class MoviesPage {
         return document.documentElement.classList.contains('tv-mode');
     }
 
+    // Android TV only: arrange the existing controls into the same visual bands as
+    // the supplied mockup. Existing nodes are MOVED (never cloned), so their event
+    // listeners, values and controller references remain valid. This method never
+    // runs on web/mobile.
+    _setupTvMoviesLayout() {
+        const page = this.pageEl;
+        const header = page?.querySelector('.movies-header');
+        const controls = header?.querySelector('.movies-controls');
+        const legacyFilterBar = document.getElementById('movies-filter-bar');
+        if (!page || !header || !controls || !legacyFilterBar || !this.container || page.classList.contains('tv-movies-layout-ready')) return;
+
+        const primary = document.createElement('div');
+        primary.id = 'movies-tv-primary-filters';
+        primary.className = 'tv-movies-filter-row tv-movies-primary-filters';
+        primary.setAttribute('aria-label', 'Movie filters');
+
+        const secondary = document.createElement('div');
+        secondary.id = 'movies-tv-secondary-filters';
+        secondary.className = 'tv-movies-filter-row tv-movies-secondary-filters';
+        secondary.setAttribute('aria-label', 'Availability and view options');
+
+        const catalogHead = document.createElement('div');
+        catalogHead.id = 'movies-tv-catalog-head';
+        catalogHead.className = 'tv-movies-catalog-head';
+
+        const catalogTitle = document.createElement('h3');
+        catalogTitle.className = 'tv-movies-catalog-title';
+        catalogTitle.textContent = 'All Movies';
+        catalogHead.appendChild(catalogTitle);
+
+        const catalogMeta = document.createElement('div');
+        catalogMeta.className = 'tv-movies-catalog-meta';
+        catalogHead.appendChild(catalogMeta);
+
+        const categoryControl = document.getElementById('movies-category-btn')?.closest('.multi-select');
+        const searchWrapper = this.searchInput?.closest('.search-wrapper');
+        const favoriteBtn = document.getElementById('movies-favorites-btn');
+        const append = (host, element) => { if (host && element) host.appendChild(element); };
+
+        // Header: title/subtitle at left, search at right.
+        append(controls, searchWrapper);
+
+        // Row 1: source, categories, year, rating, audio and subtitles.
+        [this.sourceSelect, categoryControl, this.yearSelect, this.ratingSelect,
+         this.audioSelect, this.subtitleSelect].forEach(element => append(primary, element));
+
+        // Row 2: availability, recency and the main catalogue actions.
+        [this.watchedSelect, this.addedSelect, favoriteBtn, this.hideBrokenBtn,
+         this.groupToggleBtn, this.resetBtn].forEach(element => append(secondary, element));
+
+        // The catalogue heading owns the live count and sort control.
+        append(catalogMeta, this.countEl);
+        append(catalogMeta, this.sortSelect);
+        this.resetBtn?.classList.remove('hidden');
+
+        const anchor = [this.activeFiltersEl, this.continueRow, this.container, this.detailsPanel]
+            .find(element => element?.parentElement === page) || null;
+        page.insertBefore(primary, anchor);
+        page.insertBefore(secondary, anchor);
+        page.insertBefore(catalogHead, anchor);
+        page.classList.add('tv-movies-layout-ready');
+    }
+
     _movieKey(movie) {
         return movie ? `${movie.sourceId}:${movie.stream_id}` : '';
     }
@@ -2064,6 +2139,10 @@ class MoviesPage {
     previewCard(card) {
         const group = card?.__movieGroup;
         if (!group?.items?.length) return;
+        this.container?.querySelectorAll('.movie-card.tv-preview-active').forEach(active => {
+            if (active !== card) active.classList.remove('tv-preview-active');
+        });
+        card.classList.add('tv-preview-active');
         const ordered = MediaUtils.orderVersionsByPreference(group.items, this.getPreferences());
         this.showMovieDetails(group, ordered[0], { versions: ordered, isTvPreview: true });
     }
@@ -2185,9 +2264,9 @@ class MoviesPage {
             // prefers it over src) so the fallback actually shows.
             posterEl.onerror = () => { posterEl.onerror = null; posterEl.removeAttribute('srcset'); posterEl.src = '/img/norva-media-placeholder.png'; };
             posterEl.removeAttribute('srcset');
-            // The TV panel shows a 16:9 banner — prefer the landscape backdrop and fall
-            // back to the (cover-cropped) poster only when no backdrop exists.
-            posterEl.src = (isTv && backdrop) ? backdrop : poster;
+            // The TV panel uses the cinematic backdrop as its square/landscape hero.
+            // Web and mobile keep the canonical portrait poster.
+            posterEl.src = isTv && backdrop ? backdrop : poster;
             posterEl.alt = this.getMovieDisplayTitle(displayMovie);
         }
 
