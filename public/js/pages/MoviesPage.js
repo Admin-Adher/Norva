@@ -2121,11 +2121,13 @@ class MoviesPage {
         primary.id = 'movies-tv-primary-filters';
         primary.className = 'tv-movies-filter-row tv-movies-primary-filters';
         primary.setAttribute('aria-label', 'Movie filters');
+        primary.dataset.tvNavRegion = 'movies-filters';
 
         const secondary = document.createElement('div');
         secondary.id = 'movies-tv-secondary-filters';
         secondary.className = 'tv-movies-filter-row tv-movies-secondary-filters';
         secondary.setAttribute('aria-label', 'Availability and view options');
+        secondary.dataset.tvNavRegion = 'movies-filters';
 
         const catalogHead = document.createElement('div');
         catalogHead.id = 'movies-tv-catalog-head';
@@ -2160,6 +2162,7 @@ class MoviesPage {
         append(catalogMeta, this.countEl);
         append(catalogMeta, this.sortSelect);
         this.resetBtn?.classList.remove('hidden');
+        this.activeFiltersEl?.setAttribute('data-tv-nav-region', 'movies-filters');
 
         // Nodes deliberately left in the hidden legacy bar are not TV D-pad stops.
         legacyFilterBar.querySelectorAll('button, input, select, textarea, [tabindex]').forEach(element => {
@@ -2447,9 +2450,21 @@ class MoviesPage {
             section.className = 'more-like-this';
             section.innerHTML = '<h3 class="more-like-title">More like this</h3><div class="horizontal-scroll more-like-grid"></div>';
             host.appendChild(section);
-            window.GenreRails.appendCards(section.querySelector('.more-like-grid'), items, {
+            const rail = section.querySelector('.more-like-grid');
+            window.GenreRails.appendCards(rail, items, {
                 onItemClick: (item) => this.openRailItem(item)
             });
+            // GenreRails may use different card classes across catalogue modes.
+            // Stamp a stable TV-only hook so sizing and D-pad focus never depend on
+            // whichever desktop percentage rule that card happens to inherit.
+            if (this._isTvMode()) {
+                [...rail.children].forEach(card => {
+                    if (card.matches('.scroll-arrow, .empty-state')) return;
+                    card.classList.add('tv-more-like-card');
+                    card.tabIndex = 0;
+                    if (!card.hasAttribute('role')) card.setAttribute('role', 'button');
+                });
+            }
         } catch (_) { /* the fiche works fine without related titles */ }
     }
 
