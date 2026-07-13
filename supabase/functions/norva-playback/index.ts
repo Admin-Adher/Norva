@@ -2660,6 +2660,11 @@ async function ocrEnqueue(
   return { status: "processing", jobId, providerKey: pkey, kind: "ocr", lang, gateway: gwBody };
 }
 
+// ISO 639-2 "no real language" codes (und=undetermined, mul=multiple, zxx=no linguistic content,
+// mis=uncoded). They satisfy the [a-z]{2,3} shape but Argos has no model for them, so translating TO
+// one is a guaranteed gateway 422 → never enqueue such a job (both enqueue paths guard on this set).
+const NON_TRANSLATABLE_LANGS = new Set(["und", "mul", "zxx", "mis"]);
+
 // Phase 3 (3b) ASYNC translation: translate a cached transcript into a target language on the gateway
 // (Argos / CTranslate2) and cache the result cross-user (kind='translation', lang=target). Reuses the
 // transcript claim RPC + transcribe-callback — translation is pure text on the gateway (NO provider
@@ -2674,6 +2679,11 @@ async function translateEnqueue(
   if (!runtimeConfig.mediaGatewayUrl || !runtimeConfig.mediaGatewayToken) throw new HttpError(503, "Media gateway is not configured");
   const target = stringOr(opts.targetLang, "").toLowerCase();
   if (!/^[a-z]{2,3}$/.test(target)) throw new HttpError(400, "invalid target lang");
+  if (NON_TRANSLATABLE_LANGS.has(target)) {
+    // Undetermined / no-language target: Argos can't translate to it (gateway 422). Return a clean
+    // status instead of enqueuing a job that is guaranteed to fail and leave a "failed" cache row.
+    return { status: "unsupported-target", kind: "translation", lang: target };
+  }
   const { sourceId, externalId, itemType } = await resolveSubtitleTarget(db, userId, opts);
   // Provider key from the stored source row (cached DB lookup, NO provider round-trip — translation
   // works purely off the cached transcript).
@@ -3226,6 +3236,7 @@ async function resolvePendingTranslations(db: SupabaseClient, runtimeConfig: Run
         .eq("provider_key", pkey).eq("item_type", itemType).eq("external_id", externalId)
         .eq("kind", "translation").eq("lang", target).eq("status", "pending-transcript");
     };
+    if (NON_TRANSLATABLE_LANGS.has(target.toLowerCase())) { await failPending("unsupported translation target (no language model)"); continue; }
     if (!ready) { await failPending("source transcript failed"); continue; }
     if (!vtt || segments <= 0) { await failPending("no speech in the source transcript"); continue; }
     if (sourceLang === target) {
