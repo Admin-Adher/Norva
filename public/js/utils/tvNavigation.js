@@ -295,6 +295,26 @@
             if (btn) focusElement(btn);
             return true;
         }
+        // The Movies TV fiche is a persistent split preview, so it must not be
+        // hidden like the fullscreen web fiche. Back from any of its controls
+        // (notably a version variant) simply returns to the previewed grid card.
+        const tvMoviePanel = document.querySelector('#page-movies.active #movie-details');
+        const active = document.activeElement;
+        if (isTvMoviesSplitPanel(tvMoviePanel) && active && tvMoviePanel.contains(active)) {
+            const grid = tvMoviePanel.closest('#page-movies')?.querySelector('#movies-grid');
+            const cards = [...(grid?.querySelectorAll('.movie-card') || [])];
+            const usable = card => Boolean(
+                card?.isConnected &&
+                !card.closest('.hidden, [hidden]') &&
+                (card.offsetWidth > 0 || card.offsetHeight > 0)
+            );
+            const preview = grid?.querySelector('.movie-card.tv-preview-active');
+            const target = usable(preview)
+                ? preview
+                : (cards.find(isVisible) || cards.find(usable));
+            if (target) focusElement(target);
+            return true;
+        }
         const details = lastVisible('#movie-details:not(.hidden), #series-details:not(.hidden)');
         if (details && !isTvMoviesSplitPanel(details)) {
             const back = details.querySelector('.movie-back-btn, .series-back-btn');
@@ -428,8 +448,13 @@
         ov.querySelectorAll('.tv-select-option').forEach((btn) => {
             btn.addEventListener('click', () => {
                 const idx = Number(btn.dataset.index);
-                if (select.selectedIndex !== idx) {
-                    select.selectedIndex = idx;
+                const option = select.options[idx];
+                if (option && select.selectedIndex !== idx) {
+                    // Set the real value explicitly before change. Some Android
+                    // WebViews visually update selectedIndex first but expose the
+                    // old value to a synchronous listener (notably Audio language).
+                    select.value = option.value;
+                    if (select.selectedIndex !== idx) select.selectedIndex = idx;
                     select.dispatchEvent(new Event('change', { bubbles: true }));
                 }
                 close();
@@ -467,6 +492,10 @@
         // ↑/↓ leave the field via spatial navigation — except in the channel
         // search, whose own ↑/↓ result navigation must keep working.
         if (isTextField(focused)) {
+            // IME composition uses synthetic arrow events (keyCode 229). Those
+            // belong to the keyboard and must never trigger spatial navigation.
+            if (e.isComposing || e.keyCode === 229) return;
+
             // This module is TV-only. Down from the channel search box always steps to
             // the controls row (All Sources first, else Hide unavailable, else the
             // list / results) — so search bar → controls → results is one top-to-bottom
@@ -495,7 +524,7 @@
 
             // At the beginning of the Movies search field, Left leaves the page
             // for the rail instead of becoming an empty caret move.
-            if (focused.id === 'movies-search' && e.key === 'ArrowLeft' &&
+            if (!e.repeat && focused.id === 'movies-search' && e.key === 'ArrowLeft' &&
                 activePage()?.id === 'page-movies' &&
                 (focused.selectionStart ?? 0) === 0 && (focused.selectionEnd ?? 0) === 0) {
                 const active = document.querySelector('.navbar .nav-link.active');
@@ -512,7 +541,7 @@
 
             // Symmetric boundary: Right at the end of Movies search enters the
             // docked fiche instead of remaining an inert caret press.
-            if (focused.id === 'movies-search' && e.key === 'ArrowRight' &&
+            if (!e.repeat && focused.id === 'movies-search' && e.key === 'ArrowRight' &&
                 activePage()?.id === 'page-movies' &&
                 (focused.selectionStart ?? 0) === focused.value.length &&
                 (focused.selectionEnd ?? 0) === focused.value.length) {
@@ -523,6 +552,32 @@
                     focusElement(panelTarget);
                     return;
                 }
+            }
+
+            // Avoid the generic all-page geometry scan from Movies Search. A
+            // direct target stays instant even with a very large catalogue.
+            if (focused.id === 'movies-search' &&
+                activePage()?.id === 'page-movies' &&
+                (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+                e.preventDefault();
+                e.stopPropagation();
+                let target = null;
+                if (e.key === 'ArrowDown') {
+                    const row = document.getElementById('movies-tv-primary-filters');
+                    target = [...(row?.querySelectorAll(INTERACTIVE_SELECTOR) || [])]
+                        .find(el => !el.disabled && isVisible(el));
+                    if (!target) {
+                        target = [...document.querySelectorAll('#movies-grid .movie-card')]
+                            .find(isVisible);
+                    }
+                } else {
+                    const activeNav = document.querySelector('.navbar .nav-link.active');
+                    target = (activeNav && isVisible(activeNav))
+                        ? activeNav
+                        : [...document.querySelectorAll('.navbar .nav-link')].find(isVisible);
+                }
+                if (target) focusElement(target);
+                return;
             }
 
             // Only ←/→ (caret) and Enter stay with the input; ↑ leaves via spatial nav.
@@ -1086,7 +1141,7 @@
         }, 50);
     }
     const contentObserver = new MutationObserver((mutations) => {
-        if (!lastFocusedCard || currentFocus()) return; // only when focus was actually lost
+        if (!lastFocusedCard || isTextField(lastFocusedCard) || currentFocus()) return;
         for (const m of mutations) {
             if (m.addedNodes.length || m.removedNodes.length) { scheduleContentReanchor(); return; }
         }
