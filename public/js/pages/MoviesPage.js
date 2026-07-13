@@ -126,6 +126,26 @@ class MoviesPage {
         document.getElementById('movie-thumb-up')?.addEventListener('click', () => this.setRating(1));
         document.getElementById('movie-thumb-down')?.addEventListener('click', () => this.setRating(-1));
 
+        // Android TV split-view: moving D-pad focus across grid cards live-previews
+        // the focused card in the docked detail panel (right column). Debounced so
+        // flying through cards costs nothing and never lands a stale render — mirrors
+        // LiveGuideFusion. The preview NEVER moves focus (passive), so the D-pad stays
+        // on the grid until the user deliberately steps RIGHT into the panel.
+        this.container?.addEventListener('focusin', (event) => {
+            if (!this._isTvMode()) return;
+            const card = event.target.closest?.('.movie-card');
+            if (!card) return;
+            clearTimeout(this._previewDebounce);
+            this._previewDebounce = setTimeout(() => {
+                if (card.isConnected) this.previewCard(card);
+            }, 140);
+        });
+        // Stepping INTO the panel is the "commit" signal: only now do we pay for the
+        // heavy extras (more-like-this + cast credits), so browsing the grid stays cheap.
+        this.detailsPanel?.addEventListener('focusin', () => {
+            if (this._isTvMode()) this._loadPanelExtras();
+        });
+
         // Lazy loading
         this.observer = new IntersectionObserver((entries) => {
             if (entries[0].isIntersecting && !this.isLoading) {
@@ -1360,6 +1380,10 @@ class MoviesPage {
         }
 
         this.observer.observe(loader);
+
+        // TV split-view: seed the docked panel with the first card so it's never empty
+        // on entry (the grid keeps focus; this is a passive preview).
+        if (this._isTvMode()) this._previewFirstCard();
     }
 
     // === Grid virtualization =================================================
@@ -1557,11 +1581,25 @@ class MoviesPage {
             </div>
         `;
 
+        // Stash the group so the TV panel can preview this card from the delegated
+        // grid focusin listener (which has no access to this closure).
+        card.__movieGroup = group;
+
         card.addEventListener('click', (e) => {
             if (e.target.closest('.favorite-btn')) {
                 e.stopPropagation();
                 this.toggleFavorite(group, e.target.closest('.favorite-btn'));
-            } else if (e.target.closest('.version-badge')) {
+                return;
+            }
+            // TV split-view: the panel already previews this card. Committing plays a
+            // single version, or (multi) sends focus to the labelled version list —
+            // never a fullscreen fiche takeover. The version badge lands there too.
+            if (this._isTvMode()) {
+                e.stopPropagation();
+                this._tvCommitCard(group);
+                return;
+            }
+            if (e.target.closest('.version-badge')) {
                 e.stopPropagation();
                 this.openGroup(group, { focusVersions: true });
             } else {
@@ -2008,8 +2046,75 @@ class MoviesPage {
         });
     }
 
-    showMovieDetails(group, selectedMovie = null, { versions = null, focusVersions = false, isVersionSwitch = false } = {}) {
+    _isTvMode() {
+        return document.documentElement.classList.contains('tv-mode');
+    }
+
+    _movieKey(movie) {
+        return movie ? `${movie.sourceId}:${movie.stream_id}` : '';
+    }
+
+    // TV split-view: render the D-pad-focused card into the docked panel as a light
+    // preview (no grid takeover, no heavy extras, no focus steal). Extras load only
+    // when the user steps into the panel (_loadPanelExtras).
+    previewCard(card) {
+        const group = card?.__movieGroup;
+        if (!group?.items?.length) return;
+        const ordered = MediaUtils.orderVersionsByPreference(group.items, this.getPreferences());
+        this.showMovieDetails(group, ordered[0], { versions: ordered, isTvPreview: true });
+    }
+
+    // On page entry, seed the panel with the first card so it's never empty.
+    _previewFirstCard() {
+        const first = this.container?.querySelector('.movie-card');
+        if (first) this.previewCard(first);
+    }
+
+    // Committing a card on TV (Enter/click): a single healthy version plays straight
+    // away; multiple versions ALWAYS send the user to the labelled version list to
+    // choose — never auto-play a guessed variant.
+    _tvCommitCard(group) {
+        if (!group?.items?.length) return;
+        const ordered = MediaUtils.orderVersionsByPreference(group.items, this.getPreferences());
+        // Make sure the panel reflects THIS card even if the preview debounce hasn't fired.
+        this.showMovieDetails(group, ordered[0], { versions: ordered, isTvPreview: true });
+        if (ordered.length > 1) {
+            this._focusVersionsList();
+        } else {
+            this.playPrimaryMovie();
+        }
+    }
+
+    // Move focus into the version list, pre-selecting the in-progress version if any
+    // (so a resume is one press away) else the recommended (top) one. Loads extras too.
+    _focusVersionsList() {
+        this._loadPanelExtras();
+        const list = this.versionsList;
+        if (!list) return;
+        requestAnimationFrame(() => {
+            const items = [...list.querySelectorAll('.movie-version-item')];
+            if (!items.length) return;
+            const target = items.find(b => b.querySelector('.movie-version-progress')) || items[0];
+            target.focus();
+            target.scrollIntoView({ block: 'nearest' });
+        });
+    }
+
+    // Heavy fiche extras (more-like-this rail + cast/trailer) — loaded once per movie,
+    // only when the panel is entered, so grid browsing never pays for them.
+    _loadPanelExtras() {
+        const movie = this.currentMovie;
+        if (!movie) return;
+        const key = this._movieKey(movie);
+        if (this._extrasLoadedFor === key) return;
+        this._extrasLoadedFor = key;
+        this.renderMoreLikeThis(movie);
+        this.renderFicheExtras(this.currentMovieGroup?.representative || movie);
+    }
+
+    showMovieDetails(group, selectedMovie = null, { versions = null, focusVersions = false, isVersionSwitch = false, isTvPreview = false } = {}) {
         if (!group?.items?.length || !this.detailsPanel) return;
+        const isTv = this._isTvMode();
         const ordered = versions || MediaUtils.orderVersionsByPreference(group.items, this.getPreferences());
         const movie = selectedMovie || ordered[0] || group.representative;
         const displayMovie = group.representative || movie;
@@ -2018,22 +2123,37 @@ class MoviesPage {
         this.currentMovieVersions = ordered;
         this.currentMovie = movie;
         // Remember the open fiche so a page refresh restores it (see app.restoreOpenFiche).
-        try {
-            window.app?.rememberOpenFiche?.({
-                type: 'movie', sourceId: movie.sourceId, id: movie.stream_id,
-                title: this.getMovieDisplayTitle(displayMovie),
-                // Stash the whole version group so the restore rebuilds the EXACT fiche
-                // (all versions + the selected one) without re-searching.
-                group: this.currentMovieGroup,
-            });
-        } catch (_) { /* best-effort */ }
+        // Skipped on TV: the panel is derived live from grid focus, not a persisted "open" state.
+        if (!isTv) {
+            try {
+                window.app?.rememberOpenFiche?.({
+                    type: 'movie', sourceId: movie.sourceId, id: movie.stream_id,
+                    title: this.getMovieDisplayTitle(displayMovie),
+                    // Stash the whole version group so the restore rebuilds the EXACT fiche
+                    // (all versions + the selected one) without re-searching.
+                    group: this.currentMovieGroup,
+                });
+            } catch (_) { /* best-effort */ }
+        }
 
-        this.pageEl?.classList.add('movie-detail-open');
-        this.container.classList.add('hidden');
+        // TV keeps the grid AND the panel visible side-by-side (split-view). Only the
+        // phone/web fiche does the fullscreen takeover (hide grid, mark page open).
+        if (!isTv) {
+            this.pageEl?.classList.add('movie-detail-open');
+            this.container.classList.add('hidden');
+        }
         this.detailsPanel.classList.remove('hidden');
         // A version switch re-renders in place while the user is scrolled down at the
-        // versions list — don't yank them back to the hero.
-        if (!isVersionSwitch) this.detailsPanel.scrollTop = 0;
+        // versions list — don't yank them back to the hero. On a fresh TV preview,
+        // reset to the top and drop any stale extras from the previously-focused card.
+        if (!isVersionSwitch && !isTv) this.detailsPanel.scrollTop = 0;
+        if (isTvPreview) {
+            this.detailsPanel.scrollTop = 0;
+            this.detailsPanel.querySelector('.more-like-this')?.remove();
+            this.detailsPanel.querySelector('.detail-credits')?.remove();
+            this.detailsPanel.querySelector('.detail-trailer-btn')?.remove();
+            this._extrasLoadedFor = null;
+        }
 
         // Context-aware back label — return to the search results, the open genre,
         // or the Movies home, whichever the fiche was opened from.
@@ -2109,8 +2229,10 @@ class MoviesPage {
         this.renderMovieVersions(movie);
         // A version switch keeps the same title — re-highlighting the versions list above is
         // enough; don't refetch/rebuild the "More like this" rail + extras on every tap
-        // (network churn + a visible flash of the recommendations).
-        if (!isVersionSwitch) {
+        // (network churn + a visible flash of the recommendations). On TV, a preview also
+        // defers the extras — they load lazily when the user steps into the panel
+        // (_loadPanelExtras), so flying through the grid never triggers fetches.
+        if (!isVersionSwitch && !isTvPreview) {
             this.renderMoreLikeThis(movie);
             this.renderFicheExtras(displayMovie);
         }
@@ -2193,6 +2315,8 @@ class MoviesPage {
     }
 
     hideDetails() {
+        // On TV the panel is persistent (split-view) — there is nothing to close.
+        if (this._isTvMode()) return;
         try { window.app?.forgetOpenFiche?.(); } catch (_) { /* noop */ }
         this.detailsPanel?.querySelector('.more-like-this')?.remove();
         this.stopDownloadPolling();
@@ -2206,6 +2330,13 @@ class MoviesPage {
 
     async playPrimaryMovie() {
         if (!this.currentMovie) return;
+        // TV: never auto-play a guessed variant. Multiple versions → send the user to
+        // the labelled version list to choose (pre-focused on the in-progress one).
+        // Single version → play straight through.
+        if (this._isTvMode() && (this.currentMovieVersions?.length || 0) > 1) {
+            this._focusVersionsList();
+            return;
+        }
         const versions = this.currentMovieVersions?.length
             ? [this.currentMovie, ...this.currentMovieVersions.filter(item =>
                 String(item.stream_id) !== String(this.currentMovie.stream_id) ||

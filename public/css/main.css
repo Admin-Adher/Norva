@@ -12309,6 +12309,197 @@ mark.search-highlight {
 .tv-mode .live-guide-row { min-height: 68px; }
 
 /* ==================================================================
+   Movies on Android TV — split-view redesign (P1).
+   LEFT: compact poster grid + pill filters + Continue row.
+   RIGHT: the fiche (#movie-details) promoted to a PERSISTENT panel that
+   live-previews the D-pad-focused card and holds all depth (versions,
+   more-like-this) scrollably — "everything in the panel", no fullscreen
+   fiche takeover on TV. All html.tv-mode #page-movies scoped; phone/web
+   keep the fullscreen fiche opened on click.
+   ================================================================== */
+html.tv-mode #page-movies {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 33%;
+  grid-template-rows: auto auto auto auto minmax(0, 1fr);
+  grid-template-areas:
+    "header   panel"
+    "filters  panel"
+    "active   panel"
+    "continue panel"
+    "grid     panel";
+  column-gap: 16px;
+  row-gap: 8px;
+  height: 100%;
+  min-height: 0;
+  padding: 10px 14px 12px 12px;
+  overflow: hidden;
+}
+html.tv-mode #page-movies .movies-header { grid-area: header; margin: 0; padding: 0; }
+html.tv-mode #page-movies #movies-filter-bar { grid-area: filters; }
+html.tv-mode #page-movies #movies-active-filters { grid-area: active; }
+html.tv-mode #page-movies #movies-continue { grid-area: continue; }
+html.tv-mode #page-movies .movies-grid {
+  grid-area: grid;
+  height: auto;
+  min-height: 0;
+  overflow-y: auto;
+  justify-content: flex-start;
+  align-content: flex-start;
+  gap: 12px;
+  padding: 4px 2px;
+}
+html.tv-mode #page-movies #movie-details {
+  grid-area: panel;
+  min-height: 0;
+  max-height: none;
+  overflow-y: auto;
+  border-radius: 18px;
+  border: 1px solid rgba(120, 140, 255, 0.16);
+  background: linear-gradient(180deg, rgba(24, 34, 58, 0.92), rgba(12, 17, 28, 0.97));
+}
+/* The panel is persistent on TV; JS never toggles .hidden here, but keep it
+   visible even if some shared path adds the class. */
+html.tv-mode #page-movies #movie-details.hidden { display: block; }
+/* No "back" affordance — the panel never leaves. */
+html.tv-mode #page-movies .movie-back-btn { display: none !important; }
+
+/* --- Compaction: header + subtitle -------------------------------- */
+html.tv-mode #page-movies .movies-header h2 { font-size: 1.55rem; margin: 0; }
+html.tv-mode #page-movies .movies-subtitle { display: none; }
+
+/* --- Compaction: filters as pills --------------------------------- */
+html.tv-mode #page-movies #movies-filter-bar {
+  border-bottom: 0;
+  background: transparent;
+  padding: 2px 0;
+  gap: 6px;
+}
+html.tv-mode #page-movies #movies-filter-bar .filter-select,
+html.tv-mode #page-movies #movies-filter-bar .source-select,
+html.tv-mode #page-movies #movies-filter-bar .filter-toggle,
+html.tv-mode #page-movies .movies-controls .source-select,
+html.tv-mode #page-movies .movies-controls .multi-select-btn {
+  height: 34px;
+  min-width: 0;
+  max-width: none;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  padding: 0 14px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #dbe4f7;
+}
+html.tv-mode #page-movies #movies-filter-bar .filter-toggle.active {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: #fff;
+}
+html.tv-mode #page-movies #movies-filter-bar .filter-select:focus,
+html.tv-mode #page-movies #movies-filter-bar .filter-toggle:focus,
+html.tv-mode #page-movies #movies-filter-bar .source-select:focus,
+html.tv-mode #page-movies .movies-controls .source-select:focus,
+html.tv-mode #page-movies .movies-controls .multi-select-btn:focus {
+  outline: none !important;
+  box-shadow: 0 0 0 3px #fff !important;
+}
+
+/* --- Compaction: grid cards --------------------------------------- */
+html.tv-mode #page-movies .movies-grid .movie-card { flex: 0 0 118px; width: 118px; }
+html.tv-mode #page-movies .movies-grid .movie-poster { width: 118px; height: 177px; }
+html.tv-mode #page-movies .movies-grid .movie-card:focus {
+  outline: none !important;
+  box-shadow: 0 0 0 3px #fff !important;
+}
+
+/* --- Panel: hero (backdrop banner → stacked info) ----------------- */
+html.tv-mode #page-movies .movie-detail-hero {
+  min-height: 0;
+  padding: 0;
+  display: block;
+}
+html.tv-mode #page-movies .movie-detail-hero::before { opacity: 0.34; }
+html.tv-mode #page-movies .movie-detail-hero-content {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  padding: 16px;
+}
+html.tv-mode #page-movies .movie-detail-poster {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border-radius: 12px;
+}
+html.tv-mode #page-movies .movie-detail-info { gap: 8px; min-width: 0; }
+html.tv-mode #page-movies #movie-detail-title { font-size: 1.5rem; margin: 0; line-height: 1.15; }
+html.tv-mode #page-movies #movie-detail-plot {
+  font-size: 0.9rem;
+  line-height: 1.45;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* --- Panel: actions as labelled buttons (Live .lg-btn language) ---- */
+html.tv-mode #page-movies .movie-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+html.tv-mode #page-movies .movie-primary-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px;
+  border-radius: 12px;
+  background: var(--color-accent);
+  border: 0;
+  color: #fff;
+  font-weight: 800;
+  font-size: 0.92rem;
+}
+html.tv-mode #page-movies .movie-secondary-action {
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #eef3ff;
+  font-weight: 700;
+}
+html.tv-mode #page-movies .movie-detail-actions button:focus {
+  outline: none !important;
+  box-shadow: none !important;
+  background: #fff;
+  color: #0b0e14;
+  transform: scale(1.03);
+}
+
+/* --- Panel: versions list = the "choose on multi" surface --------- */
+html.tv-mode #page-movies .movie-versions-section { padding: 0 16px 16px; }
+html.tv-mode #page-movies .movie-versions-toolbar h3 { font-size: 1.05rem; margin: 0 0 6px; }
+html.tv-mode #page-movies .movie-version-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 10px 12px;
+  margin-bottom: 6px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #eef3ff;
+}
+html.tv-mode #page-movies .movie-version-item.active {
+  border-color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 22%, transparent);
+}
+html.tv-mode #page-movies .movie-version-item:focus {
+  outline: none !important;
+  box-shadow: inset 0 0 0 3px #fff !important;
+}
+
+/* ==================================================================
    Live TV on Android TV — mockup redesign. Two columns: the sidebar is
    the categorised channel browser (LEFT); the player-section is a preview
    CARD (channel art + info + labelled actions) over the full channel list
