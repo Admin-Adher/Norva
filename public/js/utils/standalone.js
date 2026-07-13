@@ -337,13 +337,49 @@
         // streamId + sourceId); see the playVideoJson payload note for why URLs aren't
         // pre-resolved. Returns [] for single-variant channels (no menu).
         const buildNativeVariants = (channel) => {
-            const list = channel?.qualityGroup?.variants;
-            if (!Array.isArray(list) || list.length < 2) return [];
-            return list.map(v => ({
-                label: String(v.label || v.raw || 'Variant'),
-                streamId: String(v.streamId != null ? v.streamId : (v.stream_id != null ? v.stream_id : '')),
-                sourceId: String(v.sourceId != null ? v.sourceId : (channel.sourceId || ''))
-            })).filter(v => v.streamId);
+            const cl = window.app?.channelList;
+            if (!channel || !cl) return [];
+            // Use the SAME family grouping the guide list shows ("M6 · N variants" = same
+            // source + family key), so the player's "Version" menu matches the list exactly.
+            // NOT channel.qualityGroup (a separate lineup/quality grouping that, for some
+            // families, lumped in unrelated channels and dropped real variants).
+            let members = [];
+            try {
+                if (typeof cl.getChannelFamilyMembers === 'function') {
+                    members = cl.getChannelFamilyMembers(channel, { includeCurrent: true, includeHidden: false }) || [];
+                }
+            } catch (_) { members = []; }
+            if (members.length < 2) {
+                // Fallback to the old quality-group list only when family grouping is unavailable.
+                const list = channel?.qualityGroup?.variants;
+                if (!Array.isArray(list) || list.length < 2) return [];
+                return list.map(v => ({
+                    label: String(v.label || v.raw || 'Variant'),
+                    streamId: String(v.streamId != null ? v.streamId : (v.stream_id != null ? v.stream_id : '')),
+                    sourceId: String(v.sourceId != null ? v.sourceId : (channel.sourceId || ''))
+                })).filter(v => v.streamId);
+            }
+            const CG = window.ChannelGrouping;
+            const qLabel = (m) => {
+                try { const p = CG && CG.parseName && CG.parseName(m.name || ''); const q = p && CG.qualityLabel && CG.qualityLabel(p); if (q) return q; } catch (_) { /* fall through */ }
+                return m.name || 'Variant';
+            };
+            const rank = (l) => l.startsWith('4K') ? 0 : (l.startsWith('FHD') || l.startsWith('Super HD')) ? 1 : l.startsWith('HD') ? 2 : l.startsWith('SD') ? 3 : 2;
+            const seen = Object.create(null);
+            return members
+                .map(m => ({ m, label: qLabel(m) }))
+                .sort((a, b) => rank(a.label) - rank(b.label))
+                .map(({ m, label }) => {
+                    // Disambiguate identical quality labels (e.g. two HD feeds) so each entry is distinct.
+                    let lbl = label;
+                    if (seen[lbl]) { seen[lbl] += 1; lbl = `${lbl} (${seen[lbl]})`; } else { seen[lbl] = 1; }
+                    return {
+                        label: String(lbl),
+                        streamId: String(m.streamId != null ? m.streamId : (m.stream_id != null ? m.stream_id : '')),
+                        sourceId: String(m.sourceId != null ? m.sourceId : (channel.sourceId || ''))
+                    };
+                })
+                .filter(v => v.streamId);
         };
 
         // Called by the native shell (MainActivity.onActivityResult) after the viewer picks a
