@@ -234,10 +234,58 @@
         let pollHandle = 0;
         let timerHandle = 0;
         let commandHandle = 0;
+        let pollFailStreak = 0;   // consecutive poll errors — don't flash red on a single blip
+        let autoRegenCount = 0;   // codes auto-refreshed on expiry (capped, see handleExpiry)
+        const MAX_AUTO_REGEN = 6; // ~1h at 10-min TTL, then require a deliberate "New code"
         const returnTo = sanitizeReturnTo(params.get('returnTo')) || '/?paired=1#home';
 
-        document.getElementById('restart-button').addEventListener('click', startPairing);
+        // "New code" is a deliberate user action: reset the auto-refresh budget so a
+        // fresh hour of hands-off refreshing starts from here.
+        document.getElementById('restart-button').addEventListener('click', () => {
+            autoRegenCount = 0;
+            startPairing();
+        });
         resumeOrStartPairing();
+        initRemoteNav();
+
+        // Android TV D-pad: this standalone page carries no spatial-nav engine, so give
+        // the remote explicit movement between the two actions ("New code" / "Open Norva
+        // Account") and Enter to activate. The happy path is scanning the QR with a phone
+        // (no remote needed), but an expired code or the account link must still be
+        // reachable from the couch. No-op off Android TV.
+        function initRemoteNav() {
+            if (!/NorvaTV-AndroidTV/i.test(navigator.userAgent || '')) return;
+            const items = () => [document.getElementById('restart-button'), document.getElementById('account-link')].filter(Boolean);
+            try { items()[0]?.focus(); } catch (_) { /* noop */ } // give the remote a starting point
+            document.addEventListener('keydown', (e) => {
+                const list = items();
+                if (!list.length) return;
+                const i = Math.max(0, list.indexOf(document.activeElement));
+                if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+                    e.preventDefault(); list[(i + 1) % list.length].focus();
+                } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+                    e.preventDefault(); list[(i - 1 + list.length) % list.length].focus();
+                } else if ((e.key === 'Enter' || e.key === 'NavigateEnter') && list.includes(document.activeElement)) {
+                    e.preventDefault(); document.activeElement.click();
+                }
+            });
+        }
+
+        // Code expiry: keep a live, scannable code on screen without demanding a remote
+        // press — the pairing screen is often watched hands-free while the user sets up
+        // on their phone. Auto-refresh a bounded number of times so a forgotten TV
+        // doesn't mint pairing codes forever; after the cap, fall back to "New code".
+        function handleExpiry() {
+            clearInterval(pollHandle);
+            clearInterval(timerHandle);
+            if (autoRegenCount < MAX_AUTO_REGEN) {
+                autoRegenCount += 1;
+                startPairing();
+            } else {
+                setStatus('error', 'Pairing paused to save power. Select “New code” to continue.');
+                timerEl.textContent = '';
+            }
+        }
 
         // Already-paired screen relaunching this page: re-use the stored device
         // token instead of forcing a brand-new pairing every time (the TV symptom
@@ -268,6 +316,7 @@
             currentCode = '';
             currentPairingSecret = '';
             expiresAt = 0;
+            pollFailStreak = 0;
             clearInterval(commandHandle);
             codeEl.textContent = '...';
             pairUrlEl.textContent = '';
@@ -308,6 +357,7 @@
             if (!currentCode) return;
             try {
                 const result = await NorvaCloud.pairing.poll(currentCode, currentPairingSecret);
+                pollFailStreak = 0;
                 if (result.status === 'approved') {
                     clearInterval(pollHandle);
                     clearInterval(timerHandle);
@@ -318,13 +368,21 @@
                     startCommandLoop();
                     setTimeout(() => location.replace(returnTo), 900);
                 } else if (result.status === 'expired' || result.status === 'not_found') {
-                    clearInterval(pollHandle);
-                    clearInterval(timerHandle);
-                    setStatus('error', 'This pairing code expired. Create a new one.');
-                    timerEl.textContent = '';
+                    // Auto-refresh instead of dead-ending on "create a new one" (which a
+                    // remote can struggle to reach); handleExpiry caps the regen count.
+                    handleExpiry();
+                } else if (statusEl.classList.contains('error')) {
+                    // Still pending after a transient blip — clear the stale red message.
+                    setStatus('', 'Waiting for approval...');
                 }
             } catch (error) {
-                setStatus('error', error.message || 'Pairing check failed.');
+                // A single dropped poll (Wi-Fi hiccup) must not paint a permanent red
+                // error while the 2.5s poll keeps retrying and recovers on its own.
+                // Only surface it after several consecutive failures; a later success
+                // silently clears it (pollFailStreak resets above).
+                if (++pollFailStreak >= 4) {
+                    setStatus('error', (error.message || 'Pairing check failed') + ' — retrying…');
+                }
             }
         }
 
@@ -389,12 +447,8 @@
             const seconds = Math.max(0, Math.floor((expiresAt - Date.now()) / 1000));
             const minutes = Math.floor(seconds / 60);
             const rest = String(seconds % 60).padStart(2, '0');
-            timerEl.textContent = seconds ? `Expires in ${minutes}:${rest}` : 'Expired';
-            if (!seconds) {
-                clearInterval(pollHandle);
-                clearInterval(timerHandle);
-                setStatus('error', 'This pairing code expired. Create a new one.');
-            }
+            timerEl.textContent = seconds ? `Expires in ${minutes}:${rest}` : 'Refreshing code…';
+            if (!seconds) handleExpiry();
         }
 
         function setStatus(type, message) {

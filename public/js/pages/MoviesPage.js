@@ -693,8 +693,44 @@ class MoviesPage {
 
     hide() {
         if (this._facetTimer) { clearInterval(this._facetTimer); this._facetTimer = null; }
+        this._disarmCatalogRefreshWatch();
         // Scroll restoration: the grid is its own scroller, remembered per visit.
         this._savedScrollTop = this.container?.scrollTop || 0;
+    }
+
+    // Onboarding: while an empty/locked grid is shown during a first-run catalog
+    // sync, watch for the catalog coming online and reload automatically — the
+    // user should never have to leave the page and come back to see their movies
+    // appear. Self-cleans the moment content renders (filterAndRender) or the page
+    // is hidden. Armed only while an empty state is on screen, so it is idle for
+    // the normal populated case.
+    _armCatalogRefreshWatch() {
+        if (this._catalogWatch) return;
+        const reload = () => {
+            if (this._catalogWatchReloading) return; // guard re-entry: show() re-dispatches health events
+            this._catalogWatchReloading = true;
+            Promise.resolve(this.show()).catch(() => {}).finally(() => { this._catalogWatchReloading = false; });
+        };
+        const w = { reload, ticks: 0, timer: 0 };
+        this._catalogWatch = w;
+        document.addEventListener('norva:source-health-changed', reload);
+        window.addEventListener('norva:catalog-availability-changed', reload);
+        // Safety net for partial availability (movies can fill before the whole
+        // source flips to "ready", so the completion event never fires): gently
+        // re-check, bounded to ~10 min so a forgotten page never polls forever.
+        w.timer = setInterval(() => {
+            if (++w.ticks > 40) { this._disarmCatalogRefreshWatch(); return; }
+            reload();
+        }, 15000);
+    }
+
+    _disarmCatalogRefreshWatch() {
+        const w = this._catalogWatch;
+        if (!w) return;
+        this._catalogWatch = null;
+        document.removeEventListener('norva:source-health-changed', w.reload);
+        window.removeEventListener('norva:catalog-availability-changed', w.reload);
+        if (w.timer) clearInterval(w.timer);
     }
 
     renderCatalogLocked() {
@@ -720,6 +756,7 @@ class MoviesPage {
                 this.app?.navigateTo?.('home');
             });
         }
+        this._armCatalogRefreshWatch();
     }
 
     async loadServerSettings() {
@@ -1254,6 +1291,9 @@ class MoviesPage {
     }
 
     filterAndRender() {
+        // Any real render supersedes a pending empty-state auto-refresh watch;
+        // re-armed below only if this render lands on an empty (non-filtered) grid.
+        this._disarmCatalogRefreshWatch();
         // Local (self-hosted) mode default with no active filter → genre rails,
         // built client-side from already-loaded titles. Cloud mode is untouched
         // (it renders rails via the server in renderGenreRails).
@@ -1297,6 +1337,9 @@ class MoviesPage {
                     ${filtered ? '<button class="btn btn-primary" id="movies-empty-reset">Clear filters</button>' : ''}
                 </div>`;
             this.container.querySelector('#movies-empty-reset')?.addEventListener('click', () => this.resetFilters?.());
+            // A non-filtered empty grid means the catalog is still filling — auto-reload
+            // when it comes online instead of stranding the user on an empty page.
+            if (!filtered) this._armCatalogRefreshWatch();
             return;
         }
 

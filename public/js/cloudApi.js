@@ -372,6 +372,15 @@
         storageSet(KEY_LEGACY_COUNTRY, normalized);
         storageRemove(KEY_REGION_PROMPT_DISMISSED);
         rememberRegionState({ region: normalized, status: 'confirmed', source: 'local' });
+        // The region reorganizes the LIVE catalog (categories/channels are fetched
+        // per region). Announce the change so the app can drop the previous region's
+        // cached channels and re-render, instead of stranding stale content until a
+        // manual reload. Fired on the local write (already effective), before the
+        // best-effort profile save below. All three callers are deliberate user
+        // actions (prompt Yes/Apply, Settings), so this never fires on a silent boot.
+        try {
+            document.dispatchEvent(new CustomEvent('norva:content-region-changed', { detail: { region: normalized } }));
+        } catch (_) { /* noop — non-DOM contexts */ }
 
         if (options.saveProfile !== false && getToken()) {
             try {

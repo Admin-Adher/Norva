@@ -981,10 +981,27 @@ class SourceManager {
             window.location.hash = '#home';
         };
 
+        let lastFooterKind = null;
         const render = (source) => {
             const { phase } = this.sourceSyncState(source);
             title.textContent = phase === 'ready' ? 'Catalog ready' : phase === 'error' ? 'TV service needs attention' : 'Preparing your catalog';
             body.innerHTML = this.renderCatalogPreparation(source, type);
+
+            // Only rebuild the footer (and its focusable buttons) when the actionable
+            // state actually changes. During a long import the phase stays "preparing"
+            // for many poll ticks; rebuilding the footer every tick destroys the button
+            // the TV remote is focused on, stranding D-pad focus mid-dialog. Same-kind
+            // polls now leave the footer — and its focus — untouched, updating only the
+            // progress bar above. On a real transition we rebuild and, if focus was in
+            // the footer, hand it to the new primary button so the remote isn't stranded.
+            const footerKind = phase === 'ready' ? 'ready' : phase === 'error' ? 'error' : 'progress';
+            if (footerKind === lastFooterKind) return;
+            const restoreFocus = footer.contains(document.activeElement);
+            lastFooterKind = footerKind;
+            const focusIfNeeded = (id) => {
+                if (!restoreFocus) return;
+                try { document.getElementById(id)?.focus({ preventScroll: true }); } catch (_) { /* noop */ }
+            };
 
             if (phase === 'ready') {
                 footer.innerHTML = `
@@ -993,6 +1010,7 @@ class SourceManager {
         `;
                 document.getElementById('catalog-stay').onclick = closeToSettings;
                 document.getElementById('catalog-start').onclick = startWatching;
+                focusIfNeeded('catalog-start');
             } else if (phase === 'error') {
                 footer.innerHTML = `
           <button class="btn btn-secondary" id="catalog-background">Close</button>
@@ -1000,11 +1018,13 @@ class SourceManager {
         `;
                 document.getElementById('catalog-background').onclick = closeToSettings;
                 document.getElementById('catalog-edit').onclick = () => this.showEditModal(sourceId, type);
+                focusIfNeeded('catalog-edit');
             } else {
                 footer.innerHTML = `
           <button class="btn btn-secondary" id="catalog-background">Run in Background</button>
         `;
                 document.getElementById('catalog-background').onclick = closeToSettings;
+                focusIfNeeded('catalog-background');
             }
         };
 

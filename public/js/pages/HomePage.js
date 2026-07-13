@@ -936,7 +936,7 @@ class HomePage {
             submit.disabled = true;
             submit.textContent = 'Connecting...';
             try {
-                const createdSource = await window.API.sources.create({ type: 'xtream', ...payload });
+                await window.API.sources.create({ type: 'xtream', ...payload });
                 await this.app?.sourceManager?.loadSources?.();
                 document.dispatchEvent(new CustomEvent('norva:source-health-changed'));
                 submit.textContent = 'Preparing catalog...';
@@ -957,26 +957,40 @@ class HomePage {
 
     readSetupConnectionForm(container) {
         const manager = this.app?.sourceManager || window.app?.sourceManager;
-        let url = container.querySelector('#home-source-url')?.value.trim() || '';
+        const rawUrl = container.querySelector('#home-source-url')?.value.trim() || '';
+        let url = rawUrl;
         let name = container.querySelector('#home-source-name')?.value.trim() || '';
         let username = container.querySelector('#home-source-username')?.value.trim() || '';
         let password = container.querySelector('#home-source-password')?.value.trim() || '';
-        const parsed = manager?.parseXtreamLink?.(url);
+        const parsed = manager?.parseXtreamLink?.(rawUrl);
 
         if (parsed) {
-            url = parsed.serverUrl || url;
+            url = parsed.serverUrl || rawUrl;
             username = username || parsed.username || '';
             password = password || parsed.password || '';
         }
 
         if (!url) throw new Error('Provider URL is required.');
+
+        // A playlist link (.m3u/.m3u8, or an M3U-style get.php export) carries no
+        // Xtream credentials — accept it as an M3U source instead of demanding a
+        // username/password the user simply doesn't have.
+        const looksLikePlaylist = /\.m3u8?(\?|#|$)/i.test(rawUrl) || /[?&]type=m3u/i.test(rawUrl);
+        if (!username && !password && looksLikePlaylist) {
+            if (!name) {
+                const hostName = parsed?.host || manager?.hostFromUrl?.(rawUrl) || 'Playlist';
+                name = hostName ? hostName.replace(/^www\./i, '') : 'Playlist';
+            }
+            return { type: 'm3u', name, url: rawUrl };
+        }
+
         if (!username || !password) throw new Error('Username and password are required.');
 
         if (!name) {
             const hostName = parsed?.host || manager?.hostFromUrl?.(url) || 'TV service';
             name = hostName ? hostName.replace(/^www\./i, '') : 'TV service';
         }
-        return { name, url, username, password };
+        return { type: 'xtream', name, url, username, password };
     }
 
     isPairedScreen() {

@@ -2216,6 +2216,31 @@ class ChannelList {
         return true;
     }
 
+    // Wipe the device-side live catalog cache and in-memory channels. The cache
+    // key (norva-live:type:id:v4) is region-agnostic, so after a content-region
+    // change the previous region's channels would otherwise reload straight from
+    // IndexedDB. Called on norva:content-region-changed so the next load re-fetches
+    // the region-organized catalog fresh. (The api.js page cache is keyed by
+    // country and needs no busting.)
+    async clearLiveCatalogCache() {
+        this.channels = [];
+        this.groups = [];
+        this.hasLoadedOnce = false;
+        this.liveHydrationRunId++; // abandon any in-flight background page hydration
+        if (!window.API?.isCloudMode?.()) return;
+        const db = await this.openLiveCacheDb();
+        if (!db) return;
+        await new Promise((resolve) => {
+            try {
+                const tx = db.transaction('catalogs', 'readwrite');
+                tx.objectStore('catalogs').clear();
+                tx.oncomplete = () => resolve();
+                tx.onerror = () => resolve();
+                tx.onabort = () => resolve();
+            } catch (_) { resolve(); }
+        });
+    }
+
     hydrateRemainingLivePages(sourceId, categories, sourceType, loadRunId) {
         if (!window.API?.isCloudMode?.()) return;
         const pageSize = 1000;

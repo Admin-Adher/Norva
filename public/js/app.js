@@ -244,6 +244,18 @@ class App {
             this.maybeShowTrialBanner();
         });
 
+        // Picking a content region (onboarding prompt or Settings) reorganizes the
+        // LIVE catalog — categories/channels are fetched per region and the device
+        // live cache is region-agnostic. Drop the stale cache and re-render Live in
+        // place if it's the visible page; other pages pick up the cleared cache on
+        // their next visit. Movies/Series/Home rails don't depend on region.
+        document.addEventListener('norva:content-region-changed', async () => {
+            try { await this.channelList?.clearLiveCatalogCache?.(); } catch (_) { /* noop */ }
+            if (this.currentPage === 'live' && this.pages.live?.show) {
+                try { this.pages.live.show(); } catch (_) { /* noop */ }
+            }
+        });
+
         // Now Playing indicator
         const nowPlayingBtn = document.getElementById('now-playing-indicator');
         if (nowPlayingBtn) {
