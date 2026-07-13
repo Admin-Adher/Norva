@@ -466,9 +466,18 @@ html.tv .np-avatar-choice:focus{outline:2px solid #b579ff;outline-offset:2px}
         if (!ok) return;
         del.disabled = true; status.textContent = 'Deleting…';
         try {
+          const wasActive = profilesApi().getActiveId() === state.editing.id;
           await profilesApi().remove(state.editing.id);
-          if (profilesApi().getActiveId() === state.editing.id) profilesApi().setActiveId('');
           await loadProfiles();
+          if (wasActive) {
+            // Deleting the ACTIVE profile leaves no scoped identity. Switch to a remaining
+            // profile (reloads home / favorites / history under it + closes the overlay)
+            // instead of leaving the app showing the deleted profile's data with an
+            // unscoped id (the previous setActiveId('') did neither).
+            const next = state.profiles[0];
+            if (next) { selectProfile(next); return; }
+            profilesApi().setActiveId('');
+          }
           state.mode = 'manage';
           render();
         } catch (e) {

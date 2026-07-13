@@ -166,6 +166,10 @@ class SettingsPage {
                   <p class="setting-hint" style="margin:0">Loading…</p>
                 </div>
               </div>
+              <div id="ss-current-row" style="display:none">
+                <label class="setting-label" for="ss-current" style="display:block;margin-bottom:6px">Current password</label>
+                <input id="ss-current" type="password" autocomplete="current-password" placeholder="Your current password" style="${inputStyle}">
+              </div>
               <div>
                 <label class="setting-label" for="ss-new" id="ss-pwd-heading" style="display:block;margin-bottom:6px">New password</label>
                 <input id="ss-new" type="password" autocomplete="new-password" minlength="6" placeholder="At least 6 characters" style="${inputStyle}">
@@ -205,14 +209,33 @@ class SettingsPage {
             const confirmPwd = confirmInput?.value || '';
             if (pwd.length < 6) { setStatus('Password must be at least 6 characters.', true); newInput?.focus(); return; }
             if (pwd !== confirmPwd) { setStatus('The passwords do not match.', true); confirmInput?.focus(); return; }
+            const currentRow = document.getElementById('ss-current-row');
+            const currentInput = document.getElementById('ss-current');
+            const needsReauth = !!currentRow && currentRow.style.display !== 'none';
+            const currentPwd = currentInput?.value || '';
+            if (needsReauth && !currentPwd) { setStatus('Enter your current password.', true); currentInput?.focus(); return; }
             const btn = document.getElementById('ss-update');
             if (btn) btn.disabled = true;
             setStatus('Updating…', false);
             try {
+                // Premium/Netflix-grade: verify the CURRENT password (re-authenticate) before
+                // changing it, so a momentarily-unlocked session can't silently take over the
+                // account. Skipped for the passwordless "Add a password" case.
+                if (needsReauth) {
+                    try {
+                        await window.NorvaAuth.signIn({ email, password: currentPwd });
+                    } catch (_) {
+                        setStatus('Current password is incorrect.', true);
+                        if (btn) btn.disabled = false;
+                        currentInput?.focus();
+                        return;
+                    }
+                }
                 await window.NorvaAuth.updatePassword(pwd);
                 setStatus('Password updated.', false);
                 if (newInput) newInput.value = '';
                 if (confirmInput) confirmInput.value = '';
+                if (currentInput) currentInput.value = '';
                 this.populateSignInMethods(); // reflect that email+password is now a method
                 setTimeout(close, 900);
             } catch (e) {
@@ -288,6 +311,10 @@ class SettingsPage {
         const updateBtn = document.getElementById('ss-update');
         if (heading) heading.textContent = hasPassword ? 'Change password' : 'Add a password';
         if (updateBtn) updateBtn.textContent = hasPassword ? 'Update password' : 'Add password';
+        // Changing an EXISTING password requires re-auth (premium/security): reveal the
+        // current-password field. Adding a first password (passwordless account) does not.
+        const currentRow = document.getElementById('ss-current-row');
+        if (currentRow) currentRow.style.display = hasPassword ? '' : 'none';
     }
 
     async signOut() {
@@ -623,10 +650,16 @@ class SettingsPage {
         const resetBrokenHint = document.getElementById('reset-broken-hint');
 
         let s = {};
+        let loadOk = true;
         try {
             s = await API.settings.get();
         } catch (err) {
-            console.warn('Could not load settings for content section');
+            // Don't silently default the controls and then let the first interaction
+            // overwrite the user's real (unloaded) genres/language/quality. Flag it,
+            // surface it, and skip wiring the save handlers below.
+            console.warn('Could not load settings for content section', err);
+            loadOk = false;
+            window.NorvaModal?.toast?.('Could not load your preferences — reopen Settings to retry.', 'error');
         }
 
         const languagePrefs = window.MediaUtils?.normalizeContentPreferences
@@ -661,6 +694,9 @@ class SettingsPage {
             }).catch(console.error);
         }
 
+        // Only wire the save-on-change handlers when the load SUCCEEDED — otherwise the
+        // first change would persist the blank defaults over the user's real preferences.
+        if (loadOk) {
         audioLangSelect?.addEventListener('change', () => {
             // Language preferences drive the resolved synopsis language, so drop the catalog
             // caches to refetch localized overviews on the next browse view.
@@ -688,6 +724,7 @@ class SettingsPage {
         qualitySelect?.addEventListener('change', () => {
             API.settings.update({ preferredQuality: qualitySelect.value }).catch(console.error);
         });
+        }
         tmdbKeyInput?.addEventListener('change', () => {
             API.settings.update({ tmdbApiKey: tmdbKeyInput.value.trim() }).catch(console.error);
         });
@@ -1060,6 +1097,17 @@ class SettingsPage {
                     .forEach(el => el.classList.remove('tc-flash'));
             }, 2400);
         });
+
+        // On plain web (no local transcoder) the audio-fix (force-transcode) and the
+        // buffering-fix (quality/max-resolution) are inert — the controls they drive are
+        // hidden as non-functional there — yet the wizard would still flash a green "✓ fixed"
+        // and a success toast. Hide those two options so we never claim a no-op fix. The
+        // black-screen / provider-blocked options use force-proxy, which works on web, so
+        // they stay.
+        if (!(this.app.player?._hasLocalTranscoder?.() ?? false)) {
+            wiz.querySelectorAll('.tc-wizard-opt[data-fix="sound"], .tc-wizard-opt[data-fix="buffer"]')
+                .forEach(o => { o.style.display = 'none'; });
+        }
     }
 
     /**
