@@ -1,8 +1,8 @@
 # Session 2026-07-13 (2) — nav TV catalogue, profils plein écran, modèle d'abonnement & lifecycle
 
-**Statut : 10 commits livrés sur `main` (front auto-Cloudflare ; edge redéployé sur Hetzner).**
+**Statut : commits livrés sur `main` (front auto-Cloudflare ; edge redéployé sur Hetzner). Le mode `limits` (#10) a été REVERTÉ le jour même — voir §10.**
 
-Suite du log `2026-07-13-session-log.md` (nav Live + synchro cloud). Cette session couvre : la nav D-pad des pages **Movies/Séries**, la refonte **plein écran des profils** sur TV, un **audit « pubs vs réel »** des abonnements, la bascule du **différenciateur de plan** (profils, plus flux), le **verrouillage des profils** au downgrade, le **découpage du flag lifecycle** billing, et un **3ᵉ mode d'entitlements `limits`** (caps de plan sans mur d'accès).
+Suite du log `2026-07-13-session-log.md` (nav Live + synchro cloud). Cette session couvre : la nav D-pad des pages **Movies/Séries**, la refonte **plein écran des profils** sur TV, un **audit « pubs vs réel »** des abonnements, la bascule du **différenciateur de plan** (profils, plus flux), le **verrouillage des profils** au downgrade, et le **découpage du flag lifecycle** billing. ⚠️ Un 10ᵉ point (mode `limits`) a été ajouté **puis reverté** après avoir constaté que le paiement Revolut est déjà en prod (cf. §10).
 
 | # | Sujet | Commit `main` | Fichiers clés |
 |---|---|---|---|
@@ -15,7 +15,7 @@ Suite du log `2026-07-13-session-log.md` (nav Live + synchro cloud). Cette sessi
 | 7 | Pépites landing : sous-titres IA, Cast, self-healing | `f120db4` | `landing.html`, `index.html` |
 | 8 | Lifecycle : flags par-flux + correctifs des bloqueurs | `57fd2f3` | `norva-lifecycle/index.ts`, `lifecycle-email.ts` |
 | 9 | Lifecycle : claim atomique dunning + câblage des flags edge | `c90afbc` | `norva-lifecycle/index.ts`, `docker-compose.supabase.yml`, `.env.hetzner.example` |
-| 10 | Mode entitlements `limits` : caps de plan sans mur d'accès | `311a4e9` | `entitlements.ts`, `norva-cloud/index.ts`, `norva-playback/index.ts`, `.env.hetzner.example` |
+| 10 | ~~Mode entitlements `limits`~~ **REVERTÉ** (`72a541d`) — prémisse fausse, cf. §10 | `311a4e9` → `72a541d` | `entitlements.ts`, `norva-cloud/index.ts`, `norva-playback/index.ts`, `.env.hetzner.example` |
 
 Méthode : 4 workflows multi-agents (nav Movies/Séries, fit profils TV, audit features, flag-readiness lifecycle), chacun avec vérification adverse ; harnais headless Playwright pour la nav + le fit + le verrouillage.
 
@@ -85,35 +85,29 @@ Workflow flag-readiness → **verdict : ne PAS flipper le flag unique** (il acti
 
 Revue adverse (agent) du diff lifecycle : aucun bloqueur — CAS, gating, provider-scope, garde expire tous corrects.
 
-## 10. Mode entitlements `limits` — caps de plan sans mur d'accès (`311a4e9`)
+## 10. Mode entitlements `limits` — AJOUTÉ PUIS REVERTÉ (`311a4e9` → `72a541d`)
 
-**Problème** : `NORVA_ENTITLEMENTS_MODE` n'avait que 2 états. En `observe`, `applyEntitlementMode()` réécrit tout compte non hard-bloqué en `allowed:true` + `limits: PLAN_LIMITS.manual` (8 profils) → **le cap Plus=2/Family=5 et le verrouillage (#4/#5) sont inertes**. Passer en `enforce` les active, mais couple ça au **mur d'accès facturation** : tout `expired`/`past_due`/sans-projection se prend un **hard block** (mode `legacy` = pas de free-browse) → dangereux tant que le rail de paiement n'enforce pas. On voulait les **caps sans le mur**.
+> **Compte-rendu d'incident (mineur, 0 utilisateur impacté).** À garder pour ne pas refaire l'erreur.
 
-**Fix** — 3ᵉ mode `limits` (alias `enforce-limits` / `limits-only`), le juste milieu :
+**Ce qui s'est passé.** J'ai codé un 3ᵉ mode d'entitlements `limits` (appliquer les caps de plan **sans** le mur d'accès facturation), sur la **prémisse fausse** que le paiement n'était pas prêt et que l'`enforce` trouvé sur la box était un défaut accidentel. J'ai même basculé la box `enforce` → `limits`.
 
-| Mode | Caps de plan (profils/sources/appareils/flux) | Mur d'accès facturation |
-|---|---|---|
-| `observe` | ❌ inerte (tout le monde = manual/8) | ❌ ouvert |
-| **`limits`** (nouveau) | ✅ **réel pour comptes entitled** | ❌ **ouvert** |
-| `enforce` | ✅ réel | ⚠️ réel (à réserver post-refonte paiement) |
+**La réalité (que je n'avais pas lue).** `docs/BILLING-REVOLUT-MIGRATION.md` **Phase 6** : le **paiement Revolut est en PRODUCTION depuis le 2026-07-11**, validé **vraie carte Mastercard**. L'état de prod **délibéré et validé** est **`NORVA_ENTITLEMENTS_MODE=enforce` + `NORVA_BILLING_MODE=revenuecat`** (+ front `billing-config.js` `revolut.enabled:true`/`mode:prod`, git `d45ffb1`/`c2b0f9d`/`38496eb`). L'`enforce` de la box **n'était donc pas un accident** — c'était le paywall soft voulu (non-abonné → palier `free`, browse sans lecture, s'abonne via Revolut ; bypass admin).
 
-- **Comptes entitled** (essai/actif) → décision passée telle quelle → **vraies limites du plan**. Le cap d'essai **suit le plan choisi à la souscription** (une projection `trialing/plus` porte les caps Plus, `trialing/family` les caps Family) — aucun override « trial→N » codé, c'est automatique via `normalizeLimits(plan_code)`.
-- **Soft denials** (`trial_expired`, `subscription_expired`, sans abo) → **jamais mis au mur** : dégradés en `allowed:true` + limites `manual` généreuses (préfixe de raison `limits_open_`, strippé par `realPlanCode` pour l'upsell).
-- **Rayon d'action** (via `requirePlanCapacity`) : `profiles` (Plus 2 / Family 5 — le seul différenciateur), `sources` (5), `trusted_devices` (10), `concurrent_streams` (10). Sources/appareils/flux sont identiques Plus↔Family et généreux → **seul le cap de profils se ressent**. `requireCloudAccess` ne mure jamais (`allowed` reste `true`).
-- **Observabilité** : `getEntitlementRuntime()` expose `limitsEnforced` (true en `enforce` **et** `limits`), remonté dans les health `norva-cloud`/`norva-playback` sous `entitlementsLimitsEnforced`. `deno check` propre (les 3 erreurs `CloudUser`/`isAdminUser` restent la baseline).
+**Pourquoi 0 dégât.** `billingMode` était **`revenuecat`** en permanence. Dans ce mode, un soft-denial passe par `freeBrowseDecision` (`allowed:true`, `concurrent_streams:0`), que `limits` laissait passer tel quel → **le paywall a tenu**. Seule fuite théorique de `limits` vs `enforce` en revenuecat : un `past_due` toutes grâces expirées (`billing_unverified`, `allowed:false`) serait ouvert au lieu d'être bloqué — **aucun** des 5 comptes test n'était dans ce cas. Fenêtre ~1 h, aucun paiement raté.
 
-**Diagnostic pré-flip** (SQL sur `cloud_entitlement_projection` ⨝ `cloud_account_profiles`, box) : 5 comptes test, **tous `allowed`, 0 profil hors cap** → basculer en `limits` (ou même `enforce`) = **0 compte coupé, 0 profil verrouillé**. Les caps deviennent juste réels pour la suite.
+**Remédiation** (cette session) :
+- Box **remise en `enforce`** — health vérifié : `entitlementsMode:"enforce"` + `entitlementsEnforced:true` + `billingMode:"revenuecat"`.
+- Commit `311a4e9` **reverté** (`72a541d`) : le mode `limits` est retiré du code (footgun : un `limits` mal posé affaiblit le paywall — inutile puisque le paiement est live).
+- `.env.hetzner.example` : commentaire corrigé (2 modes ; **prod = `enforce`+`revenuecat`, Revolut live** ; `observe` = rollback d'urgence uniquement).
 
-**⚠️ Découverte** : la box **ne tournait pas en `observe`** comme supposé — son `.env` (ligne 73) portait explicitement `NORVA_ENTITLEMENTS_MODE=enforce`. Donc `enforce` était **actif** (health : `entitlementsMode:"enforce"`), et le verrouillage de profils (#5) était donc déjà live (mais invisible, 0 compte hors cap). Basculé en `limits` cette session (health vérifié : `entitlementsMode:"limits"` + `entitlementsEnforced:false` + `entitlementsLimitsEnforced:true`) → caps actifs, risque de mur d'accès futur retiré.
-
-**Activation** (box) : poser `NORVA_ENTITLEMENTS_MODE=limits` dans `ops/hetzner/.env` (⚠️ une **vraie** ligne — un commentaire collé ne modifie rien), puis **recréer** : `docker compose --env-file ops/hetzner/.env -f ops/hetzner/docker-compose.supabase.yml up -d functions`. Vérif health attendue : `entitlementsMode:"limits"` + `entitlementsEnforced:false` + `entitlementsLimitsEnforced:true`. Rollback = remettre `observe`/`enforce` + recréer.
+**Leçon** : lire `BILLING-REVOLUT-MIGRATION.md` **avant** de toucher à `NORVA_ENTITLEMENTS_MODE`/`NORVA_BILLING_MODE`. L'état de prod est `enforce`+`revenuecat` — pas à « décider », déjà validé.
 
 ---
 
 ## ⚠️ À NE PAS OUBLIER (ops)
 
-1. ✅ **Edge redéployé** (#5 `norva-cloud`, #8/#9 `norva-lifecycle`, #10 `entitlements`/`norva-playback`) — fait cette session via `git pull` + recréation du conteneur `functions`. Tout lifecycle reste OFF. Rappel : `restart` recharge le **code** mais pas les **nouvelles vars d'env** → pour tout `NORVA_LC_*`/`NORVA_ENTITLEMENTS_MODE`, il faut `docker compose --env-file ops/hetzner/.env -f ops/hetzner/docker-compose.supabase.yml up -d functions` (recréer).
-2. ✅ **`NORVA_ENTITLEMENTS_MODE=limits`** posé sur la box cette session (health : `entitlementsEnforced:false` + `entitlementsLimitsEnforced:true`). Caps de profils Plus=2/Family=5 actifs, accès jamais mis au mur. La box était auparavant en **`enforce`** explicite (ligne 73 du `.env`), pas `observe`. **Ne repasser en `enforce` qu'après la refonte paiement** (sinon un essai expiré serait coupé sans pouvoir payer). `grep ENTITLEMENTS_MODE ops/hetzner/.env` pour vérifier l'état.
+1. ✅ **Edge redéployé** (#5 `norva-cloud`, #8/#9 `norva-lifecycle`) — fait cette session via `git pull` + recréation du conteneur `functions`. Tout lifecycle reste OFF. ⚠️ **Le revert `72a541d` du mode `limits` n'est pas encore sur la box** — à récupérer au prochain `git pull` + `up -d functions` (sans effet de comportement : la box est en `enforce`, qui n'utilise pas la branche `limits`). Rappel : `restart` recharge le **code** mais pas les **nouvelles vars d'env** → pour tout `NORVA_LC_*`/`NORVA_ENTITLEMENTS_MODE`, il faut `docker compose --env-file ops/hetzner/.env -f ops/hetzner/docker-compose.supabase.yml up -d functions` (recréer).
+2. 🔒 **`NORVA_ENTITLEMENTS_MODE=enforce` + `NORVA_BILLING_MODE=revenuecat` = état de PROD validé** (paiement Revolut live depuis le 2026-07-11 — cf. §10 + `BILLING-REVOLUT-MIGRATION.md`). **NE PAS** repasser en `observe` (ni `limits`, retiré) sauf **rollback d'urgence** : ça réouvre tout et affaiblit le paywall. Vérif : `curl -s https://api.norva.tv/functions/v1/norva-cloud/health | grep -o 'entitlementsMode\|billingMode'` → doit rester `enforce`/`revenuecat`.
 3. **Activer le lifecycle plus tard** : jamais `EXPIRE` sans `DUNNING` (couperait sans avertir). Combo `NORVA_LIFECYCLE_BILLING_LIVE=true` + `NORVA_LC_DUNNING=true` (+ `NORVA_LC_EXPIRE=true`), puis **recréer** le conteneur (`up -d functions`, pas restart). Prérequis : cron `norva-lifecycle` enregistré, `RESEND_API_KEY` + expéditeur `norva.tv` vérifié.
 
 ## Versions d'assets finales
