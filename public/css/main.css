@@ -11989,6 +11989,24 @@ mark.search-highlight {
 }
 
 /* ------------------------------------------------------------------
+   TV (D-pad) — Home page content-nav hardening (2026-07 audit).
+   Remove hover-only / decorative controls that become stray or dangerous
+   spatial focus stops for a remote (no 10-foot D-pad purpose):
+   • .ch-remove — the Continue-Watching ✕: `@media(hover:none)` forces it
+     visible on TV WebViews, so Up from a card lands on it and Enter DELETES
+     the title. Hidden on TV → Up from a CW card always reaches the hero.
+   • .home-hero-dots — 9px carousel dots wedged between the hero actions and
+     the first rail; the billboard auto-rotates and the D-pad has no gesture
+     to cycle slides, so they are pure stray stops.
+   • .home-rail-seeall — the per-rail "See all" header button intercepts the
+     vertical card path inconsistently; the left-rail menu already reaches
+     each category page, so it is redundant on TV.
+   ------------------------------------------------------------------ */
+.tv-mode .ch-remove,
+.tv-mode .home-hero-dots,
+.tv-mode .home-rail-seeall { display: none !important; }
+
+/* ------------------------------------------------------------------
    TV menu (top navbar) — make it 10-foot / lean-back grade.
    The generic .tv-mode *:focus above is tuned for content CARDS on a
    busy grid: a 4px detached white ring + a 7px black halo + a forced

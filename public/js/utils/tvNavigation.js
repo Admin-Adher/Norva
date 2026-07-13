@@ -567,11 +567,13 @@
             // For them, Left must open the menu, not jump diagonally to Hide-unavailable.
             // The header controls themselves keep walking left within their own row.
             const isSidebarListRow = focused.matches?.('.channel-sidebar .group-header, .channel-sidebar .channel-item');
-            // NEVER escape to the rail while a modal is open: a full-width modal element
-            // has no left neighbour (leftNext null), which would otherwise fall through
-            // here and land the ring on the active nav-link BEHIND the veil, breaking the
-            // focus trap. Inside a modal, keep focus put (findNext below is modal-scoped).
-            if (!openModal() && (!leftNext || leftNext.closest('.navbar') || isSidebarListRow)) {
+            // NEVER escape to the rail while navigation is confined to an overlay (a modal,
+            // a multi-select panel, or an open Movies/Series detail panel — navScope()): a
+            // full-width trapped element has no left neighbour (leftNext null), which would
+            // otherwise fall through here and land the ring on the active nav-link BEHIND the
+            // overlay, breaking the focus trap. Inside a scope, keep focus put (findNext is
+            // scope-bound). navScope() === document means nothing is trapping.
+            if (navScope() === document && (!leftNext || leftNext.closest('.navbar') || isSidebarListRow)) {
                 // Only trust the active nav-link if it is actually VISIBLE. applyCatalogAvailability
                 // (app.js) can hide the current section's tab (display:none) while it stays .active,
                 // and a truthy-but-hidden active link would shadow the visible fallback via `||`,
@@ -635,7 +637,16 @@
             }
         }
 
-        const next = findNext(focused, e.key);
+        let next = findNext(focused, e.key);
+        // Confine a horizontal press to its own rail row: inside a .horizontal-scroll rail,
+        // a Left/Right target MUST live in the same rail. Otherwise Right at the true end of
+        // a rail (no card to its right) leaps diagonally into a different rail and recenters
+        // the page — on a 10-foot UI the expected behaviour is a no-op. Vertical presses, the
+        // hero action row, and vertical grids (not a .horizontal-scroll) are unaffected.
+        if (next && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+            const row = focused.closest?.('.horizontal-scroll');
+            if (row && !row.contains(next)) next = null;
+        }
         if (next) {
             focusElement(next);
             return;
@@ -760,12 +771,41 @@
     let lastFocusedCard = null;          // last card-like element we focused
     let lastFocusedPageId = null;
     let lastFocusRect = null;            // where it was — re-anchor point after re-renders
+    let lastFocusedKey = null;           // data-identity, to re-find the SAME card after a rebuild
+
+    // Stable identity for a card-like element that survives an innerHTML rebuild: the new
+    // node is a different object but carries the same identifying data-* attributes (same
+    // underlying item — e.g. data-rail-index/data-item-index, data-history-index, an id).
+    // Lets us re-focus the SAME card after a rail is rebuilt in the background instead of
+    // snapping to a stale screen position (a rebuilt rail resets scrollLeft to 0).
+    function cardKey(el) {
+        if (!el || el.nodeType !== 1) return null;
+        if (el.id) return '#' + el.id;
+        const ds = el.dataset ? Object.keys(el.dataset).filter((k) => k !== 'heroHoverBound') : [];
+        if (!ds.length) return null;
+        ds.sort();
+        return (el.className || '').split(' ')[0] + '|' + ds.map((k) => k + '=' + el.dataset[k]).join('&');
+    }
+    function relocateLastCard() {
+        if (!lastFocusedKey) return null;
+        const page = activePage();
+        if (!page) return null;
+        // Scan the raw page DOM (NOT the viewport-filtered candidate set) so we can re-find a
+        // card that the rebuild's scrollLeft:0 reset pushed off-screen; focusElement then
+        // scrollIntoView-centres it, restoring the user's exact horizontal place in the rail.
+        for (const el of page.querySelectorAll(INTERACTIVE_SELECTOR)) {
+            if (el.disabled || el.closest('.hidden, [hidden]')) continue;
+            if (cardKey(el) === lastFocusedKey) return el;
+        }
+        return null;
+    }
 
     document.addEventListener('focusin', () => {
         const el = document.activeElement;
         if (el && el !== document.body && el.matches?.(INTERACTIVE_SELECTOR)) {
             lastFocusedCard = el;
             lastFocusedPageId = activePage()?.id || null;
+            lastFocusedKey = cardKey(el);
             try { lastFocusRect = el.getBoundingClientRect(); } catch (_) { lastFocusRect = null; }
         }
     });
@@ -800,6 +840,13 @@
             focusElement(lastFocusedCard);
             return;
         }
+        // The card node was replaced by a same-page re-render: re-focus the SAME card by its
+        // data-identity so the user keeps their place (a rebuilt rail resets scrollLeft to 0,
+        // so a screen-position match via nearestToLastRect would snap to a low-index card).
+        if (lastFocusedPageId === page.id) {
+            const relocated = relocateLastCard();
+            if (relocated) { focusElement(relocated); return; }
+        }
         const candidates = getPageCandidates();
         const target = lastFocusedPageId === page.id
             ? nearestToLastRect(candidates)
@@ -825,6 +872,32 @@
     });
     document.querySelectorAll('.page').forEach((p) =>
         pageObserver.observe(p, { attributes: true, attributeFilter: ['class'] }));
+
+    // A same-page re-render (e.g. HomePage swaps a rail/hero innerHTML on a background
+    // refetch while the page stays .active) detaches the focused card; document.activeElement
+    // falls to <body> and the ring vanishes. pageObserver above only watches the .page CLASS,
+    // and window 'focus' never fires (the window never blurred), so nothing re-anchors until
+    // the next keypress (which is then eaten by the restore branch). Watch the content subtree
+    // for childList changes and, when our focused node was torn out (focus fell to <body>) on
+    // the page that owned it, re-anchor at once — ensurePageFocus → relocateLastCard keeps the
+    // user's exact card. Cheap: it only acts when a card was focused AND focus is now lost.
+    let contentReanchorTimer = null;
+    function scheduleContentReanchor() {
+        clearTimeout(contentReanchorTimer);
+        contentReanchorTimer = setTimeout(() => {
+            if (openModal() || isTextField(document.activeElement) || currentFocus()) return;
+            const page = activePage();
+            if (page && lastFocusedPageId === page.id) ensurePageFocus();
+        }, 50);
+    }
+    const contentObserver = new MutationObserver((mutations) => {
+        if (!lastFocusedCard || currentFocus()) return; // only when focus was actually lost
+        for (const m of mutations) {
+            if (m.addedNodes.length || m.removedNodes.length) { scheduleContentReanchor(); return; }
+        }
+    });
+    contentObserver.observe(document.querySelector('.main-content') || document.body,
+        { childList: true, subtree: true });
 
     // Boot: the first page renders its content async — a couple of passes catch
     // both the fast (cached rails) and slow (network) paint.
