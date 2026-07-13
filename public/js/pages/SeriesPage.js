@@ -56,6 +56,14 @@ class SeriesPage {
         this.cloudTotal = null;
         this.cloudPageSize = 120;
         this.cloudRequestId = 0;
+        this._tvPendingCloudReset = false;
+        this._tvSearchTextCache = new WeakMap();
+        this._tvSearchGeneration = 0;
+        this._searchTimeout = null;
+        this._searchIdleCallback = null;
+        this._tvPreviewCard = null;
+        this._tvPreviewGroup = null;
+        this._tvDetailOriginCard = null;
         this.observer = null;
         this.hiddenCategoryIds = new Set();
         this.currentSeries = null;
@@ -85,13 +93,37 @@ class SeriesPage {
         this.sourceSelect?.addEventListener('change', async () => {
             await this.loadCategories();
             await this.loadPlaybackStatuses();
-            await this.loadSeries();
+            // Preserve the rest of the active TV filter state. In particular, a TV
+            // Audio/Subtitles or genre view lives on the title-level bucket route;
+            // jumping straight to /media/page here silently discarded that filter.
+            if (this._isTvMode()) this.onFiltersChanged();
+            else await this.loadSeries();
         });
 
-        let searchTimeout;
+        // TV remotes and IMEs can emit dense input bursts. Give the WebView time
+        // to paint, then discard stale generations before touching the catalogue.
         this.searchInput?.addEventListener('input', () => {
-            clearTimeout(searchTimeout);
-            searchTimeout = setTimeout(() => this.onFiltersChanged(), 300);
+            clearTimeout(this._searchTimeout);
+            if (this._searchIdleCallback !== null) {
+                if (typeof window.cancelIdleCallback === 'function') {
+                    window.cancelIdleCallback(this._searchIdleCallback);
+                }
+                this._searchIdleCallback = null;
+            }
+            const isTv = this._isTvMode();
+            const generation = isTv ? ++this._tvSearchGeneration : 0;
+            const runSearch = () => {
+                if (isTv && generation !== this._tvSearchGeneration) return;
+                this._searchIdleCallback = null;
+                this.onFiltersChanged();
+            };
+            this._searchTimeout = setTimeout(() => {
+                if (isTv && typeof window.requestIdleCallback === 'function') {
+                    this._searchIdleCallback = window.requestIdleCallback(runSearch, { timeout: 250 });
+                } else {
+                    runSearch();
+                }
+            }, isTv ? 650 : 300);
         });
 
         [this.sortSelect, this.genreSelect, this.yearSelect, this.ratingSelect,
@@ -130,6 +162,14 @@ class SeriesPage {
         document.getElementById('series-thumb-up')?.addEventListener('click', () => this.setRating(1));
         document.getElementById('series-thumb-down')?.addEventListener('click', () => this.setRating(-1));
 
+        // The catalogue panel is only a lightweight preview. Moving focus across
+        // posters never fetches seriesInfo, seasons, episodes or recommendations.
+        this.container?.addEventListener('focusin', (event) => {
+            if (!this._isTvMode() || this.pageEl?.classList.contains('series-detail-open')) return;
+            const card = event.target.closest?.('.series-card');
+            if (card?.isConnected) this.previewCard(card);
+        });
+
         this.observer = new IntersectionObserver((entries) => {
             if (entries[0].isIntersecting && !this.isLoading) {
                 this.renderNextBatch();
@@ -158,6 +198,8 @@ class SeriesPage {
                 if (this.hideBroken) this.filterAndRender();
             }
         });
+
+        if (this._isTvMode()) this._setupTvSeriesLayout();
 
         this.applyFiltersToUI();
     }
@@ -219,6 +261,15 @@ class SeriesPage {
             // no genre selected → a catalogue-wide grid filtered server-side by each
             // title's available version languages.
             if (this.isLanguageFilterActive()) { this.openLanguageBucket(); return; }
+            // A chip/reset can clear the bucket without pressing its dedicated Back
+            // button. Drop the stale identity so selecting the same genre later
+            // cannot be mistaken for an already-open view.
+            if (this.activeBucket) {
+                this.activeBucket = null;
+                this.activeBucketLangKey = null;
+                this.bucketRequestId = (this.bucketRequestId || 0) + 1;
+                this.bucketObserver?.disconnect();
+            }
         }
         if (this.shouldShowRails()) {
             this.renderGenreRails();
@@ -241,7 +292,7 @@ class SeriesPage {
     // Catalogue-wide "All" grid carrying the active language params — reuses the
     // genre "See all" infinite-scroll grid with the synthetic 'all' bucket.
     openLanguageBucket() {
-        const langKey = JSON.stringify(this.currentLanguageParams());
+        const langKey = this.currentBucketViewKey();
         if (this.activeBucket === 'all' && this.activeBucketLangKey === langKey) return;
         this.openBucket({ id: 'genre-all', title: 'All series', curation: { bucket: 'all' } });
     }
@@ -252,11 +303,16 @@ class SeriesPage {
     // key, so changing ANY of these refreshes an open genre grid.
     currentLanguageParams() {
         const params = {};
+        const tv = this._isTvMode();
+        if (tv && this.sourceSelect?.value) params.sourceId = this.sourceSelect.value;
         if (this.audioSelect?.value) params.audio = this.audioSelect.value;
         if (this.subtitleSelect?.value) params.subs = this.subtitleSelect.value;
         if (this.yearSelect?.value) params.year = this.yearSelect.value;
         if (this.ratingSelect?.value) params.minRating = this.ratingSelect.value;
-        if (this.sortSelect?.value === 'lang-match') {
+        if (tv && this.addedSelect?.value) params.addedDays = this.addedSelect.value;
+        const sort = this.sortSelect?.value || '';
+        if (tv && sort && sort !== 'default') params.sort = sort;
+        if (sort === 'lang-match') {
             params.sort = 'lang-match';
             const prefs = this.getPreferences();
             if (prefs.preferredAudioLanguage) params.prefAudio = prefs.preferredAudioLanguage;
@@ -267,6 +323,22 @@ class SeriesPage {
         const search = (this.searchInput?.value || '').trim();
         if (search) params.q = search;
         return params;
+    }
+
+    // The request params are only half of a bucket's identity: Favorites,
+    // availability and Hide unavailable are evaluated against the returned
+    // variants on TV. Include them in the refresh key so changing one cannot
+    // be mistaken for an already-rendered bucket.
+    currentBucketViewKey() {
+        if (!this._isTvMode()) return JSON.stringify(this.currentLanguageParams());
+        return JSON.stringify({
+            ...this.currentLanguageParams(),
+            watched: this.watchedSelect?.value || '',
+            status: this.statusSelect?.value || '',
+            favoritesOnly: Boolean(this.showFavoritesOnly),
+            hideBroken: Boolean(this.hideBroken),
+            group: Boolean(this.groupDuplicates)
+        });
     }
 
     // Dynamic filter menus: only show audio/subtitle languages actually present in
@@ -311,7 +383,7 @@ class SeriesPage {
         if (!bucket) return;
         // Re-open (re-render) when the same genre is active but the language params
         // changed, so toggling an audio/subtitle filter refreshes the grid.
-        const langKey = JSON.stringify(this.currentLanguageParams());
+        const langKey = this.currentBucketViewKey();
         if (this.activeBucket === bucket && this.activeBucketLangKey === langKey) return;
         const T = window.GenreTaxonomy;
         const label = (T && T.label) ? T.label(bucket) : bucket;
@@ -322,7 +394,10 @@ class SeriesPage {
     // shows curated genre rails instead of a flat grid. Any filter or search
     // flips back to the grid via the normal path.
     shouldShowRails() {
-        return this.isCloudPagedMode() && !!window.GenreRails && !this.hasActiveFilters();
+        // TV follows the supplied flat-grid mockup. Web/mobile retain the curated
+        // genre rails exactly as before.
+        return !this._isTvMode() && this.isCloudPagedMode() &&
+            !!window.GenreRails && !this.hasActiveFilters();
     }
 
     async renderGenreRails() {
@@ -357,7 +432,25 @@ class SeriesPage {
 
     // Reuse the Home page's rail→detail path (builds the version group and opens
     // the series detail on this page), so clicks behave exactly like Home rails.
-    openRailItem(item) {
+    async openRailItem(item) {
+        if (this._isTvMode()) {
+            const replacingOpenFiche = this.pageEl?.classList.contains('series-detail-open');
+            const opened = await this.openByItem(item);
+            // A recommendation swaps the contents of an already-visible fiche, so the
+            // detail-panel MutationObserver does not see a new open transition. The
+            // recommendation card is removed during that swap; explicitly re-anchor the
+            // D-pad on the new fiche's primary action instead of leaving focus on <body>.
+            if (opened && replacingOpenFiche) {
+                requestAnimationFrame(() => {
+                    const target = (!this.primaryActionBtn?.disabled && this.primaryActionBtn)
+                        || this.detailsPanel?.querySelector('.series-back-btn, .series-secondary-action, button:not([disabled])');
+                    if (!target?.isConnected) return;
+                    target.focus({ preventScroll: true });
+                    target.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+                });
+            }
+            return;
+        }
         const home = this.app?.pages?.home;
         if (home?.navigateToSeries) home.navigateToSeries(item);
     }
@@ -367,14 +460,16 @@ class SeriesPage {
         const bucket = (rail && rail.curation && rail.curation.bucket) || String((rail && rail.id) || '').replace(/^genre-/, '');
         if (!bucket) return;
         this.activeBucket = bucket;
-        this.activeBucketLangKey = JSON.stringify(this.currentLanguageParams());
+        this.activeBucketLangKey = this.currentBucketViewKey();
         this.bucketLabel = (rail && (rail.title || rail.name)) || '';
         this.bucketOffset = 0;
         this.bucketHasMore = true;
         this.bucketLoading = false;
         this.bucketSeen = new Set(); // title identities already in the grid
+        this.bucketRenderedCount = 0;
         this.bucketRequestId = (this.bucketRequestId || 0) + 1;
         this.bucketObserver?.disconnect();
+        if (this._isTvMode()) this._clearTvPreview();
 
         // Block layout so the head / grid / loader stack vertically (see .rail-host).
         this.container.classList.add('rail-host');
@@ -419,16 +514,36 @@ class SeriesPage {
                 this.bucketSeen?.add(key);
                 return true;
             });
-            window.GenreRails.appendCards(this.bucketGridEl, fresh, {
-                startIndex: this.bucketOffset,
-                onItemClick: (item) => this.openRailItem(item)
-            });
+            if (this._isTvMode()) {
+                const groups = fresh.flatMap(item => this._tvBucketGroups(item));
+                this.sortCards(groups);
+                const fragment = document.createDocumentFragment();
+                groups.forEach(group => fragment.appendChild(this.buildCard(group)));
+                this.bucketGridEl.appendChild(fragment);
+                this.bucketRenderedCount = (this.bucketRenderedCount || 0) + groups.length;
+                if (!this.container.querySelector('.series-card.tv-preview-active')) {
+                    this._previewFirstCard();
+                }
+            } else {
+                window.GenreRails.appendCards(this.bucketGridEl, fresh, {
+                    startIndex: this.bucketOffset,
+                    onItemClick: (item) => this.openRailItem(item)
+                });
+            }
             this.bucketOffset += items.length;
             this.bucketHasMore = Boolean(payload && payload.hasMore) && items.length > 0;
             // The endpoint returns the exact filtered count — show it (the grid view
             // otherwise leaves the header count blank).
             if (this.countEl && typeof payload?.count === 'number') {
-                this.countEl.textContent = `${payload.count} titles`;
+                this.countEl.textContent = this._isTvMode()
+                    ? `${this.bucketRenderedCount || 0}${this.bucketHasMore ? '+' : ''} titles`
+                    : `${payload.count} titles`;
+            }
+            // A source/favorites/availability filter can remove a whole server page.
+            // Keep paging while the loader is still empty instead of requiring a
+            // scroll event that can never occur without any rendered cards.
+            if (this._isTvMode() && !this.bucketGridEl.childElementCount && this.bucketHasMore) {
+                setTimeout(() => this.loadBucketPage(), 0);
             }
         } catch (err) {
             console.warn('[Series] Genre bucket page failed:', err);
@@ -624,6 +739,8 @@ class SeriesPage {
     }
 
     async show() {
+        document.documentElement.classList.toggle('tv-series-active', this._isTvMode());
+        if (this._isTvMode()) this._setupTvSeriesLayout();
         this.hideDetails();
 
         this._coldPaintFromCache();
@@ -671,6 +788,10 @@ class SeriesPage {
                 this.openGenreBucket(selectedBuckets[0]);
                 return;
             }
+            if (this.isLanguageFilterActive()) {
+                this.openLanguageBucket();
+                return;
+            }
         }
 
         // Default cloud view with no active filters → Netflix-style genre rails.
@@ -693,6 +814,18 @@ class SeriesPage {
     }
 
     hide() {
+        document.documentElement.classList.remove('tv-series-active');
+        if (this._isTvMode()) {
+            clearTimeout(this._searchTimeout);
+            this._searchTimeout = null;
+            this._tvSearchGeneration += 1;
+            if (this._searchIdleCallback !== null) {
+                if (typeof window.cancelIdleCallback === 'function') {
+                    window.cancelIdleCallback(this._searchIdleCallback);
+                }
+                this._searchIdleCallback = null;
+            }
+        }
         if (this._facetTimer) { clearInterval(this._facetTimer); this._facetTimer = null; }
         this._disarmCatalogRefreshWatch();
         // Scroll restoration: the grid is its own scroller, remembered per visit.
@@ -998,12 +1131,23 @@ class SeriesPage {
     }
 
     async loadCloudSeries({ reset = false } = {}) {
-        if (this.cloudLoadingMore || (this.isLoading && !reset)) return;
+        if (this.cloudLoadingMore) {
+            if (reset && this._isTvMode()) this._tvPendingCloudReset = true;
+            return;
+        }
+        if (reset && this._isTvMode() && this.isLoading) {
+            this._tvPendingCloudReset = true;
+            return;
+        }
+        if (this.isLoading && !reset) return;
 
         let paintedFromCache = false;
+        let requestId = this.cloudRequestId;
         if (reset) {
+            if (this._isTvMode()) this._tvPendingCloudReset = false;
             this.isLoading = true;
             this.cloudRequestId += 1;
+            requestId = this.cloudRequestId;
             this.cloudOffset = 0;
             this.cloudHasMore = false;
             this.cloudTotal = null;
@@ -1030,11 +1174,14 @@ class SeriesPage {
         }
 
         try {
-            const requestId = this.cloudRequestId;
             const renderedBefore = reset ? 0 : this.container.querySelectorAll('.series-card').length;
             // On reset always refetch page 1 (offset 0), even after a cache paint.
             const page = await API.media.page(this.cloudPageParams(reset ? 0 : this.cloudOffset));
-            if (reset && requestId !== this.cloudRequestId) return;
+            if (!reset && this._isTvMode() && this._tvPendingCloudReset) return;
+            if (reset && (
+                requestId !== this.cloudRequestId ||
+                (this._isTvMode() && this._tvPendingCloudReset)
+            )) return;
             const incoming = (page.items || [])
                 .filter(s => !this.hiddenCategoryIds.has(`${s.sourceId}:${s.category_id}`))
                 .map(s => ({
@@ -1083,12 +1230,21 @@ class SeriesPage {
             }
         } catch (err) {
             console.error('Error loading cloud series:', err);
+            if (reset && this._isTvMode() && (
+                requestId !== this.cloudRequestId || this._tvPendingCloudReset
+            )) return;
             if (reset && !paintedFromCache) {
                 this.container.innerHTML = '<div class="empty-state"><p>Error loading series</p></div>';
             }
         } finally {
-            if (reset) this.isLoading = false;
-            this.cloudLoadingMore = false;
+            if (reset && (!this._isTvMode() || requestId === this.cloudRequestId)) {
+                this.isLoading = false;
+            }
+            if (!reset) this.cloudLoadingMore = false;
+            if (this._isTvMode() && this._tvPendingCloudReset && !this.cloudLoadingMore) {
+                this._tvPendingCloudReset = false;
+                Promise.resolve().then(() => this.loadCloudSeries({ reset: true }));
+            }
         }
     }
 
@@ -1204,9 +1360,28 @@ class SeriesPage {
         let items = this.seriesList.filter(s => this.matchesFilters(s));
 
         if (searchTerm && !this.isCloudPagedMode()) {
-            items = items.filter(s =>
-                MediaUtils.searchableText(s.name).includes(searchTerm) ||
-                (s.tmdb?.title && MediaUtils.searchableText(s.tmdb.title).includes(searchTerm)));
+            if (this._isTvMode()) {
+                items = items.filter(s => {
+                    const rawName = s.name || '';
+                    const rawTitle = s.tmdb?.title || s.tmdb?.name || '';
+                    let cached = this._tvSearchTextCache.get(s);
+                    if (!cached || cached.rawName !== rawName || cached.rawTitle !== rawTitle) {
+                        cached = {
+                            rawName,
+                            rawTitle,
+                            name: MediaUtils.searchableText(rawName),
+                            title: rawTitle ? MediaUtils.searchableText(rawTitle) : ''
+                        };
+                        this._tvSearchTextCache.set(s, cached);
+                    }
+                    return cached.name.includes(searchTerm) || cached.title.includes(searchTerm);
+                });
+            } else {
+                items = items.filter(s =>
+                    MediaUtils.searchableText(s.name).includes(searchTerm) ||
+                    ((s.tmdb?.title || s.tmdb?.name) &&
+                        MediaUtils.searchableText(s.tmdb?.title || s.tmdb?.name).includes(searchTerm)));
+            }
         }
 
         let cards;
@@ -1268,7 +1443,8 @@ class SeriesPage {
         this._disarmCatalogRefreshWatch();
         // Local (self-hosted) mode default with no active filter → genre rails,
         // built client-side. Cloud mode is untouched (server rails).
-        if (!this.isCloudPagedMode() && !this.hasActiveFilters() && this.renderGenreRailsLocal()) {
+        if (!this._isTvMode() && !this.isCloudPagedMode() &&
+            !this.hasActiveFilters() && this.renderGenreRailsLocal()) {
             return;
         }
 
@@ -1281,6 +1457,7 @@ class SeriesPage {
 
         this.currentBatch = 0;
         this._winStart = 0; // virtualization: index of the first card still in the DOM
+        if (this._isTvMode()) this.observer?.disconnect();
         // Flat card grid → drop the rail-host modifier so the grid centers/wraps.
         this.container.classList.remove('rail-host');
         this.container.innerHTML = '';
@@ -1299,6 +1476,7 @@ class SeriesPage {
         if (this.randomBtn) this.randomBtn.disabled = cards.length === 0;
 
         if (cards.length === 0) {
+            if (this._isTvMode()) this._clearTvPreview();
             const filtered = this.hasActiveFilters();
             this.container.innerHTML = `
                 <div class="empty-state rich-empty">
@@ -1326,11 +1504,13 @@ class SeriesPage {
         loader.innerHTML = '<div class="loading-spinner"></div>';
         this.container.appendChild(loader);
 
-        for (let i = 0; i < 5; i++) {
+        const initialBatches = this._isTvMode() ? 1 : 5;
+        for (let i = 0; i < initialBatches; i++) {
             this.renderNextBatch();
         }
 
         this.observer.observe(loader);
+        if (this._isTvMode()) this._previewFirstCard();
     }
 
     // === Grid virtualization (same window/recycle scheme as MoviesPage) ===
@@ -1474,6 +1654,7 @@ class SeriesPage {
         card.className = 'series-card';
         card.dataset.seriesId = series.series_id;
         card.dataset.sourceId = series.sourceId;
+        card.__seriesGroup = group;
 
         const poster = MediaUtils.safeImageUrl(
             series.cover || series.stream_icon || MediaUtils.tmdbPosterUrl(series.tmdb),
@@ -1518,15 +1699,26 @@ class SeriesPage {
             </div>
         `;
 
+        if (this._isTvMode()) {
+            card.tabIndex = 0;
+            card.setAttribute('role', 'button');
+            card.setAttribute('aria-label', `View ${displayName || 'series'} details`);
+            card.querySelectorAll('.favorite-btn, .version-badge').forEach(button => {
+                button.tabIndex = -1;
+            });
+        }
+
         card.addEventListener('click', (e) => {
             if (e.target.closest('.favorite-btn')) {
                 e.stopPropagation();
                 this.toggleFavorite(group, e.target.closest('.favorite-btn'));
             } else if (e.target.closest('.version-badge')) {
                 e.stopPropagation();
-                this.openGroup(group, { focusVersions: true });
+                if (this._isTvMode()) this._openTvSeriesDetails(group, { focusVersions: true, originCard: card });
+                else this.openGroup(group, { focusVersions: true });
             } else {
-                this.openGroup(group);
+                if (this._isTvMode()) this._openTvSeriesDetails(group, { originCard: card });
+                else this.openGroup(group);
             }
         });
 
@@ -1598,6 +1790,12 @@ class SeriesPage {
         }).join('');
 
         this.continueList.querySelectorAll('.continue-card').forEach(card => {
+            if (this._isTvMode()) {
+                card.tabIndex = 0;
+                card.setAttribute('role', 'button');
+                const title = card.querySelector('.continue-card-title')?.textContent || 'series';
+                card.setAttribute('aria-label', `Resume ${title}`);
+            }
             card.addEventListener('click', () => {
                 const h = inProgress.find(x => String(x.item_id) === card.dataset.itemId);
                 if (h) this.resumeEpisodeFromHistory(h);
@@ -1701,6 +1899,323 @@ class SeriesPage {
 
     // === Group interaction ===
 
+    _isTvMode() {
+        return document.documentElement.classList.contains('tv-mode');
+    }
+
+    // Android TV catalogue shell. Existing live controls are moved, never cloned,
+    // so their listeners and values stay intact. The real #series-details fiche
+    // remains inside .series-content and is only shown after the preview CTA.
+    _setupTvSeriesLayout() {
+        const page = this.pageEl;
+        const header = page?.querySelector('.series-header');
+        const controls = header?.querySelector('.series-controls');
+        const legacyFilterBar = document.getElementById('series-filter-bar');
+        const content = page?.querySelector('.series-content');
+        if (!page || !header || !controls || !legacyFilterBar || !content || !this.container) return;
+
+        page.classList.remove('series-detail-open');
+        this.container.classList.remove('hidden');
+        if (page.classList.contains('tv-series-layout-ready')) return;
+
+        const primary = document.createElement('div');
+        primary.id = 'series-tv-primary-filters';
+        primary.className = 'tv-series-filter-row tv-series-primary-filters';
+        primary.setAttribute('aria-label', 'Series filters');
+        primary.dataset.tvNavRegion = 'series-filters';
+
+        const secondary = document.createElement('div');
+        secondary.id = 'series-tv-secondary-filters';
+        secondary.className = 'tv-series-filter-row tv-series-secondary-filters';
+        secondary.setAttribute('aria-label', 'Availability and view options');
+        secondary.dataset.tvNavRegion = 'series-filters';
+
+        const catalogHead = document.createElement('div');
+        catalogHead.id = 'series-tv-catalog-head';
+        catalogHead.className = 'tv-series-catalog-head';
+        catalogHead.dataset.tvNavRegion = 'series-filters';
+        const catalogMeta = document.createElement('div');
+        catalogMeta.className = 'tv-series-catalog-meta';
+        const catalogTitle = document.createElement('h3');
+        catalogTitle.className = 'tv-series-catalog-title';
+        catalogTitle.textContent = 'All Series';
+        catalogMeta.appendChild(catalogTitle);
+        catalogHead.appendChild(catalogMeta);
+
+        const preview = document.createElement('aside');
+        preview.id = 'series-tv-preview';
+        preview.className = 'tv-series-preview is-empty';
+        preview.dataset.tvSplitPreview = 'true';
+        preview.setAttribute('aria-label', 'Selected series preview');
+        preview.setAttribute('aria-live', 'polite');
+
+        const categoryControl = document.getElementById('series-category-btn')?.closest('.multi-select');
+        const searchWrapper = this.searchInput?.closest('.search-wrapper');
+        const favoriteBtn = document.getElementById('series-favorites-btn');
+        const append = (host, element) => { if (host && element) host.appendChild(element); };
+
+        append(controls, searchWrapper);
+        [this.sourceSelect, categoryControl, this.yearSelect, this.ratingSelect,
+         this.audioSelect, this.subtitleSelect].forEach(element => append(primary, element));
+        [this.watchedSelect, this.addedSelect, favoriteBtn, this.hideBrokenBtn,
+         this.groupToggleBtn, this.resetBtn].forEach(element => append(secondary, element));
+        append(catalogMeta, this.countEl);
+        append(catalogHead, this.activeFiltersEl);
+        append(catalogHead, this.sortSelect);
+        this.activeFiltersEl?.removeAttribute('data-tv-nav-region');
+
+        // Anything left in the legacy bar is intentionally absent from the TV mockup.
+        legacyFilterBar.querySelectorAll('button, input, select, textarea, [tabindex]').forEach(element => {
+            element.tabIndex = -1;
+        });
+
+        preview.addEventListener('click', async (event) => {
+            const open = event.target.closest('#series-tv-preview-open');
+            if (open && this._tvPreviewGroup) {
+                this._openTvSeriesDetails(this._tvPreviewGroup, { originCard: this._tvPreviewCard });
+                return;
+            }
+            const favorite = event.target.closest('#series-tv-preview-favorite');
+            if (favorite && this._tvPreviewGroup) {
+                await this.toggleFavorite(this._tvPreviewGroup, favorite);
+                const active = this._tvPreviewGroup.items.some(item =>
+                    this.favoriteIds.has(`${item.sourceId}:${item.series_id}`));
+                favorite.classList.toggle('active', active);
+                favorite.setAttribute('aria-pressed', String(active));
+                const label = favorite.querySelector('.tv-series-preview-favorite-label');
+                if (label) label.textContent = active ? 'Remove from Favorites' : 'Add to Favorites';
+                if (this.showFavoritesOnly && !active) {
+                    this.activeBucketLangKey = null;
+                    this.onFiltersChanged();
+                }
+            }
+        });
+
+        page.insertBefore(primary, content);
+        page.insertBefore(secondary, content);
+        page.insertBefore(catalogHead, content);
+        page.appendChild(preview);
+        page.classList.add('tv-series-layout-ready');
+        this._clearTvPreview();
+    }
+
+    // genreItems() returns a logical title carrying normalized provider variants.
+    // Convert it to the same { representative, items } shape as the flat catalogue.
+    _groupFromCloudTitle(title) {
+        const rawVariants = Array.isArray(title?.variants) && title.variants.length
+            ? title.variants
+            : (Array.isArray(title?.exposedVariants) && title.exposedVariants.length
+                ? title.exposedVariants
+                : [title?.defaultVariant || title?.default_variant || title]);
+        const items = rawVariants.filter(Boolean).map((variant) => ({
+            ...variant,
+            sourceId: variant.sourceId ?? variant.source_id ?? title?.sourceId ?? title?.source_id,
+            series_id: variant.series_id ?? variant.seriesId ?? variant.item_id ?? variant.itemId ?? variant.id,
+            name: variant.name || variant.title || title?.name || title?.title || 'Series',
+            cover: variant.cover || variant.stream_icon || variant.poster_url || title?.cover || title?.poster_url,
+            stream_icon: variant.stream_icon || variant.cover || variant.poster_url || title?.stream_icon || title?.cover,
+            tmdb: variant.tmdb || title?.tmdb,
+            rating: variant.rating || title?.rating,
+            year: variant.year || title?.year,
+            category_name: variant.category_name || title?.category_name,
+            category_id: variant.category_id ?? title?.category_id,
+            added: variant.added || title?.added,
+            added_at: variant.added_at || title?.added_at,
+            last_modified: variant.last_modified || title?.last_modified,
+            playback_status: variant.playback_status || title?.playback_status,
+            provider_tmdb_id: variant.provider_tmdb_id || variant.providerTmdbId ||
+                title?.provider_tmdb_id || title?.providerTmdbId
+        })).filter(item => item.series_id != null && item.sourceId != null);
+        const fallback = items[0] || title;
+        const preferredRaw = title?.defaultVariant || title?.default_variant;
+        const representative = items.find(item => preferredRaw &&
+            String(item.series_id) === String(preferredRaw.series_id ?? preferredRaw.item_id ?? preferredRaw.id) &&
+            String(item.sourceId) === String(preferredRaw.sourceId ?? preferredRaw.source_id ?? item.sourceId)) || fallback;
+        return {
+            key: String(title?.title_id || title?.titleId || title?.id || `${representative?.sourceId}:${representative?.series_id}`),
+            items: items.length ? items : [fallback],
+            representative
+        };
+    }
+
+    // genreItems() returns logical titles, while several TV controls are local to
+    // the loaded user state (favorites, watch progress, playback health). Normalize
+    // each title to the standard group shape, apply those controls to its variants,
+    // and only then build the TV cards. Web/mobile keep their existing GenreRails
+    // path untouched.
+    _tvBucketGroups(title) {
+        const rawGroup = this._groupFromCloudTitle(title);
+        const sourceId = this.sourceSelect?.value || '';
+        const addedDays = parseInt(this.addedSelect?.value, 10);
+        let items = (rawGroup.items || []).filter((item) => {
+            if (sourceId && String(item.sourceId) !== String(sourceId)) return false;
+            if (this.hiddenCategoryIds?.has(`${item.sourceId}:${item.category_id}`)) return false;
+            if (!this.matchesFilters(item)) return false;
+            if (addedDays) {
+                const addedMs = this.parseAddedMs(item);
+                if (!addedMs || (Date.now() - addedMs) > addedDays * 86400000) return false;
+            }
+            return true;
+        });
+        if (!items.length) return [];
+
+        const representative = items.find(item => this.isSameSeriesVersion(item, rawGroup.representative)) || items[0];
+        let groups = this.groupDuplicates
+            ? [{ ...rawGroup, items, representative }]
+            : items.map(item => ({
+                key: `${rawGroup.key}:${item.sourceId}:${item.series_id}`,
+                items: [item],
+                representative: item
+            }));
+
+        groups = this.applyLanguagePreferencesToCards(groups);
+        if (this.getPreferences().strictLanguageMatching) {
+            groups = groups.filter(group => !this.isStrictLanguageExcluded(group));
+        }
+        if (this.showFavoritesOnly) {
+            groups = groups.filter(group => group.items.some(item =>
+                this.favoriteIds.has(`${item.sourceId}:${item.series_id}`)));
+        }
+        const watched = this.watchedSelect?.value || '';
+        if (watched === 'inprogress') {
+            groups = groups.filter(group => this.isGroupStarted(group.items));
+        } else if (watched === 'unwatched') {
+            groups = groups.filter(group => !this.isGroupStarted(group.items));
+        }
+        return groups;
+    }
+
+    _tvPreviewProgress(group) {
+        const keys = new Set((group?.items || []).map(item => `${item.sourceId}:${item.series_id}`));
+        return (this.historyItems || []).find((history) => {
+            if (history.item_type !== 'episode' || !history.data?.seriesId) return false;
+            const sourceId = history.data?.sourceId ?? history.source_id;
+            return keys.has(`${sourceId}:${history.data.seriesId}`) &&
+                this.getResumeOffset(history.progress, history.duration) > 0;
+        }) || null;
+    }
+
+    _clearTvPreview() {
+        const preview = document.getElementById('series-tv-preview');
+        if (!preview) return;
+        this._tvPreviewCard = null;
+        this._tvPreviewGroup = null;
+        preview.classList.add('is-empty');
+        preview.innerHTML = `
+            <div class="tv-series-preview-empty">
+                <strong>Select a series</strong>
+                <span>Move through the catalogue to see its details.</span>
+            </div>`;
+    }
+
+    previewCard(card) {
+        if (!this._isTvMode() || this.pageEl?.classList.contains('series-detail-open')) return;
+        const group = card?.__seriesGroup;
+        if (!group?.items?.length) return;
+        this.container?.querySelectorAll('.series-card.tv-preview-active').forEach(active => {
+            if (active !== card) active.classList.remove('tv-preview-active');
+        });
+        card.classList.add('tv-preview-active');
+        this._tvPreviewCard = card;
+        this._tvPreviewGroup = group;
+        this._paintTvSeriesPreview(group);
+    }
+
+    _previewFirstCard() {
+        const first = this.container?.querySelector('.series-card');
+        if (first) this.previewCard(first);
+        else this._clearTvPreview();
+    }
+
+    _paintTvSeriesPreview(group) {
+        const preview = document.getElementById('series-tv-preview');
+        if (!preview || !group?.items?.length) return;
+        preview.scrollTop = 0;
+        const ordered = MediaUtils.orderVersionsByPreference(group.items, this.getPreferences());
+        const selected = this.getRememberedVersion(group) || ordered[0] || group.representative;
+        const display = group.representative || selected;
+        const title = this.getSeriesDisplayTitle(display);
+        const art = this.getSeriesBackdrop(display) || this.getSeriesPoster(display);
+        const plot = display?.tmdb?.overview || display?.overview || display?.description ||
+            display?.plot || 'No summary available yet.';
+        const rating = parseFloat(display?.rating || display?.tmdb?.vote_average);
+        const version = MediaUtils.parseVersionInfo(selected?.name || '');
+        const meta = [
+            this.getSeriesYear(display),
+            display?.tmdb?.number_of_seasons ? `${display.tmdb.number_of_seasons} seasons` : '',
+            ...this.getSeriesGenres(display).slice(0, 2),
+            Number.isFinite(rating) && rating > 0 ? `★ ${rating.toFixed(1).replace('.0', '')}` : '',
+            version.quality,
+            MediaUtils.versionLanguageBadge(selected, this.getPreferences())
+        ].filter(Boolean);
+        const history = this._tvPreviewProgress(group);
+        const ratio = history?.duration > 0
+            ? Math.max(0, Math.min(100, Math.round((history.progress / history.duration) * 100)))
+            : 0;
+        const minsLeft = history?.duration > history?.progress
+            ? Math.max(1, Math.round((history.duration - history.progress) / 60))
+            : 0;
+        const progressLabel = history
+            ? [history.data?.currentSeason ? `S${history.data.currentSeason}` : '',
+               history.data?.currentEpisode ? `E${history.data.currentEpisode}` : ''].filter(Boolean).join(' ') +
+              (minsLeft ? ` · ${minsLeft} min left` : '')
+            : '';
+        const sources = [...new Set(group.items.map(item => this.getSourceName(item.sourceId)).filter(Boolean))];
+        const isFav = group.items.some(item => this.favoriteIds.has(`${item.sourceId}:${item.series_id}`));
+
+        preview.classList.remove('is-empty');
+        preview.innerHTML = `
+            <div class="tv-series-preview-art">
+                <img src="${MediaUtils.escapeHtml(art)}" alt="${MediaUtils.escapeHtml(title)}"
+                     onerror="this.onerror=null;this.srcset='';this.src='/img/norva-media-placeholder.png'">
+            </div>
+            <div class="tv-series-preview-body">
+                <h3>${MediaUtils.escapeHtml(title)}</h3>
+                <div class="tv-series-preview-meta">${meta.map(part => `<span>${MediaUtils.escapeHtml(part)}</span>`).join('')}</div>
+                <p>${MediaUtils.escapeHtml(plot)}</p>
+                ${history ? `
+                    <div class="tv-series-preview-progress-copy">${MediaUtils.escapeHtml(progressLabel)}</div>
+                    <div class="tv-series-preview-progress"><div style="width:${ratio}%"></div></div>` : ''}
+                <div class="tv-series-preview-actions">
+                    <button id="series-tv-preview-open" class="btn btn-primary tv-series-preview-primary" type="button">View Series Details</button>
+                    <button id="series-tv-preview-favorite" class="btn btn-ghost tv-series-preview-favorite ${isFav ? 'active' : ''}"
+                            type="button" aria-pressed="${isFav ? 'true' : 'false'}">
+                        <span class="fav-icon">${isFav ? Icons.favorite : Icons.favoriteOutline}</span>
+                        <span class="tv-series-preview-favorite-label">${isFav ? 'Remove from Favorites' : 'Add to Favorites'}</span>
+                    </button>
+                </div>
+                ${sources.length ? `
+                    <div class="tv-series-preview-sources">
+                        <span class="tv-series-preview-sources-label">Available on</span>
+                        ${sources.slice(0, 3).map(source => `<span class="tv-series-preview-source">${MediaUtils.escapeHtml(source)}</span>`).join('')}
+                        ${sources.length > 3 ? `<span class="tv-series-preview-source">+${sources.length - 3}</span>` : ''}
+                    </div>` : ''}
+            </div>`;
+    }
+
+    async _openTvSeriesDetails(group, { focusVersions = false, originCard = null } = {}) {
+        if (!group?.items?.length) return;
+        const ordered = MediaUtils.orderVersionsByPreference(group.items, this.getPreferences());
+        const selected = this.getRememberedVersion(group) || ordered[0] || group.representative;
+        this._tvDetailOriginCard = originCard?.isConnected ? originCard : this._tvPreviewCard;
+        this.currentSeriesGroup = group;
+        await this.showSeriesDetailsV2(selected, group, { focusVersions });
+    }
+
+    _ensureTvEpisodeCount() {
+        if (!this._isTvMode()) return null;
+        const toolbar = this.detailsPanel?.querySelector('.series-episodes-toolbar');
+        if (!toolbar) return null;
+        let count = toolbar.querySelector('.series-tv-episode-count');
+        if (!count) {
+            count = document.createElement('span');
+            count.className = 'series-tv-episode-count';
+            count.setAttribute('aria-live', 'polite');
+            toolbar.appendChild(count);
+        }
+        return count;
+    }
+
     getPreferences() {
         return {
             preferredLanguage: this.serverSettings.preferredLanguage || '',
@@ -1713,6 +2228,10 @@ class SeriesPage {
     }
 
     openGroup(group, { focusVersions = false } = {}) {
+        if (this._isTvMode()) {
+            this._openTvSeriesDetails(group, { focusVersions, originCard: this._tvPreviewCard });
+            return;
+        }
         const ordered = MediaUtils.orderVersionsByPreference(group.items, this.getPreferences());
         // Restore the version the user last chose for this title (across grid / search /
         // rails / restore), falling back to the best auto-picked one.
@@ -2459,6 +2978,8 @@ class SeriesPage {
         }
 
         this.seasonsContainer.innerHTML = '<div class="loading"><div class="loading-spinner"></div></div>';
+        const tvEpisodeCount = this._ensureTvEpisodeCount();
+        if (tvEpisodeCount) tvEpisodeCount.textContent = '';
         if (this.primaryActionBtn) {
             this.primaryActionBtn.disabled = true;
             this.primaryActionBtn.textContent = 'Loading...';
@@ -2509,6 +3030,9 @@ class SeriesPage {
             const seasons = Object.keys(info.episodes).sort((a, b) => parseInt(a) - parseInt(b));
             const episodeCount = flatEpisodes.length;
             const seasonCount = seasons.length;
+            if (tvEpisodeCount) {
+                tvEpisodeCount.textContent = `${episodeCount} episode${episodeCount === 1 ? '' : 's'}`;
+            }
             const genres = this.getSeriesGenres(series).slice(0, 3);
             const rating = parseFloat(series.rating || series.tmdb?.vote_average);
             const ratingLabel = Number.isFinite(rating) && rating > 0
@@ -2785,6 +3309,23 @@ class SeriesPage {
         } catch (_) { /* extras are progressive enhancement */ }
     }
 
+    // Recommendations must not inherit a catalogue search/year/rating. Doing so can
+    // reduce the rail to the open title itself and leave the fiche visibly empty.
+    recommendationLanguageParams() {
+        const params = {};
+        if (this.audioSelect?.value) params.audio = this.audioSelect.value;
+        if (this.subtitleSelect?.value) params.subs = this.subtitleSelect.value;
+        if (this.sortSelect?.value === 'lang-match') {
+            params.sort = 'lang-match';
+            const prefs = this.getPreferences();
+            if (prefs.preferredAudioLanguage) params.prefAudio = prefs.preferredAudioLanguage;
+            if (prefs.preferredSubtitleLanguage && prefs.preferredSubtitleLanguage !== 'none') {
+                params.prefSubs = prefs.preferredSubtitleLanguage;
+            }
+        }
+        return params;
+    }
+
     // "More like this": a genre-matched rail at the bottom of the series fiche so the
     // user keeps browsing instead of backing out. Fire-and-forget; a token guards a
     // stale fetch from landing on a newer fiche.
@@ -2798,11 +3339,18 @@ class SeriesPage {
             const catName = series?.category_name || series?.metadata?.categoryName || '';
             const bucket = T ? T.classifyTitle(catName, this.getSeriesGenres(series))[0] : null;
             if (!bucket) return;
-            const payload = await API.media.genreItems({ type: 'series', bucket, limit: 24, ...this.currentLanguageParams() });
+            const payload = await API.media.genreItems({
+                type: 'series', bucket, limit: 24, ...this.recommendationLanguageParams()
+            });
             if (token !== this._mltToken || host.classList.contains('hidden')) return;
             const curKey = `${series?.sourceId}:${series?.series_id}`;
+            const curTitleId = String(series?.title_id || series?.titleId || '');
             const items = (payload?.items || [])
-                .filter(i => `${i.sourceId}:${i.series_id}` !== curKey)
+                .filter(i => {
+                    const itemTitleId = String(i?.title_id || i?.titleId || '');
+                    if (curTitleId && itemTitleId && itemTitleId === curTitleId) return false;
+                    return `${i.sourceId}:${i.series_id}` !== curKey;
+                })
                 .slice(0, 18);
             if (!items.length) return;
             host.querySelector('.more-like-this')?.remove();
@@ -2810,14 +3358,35 @@ class SeriesPage {
             section.className = 'more-like-this';
             section.innerHTML = '<h3 class="more-like-title">More like this</h3><div class="horizontal-scroll more-like-grid"></div>';
             host.appendChild(section);
-            window.GenreRails.appendCards(section.querySelector('.more-like-grid'), items, {
+            const rail = section.querySelector('.more-like-grid');
+            window.GenreRails.appendCards(rail, items, {
                 onItemClick: (item) => this.openRailItem(item)
             });
+            if (this._isTvMode()) {
+                const cards = [...rail.children].filter(card =>
+                    !card.matches('.scroll-arrow, .empty-state'));
+                cards.forEach((card, index) => {
+                    card.classList.add('tv-more-like-card');
+                    card.tabIndex = 0;
+                    if (!card.hasAttribute('role')) card.setAttribute('role', 'button');
+                    const backdrop = this.getSeriesBackdrop(items[index]);
+                    const image = card.querySelector('img');
+                    if (backdrop && image) {
+                        image.removeAttribute('srcset');
+                        image.src = backdrop;
+                    }
+                });
+            }
         } catch (_) { /* the fiche works fine without related titles */ }
     }
 
     hideDetails() {
+        const restoreTvGrid = this._isTvMode() &&
+            this.pageEl?.classList.contains('series-detail-open');
         try { window.app?.forgetOpenFiche?.(); } catch (_) { /* noop */ }
+        this._detailToken = (this._detailToken || 0) + 1;
+        this._mltToken = (this._mltToken || 0) + 1;
+        this._ficheExtrasToken = (this._ficheExtrasToken || 0) + 1;
         this.cancelNextEpisodePrompt();
         this.detailsPanel?.querySelector('.more-like-this')?.remove();
         if (this._epDlTimer) { clearInterval(this._epDlTimer); this._epDlTimer = null; }
@@ -2826,6 +3395,25 @@ class SeriesPage {
         this.pageEl?.classList.remove('series-detail-open');
         this.currentSeries = null;
         this.currentSeriesGroup = null;
+        this.currentSeriesInfo = null;
+
+        if (restoreTvGrid) {
+            const origin = this._tvDetailOriginCard?.isConnected
+                ? this._tvDetailOriginCard
+                : (this._tvPreviewCard?.isConnected
+                    ? this._tvPreviewCard
+                    : this.container?.querySelector('.series-card'));
+            this._tvDetailOriginCard = null;
+            if (origin) {
+                this.previewCard(origin);
+                requestAnimationFrame(() => {
+                    if (origin.isConnected) {
+                        origin.focus();
+                        origin.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+                    }
+                });
+            }
+        }
     }
 
     findEpisodeById(episodeId) {
