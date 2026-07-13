@@ -2333,11 +2333,19 @@ class MoviesPage {
         const ordered = MediaUtils.orderVersionsByPreference(group.items, this.getPreferences());
         // Make sure the panel reflects THIS card even if the preview debounce hasn't fired.
         this.showMovieDetails(group, ordered[0], { versions: ordered, isTvPreview: true });
-        if (ordered.length > 1) {
-            this._focusVersionsList();
-        } else {
-            this.playPrimaryMovie();
-        }
+        // OK/commit ENTERS the fiche so the viewer can navigate it (Play, versions, favorite,
+        // more-like-this) rather than auto-playing. Land on the primary action (Play/Resume);
+        // fall back to the versions list, then Favorite, if it isn't ready yet.
+        this._loadPanelExtras();
+        requestAnimationFrame(() => {
+            const panel = this.detailsPanel;
+            if (!panel || panel.classList.contains('hidden')) return;
+            const primary = this.primaryActionBtn;
+            let target = (primary && !primary.disabled && primary.offsetParent) ? primary : null;
+            if (!target) target = this.versionsList?.querySelector('.movie-version-item.active, .movie-version-item') || null;
+            if (!target && this.detailFavoriteBtn && !this.detailFavoriteBtn.disabled) target = this.detailFavoriteBtn;
+            if (target) { target.focus(); target.scrollIntoView({ block: 'nearest' }); }
+        });
     }
 
     // Move focus into the version list, pre-selecting the in-progress version if any

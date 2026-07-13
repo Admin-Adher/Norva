@@ -255,11 +255,37 @@
         );
     }
 
-    // Movies/Series TV grid: the nearest VISIBLE card above `card` within its grid — lets UP
-    // walk up the grid (then scroll it) instead of escaping to the top filter rows. Prefers the
-    // same column, then the nearest row.
-    let lastGridUpTapAt = 0;
-    const GRID_UP_DOUBLE_TAP_MS = 350;
+    // Movies/Series TV grid UP nav state. Discriminating a HELD Up (fast-scroll) from a DOUBLE-tap
+    // Up (escape to filters) via KeyboardEvent.repeat is UNRELIABLE on Android TV WebView (held keys
+    // often arrive as discrete keydowns with repeat=false). Instead we mirror the DOWN path — every
+    // Up keydown walks/scrolls the grid — and detect a genuine second press via a KEYUP between
+    // presses (a continuous hold emits no interleaved keyup). A long gap (>600ms) also counts as a
+    // fresh press, so it degrades gracefully even if keyup isn't delivered on the device.
+    let upReleased = true;      // an ArrowUp keyup was seen since the last ArrowUp keydown
+    let prevUpDownAt = 0;       // timestamp of the previous ArrowUp keydown
+    let upFreshCount = 0;       // consecutive FRESH (released-between) Up presses within the window
+    let lastUpFreshAt = 0;
+    const UP_DOUBLE_TAP_MS = 400;
+    const UP_FRESH_GAP_MS = 600;
+
+    // The Movies filter row nearest the card's column (bottom row = closest to the grid) — the
+    // EXPLICIT escape target so a mid-list double-tap Up lands on the filters, not another grid card.
+    function moviesFilterTarget(fromEl) {
+        const page = activePage();
+        const rows = [...(page?.querySelectorAll('.tv-movies-filter-row') || [])].filter(isVisible);
+        const region = rows[rows.length - 1] || page?.querySelector('[data-tv-nav-region="movies-filters"]');
+        if (!region) return null;
+        const fromX = centerOf(fromEl).x;
+        const cands = getCandidates().filter((el) => region.contains(el) && isVisible(el));
+        if (!cands.length) return null;
+        return cands.reduce((b, el) => {
+            const d = Math.abs(centerOf(el).x - fromX);
+            return d < b.d ? { el, d } : b;
+        }, { el: cands[0], d: Infinity }).el;
+    }
+
+    // Nearest VISIBLE card above `card` within its grid — lets UP walk up the visible rows before
+    // the scroll step. Prefers the same column, then the nearest row.
     function gridCardAbove(card) {
         const grid = card?.closest?.('.movies-grid, .series-grid');
         if (!grid) return null;
@@ -896,27 +922,40 @@
             }
         }
 
-        // Movies/Series grid (TV): UP walks up WITHIN the grid — to the card above, or scrolling
-        // the list up once the top visible row is reached (mirrors how DOWN scrolls it down) —
-        // instead of escaping to the filter rows that sit above and would otherwise win findNext on
-        // every UP. Reach the filters with a deliberate DOUBLE-tap Up (two discrete presses within
-        // 350ms). A HELD Up auto-repeats (e.repeat) and only ever scrolls, so fast-scrolling up
-        // never pops into the filters.
+        // Movies/Series grid (TV): UP walks up WITHIN the grid (nearest card above), and once the top
+        // visible row is reached it scrolls the grid up (scrollActivePage, focus stays) — exactly
+        // mirroring how DOWN scrolls the list down, so a HELD Up fast-scrolls up and NEVER escapes.
+        // Reaching the filters: a FRESH Up press at the very top, OR a deliberate DOUBLE-tap Up from
+        // anywhere (two presses with a key RELEASE between them, within 400ms). A continuous hold has
+        // no interleaved keyup (see the keyup listener), so it can never trip the escape — robust to
+        // the Android TV WebView key model where e.repeat is unreliable.
         if (e.key === 'ArrowUp' &&
             focused.matches?.('.movies-grid .movie-card, .series-grid .series-card')) {
-            if (!e.repeat) {
-                const now = Date.now();
-                if (lastGridUpTapAt && now - lastGridUpTapAt < GRID_UP_DOUBLE_TAP_MS) {
-                    lastGridUpTapAt = 0;
-                    const toFilters = findNext(focused, 'ArrowUp');   // the normal escape target (a filter)
-                    if (toFilters) { focusElement(toFilters); return; }
-                }
-                lastGridUpTapAt = now;
+            const now = Date.now();
+            const fresh = upReleased || (now - prevUpDownAt > UP_FRESH_GAP_MS);   // a distinct new press
+            prevUpDownAt = now;
+            upReleased = false;
+            if (fresh) {
+                upFreshCount = (now - lastUpFreshAt < UP_DOUBLE_TAP_MS) ? upFreshCount + 1 : 1;
+                lastUpFreshAt = now;
             }
+            // Deliberate double-tap (two fresh presses) from ANYWHERE in the list → the filters.
+            if (fresh && upFreshCount >= 2) {
+                upFreshCount = 0;
+                const f = moviesFilterTarget(focused) || findNext(focused, 'ArrowUp');
+                if (f) { focusElement(f); return; }
+            }
+            // Otherwise walk/scroll up within the grid.
             const above = gridCardAbove(focused);
             if (above) { focusElement(above); return; }
             if (scrollActivePage('ArrowUp', focused)) return;         // reveal cards above; focus stays
-            return;                                                   // at the very top: swallow (double-tap Up reaches the filters)
+            // At the very top (can't scroll up): a FRESH single Up escapes to the filters (natural);
+            // a held repeat swallows so a fast-scroll to the top never overshoots into the filters.
+            if (fresh) {
+                const f = moviesFilterTarget(focused) || findNext(focused, 'ArrowUp');
+                if (f) { focusElement(f); return; }
+            }
+            return;
         }
 
         let next = findNext(focused, e.key);
@@ -940,6 +979,12 @@
             scrollActivePage(e.key, focused);
         }
     }, true); // capture: runs before the app's own arrow-key handlers
+
+    // Powers the Movies/Series grid double-tap-Up detector: a key RELEASE between two Up keydowns
+    // marks a genuine second press (a continuous hold emits keydowns with no interleaved keyup).
+    document.addEventListener('keyup', (e) => {
+        if (e.key === 'ArrowUp') upReleased = true;
+    }, true);
 
     // Auto-focus the first field/button when a modal opens, so the remote
     // lands inside it immediately instead of on the dimmed page behind.
