@@ -267,6 +267,15 @@ class MoviesPage {
             // title's available version languages.
             if (this.isLanguageFilterActive()) { this.openLanguageBucket(); return; }
         }
+        // Android TV: the flat-grid endpoint (list_media_items_deduped, version-level)
+        // can't filter by audio/subtitles — those live on the title-level, language-aware
+        // path (genre-items / cloud_titles, GIN-indexed). So on TV too, an active language
+        // filter routes through the SAME bucket grid web/mobile use → identical filtered
+        // results across devices. Genre/default views keep the TV split-view flat grid.
+        if (this.isCloudPagedMode() && this._isTvMode() && this.isLanguageFilterActive()) {
+            this.openLanguageBucket();
+            return;
+        }
         if (this.shouldShowRails()) {
             this.renderGenreRails();
             return;
