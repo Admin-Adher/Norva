@@ -64,16 +64,18 @@
         return modals[modals.length - 1] || null;
     }
 
-    // Movies on Android TV keeps #movie-details permanently docked beside the
-    // catalogue. It is a navigation region, not a modal/focus trap. The Movies
-    // controller sets the marker while assembling the TV-only split layout.
-    function isTvMoviesSplitPanel(panel) {
-        const page = panel?.closest?.('#page-movies');
-        return Boolean(
-            panel?.id === 'movie-details' &&
-            panel.dataset.tvSplitPreview === 'true' &&
-            page?.classList.contains('tv-movies-layout-ready')
-        );
+    // Docked catalogue previews are navigation regions, never modal scopes.
+    function isTvSplitPanel(panel) {
+        if (!panel || panel.dataset.tvSplitPreview !== 'true') return false;
+        if (panel.id === 'movie-details') {
+            return Boolean(panel.closest('#page-movies')?.classList.contains('tv-movies-layout-ready'));
+        }
+        if (panel.id === 'series-tv-preview') {
+            const page = panel.closest('#page-series');
+            return Boolean(page?.classList.contains('tv-series-layout-ready') &&
+                !page.classList.contains('series-detail-open'));
+        }
+        return false;
     }
 
     function lastVisible(selector) {
@@ -94,7 +96,7 @@
         if (multiSelect) return multiSelect;
 
         const details = lastVisible('#movie-details:not(.hidden), #series-details:not(.hidden)');
-        return details && !isTvMoviesSplitPanel(details) ? details : document;
+        return details && !isTvSplitPanel(details) ? details : document;
     }
 
     // Single layout pass: measure each candidate's rect ONCE and keep it alongside
@@ -186,28 +188,34 @@
         return null;
     }
 
-    // Stable entry point for the docked Movies fiche. Generic spatial scoring
-    // cannot reliably reach Play from the top filter rows because the poster makes
-    // the first panel action strongly diagonal. Only enter a live, current preview.
-    function tvMoviesPanelEntryTarget() {
+    // Stable entry point for the docked Movies/Series preview. Generic geometry
+    // cannot reliably bridge from compact filters to a CTA below a large artwork.
+    function tvSplitPanelEntryTarget() {
         const page = activePage();
-        if (page?.id !== 'page-movies' ||
-            !document.documentElement.classList.contains('tv-movies-active')) return null;
-
-        const panel = page.querySelector('#movie-details');
-        const previewCard = page.querySelector('#movies-grid .movie-card.tv-preview-active');
+        let panel = null;
+        let previewCard = null;
+        let selectors = [];
+        if (page?.id === 'page-movies' &&
+            document.documentElement.classList.contains('tv-movies-active')) {
+            panel = page.querySelector('#movie-details');
+            previewCard = page.querySelector('#movies-grid .movie-card.tv-preview-active');
+            selectors = [
+                '#movie-primary-action', '#movie-detail-favorite',
+                '.movie-version-item.active', '.movie-version-item',
+                '.movie-detail-actions button:not(.movie-back-btn):not([disabled])'
+            ];
+        } else if (page?.id === 'page-series' &&
+            document.documentElement.classList.contains('tv-series-active')) {
+            panel = page.querySelector('#series-tv-preview');
+            previewCard = page.querySelector('#series-grid .series-card.tv-preview-active');
+            selectors = ['#series-tv-preview-open', '#series-tv-preview-favorite'];
+        } else {
+            return null;
+        }
         if (!panel || panel.classList.contains('hidden') ||
-            !isTvMoviesSplitPanel(panel) || !previewCard?.isConnected) return null;
+            !isTvSplitPanel(panel) || !previewCard?.isConnected) return null;
 
-        // Entering from the header/filter area always lands on the primary CTA.
         panel.scrollTop = 0;
-        const selectors = [
-            '#movie-primary-action',
-            '#movie-detail-favorite',
-            '.movie-version-item.active',
-            '.movie-version-item',
-            '.movie-detail-actions button:not(.movie-back-btn):not([disabled])'
-        ];
         for (const selector of selectors) {
             const target = [...panel.querySelectorAll(selector)]
                 .find((el) => !el.disabled && isVisible(el));
@@ -270,10 +278,13 @@
 
     // The Movies filter row nearest the card's column (bottom row = closest to the grid) — the
     // EXPLICIT escape target so a mid-list double-tap Up lands on the filters, not another grid card.
-    function moviesFilterTarget(fromEl) {
+    function catalogFilterTarget(fromEl) {
         const page = activePage();
-        const rows = [...(page?.querySelectorAll('.tv-movies-filter-row') || [])].filter(isVisible);
-        const region = rows[rows.length - 1] || page?.querySelector('[data-tv-nav-region="movies-filters"]');
+        const rows = [...(page?.querySelectorAll('.tv-movies-filter-row, .tv-series-filter-row') || [])]
+            .filter(isVisible);
+        const regionName = page?.id === 'page-series' ? 'series-filters' : 'movies-filters';
+        const region = rows[rows.length - 1] ||
+            page?.querySelector(`[data-tv-nav-region="${regionName}"]`);
         if (!region) return null;
         const fromX = centerOf(fromEl).x;
         const cands = getCandidates().filter((el) => region.contains(el) && isVisible(el));
@@ -342,20 +353,22 @@
             if (btn) focusElement(btn);
             return true;
         }
-        // The Movies TV fiche is a persistent split preview, so it must not be
-        // hidden like the fullscreen web fiche. Back from any of its controls
-        // (notably a version variant) simply returns to the previewed grid card.
+        // A TV catalogue preview is persistent. Back from its controls returns to
+        // the selected poster instead of hiding the panel or navigating Home.
         const tvMoviePanel = document.querySelector('#page-movies.active #movie-details');
+        const tvSeriesPanel = document.querySelector('#page-series.active #series-tv-preview');
+        const tvPanel = [tvMoviePanel, tvSeriesPanel].find(isTvSplitPanel) || null;
         const active = document.activeElement;
-        if (isTvMoviesSplitPanel(tvMoviePanel) && active && tvMoviePanel.contains(active)) {
-            const grid = tvMoviePanel.closest('#page-movies')?.querySelector('#movies-grid');
-            const cards = [...(grid?.querySelectorAll('.movie-card') || [])];
+        if (tvPanel && active && tvPanel.contains(active)) {
+            const page = tvPanel.closest('.page');
+            const grid = page?.querySelector('.movies-grid, .series-grid');
+            const cards = [...(grid?.querySelectorAll('.movie-card, .series-card') || [])];
             const usable = card => Boolean(
                 card?.isConnected &&
                 !card.closest('.hidden, [hidden]') &&
                 (card.offsetWidth > 0 || card.offsetHeight > 0)
             );
-            const preview = grid?.querySelector('.movie-card.tv-preview-active');
+            const preview = grid?.querySelector('.movie-card.tv-preview-active, .series-card.tv-preview-active');
             const target = usable(preview)
                 ? preview
                 : (cards.find(isVisible) || cards.find(usable));
@@ -363,7 +376,7 @@
             return true;
         }
         const details = lastVisible('#movie-details:not(.hidden), #series-details:not(.hidden)');
-        if (details && !isTvMoviesSplitPanel(details)) {
+        if (details && !isTvSplitPanel(details)) {
             const back = details.querySelector('.movie-back-btn, .series-back-btn');
             if (back) { back.click(); return true; }
         }
@@ -478,7 +491,10 @@
             || select.closest('label')?.textContent?.trim()
             || document.querySelector(`label[for="${select.id}"]`)?.textContent?.trim()
             || 'Choose an option';
-        const rows = [...select.options].map((opt, i) =>
+        // Keep the value shown in each row stable even if language facets refresh
+        // while the overlay is open. Resolve that value against the live select on OK.
+        const optionSnapshot = [...select.options];
+        const rows = optionSnapshot.map((opt, i) =>
             `<button type="button" class="tv-select-option${opt.selected ? ' selected' : ''}" data-index="${i}">
                 <span class="tv-select-option-label">${opt.textContent}</span>
                 ${opt.selected ? '<span class="tv-select-check" aria-hidden="true">✓</span>' : ''}
@@ -495,13 +511,15 @@
         ov.querySelectorAll('.tv-select-option').forEach((btn) => {
             btn.addEventListener('click', () => {
                 const idx = Number(btn.dataset.index);
-                const option = select.options[idx];
-                if (option && select.selectedIndex !== idx) {
-                    // Set the real value explicitly before change. Some Android
-                    // WebViews visually update selectedIndex first but expose the
-                    // old value to a synchronous listener (notably Audio language).
-                    select.value = option.value;
-                    if (select.selectedIndex !== idx) select.selectedIndex = idx;
+                const intendedValue = optionSnapshot[idx]?.value;
+                const liveIndex = [...select.options].findIndex(option =>
+                    option.value === intendedValue);
+                if (intendedValue !== undefined && liveIndex >= 0) {
+                    // Dispatch even when the selected index already matches: some
+                    // Android WebViews expose the new index with the previous value,
+                    // and a repeated choice also repairs a stale filtered catalogue.
+                    select.value = intendedValue;
+                    if (select.selectedIndex !== liveIndex) select.selectedIndex = liveIndex;
                     select.dispatchEvent(new Event('change', { bubbles: true }));
                 }
                 close();
@@ -569,10 +587,12 @@
             const rpPop = focused.closest?.('[data-region-picker]')?.querySelector('[data-region-pop]');
             if (rpPop && !rpPop.hidden) return;
 
-            // At the beginning of the Movies search field, Left leaves the page
+            const isCatalogSearch = (focused.id === 'movies-search' && activePage()?.id === 'page-movies') ||
+                (focused.id === 'series-search' && activePage()?.id === 'page-series');
+
+            // At the beginning of a catalogue search field, Left leaves the page
             // for the rail instead of becoming an empty caret move.
-            if (!e.repeat && focused.id === 'movies-search' && e.key === 'ArrowLeft' &&
-                activePage()?.id === 'page-movies' &&
+            if (!e.repeat && isCatalogSearch && e.key === 'ArrowLeft' &&
                 (focused.selectionStart ?? 0) === 0 && (focused.selectionEnd ?? 0) === 0) {
                 const active = document.querySelector('.navbar .nav-link.active');
                 const railTarget = (active && isVisible(active))
@@ -586,13 +606,12 @@
                 }
             }
 
-            // Symmetric boundary: Right at the end of Movies search enters the
+            // Symmetric boundary: Right at the end of search enters the
             // docked fiche instead of remaining an inert caret press.
-            if (!e.repeat && focused.id === 'movies-search' && e.key === 'ArrowRight' &&
-                activePage()?.id === 'page-movies' &&
+            if (!e.repeat && isCatalogSearch && e.key === 'ArrowRight' &&
                 (focused.selectionStart ?? 0) === focused.value.length &&
                 (focused.selectionEnd ?? 0) === focused.value.length) {
-                const panelTarget = tvMoviesPanelEntryTarget();
+                const panelTarget = tvSplitPanelEntryTarget();
                 if (panelTarget) {
                     e.preventDefault();
                     e.stopPropagation();
@@ -601,20 +620,24 @@
                 }
             }
 
-            // Avoid the generic all-page geometry scan from Movies Search. A
+            // Avoid the generic all-page geometry scan from catalogue Search. A
             // direct target stays instant even with a very large catalogue.
-            if (focused.id === 'movies-search' &&
-                activePage()?.id === 'page-movies' &&
+            if (isCatalogSearch &&
                 (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
                 e.preventDefault();
                 e.stopPropagation();
                 let target = null;
                 if (e.key === 'ArrowDown') {
-                    const row = document.getElementById('movies-tv-primary-filters');
+                    const series = focused.id === 'series-search';
+                    const row = document.getElementById(series
+                        ? 'series-tv-primary-filters'
+                        : 'movies-tv-primary-filters');
                     target = [...(row?.querySelectorAll(INTERACTIVE_SELECTOR) || [])]
                         .find(el => !el.disabled && isVisible(el));
                     if (!target) {
-                        target = [...document.querySelectorAll('#movies-grid .movie-card')]
+                        target = [...document.querySelectorAll(series
+                            ? '#series-grid .series-card'
+                            : '#movies-grid .movie-card')]
                             .find(isVisible);
                     }
                 } else {
@@ -638,6 +661,14 @@
             e.preventDefault();
             e.stopPropagation();
             openTvSelect(focused);
+            return;
+        }
+
+        // SeriesPage owns Left/Right on season tabs because moving focus must also
+        // activate the season and repaint the episode list. Let that target handler
+        // receive the event instead of swallowing it in capture-phase spatial nav.
+        if (focused?.matches?.('.season-tab') &&
+            (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
             return;
         }
 
@@ -722,14 +753,16 @@
             }
         }
 
-        // Movies TV: walk each filter band internally, then bridge its right edge
-        // straight to Play in the docked fiche. Pure geometry cannot make this hop
+        // Movies/Series TV: walk each filter band internally, then bridge its right
+        // edge straight to the docked preview CTA. Pure geometry cannot make this hop
         // reliably because the large poster pushes the first panel button far below
         // the filters, so cards underneath otherwise out-score it.
-        if (e.key === 'ArrowRight' && activePage()?.id === 'page-movies' &&
+        if (e.key === 'ArrowRight' &&
+            (activePage()?.id === 'page-movies' || activePage()?.id === 'page-series') &&
             navScope() === document) {
+            const regionName = activePage()?.id === 'page-series' ? 'series-filters' : 'movies-filters';
             const filterRegion = focused.closest?.(
-                '[data-tv-nav-region="movies-filters"], .tv-movies-filter-row'
+                `[data-tv-nav-region="${regionName}"], .tv-movies-filter-row, .tv-series-filter-row`
             );
             if (filterRegion) {
                 const from = centerOf(focused);
@@ -753,7 +786,7 @@
                     return;
                 }
 
-                const panelTarget = tvMoviesPanelEntryTarget();
+                const panelTarget = tvSplitPanelEntryTarget();
                 if (panelTarget) {
                     focusElement(panelTarget);
                     return;
@@ -787,21 +820,21 @@
             }
         }
 
-        // Movies (TV split-view) is 3 columns: rail | grid | #movie-details (preview
-        // panel). ArrowLeft from INSIDE the panel returns to the grid — the card that
+        // Catalogue split-view is 3 columns: rail | grid | preview panel. ArrowLeft
+        // from INSIDE the panel returns to the grid — the card that
         // opened the preview (marked .tv-preview-active) if it's still on screen, else
         // the grid card nearest the focused control's screen-y — instead of letting
         // findNext strand focus in the tall scrolling panel or jump to the rail. A
         // control that HAS a panel neighbour to its left (e.g. Favorite ← Play) falls
         // through to the generic handler, which steps to that neighbour.
-        if (e.key === 'ArrowLeft' &&
-            isTvMoviesSplitPanel(focused.closest('#movie-details'))) {
-            const panel = focused.closest('#movie-details');
+        const splitPanel = focused.closest?.('#movie-details, #series-tv-preview');
+        if (e.key === 'ArrowLeft' && isTvSplitPanel(splitPanel)) {
+            const panel = splitPanel;
             const leftInPanel = findNext(focused, 'ArrowLeft');
             const realPanelNeighbour = leftInPanel && panel.contains(leftInPanel) &&
                 hasMeaningfulVerticalOverlap(focused, leftInPanel);
             if (!realPanelNeighbour) {
-                const grid = panel.closest('#page-movies')?.querySelector('.movies-grid');
+                const grid = panel.closest('.page')?.querySelector('.movies-grid, .series-grid');
                 if (grid) {
                     let target = grid.querySelector('.movie-card.tv-preview-active, .series-card.tv-preview-active');
                     if (!target || !isVisible(target)) {
@@ -942,7 +975,7 @@
             // Deliberate double-tap (two fresh presses) from ANYWHERE in the list → the filters.
             if (fresh && upFreshCount >= 2) {
                 upFreshCount = 0;
-                const f = moviesFilterTarget(focused) || findNext(focused, 'ArrowUp');
+                const f = catalogFilterTarget(focused) || findNext(focused, 'ArrowUp');
                 if (f) { focusElement(f); return; }
             }
             // Otherwise walk/scroll up within the grid.
@@ -952,7 +985,7 @@
             // At the very top (can't scroll up): a FRESH single Up escapes to the filters (natural);
             // a held repeat swallows so a fast-scroll to the top never overshoots into the filters.
             if (fresh) {
-                const f = moviesFilterTarget(focused) || findNext(focused, 'ArrowUp');
+                const f = catalogFilterTarget(focused) || findNext(focused, 'ArrowUp');
                 if (f) { focusElement(f); return; }
             }
             return;
@@ -1059,7 +1092,7 @@
             // trigger fullscreen-fiche focus anchoring on each preview render.
             const open = detailPanels.find((p) =>
                 !p.classList.contains('hidden') && isVisible(p) &&
-                !isTvMoviesSplitPanel(p)) || null;
+                !isTvSplitPanel(p)) || null;
             if (open && open !== lastOpenDetail) {
                 lastOpenDetail = open;
                 // Capture the launching card NOW — before the 60ms anchor moves focus
@@ -1077,7 +1110,7 @@
                     document.contains(lastFocusedCard)) ? lastFocusedCard : null;
                 setTimeout(() => {
                     if (!open.classList.contains('hidden') && isVisible(open) &&
-                        !isTvMoviesSplitPanel(open)) {
+                        !isTvSplitPanel(open)) {
                         anchorDetailFocus(open);
                     }
                 }, 60);
