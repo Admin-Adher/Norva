@@ -1,8 +1,8 @@
 # Session 2026-07-13 (2) — nav TV catalogue, profils plein écran, modèle d'abonnement & lifecycle
 
-**Statut : 9 commits livrés sur `main` (front auto-Cloudflare ; 2 changements edge à redéployer sur Hetzner).**
+**Statut : 10 commits livrés sur `main` (front auto-Cloudflare ; edge redéployé sur Hetzner).**
 
-Suite du log `2026-07-13-session-log.md` (nav Live + synchro cloud). Cette session couvre : la nav D-pad des pages **Movies/Séries**, la refonte **plein écran des profils** sur TV, un **audit « pubs vs réel »** des abonnements, la bascule du **différenciateur de plan** (profils, plus flux), le **verrouillage des profils** au downgrade, et le **découpage du flag lifecycle** billing.
+Suite du log `2026-07-13-session-log.md` (nav Live + synchro cloud). Cette session couvre : la nav D-pad des pages **Movies/Séries**, la refonte **plein écran des profils** sur TV, un **audit « pubs vs réel »** des abonnements, la bascule du **différenciateur de plan** (profils, plus flux), le **verrouillage des profils** au downgrade, le **découpage du flag lifecycle** billing, et un **3ᵉ mode d'entitlements `limits`** (caps de plan sans mur d'accès).
 
 | # | Sujet | Commit `main` | Fichiers clés |
 |---|---|---|---|
@@ -15,6 +15,7 @@ Suite du log `2026-07-13-session-log.md` (nav Live + synchro cloud). Cette sessi
 | 7 | Pépites landing : sous-titres IA, Cast, self-healing | `f120db4` | `landing.html`, `index.html` |
 | 8 | Lifecycle : flags par-flux + correctifs des bloqueurs | `57fd2f3` | `norva-lifecycle/index.ts`, `lifecycle-email.ts` |
 | 9 | Lifecycle : claim atomique dunning + câblage des flags edge | `c90afbc` | `norva-lifecycle/index.ts`, `docker-compose.supabase.yml`, `.env.hetzner.example` |
+| 10 | Mode entitlements `limits` : caps de plan sans mur d'accès | `311a4e9` | `entitlements.ts`, `norva-cloud/index.ts`, `norva-playback/index.ts`, `.env.hetzner.example` |
 
 Méthode : 4 workflows multi-agents (nav Movies/Séries, fit profils TV, audit features, flag-readiness lifecycle), chacun avec vérification adverse ; harnais headless Playwright pour la nav + le fit + le verrouillage.
 
@@ -84,15 +85,35 @@ Workflow flag-readiness → **verdict : ne PAS flipper le flag unique** (il acti
 
 Revue adverse (agent) du diff lifecycle : aucun bloqueur — CAS, gating, provider-scope, garde expire tous corrects.
 
+## 10. Mode entitlements `limits` — caps de plan sans mur d'accès (`311a4e9`)
+
+**Problème** : `NORVA_ENTITLEMENTS_MODE` n'avait que 2 états. En `observe`, `applyEntitlementMode()` réécrit tout compte non hard-bloqué en `allowed:true` + `limits: PLAN_LIMITS.manual` (8 profils) → **le cap Plus=2/Family=5 et le verrouillage (#4/#5) sont inertes**. Passer en `enforce` les active, mais couple ça au **mur d'accès facturation** : tout `expired`/`past_due`/sans-projection se prend un **hard block** (mode `legacy` = pas de free-browse) → dangereux tant que le rail de paiement n'enforce pas. On voulait les **caps sans le mur**.
+
+**Fix** — 3ᵉ mode `limits` (alias `enforce-limits` / `limits-only`), le juste milieu :
+
+| Mode | Caps de plan (profils/sources/appareils/flux) | Mur d'accès facturation |
+|---|---|---|
+| `observe` | ❌ inerte (tout le monde = manual/8) | ❌ ouvert |
+| **`limits`** (nouveau) | ✅ **réel pour comptes entitled** | ❌ **ouvert** |
+| `enforce` | ✅ réel | ⚠️ réel (à réserver post-refonte paiement) |
+
+- **Comptes entitled** (essai/actif) → décision passée telle quelle → **vraies limites du plan**. Le cap d'essai **suit le plan choisi à la souscription** (une projection `trialing/plus` porte les caps Plus, `trialing/family` les caps Family) — aucun override « trial→N » codé, c'est automatique via `normalizeLimits(plan_code)`.
+- **Soft denials** (`trial_expired`, `subscription_expired`, sans abo) → **jamais mis au mur** : dégradés en `allowed:true` + limites `manual` généreuses (préfixe de raison `limits_open_`, strippé par `realPlanCode` pour l'upsell).
+- **Rayon d'action** (via `requirePlanCapacity`) : `profiles` (Plus 2 / Family 5 — le seul différenciateur), `sources` (5), `trusted_devices` (10), `concurrent_streams` (10). Sources/appareils/flux sont identiques Plus↔Family et généreux → **seul le cap de profils se ressent**. `requireCloudAccess` ne mure jamais (`allowed` reste `true`).
+- **Observabilité** : `getEntitlementRuntime()` expose `limitsEnforced` (true en `enforce` **et** `limits`), remonté dans les health `norva-cloud`/`norva-playback` sous `entitlementsLimitsEnforced`. `deno check` propre (les 3 erreurs `CloudUser`/`isAdminUser` restent la baseline).
+
+**Diagnostic pré-flip** (SQL sur `cloud_entitlement_projection` ⨝ `cloud_account_profiles`, box) : 5 comptes test, **tous `allowed`, 0 profil hors cap** → basculer en `limits` (ou même `enforce`) = **0 compte coupé, 0 profil verrouillé**. Les caps deviennent juste réels pour la suite.
+
+**⚠️ Découverte** : la box **ne tournait pas en `observe`** comme supposé — son `.env` n'a **aucune ligne** `NORVA_ENTITLEMENTS_MODE` → le compose retombe sur son défaut `${…:-enforce}`. Donc `enforce` était **actif** (health : `entitlementsMode:"enforce"`), et le verrouillage de profils (#5) était donc déjà live (mais invisible, 0 compte hors cap). Le passage explicite à `limits` retire le risque de mur d'accès futur.
+
+**Activation** (box) : poser `NORVA_ENTITLEMENTS_MODE=limits` dans `ops/hetzner/.env` (⚠️ une **vraie** ligne — un commentaire collé ne modifie rien), puis **recréer** : `docker compose --env-file ops/hetzner/.env -f ops/hetzner/docker-compose.supabase.yml up -d functions`. Vérif health attendue : `entitlementsMode:"limits"` + `entitlementsEnforced:false` + `entitlementsLimitsEnforced:true`. Rollback = remettre `observe`/`enforce` + recréer.
+
 ---
 
 ## ⚠️ À NE PAS OUBLIER (ops)
 
-1. **Re-deploy edge** pour #5 (`norva-cloud`) et #8/#9 (`norva-lifecycle`) — sans risque, tout lifecycle est OFF :
-   ```
-   git pull && ops/hetzner/scripts/04-deploy-edge-functions.sh
-   ```
-2. **🚨 `NORVA_ENTITLEMENTS_MODE`** : l'exemple + le commentaire compose indiquent **`observe`** pendant la transition paiement. **En `observe`, la limite Plus=2 profils ET le verrouillage (#4/#5) sont INERTES** (le code renvoie les limites du plan `manual`). Il faut **`enforce`** pour les appliquer — mais ça peut walller vers le paywall d'anciens abonnés migrés non-actifs. Décision à prendre. `grep ENTITLEMENTS_MODE ops/hetzner/.env` pour vérifier.
+1. ✅ **Edge redéployé** (#5 `norva-cloud`, #8/#9 `norva-lifecycle`, #10 `entitlements`/`norva-playback`) — fait cette session via `git pull` + recréation du conteneur `functions`. Tout lifecycle reste OFF. Rappel : `restart` recharge le **code** mais pas les **nouvelles vars d'env** → pour tout `NORVA_LC_*`/`NORVA_ENTITLEMENTS_MODE`, il faut `docker compose --env-file ops/hetzner/.env -f ops/hetzner/docker-compose.supabase.yml up -d functions` (recréer).
+2. **`NORVA_ENTITLEMENTS_MODE`** (résolu par #10, mode `limits`) : la box tournait de fait en **`enforce`** (aucune ligne dans `.env` → défaut compose `:-enforce`), pas `observe`. **Reco : poser explicitement `limits`** → caps de profils Plus=2/Family=5 actifs, mais accès jamais mis au mur (cf. §10 pour la commande de recréation + la vérif health `entitlementsEnforced:false`). Ne repasser en `enforce` qu'**après** la refonte paiement (sinon un essai expiré est coupé sans pouvoir payer). `grep ENTITLEMENTS_MODE ops/hetzner/.env` pour voir l'état courant.
 3. **Activer le lifecycle plus tard** : jamais `EXPIRE` sans `DUNNING` (couperait sans avertir). Combo `NORVA_LIFECYCLE_BILLING_LIVE=true` + `NORVA_LC_DUNNING=true` (+ `NORVA_LC_EXPIRE=true`), puis **recréer** le conteneur (`up -d functions`, pas restart). Prérequis : cron `norva-lifecycle` enregistré, `RESEND_API_KEY` + expéditeur `norva.tv` vérifié.
 
 ## Versions d'assets finales
