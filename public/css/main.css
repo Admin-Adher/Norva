@@ -1412,10 +1412,26 @@ h4 {
   .live-guide-preview-actions {
     grid-area: actions;
     flex-direction: row;
+    align-items: center; /* stop align-stretch from inflating the Favorite pill to the Watch button's height */
   }
 
   .live-guide-preview-actions .lg-btn-primary {
     flex: 1;
+  }
+
+  /* The Watch play-arrow is an inline <svg class="lg-btn-ico" viewBox="0 0 24 24"> with NO
+     width/height attribute (LiveGuideFusion.js), and .lg-btn-ico is only sized under tv-mode
+     (line ~12432) and the .norva-phone-apk block (line ~13090). On ANY mobile viewport the
+     rule above makes the Watch button flex:1 (full width); an unsized SVG then balloons to a
+     ~square (~150px), blowing the whole action row into a giant blue block. The earlier APK-
+     only fix never reached a plain mobile browser / installed PWA / non-APK WebView (they lack
+     the norva-phone-apk body class), so pin the icon here, viewport-scoped, to cover every
+     mobile surface. TV keeps its 20px via the higher-specificity `.tv-mode #page-live .lg-btn-ico`;
+     desktop (>768px) is outside this media query and unaffected. */
+  .live-guide-preview .lg-btn-ico {
+    width: 18px;
+    height: 18px;
+    flex: 0 0 18px;
   }
 
   .live-guide-preview.is-empty {
