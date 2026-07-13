@@ -1,5 +1,7 @@
 # Audit 2026-07-13 — Ce que les abonnements promettent **vs** ce que Norva fait vraiment
 
+> **MISE À JOUR (décisions appliquées le 2026-07-13).** Le différenciateur des plans **n'est plus « flux simultanés »** mais le **nombre de profils** : **Plus = 2 profils / Family = 5** (`entitlements.ts`). Raison : le nombre de flux simultanés dépend du **compte IPTV du fournisseur**, pas de Norva — le cap Norva devient un simple **garde-fou backend large (10) et silencieux**, jamais vendu. Copy corrigé (`subscribe/landing/index.html`) : profils au lieu de flux, mot « **export** » retiré (RGPD), **offline** qualifié « app Android », promesse de **rappel J‑2 adoucie** (email désactivé par défaut). **Skip Intro retiré** de toute recommandation (non fonctionnel sur flux IPTV). Les §1/§4 ci-dessous décrivent l'état *avant* décision — voir cette note pour l'état livré.
+
 **Méthode.** Workflow multi-agents (8 finders en parallèle : 1 sur *tout le copy marketing/paywall*, 7 sur *le code réel* par domaine → confrontation → **vérification adverse** de chaque trouvaille, 26 claims vérifiés, 22 confirmés). Chiffres bruts : **52 promesses** relevées dans le copy, **172 fonctionnalités réelles** inventoriées dans le code.
 
 **Le constat en une phrase :** Norva **fait beaucoup plus que ce qu'il vend** (tout un étage IA sous-titres + du polish streaming jamais mentionné), et **quelques promesses dépassent le code** (export RGPD, offline présenté comme universel, rappel J‑2 désactivé par défaut).

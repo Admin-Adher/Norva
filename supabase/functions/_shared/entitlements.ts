@@ -26,7 +26,7 @@ const BILLING_MODE = normalizeBillingMode(Deno.env.get("NORVA_BILLING_MODE") ?? 
 const PLAN_LIMITS: Record<string, JsonRecord> = {
   trial: {
     trusted_devices: 5,
-    concurrent_streams: 2,
+    concurrent_streams: 10,
     sources: 2,
     profiles: 1,
     gateway: true,
@@ -34,21 +34,24 @@ const PLAN_LIMITS: Record<string, JsonRecord> = {
     metadata: true,
   },
   // Norva (entry plan) and Norva Family share full feature parity. The ONLY
-  // difference is concurrent_streams (2 vs 5) — i.e. how many screens can play
-  // at the same time. Everything else (profiles, trusted devices, sources and
-  // all feature flags) is intentionally identical between the two paid plans.
+  // difference is the number of PROFILES (2 vs 5). We do NOT sell "simultaneous
+  // streams" — how many streams can play at once is the user's IPTV provider's
+  // account limit, not ours. concurrent_streams here is just a generous, identical
+  // backend guard (never advertised) so a runaway account can't open unbounded
+  // gateway/transcode sessions. Everything else (trusted devices, sources, feature
+  // flags) is intentionally identical between the two paid plans.
   plus: {
     trusted_devices: 10,
-    concurrent_streams: 2,
+    concurrent_streams: 10,
     sources: 5,
-    profiles: 5,
+    profiles: 2,
     gateway: true,
     cloud_sync: true,
     metadata: true,
   },
   family: {
     trusted_devices: 10,
-    concurrent_streams: 5,
+    concurrent_streams: 10,
     sources: 5,
     profiles: 5,
     gateway: true,

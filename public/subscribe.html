@@ -69,7 +69,7 @@
     .assurance b { color: #eafff5; font-weight: 700; }
     .assurance-ico { font-size: 20px; line-height: 1.2; }
     html.tv .assurance { font-size: 16px; }
-    /* "Why Family?" — the two plans are identical except for simultaneous streams,
+    /* "Why Family?" — the two plans are identical except for the number of profiles,
        so state that plainly under the side-by-side cards instead of leaving it implicit. */
     .compare { margin: 16px auto 0; max-width: 620px; padding: 12px 16px; border: 1px solid var(--line);
       border-radius: 12px; background: rgba(255,255,255,0.03); color: var(--muted);
@@ -114,7 +114,7 @@
     <div class="brand"><img src="/favicon.png" alt=""><span>Norva</span></div>
     <h1>Choose your Norva plan</h1>
     <p class="lead">Every plan unlocks all of Norva. Plans differ only by how many
-      screens can stream at the same time. Start with a 7-day free trial.</p>
+      profiles your household gets. Start with a 7-day free trial.</p>
 
     <div class="status" id="already-sub"></div>
 
@@ -130,14 +130,13 @@
         data-package-monthly="$rc_monthly" data-package-annual="$rc_annual"
         data-monthly="4.99" data-annual="41.99" data-annual-note="That's about 3.49/mo, billed yearly.">
         <h2>Norva</h2>
-        <p class="tag">Everything Norva does, on your main screens.</p>
+        <p class="tag">Everything Norva does — for you and a plus-one.</p>
         <div class="price"><span class="cur">$</span><span class="amount">4.99</span><span class="per">/mo</span></div>
         <small class="price-note"></small>
         <ul>
-          <li>2 simultaneous streams</li>
-          <li>Up to 5 profiles</li>
+          <li>Up to 2 profiles</li>
           <li>Sync across Web, phone, tablet &amp; TV</li>
-          <li>Offline mode on compatible devices</li>
+          <li>Offline downloads (Android app)</li>
           <li>Every Norva feature included</li>
         </ul>
         <button class="btn buy" type="button">Start 7-day free trial</button>
@@ -154,10 +153,9 @@
         <div class="price"><span class="cur">$</span><span class="amount">8.99</span><span class="per">/mo</span></div>
         <small class="price-note"></small>
         <ul>
-          <li>5 simultaneous streams</li>
           <li>Up to 5 profiles</li>
           <li>Sync across Web, phone, tablet &amp; TV</li>
-          <li>Offline mode on compatible devices</li>
+          <li>Offline downloads (Android app)</li>
           <li>Every Norva feature included</li>
         </ul>
         <button class="btn buy" type="button">Start 7-day free trial</button>
@@ -165,8 +163,8 @@
     </div>
 
     <p class="compare">Both plans include <b>every Norva feature</b>. The only difference is how many
-      screens can stream at the same time — <b>Norva</b> covers 2, <b>Norva Family</b> covers 5,
-      ideal when several people watch at once.</p>
+      profiles you get — <b>Norva</b> gives 2, <b>Norva Family</b> gives 5,
+      so everyone at home gets their own space, favorites and Continue Watching.</p>
 
     <div class="pay-marks" id="pay-marks" aria-label="Accepted payment methods">
       <span class="pm-lbl">Secure card payment</span>
@@ -189,7 +187,7 @@
         To open your free trial we place a tiny temporary authorization to confirm the card is valid.
         It may appear briefly in your local currency, and is <b>released back to you right away and never debited.</b> Your first real payment happens only
         after the 7‑day trial ends — and only if you don't cancel before then.
-        <b>We'll email you a reminder 2 days before your trial ends.</b>
+        <b>You can cancel anytime before it ends, right from your account.</b>
       </div>
     </div>
 
@@ -386,7 +384,7 @@
         if (r.indexOf('trial') !== -1) return 'Your free trial has ended. Pick a plan to keep watching.';
         if (r.indexOf('expired') !== -1 || s === 'expired') return 'Your Norva plan has expired. Resubscribe to keep watching.';
         if (r.indexOf('capacity') !== -1 || r.indexOf('concurrent') !== -1 || r.indexOf('stream') !== -1) {
-          return "You've reached your plan's simultaneous-stream limit. Upgrade for more screens.";
+          return "Too many streams are playing at once. Close one on another device and try again.";
         }
         return trialEligible ? 'Start your 7-day free trial to keep watching.' : 'Subscribe to keep watching.';
       }
