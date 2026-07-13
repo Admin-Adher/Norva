@@ -37,29 +37,6 @@
         } catch (_) { /* fail open: fall through to the normal page */ }
       })();
     </script>
-    <script>
-      // ── Pre-launch gate ──────────────────────────────────────────────────
-      // Decide BEFORE first paint whether to show the "launching soon" gate, so
-      // gated visitors never see the sign-up form flash. Sets data-prelaunch;
-      // the CSS shows the overlay only when it is explicitly "gated" (so any
-      // error here fails OPEN — a script bug can never lock the owner out).
-      // Bypassed for: the native app (not publicly distributed yet), email
-      // confirm / recovery links (they carry a one-time token, not a bypass),
-      // and anyone who has already entered the access code.
-      (function () {
-        try {
-          var d = document.documentElement;
-          var p = new URLSearchParams(location.search);
-          var h = location.hash || '';
-          var authLink = p.get('token_hash') || p.get('mode') === 'recovery' || p.get('manage') === '1'
-            || /(access_token|refresh_token)=/.test(h) || /type=(recovery|invite|magiclink|signup)/.test(h);
-          var unlocked = false;
-          try { unlocked = localStorage.getItem('norva-prelaunch-ok') === '1'; } catch (_) {}
-          var open = d.classList.contains('native-app') || !!authLink || unlocked;
-          if (!open) d.setAttribute('data-prelaunch', 'gated');
-        } catch (_) { /* fail open — never lock out on error */ }
-      })();
-    </script>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         :root {
@@ -376,82 +353,8 @@
         html.native-app .onb-slide p { font-size: 13px; line-height: 1.45; }
         html.native-app .onb-dots { margin-top: 10px; }
     </style>
-    <style>
-        /* ── Pre-launch "launching soon" gate ────────────────────────────────
-           Hidden by default; shown only when the head script set data-prelaunch
-           ="gated" (so an error fails open). Full-screen opaque overlay → the
-           sign-up form behind it is never reachable without the access code. */
-        #prelaunch-gate { display: none; }
-        html[data-prelaunch="gated"] #prelaunch-gate {
-            display: flex; position: fixed; inset: 0; z-index: 10000;
-            align-items: center; justify-content: center; padding: 24px; overflow-y: auto;
-            background:
-                radial-gradient(circle at 18% 12%, rgba(33, 212, 253, 0.16), transparent 30%),
-                radial-gradient(circle at 86% 4%, rgba(199, 92, 255, 0.13), transparent 28%),
-                var(--bg, #090b10);
-        }
-        .pg-card { width: min(520px, 100%); text-align: center; }
-        .pg-logo { display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 22px; }
-        .pg-logo img { width: 46px; height: 46px; border-radius: 9px; object-fit: cover; }
-        .pg-logo span { font-size: 20px; font-weight: 750; }
-        .pg-badge { display: inline-block; padding: 5px 12px; border-radius: 999px; font-size: 11px;
-            font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: #d8b4fe;
-            background: rgba(199, 92, 255, .14); border: 1px solid rgba(199, 92, 255, .32); margin-bottom: 16px; }
-        .pg-title { font-size: clamp(26px, 5vw, 38px); line-height: 1.08; font-weight: 800;
-            margin-bottom: 12px; text-wrap: balance; }
-        .pg-sub { color: var(--muted, #9ca3af); font-size: 15.5px; line-height: 1.6; max-width: 440px; margin: 0 auto 26px; }
-        .pg-count { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; max-width: 400px; margin: 0 auto 28px; }
-        .pg-unit { background: rgba(17, 21, 29, .72); border: 1px solid rgba(148, 163, 184, .18);
-            border-radius: 12px; padding: 14px 6px; }
-        .pg-num { display: block; font-size: clamp(24px, 6vw, 34px); font-weight: 800;
-            font-variant-numeric: tabular-nums; line-height: 1; }
-        .pg-lbl { display: block; margin-top: 7px; font-size: 11px; letter-spacing: .06em;
-            text-transform: uppercase; color: var(--quiet, #667085); }
-        .pg-form { max-width: 400px; margin: 0 auto; }
-        .pg-flabel { display: block; text-align: left; color: #cbd5e1; font-size: 13px; font-weight: 650; margin-bottom: 7px; }
-        .pg-row { display: flex; gap: 8px; }
-        #pg-code { flex: 1; min-height: 48px; border: 1px solid var(--line, #273142); border-radius: 10px;
-            background: #0b0f16; color: var(--text, #f8fafc); font: inherit; padding: 0 14px; outline: none; }
-        #pg-code:focus { border-color: rgba(79, 125, 243, .9); box-shadow: 0 0 0 3px rgba(79, 125, 243, .18); }
-        .pg-btn { min-height: 48px; padding: 0 20px; border: 0; border-radius: 10px; font-weight: 750;
-            cursor: pointer; color: #fff; background: linear-gradient(135deg, #4f7df3, #6d5dfc 58%, #c75cff); }
-        .pg-btn:disabled { opacity: .6; cursor: wait; }
-        .pg-error { color: var(--danger, #fb7185); font-size: 13.5px; margin-top: 10px; text-align: left; }
-        .pg-foot { color: var(--quiet, #667085); font-size: 12px; margin-top: 24px; }
-        .pg-shake { animation: pg-shake .4s; }
-        @keyframes pg-shake { 0%,100% { transform: translateX(0); } 20%,60% { transform: translateX(-8px); } 40%,80% { transform: translateX(8px); } }
-        @media (prefers-reduced-motion: reduce) { .pg-shake { animation: none; } }
-    </style>
 </head>
 <body>
-    <!-- Pre-launch gate: "launching soon" + countdown + early-access code.
-         Shown only when data-prelaunch="gated" (see the head script + CSS). -->
-    <div id="prelaunch-gate" role="dialog" aria-modal="true" aria-label="Norva is launching soon">
-        <div class="pg-card">
-            <div class="pg-logo"><img src="/img/norva-app-icon.png" alt=""><span>Norva</span></div>
-            <span class="pg-badge">Launching soon</span>
-            <h1 class="pg-title">We're putting the finishing touches on Norva</h1>
-            <p class="pg-sub">Sign-ups open at launch. Check back when the countdown ends — or enter your
-                early-access code below if you already have one.</p>
-            <div class="pg-count" aria-hidden="true">
-                <div class="pg-unit"><span class="pg-num" id="pg-d">00</span><span class="pg-lbl">Days</span></div>
-                <div class="pg-unit"><span class="pg-num" id="pg-h">00</span><span class="pg-lbl">Hours</span></div>
-                <div class="pg-unit"><span class="pg-num" id="pg-m">00</span><span class="pg-lbl">Min</span></div>
-                <div class="pg-unit"><span class="pg-num" id="pg-s">00</span><span class="pg-lbl">Sec</span></div>
-            </div>
-            <form class="pg-form" id="pg-form" autocomplete="off">
-                <label class="pg-flabel" for="pg-code">Early-access code</label>
-                <div class="pg-row">
-                    <input id="pg-code" type="password" inputmode="text" autocomplete="off"
-                           placeholder="Enter your code" aria-label="Early-access code">
-                    <button class="pg-btn" type="submit">Enter</button>
-                </div>
-                <p class="pg-error" id="pg-error" role="alert" hidden>That code isn't right — check it and try again.</p>
-            </form>
-            <p class="pg-foot">Norva is a media player and includes no content.</p>
-        </div>
-    </div>
-
     <!-- Sign-up advantages carousel (native app only; hidden on web). -->
     <section class="native-onboarding" aria-label="Why Norva">
         <div class="onb-track" id="onb-track">
@@ -1252,76 +1155,6 @@
         function stop() { paused = true; if (timer) { clearInterval(timer); timer = null; } }
         window.addEventListener('resize', function () { go(current, false); });
         start();
-      })();
-    </script>
-    <script>
-      // ── Pre-launch gate: countdown + early-access code check ─────────────
-      (function () {
-        var gate = document.getElementById('prelaunch-gate');
-        if (!gate) return;
-
-        // ╔═══════════════════════ OWNER CONFIG ═══════════════════════╗
-        // 1) Real launch date/time for the countdown (visitor's local time).
-        var LAUNCH_DATE = new Date('2026-08-31T18:00:00');
-        // 2) SHA-256 of the early-access code. To change the code, replace this
-        //    hash with the SHA-256 of the new code — NEVER paste the code itself
-        //    (this repo is public). Current code hash = "norva-preview-2026".
-        var CODE_HASH = 'c951bccb46398813f3d76b1f7fe440830c38931170baa6e9e1202b38dbb88323';
-        // ╚════════════════════════════════════════════════════════════╝
-
-        var gated = document.documentElement.getAttribute('data-prelaunch') === 'gated';
-
-        // Countdown — only ticks while the gate is showing.
-        var eD = document.getElementById('pg-d'), eH = document.getElementById('pg-h'),
-            eM = document.getElementById('pg-m'), eS = document.getElementById('pg-s');
-        var timer = null;
-        function pad(n) { return (n < 10 ? '0' : '') + n; }
-        function tick() {
-          var diff = LAUNCH_DATE.getTime() - Date.now();
-          if (diff < 0 || isNaN(diff)) diff = 0;
-          var s = Math.floor(diff / 1000);
-          eD.textContent = pad(Math.floor(s / 86400));
-          eH.textContent = pad(Math.floor((s % 86400) / 3600));
-          eM.textContent = pad(Math.floor((s % 3600) / 60));
-          eS.textContent = pad(s % 60);
-        }
-        if (gated) { tick(); timer = setInterval(tick, 1000); }
-
-        async function sha256hex(str) {
-          var buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
-          return Array.prototype.map.call(new Uint8Array(buf), function (b) { return ('0' + b.toString(16)).slice(-2); }).join('');
-        }
-
-        function unlock() {
-          try { localStorage.setItem('norva-prelaunch-ok', '1'); } catch (_) {}
-          if (timer) clearInterval(timer);
-          document.documentElement.setAttribute('data-prelaunch', 'open');
-          var email = document.getElementById('signin-email');
-          if (email) { try { email.focus(); } catch (_) {} }
-        }
-
-        var form = document.getElementById('pg-form');
-        var input = document.getElementById('pg-code');
-        var err = document.getElementById('pg-error');
-        var btn = form ? form.querySelector('.pg-btn') : null;
-
-        if (gated && input) { try { input.focus(); } catch (_) {} }
-
-        if (form) form.addEventListener('submit', async function (e) {
-          e.preventDefault();
-          if (err) err.hidden = true;
-          var val = (input.value || '').trim();
-          if (!val) return;
-          if (btn) btn.disabled = true;
-          var ok = false;
-          try { ok = (await sha256hex(val)) === CODE_HASH; } catch (_) { ok = false; }
-          if (btn) btn.disabled = false;
-          if (ok) { unlock(); return; }
-          if (err) err.hidden = false;
-          var card = gate.querySelector('.pg-card');
-          if (card) { card.classList.remove('pg-shake'); void card.offsetWidth; card.classList.add('pg-shake'); }
-          input.value = ''; try { input.focus(); } catch (_) {}
-        });
       })();
     </script>
 </body>
