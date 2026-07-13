@@ -12,6 +12,8 @@ class LiveGuideFusion {
         this._pendingFamilySelection = null;
         this.searchQuery = '';            // inline channel filter (phone/tablet APK)
         this._searchTimer = null;
+        this._remoteSearchTimer = null;   // debounce for the mobile all-sources server search
+        this._remoteSearchSeq = 0;        // sequence guard to drop stale remote-search responses
         this.BASE_ROW_LIMIT = 150;        // rows rendered up-front; "Show more" grows it
         this._rowLimit = this.BASE_ROW_LIMIT;
         this._cinema = false;             // cinema mode: player enlarged, guide compacted
@@ -127,6 +129,9 @@ class LiveGuideFusion {
             this._rowLimit = this.BASE_ROW_LIMIT;   // a new query starts at the base cap
             clearTimeout(this._searchTimer);
             this._searchTimer = setTimeout(() => this.refreshRows(), 100);
+            // Parity with the desktop sidebar: also fan out an all-sources server query so the
+            // guide isn't limited to the lazily-hydrated in-memory set (the "1/1"-badge symptom).
+            this.scheduleRemoteSearch(this.searchQuery);
         });
 
         // Source proxy (only shown with >1 source): forward to the real,
@@ -875,8 +880,12 @@ class LiveGuideFusion {
         if (!q) return channels;
         const list = this.app.channelList;
         return channels.filter(channel => {
-            const label = list.getChannelFamilyLabel(channel) || channel.name || '';
-            return label.toLowerCase().includes(q);
+            // Match the FULL name as well as the stripped family label — the label is only the
+            // last pipe segment with quality/noise words removed, so e.g. "M6 HD | FRANCE TNT"
+            // (label "France Tnt") would otherwise be dropped on a "m6" query even when in memory.
+            const name = channel.name || '';
+            const label = list.getChannelFamilyLabel(channel) || '';
+            return name.toLowerCase().includes(q) || label.toLowerCase().includes(q);
         });
     }
 
@@ -937,8 +946,64 @@ class LiveGuideFusion {
         this.searchQuery = '';
         this._rowLimit = this.BASE_ROW_LIMIT;
         clearTimeout(this._searchTimer);
+        // Cancel any pending/in-flight remote search and invalidate late responses (via the seq
+        // bump), so a dismissed query can't merge channels into — and re-render — the browse view.
+        clearTimeout(this._remoteSearchTimer);
+        this._remoteSearchSeq++;
         this.render();
         this.container?.querySelector('.live-guide-search')?.focus();
+    }
+
+    /**
+     * Mobile inline-search parity with the desktop sidebar.
+     *
+     * The desktop search augments the local catalog with an all-sources server query on every
+     * keystroke (ChannelList.scheduleRemoteSearch → loadRemoteSearchResults). The phone guide
+     * historically filtered ONLY the lazily-hydrated in-memory set, so a search returned whatever
+     * few channels had loaded — the "1/1 badge on every row" symptom where the same account finds
+     * 10 channels on desktop but ~3 on mobile. Mirror the desktop fan-out here.
+     *
+     * Deliberately ISOLATED from the desktop path: guards on THIS component's searchQuery + its own
+     * sequence counter (never on ChannelList.searchInput, which the phone never populates), so it
+     * neither reads nor mutates desktop search state. It only REUSES ChannelList's public helpers
+     * (shouldUseRemoteSearch / getRemoteSearchSources / remoteSearchCache / mergeRemoteSearchChannels)
+     * and the shared `channels` array, so no desktop code changes. Cloud-mode + min-length gating is
+     * inherited from shouldUseRemoteSearch, so on a non-cloud/local source it stays local-only as before.
+     */
+    scheduleRemoteSearch(term) {
+        const list = this.app?.channelList;
+        const q = (term || '').trim();
+        clearTimeout(this._remoteSearchTimer);
+        if (!list?.shouldUseRemoteSearch?.(q)) return;   // too short / not cloud mode → local filter only
+        const seq = ++this._remoteSearchSeq;
+        this._remoteSearchTimer = setTimeout(() => {
+            this.loadRemoteSearchResults(q, seq).catch(err =>
+                console.warn('[LiveGuideFusion] remote live search failed:', err));
+        }, 220);
+    }
+
+    async loadRemoteSearchResults(term, seq) {
+        const list = this.app?.channelList;
+        if (!list || seq !== this._remoteSearchSeq) return;
+        const sources = list.getRemoteSearchSources?.() || [];
+        if (!sources.length) return;
+
+        let added = 0;
+        for (const source of sources) {
+            const key = `${source.type}:${source.id}:${list.normalizeSearchText(term)}`;
+            let streams = list.remoteSearchCache.get(key);
+            if (!streams) {
+                streams = await window.API.proxy.xtream.liveStreams(source.id, null, { q: term, limit: 80 });
+                list.remoteSearchCache.set(key, streams || []);
+            }
+            // Drop stale responses: bail if the query changed/cleared while this request was in flight.
+            if (seq !== this._remoteSearchSeq || (this.searchQuery || '').trim() !== term) return;
+            added += list.mergeRemoteSearchChannels(source, streams || []);
+        }
+
+        if (!added) return;
+        list._indexedChannels = null;                    // keep the desktop search index consistent
+        if ((this.searchQuery || '').trim() === term) this.refreshRows();
     }
 
     /** "Show more" — grow the render window by one chunk, keeping scroll position. */
