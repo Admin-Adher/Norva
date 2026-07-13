@@ -48,6 +48,7 @@ const MediaUtils = (() => {
         fa: 'FA',
         sq: 'SQ',
         el: 'EL',
+        da: 'DA', no: 'NO', sv: 'SV', fi: 'FI', is: 'IS',
         original: 'VO'
     };
 
@@ -57,6 +58,7 @@ const MediaUtils = (() => {
         it: 'Italian', pt: 'Portuguese', tr: 'Turkish', nl: 'Dutch', ru: 'Russian',
         pl: 'Polish', hi: 'Hindi', ja: 'Japanese', ko: 'Korean', zh: 'Chinese',
         fa: 'Persian', sq: 'Albanian', el: 'Greek',
+        da: 'Danish', no: 'Norwegian', sv: 'Swedish', fi: 'Finnish', is: 'Icelandic',
         original: 'Original'
     };
 
@@ -272,6 +274,11 @@ const MediaUtils = (() => {
         it: 'it', ita: 'it', italian: 'it',
         tr: 'tr', tur: 'tr', turkish: 'tr',
         nl: 'nl', dut: 'nl', dutch: 'nl',
+        dk: 'da', da: 'da', dan: 'da', danish: 'da', dansk: 'da', danske: 'da',
+        no: 'no', nor: 'no', norwegian: 'no', norsk: 'no', norge: 'no',
+        se: 'sv', sv: 'sv', swe: 'sv', swedish: 'sv', svensk: 'sv', svenskt: 'sv',
+        fi: 'fi', fin: 'fi', finnish: 'fi', suomi: 'fi',
+        is: 'is', isl: 'is', icelandic: 'is',
         ru: 'ru', rus: 'ru', russian: 'ru',
         pl: 'pl', pol: 'pl', polish: 'pl',
         in: 'hi', ind: 'hi', hi: 'hi', hin: 'hi', hindi: 'hi', // India -> Hindi (best-effort)
@@ -905,6 +912,21 @@ const MediaUtils = (() => {
         }
         const firstCandidate = candidates.filter(Boolean)[0];
         if (firstCandidate) return firstCandidate;
+        // A leading region/language prefix on THIS variant's raw title ("DK - ", "IR - ",
+        // "NO - ") names the language of THIS dub — a per-variant signal. It outranks the
+        // probed audio_languages, which is stored at the TITLE level and, when a provider
+        // groups several different-language dubs under one title, leaks a sibling dub's
+        // language (e.g. the French "Mon ninja et moi" stamping {fr} onto the whole Ternet
+        // Ninja group, so the Danish/Norwegian/Persian panels wrongly read "French").
+        const rawForPrefix = String(item.raw_title || item.rawTitle || item.name || item.title || '')
+            .replace(/[▎▏▍▌│┃┆┊｜]/g, ' - '); // box-bar panels ("DK ▎ …") → hyphen so the prefix parser sees it
+        // Only a DASH/BAR-separated leading code is the IPTV region convention ("DK - ", "IR - ").
+        // A colon ("It: Chapter Two" → not Italian) or slash is normal title punctuation, not a
+        // region prefix — never let it override the probed audio.
+        const prefixLang = /^\s*[a-z0-9+]{2,6}\s*[-–—]\s+/i.test(rawForPrefix)
+            ? parseLeadingRegionTag(rawForPrefix)?.audioLang
+            : null;
+        if (prefixLang) return languageDisplayFull(prefixLang);
         // Real detected languages outrank title-parsing (the crawl fills these).
         const detected = audioLanguageBadge(
             item.audioLanguages || item.audio_languages,
