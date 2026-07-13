@@ -535,12 +535,19 @@ public class MainActivity extends Activity {
     private void openPlayer(final String url, final String title, final String sourceId,
                             final String itemType, final String itemId, final int resumeSeconds,
                             final String fallbackUrl) {
-        openPlayer(url, title, sourceId, itemType, itemId, resumeSeconds, fallbackUrl, null, null);
+        openPlayer(url, title, sourceId, itemType, itemId, resumeSeconds, fallbackUrl, null, null, null, null);
     }
 
     private void openPlayer(final String url, final String title, final String sourceId,
                             final String itemType, final String itemId, final int resumeSeconds,
                             final String fallbackUrl, final String poster, final String nextTitle) {
+        openPlayer(url, title, sourceId, itemType, itemId, resumeSeconds, fallbackUrl, poster, nextTitle, null, null);
+    }
+
+    private void openPlayer(final String url, final String title, final String sourceId,
+                            final String itemType, final String itemId, final int resumeSeconds,
+                            final String fallbackUrl, final String poster, final String nextTitle,
+                            final String variantsJson, final String activeStreamId) {
         runOnUiThread(new Runnable() {
             @Override
             public void run() {
@@ -555,6 +562,8 @@ public class MainActivity extends Activity {
                 if (resumeSeconds > 0) intent.putExtra(PlayerActivity.EXTRA_RESUME_SECONDS, resumeSeconds);
                 if (fallbackUrl != null && !fallbackUrl.isEmpty()) intent.putExtra(PlayerActivity.EXTRA_FALLBACK_URL, fallbackUrl);
                 if (nextTitle != null && !nextTitle.isEmpty()) intent.putExtra(PlayerActivity.EXTRA_NEXT_TITLE, nextTitle);
+                if (variantsJson != null && !variantsJson.isEmpty()) intent.putExtra(PlayerActivity.EXTRA_VARIANTS, variantsJson);
+                if (activeStreamId != null && !activeStreamId.isEmpty()) intent.putExtra(PlayerActivity.EXTRA_ACTIVE_VARIANT, activeStreamId);
                 startActivityForResult(intent, REQ_PLAYER);
             }
         });
@@ -566,6 +575,7 @@ public class MainActivity extends Activity {
             org.json.JSONObject o = new org.json.JSONObject(json);
             String url = o.optString("url");
             if (url.isEmpty()) return;
+            org.json.JSONArray variants = o.optJSONArray("variants");
             openPlayer(url,
                     o.optString("title", "Norva"),
                     emptyToNull(o.optString("sourceId")),
@@ -574,7 +584,9 @@ public class MainActivity extends Activity {
                     o.optInt("resumeSeconds", 0),
                     emptyToNull(o.optString("fallbackUrl")),
                     emptyToNull(o.optString("poster")),
-                    emptyToNull(o.optString("nextTitle")));
+                    emptyToNull(o.optString("nextTitle")),
+                    (variants != null && variants.length() > 1) ? variants.toString() : null,
+                    emptyToNull(o.optString("activeStreamId")));
         } catch (Exception ignored) {
             // A malformed payload simply doesn't start playback; the web side
             // falls back to the legacy fixed-signature bridge methods.
@@ -594,6 +606,21 @@ public class MainActivity extends Activity {
     protected void onActivityResult(int requestCode, int resultCode, android.content.Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode != REQ_PLAYER || data == null || webView == null) return;
+        // Viewer picked a different quality variant in the native player: ask the web to
+        // re-select it (resolves a fresh stream + relaunches native playback).
+        final String pickedVariant = data.getStringExtra("selectedVariantStreamId");
+        if (pickedVariant != null && !pickedVariant.isEmpty()) {
+            final String pickedSource = data.getStringExtra("selectedVariantSourceId");
+            final String js = "window.__norvaPlayVariant && window.__norvaPlayVariant("
+                    + jsStr(pickedVariant) + "," + jsStr(pickedSource) + ")";
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    try { webView.evaluateJavascript(js, null); } catch (Exception ignored) { }
+                }
+            });
+            return;
+        }
         final String sourceId = data.getStringExtra("sourceId");
         final String itemType = data.getStringExtra("itemType");
         final String itemId = data.getStringExtra("itemId");

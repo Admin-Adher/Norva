@@ -75,6 +75,13 @@ public class PlayerActivity extends Activity {
     public static final String EXTRA_KEY_IV = "keyIv";
     public static final String EXTRA_MEDIA_IV = "mediaIv";
     public static final String EXTRA_CONTAINER = "container";
+    // Live quality variants: JSON array of {label, streamId, sourceId} for the same
+    // logical channel + the currently-playing streamId. Present only for multi-variant
+    // live; drives the "Version" button. Picking one returns selectedVariantStreamId to
+    // MainActivity, which asks the web to re-resolve + relaunch (one gateway slot → no
+    // in-place source swap).
+    public static final String EXTRA_VARIANTS = "variants";
+    public static final String EXTRA_ACTIVE_VARIANT = "activeStreamId";
 
     // IPTV providers gate on User-Agent and REJECT a browser UA (this provider 401s
     // it). Use the VLC UA the relay/gateway use successfully — the working default
@@ -130,6 +137,8 @@ public class PlayerActivity extends Activity {
     private android.widget.ImageButton castButton;
     private LinearLayout castBar;
     private TextView castBarLabel;
+    private org.json.JSONArray variants;      // live quality variants, null for single-variant/movies
+    private String activeStreamId;            // currently-playing variant's streamId
     private String mediaTitle;
 
     private final Handler errHandler = new Handler(Looper.getMainLooper());
@@ -160,6 +169,14 @@ public class PlayerActivity extends Activity {
         streamHost = hostOf(url);
         fallbackUrl = getIntent().getStringExtra(EXTRA_FALLBACK_URL);
         isLocal = getIntent().getBooleanExtra(EXTRA_LOCAL, false);
+        activeStreamId = getIntent().getStringExtra(EXTRA_ACTIVE_VARIANT);
+        try {
+            String vj = getIntent().getStringExtra(EXTRA_VARIANTS);
+            if (vj != null && !vj.isEmpty()) {
+                org.json.JSONArray arr = new org.json.JSONArray(vj);
+                if (arr.length() > 1) variants = arr;
+            }
+        } catch (Exception ignored) { variants = null; }
 
         playerView = new PlayerView(this);
         // Black everywhere behind the video so letterbox/pillarbox and any
@@ -310,6 +327,7 @@ public class PlayerActivity extends Activity {
         // Chromecast: the receiver fetches the provider URL itself from the same
         // home network. Local (encrypted) downloads can't be cast.
         if (!isLocal) installCastSupport(root);
+        installVariantControl(root);
         // Re-apply the viewer's last subtitle choice for this title before the
         // first track selection, so it doesn't reset to the stream default.
         applySavedSubtitlePref();
@@ -724,6 +742,78 @@ public class PlayerActivity extends Activity {
      * pauses the instant the session starts, so the provider still sees a
      * single connection (the receiver's, from the same home IP).
      */
+    /**
+     * Live "Version" button (top-left): opens the quality-variant picker. Shown only when
+     * the web handed us >1 variant for this channel. Picking one returns it to MainActivity,
+     * which asks the web to re-resolve + relaunch that variant (one gateway slot → we can't
+     * swap the source in place).
+     */
+    private void installVariantControl(FrameLayout root) {
+        if (variants == null) return;
+        Button variantBtn = new Button(this);
+        variantBtn.setText(currentVariantLabel() + "  ▾");
+        variantBtn.setAllCaps(false);
+        variantBtn.setTextColor(Color.WHITE);
+        variantBtn.setBackgroundColor(Color.parseColor("#66000000"));
+        variantBtn.setContentDescription("Changer la version (qualité)");
+        variantBtn.setOnClickListener(v -> showVariantDialog());
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT,
+                Gravity.TOP | Gravity.START);
+        lp.topMargin = dp(20);
+        lp.leftMargin = dp(20);
+        root.addView(variantBtn, lp);
+    }
+
+    private String currentVariantLabel() {
+        if (variants == null) return "Version";
+        try {
+            for (int i = 0; i < variants.length(); i++) {
+                org.json.JSONObject v = variants.optJSONObject(i);
+                if (v != null && activeStreamId != null && activeStreamId.equals(v.optString("streamId")))
+                    return v.optString("label", "Version");
+            }
+        } catch (Exception ignored) { }
+        return "Version";
+    }
+
+    private void showVariantDialog() {
+        if (variants == null) return;
+        final java.util.List<String> labels = new java.util.ArrayList<>();
+        final java.util.List<String> streamIds = new java.util.ArrayList<>();
+        final java.util.List<String> sourceIds = new java.util.ArrayList<>();
+        int selected = -1;
+        try {
+            for (int i = 0; i < variants.length(); i++) {
+                org.json.JSONObject v = variants.optJSONObject(i);
+                if (v == null) continue;
+                String sid = v.optString("streamId", "");
+                if (sid.isEmpty()) continue;
+                labels.add(v.optString("label", "Variant " + (labels.size() + 1)));
+                streamIds.add(sid);
+                sourceIds.add(v.optString("sourceId", ""));
+                if (activeStreamId != null && activeStreamId.equals(sid)) selected = labels.size() - 1;
+            }
+        } catch (Exception ignored) { }
+        if (labels.size() < 2) return;
+        new android.app.AlertDialog.Builder(this, android.app.AlertDialog.THEME_DEVICE_DEFAULT_DARK)
+                .setTitle("Version")
+                .setSingleChoiceItems(labels.toArray(new String[0]), selected,
+                        new android.content.DialogInterface.OnClickListener() {
+                            @Override
+                            public void onClick(android.content.DialogInterface dialog, int which) {
+                                dialog.dismiss();
+                                if (streamIds.get(which).equals(activeStreamId)) return; // already playing
+                                android.content.Intent res = new android.content.Intent();
+                                res.putExtra("selectedVariantStreamId", streamIds.get(which));
+                                res.putExtra("selectedVariantSourceId", sourceIds.get(which));
+                                setResult(RESULT_OK, res);
+                                finish(); // MainActivity → web re-resolves + relaunches this variant
+                            }
+                        })
+                .show();
+    }
+
     private void installCastSupport(FrameLayout root) {
         castButton = new android.widget.ImageButton(this);
         castButton.setImageResource(R.drawable.ic_cast);

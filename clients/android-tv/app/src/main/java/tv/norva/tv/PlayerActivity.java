@@ -76,6 +76,14 @@ public class PlayerActivity extends Activity {
     // Next-episode label ("S2 E5 — Titre") for the end-of-stream "À suivre" overlay.
     // Absent → end-of-stream simply closes the player (movies, live).
     public static final String EXTRA_NEXT_TITLE = "nextTitle";
+    // Live quality variants: a JSON array of {label, streamId, sourceId} for the same
+    // logical channel (M6 HD/RAW/HEVC...), plus the currently-playing streamId. Present
+    // only for multi-variant live channels; drives the "Version" control. Picking one
+    // returns it to MainActivity (selectedVariantStreamId), which asks the web to
+    // re-resolve + relaunch that variant (a live gateway grants one slot, so we can't
+    // just swap the source in place).
+    public static final String EXTRA_VARIANTS = "variants";
+    public static final String EXTRA_ACTIVE_VARIANT = "activeStreamId";
 
     // IPTV providers gate on User-Agent and REJECT a browser UA (this provider 401s
     // it). Use the VLC UA the relay/gateway use successfully — the working default
@@ -140,6 +148,10 @@ public class PlayerActivity extends Activity {
 
     // End-of-stream: "À suivre" overlay (series binge) and exit reporting.
     private String nextTitle;                 // next-episode label, null for movies/live
+    private org.json.JSONArray variants;      // live quality variants, null for single-variant/movies
+    private String activeStreamId;            // currently-playing variant's streamId
+    private String pendingVariantStreamId;    // set when the viewer picks a variant → returned on finish()
+    private String pendingVariantSourceId;
     private boolean endedNaturally = false;   // reached STATE_ENDED (vs user close)
     private boolean playNextChosen = false;   // viewer picked (or countdown chose) next episode
     private boolean openEpisodesChosen = false; // viewer asked for the episode list (fiche)
@@ -217,6 +229,14 @@ public class PlayerActivity extends Activity {
         streamHost = hostOf(url);
         fallbackUrl = getIntent().getStringExtra(EXTRA_FALLBACK_URL);
         nextTitle = getIntent().getStringExtra(EXTRA_NEXT_TITLE);
+        activeStreamId = getIntent().getStringExtra(EXTRA_ACTIVE_VARIANT);
+        try {
+            String vj = getIntent().getStringExtra(EXTRA_VARIANTS);
+            if (vj != null && !vj.isEmpty()) {
+                org.json.JSONArray arr = new org.json.JSONArray(vj);
+                if (arr.length() > 1) variants = arr;
+            }
+        } catch (Exception ignored) { variants = null; }
 
         root = new FrameLayout(this);
         root.setBackgroundColor(Color.BLACK);
@@ -712,6 +732,13 @@ public class PlayerActivity extends Activity {
         sleepValue = addBarItem(R.drawable.ic_player_sleep, "Sleep", "Off", new Runnable() {
             @Override public void run() { cycleSleep(); }
         });
+        // Live-only: switch the channel's quality variant (M6 HD/RAW/HEVC...). Present
+        // only when the web handed us >1 variant.
+        if (variants != null) {
+            addBarItem(R.drawable.ic_player_quality, "Version", currentVariantLabel(), new Runnable() {
+                @Override public void run() { showVariantDialog(); }
+            });
+        }
         // Series-only shortcuts: jump to the next episode without waiting for the
         // end, and reopen the episode list (the fiche behind the player).
         if (nextTitle != null && !nextTitle.isEmpty()) {
@@ -954,6 +981,62 @@ public class PlayerActivity extends Activity {
                                 dialog.dismiss();
                                 refreshSecondBarValues();
                                 scheduleHideControls();
+                            }
+                        })
+                .show();
+    }
+
+    /** Label of the currently-playing variant (for the bar item's value line). */
+    private String currentVariantLabel() {
+        if (variants == null) return "—";
+        try {
+            for (int i = 0; i < variants.length(); i++) {
+                org.json.JSONObject v = variants.optJSONObject(i);
+                if (v != null && activeStreamId != null
+                        && activeStreamId.equals(v.optString("streamId"))) {
+                    return v.optString("label", "—");
+                }
+            }
+        } catch (Exception ignored) { }
+        return "—";
+    }
+
+    /**
+     * Pick a quality variant. We can't swap the source in place (a live gateway grants
+     * one slot), so record the choice and finish() — MainActivity forwards it to the web,
+     * which re-resolves + relaunches that variant.
+     */
+    private void showVariantDialog() {
+        if (variants == null) return;
+        final List<String> labels = new ArrayList<>();
+        final List<String> streamIds = new ArrayList<>();
+        final List<String> sourceIds = new ArrayList<>();
+        int selected = -1;
+        try {
+            for (int i = 0; i < variants.length(); i++) {
+                org.json.JSONObject v = variants.optJSONObject(i);
+                if (v == null) continue;
+                String sid = v.optString("streamId", "");
+                if (sid.isEmpty()) continue;
+                labels.add(v.optString("label", "Variant " + (labels.size() + 1)));
+                streamIds.add(sid);
+                sourceIds.add(v.optString("sourceId", ""));
+                if (activeStreamId != null && activeStreamId.equals(sid)) selected = labels.size() - 1;
+            }
+        } catch (Exception ignored) { }
+        if (labels.size() < 2) { toast("No other version"); return; }
+
+        new AlertDialog.Builder(this, AlertDialog.THEME_DEVICE_DEFAULT_DARK)
+                .setTitle("Version")
+                .setSingleChoiceItems(labels.toArray(new String[0]), selected,
+                        new DialogInterface.OnClickListener() {
+                            @Override
+                            public void onClick(DialogInterface dialog, int which) {
+                                dialog.dismiss();
+                                if (streamIds.get(which).equals(activeStreamId)) return; // already playing
+                                pendingVariantStreamId = streamIds.get(which);
+                                pendingVariantSourceId = sourceIds.get(which);
+                                finish(); // MainActivity → web re-resolves + relaunches this variant
                             }
                         })
                 .show();
@@ -1360,10 +1443,11 @@ public class PlayerActivity extends Activity {
     @Override
     public void finish() {
         try {
+            android.content.Intent data = null;
             if (player != null && itemId != null && !itemId.isEmpty()) {
                 long pos = Math.max(0, player.getCurrentPosition() / 1000);
                 long dur = player.getDuration() > 0 ? player.getDuration() / 1000 : 0;
-                android.content.Intent data = new android.content.Intent();
+                data = new android.content.Intent();
                 data.putExtra("sourceId", sourceId);
                 data.putExtra("itemType", itemType);
                 data.putExtra("itemId", itemId);
@@ -1372,8 +1456,14 @@ public class PlayerActivity extends Activity {
                 data.putExtra("ended", endedNaturally);
                 data.putExtra("playNext", playNextChosen);
                 data.putExtra("openEpisodes", openEpisodesChosen);
-                setResult(RESULT_OK, data);
             }
+            // A variant pick returns here so MainActivity can ask the web to re-select it.
+            if (pendingVariantStreamId != null && !pendingVariantStreamId.isEmpty()) {
+                if (data == null) data = new android.content.Intent();
+                data.putExtra("selectedVariantStreamId", pendingVariantStreamId);
+                data.putExtra("selectedVariantSourceId", pendingVariantSourceId);
+            }
+            if (data != null) setResult(RESULT_OK, data);
         } catch (Exception ignored) { /* result is best-effort */ }
         super.finish();
     }
