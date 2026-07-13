@@ -14667,6 +14667,120 @@ html.tv-mode #page-movies .movie-versions-list {
   grid-template-columns: 1fr;
 }
 
+/* The desktop recommendation cards use viewport percentages (16.66% at large
+   widths). Inside the narrow docked TV panel that collapses them to a few pixels.
+   Give this nested rail its own fixed 10-foot dimensions and scroll container. */
+html.tv-mode.tv-movies-active
+#page-movies.active.tv-movies-layout-ready
+#movie-details .more-like-this {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  margin: 10px 0 0;
+  padding: 0 10px 14px;
+  overflow: hidden;
+}
+
+html.tv-mode.tv-movies-active
+#page-movies.active.tv-movies-layout-ready
+#movie-details .more-like-title {
+  margin: 0 0 7px;
+  font-size: 0.82rem;
+}
+
+html.tv-mode.tv-movies-active
+#page-movies.active.tv-movies-layout-ready
+#movie-details .more-like-grid {
+  display: flex !important;
+  flex-flow: row nowrap !important;
+  align-items: flex-start;
+  gap: 8px;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  padding: 4px 3px 10px;
+  overflow-x: auto !important;
+  overflow-y: hidden;
+  scroll-padding-inline: 3px;
+  scroll-snap-type: x proximity;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+
+html.tv-mode.tv-movies-active
+#page-movies.active.tv-movies-layout-ready
+#movie-details .more-like-grid::-webkit-scrollbar {
+  display: none;
+}
+
+html.tv-mode.tv-movies-active
+#page-movies.active.tv-movies-layout-ready
+#movie-details .more-like-grid > .tv-more-like-card,
+html.tv-mode.tv-movies-active
+#page-movies.active.tv-movies-layout-ready
+#movie-details .more-like-grid > .dashboard-card,
+html.tv-mode.tv-movies-active
+#page-movies.active.tv-movies-layout-ready
+#movie-details .more-like-grid > .movie-card,
+html.tv-mode.tv-movies-active
+#page-movies.active.tv-movies-layout-ready
+#movie-details .more-like-grid > .series-card,
+html.tv-mode.tv-movies-active
+#page-movies.active.tv-movies-layout-ready
+#movie-details .more-like-grid > .watch-recommended-card {
+  position: relative;
+  flex: 0 0 clamp(96px, 38%, 112px) !important;
+  width: clamp(96px, 38%, 112px) !important;
+  min-width: 96px !important;
+  max-width: 112px !important;
+  scroll-snap-align: start;
+  transform: none;
+}
+
+html.tv-mode.tv-movies-active
+#page-movies.active.tv-movies-layout-ready
+#movie-details .more-like-grid .card-image,
+html.tv-mode.tv-movies-active
+#page-movies.active.tv-movies-layout-ready
+#movie-details .more-like-grid .movie-poster {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 2 / 3;
+}
+
+html.tv-mode.tv-movies-active
+#page-movies.active.tv-movies-layout-ready
+#movie-details .more-like-grid .card-info,
+html.tv-mode.tv-movies-active
+#page-movies.active.tv-movies-layout-ready
+#movie-details .more-like-grid .movie-info {
+  padding: 5px;
+}
+
+html.tv-mode.tv-movies-active
+#page-movies.active.tv-movies-layout-ready
+#movie-details .more-like-grid .card-title,
+html.tv-mode.tv-movies-active
+#page-movies.active.tv-movies-layout-ready
+#movie-details .more-like-grid .movie-title {
+  font-size: 0.68rem;
+}
+
+html.tv-mode.tv-movies-active
+#page-movies.active.tv-movies-layout-ready
+#movie-details .more-like-grid .movie-meta {
+  display: none;
+}
+
+html.tv-mode.tv-movies-active
+#page-movies.active.tv-movies-layout-ready
+#movie-details .more-like-grid > :focus {
+  outline: none !important;
+  transform: translateY(-1px);
+  box-shadow: inset 0 0 0 2px #fff, 0 0 0 2px #2387ff !important;
+}
+
 /* Android TV reports a coarse pointer, so explicitly beat the late touch rule. */
 @media (pointer: coarse) {
   html.tv-mode #page-movies .tv-movies-filter-row .btn,
