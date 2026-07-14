@@ -154,7 +154,15 @@ Deno.serve(async (req: Request) => {
   console.error(`serving the request with ${servicePath}`)
 
   const memoryLimitMb = 150
-  const workerTimeoutMs = 1 * 60 * 1000
+  // Must comfortably exceed the sync engine's per-isolate work budget
+  // (SYNC_DRIVE_BUDGET_MS = 90s in _shared/xtream-sync.ts, and the 90s finalize
+  // loop deadline in norva-source-sync). Those loops run ~90s of work and THEN
+  // self-invoke the next isolate; if the worker is recycled before that hand-off
+  // lands, the discover/finalize chain breaks and the watchdog re-runs the same
+  // slice forever (observed on a 275k catalogue: "wall clock duration warning"
+  // every minute, finalize frozen on building_titles). 60s < 90s was the bug.
+  // 180s = 90s budget + margin for a slow final batch + the self-invoke fetch.
+  const workerTimeoutMs = 3 * 60 * 1000
   const noModuleCache = false
   const importMapPath = null
   const envVarsObj = Deno.env.toObject()
