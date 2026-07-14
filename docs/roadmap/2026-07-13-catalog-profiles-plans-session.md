@@ -125,6 +125,29 @@ Revue de santé du serveur (box `norva-db`, pg_cron) + audit de l'avancement du 
 
 ---
 
+## 12. Regroupement des films multi-langues (`4315891`, `760f227`, `5854b8c`)
+
+**Symptôme** : un même film apparaissait en plusieurs fiches — « Lilo & Stitch » regroupait 24 versions mais les variantes Polish/English/Español faisaient bande à part. La recherche montrait le film deux fois, avec des comptes « N versions » faux.
+
+**Deux bugs indépendants, un par étage :**
+
+**(1) Client — `groupItems` (`mediaUtils.js` v13→v14, `4315891`)** : la fonction ne lisait que `item.tmdb_id`, mais la grille Films sérialise l'id TMDB matché sous `provider_tmdb_id`/`providerTmdbId` (seuls recherche + rails d'accueil hoistent un `tmdb_id` plat). → la branche forte `t:` était **morte sur la grille**, chaque variante localisée retombait sur un slug de nom et fragmentait. Correctif : lire tous les alias (`tmdb_id` > `provider_tmdb_id` > `providerTmdbId` > `tmdb.id`), garde sur les sentinelles no-match `'0'`/`'tt0'`. **8/8 headless** (Node/vm). Déjà **live** sur norva.tv.
+
+**(2) Serveur — re-key + merge (`760f227`, reload PostgREST `5854b8c`)** : `cronSearchMatch` (norva-source-sync) stampe un `provider_tmdb_id` sur les titres autrefois `unmatched` **sans re-clé** l'`identity_key` → une copie localisée matchée garde sa clé `norm:<slug>` et cohabite avec la ligne canonique `tmdb:<id>` au lieu de fusionner. La dédup one-shot de juin (`20260623220000`) n'avait tourné **qu'une fois** ; chaque match depuis refragmentait. Correctif :
+- Nouvelle fonction `public.dedupe_cloud_titles_by_tmdb(p_user uuid default null)` (SECURITY DEFINER, `grant … to service_role`) : généralise la fusion de juin (remplir les trous canoniques, re-pointer les variantes, supprimer les doublons, recalculer les rollups) + **lone-row promote** (re-clé un match unique `norm:`→`tmdb:<id>` pour que la variante suivante se replie), garde `NOT EXISTS` contre la contrainte unique. **Idempotente**. `NOTIFY pgrst` en fin pour que `db.rpc()` la voie sans redémarrer `rest`.
+- `cronSearchMatch` l'appelle **scopée par compte** après chaque batch → auto-guérison en continu.
+
+**Réparation globale (à l'apply, box)** : **54 298 titres en double repliés + 21 367 re-clés** vers `tmdb:<id>`. La fragmentation touchait des dizaines de milliers de fiches accumulées depuis juin.
+
+**Vérif** : Postgres 16 jetable + le vrai trigger de rollup, tous les cas assertés (fusion localisée, non-matché tmdb null → séparé, sentinelle, collision unique bloquée, isolation `p_user`, 2ᵉ run `(0,0)`, aucune variante perdue). `deno check` propre.
+
+### Réutilisable (box : `docker exec -i norva-db psql -U postgres -d postgres`)
+- **Nettoyage global à la demande** : `SELECT public.dedupe_cloud_titles_by_tmdb();` (idempotent, no-op si propre).
+- **Un seul compte** : `SELECT public.dedupe_cloud_titles_by_tmdb('<user_uuid>');`.
+- **Appliquer une migration SQL** (host sans psql) : `docker exec -i norva-db psql -U postgres -d postgres -v ON_ERROR_STOP=1 < supabase/migrations/<fichier>.sql`.
+
+---
+
 ## ⚠️ À NE PAS OUBLIER (ops)
 
 1. ✅ **Edge redéployé** (#5 `norva-cloud`, #8/#9 `norva-lifecycle`) — fait cette session via `git pull` + recréation du conteneur `functions`. Tout lifecycle reste OFF. ⚠️ **Le revert `72a541d` du mode `limits` n'est pas encore sur la box** — à récupérer au prochain `git pull` + `up -d functions` (sans effet de comportement : la box est en `enforce`, qui n'utilise pas la branche `limits`). Rappel : `restart` recharge le **code** mais pas les **nouvelles vars d'env** → pour tout `NORVA_LC_*`/`NORVA_ENTITLEMENTS_MODE`, il faut `docker compose --env-file ops/hetzner/.env -f ops/hetzner/docker-compose.supabase.yml up -d functions` (recréer).
@@ -132,7 +155,7 @@ Revue de santé du serveur (box `norva-db`, pg_cron) + audit de l'avancement du 
 3. **Activer le lifecycle plus tard** : jamais `EXPIRE` sans `DUNNING` (couperait sans avertir). Combo `NORVA_LIFECYCLE_BILLING_LIVE=true` + `NORVA_LC_DUNNING=true` (+ `NORVA_LC_EXPIRE=true`), puis **recréer** le conteneur (`up -d functions`, pas restart). Prérequis : cron `norva-lifecycle` enregistré, `RESEND_API_KEY` + expéditeur `norva.tv` vérifié.
 
 ## Versions d'assets finales
-`tvNavigation.js` v17 · `main.css` v78 · `profiles.js` v9 · (`api.js` v70, `cloudApi.js` v47, `ChannelList.js` v43, `LiveGuideFusion.js` v27, `WatchPage.js` v117 inchangés depuis le log précédent).
+`tvNavigation.js` v17 · `main.css` v78 · `profiles.js` v9 · `mediaUtils.js` **v14** (regroupement TMDB, §12) · (`api.js` v70, `cloudApi.js` v47, `ChannelList.js` v43, `LiveGuideFusion.js` v27, `WatchPage.js` v117 inchangés depuis le log précédent).
 
 ## Harnais headless (scratchpad de session, non versionnés)
 `ms-nav-harness.html` + `ms-nav-test.js` (26/26 nav Movies/Séries), `prof-harness.html` + `prof-measure.js` (7/7 no-scroll) + `prof-lock-test.js` (7/7 verrouillage). Chromium `/opt/pw-browsers/chromium-1194`, Playwright `/opt/node22/lib/node_modules/playwright`.
