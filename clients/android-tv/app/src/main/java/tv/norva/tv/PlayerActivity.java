@@ -187,11 +187,20 @@ public class PlayerActivity extends Activity {
         public void run() { hideControls(); }
     };
 
+    // H1 fix: the native player otherwise hands back a position only on graceful
+    // finish(), so a power-off / standby / crash mid-playback loses the whole
+    // session. We persist the live position to SharedPreferences on a ~10s
+    // heartbeat and on onPause/onStop; MainActivity flushes any pending position
+    // to cloud history on its next foreground (see flushPendingNativeProgress).
+    private long lastProgressPersistMs = 0L;
+    private boolean gracefulResultEmitted = false;
+
     private final Runnable tick = new Runnable() {
         @Override
         public void run() {
             updateProgress();
             updateClock();
+            maybePersistProgress(false);
             handler.postDelayed(this, 500);
         }
     };
@@ -1497,6 +1506,56 @@ public class PlayerActivity extends Activity {
     }
 
     /**
+     * Persist the live position to SharedPreferences so a non-graceful exit
+     * (standby, power-off, OOM, crash) doesn't lose the session. Throttled to
+     * ~10s unless forced (onPause/onStop). Best-effort — never throws into the
+     * player. Skipped once finish() has emitted an authoritative result.
+     */
+    private void maybePersistProgress(boolean force) {
+        try {
+            if (gracefulResultEmitted) return;
+            if (player == null || itemId == null || itemId.isEmpty()) return;
+            long now = android.os.SystemClock.elapsedRealtime();
+            if (!force && now - lastProgressPersistMs < 10000L) return;
+            long pos = Math.max(0, player.getCurrentPosition() / 1000);
+            if (pos <= 0) return;
+            long dur = player.getDuration() > 0 ? player.getDuration() / 1000 : 0;
+            lastProgressPersistMs = now;
+            getSharedPreferences("norva", MODE_PRIVATE).edit()
+                    .putString("pending_progress_sourceId", sourceId == null ? "" : sourceId)
+                    .putString("pending_progress_itemType", itemType == null ? "" : itemType)
+                    .putString("pending_progress_itemId", itemId)
+                    .putLong("pending_progress_pos", pos)
+                    .putLong("pending_progress_dur", dur)
+                    .apply();
+        } catch (Exception ignored) { /* progress persistence is best-effort */ }
+    }
+
+    private void clearPendingProgress() {
+        try {
+            getSharedPreferences("norva", MODE_PRIVATE).edit()
+                    .remove("pending_progress_sourceId")
+                    .remove("pending_progress_itemType")
+                    .remove("pending_progress_itemId")
+                    .remove("pending_progress_pos")
+                    .remove("pending_progress_dur")
+                    .apply();
+        } catch (Exception ignored) { }
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        maybePersistProgress(true);
+    }
+
+    @Override
+    protected void onStop() {
+        super.onStop();
+        maybePersistProgress(true);
+    }
+
+    /**
      * Hand the final position back to MainActivity (which persists it to the
      * cloud history for cross-device resume). Called on every exit path: Back,
      * end-of-stream, and the sleep timer.
@@ -1517,6 +1576,10 @@ public class PlayerActivity extends Activity {
                 data.putExtra("ended", endedNaturally);
                 data.putExtra("playNext", playNextChosen);
                 data.putExtra("openEpisodes", openEpisodesChosen);
+                // Graceful exit: onActivityResult will persist this position, so drop
+                // any heartbeat-pending copy and stop onPause/onStop re-persisting.
+                gracefulResultEmitted = true;
+                clearPendingProgress();
             }
             // A variant pick returns here so MainActivity can ask the web to re-select it.
             if (pendingVariantStreamId != null && !pendingVariantStreamId.isEmpty()) {
