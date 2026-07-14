@@ -34,7 +34,7 @@ Ce runbook centralise la configuration des tags publicitaires et analytics Norva
 - **Refuser** → rien ne se charge, aucun événement.
 - Le choix est mémorisé dans `localStorage` (clé `norva_consent`) ; le bandeau ne réapparaît plus après un choix.
 - Sécurité : `consentMode` vaut `denied` par défaut, donc **aucun tag ne peut se déclencher avant un consentement explicite**, même si `enabled` est `true`.
-- Changer d'avis / ré-ouvrir le bandeau : appeler `NorvaConsent.reset()` (par ex. depuis un lien « Manage cookies » sur la page privacy). `NorvaConsent.get()` renvoie le choix courant (`'granted'` / `'denied'` / `null`).
+- Changer d'avis / ré-ouvrir le bandeau : un lien discret **« Manage cookies »** dans *Settings › Privacy & legal* (page `app.html`) appelle `NorvaConsent.open()`. Sont aussi exposés `NorvaConsent.reset()` (efface le choix et repasse en `denied`) et `NorvaConsent.get()` (renvoie `'granted'` / `'denied'` / `null`).
 
 ## Ajouter ou mettre à jour un ID
 
