@@ -2606,16 +2606,17 @@ video::cue {
 .norva-setup-sync-embedded {
   position: relative;
   display: grid;
-  min-height: calc(100dvh - 92px);
+  height: calc(100dvh - 92px);
+  min-height: 560px;
   width: 100%;
   max-width: 100%;
   inline-size: 100%;
   max-inline-size: 100%;
   box-sizing: border-box;
-  grid-template-columns: minmax(260px, 0.48fr) minmax(0, 1fr);
-  gap: clamp(20px, 3vw, 48px);
+  grid-template-columns: minmax(220px, 0.42fr) minmax(0, 1fr);
+  gap: clamp(14px, 2.4vw, 36px);
   align-items: center;
-  padding: clamp(26px, 4vh, 54px) clamp(18px, 3vw, 44px);
+  padding: clamp(14px, 2.2vh, 34px) clamp(16px, 2.8vw, 44px);
   background:
     linear-gradient(135deg, rgba(20, 52, 112, 0.88), rgba(11, 16, 31, 0.96)),
     var(--color-bg-primary);
@@ -2659,23 +2660,23 @@ video::cue {
   max-width: 640px;
   color: var(--color-text-primary);
   font-family: var(--font-display, inherit);
-  font-size: clamp(2.05rem, 4.4vw, 4.7rem);
-  line-height: 0.98;
+  font-size: clamp(2rem, 4vw, 4.35rem);
+  line-height: 0.94;
   letter-spacing: 0;
 }
 
 .norva-setup-sync-copy p {
   max-width: 520px;
-  margin: 0 0 var(--space-lg);
+  margin: 0 0 clamp(14px, 2vh, var(--space-lg));
   color: var(--color-text-secondary);
-  font-size: clamp(1rem, 1.35vw, 1.24rem);
-  line-height: 1.5;
+  font-size: clamp(0.96rem, 1.18vw, 1.16rem);
+  line-height: 1.42;
 }
 
 .norva-setup-sync-panel {
   width: 100%;
   min-width: 0;
-  max-width: min(700px, 100%);
+  max-width: min(900px, 100%);
   align-self: center;
   justify-self: stretch;
   overflow: hidden;
@@ -2698,21 +2699,28 @@ video::cue {
 
 .norva-setup-sync-panel .source-sync-hero p {
   max-width: 100%;
-  overflow-wrap: anywhere;
+  overflow-wrap: normal;
+  word-break: normal;
 }
 
 .norva-setup-sync-panel .source-sync-hero p,
 .norva-setup-sync-panel .source-sync-step span,
 .norva-setup-sync-panel .source-sync-card span {
-  overflow-wrap: anywhere;
+  overflow-wrap: normal;
+  word-break: normal;
 }
 
 .norva-setup-sync-panel .source-sync-step {
-  gap: clamp(12px, 1.7vh, 18px);
+  gap: clamp(8px, 1.2vh, 14px);
 }
 
 .norva-setup-sync-panel .source-sync-hero {
-  padding: clamp(18px, 2.6vw, 28px);
+  padding: clamp(14px, 2.1vw, 24px);
+  border-color: rgba(96, 165, 250, 0.28);
+  background:
+    radial-gradient(circle at 18% 0%, rgba(96, 165, 250, 0.28), transparent 36%),
+    linear-gradient(135deg, rgba(37, 99, 235, 0.2), rgba(15, 23, 42, 0.54));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.06);
 }
 
 .norva-setup-sync-panel .source-sync-hero h3 {
@@ -2721,12 +2729,15 @@ video::cue {
 
 .norva-setup-sync-panel .source-sync-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: clamp(10px, 1.5vw, 14px);
+  gap: clamp(8px, 1.2vw, 12px);
 }
 
 .norva-setup-sync-panel .source-sync-card {
-  min-height: 104px;
-  padding: clamp(14px, 2vw, 18px);
+  min-height: clamp(76px, 12vh, 102px);
+  padding: clamp(12px, 1.7vw, 18px);
+  border-color: rgba(148, 163, 184, 0.18);
+  background: linear-gradient(180deg, rgba(17, 24, 39, 0.86), rgba(10, 16, 31, 0.78));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
 }
 
 .norva-setup-sync-panel .source-sync-card strong {
@@ -2736,15 +2747,37 @@ video::cue {
   font-variant-numeric: tabular-nums;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-size: clamp(1.7rem, 2.8vw, 2.35rem);
+  font-size: clamp(1.45rem, 2.45vw, 2.2rem);
   line-height: 1;
   font-variant-numeric: tabular-nums;
 }
 
 .norva-setup-sync-panel .source-sync-timeline {
-  max-height: min(34vh, 310px);
-  overflow: auto;
-  padding-right: 4px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  max-height: none;
+  overflow: hidden;
+  padding-right: 0;
+}
+
+.norva-setup-sync-panel .source-sync-milestone {
+  min-height: 56px;
+  padding: clamp(8px, 1.1vh, 11px) clamp(10px, 1.3vw, 14px);
+}
+
+.norva-setup-sync-panel .source-sync-milestone small,
+.norva-setup-sync-panel .source-sync-found-note,
+.norva-setup-sync-panel .source-sync-notify-note {
+  font-size: clamp(0.78rem, 0.92vw, 0.9rem);
+  line-height: 1.28;
+}
+
+.norva-setup-sync-panel .source-sync-notify-note {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid rgba(96, 165, 250, 0.18);
+  border-radius: var(--radius-md);
+  background: rgba(37, 99, 235, 0.1);
 }
 
 /* Source Sections */
@@ -16192,4 +16225,54 @@ html.tv-mode .watch-live-badge.is-live .live-badge-dot {
    thousands of resting cards would waste GPU memory on weak TVs). */
 html.tv-mode :is(.movie-card, .series-card, .dashboard-card, .channel-tile):focus {
   will-change: transform;
+}
+
+
+/* Compact, no-crop catalog preparation layout */
+@media (max-height: 720px) and (min-width: 901px) {
+  #page-home.home-setup-active .norva-setup-sync-embedded {
+    min-height: 0;
+    grid-template-columns: minmax(200px, 0.38fr) minmax(0, 1fr);
+    padding-block: 10px;
+  }
+
+  #page-home.home-setup-active .norva-setup-sync-copy h1 {
+    font-size: clamp(1.8rem, 3.3vw, 3.2rem);
+    margin-bottom: 8px;
+  }
+
+  #page-home.home-setup-active .norva-setup-sync-copy p {
+    font-size: 0.95rem;
+    line-height: 1.32;
+    margin-bottom: 12px;
+  }
+
+  #page-home.home-setup-active .norva-setup-sync-panel .source-sync-hero {
+    padding: 12px 16px;
+  }
+
+  #page-home.home-setup-active .norva-setup-sync-panel .source-sync-hero h3 {
+    margin-block: 6px 4px;
+  }
+
+  #page-home.home-setup-active .norva-setup-sync-panel .source-sync-card {
+    min-height: 72px;
+  }
+
+  #page-home.home-setup-active .norva-setup-sync-panel .source-sync-found-note {
+    display: none;
+  }
+}
+
+@media (max-width: 900px), (max-height: 620px) {
+  #page-home.home-setup-active .norva-setup-sync-embedded {
+    height: auto;
+    min-height: calc(100dvh - 92px);
+    align-content: start;
+  }
+
+  #page-home.home-setup-active .norva-setup-sync-panel .source-sync-timeline {
+    grid-template-columns: minmax(0, 1fr);
+    overflow: visible;
+  }
 }
