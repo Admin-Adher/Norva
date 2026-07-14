@@ -2551,14 +2551,33 @@ async function getHistoryItem(req: Request, url: URL, userId: string, db: Supaba
   );
   const sourceId = stringOrNull(url.searchParams.get("sourceId") ?? url.searchParams.get("source_id"));
   if (!itemId || !itemType) throw new HttpError(400, "itemId and itemType are required");
-  let q = db
+
+  const cols = "source_id,item_type,item_id,progress_seconds,duration_seconds,completed,updated_at";
+  const base = () => db
     .from("cloud_watch_history")
-    .select("source_id,item_type,item_id,progress_seconds,duration_seconds,completed,updated_at")
+    .select(cols)
     .eq("profile_id", profileId)
     .eq("item_type", itemType)
     .eq("item_id", itemId);
-  q = sourceId ? q.eq("source_id", sourceId) : q.is("source_id", null);
-  const { data, error } = await q.maybeSingle();
+
+  // 1) Preferred: the row saved under the requested source.
+  if (sourceId) {
+    const { data, error } = await base().eq("source_id", sourceId).maybeSingle();
+    if (error) throwDb(error, "Unable to load history item");
+    if (data) return { item: data };
+  }
+
+  // 2) Fallback: the same title under ANY source (most-recent). This keeps
+  //    cross-device resume working when the physical source id changes — a user
+  //    renewing/re-adding their line gets a fresh source uuid, and the reaper's
+  //    FK (on delete set null) orphans the old rows to source_id=null. Without
+  //    this fallback those rows become invisible to the per-title resume read
+  //    and the position is silently lost. Scoped to the same profile + exact
+  //    item, so it never leaks across accounts.
+  const { data, error } = await base()
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
   if (error) throwDb(error, "Unable to load history item");
   return { item: data ?? null };
 }
