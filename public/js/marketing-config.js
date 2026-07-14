@@ -9,7 +9,7 @@ window.NORVA_MARKETING_CONFIG = window.NORVA_MARKETING_CONFIG || {
   googleAds: {
     conversionId: 'AW-18272881286',
     conversions: {
-      signup: '',
+      signup: '68jMCPyoq9AcEIaVmIlE',
       beginCheckout: '',
       trialStart: '',
       purchase: ''
