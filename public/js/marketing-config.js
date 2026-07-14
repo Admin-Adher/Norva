@@ -1,6 +1,6 @@
 window.NORVA_MARKETING_CONFIG = window.NORVA_MARKETING_CONFIG || {
   enabled: false,
-  consentMode: 'granted',
+  consentMode: 'denied',
   debug: false,
   googleAnalytics: {
     measurementId: 'G-2Z7P4LRR1T',
