@@ -129,6 +129,8 @@
     .success p { color: var(--muted); font-size: 15px; line-height: 1.6; margin-bottom: 20px; }
     .back-row { margin-top: 16px; }
   </style>
+  <script src="/js/marketing-config.js?v=1"></script>
+  <script defer src="/js/marketing.js?v=1"></script>
 </head>
 <body>
   <script>
@@ -407,6 +409,26 @@
             "Payment received — we're finalizing your account. It will be reflected within a minute.";
         }
         success.classList.add('show');
+        if (window.NorvaMarketing && typeof window.NorvaMarketing.track === 'function') {
+          const amount = Number(displayPrice || 0);
+          if (checkoutKind === 'trial_setup') {
+            window.NorvaMarketing.track('start_trial', {
+              currency: 'USD',
+              value: amount,
+              plan: plan,
+              period: period,
+              transaction_id: orderId || currentOrderId || undefined
+            });
+          } else if (checkoutKind === 'resubscribe') {
+            window.NorvaMarketing.track('purchase', {
+              currency: 'USD',
+              value: amount,
+              plan: plan,
+              period: period,
+              transaction_id: orderId || currentOrderId || undefined
+            });
+          }
+        }
         try { document.getElementById('continue-btn').focus(); } catch (_) {}
       }
 
@@ -419,6 +441,15 @@
         let data;
         try {
           data = await window.NorvaBilling.revolutCreateOrder({ plan, period, returnTo, intent });
+          if (window.NorvaMarketing && typeof window.NorvaMarketing.track === 'function') {
+            window.NorvaMarketing.track('begin_checkout', {
+              currency: 'USD',
+              value: Number(displayPrice || 0),
+              plan: plan,
+              period: period,
+              checkout_kind: data.kind || intent || 'trial_setup'
+            });
+          }
         } catch (e) {
           loading.classList.add('hide');
           if (e && e.code === 'not_signed_in') {

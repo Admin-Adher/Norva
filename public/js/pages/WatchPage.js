@@ -1610,47 +1610,40 @@ class WatchPage {
         const position = Math.max(0, Math.floor(this.getPlaybackPosition() || 0));
         let toreDown = false;
         try {
-            const wasEngine = this.currentPlaybackMode === 'engine';
-            // Only hand the receiver a URL its player can actually decode.
-            let castUrl = (!wasEngine && this.isCastSafeDirectUrl(this.baseStreamUrl))
-                ? this.baseStreamUrl
-                : null;
+            // First show the device picker while local playback is still intact.
+            // If the viewer cancels, nothing is interrupted. Once a receiver is
+            // chosen, build a fresh HLS session specifically for Cast: connected
+            // TVs fetch media outside the browser, and reusing the local
+            // video/relay session is fragile on single-connection IPTV accounts.
+            await NorvaCast.requestSession();
             try { this.video?.pause(); } catch (_) { }
 
-            if (!castUrl) {
-                // Engine (MSE) title, or a container the receiver can't play: free the
-                // provider slot, then resolve a gateway transcode playlist from here.
-                toreDown = true;
-                await this.releasePlaybackPipelineForRetry();
-                await this.waitForProviderSlotRelease(800);
-                const itemType = this.content.type === 'series' ? 'series' : 'movie';
-                const result = await API.proxy.xtream.getStreamUrl(
-                    this.content.sourceId, this.content.id, itemType,
-                    this.containerExtension || 'mp4',
-                    {
-                        gatewayMode: 'transcode', audioMode: 'transcode',
-                        ...this.getSelectedAudioPlaybackOptions(),
-                        seekOffset: position, startOffset: position, resumeTime: position
-                    });
-                if (!result?.url || !/^https?:\/\//i.test(result.url)) {
-                    throw new Error('No castable stream URL');
-                }
-                castUrl = result.url;
-                this._castBaseOffset = position; // playlist time 0 == this absolute position
-            } else {
-                this._castBaseOffset = this.streamStartOffset || 0;
+            toreDown = true;
+            await this.releasePlaybackPipelineForRetry();
+            await this.waitForProviderSlotRelease(900);
+            const itemType = this.content.type === 'series' ? 'series' : 'movie';
+            const result = await API.proxy.xtream.getStreamUrl(
+                this.content.sourceId, this.content.id, itemType,
+                this.containerExtension || 'mp4',
+                {
+                    gatewayMode: 'transcode', audioMode: 'transcode',
+                    ...this.getSelectedAudioPlaybackOptions(),
+                    seekOffset: position, startOffset: position, resumeTime: position
+                });
+            if (!result?.url || !/^https?:\/\//i.test(result.url)) {
+                throw new Error('No castable stream URL');
             }
+            const castUrl = result.url;
+            this._castBaseOffset = position; // playlist time 0 == this absolute position
 
             const device = await NorvaCast.castMedia({
                 url: castUrl,
                 title: [this.content.title, this.content.subtitle].filter(Boolean).join(' — '),
                 poster: this.content.poster,
-                currentTime: toreDown ? 0 : Math.max(0, position - (this._castBaseOffset || 0)),
+                currentTime: 0,
                 live: false,
                 subtitles: this.getCastSubtitles(castUrl)
             });
-            // The receiver now owns the provider slot — release local playback fully.
-            if (!toreDown) { try { await this.releasePlaybackPipelineForRetry(); } catch (_) { } }
             this.hideLoading();
             // _castConfirmed is set by updateCastBar once a live session is observed,
             // so a transient not-yet-STARTED tick can't auto-stop us here.
