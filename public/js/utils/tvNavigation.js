@@ -99,11 +99,21 @@
         return details && !isTvSplitPanel(details) ? details : document;
     }
 
+    // Per-keydown memo of the candidate scan. A single arrow press can call findNext
+    // 2-3 times (e.g. Left runs the TILE check then the rail guard), each re-scanning
+    // up to 400 nodes with getBoundingClientRect + getComputedStyle. Caching the scan
+    // for the duration of ONE synchronous keydown collapses those to a single pass.
+    // The cache is reset at keydown start and dropped on a microtask right after the
+    // handler unwinds, so no later (page-entry / observer / focus-restore) caller can
+    // ever read stale rects. null = nothing cached.
+    let candCache = null;
+
     // Single layout pass: measure each candidate's rect ONCE and keep it alongside
     // the element, so findNext can score without a second getBoundingClientRect().
     // rects[i] corresponds to els[i]. Filtering/order/400-cap are identical to the
     // old getCandidates (the inlined offset + rect checks equal isVisible(el)).
     function getCandidatesWithRects() {
+        if (candCache) return candCache;
         const scope = navScope();
         const all = scope.querySelectorAll(INTERACTIVE_SELECTOR);
         const els = [];
@@ -124,18 +134,22 @@
             // action / .series-secondary-action — a different class — and stays.)
             if (el.classList.contains('favorite-btn') || el.classList.contains('version-badge')) continue;
             if (!el.offsetParent && el.offsetWidth === 0 && el.offsetHeight === 0) continue;
+            const rect = el.getBoundingClientRect();
+            if (!isVisibleRect(rect)) continue;
             // Skip elements painted invisible (opacity:0 / visibility:hidden) — e.g. the
             // per-row favourite heart and the search clear-×. isVisibleRect only tests
             // size/viewport, so without this the D-pad ring can land on nothing.
+            // getComputedStyle forces a style resolution, so it runs ONLY after the
+            // rect test — i.e. for the handful of on-screen candidates, not every one
+            // of the up-to-400 off-screen grid cards (the dominant per-press cost).
             const cs = getComputedStyle(el);
             if (cs.opacity === '0' || cs.visibility === 'hidden') continue;
-            const rect = el.getBoundingClientRect();
-            if (!isVisibleRect(rect)) continue;
             els.push(el);
             rects.push(rect);
             if (els.length >= 400) break;
         }
-        return { els, rects };
+        candCache = { els, rects };
+        return candCache;
     }
 
     function getCandidates() {
@@ -247,6 +261,18 @@
         return canMovePage ? page : null;
     }
 
+    // D-pad "burst" detection. A held key on Android TV WebView emits discrete
+    // keydowns (KeyboardEvent.repeat is unreliable), and every move calls
+    // scrollIntoView/scrollBy. With behavior:'smooth' each press restarts an
+    // animation before the previous settles, so the weak GPU animates continuously
+    // and focus feels laggy. While presses arrive rapidly we scroll INSTANTLY
+    // ('auto') so there is no animation to stack; an isolated, deliberate press
+    // still gets the polished 'smooth'. navBurst is refreshed on each arrow keydown.
+    let lastNavKeyAt = 0;
+    let navBurst = false;
+    const NAV_BURST_MS = 250;
+    function navScrollBehavior() { return navBurst ? 'auto' : 'smooth'; }
+
     function scrollActivePage(direction, focused = null) {
         const target = findVerticalScroller(focused, direction);
         if (!target) return false;
@@ -254,7 +280,7 @@
         const amount = Math.max(220, Math.round(target.clientHeight * 0.65));
         const top = direction === 'ArrowDown' ? amount : -amount;
         const before = target.scrollTop;
-        target.scrollBy({ top, behavior: 'smooth' });
+        target.scrollBy({ top, behavior: navScrollBehavior() });
 
         return target.scrollHeight > target.clientHeight && (
             direction === 'ArrowDown'
@@ -303,11 +329,18 @@
         const from = centerOf(card);
         let best = null, bestScore = Infinity;
         for (const c of grid.querySelectorAll('.movie-card, .series-card')) {
-            if (c === card || !isVisible(c)) continue;
-            const p = centerOf(c);
-            const dy = from.y - p.y;                            // > 0 when c is above
+            if (c === card) continue;
+            // One rect per card: derive BOTH the visibility test and the center from a
+            // single getBoundingClientRect, instead of isVisible()+centerOf() each
+            // reading their own rect (halves the layout reads across the whole grid).
+            if (!c.offsetParent && c.offsetWidth === 0 && c.offsetHeight === 0) continue;
+            const r = c.getBoundingClientRect();
+            if (!isVisibleRect(r)) continue;
+            const px = r.left + r.width / 2;
+            const py = r.top + r.height / 2;
+            const dy = from.y - py;                             // > 0 when c is above
             if (dy <= 4) continue;
-            const score = dy + Math.abs(p.x - from.x) * 3;      // same column first, nearest row
+            const score = dy + Math.abs(px - from.x) * 3;       // same column first, nearest row
             if (score < bestScore) { bestScore = score; best = c; }
         }
         return best;
@@ -459,8 +492,9 @@
         }
         el.focus({ preventScroll: true });
         // inline:'center' keeps the focused card centered as the D-pad walks a
-        // horizontal rail (instead of leaving it stuck against an edge).
-        el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'smooth' });
+        // horizontal rail (instead of leaving it stuck against an edge). Instant
+        // during a held-key burst so overlapping smooth scrolls don't jank the TV.
+        el.scrollIntoView({ block: 'center', inline: 'center', behavior: navScrollBehavior() });
     }
 
     function currentFocus() {
@@ -550,6 +584,22 @@
         const isArrow = arrows.includes(e.key);
         const isEnter = e.key === 'Enter';
         if (!isArrow && !isEnter) return;
+
+        // Refresh the held-key burst flag so this move's scroll (focusElement /
+        // scrollActivePage) is instant when presses are coming fast, smooth when
+        // isolated. Only arrows drive scrolling, so only they update the cadence.
+        if (isArrow) {
+            const now = e.timeStamp || (typeof performance !== 'undefined' ? performance.now() : 0);
+            navBurst = (now - lastNavKeyAt) < NAV_BURST_MS;
+            lastNavKeyAt = now;
+        }
+
+        // Start this keydown with a fresh candidate scan, and guarantee the memo is
+        // dropped once the (synchronous) handler unwinds — a microtask fires before
+        // any later task, so nothing outside this keypress can read stale rects.
+        candCache = null;
+        if (typeof queueMicrotask === 'function') queueMicrotask(() => { candCache = null; });
+        else Promise.resolve().then(() => { candCache = null; });
 
         const focused = currentFocus();
 

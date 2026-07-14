@@ -1915,10 +1915,10 @@ class MoviesPage {
         return null;
     }
 
-    getMovieBackdrop(movie = this.currentMovie) {
+    getMovieBackdrop(movie = this.currentMovie, size = 'w1280') {
         return this.getTmdbImageUrl(
             movie?.backdrop_path || movie?.tmdb?.backdrop_path || movie?.backdrop || movie?.tmdb?.backdrop,
-            'w1280'
+            size
         ) || this.getMoviePoster(movie);
     }
 
@@ -2438,8 +2438,10 @@ class MoviesPage {
 
         const hero = document.getElementById('movie-detail-hero');
         const poster = this.getMoviePoster(displayMovie);
-        const backdrop = this.getMovieBackdrop(displayMovie);
-        if (hero) hero.style.setProperty('--movie-hero-bg', `url("${String(backdrop).replace(/"/g, '%22')}")`);
+        // A smaller backdrop for the TV panel: it's a modest split-view hero, so a w780
+        // image decodes far cheaper than w1280 on the weak TV GPU (indistinguishable at
+        // that size). The web/mobile fullscreen fiche keeps w1280.
+        const backdrop = this.getMovieBackdrop(displayMovie, isTv ? 'w780' : 'w1280');
 
         const posterEl = document.getElementById('movie-detail-poster');
         if (posterEl) {
@@ -2447,11 +2449,36 @@ class MoviesPage {
             // placeholder, not render a broken-image icon. Clear srcset (the browser
             // prefers it over src) so the fallback actually shows.
             posterEl.onerror = () => { posterEl.onerror = null; posterEl.removeAttribute('srcset'); posterEl.src = '/img/norva-media-placeholder.png'; };
-            posterEl.removeAttribute('srcset');
-            // The TV panel uses the cinematic backdrop as its square/landscape hero.
-            // Web and mobile keep the canonical portrait poster.
-            posterEl.src = isTv && backdrop ? backdrop : poster;
+            posterEl.setAttribute('decoding', 'async');  // never block a D-pad move on decode
             posterEl.alt = this.getMovieDisplayTitle(displayMovie);
+        }
+
+        // The backdrop (CSS hero background + the panel poster <img>, which on TV IS the
+        // cinematic backdrop) is the single most expensive per-preview cost: a large
+        // image the weak TV GPU must fetch, decode and upload. During a D-pad sweep the
+        // focused card changes several times a second, so on a TV PREVIEW we DEBOUNCE the
+        // image swap — only the card the user settles on decodes an image. A momentarily
+        // stale backdrop is purely cosmetic (it never affects focus or the panel's
+        // buttons/labels, which are updated synchronously below), so this is safe even if
+        // the user steps into the panel before it lands. URL guards skip redundant work.
+        const heroBg = `url("${String(backdrop).replace(/"/g, '%22')}")`;
+        const posterSrc = isTv && backdrop ? backdrop : poster;
+        const applyBackdrop = () => {
+            if (hero && this._lastHeroBg !== heroBg) {
+                hero.style.setProperty('--movie-hero-bg', heroBg);
+                this._lastHeroBg = heroBg;
+            }
+            if (posterEl && this._lastPosterSrc !== posterSrc) {
+                posterEl.removeAttribute('srcset');
+                posterEl.src = posterSrc;
+                this._lastPosterSrc = posterSrc;
+            }
+        };
+        if (this._previewBackdropTimer) { clearTimeout(this._previewBackdropTimer); this._previewBackdropTimer = null; }
+        if (isTvPreview) {
+            this._previewBackdropTimer = setTimeout(() => { this._previewBackdropTimer = null; applyBackdrop(); }, 110);
+        } else {
+            applyBackdrop();
         }
 
         const titleEl = document.getElementById('movie-detail-title');

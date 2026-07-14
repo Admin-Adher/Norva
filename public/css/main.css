@@ -12130,9 +12130,10 @@ mark.search-highlight {
   justify-content: flex-start;
   gap: 2px;
   padding: 26px 0 18px;             /* fits brand + 5 items + utilities in 480px */
-  background: rgba(10, 10, 15, 0.92);
-  -webkit-backdrop-filter: blur(18px);
-  backdrop-filter: blur(18px);
+  /* No backdrop-filter on TV: a fixed 100vh blur layer keeps a live GPU filter pass
+     running during every grid scroll for a near-invisible effect (bg is ~opaque).
+     A solid 0.96 bg looks identical and drops the permanent compositing cost. */
+  background: rgba(10, 10, 15, 0.96);
   border-bottom: none;
   border-right: 1px solid var(--glass-border);
   overflow: hidden;                 /* clip labels while collapsed */
@@ -12259,10 +12260,12 @@ mark.search-highlight {
 .tv-mode .search-result:focus,
 .tv-mode .watch-recommended-card:focus {
   outline: none !important;
+  /* Crisp inset ring only — NO large-radius outer blur. A soft box-shadow is a
+     non-composited paint op the weak TV GPU must re-rasterize on every D-pad
+     focus move; the inset rings give the same "selected" read for ~free. */
   box-shadow:
     inset 0 0 0 3px #ffffff,
-    inset 0 0 0 6px rgba(0, 0, 0, 0.55),
-    0 10px 28px rgba(0, 0, 0, 0.55) !important;
+    inset 0 0 0 6px rgba(0, 0, 0, 0.55) !important;
 }
 .tv-mode .dashboard-card:focus,
 .tv-mode .continue-card:focus {
@@ -12274,6 +12277,16 @@ mark.search-highlight {
 .tv-mode .search-result:focus,
 .tv-mode .watch-recommended-card:focus {
   border-radius: var(--radius-md) !important;
+}
+
+/* The base .movie-card/.series-card rule transitions box-shadow over 0.2s. On TV
+   the card LOSING focus reverts to that rule and re-rasterizes its (inset) shadow
+   every frame for 200ms per keypress. Drop box-shadow from the transition on TV so
+   the ring snaps — imperceptible at 10ft, and it removes a per-move repaint storm.
+   Specificity (0,2,0) beats the base card rule (0,1,0). */
+.tv-mode .movie-card,
+.tv-mode .series-card {
+  transition: transform 0.12s ease;
 }
 
 /* Rail scroll-arrows are for mouse users; on TV the D-pad scrolls, and on WebViews
@@ -12875,7 +12888,9 @@ html.tv-mode #page-live .search-clear {
 .tv-mode .movies-grid:focus-within .movie-card:not(:focus),
 .tv-mode .series-grid:focus-within .series-card:not(:focus) {
   opacity: 0.62;
-  transition: opacity 0.15s ease;
+  /* No opacity transition on TV: animating it repaints the two swapping cards for
+     150ms on every D-pad move (they aren't layer-promoted). Snapping the dim keeps
+     the "ring pops" look with a single repaint instead of ~9 frames. */
 }
 
 /* TV viewports sit far away: slightly larger base text */
@@ -15444,10 +15459,11 @@ html.tv-mode #page-movies #movies-grid .movie-card.tv-preview-active {
   border-color: rgba(113, 173, 255, 0.92);
   border-radius: 9px !important;
   transform: translateY(-1px);
+  /* Crisp 0-blur rings only (see the generic focus rule) — the 22px blue glow was a
+     costly per-move repaint on the TV GPU; the solid accent ring reads the same. */
   box-shadow:
     inset 0 0 0 2px #fff,
-    0 0 0 2px #2387ff,
-    0 8px 22px rgba(0, 80, 255, 0.34) !important;
+    0 0 0 2px #2387ff !important;
 }
 
 /* Continue Watching stays directly below the filters. The controller toggles
