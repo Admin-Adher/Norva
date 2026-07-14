@@ -14010,7 +14010,14 @@ html.tv-mode .navbar,
 html.tv-mode .navbar:focus-within {
   width: var(--tv-nav-compact-width);
   padding: 20px 0 14px;
-  background: rgba(8, 10, 17, 0.97);
+  /* Fully opaque + NO backdrop blur on TV: the base .navbar sets backdrop-filter:
+     blur(12px) and this override previously only changed the background (0.97 alpha),
+     so a fixed 100vh rail kept running a GPU blur pass EVERY frame during every scroll
+     and focus move — the single biggest always-on cost on weak TV GPUs. Solid bg lets
+     the browser skip the pass entirely. */
+  background: rgba(8, 10, 17, 1);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
   transition: background 0.15s ease;
 }
 
@@ -14449,8 +14456,10 @@ html.tv-mode #page-series .genre-bucket-grid .series-card.tv-preview-active {
   border-color: rgba(113, 173, 255, 0.92);
   border-radius: 9px !important;
   transform: translateY(-1px);
-  box-shadow: inset 0 0 0 2px #fff, 0 0 0 2px #2387ff,
-    0 8px 22px rgba(0, 80, 255, 0.34) !important;
+  /* Hard-edge rings only — the former third layer (0 8px 22px blurred glow) forced a
+     22px-blur repaint on EVERY D-pad move across the Series grid. The inset white +
+     hard blue ring read identically at 10 feet and cost no blur. */
+  box-shadow: inset 0 0 0 2px #fff, 0 0 0 2px #2387ff !important;
 }
 
 html.tv-mode #page-series .series-grid.rail-host {
@@ -16017,4 +16026,47 @@ html.tv-launch-ready .tv-launch-screen {
 @keyframes tvLaunchDrift {
   from { transform: translate3d(-1.5%, -1%, 0) rotate(-1deg); }
   to { transform: translate3d(1.5%, 1%, 0) rotate(1deg); }
+}
+
+/* ============================================================================
+   TV navigation fluidity — kill per-frame / per-focus GPU paint on weak TV GPUs
+   (perf audit 2026-07-14, docs/architecture). backdrop-filter (blur) and infinite
+   box-shadow animations are the dominant cost during D-pad navigation on Android
+   TV; each is visually near-identical at 10 feet once the surface is near-solid.
+   Scoped to html.tv-mode so web/mobile keep the glass. Placed last so it wins.
+   ============================================================================ */
+
+/* Per-poster badges: many tiny blur passes per card during rail scroll + focus scale. */
+html.tv-mode :is(.home-card-badge, .home-card-language-badge, .version-badge, .version-language-badge) {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* Fiche/hero glass meta-pills: re-blur on every fiche live-preview focus move + hero crossfade. */
+html.tv-mode :is(.movie-meta-pills span, .series-meta-pills span) {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  background: rgba(22, 26, 36, 0.92) !important;
+}
+html.tv-mode .home-hero-reason {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* Player track / episode menus: blur the DECODING video plane every frame while open. */
+html.tv-mode :is(.watch-audio-menu, .watch-captions-menu, .watch-episodes-menu) {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  background: rgba(20, 22, 30, 0.98) !important;
+}
+
+/* Live-edge dot: infinite box-shadow pulse = 60fps non-composited repaint while controls up. */
+html.tv-mode .watch-live-badge.is-live .live-badge-dot {
+  animation: none !important;
+}
+
+/* Give the focused card its own compositor layer only WHILE focused (not idle — promoting
+   thousands of resting cards would waste GPU memory on weak TVs). */
+html.tv-mode :is(.movie-card, .series-card, .dashboard-card, .channel-tile):focus {
+  will-change: transform;
 }
