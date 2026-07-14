@@ -86,6 +86,9 @@ public class MainActivity extends Activity {
 
     private FrameLayout  root;
     private WebView      webView;
+    // True once the web app finished loading and its __norvaNative bridge exists, so a
+    // pending native-progress flush only fires against a ready page (see onPageFinished).
+    private volatile boolean webAppReady = false;
     private LinearLayout setupPanel;
     private LinearLayout advancedPanel;
     private EditText     urlInput;
@@ -285,6 +288,13 @@ public class MainActivity extends Activity {
             public void onPageFinished(WebView view, String url) {
                 loadHandler.removeCallbacks(loadTimeout);
                 hideSplash();
+                webAppReady = true;
+                // Flush any position the native player persisted before a non-graceful
+                // exit or an offline session. Small delay lets standalone.js install
+                // window.__norvaNative before we call onProgress.
+                view.postDelayed(new Runnable() {
+                    @Override public void run() { flushPendingNativeProgress(); }
+                }, 1500);
             }
 
             @Override
@@ -929,6 +939,46 @@ public class MainActivity extends Activity {
                 try { webView.evaluateJavascript(jsEnded, null); } catch (Exception ignored) { }
             });
         }
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (webAppReady) flushPendingNativeProgress();
+    }
+
+    /**
+     * H1 / offline recovery: the native PlayerActivity persists its live position to
+     * SharedPreferences on onPause/onStop (online AND offline). When it exits without a
+     * graceful online result (background/standby/kill, or any downloaded-title play,
+     * which is launched without a result), that position is stranded; here we relay it
+     * to the web app's onProgress bridge (which writes cloud history), then consume it.
+     * Guarded on webAppReady so a cold-start onResume doesn't drop the record.
+     */
+    private void flushPendingNativeProgress() {
+        try {
+            if (!webAppReady || webView == null) return;
+            SharedPreferences p = prefs();
+            String itemId = p.getString("pending_progress_itemId", null);
+            if (itemId == null || itemId.isEmpty()) return;
+            final String sourceId = p.getString("pending_progress_sourceId", "");
+            final String itemType = p.getString("pending_progress_itemType", "");
+            final long pos = p.getLong("pending_progress_pos", 0);
+            final long dur = p.getLong("pending_progress_dur", 0);
+            p.edit()
+                    .remove("pending_progress_sourceId").remove("pending_progress_itemType")
+                    .remove("pending_progress_itemId").remove("pending_progress_pos")
+                    .remove("pending_progress_dur").apply();
+            if (pos <= 0) return;
+            final String js = "window.__norvaNative && window.__norvaNative.onProgress("
+                    + jsStr(sourceId) + "," + jsStr(itemType) + "," + jsStr(itemId) + "," + pos + "," + dur + ")";
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    try { if (webView != null) webView.evaluateJavascript(js, null); } catch (Exception ignored) { }
+                }
+            });
+        } catch (Exception ignored) { /* flush is best-effort */ }
     }
 
     private static String jsStr(String value) {

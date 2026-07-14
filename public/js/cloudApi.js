@@ -844,7 +844,11 @@
         const send = () => fetch(`${baseUrl}${path}`, {
             method,
             headers,
-            body: body === undefined || body === null ? undefined : JSON.stringify(body)
+            body: body === undefined || body === null ? undefined : JSON.stringify(body),
+            // keepalive lets a small write (the history exit flush on pagehide /
+            // backgrounding) outlive the page instead of being cancelled with it.
+            // Scoped to callers that opt in; history payloads are ~1-2 KB (<<64 KB cap).
+            ...(options.keepalive ? { keepalive: true } : {})
         });
 
         let response = await send();
@@ -1094,7 +1098,12 @@
         history: {
             list: (params = {}) => cachedGet('hist:' + JSON.stringify(params || {}), HISTORY_TTL_MS,
                 () => request('GET', `/history${query(params)}`)),
-            save: (item) => request('POST', '/history', item).then((r) => { invalidateCache('hist'); return r; }),
+            // Targeted single-title lookup (?itemId&itemType[&sourceId]) → { item } for
+            // cross-device resume-to-position. Same 'hist:' cache prefix as list so a
+            // save() invalidates it too. Params differ (itemId present) so no key clash.
+            getItem: (params = {}) => cachedGet('hist:' + JSON.stringify(params || {}), HISTORY_TTL_MS,
+                () => request('GET', `/history${query(params)}`)),
+            save: (item) => request('POST', '/history', item, { keepalive: true }).then((r) => { invalidateCache('hist'); return r; }),
             remove: (id) => request('DELETE', `/history/${encodeURIComponent(id)}`).then((r) => { invalidateCache('hist'); return r; })
         },
 
@@ -1197,7 +1206,11 @@
             history: {
                 list: (params = {}) => cachedGet('hist:' + JSON.stringify(params || {}), HISTORY_TTL_MS,
                     () => request('GET', `/device/history${query(params)}`, null, { token: getDeviceToken() })),
-                save: (item) => request('POST', '/device/history', item, { token: getDeviceToken() }).then((r) => { invalidateCache('hist'); return r; }),
+                // Targeted single-title lookup for a QR-paired screen (TV) — same cloud
+                // row as web/phone, reached with the device token. Returns { item }.
+                getItem: (params = {}) => cachedGet('hist:' + JSON.stringify(params || {}), HISTORY_TTL_MS,
+                    () => request('GET', `/device/history${query(params)}`, null, { token: getDeviceToken() })),
+                save: (item) => request('POST', '/device/history', item, { token: getDeviceToken(), keepalive: true }).then((r) => { invalidateCache('hist'); return r; }),
                 remove: (id) => request('DELETE', `/device/history/${encodeURIComponent(id)}`, null, { token: getDeviceToken() }).then((r) => { invalidateCache('hist'); return r; })
             }
         }

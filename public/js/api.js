@@ -1948,6 +1948,23 @@ const CloudAdapter = (() => {
         const hist = cloudSync('history');
         if (!hist) return method === 'GET' ? [] : { success: true };
         if (method === 'GET') {
+            // Targeted per-title cross-device resume read (?itemId&itemType[&sourceId]).
+            // WatchPage._fetchServerResumePosition expects { item } — the edge's
+            // getHistoryItem returns exactly that. Resolve the local sourceId to the
+            // cloud uuid first (mirrors the POST/favorites paths). Older/self-hosted
+            // backends that ignore itemId return a list; { item: null } → resume 0.
+            const rawItemId = query.get('itemId') || query.get('item_id');
+            if (rawItemId) {
+                const itemTypeCloud = cloudTypeFromLocal(query.get('itemType') || query.get('type') || 'movie');
+                const cloudSourceId = query.get('sourceId') ? await resolveSourceId(query.get('sourceId')) : null;
+                const payload = await hist.getItem({
+                    itemId: String(rawItemId),
+                    itemType: itemTypeCloud,
+                    ...(cloudSourceId ? { sourceId: cloudSourceId } : {})
+                });
+                const row = payload && !Array.isArray(payload) ? payload.item : null;
+                return { item: row ? mapHistory(row) : null };
+            }
             const itemType = query.get('itemType') ? cloudTypeFromLocal(query.get('itemType')) : '';
             const payload = await hist.list({ limit: query.get('limit') || 200, ...(itemType ? { itemType } : {}) });
             return (payload.history || []).map(mapHistory);

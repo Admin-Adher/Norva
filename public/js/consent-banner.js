@@ -109,7 +109,25 @@
     (document.body || document.documentElement).appendChild(el);
   }
 
+  /*
+   * TV surfaces (Norva Android TV app, Tizen/LG/other smart-TV browsers, a
+   * QR-paired TV screen) can't comfortably operate a consent banner with a
+   * remote, and the consent choice is made on web/mobile. On a TV we therefore
+   * skip the banner entirely and default consent to 'granted'. Detection is UA-
+   * based plus the cloud-pair device hint; phones are intentionally excluded.
+   */
+  function isTvSurface() {
+    try {
+      var ua = navigator.userAgent || '';
+      if (/NorvaTV-AndroidTV/i.test(ua)) return true;
+      if (/\b(Android\s?TV|SmartTV|Smart-TV|Tizen|Web0S|WebOS|NetCast|BRAVIA|CrKey|GoogleTV|HbbTV|AFT[A-Z]{2,})\b/i.test(ua)) return true;
+      if (/[?&#]device=tv\b/i.test(location.search + location.hash)) return true;
+    } catch (e) { /* default to non-TV */ }
+    return false;
+  }
+
   function init() {
+    if (isTvSurface()) { apply('granted'); return; } // TV: consent handled on web/mobile → default granted, no banner
     var stored = read();
     if (stored) { apply(stored); return; } // returning visitor: honour the saved choice silently
     if (!cfg.enabled) return;               // marketing disabled: nothing to consent to yet

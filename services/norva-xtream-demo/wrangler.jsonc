@@ -1,0 +1,13 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "norva-xtream-demo",
+  "main": "src/index.js",
+  "compatibility_date": "2026-06-18",
+  // Public workers.dev URL so Norva's media gateway / edge can reach it as a
+  // normal Xtream provider. TEST ONLY — serves one CC BY 3.0 movie.
+  "workers_dev": true,
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 0.1
+  }
+}

@@ -435,6 +435,18 @@
 
         if (window.WatchPage) {
             WatchPage.prototype.play = async function (content, streamUrl, playback) {
+                // Cross-device resume backfill for the native player. It only receives
+                // content.resumeTime, which comes from the loaded Continue-Watching
+                // window; when that is 0 (deep link, title outside the window, or a
+                // second device) recover the saved position from the server so native
+                // TV/phone resume like the web player. Best-effort, only when needed.
+                let effectiveResume = Math.max(0, Math.floor(Number(content.resumeTime) || 0));
+                if (effectiveResume <= 0 && typeof this._fetchServerResumePosition === 'function') {
+                    try {
+                        const serverPos = await this._fetchServerResumePosition(content);
+                        if (Number(serverPos) > 0) effectiveResume = Math.floor(Number(serverPos));
+                    } catch (_) { /* best-effort */ }
+                }
                 try {
                     const meta = contentMeta(content);
                     if (meta) {
@@ -459,7 +471,7 @@
                         id: content.id,
                         type: historyType(content),
                         sourceId: content.sourceId,
-                        progress: Math.max(0, Math.floor(Number(content.resumeTime) || 0)),
+                        progress: effectiveResume,
                         duration: Math.max(0, Math.floor(Number(content.durationHint) || 0)),
                         data: {
                             title: content.title,
@@ -478,7 +490,7 @@
                 // fallbackUrl: the resolver payload carries it for the movie/series
                 // path; the restore-after-refresh path passes it as the 3rd arg.
                 const fallbackUrl = resolved.fallbackUrl || (playback && playback.fallbackUrl) || null;
-                nativePlay(resolved.url, nativeTitle(content), contentMeta(content), content.resumeTime, fallbackUrl, {
+                nativePlay(resolved.url, nativeTitle(content), contentMeta(content), effectiveResume, fallbackUrl, {
                     poster: content.poster || '',
                     nextTitle: content.nextEpisodeLabel || ''
                 });

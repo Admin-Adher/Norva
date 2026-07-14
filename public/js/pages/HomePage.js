@@ -825,7 +825,7 @@ class HomePage {
                             <label for="home-source-name">Service name <span class="label-optional">(optional)</span></label>
                             <input type="text" id="home-source-name" class="form-input setup-form-input" placeholder="Family TV" autocomplete="off">
                         </div>
-                        <details class="source-advanced-login setup-manual-login" id="home-source-advanced" open>
+                        <details class="source-advanced-login setup-manual-login" id="home-source-advanced">
                             <summary>Enter server login manually</summary>
                             <p class="setup-form-hint">Auto-filled when a complete link is pasted above.</p>
                             <div class="setup-manual-grid">

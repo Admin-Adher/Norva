@@ -8,6 +8,8 @@
         "start": "node server/index.js",
         "dev": "node --watch server/index.js",
         "verify:region": "node scripts/verify-region-model.js",
+        "blog:build": "node scripts/blog/build-blog.js",
+        "blog:validate": "node scripts/blog/validate-corpus.js",
         "hash:assets": "node scripts/hash-asset-versions.js",
         "minify:css": "node scripts/minify-css.js",
         "inline:css": "node scripts/inline-css.js",
