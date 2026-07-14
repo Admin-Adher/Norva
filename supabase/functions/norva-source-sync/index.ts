@@ -871,7 +871,7 @@ async function cronSearchMatch(db: SupabaseClient, limit: number, reset: boolean
   const retryBefore = new Date(Date.now() - 90 * 24 * 3600 * 1000).toISOString();
   let q = db
     .from("cloud_titles")
-    .select("id, user_id, item_type, title, original_title, release_year, metadata, poster_url, backdrop_url")
+    .select("id, item_type, title, original_title, release_year, metadata, poster_url, backdrop_url")
     .eq("match_status", "unmatched")
     .gt("variant_count", 0) // only spend TMDB calls on titles a user can actually browse/play
     .or(`search_match_attempted_at.is.null,search_match_attempted_at.lt.${retryBefore}`)
@@ -896,9 +896,6 @@ async function cronSearchMatch(db: SupabaseClient, limit: number, reset: boolean
   const maxId = String(rows![rows!.length - 1].id);
   let next = 0;
   let matched = 0;
-  // Accounts whose backlog just gained a provider_tmdb_id — used below to fold the
-  // freshly-matched (still name-keyed) rows onto their canonical tmdb:<id> row.
-  const matchedUsers = new Set<string>();
   const worker = async () => {
     while (next < rows!.length) {
       const row = rows![next++];
@@ -924,28 +921,18 @@ async function cronSearchMatch(db: SupabaseClient, limit: number, reset: boolean
             searchMatchedAt: new Date().toISOString(),
           },
         }).eq("id", row.id);
-        if (!upErr) {
-          matched += 1;
-          if (row.user_id) matchedUsers.add(String(row.user_id));
-        }
+        if (!upErr) matched += 1;
       } catch (_) { /* a TMDB hiccup must not abort the batch */ }
     }
   };
   await Promise.all(Array.from({ length: Math.min(Math.max(1, concurrency), rows!.length) }, worker));
 
-  // Re-key + merge each freshly-matched account. cronSearchMatch stamped a
-  // provider_tmdb_id on rows the projection had keyed by NAME (identity_source
-  // 'normalized'), so a localized copy that just matched ("Lilo i Stitch",
-  // TMDB 552524) still carries its norm: key and sits beside the canonical
-  // tmdb:552524 row. dedupe_cloud_titles_by_tmdb folds it in (moves variants,
-  // deletes the dup) and promotes lone matches to tmdb:<id> so the NEXT localized
-  // variant collapses too. Scoped per user, so it only scans that account's titles.
-  // Best-effort: a dedupe hiccup must never fail an otherwise-successful match pass.
-  for (const uid of matchedUsers) {
-    try {
-      await db.rpc("dedupe_cloud_titles_by_tmdb", { p_user: uid });
-    } catch (_) { /* best-effort hygiene */ }
-  }
+  // Note: match-driven merge + grid propagation are NOT done here. Once a title gains
+  // a provider_tmdb_id, the reconcile pipeline folds it in: norva_canonicalize_titles_for_user
+  // merges the cloud_titles that share the tmdb, and norva_backfill_media_identity re-keys the
+  // raw cloud_media_items dedup_key so the Movies grid collapses. Both run in the
+  // norva-catalog-reconcile cron (0-6h). Keeping search-match single-purpose avoids the
+  // grid-layer coupling and the per-user RPC fan-out that would risk the 120s cron timeout.
 
   const scannedIds = rows!.map((r) => String(r.id));
   const attemptedAt = new Date().toISOString();
