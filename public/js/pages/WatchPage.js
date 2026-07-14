@@ -199,7 +199,8 @@ class WatchPage {
 
         // Next episode
         this.nextEpisodeTimeout = null;
-        this.nextEpisodeCountdown = 10;
+        this.nextEpisodeCountdownDefault = 15;
+        this.nextEpisodeCountdown = this.nextEpisodeCountdownDefault;
         this.nextEpisodeInterval = null;
         this.nextEpisodeShowing = false;
         this.nextEpisodeDismissed = false;
@@ -1610,47 +1611,40 @@ class WatchPage {
         const position = Math.max(0, Math.floor(this.getPlaybackPosition() || 0));
         let toreDown = false;
         try {
-            const wasEngine = this.currentPlaybackMode === 'engine';
-            // Only hand the receiver a URL its player can actually decode.
-            let castUrl = (!wasEngine && this.isCastSafeDirectUrl(this.baseStreamUrl))
-                ? this.baseStreamUrl
-                : null;
+            // First show the device picker while local playback is still intact.
+            // If the viewer cancels, nothing is interrupted. Once a receiver is
+            // chosen, build a fresh HLS session specifically for Cast: connected
+            // TVs fetch media outside the browser, and reusing the local
+            // video/relay session is fragile on single-connection IPTV accounts.
+            await NorvaCast.requestSession();
             try { this.video?.pause(); } catch (_) { }
 
-            if (!castUrl) {
-                // Engine (MSE) title, or a container the receiver can't play: free the
-                // provider slot, then resolve a gateway transcode playlist from here.
-                toreDown = true;
-                await this.releasePlaybackPipelineForRetry();
-                await this.waitForProviderSlotRelease(800);
-                const itemType = this.content.type === 'series' ? 'series' : 'movie';
-                const result = await API.proxy.xtream.getStreamUrl(
-                    this.content.sourceId, this.content.id, itemType,
-                    this.containerExtension || 'mp4',
-                    {
-                        gatewayMode: 'transcode', audioMode: 'transcode',
-                        ...this.getSelectedAudioPlaybackOptions(),
-                        seekOffset: position, startOffset: position, resumeTime: position
-                    });
-                if (!result?.url || !/^https?:\/\//i.test(result.url)) {
-                    throw new Error('No castable stream URL');
-                }
-                castUrl = result.url;
-                this._castBaseOffset = position; // playlist time 0 == this absolute position
-            } else {
-                this._castBaseOffset = this.streamStartOffset || 0;
+            toreDown = true;
+            await this.releasePlaybackPipelineForRetry();
+            await this.waitForProviderSlotRelease(900);
+            const itemType = this.content.type === 'series' ? 'series' : 'movie';
+            const result = await API.proxy.xtream.getStreamUrl(
+                this.content.sourceId, this.content.id, itemType,
+                this.containerExtension || 'mp4',
+                {
+                    gatewayMode: 'transcode', audioMode: 'transcode',
+                    ...this.getSelectedAudioPlaybackOptions(),
+                    seekOffset: position, startOffset: position, resumeTime: position
+                });
+            if (!result?.url || !/^https?:\/\//i.test(result.url)) {
+                throw new Error('No castable stream URL');
             }
+            const castUrl = result.url;
+            this._castBaseOffset = position; // playlist time 0 == this absolute position
 
             const device = await NorvaCast.castMedia({
                 url: castUrl,
                 title: [this.content.title, this.content.subtitle].filter(Boolean).join(' — '),
                 poster: this.content.poster,
-                currentTime: toreDown ? 0 : Math.max(0, position - (this._castBaseOffset || 0)),
+                currentTime: 0,
                 live: false,
                 subtitles: this.getCastSubtitles(castUrl)
             });
-            // The receiver now owns the provider slot — release local playback fully.
-            if (!toreDown) { try { await this.releasePlaybackPipelineForRetry(); } catch (_) { } }
             this.hideLoading();
             // _castConfirmed is set by updateCastBar once a live session is observed,
             // so a transient not-yet-STARTED tick can't auto-stop us here.
@@ -4769,13 +4763,13 @@ class WatchPage {
             // Only proceed if we have reliable duration data
             if (duration >= 180 && currentTime >= 120) {
                 const timeRemaining = duration - currentTime;
-                const creditsThreshold = 10; // seconds before end to show "Up Next"
+                const creditsThreshold = 28; // Netflix-like: appear during credits, not at the final frame
 
                 if (timeRemaining <= creditsThreshold && timeRemaining > 0) {
                     const nextEp = this.getNextEpisode();
                     if (nextEp) {
                         this.nextEpisodeShowing = true;
-                        this.showNextEpisodePanel(nextEp);
+                        this.showNextEpisodePanel(nextEp, { autoCountdown: true });
                     }
                 }
             }
@@ -8884,8 +8878,12 @@ class WatchPage {
 
     showNextEpisodePanel(nextEp, options = {}) {
         if (!this.nextEpisodePanel) return;
+        clearInterval(this.nextEpisodeInterval);
+        this.nextEpisodeInterval = null;
 
         const autoCountdown = options.autoCountdown !== false;
+        this.nextEpisodePanel.classList.toggle('no-countdown', !autoCountdown);
+        this.nextEpisodePanel.setAttribute('aria-hidden', 'false');
         this.nextEpisodeTitle.textContent = `S${nextEp.seasonNum} E${nextEp.episode_num} - ${nextEp.title || `Episode ${nextEp.episode_num}`}`;
         // Richer panel (Netflix parity): a still, a one-line synopsis, and the
         // Cancel button reads "Watch Credits" so dismissing is an explicit choice.
@@ -8908,15 +8906,16 @@ class WatchPage {
         this.nextEpisodePanel.classList.remove('hidden');
         this.nextEpisodePanel.nextEpisodeData = nextEp;
 
-        this.nextEpisodeCountdown = 10;
-        if (this.nextCountdown) {
-            this.nextCountdown.textContent = autoCountdown ? this.nextEpisodeCountdown : '';
+        this.nextEpisodeCountdown = this.nextEpisodeCountdownDefault;
+        this.updateNextCountdownVisual(autoCountdown);
+        if (!autoCountdown) {
+            try { this.nextPlayNowBtn?.focus?.({ preventScroll: true }); } catch (_) { }
+            return;
         }
-        if (!autoCountdown) return;
 
         this.nextEpisodeInterval = setInterval(() => {
             this.nextEpisodeCountdown--;
-            this.nextCountdown.textContent = this.nextEpisodeCountdown;
+            this.updateNextCountdownVisual(true);
 
             if (this.nextEpisodeCountdown <= 0) {
                 this.playNextEpisode({ auto: true });
@@ -8924,10 +8923,34 @@ class WatchPage {
         }, 1000);
     }
 
+    updateNextCountdownVisual(show) {
+        if (!this.nextCountdown) return;
+        if (!show) {
+            this.nextCountdown.hidden = true;
+            this.nextCountdown.setAttribute('aria-label', 'Autoplay disabled');
+            return;
+        }
+        this.nextCountdown.hidden = false;
+        const remaining = Math.max(0, this.nextEpisodeCountdown || 0);
+        const total = Math.max(1, this.nextEpisodeCountdownDefault || 15);
+        const pct = Math.max(0, Math.min(100, (remaining / total) * 100));
+        this.nextCountdown.style.setProperty('--next-progress', pct + '%');
+        const num = this.nextCountdown.querySelector('.next-countdown-num');
+        const label = this.nextCountdown.querySelector('.next-countdown-label');
+        if (num) num.textContent = String(remaining);
+        else this.nextCountdown.textContent = String(remaining);
+        if (label) label.textContent = remaining === 1 ? 'sec' : 'secs';
+        this.nextCountdown.setAttribute('aria-label', `Playing next episode in ${remaining} seconds`);
+    }
+
     async playNextEpisode(options = {}) {
         // From the end-of-episode panel if present, else resolve live (the
         // persistent "next" button). cancel clears the panel data, so read first.
         const nextEp = this.nextEpisodePanel?.nextEpisodeData || this.getNextEpisode();
+        if (!nextEp) {
+            this.cancelNextEpisode();
+            return;
+        }
         // "Are you still watching?" — after several UNINTERRUPTED auto-plays,
         // pause the binge and ask, so a title doesn't stream to an empty room all
         // night. A manual Play (button/shortcut) resets the counter.
@@ -9123,6 +9146,8 @@ class WatchPage {
     cancelNextEpisode() {
         clearInterval(this.nextEpisodeInterval);
         this.nextEpisodePanel?.classList.add('hidden');
+        this.nextEpisodePanel?.setAttribute('aria-hidden', 'true');
+        this.nextEpisodePanel?.classList.remove('no-countdown');
         this.nextEpisodeShowing = false;
         this.nextEpisodeDismissed = true; // Prevent re-triggering
         if (this.nextEpisodePanel) {

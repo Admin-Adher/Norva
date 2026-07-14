@@ -62,8 +62,23 @@ window.NorvaCast = (() => {
 
     function isCasting() {
         const ctx = context();
-        return !!ctx && ctx.getSessionState() === cast.framework.SessionState.SESSION_STARTED
-            || !!ctx && ctx.getSessionState() === cast.framework.SessionState.SESSION_RESUMED;
+        return !!ctx && (
+            ctx.getSessionState() === cast.framework.SessionState.SESSION_STARTED
+            || ctx.getSessionState() === cast.framework.SessionState.SESSION_RESUMED
+        );
+    }
+
+    async function requestSession() {
+        const ctx = context();
+        if (!ctx) throw new Error('Cast unavailable');
+        if (ctx.getCurrentSession()) return deviceName();
+        try {
+            await ctx.requestSession(); // shows the browser's device picker
+            return deviceName();
+        } catch (err) {
+            if (isCancel(err)) { const e = new Error('cast-cancelled'); e.code = 'cancel'; throw e; }
+            throw (err instanceof Error) ? err : new Error(String(err?.description || err || 'Cast session failed'));
+        }
     }
 
     function deviceName() {
@@ -103,14 +118,7 @@ window.NorvaCast = (() => {
     async function castMedia({ url, title, poster, currentTime = 0, live = false, subtitles = [] }) {
         const ctx = context();
         if (!ctx || !url) throw new Error('Cast unavailable');
-        if (!ctx.getCurrentSession()) {
-            try {
-                await ctx.requestSession(); // shows the browser's device picker
-            } catch (err) {
-                if (isCancel(err)) { const e = new Error('cast-cancelled'); e.code = 'cancel'; throw e; }
-                throw (err instanceof Error) ? err : new Error(String(err?.description || err || 'Cast session failed'));
-            }
-        }
+        if (!ctx.getCurrentSession()) await requestSession();
         const session = ctx.getCurrentSession();
         if (!session) throw new Error('No cast session');
 
@@ -218,6 +226,7 @@ window.NorvaCast = (() => {
         devicesAvailable,
         isCasting,
         deviceName,
+        requestSession,
         castMedia,
         remotePosition,
         remoteDuration,

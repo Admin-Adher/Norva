@@ -119,6 +119,8 @@
       window.ensureHls();
     })();
   </script>
+  <script src="/js/marketing-config.js?v=1"></script>
+  <script defer src="/js/marketing.js?v=1"></script>
 </head>
 
 <body class="catalog-locked">
@@ -1857,9 +1859,12 @@
               <p class="next-synopsis" id="next-episode-synopsis"></p>
             </div>
             <div class="next-actions">
-              <span class="next-countdown" id="next-countdown">10</span>
-              <button class="btn btn-primary btn-sm" id="next-play-now">Play Now</button>
-              <button class="btn btn-ghost btn-sm" id="next-cancel">Watch Credits</button>
+              <span class="next-countdown" id="next-countdown" aria-live="polite" style="--next-progress: 100%">
+                <span class="next-countdown-num">15</span>
+                <span class="next-countdown-label">sec</span>
+              </span>
+              <button class="btn btn-primary btn-sm" id="next-play-now">Play next</button>
+              <button class="btn btn-ghost btn-sm" id="next-cancel">Watch credits</button>
             </div>
           </div>
         </section>
@@ -2008,11 +2013,11 @@
   <script defer src="/js/utils/catalogCache.js?v=1"></script>
   <script defer src="/js/utils/mediaUtils.js?v=14"></script>
   <script defer src="/js/utils/hoverPreview.js?v=1"></script>
-  <script defer src="/js/utils/castSender.js?v=1"></script>
+  <script defer src="/js/utils/castSender.js?v=2"></script>
   <script defer src="/js/utils/playbackHealth.js?v=2"></script>
   <script defer src="/js/utils/sourceHealth.js?v=7"></script>
   <script defer src="/js/utils/tvNavigation.js?v=21"></script>
-  <script defer src="/js/utils/standalone.js?v=6"></script>
+  <script defer src="/js/utils/standalone.js?v=7"></script>
   <script defer src="/js/utils/channelGrouping.js?v=5"></script>
   <script defer src="/js/utils/GenreTaxonomy.js?v=4"></script>
   <script defer src="/js/utils/GenreRails.js?v=7"></script>
@@ -2030,7 +2035,7 @@
   <script defer src="/js/pages/MoviesPage.js?v=48"></script>
   <script defer src="/js/pages/SeriesPage.js?v=46"></script>
   <script defer src="/js/pages/Settings.js?v=40"></script>
-  <script defer src="/js/pages/WatchPage.js?v=119"></script>
+  <script defer src="/js/pages/WatchPage.js?v=120"></script>
   <script defer src="/js/profiles.js?v=9"></script>
   <!-- AdminPage.js (76 KB, admin-only) is lazy-loaded by app.ensureAdminPage(). -->
   <script defer src="/js/maintenance-banner.js?v=1"></script>
