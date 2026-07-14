@@ -9118,10 +9118,22 @@ class WatchPage {
 
     // === Navigation ===
 
-    async goBack() {
+    goBack() {
+        // Re-entrancy guard: on TV the BACK key repeats/queues, and without this a
+        // stalled exit let every press stack another goBack().
+        if (this._goingBack) return;
+        this._goingBack = true;
+
+        // Capture the position synchronously (cheap, local state) so nothing is lost.
         this.trackPlaybackPosition({ force: true });
         this.saveResumeSnapshotThrottled(true);
-        await this.saveProgress({ force: true });
+
+        // Fire-and-forget the final progress save — do NOT await it. Awaiting a network
+        // POST here stalled the exit on TV (slow net + main thread busy decoding), so
+        // BACK felt dead and users hammered it. saveProgress reads the position
+        // synchronously before its own await, so the value is correct; the 10s heartbeat
+        // + the resume snapshot already guarantee durability if this POST is slow/lost.
+        Promise.resolve(this.saveProgress({ force: true })).catch(() => {});
 
         this._suspendResumeSnapshotSave = true;
         this.stop();
@@ -9129,9 +9141,10 @@ class WatchPage {
         this.clearResumeSnapshot();
         this.cancelNextEpisode();
 
-        // Navigate to the page we came from (stored in returnPage)
-        // We don't use history.back() because we used replaceHistory when navigating here
+        // Navigate to the page we came from (stored in returnPage) IMMEDIATELY.
+        // We don't use history.back() because we used replaceHistory when navigating here.
         this.app.navigateTo(this.returnPage || 'movies');
+        this._goingBack = false;
     }
 
     show() {
