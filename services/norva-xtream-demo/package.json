@@ -1,0 +1,15 @@
+{
+  "name": "@norva/xtream-demo",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "TEST-ONLY Xtream-compatible source serving one CC BY 3.0 movie (Big Buck Bunny) for the Google Play foreground-service demo video.",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "delete": "wrangler delete"
+  },
+  "devDependencies": {
+    "wrangler": "^4.54.0"
+  }
+}
