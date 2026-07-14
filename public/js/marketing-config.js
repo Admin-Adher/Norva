@@ -11,7 +11,7 @@ window.NORVA_MARKETING_CONFIG = window.NORVA_MARKETING_CONFIG || {
     conversions: {
       signup: '68jMCPyoq9AcEIaVmIlE',
       beginCheckout: '',
-      trialStart: '',
+      trialStart: 'zr74CIKpq9AcEIaVmIlE',
       purchase: ''
     }
   },
