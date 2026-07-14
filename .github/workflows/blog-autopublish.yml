@@ -1,0 +1,98 @@
+name: Auto-publish Norva Blog
+
+# Publishes blog articles when their scheduled slot arrives.
+#
+# Source of truth lives in content/blog/ (drafts + publication-calendar.csv +
+# published-state.json). scripts/blog/build-blog.js renders every article whose
+# slot has passed into public/blog/<slug>/index.html, rebuilds the blog index
+# and sitemap, records the real first-publication instant, then this workflow
+# commits the result to main and deploys it to Cloudflare Pages.
+#
+# The build is idempotent: a run with no newly-due article commits nothing and
+# skips the deploy. Scheduled runs only start once this file is on the default
+# branch (main).
+
+on:
+  workflow_dispatch:
+    inputs:
+      min_published:
+        description: 'Minimum number of articles to keep live (floor)'
+        required: false
+        default: '4'
+  schedule:
+    # Editorial slots are 06:00 and 20:00 Europe/Paris. Run shortly after each
+    # slot in both possible UTC offsets — CEST (UTC+2, summer) and CET (UTC+1,
+    # winter) — so a newly-due article publishes promptly all year. Idempotent,
+    # so the off-by-one hour that does not match a slot simply commits nothing.
+    - cron: '5 4,5,18,19 * * *'
+
+concurrency:
+  group: blog-autopublish
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    name: Publish due articles and deploy
+    runs-on: ubuntu-latest
+    environment: Cloudflare
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Validate the full corpus renders cleanly
+        run: npm run blog:validate
+
+      - name: Publish any due articles (render pages, index, sitemap, state)
+        env:
+          BLOG_MIN_PUBLISHED: ${{ github.event.inputs.min_published || '4' }}
+        run: npm run blog:build
+
+      - name: Commit newly published pages to main
+        id: commit
+        run: |
+          git config user.name "norva-blog-bot"
+          git config user.email "bot@norva.tv"
+          git add public/blog public/sitemap-blog.xml content/blog/published-state.json
+          if git diff --cached --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No newly-due articles — nothing to publish this run."
+          else
+            git commit -m "chore(blog): auto-publish scheduled article(s) [skip ci]"
+            git push origin main
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # The remaining steps mirror deploy-cloudflare.yml so the deployed artifact
+      # is processed identically (cache-busting + critical-CSS inlining).
+      - name: Verify region model
+        if: steps.commit.outputs.changed == 'true'
+        run: npm run verify:region
+
+      - name: Minify landing CSS
+        if: steps.commit.outputs.changed == 'true'
+        run: npm run minify:css
+
+      - name: Cache-bust assets by content hash
+        if: steps.commit.outputs.changed == 'true'
+        run: npm run hash:assets
+
+      - name: Inline landing CSS into entry HTML
+        if: steps.commit.outputs.changed == 'true'
+        run: npm run inline:css
+
+      - name: Deploy public/ to Cloudflare Pages (norva-web)
+        if: steps.commit.outputs.changed == 'true'
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: '4.102.0'
+          command: pages deploy public --project-name=norva-web --branch=main

@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#05080f">
+  <title>How Playback Progress Sync Works | Norva Blog</title>
+  <meta name="description" content="Understand the viewer-facing playback progress model, what must match across devices, and how to diagnose an unexpected resume point.">
+  <link rel="canonical" href="https://norva.tv/blog/playback-progress-sync-explained/">
+  <meta name="robots" content="index,follow">
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/css/blog.css?v=1">
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="Norva">
+  <meta property="og:title" content="How Playback Progress Sync Works | Norva Blog">
+  <meta property="og:description" content="Understand the viewer-facing playback progress model, what must match across devices, and how to diagnose an unexpected resume point.">
+  <meta property="og:url" content="https://norva.tv/blog/playback-progress-sync-explained/">
+  <meta property="og:image" content="https://norva.tv/img/devices/norva-device-tv.webp">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="How Playback Progress Sync Works | Norva Blog">
+  <meta name="twitter:description" content="Understand the viewer-facing playback progress model, what must match across devices, and how to diagnose an unexpected resume point.">
+  <meta name="twitter:image" content="https://norva.tv/img/devices/norva-device-tv.webp">
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": "How Playback Progress Sync Works Across Devices",
+  "description": "Understand the viewer-facing playback progress model, what must match across devices, and how to diagnose an unexpected resume point.",
+  "inLanguage": "en",
+  "datePublished": "2026-07-14T15:28:15.824Z",
+  "dateModified": "2026-07-14T15:28:15.824Z",
+  "author": {
+    "@type": "Organization",
+    "name": "Norva"
+  },
+  "publisher": {
+    "@type": "Organization",
+    "name": "Norva",
+    "logo": {
+      "@type": "ImageObject",
+      "url": "https://norva.tv/img/norva-app-icon-96.png"
+    }
+  },
+  "image": [
+    "https://norva.tv/img/devices/norva-device-tv.webp"
+  ],
+  "mainEntityOfPage": {
+    "@type": "WebPage",
+    "@id": "https://norva.tv/blog/playback-progress-sync-explained/"
+  }
+}
+  </script>
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    {
+      "@type": "ListItem",
+      "position": 1,
+      "name": "Home",
+      "item": "https://norva.tv/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 2,
+      "name": "Blog",
+      "item": "https://norva.tv/blog/"
+    },
+    {
+      "@type": "ListItem",
+      "position": 3,
+      "name": "How Playback Progress Sync Works Across Devices",
+      "item": "https://norva.tv/blog/playback-progress-sync-explained/"
+    }
+  ]
+}
+  </script>
+  <script src="/js/marketing-config.js?v=1"></script>
+  <script defer src="/js/marketing.js?v=1"></script>
+  <script defer src="/js/consent-banner.js?v=1"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="blog-nav">
+    <a class="brand" href="/" aria-label="Norva home">
+      <img src="/img/norva-app-icon-96.png" width="34" height="34" alt="" decoding="async">
+      <span>Norva</span>
+    </a>
+    <nav class="nav-right" aria-label="Primary">
+      <a href="/blog/">Blog</a>
+      <a class="hide-sm" href="/#how-it-works">How it works</a>
+      <a class="cta" href="/account.html?returnTo=%2Fsubscribe.html%3Fplan%3Dplus%26period%3Dmonthly" data-cta="blog-nav" data-auth-action>Start free trial</a>
+    </nav>
+  </header>
+  <main id="main-content">
+    <nav class="breadcrumb" aria-label="Breadcrumb"><a href="/">Home</a><span class="sep">›</span><a href="/blog/">Blog</a><span class="sep">›</span><span aria-current="page">How Playback Progress Sync Works Across Devices</span></nav>
+    <article>
+      <div class="article-meta">
+        <span class="tag">Cross-Device &amp; TV Experience</span>
+        <span>By Norva Editorial Team</span>
+        <span class="dot">·</span>
+        <time datetime="2026-07-14T15:28:15.824Z">14 July 2026</time>
+        <span class="dot">·</span>
+        <span>6 min read</span>
+      </div>
+      <h1>How Playback Progress Sync Works Across Devices</h1>
+      <p class="lede">Playback progress sync connects one account's viewing state across supported screens while source, profile, title version, and connectivity still matter.</p>
+      <nav class="toc" aria-label="On this page">
+      <strong>On this page</strong>
+      <ul><li><a href="#the-viewer-facing-sync-model">The viewer-facing sync model</a></li><li><a href="#why-identity-matters-as-much-as-time">Why identity matters as much as time</a></li><li><a href="#a-practical-cross-screen-handoff">A practical cross-screen handoff</a></li><li><a href="#what-happens-when-a-device-is-offline">What happens when a device is offline</a></li><li><a href="#how-continue-watching-uses-progress">How Continue Watching uses progress</a></li><li><a href="#diagnose-a-wrong-resume-point">Diagnose a wrong resume point</a></li><li><a href="#the-checkpoint-record">The checkpoint record</a></li><li><a href="#common-mistakes-and-limitations">Common mistakes and limitations</a></li><li><a href="#frequently-asked-questions">Frequently asked questions</a></li><li><a href="#your-next-step">Your next step</a></li><li><a href="#sources">Sources</a></li></ul>
+    </nav>
+      <blockquote><strong>In short:</strong> Playback progress sync associates a viewing position with your account context so another supported device can offer a resume point for the same media. For the handoff to make sense, the profile, title or episode, selected version, and connected source must align. Connectivity and recent activity can affect when the newest state becomes visible.</blockquote>
+<p>The useful promise is simple: stop on one supported screen and continue from the same place on another. The details become clearer when progress is treated as one piece of account state rather than as a property permanently embedded in the media.</p>
+<h2 id="the-viewer-facing-sync-model">The viewer-facing sync model</h2>
+<p>Without making assumptions about undocumented internal implementation, the experience can be understood through five checkpoints:</p>
+<ol><li><strong>Account:</strong> the supported devices use the same Norva account.</li><li><strong>Profile:</strong> the same profile owns the relevant viewing state.</li><li><strong>Media identity:</strong> both screens refer to the same title, episode, and intended version.</li><li><strong>Recorded position:</strong> playback creates or updates a resume point.</li><li><strong>Connectivity:</strong> the devices can exchange the account's current state.</li></ol>
+<p>Norva states that progress, history, favourites, and preferences remain available across supported devices. The compatible source still supplies the catalogue and media access.</p>
+<h2 id="why-identity-matters-as-much-as-time">Why identity matters as much as time</h2>
+<p>A timestamp alone is not enough. It must be associated with the correct media identity. Problems can appear when:</p>
+<ul><li>two versions of a title are treated as different records;</li><li>duplicate metadata splits one work;</li><li>the wrong episode is opened;</li><li>another profile has its own progress;</li><li>an unavailable version replaces the one previously used.</li></ul>
+<p>Before changing progress, confirm the details page. The version-grouping guide helps distinguish intentional variants from duplicates.</p>
+<h2 id="a-practical-cross-screen-handoff">A practical cross-screen handoff</h2>
+<p>Use this controlled workflow:</p>
+<ol><li>On the first supported device, open the intended profile and title.</li><li>Play long enough to establish an unmistakable scene or episode position.</li><li>Stop playback normally and return to the title or library.</li><li>Ensure the device has a working connection.</li><li>On the second supported device, sign in to the same account and profile.</li><li>Open the same title and version.</li><li>Inspect the offered resume point before selecting it.</li></ol>
+<p>This is a reproducible user check, not a benchmark. It does not promise a particular sync delay because network state, device state, and current product behaviour must be observed directly.</p>
+<p>For a day-to-day example, follow start on mobile, finish on TV.</p>
+<h2 id="what-happens-when-a-device-is-offline">What happens when a device is offline</h2>
+<p>Offline access is conditional on the device, source, and associated rights. A device without a connection cannot be expected to show another screen's newest account state at that moment. When connectivity returns, verify the title and progress before assuming which activity should take precedence.</p>
+<p>Avoid making conflicting progress changes on several offline screens. If you do, record which profile, version, and device was used most recently; that information is more useful to support than a vague report that “sync is broken.”</p>
+<h2 id="how-continue-watching-uses-progress">How Continue Watching uses progress</h2>
+<p>Continue Watching is a presentation of in-progress state. It can provide a shortcut across screens, but it may also expose sampled titles or unexpected versions.</p>
+<p>Use the Continue Watching cleanup framework to classify entries as active, sampled, completed, or ambiguous. Do not use Favorites as a substitute for progress: it is a separate deliberate save that Norva also synchronises.</p>
+<h2 id="diagnose-a-wrong-resume-point">Diagnose a wrong resume point</h2>
+<p>Check in this order:</p>
+<ol><li>Same account?</li><li>Same profile?</li><li>Same title, episode, and version?</li><li>Did the first device stop normally?</li><li>Were both devices able to connect?</li><li>Did another screen play the same item afterward?</li><li>Does the source still expose the same record?</li></ol>
+<p>Changing only one variable at a time preserves useful evidence. The dedicated playback progress not syncing guide extends this into a full troubleshooting path.</p>
+<h2 id="the-checkpoint-record">The checkpoint record</h2>
+<p>When a mismatch persists, create this record before contacting support:</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Checkpoint</th><th>Device A</th><th>Device B</th></tr></thead>
+<tbody><tr><td>Account identifier, without password</td><td></td><td></td></tr><tr><td>Profile name</td><td></td><td></td></tr><tr><td>Title, season, episode</td><td></td><td></td></tr><tr><td>Version label</td><td></td><td></td></tr><tr><td>Visible progress</td><td></td><td></td></tr><tr><td>Connection state</td><td></td><td></td></tr><tr><td>Approximate time observed</td><td></td><td></td></tr></tbody>
+</table></div>
+<p>Never include passwords, full payment information, or source credentials. The record is designed to reproduce the context, not expose sensitive access.</p>
+<h2 id="common-mistakes-and-limitations">Common mistakes and limitations</h2>
+<ul><li>Comparing different profiles.</li><li>Opening another version of the same title.</li><li>Expecting an offline screen to display a newer remote update.</li><li>Scrubbing repeatedly during diagnosis.</li><li>Treating Favorites and progress as the same state.</li><li>Assuming a fixed sync time that Norva does not publicly guarantee.</li></ul>
+<h2 id="frequently-asked-questions">Frequently asked questions</h2>
+<h3 id="does-playback-progress-follow-the-device-or-the-profile">Does playback progress follow the device or the profile?</h3>
+<p>Norva associates synchronised preferences and viewing state with the account experience. Always compare the same profile because separate profiles are intended to keep personal state distinct.</p>
+<h3 id="can-i-resume-if-the-second-device-uses-a-different-version">Can I resume if the second device uses a different version?</h3>
+<p>The result can be ambiguous because versions may be separate media records. Confirm the intended version before relying on the resume point.</p>
+<h3 id="why-is-progress-visible-on-one-screen-but-not-another">Why is progress visible on one screen but not another?</h3>
+<p>Check account, profile, media identity, and connectivity first. If they match and the problem persists, collect the checkpoint record and contact support.</p>
+<h2 id="your-next-step">Your next step</h2>
+<p><a href="https://norva.tv/#features" target="_blank" rel="noopener">Explore Norva's cross-screen features</a></p>
+<h2 id="sources">Sources</h2>
+<ul><li><a href="https://norva.tv/#features" target="_blank" rel="noopener">Norva features</a></li><li><a href="https://norva.tv/#how-it-works" target="_blank" rel="noopener">How Norva works</a></li><li><a href="https://norva.tv/#faq" target="_blank" rel="noopener">Norva FAQ</a></li></ul>
+      <section class="article-cta">
+      <a class="btn" href="https://norva.tv/#features" data-cta="blog-article">Explore Norva's Cross-Screen Features</a>
+    </section>
+      <section class="sources">
+      <h2>Sources</h2>
+      <ul><li><a href="https://norva.tv/#features" target="_blank" rel="noopener">https://norva.tv/#features</a></li><li><a href="https://norva.tv/#how-it-works" target="_blank" rel="noopener">https://norva.tv/#how-it-works</a></li><li><a href="https://norva.tv/#faq" target="_blank" rel="noopener">https://norva.tv/#faq</a></li></ul>
+    </section>
+      
+    </article>
+  </main>
+  <footer class="blog-footer">
+    <div class="foot-inner">
+      <nav class="foot-links" aria-label="Footer">
+        <a href="/">Home</a>
+        <a href="/blog/">Blog</a>
+        <a href="/#features">Benefits</a>
+        <a href="/#pricing">Pricing</a>
+        <a href="/support.html">Support</a>
+        <a href="/terms.html">Terms</a>
+        <a href="/privacy.html">Privacy</a>
+        <a href="/mentions-legales.html">Legal notice</a>
+      </nav>
+      <p class="disclaimer">&copy; 2026 Norva. Norva is a media player and organiser. It does not provide media. Use requires a compatible source you own or are authorised to access.</p>
+    </div>
+  </footer>
+</body>
+</html>
