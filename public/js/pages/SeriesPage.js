@@ -390,7 +390,14 @@ class SeriesPage {
         try {
             const payload = await API.media.genreRails({ type: 'series', limit: 18 });
             const rails = (payload && payload.rails) || [];
-            if (!rails.length) {
+            // Fall back to the flat grid whenever the rails carry NO items — not only when
+            // the rails array is empty. A mid-sync / incomplete materialization can return
+            // bucket shells whose .items are empty; GenreRails.render would then paint a
+            // terminal "No shows to show yet." AND stamp the warm-view marker, stranding the
+            // page even though the flat grid (built from the raw, complete items) has content.
+            // Mirror GenreRails.render's own usability test.
+            const railsHaveItems = rails.some((r) => Array.isArray(r.items) && r.items.length);
+            if (!railsHaveItems) {
                 this.railsView = false;
                 return this.loadSeries();
             }
