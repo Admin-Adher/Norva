@@ -17,3 +17,4 @@ Disallow: /probe.html
 Disallow: /webengine/
 
 Sitemap: https://norva.tv/sitemap.xml
+Sitemap: https://norva.tv/sitemap-blog.xml
