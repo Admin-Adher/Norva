@@ -1,7 +1,7 @@
 # VOD « unavailable » / grille figée sur vide — incident, causes racines & runbook
 
 **Incident du 2026-07-14** — compte `adrien.hernandez@outlook.com` (self-hosted, box `norva-db`).
-**Statut : résolu (UI + infra).** Fix UI de fond (`918e542`, fallback rails→grille plate) + retrait du filtre « Hide unavailable » VOD (PR #187, `28b26f7` + `12c5909`) + **fix du finalize gelé** (`0cd204b`, worker edge tué avant l'auto-invocation). Voir §7.
+**Statut : résolu (UI + infra), vérifié en prod le 2026-07-14.** Fix UI de fond (`918e542`, fallback rails→grille plate) + retrait du filtre « Hide unavailable » VOD (PR #187, `28b26f7` + `12c5909`) + **fix du finalize gelé** (`0cd204b`, worker edge tué avant l'auto-invocation) → finalize mené à 100 %, catalogue `ready` + dédup complète. Voir §7.
 
 > À lire avant de rejouer ce genre de diagnostic : **la moitié du temps a été perdue sur de fausses pistes**. Ce document liste explicitement ce que ce n'était **PAS**, pour ne pas les refaire.
 
@@ -174,19 +174,26 @@ wall clock duration warning: isolate: <id>
 
 **Fix (`0cd204b`) :** `workerTimeoutMs = 3*60*1000` = **180 s** (90 s de budget + marge pour un dernier batch lent + le fetch d'auto-invocation). Ne borne que la durée MAX d'un worker → aucun impact sur les requêtes rapides normales.
 
-**Déploiement — IMPORTANT :** `main/index.ts` est le **routeur** long-vécu, pas une fonction user rechargée à chaque requête. Il faut **recréer le conteneur** :
+**Déploiement :** `main/index.ts` est le **routeur** long-vécu, pas une fonction user rechargée à chaque requête. Un `docker restart` suffit (le conteneur relit `/home/deno/functions/main` — monté depuis l'hôte — au démarrage du process) :
 ```
 cd ~/norva && git pull
-docker compose -f ops/hetzner/docker-compose.supabase.yml up -d --force-recreate functions
-# (ou ops/hetzner/scripts/04-deploy-edge-functions.sh s'il force-recreate le conteneur)
+docker restart norva-edge-functions
+# alternative garantie : docker compose -f ops/hetzner/docker-compose.supabase.yml up -d --force-recreate functions
 ```
-Puis re-armer le finalize d'adrien (`UPDATE cloud_sources SET sync_status='syncing' …`) et vérifier que `syncProgress.percent`/`heartbeat` avancent jusqu'à `sync_status='ready'` + un `lastSync.syncedAt` frais.
+Puis re-armer le finalize (`UPDATE cloud_sources SET sync_status='syncing' …`) et suivre `syncProgress`/`finalizeCursor.offset` jusqu'à `sync_status='ready'` + un `lastSync.syncedAt` frais.
 
-**Points connexes (non bloquants, à surveiller) :**
-- `service_role` n'a pas de `statement_timeout` (vs `authenticated`/`authenticator` = 8 s). Non impliqué dans ce gel (c'était le wall-clock), mais à garder en tête si un batch DB devient le facteur limitant après ce fix.
-- `dedup_key` restait ~50 % NULL (matérialisation dédup incomplète). Une fois le finalize mené à 100 %, il se complète ; sinon vérifier qu'un cron **reconcile** (`norva_reconcile_catalog` / `norva_backfill_media_identity`) est schedulé sur la box.
+**Vérification (post-déploiement, 2026-07-14) — le finalize est allé au bout pour la 1ʳᵉ fois :**
+- Déployé ~08:36 → walk VOD complet (~220k) → terminé **09:10:40** : `sync_status='ready'`, `lastSync.syncedAt` daté du jour, `finalizeCursor` effacé (plus de slice « poison »). ~34 min pour le long-tail = normal.
+- **`dedup_key` NULL : ~50 % → ~0** (series 24/46 085, movie 116/173 571 ; `live` reste NULL par design). La matérialisation dédup s'est **complétée** dès que le finalize a fini.
+- Bénéfice au-delà de ce compte : le fix étant global au routeur, **tout futur import/finalize de gros catalogue** ira désormais au bout — plus de gel silencieux sur `building_titles`.
 
-Container edge : `norva-edge-functions`. Diag : `docker logs --since 8m norva-edge-functions 2>&1 | grep -iE 'wall clock|finaliz|building_titles|killed|memory'`.
+**Faux coupable à ne pas rechercher :** pendant le diag, les logs edge crachaient `[norva-catalog] 401 Missing bearer token` / `[norva-cloud] 401 Invalid bearer token … token is expired`. C'est du **trafic CLIENT** (une app avec un JWT expiré qui poll `norva-cloud`/`norva-catalog`), **sans aucun rapport** avec le finalize (le sync n'appelle pas `norva-catalog` en HTTP). Signal décisif qui l'a confirmé : `pg_stat_activity` = 0 requête active pendant le gel → le finalize n'était ni DB-bound ni bloqué sur ce 401.
+
+**Points connexes (non bloquants) :**
+- `service_role` n'a pas de `statement_timeout` (vs `authenticated`/`authenticator` = 8 s). Non impliqué ici (c'était le wall-clock), mais à garder en tête si un batch DB devient un jour le facteur limitant.
+- Si un futur gros catalogue re-cale malgré ce fix : re-vérifier l'intervalle des `wall clock duration warning` (`docker logs -t`) — ~180 s = un batch dépasse même la nouvelle marge (réduire alors `SYNC_DRIVE_BUDGET_MS` ou le batch titres) ; ~60 s = le conteneur n'a pas rechargé le routeur (force-recreate).
+
+Container edge : `norva-edge-functions`. Diag : `docker logs --since 8m -t norva-edge-functions 2>&1 | grep -iE 'wall clock|finaliz|building_titles|killed|memory'`.
 
 ---
 
