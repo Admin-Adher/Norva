@@ -21,6 +21,7 @@
         'a[href]', 'button', 'input', 'select', 'textarea',
         '.movie-card', '.series-card', '.channel-item', '.episode-item',
         '.continue-card', '.search-result', '.group-header', '.nav-link',
+        '.gsearch-result', '.gsearch-seeall', '.gsearch-cancel', // global (menu) search overlay
         '.captions-option', '.audio-option', '.version-item', '.multi-select-item',
         '.search-group-chip', '.watch-episode-item', '.watch-season-header',
         '.season-header', '.tab', '.watch-recommended-card', '.context-item',
@@ -377,6 +378,12 @@
             try { closeBtn.onclick(); } catch (e) { /* fall through to class removal */ }
         }
         modal.classList.remove('active');
+        // Return the D-pad ring to whatever opened the modal, if it declared an opener via
+        // data-restore-focus (the global-search overlay stores #nav-search) — else focus
+        // falls to <body> and the next arrow press is wasted re-anchoring a grid card.
+        const restoreId = modal.dataset?.restoreFocus;
+        const opener = restoreId && document.getElementById(restoreId);
+        if (opener && isVisible(opener)) focusElement(opener);
         return true;
     }
 
@@ -651,6 +658,28 @@
                     document.querySelector('#channel-list .group-header, #channel-list .channel-item, .search-result')
                 ].find(el => el && isVisible(el));
                 if (t) { focusElement(t); return; }
+            }
+            // Global (menu) search overlay: the input has no rail behind it, so give it
+            // explicit exits — Down → first result (else See-all / Cancel), Right at caret
+            // end → Cancel. Mirrors the #channel-search boundary so results + Cancel become
+            // D-pad-reachable instead of the input being a caret-only dead field.
+            if (focused.id === 'gsearch-input') {
+                const ov = document.getElementById('gsearch-overlay');
+                if (e.key === 'ArrowDown') {
+                    // Prefer a result, then See-all, then Cancel — by ROLE, not DOM order
+                    // (.gsearch-cancel sits in the bar ABOVE the results, so a combined
+                    // querySelector would wrongly pick it first).
+                    const t = ov?.querySelector('.gsearch-result')
+                        || ov?.querySelector('.gsearch-seeall')
+                        || ov?.querySelector('.gsearch-cancel');
+                    if (t && isVisible(t)) { e.preventDefault(); e.stopPropagation(); focusElement(t); return; }
+                }
+                const atEnd = (focused.selectionStart ?? 0) === focused.value.length
+                    && (focused.selectionEnd ?? 0) === focused.value.length;
+                if (e.key === 'ArrowRight' && atEnd) {
+                    const cancel = ov?.querySelector('.gsearch-cancel');
+                    if (cancel && isVisible(cancel)) { e.preventDefault(); e.stopPropagation(); focusElement(cancel); return; }
+                }
             }
             // An OPEN searchable combobox (RegionPicker) drives its own listbox with
             // Up/Down/Enter/Home/End while the search input keeps focus (via

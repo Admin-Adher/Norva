@@ -1550,11 +1550,31 @@ class App {
         const ov = document.getElementById('gsearch-overlay') || this.buildSearchOverlay();
         ov.classList.add('active');
         const input = ov.querySelector('#gsearch-input');
-        setTimeout(() => { try { input.focus(); input.select(); } catch (_) { /* noop */ } }, 50);
+        // Stash the opener so closeSearch()/hardware-BACK can return the D-pad ring to it (TV).
+        this._searchOpener = (document.activeElement && document.activeElement !== document.body)
+            ? document.activeElement : document.getElementById('nav-search');
+        if (this._searchOpener?.id) ov.dataset.restoreFocus = this._searchOpener.id;
+        // Focus SYNCHRONOUSLY inside the opening gesture: Android TV WebViews raise the
+        // leanback keyboard only for a gesture-synchronous focus. A deferred (setTimeout)
+        // focus is outside the gesture, so the IME then often never rises — an empty,
+        // untypeable box, the #1 reason menu search felt broken on TV. Re-assert after paint.
+        try { input.focus(); input.select(); } catch (_) { /* noop */ }
+        setTimeout(() => {
+            try { if (document.activeElement !== input) { input.focus(); input.select(); } } catch (_) { /* noop */ }
+        }, 50);
     }
 
-    closeSearch() {
-        document.getElementById('gsearch-overlay')?.classList.remove('active');
+    closeSearch(restoreFocus = true) {
+        const ov = document.getElementById('gsearch-overlay');
+        if (!ov) return;
+        ov.classList.remove('active');
+        const opener = this._searchOpener;
+        this._searchOpener = null;
+        // TV: return the ring to the Search icon so no arrow press is wasted and re-open
+        // is one press away. Skipped when navigating to a result (focus lands on the fiche).
+        if (restoreFocus && opener && document.documentElement.classList.contains('tv-mode')) {
+            try { opener.focus(); } catch (_) { /* noop */ }
+        }
     }
 
     buildSearchOverlay() {
@@ -1696,12 +1716,20 @@ class App {
     // query — the same navigate+prefill path openSearchResult() falls back to (race-safe via the
     // page's cloudRequestId guard). Removes the overlay's 48-row ceiling as the limiting factor.
     seeAllInPage(type, q) {
-        this.closeSearch();
+        this.closeSearch(false);
         const page = type === 'series' ? 'series' : 'movies';
         this.navigateTo(page);
         setTimeout(() => {
             const input = document.getElementById(page === 'series' ? 'series-search' : 'movies-search');
             if (input) { input.value = q; input.dispatchEvent(new Event('input', { bubbles: true })); }
+            // TV: once the searched grid re-renders, land the D-pad ring on the first card
+            // so the first arrow press isn't wasted waking focus onto <body>.
+            if (document.documentElement.classList.contains('tv-mode')) {
+                setTimeout(() => {
+                    const card = document.querySelector(`#${page}-grid .${type === 'series' ? 'series' : 'movie'}-card`);
+                    try { card?.focus?.(); card?.scrollIntoView?.({ block: 'nearest' }); } catch (_) { /* noop */ }
+                }, 450);
+            }
         }, 140);
     }
 
@@ -1711,7 +1739,7 @@ class App {
     // guard makes that prefill race-safe.
     openSearchResult(type, idx) {
         const item = (type === 'series' ? this._gsSeries : this._gsMovies)?.[idx];
-        this.closeSearch();
+        this.closeSearch(false);
         const page = type === 'series' ? 'series' : 'movies';
         this.navigateTo(page);
         const pageObj = type === 'series' ? this.pages?.series : this.pages?.movies;
@@ -1719,12 +1747,24 @@ class App {
         setTimeout(async () => {
             let opened = false;
             try { if (item && pageObj?.openByItem) opened = await pageObj.openByItem(item); } catch (_) { opened = false; }
-            if (!opened) {
-                const input = document.getElementById(page === 'series' ? 'series-search' : 'movies-search');
-                if (input && title) {
-                    input.value = title;
-                    input.dispatchEvent(new Event('input', { bubbles: true }));
+            if (opened) {
+                // TV: land the D-pad ring on the opened fiche's primary action (Play/Voir),
+                // mirroring the in-page card-commit focus — otherwise focus falls to <body>
+                // and the first arrow press wakes a grid card behind the fiche.
+                if (document.documentElement.classList.contains('tv-mode')) {
+                    requestAnimationFrame(() => {
+                        const btn = pageObj?.primaryActionBtn;
+                        try {
+                            if (btn && !btn.disabled && btn.offsetParent) { btn.focus(); btn.scrollIntoView({ block: 'nearest' }); }
+                        } catch (_) { /* noop */ }
+                    });
                 }
+                return;
+            }
+            const input = document.getElementById(page === 'series' ? 'series-search' : 'movies-search');
+            if (input && title) {
+                input.value = title;
+                input.dispatchEvent(new Event('input', { bubbles: true }));
             }
         }, 140);
     }
