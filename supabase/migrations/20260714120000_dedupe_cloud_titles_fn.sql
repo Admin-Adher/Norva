@@ -129,3 +129,7 @@ grant execute on function public.dedupe_cloud_titles_by_tmdb(uuid) to service_ro
 
 -- One-time global repair: collapse everything that fragmented since 2026-06-23.
 select public.dedupe_cloud_titles_by_tmdb();
+
+-- Make the new function visible to PostgREST immediately, so norva-source-sync's
+-- db.rpc('dedupe_cloud_titles_by_tmdb', …) resolves without a rest-container restart.
+notify pgrst, 'reload schema';
