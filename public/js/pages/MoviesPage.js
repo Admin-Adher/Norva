@@ -22,7 +22,6 @@ class MoviesPage {
         this.audioSelect = document.getElementById('movies-audio');
         this.subtitleSelect = document.getElementById('movies-subtitle');
         this.groupToggleBtn = document.getElementById('movies-group-toggle');
-        this.hideBrokenBtn = document.getElementById('movies-hide-broken-btn');
         this.randomBtn = document.getElementById('movies-random');
         this.countEl = document.getElementById('movies-count');
         this.resetBtn = document.getElementById('movies-reset');
@@ -59,7 +58,6 @@ class MoviesPage {
         this.favoriteIds = new Set();
         this.showFavoritesOnly = false;
         this.groupDuplicates = true;
-        this.hideBroken = true;
         this.watchState = new Map(); // item_id -> { progress, duration, ratio }
         this.serverSettings = {};
         this.hiddenCategoryIds = new Set();
@@ -129,11 +127,6 @@ class MoviesPage {
             this.onFiltersChanged();
         });
 
-        this.hideBrokenBtn?.addEventListener('click', () => {
-            this.hideBroken = !this.hideBroken;
-            this.hideBrokenBtn.classList.toggle('active', this.hideBroken);
-            this.onFiltersChanged();
-        });
 
         // Random movie
         this.randomBtn?.addEventListener('click', () => this.playRandom());
@@ -192,15 +185,6 @@ class MoviesPage {
             this.onFiltersChanged();
         });
 
-        // When a previously-broken movie plays successfully, remove the HS mark
-        // immediately so it reappears if "hide broken" is active — no page reload needed.
-        window.addEventListener('playbackStatusChanged', (e) => {
-            const d = e.detail;
-            if (d && d.status === 'ok' && (d.item_type === 'movie' || d.itemType === 'movie')) {
-                if (this.hideBroken) this.filterAndRender();
-            }
-        });
-
         // Build the mockup-oriented Movies chrome only in the Android TV client.
         // Moving existing controls keeps every listener/reference intact while the
         // web and mobile DOM remains exactly as authored.
@@ -216,7 +200,6 @@ class MoviesPage {
         this.savedFilters = saved;
         this.groupDuplicates = saved.group !== undefined ? saved.group : true;
         this.showFavoritesOnly = !!saved.favoritesOnly;
-        this.hideBroken = saved.hideBroken !== undefined ? saved.hideBroken : true;
     }
 
     applyFiltersToUI() {
@@ -230,7 +213,6 @@ class MoviesPage {
         if (this.subtitleSelect && s.subtitle) this.subtitleSelect.value = s.subtitle;
         if (this.searchInput && s.search) this.searchInput.value = s.search;
         this.groupToggleBtn?.classList.toggle('active', this.groupDuplicates);
-        this.hideBrokenBtn?.classList.toggle('active', this.hideBroken);
         document.getElementById('movies-favorites-btn')?.classList.toggle('active', this.showFavoritesOnly);
     }
 
@@ -247,7 +229,6 @@ class MoviesPage {
             subtitle: this.subtitleSelect?.value || '',
             search: this.searchInput?.value || '',
             group: this.groupDuplicates,
-            hideBroken: this.hideBroken,
             favoritesOnly: this.showFavoritesOnly,
             categories: [...(this.categoryMulti?.getSelected() || [])]
         });
@@ -527,7 +508,6 @@ class MoviesPage {
 
         const byBucket = new Map();
         for (const m of this.movies) {
-            if (this.hideBroken && this.isBrokenItem(m)) continue;
             const genres = (m.tmdb && m.tmdb.genres) || [];
             for (const b of T.classifyTitle(m.category_name || m.category_id, genres)) {
                 if (b === 'autres') continue;
@@ -565,8 +545,6 @@ class MoviesPage {
         if (this.sortSelect) this.sortSelect.value = 'default';
         if (this.searchInput) this.searchInput.value = '';
         this.showFavoritesOnly = false;
-        this.hideBroken = true;
-        this.hideBrokenBtn?.classList.toggle('active', this.hideBroken);
         document.getElementById('movies-favorites-btn')?.classList.remove('active');
         this.categoryMulti?.setSelected([]);
         this.onFiltersChanged();
@@ -578,7 +556,7 @@ class MoviesPage {
             this.genreSelect?.value || this.yearSelect?.value || this.ratingSelect?.value ||
             this.watchedSelect?.value || this.addedSelect?.value || this.durationSelect?.value ||
             this.audioSelect?.value || this.subtitleSelect?.value ||
-            this.searchInput?.value || this.showFavoritesOnly || this.hideBroken === false ||
+            this.searchInput?.value || this.showFavoritesOnly ||
             (this.categoryMulti?.getSelected().size > 0)
         );
     }
@@ -614,10 +592,6 @@ class MoviesPage {
         if (this.showFavoritesOnly) chips.push({ label: 'Favorites', clear: () => {
             this.showFavoritesOnly = false;
             document.getElementById('movies-favorites-btn')?.classList.remove('active');
-        } });
-        if (this.hideBroken === false) chips.push({ label: 'Showing unavailable', clear: () => {
-            this.hideBroken = true;
-            this.hideBrokenBtn?.classList.toggle('active', true);
         } });
 
         if (!chips.length) { host.classList.add('hidden'); host.innerHTML = ''; return; }
@@ -1278,8 +1252,6 @@ class MoviesPage {
     }
 
     matchesFilters(item) {
-        if (this.hideBroken && this.isBrokenItem(item)) return false;
-
         // Cloud mode filters genre via the dedicated grid (openGenreBucket); the
         // self-hosted grid still filters by the selected provider category here.
         // Year / rating / recently-added are ALSO server-side in cloud mode
@@ -1418,8 +1390,7 @@ class MoviesPage {
     hasClientOnlyFilters() {
         return Boolean(
             this.genreSelect?.value || this.durationSelect?.value ||
-            this.watchedSelect?.value || this.showFavoritesOnly ||
-            this.hideBroken === false
+            this.watchedSelect?.value || this.showFavoritesOnly
         );
     }
 
@@ -2282,8 +2253,8 @@ class MoviesPage {
         [this.sourceSelect, categoryControl, this.yearSelect, this.ratingSelect,
          this.audioSelect, this.subtitleSelect].forEach(element => append(primary, element));
 
-        // Row 2: availability, recency and the main catalogue actions.
-        [this.watchedSelect, this.addedSelect, favoriteBtn, this.hideBrokenBtn,
+        // Row 2: watch state, recency and the main catalogue actions.
+        [this.watchedSelect, this.addedSelect, favoriteBtn,
          this.groupToggleBtn, this.resetBtn].forEach(element => append(secondary, element));
 
         // One compact TV toolbar owns title/count, active chips + Clear all, and

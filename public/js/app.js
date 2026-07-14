@@ -1169,7 +1169,6 @@ class App {
                     added: 'Added',
                     duration: 'Duration',
                     group: 'Group duplicates',
-                    hide: 'Hide broken',
                     favorite: 'Favorites only',
                     reset: 'Reset'
                 },
@@ -1184,7 +1183,6 @@ class App {
                     added: 'movies-added',
                     duration: 'movies-duration',
                     group: 'movies-group-toggle',
-                    hide: 'movies-hide-broken-btn',
                     random: 'movies-random',
                     favorite: 'movies-favorites-btn',
                     reset: 'movies-reset'
@@ -1203,7 +1201,6 @@ class App {
                     added: 'Added',
                     status: 'Status',
                     group: 'Group duplicates',
-                    hide: 'Hide broken',
                     favorite: 'Favorites only',
                     reset: 'Reset'
                 },
@@ -1218,7 +1215,6 @@ class App {
                     added: 'series-added',
                     status: 'series-status',
                     group: 'series-group-toggle',
-                    hide: 'series-hide-broken-btn',
                     random: 'series-random',
                     favorite: 'series-favorites-btn',
                     reset: 'series-reset'

@@ -35,7 +35,6 @@ class SeriesPage {
         this.audioSelect = document.getElementById('series-audio');
         this.subtitleSelect = document.getElementById('series-subtitle');
         this.groupToggleBtn = document.getElementById('series-group-toggle');
-        this.hideBrokenBtn = document.getElementById('series-hide-broken-btn');
         this.randomBtn = document.getElementById('series-random');
         this.countEl = document.getElementById('series-count');
         this.resetBtn = document.getElementById('series-reset');
@@ -71,7 +70,6 @@ class SeriesPage {
         this.favoriteIds = new Set();
         this.showFavoritesOnly = false;
         this.groupDuplicates = true;
-        this.hideBroken = true;
         this.startedSeriesIds = new Set(); // series with at least one episode in history
         this.historyItems = [];
         this.serverSettings = {};
@@ -138,11 +136,6 @@ class SeriesPage {
             this.onFiltersChanged();
         });
 
-        this.hideBrokenBtn?.addEventListener('click', () => {
-            this.hideBroken = !this.hideBroken;
-            this.hideBrokenBtn.classList.toggle('active', this.hideBroken);
-            this.onFiltersChanged();
-        });
 
         this.randomBtn?.addEventListener('click', () => this.openRandom());
         this.resetBtn?.addEventListener('click', () => this.resetFilters());
@@ -190,15 +183,6 @@ class SeriesPage {
             this.onFiltersChanged();
         });
 
-        // When a previously-broken series plays successfully, remove the HS mark
-        // immediately so it reappears if "hide broken" is active — no page reload needed.
-        window.addEventListener('playbackStatusChanged', (e) => {
-            const d = e.detail;
-            if (d && d.status === 'ok' && (d.item_type === 'series' || d.itemType === 'series')) {
-                if (this.hideBroken) this.filterAndRender();
-            }
-        });
-
         if (this._isTvMode()) this._setupTvSeriesLayout();
 
         this.applyFiltersToUI();
@@ -211,7 +195,6 @@ class SeriesPage {
         this.savedFilters = saved;
         this.groupDuplicates = saved.group !== undefined ? saved.group : true;
         this.showFavoritesOnly = !!saved.favoritesOnly;
-        this.hideBroken = saved.hideBroken !== undefined ? saved.hideBroken : true;
     }
 
     applyFiltersToUI() {
@@ -225,7 +208,6 @@ class SeriesPage {
         if (this.subtitleSelect && s.subtitle) this.subtitleSelect.value = s.subtitle;
         if (this.searchInput && s.search) this.searchInput.value = s.search;
         this.groupToggleBtn?.classList.toggle('active', this.groupDuplicates);
-        this.hideBrokenBtn?.classList.toggle('active', this.hideBroken);
         document.getElementById('series-favorites-btn')?.classList.toggle('active', this.showFavoritesOnly);
     }
 
@@ -242,7 +224,6 @@ class SeriesPage {
             subtitle: this.subtitleSelect?.value || '',
             search: this.searchInput?.value || '',
             group: this.groupDuplicates,
-            hideBroken: this.hideBroken,
             favoritesOnly: this.showFavoritesOnly,
             categories: [...(this.categoryMulti?.getSelected() || [])]
         });
@@ -325,10 +306,10 @@ class SeriesPage {
         return params;
     }
 
-    // The request params are only half of a bucket's identity: Favorites,
-    // availability and Hide unavailable are evaluated against the returned
-    // variants on TV. Include them in the refresh key so changing one cannot
-    // be mistaken for an already-rendered bucket.
+    // The request params are only half of a bucket's identity: Favorites and
+    // grouping are evaluated against the returned variants on TV. Include them
+    // in the refresh key so changing one cannot be mistaken for an
+    // already-rendered bucket.
     currentBucketViewKey() {
         if (!this._isTvMode()) return JSON.stringify(this.currentLanguageParams());
         return JSON.stringify({
@@ -336,7 +317,6 @@ class SeriesPage {
             watched: this.watchedSelect?.value || '',
             status: this.statusSelect?.value || '',
             favoritesOnly: Boolean(this.showFavoritesOnly),
-            hideBroken: Boolean(this.hideBroken),
             group: Boolean(this.groupDuplicates)
         });
     }
@@ -539,7 +519,7 @@ class SeriesPage {
                     ? `${this.bucketRenderedCount || 0}${this.bucketHasMore ? '+' : ''} titles`
                     : `${payload.count} titles`;
             }
-            // A source/favorites/availability filter can remove a whole server page.
+            // A source/favorites filter can remove a whole server page.
             // Keep paging while the loader is still empty instead of requiring a
             // scroll event that can never occur without any rendered cards.
             if (this._isTvMode() && !this.bucketGridEl.childElementCount && this.bucketHasMore) {
@@ -583,7 +563,6 @@ class SeriesPage {
 
         const byBucket = new Map();
         for (const s of this.seriesList) {
-            if (this.hideBroken && this.isBrokenItem(s)) continue;
             const genres = (s.tmdb && s.tmdb.genres) || [];
             for (const b of T.classifyTitle(s.category_name || s.category_id, genres)) {
                 if (b === 'autres') continue;
@@ -621,8 +600,6 @@ class SeriesPage {
         if (this.sortSelect) this.sortSelect.value = 'default';
         if (this.searchInput) this.searchInput.value = '';
         this.showFavoritesOnly = false;
-        this.hideBroken = true;
-        this.hideBrokenBtn?.classList.toggle('active', this.hideBroken);
         document.getElementById('series-favorites-btn')?.classList.remove('active');
         this.categoryMulti?.setSelected([]);
         this.onFiltersChanged();
@@ -634,7 +611,7 @@ class SeriesPage {
             this.genreSelect?.value || this.yearSelect?.value || this.ratingSelect?.value ||
             this.watchedSelect?.value || this.addedSelect?.value || this.statusSelect?.value ||
             this.audioSelect?.value || this.subtitleSelect?.value ||
-            this.searchInput?.value || this.showFavoritesOnly || this.hideBroken === false ||
+            this.searchInput?.value || this.showFavoritesOnly ||
             (this.categoryMulti?.getSelected().size > 0)
         );
     }
@@ -669,10 +646,6 @@ class SeriesPage {
         if (this.showFavoritesOnly) chips.push({ label: 'Favorites', clear: () => {
             this.showFavoritesOnly = false;
             document.getElementById('series-favorites-btn')?.classList.remove('active');
-        } });
-        if (this.hideBroken === false) chips.push({ label: 'Showing unavailable', clear: () => {
-            this.hideBroken = true;
-            this.hideBrokenBtn?.classList.toggle('active', true);
         } });
 
         if (!chips.length) { host.classList.add('hidden'); host.innerHTML = ''; return; }
@@ -1293,8 +1266,6 @@ class SeriesPage {
     }
 
     matchesFilters(item) {
-        if (this.hideBroken && this.isBrokenItem(item)) return false;
-
         // Cloud mode filters genre via the dedicated grid (openGenreBucket); the
         // self-hosted grid still filters by the selected provider category here.
         // Year / rating / recently-added are ALSO server-side in cloud mode
@@ -1425,8 +1396,7 @@ class SeriesPage {
     hasClientOnlyFilters() {
         return Boolean(
             this.genreSelect?.value || this.statusSelect?.value ||
-            this.watchedSelect?.value || this.showFavoritesOnly ||
-            this.hideBroken === false
+            this.watchedSelect?.value || this.showFavoritesOnly
         );
     }
 
@@ -1967,7 +1937,7 @@ class SeriesPage {
         append(controls, searchWrapper);
         [this.sourceSelect, categoryControl, this.yearSelect, this.ratingSelect,
          this.audioSelect, this.subtitleSelect].forEach(element => append(primary, element));
-        [this.watchedSelect, this.addedSelect, favoriteBtn, this.hideBrokenBtn,
+        [this.watchedSelect, this.addedSelect, favoriteBtn,
          this.groupToggleBtn, this.resetBtn].forEach(element => append(secondary, element));
         append(catalogMeta, this.countEl);
         append(catalogHead, this.activeFiltersEl);
