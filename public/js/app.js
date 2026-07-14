@@ -1603,8 +1603,23 @@ class App {
             if (e.key === 'Escape') { this.closeSearch(); return; }
             if (e.key === 'Enter') {
                 e.preventDefault();
-                // Enter opens the first result if any are showing; otherwise run the
-                // search immediately (don't wait out the debounce).
+                // On TV, the remote's OK/Enter (and the leanback keyboard's Search/Done
+                // key) is the "confirm my query and let me browse" gesture — NOT a pick.
+                // So Enter from the field must move the ring INTO the results (dismissing
+                // the IME), never auto-open the first result. Opening happens only on a
+                // deliberate second OK once a result is focused.
+                if (document.documentElement.classList.contains('tv-mode')) {
+                    const first = ov.querySelector('.gsearch-result') || ov.querySelector('.gsearch-seeall');
+                    if (first) { try { first.focus(); first.scrollIntoView({ block: 'nearest' }); } catch (_) { /* noop */ } return; }
+                    // No results yet → run the search now (don't wait out the debounce);
+                    // focus stays on the field so the user can then press Down/OK.
+                    clearTimeout(this._searchDebounce);
+                    const qTv = input.value.trim();
+                    if (qTv.length >= 2) this.runSearch(qTv);
+                    return;
+                }
+                // Web/mobile: Enter opens the first result (a keyboard-user shortcut);
+                // otherwise run the search immediately.
                 if (this._gsMovies && this._gsMovies.length) this.openSearchResult('movie', 0);
                 else if (this._gsSeries && this._gsSeries.length) this.openSearchResult('series', 0);
                 else {
