@@ -1,5 +1,5 @@
 window.NORVA_MARKETING_CONFIG = window.NORVA_MARKETING_CONFIG || {
-  enabled: false,
+  enabled: true,
   consentMode: 'denied',
   debug: false,
   googleAnalytics: {
