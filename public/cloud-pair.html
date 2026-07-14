@@ -50,6 +50,106 @@
             width: min(880px, 100%);
             text-align: center;
         }
+        .pair-launch-screen { display: none; }
+        html.tv-pairing-mode:not(.tv-pairing-ready) .screen { display: none; }
+        html.tv-pairing-mode:not(.tv-pairing-ready) .pair-launch-screen {
+            position: fixed;
+            inset: 0;
+            z-index: 10;
+            display: grid;
+            place-items: center;
+            align-content: center;
+            gap: clamp(16px, 4vh, 28px);
+            overflow: hidden;
+            text-align: center;
+            background:
+                radial-gradient(circle at 50% 38%, rgba(90, 125, 255, .34), transparent 0 22%, transparent 48%),
+                radial-gradient(circle at 18% 12%, rgba(33, 212, 253, .18), transparent 0 26%, transparent 46%),
+                radial-gradient(circle at 82% 78%, rgba(199, 92, 255, .22), transparent 0 24%, transparent 48%),
+                linear-gradient(135deg, #05070d 0%, #09111f 48%, #03050a 100%);
+        }
+        html.tv-pairing-mode:not(.tv-pairing-ready) .pair-launch-screen::before {
+            content: "";
+            position: absolute;
+            inset: -20%;
+            background:
+                linear-gradient(115deg, transparent 0 38%, rgba(255, 255, 255, .08) 48%, transparent 58% 100%),
+                repeating-linear-gradient(90deg, rgba(255,255,255,.035) 0 1px, transparent 1px 86px);
+            animation: pairLaunchDrift 6s ease-in-out infinite alternate;
+            pointer-events: none;
+        }
+        .pair-launch-orb {
+            position: relative;
+            width: clamp(104px, 22vh, 148px);
+            height: clamp(104px, 22vh, 148px);
+            display: grid;
+            place-items: center;
+        }
+        .pair-launch-orb span {
+            position: absolute;
+            inset: 0;
+            border-radius: 999px;
+            border: 1px solid rgba(173, 196, 255, .22);
+            box-shadow: 0 0 70px rgba(79, 125, 243, .35), inset 0 0 34px rgba(255,255,255,.05);
+            animation: pairLaunchPulse 2.4s ease-in-out infinite;
+        }
+        .pair-launch-orb span:nth-child(2) { inset: 12%; animation-delay: .22s; border-color: rgba(33, 212, 253, .28); }
+        .pair-launch-orb span:nth-child(3) { inset: 24%; animation-delay: .44s; border-color: rgba(199, 92, 255, .28); }
+        .pair-launch-orb img {
+            position: relative;
+            width: 44%;
+            height: 44%;
+            border-radius: 18px;
+            box-shadow: 0 18px 46px rgba(0,0,0,.38);
+        }
+        .pair-launch-copy { position: relative; max-width: 720px; padding: 0 28px; }
+        .pair-launch-kicker {
+            margin: 0 0 8px;
+            color: #93c5fd;
+            font-size: clamp(12px, 2.5vh, 15px);
+            font-weight: 900;
+            letter-spacing: .32em;
+            text-transform: uppercase;
+        }
+        .pair-launch-copy h1 {
+            margin: 0;
+            font-size: clamp(34px, 8vh, 64px);
+            line-height: .98;
+            letter-spacing: -.05em;
+        }
+        .pair-launch-copy p:not(.pair-launch-kicker) {
+            margin: 14px auto 0;
+            color: rgba(226, 232, 240, .76);
+            font-size: clamp(14px, 3vh, 20px);
+        }
+        .pair-launch-progress {
+            position: relative;
+            width: min(360px, 42vw);
+            height: 4px;
+            overflow: hidden;
+            border-radius: 999px;
+            background: rgba(148, 163, 184, .18);
+        }
+        .pair-launch-progress span {
+            position: absolute;
+            inset: 0 auto 0 0;
+            width: 42%;
+            border-radius: inherit;
+            background: linear-gradient(90deg, #21d4fd, #4f7df3, #c75cff);
+            animation: pairLaunchBar 1.45s cubic-bezier(.65,0,.35,1) infinite;
+        }
+        @keyframes pairLaunchPulse {
+            0%, 100% { transform: scale(.88); opacity: .42; }
+            50% { transform: scale(1.08); opacity: 1; }
+        }
+        @keyframes pairLaunchBar {
+            0% { transform: translateX(-120%); }
+            100% { transform: translateX(250%); }
+        }
+        @keyframes pairLaunchDrift {
+            from { transform: translate3d(-1.5%, -1%, 0) rotate(-1deg); }
+            to { transform: translate3d(1.5%, 1%, 0) rotate(1deg); }
+        }
         .logo {
             width: 74px;
             height: 74px;
@@ -250,7 +350,19 @@
     </style>
 </head>
 <body>
-    <main class="screen">
+    <div class="pair-launch-screen" id="pair-launch-screen" role="status" aria-live="polite" aria-label="Norva is loading">
+        <div class="pair-launch-orb" aria-hidden="true">
+            <span></span><span></span><span></span>
+            <img src="/img/norva-app-icon.png" alt="">
+        </div>
+        <div class="pair-launch-copy">
+            <p class="pair-launch-kicker">Norva TV</p>
+            <h1>Preparing your cinema</h1>
+            <p>Checking whether this TV is already connected.</p>
+        </div>
+        <div class="pair-launch-progress" aria-hidden="true"><span></span></div>
+    </div>
+    <main class="screen" id="pairing-screen">
         <img class="logo" src="/img/norva-app-icon.png" alt="Norva">
         <h1 id="page-title">Connect this TV to Norva</h1>
         <p class="subtitle" id="page-subtitle">Use your phone or computer to sign in or create your Norva Account. This TV will open the Norva app automatically after approval.</p>
@@ -286,6 +398,8 @@
         const codeEl = document.getElementById('code');
         const qrEl = document.getElementById('qr');
         const pairUrlEl = document.getElementById('pair-url');
+        const pairingScreenEl = document.getElementById('pairing-screen');
+        const pairLaunchEl = document.getElementById('pair-launch-screen');
 
         // Render a scannable QR of the approval URL (CSP-safe inline SVG, no data: URI).
         // Falls back silently to the code + URL if the vendored encoder didn't load.
@@ -314,6 +428,12 @@
         let autoRegenCount = 0;   // codes auto-refreshed on expiry (capped, see handleExpiry)
         const MAX_AUTO_REGEN = 6; // ~1h at 10-min TTL, then require a deliberate "New code"
         const returnTo = withReturnCacheBust(sanitizeReturnTo(params.get('returnTo')) || '/?paired=1#home');
+
+        function revealPairingScreen() {
+            document.documentElement.classList.add('tv-pairing-ready');
+            if (pairingScreenEl) pairingScreenEl.removeAttribute('hidden');
+            if (pairLaunchEl) pairLaunchEl.setAttribute('hidden', '');
+        }
 
         // "New code" is a deliberate user action: reset the auto-refresh budget so a
         // fresh hour of hands-off refreshing starts from here.
@@ -387,6 +507,7 @@
         }
 
         async function startPairing() {
+            revealPairingScreen();
             clearInterval(pollHandle);
             clearInterval(timerHandle);
             currentCode = '';
