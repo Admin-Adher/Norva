@@ -55,6 +55,23 @@ const PlaybackHealth = {
         return this.statuses.get(this.key(sourceId, itemType, itemId))?.status === 'broken';
     },
 
+    isUnavailable(sourceId, itemType, itemId) {
+        const entry = this.statuses.get(this.key(sourceId, itemType, itemId));
+        return this.isUnavailableEntry(entry);
+    },
+
+    isUnavailableEntry(entry) {
+        if (!entry || entry.status !== 'broken') return false;
+        return !this.isTransientFailure(entry.lastError || entry.modeReason || '');
+    },
+
+    isTransientFailure(reason = '') {
+        const text = String(reason || '').toLowerCase();
+        // Hide-unavailable should remove titles proven dead, not wipe whole VOD
+        // libraries after a temporary provider/account outage or single-slot limit.
+        return /\b(401|403|429|458|500|502|503|504|timeout|timed out|econn|enotfound|dns|network|unreachable|refused|forbidden|unauthori[sz]ed|rate limit|too many requests|service unavailable|temporarily unavailable|provider busy|limited to one connection|connection|gateway|upstream_(?:unauthori[sz]ed|forbidden|rate_limit|network|timeout))\b/i.test(text);
+    },
+
     getMode(sourceId, itemType, itemId) {
         return this.statuses.get(this.key(sourceId, itemType, itemId))?.mode || 'unknown';
     },

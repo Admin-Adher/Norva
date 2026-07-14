@@ -1339,8 +1339,18 @@ class MoviesPage {
     }
 
     isBrokenItem(item) {
-        return item?.playback_status === 'broken' ||
-            window.PlaybackHealth?.isBroken(item.sourceId, 'movie', item.stream_id);
+        const health = window.PlaybackHealth;
+        const itemEntry = {
+            status: item?.playback_status,
+            lastError: item?.playback_last_error || item?.playbackLastError || item?.last_error || item?.lastError || null,
+            modeReason: item?.playback_mode_reason || item?.playbackModeReason || item?.mode_reason || item?.modeReason || null
+        };
+        return (health?.isUnavailableEntry
+            ? health.isUnavailableEntry(itemEntry)
+            : item?.playback_status === 'broken') ||
+            (health?.isUnavailable
+                ? health.isUnavailable(item.sourceId, 'movie', item.stream_id)
+                : health?.isBroken(item.sourceId, 'movie', item.stream_id));
     }
 
     buildFilteredCards() {
