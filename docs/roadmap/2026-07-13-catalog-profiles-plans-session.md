@@ -148,6 +148,30 @@ Revue de santé du serveur (box `norva-db`, pg_cron) + audit de l'avancement du 
 
 ---
 
+## 13. ⚠️ CORRECTIF du §12 — la grille Movies lit une AUTRE couche (trace vérifiée)
+
+Le §12 laissait entendre que le fix (2) répare la grille Films. **FAUX.** Trace complète (workflow `wy6f7xbf7`, 3 traceurs client/serveur/asset) :
+
+**Il y a DEUX couches de dédup indépendantes :**
+| Couche | Table lue | Clé de dédup | Alimentée par |
+|---|---|---|---|
+| **Recherche / rails / accueil** | `cloud_titles` (projection) | `identity_key` | `titleRailItem` — **c'est ça que le fix (2) répare** |
+| **Grille Movies/Series** | `cloud_media_items` (**BRUT**) | `is_dedup_primary` + `dedup_key` (colonnes sur la ligne brute) | `norva_reconcile_catalog` → `norva_backfill_media_identity` |
+
+- La grille appelle `norva-catalog/media-items` → RPC `list_media_items_deduped` → lit `cloud_media_items WHERE is_dedup_primary` (fast-path `20260704271000`), **jamais `cloud_titles`**. L'id TMDB brut vit sous `metadata.providerTmdbId` ; groupItems v14 le regroupe côté client sur la vue source-filtrée, mais la vue par défaut ne renvoie qu'**une ligne `is_dedup_primary` par groupe** → c'est le flag serveur qui compte.
+- Le flag brut est propagé depuis `cloud_titles` par **`norva_backfill_media_identity`** (`dedup_key = ct.identity_key`), lui-même appelé par **`norva_reconcile_catalog`** (= `norva_canonicalize_titles_for_user` [merge, **doublonne mon `dedupe_cloud_titles_by_tmdb`**] + backfill + posters). Cron **`norva-catalog-reconcile`** `3-59/20 0-6 * * *` (actif) → **la grille se répare seule chaque nuit**.
+
+**Conséquence de mon merge global fix (2)** : re-clé de 54 K `identity_key` → périme les `dedup_key` des lignes brutes correspondantes sur **tous** les comptes → grosse **dette de reconcile** (ex. compte `c5be5ac4` : **82 507** lignes périmées / 275 477 items). Drainé manuellement en ~17 passages `norva_reconcile_catalog(user)` (batch 5000, plafond 120 s) ; le reste (global) éponge sur 1–3 nuits via le cron. **`ambiguous_items=0`** vérifié → convergence garantie, pas d'oscillation.
+
+**Leçon** : pour la grille, le levier n'est PAS `cloud_titles` mais la couche brute — et le pipeline `norva_reconcile_catalog` existait déjà. Mon fix (2) a accéléré le côté `cloud_titles` (search/rails, réel) mais a **réinventé** l'étape `canonicalize` + créé une dette grille. Le fix (1) client v14 reste utile. **Décision : option A** — ne rien rajouter, laisser le reconcile nocturne converger ; `dedupe_cloud_titles_by_tmdb` reste dormant comme outil de merge manuel.
+
+### Réutilisable — couche grille (box)
+- **Propager `cloud_titles`→grille pour un compte** : `SELECT norva_reconcile_catalog('<user>');` (renvoie `{titles_merged, posters_refreshed, media_rows_reconciled}` ; `media_rows_reconciled=5000` = plafond atteint, relancer).
+- **Mesurer le retard** : `SELECT count(*) FROM cloud_media_items mi JOIN cloud_title_variants v ON v.media_item_id=mi.id JOIN cloud_titles ct ON ct.id=v.title_id WHERE mi.user_id='<user>' AND mi.dedup_key IS DISTINCT FROM ct.identity_key;`
+- **Re-enrich TMDB ciblé d'un compte** : `POST $FUNCTIONS_BASE_URL/norva-source-sync/cron/search-match?user=<uuid>&limit=1500&conc=15` (Bearer `$SERVICE_ROLE_KEY`).
+
+---
+
 ## ⚠️ À NE PAS OUBLIER (ops)
 
 1. ✅ **Edge redéployé** (#5 `norva-cloud`, #8/#9 `norva-lifecycle`) — fait cette session via `git pull` + recréation du conteneur `functions`. Tout lifecycle reste OFF. ⚠️ **Le revert `72a541d` du mode `limits` n'est pas encore sur la box** — à récupérer au prochain `git pull` + `up -d functions` (sans effet de comportement : la box est en `enforce`, qui n'utilise pas la branche `limits`). Rappel : `restart` recharge le **code** mais pas les **nouvelles vars d'env** → pour tout `NORVA_LC_*`/`NORVA_ENTITLEMENTS_MODE`, il faut `docker compose --env-file ops/hetzner/.env -f ops/hetzner/docker-compose.supabase.yml up -d functions` (recréer).
