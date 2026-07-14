@@ -7,7 +7,7 @@ window.NORVA_MARKETING_CONFIG = window.NORVA_MARKETING_CONFIG || {
     sendPageView: true
   },
   googleAds: {
-    conversionId: '',
+    conversionId: 'AW-18272881286',
     conversions: {
       signup: '',
       beginCheckout: '',
