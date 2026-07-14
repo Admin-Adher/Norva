@@ -955,8 +955,16 @@ const MediaUtils = (() => {
 
         for (const item of items) {
             let key;
-            if (item.tmdb_id) {
-                key = `t:${item.tmdb_id}`;
+            // The TMDB id is the strongest grouping signal — it merges the SAME film across
+            // localized titles ("Lilo & Stitch" / "Lilo i Stitch" / "Lilo y Stitch"), which a
+            // name slug never can. The Movies grid serializes it as provider_tmdb_id/
+            // providerTmdbId (never a flat tmdb_id — only search/home-rail items hoist that),
+            // so read every alias here or the t: branch is dead on the grid and localized
+            // copies fragment. '0'/'tt0' are the provider's no-match sentinels — ignore them.
+            const tid = item.tmdb_id || item.provider_tmdb_id || item.providerTmdbId
+                || (item.tmdb && item.tmdb.id);
+            if (tid && String(tid) !== '0' && String(tid) !== 'tt0') {
+                key = `t:${tid}`;
             } else {
                 key = `k:${item.dedup_key || computeDedupKey(item.name, item.year) || `${item.sourceId}:${item[idField]}`}`;
             }
