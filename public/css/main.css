@@ -8911,13 +8911,16 @@ kbd {
   display: flex;
   align-items: center;
   gap: var(--space-md);
-  padding: var(--space-md) var(--space-lg);
-  background: rgba(0, 0, 0, 0.85);
-  backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: var(--radius-lg);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
-  animation: slideInRight 0.3s ease;
+  width: min(620px, calc(100vw - 48px));
+  padding: 14px 16px;
+  background:
+    linear-gradient(135deg, rgba(16, 18, 28, 0.94), rgba(6, 8, 14, 0.9)),
+    rgba(0, 0, 0, 0.88);
+  backdrop-filter: blur(22px) saturate(140%);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 18px;
+  box-shadow: 0 18px 58px rgba(0, 0, 0, 0.62), inset 0 1px 0 rgba(255,255,255,0.08);
+  animation: slideInRight 0.28s cubic-bezier(.2,.8,.2,1);
   z-index: 50;
   pointer-events: auto;
 }
@@ -8939,6 +8942,7 @@ kbd {
 }
 
 .next-info {
+  flex: 1 1 auto;
   min-width: 0;
 }
 
@@ -8952,19 +8956,47 @@ kbd {
 .next-info h4 {
   color: #fff;
   margin: 0;
-  font-size: 0.875rem;
+  font-size: 1rem;
+  line-height: 1.25;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 200px;
+  max-width: 100%;
 }
 
 .next-countdown {
-  font-size: 1.5rem;
-  font-weight: 700;
-  color: var(--color-accent);
-  min-width: 30px;
+  --next-progress: 100%;
+  width: 58px;
+  height: 58px;
+  border-radius: 50%;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  background:
+    radial-gradient(circle at center, rgba(7, 10, 18, 0.96) 58%, transparent 60%),
+    conic-gradient(var(--color-accent) var(--next-progress), rgba(255,255,255,.16) 0);
+  color: #fff;
+  font-weight: 800;
   text-align: center;
+  box-shadow: 0 0 28px rgba(91, 124, 250, 0.24);
+}
+
+.next-countdown[hidden] { display: none; }
+
+.next-countdown-num {
+  display: block;
+  font-size: 1.15rem;
+  line-height: 1;
+}
+
+.next-countdown-label {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.55rem;
+  line-height: 1;
+  color: rgba(255,255,255,.65);
+  text-transform: uppercase;
+  letter-spacing: .04em;
 }
 
 /* ===== Details Section ===== */
@@ -9216,9 +9248,14 @@ kbd {
   .watch-next-episode {
     left: var(--space-md);
     right: var(--space-md);
+    width: auto;
     bottom: calc(120px + env(safe-area-inset-bottom, 0px));
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
+    align-items: stretch;
+    gap: 12px;
   }
+
+  .watch-next-episode .next-still { width: 112px; }
 
   .next-info {
     flex: 1;
@@ -9226,6 +9263,14 @@ kbd {
 
   .next-info h4 {
     max-width: none;
+  }
+
+  .watch-next-episode .next-synopsis { display: none; }
+
+  .watch-next-episode .next-actions {
+    width: 100%;
+    margin-left: 0;
+    justify-content: flex-end;
   }
 
   .watch-bottom-bar {
@@ -13847,11 +13892,12 @@ html.tv-mode #gsearch-input:focus {
 
 /* Richer next-episode panel */
 .watch-next-episode .next-still {
-  width: 128px;
+  width: clamp(116px, 22vw, 168px);
   aspect-ratio: 16 / 9;
   object-fit: cover;
-  border-radius: 6px;
+  border-radius: 10px;
   flex: 0 0 auto;
+  background: rgba(255,255,255,.06);
 }
 
 .watch-next-episode .next-synopsis {
@@ -13869,6 +13915,47 @@ html.tv-mode #gsearch-input:focus {
   align-items: center;
   gap: 10px;
   margin-left: auto;
+  flex: 0 0 auto;
+}
+
+.watch-next-episode .next-actions .btn {
+  min-height: 42px;
+  border-radius: 999px;
+  padding-inline: 16px;
+}
+
+.watch-next-episode.no-countdown .next-actions {
+  margin-left: 0;
+}
+
+html.tv-mode .watch-next-episode {
+  right: 56px;
+  bottom: 150px;
+  width: min(760px, 72vw);
+  padding: 20px 22px;
+  border-radius: 22px;
+}
+
+html.tv-mode .watch-next-episode .next-still {
+  width: 190px;
+  border-radius: 12px;
+}
+
+html.tv-mode .next-label { font-size: 0.9rem; }
+html.tv-mode .next-info h4 { font-size: 1.35rem; }
+html.tv-mode .watch-next-episode .next-synopsis { font-size: 1rem; }
+
+html.tv-mode .next-countdown {
+  width: 72px;
+  height: 72px;
+}
+
+html.tv-mode .next-countdown-num { font-size: 1.45rem; }
+
+html.tv-mode .watch-next-episode .next-actions .btn {
+  min-height: 56px;
+  font-size: 1rem;
+  padding-inline: 22px;
 }
 
 /* Rich empty states (grids) */

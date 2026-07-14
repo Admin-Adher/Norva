@@ -39,6 +39,9 @@
     // position the TV reports is read back by every other device.
     const historyType = (content) => (content?.type === 'movie' ? 'movie' : 'episode');
     const historyId = (content) => (content?.id != null ? String(content.id) : '');
+    const nativeProgressMeta = new Map();
+    const nativeProgressKey = (sourceId, itemType, itemId) =>
+        [String(sourceId || ''), String(itemType || ''), String(itemId || '')].join('|');
 
     // The native player reports its final position here when it closes. Persist
     // it to the cloud history so other devices resume from it. Defined on window
@@ -48,16 +51,28 @@
     window.__norvaNative.onProgress = (sourceId, itemType, itemId, positionSeconds, durationSeconds) => {
         try {
             const progress = Math.max(0, Math.floor(Number(positionSeconds) || 0));
-            const duration = Math.max(0, Math.floor(Number(durationSeconds) || 0));
+            const meta = nativeProgressMeta.get(nativeProgressKey(sourceId, itemType, itemId)) || {};
+            const reportedDuration = Math.max(0, Math.floor(Number(durationSeconds) || 0));
+            const fallbackDuration = Math.max(0, Math.floor(Number(meta.duration) || 0));
+            const duration = reportedDuration || fallbackDuration;
             if (!sourceId || !itemId || progress <= 0) return;
-            window.API?.history?.save?.({
+            const payload = {
                 id: String(itemId),
                 type: itemType || 'movie',
                 sourceId: String(sourceId),
                 progress,
-                duration,
-                data: { sourceId: String(sourceId) }
-            })?.catch?.(() => { });
+                duration
+            };
+            if (meta.data) {
+                payload.data = {
+                    ...meta.data,
+                    sourceId: String(sourceId),
+                    durationHint: duration || meta.data.durationHint || 0
+                };
+            } else {
+                payload.data = { sourceId: String(sourceId), durationHint: duration || 0 };
+            }
+            window.API?.history?.save?.(payload)?.catch?.(() => { });
         } catch (err) {
             console.warn('[Native] onProgress save failed:', err?.message || err);
         }
@@ -421,6 +436,23 @@
         if (window.WatchPage) {
             WatchPage.prototype.play = async function (content, streamUrl, playback) {
                 try {
+                    const meta = contentMeta(content);
+                    if (meta) {
+                        nativeProgressMeta.set(nativeProgressKey(meta.sourceId, meta.itemType, meta.itemId), {
+                            duration: content.durationHint || 0,
+                            data: {
+                                title: content.title,
+                                subtitle: content.subtitle || '',
+                                poster: content.poster,
+                                sourceId: content.sourceId,
+                                seriesId: content.seriesId || null,
+                                currentSeason: content.currentSeason || null,
+                                currentEpisode: content.currentEpisode || null,
+                                containerExtension: content.containerExtension || 'mp4',
+                                durationHint: content.durationHint || 0
+                            }
+                        });
+                    }
                     // Seed history so Continue Watching shows the title even if
                     // the viewer quits before the native player reports back.
                     window.API?.history?.save?.({

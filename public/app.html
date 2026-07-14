@@ -1859,9 +1859,12 @@
               <p class="next-synopsis" id="next-episode-synopsis"></p>
             </div>
             <div class="next-actions">
-              <span class="next-countdown" id="next-countdown">10</span>
-              <button class="btn btn-primary btn-sm" id="next-play-now">Play Now</button>
-              <button class="btn btn-ghost btn-sm" id="next-cancel">Watch Credits</button>
+              <span class="next-countdown" id="next-countdown" aria-live="polite" style="--next-progress: 100%">
+                <span class="next-countdown-num">15</span>
+                <span class="next-countdown-label">sec</span>
+              </span>
+              <button class="btn btn-primary btn-sm" id="next-play-now">Play next</button>
+              <button class="btn btn-ghost btn-sm" id="next-cancel">Watch credits</button>
             </div>
           </div>
         </section>
@@ -2014,7 +2017,7 @@
   <script defer src="/js/utils/playbackHealth.js?v=2"></script>
   <script defer src="/js/utils/sourceHealth.js?v=7"></script>
   <script defer src="/js/utils/tvNavigation.js?v=21"></script>
-  <script defer src="/js/utils/standalone.js?v=6"></script>
+  <script defer src="/js/utils/standalone.js?v=7"></script>
   <script defer src="/js/utils/channelGrouping.js?v=5"></script>
   <script defer src="/js/utils/GenreTaxonomy.js?v=4"></script>
   <script defer src="/js/utils/GenreRails.js?v=7"></script>
