@@ -38,6 +38,16 @@ class App {
         this.init();
     }
 
+    finishTvLaunchScreen() {
+        const root = document.documentElement;
+        if (!root.classList.contains('tv-launching')) return;
+        root.classList.add('tv-launch-ready');
+        window.setTimeout(() => {
+            root.classList.remove('tv-launching', 'tv-launch-ready');
+            document.getElementById('tv-launch-screen')?.setAttribute('hidden', '');
+        }, 420);
+    }
+
     async init() {
         // On the hosted web app, Norva Account is the product entry point.
         const host = window.location.hostname;
@@ -71,6 +81,7 @@ class App {
         try { if (window.NorvaProfiles?.ensureSelected) await window.NorvaProfiles.ensureSelected(); } catch (_) { }
         // Surface the always-visible navbar profile avatar (one-tap switcher).
         try { if (window.NorvaProfiles?.refreshNavAvatar) await window.NorvaProfiles.refreshNavAvatar(); } catch (_) { }
+        this.finishTvLaunchScreen();
         window.NorvaTrace?.log?.('app shell ready — profile picked, router/page renders next. NorvaTrace.summary() for the full table.');
         this.applyCatalogAvailability(null);
         this.startCloudWarmKeep();
