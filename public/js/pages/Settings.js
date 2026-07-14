@@ -107,6 +107,13 @@ class SettingsPage {
             window.location.href = '/support.html?returnTo=' + encodeURIComponent(returnTo);
         });
 
+        // Cookie consent: a low-key link that reopens the consent banner so a
+        // user can change or withdraw their choice (GDPR right to withdraw).
+        document.getElementById('settings-cookie-prefs-btn')?.addEventListener('click', (event) => {
+            event.preventDefault();
+            window.NorvaConsent?.open();
+        });
+
         // Account deletion uses the dedicated page (session-aware, typed
         // confirmation), which also works inside the APK WebView and is the same
         // public URL Play requires for web-based deletion.
