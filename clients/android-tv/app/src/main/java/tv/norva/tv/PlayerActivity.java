@@ -761,7 +761,7 @@ public class PlayerActivity extends Activity {
         }
         if ("episode".equals(itemType)) {
             addBarItem(R.drawable.ic_player_expand_less, "Episodes", "List", new Runnable() {
-                @Override public void run() { openEpisodesChosen = true; finish(); }
+                @Override public void run() { openEpisodesList(); }
             });
         }
     }
@@ -773,8 +773,9 @@ public class PlayerActivity extends Activity {
         item.setGravity(Gravity.CENTER);
         item.setPadding(dp(18), dp(8), dp(18), dp(8));
         makeFocusable(item, 0);
+        final String actionLabel = caption;
         item.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { action.run(); }
+            @Override public void onClick(View v) { runBarAction(actionLabel, action); }
         });
 
         ImageView icon = new ImageView(this);
@@ -872,6 +873,21 @@ public class PlayerActivity extends Activity {
 
     // ==================== Actions ====================
 
+    /**
+     * TV remotes activate these controls directly from focus. A broken stream
+     * manifest, missing metadata or unsupported device dialog must never take
+     * the native player down; keep playback alive and surface a short message.
+     */
+    private void runBarAction(String label, Runnable action) {
+        try {
+            if (action != null) action.run();
+        } catch (Throwable t) {
+            android.util.Log.e("PlayerActivity", "VOD player option failed: " + label, t);
+            toast(label + " unavailable");
+            scheduleHideControls();
+        }
+    }
+
     private void seekBy(long deltaMs) {
         long target = player.getCurrentPosition() + deltaMs;
         if (target < 0) target = 0;
@@ -930,17 +946,28 @@ public class PlayerActivity extends Activity {
     }
 
     private void applyAspect() {
-        if (videoW <= 0 || videoH <= 0) return;
+        if (root == null || surfaceView == null) return;
         final int rootW = root.getWidth();
         final int rootH = root.getHeight();
         if (rootW == 0 || rootH == 0) {
             root.post(new Runnable() { @Override public void run() { applyAspect(); } });
             return;
         }
+        if (videoW <= 0 || videoH <= 0) {
+            if (aspectMode == 2) {
+                surfaceView.setScaleX(1f);
+                surfaceView.setScaleY(1f);
+                surfaceView.setTranslationX(0f);
+                surfaceView.setTranslationY(0f);
+                surfaceView.setLayoutParams(new FrameLayout.LayoutParams(
+                        rootW, rootH, Gravity.CENTER));
+            }
+            return;
+        }
         double videoAspect = (double) videoW / videoH;
         double rootAspect = (double) rootW / rootH;
         int w, h;
-        if (aspectMode == 2) {            // stretch
+        if (aspectMode == 2) {            // stretch/fill the panel
             w = rootW; h = rootH;
         } else if (aspectMode == 1) {     // zoom / crop
             if (videoAspect > rootAspect) { h = rootH; w = (int) (rootH * videoAspect); }
@@ -950,7 +977,23 @@ public class PlayerActivity extends Activity {
             else { h = rootH; w = (int) (rootH * videoAspect); }
         }
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(w, h, Gravity.CENTER);
+        surfaceView.setScaleX(1f);
+        surfaceView.setScaleY(1f);
+        surfaceView.setTranslationX(0f);
+        surfaceView.setTranslationY(0f);
         surfaceView.setLayoutParams(lp);
+        surfaceView.requestLayout();
+    }
+
+    private void openEpisodesList() {
+        if (!"episode".equals(itemType) || itemId == null || itemId.isEmpty()
+                || sourceId == null || sourceId.isEmpty()) {
+            toast("Episode list unavailable");
+            scheduleHideControls();
+            return;
+        }
+        openEpisodesChosen = true;
+        finish();
     }
 
     // ==================== Track selection ====================
