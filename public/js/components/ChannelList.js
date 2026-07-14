@@ -3024,7 +3024,6 @@ class ChannelList {
                     this.collapsedGroups.delete(groupName);
                     // Update DOM directly for immediate feedback
                     groupHeader.classList.remove('collapsed');
-                    this.saveCollapsedState();
                 }
 
                 // 2. Collapse ALL other groups (Focus Mode)
@@ -3035,17 +3034,18 @@ class ChannelList {
                         header.classList.add('collapsed');
                     }
                 });
-                this.saveCollapsedState();
+                // Debounce the persist: surfing channels flips this every Up/Down, and a
+                // synchronous JSON.stringify + localStorage.setItem per keypress is wasted
+                // work on the zap hot path. Coalesce the two former writes into one.
+                clearTimeout(this._saveCollapsedTimer);
+                this._saveCollapsedTimer = setTimeout(() => this.saveCollapsedState(), 400);
 
-                // 3. Scroll Group to Top
-                // Use a small timeout to allow layout updates (e.g. collapse animations) to start
-                setTimeout(() => {
-                    groupHeader.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                    // Ensure active item is visible within the group
-                    setTimeout(() => {
-                        activeItem.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-                    }, 50);
-                }, 50);
+                // 3. Bring the active item into view — ONE instant scroll. The former two
+                // nested smooth scrollIntoView (group header, then item) stacked animations
+                // that restarted every keypress and juddered the whole sidebar on a fast zap.
+                requestAnimationFrame(() => {
+                    activeItem.scrollIntoView({ behavior: 'auto', block: 'nearest' });
+                });
             } else {
                 // Fallback for non-grouped items or flat list
                 activeItem.scrollIntoView({ behavior: 'smooth', block: 'nearest' });

@@ -1415,13 +1415,18 @@ class SourceManager {
 
         searchInput?.addEventListener('input', (e) => {
             this.searchQuery = e.target.value.toLowerCase().trim();
-            this.renderTree();
+            // Debounce the full-tree rebuild: renderTree() re-renders + re-wires the whole
+            // content tree, and on TV the D-pad/IME emits rapid input events that would run
+            // it per keystroke. 250ms coalesces a burst into one render.
+            clearTimeout(this._contentSearchTimer);
+            this._contentSearchTimer = setTimeout(() => this.renderTree(), 250);
         });
 
         searchClear?.addEventListener('click', () => {
             if (searchInput) {
                 searchInput.value = '';
                 this.searchQuery = '';
+                clearTimeout(this._contentSearchTimer);
                 this.renderTree();
             }
         });

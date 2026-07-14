@@ -387,13 +387,10 @@ class EpgGuide {
         const now = new Date();
         const nowTime = now.getTime();
 
-        // Filter programs for this channel
-        const current = this.programmes.find(p => {
-            if (p.channelId !== epgChannel.id) return false;
-            const start = new Date(p.start).getTime();
-            const stop = new Date(p.stop).getTime();
-            return nowTime >= start && nowTime < stop;
-        });
+        // Use the per-channel index + cached ms (no full-list scan, no Date parsing) —
+        // this runs on the channel-list hot path.
+        const current = this.getChannelProgrammes(epgChannel.id).find(p =>
+            nowTime >= p._startMs && nowTime < p._stopMs);
 
         return current ? {
             title: current.title,
@@ -569,9 +566,14 @@ class EpgGuide {
         // Get reference to time slots container for horizontal scroll sync
         this.timeSlotsContainer = this.container.querySelector('.epg-time-slots');
 
-        // Set up scroll handler for virtual scrolling (debounced for performance)
-        this._scrollHandler = this.debounce(() => this.updateVisibleRows(), 16); // ~60fps
-        this.scrollContainer.addEventListener('scroll', this._scrollHandler);
+        // Virtual-scroll updater: rAF-throttle (runs each frame DURING scroll) instead of a
+        // trailing debounce (which only fired 16ms AFTER scrolling stopped → blank rows the
+        // whole time you fling). One updateVisibleRows per frame, coalesced.
+        this._scrollHandler = () => {
+            if (this._rowRaf) return;
+            this._rowRaf = requestAnimationFrame(() => { this._rowRaf = 0; this.updateVisibleRows(); });
+        };
+        this.scrollContainer.addEventListener('scroll', this._scrollHandler, { passive: true });
 
         // No need for horizontal scroll sync anymore - header is inside scroll container
 
@@ -662,14 +664,12 @@ class EpgGuide {
         // Get programs if EPG data exists
         let channelProgrammes = [];
         if (epgChannel) {
-            channelProgrammes = this.programmes
-                .filter(p => p.channelId === epgChannel.id)
-                .filter(p => {
-                    const start = new Date(p.start);
-                    const stop = new Date(p.stop);
-                    return start < this.endTime && stop > this.startTime;
-                })
-                .sort((a, b) => new Date(a.start) - new Date(b.start));
+            // Per-channel index (already sorted by _startMs) + cached ms window test —
+            // replaces a full this.programmes scan + Date re-parse + re-sort per row.
+            const winStart = this.startTime.getTime();
+            const winEnd = this.endTime.getTime();
+            channelProgrammes = this.getChannelProgrammes(epgChannel.id)
+                .filter(p => p._startMs < winEnd && p._stopMs > winStart);
         }
 
         // Fallback values if EPG channel is missing
