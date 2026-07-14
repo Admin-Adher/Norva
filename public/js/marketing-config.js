@@ -3,7 +3,7 @@ window.NORVA_MARKETING_CONFIG = window.NORVA_MARKETING_CONFIG || {
   consentMode: 'granted',
   debug: false,
   googleAnalytics: {
-    measurementId: '',
+    measurementId: 'G-2Z7P4LRR1T',
     sendPageView: true
   },
   googleAds: {
