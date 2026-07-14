@@ -2425,22 +2425,36 @@ class SeriesPage {
         // come straight from the panel's series-info payload — display-clean them first.
         title = MediaUtils.cleanReleaseName(title) || title;
 
-        const seriesNames = [
-            this.getSeriesDisplayTitle(),
-            this.currentSeries?.name,
-            this.currentSeries?.tmdb?.original_name,
-            this.currentSeries?.tmdb?.original_title
-        ].filter(Boolean);
-
-        for (const name of seriesNames) {
-            title = title.replace(new RegExp(`^${this.escapeRegExp(name)}\\s*[-:–—|]+\\s*`, 'i'), '');
-        }
+        // The "<series name> - " strip patterns depend only on currentSeries, not the
+        // episode, so compile them ONCE per fiche (memoized) rather than recompiling the
+        // same ~4 RegExps for every one of a large series' episodes on the render path.
+        for (const re of this._seriesNameStripRes()) title = title.replace(re, '');
         title = title
             .replace(new RegExp(`^S0?${seasonNum}\\s*E0?${episodeNum}\\s*[-:–—|]+\\s*`, 'i'), '')
             .replace(/^S\d{1,2}E\d{1,3}\s*[-:–—|]+\s*/i, '')
             .trim();
 
         return title || `Episode ${episodeNum || ''}`.trim();
+    }
+
+    // Compile the leading "<series name> - " strip patterns once per series and memoize
+    // them on the series identity, so a fiche's per-episode title cleaning reuses the
+    // same RegExps instead of recompiling them for every row.
+    _seriesNameStripRes() {
+        const s = this.currentSeries;
+        const key = s
+            ? [s.series_id, s.stream_id, s.id, s.name, this.getSeriesDisplayTitle()].map(v => v ?? '').join('|')
+            : '';
+        if (this._epStripKey === key && this._epStripRes) return this._epStripRes;
+        const names = [
+            this.getSeriesDisplayTitle(),
+            s?.name,
+            s?.tmdb?.original_name,
+            s?.tmdb?.original_title
+        ].filter(Boolean);
+        this._epStripRes = names.map(name => new RegExp(`^${this.escapeRegExp(name)}\\s*[-:–—|]+\\s*`, 'i'));
+        this._epStripKey = key;
+        return this._epStripRes;
     }
 
     getEpisodeImage(ep, series = this.currentSeries) {
@@ -2803,8 +2817,111 @@ class SeriesPage {
 
     setActiveSeason(seasonNum) {
         this._activeSeason = seasonNum == null ? null : String(seasonNum);
+        this._ensureSeasonBuilt(this._activeSeason);
         this.applySelectedSeason();
         this.enrichSeasonWithTmdb(this._activeSeason);
+    }
+
+    _seasonGroupEl(seasonNum) {
+        if (seasonNum == null || !this.seasonsContainer) return null;
+        return [...this.seasonsContainer.querySelectorAll('.season-group')]
+            .find(g => String(g.dataset.season) === String(seasonNum)) || null;
+    }
+
+    // Wire the per-episode controls WITHIN one season group (play on click/Enter/Space,
+    // mark-watched, native download). Scoped to `root` so materializing a lazy season
+    // never re-wires the already-built ones (which would double-fire playback).
+    _wireEpisodeItems(root) {
+        if (!root) return;
+        root.querySelectorAll('.episode-item').forEach(ep => {
+            ep.addEventListener('click', () => this.playEpisode(ep));
+            // Rows are role=button tabindex=0 → activate on Enter/Space. Ignore keys that
+            // bubbled from a focused child (mark/download) so they don't also start play.
+            ep.addEventListener('keydown', (e) => {
+                if (e.target !== ep) return;
+                if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
+                    e.preventDefault();
+                    this.playEpisode(ep);
+                }
+            });
+            ep.querySelector('.episode-mark')?.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.toggleEpisodeWatched(ep);
+            });
+        });
+        if (this.nativeDownloadBridge()) {
+            root.querySelectorAll('.episode-download').forEach(btn => {
+                btn.style.display = '';
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    this.downloadEpisode(btn.closest('.episode-item'), btn);
+                });
+            });
+        }
+    }
+
+    // Materialize a season's episode rows the first time it's activated (lazy render).
+    // The wrapper + season controls were built up front; here we fill the empty
+    // .episode-list from live data and wire it. No-op once the season is built.
+    _ensureSeasonBuilt(seasonNum) {
+        const group = this._seasonGroupEl(seasonNum);
+        if (!group || !group.hasAttribute('data-episodes-pending')) return;
+        const episodes = Array.isArray(this.currentSeriesInfo?.episodes?.[seasonNum])
+            ? this.currentSeriesInfo.episodes[seasonNum] : [];
+        const list = group.querySelector('.episode-list');
+        // Live history; no featured highlight (up-next lives in the featured season,
+        // which is always the one built up front).
+        if (list) {
+            list.innerHTML = this._episodeListInnerHtml(
+                episodes, seasonNum, this.getSeriesHistoryMap(), null, this.currentSeries
+            );
+        }
+        group.removeAttribute('data-episodes-pending');
+        this._wireEpisodeItems(group);
+        this.refreshSeasonMarkButtons();
+        if (this.nativeDownloadBridge()) this.refreshEpisodeDownloadStates();
+    }
+
+    // The inner HTML of one season's .episode-list. Extracted so it can be built up front
+    // for the active season and lazily for the rest (identical markup in both paths).
+    _episodeListInnerHtml(episodes, seasonNum, watchedEpisodes, featured, series) {
+        return (Array.isArray(episodes) ? episodes : []).map(ep => {
+            const history = watchedEpisodes.get(String(ep.id));
+            const ratio = history?.ratio || 0;
+            const ratioPercent = Math.max(0, Math.min(100, Math.round(ratio * 100)));
+            const watched = ratio >= 0.95;
+            const marker = (ratio > 0.02 && ratio < 0.95)
+                ? '<span class="episode-watched inprogress" title="In progress">◐</span>' : '';
+            const cleanTitle = this.cleanEpisodeTitle(ep, seasonNum);
+            const duration = this.formatEpisodeDuration(ep.duration);
+            const description = ep.plot || ep.info?.plot || ep.overview || '';
+            const thumb = this.getEpisodeImage(ep, series);
+            const isUpNext = featured && String(ep.id) === String(featured.episode.id);
+            return `
+                            <div class="episode-item ${isUpNext ? 'episode-up-next' : ''}" role="button" tabindex="0" aria-label="${MediaUtils.escapeHtml(cleanTitle)}" data-episode-id="${MediaUtils.escapeHtml(ep.id)}" data-source-id="${series.sourceId}" data-container="${MediaUtils.escapeHtml(ep.container_extension || 'mp4')}" data-season="${MediaUtils.escapeHtml(seasonNum)}" data-episode-num="${MediaUtils.escapeHtml(ep.episode_num || '')}">
+                                <span class="episode-number">${MediaUtils.escapeHtml(ep.episode_num || '')}</span>
+                                <div class="episode-thumb">
+                                    <img src="${MediaUtils.escapeHtml(thumb)}" alt="" onerror="this.onerror=null;this.srcset='';this.src='/img/norva-media-placeholder.png'" loading="lazy" decoding="async">
+                                    <span class="episode-play">${Icons.play}</span>
+                                </div>
+                                <div class="episode-copy">
+                                    <div class="episode-title-row">
+                                        <span class="episode-title">${MediaUtils.escapeHtml(cleanTitle)}</span>
+                                        ${marker}
+                                        ${isUpNext ? '<span class="episode-upnext-flag">Up next</span>' : ''}
+                                    </div>
+                                    ${description ? `<p class="episode-description">${MediaUtils.escapeHtml(description)}</p>` : ''}
+                                    ${ratioPercent > 0 && ratioPercent < 95 ? `<div class="episode-progress"><div style="width:${ratioPercent}%"></div></div>` : ''}
+                                </div>
+                                <div class="episode-actions">
+                                    <span class="episode-duration">${MediaUtils.escapeHtml(duration)}</span>
+                                    <button class="episode-mark ${watched ? 'is-watched' : ''}" type="button" aria-pressed="${watched ? 'true' : 'false'}" title="${watched ? 'Mark as unwatched' : 'Mark as watched'}">${watched ? '✓' : ''}</button>
+                                    <button class="episode-download" type="button" title="Download for offline" style="display:none">
+                                        <span class="episode-download-icon">&#x2193;</span>
+                                    </button>
+                                </div>
+                            </div>`;
+        }).join('');
     }
 
     // Progressive enhancement: overlay TMDB per-episode data onto the shown season's
@@ -3108,11 +3225,16 @@ class SeriesPage {
                 if (featured) this.playStartBtn.dataset.episodeId = featured.episode.id;
             }
 
+            // Build ONLY the active season's episode rows up front; other seasons render
+            // their list lazily on first activation (_ensureSeasonBuilt). A large series
+            // otherwise parses + lays out thousands of hidden episode nodes on every
+            // fiche-open. Season-level controls live in the always-present wrapper.
             let html = '';
             seasons.forEach(seasonNum => {
+                const isActive = String(seasonNum) === String(this._activeSeason);
                 const episodes = Array.isArray(info.episodes[seasonNum]) ? info.episodes[seasonNum] : [];
                 html += `
-                <div class="season-group" data-season="${MediaUtils.escapeHtml(seasonNum)}">
+                <div class="season-group" data-season="${MediaUtils.escapeHtml(seasonNum)}"${isActive ? '' : ' data-episodes-pending="1"'}>
                     <div class="season-dl-bar" data-season="${MediaUtils.escapeHtml(seasonNum)}" style="display:none">
                         <span class="season-dl-name">Season ${MediaUtils.escapeHtml(seasonNum)}</span>
                         <span class="season-dl-count"></span>
@@ -3123,67 +3245,13 @@ class SeriesPage {
                     <div class="season-actions">
                         <button class="season-mark-all" type="button" data-season="${MediaUtils.escapeHtml(seasonNum)}">Mark season as watched</button>
                     </div>
-                    <div class="episode-list">
-                        ${episodes.map(ep => {
-                            const history = watchedEpisodes.get(String(ep.id));
-                            const ratio = history?.ratio || 0;
-                            const ratioPercent = Math.max(0, Math.min(100, Math.round(ratio * 100)));
-                            const watched = ratio >= 0.95;
-                            const marker = (ratio > 0.02 && ratio < 0.95)
-                                ? '<span class="episode-watched inprogress" title="In progress">◐</span>' : '';
-                            const cleanTitle = this.cleanEpisodeTitle(ep, seasonNum);
-                            const duration = this.formatEpisodeDuration(ep.duration);
-                            const description = ep.plot || ep.info?.plot || ep.overview || '';
-                            const thumb = this.getEpisodeImage(ep, series);
-                            const isUpNext = featured && String(ep.id) === String(featured.episode.id);
-                            return `
-                            <div class="episode-item ${isUpNext ? 'episode-up-next' : ''}" role="button" tabindex="0" aria-label="${MediaUtils.escapeHtml(cleanTitle)}" data-episode-id="${MediaUtils.escapeHtml(ep.id)}" data-source-id="${series.sourceId}" data-container="${MediaUtils.escapeHtml(ep.container_extension || 'mp4')}" data-season="${MediaUtils.escapeHtml(seasonNum)}" data-episode-num="${MediaUtils.escapeHtml(ep.episode_num || '')}">
-                                <span class="episode-number">${MediaUtils.escapeHtml(ep.episode_num || '')}</span>
-                                <div class="episode-thumb">
-                                    <img src="${MediaUtils.escapeHtml(thumb)}" alt="" onerror="this.onerror=null;this.srcset='';this.src='/img/norva-media-placeholder.png'" loading="lazy" decoding="async">
-                                    <span class="episode-play">${Icons.play}</span>
-                                </div>
-                                <div class="episode-copy">
-                                    <div class="episode-title-row">
-                                        <span class="episode-title">${MediaUtils.escapeHtml(cleanTitle)}</span>
-                                        ${marker}
-                                        ${isUpNext ? '<span class="episode-upnext-flag">Up next</span>' : ''}
-                                    </div>
-                                    ${description ? `<p class="episode-description">${MediaUtils.escapeHtml(description)}</p>` : ''}
-                                    ${ratioPercent > 0 && ratioPercent < 95 ? `<div class="episode-progress"><div style="width:${ratioPercent}%"></div></div>` : ''}
-                                </div>
-                                <div class="episode-actions">
-                                    <span class="episode-duration">${MediaUtils.escapeHtml(duration)}</span>
-                                    <button class="episode-mark ${watched ? 'is-watched' : ''}" type="button" aria-pressed="${watched ? 'true' : 'false'}" title="${watched ? 'Mark as unwatched' : 'Mark as watched'}">${watched ? '✓' : ''}</button>
-                                    <button class="episode-download" type="button" title="Download for offline" style="display:none">
-                                        <span class="episode-download-icon">&#x2193;</span>
-                                    </button>
-                                </div>
-                            </div>`;
-                        }).join('')}
-                    </div>
+                    <div class="episode-list">${isActive ? this._episodeListInnerHtml(episodes, seasonNum, watchedEpisodes, featured, series) : ''}</div>
                 </div>`;
             });
 
             this.seasonsContainer.innerHTML = html;
-            this.seasonsContainer.querySelectorAll('.episode-item').forEach(ep => {
-                ep.addEventListener('click', () => this.playEpisode(ep));
-                // Keyboard / TV-remote: rows are role=button tabindex=0 → activate on Enter/Space.
-                // Ignore keys that bubbled up from a focused child (e.g. the mark/download
-                // buttons) so activating them doesn't also start playback.
-                ep.addEventListener('keydown', (e) => {
-                    if (e.target !== ep) return;
-                    if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
-                        e.preventDefault();
-                        this.playEpisode(ep);
-                    }
-                });
-                // Manual mark watched / unwatched (stopPropagation so the row doesn't play).
-                ep.querySelector('.episode-mark')?.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    this.toggleEpisodeWatched(ep);
-                });
-            });
+            // Season-level controls exist for EVERY season (they live in the always-built
+            // wrapper), so wire them container-wide once.
             this.seasonsContainer.querySelectorAll('.season-mark-all').forEach(btn => {
                 btn.addEventListener('click', (e) => {
                     e.stopPropagation();
@@ -3191,15 +3259,8 @@ class SeriesPage {
                 });
             });
             this.refreshSeasonMarkButtons();
-            // Offline download per episode + per season (native phone/tablet app only).
+            // Per-season download bar (native app only) — also wrapper-level, wire for all.
             if (this.nativeDownloadBridge()) {
-                this.seasonsContainer.querySelectorAll('.episode-download').forEach(btn => {
-                    btn.style.display = '';
-                    btn.addEventListener('click', (e) => {
-                        e.stopPropagation();
-                        this.downloadEpisode(btn.closest('.episode-item'), btn);
-                    });
-                });
                 this.seasonsContainer.querySelectorAll('.season-dl-bar').forEach(bar => {
                     bar.style.display = '';
                     const seasonBtn = bar.querySelector('.season-download-btn');
@@ -3208,8 +3269,11 @@ class SeriesPage {
                         this.downloadSeason(bar.dataset.season, seasonBtn);
                     });
                 });
-                this.refreshEpisodeDownloadStates();
             }
+            // Episode-level wiring for the built (active) season only; the rest are wired
+            // when _ensureSeasonBuilt materializes them on first activation.
+            this._wireEpisodeItems(this._seasonGroupEl(this._activeSeason));
+            if (this.nativeDownloadBridge()) this.refreshEpisodeDownloadStates();
             this.applySelectedSeason();
             this.enrichSeasonWithTmdb(this._activeSeason);
         } catch (err) {
@@ -3690,6 +3754,9 @@ class SeriesPage {
     async downloadSeason(seasonNum, btn) {
         const bridge = this.nativeDownloadBridge();
         if (!bridge || !this.seasonsContainer) return;
+        // A season may not have been opened yet (episode rows render lazily), so its
+        // .episode-list would be empty — materialize it before enumerating episodes.
+        this._ensureSeasonBuilt(String(seasonNum));
         const sel = (window.CSS && CSS.escape) ? CSS.escape(String(seasonNum)) : String(seasonNum);
         const group = this.seasonsContainer.querySelector(`.season-group[data-season="${sel}"]`);
         if (!group) return;
