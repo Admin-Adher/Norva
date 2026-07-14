@@ -2297,6 +2297,12 @@ class MoviesPage {
     previewCard(card) {
         const group = card?.__movieGroup;
         if (!group?.items?.length) return;
+        // Re-focusing the SAME card (focusin re-fires; a fast D-pad burst that lands back
+        // here) must be free — showMovieDetails below rebuilds the entire panel. The panel
+        // already shows this card, so skip. Cleared on commit (_tvCommitCard) so backing out
+        // of the fiche re-previews correctly.
+        if (card === this._lastPreviewCard) return;
+        this._lastPreviewCard = card;
         this.container?.querySelectorAll('.movie-card.tv-preview-active').forEach(active => {
             if (active !== card) active.classList.remove('tv-preview-active');
         });
@@ -2316,6 +2322,9 @@ class MoviesPage {
     // choose — never auto-play a guessed variant.
     _tvCommitCard(group) {
         if (!group?.items?.length) return;
+        // Committing loads heavy extras into the panel, so invalidate the light-preview
+        // guard: backing out to the grid and re-focusing this same card must re-preview.
+        this._lastPreviewCard = null;
         const ordered = MediaUtils.orderVersionsByPreference(group.items, this.getPreferences());
         // Make sure the panel reflects THIS card even if the preview debounce hasn't fired.
         this.showMovieDetails(group, ordered[0], { versions: ordered, isTvPreview: true });

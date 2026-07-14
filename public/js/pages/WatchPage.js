@@ -4672,6 +4672,20 @@ class WatchPage {
     updateDurationState() {
         const duration = this.getDisplayDuration();
         const currentTime = this.getPlaybackPosition();
+
+        // Repaint throttle: outside of scrubbing the slider + time labels render identically
+        // within one integer second (formatTime floors to whole seconds; the gradient step is
+        // sub-pixel per ~4/s timeupdate tick). Skip the redundant DOM writes — they otherwise
+        // re-composite over the playing <video> ~4x/s for no visible change. Scrubbing always
+        // re-renders (the preview position moves continuously) and re-arms the memo.
+        if (!this._timelineScrubbing) {
+            const stamp = `${Math.floor(Number(currentTime) || 0)}|${duration || 0}`;
+            if (stamp === this._durationStateStamp) return duration || null;
+            this._durationStateStamp = stamp;
+        } else {
+            this._durationStateStamp = null;
+        }
+
         const previewPosition = this._timelineScrubbing && Number.isFinite(this._pendingSeekTarget)
             ? Math.max(0, Math.min(this._pendingSeekTarget, duration || this._pendingSeekTarget))
             : null;
