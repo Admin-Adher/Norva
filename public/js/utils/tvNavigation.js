@@ -269,8 +269,15 @@
     // ('auto') so there is no animation to stack; an isolated, deliberate press
     // still gets the polished 'smooth'. navBurst is refreshed on each arrow keydown.
     let lastNavKeyAt = 0;
+    let lastNavMoveAt = 0;
     let navBurst = false;
     const NAV_BURST_MS = 250;
+    // Held-key rate cap: while a direction is held the OS repeats keydown ~25-40x/s, and
+    // the full pipeline (candidate scan + geometry reads + scroll) ran on every repeat,
+    // pegging a weak TV CPU and letting focus lag behind the keys. Drop burst repeats that
+    // arrive < this interval after the last processed move (~12 moves/s max) — smoother to
+    // track by eye AND far cheaper. Isolated presses are never throttled.
+    const NAV_THROTTLE_MS = 80;
     function navScrollBehavior() { return navBurst ? 'auto' : 'smooth'; }
 
     function scrollActivePage(direction, focused = null) {
@@ -494,7 +501,12 @@
         // inline:'center' keeps the focused card centered as the D-pad walks a
         // horizontal rail (instead of leaving it stuck against an edge). Instant
         // during a held-key burst so overlapping smooth scrolls don't jank the TV.
-        el.scrollIntoView({ block: 'center', inline: 'center', behavior: navScrollBehavior() });
+        // Vertical list rows (episode lists) only need to scroll when the row is actually
+        // off-screen; block:'center' re-scrolled AND repainted the whole details panel on
+        // EVERY Up/Down. block:'nearest' keeps focus visible with far fewer repaints. Cards
+        // and horizontal rails keep 'center' so the focused item stays framed.
+        const vBlock = el.closest('.episode-item') ? 'nearest' : 'center';
+        el.scrollIntoView({ block: vBlock, inline: 'center', behavior: navScrollBehavior() });
     }
 
     function currentFocus() {
@@ -602,6 +614,18 @@
         else Promise.resolve().then(() => { candCache = null; });
 
         const focused = currentFocus();
+
+        // Held-key throttle (spatial nav only — text-field caret stays fully responsive).
+        // A burst repeat that lands too soon after the last processed move is dropped; the
+        // NEXT repeat still moves, so held-scroll keeps flowing without running the whole
+        // navigation pipeline 30-40x/s on a weak TV.
+        if (isArrow && navBurst && !isTextField(focused)) {
+            const nowMs = (typeof performance !== 'undefined' ? performance.now() : (e.timeStamp || 0));
+            if (nowMs - lastNavMoveAt < NAV_THROTTLE_MS) { e.preventDefault(); return; }
+            lastNavMoveAt = nowMs;
+        } else if (isArrow) {
+            lastNavMoveAt = (typeof performance !== 'undefined' ? performance.now() : (e.timeStamp || 0));
+        }
 
         // Text fields: ←/→ move the caret and Enter submits natively, but
         // ↑/↓ leave the field via spatial navigation — except in the channel
