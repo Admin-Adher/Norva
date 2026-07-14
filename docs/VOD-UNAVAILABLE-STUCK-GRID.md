@@ -1,7 +1,7 @@
 # VOD « unavailable » / grille figée sur vide — incident, causes racines & runbook
 
 **Incident du 2026-07-14** — compte `adrien.hernandez@outlook.com` (self-hosted, box `norva-db`).
-**Statut : résolu.** Fix de fond livré sur `main` (`918e542`) ; retrait du filtre « Hide unavailable » VOD déjà mergé (PR #187, `28b26f7` + `12c5909`). Un point d'infra reste ouvert (finalize qui cale sur gros catalogue — voir §7).
+**Statut : résolu (UI + infra).** Fix UI de fond (`918e542`, fallback rails→grille plate) + retrait du filtre « Hide unavailable » VOD (PR #187, `28b26f7` + `12c5909`) + **fix du finalize gelé** (`0cd204b`, worker edge tué avant l'auto-invocation). Voir §7.
 
 > À lire avant de rejouer ce genre de diagnostic : **la moitié du temps a été perdue sur de fausses pistes**. Ce document liste explicitement ce que ce n'était **PAS**, pour ne pas les refaire.
 
@@ -157,23 +157,36 @@ Les commandes doivent pointer vers `https://api.norva.tv/...` (pas le projet hé
 
 ---
 
-## 7. Point d'infra ouvert : le finalize cale sur `building_titles` (gros catalogues)
+## 7. Le finalize gelé sur `building_titles` — cause réelle & fix (`0cd204b`)
 
-Sur ce catalogue de 275k, le finalize progresse (`materializing`→`building_live_channels`→`building_titles`) puis **gèle** sur `building_titles`, ré-relancé en boucle par le watchdog sans avancer.
+Sur ce catalogue de 275k, le finalize progressait (`materializing`→`building_live_channels`→`building_titles`) puis **gelait** sur `building_titles`, ré-relancé en boucle par le watchdog sans avancer.
 
-Hypothèse forte : **un batch de construction de titres dépasse le `statement_timeout`** effectif des edge functions. Constaté sur la box :
+**Ce n'était PAS un `statement_timeout` Postgres.** Les logs edge (`docker logs norva-edge-functions`) crachaient, chaque minute :
 ```
-anon          statement_timeout=3s
-authenticated statement_timeout=8s
-authenticator statement_timeout=8s, lock_timeout=8s
-service_role  (aucun)   ← incohérent avec la config hébergée
+wall clock duration warning: isolate: <id>
 ```
-`service_role` **sans `statement_timeout`** est une séquelle de cutover. Pistes de fix (à valider) :
-1. `ALTER ROLE service_role SET statement_timeout='600s';` (aligner sur l'hébergé, laisser le travail lourd finir).
-2. **Borner davantage le batch de `building_titles`** côté edge (`_shared/xtream-sync.ts`) pour qu'un catalogue 275k ne produise jamais un statement > cap.
-3. Vérifier qu'un cron **reconcile** (`norva_reconcile_catalog` / backfill `dedup_key`) est bien schedulé sur la box — non vu dans `cron.job` (le `dedup_key` reste ~50% NULL, cosmétique : titres non groupés mais affichés).
+→ c'est le **budget wall-clock du worker edge-runtime** qui est dépassé, pas la DB.
 
-Container edge : `norva-edge-functions`. Logs : `docker logs --since 8m norva-edge-functions 2>&1 | grep -iE 'finaliz|building_titles|timeout|statement|cancel'`.
+**Cause racine (mismatch de config, séquelle de cutover) :**
+- Le routeur `main` (`supabase/functions/main/index.ts`) créait chaque worker avec `workerTimeoutMs = 1*60*1000` = **60 s**.
+- Le moteur de sync a un budget de travail **par isolate de 90 s** : `SYNC_DRIVE_BUDGET_MS` (discovery, `_shared/xtream-sync.ts:57`) et le `deadline = Date.now()+90_000` de la boucle finalize (`norva-source-sync/index.ts:1188`). Ces boucles font ~90 s de travail **puis** s'auto-invoquent pour passer le curseur `{phase,offset}` à l'isolate suivant.
+- `60 s < 90 s` → le worker était **recyclé avant l'auto-invocation** → la chaîne discover/finalize se cassait → le watchdog 1-min rejouait **le même slice** indéfiniment. D'où le gel sur `building_titles`.
+
+**Fix (`0cd204b`) :** `workerTimeoutMs = 3*60*1000` = **180 s** (90 s de budget + marge pour un dernier batch lent + le fetch d'auto-invocation). Ne borne que la durée MAX d'un worker → aucun impact sur les requêtes rapides normales.
+
+**Déploiement — IMPORTANT :** `main/index.ts` est le **routeur** long-vécu, pas une fonction user rechargée à chaque requête. Il faut **recréer le conteneur** :
+```
+cd ~/norva && git pull
+docker compose -f ops/hetzner/docker-compose.supabase.yml up -d --force-recreate functions
+# (ou ops/hetzner/scripts/04-deploy-edge-functions.sh s'il force-recreate le conteneur)
+```
+Puis re-armer le finalize d'adrien (`UPDATE cloud_sources SET sync_status='syncing' …`) et vérifier que `syncProgress.percent`/`heartbeat` avancent jusqu'à `sync_status='ready'` + un `lastSync.syncedAt` frais.
+
+**Points connexes (non bloquants, à surveiller) :**
+- `service_role` n'a pas de `statement_timeout` (vs `authenticated`/`authenticator` = 8 s). Non impliqué dans ce gel (c'était le wall-clock), mais à garder en tête si un batch DB devient le facteur limitant après ce fix.
+- `dedup_key` restait ~50 % NULL (matérialisation dédup incomplète). Une fois le finalize mené à 100 %, il se complète ; sinon vérifier qu'un cron **reconcile** (`norva_reconcile_catalog` / `norva_backfill_media_identity`) est schedulé sur la box.
+
+Container edge : `norva-edge-functions`. Diag : `docker logs --since 8m norva-edge-functions 2>&1 | grep -iE 'wall clock|finaliz|building_titles|killed|memory'`.
 
 ---
 
