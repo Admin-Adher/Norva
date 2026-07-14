@@ -94,6 +94,11 @@ dependencies {
     // The SDK compiles without google-services.json; only the plugin (below) needs the config file.
     implementation platform("com.google.firebase:firebase-bom:33.7.0")
     implementation "com.google.firebase:firebase-messaging"
+    // Firebase / Google Analytics for Firebase: measures app usage and conversions
+    // (first_open, purchase, …) for Google Ads App install campaigns, and feeds GA4.
+    // Auto-collects once app/google-services.json is present (same conditional plugin as FCM
+    // below). Uses the advertising ID — declared via AD_ID permission in AndroidManifest.xml.
+    implementation "com.google.firebase:firebase-analytics"
 
     // Native Google Sign-In (Credential Manager) — the WebView's "Continue with
     // Google" on native calls a bridge that uses these instead of a web redirect,
