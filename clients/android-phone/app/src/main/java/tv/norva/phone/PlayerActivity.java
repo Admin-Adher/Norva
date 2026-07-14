@@ -103,6 +103,12 @@ public class PlayerActivity extends Activity {
     private String itemType;
     private String itemId;
     private String subKey; // SharedPreferences key for the per-title subtitle choice
+    // H1 fix: the native player otherwise reports position only on a graceful
+    // online finish(), so backgrounding/standby/kill (and ALL offline playback,
+    // which is launched without a result) loses the position. We persist it to
+    // SharedPreferences on onPause/onStop/onUserLeaveHint; MainActivity flushes any
+    // pending position to cloud history on its next foreground.
+    private boolean gracefulResultEmitted = false;
     private int resumeSeconds = 0;
     private boolean resumeApplied = false;
     private boolean endedNaturally = false;   // reached STATE_ENDED → web autoplays next episode
@@ -931,6 +937,47 @@ public class PlayerActivity extends Activity {
     }
 
     /**
+     * Persist the live position to SharedPreferences so a non-graceful exit
+     * (background/standby/kill) — or any offline play, which is launched without a
+     * result — doesn't lose it. Best-effort; skipped once an online finish() has
+     * emitted an authoritative result that onActivityResult will relay to cloud.
+     */
+    private void persistPendingProgress() {
+        try {
+            if (gracefulResultEmitted) return;
+            if (player == null || itemId == null || itemId.isEmpty()) return;
+            long pos = Math.max(0, player.getCurrentPosition() / 1000);
+            if (pos <= 0) return;
+            long dur = player.getDuration() > 0 ? player.getDuration() / 1000 : 0;
+            getSharedPreferences("norva_mobile", MODE_PRIVATE).edit()
+                    .putString("pending_progress_sourceId", sourceId == null ? "" : sourceId)
+                    .putString("pending_progress_itemType", itemType == null ? "" : itemType)
+                    .putString("pending_progress_itemId", itemId)
+                    .putLong("pending_progress_pos", pos)
+                    .putLong("pending_progress_dur", dur)
+                    .apply();
+        } catch (Exception ignored) { /* best-effort */ }
+    }
+
+    private void clearPendingProgress() {
+        try {
+            getSharedPreferences("norva_mobile", MODE_PRIVATE).edit()
+                    .remove("pending_progress_sourceId")
+                    .remove("pending_progress_itemType")
+                    .remove("pending_progress_itemId")
+                    .remove("pending_progress_pos")
+                    .remove("pending_progress_dur")
+                    .apply();
+        } catch (Exception ignored) { }
+    }
+
+    @Override
+    protected void onStop() {
+        super.onStop();
+        persistPendingProgress();
+    }
+
+    /**
      * Hand the final position back to MainActivity, which persists it to the
      * cloud history for cross-device resume. Runs on every exit path.
      */
@@ -967,6 +1014,12 @@ public class PlayerActivity extends Activity {
                 data.putExtra("selectedVariantSourceId", pendingVariantSourceId);
             }
             if (data != null) setResult(RESULT_OK, data);
+            // Online exits are relayed to cloud by MainActivity.onActivityResult, so
+            // drop any pending copy. Offline playback is launched WITHOUT a result
+            // (DownloadsActivity.startActivity), so we deliberately keep the pending
+            // record — onStop persisted it and MainActivity flushes it to cloud on its
+            // next foreground, which is how a downloaded title's progress syncs.
+            if (!isLocal) { gracefulResultEmitted = true; clearPendingProgress(); }
         } catch (Exception ignored) { /* result is best-effort */ }
         super.finish();
     }
@@ -974,6 +1027,7 @@ public class PlayerActivity extends Activity {
     @Override
     protected void onPause() {
         super.onPause();
+        persistPendingProgress();
         // Keep playing while in Picture-in-Picture; only pause when truly backgrounded.
         boolean inPip = Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && isInPictureInPictureMode();
         if (player != null && !inPip) player.pause();
@@ -984,6 +1038,7 @@ public class PlayerActivity extends Activity {
     @Override
     protected void onUserLeaveHint() {
         super.onUserLeaveHint();
+        persistPendingProgress();
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
         if (player == null || !player.isPlaying()) return;
         try { enterPictureInPictureMode(buildPipParams()); } catch (Exception ignored) { }
