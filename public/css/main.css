@@ -2875,26 +2875,6 @@ video::cue {
   padding-right: 0;
 }
 
-.norva-setup-sync-panel .source-sync-milestone {
-  min-height: 56px;
-  padding: clamp(8px, 1.1vh, 11px) clamp(10px, 1.3vw, 14px);
-}
-
-.norva-setup-sync-panel .source-sync-milestone small,
-.norva-setup-sync-panel .source-sync-found-note,
-.norva-setup-sync-panel .source-sync-notify-note {
-  font-size: clamp(0.78rem, 0.92vw, 0.9rem);
-  line-height: 1.28;
-}
-
-.norva-setup-sync-panel .source-sync-notify-note {
-  margin: 0;
-  padding: 10px 12px;
-  border: 1px solid rgba(96, 165, 250, 0.18);
-  border-radius: var(--radius-md);
-  background: rgba(37, 99, 235, 0.1);
-}
-
 
 /* Source Sections */
 .source-section {
