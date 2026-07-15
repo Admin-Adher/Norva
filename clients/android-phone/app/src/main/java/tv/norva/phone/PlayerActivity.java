@@ -372,6 +372,7 @@ public class PlayerActivity extends Activity {
                 }
                 if (state == Player.STATE_READY) {
                     errHandler.removeCallbacks(bufferWatchdog);
+                    watchdogRetried = false;   // healthy playback re-grants the re-prepare budget (mirror TV's playRetries reset)
                     if (errorPanel != null) errorPanel.setVisibility(View.GONE);
                     if (!resumeApplied && resumeSeconds > 0) {
                         resumeApplied = true;
