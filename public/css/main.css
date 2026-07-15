@@ -16192,6 +16192,11 @@ html.tv-mode #page-movies .genre-bucket-grid .dashboard-card:focus {
 .tv-launch-screen {
   display: none;
 }
+/* Safety net: the "who's watching?" / profile-setup overlay (.np-overlay) MUST render
+   above the TV launch splash. Otherwise the picker is hidden behind the splash on
+   Android TV, the viewer can't pick, ensureSelected() never resolves, and the splash
+   sticks forever. The higher-specificity selector wins regardless of stylesheet order. */
+html.tv-launching .np-overlay { z-index: 2147483001; }
 html.tv-launching .tv-launch-screen {
   position: fixed;
   inset: 0;

@@ -49,6 +49,11 @@ class App {
     }
 
     async init() {
+        // Failsafe: the launch splash must never outlive the boot. If any cloud call
+        // hangs or an interactive step stalls, force the splash down after 12s so an
+        // Android TV can't sit on "Preparing your cinema" forever. finishTvLaunchScreen
+        // is idempotent, so the normal (faster) path is unaffected.
+        window.setTimeout(() => { try { this.finishTvLaunchScreen(); } catch (_) { /* noop */ } }, 12000);
         // On the hosted web app, Norva Account is the product entry point.
         const host = window.location.hostname;
         const isRemote = host !== 'localhost' && host !== '127.0.0.1' && host !== '';
@@ -77,11 +82,18 @@ class App {
         window.NorvaTrace?.log?.('checkCloudAccess() — entitlements (served from boot cache if seeded)');
         if (!await this.checkCloudAccess()) return;
         window.NorvaTrace?.log?.('checkCloudAccess() done');
+        // Drop the TV launch splash BEFORE the profile step. The "who's watching?" /
+        // profile-setup overlay would otherwise render UNDER the launch splash (which
+        // has a near-max z-index), so on Android TV the viewer can't see or pick a
+        // profile, ensureSelected()'s promise never resolves, and the splash sticks
+        // forever on "Preparing your cinema" (browsers have no TV splash, so they were
+        // unaffected). The picker is a real interactive screen, not the auth flicker the
+        // splash hides. finishTvLaunchScreen() schedules its own fade and returns at once.
+        this.finishTvLaunchScreen();
         // Netflix-style "who's watching": pick a profile before entering the app.
         try { if (window.NorvaProfiles?.ensureSelected) await window.NorvaProfiles.ensureSelected(); } catch (_) { }
         // Surface the always-visible navbar profile avatar (one-tap switcher).
         try { if (window.NorvaProfiles?.refreshNavAvatar) await window.NorvaProfiles.refreshNavAvatar(); } catch (_) { }
-        this.finishTvLaunchScreen();
         window.NorvaTrace?.log?.('app shell ready — profile picked, router/page renders next. NorvaTrace.summary() for the full table.');
         this.applyCatalogAvailability(null);
         this.startCloudWarmKeep();
