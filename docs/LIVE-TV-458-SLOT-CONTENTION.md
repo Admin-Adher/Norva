@@ -234,20 +234,26 @@ adversarial 22 agents → 15 findings corrigés), et déployés sur `main`**.
 
 ### ⚠️ Étape ops manuelle requise (propriétaire)
 Le **rapporteur gateway** est **inerte** tant que la variable d'env
-**`NORVA_EDGE_CALLBACK_BASE`** n'est pas posée dans le service **Railway**
-(media-gateway) :
+**`NORVA_EDGE_CALLBACK_BASE`** n'est pas posée pour le service media-gateway :
 ```
 NORVA_EDGE_CALLBACK_BASE=https://oupsceccxsonaalhueff.supabase.co/functions/v1/norva-playback
 ```
-Sans elle, le verrou fonctionne quand même (touches session/événement/
-historique + crons de nuit + lecteur), mais le cas « spectateur live web
-au-delà de 5 min » n'est pas couvert par le rapporteur. Log de démarrage
-gateway : `account-activity reporter IDLE — set NORVA_EDGE_CALLBACK_BASE…`.
+La **plomberie repo est désormais en place** : la variable est câblée dans
+`ops/hetzner/media/docker-compose.media.yml` (`NORVA_EDGE_CALLBACK_BASE:
+${NORVA_EDGE_CALLBACK_BASE:-}`) et documentée dans `.env.example`. Il ne reste
+qu'à **poser la valeur** dans `.env.media` (Hetzner) ou dans le dashboard
+**Railway** si le gateway y tourne encore, puis **redéployer**. Sans elle, le
+verrou fonctionne quand même (touches session/événement/historique + crons de
+nuit + lecteur), mais le cas « spectateur live web au-delà de 5 min » n'est pas
+couvert par le rapporteur. Log de démarrage gateway : `account-activity reporter
+IDLE — set NORVA_EDGE_CALLBACK_BASE…`.
 
 ## 8. Suivi restant
 
 - [x] Point 1 + Point 2 implémentés, revus, déployés.
-- [ ] **Poser `NORVA_EDGE_CALLBACK_BASE` dans Railway** (couverture complète).
+- [ ] **Poser la valeur de `NORVA_EDGE_CALLBACK_BASE`** dans `.env.media`
+      (Hetzner) ou Railway + redéployer (câblage compose/`.env.example` déjà en
+      place ; couverture complète).
 - [ ] Différable : keepalive session lecture native ; signalement des
       téléchargements (slot tenu des heures, zéro télémétrie).
 - [ ] Fin du prêt : réactiver crons 79/80 (`cron.alter_job(job_id:=79/80,

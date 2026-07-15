@@ -37,6 +37,14 @@ services:
       GATEWAY_TOKEN: ${GATEWAY_TOKEN}
       # Residential egress proxy (anti-ban), same as Railway config if used.
       PROXY_URL: ${PROXY_URL:-}
+      # Edge base URL for the "account-activity" reporter, which keeps the provider's
+      # single-connection busy-lock accurate for the sessions the edge writers don't
+      # cover (live-web / native playback beyond ~5 min). Point at the norva-playback
+      # function base, e.g. https://<supabase-ref>.supabase.co/functions/v1/norva-playback
+      # (or the self-hosted API host's /functions/v1/norva-playback). Empty → reporter
+      # stays IDLE (busy-lock still works via the edge session/event/history writers;
+      # no regression). Set it in .env.media to enable full coverage.
+      NORVA_EDGE_CALLBACK_BASE: ${NORVA_EDGE_CALLBACK_BASE:-}
     volumes:
       # HLS segment scratch. Put on fast local NVMe; it is ephemeral (cache-fill).
       - gateway-tmp:/tmp/norva-media-gateway

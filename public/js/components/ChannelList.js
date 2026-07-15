@@ -3069,6 +3069,7 @@ class ChannelList {
 
             // Get stream URL
             let streamUrl;
+            let playbackPayload = null; // resolver payload (carries the gateway fallbackUrl)
             let staleSessionId = null;
             if (channel.sourceType === 'xtream') {
                 // Get stream format from player settings (server-side) or fallback
@@ -3111,6 +3112,7 @@ class ChannelList {
                     ...(forceLiveTranscode ? { liveForceTranscode: '1' } : {})
                 });
                 streamUrl = result.url;
+                playbackPayload = result;
                 channel.cloudPlaybackSessionId = result.sessionId || null;
                 // Cloud source UUID resolved during session creation — used for
                 // live telemetry (the player must send the UUID, not the local id).
@@ -3136,9 +3138,12 @@ class ChannelList {
                 }
             } catch (e) { /* grouping is best-effort */ }
 
-            // Play channel
+            // Play channel. Pass the resolver payload (3rd arg) so the native player
+            // receives the gateway byte-pipe fallbackUrl for LIVE too — the standalone
+            // VideoPlayer.play override reads playback.fallbackUrl. The browser player
+            // ignores the extra argument.
             if (window.app?.player) {
-                await window.app.player.play(channel, streamUrl);
+                await window.app.player.play(channel, streamUrl, playbackPayload);
             }
         });
         this._streamResolveQueue = resolveTask.catch((err) => {
