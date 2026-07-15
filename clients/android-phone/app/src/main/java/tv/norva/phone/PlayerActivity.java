@@ -99,6 +99,7 @@ public class PlayerActivity extends Activity {
     private boolean isLocal = false;     // offline (encrypted local file) playback
     private String fallbackUrl;          // gateway URL to retry with on a direct-URL refusal
     private boolean fallbackTried = false;
+    private boolean watchdogRetried = false; // one re-prepare budget for a silent no-data stall
     private String sourceId;
     private String itemType;
     private String itemId;
@@ -151,9 +152,29 @@ public class PlayerActivity extends Activity {
 
     private final Handler errHandler = new Handler(Looper.getMainLooper());
     private static final long BUFFER_TIMEOUT_MS = 35_000L; // "no data" watchdog
+    // A stream that connects but never delivers playable bytes throws NO
+    // PlaybackException, so it never reaches the onPlayerError recovery ladder. Drive
+    // the same recovery here: switch to the gateway fallback once, then a single
+    // re-prepare (the provider frees its lone slot ~8s after the prior drop), and only
+    // then surface the error — instead of dead-ending at the message.
     private final Runnable bufferWatchdog = new Runnable() {
         @Override
         public void run() {
+            if (fallbackUrl != null && !fallbackUrl.isEmpty() && !fallbackTried && player != null) {
+                switchToFallback();
+                return;
+            }
+            if (!watchdogRetried && player != null) {
+                watchdogRetried = true;
+                if (errorPanel != null) errorPanel.setVisibility(View.GONE);
+                errHandler.postDelayed(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (player != null) { player.prepare(); player.setPlayWhenReady(true); }
+                    }
+                }, 1500);
+                return;
+            }
             showStreamError(getString(R.string.player_no_data)
                     + (streamHost != null ? "\nHost: " + streamHost : ""));
         }
@@ -351,6 +372,7 @@ public class PlayerActivity extends Activity {
                 }
                 if (state == Player.STATE_READY) {
                     errHandler.removeCallbacks(bufferWatchdog);
+                    watchdogRetried = false;   // healthy playback re-grants the re-prepare budget (mirror TV's playRetries reset)
                     if (errorPanel != null) errorPanel.setVisibility(View.GONE);
                     if (!resumeApplied && resumeSeconds > 0) {
                         resumeApplied = true;
@@ -505,6 +527,7 @@ public class PlayerActivity extends Activity {
     private void retryPlayback() {
         if (player == null) return;
         fallbackTried = false;
+        watchdogRetried = false;
         errHandler.removeCallbacks(bufferWatchdog);
         if (errorPanel != null) errorPanel.setVisibility(View.GONE);
         streamHost = hostOf(originalUrl);
@@ -517,6 +540,7 @@ public class PlayerActivity extends Activity {
     /** Reload from the gateway fallback URL after a direct-URL refusal (e.g. provider 401). */
     private void switchToFallback() {
         fallbackTried = true;
+        watchdogRetried = false;      // fresh re-prepare budget for the fallback URL
         streamHost = hostOf(fallbackUrl);
         errHandler.removeCallbacks(bufferWatchdog);
         if (errorPanel != null) errorPanel.setVisibility(View.GONE);

@@ -498,11 +498,16 @@
         }
 
         if (window.VideoPlayer) {
-            VideoPlayer.prototype.play = async function (channel, streamUrl) {
+            VideoPlayer.prototype.play = async function (channel, streamUrl, playback) {
                 this.currentChannel = channel;
                 const resolved = await resolveStreamPayload(streamUrl);
                 if (!resolved.url) return;
-                nativePlay(resolved.url, channel?.name || 'Live TV', channelMeta(channel), 0, resolved.fallbackUrl, {
+                // Live resolves to a bare URL string (ChannelList passes result.url), so
+                // resolveStreamPayload yields fallbackUrl=null. Recover the gateway
+                // byte-pipe fallback from the resolver payload (3rd arg) so a native live
+                // channel gets the same direct→gateway recovery as VOD.
+                const fallbackUrl = resolved.fallbackUrl || (playback && playback.fallbackUrl) || null;
+                nativePlay(resolved.url, channel?.name || 'Live TV', channelMeta(channel), 0, fallbackUrl, {
                     variants: buildNativeVariants(channel),
                     activeStreamId: channel?.streamId != null ? String(channel.streamId) : ''
                 });

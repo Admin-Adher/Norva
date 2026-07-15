@@ -210,16 +210,45 @@ public class PlayerActivity extends Activity {
         public void run() { finish(); }
     };
 
-    // Surfaces a stuck stream (connected but no playable bytes) instead of a silent
-    // spinner at 00:00, so the failure is visible and screenshot-able.
+    // A stream that connects but never delivers playable bytes (single-slot provider
+    // busy, a residential-IP refusal that dangles the socket, a dead link) sits in
+    // STATE_BUFFERING and throws NO PlaybackException — so it never reaches the
+    // onPlayerError recovery ladder. Drive the SAME recovery from here: switch to the
+    // gateway fallback once, then a single re-prepare (the provider frees its lone slot
+    // ~8s after the prior connection drops), and only then surface + report the error.
     private final Runnable bufferWatchdog = new Runnable() {
         @Override
         public void run() {
+            // 1) Gateway byte-pipe fallback — the recovery this exact failure was built
+            //    for. onPlayerError reaches it only on a thrown IO error; a silent stall
+            //    raises none, so trigger it from here too (once).
+            if (fallbackUrl != null && !fallbackUrl.isEmpty() && !fallbackTried && player != null) {
+                switchToFallback();
+                return;
+            }
+            // 2) Already on the fallback (or none available): one delayed re-prepare, in
+            //    case the provider's single slot has just been released.
+            if (playRetries < 1 && player != null) {
+                playRetries++;
+                spinner.setVisibility(View.VISIBLE);
+                errorView.setVisibility(View.GONE);
+                handler.postDelayed(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (player != null) { player.prepare(); player.play(); }
+                    }
+                }, 1500);
+                return;
+            }
+            // 3) Exhausted: surface the failure AND report it, so silent stalls stop being
+            //    invisible to LocalServer playback-status health tracking (only thrown
+            //    errors reported 'broken' before).
             spinner.setVisibility(View.GONE);
             errorView.setText("No data received (35s timeout).\n"
                     + "The provider accepts the connection but sends no playable stream."
                     + (streamHost != null ? "\nHost: " + streamHost : ""));
             errorView.setVisibility(View.VISIBLE);
+            reportPlaybackStatus("broken", "no_data_timeout");
         }
     };
 
