@@ -10,6 +10,7 @@
 //   /user/:id/role       { role }    → set app_metadata.role to 'admin' | 'user'
 //   /user/:id/suspend    { suspend } → ban (suspend) or unban the account
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { sendTelegram, tgEscape } from "../_shared/telegram.ts";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -101,9 +102,11 @@ async function ping(url: string): Promise<JsonRecord> {
 const ALERT_COOLDOWN_MS = 6 * 3600 * 1000;
 
 async function runOpsAlertSweep(): Promise<JsonRecord> {
-  // 1) Snapshot counters (free) + staleness of the snapshot itself.
+  // 1) Snapshot counters (free) + staleness of the snapshot itself. The `cron` blob carries
+  // per-job last_run/last_status (refresh_admin_dashboard's lateral join) — the alert
+  // conditions below use THAT, not the 24h trailing counters.
   const { data: cache } = await admin.from("admin_dashboard_cache")
-    .select("overview, refreshed_at").eq("id", 1).maybeSingle();
+    .select("overview, cron, refreshed_at").eq("id", 1).maybeSingle();
   const ov = (cache?.overview ?? {}) as JsonRecord;
   const refreshedAt = cache?.refreshed_at ? new Date(String(cache.refreshed_at)).getTime() : 0;
   const snapshotAgeMin = refreshedAt ? Math.round((Date.now() - refreshedAt) / 60000) : Infinity;
@@ -122,34 +125,60 @@ async function runOpsAlertSweep(): Promise<JsonRecord> {
   if (snapshotAgeMin > 20) problems.push({ key: "snapshot_stale", detail: `Snapshot admin non rafraîchi depuis ${snapshotAgeMin} min (cron admin-dashboard-refresh en panne ?)` });
   if (Number(ov.sources_error) > 0) problems.push({ key: "sources_error", detail: `${ov.sources_error} source(s) en erreur de sync` });
   if (Number(ov.sources_incomplete) > 0) problems.push({ key: "sources_incomplete", detail: `${ov.sources_incomplete} source(s) en sync incomplète (VOD sans variants)` });
-  if (Number(ov.cron_fails_24h) > 0) problems.push({ key: "cron_fails", detail: `${ov.cron_fails_24h} échec(s) de cron sur 24 h` });
+  // Cron health: alert on jobs whose MOST RECENT run failed (an outage happening NOW), not
+  // on the 24h trailing count — a one-off self-healed failure (e.g. a transient deadlock,
+  // recovered on the very next run) otherwise kept re-alerting every 6h until the failed row
+  // aged out of the 24h window. The per-job last_status is already in the snapshot's cron blob.
+  const crons = Array.isArray(cache?.cron) ? (cache!.cron as JsonRecord[]) : [];
+  const failingNow = crons.filter((c) => c.active !== false && String(c.last_status ?? "") === "failed");
+  if (failingNow.length) problems.push({ key: "cron_fails", detail: `${failingNow.length} cron(s) actuellement en échec (dernier run failed) : ${failingNow.map((c) => c.jobname).join(", ")}` });
   if (gw && gw.ok !== true) problems.push({ key: "gateway_down", detail: `Gateway injoignable (${String(gw.error ?? "timeout")})` });
   if (rl && rl.ok !== true) problems.push({ key: "relay_down", detail: `Relay injoignable (${String(rl.error ?? "timeout")})` });
-  // Billing conditions (counters come from the snapshot — see refresh_admin_dashboard).
-  if (Number(ov.billing_cron_fails_24h) > 0) problems.push({ key: "billing_cron_fails", detail: `${ov.billing_cron_fails_24h} échec(s) sur les crons BILLING (norva-revolut-billing / norva-lifecycle) en 24 h — le moteur de revenu est peut-être en panne` });
+  // Billing crons: same last-run-failed semantics, matched by name (jobname-agnostic to the
+  // Stancer→Revolut rename — the old billing_cron_fails_24h counter still filtered the retired
+  // 'norva-stancer-billing' jobname, so Revolut billing failures were invisible to alerting).
+  const billingFailing = failingNow.filter((c) => /revolut-billing|stancer-billing|lifecycle/.test(String(c.jobname ?? "")));
+  if (billingFailing.length) problems.push({ key: "billing_cron_fails", detail: `Cron BILLING actuellement en échec : ${billingFailing.map((c) => c.jobname).join(", ")} — le moteur de revenu est peut-être en panne` });
   if (Number(ov.billing_past_due) >= 3) problems.push({ key: "billing_past_due", detail: `${ov.billing_past_due} abonnement(s) en échec de paiement (past_due/grace) simultanés` });
   if (st && st.ok !== true) problems.push({ key: "revolut_down", detail: `API Revolut injoignable (${String(st.error ?? "timeout")}) — les paiements ne passent plus` });
   if (Number(ov.support_stale_24h) > 0) problems.push({ key: "support_stale", detail: `${ov.support_stale_24h} ticket(s) support sans réponse depuis plus de 24 h` });
 
   // 4) Cooldown state: alert only keys not alerted within the window; heal (delete) resolved keys.
-  const { data: stateRows } = await admin.from("admin_alert_state").select("key, last_alerted_at");
+  // `details` is read too so the recovery notice can say WHAT was resolved.
+  const { data: stateRows } = await admin.from("admin_alert_state").select("key, last_alerted_at, details");
   const state = new Map<string, number>();
-  for (const r of (stateRows ?? []) as JsonRecord[]) state.set(String(r.key), new Date(String(r.last_alerted_at)).getTime());
+  const stateDetails = new Map<string, string>();
+  for (const r of (stateRows ?? []) as JsonRecord[]) {
+    state.set(String(r.key), new Date(String(r.last_alerted_at)).getTime());
+    if (r.details) stateDetails.set(String(r.key), String(r.details));
+  }
   const activeKeys = new Set(problems.map((p) => p.key));
   const healed = [...state.keys()].filter((k) => !activeKeys.has(k));
   if (healed.length) await admin.from("admin_alert_state").delete().in("key", healed);
   const toAlert = problems.filter((p) => (state.get(p.key) ?? 0) < Date.now() - ALERT_COOLDOWN_MS);
 
-  // 5) Email every admin (app_metadata.role) about the newly-alertable problems.
-  let emailed: string[] = [];
-  if (toAlert.length) {
-    const resendKey = Deno.env.get("RESEND_API_KEY") ?? "";
-    const from = Deno.env.get("AUTH_EMAIL_FROM") ?? "Norva <noreply@norva.tv>";
+  // 5) Notify — Telegram (instant, founder's phone) + email every admin. The cooldown state
+  // is updated when EITHER channel delivered, so a Resend outage can't turn Telegram into a
+  // 15-min spam loop (and vice versa).
+  const resendKey = Deno.env.get("RESEND_API_KEY") ?? "";
+  const from = Deno.env.get("AUTH_EMAIL_FROM") ?? "Norva <noreply@norva.tv>";
+  let recipients: string[] = [];
+  if (toAlert.length || healed.length) {
     const { data: admins } = await admin.rpc("admin_alert_recipients").then(
       (r) => r,
       () => ({ data: null }),
     );
-    const recipients = Array.isArray(admins) ? (admins as string[]) : [];
+    recipients = Array.isArray(admins) ? (admins as string[]) : [];
+  }
+
+  let emailed: string[] = [];
+  if (toAlert.length) {
+    let delivered = false;
+    const tgOk = await sendTelegram(
+      `⚠️ <b>Norva Ops — ${toAlert.length} alerte${toAlert.length > 1 ? "s" : ""}</b>\n` +
+      toAlert.map((p) => `• ${tgEscape(p.detail)}`).join("\n"),
+    );
+    if (tgOk) delivered = true;
     if (resendKey && recipients.length) {
       const items = toAlert.map((p) => `<li style="margin:6px 0;color:#e8e8ee">${p.detail}</li>`).join("");
       const html = `<body style="margin:0;padding:24px;background:#0a0c11;font-family:Arial,sans-serif">
@@ -165,15 +194,39 @@ async function runOpsAlertSweep(): Promise<JsonRecord> {
           headers: { Authorization: `Bearer ${resendKey}`, "Content-Type": "application/json" },
           body: JSON.stringify({ from, to: recipients, subject: `⚠️ Norva Ops — ${toAlert.map((p) => p.key).join(", ")}`, html }),
         });
-        if (res.ok) {
-          emailed = recipients;
-          const now = new Date().toISOString();
-          await admin.from("admin_alert_state").upsert(
-            toAlert.map((p) => ({ key: p.key, last_alerted_at: now, details: p.detail })),
-            { onConflict: "key" },
-          );
-        }
-      } catch (_) { /* email failure → no state update → retried next sweep */ }
+        if (res.ok) { emailed = recipients; delivered = true; }
+      } catch (_) { /* email failure → maybe telegram delivered; state update decided below */ }
+    }
+    if (delivered) {
+      const now = new Date().toISOString();
+      await admin.from("admin_alert_state").upsert(
+        toAlert.map((p) => ({ key: p.key, last_alerted_at: now, details: p.detail })),
+        { onConflict: "key" },
+      );
+    }
+  }
+
+  // 6) Recovery notice — heal fires exactly once per incident (its state row was deleted
+  // above), so this can never spam. Tells the founder the incident is over instead of
+  // leaving the last ⚠️ as the final word.
+  if (healed.length) {
+    const lines = healed.map((k) => `• ${tgEscape(stateDetails.get(k) ?? k)}`).join("\n");
+    await sendTelegram(`✅ <b>Norva Ops — résolu</b>\n${lines}`);
+    if (resendKey && recipients.length) {
+      const items = healed.map((k) => `<li style="margin:6px 0;color:#d9f2e3">${stateDetails.get(k) ?? k}</li>`).join("");
+      const html = `<body style="margin:0;padding:24px;background:#0a0c11;font-family:Arial,sans-serif">
+        <div style="max-width:520px;margin:0 auto;background:#101913;border:1px solid #1f3327;border-radius:14px;padding:22px 26px">
+          <h2 style="margin:0 0 6px;color:#4ade80;font-size:18px">✅ Norva Ops — résolu</h2>
+          <p style="margin:0 0 14px;color:#9aa4b2;font-size:13px">Ces alertes ne sont plus actives (vérifié par le sweep 15 min).</p>
+          <ul style="margin:0 0 16px;padding-left:20px;font-size:14px">${items}</ul>
+        </div></body>`;
+      try {
+        await fetch("https://api.resend.com/emails", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${resendKey}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ from, to: recipients, subject: `✅ Norva Ops — résolu: ${healed.join(", ")}`, html }),
+        });
+      } catch (_) { /* best-effort */ }
     }
   }
 

@@ -14,6 +14,7 @@
 // possible, but tracked replies happen through the CRM (they land in the thread + email the client).
 
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { sendTelegram, tgEscape } from "../_shared/telegram.ts";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -73,6 +74,8 @@ async function sendMail(to: string[], subject: string, html: string, replyTo?: s
 }
 
 // Notify the support inbox about a new user message (creation or reply).
+// Email (Resend) + Telegram, both best-effort AFTER the ticket/message is stored —
+// notification loss must never lose the ticket itself.
 async function notifySupport(kind: "new" | "reply", ticketId: string, userEmail: string, subject: string, body: string): Promise<void> {
   const heading = kind === "new" ? "Nouveau ticket support" : "Réponse client sur un ticket";
   const html = shell(heading,
@@ -81,6 +84,11 @@ async function notifySupport(kind: "new" | "reply", ticketId: string, userEmail:
      Répondre depuis le CRM (fiche client + page Support) pour garder le fil tracé.`,
     { label: "Ouvrir le CRM", url: `${SITE_URL}/app#admin` });
   await sendMail([SUPPORT_INBOX], `[Support] ${subject}`, html, userEmail);
+  await sendTelegram(
+    `${kind === "new" ? "🎫 <b>Nouveau ticket support</b>" : "💬 <b>Réponse client — ticket</b>"}\n` +
+    `<b>${tgEscape(userEmail)}</b> — « ${tgEscape(subject.slice(0, 180))} »\n` +
+    `${tgEscape(body.slice(0, 500))}${body.length > 500 ? "…" : ""}`,
+  );
 }
 
 async function getUser(req: Request) {

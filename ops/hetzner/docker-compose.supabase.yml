@@ -350,6 +350,9 @@ services:
       NORVA_MEDIA_GATEWAY_TOKEN: ${NORVA_MEDIA_GATEWAY_TOKEN:-}
       NORVA_RELAY_BASE_URL: ${NORVA_RELAY_BASE_URL:-}
       RELAY_TOKEN_SECRET: ${RELAY_TOKEN_SECRET:-}
+      # Telegram ops channel (ops alerts + support tickets) — empty = silently off.
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
       NORVA_REVENUECAT_WEBHOOK_AUTH: ${NORVA_REVENUECAT_WEBHOOK_AUTH:-}
       SEND_EMAIL_HOOK_SECRET: ${SEND_EMAIL_HOOK_SECRET:-}
       # Billing / entitlements runtime gate (read by _shared/entitlements.ts).
