@@ -27,7 +27,11 @@
 --   dans .env.media de la machine gateway, puis :
 --   docker compose --env-file .env.media -f docker-compose.media.yml up -d
 --
---   docker exec -i norva-db psql -U postgres -d postgres -P pager=off \
+--   ⚠ LANCER EN supabase_admin (le superuser de l'image Supabase — `postgres` n'y est
+--   PAS superuser : il n'a ni la propriété des jobs cron ni l'UPDATE sur cron.job,
+--   d'où « permission denied for table job » constaté au run du 2026-07-16) :
+--
+--   docker exec -i norva-db psql -U supabase_admin -d postgres -P pager=off \
 --     < ops/hetzner/scripts/09-reopen-probe-windows.sql
 --
 -- ROLLBACK (revenir à l'état d'avant) : même UPDATE cron.job que ci-dessous avec
