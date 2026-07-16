@@ -3000,7 +3000,17 @@ class VideoPlayer {
      * Handle keyboard shortcuts
      */
     handleKeyboard(e) {
-        if (document.activeElement.tagName === 'INPUT') return;
+        // This listener lives on `document`, so it fires on EVERY page of the SPA. Two guards:
+        //  (a) Text fields — the old check only excluded INPUT, so space/f/m/k/arrows were
+        //      hijacked (preventDefault) inside every TEXTAREA / SELECT / contenteditable in
+        //      the app (ticket replies, admin notes…), making them impossible to type in.
+        //  (b) Own page inactive — don't toggle/seek a background live video from another page
+        //      (Movies, Series, Admin…). Bails only when the video IS in a .page that is not
+        //      active (unknown container → keep prior behaviour, never disable Live controls).
+        const ae = document.activeElement;
+        if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.tagName === 'SELECT' || ae.isContentEditable)) return;
+        const pg = this.video && this.video.closest && this.video.closest('.page');
+        if (pg && !pg.classList.contains('active')) return;
 
         switch (e.key) {
             case ' ':
