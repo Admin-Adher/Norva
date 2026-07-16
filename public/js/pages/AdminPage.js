@@ -958,7 +958,11 @@ class AdminPage {
         o = o || {};
         const problems = (Array.isArray(sources) ? sources : []).filter(s => s.incomplete === true || s.sync_error || s.sync_status === 'sync_error');
         const criticals = (Number(o.billing_past_due) > 0 ? 1 : 0) + problems.length; // actionable, high-severity
-        const warnings = (Number(o.cron_fails_24h) > 0 ? 1 : 0) + (Number(o.gensubs_failed) > 50 ? 1 : 0);
+        // Recovery-aware : cron_ko = jobs dont le DERNIER run est en échec. Un échec 24 h
+        // auto-réparé (dernier run OK) n'est plus un signal « Attention ». Fallback sur le
+        // volume brut tant que le snapshot n'expose pas cron_ko (cache pas encore rafraîchi).
+        const cronKo = o.cron_ko !== undefined ? Number(o.cron_ko) : Number(o.cron_fails_24h);
+        const warnings = (cronKo > 0 ? 1 : 0) + (Number(o.gensubs_failed) > 50 ? 1 : 0);
         const total = criticals + warnings;
         let statusTxt = 'Sain', statusCls = 'ok';
         if (criticals > 0) { statusTxt = 'Dégradé'; statusCls = 'alert'; }
@@ -993,7 +997,10 @@ class AdminPage {
         // Group alerts by family so a high volume stays scannable (paiement / crons / sources / sous-titres).
         const fam = { paiement: [], crons: [], sources: [], soustitres: [] };
         if (Number(o.billing_past_due) > 0) fam.paiement.push(sysCard('red', 'Critique', o.billing_past_due, 'client(s) en échec de paiement', 'finance'));
-        if (Number(o.cron_fails_24h) > 0) fam.crons.push(sysCard('red', 'À traiter', o.cron_fails_24h, 'échec(s) cron sur 24 h', 'systeme'));
+        // KO (dernier run en échec) = rouge « À traiter » ; échecs 24 h tous récupérés = info ambre.
+        const cronKo = o.cron_ko !== undefined ? Number(o.cron_ko) : Number(o.cron_fails_24h);
+        if (cronKo > 0) fam.crons.push(sysCard('red', 'À traiter', cronKo, 'cron(s) encore en échec (dernier run KO)', 'systeme'));
+        else if (Number(o.cron_fails_24h) > 0) fam.crons.push(sysCard('amber', 'Récupéré', o.cron_fails_24h, 'échec(s) cron sur 24 h — auto-réparé(s), dernier run OK', 'systeme'));
         if (Number(o.gensubs_failed) > 0) fam.soustitres.push(sysCard('amber', 'Mineur', o.gensubs_failed, 'sous-titre(s) IA en échec', 'systeme'));
         (sources || []).filter(s => s.incomplete === true || s.sync_error || s.sync_status === 'sync_error').forEach(s => {
             const kind = s.incomplete === true ? 'sync incomplète' : (s.sync_status || 'erreur');
@@ -2734,7 +2741,9 @@ class AdminPage {
         const stFound = enrich.reduce((a, r) => a + (Number(r.subtitle_found) || 0), 0);
         const muet = new Set(enrich.filter(r => this._enrichKind(r) === 'muet').map(r => r.panel)).size;
         const arret = new Set(enrich.filter(r => this._enrichKind(r) === 'arret').map(r => r.panel)).size;
-        const cronKo = cron.filter(c => Number(c.fails_24h) > 0).length;
+        // KO = le DERNIER run est encore en échec ; échec suivi d'un run OK = récupéré (info, pas alerte).
+        const cronKo = cron.filter(c => Number(c.fails_24h) > 0 && String(c.last_status) === 'failed').length;
+        const cronRec = cron.filter(c => Number(c.fails_24h) > 0 && String(c.last_status) !== 'failed').length;
         const covCls = coverage >= 90 ? 'ok' : coverage >= 60 ? 'warn' : 'alert';
         const tmdbBacklog = (Number(ov.tmdb_year_backlog) || 0) + (Number(ov.tmdb_unmatched) || 0) + (Number(ov.tmdb_unverified) || 0);
         const card = (v, l, cls, icon) => `<div class="kpi ${cls || ''}"><div class="kpi-hd"><div class="v">${v}</div><span class="kpi-ic">${icon}</span></div><div class="l">${l}</div></div>`;
@@ -2754,6 +2763,7 @@ class AdminPage {
                 `<span class="crm-hpill ${covCls === 'alert' ? 'bad' : ''}"><b>${coverage} %</b> audio</span>` +
                 `<span class="crm-hpill ${(muet + arret) > 0 ? 'bad' : ''}"><b>${n(muet + arret)}</b> à traiter</span>` +
                 `<span class="crm-hpill ${cronKo > 0 ? 'bad' : ''}"><b>${n(cronKo)}</b> crons KO</span>` +
+                (cronRec > 0 ? `<span class="crm-hpill"><b>${n(cronRec)}</b> échec(s) récupéré(s)</span>` : '') +
                 `<span class="crm-hpill"><b>${n(tmdbBacklog)}</b> backlog TMDB</span>`;
         }
     }
@@ -2771,7 +2781,9 @@ class AdminPage {
             else if (k === 'arret') inc.push({ p: 1, cls: 'warn', t: `⏸ Sondage à l'arrêt · ${esc(r.panel)} (${typeLbl(r)})`, d: `${n(r.never_probed)} titre(s) jamais sondé(s), 0 sondage en 24 h` });
             else if (k === 'slow') inc.push({ p: 2, cls: 'gray', t: `🐌 ETA > 1 an · ${esc(r.panel)} (${typeLbl(r)})`, d: `débit quasi nul — ${n(r.never_probed)} titre(s) en attente` });
         });
-        cron.filter(c => Number(c.fails_24h) > 0).forEach(c => inc.push({ p: 0, cls: '', t: `⏱ Cron en échec · ${esc(c.jobname)}`, d: `${n(c.fails_24h)} échec(s) sur 24 h` }));
+        cron.filter(c => Number(c.fails_24h) > 0).forEach(c => inc.push(String(c.last_status) === 'failed'
+            ? { p: 0, cls: '', t: `⏱ Cron en échec · ${esc(c.jobname)}`, d: `${n(c.fails_24h)} échec(s) sur 24 h, dernier run KO` }
+            : { p: 3, cls: 'gray', t: `⏱ Échec récupéré · ${esc(c.jobname)}`, d: `${n(c.fails_24h)} échec(s) sur 24 h, dernier run OK — auto-réparé` }));
         if (!inc.length) { el.innerHTML = '<div class="mot-inc-ok">✓ Aucun incident moteur — providers actifs, crons OK.</div>'; return; }
         inc.sort((a, b) => a.p - b.p);
         el.innerHTML = `<div class="kpi-gtitle" style="margin-bottom:10px">🚨 Incidents moteur (${n(inc.length)})</div><div class="mot-inc">` +
@@ -3412,11 +3424,13 @@ class AdminPage {
         if (sum) {
             const active = rows.filter(r => r.active !== false && Number(r.fails_24h) === 0).length;
             const paused = rows.filter(r => r.active === false).length;
-            const failing = rows.filter(r => Number(r.fails_24h) > 0).length;
+            const failing = rows.filter(r => Number(r.fails_24h) > 0 && String(r.last_status) === 'failed').length;
+            const recovered = rows.filter(r => Number(r.fails_24h) > 0 && String(r.last_status) !== 'failed').length;
             sum.innerHTML = `<div class="cron-sum">
                 <span class="badge green">${AdminPage.n(active)} actifs</span>
                 <span class="badge gray">${AdminPage.n(paused)} en pause</span>
-                <span class="badge ${failing > 0 ? 'red' : 'gray'}">${AdminPage.n(failing)} en échec 24 h</span>
+                <span class="badge ${failing > 0 ? 'red' : 'gray'}">${AdminPage.n(failing)} encore en échec</span>
+                ${recovered > 0 ? `<span class="badge amber">${AdminPage.n(recovered)} récupéré(s) 24 h</span>` : ''}
             </div>`;
         }
         if (!rows.length) { el.innerHTML = '<div class="ssub">Aucun cron déclaré.</div>'; return; }
@@ -3434,11 +3448,13 @@ class AdminPage {
         let prevWin = null;
         const body = sorted.map(r => {
             const paused = r.active === false;
-            const failing = Number(r.fails_24h) > 0;
+            const failing = Number(r.fails_24h) > 0 && String(r.last_status) === 'failed';
+            const recovered = Number(r.fails_24h) > 0 && !failing;
             const newGroup = r.window !== prevWin;
             prevWin = r.window;
             const state = paused ? `<span class="badge gray">pause</span>`
-                : (failing ? `<span class="badge red">échecs</span>` : `<span class="badge green">actif</span>`);
+                : (failing ? `<span class="badge red">échecs</span>`
+                : recovered ? `<span class="badge amber">récupéré</span>` : `<span class="badge green">actif</span>`);
             const last = r.last_run ? new Date(r.last_run).toLocaleString('fr-FR') : '—';
             return `<tr class="${newGroup ? 'group-start' : ''} ${failing ? 'bad' : ''}">
                 <td>${winBadge(r.window)}</td>

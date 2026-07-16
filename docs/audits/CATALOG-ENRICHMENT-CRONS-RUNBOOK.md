@@ -214,5 +214,9 @@ select cron.unschedule('norva-catalog-reconcile');      -- stop reconcile
 -- job 84 (garde-fou) déjà supprimé le 2026-07-05 — ne plus le recréer (utiliser cron.alter_job).
 -- job 12 : cron.alter_job(12, schedule := '*/5 * * * *') pour revenir au rythme d'origine ;
 --          pour re-focaliser un compte : cron.alter_job(12, command := '…?…&user=<uuid>…')
---          (JAMAIS d'UPDATE cron.job direct → permission denied).
+--          (JAMAIS d'UPDATE cron.job direct → permission denied — règle du Supabase MANAGÉ).
+-- ⚠ Self-host Hetzner (2026-07-16) : c'est l'INVERSE — cron.alter_job y échoue même en
+--   superuser (« Job N does not exist or you don't own it », garde username = current_user,
+--   jobs recréés sous un autre rôle) ; utiliser l'UPDATE direct de cron.job (le trigger
+--   cron.job_cache_invalidate notifie le launcher). Cf. ops/hetzner/scripts/09-reopen-probe-windows.sql.
 ```

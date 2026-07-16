@@ -30,10 +30,10 @@
 --   docker exec -i norva-db psql -U postgres -d postgres -P pager=off \
 --     < ops/hetzner/scripts/09-reopen-probe-windows.sql
 --
--- ROLLBACK (revenir à l'état d'avant) :
---   select cron.alter_job(jobid, schedule => '1-4-window-d-origine') … (cf. AVANT
---   imprimé ci-dessous) ; update provider_footprint_policy set
---   max_probes_per_hour = 40 where identity_key = 'd8453dc1-…';
+-- ROLLBACK (revenir à l'état d'avant) : même UPDATE cron.job que ci-dessous avec
+--   les schedules de la section AVANT imprimée ; et
+--   update provider_footprint_policy set max_probes_per_hour = 40
+--    where identity_key = 'd8453dc1-4a95-4538-a05f-749df4f7c588';
 -- =============================================================================
 \pset pager off
 
@@ -48,19 +48,32 @@ order by jobname;
 select identity_key, mode, max_probes_per_hour from provider_footprint_policy;
 
 \echo ''
-\echo '================ [A] Fenêtre jour 6-23 restaurée (films audio) ================'
--- alter par NOM (les jobid ont bougé à la restauration Hetzner) ; 0 ligne = job absent (sain).
-select cron.alter_job(jobid, schedule => '*/3 6-23 * * *')    from cron.job where jobname = 'norva-audio-langs-untagged';
-select cron.alter_job(jobid, schedule => '3-58/5 6-23 * * *') from cron.job where jobname = 'norva-audio-langs-jeremy';
-select cron.alter_job(jobid, schedule => '1-59/3 6-23 * * *') from cron.job where jobname = 'norva-audio-airo-promax';
-select cron.alter_job(jobid, schedule => '2-59/6 6-23 * * *') from cron.job where jobname = 'norva-audio-airo-opplex';
-select cron.alter_job(jobid, schedule => '4-59/12 6-23 * * *') from cron.job where jobname = 'norva-audio-airo-king365';
-select cron.alter_job(jobid, schedule => '5-59/30 6-23 * * *') from cron.job where jobname = 'norva-audio-airo-airysat';
+\echo '================ [A] Fenêtres restaurées (films 6-23 · Ninja 24/7) ================'
+-- UPDATE direct de cron.job (par NOM — les jobid ont bougé à la restauration Hetzner).
+-- Pourquoi pas cron.alter_job : sa garde `username = current_user` rejette même un superuser
+-- quand le job appartient à un autre rôle (« Job N does not exist or you don't own it » —
+-- constaté sur la box, jobs recréés sous un autre rôle). En self-host superuser, l'UPDATE
+-- direct est sûr : le trigger cron.job_cache_invalidate (vérifié ci-dessous) notifie le
+-- launcher pg_cron, qui recharge la cadence immédiatement. (L'interdit « pas d'UPDATE direct »
+-- du runbook était un artefact de permissions du Supabase MANAGÉ, pas un problème mécanique.)
+select tgname as trigger_invalidation_present from pg_trigger where tgrelid = 'cron.job'::regclass;
 
-\echo ''
-\echo '================ [A] Ninja 24/7 (le cap horaire est le régulateur) ================'
-select cron.alter_job(jobid, schedule => '4-59/12 * * * *') from cron.job where jobname = 'norva-audio-airo-ninja';
-select cron.alter_job(jobid, schedule => '9-59/12 * * * *') from cron.job where jobname = 'norva-audio-airo-ninja-series';
+update cron.job as j
+   set schedule = v.s
+  from (values
+    ('norva-audio-langs-untagged', '*/3 6-23 * * *'),
+    ('norva-audio-langs-jeremy',   '3-58/5 6-23 * * *'),
+    ('norva-audio-airo-promax',    '1-59/3 6-23 * * *'),
+    ('norva-audio-airo-opplex',    '2-59/6 6-23 * * *'),
+    ('norva-audio-airo-king365',   '4-59/12 6-23 * * *'),
+    ('norva-audio-airo-airysat',   '5-59/30 6-23 * * *'),
+    -- Ninja 24/7 : le cap horaire (provider_footprint_policy) est le régulateur,
+    -- le mutex lecture gère le chevauchement (design « ré-activation domptée »).
+    ('norva-audio-airo-ninja',        '4-59/12 * * * *'),
+    ('norva-audio-airo-ninja-series', '9-59/12 * * * *')
+  ) as v(n, s)
+ where j.jobname = v.n
+ returning j.jobid, j.jobname, j.schedule;
 
 \echo ''
 \echo '================ [C] Cap Ninja 40 -> 60 probes/h ================'
@@ -81,6 +94,10 @@ where jobname in ('norva-audio-langs-untagged','norva-audio-langs-jeremy',
 order by jobname;
 select identity_key, mode, max_probes_per_hour from provider_footprint_policy;
 
+\echo ''
+\echo 'Vérif immédiate (si on est entre 06:00 et 23:59 UTC) : sous ~5 min un job de jour doit'
+\echo 'tirer — contrôler :  select jobname, status, start_time from cron.job_run_details'
+\echo '                     order by start_time desc limit 10;'
 \echo ''
 \echo 'Suivi sous 24-48 h : re-lancer 08-enrichment-audio-diag.sql — attendu :'
 \echo '  [E] sondes/jour x4-6 · [C] jamais_sonde en baisse nette · dashboard sans « provider muet »'

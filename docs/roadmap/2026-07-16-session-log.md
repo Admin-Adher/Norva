@@ -173,3 +173,21 @@ obsolète), §8 du doc 458 mis à jour (fenêtres soldées, valeur callback self
 **Attendu sous 24-48 h** (re-lancer le diag 08) : sondes/jour ×4-6, `jamais_sonde` en baisse
 nette, Ninja `hits_24h` ~1 200-1 400 sans 401/ban. Si un re-ban Ninja se manifeste malgré tout :
 rollback = re-poser `1-4` (état AVANT imprimé par le script 09) + cap 40.
+
+### §11-bis — deux correctifs post-application
+
+1. **Script 09 : `cron.alter_job` → UPDATE direct.** Sur la box, `cron.alter_job` a rejeté les
+   8 alters (« Job N does not exist or you don't own it ») : sa garde `username = current_user`
+   bloque même un superuser quand le job appartient à un autre rôle (jobs recréés à la
+   restauration Hetzner). Le script passe en **UPDATE direct de `cron.job`** (une instruction,
+   RETURNING, owner-agnostic) — sûr en self-host : le trigger `cron.job_cache_invalidate`
+   (impression de contrôle intégrée) notifie le launcher. Seul le cap 60/h était passé au 1ᵉʳ
+   run ; **le script corrigé doit être relancé**. Runbook amendé (la règle « jamais d'UPDATE
+   direct » était un artefact de permissions du Supabase managé).
+2. **Crons KO recovery-aware** (`20260716210000_cron_ko_recovery_aware.sql` + AdminPage v57) :
+   le deadlock unique du 15/07, auto-réparé, affichait « 1 cron KO / À traiter / Attention »
+   pendant 24 h. Nouveau champ `overview.cron_ko` = jobs ACTIFS dont le **dernier** run est
+   `failed`. Front : Cockpit (état global + alerte rouge sur `cron_ko`, carte ambre « Récupéré »
+   sinon, fallback pré-migration conservé), Moteur (carte/pilules KO vs récupérés, incident
+   gris « Échec récupéré », tableau crons badge ambre + résumé). Testé : fonction exécutée sur
+   PG16 stub (cron_ko=1/fails=2 sur le scénario mixte) + 17 assertions headless Chromium.
