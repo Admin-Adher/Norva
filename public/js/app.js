@@ -381,11 +381,10 @@ class App {
             this.maybeShowTrialBanner();
             this.maybeShowBillingIssueBanner();
             this.maybeShowRegionPrompt();
-            this.maybeShowSupportReplyBanner();
         });
-        // Support replies can land mid-session — re-check every 5 min (the banner id-guard
-        // and the seen-watermark make repeat calls cheap no-ops).
-        setInterval(() => this.maybeShowSupportReplyBanner(), 5 * 60 * 1000);
+        // New content and support replies can land mid-session — refresh the bell inbox
+        // (catalog events + support replies) every 5 min so the unread badge stays live.
+        setInterval(() => this.refreshNotifications().catch(() => {}), 5 * 60 * 1000);
 
         // Keep the catalogue fresh: a few seconds after launch, silently re-sync
         // any provider that's gone stale. Non-blocking, and cheap when nothing
@@ -451,17 +450,58 @@ class App {
     async refreshNotifications() {
         const bell = document.getElementById('nav-bell');
         if (!bell || !window.NorvaCloud?.contentEvents?.inbox) return;
-        const res = await window.NorvaCloud.contentEvents.inbox();
-        this._notifEvents = (res && res.events) || [];
-        this._notifUnread = Number(res && res.unread) || 0;
+        // One inbox, two feeds: catalog "what's new" events + support replies (merged,
+        // newest first). Support entries deep-link into their ticket from the dropdown.
+        const [res, support] = await Promise.all([
+            window.NorvaCloud.contentEvents.inbox(),
+            this._fetchSupportReplies().catch(() => []),
+        ]);
+        const catalog = ((res && res.events) || []).map(e => ({ ...e, kind: 'catalog' }));
+        this._notifEvents = [...support, ...catalog]
+            .sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
+        this._notifUnread = (Number(res && res.unread) || 0) + support.filter(e => !e.seen_at).length;
         bell.hidden = false;
         bell.setAttribute('aria-expanded', 'false');
         const dot = document.getElementById('nav-bell-dot');
-        if (dot) dot.hidden = this._notifUnread === 0;
+        if (dot) {
+            // Count pill (not a bare dot): "anything new in here" is visible at a glance.
+            dot.textContent = this._notifUnread > 9 ? '9+' : (this._notifUnread > 0 ? String(this._notifUnread) : '');
+            dot.hidden = this._notifUnread === 0;
+        }
         if (!this._notifBound) {
             this._notifBound = true;
             bell.addEventListener('click', (e) => { e.stopPropagation(); this.toggleNotifications(); });
         }
+    }
+
+    // Support replies as inbox entries. Read/unread comes from the 'norva-support-seen'
+    // watermark (newest server last_message_at the user has seen — written by support.html
+    // on load/poll and by opening this inbox). Server timestamps only, string-compared —
+    // client clock skew can't hide or replay an entry. Signed-out → empty (no noise).
+    async _fetchSupportReplies() {
+        try {
+            if (!(window.NorvaAuth && NorvaAuth.getSession && NorvaAuth.getSession())) return [];
+            const token = await NorvaAuth.getAccessToken();
+            if (!token) return [];
+            const base = ((NorvaAuth.supabaseUrl || '')).replace(/\/+$/, '');
+            const res = await fetch(base + '/functions/v1/norva-support/mine?tickets=only', {
+                headers: { apikey: NorvaAuth.publishableKey || '', Authorization: 'Bearer ' + token }
+            });
+            if (!res.ok) return [];
+            const data = await res.json().catch(() => ({}));
+            const seen = localStorage.getItem('norva-support-seen') || '';
+            return (Array.isArray(data.tickets) ? data.tickets : [])
+                .filter(t => t.last_from === 'admin')
+                .slice(0, 10)
+                .map(t => ({
+                    kind: 'support',
+                    id: 'support:' + t.id,
+                    ticket_id: t.id,
+                    summary: `Support replied to “${String(t.subject || '').slice(0, 60)}”`,
+                    created_at: t.last_message_at,
+                    seen_at: String(t.last_message_at || '') > seen ? null : (t.last_message_at || ''),
+                }));
+        } catch (_) { return []; }
     }
 
     toggleNotifications() {
@@ -481,16 +521,22 @@ class App {
             return `${Math.floor(s / 86400)}d ago`;
         };
         const esc = (t) => String(t == null ? '' : t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+        // Support entries are links straight into their ticket (support.html auto-expands
+        // & scrolls ?ticket=); catalog entries stay informational.
+        const here = location.pathname + location.search + location.hash;
+        const item = (e) => e.kind === 'support'
+            ? `<a class="norva-notif-item${e.seen_at ? '' : ' unread'}" href="/support.html?ticket=${encodeURIComponent(e.ticket_id)}&returnTo=${encodeURIComponent(here)}">
+                    <div class="norva-notif-summary">💬 ${esc(e.summary || 'Support replied')}</div>
+                    <div class="norva-notif-time">${esc(timeAgo(e.created_at))} · tap to open the ticket</div>
+                </a>`
+            : `<div class="norva-notif-item${e.seen_at ? '' : ' unread'}">
+                    <div class="norva-notif-summary">✨ ${esc(e.summary || 'New content')}</div>
+                    <div class="norva-notif-time">${esc(timeAgo(e.created_at))}</div>
+                </div>`;
         panel.innerHTML = `
             <div class="norva-notif-head">Notifications</div>
             <div class="norva-notif-list">
-                ${events.length
-                ? events.map(e => `
-                    <div class="norva-notif-item${e.seen_at ? '' : ' unread'}">
-                        <div class="norva-notif-summary">✨ ${esc(e.summary || 'New content')}</div>
-                        <div class="norva-notif-time">${esc(timeAgo(e.created_at))}</div>
-                    </div>`).join('')
-                : '<div class="norva-notif-empty">No notifications yet.</div>'}
+                ${events.length ? events.map(item).join('') : '<div class="norva-notif-empty">No notifications yet.</div>'}
             </div>`;
         document.body.appendChild(panel);
         // Position under the bell.
@@ -500,12 +546,20 @@ class App {
             panel.style.right = `${Math.round(window.innerWidth - r.right)}px`;
         } catch (_) { /* default CSS position */ }
         bell?.setAttribute('aria-expanded', 'true');
-        // Opening the inbox marks the unseen entries read.
-        const unseenIds = events.filter(e => !e.seen_at).map(e => e.id).filter(Boolean);
-        if (unseenIds.length) {
-            window.NorvaCloud.contentEvents.markSeen(unseenIds);
+        // Opening the inbox marks the unseen entries read — each feed via its own mechanism:
+        // catalog ids → contentEvents.markSeen (NEVER send it the synthetic support ids),
+        // support → advance the shared 'norva-support-seen' watermark (server timestamps).
+        const unseenIds = events.filter(e => !e.seen_at && e.kind !== 'support').map(e => e.id).filter(Boolean);
+        if (unseenIds.length) window.NorvaCloud.contentEvents.markSeen(unseenIds);
+        const unseenSupport = events.filter(e => e.kind === 'support' && !e.seen_at);
+        if (unseenSupport.length) {
+            const newest = unseenSupport.reduce((m, e) => (String(e.created_at || '') > m ? String(e.created_at) : m), '');
+            try { if (newest) localStorage.setItem('norva-support-seen', newest); } catch (_) { /* private mode */ }
+        }
+        if (unseenIds.length || unseenSupport.length) {
             this._notifUnread = 0;
-            document.getElementById('nav-bell-dot')?.setAttribute('hidden', '');
+            const dot = document.getElementById('nav-bell-dot');
+            if (dot) { dot.textContent = ''; dot.setAttribute('hidden', ''); }
             events.forEach(e => { e.seen_at = e.seen_at || new Date().toISOString(); });
         }
         // Dismiss on outside click / Escape.
@@ -1225,84 +1279,6 @@ class App {
             close.style.cssText = 'background:transparent;border:0;color:#d9c08a;font-size:16px;cursor:pointer;line-height:1';
             close.addEventListener('click', () => {
                 try { sessionStorage.setItem('norva-billing-banner-dismissed', '1'); } catch (_) { }
-                bar.remove();
-            });
-
-            bar.appendChild(span);
-            bar.appendChild(link);
-            bar.appendChild(close);
-            document.body.appendChild(bar);
-        } catch (_) { /* never break the app over a banner */ }
-    }
-
-    // In-app notice when support replied to one of the user's tickets — the email is easy
-    // to miss mid-session. The banner deep-links straight into the ticket (support.html
-    // auto-expands & scrolls ?ticket=). "Seen" watermark = 'norva-support-seen' in
-    // localStorage: the newest server last_message_at the user has seen — written by
-    // support.html on every load/poll, and by dismissing this banner (dismiss = read).
-    // Server timestamps only (string-compared ISO), so client clock skew can't hide a reply.
-    async maybeShowSupportReplyBanner() {
-        try {
-            // Not on the empty onboarding screen (same collision rule as the other banners).
-            if (this.sourceHealthSummary && ['not_configured', 'unknown'].includes(this.sourceHealthSummary.state)) return;
-            if (document.getElementById('norva-support-banner')) return;
-            if (!(window.NorvaAuth && NorvaAuth.getSession && NorvaAuth.getSession())) return;
-            const token = await NorvaAuth.getAccessToken();
-            if (!token) return;
-            const base = ((NorvaAuth.supabaseUrl || '')).replace(/\/+$/, '');
-            const res = await fetch(base + '/functions/v1/norva-support/mine?tickets=only', {
-                headers: { apikey: NorvaAuth.publishableKey || '', Authorization: 'Bearer ' + token }
-            });
-            if (!res.ok) return;
-            const data = await res.json().catch(() => ({}));
-            const tickets = Array.isArray(data.tickets) ? data.tickets : [];
-            const seen = localStorage.getItem('norva-support-seen') || '';
-            // A reply on a since-closed ticket still counts — the user hasn't read it.
-            const unseen = tickets.filter(t => t.last_from === 'admin' && String(t.last_message_at || '') > seen);
-            // Unread dot on the Settings "Contact support" button, kept in sync either way.
-            const supportBtn = document.getElementById('settings-support-btn');
-            if (supportBtn) {
-                let dot = supportBtn.querySelector('.support-unread-dot');
-                if (unseen.length && !dot) {
-                    dot = document.createElement('span');
-                    dot.className = 'support-unread-dot';
-                    dot.setAttribute('aria-label', 'New reply from support');
-                    dot.style.cssText = 'display:inline-block;width:8px;height:8px;border-radius:50%;background:#fb7185;vertical-align:middle;margin-left:7px';
-                    supportBtn.appendChild(dot);
-                } else if (!unseen.length && dot) dot.remove();
-            }
-            if (!unseen.length) return;
-            const newest = unseen.reduce((m, t) => (String(t.last_message_at) > m ? String(t.last_message_at) : m), '');
-
-            const here = location.pathname + location.search + location.hash;
-            const bar = document.createElement('div');
-            bar.id = 'norva-support-banner';
-            bar.setAttribute('role', 'status');
-            bar.style.cssText = 'position:fixed;left:50%;bottom:calc(16px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:9999;display:flex;align-items:center;gap:14px;max-width:calc(100% - 24px);padding:10px 16px;border-radius:999px;background:#0f2418;border:1px solid #2c6e49;color:#c9f2da;font:600 14px/1 Inter,system-ui,sans-serif;box-shadow:0 12px 40px rgba(0,0,0,.45)';
-
-            const span = document.createElement('span');
-            span.style.cssText = 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
-            const firstSubject = String(unseen[0].subject || '').slice(0, 60);
-            span.textContent = unseen.length === 1
-                ? `💬 Support replied to “${firstSubject}”`
-                : `💬 Support replied to ${unseen.length} of your tickets`;
-
-            const link = document.createElement('a');
-            // One reply → straight into that thread; several → the support page (all of them).
-            link.href = '/support.html?' + (unseen.length === 1 ? 'ticket=' + encodeURIComponent(unseen[0].id) + '&' : '') + 'returnTo=' + encodeURIComponent(here);
-            link.textContent = 'Read reply';
-            link.style.cssText = 'color:#7ef2b0;text-decoration:none;font-weight:700;white-space:nowrap';
-
-            const close = document.createElement('button');
-            close.type = 'button';
-            close.setAttribute('aria-label', 'Dismiss');
-            close.textContent = '✕';
-            close.style.cssText = 'background:transparent;border:0;color:#8fc9a8;font-size:16px;cursor:pointer;line-height:1';
-            close.addEventListener('click', () => {
-                // Dismiss = acknowledged: advance the watermark so this reply never re-nags
-                // (a NEWER reply will still notify).
-                try { localStorage.setItem('norva-support-seen', newest); } catch (_) { }
-                document.querySelector('#settings-support-btn .support-unread-dot')?.remove();
                 bar.remove();
             });
 

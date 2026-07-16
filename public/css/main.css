@@ -14166,6 +14166,32 @@ html.tv-mode .watch-next-episode .next-actions .btn {
   border: 2px solid var(--color-bg, #0a0a0f);
 }
 
+/* Bell badge upgrades to a COUNT pill when it carries text (unread count set by
+   refreshNotifications) — a bare dot was too easy to miss as "something new". */
+.nav-bell-dot:not(:empty) {
+  top: 0;
+  right: -2px;
+  width: auto;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.nav-bell-dot[hidden],
+.nav-devices-dot[hidden] { display: none; }
+
+/* Clickable inbox entries (support replies → deep-link into the ticket). */
+a.norva-notif-item { display: block; text-decoration: none; color: inherit; }
+a.norva-notif-item:hover,
+a.norva-notif-item:focus-visible { background: rgba(255, 255, 255, 0.06); }
+
 /* Author display:inline-flex above beats the UA [hidden] default; restore it
    (same gotcha the repo handles for .nav-profile / .region-picker-pop). */
 .nav-bell-btn[hidden],
