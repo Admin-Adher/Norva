@@ -13,8 +13,10 @@ Chantier unique cette session : **valider et durcir le dashboard admin après la
 | 5 | Finance CRM rail-agnostic + journaling des charges Revolut (G2/G3) | `556bd05` | `20260716130000_dashboard_finance_revolut_rail.sql`, `norva-revolut-billing/index.ts` |
 | 6 | Fiche + funnel Revolut-aware + route `/refund` (+ 2 bugs latents) | `234d8d0` | `20260716140000_fiche_funnel_revolut_rail.sql`, `norva-admin/index.ts`, `AdminPage.js`, `app.js` (`?v=52`), compose, healthcheck |
 | 7 | Comptes internes = plan `family`, durée indéterminée (invariant VIP) | `1b14496` | `20260716150000_internal_accounts_family_vip.sql` |
+| 8 | Value-adds Telegram : ping conversion + alerte échec renouvellement + digest hebdo | `d2b9354` | `norva-revolut-billing/index.ts`, `norva-admin/index.ts`, `20260716160000_weekly_business_digest_cron.sql` |
+| 9 | Rename ledger `cloud_stancer_payments` → `cloud_billing_ledger` (vue de compat) | `5721570` | `20260716170000_rename_ledger_cloud_billing.sql`, `norva-revolut-billing/index.ts`, `norva-admin/index.ts`, `norva-billing-webhook/index.ts`, healthcheck |
 
-Bump `?v=52` de `AdminPage.js` inclus dans le commit 6. (Le commit `22a9dab` / merge PR #206 « devices popover navbar » du même jour n'est **pas** de cette session.)
+Bump `?v=52` de `AdminPage.js` inclus dans le commit 6. (Le commit `22a9dab` / merge PR #206 « devices popover navbar » du même jour n'est **pas** de cette session.) Commits 8-9 ajoutés en fin de session (value-adds Telegram + nettoyage Stancer) — détail §8-9.
 
 ---
 
@@ -77,6 +79,19 @@ Migration `20260716150000_internal_accounts_family_vip.sql` : (a) **backfill** d
 
 ---
 
+## 8. Value-adds Telegram (`d2b9354`)
+
+Trois notifications proactives sur le même canal `sendTelegram()` :
+- **🎉 Ping conversion** (`norva-revolut-billing`) : quand un VRAI client (non-interne) convertit son trial en 1ᵉʳ prélèvement → Telegram instantané (email + plan + montant). Les comptes internes sont skippés (check `admin_internal_accounts`).
+- **💳 Alerte échec renouvellement** (`norva-revolut-billing`) : quand la charge d'un abonné réel est refusée → past_due, ping individuel (vs le seuil ≥3 du sweep ops). Les deux pings sont best-effort, ne bloquent jamais la facturation.
+- **📊 Digest business hebdo** (`norva-admin/weekly-digest` + cron lundi 07:00 UTC) : croissance, revenu (MRR/ARR, payants, essais, conversions, encaissé), support — lu depuis le cache admin. Le cron **clone la commande du job `norva-ops-alert`** (déjà pointée sur l'URL box + token) et swappe le chemin → matche l'URL self-hosted automatiquement, sans hardcoder de `*.supabase.co`.
+
+## 9. Rename du ledger : `cloud_stancer_payments` → `cloud_billing_ledger` (`5721570`)
+
+Le rail Stancer est retiré ; le nom était trompeur (c'est le ledger CROSS-RAIL). Renommé avec une **vue de compat** `cloud_stancer_payments` → `cloud_billing_ledger` (auto-updatable). Les **écrivains** edge (upserts revolut-billing + billing-webhook, insert refund admin) sont repointés sur la table réelle ; les **lecteurs SQL** (admin_finance, refresh_admin_dashboard, snapshot_admin_metrics, norva_funnel_daily, admin_user_billing) + norva-lifecycle passent par la vue, sans ré-emission. Vérifié sur PG16 : rename, SELECT via vue, upsert (table ET vue — l'`ON CONFLICT` passe même via la vue auto-updatable en PG16, donc zéro risque de fenêtre au déploiement), contrainte provider sous le nouveau nom, index renommés. ⚠️ **Ordre** : appliquer la migration PUIS déployer les edge.
+
+---
+
 ## Opérations faites en direct sur la box `norva-db` (hors commits)
 
 - **Migrations appliquées** (docker exec psql) : `20260716120000`, `20260716130000`, `20260716140000`, `20260716150000`.
@@ -93,6 +108,8 @@ Migration `20260716150000_internal_accounts_family_vip.sql` : (a) **backfill** d
 
 1. **Route refund — valider en live** sur la 1ʳᵉ vraie charge Revolut : l'endpoint `POST /api/orders/{id}/refund` (+ `Revolut-Api-Version: 2024-09-01`) n'a pas été testé contre l'API réelle. Le reste (garde admin, idempotence, ledger) est sûr.
 2. **Sécurité — roter le token bot Telegram** : le `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` ont été collés en clair dans la conversation (donc exposés dans l'historique + le shell). À régénérer via @BotFather, puis MAJ `ops/hetzner/.env` **et** `/etc/norva-netdata/health_alarm_notify.conf`.
-3. **(Optionnel) Nettoyage des références « Stancer » obsolètes** : renommer le ledger `cloud_stancer_payments` → `cloud_billing_ledger` (via vue de compat pour ne rien casser) + purger docs/commentaires. Migration prudente à part.
-4. **Fiche Revolut des 2 trials** : maintenant sur le rail `system`, leur fiche n'affiche plus de carte Revolut (c'est attendu — ils ont changé de rail).
-5. **Web** : déployé **automatiquement** par la CI à chaque push `main` (runs `234d8d0` + `1b14496` = ✅ success). Ne pas chercher à lancer `wrangler` sur la box. Recharger le CRM dans un **nouvel onglet** pour récupérer `AdminPage.js?v=52`.
+3. ~~Nettoyage des références « Stancer »~~ ✅ **FAIT** (`5721570`, §9) — ledger renommé en `cloud_billing_ledger` + vue de compat. `cloud_stancer_customers` (map carte Stancer morte) volontairement conservée (lue en coalesce par le CRM).
+4. **Digest hebdo — à vérifier après apply** : le cron `norva-weekly-digest` se crée en clonant `norva-ops-alert`. Contrôler `select jobname, schedule from cron.job where jobname='norva-weekly-digest';` et forcer un test : `POST norva-admin/weekly-digest` (Bearer backfill token) → un message doit arriver.
+5. **Fiche Revolut des 2 trials** : maintenant sur le rail `system`, leur fiche n'affiche plus de carte Revolut (c'est attendu — ils ont changé de rail).
+6. **Sécurité — roter le token bot Telegram** (déjà #2) : reste la seule action « à faire » côté secret.
+7. **Web** : déployé **automatiquement** par la CI à chaque push `main`. Ne pas chercher à lancer `wrangler` sur la box. Recharger le CRM dans un **nouvel onglet** pour récupérer `AdminPage.js?v=52`.
