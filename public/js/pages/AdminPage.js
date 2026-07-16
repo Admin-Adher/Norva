@@ -230,6 +230,16 @@ class AdminPage {
 /* Finance two-column rows (blocks paired side by side, like the mockup) */
 #page-admin .fin-cols{display:grid;grid-template-columns:1fr 1.08fr;gap:16px;margin-bottom:18px;align-items:stretch;}
 #page-admin .fin-cols > *{margin-bottom:0;}
+/* Cartes rail (Finance) : identité financière complète de chaque canal de paiement. */
+#page-admin .rail-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px;}
+#page-admin .rail-card{background:rgba(255,255,255,.015);border:1px solid var(--adm-line);border-radius:14px;padding:14px 16px 11px;}
+#page-admin .rail-card--revolut{border-color:rgba(91,124,250,.38);background:linear-gradient(158deg,rgba(91,124,250,.06),rgba(255,255,255,.01));}
+#page-admin .rail-card--store{border-color:rgba(62,207,142,.32);background:linear-gradient(158deg,rgba(62,207,142,.05),rgba(255,255,255,.01));}
+#page-admin .rail-hd{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px;}
+#page-admin .rail-share{font-size:11.5px;color:#9aa4b2;white-space:nowrap;}
+#page-admin .rail-mrr{font-size:25px;font-weight:800;letter-spacing:-.6px;font-variant-numeric:tabular-nums;}
+#page-admin .rail-net{font-size:11.5px;color:#9aa4b2;margin:2px 0 8px;cursor:help;}
+#page-admin .rail-card .kv-row{font-size:12.5px;padding:5.5px 0;}
 #page-admin .admin-cards.fin-mini{grid-template-columns:repeat(auto-fit,minmax(96px,1fr));gap:10px;}
 @media(max-width:900px){#page-admin .fin-cols{grid-template-columns:1fr;}}
 /* Header status line (executive read at the top of a page) */
@@ -1061,22 +1071,57 @@ class AdminPage {
         // revenue from Google Play / App Store mobile revenue.
         const railBadge = AdminPage.railBadge;
 
-        // Merge per-rail MRR/subscribers (by_rail) with per-rail cash collected (collected_by_rail).
+        // Merge every per-rail block (by_rail incl. trials, collected+refunded, conversions,
+        // upcoming) into one bucket per provider — the data behind each rail card.
         const railMap = {};
-        const railBucket = (k) => (railMap[k] || (railMap[k] = { provider: k, n: 0, mrr_cents: 0, unknown_n: 0, collected_cents: 0, collected_n: 0 }));
+        const railBucket = (k) => (railMap[k] || (railMap[k] = {
+            provider: k, n: 0, mrr_cents: 0, unknown_n: 0, trialing_n: 0, mrr_trial_cents: 0,
+            collected_cents: 0, collected_n: 0, refunded_cents: 0, conversions_7d: 0,
+            trial_48h_n: 0, trial_48h_cents: 0, renewals_7d_n: 0, renewals_7d_cents: 0,
+        }));
         (Array.isArray(f.by_rail) ? f.by_rail : []).forEach(r => {
             const b = railBucket(r.provider); b.n = Number(r.n) || 0; b.mrr_cents = Number(r.mrr_cents) || 0; b.unknown_n = Number(r.unknown_n) || 0;
+            b.trialing_n = Number(r.trialing_n) || 0; b.mrr_trial_cents = Number(r.mrr_trial_cents) || 0;
         });
         (Array.isArray(f.collected_by_rail) ? f.collected_by_rail : []).forEach(r => {
-            const b = railBucket(r.provider); b.collected_cents = Number(r.cents) || 0; b.collected_n = Number(r.n) || 0;
+            const b = railBucket(r.provider); b.collected_cents = Number(r.cents) || 0; b.collected_n = Number(r.n) || 0; b.refunded_cents = Number(r.refunded_cents) || 0;
         });
-        const railList = Object.values(railMap).sort((a, b) => (b.mrr_cents - a.mrr_cents) || (b.collected_cents - a.collected_cents));
-        const railRows = railList.map(r => `<tr>
-            <td>${railBadge(r.provider)}</td>
-            <td class="num">${n(r.n)}</td>
-            <td class="num">${money(r.mrr_cents)}${r.unknown_n > 0 ? ` <span class="pacct" title="Abonnés sans montant connu">+${n(r.unknown_n)} ?</span>` : ''}</td>
-            <td class="num">${money(r.collected_cents)}</td>
-        </tr>`).join('');
+        (Array.isArray(f.conversions_by_rail) ? f.conversions_by_rail : []).forEach(r => { railBucket(r.provider).conversions_7d = Number(r.n) || 0; });
+        (Array.isArray(f.upcoming_by_rail) ? f.upcoming_by_rail : []).forEach(r => {
+            const b = railBucket(r.provider);
+            b.trial_48h_n = Number(r.trial_48h_n) || 0; b.trial_48h_cents = Number(r.trial_48h_cents) || 0;
+            b.renewals_7d_n = Number(r.renewals_7d_n) || 0; b.renewals_7d_cents = Number(r.renewals_7d_cents) || 0;
+        });
+        const railList = Object.values(railMap).sort((a, b) => (b.mrr_cents - a.mrr_cents) || (b.mrr_trial_cents - a.mrr_trial_cents) || (b.collected_cents - a.collected_cents));
+
+        // Net estimé après commission — ESTIMATION (hors taxes) : ~1 % PSP Revolut ;
+        // 15 % stores mobiles (palier Small Business < 1 M$/an). Ajuster ici si les taux changent.
+        const RAIL_FEES = { revolut: 0.01, google_play: 0.15, apple_app_store: 0.15 };
+        const totalMrr = railList.reduce((s, r) => s + r.mrr_cents, 0);
+        const railCard = (r) => {
+            const fee = RAIL_FEES[r.provider];
+            const isStore = r.provider === 'google_play' || r.provider === 'apple_app_store';
+            const cls = r.provider === 'revolut' ? 'rail-card--revolut' : isStore ? 'rail-card--store' : '';
+            const share = totalMrr > 0 && r.mrr_cents > 0 ? Math.round(100 * r.mrr_cents / totalMrr) + ' % du MRR'
+                : (r.trialing_n > 0 ? 'pipeline essais' : '—');
+            const kv = (l, v2) => `<div class="kv-row"><span class="kv-l">${l}</span><span class="kv-v">${v2}</span></div>`;
+            const feePct = fee ? Math.round(fee * 100) : 0;
+            const net = fee && r.mrr_cents > 0
+                ? `<div class="rail-net" title="Estimation hors taxes — commission ${isStore ? 'du store' : 'PSP'} ≈ ${feePct} %">≈ ${money(Math.round(r.mrr_cents * (1 - fee)))} net après commission (−${feePct} %)</div>` : '';
+            return `<div class="rail-card ${cls}">
+                <div class="rail-hd">${railBadge(r.provider)}<span class="rail-share">${share}</span></div>
+                <div class="rail-mrr">${money(r.mrr_cents)}<span class="pacct" style="font-size:12px;font-weight:600"> MRR</span></div>
+                ${net}
+                ${kv('👤 Payants', n(r.n) + (r.unknown_n > 0 ? ` <span class="pacct" title="Abonnés sans montant connu">+${n(r.unknown_n)} ?</span>` : ''))}
+                ${kv('⏳ Essais en cours', n(r.trialing_n) + (r.mrr_trial_cents > 0 ? ` <span class="pacct">· ${money(r.mrr_trial_cents)} potentiels</span>` : ''))}
+                ${kv('💰 Encaissé 30 j', money(r.collected_cents) + (r.refunded_cents > 0 ? ` <span class="badge red" title="Remboursements sur 30 j">− ${money(r.refunded_cents)}</span>` : ''))}
+                ${kv('📊 Conversions 7 j', n(r.conversions_7d))}
+                ${kv('⏰ Essais à prélever &lt; 48 h', n(r.trial_48h_n) + (r.trial_48h_cents > 0 ? ` <span class="pacct">· ${money(r.trial_48h_cents)}</span>` : ''))}
+                ${kv('🔁 Renouvellements &lt; 7 j', n(r.renewals_7d_n) + (r.renewals_7d_cents > 0 ? ` <span class="pacct">· ${money(r.renewals_7d_cents)}</span>` : ''))}
+                <div class="ssub" style="margin-top:9px;font-size:11px">${r.provider === 'revolut' ? 'Prélèvements exécutés par le cron Norva (norva-revolut-billing).' : isStore ? 'Facturation gérée par le store — Norva reçoit les webhooks RevenueCat.' : 'Rail interne / manuel — hors facturation automatique.'}</div>
+            </div>`;
+        };
+        const railCards = railList.map(railCard).join('');
 
         const payRows = (Array.isArray(f.recent_payments) ? f.recent_payments : []).map(p => `<tr class="user-row" data-user-id="${esc(p.user_id)}" tabindex="0" aria-label="Voir la fiche de ${esc(p.email || p.user_id)}" title="Voir la fiche">
             <td>${esc(day(p.at))}</td><td>${esc(p.email || p.user_id)}</td>
@@ -1100,7 +1145,11 @@ class AdminPage {
                 ${card(n(f.conversions_7d), 'Conversions 7 j', '', 'conversions_7d', '📊')}
                 ${card(money(f.mrr_trial_cents), 'MRR potentiel essais', 'muted', null, '⏳', 'Revenu mensuel projeté si tous les essais en cours se convertissent — non encore encaissé.')}
             </div></div>
-            <!-- 2 ── Risque revenu : tout ce qui menace le revenu, regroupé ── -->
+            <!-- 2 ── Vue par rail : d'où vient (et viendra) le revenu — web Revolut vs stores ── -->
+            <div class="kpi-group"><div class="kpi-gtitle">💳 Revenu par rail — 🌐 web (Revolut) vs 📱 stores mobiles</div>
+                ${railCards ? `<div class="rail-cards">${railCards}</div>` : '<div class="ssub">Aucun abonnement ni essai — les cartes Revolut / Google Play / App Store apparaîtront ici avec les premiers clients.</div>'}
+            </div>
+            <!-- 3 ── Risque revenu : tout ce qui menace le revenu, regroupé ── -->
             <div class="kpi-group kpi-group--risk ${anyRisk ? 'has-risk' : ''}"><div class="kpi-gtitle">⚠️ Risque revenu — cliquer un statut pour ouvrir la liste</div><div class="admin-cards">
                 ${statusCard(n(pastDue), 'Échecs paiement', 'past_due', pastDue > 0 ? 'alert' : 'ok', '💳', stateChip(pastDue > 0, true))}
                 ${statusCard(n(cancelPending), 'Annulations prévues', 'cancel_pending', cancelPending > 0 ? 'alert' : 'ok', '📅', stateChip(cancelPending > 0, false))}
@@ -1109,34 +1158,31 @@ class AdminPage {
                 ${card(n(up.renewals_7d_n), 'Renouvellements < 7 j' + amtNote(up.renewals_7d_cents), '', null, '🔁')}
                 ${Number(f.discounts_pending) > 0 ? card(n(f.discounts_pending), 'Remises 50% en attente', '', null, '🎟️') : ''}
             </div></div>
-            <!-- 3 ── Analyse ── -->
+            <!-- 4 ── Analyse ── -->
             <div class="fin-cols">
                 <div class="kpi-group"><div class="kpi-gtitle">👥 Abonnés — cliquer pour ouvrir la liste</div><div class="admin-cards fin-mini">
                     ${statusCard(n(counts.trialing), 'En essai', 'trialing', 'ok', '⏳')}
                     ${statusCard(n(counts.active), 'Actifs payants', 'active', 'ok', '👤')}
                     ${Number(f.mrr_unknown_n) > 0 ? card(n(f.mrr_unknown_n), 'Sans montant connu (manuel/store)', 'muted', null, '🗄️', 'Abonnés actifs dont le montant n\'est pas connu côté Norva (paiement manuel ou store mobile).') : ''}
                 </div></div>
-                <div class="admin-block"><h2>💳 Revenu par rail — web (Revolut) vs mobile (stores mobiles)</h2><div class="scroll">
-                    ${railRows ? `<table><thead><tr><th>Rail</th><th class="num">Abonnés</th><th class="num">MRR</th><th class="num">Encaissé 30 j</th></tr></thead><tbody>${railRows}</tbody></table>` : '<div class="ssub">Aucun abonnement — la répartition Revolut / Google Play / App Store s\'affichera ici dès les premiers paiements.</div>'}
-                </div></div>
-            </div>
-            <div class="fin-cols">
                 <div class="admin-block"><h2>📊 MRR par plan, période & rail</h2><div class="scroll">
                     ${planRows ? `<table><thead><tr><th>Plan</th><th>Période</th><th>Rail</th><th class="num">Abonnés</th><th class="num">MRR</th></tr></thead><tbody>${planRows}</tbody></table>` : '<div class="ssub">Aucun abonnement payant.</div>'}
                 </div></div>
+            </div>
+            <div class="fin-cols">
                 <div class="admin-block"><h2>🔀 Funnel de conversion (30 j)</h2>
                     ${funnelData.length ? hbars(funnelData, '') : '<div class="ssub">Aucune donnée funnel sur 30 j.</div>'}
                 </div>
-            </div>
-            <div class="admin-block"><h2>🛑 Annulations & rétention</h2>
-                <div class="admin-cards fin-mini" style="margin-bottom:16px">
-                    ${card(n(cancelsTotal), 'Annulations (total)', '', null, '🛑')}
-                    ${card(n(savesTotal), 'Clients sauvés', savesTotal > 0 ? 'ok' : '', null, '💚', 'Clients ayant renoncé à annuler après une contre-offre.')}
-                    ${saveRate != null ? card(saveRate + ' %', 'Taux de sauvetage', saveRate >= 20 ? 'ok' : '', null, '🎯') : ''}
+                <div class="admin-block"><h2>🛑 Annulations & rétention</h2>
+                    <div class="admin-cards fin-mini" style="margin-bottom:16px">
+                        ${card(n(cancelsTotal), 'Annulations (total)', '', null, '🛑')}
+                        ${card(n(savesTotal), 'Clients sauvés', savesTotal > 0 ? 'ok' : '', null, '💚', 'Clients ayant renoncé à annuler après une contre-offre.')}
+                        ${saveRate != null ? card(saveRate + ' %', 'Taux de sauvetage', saveRate >= 20 ? 'ok' : '', null, '🎯') : ''}
+                    </div>
+                    ${reasonData.length ? `<div class="kpi-gtitle" style="margin:0 0 8px">Raisons d'annulation</div>${hbars(reasonData, 'warn')}` : '<div class="ssub">Aucune annulation enregistrée — les raisons s\'accumuleront ici.</div>'}
                 </div>
-                ${reasonData.length ? `<div class="kpi-gtitle" style="margin:0 0 8px">Raisons d'annulation</div>${hbars(reasonData, 'warn')}` : '<div class="ssub">Aucune annulation enregistrée — les raisons s\'accumuleront ici.</div>'}
             </div>
-            <!-- 4 ── Ops : log opérationnel + export ── -->
+            <!-- 5 ── Ops : log opérationnel + export ── -->
             <div class="admin-block"><h2>🧾 Derniers paiements (50) <button id="fin-csv" class="mini-btn" title="Télécharger les 50 derniers paiements au format CSV">⬇ Exporter CSV</button></h2><div class="scroll">
                 ${payRows ? `<table><thead><tr><th>Date</th><th>Client</th><th>Rail</th><th>Type</th><th>Statut</th><th class="num">Montant</th></tr></thead><tbody>${payRows}</tbody></table>` : '<div class="ssub">Aucun paiement.</div>'}
             </div></div>`;
