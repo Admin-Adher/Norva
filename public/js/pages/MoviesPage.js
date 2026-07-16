@@ -2329,9 +2329,17 @@ class MoviesPage {
         // Make sure the panel reflects THIS card even if the preview debounce hasn't fired.
         this.showMovieDetails(group, ordered[0], { versions: ordered, isTvPreview: true });
         // OK/commit ENTERS the fiche so the viewer can navigate it (Play, versions, favorite,
-        // more-like-this) rather than auto-playing. Land on the primary action (Play/Resume);
-        // fall back to the versions list, then Favorite, if it isn't ready yet.
+        // more-like-this) rather than auto-playing.
         this._loadPanelExtras();
+        this._focusPanelPrimary();
+    }
+
+    // Land the D-pad ring on the fiche's primary action (Play/Resume); fall back to the
+    // versions list, then Favorite, if it isn't ready yet. Shared by the grid commit
+    // (_tvCommitCard) and external committed opens (Home rails / global search / restore
+    // via showMovieDetails) — the docked TV panel is a split-preview that tvNavigation
+    // deliberately never anchors into, so every committed entry must move the ring itself.
+    _focusPanelPrimary() {
         requestAnimationFrame(() => {
             const panel = this.detailsPanel;
             if (!panel || panel.classList.contains('hidden')) return;
@@ -2535,6 +2543,25 @@ class MoviesPage {
             setTimeout(() => {
                 this.detailsPanel?.querySelector('.movie-versions-section')?.scrollIntoView({ block: 'start' });
             }, 50);
+        }
+
+        // External committed open on TV — Home rails, Movies-page rails (they route through
+        // Home), global search, fiche restore: every internal grid path passes isTvPreview,
+        // so a bare TV call here means the user explicitly picked THIS title elsewhere. The
+        // docked panel is a split-preview tvNavigation never anchors into; without moving the
+        // ring in, the D-pad stays in the grid and the very first arrow press re-previews
+        // another card OVER the fiche the user asked for. Mirror _tvCommitCard: sync the
+        // preview/extras guards and land the ring on the primary action (or the versions list
+        // when the caller asked for it). Version switches keep the user's place, and a ring
+        // already inside the panel is never yanked.
+        if (isTv && !isTvPreview && !isVersionSwitch) {
+            this._lastPreviewCard = null;
+            this._extrasLoadedFor = this._movieKey(movie); // extras just rendered inline above
+            const ae = document.activeElement;
+            if (!(ae && ae !== document.body && this.detailsPanel.contains(ae))) {
+                if (focusVersions) this._focusVersionsList();
+                else this._focusPanelPrimary();
+            }
         }
     }
 

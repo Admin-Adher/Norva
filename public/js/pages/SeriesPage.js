@@ -3029,6 +3029,25 @@ class SeriesPage {
         this.pageEl?.classList.add('series-detail-open');
         this.container.classList.add('hidden');
         this.detailsPanel.classList.remove('hidden');
+        // TV: anchor the D-pad ring inside the fiche. tvNavigation's detailObserver only
+        // anchors on a hidden→visible transition of this panel — an open while a fiche is
+        // ALREADY visible (Home rail / global search / recommendation while browsing a
+        // fiche) has no transition, so the ring stayed stranded outside (or on a removed
+        // launcher) and the first arrow press navigated the page behind the fiche.
+        // Never yank a ring that is already inside the panel (in-fiche interactions), and
+        // let the focusVersions flow do its own placement.
+        if (this._isTvMode() && !isVersionSwitch && !focusVersions) {
+            requestAnimationFrame(() => {
+                if (this.detailsPanel.classList.contains('hidden')) return;
+                const ae = document.activeElement;
+                if (ae && ae !== document.body && this.detailsPanel.contains(ae)) return;
+                const target = (!this.primaryActionBtn?.disabled && this.primaryActionBtn)
+                    || this.detailsPanel.querySelector('.series-back-btn, .series-secondary-action, button:not([disabled])');
+                if (!target?.isConnected) return;
+                target.focus({ preventScroll: true });
+                target.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+            });
+        }
         if (!isVersionSwitch) {
             this.detailsPanel.scrollTop = 0;
             // Opening a DIFFERENT title (not a version switch): tear down any armed "Up next"
