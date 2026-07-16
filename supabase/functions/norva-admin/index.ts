@@ -9,6 +9,7 @@
 //   /user/:id/resend-confirmation   → re-send the signup confirmation email
 //   /user/:id/role       { role }    → set app_metadata.role to 'admin' | 'user'
 //   /user/:id/suspend    { suspend } → ban (suspend) or unban the account
+//   /user/:id/refund     { pi_id }   → merchant-initiated Revolut refund of a captured charge
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { sendTelegram, tgEscape } from "../_shared/telegram.ts";
 
@@ -18,6 +19,10 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? Deno.env.get("SUPABASE_SECRET_KEY") ?? "";
 const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") ?? Deno.env.get("SUPABASE_PUBLISHABLE_KEY") ?? "";
 if (!SUPABASE_URL || !SERVICE_KEY) throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
+
+// Revolut Merchant API (same secret/base every payment function reads — edge secrets are project-wide).
+const REVOLUT_SECRET_KEY = Deno.env.get("REVOLUT_SECRET_KEY") ?? "";
+const REVOLUT_API_BASE = (Deno.env.get("REVOLUT_API_BASE") ?? "https://sandbox-merchant.revolut.com").replace(/\/+$/, "");
 
 const admin = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { autoRefreshToken: false, persistSession: false } });
 
@@ -60,6 +65,27 @@ function json(req: Request, data: unknown, status = 200) {
 async function logEvent(userId: string, kind: string, summary: string, actor: string | null, meta: JsonRecord = {}) {
   try { await admin.from("admin_events").insert({ user_id: userId, kind, summary, actor, meta }); }
   catch (_) { /* best-effort audit */ }
+}
+
+// Merchant-initiated refund of a Revolut order. Mirrors norva-revolut-billing's charge call
+// (new Merchant API + version header — the legacy /api/1.0 payment path 404s). Refunds the given
+// amount in cents (USD). Returns Revolut's raw outcome so the caller can journal + surface it.
+async function revolutRefund(orderId: string, amountCents: number): Promise<{ ok: boolean; status: number; body: JsonRecord }> {
+  const res = await fetch(`${REVOLUT_API_BASE}/api/orders/${encodeURIComponent(orderId)}/refund`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${REVOLUT_SECRET_KEY}`,
+      "Content-Type": "application/json",
+      "Accept": "application/json",
+      "Revolut-Api-Version": "2024-09-01",
+    },
+    body: JSON.stringify({ amount: amountCents, currency: "USD" }),
+    signal: AbortSignal.timeout(12_000),
+  });
+  const text = await res.text();
+  let parsed: unknown = text;
+  try { parsed = JSON.parse(text); } catch (_) { /* keep raw */ }
+  return { ok: res.ok, status: res.status, body: (parsed ?? {}) as JsonRecord };
 }
 
 // Infra URLs live server-side (edge secrets first, else the cloud_runtime_config table). We only need
@@ -333,6 +359,62 @@ Deno.serve(async (req) => {
       if (error) return json(req, { error: error.message }, 400);
       await logEvent(userId, "admin_action", "Email de confirmation renvoyé", actorEmail);
       return json(req, { ok: true, message: "Email de confirmation renvoyé." });
+    }
+
+    // ── action: refund — merchant-initiated Revolut refund of a captured charge ──
+    // The only rail with an admin refund route (Stancer retired). Idempotent: refuses a
+    // second refund of the same order. Refunds the payment's full amount unless a smaller
+    // amount_cents is given. Journals a `refund` row into the cross-rail ledger + timeline.
+    if (action === "refund") {
+      if (!REVOLUT_SECRET_KEY) return json(req, { error: "Revolut non configuré (REVOLUT_SECRET_KEY absent)." }, 503);
+      const piId = String(body.pi_id ?? "").trim();
+      if (!piId) return json(req, { error: "pi_id requis" }, 400);
+
+      // Load the target payment, scoped to THIS user (no cross-user refunds).
+      const { data: pay, error: payErr } = await admin
+        .from("cloud_stancer_payments")
+        .select("pi_id,user_id,kind,amount,currency,status,provider,order_id,provider_payment_id")
+        .eq("pi_id", piId).eq("user_id", userId).maybeSingle();
+      if (payErr) return json(req, { error: "lookup failed: " + payErr.message }, 500);
+      if (!pay) return json(req, { error: "Paiement introuvable pour ce client." }, 404);
+      if ((pay.provider ?? "stancer") !== "revolut") return json(req, { error: "Remboursement dispo uniquement sur le rail Revolut." }, 400);
+      if (pay.status !== "captured") return json(req, { error: "Seul un paiement encaissé peut être remboursé." }, 400);
+      const orderId = String(pay.order_id ?? "").trim();
+      if (!orderId) return json(req, { error: "order_id manquant sur ce paiement — remboursement impossible." }, 400);
+
+      const full = Number(pay.amount) || 0;
+      const amountCents = body.amount_cents != null ? Math.round(Number(body.amount_cents)) : full;
+      if (!Number.isFinite(amountCents) || amountCents <= 0 || amountCents > full) {
+        return json(req, { error: `Montant invalide (1..${full} cents).` }, 400);
+      }
+
+      // Idempotency: one refund ledger row per order → refuse a re-refund (guards double money-out).
+      const refundPi = `rfnd_${orderId}`;
+      const { data: existing } = await admin
+        .from("cloud_stancer_payments").select("pi_id").eq("pi_id", refundPi).maybeSingle();
+      if (existing) return json(req, { error: "Ce paiement a déjà été remboursé." }, 409);
+
+      const r = await revolutRefund(orderId, amountCents);
+      if (!r.ok) {
+        const detail = JSON.stringify(r.body).slice(0, 300);
+        console.error("[norva-admin] refund failed", r.status, detail);
+        return json(req, { error: `Revolut a refusé le remboursement (HTTP ${r.status}).`, detail }, 502);
+      }
+
+      // Journal the refund (kind='refund' → excluded from `collected`, shown in the fiche history).
+      // supabase-js resolves with { error } rather than throwing; the money already moved either way.
+      const { error: insErr } = await admin.from("cloud_stancer_payments").insert({
+        pi_id: refundPi, user_id: userId, kind: "refund",
+        amount: amountCents, currency: (pay.currency ?? "usd"), status: "refunded",
+        provider: "revolut", order_id: orderId, provider_payment_id: pay.provider_payment_id ?? null,
+      });
+      if (insErr) console.error("[norva-admin] refund ledger insert failed", insErr.message);
+
+      const cur = String(pay.currency ?? "usd").toUpperCase();
+      await logEvent(userId, "refund", `Remboursement Revolut ${(amountCents / 100).toFixed(2)} ${cur}`, actorEmail,
+        { order_id: orderId, pi_id: piId, amount_cents: amountCents });
+      return json(req, { ok: true, refunded_cents: amountCents, order_id: orderId,
+        message: `Remboursement de ${(amountCents / 100).toFixed(2)} ${cur} effectué.` });
     }
 
     // Anti self-lockout: an admin cannot demote or suspend their OWN account (would strand the panel).

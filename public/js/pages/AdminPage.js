@@ -1047,9 +1047,9 @@ class AdminPage {
         const cancelsTotal = Number(f.cancels_total) || 0;
         const saveRate = (savesTotal + cancelsTotal) > 0 ? Math.round(100 * savesTotal / (savesTotal + cancelsTotal)) : null;
 
-        const KIND_LABELS = { trial_setup: 'essai (carte)', first_charge: '1ᵉʳ prélèvement', renewal: 'renouvellement', plan_change: 'changement plan', resubscribe: 'réabonnement', card_update: 'MAJ carte' };
+        const KIND_LABELS = { trial_setup: 'essai (carte)', first_charge: '1ᵉʳ prélèvement', renewal: 'renouvellement', plan_change: 'changement plan', resubscribe: 'réabonnement', card_update: 'MAJ carte', refund: 'remboursement' };
         // Payment status → business-readable FR label; raw provider status kept in a tooltip.
-        const PAY_STATUS = { captured: 'Encaissé', authorized: 'Autorisé', to_capture: 'À encaisser', require_payment_method: 'Non finalisé', canceled: 'Annulé', refused: 'Refusé', expired: 'Expiré', disputed: 'Litige' };
+        const PAY_STATUS = { captured: 'Encaissé', authorized: 'Autorisé', to_capture: 'À encaisser', require_payment_method: 'Non finalisé', canceled: 'Annulé', refused: 'Refusé', expired: 'Expiré', disputed: 'Litige', refunded: 'Remboursé' };
         const payBadge = (s) => {
             const lbl = PAY_STATUS[s] || esc(s);
             const cls = s === 'captured' ? 'green' : (s === 'authorized' || s === 'to_capture') ? 'blue'
@@ -1852,7 +1852,7 @@ class AdminPage {
             else if (p.mrr_cents != null) details += row('Plan facturé', `${esc(p.plan_code || 'plus')} · ${esc(p.bill_period || '—')} · ${money(p.mrr_cents)} <span class="pacct">(store)</span>`);
             if (p.trial_ends_at) details += row(new Date(p.trial_ends_at) > new Date() ? 'Essai jusqu\'au' : 'Essai terminé le', esc(dt(p.trial_ends_at)));
             if (p.current_period_end) details += row('Fin de période', esc(dt(p.current_period_end)));
-            if (m && m.card_last4) details += row('Carte', `•••• ${esc(m.card_last4)}${m.card_exp ? ' · exp ' + esc(m.card_exp) : ''}`);
+            if (m && m.card_last4) details += row('Carte', `${m.card_brand ? esc(m.card_brand) + ' ' : ''}•••• ${esc(m.card_last4)}${m.card_exp ? ' · exp ' + esc(m.card_exp) : ''}`);
             if (Number(p.dunning_stage) > 0) details += row('Dunning', `<span class="badge red">relance ${esc(String(p.dunning_stage))}/3</span>${p.dunning_last_at ? ' · ' + esc(AdminPage.timeAgo(p.dunning_last_at)) : ''}`);
             if (m && m.discount_next_pct) details += row('Prochaine charge', `<span class="badge green">−${esc(String(m.discount_next_pct))} %</span> (contre-offre)`);
             else if (m && m.save_offer_used_at) details += row('Contre-offre', `utilisée ${esc(AdminPage.timeAgo(m.save_offer_used_at))}`);
@@ -1863,9 +1863,9 @@ class AdminPage {
             if (mails.length) details += row('Emails lifecycle', esc(mails.join(' · ')));
         }
 
-        const KIND_LABELS = { trial_setup: 'essai (carte)', first_charge: '1ᵉʳ prélèvement', renewal: 'renouvellement', plan_change: 'changement plan', resubscribe: 'réabonnement', card_update: 'MAJ carte' };
+        const KIND_LABELS = { trial_setup: 'essai (carte)', first_charge: '1ᵉʳ prélèvement', renewal: 'renouvellement', plan_change: 'changement plan', resubscribe: 'réabonnement', card_update: 'MAJ carte', refund: 'remboursement' };
         // Payment status → business-readable FR label; raw provider status kept in a tooltip.
-        const PAY_STATUS = { captured: 'Encaissé', authorized: 'Autorisé', to_capture: 'À encaisser', require_payment_method: 'Non finalisé', canceled: 'Annulé', refused: 'Refusé', expired: 'Expiré', disputed: 'Litige' };
+        const PAY_STATUS = { captured: 'Encaissé', authorized: 'Autorisé', to_capture: 'À encaisser', require_payment_method: 'Non finalisé', canceled: 'Annulé', refused: 'Refusé', expired: 'Expiré', disputed: 'Litige', refunded: 'Remboursé' };
         const payBadge = (s) => {
             const lbl = PAY_STATUS[s] || esc(s);
             const cls = s === 'captured' ? 'green' : (s === 'authorized' || s === 'to_capture') ? 'blue'
@@ -1876,9 +1876,10 @@ class AdminPage {
         // non-Revolut rail (a pure Revolut history would just repeat "Revolut · web" on every row).
         const payProviders = new Set(pays.map(x => x.provider || 'revolut'));
         const showRailCol = payProviders.size > 1 || (payProviders.size === 1 && !payProviders.has('revolut'));
-        // Refunds are disabled: the Stancer rail (the only one with an admin-refund route) was
-        // retired and Revolut has no /admin/refund route yet. No refund column renders.
-        const canRefund = () => false;
+        // Refunds: enabled for captured Revolut charges (backend flags `refundable` = revolut +
+        // captured + order_id present). The Stancer rail is retired; mobile rails refund in-store.
+        // norva-admin /user/:id/refund calls Revolut's refund API + journals a ledger row.
+        const canRefund = (x) => !!(x && x.refundable === true);
         const showRefundCol = pays.some(canRefund);
         const payRows = pays.map(x => `<tr>
             <td>${esc(dt(x.updated_at || x.created_at))}</td>
@@ -1896,6 +1897,30 @@ class AdminPage {
             ${payRows ? `<div style="margin-top:14px"><div class="kpi-gtitle">Historique des paiements</div><div class="scroll"><table><thead><tr><th>Date</th>${showRailCol ? '<th>Rail</th>' : ''}<th>Type</th><th>Statut</th><th class="num">Montant</th>${showRefundCol ? '<th></th>' : ''}</tr></thead><tbody>${payRows}</tbody></table></div></div>` : ''}
             ${fbRows}`;
         wireInternalToggle(this);
+        // Refund buttons → norva-admin /user/:id/refund (Revolut captured charges only).
+        el.querySelectorAll('.refund-btn').forEach((btn) => {
+            btn.addEventListener('click', async () => {
+                const pi = btn.dataset.pi, amount = Number(btn.dataset.amount) || 0;
+                if (!pi) return;
+                if (!await this._confirm(`Rembourser ${money(amount)} à ce client ? Le remboursement part immédiatement chez Revolut — action irréversible.`, { danger: true, okLabel: 'Rembourser' })) return;
+                const orig = btn.textContent;
+                btn.disabled = true; btn.textContent = '…';
+                try {
+                    const res = await fetch(`${this._sbUrl()}/functions/v1/norva-admin/user/${userId}/refund`, {
+                        method: 'POST',
+                        headers: { apikey: this._sbKey(), Authorization: `Bearer ${this._token()}`, 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ pi_id: pi })
+                    });
+                    const data = await res.json().catch(() => ({}));
+                    if (!res.ok) throw new Error(data.error || String(res.status));
+                    this._toast(data.message || 'Remboursement effectué.', 'ok');
+                    this._loadBilling(userId);
+                } catch (e) {
+                    btn.disabled = false; btn.textContent = orig;
+                    this._toast('Erreur remboursement : ' + e.message, 'err');
+                }
+            });
+        });
     }
 
     // ── Fiche: support tickets panel (open first, newest first, click → thread) ──

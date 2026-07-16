@@ -478,13 +478,17 @@ services:
       # --- PITR: WAL archiving (see backup/BACKUPS.md) --------------------------
       # archive_command is atomic-ish and idempotent (skip if already archived).
       # archive_timeout bounds the RPO: a WAL segment is shipped at least every
-      # 5 minutes even under low write load.
+      # 15 minutes even under low write load. 900s (not 300s) is the right RPO at
+      # Norva's scale — the DB is NOT the source of truth for money (Revolut is; a
+      # payment lost in the window is reconstructible from the PSP + webhook), and
+      # 300s would ship ~288 mostly-empty 16MB segments/day vs ~96, tripling archive
+      # churn for a 10-minute RPO gain that buys nothing at this write volume.
       - -c
       - archive_mode=on
       - -c
       - archive_command=test ! -f /wal-archive/%f && cp %p /wal-archive/%f
       - -c
-      - archive_timeout=300
+      - archive_timeout=900
 
 volumes:
   db-config:

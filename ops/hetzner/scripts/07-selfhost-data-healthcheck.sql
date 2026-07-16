@@ -61,11 +61,20 @@ from admin_feature_flags;
 select 'B1 projection par statut' as check, status, count(*) as n
 from cloud_entitlement_projection group by status order by n desc;
 
-select 'B2 ledger stancer (cross-rail)' as check,
+select 'B2 ledger cross-rail (pi_id, PAS payment_id)' as check,
   (select count(*) from cloud_stancer_customers) as customers,
   (select count(*) from cloud_stancer_payments)  as payments,
   (select max(created_at) from cloud_stancer_payments) as last_payment,
-  (select count(*) from cloud_stancer_payments where payment_id like 'rc_%') as rc_mobile_rows;
+  (select count(*) from cloud_stancer_payments where pi_id like 'rc_%')  as rc_mobile_rows,
+  (select count(*) from cloud_stancer_payments where provider = 'revolut') as revolut_rows,
+  (select count(*) from cloud_stancer_payments where kind = 'refund')      as refund_rows;
+
+-- ★ contrainte provider du ledger DOIT autoriser 'revolut' (bug corrigé en 20260716140000 —
+-- sinon le journaling des charges Revolut échoue en silence → collected/funnel à 0).
+select 'B2b provider check autorise revolut' as check,
+       (pg_get_constraintdef(oid) like '%revolut%') as pass,
+       pg_get_constraintdef(oid) as def
+from pg_constraint where conname = 'cloud_stancer_payments_provider_check';
 
 select 'B3 rail revolut' as check,
   (select count(*) from cloud_revolut_customers) as customers,
@@ -87,9 +96,12 @@ from pg_proc p join pg_namespace n on n.oid = p.pronamespace and n.nspname = 'pu
 where p.proname in ('admin_finance','refresh_admin_dashboard','snapshot_admin_metrics',
                     'admin_user_billing','admin_client_crm','admin_users_export')
 order by p.proname;
--- attendu : revolut_aware=t partout ; counts_dead_stancer_cron=f partout
--- (counts_dead_stancer_cron=t sur refresh_admin_dashboard = compteur billing_cron_fails_24h
---  qui surveille un cron RETIRÉ → les échecs de norva-revolut-billing seraient invisibles. G3)
+-- attendu APRÈS 20260716130000 + 140000 :
+--   admin_finance, admin_user_billing : revolut_aware=t (lisent cloud_revolut_customers).
+--   refresh_admin_dashboard, snapshot_admin_metrics : revolut_aware=f ATTENDU — ils passent
+--     par cloud_entitlement_projection.mrr_cents (coalesce rail-agnostic), pas par une lecture
+--     directe des tables Revolut. Donc f ≠ bug ici.
+--   counts_dead_stancer_cron=f partout (le filtre cron surveille norva-revolut-billing).
 
 select 'C2 funnel view revolut-aware' as check,
        (pg_get_viewdef('norva_funnel_daily'::regclass) like '%revolut%') as pass;
