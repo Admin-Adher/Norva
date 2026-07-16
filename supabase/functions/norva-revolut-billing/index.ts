@@ -195,6 +195,24 @@ async function chargeUser(db: SupabaseClient, row: Row, kind: "first_charge" | "
         });
       } catch (_) { /* noop */ }
     }
+    // Journal the charge into the shared CROSS-RAIL payments ledger (cloud_stancer_payments,
+    // provider-tagged) — the CRM's collected/recent-payments/by-rail/funnel KPIs all read that
+    // ledger, and only the RC mobile webhook journaled into it (rc_* rows), so web-rail revenue
+    // was invisible to the dashboard. Mirrors journalRcPayment's row shape. Best-effort AFTER
+    // the charge + projection update: reporting must never fail the billing action.
+    try {
+      await db.from("cloud_stancer_payments").upsert({
+        pi_id: `rvl_${orderId ?? extRef}`,
+        user_id: row.user_id,
+        kind, // 'first_charge' (trial conversion) | 'renewal' — same vocabulary as the RC rows
+        amount: chargeAmount,
+        currency: "usd",
+        status: "captured",
+        provider: "revolut",
+        order_id: orderId ?? null,
+        provider_payment_id: paymentId ?? null,
+      }, { onConflict: "pi_id", ignoreDuplicates: true });
+    } catch (_) { /* ledger is reporting-only */ }
     await sendReceipt(db, row.user_id, discountPct ? `${planLabel} (${discountPct}% off applied)` : planLabel, chargeAmount, nextEnd);
     return "charged";
   }
