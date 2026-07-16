@@ -191,3 +191,27 @@ rollback = re-poser `1-4` (état AVANT imprimé par le script 09) + cap 40.
    sinon, fallback pré-migration conservé), Moteur (carte/pilules KO vs récupérés, incident
    gris « Échec récupéré », tableau crons badge ambre + résumé). Testé : fonction exécutée sur
    PG16 stub (cron_ko=1/fails=2 sur le scénario mixte) + 17 assertions headless Chromium.
+
+---
+
+## §12 — Fiche série/film VIDE depuis My List & Continue Watching (commit ci-dessous)
+
+**Symptôme** (captures) : « Outlander (US) » depuis la recherche Series = fiche riche (8 saisons,
+98 épisodes, 15 versions, synopsis, casting) ; le MÊME titre depuis My List/Continue Watching =
+fiche squelette (1 saison, 12 épisodes, « No summary available yet », poster générique).
+
+**Cause racine** (workflow 6 agents, confiance haute, vérifiée sur code) : `renderMyList`
+(HomePage.js) réduit chaque favori à 5 champs maigres `{item_id, source_id, item_type, title,
+poster}` — ni `variants[]` ni `tmdb`. `navigateToSeries/Movie` → `buildHomeMediaGroup` ne fait
+que refléter l'item → groupe MONO-variante sans métadonnées. Double famine : (a) pas de
+tmdb/synopsis/saisons ; (b) `tryNextHealthyVersion` n'a AUCUNE version sœur vers laquelle
+basculer quand la variante favorisée est partielle (ex. la source « (4K) » qui n'a que la S5).
+
+**Fix (client only, confiné à HomePage.js)** : les items MAIGRES (sans `variants[]`) passent
+désormais par `page.openByItem(...)` — le résolveur DÉJÀ utilisé par la recherche globale et la
+restauration de fiche — qui re-cherche les versions sœurs par titre (RPC `search_media_items`,
+trigram tolérant aux suffixes « (4K) ») et reconstruit le groupe canonique complet. Garde-fous :
+les rails riches (porteurs de `variants[]`) gardent le chemin direct inchangé ; si `openByItem`
+échoue/lève, fallback sur l'ancien comportement (fiche mono-version, jamais pire qu'avant).
+HomePage v46. Testé : 7 assertions headless Chromium sur le vrai prototype (mapping series/movie,
+fallback false + throw, rail riche intact).

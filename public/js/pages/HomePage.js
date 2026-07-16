@@ -2194,13 +2194,36 @@ class HomePage {
         };
     }
 
+    // A rail item that carries its sibling variants (home rails payload) can open the
+    // fiche directly. A SKINNY row (My List favorite / Continue Watching history: just
+    // {item_id, source_id, title, poster}) cannot — buildHomeMediaGroup would produce a
+    // single-variant group with no tmdb, so the fiche opens "empty" (1 season, no
+    // synopsis, no version picker) AND tryNextHealthyVersion has no sibling to switch
+    // to. Skinny rows go through the pages' openByItem — the same resolver global
+    // search uses — which re-fetches the sibling versions and rebuilds the full group.
+    _isSkinnyRailItem(item) {
+        return !(Array.isArray(item?.variants) && item.variants.length);
+    }
+
     navigateToSeries(item) {
         if (!this.app.pages.series) return;
         const group = this.buildHomeMediaGroup(item, 'series');
 
         this.app.navigateTo('series');
-        setTimeout(() => {
+        setTimeout(async () => {
             const page = this.app.pages.series;
+            if (this._isSkinnyRailItem(item)) {
+                const data = item.data || {};
+                const mapped = {
+                    series_id: item.item_id ?? item.itemId ?? item.series_id,
+                    sourceId: item.source_id ?? item.sourceId ?? data.sourceId,
+                    name: this.displayTitle(item),
+                    tmdb: item.tmdb || data.tmdb,
+                    stream_icon: item.poster || item.stream_icon || item.poster_url,
+                    poster_url: item.poster || item.poster_url,
+                };
+                try { if (await page.openByItem(mapped)) return; } catch (_) { /* fall back below */ }
+            }
             const versions = MediaUtils.orderVersionsByPreference(group.items, page.getPreferences?.() || {});
             const series = versions[0] || group.representative;
             page.currentSeriesGroup = group;
@@ -2213,8 +2236,20 @@ class HomePage {
         const group = this.buildHomeMediaGroup(item, 'movie');
 
         this.app.navigateTo('movies');
-        setTimeout(() => {
+        setTimeout(async () => {
             const page = this.app.pages.movies;
+            if (this._isSkinnyRailItem(item)) {
+                const data = item.data || {};
+                const mapped = {
+                    stream_id: item.item_id ?? item.itemId ?? item.stream_id,
+                    sourceId: item.source_id ?? item.sourceId ?? data.sourceId,
+                    name: this.displayTitle(item),
+                    tmdb: item.tmdb || data.tmdb,
+                    stream_icon: item.poster || item.stream_icon || item.poster_url,
+                    poster_url: item.poster || item.poster_url,
+                };
+                try { if (await page.openByItem(mapped)) return; } catch (_) { /* fall back below */ }
+            }
             const versions = MediaUtils.orderVersionsByPreference(group.items, page.getPreferences?.() || {});
             const selected = versions[0] || group.representative;
             page.showMovieDetails(group, selected, { versions });
