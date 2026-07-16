@@ -13363,6 +13363,9 @@ html.tv-mode #page-live .search-clear {
   /* The bottom Profile tab replaces the top-right avatar on phones. */
   #nav-profile { display: none !important; }
   .bottom-nav .nav-link .nav-account-avatar { border-radius: 50%; object-fit: cover; }
+
+  /* A phone IS the mobile device — no room (or point) for the Devices teaser. */
+  #nav-devices { display: none !important; }
 }
 
 /* ============================================================
@@ -14138,8 +14141,9 @@ html.tv-mode .watch-next-episode .next-actions .btn {
   background: rgba(255, 255, 255, 0.14);
 }
 
-/* Notifications bell + unread dot */
-.nav-bell-btn {
+/* Notifications bell + unread dot (the Devices button shares the anatomy) */
+.nav-bell-btn,
+.nav-devices-btn {
   position: relative;
   background: transparent;
   border: none;
@@ -14150,7 +14154,8 @@ html.tv-mode .watch-next-episode .next-actions .btn {
   align-items: center;
 }
 
-.nav-bell-dot {
+.nav-bell-dot,
+.nav-devices-dot {
   position: absolute;
   top: 4px;
   right: 4px;
@@ -14160,6 +14165,11 @@ html.tv-mode .watch-next-episode .next-actions .btn {
   background: #e50914;
   border: 2px solid var(--color-bg, #0a0a0f);
 }
+
+/* Author display:inline-flex above beats the UA [hidden] default; restore it
+   (same gotcha the repo handles for .nav-profile / .region-picker-pop). */
+.nav-bell-btn[hidden],
+.nav-devices-btn[hidden] { display: none; }
 
 .norva-notif-panel {
   position: fixed;
@@ -14195,6 +14205,65 @@ html.tv-mode .watch-next-episode .next-actions .btn {
 .norva-notif-summary { font-size: 0.9rem; color: #e4e4f2; }
 .norva-notif-time { font-size: 0.75rem; color: var(--color-text-muted, #71717a); margin-top: 3px; }
 .norva-notif-empty { padding: 28px 16px; text-align: center; color: var(--color-text-secondary, #a1a1aa); }
+
+/* "Use Norva elsewhere" devices popover — reuses the .norva-notif-panel shell,
+   rows flip from a Coming-soon badge to an Install pill once app.js's
+   NORVA_DEVICE_APPS carries real store links. */
+.norva-device-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+.norva-device-row:last-child { border-bottom: none; }
+.norva-device-ic {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  background: rgba(91, 124, 250, 0.14);
+  color: #9db4ff;
+}
+.norva-device-ic svg { width: 20px; height: 20px; }
+.norva-device-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.norva-device-name { font-size: 0.92rem; font-weight: 600; color: #e4e4f2; }
+.norva-device-hint { font-size: 0.75rem; color: var(--color-text-muted, #71717a); margin-top: 2px; }
+.norva-device-soon {
+  flex: 0 0 auto;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #b9c3d8;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  padding: 4px 10px;
+  white-space: nowrap;
+}
+.norva-device-get {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #fff;
+  text-decoration: none;
+  background: var(--primary-blue, #5b7cfa);
+  border-radius: 999px;
+  padding: 6px 14px;
+  white-space: nowrap;
+}
+.norva-device-get:hover { filter: brightness(1.1); }
+
+/* A TV (either detection scheme) never advertises the companion apps — it IS
+   one — and the popover is pointer-oriented. JS also skips it; CSS backstops
+   ?tv=1 testing and any UA the JS check misses. */
+html.tv .nav-devices-btn,
+html.tv-mode .nav-devices-btn { display: none !important; }
 
 /* Accessibility: a clear keyboard focus ring everywhere, without adding an
    outline for mouse users (:focus-visible only fires for keyboard/AT). Excludes

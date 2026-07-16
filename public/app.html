@@ -18,7 +18,7 @@
   <link rel="preconnect" href="https://api.norva.tv" crossorigin>
   <link rel="dns-prefetch" href="https://image.tmdb.org">
   <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
-  <link rel="stylesheet" href="/css/main.css?v=85">
+  <link rel="stylesheet" href="/css/main.css?v=86">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@800&display=swap"
@@ -188,6 +188,14 @@
            the profile avatar used to sit (the Profile tab now lives at the bottom). -->
       <button class="nav-search-btn" id="nav-search" type="button" aria-label="Search">
         <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+      </button>
+      <!-- Companion apps: "Use Norva elsewhere" popover (mobile + TV rows, each a
+           Coming-soon badge until its store link lands in NORVA_DEVICE_APPS in
+           app.js). Web-only discovery: the native shells and the TV ARE those
+           devices, so app.js keeps it hidden there (CSS backstops tv-mode). -->
+      <button class="nav-devices-btn" id="nav-devices" type="button" aria-label="Devices" aria-haspopup="true" aria-expanded="false" hidden>
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h8"/><path d="M10 15v4"/><path d="M7 19h6"/><rect x="16" y="12" width="6" height="10" rx="2"/></svg>
+        <span class="nav-devices-dot" id="nav-devices-dot" hidden></span>
       </button>
       <!-- Notifications inbox: bell + unread dot; opens a dropdown feed backed by
            cloud_content_events. Hidden until the app boots the feed. -->
@@ -2042,7 +2050,7 @@
   <script defer src="/js/maintenance-banner.js?v=1"></script>
   <script defer src="/js/billing-config.js?v=7"></script>
   <script defer src="/js/billing.js?v=11"></script>
-  <script defer src="/js/app.js?v=43"></script>
+  <script defer src="/js/app.js?v=44"></script>
   <script>
     // PWA: register the app-shell service worker (network-first — a deploy always
     // wins; the cache only serves when offline). Skipped inside the native APK

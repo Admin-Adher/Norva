@@ -2,6 +2,17 @@
  * Norva Application Entry Point
  */
 
+/**
+ * Companion apps advertised by the navbar "Devices" popover ("Use Norva
+ * elsewhere"). The store listings aren't live yet, so every row renders a
+ * Coming-soon badge; fill in a storeUrl (e.g. the Play Store listing) and that
+ * row flips to a real Install link — nothing else to change.
+ */
+const NORVA_DEVICE_APPS = [
+    { key: 'mobile', name: 'Mobile app', hint: 'For your phone or tablet', storeUrl: '' },
+    { key: 'tv', name: 'TV app', hint: 'For the big screen, remote-friendly', storeUrl: '' },
+];
+
 class App {
     constructor() {
         // The phone APK plays everything in the native fullscreen player, so the
@@ -222,6 +233,9 @@ class App {
 
         // Global search (movies + series) from the top bar.
         document.getElementById('nav-search')?.addEventListener('click', () => this.openSearch());
+
+        // "Use Norva elsewhere" devices popover (web only, never in the shells).
+        this.setupDevicesButton();
 
         // Surface the Downloads menu entry once the native app has ≥1 download.
         this.refreshDownloadsNav();
@@ -492,6 +506,92 @@ class App {
             document.removeEventListener('click', close, true);
             document.removeEventListener('keydown', close, true);
         };
+        setTimeout(() => {
+            document.addEventListener('click', close, true);
+            document.addEventListener('keydown', close, true);
+        }, 0);
+    }
+
+    /**
+     * "Devices" navbar button → "Use Norva elsewhere" popover (same anatomy as
+     * the notifications bell above). Web-only discovery surface: the Android
+     * phone/TV shells and tv-mode ARE those devices, so they never see it.
+     */
+    setupDevicesButton() {
+        const btn = document.getElementById('nav-devices');
+        if (!btn) return;
+        // Mirrors the native-shell detection used by app.html / Settings.js.
+        const ua = navigator.userAgent || '';
+        const nativeShell = /NorvaTV-/i.test(ua) || !!window.NorvaTVCloud || !!window.NodeCastNative
+            || /[?&]mobile=1\b/.test(window.location.search || '')
+            || document.documentElement.classList.contains('tv-mode');
+        if (nativeShell) return;
+        btn.hidden = false;
+        // "New" dot: only once at least one app is actually installable, and
+        // only until the first open — a Coming-soon teaser doesn't earn a nudge.
+        const hasLinks = NORVA_DEVICE_APPS.some(a => a.storeUrl);
+        let seen = false;
+        try { seen = localStorage.getItem('norva-devices-seen') === '1'; } catch (_) { /* noop */ }
+        const dot = document.getElementById('nav-devices-dot');
+        if (dot) dot.hidden = !hasLinks || seen;
+        btn.addEventListener('click', (e) => { e.stopPropagation(); this.toggleDevicesPopover(); });
+    }
+
+    toggleDevicesPopover() {
+        const open = document.getElementById('norva-devices-panel');
+        const btn = document.getElementById('nav-devices');
+        if (open) { open.remove(); btn?.setAttribute('aria-expanded', 'false'); return; }
+        const esc = (t) => String(t == null ? '' : t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+        // Same icon family as the landing availability grid.
+        const icons = {
+            mobile: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>',
+            tv: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="13" rx="2"/><polyline points="17 2 12 7 7 2"/></svg>',
+        };
+        const panel = document.createElement('div');
+        panel.id = 'norva-devices-panel';
+        panel.className = 'norva-notif-panel norva-devices-panel';
+        panel.setAttribute('role', 'dialog');
+        panel.setAttribute('aria-label', 'Use Norva elsewhere');
+        panel.innerHTML = `
+            <div class="norva-notif-head">Use Norva elsewhere</div>
+            <div class="norva-devices-list">
+                ${NORVA_DEVICE_APPS.map(a => `
+                    <div class="norva-device-row">
+                        <span class="norva-device-ic">${icons[a.key] || icons.mobile}</span>
+                        <span class="norva-device-text">
+                            <span class="norva-device-name">${esc(a.name)}</span>
+                            <span class="norva-device-hint">${esc(a.hint)}</span>
+                        </span>
+                        ${a.storeUrl
+                            ? `<a class="norva-device-get" href="${esc(a.storeUrl)}" target="_blank" rel="noopener noreferrer">Install</a>`
+                            : '<span class="norva-device-soon">Coming soon</span>'}
+                    </div>`).join('')}
+            </div>`;
+        document.body.appendChild(panel);
+        // Position under the button (mirrors the notifications panel).
+        try {
+            const r = btn.getBoundingClientRect();
+            panel.style.top = `${Math.round(r.bottom + 8)}px`;
+            panel.style.right = `${Math.round(window.innerWidth - r.right)}px`;
+        } catch (_) { /* default CSS position */ }
+        btn?.setAttribute('aria-expanded', 'true');
+        // First open clears the "new" dot for good.
+        try { localStorage.setItem('norva-devices-seen', '1'); } catch (_) { /* noop */ }
+        document.getElementById('nav-devices-dot')?.setAttribute('hidden', '');
+        const doClose = () => {
+            panel.remove();
+            btn?.setAttribute('aria-expanded', 'false');
+            document.removeEventListener('click', close, true);
+            document.removeEventListener('keydown', close, true);
+        };
+        // Dismiss on outside click / Escape; an Install click closes too (bubble
+        // phase, so the new tab is already on its way).
+        const close = (ev) => {
+            if (ev.type === 'keydown' && ev.key !== 'Escape') return;
+            if (ev.type === 'click' && (panel.contains(ev.target) || btn?.contains(ev.target))) return;
+            doClose();
+        };
+        panel.addEventListener('click', (ev) => { if (ev.target.closest('a.norva-device-get')) doClose(); });
         setTimeout(() => {
             document.addEventListener('click', close, true);
             document.addEventListener('keydown', close, true);
