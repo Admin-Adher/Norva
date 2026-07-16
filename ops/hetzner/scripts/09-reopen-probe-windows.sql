@@ -100,8 +100,9 @@ select identity_key, mode, max_probes_per_hour from provider_footprint_policy;
 
 \echo ''
 \echo 'Vérif immédiate (si on est entre 06:00 et 23:59 UTC) : sous ~5 min un job de jour doit'
-\echo 'tirer — contrôler :  select jobname, status, start_time from cron.job_run_details'
-\echo '                     order by start_time desc limit 10;'
+\echo 'tirer — contrôler :  select j.jobname, d.status, d.start_time'
+\echo '                     from cron.job_run_details d join cron.job j on j.jobid = d.jobid'
+\echo '                     order by d.start_time desc limit 10;'
 \echo ''
 \echo 'Suivi sous 24-48 h : re-lancer 08-enrichment-audio-diag.sql — attendu :'
 \echo '  [E] sondes/jour x4-6 · [C] jamais_sonde en baisse nette · dashboard sans « provider muet »'
