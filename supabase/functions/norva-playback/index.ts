@@ -4021,7 +4021,13 @@ async function runOneDimension(db: SupabaseClient, body: JsonRecord) {
         if (requireTags.length) q = q.overlaps("version_languages", requireTags);
         if (untaggedOnly) q = q.eq("version_languages", "{}");
         if (afterId) q = q.gt("id", afterId);
-        return q.order("id", { ascending: true }).limit(limit);
+        // Recent-first (mirrors audio_backfill_candidates' order, 2026-07-16): probe the titles
+        // users actually open before the archive tail. An explicit afterId (manual/ops paging)
+        // assumes gt(id) semantics, so that path keeps the plain id order.
+        return (afterId
+          ? q.order("id", { ascending: true })
+          : q.order("release_year", { ascending: false, nullsFirst: false }).order("id", { ascending: true })
+        ).limit(limit);
       })();
   const titles = titlesResult.data as { id: string; default_variant_id: string | null; provider_tmdb_id: string | null }[] | null;
   const error = titlesResult.error;
