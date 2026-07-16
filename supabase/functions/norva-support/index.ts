@@ -3,6 +3,7 @@
 // USER routes (Supabase JWT):
 //   POST /create {subject, body}    → open a ticket + first message; email support@norva.tv
 //   POST /reply  {ticket_id, body}  → reply on own ticket (reopens it); email support@norva.tv
+//   POST /close  {ticket_id}        → mark own ticket resolved (frees the open-tickets cap)
 //   GET  /mine                      → own tickets with full threads (powers support.html)
 // ADMIN routes (JWT with app_metadata.role='admin'):
 //   POST /admin/reply  {ticket_id, body}   → reply; ticket → 'pending'; EMAILS THE CLIENT
@@ -135,6 +136,14 @@ Deno.serve(async (req) => {
     if (await userMsgCountLastHour(user.email ?? "") >= MAX_MSGS_PER_HOUR)
       return json({ error: "Too many messages in a short time. Please wait a little and try again." }, 429);
 
+    // Dedupe double-submit: an identical subject from the same user within 10 min returns the
+    // existing ticket instead of opening a duplicate (each dup emails support + eats the cap).
+    const since10 = new Date(Date.now() - 10 * 60_000).toISOString();
+    const { data: dup } = await db.from("cloud_support_tickets")
+      .select("id").eq("user_id", user.id).eq("subject", subject).gte("created_at", since10)
+      .order("created_at", { ascending: false }).limit(1).maybeSingle();
+    if (dup) return json({ ok: true, ticket_id: dup.id, deduped: true });
+
     const { data: t, error } = await db.from("cloud_support_tickets")
       .insert({ user_id: user.id, subject }).select("id").single();
     if (error || !t) return json({ error: "Could not open the ticket" }, 500);
@@ -169,6 +178,25 @@ Deno.serve(async (req) => {
     }).eq("id", t.id);
     await notifySupport("reply", String(t.id), user.email ?? "", String(t.subject), body);
     return json({ ok: true });
+  }
+
+  // ── USER: mark own ticket resolved ─────────────────────────────────────────
+  // A user who's done cannot otherwise tidy up: only admins changed status, and every open
+  // ticket counts toward MAX_OPEN_TICKETS. Idempotent on an already-closed ticket.
+  if (req.method === "POST" && path === "/close") {
+    let payload: { ticket_id?: string } = {};
+    try { payload = await req.json(); } catch (_) { /* validated below */ }
+    const ticketId = String(payload.ticket_id ?? "");
+    if (!ticketId) return json({ error: "Bad request" }, 400);
+    const { data: t } = await db.from("cloud_support_tickets")
+      .select("id,user_id,status").eq("id", ticketId).maybeSingle();
+    if (!t || String(t.user_id) !== user.id) return json({ error: "Ticket not found" }, 404);
+    if (t.status === "closed") return json({ ok: true, status: "closed" });
+    await db.from("cloud_support_tickets").update({ status: "closed", updated_at: new Date().toISOString() }).eq("id", t.id);
+    try {
+      await db.from("admin_events").insert({ user_id: user.id, kind: "admin_action", summary: "Ticket support fermé par le client", actor: user.email });
+    } catch (_) { /* best-effort */ }
+    return json({ ok: true, status: "closed" });
   }
 
   // ── USER: my tickets with threads ──────────────────────────────────────────
@@ -216,7 +244,8 @@ Deno.serve(async (req) => {
         `Your ticket « <b style="color:#cdd6e6">${esc(t.subject)}</b> » has a new reply:<br><br>
          <div style="background:#0d1117;border:1px solid #1f2733;border-radius:10px;padding:12px 14px;color:#e8e8ee;white-space:pre-wrap">${esc(body).slice(0, 4000)}</div><br>
          You can reply from your support page — we'll get it right away.`,
-        { label: "Open my support page", url: `${SITE_URL}/support.html` });
+        // Deep-link straight to THIS ticket (support.html auto-expands + scrolls ?ticket=).
+        { label: "Open my support page", url: `${SITE_URL}/support.html?ticket=${encodeURIComponent(String(t.id))}` });
       await sendMail([clientEmail], `Re: ${t.subject} — Norva support`, html);
     }
     return json({ ok: true });

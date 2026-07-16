@@ -86,6 +86,20 @@
     .reply-row .btn { margin-top: 0; min-height: 46px; min-width: 96px; }
     .reply-fb { color: var(--danger); font-size: 13px; margin-top: 6px; }
     .loading { color: var(--muted); padding: 14px 2px; }
+    .linkish { background: none; border: 0; color: var(--quiet); font: inherit; font-size: 13px;
+      cursor: pointer; text-decoration: underline; padding: 0; }
+    .linkish:hover { color: var(--muted); }
+    .linkish:focus-visible { outline: 2px solid var(--pink); outline-offset: 2px; }
+    /* Android TV (10-foot): bigger targets + explicit D-pad focus rings. The `tv` class is
+       set pre-paint from the UA (same pattern as subscription.html); tvNavigation.js adds
+       `tv-mode` and drives the spatial focus. */
+    html.tv body { padding: 40px; }
+    html.tv .wrap { width: min(760px, 100%); }
+    html.tv .btn { min-height: 58px; font-size: 17px; }
+    html.tv input[type=text], html.tv textarea { font-size: 17px; }
+    html.tv .ticket-head { padding: 17px 16px; }
+    html.tv .linkish { font-size: 15px; }
+    html.tv :focus-visible, html.tv-mode :focus-visible { outline: 3px solid var(--pink); outline-offset: 2px; }
     .skeleton { height: 46px; border-radius: 12px; margin-bottom: 10px;
       background: linear-gradient(90deg, #141922 25%, #1b212c 50%, #141922 75%);
       background-size: 200% 100%; animation: sk 1.2s ease-in-out infinite; }
@@ -104,8 +118,14 @@
   <script src="/js/marketing-config.js?v=1"></script>
   <script defer src="/js/marketing.js?v=1"></script>
   <script defer src="/js/consent-banner.js?v=1"></script>
+  <script defer src="/js/utils/tvNavigation.js?v=21"></script>
 </head>
 <body>
+  <script>
+    // Pre-paint TV class (same pattern as subscription.html) so the 10-foot CSS applies
+    // before first render; tvNavigation.js (self-gated on the same UA) drives the D-pad.
+    if (/NorvaTV-AndroidTV/i.test(navigator.userAgent || '')) { document.documentElement.classList.add('tv'); }
+  </script>
   <main class="wrap">
     <a class="back" id="back-link" href="/app#settings"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="flex:0 0 auto" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>Back</a>
     <div class="brand"><img src="/img/norva-app-icon.png" alt=""><span>Norva</span></div>
@@ -121,8 +141,10 @@
       <form id="ticket-form" style="display:none">
         <div id="t-feedback" role="status" aria-live="polite" aria-atomic="true" tabindex="-1"></div>
         <label for="t-subject">Subject</label>
+        <!-- No `required`: the unified JS validation below handles both fields with one
+             consistent message (mixing native constraint bubbles + JS was two UX styles). -->
         <input type="text" id="t-subject" maxlength="180" aria-describedby="t-subject-count"
-               placeholder="e.g. Playback stops after a few minutes" required>
+               placeholder="e.g. Playback stops after a few minutes">
         <div class="field-row">
           <label for="t-body" style="margin-top:12px">What happened?</label>
           <span class="counter" id="t-body-count" aria-live="polite">0 / 8000</span>
@@ -171,13 +193,20 @@
           return (JSON.parse(localStorage.getItem('norva-cloud-session') || 'null') || {}).access_token || '';
         } catch (_) { return ''; }
       }
+      // Recovery path: a lingering-but-dead session (getSession() doesn't check expiry) used to
+      // fail every call with no way back in — reveal the sign-in prompt instead of a dead end.
+      function showSignin() {
+        document.getElementById('signin-needed').style.display = 'block';
+        document.getElementById('ticket-form').style.display = 'none';
+      }
       async function call(path, opts) {
         const t = await token();
-        if (!t) throw new Error('Your session has expired — please sign in again.');
+        if (!t) { showSignin(); throw new Error('Your session has expired — please sign in again.'); }
         const res = await fetch(BASE + path, Object.assign({
           headers: { 'Content-Type': 'application/json', 'apikey': APIKEY, 'Authorization': 'Bearer ' + t }
         }, opts || {}));
         const data = await res.json().catch(function () { return {}; });
+        if (res.status === 401) showSignin();
         if (!res.ok) throw new Error(data.error || ('Something went wrong (HTTP ' + res.status + ')'));
         return data;
       }
@@ -264,7 +293,8 @@
             : '<div class="reply-row">' +
                 '<textarea placeholder="Reply…" aria-label="Reply to: ' + esc(t.subject) + '" data-reply="' + esc(id) + '"></textarea>' +
                 '<button type="button" class="btn ghost" data-send="' + esc(id) + '">Send</button>' +
-              '</div><p class="reply-fb" role="alert" data-reply-fb="' + esc(id) + '"></p>';
+              '</div><p class="reply-fb" role="alert" data-reply-fb="' + esc(id) + '"></p>' +
+              '<p class="note" style="margin-top:8px"><button type="button" class="linkish" data-close="' + esc(id) + '">✓ Mark this ticket as resolved</button></p>';
           return '<div class="ticket' + (isOpen ? ' expanded' : '') + '" data-ticket="' + esc(id) + '">' +
             '<button type="button" class="ticket-head" aria-expanded="' + (isOpen ? 'true' : 'false') + '" aria-controls="thread-' + esc(id) + '">' +
               '<span class="ticket-chev" aria-hidden="true">▸</span>' + chip +
@@ -284,6 +314,26 @@
         el.querySelectorAll('[data-send]').forEach(function (b) {
           b.addEventListener('click', function () { sendReply(el, b); });
         });
+        // "Mark resolved": two-step confirm (first click arms, second within 4 s closes) —
+        // a closed ticket can't be reopened by the user, so guard against a mis-click.
+        el.querySelectorAll('[data-close]').forEach(function (b) {
+          b.addEventListener('click', async function () {
+            if (b.dataset.arm !== '1') {
+              b.dataset.arm = '1';
+              b.textContent = 'Click again to confirm — this closes the ticket';
+              setTimeout(function () { b.dataset.arm = ''; b.textContent = '✓ Mark this ticket as resolved'; }, 4000);
+              return;
+            }
+            b.disabled = true;
+            try {
+              await call('/close', { method: 'POST', body: JSON.stringify({ ticket_id: b.dataset.close }) });
+              await loadTickets({ expandIds: currentOpenIds() });
+            } catch (e) {
+              b.disabled = false; b.dataset.arm = '';
+              b.textContent = 'Could not close: ' + e.message;
+            }
+          });
+        });
 
         // Scroll the target ticket's latest message into view (after reply / new ticket).
         if (opts.scrollId) {
@@ -301,7 +351,12 @@
         const fb = el.querySelector('[data-reply-fb="' + cssEsc(id) + '"]');
         const body = ta ? ta.value.trim() : '';
         if (fb) fb.textContent = '';
-        if (!body) { if (ta) ta.focus(); return; }
+        // Match the server threshold (body >= 2 chars → 400 "Empty message" otherwise).
+        if (!body || body.length < 2) {
+          if (fb && body) fb.textContent = 'Please write at least a couple of characters.';
+          if (ta) ta.focus();
+          return;
+        }
         b.disabled = true; b.innerHTML = spinner('');
         // Preserve which tickets are open, and scroll this one after the reload.
         const openIds = new Set([].map.call(el.querySelectorAll('.ticket.expanded'), function (t) { return t.dataset.ticket; }));
@@ -342,7 +397,35 @@
         btn.disabled = false; btn.textContent = 'Send to support';
       });
 
-      loadTickets();
+      function currentOpenIds() {
+        return new Set([].map.call(document.querySelectorAll('#tickets .ticket.expanded'), function (t) { return t.dataset.ticket; }));
+      }
+      // Live updates — the page promises replies land "straight to this page", so poll /mine
+      // while visible + refresh when the tab regains visibility. Never refresh over a reply
+      // draft (typed text or focused textarea): the re-render would wipe it.
+      function replyDraftActive() {
+        const tas = document.querySelectorAll('#tickets textarea');
+        for (var i = 0; i < tas.length; i++) {
+          if (tas[i].value.trim() || tas[i] === document.activeElement) return true;
+        }
+        return false;
+      }
+      function refreshTickets() {
+        if (signedIn && document.visibilityState === 'visible' && !replyDraftActive()) {
+          loadTickets({ expandIds: currentOpenIds() });
+        }
+      }
+      setInterval(refreshTickets, 45000);
+      document.addEventListener('visibilitychange', refreshTickets);
+
+      // ?ticket=<id> deep-link (the admin-reply email) — auto-expand + scroll that ticket.
+      const ticketParam = params.get('ticket');
+      loadTickets(ticketParam ? { scrollId: ticketParam } : undefined);
+
+      // TV: give the D-pad an initial focus target (tvNavigation drives moves from there).
+      if (document.documentElement.classList.contains('tv')) {
+        (signedIn ? subjEl : document.getElementById('signin-link')).focus();
+      }
     })();
   </script>
 </body>

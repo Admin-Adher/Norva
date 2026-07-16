@@ -61,7 +61,7 @@ const footer = () => `  <footer class="blog-footer">
         <a href="/blog/">Blog</a>
         <a href="/#features">Benefits</a>
         <a href="/#pricing">Pricing</a>
-        <a href="/support.html">Support</a>
+        <a href="/support.html?returnTo=%2Fblog%2F">Support</a>
         <a href="/terms.html">Terms</a>
         <a href="/privacy.html">Privacy</a>
         <a href="/mentions-legales.html">Legal notice</a>
